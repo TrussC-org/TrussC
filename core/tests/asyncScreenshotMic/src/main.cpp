@@ -440,17 +440,23 @@ void micAuthorizationTests() {
         ++events; outcome = result;
         check("permission completion settles status on main", isMainThread() && !mic.isStarting() && mic.isRunning() == result.success);
     });
+    int deniedLogs = 0, requestedLogs = 0, waitingLogs = 0;
+    bool waitingNoticeOnMain = true;
+    auto logListener = getLogger().onLog.listen([&](LogEventArgs& args) {
+        if (args.message == "[MicInput] " + denied) ++deniedLogs;
+        if (args.message == "[MicInput] permission requested; call start() again after granting") ++requestedLogs;
+        if (args.message == "[MicInput] waiting for microphone permission (System Settings → Privacy & Security → Microphone)") {
+            ++waitingLogs;
+            waitingNoticeOnMain &= args.level == LogLevel::Notice && isMainThread();
+        }
+    });
     auto settle = [&] { ready.wait(++readyCount); drain(); };
     mic.startAsync(); settle();
     check("Authorized opens normally without requesting permission", requests == 0 && opens == 1 && events == 1 && outcome.success);
     mic.stop(); finish();
     check("Authorized init and cleanup share the lifecycle thread", opens == closes && openedOn == closedOn && openedOn != this_thread::get_id());
 
-    int deniedLogs = 0, requestedLogs = 0;
-    auto logListener = getLogger().onLog.listen([&](LogEventArgs& args) {
-        if (args.message == "[MicInput] " + denied) ++deniedLogs;
-        if (args.message == "[MicInput] permission requested; call start() again after granting") ++requestedLogs;
-    });
+    check("Authorized emits no waiting-for-permission notice", waitingLogs == 0);
     for (auto blocked : {Authorization::Denied, Authorization::Restricted}) {
         status = blocked;
         const int before = events;
@@ -462,9 +468,13 @@ void micAuthorizationTests() {
     }
     check("both denied synchronous starts log exact guidance", deniedLogs == 2 && requests == 0);
 
+    check("Denied/Restricted emit no waiting-for-permission notice", waitingLogs == 0);
     status = Authorization::NotDetermined;
     int before = events;
-    mic.startAsync(); finish(); // no response, no worker, no wait
+    mic.startAsync();
+    check("NotDetermined logs exact Notice once at submission on main", waitingLogs == 1 && waitingNoticeOnMain);
+    finish(); // no response, no worker, no wait
+    check("unanswered permission does not repeat its waiting notice", waitingLogs == 1);
     check("unanswered permission stays starting without a worker", mic.isStarting() && requests == 1 && opens == 1 && events == before && internal::resourceLoadWorkersForTests() == 0);
     mic.stop(); answer(true); finish();
     check("stop drops a late permission grant", !mic.isStarting() && !mic.isRunning() && opens == 1 && events == before);
@@ -517,6 +527,7 @@ void micAuthorizationTests() {
     cleanup.open(); replacementOpened.wait(); ready.wait(++readyCount);
     mic.stop(); finish();
     check("replacement starts once after predecessor cleanup", serialOpens == 2);
+    check("only async NotDetermined submissions log once each", waitingLogs == requests - 2 && waitingNoticeOnMain);
     internal::setResourceLoadProbeForTests({});
     internal::setMicBackendForTests({}, {});
     internal::setMicAuthorizationForTests({}, {});
@@ -766,6 +777,10 @@ class ScreenshotApp : public App {
         return reinterpret_cast<R (*)(id, SEL, Args...)>(objc_msgSend)(object, sel_registerName(selector), args...);
     }
 #endif
+#if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX)
+    int visibleFrames = 0;
+    bool minimizeAttempted = false;
+#endif
     int occlusionFrames = 0;
     bool hiddenRequested = false;
     bool closingSecondary = false;
@@ -806,9 +821,6 @@ public:
             if (secondary) {
                 minimizedWindow = FindWindowW(nullptr, L"G2 hidden screenshot");
                 check("native secondary HWND found", minimizedWindow != nullptr);
-                // SW_HIDE isn't occluded on Windows and keeps presenting (shots
-                // succeed), consistent with the screenshot contract.
-                if (minimizedWindow) ShowWindow(minimizedWindow, SW_MINIMIZE);
             }
 #elif defined(__APPLE__) && TARGET_OS_OSX
             if (secondary) {
@@ -821,8 +833,6 @@ public:
                     if (title && string(title) == "G2 hidden screenshot") minimizedWindow = window;
                 }
                 check("native secondary NSWindow found", minimizedWindow != nullptr);
-                if (minimizedWindow && !secondary->isOccluded())
-                    send<void>(minimizedWindow, "miniaturize:", (id)nullptr);
             }
 #else
             printf("SKIP native secondary occlusion control: no platform helper\n");
@@ -835,8 +845,20 @@ public:
     void update() override {
         if (secondary && !hiddenRequested) {
             bool ready = secondary->isOccluded();
+#if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX)
+            // Initial isOccluded() can be cold false. Let the secondary become
+            // visible before minimizing so macOS sends an occlusion change;
+            // minimizing before first visibility can suspend its display link
+            // without ever updating occlusion. Already occluded needs no helper.
+            if (!ready && !minimizeAttempted && ++visibleFrames >= 10 && minimizedWindow) {
+                minimizeAttempted = true;
 #if defined(_WIN32)
-            ready = ready && minimizedWindow && IsIconic(minimizedWindow);
+                // SW_HIDE keeps presenting; SW_MINIMIZE triggers occlusion.
+                ShowWindow(minimizedWindow, SW_MINIMIZE);
+#else
+                send<void>(minimizedWindow, "miniaturize:", (id)nullptr);
+#endif
+            }
 #endif
             if (!ready) {
                 if (++occlusionFrames < 300) return;

@@ -2545,6 +2545,7 @@ void launchMic(const std::shared_ptr<MicState>& state, bool asynchronous) {
         return;
     }
     if (authorization == MicAuthorization::NotDetermined) {
+        if (asynchronous) logNotice("MicInput") << "waiting for microphone permission (System Settings → Privacy & Security → Microphone)";
         // Neither the OS block nor the mailbox retains MicState/the user object.
         // Only main-thread delivery can launch a worker; exit discards delivery.
         auto completion = [weak = std::weak_ptr(state), asynchronous](bool granted) {
