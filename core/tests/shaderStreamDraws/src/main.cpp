@@ -1,5 +1,6 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 
 #include <cstdio>
 #include <cstring>
@@ -135,8 +136,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         WindowSettings settings;
         settings.setSize(32, 32);
         settings.setHighDpi(false);
-        runApp<GpuApp>(settings);
-        check("GPU checks completed", completed);
+        return tcCoreTest::runDisplayTest<GpuApp>(settings, failures, [] {
+            check("GPU checks completed", completed);
+        });
 #else
         std::printf("SKIP: GPU check uses OpenGL Core test shader\n");
 #endif

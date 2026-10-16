@@ -36,6 +36,7 @@ struct Main : App {
     std::shared_ptr<Window> window;
     uint32_t baseline = 0;
     int frames = 0, completed = 0, closedFrames = 0;
+    int mainFrames = 0, windowStartFrame = 0;
 #ifndef NDEBUG
     size_t ownerBaseline = 0;
 #endif
@@ -46,7 +47,10 @@ struct Main : App {
             printf("pipeline-cycles %s cycle=%d FAIL: %s\n", mode.c_str(), completed + 1, what);
         }
     }
-    void draw() override { tc::drawRect(10, 10, 30, 30); }
+    void draw() override {
+        ++mainFrames;
+        tc::drawRect(10, 10, 30, 30);
+    }
     void update() override {
         // Warm the main window's lazy resources before taking the baseline.
         if (++frames < 4) return;
@@ -61,6 +65,13 @@ struct Main : App {
         }
         if (window) {
             if (window->isOpen()) {
+                // Bound each cycle by main frames, even if the secondary's
+                // display never schedules a tick (e.g. an occluded window).
+                if (mainFrames - windowStartFrame >= 300) {
+                    check(false, "secondary window did not complete within 300 main frames");
+                    exitApp();
+                    return;
+                }
                 if (mode == "main" && probe.updates >= 3) window->close();
                 return;
             }
@@ -92,6 +103,7 @@ struct Main : App {
         settings.setSize(160, 120);
         settings.title = "pipeline-cycle";
         window = createWindow(settings);
+        windowStartFrame = mainFrames;
         check(bool(window), "createWindow failed");
         if (!window) { exitApp(); return; }
         window->setApp(std::make_shared<Secondary>(probe));
@@ -109,11 +121,15 @@ inline int run(const char* closeMode, int count) {
     cycles = count;
     failures = 0;
     if ((mode != "self" && mode != "main" && mode != "early") || cycles <= 0) return 2;
+    if (!internal::supportsSecondaryWindows()) {
+        printf("SKIP: windowAppSwap pipeline-cycles %s single-window platform\n", mode.c_str());
+        return 0;
+    }
     WindowSettings settings;
     settings.setSize(320, 240);
     settings.title = "windowAppSwap pipeline cycles";
-    runApp<Main>(settings);
-    printf("pipeline-cycles %s: %s (%d failures)\n", mode.c_str(), failures ? "FAIL" : "PASS", failures);
-    return failures ? 1 : 0;
+    return tcCoreTest::runDisplayTest<Main>(settings, failures, [] {
+        printf("pipeline-cycles %s: %s (%d failures)\n", mode.c_str(), failures ? "FAIL" : "PASS", failures);
+    });
 }
 }} // anonymous namespace / pipelineCycles

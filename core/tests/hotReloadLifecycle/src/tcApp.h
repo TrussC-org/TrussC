@@ -1,6 +1,9 @@
 #pragma once
 
 #include <TrussC.h>
+// Both host and guest must wait for app and INTERFACE-addon shader headers.
+#include "shaders/reloadProbe.glsl.h"
+#include <tcLut.h>
 using namespace std;
 using namespace tc;
 

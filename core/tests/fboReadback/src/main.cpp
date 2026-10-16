@@ -1,6 +1,7 @@
 // #270 / #641: run with --gpu-check (Xvfb works on Linux; Metal needs a Mac).
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 #include <cstdio>
 #include <cstring>
 
@@ -189,7 +190,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     WindowSettings settings;
     settings.setSize(192, 64);
     settings.setHighDpi(false);
-    runApp<ReadbackApp>(settings);
-    check("all four frames completed", completed);
-    return failures ? 1 : 0;
+    return tcCoreTest::runDisplayTest<ReadbackApp>(settings, failures, [] {
+        check("all four frames completed", completed);
+    });
 }

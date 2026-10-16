@@ -7,6 +7,7 @@
 #include "impl/httplib.h"
 #endif
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -244,7 +245,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         });
         WindowSettings settings;
         settings.width = 64; settings.height = 64;
-        runApp<ExitApp>(settings);
+        return tcCoreTest::runDisplayTest<ExitApp>(settings, failures);
 #ifndef __EMSCRIPTEN__
     } else if (argc > 1 && std::string(argv[1]) == "--http") {
         testHttpShutdown();

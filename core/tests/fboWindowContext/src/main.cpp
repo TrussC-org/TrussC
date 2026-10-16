@@ -1,6 +1,7 @@
 // #653: --gpu-check needs a display (Linux/Xvfb or macOS Debug).
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 
 #include <cstdio>
 #include <cstring>
@@ -136,6 +137,12 @@ public:
             exitApp();
             return;
         }
+        // Count main draws: an occluded secondary may never receive a tick.
+        if (++frames_ >= 300) {
+            check("secondary window did not present within 300 main frames", false);
+            exitApp();
+            return;
+        }
         drawFrame(fbo_, true);
     }
 
@@ -143,10 +150,15 @@ private:
     Fbo fbo_;
     EventListener after_;
     std::shared_ptr<Window> secondary_;
+    int frames_ = 0;
 };
 } // namespace
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
+    if (!internal::supportsSecondaryWindows()) {
+        std::printf("SKIP: fboWindowContext single-window platform\n");
+        return 0;
+    }
     if (argc <= 1 || std::strcmp(argv[1], "--gpu-check") != 0) {
         std::printf("SKIP: fboWindowContext needs --gpu-check and a display\n");
         return 0;
@@ -155,7 +167,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     settings.setSize(64, 64);
     settings.setHighDpi(false);
     settings.sampleCount = 1;
-    runApp<MainApp>(settings);
-    check("both window readbacks completed", secondaryCaptured && mainCaptured);
-    return failures ? 1 : 0;
+    return tcCoreTest::runDisplayTest<MainApp>(settings, failures, [] {
+        check("both window readbacks completed", secondaryCaptured && mainCaptured);
+    });
 }

@@ -1,5 +1,6 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 
 #include <cstdio>
 #include <cstring>
@@ -133,9 +134,15 @@ public:
         }
     }
     void draw() override {
+        ++frames;
         if (ran) {
             check("Shader clear releases cached pipelines after frame", sg_query_pipeline_state(retiredPipeline) == SG_RESOURCESTATE_INVALID);
-            if (completed || !secondary) exitApp();
+            if (completed || !secondary) {
+                exitApp();
+            } else if (frames >= 300) {
+                check("secondary window did not present within 300 main frames", false);
+                exitApp();
+            }
             return;
         }
         ran = true;
@@ -287,6 +294,7 @@ private:
     Light light;
     std::shared_ptr<Window> secondary;
     bool ran = false;
+    int frames = 0;
     sg_pipeline retiredPipeline{};
 };
 #endif
@@ -295,13 +303,19 @@ private:
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     topologyChecks();
     if (argc > 1 && std::strcmp(argv[1], "--gpu-check") == 0) {
+        if (!internal::supportsSecondaryWindows()) {
+            // Only the GPU part is skipped: the CPU topology checks above ran.
+            std::printf("SKIP: pbrMeshTargets GPU mode, single-window platform\n");
+            return failures ? 1 : 0;
+        }
 #if defined(SOKOL_GLCORE)
         WindowSettings settings;
         settings.setSize(64, 64);
         settings.setHighDpi(false);
         settings.sampleCount = 4;
-        runApp<GpuApp>(settings);
-        check("secondary rendering completed", completed);
+        return tcCoreTest::runDisplayTest<GpuApp>(settings, failures, [] {
+            check("secondary rendering completed", completed);
+        });
 #else
         std::printf("GPU checks require Linux OpenGL\n");
         return 2;

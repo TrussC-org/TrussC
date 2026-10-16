@@ -1,6 +1,7 @@
 // #236: radians are canonical; explicit Deg companions preserve degree input.
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 
 #include <cstdio>
 #include <cstring>
@@ -220,8 +221,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         settings.setSize(64, 64);
         settings.setHighDpi(false);
         settings.sampleCount = 1;
-        runApp<AngleApp>(settings);
-        check("projection checks completed", gpuFinished);
+        return tcCoreTest::runDisplayTest<AngleApp>(settings, failures, [] {
+            check("projection checks completed", gpuFinished);
+        });
     } else {
         testInvalid();
         std::printf("SKIP: projection checks need --gpu-check and a display\n");

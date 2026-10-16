@@ -1044,6 +1044,7 @@ static int runReloadCheck() {
 
     WindowSettings settings;
     settings.setSize(960, 600);
+    // runapp-verdict: atexit-verdict -- finish sets the result in-frame; macOS atexit propagates it.
     TC_RUN_APP(tcApp, settings);
     return done ? g_reloadCheckResult : 65;
 }

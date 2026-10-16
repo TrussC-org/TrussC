@@ -878,6 +878,10 @@ jobs:
         if: always()
         run: python3 tools/test_core_test_runner.py
 
+      - name: display test verdict regression checks
+        if: always()
+        run: python3 tools/tests/test_display_test_verdicts.py -v
+
       - name: release workflow offline tests
         if: always()
         run: python3 tools/tests/test_release_workflow.py -v
@@ -905,6 +909,10 @@ jobs:
       - name: apt dependency cache regression checks
         if: always()
         run: python3 tools/tests/test_apt_dependencies.py -v
+
+      - name: shader target regression checks
+        if: always()
+        run: python3 tools/tests/test_shader_targets.py -v
 
       - name: core test symbol checker regression checks
         if: always()

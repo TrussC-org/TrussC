@@ -32,77 +32,32 @@
 #include "tc/events/tcCoreEvents.h"
 
 namespace trussc {
+namespace { thread_local const void* udpWorkerState = nullptr; }
 
 // ---------------------------------------------------------------------------
 // Constructor / Destructor
 // ---------------------------------------------------------------------------
-UdpSocket::UdpSocket() {
-    internal::ensureWinsock();
-#ifdef __EMSCRIPTEN__
-    useThread_ = false;
-#endif
-}
 
-UdpSocket::~UdpSocket() {
-    close();
-}
+
+
 
 // ---------------------------------------------------------------------------
 // Move operations
 // ---------------------------------------------------------------------------
-UdpSocket::UdpSocket(UdpSocket&& other) noexcept
-    : socket_(other.socket_)
-    , localPort_(other.localPort_)
-    , connectedHost_(std::move(other.connectedHost_))
-    , connectedPort_(other.connectedPort_)
-    , receiving_(other.receiving_.load())
-    , shouldStop_(other.shouldStop_.load())
-{
-    other.socket_ = INVALID_SOCKET_HANDLE;
-    other.localPort_ = 0;
-    other.connectedPort_ = 0;
-    other.receiving_ = false;
-    other.shouldStop_ = true;
 
-    if (other.receiveThread_.joinable()) {
-        other.receiveThread_.join();
-    }
-}
 
-UdpSocket& UdpSocket::operator=(UdpSocket&& other) noexcept {
-    if (this != &other) {
-        close();
 
-        socket_ = other.socket_;
-        localPort_ = other.localPort_;
-        connectedHost_ = std::move(other.connectedHost_);
-        connectedPort_ = other.connectedPort_;
-        receiving_ = other.receiving_.load();
-        shouldStop_ = other.shouldStop_.load();
-
-        other.socket_ = INVALID_SOCKET_HANDLE;
-        other.localPort_ = 0;
-        other.connectedPort_ = 0;
-        other.receiving_ = false;
-        other.shouldStop_ = true;
-
-        if (other.receiveThread_.joinable()) {
-            other.receiveThread_.join();
-        }
-    }
-    return *this;
-}
 
 // ---------------------------------------------------------------------------
 // Socket creation
 // ---------------------------------------------------------------------------
-bool UdpSocket::create() {
-    if (socket_ != INVALID_SOCKET_HANDLE) {
+bool UdpSocket::State::create() {
+    if (socket_->handle != INVALID_SOCKET_HANDLE) {
         return true;  // Already created
     }
 
-    socket_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (socket_ == INVALID_SOCKET_HANDLE) {
+    socket_->handle = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (socket_->handle == INVALID_SOCKET_HANDLE) {
         notifyError("Failed to create socket", SOCKET_ERROR_CODE);
         return false;
     }
@@ -110,8 +65,9 @@ bool UdpSocket::create() {
     return true;
 }
 
-bool UdpSocket::ensureSocket() {
-    if (socket_ == INVALID_SOCKET_HANDLE) {
+bool UdpSocket::State::ensureSocket() {
+    if (socket_->closed) return false;   // close() shut it down; the handle has a fresh one
+    if (socket_->handle == INVALID_SOCKET_HANDLE) {
         return create();
     }
     return true;
@@ -120,7 +76,7 @@ bool UdpSocket::ensureSocket() {
 // ---------------------------------------------------------------------------
 // Bind
 // ---------------------------------------------------------------------------
-bool UdpSocket::bind(int port, bool startReceiving) {
+bool UdpSocket::State::bind(int port, bool startReceiving) {
     if (!ensureSocket()) {
         return false;
     }
@@ -136,7 +92,7 @@ bool UdpSocket::bind(int port, bool startReceiving) {
     // one sets SO_EXCLUSIVEADDRUSE.
     if (!reuseAddress_ && !reusePort_) {
         int exclusive = 1;
-        if (setsockopt(socket_, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+        if (setsockopt(socket_->handle, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
                        reinterpret_cast<const char*>(&exclusive), sizeof(exclusive)) != 0) {
             notifyError("Failed to make port " + std::to_string(port) + " exclusive",
                         SOCKET_ERROR_CODE);
@@ -145,12 +101,23 @@ bool UdpSocket::bind(int port, bool startReceiving) {
     }
 #endif
 
-    if (::bind(socket_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+    if (::bind(socket_->handle, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
         notifyError("Failed to bind to port " + std::to_string(port), SOCKET_ERROR_CODE);
         return false;
     }
 
-    localPort_ = port;
+    sockaddr_in boundAddress{};
+#ifdef _WIN32
+    int boundSize = sizeof(boundAddress);
+#else
+    socklen_t boundSize = sizeof(boundAddress);
+#endif
+    if (getsockname(socket_->handle, reinterpret_cast<sockaddr*>(&boundAddress), &boundSize) != 0) {
+        notifyError("Failed to get bound port", SOCKET_ERROR_CODE);
+        return false;
+    }
+    localPort_ = ntohs(boundAddress.sin_port);
+    bound_ = true;
     logNotice() << "UDP socket bound to port " << port;
 
     if (startReceiving) {
@@ -163,7 +130,7 @@ bool UdpSocket::bind(int port, bool startReceiving) {
 // ---------------------------------------------------------------------------
 // Set destination
 // ---------------------------------------------------------------------------
-bool UdpSocket::connect(const std::string& host, int port) {
+bool UdpSocket::State::connect(const std::string& host, int port) {
     if (!ensureSocket()) {
         return false;
     }
@@ -182,7 +149,7 @@ bool UdpSocket::connect(const std::string& host, int port) {
     notifyRecovery(ErrorKind::Resolve);
 
     // Set destination with connect() (for UDP, this just fixes the destination for send(), not an actual connection)
-    if (::connect(socket_, result->ai_addr, static_cast<int>(result->ai_addrlen)) < 0) {
+    if (::connect(socket_->handle, result->ai_addr, static_cast<int>(result->ai_addrlen)) < 0) {
         notifyError("Failed to connect to " + host + ":" + std::to_string(port), SOCKET_ERROR_CODE);
         freeaddrinfo(result);
         return false;
@@ -199,39 +166,33 @@ bool UdpSocket::connect(const std::string& host, int port) {
 // ---------------------------------------------------------------------------
 // Close
 // ---------------------------------------------------------------------------
-void UdpSocket::close() {
-    shouldStop_ = true;
+UdpSocket::Socket::~Socket() {
+    if (handle != INVALID_SOCKET_HANDLE) CLOSE_SOCKET(handle);
+}
 
-    // Shutdown and close socket first (causes recvfrom to return with error)
-    if (socket_ != INVALID_SOCKET_HANDLE) {
+void UdpSocket::State::close() {
+    stopReceiving();
+    // Close the descriptor now, as before the per-run State. shutdown() wakes
+    // a blocked recvfrom on Linux, but on macOS/BSD an unconnected UDP socket
+    // only wakes on close (shutdown fails with ENOTCONN). A direct receive()
+    // blocked on it returns with an error; later calls see the invalid handle.
+    std::lock_guard<std::mutex> lock(socket_->mutex);
+    socket_->closed = true;
+    const SocketHandle handle = socket_->handle.exchange(INVALID_SOCKET_HANDLE);
+    if (handle != INVALID_SOCKET_HANDLE) {
 #ifdef _WIN32
-        shutdown(socket_, SD_BOTH);  // Windows: unblock blocking receive
+        shutdown(handle, SD_BOTH);
 #else
-        shutdown(socket_, SHUT_RDWR);
+        shutdown(handle, SHUT_RDWR);
 #endif
-        CLOSE_SOCKET(socket_);
-        socket_ = INVALID_SOCKET_HANDLE;
+        CLOSE_SOCKET(handle);
     }
-    // Reuse options belong to the closed socket; the next one starts exclusive.
-    reuseAddress_ = false;
-    reusePort_ = false;
-
-    // Wait for thread to finish. On that thread itself (an onReceive
-    // listener that closes the socket) it cannot join itself: keep it for a
-    // later join from another thread. Then join what earlier calls kept.
-    keptThreads_.release(receiveThread_);
-    keptThreads_.joinOthers();
-    receiving_ = false;
-
-    localPort_ = 0;
-    connectedHost_.clear();
-    connectedPort_ = 0;
 }
 
 // ---------------------------------------------------------------------------
 // Send
 // ---------------------------------------------------------------------------
-bool UdpSocket::sendTo(const std::string& host, int port, const void* data, size_t size) {
+bool UdpSocket::State::sendTo(const std::string& host, int port, const void* data, size_t size) {
     if (!ensureSocket()) {
         return false;
     }
@@ -249,7 +210,7 @@ bool UdpSocket::sendTo(const std::string& host, int port, const void* data, size
 
     notifyRecovery(ErrorKind::Resolve);
 
-    auto sent = sendto(socket_,
+    auto sent = sendto(socket_->handle,
                        static_cast<const char*>(data),
                        static_cast<int>(size),
                        0,
@@ -267,12 +228,12 @@ bool UdpSocket::sendTo(const std::string& host, int port, const void* data, size
     return true;
 }
 
-bool UdpSocket::sendTo(const std::string& host, int port, const std::string& message) {
+bool UdpSocket::State::sendTo(const std::string& host, int port, const std::string& message) {
     return sendTo(host, port, message.data(), message.size());
 }
 
-bool UdpSocket::send(const void* data, size_t size) {
-    if (socket_ == INVALID_SOCKET_HANDLE) {
+bool UdpSocket::State::send(const void* data, size_t size) {
+    if (socket_->handle == INVALID_SOCKET_HANDLE) {
         notifyError(ErrorKind::Send, "Socket not created");
         return false;
     }
@@ -282,7 +243,7 @@ bool UdpSocket::send(const void* data, size_t size) {
         return false;
     }
 
-    auto sent = ::send(socket_, static_cast<const char*>(data), static_cast<int>(size), 0);
+    auto sent = ::send(socket_->handle, static_cast<const char*>(data), static_cast<int>(size), 0);
     if (sent < 0) {
         notifyError(ErrorKind::Send, "Failed to send data", SOCKET_ERROR_CODE);
         return false;
@@ -292,28 +253,28 @@ bool UdpSocket::send(const void* data, size_t size) {
     return true;
 }
 
-bool UdpSocket::send(const std::string& message) {
+bool UdpSocket::State::send(const std::string& message) {
     return send(message.data(), message.size());
 }
 
 // ---------------------------------------------------------------------------
 // Receive (synchronous)
 // ---------------------------------------------------------------------------
-int UdpSocket::receive(void* buffer, size_t bufferSize) {
+int UdpSocket::State::receive(void* buffer, size_t bufferSize) {
     std::string host;
     int port;
     return receive(buffer, bufferSize, host, port);
 }
 
-int UdpSocket::receive(void* buffer, size_t bufferSize, std::string& remoteHost, int& remotePort) {
-    if (socket_ == INVALID_SOCKET_HANDLE) {
+int UdpSocket::State::receive(void* buffer, size_t bufferSize, std::string& remoteHost, int& remotePort) {
+    if (socket_->handle == INVALID_SOCKET_HANDLE) {
         return -1;
     }
 
     sockaddr_in fromAddr{};
     socklen_t fromLen = sizeof(fromAddr);
 
-    auto received = recvfrom(socket_,
+    auto received = recvfrom(socket_->handle,
                              static_cast<char*>(buffer),
                              static_cast<int>(bufferSize),
                              0,
@@ -335,7 +296,8 @@ int UdpSocket::receive(void* buffer, size_t bufferSize, std::string& remoteHost,
 // ---------------------------------------------------------------------------
 // Receive thread
 // ---------------------------------------------------------------------------
-void UdpSocket::startReceiving() {
+void UdpSocket::State::startReceiving() {
+    if (socket_->handle == INVALID_SOCKET_HANDLE) return;
     if (receiving_.load()) {
         return;  // Already receiving
     }
@@ -349,36 +311,36 @@ void UdpSocket::startReceiving() {
     receiving_ = true;
 
     if (useThread_) {
-        // Ensure blocking mode for thread
-        setNonBlocking(false);
-        receiveThread_ = std::thread(&UdpSocket::receiveThreadFunc, this);
+        // Non-blocking recv avoids a spurious readiness wake blocking teardown.
+        setNonBlocking(true);
+        keptThreads_.start(receiveThread_, [state = shared_from_this()] { state->receiveThreadFunc(); });
     } else {
         // Ensure non-blocking mode for event loop
         setNonBlocking(true);
-        updateListener_ = events().update.listen(this, &UdpSocket::processNetwork);
+        updateListener_ = events().update.listen([state = shared_from_this()] { state->processNetwork(); });
     }
 }
 
-void UdpSocket::stopReceiving() {
+void UdpSocket::State::stopReceiving() {
     shouldStop_ = true;
+    receiving_ = false;
     updateListener_.disconnect();
-
-    // The thread waits in slices of 100 ms and sees shouldStop_ there. On
-    // that thread itself (an onReceive listener) it cannot join itself: keep
-    // it, and the next startReceiving(), stopReceiving() or close() on
-    // another thread, or the destructor, joins it. Then join what earlier
-    // calls kept.
+    // The non-blocking worker checks shouldStop_ after each bounded poll.
+    // On its own thread keep the join for a later caller.
     keptThreads_.release(receiveThread_);
     keptThreads_.joinOthers();
-
-    receiving_ = false;
+    // Thread mode previously used blocking IO. Preserve what a direct receive()
+    // observes after stopping, including a stop called from a receive listener.
+    if (useThread_) {
+        std::lock_guard<std::mutex> lock(socket_->mutex);
+        setNonBlocking(false);
+    }
 }
 
-void UdpSocket::processNetwork() {
+void UdpSocket::State::processNetwork() {
     if (!receiving_.load()) return;
 
-    // Use a static buffer to avoid allocation every frame
-    static std::vector<char> buffer(RECEIVE_BUFFER_SIZE);
+    auto& buffer = receiveBuffer_;
 
     // In event loop mode, we poll first or just try recvfrom in non-blocking mode.
     // Since we set non-blocking in startReceiving, we can just try recvfrom.
@@ -388,13 +350,16 @@ void UdpSocket::processNetwork() {
         sockaddr_in fromAddr{};
         socklen_t fromLen = sizeof(fromAddr);
 
-        auto received = recvfrom(socket_,
+        std::unique_lock<std::mutex> socketLock(socket_->mutex);
+        if (shouldStop_ || socket_->handle == INVALID_SOCKET_HANDLE) break;
+        auto received = recvfrom(socket_->handle,
                                  buffer.data(),
                                  static_cast<int>(buffer.size()),
                                  0,
                                  reinterpret_cast<sockaddr*>(&fromAddr),
                                  &fromLen);
 
+        socketLock.unlock();
         if (received >= 0) notifyRecovery(ErrorKind::Receive);
 
         if (received > 0) {
@@ -433,11 +398,12 @@ void UdpSocket::processNetwork() {
     }
 }
 
-void UdpSocket::receiveThreadFunc() {
+void UdpSocket::State::receiveThreadFunc() {
+    udpWorkerState = this;
     // In thread mode, we use blocking IO or select/poll
     // Re-implementing with select/poll to allow proper stopping
     
-    std::vector<char> buffer(RECEIVE_BUFFER_SIZE);
+    auto& buffer = receiveBuffer_;
     bool waitFailing = false;   // the previous wait failed too (report once per run)
 
     while (!shouldStop_.load()) {
@@ -445,15 +411,17 @@ void UdpSocket::receiveThreadFunc() {
         bool dataReady = false;
         
 #ifdef _WIN32
+        const SocketHandle descriptor = socket_->handle.load();
+        if (descriptor == INVALID_SOCKET_HANDLE) break;
         fd_set readfds;
         FD_ZERO(&readfds);
-        FD_SET(socket_, &readfds);
+        FD_SET(descriptor, &readfds);
         timeval tv = {0, 100000}; // 100ms
         int res = select(0, &readfds, NULL, NULL, &tv);
         if (res > 0) dataReady = true;
 #else
         struct pollfd pfd;
-        pfd.fd = socket_;
+        pfd.fd = socket_->handle;
         pfd.events = POLLIN;
         int res = poll(&pfd, 1, 100); // 100ms
         if (res > 0) dataReady = true;
@@ -484,13 +452,16 @@ void UdpSocket::receiveThreadFunc() {
             sockaddr_in fromAddr{};
             socklen_t fromLen = sizeof(fromAddr);
 
-            auto received = recvfrom(socket_,
+            std::unique_lock<std::mutex> socketLock(socket_->mutex);
+            if (shouldStop_ || socket_->handle == INVALID_SOCKET_HANDLE) break;
+            auto received = recvfrom(socket_->handle,
                                      buffer.data(),
                                      static_cast<int>(buffer.size()),
                                      0,
                                      reinterpret_cast<sockaddr*>(&fromAddr),
                                      &fromLen);
 
+            socketLock.unlock();
             if (shouldStop_.load()) break;
 
             if (received >= 0) notifyRecovery(ErrorKind::Receive);
@@ -523,7 +494,7 @@ void UdpSocket::receiveThreadFunc() {
     receiving_ = false;
 }
 
-void UdpSocket::setUseThread(bool use) {
+void UdpSocket::State::setUseThread(bool use) {
 #ifdef __EMSCRIPTEN__
     if (use) {
         logWarning() << "Threads are not supported on Emscripten in this build. useThread remains false.";
@@ -540,35 +511,35 @@ void UdpSocket::setUseThread(bool use) {
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
-bool UdpSocket::setNonBlocking(bool nonBlocking) {
-    if (socket_ == INVALID_SOCKET_HANDLE) return false;
+bool UdpSocket::State::setNonBlocking(bool nonBlocking) {
+    if (socket_->handle == INVALID_SOCKET_HANDLE) return false;
 
 #ifdef _WIN32
     u_long mode = nonBlocking ? 1 : 0;
-    return ioctlsocket(socket_, FIONBIO, &mode) == 0;
+    return ioctlsocket(socket_->handle, FIONBIO, &mode) == 0;
 #else
-    int flags = fcntl(socket_, F_GETFL, 0);
+    int flags = fcntl(socket_->handle, F_GETFL, 0);
     if (flags < 0) return false;
     if (nonBlocking) {
         flags |= O_NONBLOCK;
     } else {
         flags &= ~O_NONBLOCK;
     }
-    return fcntl(socket_, F_SETFL, flags) == 0;
+    return fcntl(socket_->handle, F_SETFL, flags) == 0;
 #endif
 }
 
-bool UdpSocket::setBroadcast(bool enable) {
+bool UdpSocket::State::setBroadcast(bool enable) {
     if (!ensureSocket()) return false;
     int val = enable ? 1 : 0;
-    return setsockopt(socket_, SOL_SOCKET, SO_BROADCAST,
+    return setsockopt(socket_->handle, SOL_SOCKET, SO_BROADCAST,
                       reinterpret_cast<const char*>(&val), sizeof(val)) == 0;
 }
 
-bool UdpSocket::setReuseAddress(bool enable) {
+bool UdpSocket::State::setReuseAddress(bool enable) {
     if (!ensureSocket()) return false;
     int val = enable ? 1 : 0;
-    if (setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR,
+    if (setsockopt(socket_->handle, SOL_SOCKET, SO_REUSEADDR,
                    reinterpret_cast<const char*>(&val), sizeof(val)) != 0) {
         notifyError("Failed to set address reuse", SOCKET_ERROR_CODE);
         return false;
@@ -597,14 +568,14 @@ bool buildMreq(const std::string& groupAddr, const std::string& interfaceAddr, i
 }
 } // namespace
 
-bool UdpSocket::joinMulticastGroup(const std::string& groupAddr, const std::string& interfaceAddr) {
+bool UdpSocket::State::joinMulticastGroup(const std::string& groupAddr, const std::string& interfaceAddr) {
     if (!ensureSocket()) return false;
     ip_mreq mreq;
     if (!buildMreq(groupAddr, interfaceAddr, mreq)) {
         notifyError("Invalid multicast/interface address: " + groupAddr, 0);
         return false;
     }
-    if (setsockopt(socket_, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+    if (setsockopt(socket_->handle, IPPROTO_IP, IP_ADD_MEMBERSHIP,
                    reinterpret_cast<const char*>(&mreq), sizeof(mreq)) != 0) {
         notifyError("Failed to join multicast group " + groupAddr, SOCKET_ERROR_CODE);
         return false;
@@ -612,34 +583,34 @@ bool UdpSocket::joinMulticastGroup(const std::string& groupAddr, const std::stri
     return true;
 }
 
-bool UdpSocket::leaveMulticastGroup(const std::string& groupAddr, const std::string& interfaceAddr) {
-    if (socket_ == INVALID_SOCKET_HANDLE) return false;
+bool UdpSocket::State::leaveMulticastGroup(const std::string& groupAddr, const std::string& interfaceAddr) {
+    if (socket_->handle == INVALID_SOCKET_HANDLE) return false;
     ip_mreq mreq;
     if (!buildMreq(groupAddr, interfaceAddr, mreq)) {
         notifyError("Invalid multicast/interface address: " + groupAddr, 0);
         return false;
     }
-    return setsockopt(socket_, IPPROTO_IP, IP_DROP_MEMBERSHIP,
+    return setsockopt(socket_->handle, IPPROTO_IP, IP_DROP_MEMBERSHIP,
                       reinterpret_cast<const char*>(&mreq), sizeof(mreq)) == 0;
 }
 
-bool UdpSocket::setMulticastTTL(int ttl) {
+bool UdpSocket::State::setMulticastTTL(int ttl) {
     if (!ensureSocket()) return false;
     // IP_MULTICAST_TTL expects an unsigned char payload on POSIX; Winsock takes
     // an int. A single byte satisfies both (TTL is 0..255 anyway).
     unsigned char val = static_cast<unsigned char>(ttl);
-    return setsockopt(socket_, IPPROTO_IP, IP_MULTICAST_TTL,
+    return setsockopt(socket_->handle, IPPROTO_IP, IP_MULTICAST_TTL,
                       reinterpret_cast<const char*>(&val), sizeof(val)) == 0;
 }
 
-bool UdpSocket::setMulticastLoopback(bool enable) {
+bool UdpSocket::State::setMulticastLoopback(bool enable) {
     if (!ensureSocket()) return false;
     unsigned char val = enable ? 1 : 0;
-    return setsockopt(socket_, IPPROTO_IP, IP_MULTICAST_LOOP,
+    return setsockopt(socket_->handle, IPPROTO_IP, IP_MULTICAST_LOOP,
                       reinterpret_cast<const char*>(&val), sizeof(val)) == 0;
 }
 
-bool UdpSocket::setMulticastInterface(const std::string& interfaceAddr) {
+bool UdpSocket::State::setMulticastInterface(const std::string& interfaceAddr) {
     if (!ensureSocket()) return false;
     struct in_addr ifaddr{};
     if (interfaceAddr.empty()) {
@@ -648,11 +619,11 @@ bool UdpSocket::setMulticastInterface(const std::string& interfaceAddr) {
         notifyError("Invalid multicast interface address: " + interfaceAddr, 0);
         return false;
     }
-    return setsockopt(socket_, IPPROTO_IP, IP_MULTICAST_IF,
+    return setsockopt(socket_->handle, IPPROTO_IP, IP_MULTICAST_IF,
                       reinterpret_cast<const char*>(&ifaddr), sizeof(ifaddr)) == 0;
 }
 
-bool UdpSocket::setReusePort(bool enable) {
+bool UdpSocket::State::setReusePort(bool enable) {
     if (!ensureSocket()) return false;
     int val = enable ? 1 : 0;
 #ifdef _WIN32
@@ -661,7 +632,7 @@ bool UdpSocket::setReusePort(bool enable) {
 #else
     const int option = SO_REUSEPORT;
 #endif
-    if (setsockopt(socket_, SOL_SOCKET, option,
+    if (setsockopt(socket_->handle, SOL_SOCKET, option,
                    reinterpret_cast<const char*>(&val), sizeof(val)) != 0) {
         notifyError("Failed to set port reuse", SOCKET_ERROR_CODE);
         return false;
@@ -670,30 +641,30 @@ bool UdpSocket::setReusePort(bool enable) {
     return true;
 }
 
-bool UdpSocket::setReceiveBufferSize(int size) {
-    if (socket_ == INVALID_SOCKET_HANDLE) return false;
-    return setsockopt(socket_, SOL_SOCKET, SO_RCVBUF,
+bool UdpSocket::State::setReceiveBufferSize(int size) {
+    if (socket_->handle == INVALID_SOCKET_HANDLE) return false;
+    return setsockopt(socket_->handle, SOL_SOCKET, SO_RCVBUF,
                       reinterpret_cast<const char*>(&size), sizeof(size)) == 0;
 }
 
-bool UdpSocket::setSendBufferSize(int size) {
-    if (socket_ == INVALID_SOCKET_HANDLE) return false;
-    return setsockopt(socket_, SOL_SOCKET, SO_SNDBUF,
+bool UdpSocket::State::setSendBufferSize(int size) {
+    if (socket_->handle == INVALID_SOCKET_HANDLE) return false;
+    return setsockopt(socket_->handle, SOL_SOCKET, SO_SNDBUF,
                       reinterpret_cast<const char*>(&size), sizeof(size)) == 0;
 }
 
-bool UdpSocket::setReceiveTimeout(int timeoutMs) {
-    if (socket_ == INVALID_SOCKET_HANDLE) return false;
+bool UdpSocket::State::setReceiveTimeout(int timeoutMs) {
+    if (socket_->handle == INVALID_SOCKET_HANDLE) return false;
 
 #ifdef _WIN32
     DWORD tv = timeoutMs;
-    return setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO,
+    return setsockopt(socket_->handle, SOL_SOCKET, SO_RCVTIMEO,
                       reinterpret_cast<const char*>(&tv), sizeof(tv)) == 0;
 #else
     struct timeval tv;
     tv.tv_sec = timeoutMs / 1000;
     tv.tv_usec = (timeoutMs % 1000) * 1000;
-    return setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO,
+    return setsockopt(socket_->handle, SOL_SOCKET, SO_RCVTIMEO,
                       reinterpret_cast<const char*>(&tv), sizeof(tv)) == 0;
 #endif
 }
@@ -704,7 +675,7 @@ bool UdpSocket::setReceiveTimeout(int timeoutMs) {
 // Gate, counter and failure flag are atomic so a suppressed failure takes no mutex. Only
 // reports/recoveries take the small bookkeeping lock. Emit outside it: logger
 // listeners and onError listeners may call back into this socket.
-void UdpSocket::notifyError(ErrorKind kind, const std::string& message, int code) {
+void UdpSocket::State::notifyError(ErrorKind kind, const std::string& message, int code) {
     auto& state = errorLogs_[static_cast<size_t>(kind)];
     const bool report = state.gate.isFirstTime();
     uint64_t count = 0;
@@ -732,7 +703,7 @@ void UdpSocket::notifyError(ErrorKind kind, const std::string& message, int code
     onError.notify(args);
 }
 
-void UdpSocket::notifyRecovery(ErrorKind kind) {
+void UdpSocket::State::notifyRecovery(ErrorKind kind) {
     auto& state = errorLogs_[static_cast<size_t>(kind)];
     if (!state.failedSinceSuccess.load(std::memory_order_acquire)) return;
 
@@ -750,13 +721,214 @@ void UdpSocket::notifyRecovery(ErrorKind kind) {
     }
 }
 
-void UdpSocket::notifyError(const std::string& message, int code) {
+void UdpSocket::State::notifyError(const std::string& message, int code) {
     logError() << "UdpSocket: " << message << " (code: " << code << ")";
 
     UdpErrorEventArgs args;
     args.message = message;
     args.errorCode = code;
     onError.notify(args);
+}
+
+
+
+void UdpSocket::freshState() {
+    auto previous = internal::sharedLoad(state_);
+    socketOwner_ = std::make_shared<Socket>();
+    auto next = std::make_shared<State>(socketOwner_);
+    next->useThread_ = previous->useThread_;
+    next->onReceive.target = onReceiveTarget_;
+    next->onError.target = onErrorTarget_;
+    retired_.push_back(previous);
+    internal::sharedStore(state_, std::move(next));
+}
+UdpSocket::UdpSocket(UdpSocket&& other) noexcept : UdpSocket() { *this = std::move(other); }
+UdpSocket& UdpSocket::operator=(UdpSocket&& other) noexcept {
+    if (this == &other) return *this;
+    close();
+    if (other.isReceiving()) {
+        logError("UdpSocket") << "moved while running; stopped";
+        other.stopReceiving();
+    }
+    socketOwner_ = other.socketOwner_;
+    internal::sharedStore(state_, internal::sharedLoad(other.state_));
+    internal::sharedLoad(state_)->onReceive.target = onReceiveTarget_;
+    internal::sharedLoad(state_)->onError.target = onErrorTarget_;
+    internal::sharedStore(other.state_, std::make_shared<State>());
+    other.freshState();
+    return *this;
+}
+
+
+void UdpSocket::joinRetired() {
+    if (udpWorkerState) {
+        for (auto it = retired_.begin(); it != retired_.end();) {
+            if (it->use_count() == 1) {
+                (*it)->keptThreads_.joinOthers();
+                it = retired_.erase(it);
+            } else ++it;
+        }
+        return;
+    }
+    auto retired = std::move(retired_);
+    for (auto& state : retired) state->keptThreads_.joinOthers();
+}
+
+void UdpSocket::attachTargets() {
+    onReceiveTarget_ = internal::EventSnapshotDelivery<UdpReceiveEventArgs>::bind(onReceive, delivery_);
+    internal::sharedLoad(state_)->onReceive.target = onReceiveTarget_;
+    onErrorTarget_ = internal::EventSnapshotDelivery<UdpErrorEventArgs>::bind(onError, delivery_);
+    internal::sharedLoad(state_)->onError.target = onErrorTarget_;
+}
+UdpSocket::UdpSocket() { internal::ensureWinsock(); attachTargets(); }
+UdpSocket::~UdpSocket() {
+    delivery_->close();
+    onReceive.clear();
+    onError.clear();
+
+    onReceiveTarget_.reset();
+    onErrorTarget_.reset();
+    auto state = internal::sharedLoad(state_);
+    state->close();
+    joinRetired();
+}
+bool UdpSocket::create() {
+    auto state = internal::sharedLoad(state_);
+    return state->create();
+}
+bool UdpSocket::bind(int port, bool startReceiving) {
+    auto state = internal::sharedLoad(state_);
+    return state->bind(port, startReceiving);
+}
+bool UdpSocket::connect(const std::string& host, int port) {
+    auto state = internal::sharedLoad(state_);
+    return state->connect(host, port);
+}
+void UdpSocket::close() {
+    auto state = internal::sharedLoad(state_);
+    state->close();
+    freshState();
+    joinRetired();
+}
+bool UdpSocket::sendTo(const std::string& host, int port, const void* data, size_t size) {
+    auto state = internal::sharedLoad(state_);
+    return state->sendTo(host, port, data, size);
+}
+bool UdpSocket::sendTo(const std::string& host, int port, const std::string& message) {
+    auto state = internal::sharedLoad(state_);
+    return state->sendTo(host, port, message);
+}
+bool UdpSocket::send(const void* data, size_t size) {
+    auto state = internal::sharedLoad(state_);
+    return state->send(data, size);
+}
+bool UdpSocket::send(const std::string& message) {
+    auto state = internal::sharedLoad(state_);
+    return state->send(message);
+}
+int UdpSocket::receive(void* buffer, size_t bufferSize) {
+    auto state = internal::sharedLoad(state_);
+    return state->receive(buffer, bufferSize);
+}
+int UdpSocket::receive(void* buffer, size_t bufferSize, std::string& remoteHost, int& remotePort) {
+    auto state = internal::sharedLoad(state_);
+    return state->receive(buffer, bufferSize, remoteHost, remotePort);
+}
+void UdpSocket::startReceiving() {
+    joinRetired();
+    auto state = internal::sharedLoad(state_);
+    state->startReceiving();
+}
+void UdpSocket::stopReceiving() {
+    auto state = internal::sharedLoad(state_);
+    const int port = state->localPort_;
+    const bool bound = state->bound_;
+    const auto host = state->connectedHost_;
+    const int destination = state->connectedPort_;
+    const bool reuseAddress = state->reuseAddress_;
+    const bool reusePort = state->reusePort_;
+    state->stopReceiving();
+    auto next = std::make_shared<State>(state->socket_);
+    next->useThread_ = state->useThread_;
+    next->onReceive.target = onReceiveTarget_;
+    next->onError.target = onErrorTarget_;
+    next->localPort_ = port;
+    next->bound_ = bound;
+    next->connectedHost_ = host;
+    next->connectedPort_ = destination;
+    next->reuseAddress_ = reuseAddress;
+    next->reusePort_ = reusePort;
+    retired_.push_back(state);
+    internal::sharedStore(state_, std::move(next));
+    joinRetired();
+}
+void UdpSocket::processNetwork() {
+    auto state = internal::sharedLoad(state_);
+    state->processNetwork();
+}
+void UdpSocket::setUseThread(bool use) {
+    auto state = internal::sharedLoad(state_);
+    state->setUseThread(use);
+}
+bool UdpSocket::setNonBlocking(bool nonBlocking) {
+    auto state = internal::sharedLoad(state_);
+    return state->setNonBlocking(nonBlocking);
+}
+bool UdpSocket::setBroadcast(bool enable) {
+    auto state = internal::sharedLoad(state_);
+    return state->setBroadcast(enable);
+}
+bool UdpSocket::setReuseAddress(bool enable) {
+    auto state = internal::sharedLoad(state_);
+    return state->setReuseAddress(enable);
+}
+bool UdpSocket::joinMulticastGroup(const std::string& groupAddr, const std::string& interfaceAddr) {
+    auto state = internal::sharedLoad(state_);
+    return state->joinMulticastGroup(groupAddr, interfaceAddr);
+}
+bool UdpSocket::leaveMulticastGroup(const std::string& groupAddr, const std::string& interfaceAddr) {
+    auto state = internal::sharedLoad(state_);
+    return state->leaveMulticastGroup(groupAddr, interfaceAddr);
+}
+bool UdpSocket::setMulticastTTL(int ttl) {
+    auto state = internal::sharedLoad(state_);
+    return state->setMulticastTTL(ttl);
+}
+bool UdpSocket::setMulticastLoopback(bool enable) {
+    auto state = internal::sharedLoad(state_);
+    return state->setMulticastLoopback(enable);
+}
+bool UdpSocket::setMulticastInterface(const std::string& interfaceAddr) {
+    auto state = internal::sharedLoad(state_);
+    return state->setMulticastInterface(interfaceAddr);
+}
+bool UdpSocket::setReusePort(bool enable) {
+    auto state = internal::sharedLoad(state_);
+    return state->setReusePort(enable);
+}
+bool UdpSocket::setReceiveBufferSize(int size) {
+    auto state = internal::sharedLoad(state_);
+    return state->setReceiveBufferSize(size);
+}
+bool UdpSocket::setSendBufferSize(int size) {
+    auto state = internal::sharedLoad(state_);
+    return state->setSendBufferSize(size);
+}
+bool UdpSocket::setReceiveTimeout(int timeoutMs) {
+    auto state = internal::sharedLoad(state_);
+    return state->setReceiveTimeout(timeoutMs);
+}
+void UdpSocket::notifyError(ErrorKind kind, const std::string& message, int code) {
+    auto state = internal::sharedLoad(state_);
+    state->notifyError(kind, message, code);
+}
+void UdpSocket::notifyRecovery(ErrorKind kind) {
+    auto state = internal::sharedLoad(state_);
+    state->notifyRecovery(kind);
+}
+void UdpSocket::notifyError(const std::string& message, int code) {
+    auto state = internal::sharedLoad(state_);
+    state->notifyError(message, code);
 }
 
 } // namespace trussc

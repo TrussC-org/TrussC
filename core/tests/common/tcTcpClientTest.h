@@ -129,12 +129,19 @@ struct RawListener {
 };
 
 struct ProbeClient : TcpClient {
-    atomic<int> attempts{0};
-    bool connect(const string& host, int port) override {
-        ++attempts;
-        return TcpClient::connect(host, port);
+    struct ProbeTransport : Transport {
+        atomic<int> attempts{0};
+        bool connectSocket(State& st, const string& host, int port) override {
+            ++attempts;
+            return Transport::connectSocket(st, host, port);
+        }
+    };
+    shared_ptr<ProbeTransport> probe = make_shared<ProbeTransport>();
+    ProbeClient() { setTransport(probe); }
+    bool pending() const {
+        auto st = state();
+        return st->connectPending_;
     }
-    bool pending() const { return connectPending_; }
 };
 
 // Real socket back-pressure, with a bounded amount offered per native send.
@@ -144,22 +151,27 @@ struct ProbeClient : TcpClient {
 // Only the request length changes: the product performs send/error mapping,
 // readiness waits, progress accounting, timeout and cancellation unchanged.
 struct BackpressureClient : ProbeClient {
-    atomic<bool> wouldBlock{false};
-    atomic<size_t> acceptedBytes{0};
-    void smallSendBuffer() {
-        lock_guard<mutex> held(socketMutex_);
-        smallSocketBuffer(socket_, SO_SNDBUF);
-    }
-    int writeSendStep(const void* data, size_t size, bool& forWrite, int& error) override {
-        int sent = TcpClient::writeSendStep(data, std::min(size, size_t(4096)), forWrite, error);
-        if (sent > 0) acceptedBytes += static_cast<size_t>(sent);
+    struct BackpressureTransport : ProbeTransport {
+        atomic<bool> wouldBlock{false};
+        atomic<size_t> acceptedBytes{0};
+        int writeSendStep(State& st, const void* data, size_t size, bool& forWrite, int& error) override {
+            int sent = Transport::writeSendStep(st, data, std::min(size, size_t(4096)), forWrite, error);
+            if (sent > 0) acceptedBytes += static_cast<size_t>(sent);
 #ifdef _WIN32
-        const bool blocked = error == WSAEWOULDBLOCK;
+            const bool blocked = error == WSAEWOULDBLOCK;
 #else
-        const bool blocked = error == EWOULDBLOCK || error == EAGAIN;
+            const bool blocked = error == EWOULDBLOCK || error == EAGAIN;
 #endif
-        if (sent == -1 && blocked) wouldBlock = true;
-        return sent;
+            if (sent == -1 && blocked) wouldBlock = true;
+            return sent;
+        }
+    };
+    shared_ptr<BackpressureTransport> pressure = make_shared<BackpressureTransport>();
+    BackpressureClient() { probe = pressure; setTransport(pressure); }
+    void smallSendBuffer() {
+        auto st = state();
+        lock_guard<mutex> held(st->socketMutex_);
+        smallSocketBuffer(st->socket_, SO_SNDBUF);
     }
 };
 } // namespace

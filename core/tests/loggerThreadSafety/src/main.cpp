@@ -705,6 +705,7 @@ static void testXOpenDisplayFailureReachesLogFile() {
         unsetenv("WAYLAND_DISPLAY");
         setenv("TRUSSC_LOG_FILE", log.c_str(), 1);
         WindowSettings settings;
+        // runapp-verdict: expected-abort -- the parent checks this child's fatal XOpenDisplay failure.
         runApp<NoDisplayApp>(settings);
     });
     const string text = readText(log);

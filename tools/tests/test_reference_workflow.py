@@ -116,7 +116,7 @@ if any(os.path.basename(a) == os.environ.get('FAIL_AT') for a in sys.argv[1:]):
                 calls = [json.loads(line) for line in (self.directory / 'calls').read_text().splitlines()]
                 self.assertEqual(calls[0][:2], ['cmake', '-S'])
                 self.assertEqual(calls[1][0], 'cmake')
-                self.assertIn('TrussC_shaders', calls[1])
+                self.assertIn('TrussC_shaders_gen', calls[1])
                 emitters = [next(Path(a).name for a in call if a.endswith('.js')) for call in calls[2:]]
                 self.assertEqual(emitters, [] if args else expected[:1] if fail_at else expected)
 
