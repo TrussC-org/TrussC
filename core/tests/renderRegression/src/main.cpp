@@ -343,15 +343,6 @@ class RegressionApp : public App {
         } else if (is("fboClearLoad")) {
             Rgba red{128,0,0,128}, green{0,255,0,255};
             int allowance = 1;
-#if defined(SOKOL_METAL)
-            // Known wrong on Metal only: Air captures BOTH screen probes as
-            // [0,0,0,0], while the Fbo is exact. This scene never restarts a
-            // swapchain pass: the Fbo CLEAR/LOAD precedes its first present().
-            // Capture already uses that pass's drawable and ordered queue.
-            // Tracked in #832 (Fbo sampling/presentation vs capture on Metal);
-            // no proven #821 PR 3/5 fix yet. Keep exact current RGB, not a tolerance.
-            if (!offscreen) { red = green = Rgba{0,0,0,0}; allowance = 0; }
-#endif
             expect(px, offscreen, label+" loaded red", 32, 32, red, s, allowance);
             expect(px, offscreen, label+" second pass", 96, 32, green, s, allowance);
         } else if (is("msaaResolve") || is("scissorFbo")) {
