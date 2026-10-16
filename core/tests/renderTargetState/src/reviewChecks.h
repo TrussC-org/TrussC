@@ -57,7 +57,8 @@ void runReviewChecks(Fbo& fbo) {
     check("popScissor inside Fbo consumes the window scope and records full-window reset (base behavior)",
           reviewDrawFields().scissorStack.empty() && !reviewDrawFields().currentScissor.active &&
           sgl_num_commands() == commands + 1 &&
-          getFramebufferWidth() == 96 && getFramebufferHeight() == 64 &&
+          // The reset rectangle is the window's framebuffer, not the Fbo's.
+          getFramebufferWidth() > fbo.getWidth() && getFramebufferHeight() > fbo.getHeight() &&
           fbo.getWidth() == 37 && fbo.getHeight() == 23);
     // beginShadowPass uses only the swapchain flag as its suspension predicate;
     // do not execute its known-invalid nested sg_begin_pass in this check.

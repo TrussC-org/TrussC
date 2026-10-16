@@ -120,7 +120,7 @@ public:
         const auto before = cameraSnapshot();
         if (frame_ == 0) {
             check("plain frame starts with the default screen camera",
-                  before.fov == TAU / 8 && before.width == 96 && before.height == 64 &&
+                  before.fov == TAU / 8 && before.width == getWindowWidth() && before.height == getWindowHeight() &&
                   before.context->pickable);
         }
         const auto model = getMatrix();
@@ -171,6 +171,8 @@ public:
 
 void runCameraChecks(int samples = 1) {
     WindowSettings settings;
+    // Windows may clamp a small window's client area (96 → 120), so checks
+    // compare against the size the window actually got.
     settings.setSize(96, 64);
     settings.setHighDpi(false);
     settings.sampleCount = samples;
