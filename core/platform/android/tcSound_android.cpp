@@ -20,6 +20,7 @@ LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
 }
 
 LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
+    async_.cancel();
     internal::clearLoadName(path_);
     logWarning("SoundBuffer") << "AAC loading from memory not yet implemented on Android";
     return LoadResult::fail(LoadError::UnsupportedFormat,

@@ -492,3 +492,12 @@ All modifications by tettou771
   its backend cleanup check. Frame/tree/event paths need no teardown guards.
 - Shared runtime signal handling, Logger markers and MCP drain semantics are
   documented in [EXIT_PROTOCOL.md](../../../docs/EXIT_PROTOCOL.md).
+
+## `sapp_dpi_scale()` before `sapp_run()` (#841)
+
+- The X11/EGL (Raspberry Pi), Android, iOS and Emscripten backends returned
+  the zero-initialized `dpi_scale` before `sapp_run()`, so a headless app saw
+  a DPI scale of 0 (and every font size mapped to one cache key). They now
+  report 1.0 until the backend sets the real scale, like the X11/GLX and
+  Windows backends. macOS keeps its documented deviation: the main screen's
+  scale before `sapp_run()`.

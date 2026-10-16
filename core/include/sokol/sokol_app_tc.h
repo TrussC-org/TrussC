@@ -5551,7 +5551,9 @@ SOKOL_API_IMPL bool sapp_high_dpi(void) {
 }
 
 SOKOL_API_IMPL float sapp_dpi_scale(void) {
-    return _sapp_tc.dpi_scale;
+    /* [TrussC fork] before sapp_run (headless, no window) report 1.0 like the
+       desktop backends instead of the zero-initialized state (#841) */
+    return _sapp_tc.dpi_scale > 0.0f ? _sapp_tc.dpi_scale : 1.0f;
 }
 
 SOKOL_API_IMPL const void* sapp_egl_get_display(void) {
@@ -15406,7 +15408,9 @@ SOKOL_API_IMPL bool sapp_high_dpi(void) {
 }
 
 SOKOL_API_IMPL float sapp_dpi_scale(void) {
-    return _sapp_tc.dpi_scale;
+    /* [TrussC fork] before sapp_run (headless, no window) report 1.0 like the
+       desktop backends instead of the zero-initialized state (#841) */
+    return _sapp_tc.dpi_scale > 0.0f ? _sapp_tc.dpi_scale : 1.0f;
 }
 
 SOKOL_API_IMPL const void* sapp_egl_get_display(void) {
@@ -17524,7 +17528,9 @@ SOKOL_API_IMPL bool sapp_high_dpi(void) {
 }
 
 SOKOL_API_IMPL float sapp_dpi_scale(void) {
-    return _sapp_tc.dpi_scale;
+    /* [TrussC fork] before sapp_run (headless, no window) report 1.0 like the
+       desktop backends instead of the zero-initialized state (#841) */
+    return _sapp_tc.dpi_scale > 0.0f ? _sapp_tc.dpi_scale : 1.0f;
 }
 
 SOKOL_API_IMPL const void* sapp_egl_get_display(void) {
@@ -20457,7 +20463,9 @@ SOKOL_API_IMPL bool sapp_high_dpi(void) {
 }
 
 SOKOL_API_IMPL float sapp_dpi_scale(void) {
-    return _sapp_tc.dpi_scale;
+    /* [TrussC fork] before sapp_run (headless, no window) report 1.0 like the
+       desktop backends instead of the zero-initialized state (#841) */
+    return _sapp_tc.dpi_scale > 0.0f ? _sapp_tc.dpi_scale : 1.0f;
 }
 
 SOKOL_API_IMPL const void* sapp_egl_get_display(void) {

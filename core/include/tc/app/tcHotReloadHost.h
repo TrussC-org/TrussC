@@ -145,6 +145,8 @@ struct GuestLibrary {
             static uintptr_t generation = 0;  // host-only: only the host creates guests
             mcpOwner = reinterpret_cast<const void*>(++generation);
             mcp::internal::setRegistrationOwner(mcpOwner);
+            if (auto token = internal::appRunToken()) token->store(false);
+            internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
             App* raw = createApp();
             auto deleter = destroyApp;
             app = std::shared_ptr<App>(raw, [deleter](App* p) {
@@ -158,6 +160,7 @@ struct GuestLibrary {
     }
 
     void destroy() {
+        if (auto token = internal::appRunToken()) token->store(false);
         if (mcpOwner) {
             mcp::internal::removeRegistrationsOwnedBy(mcpOwner);
             mcp::internal::setRegistrationOwner(nullptr);

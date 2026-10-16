@@ -1494,8 +1494,11 @@ struct Cover_Font : af::Scope<Font> {
         (void)af::val<const Font>().getWidth(af::val<const std::string>());
         (void)af::val<const Font>().getWritingMode();
         (void)af::val<const Font>().isLoaded();
+        (void)af::val<const Font>().isLoading();
         (void)af::val<const Font>().isWrapEnabled();
         (void)af::val<Font>().load(af::val<const fs::path>(), af::val<int>(), af::val<int>());
+        (void)af::val<Font>().loadAsync(af::val<const fs::path>(), af::val<int>(), af::val<int>());
+        (void)af::val<Font>().onLoad;
         (void)af::val<Font>().resetLineHeight();
         (void)af::val<Font>().setAlign(af::val<Direction>(), af::val<Direction>());
         (void)af::val<Font>().setAlign(af::val<Direction>());
@@ -1692,11 +1695,14 @@ struct Cover_Image : af::Scope<Image> {
         (void)af::val<Image>().halve();
         (void)af::val<const Image>().hasTexture();
         (void)af::val<const Image>().isAllocated();
+        (void)af::val<const Image>().isLoading();
         (void)af::val<Image>().load(af::val<const fs::path>(), af::val<bool>());
+        (void)af::val<Image>().loadAsync(af::val<const fs::path>(), af::val<bool>());
         (void)af::val<Image>().loadFromMemory(af::val<const unsigned char *>(), af::val<int>(), af::val<bool>());
         (void)af::val<Image>().mirror(af::val<bool>(), af::val<bool>());
         (void)af::val<Image>().mirrorH();
         (void)af::val<Image>().mirrorV();
+        (void)af::val<Image>().onLoad;
         (void)af::val<Image>().resize(af::val<int>(), af::val<int>());
         (void)af::val<const Image>().save(af::val<const fs::path>());
         (void)af::val<Image>().setColor(af::val<int>(), af::val<int>(), af::val<const Color>());
@@ -3363,6 +3369,7 @@ struct Cover_SoundBuffer : af::Scope<SoundBuffer> {
         (void)af::val<SoundBuffer>().getAdtsSampleRateIndex(af::val<int>());
         (void)af::val<const SoundBuffer>().getDuration();
         (void)af::val<const SoundBuffer>().getPath();
+        (void)af::val<const SoundBuffer>().isLoading();
         (void)af::val<const SoundBuffer>().kind();
         (void)af::val<SoundBuffer>().load(af::val<const fs::path>());
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
@@ -3371,6 +3378,7 @@ struct Cover_SoundBuffer : af::Scope<SoundBuffer> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
         (void)af::val<SoundBuffer>().loadAacFromMemory(af::val<const void *>(), af::val<size_t>());
 #endif
+        (void)af::val<SoundBuffer>().loadAsync(af::val<const fs::path>());
         (void)af::val<SoundBuffer>().loadFlac(af::val<const fs::path>());
         (void)af::val<SoundBuffer>().loadFlacFromMemory(af::val<const void *>(), af::val<size_t>());
         (void)af::val<SoundBuffer>().loadMp3(af::val<const fs::path>());
@@ -3382,6 +3390,7 @@ struct Cover_SoundBuffer : af::Scope<SoundBuffer> {
         (void)af::val<SoundBuffer>().loadWavFromMemory(af::val<const void *>(), af::val<size_t>());
         (void)af::val<SoundBuffer>().mixFrom(af::val<const SoundBuffer>(), af::val<size_t>(), af::val<float>());
         (void)af::val<SoundBuffer>().numSamples;
+        (void)af::val<SoundBuffer>().onLoad;
         (void)af::val<SoundBuffer>().sampleRate;
         (void)af::val<SoundBuffer>().samples;
     }
