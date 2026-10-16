@@ -278,7 +278,6 @@ public:
 
     void pushMatrix() {
         matrixTarget().matrixStack.push_back(matrixTarget().currentMatrix);
-        sgl_push_matrix();
     }
 
     // A pop with nothing pushed is a bug in the caller: warn (rate-limited)
@@ -286,13 +285,13 @@ public:
     // Inside a Node's draw() the stack floor (#348) is that node's depth, so a
     // pop that would reach its parent's entries is refused the same way.
     void popMatrix() {
-        if (matrixTarget().matrixStack.size() <= stackFloor_.matrix) {
+        if (matrixTarget().matrixStack.size() <= (stackFloor_.target == &matrixTarget() ? stackFloor_.matrix : 0)) {
             warnPopAtFloor(popMatrixWarning_, "popMatrix()", "pushMatrix()");
             return;
         }
         matrixTarget().currentMatrix = matrixTarget().matrixStack.back();
         matrixTarget().matrixStack.pop_back();
-        sgl_pop_matrix();
+        internal::applyTargetModelView();
     }
 
     size_t getMatrixStackDepth() const { return matrixTarget().matrixStack.size(); }
@@ -344,13 +343,14 @@ public:
         size_t matrix = 0;
         size_t style = 0;
         const std::type_info* owner = nullptr;  // node type that set it, or null
+        RenderTarget* target = nullptr;
     };
 
     // Set the floor and return the previous one; the caller puts that back
     // with setStackFloor(prev), since a draw() can run another node's drawTree().
     StackFloor setStackFloor(size_t matrixDepth, size_t styleDepth, const std::type_info* owner) {
         StackFloor prev = stackFloor_;
-        stackFloor_ = StackFloor{matrixDepth, styleDepth, owner};
+        stackFloor_ = StackFloor{matrixDepth, styleDepth, owner, &matrixTarget()};
         return prev;
     }
     void setStackFloor(const StackFloor& floor) { stackFloor_ = floor; }
@@ -364,7 +364,11 @@ public:
     // mid-frame (the synced update). Only the pushes are undone: a style value
     // or transform set outside a push carries on.
     void restoreStacksAtEntryEnd(AppEntry entry, size_t matrixDepth, size_t styleDepth,
-                                 const char* eventName = nullptr) {
+                                 const char* eventName = nullptr, RenderTarget* entryTarget = nullptr) {
+        if (entryTarget && entryTarget != &matrixTarget()) {
+            // An entry cannot consume a different target's live matrix scope.
+            matrixDepth = matrixTarget().matrixStack.size();
+        }
         const size_t md = matrixTarget().matrixStack.size(), sd = styleStack_.size();
         if (md == matrixDepth && sd == styleDepth) return;
         if (md >= matrixDepth && sd >= styleDepth) {
@@ -509,27 +513,18 @@ public:
 
     void resetMatrix() {
         matrixTarget().currentMatrix = Mat4::identity();
-        // Restore default view matrix (camera lookat) set by setupScreenFovWithSize
-        // This works correctly both in main screen and FBO contexts
-        // Note: Mat4 is row-major, sokol_gl expects column-major, so transpose
-        Mat4 t = internal::currentWindowContext().currentTarget->camera.currentViewMatrix.transposed();
-        sgl_load_matrix(t.m);
+        internal::applyTargetModelView();
     }
 
-    // Multiply the current matrix by `mat` (relative transform, like translate/rotate).
-    // NOTE: this was previously misnamed setMatrix(); that name now REPLACES.
     void multMatrix(const Mat4& mat) {
         matrixTarget().currentMatrix = matrixTarget().currentMatrix * mat;
-        // sokol_gl expects column-major, but Mat4 is row-major
-        Mat4 t = mat.transposed();
-        sgl_mult_matrix(t.m);
+        internal::applyTargetModelView();
     }
 
-    // Replace the current matrix with `mat` (absolute - use with caution, may break camera setup).
+    // Replace the model matrix while retaining the active camera view.
     void setMatrix(const Mat4& mat) {
         matrixTarget().currentMatrix = mat;
-        Mat4 t = mat.transposed();
-        sgl_load_matrix(t.m);
+        internal::applyTargetModelView();
     }
     [[deprecated("Use setMatrix() instead. Will be removed in v1.0.0")]]
     void loadMatrix(const Mat4& mat) { setMatrix(mat); }
@@ -1250,8 +1245,8 @@ class EntryStackGuard {
 public:
     explicit EntryStackGuard(AppEntry entry, const char* eventName = nullptr)
         : entry_(entry), eventName_(eventName), rc_(getDefaultContext()),
-          matrixDepth_(rc_.getMatrixStackDepth()), styleDepth_(rc_.getStyleStackDepth()) {}
-    ~EntryStackGuard() { rc_.restoreStacksAtEntryEnd(entry_, matrixDepth_, styleDepth_, eventName_); }
+          matrixDepth_(rc_.getMatrixStackDepth()), styleDepth_(rc_.getStyleStackDepth()), target_(&currentTarget()) {}
+    ~EntryStackGuard() { rc_.restoreStacksAtEntryEnd(entry_, matrixDepth_, styleDepth_, eventName_, target_); }
     EntryStackGuard(const EntryStackGuard&) = delete;
     EntryStackGuard& operator=(const EntryStackGuard&) = delete;
 
@@ -1260,6 +1255,7 @@ private:
     const char* eventName_;
     RenderContext& rc_;
     size_t matrixDepth_, styleDepth_;
+    RenderTarget* target_;
 };
 
 } // namespace internal

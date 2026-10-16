@@ -236,6 +236,14 @@ struct TargetCameraState {
     float currentViewW = 0.0f;
     float currentViewH = 0.0f;
     float currentCameraDist = 0.0f;
+    Vec3 cameraPosition = {0, 0, 0};
+};
+
+// Cache role key plus selected depth/blend variant, independent of logical flags.
+struct TargetCameraScope {
+    TargetCameraState camera;
+    uint32_t selectedPipeline;
+    const void* owner;
 };
 
 struct RenderTarget {
@@ -254,6 +262,8 @@ struct RenderTarget {
     bool passStartedThisFrame = false;
 
     TargetCameraState camera;
+    std::vector<TargetCameraScope> cameraStack;
+    uint32_t selectedPipeline = 0;
     Mat4 currentMatrix = Mat4::identity();
     std::vector<Mat4> matrixStack;
     ScissorRect viewport = {0, 0, 0, 0, false};
@@ -286,22 +296,12 @@ struct RenderTarget {
         return resources().pipeline(key, desc);
     }
 
-    // Preserve the old window-wide camera/model/blend/scissor continuity across
-    // Fbo begin/end. Fbo saves/restores the incoming camera as on 56467c6b;
-    // making camera scopes truly independent per target belongs to PR 2.
-    // Moving the CPU stacks does not reload sgl's matrix stacks:
-    // the legacy Fbo/PBR model mismatch is deliberately left for PR 2.
-    void inheritDrawState(RenderTarget& previous) {
-        camera = previous.camera;
-        currentMatrix = previous.currentMatrix;
-        matrixStack = std::move(previous.matrixStack);
+    // Only these logical flags retain continuity across targets in PR 2.
+    void inheritLogicalDrawFlags(const RenderTarget& previous) {
         currentBlendMode = previous.currentBlendMode;
         depthTestEnabled = previous.depthTestEnabled;
-        currentScissor = previous.currentScissor;
-        scissorStack = std::move(previous.scissorStack);
     }
 };
-
 // Check for TrussC's internal lazily created shaders (PBR, shadow, points,
 // IBL, Fbo mip/blit), called once right after sg_make_shader(): true when the
 // shader is usable. Otherwise logs one warning; the caller remembers the

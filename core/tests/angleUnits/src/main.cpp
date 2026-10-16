@@ -129,10 +129,9 @@ void testZeroFov(Fbo& fbo) {
     checkSetup("setupScreenFovWithSizeDeg(0) matches setupScreenOrtho",
                [&] { setupScreenFovWithSizeDeg(0, width, height); });
 
-    // FBO begin consumes the public default, using the same setup as frame start.
+    // Screen defaults only affect the swapchain; Fbo begins with its fixed camera.
     fbo.begin();
-    setupScreenFovWithSize(0, fbo.getWidth(), fbo.getHeight());
-    const Mat4 fboOrtho = ctx.currentTarget->camera.currentProjectionMatrix;
+    const Mat4 fboDefaultProjection = ctx.currentTarget->camera.currentProjectionMatrix;
     const Mat4 fboView = ctx.currentTarget->camera.currentViewMatrix;
     fbo.end();
     const auto checkDefault = [&](const char* name, auto setDefault) {
@@ -146,8 +145,8 @@ void testZeroFov(Fbo& fbo) {
         const bool frameOrtho = ctx.currentTarget->camera.currentScreenFov == 0 && sameMatrix(ortho, ctx.currentTarget->camera.currentProjectionMatrix) &&
                                 sameMatrix(view, ctx.currentTarget->camera.currentViewMatrix);
         fbo.begin();
-        check(name, defaultState && frameOrtho && ctx.currentTarget->camera.currentScreenFov == 0 &&
-              sameMatrix(fboOrtho, ctx.currentTarget->camera.currentProjectionMatrix) && sameMatrix(fboView, ctx.currentTarget->camera.currentViewMatrix));
+        check(name, defaultState && frameOrtho && approxEq(ctx.currentTarget->camera.currentScreenFov, TAU / 8) &&
+              sameMatrix(fboDefaultProjection, ctx.currentTarget->camera.currentProjectionMatrix) && sameMatrix(fboView, ctx.currentTarget->camera.currentViewMatrix));
         fbo.end();
     };
     checkDefault("setDefaultScreenFov(0) selects orthographic projection", [] { setDefaultScreenFov(0); });
@@ -190,7 +189,7 @@ public:
         setupScreenPerspective(TAU / 6);
         setDefaultScreenFovDeg(30);
         fbo_.begin();
-        check("FBO takes its default FOV in radians", approxEq(ctx.currentTarget->camera.currentScreenFov, TAU / 12));
+        check("FBO uses fixed TAU/8 independently of the screen default", approxEq(ctx.currentTarget->camera.currentScreenFov, TAU / 8));
         fbo_.end();
         check("FBO restores radians and screen projection", approxEq(ctx.currentTarget->camera.currentScreenFov, TAU / 6) &&
               sameMatrix(projection, ctx.currentTarget->camera.currentProjectionMatrix));

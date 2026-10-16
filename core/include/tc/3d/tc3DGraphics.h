@@ -109,15 +109,15 @@ inline void shadowDraw(const Mesh& mesh) {
 // ---------------------------------------------------------------------------
 
 inline void setCameraPosition(const Vec3& pos) {
-    internal::currentWindowContext().cameraPosition = pos;
+    internal::currentTarget().camera.cameraPosition = pos;
 }
 
 inline void setCameraPosition(float x, float y, float z) {
-    internal::currentWindowContext().cameraPosition = Vec3(x, y, z);
+    internal::currentTarget().camera.cameraPosition = Vec3(x, y, z);
 }
 
 inline const Vec3& getCameraPosition() {
-    return internal::currentWindowContext().cameraPosition;
+    return internal::currentTarget().camera.cameraPosition;
 }
 
 } // namespace trussc

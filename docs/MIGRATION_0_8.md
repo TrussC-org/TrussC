@@ -159,3 +159,52 @@ atomic flag, so it can still change looping during threaded playback.
 
 External backends (`tcxOrbbec`, `tcxAzureKinect`, `tcxRealSense`) need the same
 migration in their own repositories; the old capture-on-backend hooks are removed.
+
+## Fbo drawing has its own matrix and camera scopes (#821, PR 2)
+
+Each successful `Fbo::begin()` starts an identity model, empty matrix/camera/scissor stacks,
+full attachment viewport and a TAU/8 camera in attachment pixels. LOAD preserves pixels,
+not drawing state. `end()` restores the suspended camera (including its CameraContext),
+model, viewport, clipping and actual selected pipeline. Unmatched offscreen pushes are
+warned about and discarded. Nested Fbos remain unsupported until PR 3.
+
+Move transforms and their matching pops inside the target that draws them:
+
+```cpp
+// Before: relied on the outer transform leaking into offscreen PBR drawing.
+pushMatrix(); translate(20, 10);
+fbo.begin(); mesh.draw(); fbo.end();
+popMatrix();
+
+// After: keep each transform scope on its drawing target.
+fbo.begin();
+pushMatrix(); translate(20, 10); mesh.draw(); popMatrix();
+fbo.end();
+pushMatrix(); translate(100, 40); fbo.draw(0, 0); popMatrix();
+```
+
+Balance matrix, scissor and EasyCam begin/end on the same target. Set an offscreen clip
+explicitly after begin. Screen pushes cannot clip or be popped inside an Fbo.
+`setMatrix(model)` now consistently replaces only M and uploads V*M; remove any view
+matrix previously baked into its argument. Copy screen matrices before begin if needed.
+
+EasyCam uses the active target aspect and restores its entry camera on end. Remove
+window-aspect compensation for Fbo drawing. `setDefaultScreenFov` and `pixelPerfect`
+only configure screen defaults; call explicit screen setup inside each Fbo activation
+for another camera. Explicit projection extents remain distinct from attachment size.
+
+Use `tc::getWidth()`, `tc::getHeight()` and `tc::getSize()` in offscreen drawing code.
+`App`/`RectNode` size getters still describe object geometry; window-named and framebuffer
+getters still describe the host window. `getViewMatrix()` and `getProjectionMatrix()`
+return active-target values. Bitmap/loaded text and RectNode clipping use target scale;
+a font rasterized at host DPI 2 retains its requested unit size in a pixel-coordinate Fbo.
+
+`setCameraPosition` is target-local and returns to its previous value on camera/target
+exit. Its zero/manual default and window light/material/environment registration remain.
+Pickability flags are unchanged: default Fbo cameras are non-pickable, explicit setup
+and EasyCam remain pickable. Offscreen picking policy is still an open question.
+
+Logical blend/depth flags retain continuity, separately from scoped pipeline selection.
+The existing screen blend-after-Fbo behavior, offscreen premult handling and GPU point
+transform/size corrections remain for PR 4. Repeating `setBlendMode` explicitly selects
+that blend pipeline, even when the logical value already matches.

@@ -399,6 +399,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
 #if defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getGyroscope", []() { return trussc::getGyroscope(); });
 #endif
+    lua->set_function("getHeight", []() { return trussc::getHeight(); });
     lua->set_function("getHours", []() { return trussc::getHours(); });
 #if defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getImmersiveMode", []() { return trussc::getImmersiveMode(); });
@@ -434,10 +435,12 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getParentDirectory", [](const fs::path & path) { return trussc::getParentDirectory(path); });
     lua->set_function("getPointSize", []() { return trussc::getPointSize(); });
     lua->set_function("getPointStyle", []() { return trussc::getPointStyle(); });
+    lua->set_function("getProjectionMatrix", []() { return trussc::getProjectionMatrix(); });
     lua->set_function("getRootNode", []() { return trussc::getRootNode(); });
     lua->set_function("getScale", []() { return trussc::getScale(); });
     lua->set_function("getSeconds", []() { return trussc::getSeconds(); });
     lua->set_function("getSelectedNode", []() { return trussc::getSelectedNode(); });
+    lua->set_function("getSize", []() { return trussc::getSize(); });
     lua->set_function("getSokolMemoryAllocs", []() { return trussc::getSokolMemoryAllocs(); });
     lua->set_function("getSokolMemoryBytes", []() { return trussc::getSokolMemoryBytes(); });
     lua->set_function("getStrokeCap", []() { return trussc::getStrokeCap(); });
@@ -472,7 +475,9 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](const fs::path & path) { return trussc::getUserDataPath(path); }
     ));
     lua->set_function("getVersion", []() { return trussc::getVersion(); });
+    lua->set_function("getViewMatrix", []() { return trussc::getViewMatrix(); });
     lua->set_function("getWeekday", []() { return trussc::getWeekday(); });
+    lua->set_function("getWidth", []() { return trussc::getWidth(); });
     lua->set_function("getWindowHeight", []() { return trussc::getWindowHeight(); });
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32)
     lua->set_function("getWindowPosition", []() { return trussc::getWindowPosition(); });

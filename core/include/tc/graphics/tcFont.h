@@ -1554,7 +1554,7 @@ public:
     LoadResult load(const fs::path& nameOrPath, int size, int faceIndex = 0) {
         // Render glyphs at physical pixel size for sharp text on HiDPI displays.
         // All metrics/drawing are scaled back to logical coordinates.
-        dpiScale_ = sapp_dpi_scale();
+        dpiScale_ = getDpiScale();
         int physicalSize = (int)(size * dpiScale_ + 0.5f);
         logicalSize_ = size;
 
@@ -2092,7 +2092,7 @@ protected:
             // Coverage pipeline for the active target (swapchain or FBO): the
             // Alpha blend of activeFill2D() (dst alpha accumulates) with a shader
             // that reads the R8 atlas's R channel as alpha.
-            internal::loadPipeline(internal::activeCoverage2D());
+            internal::loadTemporaryPipeline(internal::activeCoverage2D());
             sgl_enable_texture();
             sgl_texture(atlas.getView(), pickSampler());
 
@@ -2835,7 +2835,7 @@ protected:
     // concentration it wins back at 1:1. So grid fit stands down off 1:1.
     bool gridFitLands() const {
         if (!gridFit_) return false;
-        return std::fabs(getDefaultContext().getScale() - 1.0f) < 0.01f;
+        return std::fabs(getDefaultContext().getScale() * internal::targetPixelScale() - 1.0f) < 0.01f;
     }
 
     // Snap a baseline offset to the pixel grid.
@@ -2969,9 +2969,9 @@ private:
 
     // Minified text wants the mip chain; everything sharper wants the
     // oversampled mip 0. The quantity that decides it is texels per screen
-    // pixel: the quad covers width*oversample texels and width/dpiScale *
-    // getScale() * dpiScale screen pixels, so the dpiScale cancels and it is
-    // just oversample/getScale().
+    // pixel: raster DPI normalizes glyph coordinates, while target pixel scale
+    // converts them to attachment pixels. They cancel only when those scales
+    // agree (e.g. a screen font drawn on its original display).
     //
     // The threshold is 2, not 1, because a bilinear fetch reads a 2x2
     // neighbourhood and copes with 2:1 on its own. Measured on 16px text
@@ -2986,7 +2986,7 @@ private:
     // far more forgiving use of that estimate than choosing a segment count.
     sg_sampler pickSampler() const {
         const int   oversample = atlasManager_->getOversample();
-        const float scale = getDefaultContext().getScale();
+        const float scale = getDefaultContext().getScale() * internal::targetPixelScale() / dpiScale_;
         const float texelsPerPixel = (scale > 0.0f) ? (oversample / scale)
                                                     : (float)oversample;
         if (texelsPerPixel <= 2.0f) return internal::fontSamplers().sharp;

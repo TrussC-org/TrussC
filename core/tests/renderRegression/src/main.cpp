@@ -99,6 +99,7 @@ class RegressionApp : public App {
     FullscreenShader fullscreen_, discard_;
     EventListener after_;
     Json samples_ = Json::object();
+    Json scissorEvidence_ = Json::object();
     size_t scene_ = 0;
     int phase_ = 0, variant_ = 0, settleFrames_ = 0;
     int logicalW_ = 256, logicalH_ = 192;
@@ -108,6 +109,11 @@ class RegressionApp : public App {
     const std::string name() const { return scenes[scene_].name; }
     bool is(const char* text) const { return name() == text; }
     float screenScale() const { return internal::pixelPerfectMode() ? 1.0f : getDpiScale(); }
+    float probeScale(bool offscreen) const {
+        // fboClearLoad copies a framebuffer-sized Fbo 1:1 onto the screen;
+        // its test geometry and readback probes both use attachment pixels.
+        return offscreen || is("fboClearLoad") ? 1.0f : screenScale();
+    }
     void rect(float x, float y, float w, float h, Color color) {
         setColor(color); drawRect(x, y, w, h);
     }
@@ -145,6 +151,9 @@ class RegressionApp : public App {
     }
     void allocateTarget() {
         int w = getFramebufferWidth(), h = getFramebufferHeight();
+        // Keep these two baseline fixtures fixed in attachment pixels, even on
+        // Retina. Native framebuffer-sized RectNode coverage lives in
+        // renderTargetState --gpu-check (also registered for --msaa4).
         if (is("easyCamFbo")) { w = 160; h = 96; }
         if (is("scissorFbo")) { w = 320; h = 224; }
         const int count = is("msaaResolve") ? 4 : 1;
@@ -226,9 +235,24 @@ class RegressionApp : public App {
         } else if (is("easyCamFbo")) {
             camera_.begin(); pbr(0, 0); camera_.end();
         } else if (is("scissorFbo")) {
-            const float dpi = offscreen ? 1.0f : screenScale();
-            pushScissor(16*dpi, 16*dpi, 32*dpi, 32*dpi);
+            // pushScissor takes attachment pixels; Fbo coordinates already are
+            // pixels, while logical swapchain coordinates need conversion.
+            const float scale = internal::targetPixelScale();
+            auto& target = internal::currentTarget();
+            const bool fresh = !target.currentScissor.active && target.scissorStack.empty();
+            pushScissor(16*scale, 16*scale, 32*scale, 32*scale);
+            const auto clip = target.currentScissor;
+            const bool pushed = clip.active && clip.x == 16*scale && clip.y == 16*scale &&
+                clip.w == 32*scale && clip.h == 32*scale && target.scissorStack.size() == 1;
             rect(0, 0, 96, 96, Color(1, 0, 0)); popScissor();
+            const bool popped = !target.currentScissor.active && target.scissorStack.empty();
+            scissorEvidence_[offscreen ? "fbo" : "screen"] = {
+                {"reached", true}, {"fresh", fresh}, {"pushed", pushed}, {"popped", popped},
+                {"hostDpi", getDpiScale()}, {"pixelPerfect", internal::pixelPerfectMode()},
+                {"coordinateToPixelScale", scale}, {"target", {target.width, target.height}},
+                {"clip", {clip.x, clip.y, clip.w, clip.h}},
+                {"resetExtent", {target.width, target.height}},
+                {"legacyWindowResetExtent", {getFramebufferWidth(), getFramebufferHeight()}}};
             rect(w-32, h-32, 16, 16, Color(0, 1, 0));
         } else if (is("fullscreenShader")) {
             fullscreen_.draw();
@@ -295,7 +319,7 @@ class RegressionApp : public App {
     }
     void assertions(const Pixels& px, bool offscreen) {
         const std::string label = name() + (offscreen ? ".fbo" : ".screen");
-        const float s = offscreen ? 1 : screenScale();
+        const float s = probeScale(offscreen);
         const float w = px.getWidth()/s, h = px.getHeight()/s;
         if (is("resizePixelPerfect")) {
             check(label+" framebuffer size", px.getWidth() == int(logicalW_*getDpiScale()) &&
@@ -331,17 +355,27 @@ class RegressionApp : public App {
             expect(px, offscreen, label+" loaded red", 32, 32, red, s, allowance);
             expect(px, offscreen, label+" second pass", 96, 32, green, s, allowance);
         } else if (is("msaaResolve") || is("scissorFbo")) {
-            // Known wrong in scissorFbo: popScissor clips the larger Fbo to window size; #821 PR 2 matrices fixes the captured lower-right patch.
             expect(px, offscreen, label+" red interior", 32, 32, {255,0,0,255}, s);
             expect(px, offscreen, label+" exterior", 8, 8, {0,0,0,255}, s);
+            if (is("scissorFbo")) {
+                const auto& evidence = scissorEvidence_.at(offscreen ? "fbo" : "screen");
+                check(label+" push/draw/pop reached", evidence.at("reached").get<bool>() &&
+                    evidence.at("fresh").get<bool>() && evidence.at("pushed").get<bool>() && evidence.at("popped").get<bool>());
+                std::printf("SCISSOR %s %s\n", label.c_str(), evidence.dump().c_str());
+                expect(px, offscreen, label+" right clip boundary", 49, 32, {0,0,0,255}, s, 0);
+                expect(px, offscreen, label+" post-pop marker", w-24, h-24, {0,255,0,255}, s, 0);
+                if (offscreen) expect(px, true, label+" reset covers larger target", 296, 200, {0,255,0,255}, 1, 0);
+            }
         } else if (is("transformPbr")) {
             expect(px, offscreen, label+" transformed primitive", 40, 32, {0,255,0,255}, s);
-            // Known wrong: outer model leaks into Fbo; #821 PR 2 matrices fixes 149,99 vs 132,90.
-            expect(px, offscreen, label+" transformed PBR", offscreen ? 149.0f : 132.0f,
-                offscreen ? 99.0f : 90.0f, {232,0,0,255}, s, 2);
+            expect(px, offscreen, label+" transformed PBR", 132.0f, 90.0f, {232,0,0,255}, s, 2);
+            if (offscreen) expect(px, true, label+" isolated PBR edge", 149, 99, {0,0,0,255}, 1, 2);
         } else if (is("easyCamFbo")) {
-            // Known wrong: Fbo camera uses window aspect/size; #821 PR 2 matrices fixes the captured extent.
             expect(px, offscreen, label+" PBR emissive", w/2, h/2, {232,0,0,255}, s, 2);
+            if (offscreen) {
+                expect(px, true, label+" corrected left edge", 71, 48, {0,0,0,255}, 1, 2);
+                expect(px, true, label+" corrected interior", 72, 48, {232,0,0,255}, 1, 2);
+            }
         } else if (is("fullscreenShader")) {
             expect(px, offscreen, label+" upper left", w/4, h/4, {255,255,0,255}, s);
             expect(px, offscreen, label+" lower right", w*3/4, h*3/4, {0,0,0,255}, s);
@@ -378,13 +412,14 @@ class RegressionApp : public App {
         captured_.insert(key);
         Json sampled = Json::array();
         for (auto xy : {std::array<int,2>{8,8}, {24,24}, {32,32}, {80,32}, {128,32}, {132,90}, {149,99}, {128,96}, {18,20}, {21,73},
-                        {80,48}, {80,80}, {140,104}, {32,156}, {140,156}}) {
-            const float s = offscreen ? 1 : screenScale();
+                        {80,48}, {64,48}, {71,48}, {72,48}, {99,48}, {296,200}, {80,80}, {140,104}, {32,156}, {140,156}}) {
+            const float s = probeScale(offscreen);
             if (int(xy[0]*s) < px.getWidth() && int(xy[1]*s) < px.getHeight())
                 sampled.push_back({{"xy", {int(xy[0]*s),int(xy[1]*s)}}, {"rgba", at(px,xy[0],xy[1],s)}});
         }
         samples_[key] = {{"size", {px.getWidth(), px.getHeight()}}, {"backend", GraphicsBackend::name()},
             {"gpu", gpu_}, {"tolerance", scenes[scene_].tolerance}, {"pixels", sampled}};
+        if (is("scissorFbo")) samples_[key]["scissor"] = scissorEvidence_.at(offscreen ? "fbo" : "screen");
         if (mode == "--self-check") return;
         check(key+" saved", px.save(output / (key+".png")).ok());
         if (mode != "--compare") return;
@@ -523,8 +558,8 @@ public:
         allocateTarget();
         setBlendMode(BlendMode::Alpha); fill(); resetScissor();
         clear(0,0,0,1);
-        // Put an outer transform across begin() to capture the known FBO model
-        // leakage, without changing the independent self-check location.
+        // Put an outer transform across begin() to verify FBO model
+        // isolation, without changing the independent screen scene.
         const bool transform = is("transformPbr");
         if (transform) { pushMatrix(); translate(17, 9, 0); }
         const bool transparent = is("fboClearLoad");

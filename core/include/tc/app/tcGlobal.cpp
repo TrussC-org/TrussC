@@ -275,7 +275,6 @@ namespace {
 // pre-clear 3D geometry. sgl just records — this works with or without an
 // active render pass.
 void recordSwapchainClearQuad(float r, float g, float b, float a) {
-    BlendMode prevBlendMode = internal::currentWindowContext().currentTarget->currentBlendMode;
 
     sgl_push_matrix();
     sgl_matrix_mode_projection();
@@ -286,7 +285,7 @@ void recordSwapchainClearQuad(float r, float g, float b, float a) {
     sgl_matrix_mode_modelview();
     sgl_load_identity();
 
-    internal::loadPipeline(internal::activeClear());
+    internal::loadTemporaryPipeline(internal::activeClear());
     sgl_disable_texture();
     sgl_begin_quads();
     sgl_c4f(r, g, b, a);
@@ -303,7 +302,7 @@ void recordSwapchainClearQuad(float r, float g, float b, float a) {
     sgl_matrix_mode_modelview();
     sgl_pop_matrix();
 
-    internal::loadPipeline(internal::active2D(prevBlendMode));
+    internal::restoreCurrentPipeline();
 }
 } // anonymous namespace
 
@@ -392,8 +391,10 @@ void beginSwapchainPassInternal(bool preserveContents) {
                                           : sglue_swapchain();
     ctx.swapchainTarget.width = pass.swapchain.width;
     ctx.swapchainTarget.height = pass.swapchain.height;
-    ctx.swapchainTarget.viewport = {0, 0, (float)pass.swapchain.width,
-                                   (float)pass.swapchain.height, true};
+    if (!ctx.swapchainTarget.viewport.active) {
+        ctx.swapchainTarget.viewport = {0, 0, (float)pass.swapchain.width,
+                                       (float)pass.swapchain.height, true};
+    }
     // Record the drawable we render into so end-of-frame capture reads back
     // THIS one (sapp_get_swapchain() advances the Metal drawable per call).
     ctx.lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
@@ -434,7 +435,7 @@ void reportSglStackErrors(sgl_error_t err, bool inFbo) {
     if (err.stack_overflow || err.stack_underflow) {
         if (sglStackErrorReportGate(inFbo).isFirstTime()) {
             logWarning("sokol_gl") << "matrix stack "
-                << (err.stack_overflow ? "overflow (more than 64 nested pushMatrix / node levels in one frame)"
+                << (err.stack_overflow ? "overflow (more than 64 temporary sgl matrix levels)"
                                        : "underflow (sgl_pop_matrix without a push)")
                 << (inFbo ? " in an Fbo pass" : " on screen")
                 << "; transforms past that point are wrong this frame";

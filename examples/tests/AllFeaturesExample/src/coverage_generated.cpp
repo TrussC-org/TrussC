@@ -80,6 +80,14 @@ static void cover_font() {
 #endif
 }
 
+static void cover_graphics() {
+    (void)getHeight();
+    (void)getProjectionMatrix();
+    (void)getSize();
+    (void)getViewMatrix();
+    (void)getWidth();
+}
+
 static void cover_graphics_3d_setup() {
     (void)getDefaultScreenFov();
     (void)getDefaultScreenFovDeg();
@@ -4761,6 +4769,7 @@ void af::coverGenerated() {
     af_generated::cover_console();
     af_generated::cover_file();
     af_generated::cover_font();
+    af_generated::cover_graphics();
     af_generated::cover_graphics_3d_setup();
     af_generated::cover_graphics_advanced();
     af_generated::cover_graphics_backend();

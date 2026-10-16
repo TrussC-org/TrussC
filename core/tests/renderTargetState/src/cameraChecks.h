@@ -1,5 +1,4 @@
-// Run this same check against 56467c6b with cameraFields() returning its
-// WindowContext. The public API and expected transitions below are identical.
+// Camera snapshots, immutable context identity and picking across target scopes.
 struct CameraSnapshot {
     Mat4 view, projection;
     float fov, width, height, distance;
@@ -39,15 +38,15 @@ bool sameVec(const Vec3& a, const Vec3& b) {
 
 void expectCamera(const CameraSnapshot& expected, bool pickable, bool sameContext) {
     const auto actual = cameraSnapshot();
-    check("view/projection matrices match base transition exactly",
+    check("view/projection matrices match target snapshot exactly",
           sameMatrix(actual.view, expected.view) && sameMatrix(actual.projection, expected.projection));
-    check("screen FOV, view size and camera distance match base transition exactly",
+    check("screen FOV, view size and camera distance match target snapshot exactly",
           actual.fov == expected.fov && actual.width == expected.width &&
           actual.height == expected.height && actual.distance == expected.distance);
-    check("public coordinate conversions match base transition exactly",
+    check("public coordinate conversions match target snapshot exactly",
           sameVec(actual.screen, expected.screen) && sameVec(actual.world, expected.world) &&
           sameVec(actual.contextScreen, expected.contextScreen));
-    check("Node camera context and public pick ray match base transition exactly",
+    check("Node camera context and public pick ray match target snapshot exactly",
           actual.context->pickable == pickable &&
           actual.context->viewW == expected.width && actual.context->viewH == expected.height &&
           sameMatrix(actual.context->view, expected.context->view) &&
@@ -59,6 +58,8 @@ void expectCamera(const CameraSnapshot& expected, bool pickable, bool sameContex
     node->handleDraw();
     check("public picking follows restored/offscreen context",
           node->findHitNodeFromScreen(11, 13).hit() == pickable);
+    check("explicit-ray picking retains the same camera pickability policy",
+          node->findHitNode(actual.ray).hit() == pickable);
 }
 
 // Hex floats retain every bit for an exact base/working-tree transcript diff.
@@ -92,6 +93,8 @@ public:
     void setup() override {
         fbo_.allocate(37, 23);
         reviewAfterFrame = events().afterFrame.listen(captureReviewBlend);
+        depthAfterFrame = events().afterFrame.listen(captureDepthFixture);
+        depthSetterAfterFrame = events().afterFrame.listen(captureDepthSetterFixture);
         // Establish reference values through the public screen setup API.
         // Skip the setup frame below so normal frame setup replaces these
         // before the first measured scenario.
@@ -102,8 +105,10 @@ public:
     }
     void draw() override {
         if (!primed_) { primed_ = true; return; }
-        if (frame_ == 6) { runReviewChecks(fbo_); ++frame_; return; }
-        if (frame_ == 7) { exitApp(); return; }
+        if (frame_ >= 6 && frame_ < 9) { drawDepthFixture(frame_ - 6, fbo_); ++frame_; return; }
+        if (frame_ == 9) { runReviewChecks(fbo_); ++frame_; return; }
+        if (frame_ >= 10 && frame_ < 14) { drawDepthSetterFixture(frame_ - 10); ++frame_; return; }
+        if (frame_ == 14) { exitApp(); return; }
         const char* scenarios[] = {"default-frame", "screen-fov", "screen-ortho",
                                    "easycam", "nested-push-pop", "default-ortho"};
         const char* scenario = scenarios[frame_];
@@ -127,9 +132,9 @@ public:
         const float defaultFov = getDefaultScreenFov();
         dumpCamera(scenario, "before");
 
-        const auto& offscreen = frame_ == 5 ? ortho_ : perspective_;
+        const auto& offscreen = perspective_;
 
-        // Exercise both begin overloads. Both overwrite camera fields on base.
+        // Exercise both begin overloads. Both start a fresh target-local camera.
         if (frame_ % 2) fbo_.begin(); else fbo_.begin(0, 0, 0);
         expectCamera(offscreen, false, false);
         check("public default FOV getters survive Fbo begin",
@@ -153,7 +158,7 @@ public:
         check("public default FOV getters survive Fbo end",
               getDefaultScreenFov() == defaultFov && getDefaultScreenFovDeg() == rad2deg(defaultFov));
         dumpCamera(scenario, "after-end");
-        check("camera handoff preserves the legacy CPU model scope", sameMatrix(getMatrix(), model));
+        check("camera handoff preserves the suspended target model scope", sameMatrix(getMatrix(), model));
         if (nested) {
             popStyle(); popStyle();
             popMatrix(); popMatrix();
@@ -162,6 +167,8 @@ public:
         }
         if (frame_ == 3) easy_.end();
         if (++frame_ == 6) {
+            runMatrixChecks();
+            runFractionalDpiChecks();
             setDefaultScreenFov(TAU / 8);
             cameraChecksFinished = true;
 
@@ -173,12 +180,17 @@ int runCameraChecks(int samples = 1) {
     WindowSettings settings;
     // Windows may clamp a small window's client area (96 → 120), so checks
     // compare against the size the window actually got.
-    settings.setSize(96, 64);
-    settings.setHighDpi(false);
+    settings.setSize(256, 192);
+    // Exercise the native Retina path as well as the simulated DPI fixtures.
+    settings.setHighDpi(true);
     settings.sampleCount = samples;
     return tcCoreTest::runDisplayTest<CameraChecksApp>(settings, failures, [] {
         check("all six camera scenarios completed", cameraChecksFinished);
         check("review behavior probes and screen readback completed", reviewDrawn && reviewCaptured);
+        check("all three overlapping-depth variants captured", depthCaptures == 3);
+        check("all four explicit-depth screen variants captured", depthSetterCaptures == 4);
+        depthSetterAfterFrame = {};
+        depthAfterFrame = {};
         reviewAfterFrame = {};
     });
 }
