@@ -70,10 +70,17 @@ void captureFrame(bool main) {
     check(main ? "main window readback succeeds" : "secondary window readback succeeds", captured);
     if (!captured) return;
 
+    // Sample the centers of the shapes drawFrame() draws (rect at 8,16 16x32;
+    // circle at 48,32), not fractions of the readback: Windows may widen a
+    // small window's client area (64 → 120), which moved those fractions off
+    // the shapes.
     const int w = pixels.getWidth();
     const int h = pixels.getHeight();
-    const Color before = pixels.getColor(w / 4, h / 2);
-    const Color after = pixels.getColor(3 * w / 4, h / 2);
+    check(main ? "main readback covers both shapes" : "secondary readback covers both shapes",
+          w > 48 && h > 32);
+    if (w <= 48 || h <= 32) return;
+    const Color before = pixels.getColor(16, 32);
+    const Color after = pixels.getColor(48, 32);
     check(main ? "main 2D before FBO remains visible" : "secondary 2D before FBO remains visible",
           main ? matches(before, 0, 1, 1) : matches(before, 1, 0, 0));
     check(main ? "main 2D after FBO remains visible" : "secondary 2D after FBO remains visible",
