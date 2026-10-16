@@ -23,11 +23,8 @@ class GstAacDecoder {
 public:
     GstAacDecoder() {
         // Initialize GStreamer (safe to call multiple times)
-        static bool initialized = false;
-        if (!initialized) {
-            gst_init(nullptr, nullptr);
-            initialized = true;
-        }
+        static std::once_flag initialized;
+        std::call_once(initialized, [] { gst_init(nullptr, nullptr); });
     }
 
     ~GstAacDecoder() {
@@ -271,6 +268,7 @@ LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
 }
 
 LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
+    async_.cancel();
     internal::clearLoadName(path_);
     GstAacDecoder decoder;
     return decoder.decodeMemory(data, dataSize, *this)

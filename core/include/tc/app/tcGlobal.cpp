@@ -1192,8 +1192,8 @@ std::atomic<bool>& spawned() {
 namespace internal {
 
 std::shared_ptr<std::atomic<bool>>& appRunToken() {
-    static std::shared_ptr<std::atomic<bool>> token;
-    return token;
+    static auto* token = new std::shared_ptr<std::atomic<bool>>;
+    return *token;
 }
 
 #if !defined(__EMSCRIPTEN__)

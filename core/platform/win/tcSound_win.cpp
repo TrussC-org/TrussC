@@ -85,6 +85,7 @@ namespace {
         hr = pUncompressedAudioType->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &sampleRate);
         if (FAILED(hr)) { SafeRelease(&pUncompressedAudioType); return false; }
 
+        internal::SoundBufferLoadAccess::wrote(*buffer, 6);
         buffer->channels = channels;
         buffer->sampleRate = sampleRate;
 
@@ -174,6 +175,7 @@ LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
 }
 
 LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
+    async_.cancel();
     internal::clearLoadName(path_);
     EnsureMFStartup();
 
