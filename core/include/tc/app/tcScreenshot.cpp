@@ -1,12 +1,4 @@
 #include <TrussC.h>
-#include <map>
-#include <cstring>
-#ifdef _WIN32
-#include <windows.h>
-#elif defined(__APPLE__)
-#include <CoreFoundation/CoreFoundation.h>
-#include <unistd.h>
-#endif
 
 namespace trussc {
 Event<ScreenshotSaveEventArgs>& onScreenshotSave() {
@@ -27,7 +19,6 @@ std::FILE* openScreenshotTemporary(const fs::path& path, fs::path& temporary) {
 }
 struct ScreenshotState {
     fs::path path;
-    fs::path destination;
     std::weak_ptr<std::atomic<bool>> run = appRunToken();
     std::shared_ptr<size_t> admitted;
     Pixels pixels;
@@ -40,61 +31,13 @@ ScreenshotTestBackend& testBackend() {
     static auto* backend = new ScreenshotTestBackend;
     return *backend;
 }
-struct Writers {
+struct Writer {
     std::mutex mutex;
-    std::map<fs::path, std::deque<std::shared_ptr<ScreenshotState>>> paths;
+    // A nonempty queue includes the job currently being written. Only the
+    // transition from empty to nonempty launches a G1-retired worker.
+    std::deque<std::shared_ptr<ScreenshotState>> jobs;
 };
-Writers& writers() { static auto* value = new Writers; return *value; }
-fs::path destinationKey(const fs::path& path) {
-    // Rename replaces the final directory entry, including a symlink. Resolve
-    // only its parent so our own first write cannot change the queue identity.
-    auto key = fs::weakly_canonical(path.parent_path()) / path.filename();
-#if defined(_WIN32) || defined(__APPLE__)
-    auto parent = key.parent_path();
-    while (!fs::exists(parent) && parent.has_relative_path()) parent = parent.parent_path();
-#endif
-#ifdef _WIN32
-    // Query the directory, since Windows also supports case-sensitive names.
-    const auto directory = CreateFileW(parent.c_str(), FILE_READ_ATTRIBUTES,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-    struct CaseSensitiveInfo { DWORD flags; } info{};
-    // FileCaseSensitiveInfo (23); use the value for older SDK headers too.
-    // Fold unless the directory positively reports case sensitivity: folding
-    // a sensitive name only serializes two writers, never loses ordering.
-    const bool sensitive = directory != INVALID_HANDLE_VALUE &&
-        GetFileInformationByHandleEx(directory, static_cast<FILE_INFO_BY_HANDLE_CLASS>(23),
-            &info, sizeof(info)) && (info.flags & 1);
-    const bool insensitive = !sensitive;
-    if (directory != INVALID_HANDLE_VALUE) CloseHandle(directory);
-    if (!insensitive) return key;
-    auto native = key.native();
-    const int size = LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_UPPERCASE,
-        native.data(), static_cast<int>(native.size()), nullptr, 0, nullptr, nullptr, 0);
-    if (!size) throw std::system_error(GetLastError(), std::system_category());
-    std::wstring folded(size, L'\0');
-    if (!LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_UPPERCASE, native.data(),
-        static_cast<int>(native.size()), folded.data(), size, nullptr, nullptr, 0))
-        throw std::system_error(GetLastError(), std::system_category());
-    key = folded;
-#elif defined(__APPLE__)
-    // Fold unless the volume positively reports case sensitivity (1).
-    if (pathconf(parent.c_str(), _PC_CASE_SENSITIVE) != 1) {
-        auto* text = CFStringCreateMutable(kCFAllocatorDefault, 0);
-        CFStringAppendCString(text, key.c_str(), kCFStringEncodingUTF8);
-        CFStringNormalize(text, kCFStringNormalizationFormD);
-        CFStringFold(text, kCFCompareCaseInsensitive, nullptr);
-        std::string folded(CFStringGetMaximumSizeForEncoding(CFStringGetLength(text),
-            kCFStringEncodingUTF8) + 1, '\0');
-        const bool ok = CFStringGetCString(text, folded.data(), folded.size(), kCFStringEncodingUTF8);
-        CFRelease(text);
-        if (!ok) throw std::runtime_error("Cannot normalize screenshot destination");
-        folded.resize(std::strlen(folded.c_str()));
-        key = folded;
-    }
-#endif
-    return key;
-}
+Writer& writer() { static auto* value = new Writer; return *value; }
 void complete(const std::shared_ptr<ScreenshotState>& state, SaveResult result) {
     // Release the expensive payload before making its admission slot reusable.
     state->pixels = Pixels{};
@@ -106,23 +49,23 @@ void complete(const std::shared_ptr<ScreenshotState>& state, SaveResult result) 
     });
 }
 void write(const std::shared_ptr<ScreenshotState>& state) {
-    auto& owner = writers();
+    auto& owner = writer();
     bool launch;
     {
         std::lock_guard<std::mutex> lock(owner.mutex);
-        auto& queue = owner.paths[state->destination];
+        auto& queue = owner.jobs;
         launch = queue.empty();
         queue.push_back(state);
     }
     if (!launch) return;
     try {
-        probeResourceLoad("screenshot-writer-launch", state->destination);
-        startResourceLoad([path = state->destination, &owner] {
+        probeResourceLoad("screenshot-writer-launch", state->path);
+        startResourceLoad([&owner] {
             for (;;) {
                 std::shared_ptr<ScreenshotState> job;
                 {
                     std::lock_guard<std::mutex> lock(owner.mutex);
-                    job = owner.paths.at(path).front();
+                    job = owner.jobs.front();
                 }
                 SaveResult result;
                 try {
@@ -137,14 +80,14 @@ void write(const std::shared_ptr<ScreenshotState>& state) {
                 }
                 complete(job, std::move(result));
                 std::lock_guard<std::mutex> lock(owner.mutex);
-                auto& queue = owner.paths.at(path);
+                auto& queue = owner.jobs;
                 queue.pop_front();
-                if (queue.empty()) { owner.paths.erase(path); return; }
+                if (queue.empty()) return;
             }
         });
     } catch (...) {
         std::lock_guard<std::mutex> lock(owner.mutex);
-        owner.paths.erase(state->destination);
+        owner.jobs.clear();
         throw;
     }
 }
@@ -203,7 +146,6 @@ void captureScreenshots(ScreenshotQueue& window) {
                 complete(state, SaveResult::fail(SaveError::WriteFailed, "Screenshot capture failed"));
                 continue;
             }
-            state->destination = destinationKey(state->path);
             write(state);
         } catch (const std::exception& e) {
             complete(state, SaveResult::fail(SaveError::WriteFailed, e.what()));

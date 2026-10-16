@@ -48,117 +48,74 @@ void newRun() {
 }
 fs::path sandbox;
 #ifndef __EMSCRIPTEN__
-void screenshotAliasTests() {
-    newRun();
-    const auto real = sandbox / "real";
-    const auto alias = sandbox / "alias";
-    fs::create_directories(real);
-    std::error_code ec;
-    fs::create_directory_symlink(real, alias, ec);
-    if (ec) { printf("SKIP directory symlink: %s\n", ec.message().c_str()); return; }
-    internal::ScreenshotQueue queue;
-    vector<ScreenshotSaveEventArgs> events;
-    auto listener = onScreenshotSave().listen([&](ScreenshotSaveEventArgs& args) { events.push_back(args); });
-    int captures = 0, launches = 0;
-    Gate firstWriter;
-    internal::setResourceLoadProbeForTests([&](const char* stage, const fs::path&) {
-        if (string(stage) == "screenshot-writer-launch") ++launches;
-    });
-    internal::setScreenshotBackendForTests([&](Pixels& pixels) {
-        pixels.allocate(1, 1, 4); pixels.getData()[0] = ++captures; return true;
-    }, [&](const Pixels& pixels, const fs::path& path) {
-        if (pixels.getData()[0] == 1) firstWriter.block();
-        return internal::writeScreenshotPixels(pixels, path);
-    });
-    const auto a = real / "shot.png", b = alias / "shot.png";
-    internal::submitScreenshot(&queue, a); internal::captureScreenshots(queue); firstWriter.wait();
-    internal::submitScreenshot(&queue, b); internal::captureScreenshots(queue);
-    check("directory aliases launch only one destination writer", launches == 1);
-    firstWriter.open(); finish();
-    Pixels image; const bool loaded = image.load(a).ok();
-    check("symlink alias A then B leaves B on disk", loaded && image.getData()[0] == 2 &&
-        events.size() == 2 && events[0].result && events[1].result);
-    check("alias completion retains each submitted output path", events.size() == 2 && events[0].path == a && events[1].path == b);
-    // Exercise native filesystem case comparison when the volume supports it.
-    const auto upper = real / "SHOT.png";
-    if (fs::equivalent(a, upper, ec)) {
-        fs::remove(a); // case aliases must share a key before the file exists
-        launches = 0; captures = 0; firstWriter.released = false;
-        internal::submitScreenshot(&queue, a); internal::captureScreenshots(queue); firstWriter.wait(2);
-        internal::submitScreenshot(&queue, upper); internal::captureScreenshots(queue);
-        check("case aliases launch only one destination writer", launches == 1);
-        firstWriter.open(); finish();
-        check("case alias A then B leaves B on disk", image.load(a) && image.getData()[0] == 2);
-    } else printf("SKIP case aliases: case-sensitive filesystem\n");
-    internal::setResourceLoadProbeForTests({});
-    internal::setScreenshotBackendForTests({}, {});
-
-    // Hold two live encoder files for one aliased destination. They must be
-    // separate files, and each file must retain its own bytes until retirement.
+void screenshotTemporaryTests() {
+    const auto path = sandbox / "temporary.png";
+    { ofstream file(path); file << "previous"; }
+    // Synchronous screenshots can overlap the async writer. Each encoder
+    // file must retain its own bytes until retirement.
     fs::path tempA, tempB;
-    auto* fileA = internal::openScreenshotTemporary(a, tempA);
-    auto* fileB = internal::openScreenshotTemporary(b, tempB);
+    auto* fileA = internal::openScreenshotTemporary(path, tempA);
+    auto* fileB = internal::openScreenshotTemporary(path, tempB);
     check("overlapping screenshot jobs use distinct .tmp files", fileA && fileB &&
         tempA.extension() == ".tmp" && tempB.extension() == ".tmp" && !fs::equivalent(tempA, tempB));
     if (fileA) { std::fwrite("A", 1, 1, fileA); std::fclose(fileA); }
     if (fileB) { std::fwrite("B", 1, 1, fileB); std::fclose(fileB); }
     check("unique temporary files never truncate another job", loadTextFile(tempA) == "A" && loadTextFile(tempB) == "B");
     fs::remove(tempA); fs::remove(tempB);
-    const auto previous = loadTextFile(a);
-    auto failed = internal::atomicWrite(a, [&](std::FILE* file) {
-        auto partial = internal::checkedWrite(file, "partial", 7, a);
+    const auto previous = loadTextFile(path);
+    auto failed = internal::atomicWrite(path, [&](std::FILE* file) {
+        auto partial = internal::checkedWrite(file, "partial", 7, path);
         return partial ? SaveResult::fail(SaveError::NoSpace, "full disk during encoding") : partial;
     }, "Screenshot", true);
-    check("failed unique encoder preserves existing destination", failed.error == SaveError::NoSpace && loadTextFile(a) == previous);
+    check("failed unique encoder preserves existing destination", failed.error == SaveError::NoSpace && loadTextFile(path) == previous);
     bool clean = true;
-    for (const auto& entry : fs::directory_iterator(real)) if (entry.path().extension() == ".tmp") clean = false;
+    for (const auto& entry : fs::directory_iterator(sandbox)) if (entry.path().extension() == ".tmp") clean = false;
     check("successful and failed writers retire unique temporaries", clean);
 }
 
-void screenshotFinalSymlinkTests() {
+void screenshotWindowOrderTests() {
     newRun();
-    const auto original = sandbox / "original.png", path = sandbox / "linked-shot.png";
-    { ofstream file(original); file << "original"; }
-    std::error_code ec;
-    fs::create_symlink(original, path, ec);
-    if (ec) { printf("SKIP final symlink: %s\n", ec.message().c_str()); return; }
-    internal::ScreenshotQueue queue;
+    internal::WindowContext contextA, contextB;
+    contextA.isMain = true; contextB.isMain = false;
+    const auto path = sandbox / "two-windows.png";
     vector<ScreenshotSaveEventArgs> events;
     auto listener = onScreenshotSave().listen([&](ScreenshotSaveEventArgs& args) { events.push_back(args); });
-    int captures = 0, launches = 0;
-    Gate first, second, thirdWritten;
-    mutex records;
+    int launches = 0;
+    Gate firstWriter;
     vector<int> order;
     internal::setResourceLoadProbeForTests([&](const char* stage, const fs::path&) {
         if (string(stage) == "screenshot-writer-launch") ++launches;
     });
-    internal::setScreenshotBackendForTests([&](Pixels& pixels) {
-        pixels.allocate(1, 1, 4); pixels.getData()[0] = ++captures; return true;
+    internal::setScreenshotBackendForTests([](Pixels& pixels) {
+        pixels.allocate(1, 1, 4);
+        pixels.getData()[0] = internal::currentWindowContext().isMain ? 31 : 63;
+        return true;
     }, [&](const Pixels& pixels, const fs::path& output) {
         const int value = pixels.getData()[0];
-        if (value == 1) first.block();
-        if (value == 2) second.block();
-        auto result = internal::writeScreenshotPixels(pixels, output);
-        { lock_guard<mutex> lock(records); order.push_back(value); }
-        if (value == 3) thirdWritten.arrive();
-        return result;
+        if (value == 63) firstWriter.block();
+        order.push_back(value);
+        return internal::writeScreenshotPixels(pixels, output);
     });
-    internal::submitScreenshot(&queue, path); internal::submitScreenshot(&queue, path);
-    internal::captureScreenshots(queue); first.wait(); first.open(); second.wait();
-    check("first screenshot replaces final symlink with regular file", !fs::is_symlink(path) && fs::is_regular_file(path));
-    internal::submitScreenshot(&queue, path); internal::captureScreenshots(queue);
-    check("final symlink replacement keeps a single destination writer", launches == 1);
-    // Make the old split-key failure deterministic: C completes before B if
-    // it incorrectly launched a second writer. The correct queue waits for B.
-    if (launches > 1) thirdWritten.wait();
-    second.open(); finish();
-    check("final symlink replacement preserves A B C write order", order == vector<int>({1, 2, 3}));
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &contextA;
+    internal::submitScreenshot(&contextA.asyncScreenshots, path);
+    internal::currentWindowCtx() = &contextB;
+    internal::submitScreenshot(&contextB.asyncScreenshots, path);
+    // Submit A then B, but present B then A. Only capture completion defines
+    // global write order; the uncaptured A must not reserve a writer position.
+    internal::drainPendingScreenshots(); firstWriter.wait();
+    check("earlier request in another window still awaits its capture", contextA.asyncScreenshots.pending.size() == 1);
+    internal::currentWindowCtx() = &contextA; internal::drainPendingScreenshots();
+    internal::currentWindowCtx() = previous;
+    check("two windows share one writer while first capture is blocked", launches == 1);
+    check("both windows retain captured slots while writer is blocked", *contextA.asyncScreenshots.admitted == 1 && *contextB.asyncScreenshots.admitted == 1 && events.empty());
+    firstWriter.open(); finish();
+    check("two windows write in capture-completion order B then A", order == vector<int>({63, 31}));
     Pixels image;
-    check("A B queued then C after link replacement leaves C on disk", image.load(path) && image.getData()[0] == 3);
-    check("final symlink target remains unchanged", loadTextFile(original) == "original");
-    check("final symlink captures report three successful original paths", events.size() == 3 &&
-        events[0].result && events[1].result && events[2].result &&
-        events[0].path == path && events[1].path == path && events[2].path == path);
+    check("two windows same path leaves last captured A on disk", image.load(path) && image.getData()[0] == 31);
+    check("two windows deliver successful paths and release their slots", events.size() == 2 &&
+        events[0].result && events[1].result && events[0].path == path && events[1].path == path &&
+        *contextA.asyncScreenshots.admitted == 0 && *contextB.asyncScreenshots.admitted == 0);
     internal::setResourceLoadProbeForTests({});
     internal::setScreenshotBackendForTests({}, {});
 }
@@ -172,17 +129,22 @@ void screenshotTests() {
     });
     internal::ScreenshotQueue mainQueue, hiddenQueue;
     int captures = 0;
-    Gate encoder, independent;
+    Gate encoder;
+    int launches = 0;
+    internal::setResourceLoadProbeForTests([&](const char* stage, const fs::path&) {
+        if (string(stage) == "screenshot-writer-launch") ++launches;
+    });
     mutex recordsMutex;
-    vector<int> samePath;
+    vector<int> samePath, writeOrder;
     internal::setScreenshotBackendForTests([&](Pixels& pixels) {
         pixels.allocate(1, 1, 4); pixels.getData()[0] = ++captures; return true;
     }, [&](const Pixels& pixels, const fs::path& path) {
         if (path.filename() == "same.png") {
             { lock_guard<mutex> lock(recordsMutex); samePath.push_back(pixels.getData()[0]); }
             if (pixels.getData()[0] == 1) encoder.block();
-        } else independent.arrive();
-        return SaveResult::success();
+        }
+        { lock_guard<mutex> lock(recordsMutex); writeOrder.push_back(pixels.getData()[0]); }
+        return internal::writeScreenshotPixels(pixels, path);
     });
     for (int i = 0; i < 4; ++i) internal::submitScreenshot(&hiddenQueue, sandbox / "hidden.png");
     internal::submitScreenshot(&hiddenQueue, sandbox / "overflow.png");
@@ -193,11 +155,14 @@ void screenshotTests() {
     internal::submitScreenshot(&mainQueue, sandbox / "same.png");
     internal::submitScreenshot(&mainQueue, sandbox / "other.png");
     internal::captureScreenshots(mainQueue);
-    encoder.wait(); independent.wait();
-    check("independent path progresses while same path is blocked", samePath.size() == 1 && samePath[0] == 1 && captures == 3);
+    encoder.wait();
+    check("all captured paths share one writer while first write is blocked", launches == 1 && captures == 3);
     check("captured jobs keep slots before delivery", *mainQueue.admitted == 3);
     encoder.open(); finish();
-    check("same destination writes follow capture order", samePath == vector<int>({1, 2}));
+    check("global FIFO writes same and different paths in capture order", writeOrder == vector<int>({1, 2, 3}));
+    Pixels orderedImage;
+    check("same-window same-path shots write in request order, final is second", samePath == vector<int>({1, 2}) && orderedImage.load(sandbox / "same.png") && orderedImage.getData()[0] == 2);
+    internal::setResourceLoadProbeForTests({});
     check("completion releases slots, hidden window stays pending", *mainQueue.admitted == 0 && *hiddenQueue.admitted == 4 && hiddenQueue.pending.size() == 4);
     for (int i = 0; i < 6; ++i) {
         internal::submitScreenshot(&mainQueue, sandbox / ("visible" + to_string(i) + ".png"));
@@ -533,7 +498,7 @@ int exitChild(bool workerExit) {
     // Register proof before the resource host, so it runs after retirement.
     static atomic<int>* retired = new atomic<int>(0);
     static atomic<int>* comBalance = new atomic<int>(0);
-    atexit([] { if (retired->load() != 2 || comBalance->load() != 0) std::_Exit(8); });
+    atexit([] { if (retired->load() != 3 || comBalance->load() != 0) std::_Exit(8); });
     newRun();
     static Gate* micGate = new Gate;
     static Gate* shotGate = new Gate;
@@ -550,6 +515,7 @@ int exitChild(bool workerExit) {
     auto* queue = new internal::ScreenshotQueue;
     internal::submitScreenshot(queue, sandbox / "exit.png"); internal::captureScreenshots(*queue);
     micGate->wait(); shotGate->wait();
+    internal::submitScreenshot(queue, sandbox / "exit-later.png"); internal::captureScreenshots(*queue);
     atexit([] { micGate->open(); shotGate->open(); });
     if (workerExit) {
         internal::startResourceLoad([] { std::exit(0); });
@@ -660,7 +626,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         return tcCoreTest::runDisplayTest<ScreenshotApp>(settings, failures, [] { fs::remove_all(sandbox); });
     }
     if (argc == 3 && string(argv[1]) == "--exit-child") return exitChild(string(argv[2]) == "worker");
-    screenshotTests(); screenshotAliasTests(); screenshotFinalSymlinkTests(); micTests(); nativeAutomaticMicTests(); nativeNullMicTests(); headlessTests(); exitTests(argv[0]);
+    screenshotTests(); screenshotTemporaryTests(); screenshotWindowOrderTests(); micTests(); nativeAutomaticMicTests(); nativeNullMicTests(); headlessTests(); exitTests(argv[0]);
     fs::remove_all(sandbox);
     return failures ? 1 : 0;
 #endif
