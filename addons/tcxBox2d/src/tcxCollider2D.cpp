@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "tcxCollider2D.h"
+#include "tcxBox2dBody.h"
 
 namespace tcx::box2d {
 
@@ -63,7 +64,12 @@ int16_t Collider2D::getGroupIndex() const {
 
 void Collider2D::applyTriggerMode() {
     bool on = isTrigger;
-    forEachFixture(fixture_, [on](b2Fixture* f) { f->SetSensor(on); });
+    appliedTrigger_ = on;
+    // fixture_ is borrowed and raw DestroyFixture may already have recycled it.
+    // Resolve sensors through the owner, including changed-flag synchronization.
+    if (auto* body = body_ ? body_->getBody() : nullptr) {
+        for (auto* f = body->GetFixtureList(); f; f = f->GetNext()) f->SetSensor(on);
+    }
 }
 
 } // namespace tcx::box2d

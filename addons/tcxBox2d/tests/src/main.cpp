@@ -44,7 +44,7 @@
 //     (the other pairs still get their Stay);
 //   - listeners of a deferred Exit / Ended or of Stay may free the other body
 //     of their pair (a RigidBody2D's hears nothing more; a classic Body
-//     destroyed from Stay gets its Exit at once), and a body destroyed between
+//     destroyed from Stay hears nothing more), and a body destroyed between
 //     Step() and update() gets no Exit / Ended, its partner one with no
 //     other, and a new body at its address none;
 //   - the offset/inertia check runs once on the whole body: a rounded
@@ -742,8 +742,12 @@ static float areaMass(float areaPx) {
 
 static void step(box2d::World& world, int n) {
     for (int i = 0; i < n; ++i) {
-        world.getWorld()->Step(1.0f / 60.0f, 8, 3);
-        world.getCollisionManager()->update();
+        auto& ctx = internal::currentWindowContext();
+        double savedDelta = ctx.updateDeltaTime;
+        ++internal::updateFrameCount; ++ctx.updateCount;
+        ctx.updateDeltaTime = 1.0 / 60;
+        world.update();
+        ctx.updateDeltaTime = savedDelta;
     }
 }
 
@@ -1048,10 +1052,11 @@ static void testCompoundEvents() {
         int touching = touchingContacts(world, bar.getBody(), box.getBody());
         printf("  (classic: %d fixtures, %d touching contacts)\n", fixtureCount(bar.getBody()), touching);
         check("Collider2D: the box touches several of the bar's fixtures", touching >= 2);
+        world.getCollisionManager()->update(); // raw Begin is delivered after Step
         check("Collider2D: one Enter on each side", barEnter == 1 && boxEnter == 1);
         world.getCollisionManager()->update();
         world.getCollisionManager()->update();
-        check("Collider2D: one Stay per update", barStay == 2);
+        check("Collider2D: one Stay per update", barStay == 3);
 
         // An Exit from inside a step is dispatched after it (update()).
         box.setPhysicsPosition(400, -1000);
@@ -1085,10 +1090,11 @@ static void testCompoundEvents() {
         int touching = touchingContacts(world, bar->getBody(), box->getBody());
         printf("  (Mod: %d fixtures, %d touching contacts)\n", fixtureCount(bar->getBody()), touching);
         check("RigidBody2D: the box touches several of the bar's fixtures", touching >= 2);
+        world.getCollisionManager()->update(); // raw Begin is delivered after Step
         check("RigidBody2D: one Began on each side", began == 1 && boxBegan == 1);
         world.getCollisionManager()->update();
         world.getCollisionManager()->update();
-        check("RigidBody2D: one Stay per update", stay == 2);
+        check("RigidBody2D: one Stay per update", stay == 3);
 
         box->getBody()->SetTransform(box2d::World::toBox2d(400, -1000), 0);
         world.getWorld()->Step(1.0f / 60.0f, 8, 3);
@@ -1297,8 +1303,8 @@ static void testStayListenerDestroys() {
         check("Stay destroys the next pair's body: one bar Stay, for the survivor", barStay == 1);
         check("Stay destroys the next pair's body: survivor Stay once, no Exit",
               (gone1 ? stay2 : stay1) == 1 && (gone1 ? exit2 : exit1) == 0);
-        check("Stay destroys the next pair's body: the destroyed box gets Exit, no Stay",
-              (gone1 ? stay1 : stay2) == 0 && (gone1 ? exit1 : exit2) == 1);
+        check("Stay destroys the next pair's body: the destroyed box gets no Exit or Stay",
+              (gone1 ? stay1 : stay2) == 0 && (gone1 ? exit1 : exit2) == 0);
 
         world.getCollisionManager()->update();
         check("Stay destroys the next pair's body: later updates go on", barStay == 2);
@@ -1345,8 +1351,8 @@ static void testStayListenerDestroys() {
         check("Stay destruction invalidates body and collider handles",
               destroyed && hasInvalidHandles(*destroyed) && world.getBodyCount() == 2);
         const bool gone1 = destroyed == &box1;
-        check("Stay destroys its own pair's body: no Stay after it, one Exit",
-              destroyed && staysAfter == 0 && (gone1 ? exit1 : exit2) == 1);
+        check("Stay destroys its own pair's body: no Stay or Exit after release",
+              destroyed && staysAfter == 0 && (gone1 ? exit1 : exit2) == 0);
         check("Stay destroys its own pair's body: the next pair still gets its Stay",
               barStay == 2 && (gone1 ? stay2 : stay1) == 1 && (gone1 ? exit2 : exit1) == 0);
     }
@@ -1386,8 +1392,8 @@ static void testStayListenerDestroys() {
         EventListener l3 = bar->onCollisionExit.listen([&](box2d::Contact2D&) { ++barEnded; });
 
         world.getCollisionManager()->update();
-        check("RigidBody2D Stay drops the next pair's node: one Stay, teardown Exit deferred",
-              dropped && barStay == 1 && barEnded == 0 && world.getBodyCount() == 2);
+        check("RigidBody2D Stay drops the next pair's node: one Stay, teardown Exit after callback return",
+              dropped && barStay == 1 && barEnded == 1 && world.getBodyCount() == 2);
         world.getCollisionManager()->update();
         check("RigidBody2D Stay drops the next pair's node: next update delivers Exit and Stay", barStay == 2 && barEnded == 1);
     }
@@ -1731,7 +1737,7 @@ static void testExitListenerDestroysThirdBody() {
             int ab = 0, ac = 0, bx = 0, cx = 0, ended = 0;
             bool completed = true;
             EventListener l1 = a.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent& e) {
-                if (e.other == &b) {
+                if (e.other == &b || (!e.other && ab == 0)) {
                     ++ab;
                     // IsLocked() alone cannot detect DestroyBody/SetType's
                     // contact loop: inspect their completed state too.
@@ -1740,7 +1746,7 @@ static void testExitListenerDestroysThirdBody() {
                     else if (op == "disable") completed = completed && !b.isBodyEnabled();
                     else completed = completed && contactsBetween(world, a.getBody(), b.getBody()) == 0;
                     c.destroy();
-                } else if (e.other == &c) ++ac;
+                } else if (e.other == &c || !e.other) ++ac;
             });
             EventListener l2 = b.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++bx; });
             EventListener l3 = c.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++cx; });
@@ -1753,9 +1759,9 @@ static void testExitListenerDestroysThirdBody() {
             const string label = "outside-step " + op + (reverse ? " reverse" : "");
             check(label + ": listener sees completed Box2D operation, destroys C", touching && completed && hasInvalidHandles(c) &&
                   (op != "destroy" || hasInvalidHandles(b)) && world.getBodyCount() == (op == "destroy" ? 1 : 2));
-            check(label + ": each Exit once before wrapper returns", ab == 1 && ac == 1 && bx == 1 && cx == 1 && ended == 2);
+            check(label + ": each Exit once before wrapper returns", ab == 1 && ac == 1 && bx == (op == "destroy" ? 0 : 1) && cx == 0 && ended == 2);
             world.getCollisionManager()->update();
-            check(label + ": update does not repeat Exits", ab == 1 && ac == 1 && bx == 1 && cx == 1 && ended == 2);
+            check(label + ": update does not repeat Exits", ab == 1 && ac == 1 && bx == (op == "destroy" ? 0 : 1) && cx == 0 && ended == 2);
         }
     }
 
@@ -1778,7 +1784,7 @@ static void testExitListenerDestroysThirdBody() {
                                   touchingContacts(world, b.getBody(), c.getBody()) > 0;
             int ab = 0, ac = 0, ba = 0, bc = 0, ca = 0, cb = 0, ended = 0;
             EventListener la = a.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent& e) {
-                if (e.other == &b) { ++ab; c.destroy(); } else if (e.other == &c) ++ac;
+                if (e.other == &b || (!e.other && ab == 0)) { ++ab; c.destroy(); } else if (e.other == &c || !e.other) ++ac;
             });
             EventListener lb = b.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent& e) {
                 if (e.other == &a) ++ba; else ++bc; // C may already have been forgotten
@@ -1795,12 +1801,12 @@ static void testExitListenerDestroysThirdBody() {
             const string label = "shared-contact " + op + (reverse ? " reverse" : "");
             check(label + ": three pairs, each surviving side Exit once",
                   touching && hasInvalidHandles(c) && (op != "destroy" || hasInvalidHandles(b)) &&
-                  world.getBodyCount() == (op == "destroy" ? 1 : 2) && ab == 1 && ac == 1 && ba == 1 && bc == 1 && ca == 1 && cb <= 1 && ended == 3);
+                  world.getBodyCount() == (op == "destroy" ? 1 : 2) && ab == 1 && ac == 1 && ba == (op == "destroy" ? 0 : 1) && bc == (op == "destroy" ? 0 : 1) && ca == 0 && cb <= 1 && ended == (op == "destroy" ? 2 + cb : 3));
             // C's B Exit can already have fired before the listener drops C;
             // otherwise forget() suppresses that pending notification.
             const int before = ab + ac + ba + bc + ca + cb;
             world.getCollisionManager()->update();
-            check(label + ": no repeated Exit", ab + ac + ba + bc + ca + cb == before && ended == 3);
+            check(label + ": no repeated Exit", ab + ac + ba + bc + ca + cb == before && ended == (op == "destroy" ? 2 + cb : 3));
         }
     }
 
@@ -1874,9 +1880,9 @@ static void testExitListenerDestroysThirdBody() {
         else if (op == "type") b.getBody()->SetType(b2_staticBody);
         check("raw " + op + ": no Exit inside Box2D call", ax == 0 && bx == 0 && cx == 0);
         world.getCollisionManager()->update();
-        check("raw " + op + ": next update flushes exactly once", ax == 2 && bx == 1 && cx == 1 && hasInvalidHandles(c) && world.getBodyCount() == 2);
+        check("raw " + op + ": next update flushes exactly once", ax == 2 && bx == 1 && cx == 0 && hasInvalidHandles(c) && world.getBodyCount() == 2);
         world.getCollisionManager()->update();
-        check("raw " + op + ": no repeated Exit", ax == 2 && bx == 1 && cx == 1 && hasInvalidHandles(c) && world.getBodyCount() == 2);
+        check("raw " + op + ": no repeated Exit", ax == 2 && bx == 1 && cx == 0 && hasInvalidHandles(c) && world.getBodyCount() == 2);
     }
     {
         box2d::World world;
@@ -1909,9 +1915,9 @@ static void testExitListenerDestroysThirdBody() {
         world.getWorld()->DestroyBody(raw);
         check("raw DestroyBody: no Exit inside Box2D call", ended == 0 && ax == 0 && cx == 0);
         world.getCollisionManager()->update();
-        check("raw DestroyBody: next update can destroy C, each Exit once", ended == 2 && ax == 1 && cx == 1 && hasInvalidHandles(c) && world.getBodyCount() == 1);
+        check("raw DestroyBody: next update can destroy C, each Exit once", ended == 2 && ax == 1 && cx == 0 && hasInvalidHandles(c) && world.getBodyCount() == 1);
         world.getCollisionManager()->update();
-        check("raw DestroyBody: no repeated Exit", ended == 2 && ax == 1 && cx == 1);
+        check("raw DestroyBody: no repeated Exit", ended == 2 && ax == 1 && cx == 0);
     }
 
 }
@@ -2699,7 +2705,7 @@ static void testReentrantShapeSetup(const string& label, Setup setup) {
         a.setSensor(true);
         frames.update(world);
         int exits = 0;
-        auto listener = a.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) {
+        auto listener = b.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) {
             ++exits;
             setup(a, world, 500);
         });
@@ -3114,7 +3120,916 @@ static void testOwnerLifetimes() {
     check("point query skips Mod owners", world.getBodyAtPoint(500, 500) == nullptr);
 }
 
+// #845's six reviewer setups, plus Begin and Mod variants. Explicit handle and
+// payload assertions matter: Box2D pools can hide retirement from sanitizers.
+static void testDeliveryCancellation(const string& mode) {
+    WorldTestFrames frames;
+    bool clearing = mode.rfind("clear-", 0) == 0;
+    bool classic = mode.find("classic") != string::npos;
+    bool mod = mode.find("mod") != string::npos;
+    int phase = mode.find("begin") != string::npos ? 0 : mode.find("exit") != string::npos ? 2 : 1;
+    auto world = make_unique<box2d::World>();
+    world->setup(0, 0); world->setAutoUpdate(false);
+    auto token = world->aliveToken();
+    auto* raw = world->getWorld();
+    box2d::CircleBody a, b;
+    shared_ptr<Node> na, nb;
+    box2d::RigidBody2D* ra = nullptr;
+    box2d::RigidBody2D* rb = nullptr;
+    if (mod) {
+        na = make_shared<Node>(); nb = make_shared<Node>();
+        na->setPos(100, 100); nb->setPos(110, 100);
+        ra = na->addMod<box2d::RigidBody2D>(*world, box2d::Shape2D::circle(10));
+        rb = nb->addMod<box2d::RigidBody2D>(*world, box2d::Shape2D::circle(10));
+        ra->setTrigger();
+    } else {
+        a.setup(*world, 100, 100, 10); b.setup(*world, 110, 100, 10); a.setSensor(true);
+    }
+    if (phase != 0) frames.update(*world);
+    int mutations = 0, late = 0;
+    auto mutate = [&] { ++mutations; if (clearing) world->clear(); else world.reset(); };
+    auto& cm = *world->getCollisionManager();
+    auto& event = phase == 0 ? cm.contactBegan : phase == 1 ? cm.contactStay : cm.contactEnded;
+    vector<EventListener> listeners;
+    if (classic) {
+        auto& ce = phase == 0 ? a.getCollider()->onCollisionEnter : phase == 1 ? a.getCollider()->onCollisionStay : a.getCollider()->onCollisionExit;
+        listeners.push_back(ce.listen([&](box2d::CollisionEvent& c) {
+            mutate(); check(mode + ": executing other null", !c.other);
+        }, EventPriority::BeforeApp));
+        listeners.push_back(ce.listen([&](box2d::CollisionEvent&) { ++late; }));
+        auto& otherEvent = phase == 0 ? b.getCollider()->onCollisionEnter : phase == 1 ? b.getCollider()->onCollisionStay : b.getCollider()->onCollisionExit;
+        listeners.push_back(otherEvent.listen([&](box2d::CollisionEvent&) { ++late; }));
+    } else if (mod) {
+        auto& me = phase == 0 ? ra->onTriggerEnter : phase == 1 ? ra->onTriggerStay : ra->onTriggerExit;
+        listeners.push_back(me.listen([&](box2d::Contact2D& c) {
+            mutate(); check(mode + ": executing Mod fields null", !c.other && !c.otherNode);
+        }, EventPriority::BeforeApp));
+        listeners.push_back(me.listen([&](box2d::Contact2D&) { ++late; }));
+        auto& otherEvent = phase == 0 ? rb->onTriggerEnter : phase == 1 ? rb->onTriggerStay : rb->onTriggerExit;
+        listeners.push_back(otherEvent.listen([&](box2d::Contact2D&) { ++late; }));
+        // Router returns to a suspended world notification after Mod deletion.
+        listeners.push_back(event.listen([&](box2d::WorldContact&) { ++late; }));
+    } else {
+        listeners.push_back(event.listen([&](box2d::WorldContact& c) {
+            mutate(); check(mode + ": executing world fields null", !c.a && !c.b);
+        }, EventPriority::BeforeApp));
+        listeners.push_back(event.listen([&](box2d::WorldContact&) { ++late; }));
+        for (auto* body : {&a, &b}) {
+            auto* c = body->getCollider();
+            auto& ce = phase == 0 ? c->onCollisionEnter : phase == 1 ? c->onCollisionStay : c->onCollisionExit;
+            listeners.push_back(ce.listen([&](box2d::CollisionEvent&) { ++late; }));
+        }
+    }
+    if (phase == 2) {
+        if (mod) rb->getBody()->SetTransform(box2d::World::toBox2d(400, 400), 0);
+        else b.setPhysicsPosition(400, 400);
+    }
+    frames.update(*world, clearing ? 1.0 / 60 : 0.04);
+    check(mode + ": once, no later listeners", mutations == 1 && late == 0);
+    check(mode + ": handles invalid", mod ? !ra->getBody() && !rb->getBody() : hasInvalidHandles(a) && hasInvalidHandles(b));
+    if (!clearing) {
+        check(mode + ": World gone and token expired", !world && token.expired());
+        na.reset(); nb.reset(); // surviving owners/listeners unwind after World
+    } else {
+        check(mode + ": same b2World, no bodies", world->getWorld() == raw && world->getBodyCount() == 0);
+        listeners.front().disconnect();
+        int began = 0, stayed = 0;
+        auto begin = cm.contactBegan.listen([&](box2d::WorldContact&) { ++began; });
+        auto stay = cm.contactStay.listen([&](box2d::WorldContact&) { ++stayed; });
+        box2d::CircleBody freshA, freshB;
+        freshA.setup(*world, 100, 100, 10); freshB.setup(*world, 110, 100, 10); freshA.setSensor(true);
+        frames.update(*world);
+        check(mode + ": preserved subscriptions, fresh Begin/Stay once", began == 1 && stayed == 1 &&
+            (classic || mod || phase == 2 || late == 1));
+    }
+}
+
+static b2Body* rawCircle(b2World* raw, float x, bool compound = false) {
+    b2BodyDef bd; bd.type = b2_dynamicBody; bd.position.Set(x, 0);
+    auto* body = raw->CreateBody(&bd);
+    b2CircleShape shape; shape.m_radius = 1;
+    b2FixtureDef fd; fd.shape = &shape; fd.isSensor = true;
+    body->CreateFixture(&fd);
+    if (compound) { shape.m_p.Set(0.25f, 0); body->CreateFixture(&fd); }
+    return body;
+}
+static void testThreeRawSteps() {
+    for (bool compound : {false, true}) {
+        WorldTestFrames frames;
+        box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
+        auto* raw = world.getWorld();
+        auto* a = rawCircle(raw, 0, compound);
+        auto* b = rawCircle(raw, 1, compound);
+        vector<char> phases;
+        vector<EventListener> ls;
+        auto* cm = world.getCollisionManager();
+        ls.push_back(cm->contactBegan.listen([&](box2d::WorldContact&) { phases.push_back('B'); }));
+        ls.push_back(cm->contactEnded.listen([&](box2d::WorldContact&) { phases.push_back('E'); }));
+        ls.push_back(cm->contactStay.listen([&](box2d::WorldContact&) { phases.push_back('S'); }));
+        raw->Step(1.0f/60, 8, 3);
+        b->SetTransform(b2Vec2(20, 0), 0); raw->Step(1.0f/60, 8, 3);
+        b->SetTransform(b2Vec2(1, 0), 0); raw->Step(1.0f/60, 8, 3);
+        check("three-raw-steps-recontact: deferred all transitions", phases.empty());
+        frames.update(world, 0);
+        check("three-raw-steps-recontact: exactly Begin/End/Begin/Stay", phases == vector<char>({'B','E','B','S'}));
+        check("three-raw-steps-recontact: endpoints still live", a->GetUserData().pointer == 0 && b->GetUserData().pointer == 0);
+    }
+}
+static void testRawUnownedReuse() {
+    for (bool compound : {false, true}) for (bool queued : {false, true}) {
+        WorldTestFrames frames;
+        box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
+        auto* raw = world.getWorld(); auto* cm = world.getCollisionManager();
+        auto* a = rawCircle(raw, 0, compound); auto* b = rawCircle(raw, 1, compound);
+        b2Body* replacement = nullptr;
+        bool callbacksDuringDestroy = false, destroying = false;
+        int began = 0, ended = 0, stayed = 0, late = 0;
+        struct Proxy : b2ContactListener {
+            b2ContactListener* target; bool* destroying; bool* observed;
+            Proxy(b2ContactListener* t, bool* d, bool* o) : target(t), destroying(d), observed(o) {}
+            void BeginContact(b2Contact* c) override { target->BeginContact(c); }
+            void EndContact(b2Contact* c) override { if (*destroying) *observed = true; target->EndContact(c); }
+        } proxy(cm, &destroying, &callbacksDuringDestroy);
+        raw->SetContactListener(&proxy);
+        auto begin = cm->contactBegan.listen([&](box2d::WorldContact&) { ++began; });
+        auto stay = cm->contactStay.listen([&](box2d::WorldContact&) { ++stayed; });
+        auto replace = [&] {
+            destroying = true; raw->DestroyBody(a); destroying = false;
+            replacement = rawCircle(raw, 100, compound);
+        };
+        auto early = cm->contactEnded.listen([&](box2d::WorldContact& c) {
+            ++ended;
+            if (!queued) {
+                destroying = true; raw->DestroyBody(a); destroying = false;
+                check("raw-destroy-unowned-active-exit-reuse: executing retired field null", c.a != a && c.b != a);
+                replacement = rawCircle(raw, 100, compound);
+                check("raw-destroy-unowned-active-exit-reuse: replacement cannot reopen field", c.a != replacement && c.b != replacement);
+            }
+        }, EventPriority::BeforeApp);
+        auto later = cm->contactEnded.listen([&](box2d::WorldContact& c) {
+            ++late;
+            check("raw-destroy-unowned-active-exit-reuse: survivor only", (c.a == b && !c.b) || (c.b == b && !c.a));
+        });
+        raw->Step(1.0f/60, 8, 3);
+        if (!queued) frames.update(world, 0);
+        b->SetTransform(b2Vec2(20, 0), 0); raw->Step(1.0f/60, 8, 3);
+        if (queued) replace();
+        frames.update(world, 0);
+        check("raw-destroy-unowned-active-exit-reuse: reused address, null owner data",
+            replacement == a && replacement->GetUserData().pointer == 0 && b->GetUserData().pointer == 0);
+        check("raw-destroy-unowned-active-exit-reuse: no destruction End, no stale deliveries",
+            !callbacksDuringDestroy && began == (queued ? 0 : 1) && ended == 1 && late == 1 && stayed == (queued ? 0 : 1));
+        frames.update(world, 0);
+        check("raw-destroy-unowned-active-exit-reuse: no duplicates", ended == 1 && late == 1);
+        world.clear(); // proxy remains alive through clear
+    }
+}
+
+static void testSubstepDelivery() {
+    WorldTestFrames frames;
+    box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
+    auto* raw = world.getWorld(); auto* cm = world.getCollisionManager();
+    auto* a = rawCircle(raw, 0); auto* b = rawCircle(raw, -4);
+    b->SetLinearVelocity(b2Vec2(90, 0));
+    string order;
+    auto begin = cm->contactBegan.listen([&](box2d::WorldContact&) {
+        check("substeps: Begin unlocked", !raw->IsLocked()); order += 'B';
+    });
+    auto end = cm->contactEnded.listen([&](box2d::WorldContact&) {
+        check("substeps: End unlocked", !raw->IsLocked()); order += 'E';
+    });
+    auto stay = cm->contactStay.listen([&](box2d::WorldContact&) { order += 'S'; });
+    frames.update(world, 0.13);
+    check("substeps: Begin then End in one update, no final Stay", order == "BE");
+    world.update(); check("substeps: same-frame update deduplicated", order == "BE");
+    b->SetLinearVelocity(b2Vec2_zero); b->SetTransform(b2Vec2(1, 0), 0);
+    frames.update(world, 0.1);
+    check("substeps: multi-step touching has one final Stay", order == "BEBS");
+    check("substeps: sensor response does not move stationary partner", a->GetPosition() == b2Vec2_zero);
+}
+
+static void testDestructionForwarding() {
+    struct Observer : b2DestructionListener {
+        int fixtures = 0, joints = 0;
+        box2d::Body* owner = nullptr;
+        bool invalidBeforeForward = true;
+        void SayGoodbye(b2Fixture*) override { ++fixtures; if (owner) invalidBeforeForward &= hasInvalidHandles(*owner); }
+        void SayGoodbye(b2Joint*) override { ++joints; }
+    } observer;
+    box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
+    world.setDestructionListener(&observer);
+    box2d::CircleBody owned;
+    owned.setup(world, 100, 100, 10); observer.owner = &owned;
+    world.getWorld()->DestroyBody(owned.getBody());
+    check("destruction forwarding: owned raw release invalidates before delegate", observer.fixtures == 1 && observer.invalidBeforeForward && hasInvalidHandles(owned));
+    observer.owner = nullptr;
+    auto* a = rawCircle(world.getWorld(), 0); auto* b = rawCircle(world.getWorld(), 10);
+    b2DistanceJointDef jd; jd.Initialize(a, b, a->GetPosition(), b->GetPosition());
+    world.getWorld()->CreateJoint(&jd);
+    world.clear();
+    check("destruction forwarding: clear forwards fixtures and joints", observer.fixtures == 3 && observer.joints == 1);
+    rawCircle(world.getWorld(), 0); world.setup(0, 0);
+    rawCircle(world.getWorld(), 0); world.clear();
+    check("destruction forwarding: delegate survives clear/setup", observer.fixtures == 5);
+}
+static void testClassicTriggers() {
+    WorldTestFrames frames;
+    box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
+    box2d::PolyShape poly; poly.setupCompound(world, kNotchedBar, 400, 300);
+    auto* collider = poly.getCollider();
+    auto allSensors = [&](bool expected) {
+        for (auto* f = poly.getBody()->GetFixtureList(); f; f = f->GetNext()) if (f->IsSensor() != expected) return false;
+        return true;
+    };
+    collider->isTrigger = true; frames.update(world);
+    check("classic trigger: plain true reaches every compound fixture", allSensors(true));
+    collider->isTrigger = false; frames.update(world);
+    check("classic trigger: plain false reaches every compound fixture", allSensors(false));
+    collider->setTrigger(true);
+    check("classic trigger: immediate setter reaches every fixture", allSensors(true));
+    poly.setSensor(false); frames.update(world);
+    check("classic trigger: Body sensor and flag/cache agree", !collider->isTrigger && allSensors(false));
+    auto* fixture = poly.getBody()->GetFixtureList(); fixture->SetSensor(true);
+    frames.update(world);
+    check("classic trigger: unchanged flag preserves per-fixture override", fixture->IsSensor());
+    world.clear();
+    box2d::CircleBody classic; classic.setup(world, 100, 100, 10);
+    auto node = make_shared<Node>(); node->setPos(110, 100);
+    auto* mod = node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10));
+    int trigger = 0, solid = 0, stays = 0, exits = 0;
+    auto t = mod->onTriggerEnter.listen([&](box2d::Contact2D& c) { ++trigger; check("classic trigger: non-Mod counterpart null", !c.other && !c.otherNode); });
+    auto s = mod->onCollisionEnter.listen([&](box2d::Contact2D&) { ++solid; });
+    auto stay = mod->onCollisionStay.listen([&](box2d::Contact2D&) { ++stays; });
+    auto exit = mod->onCollisionExit.listen([&](box2d::Contact2D&) { ++exits; });
+    classic.getCollider()->setTrigger(true);
+    world.getWorld()->Step(1.0f/60, 8, 3);
+    check("classic trigger: raw Step defers sensor Begin", trigger == 0);
+    frames.update(world, 0);
+    check("classic trigger: actual fixture state routes mixed pair", trigger == 1 && solid == 0);
+    classic.getCollider()->setTrigger(false); frames.update(world);
+    check("classic trigger: changing mode synthesizes no transitions", trigger == 1 && solid == 0 && stays == 1);
+    classic.setPhysicsPosition(400, 400); frames.update(world);
+    check("classic trigger: later End uses current sensor classification", exits == 1);
+}
+
+static void testListenerReleases() {
+    for (int layer = 0; layer < 3; ++layer) for (int phase = 0; phase < 3; ++phase) for (int which = 0; which < 3; ++which) {
+        WorldTestFrames frames;
+        box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
+        box2d::CircleBody a, b;
+        shared_ptr<Node> na, nb;
+        box2d::RigidBody2D* ra = nullptr; box2d::RigidBody2D* rb = nullptr;
+        if (layer == 2) {
+            na = make_shared<Node>(); nb = make_shared<Node>(); na->setPos(100, 100); nb->setPos(110, 100);
+            ra = na->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10));
+            rb = nb->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10)); ra->setTrigger();
+        } else {
+            a.setup(world, 100, 100, 10); b.setup(world, 110, 100, 10); a.setSensor(true);
+        }
+        if (phase) frames.update(world);
+        int calls = 0, late = 0;
+        bool nested = false, mutating = false;
+        auto mutate = [&] {
+            ++calls; mutating = true;
+            if (which != 1) { if (layer == 2) na->removeMod<box2d::RigidBody2D>(); else a.destroy(); }
+            if (which != 0) { if (layer == 2) nb->removeMod<box2d::RigidBody2D>(); else b.destroy(); }
+            mutating = false;
+        };
+        auto* cm = world.getCollisionManager();
+        auto exit = cm->contactEnded.listen([&](box2d::WorldContact&) { nested |= mutating; });
+        EventListener first, later;
+        if (layer == 0) {
+            auto& ev = phase == 0 ? cm->contactBegan : phase == 1 ? cm->contactStay : cm->contactEnded;
+            first = ev.listen([&](box2d::WorldContact& c) {
+                mutate(); check("release: active world fields reflect retirement", which == 2 ? !c.a && !c.b : phase == 2 ? (c.a == nullptr) != (c.b == nullptr) : !c.a && !c.b);
+            }, EventPriority::BeforeApp);
+            later = ev.listen([&](box2d::WorldContact&) { ++late; });
+        } else if (layer == 1) {
+            auto* c = a.getCollider();
+            auto& ev = phase == 0 ? c->onCollisionEnter : phase == 1 ? c->onCollisionStay : c->onCollisionExit;
+            first = ev.listen([&](box2d::CollisionEvent& c) { mutate(); check("release: active classic counterpart null", !c.other); }, EventPriority::BeforeApp);
+            later = ev.listen([&](box2d::CollisionEvent&) { ++late; });
+        } else {
+            auto& ev = phase == 0 ? ra->onTriggerEnter : phase == 1 ? ra->onTriggerStay : ra->onTriggerExit;
+            first = ev.listen([&](box2d::Contact2D& c) { mutate(); check("release: active Mod counterpart/node null", !c.other && !c.otherNode); }, EventPriority::BeforeApp);
+            later = ev.listen([&](box2d::Contact2D&) { ++late; });
+        }
+        if (phase == 2) {
+            if (layer == 2) rb->getBody()->SetTransform(box2d::World::toBox2d(400, 400), 0);
+            else b.setPhysicsPosition(400, 400);
+        }
+        frames.update(world);
+        const int expectedLate = phase == 2 && (layer == 0 ? which != 2 : which == 1) ? 1 : 0;
+        string label = "release layer/phase/side " + to_string(layer) + "/" + to_string(phase) + "/" + to_string(which);
+        check(label + ": exact initiating/late counts, no recursive Exit", calls == 1 && late == expectedLate && !nested);
+        check(label + ": correct live body count", world.getBodyCount() == (which == 2 ? 0 : 1));
+        if (layer != 2) check(label + ": released handles null", (which == 1 || hasInvalidHandles(a)) && (which == 0 || hasInvalidHandles(b)));
+    }
+}
+static void testRecordedOrder() {
+    WorldTestFrames frames;
+    box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
+    auto* raw = world.getWorld(); auto* cm = world.getCollisionManager();
+    auto* a = rawCircle(raw, 0); auto* b = rawCircle(raw, 1);
+    auto* c = rawCircle(raw, 10); auto* d = rawCircle(raw, 11);
+    struct Proxy : b2ContactListener {
+        b2ContactListener* target; vector<string> observed;
+        b2Body* a;
+        Proxy(b2ContactListener* t, b2Body* body) : target(t), a(body) {}
+        void record(b2Contact* c, char phase) {
+            bool first = c->GetFixtureA()->GetBody() == a || c->GetFixtureB()->GetBody() == a;
+            observed.push_back(string(1, phase) + (first ? "1" : "2"));
+        }
+        void BeginContact(b2Contact* c) override { record(c, 'B'); target->BeginContact(c); }
+        void EndContact(b2Contact* c) override { record(c, 'E'); target->EndContact(c); }
+    } proxy(cm, a);
+    raw->SetContactListener(&proxy);
+    vector<string> delivered;
+    auto begin = cm->contactBegan.listen([&](box2d::WorldContact& e) { delivered.push_back(string("B") + (e.a == a || e.b == a ? "1" : "2")); });
+    auto end = cm->contactEnded.listen([&](box2d::WorldContact& e) { delivered.push_back(string("E") + (e.a == a || e.b == a ? "1" : "2")); });
+    raw->Step(1.0f/60, 8, 3);
+    b->SetTransform(b2Vec2(30, 0), 0); raw->Step(1.0f/60, 8, 3);
+    d->SetTransform(b2Vec2(40, 0), 0); raw->Step(1.0f/60, 8, 3);
+    b->SetTransform(b2Vec2(1, 0), 0); raw->Step(1.0f/60, 8, 3);
+    frames.update(world, 0);
+    check("journal: unrelated interleaved transitions keep observed Box2D order", delivered == proxy.observed && delivered.size() == 5);
+    check("journal: independent pairs retained", c && world.getBodyCount() == 4);
+    world.clear();
+}
+
+static void testSetupCallerDeletion() {
+    for (bool deleteWorld : {false, true}) {
+        WorldTestFrames frames;
+        auto world = make_unique<box2d::World>(); world->setup(0, 0); world->setAutoUpdate(false);
+        auto a = make_unique<box2d::CircleBody>(); box2d::CircleBody b;
+        a->setup(*world, 100, 100, 10); b.setup(*world, 110, 100, 10); a->setSensor(true);
+        frames.update(*world);
+        int exits = 0;
+        auto listener = b.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent& c) {
+            ++exits;
+            if (deleteWorld) world.reset(); else a.reset();
+            check("setup caller deletion: active counterpart null", !c.other);
+        });
+        a->setup(*world, 200, 100, 10);
+        check("setup caller deletion: wrapper returns safely without replacement", exits == 1 && (deleteWorld ? !world && hasInvalidHandles(*a) && hasInvalidHandles(b) : !a && world->getBodyCount() == 1));
+    }
+}
+
+static void testRouterGates() {
+    // World-address reuse during its own suspended update must not revive that
+    // dispatch. The static router storage deliberately remains until PR 3.
+    WorldTestFrames frames;
+    for (bool replaceObject : {false, true}) {
+        alignas(box2d::World) unsigned char storage[sizeof(box2d::World)];
+        auto* world = std::construct_at(reinterpret_cast<box2d::World*>(storage));
+        world->setup(0, 0); world->setAutoUpdate(false);
+        auto oldToken = world->aliveToken();
+        auto na = make_shared<Node>(), nb = make_shared<Node>();
+        na->setPos(100, 100); nb->setPos(110, 100);
+        auto* ra = na->addMod<box2d::RigidBody2D>(*world, box2d::Shape2D::circle(10));
+        nb->addMod<box2d::RigidBody2D>(*world, box2d::Shape2D::circle(10)); ra->setTrigger();
+        frames.update(*world);
+        int mutations = 0, late = 0, fresh = 0;
+        EventListener freshListener;
+        auto before = world->getCollisionManager()->contactStay.listen([&](box2d::WorldContact& c) {
+            ++mutations;
+            if (replaceObject) {
+                std::destroy_at(world);
+                world = std::construct_at(reinterpret_cast<box2d::World*>(storage));
+            }
+            world->setup(0, 0); world->setAutoUpdate(false);
+            auto* freshA = na->addMod<box2d::RigidBody2D>(*world, box2d::Shape2D::circle(10));
+            nb->addMod<box2d::RigidBody2D>(*world, box2d::Shape2D::circle(10)); freshA->setTrigger();
+            freshListener = freshA->onTriggerStay.listen([&](box2d::Contact2D&) { ++fresh; });
+            world->getWorld()->Step(1.0f/60, 8, 3);
+            check("router epoch/address: active old payload null", !c.a && !c.b);
+        }, EventPriority::BeforeApp);
+        auto after = ra->onTriggerStay.listen([&](box2d::Contact2D&) { ++late; });
+        frames.update(*world, 0.04);
+        check("router epoch/address: no stale side or replacement delivery", mutations == 1 && late == 0 && fresh == 0);
+        check("router epoch/address: object identity distinct from setup epoch", oldToken.expired() == replaceObject);
+        before.disconnect();
+        frames.update(*world, 0);
+        check("router epoch/address: next update routes fresh pair once", fresh == 1 && world->getBodyCount() == 2);
+        na.reset(); nb.reset(); std::destroy_at(world);
+    }
+    box2d::World first, second;
+    first.setup(0, 0); second.setup(0, 0); first.setAutoUpdate(false); second.setAutoUpdate(false);
+    box2d::CircleBody a, b, c, d;
+    a.setup(first, 100, 100, 10); b.setup(first, 110, 100, 10); a.setSensor(true);
+    c.setup(second, 100, 100, 10); d.setup(second, 110, 100, 10); c.setSensor(true);
+    int secondBegins = 0, secondStays = 0, late = 0;
+    auto begin = second.getCollisionManager()->contactBegan.listen([&](box2d::WorldContact&) { ++secondBegins; });
+    auto stay = second.getCollisionManager()->contactStay.listen([&](box2d::WorldContact&) { ++secondStays; });
+    auto outer = first.getCollisionManager()->contactBegan.listen([&](box2d::WorldContact& contact) {
+        frames.update(second); first.clear();
+        check("two worlds: suspended first payload cancelled", !contact.a && !contact.b);
+    }, EventPriority::BeforeApp);
+    auto later = first.getCollisionManager()->contactBegan.listen([&](box2d::WorldContact&) { ++late; });
+    frames.update(first);
+    check("two worlds: nested independent delivery survives other cancellation", secondBegins == 1 && secondStays == 1 && late == 0 && first.getBodyCount() == 0 && second.getBodyCount() == 2);
+}
+static void testDeletedClassicSource() {
+    for (int phase = 0; phase < 3; ++phase) {
+        WorldTestFrames frames;
+        box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
+        auto a = make_unique<box2d::CircleBody>(); box2d::CircleBody b;
+        a->setup(world, 100, 100, 10); b.setup(world, 110, 100, 10); a->setSensor(true);
+        if (phase) frames.update(world);
+        int calls = 0, late = 0;
+        auto* collider = a->getCollider();
+        auto& event = phase == 0 ? collider->onCollisionEnter : phase == 1 ? collider->onCollisionStay : collider->onCollisionExit;
+        auto first = event.listen([&](box2d::CollisionEvent& c) {
+            ++calls; a.reset(); check("classic deletion: active other null", !c.other);
+        }, EventPriority::BeforeApp);
+        auto later = event.listen([&](box2d::CollisionEvent&) { ++late; });
+        if (phase == 2) b.setPhysicsPosition(400, 400);
+        frames.update(world);
+        check("classic deletion: snapshot survives Event/source destruction", calls == 1 && late == 0 && !a && world.getBodyCount() == 1);
+    }
+}
+
+static_assert(std::is_aggregate_v<box2d::WorldContact>, "WorldContact keeps its public aggregate shape");
+
+static void testRawStepsInsideListener() {
+    for (bool wrapperExit : {false, true}) {
+        WorldTestFrames frames;
+        box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
+        auto* raw = world.getWorld(); auto* cm = world.getCollisionManager();
+        box2d::CircleBody rootA, rootB;
+        rootA.setup(world, 100, 100, 10); rootB.setup(world, 110, 100, 10); rootA.setSensor(true);
+        auto* a = rootA.getBody();
+        auto* c = rawCircle(raw, 10); auto* d = rawCircle(raw, 30);
+        if (wrapperExit) frames.update(world);
+        int nested = 0, rootNotifications = 0, rootStays = 0;
+        string phases;
+        auto& source = wrapperExit ? cm->contactEnded : cm->contactBegan;
+        auto first = source.listen([&](box2d::WorldContact& contact) {
+            if (contact.a != a && contact.b != a) return;
+            ++rootNotifications;
+            if (nested++) return;
+            d->SetTransform(b2Vec2(11, 0), 0); raw->Step(1.0f/60, 8, 3);
+            d->SetTransform(b2Vec2(30, 0), 0); raw->Step(1.0f/60, 8, 3);
+            d->SetTransform(b2Vec2(11, 0), 0); raw->Step(1.0f/60, 8, 3);
+        }, EventPriority::BeforeApp);
+        auto began = cm->contactBegan.listen([&](box2d::WorldContact& contact) {
+            if (contact.a == c || contact.b == c) phases += 'B';
+        });
+        auto ended = cm->contactEnded.listen([&](box2d::WorldContact& contact) {
+            if (contact.a == c || contact.b == c) phases += 'E';
+        });
+        auto stayed = cm->contactStay.listen([&](box2d::WorldContact& contact) {
+            if (contact.a == c || contact.b == c) phases += 'S';
+            if (contact.a == a || contact.b == a) ++rootStays;
+        });
+        // Neither later managed sub-steps nor an enclosing Immediate wrapper
+        // may make listener-created raw records eligible in the current drain.
+        if (wrapperExit) rootA.setEnabled(false);
+        else frames.update(world, 0.04);
+        check("raw listener Steps: initiating pair delivered once", nested == 1 && rootNotifications == 1 && rootStays == (wrapperExit ? 0 : 1));
+        check("raw listener Steps: no current-drain transitions or premature Stay", phases.empty());
+        frames.update(world, 0);
+        check("raw listener Steps: next zero-dt update gives exactly BEBS", phases == "BEBS");
+        frames.update(world, 0);
+        check("raw listener Steps: no duplicate transitions, one later Stay", phases == "BEBSS");
+    }
+}
+
+// Adversarial review r1: keep these pool-reuse assertions; ASan alone cannot
+// distinguish a retired Box2D object from a new object in its allocator slot.
+static void testRetiredFixtureSensor() {
+    for (int setter = 0; setter < 3; ++setter) {
+        WorldTestFrames frames;
+        box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
+        box2d::CircleBody owner; owner.setup(world, 0, 0, 30);
+        auto* body = owner.getBody(); auto* collider = owner.getCollider();
+        auto* borrowed = collider->getFixture();
+        b2CircleShape shape; shape.m_radius = 1; shape.m_p.Set(3, 0);
+        auto* remaining = body->CreateFixture(&shape, 1);
+        body->DestroyFixture(borrowed);
+        b2BodyDef def; def.position.Set(100, 0);
+        auto* foreign = world.getWorld()->CreateBody(&def);
+        auto* replacement = foreign->CreateFixture(&shape, 0);
+        check("fixture-sensor: fixture address reused on foreign body", replacement == borrowed);
+        if (setter == 0) owner.setSensor(true);
+        else if (setter == 1) collider->setTrigger(true);
+        else { collider->isTrigger = true; frames.update(world); }
+        check("fixture-sensor: only owner's remaining fixture changes",
+            remaining->IsSensor() && !replacement->IsSensor() && collider->isTrigger);
+        // Synchronization must cache the explicit application rather than undo
+        // a later raw per-fixture override when the public flag is unchanged.
+        remaining->SetSensor(false); frames.update(world);
+        check("fixture-sensor: unchanged flag preserves override/cache",
+            !remaining->IsSensor() && !replacement->IsSensor() && collider->isTrigger);
+        owner.setSensor(false);
+        check("fixture-sensor: false flag and owner fixtures agree",
+            !collider->isTrigger && !remaining->IsSensor() && !replacement->IsSensor());
+    }
+}
+
+static void testFixtureReleaseReuse(bool owned) {
+    // Defensive owned raw-release checks do not define the supported API.
+    // Phase 2 validates via update BEFORE DestroyBody in the Exit callback;
+    // silent last-fixture + body destruction before update is unsupported.
+    // queued Begin, delivered Begin, separated End (no End on fixture release),
+    // and removal during an active Stay. Owned variants use classic AND Mod.
+    for (int kind = owned ? 1 : 0; kind < (owned ? 3 : 1); ++kind) for (int phase = 0; phase < 4; ++phase) {
+        WorldTestFrames frames;
+        box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
+        auto* raw = world.getWorld(); auto* cm = world.getCollisionManager();
+        auto classic = make_unique<box2d::CircleBody>();
+        auto node = make_shared<Node>();
+        box2d::RigidBody2D* mod = nullptr;
+        b2Body* a = nullptr;
+        if (kind == 1) { classic->setup(world, 0, 0, 30); classic->setSensor(true); a = classic->getBody(); }
+        else if (kind == 2) { mod = node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(30)); mod->setTrigger(); a = mod->getBody(); }
+        else a = rawCircle(raw, 0);
+        auto* partner = rawCircle(raw, 1);
+        auto* fixture = a->GetFixtureList();
+        int began = 0, stayed = 0, early = 0, late = 0, goodbye = 0;
+        b2Body* replacement = nullptr;
+        struct Observer : b2DestructionListener {
+            int& count;
+            explicit Observer(int& c) : count(c) {}
+            void SayGoodbye(b2Fixture*) override { ++count; }
+            void SayGoodbye(b2Joint*) override {}
+        } observer(goodbye);
+        world.setDestructionListener(&observer);
+        auto begin = cm->contactBegan.listen([&](box2d::WorldContact&) { ++began; });
+        auto stay = cm->contactStay.listen([&](box2d::WorldContact& c) {
+            ++stayed;
+            if (phase == 3) {
+                a->DestroyFixture(fixture);
+                check("fixtures: active Stay fields revoked inside DestroyFixture", !c.a && !c.b);
+            }
+        }, EventPriority::BeforeApp);
+        auto lateStay = cm->contactStay.listen([&](box2d::WorldContact&) { if (phase == 3) ++late; });
+        auto first = cm->contactEnded.listen([&](box2d::WorldContact& c) {
+            ++early;
+            check("fixtures: released endpoint null at first Exit", (c.a == partner && !c.b) || (c.b == partner && !c.a));
+            check("fixtures: owned handles detached before fixtureless DestroyBody",
+                kind == 0 || (kind == 1 ? hasInvalidHandles(*classic) : !mod->getBody()));
+            raw->DestroyBody(a);
+            check("fixtures: executing Exit remains null after fixtureless DestroyBody", c.a != a && c.b != a);
+            replacement = rawCircle(raw, 100);
+            check("fixtures: both body and fixture pool addresses reused",
+                replacement == a && replacement->GetFixtureList() == fixture && !replacement->GetUserData().pointer);
+            check("fixtures: replacement cannot revive executing endpoint", c.a != replacement && c.b != replacement);
+        }, EventPriority::BeforeApp);
+        auto later = cm->contactEnded.listen([&](box2d::WorldContact& c) {
+            ++late;
+            check("fixtures: later Exit sees only survivor", (c.a == partner && !c.b) || (c.b == partner && !c.a));
+        });
+        raw->Step(0, 8, 3);
+        if (phase != 0 && phase != 3) frames.update(world, 0);
+        if (phase == 2) { partner->SetTransform(b2Vec2(20, 0), 0); raw->Step(0, 8, 3); }
+        if (phase != 3) a->DestroyFixture(fixture);
+        frames.update(world, 0);
+        if (phase == 3) frames.update(world, 0); // raw release remains update-only
+        check("fixtures: exact deferred counts and no destruction delegate hook",
+            began == (phase == 0 ? 0 : 1) && stayed == (phase == 0 ? 0 : 1) && early == 1 && late == 1 && goodbye == 0);
+        classic.reset(); node.reset();
+        check("fixtures: detached owner teardown leaves replacement alive", world.getBodyCount() == 2);
+        frames.update(world, 0);
+        check("fixtures: no stale Begin/Stay or duplicate Exit", early == 1 && late == 1 && began == (phase == 0 ? 0 : 1));
+        world.clear(); // observer stays alive through clear
+    }
+}
+
+// Review round 2: a fixture witnesses the body's lifetime, not the pair's
+// entire contact set. Remove the exact witness chosen by the first Begin.
+static void testPartialFixtureRelease(int kind, const string& variant = "partial") {
+    const bool inactive = variant == "inactive";
+    const bool revalidate = variant == "revalidate";
+    for (int phase = 0; phase < (inactive ? 5 : 4); ++phase) {
+        // Delivered Begin, queued Begin, executing Begin, executing Stay, End.
+        WorldTestFrames frames;
+        box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
+        auto* raw = world.getWorld(); auto* cm = world.getCollisionManager();
+        box2d::CircleBody classic, partner;
+        auto node = make_shared<Node>();
+        box2d::RigidBody2D* mod = nullptr;
+        b2Body* a;
+        if (kind == 1) { classic.setup(world, 0, 0, 30); classic.setSensor(true); a = classic.getBody(); }
+        else if (kind == 2) { mod = node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(30)); mod->setTrigger(); a = mod->getBody(); }
+        else a = rawCircle(raw, 0);
+        partner.setup(world, 30, 0, 30); partner.setSensor(true);
+        auto* b = partner.getBody();
+        b2CircleShape shape; shape.m_radius = 1;
+        if (revalidate) shape.m_p.Set(1.5f, 0);
+        b2FixtureDef fd; fd.shape = &shape; fd.isSensor = true;
+        if (kind == 1) fd.userData.pointer = reinterpret_cast<uintptr_t>(classic.getCollider());
+        a->CreateFixture(&fd);
+        struct Proxy : b2ContactListener {
+            b2ContactListener* target;
+            b2Body* body;
+            b2Fixture* witness = nullptr;
+            int ends = 0;
+            Proxy(b2ContactListener* t, b2Body* b) : target(t), body(b) {}
+            void BeginContact(b2Contact* c) override {
+                if (!witness) witness = c->GetFixtureA()->GetBody() == body ? c->GetFixtureA() : c->GetFixtureB();
+                target->BeginContact(c);
+            }
+            void EndContact(b2Contact* c) override { ++ends; target->EndContact(c); }
+        } proxy(cm, a);
+        raw->SetContactListener(&proxy);
+        const string label = variant + " kind=" + to_string(kind) + " phase=" + to_string(phase);
+        int begins = 0, stays = 0, ends = 0, lateBegins = 0, lateStays = 0;
+        int ownerBegins = 0, ownerStays = 0, ownerEnds = 0;
+        bool removed = false, livePayloads = true;
+        b2Fixture* idle = nullptr;
+        auto livePair = [&](const box2d::WorldContact& c) {
+            return (c.a == a && c.b == b) || (c.a == b && c.b == a);
+        };
+        auto remove = [&](box2d::WorldContact* c = nullptr) {
+            if (inactive) {
+                b2CircleShape distant; distant.m_radius = 1; distant.m_p.Set(100, 0);
+                b2FixtureDef idleDef; idleDef.shape = &distant; idleDef.isSensor = true;
+                idle = a->CreateFixture(&idleDef); // fixture-list head, never touching
+            }
+            if (revalidate) {
+                // Keep the witness attached through its EndContact, then remove
+                // it silently. Validation must find the other touching fixture.
+                const auto* circle = static_cast<const b2CircleShape*>(proxy.witness->GetShape());
+                b->SetTransform(b2Vec2(circle->m_p.x == 0 ? 3.0f : -1.5f, 0), 0);
+                raw->Step(0, 8, 3);
+                check(label + ": original witness no longer touching", touchingContacts(world, a, b) == 1);
+            }
+            const int beforeRemoval = proxy.ends;
+            a->DestroyFixture(proxy.witness);
+            if (revalidate) check(label + ": witness removal has no EndContact", proxy.ends == beforeRemoval);
+            if (inactive && phase != 4) {
+                const int beforeIdle = proxy.ends;
+                a->DestroyFixture(idle); idle = nullptr;
+                check(label + ": idle removal has no EndContact", proxy.ends == beforeIdle);
+            }
+            removed = true;
+            check(label + ": one contributor remains touching", fixtureCount(a) == (idle ? 2 : 1) && touchingContacts(world, a, b) == 1);
+            if (c) check(label + ": executing payload retains both bodies", livePair(*c));
+        };
+        auto begin = cm->contactBegan.listen([&](box2d::WorldContact& c) {
+            ++begins; livePayloads &= livePair(c);
+            if (phase == 2 && !removed) remove(&c);
+        }, EventPriority::BeforeApp);
+        auto lateBegin = cm->contactBegan.listen([&](box2d::WorldContact& c) { ++lateBegins; livePayloads &= livePair(c); });
+        auto stay = cm->contactStay.listen([&](box2d::WorldContact& c) {
+            ++stays; livePayloads &= livePair(c);
+            if (phase == 3 && !removed) remove(&c);
+        }, EventPriority::BeforeApp);
+        auto lateStay = cm->contactStay.listen([&](box2d::WorldContact& c) { ++lateStays; livePayloads &= livePair(c); });
+        int lateEnds = 0;
+        auto end = cm->contactEnded.listen([&](box2d::WorldContact& c) {
+            ++ends; livePayloads &= livePair(c);
+            if (phase == 4) {
+                const int beforeIdle = proxy.ends;
+                a->DestroyFixture(idle); idle = nullptr;
+                check(label + ": End idle removal has no EndContact", proxy.ends == beforeIdle);
+                check(label + ": End retains both live bodies after idle removal", livePair(c) && fixtureCount(a) == 1);
+            }
+        }, EventPriority::BeforeApp);
+        auto lateEnd = cm->contactEnded.listen([&](box2d::WorldContact& c) { ++lateEnds; livePayloads &= livePair(c); });
+        EventListener ob, os, oe;
+        if (kind == 1) {
+            ob = classic.getCollider()->onCollisionEnter.listen([&](box2d::CollisionEvent& c) { ++ownerBegins; livePayloads &= c.other == &partner; });
+            os = classic.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent& c) { ++ownerStays; livePayloads &= c.other == &partner; });
+            oe = classic.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent& c) { ++ownerEnds; livePayloads &= c.other == &partner; });
+        } else if (kind == 2) {
+            ob = mod->onTriggerEnter.listen([&](box2d::Contact2D& c) { ++ownerBegins; livePayloads &= c.other == nullptr && c.otherNode == nullptr; });
+            os = mod->onTriggerStay.listen([&](box2d::Contact2D& c) { ++ownerStays; livePayloads &= c.other == nullptr && c.otherNode == nullptr; });
+            oe = mod->onTriggerExit.listen([&](box2d::Contact2D& c) { ++ownerEnds; livePayloads &= c.other == nullptr && c.otherNode == nullptr; });
+        }
+        raw->Step(0, 8, 3);
+        check(label + ": two initial touching contributors", proxy.witness && touchingContacts(world, a, b) == 2);
+        if (phase != 1) frames.update(world, 0);
+        if (!removed) remove();
+        frames.update(world, 0);
+        const int expectedStays = phase == 1 ? 1 : 2;
+        check(label + ": Begin once, Stay continues, no premature Exit",
+            begins == 1 && lateBegins == 1 && stays == expectedStays && lateStays == expectedStays && ends == 0);
+        check(label + ": owner delivery continues",
+            kind == 0 || (ownerBegins == 1 && ownerStays == expectedStays && ownerEnds == 0));
+        b->SetTransform(b2Vec2(20, 0), 0); raw->Step(0, 8, 3); frames.update(world, 0);
+        frames.update(world, 0);
+        check(label + ": one final Exit with live bodies and owners",
+            ends == 1 && lateEnds == 1 && livePayloads && a->GetFixtureList() &&
+            (kind == 0 || (ownerEnds == 1 && (kind == 1 ? classic.getBody() == a : mod->getBody() == a))));
+        check(label + ": no duplicate Begin or post-Exit Stay",
+            begins == 1 && lateBegins == 1 && stays == expectedStays && lateStays == expectedStays &&
+            (kind == 0 || (ownerBegins == 1 && ownerStays == expectedStays)));
+        world.clear();
+        raw->SetContactListener(cm); // proxy is borrowed and dies before World
+    }
+}
+
+// Review round 3: remove contributors and idle fixtures one at a time, with
+// both possible final fixtures. Continue delivery until the last TOUCHING
+// contributor is gone, then produce one normal surviving-side Exit.
+static void testMixedFixtureRelease(int kind) {
+    for (int phase = 0; phase < 4; ++phase) for (bool lastTouching : {false, true}) {
+        WorldTestFrames frames;
+        box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
+        auto* raw = world.getWorld(); auto* cm = world.getCollisionManager();
+        box2d::CircleBody classic, partner;
+        auto node = make_shared<Node>();
+        box2d::RigidBody2D* mod = nullptr;
+        b2Body* a;
+        if (kind == 1) { classic.setup(world, 0, 0, 30); classic.setSensor(true); a = classic.getBody(); }
+        else if (kind == 2) { mod = node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(30)); mod->setTrigger(); a = mod->getBody(); }
+        else a = rawCircle(raw, 0);
+        partner.setup(world, 30, 0, 30); partner.setSensor(true);
+        auto* b = partner.getBody();
+        b2CircleShape shape; shape.m_radius = 1;
+        b2FixtureDef fd; fd.shape = &shape; fd.isSensor = true;
+        if (kind == 1) fd.userData.pointer = reinterpret_cast<uintptr_t>(classic.getCollider());
+        a->CreateFixture(&fd); a->CreateFixture(&fd);
+        vector<b2Fixture*> idle;
+        for (int i = 0; i < 3; ++i) { shape.m_p.Set(100.0f + i * 3, 0); idle.push_back(a->CreateFixture(&fd)); }
+        struct Proxy : b2ContactListener {
+            b2ContactListener* target;
+            b2Body* body;
+            b2Fixture* witness = nullptr;
+            Proxy(b2ContactListener* t, b2Body* b) : target(t), body(b) {}
+            void BeginContact(b2Contact* c) override {
+                if (!witness) witness = c->GetFixtureA()->GetBody() == body ? c->GetFixtureA() : c->GetFixtureB();
+                target->BeginContact(c);
+            }
+            void EndContact(b2Contact* c) override { target->EndContact(c); }
+        } proxy(cm, a);
+        raw->SetContactListener(&proxy);
+        const string label = "mixed kind=" + to_string(kind) + " phase=" + to_string(phase) + " last-touching=" + to_string(lastTouching);
+        int begins = 0, lateBegins = 0, stays = 0, lateStays = 0, ends = 0, lateEnds = 0;
+        int ownerBegins = 0, ownerStays = 0, ownerEnds = 0;
+        bool removed = false, payloads = true;
+        auto livePair = [&](const box2d::WorldContact& c) { return (c.a == a && c.b == b) || (c.a == b && c.b == a); };
+        auto removeFirst = [&](box2d::WorldContact* c = nullptr) {
+            a->DestroyFixture(proxy.witness); removed = true;
+            check(label + ": original witness removed with two touching contributors", touchingContacts(world, a, b) == 2);
+            if (c) check(label + ": executing payload remains live", livePair(*c));
+        };
+        auto begin = cm->contactBegan.listen([&](box2d::WorldContact& c) {
+            ++begins; payloads &= livePair(c); if (phase == 2 && !removed) removeFirst(&c);
+        }, EventPriority::BeforeApp);
+        auto lateBegin = cm->contactBegan.listen([&](box2d::WorldContact& c) { ++lateBegins; payloads &= livePair(c); });
+        auto stay = cm->contactStay.listen([&](box2d::WorldContact& c) {
+            ++stays; payloads &= livePair(c); if (phase == 3 && !removed) removeFirst(&c);
+        }, EventPriority::BeforeApp);
+        auto lateStay = cm->contactStay.listen([&](box2d::WorldContact& c) { ++lateStays; payloads &= livePair(c); });
+        auto survivor = [&](const box2d::WorldContact& c) { return (c.a == b && !c.b) || (c.b == b && !c.a); };
+        auto end = cm->contactEnded.listen([&](box2d::WorldContact& c) { ++ends; payloads &= survivor(c); }, EventPriority::BeforeApp);
+        auto lateEnd = cm->contactEnded.listen([&](box2d::WorldContact& c) { ++lateEnds; payloads &= survivor(c); });
+        EventListener ob, os, oe;
+        if (kind == 1) {
+            ob = classic.getCollider()->onCollisionEnter.listen([&](box2d::CollisionEvent& c) { ++ownerBegins; payloads &= c.other == &partner; });
+            os = classic.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent& c) { ++ownerStays; payloads &= c.other == &partner; });
+            oe = classic.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++ownerEnds; });
+        } else if (kind == 2) {
+            ob = mod->onTriggerEnter.listen([&](box2d::Contact2D&) { ++ownerBegins; });
+            os = mod->onTriggerStay.listen([&](box2d::Contact2D&) { ++ownerStays; });
+            oe = mod->onTriggerExit.listen([&](box2d::Contact2D&) { ++ownerEnds; });
+        }
+        raw->Step(0, 8, 3);
+        check(label + ": three touching and three idle fixtures", fixtureCount(a) == 6 && touchingContacts(world, a, b) == 3);
+        int expectedStays = 0;
+        if (phase != 1) { frames.update(world, 0); ++expectedStays; }
+        if (!removed) removeFirst();
+        auto verifyUpdate = [&] {
+            const bool touching = touchingContacts(world, a, b) != 0;
+            frames.update(world, 0);
+            expectedStays += touching;
+            check(label + ": exact world delivery after each fixture removal", begins == 1 && lateBegins == 1 &&
+                stays == expectedStays && lateStays == expectedStays && ends == (touching ? 0 : 1) && lateEnds == ends && payloads);
+            check(label + ": exact owner delivery after each fixture removal", kind == 0 ||
+                (ownerBegins == 1 && ownerStays == expectedStays && ownerEnds == 0));
+        };
+        verifyUpdate();
+        auto removeTouching = [&] {
+            b2Fixture* next = nullptr;
+            for (auto* edge = a->GetContactList(); edge; edge = edge->next) {
+                if (edge->other != b || !edge->contact->IsTouching()) continue;
+                auto* contact = edge->contact;
+                next = contact->GetFixtureA()->GetBody() == a ? contact->GetFixtureA() : contact->GetFixtureB();
+                break;
+            }
+            check(label + ": next contributor is touching", next != nullptr);
+            if (next) a->DestroyFixture(next);
+            verifyUpdate();
+        };
+        a->DestroyFixture(idle[0]); verifyUpdate();
+        removeTouching();
+        a->DestroyFixture(idle[1]); verifyUpdate();
+        if (lastTouching) { a->DestroyFixture(idle[2]); verifyUpdate(); removeTouching(); }
+        else { removeTouching(); a->DestroyFixture(idle[2]); verifyUpdate(); }
+        check(label + ": no fixtures or touching contributors remain", !a->GetFixtureList() && touchingContacts(world, a, b) == 0);
+        verifyUpdate(); // no duplicate Begin/Exit or post-Exit Stay
+        world.clear(); raw->SetContactListener(cm);
+    }
+}
+
+static void testSensorJournalSnapshot(bool rawSteps) {
+    WorldTestFrames frames;
+    box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
+    auto* raw = world.getWorld();
+    b2BodyDef def; auto* compound = raw->CreateBody(&def);
+    b2CircleShape shape; shape.m_radius = 1;
+    b2FixtureDef fixture; fixture.shape = &shape; compound->CreateFixture(&fixture);
+    shape.m_p.Set(3, 0); fixture.isSensor = true; compound->CreateFixture(&fixture);
+    auto node = make_shared<Node>(); node->setPos(-15, 0);
+    auto* mod = node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(30));
+    struct Proxy : b2ContactListener {
+        b2ContactListener* target;
+        vector<bool> sensors;
+        explicit Proxy(b2ContactListener* t) : target(t) {}
+        void BeginContact(b2Contact* c) override {
+            sensors.push_back(c->GetFixtureA()->IsSensor() || c->GetFixtureB()->IsSensor());
+            target->BeginContact(c);
+        }
+        void EndContact(b2Contact* c) override { target->EndContact(c); }
+    } proxy(world.getCollisionManager());
+    raw->SetContactListener(&proxy);
+    int collision = 0, trigger = 0, triggerStay = 0;
+    auto solid = mod->onCollisionEnter.listen([&](box2d::Contact2D&) { ++collision; });
+    auto sensor = mod->onTriggerEnter.listen([&](box2d::Contact2D&) { ++trigger; });
+    auto stay = mod->onTriggerStay.listen([&](box2d::Contact2D&) { ++triggerStay; });
+    if (rawSteps) raw->Step(0, 8, 3); else frames.update(world);
+    mod->getBody()->SetTransform(b2Vec2(1.5f, 0), 0);
+    if (rawSteps) raw->Step(0, 8, 3); else frames.update(world);
+    check("sensor snapshot: observed solid then sensor contributions", proxy.sensors == vector<bool>({false, true}));
+    if (rawSteps) {
+        check("sensor snapshot: raw Steps have no early delivery", collision == 0 && trigger == 0 && triggerStay == 0);
+        frames.update(world, 0);
+    }
+    check("sensor snapshot: original Begin stays solid", collision == 1 && trigger == 0);
+    check("sensor snapshot: later Stay includes sensor contributor", triggerStay == 1);
+    world.clear();
+    if (!rawSteps) {
+        // Two contributors within ONE managed bracket still aggregate sensors.
+        def = b2BodyDef(); compound = raw->CreateBody(&def);
+        shape.m_p.Set(0, 0); fixture.isSensor = false; compound->CreateFixture(&fixture);
+        shape.m_p.Set(3, 0); fixture.isSensor = true; compound->CreateFixture(&fixture);
+        auto fresh = make_shared<Node>(); fresh->setPos(45, 0);
+        auto* freshMod = fresh->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(30));
+        int solidEnters = 0, triggerEnters = 0;
+        auto c = freshMod->onCollisionEnter.listen([&](box2d::Contact2D&) { ++solidEnters; });
+        auto t = freshMod->onTriggerEnter.listen([&](box2d::Contact2D&) { ++triggerEnters; });
+        proxy.sensors.clear();
+        frames.update(world);
+        check("sensor snapshot: one managed step observes both contributors", proxy.sensors.size() == 2);
+        check("sensor snapshot: one managed step still aggregates sensors", solidEnters == 0 && triggerEnters == 1);
+        world.clear();
+    }
+}
+
+static void testDeliveryPR2(const string& selected = "all") {
+    for (int kind = 0; kind < 3; ++kind) {
+        const string mode = kind == 0 ? "partial-ownerless" : kind == 1 ? "partial-classic" : "partial-mod";
+        if (selected == "all" || selected == "partial" || selected == mode) testPartialFixtureRelease(kind);
+        const string owner = kind == 0 ? "ownerless" : kind == 1 ? "classic" : "mod";
+        for (const string variant : {"inactive", "revalidate", "mixed"}) {
+            if (selected != "all" && selected != "r3" && selected != variant && selected != variant + "-" + owner) continue;
+            if (variant == "mixed") testMixedFixtureRelease(kind);
+            else testPartialFixtureRelease(kind, variant);
+        }
+    }
+    if (selected == "all" || selected == "fixture-sensor") testRetiredFixtureSensor();
+    if (selected == "all" || selected == "fixtures") testFixtureReleaseReuse(false);
+    if (selected == "all" || selected == "fixtures-owned") testFixtureReleaseReuse(true);
+    if (selected == "all" || selected == "sensor-raw") testSensorJournalSnapshot(true);
+    if (selected == "all" || selected == "sensor-managed") testSensorJournalSnapshot(false);
+    for (const string mode : {"clear-late-world-stay", "clear-late-world-exit", "delete-world-stay", "delete-world-exit",
+        "delete-classic-stay", "delete-classic-exit", "clear-world-begin", "delete-world-begin", "delete-classic-begin",
+        "clear-classic-stay", "clear-classic-exit", "clear-classic-begin", "clear-mod-begin", "clear-mod-stay", "clear-mod-exit",
+        "delete-mod-begin", "delete-mod-stay", "delete-mod-exit"}) {
+        if (selected == "all" || selected == mode) testDeliveryCancellation(mode);
+    }
+    if (selected == "all" || selected == "three-raw-steps-recontact") testThreeRawSteps();
+    if (selected == "all" || selected == "raw-steps-inside-listener") testRawStepsInsideListener();
+    if (selected == "all" || selected == "raw-destroy-unowned-active-exit-reuse") testRawUnownedReuse();
+    if (selected == "all" || selected == "substeps") testSubstepDelivery();
+    if (selected == "all" || selected == "destruction-forwarding") testDestructionForwarding();
+    if (selected == "all" || selected == "triggers") testClassicTriggers();
+    if (selected == "all" || selected == "listener-releases") testListenerReleases();
+    if (selected == "all" || selected == "recorded-order") testRecordedOrder();
+    if (selected == "all" || selected == "setup-caller-deletion") testSetupCallerDeletion();
+    if (selected == "all" || selected == "router-gates") testRouterGates();
+    if (selected == "all" || selected == "classic-source-deletion") testDeletedClassicSource();
+}
+
 int main(int argc, char** argv) {
+    if (argc == 2 && string(argv[1]) == "--contact-lifetimes") {
+        testCompoundEvents();
+        testCompoundHandover();
+        testStayListenerDestroys();
+        testClassicEventLifetimes();
+        testModEventLifetimes();
+        testWorldEventLifetimes();
+        testExitListenerDestroysThirdBody();
+        return g_fail ? 1 : 0;
+    }
+    if (argc >= 2 && string(argv[1]) == "--delivery") {
+        testDeliveryPR2(argc >= 3 ? argv[2] : "all");
+        return g_fail ? 1 : 0;
+    }
+
     g_massDiagnostics = argc == 2 && string(argv[1]) == "--density-and-type";
     if (argc == 2 && string(argv[1]) == "--clear-reuse") {
         testClearReuse();
@@ -3147,6 +4062,7 @@ int main(int argc, char** argv) {
         return g_fail ? 1 : 0;
     }
 
+    testDeliveryPR2();
     testPolyShapeRefuses(world);
     testHullDropWarning(world);
     testPolyShapeValid(world);

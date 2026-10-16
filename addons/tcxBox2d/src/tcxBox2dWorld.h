@@ -5,6 +5,7 @@
 #pragma once
 
 #include "tcxBox2dBodyOwner.h"
+#include "tcxBox2dDispatch.h"
 #include <TrussC.h>
 #include <box2d/box2d.h>
 #include <memory>
@@ -158,14 +159,20 @@ public:
     // -------------------------------------------------------------------------
     // Collision Manager Access
     // -------------------------------------------------------------------------
-    CollisionManager* getCollisionManager() { return collisionManager_.get(); }
+    CollisionManager* getCollisionManager() { return dispatch_->manager.get(); }
 
     // -------------------------------------------------------------------------
+    // Reserve raw SetDestructionListener for internal retirement. Register a
+    // borrowed user delegate here. Fixture callbacks forward after endpoint
+    // retirement; joint callbacks also forward. Preserved by clear/setup.
+    void setDestructionListener(b2DestructionListener* listener) { dispatch_->delegate = listener; }
+
     // Lifetime token (for Mods: detect a world destroyed before its bodies)
     // -------------------------------------------------------------------------
-    std::weak_ptr<int> aliveToken() const { return alive_; }
+    std::weak_ptr<int> aliveToken() const { return dispatch_->token; }
 
 private:
+    friend struct detail::DispatchState;
     friend class Body;
     friend class RigidBody2D;
     friend void detail::routeContact(World*, const WorldContact&, int);
@@ -180,7 +187,7 @@ private:
     void refreshAutoUpdate();
 
     std::unique_ptr<b2World> world_;
-    std::unique_ptr<CollisionManager> collisionManager_;
+    std::shared_ptr<detail::DispatchState> dispatch_;
 
     // Simulation parameters (timeStep_ = fixed sub-step size)
     float timeStep_ = 1.0f / 60.0f;
@@ -191,11 +198,7 @@ private:
     bool autoUpdate_ = true;
     float accumulator_ = 0.0f;
     uint64_t lastStepFrame_ = UINT64_MAX;
-    uint64_t releaseGeneration_ = 0;  // setup changes this even if b2World's address is reused
     tc::EventListener updateListener_;
-
-    // Lifetime token: expires when this World is destroyed.
-    std::shared_ptr<int> alive_ = std::make_shared<int>(0);
 
     // Bounds body
     b2Body* groundBody_ = nullptr;
