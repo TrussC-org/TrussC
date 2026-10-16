@@ -195,6 +195,12 @@ LIBGL_ALWAYS_SOFTWARE=1 \
 
 ## Tests
 
+- `hotReloadDiagnostics/` — the shared Windows guest linker-error matcher:
+  MSVC LNK2019/LNK2001 and lld-link undefined symbols trigger the import-contract
+  hint; compile errors, host link failures and successful guest builds stay quiet.
+  Output/project ownership excludes input-library and status-line false positives.
+  On Windows it also checks separate stdout/stderr destinations, capture beyond
+  pipe-buffer capacity, and the failing exit code.
 - `shaderBindingSlots/` — headless Shader/FullscreenShader slot limits (#362):
   rejected view/image slots leave pending bindings and the image cache unchanged;
   every valid view slot binds, but only supported sampler slots are written.

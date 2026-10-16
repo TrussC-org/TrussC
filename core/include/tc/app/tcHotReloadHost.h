@@ -45,6 +45,8 @@ extern char** environ;
 #include <string>
 #include <vector>
 #include <cstdlib>
+#include "internal/tcHotReloadDiagnostics.h"
+#include "internal/tcWindowsBuildOutput.h"
 
 namespace trussc {
 namespace hot_reload {
@@ -309,7 +311,8 @@ inline string findCMake(const string& buildDir = "") {
 // _spawnvp removes the shell from the loop entirely; any metacharacters
 // become literal argument bytes to cmake.
 // ---------------------------------------------------------------------------
-inline int runBuildCommand(const vector<string>& argv) {
+inline int runBuildCommand(const vector<string>& argv, string& output) {
+    output.clear();
     if (argv.empty()) return -1;
 
 #ifdef _WIN32
@@ -323,26 +326,11 @@ inline int runBuildCommand(const vector<string>& argv) {
         cmdLine += argv[i];
         if (needsQuote) cmdLine += '"';
     }
-    STARTUPINFOA si = {};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput  = GetStdHandle(STD_INPUT_HANDLE);
-    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-    si.hStdError  = GetStdHandle(STD_ERROR_HANDLE);
-    PROCESS_INFORMATION pi = {};
-    vector<char> buf(cmdLine.begin(), cmdLine.end());
-    buf.push_back('\0');
-    if (!CreateProcessA(argv[0].c_str(), buf.data(),
-                        nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si, &pi)) {
+    const int rc = internal::runWindowsBuildWithOutput(cmdLine, output);
+    if (rc == -1) {
         logError("HotReload") << "Failed to launch: " << argv[0];
-        return -1;
     }
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    DWORD exitCode = 1;
-    GetExitCodeProcess(pi.hProcess, &exitCode);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    return (int)exitCode;
+    return rc;
 #else
     vector<char*> cargv;
     cargv.reserve(argv.size() + 1);
@@ -529,9 +517,15 @@ struct Host {
         vector<string> command = {cmake, "--build", buildDir,
                                   "--target", "guest", "--parallel"};
         if (multiConfig) command.insert(command.end(), {"--config", TC_HOT_RELOAD_CONFIG});
-        int rc = runBuildCommand(command);
+        string output;
+        int rc = runBuildCommand(command, output);
         if (rc != 0) {
             logError() << "[HotReload] Build failed (exit code " << rc << ")";
+#ifdef _WIN32
+            if (internal::hasWindowsGuestLinkError(output)) {
+                logWarning() << internal::windowsGuestLinkHint();
+            }
+#endif
             return false;
         }
         return true;
