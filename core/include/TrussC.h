@@ -2180,6 +2180,7 @@ namespace internal {
         if (!ctx.isMain) mcp::internal::drainDeferredResponses(&ctx);
         #endif
         auto& queue = ctx.pendingScreenshotPaths;
+        captureScreenshots(ctx.asyncScreenshots);
         if (queue.empty()) return;
         for (const auto& p : queue) {
             captureWindowToFile(p);
@@ -2706,7 +2707,8 @@ namespace internal {
         // and the deferred screenshot (or MCP tc_get_screenshot) actually fires —
         // otherwise a request arriving in a paused/event-driven app would never
         // be served and a blocked MCP HTTP worker would hang.
-        if (!mainWindowContext().pendingScreenshotPaths.empty()
+        if (!mainWindowContext().asyncScreenshots.pending.empty()
+            || !mainWindowContext().pendingScreenshotPaths.empty()
             #ifndef __EMSCRIPTEN__
             || mcp::internal::hasDeferredResponses()
             #endif
@@ -2763,6 +2765,7 @@ namespace internal {
     inline void _cleanup_cb() {
         if (!beginExitCleanup()) return;
         if (auto token = appRunToken()) token->store(false);
+        internal::cancelResourceBackends();
         CrashPhaseScope crashPhase("cleanup");
         writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
         // Session end may arrive inside a secondary window's modal loop.
@@ -3143,6 +3146,7 @@ template<typename AppClass>
 sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) {
     internal::appExitCode() = 0;
     if (auto token = internal::appRunToken()) token->store(false);
+    internal::cancelResourceBackends();
     internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
 
     // Set pixel perfect mode

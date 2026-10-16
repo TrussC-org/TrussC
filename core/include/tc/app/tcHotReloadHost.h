@@ -148,6 +148,7 @@ struct GuestLibrary {
             mcpOwner = reinterpret_cast<const void*>(++generation);
             mcp::internal::setRegistrationOwner(mcpOwner);
             if (auto token = internal::appRunToken()) token->store(false);
+            internal::cancelResourceBackends();
             internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
             App* raw = createApp();
             auto deleter = destroyApp;
@@ -163,6 +164,7 @@ struct GuestLibrary {
 
     void destroy() {
         if (auto token = internal::appRunToken()) token->store(false);
+        internal::cancelResourceBackends();
         if (mcpOwner) {
             mcp::internal::removeRegistrationsOwnedBy(mcpOwner);
             mcp::internal::setRegistrationOwner(nullptr);
@@ -176,6 +178,8 @@ struct GuestLibrary {
             app->cleanup();
         }
         app.reset();
+        // Cleanup/destructors can have submitted another old-run operation.
+        internal::cancelResourceBackends();
     }
 
     void unload() {

@@ -238,13 +238,13 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
         t["y"] = &trussc::DragDropEventArgs::y;
     }
     {
-        sol::usertype<trussc::ConsoleEventArgs> t = lua->new_usertype<trussc::ConsoleEventArgs>("ConsoleEventArgs");
-        t["args"] = &trussc::ConsoleEventArgs::args;
-        t["raw"] = &trussc::ConsoleEventArgs::raw;
+        sol::usertype<trussc::MicStartResult> t = lua->new_usertype<trussc::MicStartResult>("MicStartResult");
+        t["message"] = &trussc::MicStartResult::message;
+        t["success"] = &trussc::MicStartResult::success;
     }
     {
-        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
-        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
+        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
+        t["text"] = &trussc::ClipboardPastedEventArgs::text;
     }
 }
 #ifdef _MSC_VER

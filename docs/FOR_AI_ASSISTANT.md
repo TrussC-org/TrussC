@@ -2556,11 +2556,13 @@ float log2(float x) [std]  // Base-2 logarithm
 MOUSE_BUTTON_LEFT  // Left mouse button
 MOUSE_BUTTON_MIDDLE  // Middle mouse button
 MOUSE_BUTTON_RIGHT  // Right mouse button
+Event<ScreenshotSaveEventArgs> & onScreenshotSave()  // Host-owned screenshot completion event. Fires once per saveScreenshotAsync request on main in a later frame, never inline; expired application runs suppress delivery. Retain the EventListener returned by listen().
 Vec2 operator*(float s, const Vec2 & v) [+4]  // Component-wise multiplication
 PI ⚠️deprecated  // Ratio of circumference to diameter. ≈ 3.14159. Prefer HALF_TAU for half a turn.
 QUARTER_TAU  // Quarter circle (PI/2)
 float remainder(float x, float y) [std]  // IEEE floating-point remainder of x/y
 Right  // Direction shorthand for Direction::Right
+void saveScreenshotAsync(const fs::path & path)  // Capture the requesting window at its next present, then encode/write on a worker. The destination is frozen at submission. At most four pending jobs per window include capture, writing and undelivered results; further requests report WriteFailed with Screenshot queue is full through onScreenshotSave(). Hidden secondary windows wait for their own present without blocking other windows. Closing before capture or calling without a render window reports a deferred failure. Native readback still runs on main and may stall that frame. Web snapshots the canvas and submits a PNG/JPEG download; browser download policy and actual disk completion are unobservable. Serialize other saves to the same destination yourself.
 float tanh(float x) [std]  // Hyperbolic tangent
 TAU  // Ratio of circumference to radius; the radian measure of one full turn. ≈ 6.28318.
 Top  // Direction shorthand for Direction::Top
@@ -3439,9 +3441,16 @@ size_t MicInput::getBuffer(float * outBuffer, size_t numSamples)  // Copy the la
 std::string MicInput::getDeviceName() const  // Name of the capture device start() opened; empty while stopped, and on Web (the browser does not expose it).
 int MicInput::getSampleRate() const  // Sample rate the microphone was opened at.
 bool MicInput::isRunning() const  // True while the microphone device is open and capturing.
+bool MicInput::isStarting() const  // True from submission through queued readiness/failure, cleared immediately before onStart. False after cancellation and while merely running. On Web this also tracks legacy start() permission/setup.
 void MicInput::onAudioData(const float * input, size_t frameCount)  // Mic input callback: receive captured input samples (internal, called from the audio thread).
-bool MicInput::start(int sampleRate = DEFAULT_SAMPLE_RATE)  // Open the microphone device at the given sample rate and begin capturing. Returns false on failure.
-void MicInput::stop()  // Stop capture and close the microphone device.
+bool MicInput::start(int sampleRate = DEFAULT_SAMPLE_RATE)  // Open the microphone device at the given sample rate and begin capturing. Native start waits for its lifecycle thread startup result, returns false on failure, and emits no onStart. Web start returns true when the request is submitted; use isStarting/isRunning for actual readiness and startAsync/onStart for failure details. Web requires a secure context and a user gesture.
+void MicInput::startAsync(int sampleRate = DEFAULT_SAMPLE_RATE)  // Begin a fresh microphone startup attempt without waiting. onStart reports readiness or failure on main in a later frame. A new start, stop or destruction cancels the pending attempt without waiting and suppresses its event. Each native run owns initialization through teardown on one lifecycle thread; a replacement opens after predecessor cleanup. All handle operations are on main. Web requires a secure context and user gesture: getUserMedia and AudioContext resume begin directly in this call. A suspended context is a failure with retry guidance; an unanswered permission prompt remains pending until stop.
+void MicInput::stop()  // Cancel capture/startup immediately and post device teardown without waiting. No cancellation event is emitted. Native teardown runs on the thread that opened the device; application exit waits for retirement.
+```
+
+### MicStartResult — Microphone startup outcome. Success requires usable capture; permission denial or a missing device is a failure. Converts explicitly to bool.
+
+```cpp
 ```
 
 ### Mod — Attachable behavior base class for Node. Subclass it, override the lifecycle and input hooks, and attach with node->addMod<T>(). Lifecycle: setup() on attach, then each frame earlyUpdate() -> Node::update() -> update() -> draw(), and onDestroy() on removal. Override isExclusive() to allow only one instance per Node, and canAttachTo() to restrict attachment.
@@ -3844,6 +3853,11 @@ bool ScreenRecorder::isRecording() const [macos,windows,linux,android,ios]  // C
 SaveResult ScreenRecorder::start(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically. Calling start while recording finalizes the current file first. If the recorded Fbo is destroyed mid-recording, the recording stops and finalizes automatically. Returns SaveResult for path preparation and encoder opening. Success starts an in-place stream; check close()/stop() for finalization. If the previous take times out waiting for GPU frames, its last completion finalizes it independently of the new take.
 SaveResult ScreenRecorder::stop() [macos,windows,linux,android,ios]  // Disconnect the audio listener and wait up to one second for audio callbacks (a Warning if one is still running), then wait up to 2 seconds for GPU readbacks before finalizing. If GPU frames remain, logs one Error and returns WriteFailed with message recording still has frames in flight. The callbacks retain their State and writer; the last completion drains audio and closes the file. Returns SaveResult for finalization or the retained failure; repeated calls do not repeat the timeout Error. Caller errors and transient readback failures do not fail the take. No temporary/rename is used.
 VideoWriter & ScreenRecorder::writer() [macos,windows,linux,android,ios]  // Access the underlying VideoWriter for advanced introspection
+```
+
+### ScreenshotSaveEventArgs — Completion of an asynchronous screenshot: the actual destination and save result. Delivered on main in a later frame, including rejected requests.
+
+```cpp
 ```
 
 ### ScrollBar — Visual scroll indicator RectNode that syncs with a ScrollContainer and supports drag scrolling

@@ -17,6 +17,7 @@ struct LoadHost {
     std::mutex mutex;
     ResourceLoadBatch mailbox;
     ResourceLoadProbe probe;
+    std::vector<std::weak_ptr<std::function<void()>>> stops;
 #ifndef __EMSCRIPTEN__
     struct Worker { std::thread thread; bool done = false; };
     std::list<std::shared_ptr<Worker>> workers;
@@ -120,8 +121,26 @@ void startResourceLoad(std::function<void()> preparation) {
     }
 #endif
 }
+std::shared_ptr<std::function<void()>> registerResourceStop(std::function<void()> stop) {
+    auto registration = std::make_shared<std::function<void()>>(std::move(stop));
+    auto& owner = host();
+    std::lock_guard<std::mutex> lock(owner.mutex);
+    std::erase_if(owner.stops, [](const auto& entry) { return entry.expired(); });
+    owner.stops.push_back(registration);
+    return registration;
+}
+void cancelResourceBackends() {
+    std::vector<std::shared_ptr<std::function<void()>>> stops;
+    {
+        auto& owner = host();
+        std::lock_guard<std::mutex> lock(owner.mutex);
+        for (auto& entry : owner.stops) if (auto stop = entry.lock()) stops.push_back(stop);
+    }
+    for (auto& stop : stops) (*stop)();
+}
 void finishResourceLoadsAtExit() {
     if (auto token = appRunToken()) token->store(false);
+    cancelResourceBackends();
     auto& owner = host();
 #ifndef __EMSCRIPTEN__
     {
@@ -158,6 +177,7 @@ void waitForResourceLoadsForTests() {
 #endif
 }
 void waitForResourceLoadsAtAppExit() {
+    cancelResourceBackends();
     waitForResourceLoadsForTests();
     // Cache hits can retain a committed GPU atlas. Release invalidated queue
     // entries here, on main and before the old GPU context is torn down.

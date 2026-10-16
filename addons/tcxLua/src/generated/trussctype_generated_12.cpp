@@ -223,9 +223,13 @@ void tcxLuaGenShard_12(const std::shared_ptr<sol::state>& lua) {
         "Default", sol::var(trussc::AudioBackend::Default),
         "Null", sol::var(trussc::AudioBackend::Null));
     {
-        sol::usertype<trussc::ResizeEventArgs> t = lua->new_usertype<trussc::ResizeEventArgs>("ResizeEventArgs");
-        t["height"] = &trussc::ResizeEventArgs::height;
-        t["width"] = &trussc::ResizeEventArgs::width;
+        sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
+        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
+        t["name"] = &trussc::AudioDeviceInfo::name;
+    }
+    {
+        sol::usertype<trussc::TcpReceiveEventArgs> t = lua->new_usertype<trussc::TcpReceiveEventArgs>("TcpReceiveEventArgs");
+        t["data"] = &trussc::TcpReceiveEventArgs::data;
     }
 }
 #ifdef _MSC_VER

@@ -186,12 +186,10 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         t["resolution"] = &trussc::CurveStyle::resolution;
         t["tolerance"] = &trussc::CurveStyle::tolerance;
     }
-    {
-        sol::usertype<trussc::SendResult> t = lua->new_usertype<trussc::SendResult>("SendResult");
-        t["error"] = &trussc::SendResult::error;
-        t["id"] = &trussc::SendResult::id;
-        t["ok"] = &trussc::SendResult::ok;
-    }
+    lua->new_usertype<trussc::Deliver>("Deliver",
+        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
+        "Inline", sol::var(trussc::Deliver::Inline),
+        "Main", sol::var(trussc::Deliver::Main));
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

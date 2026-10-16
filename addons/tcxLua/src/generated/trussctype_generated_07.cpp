@@ -243,14 +243,16 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
         sol::meta_function::equal_to, [](trussc::SoundStream::Kind a, trussc::SoundStream::Kind b){ return a == b; },
         "Eager", sol::var(trussc::SoundStream::Kind::Eager),
         "Stream", sol::var(trussc::SoundStream::Kind::Stream));
-    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
-        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
-        "U8", sol::var(trussc::PixelFormat::U8),
-        "F32", sol::var(trussc::PixelFormat::F32));
-    lua->new_usertype<trussc::Deliver>("Deliver",
-        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
-        "Inline", sol::var(trussc::Deliver::Inline),
-        "Main", sol::var(trussc::Deliver::Main));
+    {
+        sol::usertype<trussc::VideoErrorEventArgs> t = lua->new_usertype<trussc::VideoErrorEventArgs>("VideoErrorEventArgs");
+        t["errorCode"] = &trussc::VideoErrorEventArgs::errorCode;
+        t["message"] = &trussc::VideoErrorEventArgs::message;
+    }
+    {
+        sol::usertype<trussc::DeviceLostEventArgs> t = lua->new_usertype<trussc::DeviceLostEventArgs>("DeviceLostEventArgs");
+        t["cancel"] = &trussc::DeviceLostEventArgs::cancel;
+        t["reason"] = &trussc::DeviceLostEventArgs::reason;
+    }
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

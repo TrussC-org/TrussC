@@ -5350,14 +5350,14 @@ description.ja = "マイクデバイスが開いてキャプチャ中の間 true
 description.ko = "마이크 디바이스가 열려 캡처 중일 때 true"
 
 ["MicInput::start"]
-description.en = "Open the microphone device at the given sample rate and begin capturing. Returns false on failure."
-description.ja = "指定サンプルレートでマイクデバイスを開き、キャプチャを開始。失敗時 false を返す"
-description.ko = "지정한 샘플레이트로 마이크 디바이스를 열고 캡처를 시작. 실패 시 false 반환"
+description.en = "Open the microphone device at the given sample rate and begin capturing. Native start waits for its lifecycle thread startup result, returns false on failure, and emits no onStart. Web start returns true when the request is submitted; use isStarting/isRunning for actual readiness and startAsync/onStart for failure details. Web requires a secure context and a user gesture."
+description.ja = "指定サンプルレートでマイク入力を開始。ネイティブではライフサイクルスレッドの起動結果を待ち、失敗時 false。onStart は通知しない。Web の true は要求の送信を表し、実際の準備完了は isStarting/isRunning、失敗の詳細は startAsync/onStart で確認する。Web はセキュアコンテキストとユーザー操作が必要。"
+description.ko = "지정한 샘플레이트로 마이크 캡처를 시작한다. 네이티브는 라이프사이클 스레드의 시작 결과를 기다리며 실패 시 false를 반환하고 onStart를 내지 않는다. Web의 true는 요청 제출을 뜻한다. 실제 준비 상태는 isStarting/isRunning, 오류 상세는 startAsync/onStart로 확인한다. Web은 보안 컨텍스트와 사용자 동작이 필요하다."
 
 ["MicInput::stop"]
-description.en = "Stop capture and close the microphone device."
-description.ja = "キャプチャを停止してマイクデバイスを閉じる"
-description.ko = "캡처를 정지하고 마이크 디바이스를 닫음"
+description.en = "Cancel capture/startup immediately and post device teardown without waiting. No cancellation event is emitted. Native teardown runs on the thread that opened the device; application exit waits for retirement."
+description.ja = "入力・起動待ちを即座に取り消し、待機せずデバイスの後始末を依頼する。取消イベントは通知しない。ネイティブの破棄は初期化と同じスレッドで実行し、アプリ終了時に後始末を待つ。"
+description.ko = "캡처·시작 대기를 즉시 취소하고 기다리지 않고 장치 정리를 요청한다. 취소 이벤트는 내지 않는다. 네이티브 해제는 초기화한 스레드에서 실행하며 앱 종료 시 정리를 기다린다."
 
 ["MixMode"]
 description.en = "Sound channel mixing: Auto (match the output) or DownmixMono."
@@ -20298,3 +20298,60 @@ description.ko = "유효한 비동기 결과를 반영한 뒤 메인에서 한 �
 description.en = "Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation."
 description.ja = "現在の非同期要求が準備中またはメイン反映待ちか。onLoad の前と取消し後は false。"
 description.ko = "현재 비동기 요청이 준비 중이거나 메인 반영을 기다리는지. onLoad 직전 및 취소 후에는 false."
+
+["ScreenshotSaveEventArgs"]
+description.en = "Completion of an asynchronous screenshot: the actual destination and save result. Delivered on main in a later frame, including rejected requests."
+description.ja = "非同期スクリーンショットの完了。実際の保存先と保存結果を持ち、受付失敗も含めて後のフレームのメインスレッドで通知する。"
+description.ko = "비동기 스크린샷 완료. 실제 저장 경로와 저장 결과를 담으며 거부된 요청도 이후 프레임의 메인 스레드에서 알린다."
+
+["ScreenshotSaveEventArgs::path"]
+description.en = "Resolved absolute native output path, including extension normalization; on Web, the download filename only."
+description.ja = "拡張子補正後のネイティブの絶対保存先。Web ではダウンロードファイル名のみ。"
+description.ko = "확장자 보정 후의 네이티브 절대 저장 경로. Web에서는 다운로드 파일 이름만 사용한다."
+
+["ScreenshotSaveEventArgs::result"]
+description.en = "Checked native write/close/replacement result. Web success means a download click was submitted; browser disk completion cannot be observed."
+description.ja = "ネイティブでは書き込み・クローズ・置換の確認結果。Web の成功はダウンロード要求の送信を表し、実際のディスク保存完了は確認できない。"
+description.ko = "네이티브 쓰기·닫기·교체 확인 결과. Web의 성공은 다운로드 요청 제출을 뜻하며 실제 디스크 저장 완료는 관찰할 수 없다."
+
+["saveScreenshotAsync"]
+description.en = "Capture the requesting window at its next present, then encode/write on a worker. The destination is frozen at submission. At most four pending jobs per window include capture, writing and undelivered results; further requests report WriteFailed with Screenshot queue is full through onScreenshotSave(). Hidden secondary windows wait for their own present without blocking other windows. Closing before capture or calling without a render window reports a deferred failure. Native readback still runs on main and may stall that frame. Web snapshots the canvas and submits a PNG/JPEG download; browser download policy and actual disk completion are unobservable. Serialize other saves to the same destination yourself."
+description.ja = "要求元ウィンドウの次の present で撮影し、ワーカーでエンコード・保存する。保存先は要求時に確定する。撮影待ち・保存中・未通知を含め各ウィンドウ最大4件で、超過は onScreenshotSave() から WriteFailed（Screenshot queue is full）を通知する。非表示の副ウィンドウは自身の present を待ち、他のウィンドウを妨げない。撮影前の閉鎖や描画ウィンドウなしの要求は後のフレームで失敗を通知する。ネイティブの読み戻しはメインスレッド上で行い、そのフレームが停止する場合がある。Web はキャンバスを PNG/JPEG のダウンロードとして送信し、ブラウザの許可やディスク保存完了は確認できない。同じ保存先に対する他の保存処理は呼び出し側で直列化する。"
+description.ko = "요청한 창의 다음 present에서 캡처하고 워커에서 인코딩·저장한다. 저장 경로는 요청 시 확정된다. 캡처 대기·쓰기·미통지 결과를 포함해 창마다 최대 4건이며 초과 요청은 onScreenshotSave()에서 WriteFailed(Screenshot queue is full)로 알린다. 숨겨진 보조 창은 자신의 present를 기다리며 다른 창을 막지 않는다. 캡처 전 창 닫기나 렌더 창 없는 호출은 이후 프레임에서 실패를 알린다. 네이티브 읽기는 메인 스레드에서 실행되어 해당 프레임이 지연될 수 있다. Web은 PNG/JPEG 다운로드를 제출하며 브라우저 정책과 디스크 저장 완료는 관찰할 수 없다. 같은 경로의 다른 저장 작업은 호출자가 직렬화한다."
+related = ["onScreenshotSave", "ScreenshotSaveEventArgs", "saveScreenshot"]
+
+["onScreenshotSave"]
+description.en = "Host-owned screenshot completion event. Fires once per saveScreenshotAsync request on main in a later frame, never inline; expired application runs suppress delivery. Retain the EventListener returned by listen()."
+description.ja = "ホスト所有のスクリーンショット完了イベント。saveScreenshotAsync の各要求について、後のフレームのメインスレッドで1回通知し、呼び出し中には通知しない。終了したアプリ実行の通知は抑止する。listen() が返す EventListener を保持する。"
+description.ko = "호스트 소유 스크린샷 완료 이벤트. saveScreenshotAsync 요청마다 이후 프레임의 메인 스레드에서 한 번 알리며 호출 중에는 알리지 않는다. 종료된 앱 실행의 통지는 억제한다. listen()이 반환한 EventListener를 유지한다."
+
+["MicStartResult"]
+description.en = "Microphone startup outcome. Success requires usable capture; permission denial or a missing device is a failure. Converts explicitly to bool."
+description.ja = "マイク起動の結果。利用可能な入力の準備完了で成功となり、権限拒否やデバイスなしは失敗。bool へ明示変換できる。"
+description.ko = "마이크 시작 결과. 사용 가능한 캡처가 준비되어야 성공이며 권한 거부나 장치 없음은 실패이다. bool로 명시적 변환할 수 있다."
+
+["MicStartResult::success"]
+description.en = "True after the capture device or Web Audio processor is ready."
+description.ja = "入力デバイスまたは Web Audio のプロセッサーの準備が完了した場合 true。"
+description.ko = "캡처 장치 또는 Web Audio 프로세서가 준비되면 true."
+
+["MicStartResult::message"]
+description.en = "Empty on success; backend error code/detail or browser exception name on failure."
+description.ja = "成功時は空。失敗時はバックエンドのエラーコード・詳細、またはブラウザの例外名。"
+description.ko = "성공 시 비어 있으며 실패 시 백엔드 오류 코드·상세 또는 브라우저 예외 이름."
+
+["MicInput::startAsync"]
+description.en = "Begin a fresh microphone startup attempt without waiting. onStart reports readiness or failure on main in a later frame. A new start, stop or destruction cancels the pending attempt without waiting and suppresses its event. Each native run owns initialization through teardown on one lifecycle thread; a replacement opens after predecessor cleanup. All handle operations are on main. Web requires a secure context and user gesture: getUserMedia and AudioContext resume begin directly in this call. A suspended context is a failure with retry guidance; an unanswered permission prompt remains pending until stop."
+description.ja = "待機せず新しいマイク起動を開始する。準備完了または失敗を後のフレームのメインスレッドで onStart に通知する。再起動・stop・破棄は待たずに保留中の試行を取り消し、その通知を抑止する。ネイティブでは試行ごとに1つのスレッドが初期化から破棄までを担当し、置換は旧試行の後始末後に開く。ハンドル操作はすべてメインスレッドで行う。Web はセキュアコンテキストとユーザー操作が必要で、この呼び出し中に getUserMedia と AudioContext の resume を開始する。コンテキストが停止中なら再試行方法付きの失敗となり、未回答の権限要求は stop まで保留できる。"
+description.ko = "기다리지 않고 새 마이크 시작을 요청한다. 준비 완료 또는 실패는 이후 프레임의 메인 스레드에서 onStart로 알린다. 새 시작·stop·소멸은 대기 없이 보류된 시도를 취소하고 이벤트를 억제한다. 네이티브의 각 실행은 하나의 스레드가 초기화부터 해제까지 담당하며 교체는 이전 정리 후 장치를 연다. 모든 핸들 조작은 메인 스레드에서 한다. Web은 보안 컨텍스트와 사용자 동작이 필요하며 이 호출에서 직접 getUserMedia와 AudioContext resume을 시작한다. 중지된 컨텍스트는 재시도 안내와 함께 실패하며 미응답 권한 요청은 stop까지 대기할 수 있다."
+related = ["MicInput::onStart", "MicInput::isStarting", "MicInput::start"]
+
+["MicInput::onStart"]
+description.en = "One later-frame main-thread result per uncancelled startAsync attempt. isStarting is false and running/device metadata are published before listeners run. Listeners may restart or destroy this MicInput. Synchronous native start() emits no event."
+description.ja = "取り消されていない startAsync の試行ごとに、後のフレームのメインスレッドで1回通知する。リスナー実行前に isStarting は false となり、動作状態とデバイス情報を反映する。リスナーから再起動やこの MicInput の破棄が可能。同期の start() は通知しない。"
+description.ko = "취소되지 않은 startAsync 시도마다 이후 프레임의 메인 스레드에서 한 번 알린다. 리스너 실행 전에 isStarting은 false가 되고 실행 상태와 장치 정보를 반영한다. 리스너에서 재시작하거나 이 MicInput을 삭제할 수 있다. 동기 start()는 이벤트를 내지 않는다."
+
+["MicInput::isStarting"]
+description.en = "True from submission through queued readiness/failure, cleared immediately before onStart. False after cancellation and while merely running. On Web this also tracks legacy start() permission/setup."
+description.ja = "要求時から準備完了・失敗の通知待ちまで true。onStart の直前に false となる。取り消し後と単なる入力動作中は false。Web では従来の start() の権限・準備待ちも示す。"
+description.ko = "요청부터 준비·실패 통지 대기까지 true이며 onStart 직전에 false가 된다. 취소 후와 단순 실행 중에는 false. Web에서는 기존 start()의 권한·설정 대기도 추적한다."
