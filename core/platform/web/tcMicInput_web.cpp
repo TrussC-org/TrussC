@@ -95,6 +95,7 @@ EM_JS(void, beginWebMic, (unsigned key, int rate, int frames, ReadyCallback read
 });
 }
 void launchMic(const std::shared_ptr<MicState>& state, bool) {
+    state->ring.resize(MicInput::BUFFER_SIZE, 0.0f);
     do { state->webKey = ++nextMicKey; } while (!state->webKey || micStates().contains(state->webKey));
     micStates().emplace(state->webKey, state);
     beginWebMic(state->webKey, state->sampleRate, MicInput::BUFFER_SIZE, ready, audio);
@@ -108,6 +109,7 @@ void cancelMic(const std::shared_ptr<MicState>& state) {
     }, state->webKey);
     micStates().erase(state->webKey);
     state->predecessor.reset();
+    state->done = true;
 }
 void setMicBackendForTests(MicOpen, MicClose) {}
 }

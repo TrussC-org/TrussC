@@ -2398,7 +2398,12 @@ bool AudioEngine::waitForCallbacks(bool giveUp) {
 
 namespace internal {
 namespace {
-struct MicTestBackend { MicOpen open; MicClose close; };
+struct MicTestBackend {
+    MicOpen open;
+    MicClose close;
+    MicAuthorizationQuery authorization;
+    MicPermissionRequest requestPermission;
+};
 MicTestBackend& micTestBackend() {
     static auto* backend = new MicTestBackend;
     return *backend;
@@ -2449,11 +2454,23 @@ void closeMic(MicState& state) {
 void setMicBackendForTests(MicOpen open, MicClose close) {
     micTestBackend().open = std::move(open); micTestBackend().close = std::move(close);
 }
+void setMicAuthorizationForTests(MicAuthorizationQuery query, MicPermissionRequest request) {
+    micTestBackend().authorization = std::move(query);
+    micTestBackend().requestPermission = std::move(request);
+}
 void cancelMic(const std::shared_ptr<MicState>& state) {
-    { std::lock_guard<std::mutex> lock(state->lifecycle); state->cancelled = true; }
+    {
+        std::lock_guard<std::mutex> lock(state->lifecycle);
+        state->cancelled = true;
+        // stop() passes any older unfinished cleanup past this workerless
+        // state, rather than retaining it as part of the dependency chain.
+        if (!state->lifecycleStarted) state->done = true;
+    }
     state->changed.notify_all();
 }
-void launchMic(const std::shared_ptr<MicState>& state, bool asynchronous) {
+namespace {
+void startMicLifecycle(const std::shared_ptr<MicState>& state, bool asynchronous) {
+    { std::lock_guard<std::mutex> lock(state->lifecycle); state->lifecycleStarted = true; }
     startResourceLoad([state, asynchronous, open = micTestBackend().open, close = micTestBackend().close] {
         auto previous = std::move(state->predecessor);
         while (previous) {
@@ -2470,7 +2487,11 @@ void launchMic(const std::shared_ptr<MicState>& state, bool asynchronous) {
         if (state->runBound && !appRunIsAlive(state->run)) state->cancelled = true;
         MicStartResult result;
         try {
-            if (!state->cancelled) result = open ? open(*state) : openMic(*state);
+            if (!state->cancelled) {
+                // Permission-only attempts never need a sample ring.
+                state->ring.resize(MicInput::BUFFER_SIZE, 0.0f);
+                result = open ? open(*state) : openMic(*state);
+            }
         } catch (const std::exception& e) { result = {false, e.what()}; }
         if (state->runBound && !appRunIsAlive(state->run)) state->cancelled = true;
         const bool started = result.success; // listeners may edit the delivered result
@@ -2488,11 +2509,65 @@ void launchMic(const std::shared_ptr<MicState>& state, bool asynchronous) {
         // This SAME lifecycle thread owns every partial and successful cleanup.
         if (close) close(*state); else closeMic(*state);
         {
+            std::lock_guard<std::mutex> lock(state->ringMutex);
+            std::vector<float>().swap(state->ring);
+        }
+        {
             std::lock_guard<std::mutex> lock(state->lifecycle);
             state->done = true;
         }
         state->changed.notify_all();
     });
+}
+void failMicStart(const std::shared_ptr<MicState>& state, bool asynchronous, std::string message) {
+    {
+        std::lock_guard<std::mutex> lock(state->lifecycle);
+        state->result = {false, std::move(message)};
+        state->startupDone = state->done = true;
+    }
+    state->changed.notify_all();
+    if (asynchronous) { completeMic(state); probeResourceLoad("mic-ready", {}); }
+}
+constexpr const char* micDenied = "Microphone access denied (System Settings → Privacy & Security → Microphone)";
+} // namespace
+void launchMic(const std::shared_ptr<MicState>& state, bool asynchronous) {
+    // Query BEFORE even creating a capture context/device: CoreAudio can block
+    // inside ma_device_init while the system consent dialog remains unanswered.
+    const auto& backend = micTestBackend();
+    const auto authorization = backend.authorization ? backend.authorization() :
+#ifdef __APPLE__
+        micAuthorizationPlatform();
+#else
+        MicAuthorization::Authorized;
+#endif
+    if (authorization == MicAuthorization::Denied || authorization == MicAuthorization::Restricted) {
+        failMicStart(state, asynchronous, micDenied);
+        return;
+    }
+    if (authorization == MicAuthorization::NotDetermined) {
+        // Neither the OS block nor the mailbox retains MicState/the user object.
+        // Only main-thread delivery can launch a worker; exit discards delivery.
+        auto completion = [weak = std::weak_ptr(state), asynchronous](bool granted) {
+            if (!asynchronous) return; // sync start() requires an explicit retry
+            auto pending = weak.lock();
+            if (!pending || pending->cancelled || (pending->runBound && !appRunIsAlive(pending->run))) return;
+            enqueueResourceLoad([weak, granted] {
+                auto live = weak.lock();
+                if (!live || live->cancelled || (live->runBound && !appRunIsAlive(live->run))) return;
+                try {
+                    if (granted) startMicLifecycle(live, true);
+                    else failMicStart(live, true, micDenied);
+                } catch (const std::exception& e) { failMicStart(live, true, e.what()); }
+            });
+        };
+        if (backend.requestPermission) backend.requestPermission(std::move(completion));
+#ifdef __APPLE__
+        else requestMicPermissionPlatform(std::move(completion));
+#endif
+        if (!asynchronous) failMicStart(state, false, "permission requested; call start() again after granting");
+        return;
+    }
+    startMicLifecycle(state, asynchronous);
 }
 } // namespace internal
 int MicInput::selectedBackend() {

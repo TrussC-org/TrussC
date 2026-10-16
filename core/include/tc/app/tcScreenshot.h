@@ -12,7 +12,11 @@ struct ScreenshotSaveEventArgs {
 };
 // Capture the requesting window at its next present; completion is delivered
 // on main in a later frame. Native readback itself still runs on main.
+// Completions are delivered during runApp / runHeadlessApp; in a bare main()
+// without an app run, no completion event fires.
 void saveScreenshotAsync(const fs::path& path);
+// Completions are delivered during runApp / runHeadlessApp; in a bare main()
+// without an app run, no completion event fires.
 Event<ScreenshotSaveEventArgs>& onScreenshotSave();
 
 namespace internal {

@@ -2,8 +2,15 @@
 
 namespace trussc {
 namespace internal {
+namespace {
+std::atomic<size_t> liveMicStates{0};
+}
+MicState::MicState() { ++liveMicStates; }
+MicState::~MicState() { --liveMicStates; }
+size_t micStatesAliveForTests() { return liveMicStates.load(); }
 void MicState::audio(const float* input, size_t frames) {
     std::lock_guard<std::mutex> lock(ringMutex);
+    if (ring.empty()) return;
     for (size_t i = 0; i < frames; ++i) {
         ring[writePos] = input[i];
         writePos = (writePos + 1) % ring.size();
@@ -34,6 +41,15 @@ void MicInput::stop() {
     if (state_) {
         internal::cancelMic(state_);
         predecessor_ = std::move(state_);
+        // Permission failures/cancellations have no worker to consume their
+        // chain. Hand only unfinished cleanup forward, releasing completed
+        // states (and their stop registrations) without waiting on a worker.
+        while (predecessor_) {
+            auto previous = predecessor_;
+            std::lock_guard<std::mutex> lock(previous->lifecycle);
+            if (!previous->done) break;
+            predecessor_ = std::move(previous->predecessor);
+        }
     }
     starting_ = false; running_ = false; deviceName_.clear();
     if (wasRunning) logNotice("MicInput") << "stopped";
@@ -56,7 +72,10 @@ bool MicInput::beginStart(int sampleRate, bool asynchronous) {
             sampleRate_ = ready.sampleRate;
             deviceName_ = running_ ? ready.name : std::string{};
             apply_.reset();
-            if (asynchronous) (*delivery)(ready.result);
+            if (asynchronous) {
+                if (running_) logNotice("MicInput") << "started (" << ready.sampleRate << " Hz, mono, " << ready.name << ")";
+                (*delivery)(ready.result);
+            }
             // A listener can delete or restart this object.
         });
     state->apply = apply_;

@@ -227,6 +227,8 @@ public:
     // serialized on main (direct sample access keeps its existing mixer rules).
     // Web without pthreads defers CPU decode to a frame, which may stall it.
     // App exit waits for loads still decoding; cancelling never waits.
+    // Completions are delivered during runApp / runHeadlessApp; in a bare main()
+    // without an app run, no completion event fires.
     void loadAsync(const fs::path& path);
     Event<LoadResult> onLoad;
     bool isLoading() const { return async_.loading(); }
@@ -2042,10 +2044,17 @@ public:
     MicInput& operator=(MicInput&&) = delete;
     ~MicInput();
 
-    // Initialize (open microphone device)
+    // Initialize (open microphone device). macOS/iOS: if consent is undecided,
+    // request permission and return false; call start() again after granting.
     bool start(int sampleRate = DEFAULT_SAMPLE_RATE);
     // Main-thread operation. Web requires a secure context and user gesture.
+    // macOS/iOS request undecided consent before capture init, without a worker;
+    // isStarting stays true until answered or cancelled. Exit never awaits consent.
+    // Completions are delivered during runApp / runHeadlessApp; in a bare main()
+    // without an app run, no completion event fires.
     void startAsync(int sampleRate = DEFAULT_SAMPLE_RATE);
+    // Completions are delivered during runApp / runHeadlessApp; in a bare main()
+    // without an app run, no completion event fires.
     Event<MicStartResult> onStart;
     bool isStarting() const;
 
