@@ -169,15 +169,16 @@ public:
     }
 };
 
-void runCameraChecks(int samples = 1) {
+int runCameraChecks(int samples = 1) {
     WindowSettings settings;
     // Windows may clamp a small window's client area (96 → 120), so checks
     // compare against the size the window actually got.
     settings.setSize(96, 64);
     settings.setHighDpi(false);
     settings.sampleCount = samples;
-    runApp<CameraChecksApp>(settings);
-    check("all six camera scenarios completed", cameraChecksFinished);
-    check("review behavior probes and screen readback completed", reviewDrawn && reviewCaptured);
-    reviewAfterFrame = {};
+    return tcCoreTest::runDisplayTest<CameraChecksApp>(settings, failures, [] {
+        check("all six camera scenarios completed", cameraChecksFinished);
+        check("review behavior probes and screen readback completed", reviewDrawn && reviewCaptured);
+        reviewAfterFrame = {};
+    });
 }

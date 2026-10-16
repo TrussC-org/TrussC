@@ -1,5 +1,6 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 #include <cstdio>
 #include <cstring>
 
@@ -102,6 +103,6 @@ int reviewSwapchainMetadataSamples() { return internal::currentWindowContext().s
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     checkTargetOwnership();
     checkLegacyHandoff();
-    if (argc > 1 && std::strcmp(argv[1], "--gpu-check") == 0) runCameraChecks(argc > 2 && std::strcmp(argv[2], "--msaa4") == 0 ? 4 : 1);
+    if (argc > 1 && std::strcmp(argv[1], "--gpu-check") == 0) return runCameraChecks(argc > 2 && std::strcmp(argv[2], "--msaa4") == 0 ? 4 : 1);
     return failures ? 1 : 0;
 }

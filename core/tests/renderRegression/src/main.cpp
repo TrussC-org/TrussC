@@ -1,6 +1,7 @@
 // #821, PR 0. Frame-indexed scenes: no elapsed-time inputs or external assets.
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 #include "regression.glsl.h"
 #include <array>
 #include <cstdio>
@@ -583,9 +584,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         }
         WindowSettings settings;
         settings.setSize(256,192); settings.setSwapInterval(0); settings.sampleCount = 1;
-        const int result = runApp<RegressionApp>(settings);
-        // Windows/Linux return; retain startup failures as well as probe failures.
-        if (result != 0) return result;
+        // The verdict leaves through the app (macOS never returns from runApp);
+        // a startup failure keeps runApp's non-zero result.
+        return tcCoreTest::runDisplayTest<RegressionApp>(settings, failures);
     } catch (const std::exception& e) { check(e.what(),false); }
     return failures ? 1 : 0;
 #endif

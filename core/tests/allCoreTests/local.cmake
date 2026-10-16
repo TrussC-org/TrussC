@@ -44,7 +44,9 @@ foreach(_TC_DIR IN LISTS _TC_CORE_TEST_DIRS)
 endforeach()
 
 if("renderRegression" IN_LIST _TC_CORE_TEST_NAMES)
-    trussc_compile_shaders(${PROJECT_NAME} "${_TC_CORE_TESTS_DIR}/renderRegression/src")
+    # Its own shader target: the app's <name>_shaders already exists (#820).
+    trussc_compile_shaders(renderRegression "${_TC_CORE_TESTS_DIR}/renderRegression/src")
+    target_link_libraries(${PROJECT_NAME} PRIVATE renderRegression_shaders)
 endif()
 list(LENGTH _TC_CORE_TEST_NAMES _TC_CORE_TEST_COUNT)
 message(STATUS "[${PROJECT_NAME}] ${_TC_CORE_TEST_COUNT} core tests: ${_TC_CORE_TEST_NAMES}")
