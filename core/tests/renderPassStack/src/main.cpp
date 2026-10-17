@@ -11,6 +11,10 @@ namespace {
 int failures = 0;
 bool completed = false;
 int screenCaptures = 0;
+int expectedV3dNotices = -1;
+int v3dNotices = 0;
+bool v3dNoticeLevelCorrect = true;
+constexpr const char* v3dNotice = "[RenderTarget] Mesa V3D: flushing before MSAA resolve (Mesa bug fixed in 25.1.5)";
 void check(const char* name, bool value) {
     std::printf("%s: %s\n", name, value ? "PASS" : "FAIL");
     if (!value) ++failures;
@@ -121,6 +125,22 @@ void stateAndPixels(int samples, bool differentFormat) {
     check("sequential activations reuse idle leases", leaseCount() == before);
     a.begin(); a.end();
     expect(read(a),8,8,Color(1,0,0),"fresh LOAD activation retains persistent color");
+    // #858: Mesa trims incomplete triangles before colour load/store bookkeeping.
+    Shader incomplete;
+    check("incomplete-primitive shader loads", incomplete.load(stack_mesh_shader_desc));
+    const ShaderVertex vertices[] = {
+        {-0.5f,-0.5f,0,0,0,0,1,0,1}, {0.5f,-0.5f,0,0,0,0,1,0,1}};
+    for (int count : {1, 2}) {
+        a.begin(); incomplete.begin();
+        incomplete.submitVertices(vertices, count, PrimitiveType::Triangles);
+        incomplete.end(); a.end();
+        expect(read(a),8,8,Color(1,0,0), count == 1 ?
+               "LOAD triangle count 1 preserves persistent red" :
+               "LOAD triangle count 2 preserves persistent red");
+    }
+    // #858: no geometry. Colour CLEAR must still update the MSAA resolve.
+    a.begin(0,1,0); a.end();
+    expect(read(a),8,8,Color(0,1,0),"CLEAR colour with zero draws updates resolve");
     a.begin(); clear(0,0,1); a.end();
     expect(read(a),8,8,Color(0,0,1),"explicit restart clear erases previous color");
 }
@@ -402,6 +422,16 @@ class StackApp : public App {
 public:
     void setup() override {
         setFps(VSYNC);
+        if (expectedV3dNotices >= 0) {
+            check("V3D Notice absent before first resolving pass", v3dNotices == 0);
+            Fbo probe;
+            probe.allocate(8,8,4);
+            probe.begin(1,0,0); probe.end();
+            check("first resolving pass emits expected V3D Notice at Notice level",
+                  v3dNotices == expectedV3dNotices && v3dNoticeLevelCorrect);
+            for (int i = 0; i < 3; ++i) { probe.begin(1,0,0); probe.end(); }
+            check("several resolving passes do not repeat V3D Notice", v3dNotices == expectedV3dNotices);
+        }
         screenChild_.allocate(20,16,4);
         unfinished_.allocate(8,8);
         persistent_.allocate(16,12);
@@ -473,9 +503,22 @@ public:
 }
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (argc == 1) { std::puts("SKIP: use --gpu-check [--msaa4] for target-stack pixel tests"); return 0; }
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--expect-v3d-notice") == 0) expectedV3dNotices = 1;
+        if (std::strcmp(argv[i], "--expect-no-v3d-notice") == 0) expectedV3dNotices = 0;
+    }
+    auto noticeListener = getLogger().onLog.listen([](LogEventArgs& e) {
+        if (e.message == v3dNotice) {
+            ++v3dNotices;
+            v3dNoticeLevelCorrect &= e.level == LogLevel::Notice;
+        }
+    });
     WindowSettings settings; settings.setSize(256,192); settings.setHighDpi(true);
     settings.sampleCount = argc > 2 && std::strcmp(argv[2],"--msaa4") == 0 ? 4 : 1;
     return tcCoreTest::runDisplayTest<StackApp>(settings, failures, [] {
         check("all stack cases completed", completed && screenCaptures >= 2);
+        if (expectedV3dNotices >= 0)
+            check("V3D Notice count stays correct across the entire stack suite",
+                  v3dNotices == expectedV3dNotices && v3dNoticeLevelCorrect);
     });
 }

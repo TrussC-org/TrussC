@@ -26,6 +26,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#include <cstring>
 #include <fstream>
 #include <mutex>
 #include <thread>
@@ -1303,6 +1304,8 @@ void logThreadNotWaited() {
 namespace {
 // Set while this thread logs a sokol panic (see internal::isLogNonBlocking).
 thread_local bool logNonBlocking = false;
+// Process lifetime, including sg_shutdown()/sg_setup() and hot reload (#249).
+std::atomic<bool> v3dResolveFlushNoticed{false};
 } // namespace
 
 namespace internal {
@@ -1343,7 +1346,14 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
     const bool noLogger = loggerDestroyed.load();
     if (!noLogger) {
         try {
-            if (logLevel == 0) {
+            // [TrussC] This item is emitted only after the V3D pre-resolve flush.
+            // Match the tag too: other sokol modules have independent item IDs.
+            if (tag && std::strcmp(tag, "sg") == 0 &&
+                logItem == SG_LOGITEM_TRUSSC_GL_V3D_RESOLVE_FLUSH) {
+                if (!v3dResolveFlushNoticed.exchange(true)) {
+                    logNotice("RenderTarget") << "Mesa V3D: flushing before MSAA resolve (Mesa bug fixed in 25.1.5)";
+                }
+            } else if (logLevel == 0) {
                 // A panic: the process ends right after, so the sinks do not
                 // wait for the lock (a thread holding it may never let go).
                 struct NonBlocking {

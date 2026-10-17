@@ -9,7 +9,10 @@ samples 1/4; color/depth LOAD, fresh activations, explicit clear, lazy screen
 submission, exclusive pooled contexts, transforms/camera/scissor/pipeline restore,
 version-copy preparation, mip finalization, and public readback restrictions.
 The MSAA-interruption test checks that red drawn before the child survives beside
-green drawn after resume, after resolving the outer Fbo. Run it on every backend.
+green drawn after resume, after resolving the outer Fbo. LOAD passes also issue
+triangle counts 1 and 2 and require the persistent red image to survive; these
+incomplete primitives expose Mesa V3D trimming before colour bookkeeping (#858).
+A colour CLEAR with zero draws must update the resolve. Run these on every backend.
 
 Shader scopes remain open across repeated children and nested scopes. Their full
 RGBA output must equal a flattened reference, and half-alpha probes must
@@ -50,3 +53,11 @@ ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_
 Leak detection is disabled for the process-lifetime backend/host pools. Address
 and undefined-behavior checks remain enabled. Use the machine's build wrapper
 for both build commands where required.
+
+For the #858 activation Notice regression, run the GPU modes with
+`--expect-v3d-notice` under the test preload's `TC_TEST_GL_RENDERER='V3D 7.1.10.2'`
+override (`TC_TEST_V3D_NO_POISON=1`), and with `--expect-no-v3d-notice` on native
+non-V3D. These options check the exact message and Notice level, absence before
+any resolve, delivery by the first resolving pass, and no repeats across three
+more resolves and the remaining stack suite. Both samples 1/4 modes apply.
+The override exists only in `.p858/v3d-empty-preload.c`, never in production.

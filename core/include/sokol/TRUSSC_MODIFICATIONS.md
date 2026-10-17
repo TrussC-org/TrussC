@@ -492,3 +492,34 @@ All modifications by tettou771
   its backend cleanup check. Frame/tree/event paths need no teardown guards.
 - Shared runtime signal handling, Logger markers and MCP drain semantics are
   documented in [EXIT_PROTOCOL.md](../../../docs/EXIT_PROTOCOL.md).
+
+## Mesa V3D pre-resolve submission and activation Notice (#858)
+
+At GL backend setup, `GL_RENDERER` must start with the exact `V3D ` prefix
+(including the space). This enables native names such as `V3D 4.2` and
+`V3D 7.1.10.2`, while excluding Zink's wrapped Vulkan device name, for example
+`zink Vulkan 1.3(V3D 4.2.14.0 (MESA_V3DV))`. Each resolving raster pass submits
+with one `glFlush()` before its first resolve, regardless of draws or load
+actions; all resolve blits still execute. Passes without resolves add no flush.
+
+The Windows desktop-GL embedded loader registers `glGetString` and `glFlush`
+in `_SG_GL_FUNCS` and defines `GL_RENDERER` as `0x1F01`. Its existing generated
+pointer declarations and WGL/`opengl32.dll` lookup populate both functions.
+The other GL paths use their platform GL/GLES headers. The round-2 checks
+cover the Windows branch before/after, Linux GLX/EGL, both Android header
+branches and Emscripten; macOS GL received a source/API audit without a native
+SDK build. Full commands, scope and numerical reruns are in `REPORT.md`.
+
+Round-2 reruns passed: **244 GPU stack runs / 104,432 assertions**, **16 raw
+GLES3/GLCORE runs / 496 checks**, **8 regression self-checks / 128 scenes**,
+and **16 header/logging check commands**, with zero failures. All **88** exact
+workaround Notices occur in native-V3D processes, once per process; normal
+and forced Zink emit none. Both native names remain positive controls.
+
+The pre-resolve `glFlush()` emits the `[TrussC]` log item
+`SG_LOGITEM_TRUSSC_GL_V3D_RESOLVE_FLUSH`. TrussC's existing `internal::sokolLog`
+bridge handles it as a RenderTarget Notice once per process, guarded by an
+atomic in `tcGlobal.cpp` (including backend reinitialization). Other informational
+items retain their usual Verbose mapping. The bridge supplies the exact message
+also in release builds, where sokol may omit message strings. No query API,
+header-inline mutable state, or Mesa version check is added.
