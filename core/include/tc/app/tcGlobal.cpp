@@ -215,50 +215,17 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
         << " -> " << newMaxVertices << ", commands " << budget.maxCommands
         << " -> " << newMaxCommands;
 
-    // 1. Shutdown and re-init sokol_gl with larger buffers. sgl_shutdown()
-    //    destroys every sgl context and every sgl pipeline (including the
-    //    swapchain & FBO RenderTarget caches), so there is nothing to destroy by
-    //    hand first.
-    //    Font texture/sampler/view are sg resources — they survive sgl_shutdown.
-    sgl_shutdown();
-
+    const int oldVertices = budget.maxVertices, oldCommands = budget.maxCommands;
     budget.maxVertices = newMaxVertices;
     budget.maxCommands = newMaxCommands;
-
-    sgl_desc_t sgldesc = {};
-    sgldesc.logger.func = internal::sokolLog;
-    sgldesc.pipeline_pool_size = 256;
-    sgldesc.max_vertices = newMaxVertices;
-    sgldesc.max_commands = newMaxCommands;
-    sgldesc.allocator.alloc_fn = smemtrack_alloc;
-    sgldesc.allocator.free_fn = smemtrack_free;
-    sgl_setup(&sgldesc);
-
-    // 2. The swapchain RenderTarget's cached pipelines are now stale (their context
-    //    was torn down). Drop them and re-warm — the next frame's setupScreenFov
-    //    runs every frame and would otherwise create a pipeline mid-frame, which
-    //    corrupts the frame (the same reason we pre-warm at setup). Warm against the
-    //    swapchain target explicitly in case a resize ever fires outside a swapchain
-    //    context.
-    internal::currentWindowContext().swapchainTarget.resources().context = sgl_default_context();
-    internal::currentWindowContext().swapchainTarget.resources().cache.clear();
-    assert(internal::currentTarget().passKind == TargetPassKind::Swapchain);
-    active2D(BlendMode::Alpha);
-    active2D(BlendMode::Add);
-    active2D(BlendMode::Multiply);
-    active2D(BlendMode::Screen);
-    active2D(BlendMode::Subtract);
-    active2D(BlendMode::Disabled);
-    activePremult();
-    activeCoverage2D();
-    activeClear();
-    active3D();
-
-    // NOTE: each FBO's RenderTarget cache (and its sgl context) is also invalidated
-    // by sgl_shutdown but is NOT rebuilt here — FBOs surviving an sgl buffer resize
-    // is a pre-existing limitation, out of scope for this refactor.
+    if (!rebuildTargetResources()) {
+        budget.maxVertices = oldVertices; budget.maxCommands = oldCommands;
+        budget.pendingResize = newMaxVertices; budget.pendingCommands = newMaxCommands;
+        return;
+    }
 
     budget.pendingResize = 0;
+    budget.pendingCommands = 0;
 }
 } // namespace internal
 
@@ -457,6 +424,10 @@ void RenderTarget::beginPass(TargetPassStart reason) {
             window.lastSwapchainDrawable = binding.swapchain.metal.current_drawable;
         }
         pass.swapchain = binding.swapchain;
+        colorFormat = pass.swapchain.color_format;
+        sampleCount = pass.swapchain.sample_count;
+        depthFormat = pass.swapchain.depth_format;
+        hasDepth = depthFormat != SG_PIXELFORMAT_NONE;
         width = pass.swapchain.width;
         height = pass.swapchain.height;
         if (!viewport.active) viewport = {0, 0, float(width), float(height), true};
@@ -477,7 +448,10 @@ void RenderTarget::beginPass(TargetPassStart reason) {
         pass.action.depth.store_action = resumable ? SG_STOREACTION_STORE : SG_STOREACTION_DONTCARE;
     }
     sg_begin_pass(&pass);
-    if (fixedPipeline.id) sg_apply_pipeline(fixedPipeline);
+    if (hasFixedPipeline) {
+        const auto selected = pipeline(fixedPipeline);
+        if (selected.raw.id) sg_apply_pipeline(selected.raw);
+    }
     inPass = true;
     passStartedThisFrame = true;
 }
@@ -486,6 +460,10 @@ void RenderTarget::endPass() {
     if (passKind == TargetPassKind::Transfer) {
         if (endTransfer) endTransfer(owner);
     } else if (inPass) {
+        // GL framebuffer blits obey scissor too. A clipped direct draw must
+        // not restrict the attachment-wide MSAA resolve at pass end. Keep the
+        // CPU clip untouched; resume/selectTarget reapplies it before drawing.
+        sg_apply_scissor_rect(0, 0, width, height, true);
         sg_end_pass();
         inPass = false;
     }
@@ -610,14 +588,20 @@ bool popTarget(RenderTarget& target, uint64_t token) {
     if (entry.lease) {
         attempt([&] { reportSglStackErrors(sgl_context_error(entry.lease->context), target.isFbo); });
         sgl_tc_context_reset(entry.lease->context);
-        entry.lease->leased = false;
         target.pooledResources = nullptr;
+        returnTargetResources(*entry.lease);
     }
     window.targetStack.pop_back();
     target.activation = 0;
     target.activeWindow = nullptr;
     auto& parent = *window.targetStack.back().target;
-    if (target.passKind == TargetPassKind::PublicFbo) parent.inheritLogicalDrawFlags(target);
+    if (target.passKind == TargetPassKind::PublicFbo) {
+        parent.inheritLogicalDrawFlags(target);
+        // Preserve the parent's effective role/depth (e.g. EasyCam), while
+        // reconciling its blend-sensitive selection with returned logical state.
+        if (parent.selectedPipeline.role == PipelineRole::Fill || parent.selectedPipeline.role == PipelineRole::Geometry3D)
+            parent.selectedPipeline.blend = parent.currentBlendMode;
+    }
     attempt([&] { selectTarget(parent); });
     if (entry.resumeParent && window.targetStack.back().phase == TargetPassPhase::Rendering) {
         attempt([&] { parent.beginPass(TargetPassStart::Resume); });
@@ -725,6 +709,7 @@ void internal::endGpuFrame() {
         int newVerts = budget.maxVertices * 4;
         if (newVerts > budget.pendingResize) {
             budget.pendingResize = newVerts;
+            budget.pendingCommands = 0;
             logNotice("sokol_gl") << "Vertex buffer overflow detected ("
                 << budget.maxVertices << " vertices, "
                 << budget.maxCommands << " commands). "
@@ -1666,27 +1651,331 @@ std::unordered_map<uint64_t, FboSharedResources>& fboSharedMap() {
     return map;
 }
 
-RenderTargetResources* leaseTargetResources(sg_pixel_format format, int samples) {
-    const uint64_t key = (uint64_t(samples) << 32) | uint32_t(format);
-    auto& bucket = fboSharedMap()[key];
-    for (auto& lease : bucket.leases) {
-        if (!lease->leased && lease->context.id) {
-            lease->leased = true;
-            return lease.get();
+namespace {
+struct PipelineWindowScope {
+    WindowContext* previous;
+    explicit PipelineWindowScope(WindowContext& window) : previous(currentWindowCtx()) { currentWindowCtx() = &window; }
+    ~PipelineWindowScope() { currentWindowCtx() = previous; }
+};
+uint64_t nextPipelineGeneration() { static uint64_t serial = 0; return ++serial; }
+std::unordered_map<uint32_t, uint64_t>& pipelinePrograms() {
+    // Global Shaders can clear after static teardown and sg_shutdown.
+    static auto* programs = new std::unordered_map<uint32_t, uint64_t>;
+    return *programs;
+}
+uint64_t pipelineProgram(sg_shader shader) {
+    auto& programs = pipelinePrograms();
+    auto it = programs.find(shader.id);
+    if (it != programs.end()) return it->second;
+    return programs.emplace(shader.id, nextPipelineGeneration()).first->second;
+}
+uint64_t targetBucketKey(sg_pixel_format format, int samples, sg_pixel_format depth) {
+    return uint64_t(uint32_t(format)) | (uint64_t(uint32_t(depth)) << 16) | (uint64_t(uint32_t(samples)) << 32);
+}
+std::vector<std::weak_ptr<PipelineGeneration>>& pipelineGenerations() {
+    // Weak entries do not own GPU resources; keep this registry available to
+    // late global Shader destructors, like pendingGpuDestroys().
+    static auto* generations = new std::vector<std::weak_ptr<PipelineGeneration>>;
+    return *generations;
+}
+std::shared_ptr<PipelineGeneration> makePipelineGeneration() {
+    auto generation = std::make_shared<PipelineGeneration>();
+    generation->serial = nextPipelineGeneration();
+    auto& generations = pipelineGenerations();
+    generations.erase(std::remove_if(generations.begin(), generations.end(), [](const auto& value) { return value.expired(); }), generations.end());
+    generations.push_back(generation);
+    return generation;
+}
+PipelineCacheKey canonicalPipeline(const PipelineKey& request, const sg_pipeline_desc& d) {
+    PipelineCacheKey key;
+    auto add = [&](auto value) { key.fields.push_back(uint32_t(value)); };
+    auto real = [&](float value) {
+        uint32_t bits = 0; if (value != 0) std::memcpy(&bits, &value, sizeof(bits));
+        add(bits);
+    };
+    add(request.family); add(request.role);
+    const auto program = pipelineProgram(d.shader);
+    add(program); add(program >> 32); add(d.shader.id); add(d.compute);
+    for (const auto& buffer : d.layout.buffers) { add(buffer.stride); add(buffer.step_func); add(buffer.step_rate); }
+    for (const auto& attr : d.layout.attrs) { add(attr.buffer_index); add(attr.offset); add(attr.format); }
+    add(d.depth.pixel_format); add(d.depth.compare); add(d.depth.write_enabled);
+    real(d.depth.bias); real(d.depth.bias_slope_scale); real(d.depth.bias_clamp);
+    add(d.stencil.enabled);
+    for (const auto& face : {d.stencil.front, d.stencil.back}) {
+        add(face.compare); add(face.fail_op); add(face.depth_fail_op); add(face.pass_op);
+    }
+    add(d.stencil.read_mask); add(d.stencil.write_mask); add(d.stencil.ref); add(d.color_count);
+    for (const auto& color : d.colors) {
+        add(color.pixel_format); add(color.write_mask); add(color.blend.enabled);
+        add(color.blend.src_factor_rgb); add(color.blend.dst_factor_rgb); add(color.blend.op_rgb);
+        add(color.blend.src_factor_alpha); add(color.blend.dst_factor_alpha); add(color.blend.op_alpha);
+    }
+    add(d.primitive_type); add(d.index_type); add(d.cull_mode); add(d.face_winding); add(d.sample_count);
+    real(d.blend_color.r); real(d.blend_color.g); real(d.blend_color.b); real(d.blend_color.a);
+    add(d.alpha_to_coverage_enabled);
+    return key;
+}
+}
+std::unordered_map<uint32_t, uint32_t>& pipelineOwnerCtx() {
+    static auto* owners = new std::unordered_map<uint32_t, uint32_t>;
+    return *owners;
+}
+PipelineKey PipelineKey::immediate(ImmediateSelection selection) {
+    PipelineKey key; key.selection = selection; key.role = selection.role;
+    switch (selection.role) {
+        case PipelineRole::Premult: key.desc = pipeDescPremult(selection.depth); break;
+        case PipelineRole::Coverage: key.desc = pipeDescCoverage2D(selection.depth); break;
+        case PipelineRole::Clear: key.desc = pipeDescClear(); break;
+        case PipelineRole::Geometry3D:
+            key.desc = pipeDesc2D(selection.blend, selection.depth); break;
+        default: key.desc = pipeDesc2D(selection.blend, selection.depth); break;
+    }
+    return key;
+}
+PipelineGeneration::~PipelineGeneration() {
+    for (const auto& entry : cache) deferGpuDestroy(entry.second);
+}
+bool RenderTargetResources::makeContext(const sgl_context_desc_t& desc, const char* what) {
+    if (context.id) return true;
+    if (contextFailed) return false;
+    context = sgl_make_context(&desc);
+    contextFailed = !context.id;
+    generation = nextPipelineGeneration();
+    if (contextFailed) logWarning("RenderTarget") << "could not create context for " << what;
+    return !contextFailed;
+}
+void RenderTargetResources::release() {
+    for (const auto& entry : cache) {
+        if (entry.second.id) sgl_destroy_pipeline(entry.second);
+#ifndef NDEBUG
+        pipelineOwnerCtx().erase(entry.second.id);
+#endif
+    }
+    cache.clear(); selections.clear(); rawCache.reset();
+    // sokol_gl owns its mandatory default context until shutdown. A resized
+    // main window switches to a dedicated context without trying to destroy it.
+    if (context.id && context.id != sgl_default_context().id) sgl_destroy_context(context);
+    context = {}; contextFailed = false;
+}
+PipelineSelection RenderTarget::pipeline(const PipelineKey& request) {
+    PipelineSelection result;
+    if (!sg_isvalid()) return result;
+    auto& bundle = resources();
+    if (!bundle.rawCache) {
+        if (passKind == TargetPassKind::Swapchain) bundle.rawCache = makePipelineGeneration();
+        else {
+            auto& bucket = fboSharedMap()[targetBucketKey(colorFormat, sampleCount, hasDepth ? depthFormat : SG_PIXELFORMAT_NONE)];
+            if (!bucket.generation) bucket.generation = makePipelineGeneration();
+            bundle.rawCache = bucket.generation;
         }
+    }
+    auto desc = request.desc;
+    desc.label = nullptr; // never retain a guest/subclass-owned string
+    desc.color_count = 1;
+    desc.colors[0].pixel_format = colorFormat;
+    desc.sample_count = std::max(1, sampleCount);
+    desc.depth.pixel_format = hasDepth ? depthFormat : SG_PIXELFORMAT_NONE;
+    if (!hasDepth) { desc.depth.compare = SG_COMPAREFUNC_ALWAYS; desc.depth.write_enabled = false; desc.stencil.enabled = false; }
+    // Normalize defaults before field-wise encoding (never hash padded structs).
+    const auto normalized = sg_query_pipeline_defaults(&desc);
+    const auto key = canonicalPipeline(request, normalized);
+    result.generation = bundle.rawCache;
+    const bool customImmediate = request.role == PipelineRole::Coverage ||
+        ((request.role == PipelineRole::Fill || request.role == PipelineRole::Geometry3D) &&
+         (request.selection.blend == BlendMode::Multiply || request.selection.blend == BlendMode::Screen));
+    const bool needsProgram = request.family == PipelineFamily::Raw ||
+        (customImmediate && sg_query_backend() != SG_BACKEND_DUMMY);
+    const bool programReady = desc.shader.id ? sg_query_shader_state(desc.shader) == SG_RESOURCESTATE_VALID : !needsProgram;
+    if (request.family == PipelineFamily::Raw) {
+        auto& cache = bundle.rawCache->cache;
+        auto found = cache.find(key);
+        if (found != cache.end()) { result.raw = found->second; return result; }
+        auto pipeline = programReady ? sg_make_pipeline(&normalized) : sg_pipeline{};
+        if (sg_query_pipeline_state(pipeline) != SG_RESOURCESTATE_VALID) {
+            deferGpuDestroy(pipeline); pipeline = {};
+            logWarning("RenderTarget") << "could not create raster pipeline; affected draws skipped until rebuild";
+        }
+        cache.emplace(key, pipeline); result.raw = pipeline;
+    } else if (bundle.context.id) {
+        auto found = bundle.cache.find(key);
+        if (found != bundle.cache.end()) {
+            // The failed handle also carries the just-requested semantic role:
+            // a persistent load must record it even while its draws are skipped.
+            bundle.selections[found->second.id] = request.selection;
+            result.immediate = found->second; return result;
+        }
+        // sgl supplies its vertex layout and default shader; keep those fields
+        // unset rather than passing raw-sg's inferred defaults to its backend.
+        auto pipeline = programReady ? sgl_context_make_pipeline(bundle.context, &desc) : sgl_pipeline{};
+        bundle.cache.emplace(key, pipeline);
+        bundle.selections[pipeline.id] = request.selection;
+        if (pipeline.id) {
+#ifndef NDEBUG
+            pipelineOwnerCtx()[pipeline.id] = bundle.context.id;
+#endif
+        } else logWarning("RenderTarget") << "could not create immediate pipeline; affected draws skipped until rebuild";
+        result.immediate = pipeline;
+    }
+    return result;
+}
+void retirePipelineProgram(sg_shader shader) {
+    auto erase = [&](RenderTargetResources& bundle) {
+        if (!bundle.rawCache) return;
+        auto& cache = bundle.rawCache->cache;
+        for (auto it = cache.begin(); it != cache.end();) {
+            // Shader id is a canonical field, never an object address.
+            if (it->first.fields[4] == shader.id) {
+                deferGpuDestroy(it->second); it = cache.erase(it);
+            } else ++it;
+        }
+    };
+    for (const auto& weak : pipelineGenerations()) {
+        RenderTargetResources bundle; bundle.rawCache = weak.lock(); erase(bundle);
+    }
+    pipelinePrograms().erase(shader.id);
+}
+void invalidateTargetBucket(sg_pixel_format format, int samples, sg_pixel_format depth) {
+    auto it = fboSharedMap().find(targetBucketKey(format, samples, depth));
+    if (it == fboSharedMap().end() || !it->second.generation) return;
+    auto& bucket = it->second;
+    bucket.generation.reset(); bucket.allocationFailed = false;
+    for (auto& lease : bucket.leases) if (!lease->leased) lease->release();
+}
+void returnTargetResources(RenderTargetResources& lease) {
+    lease.leased = false;
+    // An invalidated parked generation lives through its activation, then
+    // retires immediately. Idle leases never pin obsolete raw caches.
+    for (auto& entry : fboSharedMap()) {
+        for (const auto& candidate : entry.second.leases) if (candidate.get() == &lease) {
+            if (lease.rawCache != entry.second.generation) lease.release();
+            return;
+        }
+    }
+}
+namespace {
+bool hasRecordedWork(RenderTarget& target) {
+    const bool recorded = sgl_tc_context_has_pending_draws(target.resources().context);
+    return recorded || !target.deferredShaderDraws.empty() ||
+        !target.deferredPbrDraws.empty() || !target.deferredPointDraws.empty();
+}
+}
+void prepareWindowTarget() {
+    auto& window = currentWindowContext();
+    auto& target = window.swapchainTarget;
+    auto& resources = target.resources();
+    const auto native = window.isMain ? sglue_environment().defaults : sg_environment_defaults{};
+    const auto format = window.isMain
+        ? SwapchainTargetFormat{native.color_format, native.sample_count}
+        : swapchainTargetFormat(window);
+    const int width = window.isMain ? sapp_width() : window.fbWidth;
+    const int height = window.isMain ? sapp_height() : window.fbHeight;
+    const auto depth = window.isMain ? native.depth_format : target.depthFormat;
+    const bool changed = resources.width && (resources.width != width || resources.height != height ||
+        resources.color != format.colorFormat || resources.samples != format.sampleCount || resources.depth != depth);
+    if (changed && hasRecordedWork(target)) {
+        // Keep both the recording context and its attachment signature until
+        // consumption or the next global commit (which rewinds every SGL
+        // context); unchanged metadata retries this at the next beginFrame.
+        sgl_set_context(resources.context);
+        return;
+    }
+    target.width = width; target.height = height; target.colorFormat = format.colorFormat;
+    target.sampleCount = format.sampleCount; target.depthFormat = depth; target.hasDepth = depth != SG_PIXELFORMAT_NONE;
+    if (changed) {
+        assert(!target.inPass && window.targetStack.size() <= 1);
+        resources.release();
+    }
+    resources.width = width; resources.height = height; resources.color = format.colorFormat;
+    resources.samples = format.sampleCount; resources.depth = depth;
+    if (!resources.context.id) {
+        sgl_context_desc_t desc = {};
+        desc.max_vertices = sglBudget().maxVertices; desc.max_commands = sglBudget().maxCommands;
+        desc.color_format = target.colorFormat; desc.depth_format = target.depthFormat; desc.sample_count = target.sampleCount;
+        resources.makeContext(desc, "a window");
+    }
+    sgl_set_context(resources.context);
+    if (changed) {
+        for (bool depthTest : {false, true}) {
+            for (auto blend : {BlendMode::Alpha, BlendMode::Add, BlendMode::Multiply, BlendMode::Screen, BlendMode::Subtract, BlendMode::Disabled})
+                target.pipeline(PipelineKey::immediate(fillSelection(blend, depthTest)));
+            target.pipeline(PipelineKey::immediate({PipelineRole::Premult, BlendMode::Alpha, depthTest}));
+            target.pipeline(PipelineKey::immediate({PipelineRole::Coverage, BlendMode::Alpha, depthTest}));
+        }
+        activeClear(); active3D();
+    }
+}
+bool rebuildTargetResources() {
+    std::vector<WindowContext*> windows{&mainWindowContext()};
+    for (auto* window : openWindows()) if (&window->context() != &mainWindowContext()) windows.push_back(&window->context());
+    // Re-evaluate live queues on every retry. A different window's global
+    // commit rewinds immediate SGL work, but leaves these raw draw queues
+    // intact; those queues must still prevent shutdown/rebuild until replay.
+    for (auto* window : windows) if (window->targetStack.size() > 1 || window->swapchainTarget.inPass || window->swapchainTarget.openShaderScopes || hasRecordedWork(window->swapchainTarget)) {
+        logWarning("RenderTarget") << "sgl resize deferred until every window has no pending work or active target pass";
+        return false;
+    }
+    sgl_shutdown();
+#ifndef NDEBUG
+    pipelineOwnerCtx().clear();
+#endif
+    auto discard = [](RenderTargetResources& bundle) {
+        bundle.cache.clear(); bundle.selections.clear(); bundle.context = {};
+        bundle.contextFailed = false; bundle.rawCache.reset();
+    };
+    for (auto* window : windows) discard(window->swapchainTarget.resources());
+    for (auto& entry : fboSharedMap()) {
+        entry.second.generation.reset(); entry.second.allocationFailed = false;
+        for (auto& lease : entry.second.leases) { assert(!lease->leased); discard(*lease); }
+    }
+    sgl_desc_t desc = {};
+    desc.logger.func = sokolLog;
+    // Bound (retain existing pool budget; growth belongs to #863's sgl lane): 256 slots; pipeline creation fails on overflow and affected draws are skipped with a log.
+    desc.pipeline_pool_size = 256;
+    desc.max_vertices = sglBudget().maxVertices; desc.max_commands = sglBudget().maxCommands;
+    desc.allocator.alloc_fn = smemtrack_alloc; desc.allocator.free_fn = smemtrack_free;
+    sgl_setup(&desc);
+    for (auto* window : windows) {
+        PipelineWindowScope scope(*window);
+        auto& target = window->swapchainTarget;
+        sgl_context_desc_t context = {};
+        context.max_vertices = desc.max_vertices; context.max_commands = desc.max_commands;
+        context.color_format = target.colorFormat; context.depth_format = target.depthFormat; context.sample_count = target.sampleCount;
+        target.resources().makeContext(context, "a resized window");
+        sgl_set_context(target.resources().context);
+        for (bool depth : {false, true}) {
+            for (auto blend : {BlendMode::Alpha, BlendMode::Add, BlendMode::Multiply, BlendMode::Screen, BlendMode::Subtract, BlendMode::Disabled})
+                target.pipeline(PipelineKey::immediate(fillSelection(blend, depth)));
+            target.pipeline(PipelineKey::immediate({PipelineRole::Premult, BlendMode::Alpha, depth}));
+            target.pipeline(PipelineKey::immediate({PipelineRole::Coverage, BlendMode::Alpha, depth}));
+        }
+        activeClear(); active3D();
+    }
+    sgl_set_context(currentTarget().resources().context);
+    return true;
+}
+
+RenderTargetResources* leaseTargetResources(sg_pixel_format format, int samples, sg_pixel_format depth) {
+    auto& bucket = fboSharedMap()[targetBucketKey(format, samples, depth)];
+    if (!bucket.generation) bucket.generation = makePipelineGeneration();
+    for (auto& lease : bucket.leases) {
+        if (lease->leased) continue;
+        if (lease->rawCache != bucket.generation) {
+            lease->release(); lease->rawCache = bucket.generation;
+        }
+        sgl_context_desc_t desc = {};
+        desc.max_vertices = sglBudget().maxVertices; desc.max_commands = sglBudget().maxCommands;
+        desc.color_format = format; desc.depth_format = depth; desc.sample_count = samples;
+        if (!lease->makeContext(desc, "a target lease")) return nullptr;
+        lease->leased = true;
+        return lease.get();
     }
     if (bucket.allocationFailed) return nullptr;
     auto lease = std::make_unique<RenderTargetResources>();
+    lease->rawCache = bucket.generation;
     sgl_context_desc_t desc = {};
-    desc.max_vertices = sglBudget().maxVertices;
-    desc.max_commands = sglBudget().maxCommands;
-    desc.color_format = format;
-    desc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-    desc.sample_count = samples;
-    if (!lease->makeContext(desc, "a target lease")) {
-        bucket.allocationFailed = true;
-        return nullptr;
-    }
+    desc.max_vertices = sglBudget().maxVertices; desc.max_commands = sglBudget().maxCommands;
+    desc.color_format = format; desc.depth_format = depth; desc.sample_count = samples;
+    if (!lease->makeContext(desc, "a target lease")) { bucket.allocationFailed = true; return nullptr; }
     lease->leased = true;
     auto* result = lease.get();
     try { bucket.leases.push_back(std::move(lease)); }
@@ -2023,6 +2312,12 @@ WindowContext*& currentWindowCtx() {
 
 WindowContext& currentWindowContext() {
     return currentWindowCtxStorage ? *currentWindowCtxStorage : mainWindowContext();
+}
+
+void restoreWindowContext(WindowContext* previous) {
+    currentWindowCtx() = previous;
+    const auto context = currentTarget().resources().context;
+    if (sg_isvalid() && context.id) sgl_set_context(context);
 }
 
 // Window::applyPendingApp() adds to it and the platform teardown (host code)

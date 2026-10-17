@@ -864,6 +864,12 @@ jobs:
       - name: header-inline state check
         run: python3 tools/check_header_state.py
 
+      - name: test generated-file guard and regression checks
+        if: always()
+        run: |
+          python3 tools/tests/test_test_generated_files.py -v
+          python3 tools/check_test_generated_files.py
+
       - name: core logging check (no printf / cerr / cout / NSLog)
         if: always()
         run: python3 tools/check_core_logging.py

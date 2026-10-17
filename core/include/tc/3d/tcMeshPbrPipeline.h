@@ -45,6 +45,7 @@ namespace internal {
 // shaders, so everything composites in submission order. See PbrPipeline::drawMesh.
 struct PbrDrawCommand {
     sg_pipeline        pip;
+    std::shared_ptr<PipelineGeneration> generation;
     sg_bindings        bind;
     tc_pbr_vs_params_t vsp;
     tc_pbr_fs_params_t fsp;
@@ -99,11 +100,7 @@ public:
     }
 
     // Get or create a pipeline for the given color pixel format and sample count.
-    sg_pipeline getPipeline(sg_pixel_format colorFormat, int sampleCount, bool lines = false) {
-        const auto key = std::make_tuple(colorFormat, sampleCount, lines);
-        auto it = pipelineCache_.find(key);
-        if (it != pipelineCache_.end()) return it->second;
-
+    PipelineSelection getPipeline(bool lines = false) {
         sg_pipeline_desc pd = {};
         pd.shader = shader_;
 
@@ -117,17 +114,15 @@ public:
         pd.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
         pd.cull_mode = SG_CULLMODE_NONE;
 
-        pd.colors[0].pixel_format = colorFormat;
+
         pd.colors[0].blend.enabled = false;
 
-        pd.sample_count = sampleCount;
+
         pd.index_type = SG_INDEXTYPE_UINT32;
         pd.primitive_type = lines ? SG_PRIMITIVETYPE_LINES : SG_PRIMITIVETYPE_TRIANGLES;
         pd.label = "tc_mesh_pbr_pipeline";
 
-        sg_pipeline pip = sg_make_pipeline(&pd);
-        pipelineCache_[key] = pip;
-        return pip;
+        return currentTarget().pipeline(PipelineKey::raw(PipelineRole::Pbr, pd));
     }
 
     // Draw a single Mesh with the current PBR state.
@@ -141,24 +136,9 @@ public:
         auto& activeLights = wctx.activeLights;
         auto& sh = wctx.shadow;
 
-        // 現在のレンダーターゲットのカラーフォーマットとサンプルカウントを取得
-        // _SG_PIXELFORMAT_DEFAULT (0) = sokol環境デフォルト（スワップチェーン）
-        // SG_PIXELFORMAT_NONE (1) は「カラーアタッチメントなし」なので使わない
-        sg_pixel_format colorFmt;
-        int sampleCount;
-        if (wctx.currentTarget->isFbo) {
-            colorFmt = wctx.currentTarget->colorFormat;
-            sampleCount = wctx.currentTarget->sampleCount;
-        } else {
-            const auto target = swapchainTargetFormat(wctx);
-            colorFmt = target.colorFormat;
-            sampleCount = target.sampleCount;
-        }
-
-        // Resolve the pipeline now; GPU submission happens at the end of this
-        // function — deferred for the swapchain (so it composites with sokol_gl
-        // in submission order), immediate inside an FBO pass.
-        sg_pipeline pip = getPipeline(colorFmt, sampleCount, isLineMesh(mesh.getMode()));
+        const auto selection = getPipeline(isLineMesh(mesh.getMode()));
+        sg_pipeline pip = selection.raw;
+        if (!pip.id) return;
 
         // --- Bindings -------------------------------------------------------
         sg_bindings bind = {};
@@ -426,7 +406,7 @@ public:
 
         // Defer on the active target and advance its layer so later 2D
         // composites on top. Both pass types keep the same submission order.
-        PbrDrawCommand cmd{ pip, bind, vsp, fsp,
+        PbrDrawCommand cmd{ pip, selection.generation, bind, vsp, fsp,
                             mesh.getGpuIndexCount(), mesh.getGpuVertexCount() };
         wctx.currentTarget->deferredPbrDraws.push_back({ wctx.currentTarget->sglLayerNext, cmd });
         wctx.currentTarget->sglLayerNext++;
@@ -647,12 +627,14 @@ public:
         target.passKind = internal::TargetPassKind::Fixed;
         target.isFbo = true;
         target.binding = pass;
-        target.fixedPipeline = shadowPipeline_;
+        target.fixedPipeline = shadowRecipe_;
+        target.hasFixedPipeline = true;
         target.clearAction = pass.action;
         target.width = target.height = shadowTexResolution_;
         target.colorFormat = SG_PIXELFORMAT_R32F;
         target.sampleCount = 1;
         target.hasDepth = true;
+        target.depthFormat = SG_PIXELFORMAT_DEPTH;
         target.currentMatrix = internal::currentTarget().currentMatrix;
         target.matrixStack.clear();
         target.cameraStack.clear();
@@ -662,7 +644,7 @@ public:
         target.camera.currentProjectionMatrix = internal::toBackendClip(sh.viewProj[slot]);
         target.viewport = {0, 0, float(target.width), float(target.height), true};
         target.currentScissor = {0, 0, 0, 0, false};
-        target.pooledResources = internal::leaseTargetResources(target.colorFormat, 1);
+        target.pooledResources = internal::leaseTargetResources(target.colorFormat, 1, target.depthFormat);
         if (!target.pooledResources) return;
         auto* lease = target.pooledResources;
         try { sh.scope = std::make_unique<internal::TargetPassScope>(target); }
@@ -682,7 +664,9 @@ public:
 
         // Render at the shared array resolution (max of all requested sizes)
         sg_apply_viewport(0, 0, shadowTexResolution_, shadowTexResolution_, true);
-        sg_apply_pipeline(shadowPipeline_);
+        const auto selected = internal::currentTarget().pipeline(shadowRecipe_);
+        if (!selected.raw.id) { sh.scope.reset(); return; }
+        sg_apply_pipeline(selected.raw);
 
         sh.inPass = true;
     }
@@ -782,7 +766,7 @@ private:
         pd.sample_count = 1;
         pd.label = "tc_shadow_depth_pipeline";
 
-        shadowPipeline_ = sg_make_pipeline(&pd);
+        shadowRecipe_ = PipelineKey::raw(PipelineRole::Shadow, pd);
         shadowInitialized_ = true;
     }
 
@@ -860,12 +844,11 @@ private:
     // --- PBR pipeline state ---
     sg_shader shader_{};
     bool shaderReady_{false};
-    std::map<std::tuple<sg_pixel_format, int, bool>, sg_pipeline> pipelineCache_;
     bool initialized_{false};
 
     // --- Shadow pipeline state ---
     sg_shader shadowShader_{};
-    sg_pipeline shadowPipeline_{};
+    PipelineKey shadowRecipe_;
     bool shadowReady_{false};
     bool shadowInitialized_{false};
 

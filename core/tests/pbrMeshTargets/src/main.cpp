@@ -148,7 +148,7 @@ public:
         ran = true;
         auto& ctx = internal::currentWindowContext();
         const auto mainTarget = internal::swapchainTargetFormat(ctx);
-        check("main target retains defaults", mainTarget.colorFormat == _SG_PIXELFORMAT_DEFAULT && mainTarget.sampleCount == sapp_sample_count());
+        check("main target records actual swapchain attachments", mainTarget.colorFormat == sg_query_desc().environment.defaults.color_format && mainTarget.sampleCount == sapp_sample_count());
         std::printf("Actual GLX MSAA: %d (secondary windows share the GLX config)\n", sapp_sample_count());
         const auto mainPipeline = shader.targetPipeline();
         const auto savedFormat = ctx.swapchainTarget.colorFormat;
@@ -168,7 +168,7 @@ public:
                 auto pip = shader.targetPipeline();
                 auto desc = sg_query_pipeline_desc(pip);
                 check("custom Shader resolves and caches synthetic target", pip.id == shader.targetPipeline().id &&
-                      pip.id != mainPipeline.id && desc.colors[0].pixel_format == format && desc.sample_count == samples);
+                      (pip.id == mainPipeline.id) == (format == mainTarget.colorFormat && samples == mainTarget.sampleCount) && desc.colors[0].pixel_format == format && desc.sample_count == samples);
                 targetMesh.draw();
                 desc = sg_query_pipeline_desc(ctx.currentTarget->deferredPbrDraws.back().cmd.pip);
                 check("PBR resolves synthetic target", desc.colors[0].pixel_format == format && desc.sample_count == samples);
@@ -186,7 +186,7 @@ public:
         ctx.isMain = true;
         ctx.swapchainTarget.colorFormat = savedFormat;
         ctx.swapchainTarget.sampleCount = savedSamples;
-        check("main Shader still reuses load-time pipeline", shader.targetPipeline().id == mainPipeline.id);
+        check("main Shader reuses the target-owned pipeline", shader.targetPipeline().id == mainPipeline.id);
 
         {
             InspectShader disposable;

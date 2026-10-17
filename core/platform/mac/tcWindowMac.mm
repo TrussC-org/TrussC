@@ -67,6 +67,7 @@ void windowTick(sapp_window swin, void* user) {
     // Keep target metadata current before update/draw, including resize ticks.
     ctx.swapchainTarget.width = fbw;
     ctx.swapchainTarget.height = fbh;
+    ctx.swapchainTarget.sampleCount = sapp_window_sample_count(swin);
     ctx.swapchainTarget.viewport = {0, 0, (float)fbw, (float)fbh, true};
     ctx.dpiScale = sapp_window_dpi_scale(swin);
 
@@ -105,11 +106,11 @@ void windowTick(sapp_window swin, void* user) {
     ctx.updateCount++;
 
     // Own sokol_gl context, created lazily on the first tick (sgl is set up
-    // by then). Same lifecycle caveats as Fbo contexts on sgl resize.
+    // by then). New windows use the current shared budget after any resize.
     if (ctx.swapchainTarget.resources().context.id == SG_INVALID_ID) {
         sgl_context_desc_t cdesc = {};
-        cdesc.max_vertices = 65536;
-        cdesc.max_commands = 16384;
+        cdesc.max_vertices = internal::sglBudget().maxVertices;
+        cdesc.max_commands = internal::sglBudget().maxCommands;
         cdesc.color_format = SG_PIXELFORMAT_BGRA8;
         cdesc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
         cdesc.sample_count = sapp_window_sample_count(swin);
@@ -143,8 +144,7 @@ void windowTick(sapp_window swin, void* user) {
     // lastSwapchainDrawable) is current — must run before we restore prev.
     internal::drainPendingScreenshots();
 
-    sgl_set_context(sgl_default_context());
-    internal::currentWindowCtx() = prev;
+    internal::restoreWindowContext(prev);
 }
 
 // --- events: map sapp_event onto CoreEvents / App hooks / tree dispatch ----
@@ -284,12 +284,12 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
     if (!win || !win->isOpen()) return;
     auto& ctx = win->context();
     auto* prev = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &ctx;
+    internal::restoreWindowContext(&ctx);
     {
         internal::WindowDispatchScope scope(*win);   // frame boundary, as in windowTick
         dispatchWindowEvent(ev, swin, win, ctx);
     }
-    internal::currentWindowCtx() = prev;
+    internal::restoreWindowContext(prev);
 }
 
 void windowClosed(sapp_window swin, void* user) {
@@ -404,7 +404,6 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     auto win = std::shared_ptr<Window>(new Window());
     win->title_ = settings.title;
     win->ctx_.swapchainTarget.colorFormat = SG_PIXELFORMAT_BGRA8;
-    win->ctx_.swapchainTarget.sampleCount = settings.sampleCount > 0 ? settings.sampleCount : 1;
     auto* st = new AdapterState();
 
     sapp_window_desc d = {};
@@ -429,6 +428,9 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
         return nullptr;
     }
 
+    win->ctx_.swapchainTarget.sampleCount = sapp_window_sample_count(st->win);
+    win->ctx_.swapchainTarget.width = sapp_window_framebuffer_width(st->win);
+    win->ctx_.swapchainTarget.height = sapp_window_framebuffer_height(st->win);
     win->native_ = st;
     win->ctx_.acquireSwapchain = &acquireSecondarySwapchain;
     win->ctx_.acquireSwapchainUser = st;

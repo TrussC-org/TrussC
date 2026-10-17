@@ -73,23 +73,28 @@ public:
         shader = sg_make_shader(desc);
         if (sg_query_shader_state(shader) != SG_RESOURCESTATE_VALID) {
             logError("Shader") << "Failed to create shader";
+            internal::deferGpuDestroy(shader); shader = {};
             return false;
         }
 
-        // Create pipeline with standard vertex layout
+        // Capture the subclass recipe; attachment compatibility is resolved at draw.
         sg_pipeline_desc pipDesc = createPipelineDesc();
         pipDesc.shader = shader;
 
-        pipeline = sg_make_pipeline(&pipDesc);
-        if (sg_query_pipeline_state(pipeline) != SG_RESOURCESTATE_VALID) {
-            logError("Shader") << "Failed to create pipeline";
-            sg_destroy_shader(shader);
-            shader = {};
-            return false;
-        }
+        recipe_ = pipDesc;
+        recipe_.label = nullptr; // subclass-owned label need not outlive load()
 
         // Create dynamic vertex buffer
         createVertexBuffer();
+        if (sg_query_buffer_state(vertexBuffer) != SG_RESOURCESTATE_VALID ||
+            (recipe_.index_type != SG_INDEXTYPE_NONE && recipe_.index_type != _SG_INDEXTYPE_DEFAULT &&
+             sg_query_buffer_state(indexBuffer) != SG_RESOURCESTATE_VALID)) {
+            internal::deferGpuDestroy(vertexBuffer); internal::deferGpuDestroy(indexBuffer);
+            internal::deferGpuDestroy(shader);
+            shader = {}; vertexBuffer = {}; indexBuffer = {}; stream_.reset();
+            logError("Shader") << "Failed to create draw buffers";
+            return false;
+        }
 
         loaded = true;
         return true;
@@ -103,19 +108,15 @@ public:
         if (loaded) {
             internal::deferGpuDestroy(indexBuffer);
             internal::deferGpuDestroy(vertexBuffer);
-            internal::deferGpuDestroy(pipeline);
+            internal::retirePipelineProgram(shader);
             internal::deferGpuDestroy(shader);
         }
-        for (auto& [key, pip] : targetPipelines_) {
-            internal::deferGpuDestroy(pip);
-        }
-        targetPipelines_.clear();
         for (auto& [slot, cached] : imageViews_) {
             internal::deferGpuDestroy(cached.view);
         }
         imageViews_.clear();
         shader = {};
-        pipeline = {};
+
         vertexBuffer = {};
         indexBuffer = {};
         stream_.reset();
@@ -331,7 +332,10 @@ public:
         }
         internal::DeferredShaderDraw draw;
         draw.stream = stream_;
-        draw.pipeline = pipelineForCurrentTarget();  // target-resolved (swapchain vs FBO)
+        const auto selection = selectPipelineForCurrentTarget_();
+        draw.pipeline = selection.raw;
+        draw.pipelineGeneration = selection.generation;
+        if (!draw.pipeline.id) return;
         draw.vertices.assign(data, data + count);
         draw.type = type;
 
@@ -381,17 +385,10 @@ protected:
 
     // Sokol resources
     sg_shader shader = {};
-    sg_pipeline pipeline = {};   // targets the swapchain (created at load())
+    sg_pipeline_desc recipe_ = {};
     sg_buffer vertexBuffer = {};
     sg_buffer indexBuffer = {};
     bool loaded = false;
-
-    // Render-target-specific pipeline variants, keyed by (color format, sample
-    // count). `pipeline` above matches the swapchain; an FBO pass has a different
-    // color format / sample count / depth, so a matching pipeline is built lazily
-    // on first draw into each distinct FBO target. Using a mismatched pipeline
-    // (e.g. a swapchain BGRA8 pipeline inside an RGBA8 FBO) corrupts the output.
-    std::unordered_map<uint64_t, sg_pipeline> targetPipelines_;
 
     // Pending texture bindings
     struct ViewBinding {
@@ -450,29 +447,10 @@ protected:
     virtual void onEnd() {}
     virtual void setupBindings(sg_bindings& bind) {}
 
-    // Pipeline matching the current render target. The main swapchain uses the
-    // load()-time `pipeline`; secondary windows and FBOs need matching color
-    // format, sample count and depth. Build those pipelines lazily from the same
-    // createPipelineDesc() and cache per distinct (format, sampleCount) target.
-    sg_pipeline pipelineForCurrentTarget() {
-        auto& wctx = internal::currentWindowContext();
-        if (!wctx.currentTarget->isFbo && wctx.isMain) return pipeline;
-        const auto target = wctx.currentTarget->isFbo
-            ? internal::SwapchainTargetFormat{wctx.currentTarget->colorFormat, wctx.currentTarget->sampleCount}
-            : internal::swapchainTargetFormat(wctx);
-        uint64_t key = ((uint64_t)target.colorFormat << 8)
-                     | (uint64_t)(target.sampleCount & 0xff);
-        auto it = targetPipelines_.find(key);
-        if (it != targetPipelines_.end()) return it->second;
-        sg_pipeline_desc desc = createPipelineDesc();
-        desc.shader = shader;
-        desc.colors[0].pixel_format = target.colorFormat;
-        desc.sample_count           = target.sampleCount;
-        desc.depth.pixel_format     = SG_PIXELFORMAT_DEPTH_STENCIL;  // FBOs and windows use depth-stencil
-        sg_pipeline pip = sg_make_pipeline(&desc);
-        targetPipelines_[key] = pip;
-        return pip;
+    internal::PipelineSelection selectPipelineForCurrentTarget_() {
+        return internal::currentTarget().pipeline(internal::PipelineKey::raw(internal::PipelineRole::Shader, recipe_));
     }
+    sg_pipeline pipelineForCurrentTarget() { return selectPipelineForCurrentTarget_().raw; }
 
 private:
     static bool validateTextureSlot(int slot, sg_sampler sampler) {
@@ -499,7 +477,7 @@ private:
 
     void moveFrom(Shader&& other) {
         shader = other.shader;
-        pipeline = other.pipeline;
+        recipe_ = other.recipe_;
         vertexBuffer = other.vertexBuffer;
         indexBuffer = other.indexBuffer;
         loaded = other.loaded;
@@ -507,11 +485,8 @@ private:
         pendingViews = std::move(other.pendingViews);
         pendingUniforms = std::move(other.pendingUniforms);
         imageViews_ = std::move(other.imageViews_);
-        targetPipelines_ = std::move(other.targetPipelines_);
 
         other.shader = {};
-        other.pipeline = {};
-        other.targetPipelines_.clear();
         other.vertexBuffer = {};
         other.indexBuffer = {};
         other.loaded = false;
@@ -584,7 +559,9 @@ public:
         internal::currentTarget().flushLayers();
 
         // Match the pipeline to the current target (swapchain vs FBO format).
-        sg_apply_pipeline(pipelineForCurrentTarget());
+        const auto selected = selectPipelineForCurrentTarget_();
+        if (!selected.raw.id) return;
+        sg_apply_pipeline(selected.raw);
 
         sg_bindings bind = {};
         bind.vertex_buffers[0] = vertexBuffer;

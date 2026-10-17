@@ -1,4 +1,4 @@
-// The blend-return behavior remains deferred to PR 4.
+// Returned logical blend is immediately effective for lazy and active parents.
 bool reviewDrawn = false;
 bool reviewCaptured = false;
 EventListener reviewAfterFrame;
@@ -13,8 +13,8 @@ void captureReviewBlend() {
         const auto alpha = pixels.getColor(int(16*scale), int(32*scale));
         const auto add = pixels.getColor(int(64*scale), int(32*scale));
         auto nearlyEqual = [](float a, float b) { return std::abs(a - b) < 0.015f; };
-        check("Fbo end retains the old screen Alpha pipeline despite logical Add (base behavior)",
-              nearlyEqual(alpha.r, 0.625f) && nearlyEqual(alpha.g, 0.125f) && nearlyEqual(alpha.b, 0.125f));
+        check("Fbo end immediately reconciles the returned Add selection",
+              nearlyEqual(alpha.r, 0.75f) && nearlyEqual(alpha.g, 0.25f) && nearlyEqual(alpha.b, 0.25f));
         check("repeated setBlendMode(Add) loads the Add pipeline after end (never a no-op)",
               nearlyEqual(add.r, 0.75f) && nearlyEqual(add.g, 0.25f) && nearlyEqual(add.b, 0.25f));
         std::printf("REVIEW blend alpha=%a,%a,%a add=%a,%a,%a\n",
@@ -24,8 +24,8 @@ void captureReviewBlend() {
     if (captured) {
         const auto alpha = pixels.getColor(int(16*scale), int(112*scale));
         const auto add = pixels.getColor(int(64*scale), int(112*scale));
-        check("active-pass return retains the same Alpha and explicit Add pixels",
-              std::abs(alpha.r - 0.625f) < 0.015f && std::abs(alpha.g - 0.125f) < 0.015f &&
+        check("active-pass return applies Add before and after explicit setter",
+              std::abs(alpha.r - 0.75f) < 0.015f && std::abs(alpha.g - 0.25f) < 0.015f &&
               std::abs(add.r - 0.75f) < 0.015f && std::abs(add.g - 0.25f) < 0.015f);
     }
     reviewCaptured = true;

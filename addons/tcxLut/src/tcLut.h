@@ -707,15 +707,18 @@ public:
 
         // Consume all preceding layers before direct drawing.
         internal::currentTarget().flushLayers();
+        internal::applyTargetDrawingState();
 
-        // Apply pipeline
-        sg_apply_pipeline(pipeline);
-
-        const float dpi = internal::targetPixelScale();
-
-        // Set viewport and scissor for destination (convert logical coords to framebuffer pixels)
-        sg_apply_viewportf(x * dpi, y * dpi, w * dpi, h * dpi, true);
-        sg_apply_scissor_rectf(x * dpi, y * dpi, w * dpi, h * dpi, true);
+        const auto selected = selectPipelineForCurrentTarget_();
+        if (!selected.raw.id) return;
+        sg_apply_pipeline(selected.raw);
+        lut_vs_params_t params = {};
+        const auto& target = internal::currentTarget();
+        const auto mvp = (target.camera.currentProjectionMatrix * target.camera.currentViewMatrix * target.currentMatrix).transposed();
+        std::memcpy(params.mvp, mvp.m, sizeof(params.mvp));
+        params.rect[0] = x; params.rect[1] = y; params.rect[2] = w; params.rect[3] = h;
+        sg_range vertices = {&params, sizeof(params)};
+        sg_apply_uniforms(UB_lut_vs_params, &vertices);
 
         // Setup bindings
         sg_bindings bind = {};

@@ -23,7 +23,7 @@
 
 @vs vs
 layout(binding=0) uniform vs_params {
-    mat4 viewProj;   // currentProjection * currentView (transposed for column-major)
+    mat4 viewProj;   // target projection * view * model (transposed for column-major)
     vec4 params;     // x = size (NDC half-extent), y = round (0/1), z = aspect (h/w), w = unused
     vec4 tint;       // multiplied into every point color (carries the draw color for uncolored clouds)
 };

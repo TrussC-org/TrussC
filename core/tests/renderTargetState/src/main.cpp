@@ -106,8 +106,8 @@ void checkCpuCoordinates() {
     fbo.camera.currentViewMatrix = Mat4::translate(1, 2, 3);
     fbo.camera.currentProjectionMatrix = Mat4::scale(2, 3, 4);
     fbo.currentMatrix = Mat4::translate(7, 8, 9);
-    fbo.selectedPipeline = 0x300u;
-    fbo.cameraStack.push_back({fbo.camera, 0x1000u, &fbo});
+    fbo.selectedPipeline = {internal::PipelineRole::Geometry3D, BlendMode::Alpha, true};
+    fbo.cameraStack.push_back({fbo.camera, internal::fillSelection(BlendMode::Alpha, true), &fbo});
     const bool previousMode = internal::pixelPerfectMode();
     for (float dpi : {1.0f, 2.0f}) for (bool pixel : {false, true}) {
         window.dpiScale = dpi; internal::pixelPerfectMode() = pixel;
@@ -119,8 +119,8 @@ void checkCpuCoordinates() {
               getFramebufferWidth() == 512 && getWindowWidth() == int(512 / (pixel ? 1 : dpi)) && object.getWidth() == 11);
         window.currentTarget = &window.swapchainTarget;
         check("headless target switching isolates camera/model scopes and selected role",
-              getMatrix().m[3] == 0 && window.swapchainTarget.cameraStack.empty() && window.swapchainTarget.selectedPipeline == 0 &&
-              fbo.cameraStack.size() == 1 && fbo.selectedPipeline == 0x300u && fbo.cameraStack.back().selectedPipeline == 0x1000u);
+              getMatrix().m[3] == 0 && window.swapchainTarget.cameraStack.empty() && window.swapchainTarget.selectedPipeline == internal::fillSelection(BlendMode::Alpha) &&
+              fbo.cameraStack.size() == 1 && fbo.selectedPipeline == internal::ImmediateSelection{internal::PipelineRole::Geometry3D, BlendMode::Alpha, true} && fbo.cameraStack.back().selectedPipeline == internal::fillSelection(BlendMode::Alpha, true));
     }
     internal::pixelPerfectMode() = previousMode;
     internal::currentWindowCtx() = previous;

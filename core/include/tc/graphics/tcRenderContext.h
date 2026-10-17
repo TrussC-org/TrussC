@@ -432,15 +432,10 @@ public:
     }
 
 private:
-    // Restore the 2D blend pipeline only when the mode actually changed (a redundant
-    // load is otherwise a no-op that sokol_gl batches away, but we skip it anyway).
-    // No-op inside an FBO pass, which uses its own accumulating pipeline.
     void applyBlend(BlendMode mode) {
-        if (mode == internal::currentWindowContext().currentTarget->currentBlendMode) return;
-        internal::currentWindowContext().currentTarget->currentBlendMode = mode;
-        if (!internal::currentWindowContext().currentTarget->isFbo) {
-            internal::loadPipeline(internal::active2D(mode));
-        }
+        internal::currentTarget().currentBlendMode = mode;
+        internal::currentTarget().selectedPipeline = internal::fillSelection(mode, internal::currentTarget().depthTestEnabled);
+        internal::loadPipeline(internal::active2D(mode));
     }
 public:
 

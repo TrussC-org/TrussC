@@ -23,16 +23,15 @@ namespace internal {
 // context/cache; concurrently active or parked targets each retain their own.
 struct FboSharedResources {
     std::vector<std::unique_ptr<RenderTargetResources>> leases;
-    bool allocationFailed = false; // retain #317's warn-once failure policy
+    std::shared_ptr<PipelineGeneration> generation;
+    bool allocationFailed = false;
 };
 
 // Mip-downsample resources shared per color format (see Fbo::ensureSharedMip).
 struct FboSharedMipResources {
     bool ready = false;   // both shaders usable (internalShaderReady)
     sg_shader shader = {};
-    sg_pipeline pipeline = {};
     sg_shader blitShader = {};
-    sg_pipeline blitPipeline = {};
     sg_buffer vbuf = {};
     sg_sampler sampler = {};
     bool initialized = false;
@@ -126,6 +125,12 @@ public:
         if (target_.activation) {
             logWarning("Fbo") << "allocate rejected while active";
             return;
+        }
+        const bool resized = allocated_ && (target_.width != w || target_.height != h ||
+            target_.sampleCount != sampleCount || format_ != format || mipmaps_ != mipmaps);
+        if (resized) {
+            internal::invalidateTargetBucket(target_.colorFormat, target_.sampleCount, target_.depthFormat);
+            internal::invalidateTargetBucket(toSokolFormat(format), sampleCount, target_.depthFormat);
         }
         clear();
 
@@ -592,7 +597,7 @@ private:
         internal::TargetPassScope scope(pass, dst.getWidth(), dst.getHeight(), target_.colorFormat);
         if (!scope.active()) return;
 
-        sg_apply_pipeline(s.blitPipeline);
+        if (!applyMipPipeline_(s.blitShader, internal::PipelineRole::Blit)) return;
         sg_bindings bind = {};
         bind.vertex_buffers[0] = s.vbuf;
         bind.views[VIEW_tc_fbomip_srcTex] = src.getViewForMip(0);
@@ -619,7 +624,7 @@ private:
         auto& s = getSharedMip(format);
         if (s.initialized) return;
 
-        sg_pixel_format sgFormat = toSokolFormat(format);
+
 
         // Fullscreen quad (triangle strip). UV 0..1 across the quad so a
         // bilinear sample of the previous mip is enough to produce a 2x2
@@ -654,30 +659,19 @@ private:
             return;
         }
 
-        sg_pipeline_desc pip_desc = {};
-        pip_desc.shader = s.shader;
-        pip_desc.layout.attrs[ATTR_tc_fbomip_downsample_position].format = SG_VERTEXFORMAT_FLOAT2;
-        pip_desc.layout.attrs[ATTR_tc_fbomip_downsample_texcoord0].format = SG_VERTEXFORMAT_FLOAT2;
-        pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLE_STRIP;
-        pip_desc.colors[0].pixel_format = sgFormat;
-        pip_desc.colors[0].blend.enabled = false;
-        pip_desc.depth.pixel_format = SG_PIXELFORMAT_NONE;
-        pip_desc.sample_count = 1;
-        s.pipeline = sg_make_pipeline(&pip_desc);
-
-        // 1:1 blit pipeline for copying scratch mip → main mip
-        sg_pipeline_desc blit_pip_desc = {};
-        blit_pip_desc.shader = s.blitShader;
-        blit_pip_desc.layout.attrs[ATTR_tc_fbomip_blit_position].format = SG_VERTEXFORMAT_FLOAT2;
-        blit_pip_desc.layout.attrs[ATTR_tc_fbomip_blit_texcoord0].format = SG_VERTEXFORMAT_FLOAT2;
-        blit_pip_desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLE_STRIP;
-        blit_pip_desc.colors[0].pixel_format = sgFormat;
-        blit_pip_desc.colors[0].blend.enabled = false;
-        blit_pip_desc.depth.pixel_format = SG_PIXELFORMAT_NONE;
-        blit_pip_desc.sample_count = 1;
-        s.blitPipeline = sg_make_pipeline(&blit_pip_desc);
-
         s.initialized = true;
+    }
+
+    static bool applyMipPipeline_(sg_shader shader, internal::PipelineRole role) {
+        sg_pipeline_desc desc = {};
+        desc.shader = shader;
+        desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;
+        desc.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;
+        desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLE_STRIP;
+        const auto selected = internal::currentTarget().pipeline(internal::PipelineKey::raw(role, desc));
+        if (!selected.raw.id) return false;
+        sg_apply_pipeline(selected.raw);
+        return true;
     }
 
     // Downsample mip 0 into mips 1..N-1. Called from end() when the FBO was
@@ -704,7 +698,7 @@ private:
                     std::max(1, target_.height >> level), target_.colorFormat);
                 if (!scope.active()) return;
 
-                sg_apply_pipeline(s.pipeline);
+                if (!applyMipPipeline_(s.shader, internal::PipelineRole::Mip)) return;
 
                 sg_bindings bind = {};
                 bind.vertex_buffers[0] = s.vbuf;
@@ -724,7 +718,7 @@ private:
                     std::max(1, target_.height >> level), target_.colorFormat);
                 if (!scope.active()) return;
 
-                sg_apply_pipeline(s.blitPipeline);
+                if (!applyMipPipeline_(s.blitShader, internal::PipelineRole::Blit)) return;
 
                 sg_bindings bind = {};
                 bind.vertex_buffers[0] = s.vbuf;
@@ -775,7 +769,7 @@ private:
         target_.viewport = {0, 0, float(target_.width), float(target_.height), true};
         target_.sglLayerNext = 0;
         target_.openShaderScopes = 0;
-        target_.selectedPipeline = (target_.depthTestEnabled ? 0x1000u : 0u) | uint32_t(target_.currentBlendMode);
+        target_.selectedPipeline = internal::fillSelection(target_.currentBlendMode, target_.depthTestEnabled);
         target_.owner = this;
         target_.finalize = [](void* owner) { static_cast<Fbo*>(owner)->finishActivation_(); };
         // A preparation entry parks the outgoing parent while version-copy

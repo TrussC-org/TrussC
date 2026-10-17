@@ -2221,9 +2221,9 @@ description.ko = "FBO 내용을 그림"
 ["Fbo::end"]
 category = "graphics_fbo"
 keywords = ["finish", "stop", "unbind", "exit"]
-description.en = "End rendering to FBO"
-description.ja = "FBOへのレンダリングを終了"
-description.ko = "FBO 렌더링 종료"
+description.en = "End rendering to FBO and return to the parent target; the returned logical blend takes effect immediately."
+description.ja = "FBO への描画を終えて親ターゲットへ戻る。戻された論理ブレンドモードは直ちに描画へ反映される。"
+description.ko = "FBO 렌더링을 끝내고 부모 대상으로 돌아간다. 반환된 논리 블렌드 모드는 즉시 그리기에 적용된다."
 
 ["Fbo::getHeight"]
 description.en = "Get height"
@@ -8825,9 +8825,9 @@ description.ko = "셰이더가 로드되었는지 확인"
 ["Shader::load"]
 category = "graphics_shader"
 keywords = ["open", "read", "file"]
-description.en = "Load from sokol-shdc generated function"
-description.ja = "sokol-shdc生成関数からロード"
-description.ko = "sokol-shdc로 생성된 함수에서 로드"
+description.en = "Load a sokol-shdc program and capture the subclass pipeline recipe. Target-compatible pipelines are created lazily at drawing; target-specific pipeline failures are reported then."
+description.ja = "sokol-shdc のプログラムを読み込み、サブクラスのパイプライン設定を保存する。ターゲットに適合するパイプラインは描画時に生成し、その生成失敗も描画時に通知する。"
+description.ko = "sokol-shdc 프로그램을 로드하고 서브클래스의 파이프라인 설정을 저장한다. 대상에 맞는 파이프라인은 그릴 때 생성하며 대상별 생성 실패도 그때 보고한다."
 
 ["Shader::setTexture"]
 category = "graphics_shader"
@@ -10350,9 +10350,9 @@ description.ko = "축소 필터를 설정"
 ["Texture::setPremultipliedAlpha"]
 category = "graphics_texture"
 keywords = ["blend", "flag"]
-description.en = "Set whether the texture color is premultiplied by alpha"
-description.ja = "テクスチャの色をアルファ乗算済みとして扱うかを設定"
-description.ko = "텍스처 색상을 알파로 미리 곱한 것으로 취급할지 설정"
+description.en = "Set whether texture color is premultiplied by alpha. Alpha blending honors this flag on both windows and Fbos."
+description.ja = "テクスチャの色をアルファ乗算済みとして扱うかを設定。Alpha ブレンドではウィンドウと Fbo の両方でこの指定を反映する。"
+description.ko = "텍스처 색상을 알파로 미리 곱한 것으로 취급할지 설정한다. Alpha 블렌딩은 창과 Fbo 모두에서 이 설정을 따른다."
 related = ["Texture::isPremultipliedAlpha"]
 
 ["Texture::setWrap"]
@@ -17112,7 +17112,9 @@ analogue of [`setStrokeWeight`](#setStrokeWeight). The unit is **logical pixels*
 (like `strokeWeight`), so it stays the same apparent size across DPIs. Affects the
 `Square` and `Round` [`PointStyle`](#PointStyle) splats; `Pixel` is a true 1px
 point and ignores it. Saved/restored by [`pushStyle`](#pushStyle) /
-[`popStyle`](#popStyle).
+[`popStyle`](#popStyle). In an Fbo, sizes use attachment pixels independently
+of host DPI and pixelPerfect. Target projection/view/model move point centers;
+model scale does not enlarge the splats.
 '''
 details.ja = '''
 [`PrimitiveMode`](#PrimitiveMode)`::Points` メッシュの描画ステートで、点群版の
@@ -17120,6 +17122,8 @@ details.ja = '''
 同じ）なので、DPI が変わっても見た目のサイズは一定。`Square` と `Round` の
 [`PointStyle`](#PointStyle) スプラットに効き、`Pixel` は本物の 1px 点なので無視
 される。[`pushStyle`](#pushStyle) / [`popStyle`](#popStyle) で保存・復元される。
+Fbo 内のサイズはホスト DPI や pixelPerfect に依存しないアタッチメントピクセル。
+点の中心はターゲットの射影・ビュー・モデル行列に従うが、モデルの拡縮で点のサイズは変わらない。
 '''
 details.ko = '''
 [`PrimitiveMode`](#PrimitiveMode)`::Points` 메시의 그리기 상태로, 포인트 클라우드
@@ -17127,6 +17131,8 @@ details.ko = '''
 동일)이라 DPI가 달라져도 보이는 크기가 일정하다. `Square`와 `Round`
 [`PointStyle`](#PointStyle) 스플랫에 적용되며, `Pixel`은 진짜 1px 포인트라 무시한다.
 [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle)로 저장·복원된다.
+Fbo에서는 호스트 DPI와 pixelPerfect에 관계없이 어태치먼트 픽셀을 사용한다.
+점의 중심은 대상의 투영·뷰·모델 행렬을 따르며 모델 배율은 점 크기를 바꾸지 않는다.
 '''
 
 ["getPointSize"]
@@ -19033,11 +19039,6 @@ description.ko = "저장된 모든 유니폼을 바인딩된 셰이더에 적용
 description.en = "The underlying sokol shader handle."
 description.ja = "内部の sokol シェーダハンドル。"
 description.ko = "내부 sokol 셰이더 핸들."
-
-["Shader::pipeline"]
-description.en = "The pipeline targeting the swapchain, created at load()."
-description.ja = "スワップチェーンを対象とするパイプライン。load() 時に作成。"
-description.ko = "스왑체인을 대상으로 하는 파이프라인. load() 시 생성."
 
 ["Shader::vertexBuffer"]
 description.en = "The dynamic vertex buffer for shader draws."

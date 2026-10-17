@@ -957,13 +957,11 @@ private:
         // set via setBlendMode() takes priority — texture draws (including
         // Fbo::draw) must honor it, e.g. compositing an Fbo with Subtract.
         // Under the default Alpha mode, behavior is preserved: premultiplied
-        // sources use the premult pipeline on the swapchain, FBO passes use
-        // Fill2D even for premultiplied sources, as before.
+        // sources use the premult pipeline on every destination.
         BlendMode blend = internal::currentWindowContext().currentTarget->currentBlendMode;
         if (blend != BlendMode::Alpha) {
             internal::loadTemporaryPipeline(internal::active2D(blend));
-        } else if (internal::currentWindowContext().currentTarget->isFbo) {
-            internal::loadTemporaryPipeline(internal::activeFill2D());
+
         } else if (premultipliedAlpha_) {
             internal::loadTemporaryPipeline(internal::activePremult());
         } else {

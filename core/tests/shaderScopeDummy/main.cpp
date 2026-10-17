@@ -19,6 +19,12 @@
 #include <sys/wait.h>
 #include <unistd.h>
 using namespace tc;
+// Generated native shaders have no dummy-backend descriptor. The dummy sgl
+// shader is sufficient for descriptor/lifetime probes; GPU suites test pixels.
+namespace trussc::internal {
+sg_shader sglPremultShader() { return {}; }
+sg_shader sglCoverageShader() { return {}; }
+}
 // One-shot failure at the real deferred replay allocation, as in the review.
 static bool failAllocation = false;
 void* operator new(std::size_t size) {
@@ -34,6 +40,11 @@ void operator delete(void* ptr, const std::nothrow_t&) noexcept { std::free(ptr)
 void operator delete(void* ptr) noexcept { std::free(ptr); }
 void operator delete(void* ptr, std::size_t) noexcept { std::free(ptr); }
 namespace {
+struct LateShader : Shader {
+    sg_pipeline selection() { return pipelineForCurrentTarget(); }
+};
+// Constructed before the host registries, destroyed after them and sg_shutdown.
+LateShader lateShader;
 int submittedDraws = 0;
 void drawn(int, int, int, void*) { ++submittedDraws; }
 std::vector<sg_pass> passes;
@@ -156,12 +167,12 @@ bool inheritedPipelineProbe() {
         setColor(1,0,0,0.5f); drawRect(0,0,16,16);
         setColor(0,1,0,0.5f); drawRect(0,0,16,16);
         fbo.end();
-        const bool correct = role == ((depth ? 0x1000u : 0u) | unsigned(BlendMode::Add)) &&
+        const bool correct = role == internal::fillSelection(BlendMode::Add, depth) &&
             appliedPipeline.depth.write_enabled == depth &&
             appliedPipeline.depth.compare == (depth ? SG_COMPAREFUNC_LESS_EQUAL : SG_COMPAREFUNC_ALWAYS) &&
             appliedPipeline.colors[0].blend.src_factor_rgb == SG_BLENDFACTOR_SRC_ALPHA &&
             appliedPipeline.colors[0].blend.dst_factor_rgb == SG_BLENDFACTOR_ONE;
-        std::printf("INHERITED PIPELINE depth=%d role=0x%x descriptor=%d expected=1\n",depth,role,correct);
+        std::printf("INHERITED PIPELINE depth=%d role=0x%x descriptor=%d expected=1\n",depth,unsigned(role.role),correct);
         ok &= correct;
     }
     window.teardownTargets();
@@ -184,7 +195,7 @@ bool replayFailureProbe(bool destructor) {
     target.sampleCount = 1; target.colorFormat = SG_PIXELFORMAT_RGBA8;
     target.binding.attachments.colors[0] = fbo.getTexture().getAttachmentView();
     target.hasDepth = false; target.depthFormat = SG_PIXELFORMAT_NONE;
-    auto* lease = internal::leaseTargetResources(SG_PIXELFORMAT_RGBA8,1);
+    auto* lease = internal::leaseTargetResources(SG_PIXELFORMAT_RGBA8,1,SG_PIXELFORMAT_NONE);
     target.pooledResources = lease;
     Shader shader; shader.load(descriptor);
     bool caught = false;
@@ -228,7 +239,7 @@ bool teardownProbe(bool explicitTeardown, bool otherCurrent) {
     target.sampleCount = 1; target.colorFormat = SG_PIXELFORMAT_RGBA8;
     target.binding.attachments.colors[0] = fbo.getTexture().getAttachmentView();
     target.hasDepth = false; target.depthFormat = SG_PIXELFORMAT_NONE;
-    auto* lease = internal::leaseTargetResources(SG_PIXELFORMAT_RGBA8,1);
+    auto* lease = internal::leaseTargetResources(SG_PIXELFORMAT_RGBA8,1,SG_PIXELFORMAT_NONE);
     target.pooledResources = lease;
     window->shadow.scope = std::make_unique<internal::TargetPassScope>(target);
     window->shadow.inPass = true;
@@ -251,6 +262,226 @@ bool teardownProbe(bool explicitTeardown, bool otherCurrent) {
     internal::currentWindowCtx() = previous;
     sg_commit();
     return clean;
+}
+
+bool pipelineGenerationProbe() {
+    auto& window = internal::mainWindowContext();
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &window;
+    auto& target = window.swapchainTarget;
+    target.resources().context = sgl_default_context();
+    target.width=256; target.height=192; target.colorFormat=SG_PIXELFORMAT_RGBA8; target.sampleCount=1;
+    window.acquireSwapchain=dummySwapchain;
+    sg_shader shader = sg_make_shader(descriptor(SG_BACKEND_DUMMY));
+    sg_pipeline_desc desc = {}; desc.shader=shader;
+    desc.layout.attrs[0].format=SG_VERTEXFORMAT_FLOAT3;
+    auto request = internal::PipelineKey::raw(internal::PipelineRole::Shader,desc);
+    const auto first=target.pipeline(request);
+    const bool lateSelected=lateShader.selection().id!=0;
+    bool ok=lateSelected &&first.raw.id && first.raw.id==target.pipeline(request).raw.id;
+    // Exhaust the real dummy pool, rather than fabricating an invalid recipe.
+    std::vector<sg_pipeline> held;
+    for (;;) { auto pipeline=sg_alloc_pipeline(); if(!pipeline.id) break; held.push_back(pipeline); }
+    desc.colors[0].blend.enabled=true;
+    auto failedRequest=internal::PipelineKey::raw(internal::PipelineRole::Shader,desc);
+    const auto failed=target.pipeline(failedRequest);
+    const auto failedImmediate=internal::active3D();
+    internal::loadPipeline(failedImmediate);
+    ok &= !failedImmediate.id && target.selectedPipeline == internal::ImmediateSelection{internal::PipelineRole::Geometry3D,BlendMode::Alpha,true};
+    const auto entries=target.resources().rawCache->cache.size();
+    for(auto pipeline:held) sg_destroy_pipeline(pipeline);
+    ok &= !failed.raw.id && !target.pipeline(failedRequest).raw.id && target.resources().rawCache->cache.size()==entries && !internal::active3D().id;
+    Fbo survivor; survivor.allocate(16,12);
+    for(int iteration=0;iteration<50;++iteration) {
+        survivor.begin(0,0,0);
+        const auto old=internal::currentTarget().resources().generation;
+        survivor.end();
+        if(iteration==0) {
+            auto* ctx=_sgl_lookup_context(target.resources().context.id);
+            std::printf("RESIZE BOUNDARY commands=%d base=%d vertices=%d base=%d queued=%zu/%zu/%zu pass=%d scopes=%u\n",ctx->commands.next,ctx->draw_base_cmd,ctx->vertices.next,ctx->draw_base_vertex,target.deferredShaderDraws.size(),target.deferredPbrDraws.size(),target.deferredPointDraws.size(),target.inPass,target.openShaderScopes);
+        }
+        auto& budget=internal::sglBudget(); internal::resizeSgl(budget.maxVertices,budget.maxCommands);
+        survivor.begin(0,0,0);
+        ok &= internal::currentTarget().resources().generation!=old;
+        survivor.end();
+        const auto retried=target.pipeline(failedRequest);
+        ok &= retried.raw.id!=0;
+        sg_commit(); internal::drainPendingGpuDestroys();
+    }
+    internal::retirePipelineProgram(shader); internal::deferGpuDestroy(shader);
+    sg_commit(); internal::drainPendingGpuDestroys();
+    internal::currentWindowCtx()=previous;
+    std::printf("PIPELINE failure cached/retry + resize x50=%d expected=1\n",ok);
+    return ok;
+}
+
+// Adversarial review: recording on a lazy bottom target must survive both
+// rebuild paths, and memory release must follow the rebuilt window context.
+bool lazyResizeProbe(bool dimensions) {
+    auto& window = internal::mainWindowContext();
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &window;
+    auto& target = window.swapchainTarget;
+    const bool wasMain = window.isMain;
+    window.isMain = false; window.fbWidth = 256; window.fbHeight = 192;
+    window.acquireSwapchain = dummySwapchain;
+    internal::prepareWindowTarget();
+    const auto before = target.resources().context.id;
+    const auto generationBefore = target.resources().generation;
+    const int oldVertices = internal::sglBudget().maxVertices;
+    const int oldCommands = internal::sglBudget().maxCommands;
+    internal::loadPipeline(internal::activeFill2D());
+    sgl_begin_triangles(); sgl_v2f(0,0); sgl_v2f(1,0); sgl_v2f(0,1); sgl_end();
+    const bool lazy = !target.inPass && sgl_num_commands() == 1;
+    if (dimensions) {
+        window.fbWidth = 320; window.fbHeight = 240;
+        internal::prepareWindowTarget();
+    } else internal::resizeSgl(1024,256);
+    const bool deferred = target.resources().context.id == before && sgl_num_commands() == 1;
+    submittedDraws = 0;
+    present();
+    bool ok = lazy && deferred && submittedDraws == 1;
+    std::printf("LAZY RESIZE dimensions=%d deferred=%d draws=%d expected=1\n",dimensions,deferred,submittedDraws);
+    // beginFrame retries the dimension change or the exact deferred budget.
+    beginFrame();
+    auto* actual = _sgl_lookup_context(target.resources().context.id);
+    ok &= target.resources().generation != generationBefore && target.resources().context.id != sgl_default_context().id;
+    if (!dimensions) ok &= actual->desc.max_vertices == 1024 && actual->desc.max_commands == 256 && !internal::sglBudget().pendingResize;
+    // Force real CPU and GPU growth beyond the rebuilt capacities.
+    const int initialVertices = actual->vertices.cap;
+    internal::loadPipeline(internal::activeFill2D());
+    sgl_begin_triangles();
+    for (int i=0; i<initialVertices+6; ++i) sgl_v2f(0,0);
+    sgl_end();
+    present();
+    const int grownVertices = actual->vertices.cap;
+    const bool grew = grownVertices > initialVertices && actual->vbuf.id &&
+        sg_query_buffer_desc(actual->vbuf).size > size_t(initialVertices)*sizeof(_sgl_vertex_t);
+    releaseSglBuffers();
+    const bool released = actual->vertices.cap == 0 && actual->commands.cap == 0 &&
+        actual->uniforms.cap == 0 && actual->vbuf.id == 0;
+    std::printf("REBUILT RELEASE dimensions=%d grew=%d vertices=%d->%d capacities=%d/%d/%d vbuf=%u expected=0\n",
+        dimensions,grew,initialVertices,grownVertices,actual->vertices.cap,actual->commands.cap,actual->uniforms.cap,actual->vbuf.id);
+    ok &= grew && released;
+    internal::resizeSgl(oldVertices,oldCommands);
+    window.isMain = wasMain;
+    internal::currentWindowCtx() = previous;
+    return ok;
+}
+
+// Register a secondary coordinator with a dummy drawable so the production
+// global rebuild guard sees both windows, without creating a native window.
+struct DummyWindowPair {
+    Window secondary;
+    internal::WindowContext& main = internal::mainWindowContext();
+    internal::WindowContext* previous = internal::currentWindowCtx();
+    bool wasMain = main.isMain;
+    DummyWindowPair() {
+        secondary.native_ = this; // isOpen() only; never passed to native APIs.
+        main.isMain = false;
+        for (auto* window : {&main, &secondary.context()}) {
+            window->fbWidth = 256; window->fbHeight = 192;
+            window->acquireSwapchain = dummySwapchain;
+            internal::currentWindowCtx() = window;
+            internal::prepareWindowTarget();
+        }
+        internal::restoreWindowContext(previous);
+    }
+    ~DummyWindowPair() {
+        secondary.native_ = nullptr;
+        secondary.context().teardownTargets();
+        secondary.context().swapchainTarget.resources().release();
+        main.isMain = wasMain;
+        internal::restoreWindowContext(previous);
+    }
+};
+
+void recordTriangle() {
+    internal::loadPipeline(internal::activeFill2D());
+    sgl_begin_triangles(); sgl_v2f(0,0); sgl_v2f(1,0); sgl_v2f(0,1); sgl_end();
+}
+
+bool windowTickRestoreProbe(bool dimensions) {
+    DummyWindowPair windows;
+    internal::restoreWindowContext(nullptr);
+    if (dimensions) {
+        windows.main.fbWidth = 320; windows.main.fbHeight = 240;
+        internal::prepareWindowTarget();
+    } else internal::resizeSgl(1024,256);
+    const auto mainContext = internal::currentTarget().resources().context;
+    bool ok = mainContext.id && mainContext.id != sgl_default_context().id;
+    // Mirror a secondary tick, including the exact helper used by all native
+    // adapters. The main recording happens AFTER that tick's global commit.
+    auto* previous = internal::currentWindowCtx();
+    internal::restoreWindowContext(&windows.secondary.context());
+    sgl_defaults(); beginFrame(); present();
+    internal::restoreWindowContext(previous);
+    const bool restored = sgl_get_context().id == mainContext.id;
+    recordTriangle();
+    beginFrame();
+    submittedDraws = 0;
+    present();
+    ok &= restored && submittedDraws == 1;
+    std::printf("WINDOW TICK RESTORE dimensions=%d actual=%u selected=%u restored=%d draws=%d expected=1\n",
+        dimensions,mainContext.id,sgl_get_context().id,restored,submittedDraws);
+    // A boundary may also return to a parked Fbo, rather than a bottom target.
+    Fbo fbo; fbo.allocate(8,8); fbo.begin(0,0,0);
+    const auto fboContext = internal::currentTarget().resources().context;
+    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(previous);
+    ok &= sgl_get_context().id == fboContext.id;
+    fbo.end(); present();
+    return ok;
+}
+
+// Document the pre-existing global rewind honestly: B's present loses A's
+// lazy immediate triangle even WITHOUT resize. Raw deferred work survives,
+// so it must continue to block a rebuild after that global SGL rewind.
+bool interleavedRewindProbe(bool resize, bool raw) {
+    DummyWindowPair windows;
+    internal::restoreWindowContext(nullptr);
+    auto& target = windows.main.swapchainTarget;
+    const auto before = target.resources().context;
+    const auto generation = target.resources().generation;
+    recordTriangle();
+    Shader shader;
+    bool ok = !target.inPass && sgl_tc_context_has_pending_draws(before);
+    if (raw) {
+        ok &= shader.load(descriptor);
+        shader.begin(); submit(shader); shader.end();
+        ok &= !target.deferredShaderDraws.empty();
+    }
+    internal::restoreWindowContext(&windows.secondary.context());
+    if (resize) {
+        internal::resizeSgl(2048,333);
+        // A repeated request must retain the latest explicit capacities.
+        internal::resizeSgl(3072,377);
+        ok &= internal::sglBudget().pendingResize == 3072 &&
+            internal::sglBudget().pendingCommands == 377 && target.resources().context.id == before.id;
+        beginFrame(); // A still has pending work: this retry must defer too.
+        ok &= target.resources().context.id == before.id && sgl_tc_context_has_pending_draws(before);
+    }
+    present(); // Global commit rewinds A as well as B.
+    const bool rewound = !sgl_tc_context_has_pending_draws(before);
+    ok &= rewound;
+    internal::restoreWindowContext(nullptr);
+    if (resize) {
+        beginFrame(); // Rebuild now, unless A still owns a raw deferred draw.
+        if (raw) ok &= internal::sglBudget().pendingResize == 3072 && target.resources().context.id == before.id;
+        else ok &= !internal::sglBudget().pendingResize && target.resources().generation != generation;
+    }
+    submittedDraws = 0;
+    present();
+    const int draws = submittedDraws;
+    ok &= draws == (raw ? 1 : 0); // The immediate triangle was already lost.
+    if (resize) {
+        beginFrame(); // Raw work has now drained too: first safe retry succeeds.
+        auto* context = _sgl_lookup_context(target.resources().context.id);
+        ok &= !internal::sglBudget().pendingResize && context->desc.max_vertices == 3072 && context->desc.max_commands == 377;
+    }
+    std::printf("CROSS WINDOW REWIND resize=%d raw=%d rewound=%d draws=%d expected=%d retry=%d\n",
+        resize,raw,rewound,draws,raw ? 1 : 0,ok);
+    return ok;
 }
 
 bool activeDestructionProbe() {
@@ -282,6 +513,7 @@ int main(int argc, char** argv) {
     desc.environment.defaults.sample_count = 1;
     sg_setup(&desc);
     sgl_desc_t gl = {}; gl.pipeline_pool_size = 256; sgl_setup(&gl);
+    if (!lateShader.load(descriptor)) return 1;
     sg_trace_hooks hooks = {}; hooks.draw = drawn; hooks.begin_pass = began; hooks.commit = committed; hooks.apply_pipeline = applied; sg_install_trace_hooks(&hooks);
     bool teardown = true;
     for (bool explicitTeardown : {false,true}) for (bool otherCurrent : {false,true})
@@ -293,8 +525,14 @@ int main(int argc, char** argv) {
     const bool flushed = probe(true);
     const bool failedLease = leaseFailureProbe();
     const bool stores = storePolicyProbe();
+    const bool pipelines = pipelineGenerationProbe();
+    const bool lazyResize = lazyResizeProbe(false) && lazyResizeProbe(true);
+    const bool tickRestore = windowTickRestoreProbe(false) && windowTickRestoreProbe(true);
+    const bool interleaved = interleavedRewindProbe(false,false) && interleavedRewindProbe(true,false) && interleavedRewindProbe(true,true);
     const bool destruction = activeDestructionProbe();
-    return teardown && inherited && replay && normal && flushed && failedLease && stores && destruction ? 0 : 1;
+    const int result=teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && destruction ? 0 : 1;
+    sgl_shutdown(); sg_shutdown();
+    return result;
 }
 #else
 #include <cstdio>
