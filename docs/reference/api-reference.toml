@@ -2184,9 +2184,9 @@ related = ["VideoWriter::addFrame", "VideoWriter::addFrameAt", "Texture", "Fulls
 ["Fbo::allocate"]
 category = "graphics_fbo"
 keywords = ["alloc", "create", "init", "reserve", "size"]
-description.en = "Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end()."
-description.ja = "フレームバッファを確保。`mipmaps=true` でミップマップ連鎖が end() で自動更新される"
-description.ko = "프레임버퍼를 할당. `mipmaps=true` 시 end()마다 밉맵 체인이 자동 갱신됨"
+description.en = "Allocate framebuffer (void). When the size exceeds the device limit or the graphics backend reports a resource creation failure, allocation fails, partial resources are released and isAllocated() stays false. Driver-level out-of-memory may not be reported on every backend; begin()/draw() are no-ops and readPixels()/readPixelsFloat()/copyTo() return false. Oversize requests log one Warning with the requested size and device limit. `mipmaps=true` builds a full mip chain that is refreshed automatically at end()."
+description.ja = "フレームバッファを確保（void）。サイズがデバイス上限を超えるか、グラフィックスバックエンドがリソース作成失敗を報告した場合、確保は失敗し、部分リソースを解放して isAllocated() は false のままになる。ドライバーレベルのメモリ不足は、バックエンドによっては報告されない場合がある。begin()/draw() は何もせず、readPixels()/readPixelsFloat()/copyTo() は false を返す。上限超過時は要求サイズとデバイス上限を含む Warning を1回記録する。`mipmaps=true` でミップマップ連鎖が end() で自動更新される"
+description.ko = "프레임버퍼를 할당(void). 크기가 장치 제한을 초과하거나 그래픽 백엔드가 리소스 생성 실패를 보고하면 할당이 실패하고 부분 리소스를 해제하며 isAllocated()는 false로 유지된다. 드라이버 수준의 메모리 부족은 일부 백엔드에서 보고되지 않을 수 있다. begin()/draw()는 아무 작업도 하지 않고 readPixels()/readPixelsFloat()/copyTo()는 false를 반환한다. 크기 제한 초과 시 요청 크기와 장치 제한을 담은 Warning을 한 번 기록한다. `mipmaps=true` 시 end()마다 밉맵 체인이 자동 갱신됨"
 related = ["TextureFormat"]
 
 ["Fbo::begin"]

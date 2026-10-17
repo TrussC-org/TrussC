@@ -2900,7 +2900,7 @@ bool EventListener::isConnected() const  // True while the listener is still con
 ### Fbo — Framebuffer object for offscreen rendering
 
 ```cpp
-void Fbo::allocate(int w, int h, int sampleCount = 1, TextureFormat format = RGBA8, bool mipmaps = false)  // Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
+void Fbo::allocate(int w, int h, int sampleCount = 1, TextureFormat format = RGBA8, bool mipmaps = false)  // Allocate framebuffer (void). When the size exceeds the device limit or the graphics backend reports a resource creation failure, allocation fails, partial resources are released and isAllocated() stays false. Driver-level out-of-memory may not be reported on every backend; begin()/draw() are no-ops and readPixels()/readPixelsFloat()/copyTo() return false. Oversize requests log one Warning with the requested size and device limit. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
 void Fbo::begin() [+1]  // Begin rendering to FBO. Each activation starts an identity model, empty matrix/camera/scissor scopes, full viewport and a TAU/8 camera in attachment pixels. Distinct Fbos may nest; end resumes the parent with color and depth LOAD. A fresh LOAD activation keeps color and clears depth. Balance scopes on the same target; recursive begin and out-of-order end are rejected.
 void Fbo::clear()  // Release FBO resources
 void Fbo::clearColor(float r, float g, float b, float a)  // Clear the FBO with a solid color
