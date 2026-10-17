@@ -16,3 +16,10 @@ RGBA16F is required: missing render capability fails the GPU lane, so the
 half-float regression must actually run. CPU conversions must match exactly;
 GPU-written UNORM attachments on every backend and desktop GL's native
 conversion allow one byte value for rounding.
+
+Failed size and image-pool allocations are also checked for RGBA8, RGBA16F
+and RGBA32F: both byte and float reads must return false, preserve tiny
+destination sentinels and leave the render target and queued vertices alone.
+On GLCORE/GLES3 an injected GL error must remain pending, proving neither
+read entered the driver readback helper. The same public allocation guard
+precedes Metal staging. A valid allocation must recover after each failure.

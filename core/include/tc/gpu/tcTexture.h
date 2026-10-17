@@ -9,6 +9,7 @@
 
 #include "../utils/tcAnnotations.h"
 #include <memory>
+#include <type_traits>
 
 namespace trussc {
 
@@ -373,42 +374,7 @@ public:
     }
 
     // Release resources
-    void clear() {
-        cubemapStaging_.reset();
-        cubemapStagingSize_ = 0;
-        if (allocated_) {
-            // Deferred destroy: draws recorded this frame (sokol_gl quads,
-            // deferred PBR bindings) may still reference these handles.
-            internal::deferGpuDestroy(sampler_);
-            internal::deferGpuDestroy(view_);
-            internal::deferGpuDestroy(attachmentView_);
-            for (sg_view v : cubeFaceAttachmentViews_) {
-                internal::deferGpuDestroy(v);
-            }
-            cubeFaceAttachmentViews_.clear();
-            for (sg_view v : mipAttachmentViews_) {
-                internal::deferGpuDestroy(v);
-            }
-            mipAttachmentViews_.clear();
-            for (sg_view v : mipSamplingViews_) {
-                internal::deferGpuDestroy(v);
-            }
-            mipSamplingViews_.clear();
-            internal::deferGpuDestroy(image_);
-            allocated_ = false;
-        }
-        width_ = 0;
-        height_ = 0;
-        channels_ = 0;
-        mipmapped_ = false;
-        isCubemap_ = false;
-        numMipLevels_ = 1;
-        pixelFormat_ = SG_PIXELFORMAT_NONE;
-        image_ = {};
-        view_ = {};
-        attachmentView_ = {};
-        sampler_ = {};
-    }
+    void clear() { clearResources_(true); }
 
     // === State ===
 
@@ -652,6 +618,54 @@ public:
     }
 
 private:
+    friend class Fbo;
+
+    // Only Fbo may immediately discard textures it has never published.
+    void clearResources_(bool deferred) {
+        auto destroy = [deferred](auto handle) {
+            if (deferred) internal::deferGpuDestroy(handle);
+            else if (handle.id) {
+                if constexpr (std::is_same_v<decltype(handle), sg_image>) sg_destroy_image(handle);
+                else if constexpr (std::is_same_v<decltype(handle), sg_view>) sg_destroy_view(handle);
+                else sg_destroy_sampler(handle);
+            }
+        };
+        cubemapStaging_.reset();
+        cubemapStagingSize_ = 0;
+        if (allocated_) {
+            // Deferred destroy: draws recorded this frame (sokol_gl quads,
+            // deferred PBR bindings) may still reference these handles.
+            destroy(sampler_);
+            destroy(view_);
+            destroy(attachmentView_);
+            for (sg_view v : cubeFaceAttachmentViews_) {
+                destroy(v);
+            }
+            cubeFaceAttachmentViews_.clear();
+            for (sg_view v : mipAttachmentViews_) {
+                destroy(v);
+            }
+            mipAttachmentViews_.clear();
+            for (sg_view v : mipSamplingViews_) {
+                destroy(v);
+            }
+            mipSamplingViews_.clear();
+            destroy(image_);
+            allocated_ = false;
+        }
+        width_ = 0;
+        height_ = 0;
+        channels_ = 0;
+        mipmapped_ = false;
+        isCubemap_ = false;
+        numMipLevels_ = 1;
+        pixelFormat_ = SG_PIXELFORMAT_NONE;
+        image_ = {};
+        view_ = {};
+        attachmentView_ = {};
+        sampler_ = {};
+    }
+
     sg_image image_ = {};
     sg_view view_ = {};              // Texture view (for sampling)
     sg_view attachmentView_ = {};    // Attachment view (for RenderTarget)

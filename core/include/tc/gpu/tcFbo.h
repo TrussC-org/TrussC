@@ -107,6 +107,9 @@ public:
     }
 
     // Allocate FBO (MSAA supported, custom pixel format).
+    // Size above the device limit or backend-reported resource creation failure
+    // releases resources and leaves isAllocated() false. Driver-level out-of-memory
+    // may not be reported on every backend.
     //
     // - `sampleCount`: 1, 2, 4, 8, etc. (1 = no MSAA)
     // - `format`: pixel format (default RGBA8 for backward compatibility)
@@ -134,6 +137,24 @@ public:
         }
         clear();
 
+        if (!sg_isvalid()) return;
+        const int limit = sg_query_limits().max_image_size_2d;
+        auto failed = [&] {
+            clear();
+            warnAllocationFailure_(w, h);
+        };
+        // Bound (gpu): device texture limit bounds dimensions before resource creation and mip arithmetic.
+        if (w <= 0 || h <= 0 || w > limit || h > limit) {
+            clear();
+            if (w <= 0 || h <= 0) {
+                logWarning("Fbo") << "allocate failed: size " << w << "x" << h << " is not positive";
+            } else {
+                logWarning("Fbo") << "allocate failed: size " << w << "x" << h
+                    << " exceeds the device texture limit " << limit;
+            }
+            return;
+        }
+
         target_.width = w;
         target_.height = h;
         target_.camera = {}; // invalidate size-derived camera data
@@ -160,6 +181,11 @@ public:
             msaa_desc.sample_count = target_.sampleCount;
             msaaColorImage_ = sg_make_image(&msaa_desc);
 
+            if (sg_query_image_state(msaaColorImage_) != SG_RESOURCESTATE_VALID) {
+                failed();
+                return;
+            }
+
             // MSAA color attachment view
             sg_view_desc msaa_att_desc = {};
             msaa_att_desc.color_attachment.image = msaaColorImage_;
@@ -167,6 +193,8 @@ public:
 
             // Resolve color texture (non-MSAA, for reading/display)
             colorTexture_.allocate(w, h, format, TextureUsage::RenderTarget, 1, numMipLevels_);
+
+            if (!textureReady_(colorTexture_)) { failed(); return; }
 
             // Resolve view (must be created as resolve_attachment)
             sg_view_desc resolve_view_desc = {};
@@ -185,10 +213,7 @@ public:
             // Non-MSAA case
             colorTexture_.allocate(w, h, format, TextureUsage::RenderTarget, 1, numMipLevels_);
 
-            // Scratch texture for mipmap generation (same specs as color)
-            if (mipmaps_) {
-                mipScratchTexture_.allocate(w, h, format, TextureUsage::RenderTarget, 1, numMipLevels_);
-            }
+            if (!textureReady_(colorTexture_)) { failed(); return; }
 
             // Depth buffer
             sg_image_desc depth_desc = {};
@@ -203,10 +228,23 @@ public:
         // Mips always use resolved, single-sample scratch attachments.
         if (mipmaps_) mipScratchTexture_.allocate(w, h, format, TextureUsage::RenderTarget, 1, numMipLevels_);
 
+        if (sg_query_image_state(depthImage_) != SG_RESOURCESTATE_VALID ||
+            (mipmaps_ && !textureReady_(mipScratchTexture_)) ||
+            (target_.sampleCount > 1 &&
+             (sg_query_view_state(msaaColorAttView_) != SG_RESOURCESTATE_VALID ||
+              sg_query_view_state(resolveAttView_) != SG_RESOURCESTATE_VALID))) {
+            failed();
+            return;
+        }
+
         // Depth attachment view
         sg_view_desc depth_att_desc = {};
         depth_att_desc.depth_stencil_attachment.image = depthImage_;
         depthAttView_ = sg_make_view(&depth_att_desc);
+        if (sg_query_view_state(depthAttView_) != SG_RESOURCESTATE_VALID) {
+            failed();
+            return;
+        }
 
         // FBO color texture stores premultiplied alpha (due to alpha blending + MSAA resolve)
         colorTexture_.setPremultipliedAlpha(true);
@@ -220,31 +258,32 @@ public:
             logWarning("Fbo") << "clear rejected while active";
             return;
         }
-        if (allocated_) {
-            // Shared context/pipelines are NOT destroyed here (shared across FBOs)
-            sg_destroy_view(depthAttView_);
-            sg_destroy_image(depthImage_);
+        // Also release partial allocations, before allocated_ is published.
+        // Shared context/pipelines are NOT destroyed here (shared across FBOs)
+        if (depthAttView_.id) sg_destroy_view(depthAttView_);
+        if (depthImage_.id) sg_destroy_image(depthImage_);
 
-            if (target_.sampleCount > 1) {
-                sg_destroy_view(resolveAttView_);
-                sg_destroy_view(msaaColorAttView_);
-                sg_destroy_image(msaaColorImage_);
-            }
-
-            colorTexture_.clear();
-            mipScratchTexture_.clear();
-
-            // Version pool: destroy through the deferred queue (inside
-            // Texture::clear / deferGpuDestroy) — draws recorded this frame
-            // may still sample these textures.
-            for (ColorVersion& v : versionPool_) {
-                internal::deferGpuDestroy(v.resolveAttView);
-                v.tex.clear();
-            }
-            versionPool_.clear();
-
-            allocated_ = false;
+        if (target_.sampleCount > 1) {
+            if (resolveAttView_.id) sg_destroy_view(resolveAttView_);
+            if (msaaColorAttView_.id) sg_destroy_view(msaaColorAttView_);
+            if (msaaColorImage_.id) sg_destroy_image(msaaColorImage_);
         }
+
+        // Published textures may still be referenced by draws recorded this frame.
+        // Failed-attempt textures were never exposed and must free pool slots now.
+        colorTexture_.clearResources_(allocated_);
+        mipScratchTexture_.clearResources_(allocated_);
+
+        // Version pool: destroy through the deferred queue (inside
+        // Texture::clear / deferGpuDestroy) — draws recorded this frame
+        // may still sample these textures.
+        for (ColorVersion& v : versionPool_) {
+            internal::deferGpuDestroy(v.resolveAttView);
+            v.tex.clear();
+        }
+        versionPool_.clear();
+
+        allocated_ = false;
         target_.width = 0;
         target_.height = 0;
         target_.viewport = {0, 0, 0, 0, false};
@@ -527,6 +566,25 @@ private:
         drawnThisFrame_ = (lastDrawFrame_ == fc);
     }
 
+    // Backend failures within the size limit (pool or resource creation).
+    static void warnAllocationFailure_(int w, int h) {
+        logWarning("Fbo") << "allocate failed: the GPU rejected the " << w << "x" << h << " attachments";
+    }
+
+    // Texture::isAllocated alone does not validate its views or sampler.
+    static bool textureReady_(const Texture& tex) {
+        if (!tex.isAllocated() ||
+            sg_query_image_state(tex.getImage()) != SG_RESOURCESTATE_VALID ||
+            sg_query_view_state(tex.getView()) != SG_RESOURCESTATE_VALID ||
+            sg_query_view_state(tex.getAttachmentView()) != SG_RESOURCESTATE_VALID ||
+            sg_query_sampler_state(tex.getSampler()) != SG_RESOURCESTATE_VALID) return false;
+        for (int level = 0; level < tex.getNumMipLevels(); ++level) {
+            if (sg_query_view_state(tex.getAttachmentViewForMip(level)) != SG_RESOURCESTATE_VALID ||
+                sg_query_view_state(tex.getViewForMip(level)) != SG_RESOURCESTATE_VALID) return false;
+        }
+        return true;
+    }
+
     // Advance the cursor to the next version, allocating it lazily.
     // Returns false (cursor unchanged) when versioning is degraded by an
     // earlier allocation failure or when the new allocation fails now.
@@ -544,12 +602,14 @@ private:
             v.tex.setWrapV(colorTexture_.getWrapV());
             v.tex.allocate(target_.width, target_.height, format_,
                            TextureUsage::RenderTarget, 1, numMipLevels_);
-            if (sg_query_image_state(v.tex.getImage()) == SG_RESOURCESTATE_FAILED) {
-                // Texture::createResources logged the error. Degrade
+            if (!textureReady_(v.tex)) {
+                warnAllocationFailure_(target_.width, target_.height);
+                // Degrade
                 // gracefully: keep rendering into the current texture
                 // (accepting the legacy both-draws-show-final behavior).
                 poolAllocFailed_ = true;
-                return false;  // v's destructor defers the failed handles
+                v.tex.clearResources_(false);
+                return false;
             }
             v.tex.setPremultipliedAlpha(true);
             if (target_.sampleCount > 1) {
@@ -557,7 +617,9 @@ private:
                 rd.resolve_attachment.image = v.tex.getImage();
                 v.resolveAttView = sg_make_view(&rd);
                 if (sg_query_view_state(v.resolveAttView) != SG_RESOURCESTATE_VALID) {
-                    internal::deferGpuDestroy(v.resolveAttView);
+                    if (v.resolveAttView.id) sg_destroy_view(v.resolveAttView);
+                    v.tex.clearResources_(false);
+                    warnAllocationFailure_(target_.width, target_.height);
                     poolAllocFailed_ = true;
                     return false;
                 }

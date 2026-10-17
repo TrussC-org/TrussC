@@ -67,11 +67,61 @@ void cpuChecks() {
 }
 
 class ReadPixelsApp : public App {
+    void checkFailedReadback(const Fbo& fbo) {
+        // Single-element destinations make any accidental full-image read unsafe.
+        // The public guard must return before GL/GLES chunk or Metal staging work.
+        unsigned char byte = 123;
+        float value = -7.0f;
+        auto* parent = internal::currentWindowContext().currentTarget;
+        const int vertices = sgl_num_vertices();
+        check("failed allocation remains unallocated", !fbo.isAllocated());
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+        while (glGetError() != GL_NO_ERROR) {}
+        glEnable(0xffffffffu);
+#endif
+        check("failed allocation rejects byte read without writing", !fbo.readPixels(&byte) && byte == 123);
+        check("failed allocation rejects float read without writing", !fbo.readPixelsFloat(&value) && value == -7.0f);
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+        // The readback driver helper drains errors. An intact error proves that
+        // neither read reached the driver, even for converted staging formats.
+        check("failed readbacks never reach GL", glGetError() == GL_INVALID_ENUM);
+#endif
+        check("failed readbacks preserve target and queued vertices",
+              internal::currentWindowContext().currentTarget == parent && sgl_num_vertices() == vertices);
+    }
+
+    void checkAllocationFailures() {
+        const int limit = sg_query_limits().max_image_size_2d;
+        for (auto format : {TextureFormat::RGBA8, TextureFormat::RGBA16F, TextureFormat::RGBA32F}) {
+            if (!sg_query_pixelformat(toSokolFormat(format)).render) continue;
+            Fbo fbo;
+            for (bool tall : {false, true}) {
+                fbo.allocate(tall ? 1 : limit + 1, tall ? limit + 1 : 1, 1, format);
+                checkFailedReadback(fbo);
+            }
+            // A resource failure with otherwise valid dimensions must take the
+            // same cheap path as a rejected size, including after a valid Fbo.
+            fbo.allocate(3, 131, 1, format);
+            check("allocation before pool exhaustion succeeds", fbo.isAllocated());
+            std::vector<sg_image> held;
+            for (;;) {
+                sg_image image = sg_alloc_image();
+                if (!image.id) break;
+                held.push_back(image);
+            }
+            fbo.allocate(3, 131, 1, format);
+            checkFailedReadback(fbo);
+            for (auto image : held) sg_dealloc_image(image);
+            fbo.allocate(3, 131, 1, format);
+            check("allocation recovers after failed readbacks", fbo.isAllocated());
+        }
+    }
     void draw() override {
         if (completed) return;
         // Some devices render RGBA32F without supporting blending on it.
         // Select the disabled role before begin() creates a format pipeline.
         setBlendMode(BlendMode::Disabled);
+        checkAllocationFailures();
         // Distinct top/bottom rows, odd width, and several reads catch stride,
         // vertical orientation and stale-version errors as well as conversion.
         struct Format { TextureFormat value; const char* name; };
