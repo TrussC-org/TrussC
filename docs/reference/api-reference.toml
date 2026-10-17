@@ -2271,12 +2271,12 @@ description.ko = "할당되었는지 확인"
 ["Fbo::readPixels"]
 category = "graphics_fbo"
 keywords = ["download", "cpu"]
-description.en = "Read FBO contents into a CPU buffer (8-bit per channel)"
-description.ja = "FBOの内容をCPUバッファに読み出す（チャンネルあたり8ビット）"
-description.ko = "FBO 내용을 CPU 버퍼로 읽음 (채널당 8비트)"
-details.en = "Call after rendering is complete (after end()). Called inside any Fbo pass (between begin() and end()) it logs an error and returns false, on every platform."
-details.ja = "描画が終わってから(end() のあとに)呼ぶ。Fbo のパスの中(begin() と end() の間)で呼ぶと、どのプラットフォームでもエラーを出して false を返す。"
-details.ko = "렌더링이 끝난 뒤(end() 이후)에 호출한다. Fbo 패스 안(begin()과 end() 사이)에서 호출하면 모든 플랫폼에서 오류를 기록하고 false를 반환한다."
+description.en = "Always read RGBA8 into a CPU buffer, whatever the Fbo format (clamped to 0–1 and quantised to 8 bits)"
+description.ja = "Fbo の形式にかかわらず常に RGBA8 を CPU バッファに読み出す（0–1 にクランプし、8 ビットに量子化）"
+description.ko = "Fbo 형식에 관계없이 항상 RGBA8을 CPU 버퍼로 읽음 (0–1로 제한하고 8비트로 양자화)"
+details.en = "Provide width * height * 4 bytes. R/RG formats fill missing G/B with 0 and alpha with 1. Conversion rounds to nearest; CPU ties round up, while native desktop GL may differ by at most 1 byte value. Use readPixelsFloat() for full precision. Call after end(); inside any Fbo pass it logs an error and returns false. WebGL2 is supported; WebGPU synchronous readback remains unsupported."
+details.ja = "width * height * 4 バイトを用意する。R/RG 形式の不足する G/B は 0、アルファは 1 になる。最も近い値に丸め、CPU では中間値を切り上げる。デスクトップ GL の変換結果との差は最大 1。完全な精度が必要なら readPixelsFloat() を使う。end() のあとに呼ぶ。Fbo パスの中ではエラーを出して false を返す。WebGL2 に対応。WebGPU の同期読み出しは未対応。"
+details.ko = "width * height * 4바이트를 준비한다. R/RG 형식에서 없는 G/B는 0, 알파는 1로 채운다. 가장 가까운 값으로 반올림하며 CPU의 중간값은 올림한다. 데스크톱 GL 변환 결과와의 차이는 최대 1이다. 전체 정밀도가 필요하면 readPixelsFloat()를 사용한다. end() 이후에 호출하며 Fbo 패스 안에서는 오류를 기록하고 false를 반환한다. WebGL2를 지원하며 WebGPU 동기 읽기는 지원하지 않는다."
 related = ["Fbo::readPixelsFloat", "Pixels"]
 
 ["Fbo::readPixelsFloat"]
@@ -19708,9 +19708,9 @@ hide = true
 
 ["Fbo::setDebugName"]
 category = "graphics_fbo"
-description.en = "Set the MCP inspection name. tc_list_fbos lists live objects with index, name, width, height and format. tc_analyze_image accepts source={fbo:name or index} and reads the final Fbo pass after the frame. Moves transfer the name/index and remove the moved-from object; destruction removes the entry. Empty names remain available by index. Web readback and iOS float readback return errors. Byte Fbo readback supports RGBA8; other integer formats return an error. Texture is not a source; draw it into a named Fbo."
-description.ja = "MCP 検査用の名前を設定。tc_list_fbos は生存中のオブジェクトの index、name、width、height、format を一覧化。tc_analyze_image は source={fbo:名前またはインデックス} を受け、フレーム終了後に最後の Fbo パスを読む。移動で名前とインデックスを引き継ぎ、移動元と破棄済みの項目は消える。空の名前もインデックスで取得可能。Web の読み戻しと iOS の float 読み戻しはエラー。byte Fbo の読み戻しは既存 API の RGBA8 のみ対応し、他の整数形式はエラー。Texture はソースにできないため、名前付き Fbo に描画する。"
-description.ko = "MCP 검사 이름을 설정. tc_list_fbos 는 살아 있는 객체의 index, name, width, height, format 을 나열. tc_analyze_image 는 source={fbo:이름 또는 인덱스} 로 프레임 종료 후 마지막 Fbo 패스를 읽는다. 이동하면 이름과 인덱스가 이전되고 이동 원본 및 파괴된 항목은 사라진다. 빈 이름도 인덱스로 접근 가능. Web 읽기 및 iOS float 읽기는 오류. byte Fbo 읽기는 기존 API 의 RGBA8 만 지원하며 다른 정수 형식은 오류. Texture 는 소스가 아니므로 이름 있는 Fbo 에 그린다."
+description.en = "Set the MCP inspection name. tc_list_fbos lists live objects with index, name, width, height and format. tc_analyze_image accepts source={fbo:name or index} and reads the final Fbo pass after the frame. Moves transfer the name/index and remove the moved-from object; destruction removes the entry. Empty names remain available by index. Web readback and iOS float readback return errors. Non-float Fbo formats are converted to RGBA8 for byte readback. Texture is not a source; draw it into a named Fbo."
+description.ja = "MCP 検査用の名前を設定。tc_list_fbos は生存中のオブジェクトの index、name、width、height、format を一覧化。tc_analyze_image は source={fbo:名前またはインデックス} を受け、フレーム終了後に最後の Fbo パスを読む。移動で名前とインデックスを引き継ぎ、移動元と破棄済みの項目は消える。空の名前もインデックスで取得可能。Web の読み戻しと iOS の float 読み戻しはエラー。非 float の Fbo 形式は byte 読み戻し時に RGBA8 に変換される。Texture はソースにできないため、名前付き Fbo に描画する。"
+description.ko = "MCP 검사 이름을 설정. tc_list_fbos 는 살아 있는 객체의 index, name, width, height, format 을 나열. tc_analyze_image 는 source={fbo:이름 또는 인덱스} 로 프레임 종료 후 마지막 Fbo 패스를 읽는다. 이동하면 이름과 인덱스가 이전되고 이동 원본 및 파괴된 항목은 사라진다. 빈 이름도 인덱스로 접근 가능. Web 읽기 및 iOS float 읽기는 오류. float 가 아닌 Fbo 형식은 byte 읽기 시 RGBA8 로 변환된다. Texture 는 소스가 아니므로 이름 있는 Fbo 에 그린다."
 related = ["Fbo::getDebugName", "Image::setDebugName"]
 
 ["Fbo::getDebugName"]

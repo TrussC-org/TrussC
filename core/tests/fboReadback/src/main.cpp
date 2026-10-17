@@ -90,13 +90,17 @@ public:
         vector<float> floats(16 * 16 * 4);
         check("RGBA16F float readback succeeds", half_.readPixelsFloat(floats.data()));
         check("RGBA16F values are correct", floats[0] == 0.25f && floats[1] == 0.5f && floats[2] == 1.0f);
-#if defined(SOKOL_METAL)
         vector<unsigned char> bytes(16 * 16 * 4, 123);
-        check("RGBA16F byte readback is rejected", !half_.readPixels(bytes.data()));
-        check("rejected read leaves destination unchanged",
-              all_of(bytes.begin(), bytes.end(), [](unsigned char v) { return v == 123; }));
+        check("RGBA16F byte readback succeeds", half_.readPixels(bytes.data()));
+#if defined(SOKOL_GLCORE)
+        const int roundingAllowance = 1;
+#else
+        const int roundingAllowance = 0;
 #endif
-        check("float/rejected read preserves swapchain pass", isInSwapchainPass());
+        check("RGBA16F byte conversion is correct",
+              abs(int(bytes[0]) - 64) <= roundingAllowance && abs(int(bytes[1]) - 128) <= roundingAllowance &&
+              bytes[2] == 255 && bytes[3] == 255);
+        check("float/byte read preserves swapchain pass", isInSwapchainPass());
         check("readbacks never commit the frame", commits == frames_);
         setColor(0, 1, 0);
         drawCircle(160, 32, 20);

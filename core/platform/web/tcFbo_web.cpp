@@ -1,6 +1,8 @@
 #include "TrussC.h"
 
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__) && defined(SOKOL_GLES3)
+#include "../gl/tcFboReadback.h"
+#elif defined(__EMSCRIPTEN__)
 
 namespace trussc {
 

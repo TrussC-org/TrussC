@@ -1405,10 +1405,10 @@ struct Cover_Fbo : af::Scope<Fbo> {
         (void)af::val<const Fbo>().isActive();
         (void)af::val<const Fbo>().isAllocated();
         (void)af::val<const Fbo>().lifetimeToken();
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID) || defined(AF_WEB)
         (void)af::val<const Fbo>().readPixels(af::val<unsigned char *>());
 #endif
-#if defined(AF_MACOS) || defined(AF_IOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+#if defined(AF_MACOS) || defined(AF_IOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_WEB)
         (void)af::val<const Fbo>().readPixelsFloat(af::val<float *>());
 #endif
         (void)af::val<const Fbo>().save(af::val<const fs::path>());
