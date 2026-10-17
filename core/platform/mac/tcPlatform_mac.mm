@@ -285,12 +285,21 @@ std::shared_ptr<internal::CaptureStagingPool> internal::makeCaptureStagingPool()
     return std::make_shared<internal::CaptureStagingPool>();
 }
 
+std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
+    // Admission also runs in the next frame's prelude, before any drawable
+    // exists. Query native framebuffer dimensions without acquiring or messaging
+    // the borrowed drawable from a swapchain pass.
+    if (!ctx.isMain) return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
+    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+}
+
 bool internal::captureWindowAsync(
     const std::function<void(const internal::CaptureReadback&)>& completion,
     const std::shared_ptr<internal::CaptureStagingPool>& pool) {
     // Read back the drawable this frame ACTUALLY rendered into (recorded by the
     // swapchain pass). NOT sapp_get_swapchain() — that advances to the next,
-    // unrendered drawable. Fall back only if no pass ran yet.
+    // unrendered drawable. Frame-end cleanup clears this borrowed pointer;
+    // outside that frame (or before its first pass), acquire a current drawable.
     const void* drawablePtr = internal::currentWindowContext().lastSwapchainDrawable;
     if (!drawablePtr) drawablePtr = sapp_get_swapchain().metal.current_drawable;
     id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)drawablePtr;

@@ -3741,6 +3741,7 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     w->layer.device = (__bridge id<MTLDevice>)w->desc.mtl_device;
     w->layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
     w->layer.opaque = YES;
+    w->layer.framebufferOnly = NO;      /* [TrussC] captureWindow() reads the drawable (#879) */
     view.wantsLayer = YES;
     view.layer = w->layer;
     w->window.contentView = view;

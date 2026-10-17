@@ -48,15 +48,19 @@ void checkMcp(const fs::path& requested, const fs::path& expected) {
                 {"params", {{"name", "tc_save_screenshot"},
                             {"arguments", {{"path", internal::pathToUtf8(requested)}}}}}};
     const auto count = warnings.size();
-    Json response = Json::parse(mcp::internal::Server::instance().processMessage(req.dump()));
-    Json result = Json::parse(response.at("result").at("content").at(0).at("text").get<string>());
-    check("MCP screenshot returns ok", result.value("status", "") == "ok");
-    check("MCP reports actual destination",
-          result.value("path", "") == internal::pathToUtf8(expected));
+    const string response = mcp::internal::Server::instance().processMessage(req.dump());
+    auto& deferred = mcp::internal::deferralState();
+    check("MCP screenshot defers its capture", response.empty() && deferred.hasEnvelope && bool(deferred.envelope));
     check("MCP fallback warns once", warnings.size() == count + 1);
-    auto& queue = internal::currentWindowContext().pendingScreenshotPaths;
-    check("MCP reply agrees with queue", queue.size() == 1 && queue.front() == expected);
-    queue.clear();
+    check("MCP warning names actual destination", warnings.size() > count &&
+          warnings.back().find(internal::pathToUtf8(expected)) != string::npos);
+    check("MCP capture retains admission credits", mcp::internal::workingMemory() > 0);
+    check("MCP capture leaves application queue independent", internal::currentWindowContext().pendingScreenshotPaths.empty());
+    // No GPU in this tier: cancel the queued producer after checking its
+    // admitted lifetime. Native file encoders are exercised by --screen.
+    deferred.envelope = {};
+    deferred.hasEnvelope = false;
+    check("cancelled MCP capture releases credits", mcp::internal::workingMemory() == 0);
 }
 
 void checkFile(const fs::path& path, const string& magic) {
@@ -66,7 +70,7 @@ void checkFile(const fs::path& path, const string& magic) {
     check("correct encoding: " + internal::pathToUtf8(path.filename()), header == magic);
     Pixels px;
     check("decode screenshot: " + internal::pathToUtf8(path.filename()), static_cast<bool>(px.load(path)));
-    check("screenshot dimensions", px.getWidth() == 64 && px.getHeight() == 48);
+    check("screenshot dimensions", px.getWidth() == getFramebufferWidth() && px.getHeight() == getFramebufferHeight());
 }
 
 class ScreenshotApp : public App {

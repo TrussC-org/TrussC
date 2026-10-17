@@ -2757,6 +2757,10 @@ namespace internal {
             sapp_skip_present();
         }
 
+        // afterFrame listeners and capture drains have finished. The native
+        // callback owns the Metal drawable and may release it on return.
+        mainWindowContext().clearFrameDrawable();
+
         // Save previous frame's mouse position
         internal::currentWindowContext().pmouseX = internal::currentWindowContext().mouseX;
         internal::currentWindowContext().pmouseY = internal::currentWindowContext().mouseY;

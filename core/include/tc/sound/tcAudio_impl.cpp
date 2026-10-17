@@ -312,9 +312,18 @@ AudioEngine::AudioEngine()
     playingSounds_.resize(DEFAULT_MAX_PLAYING_SOUNDS);
 }
 
-internal::AudioOutputSnapshot internal::AudioAnalysisAccess::snapshot(AudioEngine& engine, size_t frames) {
-    std::lock_guard<std::mutex> lock(engine.analysisMutex_);
-    return engine.analysisRing_ ? engine.analysisRing_->snapshot(frames) : AudioOutputSnapshot{};
+internal::AudioOutputSnapshot internal::AudioAnalysisAccess::snapshot(AudioEngine& engine, size_t frames, void (*admit)(size_t, size_t)) {
+    std::unique_lock<std::mutex> lock(engine.analysisMutex_);
+    if (!engine.analysisRing_) return {};
+    if (admit) {
+        const auto shape = engine.analysisRing_->snapshotShape(frames);
+        // Admission can notify the logger; do it outside the engine lock.
+        lock.unlock();
+        admit(shape.first, shape.second);
+        lock.lock();
+        if (!engine.analysisRing_ || engine.analysisRing_->snapshotShape(frames) != shape) return {};
+    }
+    return engine.analysisRing_->snapshot(frames);
 }
 
 size_t AudioEngine::getAnalysisBuffer(float* outBuffer, size_t numSamples) {
