@@ -19,12 +19,12 @@ class GeneratedTestFilesTests(unittest.TestCase):
         project = self.root / "core/tests/fixture"
         project.mkdir(parents=True)
         (project / ".gitignore").write_text(
-            "# Generated project files\nCMakeLists.txt\n/CMakePresets.json\nbin/*\n")
+            "# Generated project files\nCMakeLists.txt\n/CMakePresets.json\nbin/*\n", encoding="utf-8")
         (project / "src").mkdir()
-        (project / "addons.make").write_text("# TrussC addons - one addon per line\n")
+        (project / "addons.make").write_text("# TrussC addons - one addon per line\n", encoding="utf-8")
         # Present on disk even in the clean-index case.
-        (project / "CMakeLists.txt").write_text("trussc_app()\n")
-        (project / "CMakePresets.json").write_text("{}\n")
+        (project / "CMakeLists.txt").write_text("trussc_app()\n", encoding="utf-8")
+        (project / "CMakePresets.json").write_text("{}\n", encoding="utf-8")
         (project / "bin").mkdir()
         (project / "bin/fixture").write_bytes(b"generated binary")
 
@@ -52,7 +52,7 @@ class GeneratedTestFilesTests(unittest.TestCase):
         self.assertIn("missing or empty core test project file: core/tests/fixture/addons.make", output)
 
     def test_empty_core_addons_make_fails(self):
-        (self.root / "core/tests/fixture/addons.make").write_text("")
+        (self.root / "core/tests/fixture/addons.make").write_text("", encoding="utf-8")
         result, output = self.run_guard([
             "core/tests/fixture/.gitignore", "core/tests/fixture/src/main.cpp"])
         self.assertEqual(result, 1)
@@ -61,8 +61,8 @@ class GeneratedTestFilesTests(unittest.TestCase):
     def test_standalone_cmake_without_addons_make_passes(self):
         project = self.root / "core/tests/standalone"
         project.mkdir(parents=True)
-        (project / "CMakeLists.txt").write_text("project(standalone)\n")
-        (project / ".gitignore").write_text("build/\nbuild-*/\n")
+        (project / "CMakeLists.txt").write_text("project(standalone)\n", encoding="utf-8")
+        (project / ".gitignore").write_text("build/\nbuild-*/\n", encoding="utf-8")
         self.assertEqual(self.run_guard([
             "core/tests/standalone/CMakeLists.txt",
             "core/tests/standalone/.gitignore",
@@ -101,7 +101,7 @@ class GeneratedTestFilesTests(unittest.TestCase):
     def test_addon_generated_project_files_fail(self):
         project = self.root / "addons/tcxFixture/tests"
         project.mkdir(parents=True)
-        (project / ".gitignore").write_text("CMakeLists.txt\n/CMakePresets.json\n")
+        (project / ".gitignore").write_text("CMakeLists.txt\n/CMakePresets.json\n", encoding="utf-8")
         paths = ["addons/tcxFixture/tests/" + name for name in sorted(guard.GENERATED)]
         result, output = self.run_guard(paths)
         self.assertEqual(result, 1)
@@ -136,15 +136,15 @@ class GeneratedTestFilesTests(unittest.TestCase):
             self.assertEqual(result, 1)
             self.assertIn("1 violation(s)", output)
             self.assertIn(f"{project}/.gitignore", output)
-            (directory / ".gitignore").write_text("CMakeLists.txt\nCMakePresets.json\nbin/*\n")
-            (directory / "addons.make").write_text("# TrussC addons - one addon per line\n")
+            (directory / ".gitignore").write_text("CMakeLists.txt\nCMakePresets.json\nbin/*\n", encoding="utf-8")
+            (directory / "addons.make").write_text("# TrussC addons - one addon per line\n", encoding="utf-8")
             self.assertEqual(self.run_guard([
                 f"{project}/{marker}" for marker in guard.PROJECT_MARKERS])[0], 0)
 
     def test_addon_test_variants_check_generated_files(self):
         project = self.root / "addons/tcxFixture/tests-renderTarget"
         project.mkdir(parents=True)
-        (project / ".gitignore").write_text("CMakeLists.txt\nCMakePresets.json\n")
+        (project / ".gitignore").write_text("CMakeLists.txt\nCMakePresets.json\n", encoding="utf-8")
         paths = ["addons/tcxFixture/tests-renderTarget/" + name
                  for name in ("CMakeLists.txt", "CMakePresets.json", "bin/fixture")]
         result, output = self.run_guard(paths)
@@ -162,7 +162,7 @@ class GeneratedTestFilesTests(unittest.TestCase):
             "core/tests/fixture/nested/local.cmake"])[0], 0)
 
     def test_ci_runs_guard_and_regression(self):
-        workflow = (guard.ROOT / ".github/workflows/build.yml").read_text()
+        workflow = (guard.ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
         job = workflow.split("  header-state-check:", 1)[1].split("  ccache-prune:", 1)[0]
         self.assertIn("python3 tools/check_test_generated_files.py", job)
         self.assertIn("python3 tools/tests/test_test_generated_files.py -v", job)

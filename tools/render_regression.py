@@ -21,7 +21,7 @@ HARNESS = 'core/tests/renderRegression'
 def run(command, cwd=ROOT, capture=False, env=None):
     print('+ ' + shlex.join(map(str, command)), flush=True)
     result = subprocess.run(list(map(str, command)), cwd=cwd, check=True, env=env,
-                            text=True, stdout=subprocess.PIPE if capture else None)
+                            text=True, stdout=subprocess.PIPE if capture else None, encoding="utf-8")
     return result.stdout.strip() if capture else None
 
 

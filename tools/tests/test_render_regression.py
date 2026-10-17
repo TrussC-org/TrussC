@@ -80,18 +80,18 @@ class DriverTests(unittest.TestCase):
 
     def test_nonempty_output_is_preserved(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as temp:
-            keep = Path(temp)/'keep'; keep.write_text('existing')
+            keep = Path(temp)/'keep'; keep.write_text('existing', encoding="utf-8")
             checkout = Path(temp)/'checkout'; (checkout/'tools/bin').mkdir(parents=True)
             (checkout/'tools/bin'/('trusscli.exe' if driver.sys.platform == 'win32' else 'trusscli')).touch()
             with patch.object(driver,'ROOT',checkout), patch.object(driver,'commit',return_value='sha'), patch.object(driver,'run',return_value='sha'):
                 with self.assertRaisesRegex(RuntimeError,'Output must be empty'):
                     driver.compare_refs('base','head',Path(temp))
-            self.assertEqual(keep.read_text(),'existing')
+            self.assertEqual(keep.read_text(encoding="utf-8"),'existing')
 
 
 class WorkflowTests(unittest.TestCase):
     def test_main_only_gate_includes_pr_and_merge_queue(self):
-        workflow = yaml.load((ROOT/'.github/workflows/build.yml').read_text(),Loader=yaml.BaseLoader)
+        workflow = yaml.load((ROOT/'.github/workflows/build.yml').read_text(encoding="utf-8"),Loader=yaml.BaseLoader)
         self.assertEqual(workflow['on']['pull_request']['branches'],['main'])
         self.assertIn('merge_group',workflow['on'])
         jobs = workflow['jobs']; job = jobs['render-regression']
@@ -121,7 +121,7 @@ class WorkflowTests(unittest.TestCase):
                       jobs['header-state-check']['steps'])
 
     def test_aggregate_gate_for_each_event_and_result(self):
-        workflow = yaml.load((ROOT/'.github/workflows/build.yml').read_text(),Loader=yaml.BaseLoader)
+        workflow = yaml.load((ROOT/'.github/workflows/build.yml').read_text(encoding="utf-8"),Loader=yaml.BaseLoader)
         script = workflow['jobs']['ci-ok']['steps'][0]['run']
         for event in ('push','workflow_dispatch','pull_request','merge_group'):
             for result in ('success','skipped','failure','cancelled'):
@@ -129,15 +129,15 @@ class WorkflowTests(unittest.TestCase):
                     env = dict(driver.os.environ, EVENT_NAME=event, DOCS_ONLY=docs,
                                **{key:'success' for key in ('R_CHANGES','R_BUILD','R_ANDROID','R_WEB','R_IOS','R_REF','R_HDR')},
                                R_RENDER=result)
-                    proc = subprocess.run(['bash','-eu','-c',script],env=env,capture_output=True,text=True)
+                    proc = subprocess.run(['bash','-eu','-c',script],env=env,capture_output=True,text=True, encoding="utf-8")
                     ok = result == 'success' or (result == 'skipped' and
                          (docs == 'true' or event not in ('pull_request','merge_group')))
                     with self.subTest(event=event,result=result,docs=docs):
                         self.assertEqual(proc.returncode == 0,ok,proc.stdout)
 
     def test_display_marker_and_tolerance_inventory(self):
-        self.assertEqual((ROOT/'core/tests/renderRegression/display-test').read_text().strip(),'{test} --self-check')
-        source = (ROOT/'core/tests/renderRegression/src/main.cpp').read_text()
+        self.assertEqual((ROOT/'core/tests/renderRegression/display-test').read_text(encoding="utf-8").strip(),'{test} --self-check')
+        source = (ROOT/'core/tests/renderRegression/src/main.cpp').read_text(encoding="utf-8")
         for name in ('blendModes','text','premultImage','fboClearLoad','msaaResolve','transformPbr',
                      'easyCamFbo','scissorFbo','fullscreenShader','pbrShadowFbo','pointMeshTransform',
                      'resizePixelPerfect','userShaderOtherFormat','readbackRoundTrip','midFrameFlush','midPassClear'):
