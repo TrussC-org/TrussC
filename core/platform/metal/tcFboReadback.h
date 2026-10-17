@@ -5,16 +5,26 @@
 #pragma once
 
 #include "TrussC.h"
+#include "../tcFboConversion.h"
 
 #ifdef __APPLE__
 #import <Metal/Metal.h>
 
 namespace trussc {
 
+static bool validMetalReadImage(sg_image image) {
+    if (sg_query_image_state(image) != SG_RESOURCESTATE_VALID) return false;
+    const sg_mtl_image_info info = sg_mtl_query_image_info(image);
+    return info.tex[info.active_slot] != nullptr;
+}
+
 // Internal helper: blit GPU texture to CPU-readable staging and copy bytes
 static bool readPixelsInternal(sg_image srcImage, int width, int height,
                                MTLPixelFormat mtlFormat, size_t bytesPerRow,
                                void* dstBuffer, bool reportError = true) {
+    if (width <= 0 || height <= 0 || !dstBuffer ||
+        bytesPerRow > std::numeric_limits<size_t>::max() / size_t(height) ||
+        !validMetalReadImage(srcImage)) return false;
     id<MTLCommandQueue> cmdQueue = (__bridge id<MTLCommandQueue>)sg_mtl_command_queue();
     if (!cmdQueue) {
         if (reportError) tc::logError() << "[FBO] Failed to get Metal command queue";
@@ -92,22 +102,11 @@ static bool readPixelsInternal(sg_image srcImage, int width, int height,
     return true;
 }
 
-bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
-    if (!allocated_ || !pixels) return false;
-
-    if (format_ != TextureFormat::RGBA8) {
-        if (reportError) logError("Fbo") << "readPixels() requires RGBA8; use readPixelsFloat() for other formats";
-        return false;
-    }
-
-    size_t bytesPerRow = target_.width * 4;  // RGBA8
-    return readPixelsInternal(curColorTex_().getImage(), target_.width, target_.height,
-                              MTLPixelFormatRGBA8Unorm, bytesPerRow, pixels, reportError);
-}
-
 // Map sokol pixel format to Metal pixel format
 static MTLPixelFormat toMTLPixelFormat(sg_pixel_format fmt) {
     switch (fmt) {
+        case SG_PIXELFORMAT_BGRA8:    return MTLPixelFormatBGRA8Unorm;
+        case SG_PIXELFORMAT_RGBA16:   return MTLPixelFormatRGBA16Unorm;
         case SG_PIXELFORMAT_RGBA8:    return MTLPixelFormatRGBA8Unorm;
         case SG_PIXELFORMAT_RGBA16F:  return MTLPixelFormatRGBA16Float;
         case SG_PIXELFORMAT_RGBA32F:  return MTLPixelFormatRGBA32Float;
@@ -121,8 +120,40 @@ static MTLPixelFormat toMTLPixelFormat(sg_pixel_format fmt) {
     }
 }
 
+bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
+    size_t rowBytes, totalBytes, outputRowBytes, outputBytes;
+    if (!allocated_ || !pixels ||
+        !internal::fboReadbackLayout(target_.width, target_.height, 4, outputRowBytes, outputBytes) ||
+        !internal::fboReadbackLayout(target_.width, target_.height, bytesPerPixel(format_), rowBytes, totalBytes) ||
+        !validMetalReadImage(curColorTex_().getImage())) return false;
+
+    if (format_ == TextureFormat::RGBA8) {
+        return readPixelsInternal(curColorTex_().getImage(), target_.width, target_.height,
+                                  MTLPixelFormatRGBA8Unorm, rowBytes, pixels, reportError);
+    }
+    // Peak staging: one native-format CPU image plus one shared Metal image
+    // (up to 32 * width * height bytes for RGBA32F, excluding Metal padding).
+    std::vector<unsigned char> raw(totalBytes);
+    if (!readPixelsInternal(curColorTex_().getImage(), target_.width, target_.height,
+                            toMTLPixelFormat(toSokolFormat(format_)), rowBytes,
+                            raw.data(), reportError)) return false;
+    for (int y = 0; y < target_.height; ++y) {
+        internal::fboRowToRgba8(raw.data() + size_t(y) * rowBytes,
+                              pixels + size_t(y) * outputRowBytes, target_.width, format_);
+    }
+    return true;
+}
+
 bool Fbo::readPixelsFloatPlatform(float* pixels) const {
-    if (!allocated_ || !pixels) return false;
+    const int ch = channelCount(format_);
+    size_t bytesPerRow, nativeBytes, outputRowBytes, outputBytes;
+    if (!allocated_ || !pixels ||
+        !internal::fboReadbackLayout(target_.width, target_.height, size_t(ch) * sizeof(float),
+                                    outputRowBytes, outputBytes) ||
+        !internal::fboReadbackLayout(target_.width, target_.height, bytesPerPixel(format_),
+                                    bytesPerRow, nativeBytes) ||
+        !validMetalReadImage(curColorTex_().getImage())) return false;
+    const size_t total = outputBytes / sizeof(float);
 
     sg_pixel_format sgFmt = curColorTex_().getPixelFormat();
     // Determine actual format (NONE means legacy RGBA8)
@@ -131,56 +162,37 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
     MTLPixelFormat mtlFmt = toMTLPixelFormat(sgFmt);
 
     // For non-float formats, read as U8 then convert
-    if (sgFmt == SG_PIXELFORMAT_RGBA8 || sgFmt == SG_PIXELFORMAT_R8 || sgFmt == SG_PIXELFORMAT_RG8) {
-        int ch = channelCount(format_);
-        std::vector<unsigned char> tmp(target_.width * target_.height * ch);
-        size_t bytesPerRow = target_.width * ch;
+    if (sgFmt == SG_PIXELFORMAT_RGBA8 || sgFmt == SG_PIXELFORMAT_R8 ||
+        sgFmt == SG_PIXELFORMAT_RG8 || sgFmt == SG_PIXELFORMAT_BGRA8) {
+        std::vector<unsigned char> tmp(nativeBytes);
         bool ok = readPixelsInternal(curColorTex_().getImage(), target_.width, target_.height,
                                      mtlFmt, bytesPerRow, tmp.data());
         if (!ok) return false;
         // Convert U8 to float
-        int total = target_.width * target_.height * ch;
-        for (int i = 0; i < total; i++) {
-            pixels[i] = (float)tmp[i] / 255.0f;
+        for (size_t i = 0; i < total; i++) {
+            const size_t source = sgFmt == SG_PIXELFORMAT_BGRA8 && i % 4 < 3 ? (i / 4) * 4 + 2 - i % 4 : i;
+            pixels[i] = (float)tmp[source] / 255.0f;
         }
         return true;
     }
 
-    // Float formats: read directly
-    int bpp = bytesPerPixel(format_);
-    size_t bytesPerRow = target_.width * bpp;
+    if (sgFmt == SG_PIXELFORMAT_RGBA16) {
+        std::vector<uint16_t> tmp(nativeBytes / sizeof(uint16_t));
+        if (!readPixelsInternal(curColorTex_().getImage(), target_.width, target_.height,
+                                mtlFmt, bytesPerRow, tmp.data())) return false;
+        for (size_t i = 0; i < tmp.size(); ++i) pixels[i] = float(tmp[i]) / 65535.0f;
+        return true;
+    }
 
     // For 16F formats we need to read raw half-floats and convert to float
     if (sgFmt == SG_PIXELFORMAT_R16F || sgFmt == SG_PIXELFORMAT_RG16F || sgFmt == SG_PIXELFORMAT_RGBA16F) {
-        int ch = channelCount(format_);
-        std::vector<uint16_t> tmp(target_.width * target_.height * ch);
+        std::vector<uint16_t> tmp(nativeBytes / sizeof(uint16_t));
         bool ok = readPixelsInternal(curColorTex_().getImage(), target_.width, target_.height,
                                      mtlFmt, bytesPerRow, tmp.data());
         if (!ok) return false;
         // Convert half-float to float (IEEE 754 binary16)
-        int total = target_.width * target_.height * ch;
-        for (int i = 0; i < total; i++) {
-            uint16_t h = tmp[i];
-            uint32_t sign = (h & 0x8000) << 16;
-            uint32_t exp = (h >> 10) & 0x1F;
-            uint32_t mantissa = h & 0x3FF;
-            uint32_t f;
-            if (exp == 0) {
-                if (mantissa == 0) {
-                    f = sign;
-                } else {
-                    // Denormalized
-                    exp = 1;
-                    while (!(mantissa & 0x400)) { mantissa <<= 1; exp--; }
-                    mantissa &= 0x3FF;
-                    f = sign | ((exp + 127 - 15) << 23) | (mantissa << 13);
-                }
-            } else if (exp == 31) {
-                f = sign | 0x7F800000 | (mantissa << 13);
-            } else {
-                f = sign | ((exp + 127 - 15) << 23) | (mantissa << 13);
-            }
-            memcpy(&pixels[i], &f, sizeof(float));
+        for (size_t i = 0; i < total; i++) {
+            pixels[i] = internal::fboHalfToFloat(tmp[i]);
         }
         return true;
     }

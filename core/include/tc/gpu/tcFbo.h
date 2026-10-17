@@ -294,10 +294,14 @@ public:
         internal::popTarget(target_, target_.activation);
     }
 
-    // Read pixel data (RGBA8 only, for backward compatibility)
+    // Always read RGBA8, whatever the Fbo format: clamp to 0–1 and quantise
+    // to 8 bits, round to nearest (CPU ties round up; native desktop GL may
+    // differ by at most 1). Use readPixelsFloat() for full precision.
+    // Buffer must hold width * height * 4 bytes. R/RG fill missing G/B with 0 and A with 1.
+    // WebGL2 supports this API; WebGPU synchronous readback is unsupported.
     // Note: Call after rendering is complete (after end()); inside an Fbo pass it returns false
     // For MSAA, reads from resolved texture
-    TC_PLATFORMS("macos,windows,linux,ios,android") bool readPixels(unsigned char* pixels) const {
+    TC_PLATFORMS("macos,windows,linux,ios,android,web") bool readPixels(unsigned char* pixels) const {
         if (!allocated_ || !pixels) return false;
         if (internal::hasPublicFboActivation()) {
             logError("Fbo") << "readPixels() inside fbo.begin()/end() is not supported; call it after end()";
@@ -313,7 +317,7 @@ public:
     // Read pixel data as float (for float pixel formats: R16F, R32F, RGBA16F, RGBA32F, etc.)
     // Buffer must be large enough: width * height * channelCount(format) floats
     // Note: Call after rendering is complete (after end()); inside an Fbo pass it returns false
-    TC_PLATFORMS("macos,ios,windows,linux,android") bool readPixelsFloat(float* pixels) const {
+    TC_PLATFORMS("macos,ios,windows,linux,android,web") bool readPixelsFloat(float* pixels) const {
         if (!allocated_ || !pixels) return false;
         if (internal::hasPublicFboActivation()) {
             logError("Fbo") << "readPixels() inside fbo.begin()/end() is not supported; call it after end()";

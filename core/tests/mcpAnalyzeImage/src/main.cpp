@@ -187,7 +187,11 @@ public:
             auto dead=decode(pending_[2]()());check("destroyed deferred source returns error",dead["status"]=="error");
             auto win=decode(pending_[3]()());check("window source captures completed frame",win["width"]==32&&win["height"]==32&&win["results"][0]["color"]==json::array({1,0,0,1}));
             auto changed=decode(pending_[4]()());
-            check("deferred capture rejects incompatible format change",changed["status"]=="error");
+            check("deferred capture converts changed format to RGBA8",changed["format"]=="RGBA8"&&
+                changed["results"][0]["color"]==json::array({0,0,1,1}));
+            auto integer=decode(pending_[5]()());
+            check("RGBA16 Fbo analysis returns converted RGBA8 colors",integer["format"]=="RGBA8"&&
+                integer["results"][0]["color"]==json::array({0,0,1,1}));
             pending_.clear(); completed=true;exitApp();
         });
     }
@@ -205,9 +209,9 @@ public:
         {Fbo dead;dead.setDebugName("pending-dead");defer({{"fbo","pending-dead"}});}
         defer({{"window",0}});
         defer({{"fbo","changing-format"}});
-        changing_.allocate(8,8,1,TextureFormat::R8);
-        auto unsupported=analyze({{"fbo","changing-format"}},json::array({op("stats")}));
-        check("unsupported integer Fbo readback returns error",unsupported["status"]=="error");
+        changing_.allocate(8,8,1,TextureFormat::RGBA16);
+        changing_.begin(0,0,1,1);changing_.end();
+        defer({{"fbo","changing-format"}});
     }
 };
 #endif
