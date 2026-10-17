@@ -268,6 +268,7 @@ bool captureWindow(Pixels& outPixels) {
     const auto layout = internal::recorderPackedLayout(width, height, internal::RecorderPixelFormat::RGBA8);
     // Bound (abi): packed capture bytes must fit size_t. Overflow drops the recorder frame and is counted.
     if (!layout.byteSize) return false;
+    mcp::internal::reconcileWindowCapture(size_t(width), size_t(height));
     outPixels.allocate(width, height, 4);
     // Bound (abi): the pixel allocation must hold every captured row. Overflow drops the recorder frame and is counted.
     if (!outPixels.getData() || outPixels.getTotalBytes() < layout.byteSize) return false;

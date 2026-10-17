@@ -331,6 +331,7 @@ bool internal::captureWindowAsync(
 
     NSUInteger width  = srcTexture.width;
     NSUInteger height = srcTexture.height;
+    mcp::internal::reconcileWindowCapture(width, height);
     MTLPixelFormat pixelFormat = srcTexture.pixelFormat;
     // Bound (abi): Metal extents must fit the capture int dimensions. Overflow drops the recorder frame and is counted.
     if (width > (NSUInteger)std::numeric_limits<int>::max() ||

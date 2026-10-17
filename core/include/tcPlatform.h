@@ -195,7 +195,8 @@ TC_PLATFORMS("macos,windows,linux,ios,android") bool captureWindow(Pixels& outPi
 // failures logged. Supports PNG/JPEG, with .png appended for other extensions.
 namespace internal {
 struct WindowContext;
-// Dimensions consumed by native readback; callable before enqueue and at drain.
+// Reservation estimate, without acquiring a drawable; callable before enqueue
+// and at drain. Native readback reconciles the selected source before allocation.
 std::pair<size_t, size_t> captureWindowSize(const WindowContext& ctx);
 // Resolve the data path and the platform-specific screenshot extension.
 // Returns the actual destination, warning when .png is appended.
