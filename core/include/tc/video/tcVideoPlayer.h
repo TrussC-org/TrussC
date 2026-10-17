@@ -771,6 +771,16 @@ public:
     static void playHeadlessForTests(VideoPlayer& player) { player.playPlatform(); }
     static void updateHeadlessForTests(VideoPlayer& player) { player.updatePlatform(); }
     static void stopAudioForTests(VideoPlayer& player);
+    // Synthetic planes exercise VideoPlayer::draw -> drawNV12Platform without a
+    // decoder/device. The supplied shader is borrowed only for this draw.
+    static void drawNV12ForTests(VideoPlayer& player, void* shader, Texture&& yPlane,
+                                Texture&& uvPlane, float x, float y, float w, float h) {
+        player.nv12Mode_ = true; player.posterActive_ = false;
+        player.nv12ShaderHandle_ = shader;
+        player.textureY_ = std::move(yPlane); player.textureUV_ = std::move(uvPlane);
+        player.draw(x, y, w, h);
+        player.nv12ShaderHandle_ = nullptr; player.nv12Mode_ = false;
+    }
 #endif
     static void setDimensions(VideoPlayer& player, int w, int h) {
         player.width_ = w;

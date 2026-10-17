@@ -72,9 +72,8 @@ public:
 
 void runSyntheticDrawChecks() {
 #if defined(SOKOL_GLCORE)
-    // LUT/NV12 still use load-time pipelines until PR 4: match screen format
-    // and sample count while exercising a differently sized offscreen target.
-    Fbo fbo; fbo.allocate(160, 96, sapp_sample_count());
+    // Deliberately differ from window size and sample count.
+    Fbo fbo; fbo.allocate(160, 96, 1);
     unsigned char rgba[] = {128, 128, 0, 128};
     Texture source; source.allocate(1, 1, TextureFormat::RGBA8, TextureUsage::Dynamic); source.loadData(rgba, 1, 1, 4);
     tcx::lut::Lut3D lut = tcx::lut::createIdentity(2);
@@ -109,14 +108,19 @@ void runSyntheticDrawChecks() {
             hap.setUniform(0, &data.uniforms, sizeof(data.uniforms));
             hap.submitVertices(data.vertices, 4, PrimitiveType::Quads);
         }
-        check("LUT/NV12/Hap retain target scoped state and active3D role", target.selectedPipeline == 0x300u && !target.depthTestEnabled &&
+        check("LUT/NV12/Hap retain target scoped state and active3D role", target.selectedPipeline == internal::ImmediateSelection{internal::PipelineRole::Geometry3D, BlendMode::Alpha, true} && !target.depthTestEnabled &&
               target.camera.currentCameraContext == context && sameMatrix(getViewMatrix(), view) && sameMatrix(getProjectionMatrix(), projection) &&
               sameMatrix(getMatrix(), model) && target.viewport.x == 4 && target.viewport.y == 6 && target.viewport.w == 120 && target.currentScissor.w == 145);
         camera.end(); setColor(0, 1, 0); drawRect(0, 0, 5, 5); popScissor(); fbo.end();
         auto pixels = readTarget(fbo);
         expectPixel(pixels, 20, 15, Color(0, 1, 0), "marker after synthetic direct draw retains model/camera");
-        if (path == 0) expectPixel(pixels, 74, 44, Color(0.25f, 0.25f, 0), "identity LUT uses offscreen destination pixels");
-        if (path == 1) expectPixel(pixels, 60, 39, Color(0.51f, 0.51f, 0.51f), "synthetic NV12 uses offscreen dimensions");
+        if (path < 2) {
+            const auto center = projection * view * model * Vec4(74, 44, 0, 1);
+            const int px = 4 + int((center.x / center.w + 1) * 60);
+            const int py = 6 + int((1 - center.y / center.w) * 36);
+            expectPixel(pixels, px, py, path == 0 ? Color(0.25f, 0.25f, 0) : Color(0.51f, 0.51f, 0.51f),
+                        "LUT/NV12 rectangle follows real camera/model/viewport");
+        }
         if (path == 2) {
             const auto center = projection * view * model * Vec4(4, 4, 0, 1);
             const int px = 4 + int((center.x / center.w + 1) * 60);
@@ -178,7 +182,7 @@ void runMatrixChecks() {
                 check("EasyCam projected edge matches target focal length", std::abs(edge.x - 99.3137f) < 0.01f);
             }
             camera.begin(); setBlendMode(BlendMode::Add); enableDepthTest(); camera.end();
-            check("nested camera restores active3D independently of logical flags", target.selectedPipeline == 0x300u && target.depthTestEnabled && target.currentBlendMode == BlendMode::Add);
+            check("nested camera restores active3D independently of logical flags", target.selectedPipeline == internal::ImmediateSelection{internal::PipelineRole::Geometry3D, BlendMode::Alpha, true} && target.depthTestEnabled && target.currentBlendMode == BlendMode::Add);
             camera.end();
             check("camera restores immutable entry snapshot and actual selected variant", target.camera.currentCameraContext == context && target.selectedPipeline == pipeline &&
                   sameMatrix(getMatrix(), Mat4::identity()));
@@ -268,7 +272,7 @@ void runMatrixChecks() {
         for (int y = 55; y < 80; ++y) for (int x = 60; x < 75; ++x) if (pixels.getColor(x, y).r > 0.5f) ++fontPixels;
         check("loaded font emits bounded visible glyphs into Fbo", fontPixels > 20 && fontPixels < 200);
     }
-    // PR 4 retains the window-based point size/aspect and missing model transform.
+    // Attachment pixels are independent of host DPI and pixelPerfect.
     window.fbWidth = 512; window.fbHeight = 384; window.dpiScale = 2;
     Fbo pointTarget; pointTarget.allocate(512, 384);
     Mesh pointMesh; pointMesh.setMode(PrimitiveMode::Points); pointMesh.addVertex(40, 40, 0);
@@ -282,9 +286,9 @@ void runMatrixChecks() {
             firstX = std::min(firstX, x); lastX = std::max(lastX, x);
             firstY = std::min(firstY, y); lastY = std::max(lastY, y); ++count;
         }
-        const int extent = pixelPerfect ? 12 : 24;
-        check("point size/aspect and missing-M mask stay deferred to PR 4", lastX - firstX + 1 == extent && lastY - firstY + 1 == extent &&
-              count == extent * extent && firstX + lastX == 79 && firstY + lastY == 79);
+        const int extent = 12;
+        check("point target extent and model transform at host DPI 2", lastX - firstX + 1 == extent && lastY - firstY + 1 == extent &&
+              count == extent * extent && firstX + lastX == 119 && firstY + lastY == 99);
     }
     window.isMain = mainWindow; window.dpiScale = hostDpi; window.fbWidth = hostW; window.fbHeight = hostH;
     internal::pixelPerfectMode() = pixelMode;
@@ -297,7 +301,7 @@ void runMatrixChecks() {
     const auto directContext = directTarget.camera.currentCameraContext;
     const auto directView = getViewMatrix(), directProjection = getProjectionMatrix(), directModel = getMatrix();
     FullscreenShader directShader; check("direct fixture shader loads", directShader.load(targetstate_discard_shader_desc)); directShader.draw();
-    check("direct shader restores full active3D target state", directTarget.selectedPipeline == 0x300u && !directTarget.depthTestEnabled &&
+    check("direct shader restores full active3D target state", directTarget.selectedPipeline == internal::ImmediateSelection{internal::PipelineRole::Geometry3D, BlendMode::Alpha, true} && !directTarget.depthTestEnabled &&
           directTarget.camera.currentCameraContext == directContext && sameMatrix(getViewMatrix(), directView) &&
           sameMatrix(getProjectionMatrix(), directProjection) && sameMatrix(getMatrix(), directModel) && directTarget.currentScissor.w == 140 && directTarget.viewport.x == 4 && directTarget.viewport.w == 120);
     directCamera.end(); setColor(0, 1, 0); drawRect(0, 0, 5, 5); popScissor(); first.end();
@@ -370,7 +374,7 @@ void drawDepthFixture(int variant, Fbo& fbo) {
         FullscreenShader shader; check("temporary shader loads", shader.load(targetstate_discard_shader_desc)); shader.draw();
     }
     if (variant == 2) { camera.begin(); setBlendMode(BlendMode::Add); camera.end(); }
-    check("scope restores active3D with depth flag false", target.selectedPipeline == 0x300u && !target.depthTestEnabled);
+    check("scope restores active3D with depth flag false", target.selectedPipeline == internal::ImmediateSelection{internal::PipelineRole::Geometry3D, BlendMode::Alpha, true} && !target.depthTestEnabled);
     setColor(0, 1, 0); drawTriangle(Vec3(-20, -20, -10), Vec3(20, -20, -10), Vec3(0, 20, -10));
     camera.end();
     check("EasyCam restores entry 2D pipeline and immutable context", target.selectedPipeline == selected && target.camera.currentCameraContext == context);

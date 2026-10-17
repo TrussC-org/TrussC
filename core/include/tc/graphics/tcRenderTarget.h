@@ -1,10 +1,9 @@
 #pragma once
 // =============================================================================
 // RenderTarget owns the lightweight state of one drawable (swapchain or Fbo).
-// Fbo targets borrow GPU resources from the existing (format, sampleCount) pool;
+// Fbo targets borrow GPU resources from the (format, samples, depth) pool;
 // window targets keep a dedicated context because their recorded commands coexist.
-// PR 1 preserves the legacy state handoff and pipeline/matrix choices. Target
-// stacks and independent matrix scopes are introduced in later #821 changes.
+// Targets own matrices and pass state; all pipeline creation is host-owned.
 // Included from TrussC.h after BlendMode, CameraContext and the sokol headers.
 // =============================================================================
 #include <unordered_map>
@@ -15,18 +14,8 @@
 
 namespace trussc { namespace internal {
 
-#ifndef NDEBUG
-// Debug safety net: remember which sgl context each pipeline we build belongs to,
-// so loadPipeline() can assert the pipeline matches the active target. This is the
-// runtime guard against the "wrong pipeline for this target" bug class that this
-// whole RenderTarget refactor exists to prevent (every recent FBO glitch was one).
-inline std::unordered_map<uint32_t, uint32_t>& pipelineOwnerCtx() {
-    // Debug bookkeeping, harmless per module: a module only checks the
-    // pipelines it built itself.
-    static std::unordered_map<uint32_t, uint32_t> m;
-    return m;
-}
-#endif
+// Always exported: Debug consumers can link against a Release core.
+std::unordered_map<uint32_t, uint32_t>& pipelineOwnerCtx();
 
 // Premultiplied-alpha sgl shader handle (defined in tcGlobal.cpp, built from
 // core/shaders/sglPremult.glsl). Screen/Multiply pipelines bind it so their blend
@@ -147,76 +136,75 @@ inline sg_pipeline_desc pipeDesc3D() {
     return d;
 }
 
-// Heavy resources: one context and its role-to-pipeline cache.
-struct RenderTargetResources {
-    sgl_context context = {};
-    std::unordered_map<uint32_t, sgl_pipeline> cache;
-    // A creation failed (out of memory, or a GPU pool full): warned once and
-    // not retried. The target stays degraded for the rest of the run (#317).
-    bool leased = false; // parked targets retain their exclusive command context
-    bool contextFailed  = false;
-    bool pipelineWarned = false;
-
-    // Makes this target's own sgl context once. On failure logs one warning
-    // and does not try again (no retry on every tick / begin()).
-    bool makeContext(const sgl_context_desc_t& desc, const char* what) {
-        if (context.id != SG_INVALID_ID) return true;
-        if (contextFailed) return false;
-        context = sgl_make_context(&desc);
-        if (context.id == SG_INVALID_ID) {
-            contextFailed = true;
-            logWarning("TrussC") << "could not create the sokol_gl context for "
-                << what << "; its shapes are not drawn for the rest of the run";
-            return false;
-        }
-        return true;
-    }
-
-    sgl_pipeline pipeline(uint32_t key, const sg_pipeline_desc& desc) {
-        if (context.id == 0) return {};   // not set up yet (e.g. headless) -> no-op
-        auto it = cache.find(key);
-        if (it != cache.end()) return it->second;
-        sg_pipeline_desc d = desc;   // sgl fills pixel_format/sample_count/depth from the context
-        sgl_pipeline p = sgl_context_make_pipeline(context, &d);
-        // Id 0 is cached too, so the creation is not retried on every call;
-        // loadPipeline() then keeps the previously loaded pipeline.
-        cache.emplace(key, p);
-        if (p.id == SG_INVALID_ID) {
-            if (!pipelineWarned) {
-                pipelineWarned = true;
-                logWarning("TrussC") << "could not create a sokol_gl pipeline (GPU "
-                    << "pipeline pool full); draws that need it keep the previous "
-                    << "blend/depth state";
-            }
-            return p;
-        }
-#ifndef NDEBUG
-        pipelineOwnerCtx()[p.id] = context.id;
-#endif
-        return p;
-    }
-
-    // Frees this target's GPU objects: every cached sgl pipeline (sgl
-    // pipelines live in one global pool, and sgl_destroy_context() frees only
-    // the context's own default pipeline), then the context. For a target
-    // that owns its context, e.g. a secondary window on close().
-    void release() {
-        for (auto& entry : cache) {
-            if (entry.second.id == SG_INVALID_ID) continue;
-            sgl_destroy_pipeline(entry.second);
-#ifndef NDEBUG
-            pipelineOwnerCtx().erase(entry.second.id);
-#endif
-        }
-        cache.clear();
-        if (context.id != SG_INVALID_ID) {
-            sgl_destroy_context(context);
-            context = {};
-        }
-        contextFailed = false;
-        pipelineWarned = false;
+// Requests describe immutable raster state; attachment fields are always supplied
+// by the target. Pipeline programs and caches live in the host (#249).
+enum class PipelineFamily { Immediate, Raw };
+enum class PipelineRole { Fill, Premult, Coverage, Clear, Geometry3D,
+    Pbr, PointSplat, PointPixel, Shader, Shadow, Mip, Blit, Ibl };
+struct ImmediateSelection {
+    PipelineRole role = PipelineRole::Fill;
+    BlendMode blend = BlendMode::Alpha;
+    bool depth = false;
+    bool operator==(const ImmediateSelection& other) const {
+        return role == other.role && blend == other.blend && depth == other.depth;
     }
 };
+inline ImmediateSelection fillSelection(BlendMode blend, bool depth = false) {
+    return {PipelineRole::Fill, blend, depth};
+}
+struct PipelineKey {
+    PipelineFamily family = PipelineFamily::Immediate;
+    PipelineRole role = PipelineRole::Fill;
+    sg_pipeline_desc desc = {};
+    ImmediateSelection selection;
+    static PipelineKey raw(PipelineRole role, const sg_pipeline_desc& desc) {
+        PipelineKey key; key.family = PipelineFamily::Raw; key.role = role;
+        key.desc = desc; return key;
+    }
+    static PipelineKey immediate(ImmediateSelection selection);
+};
+// Field-wise encoding, excluding padding, labels and canaries. Equality checks
+// the entire encoding even on a hash collision.
+struct PipelineCacheKey {
+    std::vector<uint32_t> fields;
+    bool operator==(const PipelineCacheKey& other) const { return fields == other.fields; }
+};
+struct PipelineCacheHash {
+    size_t operator()(const PipelineCacheKey& key) const {
+        size_t hash = 2166136261u;
+        for (auto field : key.fields) hash = (hash ^ field) * 16777619u;
+        return hash;
+    }
+};
+struct PipelineGeneration {
+    uint64_t serial = 0;
+    std::unordered_map<PipelineCacheKey, sg_pipeline, PipelineCacheHash> cache;
+    ~PipelineGeneration();
+};
+struct PipelineSelection {
+    sgl_pipeline immediate = {};
+    sg_pipeline raw = {};
+    std::shared_ptr<PipelineGeneration> generation;
+};
+struct RenderTargetResources {
+    sgl_context context = {};
+    std::unordered_map<PipelineCacheKey, sgl_pipeline, PipelineCacheHash> cache;
+    std::unordered_map<uint32_t, ImmediateSelection> selections;
+    std::shared_ptr<PipelineGeneration> rawCache;
+    uint64_t generation = 0;
+    int width = 0, height = 0;
+    sg_pixel_format color = _SG_PIXELFORMAT_DEFAULT, depth = _SG_PIXELFORMAT_DEFAULT;
+    int samples = 0;
+    bool leased = false;
+    bool contextFailed = false;
+    bool makeContext(const sgl_context_desc_t& desc, const char* what);
+    void release();
+};
+void retirePipelineProgram(sg_shader shader);
+void returnTargetResources(RenderTargetResources& lease);
+void invalidateTargetBucket(sg_pixel_format format, int samples, sg_pixel_format depth);
+bool rebuildTargetResources();
+void prepareWindowTarget();
 
 // C++17 vectors support incomplete elements; these draw snapshots are defined
 // later in TrussC.h. Targets are constructed where those definitions are complete.
@@ -243,7 +231,7 @@ struct TargetCameraState {
 // Cache role key plus selected depth/blend variant, independent of logical flags.
 struct TargetCameraScope {
     TargetCameraState camera;
-    uint32_t selectedPipeline;
+    ImmediateSelection selectedPipeline;
     const void* owner;
 };
 
@@ -271,7 +259,8 @@ struct RenderTarget {
     WindowContext* activeWindow = nullptr;
     TargetPassKind passKind = TargetPassKind::Swapchain;
     sg_pass binding = {};
-    sg_pipeline fixedPipeline = {}; // explicit internal raster pipeline on resume
+    PipelineKey fixedPipeline; // resolved again on resume
+    bool hasFixedPipeline = false;
     sg_image transferSource = {}; // resolved source retained by a native transfer
     sg_pixel_format depthFormat = SG_PIXELFORMAT_DEPTH_STENCIL;
     bool resumable = true;
@@ -290,7 +279,7 @@ struct RenderTarget {
 
     TargetCameraState camera;
     std::vector<TargetCameraScope> cameraStack;
-    uint32_t selectedPipeline = 0;
+    ImmediateSelection selectedPipeline;
     Mat4 currentMatrix = Mat4::identity();
     std::vector<Mat4> matrixStack;
     ScissorRect viewport = {0, 0, 0, 0, false};
@@ -314,9 +303,7 @@ struct RenderTarget {
     }
     int getWidth() const { return width; }
     int getHeight() const { return height; }
-    sgl_pipeline pipeline(uint32_t key, const sg_pipeline_desc& desc) {
-        return resources().pipeline(key, desc);
-    }
+    PipelineSelection pipeline(const PipelineKey& key);
 
     // Only these logical flags retain continuity across targets in PR 2.
     void inheritLogicalDrawFlags(const RenderTarget& previous) {
@@ -338,7 +325,8 @@ bool startPreparedTarget(RenderTarget& target, uint64_t token);
 bool popTarget(RenderTarget& target, uint64_t token);
 void ensureCurrentPass();
 bool hasPublicFboActivation();
-RenderTargetResources* leaseTargetResources(sg_pixel_format format, int samples);
+RenderTargetResources* leaseTargetResources(sg_pixel_format format, int samples,
+    sg_pixel_format depth = SG_PIXELFORMAT_DEPTH_STENCIL);
 
 // Internal scopes own fixed targets or borrow a stable owner target. All stack
 // operations live in the host, including destruction during early returns.

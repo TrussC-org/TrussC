@@ -12,6 +12,7 @@
 #include "tcGpuDestroyQueue.h"
 
 namespace trussc {
+namespace internal { struct PipelineGeneration; }
 
 // ---------------------------------------------------------------------------
 // Standard vertex format for shader drawing
@@ -134,6 +135,7 @@ struct ShaderStreamState {
 // every frame; a pooled arena is a possible future optimization.
 struct DeferredShaderDraw {
     int layerId = 0;                    // sokol_gl layer this draw follows
+    std::shared_ptr<PipelineGeneration> pipelineGeneration;
     sg_pipeline pipeline = {};          // resolved for the target at submission
     sg_bindings bindings = {};          // buffers + views/samplers snapshot
     std::vector<std::pair<int, std::vector<uint8_t>>> uniforms;  // slot -> block bytes

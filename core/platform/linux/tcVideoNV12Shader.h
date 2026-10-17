@@ -15,23 +15,18 @@ public:
 
         internal::ensureCurrentPass();
         internal::currentTarget().flushLayers();
+        internal::applyTargetDrawingState();
 
-        sg_apply_pipeline(pipeline);
-
-        // x/y/w/h come in logical coordinates (same space tcApp draws in),
-        // but sapp_width()/sapp_height() are physical framebuffer pixels.
-        // Divide by DPI scale so the shader's viewport matches its inputs.
-        // Unrounded logical size: fractional DPI must not shift the video.
-        const Vec2 logical = internal::targetLogicalSize();
-        const float vpW = logical.x;
-        const float vpH = logical.y;
-
-        struct VsParams { float v[8]; } p = {{
-            vpW, vpH, x, y,
-            w,   h,   0.0f, 0.0f
-        }};
-        sg_range range = { &p, sizeof(p) };
-        sg_apply_uniforms(0, &range);
+        const auto selected = selectPipelineForCurrentTarget_();
+        if (!selected.raw.id) return;
+        sg_apply_pipeline(selected.raw);
+        tc_video_nv12_vs_params_t params = {};
+        const auto& target = internal::currentTarget();
+        const auto mvp = (target.camera.currentProjectionMatrix * target.camera.currentViewMatrix * target.currentMatrix).transposed();
+        std::memcpy(params.mvp, mvp.m, sizeof(params.mvp));
+        params.rect[0] = x; params.rect[1] = y; params.rect[2] = w; params.rect[3] = h;
+        sg_range range = {&params, sizeof(params)};
+        sg_apply_uniforms(UB_tc_video_nv12_vs_params, &range);
 
         sg_bindings bind = {};
         bind.vertex_buffers[0] = vertexBuffer;

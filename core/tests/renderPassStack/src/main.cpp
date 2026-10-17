@@ -149,7 +149,7 @@ void inheritedBlendPixels(int samples) {
     setBlendMode(BlendMode::Add); disableDepthTest();
     fbo.begin(0,0,0);
     check("fresh Fbo selects inherited Add role with depth disabled",
-          internal::currentTarget().selectedPipeline == unsigned(BlendMode::Add));
+          internal::currentTarget().selectedPipeline == internal::fillSelection(BlendMode::Add));
     // Keep the default Fbo camera: its setup must restore the base 2D pipeline.
     rectangle(0,0,32,32,Color(1,0,0,0.5f));
     rectangle(0,0,32,32,Color(0,1,0,0.5f));

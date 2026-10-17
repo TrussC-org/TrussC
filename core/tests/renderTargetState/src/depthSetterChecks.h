@@ -32,7 +32,7 @@ void drawDepthSetterOverlap(bool easycam, bool enabled) {
     if (enabled) { disableDepthTest(); enableDepthTest(); }
     else { enableDepthTest(); disableDepthTest(); }
     check("explicit depth setter records blend/depth variant immediately",
-          target.selectedPipeline == ((enabled ? 0x1000u : 0u) | uint32_t(BlendMode::Alpha)) &&
+          target.selectedPipeline == internal::fillSelection(BlendMode::Alpha, enabled) &&
           isDepthTestEnabled() == enabled);
     const float cx = easycam ? 0 : target.camera.currentViewW / 2;
     const float cy = easycam ? 0 : target.camera.currentViewH / 2;

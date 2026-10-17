@@ -266,6 +266,7 @@ namespace internal {
         int maxVertices = 65536;
         int maxCommands = 16384;
         int pendingResize = 0;  // non-zero = need resize next frame
+        int pendingCommands = 0; // explicit deferred request; 0 derives from vertices
     };
     SglBudget& sglBudget();
 
@@ -428,11 +429,16 @@ inline void beginFrame() {
     // Skip in headless mode (no graphics context)
     if (headless::isActive()) return;
 
-    // Auto-resize sokol_gl buffers if overflow was detected last frame
+    // Retry the exact deferred request at each boundary. The rebuild checks
+    // every window for live work: sg_commit() rewinds all SGL contexts, so
+    // another window's present may have cleared immediate work since deferral.
     const int pendingResize = internal::sglBudget().pendingResize;
     if (pendingResize > 0) {
-        internal::resizeSgl(pendingResize, std::max(16384, pendingResize / 4));
+        const int commands = internal::sglBudget().pendingCommands;
+        internal::resizeSgl(pendingResize, commands > 0 ? commands : std::max(16384, pendingResize / 4));
     }
+
+    internal::prepareWindowTarget();
 
     // Setup screen with default FOV (60 = perspective, 0 = ortho)
     internal::setupScreenFov(internal::defaultScreenFov());
@@ -638,8 +644,10 @@ inline void popScissor() {
 // pipeline against the current render target, so each target lazily gets a
 // pipeline matching its own color format / sample count.
 inline void setBlendMode(BlendMode mode) {
-    if (internal::currentWindowContext().swapchainTarget.resources().context.id == 0) return;  // renderer not set up yet
-    internal::currentWindowContext().currentTarget->currentBlendMode = mode;
+    auto& target = internal::currentTarget();
+    target.currentBlendMode = mode;
+    target.selectedPipeline = internal::fillSelection(mode, target.depthTestEnabled);
+    if (!target.resources().context.id) return;
     internal::loadPipeline(internal::active2D(mode));
 }
 
@@ -676,15 +684,19 @@ inline void restoreBlendPipeline() {
 
 // Enable depth test/write on the current (and future) blend pipelines
 inline void enableDepthTest() {
-    if (internal::currentWindowContext().swapchainTarget.resources().context.id == 0) return;  // renderer not set up yet
-    internal::currentWindowContext().currentTarget->depthTestEnabled = true;
+    auto& target = internal::currentTarget();
+    target.depthTestEnabled = true;
+    target.selectedPipeline = internal::fillSelection(target.currentBlendMode, true);
+    if (!target.resources().context.id) return;
     internal::loadPipeline(internal::active2D(getBlendMode()));
 }
 
 // Disable depth test/write on the current (and future) blend pipelines (default)
 inline void disableDepthTest() {
-    if (internal::currentWindowContext().swapchainTarget.resources().context.id == 0) return;  // renderer not set up yet
-    internal::currentWindowContext().currentTarget->depthTestEnabled = false;
+    auto& target = internal::currentTarget();
+    target.depthTestEnabled = false;
+    target.selectedPipeline = internal::fillSelection(target.currentBlendMode, false);
+    if (!target.resources().context.id) return;
     internal::loadPipeline(internal::active2D(getBlendMode()));
 }
 
@@ -1814,7 +1826,7 @@ inline int getSokolMemoryAllocs() { return smemtrack_info().num_allocs; }
 // Buffers are automatically re-allocated on the next draw call.
 // Call between frames when you know the next frame will use fewer vertices.
 inline void releaseSglBuffers() {
-    sgl_tc_context_release_buffers(SGL_DEFAULT_CONTEXT);
+    sgl_tc_context_release_buffers(internal::currentWindowContext().swapchainTarget.resources().context);
 }
 
 // ---------------------------------------------------------------------------

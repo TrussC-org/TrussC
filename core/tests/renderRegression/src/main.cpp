@@ -308,8 +308,7 @@ class RegressionApp : public App {
             expect(px, offscreen, label+" glyph", 18, 20, {255,255,255,255}, s);
             expect(px, offscreen, label+" R8 coverage glyph", 21, 73, {255,255,255,255}, s);
         } else if (is("premultImage")) {
-            // Known wrong: Fbo uses Fill2D instead of Premult; #821 PR 4 pipelines fixes it.
-            expect(px, offscreen, label+" premult", 32, 32, offscreen ? Rgba{64,0,127,255} : Rgba{128,0,127,255}, s);
+            expect(px, offscreen, label+" premult", 32, 32, Rgba{128,0,127,255}, s);
         } else if (is("fboClearLoad")) {
             Rgba red{128,0,0,128}, green{0,255,0,255};
             int allowance = 1;
@@ -345,8 +344,23 @@ class RegressionApp : public App {
             expect(px, offscreen,label+" lit receiver",80,80,{128,128,128,255},s,2);
             expect(px, offscreen,label+" shadow receiver",140,104,{42,42,42,255},s,2);
         } else if (is("pointMeshTransform")) {
-            // Known wrong: #655 ignores model transforms; #821 PR 4 pipelines fixes this origin probe.
-            expect(px, offscreen, label+" GPU point", 24, 24, {0,255,0,255}, s);
+            expect(px, offscreen, label+" old GPU point origin", 24, 24, {0,0,0,255}, s);
+            expect(px, offscreen, label+" transformed green point", 67, 69, {0,255,0,255}, s);
+            expect(px, offscreen, label+" transformed magenta point", 133, 134, {255,0,255,255}, s);
+            if (offscreen) {
+                // Runs on the Air too: each square is 12x12 attachment pixels,
+                // including a DPI-2 host with pixelPerfect disabled.
+                for (int channel : {0, 1}) {
+                    int count = 0, xFirst = px.getWidth(), xLast = -1, yFirst = px.getHeight(), yLast = -1;
+                    for (int y = 0; y < px.getHeight(); ++y) for (int x = 0; x < px.getWidth(); ++x) {
+                        const auto c = pixel(px, x, y);
+                        if (c[channel] < 250) continue;
+                        ++count; xFirst = std::min(xFirst, x); xLast = std::max(xLast, x);
+                        yFirst = std::min(yFirst, y); yLast = std::max(yLast, y);
+                    }
+                    check(label+" 12x12 attachment point mask", count == 144 && xLast-xFirst+1 == 12 && yLast-yFirst+1 == 12);
+                }
+            }
         } else if (is("resizePixelPerfect") || is("readbackRoundTrip")) {
             expect(px, offscreen, label+" top left", w/4, h/4, {255,0,0,255}, s);
             expect(px, offscreen, label+" top right", w*3/4, h/4, {0,255,0,255}, s);

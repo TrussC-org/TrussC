@@ -34,6 +34,7 @@ namespace internal {
 // sokol_gl 2D and the PBR meshes in submission order. Mirrors PbrDrawCommand.
 struct PointDrawCommand {
     sg_pipeline               pip;
+    std::shared_ptr<PipelineGeneration> generation;
     sg_bindings               bind;
     tc_pointcloud_vs_params_t vsp;
     int                       numElements;    // splat: 4 (quad)    point: N
@@ -81,11 +82,7 @@ public:
     // Get or create a pipeline for the given color format and sample count.
     // alpha-to-coverage anti-aliases the round splats on a multisampled target
     // without alpha blending, so depth stays correct and order-independent.
-    sg_pipeline getPipeline(sg_pixel_format colorFormat, int sampleCount) {
-        int key = static_cast<int>(colorFormat) | (sampleCount << 16);
-        auto it = pipelineCache_.find(key);
-        if (it != pipelineCache_.end()) return it->second;
-
+    PipelineSelection getPipeline() {
         sg_pipeline_desc pd = {};
         pd.shader = shader_;
         pd.layout.buffers[0].stride = sizeof(float) * 2;                  // corner (per-vertex)
@@ -99,23 +96,17 @@ public:
         pd.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
         pd.depth.write_enabled = true;
         pd.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-        pd.colors[0].pixel_format = colorFormat;
+
         pd.alpha_to_coverage_enabled = true;
-        pd.sample_count = sampleCount;
+
         pd.label = "tc_mesh_point_pipeline";
 
-        sg_pipeline pip = sg_make_pipeline(&pd);
-        pipelineCache_[key] = pip;
-        return pip;
+        return currentTarget().pipeline(PipelineKey::raw(PipelineRole::PointSplat, pd));
     }
 
     // Pipeline for PointStyle::Pixel: draws the per-point buffer directly as
     // POINTS (1 device pixel, no quad expansion, no instancing, no a2c).
-    sg_pipeline getPrimPipeline(sg_pixel_format colorFormat, int sampleCount) {
-        int key = static_cast<int>(colorFormat) | (sampleCount << 16);
-        auto it = primPipelineCache_.find(key);
-        if (it != primPipelineCache_.end()) return it->second;
-
+    PipelineSelection getPrimPipeline() {
         sg_pipeline_desc pd = {};
         pd.shader = shaderPrim_;
         pd.layout.buffers[0].stride = sizeof(float) * 7;                  // pos3 + color4 (per-vertex)
@@ -126,13 +117,11 @@ public:
         pd.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
         pd.depth.write_enabled = true;
         pd.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-        pd.colors[0].pixel_format = colorFormat;
-        pd.sample_count = sampleCount;
+
+
         pd.label = "tc_mesh_point_prim_pipeline";
 
-        sg_pipeline pip = sg_make_pipeline(&pd);
-        primPipelineCache_[key] = pip;
-        return pip;
+        return currentTarget().pipeline(PipelineKey::raw(PipelineRole::PointPixel, pd));
     }
 
     // Draw a Points mesh. Assumes the mesh has uploaded its point instance buffer.
@@ -142,36 +131,29 @@ public:
         const int n = mesh.getGpuPointCount();
         if (n == 0) return;
 
-        sg_pixel_format colorFmt;
-        int sampleCount;
         auto& wctx = internal::currentWindowContext();
-        if (wctx.currentTarget->isFbo) {
-            colorFmt = wctx.currentTarget->colorFormat;
-            sampleCount = wctx.currentTarget->sampleCount;
-        } else {
-            const auto target = swapchainTargetFormat(wctx);
-            colorFmt = target.colorFormat;
-            sampleCount = target.sampleCount;
-        }
-
         PointDrawCommand cmd{};
         cmd.vsp = makeParams();
         // No shader for this style (warned once in ensureInit()): skip.
         if (!(getPointStyle() == PointStyle::Pixel ? shaderPrimReady_ : shaderReady_)) return;
         if (getPointStyle() == PointStyle::Pixel) {
             // True 1px point primitive: draw the point buffer's positions directly.
-            cmd.pip = getPrimPipeline(colorFmt, sampleCount);
+            const auto selection = getPrimPipeline();
+            cmd.pip = selection.raw; cmd.generation = selection.generation;
             cmd.bind.vertex_buffers[0] = mesh.getGpuPointBuffer();
             cmd.numElements  = n;
             cmd.numInstances = 1;
         } else {
             // Square / Round: instanced billboard quad splat.
-            cmd.pip = getPipeline(colorFmt, sampleCount);
+            const auto selection = getPipeline();
+            cmd.pip = selection.raw; cmd.generation = selection.generation;
             cmd.bind.vertex_buffers[0] = quadBuf_;
             cmd.bind.vertex_buffers[1] = mesh.getGpuPointBuffer();
             cmd.numElements  = 4;
             cmd.numInstances = n;
         }
+
+        if (!cmd.pip.id) return;
 
         // Defer on the active target, sharing the PBR/shader layer space.
         wctx.currentTarget->deferredPointDraws.push_back({ wctx.currentTarget->sglLayerNext, cmd });
@@ -188,12 +170,14 @@ private:
 
         // TrussC Mat4 is row-major; GLSL mat4 is column-major. Transpose before
         // upload so the shader can use the conventional `viewProj * v`.
-        Mat4 viewProj = (internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix * internal::currentWindowContext().currentTarget->camera.currentViewMatrix).transposed();
+        Mat4 viewProj = (internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix * internal::currentWindowContext().currentTarget->camera.currentViewMatrix * internal::currentTarget().currentMatrix).transposed();
         std::memcpy(vsp.viewProj, viewProj.m, sizeof(vsp.viewProj));
 
-        const int   w  = getWindowWidth();
-        const int   h  = getWindowHeight();
-        const float px = getPointSize();   // logical pixels
+        const auto& target = currentTarget();
+        const float density = targetPixelScale();
+        const float w = target.viewport.active ? target.viewport.w : float(target.width);
+        const float h = target.viewport.active ? target.viewport.h : float(target.height);
+        const float px = getPointSize() * density;   // logical pixels
         // NDC full extent = 2 * px / H gives a quad `px` logical pixels tall;
         // aspect (H/W) keeps it square in pixels (the shader scales x by it).
         vsp.params[0] = (h > 0) ? 2.0f * px / float(h) : 0.0f;
@@ -212,8 +196,6 @@ private:
     bool shaderReady_ = false;
     bool shaderPrimReady_ = false;
     sg_buffer quadBuf_{};
-    std::map<int, sg_pipeline> pipelineCache_;
-    std::map<int, sg_pipeline> primPipelineCache_;
 };
 
 // Singleton accessor, defined in tcGlobal.cpp: one point pipeline per process

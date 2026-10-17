@@ -110,7 +110,6 @@ core/include/tc/gpu/tcFbo.h trussc::Fbo::ensureSharedMip::quadVerts   # immutabl
 core/include/tc/graphics/tcClipSpace.h trussc::internal::clipZOverrideForTests::v     # harmless: test hook for headless tests
 core/include/tc/graphics/tcClipSpace.h trussc::internal::toBackendClip::zeroToOne     # immutable: constant matrix
 core/include/tc/graphics/tcFont.h trussc::Font::defaultOversample_    # harmless: set and read by the code that loads fonts (the guest's own)
-core/include/tc/graphics/tcRenderTarget.h trussc::internal::pipelineOwnerCtx::m  # harmless: debug-build assertion bookkeeping; a module only checks pipelines it built itself
 core/include/tc/graphics/tcVertexWriter.h trussc::internal::sglWriter     # harmless: stateless writer object
 core/include/tc/graphics/tcVertexWriter.h trussc::internal::shaderWriter  # harmless: per-draw scratch, filled and flushed (begin() to end()) inside one function
 
