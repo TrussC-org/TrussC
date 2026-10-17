@@ -19,7 +19,7 @@
 //   - Pipelines are cached per (color format, sample count, primitive kind), so both the
 //     swapchain and Fbo passes are supported render targets.
 //   - ALL PBR draws are deferred: swapchain draws into the per-layer flush
-//     (flushDeferredShaderDraws), Fbo draws into their target queue (flushed at
+//     (RenderTarget::flushLayers), Fbo draws into their target queue (flushed at
 //     Fbo::end()), so they composite with sokol_gl 2D in submission order.
 //     Captured sg_buffer handles stay valid because Mesh defers buffer
 //     destruction to end of frame (internal::deferGpuDestroy,
@@ -434,7 +434,7 @@ public:
     }
 
     // Submit a packaged PBR draw to the GPU. Used immediately for FBO passes and
-    // replayed from flushDeferredShaderDraws() for the swapchain.
+    // replayed from RenderTarget::flushLayers() for the swapchain.
     void executePbrDraw(const PbrDrawCommand& c) {
         sg_apply_pipeline(c.pip);
         sg_apply_bindings(&c.bind);
@@ -559,6 +559,10 @@ public:
         if (!shadowReady_) return;
         auto& wctx = internal::currentWindowContext();
         auto& sh = wctx.shadow;
+        if (sh.target.activation) {
+            logWarning("Shadow") << "recursive beginShadowPass rejected";
+            return;
+        }
         const Light& light = *wctx.activeLights[lightIndex];
 
         // Point lights are not supported yet: they need a cube/omni shadow map,
@@ -597,19 +601,6 @@ public:
             return;
         }
         ensureShadowTexture(light.getShadowResolution());
-
-        // Suspend swapchain pass if active. Remember whether one was active so
-        // endShadowPass() only resumes when there is something to resume
-        // (mirrors Fbo::wasInSwapchainPass_ — issue #191: it used to start a
-        // swapchain pass even when none was active before).
-        sh.wasInSwapchainPass = wctx.swapchainTarget.inPass;
-        if (sh.wasInSwapchainPass) {
-            // Submit every layer (including deferred mesh/user-shader draws)
-            // once before suspending. present() must not replay this prefix.
-            internal::flushLayersMidPass();
-            sg_end_pass();
-            wctx.swapchainTarget.inPass = false;
-        }
 
         // Claim the next shadow slot for this light. computeShadowViewProj()
         // returns the perspective projector VP for Spot lights and an ortho box
@@ -652,7 +643,42 @@ public:
         pass.action.depth.load_action = SG_LOADACTION_CLEAR;
         pass.action.depth.clear_value = 1.0f;
         pass.label = "tc_shadow_pass";
-        sg_begin_pass(&pass);
+        auto& target = sh.target;
+        target.passKind = internal::TargetPassKind::Fixed;
+        target.isFbo = true;
+        target.binding = pass;
+        target.fixedPipeline = shadowPipeline_;
+        target.clearAction = pass.action;
+        target.width = target.height = shadowTexResolution_;
+        target.colorFormat = SG_PIXELFORMAT_R32F;
+        target.sampleCount = 1;
+        target.hasDepth = true;
+        target.currentMatrix = internal::currentTarget().currentMatrix;
+        target.matrixStack.clear();
+        target.cameraStack.clear();
+        target.scissorStack.clear();
+        target.sglLayerNext = 0;
+        target.camera = {};
+        target.camera.currentProjectionMatrix = internal::toBackendClip(sh.viewProj[slot]);
+        target.viewport = {0, 0, float(target.width), float(target.height), true};
+        target.currentScissor = {0, 0, 0, 0, false};
+        target.pooledResources = internal::leaseTargetResources(target.colorFormat, 1);
+        if (!target.pooledResources) return;
+        auto* lease = target.pooledResources;
+        try { sh.scope = std::make_unique<internal::TargetPassScope>(target); }
+        catch (...) {
+            lease->leased = false;
+            target.pooledResources = nullptr;
+            throw;
+        }
+        if (!sh.scope->active()) {
+            lease->leased = false;
+            target.pooledResources = nullptr;
+            sh.scope.reset();
+            return;
+        }
+        target.owner = &sh;
+        target.finalize = [](void* owner) { static_cast<internal::ShadowSlotState*>(owner)->inPass = false; };
 
         // Render at the shared array resolution (max of all requested sizes)
         sg_apply_viewport(0, 0, shadowTexResolution_, shadowTexResolution_, true);
@@ -664,6 +690,10 @@ public:
     void shadowDrawMesh(const Mesh& mesh) {
         auto& sh = internal::currentWindowContext().shadow;
         if (!sh.inPass || isLineMesh(mesh.getMode())) return;
+        if (internal::currentWindowContext().currentTarget != &sh.target || !sh.target.inPass) {
+            logWarning("Shadow") << "shadowDraw rejected while a child target is active";
+            return;
+        }
         mesh.uploadToGpu();
         if (mesh.getGpuVertexBuffer().id == 0) return;
 
@@ -709,15 +739,13 @@ public:
     void endShadowPass() {
         auto& sh = internal::currentWindowContext().shadow;
         if (!sh.inPass) return;
-        sg_end_pass();
+        if (internal::currentWindowContext().currentTarget != &sh.target) {
+            logWarning("Shadow") << "endShadowPass rejected while a child target is active";
+            return;
+        }
+        sh.scope.reset();
         sh.inPass = false;
         shadowDrawCount_ = 0;
-
-        // Resume swapchain pass only if one was active before beginShadowPass()
-        if (sh.wasInSwapchainPass) {
-            resumeSwapchainPass();
-            sh.wasInSwapchainPass = false;
-        }
     }
 
 private:
@@ -854,7 +882,7 @@ private:
     int shadowDrawCount_{0};
 
     // NOTE: the per-frame shadow SLOT state (frame epoch, slot count, current
-    // slot, inPass / wasInSwapchainPass flags, and the per-slot VP / param
+    // slot, owned target scope, and the per-slot VP / param
     // arrays) is now PER-WINDOW: it lives in WindowContext::shadow
     // (ShadowSlotState, tc/app/tcWindowContext.h). Only the GPU shadow-map
     // array / views / sampler / pipeline above stay shared — they are reused
@@ -886,36 +914,6 @@ private:
 // guest on Windows built its own copy, whose shadow passes and GPU objects the
 // host's flush never saw (#249).
 PbrPipeline& getPbrPipeline();
-
-// Flush the PBR draws deferred during an FBO pass, interleaved per-layer with the
-// FBO context's sokol_gl 2D content (mirror of flushDeferredShaderDraws but for a
-// single FBO context). Called by Fbo::end()/clearColor() while the FBO pass is
-// still active. Each sgl layer is drawn exactly once (O(N)).
-inline void flushFboDeferredPbr(sgl_context ctx) {
-    // The active Fbo owns these queues and the layer counter.
-    auto& wctx = currentWindowContext();
-    for (int layer = 0; layer <= wctx.currentTarget->sglLayerNext; layer++) {
-        sgl_context_draw_layer(ctx, layer);
-        // Deferred shader draws share this FBO's layer space; replay them
-        // first within the layer, matching the swapchain flush order
-        // (sokol_gl -> shader -> PBR -> points) in flushDeferredShaderDraws.
-        for (auto& d : wctx.currentTarget->deferredShaderDraws) {
-            if (d.layerId == layer) executeDeferredShaderDraw(d);
-        }
-        for (auto& d : wctx.currentTarget->deferredPbrDraws) {
-            if (d.layerId == layer) getPbrPipeline().executePbrDraw(d.cmd);
-        }
-        // Point splats share this target's layer space; replay them
-        // in the same walk so they composite in submission order with PBR + 2D.
-        for (auto& d : wctx.currentTarget->deferredPointDraws) {
-            if (d.layerId == layer) executePointDraw(d.cmd);
-        }
-    }
-    wctx.currentTarget->deferredShaderDraws.clear();
-    wctx.currentTarget->deferredPbrDraws.clear();
-    wctx.currentTarget->deferredPointDraws.clear();
-    wctx.currentTarget->sglLayerNext = 0;
-}
 
 } // namespace internal
 

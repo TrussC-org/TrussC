@@ -133,7 +133,12 @@ public:
 
         // Push to stack (per-window)
         auto& wctx = internal::currentWindowContext();
-        wctx.shaderStack.push_back(this);
+        // Bind the scope to an activation, including while its target is parked.
+        auto& target = internal::currentTarget();
+        wctx.shaderScopeTargets.push_back({&target, target.activation});
+        try { wctx.shaderStack.push_back(this); }
+        catch (...) { wctx.shaderScopeTargets.pop_back(); throw; }
+        ++target.openShaderScopes;
 
         // Increment layer for post-shader sokol_gl draws
         // (shader draws will be deferred and executed between layers).
@@ -158,11 +163,19 @@ public:
             return;
         }
 
+        auto& wctx = internal::currentWindowContext();
+        const auto scope = wctx.shaderScopeTargets.back();
+        if (scope.target != &internal::currentTarget() || scope.token != scope.target->activation) {
+            logWarning("Shader") << "end() rejected on a different target activation";
+            return;
+        }
         // Call virtual hook
         onEnd();
 
         // Pop from stack
         stack.pop_back();
+        wctx.shaderScopeTargets.pop_back();
+        --scope.target->openShaderScopes;
 
         // Restore sokol_gl state if no more shaders
         if (stack.empty()) {
@@ -340,7 +353,7 @@ public:
         auto& wctx = internal::currentWindowContext();
         if (wctx.currentTarget->isFbo) {
             // Defer into the per-FBO list; flushed per-layer by
-            // flushFboDeferredPbr() at Fbo::end()/clearColor(). Bump the FBO
+            // RenderTarget::flushLayers() at Fbo::end()/clearColor(). Bump the FBO
             // layer so 2D drawn after this composites on top of it, matching
             // the deferred PBR/point pattern (tcMeshPbrPipeline.h).
             draw.layerId = wctx.currentTarget->sglLayerNext;
@@ -544,76 +557,6 @@ inline void popShader() {
 // resetShaderStack() that drained the stack via popShader() used to live
 // here but had no callers — removed during the internal:: consolidation.
 
-// Flush deferred shader draws (called from present())
-// Draws sokol_gl layers interleaved with shader draws for correct ordering
-namespace internal {
-inline void flushDeferredShaderDraws() {
-    // Check for vertex buffer overflow — skip sgl draw to avoid crash
-    // (overflowed commands may contain invalid pipeline IDs)
-    sgl_error_t err = sgl_error();
-    bool sglOverflow = err.vertices_full || err.commands_full;
-
-    // The active swapchain target owns its queues and layer counter.
-    auto& wctx = internal::currentWindowContext();
-
-    // For each layer: draw sokol_gl, then execute shader draws for that layer
-    for (int layer = 0; layer <= wctx.currentTarget->sglLayerNext; layer++) {
-        // Draw sokol_gl content for this layer (skip if overflowed)
-        if (!sglOverflow) {
-            sgl_draw_layer(layer);
-        }
-
-        // Deferred shader draws are independent of sgl, always safe. Each is a
-        // self-contained snapshot (pipeline/bindings/uniforms captured at
-        // submission), so no Shader object is touched here — the object may
-        // already be destroyed.
-        for (auto& draw : wctx.currentTarget->deferredShaderDraws) {
-            if (draw.layerId == layer) {
-                internal::executeDeferredShaderDraw(draw);
-            }
-        }
-
-        // Deferred PBR mesh draws — same per-layer ordering, so PBR composites
-        // with sokol_gl 2D in submission order (a 2D background drawn first
-        // stays behind the meshes).
-        for (auto& d : wctx.currentTarget->deferredPbrDraws) {
-            if (d.layerId == layer) {
-                internal::getPbrPipeline().executePbrDraw(d.cmd);
-            }
-        }
-
-        // Deferred point-splat draws (Mesh in PrimitiveMode::Points) — same
-        // per-layer ordering, sharing the swapchain pass + depth buffer.
-        for (auto& d : wctx.currentTarget->deferredPointDraws) {
-            if (d.layerId == layer) {
-                internal::executePointDraw(d.cmd);
-            }
-        }
-    }
-
-    // Clear deferred draws for next frame
-    wctx.currentTarget->deferredShaderDraws.clear();
-    wctx.currentTarget->deferredPbrDraws.clear();
-    wctx.currentTarget->deferredPointDraws.clear();
-
-    // Reset layer for next frame
-    wctx.currentTarget->sglLayerNext = 0;
-    sgl_layer(0);
-}
-
-// Submit and consume every layer of the active target before direct drawing or
-// suspending its pass. Rewind only after all layers have used the same prefix.
-inline void flushLayersMidPass() {
-    if (currentWindowContext().currentTarget->isFbo) {
-        flushFboDeferredPbr(sgl_get_context());
-        sgl_layer(0);
-    } else {
-        flushDeferredShaderDraws();
-    }
-    sgl_tc_draw_rewind();
-}
-} // namespace internal
-
 // ---------------------------------------------------------------------------
 // FullscreenShader - Fullscreen effect shader (position + texcoord layout)
 // ---------------------------------------------------------------------------
@@ -633,12 +576,12 @@ public:
         if (!loaded) return;
 
         // Ensure render pass is active (swapchain or FBO)
-        ensureSwapchainPass();
+        internal::ensureCurrentPass();
 
         // Submit all preceding layers, including deferred user shaders, meshes
         // and points. Advance the command base so end()/present() cannot blend
         // that content a second time after this fullscreen draw.
-        internal::flushLayersMidPass();
+        internal::currentTarget().flushLayers();
 
         // Match the pipeline to the current target (swapchain vs FBO format).
         sg_apply_pipeline(pipelineForCurrentTarget());

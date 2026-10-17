@@ -321,6 +321,7 @@ void Window::teardown() {
     if (!st) return;
     native_ = nullptr;             // re-entrancy guard (close_cb)
     closeRequested_ = false;
+    ctx_.teardownTargets();
     ctx_.acquireSwapchain = nullptr;
     ctx_.acquireSwapchainUser = nullptr;
     sapp_destroy_window(st->win);

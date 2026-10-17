@@ -16215,7 +16215,7 @@ _SOKOL_PRIVATE void _sg_mtl_begin_render_pass(const sg_pass* pass, const _sg_att
             pass_desc.colorAttachments[0].resolveTexture = _sg.mtl.cur_drawable.texture;
             // [TrussC] Modified by tettou771: honor the swapchain-pass "preserve
             // contents" hint (action->depth.store_action == SG_STOREACTION_STORE,
-            // set by trussc::ensureSwapchainPass/resumeSwapchainPass for passes
+            // set by the RenderTarget continuation policy for passes
             // that may be suspended and resumed within one frame). Upstream
             // hardcodes MultisampleResolve, which discards the msaa texture, so
             // a later pass on the same swapchain with SG_LOADACTION_LOAD would

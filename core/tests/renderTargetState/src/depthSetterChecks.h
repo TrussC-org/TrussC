@@ -65,7 +65,7 @@ void drawDepthSetterFixture(int variant) {
     expectPixel(pixels, 48, 32, enabled ? Color(1, 0, 0) : Color(0, 1, 0),
                 "Fbo explicit depth setter controls overlap");
     clear(0, 0, 0);
-    ensureSwapchainPass();
+    internal::ensureCurrentPass();
     drawDepthSetterOverlap(easycam, enabled);
     depthSetterPending = variant;
 }

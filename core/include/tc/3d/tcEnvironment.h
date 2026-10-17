@@ -309,7 +309,9 @@ private:
         // uninitialized, so the baked IBL cubemap/mips come back as garbage.
         pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
         pass.action.colors[0].clear_value = { 0.0f, 0.0f, 0.0f, 1.0f };
-        sg_begin_pass(&pass);
+        internal::TargetPassScope scope(pass, viewportW, viewportH,
+            sg_query_pipeline_desc(pipe).colors[0].pixel_format);
+        if (!scope.active()) return;
         sg_apply_viewport(0, 0, viewportW, viewportH, true);
         sg_apply_pipeline(pipe);
         sg_apply_bindings(&bindings);
@@ -318,7 +320,6 @@ private:
             sg_apply_uniforms(uniformSlot, &r);
         }
         sg_draw(0, 6, 1);
-        sg_end_pass();
     }
 
     // -------------------------------------------------------------------------
@@ -352,13 +353,6 @@ private:
         if (!r.ready) {   // warned once in ensureBakeResources()
             loaded_ = false;
             return false;
-        }
-
-        // IBL bakes run outside any user-facing pass. If a swapchain pass is
-        // somehow active, suspend it so we can start fresh offscreen passes.
-        bool wasInSwapchain = isInSwapchainPass();
-        if (wasInSwapchain) {
-            suspendSwapchainPass();
         }
 
         // 1. equirect → irradianceMap (6 faces, 1 mip)
@@ -414,10 +408,6 @@ private:
                               kBrdfLutSize, kBrdfLutSize,
                               r.lutPipe, bind,
                               0, nullptr, 0);
-        }
-
-        if (wasInSwapchain) {
-            resumeSwapchainPass();
         }
 
         loaded_ = true;

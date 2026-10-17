@@ -48,9 +48,9 @@ values in the PR; every other changed pixel is a regression.
 
 The PR 0 baselines intentionally include the existing FBO blend/premult, camera,
 model and GPU-point behavior that PRs 2/4 will correct. Self-checks sample stable
-known interiors alongside those features. The shadow scene keeps an Fbo active
-across a nested shadow pass using a **test-only raw suspend/resume bridge**, since
-the current public shadow implementation only suspends the swapchain. PR 3 should
-replace that bridge with the target-stack operation and preserve the images.
+known interiors alongside those features. The shadow scene keeps an Fbo active across the public shadow API. Target-stack
+interruption preserves its original color and depth attachments. Additional
+nesting and MSAA-interruption pixels live in `renderPassStack --gpu-check`,
+separate from this unchanged baseline manifest.
 Web is excluded. Windows/D3D11, macOS/Metal (including Retina) and Pi/GL comparisons
 must run on those machines; Linux software rendering cannot verify them.

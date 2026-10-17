@@ -57,14 +57,16 @@ void expectFaces(Texture& texture, const Faces& expected) {
         pass.attachments.colors[0] = view;
         pass.action.colors[0].load_action = SG_LOADACTION_LOAD;
         pass.action.colors[0].store_action = SG_STOREACTION_STORE;
-        sg_begin_pass(&pass);
+        {
+        internal::TargetPassScope scope(pass, sideSize, sideSize, SG_PIXELFORMAT_RGBA8);
+        check("face target scope is active", scope.active());
         Face actual = {};
         glReadPixels(0, 0, sideSize, sideSize, GL_RGBA, GL_UNSIGNED_BYTE, actual.data());
         check("face readback has no GL error", glGetError() == GL_NO_ERROR);
         char label[80];
         std::snprintf(label, sizeof(label), "face %d matches every pattern byte", face);
         check(label, actual == expected[face]);
-        sg_end_pass();
+        }
         sg_destroy_view(view);
     }
     sg_destroy_image(alias);

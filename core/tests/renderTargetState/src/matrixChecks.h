@@ -362,9 +362,9 @@ void drawDepthFixture(int variant, Fbo& fbo) {
     const auto selected = target.selectedPipeline;
     const auto context = target.camera.currentCameraContext;
     EasyCam camera; camera.setDistance(100); camera.begin();
-    ensureSwapchainPass();
+    internal::ensureCurrentPass();
     setColor(1, 0, 0); drawTriangle(Vec3(-20, -20, 10), Vec3(20, -20, 10), Vec3(0, 20, 10));
-    internal::flushLayersMidPass();
+    internal::currentTarget().flushLayers();
     if (variant == 0) { fbo.begin(0, 0, 0); fbo.end(); }
     if (variant == 1) {
         FullscreenShader shader; check("temporary shader loads", shader.load(targetstate_discard_shader_desc)); shader.draw();

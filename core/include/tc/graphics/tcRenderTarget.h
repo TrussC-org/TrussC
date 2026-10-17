@@ -153,6 +153,7 @@ struct RenderTargetResources {
     std::unordered_map<uint32_t, sgl_pipeline> cache;
     // A creation failed (out of memory, or a GPU pool full): warned once and
     // not retried. The target stays degraded for the rest of the run (#317).
+    bool leased = false; // parked targets retain their exclusive command context
     bool contextFailed  = false;
     bool pipelineWarned = false;
 
@@ -246,13 +247,18 @@ struct TargetCameraScope {
     const void* owner;
 };
 
+struct WindowContext;
+enum class TargetPassKind { Swapchain, PublicFbo, Fixed, Transfer };
+enum class TargetPassPhase { Preparing, Rendering, Finalizing };
+enum class TargetPassStart { Initial, Resume, Clear };
+
 struct RenderTarget {
     int width = 0;
     int height = 0;
     sg_pixel_format colorFormat = _SG_PIXELFORMAT_DEFAULT;
     int sampleCount = 0;
     bool hasDepth = true;
-    bool isFbo = false;
+    bool isFbo = false; // attachment-pixel coordinates (public or fixed raster)
     sg_pass_action clearAction = [] {
         sg_pass_action action = {};
         action.colors[0].clear_value = {0, 0, 0, 1};
@@ -260,6 +266,27 @@ struct RenderTarget {
     }();
     bool inPass = false;
     bool passStartedThisFrame = false;
+    uint64_t frameEpoch = UINT64_MAX;
+    uint64_t activation = 0;
+    WindowContext* activeWindow = nullptr;
+    TargetPassKind passKind = TargetPassKind::Swapchain;
+    sg_pass binding = {};
+    sg_pipeline fixedPipeline = {}; // explicit internal raster pipeline on resume
+    sg_image transferSource = {}; // resolved source retained by a native transfer
+    sg_pixel_format depthFormat = SG_PIXELFORMAT_DEPTH_STENCIL;
+    bool resumable = true;
+    unsigned openShaderScopes = 0;
+    // Owner finalization runs while the completed entry is still on the stack.
+    // Mip scopes cannot reopen it; the parent resumes only after finalization.
+    void* owner = nullptr;
+    void (*finalize)(void*) = nullptr;
+    void (*beginTransfer)(void*) = nullptr;
+    void (*endTransfer)(void*) = nullptr;
+
+    void beginPass(TargetPassStart reason);
+    void endPass();
+    void flushLayers();
+    void restartClear(float r, float g, float b, float a);
 
     TargetCameraState camera;
     std::vector<TargetCameraScope> cameraStack;
@@ -276,11 +303,6 @@ struct RenderTarget {
     std::vector<DeferredPointDraw> deferredPointDraws;
     std::vector<DeferredShaderDraw> deferredShaderDraws;
     int sglLayerNext = 0;
-
-    // Only Fbo clear needs an owner callback until passes move to the target
-    // in PR 3. No window-side Fbo pointer or format/sample mirror is needed.
-    void* clearOwner = nullptr;
-    void (*clearColor)(void*, float, float, float, float) = nullptr;
 
     RenderTargetResources windowResources;
     RenderTargetResources* pooledResources = nullptr;
@@ -302,6 +324,39 @@ struct RenderTarget {
         depthTestEnabled = previous.depthTestEnabled;
     }
 };
+// Stack entries use tokens, never addresses into the growable entry vector.
+struct TargetStackEntry {
+    RenderTarget* target;
+    uint64_t token;
+    TargetPassPhase phase;
+    bool resumeParent;
+    RenderTargetResources* lease;
+};
+
+uint64_t pushTarget(RenderTarget& target, bool prepareOnly = false);
+bool startPreparedTarget(RenderTarget& target, uint64_t token);
+bool popTarget(RenderTarget& target, uint64_t token);
+void ensureCurrentPass();
+bool hasPublicFboActivation();
+RenderTargetResources* leaseTargetResources(sg_pixel_format format, int samples);
+
+// Internal scopes own fixed targets or borrow a stable owner target. All stack
+// operations live in the host, including destruction during early returns.
+class TargetPassScope {
+public:
+    explicit TargetPassScope(RenderTarget& target);
+    TargetPassScope(const sg_pass& pass, int width, int height,
+                    sg_pixel_format format, int samples = 1, bool depth = false);
+    ~TargetPassScope() noexcept;
+    TargetPassScope(const TargetPassScope&) = delete;
+    TargetPassScope& operator=(const TargetPassScope&) = delete;
+    bool active() const { return token_ != 0 && target_->activation == token_; }
+private:
+    RenderTarget owned_;
+    RenderTarget* target_;
+    uint64_t token_ = 0;
+};
+
 // Check for TrussC's internal lazily created shaders (PBR, shadow, points,
 // IBL, Fbo mip/blit), called once right after sg_make_shader(): true when the
 // shader is usable. Otherwise logs one warning; the caller remembers the

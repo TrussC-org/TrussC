@@ -70,7 +70,7 @@ public:
             fullscreen_.draw();
             check("FullscreenShader opens swapchain pass", isInSwapchainPass());
         } else {
-            ensureSwapchainPass();
+            internal::ensureCurrentPass();
         }
         const uint32_t firstVersion = fbo_.getColorImage().id;
         setColor(1, 1, 1);

@@ -90,8 +90,6 @@ class RegressionApp : public App {
     Fbo target_;
     Texture premult_, coverage_;
     Mesh triangle_, points_, receiver_;
-    sg_image resumeDepth_ = {};
-    sg_view resumeDepthView_ = {};
     Material emissive_;
     Light light_;
     EasyCam camera_;
@@ -161,39 +159,11 @@ class RegressionApp : public App {
         if (target_.getWidth() != w || target_.getHeight() != h ||
             target_.getSampleCount() != count || target_.getTextureFormat() != format)
             target_.allocate(w, h, count, format);
-        if (is("pbrShadowFbo") || is("midFrameFlush")) {
-            if (resumeDepth_.id == 0) {
-                sg_image_desc desc = {};
-                desc.usage.depth_stencil_attachment = true;
-                desc.width = w; desc.height = h; desc.sample_count = 1;
-                desc.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-                resumeDepth_ = sg_make_image(&desc);
-                sg_view_desc view = {}; view.depth_stencil_attachment.image = resumeDepth_;
-                resumeDepthView_ = sg_make_view(&view);
-            }
-        }
     }
-    void shadowPass(bool offscreen) {
-        // Test-only bridge for the renderer before PR 3: keep the Fbo active
-        // while suspending its raw pass around the nested shadow pass. The
-        // public shadow API currently suspends only swapchains. No production
-        // target-stack behavior is changed in PR 0.
-        if (offscreen) {
-            internal::flushLayersMidPass();
-            sg_end_pass();
-        }
+    void shadowPass(bool /*offscreen*/) {
         beginShadowPass(light_);
         pushMatrix(); translate(128,96,24); shadowDraw(triangle_); popMatrix();
         endShadowPass();
-        if (offscreen) {
-            sg_pass pass = {};
-            pass.attachments.colors[0] = target_.getTexture().getAttachmentView();
-            pass.attachments.depth_stencil = resumeDepthView_;
-            pass.action.colors[0].load_action = SG_LOADACTION_LOAD;
-            pass.action.depth.load_action = SG_LOADACTION_CLEAR;
-            pass.action.depth.clear_value = 1;
-            sg_begin_pass(&pass);
-        }
     }
     void drawScene(float w, float h, bool offscreen) {
         if (is("blendModes")) {
@@ -572,7 +542,6 @@ public:
     }
     void exit() override {
         clearLights();
-        internal::deferGpuDestroy(resumeDepthView_); internal::deferGpuDestroy(resumeDepth_);
         // AppKit terminates inside runApp(), so the verdict must be set during
         // the lifecycle. This also makes an early native-window close fail.
         check("all "+std::to_string(std::size(scenes))+" scenes completed", completed);

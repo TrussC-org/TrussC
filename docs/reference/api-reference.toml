@@ -2192,9 +2192,9 @@ related = ["TextureFormat"]
 ["Fbo::begin"]
 category = "graphics_fbo"
 keywords = ["start", "bind", "enter", "render to"]
-description.en = "Begin rendering to FBO. Each activation starts an identity model, empty matrix/camera/scissor scopes, full viewport and a TAU/8 camera in attachment pixels. LOAD keeps pixels only; end restores the suspended target. Balance scopes on the same target."
-description.ja = "FBO への描画を開始。毎回、モデル単位行列、空の行列・カメラ・scissor スタック、全面 viewport、添付画像のピクセル単位の TAU/8 カメラで開始する。LOAD は画素だけを維持し、end は元の描画先を復元する。スコープは同じ描画先で閉じる。"
-description.ko = "FBO 렌더링 시작. 매번 단위 모델 행렬, 빈 행렬·카메라·scissor 스택, 전체 viewport, 첨부 픽셀 단위 TAU/8 카메라로 시작한다. LOAD는 픽셀만 유지하고 end는 이전 타깃을 복원한다. 같은 타깃에서 스코프를 닫는다."
+description.en = "Begin rendering to FBO. Each activation starts an identity model, empty matrix/camera/scissor scopes, full viewport and a TAU/8 camera in attachment pixels. Distinct Fbos may nest; end resumes the parent with color and depth LOAD. A fresh LOAD activation keeps color and clears depth. Balance scopes on the same target; recursive begin and out-of-order end are rejected."
+description.ja = "FBO への描画を開始。毎回、モデル単位行列、空の行列・カメラ・scissor スタック、全面 viewport、添付画像のピクセル単位の TAU/8 カメラで開始する。異なる Fbo は入れ子にでき、end は親の色と深度を LOAD して再開する。新しい LOAD 開始では色を維持して深度をクリアする。スコープは同じ描画先で閉じ、同一 Fbo の再帰 begin と順序違いの end は拒否する。"
+description.ko = "FBO 렌더링 시작. 매번 단위 모델 행렬, 빈 행렬·카메라·scissor 스택, 전체 viewport, 첨부 픽셀 단위 TAU/8 카메라로 시작한다. 서로 다른 Fbo는 중첩할 수 있으며 end는 부모의 색상과 깊이를 LOAD하여 재개한다. 새 LOAD 활성화는 색상을 유지하고 깊이를 지운다. 같은 타깃에서 스코프를 닫으며 재귀 begin과 순서가 잘못된 end는 거부한다."
 
 ["Fbo::clear"]
 description.en = "Release FBO resources"
@@ -13560,6 +13560,8 @@ shadow-casting light, before the PBR pass. Up to 4 lights can cast shadows in
 the same frame — each pass renders into its own layer of a shared shadow map
 array. Passes beyond the limit are ignored with a one-time warning. All
 layers share one resolution: the largest requested via `enableShadow()`.
+This pair may run inside an Fbo. End resumes its original color and depth
+attachments and restores the calling target's transforms and clipping.
 '''
 details.ja = '''
 shadowを落とすlightごとに `beginShadowPass(light)` /
@@ -13567,6 +13569,8 @@ shadowを落とすlightごとに `beginShadowPass(light)` /
 1フレームに最大4灯までshadowを落とせる（各パスは共有shadow map配列の
 専用レイヤーに描画される）。上限を超えたパスは一度だけ警告を出して無視される。
 解像度は全レイヤー共通で、`enableShadow()` で要求された最大値になる。
+Fbo 内でも呼び出せる。end は元の色・深度アタッチメントを再開し、
+呼び出し元の変換とクリッピングを復元する。
 '''
 details.ko = '''
 섀도우를 드리우는 조명마다 `beginShadowPass(light)` /
@@ -13574,6 +13578,8 @@ details.ko = '''
 한 프레임에 최대 4개 조명이 섀도우를 드리울 수 있으며, 각 패스는 공유 섀도우 맵
 배열의 전용 레이어에 렌더링된다. 한도를 넘는 패스는 한 번만 경고를 내고
 무시된다. 해상도는 모든 레이어가 공유하며 `enableShadow()`로 요청된 최댓값이 된다.
+Fbo 안에서도 호출할 수 있다. end는 원래 색상·깊이 첨부를 재개하고
+호출한 타깃의 변환과 클리핑을 복원한다.
 '''
 
 ["beginShape"]
@@ -18699,19 +18705,10 @@ description.ko = "정규 scroll 값을 폐기 예정인 scrollX/scrollY 미러 �
 ["beginFrame"]
 hide = true
 
-["ensureSwapchainPass"]
-hide = true
-
 ["present"]
 hide = true
 
 ["isInSwapchainPass"]
-hide = true
-
-["suspendSwapchainPass"]
-hide = true
-
-["resumeSwapchainPass"]
 hide = true
 
 ["restoreBlendPipeline"]

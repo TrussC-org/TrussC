@@ -79,7 +79,8 @@ struct ShadowSlotState {
     int count = 0;
     int current = -1;
     bool inPass = false;
-    bool wasInSwapchainPass = false;   // swapchain pass active before beginShadowPass()
+    RenderTarget target;
+    std::unique_ptr<TargetPassScope> scope;
     Mat4  viewProj[maxShadowLights]{};
     int   lightIndex[maxShadowLights]{};
     float bias[maxShadowLights]{};
@@ -95,7 +96,11 @@ struct ShadowSlotState {
 };
 
 struct WindowContext {
-    WindowContext() = default;
+    WindowContext();
+    ~WindowContext();
+    // Recover owned scopes before native/GPU resources or any members die.
+    // Safe to call again from the destructor after native window teardown.
+    void teardownTargets() noexcept;
     // currentTarget points into this object — copying/moving would dangle it.
     WindowContext(const WindowContext&) = delete;
     WindowContext& operator=(const WindowContext&) = delete;
@@ -127,11 +132,15 @@ struct WindowContext {
 
     // --- render target routing (one swapchain target per window) ---
     RenderTarget swapchainTarget;
+    // Compatibility view: only the host stack coordinator changes this pointer.
     RenderTarget* currentTarget = &swapchainTarget;
+    std::vector<TargetStackEntry> targetStack;
+    uint64_t nextTargetToken = 1;
+    uint64_t renderEpoch = 0;
     // Metal drawable actually rendered into this frame (see tcGlobal.cpp notes)
     const void* lastSwapchainDrawable = nullptr;
     // Full swapchain description this frame actually rendered into (recorded by
-    // beginSwapchainPassInternal, same timing as lastSwapchainDrawable). Used by
+    // RenderTarget::beginPass, same timing as lastSwapchainDrawable). Used by
     // the per-window capture backends on Windows (d3d11.render_view) and Linux
     // (gl.framebuffer / width / height) so a secondary window's screenshot /
     // recording reads back ITS surface instead of the main swapchain. On macOS
@@ -142,7 +151,7 @@ struct WindowContext {
     // dimensions from sapp. Secondary windows: the native layer sets isMain
     // false, keeps fbWidth/fbHeight/dpiScale up to date, and provides the
     // frame's swapchain through acquireSwapchain (called by
-    // ensureSwapchainPass/resumeSwapchainPass; must return the SAME drawable
+    // the target coordinator; must return the SAME drawable
     // for the duration of one window frame).
     bool isMain = true;
     int fbWidth = 0;
@@ -245,6 +254,8 @@ struct WindowContext {
     // --- per-window shader stack (pushShader / popShader) ------------------
     // Made per-window so an unbalanced push in window A can't leak into B.
     std::vector<Shader*> shaderStack;
+    struct ShaderScopeTarget { RenderTarget* target; uint64_t token; };
+    std::vector<ShaderScopeTarget> shaderScopeTargets;
 
     // --- per-window shape / stroke accumulators (beginShape/endShape etc.) -
     // Made per-window so a shape left open at end-of-tick can't bleed into the

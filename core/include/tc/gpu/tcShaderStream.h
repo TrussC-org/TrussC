@@ -143,9 +143,8 @@ struct DeferredShaderDraw {
 };
 
 // Replay a captured shader draw on the GPU. Self-contained: uses captured
-// resources and accounting, never a live Shader. Used by flushDeferredShaderDraws()
-// (swapchain, tcShader.h) and flushFboDeferredPbr() (FBO passes,
-// tcMeshPbrPipeline.h).
+// resources and accounting, never a live Shader. RenderTarget::flushLayers()
+// consumes these snapshots in the same order on every drawing target.
 inline void executeDeferredShaderDraw(const DeferredShaderDraw& d) {
     if (d.vertices.empty()) return;
 
