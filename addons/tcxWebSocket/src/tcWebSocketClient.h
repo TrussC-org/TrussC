@@ -29,6 +29,7 @@ struct WebSocketEventArgs {
 };
 
 namespace detail {
+struct WebSocketIngressTest;
 // Fills args from a message as Emscripten's WebSocket API reports it. For a
 // text message, Emscripten writes the UTF-8 string NUL-terminated and counts
 // the terminator in numBytes; it is dropped here so the web build delivers
@@ -48,8 +49,8 @@ inline void fillMessageArgs(WebSocketEventArgs& args, const unsigned char* data,
 
 // =============================================================================
 // WebSocketClient
-// An untrusted peer can send huge or fragmented messages; a cap keeps message memory finite.
-// Native messages are limited to 64 MiB (code 1009 on overflow); no public size setter exists.
+// Messages default to 64 MiB; native upgrade headers default to 64 KiB.
+// The browser assembles messages itself; Web only bounds delivery into WASM.
 // =============================================================================
 class WebSocketClient {
 public:
@@ -114,10 +115,17 @@ public:
     // server does not ping.
     //
     // The Pong is not reported to the app; a failure shows up as a disconnect.
-    // Payload is capped at 125 bytes (RFC 6455 5.5: control frames).
+    // Bound (platform): RFC 6455 control frames permit at most 125 payload bytes. Overflow truncates the payload, warns once per owning client and counts every truncation.
     // Returns false when not connected, and on Emscripten, where the browser
     // owns the connection and exposes no ping.
     bool sendPing(const std::string& payload = "keepalive");
+
+    // Limits applied to the next connect(). Invalid values leave the limit unchanged.
+    // Bound (security): network messages need a finite memory allowance. Overflow rejects the message with native Close 1009 (Web 4009), warns once and is counted.
+    bool setMaxMessageSize(size_t bytes);
+    // Bound (security): upgrade metadata needs a finite memory allowance. Overflow rejects the upgrade, closes once, warns once and is counted.
+    // Includes CRLFCRLF. Minimum 4 bytes. Native only; browsers own the upgrade.
+    bool setMaxHandshakeSize(size_t bytes);
 
     State getState() const { return tc::internal::sharedLoad(state_)->state_; }
     bool isConnected() const { return getState() == State::Open; }
@@ -154,6 +162,12 @@ public:
     void setHandshakeTimeout(float seconds) { handshakeTimeout_ = seconds > 0.0f ? seconds : 0.0f; }
 
 private:
+    friend struct detail::WebSocketIngressTest;
+    struct IngressRejections {
+        std::atomic<uint64_t> upgrades{0}, messages{0}, controls{0}, configurations{0};
+        std::atomic<bool> controlTruncationWarned{false};
+    };
+    enum class IngressLimit { Upgrade, Message, Control };
     struct ConnectionState : std::enable_shared_from_this<ConnectionState> {
     void setupClient(bool useTls);
     bool connect(const std::string& url);
@@ -188,17 +202,16 @@ private:
     // or destroyed the client. The caller must return right after without
     // touching members: any of the listeners may have done so (#262).
     void failConnection(uint16_t statusCode, const std::string& reason);
+    void rejectIngress(IngressLimit limit, uint16_t statusCode, const std::string& reason);
+    std::shared_ptr<IngressRejections> rejections_ = std::make_shared<IngressRejections>();
+    bool ingressRejected_ = false;
 
-    // Largest message accepted, in bytes: one frame, or all fragments of a
-    // fragmented message together. A server that sends more gets Close 1009
-    // (Message Too Big) and the app gets onError then onClose. The size is
-    // checked from the frame header, before the payload is buffered.
-    // 64 MiB is far above typical WebSocket traffic (JSON, commands, encoded
-    // images or audio chunks) and keeps the memory one message can take
-    // bounded to a few such buffers (receive buffer, reassembled message, the
-    // copy handed to onMessage), also in a long-running app.
-    // Bound (security): an untrusted peer can send huge or fragmented messages; a cap keeps message memory finite. Overflow fails the connection with code 1009.
-    static constexpr uint64_t maxMessageSize_ = 64ull * 1024 * 1024;
+    // Bound (security): network messages need a finite memory allowance. Overflow rejects the message with native Close 1009 (Web 4009), warns once and is counted.
+    size_t maxMessageSize_ = 64ull * 1024 * 1024;
+    // Bound (security): upgrade metadata needs a finite memory allowance. Overflow rejects the upgrade, closes once, warns once and is counted.
+    size_t maxHandshakeSize_ = 64 * 1024;
+    // Only an admitted frame's bytes are copied from a TCP delivery.
+    size_t frameBytesNeeded_ = 2;
 
     // Default for setHandshakeTimeout(), in seconds. Why 15:
     //  - The OS never times out a server that accepted the TCP connection
@@ -255,6 +268,7 @@ private:
 
 #ifdef __EMSCRIPTEN__
     EMSCRIPTEN_WEBSOCKET_T wsHandle_ = 0;
+    static void onEmscriptenMessageLimit(void* userData);
     static EM_BOOL onEmscriptenOpen(int eventType, const EmscriptenWebSocketOpenEvent *websocketEvent, void *userData);
     static EM_BOOL onEmscriptenMessage(int eventType, const EmscriptenWebSocketMessageEvent *websocketEvent, void *userData);
     static EM_BOOL onEmscriptenClose(int eventType, const EmscriptenWebSocketCloseEvent *websocketEvent, void *userData);
@@ -270,6 +284,11 @@ private:
     bool tlsVerifyNone_ = false;
     std::string tlsCaPem_;
     float connectTimeout_ = 0.0f;
+    // Bound (security): network messages need a finite memory allowance. Overflow rejects the message with native Close 1009 (Web 4009), warns once and is counted.
+    size_t maxMessageSize_ = 64ull * 1024 * 1024;
+    // Bound (security): upgrade metadata needs a finite memory allowance. Overflow rejects the upgrade, closes once, warns once and is counted.
+    size_t maxHandshakeSize_ = 64 * 1024;
+    std::shared_ptr<IngressRejections> rejections_ = std::make_shared<IngressRejections>();
     std::atomic<float> handshakeTimeout_{15.0f};
 
 };
