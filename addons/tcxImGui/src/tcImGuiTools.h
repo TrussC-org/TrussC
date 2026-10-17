@@ -390,10 +390,12 @@ inline bool jsonToInt(const nlohmann::json& v, unsigned char* out, std::string& 
     T x;
     if (v.is_number_unsigned()) {
         uint64_t u = v.get<uint64_t>();
+        // Bound (abi): external MCP values must fit the destination numeric width. Overflow returns an out-of-range error.
         if (u > (uint64_t)L::max()) { err = "out of range"; return false; }
         x = (T)u;
     } else if (v.is_number_integer()) {
         int64_t i = v.get<int64_t>();
+        // Bound (abi): external MCP values must fit the destination numeric width. Overflow returns an out-of-range error.
         if (std::is_signed<T>::value ? (i < (int64_t)L::min() || i > (int64_t)L::max()) : i < 0) {
             err = "out of range";
             return false;
@@ -403,6 +405,7 @@ inline bool jsonToInt(const nlohmann::json& v, unsigned char* out, std::string& 
         double d = v.get<double>();
         if (d != std::floor(d)) { err = "not an integer"; return false; }
         // max() + 1 is a power of two, exact as a double (max() itself may round up)
+        // Bound (abi): external MCP values must fit the destination numeric width. Overflow returns an out-of-range error.
         if (!(d >= (double)L::min() && d < (double)L::max() + 1.0)) { err = "out of range"; return false; }
         x = (T)d;
     }
@@ -423,6 +426,7 @@ inline bool jsonToScalar(const nlohmann::json& v, ImGuiDataType t, unsigned char
     switch (t) {
     case ImGuiDataType_Float: {
         double d = v.get<double>();
+        // Bound (abi): external MCP values must fit the destination numeric width. Overflow returns an out-of-range error.
         if (std::fabs(d) > (double)std::numeric_limits<float>::max()) { err = "out of range"; return false; }
         float f = (float)d;
         std::memcpy(out, &f, sizeof(f));

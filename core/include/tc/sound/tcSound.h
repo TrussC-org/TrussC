@@ -90,6 +90,7 @@ struct SoundBufferLoadAccess;
 inline bool interleavedSampleCount(uint64_t frames, int channels, size_t maxCount,
                                    size_t& outCount) {
     if (channels < 1) return false;
+    // Bound (abi): decoded file frame counts must fit the sample-container index width. Overflow returns false.
     if (frames > maxCount / (size_t)channels) return false;
     outCount = (size_t)frames * (size_t)channels;
     return true;
@@ -102,8 +103,11 @@ inline bool interleavedSampleCount(uint64_t frames, int channels, size_t maxCoun
 // 8 kbit/s). Vorbis has no such floor; 32 covers its lowest common quality
 // settings (about 32 kbit/s for 44.1 kHz stereo). Streams that decode to
 // more still load: the buffer grows past the reservation.
+// Bound (security): untrusted file headers can exaggerate decoded length; input-relative reservation keeps initial memory finite. Overflow reduces the initial reservation to the input-relative bound.
 constexpr uint64_t kReserveSamplesPerInputByte = 16;
+// Bound (security): untrusted MP3 length claims must not force huge reservations; encoded bytes bound initial memory. Overflow reduces the initial reservation to the input-relative bound.
 constexpr uint64_t kReserveSamplesPerInputByteMp3 = 48;
+// Bound (security): untrusted Vorbis length claims must not force huge reservations; encoded bytes bound initial memory. Overflow reduces the initial reservation to the input-relative bound.
 constexpr uint64_t kReserveSamplesPerInputByteVorbis = 32;
 
 // Interleaved samples to reserve before decoding a stream whose header states
@@ -2034,6 +2038,7 @@ namespace internal { struct MicState; }
 
 class MicInput {
 public:
+    // Bound (realtime): the microphone callback must not allocate; a preallocated ring holds device input. Overflow overwrites the oldest samples.
     static constexpr int BUFFER_SIZE = 4096;  // Ring buffer size
     static constexpr int DEFAULT_SAMPLE_RATE = 48000;  // match AudioEngine::DEFAULT_SAMPLE_RATE
 

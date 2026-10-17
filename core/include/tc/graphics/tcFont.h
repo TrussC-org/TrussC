@@ -222,6 +222,7 @@ public:
     static int atlasLimit() {
         if (!sg_isvalid()) return 4096;
         const int limit = sg_query_limits().max_image_size_2d;
+        // Bound (gpu): font glyph atlases must fit the GPU limit; the 8192 ceiling also bounds each page allocation. Overflow caps atlas dimensions and uses further pages as needed.
         return limit > 0 ? std::min(limit, 8192) : 4096;
     }
     bool setup(const std::string& fontPath, int fontSize, int faceIndex = 0) {
@@ -321,6 +322,7 @@ private:
     // packer fills first on a page grown to maxAtlasSize_: the right half,
     // starting GLYPH_PADDING in from the top and from the middle.
     bool fitsLargestPage(int paddedWidth, int paddedHeight) const {
+        // Bound (gpu): file glyphs must fit the atlas page packing region. Overflow triggers downsampling, then invalidation with a log if the glyph still cannot fit.
         return paddedWidth <= maxAtlasSize_ / 2 - GLYPH_PADDING &&
                paddedHeight <= maxAtlasSize_ - GLYPH_PADDING;
     }
@@ -457,6 +459,7 @@ private:
     // to the stb backend: drop it together with stb if the backend is replaced.
     // Offsets and lengths are added in 64 bits.
     // -------------------------------------------------------------------------
+    // Bound (abi): the bundled font decoder uses signed offsets; font data must leave room for offset arithmetic. Overflow rejects the font.
     static constexpr uint64_t kMaxFontDataSize = 0x40000000u;
     static constexpr const char* kTooLargeReason =
         "the bundled font engine (stb_truetype) cannot handle fonts larger than 1 GiB";
@@ -947,6 +950,7 @@ private:
         int newWidth = atlas.width_ * 2;
         int newHeight = atlas.height_ * 2;
 
+        // Bound (gpu): glyphs from font files must fit the atlas texture limit. Overflow refuses atlas expansion.
         if (newWidth > maxAtlasSize_ || newHeight > maxAtlasSize_) {
             return false;
         }
@@ -1053,6 +1057,7 @@ private:
         // not fit the largest page is rasterized at a lower resolution that
         // fits, and drawn scaled up to its size in final pixels. Integer scales
         // keep the box prefilter; below 1 the glyph is rasterized directly.
+        // Bound (gpu): the atlas page size limits file glyphs; at most 32 raster-scale retries downsample them. Overflow marks a still-oversized glyph invalid with a log.
         for (int attempt = 0; attempt < 32 && !fitsLargestPage(paddedWidth, paddedHeight); ++attempt) {
             const float fitW = (float)(maxAtlasSize_ / 2 - 2 * GLYPH_PADDING) / (float)glyphWidth;
             const float fitH = (float)(maxAtlasSize_ - 2 * GLYPH_PADDING) / (float)glyphHeight;
@@ -1072,6 +1077,7 @@ private:
             paddedWidth = glyphWidth + GLYPH_PADDING;
             paddedHeight = glyphHeight + GLYPH_PADDING;
         }
+        // Bound (gpu): a downsampled glyph must fit the atlas page. Overflow marks the glyph invalid with a log and returns false.
         if (!fitsLargestPage(paddedWidth, paddedHeight)) {
             logWarning("Font") << "glyph U+" << std::hex << codepoint << std::dec
                                << " does not fit an atlas page of " << maxAtlasSize_

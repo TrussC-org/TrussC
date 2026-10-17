@@ -115,6 +115,8 @@ Polling enables an internal buffer on the first `hasNewMessage()` or `getNextMes
 call. Pick polling unless you specifically need lowest latency — it's the simpler,
 footgun-free path.
 
+Untrusted senders or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow drops the oldest messages and is counted.
+
 The buffer holds up to 1024 messages by default (each message of a bundle counts as
 one). If more arrive before `update()` drains them, the oldest are dropped; shrinking
 the limit with `setBufferSize()` also discards the oldest queued messages. Either way

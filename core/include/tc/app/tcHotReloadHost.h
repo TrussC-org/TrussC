@@ -736,7 +736,9 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     desc.event_cb = internal::_event_cb;
     desc.logger.func = internal::sokolLog;
     desc.enable_dragndrop = true;
+    // Bound (security): OS file drops can flood delivery; a fixed cap keeps path storage finite. Overflow omits excess files.
     desc.max_dropped_files = 16;
+    // Bound (security): OS drop paths need finite per-path storage. Overflow rejects the drop if a path does not fit.
     desc.max_dropped_file_path_length = 2048;
     desc.enable_clipboard = true;
     desc.clipboard_size = settings.clipboardSize;

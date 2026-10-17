@@ -643,6 +643,7 @@ bool UdpSocket::State::setReusePort(bool enable) {
 
 bool UdpSocket::State::setReceiveBufferSize(int size) {
     if (socket_->handle == INVALID_SOCKET_HANDLE) return false;
+    // Bound (security): untrusted datagram floods can fill the OS queue; the configured buffer keeps queued memory finite. Overflow is handled by the OS dropping datagrams.
     return setsockopt(socket_->handle, SOL_SOCKET, SO_RCVBUF,
                       reinterpret_cast<const char*>(&size), sizeof(size)) == 0;
 }

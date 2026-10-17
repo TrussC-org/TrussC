@@ -48,6 +48,8 @@ inline void fillMessageArgs(WebSocketEventArgs& args, const unsigned char* data,
 
 // =============================================================================
 // WebSocketClient
+// An untrusted peer can send huge or fragmented messages; a cap keeps message memory finite.
+// Native messages are limited to 64 MiB (code 1009 on overflow); no public size setter exists.
 // =============================================================================
 class WebSocketClient {
 public:
@@ -195,6 +197,7 @@ private:
     // images or audio chunks) and keeps the memory one message can take
     // bounded to a few such buffers (receive buffer, reassembled message, the
     // copy handed to onMessage), also in a long-running app.
+    // Bound (security): an untrusted peer can send huge or fragmented messages; a cap keeps message memory finite. Overflow fails the connection with code 1009.
     static constexpr uint64_t maxMessageSize_ = 64ull * 1024 * 1024;
 
     // Default for setHandshakeTimeout(), in seconds. Why 15:

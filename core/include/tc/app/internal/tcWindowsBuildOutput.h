@@ -47,6 +47,7 @@ inline int runWindowsBuildWithOutput(std::string commandLine, std::string& outpu
         for (int i = 0; i < 2; ++i) {
             if (!reads[i]) continue;
             DWORD available = 0;
+            // Bound (security/latency): child-process output uses finite per-read storage. Overflow continues in the next read.
             char buffer[4096];
             DWORD count = 0;
             const bool open = PeekNamedPipe(reads[i], nullptr, 0, nullptr, &available, nullptr) != 0;

@@ -196,6 +196,7 @@ class AudioRecorder {
             const size_t n = (size_t)b.frameCount * b.channels;
             const uint64_t head = head_.load(std::memory_order_relaxed);
             const uint64_t tail = tail_.load(std::memory_order_acquire);
+            // Bound (realtime): the audio callback must not allocate or wait for file I/O; a fixed ring buffers captured audio. Overflow drops the incoming block and is counted.
             if (ringCap_ - (size_t)(head - tail) < n) {
                 droppedFrames_.fetch_add((uint64_t)b.frameCount, std::memory_order_relaxed);
                 return;

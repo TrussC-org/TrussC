@@ -111,6 +111,7 @@ int findFaceInFileByPostScriptName(const fs::path& path, const std::string& post
     };
     const auto readAt = [&](uint64_t offset, uint8_t* data, uint64_t length) {
         // Check in 64 bits before seeking or narrowing to stream types.
+        // Bound (abi): font table offsets and lengths must fit the file and stream count widths. Overflow returns false.
         if (!inFile(offset, length) ||
             offset > static_cast<uint64_t>(std::numeric_limits<std::streamoff>::max()) ||
             length > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) {
@@ -145,6 +146,7 @@ int findFaceInFileByPostScriptName(const fs::path& path, const std::string& post
             if (readU32(directory.data(), rec) != 0x6E616D65u) continue;  // 'name'
             const uint64_t offset = readU32(directory.data(), rec + 8);
             const uint64_t length = readU32(directory.data(), rec + 12);
+            // Bound (abi): font name-table lengths must fit host storage and stream count widths. Overflow returns -1.
             if (!inFile(offset, length) || length > std::numeric_limits<size_t>::max() ||
                 length > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) {
                 return -1;

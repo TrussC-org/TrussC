@@ -17,6 +17,7 @@ inline LoadResult checkImageSize(int width, int height) {
     // Headless Images keep their CPU pixels; there is no GPU limit to query.
     if (sg_isvalid()) {
         const int limit = sg_query_limits().max_image_size_2d;
+        // Bound (gpu): file or device image dimensions must fit the device texture limit. Overflow returns LoadError::TooLarge.
         if (width > limit || height > limit) {
             return LoadResult::fail(LoadError::TooLarge,
                 "image exceeds GPU texture limit: " + std::to_string(limit));
@@ -355,6 +356,7 @@ public:
         mipmapped_ = mipmaps && mipmapSupported;
         if (mipmapped_) {
             numMipLevels_ = 1 + (int)std::floor(std::log2((float)std::max(width_, height_)));
+            // Bound (gpu): image-derived mip counts must fit the GPU API descriptor array. Overflow clamps the mip count.
             if (numMipLevels_ > SG_MAX_MIPMAPS) numMipLevels_ = SG_MAX_MIPMAPS;
             if (numMipLevels_ < 1) numMipLevels_ = 1;
         } else {
@@ -783,6 +785,7 @@ private:
                     // RGBA / RGBAF32 here.
                     if (mipmapped_ && channels_ == 4) {
                         int numLevels = 1 + (int)std::floor(std::log2((float)std::max(width_, height_)));
+                        // Bound (gpu): image-derived mip counts must fit the GPU API descriptor array. Overflow clamps the mip count.
                         if (numLevels > SG_MAX_MIPMAPS) numLevels = SG_MAX_MIPMAPS;
                         img_desc.num_mipmaps = numLevels;
 

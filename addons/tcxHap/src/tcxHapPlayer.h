@@ -78,6 +78,7 @@ inline bool loadPcmTrack(MovParser& parser, const MovTrack& track, tc::SoundBuff
     for (size_t i = 0; i < track.samples.size(); i++) {
         if (parser.isSampleInFile(track, i)) totalSize += track.samples[i].size;
     }
+    // Bound (abi): file audio sample sizes must fit the file and host buffer index width. Overflow fails audio loading.
     if (totalSize > parser.getFileSize() || totalSize > SIZE_MAX) {
         tc::logWarning("HapPlayer") << "Failed to read PCM audio data";
         return false;

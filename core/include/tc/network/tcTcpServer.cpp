@@ -130,6 +130,7 @@ constexpr int kWaitSliceMs = 100;
 // (maxClients is), which is why it no longer follows maxClients. 128 is the
 // traditional SOMAXCONN; the kernel may clamp it further (Linux:
 // net.core.somaxconn).
+// Bound (security): the listen backlog bounds the kernel pending-accept queue. Overflow is handled by the OS refusing or deferring new connections.
 constexpr int kListenBacklog = 128;
 
 // Back-off after a failed accept(). An error such as running out of descriptors
@@ -603,6 +604,7 @@ void TcpServer::State::acceptThreadFunc() {
         // Full: close the new connection at once. Only this thread registers
         // clients, so the count can only have gone down since this check.
         const int limit = maxClients_;
+        // Bound (security): untrusted connection floods can retain clients; an optional cap keeps client memory finite. Overflow closes the newly accepted socket.
         if (limit > 0 && getClientCount() >= limit) {
             CLOSE_SOCKET(clientSocket);
             if (fullLog.admit()) {

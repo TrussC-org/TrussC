@@ -8194,9 +8194,9 @@ description.ko = "listDevices()의 deprecated 별칭"
 details = "Kept as a backward-compatible alias; new code should call `listDevices()` (same behavior). Scheduled for removal in v1.0.0."
 
 ["Serial::getDroppedByteCount"]
-description.en = "Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count"
-description.ja = "直近の setup() 以降、1 MiB の TrussC バッファから破棄された受信バイト数。flush と close では累計を保持"
-description.ko = "마지막 setup() 이후 1 MiB TrussC 버퍼에서 버린 수신 바이트 수. flush와 close는 누적 수를 유지"
+description.en = "Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count. Device input or a stalled reader can fill the deque; a fixed cap keeps memory finite. Overflow drops the oldest bytes and increments the discard count."
+description.ja = "直近の setup() 以降、1 MiB の TrussC バッファから破棄された受信バイト数。flush と close では累計を保持。 デバイス入力や読み取りの停止で受信キューが満杯になるため、容量を制限してメモリ使用量を有限に保つ。 あふれた場合は最古のバイトから破棄し、破棄カウントを増やす。"
+description.ko = "마지막 setup() 이후 1 MiB TrussC 버퍼에서 버린 수신 바이트 수. flush와 close는 누적 수를 유지. 장치 입력이나 멈춘 리더가 수신 큐를 채울 수 있으므로 고정 용량으로 메모리 사용량을 제한한다. 넘치면 가장 오래된 바이트부터 버리고 폐기 횟수를 늘린다."
 details.en = "Counts only overflow discards, on desktop and Android. Reading and intentional flushing do not increase it. Moving a Serial carries its counter. Windows overrun/RX overflow flags are logged, but the driver does not supply an exact lost-byte count; those losses cannot be included. Framing/parity errors are log-only."
 details.ja = "デスクトップと Android で、容量超過による破棄だけを数える。読み取りや意図した flush では増えない。Serial のムーブでは累計も移る。Windows の overrun/RX overflow は警告するが、ドライバが正確な消失バイト数を提供しないので累計には含められない。framing/parity はログのみ。"
 details.ko = "데스크톱과 Android에서 용량 초과로 버린 바이트만 센다. 읽기나 의도적인 flush로는 증가하지 않는다. Serial 이동 시 누적 수도 이동한다. Windows overrun/RX overflow 플래그는 경고하지만 드라이버가 정확한 손실 바이트 수를 제공하지 않아 누적 수에 포함할 수 없다. framing/parity 오류는 로그만 남긴다."
@@ -9730,9 +9730,9 @@ details.ja = "接続・受信・送信をキャンセルできるよう稼働中
 details.ko = "연결/수신/전송 취소를 위해 동작 중 소켓은 비차단 유지. 동작 중 차단 모드 요청은 경고 후 무시."
 
 ["TcpClient::setReceiveBufferSize"]
-description.en = "Set the receive buffer size"
-description.ja = "受信バッファサイズを設定"
-description.ko = "수신 버퍼 크기를 설정"
+description.en = "Set the receive buffer size. Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads."
+description.ja = "受信バッファサイズを設定。 ネットワーク入力を有限サイズに分割して読み、各受信時のメモリ確保量を制限する。 超過分は後続の読み取りで受信する。"
+description.ko = "수신 버퍼 크기를 설정. 네트워크 입력을 유한한 크기로 나누어 읽어 각 수신 메모리 할당량을 제한한다. 초과분은 이후 읽기에서 계속 수신한다."
 
 ["TcpClient::setUseThread"]
 description.en = "Whether to use threads (must be false on Wasm)"
@@ -10005,9 +10005,9 @@ description.ja = "サーバが bind しているポート。start(0) のあと�
 description.ko = "서버가 bind된 포트. start(0) 후에는 OS가 고른 포트, 고정 포트라면 그 포트"
 
 ["TcpServer::getSendAsyncBufferSize"]
-description.en = "The current high-water mark for one client's send queue, in bytes"
-description.ja = "クライアント1つあたりの送信キューの高水位マーク（バイト）"
-description.ko = "클라이언트 하나당 송신 큐의 high-water mark (바이트)"
+description.en = "The current high-water mark for one client's send queue, in bytes. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark."
+description.ja = "クライアント1つあたりの送信キューの高水位マーク（バイト）。 通信相手の停止で送信データが滞留するため、高水位マークでキューのさらなる増大を抑える。 高水位を超えると sendAsync は QueueFull で拒否し、send は待機する。1 回の送信は高水位を超える場合がある。"
+description.ko = "클라이언트 하나당 송신 큐의 high-water mark (바이트). 멈춘 네트워크 피어 때문에 송신 데이터가 쌓일 수 있으므로 상한 기준으로 큐의 추가 증가를 제한한다. 상한 기준을 넘으면 sendAsync는 QueueFull로 거부하고 send는 대기한다. 한 번의 전송은 상한 기준을 넘을 수 있다."
 related = ["TcpServer::setSendAsyncBufferSize"]
 
 ["TcpServer::getSendAsyncPendingBytes"]
@@ -10076,22 +10076,22 @@ keywords = ["timeout", "blocking", "send"]
 details = "The timeout measures silence, not the duration of the send: it restarts every time bytes are accepted, so a peer that keeps draining never trips it however large the payload or slow the link. What it catches is a peer that has stopped reading. Defaults to 60 seconds — long enough that no healthy peer reaches it, short enough that a dead one cannot hold a send open forever; pass 0 to wait indefinitely instead. Applies to every send that starts after the call, on every client. A timeout that fires mid-payload leaves the stream truncated, so the client is disconnected rather than left open for the next send() to splice a fresh message onto a partial one — that completion reports SendError::Disconnected, because the client really has gone. One that fires having written nothing leaves the connection intact and reports SendError::Timeout instead, so a listener can tell a slow peer from a lost one without reading the error message."
 
 ["TcpServer::setSendAsyncBufferSize"]
-description.en = "Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB"
-description.ja = "クライアント1つあたりの送信キューの高水位マークを設定（バイト、0 = 無制限）。既定は16MB"
-description.ko = "클라이언트 하나당 송신 큐의 high-water mark를 바이트로 설정 (0 = 무제한). 기본값 16MB"
+description.en = "Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark."
+description.ja = "クライアント1つあたりの送信キューの高水位マークを設定（バイト、0 = 無制限）。既定は16MB。 通信相手の停止で送信データが滞留するため、高水位マークでキューのさらなる増大を抑える。 高水位を超えると sendAsync は QueueFull で拒否し、send は待機する。1 回の送信は高水位を超える場合がある。"
+description.ko = "클라이언트 하나당 송신 큐의 high-water mark를 바이트로 설정 (0 = 무제한). 기본값 16MB. 멈춘 네트워크 피어 때문에 송신 데이터가 쌓일 수 있으므로 상한 기준으로 큐의 추가 증가를 제한한다. 상한 기준을 넘으면 sendAsync는 QueueFull로 거부하고 send는 대기한다. 한 번의 전송은 상한 기준을 넘을 수 있다."
 keywords = ["backpressure", "queue", "limit", "async", "high-water mark"]
 related = ["TcpServer::sendAsync", "TcpServer::getSendAsyncPendingBytes"]
 details = "A mark, not a cap: sendAsync() is refused with QueueFull only when the queue ALREADY holds this much, so a single message of any size still goes through on an empty queue and there is no separate \"message too large\" case — the queue overshoots the mark by at most one message. A full queue does not disconnect anyone; only the idle timeout does. send() waits for room instead of failing, which is why QueueFull is something only sendAsync() can return. The 16 MB default is chosen so a frame streamer learns about back-pressure after a frame or two rather than after a large buffer of latency has piled up; raising it only delays that news."
 
 ["TcpServer::setReceiveBufferSize"]
-description.en = "Set the receive buffer size"
-description.ja = "受信バッファサイズを設定"
-description.ko = "수신 버퍼 크기를 설정"
+description.en = "Set the receive buffer size. Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads."
+description.ja = "受信バッファサイズを設定。 ネットワーク入力を有限サイズに分割して読み、各受信時のメモリ確保量を制限する。 超過分は後続の読み取りで受信する。"
+description.ko = "수신 버퍼 크기를 설정. 네트워크 입력을 유한한 크기로 나누어 읽어 각 수신 메모리 할당량을 제한한다. 초과분은 이후 읽기에서 계속 수신한다."
 
 ["TcpServer::start"]
-description.en = "Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default)"
-description.ja = "ポートで待ち受けを開始。maxClients で同時接続数に上限を付ける（0 = 無制限、既定）"
-description.ko = "포트에서 수신 대기를 시작. maxClients로 동시 접속 수를 제한 (0 = 무제한, 기본값)"
+description.en = "Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default). Untrusted connection floods can retain clients; an optional cap keeps client memory finite. At the cap, newly accepted sockets are closed."
+description.ja = "ポートで待ち受けを開始。maxClients で同時接続数に上限を付ける（0 = 無制限、既定）。 信頼できない接続の集中でクライアントが滞留するため、任意の上限でクライアント用メモリを有限に保つ。 上限に達すると、新たに受け付けたソケットを閉じる。"
+description.ko = "포트에서 수신 대기를 시작. maxClients로 동시 접속 수를 제한 (0 = 무제한, 기본값). 신뢰할 수 없는 연결 폭주로 클라이언트가 쌓일 수 있으므로 선택적 상한으로 클라이언트 메모리를 제한한다. 상한에 도달하면 새로 수락한 소켓을 닫는다."
 keywords = ["listen", "port", "max clients", "connection limit"]
 details.en = "With maxClients above 0, a connection that arrives while that many clients are connected is closed right away and a warning is logged, at most once every few seconds however many arrive; a slot frees up as soon as a client disconnects. The default of 0 accepts any number of clients. The listen backlog is a fixed value and does not depend on maxClients. The receive and writer threads of clients that leave are joined while the server runs, and a failing accept() is retried with a short back-off rather than in a tight loop. start() calls stop() first, which also joins any thread a listener's stop() left running, and when a stop() on another thread is still tearing the previous session down (waiting for the previous accept thread to end, disconnecting the clients or joining their threads), it waits for that stop() to finish too, so none of it reaches the restarted server. It cannot be called from an inline listener on one of the server's own threads: on the accept thread (onClientConnect, and onError or onClientDisconnect for server-level failures) or on a client's receive or writer thread (onReceive, onSendComplete, onClientDisconnect, onError from those threads) it logs an error and returns false without stopping anything."
 details.ja = "maxClients が 0 より大きい場合、その数のクライアントが接続している間に届いた接続はすぐに閉じられ、警告がログに出る（何件届いても数秒に 1 回まで）。クライアントが切断すればすぐに枠が空く。既定の 0 ではクライアント数に上限はない。listen のバックログは固定値で、maxClients には依存しない。去ったクライアントの受信スレッドと送信スレッドはサーバの動作中に join され、失敗した accept() は間を置かずに繰り返すのではなく、短いバックオフを挟んで再試行される。start() は最初に stop() を呼び（リスナーの stop() が残したスレッドもここで join される）、別のスレッドの stop() が前のセッションをまだ片付けている（前の accept スレッドの終了を待っている、クライアントを切断している、またはそのスレッドを join している）なら、その stop() が終わるまで待つので、片付けが再開後のサーバに及ぶことはない。サーバ自身のスレッド上のインラインリスナーからは呼べない。accept スレッド上（onClientConnect、およびサーバ単位の失敗での onError や onClientDisconnect）や、クライアントの受信スレッド・送信スレッド上（onReceive、onSendComplete、onClientDisconnect、それらのスレッドからの onError）では、エラーをログに出して false を返し、何も停止しない。"
@@ -11326,9 +11326,9 @@ description.ja = "ノンブロッキングモードを設定"
 description.ko = "논블로킹 모드를 설정"
 
 ["UdpSocket::setReceiveBufferSize"]
-description.en = "Set the receive buffer size"
-description.ja = "受信バッファサイズを設定"
-description.ko = "수신 버퍼 크기를 설정"
+description.en = "Set the receive buffer size. Untrusted datagram floods can fill the OS queue; the configured buffer keeps queued memory finite. On overflow, the OS drops datagrams."
+description.ja = "受信バッファサイズを設定。 信頼できないデータグラムの集中で OS のキューが満杯になるため、受信バッファの設定で滞留データのメモリ量を有限に保つ。 あふれたデータグラムは OS が破棄する。"
+description.ko = "수신 버퍼 크기를 설정. 신뢰할 수 없는 데이터그램 폭주로 OS 큐가 가득 찰 수 있으므로 수신 버퍼 설정으로 대기 중인 데이터의 메모리를 제한한다. 넘치는 데이터그램은 OS가 버린다."
 
 ["UdpSocket::setReceiveTimeout"]
 description.en = "Set the receive timeout (0 = infinite)"
@@ -11946,9 +11946,9 @@ description.ja = "アクティブなキャプチャデバイスの名前を返�
 description.ko = "활성 캡처 디바이스의 이름을 반환"
 
 ["VideoGrabber::getFrameQueueSize"]
-description.en = "Return the frame queue capacity (0 = queueing disabled)"
-description.ja = "フレームキューの容量を返す（0 = キュー無効）"
-description.ko = "프레임 큐 용량을 반환 (0 = 큐 비활성)"
+description.en = "Return the frame queue capacity (0 = queueing disabled). Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame."
+description.ja = "フレームキューの容量を返す（0 = キュー無効）。 読み取りが停止するとカメラフレームが滞留するため、任意の容量制限でキューのメモリ使用量を有限に保つ。 あふれた場合は最古のフレームを破棄する。"
+description.ko = "프레임 큐 용량을 반환 (0 = 큐 비활성). 리더가 멈추면 카메라 프레임이 쌓일 수 있으므로 선택적 용량 제한으로 큐 메모리를 유한하게 유지한다. 넘치면 가장 오래된 프레임을 버린다."
 
 ["VideoGrabber::getHeight"]
 description.en = "Return the captured frame height in pixels"
@@ -12015,9 +12015,9 @@ description.ko = "사용할 카메라를 선택. setup() 이전에 호출"
 ["VideoGrabber::setFrameQueueSize"]
 category = "video"
 keywords = ["frame queue", "enable", "capacity", "buffer", "measurement"]
-description.en = "Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup()"
-description.ja = "タイムスタンプ付きフレームキューを有効化し容量を設定（0 = 無効。デフォルトで、オフ時のオーバーヘッドはゼロ）。満杯時は古いフレームから捨てるので、取り出しが遅れてもキャプチャは止まらない。容量目安は ceil(カメラfps / アプリfps) + 余裕で、8〜16 で十分。setup() の前後どちらでも呼べる"
-description.ko = "타임스탬프 프레임 큐를 활성화하고 용량을 설정 (0 = 비활성, 기본값. 꺼져 있으면 오버헤드 없음). 가득 차면 오래된 프레임부터 버려서 소비가 늦어도 캡처가 막히지 않음. 용량은 ceil(카메라fps / 앱fps) + 여유, 8~16이면 충분. setup() 전후 어느 쪽에서도 호출 가능"
+description.en = "Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup(). Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame."
+description.ja = "タイムスタンプ付きフレームキューを有効化し容量を設定（0 = 無効。デフォルトで、オフ時のオーバーヘッドはゼロ）。満杯時は古いフレームから捨てるので、取り出しが遅れてもキャプチャは止まらない。容量目安は ceil(カメラfps / アプリfps) + 余裕で、8〜16 で十分。setup() の前後どちらでも呼べる。 読み取りが停止するとカメラフレームが滞留するため、任意の容量制限でキューのメモリ使用量を有限に保つ。 あふれた場合は最古のフレームを破棄する。"
+description.ko = "타임스탬프 프레임 큐를 활성화하고 용량을 설정 (0 = 비활성, 기본값. 꺼져 있으면 오버헤드 없음). 가득 차면 오래된 프레임부터 버려서 소비가 늦어도 캡처가 막히지 않음. 용량은 ceil(카메라fps / 앱fps) + 여유, 8~16이면 충분. setup() 전후 어느 쪽에서도 호출 가능. 리더가 멈추면 카메라 프레임이 쌓일 수 있으므로 선택적 용량 제한으로 큐 메모리를 유한하게 유지한다. 넘치면 가장 오래된 프레임을 버린다."
 related = ["VideoGrabber::getQueuedFrames", "VideoGrabber::getFrameQueueSize", "GrabberFrame"]
 
 ["VideoGrabber::setVerbose"]
@@ -13000,9 +13000,9 @@ description.ko = "시작 시 앱에 전달되는 윈도우 설정 (크기, 제�
 related = ["runApp", "setWindowSize", "setWindowTitle", "HeadlessSettings"]
 
 ["WindowSettings::clipboardSize"]
-description.en = "Clipboard buffer size in bytes (default 65536)"
-description.ja = "クリップボードバッファのサイズ (バイト、デフォルト 65536)"
-description.ko = "클립보드 버퍼 크기 (바이트, 기본값 65536)"
+description.en = "Clipboard buffer size in bytes (default 65536). OS clipboard text needs finite storage in the window backend. On reads, macOS and web truncate to size - 1 bytes; Windows fails UTF-8 conversion on overflow; X11 rejects oversized or incremental selections (standalone returns empty, legacy returns null). On writes, macOS and web send the full text to the OS and truncate the local copy; Windows rejects overflowing UTF-16 conversion and truncates the local UTF-8 copy after success; standalone X11 rejects oversized writes, while legacy X11 logs and truncates. Clipboard access is unsupported on iOS and Android."
+description.ja = "クリップボードバッファのサイズ (バイト、デフォルト 65536)。 ウィンドウのバックエンドでは OS のクリップボード文字列を格納する領域を有限に保つ必要がある。 読み取りでは、macOS と web は size - 1 バイトに切り詰め、Windows は超過時に UTF-8 変換が失敗し、X11 はサイズ超過または逐次転送の選択を拒否する（standalone は空文字列、legacy は null を返す）。書き込みでは、macOS と web は全文を OS に送りローカルコピーを切り詰める。Windows は超過する UTF-16 変換を拒否し、成功後のローカル UTF-8 コピーを切り詰める。standalone X11 はサイズ超過の書き込みを拒否し、legacy X11 はログを出して切り詰める。iOS と Android はクリップボードアクセス非対応。"
+description.ko = "클립보드 버퍼 크기 (바이트, 기본값 65536). 윈도우 백엔드는 OS 클립보드 텍스트의 저장 공간을 유한하게 유지해야 한다. 읽을 때 macOS와 web은 size - 1바이트로 자르고, Windows는 초과 시 UTF-8 변환이 실패하며, X11은 크기 초과 또는 증분 전송 선택을 거부한다 (standalone은 빈 문자열, legacy는 null 반환). 쓸 때 macOS와 web은 전체 텍스트를 OS에 보내고 로컬 사본을 자른다. Windows는 초과하는 UTF-16 변환을 거부하고 성공 후 로컬 UTF-8 사본을 자른다. standalone X11은 크기 초과 쓰기를 거부하고 legacy X11은 로그를 남기고 자른다. iOS와 Android는 클립보드 접근을 지원하지 않는다."
 
 ["WindowSettings::decorated"]
 description.en = "false: borderless/chromeless window with no title bar (default true)"
@@ -13105,9 +13105,9 @@ description.ja = "MSAA サンプル数 (デフォルト 4)"
 description.ko = "MSAA 샘플 수 (기본값 4)"
 
 ["WindowSettings::setClipboardSize"]
-description.en = "Set clipboard buffer size in bytes (chainable)"
-description.ja = "クリップボードバッファのサイズをバイト単位で設定 (チェイン可能)"
-description.ko = "클립보드 버퍼 크기를 바이트 단위로 설정 (체인 가능)"
+description.en = "Set clipboard buffer size in bytes (chainable). OS clipboard text needs finite storage in the window backend. On reads, macOS and web truncate to size - 1 bytes; Windows fails UTF-8 conversion on overflow; X11 rejects oversized or incremental selections (standalone returns empty, legacy returns null). On writes, macOS and web send the full text to the OS and truncate the local copy; Windows rejects overflowing UTF-16 conversion and truncates the local UTF-8 copy after success; standalone X11 rejects oversized writes, while legacy X11 logs and truncates. Clipboard access is unsupported on iOS and Android."
+description.ja = "クリップボードバッファのサイズをバイト単位で設定 (チェイン可能)。 ウィンドウのバックエンドでは OS のクリップボード文字列を格納する領域を有限に保つ必要がある。 読み取りでは、macOS と web は size - 1 バイトに切り詰め、Windows は超過時に UTF-8 変換が失敗し、X11 はサイズ超過または逐次転送の選択を拒否する（standalone は空文字列、legacy は null を返す）。書き込みでは、macOS と web は全文を OS に送りローカルコピーを切り詰める。Windows は超過する UTF-16 変換を拒否し、成功後のローカル UTF-8 コピーを切り詰める。standalone X11 はサイズ超過の書き込みを拒否し、legacy X11 はログを出して切り詰める。iOS と Android はクリップボードアクセス非対応。"
+description.ko = "클립보드 버퍼 크기를 바이트 단위로 설정 (체인 가능). 윈도우 백엔드는 OS 클립보드 텍스트의 저장 공간을 유한하게 유지해야 한다. 읽을 때 macOS와 web은 size - 1바이트로 자르고, Windows는 초과 시 UTF-8 변환이 실패하며, X11은 크기 초과 또는 증분 전송 선택을 거부한다 (standalone은 빈 문자열, legacy는 null 반환). 쓸 때 macOS와 web은 전체 텍스트를 OS에 보내고 로컬 사본을 자른다. Windows는 초과하는 UTF-16 변환을 거부하고 성공 후 로컬 UTF-8 사본을 자른다. standalone X11은 크기 초과 쓰기를 거부하고 legacy X11은 로그를 남기고 자른다. iOS와 Android는 클립보드 접근을 지원하지 않는다."
 
 ["WindowSettings::setDecorated"]
 description.en = "false = borderless/chromeless window that can still take focus and be closed programmatically (chainable)"
@@ -19654,14 +19654,14 @@ details.ja = "クライアントが生存している間、キュー済み id �
 details.ko = "클라이언트가 살아 있는 동안 큐 id는 disconnect() 취소를 포함해 한 번 완료를 알린다. 스레드 사용 시 전송 스레드에서, 없으면 processNetwork(), send(), disconnect()에서 발생. 소멸은 새 이벤트 없이 작업자를 멈추고 대기 송신자를 깨운다."
 
 ["TcpClient::setSendAsyncBufferSize"]
-description.en = "Set the send queue high-water mark; default 16 MB, 0 unlimited"
-description.ja = "送信キューの高水位を設定。既定 16 MB、0 は無制限"
-description.ko = "전송 큐의 상한 기준 설정. 기본 16 MB, 0은 무제한"
+description.en = "Set the send queue high-water mark; default 16 MB, 0 unlimited. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark."
+description.ja = "送信キューの高水位を設定。既定 16 MB、0 は無制限。 通信相手の停止で送信データが滞留するため、高水位マークでキューのさらなる増大を抑える。 高水位を超えると sendAsync は QueueFull で拒否し、send は待機する。1 回の送信は高水位を超える場合がある。"
+description.ko = "전송 큐의 상한 기준 설정. 기본 16 MB, 0은 무제한. 멈춘 네트워크 피어 때문에 송신 데이터가 쌓일 수 있으므로 상한 기준으로 큐의 추가 증가를 제한한다. 상한 기준을 넘으면 sendAsync는 QueueFull로 거부하고 send는 대기한다. 한 번의 전송은 상한 기준을 넘을 수 있다."
 
 ["TcpClient::getSendAsyncBufferSize"]
-description.en = "Get the send queue high-water mark in bytes"
-description.ja = "送信キューの高水位をバイト数で取得"
-description.ko = "전송 큐의 상한 기준을 바이트로 가져오기"
+description.en = "Get the send queue high-water mark in bytes. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark."
+description.ja = "送信キューの高水位をバイト数で取得。 通信相手の停止で送信データが滞留するため、高水位マークでキューのさらなる増大を抑える。 高水位を超えると sendAsync は QueueFull で拒否し、send は待機する。1 回の送信は高水位を超える場合がある。"
+description.ko = "전송 큐의 상한 기준을 바이트로 가져오기. 멈춘 네트워크 피어 때문에 송신 데이터가 쌓일 수 있으므로 상한 기준으로 큐의 추가 증가를 제한한다. 상한 기준을 넘으면 sendAsync는 QueueFull로 거부하고 send는 대기한다. 한 번의 전송은 상한 기준을 넘을 수 있다."
 
 ["TcpClient::getSendAsyncPendingBytes"]
 description.en = "Bytes queued but not yet completed"

@@ -420,6 +420,7 @@ void WebSocketClient::ConnectionState::processFrame() {
                 failConnection(1002, "WebSocket protocol error: fragmented control frame (FIN=0)");
                 return;
             }
+            // Bound (security): untrusted control frames must fit the RFC 6455 limit to keep buffering finite. Overflow fails the connection with code 1002.
             if (payloadLen > 125) {
                 failConnection(1002, "WebSocket protocol error: control frame payload over 125 bytes");
                 return;
@@ -584,6 +585,7 @@ bool WebSocketClient::ConnectionState::sendControl(uint8_t opcode, const char* d
 #ifndef __EMSCRIPTEN__
     if (state_ != State::Open || !client_) return false;
 
+    // Bound (platform): the WebSocket control-frame API permits at most 125 payload bytes. Overflow truncates the control payload.
     if (len > 125) len = 125;
     std::vector<unsigned char> frame;
     frame.reserve(6 + len);

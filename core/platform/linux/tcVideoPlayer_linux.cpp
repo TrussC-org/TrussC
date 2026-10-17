@@ -198,6 +198,7 @@ private:
         double pts;
     };
     std::queue<FrameData> frameQueue_;
+    // Bound (security): decoded file frames can outpace presentation; a cap keeps queued frame memory finite. Overflow waits for the consumer before decoding more.
     static constexpr size_t MAX_QUEUE_SIZE = 4;
 
     // Timing
@@ -735,6 +736,7 @@ void TCVideoPlayerImpl::probeHwOutputFormat() {
 
     AVFrame* probeFrame = av_frame_alloc();
     bool captured = false;
+    // Bound (security): untrusted file packets may never yield a frame; a probe cap bounds startup work. Overflow ends the probe without a captured frame.
     constexpr int kMaxPackets = 64;  // keep probe bounded
 
     for (int i = 0; i < kMaxPackets && !captured; ++i) {

@@ -2309,6 +2309,7 @@ struct WindowSettings {
     int sampleCount = 4;  // MSAA (default 4x, 8x not supported on some devices)
     bool fullscreen = false;
     bool decorated = true;  // false: borderless/chromeless window (no title bar)
+    // Bound (security): OS clipboard text needs finite storage in the window backend. Overflow truncates or rejects oversized text, depending on the backend.
     int clipboardSize = 65536;  // Clipboard buffer size (default 64KB)
     int swapInterval = 1;  // VSync: 1 = on (default), 0 = off
     int uniformBufferReserve = 0;  // per-frame GPU uniform reservation in bytes;
@@ -2358,6 +2359,7 @@ struct WindowSettings {
         return *this;
     }
 
+    // OS clipboard text needs finite storage in the window backend. On reads, macOS and web truncate to size - 1 bytes; Windows fails UTF-8 conversion on overflow; X11 rejects oversized or incremental selections (standalone returns empty, legacy returns null). On writes, macOS and web send the full text to the OS and truncate the local copy; Windows rejects overflowing UTF-16 conversion and truncates the local UTF-8 copy after success; standalone X11 rejects oversized writes, while legacy X11 logs and truncates. Clipboard access is unsupported on iOS and Android.
     WindowSettings& setClipboardSize(int size) {
         clipboardSize = size;
         return *this;
@@ -2989,6 +2991,7 @@ namespace internal {
                 TouchEventArgs touchArgs;
                 internal::TouchSample samples[TouchEventArgs::MAX_TOUCHES];
                 touchArgs.numTouches = ev->num_touches;
+                // Bound (platform): OS touch events must fit the SDK-sized event array. Overflow clamps the delivered touch count.
                 if (touchArgs.numTouches > TouchEventArgs::MAX_TOUCHES)
                     touchArgs.numTouches = TouchEventArgs::MAX_TOUCHES;
                 for (int i = 0; i < touchArgs.numTouches; i++) {
@@ -3266,7 +3269,9 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
 
     // Enable drag and drop
     desc.enable_dragndrop = true;
+    // Bound (security): OS file drops can flood delivery; a fixed cap keeps path storage finite. Overflow omits excess files.
     desc.max_dropped_files = 16;           // Max 16 files
+    // Bound (security): OS drop paths need finite per-path storage. Overflow rejects the drop if a path does not fit.
     desc.max_dropped_file_path_length = 2048;  // Max path length
 
     // Enable clipboard

@@ -11,6 +11,7 @@ struct Rect { int x, y, w, h; };
 int integer(const json& j) {
     if (!j.is_number_integer()) throw std::runtime_error("coordinates and sizes must be integers");
     const auto n = j.get<int64_t>();
+    // Bound (abi): external MCP coordinates and sizes must fit int indices. Overflow throws an error.
     if (n < INT_MIN || n > INT_MAX) throw std::runtime_error("integer out of range");
     return static_cast<int>(n);
 }

@@ -80,6 +80,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
         bool setMulticastTTL(int ttl);
         bool setMulticastLoopback(bool enable);
         bool setMulticastInterface(const std::string& interfaceAddr);
+        // Untrusted datagram floods can fill the OS queue; the configured buffer keeps queued memory finite. On overflow, the OS drops datagrams.
         bool setReceiveBufferSize(int size);
         bool setSendBufferSize(int size);
         bool setReceiveTimeout(int timeoutMs);
@@ -119,6 +120,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
         bool useThread_ = true;
     #endif
         EventListener updateListener_;
+        // Bound (platform): a UDP datagram fits within the IP length limit; a fixed receive buffer avoids per-packet growth. Overflow truncates an oversized datagram on POSIX or fails the receive on Windows.
         static constexpr size_t RECEIVE_BUFFER_SIZE = 65536;
         std::vector<char> receiveBuffer_ = std::vector<char>(RECEIVE_BUFFER_SIZE);
     };
@@ -246,6 +248,7 @@ public:
     // Pick the NIC used for OUTGOING multicast (""/"0.0.0.0" = default route).
     bool setMulticastInterface(const std::string& interfaceAddr);
     // Set receive buffer size
+    // Untrusted datagram floods can fill the OS queue; the configured buffer keeps queued memory finite. On overflow, the OS drops datagrams.
     bool setReceiveBufferSize(int size);
     // Set send buffer size
     bool setSendBufferSize(int size);

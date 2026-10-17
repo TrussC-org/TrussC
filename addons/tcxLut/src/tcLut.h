@@ -106,6 +106,7 @@ public:
                 }
             } else if (keyword == "LUT_3D_SIZE") {
                 iss >> size;
+                // Bound (security): file-provided LUT dimensions grow cubically; a cap limits the declared table allocation. Overflow returns false.
                 if (size < 2 || size > 256) {
                     logError() << "Lut3D: invalid LUT size " << size;
                     return false;

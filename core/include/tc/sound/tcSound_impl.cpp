@@ -62,6 +62,7 @@ namespace {
 
 // Frames decoded per step. Samples are appended as they decode, so the
 // stated stream length never decides how much is written anywhere.
+// Bound (security/latency): file audio decoding uses 4096-frame chunks to bound each scratch allocation. Overflow continues in subsequent decode steps.
 constexpr int kDecodeChunkFrames = 4096;
 
 // Reserve the first `count` samples of a decode buffer. Only a hint: when the
@@ -78,6 +79,7 @@ void reserveDecodeBuffer(std::vector<float>& buf, size_t count) {
 // internal::growSampleBuffer (towards `statedSamples`, the stream's stated
 // length, when that is ahead). False when the buffer cannot grow.
 bool appendDecoded(std::vector<float>& buf, const float* data, size_t n, size_t statedSamples) {
+    // Bound (abi): decoded file samples must fit the vector index width before appending. Overflow returns false.
     if (n > buf.max_size() - buf.size()) return false;
     if (!internal::growSampleBuffer(buf, buf.size() + n, statedSamples)) return false;
     buf.insert(buf.end(), data, data + n);

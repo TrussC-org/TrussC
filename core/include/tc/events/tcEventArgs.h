@@ -234,6 +234,7 @@ struct TouchPoint {
 // Touch event arguments (multi-touch)
 // ---------------------------------------------------------------------------
 struct TouchEventArgs {
+    // Bound (platform): the OS input backend exposes at most SAPP_MAX_TOUCHPOINTS touches per event. Overflow omits additional touches.
     static constexpr int MAX_TOUCHES = 32;  // Matches SAPP_MAX_TOUCHPOINTS
     TouchPoint touches[MAX_TOUCHES];
     int numTouches = 0;

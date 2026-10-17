@@ -23,6 +23,7 @@ struct AudioOutputSnapshot {
 class AudioOutputRing {
 public:
     AudioOutputRing(int sampleRate, int channels)
+        // Bound (realtime): the audio callback must not allocate; a preallocated history holds two seconds plus overwrite slack. Overflow overwrites the oldest samples.
         : sampleRate_(sampleRate), channels_(channels), capacity_(size_t(sampleRate) * 2),
           storageCapacity_(capacity_ + (size_t(sampleRate) + 1) / 2),
           samples_(new std::atomic<uint32_t>[storageCapacity_ * size_t(channels)]{}) {}
@@ -57,6 +58,7 @@ public:
         // Only reject writes that can overwrite the copied range. Half a second
         // of private slack lets even a full two-second read overlap callbacks.
         // Allocation stays outside the bounded retries; the producer never waits.
+        // Bound (realtime): MCP snapshot retries must not chase a continuously writing callback indefinitely. Overflow returns an empty snapshot after three failed copies.
         for (int attempt = 0; attempt < 3; ++attempt) {
             result.framesWritten = framesWritten_.load(std::memory_order_acquire);
             const size_t count = size_t(std::min<uint64_t>(frames, result.framesWritten));
