@@ -12,6 +12,7 @@
 #include "tcGpuDestroyQueue.h"
 
 namespace trussc {
+namespace internal { struct PipelineGeneration; }
 
 // ---------------------------------------------------------------------------
 // Standard vertex format for shader drawing
@@ -134,6 +135,7 @@ struct ShaderStreamState {
 // every frame; a pooled arena is a possible future optimization.
 struct DeferredShaderDraw {
     int layerId = 0;                    // sokol_gl layer this draw follows
+    std::shared_ptr<PipelineGeneration> pipelineGeneration;
     sg_pipeline pipeline = {};          // resolved for the target at submission
     sg_bindings bindings = {};          // buffers + views/samplers snapshot
     std::vector<std::pair<int, std::vector<uint8_t>>> uniforms;  // slot -> block bytes
@@ -143,9 +145,8 @@ struct DeferredShaderDraw {
 };
 
 // Replay a captured shader draw on the GPU. Self-contained: uses captured
-// resources and accounting, never a live Shader. Used by flushDeferredShaderDraws()
-// (swapchain, tcShader.h) and flushFboDeferredPbr() (FBO passes,
-// tcMeshPbrPipeline.h).
+// resources and accounting, never a live Shader. RenderTarget::flushLayers()
+// consumes these snapshots in the same order on every drawing target.
 inline void executeDeferredShaderDraw(const DeferredShaderDraw& d) {
     if (d.vertices.empty()) return;
 

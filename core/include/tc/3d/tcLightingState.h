@@ -4,11 +4,12 @@
 // tcLightingState.h - Lighting state (breadcrumb; per-window)
 // =============================================================================
 //
-// The lighting state (activeLights, currentMaterial, cameraPosition,
+// The lighting state (activeLights, currentMaterial,
 // pbrExposure, currentEnvironment) used to be process globals here. It is now
 // PER-WINDOW: it lives in internal::WindowContext (tc/app/tcWindowContext.h)
 // and is reached through internal::currentWindowContext(). Single-window apps
-// are unchanged (the main window is the only context).
+// are unchanged (the main window is the only context). The explicit PBR
+// camera position now lives in currentTarget().camera and follows camera scopes.
 //
 // The limits internal::maxLights / internal::maxShadowLights also moved to
 // tcWindowContext.h (the shadow-slot arrays need maxShadowLights at definition

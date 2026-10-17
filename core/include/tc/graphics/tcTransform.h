@@ -212,7 +212,7 @@ inline void multMatrix(const Mat4& mat) {
     getDefaultContext().multMatrix(mat);
 }
 
-// Replace the current matrix with `mat` (absolute - use with caution, may break camera setup)
+// Replace the active target model matrix with `mat`, retaining its camera view
 inline void setMatrix(const Mat4& mat) {
     getDefaultContext().setMatrix(mat);
 }

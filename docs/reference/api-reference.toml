@@ -1757,9 +1757,9 @@ description.ko = "정사영을 활성화"
 ["EasyCam::end"]
 category = "graphics_camera"
 keywords = ["finish", "stop", "unbind", "exit"]
-description.en = "Restore previous transform (end 3D mode)"
-description.ja = "カメラ視点を解除（3Dモード終了）"
-description.ko = "이전 변환으로 복원 (3D 모드 종료)"
+description.en = "Restore the camera snapshot and selected pipeline from the matching begin on this target, retaining its model and continuous logical blend/depth flags."
+description.ja = "同じ描画先の begin 時点のカメラと選択パイプラインを復元する。モデルと blend/depth の論理値は維持する。"
+description.ko = "같은 타깃의 begin 시점 카메라와 선택 파이프라인을 복원한다. 모델과 논리 blend/depth 값은 유지한다."
 related = ["popMatrix"]
 
 ["EasyCam::getAzimuth"]
@@ -2184,17 +2184,17 @@ related = ["VideoWriter::addFrame", "VideoWriter::addFrameAt", "Texture", "Fulls
 ["Fbo::allocate"]
 category = "graphics_fbo"
 keywords = ["alloc", "create", "init", "reserve", "size"]
-description.en = "Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end()."
-description.ja = "フレームバッファを確保。`mipmaps=true` でミップマップ連鎖が end() で自動更新される"
-description.ko = "프레임버퍼를 할당. `mipmaps=true` 시 end()마다 밉맵 체인이 자동 갱신됨"
+description.en = "Allocate framebuffer (void). When the size exceeds the device limit or the graphics backend reports a resource creation failure, allocation fails, partial resources are released and isAllocated() stays false. Driver-level out-of-memory may not be reported on every backend; begin()/draw() are no-ops and readPixels()/readPixelsFloat()/copyTo() return false. Oversize requests log one Warning with the requested size and device limit. `mipmaps=true` builds a full mip chain that is refreshed automatically at end()."
+description.ja = "フレームバッファを確保（void）。サイズがデバイス上限を超えるか、グラフィックスバックエンドがリソース作成失敗を報告した場合、確保は失敗し、部分リソースを解放して isAllocated() は false のままになる。ドライバーレベルのメモリ不足は、バックエンドによっては報告されない場合がある。begin()/draw() は何もせず、readPixels()/readPixelsFloat()/copyTo() は false を返す。上限超過時は要求サイズとデバイス上限を含む Warning を1回記録する。`mipmaps=true` でミップマップ連鎖が end() で自動更新される"
+description.ko = "프레임버퍼를 할당(void). 크기가 장치 제한을 초과하거나 그래픽 백엔드가 리소스 생성 실패를 보고하면 할당이 실패하고 부분 리소스를 해제하며 isAllocated()는 false로 유지된다. 드라이버 수준의 메모리 부족은 일부 백엔드에서 보고되지 않을 수 있다. begin()/draw()는 아무 작업도 하지 않고 readPixels()/readPixelsFloat()/copyTo()는 false를 반환한다. 크기 제한 초과 시 요청 크기와 장치 제한을 담은 Warning을 한 번 기록한다. `mipmaps=true` 시 end()마다 밉맵 체인이 자동 갱신됨"
 related = ["TextureFormat"]
 
 ["Fbo::begin"]
 category = "graphics_fbo"
 keywords = ["start", "bind", "enter", "render to"]
-description.en = "Begin rendering to FBO"
-description.ja = "FBOへのレンダリングを開始"
-description.ko = "FBO 렌더링 시작"
+description.en = "Begin rendering to FBO. Each activation starts an identity model, empty matrix/camera/scissor scopes, full viewport and a TAU/8 camera in attachment pixels. Distinct Fbos may nest; end resumes the parent with color and depth LOAD. A fresh LOAD activation keeps color and clears depth. Balance scopes on the same target; recursive begin and out-of-order end are rejected."
+description.ja = "FBO への描画を開始。毎回、モデル単位行列、空の行列・カメラ・scissor スタック、全面 viewport、添付画像のピクセル単位の TAU/8 カメラで開始する。異なる Fbo は入れ子にでき、end は親の色と深度を LOAD して再開する。新しい LOAD 開始では色を維持して深度をクリアする。スコープは同じ描画先で閉じ、同一 Fbo の再帰 begin と順序違いの end は拒否する。"
+description.ko = "FBO 렌더링 시작. 매번 단위 모델 행렬, 빈 행렬·카메라·scissor 스택, 전체 viewport, 첨부 픽셀 단위 TAU/8 카메라로 시작한다. 서로 다른 Fbo는 중첩할 수 있으며 end는 부모의 색상과 깊이를 LOAD하여 재개한다. 새 LOAD 활성화는 색상을 유지하고 깊이를 지운다. 같은 타깃에서 스코프를 닫으며 재귀 begin과 순서가 잘못된 end는 거부한다."
 
 ["Fbo::clear"]
 description.en = "Release FBO resources"
@@ -2221,9 +2221,9 @@ description.ko = "FBO 내용을 그림"
 ["Fbo::end"]
 category = "graphics_fbo"
 keywords = ["finish", "stop", "unbind", "exit"]
-description.en = "End rendering to FBO"
-description.ja = "FBOへのレンダリングを終了"
-description.ko = "FBO 렌더링 종료"
+description.en = "End rendering to FBO and return to the parent target; the returned logical blend takes effect immediately."
+description.ja = "FBO への描画を終えて親ターゲットへ戻る。戻された論理ブレンドモードは直ちに描画へ反映される。"
+description.ko = "FBO 렌더링을 끝내고 부모 대상으로 돌아간다. 반환된 논리 블렌드 모드는 즉시 그리기에 적용된다."
 
 ["Fbo::getHeight"]
 description.en = "Get height"
@@ -2271,12 +2271,12 @@ description.ko = "할당되었는지 확인"
 ["Fbo::readPixels"]
 category = "graphics_fbo"
 keywords = ["download", "cpu"]
-description.en = "Read FBO contents into a CPU buffer (8-bit per channel)"
-description.ja = "FBOの内容をCPUバッファに読み出す（チャンネルあたり8ビット）"
-description.ko = "FBO 내용을 CPU 버퍼로 읽음 (채널당 8비트)"
-details.en = "Call after rendering is complete (after end()). Called inside any Fbo pass (between begin() and end()) it logs an error and returns false, on every platform."
-details.ja = "描画が終わってから(end() のあとに)呼ぶ。Fbo のパスの中(begin() と end() の間)で呼ぶと、どのプラットフォームでもエラーを出して false を返す。"
-details.ko = "렌더링이 끝난 뒤(end() 이후)에 호출한다. Fbo 패스 안(begin()과 end() 사이)에서 호출하면 모든 플랫폼에서 오류를 기록하고 false를 반환한다."
+description.en = "Always read RGBA8 into a CPU buffer, whatever the Fbo format (clamped to 0–1 and quantised to 8 bits)"
+description.ja = "Fbo の形式にかかわらず常に RGBA8 を CPU バッファに読み出す（0–1 にクランプし、8 ビットに量子化）"
+description.ko = "Fbo 형식에 관계없이 항상 RGBA8을 CPU 버퍼로 읽음 (0–1로 제한하고 8비트로 양자화)"
+details.en = "Provide width * height * 4 bytes. R/RG formats fill missing G/B with 0 and alpha with 1. Conversion rounds to nearest; CPU ties round up, while native desktop GL may differ by at most 1 byte value. Use readPixelsFloat() for full precision. Call after end(); inside any Fbo pass it logs an error and returns false. WebGL2 is supported; WebGPU synchronous readback remains unsupported."
+details.ja = "width * height * 4 バイトを用意する。R/RG 形式の不足する G/B は 0、アルファは 1 になる。最も近い値に丸め、CPU では中間値を切り上げる。デスクトップ GL の変換結果との差は最大 1。完全な精度が必要なら readPixelsFloat() を使う。end() のあとに呼ぶ。Fbo パスの中ではエラーを出して false を返す。WebGL2 に対応。WebGPU の同期読み出しは未対応。"
+details.ko = "width * height * 4바이트를 준비한다. R/RG 형식에서 없는 G/B는 0, 알파는 1로 채운다. 가장 가까운 값으로 반올림하며 CPU의 중간값은 올림한다. 데스크톱 GL 변환 결과와의 차이는 최대 1이다. 전체 정밀도가 필요하면 readPixelsFloat()를 사용한다. end() 이후에 호출하며 Fbo 패스 안에서는 오류를 기록하고 false를 반환한다. WebGL2를 지원하며 WebGPU 동기 읽기는 지원하지 않는다."
 related = ["Fbo::readPixelsFloat", "Pixels"]
 
 ["Fbo::readPixelsFloat"]
@@ -8825,9 +8825,9 @@ description.ko = "셰이더가 로드되었는지 확인"
 ["Shader::load"]
 category = "graphics_shader"
 keywords = ["open", "read", "file"]
-description.en = "Load from sokol-shdc generated function"
-description.ja = "sokol-shdc生成関数からロード"
-description.ko = "sokol-shdc로 생성된 함수에서 로드"
+description.en = "Load a sokol-shdc program and capture the subclass pipeline recipe. Target-compatible pipelines are created lazily at drawing; target-specific pipeline failures are reported then."
+description.ja = "sokol-shdc のプログラムを読み込み、サブクラスのパイプライン設定を保存する。ターゲットに適合するパイプラインは描画時に生成し、その生成失敗も描画時に通知する。"
+description.ko = "sokol-shdc 프로그램을 로드하고 서브클래스의 파이프라인 설정을 저장한다. 대상에 맞는 파이프라인은 그릴 때 생성하며 대상별 생성 실패도 그때 보고한다."
 
 ["Shader::setTexture"]
 category = "graphics_shader"
@@ -10350,9 +10350,9 @@ description.ko = "축소 필터를 설정"
 ["Texture::setPremultipliedAlpha"]
 category = "graphics_texture"
 keywords = ["blend", "flag"]
-description.en = "Set whether the texture color is premultiplied by alpha"
-description.ja = "テクスチャの色をアルファ乗算済みとして扱うかを設定"
-description.ko = "텍스처 색상을 알파로 미리 곱한 것으로 취급할지 설정"
+description.en = "Set whether texture color is premultiplied by alpha. Alpha blending honors this flag on both windows and Fbos."
+description.ja = "テクスチャの色をアルファ乗算済みとして扱うかを設定。Alpha ブレンドではウィンドウと Fbo の両方でこの指定を反映する。"
+description.ko = "텍스처 색상을 알파로 미리 곱한 것으로 취급할지 설정한다. Alpha 블렌딩은 창과 Fbo 모두에서 이 설정을 따른다."
 related = ["Texture::isPremultipliedAlpha"]
 
 ["Texture::setWrap"]
@@ -13560,6 +13560,8 @@ shadow-casting light, before the PBR pass. Up to 4 lights can cast shadows in
 the same frame — each pass renders into its own layer of a shared shadow map
 array. Passes beyond the limit are ignored with a one-time warning. All
 layers share one resolution: the largest requested via `enableShadow()`.
+This pair may run inside an Fbo. End resumes its original color and depth
+attachments and restores the calling target's transforms and clipping.
 '''
 details.ja = '''
 shadowを落とすlightごとに `beginShadowPass(light)` /
@@ -13567,6 +13569,8 @@ shadowを落とすlightごとに `beginShadowPass(light)` /
 1フレームに最大4灯までshadowを落とせる（各パスは共有shadow map配列の
 専用レイヤーに描画される）。上限を超えたパスは一度だけ警告を出して無視される。
 解像度は全レイヤー共通で、`enableShadow()` で要求された最大値になる。
+Fbo 内でも呼び出せる。end は元の色・深度アタッチメントを再開し、
+呼び出し元の変換とクリッピングを復元する。
 '''
 details.ko = '''
 섀도우를 드리우는 조명마다 `beginShadowPass(light)` /
@@ -13574,6 +13578,8 @@ details.ko = '''
 한 프레임에 최대 4개 조명이 섀도우를 드리울 수 있으며, 각 패스는 공유 섀도우 맵
 배열의 전용 레이어에 렌더링된다. 한도를 넘는 패스는 한 번만 경고를 내고
 무시된다. 해상도는 모든 레이어가 공유하며 `enableShadow()`로 요청된 최댓값이 된다.
+Fbo 안에서도 호출할 수 있다. end는 원래 색상·깊이 첨부를 재개하고
+호출한 타깃의 변환과 클리핑을 복원한다.
 '''
 
 ["beginShape"]
@@ -16811,9 +16817,9 @@ related = ["getUserDataPath", "setDataPathRoot"]
 ["setDefaultScreenFov"]
 category = "graphics_3d_setup"
 keywords = ["field of view", "projection", "perspective"]
-description.en = "Set default screen FOV in radians (frame start and FBO begin)"
-description.ja = "デフォルトFOVをラジアンで設定（フレーム開始・FBO開始時）"
-description.ko = "기본 FOV를 라디안으로 설정 (프레임 및 FBO 시작 시)"
+description.en = "Set default swapchain FOV in radians (frame start only)"
+description.ja = "画面のデフォルトFOVをラジアンで設定（フレーム開始時のみ）"
+description.ko = "화면 기본 FOV를 라디안으로 설정 (프레임 시작 시만)"
 related = ["getDefaultScreenFov"]
 details.en = "Accepts 0 (orthographic) or 0 < fov < TAU/2 radians. Invalid values warn once and are ignored, preserving the current projection/default. setupScreenOrtho() and setDefaultScreenOrtho() are the readable spellings for orthographic setup and defaults."
 details.ja = "0（正投影）または 0 < fov < TAU/2 のラジアンを受け付ける。範囲外は一度だけ警告して無視し、現在の投影・デフォルト値を維持する。正投影の設定とデフォルト値には、意図が明確な setupScreenOrtho() と setDefaultScreenOrtho() を使える。"
@@ -17003,9 +17009,9 @@ related = ["Material", "addLight", "setEnvironment"]
 ["setMatrix"]
 category = "transform"
 keywords = ["transform", "modelview", "replace", "load"]
-description.en = "Replace the current matrix with mat (absolute - use with caution, may break camera setup)"
-description.ja = "現在の行列を mat で置き換える（絶対・カメラ設定を壊す可能性があるので注意）"
-description.ko = "현재 행렬을 mat로 대체 (절대 - 카메라 설정을 깨뜨릴 수 있으므로 주의)"
+description.en = "Replace the active target model matrix with mat, retaining its camera view (sgl receives V*M). Pass a model matrix without a baked-in view."
+description.ja = "現在の描画先のモデル行列を mat に置き換え、カメラのビューは維持する（sgl には V*M を送る）。ビューを焼き込まないモデル行列を渡す。"
+description.ko = "현재 타깃 모델 행렬을 mat로 교체하고 카메라 뷰를 유지한다(sgl에 V*M 전달). 뷰가 포함되지 않은 모델 행렬을 전달한다."
 related = ["Mat4", "multMatrix", "resetMatrix"]
 
 ["setNearClip"]
@@ -17106,7 +17112,9 @@ analogue of [`setStrokeWeight`](#setStrokeWeight). The unit is **logical pixels*
 (like `strokeWeight`), so it stays the same apparent size across DPIs. Affects the
 `Square` and `Round` [`PointStyle`](#PointStyle) splats; `Pixel` is a true 1px
 point and ignores it. Saved/restored by [`pushStyle`](#pushStyle) /
-[`popStyle`](#popStyle).
+[`popStyle`](#popStyle). In an Fbo, sizes use attachment pixels independently
+of host DPI and pixelPerfect. Target projection/view/model move point centers;
+model scale does not enlarge the splats.
 '''
 details.ja = '''
 [`PrimitiveMode`](#PrimitiveMode)`::Points` メッシュの描画ステートで、点群版の
@@ -17114,6 +17122,8 @@ details.ja = '''
 同じ）なので、DPI が変わっても見た目のサイズは一定。`Square` と `Round` の
 [`PointStyle`](#PointStyle) スプラットに効き、`Pixel` は本物の 1px 点なので無視
 される。[`pushStyle`](#pushStyle) / [`popStyle`](#popStyle) で保存・復元される。
+Fbo 内のサイズはホスト DPI や pixelPerfect に依存しないアタッチメントピクセル。
+点の中心はターゲットの射影・ビュー・モデル行列に従うが、モデルの拡縮で点のサイズは変わらない。
 '''
 details.ko = '''
 [`PrimitiveMode`](#PrimitiveMode)`::Points` 메시의 그리기 상태로, 포인트 클라우드
@@ -17121,6 +17131,8 @@ details.ko = '''
 동일)이라 DPI가 달라져도 보이는 크기가 일정하다. `Square`와 `Round`
 [`PointStyle`](#PointStyle) 스플랫에 적용되며, `Pixel`은 진짜 1px 포인트라 무시한다.
 [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle)로 저장·복원된다.
+Fbo에서는 호스트 DPI와 pixelPerfect에 관계없이 어태치먼트 픽셀을 사용한다.
+점의 중심은 대상의 투영·뷰·모델 행렬을 따르며 모델 배율은 점 크기를 바꾸지 않는다.
 '''
 
 ["getPointSize"]
@@ -18699,19 +18711,10 @@ description.ko = "정규 scroll 값을 폐기 예정인 scrollX/scrollY 미러 �
 ["beginFrame"]
 hide = true
 
-["ensureSwapchainPass"]
-hide = true
-
 ["present"]
 hide = true
 
 ["isInSwapchainPass"]
-hide = true
-
-["suspendSwapchainPass"]
-hide = true
-
-["resumeSwapchainPass"]
 hide = true
 
 ["restoreBlendPipeline"]
@@ -19036,11 +19039,6 @@ description.ko = "저장된 모든 유니폼을 바인딩된 셰이더에 적용
 description.en = "The underlying sokol shader handle."
 description.ja = "内部の sokol シェーダハンドル。"
 description.ko = "내부 sokol 셰이더 핸들."
-
-["Shader::pipeline"]
-description.en = "The pipeline targeting the swapchain, created at load()."
-description.ja = "スワップチェーンを対象とするパイプライン。load() 時に作成。"
-description.ko = "스왑체인을 대상으로 하는 파이프라인. load() 시 생성."
 
 ["Shader::vertexBuffer"]
 description.en = "The dynamic vertex buffer for shader draws."
@@ -19710,9 +19708,9 @@ hide = true
 
 ["Fbo::setDebugName"]
 category = "graphics_fbo"
-description.en = "Set the MCP inspection name. tc_list_fbos lists live objects with index, name, width, height and format. tc_analyze_image accepts source={fbo:name or index} and reads the final Fbo pass after the frame. Moves transfer the name/index and remove the moved-from object; destruction removes the entry. Empty names remain available by index. Web readback and iOS float readback return errors. Byte Fbo readback supports RGBA8; other integer formats return an error. Texture is not a source; draw it into a named Fbo."
-description.ja = "MCP 検査用の名前を設定。tc_list_fbos は生存中のオブジェクトの index、name、width、height、format を一覧化。tc_analyze_image は source={fbo:名前またはインデックス} を受け、フレーム終了後に最後の Fbo パスを読む。移動で名前とインデックスを引き継ぎ、移動元と破棄済みの項目は消える。空の名前もインデックスで取得可能。Web の読み戻しと iOS の float 読み戻しはエラー。byte Fbo の読み戻しは既存 API の RGBA8 のみ対応し、他の整数形式はエラー。Texture はソースにできないため、名前付き Fbo に描画する。"
-description.ko = "MCP 검사 이름을 설정. tc_list_fbos 는 살아 있는 객체의 index, name, width, height, format 을 나열. tc_analyze_image 는 source={fbo:이름 또는 인덱스} 로 프레임 종료 후 마지막 Fbo 패스를 읽는다. 이동하면 이름과 인덱스가 이전되고 이동 원본 및 파괴된 항목은 사라진다. 빈 이름도 인덱스로 접근 가능. Web 읽기 및 iOS float 읽기는 오류. byte Fbo 읽기는 기존 API 의 RGBA8 만 지원하며 다른 정수 형식은 오류. Texture 는 소스가 아니므로 이름 있는 Fbo 에 그린다."
+description.en = "Set the MCP inspection name. tc_list_fbos lists live objects with index, name, width, height and format. tc_analyze_image accepts source={fbo:name or index} and reads the final Fbo pass after the frame. Moves transfer the name/index and remove the moved-from object; destruction removes the entry. Empty names remain available by index. Web readback and iOS float readback return errors. Non-float Fbo formats are converted to RGBA8 for byte readback. Texture is not a source; draw it into a named Fbo."
+description.ja = "MCP 検査用の名前を設定。tc_list_fbos は生存中のオブジェクトの index、name、width、height、format を一覧化。tc_analyze_image は source={fbo:名前またはインデックス} を受け、フレーム終了後に最後の Fbo パスを読む。移動で名前とインデックスを引き継ぎ、移動元と破棄済みの項目は消える。空の名前もインデックスで取得可能。Web の読み戻しと iOS の float 読み戻しはエラー。非 float の Fbo 形式は byte 読み戻し時に RGBA8 に変換される。Texture はソースにできないため、名前付き Fbo に描画する。"
+description.ko = "MCP 검사 이름을 설정. tc_list_fbos 는 살아 있는 객체의 index, name, width, height, format 을 나열. tc_analyze_image 는 source={fbo:이름 또는 인덱스} 로 프레임 종료 후 마지막 Fbo 패스를 읽는다. 이동하면 이름과 인덱스가 이전되고 이동 원본 및 파괴된 항목은 사라진다. 빈 이름도 인덱스로 접근 가능. Web 읽기 및 iOS float 읽기는 오류. float 가 아닌 Fbo 형식은 byte 읽기 시 RGBA8 로 변환된다. Texture 는 소스가 아니므로 이름 있는 Fbo 에 그린다."
 related = ["Fbo::getDebugName", "Image::setDebugName"]
 
 ["Fbo::getDebugName"]
@@ -20199,6 +20197,36 @@ category = "file"
 description.en = "Save failure kind: None, AccessDenied (including bundle refusal), NoSpace, WriteFailed, Unknown. Rename failure is always WriteFailed."
 description.ja = "保存結果の種別：None、AccessDenied（バンドルへの書き込み拒否を含む）、NoSpace、WriteFailed、Unknown。rename の失敗は常に WriteFailed"
 description.ko = "저장 결과 종류: None, AccessDenied(번들 쓰기 거부 포함), NoSpace, WriteFailed, Unknown. 이름 변경 실패는 항상 WriteFailed"
+
+["getWidth"]
+category = "graphics"
+description.en = "Drawing width in active-target coordinate units. Fbo: attachment pixels; swapchain: logical units or pixels according to pixelPerfect. Object and window getters keep their own size."
+description.ja = "現在の描画先の座標単位で幅を返す。Fbo は添付画像のピクセル、画面は pixelPerfect に応じて論理単位またはピクセル。オブジェクトとウィンドウの getter は各自の寸法を維持する。"
+description.ko = "현재 렌더 타깃의 좌표 단위 너비. Fbo는 첨부 이미지 픽셀, 화면은 pixelPerfect에 따라 논리 단위 또는 픽셀이다. 객체와 창 getter는 각자의 크기를 유지한다."
+
+["getHeight"]
+category = "graphics"
+description.en = "Drawing height in active-target coordinate units; see getWidth."
+description.ja = "現在の描画先の座標単位で高さを返す。getWidth を参照。"
+description.ko = "현재 렌더 타깃의 좌표 단위 높이. getWidth 참조."
+
+["getSize"]
+category = "graphics"
+description.en = "Drawing width and height of the active target as Vec2; see getWidth."
+description.ja = "現在の描画先の幅と高さを Vec2 で返す。getWidth を参照。"
+description.ko = "현재 렌더 타깃의 너비와 높이를 Vec2로 반환한다. getWidth 참조."
+
+["getViewMatrix"]
+category = "graphics"
+description.en = "Return the active target camera view matrix by value. Fbo and EasyCam scopes restore the previous camera on exit; Node CameraContexts remain immutable draw-time snapshots."
+description.ja = "現在の描画先のカメラのビュー行列を値で返す。Fbo と EasyCam の終了時に元のカメラへ戻る。Node の CameraContext は描画時点の不変スナップショット。"
+description.ko = "현재 렌더 타깃 카메라의 뷰 행렬을 값으로 반환한다. Fbo와 EasyCam 종료 시 이전 카메라가 복원된다. Node CameraContext는 그릴 때의 불변 스냅샷이다."
+
+["getProjectionMatrix"]
+category = "graphics"
+description.en = "Return the active target camera projection matrix by value, in backend-native clip space."
+description.ja = "現在の描画先のカメラの投影行列を値で返す。クリップ空間はバックエンドの規約に従う。"
+description.ko = "현재 렌더 타깃 카메라의 투영 행렬을 값으로 반환한다. 클립 공간은 백엔드 규약을 따른다."
 
 ["Image::loadAsync"]
 keywords = ["async", "background", "load", "cancel"]

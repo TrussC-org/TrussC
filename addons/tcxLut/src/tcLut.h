@@ -704,21 +704,22 @@ public:
         if (!loaded || !currentLut || !sourceView.id) return;
 
         // Ensure render pass is active
-        ensureSwapchainPass();
+        internal::ensureCurrentPass();
 
-        // Flush sokol_gl before custom drawing
-        sgl_draw();
+        // Consume all preceding layers before direct drawing.
+        internal::currentTarget().flushLayers();
+        internal::applyTargetDrawingState();
 
-        // Apply pipeline
-        sg_apply_pipeline(pipeline);
-
-        float dpi = sapp_dpi_scale();
-        float winW = (float)sapp_width();
-        float winH = (float)sapp_height();
-
-        // Set viewport and scissor for destination (convert logical coords to framebuffer pixels)
-        sg_apply_viewportf(x * dpi, y * dpi, w * dpi, h * dpi, true);
-        sg_apply_scissor_rectf(x * dpi, y * dpi, w * dpi, h * dpi, true);
+        const auto selected = selectPipelineForCurrentTarget_();
+        if (!selected.raw.id) return;
+        sg_apply_pipeline(selected.raw);
+        lut_vs_params_t params = {};
+        const auto& target = internal::currentTarget();
+        const auto mvp = (target.camera.currentProjectionMatrix * target.camera.currentViewMatrix * target.currentMatrix).transposed();
+        std::memcpy(params.mvp, mvp.m, sizeof(params.mvp));
+        params.rect[0] = x; params.rect[1] = y; params.rect[2] = w; params.rect[3] = h;
+        sg_range vertices = {&params, sizeof(params)};
+        sg_apply_uniforms(UB_lut_vs_params, &vertices);
 
         // Setup bindings
         sg_bindings bind = {};
@@ -749,17 +750,8 @@ public:
         // Draw quad
         sg_draw(0, 6, 1);
 
-        // Reset viewport
-        sg_apply_viewportf(0, 0, winW, winH, true);
-        sg_apply_scissor_rectf(0, 0, winW, winH, true);
-
-        // Restore sokol_gl state (use logical coordinates, not framebuffer pixels)
         sg_reset_state_cache();
-        sgl_defaults();
-        sgl_matrix_mode_projection();
-        sgl_ortho(0.0f, winW / dpi, winH / dpi, 0.0f, -10000.0f, 10000.0f);
-        sgl_matrix_mode_modelview();
-        sgl_load_identity();
+        internal::applyTargetDrawingState();
     }
 
 protected:

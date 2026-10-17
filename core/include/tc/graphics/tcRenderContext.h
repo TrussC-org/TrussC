@@ -229,7 +229,7 @@ public:
     // accounting for perspective would require per-pixel jacobian inversion
     // at every curve point (overkill).
     float getScale() const {
-        const auto& m = currentMatrix_.m;
+        const auto& m = matrixTarget().currentMatrix.m;
         // Column 0 / column 1 lengths = effective x / y scale of the basis.
         float sx = std::sqrt(m[0]*m[0] + m[4]*m[4] + m[8]*m[8]);
         float sy = std::sqrt(m[1]*m[1] + m[5]*m[5] + m[9]*m[9]);
@@ -277,8 +277,7 @@ public:
     // -----------------------------------------------------------------------
 
     void pushMatrix() {
-        matrixStack_.push_back(currentMatrix_);
-        sgl_push_matrix();
+        matrixTarget().matrixStack.push_back(matrixTarget().currentMatrix);
     }
 
     // A pop with nothing pushed is a bug in the caller: warn (rate-limited)
@@ -286,16 +285,16 @@ public:
     // Inside a Node's draw() the stack floor (#348) is that node's depth, so a
     // pop that would reach its parent's entries is refused the same way.
     void popMatrix() {
-        if (matrixStack_.size() <= stackFloor_.matrix) {
+        if (matrixTarget().matrixStack.size() <= (stackFloor_.target == &matrixTarget() ? stackFloor_.matrix : 0)) {
             warnPopAtFloor(popMatrixWarning_, "popMatrix()", "pushMatrix()");
             return;
         }
-        currentMatrix_ = matrixStack_.back();
-        matrixStack_.pop_back();
-        sgl_pop_matrix();
+        matrixTarget().currentMatrix = matrixTarget().matrixStack.back();
+        matrixTarget().matrixStack.pop_back();
+        internal::applyTargetModelView();
     }
 
-    size_t getMatrixStackDepth() const { return matrixStack_.size(); }
+    size_t getMatrixStackDepth() const { return matrixTarget().matrixStack.size(); }
     size_t getStyleStackDepth() const { return styleStack_.size(); }
 
     // -----------------------------------------------------------------------
@@ -303,9 +302,9 @@ public:
     // -----------------------------------------------------------------------
 
     void pushStyle() {
-        // Capture the live blend mode (it lives in internal::currentWindowContext().currentBlendMode, not in
+        // Capture the live blend mode (it lives in internal::currentWindowContext().currentTarget->currentBlendMode, not in
         // style_) so it is saved/restored alongside color/fill/stroke.
-        style_.blend = internal::currentWindowContext().currentBlendMode;
+        style_.blend = internal::currentWindowContext().currentTarget->currentBlendMode;
         styleStack_.push_back(style_);
     }
 
@@ -327,10 +326,10 @@ public:
     // present(), the draw entry point's end (#349); the sokol_gl side is
     // reset there too.
     void resetStacksAtFrameEnd() {
-        warnLeftOpen(AppEntry::Draw, matrixStack_.size(), styleStack_.size());
-        matrixStack_.clear();
+        warnLeftOpen(AppEntry::Draw, matrixTarget().matrixStack.size(), styleStack_.size());
+        matrixTarget().matrixStack.clear();
         styleStack_.clear();
-        currentMatrix_ = Mat4::identity();
+        matrixTarget().currentMatrix = Mat4::identity();
         stackFloor_ = StackFloor{};
     }
 
@@ -344,13 +343,14 @@ public:
         size_t matrix = 0;
         size_t style = 0;
         const std::type_info* owner = nullptr;  // node type that set it, or null
+        RenderTarget* target = nullptr;
     };
 
     // Set the floor and return the previous one; the caller puts that back
     // with setStackFloor(prev), since a draw() can run another node's drawTree().
     StackFloor setStackFloor(size_t matrixDepth, size_t styleDepth, const std::type_info* owner) {
         StackFloor prev = stackFloor_;
-        stackFloor_ = StackFloor{matrixDepth, styleDepth, owner};
+        stackFloor_ = StackFloor{matrixDepth, styleDepth, owner, &matrixTarget()};
         return prev;
     }
     void setStackFloor(const StackFloor& floor) { stackFloor_ = floor; }
@@ -364,8 +364,12 @@ public:
     // mid-frame (the synced update). Only the pushes are undone: a style value
     // or transform set outside a push carries on.
     void restoreStacksAtEntryEnd(AppEntry entry, size_t matrixDepth, size_t styleDepth,
-                                 const char* eventName = nullptr) {
-        const size_t md = matrixStack_.size(), sd = styleStack_.size();
+                                 const char* eventName = nullptr, RenderTarget* entryTarget = nullptr) {
+        if (entryTarget && entryTarget != &matrixTarget()) {
+            // An entry cannot consume a different target's live matrix scope.
+            matrixDepth = matrixTarget().matrixStack.size();
+        }
+        const size_t md = matrixTarget().matrixStack.size(), sd = styleStack_.size();
         if (md == matrixDepth && sd == styleDepth) return;
         if (md >= matrixDepth && sd >= styleDepth) {
             warnLeftOpen(entry, md - matrixDepth, sd - styleDepth, eventName);
@@ -377,11 +381,11 @@ public:
                 std::to_string((long long)md - (long long)matrixDepth) + ", pushStyle " +
                 std::to_string((long long)sd - (long long)styleDepth) + "); restored");
         }
-        while (matrixStack_.size() > matrixDepth) popMatrix();
+        while (matrixTarget().matrixStack.size() > matrixDepth) popMatrix();
         while (styleStack_.size() > styleDepth) popStyle();
         // The lost entries can't be recovered, but refilling the depth keeps
         // the caller's pops matched to its pushes.
-        while (matrixStack_.size() < matrixDepth) pushMatrix();
+        while (matrixTarget().matrixStack.size() < matrixDepth) pushMatrix();
         while (styleStack_.size() < styleDepth) pushStyle();
     }
 
@@ -391,7 +395,7 @@ public:
     // see the matrix and style they expect. A stray pop is refused at the
     // floor above; the shallower branch below is a safety net only.
     void restoreStackDepth(size_t matrixDepth, size_t styleDepth, const char* who) {
-        const size_t md = matrixStack_.size(), sd = styleStack_.size();
+        const size_t md = matrixTarget().matrixStack.size(), sd = styleStack_.size();
         if (md == matrixDepth && sd == styleDepth) return;
         if (md >= matrixDepth && sd >= styleDepth) {
             // Extra pushes: reported like a stray pop, naming the node (#348).
@@ -412,12 +416,12 @@ public:
                 std::to_string((long long)md - (long long)matrixDepth) + ", pushStyle " +
                 std::to_string((long long)sd - (long long)styleDepth) + ")");
         }
-        while (matrixStack_.size() > matrixDepth) popMatrix();
+        while (matrixTarget().matrixStack.size() > matrixDepth) popMatrix();
         while (styleStack_.size() > styleDepth) popStyle();
         // Shallower than expected (only if something got past the floor): the
         // lost entries can't be recovered, but refilling the depth keeps the
         // parent's pops matched to its pushes.
-        while (matrixStack_.size() < matrixDepth) pushMatrix();
+        while (matrixTarget().matrixStack.size() < matrixDepth) pushMatrix();
         while (styleStack_.size() < styleDepth) pushStyle();
     }
 
@@ -428,21 +432,16 @@ public:
     }
 
 private:
-    // Restore the 2D blend pipeline only when the mode actually changed (a redundant
-    // load is otherwise a no-op that sokol_gl batches away, but we skip it anyway).
-    // No-op inside an FBO pass, which uses its own accumulating pipeline.
     void applyBlend(BlendMode mode) {
-        if (mode == internal::currentWindowContext().currentBlendMode) return;
-        internal::currentWindowContext().currentBlendMode = mode;
-        if (!internal::currentWindowContext().inFboPass) {
-            internal::loadPipeline(internal::active2D(mode));
-        }
+        internal::currentTarget().currentBlendMode = mode;
+        internal::currentTarget().selectedPipeline = internal::fillSelection(mode, internal::currentTarget().depthTestEnabled);
+        internal::loadPipeline(internal::active2D(mode));
     }
 public:
 
     // Main implementation (Vec3)
     void translate(Vec3 pos) {
-        currentMatrix_ = currentMatrix_ * Mat4::translate(pos.x, pos.y, pos.z);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * Mat4::translate(pos.x, pos.y, pos.z);
         sgl_translate(pos.x, pos.y, pos.z);
     }
 
@@ -455,22 +454,22 @@ public:
     }
 
     void rotate(float radians) {
-        currentMatrix_ = currentMatrix_ * Mat4::rotateZ(radians);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * Mat4::rotateZ(radians);
         sgl_rotate(radians, 0.0f, 0.0f, 1.0f);
     }
 
     void rotateX(float radians) {
-        currentMatrix_ = currentMatrix_ * Mat4::rotateX(radians);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * Mat4::rotateX(radians);
         sgl_rotate(radians, 1.0f, 0.0f, 0.0f);
     }
 
     void rotateY(float radians) {
-        currentMatrix_ = currentMatrix_ * Mat4::rotateY(radians);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * Mat4::rotateY(radians);
         sgl_rotate(radians, 0.0f, 1.0f, 0.0f);
     }
 
     void rotateZ(float radians) {
-        currentMatrix_ = currentMatrix_ * Mat4::rotateZ(radians);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * Mat4::rotateZ(radians);
         sgl_rotate(radians, 0.0f, 0.0f, 1.0f);
     }
 
@@ -481,55 +480,46 @@ public:
 
     void rotate(const Quaternion& quat) {
         Mat4 rotMat = quat.toMatrix();
-        currentMatrix_ = currentMatrix_ * rotMat;
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * rotMat;
         // Mat4 is row-major, sokol_gl expects column-major — transpose
         Mat4 t = rotMat.transposed();
         sgl_mult_matrix(t.m);
     }
 
     void scale(float s) {
-        currentMatrix_ = currentMatrix_ * Mat4::scale(s, s, 1.0f);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * Mat4::scale(s, s, 1.0f);
         sgl_scale(s, s, 1.0f);
     }
 
     void scale(float sx, float sy) {
-        currentMatrix_ = currentMatrix_ * Mat4::scale(sx, sy, 1.0f);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * Mat4::scale(sx, sy, 1.0f);
         sgl_scale(sx, sy, 1.0f);
     }
 
     void scale(float sx, float sy, float sz) {
-        currentMatrix_ = currentMatrix_ * Mat4::scale(sx, sy, sz);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * Mat4::scale(sx, sy, sz);
         sgl_scale(sx, sy, sz);
     }
 
     // Current accumulated model matrix.
-    Mat4 getMatrix() const { return currentMatrix_; }
+    Mat4 getMatrix() const { return matrixTarget().currentMatrix; }
     [[deprecated("Use getMatrix() instead. Will be removed in v1.0.0")]]
     Mat4 getCurrentMatrix() const { return getMatrix(); }
 
     void resetMatrix() {
-        currentMatrix_ = Mat4::identity();
-        // Restore default view matrix (camera lookat) set by setupScreenFovWithSize
-        // This works correctly both in main screen and FBO contexts
-        // Note: Mat4 is row-major, sokol_gl expects column-major, so transpose
-        Mat4 t = internal::currentWindowContext().currentViewMatrix.transposed();
-        sgl_load_matrix(t.m);
+        matrixTarget().currentMatrix = Mat4::identity();
+        internal::applyTargetModelView();
     }
 
-    // Multiply the current matrix by `mat` (relative transform, like translate/rotate).
-    // NOTE: this was previously misnamed setMatrix(); that name now REPLACES.
     void multMatrix(const Mat4& mat) {
-        currentMatrix_ = currentMatrix_ * mat;
-        // sokol_gl expects column-major, but Mat4 is row-major
-        Mat4 t = mat.transposed();
-        sgl_mult_matrix(t.m);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * mat;
+        internal::applyTargetModelView();
     }
 
-    // Replace the current matrix with `mat` (absolute - use with caution, may break camera setup).
+    // Replace the model matrix while retaining the active camera view.
     void setMatrix(const Mat4& mat) {
-        currentMatrix_ = mat;
-        Mat4 t = mat.transposed();
-        sgl_load_matrix(t.m);
+        matrixTarget().currentMatrix = mat;
+        internal::applyTargetModelView();
     }
     [[deprecated("Use setMatrix() instead. Will be removed in v1.0.0")]]
     void loadMatrix(const Mat4& mat) { setMatrix(mat); }
@@ -1110,7 +1100,7 @@ private:
         Direction textAlignH = Direction::Left;
         Direction textAlignV = Direction::Top;
         float bitmapLineHeight = bitmapfont::CHAR_TEX_HEIGHT;
-        // Mirror of internal::currentWindowContext().currentBlendMode. blend state itself lives outside the
+        // Mirror of internal::currentWindowContext().currentTarget->currentBlendMode. blend state itself lives outside the
         // RenderContext (it maps to an sgl pipeline), so push/popStyle capture and
         // restore it explicitly rather than via this field's value alone.
         BlendMode blend = BlendMode::Alpha;
@@ -1137,8 +1127,9 @@ private:
     int& circleResolution_ = style_.circleResolution;
 
     // Matrix stack
-    Mat4 currentMatrix_ = Mat4::identity();
-    std::vector<Mat4> matrixStack_;
+    RenderTarget& matrixTarget() const {
+        return *currentWindowContext().currentTarget;
+    }
 
     // Unbalanced push/pop warnings (#232). A missing pop repeats every frame,
     // so each kind logs its first occurrence, then at most once per 5 s with
@@ -1249,8 +1240,8 @@ class EntryStackGuard {
 public:
     explicit EntryStackGuard(AppEntry entry, const char* eventName = nullptr)
         : entry_(entry), eventName_(eventName), rc_(getDefaultContext()),
-          matrixDepth_(rc_.getMatrixStackDepth()), styleDepth_(rc_.getStyleStackDepth()) {}
-    ~EntryStackGuard() { rc_.restoreStacksAtEntryEnd(entry_, matrixDepth_, styleDepth_, eventName_); }
+          matrixDepth_(rc_.getMatrixStackDepth()), styleDepth_(rc_.getStyleStackDepth()), target_(&currentTarget()) {}
+    ~EntryStackGuard() { rc_.restoreStacksAtEntryEnd(entry_, matrixDepth_, styleDepth_, eventName_, target_); }
     EntryStackGuard(const EntryStackGuard&) = delete;
     EntryStackGuard& operator=(const EntryStackGuard&) = delete;
 
@@ -1259,6 +1250,7 @@ private:
     const char* eventName_;
     RenderContext& rc_;
     size_t matrixDepth_, styleDepth_;
+    RenderTarget* target_;
 };
 
 } // namespace internal

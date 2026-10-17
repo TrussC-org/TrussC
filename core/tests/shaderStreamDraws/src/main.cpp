@@ -72,7 +72,7 @@ public:
         shader_.begin();
         shader_.submitVertices(triangle, 3, PrimitiveType::Triangles);
         shader_.end();
-        const auto captured = internal::currentWindowContext().deferredShaderDraws.back().bindings;
+        const auto captured = internal::currentWindowContext().currentTarget->deferredShaderDraws.back().bindings;
 
         fbo_.begin(0, 0, 0, 1);
         shader_.submitVertices(large_.data(), static_cast<int>(large_.size()), PrimitiveType::Triangles);
@@ -91,7 +91,7 @@ public:
         fbo_.end();
         checkPixel("rectangle tail in second FBO pass", 0, frame_ == 0 ? 0 : 255);
         check("FBO flush preserves captured swapchain buffer handles",
-            internal::currentWindowContext().deferredShaderDraws.back().bindings.vertex_buffers[0].id
+            internal::currentWindowContext().currentTarget->deferredShaderDraws.back().bindings.vertex_buffers[0].id
                 == captured.vertex_buffers[0].id);
         if (frame_++ == 0) {
             InspectShader moved(std::move(shader_));

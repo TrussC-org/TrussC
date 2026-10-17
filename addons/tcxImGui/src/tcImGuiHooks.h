@@ -138,6 +138,20 @@ struct PendingValue {
     }
 };
 
+// Input injected by a tool, identified separately from native input. Keep its
+// reservation until all its events are consumed, or its write deadline expires.
+struct PendingText {
+    ImU32 firstEvent = 0, eventCount = 0;
+    size_t reservedEvents = 0;
+    std::chrono::steady_clock::time_point deadline;
+    // Only pairs actually inserted by Add*Event (which deduplicates against
+    // native state). Text injection presses Ctrl, mouse, A, Delete and Enter.
+    struct Release { ImU32 press = 0, release = 0; };
+    Release releases[5];
+    int releaseCount = 0;
+    bool contains(ImU32 id) const { return ImU32(id - firstEvent) < eventCount; }
+};
+
 // Per ImGui context (each window running imgui has its own)
 struct ContextState {
     // Current frame (written during ImGui rendering)
@@ -176,20 +190,29 @@ struct ContextState {
 
     // Values queued by the MCP tools, waiting for their widget (or running in it)
     std::vector<std::shared_ptr<PendingValue>> pendingValues;
+    std::vector<PendingText> pendingText;
+    uint64_t rejectedPendingValues = 0;
 
     // Opaque owner tag (tcxImGui: the tc::internal::WindowContext*), so tools
     // can say which OS window a widget is in
     const void* owner = nullptr;
 };
 
+// Trivial process-lifetime flag: either registry's destructor closes runtime
+// teardown before its storage disappears. Global owned managers can outlive both.
+inline bool hookRegistriesAlive = true;
+template<class T> struct HookRegistry {
+    T data;
+    ~HookRegistry() { hookRegistriesAlive = false; }
+};
 inline std::unordered_map<ImGuiContext*, ContextState>& contexts() {
-    static std::unordered_map<ImGuiContext*, ContextState> m;
-    return m;
+    static HookRegistry<std::unordered_map<ImGuiContext*, ContextState>> m;
+    return m.data;
 }
 
 inline std::vector<TouchedWidget>& touched() {
-    static std::vector<TouchedWidget> v;
-    return v;
+    static HookRegistry<std::vector<TouchedWidget>> v;
+    return v.data;
 }
 
 // Whether collection is active
@@ -319,18 +342,118 @@ inline bool hasValueOwner(const ContextState& cs, int kind, ImGuiID id, int comb
     return false;
 }
 
+// Bound (security): pending tool edits, including text input, per UI context
+// are bounded to 256 (1024 total). Injected input also reserves at most 8192
+// events and 128 KiB per context (32768 events / 512 KiB total), BEFORE insertion.
+// These budgets permit interactive bursts without retaining unlimited idle work.
+// Bound (reply latency): unconsumed text uses the same 2 s write deadline as values.
+inline constexpr std::chrono::seconds kPendingValueLifetime{2};
+inline constexpr size_t kMaxPendingValuesPerContext = 256;
+inline constexpr size_t kMaxPendingValuesTotal = 1024;
+inline constexpr size_t kMaxPendingEventsPerContext = 8192;
+inline constexpr size_t kMaxPendingEventsTotal = 32768;
+inline constexpr size_t kMaxPendingBytesPerContext = 128 * 1024;
+inline constexpr size_t kMaxPendingBytesTotal = 512 * 1024;
+inline uint64_t rejectedPendingValues = 0;
+
+// Reclaim only tool events, preserving native events and other requests. Keep
+// releases whose tool presses have already been consumed: trickling can split
+// a request across frames. Retaining these in place preserves native ordering
+// and needs neither a focus-loss event (which clears native state) nor a current
+// context switch. Rebuild to release allocation even when this UI stays cached.
+inline void settlePendingText(ImGuiContext* ctx, ContextState& cs, bool settleAll = false) {
+    const auto t = now();
+    bool expired = false;
+    for (const auto& p : cs.pendingText) expired |= settleAll || t >= p.deadline;
+    if (expired) {
+        ImVector<ImGuiInputEvent> retained;
+        for (const auto& event : ctx->InputEventsQueue) {
+            bool drop = false;
+            for (const auto& p : cs.pendingText) {
+                if (!(settleAll || t >= p.deadline) || !p.contains(event.EventId)) continue;
+                drop = true;
+                for (int i = 0; i < p.releaseCount; ++i) {
+                    // NewFrame consumes a prefix of the ordered event queue,
+                    // including across EventId wrap. A press older than its
+                    // first remaining event has already reached ImGui's IO.
+                    const auto& pair = p.releases[i];
+                    if (pair.release == event.EventId &&
+                        ImU32(pair.press - ctx->InputEventsQueue[0].EventId) > UINT32_MAX / 2)
+                        drop = false;
+                }
+                break;
+            }
+            if (!drop) retained.push_back(event);
+        }
+        ctx->InputEventsQueue.swap(retained);
+    }
+    // Requests and events are in insertion order. Walk the queue once, including
+    // across EventId wrap, rather than scanning it again for every request.
+    int eventIndex = 0;
+    for (auto it = cs.pendingText.begin(); it != cs.pendingText.end();) {
+        while (eventIndex < ctx->InputEventsQueue.Size &&
+               ImU32(ctx->InputEventsQueue[eventIndex].EventId - it->firstEvent) > UINT32_MAX / 2)
+            ++eventIndex;
+        const bool queued = !settleAll && t < it->deadline &&
+            eventIndex < ctx->InputEventsQueue.Size && it->contains(ctx->InputEventsQueue[eventIndex].EventId);
+        if (!queued) it = cs.pendingText.erase(it);
+        else ++it;
+    }
+}
+
+inline size_t pendingValueCount() {
+    size_t count = 0;
+    for (const auto& entry : contexts())
+        count += entry.second.pendingValues.size() + entry.second.pendingText.size();
+    return count;
+}
+inline size_t pendingEventCount(const ContextState& cs) {
+    size_t count = 0;
+    for (const auto& p : cs.pendingText) count += p.reservedEvents;
+    return count;
+}
+inline size_t pendingByteCount(const ContextState& cs) {
+    size_t count = pendingEventCount(cs) * sizeof(ImGuiInputEvent);
+    // Reserve the write, before and read-back buffers for fixed-size edits too.
+    for (const auto& p : cs.pendingValues) count += 3 * p->bytes.size();
+    return count;
+}
+inline bool admitPendingEdit(ImGuiContext* ctx, size_t events, size_t bytes) {
+    size_t totalCount = 0, totalEvents = 0, totalBytes = 0;
+    for (auto& [context, state] : contexts()) {
+        settlePendingText(context, state);
+        totalCount += state.pendingValues.size() + state.pendingText.size();
+        totalEvents += pendingEventCount(state);
+        totalBytes += pendingByteCount(state);
+    }
+    auto& cs = contexts()[ctx];
+    if (cs.pendingValues.size() + cs.pendingText.size() >= kMaxPendingValuesPerContext ||
+        totalCount >= kMaxPendingValuesTotal ||
+        events > kMaxPendingEventsPerContext - pendingEventCount(cs) ||
+        events > kMaxPendingEventsTotal - totalEvents ||
+        bytes > kMaxPendingBytesPerContext - pendingByteCount(cs) ||
+        bytes > kMaxPendingBytesTotal - totalBytes) {
+        ++cs.rejectedPendingValues;
+        ++rejectedPendingValues;
+        return false;
+    }
+    return true;
+}
+
 // Queue `bytes` for the widget `id` of `ctx`, which reported `kind`,
 // `dataType` and `components`. The value hook writes it the next time the
 // widget runs, within `lifetime`; its check in the widget's next frame is
 // waited for until `checkWithin` after now (see settleOverdueValues()). A value
 // still queued for the same widget is superseded. `onDone` runs once the
-// outcome is known (see finishPendingValues()).
+// outcome is known (see finishPendingValues()). Returns null on overflow;
+// rejection is counted and leaves existing edits (including supersession) untouched.
 inline std::shared_ptr<PendingValue> queueValue(ImGuiContext* ctx, ImGuiID id, int kind,
                                                 ImGuiDataType dataType, int components,
                                                 std::vector<unsigned char> bytes,
                                                 std::chrono::steady_clock::duration lifetime,
                                                 std::chrono::steady_clock::duration checkWithin,
                                                 std::function<void()> onDone) {
+    if (!admitPendingEdit(ctx, 0, 3 * bytes.size())) return nullptr;
     auto& pending = contexts()[ctx].pendingValues;
     for (auto& q : pending) {
         if (q->id == id && q->state == PendingValue::State::Queued) {
@@ -515,11 +638,12 @@ inline void finishPendingValues(ContextState& cs, int frame, bool settleAll = fa
 inline void settleWithoutImGuiFrame(ImGuiContext* ctx) {
     if (!ctx) return;
     auto it = contexts().find(ctx);
-    if (it == contexts().end() || it->second.pendingValues.empty()) return;
+    if (it == contexts().end()) return;
+    settlePendingText(ctx, it->second, true);
     finishPendingValues(it->second, ctx->FrameCount, true);
 }
 
-// Call regularly from a window that keeps rendering (tcxImGui: the main
+// Call regularly for window and offscreen contexts (tcxImGui: the main
 // window's afterFrame, before tc::mcp's timeout drain): a value written into
 // one of ctx's widgets whose check in the widget's next frame has not come by
 // its checkDeadline (the window renders no frame: very slow, or it stopped
@@ -528,17 +652,24 @@ inline void settleWithoutImGuiFrame(ImGuiContext* ctx) {
 inline void settleOverdueValues(ImGuiContext* ctx) {
     if (!ctx) return;
     auto it = contexts().find(ctx);
-    if (it == contexts().end() || it->second.pendingValues.empty()) return;
+    if (it == contexts().end()) return;
+    settlePendingText(ctx, it->second);
     const auto t = now();
     bool any = false;
     for (auto& p : it->second.pendingValues) {
         if (p->state == PendingValue::State::Verify && t >= p->checkDeadline) {
             p->state = PendingValue::State::Applied;
             any = true;
+        } else if (p->state == PendingValue::State::Queued && t >= p->deadline) {
+            p->state = PendingValue::State::Expired;
+            any = true;
         }
+        // Superseded and other finished requests must also be reclaimed when
+        // this context never draws another UI frame.
+        any |= p->done();
     }
     // Outside any imgui frame of ctx: FrameCount is its last frame, which
-    // settles nothing else
+    // leaves unexpired queued values and verification before its deadline alone
     if (any) finishPendingValues(it->second, ctx->FrameCount);
 }
 
@@ -560,6 +691,7 @@ inline void beginFrame() {
     if (!ctx) return;
     ctx->TestEngineHookItems = true;
     auto& cs = detail::contexts()[ctx];
+    detail::settlePendingText(ctx, cs);
     cs.currentFrame.clear();
     cs.currentIdMap.clear();
     cs.listBoxes.clear();

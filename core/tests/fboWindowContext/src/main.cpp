@@ -29,13 +29,37 @@ void drawFrame(Fbo& fbo, bool main) {
     setColor(main ? Color(0, 1, 1) : Color(1, 0, 0));
     drawRect(8, 16, 16, 32);
 
+    auto& window = internal::currentWindowContext();
+    auto* screenTarget = window.currentTarget;
+    check(main ? "main target size matches its framebuffer inside draw" :
+                 "secondary target size matches its framebuffer inside draw",
+          screenTarget->getWidth() == getFramebufferWidth() &&
+          screenTarget->getHeight() == getFramebufferHeight() &&
+          screenTarget->getWidth() > 0 && screenTarget->getHeight() > 0);
     fbo.begin(0, 0, 0);
+    auto* fboTarget = window.currentTarget;
+    auto* borrowedResources = &fboTarget->resources();
+    check("Fbo owns its dimensions, format, samples and pass state",
+          fboTarget != screenTarget && fboTarget->isFbo && fboTarget->inPass &&
+          fboTarget->getWidth() == 16 && fboTarget->getHeight() == 16 &&
+          fboTarget->colorFormat == SG_PIXELFORMAT_RGBA8 && fboTarget->sampleCount == 1 &&
+          fboTarget->hasDepth);
     setColor(1, 1, 1);
     drawCircle(8, 8, 4);
     fbo.end();
     check(main ? "main FBO restores its window context" :
                  "secondary FBO restores its window context",
-          sgl_get_context().id == internal::currentWindowContext().swapchainTarget.context.id);
+          sgl_get_context().id == internal::currentWindowContext().swapchainTarget.resources().context.id);
+
+    Fbo other;
+    other.allocate(5, 7);
+    other.begin(0, 0, 0);
+    check("sequential same-format Fbos reuse the released resource lease",
+          window.currentTarget != fboTarget &&
+          &window.currentTarget->resources() == borrowedResources &&
+          window.currentTarget->getWidth() == 5 && fboTarget->getWidth() == 16);
+    other.end();
+    check("both Fbos return to this window's target", window.currentTarget == screenTarget);
 
     setColor(main ? Color(1, 0, 1) : Color(0, 1, 0));
     drawCircle(48, 32, 8);
@@ -47,10 +71,17 @@ void captureFrame(bool main) {
     check(main ? "main window readback succeeds" : "secondary window readback succeeds", captured);
     if (!captured) return;
 
+    // Sample the centers of the shapes drawFrame() draws (rect at 8,16 16x32;
+    // circle at 48,32), not fractions of the readback: Windows may widen a
+    // small window's client area (64 → 120), which moved those fractions off
+    // the shapes.
     const int w = pixels.getWidth();
     const int h = pixels.getHeight();
-    const Color before = pixels.getColor(w / 4, h / 2);
-    const Color after = pixels.getColor(3 * w / 4, h / 2);
+    check(main ? "main readback covers both shapes" : "secondary readback covers both shapes",
+          w > 48 && h > 32);
+    if (w <= 48 || h <= 32) return;
+    const Color before = pixels.getColor(16, 32);
+    const Color after = pixels.getColor(48, 32);
     check(main ? "main 2D before FBO remains visible" : "secondary 2D before FBO remains visible",
           main ? matches(before, 0, 1, 1) : matches(before, 1, 0, 0));
     check(main ? "main 2D after FBO remains visible" : "secondary 2D after FBO remains visible",

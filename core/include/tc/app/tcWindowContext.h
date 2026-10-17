@@ -5,7 +5,7 @@
 // =============================================================================
 //
 // Multi-window support: every piece of state that is conceptually "per window"
-// — input, hover/scene, camera/projection, render-pass, per-window frame count,
+// — input, hover/scene, render-target routing, per-window frame count,
 // lighting/material/environment, and the per-frame shadow-slot assignment —
 // lives in one WindowContext instead of scattered process globals.
 // currentWindowContext() == mainWindowContext() while only the main window is
@@ -46,18 +46,8 @@ namespace internal {
 class RenderContext;   // the real class lives in internal:: (tcRenderContext.h)
 
 // ---------------------------------------------------------------------------
-// Per-window draw/record queue element types. Defined later (in the 3d /
-// graphics headers, all included after this file); WindowContext holds their
-// queues by std::vector, which C++17 guarantees to support an incomplete
-// element type as long as the type is complete wherever the vector's members
-// are instantiated. WindowContext is only ever constructed at tcGlobal.cpp
-// (mainWindowContext) and tcWindow.h (Window::ctx_), both of which see the full
-// definitions — same trick as activeLights holding Light* before Light. The
-// small StrokeVertex / LinesVertex accumulator structs (tcShape.h) are likewise
-// forward-declared here and kept defined where they were.
-struct DeferredPbrDraw;
-struct DeferredPointDraw;
-struct DeferredShaderDraw;
+// Per-window shape accumulators; deferred draw queues live on RenderTarget.
+// These incomplete elements are defined later in TrussC.h.
 struct StrokeVertex;
 struct LinesVertex;
 
@@ -89,7 +79,8 @@ struct ShadowSlotState {
     int count = 0;
     int current = -1;
     bool inPass = false;
-    bool wasInSwapchainPass = false;   // swapchain pass active before beginShadowPass()
+    RenderTarget target;
+    std::unique_ptr<TargetPassScope> scope;
     Mat4  viewProj[maxShadowLights]{};
     int   lightIndex[maxShadowLights]{};
     float bias[maxShadowLights]{};
@@ -104,16 +95,12 @@ struct ShadowSlotState {
     float refDot[maxShadowLights]{};
 };
 
-// ---------------------------------------------------------------------------
-// Scissor clipping stack (moved from TrussC.h)
-// ---------------------------------------------------------------------------
-struct ScissorRect {
-    float x, y, w, h;
-    bool active;  // Whether a valid range exists in the stack
-};
-
 struct WindowContext {
-    WindowContext() = default;
+    WindowContext();
+    ~WindowContext();
+    // Recover owned scopes before native/GPU resources or any members die.
+    // Safe to call again from the destructor after native window teardown.
+    void teardownTargets() noexcept;
     // currentTarget points into this object — copying/moving would dangle it.
     WindowContext(const WindowContext&) = delete;
     WindowContext& operator=(const WindowContext&) = delete;
@@ -143,43 +130,18 @@ struct WindowContext {
     int grabbedButton = -1;               // Mouse button that caused the grab
     std::weak_ptr<Node> selectedNode;     // Last node clicked (selection)
 
-    // --- camera / projection state ---
-    std::shared_ptr<const CameraContext> currentCameraContext;
-    Mat4 currentViewMatrix = Mat4::identity();
-    Mat4 currentProjectionMatrix = Mat4::identity();
-    float currentScreenFov = TAU / 8.0f; // radians; zero is orthographic
-    float currentViewW = 0.0f;
-    float currentViewH = 0.0f;
-    float currentCameraDist = 0.0f;  // Distance from camera to Z=0 plane
-
-    // --- render-pass state ---
-    RenderTarget swapchainTarget;                     // .context set after sgl_setup()
-    RenderTarget* currentTarget = &swapchainTarget;   // Fbo::begin/end retargets this
-    sg_color swapchainClearValue = { 0.0f, 0.0f, 0.0f, 1.0f };
-    bool inSwapchainPass = false;
-    bool inFboPass = false;
-    // FBO-pass companions of inFboPass — per-window for the same reason. They are
-    // read on EVERY mesh / point / shader submit while inFboPass to select the
-    // pipeline's color format + sample count, so a stale value from another
-    // window would resolve the wrong pipeline. Set in Fbo::beginInternal(),
-    // reset in Fbo::end(). currentFbo (the active Fbo*, held as void* so this
-    // header stays includable before Fbo) and fboClearColorFunc route the FBO
-    // clear-color path (tc::clear() -> _fboClearColorHelper -> Fbo::clearColor).
-    void (*fboClearColorFunc)(float, float, float, float) = nullptr;
-    void* currentFbo = nullptr;
-    sg_pixel_format currentFboColorFormat = SG_PIXELFORMAT_RGBA8;
-    int currentFboSampleCount = 1;
-    // True once the swapchain pass has been started at least once this frame.
-    // First start CLEARs with swapchainClearValue (frame background); any
-    // later restart (resume after an FBO / shadow / reflection pass suspended
-    // it) must LOAD color and depth so the content already rendered into the
-    // drawable survives (issue #191). Reset in present() after sg_commit().
-    bool swapchainPassStartedThisFrame = false;
+    // --- render target routing (one swapchain target per window) ---
+    RenderTarget swapchainTarget;
+    // Compatibility view: only the host stack coordinator changes this pointer.
+    RenderTarget* currentTarget = &swapchainTarget;
+    std::vector<TargetStackEntry> targetStack;
+    uint64_t nextTargetToken = 1;
+    uint64_t renderEpoch = 0;
     // Borrowed Metal drawable rendered into this frame. Valid only until the
     // native frame callback returns; clear after afterFrame and capture drains.
     const void* lastSwapchainDrawable = nullptr;
     // Full swapchain description this frame actually rendered into (recorded by
-    // beginSwapchainPassInternal, same timing as lastSwapchainDrawable). Used by
+    // RenderTarget::beginPass, same timing as lastSwapchainDrawable). Used by
     // the per-window capture backends on Windows (d3d11.render_view) and Linux
     // (gl.framebuffer / width / height) so a secondary window's screenshot /
     // recording reads back ITS surface instead of the main swapchain. On macOS
@@ -189,31 +151,14 @@ struct WindowContext {
         lastSwapchainDrawable = nullptr;
         lastSwapchain.metal.current_drawable = nullptr;
     }
-    std::vector<ScissorRect> scissorStack;
-    ScissorRect currentScissor = {0, 0, 0, 0, false};
-    // Current 2D blend mode (the "role"); actual sgl pipeline in currentTarget
-    BlendMode currentBlendMode = BlendMode::Alpha;
-    // Depth-tested 2D pipelines (tc::enableDepthTest()). When true, active2D()
-    // resolves the depth-enabled variant of the current blend pipeline, so
-    // blended draws keep participating in the scene's depth buffer. Persists
-    // like currentBlendMode: across frames and into Fbo passes, until changed.
-    bool depthTestEnabled = false;
-
     // --- window identity / swapchain source (Phase 1 seam) ---
     // Main window: isMain=true, swapchain comes from sglue_swapchain() and
     // dimensions from sapp. Secondary windows: the native layer sets isMain
     // false, keeps fbWidth/fbHeight/dpiScale up to date, and provides the
     // frame's swapchain through acquireSwapchain (called by
-    // ensureSwapchainPass/resumeSwapchainPass; must return the SAME drawable
+    // the target coordinator; must return the SAME drawable
     // for the duration of one window frame).
     bool isMain = true;
-    // Swapchain attachment formats of THIS window. Secondary windows: set by
-    // the platform adapter (mac/win: BGRA8, linux: RGBA8 -- the main window
-    // is the only RGB10A2 surface). Zero = environment defaults (main).
-    // Consumers that build pipelines rendering into this window's swapchain
-    // (e.g. tcxImGui) must use these instead of the environment defaults.
-    sg_pixel_format swapchainColorFormat = _SG_PIXELFORMAT_DEFAULT;
-    int swapchainSampleCount = 0;
     int fbWidth = 0;
     int fbHeight = 0;
     float dpiScale = 1.0f;
@@ -229,13 +174,12 @@ struct WindowContext {
 
     // --- lighting / material / environment (per window) ---
     // Moved out of the tcLightingState.h process globals so each window has its
-    // own active light set, current material, camera position (PBR view vector),
+    // own active light set, current material,
     // exposure and IBL environment. Registration in activeLights is by address:
     // a Light registered with addLight() must outlive its registration (prefer
     // stable storage — members, not vector<Light> elements). See tcLight.h.
     std::vector<Light*> activeLights;
     Material* currentMaterial = nullptr;
-    Vec3 cameraPosition = {0, 0, 0};
     float pbrExposure = 1.0f;              // global exposure scalar (pre-ACES tonemap)
     Environment* currentEnvironment = nullptr;
 
@@ -314,31 +258,11 @@ struct WindowContext {
     std::vector<std::filesystem::path> pendingScreenshotPaths;
     ScreenshotQueue asyncScreenshots;
 
-    // --- per-window deferred draw queues + sokol_gl layer counter ---------
-    // These were process globals, "safe" only because window ticks run strictly
-    // serialized and each window fully populates + drains its own queues within
-    // one tick. Made per-window so no per-frame draw/record state is shared
-    // between windows. Swapchain path: populated by drawMesh / point drawMesh /
-    // Shader::submitVertices during draw, drained in flushDeferredShaderDraws()
-    // at present() (which also resets sglLayerNext to 0). sglLayerNext is the
-    // per-frame sokol_gl layer counter (bumped so later 2D composites on top).
-    std::vector<DeferredPbrDraw>    deferredPbrDraws;
-    std::vector<DeferredPointDraw>  deferredPointDraws;
-    std::vector<DeferredShaderDraw> deferredShaderDraws;
-    int sglLayerNext = 0;
-    // FBO-pass path: the same deferral, scoped to one Fbo::begin()/end() pass.
-    // Populated during the pass, drained in flushFboDeferredPbr() at Fbo::end()
-    // (which resets fboLayerNext). fboLayerNext is reset to 0 at Fbo::begin().
-    // Per-window for the same reason: an FBO pass runs inside a window tick and
-    // must not read/leak another window's in-flight FBO draws.
-    std::vector<DeferredPbrDraw>    fboPbrDraws;
-    std::vector<DeferredPointDraw>  fboPointDraws;
-    std::vector<DeferredShaderDraw> fboShaderDraws;
-    int fboLayerNext = 0;
-
     // --- per-window shader stack (pushShader / popShader) ------------------
     // Made per-window so an unbalanced push in window A can't leak into B.
     std::vector<Shader*> shaderStack;
+    struct ShaderScopeTarget { RenderTarget* target; uint64_t token; };
+    std::vector<ShaderScopeTarget> shaderScopeTargets;
 
     // --- per-window shape / stroke accumulators (beginShape/endShape etc.) -
     // Made per-window so a shape left open at end-of-tick can't bleed into the
@@ -365,9 +289,7 @@ struct SwapchainTargetFormat {
 };
 
 inline SwapchainTargetFormat swapchainTargetFormat(const WindowContext& ctx) {
-    return ctx.isMain
-        ? SwapchainTargetFormat{_SG_PIXELFORMAT_DEFAULT, sapp_sample_count()}
-        : SwapchainTargetFormat{ctx.swapchainColorFormat, ctx.swapchainSampleCount};
+    return {ctx.swapchainTarget.colorFormat, ctx.swapchainTarget.sampleCount};
 }
 
 // Main window context. Non-inline (tcGlobal.cpp) — Host/Guest share one.
@@ -385,6 +307,10 @@ WindowContext*& currentWindowCtx();
 // currentWindowCtx(), and in a single-window app it costs the one out-of-line
 // call its inline version always made (to mainWindowContext()).
 WindowContext& currentWindowContext();
+
+// Restore both window dispatch and its current target's actual SGL context.
+// A resize can replace the main context; nullptr still denotes the main window.
+void restoreWindowContext(WindowContext* previous);
 
 // Drop the node references of every window context: hover, grab and
 // selection in the main window's context and each secondary window's, and
@@ -435,52 +361,73 @@ inline bool windowThrottleShouldTick(WindowContext& ctx) {
 // resolve through the current window's target now)
 // ---------------------------------------------------------------------------
 
-// Role keys: high nibble = role, low byte = blend mode (2D only). Bit 12
-// (0x1000u) marks the depth-tested variant of a 2D blend pipeline
-// (tc::enableDepthTest()) — orthogonal to both role and blend mode.
-inline sgl_pipeline active2D(BlendMode m) {
-    bool depth = currentWindowContext().depthTestEnabled;
-    return currentWindowContext().currentTarget->pipeline(
-        (depth ? 0x1000u : 0x000u) | (uint32_t)m, pipeDesc2D(m, depth));
+inline RenderTarget& currentTarget() { return *currentWindowContext().currentTarget; }
+inline sgl_pipeline active2D(BlendMode mode) {
+    return currentTarget().pipeline(PipelineKey::immediate(fillSelection(mode, currentTarget().depthTestEnabled))).immediate;
 }
-inline sgl_pipeline activeFill2D()        { return active2D(BlendMode::Alpha); }
+inline sgl_pipeline activeFill2D() { return active2D(BlendMode::Alpha); }
 inline sgl_pipeline activePremult() {
-    bool depth = currentWindowContext().depthTestEnabled;
-    return currentWindowContext().currentTarget->pipeline(
-        (depth ? 0x1000u : 0x000u) | 0x100u, pipeDescPremult(depth));
+    return currentTarget().pipeline(PipelineKey::immediate({PipelineRole::Premult, BlendMode::Alpha, currentTarget().depthTestEnabled})).immediate;
 }
-// TrueType glyph atlas (R8 coverage): Alpha blend + sglCoverageShader().
 inline sgl_pipeline activeCoverage2D() {
-    bool depth = currentWindowContext().depthTestEnabled;
-    return currentWindowContext().currentTarget->pipeline(
-        (depth ? 0x1000u : 0x000u) | 0x400u, pipeDescCoverage2D(depth));
+    return currentTarget().pipeline(PipelineKey::immediate({PipelineRole::Coverage, BlendMode::Alpha, currentTarget().depthTestEnabled})).immediate;
 }
-inline sgl_pipeline activeClear()         { return currentWindowContext().currentTarget->pipeline(0x200u, pipeDescClear()); }
-inline sgl_pipeline active3D()            { return currentWindowContext().currentTarget->pipeline(0x300u, pipeDesc3D()); }
-
-// Single chokepoint for loading an sgl pipeline by role. No-op if the target isn't
-// ready (id 0). In debug builds it asserts the pipeline was built for the active
-// target's context — the runtime safety net against loading a pipeline meant for a
-// different target (the bug class this refactor removes).
-inline void loadPipeline(sgl_pipeline p) {
-    if (p.id == 0) return;
+inline sgl_pipeline activeClear() {
+    return currentTarget().pipeline(PipelineKey::immediate({PipelineRole::Clear})).immediate;
+}
+inline sgl_pipeline active3D() {
+    return currentTarget().pipeline(PipelineKey::immediate({PipelineRole::Geometry3D, BlendMode::Alpha, true})).immediate;
+}
+inline void loadTemporaryPipeline(sgl_pipeline pipeline) {
+    if (!sg_isvalid() || !currentTarget().resources().context.id) return;
+    // An invalid selection must never keep a previous incompatible pipeline.
+    // sokol_gl rejects an invalid pipeline and drops its affected commands.
 #ifndef NDEBUG
-    auto& owner = pipelineOwnerCtx();
-    auto it = owner.find(p.id);
-    // Only check pipelines WE built (others, e.g. sgl's built-in default, are unknown).
-    assert((it == owner.end() || it->second == currentWindowContext().currentTarget->context.id)
-           && "loadPipeline: sgl pipeline built for a different render target than the active one");
+    auto it = pipelineOwnerCtx().find(pipeline.id);
+    assert(it == pipelineOwnerCtx().end() || it->second == currentTarget().resources().context.id);
 #endif
-    sgl_load_pipeline(p);
+    sgl_load_pipeline(pipeline);
+}
+inline void loadPipeline(sgl_pipeline pipeline) {
+    const auto& selections = currentTarget().resources().selections;
+    auto it = selections.find(pipeline.id);
+    if (it != selections.end()) currentTarget().selectedPipeline = it->second;
+    loadTemporaryPipeline(pipeline);
+}
+inline void restoreCurrentPipeline() {
+    auto& target = currentTarget();
+    loadTemporaryPipeline(target.pipeline(PipelineKey::immediate(target.selectedPipeline)).immediate);
 }
 
-// Restore the current blend pipeline after temporary pipeline changes.
-// Honors the current blend mode on the swapchain and inside Fbo passes alike:
-// active2D() resolves per render target, so the pipeline always matches the
-// active target's color format / sample count. (moved from TrussC.h)
-inline void restoreCurrentPipeline() {
-    loadPipeline(active2D(currentWindowContext().currentBlendMode));
+inline void applyTargetModelView() {
+    const auto& target = currentTarget();
+    const Mat4 composed = (target.camera.currentViewMatrix * target.currentMatrix).transposed();
+    sgl_matrix_mode_modelview();
+    sgl_load_matrix(composed.m);
 }
+
+// Reapply CPU-authoritative state after a target switch, clear, or direct draw.
+inline void applyTargetDrawingState() {
+    const auto& target = currentTarget();
+    const Mat4 projection = target.camera.currentProjectionMatrix.transposed();
+    sgl_matrix_mode_projection();
+    sgl_load_matrix(projection.m);
+    applyTargetModelView();
+    const auto& vp = target.viewport;
+    sgl_viewportf(vp.active ? vp.x : 0, vp.active ? vp.y : 0,
+                  vp.active ? vp.w : float(target.width), vp.active ? vp.h : float(target.height), true);
+    const auto& clip = target.currentScissor;
+    sgl_scissor_rectf(clip.active ? clip.x : 0, clip.active ? clip.y : 0,
+                      clip.active ? clip.w : float(target.width), clip.active ? clip.h : float(target.height), true);
+    restoreCurrentPipeline();
+    if (target.inPass) {
+        sg_apply_viewportf(vp.active ? vp.x : 0, vp.active ? vp.y : 0,
+                          vp.active ? vp.w : float(target.width), vp.active ? vp.h : float(target.height), true);
+        sg_apply_scissor_rectf(clip.active ? clip.x : 0, clip.active ? clip.y : 0,
+                              clip.active ? clip.w : float(target.width), clip.active ? clip.h : float(target.height), true);
+    }
+}
+
 
 // Register a new camera scope (declared in tcCameraContext.h, defined here
 // where WindowContext is complete). Always allocates a fresh context — see
@@ -493,7 +440,7 @@ inline void registerCameraContext(const Mat4& view, const Mat4& projection,
     ctx->viewW = viewW;
     ctx->viewH = viewH;
     ctx->pickable = pickable;
-    currentWindowContext().currentCameraContext = std::move(ctx);
+    currentWindowContext().currentTarget->camera.currentCameraContext = std::move(ctx);
 }
 
 } // namespace internal

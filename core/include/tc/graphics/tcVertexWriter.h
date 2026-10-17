@@ -136,15 +136,23 @@ private:
 
     inline Shader* getCurrentShader() {
         auto& s = currentWindowContext().shaderStack;
-        return s.empty() ? nullptr : s.back();
+        const auto& targets = currentWindowContext().shaderScopeTargets;
+        if (s.empty() || targets.empty()) return nullptr;
+        const auto& scope = targets.back();
+        return scope.target == &currentTarget() && scope.token == currentTarget().activation ? s.back() : nullptr;
     }
 
     inline bool isShaderActive() {
-        return !currentWindowContext().shaderStack.empty();
+        return getCurrentShader() != nullptr;
     }
 
     inline void resetShaderStack() {
-        currentWindowContext().shaderStack.clear();
+        auto& window = currentWindowContext();
+        for (const auto& scope : window.shaderScopeTargets)
+            if (scope.target->activation == scope.token && scope.target->openShaderScopes)
+                --scope.target->openShaderScopes;
+        window.shaderScopeTargets.clear();
+        window.shaderStack.clear();
     }
 
     inline VertexWriter& getActiveWriter() {

@@ -79,9 +79,9 @@ struct Main : App {
             // late backend tick must neither recreate its context nor leak.
             const uint32_t live = sg_query_stats().total.pipelines.alive;
             check(live == baseline, "live sg pipelines did not return to baseline");
-            check(window->context().swapchainTarget.context.id == SG_INVALID_ID,
+            check(window->context().swapchainTarget.resources().context.id == SG_INVALID_ID,
                   "closed window recreated its sgl context");
-            check(window->context().swapchainTarget.cache.empty(), "closed window retained pipelines");
+            check(window->context().swapchainTarget.resources().cache.empty(), "closed window retained pipelines");
 #ifndef NDEBUG
             check(internal::pipelineOwnerCtx().size() == ownerBaseline,
                   "pipeline ownership bookkeeping did not return to baseline");

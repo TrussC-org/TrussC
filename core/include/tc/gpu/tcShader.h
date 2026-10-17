@@ -73,23 +73,28 @@ public:
         shader = sg_make_shader(desc);
         if (sg_query_shader_state(shader) != SG_RESOURCESTATE_VALID) {
             logError("Shader") << "Failed to create shader";
+            internal::deferGpuDestroy(shader); shader = {};
             return false;
         }
 
-        // Create pipeline with standard vertex layout
+        // Capture the subclass recipe; attachment compatibility is resolved at draw.
         sg_pipeline_desc pipDesc = createPipelineDesc();
         pipDesc.shader = shader;
 
-        pipeline = sg_make_pipeline(&pipDesc);
-        if (sg_query_pipeline_state(pipeline) != SG_RESOURCESTATE_VALID) {
-            logError("Shader") << "Failed to create pipeline";
-            sg_destroy_shader(shader);
-            shader = {};
-            return false;
-        }
+        recipe_ = pipDesc;
+        recipe_.label = nullptr; // subclass-owned label need not outlive load()
 
         // Create dynamic vertex buffer
         createVertexBuffer();
+        if (sg_query_buffer_state(vertexBuffer) != SG_RESOURCESTATE_VALID ||
+            (recipe_.index_type != SG_INDEXTYPE_NONE && recipe_.index_type != _SG_INDEXTYPE_DEFAULT &&
+             sg_query_buffer_state(indexBuffer) != SG_RESOURCESTATE_VALID)) {
+            internal::deferGpuDestroy(vertexBuffer); internal::deferGpuDestroy(indexBuffer);
+            internal::deferGpuDestroy(shader);
+            shader = {}; vertexBuffer = {}; indexBuffer = {}; stream_.reset();
+            logError("Shader") << "Failed to create draw buffers";
+            return false;
+        }
 
         loaded = true;
         return true;
@@ -103,19 +108,15 @@ public:
         if (loaded) {
             internal::deferGpuDestroy(indexBuffer);
             internal::deferGpuDestroy(vertexBuffer);
-            internal::deferGpuDestroy(pipeline);
+            internal::retirePipelineProgram(shader);
             internal::deferGpuDestroy(shader);
         }
-        for (auto& [key, pip] : targetPipelines_) {
-            internal::deferGpuDestroy(pip);
-        }
-        targetPipelines_.clear();
         for (auto& [slot, cached] : imageViews_) {
             internal::deferGpuDestroy(cached.view);
         }
         imageViews_.clear();
         shader = {};
-        pipeline = {};
+
         vertexBuffer = {};
         indexBuffer = {};
         stream_.reset();
@@ -133,16 +134,21 @@ public:
 
         // Push to stack (per-window)
         auto& wctx = internal::currentWindowContext();
-        wctx.shaderStack.push_back(this);
+        // Bind the scope to an activation, including while its target is parked.
+        auto& target = internal::currentTarget();
+        wctx.shaderScopeTargets.push_back({&target, target.activation});
+        try { wctx.shaderStack.push_back(this); }
+        catch (...) { wctx.shaderScopeTargets.pop_back(); throw; }
+        ++target.openShaderScopes;
 
         // Increment layer for post-shader sokol_gl draws
         // (shader draws will be deferred and executed between layers).
         // Inside an FBO pass the layering is handled per-submission instead
-        // (fboLayerNext bump in submitVertices, like the deferred PBR path),
+        // (target layer bump in submitVertices, like the deferred PBR path),
         // so only the swapchain layer counter is advanced here.
-        if (!wctx.inFboPass) {
-            wctx.sglLayerNext++;
-            sgl_layer(wctx.sglLayerNext);
+        if (!wctx.currentTarget->isFbo) {
+            wctx.currentTarget->sglLayerNext++;
+            sgl_layer(wctx.currentTarget->sglLayerNext);
         }
 
         // Call virtual hook
@@ -158,11 +164,19 @@ public:
             return;
         }
 
+        auto& wctx = internal::currentWindowContext();
+        const auto scope = wctx.shaderScopeTargets.back();
+        if (scope.target != &internal::currentTarget() || scope.token != scope.target->activation) {
+            logWarning("Shader") << "end() rejected on a different target activation";
+            return;
+        }
         // Call virtual hook
         onEnd();
 
         // Pop from stack
         stack.pop_back();
+        wctx.shaderScopeTargets.pop_back();
+        --scope.target->openShaderScopes;
 
         // Restore sokol_gl state if no more shaders
         if (stack.empty()) {
@@ -318,7 +332,10 @@ public:
         }
         internal::DeferredShaderDraw draw;
         draw.stream = stream_;
-        draw.pipeline = pipelineForCurrentTarget();  // target-resolved (swapchain vs FBO)
+        const auto selection = selectPipelineForCurrentTarget_();
+        draw.pipeline = selection.raw;
+        draw.pipelineGeneration = selection.generation;
+        if (!draw.pipeline.id) return;
         draw.vertices.assign(data, data + count);
         draw.type = type;
 
@@ -338,19 +355,19 @@ public:
         draw.bindings = bind;
 
         auto& wctx = internal::currentWindowContext();
-        if (wctx.inFboPass) {
+        if (wctx.currentTarget->isFbo) {
             // Defer into the per-FBO list; flushed per-layer by
-            // flushFboDeferredPbr() at Fbo::end()/clearColor(). Bump the FBO
+            // RenderTarget::flushLayers() at Fbo::end()/clearColor(). Bump the FBO
             // layer so 2D drawn after this composites on top of it, matching
             // the deferred PBR/point pattern (tcMeshPbrPipeline.h).
-            draw.layerId = wctx.fboLayerNext;
-            wctx.fboShaderDraws.push_back(std::move(draw));
-            wctx.fboLayerNext++;
-            sgl_layer(wctx.fboLayerNext);
+            draw.layerId = wctx.currentTarget->sglLayerNext;
+            wctx.currentTarget->deferredShaderDraws.push_back(std::move(draw));
+            wctx.currentTarget->sglLayerNext++;
+            sgl_layer(wctx.currentTarget->sglLayerNext);
         } else {
             // Swapchain: executed in present() between sokol_gl layers.
-            draw.layerId = wctx.sglLayerNext - 1;  // Layer before this shader
-            wctx.deferredShaderDraws.push_back(std::move(draw));
+            draw.layerId = wctx.currentTarget->sglLayerNext - 1;  // Layer before this shader
+            wctx.currentTarget->deferredShaderDraws.push_back(std::move(draw));
         }
     }
 
@@ -368,17 +385,10 @@ protected:
 
     // Sokol resources
     sg_shader shader = {};
-    sg_pipeline pipeline = {};   // targets the swapchain (created at load())
+    sg_pipeline_desc recipe_ = {};
     sg_buffer vertexBuffer = {};
     sg_buffer indexBuffer = {};
     bool loaded = false;
-
-    // Render-target-specific pipeline variants, keyed by (color format, sample
-    // count). `pipeline` above matches the swapchain; an FBO pass has a different
-    // color format / sample count / depth, so a matching pipeline is built lazily
-    // on first draw into each distinct FBO target. Using a mismatched pipeline
-    // (e.g. a swapchain BGRA8 pipeline inside an RGBA8 FBO) corrupts the output.
-    std::unordered_map<uint64_t, sg_pipeline> targetPipelines_;
 
     // Pending texture bindings
     struct ViewBinding {
@@ -437,29 +447,10 @@ protected:
     virtual void onEnd() {}
     virtual void setupBindings(sg_bindings& bind) {}
 
-    // Pipeline matching the current render target. The main swapchain uses the
-    // load()-time `pipeline`; secondary windows and FBOs need matching color
-    // format, sample count and depth. Build those pipelines lazily from the same
-    // createPipelineDesc() and cache per distinct (format, sampleCount) target.
-    sg_pipeline pipelineForCurrentTarget() {
-        auto& wctx = internal::currentWindowContext();
-        if (!wctx.inFboPass && wctx.isMain) return pipeline;
-        const auto target = wctx.inFboPass
-            ? internal::SwapchainTargetFormat{wctx.currentFboColorFormat, wctx.currentFboSampleCount}
-            : internal::swapchainTargetFormat(wctx);
-        uint64_t key = ((uint64_t)target.colorFormat << 8)
-                     | (uint64_t)(target.sampleCount & 0xff);
-        auto it = targetPipelines_.find(key);
-        if (it != targetPipelines_.end()) return it->second;
-        sg_pipeline_desc desc = createPipelineDesc();
-        desc.shader = shader;
-        desc.colors[0].pixel_format = target.colorFormat;
-        desc.sample_count           = target.sampleCount;
-        desc.depth.pixel_format     = SG_PIXELFORMAT_DEPTH_STENCIL;  // FBOs and windows use depth-stencil
-        sg_pipeline pip = sg_make_pipeline(&desc);
-        targetPipelines_[key] = pip;
-        return pip;
+    internal::PipelineSelection selectPipelineForCurrentTarget_() {
+        return internal::currentTarget().pipeline(internal::PipelineKey::raw(internal::PipelineRole::Shader, recipe_));
     }
+    sg_pipeline pipelineForCurrentTarget() { return selectPipelineForCurrentTarget_().raw; }
 
 private:
     static bool validateTextureSlot(int slot, sg_sampler sampler) {
@@ -486,7 +477,7 @@ private:
 
     void moveFrom(Shader&& other) {
         shader = other.shader;
-        pipeline = other.pipeline;
+        recipe_ = other.recipe_;
         vertexBuffer = other.vertexBuffer;
         indexBuffer = other.indexBuffer;
         loaded = other.loaded;
@@ -494,11 +485,8 @@ private:
         pendingViews = std::move(other.pendingViews);
         pendingUniforms = std::move(other.pendingUniforms);
         imageViews_ = std::move(other.imageViews_);
-        targetPipelines_ = std::move(other.targetPipelines_);
 
         other.shader = {};
-        other.pipeline = {};
-        other.targetPipelines_.clear();
         other.vertexBuffer = {};
         other.indexBuffer = {};
         other.loaded = false;
@@ -544,64 +532,6 @@ inline void popShader() {
 // resetShaderStack() that drained the stack via popShader() used to live
 // here but had no callers — removed during the internal:: consolidation.
 
-// Flush deferred shader draws (called from present())
-// Draws sokol_gl layers interleaved with shader draws for correct ordering
-namespace internal {
-inline void flushDeferredShaderDraws() {
-    // Check for vertex buffer overflow — skip sgl draw to avoid crash
-    // (overflowed commands may contain invalid pipeline IDs)
-    sgl_error_t err = sgl_error();
-    bool sglOverflow = err.vertices_full || err.commands_full;
-
-    // Deferred swapchain queues + layer counter are per-window (this tick's ctx).
-    auto& wctx = internal::currentWindowContext();
-
-    // For each layer: draw sokol_gl, then execute shader draws for that layer
-    for (int layer = 0; layer <= wctx.sglLayerNext; layer++) {
-        // Draw sokol_gl content for this layer (skip if overflowed)
-        if (!sglOverflow) {
-            sgl_draw_layer(layer);
-        }
-
-        // Deferred shader draws are independent of sgl, always safe. Each is a
-        // self-contained snapshot (pipeline/bindings/uniforms captured at
-        // submission), so no Shader object is touched here — the object may
-        // already be destroyed.
-        for (auto& draw : wctx.deferredShaderDraws) {
-            if (draw.layerId == layer) {
-                internal::executeDeferredShaderDraw(draw);
-            }
-        }
-
-        // Deferred PBR mesh draws — same per-layer ordering, so PBR composites
-        // with sokol_gl 2D in submission order (a 2D background drawn first
-        // stays behind the meshes).
-        for (auto& d : wctx.deferredPbrDraws) {
-            if (d.layerId == layer) {
-                internal::getPbrPipeline().executePbrDraw(d.cmd);
-            }
-        }
-
-        // Deferred point-splat draws (Mesh in PrimitiveMode::Points) — same
-        // per-layer ordering, sharing the swapchain pass + depth buffer.
-        for (auto& d : wctx.deferredPointDraws) {
-            if (d.layerId == layer) {
-                internal::executePointDraw(d.cmd);
-            }
-        }
-    }
-
-    // Clear deferred draws for next frame
-    wctx.deferredShaderDraws.clear();
-    wctx.deferredPbrDraws.clear();
-    wctx.deferredPointDraws.clear();
-
-    // Reset layer for next frame
-    wctx.sglLayerNext = 0;
-    sgl_layer(0);
-}
-} // namespace internal
-
 // ---------------------------------------------------------------------------
 // FullscreenShader - Fullscreen effect shader (position + texcoord layout)
 // ---------------------------------------------------------------------------
@@ -621,13 +551,17 @@ public:
         if (!loaded) return;
 
         // Ensure render pass is active (swapchain or FBO)
-        ensureSwapchainPass();
+        internal::ensureCurrentPass();
 
-        // Flush sokol_gl so it draws before the fullscreen quad
-        sgl_draw();
+        // Submit all preceding layers, including deferred user shaders, meshes
+        // and points. Advance the command base so end()/present() cannot blend
+        // that content a second time after this fullscreen draw.
+        internal::currentTarget().flushLayers();
 
         // Match the pipeline to the current target (swapchain vs FBO format).
-        sg_apply_pipeline(pipelineForCurrentTarget());
+        const auto selected = selectPipelineForCurrentTarget_();
+        if (!selected.raw.id) return;
+        sg_apply_pipeline(selected.raw);
 
         sg_bindings bind = {};
         bind.vertex_buffers[0] = vertexBuffer;
@@ -646,31 +580,8 @@ public:
 
         sg_draw(0, 6, 1);
 
-        // Restore sokol_gl state to what the rest of the frame expects.
-        //
-        // Inside an Fbo pass that is the corner-origin ortho Fbo::begin set up.
-        // On the SWAPCHAIN the screen convention is NOT a corner ortho — it is
-        // the screen camera from setupScreenFovWithSize (a CENTERED projection
-        // plus a lookat modelview; perspective when defaultScreenFov > 0). A
-        // plain ortho here leaves a mixed state: as soon as the engine
-        // re-applies the camera modelview, later 2D draws land shifted by
-        // (-W/2, -H/2) at the wrong scale. (Historic bug: this used
-        // sapp_width(), physical px, which additionally halved everything on
-        // retina.) Re-run the real setup with the CURRENT view params instead.
         sg_reset_state_cache();
-        auto& wctx = internal::currentWindowContext();
-        if (wctx.inFboPass) {
-            sgl_defaults();
-            internal::loadPipeline(internal::activeFill2D());
-            internal::sglLoadProjection(
-                internal::screen2DProjection(wctx.currentViewW, wctx.currentViewH));
-            sgl_matrix_mode_modelview();
-            sgl_load_identity();
-        } else {
-            internal::setupScreenFovWithSize(wctx.currentScreenFov,
-                                             wctx.currentViewW, wctx.currentViewH,
-                                             0.0f, 0.0f);
-        }
+        internal::applyTargetDrawingState();
     }
 
 protected:

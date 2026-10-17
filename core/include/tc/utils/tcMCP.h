@@ -181,6 +181,11 @@ inline void reserveMetadata(std::initializer_list<std::string_view> fields) {
     reserveReply(bytes * 6 + overhead); // Worst-case escaping plus structural output.
 }
 
+// Explicit admission refusals are JSON-RPC errors, before any tool work is queued.
+struct RequestRejected : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 inline std::string toolError(const json& id, const std::string& message) {
     return makeResult(id, {{"content", {{{"type", "text"}, {"text", message}}}},
                            {"isError", true}});
@@ -692,6 +697,8 @@ private:
 
             return formatResult(content);
 
+        } catch (const internal::RequestRejected& e) {
+            return makeError(id, -32000, e.what());
         } catch (const InputArgumentError& e) {
             return makeError(id, -32602, e.what());
         } catch (const AdmissionError&) {

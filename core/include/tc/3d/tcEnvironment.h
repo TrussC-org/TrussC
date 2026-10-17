@@ -55,10 +55,6 @@ struct IblBakeResources {
     sg_shader irrShader{};
     sg_shader preShader{};
     sg_shader lutShader{};
-    sg_pipeline eqPipe{};      // target: RGBA16F
-    sg_pipeline irrPipe{};     // target: RGBA16F
-    sg_pipeline prePipe{};     // target: RGBA16F
-    sg_pipeline lutPipe{};     // target: RG16F
     sg_buffer quadVbuf{};      // 6 verts, 2 triangles
     sg_sampler linearSampler{};
     bool ready = false;        // all four shaders usable (internalShaderReady)
@@ -247,24 +243,6 @@ private:
             return;
         }
 
-        auto makePipe = [](sg_shader sh, sg_pixel_format colorFmt) {
-            sg_pipeline_desc pd = {};
-            pd.shader = sh;
-            pd.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;
-            pd.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
-            pd.cull_mode = SG_CULLMODE_NONE;
-            pd.depth.pixel_format = SG_PIXELFORMAT_NONE;  // no depth attachment
-            pd.colors[0].pixel_format = colorFmt;
-            pd.colors[0].blend.enabled = false;
-            pd.sample_count = 1;  // オフスクリーンベイク用（MSAA不要）
-            pd.label = "tc_ibl_bake_pipeline";
-            return sg_make_pipeline(&pd);
-        };
-        r.eqPipe  = makePipe(r.eqShader,  SG_PIXELFORMAT_RGBA16F);
-        r.irrPipe = makePipe(r.irrShader, SG_PIXELFORMAT_RGBA16F);
-        r.prePipe = makePipe(r.preShader, SG_PIXELFORMAT_RGBA16F);
-        r.lutPipe = makePipe(r.lutShader, SG_PIXELFORMAT_RG16F);
-
         // Fullscreen quad in NDC, as two triangles.
         const float verts[] = {
             -1.0f, -1.0f,
@@ -298,7 +276,7 @@ private:
     // populates `bind` (texture/sampler slots) and uploads uniforms beforehand.
     static void runFullscreenPass(sg_view colorAttachment,
                                   int viewportW, int viewportH,
-                                  sg_pipeline pipe,
+                                  sg_shader shader, sg_pixel_format format,
                                   const sg_bindings& bindings,
                                   int uniformSlot,
                                   const void* uniformData, size_t uniformSize) {
@@ -309,16 +287,22 @@ private:
         // uninitialized, so the baked IBL cubemap/mips come back as garbage.
         pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
         pass.action.colors[0].clear_value = { 0.0f, 0.0f, 0.0f, 1.0f };
-        sg_begin_pass(&pass);
+        internal::TargetPassScope scope(pass, viewportW, viewportH,
+            format);
+        if (!scope.active()) return;
         sg_apply_viewport(0, 0, viewportW, viewportH, true);
-        sg_apply_pipeline(pipe);
+        sg_pipeline_desc desc = {};
+        desc.shader = shader;
+        desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;
+        const auto selected = internal::currentTarget().pipeline(internal::PipelineKey::raw(internal::PipelineRole::Ibl, desc));
+        if (!selected.raw.id) return;
+        sg_apply_pipeline(selected.raw);
         sg_apply_bindings(&bindings);
         if (uniformSize > 0) {
             sg_range r = { uniformData, uniformSize };
             sg_apply_uniforms(uniformSlot, &r);
         }
         sg_draw(0, 6, 1);
-        sg_end_pass();
     }
 
     // -------------------------------------------------------------------------
@@ -354,13 +338,6 @@ private:
             return false;
         }
 
-        // IBL bakes run outside any user-facing pass. If a swapchain pass is
-        // somehow active, suspend it so we can start fresh offscreen passes.
-        bool wasInSwapchain = isInSwapchainPass();
-        if (wasInSwapchain) {
-            suspendSwapchainPass();
-        }
-
         // 1. equirect → irradianceMap (6 faces, 1 mip)
         irradiance_.allocateCubemap(kIrradianceSize, TextureFormat::RGBA16F,
                                     TextureUsage::RenderTarget, 1);
@@ -375,7 +352,7 @@ private:
 
             runFullscreenPass(irradiance_.getCubemapFaceAttachmentView(face, 0),
                               kIrradianceSize, kIrradianceSize,
-                              r.irrPipe, bind,
+                              r.irrShader, SG_PIXELFORMAT_RGBA16F, bind,
                               UB_tc_ibl_irradiance_params, &params, sizeof(params));
         }
 
@@ -399,7 +376,7 @@ private:
 
                 runFullscreenPass(prefilter_.getCubemapFaceAttachmentView(face, mip),
                                   mipSize, mipSize,
-                                  r.prePipe, bind,
+                                  r.preShader, SG_PIXELFORMAT_RGBA16F, bind,
                                   UB_tc_ibl_prefilter_params, &params, sizeof(params));
             }
         }
@@ -412,12 +389,8 @@ private:
             bind.vertex_buffers[0] = r.quadVbuf;
             runFullscreenPass(brdfLut_.getAttachmentView(),
                               kBrdfLutSize, kBrdfLutSize,
-                              r.lutPipe, bind,
+                              r.lutShader, SG_PIXELFORMAT_RG16F, bind,
                               0, nullptr, 0);
-        }
-
-        if (wasInSwapchain) {
-            resumeSwapchainPass();
         }
 
         loaded_ = true;
