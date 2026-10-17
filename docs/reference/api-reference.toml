@@ -19850,9 +19850,9 @@ value_desc.Public.ko = "기본 허용 수준. 내장 도구 중 Public은 상태
 value_desc.ReadOnly.en = "Inspection, screenshots, status and alerts; captures may write files."
 value_desc.ReadOnly.ja = "検査、スクリーンショット、ステータス、アラート。キャプチャはファイルを書き込む場合がある。"
 value_desc.ReadOnly.ko = "조회, 스크린샷, 상태 및 알림. 캡처는 파일을 쓸 수 있다."
-value_desc.Control.en = "Input, scene changes, recording and quit; includes ReadOnly."
-value_desc.Control.ja = "入力、シーン変更、録画、終了。ReadOnly を含む。"
-value_desc.Control.ko = "입력, 장면 변경, 녹화 및 종료. ReadOnly를 포함한다."
+value_desc.Control.en = "Input, scene changes, recording and quit; includes ReadOnly. Input requires one of 120 defined nonzero sokol key codes, mouse buttons 0–2 (move also allows -1), finite float coordinates/scroll deltas and boolean modifiers. Invalid input returns JSON-RPC -32602 before callbacks or state changes; synthetic held keys are limited to 120."
+value_desc.Control.ja = "入力、シーン変更、録画、終了。ReadOnly を含む。入力は定義済みの非ゼロ sokol キーコード 120 個、マウスボタン 0–2（移動は -1 も可）、有限の float 座標・スクロール量、真偽値の修飾フラグを受け付ける。不正な入力はコールバックや状態変更の前に JSON-RPC -32602 を返す。合成入力で保持するキーは最大 120 個。"
+value_desc.Control.ko = "입력, 장면 변경, 녹화 및 종료. ReadOnly를 포함한다. 입력은 정의된 0 이외의 sokol 키 코드 120개, 마우스 버튼 0–2(이동은 -1도 허용), 유한한 float 좌표·스크롤 값 및 불리언 보조 키 플래그를 받는다. 잘못된 입력은 콜백이나 상태 변경 전에 JSON-RPC -32602를 반환하며 합성 입력으로 유지하는 키는 최대 120개이다."
 
 ["mcp::setToolLevel"]
 category = "mcp"
