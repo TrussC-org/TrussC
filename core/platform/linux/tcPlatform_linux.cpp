@@ -212,6 +212,8 @@ bool captureWindow(Pixels& outPixels) {
         return false;
     }
 
+    mcp::internal::reconcileWindowCapture(size_t(width), size_t(height));
+
     // Allocate pixel buffer
     const auto layout = internal::recorderPackedLayout(width, height, internal::RecorderPixelFormat::RGBA8);
     // Bound (abi): packed capture bytes must fit size_t. Overflow drops the recorder frame and is counted.

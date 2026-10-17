@@ -182,6 +182,7 @@ bool captureWindow(Pixels& outPixels) {
 
     NSUInteger width = srcTexture.width;
     NSUInteger height = srcTexture.height;
+    mcp::internal::reconcileWindowCapture(width, height);
     MTLPixelFormat pixelFormat = srcTexture.pixelFormat;
     const auto layout = internal::recorderPackedLayout(width, height, internal::RecorderPixelFormat::RGBA8);
     // Bound (abi): Metal extent and format must fit the packed capture layout. Overflow drops the recorder frame and is counted.

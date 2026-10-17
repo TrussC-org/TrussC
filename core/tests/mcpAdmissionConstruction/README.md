@@ -31,7 +31,15 @@ responses are recognized by the test helper as success.
 
 A full two-window resize run expects **160/160** assertions, **6** cycles,
 **6** accepted saves and **12** pointer checks. GPU mode expects **18/18**.
-Default mode expects **188/188 on Linux**, **142/142 on macOS/Windows**.
+Default mode expects **237/237 on Linux**, **150/150 on macOS/Windows**.
+
+Linux default mode also uses the native dimension link wrappers to give the
+reservation query and capture different extents. For get, analyze and save,
+it checks error replies, the Working rejection counter and rejection before
+full source allocation or pixel read. Matching extents and an admitted size
+increase succeed. The GL pixel-read wrapper supplies headless test pixels and
+forwards to real GL in display modes. Shared checks cover incremental credits,
+smaller extents, checked size arithmetic and the shared Working allowance.
 
 A window with no rendered frame for **3 seconds** (`noFrameLimit`) prints
 `SKIP: window <n> renders no frames (occluded or hidden)` and skips its

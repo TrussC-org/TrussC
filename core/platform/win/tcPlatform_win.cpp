@@ -311,6 +311,12 @@ bool captureWindow(Pixels& outPixels) {
     // テクスチャの情報を取得
     D3D11_TEXTURE2D_DESC desc;
     backBuffer->GetDesc(&desc);
+    try {
+        mcp::internal::reconcileWindowCapture(desc.Width, desc.Height);
+    } catch (...) {
+        backBuffer->Release();
+        throw;
+    }
 
     const auto layout = internal::recorderPackedLayout(desc.Width, desc.Height,
                                                       internal::RecorderPixelFormat::RGBA8);

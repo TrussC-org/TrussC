@@ -142,6 +142,28 @@ WorkScope::WorkScope(std::shared_ptr<WorkBudget> budget) : previous_(currentWork
 }
 WorkScope::~WorkScope() { currentWorkBudget() = std::move(previous_); }
 void reserveWork(size_t bytes) { if (currentWorkBudget()) currentWorkBudget()->reserve(bytes); }
+void reserveWindowCapture(size_t width, size_t height, size_t pixelBytes, size_t overhead) {
+    auto budget = currentWorkBudget();
+    if (!budget) return;
+    const auto limit = getAdmissionLimits().workingBytes;
+    // Bound (security): the selected window source and its capture workspace must fit reserved working memory before allocation. Overflow rejects the capture and is counted.
+    if (width && height && (overhead > limit || width > (limit - overhead) / height / pixelBytes)) {
+        const size_t area = height && width > SIZE_MAX / height ? SIZE_MAX : width * height;
+        const size_t needed = area > (SIZE_MAX - overhead) / pixelBytes ? SIZE_MAX : area * pixelBytes + overhead;
+        admissionRejected(AdmissionStore::Working, limit, needed);
+        throw AdmissionError();
+    }
+    const size_t needed = width && height ? width * height * pixelBytes + overhead : 0;
+    if (needed > budget->captureBytes_) reserveWork(needed - budget->captureBytes_);
+    budget->captureBytes_ = std::max(needed, budget->captureBytes_);
+    budget->capturePixelBytes_ = pixelBytes;
+    budget->captureOverhead_ = overhead;
+}
+void reconcileWindowCapture(size_t width, size_t height) {
+    auto budget = currentWorkBudget();
+    if (budget && budget->capturePixelBytes_)
+        reserveWindowCapture(width, height, budget->capturePixelBytes_, budget->captureOverhead_);
+}
 void reserveReply(size_t bytes) { if (currentWorkBudget()) currentWorkBudget()->reply(bytes); }
 
 std::shared_ptr<void> acquireScreenshotCredit() {
