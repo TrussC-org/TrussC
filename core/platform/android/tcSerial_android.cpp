@@ -68,6 +68,7 @@ constexpr int    PERMISSION_TIMEOUT_SEC = 60;   // give up on an unanswered dial
 constexpr int    PERMISSION_POLL_MS     = 200;
 constexpr int    READ_TIMEOUT_MS        = 250;  // per-ioctl bulk read timeout
 constexpr int    CONTROL_TIMEOUT_MS     = 1000; // CDC control requests
+// Bound (security/latency): 4096-byte USB reads bound per-read storage and work. Overflow continues in the next read.
 constexpr int    READ_CHUNK             = 4096;     // multiple of bulk max packet
 constexpr int    WRITE_CHUNK            = internal::serialAndroidWriteChunk;  // usbfs per-urb limit
 

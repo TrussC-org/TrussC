@@ -5,6 +5,8 @@
 #include "ProjectState.h"
 #include "BuildSetup.h"
 #include "VsDetector.h"
+#include "tc/app/internal/tcHotReloadDiagnostics.h"
+#include "tc/app/internal/tcWindowsBuildOutput.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -163,12 +165,21 @@ static bool parseAddonValue(const string& value,
 // Subprocess: run an external command with inherited stdout/stderr
 // =============================================================================
 
-// Run a command with argv passed as an array (no shell involvement). stdout and
-// stderr are inherited from the parent process so build output streams through.
+// Run a command with argv passed as an array (no shell involvement). Output
+// streams through; Windows builds can also retain it for failure diagnostics.
 // Returns the child's exit code, or -1 on spawn failure.
-static int runProcess(const vector<string>& argv) {
+static int runProcess(const vector<string>& argv, string* buildOutput = nullptr) {
     if (argv.empty()) return -1;
 #ifdef _WIN32
+    if (buildOutput) {
+        string commandLine;
+        for (const auto& a : argv) {
+            if (!commandLine.empty()) commandLine += ' ';
+            commandLine += quoteWindowsArgument(a);
+        }
+        return trussc::internal::runWindowsBuildWithOutput(commandLine, *buildOutput,
+            GetConsoleCP() != 0 ? 0 : CREATE_NO_WINDOW);
+    }
     if (GetConsoleCP() != 0) {
         // CLI builds inherit the same console used by configure.
         vector<const char*> cargv;
@@ -198,6 +209,7 @@ static int runProcess(const vector<string>& argv) {
     CloseHandle(pi.hThread);
     return gotExitCode ? static_cast<int>(exitCode) : -1;
 #else
+    (void)buildOutput;
     // POSIX: posix_spawnp + waitpid
     vector<char*> cargv;
     for (const auto& a : argv) cargv.push_back(const_cast<char*>(a.c_str()));
@@ -3535,12 +3547,23 @@ static int cmdBuild(const vector<string>& args) {
     bool needConfigure = plan.configure;
 
     int rc = 0;
+    string buildOutput;
     if (needConfigure) rc = runProcess(cfg);
-    if (rc == 0) rc = runProcess(cmd);
+    if (rc == 0) rc = runProcess(cmd, &buildOutput);
+#ifdef _WIN32
+    // CMake owns this decision and may update it during an automatic reconfigure.
+    string hotReloadState;
+    ifstream(fs::path(cfgIn.buildDir) / ".tc_hot_reload_state") >> hotReloadState;
+#endif
     fs::current_path(savedCwd);
 
     if (rc != 0) {
         cerr << "Build failed (exit code " << rc << ").\n";
+#ifdef _WIN32
+        if (hotReloadState == "ON" && trussc::internal::hasWindowsGuestLinkError(buildOutput)) {
+            cerr << trussc::internal::windowsGuestLinkHint() << '\n';
+        }
+#endif
     }
     return rc;
 }

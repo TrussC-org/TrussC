@@ -64,6 +64,7 @@ struct WidgetValue {
     bool truncated = false;            // Text: longer than kMaxTextBytes
     int buttonValue = 0;               // Radio: this button's value (v_button), what pressing it sets
 
+    // Bound (security): OS text edits can produce large widget values; a snapshot cap keeps retained text memory finite. Overflow truncates the snapshot at a UTF-8 boundary and sets truncated.
     static constexpr size_t kMaxTextBytes = 64 * 1024;
 };
 

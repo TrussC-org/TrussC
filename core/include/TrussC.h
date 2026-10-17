@@ -2202,6 +2202,7 @@ namespace internal {
         if (!ctx.isMain) mcp::internal::drainDeferredResponses(&ctx);
         #endif
         auto& queue = ctx.pendingScreenshotPaths;
+        captureScreenshots(ctx.asyncScreenshots);
         if (queue.empty()) return;
         for (const auto& p : queue) {
             captureWindowToFile(p);
@@ -2330,6 +2331,7 @@ struct WindowSettings {
     int sampleCount = 4;  // MSAA (default 4x, 8x not supported on some devices)
     bool fullscreen = false;
     bool decorated = true;  // false: borderless/chromeless window (no title bar)
+    // Bound (security): OS clipboard text needs finite storage in the window backend. Overflow truncates or rejects oversized text, depending on the backend.
     int clipboardSize = 65536;  // Clipboard buffer size (default 64KB)
     int swapInterval = 1;  // VSync: 1 = on (default), 0 = off
     int uniformBufferReserve = 0;  // per-frame GPU uniform reservation in bytes;
@@ -2379,6 +2381,7 @@ struct WindowSettings {
         return *this;
     }
 
+    // OS clipboard text needs finite storage in the window backend. On reads, macOS and web truncate to size - 1 bytes; Windows fails UTF-8 conversion on overflow; X11 rejects oversized or incremental selections (standalone returns empty, legacy returns null). On writes, macOS and web send the full text to the OS and truncate the local copy; Windows rejects overflowing UTF-16 conversion and truncates the local UTF-8 copy after success; standalone X11 rejects oversized writes, while legacy X11 logs and truncates. Clipboard access is unsupported on iOS and Android.
     WindowSettings& setClipboardSize(int size) {
         clipboardSize = size;
         return *this;
@@ -2662,6 +2665,7 @@ namespace internal {
     // whether this frame draws. Split out of _frame_cb so the whole sequence
     // can be driven headless (core/tests/frameTiming).
     inline bool beginMainLoopFrame(std::chrono::steady_clock::time_point now) {
+        auto resourceLoads = takeResourceLoadBatch();
         sampleFrameTime(mainWindowContext());
 
         {
@@ -2671,6 +2675,7 @@ namespace internal {
             // Run work marshalled from worker threads (runOnMainThread, Event
             // Deliver::Main). Done before update/draw so queued tree edits land
             // while no traversal is in flight.
+            internal::deliverResourceLoadBatch(std::move(resourceLoads));
             internal::drainMainThreadQueue();
 
             // Log the dropped plays that could only be counted (off the main
@@ -2726,7 +2731,8 @@ namespace internal {
         // and the deferred screenshot (or MCP tc_get_screenshot) actually fires —
         // otherwise a request arriving in a paused/event-driven app would never
         // be served and a blocked MCP HTTP worker would hang.
-        if (!mainWindowContext().pendingScreenshotPaths.empty()
+        if (!mainWindowContext().asyncScreenshots.pending.empty()
+            || !mainWindowContext().pendingScreenshotPaths.empty()
             #ifndef __EMSCRIPTEN__
             || mcp::internal::hasDeferredResponses()
             #endif
@@ -2773,6 +2779,10 @@ namespace internal {
             sapp_skip_present();
         }
 
+        // afterFrame listeners and capture drains have finished. The native
+        // callback owns the Metal drawable and may release it on return.
+        mainWindowContext().clearFrameDrawable();
+
         // Save previous frame's mouse position
         internal::currentWindowContext().pmouseX = internal::currentWindowContext().mouseX;
         internal::currentWindowContext().pmouseY = internal::currentWindowContext().mouseY;
@@ -2783,6 +2793,7 @@ namespace internal {
     inline void _cleanup_cb() {
         if (!beginExitCleanup()) return;
         if (auto token = appRunToken()) token->store(false);
+        internal::cancelResourceBackends();
         CrashPhaseScope crashPhase("cleanup");
         writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
         // Session end may arrive inside a secondary window's modal loop.
@@ -2799,6 +2810,8 @@ namespace internal {
             EntryStackGuard guard(AppEntry::Exit);
             appCleanupFunc();
         }
+
+        waitForResourceLoadsAtAppExit();
 
         // Stop the audio device explicitly: the AudioEngine singleton is
         // intentionally leaked (see AudioEngine::getInstance()), so no
@@ -3004,6 +3017,7 @@ namespace internal {
                 TouchEventArgs touchArgs;
                 internal::TouchSample samples[TouchEventArgs::MAX_TOUCHES];
                 touchArgs.numTouches = ev->num_touches;
+                // Bound (platform): OS touch events must fit the SDK-sized event array. Overflow clamps the delivered touch count.
                 if (touchArgs.numTouches > TouchEventArgs::MAX_TOUCHES)
                     touchArgs.numTouches = TouchEventArgs::MAX_TOUCHES;
                 for (int i = 0; i < touchArgs.numTouches; i++) {
@@ -3161,6 +3175,7 @@ template<typename AppClass>
 sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) {
     internal::appExitCode() = 0;
     if (auto token = internal::appRunToken()) token->store(false);
+    internal::cancelResourceBackends();
     internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
 
     // Set pixel perfect mode
@@ -3280,7 +3295,9 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
 
     // Enable drag and drop
     desc.enable_dragndrop = true;
+    // Bound (security): OS file drops can flood delivery; a fixed cap keeps path storage finite. Overflow omits excess files.
     desc.max_dropped_files = 16;           // Max 16 files
+    // Bound (security): OS drop paths need finite per-path storage. Overflow rejects the drop if a path does not fit.
     desc.max_dropped_file_path_length = 2048;  // Max path length
 
     // Enable clipboard

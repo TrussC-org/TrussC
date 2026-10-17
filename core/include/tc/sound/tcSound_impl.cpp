@@ -62,6 +62,7 @@ namespace {
 
 // Frames decoded per step. Samples are appended as they decode, so the
 // stated stream length never decides how much is written anywhere.
+// Bound (security/latency): file audio decoding uses 4096-frame chunks to bound each scratch allocation. Overflow continues in subsequent decode steps.
 constexpr int kDecodeChunkFrames = 4096;
 
 // Reserve the first `count` samples of a decode buffer. Only a hint: when the
@@ -78,6 +79,7 @@ void reserveDecodeBuffer(std::vector<float>& buf, size_t count) {
 // internal::growSampleBuffer (towards `statedSamples`, the stream's stated
 // length, when that is ahead). False when the buffer cannot grow.
 bool appendDecoded(std::vector<float>& buf, const float* data, size_t n, size_t statedSamples) {
+    // Bound (abi): decoded file samples must fit the vector index width before appending. Overflow returns false.
     if (n > buf.max_size() - buf.size()) return false;
     if (!internal::growSampleBuffer(buf, buf.size() + n, statedSamples)) return false;
     buf.insert(buf.end(), data, data + n);
@@ -317,11 +319,80 @@ bool decodeMemoryWithMiniaudio(const void* data, size_t dataSize,
 
 } // namespace
 
+SoundBuffer::SoundBuffer(const SoundBuffer& other) : SoundBuffer() {
+    *this = other;
+}
+SoundBuffer& SoundBuffer::operator=(const SoundBuffer& other) {
+    if (this == &other) return *this;
+    async_.cancel();
+    samples = other.samples;
+    channels = other.channels;
+    sampleRate = other.sampleRate;
+    numSamples = other.numSamples;
+    path_ = other.path_;
+    return *this;
+}
+SoundBuffer::SoundBuffer(SoundBuffer&& other) noexcept : SoundBuffer() {
+    *this = std::move(other);
+}
+SoundBuffer& SoundBuffer::operator=(SoundBuffer&& other) noexcept {
+    if (this == &other) return *this;
+    async_.cancel();
+    other.async_.cancel();
+    samples = std::move(other.samples);
+    channels = other.channels;
+    sampleRate = other.sampleRate;
+    numSamples = other.numSamples;
+    path_ = std::move(other.path_);
+    return *this;
+}
+void SoundBuffer::loadAsync(const fs::path& path) {
+    auto state = async_.begin(onLoad, [this](AsyncState& ready) {
+        auto& decoded = *ready.decoded;
+        std::lock_guard<std::mutex> lock(AudioEngine::getInstance().mutex_);
+        // Ordinary failures leave PCM/metadata alone. AAC backends that write
+        // fields before failing record exactly those writes on their private
+        // buffer, so applying a failure reproduces that branch too.
+        const unsigned fields = ready.result ? 15 : decoded.loadWrites_;
+        if (fields & 1) samples = std::move(decoded.samples);
+        if (fields & 2) channels = decoded.channels;
+        if (fields & 4) sampleRate = decoded.sampleRate;
+        if (fields & 8) numSamples = decoded.numSamples;
+        path_ = std::move(decoded.path_);
+    });
+    state->input = path;
+    state->path = internal::resolveLoadPath(path);
+    state->decoded = std::make_shared<SoundBuffer>();
+    internal::startResourceLoad([state] {
+        internal::probeResourceLoad("sound.decode", state->path);
+        if (state->cancelled.load()) return;
+#ifdef __EMSCRIPTEN__
+        const auto ext = toLower(getFileExtension(state->input));
+        if (ext == "aac" || ext == "m4a") {
+            auto entry = internal::checkLoadFile(state->path, "SoundBuffer");
+            if (entry) {
+                loadAacWebAsync(state->decoded, [state](LoadResult result) {
+                    state->result = std::move(result);
+                    if (state->result) internal::setLoadName(state->decoded->path_, state->path);
+                    if (!state->cancelled.load()) internal::completeResourceLoad(state);
+                }, state->path);
+                return;
+            }
+            state->result = entry;
+        } else
+#endif
+        state->result = state->decoded->loadResolved(state->input, state->path);
+        internal::probeResourceLoad("sound.ready", state->path);
+        if (!state->cancelled.load()) internal::completeResourceLoad(state);
+    });
+}
+
 // -----------------------------------------------------------------------------
 // OGG Vorbis: stb_vorbis (miniaudio does not bundle a Vorbis decoder)
 // -----------------------------------------------------------------------------
 
 LoadResult SoundBuffer::loadOgg(const fs::path& filePath) {
+    async_.cancel();
     internal::clearLoadName(path_);
     const auto path = internal::resolveLoadPath(filePath);
     std::string pathStr = internal::pathToDisplayUtf8(path);
@@ -376,6 +447,7 @@ LoadResult loadFileViaMiniaudio(const fs::path& path, ma_encoding_format hint,
 } // namespace
 
 LoadResult SoundBuffer::loadWav(const fs::path& filePath) {
+    async_.cancel();
     internal::clearLoadName(path_);
     const auto path = internal::resolveLoadPath(filePath);
     LoadResult r = loadFileViaMiniaudio(path, ma_encoding_format_wav, "WAV", *this);
@@ -384,6 +456,7 @@ LoadResult SoundBuffer::loadWav(const fs::path& filePath) {
 }
 
 LoadResult SoundBuffer::loadMp3(const fs::path& filePath) {
+    async_.cancel();
     internal::clearLoadName(path_);
     const auto path = internal::resolveLoadPath(filePath);
     LoadResult r = loadFileViaMiniaudio(path, ma_encoding_format_mp3, "MP3", *this);
@@ -392,6 +465,7 @@ LoadResult SoundBuffer::loadMp3(const fs::path& filePath) {
 }
 
 LoadResult SoundBuffer::loadFlac(const fs::path& filePath) {
+    async_.cancel();
     internal::clearLoadName(path_);
     const auto path = internal::resolveLoadPath(filePath);
     LoadResult r = loadFileViaMiniaudio(path, ma_encoding_format_flac, "FLAC", *this);
@@ -400,6 +474,7 @@ LoadResult SoundBuffer::loadFlac(const fs::path& filePath) {
 }
 
 LoadResult SoundBuffer::loadWavFromMemory(const void* data, size_t dataSize) {
+    async_.cancel();
     internal::clearLoadName(path_);
     return decodeMemoryWithMiniaudio(data, dataSize, ma_encoding_format_wav, "WAV", *this)
                ? LoadResult::success()
@@ -407,6 +482,7 @@ LoadResult SoundBuffer::loadWavFromMemory(const void* data, size_t dataSize) {
 }
 
 LoadResult SoundBuffer::loadMp3FromMemory(const void* data, size_t dataSize) {
+    async_.cancel();
     internal::clearLoadName(path_);
     return decodeMemoryWithMiniaudio(data, dataSize, ma_encoding_format_mp3, "MP3", *this)
                ? LoadResult::success()
@@ -414,6 +490,7 @@ LoadResult SoundBuffer::loadMp3FromMemory(const void* data, size_t dataSize) {
 }
 
 LoadResult SoundBuffer::loadFlacFromMemory(const void* data, size_t dataSize) {
+    async_.cancel();
     internal::clearLoadName(path_);
     return decodeMemoryWithMiniaudio(data, dataSize, ma_encoding_format_flac, "FLAC", *this)
                ? LoadResult::success()
@@ -421,6 +498,7 @@ LoadResult SoundBuffer::loadFlacFromMemory(const void* data, size_t dataSize) {
 }
 
 LoadResult SoundBuffer::loadOggFromMemory(const void* data, size_t dataSize) {
+    async_.cancel();
     internal::clearLoadName(path_);
     if (data == nullptr || dataSize == 0) {
         logError("SoundBuffer") << "empty memory range for OGG decode";
@@ -449,6 +527,7 @@ LoadResult SoundBuffer::loadOggFromMemory(const void* data, size_t dataSize) {
 // AAC's file entry is shared; only the decode belongs to the platform.
 // -----------------------------------------------------------------------------
 LoadResult SoundBuffer::loadAac(const fs::path& filePath) {
+    async_.cancel();
     internal::clearLoadName(path_);
     const auto path = internal::resolveLoadPath(filePath);
     auto entry = internal::checkLoadFile(path, "SoundBuffer");
@@ -465,9 +544,14 @@ LoadResult SoundBuffer::loadAac(const fs::path& filePath) {
 // -----------------------------------------------------------------------------
 
 LoadResult SoundBuffer::load(const fs::path& path) {
+    return loadResolved(path, internal::resolveLoadPath(path));
+}
+
+LoadResult SoundBuffer::loadResolved(const fs::path& input, const fs::path& path) {
+    async_.cancel();
     internal::clearLoadName(path_);
     // Lowercase the extension once
-    std::string ext = toLower(getFileExtension(path));
+    std::string ext = toLower(getFileExtension(input));
 
     if (ext == "wav")  return loadWav(path);
     if (ext == "mp3")  return loadMp3(path);
@@ -480,10 +564,10 @@ LoadResult SoundBuffer::load(const fs::path& path) {
     auto entry = internal::checkLoadFile(internal::resolveLoadPath(path), "SoundBuffer");
     if (!entry) return entry;
     logError("SoundBuffer") << "unsupported extension '." << ext << "' for "
-                            << path;
+                            << input;
     return LoadResult::fail(LoadError::UnsupportedFormat,
                             "unsupported extension '." + ext + "' for " +
-                            internal::pathToDisplayUtf8(path));
+                            internal::pathToDisplayUtf8(input));
 }
 
 } // namespace trussc

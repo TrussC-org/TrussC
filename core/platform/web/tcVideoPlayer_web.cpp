@@ -21,6 +21,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
     const double deadline = emscripten_get_now() + internal::webLoadTimeoutMSecs;
     std::string pathStr = internal::pathToUtf8(path);
     // Create video element in JavaScript
+    // Bound (security): the file path is embedded in a fixed-size load script to bound temporary storage. Overflow truncates the script via snprintf; no explicit truncation error is returned.
     char script[8192];
     snprintf(script, sizeof(script), R"JS(
         (function() {

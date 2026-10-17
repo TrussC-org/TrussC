@@ -4,6 +4,15 @@
 
 #include "tcxBox2dWorld.h"
 #include "tcxBox2dBody.h"
+// The Mod constructors initialize deprecated event aliases internally.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#include "tcxBox2dMod.h"
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 #include "tcxCollisionManager.h"
 
 namespace tcx::box2d {
@@ -14,48 +23,59 @@ float World::scale = 30.0f;
 // =============================================================================
 // Constructor / Destructor
 // =============================================================================
-World::World() = default;
+namespace detail {
+DispatchState::DispatchState() : manager(std::make_unique<CollisionManager>()) {}
+DispatchState::~DispatchState() = default;
+void DispatchState::SayGoodbye(b2Fixture* fixture) {
+    b2Body* body = fixture->GetBody();
+    auto* owner = reinterpret_cast<BodyOwner*>(body->GetUserData().pointer);
+    body->GetUserData().pointer = 0;
+    if (owner) owner->onWorldReleased();
+    manager->forget(body); // includes ownerless endpoints and active Exit frames
+    if (world && world->groundBody_ == body) world->groundBody_ = nullptr;
+    if (world && world->dragAnchorBody_ == body) world->dragAnchorBody_ = nullptr;
+    if (delegate) delegate->SayGoodbye(fixture);
+}
+void DispatchState::SayGoodbye(b2Joint* joint) {
+    if (world && world->mouseJoint_ == joint) world->mouseJoint_ = nullptr;
+    if (delegate) delegate->SayGoodbye(joint);
+}
+} // namespace detail
+
+World::World() : dispatch_(std::make_shared<detail::DispatchState>()) {
+    dispatch_->world = this;
+    dispatch_->manager->state_ = dispatch_;
+}
 
 World::~World() {
+    dispatch_->alive = false;
+    dispatch_->token.reset();
+    updateListener_.disconnect();
+    contactRouter_.beganL.disconnect();
+    contactRouter_.stayL.disconnect();
+    contactRouter_.endedL.disconnect();
     clear();
+    dispatch_->physics = nullptr;
+    dispatch_->world = nullptr;
+    world_.reset();
 }
 
-World::World(World&& other) noexcept
-    : world_(std::move(other.world_))
-    , collisionManager_(std::move(other.collisionManager_))
-    , timeStep_(other.timeStep_)
-    , velocityIterations_(other.velocityIterations_)
-    , positionIterations_(other.positionIterations_)
-    , autoUpdate_(other.autoUpdate_)
-    , accumulator_(other.accumulator_)
-    , lastStepFrame_(other.lastStepFrame_)
-    , alive_(std::move(other.alive_))
-    , groundBody_(other.groundBody_)
-{
-    other.groundBody_ = nullptr;
-    // The moved-from listener captured &other; drop it and bind a fresh one here.
-    other.updateListener_ = tc::EventListener();
-    refreshAutoUpdate();
-}
-
-World& World::operator=(World&& other) noexcept {
-    if (this != &other) {
-        clear();
-        world_ = std::move(other.world_);
-        collisionManager_ = std::move(other.collisionManager_);
-        timeStep_ = other.timeStep_;
-        velocityIterations_ = other.velocityIterations_;
-        positionIterations_ = other.positionIterations_;
-        autoUpdate_ = other.autoUpdate_;
-        accumulator_ = other.accumulator_;
-        lastStepFrame_ = other.lastStepFrame_;
-        alive_ = std::move(other.alive_);
-        groundBody_ = other.groundBody_;
-        other.groundBody_ = nullptr;
-        other.updateListener_ = tc::EventListener();
-        refreshAutoUpdate();
-    }
-    return *this;
+void World::ensureContactRouter() {
+    if (contactRouter_.beganL) return;
+    auto* cm = getCollisionManager();
+    if (!cm) return;
+    std::weak_ptr<detail::DispatchState> weak = dispatch_;
+    // Capture only the World identity and independently retained dispatch state.
+    // A routed listener may delete this World (including its router handles).
+    contactRouter_.beganL = cm->contactBegan.listen([wp = this, weak](WorldContact& c) {
+        if (auto s = weak.lock(); s && s->alive) detail::routeContact(wp, c, 0);
+    });
+    contactRouter_.stayL = cm->contactStay.listen([wp = this, weak](WorldContact& c) {
+        if (auto s = weak.lock(); s && s->alive) detail::routeContact(wp, c, 1);
+    });
+    contactRouter_.endedL = cm->contactEnded.listen([wp = this, weak](WorldContact& c) {
+        if (auto s = weak.lock(); s && s->alive) detail::routeContact(wp, c, 2);
+    });
 }
 
 // =============================================================================
@@ -69,6 +89,8 @@ void World::setup(float gravityX, float gravityY) {
     // Clean up existing state if setup() is called multiple times
     if (world_) {
         clear();
+        ++dispatch_->setupGeneration;
+        world_.reset();
     }
 
     // Reset groundBody_ to ensure clean state
@@ -79,8 +101,11 @@ void World::setup(float gravityX, float gravityY) {
     world_ = std::make_unique<b2World>(g);
 
     // Create and register collision manager
-    collisionManager_ = std::make_unique<CollisionManager>();
-    world_->SetContactListener(collisionManager_.get());
+    if (!dispatch_->manager) dispatch_->manager = std::make_unique<CollisionManager>();
+    dispatch_->manager->state_ = dispatch_;
+    dispatch_->physics = world_.get();
+    world_->SetContactListener(dispatch_->manager.get());
+    world_->SetDestructionListener(dispatch_.get());
 
     // Fresh stepping state, and (re)arm the auto-update listener.
     accumulator_ = 0.0f;
@@ -92,33 +117,40 @@ void World::setup(float gravityX, float gravityY) {
 // Simulation
 // =============================================================================
 void World::update() {
-    if (!world_) return;
-
-    // Step at most once per frame. Auto-update calls this at events().update;
-    // legacy code that also calls world.update() in its own update() then
-    // dedupes to a no-op here (and never double-counts dt below).
+    auto state = dispatch_;
+    if (!world_ || state->depth) return;
     uint64_t frame = tc::getFrameCount();
     if (frame == lastStepFrame_) return;
     lastStepFrame_ = frame;
-
-    // Framerate-independent: accumulate real time, step in FIXED sub-steps so
-    // Box2D stays stable regardless of display rate.
     accumulator_ += static_cast<float>(tc::getDeltaTime());
-    const int MAX_SUBSTEPS = 8;  // spiral-of-death guard (e.g. after a stall)
+    const uint64_t generation = state->setupGeneration;
+    ++state->manager->journal_.updateCounter;
+    state->manager->drain(); // raw Steps, including a zero-sub-step update
+    if (!state->alive) return;
+    if (state->setupGeneration != generation) return;
+    const int MAX_SUBSTEPS = 8;
     int n = 0;
     while (accumulator_ >= timeStep_ && n < MAX_SUBSTEPS) {
-        world_->Step(timeStep_, velocityIterations_, positionIterations_);
-        // Contacts that ended inside the step and did not begin again
-        if (collisionManager_) collisionManager_->flushPendingExits();
-        accumulator_ -= timeStep_;
+        // Only changed classic flags are synchronized. Per-fixture overrides
+        // survive an unchanged flag, including the default false.
+        for (auto* body = world_->GetBodyList(); body; body = body->GetNext()) {
+            auto* owner = reinterpret_cast<detail::BodyOwner*>(body->GetUserData().pointer);
+            if (auto* classic = dynamic_cast<Body*>(owner)) {
+                if (auto* collider = classic->getCollider()) collider->syncTriggerMode();
+            }
+        }
+        state->manager->beginStep();
+        const float step = timeStep_;
+        world_->Step(step, velocityIterations_, positionIterations_);
+        state->manager->endStep(); // close BEFORE callbacks/wrapper teardown
+        state->manager->drain();
+        if (!state->alive) return; // never read this after listener deletion
+        if (state->setupGeneration != generation) return;
+        accumulator_ -= step;
         ++n;
     }
-    if (n >= MAX_SUBSTEPS) accumulator_ = 0.0f;  // drop the backlog
-
-    // Dispatch onCollisionStay events
-    if (collisionManager_) {
-        collisionManager_->update();
-    }
+    if (n >= MAX_SUBSTEPS) accumulator_ = 0.0f;
+    state->manager->dispatchStay();
 }
 
 void World::setAutoUpdate(bool on) {
@@ -179,9 +211,9 @@ void World::createBounds(float x, float y, float width, float height) {
 
     // Remove existing bounds
     if (groundBody_) {
-        if (collisionManager_) collisionManager_->forget(groundBody_);
+        if (dispatch_->manager) dispatch_->manager->forget(groundBody_);
         world_->DestroyBody(groundBody_);
-        if (collisionManager_) collisionManager_->forgetBody(groundBody_);
+        if (dispatch_->manager) dispatch_->manager->forgetBody(groundBody_);
         groundBody_ = nullptr;
     }
 
@@ -227,9 +259,9 @@ void World::createGround(float y, float width) {
     if (!world_) return;
 
     if (groundBody_) {
-        if (collisionManager_) collisionManager_->forget(groundBody_);
+        if (dispatch_->manager) dispatch_->manager->forget(groundBody_);
         world_->DestroyBody(groundBody_);
-        if (collisionManager_) collisionManager_->forgetBody(groundBody_);
+        if (dispatch_->manager) dispatch_->manager->forgetBody(groundBody_);
         groundBody_ = nullptr;
     }
 
@@ -250,23 +282,61 @@ void World::createGround() {
 // =============================================================================
 // Body Management
 // =============================================================================
-void World::clear() {
-    if (world_) {
-        // Destroy mouse joint
-        endDrag();
+void World::attachOwner(b2Body* body, detail::BodyOwner& owner) {
+    static uint64_t nextGeneration = 0;  // physics objects live on the main thread
+    owner.generation = ++nextGeneration;
+    body->GetUserData().pointer = reinterpret_cast<uintptr_t>(&owner);
+}
 
-        // Remove all bodies
-        b2Body* body = world_->GetBodyList();
-        while (body) {
-            b2Body* next = body->GetNext();
-            if (collisionManager_) collisionManager_->forget(body);
-            world_->DestroyBody(body);
-            if (collisionManager_) collisionManager_->forgetBody(body);
-            body = next;
+detail::BodyOwner* World::findOwner(b2Body* body) const {
+    // A listener can destroy a body, then create another at the same address.
+    // Compare against live bodies before reading any user data.
+    if (world_ && body) {
+        for (b2Body* live = world_->GetBodyList(); live; live = live->GetNext()) {
+            if (live == body) {
+                return reinterpret_cast<detail::BodyOwner*>(live->GetUserData().pointer);
+            }
         }
-        groundBody_ = nullptr;
-        dragAnchorBody_ = nullptr;
     }
+    return nullptr;
+}
+
+void World::releaseBody(b2Body* body, ExitDelivery delivery) {
+    if (!world_ || !body) return;
+    auto state = dispatch_;
+    auto operation = state->manager->mutation(delivery == ExitDelivery::Deferred);
+    if (mouseJoint_ && mouseJoint_->GetBodyB() == body) endDrag();
+    auto* owner = reinterpret_cast<detail::BodyOwner*>(body->GetUserData().pointer);
+    body->GetUserData().pointer = 0;
+    if (owner) owner->onWorldReleased();
+    state->manager->forget(body); // also covers explicit fixture/owner release
+    world_->DestroyBody(body);
+    state->manager->forget(body);
+    // No World/owner access after delivery; a listener can delete either.
+    if (delivery == ExitDelivery::Immediate) state->manager->drain();
+}
+
+void World::clear() {
+    // Cancel active/suspended payloads before the first object is released.
+    dispatch_->manager->clearContacts();
+    endDrag();
+    if (world_) {
+        // Invalidate every borrowed handle before Box2D releases any objects.
+        for (b2Body* body = world_->GetBodyList(); body; body = body->GetNext()) {
+            auto* owner = reinterpret_cast<detail::BodyOwner*>(body->GetUserData().pointer);
+            body->GetUserData().pointer = 0;
+            if (owner) owner->onWorldReleased();
+        }
+        // Clear is silent, including any Exits queued by earlier owner teardown.
+        // Keep the world, its settings and its auto-update subscription intact.
+        // Restore whatever listener was registered (a user proxy included).
+        b2ContactListener* listener = world_->GetContactManager().m_contactListener;
+        world_->SetContactListener(nullptr);
+        while (b2Body* body = world_->GetBodyList()) world_->DestroyBody(body);
+        world_->SetContactListener(listener);
+    }
+    groundBody_ = nullptr;
+    dragAnchorBody_ = nullptr;
 }
 
 int World::getBodyCount() const {
@@ -291,11 +361,8 @@ Body* World::getBodyAtPoint(float px, float py) {
 
         for (b2Fixture* f = b->GetFixtureList(); f; f = f->GetNext()) {
             if (f->TestPoint(point)) {
-                // Get Body* from UserData
-                uintptr_t ptr = b->GetUserData().pointer;
-                if (ptr != 0) {
-                    return reinterpret_cast<Body*>(ptr);
-                }
+                auto* owner = reinterpret_cast<detail::BodyOwner*>(b->GetUserData().pointer);
+                if (auto* classic = dynamic_cast<Body*>(owner)) return classic;
             }
         }
     }
@@ -310,7 +377,7 @@ void World::startDrag(Body* body, const tc::Vec2& target) {
 }
 
 void World::startDrag(Body* body, float tx, float ty) {
-    if (!world_ || !body || !body->getBody()) return;
+    if (!world_ || !body || !body->getBody() || body->getBody()->GetWorld() != world_.get()) return;
 
     // Destroy existing joint if any
     endDrag();

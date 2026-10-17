@@ -209,6 +209,14 @@ The video counterpart of `tc_save_screenshot` — capture the window to a video 
 
 Tools that operate the app require a Control grant.
 
+Key press/release accepts only the 120 defined, nonzero `sapp_keycode` values
+(including uppercase ASCII letters); undefined values and non-integer JSON
+values are rejected. Synthetic input can therefore hold at most 120 keys.
+Mouse buttons must be integers 0–2 (`tc_mouse_move` also accepts -1 or omission
+for a plain move). Mouse coordinates and scroll deltas must be finite floats,
+and modifier flags must be JSON booleans. Invalid input returns JSON-RPC error
+`-32602` before any input callback or state change, including modifier keys.
+
 | Tool | Arguments | Description |
 |------|-----------|-------------|
 | `tc_quit` | (none) | Quit the application gracefully |

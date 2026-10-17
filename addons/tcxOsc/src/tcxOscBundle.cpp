@@ -93,6 +93,7 @@ OscBundle OscBundle::fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok
         pos += 4;
 
         // An element larger than the data left is truncated
+        // Bound (security): untrusted element lengths must stay within the received packet. Overflow rejects the bundle.
         if (elementSize > size - pos) return OscBundle();
 
         const uint8_t* elementData = data + pos;

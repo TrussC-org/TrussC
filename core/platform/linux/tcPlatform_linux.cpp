@@ -118,6 +118,7 @@ void setWindowSizeLogical(int width, int height) {
 }
 
 fs::path getExecutablePath() {
+    // Bound (platform): the OS executable path uses PATH_MAX storage. Overflow returns the truncated path from readlink.
     char path[PATH_MAX];
     ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
     if (len != -1) {
@@ -182,6 +183,12 @@ fs::path internal::platformAppBundlePath() {
 // Screenshot Functions (OpenGL)
 // ---------------------------------------------------------------------------
 
+std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
+    if (!ctx.isMain && ctx.fbWidth > 0 && ctx.fbHeight > 0)
+        return {size_t(ctx.fbWidth), size_t(ctx.fbHeight)};
+    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+}
+
 bool captureWindow(Pixels& outPixels) {
     // Read back the CURRENT window's framebuffer. A secondary window's context
     // records its own swapchain (framebuffer id + size) in lastSwapchain, and the
@@ -239,10 +246,14 @@ bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
 }
 
 bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    return writeScreenshotPixels(pixels, requestedPath).ok();
+}
+
+SaveResult internal::writeScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
     const auto path = internal::resolveScreenshotPath(requestedPath);
     return internal::atomicWrite(path, [&](std::FILE* file) {
         return internal::writePixelsEncoded(file, pixels, toLower(getFileExtension(path)), path);
-    }, "Screenshot").ok();
+    }, "Screenshot", true);
 }
 
 // ---------------------------------------------------------------------------

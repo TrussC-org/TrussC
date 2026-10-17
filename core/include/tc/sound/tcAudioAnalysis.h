@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace trussc {
@@ -23,6 +24,7 @@ struct AudioOutputSnapshot {
 class AudioOutputRing {
 public:
     AudioOutputRing(int sampleRate, int channels)
+        // Bound (realtime): the audio callback must not allocate; a preallocated history holds two seconds plus overwrite slack. Overflow overwrites the oldest samples.
         : sampleRate_(sampleRate), channels_(channels), capacity_(size_t(sampleRate) * 2),
           storageCapacity_(capacity_ + (size_t(sampleRate) + 1) / 2),
           samples_(new std::atomic<uint32_t>[storageCapacity_ * size_t(channels)]{}) {}
@@ -46,17 +48,24 @@ public:
         framesWritten_.store(start + frames, std::memory_order_release);
     }
 
-    AudioOutputSnapshot snapshot(size_t frames) const {
+    std::pair<size_t, size_t> snapshotShape(size_t frames) const {
+        return {std::min(frames, capacity_), size_t(channels_)};
+    }
+
+    AudioOutputSnapshot snapshot(size_t frames, void (*admit)(size_t, size_t) = nullptr) const {
         AudioOutputSnapshot result;
         result.sampleRate = sampleRate_;
         result.channels = channels_;
         result.capacity = capacity_;
         frames = std::min(frames, capacity_);
+        // Bound (security): external snapshot copies need credits before vector growth. Overflow rejects the request and is counted.
+        if (admit) admit(frames, size_t(channels_));
         result.samples.resize(frames * size_t(channels_));
         // Atomic payloads make even an overlapping read data-race-free.
         // Only reject writes that can overwrite the copied range. Half a second
         // of private slack lets even a full two-second read overlap callbacks.
         // Allocation stays outside the bounded retries; the producer never waits.
+        // Bound (realtime): MCP snapshot retries must not chase a continuously writing callback indefinitely. Overflow returns an empty snapshot after three failed copies.
         for (int attempt = 0; attempt < 3; ++attempt) {
             result.framesWritten = framesWritten_.load(std::memory_order_acquire);
             const size_t count = size_t(std::min<uint64_t>(frames, result.framesWritten));
@@ -87,7 +96,7 @@ private:
 };
 
 struct AudioAnalysisAccess {
-    static AudioOutputSnapshot snapshot(AudioEngine& engine, size_t frames);
+    static AudioOutputSnapshot snapshot(AudioEngine& engine, size_t frames, void (*admit)(size_t, size_t) = nullptr);
 };
 
 } // namespace internal

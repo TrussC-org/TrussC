@@ -870,6 +870,12 @@ jobs:
           python3 tools/tests/test_test_generated_files.py -v
           python3 tools/check_test_generated_files.py
 
+      - name: Python text encoding check
+        if: always()
+        run: |
+          python3 tools/check_python_encoding.py
+          python3 -m unittest discover -s tools/tests -p test_python_encoding.py -v
+
       - name: core logging check (no printf / cerr / cout / NSLog)
         if: always()
         run: python3 tools/check_core_logging.py

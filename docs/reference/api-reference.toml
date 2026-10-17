@@ -3142,9 +3142,9 @@ description.ja = "画像リソースを解放"
 description.ko = "이미지 리소스를 해제"
 
 ["Image::crop"]
-description.en = "Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge."
-description.ja = "(x, y) から (w x h) を切り出し。 範囲外は最近房 (clamp-to-edge) で埋める"
-description.ko = "(x, y)에서 (w x h) 영역 자르기. 범위 밖은 클램프-투-엣지로 채움"
+description.en = "Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge. Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "(x, y) から (w x h) を切り出し。 範囲外は最近房 (clamp-to-edge) で埋める 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "(x, y)에서 (w x h) 영역 자르기. 범위 밖은 클램프-투-엣지로 채움 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["Image::getChannels"]
 description.en = "Get number of channels"
@@ -3182,9 +3182,9 @@ description.ja = "幅を取得"
 description.ko = "너비를 얻음"
 
 ["Image::halve"]
-description.en = "Replace with 2x2 box-averaged half. Gamma-correct for U8."
-description.ja = "2x2 ボックス平均で半分に縮小 (U8 はガンマ補正)"
-description.ko = "2x2 박스 평균으로 절반 크기로 축소 (U8은 감마 보정)"
+description.en = "Replace with 2x2 box-averaged half. Gamma-correct for U8. Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "2x2 ボックス平均で半分に縮小 (U8 はガンマ補正) 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "2x2 박스 평균으로 절반 크기로 축소 (U8은 감마 보정) 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["Image::isAllocated"]
 description.en = "Check if allocated"
@@ -3194,9 +3194,9 @@ description.ko = "할당되었는지 확인"
 ["Image::load"]
 category = "graphics_texture"
 keywords = ["open", "read", "file"]
-description.en = "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels."
-description.ja = "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)。GPU テクスチャを作るのでメインスレッド専用。バックグラウンドで読むなら、ワーカースレッドで `Pixels::load` し、メインスレッドで `Texture::allocate(pixels)` する。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う。GPU 使用時、幅または高さがテクスチャ上限を超えると TooLarge。ヘッドレスでは CPU ピクセルを保持する。"
-description.ko = "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장). GPU 텍스처를 생성하므로 메인 스레드 전용. 백그라운드에서 로드하려면 워커 스레드에서 `Pixels::load` 후 메인 스레드에서 `Texture::allocate(pixels)`. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용. GPU 사용 시 너비나 높이가 텍스처 한도를 초과하면 TooLarge를 반환한다. 헤드리스에서는 CPU 픽셀을 유지한다."
+description.en = "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. Use `loadAsync` for background loading with deferred main-thread application. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels."
+description.ja = "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)。GPU テクスチャを作るのでメインスレッド専用。バックグラウンド読み込みには `loadAsync` を使い、後のフレームでメインに反映する。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う。GPU 使用時、幅または高さがテクスチャ上限を超えると TooLarge。ヘッドレスでは CPU ピクセルを保持する。"
+description.ko = "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장). GPU 텍스처를 생성하므로 메인 스레드 전용. 백그라운드 로드에는 `loadAsync`를 사용하여 이후 프레임의 메인 스레드에서 반영한다. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용. GPU 사용 시 너비나 높이가 텍스처 한도를 초과하면 TooLarge를 반환한다. 헤드리스에서는 CPU 픽셀을 유지한다."
 related = ["Pixels::load", "Texture::allocate"]
 
 ["Image::loadFromMemory"]
@@ -3205,24 +3205,24 @@ description.ja = "メモリから画像を読み込む。`mipmaps=true` でミ�
 description.ko = "메모리에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성. 메인 스레드 전용. 백그라운드 디코딩은 `Pixels::loadFromMemory`로 GPU 사용 시 너비나 높이가 텍스처 한도를 초과하면 TooLarge를 반환한다. 헤드리스에서는 CPU 픽셀을 유지한다."
 
 ["Image::mirror"]
-description.en = "Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°."
-description.ja = "画像を反転。 horizontal=true で左右、 vertical=true で上下、 両方 true で 180度回転"
-description.ko = "이미지 뒤집기. horizontal=true 좌우, vertical=true 상하, 둘 다 true는 180도 회전"
+description.en = "Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°. Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "画像を反転。 horizontal=true で左右、 vertical=true で上下、 両方 true で 180度回転 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "이미지 뒤집기. horizontal=true 좌우, vertical=true 상하, 둘 다 true는 180도 회전 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["Image::mirrorH"]
-description.en = "Mirror horizontally (alias for mirror(true, false))"
-description.ja = "水平反転 (mirror(true, false) のエイリアス)"
-description.ko = "수평 뒤집기 (mirror(true, false) 별칭)"
+description.en = "Mirror horizontally (alias for mirror(true, false)) Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "水平反転 (mirror(true, false) のエイリアス) 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "수평 뒤집기 (mirror(true, false) 별칭) 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["Image::mirrorV"]
-description.en = "Mirror vertically (alias for mirror(false, true))"
-description.ja = "垂直反転 (mirror(false, true) のエイリアス)"
-description.ko = "수직 뒤집기 (mirror(false, true) 별칭)"
+description.en = "Mirror vertically (alias for mirror(false, true)) Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "垂直反転 (mirror(false, true) のエイリアス) 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "수직 뒤집기 (mirror(false, true) 별칭) 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["Image::resize"]
-description.en = "Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8. Use FBO sampling for fast paths."
-description.ja = "高品質リサイズ (縮小=BoxArea / 拡大=Catmull-Rom bicubic、 U8はガンマ補正)。 高速版が必要なら FBO 経由で"
-description.ko = "고품질 리사이즈 (축소=BoxArea / 확대=Catmull-Rom 바이큐빅, U8 감마 보정). 빠른 경로는 FBO 활용"
+description.en = "Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8. Use FBO sampling for fast paths. Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "高品質リサイズ (縮小=BoxArea / 拡大=Catmull-Rom bicubic、 U8はガンマ補正)。 高速版が必要なら FBO 経由で 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "고품질 리사이즈 (축소=BoxArea / 확대=Catmull-Rom 바이큐빅, U8 감마 보정). 빠른 경로는 FBO 활용 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["Image::save"]
 description.en = "Save image pixels. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss."
@@ -3230,9 +3230,9 @@ description.ja = "SaveResult を返す。<file>.tmp に書き込み、close を�
 description.ko = "SaveResult를 반환한다. <file>.tmp에 쓰고 닫기를 확인한 뒤 기존 파일을 교체한다. 실패하면 기존 파일을 보존하고 임시 파일을 삭제한다. 상대 경로는 getDataPath()로 해석하고 상위 폴더를 만든다. 번들 내부는 AccessDenied. 전원 차단 시 영속성을 보장하지 않는다."
 
 ["Image::setColor"]
-description.en = "Set pixel color at position (marks image as dirty)"
-description.ja = "指定位置のピクセル色を設定（ダーティフラグが立つ）"
-description.ko = "지정 위치의 픽셀 색상을 설정 (이미지를 dirty로 표시)"
+description.en = "Set pixel color at position (marks image as dirty) Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "指定位置のピクセル色を設定（ダーティフラグが立つ） 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "지정 위치의 픽셀 색상을 설정 (이미지를 dirty로 표시) 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["Image::setDirty"]
 description.en = "Mark image as needing update"
@@ -5350,14 +5350,14 @@ description.ja = "マイクデバイスが開いてキャプチャ中の間 true
 description.ko = "마이크 디바이스가 열려 캡처 중일 때 true"
 
 ["MicInput::start"]
-description.en = "Open the microphone device at the given sample rate and begin capturing. Returns false on failure."
-description.ja = "指定サンプルレートでマイクデバイスを開き、キャプチャを開始。失敗時 false を返す"
-description.ko = "지정한 샘플레이트로 마이크 디바이스를 열고 캡처를 시작. 실패 시 false 반환"
+description.en = "Open the microphone device at the given sample rate and begin capturing. Native start waits for its lifecycle thread startup result, returns false on failure, and emits no onStart. Web start returns true when the request is submitted; use isStarting/isRunning for actual readiness and startAsync/onStart for failure details. Web requires a secure context and a user gesture. On macOS/iOS, undecided microphone consent requests access and returns false immediately with retry guidance; call start() again after granting. Denied/restricted access fails before capture initialization."
+description.ja = "指定サンプルレートでマイク入力を開始。ネイティブではライフサイクルスレッドの起動結果を待ち、失敗時 false。onStart は通知しない。Web の true は要求の送信を表し、実際の準備完了は isStarting/isRunning、失敗の詳細は startAsync/onStart で確認する。Web はセキュアコンテキストとユーザー操作が必要。 macOS/iOS でマイク権限が未決定なら許可を要求して直ちに false と再試行案内を返す。許可後に start() を再度呼ぶ。拒否・制限時はキャプチャ初期化前に失敗する。"
+description.ko = "지정한 샘플레이트로 마이크 캡처를 시작한다. 네이티브는 라이프사이클 스레드의 시작 결과를 기다리며 실패 시 false를 반환하고 onStart를 내지 않는다. Web의 true는 요청 제출을 뜻한다. 실제 준비 상태는 isStarting/isRunning, 오류 상세는 startAsync/onStart로 확인한다. Web은 보안 컨텍스트와 사용자 동작이 필요하다. macOS/iOS에서 마이크 권한이 미결정이면 접근을 요청하고 즉시 false와 재시도 안내를 반환한다. 허용한 뒤 start()를 다시 호출한다. 거부·제한 상태는 캡처 초기화 전에 실패한다."
 
 ["MicInput::stop"]
-description.en = "Stop capture and close the microphone device."
-description.ja = "キャプチャを停止してマイクデバイスを閉じる"
-description.ko = "캡처를 정지하고 마이크 디바이스를 닫음"
+description.en = "Cancel capture/startup immediately and post device teardown without waiting. No cancellation event is emitted. Native teardown runs on the thread that opened the device; application exit waits for retirement."
+description.ja = "入力・起動待ちを即座に取り消し、待機せずデバイスの後始末を依頼する。取消イベントは通知しない。ネイティブの破棄は初期化と同じスレッドで実行し、アプリ終了時に後始末を待つ。"
+description.ko = "캡처·시작 대기를 즉시 취소하고 기다리지 않고 장치 정리를 요청한다. 취소 이벤트는 내지 않는다. 네이티브 해제는 초기화한 스레드에서 실행하며 앱 종료 시 정리를 기다린다."
 
 ["MixMode"]
 description.en = "Sound channel mixing: Auto (match the output) or DownmixMono."
@@ -8194,9 +8194,9 @@ description.ko = "listDevices()의 deprecated 별칭"
 details = "Kept as a backward-compatible alias; new code should call `listDevices()` (same behavior). Scheduled for removal in v1.0.0."
 
 ["Serial::getDroppedByteCount"]
-description.en = "Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count"
-description.ja = "直近の setup() 以降、1 MiB の TrussC バッファから破棄された受信バイト数。flush と close では累計を保持"
-description.ko = "마지막 setup() 이후 1 MiB TrussC 버퍼에서 버린 수신 바이트 수. flush와 close는 누적 수를 유지"
+description.en = "Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count. Device input or a stalled reader can fill the deque; a fixed cap keeps memory finite. Overflow drops the oldest bytes and increments the discard count."
+description.ja = "直近の setup() 以降、1 MiB の TrussC バッファから破棄された受信バイト数。flush と close では累計を保持。 デバイス入力や読み取りの停止で受信キューが満杯になるため、容量を制限してメモリ使用量を有限に保つ。 あふれた場合は最古のバイトから破棄し、破棄カウントを増やす。"
+description.ko = "마지막 setup() 이후 1 MiB TrussC 버퍼에서 버린 수신 바이트 수. flush와 close는 누적 수를 유지. 장치 입력이나 멈춘 리더가 수신 큐를 채울 수 있으므로 고정 용량으로 메모리 사용량을 제한한다. 넘치면 가장 오래된 바이트부터 버리고 폐기 횟수를 늘린다."
 details.en = "Counts only overflow discards, on desktop and Android. Reading and intentional flushing do not increase it. Moving a Serial carries its counter. Windows overrun/RX overflow flags are logged, but the driver does not supply an exact lost-byte count; those losses cannot be included. Framing/parity errors are log-only."
 details.ja = "デスクトップと Android で、容量超過による破棄だけを数える。読み取りや意図した flush では増えない。Serial のムーブでは累計も移る。Windows の overrun/RX overflow は警告するが、ドライバが正確な消失バイト数を提供しないので累計には含められない。framing/parity はログのみ。"
 details.ko = "데스크톱과 Android에서 용량 초과로 버린 바이트만 센다. 읽기나 의도적인 flush로는 증가하지 않는다. Serial 이동 시 누적 수도 이동한다. Windows overrun/RX overflow 플래그는 경고하지만 드라이버가 정확한 손실 바이트 수를 제공하지 않아 누적 수에 포함할 수 없다. framing/parity 오류는 로그만 남긴다."
@@ -9090,14 +9090,14 @@ description.ko = "Eager 사운드 소스: 파일 전체를 interleaved float PCM
 related = ["SoundStream", "SoundSource", "Sound", "Wave"]
 
 ["SoundBuffer::applyADSR"]
-description.en = "Apply an ADSR amplitude envelope to the buffer in place (attack / decay / release in seconds, sustainLevel 0-1)."
-description.ja = "バッファにADSR振幅エンベロープをin-placeで適用(attack / decay / releaseは秒、sustainLevelは0-1)"
-description.ko = "버퍼에 ADSR 진폭 엔벨로프를 in-place로 적용(attack / decay / release는 초, sustainLevel은 0-1)"
+description.en = "Apply an ADSR amplitude envelope to the buffer in place (attack / decay / release in seconds, sustainLevel 0-1). Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "バッファにADSR振幅エンベロープをin-placeで適用(attack / decay / releaseは秒、sustainLevelは0-1) 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "버퍼에 ADSR 진폭 엔벨로프를 in-place로 적용(attack / decay / release는 초, sustainLevel은 0-1) 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["SoundBuffer::clip"]
-description.en = "Hard-clip all samples into the -1.0 .. 1.0 range."
-description.ja = "全サンプルを-1.0 .. 1.0の範囲にhard-clipする"
-description.ko = "모든 샘플을 -1.0 .. 1.0 범위로 hard-clip"
+description.en = "Hard-clip all samples into the -1.0 .. 1.0 range. Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "全サンプルを-1.0 .. 1.0の範囲にhard-clipする 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "모든 샘플을 -1.0 .. 1.0 범위로 hard-clip 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["SoundBuffer::createAdtsHeader"]
 description.en = "Write a 7-byte ADTS header for one raw AAC frame into header (AAC-in-MOV container helper)."
@@ -9219,9 +9219,9 @@ description.ja = "メモリバッファからWAVデータをデコード"
 description.ko = "메모리 버퍼에서 WAV 데이터를 디코딩"
 
 ["SoundBuffer::mixFrom"]
-description.en = "Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed. offsetSamples is in frames (samples per channel, like numSamples). Both buffers must have the same channel count; otherwise nothing is mixed and an error is logged."
-description.ja = "別のバッファをoffsetSamplesから加算ミックスし、必要ならこのバッファを拡張する。offsetSamplesはフレーム単位(numSamplesと同じチャンネルあたりのサンプル数)。両バッファのチャンネル数が同じである必要があり、異なる場合は何もミックスせずエラーをログに出す"
-description.ko = "다른 버퍼를 offsetSamples부터 가산 믹스하고, 필요하면 이 버퍼를 확장. offsetSamples는 프레임 단위(numSamples와 같은 채널당 샘플 수). 두 버퍼의 채널 수가 같아야 하며, 다르면 아무것도 믹스하지 않고 에러를 로그에 남김"
+description.en = "Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed. offsetSamples is in frames (samples per channel, like numSamples). Both buffers must have the same channel count; otherwise nothing is mixed and an error is logged. Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "別のバッファをoffsetSamplesから加算ミックスし、必要ならこのバッファを拡張する。offsetSamplesはフレーム単位(numSamplesと同じチャンネルあたりのサンプル数)。両バッファのチャンネル数が同じである必要があり、異なる場合は何もミックスせずエラーをログに出す 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "다른 버퍼를 offsetSamples부터 가산 믹스하고, 필요하면 이 버퍼를 확장. offsetSamples는 프레임 단위(numSamples와 같은 채널당 샘플 수). 두 버퍼의 채널 수가 같아야 하며, 다르면 아무것도 믹스하지 않고 에러를 로그에 남김 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["SoundBuffer::numSamples"]
 description.en = "Number of samples per channel (frame count)"
@@ -9730,9 +9730,9 @@ details.ja = "接続・受信・送信をキャンセルできるよう稼働中
 details.ko = "연결/수신/전송 취소를 위해 동작 중 소켓은 비차단 유지. 동작 중 차단 모드 요청은 경고 후 무시."
 
 ["TcpClient::setReceiveBufferSize"]
-description.en = "Set the receive buffer size"
-description.ja = "受信バッファサイズを設定"
-description.ko = "수신 버퍼 크기를 설정"
+description.en = "Set the receive buffer size. Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads."
+description.ja = "受信バッファサイズを設定。 ネットワーク入力を有限サイズに分割して読み、各受信時のメモリ確保量を制限する。 超過分は後続の読み取りで受信する。"
+description.ko = "수신 버퍼 크기를 설정. 네트워크 입력을 유한한 크기로 나누어 읽어 각 수신 메모리 할당량을 제한한다. 초과분은 이후 읽기에서 계속 수신한다."
 
 ["TcpClient::setUseThread"]
 description.en = "Whether to use threads (must be false on Wasm)"
@@ -10005,9 +10005,9 @@ description.ja = "サーバが bind しているポート。start(0) のあと�
 description.ko = "서버가 bind된 포트. start(0) 후에는 OS가 고른 포트, 고정 포트라면 그 포트"
 
 ["TcpServer::getSendAsyncBufferSize"]
-description.en = "The current high-water mark for one client's send queue, in bytes"
-description.ja = "クライアント1つあたりの送信キューの高水位マーク（バイト）"
-description.ko = "클라이언트 하나당 송신 큐의 high-water mark (바이트)"
+description.en = "The current high-water mark for one client's send queue, in bytes. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark."
+description.ja = "クライアント1つあたりの送信キューの高水位マーク（バイト）。 通信相手の停止で送信データが滞留するため、高水位マークでキューのさらなる増大を抑える。 高水位を超えると sendAsync は QueueFull で拒否し、send は待機する。1 回の送信は高水位を超える場合がある。"
+description.ko = "클라이언트 하나당 송신 큐의 high-water mark (바이트). 멈춘 네트워크 피어 때문에 송신 데이터가 쌓일 수 있으므로 상한 기준으로 큐의 추가 증가를 제한한다. 상한 기준을 넘으면 sendAsync는 QueueFull로 거부하고 send는 대기한다. 한 번의 전송은 상한 기준을 넘을 수 있다."
 related = ["TcpServer::setSendAsyncBufferSize"]
 
 ["TcpServer::getSendAsyncPendingBytes"]
@@ -10076,22 +10076,22 @@ keywords = ["timeout", "blocking", "send"]
 details = "The timeout measures silence, not the duration of the send: it restarts every time bytes are accepted, so a peer that keeps draining never trips it however large the payload or slow the link. What it catches is a peer that has stopped reading. Defaults to 60 seconds — long enough that no healthy peer reaches it, short enough that a dead one cannot hold a send open forever; pass 0 to wait indefinitely instead. Applies to every send that starts after the call, on every client. A timeout that fires mid-payload leaves the stream truncated, so the client is disconnected rather than left open for the next send() to splice a fresh message onto a partial one — that completion reports SendError::Disconnected, because the client really has gone. One that fires having written nothing leaves the connection intact and reports SendError::Timeout instead, so a listener can tell a slow peer from a lost one without reading the error message."
 
 ["TcpServer::setSendAsyncBufferSize"]
-description.en = "Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB"
-description.ja = "クライアント1つあたりの送信キューの高水位マークを設定（バイト、0 = 無制限）。既定は16MB"
-description.ko = "클라이언트 하나당 송신 큐의 high-water mark를 바이트로 설정 (0 = 무제한). 기본값 16MB"
+description.en = "Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark."
+description.ja = "クライアント1つあたりの送信キューの高水位マークを設定（バイト、0 = 無制限）。既定は16MB。 通信相手の停止で送信データが滞留するため、高水位マークでキューのさらなる増大を抑える。 高水位を超えると sendAsync は QueueFull で拒否し、send は待機する。1 回の送信は高水位を超える場合がある。"
+description.ko = "클라이언트 하나당 송신 큐의 high-water mark를 바이트로 설정 (0 = 무제한). 기본값 16MB. 멈춘 네트워크 피어 때문에 송신 데이터가 쌓일 수 있으므로 상한 기준으로 큐의 추가 증가를 제한한다. 상한 기준을 넘으면 sendAsync는 QueueFull로 거부하고 send는 대기한다. 한 번의 전송은 상한 기준을 넘을 수 있다."
 keywords = ["backpressure", "queue", "limit", "async", "high-water mark"]
 related = ["TcpServer::sendAsync", "TcpServer::getSendAsyncPendingBytes"]
 details = "A mark, not a cap: sendAsync() is refused with QueueFull only when the queue ALREADY holds this much, so a single message of any size still goes through on an empty queue and there is no separate \"message too large\" case — the queue overshoots the mark by at most one message. A full queue does not disconnect anyone; only the idle timeout does. send() waits for room instead of failing, which is why QueueFull is something only sendAsync() can return. The 16 MB default is chosen so a frame streamer learns about back-pressure after a frame or two rather than after a large buffer of latency has piled up; raising it only delays that news."
 
 ["TcpServer::setReceiveBufferSize"]
-description.en = "Set the receive buffer size"
-description.ja = "受信バッファサイズを設定"
-description.ko = "수신 버퍼 크기를 설정"
+description.en = "Set the receive buffer size. Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads."
+description.ja = "受信バッファサイズを設定。 ネットワーク入力を有限サイズに分割して読み、各受信時のメモリ確保量を制限する。 超過分は後続の読み取りで受信する。"
+description.ko = "수신 버퍼 크기를 설정. 네트워크 입력을 유한한 크기로 나누어 읽어 각 수신 메모리 할당량을 제한한다. 초과분은 이후 읽기에서 계속 수신한다."
 
 ["TcpServer::start"]
-description.en = "Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default)"
-description.ja = "ポートで待ち受けを開始。maxClients で同時接続数に上限を付ける（0 = 無制限、既定）"
-description.ko = "포트에서 수신 대기를 시작. maxClients로 동시 접속 수를 제한 (0 = 무제한, 기본값)"
+description.en = "Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default). Untrusted connection floods can retain clients; an optional cap keeps client memory finite. At the cap, newly accepted sockets are closed."
+description.ja = "ポートで待ち受けを開始。maxClients で同時接続数に上限を付ける（0 = 無制限、既定）。 信頼できない接続の集中でクライアントが滞留するため、任意の上限でクライアント用メモリを有限に保つ。 上限に達すると、新たに受け付けたソケットを閉じる。"
+description.ko = "포트에서 수신 대기를 시작. maxClients로 동시 접속 수를 제한 (0 = 무제한, 기본값). 신뢰할 수 없는 연결 폭주로 클라이언트가 쌓일 수 있으므로 선택적 상한으로 클라이언트 메모리를 제한한다. 상한에 도달하면 새로 수락한 소켓을 닫는다."
 keywords = ["listen", "port", "max clients", "connection limit"]
 details.en = "With maxClients above 0, a connection that arrives while that many clients are connected is closed right away and a warning is logged, at most once every few seconds however many arrive; a slot frees up as soon as a client disconnects. The default of 0 accepts any number of clients. The listen backlog is a fixed value and does not depend on maxClients. The receive and writer threads of clients that leave are joined while the server runs, and a failing accept() is retried with a short back-off rather than in a tight loop. start() calls stop() first, which also joins any thread a listener's stop() left running, and when a stop() on another thread is still tearing the previous session down (waiting for the previous accept thread to end, disconnecting the clients or joining their threads), it waits for that stop() to finish too, so none of it reaches the restarted server. It cannot be called from an inline listener on one of the server's own threads: on the accept thread (onClientConnect, and onError or onClientDisconnect for server-level failures) or on a client's receive or writer thread (onReceive, onSendComplete, onClientDisconnect, onError from those threads) it logs an error and returns false without stopping anything."
 details.ja = "maxClients が 0 より大きい場合、その数のクライアントが接続している間に届いた接続はすぐに閉じられ、警告がログに出る（何件届いても数秒に 1 回まで）。クライアントが切断すればすぐに枠が空く。既定の 0 ではクライアント数に上限はない。listen のバックログは固定値で、maxClients には依存しない。去ったクライアントの受信スレッドと送信スレッドはサーバの動作中に join され、失敗した accept() は間を置かずに繰り返すのではなく、短いバックオフを挟んで再試行される。start() は最初に stop() を呼び（リスナーの stop() が残したスレッドもここで join される）、別のスレッドの stop() が前のセッションをまだ片付けている（前の accept スレッドの終了を待っている、クライアントを切断している、またはそのスレッドを join している）なら、その stop() が終わるまで待つので、片付けが再開後のサーバに及ぶことはない。サーバ自身のスレッド上のインラインリスナーからは呼べない。accept スレッド上（onClientConnect、およびサーバ単位の失敗での onError や onClientDisconnect）や、クライアントの受信スレッド・送信スレッド上（onReceive、onSendComplete、onClientDisconnect、それらのスレッドからの onError）では、エラーをログに出して false を返し、何も停止しない。"
@@ -11326,9 +11326,9 @@ description.ja = "ノンブロッキングモードを設定"
 description.ko = "논블로킹 모드를 설정"
 
 ["UdpSocket::setReceiveBufferSize"]
-description.en = "Set the receive buffer size"
-description.ja = "受信バッファサイズを設定"
-description.ko = "수신 버퍼 크기를 설정"
+description.en = "Set the receive buffer size. Untrusted datagram floods can fill the OS queue; the configured buffer keeps queued memory finite. On overflow, the OS drops datagrams."
+description.ja = "受信バッファサイズを設定。 信頼できないデータグラムの集中で OS のキューが満杯になるため、受信バッファの設定で滞留データのメモリ量を有限に保つ。 あふれたデータグラムは OS が破棄する。"
+description.ko = "수신 버퍼 크기를 설정. 신뢰할 수 없는 데이터그램 폭주로 OS 큐가 가득 찰 수 있으므로 수신 버퍼 설정으로 대기 중인 데이터의 메모리를 제한한다. 넘치는 데이터그램은 OS가 버린다."
 
 ["UdpSocket::setReceiveTimeout"]
 description.en = "Set the receive timeout (0 = infinite)"
@@ -11946,9 +11946,9 @@ description.ja = "アクティブなキャプチャデバイスの名前を返�
 description.ko = "활성 캡처 디바이스의 이름을 반환"
 
 ["VideoGrabber::getFrameQueueSize"]
-description.en = "Return the frame queue capacity (0 = queueing disabled)"
-description.ja = "フレームキューの容量を返す（0 = キュー無効）"
-description.ko = "프레임 큐 용량을 반환 (0 = 큐 비활성)"
+description.en = "Return the frame queue capacity (0 = queueing disabled). Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame."
+description.ja = "フレームキューの容量を返す（0 = キュー無効）。 読み取りが停止するとカメラフレームが滞留するため、任意の容量制限でキューのメモリ使用量を有限に保つ。 あふれた場合は最古のフレームを破棄する。"
+description.ko = "프레임 큐 용량을 반환 (0 = 큐 비활성). 리더가 멈추면 카메라 프레임이 쌓일 수 있으므로 선택적 용량 제한으로 큐 메모리를 유한하게 유지한다. 넘치면 가장 오래된 프레임을 버린다."
 
 ["VideoGrabber::getHeight"]
 description.en = "Return the captured frame height in pixels"
@@ -12015,9 +12015,9 @@ description.ko = "사용할 카메라를 선택. setup() 이전에 호출"
 ["VideoGrabber::setFrameQueueSize"]
 category = "video"
 keywords = ["frame queue", "enable", "capacity", "buffer", "measurement"]
-description.en = "Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup()"
-description.ja = "タイムスタンプ付きフレームキューを有効化し容量を設定（0 = 無効。デフォルトで、オフ時のオーバーヘッドはゼロ）。満杯時は古いフレームから捨てるので、取り出しが遅れてもキャプチャは止まらない。容量目安は ceil(カメラfps / アプリfps) + 余裕で、8〜16 で十分。setup() の前後どちらでも呼べる"
-description.ko = "타임스탬프 프레임 큐를 활성화하고 용량을 설정 (0 = 비활성, 기본값. 꺼져 있으면 오버헤드 없음). 가득 차면 오래된 프레임부터 버려서 소비가 늦어도 캡처가 막히지 않음. 용량은 ceil(카메라fps / 앱fps) + 여유, 8~16이면 충분. setup() 전후 어느 쪽에서도 호출 가능"
+description.en = "Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup(). Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame."
+description.ja = "タイムスタンプ付きフレームキューを有効化し容量を設定（0 = 無効。デフォルトで、オフ時のオーバーヘッドはゼロ）。満杯時は古いフレームから捨てるので、取り出しが遅れてもキャプチャは止まらない。容量目安は ceil(カメラfps / アプリfps) + 余裕で、8〜16 で十分。setup() の前後どちらでも呼べる。 読み取りが停止するとカメラフレームが滞留するため、任意の容量制限でキューのメモリ使用量を有限に保つ。 あふれた場合は最古のフレームを破棄する。"
+description.ko = "타임스탬프 프레임 큐를 활성화하고 용량을 설정 (0 = 비활성, 기본값. 꺼져 있으면 오버헤드 없음). 가득 차면 오래된 프레임부터 버려서 소비가 늦어도 캡처가 막히지 않음. 용량은 ceil(카메라fps / 앱fps) + 여유, 8~16이면 충분. setup() 전후 어느 쪽에서도 호출 가능. 리더가 멈추면 카메라 프레임이 쌓일 수 있으므로 선택적 용량 제한으로 큐 메모리를 유한하게 유지한다. 넘치면 가장 오래된 프레임을 버린다."
 related = ["VideoGrabber::getQueuedFrames", "VideoGrabber::getFrameQueueSize", "GrabberFrame"]
 
 ["VideoGrabber::setVerbose"]
@@ -13000,9 +13000,9 @@ description.ko = "시작 시 앱에 전달되는 윈도우 설정 (크기, 제�
 related = ["runApp", "setWindowSize", "setWindowTitle", "HeadlessSettings"]
 
 ["WindowSettings::clipboardSize"]
-description.en = "Clipboard buffer size in bytes (default 65536)"
-description.ja = "クリップボードバッファのサイズ (バイト、デフォルト 65536)"
-description.ko = "클립보드 버퍼 크기 (바이트, 기본값 65536)"
+description.en = "Clipboard buffer size in bytes (default 65536). OS clipboard text needs finite storage in the window backend. On reads, macOS and web truncate to size - 1 bytes; Windows fails UTF-8 conversion on overflow; X11 rejects oversized or incremental selections (standalone returns empty, legacy returns null). On writes, macOS and web send the full text to the OS and truncate the local copy; Windows rejects overflowing UTF-16 conversion and truncates the local UTF-8 copy after success; standalone X11 rejects oversized writes, while legacy X11 logs and truncates. Clipboard access is unsupported on iOS and Android."
+description.ja = "クリップボードバッファのサイズ (バイト、デフォルト 65536)。 ウィンドウのバックエンドでは OS のクリップボード文字列を格納する領域を有限に保つ必要がある。 読み取りでは、macOS と web は size - 1 バイトに切り詰め、Windows は超過時に UTF-8 変換が失敗し、X11 はサイズ超過または逐次転送の選択を拒否する（standalone は空文字列、legacy は null を返す）。書き込みでは、macOS と web は全文を OS に送りローカルコピーを切り詰める。Windows は超過する UTF-16 変換を拒否し、成功後のローカル UTF-8 コピーを切り詰める。standalone X11 はサイズ超過の書き込みを拒否し、legacy X11 はログを出して切り詰める。iOS と Android はクリップボードアクセス非対応。"
+description.ko = "클립보드 버퍼 크기 (바이트, 기본값 65536). 윈도우 백엔드는 OS 클립보드 텍스트의 저장 공간을 유한하게 유지해야 한다. 읽을 때 macOS와 web은 size - 1바이트로 자르고, Windows는 초과 시 UTF-8 변환이 실패하며, X11은 크기 초과 또는 증분 전송 선택을 거부한다 (standalone은 빈 문자열, legacy는 null 반환). 쓸 때 macOS와 web은 전체 텍스트를 OS에 보내고 로컬 사본을 자른다. Windows는 초과하는 UTF-16 변환을 거부하고 성공 후 로컬 UTF-8 사본을 자른다. standalone X11은 크기 초과 쓰기를 거부하고 legacy X11은 로그를 남기고 자른다. iOS와 Android는 클립보드 접근을 지원하지 않는다."
 
 ["WindowSettings::decorated"]
 description.en = "false: borderless/chromeless window with no title bar (default true)"
@@ -13105,9 +13105,9 @@ description.ja = "MSAA サンプル数 (デフォルト 4)"
 description.ko = "MSAA 샘플 수 (기본값 4)"
 
 ["WindowSettings::setClipboardSize"]
-description.en = "Set clipboard buffer size in bytes (chainable)"
-description.ja = "クリップボードバッファのサイズをバイト単位で設定 (チェイン可能)"
-description.ko = "클립보드 버퍼 크기를 바이트 단위로 설정 (체인 가능)"
+description.en = "Set clipboard buffer size in bytes (chainable). OS clipboard text needs finite storage in the window backend. On reads, macOS and web truncate to size - 1 bytes; Windows fails UTF-8 conversion on overflow; X11 rejects oversized or incremental selections (standalone returns empty, legacy returns null). On writes, macOS and web send the full text to the OS and truncate the local copy; Windows rejects overflowing UTF-16 conversion and truncates the local UTF-8 copy after success; standalone X11 rejects oversized writes, while legacy X11 logs and truncates. Clipboard access is unsupported on iOS and Android."
+description.ja = "クリップボードバッファのサイズをバイト単位で設定 (チェイン可能)。 ウィンドウのバックエンドでは OS のクリップボード文字列を格納する領域を有限に保つ必要がある。 読み取りでは、macOS と web は size - 1 バイトに切り詰め、Windows は超過時に UTF-8 変換が失敗し、X11 はサイズ超過または逐次転送の選択を拒否する（standalone は空文字列、legacy は null を返す）。書き込みでは、macOS と web は全文を OS に送りローカルコピーを切り詰める。Windows は超過する UTF-16 変換を拒否し、成功後のローカル UTF-8 コピーを切り詰める。standalone X11 はサイズ超過の書き込みを拒否し、legacy X11 はログを出して切り詰める。iOS と Android はクリップボードアクセス非対応。"
+description.ko = "클립보드 버퍼 크기를 바이트 단위로 설정 (체인 가능). 윈도우 백엔드는 OS 클립보드 텍스트의 저장 공간을 유한하게 유지해야 한다. 읽을 때 macOS와 web은 size - 1바이트로 자르고, Windows는 초과 시 UTF-8 변환이 실패하며, X11은 크기 초과 또는 증분 전송 선택을 거부한다 (standalone은 빈 문자열, legacy는 null 반환). 쓸 때 macOS와 web은 전체 텍스트를 OS에 보내고 로컬 사본을 자른다. Windows는 초과하는 UTF-16 변환을 거부하고 성공 후 로컬 UTF-8 사본을 자른다. standalone X11은 크기 초과 쓰기를 거부하고 legacy X11은 로그를 남기고 자른다. iOS와 Android는 클립보드 접근을 지원하지 않는다."
 
 ["WindowSettings::setDecorated"]
 description.en = "false = borderless/chromeless window that can still take focus and be closed programmatically (chainable)"
@@ -19652,14 +19652,14 @@ details.ja = "クライアントが生存している間、キュー済み id �
 details.ko = "클라이언트가 살아 있는 동안 큐 id는 disconnect() 취소를 포함해 한 번 완료를 알린다. 스레드 사용 시 전송 스레드에서, 없으면 processNetwork(), send(), disconnect()에서 발생. 소멸은 새 이벤트 없이 작업자를 멈추고 대기 송신자를 깨운다."
 
 ["TcpClient::setSendAsyncBufferSize"]
-description.en = "Set the send queue high-water mark; default 16 MB, 0 unlimited"
-description.ja = "送信キューの高水位を設定。既定 16 MB、0 は無制限"
-description.ko = "전송 큐의 상한 기준 설정. 기본 16 MB, 0은 무제한"
+description.en = "Set the send queue high-water mark; default 16 MB, 0 unlimited. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark."
+description.ja = "送信キューの高水位を設定。既定 16 MB、0 は無制限。 通信相手の停止で送信データが滞留するため、高水位マークでキューのさらなる増大を抑える。 高水位を超えると sendAsync は QueueFull で拒否し、send は待機する。1 回の送信は高水位を超える場合がある。"
+description.ko = "전송 큐의 상한 기준 설정. 기본 16 MB, 0은 무제한. 멈춘 네트워크 피어 때문에 송신 데이터가 쌓일 수 있으므로 상한 기준으로 큐의 추가 증가를 제한한다. 상한 기준을 넘으면 sendAsync는 QueueFull로 거부하고 send는 대기한다. 한 번의 전송은 상한 기준을 넘을 수 있다."
 
 ["TcpClient::getSendAsyncBufferSize"]
-description.en = "Get the send queue high-water mark in bytes"
-description.ja = "送信キューの高水位をバイト数で取得"
-description.ko = "전송 큐의 상한 기준을 바이트로 가져오기"
+description.en = "Get the send queue high-water mark in bytes. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark."
+description.ja = "送信キューの高水位をバイト数で取得。 通信相手の停止で送信データが滞留するため、高水位マークでキューのさらなる増大を抑える。 高水位を超えると sendAsync は QueueFull で拒否し、send は待機する。1 回の送信は高水位を超える場合がある。"
+description.ko = "전송 큐의 상한 기준을 바이트로 가져오기. 멈춘 네트워크 피어 때문에 송신 데이터가 쌓일 수 있으므로 상한 기준으로 큐의 추가 증가를 제한한다. 상한 기준을 넘으면 sendAsync는 QueueFull로 거부하고 send는 대기한다. 한 번의 전송은 상한 기준을 넘을 수 있다."
 
 ["TcpClient::getSendAsyncPendingBytes"]
 description.en = "Bytes queued but not yet completed"
@@ -19721,9 +19721,9 @@ description.ko = "MCP 검사 이름을 반환 (이름이 없거나 이동된 원
 related = ["Fbo::setDebugName"]
 
 ["Image::setDebugName"]
-description.en = "Set the MCP inspection name. tc_list_images lists live Images with index, name, width, height and format; moves transfer name/index and remove moved-from entries, destruction removes entries, unnamed Images remain available by index. tc_analyze_image reads CPU pixels with source={image:name or index}; other sources are window:index, fbo:name or index, path:file. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), and results in ops order; byte colors are normalized RGBA, float values above 1 pass through. Ops: pixel(x,y):color; histogram(bins):histogram[channel][bin] over 0-1 (outliers in end bins); count(color,tolerance or min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):mean colors[row][col]; diff(path,threshold,optional save):count,bbox,maxDifference; line(x0,y0,x1,y1):colors along inclusive Bresenham samples. Every op accepts optional rect=[x,y,w,h], default whole image. Coordinates are top-left, bbox=[x,y,w,h], centroid=[x,y]; empty matches yield null bbox/centroid. Rects and grid cells must be nonempty; line endpoints are in the image and samples clip to rect. Count accepts RGB/RGBA bounds or color plus a nonnegative scalar tolerance. Diff compares raw RGBA values with equal image dimensions and counts maximum absolute channel differences strictly above threshold. Optional top-level save (omitted/null writes nothing) and diff.save use tc_save_screenshot paths: UTF-8, data-directory-relative, create parents, unsupported extensions append .png. Float file output is clamped to 0-1; analysis preserves float values. Texture, VideoPlayer and VideoGrabber are not sources."
-description.ja = "MCP 検査用の名前を設定。tc_list_images は生存中の Image の index、name、width、height、format を一覧化。移動で名前とインデックスを引き継ぎ、移動元と破棄済みの項目は消える。名前なしもインデックスで取得可能。tc_analyze_image は source={image:名前またはインデックス} で CPU ピクセルを読む。他のソースは window:インデックス、fbo:名前またはインデックス、path:ファイル。width、height、format（RGBA8/float）、colorSpace（sRGB/linear）、ops 順の results を返す。byte は RGBA 0–1、float は 1 を超える値も保持。操作: pixel(x,y):color、histogram(bins):histogram[channel][bin]（0–1 の等幅区間、範囲外は端の bin）、count(color,tolerance または min,max):count,bbox,centroid、stats():mean,min,max、grid(cols,rows):平均 colors[row][col]、diff(path,threshold,任意の save):count,bbox,maxDifference、line(x0,y0,x1,y1):両端を含む Bresenham 線上の colors。各操作に任意の rect=[x,y,w,h]（既定は画像全体）。座標は左上原点、bbox=[x,y,w,h]、centroid=[x,y]、一致なしは bbox/centroid が null。rect とセルは空にできない。線の両端は画像内、rect 内のサンプルだけを返す。count は RGB/RGBA の範囲または色と非負のスカラー tolerance。diff は同寸法の RGBA 生値を比較し、最大絶対チャネル差が threshold を超えたピクセルを数える。任意のトップレベル save（省略/null は保存なし）と diff.save は tc_save_screenshot と同じ UTF-8・data 相対パス・親作成・未対応拡張子に .png 追加の規則。float の保存は 0–1 に制限するが解析値は保持。Texture、VideoPlayer、VideoGrabber はソースではない。"
-description.ko = "MCP 검사 이름을 설정. tc_list_images 는 살아 있는 Image 의 index, name, width, height, format 을 나열. 이동하면 이름과 인덱스가 이전되며 이동 원본 및 파괴된 항목은 사라진다. 이름 없는 객체도 인덱스로 접근 가능. tc_analyze_image 는 source={image:이름 또는 인덱스} 로 CPU 픽셀을 읽는다. 다른 소스는 window:인덱스, fbo:이름 또는 인덱스, path:파일. width, height, format (RGBA8/float), colorSpace (sRGB/linear), ops 순서의 results 를 반환. byte 색은 RGBA 0–1, float 는 1 초과 값도 유지. 연산: pixel(x,y):color; histogram(bins):histogram[channel][bin] (0–1 등간격, 범위 밖은 끝 bin); count(color,tolerance 또는 min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):평균 colors[row][col]; diff(path,threshold,선택 save):count,bbox,maxDifference; line(x0,y0,x1,y1):양 끝점을 포함한 Bresenham 색 배열. 모든 연산에 선택 rect=[x,y,w,h], 기본값은 전체 이미지. 좌표는 왼쪽 위 원점, bbox=[x,y,w,h], centroid=[x,y]; 일치 없으면 bbox/centroid 는 null. rect 와 셀은 비어 있을 수 없다. 선 끝점은 이미지 내부, rect 내부 샘플만 반환. count 는 RGB/RGBA 범위 또는 색과 음이 아닌 스칼라 tolerance. diff 는 동일 크기 RGBA 원시 값을 비교하며 최대 절대 채널 차이가 threshold 보다 큰 픽셀을 센다. 선택 최상위 save (생략/null 은 저장 안 함) 와 diff.save 는 tc_save_screenshot 의 UTF-8, data 상대 경로, 부모 생성, 미지원 확장자에 .png 추가 규칙을 따른다. float 저장은 0–1 로 제한하지만 분석 값은 유지. Texture, VideoPlayer, VideoGrabber 는 소스가 아니다."
+description.en = "Set the MCP inspection name. tc_list_images lists live Images with index, name, width, height and format; moves transfer name/index and remove moved-from entries, destruction removes entries, unnamed Images remain available by index. tc_analyze_image reads CPU pixels with source={image:name or index}; other sources are window:index, fbo:name or index, path:file. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), and results in ops order; byte colors are normalized RGBA, float values above 1 pass through. Ops: pixel(x,y):color; histogram(bins):histogram[channel][bin] over 0-1 (outliers in end bins); count(color,tolerance or min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):mean colors[row][col]; diff(path,threshold,optional save):count,bbox,maxDifference; line(x0,y0,x1,y1):colors along inclusive Bresenham samples. Every op accepts optional rect=[x,y,w,h], default whole image. Coordinates are top-left, bbox=[x,y,w,h], centroid=[x,y]; empty matches yield null bbox/centroid. Rects and grid cells must be nonempty; line endpoints are in the image and samples clip to rect. Count accepts RGB/RGBA bounds or color plus a nonnegative scalar tolerance. Diff compares raw RGBA values with equal image dimensions and counts maximum absolute channel differences strictly above threshold. Optional top-level save (omitted/null writes nothing) and diff.save use tc_save_screenshot paths: UTF-8, data-directory-relative, create parents, unsupported extensions append .png. Float file output is clamped to 0-1; analysis preserves float values. Texture, VideoPlayer and VideoGrabber are not sources. Analysis defaults to 4096 histogram bins, 65536 grid cells and 256 operations; excess parameters return an error before scratch allocation. Replies default to 64 MiB and aggregate MCP working memory to 256 MiB. Limits are set with mcp::setAdmissionLimits(). File sources and diff references use a bounded encoded snapshot, query stb or platform metadata, and reserve decoded storage and estimated codec workspace before decoding. macOS/iOS retain ImageIO formats, including HEIC, TIFF and JPEG 2000."
+description.ja = "MCP 検査用の名前を設定。tc_list_images は生存中の Image の index、name、width、height、format を一覧化。移動で名前とインデックスを引き継ぎ、移動元と破棄済みの項目は消える。名前なしもインデックスで取得可能。tc_analyze_image は source={image:名前またはインデックス} で CPU ピクセルを読む。他のソースは window:インデックス、fbo:名前またはインデックス、path:ファイル。width、height、format（RGBA8/float）、colorSpace（sRGB/linear）、ops 順の results を返す。byte は RGBA 0–1、float は 1 を超える値も保持。操作: pixel(x,y):color、histogram(bins):histogram[channel][bin]（0–1 の等幅区間、範囲外は端の bin）、count(color,tolerance または min,max):count,bbox,centroid、stats():mean,min,max、grid(cols,rows):平均 colors[row][col]、diff(path,threshold,任意の save):count,bbox,maxDifference、line(x0,y0,x1,y1):両端を含む Bresenham 線上の colors。各操作に任意の rect=[x,y,w,h]（既定は画像全体）。座標は左上原点、bbox=[x,y,w,h]、centroid=[x,y]、一致なしは bbox/centroid が null。rect とセルは空にできない。線の両端は画像内、rect 内のサンプルだけを返す。count は RGB/RGBA の範囲または色と非負のスカラー tolerance。diff は同寸法の RGBA 生値を比較し、最大絶対チャネル差が threshold を超えたピクセルを数える。任意のトップレベル save（省略/null は保存なし）と diff.save は tc_save_screenshot と同じ UTF-8・data 相対パス・親作成・未対応拡張子に .png 追加の規則。float の保存は 0–1 に制限するが解析値は保持。Texture、VideoPlayer、VideoGrabber はソースではない。 解析の既定上限は histogram 4096 bins、grid 65536 cells、256 操作。超過する引数は作業領域の確保前にエラーとなる。応答は既定 64 MiB、MCP 作業メモリ合計は 256 MiB。mcp::setAdmissionLimits() で設定する。 ファイルソースと diff の参照画像は上限付きの符号化スナップショットから stb またはプラットフォームのメタデータを取得し、復号前にピクセルと推定コーデック作業領域を予約する。macOS/iOS は HEIC、TIFF、JPEG 2000 を含む ImageIO の形式を引き続きサポートする。"
+description.ko = "MCP 검사 이름을 설정. tc_list_images 는 살아 있는 Image 의 index, name, width, height, format 을 나열. 이동하면 이름과 인덱스가 이전되며 이동 원본 및 파괴된 항목은 사라진다. 이름 없는 객체도 인덱스로 접근 가능. tc_analyze_image 는 source={image:이름 또는 인덱스} 로 CPU 픽셀을 읽는다. 다른 소스는 window:인덱스, fbo:이름 또는 인덱스, path:파일. width, height, format (RGBA8/float), colorSpace (sRGB/linear), ops 순서의 results 를 반환. byte 색은 RGBA 0–1, float 는 1 초과 값도 유지. 연산: pixel(x,y):color; histogram(bins):histogram[channel][bin] (0–1 등간격, 범위 밖은 끝 bin); count(color,tolerance 또는 min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):평균 colors[row][col]; diff(path,threshold,선택 save):count,bbox,maxDifference; line(x0,y0,x1,y1):양 끝점을 포함한 Bresenham 색 배열. 모든 연산에 선택 rect=[x,y,w,h], 기본값은 전체 이미지. 좌표는 왼쪽 위 원점, bbox=[x,y,w,h], centroid=[x,y]; 일치 없으면 bbox/centroid 는 null. rect 와 셀은 비어 있을 수 없다. 선 끝점은 이미지 내부, rect 내부 샘플만 반환. count 는 RGB/RGBA 범위 또는 색과 음이 아닌 스칼라 tolerance. diff 는 동일 크기 RGBA 원시 값을 비교하며 최대 절대 채널 차이가 threshold 보다 큰 픽셀을 센다. 선택 최상위 save (생략/null 은 저장 안 함) 와 diff.save 는 tc_save_screenshot 의 UTF-8, data 상대 경로, 부모 생성, 미지원 확장자에 .png 추가 규칙을 따른다. float 저장은 0–1 로 제한하지만 분석 값은 유지. Texture, VideoPlayer, VideoGrabber 는 소스가 아니다. 분석 기본 한도는 histogram 4096 bins, grid 65536 cells, 연산 256개다. 초과 인수는 작업 메모리 할당 전에 오류를 반환한다. 응답 기본값은 64 MiB, MCP 전체 작업 메모리는 256 MiB다. mcp::setAdmissionLimits()로 설정한다. 파일 소스와 diff 참조 이미지는 한도가 있는 인코딩 스냅샷에서 stb 또는 플랫폼 메타데이터를 읽고 디코딩 전에 픽셀과 추정 코덱 작업 메모리를 예약한다. macOS/iOS는 HEIC, TIFF, JPEG 2000을 포함한 ImageIO 형식을 계속 지원한다."
 related = ["Image::getDebugName", "Fbo::setDebugName"]
 
 ["Image::getDebugName"]
@@ -19848,9 +19848,9 @@ value_desc.Public.ko = "기본 허용 수준. 내장 도구 중 Public은 상태
 value_desc.ReadOnly.en = "Inspection, screenshots, status and alerts; captures may write files."
 value_desc.ReadOnly.ja = "検査、スクリーンショット、ステータス、アラート。キャプチャはファイルを書き込む場合がある。"
 value_desc.ReadOnly.ko = "조회, 스크린샷, 상태 및 알림. 캡처는 파일을 쓸 수 있다."
-value_desc.Control.en = "Input, scene changes, recording and quit; includes ReadOnly."
-value_desc.Control.ja = "入力、シーン変更、録画、終了。ReadOnly を含む。"
-value_desc.Control.ko = "입력, 장면 변경, 녹화 및 종료. ReadOnly를 포함한다."
+value_desc.Control.en = "Input, scene changes, recording and quit; includes ReadOnly. Input requires one of 120 defined nonzero sokol key codes, mouse buttons 0–2 (move also allows -1), finite float coordinates/scroll deltas and boolean modifiers. Invalid input returns JSON-RPC -32602 before callbacks or state changes; synthetic held keys are limited to 120."
+value_desc.Control.ja = "入力、シーン変更、録画、終了。ReadOnly を含む。入力は定義済みの非ゼロ sokol キーコード 120 個、マウスボタン 0–2（移動は -1 も可）、有限の float 座標・スクロール量、真偽値の修飾フラグを受け付ける。不正な入力はコールバックや状態変更の前に JSON-RPC -32602 を返す。合成入力で保持するキーは最大 120 個。"
+value_desc.Control.ko = "입력, 장면 변경, 녹화 및 종료. ReadOnly를 포함한다. 입력은 정의된 0 이외의 sokol 키 코드 120개, 마우스 버튼 0–2(이동은 -1도 허용), 유한한 float 좌표·스크롤 값 및 불리언 보조 키 플래그를 받는다. 잘못된 입력은 콜백이나 상태 변경 전에 JSON-RPC -32602를 반환하며 합성 입력으로 유지하는 키는 최대 120개이다."
 
 ["mcp::setToolLevel"]
 category = "mcp"
@@ -19956,15 +19956,15 @@ description.ko = "URI로 참조하는 리소스 메타데이터와 콘텐츠 핸
 
 ["mcp::startHttpServer"]
 category = "mcp"
-description.en = "Explicitly open HTTP (default 127.0.0.1, port 0 chooses an OS port); non-loopback requires a token. TRUSSC_MCP=0 closes. Call before setToolLevel() to choose the address: the first opener wins; mismatched later parameters log an Error and change nothing. No-op on Web."
-description.ja = "HTTP を明示的に開く。既定は 127.0.0.1、ポート 0 は OS が選択する。非ループバックにはトークンが必要。TRUSSC_MCP=0 では開かない。アドレス指定は setToolLevel() より前に行う。最初の指定が有効で、後の不一致は Error を記録して変更しない。Web では何もしない。"
-description.ko = "HTTP를 명시적으로 연다. 기본 주소는 127.0.0.1이며 포트 0은 OS가 선택한다. 외부 주소에는 토큰이 필요하다. TRUSSC_MCP=0이면 열리지 않는다. 주소를 선택하려면 setToolLevel() 전에 호출한다. 첫 설정을 유지하며 이후 불일치는 Error를 기록하고 변경하지 않는다. Web에서는 아무 작업도 하지 않는다."
+description.en = "Explicitly open HTTP (default 127.0.0.1, port 0 chooses an OS port); non-loopback requires a token. TRUSSC_MCP=0 closes. Call before setToolLevel() to choose the address: the first opener wins; mismatched later parameters log an Error and change nothing. No-op on Web. Defaults: 1 MiB wire/decoded body, 8 KiB per request/header/trailer line, 64 KiB metadata, 128 fields, 32 outstanding connections and 4 workers. Excess bodies return 413, metadata returns 431, excess connections close. Rejections issue one Warning per store and increment lifetime counters. See setAdmissionLimits(). Request JSON defaults to 64 levels; parse admission failures return 503 with a reason."
+description.ja = "HTTP を明示的に開く。既定は 127.0.0.1、ポート 0 は OS が選択する。非ループバックにはトークンが必要。TRUSSC_MCP=0 では開かない。アドレス指定は setToolLevel() より前に行う。最初の指定が有効で、後の不一致は Error を記録して変更しない。Web では何もしない。 既定: wire/decoded 本文 1 MiB、要求/ヘッダー/トレーラーの各行 8 KiB、メタデータ合計 64 KiB、128 フィールド、未完了接続 32、ワーカー 4。超過時は本文 413、メタデータ 431、接続超過は切断。ストアごとに初回のみ Warning を出し、生存期間中の累積カウンターを増やす。setAdmissionLimits() を参照。 要求 JSON のネストは既定 64。解析の受付上限に達した場合は理由付きの 503 を返す。"
+description.ko = "HTTP를 명시적으로 연다. 기본 주소는 127.0.0.1이며 포트 0은 OS가 선택한다. 외부 주소에는 토큰이 필요하다. TRUSSC_MCP=0이면 열리지 않는다. 주소를 선택하려면 setToolLevel() 전에 호출한다. 첫 설정을 유지하며 이후 불일치는 Error를 기록하고 변경하지 않는다. Web에서는 아무 작업도 하지 않는다. 기본값: wire/decoded 본문 1 MiB, 요청/헤더/트레일러 한 줄 8 KiB, 메타데이터 합계 64 KiB, 필드 128개, 미완료 연결 32개, 워커 4개. 초과 본문은 413, 메타데이터는 431, 연결 초과는 종료한다. 저장소별 첫 거부에 Warning을 기록하고 수명 동안 누적 카운터를 증가시킨다. setAdmissionLimits() 참조. 요청 JSON 중첩 기본값은 64다. 파싱 수락 한도에 도달하면 이유와 함께 503을 반환한다."
 
 ["mcp::stopHttpServer"]
 category = "mcp"
-description.en = "Stop the HTTP listener and answer pending requests before joining the worker. No-op on Web."
-description.ja = "HTTP リスナーを停止し、保留中の要求に応答してからワーカーを終了する。Web では何もしない。"
-description.ko = "HTTP 리스너를 중지하고 대기 중인 요청에 응답한 뒤 작업 스레드를 종료한다. Web에서는 아무 작업도 하지 않는다."
+description.en = "Stop the HTTP listener and answer pending requests before joining the workers. Discard producers finishing after shutdown. If an error reply cannot fit, return 503 with X-MCP-Reason. No-op on Web."
+description.ja = "HTTP リスナーを停止し、保留中の要求に応答してからワーカーを終了する。停止後に完了する生成処理は破棄する。エラー応答が上限に収まらない場合は X-MCP-Reason 付きの 503 を返す。Web では何もしない。"
+description.ko = "HTTP 리스너를 중지하고 대기 중인 요청에 응답한 뒤 워커를 종료한다. 종료 후 완료되는 생성 작업은 버린다. 오류 응답이 한도에 맞지 않으면 X-MCP-Reason과 함께 503을 반환한다. Web에서는 아무 작업도 하지 않는다."
 
 ["mcp::processHttpQueue"]
 category = "mcp"
@@ -20227,3 +20227,252 @@ category = "graphics"
 description.en = "Return the active target camera projection matrix by value, in backend-native clip space."
 description.ja = "現在の描画先のカメラの投影行列を値で返す。クリップ空間はバックエンドの規約に従う。"
 description.ko = "현재 렌더 타깃 카메라의 투영 행렬을 값으로 반환한다. 클립 공간은 백엔드 규약을 따른다."
+
+["Image::loadAsync"]
+keywords = ["async", "background", "load", "cancel"]
+description.en = "loadAsync(path, mipmaps = false): decode pixels on a native worker, then apply pixels, upload the texture and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires."
+description.ja = "loadAsync(path, mipmaps = false)。ネイティブでは専用 State をワーカーで準備し、後のフレームでメインに反映して通知する。通知は呼び出し中には行わない。終了時はデコード中の読み込みを待つが、取消しでは待たない。 完了通知はアプリ実行中（runApp / runHeadlessApp）に配信される。これらを使わない単独の main() では完了イベントは発火しない。"
+description.ko = "loadAsync(path, mipmaps = false). 네이티브 워커가 전용 State를 준비하고 이후 프레임의 메인 스레드에서 반영 및 알림. 호출 중에는 알리지 않는다. 앱 종료는 디코딩 중인 로드를 기다리며 취소는 기다리지 않는다. 완료 알림은 앱 실행 중(runApp / runHeadlessApp)에 전달된다. 앱 실행이 없는 일반 main()에서는 완료 이벤트가 발생하지 않는다."
+details.en = """
+Image remains noncopyable. Moving transfers committed data and leaves listeners with their handles.
+Image failures clear the committed image, as load() does. Mipmaps and texture upload are applied on main.
+All handle operations, access, copy/move and teardown are serialized on main. Existing committed data remains readable until application. Any new request (including an identical request), synchronous load/clear/allocation/generation or atlas-rebuilding setter cancels pending delivery. Move cancels both handles; destruction discards pending delivery. Cancellation emits no event or diagnostic; a running decoder may already have emitted its ordinary logs. Replaced decodes finish privately and may temporarily overlap.
+The shared host completion mailbox takes one snapshot before each frame/headless prelude. Work submitted during that pass waits for another pass, including failures and cache hits. isLoading() stays true until surviving application, then becomes false before the single onLoad event. A listener may restart, move or delete the emitter; retain the listener token as usual.
+Web without pthreads defers VFS/CPU preparation to a main-loop pass, which may stall that frame, then queues application for a subsequent pass. This entry point never Asyncify-waits. The run token drops results across app exit and hot reload.
+"""
+details.ja = """
+操作・参照・コピー・移動・破棄はメインで直列に行う。反映までは既存データを参照できる。同期 load と同じパス解決・失敗時の状態・エラー・ログを使う。同一引数でも新しい要求は古い要求を取り消す。同期読み込み、clear、割当て、生成、アトラスを再構築する設定も取り消す。移動は両側、破棄は自身の処理を取り消し、結果とイベントを捨てる。取消し自体はログを出さず、古いデコードは専用 State のまま終了する。
+フレーム／ヘッドレス処理の冒頭でキューを一括取得し、その処理中の追加分は次回に回す。失敗・キャッシュヒットも同じ経路。反映後に isLoading() が false になってから onLoad を一度通知する。リスナーは再読み込み・移動・自身の破棄が可能。Image は従来どおりコピー不可で、移動時もリスナーは元のハンドルに残る。
+Web の pthreads なしでは後のフレームで VFS 読み込みと CPU デコードを行うため、そのフレームは停止し得る。さらに後のフレームで反映し、この入口では Asyncify 待機をしない。Font のグリフ生成は遅延のまま。終了・ホットリロード後の古い結果は捨てる。
+"""
+details.ko = """
+핸들 조작, 접근, 복사/이동, 파괴는 메인 스레드에서 직렬화한다. 반영 전까지 기존 데이터를 읽을 수 있다. 동기 load와 같은 경로 해석, 실패 상태, 오류 및 로그를 유지한다. 같은 인수라도 새 요청은 이전 요청을 취소한다. 동기 로드, clear, 할당, 생성, 아틀라스를 다시 만드는 설정도 취소한다. 이동은 양쪽, 파괴는 자신의 미완료 결과와 이벤트를 버린다. 취소 자체는 로그를 남기지 않으며 오래된 디코드는 전용 State로 종료한다.
+프레임/헤드리스 패스 시작에 큐를 일괄 획득하고 패스 중 추가된 작업은 다음 패스로 넘긴다. 실패와 캐시 적중도 같은 경로를 쓴다. 반영 뒤 isLoading()이 false가 된 후 onLoad를 한 번 알린다. 리스너는 재시작, 이동, 발신자 파괴를 할 수 있다. Image는 계속 복사할 수 없으며 이동 시 리스너는 원래 핸들에 남는다.
+pthreads 없는 Web에서는 이후 프레임에서 VFS/CPU 디코드를 수행하여 그 프레임이 멈출 수 있고 다음 패스에 반영한다. 이 진입점은 Asyncify로 기다리지 않는다. Font 글리프 생성은 지연 상태를 유지한다. 종료/핫 리로드 뒤 이전 결과는 버린다.
+"""
+
+["Image::onLoad"]
+description.en = "LoadResult event delivered once on main after the surviving asynchronous result is applied; cancellation has no event. Retain the listener token."
+description.ja = "生き残った非同期結果の反映後、メインで一度通知する LoadResult イベント。取消しは通知しない。リスナートークンを保持する。"
+description.ko = "유효한 비동기 결과를 반영한 뒤 메인에서 한 번 알리는 LoadResult 이벤트. 취소는 알리지 않으며 리스너 토큰을 유지한다."
+
+["Image::isLoading"]
+description.en = "Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation."
+description.ja = "現在の非同期要求が準備中またはメイン反映待ちか。onLoad の前と取消し後は false。"
+description.ko = "현재 비동기 요청이 준비 중이거나 메인 반영을 기다리는지. onLoad 직전 및 취소 후에는 false."
+
+["SoundBuffer::loadAsync"]
+keywords = ["async", "background", "load", "cancel"]
+description.en = "loadAsync(path): prepare PCM and metadata on a native worker, apply and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires."
+description.ja = "loadAsync(path)。ネイティブでは専用 State をワーカーで準備し、後のフレームでメインに反映して通知する。通知は呼び出し中には行わない。終了時はデコード中の読み込みを待つが、取消しでは待たない。 完了通知はアプリ実行中（runApp / runHeadlessApp）に配信される。これらを使わない単独の main() では完了イベントは発火しない。"
+description.ko = "loadAsync(path). 네이티브 워커가 전용 State를 준비하고 이후 프레임의 메인 스레드에서 반영 및 알림. 호출 중에는 알리지 않는다. 앱 종료는 디코딩 중인 로드를 기다리며 취소는 기다리지 않는다. 완료 알림은 앱 실행 중(runApp / runHeadlessApp)에 전달된다. 앱 실행이 없는 일반 main()에서는 완료 이벤트가 발생하지 않는다."
+details.en = """
+Copies own the committed PCM, start idle with empty listeners and leave the source loading. Copy assignment cancels only the destination and keeps its listeners. Moves cancel both pending loads, transfer committed data and leave listeners with their handles.
+Failures reproduce load() field changes, including clearing the recorded path. Successful PCM/metadata replacement uses the mixer lock, including buffers in use; direct sample access retains its existing synchronization requirements.
+All handle operations, access, copy/move and teardown are serialized on main. Existing committed data remains readable until application. Any new request (including an identical request), synchronous load/clear/allocation/generation or atlas-rebuilding setter cancels pending delivery. Move cancels both handles; destruction discards pending delivery. Cancellation emits no event or diagnostic; a running decoder may already have emitted its ordinary logs. Replaced decodes finish privately and may temporarily overlap.
+The shared host completion mailbox takes one snapshot before each frame/headless prelude. Work submitted during that pass waits for another pass, including failures and cache hits. isLoading() stays true until surviving application, then becomes false before the single onLoad event. A listener may restart, move or delete the emitter; retain the listener token as usual.
+Web without pthreads defers VFS/CPU preparation to a main-loop pass, which may stall that frame, then queues application for a subsequent pass. This entry point never Asyncify-waits. The run token drops results across app exit and hot reload.
+"""
+details.ja = """
+操作・参照・コピー・移動・破棄はメインで直列に行う。反映までは既存データを参照できる。同期 load と同じパス解決・失敗時の状態・エラー・ログを使う。同一引数でも新しい要求は古い要求を取り消す。同期読み込み、clear、割当て、生成、アトラスを再構築する設定も取り消す。移動は両側、破棄は自身の処理を取り消し、結果とイベントを捨てる。取消し自体はログを出さず、古いデコードは専用 State のまま終了する。
+フレーム／ヘッドレス処理の冒頭でキューを一括取得し、その処理中の追加分は次回に回す。失敗・キャッシュヒットも同じ経路。反映後に isLoading() が false になってから onLoad を一度通知する。リスナーは再読み込み・移動・自身の破棄が可能。コピーは確定済みデータだけを持ち、アイドル・空のリスナーで開始。コピー代入は代入先だけを取り消しリスナーを保持する。
+Web の pthreads なしでは後のフレームで VFS 読み込みと CPU デコードを行うため、そのフレームは停止し得る。さらに後のフレームで反映し、この入口では Asyncify 待機をしない。Font のグリフ生成は遅延のまま。終了・ホットリロード後の古い結果は捨てる。
+"""
+details.ko = """
+핸들 조작, 접근, 복사/이동, 파괴는 메인 스레드에서 직렬화한다. 반영 전까지 기존 데이터를 읽을 수 있다. 동기 load와 같은 경로 해석, 실패 상태, 오류 및 로그를 유지한다. 같은 인수라도 새 요청은 이전 요청을 취소한다. 동기 로드, clear, 할당, 생성, 아틀라스를 다시 만드는 설정도 취소한다. 이동은 양쪽, 파괴는 자신의 미완료 결과와 이벤트를 버린다. 취소 자체는 로그를 남기지 않으며 오래된 디코드는 전용 State로 종료한다.
+프레임/헤드리스 패스 시작에 큐를 일괄 획득하고 패스 중 추가된 작업은 다음 패스로 넘긴다. 실패와 캐시 적중도 같은 경로를 쓴다. 반영 뒤 isLoading()이 false가 된 후 onLoad를 한 번 알린다. 리스너는 재시작, 이동, 발신자 파괴를 할 수 있다. 복사본은 확정된 데이터만 가지고 유휴 상태와 빈 리스너로 시작한다. 복사 대입은 대상만 취소하며 대상 리스너를 유지한다.
+pthreads 없는 Web에서는 이후 프레임에서 VFS/CPU 디코드를 수행하여 그 프레임이 멈출 수 있고 다음 패스에 반영한다. 이 진입점은 Asyncify로 기다리지 않는다. Font 글리프 생성은 지연 상태를 유지한다. 종료/핫 리로드 뒤 이전 결과는 버린다.
+"""
+
+["SoundBuffer::onLoad"]
+description.en = "LoadResult event delivered once on main after the surviving asynchronous result is applied; cancellation has no event. Retain the listener token."
+description.ja = "生き残った非同期結果の反映後、メインで一度通知する LoadResult イベント。取消しは通知しない。リスナートークンを保持する。"
+description.ko = "유효한 비동기 결과를 반영한 뒤 메인에서 한 번 알리는 LoadResult 이벤트. 취소는 알리지 않으며 리스너 토큰을 유지한다."
+
+["SoundBuffer::isLoading"]
+description.en = "Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation."
+description.ja = "現在の非同期要求が準備中またはメイン反映待ちか。onLoad の前と取消し後は false。"
+description.ko = "현재 비동기 요청이 준비 중이거나 메인 반영을 기다리는지. onLoad 직전 및 취소 후에는 false."
+
+["Font::loadAsync"]
+keywords = ["async", "background", "load", "cancel"]
+description.en = "loadAsync(nameOrPath, size, faceIndex = 0): prepare owned font bytes and CPU metrics on a native worker, then publish the shared atlas and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires."
+description.ja = "loadAsync(nameOrPath, size, faceIndex = 0)。ネイティブでは専用 State をワーカーで準備し、後のフレームでメインに反映して通知する。通知は呼び出し中には行わない。終了時はデコード中の読み込みを待つが、取消しでは待たない。 完了通知はアプリ実行中（runApp / runHeadlessApp）に配信される。これらを使わない単独の main() では完了イベントは発火しない。"
+description.ko = "loadAsync(nameOrPath, size, faceIndex = 0). 네이티브 워커가 전용 State를 준비하고 이후 프레임의 메인 스레드에서 반영 및 알림. 호출 중에는 알리지 않는다. 앱 종료는 디코딩 중인 로드를 기다리며 취소는 기다리지 않는다. 완료 알림은 앱 실행 중(runApp / runHeadlessApp)에 전달된다. 앱 실행이 없는 일반 main()에서는 완료 이벤트가 발생하지 않는다."
+details.en = """
+Copies share the committed atlas, start idle with empty listeners and leave the source loading. Copy assignment cancels only the destination and keeps its listeners. Moves cancel both pending loads, transfer committed data and leave listeners with their handles.
+Keeps file/system-name precedence, face selection, DPI and atlas options. CPU font preparation runs off-thread; cache and GPU access stay on main. Glyph rasterization remains lazy. Web URLs retain the existing fetch timeout policy.
+All handle operations, access, copy/move and teardown are serialized on main. Existing committed data remains readable until application. Any new request (including an identical request), synchronous load/clear/allocation/generation or atlas-rebuilding setter cancels pending delivery. Move cancels both handles; destruction discards pending delivery. Cancellation emits no event or diagnostic; a running decoder may already have emitted its ordinary logs. Replaced decodes finish privately and may temporarily overlap.
+The shared host completion mailbox takes one snapshot before each frame/headless prelude. Work submitted during that pass waits for another pass, including failures and cache hits. isLoading() stays true until surviving application, then becomes false before the single onLoad event. A listener may restart, move or delete the emitter; retain the listener token as usual.
+Web without pthreads defers VFS/CPU preparation to a main-loop pass, which may stall that frame, then queues application for a subsequent pass. This entry point never Asyncify-waits. The run token drops results across app exit and hot reload.
+"""
+details.ja = """
+操作・参照・コピー・移動・破棄はメインで直列に行う。反映までは既存データを参照できる。同期 load と同じパス解決・失敗時の状態・エラー・ログを使う。同一引数でも新しい要求は古い要求を取り消す。同期読み込み、clear、割当て、生成、アトラスを再構築する設定も取り消す。移動は両側、破棄は自身の処理を取り消し、結果とイベントを捨てる。取消し自体はログを出さず、古いデコードは専用 State のまま終了する。
+フレーム／ヘッドレス処理の冒頭でキューを一括取得し、その処理中の追加分は次回に回す。失敗・キャッシュヒットも同じ経路。反映後に isLoading() が false になってから onLoad を一度通知する。リスナーは再読み込み・移動・自身の破棄が可能。コピーは確定済みデータだけを持ち、アイドル・空のリスナーで開始。コピー代入は代入先だけを取り消しリスナーを保持する。
+Web の pthreads なしでは後のフレームで VFS 読み込みと CPU デコードを行うため、そのフレームは停止し得る。さらに後のフレームで反映し、この入口では Asyncify 待機をしない。Font のグリフ生成は遅延のまま。終了・ホットリロード後の古い結果は捨てる。
+"""
+details.ko = """
+핸들 조작, 접근, 복사/이동, 파괴는 메인 스레드에서 직렬화한다. 반영 전까지 기존 데이터를 읽을 수 있다. 동기 load와 같은 경로 해석, 실패 상태, 오류 및 로그를 유지한다. 같은 인수라도 새 요청은 이전 요청을 취소한다. 동기 로드, clear, 할당, 생성, 아틀라스를 다시 만드는 설정도 취소한다. 이동은 양쪽, 파괴는 자신의 미완료 결과와 이벤트를 버린다. 취소 자체는 로그를 남기지 않으며 오래된 디코드는 전용 State로 종료한다.
+프레임/헤드리스 패스 시작에 큐를 일괄 획득하고 패스 중 추가된 작업은 다음 패스로 넘긴다. 실패와 캐시 적중도 같은 경로를 쓴다. 반영 뒤 isLoading()이 false가 된 후 onLoad를 한 번 알린다. 리스너는 재시작, 이동, 발신자 파괴를 할 수 있다. 복사본은 확정된 데이터만 가지고 유휴 상태와 빈 리스너로 시작한다. 복사 대입은 대상만 취소하며 대상 리스너를 유지한다.
+pthreads 없는 Web에서는 이후 프레임에서 VFS/CPU 디코드를 수행하여 그 프레임이 멈출 수 있고 다음 패스에 반영한다. 이 진입점은 Asyncify로 기다리지 않는다. Font 글리프 생성은 지연 상태를 유지한다. 종료/핫 리로드 뒤 이전 결과는 버린다.
+"""
+
+["Font::onLoad"]
+description.en = "LoadResult event delivered once on main after the surviving asynchronous result is applied; cancellation has no event. Retain the listener token."
+description.ja = "生き残った非同期結果の反映後、メインで一度通知する LoadResult イベント。取消しは通知しない。リスナートークンを保持する。"
+description.ko = "유효한 비동기 결과를 반영한 뒤 메인에서 한 번 알리는 LoadResult 이벤트. 취소는 알리지 않으며 리스너 토큰을 유지한다."
+
+["Font::isLoading"]
+description.en = "Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation."
+description.ja = "現在の非同期要求が準備中またはメイン反映待ちか。onLoad の前と取消し後は false。"
+description.ko = "현재 비동기 요청이 준비 중이거나 메인 반영을 기다리는지. onLoad 직전 및 취소 후에는 false."
+
+["ScreenshotSaveEventArgs"]
+description.en = "Completion of an asynchronous screenshot: the actual destination and save result. Delivered on main in a later frame, including rejected requests."
+description.ja = "非同期スクリーンショットの完了。実際の保存先と保存結果を持ち、受付失敗も含めて後のフレームのメインスレッドで通知する。"
+description.ko = "비동기 스크린샷 완료. 실제 저장 경로와 저장 결과를 담으며 거부된 요청도 이후 프레임의 메인 스레드에서 알린다."
+
+["ScreenshotSaveEventArgs::path"]
+description.en = "Resolved absolute native output path, including extension normalization; on Web, the download filename only."
+description.ja = "拡張子補正後のネイティブの絶対保存先。Web ではダウンロードファイル名のみ。"
+description.ko = "확장자 보정 후의 네이티브 절대 저장 경로. Web에서는 다운로드 파일 이름만 사용한다."
+
+["ScreenshotSaveEventArgs::result"]
+description.en = "Checked native write/close/replacement result. Web success means a download click was submitted; browser disk completion cannot be observed."
+description.ja = "ネイティブでは書き込み・クローズ・置換の確認結果。Web の成功はダウンロード要求の送信を表し、実際のディスク保存完了は確認できない。"
+description.ko = "네이티브 쓰기·닫기·교체 확인 결과. Web의 성공은 다운로드 요청 제출을 뜻하며 실제 디스크 저장 완료는 관찰할 수 없다."
+
+["saveScreenshotAsync"]
+description.en = "Capture the requesting window at its next present, then encode/write on a worker. The destination is frozen at submission. At most four pending jobs per window include capture, writing and undelivered results; further requests report WriteFailed with Screenshot queue is full through onScreenshotSave(). Hidden secondary windows wait for their own present without blocking captures in other windows. Native writes use one global FIFO in capture-completion order; a slow write delays later writes. Closing before capture or calling without a render window reports a deferred failure. Native readback still runs on main and may stall that frame. Web snapshots the canvas and submits a PNG/JPEG download; browser download policy and actual disk completion are unobservable. Serialize other saves to the same destination yourself. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires."
+description.ja = "要求元ウィンドウの次の present で撮影し、ワーカーでエンコード・保存する。保存先は要求時に確定する。撮影待ち・保存中・未通知を含め各ウィンドウ最大4件で、超過は onScreenshotSave() から WriteFailed（Screenshot queue is full）を通知する。非表示の副ウィンドウは自身の present を待ち、他のウィンドウの撮影を妨げない。ネイティブの保存は撮影完了順の単一グローバル FIFO で処理し、遅い保存は後続の保存を遅らせる。撮影前の閉鎖や描画ウィンドウなしの要求は後のフレームで失敗を通知する。ネイティブの読み戻しはメインスレッド上で行い、そのフレームが停止する場合がある。Web はキャンバスを PNG/JPEG のダウンロードとして送信し、ブラウザの許可やディスク保存完了は確認できない。同じ保存先に対する他の保存処理は呼び出し側で直列化する。 完了通知はアプリ実行中（runApp / runHeadlessApp）に配信される。これらを使わない単独の main() では完了イベントは発火しない。"
+description.ko = "요청한 창의 다음 present에서 캡처하고 워커에서 인코딩·저장한다. 저장 경로는 요청 시 확정된다. 캡처 대기·쓰기·미통지 결과를 포함해 창마다 최대 4건이며 초과 요청은 onScreenshotSave()에서 WriteFailed(Screenshot queue is full)로 알린다. 숨겨진 보조 창은 자신의 present를 기다리며 다른 창의 캡처를 막지 않는다. 네이티브 쓰기는 캡처 완료 순서의 단일 전역 FIFO로 처리하며 느린 쓰기는 이후 쓰기를 지연시킨다. 캡처 전 창 닫기나 렌더 창 없는 호출은 이후 프레임에서 실패를 알린다. 네이티브 읽기는 메인 스레드에서 실행되어 해당 프레임이 지연될 수 있다. Web은 PNG/JPEG 다운로드를 제출하며 브라우저 정책과 디스크 저장 완료는 관찰할 수 없다. 같은 경로의 다른 저장 작업은 호출자가 직렬화한다. 완료 알림은 앱 실행 중(runApp / runHeadlessApp)에 전달된다. 앱 실행이 없는 일반 main()에서는 완료 이벤트가 발생하지 않는다."
+related = ["onScreenshotSave", "ScreenshotSaveEventArgs", "saveScreenshot"]
+
+["onScreenshotSave"]
+description.en = "Host-owned screenshot completion event. Fires once per saveScreenshotAsync request on main in a later frame, never inline; expired application runs suppress delivery. Retain the EventListener returned by listen(). Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires."
+description.ja = "ホスト所有のスクリーンショット完了イベント。saveScreenshotAsync の各要求について、後のフレームのメインスレッドで1回通知し、呼び出し中には通知しない。終了したアプリ実行の通知は抑止する。listen() が返す EventListener を保持する。 完了通知はアプリ実行中（runApp / runHeadlessApp）に配信される。これらを使わない単独の main() では完了イベントは発火しない。"
+description.ko = "호스트 소유 스크린샷 완료 이벤트. saveScreenshotAsync 요청마다 이후 프레임의 메인 스레드에서 한 번 알리며 호출 중에는 알리지 않는다. 종료된 앱 실행의 통지는 억제한다. listen()이 반환한 EventListener를 유지한다. 완료 알림은 앱 실행 중(runApp / runHeadlessApp)에 전달된다. 앱 실행이 없는 일반 main()에서는 완료 이벤트가 발생하지 않는다."
+
+["MicStartResult"]
+description.en = "Microphone startup outcome. Success requires usable capture; permission denial or a missing device is a failure. Converts explicitly to bool."
+description.ja = "マイク起動の結果。利用可能な入力の準備完了で成功となり、権限拒否やデバイスなしは失敗。bool へ明示変換できる。"
+description.ko = "마이크 시작 결과. 사용 가능한 캡처가 준비되어야 성공이며 권한 거부나 장치 없음은 실패이다. bool로 명시적 변환할 수 있다."
+
+["MicStartResult::success"]
+description.en = "True after the capture device or Web Audio processor is ready."
+description.ja = "入力デバイスまたは Web Audio のプロセッサーの準備が完了した場合 true。"
+description.ko = "캡처 장치 또는 Web Audio 프로세서가 준비되면 true."
+
+["MicStartResult::message"]
+description.en = "Empty on success; backend error code/detail or browser exception name on failure."
+description.ja = "成功時は空。失敗時はバックエンドのエラーコード・詳細、またはブラウザの例外名。"
+description.ko = "성공 시 비어 있으며 실패 시 백엔드 오류 코드·상세 또는 브라우저 예외 이름."
+
+["MicInput::startAsync"]
+description.en = "Begin a fresh microphone startup attempt without waiting. onStart reports readiness or failure on main in a later frame. A new start, stop or destruction cancels the pending attempt without waiting and suppresses its event. Each native run owns initialization through teardown on one lifecycle thread; a replacement opens after predecessor cleanup. All handle operations are on main. Web requires a secure context and user gesture: getUserMedia and AudioContext resume begin directly in this call. A suspended context is a failure with retry guidance; an unanswered permission prompt remains pending until stop. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires. On macOS/iOS, microphone consent is checked before capture initialization. An unanswered request keeps isStarting true without a lifecycle worker; stop, destruction and exit return without waiting for consent, and late responses after cancellation are discarded."
+description.ja = "待機せず新しいマイク起動を開始する。準備完了または失敗を後のフレームのメインスレッドで onStart に通知する。再起動・stop・破棄は待たずに保留中の試行を取り消し、その通知を抑止する。ネイティブでは試行ごとに1つのスレッドが初期化から破棄までを担当し、置換は旧試行の後始末後に開く。ハンドル操作はすべてメインスレッドで行う。Web はセキュアコンテキストとユーザー操作が必要で、この呼び出し中に getUserMedia と AudioContext の resume を開始する。コンテキストが停止中なら再試行方法付きの失敗となり、未回答の権限要求は stop まで保留できる。 完了通知はアプリ実行中（runApp / runHeadlessApp）に配信される。これらを使わない単独の main() では完了イベントは発火しない。 macOS/iOS ではキャプチャ初期化前にマイク権限を確認する。未回答の要求はワーカーを起動せず isStarting が true のまま保留する。stop・破棄・終了は権限回答を待たず、取り消し後の回答は破棄する。"
+description.ko = "기다리지 않고 새 마이크 시작을 요청한다. 준비 완료 또는 실패는 이후 프레임의 메인 스레드에서 onStart로 알린다. 새 시작·stop·소멸은 대기 없이 보류된 시도를 취소하고 이벤트를 억제한다. 네이티브의 각 실행은 하나의 스레드가 초기화부터 해제까지 담당하며 교체는 이전 정리 후 장치를 연다. 모든 핸들 조작은 메인 스레드에서 한다. Web은 보안 컨텍스트와 사용자 동작이 필요하며 이 호출에서 직접 getUserMedia와 AudioContext resume을 시작한다. 중지된 컨텍스트는 재시도 안내와 함께 실패하며 미응답 권한 요청은 stop까지 대기할 수 있다. 완료 알림은 앱 실행 중(runApp / runHeadlessApp)에 전달된다. 앱 실행이 없는 일반 main()에서는 완료 이벤트가 발생하지 않는다. macOS/iOS에서는 캡처 초기화 전에 마이크 권한을 확인한다. 응답이 없는 요청은 수명 주기 워커 없이 isStarting을 true로 유지한다. stop·소멸·종료는 권한 응답을 기다리지 않으며 취소 후 응답은 버린다."
+related = ["MicInput::onStart", "MicInput::isStarting", "MicInput::start"]
+
+["MicInput::onStart"]
+description.en = "One later-frame main-thread result per uncancelled startAsync attempt. isStarting is false and running/device metadata are published before listeners run. Listeners may restart or destroy this MicInput. Synchronous native start() emits no event. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires."
+description.ja = "取り消されていない startAsync の試行ごとに、後のフレームのメインスレッドで1回通知する。リスナー実行前に isStarting は false となり、動作状態とデバイス情報を反映する。リスナーから再起動やこの MicInput の破棄が可能。同期の start() は通知しない。 完了通知はアプリ実行中（runApp / runHeadlessApp）に配信される。これらを使わない単独の main() では完了イベントは発火しない。"
+description.ko = "취소되지 않은 startAsync 시도마다 이후 프레임의 메인 스레드에서 한 번 알린다. 리스너 실행 전에 isStarting은 false가 되고 실행 상태와 장치 정보를 반영한다. 리스너에서 재시작하거나 이 MicInput을 삭제할 수 있다. 동기 start()는 이벤트를 내지 않는다. 완료 알림은 앱 실행 중(runApp / runHeadlessApp)에 전달된다. 앱 실행이 없는 일반 main()에서는 완료 이벤트가 발생하지 않는다."
+
+["MicInput::isStarting"]
+description.en = "True from submission through queued readiness/failure, cleared immediately before onStart. False after cancellation and while merely running. On Web this also tracks legacy start() permission/setup."
+description.ja = "要求時から準備完了・失敗の通知待ちまで true。onStart の直前に false となる。取り消し後と単なる入力動作中は false。Web では従来の start() の権限・準備待ちも示す。"
+description.ko = "요청부터 준비·실패 통지 대기까지 true이며 onStart 직전에 false가 된다. 취소 후와 단순 실행 중에는 false. Web에서는 기존 start()의 권한·설정 대기도 추적한다."
+
+["mcp::AdmissionLimits"]
+category = "mcp"
+description.en = "MCP admission settings with finite defaults; all values must be positive. Change through setAdmissionLimits() while stopped. Excess requests are rejected as whole units."
+description.ja = "MCP 受付の有限な既定上限。各値は正数。停止中に setAdmissionLimits() で変更する。超過した要求は全体を拒否する。"
+description.ko = "MCP 수락의 유한 기본 한도. 모든 값은 양수여야 한다. 중지 상태에서 setAdmissionLimits()로 변경한다. 초과 요청 전체를 거부한다."
+
+["mcp::setAdmissionLimits"]
+category = "mcp"
+description.en = "Set MCP limits before opening HTTP; return true on success. Zero values, active HTTP or outstanding work return false, log one Warning per rejected call, increment the Configuration rejection counter and preserve all previous settings. Defaults include 4096 histogram bins, 65536 grid cells, 256 operations, 64 MiB per reply and 256 MiB aggregate working memory. Counters and first-Warning state last for the process and do not reset on query or restart. Bound (security): control JSON must fit finite ingress storage. Overflow rejects with 413 and is counted. Bound (security): sockets and pending replies share finite admission. Overflow closes the new socket and is counted. Bound (security): network work must use a finite worker pool. Overflow queues within admission and excess admission is counted. Bound (security): HTTP metadata must stop growing while read. Overflow rejects with 431 and is counted. Bound (security): headers and trailers share finite metadata storage. Overflow rejects with 431 and is counted. Bound (security): header/trailer entries also consume storage. Overflow rejects with 431 and is counted. Bound (security): histogram parameters drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): grid products drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): operation arrays drive repeated work and retained results. Overflow rejects the request and is counted. Bound (security): reply construction must fit finite output storage. Overflow returns an error and is counted. Bound (security): concurrent MCP work shares finite process storage. Overflow rejects admission or returns an error and is counted. Bound (security): analysis image copies and encoders need credits before allocation. Overflow returns an error and is counted. Bound (abi): stb's immutable input view uses an int byte length. Overflow rejects the image and is counted. Bound (security): encoded copies and decoder buffers share working credits. Overflow rejects the image before reading and is counted. Bound (security): decoded pixels, copies and codec scratch need credits before decoding. Overflow rejects the image and is counted. Bound (security): RPC nesting must fit parse and copy stacks. Overflow rejects the request and is counted. Bound (security): audio scratch and result products need credits before allocation. Overflow rejects the request and is counted. Bound (abi): external MCP FFT lengths must fit the int-sized transform API. Overflow returns an error and is counted. Bound (realtime): the audio callback must not allocate; external MCP reads share its fixed history ring. Overflow returns an error and is counted. Bound (security): external snapshot copies need credits before vector growth. Overflow rejects the request and is counted. Bound (abi): codec allocation headers must fit size_t. Overflow returns null and is counted. Bound (security): codec allocations must fit pre-admitted workspace. Overflow returns null and is counted. Bound (abi): chunk sizes must fit the unsigned-long parser. Overflow rejects with 413 and is counted."
+description.ja = "HTTP を開く前に MCP の上限を設定し、成功時は true を返す。0、HTTP 動作中、作業残存中は false を返し、拒否した呼び出しごとに Warning を 1 回記録して Configuration 拒否カウンターを増やし、以前の設定をすべて保持する。既定は histogram 4096 bins、grid 65536 cells、256 操作、応答 64 MiB、合計作業メモリ 256 MiB。カウンターと初回 Warning 状態はプロセスの生存期間中保持し、照会や再起動でリセットしない。 Bound (security): control JSON must fit finite ingress storage. Overflow rejects with 413 and is counted. Bound (security): sockets and pending replies share finite admission. Overflow closes the new socket and is counted. Bound (security): network work must use a finite worker pool. Overflow queues within admission and excess admission is counted. Bound (security): HTTP metadata must stop growing while read. Overflow rejects with 431 and is counted. Bound (security): headers and trailers share finite metadata storage. Overflow rejects with 431 and is counted. Bound (security): header/trailer entries also consume storage. Overflow rejects with 431 and is counted. Bound (security): histogram parameters drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): grid products drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): operation arrays drive repeated work and retained results. Overflow rejects the request and is counted. Bound (security): reply construction must fit finite output storage. Overflow returns an error and is counted. Bound (security): concurrent MCP work shares finite process storage. Overflow rejects admission or returns an error and is counted. Bound (security): analysis image copies and encoders need credits before allocation. Overflow returns an error and is counted. Bound (abi): stb's immutable input view uses an int byte length. Overflow rejects the image and is counted. Bound (security): encoded copies and decoder buffers share working credits. Overflow rejects the image before reading and is counted. Bound (security): decoded pixels, copies and codec scratch need credits before decoding. Overflow rejects the image and is counted. Bound (security): RPC nesting must fit parse and copy stacks. Overflow rejects the request and is counted. Bound (security): audio scratch and result products need credits before allocation. Overflow rejects the request and is counted. Bound (abi): external MCP FFT lengths must fit the int-sized transform API. Overflow returns an error and is counted. Bound (realtime): the audio callback must not allocate; external MCP reads share its fixed history ring. Overflow returns an error and is counted. Bound (security): external snapshot copies need credits before vector growth. Overflow rejects the request and is counted. Bound (abi): codec allocation headers must fit size_t. Overflow returns null and is counted. Bound (security): codec allocations must fit pre-admitted workspace. Overflow returns null and is counted. Bound (abi): chunk sizes must fit the unsigned-long parser. Overflow rejects with 413 and is counted."
+description.ko = "HTTP를 열기 전에 MCP 한도를 설정하며 성공하면 true를 반환한다. 0, 실행 중 HTTP 또는 미완료 작업이 있으면 false를 반환하고 거부한 호출마다 Warning을 한 번 기록하며 Configuration 거부 카운터를 증가시키고 이전 설정을 모두 유지한다. 기본값은 histogram 4096 bins, grid 65536 cells, 연산 256개, 응답 64 MiB, 전체 작업 메모리 256 MiB다. 카운터와 첫 Warning 상태는 프로세스 수명 동안 유지하며 조회나 재시작으로 초기화하지 않는다. Bound (security): control JSON must fit finite ingress storage. Overflow rejects with 413 and is counted. Bound (security): sockets and pending replies share finite admission. Overflow closes the new socket and is counted. Bound (security): network work must use a finite worker pool. Overflow queues within admission and excess admission is counted. Bound (security): HTTP metadata must stop growing while read. Overflow rejects with 431 and is counted. Bound (security): headers and trailers share finite metadata storage. Overflow rejects with 431 and is counted. Bound (security): header/trailer entries also consume storage. Overflow rejects with 431 and is counted. Bound (security): histogram parameters drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): grid products drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): operation arrays drive repeated work and retained results. Overflow rejects the request and is counted. Bound (security): reply construction must fit finite output storage. Overflow returns an error and is counted. Bound (security): concurrent MCP work shares finite process storage. Overflow rejects admission or returns an error and is counted. Bound (security): analysis image copies and encoders need credits before allocation. Overflow returns an error and is counted. Bound (abi): stb's immutable input view uses an int byte length. Overflow rejects the image and is counted. Bound (security): encoded copies and decoder buffers share working credits. Overflow rejects the image before reading and is counted. Bound (security): decoded pixels, copies and codec scratch need credits before decoding. Overflow rejects the image and is counted. Bound (security): RPC nesting must fit parse and copy stacks. Overflow rejects the request and is counted. Bound (security): audio scratch and result products need credits before allocation. Overflow rejects the request and is counted. Bound (abi): external MCP FFT lengths must fit the int-sized transform API. Overflow returns an error and is counted. Bound (realtime): the audio callback must not allocate; external MCP reads share its fixed history ring. Overflow returns an error and is counted. Bound (security): external snapshot copies need credits before vector growth. Overflow rejects the request and is counted. Bound (abi): codec allocation headers must fit size_t. Overflow returns null and is counted. Bound (security): codec allocations must fit pre-admitted workspace. Overflow returns null and is counted. Bound (abi): chunk sizes must fit the unsigned-long parser. Overflow rejects with 413 and is counted."
+
+["mcp::getAdmissionLimits"]
+category = "mcp"
+description.en = "Return the current MCP admission limits."
+description.ja = "現在の MCP 受付上限を返す。"
+description.ko = "현재 MCP 수락 한도를 반환한다."
+
+["mcp::AdmissionLimits::bodyBytes"]
+category = "mcp"
+description.en = "Wire and decoded body bytes (default 1 MiB); excess returns 413."
+description.ja = "wire と decoded 本文のバイト数。既定 1 MiB、超過は 413。"
+description.ko = "wire 및 decoded 본문 바이트 수. 기본값 1 MiB, 초과 시 413."
+
+["mcp::AdmissionLimits::outstanding"]
+category = "mcp"
+description.en = "Outstanding connections including queued and deferred work (default 32); excess closes."
+description.ja = "キュー待機・読み取り中・遅延応答を含む未完了接続数。既定 32、超過接続は切断。"
+description.ko = "큐 대기·읽기·지연 응답을 포함한 미완료 연결 수. 기본값 32, 초과 연결은 종료."
+
+["mcp::AdmissionLimits::workers"]
+category = "mcp"
+description.en = "HTTP worker count (default 4); queued work shares connection admission."
+description.ja = "HTTP ワーカー数。既定 4。キュー待機も接続数の上限に含む。"
+description.ko = "HTTP 워커 수. 기본값 4. 큐 대기도 연결 수 한도에 포함."
+
+["mcp::AdmissionLimits::lineBytes"]
+category = "mcp"
+description.en = "Request/header/trailer line bytes (default 8192); excess returns 431."
+description.ja = "要求・ヘッダー・トレーラーの各行のバイト数。既定 8192、超過は 431。"
+description.ko = "요청·헤더·트레일러의 한 줄 바이트 수. 기본값 8192, 초과 시 431."
+
+["mcp::AdmissionLimits::headerBytes"]
+category = "mcp"
+description.en = "Combined request/header/trailer bytes (default 65536); excess returns 431."
+description.ja = "要求行・ヘッダー・トレーラーの合計バイト数。既定 65536、超過は 431。"
+description.ko = "요청 줄·헤더·트레일러의 합계 바이트 수. 기본값 65536, 초과 시 431."
+
+["mcp::AdmissionLimits::headerCount"]
+category = "mcp"
+description.en = "Combined header/trailer fields (default 128); excess returns 431."
+description.ja = "ヘッダーとトレーラーを合わせたフィールド数。既定 128、超過は 431。"
+description.ko = "헤더와 트레일러의 합계 필드 수. 기본값 128, 초과 시 431."
+
+["mcp::AdmissionLimits::histogramBins"]
+category = "mcp"
+description.en = "Histogram bins (default 4096); excess returns an error."
+description.ja = "ヒストグラムの bin 数。既定 4096、超過はエラー。"
+description.ko = "히스토그램 bin 수. 기본값 4096, 초과 시 오류."
+
+["mcp::AdmissionLimits::gridCells"]
+category = "mcp"
+description.en = "Grid cells (default 65536); excess returns an error."
+description.ja = "グリッドのセル数。既定 65536、超過はエラー。"
+description.ko = "그리드 셀 수. 기본값 65536, 초과 시 오류."
+
+["mcp::AdmissionLimits::operations"]
+category = "mcp"
+description.en = "Analysis operations per request (default 256); excess returns an error."
+description.ja = "画像解析要求あたりの操作数。既定 256、超過はエラー。"
+description.ko = "이미지 분석 요청당 연산 수. 기본값 256, 초과 시 오류."
+
+["mcp::AdmissionLimits::replyBytes"]
+category = "mcp"
+description.en = "Reply bytes (default 64 MiB); excess returns an error."
+description.ja = "応答のバイト数。既定 64 MiB、超過はエラー。"
+description.ko = "응답 바이트 수. 기본값 64 MiB, 초과 시 오류."
+
+["mcp::AdmissionLimits::workingBytes"]
+category = "mcp"
+description.en = "Aggregate MCP working bytes (default 256 MiB); excess closes admission or returns an error."
+description.ja = "MCP 作業メモリの合計バイト数。既定 256 MiB、超過は受付時の切断またはエラー。"
+description.ko = "MCP 전체 작업 메모리 바이트 수. 기본값 256 MiB, 초과 시 수락 연결 종료 또는 오류."
+
+["mcp::McpRequest::budget"]
+hide = true
+
+["mcp::AdmissionLimits::jsonDepth"]
+category = "mcp"
+description.en = "Maximum request JSON nesting depth (default 64); excess rejects the whole request."
+description.ja = "要求 JSON の最大ネスト深度。既定 64。超過した要求は全体を拒否する。"
+description.ko = "요청 JSON의 최대 중첩 깊이. 기본값 64. 초과 요청 전체를 거부한다."

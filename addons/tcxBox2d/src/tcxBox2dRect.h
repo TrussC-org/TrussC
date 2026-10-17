@@ -16,9 +16,9 @@ public:
     RectBody() = default;
     ~RectBody() override = default;
 
-    // Movable
-    RectBody(RectBody&& other) noexcept;
-    RectBody& operator=(RectBody&& other) noexcept;
+    // Non-movable
+    RectBody(RectBody&&) = delete;
+    RectBody& operator=(RectBody&&) = delete;
 
     // -------------------------------------------------------------------------
     // Creation

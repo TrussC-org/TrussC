@@ -1,7 +1,9 @@
 #pragma once
 #include "tc/utils/tcAnnotations.h"
+#include "tc/app/tcScreenshot.h"
 
 #include <string>
+#include <utility>
 #include <filesystem>
 #include "tcMath.h"
 
@@ -192,6 +194,9 @@ TC_PLATFORMS("macos,windows,linux,ios,android") bool captureWindow(Pixels& outPi
 // Paths are download filenames; returns true when encoding starts, with later
 // failures logged. Supports PNG/JPEG, with .png appended for other extensions.
 namespace internal {
+struct WindowContext;
+// Dimensions consumed by native readback; callable before enqueue and at drain.
+std::pair<size_t, size_t> captureWindowSize(const WindowContext& ctx);
 // Resolve the data path and the platform-specific screenshot extension.
 // Returns the actual destination, warning when .png is appended.
 std::filesystem::path resolveScreenshotPath(const std::filesystem::path& path);
@@ -201,6 +206,7 @@ std::filesystem::path resolveScreenshotDownloadName(const std::filesystem::path&
 bool captureWindowToFile(const std::filesystem::path& path);
 // Encode an already captured RGBA8 image using the screenshot file formats.
 bool saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& path);
+SaveResult writeScreenshotPixels(const Pixels& pixels, const std::filesystem::path& path);
 }
 
 // ---------------------------------------------------------------------------

@@ -120,7 +120,9 @@ public:
     bool hasNewMessage() { return state_->hasNewMessage(); }
     bool getNextMessage(OscMessage& msg) { return state_->getNextMessage(msg); }
     // Overflow and shrinking drop the oldest queued messages first.
+    // Untrusted senders or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow and shrinking drop the oldest messages and increment the drop count.
     void setBufferSize(size_t size) { state_->setBufferSize(size); }
+    // Untrusted senders or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow and shrinking drop the oldest messages and increment the drop count.
     size_t getBufferSize() const { return state_->getBufferSize(); }
     // Running total since construction, including drops caused by shrinking.
     uint64_t getDroppedMessageCount() const { return state_->getDroppedMessageCount(); }
@@ -156,6 +158,7 @@ private:
         // Set the queue limit (default 1024). Past it, the oldest message is
         // dropped. Shrinking the limit discards the oldest queued messages now;
         // they count as dropped too.
+        // Untrusted senders or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow and shrinking drop the oldest messages and increment the drop count.
         void setBufferSize(size_t size) {
             uint64_t dropped = 0;
             {
@@ -170,6 +173,7 @@ private:
             countDrops(dropped);
         }
 
+        // Untrusted senders or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow and shrinking drop the oldest messages and increment the drop count.
         size_t getBufferSize() const { return bufferMax_; }
 
         // Messages received but never handed to the app, since this receiver was
@@ -310,6 +314,7 @@ private:
         std::queue<OscMessage> messageQueue_;
         std::mutex queueMutex_;
         std::atomic<bool> bufferEnabled_{false};
+        // Bound (security): untrusted senders or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow drops the oldest and is counted.
         size_t bufferMax_ = 1024;
 
         // Drop accounting: the receive thread and setBufferSize() only add to

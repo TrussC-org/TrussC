@@ -365,6 +365,7 @@ static void cover_mcp() {
     (void)mcp::alert(af::val<const std::string>());
     (void)mcp::deferToolResultTwoStage(af::val<std::function<std::function<json ()> ()>>(), af::val<const void *>());
     (void)mcp::deferToolResultUntilAfterFrame(af::val<std::function<json ()>>(), af::val<const void *>());
+    (void)mcp::getAdmissionLimits();
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
     (void)mcp::getHttpPort();
 #endif
@@ -375,6 +376,7 @@ static void cover_mcp() {
     (void)mcp::processHttpQueue();
 #endif
     (void)mcp::resource(af::val<const std::string>(), af::val<const std::string>());
+    (void)mcp::setAdmissionLimits(af::val<const mcp::AdmissionLimits>());
     (void)mcp::setToolLevel(af::val<mcp::ToolLevel>());
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
     (void)mcp::startHttpServer(af::val<int>(), af::val<const std::string>(), af::val<const std::string>());
@@ -475,11 +477,13 @@ static void cover_other() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
     (void)createWindow(af::val<const WindowSettings>());
 #endif
+    (void)onScreenshotSave();
     (void)operator*(af::val<float>(), af::val<const Vec2>());
     (void)operator*(af::val<float>(), af::val<const Vec3>());
     (void)operator*(af::val<int>(), af::val<const IVec2>());
     (void)operator*(af::val<int>(), af::val<const IVec3>());
     (void)operator*(af::val<float>(), af::val<const Vec4>());
+    (void)saveScreenshotAsync(af::val<const fs::path>());
 }
 
 static void cover_platform() {
@@ -1502,8 +1506,11 @@ struct Cover_Font : af::Scope<Font> {
         (void)af::val<const Font>().getWidth(af::val<const std::string>());
         (void)af::val<const Font>().getWritingMode();
         (void)af::val<const Font>().isLoaded();
+        (void)af::val<const Font>().isLoading();
         (void)af::val<const Font>().isWrapEnabled();
         (void)af::val<Font>().load(af::val<const fs::path>(), af::val<int>(), af::val<int>());
+        (void)af::val<Font>().loadAsync(af::val<const fs::path>(), af::val<int>(), af::val<int>());
+        (void)af::val<Font>().onLoad;
         (void)af::val<Font>().resetLineHeight();
         (void)af::val<Font>().setAlign(af::val<Direction>(), af::val<Direction>());
         (void)af::val<Font>().setAlign(af::val<Direction>());
@@ -1700,11 +1707,14 @@ struct Cover_Image : af::Scope<Image> {
         (void)af::val<Image>().halve();
         (void)af::val<const Image>().hasTexture();
         (void)af::val<const Image>().isAllocated();
+        (void)af::val<const Image>().isLoading();
         (void)af::val<Image>().load(af::val<const fs::path>(), af::val<bool>());
+        (void)af::val<Image>().loadAsync(af::val<const fs::path>(), af::val<bool>());
         (void)af::val<Image>().loadFromMemory(af::val<const unsigned char *>(), af::val<int>(), af::val<bool>());
         (void)af::val<Image>().mirror(af::val<bool>(), af::val<bool>());
         (void)af::val<Image>().mirrorH();
         (void)af::val<Image>().mirrorV();
+        (void)af::val<Image>().onLoad;
         (void)af::val<Image>().resize(af::val<int>(), af::val<int>());
         (void)af::val<const Image>().save(af::val<const fs::path>());
         (void)af::val<Image>().setColor(af::val<int>(), af::val<int>(), af::val<const Color>());
@@ -2120,9 +2130,19 @@ struct Cover_MicInput : af::Scope<MicInput> {
         (void)af::val<const MicInput>().getDeviceName();
         (void)af::val<const MicInput>().getSampleRate();
         (void)af::val<const MicInput>().isRunning();
+        (void)af::val<const MicInput>().isStarting();
         (void)af::val<MicInput>().onAudioData(af::val<const float *>(), af::val<size_t>());
+        (void)af::val<MicInput>().onStart;
         (void)af::val<MicInput>().start(af::val<int>());
+        (void)af::val<MicInput>().startAsync(af::val<int>());
         (void)af::val<MicInput>().stop();
+    }
+};
+
+struct Cover_MicStartResult : af::Scope<MicStartResult> {
+    static void run() {
+        (void)af::val<MicStartResult>().message;
+        (void)af::val<MicStartResult>().success;
     }
 };
 
@@ -2883,6 +2903,13 @@ struct Cover_ScreenRecorder : af::Scope<ScreenRecorder> {
     }
 };
 
+struct Cover_ScreenshotSaveEventArgs : af::Scope<ScreenshotSaveEventArgs> {
+    static void run() {
+        (void)af::val<ScreenshotSaveEventArgs>().path;
+        (void)af::val<ScreenshotSaveEventArgs>().result;
+    }
+};
+
 struct Cover_ScrollBar : af::Scope<ScrollBar> {
     static void run() {
         (void)ScrollBar(af::val<ScrollContainer *>(), af::val<Direction>());
@@ -3371,6 +3398,7 @@ struct Cover_SoundBuffer : af::Scope<SoundBuffer> {
         (void)af::val<SoundBuffer>().getAdtsSampleRateIndex(af::val<int>());
         (void)af::val<const SoundBuffer>().getDuration();
         (void)af::val<const SoundBuffer>().getPath();
+        (void)af::val<const SoundBuffer>().isLoading();
         (void)af::val<const SoundBuffer>().kind();
         (void)af::val<SoundBuffer>().load(af::val<const fs::path>());
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
@@ -3379,6 +3407,7 @@ struct Cover_SoundBuffer : af::Scope<SoundBuffer> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
         (void)af::val<SoundBuffer>().loadAacFromMemory(af::val<const void *>(), af::val<size_t>());
 #endif
+        (void)af::val<SoundBuffer>().loadAsync(af::val<const fs::path>());
         (void)af::val<SoundBuffer>().loadFlac(af::val<const fs::path>());
         (void)af::val<SoundBuffer>().loadFlacFromMemory(af::val<const void *>(), af::val<size_t>());
         (void)af::val<SoundBuffer>().loadMp3(af::val<const fs::path>());
@@ -3390,6 +3419,7 @@ struct Cover_SoundBuffer : af::Scope<SoundBuffer> {
         (void)af::val<SoundBuffer>().loadWavFromMemory(af::val<const void *>(), af::val<size_t>());
         (void)af::val<SoundBuffer>().mixFrom(af::val<const SoundBuffer>(), af::val<size_t>(), af::val<float>());
         (void)af::val<SoundBuffer>().numSamples;
+        (void)af::val<SoundBuffer>().onLoad;
         (void)af::val<SoundBuffer>().sampleRate;
         (void)af::val<SoundBuffer>().samples;
     }
@@ -4711,6 +4741,23 @@ struct Cover_Xml : af::Scope<Xml> {
     }
 };
 
+struct Cover_mcp__AdmissionLimits : af::Scope<mcp::AdmissionLimits> {
+    static void run() {
+        (void)af::val<mcp::AdmissionLimits>().bodyBytes;
+        (void)af::val<mcp::AdmissionLimits>().gridCells;
+        (void)af::val<mcp::AdmissionLimits>().headerBytes;
+        (void)af::val<mcp::AdmissionLimits>().headerCount;
+        (void)af::val<mcp::AdmissionLimits>().histogramBins;
+        (void)af::val<mcp::AdmissionLimits>().jsonDepth;
+        (void)af::val<mcp::AdmissionLimits>().lineBytes;
+        (void)af::val<mcp::AdmissionLimits>().operations;
+        (void)af::val<mcp::AdmissionLimits>().outstanding;
+        (void)af::val<mcp::AdmissionLimits>().replyBytes;
+        (void)af::val<mcp::AdmissionLimits>().workers;
+        (void)af::val<mcp::AdmissionLimits>().workingBytes;
+    }
+};
+
 struct Cover_mcp__Resource : af::Scope<mcp::Resource> {
     static void run() {
         (void)af::val<mcp::Resource>().description;
@@ -4863,6 +4910,7 @@ void af::coverGenerated() {
     af_generated::Cover_Material::run();
     af_generated::Cover_Mesh::run();
     af_generated::Cover_MicInput::run();
+    af_generated::Cover_MicStartResult::run();
     af_generated::Cover_Mod::run();
     af_generated::Cover_MouseDragEventArgs::run();
     af_generated::Cover_MouseEventArgs::run();
@@ -4886,6 +4934,7 @@ void af::coverGenerated() {
     af_generated::Cover_ResizeEventArgs::run();
     af_generated::Cover_SaveResult::run();
     af_generated::Cover_ScreenRecorder::run();
+    af_generated::Cover_ScreenshotSaveEventArgs::run();
     af_generated::Cover_ScrollBar::run();
     af_generated::Cover_ScrollContainer::run();
     af_generated::Cover_ScrollEventArgs::run();
@@ -4933,6 +4982,7 @@ void af::coverGenerated() {
     af_generated::Cover_Window::run();
     af_generated::Cover_WindowSettings::run();
     af_generated::Cover_Xml::run();
+    af_generated::Cover_mcp__AdmissionLimits::run();
     af_generated::Cover_mcp__Resource::run();
     af_generated::Cover_mcp__ResourceBuilder::run();
     af_generated::Cover_mcp__Tool::run();

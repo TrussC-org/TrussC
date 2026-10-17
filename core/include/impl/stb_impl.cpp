@@ -16,6 +16,80 @@
 #define STBI_WINDOWS_UTF8
 #define STBIW_WINDOWS_UTF8
 
+#include "tcMcpImageAdmission.h"
+#include <algorithm>
+#include <cstdlib>
+#include <cstring>
+
+namespace trussc::mcp::internal {
+namespace {
+struct alignas(std::max_align_t) ImageAllocation {
+    ImageAllocationScope* owner;
+    size_t size;
+    ImageAllocation* previous;
+    ImageAllocation* next;
+};
+thread_local ImageAllocationScope* imageAllocationScope = nullptr;
+}
+ImageAllocationScope::ImageAllocationScope(size_t limit)
+    : previous_(imageAllocationScope), limit_(limit) { imageAllocationScope = this; }
+ImageAllocationScope::~ImageAllocationScope() {
+    while (first_) mcpImageFree(static_cast<ImageAllocation*>(first_) + 1);
+    imageAllocationScope = previous_;
+}
+void* mcpImageMalloc(size_t size) {
+    auto* scope = imageAllocationScope;
+    if (!scope) return std::malloc(size);
+    // Bound (abi): codec allocation headers must fit size_t. Overflow returns null and is counted.
+    if (size > SIZE_MAX - sizeof(ImageAllocation)) { scope->needed_ = SIZE_MAX; return nullptr; }
+    const auto total = size + sizeof(ImageAllocation);
+    // Bound (security): codec allocations must fit pre-admitted workspace. Overflow returns null and is counted.
+    if (total > scope->limit_ - scope->used_) {
+        const auto needed = total > SIZE_MAX - scope->used_ ? SIZE_MAX : total + scope->used_;
+        scope->needed_ = std::max(scope->needed_, needed);
+        return nullptr;
+    }
+    auto* block = static_cast<ImageAllocation*>(std::malloc(total));
+    if (!block) return nullptr;
+    block->owner = scope;
+    block->size = size;
+    block->previous = nullptr;
+    block->next = static_cast<ImageAllocation*>(scope->first_);
+    if (block->next) block->next->previous = block;
+    scope->first_ = block;
+    scope->used_ += total;
+    scope->peak_ = std::max(scope->peak_, scope->used_);
+    return block + 1;
+}
+void mcpImageFree(void* pointer) {
+    if (!pointer) return;
+    if (!imageAllocationScope) { std::free(pointer); return; }
+    auto* block = static_cast<ImageAllocation*>(pointer) - 1;
+    auto* scope = block->owner;
+    if (block->previous) block->previous->next = block->next;
+    else scope->first_ = block->next;
+    if (block->next) block->next->previous = block->previous;
+    scope->used_ -= block->size + sizeof(ImageAllocation);
+    std::free(block);
+}
+void* mcpImageRealloc(void* pointer, size_t size) {
+    if (!imageAllocationScope) return std::realloc(pointer, size);
+    if (!pointer) return mcpImageMalloc(size);
+    if (!size) { mcpImageFree(pointer); return nullptr; }
+    const auto previousSize = (static_cast<ImageAllocation*>(pointer) - 1)->size;
+    // Reserve both buffers before replacing: an allocation never publishes a prefix.
+    auto* replacement = mcpImageMalloc(size);
+    if (!replacement) return nullptr;
+    std::memcpy(replacement, pointer, std::min(previousSize, size));
+    mcpImageFree(pointer);
+    return replacement;
+}
+}
+
+#define STBI_MALLOC(size) trussc::mcp::internal::mcpImageMalloc(size)
+#define STBI_REALLOC(pointer, size) trussc::mcp::internal::mcpImageRealloc(pointer, size)
+#define STBI_FREE(pointer) trussc::mcp::internal::mcpImageFree(pointer)
+
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 

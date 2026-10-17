@@ -547,3 +547,19 @@ atomic in `tcGlobal.cpp` (including backend reinitialization). Other information
 items retain their usual Verbose mapping. The bridge supplies the exact message
 also in release builds, where sokol may omit message strings. No query API,
 header-inline mutable state, or Mesa version check is added.
+
+## `sapp_dpi_scale()` before `sapp_run()` (#841)
+
+- The X11/EGL (Raspberry Pi), Android, iOS and Emscripten backends returned
+  the zero-initialized `dpi_scale` before `sapp_run()`, so a headless app saw
+  a DPI scale of 0 (and every font size mapped to one cache key). They now
+  report 1.0 until the backend sets the real scale, like the X11/GLX and
+  Windows backends. macOS keeps its documented deviation: the main screen's
+  scale before `sapp_run()`.
+
+## macOS secondary-window capture (#879)
+
+- Secondary-window `CAMetalLayer`s now set `framebufferOnly = NO`, like the
+  main window and iOS. Window capture blits from the drawable texture, which
+  Metal does not allow for a framebuffer-only texture (validation aborts with
+  "sourceTexture must not be a framebufferOnly texture").

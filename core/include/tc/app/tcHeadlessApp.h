@@ -240,6 +240,10 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     // isMainThread() / runOnMainThread() behave the same as in the windowed app.
     getMainThreadId();
 
+    if (auto token = internal::appRunToken()) token->store(false);
+    internal::cancelResourceBackends();
+    internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
+
     // Reset state
     headless::active = true;
     headless::frameCount = 0;
@@ -282,6 +286,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         double elapsed = std::chrono::duration<double>(now - lastTime).count();
         lastTime = now;
 
+        auto resourceLoads = internal::takeResourceLoadBatch();
         internal::sampleFrameTime(ctx);
 
         // Run work marshalled from worker threads (runOnMainThread, Event
@@ -290,6 +295,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         // (#349): the stacks go back to their depth before it.
         {
             internal::EntryStackGuard guard(internal::AppEntry::Prelude);
+            internal::deliverResourceLoadBatch(std::move(resourceLoads));
             internal::drainMainThreadQueue();
             internal::pumpAudioDiagnostics();
 #ifndef __EMSCRIPTEN__
@@ -308,6 +314,9 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         sleeper.sleep(internal::headlessSleepTime(accumulator, targetDelta, spent));
     }
 
+    if (auto token = internal::appRunToken()) token->store(false);
+    internal::cancelResourceBackends();
+
     // Finish MCP workers before their app-owned handlers are destroyed.
 #ifndef __EMSCRIPTEN__
     mcp::stopHttpServer();
@@ -323,6 +332,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         app->cleanup();
     }
 
+    internal::waitForResourceLoadsAtAppExit();
     ctx.rootNode.reset();   // no longer the running App
 
     // Headless apps leave the audio device running (no shutdownAudio() on

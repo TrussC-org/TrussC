@@ -1,5 +1,6 @@
 #include <TrussC.h>
 #include <fstream>
+#include <climits>
 #include "tcAudioTools.h"
 #include "tc/sound/tcAudioAnalysis.h"
 #include "tc/sound/tcAudioRecorder.h"
@@ -21,11 +22,27 @@ json decibels(double amplitude) {
     return std::round(200.0 * std::log10(amplitude)) / 10.0;
 }
 
+size_t audioBytes(size_t count, size_t channels, size_t perValue, AdmissionStore store) {
+    const auto limits = getAdmissionLimits();
+    const size_t capacity = store == AdmissionStore::Reply ? limits.replyBytes : limits.workingBytes;
+    // Bound (security): audio scratch and result products need credits before allocation. Overflow rejects the request and is counted.
+    if (count && channels > capacity / perValue / count) {
+        const size_t needed = channels > SIZE_MAX / perValue / count ? SIZE_MAX : count * channels * perValue;
+        admissionRejected(store, capacity, needed);
+        throw AdmissionError();
+    }
+    return count * channels * perValue;
+}
+
 json spectrum(const json& args) {
     if (args.contains("n") && !args["n"].is_number_integer()) return error("n must be an integer");
     const auto nValue = args.value("n", 1024.0);
-    if (nValue < 64 || nValue > double(std::numeric_limits<int>::max()))
+    if (nValue < 64) return error("n must be a power of two from 64 up to the ring length");
+    // Bound (abi): external MCP FFT lengths must fit the int-sized transform API. Overflow returns an error and is counted.
+    if (nValue > double(std::numeric_limits<int>::max())) {
+        admissionRejected(AdmissionStore::Working, size_t(INT_MAX), nValue >= double(SIZE_MAX) ? SIZE_MAX : size_t(nValue), "frames");
         return error("n must be a power of two from 64 up to the ring length");
+    }
     const int n = int(nValue);
     if (!isPowerOfTwo(n)) return error("n must be a power of two from 64 up to the ring length");
     const std::string window = args.value("window", std::string("hann"));
@@ -37,9 +54,13 @@ json spectrum(const json& args) {
     if (peaks < 0) return error("peaks must be a non-negative integer");
     if (!number(args, "fmin") || !number(args, "fmax")) return error("frequency bounds must be finite numbers");
 
-    auto data = trussc::internal::AudioAnalysisAccess::snapshot(AudioEngine::getInstance(), n);
+    auto data = trussc::internal::AudioAnalysisAccess::snapshot(AudioEngine::getInstance(), n, &reserveAudioSnapshot);
     if (!data.channels) return error("Audio output history is unavailable; start audio or retry after a concurrent callback");
-    if (size_t(n) > data.capacity) return error("n exceeds the ring length");
+    // Bound (realtime): the audio callback must not allocate; external MCP reads share its fixed history ring. Overflow returns an error and is counted.
+    if (size_t(n) > data.capacity) {
+        admissionRejected(AdmissionStore::Working, data.capacity, size_t(n), "frames");
+        return error("n exceeds the ring length");
+    }
     const double binHz = double(data.sampleRate) / n;
     const double fmin = args.value("fmin", 0.0);
     const double fmax = args.value("fmax", double(data.sampleRate) / 2);
@@ -49,6 +70,14 @@ json spectrum(const json& args) {
     const int last = int(std::floor(fmax / binHz));
     const int outputChannels = channels == "mix" ? 1 : data.channels;
     const size_t count = data.samples.size() / data.channels;
+    const size_t binCount = last >= first ? size_t(last - first) + 1 : 0;
+    const size_t peakLimit = size_t(std::min(peaks, double(binCount)));
+    reserveReply(audioBytes(binCount, size_t(outputChannels), 32, AdmissionStore::Reply));
+    reserveReply(audioBytes(peakLimit, size_t(outputChannels), 128, AdmissionStore::Reply));
+    reserveReply(512);
+    reserveWork(audioBytes(size_t(n), 1, 128, AdmissionStore::Working));
+    reserveWork(audioBytes(binCount, size_t(outputChannels), 64, AdmissionStore::Working));
+    reserveWork(audioBytes(peakLimit, size_t(outputChannels), 512, AdmissionStore::Working));
     std::vector<double> weights(n);
     double gain = 0;
     for (int i = 0; i < n; ++i) {
@@ -113,7 +142,7 @@ json capture(const json& args) {
     if (!number(args, "seconds")) return error("seconds must be a finite positive number");
     const double seconds = args.value("seconds", 1.0);
     if (seconds <= 0) return error("seconds must be a finite positive number");
-    auto data = trussc::internal::AudioAnalysisAccess::snapshot(AudioEngine::getInstance(), std::numeric_limits<size_t>::max());
+    auto data = trussc::internal::AudioAnalysisAccess::snapshot(AudioEngine::getInstance(), std::numeric_limits<size_t>::max(), &reserveAudioSnapshot);
     if (!data.channels || data.samples.empty()) return error("Audio output history is unavailable or empty; retry after audio has been produced");
     const size_t requested = size_t(std::min(seconds, 2.0) * data.sampleRate);
     const size_t frames = std::min(requested, data.samples.size() / data.channels);
@@ -142,6 +171,10 @@ json capture(const json& args) {
             {"channels", data.channels}, {"frames", frames}, {"framesWritten", data.framesWritten}};
 }
 } // namespace
+
+void reserveAudioSnapshot(size_t frames, size_t channels) {
+    reserveWork(audioBytes(frames, channels, sizeof(float), AdmissionStore::Working));
+}
 
 void registerAudioTools(Server& server) {
     coreTool(server, "tc_get_audio_spectrum", "Full post-clamp output spectrum, read-only; never starts the engine. Returns sampleRate, n, binHz, framesWritten (since last init), and channels [{peak, rms, peaks [{hz, dbfs}], spectrum}]. Spectrum values are dBFS rounded to one decimal; null means silence (-infinity). Missing startup frames are zero padded. Frequency bounds select inclusive FFT bins; peak frequencies are interpolated.")

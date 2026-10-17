@@ -24,7 +24,7 @@ def discover_modes(root):
     still reported, with its reason, so it stays visible in the summary.
     """
     for marker in sorted((root / 'core/tests').glob('*/display-test')):
-        for number, line in enumerate(marker.read_text().splitlines(), 1):
+        for number, line in enumerate(marker.read_text(encoding="utf-8").splitlines(), 1):
             words = shlex.split(line, comments=True)
             if not words:
                 continue

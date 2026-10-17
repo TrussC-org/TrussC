@@ -106,6 +106,7 @@ class TC_PLATFORMS("macos,windows,linux,android") TcpServer {
         internal::EventSnapshotDelivery<TcpClientDisconnectEventArgs> onClientDisconnect;
         internal::EventSnapshotDelivery<TcpServerErrorEventArgs> onError;
         internal::EventSnapshotDelivery<TcpSendCompleteEventArgs> onSendComplete;
+        // Untrusted connection floods can retain clients; an optional cap keeps client memory finite. At the cap, newly accepted sockets are closed.
         bool start(int port, int maxClients = 0);
         void stop();
         bool isRunning() const;
@@ -126,9 +127,12 @@ class TC_PLATFORMS("macos,windows,linux,android") TcpServer {
         int broadcastAsync(const void* data, size_t size);
         int broadcastAsync(const std::vector<char>& data);
         int broadcastAsync(const std::string& message);
+        // Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads.
         void setReceiveBufferSize(size_t size);
         void setSendTimeout(float seconds);
+        // A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
         void setSendAsyncBufferSize(size_t bytes);
+        // A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
         size_t getSendAsyncBufferSize() const;
         size_t getSendAsyncPendingBytes(int clientId) const;
         int getPort() const;
@@ -161,8 +165,10 @@ class TC_PLATFORMS("macos,windows,linux,android") TcpServer {
         std::vector<int> finishedWriters_;
         mutable std::shared_mutex clientsMutex_;
         int nextClientId_ = 1;
+        // Bound (security): network reads use finite chunks to bound each receive allocation. Overflow continues in later reads.
         size_t receiveBufferSize_ = 65536;
         std::atomic<float> sendTimeout_{60.0f};
+        // Bound (security): a stalled network peer can retain queued sends; a high-water mark limits further queue growth. Overflow refuses sendAsync with QueueFull or makes send wait; a single send can exceed the mark.
         std::atomic<size_t> sendAsyncBufferSize_{16 * 1024 * 1024};
         std::atomic<uint64_t> nextSendId_{0};
         std::shared_ptr<internal::TcpSendChannel> findChannel(int clientId) const;
@@ -249,6 +255,7 @@ public:
     // Events above) or on a client's receive or writer thread (onReceive,
     // onSendComplete, onClientDisconnect, onError from those threads), it logs
     // an error and returns false without stopping anything.
+    // Untrusted connection floods can retain clients; an optional cap keeps client memory finite. At the cap, newly accepted sockets are closed.
     bool start(int port, int maxClients = 0);
     // Stop server. Returns once the accept thread and every client thread have
     // ended and every client is disconnected. When two threads call it at
@@ -315,6 +322,7 @@ public:
     // Settings
     // -------------------------------------------------------------------------
     // Set receive buffer size
+    // Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads.
     void setReceiveBufferSize(size_t size);
     // Set how long a send may make NO progress before it gives up, in seconds
     // (0 = wait indefinitely). Defaults to 60 s: long enough that no healthy
@@ -330,7 +338,9 @@ public:
     // A full queue does not disconnect anyone — only the idle timeout does.
     // send() waits for room instead of failing, so QueueFull is something only
     // sendAsync() can return.
+    // A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
     void setSendAsyncBufferSize(size_t bytes);
+    // A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
     size_t getSendAsyncBufferSize() const;
     // How much this client has queued and not yet completed, in bytes.
     // 0 for an unknown client.

@@ -2479,6 +2479,7 @@ void mcp::alert(const std::string & msg)  // Log an operator warning and queue i
 void mcp::deferToolResultTwoStage(std::function<std::function<json ()> ()> mainStage, const void * targetWindow = nullptr)  // Defer a main-thread stage until after present; its returned JSON producer runs on the HTTP worker for expensive encoding.
 void mcp::deferToolResultUntilAfterFrame(std::function<json ()> produce, const void * targetWindow = nullptr)  // In a tool handler, defer the JSON result producer until after the target window's present; null targets the main window.
 void mcp::enableDebugger() ⚠️deprecated [macos,windows,linux,ios,android]  // Deprecated no-op; use setToolLevel(ToolLevel::Control). Removal at v1.0.0.
+AdmissionLimits mcp::getAdmissionLimits()  // Return the current MCP admission limits.
 int mcp::getHttpPort() [macos,windows,linux,ios,android]  // Return the bound HTTP port, or 0 when stopped or on Web.
 ToolLevel mcp::getToolLevel()  // Return the current host grant, checked for every tools/list and tools/call.
 bool mcp::hasTool(const std::string & name)  // Whether a tool is registered, regardless of its current exposure.
@@ -2488,12 +2489,13 @@ void mcp::registerControlTools() ⚠️deprecated  // Deprecated alias of setToo
 void mcp::registerDebuggerTools() ⚠️deprecated  // Deprecated alias of setToolLevel(ToolLevel::Control); removal at v1.0.0.
 void mcp::registerInspectionTools() ⚠️deprecated  // Deprecated alias of setToolLevel(ToolLevel::ReadOnly); removal at v1.0.0.
 ResourceBuilder mcp::resource(const std::string & uri, const std::string & name)  // Build a URI-addressed text resource registration; registration alone does not open HTTP.
+bool mcp::setAdmissionLimits(const AdmissionLimits & limits)  // Set MCP limits before opening HTTP; return true on success. Zero values, active HTTP or outstanding work return false, log one Warning per rejected call, increment the Configuration rejection counter and preserve all previous settings. Defaults include 4096 histogram bins, 65536 grid cells, 256 operations, 64 MiB per reply and 256 MiB aggregate working memory. Counters and first-Warning state last for the process and do not reset on query or restart. Bound (security): control JSON must fit finite ingress storage. Overflow rejects with 413 and is counted. Bound (security): sockets and pending replies share finite admission. Overflow closes the new socket and is counted. Bound (security): network work must use a finite worker pool. Overflow queues within admission and excess admission is counted. Bound (security): HTTP metadata must stop growing while read. Overflow rejects with 431 and is counted. Bound (security): headers and trailers share finite metadata storage. Overflow rejects with 431 and is counted. Bound (security): header/trailer entries also consume storage. Overflow rejects with 431 and is counted. Bound (security): histogram parameters drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): grid products drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): operation arrays drive repeated work and retained results. Overflow rejects the request and is counted. Bound (security): reply construction must fit finite output storage. Overflow returns an error and is counted. Bound (security): concurrent MCP work shares finite process storage. Overflow rejects admission or returns an error and is counted. Bound (security): analysis image copies and encoders need credits before allocation. Overflow returns an error and is counted. Bound (abi): stb's immutable input view uses an int byte length. Overflow rejects the image and is counted. Bound (security): encoded copies and decoder buffers share working credits. Overflow rejects the image before reading and is counted. Bound (security): decoded pixels, copies and codec scratch need credits before decoding. Overflow rejects the image and is counted. Bound (security): RPC nesting must fit parse and copy stacks. Overflow rejects the request and is counted. Bound (security): audio scratch and result products need credits before allocation. Overflow rejects the request and is counted. Bound (abi): external MCP FFT lengths must fit the int-sized transform API. Overflow returns an error and is counted. Bound (realtime): the audio callback must not allocate; external MCP reads share its fixed history ring. Overflow returns an error and is counted. Bound (security): external snapshot copies need credits before vector growth. Overflow rejects the request and is counted. Bound (abi): codec allocation headers must fit size_t. Overflow returns null and is counted. Bound (security): codec allocations must fit pre-admitted workspace. Overflow returns null and is counted. Bound (abi): chunk sizes must fit the unsigned-long parser. Overflow rejects with 413 and is counted.
 void mcp::setToolLevel(ToolLevel level)  // Set the host grant. ReadOnly or Control opens loopback HTTP unless TRUSSC_MCP=0; dev builds retain Control. Registration order is independent; the grant survives hot reload.
-void mcp::startHttpServer(int port = 0, const std::string & host = std::string("127.0.0.1"), const std::string & token = std::string("")) [macos,windows,linux,ios,android]  // Explicitly open HTTP (default 127.0.0.1, port 0 chooses an OS port); non-loopback requires a token. TRUSSC_MCP=0 closes. Call before setToolLevel() to choose the address: the first opener wins; mismatched later parameters log an Error and change nothing. No-op on Web.
+void mcp::startHttpServer(int port = 0, const std::string & host = std::string("127.0.0.1"), const std::string & token = std::string("")) [macos,windows,linux,ios,android]  // Explicitly open HTTP (default 127.0.0.1, port 0 chooses an OS port); non-loopback requires a token. TRUSSC_MCP=0 closes. Call before setToolLevel() to choose the address: the first opener wins; mismatched later parameters log an Error and change nothing. No-op on Web. Defaults: 1 MiB wire/decoded body, 8 KiB per request/header/trailer line, 64 KiB metadata, 128 fields, 32 outstanding connections and 4 workers. Excess bodies return 413, metadata returns 431, excess connections close. Rejections issue one Warning per store and increment lifetime counters. See setAdmissionLimits(). Request JSON defaults to 64 levels; parse admission failures return 503 with a reason.
 void mcp::status(const std::string & name, std::function<double ()> getter) [+1]  // Publish a numeric or string getter through ReadOnly tc_get_status; registering the same name replaces it.
 void mcp::statusGraph(const std::string & name, std::function<double ()> getter)  // Publish a numeric getter marked for time-series plotting through ReadOnly tc_get_status.
 void mcp::statusImage(const std::string & name, std::function<trussc::Pixels ()> getter)  // Publish a Pixels getter through ReadOnly tc_get_status_image, evaluated on demand on the main thread.
-void mcp::stopHttpServer() [macos,windows,linux,ios,android]  // Stop the HTTP listener and answer pending requests before joining the worker. No-op on Web.
+void mcp::stopHttpServer() [macos,windows,linux,ios,android]  // Stop the HTTP listener and answer pending requests before joining the workers. Discard producers finishing after shutdown. If an error reply cannot fit, return 503 with X-MCP-Reason. No-op on Web.
 ToolBuilder mcp::tool(const std::string & name, const std::string & desc)  // Build a tool registration. Only tc_ is reserved; tcx_ is free. Registration never starts the listener.
 ```
 
@@ -2566,11 +2568,13 @@ float log2(float x) [std]  // Base-2 logarithm
 MOUSE_BUTTON_LEFT  // Left mouse button
 MOUSE_BUTTON_MIDDLE  // Middle mouse button
 MOUSE_BUTTON_RIGHT  // Right mouse button
+Event<ScreenshotSaveEventArgs> & onScreenshotSave()  // Host-owned screenshot completion event. Fires once per saveScreenshotAsync request on main in a later frame, never inline; expired application runs suppress delivery. Retain the EventListener returned by listen(). Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires.
 Vec2 operator*(float s, const Vec2 & v) [+4]  // Component-wise multiplication
 PI ⚠️deprecated  // Ratio of circumference to diameter. ≈ 3.14159. Prefer HALF_TAU for half a turn.
 QUARTER_TAU  // Quarter circle (PI/2)
 float remainder(float x, float y) [std]  // IEEE floating-point remainder of x/y
 Right  // Direction shorthand for Direction::Right
+void saveScreenshotAsync(const fs::path & path)  // Capture the requesting window at its next present, then encode/write on a worker. The destination is frozen at submission. At most four pending jobs per window include capture, writing and undelivered results; further requests report WriteFailed with Screenshot queue is full through onScreenshotSave(). Hidden secondary windows wait for their own present without blocking captures in other windows. Native writes use one global FIFO in capture-completion order; a slow write delays later writes. Closing before capture or calling without a render window reports a deferred failure. Native readback still runs on main and may stall that frame. Web snapshots the canvas and submits a PNG/JPEG download; browser download policy and actual disk completion are unobservable. Serialize other saves to the same destination yourself. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires.
 float tanh(float x) [std]  // Hyperbolic tangent
 TAU  // Ratio of circumference to radius; the radian measure of one full turn. ≈ 6.28318.
 Top  // Direction shorthand for Direction::Top
@@ -3002,10 +3006,12 @@ float Font::getWidth(const std::string & text) const  // Get text width
 WritingMode Font::getWritingMode() const  // Current writing mode
 bool Font::gridFitLands() const  // Report whether grid fit actually lands on the pixel grid, i.e. whether it is enabled and the current transform maps one model unit to one device pixel.
 bool Font::isLoaded() const  // Check if loaded
+bool Font::isLoading() const  // Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation.
 bool Font::isWrapEnabled() const  // Check if line wrapping is enabled
 bool Font::kinsokuLineEnd(uint32_t cp) const  // Return whether a codepoint is forbidden at the end of a line (kinsoku rule).
 bool Font::kinsokuLineStart(uint32_t cp) const  // Return whether a codepoint is forbidden at the start of a line (kinsoku rule).
 LoadResult Font::load(const fs::path & nameOrPath, int size, int faceIndex = 0)  // Load a font file or a system font name; faceIndex picks the face in a .ttc. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins. On Web, URL loading waits until the font is usable or fetching/decoding fails.
+void Font::loadAsync(const fs::path & nameOrPath, int size, int faceIndex = 0)  // loadAsync(nameOrPath, size, faceIndex = 0): prepare owned font bytes and CPU metrics on a native worker, then publish the shared atlas and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires.
 void Font::resetLineHeight()  // Reset line height to the font default
 void Font::setAlign(Direction h, Direction v) [+1]  // Set horizontal (and optional vertical) text alignment
 void Font::setDefaultOversampling(int n)  // Set the oversampling factor newly loaded fonts start with; does not affect fonts already loaded.
@@ -3124,7 +3130,7 @@ bool IesProfile::loadFromString(const std::string & data)  // Load IES profile f
 ```cpp
 void Image::allocate(int width, int height, int channels = 4, bool mipmaps = false)  // Allocate empty image for dynamic updates. `mipmaps=true` builds a chain refreshed on every update().
 void Image::clear()  // Release image resources
-void Image::crop(int x, int y, int w, int h)  // Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge.
+void Image::crop(int x, int y, int w, int h)  // Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge. Cancels any pending loadAsync before editing, including invalid or no-op requests.
 int Image::getChannels() const  // Get number of channels
 Color Image::getColor(int x, int y) const  // Get pixel color at position
 const std::string & Image::getDebugName() const  // Return the MCP inspection name (empty for unnamed or moved-from objects).
@@ -3133,17 +3139,19 @@ Pixels & Image::getPixels() [+1]  // Get pixels reference for direct manipulatio
 unsigned char * Image::getPixelsData() [+1]  // Get raw pixel data pointer
 Texture & Image::getTexture() [+1]  // Get internal texture
 int Image::getWidth() const  // Get width
-void Image::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
+void Image::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8. Cancels any pending loadAsync before editing, including invalid or no-op requests.
 bool Image::isAllocated() const  // Check if allocated
-LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels.
+bool Image::isLoading() const  // Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation.
+LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. Use `loadAsync` for background loading with deferred main-thread application. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels.
+void Image::loadAsync(const fs::path & path, bool mipmaps = false)  // loadAsync(path, mipmaps = false): decode pixels on a native worker, then apply pixels, upload the texture and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires.
 LoadResult Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain. Main thread only; decode in the background with `Pixels::loadFromMemory`. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels.
-void Image::mirror(bool horizontal, bool vertical)  // Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°.
-void Image::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
-void Image::mirrorV()  // Mirror vertically (alias for mirror(false, true))
-void Image::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8. Use FBO sampling for fast paths.
+void Image::mirror(bool horizontal, bool vertical)  // Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°. Cancels any pending loadAsync before editing, including invalid or no-op requests.
+void Image::mirrorH()  // Mirror horizontally (alias for mirror(true, false)) Cancels any pending loadAsync before editing, including invalid or no-op requests.
+void Image::mirrorV()  // Mirror vertically (alias for mirror(false, true)) Cancels any pending loadAsync before editing, including invalid or no-op requests.
+void Image::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8. Use FBO sampling for fast paths. Cancels any pending loadAsync before editing, including invalid or no-op requests.
 SaveResult Image::save(const fs::path & path) const  // Save image pixels. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
-void Image::setColor(int x, int y, const Color & c)  // Set pixel color at position (marks image as dirty)
-void Image::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_images lists live Images with index, name, width, height and format; moves transfer name/index and remove moved-from entries, destruction removes entries, unnamed Images remain available by index. tc_analyze_image reads CPU pixels with source={image:name or index}; other sources are window:index, fbo:name or index, path:file. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), and results in ops order; byte colors are normalized RGBA, float values above 1 pass through. Ops: pixel(x,y):color; histogram(bins):histogram[channel][bin] over 0-1 (outliers in end bins); count(color,tolerance or min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):mean colors[row][col]; diff(path,threshold,optional save):count,bbox,maxDifference; line(x0,y0,x1,y1):colors along inclusive Bresenham samples. Every op accepts optional rect=[x,y,w,h], default whole image. Coordinates are top-left, bbox=[x,y,w,h], centroid=[x,y]; empty matches yield null bbox/centroid. Rects and grid cells must be nonempty; line endpoints are in the image and samples clip to rect. Count accepts RGB/RGBA bounds or color plus a nonnegative scalar tolerance. Diff compares raw RGBA values with equal image dimensions and counts maximum absolute channel differences strictly above threshold. Optional top-level save (omitted/null writes nothing) and diff.save use tc_save_screenshot paths: UTF-8, data-directory-relative, create parents, unsupported extensions append .png. Float file output is clamped to 0-1; analysis preserves float values. Texture, VideoPlayer and VideoGrabber are not sources.
+void Image::setColor(int x, int y, const Color & c)  // Set pixel color at position (marks image as dirty) Cancels any pending loadAsync before editing, including invalid or no-op requests.
+void Image::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_images lists live Images with index, name, width, height and format; moves transfer name/index and remove moved-from entries, destruction removes entries, unnamed Images remain available by index. tc_analyze_image reads CPU pixels with source={image:name or index}; other sources are window:index, fbo:name or index, path:file. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), and results in ops order; byte colors are normalized RGBA, float values above 1 pass through. Ops: pixel(x,y):color; histogram(bins):histogram[channel][bin] over 0-1 (outliers in end bins); count(color,tolerance or min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):mean colors[row][col]; diff(path,threshold,optional save):count,bbox,maxDifference; line(x0,y0,x1,y1):colors along inclusive Bresenham samples. Every op accepts optional rect=[x,y,w,h], default whole image. Coordinates are top-left, bbox=[x,y,w,h], centroid=[x,y]; empty matches yield null bbox/centroid. Rects and grid cells must be nonempty; line endpoints are in the image and samples clip to rect. Count accepts RGB/RGBA bounds or color plus a nonnegative scalar tolerance. Diff compares raw RGBA values with equal image dimensions and counts maximum absolute channel differences strictly above threshold. Optional top-level save (omitted/null writes nothing) and diff.save use tc_save_screenshot paths: UTF-8, data-directory-relative, create parents, unsupported extensions append .png. Float file output is clamped to 0-1; analysis preserves float values. Texture, VideoPlayer and VideoGrabber are not sources. Analysis defaults to 4096 histogram bins, 65536 grid cells and 256 operations; excess parameters return an error before scratch allocation. Replies default to 64 MiB and aggregate MCP working memory to 256 MiB. Limits are set with mcp::setAdmissionLimits(). File sources and diff references use a bounded encoded snapshot, query stb or platform metadata, and reserve decoded storage and estimated codec workspace before decoding. macOS/iOS retain ImageIO formats, including HEIC, TIFF and JPEG 2000.
 void Image::setDirty()  // Mark image as needing update
 void Image::update()  // Apply pixel changes to GPU texture
 ```
@@ -3445,9 +3453,16 @@ size_t MicInput::getBuffer(float * outBuffer, size_t numSamples)  // Copy the la
 std::string MicInput::getDeviceName() const  // Name of the capture device start() opened; empty while stopped, and on Web (the browser does not expose it).
 int MicInput::getSampleRate() const  // Sample rate the microphone was opened at.
 bool MicInput::isRunning() const  // True while the microphone device is open and capturing.
+bool MicInput::isStarting() const  // True from submission through queued readiness/failure, cleared immediately before onStart. False after cancellation and while merely running. On Web this also tracks legacy start() permission/setup.
 void MicInput::onAudioData(const float * input, size_t frameCount)  // Mic input callback: receive captured input samples (internal, called from the audio thread).
-bool MicInput::start(int sampleRate = DEFAULT_SAMPLE_RATE)  // Open the microphone device at the given sample rate and begin capturing. Returns false on failure.
-void MicInput::stop()  // Stop capture and close the microphone device.
+bool MicInput::start(int sampleRate = DEFAULT_SAMPLE_RATE)  // Open the microphone device at the given sample rate and begin capturing. Native start waits for its lifecycle thread startup result, returns false on failure, and emits no onStart. Web start returns true when the request is submitted; use isStarting/isRunning for actual readiness and startAsync/onStart for failure details. Web requires a secure context and a user gesture. On macOS/iOS, undecided microphone consent requests access and returns false immediately with retry guidance; call start() again after granting. Denied/restricted access fails before capture initialization.
+void MicInput::startAsync(int sampleRate = DEFAULT_SAMPLE_RATE)  // Begin a fresh microphone startup attempt without waiting. onStart reports readiness or failure on main in a later frame. A new start, stop or destruction cancels the pending attempt without waiting and suppresses its event. Each native run owns initialization through teardown on one lifecycle thread; a replacement opens after predecessor cleanup. All handle operations are on main. Web requires a secure context and user gesture: getUserMedia and AudioContext resume begin directly in this call. A suspended context is a failure with retry guidance; an unanswered permission prompt remains pending until stop. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires. On macOS/iOS, microphone consent is checked before capture initialization. An unanswered request keeps isStarting true without a lifecycle worker; stop, destruction and exit return without waiting for consent, and late responses after cancellation are discarded.
+void MicInput::stop()  // Cancel capture/startup immediately and post device teardown without waiting. No cancellation event is emitted. Native teardown runs on the thread that opened the device; application exit waits for retirement.
+```
+
+### MicStartResult — Microphone startup outcome. Success requires usable capture; permission denial or a missing device is a failure. Converts explicitly to bool.
+
+```cpp
 ```
 
 ### Mod — Attachable behavior base class for Node. Subclass it, override the lifecycle and input hooks, and attach with node->addMod<T>(). Lifecycle: setup() on attach, then each frame earlyUpdate() -> Node::update() -> update() -> draw(), and onDestroy() on removal. Override isExclusive() to allow only one instance per Node, and canAttachTo() to restrict attachment.
@@ -3852,6 +3867,11 @@ SaveResult ScreenRecorder::stop() [macos,windows,linux,android,ios]  // Disconne
 VideoWriter & ScreenRecorder::writer() [macos,windows,linux,android,ios]  // Access the underlying VideoWriter for advanced introspection
 ```
 
+### ScreenshotSaveEventArgs — Completion of an asynchronous screenshot: the actual destination and save result. Delivered on main in a later frame, including rejected requests.
+
+```cpp
+```
+
 ### ScrollBar — Visual scroll indicator RectNode that syncs with a ScrollContainer and supports drag scrolling
 
 ```cpp
@@ -3922,7 +3942,7 @@ void Serial::flushInput() [macos,windows,linux,android]  // Clear the input buff
 void Serial::flushOutput() [macos,windows,linux,android]  // Clear the output buffer
 std::vector<SerialDeviceInfo> Serial::getDeviceList() ⚠️deprecated [macos,windows,linux,android]  // Deprecated alias for listDevices()
 std::string Serial::getDevicePath() const [macos,windows,linux,android]  // Current device path; a copy, since another thread's setup() may change it. Never waits for setup(), close() or an I/O call
-size_t Serial::getDroppedByteCount() const [macos,windows,linux,android]  // Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count
+size_t Serial::getDroppedByteCount() const [macos,windows,linux,android]  // Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count. Device input or a stalled reader can fill the deque; a fixed cap keeps memory finite. Overflow drops the oldest bytes and increments the discard count.
 bool Serial::isConnected() const [macos,windows,linux,android]  // Whether the port is open and working; turns false after close() or when a read/write call finds the device gone
 bool Serial::isInitialized() const [macos,windows,linux,android]  // Whether currently connected; same as isConnected()
 std::vector<SerialDeviceInfo> Serial::listDevices() [macos,windows,linux,android]  // List available serial devices
@@ -4013,8 +4033,8 @@ void Sound::stop()  // Stop audio and release the voice (a streamed voice also c
 ### SoundBuffer — Eager sound source: the full file decoded into interleaved float PCM held in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Also provides waveform generators, an ADSR envelope, and mixing helpers, so it doubles as a procedural-audio scratch buffer. Best for short SFX and zero-latency play / seek / multi-instance.
 
 ```cpp
-void SoundBuffer::applyADSR(float attack, float decay, float sustainLevel, float release)  // Apply an ADSR amplitude envelope to the buffer in place (attack / decay / release in seconds, sustainLevel 0-1).
-void SoundBuffer::clip()  // Hard-clip all samples into the -1.0 .. 1.0 range.
+void SoundBuffer::applyADSR(float attack, float decay, float sustainLevel, float release)  // Apply an ADSR amplitude envelope to the buffer in place (attack / decay / release in seconds, sustainLevel 0-1). Cancels any pending loadAsync before editing, including invalid or no-op requests.
+void SoundBuffer::clip()  // Hard-clip all samples into the -1.0 .. 1.0 range. Cancels any pending loadAsync before editing, including invalid or no-op requests.
 void SoundBuffer::createAdtsHeader(uint8_t * header, int frameLength, int sampleRate, int channels, int profile = 2)  // Write a 7-byte ADTS header for one raw AAC frame into header (AAC-in-MOV container helper).
 void SoundBuffer::generateNoise(float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with mono white noise.
 void SoundBuffer::generatePinkNoise(float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with mono pink noise (1/f spectrum, Paul Kellet's method).
@@ -4026,9 +4046,11 @@ void SoundBuffer::generateTriangleWave(float frequency, float duration, float vo
 int SoundBuffer::getAdtsSampleRateIndex(int sampleRate)  // ADTS sample-rate index for the given rate (AAC-in-MOV container helper).
 float SoundBuffer::getDuration() const  // Duration in seconds (numSamples / sampleRate).
 fs::path SoundBuffer::getPath() const  // Resolved path of the last successful file load, including direct loadAac(). Empty after a failed load, a memory/PCM load, or generation.
+bool SoundBuffer::isLoading() const  // Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation.
 LoadResult SoundBuffer::load(const fs::path & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure. Relative paths resolve via getDataPath(); absolute paths pass through.
 LoadResult SoundBuffer::loadAac(const fs::path & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms). Relative paths resolve via getDataPath(); absolute paths pass through. On Web, load waits for decoded PCM using OfflineAudioContext, including in setup().
 LoadResult SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
+void SoundBuffer::loadAsync(const fs::path & path)  // loadAsync(path): prepare PCM and metadata on a native worker, apply and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires.
 LoadResult SoundBuffer::loadFlac(const fs::path & path)  // Decode a FLAC file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through.
 LoadResult SoundBuffer::loadFlacFromMemory(const void * data, size_t dataSize)  // Decode FLAC data from a memory buffer.
 LoadResult SoundBuffer::loadMp3(const fs::path & path)  // Decode an MP3 file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through.
@@ -4038,7 +4060,7 @@ LoadResult SoundBuffer::loadOggFromMemory(const void * data, size_t dataSize)  /
 LoadResult SoundBuffer::loadPcmFromMemory(const void * data, size_t dataSize, int numChannels, int rate, int bitsPerSample = 16, bool bigEndian = false)  // Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths, a channel count below 1, a data size that is not a whole number of frames, or more samples than a buffer can hold.
 LoadResult SoundBuffer::loadWav(const fs::path & path)  // Decode a WAV file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through.
 LoadResult SoundBuffer::loadWavFromMemory(const void * data, size_t dataSize)  // Decode WAV data from a memory buffer.
-void SoundBuffer::mixFrom(const SoundBuffer & other, size_t offsetSamples, float volume = 1.0)  // Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed. offsetSamples is in frames (samples per channel, like numSamples). Both buffers must have the same channel count; otherwise nothing is mixed and an error is logged.
+void SoundBuffer::mixFrom(const SoundBuffer & other, size_t offsetSamples, float volume = 1.0)  // Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed. offsetSamples is in frames (samples per channel, like numSamples). Both buffers must have the same channel count; otherwise nothing is mixed and an error is logged. Cancels any pending loadAsync before editing, including invalid or no-op requests.
 ```
 
 ### SoundSource — Abstract base for anything Sound::play() can consume. Two concrete subclasses: SoundBuffer (eager, full PCM in RAM) and SoundStream (decoded on demand from disk). Holds the shared channels / sampleRate fields and the kind() / getDuration() interface.
@@ -4085,7 +4107,7 @@ void TcpClient::connectAsync(const std::string & host, int port) [macos,windows,
 void TcpClient::disconnect() [macos,windows,linux,android,ios]  // Disconnect
 std::string TcpClient::getRemoteHost() const [macos,windows,linux,android,ios]  // Remote host name
 int TcpClient::getRemotePort() const [macos,windows,linux,android,ios]  // Remote port
-size_t TcpClient::getSendAsyncBufferSize() const [macos,windows,linux,android,ios]  // Get the send queue high-water mark in bytes
+size_t TcpClient::getSendAsyncBufferSize() const [macos,windows,linux,android,ios]  // Get the send queue high-water mark in bytes. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
 size_t TcpClient::getSendAsyncPendingBytes() const [macos,windows,linux,android,ios]  // Bytes queued but not yet completed
 bool TcpClient::isConnected() const [macos,windows,linux,android,ios]  // Whether currently connected
 bool TcpClient::isConnecting() const [macos,windows,linux,android,ios]  // Whether a TCP connection attempt or TLS handshake is in progress
@@ -4097,8 +4119,8 @@ bool TcpClient::send(const void * data, size_t size) [+2] [macos,windows,linux,a
 SendResult TcpClient::sendAsync(const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Queue owned bytes without waiting; returns SendResult and reports once through onSendComplete
 void TcpClient::setBlocking(bool blocking) [macos,windows,linux,android,ios]  // Set blocking mode
 void TcpClient::setConnectTimeout(float seconds) [macos,windows,linux,android,ios]  // Set the TCP connect deadline in seconds; default 0 uses the OS deadline
-void TcpClient::setReceiveBufferSize(size_t size) [macos,windows,linux,android,ios]  // Set the receive buffer size
-void TcpClient::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android,ios]  // Set the send queue high-water mark; default 16 MB, 0 unlimited
+void TcpClient::setReceiveBufferSize(size_t size) [macos,windows,linux,android,ios]  // Set the receive buffer size. Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads.
+void TcpClient::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android,ios]  // Set the send queue high-water mark; default 16 MB, 0 unlimited. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
 void TcpClient::setSendTimeout(float seconds) [macos,windows,linux,android,ios]  // Set the idle send timeout in seconds; default 60, 0 waits forever
 void TcpClient::setTransport(std::shared_ptr<Transport> transport) [macos,windows,linux,android,ios]  // Subclass hook: set the transport this client's connections use (TlsClient installs its TLS transport here). Call it before connecting; later connections keep it.
 void TcpClient::setUseThread(bool useThread) [macos,windows,linux,android,ios]  // Whether to use threads (must be false on Wasm)
@@ -4151,15 +4173,15 @@ const TcpServerClient * TcpServer::getClient(int clientId) const [macos,windows,
 int TcpServer::getClientCount() const [macos,windows,linux,android]  // Number of connected clients
 std::vector<int> TcpServer::getClientIds() const [macos,windows,linux,android]  // IDs of all connected clients
 int TcpServer::getPort() const [macos,windows,linux,android]  // The port the server is bound to. After start(0) this is the port the OS picked; for a fixed port it is that port
-size_t TcpServer::getSendAsyncBufferSize() const [macos,windows,linux,android]  // The current high-water mark for one client's send queue, in bytes
+size_t TcpServer::getSendAsyncBufferSize() const [macos,windows,linux,android]  // The current high-water mark for one client's send queue, in bytes. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
 size_t TcpServer::getSendAsyncPendingBytes(int clientId) const [macos,windows,linux,android]  // How much a client has queued and not yet completed, in bytes (0 for an unknown client)
 bool TcpServer::isRunning() const [macos,windows,linux,android]  // Whether the server is running
 bool TcpServer::send(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Send data to a specific client (blocking)
 SendResult TcpServer::sendAsync(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Queue data for a client and return at once, without waiting for it to be written
-void TcpServer::setReceiveBufferSize(size_t size) [macos,windows,linux,android]  // Set the receive buffer size
-void TcpServer::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android]  // Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB
+void TcpServer::setReceiveBufferSize(size_t size) [macos,windows,linux,android]  // Set the receive buffer size. Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads.
+void TcpServer::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android]  // Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
 void TcpServer::setSendTimeout(float seconds) [macos,windows,linux,android]  // Set how long a send may stall without progress before giving up, in seconds (0 = wait indefinitely)
-bool TcpServer::start(int port, int maxClients = 0) [macos,windows,linux,android]  // Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default)
+bool TcpServer::start(int port, int maxClients = 0) [macos,windows,linux,android]  // Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default). Untrusted connection floods can retain clients; an optional cap keeps client memory finite. At the cap, newly accepted sockets are closed.
 void TcpServer::stop() [macos,windows,linux,android]  // Stop the server
 ```
 
@@ -4365,7 +4387,7 @@ bool UdpSocket::setMulticastInterface(const std::string & interfaceAddr) [macos,
 bool UdpSocket::setMulticastLoopback(bool enable) [macos,windows,linux,android,ios]  // Whether outgoing multicast loops back to local listeners (default on)
 bool UdpSocket::setMulticastTTL(int ttl) [macos,windows,linux,android,ios]  // Hop limit for outgoing multicast (default 1 = local subnet)
 bool UdpSocket::setNonBlocking(bool nonBlocking) [macos,windows,linux,android,ios]  // Set non-blocking mode
-bool UdpSocket::setReceiveBufferSize(int size) [macos,windows,linux,android,ios]  // Set the receive buffer size
+bool UdpSocket::setReceiveBufferSize(int size) [macos,windows,linux,android,ios]  // Set the receive buffer size. Untrusted datagram floods can fill the OS queue; the configured buffer keeps queued memory finite. On overflow, the OS drops datagrams.
 bool UdpSocket::setReceiveTimeout(int timeoutMs) [macos,windows,linux,android,ios]  // Set the receive timeout (0 = infinite)
 bool UdpSocket::setReuseAddress(bool enable) [macos,windows,linux,android,ios]  // Allow address reuse (set before bind)
 bool UdpSocket::setReusePort(bool enable) [macos,windows,linux,android,ios]  // Allow multiple sockets on the same port (multicast receivers; set before bind)
@@ -4451,7 +4473,7 @@ void VideoGrabber::copyToImage(Image & image) const [macos,windows,linux,ios,web
 int VideoGrabber::getDesiredFrameRate() const [macos,windows,linux,ios,web]  // Return the requested frame rate (-1 if unspecified)
 int VideoGrabber::getDeviceID() const [macos,windows,linux,ios,web]  // Return the selected device ID
 const std::string & VideoGrabber::getDeviceName() const [macos,windows,linux,ios,web]  // Return the name of the active capture device
-size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux]  // Return the frame queue capacity (0 = queueing disabled)
+size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux]  // Return the frame queue capacity (0 = queueing disabled). Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame.
 int VideoGrabber::getHeight() const [macos,windows,linux,ios,web]  // Return the captured frame height in pixels
 unsigned char * VideoGrabber::getPixels() [+1] [macos,windows,linux,ios,web]  // Return a pointer to the current RGBA pixel buffer
 size_t VideoGrabber::getQueuedFrames(std::vector<GrabberFrame> & out) [macos,windows,linux]  // Drain all frames captured since the last call (appended to the given vector, oldest first; returns the count). Each GrabberFrame carries a monotonic timestamp stamped on the capture thread, so timestamps stay truthful even if the main loop stalls, and no frame is lost when the camera runs faster than the app loop. Requires setFrameQueueSize() > 0; getPixels()/isFrameNew() are unaffected
@@ -4465,7 +4487,7 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevices() [macos,windows,linux,io
 void VideoGrabber::requestCameraPermission() [macos,windows,linux,ios,web]  // Request camera access asynchronously (macOS)
 void VideoGrabber::setDesiredFrameRate(int fps) [macos,windows,linux,ios,web]  // Request a capture frame rate; call before setup()
 void VideoGrabber::setDeviceID(int deviceId) [macos,windows,linux,ios,web]  // Select which camera to use; call before setup()
-void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux]  // Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup()
+void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux]  // Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup(). Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame.
 bool VideoGrabber::setup(int width = 640, int height = 480) [macos,windows,linux,ios,web]  // Start the camera at the requested size. Returns false if permission is not yet granted (it is requested asynchronously); keep calling update() and capture begins once granted
 void VideoGrabber::setVerbose(bool verbose) [macos,windows,linux,ios,web]  // Enable or disable verbose logging
 void VideoGrabber::update() [macos,windows,linux,ios,web]  // Poll for a new frame and upload it to the texture. Call every frame; also completes a setup() that was waiting on permission
@@ -4642,7 +4664,7 @@ void Window::toggleFullscreen() [macos,windows,linux]  // Toggle this window's f
 
 ```cpp
 WindowSettings & WindowSettings::reserveUniformBuffer(int bytes)  // Reserve the per-frame GPU uniform buffer in bytes, vector::reserve style; 0 = backend default 4MB ≈ 8k draw calls. Metal/WebGPU/Vulkan only — GL/D3D11 have no such cap (chainable)
-WindowSettings & WindowSettings::setClipboardSize(int size)  // Set clipboard buffer size in bytes (chainable)
+WindowSettings & WindowSettings::setClipboardSize(int size)  // Set clipboard buffer size in bytes (chainable). OS clipboard text needs finite storage in the window backend. On reads, macOS and web truncate to size - 1 bytes; Windows fails UTF-8 conversion on overflow; X11 rejects oversized or incremental selections (standalone returns empty, legacy returns null). On writes, macOS and web send the full text to the OS and truncate the local copy; Windows rejects overflowing UTF-16 conversion and truncates the local UTF-8 copy after success; standalone X11 rejects oversized writes, while legacy X11 logs and truncates. Clipboard access is unsupported on iOS and Android.
 WindowSettings & WindowSettings::setDecorated(bool enabled)  // false = borderless/chromeless window that can still take focus and be closed programmatically (chainable)
 WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Enable/disable fullscreen at startup (chainable)
 WindowSettings & WindowSettings::setHighDpi(bool enabled)  // Enable/disable high DPI support (chainable)
@@ -4666,6 +4688,11 @@ bool Xml::parse(const std::string & str)  // Parse an XML document from a string
 XmlNode Xml::root() [+1]  // Get the document's root element node.
 SaveResult Xml::save(const fs::path & path, const std::string & indent = std::string("  ")) const  // Serialize and save XML. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
 std::string Xml::toString(const std::string & indent = std::string("  ")) const  // Serialize the document to an XML string. indent sets the per-level indentation string.
+```
+
+### mcp::AdmissionLimits — MCP admission settings with finite defaults; all values must be positive. Change through setAdmissionLimits() while stopped. Excess requests are rejected as whole units.
+
+```cpp
 ```
 
 ### mcp::Resource — URI-addressed resource metadata and content handler.
@@ -4787,6 +4814,44 @@ category, platforms, dependencies, repo URL for each addon):
 
 Always check the registry before assuming a feature needs to be built from scratch —
 it may already be an addon.
+
+### tcxBox2d contact delivery (v0.8 migration)
+
+World delivers Begin/End in Box2D order after each managed fixed sub-step;
+Stay runs once per update. Enter callbacks now observe the completed sub-step
+and may destroy bodies, nodes/Mods, clear/setup the World, or delete the World.
+Release invalidates borrowed handles and cancels later listeners for an invalid
+Begin/Stay. Exit can still reach a surviving recipient with its counterpart null.
+Clear/setup/World deletion cancel the whole old notification immediately. Recheck
+`WorldContact::a/b`, `CollisionEvent::other`, and `Contact2D::other/otherNode`
+after mutation, even inside the executing callback; retain application IDs for
+later use. Mutation-generated Exits run after the initiating callback returns.
+Owner destructors/Mod removal never invoke listeners during teardown.
+
+Raw `getWorld()->Step()` defers both Begin and End to the next fresh-frame
+`World::update()`, even with no managed sub-step. Each aggregated transition is
+preserved (Begin/End/Begin across raw Steps); compound fixture hand-over folding
+is limited to one managed sub-step. Earlier raw records can delay an otherwise
+immediate wrapper Exit until update to preserve order. Use Stay for once-per-frame
+work rather than assuming only one transition per update.
+
+Bodies owned by a TrussC Body or RigidBody2D are destroyed through TrussC (`Body::destroy()`, removing the Mod, `World::clear()`); don't call raw `b2World::DestroyBody`/`DestroyFixture` on them. Raw destroys of bodies you created yourself are tracked when the body still has fixtures (the destruction listener); removing a body's last fixture and then the body without an `update()` in between is not tracked.
+
+Classic `Collider2D::isTrigger` now applies sensor response to every fixture;
+changed flag assignments synchronize before each managed sub-step. Use
+`Collider2D::setTrigger(bool)` or `Body::setSensor(bool)` for immediate application
+before raw Step. An unchanged flag preserves raw per-fixture sensor overrides.
+Sensors retain classic collision event names; Mods use `onTrigger*` when any
+contributing fixture is a sensor, including mixed classic/Mod contacts. Mode
+changes alone do not synthesize Enter/Exit; later phases use current sensor state.
+Sensor geometry may be zero and impulses remain unimplemented.
+
+World reserves Box2D's destruction-listener slot to retire owned and ownerless
+endpoints before storage reuse. Migrate raw `SetDestructionListener` registration
+to `World::setDestructionListener(b2DestructionListener*)`; the non-owning user
+delegate receives fixture callbacks after endpoint retirement, also receives
+joint callbacks, and survives clear/setup. See [tcxBox2d tests](../addons/tcxBox2d/tests/README.md) for regression
+setups and supported delivery boundaries.
 
 ### Bundled Addons (ship with TrussC)
 

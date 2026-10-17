@@ -57,6 +57,7 @@ static cgltf_result readGltfFile(const cgltf_memory_options* memory,
         auto length = file.tellg();
         if (length < 0) return cgltf_result_io_error;
         cgltf_size bytes = *size ? *size : static_cast<cgltf_size>(length);
+        // Bound (abi): file reads must fit both the available bytes and the stream count width. Overflow returns cgltf_result_io_error.
         if (bytes > static_cast<cgltf_size>(length) ||
             bytes > static_cast<cgltf_size>((numeric_limits<streamsize>::max)()))
             return cgltf_result_io_error;
@@ -88,9 +89,11 @@ static cgltf_result readGltfFile(const cgltf_memory_options* memory,
 static bool rangeFits(cgltf_size size, cgltf_size offset, cgltf_size stride,
                       cgltf_size elemSize, cgltf_size count) {
     if (count == 0) return true;
+    // Bound (security): untrusted file buffer ranges must fit actual storage before access. Overflow rejects the model range.
     if (offset > size || elemSize > size - offset) return false;
     // The last element starts at offset + stride * (count - 1).
     cgltf_size room = size - offset - elemSize;
+    // Bound (security): untrusted file accessor strides and counts must fit actual storage before access. Overflow rejects the model range.
     return stride == 0 || count - 1 <= room / stride;
 }
 
@@ -140,6 +143,7 @@ static const char* checkDataRanges(const cgltf_data* data) {
     for (cgltf_size i = 0; i < data->accessors_count; i++) {
         const cgltf_accessor& acc = data->accessors[i];
         cgltf_size numComp = cgltf_num_components(acc.type);
+        // Bound (abi): file accessor counts must fit the unpacked float-array index width. Overflow rejects the model.
         if (acc.count > SIZE_MAX / (sizeof(float) * numComp)) return outOfRange;
         cgltf_size elemSize = cgltf_calc_size(acc.type, acc.component_type);
         if (elemSize == 0) continue;
@@ -297,6 +301,7 @@ static Texture* loadGltfTexture(const cgltf_texture* tex,
         // returns NULL for it.
         const uint8_t* ptr = cgltf_buffer_view_data(img->buffer_view);
         size_t len = img->buffer_view->size;
+        // Bound (abi): the embedded-image decoder accepts an int-sized input length. Overflow rejects the image.
         if (!ptr || len > (size_t)INT_MAX) return nullptr;
         pixels.loadFromMemory(ptr, (int)len);
     } else if (img->uri) {

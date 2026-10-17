@@ -49,6 +49,7 @@ inline bool parseIes(const std::string& data, IesParseResult& result,
 
     const auto validCount = [](float count, int minimum, std::size_t remaining) {
         // Compare without rounding INT_MAX up to the next float before casting.
+        // Bound (abi): file angle counts must fit int indices and the available token count. Overflow rejects the IES data.
         return std::isfinite(count) && count >= minimum &&
                static_cast<double>(count) <= std::numeric_limits<int>::max() &&
                static_cast<long double>(count) <= remaining;
@@ -88,11 +89,13 @@ inline bool parseIes(const std::string& data, IesParseResult& result,
 
     // Both counts fit int, so their sum fits size_t. Guard the product too,
     // including on platforms with 32-bit size_t.
+    // Bound (abi): file candela-table dimensions must fit the host index width before multiplication. Overflow rejects the IES data.
     if (numHoriz > (std::numeric_limits<std::size_t>::max() - numVert - numHoriz) / numVert) {
         error = "not enough angle or candela data";
         return false;
     }
     const std::size_t needed = numVert + numHoriz + numVert * numHoriz;
+    // Bound (security): untrusted IES table dimensions must fit actual file tokens to bound output allocation by input. Overflow rejects the IES data.
     if (needed > remaining) {
         error = "not enough angle or candela data";
         return false;

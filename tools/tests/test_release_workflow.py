@@ -21,7 +21,7 @@ import zipfile
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-WORKFLOW = yaml.load((ROOT / '.github/workflows/release.yml').read_text(), Loader=yaml.BaseLoader)
+WORKFLOW = yaml.load((ROOT / '.github/workflows/release.yml').read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
 ARCHIVE_REFS = [('v1.2.3', 'v1.2.3'), ('fix/a', 'fix-a'),
                 ('fix-a', 'fix-a'), ('fix/release/check', 'fix-release-check')]
 
@@ -32,7 +32,7 @@ def step(job, name):
 
 def cmake_script_writer(variable):
     """Exercise the production writer without configuring/building TrussC."""
-    source = (ROOT / 'core/cmake/trussc_app.cmake').read_text()
+    source = (ROOT / 'core/cmake/trussc_app.cmake').read_text(encoding="utf-8")
     start = source.index(f'file(WRITE "${{{variable}}}"')
     end = source.index('\n")', start) + len('\n")')
     return source[start:end]
@@ -55,15 +55,15 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.data = self.project / 'bin/data'
         self.data.mkdir(parents=True)
         (self.data / '日本語 sub').mkdir()
-        (self.data / '日本語 sub/asset.txt').write_text('packaged asset\n')
-        (self.data / '.hidden').write_text('hidden asset\n')
-        (self.data / 'lookup.pdb').write_text('asset, not build symbols\n')
-        (self.data / 'lookup.debug').write_text('asset, not build symbols\n')
+        (self.data / '日本語 sub/asset.txt').write_text('packaged asset\n', encoding="utf-8")
+        (self.data / '.hidden').write_text('hidden asset\n', encoding="utf-8")
+        (self.data / 'lookup.pdb').write_text('asset, not build symbols\n', encoding="utf-8")
+        (self.data / 'lookup.debug').write_text('asset, not build symbols\n', encoding="utf-8")
         (self.data / 'empty').mkdir()
 
     def mock(self, name, body):
         path = self.commands / name
-        path.write_text('#!/usr/bin/env python3\n' + body)
+        path.write_text('#!/usr/bin/env python3\n' + body, encoding="utf-8")
         path.chmod(0o755)
 
     def run_step(self, job, name, **env):
@@ -71,7 +71,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertNotIn('${{', script, 'tested scripts must take inputs through environment variables')
         return subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script],
                               cwd=self.project, env=dict(self.env, **env),
-                              text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                              text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8", errors="replace")
 
     def ok(self, result):
         self.assertEqual(result.returncode, 0, result.stdout + (result.stderr or ''))
@@ -94,11 +94,11 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 if 'run' not in item or (job_name == 'windows' and item.get('shell') != 'bash'):
                     continue
                 script = re.sub(r'\$\{\{.*?\}\}', 'TEST_VALUE', item['run'])
-                result = subprocess.run(['bash', '-n'], input=script, text=True, capture_output=True)
+                result = subprocess.run(['bash', '-n'], input=script, text=True, capture_output=True, encoding="utf-8", errors="replace")
                 self.assertEqual(result.returncode, 0, f"{job_name}/{item.get('name')}: {result.stderr}")
         self.assertEqual(WORKFLOW['on']['workflow_call']['inputs']['publish']['default'], 'true')
         self.assertIn('inputs.publish', WORKFLOW['jobs']['release']['if'])
-        weekly = yaml.load((ROOT / '.github/workflows/release-check.yml').read_text(), Loader=yaml.BaseLoader)
+        weekly = yaml.load((ROOT / '.github/workflows/release-check.yml').read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         inputs = weekly['jobs']['release-check']['with']
         self.assertEqual(inputs['publish'], 'false')
         self.assertEqual(inputs['sign-identity'], '-')
@@ -115,52 +115,52 @@ class ReleaseWorkflowTest(unittest.TestCase):
 
     def test_version_precedence_and_latest_failure(self):
         self.mock('gh', "import os, sys\nfrom pathlib import Path\n"
-                        "Path(os.environ['GH_CALL_LOG']).write_text(' '.join(sys.argv[1:]))\n"
+                        "Path(os.environ['GH_CALL_LOG']).write_text(' '.join(sys.argv[1:]), encoding='utf-8')\n"
                         "print(os.environ.get('LATEST_TAG', 'v0.7.5'))\n"
                         "sys.exit(int(os.environ.get('GH_EXIT', '0')))\n")
         log = self.root / 'gh-call'
         env = dict(REQUESTED_REF='fix/release/check', GH_REPO='TrussC-org/TrussC', GH_CALL_LOG=str(log))
         pin = self.project / '.trussc-version'
-        pin.write_text('v0.7.4\n')
+        pin.write_text('v0.7.4\n', encoding="utf-8")
         self.ok(self.run_step('version', 'Resolve TrussC version', **env))
-        self.assertEqual((self.root / 'output').read_text(), 'ref=fix/release/check\n')
+        self.assertEqual((self.root / 'output').read_text(encoding="utf-8"), 'ref=fix/release/check\n')
         self.assertFalse(log.exists())
         (self.root / 'output').unlink()
         env['REQUESTED_REF'] = ''
         self.ok(self.run_step('version', 'Resolve TrussC version', **env))
-        self.assertEqual((self.root / 'output').read_text(), 'ref=v0.7.4\n')
+        self.assertEqual((self.root / 'output').read_text(encoding="utf-8"), 'ref=v0.7.4\n')
         self.assertFalse(log.exists())
         pin.unlink()
         (self.root / 'output').unlink()
         self.ok(self.run_step('version', 'Resolve TrussC version', **env))
-        self.assertEqual((self.root / 'output').read_text(), 'ref=v0.7.5\n')
-        self.assertEqual(log.read_text(), 'api repos/TrussC-org/TrussC/releases/latest --jq .tag_name')
+        self.assertEqual((self.root / 'output').read_text(encoding="utf-8"), 'ref=v0.7.5\n')
+        self.assertEqual(log.read_text(encoding="utf-8"), 'api repos/TrussC-org/TrussC/releases/latest --jq .tag_name')
         for override in [{'LATEST_TAG': 'null'}, {'GH_EXIT': '1'}]:
             self.assertNotEqual(self.run_step('version', 'Resolve TrussC version', **env, **override).returncode, 0)
 
     def test_revision_and_release_notes_with_single_platform(self):
         self.mock('git', "import sys\nprint('0123456789abcdef' if 'rev-parse' in sys.argv else 'v0.7.5')\n")
         self.ok(self.run_step('linux', 'Record TrussC revision', TRUSSC_REF='fix/release/check', RUNNER_OS='Linux'))
-        revision = (self.runner / 'revision/trussc-Linux.md').read_text()
+        revision = (self.runner / 'revision/trussc-Linux.md').read_text(encoding="utf-8")
         self.assertIn('ref `fix/release/check`', revision)
         self.assertIn('tag `v0.7.5`, commit `0123456789abcdef`', revision)
         artifacts = self.project / 'artifacts'
         for name in ['trussc-revision-linux', 'linux-tar', 'linux-symbols']:
             (artifacts / name).mkdir(parents=True)
-        (artifacts / 'trussc-revision-linux/revision.md').write_text(revision)
-        (artifacts / 'linux-tar/app.tar.gz').write_text('package')
-        (artifacts / 'linux-symbols/app-debug.tar.gz').write_text('symbols')
+        (artifacts / 'trussc-revision-linux/revision.md').write_text(revision, encoding="utf-8")
+        (artifacts / 'linux-tar/app.tar.gz').write_text('package', encoding="utf-8")
+        (artifacts / 'linux-symbols/app-debug.tar.gz').write_text('symbols', encoding="utf-8")
         self.mock('gh', "import json, os, sys\nfrom pathlib import Path\n"
-                        "Path(os.environ['GH_CALL_LOG']).write_text(json.dumps(sys.argv[1:]))\n")
+                        "Path(os.environ['GH_CALL_LOG']).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')\n")
         self.ok(self.run_step('release', 'Create GitHub Release', GITHUB_REF_NAME='fix/release/check',
                               GH_CALL_LOG=str(self.root / 'gh-call')))
-        args = json.loads((self.root / 'gh-call').read_text())
+        args = json.loads((self.root / 'gh-call').read_text(encoding="utf-8"))
         self.assertEqual(args[:3], ['release', 'create', 'fix/release/check'])
         self.assertEqual(args[args.index('--title') + 1], 'fix/release/check')
         self.assertIn('artifacts/linux-tar/app.tar.gz', args)
         self.assertIn('artifacts/linux-symbols/app-debug.tar.gz', args)
         self.assertFalse(any('*' in arg or 'revision.md' in arg for arg in args))
-        self.assertEqual((self.project / 'release-notes.md').read_text(), revision)
+        self.assertEqual((self.project / 'release-notes.md').read_text(encoding="utf-8"), revision)
 
     def test_hot_reload_guard_on_off_crlf_and_missing(self):
         (self.project / 'build').mkdir()
@@ -179,7 +179,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         src = self.project / 'src/nested'
         src.mkdir(parents=True)
         source = src / 'app.cpp'
-        source.write_text('TC_HOT_RELOAD(App)\n')
+        source.write_text('TC_HOT_RELOAD(App)\n', encoding="utf-8")
         cmakelists = self.project / 'CMakeLists.txt'
         cmakelists.touch()
         state = self.project / '.tc_hot_reload_state'
@@ -189,7 +189,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         writer = cmake_script_writer('_TC_HR_CHECK_SCRIPT')
         # Apply modern CMake policies even on older Linux installations.
         driver = self.root / 'run-check.cmake'
-        driver.write_text(f'cmake_minimum_required(VERSION 3.20)\ninclude([==[{generated}]==])\n')
+        driver.write_text(f'cmake_minimum_required(VERSION 3.20)\ninclude([==[{generated}]==])\n', encoding="utf-8")
         check_command = ['cmake', '-P', str(driver)]
         for explicit in [False, True]:
             with self.subTest(explicit=explicit):
@@ -203,18 +203,18 @@ class ReleaseWorkflowTest(unittest.TestCase):
                     'TRUSSC_DIR': native(ROOT / 'core'),
                 }
                 generator.write_text('cmake_minimum_required(VERSION 3.20)\n' + ''.join(
-                    f'set({key} [==[{value}]==])\n' for key, value in values.items()) + writer)
-                self.ok(subprocess.run(['cmake', '-P', str(generator)], text=True, capture_output=True))
-                source.write_text('TC_HOT_RELOAD(App)\n')
-                state.write_text('ON')
-                self.ok(subprocess.run(check_command, text=True, capture_output=True))
-                source.write_text('int x;\n')
+                    f'set({key} [==[{value}]==])\n' for key, value in values.items()) + writer, encoding="utf-8")
+                self.ok(subprocess.run(['cmake', '-P', str(generator)], text=True, capture_output=True, encoding="utf-8", errors="replace"))
+                source.write_text('TC_HOT_RELOAD(App)\n', encoding="utf-8")
+                state.write_text('ON', encoding="utf-8")
+                self.ok(subprocess.run(check_command, text=True, capture_output=True, encoding="utf-8", errors="replace"))
+                source.write_text('int x;\n', encoding="utf-8")
                 result = subprocess.run(check_command, text=True, stderr=subprocess.STDOUT,
-                                        stdout=subprocess.PIPE)
+                                        stdout=subprocess.PIPE, encoding="utf-8", errors="replace")
                 self.assertNotEqual(result.returncode, 0, result.stdout)
                 self.assertIn('hot reload state changed', result.stdout)
-                state.write_text('OFF')
-                self.ok(subprocess.run(check_command, text=True, capture_output=True))
+                state.write_text('OFF', encoding="utf-8")
+                self.ok(subprocess.run(check_command, text=True, capture_output=True, encoding="utf-8", errors="replace"))
 
         # Drive paths from the failing runner must also survive the CMake parser.
         scanner = self.root / 'D:/a/TrussC/TrussC/TrussC/core/cmake/tc_hot_reload_scan.cmake'
@@ -226,15 +226,15 @@ class ReleaseWorkflowTest(unittest.TestCase):
                       _TC_HR_CMAKELISTS=r'D:\a\TrussC\TrussC\CMakeLists.txt',
                       _TC_HR_EXPLICIT_SOURCES=r'D:\a\app with spaces\one.cpp;D:\a\app\two.cpp')
         generator.write_text('cmake_minimum_required(VERSION 3.20)\n' + ''.join(
-            f'set({key} [==[{value}]==])\n' for key, value in values.items()) + writer)
-        self.ok(subprocess.run(['cmake', '-P', str(generator)], text=True, capture_output=True))
-        with generated.open('a') as out:
+            f'set({key} [==[{value}]==])\n' for key, value in values.items()) + writer, encoding="utf-8")
+        self.ok(subprocess.run(['cmake', '-P', str(generator)], text=True, capture_output=True, encoding="utf-8", errors="replace"))
+        with generated.open('a', encoding="utf-8") as out:
             for key, value in [('SRC_DIR', values['_TC_HR_SRC_DIR']),
                                ('CMAKELISTS', values['_TC_HR_CMAKELISTS']),
                                ('EXPLICIT_SOURCES', values['_TC_HR_EXPLICIT_SOURCES'])]:
                 out.write(f'\nif(NOT "${{{key}}}" STREQUAL [==[{value}]==])\n'
                           f'    message(FATAL_ERROR "{key} changed during parsing")\nendif()\n')
-        self.ok(subprocess.run(check_command, cwd=self.root, text=True, capture_output=True))
+        self.ok(subprocess.run(check_command, cwd=self.root, text=True, capture_output=True, encoding="utf-8", errors="replace"))
 
     def test_generated_windows_exports_uses_runtime_paths(self):
         # The other generated CMake script takes paths through -D at execution,
@@ -242,8 +242,8 @@ class ReleaseWorkflowTest(unittest.TestCase):
         generated = self.root / '_tc_gen_exports.cmake'
         generator = self.root / 'generate-exports.cmake'
         generator.write_text(f'set(_TC_DEF_SCRIPT [==[{generated}]==])\n' +
-                             cmake_script_writer('_TC_DEF_SCRIPT'))
-        self.ok(subprocess.run(['cmake', '-P', str(generator)], text=True, capture_output=True))
+                             cmake_script_writer('_TC_DEF_SCRIPT'), encoding="utf-8")
+        self.ok(subprocess.run(['cmake', '-P', str(generator)], text=True, capture_output=True, encoding="utf-8", errors="replace"))
         library = r'D:\a\app with spaces\TrussC.lib'
         self.mock('dumpbin', "import os, sys\n"
                             "assert sys.argv[1:] == ['/LINKERMEMBER:1', os.environ['LIBRARY_PATH']]\n"
@@ -251,9 +251,9 @@ class ReleaseWorkflowTest(unittest.TestCase):
         exports = self.project / 'exports.def'
         result = subprocess.run(['cmake', f'-DLIB_FILE={library}', f'-DDEF_FILE={exports}',
                                  f'-DDUMPBIN={self.commands / "dumpbin"}', '-P', str(generated)],
-                                env=dict(self.env, LIBRARY_PATH=library), text=True, capture_output=True)
+                                env=dict(self.env, LIBRARY_PATH=library), text=True, capture_output=True, encoding="utf-8", errors="replace")
         self.ok(result)
-        self.assertEqual(exports.read_text(), 'EXPORTS\n    ?fixture@@YAXXZ\n')
+        self.assertEqual(exports.read_text(encoding="utf-8"), 'EXPORTS\n    ?fixture@@YAXXZ\n')
 
     def test_windows_archive_layout_and_separate_symbols(self):
         self.mock('7z', "import pathlib, sys, zipfile\n"
@@ -293,7 +293,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
     def test_mac_staging_and_older_plist_minimum(self):
         app = self.project / 'bin/Fixture.app'
         (app / 'Contents/MacOS').mkdir(parents=True)
-        (app / 'Contents/MacOS/Fixture').write_text('fixture executable')
+        (app / 'Contents/MacOS/Fixture').write_text('fixture executable', encoding="utf-8")
         info = app / 'Contents/Info.plist'
         for minimum in [None, '12.0']:
             metadata = {'CFBundleExecutable': 'Fixture'}
@@ -320,17 +320,17 @@ class ReleaseWorkflowTest(unittest.TestCase):
     def test_mac_signing_order_defaults_and_replacement(self):
         app = self.project / 'bin/Fixture.app'
         (app / 'Contents/MacOS').mkdir(parents=True)
-        (app / 'Contents/MacOS/Fixture').write_text('main executable')
+        (app / 'Contents/MacOS/Fixture').write_text('main executable', encoding="utf-8")
         framework = app / 'Contents/Frameworks/Nested.framework'
         (framework / 'Versions/A').mkdir(parents=True)
-        (framework / 'Versions/A/Nested.dylib').write_text('nested dylib')
+        (framework / 'Versions/A/Nested.dylib').write_text('nested dylib', encoding="utf-8")
         helper = framework / 'Helpers/Helper.app'
         (helper / 'Contents/MacOS').mkdir(parents=True)
-        (helper / 'Contents/MacOS/Helper').write_text('helper executable')
+        (helper / 'Contents/MacOS/Helper').write_text('helper executable', encoding="utf-8")
         self.mock('file', "import sys\nprint('Mach-O dynamically linked shared library' if sys.argv[-1].endswith('.dylib') else ('Mach-O executable' if '/MacOS/' in sys.argv[-1] else 'data'))\n")
         self.mock('plutil', "import plistlib, sys\nplistlib.load(open(sys.argv[-1], 'rb'))\n")
         self.mock('codesign', "import json, os, sys\n"
-                             "with open(os.environ['SIGN_LOG'], 'a') as out: out.write(json.dumps(sys.argv[1:])+'\\n')\n")
+                             "with open(os.environ['SIGN_LOG'], 'a', encoding='utf-8') as out: out.write(json.dumps(sys.argv[1:])+'\\n')\n")
         log = self.root / 'sign-log'
         custom = self.project / 'custom.entitlements'
         custom.write_bytes(plistlib.dumps({'com.apple.security.device.camera': True}))
@@ -338,7 +338,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
             with self.subTest(replacement=replacement):
                 self.ok(self.run_step('macos', 'Code Sign', APP_PATH=str(app),
                                       ENTITLEMENTS_INPUT=replacement, SIGN_IDENTITY=identity, SIGN_LOG=str(log)))
-                calls = [json.loads(line) for line in log.read_text().splitlines()]
+                calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
                 signed = [call for call in calls if '--sign' in call]
                 targets = [call[-1] for call in signed]
                 self.assertLess(targets.index(str(helper)), targets.index(str(framework)))
@@ -409,13 +409,13 @@ class ReleaseWorkflowTest(unittest.TestCase):
                     self.assertIn('./data/empty', names)
                     self.assertFalse(any(n.endswith('.debug') and n.count('/') == 1 for n in names))
                 packaged = self.runner / 'verify/Fixture'
-                sections = subprocess.check_output(['readelf', '-S', str(packaged)], text=True)
+                sections = subprocess.check_output(['readelf', '-S', str(packaged)], text=True, encoding="utf-8", errors="replace")
                 self.assertNotIn('.debug_info', sections)
                 self.assertIn('.gnu_debuglink', sections)
                 with tarfile.open(self.runner / 'Fixture-debug.tar.gz') as t:
                     self.assertIn('./Fixture.debug', t.getnames())
                 debug = self.runner / 'symbols/Fixture.debug'
-                self.assertIn('.debug_info', subprocess.check_output(['objdump', '-h', str(debug)], text=True))
+                self.assertIn('.debug_info', subprocess.check_output(['objdump', '-h', str(debug)], text=True, encoding="utf-8", errors="replace"))
                 link = self.root / 'debuglink'
                 subprocess.run(['objcopy', '--dump-section', f'.gnu_debuglink={link}', str(packaged)], check=True)
                 payload = link.read_bytes()

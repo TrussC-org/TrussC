@@ -805,16 +805,27 @@
 
     The HTML5 drag'n'drop API doesn't return file paths, but instead
     black-box 'file objects' which must be used to load the content
-    of dropped files. This is the reason why sokol_app.h adds two
+    of dropped files. This is the reason why sokol_app.h adds
     HTML5-specific functions to the drag'n'drop API:
 
         uint32_t sapp_html5_get_dropped_file_size(int index)
-            Returns the size in bytes of a dropped file.
+            Returns the size in bytes, saturated at UINT32_MAX.
+
+        uint64_t sapp_html5_get_dropped_file_size64(int index)
+            Returns the full size in bytes of a dropped file, or zero for an
+            unavailable file or a size outside the JavaScript safe integer range.
+            Returns zero on non-HTML5 platforms.
 
         void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request* request)
             Asynchronously loads the content of a dropped file into a
             provided memory buffer (which must be big enough to hold
-            the file content)
+            the file content). Files above 256 MiB or the buffer capacity are
+            rejected before reading. At most four reads may be active at once.
+            A buffer capacity rejection reports SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+            other limit, invalid size or index, and reader failures report
+            SAPP_HTML5_FETCH_ERROR_OTHER. Each failure invokes the callback once
+            with no data and logs one warning. Application shutdown cancels
+            pending reads before cleanup, without invoking their callbacks.
 
     To start loading the first dropped file after an SAPP_EVENTTYPE_FILES_DROPPED
     event is received:
@@ -1486,8 +1497,10 @@ extern "C" {
 
 /* misc constants */
 enum {
+    // Bound (platform): OS touch events use a fixed SDK array to avoid per-event allocation. Overflow omits excess points, preferring changed points where supported.
     SAPP_MAX_TOUCHPOINTS = 32,
     SAPP_MAX_MOUSEBUTTONS = 3,
+    // Bound (platform): OS scancodes index the fixed SDK translation table. Overflow maps out-of-range scancodes to SAPP_KEYCODE_INVALID.
     SAPP_MAX_KEYCODES = 512,
     SAPP_MAX_ICONIMAGES = 8,
 };
@@ -2350,8 +2363,10 @@ SOKOL_APP_API_DECL const void* sapp_egl_get_context(void);
 
 /* HTML5: enable or disable the hardwired "Leave Site?" dialog box */
 SOKOL_APP_API_DECL void sapp_html5_ask_leave_site(bool ask);
-/* HTML5: get byte size of a dropped file */
+/* HTML5: get byte size of a dropped file, saturated at UINT32_MAX */
 SOKOL_APP_API_DECL uint32_t sapp_html5_get_dropped_file_size(int index);
+/* HTML5: get full byte size of a dropped file (zero if unavailable) */
+SOKOL_APP_API_DECL uint64_t sapp_html5_get_dropped_file_size64(int index);
 /* HTML5: asynchronously load the content of a dropped file */
 SOKOL_APP_API_DECL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request* request);
 
@@ -2537,6 +2552,18 @@ static inline void _sapp_tc_log(const sapp_logger* logger, uint32_t level, uint3
         #endif
     }
 }
+
+// Bound (security): allow large media files while limiting each whole-file browser allocation to 256 MiB.
+#define _SAPP_TC_MAX_DROP_CONTENT_SIZE (256u * 1024u * 1024u)
+// Bound (security): at most four readers keep total pending file content within 1 GiB.
+#define _SAPP_TC_MAX_DROP_READERS (4)
+
+#if !defined(__EMSCRIPTEN__)
+uint64_t sapp_html5_get_dropped_file_size64(int index) {
+    (void)index;
+    return 0;
+}
+#endif
 
 #if defined(__APPLE__) && TARGET_OS_OSX
 /*== macOS ==================================================================*/
@@ -3061,12 +3088,14 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
     memset(_sapp_tc.app.drop_buffer, 0, (size_t)max_files * (size_t)max_path);
     _sapp_tc.app.drop_num_files = 0;
     int num = (int)pboard.pasteboardItems.count;
+    // Bound (security): OS drop lists can flood delivery; a fixed cap keeps path storage finite. Overflow omits excess files.
     if (num > max_files) num = max_files;
     for (int i = 0; i < num; i++) {
         NSString* str = [pboard.pasteboardItems[(NSUInteger)i] stringForType:NSPasteboardTypeFileURL];
         if (!str) return NO;
         NSURL* url = [NSURL URLWithString:str];
         const char* path = url.standardizedURL.path.UTF8String;
+        // Bound (security): OS drop paths must fit fixed per-path storage to keep memory finite. Overflow rejects the drop.
         if (!path || (int)strlen(path) >= max_path) return NO;  /* path too long: drop everything */
         strcpy(_sapp_tc.app.drop_buffer + (size_t)i * (size_t)max_path, path);
     }
@@ -3712,6 +3741,7 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     w->layer.device = (__bridge id<MTLDevice>)w->desc.mtl_device;
     w->layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
     w->layer.opaque = YES;
+    w->layer.framebufferOnly = NO;      /* [TrussC] captureWindow() reads the drawable (#879) */
     view.wantsLayer = YES;
     view.layer = w->layer;
     w->window.contentView = view;
@@ -4064,6 +4094,7 @@ const char* sapp_get_clipboard_string(void) {
         if ([pboard.types containsObject:NSPasteboardTypeString]) {
             NSString* str = [pboard stringForType:NSPasteboardTypeString];
             if (str) {
+                // Bound (security): OS clipboard text uses finite macOS storage. Overflow truncates to clipboard_size - 1 bytes.
                 strncpy(_sapp_tc.app.clipboard, str.UTF8String,
                         (size_t)_sapp_tc.app.clipboard_size - 1);
                 _sapp_tc.app.clipboard[_sapp_tc.app.clipboard_size - 1] = 0;
@@ -5119,6 +5150,7 @@ _SOKOL_PRIVATE void _sapp_tc_ios_touch_event(sapp_event_type type, NSSet<UITouch
         while ((ios_touch = [enumerator nextObject])) {
             const bool changed = [touches containsObject:ios_touch];
             int dst_index = -1;
+            // Bound (platform): iOS touch input must fit the SDK touch-event array. Overflow drops a touch point, preferring changed points, and warns once.
             if (_sapp_tc.event.num_touches < SAPP_MAX_TOUCHPOINTS) {
                 dst_index = _sapp_tc.event.num_touches++;
             } else {
@@ -5551,7 +5583,9 @@ SOKOL_API_IMPL bool sapp_high_dpi(void) {
 }
 
 SOKOL_API_IMPL float sapp_dpi_scale(void) {
-    return _sapp_tc.dpi_scale;
+    /* [TrussC fork] before sapp_run (headless, no window) report 1.0 like the
+       desktop backends instead of the zero-initialized state (#841) */
+    return _sapp_tc.dpi_scale > 0.0f ? _sapp_tc.dpi_scale : 1.0f;
 }
 
 SOKOL_API_IMPL const void* sapp_egl_get_display(void) {
@@ -5827,16 +5861,8 @@ SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
 }
 
 SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size(int index) {
-    SOKOL_ASSERT((index >= 0) && (index < _sapp_tc.drop.num_files));
-    #if defined(_SAPP_EMSCRIPTEN)
-        if (!_sapp_tc.drop.enabled) {
-            return 0;
-        }
-        return _sapp_tc_js_dropped_file_size(index);
-    #else
-        (void)index;
-        return 0;
-    #endif
+    const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+    return (size > UINT32_MAX) ? UINT32_MAX : (uint32_t)size;
 }
 
 SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request* request) {
@@ -5850,9 +5876,13 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
         sapp_html5_fetch_error error_code = SAPP_HTML5_FETCH_ERROR_NO_ERROR;
         if ((index < 0) || (index >= _sapp_tc.drop.num_files)) {
             error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
-        }
-        if (sapp_html5_get_dropped_file_size(index) > request->buffer.size) {
-            error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+        } else {
+            const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+            if (size > request->buffer.size) {
+                error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+            } else if (size > _SAPP_TC_MAX_DROP_CONTENT_SIZE) {
+                error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
+            }
         }
         if (SAPP_HTML5_FETCH_ERROR_NO_ERROR != error_code) {
             _sapp_tc_emsc_invoke_fetch_cb(index,
@@ -5868,7 +5898,9 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
                 request->callback,
                 (void*)request->buffer.ptr,
                 request->buffer.size,
-                request->user_data);
+                request->user_data,
+                _SAPP_TC_MAX_DROP_CONTENT_SIZE,
+                _SAPP_TC_MAX_DROP_READERS);
         }
     #else
         (void)request;
@@ -7086,6 +7118,7 @@ static void _sapp_tc_win32_files_dropped(_sapp_tc_window_t* w, HDROP hdrop) {
     memset(_sapp_tc.app.drop_buffer, 0, (size_t)max_files * (size_t)max_path);
     _sapp_tc.app.drop_num_files = 0;
     int num = (int)DragQueryFileW(hdrop, 0xFFFFFFFF, NULL, 0);
+    // Bound (security): OS drop lists can flood delivery; a fixed cap keeps path storage finite. Overflow omits excess files.
     if (num > max_files) num = max_files;
     bool ok = (num > 0);
     WCHAR* wpath = (WCHAR*)calloc((size_t)max_path, sizeof(WCHAR));
@@ -7096,6 +7129,7 @@ static void _sapp_tc_win32_files_dropped(_sapp_tc_window_t* w, HDROP hdrop) {
             break;
         }
         char* dst = _sapp_tc.app.drop_buffer + (size_t)i * (size_t)max_path;
+        // Bound (security): OS drop paths must fit fixed UTF-8 storage to keep memory finite. Overflow rejects the drop.
         if (!_sapp_tc_win32_wide_to_utf8(wpath, dst, max_path)) {
             ok = false;     /* path too long: drop everything */
             break;
@@ -8221,6 +8255,7 @@ const char* sapp_get_clipboard_string(void) {
     if (object) {
         const wchar_t* wchar_buf = (const wchar_t*)GlobalLock(object);
         if (wchar_buf) {
+            // Bound (security): OS clipboard text must fit the Windows UTF-8 buffer. Overflow fails conversion; the buffer is NUL-terminated.
             _sapp_tc_win32_wide_to_utf8(wchar_buf, _sapp_tc.app.clipboard,
                                         _sapp_tc.app.clipboard_size);
             GlobalUnlock(object);
@@ -8406,6 +8441,7 @@ sapp_swapchain sapp_get_swapchain(void) {
 #endif
 
 #define _SAPP_TC_MAX_WINDOWS (32)
+// Bound (platform): X11 keycodes use the protocol eight-bit range. Overflow maps out-of-range keycodes to invalid or zero.
 #define _SAPP_X11_MAX_X11_KEYCODES (256)
 #define _SAPP_TC_XDND_VERSION (5)
 
@@ -10180,6 +10216,7 @@ static bool _sapp_tc_x11_parse_dropped_files_list(const char* src) {
             src_count = 0;
             _sapp_tc.app.drop_num_files++;
             // too many files is not an error
+            // Bound (security): X11 drop lists can flood delivery; a fixed cap keeps path storage finite. Overflow stops parsing further files.
             if (_sapp_tc.app.drop_num_files >= _sapp_tc.app.drop_max_files) {
                 break;
             }
@@ -10195,6 +10232,7 @@ static bool _sapp_tc_x11_parse_dropped_files_list(const char* src) {
         }
         if (dst_chr) {
             // dst_end_ptr already has adjustment for terminating zero
+            // Bound (security): X11 drop paths must fit fixed per-path storage to keep memory finite. Overflow aborts parsing the drop.
             if (dst_ptr < dst_end_ptr) {
                 *dst_ptr++ = dst_chr;
             } else {
@@ -11535,6 +11573,7 @@ const char* sapp_get_clipboard_string(void) {
         return _sapp_tc.app.clipboard;
     }
     /* INCR (incremental transfer) is rejected: pastes beyond the buffer fail */
+    // Bound (security): X11 selection data must fit fixed clipboard storage to keep retained memory finite. Overflow rejects the selection.
     if ((actual_type != incremental) && (item_count < (unsigned long)_sapp_tc.app.clipboard_size)) {
         strncpy(_sapp_tc.app.clipboard, data, (size_t)_sapp_tc.app.clipboard_size - 1);
         _sapp_tc.app.clipboard[_sapp_tc.app.clipboard_size - 1] = 0;
@@ -11855,6 +11894,7 @@ _SOKOL_PRIVATE double _sapp_tc_timing_get(_sapp_tc_timing_t* t) {
 #if defined(_SAPP_LINUX)
 
 #define _SAPP_X11_XDND_VERSION (5)
+// Bound (platform): X11 keycodes use the protocol eight-bit range. Overflow maps out-of-range keycodes to invalid or zero.
 #define _SAPP_X11_MAX_X11_KEYCODES (256)
 
 #define GLX_VENDOR 1
@@ -14229,6 +14269,7 @@ _SOKOL_PRIVATE const char* _sapp_tc_x11_get_clipboard_string(void) {
         }
         return NULL;
     }
+    // Bound (security): X11 selection data must fit the fixed clipboard buffer to keep memory finite. Overflow rejects the selection.
     if ((actualType == incremental) || (itemCount >= (size_t)_sapp_tc.clipboard.buf_size)) {
         _SAPP_ERROR(CLIPBOARD_STRING_TOO_BIG);
         XFree(data);
@@ -14647,6 +14688,7 @@ _SOKOL_PRIVATE bool _sapp_tc_x11_parse_dropped_files_list(const char* src) {
             src_count = 0;
             _sapp_tc.drop.num_files++;
             // too many files is not an error
+            // Bound (security): X11 drop lists can flood delivery; a fixed cap keeps path storage finite. Overflow stops parsing further files.
             if (_sapp_tc.drop.num_files >= _sapp_tc.drop.max_files) {
                 break;
             }
@@ -14662,6 +14704,7 @@ _SOKOL_PRIVATE bool _sapp_tc_x11_parse_dropped_files_list(const char* src) {
         }
         if (dst_chr) {
             // dst_end_ptr already has adjustment for terminating zero
+            // Bound (security): X11 drop paths must fit fixed per-path storage to keep memory finite. Overflow aborts parsing the drop.
             if (dst_ptr < dst_end_ptr) {
                 *dst_ptr++ = dst_chr;
             } else {
@@ -15082,6 +15125,7 @@ _SOKOL_PRIVATE void _sapp_tc_egl_init(void) {
         EGL_NONE,
     };
 
+    // Bound (platform): the EGL SDK writes only the requested number of configuration handles into this fixed array. Overflow omits further configurations.
     EGLConfig egl_configs[32];
     EGLint config_count;
     if (!eglChooseConfig(_sapp_tc.egl.display, config_attrs, egl_configs, 32, &config_count) || config_count == 0) {
@@ -15406,7 +15450,9 @@ SOKOL_API_IMPL bool sapp_high_dpi(void) {
 }
 
 SOKOL_API_IMPL float sapp_dpi_scale(void) {
-    return _sapp_tc.dpi_scale;
+    /* [TrussC fork] before sapp_run (headless, no window) report 1.0 like the
+       desktop backends instead of the zero-initialized state (#841) */
+    return _sapp_tc.dpi_scale > 0.0f ? _sapp_tc.dpi_scale : 1.0f;
 }
 
 SOKOL_API_IMPL const void* sapp_egl_get_display(void) {
@@ -15682,16 +15728,8 @@ SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
 }
 
 SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size(int index) {
-    SOKOL_ASSERT((index >= 0) && (index < _sapp_tc.drop.num_files));
-    #if defined(_SAPP_EMSCRIPTEN)
-        if (!_sapp_tc.drop.enabled) {
-            return 0;
-        }
-        return _sapp_tc_js_dropped_file_size(index);
-    #else
-        (void)index;
-        return 0;
-    #endif
+    const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+    return (size > UINT32_MAX) ? UINT32_MAX : (uint32_t)size;
 }
 
 SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request* request) {
@@ -15705,9 +15743,13 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
         sapp_html5_fetch_error error_code = SAPP_HTML5_FETCH_ERROR_NO_ERROR;
         if ((index < 0) || (index >= _sapp_tc.drop.num_files)) {
             error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
-        }
-        if (sapp_html5_get_dropped_file_size(index) > request->buffer.size) {
-            error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+        } else {
+            const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+            if (size > request->buffer.size) {
+                error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+            } else if (size > _SAPP_TC_MAX_DROP_CONTENT_SIZE) {
+                error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
+            }
         }
         if (SAPP_HTML5_FETCH_ERROR_NO_ERROR != error_code) {
             _sapp_tc_emsc_invoke_fetch_cb(index,
@@ -15723,7 +15765,9 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
                 request->callback,
                 (void*)request->buffer.ptr,
                 request->buffer.size,
-                request->user_data);
+                request->user_data,
+                _SAPP_TC_MAX_DROP_CONTENT_SIZE,
+                _SAPP_TC_MAX_DROP_READERS);
         }
     #else
         (void)request;
@@ -16692,6 +16736,7 @@ _SOKOL_PRIVATE bool _sapp_tc_android_init_egl(void) {
         EGL_STENCIL_SIZE, 0,
         EGL_NONE,
     };
+    // Bound (platform): the Android EGL SDK writes only the requested number of configuration handles into this fixed array. Overflow omits further configurations.
     EGLConfig available_cfgs[32];
     EGLint cfg_count;
     eglChooseConfig(display, cfg_attributes, available_cfgs, 32, &cfg_count);
@@ -16916,6 +16961,7 @@ _SOKOL_PRIVATE bool _sapp_tc_android_touch_event(const AInputEvent* e) {
     int32_t idx = action_idx >> AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
     _sapp_tc_init_event(type);
     _sapp_tc.event.num_touches = (int)AMotionEvent_getPointerCount(e);
+    // Bound (platform): OS touch input must fit the SDK touch-event array. Overflow clamps the touch count and warns once.
     if (_sapp_tc.event.num_touches > SAPP_MAX_TOUCHPOINTS) {
         // Implementation-only state: warn once for this backend's lifetime.
         static bool warned = false;
@@ -17524,7 +17570,9 @@ SOKOL_API_IMPL bool sapp_high_dpi(void) {
 }
 
 SOKOL_API_IMPL float sapp_dpi_scale(void) {
-    return _sapp_tc.dpi_scale;
+    /* [TrussC fork] before sapp_run (headless, no window) report 1.0 like the
+       desktop backends instead of the zero-initialized state (#841) */
+    return _sapp_tc.dpi_scale > 0.0f ? _sapp_tc.dpi_scale : 1.0f;
 }
 
 SOKOL_API_IMPL const void* sapp_egl_get_display(void) {
@@ -17800,16 +17848,8 @@ SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
 }
 
 SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size(int index) {
-    SOKOL_ASSERT((index >= 0) && (index < _sapp_tc.drop.num_files));
-    #if defined(_SAPP_EMSCRIPTEN)
-        if (!_sapp_tc.drop.enabled) {
-            return 0;
-        }
-        return _sapp_tc_js_dropped_file_size(index);
-    #else
-        (void)index;
-        return 0;
-    #endif
+    const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+    return (size > UINT32_MAX) ? UINT32_MAX : (uint32_t)size;
 }
 
 SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request* request) {
@@ -17823,9 +17863,13 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
         sapp_html5_fetch_error error_code = SAPP_HTML5_FETCH_ERROR_NO_ERROR;
         if ((index < 0) || (index >= _sapp_tc.drop.num_files)) {
             error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
-        }
-        if (sapp_html5_get_dropped_file_size(index) > request->buffer.size) {
-            error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+        } else {
+            const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+            if (size > request->buffer.size) {
+                error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+            } else if (size > _SAPP_TC_MAX_DROP_CONTENT_SIZE) {
+                error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
+            }
         }
         if (SAPP_HTML5_FETCH_ERROR_NO_ERROR != error_code) {
             _sapp_tc_emsc_invoke_fetch_cb(index,
@@ -17841,7 +17885,9 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
                 request->callback,
                 (void*)request->buffer.ptr,
                 request->buffer.size,
-                request->user_data);
+                request->user_data,
+                _SAPP_TC_MAX_DROP_CONTENT_SIZE,
+                _SAPP_TC_MAX_DROP_READERS);
         }
     #else
         (void)request;
@@ -19158,6 +19204,7 @@ typedef void (*_sapp_tc_html5_fetch_callback) (const sapp_html5_fetch_response*)
 
 EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_onpaste(const char* str) {
     if (_sapp_tc.clipboard.enabled) {
+        // Bound (security): pasted browser text uses finite clipboard storage. Overflow truncates to buf_size - 1 bytes.
         _sapp_tc_strcpy(str, _sapp_tc.clipboard.buffer, (size_t)_sapp_tc.clipboard.buf_size);
         if (_sapp_tc_events_enabled()) {
             _sapp_tc_init_event(SAPP_EVENTTYPE_CLIPBOARD_PASTED);
@@ -19178,6 +19225,7 @@ EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_begin_drop(int num) {
     if (num < 0) {
         num = 0;
     }
+    // Bound (security): browser drop lists can flood delivery; a fixed cap keeps path storage finite. Overflow omits excess files.
     if (num > _sapp_tc.drop.max_files) {
         num = _sapp_tc.drop.max_files;
     }
@@ -19197,6 +19245,7 @@ EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_drop(int i, const char* name) {
     if ((i < 0) || (i >= _sapp_tc.drop.num_files)) {
         return;
     }
+    // Bound (security): browser drop names must fit fixed per-path storage to keep memory finite. Overflow rejects the drop and logs an error.
     if (!_sapp_tc_strcpy(name, _sapp_tc_dropped_file_path_ptr(i), (size_t)_sapp_tc.drop.max_path_length)) {
         _SAPP_ERROR(DROPPED_FILE_PATH_TOO_LONG);
         _sapp_tc.drop.num_files = 0;
@@ -19238,6 +19287,10 @@ EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_invoke_fetch_cb(int index, int success, 
     response.buffer.ptr = buf_ptr;
     response.buffer.size = buf_size;
     response.user_data = user_data;
+    if (!success) {
+        _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+            "warning: ", "dropped file fetch failed (index %d, error %d)", index, error_code);
+    }
     callback(&response);
 }
 
@@ -19344,36 +19397,109 @@ EM_JS(void, _sapp_tc_js_add_dragndrop_listeners, (void), {
     canvas.addEventListener('drop',      Module.sokol_drop, false);
 })
 
-EM_JS(uint32_t, _sapp_tc_js_dropped_file_size, (int index), {
+EM_JS(double, _sapp_tc_js_dropped_file_size, (int index), {
     \x2F\x2A\x2A @suppress {missingProperties} \x2A\x2F
     const files = Module.sokol_dropped_files;
-    if ((index < 0) || (index >= files.length)) {
+    if (!files || (index < 0) || (index >= files.length)) {
         return 0;
     } else {
         return files[index].size;
     }
 })
 
-EM_JS(void, _sapp_tc_js_fetch_dropped_file, (int index, _sapp_tc_html5_fetch_callback callback, void* buf_ptr, uint32_t buf_size, void* user_data), {
-    const reader = new FileReader();
-    reader.onload = (loadEvent) => {
-        const content = loadEvent.target.result;
-        if (content.byteLength > buf_size) {
-            // SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL
-            __sapp_tc_emsc_invoke_fetch_cb(index, 0, 1, callback, 0, buf_ptr, buf_size, user_data);
-        } else {
-            HEAPU8.set(new Uint8Array(content), buf_ptr);
-            __sapp_tc_emsc_invoke_fetch_cb(index, 1, 0, callback, content.byteLength, buf_ptr, buf_size, user_data);
+EM_JS(void, _sapp_tc_js_fetch_dropped_file, (int index, _sapp_tc_html5_fetch_callback callback, void* buf_ptr, uint32_t buf_size, void* user_data, uint32_t max_content_size, int max_readers), {
+    buf_size = buf_size >>> 0;
+    const files = Module.sokol_dropped_files;
+    const file = files && files[index];
+    const active = Module.sokol_active_drop_readers || 0;
+    let error = 0;
+    if (!file || !Number.isSafeInteger(file.size) || (file.size < 0)) {
+        error = 2; // SAPP_HTML5_FETCH_ERROR_OTHER
+    } else if (file.size > buf_size) {
+        error = 1; // SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL
+    } else if ((file.size > max_content_size) || (active >= max_readers)) {
+        error = 2; // SAPP_HTML5_FETCH_ERROR_OTHER
+    }
+    if (error !== 0) {
+        __sapp_tc_emsc_invoke_fetch_cb(index, 0, error, callback, 0, buf_ptr, buf_size, user_data);
+        return;
+    }
+    // The pending set also identifies this run; retained handlers cannot affect a later run.
+    const pending = Module.sokol_pending_drop_readers || (Module.sokol_pending_drop_readers = new Set());
+    Module.sokol_active_drop_readers = active + 1;
+    let reader;
+    let finished = false;
+    const release = () => {
+        if (finished) {
+            return false;
+        }
+        finished = true;
+        pending.delete(cancel);
+        if (Module.sokol_pending_drop_readers === pending) {
+            Module.sokol_active_drop_readers--;
+        }
+        if (reader) {
+            reader.onload = reader.onerror = reader.onabort = null;
+        }
+        return true;
+    };
+    const cancel = () => {
+        if (release() && reader) {
+            // Clear handlers and close the slot before abort can dispatch an event.
+            try { reader.abort(); } catch (error) {}
         }
     };
-    reader.onerror = () => {
-        // SAPP_HTML5_FETCH_ERROR_OTHER
-        __sapp_tc_emsc_invoke_fetch_cb(index, 0, 2, callback, 0, buf_ptr, buf_size, user_data);
+    const finish = (success, error_code, size) => {
+        if ((Module.sokol_pending_drop_readers !== pending) || !release()) {
+            return;
+        }
+        __sapp_tc_emsc_invoke_fetch_cb(index, success, error_code, callback, size, buf_ptr, buf_size, user_data);
     };
-    \x2F\x2A\x2A @suppress {missingProperties} \x2A\x2F
-    const files = Module.sokol_dropped_files;
-    reader.readAsArrayBuffer(files[index]);
+    pending.add(cancel);
+    try {
+        reader = new FileReader();
+        reader.onload = (loadEvent) => {
+            if (finished || (Module.sokol_pending_drop_readers !== pending)) {
+                return;
+            }
+            const content = loadEvent.target.result;
+            if ((content.byteLength > buf_size) || (content.byteLength > max_content_size)) {
+                finish(0, content.byteLength > buf_size ? 1 : 2, 0);
+            } else {
+                HEAPU8.set(new Uint8Array(content), buf_ptr);
+                finish(1, 0, content.byteLength);
+            }
+        };
+        reader.onerror = reader.onabort = () => {
+            finish(0, 2, 0); // SAPP_HTML5_FETCH_ERROR_OTHER
+        };
+        reader.readAsArrayBuffer(file);
+    } catch (error) {
+        finish(0, 2, 0); // SAPP_HTML5_FETCH_ERROR_OTHER
+    }
 })
+
+EM_JS(void, _sapp_tc_js_cancel_dropped_file_reads, (void), {
+    const pending = Module.sokol_pending_drop_readers;
+    if (pending) {
+        for (const cancel of pending) {
+            cancel();
+        }
+        Module.sokol_pending_drop_readers = null;
+    }
+})
+
+SOKOL_API_IMPL uint64_t sapp_html5_get_dropped_file_size64(int index) {
+    if (!_sapp_tc.drop.enabled || (index < 0) || (index >= _sapp_tc.drop.num_files)) {
+        return 0;
+    }
+    const double size = _sapp_tc_js_dropped_file_size(index);
+    if (!((size >= 0.0) && (size <= 9007199254740991.0))) {
+        return 0;
+    }
+    const uint64_t result = (uint64_t)size;
+    return ((double)result == size) ? result : 0;
+}
 
 EM_JS(void, _sapp_tc_js_remove_dragndrop_listeners, (void), {
     \x2F\x2A\x2A @suppress {missingProperties} \x2A\x2F
@@ -19778,6 +19904,7 @@ _SOKOL_PRIVATE EM_BOOL _sapp_tc_emsc_mouse_cb(int emsc_type, const EmscriptenMou
         _sapp_tc.mouse.y = new_y;
         _sapp_tc.mouse.pos_valid = true;
     }
+    // Bound (platform): browser mouse-button indices must match the SDK-supported button range. Overflow ignores the event.
     if (_sapp_tc_events_enabled() && (emsc_event->button >= 0) && (emsc_event->button < SAPP_MAX_MOUSEBUTTONS)) {
         sapp_event_type type;
         bool is_button_event = false;
@@ -20080,6 +20207,7 @@ _SOKOL_PRIVATE EM_BOOL _sapp_tc_emsc_touch_cb(int emsc_type, const EmscriptenTou
             _sapp_tc_init_event(type);
             _sapp_tc.event.modifiers = _sapp_tc_emsc_touch_event_mods(emsc_event);
             _sapp_tc.event.num_touches = emsc_event->numTouches;
+            // Bound (platform): OS touch input must fit the SDK touch-event array. Overflow clamps the touch count and warns once.
             if (_sapp_tc.event.num_touches > SAPP_MAX_TOUCHPOINTS) {
                 // Implementation-only state: warn once for this backend's lifetime.
                 static bool warned = false;
@@ -20268,6 +20396,7 @@ _SOKOL_PRIVATE EM_BOOL _sapp_tc_emsc_frame_animation_loop(double time, void* use
         }
     }
     if (_sapp_tc.quit_ordered) {
+        _sapp_tc_js_cancel_dropped_file_reads();
         _sapp_tc_emsc_unregister_eventhandlers();
         #if defined(SOKOL_WGPU)
             _sapp_tc_wgpu_discard();
@@ -20457,7 +20586,9 @@ SOKOL_API_IMPL bool sapp_high_dpi(void) {
 }
 
 SOKOL_API_IMPL float sapp_dpi_scale(void) {
-    return _sapp_tc.dpi_scale;
+    /* [TrussC fork] before sapp_run (headless, no window) report 1.0 like the
+       desktop backends instead of the zero-initialized state (#841) */
+    return _sapp_tc.dpi_scale > 0.0f ? _sapp_tc.dpi_scale : 1.0f;
 }
 
 SOKOL_API_IMPL const void* sapp_egl_get_display(void) {
@@ -20733,16 +20864,8 @@ SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
 }
 
 SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size(int index) {
-    SOKOL_ASSERT((index >= 0) && (index < _sapp_tc.drop.num_files));
-    #if defined(_SAPP_EMSCRIPTEN)
-        if (!_sapp_tc.drop.enabled) {
-            return 0;
-        }
-        return _sapp_tc_js_dropped_file_size(index);
-    #else
-        (void)index;
-        return 0;
-    #endif
+    const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+    return (size > UINT32_MAX) ? UINT32_MAX : (uint32_t)size;
 }
 
 SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request* request) {
@@ -20756,9 +20879,13 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
         sapp_html5_fetch_error error_code = SAPP_HTML5_FETCH_ERROR_NO_ERROR;
         if ((index < 0) || (index >= _sapp_tc.drop.num_files)) {
             error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
-        }
-        if (sapp_html5_get_dropped_file_size(index) > request->buffer.size) {
-            error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+        } else {
+            const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+            if (size > request->buffer.size) {
+                error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+            } else if (size > _SAPP_TC_MAX_DROP_CONTENT_SIZE) {
+                error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
+            }
         }
         if (SAPP_HTML5_FETCH_ERROR_NO_ERROR != error_code) {
             _sapp_tc_emsc_invoke_fetch_cb(index,
@@ -20774,7 +20901,9 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
                 request->callback,
                 (void*)request->buffer.ptr,
                 request->buffer.size,
-                request->user_data);
+                request->user_data,
+                _SAPP_TC_MAX_DROP_CONTENT_SIZE,
+                _SAPP_TC_MAX_DROP_READERS);
         }
     #else
         (void)request;

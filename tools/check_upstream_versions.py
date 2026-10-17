@@ -74,7 +74,7 @@ def version_key(v):
 def ls_remote(url, *patterns, tags=False):
     cmd = ["git", "ls-remote"] + (["--tags", "--refs"] if tags else []) + [url] + list(patterns)
     out = subprocess.run(cmd, check=True, capture_output=True,
-                         text=True, timeout=TIMEOUT).stdout
+                         text=True, timeout=TIMEOUT, encoding="utf-8").stdout
     return [line.split("\t") for line in out.splitlines() if "\t" in line]
 
 

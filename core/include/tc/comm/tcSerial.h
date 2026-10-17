@@ -1118,6 +1118,7 @@ public:
     // Received bytes discarded by the 1 MiB buffer, since the last setup().
     // Flush/close preserve the count; Windows driver flags cannot supply an
     // exact byte count and are warned about separately.
+    // Device input or a stalled reader can fill the deque; a fixed cap keeps memory finite. Overflow drops the oldest bytes and increments the discard count.
     size_t getDroppedByteCount() const {
         Shared lock(lock_);
 #if defined(__ANDROID__)
@@ -1385,6 +1386,7 @@ private:
 #if defined(_WIN32)
         const HANDLE port = handle_;
         rx->worker = std::thread([rx, port] {
+            // Bound (security/latency): 4096-byte device reads bound per-read storage and work. Overflow continues in the next read.
             uint8_t data[4096];
             OVERLAPPED operation{};
             operation.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
@@ -1408,6 +1410,7 @@ private:
                     rx->errors |= errors;
                     DWORD n = 0;
                     ResetEvent(operation.hEvent);
+                    // Bound (security/latency): the device read is limited to the fixed chunk. Overflow continues in the next read.
                     BOOL ok = ReadFile(port, data, sizeof(data), &n, &operation);
                     if (!ok && GetLastError() == ERROR_IO_PENDING) {
                         // A bounded wait also makes shutdown independent of a
@@ -1437,6 +1440,7 @@ private:
 #else
         const int port = fd_;
         rx->worker = std::thread([rx, port] {
+            // Bound (security/latency): 4096-byte device reads bound per-read storage and work. Overflow continues in the next read.
             uint8_t data[4096];
             while (!rx->stop.load()) {
                 pollfd event{port, POLLIN, 0};
@@ -1455,6 +1459,7 @@ private:
                 if (!ready) continue;
                 {
                     std::lock_guard<std::mutex> lock(rx->buffer.mutex);
+                    // Bound (security/latency): the device read is limited to the fixed chunk. Overflow continues in the next read.
                     const ssize_t n = ::read(port, data, sizeof(data));
                     if (n > 0) rx->buffer.append(data, static_cast<size_t>(n));
                     else if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {

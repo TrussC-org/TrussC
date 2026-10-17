@@ -30,9 +30,9 @@ file(MAKE_DIRECTORY "${DEST}")
 file(WRITE "${DEST}/CMakeLists.txt"
     "cmake_minimum_required(VERSION 3.20)\\nproject(fixture C)\\nadd_library(fixture STATIC fixture.c)\\n")
 file(WRITE "${DEST}/fixture.c" "int fixture(void) { return 42; }\\n")
-''')
+''', encoding="utf-8")
         (self.source / 'main.c').write_text(
-            'int fixture(void);\nint main(void) { return fixture() == 42 ? 0 : 1; }\n')
+            'int fixture(void);\nint main(void) { return fixture() == 42 ? 0 : 1; }\n', encoding="utf-8")
         self.project = f'''
 cmake_minimum_required(VERSION 3.20)
 project(cache_fixture C)
@@ -51,11 +51,11 @@ add_test(NAME probe COMMAND probe)
 file(WRITE "${{CMAKE_BINARY_DIR}}/settings"
     "${{FETCHCONTENT_BASE_DIR}}\\n${{FETCHCONTENT_UPDATES_DISCONNECTED}}\\n${{fixture_SOURCE_DIR}}\\n")
 '''
-        (self.source / 'CMakeLists.txt').write_text(self.project)
+        (self.source / 'CMakeLists.txt').write_text(self.project, encoding="utf-8")
 
     def command(self, command, cwd=None):
         result = subprocess.run(command, cwd=cwd, env=self.env,
-                                capture_output=True, text=True)
+                                capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result.stdout + result.stderr
 
@@ -64,10 +64,10 @@ file(WRITE "${{CMAKE_BINARY_DIR}}/settings"
         # Exercise the same native configure command builder as build_all.py.
         command = build_all.cmake_config_cmd(str(build), {'cmake_generator': None})
         self.command(command + list(options), cwd=self.source)
-        return build, (build / 'settings').read_text().splitlines()
+        return build, (build / 'settings').read_text(encoding="utf-8").splitlines()
 
     def calls(self):
-        return (self.directory / 'calls').read_text().splitlines()
+        return (self.directory / 'calls').read_text(encoding="utf-8").splitlines()
 
     def test_unset_uses_independent_default_directories(self):
         for name in ('first', 'second'):
@@ -122,9 +122,9 @@ file(WRITE "${{CMAKE_BINARY_DIR}}/settings"
         self.env['TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED'] = 'ON'
         (self.source / 'CMakeLists.txt').write_text(self.project.replace(
             'include("', f'set(FETCHCONTENT_BASE_DIR "{explicit.as_posix()}")\n'
-            'set(FETCHCONTENT_UPDATES_DISCONNECTED OFF)\ninclude("', 1))
+            'set(FETCHCONTENT_UPDATES_DISCONNECTED OFF)\ninclude("', 1), encoding="utf-8")
         build, _ = self.configure('normal')
-        self.assertEqual((build / 'hook-settings').read_text().splitlines(),
+        self.assertEqual((build / 'hook-settings').read_text(encoding="utf-8").splitlines(),
                          [str(explicit), 'OFF'])
         self.assertFalse((self.directory / 'env deps').exists())
 

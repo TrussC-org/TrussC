@@ -6,27 +6,13 @@
 
 namespace tcx::box2d {
 
-RectBody::RectBody(RectBody&& other) noexcept
-    : Body(std::move(other))
-    , width_(other.width_)
-    , height_(other.height_)
-{
-    other.width_ = 0;
-    other.height_ = 0;
-}
-
-RectBody& RectBody::operator=(RectBody&& other) noexcept {
-    if (this != &other) {
-        Body::operator=(std::move(other));
-        width_ = other.width_;
-        height_ = other.height_;
-        other.width_ = 0;
-        other.height_ = 0;
-    }
-    return *this;
-}
-
 void RectBody::setup(World& world, float cx, float cy, float width, float height) {
+    std::weak_ptr<int> ownerLife = objectLife;
+    auto worldLife = world.aliveToken();
+    destroy();
+    if (ownerLife.expired() || worldLife.expired()) return;
+    // Exit callbacks may have already set this owner up again. Keep that body.
+    if (body_ || !world.getWorld()) return;
     world_ = &world;
     width_ = width;
     height_ = height;
@@ -37,7 +23,7 @@ void RectBody::setup(World& world, float cx, float cy, float width, float height
     bodyDef.position = World::toBox2d(cx, cy);
 
     // Create body
-    body_ = world.getWorld()->CreateBody(&bodyDef);
+    setBody(world.getWorld()->CreateBody(&bodyDef));
 
     // Rectangle shape (Box2D SetAsBox uses half-size)
     b2PolygonShape box;
@@ -51,9 +37,6 @@ void RectBody::setup(World& world, float cx, float cy, float width, float height
     fixtureDef.restitution = 0.3f;
 
     body_->CreateFixture(&fixtureDef);
-
-    // Store Body* in UserData (used by World::getBodyAtPoint())
-    body_->GetUserData().pointer = reinterpret_cast<uintptr_t>(this);
 
     // Create collider component
     auto* collider = setupCollider<BoxCollider2D>();

@@ -591,6 +591,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](const trussc::Vec3 & v) { return trussc::noise(v); },
         [](float x, float y, float z, int seed) { return trussc::noise(x, y, z, seed); }
     ));
+    lua->set_function("onScreenshotSave", []() -> decltype(auto) { return trussc::onScreenshotSave(); });
     lua->set_function("operator&", [](trussc::Orientation a, trussc::Orientation b) { return trussc::operator&(a, b); });
     lua->set_function("operator*", sol::overload(
         [](float s, const trussc::Vec2 & v) { return trussc::operator*(s, v); },
@@ -681,6 +682,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](const trussc::Json & j, const fs::path & path, int indent) { return trussc::saveJson(j, path, indent); }
     ));
     lua->set_function("saveScreenshot", [](const std::filesystem::path & path) { return trussc::saveScreenshot(path); });
+    lua->set_function("saveScreenshotAsync", [](const fs::path & path) { return trussc::saveScreenshotAsync(path); });
     lua->set_function("saveTextFile", [](const fs::path & path, const std::string & content) { return trussc::saveTextFile(path, content); });
     lua->set_function("scale", sol::overload(
         [](float s) { return trussc::scale(s); },

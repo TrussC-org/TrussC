@@ -61,7 +61,7 @@ def can_save_on_merge_group(step):
 
 class BuildWorkflowCacheTests(unittest.TestCase):
     def setUp(self):
-        self.workflow = yaml.load((ROOT / '.github/workflows/build.yml').read_text(),
+        self.workflow = yaml.load((ROOT / '.github/workflows/build.yml').read_text(encoding="utf-8"),
                                   Loader=yaml.BaseLoader)
 
     def test_cache_steps_cannot_save_on_merge_group(self):
@@ -134,7 +134,7 @@ class BuildWorkflowCacheTests(unittest.TestCase):
     def test_fetchcontent_cache_twins_and_environment(self):
         for filename, jobs in [('build.yml', ('build', 'build-android', 'build-web', 'build-ios')),
                                ('daily.yml', ('sweep', 'sweep-web'))]:
-            workflow = yaml.load((ROOT / '.github/workflows' / filename).read_text(),
+            workflow = yaml.load((ROOT / '.github/workflows' / filename).read_text(encoding="utf-8"),
                                  Loader=yaml.BaseLoader)
             for job_name in jobs:
                 with self.subTest(workflow=filename, job=job_name):
@@ -166,14 +166,14 @@ class BuildWorkflowCacheTests(unittest.TestCase):
                         env_file = Path(scratch) / 'github-env'
                         workspace = str(Path(scratch) / 'workspace with spaces')
                         for hit in ('true', 'false', ''):
-                            env_file.write_text('')
+                            env_file.write_text('', encoding="utf-8")
                             subprocess.run(['bash', '-eu', '-c', setup['run']], check=True,
                                            env=dict(os.environ, GITHUB_ENV=str(env_file),
                                                     GITHUB_WORKSPACE=workspace, FETCHCONTENT_CACHE_HIT=hit))
                             expected_lines = [f'TRUSSC_FETCHCONTENT_DIR={workspace}/.fetchcontent']
                             if hit == 'true':
                                 expected_lines.append('TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON')
-                            self.assertEqual(env_file.read_text().splitlines(), expected_lines)
+                            self.assertEqual(env_file.read_text(encoding="utf-8").splitlines(), expected_lines)
 
     def test_ccache_prune_runs_only_after_main_builds(self):
         # #776: one compiler-cache save per platform. The prune job deletes

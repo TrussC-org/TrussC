@@ -85,6 +85,7 @@ PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
                               OffsetCheck offset) {
     const size_t count = points.size();
     if (count < 3) return PolygonError::TooFewPoints;
+    // Bound (platform): the Box2D SDK stores polygon vertices in a fixed array. Overflow returns TooManyPoints.
     if (count > b2_maxPolygonVertices) return PolygonError::TooManyPoints;
 
     // The steps below mirror b2PolygonShape::Set() in Box2D v2.4.1 exactly, so

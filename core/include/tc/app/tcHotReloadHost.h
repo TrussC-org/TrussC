@@ -45,6 +45,8 @@ extern char** environ;
 #include <string>
 #include <vector>
 #include <cstdlib>
+#include "internal/tcHotReloadDiagnostics.h"
+#include "internal/tcWindowsBuildOutput.h"
 
 namespace trussc {
 namespace hot_reload {
@@ -145,6 +147,9 @@ struct GuestLibrary {
             static uintptr_t generation = 0;  // host-only: only the host creates guests
             mcpOwner = reinterpret_cast<const void*>(++generation);
             mcp::internal::setRegistrationOwner(mcpOwner);
+            if (auto token = internal::appRunToken()) token->store(false);
+            internal::cancelResourceBackends();
+            internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
             App* raw = createApp();
             auto deleter = destroyApp;
             app = std::shared_ptr<App>(raw, [deleter](App* p) {
@@ -158,6 +163,8 @@ struct GuestLibrary {
     }
 
     void destroy() {
+        if (auto token = internal::appRunToken()) token->store(false);
+        internal::cancelResourceBackends();
         if (mcpOwner) {
             mcp::internal::removeRegistrationsOwnedBy(mcpOwner);
             mcp::internal::setRegistrationOwner(nullptr);
@@ -171,6 +178,8 @@ struct GuestLibrary {
             app->cleanup();
         }
         app.reset();
+        // Cleanup/destructors can have submitted another old-run operation.
+        internal::cancelResourceBackends();
     }
 
     void unload() {
@@ -306,7 +315,8 @@ inline string findCMake(const string& buildDir = "") {
 // _spawnvp removes the shell from the loop entirely; any metacharacters
 // become literal argument bytes to cmake.
 // ---------------------------------------------------------------------------
-inline int runBuildCommand(const vector<string>& argv) {
+inline int runBuildCommand(const vector<string>& argv, string& output) {
+    output.clear();
     if (argv.empty()) return -1;
 
 #ifdef _WIN32
@@ -320,26 +330,11 @@ inline int runBuildCommand(const vector<string>& argv) {
         cmdLine += argv[i];
         if (needsQuote) cmdLine += '"';
     }
-    STARTUPINFOA si = {};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput  = GetStdHandle(STD_INPUT_HANDLE);
-    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-    si.hStdError  = GetStdHandle(STD_ERROR_HANDLE);
-    PROCESS_INFORMATION pi = {};
-    vector<char> buf(cmdLine.begin(), cmdLine.end());
-    buf.push_back('\0');
-    if (!CreateProcessA(argv[0].c_str(), buf.data(),
-                        nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si, &pi)) {
+    const int rc = internal::runWindowsBuildWithOutput(cmdLine, output);
+    if (rc == -1) {
         logError("HotReload") << "Failed to launch: " << argv[0];
-        return -1;
     }
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    DWORD exitCode = 1;
-    GetExitCodeProcess(pi.hProcess, &exitCode);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    return (int)exitCode;
+    return rc;
 #else
     vector<char*> cargv;
     cargv.reserve(argv.size() + 1);
@@ -526,9 +521,15 @@ struct Host {
         vector<string> command = {cmake, "--build", buildDir,
                                   "--target", "guest", "--parallel"};
         if (multiConfig) command.insert(command.end(), {"--config", TC_HOT_RELOAD_CONFIG});
-        int rc = runBuildCommand(command);
+        string output;
+        int rc = runBuildCommand(command, output);
         if (rc != 0) {
             logError() << "[HotReload] Build failed (exit code " << rc << ")";
+#ifdef _WIN32
+            if (internal::hasWindowsGuestLinkError(output)) {
+                logWarning() << internal::windowsGuestLinkHint();
+            }
+#endif
             return false;
         }
         return true;
@@ -735,7 +736,9 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     desc.event_cb = internal::_event_cb;
     desc.logger.func = internal::sokolLog;
     desc.enable_dragndrop = true;
+    // Bound (security): OS file drops can flood delivery; a fixed cap keeps path storage finite. Overflow omits excess files.
     desc.max_dropped_files = 16;
+    // Bound (security): OS drop paths need finite per-path storage. Overflow rejects the drop if a path does not fit.
     desc.max_dropped_file_path_length = 2048;
     desc.enable_clipboard = true;
     desc.clipboard_size = settings.clipboardSize;

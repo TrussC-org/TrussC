@@ -137,7 +137,8 @@ struct WindowContext {
     std::vector<TargetStackEntry> targetStack;
     uint64_t nextTargetToken = 1;
     uint64_t renderEpoch = 0;
-    // Metal drawable actually rendered into this frame (see tcGlobal.cpp notes)
+    // Borrowed Metal drawable rendered into this frame. Valid only until the
+    // native frame callback returns; clear after afterFrame and capture drains.
     const void* lastSwapchainDrawable = nullptr;
     // Full swapchain description this frame actually rendered into (recorded by
     // RenderTarget::beginPass, same timing as lastSwapchainDrawable). Used by
@@ -146,6 +147,10 @@ struct WindowContext {
     // recording reads back ITS surface instead of the main swapchain. On macOS
     // capture reads lastSwapchainDrawable directly and ignores this.
     sg_swapchain lastSwapchain{};
+    void clearFrameDrawable() {
+        lastSwapchainDrawable = nullptr;
+        lastSwapchain.metal.current_drawable = nullptr;
+    }
     // --- window identity / swapchain source (Phase 1 seam) ---
     // Main window: isMain=true, swapchain comes from sglue_swapchain() and
     // dimensions from sapp. Secondary windows: the native layer sets isMain
@@ -242,6 +247,7 @@ struct WindowContext {
     bool throttleLastTimeInitialized = false;
 
     // --- misc per-window ---
+    // Bound (security): OS clipboard text needs finite storage in the window backend. Overflow truncates or rejects oversized text, depending on the backend.
     int clipboardSize = 65536;   // Clipboard buffer size (for overflow check)
     // Resolved absolute paths (download names on web) queued by saveScreenshot()
     // on THIS window, drained
@@ -250,6 +256,7 @@ struct WindowContext {
     // window drains from the afterFrame listener in _setup_cb; each secondary
     // window drains in its own windowTick. See TrussC.h drainPendingScreenshots().
     std::vector<std::filesystem::path> pendingScreenshotPaths;
+    ScreenshotQueue asyncScreenshots;
 
     // --- per-window shader stack (pushShader / popShader) ------------------
     // Made per-window so an unbalanced push in window A can't leak into B.

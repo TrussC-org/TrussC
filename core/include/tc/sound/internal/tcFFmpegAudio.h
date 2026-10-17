@@ -149,10 +149,12 @@ struct FFmpegAudio {
     }
 
     ma_result seek(ma_uint64 target) {
+        // Bound (abi): file seek targets must fit FFmpeg signed timestamp width. Overflow returns MA_OUT_OF_RANGE.
         if (target > static_cast<ma_uint64>(INT64_MAX)) return MA_OUT_OF_RANGE;
         AVStream* st = format->streams[stream];
         const int64_t start = st->start_time == AV_NOPTS_VALUE ? 0 : st->start_time;
         int64_t timestamp = av_rescale_q(static_cast<int64_t>(target), AVRational{1, rate}, st->time_base);
+        // Bound (abi): file start offsets plus seek timestamps must fit FFmpeg signed timestamp width. Overflow returns MA_OUT_OF_RANGE.
         if (timestamp > INT64_MAX - std::max<int64_t>(0, start)) return MA_OUT_OF_RANGE;
         if (timestamp < 0) return MA_OUT_OF_RANGE;
         // Decode the preceding codec frame as preroll. AAC needs its overlap

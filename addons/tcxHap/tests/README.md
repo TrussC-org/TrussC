@@ -3,7 +3,60 @@
 Snappy integration checks encode repeated BC1 blocks as single-chunk and
 four-chunk HAP frames, verify compression actually reduced their size, and
 compare both `HapDecoder` decode paths with the original texture bytes.
-These checks run headlessly as part of the default test mode.
+These checks run headlessly as part of the default test mode. Chunk-count
+diagnostics must report 1 for single-chunk frames (including raw and Snappy
+frames that bypass the callback) and the actual count for chunk tables,
+through both decoder entry points.
+
+Chunk worker checks decode mixed raw/Snappy frames with 2, 8, 9 and 1024
+chunks. Every valid table fixture is compared byte-for-byte with a serial
+`HapDecode` callback through both decoder entry points. On Linux,
+`local.cmake` enables executable-local `pthread_create` observation: at most
+eight workers may be created per callback, and each must finish before decode
+returns. Returning `EAGAIN` on creation attempts 1 through 8 exercises
+`std::thread` construction failure, including failure after workers have
+started. Each result must still match serial decoding. Copy/move construction,
+assignment, reuse of moved-from decoders, and destruction are checked after
+multi-worker decoding. The probe's mutable state lives in a test `.cpp`.
+
+For standalone table tests on Linux, also compile `workerThreadProbe.cpp`,
+define `TC_HAP_WORKER_PROBE`, and link `${CMAKE_DL_LIBS}` (or `-ldl`).
+`--case "1024 mixed worker chunks" --worker-failure 0` isolates the worker
+bound; `--worker-failure 2` injects failure after one successful creation.
+Omitting that option exercises normal creation and all eight failure points.
+The same tests can be built against an earlier decoder header to observe its
+thread count and behavior when creation fails. Serial comparisons run on
+all platforms; thread observation and failure injection run on Linux.
+
+Frame table checks cover compressor, size and offset tables, section bounds,
+extended headers, cumulative input/output sizes, Snappy streams, and both
+textures in multi-texture frames. Both decoder entry points must reject a
+malformed frame before changing output. Valid raw, Snappy and mixed chunk
+fixtures preserve texture bytes and BC1 pixels. Decoder diagnostics check a
+single warning per decoder and a cumulative invalid-frame count. Copy/move
+construction and assignment remain available (compile-time assertions), and
+copies preserve warning/counter state. Empty unknown instruction sections
+are valid fixtures checked on both the base and changed decoder. Explicit
+offsets may reuse input ranges: the 4x8 BC1 fixture repeats one eight-byte block
+with two eight-byte chunks at offsets [0, 0], checking both output blocks.
+Implicit offsets still require cumulative physical containment.
+
+Chunk count is limited to 1024 before `HapDecode`, with boundary validation
+and 32-bit allocation/index product checks. This is a resource policy above
+[FFmpeg's 1–64 range](https://www.ffmpeg.org/ffmpeg-codecs.html#Hap) and
+[Jokyo's recommendation of 8](https://jokyohapencoder.com/jokyo-hap-encoder-standalone/),
+not a limit in the HAP format. The pinned reference source has no local patches;
+section lengths must stay below `0x80000000` for its signed four-byte reader.
+Header-only tests exercise both sides of that boundary without large allocations.
+
+The standalone `chunkTableTests` harness is **Linux only**: it links through
+the Linux `--wrap=HapDecode` workflow. `chunkTableTests.cpp` provides its main
+when compiled with `TC_HAP_CHUNK_TABLE_TEST_MAIN`. Use `--list`,
+`--case "chunk offset outside texture"` and `--entry allocating` (or
+`preallocated`) to isolate fixtures
+when comparing with a base build. On Linux, defining `TC_HAP_TRACE_DECODE`
+and linking with `-Wl,--wrap=HapDecode` also checks that malformed fixtures
+never reach the reference decoder.
 
 Video regressions (#283) check BC1, BC3 (Hap Alpha and HAP-Q), and BC7
 decoding at 6x5, 6x8, 8x5, 8x8, and 1x1. Hand-built blocks have known pixel
@@ -145,10 +198,17 @@ trusscli run -p .          # from this directory
 ```
 
 The optional `tests --playback-errors` mode needs a graphics context (Xvfb is
-sufficient on Linux). It checks fatal truncated-sample reads and
-`HapResult_Buffer_Too_Small`: one event and one error log, stopped state and
-retained texture. A separate single `HapResult_Bad_Frame` fixture checks a
-warning, continued playback and decoding of the following frame.
+sufficient on Linux). It checks fatal truncated-sample reads: one event and
+one error log, stopped state and retained texture. Invalid compressor and
+oversized Snappy output fixtures check one warning per decoder, continued
+playback, retained texture, and decoding of the following frame. A movie with
+a bad chunk table in its first sample and valid later samples must load via
+header-only format discovery, reject sample 0 with one Warning and count 1,
+and decode sample 1. Both player move operations carry the decoder counter and
+warning state, replacing the destination diagnostics on assignment. The counter
+counts rejected decode attempts over the player lifetime, is carried by moves,
+and is never reset by queries, resetStats(), close(), or load(). Sample indices
+in the API are zero-based.
 
 The optional `tests --shader-failure` mode also runs under Xvfb. It builds a
 4x4 HAP-Q movie locally and reserves the remaining shader slots to force a

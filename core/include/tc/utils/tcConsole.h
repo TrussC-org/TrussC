@@ -97,6 +97,7 @@ protected:
         return traits_type::to_int_type(*gptr());
     }
 private:
+    // Bound (security/latency): external stdin uses finite per-read storage. Overflow continues in the next read.
     char buffer_[4096];
 };
 

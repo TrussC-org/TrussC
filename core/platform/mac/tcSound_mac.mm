@@ -4,10 +4,27 @@
 
 #import <AudioToolbox/AudioToolbox.h>
 #import <Foundation/Foundation.h>
+#import <AVFoundation/AVFoundation.h>
 
 #include "tc/sound/tcSound.h"
+#include "tc/sound/tcMicInputInternal.h"
 
 namespace trussc {
+namespace internal {
+MicAuthorization micAuthorizationPlatform() {
+    switch ([AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio]) {
+        case AVAuthorizationStatusAuthorized: return MicAuthorization::Authorized;
+        case AVAuthorizationStatusNotDetermined: return MicAuthorization::NotDetermined;
+        case AVAuthorizationStatusRestricted: return MicAuthorization::Restricted;
+        default: return MicAuthorization::Denied;
+    }
+}
+void requestMicPermissionPlatform(std::function<void(bool)> completion) {
+    [AVCaptureDevice requestAccessForMediaType:AVMediaTypeAudio completionHandler:^(BOOL granted) {
+        completion(granted);
+    }];
+}
+} // namespace internal
 
 // -----------------------------------------------------------------------------
 // Memory read callbacks for AudioFile
@@ -139,6 +156,7 @@ LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
     // The members change only once the buffer is allocated
     try {
         samples.resize(sampleCount);
+        loadWrites_ |= 1;
     } catch (const std::bad_alloc&) {
         logError("SoundBuffer") << "not enough memory to load AAC ("
                                 << dstFormat.mChannelsPerFrame << " ch, "
@@ -146,6 +164,7 @@ LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
         ExtAudioFileDispose(extAudioFile);
         return LoadResult::fail(LoadError::DecodeFailed, "not enough memory to load AAC");
     }
+    loadWrites_ |= 14;
     channels = static_cast<int>(dstFormat.mChannelsPerFrame);
     sampleRate = static_cast<int>(dstFormat.mSampleRate);
     numSamples = static_cast<size_t>(totalFrames);
@@ -184,6 +203,7 @@ LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
 // SoundBuffer::loadAacFromMemory - macOS implementation (memory-based)
 // -----------------------------------------------------------------------------
 LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
+    async_.cancel();
     internal::clearLoadName(path_);
     if (!data || dataSize == 0) {
         logError("SoundBuffer") << "AAC data is empty";
@@ -319,6 +339,7 @@ LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
     // The members change only once the buffer is allocated
     try {
         samples.resize(sampleCount);
+        loadWrites_ |= 1;
     } catch (const std::bad_alloc&) {
         logError("SoundBuffer") << "not enough memory to load AAC ("
                                 << dstFormat.mChannelsPerFrame << " ch, "
@@ -327,6 +348,7 @@ LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
         AudioFileClose(audioFile);
         return LoadResult::fail(LoadError::DecodeFailed, "not enough memory to load AAC");
     }
+    loadWrites_ |= 14;
     channels = static_cast<int>(dstFormat.mChannelsPerFrame);
     sampleRate = static_cast<int>(dstFormat.mSampleRate);
     numSamples = static_cast<size_t>(totalFrames);
