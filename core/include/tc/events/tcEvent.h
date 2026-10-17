@@ -43,6 +43,7 @@ namespace trussc {
 #endif
 
 namespace trussc {
+namespace internal { template<class> struct GuardedEventDelivery; }
 
 // ---------------------------------------------------------------------------
 // Event priority
@@ -250,6 +251,7 @@ public:
 
 private:
     template<class> friend struct internal::EventSnapshotDelivery;
+    template<class> friend struct internal::GuardedEventDelivery;
     // Internal delivery can notify from a snapshot after the Event's owner is gone.
     // Dispatch accesses only the owned entries and payload, never the Event.
     static void notifySnapshot(ConstEntryListPtr snapshot, T& arg) {
@@ -449,6 +451,7 @@ public:
 
 private:
     template<class> friend struct internal::EventSnapshotDelivery;
+    template<class> friend struct internal::GuardedEventDelivery;
     static void notifySnapshot(ConstEntryListPtr snapshot) {
         if (!snapshot) return;
         for (const auto& entry : *snapshot) {
@@ -510,3 +513,25 @@ private:
 };
 
 } // namespace trussc
+
+// Synchronous internal delivery for borrowed payloads. Own the snapshot before
+// entering user code; prepare reconstructs/cancels the payload before every
+// listener and after each return. Never queue a borrowed payload to Main.
+namespace trussc::internal {
+template<class T> struct GuardedEventDelivery {
+    template<class Prepare>
+    static void notify(Event<T>& source, T& args, Prepare prepare) {
+        auto snapshot = sharedLoad(source.entries_);
+        if (!snapshot) return;
+        for (const auto& entry : *snapshot) {
+            if (!entry.callback || (entry.alive && !entry.alive->load(std::memory_order_acquire))) continue;
+            if (!prepare()) break;
+            entry.callback(args);
+            if (!prepare()) break;
+            if constexpr (requires { args.consumed; }) {
+                if (args.consumed) break;
+            }
+        }
+    }
+};
+} // namespace trussc::internal

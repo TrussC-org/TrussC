@@ -126,7 +126,10 @@ void PolyShape::setupCompound(World& world, const std::vector<tc::Vec2>& points,
 
 void PolyShape::createBody(World& world, const b2PolygonShape* shapes, size_t count,
                            float cx, float cy) {
+    std::weak_ptr<int> ownerLife = objectLife;
+    auto worldLife = world.aliveToken();
     destroy();
+    if (ownerLife.expired() || worldLife.expired()) return;
     // Exit callbacks may have already set this owner up again. Keep that body
     // and the shape/drawing data installed by the reentrant setup.
     if (body_ || !world.getWorld()) return;

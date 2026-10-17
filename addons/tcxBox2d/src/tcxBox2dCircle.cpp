@@ -23,7 +23,10 @@ CircleBody& CircleBody::operator=(CircleBody&& other) noexcept {
 }
 
 void CircleBody::setup(World& world, float cx, float cy, float radius) {
+    std::weak_ptr<int> ownerLife = objectLife;
+    auto worldLife = world.aliveToken();
     destroy();
+    if (ownerLife.expired() || worldLife.expired()) return;
     // Exit callbacks may have already set this owner up again. Keep that body.
     if (body_ || !world.getWorld()) return;
     world_ = &world;

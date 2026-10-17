@@ -14,25 +14,55 @@ float World::scale = 30.0f;
 // =============================================================================
 // Constructor / Destructor
 // =============================================================================
-World::World() = default;
+namespace detail {
+DispatchState::DispatchState() : manager(std::make_unique<CollisionManager>()) {}
+DispatchState::~DispatchState() = default;
+void DispatchState::SayGoodbye(b2Fixture* fixture) {
+    b2Body* body = fixture->GetBody();
+    auto* owner = reinterpret_cast<BodyOwner*>(body->GetUserData().pointer);
+    body->GetUserData().pointer = 0;
+    if (owner) owner->onWorldReleased();
+    manager->forget(body); // includes ownerless endpoints and active Exit frames
+    if (world && world->groundBody_ == body) world->groundBody_ = nullptr;
+    if (world && world->dragAnchorBody_ == body) world->dragAnchorBody_ = nullptr;
+    if (delegate) delegate->SayGoodbye(fixture);
+}
+void DispatchState::SayGoodbye(b2Joint* joint) {
+    if (world && world->mouseJoint_ == joint) world->mouseJoint_ = nullptr;
+    if (delegate) delegate->SayGoodbye(joint);
+}
+} // namespace detail
+
+World::World() : dispatch_(std::make_shared<detail::DispatchState>()) {
+    dispatch_->world = this;
+    dispatch_->manager->state_ = dispatch_;
+}
 
 World::~World() {
+    dispatch_->alive = false;
+    dispatch_->token.reset();
+    updateListener_.disconnect();
     clear();
+    dispatch_->physics = nullptr;
+    dispatch_->world = nullptr;
     world_.reset();
 }
 
 World::World(World&& other) noexcept
     : world_(std::move(other.world_))
-    , collisionManager_(std::move(other.collisionManager_))
+    , dispatch_(std::move(other.dispatch_))
     , timeStep_(other.timeStep_)
     , velocityIterations_(other.velocityIterations_)
     , positionIterations_(other.positionIterations_)
     , autoUpdate_(other.autoUpdate_)
     , accumulator_(other.accumulator_)
     , lastStepFrame_(other.lastStepFrame_)
-    , alive_(std::move(other.alive_))
     , groundBody_(other.groundBody_)
 {
+    dispatch_->world = this;
+    other.dispatch_ = std::make_shared<detail::DispatchState>();
+    other.dispatch_->world = &other;
+    other.dispatch_->manager->state_ = other.dispatch_;
     other.groundBody_ = nullptr;
     // The moved-from listener captured &other; drop it and bind a fresh one here.
     other.updateListener_ = tc::EventListener();
@@ -43,15 +73,18 @@ World& World::operator=(World&& other) noexcept {
     if (this != &other) {
         clear();
         world_ = std::move(other.world_);
-        collisionManager_ = std::move(other.collisionManager_);
+        dispatch_ = std::move(other.dispatch_);
         timeStep_ = other.timeStep_;
         velocityIterations_ = other.velocityIterations_;
         positionIterations_ = other.positionIterations_;
         autoUpdate_ = other.autoUpdate_;
         accumulator_ = other.accumulator_;
         lastStepFrame_ = other.lastStepFrame_;
-        alive_ = std::move(other.alive_);
         groundBody_ = other.groundBody_;
+        dispatch_->world = this;
+        other.dispatch_ = std::make_shared<detail::DispatchState>();
+        other.dispatch_->world = &other;
+        other.dispatch_->manager->state_ = other.dispatch_;
         other.groundBody_ = nullptr;
         other.updateListener_ = tc::EventListener();
         refreshAutoUpdate();
@@ -70,7 +103,7 @@ void World::setup(float gravityX, float gravityY) {
     // Clean up existing state if setup() is called multiple times
     if (world_) {
         clear();
-        ++releaseGeneration_;
+        ++dispatch_->setupGeneration;
         world_.reset();
     }
 
@@ -82,8 +115,11 @@ void World::setup(float gravityX, float gravityY) {
     world_ = std::make_unique<b2World>(g);
 
     // Create and register collision manager
-    if (!collisionManager_) collisionManager_ = std::make_unique<CollisionManager>();
-    world_->SetContactListener(collisionManager_.get());
+    if (!dispatch_->manager) dispatch_->manager = std::make_unique<CollisionManager>();
+    dispatch_->manager->state_ = dispatch_;
+    dispatch_->physics = world_.get();
+    world_->SetContactListener(dispatch_->manager.get());
+    world_->SetDestructionListener(dispatch_.get());
 
     // Fresh stepping state, and (re)arm the auto-update listener.
     accumulator_ = 0.0f;
@@ -95,38 +131,40 @@ void World::setup(float gravityX, float gravityY) {
 // Simulation
 // =============================================================================
 void World::update() {
-    if (!world_) return;
-
-    // Step at most once per frame. Auto-update calls this at events().update;
-    // legacy code that also calls world.update() in its own update() then
-    // dedupes to a no-op here (and never double-counts dt below).
+    auto state = dispatch_;
+    if (!world_ || state->depth) return;
     uint64_t frame = tc::getFrameCount();
     if (frame == lastStepFrame_) return;
     lastStepFrame_ = frame;
-
-    // Framerate-independent: accumulate real time, step in FIXED sub-steps so
-    // Box2D stays stable regardless of display rate.
     accumulator_ += static_cast<float>(tc::getDeltaTime());
-    const int MAX_SUBSTEPS = 8;  // spiral-of-death guard (e.g. after a stall)
+    const uint64_t generation = state->setupGeneration;
+    ++state->manager->journal_.updateCounter;
+    state->manager->drain(); // raw Steps, including a zero-sub-step update
+    if (!state->alive) return;
+    if (state->setupGeneration != generation) return;
+    const int MAX_SUBSTEPS = 8;
     int n = 0;
-    const uint64_t generation = releaseGeneration_;
     while (accumulator_ >= timeStep_ && n < MAX_SUBSTEPS) {
-        world_->Step(timeStep_, velocityIterations_, positionIterations_);
-        // Contacts that ended inside the step and did not begin again
-        if (collisionManager_) collisionManager_->flushPendingExits();
-        // setup() replaces the world: leave its fresh accumulator untouched.
-        // clear() keeps this world and its stepping state, so remaining sub-steps
-        // continue normally, including bodies created by the Exit listener.
-        if (releaseGeneration_ != generation) return;
-        accumulator_ -= timeStep_;
+        // Only changed classic flags are synchronized. Per-fixture overrides
+        // survive an unchanged flag, including the default false.
+        for (auto* body = world_->GetBodyList(); body; body = body->GetNext()) {
+            auto* owner = reinterpret_cast<detail::BodyOwner*>(body->GetUserData().pointer);
+            if (auto* classic = dynamic_cast<Body*>(owner)) {
+                if (auto* collider = classic->getCollider()) collider->syncTriggerMode();
+            }
+        }
+        state->manager->beginStep();
+        const float step = timeStep_;
+        world_->Step(step, velocityIterations_, positionIterations_);
+        state->manager->endStep(); // close BEFORE callbacks/wrapper teardown
+        state->manager->drain();
+        if (!state->alive) return; // never read this after listener deletion
+        if (state->setupGeneration != generation) return;
+        accumulator_ -= step;
         ++n;
     }
-    if (n >= MAX_SUBSTEPS) accumulator_ = 0.0f;  // drop the backlog
-
-    // Dispatch onCollisionStay events
-    if (collisionManager_) {
-        collisionManager_->update();
-    }
+    if (n >= MAX_SUBSTEPS) accumulator_ = 0.0f;
+    state->manager->dispatchStay();
 }
 
 void World::setAutoUpdate(bool on) {
@@ -187,9 +225,9 @@ void World::createBounds(float x, float y, float width, float height) {
 
     // Remove existing bounds
     if (groundBody_) {
-        if (collisionManager_) collisionManager_->forget(groundBody_);
+        if (dispatch_->manager) dispatch_->manager->forget(groundBody_);
         world_->DestroyBody(groundBody_);
-        if (collisionManager_) collisionManager_->forgetBody(groundBody_);
+        if (dispatch_->manager) dispatch_->manager->forgetBody(groundBody_);
         groundBody_ = nullptr;
     }
 
@@ -235,9 +273,9 @@ void World::createGround(float y, float width) {
     if (!world_) return;
 
     if (groundBody_) {
-        if (collisionManager_) collisionManager_->forget(groundBody_);
+        if (dispatch_->manager) dispatch_->manager->forget(groundBody_);
         world_->DestroyBody(groundBody_);
-        if (collisionManager_) collisionManager_->forgetBody(groundBody_);
+        if (dispatch_->manager) dispatch_->manager->forgetBody(groundBody_);
         groundBody_ = nullptr;
     }
 
@@ -279,26 +317,22 @@ detail::BodyOwner* World::findOwner(b2Body* body) const {
 
 void World::releaseBody(b2Body* body, ExitDelivery delivery) {
     if (!world_ || !body) return;
+    auto state = dispatch_;
+    auto operation = state->manager->mutation(delivery == ExitDelivery::Deferred);
     if (mouseJoint_ && mouseJoint_->GetBodyB() == body) endDrag();
     auto* owner = reinterpret_cast<detail::BodyOwner*>(body->GetUserData().pointer);
     body->GetUserData().pointer = 0;
     if (owner) owner->onWorldReleased();
-    if (collisionManager_) collisionManager_->forget(body);
+    state->manager->forget(body); // also covers explicit fixture/owner release
     world_->DestroyBody(body);
-    if (collisionManager_) {
-        collisionManager_->forgetBody(body);
-        if (delivery == ExitDelivery::Deferred) {
-            // DestroyBody has now queued the collider Exits too. Their dying
-            // side must not survive the destructor as a dangling event source.
-            if (auto* classic = dynamic_cast<Body*>(owner)) {
-                collisionManager_->forgetCollider(classic->getCollider());
-            }
-        }
-        if (delivery == ExitDelivery::Immediate) collisionManager_->flushPendingExits();
-    }
+    state->manager->forget(body);
+    // No World/owner access after delivery; a listener can delete either.
+    if (delivery == ExitDelivery::Immediate) state->manager->drain();
 }
 
 void World::clear() {
+    // Cancel active/suspended payloads before the first object is released.
+    dispatch_->manager->clearContacts();
     endDrag();
     if (world_) {
         // Invalidate every borrowed handle before Box2D releases any objects.
@@ -314,10 +348,6 @@ void World::clear() {
         world_->SetContactListener(nullptr);
         while (b2Body* body = world_->GetBodyList()) world_->DestroyBody(body);
         world_->SetContactListener(listener);
-    }
-    // Keep the event sources/listeners across clear/setup, but no stale contacts.
-    if (collisionManager_) {
-        collisionManager_->clearContacts();
     }
     groundBody_ = nullptr;
     dragAnchorBody_ = nullptr;

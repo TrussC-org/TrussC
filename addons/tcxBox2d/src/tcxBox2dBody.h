@@ -266,24 +266,27 @@ public:
     void setStatic() {
         if (body_) {
             auto* cm = world_->getCollisionManager();
+            auto operation = cm->mutation();
             body_->SetType(b2_staticBody);
-            if (cm) cm->flushPendingExits();
+            if (cm) cm->drain();
         }
     }
 
     void setDynamic() {
         if (body_) {
             auto* cm = world_->getCollisionManager();
+            auto operation = cm->mutation();
             body_->SetType(b2_dynamicBody);
-            if (cm) cm->flushPendingExits();
+            if (cm) cm->drain();
         }
     }
 
     void setKinematic() {
         if (body_) {
             auto* cm = world_->getCollisionManager();
+            auto operation = cm->mutation();
             body_->SetType(b2_kinematicBody);
-            if (cm) cm->flushPendingExits();
+            if (cm) cm->drain();
         }
     }
 
@@ -311,6 +314,10 @@ public:
     }
 
     void setSensor(bool sensor) {
+        if (collider_) {
+            collider_->isTrigger = sensor;
+            collider_->appliedTrigger_ = sensor;
+        }
         if (body_) {
             for (b2Fixture* f = body_->GetFixtureList(); f; f = f->GetNext()) {
                 f->SetSensor(sensor);
@@ -329,8 +336,9 @@ public:
     void setEnabled(bool enabled) {
         if (body_) {
             auto* cm = world_->getCollisionManager();
+            auto operation = cm->mutation();
             body_->SetEnabled(enabled);
-            if (cm) cm->flushPendingExits();
+            if (cm) cm->drain();
         }
     }
 
@@ -386,6 +394,7 @@ protected:
             }
         }
 
+        collider->syncTriggerMode();
         ColliderType* ptr = collider.get();
         collider_ = std::move(collider);
         return ptr;
@@ -399,6 +408,9 @@ private:
     }
 
 protected:
+    // A surviving-side Exit may delete the C++ caller during shape setup.
+    // Separate object lifetime from the generation of its borrowed b2Body.
+    std::shared_ptr<int> objectLife = std::make_shared<int>(0);
     World* world_ = nullptr;
     b2Body* body_ = nullptr;
     std::unique_ptr<Collider2D> collider_;

@@ -243,10 +243,11 @@ public:
         type_ = t;
         if (body_) {
             auto* cm = world_->getCollisionManager();
+            auto operation = cm->mutation();
             body_->SetType(t == BodyType::Dynamic ? b2_dynamicBody
                          : t == BodyType::Static  ? b2_staticBody
                                                   : b2_kinematicBody);
-            if (cm) cm->flushPendingExits();
+            if (cm) cm->drain();
         }
         return *this;
     }
@@ -379,9 +380,16 @@ protected:
             router.worldAlive = world_->aliveToken();
             if (auto* cm = world_->getCollisionManager()) {
                 World* wp = world_;
-                router.beganL = cm->contactBegan.listen([wp](WorldContact& c) { detail::routeContact(wp, c, 0); });
-                router.stayL  = cm->contactStay.listen ([wp](WorldContact& c) { detail::routeContact(wp, c, 1); });
-                router.endedL = cm->contactEnded.listen([wp](WorldContact& c) { detail::routeContact(wp, c, 2); });
+                std::weak_ptr<detail::DispatchState> weak = world_->dispatch_;
+                router.beganL = cm->contactBegan.listen([wp, weak](WorldContact& c) {
+                    if (auto s = weak.lock(); s && s->alive) detail::routeContact(wp, c, 0);
+                });
+                router.stayL = cm->contactStay.listen([wp, weak](WorldContact& c) {
+                    if (auto s = weak.lock(); s && s->alive) detail::routeContact(wp, c, 1);
+                });
+                router.endedL = cm->contactEnded.listen([wp, weak](WorldContact& c) {
+                    if (auto s = weak.lock(); s && s->alive) detail::routeContact(wp, c, 2);
+                });
             }
         }
     }
@@ -435,25 +443,38 @@ private:
 
     // Build a Contact2D (from this body's view) and fire the matching event.
     void fireContact(RigidBody2D* other, const WorldContact& c, int phase) {
+        auto state = world_->dispatch_;
+        const bool sensor = !state->frames.empty() && state->frames.back()->sensor;
+        const uint64_t epoch = state->epoch;
+        const uint64_t selfGeneration = generation;
+        b2Body* selfBody = body_;
+        b2Body* otherBody = c.a == selfBody ? c.b : c.a;
+        const uint64_t otherGeneration = other ? other->generation : 0;
         Contact2D col;
-        col.other     = other;
-        col.otherNode = other ? other->getOwner() : nullptr;
-        col.point     = c.point;
-        col.normal    = c.normal;
-        bool trigger = trigger_ || (other && other->trigger_);
-        if (trigger) {
-            switch (phase) {
-                case 0:  onTriggerEnter.notify(col); break;
-                case 1:  onTriggerStay.notify(col);  break;
-                default: onTriggerExit.notify(col); break;
+        col.point = c.point;
+        col.normal = c.normal;
+        auto prepare = [&, state, epoch, selfGeneration, selfBody, otherBody, otherGeneration] {
+            col.other = nullptr;
+            col.otherNode = nullptr;
+            if (!state->alive || state->epoch != epoch) return false;
+            if (c.a != selfBody && c.b != selfBody) return false;
+            auto* selfOwner = state->world->findOwner(selfBody);
+            if (!selfOwner || selfOwner->generation != selfGeneration) return false;
+            if (otherGeneration && (c.a == otherBody || c.b == otherBody)) {
+                auto* owner = state->world->findOwner(otherBody);
+                if (owner && owner->generation == otherGeneration) {
+                    col.other = dynamic_cast<RigidBody2D*>(owner);
+                    col.otherNode = col.other ? col.other->getOwner() : nullptr;
+                }
             }
-        } else {
-            switch (phase) {
-                case 0:  onCollisionEnter.notify(col); break;
-                case 1:  onCollisionStay.notify(col);  break;
-                default: onCollisionExit.notify(col); break;
-            }
-        }
+            return true;
+        };
+        detail::DispatchState::Frame frame(*state, {}, [&] { prepare(); });
+        // Snapshot target before callbacks: this Mod may be removed in one.
+        auto& event = sensor
+            ? (phase == 0 ? onTriggerEnter : phase == 1 ? onTriggerStay : onTriggerExit)
+            : (phase == 0 ? onCollisionEnter : phase == 1 ? onCollisionStay : onCollisionExit);
+        tc::internal::GuardedEventDelivery<Contact2D>::notify(event, col, prepare);
     }
 
     // polys: the checked polygons, one fixture each, used when shape_ is a
@@ -531,6 +552,8 @@ namespace detail {
 // Fan a world contact out to the RigidBody2D(s) involved (main thread). Each
 // side hears about the OTHER body; a side that isn't a RigidBody2D is null.
 inline void routeContact(World* w, const WorldContact& c, int phase) {
+    auto state = w->dispatch_;
+    const uint64_t epoch = state->epoch;
     struct Entry {
         RigidBody2D* rb = nullptr;
         uint64_t serial = 0;
@@ -546,6 +569,7 @@ inline void routeContact(World* w, const WorldContact& c, int phase) {
 
     // A's listeners may have dropped B's node (and made a new body at the
     // same address) or A's: notify B only while its owner generation is still live.
+    if (!state->alive || state->epoch != epoch) return;
     if (!eb.rb || find(c.b).serial != eb.serial) return;
     RigidBody2D* ra = (ea.rb && find(c.a).serial == ea.serial) ? ea.rb : nullptr;
     eb.rb->fireContact(ra, c, phase);

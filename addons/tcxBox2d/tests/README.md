@@ -46,10 +46,10 @@ outline exactly, one fixture per triangle:
   `RigidBody2D` events);
 - a small sensor box moved back and forth across the seam between two
   fixtures, touching one at a time while both contacts live on, gets one
-  Enter / Began and no Exit / Ended until it leaves (Box2D ends the old
-  contact before it begins the new one in one of the two directions);
+  Enter / Began and no Exit / Ended until it leaves during managed World
+  sub-steps (raw Steps preserve all aggregated transitions);
 - a Stay listener may destroy a body: of the next pair in the list (the
-  survivor still gets its Stay, the destroyed box its Exit and no Stay), of
+  survivor still gets its Stay, the destroyed box no further Exit or Stay), of
   the pair being dispatched (no Stay after it, and the next pair still gets
   its Stay), or drop a `RigidBody2D` node;
 - the offset/inertia check runs once on the whole body: a 600x40 rounded
@@ -98,8 +98,8 @@ free the other body of their pair, and bodies may be destroyed between
 Outside-step Exits (#473) are queued until Box2D returns:
 
 - `Body::destroy()`, disabling, each body type setter,
-  and each `setBodyType()` transition deliver Exits before the wrapper
-  returns; an Exit listener destroys a third touching body, with each live
+  and each `setBodyType()` transition deliver eligible Exits before the wrapper
+  returns, unless an earlier raw-Step record is waiting for update; an Exit listener destroys a third touching body, with each live
   side notified exactly once, in both body creation orders;
 - listeners check the completed operation (destroyed or disabled state,
   or removed contacts), and a later update does not repeat any Exit;
@@ -113,7 +113,8 @@ Outside-step Exits (#473) are queued until Box2D returns:
 ASan/UBSan cover wrapper-side lifetimes (`Body`, `RigidBody2D`,
 `CollisionManager`, World members). Pooled `b2Body` / `b2Fixture` / `b2Joint`
 reuse is invisible to ASan because Box2D returns them to its block allocator;
-the defence is the owner back-link plus explicit handle-invalid assertions.
+the defence is destruction observation, endpoint retirement, owner generations
+and explicit handle-invalid assertions.
 
 CI builds this harness with Box2D's asserts compiled out (RelWithDebInfo, the
 default build type, or Release). Adding the fixtures at density 0 (and
@@ -166,7 +167,7 @@ replacement regressions; they also run in the full suite and with
 frame IDs and delta time, without raw Box2D stepping:
 
 - `clear-stay` / `setup-stay`: release from world-level Stay and either classic
-  side; retire old pairs as tombstones and dispatch fresh contacts immediately;
+  side; cancel the active epoch and dispatch fresh contacts on later steps;
 - `clear-update` / `setup-update`: clear or replace the World on the first
   sub-step's Ended. As on base, clear keeps the accumulator and continues the
   current update's remaining sub-steps (including bodies created by that
@@ -176,7 +177,7 @@ frame IDs and delta time, without raw Box2D stepping:
   World; explicit Mod removal must also release exactly once;
 - `reentrant-circle`, `reentrant-rect`, `reentrant-poly`,
   `reentrant-simplified`, `reentrant-compound`: an Exit listener sets up the
-  same owner during its outer setup; retain the inner body, leave no orphan,
+  same owner from the surviving partner's Exit during its outer setup; retain the inner body, leave no orphan,
   then tear down the World after the owner is gone.
 
 Pass a case name after `--review-round-1` to run it alone. For example:
@@ -197,7 +198,88 @@ they also run in the full suite and with `--owner-lifetimes`:
   names only surviving owners, never dispatches to the destroyed side, and
   does not repeat the Exit.
 
-Pass a case name after `--review-round-2` to run it alone. The same-notification
-release and World-destruction-during-dispatch scenarios remain assigned to
-PR 2's event delivery work; exact reproductions are recorded under “Left for
-PR 2” in `REPORT.md` and `PR_DRAFT.md`, without adding failing suite tests.
+Pass a case name after `--review-round-2` to run it alone.
+
+Sub-step delivery (#842 PR 2). `--delivery` runs the new deterministic group,
+also included in the ordinary full suite. `--delivery <mode>` selects one:
+
+- `clear-late-world-stay`, `clear-late-world-exit`, `delete-world-stay`,
+  `delete-world-exit`, `delete-classic-stay`, `delete-classic-exit` reproduce
+  #845's six cases: zero gravity, auto-update off, classic circles at
+  (100,100)/(110,100), radius 10, first sensor; establish contact first.
+  For Exit move the second to (400,400); clear uses dt=1/60, deletion dt=0.04.
+  Clear runs BeforeApp and must stop App in that same snapshot. Tests assert
+  one mutation, zero later deliveries, null executing payload fields, invalid
+  body/fixture handles, and preserved world/subscriptions or expired World token.
+- `clear-world-begin`, `delete-world-begin`, `delete-classic-begin`,
+  `clear-classic-begin/stay/exit`, `clear-mod-begin/stay/exit` and
+  `delete-mod-begin/stay/exit` extend cancellation across phases and layers
+  (replace slash notation with the individual phase).
+- `raw-destroy-unowned-active-exit-reuse` destroys an ownerless, already
+  separated body inside End, then asserts its distant replacement reused the
+  same address. The executing and later payloads cannot acquire the replacement.
+  Compound and queued-record variants assert counts and no destruction EndContact.
+- `three-raw-steps-recontact` asserts no early callbacks and exactly
+  Begin/End/Begin/Stay on a zero-dt update, with single and compound fixtures.
+- `raw-steps-inside-listener` calls three raw Steps inside a managed Begin
+  callback and inside an Immediate wrapper's Exit callback. Its Begin/End/Begin
+  and first Stay must wait for the next update, even with more managed sub-steps
+  in the initiating update; wrapper eligibility cannot leak into raw calls.
+- `fixture-sensor` retires the collider's borrowed fixture and reuses its
+  address on another body. Body setter, collider setter and changed-flag sync
+  must affect only the owner's remaining live fixtures and keep the cache.
+- `fixtures` and `fixtures-owned` remove the last fixture before a raw
+  fixtureless DestroyBody/reallocation. Unowned, classic and Mod variants cover
+  queued Begin, delivered Begin, already-separated End and active Stay. Assert
+  reused body/fixture addresses, immediate payload nulling, null later Exit,
+  detached owner handles, exact counts and no SayGoodbye hook. The separated-End
+  case runs `update()` between fixture removal and body destruction; it does
+  not cover silent last-fixture/body destruction before update. Owned raw-release
+  cases are defensive checks outside the supported ownership contract.
+- Review round 2 (adversarial): `partial` runs `partial-ownerless`,
+  `partial-classic` and `partial-mod`. Each removes the initial pair witness
+  from two overlapping sensor fixtures with Begin delivered, queued, executing,
+  or during executing Stay. Assert one remaining touching contact, one Begin,
+  continuing Stay at both listener priorities and the owner layer, preserved
+  executing payloads, and one final Exit with both live body pointers. These
+  tests also run in the full suite. The unobserved `separated` destruction/reuse
+  path is excluded by auditor decision (a) in REPORT.md; no stamp table is added.
+- Review round 3 (adversarial): `inactive` adds a non-touching fixture at the
+  fixture-list head, removes the original witness, then removes the idle
+  fixture with Begin delivered, queued, executing, during Stay, or inside End.
+  Both listener priorities and owner delivery must retain the live pair;
+  separation produces exactly one Exit with both bodies. `revalidate` lets
+  the original witness stop touching before removing it without EndContact,
+  checking delivery-time rebinding while another fixture still touches.
+  `mixed` removes three touching and three idle fixtures one by one, starting
+  with delivered/queued/executing Begin or executing Stay, with either a
+  touching or idle fixture removed last. Every removal checks exact world and
+  owner counts; the final touching removal closes the endpoint and gives one
+  survivor-only Exit, with no further Stay or duplicate Begin/Exit.
+  All three groups run for ownerless, classic and Mod A (51 scenarios,
+  684 assertions), in the full suite and under `--delivery r3`. Individual
+  groups accept `-ownerless`, `-classic` and `-mod` suffixes. Owned raw-fixture
+  removal remains a defensive check outside the supported public contract.
+- `sensor-raw` and `sensor-managed` observe solid then sensor contributors to
+  one continuously touching pair. The first Begin must remain collision Enter
+  (1 collision, 0 trigger), while the later Stay uses trigger routing.
+- `substeps`, `recorded-order`, `listener-releases`, `setup-caller-deletion`,
+  `destruction-forwarding`, `triggers`, `router-gates` and
+  `classic-source-deletion` cover ordered unlocked delivery,
+  once-per-update Stay, frame deduplication, self/other/both release at all
+  three layers/phases, callback-return Exit barriers, forwarding through
+  clear/setup, raw owned destruction, and classic flag/setter/fixture behavior.
+
+The original compound seam test now drives managed `World::update()`; raw
+Steps deliberately have no fixture hand-over suppression. The reentrant shape
+setup tests use a surviving-side Exit, since a released owner receives no
+further notification. Exact mass comparisons and clear/unspent-time tests remain.
+
+Run the full suite in Debug and Release and under ASan+UBSan. Repeat `--delivery`,
+`--owner-lifetimes` and `--contact-lifetimes` 50 times under sanitizers. The
+last selector runs the existing compound aggregation/seam and classic/Mod/world
+contact-lifetime tests without unrelated polygon-reduction work.
+Use `ASAN_OPTIONS=detect_leaks=0:halt_on_error=1` and
+`UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1` (leak detection disabled).
+Windows, MacBook Air and Raspberry Pi still require the suite and a physics
+example that starts and exits cleanly.
