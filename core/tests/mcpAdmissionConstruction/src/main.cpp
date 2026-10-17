@@ -128,6 +128,7 @@ class ResizeDisplayApp : public App {
     std::future<mcp::internal::ReplyThunk> reply;
     fs::path output;
     static constexpr int resizeFrameLimit = 60;
+    static constexpr auto noFrameLimit = std::chrono::seconds(3);
     int windowIndex = 0, largeFrames = 0, resizeFrames = 0, cycles = 0;
     bool resizing = false;
     bool largeFrameSeen = false;
@@ -135,6 +136,7 @@ class ResizeDisplayApp : public App {
     size_t savedPixelCount = 0;
     uint64_t rejections = 0;
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point lastRenderedFrame = started;
 
     internal::WindowContext& context() {
         return windowIndex ? getWindow()->context() : internal::mainWindowContext();
@@ -155,11 +157,19 @@ class ResizeDisplayApp : public App {
         const auto [w, h] = internal::captureWindowSize(context());
         printf("SKIP: window resize not supported here (requested %dx%d, measured %zux%zu)\n",
             requestedWidth, requestedHeight, w, h);
+        skipRemainingCycles();
+    }
+    void skipRemainingCycles() {
         printf("resize skipped window=%d remaining_cycles=%d\n", windowIndex, 3 - cycles);
         ++resizeSkipped;
         resizeSkippedCycles += 3 - cycles;
         resizing = false;
         finishWindow();
+    }
+    void checkNoFrames(std::chrono::steady_clock::time_point now) {
+        if (finished || now - lastRenderedFrame < noFrameLimit) return;
+        printf("SKIP: window %d renders no frames (occluded or hidden)\n", windowIndex);
+        skipRemainingCycles();
     }
     void enqueueInPrelude() {
         using namespace mcp::internal;
@@ -192,6 +202,7 @@ class ResizeDisplayApp : public App {
             accepted && workingMemory() > 0 && workingMemory() <= mcp::getAdmissionLimits().workingBytes);
     }
     void afterFrame() {
+        lastRenderedFrame = std::chrono::steady_clock::now();
         if (dpiSkipped) return;
         if (verifyAdmission) {
             verifyAdmission = false;
@@ -241,6 +252,9 @@ class ResizeDisplayApp : public App {
             secondary = createWindow(settings);
             check("supported platform creates real secondary window", bool(secondary));
             if (secondary) {
+                // setup() waits for the first native tick, which an occluded
+                // window may never receive. Count it at creation instead.
+                ++resizeWindows;
                 secondaryApp = std::make_shared<ResizeDisplayApp>();
                 secondaryApp->windowIndex = 1;
                 secondary->setApp(secondaryApp);
@@ -260,8 +274,8 @@ public:
             exitApp();
             return;
         }
-        ++resizeWindows;
         if (!windowIndex) {
+            ++resizeWindows;
             mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
             mcp::stopHttpServer();
             auto limits = mcp::getAdmissionLimits();
@@ -280,17 +294,22 @@ public:
         after = events().afterFrame.listen([this] { afterFrame(); });
     }
     void update() override {
-        if (std::chrono::steady_clock::now() - started > std::chrono::seconds(45)) {
-            check("resize mode completes within 45 seconds", false);
-            exitApp(1);
-            return;
-        }
-        if (finished) {
-            if (secondaryApp && secondaryApp->finished) {
+        const auto now = std::chrono::steady_clock::now();
+        // Only the main window is guaranteed to tick while a secondary is
+        // occluded. Poll here, including before the secondary's first setup.
+        if (!windowIndex) {
+            checkNoFrames(now);
+            if (secondaryApp) secondaryApp->checkNoFrames(now);
+            if (finished && secondaryApp && secondaryApp->finished) {
                 resizeCompleted = true;
                 secondary->close();
                 exitApp();
+                return;
             }
+        }
+        if (now - started > std::chrono::seconds(45)) {
+            check("resize mode completes within 45 seconds", false);
+            exitApp(1);
             return;
         }
     }

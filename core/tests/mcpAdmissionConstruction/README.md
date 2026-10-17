@@ -13,7 +13,8 @@ released working credits and the sole screenshot admission slot. It repeats thre
 secondary on macOS/Windows/Linux; unsupported platforms print SKIP. The final
 `RESIZE` line reports counts; any failed assertion or incomplete run exits 1.
 Close other windows that could cover the test windows; secondary rendering
-pauses when the OS reports occlusion. Allow the test to finish automatically.
+pauses when the OS reports occlusion. Such windows skip automatically; allow
+the test to finish.
 
 The save-success budget is derived independently from requested logical size
 and measured DPI: `320*scale * 240*scale * 64 + 4 MiB` (9,109,504 bytes at
@@ -32,7 +33,12 @@ A full two-window resize run expects **160/160** assertions, **6** cycles,
 **6** accepted saves and **12** pointer checks. GPU mode expects **18/18**.
 Default mode expects **188/188 on Linux**, **142/142 on macOS/Windows**.
 
-A resize timeout prints
+A window with no rendered frame for **3 seconds** (`noFrameLimit`) prints
+`SKIP: window <n> renders no frames (occluded or hidden)` and skips its
+remaining cycles. The main window polls this wall-clock deadline even if the
+secondary never receives its first tick or `setup()`, before the 45-second
+global failure timeout. This is separate from a window that renders but
+refuses to resize: that resize timeout prints
 `SKIP: window resize not supported here (requested WxH, measured WxH)`
 for that window and skips its remaining resize-dependent checks. The window
 index and remaining cycle count are logged separately. A grow that cannot
@@ -44,8 +50,19 @@ run has four shared assertions. A window skipped before its first cycle omits
 expects **82/82**, **1 window SKIP**, **3** secondary cycles, **3** accepted saves
 and **6** pointer checks at either DPI. Air/Windows expect **160/160** when both
 windows resize, **82/82** if one window refuses all resizing, or **4/4** if both
-refuse; all exit 0 with explicit SKIPs. Secondary-window unsupported platforms
-omit its creation assertion (and its 78 cycle assertions).
+refuse; all exit 0 with explicit SKIPs. On the Air in clamshell mode with a
+dummy plug, the permanently occluded secondary is expected to give **82/82 +
+1 SKIP**, **3** main-window cycles, **3** accepted saves and **6** pointer checks
+at each supported DPI, exiting 0 instead of hitting the global timeout.
+This is an expectation awaiting an Air rerun, not measured device evidence.
+Secondary-window unsupported platforms omit its creation assertion (and its
+78 cycle assertions).
+
+Linux rerun (2026-10-18, software Mesa/Xvfb): default **188/188**;
+resize DPI 1 and 2 each **82/82 + 1 resize SKIP**. With a native X11 cover
+suppressing secondary frames, each DPI gives **4/4 + 2 SKIPs** (Linux main
+resize refusal plus secondary no-frame SKIP), finishing in **3.50 s / 3.65 s**
+instead of 45 s. All five runs have **0 failures**, exit **0**.
 
 Build from the repository root with the usual generated project:
 
