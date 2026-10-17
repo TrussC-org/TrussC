@@ -28,6 +28,7 @@
 #endif
 
 #include "tc/sound/tcSound.h"
+#include "tc/sound/tcMicInputInternal.h"
 #include "tc/utils/tcFile.h"
 
 #include <algorithm>
@@ -2395,128 +2396,187 @@ bool AudioEngine::waitForCallbacks(bool giveUp) {
 // ---------------------------------------------------------------------------
 #ifndef __EMSCRIPTEN__
 
-// MicInput miniaudio callback
-static void micDataCallback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount) {
-    (void)pOutput;  // Capture only, output not used
-
-    MicInput* mic = static_cast<MicInput*>(pDevice->pUserData);
-    if (mic && pInput) {
-        mic->onAudioData(static_cast<const float*>(pInput), frameCount);
-    }
+namespace internal {
+namespace {
+struct MicTestBackend {
+    MicOpen open;
+    MicClose close;
+    MicAuthorizationQuery authorization;
+    MicPermissionRequest requestPermission;
+};
+MicTestBackend& micTestBackend() {
+    static auto* backend = new MicTestBackend;
+    return *backend;
 }
-
-// Stop and free the capture device; logs nothing.
-static void releaseCaptureDevice(void*& handle) {
-    if (!handle) return;
-    ma_device* device = static_cast<ma_device*>(handle);
-    ma_device_stop(device);
-    ma_device_uninit(device);
-    delete device;
-    handle = nullptr;
+void micDataCallback(ma_device* device, void*, const void* input, ma_uint32 frames) {
+    if (input) static_cast<MicState*>(device->pUserData)->audio(static_cast<const float*>(input), frames);
 }
-
-MicInput::~MicInput() {
-    // Not stop(): it logs, and getMicInput()'s function-local instance is
-    // destroyed during static destruction when the mic is still running at
-    // exit. getLogger()'s Logger is a function-local static too; when the
-    // mic's first start() was the first thing to log, the Logger was
-    // constructed after this instance and is already destroyed here.
-    releaseCaptureDevice(device_);
-}
-
-bool MicInput::start(int sampleRate) {
-    if (running_) {
-        stop();
-    }
-
-    sampleRate_ = sampleRate;
-    buffer_.resize(BUFFER_SIZE, 0.0f);
-    writePos_ = 0;
-
-    // Create ma_device
-    ma_device* device = new ma_device();
-
+MicStartResult openMic(MicState& state) {
+    auto* device = new ma_device();
     ma_device_config config = ma_device_config_init(ma_device_type_capture);
     config.capture.format = ma_format_f32;
-    config.capture.channels = 1;  // Mono
-    config.sampleRate = sampleRate;
+    config.capture.channels = 1;
+    config.sampleRate = state.sampleRate;
     config.dataCallback = micDataCallback;
-    config.pUserData = this;
-
-    // Follow the engine's selected backend, with a private capture context so
-    // engine re-init/shutdown cannot invalidate a running microphone's context.
-    // Releasing capture must not deactivate the iOS session used by playback.
+    config.pUserData = &state;
     ma_context_config contextConfig = ma_context_config_init();
     contextConfig.coreaudio.noAudioSessionDeactivate = MA_TRUE;
-    const auto* engineContext = static_cast<const ma_context*>(AudioEngine::getInstance().context_);
-    ma_result result = ma_device_init_ex(engineContext ? &engineContext->backend : nullptr,
-                                       engineContext ? 1 : 0, &contextConfig, &config, device);
+    // Match miniaudio's default priority, but synthetic silence is only valid
+    // when the application explicitly requested the Null backend.
+    std::vector<ma_backend> backends;
+    if (state.backend >= 0) backends.push_back(static_cast<ma_backend>(state.backend));
+    else for (int backend = 0; backend < ma_backend_null; ++backend)
+        backends.push_back(static_cast<ma_backend>(backend));
+    auto result = ma_device_init_ex(backends.data(), static_cast<ma_uint32>(backends.size()),
+                                   &contextConfig, &config, device);
     if (result != MA_SUCCESS) {
-        logError("MicInput") << "failed to initialize the capture device (result="
-                             << (int)result << ")";
         delete device;
-        return false;
+        return {false, "No usable microphone capture device (miniaudio result=" + std::to_string(result) +
+            "); connect or enable a microphone and check input permissions"};
     }
-
+    state.device = device;
     result = ma_device_start(device);
-    if (result != MA_SUCCESS) {
-        logError("MicInput") << "failed to start the capture device (result="
-                             << (int)result << ")";
+    if (result != MA_SUCCESS)
+        return {false, "Capture device start failed (miniaudio result=" + std::to_string(result) + ")"};
+    state.sampleRate = static_cast<int>(device->sampleRate);
+    state.name = device->capture.name;
+    return {true, {}};
+}
+void closeMic(MicState& state) {
+    if (auto* device = static_cast<ma_device*>(state.device)) {
+        ma_device_stop(device);
         ma_device_uninit(device);
         delete device;
-        return false;
-    }
-
-    device_ = device;
-    running_ = true;
-    deviceName_ = device->capture.name;
-
-    logNotice("MicInput") << "started (" << sampleRate << " Hz, mono, " << deviceName_ << ")";
-    return true;
-}
-
-void MicInput::stop() {
-    if (!running_) return;
-
-    releaseCaptureDevice(device_);
-
-    running_ = false;
-    deviceName_.clear();
-    logNotice("MicInput") << "stopped";
-}
-
-size_t MicInput::getBuffer(float* outBuffer, size_t numSamples) {
-    if (!running_ || numSamples == 0) return 0;
-
-    numSamples = std::min(numSamples, (size_t)BUFFER_SIZE);
-
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    // Copy latest samples from ring buffer
-    size_t readPos = (writePos_ + BUFFER_SIZE - numSamples) % BUFFER_SIZE;
-
-    for (size_t i = 0; i < numSamples; i++) {
-        outBuffer[i] = buffer_[(readPos + i) % BUFFER_SIZE];
-    }
-
-    return numSamples;
-}
-
-void MicInput::onAudioData(const float* input, size_t frameCount) {
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    for (size_t i = 0; i < frameCount; i++) {
-        buffer_[writePos_] = input[i];
-        writePos_ = (writePos_ + 1) % BUFFER_SIZE;
+        state.device = nullptr;
     }
 }
-
-// ---------------------------------------------------------------------------
-// Global instance
-// ---------------------------------------------------------------------------
-MicInput& getMicInput() {
-    static MicInput instance;
-    return instance;
+}
+void setMicBackendForTests(MicOpen open, MicClose close) {
+    micTestBackend().open = std::move(open); micTestBackend().close = std::move(close);
+}
+void setMicAuthorizationForTests(MicAuthorizationQuery query, MicPermissionRequest request) {
+    micTestBackend().authorization = std::move(query);
+    micTestBackend().requestPermission = std::move(request);
+}
+void cancelMic(const std::shared_ptr<MicState>& state) {
+    {
+        std::lock_guard<std::mutex> lock(state->lifecycle);
+        state->cancelled = true;
+        // stop() passes any older unfinished cleanup past this workerless
+        // state, rather than retaining it as part of the dependency chain.
+        if (!state->lifecycleStarted) state->done = true;
+    }
+    state->changed.notify_all();
+}
+namespace {
+void startMicLifecycle(const std::shared_ptr<MicState>& state, bool asynchronous) {
+    { std::lock_guard<std::mutex> lock(state->lifecycle); state->lifecycleStarted = true; }
+    startResourceLoad([state, asynchronous, open = micTestBackend().open, close = micTestBackend().close] {
+        auto previous = std::move(state->predecessor);
+        while (previous) {
+            std::shared_ptr<MicState> earlier;
+            {
+                std::unique_lock<std::mutex> lock(previous->lifecycle);
+                previous->changed.wait(lock, [&] { return previous->done; });
+                // A failed thread launch leaves its predecessor here. Do not
+                // bypass that older run's still-pending device cleanup.
+                earlier = std::move(previous->predecessor);
+            }
+            previous = std::move(earlier);
+        }
+        if (state->runBound && !appRunIsAlive(state->run)) state->cancelled = true;
+        MicStartResult result;
+        try {
+            if (!state->cancelled) {
+                // Permission-only attempts never need a sample ring.
+                state->ring.resize(MicInput::BUFFER_SIZE, 0.0f);
+                result = open ? open(*state) : openMic(*state);
+            }
+        } catch (const std::exception& e) { result = {false, e.what()}; }
+        if (state->runBound && !appRunIsAlive(state->run)) state->cancelled = true;
+        const bool started = result.success; // listeners may edit the delivered result
+        {
+            std::lock_guard<std::mutex> lock(state->lifecycle);
+            state->result = std::move(result);
+            state->startupDone = true;
+        }
+        state->changed.notify_all();
+        if (asynchronous) { completeMic(state); probeResourceLoad("mic-ready", {}); }
+        if (started) {
+            std::unique_lock<std::mutex> lock(state->lifecycle);
+            state->changed.wait(lock, [&] { return state->cancelled.load(); });
+        }
+        // This SAME lifecycle thread owns every partial and successful cleanup.
+        if (close) close(*state); else closeMic(*state);
+        {
+            std::lock_guard<std::mutex> lock(state->ringMutex);
+            std::vector<float>().swap(state->ring);
+        }
+        {
+            std::lock_guard<std::mutex> lock(state->lifecycle);
+            state->done = true;
+        }
+        state->changed.notify_all();
+    });
+}
+void failMicStart(const std::shared_ptr<MicState>& state, bool asynchronous, std::string message) {
+    {
+        std::lock_guard<std::mutex> lock(state->lifecycle);
+        state->result = {false, std::move(message)};
+        state->startupDone = state->done = true;
+    }
+    state->changed.notify_all();
+    if (asynchronous) { completeMic(state); probeResourceLoad("mic-ready", {}); }
+}
+constexpr const char* micDenied = "Microphone access denied (System Settings → Privacy & Security → Microphone)";
+} // namespace
+void launchMic(const std::shared_ptr<MicState>& state, bool asynchronous) {
+    // Query BEFORE even creating a capture context/device: CoreAudio can block
+    // inside ma_device_init while the system consent dialog remains unanswered.
+    const auto& backend = micTestBackend();
+    const auto authorization = backend.authorization ? backend.authorization() :
+#ifdef __APPLE__
+        micAuthorizationPlatform();
+#else
+        MicAuthorization::Authorized;
+#endif
+    if (authorization == MicAuthorization::Denied || authorization == MicAuthorization::Restricted) {
+        failMicStart(state, asynchronous, micDenied);
+        return;
+    }
+    if (authorization == MicAuthorization::NotDetermined) {
+        if (asynchronous) logNotice("MicInput") << "waiting for microphone permission (System Settings → Privacy & Security → Microphone)";
+        // Neither the OS block nor the mailbox retains MicState/the user object.
+        // Only main-thread delivery can launch a worker; exit discards delivery.
+        auto completion = [weak = std::weak_ptr(state), asynchronous](bool granted) {
+            if (!asynchronous) return; // sync start() requires an explicit retry
+            auto pending = weak.lock();
+            if (!pending || pending->cancelled || (pending->runBound && !appRunIsAlive(pending->run))) return;
+            enqueueResourceLoad([weak, granted] {
+                auto live = weak.lock();
+                if (!live || live->cancelled || (live->runBound && !appRunIsAlive(live->run))) return;
+                try {
+                    if (granted) startMicLifecycle(live, true);
+                    else failMicStart(live, true, micDenied);
+                } catch (const std::exception& e) { failMicStart(live, true, e.what()); }
+            });
+        };
+        if (backend.requestPermission) backend.requestPermission(std::move(completion));
+#ifdef __APPLE__
+        else requestMicPermissionPlatform(std::move(completion));
+#endif
+        if (!asynchronous) failMicStart(state, false, "permission requested; call start() again after granting");
+        return;
+    }
+    startMicLifecycle(state, asynchronous);
+}
+} // namespace internal
+int MicInput::selectedBackend() {
+    const auto* context = static_cast<const ma_context*>(AudioEngine::getInstance().context_);
+    // The playback engine can itself fall back to Null without an explicit
+    // request. That must not turn a real microphone request into fake capture.
+    return context && (context->backend != ma_backend_null || g_engineNullBackendRequested)
+        ? static_cast<int>(context->backend) : -1;
 }
 
 #endif // !__EMSCRIPTEN__

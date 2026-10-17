@@ -1680,6 +1680,8 @@ public:
     // Calls and resource access are serialized on main. Web without pthreads
     // decodes in a later frame, which may stall that preparation frame.
     // App exit waits for loads still decoding; cancelling never waits.
+    // Completions are delivered during runApp / runHeadlessApp; in a bare main()
+    // without an app run, no completion event fires.
     void loadAsync(const fs::path& nameOrPath, int size, int faceIndex = 0) {
         auto state = async_.begin(onLoad, [this](AsyncState& ready) { applyAsync(ready); });
         state->dpi = sapp_dpi_scale();

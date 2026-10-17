@@ -252,65 +252,68 @@ bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
 }
 
 bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
-    const auto path = internal::resolveScreenshotPath(requestedPath);
+    return writeScreenshotPixels(pixels, requestedPath).ok();
+}
 
-    int width = pixels.getWidth();
-    int height = pixels.getHeight();
-    const auto ext = toLower(getFileExtension(path));
-    if (ext == "bmp") {
-        // Pixels uses stbi_write_bmp, as on the other native platforms.
-        const bool success = pixels.save(path).ok();
-        if (success) logVerbose("Screenshot") << "Saved: " << path;
-        return success;
-    }
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+SaveResult internal::writeScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    // Retire each encoded payload before its async admission slot is released.
+    @autoreleasepool {
+        const auto path = internal::resolveScreenshotPath(requestedPath);
 
-    CGContextRef context = CGBitmapContextCreate(
-        const_cast<unsigned char*>(pixels.getData()),
-        width, height,
-        8,
-        width * 4,
-        colorSpace,
-        kCGImageAlphaPremultipliedLast | (CGBitmapInfo)kCGBitmapByteOrder32Big
-    );
+        int width = pixels.getWidth();
+        int height = pixels.getHeight();
+        const auto ext = toLower(getFileExtension(path));
+        if (ext == "bmp") {
+            // Pixels uses stbi_write_bmp, as on the other native platforms.
+            return internal::atomicWrite(path, [&](std::FILE* file) {
+                return internal::writePixelsEncoded(file, pixels, ext, path);
+            }, "Screenshot", true);
+        }
+        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
 
-    if (!context) {
+        CGContextRef context = CGBitmapContextCreate(
+            const_cast<unsigned char*>(pixels.getData()),
+            width, height,
+            8,
+            width * 4,
+            colorSpace,
+            kCGImageAlphaPremultipliedLast | (CGBitmapInfo)kCGBitmapByteOrder32Big
+        );
+
+        if (!context) {
+            CGColorSpaceRelease(colorSpace);
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "Failed to create CGContext"), "Screenshot");
+        }
+
+        CGImageRef cgImage = CGBitmapContextCreateImage(context);
+        CGContextRelease(context);
         CGColorSpaceRelease(colorSpace);
-        logError() << "[Screenshot] Failed to create CGContext";
-        return false;
+
+        if (!cgImage) {
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "Failed to create CGImage"), "Screenshot");
+        }
+
+        // Use UIImage + PNG/JPEG representation
+        UIImage* image = [UIImage imageWithCGImage:cgImage];
+        CGImageRelease(cgImage);
+
+        if (!image) {
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "Failed to create UIImage"), "Screenshot");
+        }
+
+        NSData* data = nil;
+        if (ext == "jpg" || ext == "jpeg") {
+            data = UIImageJPEGRepresentation(image, 0.9);
+        } else {
+            data = UIImagePNGRepresentation(image);
+        }
+
+        if (!data) {
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "Failed to create image data"), "Screenshot");
+        }
+
+        return internal::atomicWrite(path, data.bytes, data.length, "Screenshot", true);
     }
-
-    CGImageRef cgImage = CGBitmapContextCreateImage(context);
-    CGContextRelease(context);
-    CGColorSpaceRelease(colorSpace);
-
-    if (!cgImage) {
-        logError() << "[Screenshot] Failed to create CGImage";
-        return false;
-    }
-
-    // Use UIImage + PNG/JPEG representation
-    UIImage* image = [UIImage imageWithCGImage:cgImage];
-    CGImageRelease(cgImage);
-
-    if (!image) {
-        logError() << "[Screenshot] Failed to create UIImage";
-        return false;
-    }
-
-    NSData* data = nil;
-    if (ext == "jpg" || ext == "jpeg") {
-        data = UIImageJPEGRepresentation(image, 0.9);
-    } else {
-        data = UIImagePNGRepresentation(image);
-    }
-
-    if (!data) {
-        logError() << "[Screenshot] Failed to create image data";
-        return false;
-    }
-
-    return internal::atomicWrite(path, data.bytes, data.length, "Screenshot").ok();
 }
 
 // ---------------------------------------------------------------------------

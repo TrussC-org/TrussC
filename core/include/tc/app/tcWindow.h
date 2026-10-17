@@ -473,6 +473,7 @@ inline void Window::endApp() {
     // Detach first, then run user code on the local: a setApp() or close()
     // from the App's own exit() / cleanup() finds a closed window with no App.
     std::shared_ptr<App> app = std::move(app_);
+    internal::closeScreenshots(ctx_.asyncScreenshots);
     ctx_.rootNode.reset();
     if (!app) return;
     internal::attachedApps().erase(app.get());

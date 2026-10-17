@@ -417,10 +417,14 @@ bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
 }
 
 bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    return writeScreenshotPixels(pixels, requestedPath).ok();
+}
+
+SaveResult internal::writeScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
     const auto path = internal::resolveScreenshotPath(requestedPath);
     return internal::atomicWrite(path, [&](std::FILE* file) {
         return internal::writePixelsEncoded(file, pixels, toLower(getFileExtension(path)), path);
-    }, "Screenshot").ok();
+    }, "Screenshot", true);
 }
 
 // ---------------------------------------------------------------------------

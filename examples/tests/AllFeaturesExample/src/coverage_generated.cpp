@@ -467,11 +467,13 @@ static void cover_other() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
     (void)createWindow(af::val<const WindowSettings>());
 #endif
+    (void)onScreenshotSave();
     (void)operator*(af::val<float>(), af::val<const Vec2>());
     (void)operator*(af::val<float>(), af::val<const Vec3>());
     (void)operator*(af::val<int>(), af::val<const IVec2>());
     (void)operator*(af::val<int>(), af::val<const IVec3>());
     (void)operator*(af::val<float>(), af::val<const Vec4>());
+    (void)saveScreenshotAsync(af::val<const fs::path>());
 }
 
 static void cover_platform() {
@@ -2118,9 +2120,19 @@ struct Cover_MicInput : af::Scope<MicInput> {
         (void)af::val<const MicInput>().getDeviceName();
         (void)af::val<const MicInput>().getSampleRate();
         (void)af::val<const MicInput>().isRunning();
+        (void)af::val<const MicInput>().isStarting();
         (void)af::val<MicInput>().onAudioData(af::val<const float *>(), af::val<size_t>());
+        (void)af::val<MicInput>().onStart;
         (void)af::val<MicInput>().start(af::val<int>());
+        (void)af::val<MicInput>().startAsync(af::val<int>());
         (void)af::val<MicInput>().stop();
+    }
+};
+
+struct Cover_MicStartResult : af::Scope<MicStartResult> {
+    static void run() {
+        (void)af::val<MicStartResult>().message;
+        (void)af::val<MicStartResult>().success;
     }
 };
 
@@ -2878,6 +2890,13 @@ struct Cover_ScreenRecorder : af::Scope<ScreenRecorder> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<ScreenRecorder>().writer();
 #endif
+    }
+};
+
+struct Cover_ScreenshotSaveEventArgs : af::Scope<ScreenshotSaveEventArgs> {
+    static void run() {
+        (void)af::val<ScreenshotSaveEventArgs>().path;
+        (void)af::val<ScreenshotSaveEventArgs>().result;
     }
 };
 
@@ -4863,6 +4882,7 @@ void af::coverGenerated() {
     af_generated::Cover_Material::run();
     af_generated::Cover_Mesh::run();
     af_generated::Cover_MicInput::run();
+    af_generated::Cover_MicStartResult::run();
     af_generated::Cover_Mod::run();
     af_generated::Cover_MouseDragEventArgs::run();
     af_generated::Cover_MouseEventArgs::run();
@@ -4886,6 +4906,7 @@ void af::coverGenerated() {
     af_generated::Cover_ResizeEventArgs::run();
     af_generated::Cover_SaveResult::run();
     af_generated::Cover_ScreenRecorder::run();
+    af_generated::Cover_ScreenshotSaveEventArgs::run();
     af_generated::Cover_ScrollBar::run();
     af_generated::Cover_ScrollContainer::run();
     af_generated::Cover_ScrollEventArgs::run();
