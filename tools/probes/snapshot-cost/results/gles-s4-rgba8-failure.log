@@ -1,0 +1,22 @@
+CONFIG,requested=1920x1080,windows=1,samples=4,vsync=1,frames=60,warmup=20,blocks=8
+[03:58:00.567] [WARNING] [sapp] LINUX_X11_QUERY_SYSTEM_DPI_FAILED
+[03:58:00.851] [WARNING] [sg] id:9 line:11262
+[03:58:00.851] [WARNING] [sg] id:9 line:11262
+[03:58:00.851] [WARNING] [sg] id:9 line:11262
+[03:58:00.851] [WARNING] [sg] id:9 line:11262
+[03:58:00.851] [WARNING] [sg] id:9 line:11262
+[03:58:00.851] [WARNING] [sg] id:9 line:11262
+[03:58:00.851] [WARNING] [sg] id:9 line:11262
+[03:58:00.851] [WARNING] [sg] id:9 line:11262
+[03:58:00.851] [WARNING] [sg] id:9 line:11262
+[03:58:00.851] [WARNING] [sg] id:9 line:11262
+[03:58:00.852] [WARNING] [sg] id:9 line:11262
+[03:58:00.852] [WARNING] [sg] id:9 line:11262
+[03:58:00.852] [WARNING] [sg] id:9 line:11262
+[03:58:00.852] [WARNING] [sg] id:9 line:11262
+[03:58:00.852] [WARNING] [sg] id:9 line:11262
+PROBE ERROR: snapshot GL error
+GPU,vendor=Mesa,renderer=llvmpipe (LLVM 20.1.2, 256 bits),version=OpenGL ES 3.2 Mesa 25.2.8-0ubuntu0.24.04.2
+TIMER,available=1,asynchronous=1
+WINDOW,id=0,physical=1920x1080,logical=1920x1080,samples=4,format=23
+SNAPSHOT,bytes=8294400,physical=1920x1080,format=RGBA8

@@ -1,0 +1,31 @@
+CONFIG,requested=1920x1080,windows=1,samples=1,vsync=1,frames=60,warmup=20,blocks=8
+[04:00:24.234] [WARNING] [sg] id:9 line:11262
+[04:00:24.234] [WARNING] [sg] id:9 line:11262
+[04:00:24.234] [WARNING] [sg] id:9 line:11262
+[04:00:24.234] [WARNING] [sg] id:9 line:11262
+[04:00:24.234] [WARNING] [sg] id:9 line:11262
+[04:00:24.234] [WARNING] [sg] id:9 line:11262
+[04:00:24.234] [WARNING] [sg] id:9 line:11262
+[04:00:24.234] [WARNING] [sg] id:9 line:11262
+[04:00:24.234] [WARNING] [sg] id:9 line:11262
+[04:00:24.234] [WARNING] [sg] id:9 line:11262
+[04:00:24.235] [WARNING] [sg] id:9 line:11262
+[04:00:24.235] [WARNING] [sg] id:9 line:11262
+[04:00:24.235] [WARNING] [sg] id:9 line:11262
+[04:00:24.235] [WARNING] [sg] id:9 line:11262
+[04:00:24.235] [WARNING] [sg] id:9 line:11262
+GPU,vendor=Mesa,renderer=llvmpipe (LLVM 20.1.2, 256 bits),version=4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2
+TIMER,available=1,asynchronous=1
+WINDOW,id=0,physical=1920x1080,logical=1920x1080,samples=1,format=23
+SNAPSHOT,payload_bytes=8294400,physical=1920x1080,format=RGBA8
+[04:00:40.626] [NOTICE] [System] exit: begin reason=request-exit-app pid=46
+window,block,snapshot,cpu_n,gpu_n,frame_interval_ms,fps,cpu_submit_ms,cpu_p95_ms,scene_gpu_ms,copy_gpu_ms,total_gpu_ms,gpu_p95_ms
+0,0,0,60,60,19.151240,52.216,0.675111,0.764097,12.188455,0.000000,12.188455,15.051854
+0,1,1,60,60,37.228337,26.861,18.013722,21.969357,12.540758,15.247808,27.788566,34.418080
+0,2,1,60,60,34.448818,29.029,17.198981,22.247594,12.013372,15.817789,27.831160,36.890273
+0,3,0,60,60,15.808007,63.259,0.912554,1.568324,7.168431,0.000000,7.168431,14.843438
+0,4,0,60,60,17.582483,56.875,1.368526,3.469814,7.939168,0.000000,7.939168,13.531593
+0,5,1,60,60,33.962804,29.444,16.761202,22.538746,11.615198,14.768816,26.384014,36.846628
+0,6,1,60,60,31.291008,31.958,14.164577,19.690577,8.804736,12.690409,21.495145,31.585829
+0,7,0,60,60,19.100586,52.354,1.516459,3.484774,8.825073,0.000000,8.825073,14.818128
+[04:00:40.629] [NOTICE] [System] exit: clean reason=request-exit-app code=0 pid=46

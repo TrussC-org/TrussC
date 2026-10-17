@@ -1,0 +1,34 @@
+CONFIG,requested=640x360,windows=1,samples=4,vsync=1,frames=2,warmup=1,blocks=4
+[03:59:09.610] [WARNING] [sapp] LINUX_X11_QUERY_SYSTEM_DPI_FAILED
+[03:59:09.876] [WARNING] [sg] id:9 line:11262
+[03:59:09.877] [WARNING] [sg] id:9 line:11262
+[03:59:09.877] [WARNING] [sg] id:9 line:11262
+[03:59:09.877] [WARNING] [sg] id:9 line:11262
+[03:59:09.877] [WARNING] [sg] id:9 line:11262
+[03:59:09.877] [WARNING] [sg] id:9 line:11262
+[03:59:09.877] [WARNING] [sg] id:9 line:11262
+[03:59:09.877] [WARNING] [sg] id:9 line:11262
+[03:59:09.877] [WARNING] [sg] id:9 line:11262
+[03:59:09.877] [WARNING] [sg] id:9 line:11262
+[03:59:09.880] [WARNING] [sg] id:9 line:11262
+[03:59:09.880] [WARNING] [sg] id:9 line:11262
+[03:59:09.880] [WARNING] [sg] id:9 line:11262
+[03:59:09.880] [WARNING] [sg] id:9 line:11262
+[03:59:09.880] [WARNING] [sg] id:9 line:11262
+BLIT DIAGNOSTIC src=0/rgbA=8,8,8,0 dst=2/rgbA=8,8,8,8 drawSamples=0 errors=0x0->0x502
+BLIT DIAGNOSTIC src=0/rgbA=8,8,8,0 dst=2/rgbA=8,8,8,8 drawSamples=0 errors=0x0->0x502
+BLIT DIAGNOSTIC src=0/rgbA=8,8,8,0 dst=2/rgbA=8,8,8,8 drawSamples=0 errors=0x0->0x502
+BLIT DIAGNOSTIC src=0/rgbA=8,8,8,0 dst=2/rgbA=8,8,8,8 drawSamples=0 errors=0x0->0x502
+BLIT DIAGNOSTIC src=0/rgbA=8,8,8,0 dst=2/rgbA=8,8,8,8 drawSamples=0 errors=0x0->0x502
+BLIT DIAGNOSTIC src=0/rgbA=8,8,8,0 dst=2/rgbA=8,8,8,8 drawSamples=0 errors=0x0->0x502
+GPU,vendor=Mesa,renderer=llvmpipe (LLVM 20.1.2, 256 bits),version=OpenGL ES 3.2 Mesa 25.2.8-0ubuntu0.24.04.2
+TIMER,available=1,asynchronous=1
+WINDOW,id=0,physical=640x360,logical=640x360,samples=4,format=23
+SNAPSHOT,bytes=921600,physical=640x360,format=RGBA8
+[03:59:10.017] [NOTICE] [System] exit: begin reason=request-exit-app pid=22
+window,block,snapshot,cpu_n,gpu_n,frame_interval_ms,fps,cpu_submit_ms,cpu_p95_ms,scene_gpu_ms,copy_gpu_ms,total_gpu_ms,gpu_p95_ms
+0,0,0,2,2,22.189304,45.067,0.426850,0.418947,1.842956,0.000000,1.842956,0.090865
+0,1,1,2,2,10.649141,93.904,0.532415,0.493560,3.948984,1.597277,5.546260,3.077994
+0,2,1,2,2,10.248286,97.577,0.542536,0.528169,3.796178,1.873918,5.670096,0.082317
+0,3,0,2,2,6.749614,148.157,0.448701,0.441206,1.007035,0.000000,1.007035,0.540815
+[03:59:10.019] [NOTICE] [System] exit: clean reason=request-exit-app code=0 pid=22

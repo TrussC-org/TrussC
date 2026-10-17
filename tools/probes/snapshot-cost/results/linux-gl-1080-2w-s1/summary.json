@@ -1,0 +1,80 @@
+[
+  {
+    "window": 0,
+    "modes": [
+      {
+        "snapshot": false,
+        "cpu_n": 240,
+        "gpu_n": 240,
+        "frame_interval_ms": 20.370562749999998,
+        "cpu_submit_ms": 0.8226852499999999,
+        "scene_gpu_ms": 9.392877,
+        "copy_gpu_ms": 0.0,
+        "total_gpu_ms": 9.392877,
+        "fps": 49.09044547627925,
+        "gpu_block_range_ms": [
+          7.910021,
+          10.873259
+        ]
+      },
+      {
+        "snapshot": true,
+        "cpu_n": 240,
+        "gpu_n": 240,
+        "frame_interval_ms": 37.081014999999994,
+        "cpu_submit_ms": 13.56019,
+        "scene_gpu_ms": 9.560211,
+        "copy_gpu_ms": 11.87055475,
+        "total_gpu_ms": 21.43076575,
+        "fps": 26.967978087978448,
+        "gpu_block_range_ms": [
+          13.982995,
+          31.932307
+        ]
+      }
+    ],
+    "gpu_delta_ms": 12.037888749999999,
+    "gpu_delta_percent": 128.15976138088467,
+    "fps_delta": -22.1224673883008,
+    "fps_delta_percent": -45.064711011821004
+  },
+  {
+    "window": 1,
+    "modes": [
+      {
+        "snapshot": false,
+        "cpu_n": 240,
+        "gpu_n": 240,
+        "frame_interval_ms": 54.259515,
+        "cpu_submit_ms": 0.77560475,
+        "scene_gpu_ms": 11.677914249999999,
+        "copy_gpu_ms": 0.0,
+        "total_gpu_ms": 11.677914249999999,
+        "fps": 18.4299472636274,
+        "gpu_block_range_ms": [
+          10.900112,
+          12.365448
+        ]
+      },
+      {
+        "snapshot": true,
+        "cpu_n": 240,
+        "gpu_n": 240,
+        "frame_interval_ms": 85.506113,
+        "cpu_submit_ms": 13.94641125,
+        "scene_gpu_ms": 11.80792125,
+        "copy_gpu_ms": 13.02116325,
+        "total_gpu_ms": 24.82908475,
+        "fps": 11.695070269420386,
+        "gpu_block_range_ms": [
+          21.421126,
+          33.182344
+        ]
+      }
+    ],
+    "gpu_delta_ms": 13.151170500000001,
+    "gpu_delta_percent": 112.61574814183965,
+    "fps_delta": -6.734876994207015,
+    "fps_delta_percent": -36.54311592903304
+  }
+]

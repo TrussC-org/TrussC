@@ -1,0 +1,33 @@
+CONFIG,requested=1920x1080,windows=1,samples=1,vsync=1,frames=60,warmup=20,blocks=8
+[04:01:39.638] [WARNING] [sapp] LINUX_X11_QUERY_SYSTEM_DPI_FAILED
+[04:01:39.803] [WARNING] [sg] id:9 line:11262
+[04:01:39.806] [WARNING] [sg] id:9 line:11262
+[04:01:39.806] [WARNING] [sg] id:9 line:11262
+[04:01:39.806] [WARNING] [sg] id:9 line:11262
+[04:01:39.806] [WARNING] [sg] id:9 line:11262
+[04:01:39.806] [WARNING] [sg] id:9 line:11262
+[04:01:39.806] [WARNING] [sg] id:9 line:11262
+[04:01:39.806] [WARNING] [sg] id:9 line:11262
+[04:01:39.806] [WARNING] [sg] id:9 line:11262
+[04:01:39.806] [WARNING] [sg] id:9 line:11262
+[04:01:39.807] [WARNING] [sg] id:9 line:11262
+[04:01:39.807] [WARNING] [sg] id:9 line:11262
+[04:01:39.807] [WARNING] [sg] id:9 line:11262
+[04:01:39.807] [WARNING] [sg] id:9 line:11262
+[04:01:39.807] [WARNING] [sg] id:9 line:11262
+GPU,vendor=Mesa,renderer=llvmpipe (LLVM 20.1.2, 256 bits),version=OpenGL ES 3.2 Mesa 25.2.8-0ubuntu0.24.04.2
+TIMER,available=1,asynchronous=1
+WINDOW,id=0,physical=1920x1080,logical=1920x1080,samples=1,format=23
+SOURCE,GLES_alpha_bits=0,retained=RGB8
+SNAPSHOT,payload_bytes=6220800,physical=1920x1080,format=RGB8
+[04:01:56.291] [NOTICE] [System] exit: begin reason=request-exit-app pid=133
+window,block,snapshot,cpu_n,gpu_n,frame_interval_ms,fps,cpu_submit_ms,cpu_p95_ms,scene_gpu_ms,copy_gpu_ms,total_gpu_ms,gpu_p95_ms
+0,0,0,60,60,22.204391,45.036,1.338777,4.422590,7.440850,0.000000,7.440850,13.048526
+0,1,1,60,60,25.133964,39.787,9.791889,13.472716,3.844885,8.435346,12.280231,18.279056
+0,2,1,60,60,27.225378,36.730,10.231660,13.857265,4.349611,9.090886,13.440497,18.503772
+0,3,0,60,60,21.367537,46.800,1.601881,3.748786,7.656295,0.000000,7.656295,14.083718
+0,4,0,60,60,23.989884,41.684,2.468982,4.568637,7.891996,0.000000,7.891996,13.100491
+0,5,1,60,60,32.477407,30.791,14.565948,19.868106,8.323825,11.067975,19.391800,27.762906
+0,6,1,60,60,30.269517,33.037,11.812296,20.971106,6.062172,10.119433,16.181605,26.524945
+0,7,0,60,60,20.898765,47.850,1.781224,4.030394,6.167195,0.000000,6.167195,12.896218
+[04:01:56.298] [NOTICE] [System] exit: clean reason=request-exit-app code=0 pid=133

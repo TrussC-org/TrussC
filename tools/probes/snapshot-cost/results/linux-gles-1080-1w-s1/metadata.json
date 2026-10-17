@@ -1,0 +1,40 @@
+{
+  "environment": {
+    "DISPLAY": ":234",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "__GLX_VENDOR_LIBRARY_NAME": "mesa",
+    "__EGL_VENDOR_LIBRARY_FILENAMES": "/usr/share/glvnd/egl_vendor.d/50_mesa.json",
+    "MESA_SHADER_CACHE_DIR": "/tmp/snapshot-cost-mesa-cache"
+  },
+  "utc": "2026-10-17T19:01:39.559809+00:00",
+  "host": "nextcloud-server",
+  "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.39",
+  "machine": "x86_64",
+  "processor": "x86_64",
+  "command": [
+    "/tmp/snapshot-cost-gles/bin/snapshotCost",
+    "--width",
+    "1920",
+    "--height",
+    "1080",
+    "--windows",
+    "1",
+    "--samples",
+    "1",
+    "--vsync",
+    "1",
+    "--frames",
+    "60",
+    "--warmup",
+    "20",
+    "--blocks",
+    "8"
+  ],
+  "probe_sha256": {
+    "run.py": "1116fbe670abe1ec267c43d2077cab8eee95a490a7bdeda3f20c9ee6570717ee",
+    "src/main.cpp": "f45962b2b9cb7d91e732463684328bed860165af52233750480ee6c2fa3ca2a1",
+    "src/native.cpp": "505b85f809dde08fe82db022b1bd71edaff89465471cd5f317ea9c4bf6103a2d",
+    "CMakeLists.txt": "bb7eaaab6439b485eb5d7675d1458f13e9a9b4b80b03b7efc333d8ba9cdee276"
+  },
+  "base": "a711686f05dcd8f8dcb93aa919efc0c9f572e024"
+}

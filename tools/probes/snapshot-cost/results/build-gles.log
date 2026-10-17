@@ -1,0 +1,5 @@
+[ 17%] Built target TrussC_shaders_gen
+[ 93%] Built target TrussC
+[ 95%] Building CXX object CMakeFiles/snapshotCost.dir/src/native.cpp.o
+[ 97%] Linking CXX executable bin/snapshotCost
+[100%] Built target snapshotCost

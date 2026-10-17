@@ -1,0 +1,21 @@
+CONFIG,requested=1920x1080,windows=2,samples=1,vsync=1,frames=180,warmup=60,blocks=8
+[04:03:01.144] [WARNING] [sapp] LINUX_X11_QUERY_SYSTEM_DPI_FAILED
+[04:03:01.219] [WARNING] [sg] id:9 line:11262
+[04:03:01.219] [WARNING] [sg] id:9 line:11262
+[04:03:01.219] [WARNING] [sg] id:9 line:11262
+[04:03:01.219] [WARNING] [sg] id:9 line:11262
+[04:03:01.219] [WARNING] [sg] id:9 line:11262
+[04:03:01.220] [WARNING] [sg] id:9 line:11262
+[04:03:01.220] [WARNING] [sg] id:9 line:11262
+[04:03:01.220] [WARNING] [sg] id:9 line:11262
+[04:03:01.220] [WARNING] [sg] id:9 line:11262
+[04:03:01.220] [WARNING] [sg] id:9 line:11262
+[04:03:01.220] [WARNING] [sg] id:9 line:11262
+[04:03:01.220] [WARNING] [sg] id:9 line:11262
+[04:03:01.220] [WARNING] [sg] id:9 line:11262
+[04:03:01.220] [WARNING] [sg] id:9 line:11262
+[04:03:01.220] [WARNING] [sg] id:9 line:11262
+GPU,vendor=Mesa,renderer=llvmpipe (LLVM 20.1.2, 256 bits),version=OpenGL ES 3.2 Mesa 25.2.8-0ubuntu0.24.04.2
+TIMER,available=1,asynchronous=1
+[04:03:01.221] [ERROR] [Window] createWindow(): secondary windows are supported on macOS, Windows and desktop Linux (OpenGL); this platform is single-window
+ERROR: two windows unsupported by this backend at a711686f; no two-window measurement

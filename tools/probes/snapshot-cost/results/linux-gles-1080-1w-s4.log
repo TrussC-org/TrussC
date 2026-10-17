@@ -1,0 +1,74 @@
+CONFIG,requested=1920x1080,windows=1,samples=4,vsync=1,frames=60,warmup=20,blocks=8
+[04:01:56.535] [WARNING] [sapp] LINUX_X11_QUERY_SYSTEM_DPI_FAILED
+[04:01:56.808] [WARNING] [sg] id:9 line:11262
+[04:01:56.808] [WARNING] [sg] id:9 line:11262
+[04:01:56.808] [WARNING] [sg] id:9 line:11262
+[04:01:56.808] [WARNING] [sg] id:9 line:11262
+[04:01:56.808] [WARNING] [sg] id:9 line:11262
+[04:01:56.808] [WARNING] [sg] id:9 line:11262
+[04:01:56.808] [WARNING] [sg] id:9 line:11262
+[04:01:56.808] [WARNING] [sg] id:9 line:11262
+[04:01:56.808] [WARNING] [sg] id:9 line:11262
+[04:01:56.808] [WARNING] [sg] id:9 line:11262
+[04:01:56.809] [WARNING] [sg] id:9 line:11262
+[04:01:56.812] [WARNING] [sg] id:9 line:11262
+[04:01:56.812] [WARNING] [sg] id:9 line:11262
+[04:01:56.812] [WARNING] [sg] id:9 line:11262
+[04:01:56.812] [WARNING] [sg] id:9 line:11262
+GPU,vendor=Mesa,renderer=llvmpipe (LLVM 20.1.2, 256 bits),version=OpenGL ES 3.2 Mesa 25.2.8-0ubuntu0.24.04.2
+TIMER,available=1,asynchronous=1
+WINDOW,id=0,physical=1920x1080,logical=1920x1080,samples=4,format=23
+SOURCE,GLES_alpha_bits=0,retained=RGB8
+SNAPSHOT,payload_bytes=6220800,physical=1920x1080,format=RGB8
+[04:02:30.689] [NOTICE] [System] exit: begin reason=request-exit-app pid=162
+window,block,snapshot,cpu_n,gpu_n,frame_interval_ms,fps,cpu_submit_ms,cpu_p95_ms,scene_gpu_ms,copy_gpu_ms,total_gpu_ms,gpu_p95_ms
+0,0,0,60,60,39.394532,25.384,1.490149,3.832757,12.810304,0.000000,12.810304,20.010373
+0,1,1,60,60,59.207029,16.890,26.007331,47.320728,18.402004,16.686226,35.088230,62.372639
+0,2,1,60,60,53.859098,18.567,22.570757,47.135299,14.826749,15.950851,30.777599,54.911600
+0,3,0,60,60,41.806423,23.920,2.249600,4.278519,13.621513,0.000000,13.621513,20.784590
+0,4,0,60,60,48.212119,20.742,2.093315,4.238530,17.961802,0.000000,17.961802,37.157243
+0,5,1,60,60,66.522166,15.033,28.284260,51.284787,19.398278,18.898207,38.296485,63.685502
+0,6,1,60,60,58.222198,17.176,23.402909,35.279461,15.608402,16.488066,32.096468,47.843424
+0,7,0,60,60,46.365312,21.568,1.512481,3.720009,17.345256,0.000000,17.345256,36.571528
+[04:02:30.692] [NOTICE] [System] exit: clean reason=request-exit-app code=0 pid=162
+[
+  {
+    "window": 0,
+    "modes": [
+      {
+        "snapshot": false,
+        "cpu_n": 240,
+        "gpu_n": 240,
+        "frame_interval_ms": 43.9445965,
+        "cpu_submit_ms": 1.83638625,
+        "scene_gpu_ms": 15.43471875,
+        "copy_gpu_ms": 0.0,
+        "total_gpu_ms": 15.43471875,
+        "fps": 22.755926317357357,
+        "gpu_block_range_ms": [
+          12.810304,
+          17.961802
+        ]
+      },
+      {
+        "snapshot": true,
+        "cpu_n": 240,
+        "gpu_n": 240,
+        "frame_interval_ms": 59.45262275,
+        "cpu_submit_ms": 25.066314249999998,
+        "scene_gpu_ms": 17.05885825,
+        "copy_gpu_ms": 17.0058375,
+        "total_gpu_ms": 34.0646955,
+        "fps": 16.82011581230031,
+        "gpu_block_range_ms": [
+          30.777599,
+          38.296485
+        ]
+      }
+    ],
+    "gpu_delta_ms": 18.629976749999997,
+    "gpu_delta_percent": 120.70175719917148,
+    "fps_delta": -5.935810505057049,
+    "fps_delta_percent": -26.084679754519325
+  }
+]

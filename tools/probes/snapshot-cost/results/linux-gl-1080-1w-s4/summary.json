@@ -1,0 +1,41 @@
+[
+  {
+    "window": 0,
+    "modes": [
+      {
+        "snapshot": false,
+        "cpu_n": 240,
+        "gpu_n": 240,
+        "frame_interval_ms": 18.214981249999997,
+        "cpu_submit_ms": 1.27159425,
+        "scene_gpu_ms": 8.422794750000001,
+        "copy_gpu_ms": 0.0,
+        "total_gpu_ms": 8.422794750000001,
+        "fps": 54.899864363022616,
+        "gpu_block_range_ms": [
+          6.977155,
+          10.102667
+        ]
+      },
+      {
+        "snapshot": true,
+        "cpu_n": 240,
+        "gpu_n": 240,
+        "frame_interval_ms": 26.279247,
+        "cpu_submit_ms": 12.749302,
+        "scene_gpu_ms": 7.23467075,
+        "copy_gpu_ms": 11.3811455,
+        "total_gpu_ms": 18.61581625,
+        "fps": 38.052840707345986,
+        "gpu_block_range_ms": [
+          15.389905,
+          20.758576
+        ]
+      }
+    ],
+    "gpu_delta_ms": 10.1930215,
+    "gpu_delta_percent": 121.01709471194224,
+    "fps_delta": -16.84702365567663,
+    "fps_delta_percent": -30.68682200064562
+  }
+]

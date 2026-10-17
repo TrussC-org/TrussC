@@ -1,0 +1,124 @@
+CONFIG,requested=1920x1080,windows=2,samples=1,vsync=1,frames=60,warmup=20,blocks=8
+[04:00:41.067] [WARNING] [sg] id:9 line:11262
+[04:00:41.068] [WARNING] [sg] id:9 line:11262
+[04:00:41.068] [WARNING] [sg] id:9 line:11262
+[04:00:41.068] [WARNING] [sg] id:9 line:11262
+[04:00:41.068] [WARNING] [sg] id:9 line:11262
+[04:00:41.068] [WARNING] [sg] id:9 line:11262
+[04:00:41.068] [WARNING] [sg] id:9 line:11262
+[04:00:41.071] [WARNING] [sg] id:9 line:11262
+[04:00:41.071] [WARNING] [sg] id:9 line:11262
+[04:00:41.071] [WARNING] [sg] id:9 line:11262
+[04:00:41.072] [WARNING] [sg] id:9 line:11262
+[04:00:41.072] [WARNING] [sg] id:9 line:11262
+[04:00:41.072] [WARNING] [sg] id:9 line:11262
+[04:00:41.072] [WARNING] [sg] id:9 line:11262
+[04:00:41.072] [WARNING] [sg] id:9 line:11262
+GPU,vendor=Mesa,renderer=llvmpipe (LLVM 20.1.2, 256 bits),version=4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2
+TIMER,available=1,asynchronous=1
+WINDOW,id=0,physical=1920x1080,logical=1920x1080,samples=1,format=23
+GPU,vendor=Mesa,renderer=llvmpipe (LLVM 20.1.2, 256 bits),version=4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2
+TIMER,available=1,asynchronous=1
+WINDOW,id=1,physical=1920x1080,logical=1920x1080,samples=1,format=23
+SNAPSHOT,payload_bytes=8294400,physical=1920x1080,format=RGBA8
+SNAPSHOT,payload_bytes=8294400,physical=1920x1080,format=RGBA8
+[04:01:24.862] [NOTICE] [System] exit: begin reason=request-exit-app pid=75
+window,block,snapshot,cpu_n,gpu_n,frame_interval_ms,fps,cpu_submit_ms,cpu_p95_ms,scene_gpu_ms,copy_gpu_ms,total_gpu_ms,gpu_p95_ms
+0,0,0,60,60,20.003246,49.992,1.067944,1.965632,9.128272,0.000000,9.128272,16.714345
+0,1,1,60,60,36.309971,27.541,13.169770,22.490193,9.151900,10.765329,19.917229,32.708961
+0,2,1,60,60,22.349064,44.745,8.648563,11.538407,5.062596,8.920399,13.982995,18.726599
+0,3,0,60,60,17.233740,58.026,0.727785,0.755792,7.910021,0.000000,7.910021,14.390715
+0,4,0,60,60,20.397620,49.025,0.687907,0.846219,9.659956,0.000000,9.659956,16.462440
+0,5,1,60,60,36.159088,27.656,12.718952,19.741279,8.931158,10.959374,19.890532,33.808364
+0,6,1,60,60,53.505937,18.690,19.703475,32.489223,15.095190,16.837117,31.932307,46.333966
+0,7,0,60,60,23.847645,41.933,0.807105,1.457767,10.873259,0.000000,10.873259,18.914347
+window,block,snapshot,cpu_n,gpu_n,frame_interval_ms,fps,cpu_submit_ms,cpu_p95_ms,scene_gpu_ms,copy_gpu_ms,total_gpu_ms,gpu_p95_ms
+1,0,0,60,60,50.821789,19.677,0.998123,1.579545,10.900112,0.000000,10.900112,16.790444
+1,1,1,60,60,83.533610,11.971,12.419061,18.993169,10.907146,11.967145,22.874291,35.835995
+1,2,1,60,60,76.251647,13.114,11.970836,19.099751,10.393001,11.028125,21.421126,33.490336
+1,3,0,60,60,51.084856,19.575,0.715091,0.890915,11.514009,0.000000,11.514009,17.688931
+1,4,0,60,60,58.214331,17.178,0.689740,0.753775,11.932088,0.000000,11.932088,18.130413
+1,5,1,60,60,80.062843,12.490,12.482903,20.159750,10.515966,11.322611,21.838578,36.414777
+1,6,1,60,60,102.176352,9.787,18.912845,27.916581,15.415572,17.766772,33.182344,47.468328
+1,7,0,60,60,56.917084,17.569,0.699465,0.788154,12.365448,0.000000,12.365448,18.086091
+[04:01:24.871] [NOTICE] [System] exit: clean reason=request-exit-app code=0 pid=75
+[
+  {
+    "window": 0,
+    "modes": [
+      {
+        "snapshot": false,
+        "cpu_n": 240,
+        "gpu_n": 240,
+        "frame_interval_ms": 20.370562749999998,
+        "cpu_submit_ms": 0.8226852499999999,
+        "scene_gpu_ms": 9.392877,
+        "copy_gpu_ms": 0.0,
+        "total_gpu_ms": 9.392877,
+        "fps": 49.09044547627925,
+        "gpu_block_range_ms": [
+          7.910021,
+          10.873259
+        ]
+      },
+      {
+        "snapshot": true,
+        "cpu_n": 240,
+        "gpu_n": 240,
+        "frame_interval_ms": 37.081014999999994,
+        "cpu_submit_ms": 13.56019,
+        "scene_gpu_ms": 9.560211,
+        "copy_gpu_ms": 11.87055475,
+        "total_gpu_ms": 21.43076575,
+        "fps": 26.967978087978448,
+        "gpu_block_range_ms": [
+          13.982995,
+          31.932307
+        ]
+      }
+    ],
+    "gpu_delta_ms": 12.037888749999999,
+    "gpu_delta_percent": 128.15976138088467,
+    "fps_delta": -22.1224673883008,
+    "fps_delta_percent": -45.064711011821004
+  },
+  {
+    "window": 1,
+    "modes": [
+      {
+        "snapshot": false,
+        "cpu_n": 240,
+        "gpu_n": 240,
+        "frame_interval_ms": 54.259515,
+        "cpu_submit_ms": 0.77560475,
+        "scene_gpu_ms": 11.677914249999999,
+        "copy_gpu_ms": 0.0,
+        "total_gpu_ms": 11.677914249999999,
+        "fps": 18.4299472636274,
+        "gpu_block_range_ms": [
+          10.900112,
+          12.365448
+        ]
+      },
+      {
+        "snapshot": true,
+        "cpu_n": 240,
+        "gpu_n": 240,
+        "frame_interval_ms": 85.506113,
+        "cpu_submit_ms": 13.94641125,
+        "scene_gpu_ms": 11.80792125,
+        "copy_gpu_ms": 13.02116325,
+        "total_gpu_ms": 24.82908475,
+        "fps": 11.695070269420386,
+        "gpu_block_range_ms": [
+          21.421126,
+          33.182344
+        ]
+      }
+    ],
+    "gpu_delta_ms": 13.151170500000001,
+    "gpu_delta_percent": 112.61574814183965,
+    "fps_delta": -6.734876994207015,
+    "fps_delta_percent": -36.54311592903304
+  }
+]

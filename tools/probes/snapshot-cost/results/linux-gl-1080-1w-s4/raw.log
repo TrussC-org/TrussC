@@ -1,0 +1,31 @@
+CONFIG,requested=1920x1080,windows=1,samples=4,vsync=1,frames=60,warmup=20,blocks=8
+[04:01:25.193] [WARNING] [sg] id:9 line:11262
+[04:01:25.193] [WARNING] [sg] id:9 line:11262
+[04:01:25.193] [WARNING] [sg] id:9 line:11262
+[04:01:25.193] [WARNING] [sg] id:9 line:11262
+[04:01:25.193] [WARNING] [sg] id:9 line:11262
+[04:01:25.193] [WARNING] [sg] id:9 line:11262
+[04:01:25.193] [WARNING] [sg] id:9 line:11262
+[04:01:25.193] [WARNING] [sg] id:9 line:11262
+[04:01:25.193] [WARNING] [sg] id:9 line:11262
+[04:01:25.193] [WARNING] [sg] id:9 line:11262
+[04:01:25.198] [WARNING] [sg] id:9 line:11262
+[04:01:25.198] [WARNING] [sg] id:9 line:11262
+[04:01:25.198] [WARNING] [sg] id:9 line:11262
+[04:01:25.198] [WARNING] [sg] id:9 line:11262
+[04:01:25.198] [WARNING] [sg] id:9 line:11262
+GPU,vendor=Mesa,renderer=llvmpipe (LLVM 20.1.2, 256 bits),version=4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2
+TIMER,available=1,asynchronous=1
+WINDOW,id=0,physical=1920x1080,logical=1920x1080,samples=4,format=23
+SNAPSHOT,payload_bytes=8294400,physical=1920x1080,format=RGBA8
+[04:01:39.347] [NOTICE] [System] exit: begin reason=request-exit-app pid=104
+window,block,snapshot,cpu_n,gpu_n,frame_interval_ms,fps,cpu_submit_ms,cpu_p95_ms,scene_gpu_ms,copy_gpu_ms,total_gpu_ms,gpu_p95_ms
+0,0,0,60,60,19.415212,51.506,1.068430,3.301633,10.102667,0.000000,10.102667,14.252835
+0,1,1,60,60,22.717513,44.019,11.269826,18.347620,5.992916,9.396989,15.389905,27.162180
+0,2,1,60,60,26.543663,37.674,13.050470,18.659390,8.004203,11.272868,19.277071,28.414624
+0,3,0,60,60,19.351419,51.676,1.508798,3.066870,7.911716,0.000000,7.911716,17.121827
+0,4,0,60,60,18.181306,55.002,1.372477,3.521485,8.699641,0.000000,8.699641,12.638606
+0,5,1,60,60,27.232575,36.721,13.002404,20.165474,6.432500,12.605213,19.037713,30.450330
+0,6,1,60,60,28.623237,34.937,13.674508,21.378020,8.509064,12.249512,20.758576,32.645024
+0,7,0,60,60,15.911988,62.846,1.136672,1.609901,6.977155,0.000000,6.977155,12.961023
+[04:01:39.349] [NOTICE] [System] exit: clean reason=request-exit-app code=0 pid=104
