@@ -117,6 +117,50 @@ class GeneratedTestFilesTests(unittest.TestCase):
                  "addons/tcxFixture/CMakeLists.txt"]
         self.assertEqual(self.run_guard(paths)[0], 0)
 
+    def test_project_markers_require_ignore(self):
+        for project in ("core/tests/newFixture", "addons/tcxFixture/tests",
+                        "addons/tcxFixture/tests-renderTarget"):
+            for marker in sorted(guard.PROJECT_MARKERS):
+                with self.subTest(project=project, marker=marker):
+                    result, output = self.run_guard([f"{project}/{marker}"])
+                    self.assertEqual(result, 1)
+                    self.assertIn(f"missing .gitignore: {project}/.gitignore", output)
+
+    def test_untracked_local_project_requires_ignore(self):
+        for project in ("core/tests/newFixture", "addons/tcxFixture/tests-new"):
+            directory = self.root / project
+            directory.mkdir(parents=True)
+            for marker in guard.PROJECT_MARKERS:
+                (directory / marker).touch()
+            result, output = self.run_guard([])
+            self.assertEqual(result, 1)
+            self.assertIn("1 violation(s)", output)
+            self.assertIn(f"{project}/.gitignore", output)
+            (directory / ".gitignore").write_text("CMakeLists.txt\nCMakePresets.json\nbin/*\n")
+            (directory / "addons.make").write_text("# TrussC addons - one addon per line\n")
+            self.assertEqual(self.run_guard([
+                f"{project}/{marker}" for marker in guard.PROJECT_MARKERS])[0], 0)
+
+    def test_addon_test_variants_check_generated_files(self):
+        project = self.root / "addons/tcxFixture/tests-renderTarget"
+        project.mkdir(parents=True)
+        (project / ".gitignore").write_text("CMakeLists.txt\nCMakePresets.json\n")
+        paths = ["addons/tcxFixture/tests-renderTarget/" + name
+                 for name in ("CMakeLists.txt", "CMakePresets.json", "bin/fixture")]
+        result, output = self.run_guard(paths)
+        self.assertEqual(result, 1)
+        self.assertIn("3 violation(s)", output)
+
+    def test_markers_outside_test_roots_pass(self):
+        for project in ("examples/tests/fixture", "addons/tcxFixture/example",
+                        "core/tests/fixture/nested"):
+            directory = self.root / project
+            directory.mkdir(parents=True)
+            (directory / "local.cmake").touch()
+        self.assertEqual(self.run_guard([
+            "examples/tests/fixture/local.cmake", "addons/tcxFixture/example/addons.make",
+            "core/tests/fixture/nested/local.cmake"])[0], 0)
+
     def test_ci_runs_guard_and_regression(self):
         workflow = (guard.ROOT / ".github/workflows/build.yml").read_text()
         job = workflow.split("  header-state-check:", 1)[1].split("  ccache-prune:", 1)[0]
