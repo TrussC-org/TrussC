@@ -191,6 +191,30 @@ before dispatch so reentry cannot deliver the event twice.
 
 ## sokol_gfx.h
 
+### Whole-attachment MSAA resolve with a scissored final draw (GL/GLES, #861)
+
+**Purpose:** `glBlitFramebuffer` respects the draw scissor. Resolving after a
+clipped draw must replace the whole destination, including pixels outside the
+last draw's rectangle.
+
+**Changes (marked `[TrussC]`, in `_sg_gl_end_render_pass`):**
+- Disable `GL_SCISSOR_TEST` once before the first resolve blit and re-enable it
+  after all color-attachment resolves, before GLES framebuffer invalidation.
+  Passes without resolves do not change the enable state. The existing V3D
+  pre-resolve flush stays before the first resolve.
+- `_sg_gl_cache_t` does not cache scissor enable. `_sg_gl_reset_state_cache`
+  enables it unconditionally, while begin-pass and apply-scissor only set the
+  rectangle. Restoring the enabled state preserves this invariant and leaves
+  the rectangle untouched; no cache field or pipeline invalidation is needed.
+- This loop contains the only GL backend `glBlitFramebuffer` call. TrussC's
+  GL readbacks use `glReadPixels` (not scissor-clipped); Fbo version copies and
+  mip generation use destination-sized draw-pass scopes with full scissors.
+
+Regression: `allCoreTests msaaResolveScissor --gpu-check` checks every pixel
+after a 1x1-scissored draw at samples 1/4, with and without mips, plus copyTo,
+subsequent draw clipping and empty clipped CLEAR passes. It fails on `ca0568bd`
+and passes with this patch on GLCORE and GLES3.
+
 ### BC texture support on iOS (#645)
 
 **Purpose:** Allow HAP playback on iOS GPUs that report BC texture support.
