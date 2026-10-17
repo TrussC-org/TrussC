@@ -3,7 +3,30 @@
 Snappy integration checks encode repeated BC1 blocks as single-chunk and
 four-chunk HAP frames, verify compression actually reduced their size, and
 compare both `HapDecoder` decode paths with the original texture bytes.
-These checks run headlessly as part of the default test mode.
+These checks run headlessly as part of the default test mode. Chunk-count
+diagnostics must report 1 for single-chunk frames (including raw and Snappy
+frames that bypass the callback) and the actual count for chunk tables,
+through both decoder entry points.
+
+Chunk worker checks decode mixed raw/Snappy frames with 2, 8, 9 and 1024
+chunks. Every valid table fixture is compared byte-for-byte with a serial
+`HapDecode` callback through both decoder entry points. On Linux,
+`local.cmake` enables executable-local `pthread_create` observation: at most
+eight workers may be created per callback, and each must finish before decode
+returns. Returning `EAGAIN` on creation attempts 1 through 8 exercises
+`std::thread` construction failure, including failure after workers have
+started. Each result must still match serial decoding. Copy/move construction,
+assignment, reuse of moved-from decoders, and destruction are checked after
+multi-worker decoding. The probe's mutable state lives in a test `.cpp`.
+
+For standalone table tests on Linux, also compile `workerThreadProbe.cpp`,
+define `TC_HAP_WORKER_PROBE`, and link `${CMAKE_DL_LIBS}` (or `-ldl`).
+`--case "1024 mixed worker chunks" --worker-failure 0` isolates the worker
+bound; `--worker-failure 2` injects failure after one successful creation.
+Omitting that option exercises normal creation and all eight failure points.
+The same tests can be built against an earlier decoder header to observe its
+thread count and behavior when creation fails. Serial comparisons run on
+all platforms; thread observation and failure injection run on Linux.
 
 Frame table checks cover compressor, size and offset tables, section bounds,
 extended headers, cumulative input/output sizes, Snappy streams, and both
@@ -26,9 +49,11 @@ not a limit in the HAP format. The pinned reference source has no local patches;
 section lengths must stay below `0x80000000` for its signed four-byte reader.
 Header-only tests exercise both sides of that boundary without large allocations.
 
-`chunkTableTests.cpp` also provides a standalone main when compiled with
-`TC_HAP_CHUNK_TABLE_TEST_MAIN`. Use `--list`, `--case "chunk offset outside
-texture"` and `--entry allocating` (or `preallocated`) to isolate fixtures
+The standalone `chunkTableTests` harness is **Linux only**: it links through
+the Linux `--wrap=HapDecode` workflow. `chunkTableTests.cpp` provides its main
+when compiled with `TC_HAP_CHUNK_TABLE_TEST_MAIN`. Use `--list`,
+`--case "chunk offset outside texture"` and `--entry allocating` (or
+`preallocated`) to isolate fixtures
 when comparing with a base build. On Linux, defining `TC_HAP_TRACE_DECODE`
 and linking with `-Wl,--wrap=HapDecode` also checks that malformed fixtures
 never reach the reference decoder.

@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <functional>
 #include <thread>
+#include <array>
+#include <atomic>
 #include <limits>
 #include <tc/utils/tcLog.h>
 #include <utility>
@@ -85,8 +87,6 @@ inline size_t calculateTextureSize(uint32_t width, uint32_t height, HapFormat fo
 
 namespace tcx::hap {
 
-static_assert(detail::kMaxHapChunks <= std::numeric_limits<size_t>::max() / sizeof(std::thread));
-
 // -----------------------------------------------------------------------------
 // Decoded frame result
 // -----------------------------------------------------------------------------
@@ -108,7 +108,7 @@ class HapDecoder {
 public:
     HapDecoder() = default;
 
-    // Get last chunk count (for debugging, -1 = callback not called)
+    // Get last decoded chunk count (for debugging, -1 = no count available)
     int getLastChunkCount() const { return lastChunkCount_; }
     uint64_t getInvalidFrameCount() const { return invalidFrameCount_; }
 
@@ -153,6 +153,8 @@ public:
             return lastErrorCode_ == HapResult_Bad_Frame ? invalidFrame() : false;
         }
 
+        // HAP decodes simple single-chunk frames without invoking the callback.
+        if (lastChunkCount_ < 0) lastChunkCount_ = 1;
         return true;
     }
 
@@ -196,13 +198,15 @@ public:
             outFormat = HapFormat::Unknown;
             return lastErrorCode_ == HapResult_Bad_Frame ? invalidFrame() : false;
         }
+        // HAP decodes simple single-chunk frames without invoking the callback.
+        if (lastChunkCount_ < 0) lastChunkCount_ = 1;
         return true;
     }
 
 private:
     friend class HapPlayer;
     unsigned int lastErrorCode_ = 0;
-    mutable int lastChunkCount_ = -1;  // -1 = callback never called
+    mutable int lastChunkCount_ = -1;  // -1 = no count available
     // Copies preserve the diagnostic state; later warnings are independent.
     bool invalidFrameWarned_ = false;
     uint64_t invalidFrameCount_ = 0;
@@ -232,18 +236,34 @@ private:
             return;
         }
 
-        // Parallel decode using threads
-        std::vector<std::thread> threads;
-        threads.reserve(count);
-
-        for (unsigned int i = 0; i < count; i++) {
-            threads.emplace_back([work, p, i]() {
+        // Bound (resource): File-controlled chunk counts must not determine OS thread usage.
+        constexpr unsigned int maxWorkers = 8;
+        std::array<std::thread, maxWorkers> threads;
+        std::atomic<unsigned int> nextChunk{0};
+        auto decodeChunks = [&]() {
+            for (;;) {
+                const unsigned int i = nextChunk.fetch_add(1, std::memory_order_relaxed);
+                if (i >= count) return;
                 work(p, i);
-            });
+            }
+        };
+        const unsigned int workerCount = count < maxWorkers ? count : maxWorkers;
+        try {
+            for (unsigned int i = 0; i < workerCount; ++i) {
+                threads[i] = std::thread(decodeChunks);
+            }
+        } catch (...) {
+            // A failed thread construction must not unwind past joinable workers.
+            for (auto& t : threads) {
+                if (t.joinable()) t.join();
+            }
+            decodeChunks();
+            return;
         }
 
+        // Workers and their captured callback data never outlive this call.
         for (auto& t : threads) {
-            t.join();
+            if (t.joinable()) t.join();
         }
     }
 };
