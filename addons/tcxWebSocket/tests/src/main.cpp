@@ -769,7 +769,15 @@ static void runLoopbackTests() {
     runReconnectFromEventTests();
 }
 
-int main() {
+#include "ingress.h"
+
+int main(int argc, char** argv) {
+    if (argc > 1 && string(argv[1]) == "--ingress-only") {
+        runIngressTests();
+        printf("\n%d passed, %d failed\n", g_pass, g_fail);
+        return g_fail ? 1 : 0;
+    }
+    runIngressTests();
     {
         auto bytes = emscriptenText("hello");
         WebSocketEventArgs args;

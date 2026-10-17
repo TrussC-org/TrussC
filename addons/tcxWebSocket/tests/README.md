@@ -85,3 +85,35 @@ reconnection from `onError` after 20 self-signed certificate failures with
 certificate verification enabled. On Linux it also fills a loopback accept
 queue to check the inherited TCP deadline through TlsClient, with threads
 enabled and disabled.
+
+## Ingress regression checks
+
+`tests --ingress-only` runs deterministic checks against the real ingress parser
+with a recording TCP transport. It checks the 64 KiB upgrade boundary (including
+split terminators and a coalesced first frame), admission of 64 MiB messages,
+message/fragment/control rejection before payload retention, and exact Warning,
+close and internal counter totals. It also measures growth over 32,768 one-byte
+fragments against plain vector growth, checks header-only advertised lengths,
+and destroys/disconnects/replaces the owner inside a truncation Warning. Two
+truncations must produce one Warning and count twice, including across reconnects.
+The full native suite includes these checks.
+
+Enable ASan and UBSan for the parser and harness with:
+
+```bash
+cmake -S addons/tcxWebSocket/tests -B /tmp/ws-tests \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTC_WEBSOCKET_SANITIZE=ON
+cmake --build /tmp/ws-tests -j4
+addons/tcxWebSocket/tests/bin/tests --ingress-only
+```
+
+The same `--ingress-only` entry runs the actual Emscripten `EM_JS` boundary under
+Node. The mock browser enforces the allowed browser close codes and delivers
+text and binary messages through Emscripten's real message callback. Allocation
+tracking verifies that oversized messages never reach its WASM allocation.
+Native rejection uses 1009; browser rejection uses application code 4009 because
+the browser API disallows sending 1009. Build with the Emscripten toolchain,
+`TC_WEB_BACKEND=GLES3` and `TC_WEBSOCKET_SANITIZE=ON`, then run the generated
+`bin/tests.js` using Node and `--ingress-only`. The test does not claim bounds on
+message assembly inside the browser. Limits of 2,147,483,648 and 4,294,967,280
+are exercised through the actual wasm32 import with tiny binary and UTF-8 messages.
