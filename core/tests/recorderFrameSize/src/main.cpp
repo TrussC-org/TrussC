@@ -1,14 +1,23 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if defined(__linux__) && !defined(__EMSCRIPTEN__) && !defined(__ANDROID__) && !defined(SOKOL_GLES3)
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
 #include <GL/glext.h>
 #include <X11/Xlib.h>
 #endif
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <limits>
+
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__) && \
+    (defined(_WIN32) || defined(__linux__) || (defined(__APPLE__) && !TARGET_OS_IPHONE))
+#define TC_RECORDER_DEVICE_CHECK 1
+#else
+#define TC_RECORDER_DEVICE_CHECK 0
+#endif
 
 using namespace tc;
 using trussc::internal::RecorderFrameLayout;
@@ -24,6 +33,28 @@ struct RecorderFrameTestAccess {
         return writer.completeCapture(source, acquire, copy, discard, submit);
     }
 };
+#if TC_RECORDER_DEVICE_CHECK
+// Same definition as audioListenerTeardown: both TUs can share allCoreTests.
+struct ScreenRecorderTestAccess {
+    static void startTap(ScreenRecorder& recorder, int rate, int channels) {
+        recorder.state_->startAudioTap(rate, channels);
+    }
+    static std::weak_ptr<void> lifetime(ScreenRecorder& recorder) {
+        return recorder.state_;
+    }
+    static std::unique_lock<std::mutex> lockWriter(ScreenRecorder& recorder) {
+        return std::unique_lock<std::mutex>(recorder.state_->writerMutex_);
+    }
+    static auto pendingCapture(ScreenRecorder& recorder) {
+        auto state = recorder.state_;
+        state->inFlight_.fetch_add(1);
+        return [state]() {
+            std::lock_guard<std::mutex> lock(state->writerMutex_);
+            state->finishCapture();
+        };
+    }
+};
+#endif
 }
 
 namespace {
@@ -34,7 +65,7 @@ void check(bool ok, const char* name) {
 }
 }
 
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if defined(__linux__) && !defined(__EMSCRIPTEN__) && !defined(__ANDROID__) && !defined(SOKOL_GLES3)
 namespace {
 bool gpuCompleted = false;
 class RecorderApp : public App {
@@ -137,8 +168,324 @@ public:
 }
 #endif
 
+#if TC_RECORDER_DEVICE_CHECK
+namespace {
+fs::path keepDirectory;
+bool deviceCompleted = false;
+
+class DeviceRecorderApp : public App {
+    using Clock = std::chrono::steady_clock;
+    static constexpr int requestWidth = 320, requestHeight = 240;
+    ScreenRecorder recorder;
+    EventListener afterFrame, logs;
+    fs::path directory;
+    // Shared with the log listener: a completion thread may still be inside it
+    // after a failed stop, so the counters must outlive this app.
+    struct Diagnostics { std::atomic<int> warnings{0}, errors{0}; };
+    std::shared_ptr<Diagnostics> diagnostics = std::make_shared<Diagnostics>();
+    int takeWidth = 0, takeHeight = 0, phase = 0, frames = 0;
+    int acceptedBeforeReturn = 0;
+    int observedWidth = 0, observedHeight = 0, stableFrames = 0;
+    int beforeWidth = 0, beforeHeight = 0;
+    uint64_t rejectedBefore = 0;
+    bool started = false, finished = false, stepChanged = false;
+    bool anyResize = false, anyMismatch = false, resumed = false, returnSeen = false;
+    bool screenStopAttempted = false, preserveOutput = false;
+    std::vector<std::string> skippedSteps;
+    Clock::time_point phaseStart = Clock::now();
+    Clock::time_point stableSince = phaseStart;
+    Clock::time_point began = phaseStart;
+
+    int accepted() {
+        // Metal appends on a completion thread; the public getter is not atomic.
+        auto lock = internal::ScreenRecorderTestAccess::lockWriter(recorder);
+        return recorder.getFrameCount();
+    }
+    double seconds() const {
+        return std::chrono::duration<double>(Clock::now() - phaseStart).count();
+    }
+    const char* stepName() const {
+        return phase == 1 ? "taller" : phase == 2 ? "wider" : "return";
+    }
+    void requestResize(int next) {
+        phase = next;
+        frames = 0;
+        stableFrames = 0;
+        stepChanged = false;
+        phaseStart = Clock::now();
+        stableSince = phaseStart;
+        beforeWidth = observedWidth = getFramebufferWidth();
+        beforeHeight = observedHeight = getFramebufferHeight();
+        rejectedBefore = recorder.getRejectedFrameCount();
+        if (phase == 3) acceptedBeforeReturn = accepted();
+        // Repeat the same API/units used before the take; never predict DPI pixels.
+        const int w = phase == 2 ? requestWidth * 3 / 2 : requestWidth;
+        const int h = phase == 1 ? requestHeight * 3 / 2 : requestHeight;
+        setWindowSize(w, h);
+        std::printf("resize step=%s requested=%dx%d take=%dx%d\n", stepName(), w, h,
+                    takeWidth, takeHeight);
+    }
+    void failedResult(const char* kind, const char* status, const fs::path& path) {
+        preserveOutput = true; // A late completion may still write here.
+        const auto file = json(internal::pathToUtf8(path)).dump();
+        std::printf("RESULT %s status=%s file=%s\n", kind, status, file.c_str());
+    }
+    bool stopScreen() {
+        screenStopAttempted = true;
+        const bool stopped = recorder.stop().ok();
+        check(stopped, "device screen take finalizes (drains Metal captures)");
+        if (!stopped) failedResult("screen", "stop-failed", directory / "screen.mp4");
+        return stopped;
+    }
+    void summary(const char* kind, const fs::path& path, int w, int h,
+                 int count, uint64_t rejected, int warningCount) {
+        std::error_code ec;
+        const auto bytes = fs::file_size(path, ec);
+        check(!ec && bytes > 0, "recording file is nonempty");
+        // Player support is optional (e.g. a device without a decoder). Its
+        // load diagnostics are outside the recording's zero-Error assertion.
+        VideoPlayer player;
+        player.setAutoPoster(false);
+        player.setUseHwAccel(false); // metadata check needs no Linux hardware probing
+        const bool loaded = player.load(path).ok();
+        std::string fileSize = "unavailable";
+        if (loaded) {
+            const int fw = player.getWidth(), fh = player.getHeight();
+            fileSize = std::to_string(fw) + "x" + std::to_string(fh);
+            check(fw == w && fh == h, "file dimensions equal the take framebuffer size");
+        } else {
+            std::printf("SKIP: %s file dimensions unavailable from VideoPlayer\n", kind);
+        }
+        player.close();
+        const auto file = json(internal::pathToUtf8(path)).dump();
+        std::printf("RESULT %s take=%dx%d accepted=%d rejected=%llu warnings=%d file=%s fileBytes=%llu fileSize=%s\n",
+            kind, w, h, count, static_cast<unsigned long long>(rejected), warningCount,
+            file.c_str(), ec ? 0ULL : static_cast<unsigned long long>(bytes),
+            fileSize.c_str());
+    }
+    void synchronousTake() {
+        diagnostics->warnings = 0;
+        VideoWriter writer;
+        Fbo match, mismatch;
+        match.allocate(takeWidth, takeHeight);
+        mismatch.allocate(takeWidth, takeHeight + 120);
+        for (Fbo* fbo : {&match, &mismatch}) {
+            fbo->begin();
+            clear(0.6f, 0.2f, 0.1f);
+            fbo->end();
+        }
+        check(writer.open(directory / "fbo.mp4", takeWidth, takeHeight).ok(), "device Fbo take opens");
+        if (!writer.isOpen()) {
+            failedResult("fbo", "open-failed", directory / "fbo.mp4");
+            logs = EventListener{};
+            return;
+        }
+        check(!writer.addFrame(mismatch).ok() && writer.getRejectedFrameCount() == 1 &&
+              writer.getFrameCount() == 0, "synchronous Fbo mismatch is refused and counted");
+        check(writer.addFrame(match).ok() && writer.getFrameCount() == 1 &&
+              writer.getRejectedFrameCount() == 1, "synchronous matching Fbo is accepted after refusal");
+        const bool closed = writer.close().ok();
+        check(closed, "device Fbo take finalizes");
+        if (!closed) {
+            failedResult("fbo", "stop-failed", directory / "fbo.mp4");
+            logs = EventListener{};
+            return; // No writer samples or finalized-file claims after failed close.
+        }
+        const int count = writer.getFrameCount();
+        const auto rejected = writer.getRejectedFrameCount();
+        const int warningCount = diagnostics->warnings.load();
+        check(warningCount == 1, "Fbo take emits exactly one layout Warning");
+        check(diagnostics->errors == 0, "device recordings emit zero Errors");
+        logs = EventListener{};
+        summary("fbo", directory / "fbo.mp4", takeWidth, takeHeight, count, rejected, warningCount);
+    }
+    void finish() {
+        if (finished) return;
+        finished = true;
+        if (stopScreen()) {
+            const int count = recorder.getFrameCount(); // successful stop drained completions
+            const auto rejected = recorder.getRejectedFrameCount();
+            const int warningCount = diagnostics->warnings.load();
+            check(count > 0, "screen take accepts matching frames");
+            if (anyResize || rejected > 0) {
+                check(anyMismatch && rejected > 0, "effective window resizes reject mismatching frames");
+                check(resumed, "effective window resizes are followed by verified matching-frame resume");
+                check(warningCount == 1, "screen take emits exactly one layout Warning");
+                for (const auto& step : skippedSteps) std::printf("SKIP: %s\n", step.c_str());
+            } else {
+                std::printf("SKIP: resize part: platform made no framebuffer changes within limits (taller, wider, return)\n");
+                check(warningCount == 0, "unchanged screen take emits no layout Warning");
+            }
+            check(diagnostics->errors == 0, "screen recording emits zero Errors");
+            logs = EventListener{};
+            summary("screen", directory / "screen.mp4", takeWidth, takeHeight, count, rejected, warningCount);
+        }
+        logs = EventListener{};
+        listenForDiagnostics();
+        synchronousTake();
+        deviceCompleted = true;
+        exitApp();
+    }
+    void listenForDiagnostics() {
+        logs = getLogger().onLog.listen([diagnostics = diagnostics](LogEventArgs& event) {
+            if (event.level == LogLevel::Warning &&
+                event.message.find("frame layout does not match") != std::string::npos) ++diagnostics->warnings;
+            if (event.level == LogLevel::Error) ++diagnostics->errors;
+        });
+    }
+    void tick() {
+        if (finished) return;
+        ++frames;
+        const int w = getFramebufferWidth(), h = getFramebufferHeight();
+        if (w != observedWidth || h != observedHeight) {
+            observedWidth = w;
+            observedHeight = h;
+            stableFrames = 0;
+            stableSince = Clock::now();
+            if (started) {
+                anyResize = true;
+                anyMismatch |= w != takeWidth || h != takeHeight;
+                stepChanged |= w != beforeWidth || h != beforeHeight;
+                std::printf("resize step=%s observed=%dx%d take=%dx%d\n", stepName(), w, h,
+                            takeWidth, takeHeight);
+            }
+        } else {
+            ++stableFrames;
+        }
+        // Bound (platform): native extents need a 12-frame/0.25-second dwell. Overflow of the enclosing wait is counted below.
+        const bool settled = stableFrames >= 12 &&
+            Clock::now() - stableSince >= std::chrono::duration<double>(0.25);
+        if (!started) {
+            // Bound (platform): initial native resize/DPI must settle. Overflow records FAIL and aborts before the take.
+            const bool timeout = frames >= 240 || seconds() >= 4;
+            if (!settled && !timeout) return;
+            if (!settled || w <= 0 || h <= 0) {
+                check(false, "initial framebuffer settles to a positive size within limit");
+                finished = true;
+                exitApp();
+                return;
+            }
+            takeWidth = w;
+            takeHeight = h;
+            std::printf("take requested=%dx%d settledFramebuffer=%dx%d\n",
+                        requestWidth, requestHeight, takeWidth, takeHeight);
+            VideoRecordSettings settings;
+            settings.fps = 60;
+            check(recorder.start(directory / "screen.mp4", settings).ok(), "device window take opens");
+            started = true;
+            check(recorder.writer().getWidth() == takeWidth && recorder.writer().getHeight() == takeHeight,
+                  "screen take uses the actual framebuffer dimensions");
+            if (!recorder.isRecording()) { finish(); return; }
+            frames = 0;
+            phaseStart = Clock::now();
+            return;
+        }
+        if (phase == 0) {
+            // Bound (platform): initial captures need a 12-frame/0.25-second dwell and four accepted frames. Overflow of the enclosing wait is counted below.
+            if (frames >= 12 && seconds() >= 0.25 && accepted() >= 4) requestResize(1);
+            // Bound (platform): initial matching captures may lag. Overflow fails the run with one check.
+            else if (frames >= 240 || seconds() >= 4) {
+                check(false, "initial matching screen frames arrive within limit");
+                requestResize(1);
+            }
+            return;
+        }
+        const bool matches = w == takeWidth && h == takeHeight;
+        const bool direction = phase == 1 ? w == takeWidth && h > takeHeight :
+                               phase == 2 ? w > takeWidth && h == takeHeight : matches;
+        if (phase == 3 && matches && !returnSeen) {
+            acceptedBeforeReturn = accepted();
+            returnSeen = true;
+        }
+        // Metal completion can lag afterFrame; require the appropriate counter to move.
+        const bool counted = phase == 3 ? accepted() > acceptedBeforeReturn :
+                             recorder.getRejectedFrameCount() > rejectedBefore;
+        const bool ready = settled && direction && counted && (phase == 3 || stepChanged);
+        // Bound (platform): OS resize/completion may stall. Overflow prints SKIP only for unchanged steps; effective mismatch or return failures are counted FAILs.
+        const bool timeout = frames >= 240 || seconds() >= 4;
+        if (!ready && !timeout) return;
+        if (phase < 3) {
+            if (!stepChanged) {
+                skippedSteps.push_back(std::string("resize step=") + stepName() +
+                    " made no framebuffer change within limit framebuffer=" +
+                    std::to_string(w) + "x" + std::to_string(h));
+            } else {
+                if (!direction) std::printf("resize step=%s unexpected framebuffer=%dx%d take=%dx%d\n",
+                                           stepName(), w, h, takeWidth, takeHeight);
+                check(direction && settled, "effective resize settles in the requested direction relative to take");
+                check(counted, "effective mismatching framebuffer is refused within limit");
+            }
+        } else if (matches) {
+            // Mandatory whenever the return reached the take, even if a prior step was skipped.
+            resumed = settled && counted;
+            check(resumed, "matching captures resume within the return deadline");
+        } else {
+            std::printf("resize step=return unexpected framebuffer=%dx%d take=%dx%d\n",
+                        w, h, takeWidth, takeHeight);
+            check(false, "framebuffer returns to the recorded take size within limit");
+        }
+        if (phase < 3) requestResize(phase + 1);
+        else finish();
+    }
+
+public:
+    void setup() override {
+        directory = (keepDirectory.empty() ? fs::temp_directory_path() : keepDirectory) /
+            ("tc-recorder-device-" + std::to_string(Clock::now().time_since_epoch().count()));
+        fs::create_directories(directory);
+        listenForDiagnostics();
+        phaseStart = stableSince = Clock::now();
+        observedWidth = getFramebufferWidth();
+        observedHeight = getFramebufferHeight();
+        setWindowSize(requestWidth, requestHeight);
+        afterFrame = events().afterFrame.listen([this] { tick(); });
+    }
+    void update() override {
+        // Bound (platform): device recording cannot wait indefinitely. Overflow records FAIL and attempts safe finalization.
+        if (!finished && Clock::now() - began > std::chrono::seconds(25)) {
+            check(false, "device recording completes within global deadline");
+            if (started) finish();
+            else exitApp();
+        }
+    }
+    void draw() override { clear(0.2f, 0.4f, 0.6f); }
+    void cleanup() override {
+        if (started && !screenStopAttempted) stopScreen();
+        afterFrame = EventListener{};
+        logs = EventListener{};
+        if (preserveOutput) {
+            const auto path = json(internal::pathToUtf8(directory)).dump();
+            std::printf("Output retained after finalization failure (pending work may still write): %s\n", path.c_str());
+        } else if (keepDirectory.empty() && !directory.empty()) {
+            std::error_code ec;
+            fs::remove_all(directory, ec);
+            check(!ec, "temporary device recordings removed");
+        }
+    }
+};
+
+}
+#endif
+
 TC_CORE_TEST_MAIN(int argc, char** argv) {
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+    if (argc > 1 && std::string(argv[1]) == "--device-check") {
+#if TC_RECORDER_DEVICE_CHECK
+        if (argc == 4 && std::string(argv[2]) == "--keep") keepDirectory = fs::absolute(argv[3]);
+        else if (argc != 2) {
+            std::printf("Usage: recorderFrameSize --device-check [--keep dir]\n");
+            return 2;
+        }
+        WindowSettings settings;
+        settings.setSize(320, 240).setHighDpi(true).setSampleCount(1);
+        return tcCoreTest::runDisplayTest<DeviceRecorderApp>(settings, failures, [] {
+            check(deviceCompleted, "portable device checks complete");
+        });
+#else
+        std::printf("SKIP: --device-check requires macOS, Windows or Linux desktop/Pi\n");
+        return 0;
+#endif
+    }
+#if defined(__linux__) && !defined(__EMSCRIPTEN__) && !defined(__ANDROID__) && !defined(SOKOL_GLES3)
     if (argc > 1 && std::string(argv[1]) == "--gpu-check") {
         WindowSettings settings;
         settings.width = settings.height = 64;
