@@ -145,7 +145,13 @@ public:
         };
         // Bound (gpu): device texture limit bounds dimensions before resource creation and mip arithmetic.
         if (w <= 0 || h <= 0 || w > limit || h > limit) {
-            failed();
+            clear();
+            if (w <= 0 || h <= 0) {
+                logWarning("Fbo") << "allocate failed: size " << w << "x" << h << " is not positive";
+            } else {
+                logWarning("Fbo") << "allocate failed: size " << w << "x" << h
+                    << " exceeds the device texture limit " << limit;
+            }
             return;
         }
 
@@ -560,9 +566,9 @@ private:
         drawnThisFrame_ = (lastDrawFrame_ == fc);
     }
 
+    // Backend failures within the size limit (pool or resource creation).
     static void warnAllocationFailure_(int w, int h) {
-        logWarning("Fbo") << "allocate failed for " << w << "x" << h
-            << " (device texture limit " << sg_query_limits().max_image_size_2d << ")";
+        logWarning("Fbo") << "allocate failed: the GPU rejected the " << w << "x" << h << " attachments";
     }
 
     // Texture::isAllocated alone does not validate its views or sampler.

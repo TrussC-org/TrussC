@@ -136,8 +136,8 @@ private:
                     int warnings = 0, errors = 0;
                     EventListener sub = getLogger().onLog.listen([&](LogEventArgs& e) {
                         if (e.level == LogLevel::Warning &&
-                            e.message.find("[Fbo] allocate failed for " + to_string(w) + "x" + to_string(h)) == 0 &&
-                            e.message.find("device texture limit " + to_string(limit)) != string::npos) ++warnings;
+                            e.message == "[Fbo] allocate failed: size " + to_string(w) + "x" + to_string(h) +
+                                " exceeds the device texture limit " + to_string(limit)) ++warnings;
                         if (e.level == LogLevel::Error) ++errors;
                     });
                     probe.allocate(w, h, samples, TextureFormat::RGBA8, mips);
@@ -240,8 +240,17 @@ private:
             if (!view.id) break;
             heldViews.push_back(view);
         }
+        int rejected = 0, sizeWarnings = 0;
+        EventListener poolSub = getLogger().onLog.listen([&](LogEventArgs& e) {
+            if (e.level != LogLevel::Warning) return;
+            if (e.message == "[Fbo] allocate failed: the GPU rejected the 8x8 attachments") ++rejected;
+            if (e.message.find("limit") != string::npos) ++sizeWarnings;
+        });
         probe.allocate(8, 8);
+        poolSub.disconnect();
         check("pool-pressure allocation fails without views", !probe.isAllocated());
+        check("backend failure logs one rejection Warning without a size limit",
+              rejected == 1 && sizeWarnings == 0);
         for (sg_view view : heldViews) sg_dealloc_view(view);
         probe.allocate(8, 8);
         check("pool-pressure retry succeeds in same frame without drain", probe.isAllocated());
