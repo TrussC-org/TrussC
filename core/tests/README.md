@@ -195,6 +195,10 @@ LIBGL_ALWAYS_SOFTWARE=1 \
 
 ## Tests
 
+- `msaaResolveScissor/` — #861: whole-attachment resolve after a 1x1-scissored
+  final draw, at samples 1/4 with and without mips. Checks every RGBA pixel,
+  copyTo under a parent scissor, an empty clipped CLEAR pass, and clipping in
+  the following pass. Run with `--gpu-check` on GLCORE and GLES3.
 - `shaderBindingSlots/` — headless Shader/FullscreenShader slot limits (#362):
   rejected view/image slots leave pending bindings and the image cache unchanged;
   every valid view slot binds, but only supported sampler slots are written.

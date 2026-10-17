@@ -11692,6 +11692,9 @@ _SOKOL_PRIVATE void _sg_gl_end_render_pass(const _sg_attachments_ptrs_t* atts) {
                     _SG_INFO(TRUSSC_GL_V3D_RESOLVE_FLUSH);
                 }
                 if (!fb_read_bound) {
+                    // [TrussC] Resolve the whole attachment, regardless of the last draw's scissor (#861).
+                    // Scissor enable isn't cached: _sg_gl_reset_state_cache() keeps it always enabled.
+                    glDisable(GL_SCISSOR_TEST);
                     glBindFramebuffer(GL_READ_FRAMEBUFFER, _sg.gl.fb);
                     fb_read_bound = true;
                 }
@@ -11703,6 +11706,11 @@ _SOKOL_PRIVATE void _sg_gl_end_render_pass(const _sg_attachments_ptrs_t* atts) {
                 glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
                 fb_draw_bound = true;
             }
+        }
+
+        // [TrussC] Restore sokol's always-enabled scissor invariant after all resolve blits (#861).
+        if (fb_read_bound) {
+            glEnable(GL_SCISSOR_TEST);
         }
 
         // invalidate framebuffers
