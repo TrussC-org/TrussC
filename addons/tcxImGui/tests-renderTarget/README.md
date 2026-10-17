@@ -23,7 +23,19 @@ Fixtures cover RGBA8/RGBA16F, samples 1/4, the five-row byte-alpha table,
 premultiplied chaining, clipping, user reset callbacks, both pipeline recipes,
 context isolation, same-context refusal, pending window preservation, nested
 context restoration, next-commit recovery, and ordinary main/secondary window
-onRender UI at DPI 2 with pixelPerfect off/on. Single-window platforms
+onRender UI at DPI 2 with pixelPerfect off/on. All screen readbacks and their
+pixel/image checks run in the capturing window's `afterFrame`, after `present()`
+has committed and before another draw. The pending-across-commit marker gets a
+separate present before the ordinary screen scene clears it; its check still
+samples at the DPI saved when the pending frame was built. The ordinary screen
+scenes run once each and retain their capture names and byte-exact baselines.
+
+The main window polls secondary progress by wall clock, including before the
+secondary's first setup. Three seconds without a secondary frame prints a SKIP
+naming both `imguiScreenDpi2.pixelPerfectOff.secondary` and
+`imguiScreenDpi2.pixelPerfectOn.secondary` (occluded or hidden), then allows the
+other checks to finish. The whole run fails if it exceeds 30 seconds.
+Single-window platforms
 (Raspberry Pi, web, mobile) print a SKIP for the secondary window. Pass `--native-dpi2` on a
 DPI-2 display (Linux Xvfb: set the Xft.dpi resource to 192 and enable high DPI).
 Add `--msaa4` to request a four-sample swapchain.

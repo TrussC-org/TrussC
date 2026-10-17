@@ -1,6 +1,7 @@
 #include <TrussC.h>
 #include <tcxImGui.h>
 #include "../../../../core/tests/common/tcDisplayTest.h"
+#include <chrono>
 #include <cstdio>
 #include <fstream>
 using namespace tc;
@@ -258,7 +259,9 @@ void screenUi(bool pixelMode) {
     ImGui::Button("fixed"); ImGui::End(); imguiEnd();
 }
 void screenCapture(const std::string& name) {
-    Pixels image; check("screen readback",bool(grabScreen(image)));
+    Pixels image; const bool captured=bool(grabScreen(image));
+    check("screen readback",captured);
+    if(!captured) return;
     pixel(image,20,20,{255,0,0,255},"DPI 2 first device pixel",false);
     pixel(image,59,59,{255,0,0,255},"DPI 2 last device pixel",false);
     pixel(image,19,20,{0,0,0,255},"DPI 2 outside left",false);
@@ -280,16 +283,25 @@ void screenCapture(const std::string& name) {
 #endif
 }
 bool secondaryComplete=false;
+bool secondaryPresented=false; // the SKIP below only applies before the first present
+using Clock = std::chrono::steady_clock;
+auto lastSecondaryFrame = Clock::now();
+// Bound (platform): an occluded secondary window never presents (#878 pattern). Overflow skips its captures and prints one SKIP.
+constexpr auto noFrameLimit = std::chrono::seconds(3);
+// Bound (platform): a stalled window loop must not hang the run. Overflow fails the run with one check.
+constexpr auto runLimit = std::chrono::seconds(30);
 class SecondaryFixture : public App {
     int frame_=0;
-    EventListener render_;
+    EventListener after_;
 public:
     void setup() override {
         imguiSetup(); fixedContext();
-        render_=events().onRender.listen([this] {
+        after_=events().afterFrame.listen([this] {
+            lastSecondaryFrame=Clock::now(); secondaryPresented=true;
+            if(secondaryComplete) return; // Main may have skipped an unpresented window.
             if(frame_==1 || frame_==2) screenCapture(std::string("imguiScreenDpi2.")+(frame_==1?"pixelPerfectOff":"pixelPerfectOn")+".secondary");
             if(frame_==2) secondaryComplete=true;
-        },2000);
+        });
     }
     void draw() override {
         clear(0,0,0); setupScreenOrtho();
@@ -299,13 +311,15 @@ public:
 };
 class Fixture : public App {
     int frame_=0;
-    EventListener render_,log_;
+    EventListener render_,after_,log_;
+    Clock::time_point started_=Clock::now();
     std::shared_ptr<Window> secondary_;
 #ifndef TC_IMGUI_BASE_FIXTURE
     ImGuiManager recovery_;
     Fbo recoveryFbo_;
     simgui_tc_context pendingAcrossCommit_ = {};
     ImGuiContext* pendingImGui_ = nullptr;
+    bool pendingReadback_=false, pendingChecked_=false;
     float pendingDpi_ = 1; // DPI the pending frame was built at (frame 0, before screenUi())
 #endif
 public:
@@ -323,9 +337,24 @@ public:
         manifest["version"]=getVersion();
         manifest["dpiSource"]=nativeDpi2?"native window DPI from Xft.dpi":"simulated window metrics";
         manifest["backend"]=getBackendName(); manifest["baseCapability"]=screenOnly?"screen-only; target-bound UI unavailable on base":"target-bound UI";
-        render_=events().onRender.listen([this] {
+        // Restore the simulated main-window identity before present() returns.
+        render_=events().onRender.listen([] {
+            internal::currentWindowContext().isMain=true;
+        },2000);
+        after_=events().afterFrame.listen([this] {
+#ifndef TC_IMGUI_BASE_FIXTURE
+            if(pendingReadback_) {
+                Pixels image; const bool captured=bool(grabScreen(image));
+                check("pending frame after commit readback",captured);
+                if(captured) pixel(image,110,int(20*pendingDpi_),{0,0,255,255},"original pending frame renders after commit",false);
+                pendingReadback_=false; pendingChecked_=true;
+                return;
+            }
+#endif
             if(frame_==1 && !screenOnly) {
-                Pixels image; check("offscreen-to-screen capture",bool(grabScreen(image)));
+                Pixels image; const bool captured=bool(grabScreen(image));
+                check("offscreen-to-screen capture",captured);
+                if(!captured) return;
                 pixel(image,20,20,{255,0,0,255},"context A on screen",false);
                 pixel(image,178,20,{0,255,0,255},"context B on screen",false);
                 pixel(image,100,20,{0,0,255,255},"no foreign UI leakage",false);
@@ -335,16 +364,49 @@ public:
             }
             if(frame_==2 || frame_==3)
                 screenCapture(std::string("imguiScreenDpi2.")+(frame_==2?"pixelPerfectOff":"pixelPerfectOn")+".main");
-            internal::currentWindowContext().isMain=true;
-        },2000);
+        });
+    }
+    void update() override {
+        const auto now=Clock::now();
+        if(now-started_>runLimit) {
+            check("all fixtures completed within 30 seconds (wall-clock timeout)",false);
+            exitApp(1);
+            return;
+        }
+        // Poll from the main window even if the secondary never reaches setup().
+        // Once it has presented, both captures must finish (or the run times out).
+        if(secondary_ && !secondaryComplete && !secondaryPresented && now-lastSecondaryFrame>=noFrameLimit) {
+            std::puts("SKIP: imguiScreenDpi2.pixelPerfectOff.secondary, imguiScreenDpi2.pixelPerfectOn.secondary: window renders no frames (occluded or hidden)");
+            secondaryComplete=true;
+        }
     }
     void draw() override {
 #ifndef TC_IMGUI_BASE_FIXTURE
-        if(frame_==1 && !screenOnly) {
+        if(frame_==1 && !screenOnly && !pendingChecked_) {
             const auto generation=internal::currentTarget().resources().generation;
             const auto budget=internal::sglBudget();
             internal::resizeSgl(budget.maxVertices+32,budget.maxCommands+16);
             check("actual sgl rebuild replaces generation",internal::currentTarget().resources().generation!=generation);
+            // Present the intermediate blue marker before the ordinary screen
+            // scene clears it. Keep frame_ at 1 until afterFrame has read it;
+            // screenUi() is still called exactly once for each original scene.
+            clear(0,0,0); setupScreenOrtho(); setColor(1);
+            recoveryFbo_.allocate(48,40,4,TextureFormat::RGBA16F);
+            recoveryFbo_.begin(0,0,0,0); {auto ui=recovery_.scoped(); check("same context recovers after normal commit",bool(ui)); if(ui) marker(IM_COL32(0,255,0,255));} recoveryFbo_.end();
+            pixel(read(recoveryFbo_),20,20,{0,255,0,255},"next frame marker");
+            const auto previous=simgui_tc_get_context();
+            auto* previousImGui=ImGui::GetCurrentContext();
+            const int pendingErrors=errors;
+            simgui_frame_desc_t unusedDesc={};
+            check("pending frame survives commit and refuses overwrite",!tcx::imgui::detail::beginTargetFrame(pendingAcrossCommit_,unusedDesc));
+            check("pending overwrite emits one Error",errors==pendingErrors+1);
+            tcx::imgui::detail::renderTargetFrame(pendingAcrossCommit_);
+            manifest["checks"]["pendingAcrossCommit"]["tcErrors"]=errors-pendingErrors;
+            forgetContext(pendingImGui_); pendingImGui_=nullptr;
+            tcx::imgui::detail::destroyTargetContext(pendingAcrossCommit_); pendingAcrossCommit_={};
+            simgui_tc_set_context(previous); ImGui::SetCurrentContext(previousImGui);
+            pendingReadback_=true;
+            return; // Framework present() commits; afterFrame reads before any later draw.
         }
 #endif
         clear(0,0,0); setupScreenOrtho(); setColor(1);
@@ -362,18 +424,15 @@ public:
             secondaryComplete=true;
         } else if(frame_==3) {
             WindowSettings secondarySettings; secondarySettings.setSize(nativeDpi2?256:512,nativeDpi2?192:384); secondarySettings.setHighDpi(nativeDpi2); secondarySettings.sampleCount=screenSamples;
+            lastSecondaryFrame=Clock::now();
             secondary_=createWindow(secondarySettings); check("real secondary window created",bool(secondary_));
             if(secondary_) secondary_->setApp(std::make_shared<SecondaryFixture>());
+            else secondaryComplete=true; // Creation already failed; do not wait for a tick.
         }
 #ifndef TC_IMGUI_BASE_FIXTURE
         if(frame_==0 && !screenOnly) {
             recovery_.setupOffscreen(); fixedContext(); recoveryFbo_.allocate(32,32);
             recoveryFbo_.begin(0,0,0,0); {auto ui=recovery_.scoped(); if(ui) marker(IM_COL32(255,0,0,255));} recoveryFbo_.end();
-        }
-        if(frame_==1 && !screenOnly) {
-            recoveryFbo_.allocate(48,40,4,TextureFormat::RGBA16F);
-            recoveryFbo_.begin(0,0,0,0); {auto ui=recovery_.scoped(); check("same context recovers after normal commit",bool(ui)); if(ui) marker(IM_COL32(0,255,0,255));} recoveryFbo_.end();
-            pixel(read(recoveryFbo_),20,20,{0,255,0,255},"next frame marker");
         }
 #endif
 #ifndef TC_IMGUI_BASE_FIXTURE
@@ -393,22 +452,6 @@ public:
             marker(IM_COL32(0,0,255,255),100/pendingDpi_);
             simgui_tc_set_context(previous); ImGui::SetCurrentContext(previousImGui);
         }
-        if(frame_==1 && !screenOnly) {
-            const auto previous=simgui_tc_get_context();
-            auto* previousImGui=ImGui::GetCurrentContext();
-            const int pendingErrors=errors;
-            simgui_frame_desc_t unusedDesc={};
-            check("pending frame survives commit and refuses overwrite",!tcx::imgui::detail::beginTargetFrame(pendingAcrossCommit_,unusedDesc));
-            check("pending overwrite emits one Error",errors==pendingErrors+1);
-            tcx::imgui::detail::renderTargetFrame(pendingAcrossCommit_);
-            Pixels pendingPixels; check("pending frame after commit readback",bool(grabScreen(pendingPixels)));
-            pixel(pendingPixels,110,int(20*pendingDpi_),{0,0,255,255},"original pending frame renders after commit",false);
-            manifest["checks"]["pendingAcrossCommit"]["tcErrors"]=errors-pendingErrors;
-            forgetContext(pendingImGui_); pendingImGui_=nullptr;
-            tcx::imgui::detail::destroyTargetContext(pendingAcrossCommit_); pendingAcrossCommit_={};
-            simgui_tc_set_context(previous); ImGui::SetCurrentContext(previousImGui);
-            clear(0,0,0); // retain the ordinary screen fixture's base image
-        }
 #endif
         if(frame_>=5 && secondaryComplete) {
             if(secondary_) secondary_->close();
@@ -421,7 +464,6 @@ public:
             completed=true; exitApp();
         }
         ++frame_;
-        if(frame_>90) {check("secondary fixtures completed within frame budget",false); exitApp();}
     }
 };
 }
