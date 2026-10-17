@@ -23,7 +23,8 @@ Fixtures cover RGBA8/RGBA16F, samples 1/4, the five-row byte-alpha table,
 premultiplied chaining, clipping, user reset callbacks, both pipeline recipes,
 context isolation, same-context refusal, pending window preservation, nested
 context restoration, next-commit recovery, and ordinary main/secondary window
-onRender UI at DPI 2 with pixelPerfect off/on. Pass `--native-dpi2` on a
+onRender UI at DPI 2 with pixelPerfect off/on. Single-window platforms
+(Raspberry Pi, web, mobile) print a SKIP for the secondary window. Pass `--native-dpi2` on a
 DPI-2 display (Linux Xvfb: set the Xft.dpi resource to 192 and enable high DPI).
 Add `--msaa4` to request a four-sample swapchain.
 `requestedScreenSamples` records that request; `screenSamples` and each screen

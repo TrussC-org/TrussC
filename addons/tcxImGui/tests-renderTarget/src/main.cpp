@@ -306,6 +306,7 @@ class Fixture : public App {
     Fbo recoveryFbo_;
     simgui_tc_context pendingAcrossCommit_ = {};
     ImGuiContext* pendingImGui_ = nullptr;
+    float pendingDpi_ = 1; // DPI the pending frame was built at (frame 0, before screenUi())
 #endif
 public:
     void setup() override {
@@ -355,7 +356,11 @@ public:
 #endif
         }
         if(frame_==1 || frame_==2) screenUi(frame_==2);
-        if(frame_==3) {
+        if(frame_==3 && !internal::supportsSecondaryWindows()) {
+            // Single-window platforms (Pi, web, mobile): no secondary fixtures to wait for.
+            std::puts("SKIP: secondary windows unsupported on this platform");
+            secondaryComplete=true;
+        } else if(frame_==3) {
             WindowSettings secondarySettings; secondarySettings.setSize(nativeDpi2?256:512,nativeDpi2?192:384); secondarySettings.setHighDpi(nativeDpi2); secondarySettings.sampleCount=screenSamples;
             secondary_=createWindow(secondarySettings); check("real secondary window created",bool(secondary_));
             if(secondary_) secondary_->setApp(std::make_shared<SecondaryFixture>());
@@ -382,9 +387,10 @@ public:
             simgui_tc_set_context(pendingAcrossCommit_); fixedContext();
             pendingImGui_=ImGui::GetCurrentContext();
             simgui_frame_desc_t frameDesc={}; frameDesc.width=getFramebufferWidth(); frameDesc.height=getFramebufferHeight();
-            frameDesc.dpi_scale=getDpiScale(); frameDesc.delta_time=1.f/60;
+            pendingDpi_=getDpiScale();
+            frameDesc.dpi_scale=pendingDpi_; frameDesc.delta_time=1.f/60;
             check("pending context reserves before normal present",tcx::imgui::detail::beginTargetFrame(pendingAcrossCommit_,frameDesc));
-            marker(IM_COL32(0,0,255,255),100/getDpiScale());
+            marker(IM_COL32(0,0,255,255),100/pendingDpi_);
             simgui_tc_set_context(previous); ImGui::SetCurrentContext(previousImGui);
         }
         if(frame_==1 && !screenOnly) {
@@ -396,7 +402,7 @@ public:
             check("pending overwrite emits one Error",errors==pendingErrors+1);
             tcx::imgui::detail::renderTargetFrame(pendingAcrossCommit_);
             Pixels pendingPixels; check("pending frame after commit readback",bool(grabScreen(pendingPixels)));
-            pixel(pendingPixels,110,int(20*getDpiScale()),{0,0,255,255},"original pending frame renders after commit",false);
+            pixel(pendingPixels,110,int(20*pendingDpi_),{0,0,255,255},"original pending frame renders after commit",false);
             manifest["checks"]["pendingAcrossCommit"]["tcErrors"]=errors-pendingErrors;
             forgetContext(pendingImGui_); pendingImGui_=nullptr;
             tcx::imgui::detail::destroyTargetContext(pendingAcrossCommit_); pendingAcrossCommit_={};
