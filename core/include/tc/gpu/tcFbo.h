@@ -565,6 +565,17 @@ private:
         return true;
     }
 
+    // GL without native texture views binds the entire image: its shader LOD
+    // must remain relative to the image rather than to the requested view.
+    static void applyMipSource_(int level) {
+        const auto backend = sg_query_backend();
+        const bool wholeImage = (backend == SG_BACKEND_GLCORE || backend == SG_BACKEND_GLES3)
+            && !sg_query_features().gl_texture_views;
+        tc_fbomip_mip_params_t params = {};
+        params.sourceMip[0] = wholeImage ? float(level) : 0.0f;
+        sg_apply_uniforms(UB_tc_fbomip_mip_params, SG_RANGE(params));
+    }
+
     // Copy src's mip 0 into dst's mip 0 with the shared 1:1 blit pipeline.
     // Used only for begin() WITHOUT clear on a non-MSAA Fbo right after a
     // version switch: LOAD semantics require the previous content to be
@@ -587,6 +598,7 @@ private:
         bind.views[VIEW_tc_fbomip_srcTex] = src.getViewForMip(0);
         bind.samplers[SMP_tc_fbomip_srcSmp] = s.sampler;
         sg_apply_bindings(&bind);
+        applyMipSource_(0);
         sg_draw(0, 4, 1);
     }
 
@@ -699,7 +711,7 @@ private:
                 bind.views[VIEW_tc_fbomip_srcTex] = curColorTex_().getViewForMip(level - 1);
                 bind.samplers[SMP_tc_fbomip_srcSmp] = s.sampler;
                 sg_apply_bindings(&bind);
-
+                applyMipSource_(level - 1);
                 sg_draw(0, 4, 1);
             }
 
@@ -719,7 +731,7 @@ private:
                 bind.views[VIEW_tc_fbomip_srcTex] = mipScratchTexture_.getViewForMip(level);
                 bind.samplers[SMP_tc_fbomip_srcSmp] = s.sampler;
                 sg_apply_bindings(&bind);
-
+                applyMipSource_(level);
                 sg_draw(0, 4, 1);
             }
         }

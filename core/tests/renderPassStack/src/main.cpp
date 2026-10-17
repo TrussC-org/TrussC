@@ -49,6 +49,8 @@ void patch(Shader& shader, bool right) {
     shader.submitVertices(vertices, 4, PrimitiveType::TriangleStrip);
 }
 void stateAndPixels(int samples, bool differentFormat) {
+    std::printf("CASE stateAndPixels frame=0 samples=%d childFormat=%s\n",
+                samples, differentFormat ? "RGBA16F" : "RGBA8");
     Fbo a, b, c;
     a.allocate(64,48,samples);
     b.allocate(37,29,samples,differentFormat ? TextureFormat::RGBA16F : TextureFormat::RGBA8,true);
@@ -151,6 +153,8 @@ void depthPixels(int samples) {
     expect(read(a),48,32,Color(0,1,0),"fresh LOAD activation clears old depth");
 }
 void shaderPixels(int samples, bool differentFormat) {
+    std::printf("CASE shaderPixels frame=0 samples=%d childFormat=%s\n",
+                samples, differentFormat ? "RGBA16F" : "RGBA8");
     Fbo a,b,c,reference;
     a.allocate(64,48,samples);
     b.allocate(37,29,samples,differentFormat ? TextureFormat::RGBA16F : TextureFormat::RGBA8);
@@ -322,6 +326,7 @@ void misuseAndScopes() {
     check("failed scope construction rolls back its activation and resumes parent", constructionThrew &&
           transferState.starts == 1 && transferState.ends == 1 && !transfer.activation && &internal::currentTarget() == parent && parent->inPass);
     unsigned char bytes[16*12*4] = {};
+    std::puts("CASE intentional readback rejection inside public Fbo (not an IBL readback)");
     check("readback still rejects any public Fbo activation", !b.readPixels(bytes));
     a.end();
     auto& bottom = internal::currentTarget();
@@ -339,6 +344,7 @@ void versionCopyPixels() {
     expect(image,56,12,Color(0,1,0),"new version receives subsequent draws");
 }
 void environmentPixels() {
+    std::puts("CASE environmentPixels frame=0 outerSamples=4 childSamples=1");
     Pixels hdr; hdr.allocate(16,8,4,PixelFormat::F32);
     auto* values = static_cast<float*>(hdr.getDataVoid());
     for (int y=0;y<8;++y) for (int x=0;x<16;++x) {
@@ -358,6 +364,7 @@ void environmentPixels() {
     expect(read(a),8,8,Color(1,0,0),"IBL scopes preserve the outer MSAA draw");
     FullscreenShader cube, copy;
     check("IBL probe shaders load", cube.load(stack_cube_shader_desc) && copy.load(tc_fbomip_blit_shader_desc));
+    copy.setParams(tc_fbomip_mip_params_t{});
     Fbo probe; probe.allocate(8,8);
     const Vec3 directions[] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
     auto sample = [&](const Texture& texture, Vec3 direction, int level) {
@@ -417,6 +424,8 @@ public:
         });
     }
     void draw() override {
+        std::printf("FRAME renderPassStack index=%d windowSamples=%d\n", frame_,
+                    internal::currentWindowContext().swapchainTarget.sampleCount);
         if (frame_ == 2) { completed = true; exitApp(); return; }
         if (frame_ == 0) {
             for (int samples : {1,4}) for (bool different : {false,true}) {
@@ -454,7 +463,10 @@ public:
         nestedShader_.begin();
         screenChild_.begin(0,0,1); screenChild_.end();
         nestedShader_.end(); patch(screenShader_,true); screenShader_.end();
-        if (frame_ == 0) unfinished_.begin(0,0,1); // present must recover before submitting the screen
+        // Deliberate misuse: also crosses Node::drawTree's matrix guard. Its
+        // pushMatrix -1 warning occurs after every pixel case above, and
+        // present() must unwind this target before afterFrame's readback.
+        if (frame_ == 0) unfinished_.begin(0,0,1);
         ++frame_;
     }
 };
