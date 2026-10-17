@@ -249,6 +249,28 @@ fs::path internal::platformAppBundlePath() {
 // ---------------------------------------------------------------------------
 // captureWindow - 現在のウィンドウをキャプチャ
 // ---------------------------------------------------------------------------
+std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
+    const void* view = !ctx.isMain ? ctx.lastSwapchain.d3d11.render_view : nullptr;
+    if (!view) view = sapp_get_swapchain().d3d11.render_view;
+    if (view) {
+        ID3D11Resource* resource = nullptr;
+        ((ID3D11RenderTargetView*)view)->GetResource(&resource);
+        if (resource) {
+            ID3D11Texture2D* texture = nullptr;
+            const HRESULT hr = resource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&texture);
+            resource->Release();
+            if (SUCCEEDED(hr) && texture) {
+                D3D11_TEXTURE2D_DESC desc;
+                texture->GetDesc(&desc);
+                texture->Release();
+                return {size_t(desc.Width), size_t(desc.Height)};
+            }
+        }
+    }
+    if (!ctx.isMain) return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
+    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+}
+
 bool captureWindow(Pixels& outPixels) {
     // Pick the render-target view of the CURRENT window: a secondary window's
     // context records its own swapchain in lastSwapchain (beginSwapchainPassInternal),

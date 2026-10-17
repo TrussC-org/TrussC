@@ -175,7 +175,8 @@ struct WindowContext {
     // it) must LOAD color and depth so the content already rendered into the
     // drawable survives (issue #191). Reset in present() after sg_commit().
     bool swapchainPassStartedThisFrame = false;
-    // Metal drawable actually rendered into this frame (see tcGlobal.cpp notes)
+    // Borrowed Metal drawable rendered into this frame. Valid only until the
+    // native frame callback returns; clear after afterFrame and capture drains.
     const void* lastSwapchainDrawable = nullptr;
     // Full swapchain description this frame actually rendered into (recorded by
     // beginSwapchainPassInternal, same timing as lastSwapchainDrawable). Used by
@@ -184,6 +185,10 @@ struct WindowContext {
     // recording reads back ITS surface instead of the main swapchain. On macOS
     // capture reads lastSwapchainDrawable directly and ignores this.
     sg_swapchain lastSwapchain{};
+    void clearFrameDrawable() {
+        lastSwapchainDrawable = nullptr;
+        lastSwapchain.metal.current_drawable = nullptr;
+    }
     std::vector<ScissorRect> scissorStack;
     ScissorRect currentScissor = {0, 0, 0, 0, false};
     // Current 2D blend mode (the "role"); actual sgl pipeline in currentTarget

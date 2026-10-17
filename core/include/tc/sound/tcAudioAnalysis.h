@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace trussc {
@@ -47,12 +48,18 @@ public:
         framesWritten_.store(start + frames, std::memory_order_release);
     }
 
-    AudioOutputSnapshot snapshot(size_t frames) const {
+    std::pair<size_t, size_t> snapshotShape(size_t frames) const {
+        return {std::min(frames, capacity_), size_t(channels_)};
+    }
+
+    AudioOutputSnapshot snapshot(size_t frames, void (*admit)(size_t, size_t) = nullptr) const {
         AudioOutputSnapshot result;
         result.sampleRate = sampleRate_;
         result.channels = channels_;
         result.capacity = capacity_;
         frames = std::min(frames, capacity_);
+        // Bound (security): external snapshot copies need credits before vector growth. Overflow rejects the request and is counted.
+        if (admit) admit(frames, size_t(channels_));
         result.samples.resize(frames * size_t(channels_));
         // Atomic payloads make even an overlapping read data-race-free.
         // Only reject writes that can overwrite the copied range. Half a second
@@ -89,7 +96,7 @@ private:
 };
 
 struct AudioAnalysisAccess {
-    static AudioOutputSnapshot snapshot(AudioEngine& engine, size_t frames);
+    static AudioOutputSnapshot snapshot(AudioEngine& engine, size_t frames, void (*admit)(size_t, size_t) = nullptr);
 };
 
 } // namespace internal

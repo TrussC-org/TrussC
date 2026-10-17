@@ -31,7 +31,148 @@
 namespace trussc {
 namespace mcp {
 
+namespace {
+struct AdmissionState {
+    std::mutex mutex;
+    AdmissionLimits limits;
+    std::atomic<size_t> connections{0};
+    size_t bytes = 0;
+    size_t screenshots = 0;
+    std::atomic<uint64_t> rejected[static_cast<size_t>(internal::AdmissionStore::Count)]{};
+};
+AdmissionState& admissionState() {
+    static auto* state = new AdmissionState;
+    return *state;
+}
+}
+
+AdmissionLimits getAdmissionLimits() {
+    auto& state = admissionState();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    return state.limits;
+}
+
+bool setAdmissionLimits(const AdmissionLimits& limits) {
+    auto& state = admissionState();
+    const char* reason = nullptr;
+    const size_t values[] = {limits.bodyBytes, limits.jsonDepth, limits.outstanding, limits.workers,
+        limits.lineBytes, limits.headerBytes, limits.headerCount, limits.histogramBins,
+        limits.gridCells, limits.operations, limits.replyBytes, limits.workingBytes};
+    for (auto value : values) if (!value) { reason = "limits must be positive"; break; }
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+#ifndef __EMSCRIPTEN__
+        if (!reason && internal::getHttpServer()) reason = "HTTP is running";
+#endif
+        if (!reason && (state.bytes || state.connections.load())) reason = "work is still outstanding";
+        if (!reason) {
+            state.limits = limits;
+            return true;
+        }
+    }
+    ++state.rejected[static_cast<size_t>(internal::AdmissionStore::Configuration)];
+    // Log outside the mutex: listeners may query the retained limits.
+    logWarning("MCP") << "Admission limits rejected: " << reason << "; configuration unchanged";
+    return false;
+}
+
 namespace internal {
+void admissionRejected(AdmissionStore store, size_t capacity, size_t needed, const char* units) {
+    static constexpr const char* names[] = {"body", "headers", "connections", "histogram", "grid", "operations", "reply", "working memory", "configuration"};
+    auto& count = admissionState().rejected[static_cast<size_t>(store)];
+    if (count.fetch_add(1) == 0)
+        logWarning("MCP") << names[static_cast<size_t>(store)] << " capacity " << capacity
+                          << ", needed " << needed << " " << (units ? units :
+                              (store == AdmissionStore::Body || store == AdmissionStore::Headers ||
+                               store == AdmissionStore::Reply || store == AdmissionStore::Working ? "bytes" : "items"))
+                          << "; request rejected";
+}
+uint64_t admissionRejections(AdmissionStore store) {
+    return admissionState().rejected[static_cast<size_t>(store)].load();
+}
+size_t admittedConnections() { return admissionState().connections.load(); }
+size_t workingMemory() {
+    auto& state = admissionState();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    return state.bytes;
+}
+void checkAdmission(size_t needed, size_t capacity, AdmissionStore store) {
+    // Bound (security): external parameters must fit their owning store before allocation. Overflow rejects the unit and is counted.
+    if (needed > capacity) { admissionRejected(store, capacity, needed); throw AdmissionError(); }
+}
+WorkBudget::~WorkBudget() {
+    auto& state = admissionState();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    state.bytes -= reserved_;
+}
+bool WorkBudget::tryReserve(size_t bytes, size_t& capacity, size_t& needed) {
+    auto& state = admissionState();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    capacity = state.limits.workingBytes;
+    needed = bytes > SIZE_MAX - state.bytes ? SIZE_MAX : bytes + state.bytes;
+    // Bound (security): credits precede allocations. Decide silently under locks; the caller reports rejection after unlocking.
+    if (bytes > capacity - state.bytes) return false;
+    state.bytes += bytes;
+    reserved_ += bytes;
+    return true;
+}
+void WorkBudget::reserve(size_t bytes) {
+    size_t limit, needed;
+    if (tryReserve(bytes, limit, needed)) return;
+    admissionRejected(AdmissionStore::Working, limit, needed);
+    throw AdmissionError();
+}
+void WorkBudget::reply(size_t bytes) {
+    const auto limit = getAdmissionLimits().replyBytes;
+    // Bound (security): incremental result construction shares one reply allowance. Overflow returns an error and is counted.
+    if (bytes > limit - reply_) {
+        admissionRejected(AdmissionStore::Reply, limit, bytes > SIZE_MAX - reply_ ? SIZE_MAX : reply_ + bytes);
+        throw AdmissionError();
+    }
+    reserve(bytes);
+    reply_ += bytes;
+}
+std::shared_ptr<WorkBudget>& currentWorkBudget() {
+    static thread_local std::shared_ptr<WorkBudget> budget;
+    return budget;
+}
+WorkScope::WorkScope(std::shared_ptr<WorkBudget> budget) : previous_(currentWorkBudget()) {
+    currentWorkBudget() = budget ? std::move(budget) :
+        (previous_ ? previous_ : std::make_shared<WorkBudget>());
+}
+WorkScope::~WorkScope() { currentWorkBudget() = std::move(previous_); }
+void reserveWork(size_t bytes) { if (currentWorkBudget()) currentWorkBudget()->reserve(bytes); }
+void reserveReply(size_t bytes) { if (currentWorkBudget()) currentWorkBudget()->reply(bytes); }
+
+std::shared_ptr<void> acquireScreenshotCredit() {
+    reserveWork(1024); // Slot, deferred closure and path bookkeeping.
+    struct Credit {
+        bool owned = false;
+        ~Credit() {
+            if (!owned) return;
+            auto& state = admissionState();
+            std::lock_guard<std::mutex> lock(state.mutex);
+            --state.screenshots;
+        }
+    };
+    auto credit = std::make_shared<Credit>();
+    auto& state = admissionState();
+    size_t limit, needed;
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        // Bound (security): deferred external captures share at most min(outstanding, 8) slots across windows. Overflow rejects the tool and counts a connections rejection.
+        limit = std::min<size_t>(state.limits.outstanding, 8);
+        needed = state.screenshots + 1;
+        if (needed <= limit) {
+            ++state.screenshots;
+            credit->owned = true;
+            return credit;
+        }
+    }
+    admissionRejected(AdmissionStore::Connections, limit, needed);
+    throw AdmissionError();
+}
+
 
 bool isDevBuild() {
 #if TRUSSC_MCP_DEV && !defined(__EMSCRIPTEN__)
@@ -76,6 +217,8 @@ void logExposure() {
     if (!mcpInitialized || !getHttpServer() || healthOnly()) return;
     const auto reply = json::parse(Server::instance().processMessage(
         R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})"));
+    if (!reply.is_object() || !reply.contains("result") ||
+        !reply["result"].is_object() || !reply["result"].contains("tools")) return;
     std::string names;
     for (const auto& tool : reply["result"]["tools"]) {
         if (!names.empty()) names += ", ";
@@ -188,6 +331,76 @@ std::deque<json>& alertQueue() {
 // thread while the listener and its request workers are still using it.
 // A request worker cannot join the listener, which joins that worker in turn.
 static thread_local bool handlingHttpRequest = false;
+
+// The queue hook runs on the accept thread, before httplib reads any bytes.
+class AdmittedQueue final : public httplib::TaskQueue {
+public:
+    explicit AdmittedQueue(const AdmissionLimits& limits) : limits_(limits), pool_(limits.workers) {}
+    bool enqueue(std::function<void()> fn) override {
+        auto& count = admissionState().connections;
+        auto active = count.load();
+        do {
+            // Bound (security): queued, reading and deferred connections share admission. Overflow closes the new socket and is counted.
+            if (active >= limits_.outstanding) {
+                admissionRejected(AdmissionStore::Connections, limits_.outstanding, active + 1);
+                return false;
+            }
+        } while (!count.compare_exchange_weak(active, active + 1));
+        struct Credit {
+            std::shared_ptr<WorkBudget> budget = std::make_shared<WorkBudget>(true);
+            ~Credit() { --admissionState().connections; }
+        };
+        std::shared_ptr<Credit> credit;
+        try {
+            credit = std::make_shared<Credit>();
+            // Account string growth/copies and map nodes before reading headers/body.
+            if (limits_.bodyBytes > limits_.workingBytes / 4 || limits_.headerBytes > limits_.workingBytes / 16) {
+                admissionRejected(AdmissionStore::Working, limits_.workingBytes, limits_.bodyBytes);
+                return false;
+            }
+            credit->budget->reserve(limits_.bodyBytes * 4);
+            credit->budget->reserve(limits_.headerBytes * 16);
+            return pool_.enqueue([fn = std::move(fn), credit] {
+                WorkScope workScope(credit->budget);
+                struct WorkerScope {
+                    bool previous = handlingHttpRequest;
+                    WorkerScope() { handlingHttpRequest = true; }
+                    ~WorkerScope() { handlingHttpRequest = previous; }
+                } workerScope;
+                fn();
+            });
+        } catch (...) {
+            if (!credit) --count;
+            return false;
+        }
+    }
+    void shutdown() override { pool_.shutdown(); }
+private:
+    AdmissionLimits limits_;
+    httplib::ThreadPool pool_;
+};
+
+struct ActiveHttpPromise {
+    std::weak_ptr<std::promise<ReplyThunk>> promise;
+    std::string body;
+    std::shared_ptr<WorkBudget> budget;
+    std::shared_future<ReplyThunk> future;
+};
+std::vector<ActiveHttpPromise>& activeHttpPromises() {
+    static auto* promises = new std::vector<ActiveHttpPromise>;
+    return *promises;
+}
+void trackHttpPromise(const std::shared_ptr<std::promise<ReplyThunk>>& promise, const std::string& body,
+                      const std::shared_ptr<WorkBudget>& budget, std::shared_future<ReplyThunk> future) {
+    activeHttpPromises().push_back({promise, body, budget, std::move(future)});
+}
+void untrackHttpPromise(const std::shared_ptr<std::promise<ReplyThunk>>& promise) {
+    std::lock_guard<std::mutex> lock(httpQueueMutex());
+    auto& promises = activeHttpPromises();
+    promises.erase(std::remove_if(promises.begin(), promises.end(),
+        [&](const auto& entry) { return entry.promise.lock() == promise; }), promises.end());
+}
+
 
 std::mutex& httpQueueMutex() {
     static auto* mutex = new std::mutex;
@@ -323,6 +536,42 @@ void startHttpServerImpl(int port, const std::string& host,
     internal::mcpLoopbackOnly().store(isLoopback);
 
     svr = std::make_unique<httplib::Server>();
+    const auto limits = getAdmissionLimits();
+    svr->new_task_queue = [limits] { return new AdmittedQueue(limits); };
+    svr->set_request_scope_handler([]() -> std::shared_ptr<void> {
+        // The socket keeps its ingress credits; request credits retire after
+        // response destruction and the last main/deferred-stage owner releases.
+        return std::make_shared<WorkScope>(std::make_shared<WorkBudget>(true));
+    });
+    svr->set_payload_max_length(limits.bodyBytes);
+    svr->set_pre_routing_handler([limits](const httplib::Request& req, httplib::Response& res) {
+        if (req.has_header("Content-Length") && req.get_header_value_u64("Content-Length") > limits.bodyBytes)
+            return httplib::Server::HandlerResponse::Unhandled;
+        size_t workspace = 0;
+        const auto encoding = req.get_header_value("Content-Encoding");
+#ifdef CPPHTTPLIB_ZLIB_SUPPORT
+        if (encoding == "gzip" || encoding == "deflate") workspace = 1024 * 1024;
+#endif
+#ifdef CPPHTTPLIB_BROTLI_SUPPORT
+        if (encoding.find("br") != std::string::npos) workspace = 64 * 1024 * 1024;
+#endif
+        try { reserveWork(workspace); }
+        catch (const AdmissionError&) {
+            res.status = 503;
+            res.set_header("Connection", "close");
+            res.set_content("{\"error\":\"MCP decoder workspace limit exceeded\"}", "application/json");
+            return httplib::Server::HandlerResponse::Handled;
+        }
+        return httplib::Server::HandlerResponse::Unhandled;
+    });
+    svr->set_header_limits(limits.lineBytes, limits.headerBytes, limits.headerCount);
+    svr->set_limit_handler([](int status, size_t capacity, size_t needed, const char* units) {
+        admissionRejected(status == 413 ? AdmissionStore::Body : AdmissionStore::Headers, capacity, needed, units);
+    });
+    svr->set_error_handler([](const httplib::Request&, httplib::Response& res) {
+        if (res.status == 413) res.set_content("{\"error\":\"MCP body limit exceeded\"}", "application/json");
+        if (res.status == 431) res.set_content("{\"error\":\"MCP header limit exceeded\"}", "application/json");
+    });
 
     // A fixed port that is already in use fails to bind and is reported below.
     // POSIX: SO_REUSEADDR only, as TcpServer does. Windows: SO_EXCLUSIVEADDRUSE
@@ -343,8 +592,9 @@ void startHttpServerImpl(int port, const std::string& host,
     // browser drive the local server. (OPTIONS preflight handler dropped too.)
     svr->Post("/mcp", [](const httplib::Request& req, httplib::Response& res) {
         struct RequestScope {
+            bool previous = handlingHttpRequest;
             RequestScope() { handlingHttpRequest = true; }
-            ~RequestScope() { handlingHttpRequest = false; }
+            ~RequestScope() { handlingHttpRequest = previous; }
         } requestScope;
         if (!internal::checkRequest(req, res, true)) return;
 
@@ -359,26 +609,58 @@ void startHttpServerImpl(int port, const std::string& host,
             }
         }
 
+        // Reserve retained argument/envelope copies before making a promise or
+        // copying the body. The DOM parser reserves its separate workspace on main.
+        const auto workingLimit = getAdmissionLimits().workingBytes;
+        // Bound (security): retained request JSON copies share aggregate working memory. Overflow returns 503 and is counted.
+        if (req.body.size() > workingLimit / 64) {
+            admissionRejected(AdmissionStore::Working, workingLimit, req.body.size() > SIZE_MAX / 64 ? SIZE_MAX : req.body.size() * 64);
+            res.status = 503;
+            res.set_content("{\"error\":\"request copies exceed MCP working memory\"}", "application/json");
+            return;
+        }
+        try {
+            reserveWork(req.body.size() * 64);
+        } catch (const AdmissionError&) {
+            res.status = 503;
+            res.set_content("{\"error\":\"request copies exceed MCP working memory\"}", "application/json");
+            return;
+        }
+
         auto p = std::make_shared<std::promise<internal::ReplyThunk>>();
-        auto f = p->get_future();
+        auto f = p->get_future().share();
+        struct PromiseScope {
+            std::shared_ptr<std::promise<ReplyThunk>> promise;
+            ~PromiseScope() { untrackHttpPromise(promise); }
+        } promiseScope{p};
 
         McpRequest mcpReq;
+        mcpReq.budget = currentWorkBudget();
         mcpReq.body = req.body;
         mcpReq.response = p;
 
-        internal::enqueueHttpRequest(std::move(mcpReq));
+        internal::enqueueHttpRequest(std::move(mcpReq), f);
 
         // Block until main thread processes the request, then execute the
         // reply thunk HERE — heavy two-stage work (thumbnail encode etc.) runs
         // on this worker thread, not the frame loop.
-        internal::ReplyThunk thunk = f.get();
+        const internal::ReplyThunk& thunk = f.get();
         std::string result;
         try {
             result = thunk();
+        } catch (const AdmissionError&) {
+            res.status = 503;
+            res.set_header("X-MCP-Reason", "MCP admission limit exceeded");
+            return;
         } catch (const std::exception& e) {
-            result = internal::dumpReply(json{{"error", std::string("reply construction failed: ") + e.what()}});
+            result = "{\"error\":\"MCP reply construction failed\"}";
         }
-
+        // Fixed error fallbacks must respect small configured reply limits too.
+        if (result.size() > getAdmissionLimits().replyBytes) {
+            res.status = 503;
+            res.set_header("X-MCP-Reason", "reply limit exceeded");
+            return;
+        }
         res.set_content(result, "application/json");
     });
 
@@ -457,12 +739,16 @@ void startHttpServer(int port, const std::string& host, const std::string& token
 
 void stopHttpServer() {
     {
-        std::lock_guard<std::mutex> lock(internal::httpQueueMutex());
-        auto queued = internal::getHttpChannel().receiveAll();
-        internal::getHttpChannel().close();
+        std::vector<McpRequest> queued;
+        {
+            std::lock_guard<std::mutex> lock(internal::httpQueueMutex());
+            queued = internal::getHttpChannel().receiveAll();
+            internal::getHttpChannel().close();
+        }
         for (auto& request : queued) {
-            const auto reply = internal::normalExitReply(request.body);
-            request.response->set_value([reply] { return reply; });
+            internal::completeTerminalResponse(request.response, request.budget, [&] {
+                return internal::normalExitReply(request.body);
+            });
         }
     }
     // Unblock any HTTP workers still waiting on a deferred reply — no more frames
@@ -479,13 +765,35 @@ void stopHttpServer() {
         for (auto& d : list) {
             // During an app exit, say so (with the reason); otherwise the
             // server was just stopped.
-            const std::string message = trussc::internal::exitReason().empty()
-                ? std::string("the MCP server shut down before the reply was produced")
-                : internal::normalExitMessage();
-            std::string reply = internal::toolError(d.id, message);
-            d.response->set_value([reply]() { return reply; });
+            internal::completeTerminalResponse(d.response, d.budget, [&] {
+                const std::string message = trussc::internal::exitReason().empty()
+                    ? std::string("the MCP server shut down before the reply was produced")
+                    : internal::normalExitMessage();
+                return internal::toolError(d.id, message);
+            });
         }
         list.clear();
+    }
+
+    // A main-thread handler may have removed its request from the channel
+    // without publishing a deferral yet. Complete those promises as well.
+    {
+        std::remove_reference_t<decltype(internal::activeHttpPromises())> active;
+        {
+            std::lock_guard<std::mutex> lock(internal::httpQueueMutex());
+            active.swap(internal::activeHttpPromises());
+        }
+        for (auto& entry : active) {
+            // Queued/deferred completion may already have answered this entry.
+            // Avoid rebuilding an error (and charging it) for a ready promise.
+            if (entry.future.valid() && entry.future.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+                continue;
+            if (auto promise = entry.promise.lock()) {
+                internal::completeTerminalResponse(promise, entry.budget, [&] {
+                    return internal::normalExitReply(entry.body);
+                });
+            }
+        }
     }
 
     auto& svr = internal::getHttpServer();
