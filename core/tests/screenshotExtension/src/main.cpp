@@ -70,7 +70,7 @@ void checkFile(const fs::path& path, const string& magic) {
     check("correct encoding: " + internal::pathToUtf8(path.filename()), header == magic);
     Pixels px;
     check("decode screenshot: " + internal::pathToUtf8(path.filename()), static_cast<bool>(px.load(path)));
-    check("screenshot dimensions", px.getWidth() == 64 && px.getHeight() == 48);
+    check("screenshot dimensions", px.getWidth() == getFramebufferWidth() && px.getHeight() == getFramebufferHeight());
 }
 
 class ScreenshotApp : public App {

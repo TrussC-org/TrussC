@@ -57,12 +57,296 @@ bool toolError(const json& reply) {
     if (!reply.contains("result")) return false;
     const auto& result = reply.at("result");
     if (result.value("isError", false)) return true;
+    if (result.at("content").at(0).value("type", "") == "image") return false;
     const auto text = json::parse(result.at("content").at(0).at("text").get<std::string>());
     return text.value("status", "") == "error";
 }
 
 int expectedDpi = 1;
 bool gpuCompleted = false;
+// Windows obtains high-DPI scale from the monitor; highDpi cannot force 2x.
+bool skipMonitorDpi() {
+#ifdef _WIN32
+    if (expectedDpi == 2 && std::abs(getDpiScale() - 1.0f) < 0.01f) {
+        printf("SKIP: DPI 2 needs a display scaled to 200%% (measured %.2f)\n", double(getDpiScale()));
+        return true;
+    }
+#endif
+    return false;
+}
+bool dpiSkipped = false;
+void checkReadbackAdmission(size_t pixelCount, const void* target = nullptr) {
+    using namespace mcp::internal;
+    const auto defaults = mcp::getAdmissionLimits();
+    const int window = target ? 1 : 0;
+    const auto probePath = fs::temp_directory_path() / "tc-admission-rejection.png";
+    for (const char* name : {"tc_save_screenshot", "tc_get_screenshot", "tc_analyze_image"}) {
+        auto limits = defaults;
+        // Readback pixels are independent of captureWindowSize. At DPI 2 a
+        // logical-size admission fits this budget and must fail the checks.
+        limits.workingBytes = std::string(name) == "tc_save_screenshot" ?
+            pixelCount * 64 + 1024 * 1024 - 1 : pixelCount * 8 - 1;
+        check("admission limits configuration succeeds", mcp::setAdmissionLimits(limits));
+        const auto before = admissionRejections(AdmissionStore::Working);
+        resetHttpChannel();
+        auto promise = std::make_shared<std::promise<ReplyThunk>>();
+        auto future = promise->get_future();
+        json args = std::string(name) == "tc_analyze_image" ?
+            json{{"source", {{"window", window}}}, {"ops", json::array({{{"op", "stats"}}})}} : json{{"window", window}};
+        if (std::string(name) == "tc_save_screenshot") args["path"] = internal::pathToUtf8(probePath);
+        // A thumbnail keeps later encoding within the budget even under the
+        // logical-size mutation, so late encoder rejection cannot mask it.
+        if (std::string(name) == "tc_get_screenshot") args["width"] = 16;
+        getHttpChannel().send(mcp::McpRequest{request(name, args), promise, std::make_shared<WorkBudget>(true)});
+        mcp::processHttpQueue();
+        drainDeferredResponses(target);
+        const bool ready = future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+        bool rejected = false;
+        if (ready) {
+            try { rejected = toolError(json::parse(future.get()())); }
+            catch (const AdmissionError&) { rejected = true; }
+        }
+        check("real framebuffer admission rejects screenshot tool", ready && rejected);
+        check("real framebuffer rejection increments working counter once", admissionRejections(AdmissionStore::Working) == before + 1);
+        check("real framebuffer rejection releases capture and credits", !hasDeferredResponses() && workingMemory() == 0);
+        printf("real admission tool=%s working limit=%zu rejections=%llu\n", name, limits.workingBytes,
+            static_cast<unsigned long long>(admissionRejections(AdmissionStore::Working) - before));
+    }
+    check("admission limits configuration succeeds", mcp::setAdmissionLimits(defaults));
+    std::error_code ec;
+    fs::remove(probePath, ec);
+}
+// This mode deliberately uses native resizing and the normal frame prelude.
+// No synthetic dimensions, drawable cleanup, or manual frame pumping here.
+int resizeSaves = 0, resizeAccepted = 0, resizeCycles = 0;
+int resizePointerChecks = 0, resizeWindows = 0, resizeSkipped = 0, resizeSkippedCycles = 0;
+bool resizeCompleted = false;
+class ResizeDisplayApp : public App {
+    EventListener after;
+    std::shared_ptr<Window> secondary;
+    std::shared_ptr<ResizeDisplayApp> secondaryApp;
+    std::future<mcp::internal::ReplyThunk> reply;
+    fs::path output;
+    static constexpr int resizeFrameLimit = 60;
+    int windowIndex = 0, largeFrames = 0, resizeFrames = 0, cycles = 0;
+    bool resizing = false;
+    bool largeFrameSeen = false;
+    bool waiting = false, finished = false, verifyAdmission = false;
+    size_t savedPixelCount = 0;
+    uint64_t rejections = 0;
+    std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+
+    internal::WindowContext& context() {
+        return windowIndex ? getWindow()->context() : internal::mainWindowContext();
+    }
+    void checkCleared() {
+        auto& ctx = context();
+        ++resizePointerChecks;
+        check("previous frame cleared both borrowed drawable pointers",
+            !ctx.lastSwapchainDrawable && !ctx.lastSwapchain.metal.current_drawable);
+    }
+    void grow() {
+        // Request 4K physical. Window managers may constrain this; record the
+        // actual surface after three rendered frames, rather than assuming 4K.
+        setWindowSize(3840 / expectedDpi, 2160 / expectedDpi);
+        largeFrames = 0;
+    }
+    void skipResize(int requestedWidth, int requestedHeight) {
+        const auto [w, h] = internal::captureWindowSize(context());
+        printf("SKIP: window resize not supported here (requested %dx%d, measured %zux%zu)\n",
+            requestedWidth, requestedHeight, w, h);
+        printf("resize skipped window=%d remaining_cycles=%d\n", windowIndex, 3 - cycles);
+        ++resizeSkipped;
+        resizeSkippedCycles += 3 - cycles;
+        resizing = false;
+        finishWindow();
+    }
+    void enqueueInPrelude() {
+        using namespace mcp::internal;
+        check("large frame exceeds small framebuffer", largeFrameSeen);
+        checkCleared();
+        auto& ctx = context();
+        const auto [w, h] = internal::captureWindowSize(ctx);
+        printf("resize prelude window=%d cycle=%d current=%zux%zu previous=%dx%d budget=%zu\n",
+            windowIndex, cycles + 1, w, h, ctx.lastSwapchain.width, ctx.lastSwapchain.height,
+            mcp::getAdmissionLimits().workingBytes);
+        check("next-frame prelude sees resized physical framebuffer",
+            w == size_t(320 * expectedDpi) && h == size_t(240 * expectedDpi));
+        rejections = admissionRejections(AdmissionStore::Working);
+        auto promise = std::make_shared<std::promise<ReplyThunk>>();
+        reply = promise->get_future();
+        getHttpChannel().send(mcp::McpRequest{request("tc_save_screenshot",
+            {{"path", internal::pathToUtf8(output)}, {"window", windowIndex}}),
+            promise, std::make_shared<WorkBudget>(true)});
+        // Same queue dispatcher as beginMainLoopFrame, while still in its
+        // main-thread prelude, before beginFrame/update/draw on the main window.
+        mcp::processHttpQueue();
+        ++resizeSaves;
+        const bool accepted = reply.wait_for(std::chrono::seconds(0)) != std::future_status::ready &&
+            deferredResponses().size() == 1;
+        if (accepted) ++resizeAccepted;
+        check("real resized save accepted and deferred before drawing", accepted);
+        check("enqueue has no stale-size working rejection",
+            admissionRejections(AdmissionStore::Working) == rejections);
+        check("deferred save retains bounded working credits",
+            accepted && workingMemory() > 0 && workingMemory() <= mcp::getAdmissionLimits().workingBytes);
+    }
+    void afterFrame() {
+        if (dpiSkipped) return;
+        if (verifyAdmission) {
+            verifyAdmission = false;
+            checkReadbackAdmission(savedPixelCount, windowIndex ? &context() : nullptr);
+            if (cycles == 3) finishWindow();
+            else grow();
+            return;
+        }
+        if (finished) return;
+        if (resizing) {
+            // afterFrame runs after this window's native tick has refreshed its
+            // framebuffer cache. Only then enqueue for the next main prelude.
+            const auto [w, h] = internal::captureWindowSize(context());
+            if (w == size_t(320 * expectedDpi) && h == size_t(240 * expectedDpi)) {
+                resizing = false;
+                waiting = true;
+                internal::mainThreadQueue().send([this] { enqueueInPrelude(); });
+            } else if (++resizeFrames >= resizeFrameLimit) {
+                skipResize(320 * expectedDpi, 240 * expectedDpi);
+            }
+            return;
+        }
+        if (waiting) return;
+        if (++largeFrames < 3) return;
+        const auto [w, h] = internal::captureWindowSize(context());
+        largeFrameSeen = w > size_t(320 * expectedDpi) && h > size_t(240 * expectedDpi);
+        if (!largeFrameSeen) {
+            if (largeFrames >= resizeFrameLimit) skipResize(3840, 2160);
+            return;
+        }
+        auto& ctx = context();
+        printf("resize large window=%d cycle=%d actual=%dx%d logical=%dx%d dpi=%.2f\n",
+            windowIndex, cycles + 1, ctx.lastSwapchain.width, ctx.lastSwapchain.height,
+            getWindowWidth(), getWindowHeight(), double(getDpiScale()));
+        setWindowSize(320, 240);
+        resizing = true;
+        resizeFrames = 0;
+    }
+    void finishWindow() {
+        finished = true;
+        if (windowIndex) return;
+        if constexpr (internal::supportsSecondaryWindows()) {
+            WindowSettings settings;
+            settings.setSize(3840 / expectedDpi, 2160 / expectedDpi);
+            settings.setHighDpi(expectedDpi == 2);
+            settings.sampleCount = 1;
+            secondary = createWindow(settings);
+            check("supported platform creates real secondary window", bool(secondary));
+            if (secondary) {
+                secondaryApp = std::make_shared<ResizeDisplayApp>();
+                secondaryApp->windowIndex = 1;
+                secondary->setApp(secondaryApp);
+                return;
+            }
+        } else {
+            ++resizeSkipped;
+            printf("SKIP: secondary windows unsupported on this platform\n");
+        }
+        resizeCompleted = true;
+        exitApp();
+    }
+public:
+    void setup() override {
+        if (!windowIndex && skipMonitorDpi()) {
+            dpiSkipped = true;
+            exitApp();
+            return;
+        }
+        ++resizeWindows;
+        if (!windowIndex) {
+            mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
+            mcp::stopHttpServer();
+            auto limits = mcp::getAdmissionLimits();
+            // Independent requested logical dimensions times measured DPI. Leave
+            // 3 MiB above the current physical save bound for request overhead;
+            // the previous large framebuffer must still exceed this allowance.
+            const auto scale = double(getDpiScale());
+            limits.workingBytes = size_t(320 * scale) * size_t(240 * scale) * 64 + 4 * 1024 * 1024;
+            limits.outstanding = 1; // Every completed save must return its slot.
+            check("resize working budget configured", mcp::setAdmissionLimits(limits));
+            mcp::internal::resetHttpChannel();
+        }
+        output = fs::temp_directory_path() / ("tc-admission-resize-" + std::to_string(windowIndex) + ".png");
+        std::error_code ec;
+        fs::remove(output, ec);
+        after = events().afterFrame.listen([this] { afterFrame(); });
+    }
+    void update() override {
+        if (std::chrono::steady_clock::now() - started > std::chrono::seconds(45)) {
+            check("resize mode completes within 45 seconds", false);
+            exitApp(1);
+            return;
+        }
+        if (finished) {
+            if (secondaryApp && secondaryApp->finished) {
+                resizeCompleted = true;
+                secondary->close();
+                exitApp();
+            }
+            return;
+        }
+    }
+    void draw() override {
+        clear(0.2f, 0.4f, 0.6f);
+        if (!waiting || !reply.valid()) return;
+        // This closure runs after the current native callback has returned,
+        // so both drawable pointers must already have been cleared by core.
+        internal::mainThreadQueue().send([this] {
+            using namespace mcp::internal;
+            checkCleared();
+            if (!reply.valid()) return;
+            const bool ready = reply.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+            check("real resized save completes after its frame", ready);
+            if (!ready) return;
+            bool ok = false;
+            try { ok = !toolError(json::parse(reply.get()())); }
+            catch (const std::exception& e) { printf("resize reply exception: %s\n", e.what()); }
+            check("real resized save succeeds", ok);
+            Pixels pixels;
+            const bool loaded = bool(pixels.load(output));
+            const auto [w, h] = internal::captureWindowSize(context());
+            check("saved output equals current physical framebuffer",
+                loaded && pixels.getWidth() == 320 * expectedDpi && pixels.getHeight() == 240 * expectedDpi &&
+                size_t(pixels.getWidth()) == w && size_t(pixels.getHeight()) == h);
+            check("completion has no stale-size working rejection",
+                admissionRejections(AdmissionStore::Working) == rejections);
+            check("completion releases deferred capture and all working credits",
+                !hasDeferredResponses() && workingMemory() == 0);
+            bool slotReleased = false;
+            try {
+                WorkScope scope(std::make_shared<WorkBudget>(true));
+                auto credit = acquireScreenshotCredit();
+                slotReleased = bool(credit);
+            } catch (const AdmissionError&) {}
+            check("completion returns the sole screenshot slot", slotReleased && workingMemory() == 0);
+            printf("resize saved window=%d cycle=%d output=%dx%d credits=%zu\n",
+                windowIndex, cycles + 1, pixels.getWidth(), pixels.getHeight(), workingMemory());
+            std::error_code ec;
+            fs::remove(output, ec);
+            waiting = false;
+            ++cycles;
+            ++resizeCycles;
+            // Independently predict the requested physical size even if saving failed.
+            const auto scale = double(getDpiScale());
+            savedPixelCount = size_t(320 * scale) * size_t(240 * scale);
+            // Rejection probes need a live drawable; run in the next afterFrame.
+            verifyAdmission = true;
+        });
+    }
+    void cleanup() override {
+        mcp::stopHttpServer();
+        std::error_code ec;
+        fs::remove(output, ec);
+    }
+};
 class AdmissionDisplayApp : public App {
     EventListener after;
 public:
@@ -72,6 +356,11 @@ public:
         after = events().afterFrame.listen([] {
             if (gpuCompleted) return;
             gpuCompleted = true;
+            if (skipMonitorDpi()) {
+                dpiSkipped = true;
+                exitApp();
+                return;
+            }
             using namespace mcp::internal;
             auto& ctx = internal::mainWindowContext();
             const auto [width, height] = internal::captureWindowSize(ctx);
@@ -82,42 +371,12 @@ public:
                 width == size_t(pixels.getWidth()) && height == size_t(pixels.getHeight()));
             check("real framebuffer has requested DPI ratio",
                 logicalWidth > 0 && logicalHeight > 0 &&
-                width == size_t(logicalWidth * expectedDpi) && height == size_t(logicalHeight * expectedDpi));
+                pixels.getWidth() == logicalWidth * expectedDpi && pixels.getHeight() == logicalHeight * expectedDpi);
             check("real main secondary-only dimensions remain zero", ctx.isMain && ctx.fbWidth == 0 && ctx.fbHeight == 0);
             printf("real screenshot DPI=%d: logical=%dx%d framebuffer=%zux%zu readback=%dx%d scale=%.2f\n",
                 expectedDpi, logicalWidth, logicalHeight, width, height,
                 pixels.getWidth(), pixels.getHeight(), double(getDpiScale()));
-            const auto defaults = mcp::getAdmissionLimits();
-            for (const char* name : {"tc_save_screenshot", "tc_get_screenshot", "tc_analyze_image"}) {
-                auto limits = defaults;
-                // One byte below the *real* framebuffer requirement. At DPI 2
-                // the logical-size estimate fits, so using it makes this fail.
-                limits.workingBytes = std::string(name) == "tc_save_screenshot" ?
-                    width * height * 64 + 1024 * 1024 - 1 : width * height * 8 - 1;
-                check("admission limits configuration succeeds", mcp::setAdmissionLimits(limits));
-                const auto before = admissionRejections(AdmissionStore::Working);
-                resetHttpChannel();
-                auto promise = std::make_shared<std::promise<ReplyThunk>>();
-                auto future = promise->get_future();
-                json args = std::string(name) == "tc_analyze_image" ?
-                    json{{"source", {{"window", 0}}}, {"ops", json::array({{{"op", "stats"}}})}} : json{{"window", 0}};
-                if (std::string(name) == "tc_save_screenshot") args["path"] = "admission.png";
-                getHttpChannel().send(mcp::McpRequest{request(name, args), promise, std::make_shared<WorkBudget>(true)});
-                mcp::processHttpQueue();
-                drainDeferredResponses();
-                const bool ready = future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-                bool rejected = false;
-                if (ready) {
-                    try { rejected = toolError(json::parse(future.get()())); }
-                    catch (const AdmissionError&) { rejected = true; }
-                }
-                check("real framebuffer admission rejects screenshot tool", ready && rejected);
-                check("real framebuffer rejection increments working counter once", admissionRejections(AdmissionStore::Working) == before + 1);
-                check("real framebuffer rejection releases capture and credits", !hasDeferredResponses() && workingMemory() == 0);
-                printf("real admission tool=%s working limit=%zu rejections=%llu\n", name, limits.workingBytes,
-                    static_cast<unsigned long long>(admissionRejections(AdmissionStore::Working) - before));
-            }
-            check("admission limits configuration succeeds", mcp::setAdmissionLimits(defaults));
+            checkReadbackAdmission(size_t(pixels.getWidth()) * size_t(pixels.getHeight()));
             exitApp();
         });
     }
@@ -131,9 +390,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     setenv("TRUSSC_MCP", "0", 1);
 #endif
     if (argc > 1) {
-        if (argc != 3 || std::strcmp(argv[1], "--gpu-check") != 0 ||
+        if (argc != 3 || (std::strcmp(argv[1], "--gpu-check") != 0 && std::strcmp(argv[1], "--gpu-check-resize") != 0) ||
             (std::strcmp(argv[2], "--dpi=1") != 0 && std::strcmp(argv[2], "--dpi=2") != 0)) {
-            printf("Usage: mcpAdmissionConstruction [--gpu-check --dpi=1|--dpi=2]\n");
+            printf("Usage: mcpAdmissionConstruction [--gpu-check|--gpu-check-resize --dpi=1|--dpi=2]\n");
             return 2;
         }
         expectedDpi = argv[2][6] - '0';
@@ -141,10 +400,27 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         realCapture = true;
 #endif
         WindowSettings settings;
-        settings.setSize(320, 240);
+        const bool resize = std::strcmp(argv[1], "--gpu-check-resize") == 0;
+        settings.setSize(resize ? 3840 / expectedDpi : 320, resize ? 2160 / expectedDpi : 240);
         settings.setHighDpi(expectedDpi == 2);
         settings.sampleCount = 1;
+        if (resize) return tcCoreTest::runDisplayTest<ResizeDisplayApp>(settings, failures, [] {
+            if (dpiSkipped) {
+                printf("mcpAdmissionConstruction RESIZE DPI=2: 0/0 checks, DPI-only run skipped\n");
+                return;
+            }
+            check("real resize run completed", resizeCompleted);
+            check("three resize cycles completed or skipped per window",
+                resizeCycles + resizeSkippedCycles == resizeWindows * 3);
+            printf("mcpAdmissionConstruction RESIZE DPI=%d: windows=%d skipped=%d cycles=%d saves=%d accepted=%d pointer_checks=%d checks=%d/%d failures=%d\n",
+                expectedDpi, resizeWindows, resizeSkipped, resizeCycles, resizeSaves, resizeAccepted,
+                resizePointerChecks, checks - failures, checks, failures);
+        });
         return tcCoreTest::runDisplayTest<AdmissionDisplayApp>(settings, failures, [] {
+            if (dpiSkipped) {
+                printf("mcpAdmissionConstruction GPU DPI=2: 0/0 checks, DPI-only run skipped\n");
+                return;
+            }
             check("real framebuffer admission run completed", gpuCompleted);
             printf("mcpAdmissionConstruction GPU DPI=%d: %d/%d checks passed, %d failures\n",
                 expectedDpi, checks - failures, checks, failures);

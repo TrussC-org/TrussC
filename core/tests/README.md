@@ -197,6 +197,12 @@ LIBGL_ALWAYS_SOFTWARE=1 \
 
 ## Tests
 
+- `mcpAdmissionConstruction/` — admission construction/model checks, real
+  framebuffer rejection (`--gpu-check --dpi=1|2`), and native cross-frame
+  resize/save cycles (`--gpu-check-resize --dpi=1|2`). See its
+  [README](mcpAdmissionConstruction/README.md) for exact Linux, Air and Windows
+  commands and the current DPI 2 / 8 MiB budget limitation.
+
 - `webDropSize/` — Web dropped-file size and reader limits. The Web build
   exercises the complete application header with mock FileReaders under Node;
   native builds compile the unchanged Web C entry points with a browser-size
