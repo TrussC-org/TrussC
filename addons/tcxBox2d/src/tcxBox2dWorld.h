@@ -38,9 +38,9 @@ public:
     World(const World&) = delete;
     World& operator=(const World&) = delete;
 
-    // Movable
-    World(World&& other) noexcept;
-    World& operator=(World&& other) noexcept;
+    // Stable address: callbacks and borrowed owners refer to this World.
+    World(World&&) = delete;
+    World& operator=(World&&) = delete;
 
     // -------------------------------------------------------------------------
     // Initialization
@@ -177,6 +177,11 @@ private:
     friend class RigidBody2D;
     friend void detail::routeContact(World*, const WorldContact&, int);
 
+    struct ContactRouter2D {
+        tc::EventListener beganL, stayL, endedL;
+    };
+    void ensureContactRouter();
+
     void attachOwner(b2Body* body, detail::BodyOwner& owner);
     // Teardown must not run user listeners inside a Node/Mod destructor.
     enum class ExitDelivery { Immediate, Deferred };
@@ -188,6 +193,8 @@ private:
 
     std::unique_ptr<b2World> world_;
     std::shared_ptr<detail::DispatchState> dispatch_;
+
+    ContactRouter2D contactRouter_;
 
     // Simulation parameters (timeStep_ = fixed sub-step size)
     float timeStep_ = 1.0f / 60.0f;

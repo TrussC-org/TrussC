@@ -283,3 +283,14 @@ Use `ASAN_OPTIONS=detect_leaks=0:halt_on_error=1` and
 `UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1` (leak detection disabled).
 Windows, MacBook Air and Raspberry Pi still require the suite and a physics
 example that starts and exits cleanly.
+
+
+World member router (#842 PR 3): `--delivery router-gates` covers Mod pairs in
+independent Worlds (including nested updates), clearing/deleting a World inside
+routed Enter/Stay/Exit, address reuse during suspended delivery, lazy subscription
+order and exactly one subscription through clear/setup. Compile-time assertions
+reject move construction/assignment of World, Body and all three classic shapes.
+
+Selected runs fail with `unknown case` if no checks ran. Verify unknown and known
+selectors with `python3 test_selectors.py bin/tests` from this directory (use the
+appropriate executable path on each platform).

@@ -33,7 +33,6 @@
 #include <TrussC.h>   // tc::Mod, tc::Node, drawing, TC_REFLECT
 #include <box2d/box2d.h>
 #include <cstdint>
-#include <unordered_map>
 #include <vector>
 #include <cmath>
 
@@ -159,16 +158,6 @@ struct Contact2D {
 };
 
 namespace detail {
-    // Listener storage remains per World until the router moves into World.
-    // Owners and their generations come exclusively from b2Body user data.
-    struct ContactRouter2D {
-        std::weak_ptr<int> worldAlive;
-        tc::EventListener beganL, stayL, endedL;
-    };
-    inline std::unordered_map<World*, ContactRouter2D>& contactRouters() {
-        static std::unordered_map<World*, ContactRouter2D> r;
-        return r;
-    }
     // phase: 0 = began, 1 = stay, 2 = ended.
     inline void routeContact(World* w, const WorldContact& c, int phase);  // after RigidBody2D
 }
@@ -375,23 +364,7 @@ protected:
 
         // Register for contact routing; the first body on this world hooks the
         // CollisionManager's contact events.
-        auto& router = detail::contactRouters()[world_];
-        if (!router.beganL || router.worldAlive.expired()) {
-            router.worldAlive = world_->aliveToken();
-            if (auto* cm = world_->getCollisionManager()) {
-                World* wp = world_;
-                std::weak_ptr<detail::DispatchState> weak = world_->dispatch_;
-                router.beganL = cm->contactBegan.listen([wp, weak](WorldContact& c) {
-                    if (auto s = weak.lock(); s && s->alive) detail::routeContact(wp, c, 0);
-                });
-                router.stayL = cm->contactStay.listen([wp, weak](WorldContact& c) {
-                    if (auto s = weak.lock(); s && s->alive) detail::routeContact(wp, c, 1);
-                });
-                router.endedL = cm->contactEnded.listen([wp, weak](WorldContact& c) {
-                    if (auto s = weak.lock(); s && s->alive) detail::routeContact(wp, c, 2);
-                });
-            }
-        }
+        world_->ensureContactRouter();
     }
 
     // Dynamic: physics drives the node — sync BEFORE Node::update() so user code

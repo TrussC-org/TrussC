@@ -8,26 +8,6 @@
 
 namespace tcx::box2d {
 
-PolyShape::PolyShape(PolyShape&& other) noexcept
-    : Body(std::move(other))
-    , vertices_(std::move(other.vertices_))
-    , path_(std::move(other.path_))
-    , fillMesh_(std::move(other.fillMesh_))
-    , compound_(other.compound_)
-{
-}
-
-PolyShape& PolyShape::operator=(PolyShape&& other) noexcept {
-    if (this != &other) {
-        Body::operator=(std::move(other));
-        vertices_ = std::move(other.vertices_);
-        path_ = std::move(other.path_);
-        fillMesh_ = std::move(other.fillMesh_);
-        compound_ = other.compound_;
-    }
-    return *this;
-}
-
 void PolyShape::setup(World& world, const std::vector<tc::Vec2>& vertices, float cx, float cy) {
     // Check before creating anything: Box2D would assert (Debug) or build a
     // 2x2 m box (Release) for points it can't use.

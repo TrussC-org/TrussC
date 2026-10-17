@@ -16,9 +16,9 @@ public:
     CircleBody() = default;
     ~CircleBody() override = default;
 
-    // Movable
-    CircleBody(CircleBody&& other) noexcept;
-    CircleBody& operator=(CircleBody&& other) noexcept;
+    // Non-movable
+    CircleBody(CircleBody&&) = delete;
+    CircleBody& operator=(CircleBody&&) = delete;
 
     // -------------------------------------------------------------------------
     // Creation

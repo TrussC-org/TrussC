@@ -69,14 +69,36 @@
 #include <memory>
 #include <random>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 using namespace std;
 using namespace tc;
 using namespace tcx;
 
+static_assert(!std::is_move_constructible_v<box2d::World>);
+static_assert(!std::is_move_assignable_v<box2d::World>);
+static_assert(!std::is_move_constructible_v<box2d::Body>);
+static_assert(!std::is_move_assignable_v<box2d::Body>);
+static_assert(!std::is_move_constructible_v<box2d::CircleBody>);
+static_assert(!std::is_move_assignable_v<box2d::CircleBody>);
+static_assert(!std::is_move_constructible_v<box2d::RectBody>);
+static_assert(!std::is_move_assignable_v<box2d::RectBody>);
+static_assert(!std::is_move_constructible_v<box2d::PolyShape>);
+static_assert(!std::is_move_assignable_v<box2d::PolyShape>);
+
 static int g_fail = 0;
+static int g_checks = 0;
+static int finishSelectedRun(const string& selected) {
+    if (!g_checks) {
+        fprintf(stderr, "unknown case: %s (0 checks)\n", selected.c_str());
+        return 1;
+    }
+    printf("\n%d checks, %d failures\n", g_checks, g_fail);
+    return g_fail ? 1 : 0;
+}
 static void check(const string& name, bool ok) {
+    ++g_checks;
     printf("%-72s %s\n", name.c_str(), ok ? "PASS" : "FAIL");
     fflush(stdout);  // flush each line so CI logs survive a later crash
     if (!ok) ++g_fail;
@@ -3475,9 +3497,82 @@ static void testSetupCallerDeletion() {
     }
 }
 
+// Keep the event handles outside the World whose routed listener destroys it.
+static void testMemberRouter() {
+    for (bool deleteWorld : {false, true}) for (int phase = 0; phase < 3; ++phase) {
+        WorldTestFrames frames;
+        auto first = make_unique<box2d::World>();
+        box2d::World second;
+        first->setup(0, 0); second.setup(0, 0);
+        first->setAutoUpdate(false); second.setAutoUpdate(false);
+        auto a = make_shared<Node>(), b = make_shared<Node>();
+        auto c = make_shared<Node>(), d = make_shared<Node>();
+        a->setPos(100, 100); b->setPos(110, 100);
+        c->setPos(100, 100); d->setPos(110, 100);
+        auto* ra = a->addMod<box2d::RigidBody2D>(*first, box2d::Shape2D::circle(10));
+        auto* rb = b->addMod<box2d::RigidBody2D>(*first, box2d::Shape2D::circle(10));
+        auto* rc = c->addMod<box2d::RigidBody2D>(second, box2d::Shape2D::circle(10));
+        d->addMod<box2d::RigidBody2D>(second, box2d::Shape2D::circle(10));
+        ra->setTrigger(); rc->setTrigger();
+        int entered = 0, stayed = 0, exited = 0, mutations = 0, late = 0, otherSide = 0;
+        auto enter = rc->onTriggerEnter.listen([&](box2d::Contact2D& contact) {
+            ++entered; check("member router: second World counterpart", contact.otherNode == d.get());
+        });
+        auto stay = rc->onTriggerStay.listen([&](box2d::Contact2D&) { ++stayed; });
+        auto exit = rc->onTriggerExit.listen([&](box2d::Contact2D&) { ++exited; });
+        if (phase) frames.update(*first);
+        auto& event = phase == 0 ? ra->onTriggerEnter : phase == 1 ? ra->onTriggerStay : ra->onTriggerExit;
+        auto mutate = event.listen([&](box2d::Contact2D& contact) {
+            ++mutations;
+            frames.update(second); // Nested routing belongs solely to second.
+            if (deleteWorld) first.reset(); else first->clear();
+            check("member router: released payload null", !contact.other && !contact.otherNode);
+        }, EventPriority::BeforeApp);
+        auto after = event.listen([&](box2d::Contact2D&) { ++late; });
+        auto& partnerEvent = phase == 0 ? rb->onTriggerEnter : phase == 1 ? rb->onTriggerStay : rb->onTriggerExit;
+        auto partner = partnerEvent.listen([&](box2d::Contact2D&) { ++otherSide; });
+        if (phase == 2) rb->getBody()->SetTransform(b2Vec2(10, 10), 0);
+        frames.update(*first);
+        check("member router: mutation cancels both suspended sides", mutations == 1 && late == 0 && otherSide == 0);
+        check("member router: nested World exact Enter/Stay", entered == 1 && stayed == 1 && exited == 0);
+        frames.update(second);
+        check("member router: surviving World still routes once", entered == 1 && stayed == 2 && exited == 0);
+        rc->getBody()->SetTransform(b2Vec2(10, 10), 0);
+        frames.update(second);
+        check("member router: surviving World exact Exit", entered == 1 && stayed == 2 && exited == 1);
+    }
+
+    // First-Mod registration stays between same-priority World listeners, even
+    // after clear/setup. Additional Mods must not add another subscription.
+    WorldTestFrames frames;
+    box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
+    string order;
+    auto before = world.getCollisionManager()->contactBegan.listen([&](box2d::WorldContact&) { order += 'B'; });
+    EventListener after;
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        if (cycle == 1) world.clear();
+        if (cycle == 2) world.setup(0, 0);
+        auto a = make_shared<Node>(), b = make_shared<Node>();
+        a->setPos(100, 100); b->setPos(110, 100);
+        auto* ra = a->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10));
+        b->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10)); ra->setTrigger();
+        int enters = 0, stays = 0, exits = 0;
+        auto enter = ra->onTriggerEnter.listen([&](box2d::Contact2D&) { ++enters; order += 'M'; });
+        auto stay = ra->onTriggerStay.listen([&](box2d::Contact2D&) { ++stays; });
+        auto exit = ra->onTriggerExit.listen([&](box2d::Contact2D&) { ++exits; });
+        if (!after) after = world.getCollisionManager()->contactBegan.listen([&](box2d::WorldContact&) { order += 'A'; });
+        order.clear(); frames.update(world);
+        check("member router: lazy subscription order survives clear/setup", order == "BMA");
+        frames.update(world);
+        ra->getBody()->SetTransform(b2Vec2(10, 10), 0); frames.update(world);
+        check("member router: multiple Mods route each phase once", enters == 1 && stays == 2 && exits == 1);
+    }
+}
+
 static void testRouterGates() {
+    testMemberRouter();
     // World-address reuse during its own suspended update must not revive that
-    // dispatch. The static router storage deliberately remains until PR 3.
+    // dispatch, even when its member router is destroyed with it.
     WorldTestFrames frames;
     for (bool replaceObject : {false, true}) {
         alignas(box2d::World) unsigned char storage[sizeof(box2d::World)];
@@ -4023,26 +4118,26 @@ int main(int argc, char** argv) {
         testModEventLifetimes();
         testWorldEventLifetimes();
         testExitListenerDestroysThirdBody();
-        return g_fail ? 1 : 0;
+        return finishSelectedRun(argc >= 3 ? argv[2] : argv[1]);
     }
     if (argc >= 2 && string(argv[1]) == "--delivery") {
         testDeliveryPR2(argc >= 3 ? argv[2] : "all");
-        return g_fail ? 1 : 0;
+        return finishSelectedRun(argc >= 3 ? argv[2] : argv[1]);
     }
 
     g_massDiagnostics = argc == 2 && string(argv[1]) == "--density-and-type";
     if (argc == 2 && string(argv[1]) == "--clear-reuse") {
         testClearReuse();
         testClearKeepsContactListener();
-        return g_fail ? 1 : 0;
+        return finishSelectedRun(argc >= 3 ? argv[2] : argv[1]);
     }
     if (argc >= 2 && string(argv[1]) == "--review-round-2") {
         testAdversarialReviewRound2(argc >= 3 ? argv[2] : "all");
-        return g_fail ? 1 : 0;
+        return finishSelectedRun(argc >= 3 ? argv[2] : argv[1]);
     }
     if (argc >= 2 && string(argv[1]) == "--review-round-1") {
         testAdversarialReview(argc >= 3 ? argv[2] : "all");
-        return g_fail ? 1 : 0;
+        return finishSelectedRun(argc >= 3 ? argv[2] : argv[1]);
     }
     if (argc == 2 && string(argv[1]) == "--owner-lifetimes") {
         testClearReuse();
@@ -4051,7 +4146,11 @@ int main(int argc, char** argv) {
         testAdversarialReview();
         testAdversarialReviewRound2();
         printf("\nOwner lifetime checks: %d failures\n", g_fail);
-        return g_fail ? 1 : 0;
+        return finishSelectedRun(argc >= 3 ? argv[2] : argv[1]);
+    }
+    if (argc > 1 && !g_massDiagnostics) {
+        fprintf(stderr, "unknown case: %s\n", argv[1]);
+        return 1;
     }
     box2d::World world;
     world.setup(0, 0);
@@ -4059,7 +4158,7 @@ int main(int argc, char** argv) {
 
     if (g_massDiagnostics) {
         testDensityAndType(world);
-        return g_fail ? 1 : 0;
+        return finishSelectedRun(argc >= 3 ? argv[2] : argv[1]);
     }
 
     testDeliveryPR2();
@@ -4093,6 +4192,6 @@ int main(int argc, char** argv) {
         printf("\n%d check(s) FAILED\n", g_fail);
         return 1;
     }
-    printf("\nAll checks passed\n");
+    printf("\nAll %d checks passed\n", g_checks);
     return 0;
 }
