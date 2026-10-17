@@ -241,6 +241,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     getMainThreadId();
 
     if (auto token = internal::appRunToken()) token->store(false);
+    internal::cancelResourceBackends();
     internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
 
     // Reset state
@@ -314,6 +315,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     }
 
     if (auto token = internal::appRunToken()) token->store(false);
+    internal::cancelResourceBackends();
 
     // Finish MCP workers before their app-owned handlers are destroyed.
 #ifndef __EMSCRIPTEN__

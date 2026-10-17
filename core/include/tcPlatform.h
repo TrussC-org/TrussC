@@ -1,5 +1,6 @@
 #pragma once
 #include "tc/utils/tcAnnotations.h"
+#include "tc/app/tcScreenshot.h"
 
 #include <string>
 #include <filesystem>
@@ -201,6 +202,7 @@ std::filesystem::path resolveScreenshotDownloadName(const std::filesystem::path&
 bool captureWindowToFile(const std::filesystem::path& path);
 // Encode an already captured RGBA8 image using the screenshot file formats.
 bool saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& path);
+SaveResult writeScreenshotPixels(const Pixels& pixels, const std::filesystem::path& path);
 }
 
 // ---------------------------------------------------------------------------

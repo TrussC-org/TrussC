@@ -5,10 +5,27 @@
 
 #import <AudioToolbox/AudioToolbox.h>
 #import <Foundation/Foundation.h>
+#import <AVFoundation/AVFoundation.h>
 
 #include "tc/sound/tcSound.h"
+#include "tc/sound/tcMicInputInternal.h"
 
 namespace trussc {
+namespace internal {
+MicAuthorization micAuthorizationPlatform() {
+    switch ([AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio]) {
+        case AVAuthorizationStatusAuthorized: return MicAuthorization::Authorized;
+        case AVAuthorizationStatusNotDetermined: return MicAuthorization::NotDetermined;
+        case AVAuthorizationStatusRestricted: return MicAuthorization::Restricted;
+        default: return MicAuthorization::Denied;
+    }
+}
+void requestMicPermissionPlatform(std::function<void(bool)> completion) {
+    [AVCaptureDevice requestAccessForMediaType:AVMediaTypeAudio completionHandler:^(BOOL granted) {
+        completion(granted);
+    }];
+}
+} // namespace internal
 
 // -----------------------------------------------------------------------------
 // Memory read callbacks for AudioFile

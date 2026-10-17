@@ -98,6 +98,8 @@ public:
     // All resource access and lifecycle operations are serialized on main.
     // Web without pthreads decodes in a later frame, which may stall that frame.
     // App exit waits for loads still decoding; cancelling never waits.
+    // Completions are delivered during runApp / runHeadlessApp; in a bare main()
+    // without an app run, no completion event fires.
     void loadAsync(const fs::path& path, bool mipmaps = false) {
         auto state = async_.begin(onLoad, [this](AsyncState& ready) {
             clearCommitted();

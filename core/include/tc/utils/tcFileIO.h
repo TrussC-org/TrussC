@@ -206,20 +206,29 @@ inline SaveResult checkOutputStream(std::ofstream& stream, const fs::path& path)
     return stream.fail() ? saveErrno(path, "Write error") : SaveResult::success();
 }
 
-// The fixed sibling temporary is reused on retries. Never remove the destination
-// before rename: filesystem::rename replaces an existing file on every platform.
+// Screenshot jobs use exclusive, unique sibling temporaries, including when a
+// synchronous saver overlaps an async job. Other savers retain their retry path.
+std::FILE* openScreenshotTemporary(const fs::path& path, fs::path& temporary);
+
+// Never remove the destination before rename.
 template<class Write>
-inline SaveResult atomicWrite(const fs::path& path, Write write, const char* module) {
+inline SaveResult atomicWrite(const fs::path& path, Write write, const char* module,
+                              bool uniqueTemporary = false) {
     std::error_code ec;
     auto status = fs::status(path, ec);
     if (ec && ec != std::errc::no_such_file_or_directory)
         return reportSaveFailure(saveFailure(path, "Cannot inspect target", ec), module);
     if (fs::exists(status) && !fs::is_regular_file(status))
         return reportSaveFailure(saveFailure(path, "Not a regular file"), module);
-    fs::path temporary = path;
-    temporary += ".tmp";
+    fs::path temporary;
     errno = 0;
-    auto* file = openFile(temporary, "wb");
+    std::FILE* file;
+    if (uniqueTemporary) file = openScreenshotTemporary(path, temporary);
+    else {
+        temporary = path;
+        temporary += ".tmp";
+        file = openFile(temporary, "wb");
+    }
     auto result = file ? SaveResult::success() : saveErrno(path, "Cannot create file");
     if (file) {
         try {
@@ -234,21 +243,20 @@ inline SaveResult atomicWrite(const fs::path& path, Write write, const char* mod
     }
     if (result) {
         fs::rename(temporary, path, ec);
-        if (ec) result = SaveResult::fail(SaveError::WriteFailed,
-            "Cannot replace file: " + pathToDisplayUtf8(path) + " (" + ec.message() + ")");
+        if (ec) result = saveFailure(path, "Cannot replace file", ec);
     }
     if (!result) {
-        fs::remove(temporary, ec);
+        if (file) fs::remove(temporary, ec);
         return reportSaveFailure(result, module);
     }
     return result;
 }
 
 inline SaveResult atomicWrite(const fs::path& path, const void* data, size_t size,
-                              const char* module) {
+                              const char* module, bool uniqueTemporary = false) {
     return atomicWrite(path, [&](std::FILE* file) {
         return checkedWrite(file, data, size, path);
-    }, module);
+    }, module, uniqueTemporary);
 }
 
 // Loading entry. URLs opt out of filesystem resolution and opening.

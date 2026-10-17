@@ -17,6 +17,9 @@ ResourceLoadBatch takeResourceLoadBatch();
 void deliverResourceLoadBatch(ResourceLoadBatch batch);
 void startResourceLoad(std::function<void()> preparation);
 void finishResourceLoadsAtExit();
+// A backend retains this registration until its callbacks have quiesced.
+std::shared_ptr<std::function<void()>> registerResourceStop(std::function<void()> stop);
+void cancelResourceBackends();
 void waitForResourceLoadsAtAppExit();
 
 // Deterministic test seam. Installed/removed only with workers quiescent.

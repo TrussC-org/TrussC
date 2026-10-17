@@ -412,68 +412,71 @@ bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
 }
 
 bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
-    const auto path = internal::resolveScreenshotPath(requestedPath);
+    return writeScreenshotPixels(pixels, requestedPath).ok();
+}
 
-    // CGImage を作成
-    int width = pixels.getWidth();
-    int height = pixels.getHeight();
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+SaveResult internal::writeScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    // Retire each encoded payload before its async admission slot is released.
+    @autoreleasepool {
+        const auto path = internal::resolveScreenshotPath(requestedPath);
 
-    CGContextRef context = CGBitmapContextCreate(
-        const_cast<unsigned char*>(pixels.getData()),
-        width, height,
-        8,                          // bitsPerComponent
-        width * 4,                  // bytesPerRow
-        colorSpace,
-        (CGBitmapInfo)kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
-    );
+        // CGImage を作成
+        int width = pixels.getWidth();
+        int height = pixels.getHeight();
+        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
 
-    if (!context) {
+        CGContextRef context = CGBitmapContextCreate(
+            const_cast<unsigned char*>(pixels.getData()),
+            width, height,
+            8,                          // bitsPerComponent
+            width * 4,                  // bytesPerRow
+            colorSpace,
+            (CGBitmapInfo)kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
+        );
+
+        if (!context) {
+            CGColorSpaceRelease(colorSpace);
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "CGContext の作成に失敗しました"), "Screenshot");
+        }
+
+        CGImageRef cgImage = CGBitmapContextCreateImage(context);
+        CGContextRelease(context);
         CGColorSpaceRelease(colorSpace);
-        logError() << "[Screenshot] CGContext の作成に失敗しました";
-        return false;
+
+        if (!cgImage) {
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "CGImage の作成に失敗しました"), "Screenshot");
+        }
+
+        // NSBitmapImageRep に変換
+        NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithCGImage:cgImage];
+        CGImageRelease(cgImage);
+
+        if (!rep) {
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "NSBitmapImageRep の作成に失敗しました"), "Screenshot");
+        }
+
+        // ファイル拡張子から形式を判定
+        // Case-insensitive extension match on the resolved destination
+        std::string ext = toLower(getFileExtension(path));
+        NSBitmapImageFileType fileType = NSBitmapImageFileTypePNG;
+        if (ext == "jpg" || ext == "jpeg") {
+            fileType = NSBitmapImageFileTypeJPEG;
+        } else if (ext == "tiff" || ext == "tif") {
+            fileType = NSBitmapImageFileTypeTIFF;
+        } else if (ext == "bmp") {
+            fileType = NSBitmapImageFileTypeBMP;
+        } else if (ext == "gif") {
+            fileType = NSBitmapImageFileTypeGIF;
+        }
+
+        // ファイルに保存
+        NSData* data = [rep representationUsingType:fileType properties:@{}];
+        if (!data) {
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "画像データの作成に失敗しました"), "Screenshot");
+        }
+
+        return internal::atomicWrite(path, data.bytes, data.length, "Screenshot", true);
     }
-
-    CGImageRef cgImage = CGBitmapContextCreateImage(context);
-    CGContextRelease(context);
-    CGColorSpaceRelease(colorSpace);
-
-    if (!cgImage) {
-        logError() << "[Screenshot] CGImage の作成に失敗しました";
-        return false;
-    }
-
-    // NSBitmapImageRep に変換
-    NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithCGImage:cgImage];
-    CGImageRelease(cgImage);
-
-    if (!rep) {
-        logError() << "[Screenshot] NSBitmapImageRep の作成に失敗しました";
-        return false;
-    }
-
-    // ファイル拡張子から形式を判定
-    // Case-insensitive extension match on the resolved destination
-    std::string ext = toLower(getFileExtension(path));
-    NSBitmapImageFileType fileType = NSBitmapImageFileTypePNG;
-    if (ext == "jpg" || ext == "jpeg") {
-        fileType = NSBitmapImageFileTypeJPEG;
-    } else if (ext == "tiff" || ext == "tif") {
-        fileType = NSBitmapImageFileTypeTIFF;
-    } else if (ext == "bmp") {
-        fileType = NSBitmapImageFileTypeBMP;
-    } else if (ext == "gif") {
-        fileType = NSBitmapImageFileTypeGIF;
-    }
-
-    // ファイルに保存
-    NSData* data = [rep representationUsingType:fileType properties:@{}];
-    if (!data) {
-        logError() << "[Screenshot] 画像データの作成に失敗しました";
-        return false;
-    }
-
-    return internal::atomicWrite(path, data.bytes, data.length, "Screenshot").ok();
 }
 
 // ---------------------------------------------------------------------------

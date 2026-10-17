@@ -227,6 +227,8 @@ public:
     // serialized on main (direct sample access keeps its existing mixer rules).
     // Web without pthreads defers CPU decode to a frame, which may stall it.
     // App exit waits for loads still decoding; cancelling never waits.
+    // Completions are delivered during runApp / runHeadlessApp; in a bare main()
+    // without an app run, no completion event fires.
     void loadAsync(const fs::path& path);
     Event<LoadResult> onLoad;
     bool isLoading() const { return async_.loading(); }
@@ -2023,16 +2025,38 @@ inline size_t getAudioAnalysisBuffer(float* outBuffer, size_t numSamples) {
 // Microphone Input (miniaudio-based)
 // ---------------------------------------------------------------------------
 
+struct MicStartResult {
+    bool success = false;
+    std::string message;
+    explicit operator bool() const { return success; }
+};
+namespace internal { struct MicState; }
+
 class MicInput {
 public:
     static constexpr int BUFFER_SIZE = 4096;  // Ring buffer size
     static constexpr int DEFAULT_SAMPLE_RATE = 48000;  // match AudioEngine::DEFAULT_SAMPLE_RATE
 
     MicInput() = default;
+    MicInput(const MicInput&) = delete;
+    MicInput& operator=(const MicInput&) = delete;
+    MicInput(MicInput&&) = delete;
+    MicInput& operator=(MicInput&&) = delete;
     ~MicInput();
 
-    // Initialize (open microphone device)
+    // Initialize (open microphone device). macOS/iOS: if consent is undecided,
+    // request permission and return false; call start() again after granting.
     bool start(int sampleRate = DEFAULT_SAMPLE_RATE);
+    // Main-thread operation. Web requires a secure context and user gesture.
+    // macOS/iOS request undecided consent before capture init, without a worker;
+    // isStarting stays true until answered or cancelled. Exit never awaits consent.
+    // Completions are delivered during runApp / runHeadlessApp; in a bare main()
+    // without an app run, no completion event fires.
+    void startAsync(int sampleRate = DEFAULT_SAMPLE_RATE);
+    // Completions are delivered during runApp / runHeadlessApp; in a bare main()
+    // without an app run, no completion event fires.
+    Event<MicStartResult> onStart;
+    bool isStarting() const;
 
     // Stop
     void stop();
@@ -2043,29 +2067,27 @@ public:
     size_t getBuffer(float* outBuffer, size_t numSamples);
 
     // State
-    bool isRunning() const { return running_; }
+    bool isRunning() const;
     int getSampleRate() const { return sampleRate_; }
 
     // Name of the capture device start() opened; empty while stopped (and
     // on Web, where the browser does not expose it).
-    std::string getDeviceName() const { return deviceName_; }
+    std::string getDeviceName() const { return isRunning() ? deviceName_ : std::string{}; }
 
     // Callback (internal use)
     void onAudioData(const float* input, size_t frameCount);
 
 private:
-    void* device_ = nullptr;  // ma_device*
-#ifdef __EMSCRIPTEN__
-    unsigned int webInstanceId_ = 0;
-#endif
+    std::shared_ptr<internal::MicState> state_;
+    std::shared_ptr<internal::MicState> predecessor_;
+    std::shared_ptr<std::function<void(internal::MicState&)>> apply_;
+    std::shared_ptr<internal::NetworkDelivery> gate_ = std::make_shared<internal::NetworkDelivery>();
     bool running_ = false;
+    bool starting_ = false;
     int sampleRate_ = DEFAULT_SAMPLE_RATE;
     std::string deviceName_;
-
-    // Ring buffer
-    std::vector<float> buffer_;
-    size_t writePos_ = 0;
-    std::mutex mutex_;
+    bool beginStart(int sampleRate, bool asynchronous);
+    static int selectedBackend();
 };
 
 // Global MicInput instance (singleton-like usage)

@@ -202,13 +202,12 @@ TC_CORE_TEST_MAIN() {
         for (const auto* extension : {".png", ".jpg", ".bmp"}) {
             auto output = fs::path(destination).replace_extension(extension);
             check(internal::saveScreenshotPixels(px, output), "prepare previous screenshot output");
-            const auto previous = loadTextFile(output);
             fs::create_symlink("/dev/full", fs::path(output).concat(".tmp"));
             const int before = screenshotErrors;
-            check(!internal::saveScreenshotPixels(px, output) && screenshotErrors == before + 1 &&
-                  loadTextFile(output) == previous &&
-                  !fs::exists(fs::path(output).concat(".tmp")),
-                  "deferred screenshot ENOSPC logs exactly one Error and preserves output");
+            check(internal::saveScreenshotPixels(px, output) && screenshotErrors == before &&
+                  fs::is_symlink(fs::path(output).concat(".tmp")),
+                  "screenshot unique temporary ignores an unrelated fixed .tmp symlink");
+            fs::remove(fs::path(output).concat(".tmp"));
         }
 #else
         fs::create_directory(destination);

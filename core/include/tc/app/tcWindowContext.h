@@ -306,6 +306,7 @@ struct WindowContext {
     // window drains from the afterFrame listener in _setup_cb; each secondary
     // window drains in its own windowTick. See TrussC.h drainPendingScreenshots().
     std::vector<std::filesystem::path> pendingScreenshotPaths;
+    ScreenshotQueue asyncScreenshots;
 
     // --- per-window deferred draw queues + sokol_gl layer counter ---------
     // These were process globals, "safe" only because window ticks run strictly
