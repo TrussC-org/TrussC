@@ -494,30 +494,36 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         });
     }
 #endif
-    constexpr size_t width = 16, height = 16;
+    // Media Foundation's H.264 encoders need at least 64x64 on some devices.
+    constexpr size_t width = 64, height = 64;
     const auto packed = internal::recorderPackedLayout(width, height, F::BGRA8);
+    const size_t paddedRowBytes = packed.rowBytes + 16;
+    const size_t paddedBytes = paddedRowBytes * height;
+    const size_t nv12Stride = width + 8;
+    const size_t nv12PaddedBytes = nv12Stride * height * 3 / 2;
+    const size_t nv12Span = nv12PaddedBytes - (nv12Stride - width);
     const size_t max = std::numeric_limits<size_t>::max();
     size_t bytes = 0;
     check(!internal::recorderPackedLayout(max / 4 + 1, 2, F::BGRA8).byteSize &&
-          !internal::recorderPackedLayout(16, max / 64 + 1, F::BGRA8).byteSize &&
+          !internal::recorderPackedLayout(width, max / packed.rowBytes + 1, F::BGRA8).byteSize &&
           !internal::recorderByteSize(max, 2, bytes),
           "recorder checks row and total byte arithmetic");
-    check(internal::recorderNV12ByteSize(16, 16, bytes) && bytes == 384 &&
-          !internal::recorderNV12ByteSize(15, 16, bytes) &&
-          !internal::recorderNV12ByteSize(16, 15, bytes) &&
+    check(internal::recorderNV12ByteSize(width, height, bytes) && bytes == width * height * 3 / 2 &&
+          !internal::recorderNV12ByteSize(width - 1, height, bytes) &&
+          !internal::recorderNV12ByteSize(width, height - 1, bytes) &&
           !internal::recorderNV12ByteSize(max - 1, 2, bytes) &&
           !internal::recorderNV12ByteSize((max / 4) & ~size_t(1), 4, bytes),
           "recorder checks complete NV12 byte arithmetic");
 
-    check(internal::recorderNV12ByteSize(1088, 1920, bytes) && bytes == 3133440 &&
-          internal::recorderNV12ImageSpan(1080, 1920, 1088, 1920, bytes) && bytes == 3133432 &&
-          internal::recorderNV12ImageFits(1080, 1920, 1088, 1920, 3133432),
+    check(internal::recorderNV12ByteSize(nv12Stride, height, bytes) && bytes == nv12PaddedBytes &&
+          internal::recorderNV12ImageSpan(width, height, nv12Stride, height, bytes) && bytes == nv12Span &&
+          internal::recorderNV12ImageFits(width, height, nv12Stride, height, nv12Span),
           "recorder accepts complete NV12 pixels without final row padding");
-    check(!internal::recorderNV12ImageFits(1080, 1920, 1088, 1920, 3133431) &&
-          !internal::recorderNV12ImageSpan(1081, 1920, 1088, 1920, bytes) &&
-          !internal::recorderNV12ImageSpan(1080, 0, 1088, 1920, bytes) &&
-          !internal::recorderNV12ImageSpan(1080, 1920, 1072, 1920, bytes) &&
-          !internal::recorderNV12ImageSpan(1080, 1920, 1088, 1918, bytes) &&
+    check(!internal::recorderNV12ImageFits(width, height, nv12Stride, height, nv12Span - 1) &&
+          !internal::recorderNV12ImageSpan(width + 1, height, nv12Stride, height, bytes) &&
+          !internal::recorderNV12ImageSpan(width, 0, nv12Stride, height, bytes) &&
+          !internal::recorderNV12ImageSpan(width, height, width - 8, height, bytes) &&
+          !internal::recorderNV12ImageSpan(width, height, nv12Stride, height - 2, bytes) &&
           !internal::recorderNV12ImageSpan(2, 2, max - 1, 2, bytes),
           "recorder refuses incomplete or invalid NV12 pixel spans");
 
@@ -528,8 +534,24 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     VideoWriter writer;
     VideoRecordSettings settings;
     settings.fps = 30;
-    check(writer.open(dir / "frames.mp4", width, height, settings).ok(), "recorder opens a fixed size take");
-    if (!writer.isOpen()) { fs::remove_all(dir); return 1; }
+    const auto opened = writer.open(dir / "frames.mp4", width, height, settings);
+    bool unsupportedMediaType = false;
+#if !defined(__linux__)
+    // SaveResult has no media-type error enum. Only explicit backend media-type
+    // diagnostics qualify; file errors and generic backend failures must fail.
+    // Linux/GStreamer must open this fixture, even for these diagnostics.
+    unsupportedMediaType = opened.error == SaveError::WriteFailed &&
+        (opened.message.find("0xC00D36B4") != std::string::npos ||
+         opened.message.find("MF_E_INVALIDMEDIATYPE") != std::string::npos ||
+         opened.message.find("unsupported media type") != std::string::npos ||
+         opened.message.find("Unsupported media type") != std::string::npos);
+#endif
+    if (unsupportedMediaType) {
+        std::printf("SKIP: encoder rejected a %zux%zu take (%s)\n", width, height, opened.message.c_str());
+    } else {
+        check(opened.ok(), "recorder opens a fixed size take");
+    }
+    if (!opened) { fs::remove_all(dir); return failures ? 1 : 0; }
     int warnings = 0, errors = 0;
     std::mutex writerMutex;
     bool diagnosticsUnlocked = true;
@@ -578,14 +600,16 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
           "recorder encodes frames that match the take size");
     std::fill(destination.begin(), destination.end(), 0x7b);
     const std::vector<RecorderFrameLayout> differentSources = {
-        internal::recorderPackedLayout(16, 32, F::BGRA8),
-        internal::recorderPackedLayout(32, 16, F::BGRA8),
-        internal::recorderPackedLayout(32, 32, F::BGRA8),
-        internal::recorderPackedLayout(8, 8, F::BGRA8),
-        {16, 16, 63, 1024, F::BGRA8}, {16, 16, 64, 1023, F::BGRA8},
-        {16, 16, max, max, F::BGRA8}, {16, 16, 64, 1024, F::Unknown},
-        {16, 16, 64, 1024, F::RGBA8},
-        {0, 16, 64, 1024, F::BGRA8},
+        internal::recorderPackedLayout(width, height * 2, F::BGRA8),
+        internal::recorderPackedLayout(width * 2, height, F::BGRA8),
+        internal::recorderPackedLayout(width * 2, height * 2, F::BGRA8),
+        internal::recorderPackedLayout(width / 2, height / 2, F::BGRA8),
+        {width, height, packed.rowBytes - 1, packed.byteSize, F::BGRA8},
+        {width, height, packed.rowBytes, packed.byteSize - 1, F::BGRA8},
+        {width, height, max, max, F::BGRA8},
+        {width, height, packed.rowBytes, packed.byteSize, F::Unknown},
+        {width, height, packed.rowBytes, packed.byteSize, F::RGBA8},
+        {0, height, packed.rowBytes, packed.byteSize, F::BGRA8},
     };
     bool refused = true;
     for (const auto& source : differentSources) refused &= !complete(source);
@@ -593,10 +617,13 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
           std::all_of(destination.begin(), destination.end(), [](unsigned char b) { return b == 0x7b; }),
           "recorder rejects frames that do not match the take size before copying");
     const std::vector<RecorderFrameLayout> differentDestinations = {
-        {16, 8, 64, 512, F::BGRA8}, {8, 16, 64, 1024, F::BGRA8},
-        {16, 16, 63, 1024, F::BGRA8}, {16, 16, 64, 1023, F::BGRA8},
-        {16, 16, 80, 1279, F::BGRA8}, {16, 16, max, max, F::BGRA8},
-        {16, 16, 64, 1024, F::RGBA8},
+        {width, height / 2, packed.rowBytes, packed.byteSize / 2, F::BGRA8},
+        {width / 2, height, packed.rowBytes, packed.byteSize, F::BGRA8},
+        {width, height, packed.rowBytes - 1, packed.byteSize, F::BGRA8},
+        {width, height, packed.rowBytes, packed.byteSize - 1, F::BGRA8},
+        {width, height, paddedRowBytes, paddedBytes - 1, F::BGRA8},
+        {width, height, max, max, F::BGRA8},
+        {width, height, packed.rowBytes, packed.byteSize, F::RGBA8},
     };
     for (const auto& layout : differentDestinations) {
         destinationLayout = layout;
@@ -615,14 +642,14 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     check(!writer.addFrame(floatPixels) && writer.getFrameCount() == 1,
           "recorder refuses a different pixel element format");
     Pixels differentSize;
-    differentSize.allocate(32, 16, 4);
+    differentSize.allocate(width * 2, height, 4);
     for (int i = 0; i < 50; ++i) refused &= !writer.addFrame(differentSize);
     check(diagnosticsUnlocked, "recorder emits layout diagnostics after releasing the writer mutex");
     check(refused && warnings == 1 && errors == 0 && writer.getRejectedFrameCount() ==
           differentSources.size() + differentDestinations.size() + 52,
           "recorder counts mismatches and logs one Warning per take");
-    destinationLayout.rowBytes = 80;
-    destinationLayout.byteSize = 80 * height;
+    destinationLayout.rowBytes = paddedRowBytes;
+    destinationLayout.byteSize = paddedBytes;
     destination.assign(destinationLayout.byteSize, 0x7b);
     auto tenBit = packed;
     tenBit.format = F::RGB10A2;

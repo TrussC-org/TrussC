@@ -6,6 +6,13 @@ Linux GLCORE and Raspberry Pi GLES3 (GStreamer). Web, iOS and Android print SKIP
 Leave the test window visible until it exits. The no-argument test stays headless;
 the existing Linux GLCORE `--gpu-check` still checks X11 resizing and GL pack state.
 
+The headless take uses 64x64 for desktop H.264 encoder compatibility; its frame
+fixtures and byte counts are derived from that size. Layout and overflow checks
+run before opening the encoder. An explicit unsupported-media-type open failure
+prints `SKIP: encoder rejected a 64x64 take (<result/HRESULT text>)` and skips
+only encoding checks on non-Linux platforms. Other open failures are FAILs.
+Linux/GStreamer must open the take and run all 16 headless checks.
+
 Before opening the screen take, device mode calls `setWindowSize(W, H)` with
 `W=320`, `H=240` and records the framebuffer extent after it settles. It then
 uses the same API to request `(W, H*3/2)`, `(W*3/2, H)` and `(W, H)`.
