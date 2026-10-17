@@ -70,6 +70,27 @@ class CoreTestRunnerTests(unittest.TestCase):
         self.symbol_check_calls = check.call_args_list
         return rc, [call.kwargs["args"][0] for call in run.call_args_list]
 
+    def test_standalone_web_tests_are_selected_and_use_their_own_cmake(self):
+        unit = self.project("unitWeb", unit=True, web=True)
+        daily = self.project("dailyUnitWeb", unit=True, web=True, daily=True)
+        self.assertEqual(runner.find_core_web_tests(self.root), [unit])
+        self.assertEqual(set(runner.find_core_web_tests(self.root, True)), {unit, daily})
+        js = Path(unit) / "build-web" / "unitWeb.js"
+        js.parent.mkdir()
+        js.touch()
+        with patch.object(runner, "find_node", return_value="node"), \
+                patch.object(runner.shutil, "which", return_value="emcmake"), \
+                patch.object(runner, "run_command", return_value=True) as commands, \
+                patch.object(runner, "update_target_flags") as flags, \
+                patch.object(runner, "run_timed_test_binary", return_value=True) as run:
+            self.assertEqual(runner.build_and_run_web_test(unit, "pg", self.platform, self.options),
+                             (True, None))
+        flags.assert_not_called()
+        self.assertEqual(len(commands.call_args_list), 2)
+        self.assertEqual(commands.call_args_list[0].args[0][:2], ["emcmake", "cmake"])
+        self.assertEqual(run.call_args.args[0], str(js))
+        self.assertEqual(run.call_args.kwargs["launcher"], "node")
+
     def test_symbol_check_runs_on_linux_and_failure_prevents_runs(self):
         regular = self.project("regular")
         self.assertEqual(self.combined([regular], ["regular"], symbols_ok=False), (1, []))

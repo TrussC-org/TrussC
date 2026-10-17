@@ -209,10 +209,12 @@ def is_combined_core_test(test_dir):
             and not os.path.isfile(os.path.join(test_dir, "own-binary")))
 
 def find_core_web_tests(root_dir, include_daily=False):
-    # The trusscli project core tests that ALSO run as a WebAssembly build under
-    # node: those carrying a `web-test` marker file. Web-only behaviour
+    # Core tests that ALSO run as a WebAssembly build under node: those
+    # carrying a `web-test` marker file. Web-only behaviour
     # (#ifdef __EMSCRIPTEN__) is otherwise only ever compiled in CI, never run.
-    return [t for t in find_core_tests(root_dir, include_daily=include_daily)
+    tests = (find_core_tests(root_dir, include_daily=include_daily)
+             + find_core_unit_tests(root_dir, include_daily=include_daily))
+    return [t for t in tests
             if os.path.isfile(os.path.join(t, "web-test"))]
 
 def find_core_unit_tests(root_dir, include_daily=False):
@@ -495,20 +497,21 @@ def find_node():
     return shutil.which("node")
 
 def build_and_run_web_test(test_dir, pg_bin, platform_info, args):
-    # Build a core test for WebAssembly (trusscli --web + emcmake, the same
-    # path as a web example), then RUN its bin/<name>.js under node (non-zero
-    # exit = failure). Emscripten's default ENVIRONMENT includes node, so the
-    # regular web app build runs as a console program as long as the test
-    # never touches the canvas / GPU. The .html shell is simply unused.
+    # Build a core test for WebAssembly, then run its JavaScript under node
+    # (non-zero exit = failure). Project tests use trusscli + emcmake like Web
+    # examples; standalone tests use their own CMake project. Neither needs
+    # a canvas or GPU, and the project test's .html shell is unused.
     node = find_node()
     if not node:
         Colors.print("  node not found (source emsdk_env or put node on PATH)", Colors.RED)
         return False, "node-missing"
 
-    pg_cmd = [str(pg_bin), "update", "-p", test_dir, "--tc-root", ROOT_DIR, "--ide", "cmake"]
-    pg_cmd += update_target_flags(pg_bin, web=True)
-    if not run_command(pg_cmd, cwd=ROOT_DIR, verbose=args.verbose):
-        return False, "update"
+    standalone = not os.path.isdir(os.path.join(test_dir, "src"))
+    if not standalone:
+        pg_cmd = [str(pg_bin), "update", "-p", test_dir, "--tc-root", ROOT_DIR, "--ide", "cmake"]
+        pg_cmd += update_target_flags(pg_bin, web=True)
+        if not run_command(pg_cmd, cwd=ROOT_DIR, verbose=args.verbose):
+            return False, "update"
 
     if shutil.which("emcmake"):
         cmd_config = ["emcmake", "cmake", "-S", ".", "-B", "build-web"]
@@ -523,7 +526,7 @@ def build_and_run_web_test(test_dir, pg_bin, platform_info, args):
         return False, "web-build"
 
     base = os.path.basename(os.path.normpath(test_dir))
-    js = os.path.join(test_dir, "bin", base + ".js")
+    js = os.path.join(test_dir, "build-web" if standalone else "bin", base + ".js")
     if not os.path.isfile(js):
         Colors.print(f"  Web test output not found: {os.path.relpath(js, test_dir)}", Colors.RED)
         return False, "binary-missing"
