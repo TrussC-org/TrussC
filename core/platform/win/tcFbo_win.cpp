@@ -40,6 +40,11 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
     D3D11_TEXTURE2D_DESC desc;
     srcTexture->GetDesc(&desc);
 
+    // Bound (abi): D3D11 source extent and format must match the Fbo readback. Overflow drops the recorder frame and is counted.
+    if (desc.Width != (UINT)width_ || desc.Height != (UINT)height_ ||
+        (desc.Format != DXGI_FORMAT_R8G8B8A8_UNORM && desc.Format != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB))
+        return false;
+
     // CPU-readable staging texture
     D3D11_TEXTURE2D_DESC stagingDesc = desc;
     stagingDesc.Usage = D3D11_USAGE_STAGING;
@@ -64,14 +69,24 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
         return false;
     }
 
+    const auto layout = internal::recorderPackedLayout(width_, height_, internal::RecorderPixelFormat::RGBA8);
+    size_t mappedBytes = 0;
+    // Bound (abi): mapped D3D11 rows must hold the complete Fbo readback. Overflow drops the recorder frame and is counted.
+    if (!mapped.pData || !layout.byteSize || mapped.RowPitch < layout.rowBytes ||
+        !internal::recorderByteSize(mapped.RowPitch, height_, mappedBytes)) {
+        context->Unmap(stagingTexture, 0);
+        stagingTexture->Release();
+        return false;
+    }
+
     // Copy pixels row-by-row (handle RowPitch != width*4 stride)
     // sokol maps SG_PIXELFORMAT_RGBA8 to DXGI_FORMAT_R8G8B8A8_UNORM,
     // so the data is already in RGBA order — no channel swizzle needed.
     unsigned char* src = (unsigned char*)mapped.pData;
     unsigned char* dst = pixels;
-    size_t rowBytes = (size_t)width_ * 4;
+    size_t rowBytes = layout.rowBytes;
     for (int y = 0; y < height_; y++) {
-        memcpy(dst + y * rowBytes, src + y * mapped.RowPitch, rowBytes);
+        memcpy(dst + y * rowBytes, src + (size_t)y * mapped.RowPitch, rowBytes);
     }
 
     context->Unmap(stagingTexture, 0);

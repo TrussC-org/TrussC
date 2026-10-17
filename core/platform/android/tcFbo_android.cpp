@@ -8,6 +8,8 @@
 
 #include <GLES3/gl3.h>
 
+#include "../gl/tcPixelPack.h"
+
 namespace trussc {
 
 // Helper: read from GL texture via temp FBO
@@ -32,7 +34,10 @@ static bool readFromGLTexture(sg_image image, int width, int height,
 
     bool ok = false;
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
-        glReadPixels(0, 0, width, height, glFormat, glType, buffer);
+        {
+            internal::ScopedTightPixelPack pack;
+            glReadPixels(0, 0, width, height, glFormat, glType, buffer);
+        }
 
         // Vertical flip (OpenGL bottom-left -> TrussC top-left)
         if (flipY) {
@@ -59,7 +64,7 @@ static bool readFromGLTexture(sg_image image, int width, int height,
 bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
     if (!allocated_ || !pixels) return false;
 
-    size_t rowBytes = width_ * 4;
+    size_t rowBytes = (size_t)width_ * 4;
     return readFromGLTexture(colorTexture_.getImage(), width_, height_,
                              GL_RGBA, GL_UNSIGNED_BYTE, pixels, rowBytes, true, reportError);
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include "tc/utils/tcAnnotations.h"
+#include "tcRecorderFrame.h"
 
 // =============================================================================
 // tcVideoRecorder.h - Native video recording (H.264 / HEVC / ProRes -> file)
@@ -69,7 +70,10 @@ class Fbo;
 class Pixels;
 
 // Opaque per-platform encoder state (AVAssetWriter / IMFSinkWriter / GstPipeline)
-namespace internal { struct VideoWriterPlatformData; }
+namespace internal {
+struct VideoWriterPlatformData;
+struct RecorderFrameTestAccess;
+}
 
 // ---------------------------------------------------------------------------
 // Codec / settings
@@ -121,6 +125,8 @@ struct VideoRecordSettings {
 // VideoWriter - low-level encoder you feed frames to.
 // ---------------------------------------------------------------------------
 class TC_PLATFORMS("macos,windows,linux,android,ios") VideoWriter {
+    friend class ScreenRecorder;
+    friend struct internal::RecorderFrameTestAccess;
 public:
     VideoWriter() = default;
     ~VideoWriter() { close(); }
@@ -135,6 +141,7 @@ public:
         close();
         result_ = SaveResult::success();
         callerMistakeLogged_ = false;
+        rejectedFrameCount_.store(0, std::memory_order_relaxed);
         path_.clear();
         if (width <= 0 || height <= 0) {
             const auto message = "invalid size " + std::to_string(width) + "x" + std::to_string(height);
@@ -154,7 +161,12 @@ public:
         settings_ = settings;
         fps_ = (settings_.fps > 0.0f) ? settings_.fps : 60.0f;
         frameCount_ = 0;
-        scratch_.resize((size_t)width_ * height_ * 4);
+        const auto layout = internal::recorderPackedLayout(width_, height_, internal::RecorderPixelFormat::RGBA8);
+        // Bound (abi): take bytes must fit size_t and vector capacity. Overflow refuses open() and is reported by its false return; no frame exists to count.
+        if (!layout.byteSize || layout.byteSize > scratch_.max_size())
+            return result_ = internal::reportSaveFailure(
+                internal::saveFailure(path_, "invalid frame byte size"), "VideoWriter");
+        scratch_.resize(layout.byteSize);
 
         // Platform encoders take UTF-8 (converted to native inside)
         if (!openPlatform(internal::pathToUtf8(path_), width_, height_, fps_, settings_)) {
@@ -175,11 +187,11 @@ public:
             auto finalized = closePlatform();
             if (result_) {
                 result_ = finalized;
-                if (!result_) internal::reportSaveFailure(result_, "VideoWriter");
+                if (!result_) diagnostic(LogLevel::Error, result_.message);
             }
             if (frameCount_ == 0 && callerMistakeLogged_)
-                logWarning("VideoWriter") << "take accepted 0 frames after caller mistakes -> " << path_;
-            else if (result_) logNotice("VideoWriter") << "saved " << frameCount_ << " frames -> " << path_;
+                diagnostic(LogLevel::Warning, "take accepted 0 frames after caller mistakes -> " + internal::pathToDisplayUtf8(path_));
+            else if (result_) diagnostic(LogLevel::Notice, "saved " + std::to_string(frameCount_) + " frames -> " + internal::pathToDisplayUtf8(path_));
         }
         open_ = false;
         return result_;
@@ -188,6 +200,8 @@ public:
     bool isOpen() const { return open_; }
     // Frames accepted by the backend; close() reports finalization separately.
     int  getFrameCount() const { return frameCount_; }
+    // Frames refused by recorder layout/capacity validation in this take.
+    uint64_t getRejectedFrameCount() const { return rejectedFrameCount_.load(std::memory_order_relaxed); }
     int  getWidth() const { return width_; }
     int  getHeight() const { return height_; }
     float getFps() const { return fps_; }
@@ -208,10 +222,21 @@ public:
             return sizeMismatch("fbo", fbo.getWidth(), fbo.getHeight());
         }
         if (!fbo.isAllocated()) return callFailed("fbo is not allocated");
+        const auto layout = internal::recorderPackedLayout(width_, height_, internal::RecorderPixelFormat::RGBA8);
+        // Bound (abi): Fbo extent and RGBA8 bytes must match the take and scratch capacity. Overflow drops the recorder frame and is counted.
+        if (fbo.getTextureFormat() != TextureFormat::RGBA8 ||
+            fbo.getTexture().getPixelFormat() != SG_PIXELFORMAT_RGBA8 ||
+            fbo.getTexture().getWidth() != width_ || fbo.getTexture().getHeight() != height_ ||
+            !layout.byteSize || scratch_.size() < layout.byteSize) {
+            rejectFrameLayout();
+            return internal::saveFailure(path_, "frame layout does not match the recording buffer");
+        }
         if (internal::currentWindowContext().inFboPass)
             return callFailed("fbo readPixels requires fbo.end() first");
-        if (!fbo.readPixelsPlatform(scratch_.data(), false))
-            return callFailed("fbo readPixels failed");
+        if (!fbo.readPixelsPlatform(scratch_.data(), false)) {
+            rejectFrameLayout();
+            return internal::saveFailure(path_, "fbo readPixels failed");
+        }
         return appendRGBA(scratch_.data(), timeSec);
     }
     SaveResult addFrameAt(const Pixels& pixels, double timeSec) {
@@ -219,6 +244,15 @@ public:
         if (!result_) return result_;
         if (pixels.getWidth() != width_ || pixels.getHeight() != height_) {
             return sizeMismatch("pixels", pixels.getWidth(), pixels.getHeight());
+        }
+        size_t elements = 0;
+        // Bound (abi): pixel element format and allocation must cover the take. Overflow drops the recorder frame and is counted.
+        if (pixels.getFormat() != PixelFormat::U8 || !pixels.isAllocated() ||
+            !internal::pixelBufferCount(width_, height_, pixels.getChannels(), 1,
+                                        std::numeric_limits<size_t>::max(), elements) ||
+            pixels.getTotalBytes() < elements) {
+            rejectFrameLayout();
+            return internal::saveFailure(path_, "frame layout does not match the recording buffer");
         }
         if (pixels.getChannels() == 4) return appendRGBA(pixels.getData(), timeSec);
         // Expand to RGBA into the scratch buffer.
@@ -264,7 +298,15 @@ public:
 #if TC_ASYNC_SCREEN_CAPTURE
         if (!open_) { callFailed("not open"); return nullptr; }
         if (!result_) return nullptr;
-        auto* frame = lockFramePlatform(strideOut);
+        internal::RecorderFrameBuffer buffer;
+        auto* frame = lockFramePlatform(buffer);
+        // Bound (abi): the public stride must fit int. Overflow drops the recorder frame and is counted.
+        if (frame && buffer.layout.rowBytes > static_cast<size_t>(std::numeric_limits<int>::max())) {
+            discardFramePlatform();
+            rejectFrameLayout();
+            return nullptr;
+        }
+        strideOut = frame ? static_cast<int>(buffer.layout.rowBytes) : 0;
         return frame;
 #else
         (void)strideOut;
@@ -302,29 +344,90 @@ public:
     }
 
 private:
+    struct Diagnostic { LogLevel level; std::string message; };
+    std::vector<Diagnostic>* deferredDiagnostics_ = nullptr;
+    void diagnostic(LogLevel level, const std::string& message) {
+        if (deferredDiagnostics_) deferredDiagnostics_->push_back({level, message});
+        else LogStream(level, "VideoWriter") << message;
+    }
+    // Collect diagnostics while serializing encoder access. Destroying this
+    // guard releases the mutex before invoking logger callbacks.
+    class DiagnosticLock {
+        VideoWriter& writer_;
+        std::vector<Diagnostic> diagnostics_;
+        std::unique_lock<std::mutex> lock_;
+    public:
+        DiagnosticLock(VideoWriter& writer, std::mutex& mutex)
+            : writer_(writer), lock_(mutex) { writer_.deferredDiagnostics_ = &diagnostics_; }
+        ~DiagnosticLock() {
+            writer_.deferredDiagnostics_ = nullptr;
+            lock_.unlock();
+            for (const auto& entry : diagnostics_)
+                LogStream(entry.level, "VideoWriter") << entry.message;
+        }
+    };
+    bool rejectFrameLayout() {
+        if (rejectedFrameCount_.fetch_add(1, std::memory_order_relaxed) == 0)
+            diagnostic(LogLevel::Warning, "frame layout does not match the recording buffer; frame skipped");
+        return false;
+    }
+    bool captureLayoutMatches(const internal::RecorderFrameLayout& layout) const {
+        using F = internal::RecorderPixelFormat;
+        return (layout.format == F::BGRA8 || layout.format == F::RGB10A2) &&
+            internal::recorderFrameFits(layout, width_, height_, layout.format);
+    }
+    // The callbacks keep native buffer ownership in the backend. Tests inject
+    // a readback and a locked buffer through this same completion path.
+    template<class Acquire, class Copy, class Discard, class Submit>
+    bool completeCapture(const internal::RecorderFrameLayout& source,
+                         Acquire acquire, Copy copy, Discard discard, Submit submit) {
+        if (!open_ || !result_) return false;
+        // Bound (abi): captured extent and bytes must match the take before acquiring a buffer. Overflow drops the recorder frame and is counted.
+        if (!captureLayoutMatches(source)) return rejectFrameLayout();
+        const auto destination = acquire();
+        if (!destination.data) return false;
+        // Bound (abi): native destination must fit the take before readback. Overflow drops the recorder frame and is counted.
+        if (!internal::recorderFrameFits(destination.layout, width_, height_,
+                                         internal::RecorderPixelFormat::BGRA8) ||
+            !copy(destination)) {
+            discard();
+            return rejectFrameLayout();
+        }
+        return submit();
+    }
+    bool recordingSizeMatches(int width, int height) {
+        // Bound (abi): source extent must match the fixed take size. Overflow drops the recorder frame and is counted.
+        return (width == width_ && height == height_) || rejectFrameLayout();
+    }
     SaveResult callFailed(const std::string& message) {
         auto failure = internal::saveFailure(path_, message.c_str());
         if (!callerMistakeLogged_) {
             callerMistakeLogged_ = true;
-            internal::reportSaveFailure(failure, "VideoWriter");
+            diagnostic(LogLevel::Error, failure.message);
         }
         return failure;
     }
     SaveResult sizeMismatch(const char* source, int w, int h) {
-        return callFailed(std::string(source) + " size " + std::to_string(w) + "x" +
-            std::to_string(h) + " != writer " + std::to_string(width_) + "x" + std::to_string(height_));
+        rejectFrameLayout();
+        const auto message = std::string(source) + " size " + std::to_string(w) + "x" +
+            std::to_string(h) + " != writer " + std::to_string(width_) + "x" + std::to_string(height_);
+        return internal::saveFailure(path_, message.c_str());
     }
     // Backends supply details without logging. Report only the first rejected
     // submission; subsequent calls return result_ before reaching the backend.
     SaveResult backendRejected(const std::string& message) {
         if (result_) result_ = internal::saveFailure(path_, message.c_str());
-        return internal::reportSaveFailure(result_, "VideoWriter");
+        diagnostic(LogLevel::Error, result_.message);
+        return result_;
     }
     SaveResult appendRGBA(const unsigned char* rgba, double timeSec) {
         if (!open_) return callFailed("not open");
         if (!result_) return result_;
         if (!rgba) return callFailed("null frame data");
+        const auto rejectedBefore = getRejectedFrameCount();
         if (!appendPlatform(rgba, timeSec)) {
+            if (getRejectedFrameCount() != rejectedBefore)
+                return internal::saveFailure(path_, "frame layout does not match the recording buffer");
             return backendRejected("encoder rejected frame " + std::to_string(frameCount_));
         }
         ++frameCount_;
@@ -339,7 +442,8 @@ private:
     SaveResult closePlatform();
 #if TC_ASYNC_SCREEN_CAPTURE
     // Direct-buffer hooks for the zero-intermediate capture path (macOS).
-    unsigned char* lockFramePlatform(int& strideOut);   // lock & return encoder buffer
+    unsigned char* lockFramePlatform(internal::RecorderFrameBuffer& buffer);
+    void discardFramePlatform();
     bool submitFramePlatform(double timeSec);            // append the locked buffer
 #endif
 
@@ -351,6 +455,7 @@ private:
     float fps_    = 30.0f;
     VideoRecordSettings settings_;
     int   frameCount_ = 0;
+    std::atomic<uint64_t> rejectedFrameCount_{0};
     bool  open_ = false;
     bool  callerMistakeLogged_ = false;
     SaveResult result_;
@@ -509,7 +614,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
                 }
                 return stopResult_;
             }
-            std::lock_guard<std::mutex> lk(writerMutex_);
+            VideoWriter::DiagnosticLock lk(writer_, writerMutex_);
             if (audioActive_) drainAudio();
             audioActive_ = false;
             auto closed = writer_.close();
@@ -576,7 +681,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
             // Feed buffered audio to the encoder once per frame (main thread; the
             // audio thread only ever touches the lock-free ring).
             if (audioActive_) {
-                std::lock_guard<std::mutex> lk(writerMutex_);
+                VideoWriter::DiagnosticLock lk(writer_, writerMutex_);
                 drainAudio();
             }
 
@@ -608,7 +713,8 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
             double t = pacer_.commitPts(audioActive_ ? audioClockSeconds()
                                                      : tick.wallPts);
             if (source_ == Source::Fbo && fbo_) {
-                writer_.addFrameAt(*fbo_, t);
+                if (writer_.recordingSizeMatches(fbo_->getWidth(), fbo_->getHeight()))
+                    writer_.addFrameAt(*fbo_, t);
                 return;
             }
 #if TC_ASYNC_SCREEN_CAPTURE
@@ -621,23 +727,37 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
             inFlight_.fetch_add(1, std::memory_order_relaxed);
             bool started = internal::captureWindowAsync(
                 [state = shared_from_this(), t](const internal::CaptureReadback& rb) {
-                    std::lock_guard<std::mutex> lk(state->writerMutex_);
+                    VideoWriter::DiagnosticLock lk(state->writer_, state->writerMutex_);
                     if (state->writer_.isOpen()) {
-                        int stride = 0;
-                        if (unsigned char* dst = state->writer_.lockFrame(stride)) {
-                            rb.readInto(dst, stride, /*wantRGBA=*/false);
-                            state->writer_.submitFrame(t);
-                        }
+                        auto& writer = state->writer_;
+                        writer.completeCapture(rb.getLayout(),
+                            [&writer] {
+                                internal::RecorderFrameBuffer buffer;
+                                writer.lockFramePlatform(buffer);
+                                return buffer;
+                            },
+                            [&rb](const internal::RecorderFrameBuffer& buffer) {
+                                return rb.readInto(buffer.data, buffer.layout.rowBytes,
+                                                   buffer.layout.byteSize, /*wantRGBA=*/false);
+                            },
+                            [&writer] { writer.discardFramePlatform(); },
+                            [&writer, t] { return writer.submitFrame(t).ok(); });
                     }
                     state->finishCapture();
                 }, stagingPool_);
             if (!started) {
-                std::lock_guard<std::mutex> lk(writerMutex_);
+                VideoWriter::DiagnosticLock lk(writer_, writerMutex_);
+                writer_.rejectFrameLayout();
                 finishCapture();
             }
 #else
             Pixels px;
-            if (grabScreen(px) && px.isAllocated()) writer_.addFrameAt(px, t);
+            if (!grabScreen(px) || !px.isAllocated()) {
+                writer_.rejectFrameLayout();
+                return;
+            }
+            if (writer_.recordingSizeMatches(px.getWidth(), px.getHeight()))
+                writer_.addFrameAt(px, t);
 #endif
         }
 
@@ -858,6 +978,7 @@ public:
         return state_->source_ != State::Source::None && state_->writer_.isOpen();
     }
     int getFrameCount() const { return state_->writer_.getFrameCount(); }
+    uint64_t getRejectedFrameCount() const { return state_->writer_.getRejectedFrameCount(); }
     fs::path getPath() const { return state_->writer_.getPath(); }
     VideoWriter& writer() { return state_->writer_; }
 

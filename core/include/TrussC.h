@@ -47,6 +47,7 @@
 // Headless mode state (must be included early for graphics skip checks)
 #include "tc/app/tcHeadlessState.h"
 #include "tc/app/tcGpuFrame.h"
+#include "tc/video/tcRecorderFrame.h"
 
 // Platform-specific headers for memory usage
 #if defined(__APPLE__)
@@ -2128,7 +2129,8 @@ namespace internal {
         // Copy the readback into dst (dstStride bytes per row). wantRGBA=false
         // keeps native BGRA8 order (matches the encoder's CVPixelBuffer);
         // wantRGBA=true yields RGBA8 (for Pixels / screenshots).
-        void readInto(unsigned char* dst, int dstStride, bool wantRGBA) const;
+        RecorderFrameLayout getLayout() const;
+        bool readInto(unsigned char* dst, size_t dstStride, size_t capacity, bool wantRGBA) const;
     };
 
     // macOS: asynchronous window capture. Issues the GPU readback blit and

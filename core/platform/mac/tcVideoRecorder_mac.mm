@@ -14,6 +14,7 @@
 #import <CoreMedia/CoreMedia.h>
 
 #include "TrussC.h"
+#include "../metal/tcRecorderPixelBuffer.h"
 #include <cmath>
 
 #include "../metal/tcVideoWriterError.h"
@@ -321,16 +322,28 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
             return false;
         }
 
-        CVPixelBufferLockBaseAddress(pb, 0);
+        // Bound (abi): CoreVideo must grant writable access to the native frame. Overflow drops the recorder frame and is counted.
+        if (CVPixelBufferLockBaseAddress(pb, 0) != kCVReturnSuccess) {
+            CVPixelBufferRelease(pb);
+            return rejectFrameLayout();
+        }
         uint8_t* dst = (uint8_t*)CVPixelBufferGetBaseAddress(pb);
-        size_t dstStride = CVPixelBufferGetBytesPerRow(pb);
+        const auto layout = internal::recorderPixelBufferLayout(pb);
+        // Bound (abi): CoreVideo BGRA8 extent, stride and capacity must cover the take. Overflow drops the recorder frame and is counted.
+        if (!dst || !internal::recorderFrameFits(layout, pd->width, pd->height,
+                                                internal::RecorderPixelFormat::BGRA8)) {
+            CVPixelBufferUnlockBaseAddress(pb, 0);
+            CVPixelBufferRelease(pb);
+            return rejectFrameLayout();
+        }
+        const size_t dstStride = layout.rowBytes;
         const int w = pd->width;
         const int h = pd->height;
         // RGBA -> BGRA, row by row (respect destination stride/alignment).
         for (int y = 0; y < h; ++y) {
             const unsigned char* srow = rgba + (size_t)y * w * 4;
             uint8_t* drow = dst + (size_t)y * dstStride;
-            for (int x = 0; x < w; ++x) {
+            for (size_t x = 0; x < (size_t)w; ++x) {
                 drow[x * 4 + 0] = srow[x * 4 + 2];  // B
                 drow[x * 4 + 1] = srow[x * 4 + 1];  // G
                 drow[x * 4 + 2] = srow[x * 4 + 0];  // R
@@ -364,7 +377,7 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
 // (BGRA), so there is no temporary Pixels buffer to copy through. Called on the
 // capture completion thread, serialized by the recorder's writer mutex.
 // ---------------------------------------------------------------------------
-unsigned char* VideoWriter::lockFramePlatform(int& strideOut) {
+unsigned char* VideoWriter::lockFramePlatform(internal::RecorderFrameBuffer& buffer) {
     VideoWriterPlatformData* pd = platform_;
     if (!pd || !pd->writer || pd->failed || pd->pendingPB) {
         callFailed("encoder frame buffer unavailable or already locked");
@@ -410,21 +423,33 @@ unsigned char* VideoWriter::lockFramePlatform(int& strideOut) {
         return nullptr;
     }
 
+    // Bound (abi): CoreVideo must grant writable access to the native frame. Overflow drops the recorder frame and is counted.
     if (CVPixelBufferLockBaseAddress(pb, 0) != kCVReturnSuccess) {
         CVPixelBufferRelease(pb);
-        callFailed("could not lock pixel buffer");
+        rejectFrameLayout();
         return nullptr;
     }
     auto* frame = (unsigned char*)CVPixelBufferGetBaseAddress(pb);
-    if (!frame) {
+    const auto layout = internal::recorderPixelBufferLayout(pb);
+    // Bound (abi): CoreVideo BGRA8 extent, stride and capacity must cover the take. Overflow drops the recorder frame and is counted.
+    if (!frame || !internal::recorderFrameFits(layout, pd->width, pd->height,
+                                              internal::RecorderPixelFormat::BGRA8)) {
         CVPixelBufferUnlockBaseAddress(pb, 0);
         CVPixelBufferRelease(pb);
-        callFailed("null pixel buffer data");
+        rejectFrameLayout();
         return nullptr;
     }
     pd->pendingPB = pb;
-    strideOut = (int)CVPixelBufferGetBytesPerRow(pb);
+    buffer = {frame, layout};
     return frame;
+}
+
+void VideoWriter::discardFramePlatform() {
+    if (!platform_ || !platform_->pendingPB) return;
+    CVPixelBufferRef pb = platform_->pendingPB;
+    platform_->pendingPB = NULL;
+    CVPixelBufferUnlockBaseAddress(pb, 0);
+    CVPixelBufferRelease(pb);
 }
 
 bool VideoWriter::submitFramePlatform(double timeSec) {

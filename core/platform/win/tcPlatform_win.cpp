@@ -312,6 +312,16 @@ bool captureWindow(Pixels& outPixels) {
     D3D11_TEXTURE2D_DESC desc;
     backBuffer->GetDesc(&desc);
 
+    const auto layout = internal::recorderPackedLayout(desc.Width, desc.Height,
+                                                      internal::RecorderPixelFormat::RGBA8);
+    // Bound (abi): D3D11 capture extent and format must fit the pixel layout. Overflow drops the recorder frame and is counted.
+    if (!layout.byteSize || desc.Width > (UINT)std::numeric_limits<int>::max() ||
+        desc.Height > (UINT)std::numeric_limits<int>::max() ||
+        (desc.Format != DXGI_FORMAT_R10G10B10A2_UNORM &&
+         desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM && desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM_SRGB)) {
+        backBuffer->Release();
+        return false;
+    }
     int width = (int)desc.Width;
     int height = (int)desc.Height;
 
@@ -391,17 +401,26 @@ bool captureWindow(Pixels& outPixels) {
     // Pixels を確保
     outPixels.allocate(width, height, 4);
     unsigned char* dst = outPixels.getData();
+    size_t mappedBytes = 0;
+    // Bound (abi): mapped D3D11 rows and destination capacity must cover the capture. Overflow drops the recorder frame and is counted.
+    if (!dst || outPixels.getTotalBytes() < layout.byteSize || !mapped.pData ||
+        mapped.RowPitch < layout.rowBytes ||
+        !internal::recorderByteSize(mapped.RowPitch, height, mappedBytes)) {
+        context->Unmap(stagingTexture, 0);
+        stagingTexture->Release();
+        return false;
+    }
 
     bool isRGB10A2 = (desc.Format == DXGI_FORMAT_R10G10B10A2_UNORM);
 
     unsigned char* src = (unsigned char*)mapped.pData;
     for (int y = 0; y < height; y++) {
-        unsigned char* srcRow = src + y * mapped.RowPitch;
-        unsigned char* dstRow = dst + y * width * 4;
+        unsigned char* srcRow = src + (size_t)y * mapped.RowPitch;
+        unsigned char* dstRow = dst + (size_t)y * layout.rowBytes;
         if (isRGB10A2) {
             // R10G10B10A2: [A:2 (31-30)][B:10 (29-20)][G:10 (19-10)][R:10 (9-0)]
             const uint32_t* srcPixels = (const uint32_t*)srcRow;
-            for (int x = 0; x < width; x++) {
+            for (size_t x = 0; x < (size_t)width; x++) {
                 uint32_t pixel = srcPixels[x];
                 uint32_t r10 = (pixel >>  0) & 0x3FF;
                 uint32_t g10 = (pixel >> 10) & 0x3FF;
@@ -414,7 +433,7 @@ bool captureWindow(Pixels& outPixels) {
             }
         } else {
             // BGRA8 fallback
-            for (int x = 0; x < width; x++) {
+            for (size_t x = 0; x < (size_t)width; x++) {
                 dstRow[x * 4 + 0] = srcRow[x * 4 + 2];  // R <- B
                 dstRow[x * 4 + 1] = srcRow[x * 4 + 1];  // G <- G
                 dstRow[x * 4 + 2] = srcRow[x * 4 + 0];  // B <- R

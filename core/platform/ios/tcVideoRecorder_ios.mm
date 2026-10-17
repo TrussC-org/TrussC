@@ -17,6 +17,7 @@
 #import <CoreMedia/CoreMedia.h>
 
 #include "TrussC.h"
+#include "../metal/tcRecorderPixelBuffer.h"
 #include <cmath>
 
 #include "../metal/tcVideoWriterError.h"
@@ -188,15 +189,27 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
             return false;
         }
 
-        CVPixelBufferLockBaseAddress(pb, 0);
+        // Bound (abi): CoreVideo must grant writable access to the native frame. Overflow drops the recorder frame and is counted.
+        if (CVPixelBufferLockBaseAddress(pb, 0) != kCVReturnSuccess) {
+            CVPixelBufferRelease(pb);
+            return rejectFrameLayout();
+        }
         uint8_t* dst = (uint8_t*)CVPixelBufferGetBaseAddress(pb);
-        size_t dstStride = CVPixelBufferGetBytesPerRow(pb);
+        const auto layout = internal::recorderPixelBufferLayout(pb);
+        // Bound (abi): CoreVideo BGRA8 extent, stride and capacity must cover the take. Overflow drops the recorder frame and is counted.
+        if (!dst || !internal::recorderFrameFits(layout, pd->width, pd->height,
+                                                internal::RecorderPixelFormat::BGRA8)) {
+            CVPixelBufferUnlockBaseAddress(pb, 0);
+            CVPixelBufferRelease(pb);
+            return rejectFrameLayout();
+        }
+        const size_t dstStride = layout.rowBytes;
         const int w = pd->width;
         const int h = pd->height;
         for (int y = 0; y < h; ++y) {
             const unsigned char* srow = rgba + (size_t)y * w * 4;
             uint8_t* drow = dst + (size_t)y * dstStride;
-            for (int x = 0; x < w; ++x) {
+            for (size_t x = 0; x < (size_t)w; ++x) {
                 drow[x * 4 + 0] = srow[x * 4 + 2];  // B
                 drow[x * 4 + 1] = srow[x * 4 + 1];  // G
                 drow[x * 4 + 2] = srow[x * 4 + 0];  // R
