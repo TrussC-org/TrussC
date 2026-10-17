@@ -104,6 +104,10 @@ void setup() {
     // RenderTarget: the swapchain target uses the default sgl context (carries the
     // swapchain color/depth format + sample count). Pipelines build lazily on first use.
     internal::currentWindowContext().swapchainTarget.resources().context = sgl_default_context();
+    sgl_tc_context_target_owned(sgl_default_context());
+#if defined(__linux__) && !defined(__ANDROID__) && defined(SOKOL_GLCORE)
+    internal::mainWindowContext().activateNative = [](void*) { sapp_tc_gl_make_current({0}); };
+#endif
     internal::currentWindowContext().swapchainTarget.isFbo = false;
     auto& target = internal::currentWindowContext().swapchainTarget;
     target.colorFormat = sgdesc.environment.defaults.color_format;
@@ -152,6 +156,10 @@ void setup() {
 // ---------------------------------------------------------------------------
 void cleanup() {
     internal::mainWindowContext().teardownTargets();
+    // Parked/cancelled frames can still own an enqueued renderer prefix.
+    // Submit it without presentation before Metal waits for semaphore permits
+    // during shutdown, and before destroying any referenced native resources.
+    if (sg_isvalid()) sg_tc_submit_prefix();
     // The 2D blend / 3D / premultiplied / clear sgl pipelines live in the
     // swapchain and per-FBO RenderTarget caches. sgl pipelines are in one
     // global pool (sgl_destroy_context() frees only the context's own default
@@ -318,6 +326,50 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
 // パス管理関数（non-inline: Hot Reload時にHost/Guest間で同じ状態を参照するため）
 // ---------------------------------------------------------------------------
 namespace internal {
+bool RenderContext::admitScreenCapture() {
+    // A selected/parked native pass is not an app phase: synced update runs
+    // after beginFrame(), and Fbo rendering is also possible during setup().
+    if (activeEntry_ == AppEntry::Draw || activeEntry_ == AppEntry::AfterFrame)
+        return true;
+    if (!screenCaptureWarned_) {
+        screenCaptureWarned_ = true; // set before logging, which can reenter
+        logWarning("Screenshot") << "grabScreen() requires draw() or an events().afterFrame listener; "
+            "use events().afterFrame for the finished frame or saveScreenshot() for a file "
+            "(warning once per window)";
+    }
+    return false;
+}
+uint64_t nextTargetOwnerId() {
+    static std::atomic<uint64_t> serial{0};
+    const auto previous = serial.fetch_add(1, std::memory_order_relaxed);
+    if (previous == UINT64_MAX) std::terminate();
+    return previous + 1;
+}
+WindowCaptureSource windowCaptureSource() {
+    auto& window = currentWindowContext();
+    WindowCaptureSource source;
+    // This is a borrowed source from the current native tick, never a saved
+    // drawable from a previous frame. Native jobs retain the texture before
+    // returning; Q2 will supply a stable completed image through this seam.
+    source.swapchain = window.lastSwapchain;
+    source.drawable = window.lastSwapchainDrawable;
+#if defined(SOKOL_METAL)
+    // A cleared frame source must fail rather than acquire another window's
+    // or the next frame's drawable. Also scrub the copied swapchain alias.
+    source.swapchain.metal.current_drawable = source.drawable;
+#elif defined(SOKOL_D3D11)
+    if (window.isMain || !source.swapchain.d3d11.render_view)
+        source.swapchain = sglue_swapchain();
+#endif
+    source.width = window.isMain ? sapp_width() : window.fbWidth;
+    source.height = window.isMain ? sapp_height() : window.fbHeight;
+    return source;
+}
+bool finishWindowCaptureSource(RenderTarget&) {
+    // Q2 inserts its final copy here, after the owner's last pass and before
+    // presentation authorization. No copy or stable-source promise in part 1.
+    return true;
+}
 WindowContext::WindowContext() {
     swapchainTarget.activation = nextTargetToken++;
     swapchainTarget.activeWindow = this;
@@ -332,6 +384,10 @@ void WindowContext::teardownTargets() noexcept {
     // popTarget resolves through the current window. Destruction may be
     // dispatched while a different window is current.
     auto* previous = currentWindowCtx();
+    if (sg_isvalid()) {
+        if (&currentWindowContext() != this) parkWindowPass();
+        if (activateNative) activateNative(acquireSwapchainUser);
+    }
     const auto previousSgl = sg_isvalid() ? sgl_get_context() : sgl_context{};
     currentWindowCtx() = this;
     if (sg_isvalid() && currentTarget->resources().context.id)
@@ -364,11 +420,15 @@ void WindowContext::teardownTargets() noexcept {
     swapchainTarget.resumable = true;
     shaderScopeTargets.clear();
     shaderStack.clear();
+    pendingScreenshotPaths.clear();
     currentTarget = &swapchainTarget;
     if (sg_isvalid() && swapchainTarget.resources().context.id) {
-        sgl_tc_context_reset(swapchainTarget.resources().context);
+        sgl_tc_context_complete(swapchainTarget.resources().context);
     }
-    currentWindowCtx() = previous;
+    if (sg_isvalid()) {
+        sg_tc_mtl_cancel_drawables(swapchainTarget.ownerId);
+        restoreWindowContext(previous);
+    } else currentWindowCtx() = previous;
     if (sg_isvalid() && previous != this && previousSgl.id) sgl_set_context(previousSgl);
     if (failed) logError("RenderTarget") << "window teardown recovered after pass cleanup failure";
 }
@@ -422,6 +482,11 @@ void RenderTarget::beginPass(TargetPassStart reason) {
                 ? window.acquireSwapchain(window.acquireSwapchainUser) : sglue_swapchain();
             window.lastSwapchain = binding.swapchain;
             window.lastSwapchainDrawable = binding.swapchain.metal.current_drawable;
+            if (!sg_tc_mtl_register_drawable(&binding.swapchain, ownerId,
+                    resources().generation, window.renderEpoch)) {
+                binding.swapchain.invalid = true;
+                logWarning("RenderTarget") << "could not register the owning swapchain frame";
+            }
         }
         pass.swapchain = binding.swapchain;
         colorFormat = pass.swapchain.color_format;
@@ -469,13 +534,34 @@ void RenderTarget::endPass() {
     }
 }
 
+void RenderTarget::failRecording(const char* reason) {
+    auto& window = currentWindowContext();
+    deferredShaderDraws.clear(); deferredPbrDraws.clear(); deferredPointDraws.clear();
+    for (size_t i = window.shaderScopeTargets.size(); i-- > 0;) {
+        if (window.shaderScopeTargets[i].target == this) {
+            window.shaderScopeTargets.erase(window.shaderScopeTargets.begin() + i);
+            window.shaderStack.erase(window.shaderStack.begin() + i);
+        }
+    }
+    openShaderScopes = 0; sglLayerNext = 0; recordingFailed = true;
+    if (resources().context.id) sgl_tc_context_complete(resources().context);
+    logError("RenderTarget") << reason << "; discarded this target's recording";
+}
+bool RenderTarget::advanceLayer() {
+    // Bound (abi): SGL layer identifiers must fit signed int. Overflow discards the target's recording and is reported by failRecording logging an error and advanceLayer returning false.
+    if (recordingFailed) return false;
+    if (sglLayerNext == INT_MAX) { failRecording("layer identifier cannot be represented"); return false; }
+    sgl_layer(++sglLayerNext);
+    return true;
+}
+
 void RenderTarget::flushLayers() {
     assert(currentWindowContext().currentTarget == this);
     if (!inPass || !resources().context.id) return;
     const auto err = sgl_context_error(resources().context);
-    const bool overflow = err.vertices_full || err.commands_full;
-    for (int layer = 0; layer <= sglLayerNext; ++layer) {
-        if (!overflow) sgl_context_draw_layer(resources().context, layer);
+    const bool overflow = recordingFailed || err.vertices_full || err.commands_full || err.uniforms_full;
+    for (int64_t layer = 0; layer <= sglLayerNext; ++layer) {
+        if (!overflow) sgl_context_draw_layer(resources().context, (int)layer);
         for (auto& draw : deferredShaderDraws)
             if (draw.layerId == layer) executeDeferredShaderDraw(draw);
         for (auto& draw : deferredPbrDraws)
@@ -489,7 +575,7 @@ void RenderTarget::flushLayers() {
     // Shader::begin reserved a screen layer. Keep that reservation even when
     // all preceding commands have been consumed, until its owning scope closes.
     if (!openShaderScopes) sglLayerNext = 0;
-    sgl_tc_draw_rewind();
+    sgl_tc_context_draw_rewind(resources().context);
     sgl_layer(sglLayerNext);
 }
 
@@ -514,6 +600,7 @@ uint64_t pushTarget(RenderTarget& target, bool prepareOnly) {
     target.activation = token;
     target.activeWindow = &window;
     target.passStartedThisFrame = false;
+    target.recordingFailed = false;
     target.frameEpoch = window.renderEpoch;
     // A scope constructor has no destructor if target setup throws. Roll back
     // a published activation here, without finalizing an unprepared owner.
@@ -587,7 +674,7 @@ bool popTarget(RenderTarget& target, uint64_t token) {
     target.openShaderScopes = 0;
     if (entry.lease) {
         attempt([&] { reportSglStackErrors(sgl_context_error(entry.lease->context), target.isFbo); });
-        sgl_tc_context_reset(entry.lease->context);
+        sgl_tc_context_complete(entry.lease->context);
         target.pooledResources = nullptr;
         returnTargetResources(*entry.lease);
     }
@@ -706,7 +793,7 @@ void internal::endGpuFrame() {
     internal::reportSglStackErrors(err, false);
     if (err.vertices_full || err.commands_full) {
         auto& budget = internal::sglBudget();
-        int newVerts = budget.maxVertices * 4;
+        int newVerts = budget.maxVertices <= INT_MAX / 4 ? budget.maxVertices * 4 : INT_MAX;
         if (newVerts > budget.pendingResize) {
             budget.pendingResize = newVerts;
             budget.pendingCommands = 0;
@@ -718,11 +805,14 @@ void internal::endGpuFrame() {
     }
 
     sg_commit();
+    // Only the committing owner completes immediate CPU work. Raw draws keep
+    // their pass-consumption lifetime, including on upload-only boundaries.
+    auto& target = internal::currentWindowContext().swapchainTarget;
+    if (target.resources().context.id) sgl_tc_context_complete(target.resources().context);
+    target.recordingFailed = false;
 
-    // Now that every deferred draw (swapchain layers above, FBO passes at
-    // their Fbo::end()) has been submitted, it is safe to destroy the GPU
-    // resources released during this frame (temporary Mesh draws, texture
-    // re-uploads, atlas growth, sampler changes, ...).
+    // Retire submitted resources while preserving typed dependencies of every
+    // still-unconsumed recording, including suspended foreign targets.
     internal::drainPendingGpuDestroys();
 }
 
@@ -754,8 +844,16 @@ void present() {
     }
     window.swapchainTarget.flushLayers();
     window.swapchainTarget.endPass();
+    if (internal::finishWindowCaptureSource(window.swapchainTarget)) {
+        if (!sg_tc_mtl_authorize_drawable(window.swapchainTarget.ownerId,
+                window.swapchainTarget.resources().generation, window.renderEpoch))
+            sg_tc_mtl_cancel_drawables(window.swapchainTarget.ownerId);
+    } else {
+        sg_tc_mtl_cancel_drawables(window.swapchainTarget.ownerId);
+    }
     window.swapchainTarget.passStartedThisFrame = false;
     window.swapchainTarget.resumable = true;
+    window.framePending = false;
     ++window.renderEpoch;
     internal::endGpuFrame();
 
@@ -1602,23 +1700,88 @@ void deferGpuDestroy(sg_shader shd) {
     if (shd.id != 0) pendingGpuDestroys().shaders.push_back(shd);
 }
 
+namespace {
+// Full typed SG ids include generations. Resolve dependency closure while the
+// view/pipeline is still valid; an idle owner pins only what it will consume.
+struct RecordingReferences {
+    std::unordered_set<uint32_t> buffers, images, views, samplers, pipelines, shaders;
+    void view(sg_view handle) {
+        if (!handle.id || !views.insert(handle.id).second) return;
+        const auto d = sg_query_view_desc(handle);
+        for (sg_image image : {d.texture.image, d.storage_image.image,
+                d.color_attachment.image, d.resolve_attachment.image, d.depth_stencil_attachment.image})
+            if (image.id) images.insert(image.id);
+        if (d.storage_buffer.buffer.id) buffers.insert(d.storage_buffer.buffer.id);
+    }
+    void pipeline(sg_pipeline handle) {
+        if (handle.id && pipelines.insert(handle.id).second) {
+            const auto shader = sg_query_pipeline_desc(handle).shader;
+            if (shader.id) shaders.insert(shader.id);
+        }
+    }
+    void bindings(const sg_bindings& bindings) {
+        for (auto buffer : bindings.vertex_buffers) if (buffer.id) buffers.insert(buffer.id);
+        if (bindings.index_buffer.id) buffers.insert(bindings.index_buffer.id);
+        for (auto handle : bindings.views) view(handle);
+        for (auto handle : bindings.samplers) if (handle.id) samplers.insert(handle.id);
+    }
+    void target(const RenderTarget& target) {
+        if (target.resources().context.id) {
+            sgl_tc_context_dependencies(target.resources().context,
+                [](sg_pipeline pipeline, sg_view view, sg_sampler sampler, void* user) {
+                    auto& refs = *static_cast<RecordingReferences*>(user);
+                    refs.pipeline(pipeline); refs.view(view);
+                    if (sampler.id) refs.samplers.insert(sampler.id);
+                }, this);
+        }
+        for (const auto& draw : target.deferredShaderDraws) { pipeline(draw.pipeline); bindings(draw.bindings); }
+        for (const auto& draw : target.deferredPbrDraws) { pipeline(draw.cmd.pip); bindings(draw.cmd.bind); }
+        for (const auto& draw : target.deferredPointDraws) { pipeline(draw.cmd.pip); bindings(draw.cmd.bind); }
+        if (target.activation && target.passKind != TargetPassKind::Swapchain) {
+            for (auto handle : target.binding.attachments.colors) view(handle);
+            for (auto handle : target.binding.attachments.resolves) view(handle);
+            view(target.binding.attachments.depth_stencil);
+            if (target.transferSource.id) images.insert(target.transferSource.id);
+        }
+    }
+};
+}
+
 void drainPendingGpuDestroys() {
     auto& q = pendingGpuDestroys();
-    if (sg_isvalid()) {
-        for (sg_buffer buf : q.buffers)   sg_destroy_buffer(buf);
-        for (sg_view view : q.views)      sg_destroy_view(view);
-        for (sg_image img : q.images)     sg_destroy_image(img);
-        for (sg_sampler smp : q.samplers) sg_destroy_sampler(smp);
-        // Pipelines before shaders: a pipeline references its shader.
-        for (sg_pipeline pip : q.pipelines) sg_destroy_pipeline(pip);
-        for (sg_shader shd : q.shaders)     sg_destroy_shader(shd);
+    if (!sg_isvalid()) {
+        q = {};
+        return;
     }
-    q.buffers.clear();
-    q.images.clear();
-    q.views.clear();
-    q.samplers.clear();
-    q.pipelines.clear();
-    q.shaders.clear();
+    try {
+        RecordingReferences refs;
+        std::unordered_set<WindowContext*> windows{&mainWindowContext(), &currentWindowContext()};
+        for (auto* window : openWindows()) windows.insert(&window->context());
+        for (auto* window : windows) {
+            refs.target(window->swapchainTarget);
+            for (const auto& entry : window->targetStack)
+                if (entry.target != &window->swapchainTarget) refs.target(*entry.target);
+        }
+        auto retire = [](auto& handles, const auto& pinned, auto destroy) {
+            handles.erase(std::remove_if(handles.begin(), handles.end(), [&](auto handle) {
+                if (pinned.count(handle.id)) return false;
+                destroy(handle);
+                return true;
+            }), handles.end());
+        };
+        retire(q.buffers, refs.buffers, sg_destroy_buffer);
+        retire(q.views, refs.views, sg_destroy_view);
+        retire(q.images, refs.images, sg_destroy_image);
+        retire(q.samplers, refs.samplers, sg_destroy_sampler);
+        retire(q.pipelines, refs.pipelines, sg_destroy_pipeline);
+        retire(q.shaders, refs.shaders, sg_destroy_shader);
+    } catch (const std::bad_alloc&) {
+        // No handle retires before the complete reference closure is known.
+        // Keep this batch intact and retry at the next device boundary.
+        logWarning("RenderTarget") << "resource retirement allocation failed; deferred collection";
+    } catch (const std::length_error&) {
+        logWarning("RenderTarget") << "resource retirement size cannot be represented; deferred collection";
+    }
 }
 
 BeepManager& getManager() {
@@ -1629,6 +1792,12 @@ BeepManager& getManager() {
 ScreenRecorder& globalScreenRecorder() {
     static auto* rec = new ScreenRecorder;
     return *rec;
+}
+
+ShadowStorage& shadowStorageForWindow(WindowContext&) {
+    // Q1 changes only this ownership policy after the owner's decision.
+    static ShadowStorage storage;
+    return storage;
 }
 
 PbrPipeline& getPbrPipeline() {
@@ -1739,6 +1908,7 @@ bool RenderTargetResources::makeContext(const sgl_context_desc_t& desc, const ch
     if (context.id) return true;
     if (contextFailed) return false;
     context = sgl_make_context(&desc);
+    if (context.id) sgl_tc_context_target_owned(context);
     contextFailed = !context.id;
     generation = nextPipelineGeneration();
     if (contextFailed) logWarning("RenderTarget") << "could not create context for " << what;
@@ -1853,10 +2023,15 @@ void returnTargetResources(RenderTargetResources& lease) {
     }
 }
 namespace {
-bool hasRecordedWork(RenderTarget& target) {
+bool hasPendingRecording(RenderTarget& target) {
     const bool recorded = sgl_tc_context_has_pending_draws(target.resources().context);
     return recorded || !target.deferredShaderDraws.empty() ||
         !target.deferredPbrDraws.empty() || !target.deferredPointDraws.empty();
+}
+bool hasRecordedWork(RenderTarget& target) {
+    // An ended/parked pass still owns this frame's drawable and generation.
+    // Rebuilding after its CPU prefix was consumed would invalidate resume.
+    return target.passStartedThisFrame || hasPendingRecording(target);
 }
 }
 void prepareWindowTarget() {
@@ -1874,8 +2049,8 @@ void prepareWindowTarget() {
         resources.color != format.colorFormat || resources.samples != format.sampleCount || resources.depth != depth);
     if (changed && hasRecordedWork(target)) {
         // Keep both the recording context and its attachment signature until
-        // consumption or the next global commit (which rewinds every SGL
-        // context); unchanged metadata retries this at the next beginFrame.
+        // consumption by its owner; unchanged metadata retries this at the
+        // next beginFrame. Foreign commits cannot discard this recording.
         sgl_set_context(resources.context);
         return;
     }
@@ -1907,9 +2082,8 @@ void prepareWindowTarget() {
 bool rebuildTargetResources() {
     std::vector<WindowContext*> windows{&mainWindowContext()};
     for (auto* window : openWindows()) if (&window->context() != &mainWindowContext()) windows.push_back(&window->context());
-    // Re-evaluate live queues on every retry. A different window's global
-    // commit rewinds immediate SGL work, but leaves these raw draw queues
-    // intact; those queues must still prevent shutdown/rebuild until replay.
+    // Foreign submissions preserve CPU recordings. Re-evaluate all immediate
+    // and raw queues on every retry before destroying any context.
     for (auto* window : windows) if (window->targetStack.size() > 1 || window->swapchainTarget.inPass || window->swapchainTarget.openShaderScopes || hasRecordedWork(window->swapchainTarget)) {
         logWarning("RenderTarget") << "sgl resize deferred until every window has no pending work or active target pass";
         return false;
@@ -1934,6 +2108,7 @@ bool rebuildTargetResources() {
     desc.max_vertices = sglBudget().maxVertices; desc.max_commands = sglBudget().maxCommands;
     desc.allocator.alloc_fn = smemtrack_alloc; desc.allocator.free_fn = smemtrack_free;
     sgl_setup(&desc);
+    sgl_tc_context_target_owned(sgl_default_context());
     for (auto* window : windows) {
         PipelineWindowScope scope(*window);
         auto& target = window->swapchainTarget;
@@ -2314,10 +2489,65 @@ WindowContext& currentWindowContext() {
     return currentWindowCtxStorage ? *currentWindowCtxStorage : mainWindowContext();
 }
 
+void parkWindowPass() {
+    auto& outgoing = currentWindowContext();
+    if (outgoing.activateNative) outgoing.activateNative(outgoing.acquireSwapchainUser);
+    if (outgoing.currentTarget->inPass) {
+        try { outgoing.currentTarget->flushLayers(); }
+        catch (const std::bad_alloc&) {
+            outgoing.currentTarget->failRecording("parked replay allocation failed");
+        } catch (const std::length_error&) {
+            outgoing.currentTarget->failRecording("parked replay size cannot be represented");
+        }
+        // Even a failed recording must release the native encoder before a
+        // foreign window can render or enter its noexcept teardown.
+        outgoing.currentTarget->endPass();
+    }
+}
+
+void submitCapturePrefix() {
+    // Global phase, including a foreign owner's parked prefix. Do not complete
+    // CPU work, rotate the device frame or authorize presentation here.
+    parkWindowPass();
+    sg_tc_submit_prefix();
+}
+
+CapturePrefixScope::CapturePrefixScope()
+    : window_(&currentWindowContext()), target_(window_->currentTarget),
+      token_(target_->activation), resume_(target_->inPass) {
+    // Basic drawing only records CPU commands. Start even a never-opened
+    // pass so parking consumes its clear and prefix before native readback.
+    // After present(), keep the finished window source until beginFrame().
+    // An already-consumed parked prefix needs no pass or native-state changes.
+    if ((target_->passKind != TargetPassKind::Swapchain || window_->framePending) &&
+        (!target_->passStartedThisFrame || hasPendingRecording(*target_))) {
+        ensureCurrentPass();
+        token_ = target_->activation;
+        resume_ = target_->inPass;
+    }
+    submitCapturePrefix();
+}
+CapturePrefixScope::~CapturePrefixScope() noexcept {
+    if (!resume_ || &currentWindowContext() != window_ || window_->currentTarget != target_ || target_->activation != token_) return;
+    try { ensureCurrentPass(); }
+    catch (...) { logError("Capture") << "could not resume the parked target"; }
+}
+
 void restoreWindowContext(WindowContext* previous) {
+    auto* incoming = previous ? previous : &mainWindowContext();
+    if (&currentWindowContext() != incoming && sg_isvalid()) parkWindowPass();
     currentWindowCtx() = previous;
+    if (incoming->activateNative) incoming->activateNative(incoming->acquireSwapchainUser);
+    // Events may record before the first tick. Give that owner its own context
+    // before any callback can emit immediate commands.
+    if (sg_isvalid() && !incoming->currentTarget->resources().context.id &&
+        incoming->swapchainTarget.width > 0 && incoming->swapchainTarget.height > 0)
+        prepareWindowTarget();
     const auto context = currentTarget().resources().context;
-    if (sg_isvalid() && context.id) sgl_set_context(context);
+    if (sg_isvalid() && context.id) {
+        sgl_tc_context_target_owned(context);
+        sgl_set_context(context);
+    }
 }
 
 // Window::applyPendingApp() adds to it and the platform teardown (host code)
@@ -2350,5 +2580,261 @@ uint64_t& registryVersion() {
 
 } // namespace internal
 } // namespace bitmapfont
+
+} // namespace trussc
+
+// Recorder operations and control blocks are host-resident. A timed-out guest
+// stop can leave a native operation pending across module unload safely.
+namespace trussc {
+std::shared_ptr<ScreenRecorder::State> ScreenRecorder::makeState() {
+    return std::make_shared<State>();
+}
+
+SaveResult ScreenRecorder::State::stop(std::chrono::milliseconds drainPollInterval) {
+    {
+        // An external stop may overlap a completion listener's stop.
+        // Never hold this bookkeeping lock across waits or logging.
+        std::lock_guard<std::mutex> lock(stopMutex_);
+        afterFrameListener_ = EventListener{};   // no new captures get queued
+        exitListener_ = EventListener{};
+        audioListener_ = EventListener{};
+        source_ = Source::None;
+        fbo_ = nullptr;
+    }
+    // Bounded, like AudioRecorder: a straggling tap writes into this
+    // State's ring, which outlives it.
+    if (audioActive_) {
+        Delivery delivery(*this);
+        AudioEngine::getInstance().waitForAudioCallbacks();
+    }
+    // Drain captures and inline diagnostic deliveries before closing the
+    // writer. Synchronous platforms also have diagnostic deliveries.
+    // Bound (platform): capture and diagnostic draining wait at most 2 s (steady clock). Overflow leaves close pending and is reported by stop() returning WriteFailed, with one Error per take.
+    const auto deadline = std::chrono::steady_clock::now() + kDrainTimeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        {
+            std::lock_guard<std::mutex> completionLock(completionMutex_);
+            if (!pendingWork()) break;
+        }
+        std::this_thread::sleep_for(drainPollInterval);
+    }
+    // The request and final decrement must be serialized. A completion
+    // either sees this request, or has already finished all writer IO.
+    bool pendingCaptures;
+    std::optional<Delivery> delivery;
+    {
+        std::unique_lock<std::mutex> completionLock(completionMutex_);
+        pendingCaptures = pendingWork();
+        if (pendingCaptures) closeWhenDone_ = true;
+        delivery.emplace(*this, completionLock);
+    }
+    // Do not acquire writerMutex_ on timeout: a completion may be
+    // stuck inside the encoder while holding it.
+    if (pendingCaptures) {
+        SaveResult result;
+        bool report;
+        {
+            std::lock_guard<std::mutex> lock(stopMutex_);
+            report = stopResult_.ok();
+            if (report) stopResult_ = SaveResult::fail(SaveError::WriteFailed,
+                "recording still has frames in flight");
+            result = stopResult_;
+        }
+        if (report) logError("ScreenRecorder") << result.message;
+        return result;
+    }
+    VideoWriter::Diagnostics diagnostics;
+    SaveResult result;
+    {
+        std::lock_guard<std::mutex> lock(stopMutex_);
+        if (busySkipped_ != reportedBusySkipped_) {
+            diagnostics.pending.emplace_back([count = busySkipped_] {
+                logNotice("ScreenRecorder") << "skipped " << count << " busy capture opportunities";
+            });
+            reportedBusySkipped_ = busySkipped_;
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lk(writerMutex_);
+        if (audioActive_) drainAudio(diagnostics);
+        audioActive_ = false;
+        auto closed = writer_.closeDeferred(diagnostics);
+        std::lock_guard<std::mutex> lock(stopMutex_);
+        result = stopResult_ ? closed : stopResult_;
+    }
+    diagnostics.log();
+    return result;
+}
+
+SaveResult ScreenRecorder::State::startSource(Source src, const Fbo* fbo, int w, int h,
+                     const fs::path& path,
+                     const VideoRecordSettings& settings) {
+    VideoRecordSettings s = settings;
+    if (s.audio) {
+        auto& engine = AudioEngine::getInstance();
+        if (!engine.isInitialized()) {
+            logWarning("ScreenRecorder")
+                << "audio requested but AudioEngine is not initialized - "
+                   "recording video only";
+            s.audio = false;
+        } else {
+            if (s.audioSampleRate <= 0) s.audioSampleRate = engine.getSampleRate();
+            if (s.audioChannels   <= 0) s.audioChannels   = engine.getChannels();
+        }
+    }
+    auto opened = writer_.open(path, w, h, s);
+    if (!opened) return opened;
+    sourceOwner_ = internal::currentWindowContext().swapchainTarget.ownerId;
+    sourceFormat_ = src == Source::Fbo ? sg_query_image_desc(fbo->getColorImage()).pixel_format
+        : internal::currentWindowContext().swapchainTarget.colorFormat;
+    sourceDevice_ = sg_mtl_device() ? sg_mtl_device() : sg_d3d11_device();
+    source_ = src;
+    fbo_ = fbo;
+    fboAlive_ = fbo ? fbo->lifetimeToken() : std::shared_ptr<void>{};
+    // Pace on the framework clock, which the app cannot reset (#229).
+    pacer_.start(writer_.getFps(), s.duration);
+    if (s.audio) startAudioTap(s.audioSampleRate, s.audioChannels);
+    // Per-window binding (T3): events() resolves through the window context
+    // that is CURRENT when recording starts — so calling recordScreen() from
+    // a secondary window's tick subscribes to THAT window's afterFrame/exit,
+    // and swapchain frames are captured while that window's context (and its
+    // lastSwapchainDrawable) is current. No explicit window handle is needed;
+    // the recorder follows whichever window started it.
+    //   Platform note: the swapchain readback is per-window on all three
+    //   desktop platforms — macOS reads currentWindowContext().lastSwapchainDrawable,
+    //   Windows reads the context's recorded swapchain render_view, and Linux
+    //   reads the window's framebuffer at its own size (see the captureWindow
+    //   backends). Fbo-source recording is per-window everywhere (it reads the
+    //   passed Fbo, not the swapchain).
+    afterFrameListener_ = events().afterFrame.listen([state = shared_from_this()]() { state->onAfterFrame(); });
+    exitListener_ = events().exit.listen([state = shared_from_this()]() { state->stop(); });
+    return SaveResult::success();
+}
+
+void ScreenRecorder::State::onAfterFrame() {
+    Delivery delivery(*this);
+    if (source_ == Source::None || !writer_.isOpen()) return;
+    // Recorded Fbo was destroyed: finalize instead of reading a dangling
+    // pointer. The file stays valid up to the last captured frame.
+    if (source_ == Source::Fbo && fboAlive_.expired()) {
+        logWarning("ScreenRecorder")
+            << "recorded Fbo was destroyed; stopping and finalizing";
+        stop();
+        return;
+    }
+    // This frame's cutoff, decimation and wall-clock PTS, on the pacer's
+    // clock, which the app cannot reset (#229).
+    const auto tick = pacer_.tick();
+
+    // Feed buffered audio to the encoder once per frame (main thread; the
+    // audio thread only ever touches the lock-free ring).
+    if (audioActive_) {
+        VideoWriter::Diagnostics diagnostics;
+        {
+            std::unique_lock<std::mutex> lk(writerMutex_, std::try_to_lock);
+            if (lk.owns_lock()) drainAudio(diagnostics);
+        }
+        diagnostics.log();
+        if (source_ == Source::None) return;
+    }
+
+    // Fixed-duration cutoff. tick.wallPts is the wall-clock PTS this frame would
+    // carry; once it reaches the requested length we finalize and append nothing more,
+    // so the output length == duration (to within one frame slot). The cut is
+    // PTS-based, so any async capture already in flight — its PTS was sampled
+    // below when it was issued, always < duration — can't push the file past
+    // the cutoff; stop() just drains those before closing the writer.
+    //
+    // stop() clears afterFrameListener_ from inside this callback (self-removal
+    // mid-dispatch). That is safe here: Event::notify() iterates an RCU
+    // snapshot of the listener list held alive for the whole loop, so removing
+    // ourselves only swaps in a new list for the NEXT fire; the in-progress
+    // dispatch is unaffected, and removeListener() takes a recursive_mutex that
+    // notify() does not hold (no deadlock). No deferral needed.
+    if (tick.reachedDuration) {
+        stop();
+        return;
+    }
+
+    // Decimate to the target fps (see ScreenRecorderPacer::shouldCapture).
+    if (!tick.capture) {
+        return;   // this frame isn't the closest one to the next slot yet
+    }
+    const int sourceWidth = source_ == Source::Fbo ? fbo_->getWidth() : getFramebufferWidth();
+    const int sourceHeight = source_ == Source::Fbo ? fbo_->getHeight() : getFramebufferHeight();
+    const auto sourceFormat = source_ == Source::Fbo ? sg_query_image_desc(fbo_->getColorImage()).pixel_format
+        : internal::currentWindowContext().swapchainTarget.colorFormat;
+    const void* sourceDevice = sg_mtl_device() ? sg_mtl_device() : sg_d3d11_device();
+    if (!writer_.recordingSizeMatches(sourceWidth, sourceHeight)) return;
+    if (sourceFormat != sourceFormat_ || sourceDevice != sourceDevice_ ||
+        sourceOwner_ != internal::currentWindowContext().swapchainTarget.ownerId) {
+        VideoWriter::Diagnostics diagnostics;
+        writer_.rejectFrameLayout(&diagnostics);
+        {
+            std::lock_guard<std::mutex> lock(stopMutex_);
+            stopResult_ = SaveResult::fail(SaveError::WriteFailed,
+                "recording source format, device or owner changed during a fixed-size take");
+            diagnostics.pending.emplace_back([failure = stopResult_] {
+                logError("ScreenRecorder") << failure.message;
+            });
+        }
+        diagnostics.log();
+        stop();
+        return;
+    }
+    try {
+    // PTS: wall clock normally; the AUDIO DEVICE clock when an audio track
+    // is being recorded, so frames land exactly where they happened on the
+    // audio timeline (drift-free A/V sync however unstable the fps is).
+    double t = pacer_.commitPts(audioActive_ ? audioClockSeconds()
+                                             : tick.wallPts);
+    if (source_ == Source::Fbo && fbo_) {
+        if (writer_.recordingSizeMatches(fbo_->getWidth(), fbo_->getHeight()))
+            writer_.addFrameAt(*fbo_, t);
+        return;
+    }
+#if TC_ASYNC_SCREEN_CAPTURE
+    // Async + zero-intermediate: issue the GPU readback and return — no
+    // main-thread stall. When it completes (Metal background thread), read the
+    // staging straight into the encoder's pixel buffer (BGRA, no swap) and
+    // submit. PTS t is captured now so wall-clock timing is unaffected by
+    // encode latency.
+    if (!admitCapture()) return;
+    struct PendingIssue {
+        State* state;
+        bool issued = false;
+        ~PendingIssue() {
+            if (!issued) {
+                state->finishCaptureAndLog();
+            }
+        }
+    } issue{this};
+    if (!stagingPool_) stagingPool_ = internal::makeCaptureStagingPool();
+    auto diagnostics = std::make_shared<VideoWriter::Diagnostics>();
+    bool started = internal::captureWindowAsync(
+        [state = shared_from_this(), t, diagnostics](const internal::CaptureReadback& rb) {
+            state->completeCapture(rb, t, /*finish=*/false, diagnostics.get());
+        }, stagingPool_, [state = shared_from_this(), diagnostics] {
+            // Native cleanup returns staging before the pending slot and its
+            // diagnostic Delivery are retired. Reentrant stop can now finish.
+            state->finishCaptureAndLog(false, diagnostics.get());
+        });
+    issue.issued = started;
+    if (!started) {
+        issue.issued = true; // retire exactly once, before delivering warnings
+        finishCaptureAndLog(/*rejectedLayout=*/true);
+    }
+#else
+    Pixels px;
+    if (!captureWindow(px) || !px.isAllocated()) {
+        writer_.rejectFrameLayout();
+    } else if (writer_.recordingSizeMatches(px.getWidth(), px.getHeight())) {
+        writer_.addFrameAt(px, t);
+    }
+#endif
+    } catch (const std::bad_alloc&) {
+        logWarning("ScreenRecorder") << "capture allocation failed; skipped this opportunity";
+    }
+}
 
 } // namespace trussc

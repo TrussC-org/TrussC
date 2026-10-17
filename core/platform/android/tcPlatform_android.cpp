@@ -15,6 +15,7 @@
 #include <GLES3/gl3.h>
 
 #include "../gl/tcPixelPack.h"
+#include "../gl/tcGLReadbackState.h"
 
 namespace trussc {
 
@@ -257,10 +258,14 @@ std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowCont
 }
 
 bool captureWindow(Pixels& outPixels) {
-    int width = sapp_width();
-    int height = sapp_height();
+    if (!sg_isvalid()) return false;
+    if (internal::hasPublicFboActivation()) return false;
+    internal::CapturePrefixScope capturePhase;
+    const auto source = internal::windowCaptureSource();
+    const int width = source.width, height = source.height;
 
-    if (width <= 0 || height <= 0) {
+    size_t rowBytes = 0, totalBytes = 0;
+    if (!internal::captureLayout(width, height, 4, rowBytes, totalBytes)) {
         logError("Screenshot") << "Invalid window dimensions";
         return false;
     }
@@ -269,6 +274,8 @@ bool captureWindow(Pixels& outPixels) {
     // Bound (abi): packed capture bytes must fit size_t. Overflow drops the recorder frame and is counted.
     if (!layout.byteSize) return false;
     mcp::internal::reconcileWindowCapture(size_t(width), size_t(height));
+    internal::GLReadbackState nativeState;
+    nativeState.bindSource(source.swapchain.gl.framebuffer);
     outPixels.allocate(width, height, 4);
     // Bound (abi): the pixel allocation must hold every captured row. Overflow drops the recorder frame and is counted.
     if (!outPixels.getData() || outPixels.getTotalBytes() < layout.byteSize) return false;

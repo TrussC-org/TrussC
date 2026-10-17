@@ -272,18 +272,11 @@ std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowCont
 }
 
 bool captureWindow(Pixels& outPixels) {
-    // Pick the render-target view of the CURRENT window: a secondary window's
-    // context records its own swapchain in lastSwapchain (beginSwapchainPassInternal),
-    // so its screenshot / recording reads back ITS surface. The main window has no
-    // per-window swapchain recorded here for capture-only frames, so it keeps using
-    // sapp_get_swapchain() — byte-identical to the previous behavior.
-    const void* renderView = nullptr;
-    auto& winCtx = internal::currentWindowContext();
-    if (!winCtx.isMain && winCtx.lastSwapchain.d3d11.render_view) {
-        renderView = winCtx.lastSwapchain.d3d11.render_view;
-    } else {
-        renderView = sapp_get_swapchain().d3d11.render_view;
-    }
+    if (!sg_isvalid()) return false;
+    if (internal::hasPublicFboActivation()) return false;
+    internal::CapturePrefixScope capturePhase;
+    const auto source = internal::windowCaptureSource();
+    const void* renderView = source.swapchain.d3d11.render_view;
     if (!renderView) {
         logError() << "[Screenshot] D3D11 render target view is null";
         return false;
@@ -404,8 +397,13 @@ bool captureWindow(Pixels& outPixels) {
         return false;
     }
 
-    // Pixels を確保
-    outPixels.allocate(width, height, 4);
+    // Pixels allocation may fail after Map; always release that native lease.
+    try { outPixels.allocate(width, height, 4); }
+    catch (const std::bad_alloc&) {
+        context->Unmap(stagingTexture, 0); stagingTexture->Release();
+        logError("Screenshot") << "pixel allocation failed";
+        return false;
+    }
     unsigned char* dst = outPixels.getData();
     size_t mappedBytes = 0;
     // Bound (abi): mapped D3D11 rows and destination capacity must cover the capture. Overflow drops the recorder frame and is counted.

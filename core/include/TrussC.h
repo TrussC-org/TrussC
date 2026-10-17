@@ -431,8 +431,8 @@ inline void beginFrame() {
     if (headless::isActive()) return;
 
     // Retry the exact deferred request at each boundary. The rebuild checks
-    // every window for live work: sg_commit() rewinds all SGL contexts, so
-    // another window's present may have cleared immediate work since deferral.
+    // every window for live work: only an owner's completion releases its
+    // immediate recording, and a parked begun frame also blocks rebuilding.
     const int pendingResize = internal::sglBudget().pendingResize;
     if (pendingResize > 0) {
         const int commands = internal::sglBudget().pendingCommands;
@@ -440,6 +440,7 @@ inline void beginFrame() {
     }
 
     internal::prepareWindowTarget();
+    internal::currentWindowContext().framePending = true;
 
     // Setup screen with default FOV (60 = perspective, 0 = ortho)
     internal::setupScreenFov(internal::defaultScreenFov());
@@ -1827,7 +1828,15 @@ inline int getSokolMemoryAllocs() { return smemtrack_info().num_allocs; }
 // Buffers are automatically re-allocated on the next draw call.
 // Call between frames when you know the next frame will use fewer vertices.
 inline void releaseSglBuffers() {
-    sgl_tc_context_release_buffers(internal::currentWindowContext().swapchainTarget.resources().context);
+    auto& window = internal::currentWindowContext();
+    const auto& target = window.swapchainTarget;
+    if (window.targetStack.size() > 1 || target.inPass || target.passStartedThisFrame || target.openShaderScopes ||
+        !target.deferredShaderDraws.empty() || !target.deferredPbrDraws.empty() || !target.deferredPointDraws.empty() ||
+        sgl_tc_context_has_pending_draws(target.resources().context)) {
+        logWarning("RenderTarget") << "releaseSglBuffers deferred: target still owns recorded work";
+        return;
+    }
+    sgl_tc_context_release_buffers(target.resources().context);
 }
 
 // ---------------------------------------------------------------------------
@@ -2171,19 +2180,40 @@ namespace internal {
     std::shared_ptr<CaptureStagingPool> makeCaptureStagingPool();
     bool captureWindowAsync(
         const std::function<void(const CaptureReadback&)>& completion,
-        const std::shared_ptr<CaptureStagingPool>& pool = nullptr);
+        const std::shared_ptr<CaptureStagingPool>& pool = nullptr,
+        const std::function<void()>& finished = {});
 #endif
 }
 
-// Capture screen to Pixels.
-// NOTE: immediate readback — call this OUTSIDE draw() (e.g. at the end of
-// update() or from an events().afterFrame listener). During draw() nothing has
-// been rendered yet (drawing is deferred to present()), so on Linux you'd read
-// a blank framebuffer. If you just want a file of the current frame, prefer
-// saveScreenshot() which captures at the correct point automatically.
-// Web: not implemented (no canvas readback). Always returns false and warns
-// once; take screenshots with the browser's own tools instead.
+// Read this window's screen into Pixels. What is captured depends on when called.
+// - update(), setup(), and other phases outside a frame/afterFrame: false, with
+//   one Warning per window pointing to events().afterFrame or saveScreenshot().
+//   An open GPU pass/Fbo alone does not count as a frame (synced update runs
+//   after beginFrame). The current window's innermost AppEntry guard defines
+//   the phase: Draw spans app/tree drawing through present()/onRender; AfterFrame
+//   spans the framework's afterFrame notification. Nested other entries override it.
+// - draw(): submit/read the frame so far. ImGui, child nodes drawn later and
+//   later overlays are not included. Slow; intended for debugging. On macOS,
+//   the capture completion wait is limited to 10 s for a hung GPU.
+// - events().afterFrame listener: read the full finished frame, including ImGui.
+// Drawing to the screen inside afterFrame doesn't appear (it lands under the
+// next frame's clear()); there, only read, or render into an Fbo.
+// Use saveScreenshot() for files and Fbo::readPixels() for Fbo contents;
+// grabScreen never reads an active Fbo.
+// Keep an EventListener member alive, for example:
+//   EventListener captureListener;
+//   bool captureRequested = true;
+//   void setup() override {
+//       captureListener = events().afterFrame.listen([this] {
+//           if (captureRequested) { Pixels pixels; grabScreen(pixels); captureRequested = false; }
+//       });
+//   }
+// One call costs about 3–7 ms on desktop GPUs and about 15 ms on a Raspberry Pi
+// at 720p, mostly waiting for the GPU, so reading less doesn't make it much
+// cheaper; prefer calling on demand rather than every frame.
+// Web: synchronous readback is not implemented; returns false and warns once.
 TC_PLATFORMS("macos,windows,linux,ios,android") inline bool grabScreen(Pixels& outPixels) {
+    if (!internal::getDefaultContext().admitScreenCapture()) return false;
     return captureWindow(outPixels);
 }
 
@@ -2225,27 +2255,10 @@ namespace internal {
     inline EventListener screenshotAfterFrameListener;
 }
 
-// Save a screenshot of the current frame to a file. Safe to call from anywhere
-// (setup/update/draw/event handlers): the actual capture is deferred to just
-// after present(), so it always grabs the fully-rendered frame — no black
-// captures on Linux when called inside draw().
-//
-// Returns true if the destination was prepared and the capture was queued;
-// false if the destination is inside the app bundle (with an Error naming
-// getUserDataPath()) or the parent directory could not be created (e.g. no write
-// permission). The rare failure of the deferred write itself (permission/disk
-// after the directory check) is reported via logError("Screenshot").
-// Relative paths resolve against the data path. The format comes from the
-// extension (case-insensitive): png/jpg/jpeg/bmp; macOS also writes tiff/tif/gif,
-// Windows also tga. Unsupported or missing extensions append .png and warn
-// with the actual destination and supported formats.
-//
-// Web: queue a canvas download (PNG/JPEG). Only the filename is used; an empty
-// name gets a timestamped default. Returns true when queued; encoded output is
-// handed to the browser (disk completion is not observable). Later failures
-// (including a tainted canvas) are logged. The browser may ask for permission
-// to allow multiple downloads.
-inline bool saveScreenshot(const std::filesystem::path& path) {
+namespace internal {
+// App-authored captures use their existing queue. External requests use MCP's
+// admitted deferral path instead.
+inline bool queueScreenshot(const std::filesystem::path& path) {
     std::filesystem::path resolved;
 #ifdef __EMSCRIPTEN__
     auto name = internal::resolveScreenshotDownloadName(path);
@@ -2268,6 +2281,31 @@ inline bool saveScreenshot(const std::filesystem::path& path) {
         redraw();
     }
     return true;
+}
+} // namespace internal
+
+// Save a screenshot of the current frame to a file. Safe to call from anywhere
+// (setup/update/draw/event handlers): the actual capture is deferred to just
+// after present(), so it always grabs the fully-rendered frame — no black
+// captures on Linux when called inside draw().
+//
+// Returns true if the destination was prepared and the capture was queued;
+// false if the destination is inside the app bundle (with an Error naming
+// getUserDataPath()) or the parent directory could not be created (e.g. no write
+// permission). The rare failure of the deferred write itself (permission/disk
+// after the directory check) is reported via logError("Screenshot").
+// Relative paths resolve against the data path. The format comes from the
+// extension (case-insensitive): png/jpg/jpeg/bmp; macOS also writes tiff/tif/gif,
+// Windows also tga. Unsupported or missing extensions append .png and warn
+// with the actual destination and supported formats.
+//
+// Web: queue a canvas download (PNG/JPEG). Only the filename is used; an empty
+// name gets a timestamped default. Returns true when queued; encoded output is
+// handed to the browser (disk completion is not observable). Later failures
+// (including a tainted canvas) are logged. The browser may ask for permission
+// to allow multiple downloads.
+inline bool saveScreenshot(const std::filesystem::path& path) {
+    return internal::queueScreenshot(path);
 }
 
 // ---------------------------------------------------------------------------
@@ -2732,6 +2770,8 @@ namespace internal {
             return;
         }
         frameReentryGuard = true;
+        auto* previousWindow = currentWindowCtx();
+        restoreWindowContext(nullptr);
         crashFrame(sapp_frame_count());
         CrashPhaseScope crashPhase("frame");
 
@@ -2758,14 +2798,17 @@ namespace internal {
             runSyncedUpdate();
 
             {
-                CrashPhaseScope drawPhase("draw");
-                if (appDrawFunc) appDrawFunc();
+                EntryStackGuard drawEntry(AppEntry::Draw);
+                {
+                    CrashPhaseScope drawPhase("draw");
+                    if (appDrawFunc) appDrawFunc();
+                }
+
+                // Reset shader stack if any shaders are still pushed
+                internal::resetShaderStack();
+
+                present();
             }
-
-            // Reset shader stack if any shaders are still pushed
-            internal::resetShaderStack();
-
-            present();
 
             // After present(): swapchain committed, outside any pass. Safe point
             // for end-of-frame readback (e.g. VideoRecorder auto-capture). Its
@@ -2798,6 +2841,7 @@ namespace internal {
         internal::currentWindowContext().pmouseX = internal::currentWindowContext().mouseX;
         internal::currentWindowContext().pmouseY = internal::currentWindowContext().mouseY;
 
+        restoreWindowContext(previousWindow);
         frameReentryGuard = false;
     }
 
@@ -2808,7 +2852,7 @@ namespace internal {
         CrashPhaseScope crashPhase("cleanup");
         writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
         // Session end may arrive inside a secondary window's modal loop.
-        currentWindowCtx() = &mainWindowContext();
+        restoreWindowContext(nullptr);
         // Stop MCP HTTP server
         #ifndef __EMSCRIPTEN__
         mcp::stopHttpServer();
@@ -2868,6 +2912,12 @@ namespace internal {
     }
 
     inline void _event_cb(const sapp_event* ev) {
+        auto* previousWindow = currentWindowCtx();
+        restoreWindowContext(nullptr);
+        struct RestoreEventWindow {
+            WindowContext* previous;
+            ~RestoreEventWindow() { restoreWindowContext(previous); }
+        } restoreEventWindow{previousWindow};
         CrashPhaseScope crashPhase("event dispatch");
         if (ev->type >= SAPP_EVENTTYPE_KEY_DOWN && ev->type <= SAPP_EVENTTYPE_TOUCHES_CANCELLED) {
             crashInput(static_cast<int>(ev->type), static_cast<int>(ev->mouse_x),

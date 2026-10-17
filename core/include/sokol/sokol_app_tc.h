@@ -2484,6 +2484,9 @@ SOKOL_APP_API_DECL const void* sapp_window_d3d11_depth_stencil_view(sapp_window 
 /* GL swapchain handle -- the default-framebuffer id (Linux/GLX: rendering
    targets the current drawable, which is this window's during its tick_cb) */
 SOKOL_APP_API_DECL uint32_t sapp_window_gl_framebuffer(sapp_window win);
+// [TrussC] GLX drawable restore for nested window execution; id 0 = main.
+// [TrussC] Framework seam, not app API.
+SOKOL_APP_API_DECL void sapp_tc_gl_make_current(sapp_window win);
 
 /* native escape hatches (macOS: NSWindow*; Windows: HWND; Linux: X11 Window XID) */
 SOKOL_APP_API_DECL const void* sapp_window_macos_get_window(sapp_window win);
@@ -11151,6 +11154,12 @@ static bool _sapp_tc_x11_create_main_window(void) {
 
 /*-- public API --------------------------------------------------------------------*/
 extern "C" {
+
+void sapp_tc_gl_make_current(sapp_window win) {
+    _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+    if (w && w->glx_win && _sapp_tc.ctx)
+        glXMakeCurrent(_sapp_tc.display, w->glx_win, _sapp_tc.ctx);
+}
 
 sapp_window sapp_create_window(const sapp_window_desc* desc) {
     sapp_window invalid = { 0 };

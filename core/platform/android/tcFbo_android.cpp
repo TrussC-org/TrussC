@@ -1,4 +1,4 @@
 #include "TrussC.h"
-#ifdef __ANDROID__
+#if defined(__ANDROID__)
 #include "../gl/tcFboReadback.h"
 #endif

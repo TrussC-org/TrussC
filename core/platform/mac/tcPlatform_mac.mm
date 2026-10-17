@@ -303,6 +303,18 @@ struct internal::CaptureStagingPool {
     std::vector<id<MTLTexture>> free;
 };
 
+// Host-resident operation; native completion owns only these resources and
+// callbacks. Empty it before publishing the recorder's terminal count.
+namespace {
+struct NativeCaptureJob {
+    std::shared_ptr<mcp::internal::WindowCaptureAdmission::Ownership> admission;
+    id<MTLTexture> source = nil, staging = nil;
+    std::shared_ptr<internal::CaptureStagingPool> pool;
+    std::function<void(const internal::CaptureReadback&)> completion;
+    std::function<void()> finished;
+};
+} // namespace
+
 std::shared_ptr<internal::CaptureStagingPool> internal::makeCaptureStagingPool() {
     return std::make_shared<internal::CaptureStagingPool>();
 }
@@ -317,13 +329,12 @@ std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowCont
 
 bool internal::captureWindowAsync(
     const std::function<void(const internal::CaptureReadback&)>& completion,
-    const std::shared_ptr<internal::CaptureStagingPool>& pool) {
-    // Read back the drawable this frame ACTUALLY rendered into (recorded by the
-    // swapchain pass). NOT sapp_get_swapchain() — that advances to the next,
-    // unrendered drawable. Frame-end cleanup clears this borrowed pointer;
-    // outside that frame (or before its first pass), acquire a current drawable.
-    const void* drawablePtr = internal::currentWindowContext().lastSwapchainDrawable;
-    if (!drawablePtr) drawablePtr = sapp_get_swapchain().metal.current_drawable;
+    const std::shared_ptr<internal::CaptureStagingPool>& pool,
+    const std::function<void()>& finished) {
+    // Select only this native tick's rendered drawable. The host clears the
+    // borrowed pointer at frame end; this job owns its texture until cleanup.
+    if (!sg_isvalid() || internal::hasPublicFboActivation()) return false;
+    const void* drawablePtr = internal::windowCaptureSource().drawable;
     id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)drawablePtr;
     if (!drawable) return false;
     id<MTLTexture> srcTexture = drawable.texture;
@@ -336,7 +347,14 @@ bool internal::captureWindowAsync(
     // Bound (abi): Metal extents must fit the capture int dimensions. Overflow drops the recorder frame and is counted.
     if (width > (NSUInteger)std::numeric_limits<int>::max() ||
         height > (NSUInteger)std::numeric_limits<int>::max()) return false;
+    const auto layout = internal::recorderPackedLayout(width, height,
+        pixelFormat == MTLPixelFormatRGB10A2Unorm ? internal::RecorderPixelFormat::RGB10A2 : internal::RecorderPixelFormat::BGRA8);
+    // Bound (abi): selected Metal source bytes and format must fit capture staging. Overflow drops the recorder frame and is counted.
+    if (!layout.byteSize || (pixelFormat != MTLPixelFormatBGRA8Unorm &&
+        pixelFormat != MTLPixelFormatBGRA8Unorm_sRGB && pixelFormat != MTLPixelFormatRGB10A2Unorm)) return false;
+    auto admission = mcp::internal::WindowCaptureAdmission::retain();
     id<MTLDevice> device = srcTexture.device;
+    if ((__bridge const void*)device != sg_mtl_device()) return false;
 
     // sokol sets framebufferOnly=YES on the layer, so getBytes on the drawable
     // asserts: blit into a shared-storage staging texture first. Each capture
@@ -369,20 +387,21 @@ bool internal::captureWindowAsync(
     }
     if (!staging) return false;
 
-    // Blit on sokol's own queue so it is ordered AFTER the frame's render (a
-    // single MTLCommandQueue executes command buffers in commit order). A private
-    // queue raced ahead of the render and copied stale drawable contents.
-    id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)sg_mtl_command_queue();
-    static id<MTLCommandQueue> s_fallbackQueue = nil;
-    if (!queue) {
-        if (!s_fallbackQueue || s_fallbackQueue.device != device) {
-            s_fallbackQueue = [device newCommandQueue];
-        }
-        queue = s_fallbackQueue;
-    }
+    std::shared_ptr<NativeCaptureJob> job;
+    try {
+        job = std::make_shared<NativeCaptureJob>();
+        job->admission = std::move(admission);
+        job->source = srcTexture; job->staging = staging; job->pool = pool;
+        job->completion = completion; job->finished = finished;
+    } catch (const std::bad_alloc&) { return false; }
 
-    id<MTLCommandBuffer>      cmdBuf  = [queue commandBuffer];
+    // Stage in the renderer's prefix before any later source write. This also
+    // handles a parked foreign encoder; submission never presents a drawable.
+    internal::parkWindowPass();
+    id<MTLCommandBuffer> cmdBuf = (__bridge id<MTLCommandBuffer>)sg_tc_mtl_command_buffer();
+    if (!cmdBuf || !sg_mtl_command_queue()) return false;
     id<MTLBlitCommandEncoder> blitEnc = [cmdBuf blitCommandEncoder];
+    if (!blitEnc) return false;
     [blitEnc copyFromTexture:srcTexture
                  sourceSlice:0 sourceLevel:0
                 sourceOrigin:MTLOriginMake(0, 0, 0)
@@ -392,51 +411,78 @@ bool internal::captureWindowAsync(
            destinationOrigin:MTLOriginMake(0, 0, 0)];
     [blitEnc endEncoding];
 
-    // Deliver a readback handle when the GPU finishes — no main-thread
-    // waitUntilCompleted stall. The block retains `staging` and copies
-    // `completion`, so both outlive this function until the handler runs. The
-    // consumer reads the staging straight into its own destination buffer.
-    std::function<void(const internal::CaptureReadback&)> comp = completion;
-    std::shared_ptr<internal::CaptureStagingPool> returnTo = pool;
-    NSUInteger w = width, h = height;
-    bool isRGB10A2 = (pixelFormat == MTLPixelFormatRGB10A2Unorm);
+    // Staging and source ownership survive unretained-reference command
+    // buffers. Cleanup precedes terminal notification, so the next recorder
+    // opportunity cannot allocate a second slot before this one returns.
+    const bool isRGB10A2 = (pixelFormat == MTLPixelFormatRGB10A2Unorm);
     [cmdBuf addCompletedHandler:^(id<MTLCommandBuffer> cb) {
-        (void)cb;
         internal::CaptureReadback rb;
-        rb.staging   = (__bridge void*)staging;   // valid: block retains `staging`
-        rb.width     = (int)w;
-        rb.height    = (int)h;
-        rb.isRGB10A2 = isRGB10A2;
-        comp(rb);
-        // The readback is done with it: reusable from here on.
-        if (returnTo) {
-            std::lock_guard<std::mutex> lock(returnTo->mutex);
-            returnTo->free.push_back(staging);
-        }
+        rb.staging = cb.status == MTLCommandBufferStatusCompleted
+            ? (__bridge void*)job->staging : nullptr;
+        rb.width = (int)width; rb.height = (int)height; rb.isRGB10A2 = isRGB10A2;
+        mcp::internal::finishCaptureJob(*job, rb, [&] {
+            if (job->pool) {
+                std::lock_guard<std::mutex> lock(job->pool->mutex);
+                try { job->pool->free.push_back(job->staging); }
+                catch (...) { /* reuse is optional */ }
+            }
+            job->staging = nil; job->source = nil; job->pool.reset();
+        });
     }];
-    [cmdBuf commit];
+    sg_tc_submit_prefix();
     return true;
 }
 
 bool captureWindow(Pixels& outPixels) {
+    if (!sg_isvalid() || internal::hasPublicFboActivation()) {
+        logError("Screenshot") << "Metal window capture requires an available window target";
+        return false;
+    }
+    internal::CapturePrefixScope capturePhase;
     // Synchronous wrapper over the async primitive: issue the capture and block
     // until the pixels land. Screenshots / MCP / exit use this — they need the
     // bytes before returning (so the file is written / the response is ready).
-    bool ok = false;
+    // Completion may outlive a bounded synchronous wait. Own its result rather
+    // than capturing the caller's Pixels or stack by reference.
+    struct Result : mcp::internal::CaptureCompletionGate { Pixels pixels; bool ok = false; };
+    auto result = std::make_shared<Result>();
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
     bool started = internal::captureWindowAsync(
-        [&outPixels, &ok, sem](const internal::CaptureReadback& rb) {
-            outPixels.allocate(rb.width, rb.height, 4);
-            ok = rb.readInto(outPixels.getData(), (size_t)rb.width * 4,
-                             outPixels.getTotalBytes(), /*wantRGBA=*/true);
+        [result](const internal::CaptureReadback& rb) {
+            result->complete([&] {
+              try {
+                if (rb.getLayout().byteSize) {
+                    result->pixels.allocate(rb.width, rb.height, 4);
+                    result->ok = rb.readInto(result->pixels.getData(), (size_t)rb.width * 4,
+                        result->pixels.getTotalBytes(), /*wantRGBA=*/true);
+                }
+              } catch (...) { result->ok = false; }
+            });
+        }, {}, [sem] {
+            // Publish completion only after source/staging and carried admission
+            // have finished cleanup, including after a caller timeout.
             dispatch_semaphore_signal(sem);
         });
     if (!started) {
+        capturePhase.leaveParked();
         logError() << "[Screenshot] Metal drawable が取得できません";
         return false;
     }
-    dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-    return ok;
+    // Bound (platform): a stalled Metal completion must not hold the macOS
+    // frame thread indefinitely; ten seconds permits slow GPU work/recovery.
+    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)) != 0) {
+        result->abandon();
+        capturePhase.leaveParked();
+        logError("Screenshot") << "Metal window capture completion timed out";
+        return false;
+    }
+    if (!result->ok) {
+        capturePhase.leaveParked();
+        logError("Screenshot") << "Metal window capture readback failed";
+        return false;
+    }
+    outPixels = std::move(result->pixels);
+    return true;
 }
 
 bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
