@@ -3,7 +3,7 @@ import pathlib
 import re
 import sys
 
-source = pathlib.Path(sys.argv[1]).read_text()
+source = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 
 def function(signature):
     start = source.rindex(signature)
@@ -26,4 +26,4 @@ if 'SOKOL_API_IMPL uint64_t sapp_html5_get_dropped_file_size64' in source:
     parts.append(function('SOKOL_API_IMPL uint64_t sapp_html5_get_dropped_file_size64'))
 parts.append(function('SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size'))
 parts.append(function('SOKOL_API_IMPL void sapp_html5_fetch_dropped_file'))
-pathlib.Path(sys.argv[2]).write_text('\n\n'.join(parts) + '\n')
+pathlib.Path(sys.argv[2]).write_text('\n\n'.join(parts) + '\n', encoding="utf-8")

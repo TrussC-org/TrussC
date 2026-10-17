@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(app_header ${CMAKE_CURRENT_SOURCE_DIR}/../../include/sokol/sokol_app_tc.h
     CACHE FILEPATH "Application header under test")
 add_executable(webDropSize main.cpp)
+if(MSVC)
+    # Sources and core headers are UTF-8, including on CP932 hosts (#793).
+    target_compile_options(webDropSize PRIVATE /utf-8)
+endif()
 target_compile_definitions(webDropSize PRIVATE WEB_DROP_APP_HEADER="${app_header}")
 option(WEB_DROP_LEGACY_HEADER "Run shared checks against a header without the 64-bit getter" OFF)
 if(NOT WEB_DROP_LEGACY_HEADER)
