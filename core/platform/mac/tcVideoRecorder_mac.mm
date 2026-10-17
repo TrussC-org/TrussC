@@ -276,6 +276,13 @@ bool VideoWriter::appendAudioPlatform(const float* interleaved, int frames,
 // appendPlatform - encode one RGBA8 (top-down) frame
 // ---------------------------------------------------------------------------
 bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
+    Diagnostics diagnostics;
+    const bool result = appendPlatformDeferred(rgba, timeSec, diagnostics);
+    diagnostics.log();
+    return result;
+}
+
+bool VideoWriter::appendPlatformDeferred(const unsigned char* rgba, double timeSec, Diagnostics& diagnostics) {
     VideoWriterPlatformData* pd = platform_;
     if (!pd || !pd->writer || pd->failed) return false;
 
@@ -325,7 +332,7 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
         // Bound (abi): CoreVideo must grant writable access to the native frame. Overflow drops the recorder frame and is counted.
         if (CVPixelBufferLockBaseAddress(pb, 0) != kCVReturnSuccess) {
             CVPixelBufferRelease(pb);
-            return rejectFrameLayout();
+            return rejectFrameLayout(&diagnostics);
         }
         uint8_t* dst = (uint8_t*)CVPixelBufferGetBaseAddress(pb);
         const auto layout = internal::recorderPixelBufferLayout(pb);
@@ -334,7 +341,7 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
                                                 internal::RecorderPixelFormat::BGRA8)) {
             CVPixelBufferUnlockBaseAddress(pb, 0);
             CVPixelBufferRelease(pb);
-            return rejectFrameLayout();
+            return rejectFrameLayout(&diagnostics);
         }
         const size_t dstStride = layout.rowBytes;
         const int w = pd->width;
@@ -377,14 +384,15 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
 // (BGRA), so there is no temporary Pixels buffer to copy through. Called on the
 // capture completion thread, serialized by the recorder's writer mutex.
 // ---------------------------------------------------------------------------
-unsigned char* VideoWriter::lockFramePlatform(internal::RecorderFrameBuffer& buffer) {
+unsigned char* VideoWriter::lockFramePlatform(internal::RecorderFrameBuffer& buffer, Diagnostics& diagnostics) {
     VideoWriterPlatformData* pd = platform_;
     if (!pd || !pd->writer || pd->failed || pd->pendingPB) {
-        callFailed("encoder frame buffer unavailable or already locked");
+        callFailed("encoder frame buffer unavailable or already locked", &diagnostics);
         return nullptr;
     }
 
     // Briefly wait for the encoder input to accept more data.
+    // Bound (platform): encoder readiness waits at most 5000 one-ms sleeps. Overflow rejects the frame and is reported by its failed result, with at most one Error per take.
     int spins = 0;
     while (!pd->input.readyForMoreMediaData && spins < 5000 &&
                pd->writer.status == AVAssetWriterStatusWriting) {
@@ -396,11 +404,11 @@ unsigned char* VideoWriter::lockFramePlatform(internal::RecorderFrameBuffer& buf
         result_ = SaveResult::fail(SaveError::WriteFailed,
             message ? message : "AVAssetWriter is not writing");
         pd->failed = true;
-        backendRejected("AVAssetWriter is not writing");
+        backendRejected("AVAssetWriter is not writing", &diagnostics);
         return nullptr;
     }
     if (!pd->input.readyForMoreMediaData) {
-        callFailed("input not ready (timeout)");
+        callFailed("input not ready (timeout)", &diagnostics);
         return nullptr;
     }
 
@@ -419,14 +427,14 @@ unsigned char* VideoWriter::lockFramePlatform(internal::RecorderFrameBuffer& buf
                             (__bridge CFDictionaryRef)attrs, &pb);
     }
     if (!pb) {
-        callFailed("could not create pixel buffer");
+        callFailed("could not create pixel buffer", &diagnostics);
         return nullptr;
     }
 
     // Bound (abi): CoreVideo must grant writable access to the native frame. Overflow drops the recorder frame and is counted.
     if (CVPixelBufferLockBaseAddress(pb, 0) != kCVReturnSuccess) {
         CVPixelBufferRelease(pb);
-        rejectFrameLayout();
+        rejectFrameLayout(&diagnostics);
         return nullptr;
     }
     auto* frame = (unsigned char*)CVPixelBufferGetBaseAddress(pb);
@@ -436,7 +444,7 @@ unsigned char* VideoWriter::lockFramePlatform(internal::RecorderFrameBuffer& buf
                                               internal::RecorderPixelFormat::BGRA8)) {
         CVPixelBufferUnlockBaseAddress(pb, 0);
         CVPixelBufferRelease(pb);
-        rejectFrameLayout();
+        rejectFrameLayout(&diagnostics);
         return nullptr;
     }
     pd->pendingPB = pb;

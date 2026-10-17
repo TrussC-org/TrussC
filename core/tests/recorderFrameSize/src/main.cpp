@@ -29,8 +29,14 @@ struct RecorderFrameTestAccess {
     template<class Acquire, class Copy, class Discard, class Submit>
     static bool complete(VideoWriter& writer, const RecorderFrameLayout& source,
                          std::mutex& mutex, Acquire acquire, Copy copy, Discard discard, Submit submit) {
-        VideoWriter::DiagnosticLock lock(writer, mutex);
-        return writer.completeCapture(source, acquire, copy, discard, submit);
+        VideoWriter::Diagnostics diagnostics;
+        bool result;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            result = writer.completeCapture(source, acquire, copy, discard, submit, diagnostics);
+        }
+        diagnostics.log();
+        return result;
     }
 };
 #if TC_RECORDER_DEVICE_CHECK
@@ -49,8 +55,7 @@ struct ScreenRecorderTestAccess {
         auto state = recorder.state_;
         state->inFlight_.fetch_add(1);
         return [state]() {
-            std::lock_guard<std::mutex> lock(state->writerMutex_);
-            state->finishCapture();
+            state->finishCaptureAndLog();
         };
     }
 };

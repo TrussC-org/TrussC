@@ -78,8 +78,7 @@ struct ScreenRecorderTestAccess {
         auto state = recorder.state_;
         state->inFlight_.fetch_add(1);
         return [state]() {
-            std::lock_guard<std::mutex> lock(state->writerMutex_);
-            state->finishCapture();
+            state->finishCaptureAndLog();
         };
     }
 };
@@ -424,6 +423,38 @@ TC_CORE_TEST_MAIN() {
         check("... and the teardown goes on once audioOut() returns", g_stuckDestroyed.load());
         check("meanwhile the public barrier still gives up after about a second",
               !publicResult && publicTook >= 0.9 && publicTook < 1.5, ms(publicTook));
+    }
+
+    // Each barrier diagnostic may synchronously reenter the unbounded audio
+    // barrier through onLog. Release the held callback first: reentry must wait
+    // for that callback, rather than deadlock on the outer barrier's mutex.
+    // The process watchdog above supplies a timeout for both regressions.
+    for (bool bounded : {true, false}) {
+        atomic<bool> entered{false}, release{false};
+        auto held = engine.audioOut.listen([&](AudioOutBuffer&) {
+            entered = true;
+            while (!release.load()) this_thread::yield();
+        });
+        check("reentrant diagnostic test holds an audio callback",
+              waitFor([&] { return entered.load(); }, 2000));
+        held.disconnect();
+        int diagnostics = 0;
+        bool reentered = false;
+        auto log = getLogger().onLog.listen([&](LogEventArgs& e) {
+            const char* needle = bounded ? "waitForAudioCallbacks:" : "teardown keeps waiting";
+            if (e.message.find(needle) == string::npos) return;
+            ++diagnostics;
+            release = true;
+            internal::waitForAudioCallbacksNoTimeout();
+            reentered = true;
+        });
+        bool result = true;
+        if (bounded) result = engine.waitForAudioCallbacks();
+        else internal::waitForAudioCallbacksNoTimeout();
+        release = true;
+        check(bounded ? "barrier Warning permits unbounded onLog reentry"
+                      : "teardown Error permits unbounded onLog reentry",
+              reentered && diagnostics == 1 && result == !bounded);
     }
 
     // --- setApp() refuses a cleaned-up App and a closed window ---------------------------
