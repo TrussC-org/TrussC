@@ -924,7 +924,9 @@ jobs:
 
       - name: shader target regression checks
         if: always()
-        run: python3 tools/tests/test_shader_targets.py -v
+        run: |
+          python3 tools/tests/test_shader_targets.py -v
+          python3 tools/tests/test_shared_build_regen.py -v
 
       - name: core test symbol checker regression checks
         if: always()
