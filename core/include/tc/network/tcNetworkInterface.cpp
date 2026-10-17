@@ -175,6 +175,7 @@ std::vector<NetworkInterface> listNetworkInterfaces() {
     ULONG bufLen = 16384;
     std::vector<unsigned char> buf(bufLen);
     DWORD ret = 0;
+    // Bound (platform): OS adapter data may grow during enumeration; three attempts limit retries. Overflow logs failure and returns an empty interface list.
     for (int attempt = 0; attempt < 3; ++attempt) {
         ret = GetAdaptersAddresses(AF_UNSPEC, flags, nullptr,
                                    reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buf.data()), &bufLen);

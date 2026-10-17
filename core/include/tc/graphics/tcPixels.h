@@ -38,10 +38,13 @@ inline bool pixelBufferCount(int width, int height, int channels, size_t elemSiz
                              size_t maxBytes, size_t& outCount) {
     if (width < 0 || height < 0 || !isValidPixelChannels(channels) || elemSize == 0) return false;
     size_t count = (size_t)width;
+    // Bound (abi): file or device image dimensions must fit the destination byte-count width. Overflow returns false.
     if (height != 0 && count > maxBytes / (size_t)height) return false;
     count *= (size_t)height;
+    // Bound (abi): file or device image channel products must fit the destination byte-count width. Overflow returns false.
     if (count > maxBytes / (size_t)channels) return false;
     count *= (size_t)channels;
+    // Bound (abi): file or device image element products must fit the destination byte-count width. Overflow returns false.
     if (count > maxBytes / elemSize) return false;
     outCount = count;
     return true;

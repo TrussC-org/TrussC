@@ -122,6 +122,7 @@ protected:
             // file plays without depth).
             const std::int64_t rgbaBytes = static_cast<std::int64_t>(header_.width) *
                                            static_cast<std::int64_t>(header_.height) * 4;
+            // Bound (abi): file frame dimensions must fit int-sized image byte counts and indices. Overflow refuses to open the file.
             if (header_.width < 0 || header_.height < 0 || rgbaBytes > INT_MAX) {
                 logError("tcxDepthRecord")
                     << "PlaybackDepthCamera: the frame size " << header_.width << "x"

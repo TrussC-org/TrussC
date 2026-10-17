@@ -297,6 +297,7 @@ public:
         const auto& sample = track.samples[sampleIndex];
         // The sample must lie fully inside the file; this is checked before
         // the buffer is sized
+        // Bound (security): untrusted MOV sample sizes must fit the file to keep reads and memory bounded by input. Overflow refuses the sample read.
         if (sample.size > fileSize_ || sample.offset > fileSize_ - sample.size) {
             return false;
         }
@@ -405,6 +406,7 @@ private:
         uint32_t atomSize = readU32();
         atomType = readU32();
         if (!file_.good()) { bad = true; return false; }
+        // Bound (security): untrusted MOV atom lengths must fit the enclosing atom to bound parser reads. Overflow returns false and marks the atom invalid.
         if (atomSize < 8 || atomSize > endPos - atomStart) { bad = true; return false; }
         atomEnd = atomStart + atomSize;
         return true;
@@ -793,6 +795,7 @@ private:
         count = readU32();
         uint64_t pos = 0;
         if (!position(pos) || pos > atomEnd) return false;
+        // Bound (security): untrusted MOV table counts must fit the atom before allocating entries. Overflow rejects the table.
         return count <= (atomEnd - pos) / entrySize;
     }
 
@@ -838,6 +841,7 @@ private:
         }
 
         // Variable size samples: 4 bytes per entry
+        // Bound (security): untrusted MOV sample counts must fit the size table to bound allocation by file data. Overflow rejects the table.
         if (sampleSizes.count > (atomEnd - pos) / 4) return false;
         sampleSizes.sizes.reserve(sampleSizes.count);
         for (uint32_t i = 0; i < sampleSizes.count; i++) {
@@ -887,6 +891,7 @@ private:
         // read, the number of samples it times (its entry counts summed). In a
         // valid file the two are equal; 'stts' entries are bounded by its atom
         // size, which a constant-size 'stsz' count is not.
+        // Bound (security): untrusted MOV tables must agree on available samples to bound index memory and work. Overflow stops building entries at the smallest table limit.
         uint64_t limit = sampleSizes.count;
         if (!timeToSample.empty()) {
             uint64_t timed = 0;
@@ -964,6 +969,7 @@ private:
     bool buildPcmChunks(MovTrack& track, uint32_t frameBytes, uint32_t frameCount,
                         const std::vector<uint64_t>& chunkOffsets,
                         const std::vector<std::pair<uint32_t, uint32_t>>& sampleToChunk) {
+        // Bound (abi): file PCM chunk byte counts must fit each 32-bit sample entry. Overflow splits the chunk into smaller entries.
         const uint64_t maxEntryFrames = std::max<uint64_t>(1, UINT32_MAX / frameBytes);
         uint64_t framesLeft = frameCount;
         uint64_t bytesInFile = 0;

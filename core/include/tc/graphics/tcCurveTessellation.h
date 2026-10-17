@@ -35,6 +35,7 @@ struct CurveStyle {
 // like polygons even at tiny radii; the upper prevents pathological vertex
 // floods from bad input (radius=1e9, tolerance=1e-6, ...).
 inline constexpr int kMinCircleSegments = 6;
+// Bound (security): user radii and tolerances can demand huge meshes; a segment cap bounds vertex memory and work. Overflow clamps the circle segment count.
 inline constexpr int kMaxCircleSegments = 1024;
 
 // Number of edges to approximate a full circle of `radius` so that the
@@ -84,6 +85,7 @@ inline int segmentsForArc(float radius, float angleSpan, float tolerance) {
 // curve (cusp, near-coincident control points) can't run away.
 // =============================================================================
 
+// Bound (security): user control points and tolerance can force recursive subdivision; a depth cap bounds stack memory and work. Overflow emits the current endpoint.
 inline constexpr int kBezierMaxDepth = 16;
 
 // Hard cap on the order (point count) accepted by the N-th order Bezier
@@ -104,6 +106,7 @@ inline constexpr int kBezierMaxDepth = 16;
 // purpose-built tessellator with cached factorials / vectorised inner
 // loops / GPU dispatch. Roll your own and call the underlying primitives
 // from there, or chain cubics.
+// Bound (security): user control-point arrays cause quadratic work per subdivision; a cap bounds scratch memory and work. Overflow refuses the curve with a warning.
 inline constexpr int kBezierMaxOrder = 64;
 
 namespace internal {

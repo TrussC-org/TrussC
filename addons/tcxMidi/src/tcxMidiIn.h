@@ -164,7 +164,9 @@ public:
     bool hasNewMessage() { return polling_->hasNewMessage(name_); }
     bool getNextMessage(MidiMessage& msg) { return polling_->getNextMessage(msg, name_); }
     // Queue limit (default 1024); overflow and shrinking drop the oldest first.
+    // Device input or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow and shrinking drop the oldest messages and increment the drop count.
     void setBufferSize(size_t size) { polling_->setBufferSize(size); }
+    // Device input or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow and shrinking drop the oldest messages and increment the drop count.
     size_t getBufferSize() const { return polling_->getBufferSize(); }
     // Running total since construction, including drops caused by shrinking.
     uint64_t getDroppedMessageCount() const { return polling_->getDroppedMessageCount(); }
@@ -193,6 +195,7 @@ private:
         // Queue limit (default 1024). Past it, the oldest message is dropped.
         // Shrinking the limit discards the oldest queued messages now; they
         // count as dropped too.
+        // Device input or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow and shrinking drop the oldest messages and increment the drop count.
         void setBufferSize(size_t size) {
             uint64_t dropped = 0;
             {
@@ -205,6 +208,7 @@ private:
             }
             countDrops(dropped);
         }
+        // Device input or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow and shrinking drop the oldest messages and increment the drop count.
         size_t getBufferSize() const { return bufferMax_; }
 
         // Messages received but never handed to the app, since this MidiIn was
@@ -250,6 +254,7 @@ private:
         std::queue<MidiMessage> queue_;
         std::mutex queueMutex_;
         std::atomic<bool> bufferEnabled_{false};
+        // Bound (security): device input or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow drops the oldest and is counted.
         size_t bufferMax_ = 1024;
 
         // Drop accounting: the input thread and setBufferSize() only add to the

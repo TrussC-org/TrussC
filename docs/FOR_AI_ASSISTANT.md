@@ -3930,7 +3930,7 @@ void Serial::flushInput() [macos,windows,linux,android]  // Clear the input buff
 void Serial::flushOutput() [macos,windows,linux,android]  // Clear the output buffer
 std::vector<SerialDeviceInfo> Serial::getDeviceList() ⚠️deprecated [macos,windows,linux,android]  // Deprecated alias for listDevices()
 std::string Serial::getDevicePath() const [macos,windows,linux,android]  // Current device path; a copy, since another thread's setup() may change it. Never waits for setup(), close() or an I/O call
-size_t Serial::getDroppedByteCount() const [macos,windows,linux,android]  // Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count
+size_t Serial::getDroppedByteCount() const [macos,windows,linux,android]  // Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count. Device input or a stalled reader can fill the deque; a fixed cap keeps memory finite. Overflow drops the oldest bytes and increments the discard count.
 bool Serial::isConnected() const [macos,windows,linux,android]  // Whether the port is open and working; turns false after close() or when a read/write call finds the device gone
 bool Serial::isInitialized() const [macos,windows,linux,android]  // Whether currently connected; same as isConnected()
 std::vector<SerialDeviceInfo> Serial::listDevices() [macos,windows,linux,android]  // List available serial devices
@@ -4095,7 +4095,7 @@ void TcpClient::connectAsync(const std::string & host, int port) [macos,windows,
 void TcpClient::disconnect() [macos,windows,linux,android,ios]  // Disconnect
 std::string TcpClient::getRemoteHost() const [macos,windows,linux,android,ios]  // Remote host name
 int TcpClient::getRemotePort() const [macos,windows,linux,android,ios]  // Remote port
-size_t TcpClient::getSendAsyncBufferSize() const [macos,windows,linux,android,ios]  // Get the send queue high-water mark in bytes
+size_t TcpClient::getSendAsyncBufferSize() const [macos,windows,linux,android,ios]  // Get the send queue high-water mark in bytes. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
 size_t TcpClient::getSendAsyncPendingBytes() const [macos,windows,linux,android,ios]  // Bytes queued but not yet completed
 bool TcpClient::isConnected() const [macos,windows,linux,android,ios]  // Whether currently connected
 bool TcpClient::isConnecting() const [macos,windows,linux,android,ios]  // Whether a TCP connection attempt or TLS handshake is in progress
@@ -4107,8 +4107,8 @@ bool TcpClient::send(const void * data, size_t size) [+2] [macos,windows,linux,a
 SendResult TcpClient::sendAsync(const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Queue owned bytes without waiting; returns SendResult and reports once through onSendComplete
 void TcpClient::setBlocking(bool blocking) [macos,windows,linux,android,ios]  // Set blocking mode
 void TcpClient::setConnectTimeout(float seconds) [macos,windows,linux,android,ios]  // Set the TCP connect deadline in seconds; default 0 uses the OS deadline
-void TcpClient::setReceiveBufferSize(size_t size) [macos,windows,linux,android,ios]  // Set the receive buffer size
-void TcpClient::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android,ios]  // Set the send queue high-water mark; default 16 MB, 0 unlimited
+void TcpClient::setReceiveBufferSize(size_t size) [macos,windows,linux,android,ios]  // Set the receive buffer size. Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads.
+void TcpClient::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android,ios]  // Set the send queue high-water mark; default 16 MB, 0 unlimited. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
 void TcpClient::setSendTimeout(float seconds) [macos,windows,linux,android,ios]  // Set the idle send timeout in seconds; default 60, 0 waits forever
 void TcpClient::setTransport(std::shared_ptr<Transport> transport) [macos,windows,linux,android,ios]  // Subclass hook: set the transport this client's connections use (TlsClient installs its TLS transport here). Call it before connecting; later connections keep it.
 void TcpClient::setUseThread(bool useThread) [macos,windows,linux,android,ios]  // Whether to use threads (must be false on Wasm)
@@ -4161,15 +4161,15 @@ const TcpServerClient * TcpServer::getClient(int clientId) const [macos,windows,
 int TcpServer::getClientCount() const [macos,windows,linux,android]  // Number of connected clients
 std::vector<int> TcpServer::getClientIds() const [macos,windows,linux,android]  // IDs of all connected clients
 int TcpServer::getPort() const [macos,windows,linux,android]  // The port the server is bound to. After start(0) this is the port the OS picked; for a fixed port it is that port
-size_t TcpServer::getSendAsyncBufferSize() const [macos,windows,linux,android]  // The current high-water mark for one client's send queue, in bytes
+size_t TcpServer::getSendAsyncBufferSize() const [macos,windows,linux,android]  // The current high-water mark for one client's send queue, in bytes. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
 size_t TcpServer::getSendAsyncPendingBytes(int clientId) const [macos,windows,linux,android]  // How much a client has queued and not yet completed, in bytes (0 for an unknown client)
 bool TcpServer::isRunning() const [macos,windows,linux,android]  // Whether the server is running
 bool TcpServer::send(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Send data to a specific client (blocking)
 SendResult TcpServer::sendAsync(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Queue data for a client and return at once, without waiting for it to be written
-void TcpServer::setReceiveBufferSize(size_t size) [macos,windows,linux,android]  // Set the receive buffer size
-void TcpServer::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android]  // Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB
+void TcpServer::setReceiveBufferSize(size_t size) [macos,windows,linux,android]  // Set the receive buffer size. Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads.
+void TcpServer::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android]  // Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
 void TcpServer::setSendTimeout(float seconds) [macos,windows,linux,android]  // Set how long a send may stall without progress before giving up, in seconds (0 = wait indefinitely)
-bool TcpServer::start(int port, int maxClients = 0) [macos,windows,linux,android]  // Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default)
+bool TcpServer::start(int port, int maxClients = 0) [macos,windows,linux,android]  // Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default). Untrusted connection floods can retain clients; an optional cap keeps client memory finite. At the cap, newly accepted sockets are closed.
 void TcpServer::stop() [macos,windows,linux,android]  // Stop the server
 ```
 
@@ -4375,7 +4375,7 @@ bool UdpSocket::setMulticastInterface(const std::string & interfaceAddr) [macos,
 bool UdpSocket::setMulticastLoopback(bool enable) [macos,windows,linux,android,ios]  // Whether outgoing multicast loops back to local listeners (default on)
 bool UdpSocket::setMulticastTTL(int ttl) [macos,windows,linux,android,ios]  // Hop limit for outgoing multicast (default 1 = local subnet)
 bool UdpSocket::setNonBlocking(bool nonBlocking) [macos,windows,linux,android,ios]  // Set non-blocking mode
-bool UdpSocket::setReceiveBufferSize(int size) [macos,windows,linux,android,ios]  // Set the receive buffer size
+bool UdpSocket::setReceiveBufferSize(int size) [macos,windows,linux,android,ios]  // Set the receive buffer size. Untrusted datagram floods can fill the OS queue; the configured buffer keeps queued memory finite. On overflow, the OS drops datagrams.
 bool UdpSocket::setReceiveTimeout(int timeoutMs) [macos,windows,linux,android,ios]  // Set the receive timeout (0 = infinite)
 bool UdpSocket::setReuseAddress(bool enable) [macos,windows,linux,android,ios]  // Allow address reuse (set before bind)
 bool UdpSocket::setReusePort(bool enable) [macos,windows,linux,android,ios]  // Allow multiple sockets on the same port (multicast receivers; set before bind)
@@ -4461,7 +4461,7 @@ void VideoGrabber::copyToImage(Image & image) const [macos,windows,linux,ios,web
 int VideoGrabber::getDesiredFrameRate() const [macos,windows,linux,ios,web]  // Return the requested frame rate (-1 if unspecified)
 int VideoGrabber::getDeviceID() const [macos,windows,linux,ios,web]  // Return the selected device ID
 const std::string & VideoGrabber::getDeviceName() const [macos,windows,linux,ios,web]  // Return the name of the active capture device
-size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux]  // Return the frame queue capacity (0 = queueing disabled)
+size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux]  // Return the frame queue capacity (0 = queueing disabled). Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame.
 int VideoGrabber::getHeight() const [macos,windows,linux,ios,web]  // Return the captured frame height in pixels
 unsigned char * VideoGrabber::getPixels() [+1] [macos,windows,linux,ios,web]  // Return a pointer to the current RGBA pixel buffer
 size_t VideoGrabber::getQueuedFrames(std::vector<GrabberFrame> & out) [macos,windows,linux]  // Drain all frames captured since the last call (appended to the given vector, oldest first; returns the count). Each GrabberFrame carries a monotonic timestamp stamped on the capture thread, so timestamps stay truthful even if the main loop stalls, and no frame is lost when the camera runs faster than the app loop. Requires setFrameQueueSize() > 0; getPixels()/isFrameNew() are unaffected
@@ -4475,7 +4475,7 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevices() [macos,windows,linux,io
 void VideoGrabber::requestCameraPermission() [macos,windows,linux,ios,web]  // Request camera access asynchronously (macOS)
 void VideoGrabber::setDesiredFrameRate(int fps) [macos,windows,linux,ios,web]  // Request a capture frame rate; call before setup()
 void VideoGrabber::setDeviceID(int deviceId) [macos,windows,linux,ios,web]  // Select which camera to use; call before setup()
-void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux]  // Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup()
+void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux]  // Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup(). Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame.
 bool VideoGrabber::setup(int width = 640, int height = 480) [macos,windows,linux,ios,web]  // Start the camera at the requested size. Returns false if permission is not yet granted (it is requested asynchronously); keep calling update() and capture begins once granted
 void VideoGrabber::setVerbose(bool verbose) [macos,windows,linux,ios,web]  // Enable or disable verbose logging
 void VideoGrabber::update() [macos,windows,linux,ios,web]  // Poll for a new frame and upload it to the texture. Call every frame; also completes a setup() that was waiting on permission
@@ -4652,7 +4652,7 @@ void Window::toggleFullscreen() [macos,windows,linux]  // Toggle this window's f
 
 ```cpp
 WindowSettings & WindowSettings::reserveUniformBuffer(int bytes)  // Reserve the per-frame GPU uniform buffer in bytes, vector::reserve style; 0 = backend default 4MB ≈ 8k draw calls. Metal/WebGPU/Vulkan only — GL/D3D11 have no such cap (chainable)
-WindowSettings & WindowSettings::setClipboardSize(int size)  // Set clipboard buffer size in bytes (chainable)
+WindowSettings & WindowSettings::setClipboardSize(int size)  // Set clipboard buffer size in bytes (chainable). OS clipboard text needs finite storage in the window backend. On reads, macOS and web truncate to size - 1 bytes; Windows fails UTF-8 conversion on overflow; X11 rejects oversized or incremental selections (standalone returns empty, legacy returns null). On writes, macOS and web send the full text to the OS and truncate the local copy; Windows rejects overflowing UTF-16 conversion and truncates the local UTF-8 copy after success; standalone X11 rejects oversized writes, while legacy X11 logs and truncates. Clipboard access is unsupported on iOS and Android.
 WindowSettings & WindowSettings::setDecorated(bool enabled)  // false = borderless/chromeless window that can still take focus and be closed programmatically (chainable)
 WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Enable/disable fullscreen at startup (chainable)
 WindowSettings & WindowSettings::setHighDpi(bool enabled)  // Enable/disable high DPI support (chainable)

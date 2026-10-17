@@ -118,6 +118,7 @@ void setWindowSizeLogical(int width, int height) {
 }
 
 fs::path getExecutablePath() {
+    // Bound (platform): the OS executable path uses PATH_MAX storage. Overflow returns the truncated path from readlink.
     char path[PATH_MAX];
     ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
     if (len != -1) {

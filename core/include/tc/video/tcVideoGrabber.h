@@ -57,6 +57,7 @@ struct VideoGrabberTestAccess;
 struct GrabberFrameQueue {
     std::mutex mtx;
     std::deque<GrabberFrame> frames;
+    // Bound (security): camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame.
     std::atomic<size_t> maxFrames{0};  // 0 = queueing disabled
 
     // Called from the capture thread. Drops the oldest frame when full so a
@@ -284,6 +285,7 @@ public:
     // Enable/resize the internal frame queue (0 = disable, the default).
     // When full, the oldest frame is dropped. Sizing hint: keep it at least
     // ceil(cameraFps / appFps) + a little headroom; 8-16 is plenty.
+    // Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame.
     TC_PLATFORMS("macos,windows,linux") void setFrameQueueSize(size_t maxFrames) {
         state_->frameQueue.maxFrames.store(maxFrames, std::memory_order_relaxed);
         if (maxFrames == 0) {
@@ -292,6 +294,7 @@ public:
         }
     }
 
+    // Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame.
     TC_PLATFORMS("macos,windows,linux") size_t getFrameQueueSize() const {
         return state_->frameQueue.maxFrames.load(std::memory_order_relaxed);
     }

@@ -19,6 +19,7 @@ public:
 
     // Deepest bundle nesting fromBytes() accepts, counting the outermost
     // bundle as level 1. Data nested deeper fails to parse as a whole.
+    // Bound (security): untrusted bundles can nest recursively; a depth cap bounds stack memory. Overflow rejects the bundle.
     static constexpr int MAX_NESTING_DEPTH = 16;
 
     OscBundle() : timetag_(TIMETAG_IMMEDIATELY) {}

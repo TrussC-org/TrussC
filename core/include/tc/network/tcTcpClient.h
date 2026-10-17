@@ -100,9 +100,12 @@ protected:
         SendResult sendAsync(const std::string& message);
         void setSendTimeout(float seconds);
         void setConnectTimeout(float seconds);
+        // A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
         void setSendAsyncBufferSize(size_t bytes);
+        // A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
         size_t getSendAsyncBufferSize() const;
         size_t getSendAsyncPendingBytes() const;
+        // Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads.
         void setReceiveBufferSize(size_t size);
         void setBlocking(bool blocking);
         void setUseThread(bool useThread);
@@ -134,6 +137,7 @@ protected:
         int remotePort_ = 0;
         std::atomic<bool> running_{false};
         std::atomic<bool> connected_{false};
+        // Bound (security): network reads use finite chunks to bound each receive allocation. Overflow continues in later reads.
         std::atomic<size_t> receiveBufferSize_{65536};
     #ifdef __EMSCRIPTEN__
         std::atomic<bool> useThread_{false};
@@ -154,6 +158,7 @@ protected:
         mutable std::mutex channelMutex_;
         std::shared_ptr<ClientSendChannel> sendChannel_;
         std::atomic<float> sendTimeout_{60.0f};
+        // Bound (security): a stalled network peer can retain queued sends; a high-water mark limits further queue growth. Overflow refuses sendAsync with QueueFull or makes send wait; a single send can exceed the mark.
         std::atomic<size_t> sendAsyncBufferSize_{16 * 1024 * 1024};
         std::atomic<uint64_t> nextSendId_{0};
         std::atomic<float> connectTimeout_{0.0f};
@@ -296,13 +301,16 @@ public:
     void setConnectTimeout(float seconds);
     // Same high-water mark as TcpServer: 16 MB; 0 is unlimited. A single
     // payload may exceed the mark. send() waits for room; sendAsync() refuses it.
+    // A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
     void setSendAsyncBufferSize(size_t bytes);
+    // A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
     size_t getSendAsyncBufferSize() const;
     size_t getSendAsyncPendingBytes() const;
     // -------------------------------------------------------------------------
     // Settings
     // -------------------------------------------------------------------------
     // Set receive buffer size
+    // Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads.
     void setReceiveBufferSize(size_t size);
     // Set blocking mode
     void setBlocking(bool blocking);

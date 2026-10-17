@@ -42,6 +42,7 @@ using tls_internal::countCerts;
 // unexpectedly large — e.g. a sysadmin symlinked /etc/ssl/cert.pem to
 // the wrong target, or someone passed a non-PEM file to
 // setCACertificateFile() by mistake.
+// Bound (security): a byte cap bounds certificate-file storage. Overflow rejects the CA file.
 inline constexpr std::streamsize kMaxCaPemBytes = 16 * 1024 * 1024;
 
 // =============================================================================

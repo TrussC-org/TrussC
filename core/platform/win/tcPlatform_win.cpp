@@ -181,6 +181,7 @@ void setWindowSizeLogical(int width, int height) {
 fs::path getExecutablePath() {
     // Native UTF-16 straight into fs::path — no UTF-8 round trip, so
     // non-ASCII install paths survive intact.
+    // Bound (platform): the OS executable path uses MAX_PATH storage. Overflow returns the truncated path from GetModuleFileNameW.
     wchar_t path[MAX_PATH] = { 0 };
     GetModuleFileNameW(nullptr, path, MAX_PATH);
     return fs::path(path);

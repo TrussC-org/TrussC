@@ -649,6 +649,7 @@ struct Mp3StreamData {
 };
 
 struct StreamInstance {
+    // Bound (realtime): streamed file audio uses a finite ring to keep callback storage fixed. Overflow defers decoding until the mixer frees room.
     static constexpr size_t RING_FRAMES = 16384;          // power of 2
     static constexpr size_t RING_MASK   = RING_FRAMES - 1;
     static constexpr int    CHANNELS    = 2;              // stereo, hard-coded
@@ -1012,6 +1013,7 @@ private:
 
     // Decoding goes in chunks of this many frames; a stream is due a refill
     // once its ring has room for one.
+    // Bound (security/latency): streamed file audio uses 1024-frame reads to bound scratch storage. Overflow continues in subsequent decode steps.
     static constexpr size_t kChunkFrames = 1024;
 
     // refillOne() and hasWork() share these checks, so that hasWork() is

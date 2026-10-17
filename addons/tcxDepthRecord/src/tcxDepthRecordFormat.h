@@ -56,6 +56,7 @@ enum class DepthCodecId : std::uint8_t { Raw = 0, LZ4 = 1, HiloLZ4 = 2 };
 enum class ColorCodecId : std::uint8_t { Raw = 0, LZ4 = 1 };
 
 constexpr std::uint32_t TCDC_VERSION = 2;   // v2: TLV blocks + stream manifest
+// Bound (abi): the file manifest has a fixed-width block-type table. Overflow rejects playback manifests or omits further recorded types.
 constexpr int TCDC_MAX_STREAM_TYPES = 31;
 
 #pragma pack(push, 1)
@@ -216,6 +217,7 @@ inline void writeColorBlock(std::ostream& o, const DepthFrame& f, ColorCodecId c
 // above it: compress() fails past LZ4_MAX_INPUT_SIZE bytes (LZ4) or INT_MAX
 // bytes (plain copy).
 inline bool decodableSize(std::uint32_t rawBytes) {
+    // Bound (abi): the decompressor accepts and returns int-sized decoded byte counts. Overflow makes the block parser skip the block.
     return rawBytes <= static_cast<std::uint32_t>(INT_MAX);
 }
 
@@ -223,6 +225,7 @@ inline bool decodableSize(std::uint32_t rawBytes) {
 // copy, and LZ4 turns each input byte into at most 255 output bytes. This caps
 // what a block's sizes can make the reader allocate.
 inline bool decodedSizeFits(std::uint64_t rawBytes, std::uint64_t compSize, Codec codec) {
+    // Bound (security): untrusted block sizes must obey the codec expansion ratio to bound allocated memory by input. Overflow makes the block parser skip the block.
     return codec == Codec::None ? rawBytes == compSize : rawBytes <= compSize * 255;
 }
 
@@ -242,6 +245,7 @@ inline bool parseDepthPayload(std::istream& in, const TcdcHeader& h, std::uint32
         return fail("block is shorter than its size fields");
     if (!rd(in,n) || !rd(in,rawBytes) || !rd(in,compSize)) return fail("block is cut off");
     const std::uint64_t payloadBytes = DEPTH_BLOCK_FIELDS + static_cast<std::uint64_t>(compSize);
+    // Bound (security): untrusted depth payload sizes must fit both block and frame before allocation. Overflow skips the block.
     if (payloadBytes > len || payloadBytes > room)
         return fail("compressed size runs past the block");
     used = payloadBytes;
@@ -295,6 +299,7 @@ inline bool parseColorPayload(std::istream& in, const TcdcHeader& h, std::uint32
     // in a file written before the color length was fixed.
     const std::uint64_t payloadBytes = COLOR_BLOCK_FIELDS + static_cast<std::uint64_t>(compSize);
     const bool legacyLen = len == LEGACY_COLOR_BLOCK_FIELDS + static_cast<std::uint64_t>(compSize);
+    // Bound (security): untrusted color payload sizes must fit the block and frame before allocation. Overflow skips the block.
     if ((!legacyLen && payloadBytes > len) || payloadBytes > room)
         return fail("compressed size runs past the block");
     used = payloadBytes;

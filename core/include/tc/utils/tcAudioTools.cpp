@@ -24,6 +24,7 @@ json decibels(double amplitude) {
 json spectrum(const json& args) {
     if (args.contains("n") && !args["n"].is_number_integer()) return error("n must be an integer");
     const auto nValue = args.value("n", 1024.0);
+    // Bound (abi): external MCP FFT lengths must fit the int-sized transform API. Overflow returns an error.
     if (nValue < 64 || nValue > double(std::numeric_limits<int>::max()))
         return error("n must be a power of two from 64 up to the ring length");
     const int n = int(nValue);
@@ -39,6 +40,7 @@ json spectrum(const json& args) {
 
     auto data = trussc::internal::AudioAnalysisAccess::snapshot(AudioEngine::getInstance(), n);
     if (!data.channels) return error("Audio output history is unavailable; start audio or retry after a concurrent callback");
+    // Bound (realtime): the audio callback must not allocate; external MCP reads share its fixed history ring. Overflow returns an error.
     if (size_t(n) > data.capacity) return error("n exceeds the ring length");
     const double binHz = double(data.sampleRate) / n;
     const double fmin = args.value("fmin", 0.0);

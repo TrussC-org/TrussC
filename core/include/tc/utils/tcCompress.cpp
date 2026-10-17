@@ -21,6 +21,7 @@ int compress(const void* src, std::size_t nbytes,
             return static_cast<int>(nbytes);
         }
         case Codec::LZ4: {
+            // Bound (platform): the LZ4 API accepts only input within LZ4_MAX_INPUT_SIZE. Overflow returns -1.
             if (nbytes > static_cast<std::size_t>(LZ4_MAX_INPUT_SIZE)) return -1;
             const int n = LZ4_compress_default(
                 static_cast<const char*>(src), static_cast<char*>(dst),

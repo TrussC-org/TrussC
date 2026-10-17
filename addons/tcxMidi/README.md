@@ -75,6 +75,7 @@ messages by default; when it is full the oldest message is dropped (shrinking it
 with `setBufferSize()` also discards the oldest queued ones). Dropped messages are
 counted in `getDroppedMessageCount()` and logged as a warning (at most once every 2 s).
 Raise `setBufferSize()` if you see it.
+Device input or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow drops the oldest messages and is counted.
 
 **`MidiOut`** — `listDevices()`, `openPort(index|name)`, `openVirtualPort(name)`,
 `getName()` / `getPort()` / `isVirtual()`, `sendNoteOn/Off`,

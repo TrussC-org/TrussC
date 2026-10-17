@@ -14,6 +14,7 @@ namespace trussc::internal {
 // touching bytes; the counter remains readable after close/flush. A new
 // connection resets the counter. Deliberate flushes are not lost bytes.
 struct SerialRxBuffer {
+    // Bound (security): device input or a stalled reader can fill the deque; a fixed cap keeps memory finite. Overflow drops the oldest bytes and is counted.
     static constexpr size_t capacity = 1 << 20;
     mutable std::mutex mutex;
     std::deque<uint8_t> bytes;

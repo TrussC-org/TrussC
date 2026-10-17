@@ -67,6 +67,7 @@ internal::SystemFontFace internal::systemFontFace(const std::string& name) {
     CFRelease(desc);
     if (!url) return out;
 
+    // Bound (platform): the OS font URL must fit PATH_MAX storage. Overflow fails conversion and returns no font path.
     char buf[PATH_MAX] = {0};
     Boolean ok = CFURLGetFileSystemRepresentation(url, true, (UInt8*)buf, PATH_MAX);
     CFRelease(url);
