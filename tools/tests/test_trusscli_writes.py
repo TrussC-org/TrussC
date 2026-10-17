@@ -29,6 +29,7 @@ class WriteTests(unittest.TestCase):
             [str(CLI), *map(str, args)], cwd=self.project,
             env=dict(os.environ, TRUSSC_DIR=str(ROOT), **(env or {})),
             capture_output=True, text=True, check=False,
+            encoding="utf-8", errors="replace",
         )
         if success:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

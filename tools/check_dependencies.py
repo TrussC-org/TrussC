@@ -239,7 +239,7 @@ def tracked_cmake_files(root):
         out = subprocess.run(
             ["git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard",
              "-z", "--", "*CMakeLists.txt", "*.cmake"],
-            check=True, capture_output=True, text=True).stdout.split("\0")
+            check=True, capture_output=True, text=True, encoding="utf-8").stdout.split("\0")
         files = [f for f in out if f]
         if files:
             return sorted(set(files))

@@ -37,7 +37,7 @@ WEAK_KINDS = frozenset("WVu")
 
 def combined_objects(build_dir, tests_dir):
     objects = {}
-    entries = json.loads((build_dir / "compile_commands.json").read_text())
+    entries = json.loads((build_dir / "compile_commands.json").read_text(encoding="utf-8"))
     for entry in entries:
         directory = Path(entry["directory"])
         source = (directory / entry["file"]).resolve()
@@ -86,7 +86,7 @@ def demangle_symbols(symbols):
     if not names:
         return {}
     result = subprocess.run(["c++filt"], input="\n".join(names) + "\n",
-                            capture_output=True, text=True, check=True)
+                            capture_output=True, text=True, check=True, encoding="utf-8")
     demangled = result.stdout.splitlines()
     if len(demangled) != len(names) or any(not name for name in demangled):
         raise ValueError("Unexpected c++filt output")
@@ -184,7 +184,7 @@ def check_objects(objects):
     listings = {}
     for obj, test in sorted(objects.items()):
         result = subprocess.run(["nm", "-g", "--defined-only", str(obj)],
-                                capture_output=True, text=True, check=True)
+                                capture_output=True, text=True, check=True, encoding="utf-8")
         listings[obj] = (test, result.stdout)
     duplicates, demangled = find_duplicates(listings)
     if duplicates:
