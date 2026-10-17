@@ -38,6 +38,7 @@ void drawFrame(Fbo& fbo, bool main) {
           screenTarget->getWidth() > 0 && screenTarget->getHeight() > 0);
     fbo.begin(0, 0, 0);
     auto* fboTarget = window.currentTarget;
+    auto* borrowedResources = &fboTarget->resources();
     check("Fbo owns its dimensions, format, samples and pass state",
           fboTarget != screenTarget && fboTarget->isFbo && fboTarget->inPass &&
           fboTarget->getWidth() == 16 && fboTarget->getHeight() == 16 &&
@@ -53,9 +54,9 @@ void drawFrame(Fbo& fbo, bool main) {
     Fbo other;
     other.allocate(5, 7);
     other.begin(0, 0, 0);
-    check("same-format Fbos own distinct state and borrow the same GPU resources",
+    check("sequential same-format Fbos reuse the released resource lease",
           window.currentTarget != fboTarget &&
-          &window.currentTarget->resources() == &fboTarget->resources() &&
+          &window.currentTarget->resources() == borrowedResources &&
           window.currentTarget->getWidth() == 5 && fboTarget->getWidth() == 16);
     other.end();
     check("both Fbos return to this window's target", window.currentTarget == screenTarget);

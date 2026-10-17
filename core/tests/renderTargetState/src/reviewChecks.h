@@ -62,10 +62,18 @@ void runReviewChecks(Fbo& fbo) {
     pushScissor(1, 1, 3, 3); popScissor(); popScissor();
     check("Fbo clip reset uses its attachment extent", reviewDrawFields().scissorStack.empty() && !reviewDrawFields().currentScissor.active &&
           internal::currentTarget().width == 37 && internal::currentTarget().height == 23);
-    // beginShadowPass uses only the swapchain flag as its suspension predicate;
-    // do not execute its known-invalid nested sg_begin_pass in this check.
-    check("active Fbo leaves shadow swapchain suspension predicate false (base behavior)",
-          !reviewSwapchainInPass() && internal::currentWindowContext().currentTarget->isFbo);
+    Light shadowLight;
+    shadowLight.setDirectional(0, -1, 0);
+    shadowLight.enableShadow(32);
+    addLight(shadowLight);
+    auto* parentTarget = &internal::currentTarget();
+    beginShadowPass(shadowLight);
+    check("public shadow pass nests above Fbo", internal::currentWindowContext().shadow.inPass &&
+          &internal::currentTarget() != parentTarget);
+    endShadowPass();
+    check("public shadow pass restores Fbo and its clip", &internal::currentTarget() == parentTarget &&
+          internal::currentTarget().inPass && !internal::currentTarget().currentScissor.active);
+    removeLight(shadowLight);
     fbo.end();
     check("screen scissor scope survives return", reviewDrawFields().scissorStack.size() == 1 && reviewDrawFields().currentScissor.active);
     popScissor();
@@ -76,7 +84,7 @@ void runReviewChecks(Fbo& fbo) {
     // First return without an active screen pass, then suspend/resume one.
     for (int row = 0; row < 2; ++row) {
         setBlendMode(BlendMode::Alpha);
-        if (row) ensureSwapchainPass();
+        if (row) internal::ensureCurrentPass();
         fbo.begin(0, 0, 0);
         setBlendMode(BlendMode::Add);
         fbo.end();

@@ -13,8 +13,8 @@ public:
               const Texture& texY, const Texture& texUV) {
         if (!loaded) return;
 
-        ensureSwapchainPass();
-        internal::flushLayersMidPass();
+        internal::ensureCurrentPass();
+        internal::currentTarget().flushLayers();
 
         sg_apply_pipeline(pipeline);
 

@@ -15,7 +15,7 @@
 // so points composite in submission order, share the target
 // depth buffer, and 2D drawn afterwards lands on top.
 //
-// Included BEFORE tcMeshPbrPipeline.h so that header's flushFboDeferredPbr() can
+// Included BEFORE tcMeshPbrPipeline.h so that header's RenderTarget::flushLayers() can
 // replay point draws within the Fbo layer walk.
 //
 // =============================================================================

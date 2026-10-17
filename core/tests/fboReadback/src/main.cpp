@@ -26,6 +26,7 @@ public:
         fbo_.allocate(16, 16);
         half_.allocate(16, 16, 1, TextureFormat::RGBA16F);
         check("fullscreen shader loads", fullscreen_.load(tc_fbomip_blit_shader_desc));
+        fullscreen_.setParams(tc_fbomip_mip_params_t{});
         check("commit listener installed", sg_add_commit_listener(listener));
         // A writable temp folder: not a macOS app bundle's data folder, and
         // not the working directory, which is "/" on iOS.
@@ -70,7 +71,7 @@ public:
             fullscreen_.draw();
             check("FullscreenShader opens swapchain pass", isInSwapchainPass());
         } else {
-            ensureSwapchainPass();
+            internal::ensureCurrentPass();
         }
         const uint32_t firstVersion = fbo_.getColorImage().id;
         setColor(1, 1, 1);

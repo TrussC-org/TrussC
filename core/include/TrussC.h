@@ -458,30 +458,9 @@ inline void clear(const Color& c) {
     clear(c.r, c.g, c.b, c.a);
 }
 
-// Forward declaration (implemented in tcShader.h after Shader class)
-namespace internal {
-    void flushDeferredShaderDraws();
-    void flushLayersMidPass();
-}
-
-// パス管理関数（non-inline: Hot Reload時にHost/Guest間で同じグローバル状態を参照するため）
-// 実装は tc/app/tcGlobal.cpp
-
-// Ensure swapchain pass is active (starts if needed)
-// Safe to call multiple times — only starts once.
-void ensureSwapchainPass();
-
-// End pass and commit (call at end of draw)
+// Frame submission is host-owned; drawing helpers use internal::ensureCurrentPass().
 void present();
-
-// Get swapchain pass state (for FBO)
 bool isInSwapchainPass();
-
-// Suspend swapchain pass (for FBO begin/end during draw)
-void suspendSwapchainPass();
-
-// Resume swapchain pass (for FBO)
-void resumeSwapchainPass();
 
 // ---------------------------------------------------------------------------
 // Color settings (delegated to RenderContext)
@@ -3448,7 +3427,7 @@ inline void bindCursorImage(Cursor cursor, const Image& image,
 #include "tc/3d/tcEnvironment.h"
 
 // TrussC GPU point-splat pipeline (defines Mesh::drawGpuPoints() out-of-class).
-// Must come before the PBR pipeline: flushFboDeferredPbr() replays the deferred
+// Must come before the PBR pipeline: RenderTarget::flushLayers() replays the deferred
 // point draws within the shared FBO layer walk.
 #include "tc/3d/tcMeshPointPipeline.h"
 

@@ -703,10 +703,10 @@ public:
         if (!loaded || !currentLut || !sourceView.id) return;
 
         // Ensure render pass is active
-        ensureSwapchainPass();
+        internal::ensureCurrentPass();
 
         // Consume all preceding layers before direct drawing.
-        internal::flushLayersMidPass();
+        internal::currentTarget().flushLayers();
 
         // Apply pipeline
         sg_apply_pipeline(pipeline);

@@ -7,7 +7,7 @@
 // TrussC records draws and replays them at end-of-frame flush: sokol_gl
 // commands (textured quads, bitmap font glyphs) are drawn in present(),
 // and deferred PBR / point mesh commands capture sg_bindings that are
-// replayed in flushDeferredShaderDraws() (swapchain) or Fbo::end() (FBO
+// replayed in RenderTarget::flushLayers() (swapchain) or Fbo::end() (FBO
 // passes). Destroying a GPU resource mid-frame therefore leaves dead
 // handles inside already-recorded commands — sokol invalidates the next
 // draw and silently drops it.

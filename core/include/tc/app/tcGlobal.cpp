@@ -26,6 +26,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#include <cstring>
 #include <fstream>
 #include <mutex>
 #include <thread>
@@ -150,6 +151,7 @@ void setup() {
 // Cleanup (shutdown)
 // ---------------------------------------------------------------------------
 void cleanup() {
+    internal::mainWindowContext().teardownTargets();
     // The 2D blend / 3D / premultiplied / clear sgl pipelines live in the
     // swapchain and per-FBO RenderTarget caches. sgl pipelines are in one
     // global pool (sgl_destroy_context() frees only the context's own default
@@ -240,8 +242,7 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
     //    context.
     internal::currentWindowContext().swapchainTarget.resources().context = sgl_default_context();
     internal::currentWindowContext().swapchainTarget.resources().cache.clear();
-    RenderTarget* prevTarget = internal::currentWindowContext().currentTarget;
-    internal::currentWindowContext().currentTarget = &internal::currentWindowContext().swapchainTarget;
+    assert(internal::currentTarget().passKind == TargetPassKind::Swapchain);
     active2D(BlendMode::Alpha);
     active2D(BlendMode::Add);
     active2D(BlendMode::Multiply);
@@ -252,7 +253,7 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
     activeCoverage2D();
     activeClear();
     active3D();
-    internal::currentWindowContext().currentTarget = prevTarget;
+
     // NOTE: each FBO's RenderTarget cache (and its sgl context) is also invalidated
     // by sgl_shutdown but is NOT rebuilt here — FBOs surviving an sgl buffer resize
     // is a pre-existing limitation, out of scope for this refactor.
@@ -311,16 +312,15 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
     if (headless::isActive()) return;
 
     auto& ctx = internal::currentWindowContext();
-    if (ctx.currentTarget->isFbo && ctx.currentTarget->clearColor) {
-        // During FBO pass, call FBO's clearColor() to restart pass
-        ctx.currentTarget->clearColor(ctx.currentTarget->clearOwner, r, g, b, a);
+    if (ctx.currentTarget->isFbo) {
+        ctx.currentTarget->restartClear(r, g, b, a);
     } else if (ctx.swapchainTarget.inPass) {
         // During swapchain pass: erase by recording an opaque fullscreen quad
         recordSwapchainClearQuad(r, g, b, a);
     } else {
         // Outside a pass. If nothing has been recorded for the swapchain yet
         // this frame, keep the cheap path: stash the clear color as the pass
-        // CLEAR action, consumed when the pass starts in ensureSwapchainPass()
+        // CLEAR action, consumed when the pass starts in internal::ensureCurrentPass()
         // (the normal clear()-at-top-of-draw() pattern costs nothing extra).
         // Otherwise clear() must ERASE what came before (issue #190): record
         // the opaque fullscreen quad in submission order instead.
@@ -350,73 +350,346 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
 // ---------------------------------------------------------------------------
 // パス管理関数（non-inline: Hot Reload時にHost/Guest間で同じ状態を参照するため）
 // ---------------------------------------------------------------------------
-namespace {
-// Start (or restart) the swapchain render pass for the current window.
-// The FIRST start of a frame clears color and depth with swapchainClearValue
-// (frame background). Any subsequent start — resumeSwapchainPass() after an
-// FBO / shadow / reflection pass suspended it — must LOAD color AND depth so
-// everything already rendered into the drawable this frame survives (issue
-// #191: FullscreenShader/direct-pass content was wiped by the old
-// unconditional CLEAR).
-// `preserveContents` marks a pass that may be suspended and resumed later in
-// the same frame (any pass started OUTSIDE present(): FullscreenShader / LUT
-// force-starts, resumes after Fbo / shadow / reflection passes). Such passes
-// set depth.store_action = SG_STOREACTION_STORE, which does double duty:
-//   - stores the depth buffer so the resume can LOAD it (upstream sokol
-//     discards swapchain depth after every pass), and
-//   - on Metal + MSAA it is the hint (see the [TrussC] patch in sokol_gfx.h)
-//     to store the multisample texture, which upstream resolve-only passes
-//     discard — without it a resumed pass would LOAD undefined content.
-// The final pass started in present() passes false, so the normal
-// clear-at-top-of-draw() frame keeps today's exact store behavior (resolve-
-// only color, discarded depth) — zero bandwidth regression.
-void beginSwapchainPassInternal(bool preserveContents) {
-    auto& ctx = internal::currentWindowContext();
-    sg_pass pass = {};
-    if (!ctx.swapchainTarget.passStartedThisFrame) {
-        pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-        pass.action.colors[0].clear_value = ctx.swapchainTarget.clearAction.colors[0].clear_value;
-        pass.action.depth.load_action = SG_LOADACTION_CLEAR;
-        pass.action.depth.clear_value = 1.0f;
-    } else {
-        pass.action.colors[0].load_action = SG_LOADACTION_LOAD;
-        pass.action.depth.load_action = SG_LOADACTION_LOAD;
-    }
-    if (preserveContents) {
-        pass.action.depth.store_action = SG_STOREACTION_STORE;
-    }
-    // Secondary windows provide their own swapchain (same drawable for the
-    // whole window frame); the main window uses sokol_glue as before.
-    pass.swapchain = ctx.acquireSwapchain ? ctx.acquireSwapchain(ctx.acquireSwapchainUser)
-                                          : sglue_swapchain();
-    ctx.swapchainTarget.width = pass.swapchain.width;
-    ctx.swapchainTarget.height = pass.swapchain.height;
-    if (!ctx.swapchainTarget.viewport.active) {
-        ctx.swapchainTarget.viewport = {0, 0, (float)pass.swapchain.width,
-                                       (float)pass.swapchain.height, true};
-    }
-    // Record the drawable we render into so end-of-frame capture reads back
-    // THIS one (sapp_get_swapchain() advances the Metal drawable per call).
-    ctx.lastSwapchainDrawable = pass.swapchain.metal.current_drawable;
-    // Record the whole swapchain too: the Windows / Linux capture backends read
-    // this window's render_view / gl.framebuffer + size from here (mac uses the
-    // drawable above). Main window: this is sglue_swapchain(), i.e. identical to
-    // sapp_get_swapchain(), so the main capture path is unchanged.
-    ctx.lastSwapchain = pass.swapchain;
-    sg_begin_pass(&pass);
-    ctx.swapchainTarget.inPass = true;
-    ctx.swapchainTarget.passStartedThisFrame = true;
+namespace internal {
+WindowContext::WindowContext() {
+    swapchainTarget.activation = nextTargetToken++;
+    swapchainTarget.activeWindow = this;
+    targetStack.push_back({&swapchainTarget, swapchainTarget.activation, TargetPassPhase::Rendering, false, nullptr});
 }
-} // anonymous namespace
+WindowContext::~WindowContext() {
+    teardownTargets();
+    if (currentWindowCtx() == this) currentWindowCtx() = nullptr;
+}
 
-void ensureSwapchainPass() {
-    if (!internal::currentWindowContext().swapchainTarget.inPass && !internal::currentWindowContext().currentTarget->isFbo) {
-        // Callers outside present() (FullscreenShader, tcxLut, ...) force-start
-        // the pass mid-frame; it may be suspended by an Fbo/shadow pass later,
-        // so its contents must be preserved.
-        beginSwapchainPassInternal(true);
+void WindowContext::teardownTargets() noexcept {
+    // popTarget resolves through the current window. Destruction may be
+    // dispatched while a different window is current.
+    auto* previous = currentWindowCtx();
+    const auto previousSgl = sg_isvalid() ? sgl_get_context() : sgl_context{};
+    currentWindowCtx() = this;
+    if (sg_isvalid() && currentTarget->resources().context.id)
+        sgl_set_context(currentTarget->resources().context);
+    bool failed = false;
+    auto attempt = [&](auto&& work) {
+        try { work(); }
+        catch (...) { failed = true; }
+    };
+    while (targetStack.size() > 1) {
+        const auto entry = targetStack.back();
+        // Shutdown must not acquire/reopen a parked parent's drawable.
+        targetStack.back().resumeParent = false;
+        attempt([&] { popTarget(*entry.target, entry.token); });
+    }
+    // Its activation is already gone, so the scope destructor is now inert.
+    shadow.scope.reset();
+    shadow.inPass = false;
+    shadow.current = -1;
+    if (swapchainTarget.inPass) {
+        attempt([&] { swapchainTarget.flushLayers(); });
+        attempt([&] { swapchainTarget.endPass(); });
+    }
+    swapchainTarget.deferredShaderDraws.clear();
+    swapchainTarget.deferredPbrDraws.clear();
+    swapchainTarget.deferredPointDraws.clear();
+    swapchainTarget.openShaderScopes = 0;
+    swapchainTarget.sglLayerNext = 0;
+    swapchainTarget.passStartedThisFrame = false;
+    swapchainTarget.resumable = true;
+    shaderScopeTargets.clear();
+    shaderStack.clear();
+    currentTarget = &swapchainTarget;
+    if (sg_isvalid() && swapchainTarget.resources().context.id) {
+        sgl_tc_context_reset(swapchainTarget.resources().context);
+    }
+    currentWindowCtx() = previous;
+    if (sg_isvalid() && previous != this && previousSgl.id) sgl_set_context(previousSgl);
+    if (failed) logError("RenderTarget") << "window teardown recovered after pass cleanup failure";
+}
+
+namespace {
+void ensureTargetStack(WindowContext& window) {
+    if (!window.targetStack.empty()) return;
+    auto& bottom = window.swapchainTarget;
+    bottom.activation = window.nextTargetToken++;
+    bottom.activeWindow = &window;
+    window.targetStack.push_back({&bottom, bottom.activation, TargetPassPhase::Rendering, false, nullptr});
+    window.currentTarget = &bottom;
+}
+bool validTargetAttachments(const RenderTarget& target) {
+    if (target.width <= 0 || target.height <= 0 || target.sampleCount <= 0) return false;
+    const auto& attachments = target.binding.attachments;
+    if (sg_query_view_state(attachments.colors[0]) != SG_RESOURCESTATE_VALID) return false;
+    if (target.hasDepth && sg_query_view_state(attachments.depth_stencil) != SG_RESOURCESTATE_VALID) return false;
+    if (!target.hasDepth && attachments.depth_stencil.id) return false;
+    if (attachments.resolves[0].id && sg_query_view_state(attachments.resolves[0]) != SG_RESOURCESTATE_VALID) return false;
+    return true;
+}
+void selectTarget(RenderTarget& target) {
+    currentWindowContext().currentTarget = &target;
+    if (target.resources().context.id) {
+        sgl_set_context(target.resources().context);
+        sgl_layer(target.sglLayerNext);
+        applyTargetDrawingState();
     }
 }
+}
+
+void RenderTarget::beginPass(TargetPassStart reason) {
+    auto& window = currentWindowContext();
+    assert(window.currentTarget == this && !inPass);
+    if (frameEpoch != window.renderEpoch) {
+        frameEpoch = window.renderEpoch;
+        passStartedThisFrame = false;
+    }
+    if (passKind == TargetPassKind::Transfer) {
+        if (beginTransfer) beginTransfer(owner);
+        passStartedThisFrame = true;
+        return;
+    }
+    sg_pass pass = binding;
+    pass.action = clearAction;
+    if (passKind == TargetPassKind::Swapchain) {
+        if (!passStartedThisFrame) {
+            // Acquire exactly once per window frame, including on Metal.
+            binding.swapchain = window.acquireSwapchain
+                ? window.acquireSwapchain(window.acquireSwapchainUser) : sglue_swapchain();
+            window.lastSwapchain = binding.swapchain;
+            window.lastSwapchainDrawable = binding.swapchain.metal.current_drawable;
+        }
+        pass.swapchain = binding.swapchain;
+        width = pass.swapchain.width;
+        height = pass.swapchain.height;
+        if (!viewport.active) viewport = {0, 0, float(width), float(height), true};
+        if (!passStartedThisFrame) {
+            pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
+            pass.action.depth.load_action = SG_LOADACTION_CLEAR;
+            pass.action.depth.clear_value = 1;
+        }
+    }
+    if (reason == TargetPassStart::Resume ||
+        (passKind == TargetPassKind::Swapchain && passStartedThisFrame)) {
+        pass.action.colors[0].load_action = SG_LOADACTION_LOAD;
+        if (hasDepth) pass.action.depth.load_action = SG_LOADACTION_LOAD;
+    }
+    pass.action.colors[0].store_action = SG_STOREACTION_STORE;
+    if (hasDepth) {
+        // Metal's swapchain adapter also uses depth STORE to retain MSAA samples.
+        pass.action.depth.store_action = resumable ? SG_STOREACTION_STORE : SG_STOREACTION_DONTCARE;
+    }
+    sg_begin_pass(&pass);
+    if (fixedPipeline.id) sg_apply_pipeline(fixedPipeline);
+    inPass = true;
+    passStartedThisFrame = true;
+}
+
+void RenderTarget::endPass() {
+    if (passKind == TargetPassKind::Transfer) {
+        if (endTransfer) endTransfer(owner);
+    } else if (inPass) {
+        sg_end_pass();
+        inPass = false;
+    }
+}
+
+void RenderTarget::flushLayers() {
+    assert(currentWindowContext().currentTarget == this);
+    if (!inPass || !resources().context.id) return;
+    const auto err = sgl_context_error(resources().context);
+    const bool overflow = err.vertices_full || err.commands_full;
+    for (int layer = 0; layer <= sglLayerNext; ++layer) {
+        if (!overflow) sgl_context_draw_layer(resources().context, layer);
+        for (auto& draw : deferredShaderDraws)
+            if (draw.layerId == layer) executeDeferredShaderDraw(draw);
+        for (auto& draw : deferredPbrDraws)
+            if (draw.layerId == layer) getPbrPipeline().executePbrDraw(draw.cmd);
+        for (auto& draw : deferredPointDraws)
+            if (draw.layerId == layer) executePointDraw(draw.cmd);
+    }
+    deferredShaderDraws.clear();
+    deferredPbrDraws.clear();
+    deferredPointDraws.clear();
+    // Shader::begin reserved a screen layer. Keep that reservation even when
+    // all preceding commands have been consumed, until its owning scope closes.
+    if (!openShaderScopes) sglLayerNext = 0;
+    sgl_tc_draw_rewind();
+    sgl_layer(sglLayerNext);
+}
+
+uint64_t pushTarget(RenderTarget& target, bool prepareOnly) {
+    auto& window = currentWindowContext();
+    ensureTargetStack(window);
+    if (target.activation || target.activeWindow || target.width <= 0 || target.height <= 0 ||
+        (target.passKind != TargetPassKind::Transfer && !prepareOnly && !validTargetAttachments(target))) {
+        logWarning("RenderTarget") << "begin rejected: active target or invalid attachments";
+        return 0;
+    }
+    // Capacity allocation must succeed before interrupting a valid parent.
+    window.targetStack.reserve(window.targetStack.size() + 1);
+    auto& parent = *window.currentTarget;
+    const bool resume = parent.inPass;
+    if (resume) {
+        parent.flushLayers();
+        parent.endPass();
+    }
+    const uint64_t token = window.nextTargetToken++;
+    window.targetStack.push_back({&target, token, TargetPassPhase::Preparing, resume, target.pooledResources});
+    target.activation = token;
+    target.activeWindow = &window;
+    target.passStartedThisFrame = false;
+    target.frameEpoch = window.renderEpoch;
+    // A scope constructor has no destructor if target setup throws. Roll back
+    // a published activation here, without finalizing an unprepared owner.
+    auto rollback = [&] {
+        if (target.activation != token) return;
+        auto finalizer = target.finalize;
+        target.finalize = nullptr;
+        try { popTarget(target, token); }
+        catch (...) { target.finalize = finalizer; throw; }
+        target.finalize = finalizer;
+    };
+    try {
+        selectTarget(target);
+        if (!prepareOnly && !startPreparedTarget(target, token)) {
+            rollback();
+            return 0;
+        }
+    } catch (...) {
+        rollback();
+        throw;
+    }
+    return token;
+}
+
+bool startPreparedTarget(RenderTarget& target, uint64_t token) {
+    auto& window = currentWindowContext();
+    if (window.targetStack.empty() || window.targetStack.back().target != &target ||
+        window.targetStack.back().token != token || target.activeWindow != &window) return false;
+    if (target.passKind != TargetPassKind::Transfer && !validTargetAttachments(target)) {
+        logWarning("RenderTarget") << "prepared target has invalid attachments";
+        return false;
+    }
+    window.targetStack.back().phase = TargetPassPhase::Rendering;
+    target.beginPass(TargetPassStart::Initial);
+    selectTarget(target);
+    return true;
+}
+
+bool popTarget(RenderTarget& target, uint64_t token) {
+    auto& window = currentWindowContext();
+    if (window.targetStack.size() <= 1 || target.activeWindow != &window ||
+        window.targetStack.back().target != &target || window.targetStack.back().token != token || target.activation != token) {
+        logWarning("RenderTarget") << "end rejected: wrong target, window or activation token";
+        return false;
+    }
+    const auto entry = window.targetStack.back();
+    // Replay allocates too, and transfer completion can throw. Finish every
+    // cleanup step before propagating the first failure to the caller.
+    std::exception_ptr failure;
+    auto attempt = [&](auto&& work) {
+        try { work(); }
+        catch (...) { if (!failure) failure = std::current_exception(); }
+    };
+    attempt([&] { target.flushLayers(); });
+    attempt([&] { target.endPass(); });
+    window.targetStack.back().phase = TargetPassPhase::Finalizing;
+    // Do not generate mips from a partially replayed or incomplete target.
+    if (!failure) attempt([&] { if (target.finalize) target.finalize(target.owner); });
+    target.deferredShaderDraws.clear();
+    target.deferredPbrDraws.clear();
+    target.deferredPointDraws.clear();
+    // Drop only this activation's unmatched Shader scopes. A parked parent's
+    // scopes and reservations must survive every child and consuming flush.
+    for (size_t i = window.shaderScopeTargets.size(); i-- > 0;) {
+        if (window.shaderScopeTargets[i].target == &target && window.shaderScopeTargets[i].token == token) {
+            attempt([&] { logWarning("RenderTarget") << "end discarded an unclosed Shader scope"; });
+            window.shaderScopeTargets.erase(window.shaderScopeTargets.begin() + i);
+            window.shaderStack.erase(window.shaderStack.begin() + i);
+        }
+    }
+    target.openShaderScopes = 0;
+    if (entry.lease) {
+        attempt([&] { reportSglStackErrors(sgl_context_error(entry.lease->context), target.isFbo); });
+        sgl_tc_context_reset(entry.lease->context);
+        entry.lease->leased = false;
+        target.pooledResources = nullptr;
+    }
+    window.targetStack.pop_back();
+    target.activation = 0;
+    target.activeWindow = nullptr;
+    auto& parent = *window.targetStack.back().target;
+    if (target.passKind == TargetPassKind::PublicFbo) parent.inheritLogicalDrawFlags(target);
+    attempt([&] { selectTarget(parent); });
+    if (entry.resumeParent && window.targetStack.back().phase == TargetPassPhase::Rendering) {
+        attempt([&] { parent.beginPass(TargetPassStart::Resume); });
+        attempt([&] { selectTarget(parent); });
+    }
+    if (failure) std::rethrow_exception(failure);
+    return true;
+}
+
+void ensureCurrentPass() {
+    auto& window = currentWindowContext();
+    ensureTargetStack(window);
+    auto& target = *window.currentTarget;
+    if (!target.inPass && target.passKind != TargetPassKind::Transfer &&
+        window.targetStack.back().phase == TargetPassPhase::Rendering) {
+        target.beginPass(target.passStartedThisFrame ? TargetPassStart::Resume : TargetPassStart::Initial);
+        selectTarget(target);
+    }
+}
+
+bool hasPublicFboActivation() {
+    for (const auto& entry : currentWindowContext().targetStack)
+        if (entry.target->passKind == TargetPassKind::PublicFbo) return true;
+    return false;
+}
+
+void RenderTarget::restartClear(float r, float g, float b, float a) {
+    auto& window = currentWindowContext();
+    if (window.currentTarget != this || !activation || !inPass) return;
+    flushLayers();
+    endPass();
+    clearAction.colors[0].load_action = SG_LOADACTION_CLEAR;
+    clearAction.colors[0].clear_value = {r, g, b, a};
+    if (hasDepth) {
+        clearAction.depth.load_action = SG_LOADACTION_CLEAR;
+        clearAction.depth.clear_value = 1;
+    }
+    beginPass(TargetPassStart::Clear);
+    if (resources().context.id) {
+        sgl_defaults();
+        sgl_layer(sglLayerNext);
+        applyTargetDrawingState();
+    }
+}
+
+TargetPassScope::TargetPassScope(RenderTarget& target) : target_(&target), token_(pushTarget(target)) {}
+TargetPassScope::TargetPassScope(const sg_pass& pass, int width, int height,
+                                sg_pixel_format format, int samples, bool depth) : target_(&owned_) {
+    owned_.passKind = TargetPassKind::Fixed;
+    owned_.isFbo = true;
+    owned_.binding = pass;
+    owned_.clearAction = pass.action;
+    owned_.width = width;
+    owned_.height = height;
+    owned_.colorFormat = format;
+    owned_.sampleCount = samples;
+    owned_.hasDepth = depth;
+    owned_.depthFormat = depth ? SG_PIXELFORMAT_DEPTH_STENCIL : SG_PIXELFORMAT_NONE;
+    token_ = pushTarget(owned_);
+}
+TargetPassScope::~TargetPassScope() noexcept {
+    try {
+        if (token_ && target_->activation == token_ && !popTarget(*target_, token_)) {
+            // An owned scope cannot disappear while children still borrow it.
+            logError("RenderTarget") << "scope destroyed out of stack order";
+            std::terminate();
+        }
+    } catch (...) {
+        logError("RenderTarget") << "scope finalization failed; parent restored";
+    }
+}
+} // namespace internal
 
 namespace internal {
 OnceGate& sglStackErrorReportGate(bool inFbo) {
@@ -471,21 +744,34 @@ void internal::endGpuFrame() {
 void present() {
     if (headless::isActive()) return;
 
-    // Final pass of the frame — nothing suspends it, so no preserve hint
-    // (keeps the normal one-pass frame's store behavior unchanged).
-    if (!internal::currentWindowContext().swapchainTarget.inPass && !internal::currentWindowContext().currentTarget->isFbo) {
-        beginSwapchainPassInternal(false);
+    auto& window = internal::currentWindowContext();
+    internal::ensureTargetStack(window);
+    if (window.targetStack.size() != 1) {
+        logWarning("RenderTarget") << "present() unwinding unfinished target scopes";
+        while (window.targetStack.size() > 1) {
+            const auto entry = window.targetStack.back();
+            internal::popTarget(*entry.target, entry.token);
+        }
     }
-
-    internal::flushDeferredShaderDraws();
-
+    // Registered callbacks can push targets. Select stores before creating the
+    // encoder; a proven uninterrupted final pass keeps resolve-only/depth discard.
+    if (!window.swapchainTarget.inPass)
+        window.swapchainTarget.resumable = events().onRender.listenerCount() != 0;
+    internal::ensureCurrentPass();
+    window.swapchainTarget.flushLayers();
     events().onRender.notify();
-
-    sg_end_pass();
-    internal::currentWindowContext().swapchainTarget.inPass = false;
-    // Frame is over: the next swapchain pass start belongs to the next frame
-    // and must CLEAR again with swapchainClearValue (see issue #191).
-    internal::currentWindowContext().swapchainTarget.passStartedThisFrame = false;
+    if (window.targetStack.size() != 1) {
+        logWarning("RenderTarget") << "onRender left unfinished target scopes";
+        while (window.targetStack.size() > 1) {
+            const auto entry = window.targetStack.back();
+            internal::popTarget(*entry.target, entry.token);
+        }
+    }
+    window.swapchainTarget.flushLayers();
+    window.swapchainTarget.endPass();
+    window.swapchainTarget.passStartedThisFrame = false;
+    window.swapchainTarget.resumable = true;
+    ++window.renderEpoch;
     internal::endGpuFrame();
 
     // Frame end (#232): whatever this frame left pushed is dropped here (with
@@ -499,22 +785,6 @@ void present() {
 
 bool isInSwapchainPass() {
     return internal::currentWindowContext().swapchainTarget.inPass;
-}
-
-void suspendSwapchainPass() {
-    if (internal::currentWindowContext().swapchainTarget.inPass) {
-        sg_end_pass();
-        internal::currentWindowContext().swapchainTarget.inPass = false;
-    }
-}
-
-void resumeSwapchainPass() {
-    if (!internal::currentWindowContext().swapchainTarget.inPass) {
-        // Restart uses LOAD when the pass already ran this frame — see
-        // beginSwapchainPassInternal() (issue #191). A resumed pass may be
-        // suspended again (multiple Fbo blocks), so preserve its contents too.
-        beginSwapchainPassInternal(true);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1034,6 +1304,8 @@ void logThreadNotWaited() {
 namespace {
 // Set while this thread logs a sokol panic (see internal::isLogNonBlocking).
 thread_local bool logNonBlocking = false;
+// Process lifetime, including sg_shutdown()/sg_setup() and hot reload (#249).
+std::atomic<bool> v3dResolveFlushNoticed{false};
 } // namespace
 
 namespace internal {
@@ -1074,7 +1346,14 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
     const bool noLogger = loggerDestroyed.load();
     if (!noLogger) {
         try {
-            if (logLevel == 0) {
+            // [TrussC] This item is emitted only after the V3D pre-resolve flush.
+            // Match the tag too: other sokol modules have independent item IDs.
+            if (tag && std::strcmp(tag, "sg") == 0 &&
+                logItem == SG_LOGITEM_TRUSSC_GL_V3D_RESOLVE_FLUSH) {
+                if (!v3dResolveFlushNoticed.exchange(true)) {
+                    logNotice("RenderTarget") << "Mesa V3D: flushing before MSAA resolve (Mesa bug fixed in 25.1.5)";
+                }
+            } else if (logLevel == 0) {
                 // A panic: the process ends right after, so the sinks do not
                 // wait for the lock (a thread holding it may never let go).
                 struct NonBlocking {
@@ -1385,6 +1664,34 @@ PointPipeline& getPointPipeline() {
 std::unordered_map<uint64_t, FboSharedResources>& fboSharedMap() {
     static std::unordered_map<uint64_t, FboSharedResources> map;
     return map;
+}
+
+RenderTargetResources* leaseTargetResources(sg_pixel_format format, int samples) {
+    const uint64_t key = (uint64_t(samples) << 32) | uint32_t(format);
+    auto& bucket = fboSharedMap()[key];
+    for (auto& lease : bucket.leases) {
+        if (!lease->leased && lease->context.id) {
+            lease->leased = true;
+            return lease.get();
+        }
+    }
+    if (bucket.allocationFailed) return nullptr;
+    auto lease = std::make_unique<RenderTargetResources>();
+    sgl_context_desc_t desc = {};
+    desc.max_vertices = sglBudget().maxVertices;
+    desc.max_commands = sglBudget().maxCommands;
+    desc.color_format = format;
+    desc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
+    desc.sample_count = samples;
+    if (!lease->makeContext(desc, "a target lease")) {
+        bucket.allocationFailed = true;
+        return nullptr;
+    }
+    lease->leased = true;
+    auto* result = lease.get();
+    try { bucket.leases.push_back(std::move(lease)); }
+    catch (...) { if (lease) lease->release(); throw; }
+    return result;
 }
 
 std::unordered_map<uint64_t, FboSharedMipResources>& fboSharedMipMap() {

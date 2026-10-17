@@ -43,31 +43,45 @@ static bool readPixelsInternal(sg_image srcImage, int width, int height,
         return false;
     }
 
-    // End only the active swapchain pass, preserving its attachments for LOAD.
-    // Keep it suspended until the blit completes: a newly begun sokol pass
-    // enqueues its command buffer, which would otherwise precede this blit.
-    const bool resumeSwapchain = isInSwapchainPass();
-    if (resumeSwapchain) suspendSwapchainPass();
-    sg_tc_mtl_flush();
+    // Native transfers park the current target without fabricating a raster
+    // pass. Submit sokol before the blit, then wait before the parent's resume.
+    internal::RenderTarget transfer;
+    transfer.passKind = internal::TargetPassKind::Transfer;
+    transfer.width = width;
+    transfer.height = height;
+    transfer.colorFormat = sg_query_image_desc(srcImage).pixel_format;
+    transfer.sampleCount = 1;
+    transfer.transferSource = srcImage;
+    transfer.hasDepth = false;
+    transfer.depthFormat = SG_PIXELFORMAT_NONE;
+    transfer.beginTransfer = [](void*) { sg_tc_mtl_flush(); };
+    transfer.endTransfer = [](void* buffer) {
+        // Balance the explicit retain even if ARC shortens the caller's local
+        // variable lifetime. Completion must precede a parent's new encoder.
+        id<MTLCommandBuffer> command = (__bridge_transfer id<MTLCommandBuffer>)buffer;
+        [command waitUntilCompleted];
+    };
+    {
+        internal::TargetPassScope scope(transfer);
+        if (!scope.active()) return false;
 
-    id<MTLCommandBuffer> cmdBuffer = [cmdQueue commandBuffer];
-    id<MTLBlitCommandEncoder> blitEncoder = [cmdBuffer blitCommandEncoder];
+        id<MTLCommandBuffer> cmdBuffer = [cmdQueue commandBuffer];
+        id<MTLBlitCommandEncoder> blitEncoder = [cmdBuffer blitCommandEncoder];
 
-    [blitEncoder copyFromTexture:srcTexture
-                     sourceSlice:0
-                     sourceLevel:0
-                    sourceOrigin:MTLOriginMake(0, 0, 0)
-                      sourceSize:MTLSizeMake(width, height, 1)
-                       toTexture:dstTexture
-                destinationSlice:0
-                destinationLevel:0
-               destinationOrigin:MTLOriginMake(0, 0, 0)];
+        [blitEncoder copyFromTexture:srcTexture
+                         sourceSlice:0
+                         sourceLevel:0
+                        sourceOrigin:MTLOriginMake(0, 0, 0)
+                          sourceSize:MTLSizeMake(width, height, 1)
+                           toTexture:dstTexture
+                    destinationSlice:0
+                    destinationLevel:0
+                   destinationOrigin:MTLOriginMake(0, 0, 0)];
 
-    [blitEncoder endEncoding];
-    [cmdBuffer commit];
-    [cmdBuffer waitUntilCompleted];
-
-    if (resumeSwapchain) resumeSwapchainPass();
+        [blitEncoder endEncoding];
+        [cmdBuffer commit];
+        transfer.owner = (__bridge_retained void*)cmdBuffer;
+    } // waits for the blit, then resumes the previous target
 
     MTLRegion region = MTLRegionMake2D(0, 0, width, height);
     [dstTexture getBytes:dstBuffer
