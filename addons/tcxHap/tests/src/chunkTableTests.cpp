@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <type_traits>
+#include "workerThreadProbe.h"
 
 static_assert(std::is_copy_constructible_v<tcx::hap::HapDecoder>);
 static_assert(std::is_move_constructible_v<tcx::hap::HapDecoder>);
@@ -34,6 +35,9 @@ int checks = 0;
 std::string selected;
 std::string entry;
 bool listCases = false;
+#ifdef TC_HAP_WORKER_PROBE
+int workerFailure = -1;
+#endif
 
 bool selectCase(const char* kind, const std::string& name) {
     if (listCases) {
@@ -105,13 +109,45 @@ void rejected(const std::string& name, const Bytes& bytes) {
 
 void accepted(const std::string& name, const Bytes& bytes, const Bytes& expected, uint32_t height = 4) {
     if (!selectCase("valid", name)) return;
+    Bytes serial(expected.size());
+    unsigned long serialUsed = 0;
+    unsigned int serialFormat = 0;
+    unsigned int serialChunks = 0;
+    const auto serialResult = HapDecode(bytes.data(), bytes.size(), 0,
+        [](HapDecodeWorkFunction work, void* data, unsigned int count, void* info) {
+            *static_cast<unsigned int*>(info) = count;
+            for (unsigned int i = 0; i < count; ++i) work(data, i);
+        }, &serialChunks, serial.data(), serial.size(), &serialUsed, &serialFormat);
+    check(name + " serial reference", serialResult == HapResult_No_Error &&
+          serialUsed == expected.size() && serial == expected);
+    const int expectedChunks = serialChunks ? static_cast<int>(serialChunks) : 1;
     tcx::hap::HapDecoder decoder;
     tcx::hap::HapDecodedFrame frame;
-    check(name + " allocating bytes", decoder.decode(bytes.data(), bytes.size(), 4, height, frame) && frame.data == expected);
+    check(name + " allocating bytes", decoder.decode(bytes.data(), bytes.size(), 4, height, frame) && frame.data == serial);
+    check(name + " allocating chunk count", decoder.getLastChunkCount() == expectedChunks);
     Bytes output(expected.size());
     tcx::hap::HapFormat format = tcx::hap::HapFormat::Unknown;
     check(name + " preallocated bytes", decoder.decodeToBuffer(bytes.data(), bytes.size(), 4, height,
-          output.data(), output.size(), format) && output == expected);
+          output.data(), output.size(), format) && output == serial);
+    check(name + " preallocated chunk count", decoder.getLastChunkCount() == expectedChunks);
+#ifdef TC_HAP_WORKER_PROBE
+    for (unsigned int failAt = 0; failAt <= 8; ++failAt) {
+        if (workerFailure >= 0 && failAt != unsigned(workerFailure)) continue;
+        const unsigned int workers = serialChunks <= 1 ? 0 : std::min(serialChunks, 8u);
+        const unsigned int attempts = failAt && failAt <= workers ? failAt : workers;
+        const unsigned int created = failAt && failAt <= workers ? failAt - 1 : workers;
+        for (bool preallocated : {false, true}) {
+            hapTest::WorkerProbe probe(failAt);
+            const bool ok = preallocated ?
+                decoder.decodeToBuffer(bytes.data(), bytes.size(), 4, height, output.data(), output.size(), format) && output == serial :
+                decoder.decode(bytes.data(), bytes.size(), 4, height, frame) && frame.data == serial;
+            check(name + (preallocated ? " preallocated workers " : " allocating workers ") +
+                  std::to_string(failAt) + " (created " + std::to_string(probe.created) + ")",
+                  ok && decoder.getLastChunkCount() == expectedChunks && probe.attempts == attempts && probe.created == created &&
+                  probe.created <= 8 && probe.completed == probe.created);
+        }
+    }
+#endif
     // Exact BC bytes preserve pixels; also compare BC1 RGBA output explicitly.
     if (format == tcx::hap::HapFormat::DXT1 && output == expected) {
         std::array<uint32_t, 16> actualPixels{}, expectedPixels{};
@@ -137,6 +173,54 @@ Bytes chunkFrame(const Bytes& compressors, const std::vector<uint32_t>& sizes,
     Bytes payload = section(1, tables);
     append(payload, data);
     return section(0xcb, payload);
+}
+
+void workerTests() {
+    // Distinct raw/Snappy chunks make missing, duplicated or reordered output
+    // observable, including the final chunk at the validation limit.
+    for (unsigned int count : {2u, 8u, 9u, 1024u}) {
+        Bytes compressors, data, expected;
+        std::vector<uint32_t> sizes;
+        for (unsigned int i = 0; i < count; ++i) {
+            Bytes chunk(8);
+            for (unsigned int j = 0; j < 8; ++j) chunk[j] = uint8_t((i * 13 + j * 7) ^ (i >> 8));
+            append(expected, chunk);
+            compressors.push_back(i % 2 ? 0xb : 0xa);
+            if (i % 2) {
+                Bytes compressed(snappy_max_compressed_length(chunk.size()));
+                size_t size = compressed.size();
+                snappy_compress(reinterpret_cast<const char*>(chunk.data()), chunk.size(),
+                                reinterpret_cast<char*>(compressed.data()), &size);
+                compressed.resize(size);
+                chunk = std::move(compressed);
+            }
+            sizes.push_back(uint32_t(chunk.size()));
+            append(data, chunk);
+        }
+        const auto bytes = chunkFrame(compressors, sizes, data);
+        accepted(std::to_string(count) + " mixed worker chunks", bytes, expected, count * 4);
+#ifdef TC_HAP_WORKER_PROBE
+        if (count != 1024 || listCases || !selected.empty()) continue;
+        auto decode = [&](tcx::hap::HapDecoder& decoder) {
+            hapTest::WorkerProbe probe;
+            tcx::hap::HapDecodedFrame output;
+            return decoder.decode(bytes.data(), bytes.size(), 4, count * 4, output) &&
+                   output.data == expected && probe.created == 8 && probe.completed == 8;
+        };
+        bool ok = true;
+        {
+            tcx::hap::HapDecoder original;
+            ok &= decode(original);
+            auto copied = original;
+            auto moved = std::move(copied);
+            tcx::hap::HapDecoder assigned, moveAssigned;
+            assigned = original;
+            moveAssigned = std::move(assigned);
+            for (auto* decoder : {&original, &copied, &moved, &assigned, &moveAssigned}) ok &= decode(*decoder);
+        }
+        check("workers joined before decoder copies moves and destruction", ok);
+#endif
+    }
 }
 
 void diagnosticsTests(const Bytes& valid, const Bytes& invalid) {
@@ -190,6 +274,7 @@ void diagnosticsTests(const Bytes& valid, const Bytes& invalid) {
 } // namespace
 
 int runChunkTableTests() {
+    workerTests();
     const Bytes block = {0x00, 0xf8, 0, 0, 0, 0, 0, 0};
     const auto valid = complexFrame(block);
     auto bytes = valid;
@@ -359,6 +444,9 @@ int main(int argc, char** argv) {
         if (std::string(argv[i]) == "--list") listCases = true;
         else if (std::string(argv[i]) == "--case" && i + 1 < argc) selected = argv[++i];
         else if (std::string(argv[i]) == "--entry" && i + 1 < argc) entry = argv[++i];
+#ifdef TC_HAP_WORKER_PROBE
+        else if (std::string(argv[i]) == "--worker-failure" && i + 1 < argc) workerFailure = std::stoi(argv[++i]);
+#endif
         else return 2;
     }
     return runChunkTableTests() ? 1 : 0;
