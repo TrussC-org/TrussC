@@ -226,6 +226,12 @@ public:
     // Performance stats
     // =========================================================================
 
+    // Cumulative rejected decode attempts per player lifetime, carried by moves.
+    // Queries, resetStats(), close() and load() never reset this counter.
+    uint64_t getInvalidFrameCount() const {
+        return hapDecoder_.getInvalidFrameCount();
+    }
+
     double getDecodeTimeMs() const {
         return decodeTimeMs_;
     }
@@ -667,8 +673,6 @@ protected:
 private:
     MovParser movParser_;
     HapDecoder hapDecoder_;
-    tc::OnceGate invalidFrameWarningGate_{5.0};
-    uint64_t skippedInvalidFrames_ = 0;
     const MovTrack* videoTrack_ = nullptr;
     const MovTrack* audioTrack_ = nullptr;
 
@@ -720,6 +724,7 @@ private:
         texture_ = std::move(other.texture_);
 
         // Move HapPlayer-specific state
+        hapDecoder_ = std::move(other.hapDecoder_);
         movParser_ = std::move(other.movParser_);
         videoTrack_ = other.videoTrack_;
         audioTrack_ = other.audioTrack_;
@@ -905,13 +910,6 @@ private:
                 frameBuffer_.data(), frameBuffer_.size(),
                 outFormat)) {
             if (hapDecoder_.lastErrorCode_ == HapResult_Bad_Frame) {
-                ++skippedInvalidFrames_;
-                if (invalidFrameWarningGate_.isFirstTime()) {
-                    tc::logWarning("HapPlayer") << "Skipping invalid HAP frame " << frameIndex
-                        << "; skipped " << skippedInvalidFrames_
-                        << " invalid frames since the last report";
-                    skippedInvalidFrames_ = 0;
-                }
                 return false;
             }
             reportPlaybackError("Failed to decode HAP video frame", hapDecoder_.lastErrorCode_);
