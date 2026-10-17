@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "tcxBox2dBodyOwner.h"
+#include "tcxBox2dDispatch.h"
 #include <TrussC.h>
 #include <box2d/box2d.h>
 #include <memory>
@@ -12,8 +14,12 @@
 namespace tcx::box2d {
 
 // Forward declarations
+class World;
 class Body;
+class RigidBody2D;
 class CollisionManager;
+struct WorldContact;
+namespace detail { void routeContact(World*, const WorldContact&, int); }
 
 // =============================================================================
 // Box2D World
@@ -32,9 +38,9 @@ public:
     World(const World&) = delete;
     World& operator=(const World&) = delete;
 
-    // Movable
-    World(World&& other) noexcept;
-    World& operator=(World&& other) noexcept;
+    // Stable address: callbacks and borrowed owners refer to this World.
+    World(World&&) = delete;
+    World& operator=(World&&) = delete;
 
     // -------------------------------------------------------------------------
     // Initialization
@@ -97,7 +103,8 @@ public:
     // Body Management
     // -------------------------------------------------------------------------
 
-    // Remove all registered bodies
+    // Invalidate all borrowed body handles, end any drag and destroy all bodies.
+    // Keep the Box2D world, gravity and settings; new bodies can be created now.
     void clear();
 
     // Body count
@@ -152,19 +159,42 @@ public:
     // -------------------------------------------------------------------------
     // Collision Manager Access
     // -------------------------------------------------------------------------
-    CollisionManager* getCollisionManager() { return collisionManager_.get(); }
+    CollisionManager* getCollisionManager() { return dispatch_->manager.get(); }
 
     // -------------------------------------------------------------------------
+    // Reserve raw SetDestructionListener for internal retirement. Register a
+    // borrowed user delegate here. Fixture callbacks forward after endpoint
+    // retirement; joint callbacks also forward. Preserved by clear/setup.
+    void setDestructionListener(b2DestructionListener* listener) { dispatch_->delegate = listener; }
+
     // Lifetime token (for Mods: detect a world destroyed before its bodies)
     // -------------------------------------------------------------------------
-    std::weak_ptr<int> aliveToken() const { return alive_; }
+    std::weak_ptr<int> aliveToken() const { return dispatch_->token; }
 
 private:
+    friend struct detail::DispatchState;
+    friend class Body;
+    friend class RigidBody2D;
+    friend void detail::routeContact(World*, const WorldContact&, int);
+
+    struct ContactRouter2D {
+        tc::EventListener beganL, stayL, endedL;
+    };
+    void ensureContactRouter();
+
+    void attachOwner(b2Body* body, detail::BodyOwner& owner);
+    // Teardown must not run user listeners inside a Node/Mod destructor.
+    enum class ExitDelivery { Immediate, Deferred };
+    void releaseBody(b2Body* body, ExitDelivery delivery = ExitDelivery::Immediate);
+    detail::BodyOwner* findOwner(b2Body* body) const;
+
     // (Re)register or drop the per-frame auto-step listener based on autoUpdate_.
     void refreshAutoUpdate();
 
     std::unique_ptr<b2World> world_;
-    std::unique_ptr<CollisionManager> collisionManager_;
+    std::shared_ptr<detail::DispatchState> dispatch_;
+
+    ContactRouter2D contactRouter_;
 
     // Simulation parameters (timeStep_ = fixed sub-step size)
     float timeStep_ = 1.0f / 60.0f;
@@ -176,9 +206,6 @@ private:
     float accumulator_ = 0.0f;
     uint64_t lastStepFrame_ = UINT64_MAX;
     tc::EventListener updateListener_;
-
-    // Lifetime token: expires when this World is destroyed.
-    std::shared_ptr<int> alive_ = std::make_shared<int>(0);
 
     // Bounds body
     b2Body* groundBody_ = nullptr;

@@ -101,41 +101,56 @@ use the path as an outline (a vector is one closed outline).
 ## Collision events
 
 Both APIs count contacts per pair: `Collider2D` events per collider pair,
-`RigidBody2D` events per body pair. Enter (`onCollisionEnter` /
-`onTriggerEnter` on both) fires on the pair's first touching contact, Stay
-once per update, and Exit (`onCollisionExit` / `onTriggerExit`) when its
-last contact ends, however many fixtures touch.
+`RigidBody2D` events per body pair. Enter fires on the pair's first touching
+contact, Stay once per update,
+and Exit when its last contact ends, however many fixtures touch. Classic
+colliders use `onCollisionEnter/Stay/Exit` for both solid and sensor contacts;
+Mods use `onTriggerEnter/Stay/Exit` for sensor contacts and `onCollision*`
+for solid contacts.
 
 - This covers every body with several fixtures, not only compound ones:
   `World::createBounds()` makes its four walls as one static body, so a
   `RigidBody2D` already touching the floor gets no new `onCollisionEnter`
   when it reaches a side wall, and `onCollisionExit` only when it leaves the
   last wall.
-- An Exit whose last contact ends inside a physics step is dispatched after
-  that step, and a contact of the same pair that begins in the same step
-  cancels it: a body sliding from one fixture of a compound onto the next
-  never sees Exit + Enter. `World::update()` does this; if you call
-  `b2World::Step()` yourself, call `world.getCollisionManager()->update()`
-  right after it, before creating or destroying bodies.
-- Exit delivery follows one rule: TrussC never calls an Exit listener while
-  Box2D is in the middle of an operation. `Body::destroy()`, `RigidBody2D`
-  teardown, `Body::setEnabled()`, `setStatic()` / `setDynamic()` /
-  `setKinematic()` and `RigidBody2D::setBodyType()` hold Exits until their
-  Box2D call returns, then deliver them before the TrussC function returns.
-  Exits from raw Box2D calls (`DestroyBody()`, `SetEnabled(false)`,
-  `SetType()` or `Step()`) wait for the next `update()`.
-- A body destroyed before its deferred Exit fires (`Body::destroy()`, a
-  `RigidBody2D`'s node going away) gets none; the other side still gets its
-  own, with that body null (`CollisionEvent::other`, `Contact2D::other`,
-  `WorldContact::a` / `b`). Bodies freed with a raw `b2World::DestroyBody()`
-  are not tracked: call `update()` first.
-- Stay and Exit listeners may destroy bodies,
-  including the other body of their own pair. With `RigidBody2D` the
-  destroyed side hears nothing more. Destroying a classic `Body` from Stay
-  ends that still-touching pair, and both classic colliders get their Exit
-  after Box2D returns, before `destroy()` returns; an Exit already pending
-  before destruction is not delivered to the destroyed side. World-level
-  Exits name a destroyed raw body as null.
+- Begin and End are delivered in observed Box2D order after each managed
+  sub-step; Stay runs once per update. Fixture hand-over folds End + Begin
+  only within the same managed sub-step, so sliding across a compound seam
+  stays continuous. Raw `b2World::Step()` events wait for the next fresh-frame
+  `World::update()` (including zero-dt updates), preserving every aggregated
+  transition; raw Steps have no hand-over folding.
+- TrussC contact listeners run after Box2D returns. Outside a listener,
+  explicit `Body::destroy()`, disable and type changes deliver eligible Exits
+  before the wrapper returns, unless an earlier raw event still awaits update.
+  Inside a listener, the surviving side's Exit waits until the initiating
+  callback returns. Body destruction and Mod teardown defer Exits until that
+  callback-return boundary, or the next update when outside dispatch.
+- A destroyed side receives no further callbacks, including its own Exit.
+  The surviving side receives Exit with a null counterpart
+  (`CollisionEvent::other`, `Contact2D::other` / `otherNode`, or
+  `WorldContact::a` / `b`).
+- Begin, Stay and Exit listeners may destroy either or both bodies, clear the
+  World or delete it. Borrowed payload pointers can become null even inside
+  the initiating callback; recheck after mutation and retain application IDs
+  rather than raw physics pointers. Clear/setup discard the old contact epoch.
+- Classic `Collider2D::isTrigger` changes fixture sensor state before each
+  managed sub-step when its value changes. Use `setTrigger(bool)` or
+  `Body::setSensor(bool)` for immediate application before raw Steps. Each
+  transition retains its recorded sensor classification; sensor aggregation of
+  a queued Begin is limited to its own managed sub-step.
+- Register a borrowed user destruction listener with
+  `World::setDestructionListener()`, preserving the World's retirement observer
+  in Box2D's destruction-listener slot.
+
+Migration: move destroyed-side Exit cleanup before release, accept callback-return surviving Exits with null counterparts, and drain raw Step events through update.
+
+## Raw Box2D access
+
+Use `World::getWorld()` for direct `b2World` access.
+
+b2Body user data is reserved by TrussC; put application data in your Body subclass. Fixture user data is reserved too.
+
+Bodies owned by a TrussC Body or RigidBody2D are destroyed through TrussC (`Body::destroy()`, removing the Mod, `World::clear()`); don't call raw `b2World::DestroyBody`/`DestroyFixture` on them. Raw destroys of bodies you created yourself are tracked when the body still has fixtures (the destruction listener); removing a body's last fixture and then the body without an `update()` in between is not tracked.
 
 ## Tests
 

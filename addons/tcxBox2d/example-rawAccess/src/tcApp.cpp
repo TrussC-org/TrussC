@@ -5,6 +5,12 @@
 // drive world.update() / drag joints directly. For most apps prefer the Mod API
 // (RigidBody2D / ColliderRenderer2D) shown in example-basic; reach for this when
 // you need direct access to b2Body / fixtures / mouse joints.
+//
+// Bodies owned by a TrussC Body or RigidBody2D are destroyed through TrussC (`Body::destroy()`,
+// removing the Mod, `World::clear()`); don't call raw `b2World::DestroyBody`/`DestroyFixture` on
+// them. Raw destroys of bodies you created yourself are tracked when the body still has fixtures
+// (the destruction listener); removing a body's last fixture and then the body without an
+// `update()` in between is not tracked.
 // =============================================================================
 
 #include <TrussC.h>

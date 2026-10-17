@@ -4784,6 +4784,44 @@ category, platforms, dependencies, repo URL for each addon):
 Always check the registry before assuming a feature needs to be built from scratch —
 it may already be an addon.
 
+### tcxBox2d contact delivery (v0.8 migration)
+
+World delivers Begin/End in Box2D order after each managed fixed sub-step;
+Stay runs once per update. Enter callbacks now observe the completed sub-step
+and may destroy bodies, nodes/Mods, clear/setup the World, or delete the World.
+Release invalidates borrowed handles and cancels later listeners for an invalid
+Begin/Stay. Exit can still reach a surviving recipient with its counterpart null.
+Clear/setup/World deletion cancel the whole old notification immediately. Recheck
+`WorldContact::a/b`, `CollisionEvent::other`, and `Contact2D::other/otherNode`
+after mutation, even inside the executing callback; retain application IDs for
+later use. Mutation-generated Exits run after the initiating callback returns.
+Owner destructors/Mod removal never invoke listeners during teardown.
+
+Raw `getWorld()->Step()` defers both Begin and End to the next fresh-frame
+`World::update()`, even with no managed sub-step. Each aggregated transition is
+preserved (Begin/End/Begin across raw Steps); compound fixture hand-over folding
+is limited to one managed sub-step. Earlier raw records can delay an otherwise
+immediate wrapper Exit until update to preserve order. Use Stay for once-per-frame
+work rather than assuming only one transition per update.
+
+Bodies owned by a TrussC Body or RigidBody2D are destroyed through TrussC (`Body::destroy()`, removing the Mod, `World::clear()`); don't call raw `b2World::DestroyBody`/`DestroyFixture` on them. Raw destroys of bodies you created yourself are tracked when the body still has fixtures (the destruction listener); removing a body's last fixture and then the body without an `update()` in between is not tracked.
+
+Classic `Collider2D::isTrigger` now applies sensor response to every fixture;
+changed flag assignments synchronize before each managed sub-step. Use
+`Collider2D::setTrigger(bool)` or `Body::setSensor(bool)` for immediate application
+before raw Step. An unchanged flag preserves raw per-fixture sensor overrides.
+Sensors retain classic collision event names; Mods use `onTrigger*` when any
+contributing fixture is a sensor, including mixed classic/Mod contacts. Mode
+changes alone do not synthesize Enter/Exit; later phases use current sensor state.
+Sensor geometry may be zero and impulses remain unimplemented.
+
+World reserves Box2D's destruction-listener slot to retire owned and ownerless
+endpoints before storage reuse. Migrate raw `SetDestructionListener` registration
+to `World::setDestructionListener(b2DestructionListener*)`; the non-owning user
+delegate receives fixture callbacks after endpoint retirement, also receives
+joint callbacks, and survives clear/setup. See [tcxBox2d tests](../addons/tcxBox2d/tests/README.md) for regression
+setups and supported delivery boundaries.
+
 ### Bundled Addons (ship with TrussC)
 
 <!-- ADDON-LIST-START -->

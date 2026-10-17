@@ -1,5 +1,24 @@
 # Migrating to v0.8.0
 
+## Box2D ownership and contact delivery
+
+World, Body, CircleBody, RectBody and PolyShape cannot be moved; construct them in place and store/move smart pointers when needed.
+
+b2Body user data is reserved by TrussC; put application data in your Body subclass. Fixture user data is reserved too.
+
+Begin/End now run after each managed sub-step in Box2D order; Stay runs once per
+update. Raw `b2World::Step()` events wait for the next fresh-frame
+`World::update()`. Move destroyed-side Exit cleanup before release; surviving
+sides receive Exit with null counterparts. Listeners may destroy bodies or the
+World: recheck borrowed payload pointers after release. See the
+[addon event contract](../addons/tcxBox2d/README.md#collision-events).
+
+Bodies owned by a TrussC Body or RigidBody2D are destroyed through TrussC (`Body::destroy()`, removing the Mod, `World::clear()`); don't call raw `b2World::DestroyBody`/`DestroyFixture` on them. Raw destroys of bodies you created yourself are tracked when the body still has fixtures (the destruction listener); removing a body's last fixture and then the body without an `update()` in between is not tracked.
+
+Register borrowed destruction delegates through `World::setDestructionListener()`
+to preserve the internal observer. `clear()` keeps the physics world and settings
+and is immediately reusable; a second `setup()` replaces the physics world.
+
 ## Stdin commands need `console::start()`
 
 Console input is now opt-in (breaking change, #689 and #756). Neither `runApp()` nor `runHeadlessApp()` starts a stdin reader automatically. If your app subscribes to `events().console`, add `console::start()` in `setup()`:

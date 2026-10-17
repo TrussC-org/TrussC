@@ -35,6 +35,8 @@ public:
     // When true, collision is detected but no physics response occurs.
     // Useful for triggers, pickups, detection zones, etc.
     bool isTrigger = false;
+    // Immediate sensor application, including before a raw b2World::Step().
+    void setTrigger(bool on) { isTrigger = on; applyTriggerMode(); }
 
     // -------------------------------------------------------------------------
     // Collision Filtering (wraps Box2D b2Filter)
@@ -63,15 +65,14 @@ public:
 
 protected:
     friend class Body;
+    friend class World;
     friend class CollisionManager;
 
     Body* body_ = nullptr;
     b2Fixture* fixture_ = nullptr;
 
-    // Internal: called by CollisionManager
-    void notifyEnter(CollisionEvent& e) { onCollisionEnter.notify(e); }
-    void notifyStay(CollisionEvent& e) { onCollisionStay.notify(e); }
-    void notifyExit(CollisionEvent& e) { onCollisionExit.notify(e); }
+    bool appliedTrigger_ = false;
+    void syncTriggerMode() { if (isTrigger != appliedTrigger_) applyTriggerMode(); }
 
     // Apply isTrigger to every fixture of the body
     void applyTriggerMode();

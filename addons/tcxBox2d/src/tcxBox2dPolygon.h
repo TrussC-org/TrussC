@@ -32,9 +32,9 @@ public:
     PolyShape() = default;
     ~PolyShape() override = default;
 
-    // Movable
-    PolyShape(PolyShape&& other) noexcept;
-    PolyShape& operator=(PolyShape&& other) noexcept;
+    // Non-movable
+    PolyShape(PolyShape&&) = delete;
+    PolyShape& operator=(PolyShape&&) = delete;
 
     // -------------------------------------------------------------------------
     // Creation

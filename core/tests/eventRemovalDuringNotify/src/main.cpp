@@ -262,6 +262,31 @@ static void tweenShape() {
           once && g_deadCalls == 0);
 }
 
+// Borrowed payload delivery reconstructs before every listener, cancels an
+// active snapshot, and never resumes through an Event deleted by a listener.
+static void guardedBorrowedDelivery() {
+    auto source = make_unique<Event<int>>();
+    vector<int> seen;
+    bool open = true;
+    int value = 0;
+    auto after = source->listen([&](int& v) { seen.push_back(v); v = 99; }, EventPriority::AfterApp);
+    EventListener removed = source->listen([&](int&) { seen.push_back(500); });
+    auto first = source->listen([&](int& v) {
+        seen.push_back(v); v = 77; removed.disconnect();
+    }, EventPriority::BeforeApp);
+    internal::GuardedEventDelivery<int>::notify(*source, value, [&] { value = 3; return open; });
+    check("guarded delivery: priority, disconnect and payload reconstruction", seen == vector<int>({3, 3}) && value == 3);
+    seen.clear();
+    auto cancel = source->listen([&](int&) { open = false; value = 0; }, EventPriority::BeforeApp - 1);
+    internal::GuardedEventDelivery<int>::notify(*source, value, [&] { if (!open) value = 0; return open; });
+    check("guarded delivery: cancellation stops every later listener", seen.empty() && value == 0);
+    cancel.disconnect(); first.disconnect();
+    open = true;
+    auto destroy = source->listen([&](int&) { source.reset(); open = false; }, EventPriority::BeforeApp);
+    internal::GuardedEventDelivery<int>::notify(*source, value, [&] { return open; });
+    check("guarded delivery: source deletion unwinds with owned snapshot", !source && seen.empty());
+}
+
 } // namespace
 
 TC_CORE_TEST_MAIN() {
@@ -270,6 +295,7 @@ TC_CORE_TEST_MAIN() {
     selfRemoval();
     addedDuringNotify();
     tweenShape();
+    guardedBorrowedDelivery();
 
     printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED",
            g_fail, g_fail == 1 ? "" : "s");

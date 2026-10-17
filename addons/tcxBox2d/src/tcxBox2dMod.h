@@ -12,7 +12,7 @@
 //   // The world auto-steps each frame (box2d::defaultWorld() / setup()).
 //
 // This mirrors the tcxPhysics (3D / Jolt) Mod design, in 2D:
-//   - RigidBody2D owns ONE b2Body (shape + body type + physics material).
+//   - RigidBody2D borrows ONE b2Body (shape + type + material) from World.
 //   - ColliderRenderer2D is a SEPARATE draw Mod reading the sibling shape.
 //   - defaultWorld() removes the need to pass a World around.
 //   - a per-world contact router fans world contacts out to per-node events.
@@ -33,7 +33,6 @@
 #include <TrussC.h>   // tc::Mod, tc::Node, drawing, TC_REFLECT
 #include <box2d/box2d.h>
 #include <cstdint>
-#include <unordered_map>
 #include <vector>
 #include <cmath>
 
@@ -159,24 +158,6 @@ struct Contact2D {
 };
 
 namespace detail {
-    // One router per world: maps b2Body* -> the RigidBody2D that owns it, plus
-    // the listeners on that world's CollisionManager contact events. The first
-    // RigidBody2D on a world installs the listeners; everyone registers here.
-    // Each registration gets its own serial: a body destroyed by a listener
-    // and a new one created at the same address are told apart.
-    struct ContactRouter2D {
-        struct Entry {
-            RigidBody2D* rb = nullptr;
-            uint64_t serial = 0;   // 0 = not registered
-        };
-        std::unordered_map<b2Body*, Entry> bodies;
-        uint64_t lastSerial = 0;
-        tc::EventListener beganL, stayL, endedL;
-    };
-    inline std::unordered_map<World*, ContactRouter2D>& contactRouters() {
-        static std::unordered_map<World*, ContactRouter2D> r;
-        return r;
-    }
     // phase: 0 = began, 1 = stay, 2 = ended.
     inline void routeContact(World* w, const WorldContact& c, int phase);  // after RigidBody2D
 }
@@ -184,7 +165,7 @@ namespace detail {
 // =============================================================================
 // RigidBody2D : the physics Mod (one b2Body).
 // =============================================================================
-class RigidBody2D : public tc::Mod {
+class RigidBody2D : public tc::Mod, public detail::BodyOwner {
     // addMod() calls setup() through a RigidBody2D* (not Mod*), so Node needs
     // access to our protected override.
     friend class trussc::Node;
@@ -199,6 +180,11 @@ public:
     RigidBody2D(const Shape2D& shape,
                 BodyType type = BodyType::Dynamic, float density = 1.0f)
         : world_(&defaultWorld()), shape_(shape), type_(type), density_(density) {}
+
+    // Replacing an exclusive Mod destroys it without calling onDestroy().
+    // Both paths release the owner back-link without running user listeners
+    // inside Node's Mod installation/removal or destruction.
+    ~RigidBody2D() override { onDestroy(); }
 
     b2Body* getBody() { return body_; }
     const b2Body* getBody() const { return body_; }
@@ -246,10 +232,11 @@ public:
         type_ = t;
         if (body_) {
             auto* cm = world_->getCollisionManager();
+            auto operation = cm->mutation();
             body_->SetType(t == BodyType::Dynamic ? b2_dynamicBody
                          : t == BodyType::Static  ? b2_staticBody
                                                   : b2_kinematicBody);
-            if (cm) cm->flushPendingExits();
+            if (cm) cm->drain();
         }
         return *this;
     }
@@ -292,7 +279,6 @@ public:
 protected:
     void setup() override {
         tc::Node* n = getOwner();
-        worldAlive_ = world_->aliveToken();
         b2World* w = world_->getWorld();
         if (!w) {
             tc::logWarning() << "tcxBox2d: RigidBody2D attached before world.setup() — body not created.";
@@ -371,26 +357,14 @@ protected:
         bd.fixedRotation = fixedRotation_;
         body_ = w->CreateBody(&bd);
 
-        // Do NOT store anything in the body UserData: World::getBodyAtPoint()
-        // casts it to box2d::Body* and we are not one. The router keys on the
-        // raw b2Body* instead.
-        body_->GetUserData().pointer = 0;
+        world_->attachOwner(body_, *this);
 
         createFixtures(polys);
         if (trigger_) forFixtures([](b2Fixture* f) { f->SetSensor(true); });
 
         // Register for contact routing; the first body on this world hooks the
         // CollisionManager's contact events.
-        auto& router = detail::contactRouters()[world_];
-        if (!router.beganL) {
-            if (auto* cm = world_->getCollisionManager()) {
-                World* wp = world_;
-                router.beganL = cm->contactBegan.listen([wp](WorldContact& c) { detail::routeContact(wp, c, 0); });
-                router.stayL  = cm->contactStay.listen ([wp](WorldContact& c) { detail::routeContact(wp, c, 1); });
-                router.endedL = cm->contactEnded.listen([wp](WorldContact& c) { detail::routeContact(wp, c, 2); });
-            }
-        }
-        router.bodies[body_] = {this, ++router.lastSerial};
+        world_->ensureContactRouter();
     }
 
     // Dynamic: physics drives the node — sync BEFORE Node::update() so user code
@@ -429,48 +403,51 @@ protected:
     }
 
     void onDestroy() override {
-        b2Body* gone = body_;
-        body_ = nullptr;
-        auto it = detail::contactRouters().find(world_);
-        if (it != detail::contactRouters().end()) it->second.bodies.erase(gone);
-        // Only touch the world if it's still alive — at shutdown it may be
-        // destroyed before its bodies' nodes (it frees all bodies itself).
-        if (!worldAlive_.expired() && world_ && gone) {
-            // A deferred Exit must not name this body once it is freed
-            auto* cm = world_->getCollisionManager();
-            if (cm) cm->forget(gone);
-            if (auto* w = world_->getWorld()) w->DestroyBody(gone);
-            if (cm) {
-                cm->forgetBody(gone);
-                cm->flushPendingExits();
-            }
-        }
+        if (body_ && world_) world_->releaseBody(body_, World::ExitDelivery::Deferred);
     }
 
     bool isExclusive() const override { return true; }
 
 private:
+    void onWorldReleased() override {
+        body_ = nullptr;
+        world_ = nullptr;
+    }
+
     // Build a Contact2D (from this body's view) and fire the matching event.
     void fireContact(RigidBody2D* other, const WorldContact& c, int phase) {
+        auto state = world_->dispatch_;
+        const bool sensor = !state->frames.empty() && state->frames.back()->sensor;
+        const uint64_t epoch = state->epoch;
+        const uint64_t selfGeneration = generation;
+        b2Body* selfBody = body_;
+        b2Body* otherBody = c.a == selfBody ? c.b : c.a;
+        const uint64_t otherGeneration = other ? other->generation : 0;
         Contact2D col;
-        col.other     = other;
-        col.otherNode = other ? other->getOwner() : nullptr;
-        col.point     = c.point;
-        col.normal    = c.normal;
-        bool trigger = trigger_ || (other && other->trigger_);
-        if (trigger) {
-            switch (phase) {
-                case 0:  onTriggerEnter.notify(col); break;
-                case 1:  onTriggerStay.notify(col);  break;
-                default: onTriggerExit.notify(col); break;
+        col.point = c.point;
+        col.normal = c.normal;
+        auto prepare = [&, state, epoch, selfGeneration, selfBody, otherBody, otherGeneration] {
+            col.other = nullptr;
+            col.otherNode = nullptr;
+            if (!state->alive || state->epoch != epoch) return false;
+            if (c.a != selfBody && c.b != selfBody) return false;
+            auto* selfOwner = state->world->findOwner(selfBody);
+            if (!selfOwner || selfOwner->generation != selfGeneration) return false;
+            if (otherGeneration && (c.a == otherBody || c.b == otherBody)) {
+                auto* owner = state->world->findOwner(otherBody);
+                if (owner && owner->generation == otherGeneration) {
+                    col.other = dynamic_cast<RigidBody2D*>(owner);
+                    col.otherNode = col.other ? col.other->getOwner() : nullptr;
+                }
             }
-        } else {
-            switch (phase) {
-                case 0:  onCollisionEnter.notify(col); break;
-                case 1:  onCollisionStay.notify(col);  break;
-                default: onCollisionExit.notify(col); break;
-            }
-        }
+            return true;
+        };
+        detail::DispatchState::Frame frame(*state, {}, [&] { prepare(); });
+        // Snapshot target before callbacks: this Mod may be removed in one.
+        auto& event = sensor
+            ? (phase == 0 ? onTriggerEnter : phase == 1 ? onTriggerStay : onTriggerExit)
+            : (phase == 0 ? onCollisionEnter : phase == 1 ? onCollisionStay : onCollisionExit);
+        tc::internal::GuardedEventDelivery<Contact2D>::notify(event, col, prepare);
     }
 
     // polys: the checked polygons, one fixture each, used when shape_ is a
@@ -542,26 +519,30 @@ private:
     bool fixedRotation_ = false;
     b2Body* body_ = nullptr;
     tc::Mesh fillMesh_;   // compound fill, triangulated once in setup()
-    std::weak_ptr<int> worldAlive_;
 };
 
 namespace detail {
 // Fan a world contact out to the RigidBody2D(s) involved (main thread). Each
 // side hears about the OTHER body; a side that isn't a RigidBody2D is null.
 inline void routeContact(World* w, const WorldContact& c, int phase) {
-    using Entry = ContactRouter2D::Entry;
+    auto state = w->dispatch_;
+    const uint64_t epoch = state->epoch;
+    struct Entry {
+        RigidBody2D* rb = nullptr;
+        uint64_t serial = 0;
+    };
     auto find = [w](b2Body* body) -> Entry {
-        auto it = contactRouters().find(w);
-        if (!body || it == contactRouters().end()) return {};
-        auto f = it->second.bodies.find(body);
-        return (f != it->second.bodies.end()) ? f->second : Entry{};
+        auto* owner = w->findOwner(body);
+        auto* rb = dynamic_cast<RigidBody2D*>(owner);
+        return rb ? Entry{rb, owner->generation} : Entry{};
     };
     const Entry ea = find(c.a);
     const Entry eb = find(c.b);
     if (ea.rb) ea.rb->fireContact(eb.rb, c, phase);
 
     // A's listeners may have dropped B's node (and made a new body at the
-    // same address) or A's: notify B only while it is still registered.
+    // same address) or A's: notify B only while its owner generation is still live.
+    if (!state->alive || state->epoch != epoch) return;
     if (!eb.rb || find(c.b).serial != eb.serial) return;
     RigidBody2D* ra = (ea.rb && find(c.a).serial == ea.serial) ? ea.rb : nullptr;
     eb.rb->fireContact(ra, c, phase);
