@@ -1156,6 +1156,7 @@ static void clockTests() {
 }
 
 int runVideoTests();
+int runChunkTableTests();
 
 // Optional GPU-backed playback failure checks (run under Xvfb on Linux).
 class PlaybackErrorApp : public App {
@@ -1180,8 +1181,7 @@ public:
         written = writeBytes(tmp, bytes);
         check("bad-frame fixture written", written);
         if (written) checkBadFrame(tmp);
-        // Snappy header advertises more output than the allocated texture:
-        // HapDecode returns Buffer_Too_Small, which remains fatal.
+        // An oversized Snappy output is rejected during frame validation too.
         bytes[sample.offset + 3] = (originalType & 0x0F) | 0xB0;
         const size_t headerSize = (bytes[sample.offset] == 0 &&
                                    bytes[sample.offset + 1] == 0 &&
@@ -1191,26 +1191,108 @@ public:
         bytes[sample.offset + headerSize + 2] = 0x04; // 65536 bytes (varint)
         written = writeBytes(tmp, bytes);
         check("decoder failure fixture written", written);
-        if (written) checkFailure(tmp, HapResult_Buffer_Too_Small);
+        if (written) checkBadFrame(tmp);
+        // Corrupt the first sample's chunk table while preserving its texture header.
+        bytes = readBytes(source);
+        const auto first = track->samples[0];
+        vector<char> badFirst(first.size, 0);
+        if (first.size >= 37 && first.size - 4 < 0x1000000) {
+            const auto length = first.size - 4;
+            for (int i = 0; i < 3; ++i) badFirst[i] = char(length >> (8 * i));
+            badFirst[3] = char(0xcb);
+            badFirst[4] = 21; badFirst[7] = 1; // Instructions container.
+            badFirst[8] = 1; badFirst[11] = 2; badFirst[12] = char(0xa);
+            badFirst[13] = 4; badFirst[16] = 3; badFirst[17] = 8;
+            badFirst[21] = 4; badFirst[24] = 4; badFirst[27] = 0x10; // Offset 0x100000.
+            std::copy(badFirst.begin(), badFirst.end(), bytes.begin() + first.offset);
+            written = writeBytes(tmp, bytes);
+            check("bad first table fixture written", written);
+            if (written) checkBadFirstFrame(tmp);
+        } else {
+            check("bad first table fixture fits sample", false);
+        }
         error_code ec;
         fs::remove(tmp, ec);
         exitApp();
     }
 private:
+    void checkBadFirstFrame(const fs::path& path) {
+        HapPlayer player;
+        int warnings = 0;
+        auto logger = getLogger().onLog.listen([&](LogEventArgs& log) {
+            if (log.level == LogLevel::Warning && log.message.find("[HapDecoder]") == 0) ++warnings;
+        });
+        const bool loaded = bool(player.load(path));
+        check("bad first table loads from texture header", loaded && warnings == 0 && player.getInvalidFrameCount() == 0);
+        if (!loaded) return;
+        player.play();
+        player.setFrame(0); // First sample (frame 1).
+        check("first sample rejected with Warning and counter", warnings == 1 && player.getInvalidFrameCount() == 1 &&
+              !player.hasError() && player.isPlaying());
+        player.setFrame(1); // Second sample (frame 2).
+        check("second sample after bad first table decodes", player.isFrameNew() && player.getCurrentFrame() == 1 &&
+              player.getInvalidFrameCount() == 1 && warnings == 1 && !player.hasError());
+        HapPlayer moved(std::move(player));
+        check("player move construction carries invalid count", moved.getInvalidFrameCount() == 1 &&
+              moved.getInvalidFrameCount() == 1 && moved.getCurrentFrame() == 1);
+        moved.setFrame(0);
+        check("player move construction carries warning state", moved.getInvalidFrameCount() == 2 && warnings == 1);
+        HapPlayer destination;
+        const bool destinationLoaded = bool(destination.load(path));
+        check("move assignment destination loads", destinationLoaded);
+        if (!destinationLoaded) return;
+        for (int i = 0; i < 3; ++i) destination.setFrame(0);
+        check("move assignment destination has independent count", destination.getInvalidFrameCount() == 3 && warnings == 2);
+        destination = std::move(moved);
+        check("player move assignment replaces invalid count", destination.getInvalidFrameCount() == 2 &&
+              destination.getInvalidFrameCount() == 2 && destination.getCurrentFrame() == 1);
+        destination.setFrame(0);
+        check("player move assignment carries warning state", destination.getInvalidFrameCount() == 3 && warnings == 2);
+        destination.setFrame(1);
+        check("moved player recovers on valid sample", destination.isFrameNew() && destination.getCurrentFrame() == 1 &&
+              destination.getInvalidFrameCount() == 3 && warnings == 2 && !destination.hasError());
+        destination.resetStats();
+        destination.close();
+        check("player stats reset and close preserve invalid count", destination.getInvalidFrameCount() == 3);
+        const bool reloaded = bool(destination.load(path));
+        check("player reload preserves invalid count", reloaded && destination.getInvalidFrameCount() == 3);
+        if (!reloaded) return;
+        destination.setFrame(0);
+        check("player reload preserves warning state", destination.getInvalidFrameCount() == 4 && warnings == 2);
+        HapPlayer fresh;
+        const bool freshLoaded = bool(fresh.load(path));
+        check("fresh move source loads", freshLoaded);
+        if (!freshLoaded) return;
+        destination = std::move(fresh);
+        check("move assignment replaces prior warning state", destination.getInvalidFrameCount() == 0);
+        destination.setFrame(0);
+        check("move assigned fresh decoder warns on first rejection", destination.getInvalidFrameCount() == 1 && warnings == 3);
+    }
+
     void checkBadFrame(const fs::path& path) {
         HapPlayer player;
         if (!player.load(path)) { check("bad-frame fixture loads", false); return; }
         player.play();
         player.setFrame(1);
         const auto frame = player.getCurrentFrame();
+        Fbo fbo;
+        fbo.allocate(4, 4);
+        const auto drawnPixels = [&] {
+            fbo.begin();
+            clear(0, 0, 0, 1);
+            player.draw(0, 0, 4, 4);
+            fbo.end();
+            vector<uint8_t> pixels(4 * 4 * 4);
+            check("HAP retained-frame readback", fbo.readPixels(pixels.data()));
+            return pixels;
+        };
+        const auto previousPixels = drawnPixels();
         int events = 0, warnings = 0, errorLogs = 0;
-        string lastWarning;
         auto listener = player.onError.listen([&](VideoErrorEventArgs&) { ++events; });
         auto logger = getLogger().onLog.listen([&](LogEventArgs& log) {
-            if (log.message.find("[HapPlayer]") != 0) return;
+            if (log.message.find("[HapPlayer]") != 0 && log.message.find("[HapDecoder]") != 0) return;
             if (log.level == LogLevel::Warning && log.message.find("Skipping invalid HAP frame") != string::npos) {
                 ++warnings;
-                lastWarning = log.message;
             }
             if (log.level == LogLevel::Error) ++errorLogs;
         });
@@ -1218,20 +1300,18 @@ private:
         check("HAP bad frame skipped with warning", warnings == 1 && player.getCurrentFrame() == frame);
         player.update();
         check("HAP bad frame keeps playing without error", player.isPlaying() && !player.hasError() && events == 0 && errorLogs == 0);
+        check("HAP invalid frame preserves drawn pixels", drawnPixels() == previousPixels);
         player.setFrame(3);
         check("HAP frame after bad frame decodes", player.isFrameNew() && player.getCurrentFrame() == 3);
         player.setPaused(true);
         for (int i = 0; i < 46; ++i) player.setFrame(2);
         check("HAP bad-frame burst produces only one warning", warnings == 1);
-        this_thread::sleep_for(chrono::milliseconds(5100));
         player.setFrame(2);
-        check("HAP next warning reports all skips since last report", warnings == 2 &&
-              lastWarning.find("skipped 47 invalid frames since the last report") != string::npos);
+        check("HAP repeated invalid frames keep one warning", warnings == 1);
         HapPlayer other;
         check("second HAP player loads", bool(other.load(path)));
         other.setFrame(2);
-        check("HAP warning gate is per player and starts with one skip", warnings == 3 &&
-              lastWarning.find("skipped 1 invalid frames since the last report") != string::npos);
+        check("HAP warning gate is per decoder", warnings == 2);
         player.close();
     }
 
@@ -1394,6 +1474,7 @@ int main(int argc, char** argv) {
         return tcCoreTest::runDisplayTest<PlaybackErrorApp>(settings, g_fail);
     }
     g_fail += runVideoTests();
+    g_fail += runChunkTableTests();
     const fs::path data = fs::path(getDataPath(""));
     printf("data: %s\n", data.string().c_str());
 
