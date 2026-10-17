@@ -22,6 +22,7 @@
 #include <mutex>
 #include <cctype>
 #include <chrono>
+#include <stdexcept>
 
 // JSON support
 #include "../../nlohmann/json.hpp"
@@ -110,6 +111,11 @@ inline std::string makeResult(const json& id, const json& result) {
     };
     return dumpReply(res);
 }
+
+// Explicit admission refusals are JSON-RPC errors, before any tool work is queued.
+struct RequestRejected : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
 
 inline std::string toolError(const json& id, const std::string& message) {
     return makeResult(id, {{"content", {{{"type", "text"}, {"text", message}}}},
@@ -540,6 +546,8 @@ private:
 
             return formatResult(content);
 
+        } catch (const internal::RequestRejected& e) {
+            return makeError(id, -32000, e.what());
         } catch (const std::exception& e) {
             return internal::toolError(id, std::string("Tool execution error: ") + e.what());
         } catch (...) {
