@@ -185,7 +185,11 @@ public:
             auto second=decode(pending_[1]()());
             check("float Fbo preserves HDR values",second["format"]=="float"&&approxEq(second["results"][0]["color"][0],2.5));
             auto dead=decode(pending_[2]()());check("destroyed deferred source returns error",dead["status"]=="error");
-            auto win=decode(pending_[3]()());check("window source captures completed frame",win["width"]==32&&win["height"]==32&&win["results"][0]["color"]==json::array({1,0,0,1}));
+            auto win=decode(pending_[3]()());
+            // Windows may widen a small titled window (see #849).
+            check("window source captures completed frame",
+                win["width"]==getFramebufferWidth()&&win["height"]==getFramebufferHeight()&&
+                win["results"][0]["color"]==json::array({1,0,0,1}));
             auto changed=decode(pending_[4]()());
             check("deferred capture converts changed format to RGBA8",changed["format"]=="RGBA8"&&
                 changed["results"][0]["color"]==json::array({0,0,1,1}));

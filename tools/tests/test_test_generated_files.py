@@ -20,6 +20,8 @@ class GeneratedTestFilesTests(unittest.TestCase):
         project.mkdir(parents=True)
         (project / ".gitignore").write_text(
             "# Generated project files\nCMakeLists.txt\n/CMakePresets.json\nbin/*\n")
+        (project / "src").mkdir()
+        (project / "addons.make").touch()
         # Present on disk even in the clean-index case.
         (project / "CMakeLists.txt").write_text("trussc_app()\n")
         (project / "CMakePresets.json").write_text("{}\n")
@@ -40,6 +42,24 @@ class GeneratedTestFilesTests(unittest.TestCase):
             "core/tests/fixture/.gitignore", "core/tests/fixture/src/main.cpp"])
         self.assertEqual(result, 0)
         self.assertIn("0 violation(s)", output)
+
+    def test_missing_core_addons_make_fails(self):
+        (self.root / "core/tests/fixture/addons.make").unlink()
+        result, output = self.run_guard([
+            "core/tests/fixture/.gitignore", "core/tests/fixture/src/main.cpp"])
+        self.assertEqual(result, 1)
+        self.assertIn("1 violation(s)", output)
+        self.assertIn("missing core test project file: core/tests/fixture/addons.make", output)
+
+    def test_standalone_cmake_without_addons_make_passes(self):
+        project = self.root / "core/tests/standalone"
+        project.mkdir(parents=True)
+        (project / "CMakeLists.txt").write_text("project(standalone)\n")
+        (project / ".gitignore").write_text("build/\nbuild-*/\n")
+        self.assertEqual(self.run_guard([
+            "core/tests/standalone/CMakeLists.txt",
+            "core/tests/standalone/.gitignore",
+            "core/tests/standalone/main.cpp"])[0], 0)
 
     def test_tracked_generated_project_files_fail(self):
         paths = ["core/tests/fixture/" + name for name in sorted(guard.GENERATED)]

@@ -118,11 +118,12 @@ class ReadPixelsApp : public App {
                     for (int x = 0; x < 3; ++x) for (int c = 0; c < 4; ++c) {
                         const int want = c < channels ? expected[c] : c == 3 ? 255 : 0;
                         const int got = guarded[2 + (y * 3 + x) * 4 + c];
-                        // Desktop native conversion is allowed one LSB; CPU paths exact.
+                        // GPU UNORM writes can round one LSB either way on any backend.
+                        // GLCORE also performs native float-to-byte conversion.
 #if defined(SOKOL_GLCORE)
                         const int tolerance = 1;
 #else
-                        const int tolerance = 0;
+                        const int tolerance = isFloatFormat(fmt.value) ? 0 : 1;
 #endif
                         if (std::abs(got - want) > tolerance) {
                             std::printf("mismatch %s row=%d component=%d got=%d want=%d\n", fmt.name, y, c, got, want);
@@ -166,7 +167,9 @@ class ReadPixelsApp : public App {
                 const size_t i = (size_t(y) * 3 + x) * 4 + c;
                 const int want = (y < 65 ? top : bottom)[c];
                 byteRows &= std::abs(int(bytes[i]) - want) <= 1;
-                floatRows &= std::abs(floats[i] - want / 255.0f) < 0.003f;
+                // Include float arithmetic error at the one-UNORM-step boundary.
+                floatRows &= std::abs(floats[i] - want / 255.0f) <=
+                             1.0f / 255.0f + std::numeric_limits<float>::epsilon();
             }
             check("tall image byte rows preserve order across chunks", byteRows);
             check("tall image float rows preserve order across chunks", floatRows);

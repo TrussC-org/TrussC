@@ -14,4 +14,5 @@ skip its vertical flip.
 Unsupported optional attachment formats (including RGBA32F) print SKIP.
 RGBA16F is required: missing render capability fails the GPU lane, so the
 half-float regression must actually run. CPU conversions must match exactly;
-desktop GL's native conversion has an allowance of one byte value for rounding.
+GPU-written UNORM attachments on every backend and desktop GL's native
+conversion allow one byte value for rounding.
