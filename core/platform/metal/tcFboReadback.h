@@ -28,6 +28,11 @@ static bool readPixelsInternal(sg_image srcImage, int width, int height,
         return false;
     }
 
+    // Bound (abi): Metal source extent and format must match the Fbo readback. Overflow drops the recorder frame and is counted.
+    if (width <= 0 || height <= 0 || srcTexture.width != (NSUInteger)width ||
+        srcTexture.height != (NSUInteger)height || srcTexture.pixelFormat != mtlFormat)
+        return false;
+
     id<MTLDevice> device = cmdQueue.device;
 
     MTLTextureDescriptor* desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:mtlFormat
@@ -86,7 +91,7 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
         return false;
     }
 
-    size_t bytesPerRow = width_ * 4;  // RGBA8
+    size_t bytesPerRow = (size_t)width_ * 4;  // RGBA8
     return readPixelsInternal(curColorTex_().getImage(), width_, height_,
                               MTLPixelFormatRGBA8Unorm, bytesPerRow, pixels, reportError);
 }

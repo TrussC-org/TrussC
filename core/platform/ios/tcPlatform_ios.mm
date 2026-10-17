@@ -183,6 +183,12 @@ bool captureWindow(Pixels& outPixels) {
     NSUInteger width = srcTexture.width;
     NSUInteger height = srcTexture.height;
     MTLPixelFormat pixelFormat = srcTexture.pixelFormat;
+    const auto layout = internal::recorderPackedLayout(width, height, internal::RecorderPixelFormat::RGBA8);
+    // Bound (abi): Metal extent and format must fit the packed capture layout. Overflow drops the recorder frame and is counted.
+    if (!layout.byteSize || width > (NSUInteger)std::numeric_limits<int>::max() ||
+        height > (NSUInteger)std::numeric_limits<int>::max() ||
+        (pixelFormat != MTLPixelFormatRGB10A2Unorm && pixelFormat != MTLPixelFormatBGRA8Unorm &&
+         pixelFormat != MTLPixelFormatBGRA8Unorm_sRGB)) return false;
 
     // sokol sets framebufferOnly=YES on the CAMetalLayer, so reading the
     // drawable texture directly asserts under Metal validation. Blit into a
@@ -219,8 +225,8 @@ bool captureWindow(Pixels& outPixels) {
     [cmdBuf waitUntilCompleted];
 
     MTLRegion region = MTLRegionMake2D(0, 0, width, height);
-    NSUInteger bytesPerRow = width * 4;
-    std::vector<uint8_t> rawData(bytesPerRow * height);
+    NSUInteger bytesPerRow = layout.rowBytes;
+    std::vector<uint8_t> rawData(layout.byteSize);
     [stagingTexture getBytes:rawData.data()
                  bytesPerRow:bytesPerRow
                   fromRegion:region
@@ -228,6 +234,8 @@ bool captureWindow(Pixels& outPixels) {
 
     outPixels.allocate((int)width, (int)height, 4);
     unsigned char* dst = outPixels.getData();
+    // Bound (abi): pixel capacity must hold every captured row. Overflow drops the recorder frame and is counted.
+    if (!dst || outPixels.getTotalBytes() < layout.byteSize) return false;
 
     if (pixelFormat == MTLPixelFormatRGB10A2Unorm) {
         // Modern iPhones use a 10-bit wide-color drawable. Unpack to RGBA8.

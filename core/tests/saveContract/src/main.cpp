@@ -319,8 +319,9 @@ TC_CORE_TEST_MAIN() {
             auto noAudio = healthy.writeAudio(samples, 1, 0);
             check(!wrongSize && wrongSize.message.find("pixels size 8x8 != writer 16x16") != std::string::npos &&
                   !noAudio && noAudio.message.find("writer has no audio track") != std::string::npos &&
-                  callErrors == 1 && allWrongSizesFailed && healthy.getFrameCount() == 1,
-                  "repeated wrong sizes and missing audio log exactly one Error without counting frames");
+                  callErrors == 1 && allWrongSizesFailed && healthy.getFrameCount() == 1 &&
+                  healthy.getRejectedFrameCount() == 101,
+                  "size refusals and missing audio retain the accepted frame count");
             auto nullFrame = healthy.addFrameAt(nullptr, 16, 16, 0);
             auto nullAudio = healthy.writeAudio(nullptr, 1, 0);
             auto noFrames = healthy.writeAudio(samples, 0, 0);
@@ -344,15 +345,16 @@ TC_CORE_TEST_MAIN() {
             check(healthy.open(dir / "zero.mp4", 16, 16).ok(), "reopen for zero-frame caller mistakes");
             auto logs = getLogger().onLog.listen([&](LogEventArgs& e) {
                 if (e.level == LogLevel::Error) ++errors;
-                if (e.level == LogLevel::Warning && e.message.find("0 frames after caller mistakes") != std::string::npos)
+                if (e.level == LogLevel::Warning && e.message.find("frame layout does not match") != std::string::npos)
                     ++warnings;
             });
             Pixels wrong; wrong.allocate(8, 8, 4);
             for (int i = 0; i < 100; ++i) healthy.addFrame(wrong);
-            check(errors == 1 && healthy.getFrameCount() == 0, "open resets caller mistake logging for next take");
+            check(errors == 0 && healthy.getFrameCount() == 0 && healthy.getRejectedFrameCount() == 100,
+                  "open resets frame refusal reporting for the next take");
             healthy.close();
             healthy.close();
-            check(warnings == 1, "zero accepted frames after caller mistakes warn once at close");
+            check(warnings == 1, "a take with refused frames logs one layout Warning");
         }
         if (geteuid() != 0) {
             const auto denied = dir / "video-denied";
