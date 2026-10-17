@@ -49,7 +49,7 @@ def should_run(step, outcomes, cancelled=False):
 
 class DailyWebWorkflowTests(unittest.TestCase):
     def setUp(self):
-        workflow = yaml.load((ROOT / '.github/workflows/daily.yml').read_text(), Loader=yaml.BaseLoader)
+        workflow = yaml.load((ROOT / '.github/workflows/daily.yml').read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         self.steps = workflow['jobs']['sweep-web']['steps']
         self.examples = next(step for step in self.steps if step.get('name') == 'Build every example (Web)')
         self.tests = next(step for step in self.steps if step.get('name') == 'Build and run core tests (Web, under node)')
@@ -82,7 +82,7 @@ class DailyWebWorkflowTests(unittest.TestCase):
         self.assertFalse(should_run(self.tests, {self.example_id: 'skipped'}))
 
     def test_regression_runs_in_pr_ci(self):
-        workflow = yaml.load((ROOT / '.github/workflows/build.yml').read_text(), Loader=yaml.BaseLoader)
+        workflow = yaml.load((ROOT / '.github/workflows/build.yml').read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         matches = [step for step in workflow['jobs']['header-state-check']['steps']
                    if step.get('run') == 'python3 tools/tests/test_daily_workflow.py -v']
         self.assertEqual(len(matches), 1)
@@ -91,7 +91,7 @@ class DailyWebWorkflowTests(unittest.TestCase):
 
 class DailyDisplayWorkflowTests(unittest.TestCase):
     def test_display_step_is_linux_daily_only(self):
-        daily = yaml.load((ROOT / '.github/workflows/daily.yml').read_text(), Loader=yaml.BaseLoader)
+        daily = yaml.load((ROOT / '.github/workflows/daily.yml').read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         steps = daily['jobs']['sweep']['steps']
         matches = [step for step in steps if 'tools/run_core_display_tests.py' in step.get('run', '')]
         self.assertEqual(len(matches), 1)
@@ -105,7 +105,7 @@ class DailyDisplayWorkflowTests(unittest.TestCase):
         self.assertNotIn('continue-on-error', step)
         core = next(s for s in steps if s.get('name') == 'Build & run core tests')
         self.assertLess(steps.index(core), steps.index(step))
-        pr = (ROOT / '.github/workflows/build.yml').read_text()
+        pr = (ROOT / '.github/workflows/build.yml').read_text(encoding="utf-8")
         self.assertNotIn('run_core_display_tests.py', pr)
         self.assertNotIn('display-test', pr)
         # This step fails the existing sweep, so the existing failure reporter
@@ -123,9 +123,9 @@ class DailyDisplayWorkflowTests(unittest.TestCase):
                 (test / 'src/main.cpp').touch()
             (tests / 'fixture/display-test').write_text(
                 '# comments and quoted arguments\n{test} --fail\n{test} --window "two words"\n'
-                'skip "#707: known hang" {test} --skipped\n')
+                'skip "#707: known hang" {test} --skipped\n', encoding="utf-8")
             (tests / 'own/own-binary').touch()
-            (tests / 'own/display-test').write_text('{test} --gpu-check\n')
+            (tests / 'own/display-test').write_text('{test} --gpu-check\n', encoding="utf-8")
             # Real fixture processes record argv and cwd, then return the
             # requested status. No TrussC build/display is needed here.
             for name, combined in (('allCoreTests', True), ('own', False)):
@@ -135,21 +135,21 @@ class DailyDisplayWorkflowTests(unittest.TestCase):
                     f'#!{sys.executable}\n'
                     'from pathlib import Path\nimport sys\n'
                     f'args = sys.argv[{2 if combined else 1}:]\n'
-                    'with Path("calls").open("a") as log: log.write(repr(args) + "\\n")\n'
-                    'sys.exit(7 if "--fail" in args else 0)\n')
+                    'with Path("calls").open("a", encoding="utf-8") as log: log.write(repr(args) + "\\n")\n'
+                    'sys.exit(7 if "--fail" in args else 0)\n', encoding="utf-8")
                 binary.chmod(0o755)
             output = io.StringIO()
             with redirect_stdout(output):
                 self.assertEqual(display.run_modes(root), 1)
-            self.assertEqual((tests / 'fixture/calls').read_text().splitlines(),
+            self.assertEqual((tests / 'fixture/calls').read_text(encoding="utf-8").splitlines(),
                              ["['--fail']", "['--window', 'two words']"])
-            self.assertEqual((tests / 'own/calls').read_text().strip(), "['--gpu-check']")
+            self.assertEqual((tests / 'own/calls').read_text(encoding="utf-8").strip(), "['--gpu-check']")
             self.assertFalse((tests / 'unmarked/calls').exists())
             self.assertIn('FAIL fixture:', output.getvalue())
             self.assertIn('--window', output.getvalue())
             self.assertIn("SKIP fixture: '{test}' --skipped (#707: known hang)", output.getvalue())
             self.assertIn('4 modes, 1 skipped, 1 failures', output.getvalue())
-            (tests / 'fixture/display-test').write_text('{test} --window\n')
+            (tests / 'fixture/display-test').write_text('{test} --window\n', encoding="utf-8")
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(display.run_modes(root), 0)
             (tests / 'own/bin/own').unlink()
@@ -174,14 +174,14 @@ class DailyDisplayWorkflowTests(unittest.TestCase):
                 self.assertEqual(display.run_modes(root), 1)
             marker = root / 'core/tests/fixture/display-test'
             marker.parent.mkdir(parents=True)
-            marker.write_text('--window\n')
+            marker.write_text('--window\n', encoding="utf-8")
             with self.assertRaisesRegex(ValueError, 'expected one'):
                 list(display.discover_modes(root))
-            marker.write_text('skip "reason only"\n')
+            marker.write_text('skip "reason only"\n', encoding="utf-8")
             with self.assertRaisesRegex(ValueError, 'expected skip'):
                 list(display.discover_modes(root))
             # A sweep where every mode is skipped ran nothing: it fails.
-            marker.write_text('skip "#707" {test} --window\n')
+            marker.write_text('skip "#707" {test} --window\n', encoding="utf-8")
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(display.run_modes(root), 1)
 

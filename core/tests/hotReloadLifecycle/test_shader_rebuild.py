@@ -63,7 +63,7 @@ def main():
     def build_guest(capture=False):
         result = subprocess.run(command, check=True,
                                 stdout=subprocess.PIPE if capture else None,
-                                stderr=subprocess.STDOUT, text=True)
+                                stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
         assert host.stat().st_mtime_ns == before_host, 'guest build relinked the host executable'
         return result
 

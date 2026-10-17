@@ -23,13 +23,13 @@ class ReferenceWorkflowTests(unittest.TestCase):
         self.bin.mkdir()
         self.env = dict(os.environ, PATH=f'{self.bin}{os.pathsep}{os.environ["PATH"]}',
                         CALLS=str(self.directory / 'calls'))
-        self.workflow = yaml.load((ROOT / '.github/workflows/build.yml').read_text(),
+        self.workflow = yaml.load((ROOT / '.github/workflows/build.yml').read_text(encoding="utf-8"),
                                   Loader=yaml.BaseLoader)
         self.job = self.workflow['jobs']['reference-check']
 
     def stub(self, name, text):
         script = self.bin / name
-        script.write_text('#!/usr/bin/env python3\n' + text)
+        script.write_text('#!/usr/bin/env python3\n' + text, encoding="utf-8")
         script.chmod(0o755)
 
     def test_ci_lanes_bootstrap_and_patch(self):
@@ -54,7 +54,7 @@ class ReferenceWorkflowTests(unittest.TestCase):
         # Exercise the actual workflow shell with clean and stale diff responses.
         # No git repository is written and no Actions service is needed.
         self.stub('git', '''import json, os, sys
-with open(os.environ['CALLS'], 'a') as log:
+with open(os.environ['CALLS'], 'a', encoding='utf-8') as log:
     log.write(json.dumps(sys.argv[1:]) + '\\n')
 if '--exit-code' in sys.argv:
     sys.exit(int(os.environ['DRIFT']))
@@ -74,19 +74,19 @@ print('diff --git a/generated.cpp b/generated.cpp')
                  ('0', new_shard, [status, add, ['diff']])]
         for drift, new, after in cases:
             with self.subTest(drift=drift, new=bool(new)):
-                (self.directory / 'calls').write_text('')
+                (self.directory / 'calls').write_text('', encoding="utf-8")
                 (self.directory / 'regenerated.patch').unlink(missing_ok=True)
                 result = subprocess.run(['bash', '-euo', 'pipefail', '-c', freshness['run']],
                                         cwd=self.directory, env=dict(self.env, DRIFT=drift, NEW=new))
                 failed = drift == '1' or bool(new)
                 self.assertEqual(result.returncode, int(failed))
-                calls = [json.loads(line) for line in (self.directory / 'calls').read_text().splitlines()]
+                calls = [json.loads(line) for line in (self.directory / 'calls').read_text(encoding="utf-8").splitlines()]
                 self.assertEqual(calls, [['diff', '--exit-code', '--', *OUTPUTS], *after])
                 if failed:
-                    self.assertIn('diff --git', (self.directory / 'regenerated.patch').read_text())
+                    self.assertIn('diff --git', (self.directory / 'regenerated.patch').read_text(encoding="utf-8"))
                 else:
                     self.assertFalse((self.directory / 'regenerated.patch').exists())
-        tracked = subprocess.check_output(['git', 'ls-files', '--', *OUTPUTS], cwd=ROOT, text=True)
+        tracked = subprocess.check_output(['git', 'ls-files', '--', *OUTPUTS], cwd=ROOT, text=True, encoding="utf-8")
         self.assertEqual(len(tracked.splitlines()), 21)
         self.assertNotIn('reference-data.json', tracked)
 
@@ -95,9 +95,9 @@ print('diff --git a/generated.cpp b/generated.cpp')
         reference.mkdir(parents=True)
         (self.directory / 'addons/tcxLua/src/generated').mkdir(parents=True)
         script = reference / 'regenerate.sh'
-        script.write_text((ROOT / 'docs/reference/regenerate.sh').read_text())
+        script.write_text((ROOT / 'docs/reference/regenerate.sh').read_text(encoding="utf-8"), encoding="utf-8")
         stub = '''import json, os, sys
-with open(os.environ['CALLS'], 'a') as log:
+with open(os.environ['CALLS'], 'a', encoding='utf-8') as log:
     log.write(json.dumps([os.path.basename(sys.argv[0]), *sys.argv[1:]]) + '\\n')
 if any(os.path.basename(a) == os.environ.get('FAIL_AT') for a in sys.argv[1:]):
     sys.exit(1)
@@ -109,11 +109,11 @@ if any(os.path.basename(a) == os.environ.get('FAIL_AT') for a in sys.argv[1:]):
                     'emit-sketch-api.js', 'emit-sketch-reference.js']
         for args, fail_at in [([], ''), (['--shaders-only'], ''), ([], 'structure.js')]:
             with self.subTest(args=args, fail_at=fail_at):
-                (self.directory / 'calls').write_text('')
+                (self.directory / 'calls').write_text('', encoding="utf-8")
                 result = subprocess.run(['bash', str(script), *args], cwd=self.directory,
                                         env=dict(self.env, FAIL_AT=fail_at))
                 self.assertEqual(result.returncode, 1 if fail_at else 0)
-                calls = [json.loads(line) for line in (self.directory / 'calls').read_text().splitlines()]
+                calls = [json.loads(line) for line in (self.directory / 'calls').read_text(encoding="utf-8").splitlines()]
                 self.assertEqual(calls[0][:2], ['cmake', '-S'])
                 self.assertEqual(calls[1][0], 'cmake')
                 self.assertIn('TrussC_shaders_gen', calls[1])
@@ -154,7 +154,7 @@ for (const args of [['--ids'], ['--json', 'output'], ['--save-ast', 'output']]) 
         outputs = []
         for data in (entries, dict(reversed(list(entries.items())))):
             structure = self.directory / 'structure.json'
-            structure.write_text(json.dumps(data))
+            structure.write_text(json.dumps(data), encoding="utf-8")
             output = self.directory / 'reference.json'
             # The join uses no authored prose for these fixture ids. Mock the
             # TOML parser so this workflow test needs no npm installation.
@@ -174,13 +174,13 @@ vm.runInNewContext(fs.readFileSync(file, 'utf8'), {
         self.assertEqual(outputs[0], outputs[1])
         self.assertEqual(list(json.loads(outputs[0])), sorted(entries))
         # Old partial caches cannot bypass the failure via the former override.
-        structure.write_text(json.dumps({'__meta': {'partialAst': True}}))
+        structure.write_text(json.dumps({'__meta': {'partialAst': True}}), encoding="utf-8")
         output.unlink()
         result = subprocess.run(['node', '-e', runner, str(ROOT / 'docs/reference/generate.js'),
                                  '--structure', str(structure), '--out-json', str(output),
                                  '--out-md', str(self.directory / 'index.md')],
                                 env=dict(os.environ, TC_ALLOW_PARTIAL_AST='1'),
-                                capture_output=True, text=True)
+                                capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(result.returncode, 1)
         self.assertIn('REFUSING', result.stderr)
         self.assertFalse(output.exists())

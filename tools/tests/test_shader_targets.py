@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class ShaderTargetTests(unittest.TestCase):
     def test_windows_guest_imports_do_not_depend_on_host_target(self):
-        source = (ROOT / 'core/cmake/trussc_app.cmake').read_text()
+        source = (ROOT / 'core/cmake/trussc_app.cmake').read_text(encoding="utf-8")
         self.assertNotIn('target_link_libraries(guest PRIVATE ${PROJECT_NAME})', source)
         self.assertNotIn('add_dependencies(guest ${PROJECT_NAME})', source)
         self.assertIn('add_dependencies(${PROJECT_NAME} guest)', source)
@@ -32,13 +32,13 @@ class ShaderTargetTests(unittest.TestCase):
     def check_import_definition(self, config, librarian=None, readobj=None):
         # Execute the actual CMake block, including its generated script. The
         # exporting executable is deliberately never compiled or linked.
-        source = (ROOT / 'core/cmake/trussc_app.cmake').read_text()
+        source = (ROOT / 'core/cmake/trussc_app.cmake').read_text(encoding="utf-8")
         block = source[source.index('            set(_TC_HOST_IMPORT_LIB '):
                        source.index('            add_custom_target(_tc_host_import ')]
         with tempfile.TemporaryDirectory(prefix='tc imports ') as temporary:
             fixture = Path(temporary)
             build = fixture / 'build with spaces'
-            (fixture / 'main.c').write_text('int main(void) { return 0; }\n')
+            (fixture / 'main.c').write_text('int main(void) { return 0; }\n', encoding="utf-8")
             (fixture / 'CMakeLists.txt').write_text('''
 cmake_minimum_required(VERSION 3.20)
 project(import_probe C)
@@ -49,18 +49,18 @@ set(_TC_DEF_FILE "${CMAKE_BINARY_DIR}/core.def")
 file(WRITE "${_TC_DEF_FILE}" "EXPORTS\\n core_function\\n core_data DATA\\n")
 add_custom_target(_tc_gen_exports)
 set(CMAKE_CXX_COMPILER_ARCHITECTURE_ID x64)
-''' + block)
+''' + block, encoding="utf-8")
             def run(*command):
                 return subprocess.run(command, check=True, text=True,
                                       stdout=subprocess.PIPE,
-                                      stderr=subprocess.STDOUT).stdout
+                                      stderr=subprocess.STDOUT, encoding="utf-8", errors="replace").stdout
 
             run('cmake', '-S', str(fixture), '-B', str(build),
                 f'-DCMAKE_BUILD_TYPE={config}')
             run('cmake', '-P', str(build / f'_tc_host_import_{config}.cmake'))
             definition = build / f'trussc_host_import_{config}.def'
             module = 'renamed host' + ('_debug' if config == 'Debug' else '') + '.exe'
-            self.assertEqual(definition.read_text(),
+            self.assertEqual(definition.read_text(encoding="utf-8"),
                              f'NAME "{module}"\nEXPORTS\n core_function\n core_data DATA\n')
             if librarian:
                 for arch in ('x64', 'ARM64'):
@@ -100,7 +100,7 @@ set(CMAKE_CXX_COMPILER_ARCHITECTURE_ID x64)
                 self.check_import_definition(config, librarian, readobj)
 
     def test_hot_reload_links_shader_requirements_to_both_consumers(self):
-        source = (ROOT / 'core/cmake/trussc_app.cmake').read_text()
+        source = (ROOT / 'core/cmake/trussc_app.cmake').read_text(encoding="utf-8")
         for consumer in ('${PROJECT_NAME}', 'guest'):
             self.assertIn(f'target_link_libraries({consumer} PRIVATE '
                           'TrussC_shaders ${PROJECT_NAME}_shaders)', source)
@@ -119,14 +119,14 @@ set(CMAKE_CXX_COMPILER_ARCHITECTURE_ID x64)
              'target_link_libraries(${ADDON_NAME} INTERFACE ${ADDON_NAME}_shaders)'),
         ):
             with self.subTest(filename=filename):
-                self.assertIn(statement, (ROOT / filename).read_text())
+                self.assertIn(statement, (ROOT / filename).read_text(encoding="utf-8"))
 
     def test_msvc_ninja_objects_depend_on_generated_headers(self):
-        shaders = (ROOT / 'core/cmake/trussc_shaders.cmake').read_text()
+        shaders = (ROOT / 'core/cmake/trussc_shaders.cmake').read_text(encoding="utf-8")
         self.assertIn('function(trussc_shader_object_depends _TC_CONSUMER)', shaders)
         self.assertIn('PROPERTY TC_SHADER_HEADERS ${_TC_SHADER_OUTPUTS}', shaders)
         self.assertIn('APPEND PROPERTY OBJECT_DEPENDS ${_TC_HEADERS}', shaders)
-        app = (ROOT / 'core/cmake/trussc_app.cmake').read_text()
+        app = (ROOT / 'core/cmake/trussc_app.cmake').read_text(encoding="utf-8")
         for consumer in ('${PROJECT_NAME}', 'guest'):
             self.assertIn(f'trussc_shader_object_depends({consumer} ${{_TC_APP_SHADER_TARGETS}})', app)
         # Hot reload: the host executable never gets them (a guest build on
@@ -139,11 +139,11 @@ set(CMAKE_CXX_COMPILER_ARCHITECTURE_ID x64)
              'trussc_shader_object_depends(${_ADDON_NAME} ${_ADDON_NAME}_shaders)'),
         ):
             with self.subTest(filename=filename):
-                self.assertIn(statement, (ROOT / filename).read_text())
+                self.assertIn(statement, (ROOT / filename).read_text(encoding="utf-8"))
         # Addon authors write only the link line; the loader adds the rest.
         for addon in sorted((ROOT / 'addons').glob('*/CMakeLists.txt')):
             with self.subTest(addon=addon.parent.name):
-                self.assertNotIn('trussc_shader_object_depends', addon.read_text())
+                self.assertNotIn('trussc_shader_object_depends', addon.read_text(encoding="utf-8"))
 
 
 if __name__ == '__main__':

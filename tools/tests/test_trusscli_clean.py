@@ -26,10 +26,10 @@ class CleanTests(unittest.TestCase):
         (self.project / "src/scenes/menu").mkdir(parents=True)
         for folder in BUILD_DIRS:
             (self.project / folder).mkdir()
-            (self.project / folder / "sentinel").write_text("keep until cleaned")
+            (self.project / folder / "sentinel").write_text("keep until cleaned", encoding="utf-8")
         for script in SCRIPTS:
-            (self.project / script).write_text("generated script")
-        (self.project / "notes.txt").write_text("keep")
+            (self.project / script).write_text("generated script", encoding="utf-8")
+        (self.project / "notes.txt").write_text("keep", encoding="utf-8")
 
     def markers(self):
         for marker in ("CMakeLists.txt", "addons.make"):
@@ -40,6 +40,7 @@ class CleanTests(unittest.TestCase):
             [str(CLI), *map(str, args)], cwd=cwd or self.project,
             env=dict(os.environ, TRUSSC_DIR=str(ROOT)),
             capture_output=True, text=True, check=False,
+            encoding="utf-8", errors="replace",
         )
 
     def snapshot(self):

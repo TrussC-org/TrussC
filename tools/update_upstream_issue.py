@@ -14,7 +14,7 @@ MARKER = re.compile(r"<!-- upstream-check: ([0-9a-f]+|none) -->")
 
 def gh(*args):
     return subprocess.run(["gh", *args], check=True, stdout=subprocess.PIPE,
-                          text=True).stdout
+                          text=True, encoding="utf-8").stdout
 
 
 def publish(repo, body_file, key):

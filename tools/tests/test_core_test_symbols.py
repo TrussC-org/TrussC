@@ -228,7 +228,7 @@ class CoreTestSymbolTests(unittest.TestCase):
                                 arguments=["c++", "-o", "combined/extra.o"]))
             # A stale object absent from the database must not be inspected.
             (build / "stale.o").touch()
-            (build / "compile_commands.json").write_text(json.dumps(entries))
+            (build / "compile_commands.json").write_text(json.dumps(entries), encoding="utf-8")
             self.assertEqual(check.combined_objects(build, tests), {
                 build / "combined/main.cpp.o": "combined",
                 build / "combined/helper.c.o": "combined",
@@ -239,7 +239,7 @@ class CoreTestSymbolTests(unittest.TestCase):
             build = Path(tmp)
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(check.main([str(build)]), 1)
-                (build / "compile_commands.json").write_text("[]")
+                (build / "compile_commands.json").write_text("[]", encoding="utf-8")
                 self.assertEqual(check.main([str(build)]), 1)
                 for error in (FileNotFoundError("nm"),
                               subprocess.CalledProcessError(1, "nm", stderr="object missing")):

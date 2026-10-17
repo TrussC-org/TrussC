@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class AptDependenciesTests(unittest.TestCase):
     def setUp(self):
         release = subprocess.check_output(
-            ['bash', '-c', '. /etc/os-release; echo "$ID $ID_LIKE"'], text=True)
+            ['bash', '-c', '. /etc/os-release; echo "$ID $ID_LIKE"'], text=True, encoding="utf-8")
         if not any(name in release.split() for name in ('debian', 'ubuntu')):
             self.skipTest('requires a Debian/Ubuntu host')
         self.scratch = tempfile.TemporaryDirectory(dir=ROOT)
@@ -27,18 +27,18 @@ class AptDependenciesTests(unittest.TestCase):
         self.stub('dpkg', '#!/bin/bash\nexit 1\n')
         self.stub('sudo', f'#!{sys.executable}\n'
                   'import json, os, sys\n'
-                  'with open(os.environ["APT_TEST_LOG"], "a") as log:\n'
+                  'with open(os.environ["APT_TEST_LOG"], "a", encoding="utf-8") as log:\n'
                   '    log.write(json.dumps(sys.argv[1:]) + "\\n")\n')
 
     def stub(self, name, contents):
         path = self.directory / name
-        path.write_text(contents)
+        path.write_text(contents, encoding="utf-8")
         path.chmod(0o755)
 
     def run_installer(self):
         subprocess.run([str(ROOT / 'tools/install_dependencies_linux.sh'), '-y'],
-                       env=self.env, check=True, capture_output=True, text=True)
-        return [json.loads(line) for line in self.log.read_text().splitlines()]
+                       env=self.env, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        return [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()]
 
     def test_cache_option_is_optional_and_preserves_arguments(self):
         baseline = self.run_installer()
@@ -61,7 +61,7 @@ class AptDependenciesTests(unittest.TestCase):
         self.env['TRUSSC_APT_ARCHIVES'] = str(self.directory / 'archives')
         result = subprocess.run(
             [str(ROOT / 'tools/install_dependencies_linux.sh'), '-y'],
-            env=self.env, check=True, capture_output=True, text=True)
+            env=self.env, check=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertIn('All required packages are already installed.', result.stdout)
         self.assertFalse(self.log.exists())
 

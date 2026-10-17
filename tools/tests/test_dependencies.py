@@ -242,7 +242,7 @@ fetchcontent_declare(real
     def test_untracked_cmake_files_are_scanned_without_staging(self):
         with tempfile.TemporaryDirectory(dir=ROOT, prefix="dependency-fixture-") as directory:
             path = Path(directory) / "CMakeLists.txt"
-            path.write_text('fetchcontent_declare(new_library GIT_REPOSITORY https://github.com/new/library.git GIT_TAG v1.2.3)\n')
+            path.write_text('fetchcontent_declare(new_library GIT_REPOSITORY https://github.com/new/library.git GIT_TAG v1.2.3)\n', encoding="utf-8")
             relative = path.relative_to(ROOT).as_posix()
             self.assertIn(relative, deps.tracked_cmake_files(str(ROOT)))
             errors = deps.check(str(ROOT), self.rows)
@@ -267,25 +267,25 @@ fetchcontent_declare(real
 
             def run():
                 return subprocess.run([sys.executable, str(ROOT / "tools/check_dependencies.py"), "--root", directory],
-                                      capture_output=True, text=True, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+                                      capture_output=True, text=True, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"), encoding="utf-8", errors="replace")
 
             good = run()
             self.assertEqual(good.returncode, 0, good.stdout + good.stderr)
             self.assertIn("31 third-party entries", good.stdout)
             license_path = root / deps.LIST_FILE
-            inventory = license_path.read_text().replace("| 0.11.25 |", "| 0.11.21 |")
+            inventory = license_path.read_text(encoding="utf-8").replace("| 0.11.25 |", "| 0.11.21 |")
             shader_row = next(r for r in self.rows if r["name"] == deps.SHADER_COMPILER)
             inventory = inventory.replace(shader_row["commit"], "0" * 40)
             inventory = inventory.replace(shader_row["hashes"]["linux"], "0" * 64)
             inventory = "\n".join(line for line in inventory.splitlines() if not line.startswith("| **cgltf**")) + "\n"
-            license_path.write_text(inventory)
+            license_path.write_text(inventory, encoding="utf-8")
             for path, old, new in [
                 ("addons/tcxTls/CMakeLists.txt", "v3.6.7", "v3.6.8"),
                 ("addons/tcxCurl/CMakeLists.txt", "8_22_0", "8_23_0"),
                 ("core/include/stb/README.md", "6e9f34d", "0000000"),
             ]:
                 target = root / path
-                target.write_text(target.read_text().replace(old, new))
+                target.write_text(target.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
             bad = run()
             self.assertEqual(bad.returncode, 1, bad.stdout + bad.stderr)
             for expected in ["mbedTLS", "miniaudio", "FetchContent_Declare(cgltf)", "stb_truetype", "libcurl",
@@ -294,7 +294,7 @@ fetchcontent_declare(real
             self.assertNotIn("match the build.", bad.stdout)
 
     def test_merge_preserves_all_header_job_checks(self):
-        workflow = yaml.load((ROOT / ".github/workflows/build.yml").read_text(), Loader=yaml.BaseLoader)
+        workflow = yaml.load((ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         job = workflow["jobs"]["header-state-check"]
         commands = [step for step in job["steps"] if "run" in step]
         for command in ["python3 tools/check_header_state.py", "python3 tools/check_core_logging.py",

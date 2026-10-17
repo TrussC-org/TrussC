@@ -113,7 +113,7 @@ def update_target_flags(pg_bin, web):
     if key not in _target_flags_cache:
         try:
             r = subprocess.run([key, "update", "--help"], stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, text=True, timeout=60)
+                               stderr=subprocess.STDOUT, text=True, timeout=60, encoding="utf-8", errors="replace")
             _target_flags_cache[key] = "--no-web" in r.stdout
         except (OSError, subprocess.SubprocessError):
             _target_flags_cache[key] = False
