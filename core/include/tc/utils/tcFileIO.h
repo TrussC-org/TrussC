@@ -243,7 +243,15 @@ inline SaveResult atomicWrite(const fs::path& path, Write write, const char* mod
     }
     if (result) {
         fs::rename(temporary, path, ec);
-        if (ec) result = saveFailure(path, "Cannot replace file", ec);
+        if (ec) {
+            // A destination that stopped being a regular file is WriteFailed,
+            // as in the check above; Windows reports it as access denied.
+            std::error_code statusError;
+            const auto now = fs::status(path, statusError);
+            result = !statusError && fs::exists(now) && !fs::is_regular_file(now)
+                ? saveFailure(path, "Not a regular file")
+                : saveFailure(path, "Cannot replace file", ec);
+        }
     }
     if (!result) {
         if (file) fs::remove(temporary, ec);
