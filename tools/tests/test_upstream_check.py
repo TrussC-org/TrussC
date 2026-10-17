@@ -164,7 +164,7 @@ class UpstreamTests(unittest.TestCase):
             with patch.object(sys, "argv", args), patch.object(check, "parse_list", return_value=rows), \
                     patch.object(check, "check_row", side_effect=states), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(check.main(), 0)
-            return body.read_text(), key.read_text().strip()
+            return body.read_text(encoding="utf-8"), key.read_text(encoding="utf-8").strip()
 
     def test_fingerprint_tracks_set_not_release_text_or_order(self):
         a, b = row("a"), row("b")
@@ -250,8 +250,8 @@ class PublishingTests(unittest.TestCase):
     def test_workflow_entry_writes_summary_and_validates_key(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as directory:
             body, key, summary = [Path(directory) / n for n in ["body.md", "key", "summary.md"]]
-            body.write_text(self.issue(key="incomplete")["body"])
-            key.write_text("incomplete\n")
+            body.write_text(self.issue(key="incomplete")["body"], encoding="utf-8")
+            key.write_text("incomplete\n", encoding="utf-8")
             env = dict(GITHUB_REPOSITORY="owner/repo", GITHUB_STEP_SUMMARY=str(summary),
                        RUN_URL="https://example.invalid/run/1")
             args = ["publish", "--body", str(body), "--fingerprint", str(key)]
@@ -259,8 +259,8 @@ class PublishingTests(unittest.TestCase):
                     patch.object(publish, "gh", side_effect=AssertionError("no remote calls")), \
                     contextlib.redirect_stdout(io.StringIO()):
                 publish.main()
-                self.assertIn(env["RUN_URL"], summary.read_text())
-                key.write_text(self.KEY)
+                self.assertIn(env["RUN_URL"], summary.read_text(encoding="utf-8"))
+                key.write_text(self.KEY, encoding="utf-8")
                 with self.assertRaisesRegex(ValueError, "disagree"):
                     publish.main()
 
@@ -270,28 +270,28 @@ class PublishingTests(unittest.TestCase):
             fake = directory / "gh"
             fake.write_text("#!/usr/bin/env python3\n"
                             "import json, os, sys\n"
-                            "with open(os.environ['FAKE_GH_LOG'], 'a') as f:\n"
+                            "with open(os.environ['FAKE_GH_LOG'], 'a', encoding='utf-8') as f:\n"
                             "    f.write(json.dumps(sys.argv[1:]) + '\\n')\n"
                             "if sys.argv[1] == 'api':\n"
                             "    data = '[]' if '/comments' in sys.argv[3] else os.environ['FAKE_GH_ISSUES']\n"
                             "    for item in json.loads(data):\n"
-                            "        print(json.dumps(item))\n")
+                            "        print(json.dumps(item))\n", encoding="utf-8")
             fake.chmod(0o755)
             body, key, summary, log = [directory / n for n in ["body.md", "key", "summary.md", "gh.log"]]
-            body.write_text(self.issue()["body"])
-            key.write_text(self.KEY + "\n")
+            body.write_text(self.issue()["body"], encoding="utf-8")
+            key.write_text(self.KEY + "\n", encoding="utf-8")
             env = dict(os.environ, PATH=str(directory) + os.pathsep + os.environ["PATH"],
                        GITHUB_REPOSITORY="owner/repo", GITHUB_STEP_SUMMARY=str(summary),
                        RUN_URL="https://example.invalid/run/1", FAKE_GH_LOG=str(log),
                        FAKE_GH_ISSUES=json.dumps([self.issue(key="none")]))
             result = subprocess.run([sys.executable, str(ROOT / "tools/update_upstream_issue.py"),
                                      "--body", str(body), "--fingerprint", str(key)],
-                                    env=env, capture_output=True, text=True, check=True)
+                                    env=env, capture_output=True, text=True, check=True, encoding="utf-8", errors="replace")
             self.assertEqual(result.returncode, 0)
-            calls = [json.loads(line) for line in log.read_text().splitlines()]
+            calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(calls[-1][:3], ["issue", "comment", "12"])
             self.assertEqual(calls[-1][-2:], ["--body-file", str(body)])
-            self.assertIn(env["RUN_URL"], summary.read_text())
+            self.assertIn(env["RUN_URL"], summary.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

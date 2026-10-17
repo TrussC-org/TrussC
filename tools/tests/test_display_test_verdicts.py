@@ -72,7 +72,7 @@ runApp<App>(settings);'''
                          'core/tests/foo/build-linux/generated.cpp']:
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text('runApp<App>(s); return failures;')
+                path.write_text('runApp<App>(s); return failures;', encoding="utf-8")
             self.assertEqual(len(check.check(root)), 5)
 
     def test_repository_display_verdicts(self):
