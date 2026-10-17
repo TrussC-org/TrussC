@@ -140,7 +140,7 @@ compiler and linker flags when switching back to a normal build.
 
 ### Also on web (`web-test` marker)
 
-A trusscli project test that also has a `web-test` file in its dir is built for
+A core test that also has a `web-test` file in its dir is built for
 WebAssembly too and run under **node** (`build_all.py --web-only
 --core-tests-only`; in CI, the daily run's `sweep-web` job, not the per-PR
 lane). Use it when the invariant lives in
@@ -151,6 +151,8 @@ environment includes node), so it must not touch the canvas / GPU: plain
 through `allCoreTests`). It still runs natively under `--core-tests-only`, so
 give the native side something real to check (or an explicit skip).
 Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
+Standalone CMake tests use their own CMake project and run
+`build-web/<name>.js` under Node, without linking libTrussC.
 
 ### Display modes (`display-test` marker, daily Linux only)
 
@@ -195,6 +197,24 @@ LIBGL_ALWAYS_SOFTWARE=1 \
 
 ## Tests
 
+- `mcpAdmissionConstruction/` — admission construction/model checks, real
+  framebuffer rejection (`--gpu-check --dpi=1|2`), and native cross-frame
+  resize/save cycles (`--gpu-check-resize --dpi=1|2`). See its
+  [README](mcpAdmissionConstruction/README.md) for exact Linux, Air and Windows
+  commands and the current DPI 2 / 8 MiB budget limitation.
+
+- `webDropSize/` — Web dropped-file size and reader limits. The Web build
+  exercises the complete application header with mock FileReaders under Node;
+  native builds compile the unchanged Web C entry points with a browser-size
+  stub for sanitizer coverage. Metadata-only files cover sizes above 4 GiB,
+  the 256 MiB content bound, and four concurrent readers without allocating
+  large buffers. Checks successful reads, error/abort/exception slot release,
+  single completion, warning counts, and both size getters. The Web lifecycle
+  case quits with four reads pending, verifies cancellation before cleanup,
+  reinitializes, and completes a new fetch while retained old handlers remain
+  inert and cannot change the new run's count. Run the Web build
+  with `emcmake cmake -S core/tests/webDropSize -B /tmp/webDropSize`,
+  `cmake --build /tmp/webDropSize`, then `node /tmp/webDropSize/webDropSize.js`.
 - `hotReloadDiagnostics/` — the shared Windows guest linker-error matcher:
   MSVC LNK2019/LNK2001 and lld-link undefined symbols trigger the import-contract
   hint; compile errors, host link failures and successful guest builds stay quiet.
@@ -611,6 +631,11 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   (counted on Linux). The receive thread must not read the client after
   such a notification, which a plain build rarely shows: build it with
   AddressSanitizer (`-DCMAKE_CXX_FLAGS=-fsanitize=address`) to check that.
+- `mcpInputValidation/` — synthetic key and mouse input is validated before
+  callbacks or state changes. Checks all 120 defined key codes, undefined
+  codes and numeric types, transactional modifier validation, 1,024 sequential
+  rejections with a full held set, bounded replies, mouse buttons and finite
+  coordinates/scroll deltas.
 - `mcpHttpGuard/` — the MCP HTTP server refuses browser-driven requests
   (#238): a non-loopback `Host`, a foreign `Origin` (403) and a non-JSON
   `Content-Type` (415), and checks the bearer token on `/mcp` (401). It also

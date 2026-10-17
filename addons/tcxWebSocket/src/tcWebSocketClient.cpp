@@ -4,11 +4,52 @@
 #include <random>
 #include <cstring>
 #include <cstdio>
+#include <limits>
+#include <array>
 
 using namespace std;
 using namespace tc;
 
 namespace tcx::websocket {
+
+#ifndef __EMSCRIPTEN__
+namespace {
+// Grow only for bytes being appended, amortizing small deliveries/fragments.
+// Admission guarantees required <= allowance; avoid doubling past that cap.
+void reserveIngress(std::vector<char>& buffer, size_t required, size_t allowance) {
+    if (required <= buffer.capacity()) return;
+    size_t capacity = buffer.capacity();
+    buffer.reserve(std::max(required, capacity + std::min(capacity, allowance - capacity)));
+}
+}
+#endif
+
+#ifdef __EMSCRIPTEN__
+// The SDK's message callback allocates in WASM before calling C++. Wrap it
+// at the browser event boundary so rejected messages never reach that copy.
+using WebSocketLimitCallback = void (*)(void*);
+EM_JS_DEPS(webSocketIngressDeps, "$WS,$lengthBytesUTF8,$getWasmTableEntry");
+EM_JS(void, installWebSocketIngressLimit,
+      (int socketId, size_t limit, void* userData, WebSocketLimitCallback reject), {
+    // wasm32 size_t arrives as a signed i32; preserve its unsigned allowance.
+    limit = limit >>> 0;
+    var socket = WS.getSocket(socketId);
+    var deliver = socket.onmessage;
+    var rejected = false;
+    socket.onmessage = function(event) {
+        if (rejected) return;
+        var bytes = typeof event.data === 'string'
+            ? lengthBytesUTF8(event.data) : event.data.byteLength;
+        // Bound (security): delivered messages need a finite WASM memory allowance. Overflow rejects the message with Close 4009, warns once and is counted.
+        if (bytes > limit) {
+            rejected = true;
+            getWasmTableEntry(reject)(userData);
+            return;
+        }
+        deliver(event);
+    };
+});
+#endif
 
 // =============================================================================
 // SHA-1 Implementation (Minimal for WebSocket handshake)
@@ -108,6 +149,8 @@ bool WebSocketClient::connect(const std::string& url) {
     auto state = std::make_shared<ConnectionState>();
     state->tlsVerifyNone_ = tlsVerifyNone_; state->tlsCaPem_ = tlsCaPem_;
     state->connectTimeout_ = connectTimeout_; state->handshakeTimeout_ = handshakeTimeout_.load();
+    state->maxMessageSize_ = maxMessageSize_; state->maxHandshakeSize_ = maxHandshakeSize_;
+    state->rejections_ = rejections_;
     state->onOpen.target = openTarget_; state->onClose.target = closeTarget_;
     state->onMessage.target = messageTarget_; state->onError.target = errorTarget_;
     tc::internal::sharedStore(state_, state);
@@ -117,6 +160,28 @@ void WebSocketClient::disconnect() { auto state = tc::internal::sharedLoad(state
 bool WebSocketClient::send(const std::string& message) { auto state = tc::internal::sharedLoad(state_); return state->send(message); }
 bool WebSocketClient::send(const std::vector<char>& data) { auto state = tc::internal::sharedLoad(state_); return state->send(data); }
 bool WebSocketClient::sendPing(const std::string& payload) { auto state = tc::internal::sharedLoad(state_); return state->sendPing(payload); }
+
+bool WebSocketClient::setMaxMessageSize(size_t bytes) {
+    // Bound (platform): frame lengths must leave room for their header in size_t. Overflow rejects the configuration, warns once and is counted.
+    if (bytes == 0 || bytes > std::numeric_limits<size_t>::max() - 14) {
+        ++rejections_->configurations;
+        logWarning("WebSocket") << "Invalid message limit; configuration unchanged";
+        return false;
+    }
+    maxMessageSize_ = bytes;
+    return true;
+}
+
+bool WebSocketClient::setMaxHandshakeSize(size_t bytes) {
+    // Bound (platform): an upgrade header includes its four-byte terminator. Overflow rejects the configuration, warns once and is counted.
+    if (bytes < 4) {
+        ++rejections_->configurations;
+        logWarning("WebSocket") << "Invalid upgrade header limit; configuration unchanged";
+        return false;
+    }
+    maxHandshakeSize_ = bytes;
+    return true;
+}
 
 bool WebSocketClient::ConnectionState::connect(const std::string& url) {
     disconnect();
@@ -134,6 +199,7 @@ bool WebSocketClient::ConnectionState::connect(const std::string& url) {
 
     emscripten_websocket_set_onopen_callback(wsHandle_, this, onEmscriptenOpen);
     emscripten_websocket_set_onmessage_callback(wsHandle_, this, onEmscriptenMessage);
+    installWebSocketIngressLimit(wsHandle_, maxMessageSize_, this, onEmscriptenMessageLimit);
     emscripten_websocket_set_onclose_callback(wsHandle_, this, onEmscriptenClose);
     emscripten_websocket_set_onerror_callback(wsHandle_, this, onEmscriptenError);
 
@@ -181,7 +247,8 @@ bool WebSocketClient::ConnectionState::connect(const std::string& url) {
 void WebSocketClient::ConnectionState::disconnect() {
 #ifdef __EMSCRIPTEN__
     if (wsHandle_ > 0) {
-        emscripten_websocket_close(wsHandle_, 1000, "Normal closure");
+        if (state_ != State::Closing && state_ != State::Disconnected)
+            emscripten_websocket_close(wsHandle_, 1000, "Normal closure");
         emscripten_websocket_delete(wsHandle_);
         wsHandle_ = 0;
     }
@@ -202,6 +269,7 @@ void WebSocketClient::ConnectionState::disconnect() {
 #endif
     state_ = State::Disconnected;
     receiveBuffer_.clear();
+    frameBytesNeeded_ = 2;
     // A partial fragmented message must not leak into the next connection
     fragmentBuffer_.clear();
     fragmentOpcode_ = 0;
@@ -337,19 +405,40 @@ void WebSocketClient::ConnectionState::sendHandshake() {
 
 void WebSocketClient::ConnectionState::handleRawReceive(TcpReceiveEventArgs& args) {
 #ifndef __EMSCRIPTEN__
-    receiveBuffer_.insert(receiveBuffer_.end(), args.data.begin(), args.data.end());
-
-    if (state_ == State::Connecting) {
-        // Look for end of HTTP header
-        std::string bufferStr(receiveBuffer_.begin(), receiveBuffer_.end());
-        size_t headerEnd = bufferStr.find("\r\n\r\n");
-        if (headerEnd != std::string::npos) {
-            std::string header = bufferStr.substr(0, headerEnd);
-            receiveBuffer_.erase(receiveBuffer_.begin(), receiveBuffer_.begin() + headerEnd + 4);
+    size_t offset = 0;
+    while (offset < args.data.size() && !ingressRejected_) {
+        if (state_ == State::Connecting) {
+            // Scan only new bytes. The terminator may span TCP deliveries;
+            // bytes after it belong to the first frame, not to the header.
+            // Bound (security): upgrade metadata needs a finite memory allowance. Overflow rejects the upgrade, closes once, warns once and is counted.
+            if (receiveBuffer_.size() == maxHandshakeSize_) {
+                rejectIngress(IngressLimit::Upgrade, 1009, "WebSocket upgrade header limit exceeded");
+                return;
+            }
+            receiveBuffer_.push_back(args.data[offset++]);
+            if (receiveBuffer_.size() < 4 ||
+                !std::equal(receiveBuffer_.end() - 4, receiveBuffer_.end(), "\r\n\r\n")) continue;
+            std::string header(receiveBuffer_.begin(), receiveBuffer_.end() - 4);
+            receiveBuffer_.clear();
+            auto alive = alive_;
+            unsigned connection = connection_;
             processHandshake(header);
+            if (!*alive || connection_ != connection) return;
+        } else if (state_ == State::Open) {
+            // First collect only the frame header. processFrame validates its
+            // length before admitting any payload from this TCP delivery.
+            size_t count = std::min(frameBytesNeeded_ - receiveBuffer_.size(), args.data.size() - offset);
+            reserveIngress(receiveBuffer_, receiveBuffer_.size() + count, frameBytesNeeded_);
+            receiveBuffer_.insert(receiveBuffer_.end(), args.data.begin() + offset,
+                                  args.data.begin() + offset + count);
+            offset += count;
+            auto alive = alive_;
+            unsigned connection = connection_;
+            processFrame();
+            if (!*alive || connection_ != connection) return;
+        } else {
+            return;
         }
-    } else if (state_ == State::Open) {
-        processFrame();
     }
 #endif
 }
@@ -392,11 +481,11 @@ void WebSocketClient::ConnectionState::processFrame() {
 
         size_t headerSize = 2;
         if (payloadLen == 126) {
-            if (receiveBuffer_.size() < 4) return;
+            if (receiveBuffer_.size() < 4) { frameBytesNeeded_ = 4; return; }
             payloadLen = ((unsigned char)receiveBuffer_[2] << 8) | (unsigned char)receiveBuffer_[3];
             headerSize = 4;
         } else if (payloadLen == 127) {
-            if (receiveBuffer_.size() < 10) return;
+            if (receiveBuffer_.size() < 10) { frameBytesNeeded_ = 10; return; }
             payloadLen = 0;
             for (int i = 0; i < 8; ++i) {
                 payloadLen = (payloadLen << 8) | (unsigned char)receiveBuffer_[2 + i];
@@ -420,9 +509,9 @@ void WebSocketClient::ConnectionState::processFrame() {
                 failConnection(1002, "WebSocket protocol error: fragmented control frame (FIN=0)");
                 return;
             }
-            // Bound (security): untrusted control frames must fit the RFC 6455 limit to keep buffering finite. Overflow fails the connection with code 1002.
+            // Bound (security): control frames must fit the RFC 6455 allowance. Overflow rejects the frame with Close 1002, warns once and is counted.
             if (payloadLen > 125) {
-                failConnection(1002, "WebSocket protocol error: control frame payload over 125 bytes");
+                rejectIngress(IngressLimit::Control, 1002, "WebSocket protocol error: control frame payload over 125 bytes");
                 return;
             }
         }
@@ -436,11 +525,10 @@ void WebSocketClient::ConnectionState::processFrame() {
         // comes first, so headerSize + payloadLen below cannot overflow.
         bool isData = (opcode == 0x0 || opcode == 0x1 || opcode == 0x2);
         uint64_t alreadyBuffered = (opcode == 0x0) ? fragmentBuffer_.size() : 0;
-        if (payloadLen > maxMessageSize_ ||
-            (isData && payloadLen > maxMessageSize_ - alreadyBuffered)) {
-            failConnection(1009, "WebSocket message too big: " +
-                           std::to_string(alreadyBuffered + payloadLen) +
-                           " bytes, limit is " + std::to_string(maxMessageSize_));
+        // Bound (security): frame and fragmented totals share the message allowance. Overflow rejects the message with Close 1009, warns once and is counted.
+        if (isData && (payloadLen > maxMessageSize_ ||
+                       payloadLen > maxMessageSize_ - alreadyBuffered)) {
+            rejectIngress(IngressLimit::Message, 1009, "WebSocket message too big: message limit exceeded");
             return;
         }
         if (opcode == 0x0 && fragmentOpcode_ == 0) {
@@ -453,15 +541,16 @@ void WebSocketClient::ConnectionState::processFrame() {
             return;
         }
 
-        if (receiveBuffer_.size() < headerSize + payloadLen) return;
-
-        std::vector<char> payload(payloadLen);
-        if (payloadLen > 0) {
-            memcpy(payload.data(), &receiveBuffer_[headerSize], payloadLen);
+        frameBytesNeeded_ = headerSize + static_cast<size_t>(payloadLen);
+        if (receiveBuffer_.size() < frameBytesNeeded_) {
+            // An advertised length alone does not allocate its payload storage.
+            return;
         }
 
-        // Remove processed frame from buffer
-        receiveBuffer_.erase(receiveBuffer_.begin(), receiveBuffer_.begin() + headerSize + payloadLen);
+        receiveBuffer_.erase(receiveBuffer_.begin(), receiveBuffer_.begin() + headerSize);
+        std::vector<char> payload = std::move(receiveBuffer_);
+        receiveBuffer_.clear();
+        frameBytesNeeded_ = 2;
 
         // Handle Opcode. A message may be split into a Text/Binary frame with
         // FIN=0 and continuation frames (opcode 0), the last with FIN=1
@@ -473,10 +562,12 @@ void WebSocketClient::ConnectionState::processFrame() {
             if (fin) {
                 messageOpcode = opcode;
             } else {
-                fragmentBuffer_ = std::move(payload);
+                reserveIngress(fragmentBuffer_, payload.size(), maxMessageSize_);
+                fragmentBuffer_.assign(payload.begin(), payload.end());
                 fragmentOpcode_ = opcode;
             }
         } else if (opcode == 0x0) { // Continuation
+            reserveIngress(fragmentBuffer_, fragmentBuffer_.size() + payload.size(), maxMessageSize_);
             fragmentBuffer_.insert(fragmentBuffer_.end(), payload.begin(), payload.end());
             if (fin) {
                 messageOpcode = fragmentOpcode_;
@@ -585,8 +676,21 @@ bool WebSocketClient::ConnectionState::sendControl(uint8_t opcode, const char* d
 #ifndef __EMSCRIPTEN__
     if (state_ != State::Open || !client_) return false;
 
-    // Bound (platform): the WebSocket control-frame API permits at most 125 payload bytes. Overflow truncates the control payload.
-    if (len > 125) len = 125;
+    std::array<char, 125> truncated;
+    // Bound (platform): RFC 6455 control frames permit at most 125 payload bytes. Overflow truncates the payload, warns once per owning client and counts every truncation.
+    if (len > 125) {
+        len = 125;
+        // The synchronous log listener may destroy the owner of borrowed data.
+        std::copy_n(data, len, truncated.data());
+        data = truncated.data();
+        ++rejections_->controls;
+        if (!rejections_->controlTruncationWarned.exchange(true)) {
+            auto alive = alive_;
+            unsigned connection = connection_;
+            logWarning("WebSocket") << "WebSocket control payload truncated to 125 bytes";
+            if (!*alive || connection_ != connection || state_ != State::Open || !client_) return false;
+        }
+    }
     std::vector<unsigned char> frame;
     frame.reserve(6 + len);
     frame.push_back(0x80 | opcode);               // FIN + opcode
@@ -614,6 +718,8 @@ void WebSocketClient::ConnectionState::failConnection(uint16_t statusCode, const
     const char status[2] = {(char)((statusCode >> 8) & 0xFF), (char)(statusCode & 0xFF)};
     sendControl(0x08, status, 2);
 
+    state_ = State::Closing;
+
     // onError fires before disconnect(), which fires onClose synchronously.
     // A listener may disconnect, reconnect or destroy the client (#262).
     std::shared_ptr<std::atomic<bool>> alive = alive_;
@@ -624,11 +730,46 @@ void WebSocketClient::ConnectionState::failConnection(uint16_t statusCode, const
     if (!*alive || connection_ != connection) return;
     disconnect();
 #else
-    (void)statusCode; (void)reason;
+    // Browser close() permits 1000 or application codes 3000-4999. Use
+    // application code 4009 for the same message-size rejection as native 1009.
+    if (wsHandle_ > 0) emscripten_websocket_close(wsHandle_, statusCode == 1009 ? 4009 : 4000, reason.c_str());
+    state_ = State::Closing;
+    auto alive = alive_;
+    unsigned connection = connection_;
+    TcpErrorEventArgs err;
+    err.message = reason;
+    onError.notify(err);
+    if (!*alive || connection_ != connection) return;
+    // Keep the browser's close callback: it reports onClose once.
 #endif
 }
 
+void WebSocketClient::ConnectionState::rejectIngress(IngressLimit limit, uint16_t statusCode,
+                                                     const std::string& reason) {
+    if (ingressRejected_) return;
+#ifndef __EMSCRIPTEN__
+    if (limit == IngressLimit::Upgrade && !awaitingUpgrade_.exchange(false)) return;
+#endif
+    ingressRejected_ = true;
+    switch (limit) {
+        case IngressLimit::Upgrade: ++rejections_->upgrades; break;
+        case IngressLimit::Message: ++rejections_->messages; break;
+        case IngressLimit::Control: ++rejections_->controls; break;
+    }
+    auto alive = alive_;
+    unsigned connection = connection_;
+    logWarning("WebSocket") << reason;
+    if (!*alive || connection_ != connection) return;
+    failConnection(statusCode, reason);
+}
+
 #ifdef __EMSCRIPTEN__
+void WebSocketClient::ConnectionState::onEmscriptenMessageLimit(void* userData) {
+    auto self = static_cast<ConnectionState*>(userData)->shared_from_this();
+    if (!*self->alive_) return;
+    self->rejectIngress(IngressLimit::Message, 1009, "WebSocket message too big: message limit exceeded");
+}
+
 EM_BOOL WebSocketClient::ConnectionState::onEmscriptenOpen(int eventType, const EmscriptenWebSocketOpenEvent *websocketEvent, void *userData) {
     auto keepAlive = static_cast<ConnectionState*>(userData)->shared_from_this();
     auto* self = keepAlive.get();
@@ -641,7 +782,15 @@ EM_BOOL WebSocketClient::ConnectionState::onEmscriptenOpen(int eventType, const 
 EM_BOOL WebSocketClient::ConnectionState::onEmscriptenMessage(int eventType, const EmscriptenWebSocketMessageEvent *websocketEvent, void *userData) {
     auto keepAlive = static_cast<ConnectionState*>(userData)->shared_from_this();
     auto* self = keepAlive.get();
-    if (!*self->alive_) return EM_TRUE;
+    if (!*self->alive_ || self->ingressRejected_ || self->state_ != State::Open) return EM_TRUE;
+    // Defensive C++ admission as well; the JS boundary checks before WASM allocation.
+    size_t bytes = websocketEvent->numBytes;
+    if (websocketEvent->isText && bytes > 0 && websocketEvent->data[bytes - 1] == 0) --bytes;
+    // Bound (security): delivered messages share the native message allowance. Overflow rejects the message with Close 4009, warns once and is counted.
+    if (bytes > self->maxMessageSize_) {
+        onEmscriptenMessageLimit(userData);
+        return EM_TRUE;
+    }
     WebSocketEventArgs args;
     // Text messages arrive NUL-terminated with the terminator counted in
     // numBytes; fillMessageArgs drops it so web matches native.

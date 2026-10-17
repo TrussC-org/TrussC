@@ -22,6 +22,7 @@
 #include <mutex>
 #include <cctype>
 #include <chrono>
+#include <stdexcept>
 
 // JSON support
 #include "../../nlohmann/json.hpp"
@@ -31,6 +32,7 @@ using json = nlohmann::json;
 #include "tcLog.h"
 #include "tcThreadChannel.h"
 #include "tcVersion.h"
+#include "tcMcpLimits.h"
 #include "../app/tcExit.h"
 
 #ifndef __EMSCRIPTEN__
@@ -97,12 +99,46 @@ inline const char* toolLevelName(ToolLevel level) {
 namespace internal {
 
 // Replies preserve valid UTF-8 and silently replace malformed bytes with U+FFFD.
+inline size_t replySize(const json& j) {
+    // Count through the serializer before reserving the output string. Its
+    // adapter enforces the limit as each escaped UTF-8 segment is emitted.
+    struct Counter : nlohmann::detail::output_adapter_protocol<char> {
+        size_t size = 0, limit = getAdmissionLimits().replyBytes;
+        void write_character(char) override { add(1); }
+        void write_characters(const char*, size_t n) override { add(n); }
+        void add(size_t n) {
+            // Bound (security): escaped and replaced text must fit the wire reply. Overflow returns an error and is counted.
+            if (n > limit - size) {
+                admissionRejected(AdmissionStore::Reply, limit, n > SIZE_MAX - size ? SIZE_MAX : size + n);
+                throw AdmissionError();
+            }
+            size += n;
+        }
+    };
+    auto counter = std::make_shared<Counter>();
+    nlohmann::detail::serializer<json> count(counter, ' ', json::error_handler_t::replace);
+    count.dump(j, false, false, 0);
+    return counter->size;
+}
+
 inline std::string dumpReply(const json& j) {
-    return j.dump(-1, ' ', false, json::error_handler_t::replace);
+    const auto size = replySize(j);
+    // Bound (abi): output and HTTP copies must fit checked size arithmetic. Overflow returns an error and is counted.
+    if (size > getAdmissionLimits().workingBytes / 2) {
+        admissionRejected(AdmissionStore::Working, getAdmissionLimits().workingBytes, size);
+        throw AdmissionError();
+    }
+    reserveWork(size * 2); // Output plus the HTTP response copy.
+    std::string out;
+    out.reserve(size);
+    nlohmann::detail::serializer<json> write(nlohmann::detail::output_adapter<char>(out), ' ', json::error_handler_t::replace);
+    write.dump(j, false, false, 0);
+    return out;
 }
 
 inline std::string makeResult(const json& id, const json& result) {
     if (id.is_null()) return "";
+    (void)replySize(id); // Bound the ID before copying it into an envelope.
     json res = {
         {"jsonrpc", "2.0"},
         {"id", id},
@@ -111,9 +147,60 @@ inline std::string makeResult(const json& id, const json& result) {
     return dumpReply(res);
 }
 
+// Rvalue results transfer the completed arrays into the envelope once.
+inline std::string makeResult(const json& id, json&& result) {
+    if (id.is_null()) return "";
+    (void)replySize(id);
+    json res = json::object();
+    res["jsonrpc"] = "2.0";
+    res["id"] = id;
+    res["result"] = std::move(result);
+    return dumpReply(res);
+}
+
+inline void reserveMetadata(std::initializer_list<std::string_view> fields) {
+    if (!currentWorkBudget()) return;
+    constexpr size_t overhead = 2048;
+    size_t bytes = 0;
+    for (auto field : fields)
+        bytes = field.size() > SIZE_MAX - bytes ? SIZE_MAX : bytes + field.size();
+    const auto limit = getAdmissionLimits().workingBytes;
+    // Bound (security): registry metadata and schema nodes need incremental credits before copying. Overflow rejects and is counted.
+    if (limit < overhead || bytes > (limit - overhead) / 3) {
+        admissionRejected(AdmissionStore::Working, limit,
+            bytes > (SIZE_MAX - overhead) / 3 ? SIZE_MAX : bytes * 3 + overhead);
+        throw AdmissionError();
+    }
+    reserveWork(bytes * 3 + overhead); // Strings, required-name copies and JSON/vector nodes.
+    const auto replyLimit = getAdmissionLimits().replyBytes;
+    if (replyLimit < overhead || bytes > (replyLimit - overhead) / 6) {
+        admissionRejected(AdmissionStore::Reply, replyLimit,
+            bytes > (SIZE_MAX - overhead) / 6 ? SIZE_MAX : bytes * 6 + overhead);
+        throw AdmissionError();
+    }
+    reserveReply(bytes * 6 + overhead); // Worst-case escaping plus structural output.
+}
+
 inline std::string toolError(const json& id, const std::string& message) {
     return makeResult(id, {{"content", {{{"type", "text"}, {"text", message}}}},
                            {"isError", true}});
+}
+
+inline std::string boundedErrorMessage(std::string_view prefix, const char* detail) {
+    const auto limit = getAdmissionLimits().replyBytes;
+    checkAdmission(prefix.size(), limit, AdmissionStore::Reply);
+    size_t length = 0;
+    while (length < limit - prefix.size() && detail[length]) ++length;
+    // Bound (security): exception details must fit before concatenating them.
+    // Escaping/replacement and the complete envelope are checked by dumpReply.
+    if (detail[length]) {
+        admissionRejected(AdmissionStore::Reply, limit, limit == SIZE_MAX ? SIZE_MAX : limit + 1);
+        throw AdmissionError();
+    }
+    reserveWork(prefix.size() + length);
+    std::string message(prefix);
+    message.append(detail, length);
+    return message;
 }
 
 // The promise carries a THUNK, not the reply string: the blocked HTTP worker
@@ -123,8 +210,48 @@ inline std::string toolError(const json& id, const std::string& message) {
 // runs on the HTTP worker — off the frame loop — while main only did the
 // readback.
 using ReplyThunk = std::function<std::string()>;
+inline void completeResponse(const std::shared_ptr<std::promise<ReplyThunk>>& promise, ReplyThunk thunk) {
+    try { promise->set_value(std::move(thunk)); }
+    catch (const std::future_error& e) {
+        if (e.code() != std::make_error_code(std::future_errc::promise_already_satisfied)) throw;
+    }
+}
+
+// All terminal builders may fail admission, including error builders. Always
+// publish a thunk: a failed bounded envelope takes the HTTP 503 path.
+template<class Builder>
+inline void completeTerminalResponse(const std::shared_ptr<std::promise<ReplyThunk>>& promise,
+                                     const std::shared_ptr<WorkBudget>& budget, Builder&& build) {
+    try {
+        WorkScope scope(budget);
+        auto reply = build();
+        completeResponse(promise, [reply = std::move(reply)] { return reply; });
+    } catch (...) {
+        completeResponse(promise, []() -> std::string { throw AdmissionError(); });
+    }
+}
+
+// Shared by normal dispatch and shutdown; no alternate unrestricted parser.
+inline json parseRequest(const std::string& body) {
+    const auto limits = getAdmissionLimits();
+    checkAdmission(body.size(), limits.bodyBytes, AdmissionStore::Body);
+    if (body.size() > limits.workingBytes / 128) {
+        admissionRejected(AdmissionStore::Working, limits.workingBytes, body.size());
+        throw AdmissionError();
+    }
+    reserveWork(body.size() * 128);
+    return json::parse(body, [limits](int depth, json::parse_event_t, json&) {
+        // Bound (security): reject depth before recursive DOM copies or dumps.
+        if (depth >= 0 && size_t(depth) > limits.jsonDepth) {
+            admissionRejected(AdmissionStore::Working, limits.jsonDepth, size_t(depth), "levels");
+            throw AdmissionError();
+        }
+        return true;
+    });
+}
 
 struct DeferredResponse {
+    std::shared_ptr<WorkBudget> budget;
     json id = nullptr;  // request id retained for deferred error replies
     std::shared_ptr<std::promise<ReplyThunk>> response;  // unblocks the HTTP worker
     std::function<ReplyThunk()> makeEnvelope;            // main stage → worker thunk
@@ -236,20 +363,28 @@ inline void drainDeferredResponses(const void* targetWindow = nullptr) {
     // Answer outside the lock: a worker woken here may call std::exit, whose
     // stopHttpServer() takes the lock to answer what is still pending.
     for (auto& d : ready) {
-        internal::ReplyThunk thunk;
+        WorkScope workScope(d.budget);
         try {
-            thunk = d.makeEnvelope();
+            internal::completeResponse(d.response, d.makeEnvelope());
+        } catch (const AdmissionError&) {
+            completeTerminalResponse(d.response, d.budget, [&] {
+                return toolError(d.id, "MCP admission limit exceeded");
+            });
         } catch (const std::exception& e) {
-            const std::string message = std::string("deferred response failed: ") + e.what();
-            std::string err = internal::toolError(d.id, message);
-            thunk = [err]() { return err; };
+            completeTerminalResponse(d.response, d.budget, [&] {
+                return toolError(d.id, boundedErrorMessage("deferred response failed: ", e.what()));
+            });
+        } catch (...) {
+            completeTerminalResponse(d.response, d.budget, [&] {
+                return toolError(d.id, "deferred response failed");
+            });
         }
-        d.response->set_value(std::move(thunk));
     }
     for (auto& d : expired) {
-        std::string reply = internal::toolError(d.id,
-            "the window rendered no frame within 5 s (minimized, hidden or closed?)");
-        d.response->set_value([reply]() { return reply; });
+        completeTerminalResponse(d.response, d.budget, [&] {
+            return toolError(d.id,
+                "the window rendered no frame within 5 s (minimized, hidden or closed?)");
+        });
     }
 }
 
@@ -302,6 +437,7 @@ public:
     const void* owner = nullptr;   // see registrationOwner()
 
     json getSchema() const {
+        internal::reserveMetadata({});
         json schema = {
             {"type", "object"},
             {"properties", json::object()},
@@ -309,6 +445,7 @@ public:
         };
 
         for (const auto& arg : args) {
+            internal::reserveMetadata({arg.name, arg.type, arg.description});
             schema["properties"][arg.name] = {
                 {"type", arg.type},
                 {"description", arg.description}
@@ -340,6 +477,12 @@ public:
 // ---------------------------------------------------------------------------
 
 namespace internal {
+
+// Input handlers use this only for validation before delivering any events.
+class InputArgumentError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
 
 class Server {
 public:
@@ -380,8 +523,9 @@ public:
     // --- Message Processing (returns JSON-RPC response string) ---
 
     std::string processMessage(const std::string& rawMessage) {
+        WorkScope workScope;
         try {
-            auto j = json::parse(rawMessage);
+            auto j = parseRequest(rawMessage);
 
             // Validate JSON-RPC
             if (!j.contains("jsonrpc") || j["jsonrpc"] != "2.0") {
@@ -399,6 +543,9 @@ public:
 
             return "";
 
+        } catch (const AdmissionError&) {
+            if (currentWorkBudget() && currentWorkBudget()->isHttp()) throw;
+            return "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32000,\"message\":\"MCP admission limit exceeded\"}}";
         } catch (const std::exception& e) {
             trussc::logError("MCP") << "JSON parse error: " << e.what();
             return makeError(json(nullptr), -32700, std::string("Parse error: ") + e.what());
@@ -450,13 +597,16 @@ private:
         json toolList = json::array();
         for (const auto& [name, tool] : tools_) {
             if (tool.level > getToolLevel() || (internal::healthOnly() && name != "tc_get_health")) continue;
-            toolList.push_back({
-                {"name", tool.name},
-                {"description", tool.description},
-                {"inputSchema", tool.getSchema()}
-            });
+            reserveMetadata({tool.name, tool.description});
+            json entry = json::object();
+            entry["name"] = tool.name;
+            entry["description"] = tool.description;
+            entry["inputSchema"] = tool.getSchema();
+            toolList.push_back(std::move(entry));
         }
-        return internal::makeResult(id, {{"tools", toolList}});
+        json result = json::object();
+        result["tools"] = std::move(toolList);
+        return internal::makeResult(id, std::move(result));
     }
 
     std::string handleToolsCall(const json& req, const json& id) {
@@ -527,11 +677,13 @@ private:
                 ds.hasEnvelope = true;
                 ds.envelope = [id, formatResult, mainStage]() -> internal::ReplyThunk {
                     std::function<json()> workerStage = mainStage();
-                    return [id, formatResult, workerStage]() -> std::string {
+                    auto budget = currentWorkBudget();
+                    return [id, formatResult, workerStage, budget]() -> std::string {
+                        WorkScope workScope(budget);
                         try {
                             return formatResult(workerStage());
                         } catch (const std::exception& e) {
-                            return internal::toolError(id, std::string("deferred worker stage failed: ") + e.what());
+                            return internal::toolError(id, boundedErrorMessage("deferred worker stage failed: ", e.what()));
                         }
                     };
                 };
@@ -540,6 +692,11 @@ private:
 
             return formatResult(content);
 
+        } catch (const InputArgumentError& e) {
+            return makeError(id, -32602, e.what());
+        } catch (const AdmissionError&) {
+            if (currentWorkBudget() && currentWorkBudget()->isHttp()) throw;
+            return "{\"jsonrpc\":\"2.0\",\"id\":null,\"result\":{\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"MCP admission limit exceeded\"}]}}";
         } catch (const std::exception& e) {
             return internal::toolError(id, std::string("Tool execution error: ") + e.what());
         } catch (...) {
@@ -551,14 +708,17 @@ private:
         json resList = json::array();
         for (const auto& [uri, res] : resources_) {
             if (internal::healthOnly()) continue;
-            resList.push_back({
-                {"uri", res.uri},
-                {"name", res.name},
-                {"description", res.description},
-                {"mimeType", res.mimeType.empty() ? nullptr : json(res.mimeType)}
-            });
+            reserveMetadata({res.uri, res.name, res.description, res.mimeType});
+            json entry = json::object();
+            entry["uri"] = res.uri;
+            entry["name"] = res.name;
+            entry["description"] = res.description;
+            entry["mimeType"] = res.mimeType.empty() ? nullptr : json(res.mimeType);
+            resList.push_back(std::move(entry));
         }
-        return internal::makeResult(id, {{"resources", resList}});
+        json result = json::object();
+        result["resources"] = std::move(resList);
+        return internal::makeResult(id, std::move(result));
     }
 
     std::string handleResourcesRead(const json& req, const json& id) {
@@ -612,12 +772,17 @@ struct TC_PLATFORMS("macos,windows,linux,ios,android") McpRequest {
     // see internal::ReplyThunk. Normal replies are prebuilt (thunk just returns
     // them); two-stage tool replies do their heavy encode inside the thunk.
     TC_PLATFORMS("macos,windows,linux,ios,android") std::shared_ptr<std::promise<internal::ReplyThunk>> response;
+    std::shared_ptr<internal::WorkBudget> budget;
 };
 
 namespace internal {
 
 // HTTP server state, one per process (defined in tcMCP.cpp, see above).
 ThreadChannel<McpRequest>& getHttpChannel();
+void trackHttpPromise(const std::shared_ptr<std::promise<ReplyThunk>>& promise, const std::string& body,
+                      const std::shared_ptr<WorkBudget>& budget,
+                      std::shared_future<ReplyThunk> future);
+void untrackHttpPromise(const std::shared_ptr<std::promise<ReplyThunk>>& promise);
 void resetHttpChannel();
 std::unique_ptr<httplib::Server>& getHttpServer();
 std::unique_ptr<std::thread>& getHttpThread();
@@ -718,20 +883,27 @@ inline std::string normalExitMessage() {
     return "the app is exiting normally" + (reason.empty() ? std::string() : " (reason=" + reason + ")");
 }
 inline std::string normalExitReply(const std::string& body) {
-    auto request = json::parse(body, nullptr, false);
-    json id = nullptr;
-    if (request.is_object() && request.contains("id")) id = request["id"];
-    return json{{"jsonrpc", "2.0"}, {"id", id},
-        {"error", {{"code", -32000}, {"message", normalExitMessage()}}}}.dump();
+    WorkScope scope;
+    auto request = parseRequest(body);
+    json reply{{"jsonrpc", "2.0"},
+        {"error", {{"code", -32000}, {"message", normalExitMessage()}}}};
+    // Move the depth-bounded ID, avoiding a recursive copy before serialization.
+    reply["id"] = request.is_object() && request.contains("id")
+        ? std::move(request["id"]) : json(nullptr);
+    return dumpReply(reply);
 }
-inline void enqueueHttpRequest(McpRequest request) {
-    std::lock_guard<std::mutex> lock(httpQueueMutex());
-    if (!getHttpChannel().isClosed()) {
-        getHttpChannel().send(std::move(request));
-    } else {
-        const auto reply = normalExitReply(request.body);
-        request.response->set_value([reply] { return reply; });
+inline void enqueueHttpRequest(McpRequest request, std::shared_future<ReplyThunk> future = {}) {
+    {
+        std::lock_guard<std::mutex> lock(httpQueueMutex());
+        if (!getHttpChannel().isClosed()) {
+            trackHttpPromise(request.response, request.body, request.budget, std::move(future));
+            getHttpChannel().send(std::move(request));
+            return;
+        }
     }
+    completeTerminalResponse(request.response, request.budget, [&] {
+        return normalExitReply(request.body);
+    });
 }
 } // namespace internal
 
@@ -767,25 +939,42 @@ TC_PLATFORMS("macos,windows,linux,ios,android") void stopHttpServer();
 TC_PLATFORMS("macos,windows,linux,ios,android") inline void processHttpQueue() {
     McpRequest req;
     while (internal::getHttpChannel().tryReceive(req)) {
+        internal::WorkScope workScope(req.budget);
         auto& ds = internal::deferralState();
         ds.hasEnvelope = false;
         ds.target = nullptr;
         ds.owner = nullptr;
-        std::string result = internal::Server::instance().processMessage(req.body);
+        std::string result;
+        try {
+            result = internal::Server::instance().processMessage(req.body);
+        } catch (const internal::AdmissionError&) {
+            internal::completeResponse(req.response, []() -> std::string { throw internal::AdmissionError(); });
+            continue;
+        }
         if (ds.hasEnvelope) {
             // Tool deferred its reply until after present(): stash the promise
             // and answer it from drainDeferredResponses(). The HTTP worker stays
             // blocked on its future a few ms longer (correct, not a hang).
             internal::DeferredResponse d;
+            d.budget = req.budget;
             d.id = std::move(ds.id);
             d.response = req.response;
             d.makeEnvelope = std::move(ds.envelope);
             d.target = ds.target;
             d.deadline = std::chrono::steady_clock::now() + internal::kTargetedDeferralTimeout;
             d.owner = ds.owner;
+            bool closed;
             {
                 std::lock_guard<std::mutex> lock(internal::deferredResponsesMutex());
-                internal::deferredResponses().push_back(std::move(d));
+                // Stop closes the channel before draining this list. Checking
+                // under the list lock also covers a handler finishing later.
+                closed = internal::getHttpChannel().isClosed();
+                if (!closed) internal::deferredResponses().push_back(std::move(d));
+            }
+            if (closed) {
+                internal::completeTerminalResponse(d.response, d.budget, [&] {
+                    return internal::toolError(d.id, "the MCP server shut down before the reply was produced");
+                });
             }
             ds.hasEnvelope = false;
             ds.target = nullptr;
@@ -795,7 +984,7 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline void processHttpQueue() {
             // Return empty JSON-RPC response for notifications
             result = "{}";
         }
-        req.response->set_value([result]() { return result; });
+        internal::completeResponse(req.response, [result]() { return result; });
     }
 }
 
@@ -833,10 +1022,10 @@ inline void removeRegistrationsOwnedBy(const void* owner) {
         pending.swap(keep);
     }
     for (auto& d : owned) {
-        const std::string message = "the app code behind this reply was unloaded by a hot reload "
-                                    "before the reply was produced";
-        std::string reply = internal::toolError(d.id, message);
-        d.response->set_value([reply]() { return reply; });
+        completeTerminalResponse(d.response, d.budget, [&] {
+            return toolError(d.id, "the app code behind this reply was unloaded by a hot reload "
+                                   "before the reply was produced");
+        });
     }
 }
 } // namespace internal

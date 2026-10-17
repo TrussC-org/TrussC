@@ -21,6 +21,14 @@ The implementations are compiled in `core/include/impl/stb_impl.cpp`
 `STBI_WINDOWS_UTF8` / `STBIW_WINDOWS_UTF8`, and `STBTT_assert`,
 `STBTT_malloc` / `STBTT_free` for stb_truetype, see below) and in
 `core/include/tc/sound/tcSound_impl.cpp` (`stb_vorbis`, inside `extern "C"`).
+For MCP file decoding, `STBI_MALLOC` / `STBI_REALLOC` / `STBI_FREE` route
+through the synchronous `impl/tcMcpImageAdmission.h` allocation scope. Metadata
+and decoding allocations, including growth during decompression, must fit the
+workspace reserved by the MCP owner. All scoped buffers are freed before the
+scope ends; outside a scope these hooks use ordinary malloc/realloc/free with
+unchanged pointer layout. Keep these hooks when updating stb_image and run
+`httpAdmission`, `mcpAdmission` and `mcpAnalyzeImage` after changes.
+
 No other configuration macro is set: every stb_image format is enabled.
 
 "Commit" is the commit of the source repository whose copy of the file is

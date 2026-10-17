@@ -357,6 +357,7 @@ static void cover_mcp() {
     (void)mcp::alert(af::val<const std::string>());
     (void)mcp::deferToolResultTwoStage(af::val<std::function<std::function<json ()> ()>>(), af::val<const void *>());
     (void)mcp::deferToolResultUntilAfterFrame(af::val<std::function<json ()>>(), af::val<const void *>());
+    (void)mcp::getAdmissionLimits();
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
     (void)mcp::getHttpPort();
 #endif
@@ -367,6 +368,7 @@ static void cover_mcp() {
     (void)mcp::processHttpQueue();
 #endif
     (void)mcp::resource(af::val<const std::string>(), af::val<const std::string>());
+    (void)mcp::setAdmissionLimits(af::val<const mcp::AdmissionLimits>());
     (void)mcp::setToolLevel(af::val<mcp::ToolLevel>());
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
     (void)mcp::startHttpServer(af::val<int>(), af::val<const std::string>(), af::val<const std::string>());
@@ -4731,6 +4733,23 @@ struct Cover_Xml : af::Scope<Xml> {
     }
 };
 
+struct Cover_mcp__AdmissionLimits : af::Scope<mcp::AdmissionLimits> {
+    static void run() {
+        (void)af::val<mcp::AdmissionLimits>().bodyBytes;
+        (void)af::val<mcp::AdmissionLimits>().gridCells;
+        (void)af::val<mcp::AdmissionLimits>().headerBytes;
+        (void)af::val<mcp::AdmissionLimits>().headerCount;
+        (void)af::val<mcp::AdmissionLimits>().histogramBins;
+        (void)af::val<mcp::AdmissionLimits>().jsonDepth;
+        (void)af::val<mcp::AdmissionLimits>().lineBytes;
+        (void)af::val<mcp::AdmissionLimits>().operations;
+        (void)af::val<mcp::AdmissionLimits>().outstanding;
+        (void)af::val<mcp::AdmissionLimits>().replyBytes;
+        (void)af::val<mcp::AdmissionLimits>().workers;
+        (void)af::val<mcp::AdmissionLimits>().workingBytes;
+    }
+};
+
 struct Cover_mcp__Resource : af::Scope<mcp::Resource> {
     static void run() {
         (void)af::val<mcp::Resource>().description;
@@ -4954,6 +4973,7 @@ void af::coverGenerated() {
     af_generated::Cover_Window::run();
     af_generated::Cover_WindowSettings::run();
     af_generated::Cover_Xml::run();
+    af_generated::Cover_mcp__AdmissionLimits::run();
     af_generated::Cover_mcp__Resource::run();
     af_generated::Cover_mcp__ResourceBuilder::run();
     af_generated::Cover_mcp__Tool::run();

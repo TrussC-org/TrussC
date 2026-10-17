@@ -19723,9 +19723,9 @@ description.ko = "MCP 검사 이름을 반환 (이름이 없거나 이동된 원
 related = ["Fbo::setDebugName"]
 
 ["Image::setDebugName"]
-description.en = "Set the MCP inspection name. tc_list_images lists live Images with index, name, width, height and format; moves transfer name/index and remove moved-from entries, destruction removes entries, unnamed Images remain available by index. tc_analyze_image reads CPU pixels with source={image:name or index}; other sources are window:index, fbo:name or index, path:file. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), and results in ops order; byte colors are normalized RGBA, float values above 1 pass through. Ops: pixel(x,y):color; histogram(bins):histogram[channel][bin] over 0-1 (outliers in end bins); count(color,tolerance or min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):mean colors[row][col]; diff(path,threshold,optional save):count,bbox,maxDifference; line(x0,y0,x1,y1):colors along inclusive Bresenham samples. Every op accepts optional rect=[x,y,w,h], default whole image. Coordinates are top-left, bbox=[x,y,w,h], centroid=[x,y]; empty matches yield null bbox/centroid. Rects and grid cells must be nonempty; line endpoints are in the image and samples clip to rect. Count accepts RGB/RGBA bounds or color plus a nonnegative scalar tolerance. Diff compares raw RGBA values with equal image dimensions and counts maximum absolute channel differences strictly above threshold. Optional top-level save (omitted/null writes nothing) and diff.save use tc_save_screenshot paths: UTF-8, data-directory-relative, create parents, unsupported extensions append .png. Float file output is clamped to 0-1; analysis preserves float values. Texture, VideoPlayer and VideoGrabber are not sources."
-description.ja = "MCP 検査用の名前を設定。tc_list_images は生存中の Image の index、name、width、height、format を一覧化。移動で名前とインデックスを引き継ぎ、移動元と破棄済みの項目は消える。名前なしもインデックスで取得可能。tc_analyze_image は source={image:名前またはインデックス} で CPU ピクセルを読む。他のソースは window:インデックス、fbo:名前またはインデックス、path:ファイル。width、height、format（RGBA8/float）、colorSpace（sRGB/linear）、ops 順の results を返す。byte は RGBA 0–1、float は 1 を超える値も保持。操作: pixel(x,y):color、histogram(bins):histogram[channel][bin]（0–1 の等幅区間、範囲外は端の bin）、count(color,tolerance または min,max):count,bbox,centroid、stats():mean,min,max、grid(cols,rows):平均 colors[row][col]、diff(path,threshold,任意の save):count,bbox,maxDifference、line(x0,y0,x1,y1):両端を含む Bresenham 線上の colors。各操作に任意の rect=[x,y,w,h]（既定は画像全体）。座標は左上原点、bbox=[x,y,w,h]、centroid=[x,y]、一致なしは bbox/centroid が null。rect とセルは空にできない。線の両端は画像内、rect 内のサンプルだけを返す。count は RGB/RGBA の範囲または色と非負のスカラー tolerance。diff は同寸法の RGBA 生値を比較し、最大絶対チャネル差が threshold を超えたピクセルを数える。任意のトップレベル save（省略/null は保存なし）と diff.save は tc_save_screenshot と同じ UTF-8・data 相対パス・親作成・未対応拡張子に .png 追加の規則。float の保存は 0–1 に制限するが解析値は保持。Texture、VideoPlayer、VideoGrabber はソースではない。"
-description.ko = "MCP 검사 이름을 설정. tc_list_images 는 살아 있는 Image 의 index, name, width, height, format 을 나열. 이동하면 이름과 인덱스가 이전되며 이동 원본 및 파괴된 항목은 사라진다. 이름 없는 객체도 인덱스로 접근 가능. tc_analyze_image 는 source={image:이름 또는 인덱스} 로 CPU 픽셀을 읽는다. 다른 소스는 window:인덱스, fbo:이름 또는 인덱스, path:파일. width, height, format (RGBA8/float), colorSpace (sRGB/linear), ops 순서의 results 를 반환. byte 색은 RGBA 0–1, float 는 1 초과 값도 유지. 연산: pixel(x,y):color; histogram(bins):histogram[channel][bin] (0–1 등간격, 범위 밖은 끝 bin); count(color,tolerance 또는 min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):평균 colors[row][col]; diff(path,threshold,선택 save):count,bbox,maxDifference; line(x0,y0,x1,y1):양 끝점을 포함한 Bresenham 색 배열. 모든 연산에 선택 rect=[x,y,w,h], 기본값은 전체 이미지. 좌표는 왼쪽 위 원점, bbox=[x,y,w,h], centroid=[x,y]; 일치 없으면 bbox/centroid 는 null. rect 와 셀은 비어 있을 수 없다. 선 끝점은 이미지 내부, rect 내부 샘플만 반환. count 는 RGB/RGBA 범위 또는 색과 음이 아닌 스칼라 tolerance. diff 는 동일 크기 RGBA 원시 값을 비교하며 최대 절대 채널 차이가 threshold 보다 큰 픽셀을 센다. 선택 최상위 save (생략/null 은 저장 안 함) 와 diff.save 는 tc_save_screenshot 의 UTF-8, data 상대 경로, 부모 생성, 미지원 확장자에 .png 추가 규칙을 따른다. float 저장은 0–1 로 제한하지만 분석 값은 유지. Texture, VideoPlayer, VideoGrabber 는 소스가 아니다."
+description.en = "Set the MCP inspection name. tc_list_images lists live Images with index, name, width, height and format; moves transfer name/index and remove moved-from entries, destruction removes entries, unnamed Images remain available by index. tc_analyze_image reads CPU pixels with source={image:name or index}; other sources are window:index, fbo:name or index, path:file. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), and results in ops order; byte colors are normalized RGBA, float values above 1 pass through. Ops: pixel(x,y):color; histogram(bins):histogram[channel][bin] over 0-1 (outliers in end bins); count(color,tolerance or min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):mean colors[row][col]; diff(path,threshold,optional save):count,bbox,maxDifference; line(x0,y0,x1,y1):colors along inclusive Bresenham samples. Every op accepts optional rect=[x,y,w,h], default whole image. Coordinates are top-left, bbox=[x,y,w,h], centroid=[x,y]; empty matches yield null bbox/centroid. Rects and grid cells must be nonempty; line endpoints are in the image and samples clip to rect. Count accepts RGB/RGBA bounds or color plus a nonnegative scalar tolerance. Diff compares raw RGBA values with equal image dimensions and counts maximum absolute channel differences strictly above threshold. Optional top-level save (omitted/null writes nothing) and diff.save use tc_save_screenshot paths: UTF-8, data-directory-relative, create parents, unsupported extensions append .png. Float file output is clamped to 0-1; analysis preserves float values. Texture, VideoPlayer and VideoGrabber are not sources. Analysis defaults to 4096 histogram bins, 65536 grid cells and 256 operations; excess parameters return an error before scratch allocation. Replies default to 64 MiB and aggregate MCP working memory to 256 MiB. Limits are set with mcp::setAdmissionLimits(). File sources and diff references use a bounded encoded snapshot, query stb or platform metadata, and reserve decoded storage and estimated codec workspace before decoding. macOS/iOS retain ImageIO formats, including HEIC, TIFF and JPEG 2000."
+description.ja = "MCP 検査用の名前を設定。tc_list_images は生存中の Image の index、name、width、height、format を一覧化。移動で名前とインデックスを引き継ぎ、移動元と破棄済みの項目は消える。名前なしもインデックスで取得可能。tc_analyze_image は source={image:名前またはインデックス} で CPU ピクセルを読む。他のソースは window:インデックス、fbo:名前またはインデックス、path:ファイル。width、height、format（RGBA8/float）、colorSpace（sRGB/linear）、ops 順の results を返す。byte は RGBA 0–1、float は 1 を超える値も保持。操作: pixel(x,y):color、histogram(bins):histogram[channel][bin]（0–1 の等幅区間、範囲外は端の bin）、count(color,tolerance または min,max):count,bbox,centroid、stats():mean,min,max、grid(cols,rows):平均 colors[row][col]、diff(path,threshold,任意の save):count,bbox,maxDifference、line(x0,y0,x1,y1):両端を含む Bresenham 線上の colors。各操作に任意の rect=[x,y,w,h]（既定は画像全体）。座標は左上原点、bbox=[x,y,w,h]、centroid=[x,y]、一致なしは bbox/centroid が null。rect とセルは空にできない。線の両端は画像内、rect 内のサンプルだけを返す。count は RGB/RGBA の範囲または色と非負のスカラー tolerance。diff は同寸法の RGBA 生値を比較し、最大絶対チャネル差が threshold を超えたピクセルを数える。任意のトップレベル save（省略/null は保存なし）と diff.save は tc_save_screenshot と同じ UTF-8・data 相対パス・親作成・未対応拡張子に .png 追加の規則。float の保存は 0–1 に制限するが解析値は保持。Texture、VideoPlayer、VideoGrabber はソースではない。 解析の既定上限は histogram 4096 bins、grid 65536 cells、256 操作。超過する引数は作業領域の確保前にエラーとなる。応答は既定 64 MiB、MCP 作業メモリ合計は 256 MiB。mcp::setAdmissionLimits() で設定する。 ファイルソースと diff の参照画像は上限付きの符号化スナップショットから stb またはプラットフォームのメタデータを取得し、復号前にピクセルと推定コーデック作業領域を予約する。macOS/iOS は HEIC、TIFF、JPEG 2000 を含む ImageIO の形式を引き続きサポートする。"
+description.ko = "MCP 검사 이름을 설정. tc_list_images 는 살아 있는 Image 의 index, name, width, height, format 을 나열. 이동하면 이름과 인덱스가 이전되며 이동 원본 및 파괴된 항목은 사라진다. 이름 없는 객체도 인덱스로 접근 가능. tc_analyze_image 는 source={image:이름 또는 인덱스} 로 CPU 픽셀을 읽는다. 다른 소스는 window:인덱스, fbo:이름 또는 인덱스, path:파일. width, height, format (RGBA8/float), colorSpace (sRGB/linear), ops 순서의 results 를 반환. byte 색은 RGBA 0–1, float 는 1 초과 값도 유지. 연산: pixel(x,y):color; histogram(bins):histogram[channel][bin] (0–1 등간격, 범위 밖은 끝 bin); count(color,tolerance 또는 min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):평균 colors[row][col]; diff(path,threshold,선택 save):count,bbox,maxDifference; line(x0,y0,x1,y1):양 끝점을 포함한 Bresenham 색 배열. 모든 연산에 선택 rect=[x,y,w,h], 기본값은 전체 이미지. 좌표는 왼쪽 위 원점, bbox=[x,y,w,h], centroid=[x,y]; 일치 없으면 bbox/centroid 는 null. rect 와 셀은 비어 있을 수 없다. 선 끝점은 이미지 내부, rect 내부 샘플만 반환. count 는 RGB/RGBA 범위 또는 색과 음이 아닌 스칼라 tolerance. diff 는 동일 크기 RGBA 원시 값을 비교하며 최대 절대 채널 차이가 threshold 보다 큰 픽셀을 센다. 선택 최상위 save (생략/null 은 저장 안 함) 와 diff.save 는 tc_save_screenshot 의 UTF-8, data 상대 경로, 부모 생성, 미지원 확장자에 .png 추가 규칙을 따른다. float 저장은 0–1 로 제한하지만 분석 값은 유지. Texture, VideoPlayer, VideoGrabber 는 소스가 아니다. 분석 기본 한도는 histogram 4096 bins, grid 65536 cells, 연산 256개다. 초과 인수는 작업 메모리 할당 전에 오류를 반환한다. 응답 기본값은 64 MiB, MCP 전체 작업 메모리는 256 MiB다. mcp::setAdmissionLimits()로 설정한다. 파일 소스와 diff 참조 이미지는 한도가 있는 인코딩 스냅샷에서 stb 또는 플랫폼 메타데이터를 읽고 디코딩 전에 픽셀과 추정 코덱 작업 메모리를 예약한다. macOS/iOS는 HEIC, TIFF, JPEG 2000을 포함한 ImageIO 형식을 계속 지원한다."
 related = ["Image::getDebugName", "Fbo::setDebugName"]
 
 ["Image::getDebugName"]
@@ -19850,9 +19850,9 @@ value_desc.Public.ko = "기본 허용 수준. 내장 도구 중 Public은 상태
 value_desc.ReadOnly.en = "Inspection, screenshots, status and alerts; captures may write files."
 value_desc.ReadOnly.ja = "検査、スクリーンショット、ステータス、アラート。キャプチャはファイルを書き込む場合がある。"
 value_desc.ReadOnly.ko = "조회, 스크린샷, 상태 및 알림. 캡처는 파일을 쓸 수 있다."
-value_desc.Control.en = "Input, scene changes, recording and quit; includes ReadOnly."
-value_desc.Control.ja = "入力、シーン変更、録画、終了。ReadOnly を含む。"
-value_desc.Control.ko = "입력, 장면 변경, 녹화 및 종료. ReadOnly를 포함한다."
+value_desc.Control.en = "Input, scene changes, recording and quit; includes ReadOnly. Input requires one of 120 defined nonzero sokol key codes, mouse buttons 0–2 (move also allows -1), finite float coordinates/scroll deltas and boolean modifiers. Invalid input returns JSON-RPC -32602 before callbacks or state changes; synthetic held keys are limited to 120."
+value_desc.Control.ja = "入力、シーン変更、録画、終了。ReadOnly を含む。入力は定義済みの非ゼロ sokol キーコード 120 個、マウスボタン 0–2（移動は -1 も可）、有限の float 座標・スクロール量、真偽値の修飾フラグを受け付ける。不正な入力はコールバックや状態変更の前に JSON-RPC -32602 を返す。合成入力で保持するキーは最大 120 個。"
+value_desc.Control.ko = "입력, 장면 변경, 녹화 및 종료. ReadOnly를 포함한다. 입력은 정의된 0 이외의 sokol 키 코드 120개, 마우스 버튼 0–2(이동은 -1도 허용), 유한한 float 좌표·스크롤 값 및 불리언 보조 키 플래그를 받는다. 잘못된 입력은 콜백이나 상태 변경 전에 JSON-RPC -32602를 반환하며 합성 입력으로 유지하는 키는 최대 120개이다."
 
 ["mcp::setToolLevel"]
 category = "mcp"
@@ -19958,15 +19958,15 @@ description.ko = "URI로 참조하는 리소스 메타데이터와 콘텐츠 핸
 
 ["mcp::startHttpServer"]
 category = "mcp"
-description.en = "Explicitly open HTTP (default 127.0.0.1, port 0 chooses an OS port); non-loopback requires a token. TRUSSC_MCP=0 closes. Call before setToolLevel() to choose the address: the first opener wins; mismatched later parameters log an Error and change nothing. No-op on Web."
-description.ja = "HTTP を明示的に開く。既定は 127.0.0.1、ポート 0 は OS が選択する。非ループバックにはトークンが必要。TRUSSC_MCP=0 では開かない。アドレス指定は setToolLevel() より前に行う。最初の指定が有効で、後の不一致は Error を記録して変更しない。Web では何もしない。"
-description.ko = "HTTP를 명시적으로 연다. 기본 주소는 127.0.0.1이며 포트 0은 OS가 선택한다. 외부 주소에는 토큰이 필요하다. TRUSSC_MCP=0이면 열리지 않는다. 주소를 선택하려면 setToolLevel() 전에 호출한다. 첫 설정을 유지하며 이후 불일치는 Error를 기록하고 변경하지 않는다. Web에서는 아무 작업도 하지 않는다."
+description.en = "Explicitly open HTTP (default 127.0.0.1, port 0 chooses an OS port); non-loopback requires a token. TRUSSC_MCP=0 closes. Call before setToolLevel() to choose the address: the first opener wins; mismatched later parameters log an Error and change nothing. No-op on Web. Defaults: 1 MiB wire/decoded body, 8 KiB per request/header/trailer line, 64 KiB metadata, 128 fields, 32 outstanding connections and 4 workers. Excess bodies return 413, metadata returns 431, excess connections close. Rejections issue one Warning per store and increment lifetime counters. See setAdmissionLimits(). Request JSON defaults to 64 levels; parse admission failures return 503 with a reason."
+description.ja = "HTTP を明示的に開く。既定は 127.0.0.1、ポート 0 は OS が選択する。非ループバックにはトークンが必要。TRUSSC_MCP=0 では開かない。アドレス指定は setToolLevel() より前に行う。最初の指定が有効で、後の不一致は Error を記録して変更しない。Web では何もしない。 既定: wire/decoded 本文 1 MiB、要求/ヘッダー/トレーラーの各行 8 KiB、メタデータ合計 64 KiB、128 フィールド、未完了接続 32、ワーカー 4。超過時は本文 413、メタデータ 431、接続超過は切断。ストアごとに初回のみ Warning を出し、生存期間中の累積カウンターを増やす。setAdmissionLimits() を参照。 要求 JSON のネストは既定 64。解析の受付上限に達した場合は理由付きの 503 を返す。"
+description.ko = "HTTP를 명시적으로 연다. 기본 주소는 127.0.0.1이며 포트 0은 OS가 선택한다. 외부 주소에는 토큰이 필요하다. TRUSSC_MCP=0이면 열리지 않는다. 주소를 선택하려면 setToolLevel() 전에 호출한다. 첫 설정을 유지하며 이후 불일치는 Error를 기록하고 변경하지 않는다. Web에서는 아무 작업도 하지 않는다. 기본값: wire/decoded 본문 1 MiB, 요청/헤더/트레일러 한 줄 8 KiB, 메타데이터 합계 64 KiB, 필드 128개, 미완료 연결 32개, 워커 4개. 초과 본문은 413, 메타데이터는 431, 연결 초과는 종료한다. 저장소별 첫 거부에 Warning을 기록하고 수명 동안 누적 카운터를 증가시킨다. setAdmissionLimits() 참조. 요청 JSON 중첩 기본값은 64다. 파싱 수락 한도에 도달하면 이유와 함께 503을 반환한다."
 
 ["mcp::stopHttpServer"]
 category = "mcp"
-description.en = "Stop the HTTP listener and answer pending requests before joining the worker. No-op on Web."
-description.ja = "HTTP リスナーを停止し、保留中の要求に応答してからワーカーを終了する。Web では何もしない。"
-description.ko = "HTTP 리스너를 중지하고 대기 중인 요청에 응답한 뒤 작업 스레드를 종료한다. Web에서는 아무 작업도 하지 않는다."
+description.en = "Stop the HTTP listener and answer pending requests before joining the workers. Discard producers finishing after shutdown. If an error reply cannot fit, return 503 with X-MCP-Reason. No-op on Web."
+description.ja = "HTTP リスナーを停止し、保留中の要求に応答してからワーカーを終了する。停止後に完了する生成処理は破棄する。エラー応答が上限に収まらない場合は X-MCP-Reason 付きの 503 を返す。Web では何もしない。"
+description.ko = "HTTP 리스너를 중지하고 대기 중인 요청에 응답한 뒤 워커를 종료한다. 종료 후 완료되는 생성 작업은 버린다. 오류 응답이 한도에 맞지 않으면 X-MCP-Reason과 함께 503을 반환한다. Web에서는 아무 작업도 하지 않는다."
 
 ["mcp::processHttpQueue"]
 category = "mcp"
@@ -20355,3 +20355,96 @@ description.ko = "취소되지 않은 startAsync 시도마다 이후 프레임�
 description.en = "True from submission through queued readiness/failure, cleared immediately before onStart. False after cancellation and while merely running. On Web this also tracks legacy start() permission/setup."
 description.ja = "要求時から準備完了・失敗の通知待ちまで true。onStart の直前に false となる。取り消し後と単なる入力動作中は false。Web では従来の start() の権限・準備待ちも示す。"
 description.ko = "요청부터 준비·실패 통지 대기까지 true이며 onStart 직전에 false가 된다. 취소 후와 단순 실행 중에는 false. Web에서는 기존 start()의 권한·설정 대기도 추적한다."
+
+["mcp::AdmissionLimits"]
+category = "mcp"
+description.en = "MCP admission settings with finite defaults; all values must be positive. Change through setAdmissionLimits() while stopped. Excess requests are rejected as whole units."
+description.ja = "MCP 受付の有限な既定上限。各値は正数。停止中に setAdmissionLimits() で変更する。超過した要求は全体を拒否する。"
+description.ko = "MCP 수락의 유한 기본 한도. 모든 값은 양수여야 한다. 중지 상태에서 setAdmissionLimits()로 변경한다. 초과 요청 전체를 거부한다."
+
+["mcp::setAdmissionLimits"]
+category = "mcp"
+description.en = "Set MCP limits before opening HTTP; return true on success. Zero values, active HTTP or outstanding work return false, log one Warning per rejected call, increment the Configuration rejection counter and preserve all previous settings. Defaults include 4096 histogram bins, 65536 grid cells, 256 operations, 64 MiB per reply and 256 MiB aggregate working memory. Counters and first-Warning state last for the process and do not reset on query or restart. Bound (security): control JSON must fit finite ingress storage. Overflow rejects with 413 and is counted. Bound (security): sockets and pending replies share finite admission. Overflow closes the new socket and is counted. Bound (security): network work must use a finite worker pool. Overflow queues within admission and excess admission is counted. Bound (security): HTTP metadata must stop growing while read. Overflow rejects with 431 and is counted. Bound (security): headers and trailers share finite metadata storage. Overflow rejects with 431 and is counted. Bound (security): header/trailer entries also consume storage. Overflow rejects with 431 and is counted. Bound (security): histogram parameters drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): grid products drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): operation arrays drive repeated work and retained results. Overflow rejects the request and is counted. Bound (security): reply construction must fit finite output storage. Overflow returns an error and is counted. Bound (security): concurrent MCP work shares finite process storage. Overflow rejects admission or returns an error and is counted. Bound (security): analysis image copies and encoders need credits before allocation. Overflow returns an error and is counted. Bound (abi): stb's immutable input view uses an int byte length. Overflow rejects the image and is counted. Bound (security): encoded copies and decoder buffers share working credits. Overflow rejects the image before reading and is counted. Bound (security): decoded pixels, copies and codec scratch need credits before decoding. Overflow rejects the image and is counted. Bound (security): RPC nesting must fit parse and copy stacks. Overflow rejects the request and is counted. Bound (security): audio scratch and result products need credits before allocation. Overflow rejects the request and is counted. Bound (abi): external MCP FFT lengths must fit the int-sized transform API. Overflow returns an error and is counted. Bound (realtime): the audio callback must not allocate; external MCP reads share its fixed history ring. Overflow returns an error and is counted. Bound (security): external snapshot copies need credits before vector growth. Overflow rejects the request and is counted. Bound (abi): codec allocation headers must fit size_t. Overflow returns null and is counted. Bound (security): codec allocations must fit pre-admitted workspace. Overflow returns null and is counted. Bound (abi): chunk sizes must fit the unsigned-long parser. Overflow rejects with 413 and is counted."
+description.ja = "HTTP を開く前に MCP の上限を設定し、成功時は true を返す。0、HTTP 動作中、作業残存中は false を返し、拒否した呼び出しごとに Warning を 1 回記録して Configuration 拒否カウンターを増やし、以前の設定をすべて保持する。既定は histogram 4096 bins、grid 65536 cells、256 操作、応答 64 MiB、合計作業メモリ 256 MiB。カウンターと初回 Warning 状態はプロセスの生存期間中保持し、照会や再起動でリセットしない。 Bound (security): control JSON must fit finite ingress storage. Overflow rejects with 413 and is counted. Bound (security): sockets and pending replies share finite admission. Overflow closes the new socket and is counted. Bound (security): network work must use a finite worker pool. Overflow queues within admission and excess admission is counted. Bound (security): HTTP metadata must stop growing while read. Overflow rejects with 431 and is counted. Bound (security): headers and trailers share finite metadata storage. Overflow rejects with 431 and is counted. Bound (security): header/trailer entries also consume storage. Overflow rejects with 431 and is counted. Bound (security): histogram parameters drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): grid products drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): operation arrays drive repeated work and retained results. Overflow rejects the request and is counted. Bound (security): reply construction must fit finite output storage. Overflow returns an error and is counted. Bound (security): concurrent MCP work shares finite process storage. Overflow rejects admission or returns an error and is counted. Bound (security): analysis image copies and encoders need credits before allocation. Overflow returns an error and is counted. Bound (abi): stb's immutable input view uses an int byte length. Overflow rejects the image and is counted. Bound (security): encoded copies and decoder buffers share working credits. Overflow rejects the image before reading and is counted. Bound (security): decoded pixels, copies and codec scratch need credits before decoding. Overflow rejects the image and is counted. Bound (security): RPC nesting must fit parse and copy stacks. Overflow rejects the request and is counted. Bound (security): audio scratch and result products need credits before allocation. Overflow rejects the request and is counted. Bound (abi): external MCP FFT lengths must fit the int-sized transform API. Overflow returns an error and is counted. Bound (realtime): the audio callback must not allocate; external MCP reads share its fixed history ring. Overflow returns an error and is counted. Bound (security): external snapshot copies need credits before vector growth. Overflow rejects the request and is counted. Bound (abi): codec allocation headers must fit size_t. Overflow returns null and is counted. Bound (security): codec allocations must fit pre-admitted workspace. Overflow returns null and is counted. Bound (abi): chunk sizes must fit the unsigned-long parser. Overflow rejects with 413 and is counted."
+description.ko = "HTTP를 열기 전에 MCP 한도를 설정하며 성공하면 true를 반환한다. 0, 실행 중 HTTP 또는 미완료 작업이 있으면 false를 반환하고 거부한 호출마다 Warning을 한 번 기록하며 Configuration 거부 카운터를 증가시키고 이전 설정을 모두 유지한다. 기본값은 histogram 4096 bins, grid 65536 cells, 연산 256개, 응답 64 MiB, 전체 작업 메모리 256 MiB다. 카운터와 첫 Warning 상태는 프로세스 수명 동안 유지하며 조회나 재시작으로 초기화하지 않는다. Bound (security): control JSON must fit finite ingress storage. Overflow rejects with 413 and is counted. Bound (security): sockets and pending replies share finite admission. Overflow closes the new socket and is counted. Bound (security): network work must use a finite worker pool. Overflow queues within admission and excess admission is counted. Bound (security): HTTP metadata must stop growing while read. Overflow rejects with 431 and is counted. Bound (security): headers and trailers share finite metadata storage. Overflow rejects with 431 and is counted. Bound (security): header/trailer entries also consume storage. Overflow rejects with 431 and is counted. Bound (security): histogram parameters drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): grid products drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): operation arrays drive repeated work and retained results. Overflow rejects the request and is counted. Bound (security): reply construction must fit finite output storage. Overflow returns an error and is counted. Bound (security): concurrent MCP work shares finite process storage. Overflow rejects admission or returns an error and is counted. Bound (security): analysis image copies and encoders need credits before allocation. Overflow returns an error and is counted. Bound (abi): stb's immutable input view uses an int byte length. Overflow rejects the image and is counted. Bound (security): encoded copies and decoder buffers share working credits. Overflow rejects the image before reading and is counted. Bound (security): decoded pixels, copies and codec scratch need credits before decoding. Overflow rejects the image and is counted. Bound (security): RPC nesting must fit parse and copy stacks. Overflow rejects the request and is counted. Bound (security): audio scratch and result products need credits before allocation. Overflow rejects the request and is counted. Bound (abi): external MCP FFT lengths must fit the int-sized transform API. Overflow returns an error and is counted. Bound (realtime): the audio callback must not allocate; external MCP reads share its fixed history ring. Overflow returns an error and is counted. Bound (security): external snapshot copies need credits before vector growth. Overflow rejects the request and is counted. Bound (abi): codec allocation headers must fit size_t. Overflow returns null and is counted. Bound (security): codec allocations must fit pre-admitted workspace. Overflow returns null and is counted. Bound (abi): chunk sizes must fit the unsigned-long parser. Overflow rejects with 413 and is counted."
+
+["mcp::getAdmissionLimits"]
+category = "mcp"
+description.en = "Return the current MCP admission limits."
+description.ja = "現在の MCP 受付上限を返す。"
+description.ko = "현재 MCP 수락 한도를 반환한다."
+
+["mcp::AdmissionLimits::bodyBytes"]
+category = "mcp"
+description.en = "Wire and decoded body bytes (default 1 MiB); excess returns 413."
+description.ja = "wire と decoded 本文のバイト数。既定 1 MiB、超過は 413。"
+description.ko = "wire 및 decoded 본문 바이트 수. 기본값 1 MiB, 초과 시 413."
+
+["mcp::AdmissionLimits::outstanding"]
+category = "mcp"
+description.en = "Outstanding connections including queued and deferred work (default 32); excess closes."
+description.ja = "キュー待機・読み取り中・遅延応答を含む未完了接続数。既定 32、超過接続は切断。"
+description.ko = "큐 대기·읽기·지연 응답을 포함한 미완료 연결 수. 기본값 32, 초과 연결은 종료."
+
+["mcp::AdmissionLimits::workers"]
+category = "mcp"
+description.en = "HTTP worker count (default 4); queued work shares connection admission."
+description.ja = "HTTP ワーカー数。既定 4。キュー待機も接続数の上限に含む。"
+description.ko = "HTTP 워커 수. 기본값 4. 큐 대기도 연결 수 한도에 포함."
+
+["mcp::AdmissionLimits::lineBytes"]
+category = "mcp"
+description.en = "Request/header/trailer line bytes (default 8192); excess returns 431."
+description.ja = "要求・ヘッダー・トレーラーの各行のバイト数。既定 8192、超過は 431。"
+description.ko = "요청·헤더·트레일러의 한 줄 바이트 수. 기본값 8192, 초과 시 431."
+
+["mcp::AdmissionLimits::headerBytes"]
+category = "mcp"
+description.en = "Combined request/header/trailer bytes (default 65536); excess returns 431."
+description.ja = "要求行・ヘッダー・トレーラーの合計バイト数。既定 65536、超過は 431。"
+description.ko = "요청 줄·헤더·트레일러의 합계 바이트 수. 기본값 65536, 초과 시 431."
+
+["mcp::AdmissionLimits::headerCount"]
+category = "mcp"
+description.en = "Combined header/trailer fields (default 128); excess returns 431."
+description.ja = "ヘッダーとトレーラーを合わせたフィールド数。既定 128、超過は 431。"
+description.ko = "헤더와 트레일러의 합계 필드 수. 기본값 128, 초과 시 431."
+
+["mcp::AdmissionLimits::histogramBins"]
+category = "mcp"
+description.en = "Histogram bins (default 4096); excess returns an error."
+description.ja = "ヒストグラムの bin 数。既定 4096、超過はエラー。"
+description.ko = "히스토그램 bin 수. 기본값 4096, 초과 시 오류."
+
+["mcp::AdmissionLimits::gridCells"]
+category = "mcp"
+description.en = "Grid cells (default 65536); excess returns an error."
+description.ja = "グリッドのセル数。既定 65536、超過はエラー。"
+description.ko = "그리드 셀 수. 기본값 65536, 초과 시 오류."
+
+["mcp::AdmissionLimits::operations"]
+category = "mcp"
+description.en = "Analysis operations per request (default 256); excess returns an error."
+description.ja = "画像解析要求あたりの操作数。既定 256、超過はエラー。"
+description.ko = "이미지 분석 요청당 연산 수. 기본값 256, 초과 시 오류."
+
+["mcp::AdmissionLimits::replyBytes"]
+category = "mcp"
+description.en = "Reply bytes (default 64 MiB); excess returns an error."
+description.ja = "応答のバイト数。既定 64 MiB、超過はエラー。"
+description.ko = "응답 바이트 수. 기본값 64 MiB, 초과 시 오류."
+
+["mcp::AdmissionLimits::workingBytes"]
+category = "mcp"
+description.en = "Aggregate MCP working bytes (default 256 MiB); excess closes admission or returns an error."
+description.ja = "MCP 作業メモリの合計バイト数。既定 256 MiB、超過は受付時の切断またはエラー。"
+description.ko = "MCP 전체 작업 메모리 바이트 수. 기본값 256 MiB, 초과 시 수락 연결 종료 또는 오류."
+
+["mcp::McpRequest::budget"]
+hide = true
+
+["mcp::AdmissionLimits::jsonDepth"]
+category = "mcp"
+description.en = "Maximum request JSON nesting depth (default 64); excess rejects the whole request."
+description.ja = "要求 JSON の最大ネスト深度。既定 64。超過した要求は全体を拒否する。"
+description.ko = "요청 JSON의 최대 중첩 깊이. 기본값 64. 초과 요청 전체를 거부한다."

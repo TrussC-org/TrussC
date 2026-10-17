@@ -20,6 +20,7 @@
 #include "stb/stb_image_write.h"
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 
 // Platform bits for internal::currentPid() / internal::processRssBytes()
 #if defined(__APPLE__)
@@ -43,14 +44,55 @@
 extern "C" unsigned char *stbi_write_png_to_mem(const unsigned char *pixels, int stride_bytes, int x, int y, int n, int *out_len);
 
 namespace trussc {
+namespace {
+// The writer checks each field before JsonWriteReflector copies its value.
+class McpJsonWriteReflector : public JsonWriteReflector {
+    void account(const char* name, size_t bytes = 32) {
+        if (!mcp::internal::currentWorkBudget()) return;
+        const auto limit = mcp::getAdmissionLimits().replyBytes;
+        const size_t nameBytes = std::char_traits<char>::length(name);
+        // Bound (security): reflected strings and fields are reply construction. Overflow returns an error before copying and is counted.
+        if (bytes > limit / 8 || nameBytes > limit / 8) {
+            const size_t fieldBytes = std::max(bytes, nameBytes);
+            mcp::internal::admissionRejected(mcp::internal::AdmissionStore::Reply, limit, fieldBytes > SIZE_MAX / 8 ? SIZE_MAX : fieldBytes * 8);
+            throw mcp::internal::AdmissionError();
+        }
+        mcp::internal::reserveReply((nameBytes + bytes) * 6 + 128);
+        mcp::internal::reserveWork((nameBytes + bytes) * 8 + 512);
+    }
+public:
+    bool visit(const char* name, float& v) override { account(name); return JsonWriteReflector::visit(name, v); }
+    bool visit(const char* name, int& v) override { account(name); return JsonWriteReflector::visit(name, v); }
+    bool visit(const char* name, bool& v) override { account(name); return JsonWriteReflector::visit(name, v); }
+    bool visit(const char* name, std::string& v) override { account(name, v.size()); return JsonWriteReflector::visit(name, v); }
+    bool visit(const char* name, Vec2& v) override { account(name); return JsonWriteReflector::visit(name, v); }
+    bool visit(const char* name, Vec3& v) override { account(name); return JsonWriteReflector::visit(name, v); }
+    bool visit(const char* name, Color& v) override { account(name); return JsonWriteReflector::visit(name, v); }
+    bool visit(const char* name, int& v, const EnumLabelSpan& labels) override {
+        account(name, labels.labels && v >= 0 && v < labels.count && labels.labels[v] ? std::char_traits<char>::length(labels.labels[v]) : 32);
+        return JsonWriteReflector::visit(name, v, labels);
+    }
+    void beginGroup(const char* name) override { account(name); JsonWriteReflector::beginGroup(name); }
+};
+template<class T>
+void writeMcpMembers(T& object, Json& out, bool includeDerived) {
+    McpJsonWriteReflector writer;
+    writer.includeDerived = includeDerived;
+    object.reflectMembers(writer);
+    if (!writer.members.empty()) out["members"] = std::move(writer.members);
+    if (includeDerived && !writer.derived.empty()) out["derived"] = std::move(writer.derived);
+}
+}
 
 Json nodeToJson(Node& node, int maxDepth, bool includeDerived) {
+    mcp::internal::reserveReply(1024 + node.getName().size() * 6);
+    mcp::internal::reserveWork(4096);
     Json j = Json::object();
     j["type"] = node.getTypeName();
     if (node.hasName()) j["name"] = node.getName();
     j["id"] = node.getInstanceId();
     j["members"] = Json::object();
-    internal::reflectMembersToJson(node, j, includeDerived);
+    writeMcpMembers(node, j, includeDerived);
     auto mods = node.getMods();
     if (!mods.empty()) {
         Json jmods = Json::array();
@@ -58,7 +100,7 @@ Json nodeToJson(Node& node, int maxDepth, bool includeDerived) {
             Json jm = Json::object();
             Mod& mod = *m;
             jm["type"] = shortTypeName(typeid(mod));
-            internal::reflectMembersToJson(mod, jm, includeDerived);
+            writeMcpMembers(mod, jm, includeDerived);
             jmods.push_back(std::move(jm));
         }
         j["mods"] = std::move(jmods);
@@ -83,8 +125,121 @@ Json nodeToJson(Node& node, int maxDepth, bool includeDerived) {
 
 namespace trussc::mcp::internal {
 
+namespace {
+
+int inputInteger(const json& a, const char* name, int minimum, int maximum) {
+    auto it = a.find(name);
+    if (it != a.end() && it->is_number_integer()) {
+        if (it->is_number_unsigned()) {
+            const auto value = it->get<uint64_t>();
+            if ((minimum <= 0 || value >= static_cast<uint64_t>(minimum)) &&
+                value <= static_cast<uint64_t>(maximum)) return static_cast<int>(value);
+        } else {
+            const auto value = it->get<int64_t>();
+            if (value >= minimum && value <= maximum) return static_cast<int>(value);
+        }
+    }
+    throw InputArgumentError(std::string(name) + " must be an integer in [" +
+        std::to_string(minimum) + ", " + std::to_string(maximum) + "]");
+}
+
+int inputKey(const json& a) {
+    const int key = inputInteger(a, "key", SAPP_KEYCODE_SPACE, SAPP_KEYCODE_MENU);
+    // Match the 120 defined nonzero codes; numeric gaps are not keys.
+    if (key == SAPP_KEYCODE_SPACE || key == SAPP_KEYCODE_APOSTROPHE ||
+        (key >= SAPP_KEYCODE_COMMA && key <= SAPP_KEYCODE_9) ||
+        key == SAPP_KEYCODE_SEMICOLON || key == SAPP_KEYCODE_EQUAL ||
+        (key >= SAPP_KEYCODE_A && key <= SAPP_KEYCODE_RIGHT_BRACKET) ||
+        key == SAPP_KEYCODE_GRAVE_ACCENT ||
+        (key >= SAPP_KEYCODE_WORLD_1 && key <= SAPP_KEYCODE_WORLD_2) ||
+        (key >= SAPP_KEYCODE_ESCAPE && key <= SAPP_KEYCODE_END) ||
+        (key >= SAPP_KEYCODE_CAPS_LOCK && key <= SAPP_KEYCODE_PAUSE) ||
+        (key >= SAPP_KEYCODE_F1 && key <= SAPP_KEYCODE_F25) ||
+        (key >= SAPP_KEYCODE_KP_0 && key <= SAPP_KEYCODE_KP_EQUAL) ||
+        (key >= SAPP_KEYCODE_LEFT_SHIFT && key <= SAPP_KEYCODE_MENU)) return key;
+    throw InputArgumentError("key must be a defined nonzero sokol_app key code");
+}
+
+void validateInputModifiers(const json& a) {
+    for (const char* flag : {"shift", "ctrl", "alt", "super"}) {
+        auto it = a.find(flag);
+        if (it != a.end() && !it->is_boolean())
+            throw InputArgumentError(std::string(flag) + " must be a boolean");
+    }
+}
+
+float inputFloat(const json& a, const char* name) {
+    auto it = a.find(name);
+    if (it != a.end() && it->is_number()) {
+        const double value = it->get<double>();
+        // Bound (abi): MCP coordinates and scroll deltas must fit finite float event fields. Overflow returns JSON-RPC -32602 before callbacks or state changes.
+        if (std::isfinite(value) && std::abs(value) <= std::numeric_limits<float>::max())
+            return static_cast<float>(value);
+    }
+    throw InputArgumentError(std::string(name) + " must be a finite float");
+}
+
+int inputMouseButton(const json& a, bool move = false) {
+    if (!a.contains("button")) return move ? -1 : SAPP_MOUSEBUTTON_LEFT;
+    return inputInteger(a, "button", move ? -1 : SAPP_MOUSEBUTTON_LEFT, SAPP_MOUSEBUTTON_MIDDLE);
+}
+
+} // namespace
+
+void reserveWindowReadback() {
+    const auto [width, height] = trussc::internal::captureWindowSize(trussc::internal::currentWindowContext());
+    const auto limit = getAdmissionLimits().workingBytes;
+    // Bound (security): framebuffer readback is externally requested working memory. Overflow returns an error and is counted.
+    if (!width || !height) return;
+    if (width > limit / height / 8) {
+        const uint64_t area = uint64_t(width) * height;
+        admissionRejected(AdmissionStore::Working, limit, area > SIZE_MAX / 8 ? SIZE_MAX : size_t(area) * 8);
+        throw AdmissionError();
+    }
+    reserveWork(width * height * 8);
+}
+
+// Admit both the GPU staging/readback and the file encoder before either runs.
+// A queued capture repeats this check at drain time, when dimensions may differ.
+size_t screenshotSaveBytes(const trussc::internal::WindowContext& ctx) {
+    const auto [width, height] = trussc::internal::captureWindowSize(ctx);
+    if (!width || !height) return 0;
+    const auto limit = getAdmissionLimits().workingBytes;
+    // Bound (security): capture/encoder workspace uses 64 bytes per pixel plus 1 MiB codec overhead. Overflow rejects before readback and is counted.
+    constexpr size_t overhead = 1024 * 1024;
+    if (limit < overhead || width > (limit - overhead) / height / 64) {
+        const uint64_t area = uint64_t(width) * height;
+        admissionRejected(AdmissionStore::Working, limit,
+            area > (SIZE_MAX - overhead) / 64 ? SIZE_MAX : size_t(area) * 64 + overhead);
+        throw AdmissionError();
+    }
+    return width * height * 64 + overhead;
+}
+
+// Each entry includes map/string nodes, vector growth and escaped output.
+void reserveDebugObjectJson(const std::string& name) {
+    const auto limit = getAdmissionLimits().replyBytes;
+    // Bound (security): registry replies admit each name and JSON entry before copying. Overflow rejects the tool and is counted.
+    constexpr size_t overhead = 2048;
+    if (limit < overhead || name.size() > (limit - overhead) / 6) {
+        admissionRejected(AdmissionStore::Reply, limit,
+            name.size() > (SIZE_MAX - overhead) / 6 ? SIZE_MAX : name.size() * 6 + overhead);
+        throw AdmissionError();
+    }
+    reserveReply(name.size() * 6 + overhead);
+    reserveWork(name.size() + overhead);
+}
+
 void downscaleImage(const unsigned char* src, int srcW, int srcH, int channels,
                     std::vector<unsigned char>& dst, int dstW, int dstH) {
+    if (dstW <= 0 || dstH <= 0 || channels <= 0) throw std::runtime_error("invalid image dimensions");
+    const auto limit = getAdmissionLimits().workingBytes;
+    // Bound (security): image scratch dimensions must fit before resize. Overflow returns an error and is counted.
+    if (size_t(dstW) > limit / size_t(dstH) / size_t(channels)) {
+        admissionRejected(AdmissionStore::Working, limit, size_t(dstW));
+        throw AdmissionError();
+    }
+    reserveWork(size_t(dstW) * dstH * channels);
     dst.resize(size_t(dstW) * dstH * channels);
     for (int y = 0; y < dstH; ++y) {
         int sy0 = int(size_t(y) * srcH / dstH);
@@ -112,6 +267,15 @@ json pixelsToImageJson(const trussc::Pixels& px, const std::string& format,
     int dstW = (reqWidth > 0) ? std::min(reqWidth, srcW) : srcW;
     int dstH = std::max(1, (int)std::lround((double)srcH * dstW / srcW));
 
+    const auto limit = getAdmissionLimits().replyBytes;
+    // Bound (security): image encoding and base64 copies need credits before construction. Overflow returns an error and is counted.
+    if (dstW <= 0 || ch <= 0 || size_t(dstW) > limit / size_t(dstH) / size_t(ch) / 8) {
+        admissionRejected(AdmissionStore::Reply, limit, size_t(dstW));
+        throw AdmissionError();
+    }
+    const size_t rawBytes = size_t(dstW) * dstH * ch;
+    reserveReply(rawBytes * 8);
+    reserveWork(rawBytes * 16);
     const unsigned char* data = px.getData();
     std::vector<unsigned char> scaled;
     if (dstW != srcW) {
@@ -354,22 +518,40 @@ void registerStandardTools(Server& server) {
 
     // Lists and source lookup use the same process-wide lifetime registry.
     auto listImages = []() -> json {
-        json arr = json::array();
-        for (const auto& e : trussc::internal::debugObjects(trussc::internal::DebugObjectKind::Image)) {
-            const auto& p = static_cast<Image*>(e.object)->getPixels();
-            arr.push_back({{"index",e.index},{"name",e.name},{"width",p.getWidth()},
-                           {"height",p.getHeight()},{"format",p.isFloat()?"float":"RGBA8"}});
+        try {
+            reserveReply(512);
+            reserveWork(1024);
+            json arr = json::array();
+            for (const auto& e : trussc::internal::debugObjects(trussc::internal::DebugObjectKind::Image)) {
+                reserveDebugObjectJson(e.name);
+                const auto& p = static_cast<Image*>(e.object)->getPixels();
+                arr.push_back({{"index",e.index},{"name",e.name},{"width",p.getWidth()},
+                               {"height",p.getHeight()},{"format",p.isFloat()?"float":"RGBA8"}});
+            }
+            json result = json::object();
+            result["images"] = std::move(arr);
+            return result;
+        } catch (const AdmissionError& e) {
+            return json{{"status", "error"}, {"message", e.what()}};
         }
-        return json{{"images",arr}};
     };
     auto listFbos = []() -> json {
-        json arr = json::array();
-        for (const auto& e : trussc::internal::debugObjects(trussc::internal::DebugObjectKind::Fbo)) {
-            const auto& f = *static_cast<Fbo*>(e.object);
-            arr.push_back({{"index",e.index},{"name",e.name},{"width",f.getWidth()},
-                           {"height",f.getHeight()},{"format",isFloatFormat(f.getTextureFormat())?"float":"RGBA8"}});
+        try {
+            reserveReply(512);
+            reserveWork(1024);
+            json arr = json::array();
+            for (const auto& e : trussc::internal::debugObjects(trussc::internal::DebugObjectKind::Fbo)) {
+                reserveDebugObjectJson(e.name);
+                const auto& f = *static_cast<Fbo*>(e.object);
+                arr.push_back({{"index",e.index},{"name",e.name},{"width",f.getWidth()},
+                               {"height",f.getHeight()},{"format",isFloatFormat(f.getTextureFormat())?"float":"RGBA8"}});
+            }
+            json result = json::object();
+            result["fbos"] = std::move(arr);
+            return result;
+        } catch (const AdmissionError& e) {
+            return json{{"status", "error"}, {"message", e.what()}};
         }
-        return json{{"fbos",arr}};
     };
     coreTool(server, "tc_list_images", "List live Images: index, name, width, height, format (RGBA8 or float).")
         .level(ToolLevel::ReadOnly)
@@ -388,11 +570,12 @@ void registerStandardTools(Server& server) {
     analyze.handler = [resolveWindowCtx](const json& args) -> json {
         auto error = [](const std::string& message) { return json{{"status","error"},{"message",message}}; };
         try {
+            internal::validateAnalyzeArguments(args);
             const auto& source = args.at("source");
             if (!source.is_object() || source.size()!=1) return error("source must contain exactly one selector");
             if (source.contains("path")) {
                 Pixels p;
-                if (!p.load(trussc::internal::utf8ToPath(source.at("path").get<std::string>()))) return error("failed to load source image");
+                if (!internal::loadMcpImage(p, trussc::internal::utf8ToPath(source.at("path").get<std::string>()))) return error("failed to load source image");
                 return internal::analyzeImage(p,args,(p.isFloat()||p.getChannels()<=2)?"linear":"sRGB");
             }
             if (source.contains("image") || source.contains("fbo")) {
@@ -457,6 +640,16 @@ void registerStandardTools(Server& server) {
                         if (!floating && current->getTextureFormat()!=TextureFormat::RGBA8)
                             return [error] { return error("Fbo byte readback requires RGBA8; other integer formats have no supported readback"); };
                         if (floating || channelCount(current->getTextureFormat())<=2) colorSpace="linear";
+                        const auto limit = getAdmissionLimits().workingBytes;
+                        const size_t bytesPerPixel = floating ? 32 : 8;
+                        // Bound (security): readback copies need credits before allocation. Overflow returns an error and is counted.
+                        if (current->getWidth() <= 0 || current->getHeight() <= 0 ||
+                            size_t(current->getWidth()) > limit / size_t(current->getHeight()) / bytesPerPixel) {
+                            const uint64_t area = uint64_t(std::max(0, current->getWidth())) * std::max(0, current->getHeight());
+                            admissionRejected(AdmissionStore::Working, limit, area > SIZE_MAX / bytesPerPixel ? SIZE_MAX : size_t(area) * bytesPerPixel);
+                            throw AdmissionError();
+                        }
+                        reserveWork(size_t(current->getWidth()) * current->getHeight() * bytesPerPixel);
                         p->allocate(current->getWidth(),current->getHeight(),4,floating?PixelFormat::F32:PixelFormat::U8);
                         if(floating) {
 #if !defined(__APPLE__) || !TARGET_OS_IPHONE
@@ -487,6 +680,7 @@ void registerStandardTools(Server& server) {
                 if(!ctx) return err;
                 mcp::deferToolResultTwoStage([args,error]() -> std::function<json()> {
                     auto p=std::make_shared<Pixels>();
+                    reserveWindowReadback();
                     bool ok=grabScreen(*p);
                     return [p,args,ok,error]() -> json {
                         if(!ok) return error("failed to grab screen");
@@ -537,6 +731,7 @@ void registerStandardTools(Server& server) {
             // runs on the HTTP worker blocked on this reply.
             mcp::deferToolResultTwoStage([format, reqWidth, quality]() -> std::function<json()> {
                 auto px = std::make_shared<trussc::Pixels>();
+                reserveWindowReadback();
                 bool grabbed = trussc::grabScreen(*px);
                 return [px, grabbed, format, reqWidth, quality]() -> json {
                     if (!grabbed) {
@@ -557,27 +752,29 @@ void registerStandardTools(Server& server) {
             // would interpret them in the ACP on Windows)
             const std::string path = args.at("path").get<std::string>();
             const int windowIdx = args.value("window", 0);
-            if (windowIdx == 0) {
-                // Main window: the classic queued path (drained after present)
-                const auto destination = trussc::internal::resolveScreenshotPath(
-                    trussc::internal::utf8ToPath(path));
-                if (trussc::saveScreenshot(destination)) {
-                    return json{{"status", "ok"}, {"path", trussc::internal::pathToUtf8(destination)}};
-                }
-                return json{{"status", "error"}, {"message", "Failed to save screenshot"}};
-            }
-            // Secondary window: capture inside that window's own tick, right
-            // after its present(), where its drawable is current (#243)
             json err;
             auto* ctx = resolveWindowCtx(windowIdx, err);
             if (!ctx) return err;
-            mcp::deferToolResultUntilAfterFrame([windowIdx, path]() -> json {
-                const auto destination = trussc::internal::resolveScreenshotPath(
-                    trussc::internal::utf8ToPath(path));
+            auto credit = acquireScreenshotCredit();
+            auto budget = currentWorkBudget();
+            const size_t captureBytes = screenshotSaveBytes(*ctx);
+            reserveWork(captureBytes);
+            const auto destination = trussc::internal::resolveScreenshotPath(
+                trussc::internal::utf8ToPath(path));
+            std::filesystem::path prepared;
+            if (!trussc::internal::prepareOutputPath(destination, prepared, "Screenshot"))
+                return json{{"status", "error"}, {"message", "Failed to prepare screenshot destination"}};
+            // Both windows use MCP deferral: the slot and budget live until
+            // capture, expiration, owner cleanup or shutdown releases the job.
+            // App-authored saveScreenshot() keeps its independent path queue.
+            mcp::deferToolResultUntilAfterFrame([windowIdx, destination, credit, budget, captureBytes]() -> json {
+                WorkScope scope(budget);
+                const size_t needed = screenshotSaveBytes(trussc::internal::currentWindowContext());
+                if (needed > captureBytes) reserveWork(needed - captureBytes);
                 bool ok = trussc::internal::captureWindowToFile(destination);
                 if (ok) return json{{"status", "ok"}, {"path", trussc::internal::pathToUtf8(destination)}, {"window", windowIdx}};
                 return json{{"status", "error"}, {"message", "Failed to capture window " + std::to_string(windowIdx)}};
-            }, ctx);
+            }, ctx->isMain ? nullptr : ctx);
             return json(nullptr);  // deferred result is sent instead
         });
 
@@ -864,9 +1061,9 @@ void registerStandardTools(Server& server) {
         .bind([](const json& a) -> json {
             // json bind, not the typed one — the typed bind requires every
             // declared arg, which contradicted "button" being optional.
-            float x = a.at("x").get<float>();
-            float y = a.at("y").get<float>();
-            int button = a.value("button", -1);
+            float x = internal::inputFloat(a, "x");
+            float y = internal::inputFloat(a, "y");
+            int button = internal::inputMouseButton(a, true);
             // If button is pressed, treat as drag
             if (button >= 0) {
                 trussc::internal::MouseEventRaw args;
@@ -905,8 +1102,8 @@ void registerStandardTools(Server& server) {
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
         .bind([](const json& a) -> json {
             MouseEventArgs args;
-            args.pos = args.globalPos = Vec2(a.at("x").get<float>(), a.at("y").get<float>());
-            args.button = a.value("button", 0);
+            args.pos = args.globalPos = Vec2(internal::inputFloat(a, "x"), internal::inputFloat(a, "y"));
+            args.button = internal::inputMouseButton(a);
             args.syncLegacy();
 
             ::trussc::internal::currentWindowContext().mouseX = args.pos.x;
@@ -926,8 +1123,8 @@ void registerStandardTools(Server& server) {
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
         .bind([](const json& a) -> json {
             MouseEventArgs args;
-            args.pos = args.globalPos = Vec2(a.at("x").get<float>(), a.at("y").get<float>());
-            args.button = a.value("button", 0);
+            args.pos = args.globalPos = Vec2(internal::inputFloat(a, "x"), internal::inputFloat(a, "y"));
+            args.button = internal::inputMouseButton(a);
             args.syncLegacy();
 
             ::trussc::internal::currentWindowContext().mouseX = args.pos.x;
@@ -950,9 +1147,10 @@ void registerStandardTools(Server& server) {
         .arg<bool>("alt", "Hold Alt", false)
         .arg<bool>("super", "Hold Cmd/Super", false)
         .bind([](const json& a) -> json {
+            internal::validateInputModifiers(a);
             MouseEventArgs args;
-            args.pos = args.globalPos = Vec2(a.at("x").get<float>(), a.at("y").get<float>());
-            args.button = a.value("button", 0);
+            args.pos = args.globalPos = Vec2(internal::inputFloat(a, "x"), internal::inputFloat(a, "y"));
+            args.button = internal::inputMouseButton(a);
             args.shift = a.value("shift", false);
             args.ctrl  = a.value("ctrl", false);
             args.alt   = a.value("alt", false);
@@ -978,7 +1176,9 @@ void registerStandardTools(Server& server) {
         .level(ToolLevel::Control)
         .arg<float>("dx", "Horizontal scroll delta")
         .arg<float>("dy", "Vertical scroll delta")
-        .bind<float, float>([](float dx, float dy) {
+        .bind([](const json& a) -> json {
+            const float dx = internal::inputFloat(a, "dx");
+            const float dy = internal::inputFloat(a, "dy");
             ScrollEventArgs args;
             args.pos = args.globalPos = Vec2(::trussc::internal::currentWindowContext().mouseX, ::trussc::internal::currentWindowContext().mouseY);
             args.scroll = Vec2(dx, dy);
@@ -1003,13 +1203,14 @@ void registerStandardTools(Server& server) {
          "pair it with the same flag on tc_key_release, or hold a modifier across several "
          "keys by pressing/releasing its keycode explicitly")
         .level(ToolLevel::Control)
-        .arg<int>("key", "Key code (sokol_app keycode; letters are uppercase ASCII: 'A'=65..'Z'=90)")
+        .arg<int>("key", "Defined nonzero sokol_app key code; letters are uppercase ASCII: 'A'=65..'Z'=90")
         .arg<bool>("shift", "Hold Shift for this press", false)
         .arg<bool>("ctrl", "Hold Ctrl for this press", false)
         .arg<bool>("alt", "Hold Alt for this press", false)
         .arg<bool>("super", "Hold Super/Command for this press", false)
         .bind([](const json& a) -> json {
-            const int key = a.at("key").get<int>();
+            const int key = internal::inputKey(a);
+            internal::validateInputModifiers(a);
 
             // Press the requested modifiers first (skip any already held —
             // whichever side, so an explicit RIGHT_SHIFT hold is respected).
@@ -1038,13 +1239,14 @@ void registerStandardTools(Server& server) {
          "(shift -> keycode 340, ctrl -> 341, alt -> 342, super -> 343), "
          "mirroring tc_key_press")
         .level(ToolLevel::Control)
-        .arg<int>("key", "Key code (sokol_app keycode; letters are uppercase ASCII: 'A'=65..'Z'=90)")
+        .arg<int>("key", "Defined nonzero sokol_app key code; letters are uppercase ASCII: 'A'=65..'Z'=90")
         .arg<bool>("shift", "Also release Shift after this key", false)
         .arg<bool>("ctrl", "Also release Ctrl after this key", false)
         .arg<bool>("alt", "Also release Alt after this key", false)
         .arg<bool>("super", "Also release Super/Command after this key", false)
         .bind([](const json& a) -> json {
-            const int key = a.at("key").get<int>();
+            const int key = internal::inputKey(a);
+            internal::validateInputModifiers(a);
 
             // The key goes up first — while the modifiers are still held, so
             // this event still carries them (as it does on a real keyboard).

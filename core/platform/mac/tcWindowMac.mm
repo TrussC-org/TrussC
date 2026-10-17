@@ -138,6 +138,7 @@ void windowTick(sapp_window swin, void* user) {
     // Drain this window's saveScreenshot() queue while ITS context (and its
     // lastSwapchainDrawable) is current — must run before we restore prev.
     internal::drainPendingScreenshots();
+    ctx.clearFrameDrawable();
 
     sgl_set_context(sgl_default_context());
     internal::currentWindowCtx() = prev;

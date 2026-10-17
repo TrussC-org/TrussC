@@ -250,6 +250,10 @@ fs::path internal::platformAppBundlePath() {
 // Screenshot Functions (GLES3)
 // ---------------------------------------------------------------------------
 
+std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
+    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+}
+
 bool captureWindow(Pixels& outPixels) {
     int width = sapp_width();
     int height = sapp_height();

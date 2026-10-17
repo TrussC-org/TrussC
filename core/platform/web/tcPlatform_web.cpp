@@ -122,6 +122,10 @@ static void screenshotDownloadError(int reason) {
     logError("Screenshot") << message;
 }
 
+std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
+    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+}
+
 bool captureWindow(Pixels& outPixels) {
     (void)outPixels;
     if (!captureWindowWarned_) {
