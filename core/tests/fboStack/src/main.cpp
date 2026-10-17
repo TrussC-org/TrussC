@@ -1,4 +1,4 @@
-// #327: FBO passes reset only sokol_gl's stacks and report its errors.
+// #327/#821: FBO passes isolate local stacks and report sokol_gl errors.
 // Run with --gpu-check on a display (Xvfb works on Linux).
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
@@ -65,7 +65,7 @@ public:
         pushMatrix();  // Deliberately left open, once per update for 200 frames.
         drawRect(0, 0, 8, 8);
         first_.end();
-        depthsPreserved_ &= rc.getMatrixStackDepth() == depth + 1;
+        depthsPreserved_ &= rc.getMatrixStackDepth() == depth;
         ++leaks_;
         leakedThisFrame_ = true;
     }
@@ -94,7 +94,7 @@ public:
             if (leaks_ == 200) {
                 check("second FBO has no errors across 200 leaking passes", drawsHealthy_);
                 check("second FBO still draws at frame 200", pixelIsWhite(second_, 20, 20));
-                check("FBO boundary leaves TrussC's leaked push untouched", depthsPreserved_);
+                check("FBO boundary discards only the FBO-local leaked push", depthsPreserved_);
             }
             return;
         }
@@ -114,7 +114,7 @@ public:
         drawRect(0, 0, 16, 16);
         first_.end();
         check("end preserves the matrix and push from outside the pass",
-              rc.getMatrixStackDepth() == depth + 1 && sameMatrix(getMatrix(), inside));
+              rc.getMatrixStackDepth() == depth + 1 && sameMatrix(getMatrix(), original) && !sameMatrix(getMatrix(), inside));
         popMatrix();
         check("pop outside the pass restores the screen matrix",
               rc.getMatrixStackDepth() == depth && sameMatrix(getMatrix(), original));

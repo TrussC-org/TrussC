@@ -1280,79 +1280,7 @@ void TCVideoPlayerImpl::previousFrame() {
 // VideoPlayer platform methods (Linux implementation)
 // =============================================================================
 
-#include "tc/gpu/shaders/videoNV12.glsl.h"
-
-// NV12 immediate-draw shader (immutable unit-quad, uniform-based positioning)
-class NV12VideoShader : public Shader {
-public:
-    void loadShader() { load(tc_video_nv12_nv12_shader_desc); }
-
-    void draw(float x, float y, float w, float h,
-              const Texture& texY, const Texture& texUV) {
-        if (!loaded) return;
-
-        ensureSwapchainPass();
-        internal::flushLayersMidPass();
-
-        sg_apply_pipeline(pipeline);
-
-        // x/y/w/h come in logical coordinates (same space tcApp draws in),
-        // but sapp_width()/sapp_height() are physical framebuffer pixels.
-        // Divide by DPI scale so the shader's viewport matches its inputs.
-        const float dpiScale = sapp_dpi_scale();
-        const float vpW = (float)sapp_width()  / dpiScale;
-        const float vpH = (float)sapp_height() / dpiScale;
-
-        struct VsParams { float v[8]; } p = {{
-            vpW, vpH, x, y,
-            w,   h,   0.0f, 0.0f
-        }};
-        sg_range range = { &p, sizeof(p) };
-        sg_apply_uniforms(0, &range);
-
-        sg_bindings bind = {};
-        bind.vertex_buffers[0] = vertexBuffer;
-        bind.index_buffer      = indexBuffer;
-        bind.views[0]    = texY.getView();
-        bind.samplers[0] = texY.getSampler();
-        bind.views[1]    = texUV.getView();
-        bind.samplers[1] = texUV.getSampler();
-        sg_apply_bindings(&bind);
-
-        sg_draw(0, 6, 1);
-
-        sg_reset_state_cache();
-        sgl_defaults();
-        trussc::internal::sglLoadProjection(trussc::internal::screen2DProjection(vpW, vpH));
-        sgl_matrix_mode_modelview();
-        sgl_load_identity();
-    }
-
-protected:
-    sg_pipeline_desc createPipelineDesc() override {
-        sg_pipeline_desc desc = {};
-        desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;
-        desc.colors[0].blend.enabled = false;
-        desc.index_type = SG_INDEXTYPE_UINT16;
-        desc.label = "tc_nv12_pipeline";
-        return desc;
-    }
-
-    void createVertexBuffer() override {
-        float verts[] = { 0.f,0.f, 1.f,0.f, 1.f,1.f, 0.f,1.f };
-        sg_buffer_desc vd = {};
-        vd.data  = SG_RANGE(verts);
-        vd.label = "tc_nv12_verts";
-        vertexBuffer = sg_make_buffer(&vd);
-
-        uint16_t idx[] = { 0, 1, 2, 0, 2, 3 };
-        sg_buffer_desc id = {};
-        id.usage.index_buffer = true;
-        id.data  = SG_RANGE(idx);
-        id.label = "tc_nv12_idx";
-        indexBuffer = sg_make_buffer(&id);
-    }
-};
+#include "tcVideoNV12Shader.h"
 
 namespace trussc {
 
@@ -1383,7 +1311,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             std::memset(pixelsY_,  0, width_ * height_);
             std::memset(pixelsUV_, 128, width_ * height_ / 2);  // 128 = neutral chroma in NV12
 
-            auto* shader = new NV12VideoShader();
+            auto* shader = new internal::NV12VideoShader();
             shader->loadShader();
             nv12ShaderHandle_ = shader;
         } else {
@@ -1397,7 +1325,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
 
 void VideoPlayer::closePlatform() {
     if (nv12ShaderHandle_) {
-        delete static_cast<NV12VideoShader*>(nv12ShaderHandle_);
+        delete static_cast<internal::NV12VideoShader*>(nv12ShaderHandle_);
         nv12ShaderHandle_ = nullptr;
     }
     if (platformHandle_) {
@@ -1408,7 +1336,7 @@ void VideoPlayer::closePlatform() {
 }
 
 void VideoPlayer::drawNV12Platform(float x, float y, float w, float h) const {
-    static_cast<NV12VideoShader*>(nv12ShaderHandle_)->draw(x, y, w, h, textureY_, textureUV_);
+    static_cast<internal::NV12VideoShader*>(nv12ShaderHandle_)->draw(x, y, w, h, textureY_, textureUV_);
 }
 
 void VideoPlayer::playPlatform() {

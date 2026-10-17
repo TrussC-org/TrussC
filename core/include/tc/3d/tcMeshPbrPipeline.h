@@ -299,7 +299,7 @@ public:
         fsp.emissive[2] = em.b;
         fsp.emissive[3] = 0.0f;
 
-        const Vec3& cam = wctx.cameraPosition;
+        const Vec3& cam = wctx.currentTarget->camera.cameraPosition;
         int numLights = static_cast<int>(activeLights.size());
         if (numLights > internal::maxLights) numLights = internal::maxLights;
         fsp.cameraPos[0] = cam.x;

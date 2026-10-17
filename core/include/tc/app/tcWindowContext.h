@@ -160,13 +160,12 @@ struct WindowContext {
 
     // --- lighting / material / environment (per window) ---
     // Moved out of the tcLightingState.h process globals so each window has its
-    // own active light set, current material, camera position (PBR view vector),
+    // own active light set, current material,
     // exposure and IBL environment. Registration in activeLights is by address:
     // a Light registered with addLight() must outlive its registration (prefer
     // stable storage — members, not vector<Light> elements). See tcLight.h.
     std::vector<Light*> activeLights;
     Material* currentMaterial = nullptr;
-    Vec3 cameraPosition = {0, 0, 0};
     float pbrExposure = 1.0f;              // global exposure scalar (pre-ACES tonemap)
     Environment* currentEnvironment = nullptr;
 
@@ -345,6 +344,8 @@ inline bool windowThrottleShouldTick(WindowContext& ctx) {
 // Role keys: high nibble = role, low byte = blend mode (2D only). Bit 12
 // (0x1000u) marks the depth-tested variant of a 2D blend pipeline
 // (tc::enableDepthTest()) — orthogonal to both role and blend mode.
+inline RenderTarget& currentTarget() { return *currentWindowContext().currentTarget; }
+
 inline sgl_pipeline active2D(BlendMode m) {
     bool depth = currentWindowContext().currentTarget->depthTestEnabled;
     return currentWindowContext().currentTarget->pipeline(
@@ -369,7 +370,7 @@ inline sgl_pipeline active3D()            { return currentWindowContext().curren
 // ready (id 0). In debug builds it asserts the pipeline was built for the active
 // target's context — the runtime safety net against loading a pipeline meant for a
 // different target (the bug class this refactor removes).
-inline void loadPipeline(sgl_pipeline p) {
+inline void loadTemporaryPipeline(sgl_pipeline p) {
     if (p.id == 0) return;
 #ifndef NDEBUG
     auto& owner = pipelineOwnerCtx();
@@ -381,13 +382,63 @@ inline void loadPipeline(sgl_pipeline p) {
     sgl_load_pipeline(p);
 }
 
-// Restore the current blend pipeline after temporary pipeline changes.
-// Honors the current blend mode on the swapchain and inside Fbo passes alike:
-// active2D() resolves per render target, so the pipeline always matches the
-// active target's color format / sample count. (moved from TrussC.h)
-inline void restoreCurrentPipeline() {
-    loadPipeline(active2D(currentWindowContext().currentTarget->currentBlendMode));
+// Record persistent selections separately from temporary texture/text roles.
+inline void loadPipeline(sgl_pipeline p) {
+    if (p.id == 0) return;
+    for (const auto& entry : currentTarget().resources().cache) {
+        if (entry.second.id == p.id) {
+            currentTarget().selectedPipeline = entry.first;
+            break;
+        }
+    }
+    loadTemporaryPipeline(p);
 }
+
+// Resolve the saved actual role in the active target's resource cache.
+inline void restoreCurrentPipeline() {
+    auto& target = currentTarget();
+    const uint32_t key = target.selectedPipeline;
+    const bool depth = (key & 0x1000u) != 0;
+    sg_pipeline_desc desc;
+    switch (key & 0xf00u) {
+        case 0x100u: desc = pipeDescPremult(depth); break;
+        case 0x200u: desc = pipeDescClear(); break;
+        case 0x300u: desc = pipeDesc3D(); break;
+        case 0x400u: desc = pipeDescCoverage2D(depth); break;
+        default: desc = pipeDesc2D(static_cast<BlendMode>(key & 0xffu), depth); break;
+    }
+    loadTemporaryPipeline(target.pipeline(key, desc));
+}
+
+inline void applyTargetModelView() {
+    const auto& target = currentTarget();
+    const Mat4 composed = (target.camera.currentViewMatrix * target.currentMatrix).transposed();
+    sgl_matrix_mode_modelview();
+    sgl_load_matrix(composed.m);
+}
+
+// Reapply CPU-authoritative state after a target switch, clear, or direct draw.
+inline void applyTargetDrawingState() {
+    const auto& target = currentTarget();
+    const Mat4 projection = target.camera.currentProjectionMatrix.transposed();
+    sgl_matrix_mode_projection();
+    sgl_load_matrix(projection.m);
+    applyTargetModelView();
+    const auto& vp = target.viewport;
+    sgl_viewportf(vp.active ? vp.x : 0, vp.active ? vp.y : 0,
+                  vp.active ? vp.w : float(target.width), vp.active ? vp.h : float(target.height), true);
+    const auto& clip = target.currentScissor;
+    sgl_scissor_rectf(clip.active ? clip.x : 0, clip.active ? clip.y : 0,
+                      clip.active ? clip.w : float(target.width), clip.active ? clip.h : float(target.height), true);
+    restoreCurrentPipeline();
+    if (target.inPass) {
+        sg_apply_viewportf(vp.active ? vp.x : 0, vp.active ? vp.y : 0,
+                          vp.active ? vp.w : float(target.width), vp.active ? vp.h : float(target.height), true);
+        sg_apply_scissor_rectf(clip.active ? clip.x : 0, clip.active ? clip.y : 0,
+                              clip.active ? clip.w : float(target.width), clip.active ? clip.h : float(target.height), true);
+    }
+}
+
 
 // Register a new camera scope (declared in tcCameraContext.h, defined here
 // where WindowContext is complete). Always allocates a fresh context — see

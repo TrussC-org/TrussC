@@ -961,13 +961,13 @@ private:
         // Fill2D even for premultiplied sources, as before.
         BlendMode blend = internal::currentWindowContext().currentTarget->currentBlendMode;
         if (blend != BlendMode::Alpha) {
-            internal::loadPipeline(internal::active2D(blend));
+            internal::loadTemporaryPipeline(internal::active2D(blend));
         } else if (internal::currentWindowContext().currentTarget->isFbo) {
-            internal::loadPipeline(internal::activeFill2D());
+            internal::loadTemporaryPipeline(internal::activeFill2D());
         } else if (premultipliedAlpha_) {
-            internal::loadPipeline(internal::activePremult());
+            internal::loadTemporaryPipeline(internal::activePremult());
         } else {
-            internal::loadPipeline(internal::activeFill2D());
+            internal::loadTemporaryPipeline(internal::activeFill2D());
         }
         sgl_enable_texture();
         sgl_texture(view_, sampler_);

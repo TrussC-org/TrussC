@@ -110,6 +110,7 @@ public:
 
         target_.width = w;
         target_.height = h;
+        target_.camera = {}; // invalidate size-derived camera data
         target_.viewport = {0, 0, (float)w, (float)h, true};
         target_.sampleCount = sampleCount;
         format_ = format;
@@ -277,16 +278,8 @@ public:
         target_.clearAction = pass.action;
         sg_begin_pass(&pass);
 
-        // Reset sokol_gl state. We are still mid-FBO (currentTarget is this FBO),
-        // so the restored pipeline resolves in the FBO's context/format. The
-        // current blend mode survives the clear (same contract as tc::clear()
-        // on the swapchain, which saves and restores it).
         sgl_defaults();
-        internal::restoreCurrentPipeline();
-        internal::sglLoadProjection(
-            internal::screen2DProjection((float)target_.width, (float)target_.height));
-        sgl_matrix_mode_modelview();
-        sgl_load_identity();
+        internal::applyTargetDrawingState();
     }
 
     // End rendering to FBO
@@ -319,17 +312,21 @@ public:
         active_ = false;
         auto& wctx = internal::currentWindowContext();
         target_.inPass = false;
-        wctx.swapchainTarget.inheritDrawState(target_);
-        // Match the window-wide camera save/restore on 56467c6b, including
-        // the original CameraContext identity. Per-target scopes are PR 2.
-        wctx.swapchainTarget.camera = std::move(savedCamera_);
-        savedCamera_ = {};
+        wctx.swapchainTarget.inheritLogicalDrawFlags(target_);
+        if (!target_.matrixStack.empty() || !target_.cameraStack.empty() || !target_.scissorStack.empty()) {
+            static OnceGate warned;
+            if (warned.isFirstTime()) logWarning("Fbo") << "end() discarded unmatched matrix, camera or scissor pushes";
+        }
+        target_.matrixStack.clear();
+        target_.cameraStack.clear();
+        target_.scissorStack.clear();
         wctx.currentTarget = &wctx.swapchainTarget;
 
         // Resume swapchain pass (if we were in one before)
         if (wasInSwapchainPass_) {
             resumeSwapchainPass();
         }
+        internal::applyTargetDrawingState();
     }
 
     // Read pixel data (RGBA8 only, for backward compatibility)
@@ -444,7 +441,6 @@ private:
     TextureFormat format_ = TextureFormat::RGBA8;
     bool allocated_ = false;
     bool active_ = false;
-    internal::TargetCameraState savedCamera_;
     bool wasInSwapchainPass_ = false;  // Was in swapchain pass when begin() called
     bool mipmaps_ = false;
     int  numMipLevels_ = 1;
@@ -874,25 +870,22 @@ private:
         target_.sglLayerNext = 0;
         sgl_layer(0);
 
-        // Preserve the original setup ordering: the old target selects the
-        // temporary setup pipeline, while the shared Fbo context receives its
-        // sgl matrices. As on 56467c6b, save the incoming camera before setup
-        // overwrites it, then carry the entire window-wide state into the Fbo.
-        // Independent per-target camera scopes belong to PR 2.
         auto& wctx = internal::currentWindowContext();
-        savedCamera_ = wctx.currentTarget->camera;
-
-        // Setup screen projection using defaultScreenFov (like main screen).
-        // pickable=false: geometry drawn into an offscreen target must not be
-        // pickable from main-screen clicks (see tcCameraContext.h).
-        internal::setupScreenFovWithSize(internal::defaultScreenFov(), (float)target_.width, (float)target_.height, 0.0f, 0.0f, false);
-
-        target_.inheritDrawState(*wctx.currentTarget);
+        target_.inheritLogicalDrawFlags(*wctx.currentTarget);
         target_.pooledResources = &shared.resources;
+        wctx.currentTarget = &target_;
+        target_.camera = {};
+        target_.cameraStack.clear();
+        target_.currentMatrix = Mat4::identity();
+        target_.matrixStack.clear();
+        target_.currentScissor = {0, 0, 0, 0, false};
+        target_.scissorStack.clear();
+        target_.viewport = {0, 0, float(target_.width), float(target_.height), true};
+        internal::setupScreenFovWithSize(TAU / 8, float(target_.width), float(target_.height), 0, 0, false);
         active_ = true;
         target_.inPass = true;
-        wctx.currentTarget = &target_;
-        internal::restoreCurrentPipeline();
+        internal::loadPipeline(internal::active2D(target_.currentBlendMode));
+        internal::applyTargetDrawingState();
         target_.clearOwner = this;
         target_.clearColor = [](void* owner, float cr, float cg, float cb, float ca) {
             static_cast<Fbo*>(owner)->clearColor(cr, cg, cb, ca);
@@ -911,8 +904,6 @@ private:
         format_ = other.format_;
         allocated_ = other.allocated_;
         active_ = other.active_;
-        savedCamera_ = std::move(other.savedCamera_);
-        other.savedCamera_ = {};
         wasInSwapchainPass_ = other.wasInSwapchainPass_;
         mipmaps_ = other.mipmaps_;
         numMipLevels_ = other.numMipLevels_;

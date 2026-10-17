@@ -4,6 +4,14 @@
 #include <cstdio>
 #include <cstring>
 
+#include "state.glsl.h"
+#include "../../../../addons/tcxLut/src/tcLut.h"
+#include "../../../../addons/tcxHap/src/impl/tcxHapDrawData.h"
+#include "ycocg.glsl.h"
+#if defined(__linux__) && !defined(__ANDROID__)
+#include "../../../platform/linux/tcVideoNV12Shader.h"
+#endif
+
 using namespace tc;
 
 namespace {
@@ -53,7 +61,7 @@ void checkTargetOwnership() {
           secondFbo.clearAction.colors[0].clear_value.a == 1);
 }
 
-void checkLegacyHandoff() {
+void checkLogicalHandoff() {
     internal::RenderTarget windowTarget;
     internal::RenderTarget fboTarget;
     windowTarget.currentMatrix = Mat4::translate(4, 5, 6);
@@ -70,39 +78,68 @@ void checkLegacyHandoff() {
     windowTarget.camera.currentCameraDist = 173;
     windowTarget.camera.currentCameraContext = std::make_shared<CameraContext>();
     windowTarget.sglLayerNext = 7;
-    fboTarget.inheritDrawState(windowTarget);
-    check("Fbo inherits the legacy model, blend, depth and clipping scope",
-          fboTarget.currentMatrix.m[3] == 4 && fboTarget.matrixStack.size() == 1 &&
+    fboTarget.inheritLogicalDrawFlags(windowTarget);
+    check("only blend/depth flags cross target activation",
           fboTarget.currentBlendMode == BlendMode::Add && fboTarget.depthTestEnabled &&
-          fboTarget.currentScissor.w == 3 && fboTarget.scissorStack.size() == 1);
-    check("Fbo inherits all legacy window-wide camera fields",
-          fboTarget.camera.currentViewMatrix.m[3] == 1 &&
-          fboTarget.camera.currentProjectionMatrix.m[0] == 2 &&
-          fboTarget.camera.currentScreenFov == TAU / 6 &&
-          fboTarget.camera.currentViewW == 96 && fboTarget.camera.currentViewH == 64 &&
-          fboTarget.camera.currentCameraDist == 173 &&
-          fboTarget.camera.currentCameraContext == windowTarget.camera.currentCameraContext);
+          fboTarget.matrixStack.empty() && fboTarget.scissorStack.empty() &&
+          !fboTarget.currentScissor.active && fboTarget.currentMatrix.m[3] == 0 &&
+          fboTarget.camera.currentViewW == 0 && !fboTarget.camera.currentCameraContext &&
+          windowTarget.matrixStack.size() == 1 && windowTarget.scissorStack.size() == 1);
     fboTarget.camera.currentViewW = 37;
     fboTarget.currentMatrix = Mat4::translate(8, 9, 10);
     fboTarget.currentBlendMode = BlendMode::Screen;
     fboTarget.matrixStack.push_back(Mat4::identity());
-    windowTarget.inheritDrawState(fboTarget);
-    check("raw handoff carries mutations and preserves target layer counters",
-          windowTarget.currentMatrix.m[3] == 8 && windowTarget.matrixStack.size() == 2 &&
+    windowTarget.inheritLogicalDrawFlags(fboTarget);
+    check("return handoff retains suspended matrices, stacks and camera",
+          windowTarget.currentMatrix.m[3] == 4 && windowTarget.matrixStack.size() == 1 &&
           windowTarget.currentBlendMode == BlendMode::Screen && windowTarget.sglLayerNext == 7 &&
-          windowTarget.camera.currentViewW == 37);
+          windowTarget.camera.currentViewW == 96 && windowTarget.scissorStack.size() == 1);
+
+}
+void checkCpuCoordinates() {
+    internal::WindowContext window;
+    window.isMain = false; window.fbWidth = 512; window.fbHeight = 384;
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &window;
+    internal::RenderTarget fbo;
+    fbo.isFbo = true; fbo.width = 37; fbo.height = 23;
+    fbo.camera.currentViewMatrix = Mat4::translate(1, 2, 3);
+    fbo.camera.currentProjectionMatrix = Mat4::scale(2, 3, 4);
+    fbo.currentMatrix = Mat4::translate(7, 8, 9);
+    fbo.selectedPipeline = 0x300u;
+    fbo.cameraStack.push_back({fbo.camera, 0x1000u, &fbo});
+    const bool previousMode = internal::pixelPerfectMode();
+    for (float dpi : {1.0f, 2.0f}) for (bool pixel : {false, true}) {
+        window.dpiScale = dpi; internal::pixelPerfectMode() = pixel;
+        window.currentTarget = &fbo;
+        RectNode object; object.setSize(11, 13);
+        check("headless offscreen getters ignore host DPI and preserve object/window dimensions",
+              tc::getWidth() == 37 && tc::getHeight() == 23 && tc::getSize().y == 23 &&
+              getViewMatrix().m[3] == 1 && getProjectionMatrix().m[0] == 2 && getMatrix().m[3] == 7 &&
+              getFramebufferWidth() == 512 && getWindowWidth() == int(512 / (pixel ? 1 : dpi)) && object.getWidth() == 11);
+        window.currentTarget = &window.swapchainTarget;
+        check("headless target switching isolates camera/model scopes and selected role",
+              getMatrix().m[3] == 0 && window.swapchainTarget.cameraStack.empty() && window.swapchainTarget.selectedPipeline == 0 &&
+              fbo.cameraStack.size() == 1 && fbo.selectedPipeline == 0x300u && fbo.cameraStack.back().selectedPipeline == 0x1000u);
+    }
+    internal::pixelPerfectMode() = previousMode;
+    internal::currentWindowCtx() = previous;
 }
 auto& cameraFields() { return internal::currentWindowContext().currentTarget->camera; }
 auto& reviewDrawFields() { return *internal::currentWindowContext().currentTarget; }
 bool reviewSwapchainInPass() { return internal::currentWindowContext().swapchainTarget.inPass; }
 int reviewSwapchainMetadataSamples() { return internal::currentWindowContext().swapchainTarget.sampleCount; }
+bool sameMatrix(const Mat4&, const Mat4&);
 #include "reviewChecks.h"
+#include "matrixChecks.h"
+#include "depthSetterChecks.h"
 #include "cameraChecks.h"
 }
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     checkTargetOwnership();
-    checkLegacyHandoff();
+    checkLogicalHandoff();
+    checkCpuCoordinates();
     if (argc > 1 && std::strcmp(argv[1], "--gpu-check") == 0) return runCameraChecks(argc > 2 && std::strcmp(argv[2], "--msaa4") == 0 ? 4 : 1);
     return failures ? 1 : 0;
 }

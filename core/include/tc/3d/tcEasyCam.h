@@ -39,13 +39,15 @@ public:
 
     // Start camera mode (set 3D perspective + view matrix)
     void begin() {
+        auto& target = internal::currentTarget();
+        target.cameraStack.push_back({target.camera, target.selectedPipeline, this});
         // 3D pipeline for the active target (swapchain or FBO) — RenderTarget picks
         // the format-correct one; no per-site swapchain/FBO branch.
         internal::loadPipeline(internal::active3D());
 
-        float dpiScale = getDpiScale();
-        float w = (float)getFramebufferWidth() / dpiScale;
-        float h = (float)getFramebufferHeight() / dpiScale;
+        const auto size = internal::targetLogicalSize();
+        float w = size.x;
+        float h = size.y;
         float aspect = w / h;
 
         // Camera basis from orientation quaternion (no gimbal lock / no pole
@@ -91,24 +93,21 @@ public:
         // it, so mouse picking unprojects through THIS camera for them.
         internal::registerCameraContext(view, projection, w, h, true);
 
-        // Apply to SGL (needs column-major, so transpose)
-        Mat4 projT = projection.transposed();
-        Mat4 viewT = view.transposed();
-
-        sgl_matrix_mode_projection();
-        sgl_load_identity();
-        sgl_mult_matrix(projT.m);
-
-        sgl_matrix_mode_modelview();
-        sgl_load_identity();
-        sgl_mult_matrix(viewT.m);
+        internal::applyTargetDrawingState();
     }
 
-    // End camera mode (return to 2D drawing mode)
+    // Camera scopes must be balanced on the target where they began.
     void end() {
-        internal::restoreCurrentPipeline();
-        // Return to 2D orthographic projection
-        beginFrame();
+        auto& target = internal::currentTarget();
+        if (target.cameraStack.empty() || target.cameraStack.back().owner != this) {
+            static OnceGate warned;
+            if (warned.isFirstTime()) logWarning("EasyCam") << "end() has no matching begin() on this target";
+            return;
+        }
+        target.camera = target.cameraStack.back().camera;
+        target.selectedPipeline = target.cameraStack.back().selectedPipeline;
+        target.cameraStack.pop_back();
+        internal::applyTargetDrawingState();
     }
 
     // Reset camera
