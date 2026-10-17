@@ -42,8 +42,11 @@ def violations(root, tracked):
         # and no src/ directory; their .gitignore may only ignore build output.
         standalone = (str(project / "CMakeLists.txt") in tracked
                       and not (root / project / "src").is_dir())
+        addons = root / project / "addons.make"
         if (not standalone and (root / project / ".gitignore").is_file()
-                and not (root / project / "addons.make").is_file()):
+                and (not addons.is_file() or addons.stat().st_size == 0)):
+            # trusscli update rewrites an empty addons.make with its header,
+            # which would dirty the tree on every build.
             errors.append(str(project / "addons.make"))
     return errors
 
@@ -54,7 +57,7 @@ def main(root=ROOT):
     errors = violations(root, filter(None, tracked))
     for name in errors:
         if PurePosixPath(name).name == "addons.make":
-            print(f"missing core test project file: {name} (add an empty file)")
+            print(f"missing or empty core test project file: {name} (add \"# TrussC addons - one addon per line\")")
         else:
             print(f"tracked generated test file: {name} (untrack this path)")
     print(f"test generated-file check: {len(errors)} violation(s)")

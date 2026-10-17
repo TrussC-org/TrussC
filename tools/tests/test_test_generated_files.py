@@ -21,7 +21,7 @@ class GeneratedTestFilesTests(unittest.TestCase):
         (project / ".gitignore").write_text(
             "# Generated project files\nCMakeLists.txt\n/CMakePresets.json\nbin/*\n")
         (project / "src").mkdir()
-        (project / "addons.make").touch()
+        (project / "addons.make").write_text("# TrussC addons - one addon per line\n")
         # Present on disk even in the clean-index case.
         (project / "CMakeLists.txt").write_text("trussc_app()\n")
         (project / "CMakePresets.json").write_text("{}\n")
@@ -49,7 +49,14 @@ class GeneratedTestFilesTests(unittest.TestCase):
             "core/tests/fixture/.gitignore", "core/tests/fixture/src/main.cpp"])
         self.assertEqual(result, 1)
         self.assertIn("1 violation(s)", output)
-        self.assertIn("missing core test project file: core/tests/fixture/addons.make", output)
+        self.assertIn("missing or empty core test project file: core/tests/fixture/addons.make", output)
+
+    def test_empty_core_addons_make_fails(self):
+        (self.root / "core/tests/fixture/addons.make").write_text("")
+        result, output = self.run_guard([
+            "core/tests/fixture/.gitignore", "core/tests/fixture/src/main.cpp"])
+        self.assertEqual(result, 1)
+        self.assertIn("missing or empty core test project file: core/tests/fixture/addons.make", output)
 
     def test_standalone_cmake_without_addons_make_passes(self):
         project = self.root / "core/tests/standalone"
