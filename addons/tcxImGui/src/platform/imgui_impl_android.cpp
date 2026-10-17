@@ -17,8 +17,7 @@
 #include "imgui/imgui_demo.cpp"
 
 // sokol_imgui implementation
-#define SOKOL_IMGUI_IMPL
-#include "sokol_imgui.h"
+#include "tcImGuiTargetImpl.h"
 
 // Test Engine hook implementations (provides ImGuiTestEngineHook_* functions)
 #include "tcImGuiHooks.h"

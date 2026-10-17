@@ -492,7 +492,7 @@ inline Color calculateLighting(const Vec3& worldPos, const Vec3& worldNormal,
     float b = em.b * es;
 
     // Sum contributions from each light
-    const Vec3& cameraPosition = internal::currentWindowContext().cameraPosition;
+    const Vec3& cameraPosition = internal::currentTarget().camera.cameraPosition;
     for (Light* light : activeLights) {
         if (light && light->isEnabled()) {
             Color contribution = light->calculate(worldPos, worldNormal,

@@ -225,13 +225,13 @@ public:
         const auto layout = internal::recorderPackedLayout(width_, height_, internal::RecorderPixelFormat::RGBA8);
         // Bound (abi): Fbo extent and RGBA8 bytes must match the take and scratch capacity. Overflow drops the recorder frame and is counted.
         if (fbo.getTextureFormat() != TextureFormat::RGBA8 ||
-            fbo.getTexture().getPixelFormat() != SG_PIXELFORMAT_RGBA8 ||
-            fbo.getTexture().getWidth() != width_ || fbo.getTexture().getHeight() != height_ ||
+            fbo.curColorTex_().getPixelFormat() != SG_PIXELFORMAT_RGBA8 ||
+            fbo.curColorTex_().getWidth() != width_ || fbo.curColorTex_().getHeight() != height_ ||
             !layout.byteSize || scratch_.size() < layout.byteSize) {
             rejectFrameLayout();
             return internal::saveFailure(path_, "frame layout does not match the recording buffer");
         }
-        if (internal::currentWindowContext().inFboPass)
+        if (internal::hasPublicFboActivation())
             return callFailed("fbo readPixels requires fbo.end() first");
         if (!fbo.readPixelsPlatform(scratch_.data(), false)) {
             rejectFrameLayout();

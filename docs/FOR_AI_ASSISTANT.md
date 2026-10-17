@@ -1968,7 +1968,7 @@ void rotateZ(float radians)  // Rotate around Z axis
 void rotateZDeg(float degrees)  // Rotate around Z axis (degrees)
 void scale(float s) [+2]  // Scale
 MatrixScope scopedMatrix()  // pushMatrix() now, popMatrix() at the end of the scope: `auto m = scopedMatrix();` returns a MatrixScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushMatrix() / popMatrix() remain the main form. [[nodiscard]]: `scopedMatrix();` alone would pop at once and is a compiler warning
-void setMatrix(const Mat4 & mat)  // Replace the current matrix with mat (absolute - use with caution, may break camera setup)
+void setMatrix(const Mat4 & mat)  // Replace the active target model matrix with mat, retaining its camera view (sgl receives V*M). Pass a model matrix without a baked-in view.
 void translate(Vec3 pos) [+2]  // Move origin
 ```
 
@@ -2380,7 +2380,7 @@ void enable3DPerspective(float fovY = 0.785000026, float nearZ = 0.100000001, fl
 float getDefaultScreenFov()  // Get default screen FOV in radians
 float getDefaultScreenFovDeg()  // Get default screen FOV in degrees
 Vec3 screenToWorld(const Vec2 & screenPos, float worldZ = 0.0)  // Convert screen coordinate to world coordinate on Z plane
-void setDefaultScreenFov(float fovRadians)  // Set default screen FOV in radians (frame start and FBO begin)
+void setDefaultScreenFov(float fovRadians)  // Set default swapchain FOV in radians (frame start only)
 void setDefaultScreenFovDeg(float fovDeg)  // Set default screen FOV in degrees
 void setDefaultScreenOrtho()  // Set orthographic projection as the default (frame start and FBO begin)
 void setFarClip(float farDist)  // Set the default-screen far clipping plane (0 = auto-calculate)
@@ -2505,6 +2505,16 @@ ToolBuilder mcp::tool(const std::string & name, const std::string & desc)  // Bu
 bool console::isEnabled()  // Whether stdin command delivery is enabled. False until the app calls start(), and after stop(); always false on Web.
 void console::start()  // Opt in to stdin commands: call in setup() for windowed or headless apps. Neither runner starts input automatically (breaking in v0.8.0). Drains pending commands before enabling delivery; the first call creates the process's only detached reader, which reads until EOF. Later starts reuse it. LF/CRLF and a partial last line at EOF are supported. Unavailable on Web.
 void console::stop()  // Disable stdin command delivery and discard queued commands. The detached reader continues consuming stdin until EOF, dropping lines read while stopped. start() enables delivery again. Both runners stop delivery before app exit/cleanup. No-op on Web.
+```
+
+### graphics
+
+```cpp
+int getHeight()  // Drawing height in active-target coordinate units; see getWidth.
+Mat4 getProjectionMatrix()  // Return the active target camera projection matrix by value, in backend-native clip space.
+Vec2 getSize()  // Drawing width and height of the active target as Vec2; see getWidth.
+Mat4 getViewMatrix()  // Return the active target camera view matrix by value. Fbo and EasyCam scopes restore the previous camera on exit; Node CameraContexts remain immutable draw-time snapshots.
+int getWidth()  // Drawing width in active-target coordinate units. Fbo: attachment pixels; swapchain: logical units or pixels according to pixelPerfect. Object and window getters keep their own size.
 ```
 
 ### Other
@@ -2808,7 +2818,7 @@ void EasyCam::disableMouseInput()  // Disable mouse input for camera control
 void EasyCam::disableOrtho()  // Disable orthographic projection (use perspective)
 void EasyCam::enableMouseInput()  // Enable mouse input for camera control
 void EasyCam::enableOrtho()  // Enable orthographic projection
-void EasyCam::end()  // Restore previous transform (end 3D mode)
+void EasyCam::end()  // Restore the camera snapshot and selected pipeline from the matching begin on this target, retaining its model and continuous logical blend/depth flags.
 float EasyCam::getAzimuth() const  // Get orbit azimuth (horizontal angle, radians)
 float EasyCam::getDistance() const  // Get distance from target
 Modifier EasyCam::getDragModifier() const  // Get the modifier key required for camera mouse input
@@ -2894,13 +2904,13 @@ bool EventListener::isConnected() const  // True while the listener is still con
 ### Fbo — Framebuffer object for offscreen rendering
 
 ```cpp
-void Fbo::allocate(int w, int h, int sampleCount = 1, TextureFormat format = RGBA8, bool mipmaps = false)  // Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
-void Fbo::begin() [+1]  // Begin rendering to FBO
+void Fbo::allocate(int w, int h, int sampleCount = 1, TextureFormat format = RGBA8, bool mipmaps = false)  // Allocate framebuffer (void). When the size exceeds the device limit or the graphics backend reports a resource creation failure, allocation fails, partial resources are released and isAllocated() stays false. Driver-level out-of-memory may not be reported on every backend; begin()/draw() are no-ops and readPixels()/readPixelsFloat()/copyTo() return false. Oversize requests log one Warning with the requested size and device limit. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
+void Fbo::begin() [+1]  // Begin rendering to FBO. Each activation starts an identity model, empty matrix/camera/scissor scopes, full viewport and a TAU/8 camera in attachment pixels. Distinct Fbos may nest; end resumes the parent with color and depth LOAD. A fresh LOAD activation keeps color and clears depth. Balance scopes on the same target; recursive begin and out-of-order end are rejected.
 void Fbo::clear()  // Release FBO resources
 void Fbo::clearColor(float r, float g, float b, float a)  // Clear the FBO with a solid color
 bool Fbo::copyTo(Image & image) const  // Copy FBO contents to Image
 void Fbo::draw(float x, float y) const [+1]  // Draw FBO contents
-void Fbo::end()  // End rendering to FBO
+void Fbo::end()  // End rendering to FBO and return to the parent target; the returned logical blend takes effect immediately.
 sg_image Fbo::getColorImage() const  // Return the underlying sokol-gfx color image handle (advanced interop).
 const std::string & Fbo::getDebugName() const  // Return the MCP inspection name (empty for unnamed or moved-from objects).
 int Fbo::getHeight() const  // Get height
@@ -2913,10 +2923,10 @@ int Fbo::getWidth() const  // Get width
 bool Fbo::isActive() const  // Check if currently rendering to FBO
 bool Fbo::isAllocated() const  // Check if allocated
 std::shared_ptr<void> Fbo::lifetimeToken() const  // Lifetime token for observers holding a raw pointer to this Fbo (e.g. ScreenRecorder auto-stops when the recorded Fbo dies). Per-object: it does not transfer on move
-bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android]  // Read FBO contents into a CPU buffer (8-bit per channel)
-bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android]  // Read FBO contents into a CPU buffer (32-bit float per channel)
+bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android,web]  // Always read RGBA8 into a CPU buffer, whatever the Fbo format (clamped to 0–1 and quantised to 8 bits)
+bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android,web]  // Read FBO contents into a CPU buffer (32-bit float per channel)
 SaveResult Fbo::save(const fs::path & path) const  // Read back and save FBO pixels. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
-void Fbo::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_fbos lists live objects with index, name, width, height and format. tc_analyze_image accepts source={fbo:name or index} and reads the final Fbo pass after the frame. Moves transfer the name/index and remove the moved-from object; destruction removes the entry. Empty names remain available by index. Web readback and iOS float readback return errors. Byte Fbo readback supports RGBA8; other integer formats return an error. Texture is not a source; draw it into a named Fbo.
+void Fbo::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_fbos lists live objects with index, name, width, height and format. tc_analyze_image accepts source={fbo:name or index} and reads the final Fbo pass after the frame. Moves transfer the name/index and remove the moved-from object; destruction removes the entry. Empty names remain available by index. Web readback and iOS float readback return errors. Non-float Fbo formats are converted to RGBA8 for byte readback. Texture is not a source; draw it into a named Fbo.
 ```
 
 ### FileDialogResult — Result of a load/save file dialog
@@ -3969,7 +3979,7 @@ void Shader::createVertexBuffer()  // Create the dynamic vertex/index buffers; o
 void Shader::end()  // End shader (pops from stack)
 void Shader::fillTextureBindings(sg_bindings & bind) const  // Copy the textures set with setTexture() into sg_bindings; a sampler is written only for slots below sokol's sampler limit (12).
 bool Shader::isLoaded() const  // Check if shader is loaded
-bool Shader::load(const sg_shader_desc *(*)(sg_backend) descFn)  // Load from sokol-shdc generated function
+bool Shader::load(const sg_shader_desc *(*)(sg_backend) descFn)  // Load a sokol-shdc program and capture the subclass pipeline recipe. Target-compatible pipelines are created lazily at drawing; target-specific pipeline failures are reported then.
 void Shader::onBegin()  // Hook called when the shader scope begins; override to set up bindings.
 void Shader::onEnd()  // Hook called when the shader scope ends.
 sg_pipeline Shader::pipelineForCurrentTarget()  // Return the pipeline matching the current render target, building and caching one per (format, sampleCount).
@@ -4232,7 +4242,7 @@ void Texture::loadData(const Pixels & pixels) [+2]  // Load pixel data to textur
 void Texture::setFilter(TextureFilter filter)  // Set both min and mag filters
 void Texture::setMagFilter(TextureFilter filter)  // Set magnification filter
 void Texture::setMinFilter(TextureFilter filter)  // Set minification filter
-void Texture::setPremultipliedAlpha(bool v)  // Set whether the texture color is premultiplied by alpha
+void Texture::setPremultipliedAlpha(bool v)  // Set whether texture color is premultiplied by alpha. Alpha blending honors this flag on both windows and Fbos.
 void Texture::setWrap(TextureWrap wrap)  // Set both wrap modes
 void Texture::setWrapU(TextureWrap wrap)  // Set horizontal wrap mode
 void Texture::setWrapV(TextureWrap wrap)  // Set vertical wrap mode

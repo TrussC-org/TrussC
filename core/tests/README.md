@@ -197,6 +197,10 @@ LIBGL_ALWAYS_SOFTWARE=1 \
 
 ## Tests
 
+- `msaaResolveScissor/` — #861: whole-attachment resolve after a 1x1-scissored
+  final draw, at samples 1/4 with and without mips. Checks every RGBA pixel,
+  copyTo under a parent scissor, an empty clipped CLEAR pass, and clipping in
+  the following pass. Run with `--gpu-check` on GLCORE and GLES3.
 - `mcpAdmissionConstruction/` — admission construction/model checks, real
   framebuffer rejection (`--gpu-check --dpi=1|2`), and native cross-frame
   resize/save cycles (`--gpu-check-resize --dpi=1|2`). See its

@@ -34,13 +34,14 @@ void tcApp::draw() {
     // Your TrussC drawing here...
 
     // ImGui frame
-    imguiBegin();
-    ImGui::Begin("My Window");
-    ImGui::Text("Hello from TrussC!");
-    if (ImGui::Button("Click me")) {
-        logNotice() << "Button clicked";
+    if (imguiBegin()) {
+        ImGui::Begin("My Window");
+        ImGui::Text("Hello from TrussC!");
+        if (ImGui::Button("Click me")) {
+            logNotice() << "Button clicked";
+        }
+        ImGui::End();
     }
-    ImGui::End();
     imguiEnd();
 }
 ```
@@ -51,6 +52,39 @@ shuts itself down when the app closes, so there is nothing to call in `cleanup()
 With hot reload, the same teardown runs on `events().hotReloadUnload` before
 each reload, and the new build sets ImGui up again in its `setup()`.
 
+## Offscreen UI
+
+Create a separate `tcx::imgui::ImGuiManager` and call `setupOffscreen()` while
+its owning window is current. Keep the manager alive across frames. With an
+allocated `fbo` and that `manager`, use:
+
+```cpp
+manager.setupOffscreen();
+// each frame
+fbo.begin(); if (auto ui = manager.scoped()) { ImGui::Text("hi"); } fbo.end();
+```
+
+`setupOffscreen()` creates independent UI state without window input hooks or
+a shared ini file. Route offscreen input explicitly through the context's
+`ImGuiIO`; do not expect window input to be forwarded automatically.
+
+`scoped()` starts a frame only when its boolean result is true. End the scope
+before `Fbo::end()`, on the same active target: its destructor ends the frame,
+renders synchronously into the Fbo, and restores the previous ImGui context.
+The attachment stores premultiplied RGBA for `BlendMode::Alpha` compositing.
+A context may begin once per Sokol frame; rendering UI into another target
+before present requires a separate manager.
+
+Window `imguiBegin()` / `imguiEnd()` retain deferred `onRender` timing and use
+`getDpiScale()` independently of `pixelPerfect`. `imguiBegin()` returns `false`
+on refusal. Submit widgets only on success, and pair every attempt, including
+a refused one, with `imguiEnd()`:
+
+```cpp
+if (imguiBegin()) { ImGui::Text("hi"); }
+imguiEnd();
+```
+
 ## API
 
 ### Lifecycle
@@ -59,8 +93,17 @@ each reload, and the new build sets ImGui up again in its `setup()`.
 |----------|-------------|
 | `imguiSetup()` | Initialize ImGui (call in setup) |
 | `imguiShutdown()` | Shut down ImGui early (optional — runs automatically on app exit) |
-| `imguiBegin()` | Start ImGui frame (call at start of your GUI code) |
+| `imguiBegin()` | Attempt to start a window UI frame; returns false on refusal. Always pair with `imguiEnd()` |
 | `imguiEnd()` | End ImGui frame (rendering is deferred to onRender) |
+
+### Owned offscreen manager (`tcx::imgui::ImGuiManager`)
+
+| Method | Description |
+|--------|-------------|
+| `setupOffscreen()` | Initialize independent offscreen UI state while its owning window is current |
+| `scoped()` | Return a scope whose boolean result indicates whether frame start succeeded; destruction ends the frame and restores the previous context. Requires an active Fbo for an offscreen manager |
+
+See [Offscreen UI](#offscreen-ui) for target lifetime, input and compositing rules.
 
 ### Input Query
 
@@ -79,7 +122,7 @@ void tcApp::mousePressed(int x, int y, int button) {
 
 ### Dear ImGui API
 
-After `imguiBegin()`, use the standard [Dear ImGui API](https://github.com/ocornut/imgui) directly (`ImGui::Begin()`, `ImGui::Button()`, etc). See the [Dear ImGui demo](https://github.com/ocornut/imgui/blob/master/imgui_demo.cpp) for a full showcase.
+After `imguiBegin()` succeeds, use the standard [Dear ImGui API](https://github.com/ocornut/imgui) directly (`ImGui::Begin()`, `ImGui::Button()`, etc). See the [Dear ImGui demo](https://github.com/ocornut/imgui/blob/master/imgui_demo.cpp) for a full showcase.
 
 ## MCP Tools
 
@@ -295,7 +338,8 @@ tcxImGui connects to TrussC via these core events:
   `tcx_imgui_input` whose check frame did not come in time (see
   [Setting values](#setting-values)), before the MCP server's own timeout
 
-This means ImGui always renders on top and receives input before your app.
+Window UI renders on top and receives input before your app. Owned offscreen
+UI uses the explicit input and synchronous rendering described above.
 
 ## License
 

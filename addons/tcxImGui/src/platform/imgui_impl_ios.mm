@@ -18,5 +18,4 @@
 #include "tcImGuiHooks.h"
 
 // sokol_imgui implementation
-#define SOKOL_IMGUI_IMPL
-#include "sokol_imgui.h"
+#include "tcImGuiTargetImpl.h"

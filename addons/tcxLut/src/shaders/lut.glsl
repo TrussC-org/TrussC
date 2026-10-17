@@ -6,12 +6,16 @@
 
 // Vertex shader
 @vs vs
+layout(binding=1) uniform lut_vs_params {
+    mat4 mvp;
+    vec4 rect;
+};
 in vec2 position;
 in vec2 texcoord0;
 out vec2 uv;
 
 void main() {
-    gl_Position = vec4(position, 0.0, 1.0);
+    gl_Position = mvp * vec4(rect.xy + vec2(position.x * 0.5 + 0.5, 0.5 - position.y * 0.5) * rect.zw, 0.0, 1.0);
     uv = texcoord0;
 }
 @end

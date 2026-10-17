@@ -1,0 +1,2 @@
+{test} --gpu-check
+{test} --gpu-check --msaa4

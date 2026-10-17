@@ -4854,6 +4854,8 @@ typedef struct sg_stats {
     _SG_LOGITEM_XMACRO(VALIDATE_UPDIMG_USAGE, "sg_update_image: cannot update immutable image") \
     _SG_LOGITEM_XMACRO(VALIDATE_UPDIMG_ONCE, "sg_update_image: only one update allowed per image and frame") \
     _SG_LOGITEM_XMACRO(VALIDATION_FAILED, "validation layer checks failed") \
+    /* [TrussC] Routed to the process-once RenderTarget Notice in tcGlobal.cpp. */ \
+    _SG_LOGITEM_XMACRO(TRUSSC_GL_V3D_RESOLVE_FLUSH, "Mesa V3D: flushing before MSAA resolve (Mesa bug fixed in 25.1.5)") \
 
 #define _SG_LOGITEM_XMACRO(item,msg) SG_LOGITEM_##item,
 typedef enum sg_log_item {
@@ -5774,6 +5776,7 @@ inline int sg_append_buffer(sg_buffer buf_id, const sg_range& data) { return sg_
         #define GL_DRAW_FRAMEBUFFER 0x8CA9
         #define GL_FRAMEBUFFER_COMPLETE 0x8CD5
         #define GL_NUM_EXTENSIONS 0x821D
+        #define GL_RENDERER 0x1F01
         #define GL_INFO_LOG_LENGTH 0x8B84
         #define GL_VERTEX_SHADER 0x8B31
         #define GL_INCR 0x1E02
@@ -6554,6 +6557,8 @@ typedef struct {
     _sg_gl_cache_t cache;
     bool ext_anisotropic;
     GLint max_anisotropy;
+    // [TrussC] Mesa V3D requires submission before MSAA resolves (#858).
+    bool v3d_resolve_flush;
     sg_store_action color_store_actions[SG_MAX_COLOR_ATTACHMENTS];
     sg_store_action depth_store_action;
     sg_store_action stencil_store_action;
@@ -9104,6 +9109,8 @@ _SOKOL_PRIVATE void _sg_dummy_update_image(_sg_image_t* img, const sg_image_data
     _SG_XMACRO(glBindFramebuffer,                 void, (GLenum target, GLuint framebuffer)) \
     _SG_XMACRO(glBindRenderbuffer,                void, (GLenum target, GLuint renderbuffer)) \
     _SG_XMACRO(glGetStringi,                      const GLubyte *, (GLenum name, GLuint index)) \
+    _SG_XMACRO(glGetString,                       const GLubyte *, (GLenum name)) \
+    _SG_XMACRO(glFlush,                           void, (void)) \
     _SG_XMACRO(glClearBufferfi,                   void, (GLenum buffer, GLint drawbuffer, GLfloat depth, GLint stencil)) \
     _SG_XMACRO(glClearBufferfv,                   void, (GLenum buffer, GLint drawbuffer, const GLfloat * value)) \
     _SG_XMACRO(glClearBufferuiv,                  void, (GLenum buffer, GLint drawbuffer, const GLuint * value)) \
@@ -10632,6 +10639,10 @@ _SOKOL_PRIVATE void _sg_gl_setup_backend(const sg_desc* desc) {
         _sg_gl_init_caps_gles3();
     #endif
 
+    // [TrussC] Native Pi 5 ("V3D 7.1.10.2") / Pi 4 ("V3D 4.2") only; exclude Zink's wrapped Vulkan device name.
+    const char* renderer = (const char*) glGetString(GL_RENDERER);
+    _sg.gl.v3d_resolve_flush = renderer && (strncmp(renderer, "V3D ", 4) == 0);
+
     // create and bind global vertex array object which will be mutated as needed
     glGenVertexArrays(1, &_sg.gl.vao);
     glBindVertexArray(_sg.gl.vao);
@@ -11674,7 +11685,16 @@ _SOKOL_PRIVATE void _sg_gl_end_render_pass(const _sg_attachments_ptrs_t* atts) {
             // perform MSAA resolve if needed
             const _sg_view_t* rsv_view = atts->resolve_views[i];
             if (rsv_view && rsv_view->gl.msaa_resolve_frame_buffer) {
+                // [TrussC] Mesa V3D fast TLB blit bug (#858), fix d0163f1096dac8925579c7ce56d1e2ae50f3fb36 (fixed in Mesa 25.1.5 / 25.2.0); remove once Pi OS ships fixed Mesa.
+                if (_sg.gl.v3d_resolve_flush && !fb_read_bound) {
+                    glFlush();
+                    // [TrussC] Report actual activation through the existing logger bridge.
+                    _SG_INFO(TRUSSC_GL_V3D_RESOLVE_FLUSH);
+                }
                 if (!fb_read_bound) {
+                    // [TrussC] Resolve the whole attachment, regardless of the last draw's scissor (#861).
+                    // Scissor enable isn't cached: _sg_gl_reset_state_cache() keeps it always enabled.
+                    glDisable(GL_SCISSOR_TEST);
                     glBindFramebuffer(GL_READ_FRAMEBUFFER, _sg.gl.fb);
                     fb_read_bound = true;
                 }
@@ -11686,6 +11706,11 @@ _SOKOL_PRIVATE void _sg_gl_end_render_pass(const _sg_attachments_ptrs_t* atts) {
                 glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
                 fb_draw_bound = true;
             }
+        }
+
+        // [TrussC] Restore sokol's always-enabled scissor invariant after all resolve blits (#861).
+        if (fb_read_bound) {
+            glEnable(GL_SCISSOR_TEST);
         }
 
         // invalidate framebuffers
@@ -16215,7 +16240,7 @@ _SOKOL_PRIVATE void _sg_mtl_begin_render_pass(const sg_pass* pass, const _sg_att
             pass_desc.colorAttachments[0].resolveTexture = _sg.mtl.cur_drawable.texture;
             // [TrussC] Modified by tettou771: honor the swapchain-pass "preserve
             // contents" hint (action->depth.store_action == SG_STOREACTION_STORE,
-            // set by trussc::ensureSwapchainPass/resumeSwapchainPass for passes
+            // set by the RenderTarget continuation policy for passes
             // that may be suspended and resumed within one frame). Upstream
             // hardcodes MultisampleResolve, which discards the msaa texture, so
             // a later pass on the same swapchain with SG_LOADACTION_LOAD would

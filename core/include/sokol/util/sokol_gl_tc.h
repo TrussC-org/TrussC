@@ -860,6 +860,10 @@ SOKOL_GL_API_DECL void sgl_context_draw_layer(sgl_context ctx, int layer_id);
 SOKOL_GL_API_DECL void sgl_tc_draw_rewind(void);
 SOKOL_GL_API_DECL void sgl_tc_context_draw_rewind(sgl_context ctx);
 
+/* [TrussC] Whether this context has vertices after its last draw rewind.
+   Query without selecting it; used to defer resource rebuilds until present. */
+SOKOL_GL_API_DECL bool sgl_tc_context_has_pending_draws(sgl_context ctx);
+
 /* [TrussC] Reset command/vertex/uniform counters to zero without freeing memory.
    Buffers and GPU resources are preserved at their current (possibly grown) size.
    Call after sgl_context_draw() to prepare for the next user of a shared context.
@@ -3221,13 +3225,10 @@ static sgl_context _sgl_make_context(const sgl_context_desc_t* desc) {
 static void _sgl_destroy_context(sgl_context ctx_id) {
     _sgl_context_t* ctx = _sgl_lookup_context(ctx_id.id);
     if (ctx) {
-        SOKOL_ASSERT(ctx->vertices.ptr);
-        SOKOL_ASSERT(ctx->uniforms.ptr);
-        SOKOL_ASSERT(ctx->commands.ptr);
-
-        _sgl_free(ctx->vertices.ptr);
-        _sgl_free(ctx->uniforms.ptr);
-        _sgl_free(ctx->commands.ptr);
+        /* [TrussC] release_buffers can leave an idle context without storage. */
+        if (ctx->vertices.ptr) _sgl_free(ctx->vertices.ptr);
+        if (ctx->uniforms.ptr) _sgl_free(ctx->uniforms.ptr);
+        if (ctx->commands.ptr) _sgl_free(ctx->commands.ptr);
         ctx->vertices.ptr = 0;
         ctx->uniforms.ptr = 0;
         ctx->commands.ptr = 0;
@@ -4888,6 +4889,14 @@ SOKOL_API_IMPL void sgl_tc_context_draw_rewind(sgl_context ctx_id) {
     if (ctx) {
         _sgl_draw_rewind(ctx);
     }
+}
+
+SOKOL_API_IMPL bool sgl_tc_context_has_pending_draws(sgl_context ctx_id) {
+    SOKOL_ASSERT(_SGL_INIT_COOKIE == _sgl.init_cookie);
+    _sgl_context_t* ctx = _sgl_lookup_context(ctx_id.id);
+    /* Viewport/scissor commands alone carry no draws; the target reapplies
+       that state after a rebuild. Every immediate draw has recorded vertices. */
+    return ctx && ctx->vertices.next > ctx->draw_base_vertex;
 }
 
 /* [TrussC fork] Reset command/vertex/uniform counters to zero.

@@ -563,7 +563,7 @@ void registerStandardTools(Server& server) {
     Tool analyze;
     analyze.level = ToolLevel::ReadOnly;
     analyze.name = "tc_analyze_image";
-    analyze.description = "Analyze pixels without returning an image. Source: exactly one of {window:index}, {fbo:name or index}, {image:name or index}, {path:file}. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), results in ops order. Colors are RGBA, 0-1 for bytes; float values are unchanged. Ops: pixel(x,y)->color; histogram(bins)->histogram[RGBA][bin] (0-1, outliers in end bins); count(color,tolerance OR min,max)->count,bbox,centroid; stats()->mean,min,max; grid(cols,rows)->colors[row][col]; diff(path,threshold,save optional)->count,bbox,maxDifference; line(x0,y0,x1,y1)->colors. Every op accepts rect:[x,y,w,h], default whole image. Coordinates are top-left, line includes endpoints and clips to rect. Bbox is [x,y,w,h]; empty matches give null bbox/centroid. Diff uses max absolute RGBA difference, compares raw values and counts strictly above threshold. Save paths follow tc_save_screenshot; float file output is clamped to 0-1, analysis is unchanged. Fbo/window capture runs after frame completion. Web Fbo readback and iOS float Fbo readback return errors; byte Fbo readback requires RGBA8.";
+    analyze.description = "Analyze pixels without returning an image. Source: exactly one of {window:index}, {fbo:name or index}, {image:name or index}, {path:file}. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), results in ops order. Colors are RGBA, 0-1 for bytes; float values are unchanged. Ops: pixel(x,y)->color; histogram(bins)->histogram[RGBA][bin] (0-1, outliers in end bins); count(color,tolerance OR min,max)->count,bbox,centroid; stats()->mean,min,max; grid(cols,rows)->colors[row][col]; diff(path,threshold,save optional)->count,bbox,maxDifference; line(x0,y0,x1,y1)->colors. Every op accepts rect:[x,y,w,h], default whole image. Coordinates are top-left, line includes endpoints and clips to rect. Bbox is [x,y,w,h]; empty matches give null bbox/centroid. Diff uses max absolute RGBA difference, compares raw values and counts strictly above threshold. Save paths follow tc_save_screenshot; float file output is clamped to 0-1, analysis is unchanged. Fbo/window capture runs after frame completion. Web Fbo readback and iOS float Fbo readback return errors; non-float Fbo formats are converted to RGBA8 for byte readback.";
     analyze.args = {{"source","object","Image source (exactly one selector)",true},
                     {"save","string|null","Optional capture file path; omitted/null writes nothing",false},
                     {"ops","array","Ordered image operations and their arguments",true}};
@@ -618,10 +618,7 @@ void registerStandardTools(Server& server) {
                 return error("Fbo readback is unavailable on web");
 #else
                 auto* f=static_cast<Fbo*>(object);
-                // Fbo::readPixels explicitly contracts RGBA8 byte readback.
-                // Do not call it on an incompatible integer texture format.
-                if (!isFloatFormat(f->getTextureFormat()) && f->getTextureFormat()!=TextureFormat::RGBA8)
-                    return error("Fbo byte readback requires RGBA8; other integer formats have no supported readback");
+                // Fbo::readPixels converts every non-float format to RGBA8 bytes.
 #if defined(__APPLE__) && TARGET_OS_IPHONE
                 if (isFloatFormat(f->getTextureFormat())) return error("float Fbo readback is unavailable on iOS");
 #endif
@@ -637,8 +634,6 @@ void registerStandardTools(Server& server) {
                     const char* colorSpace="sRGB";
                     if(current && current->isAllocated()) {
                         bool floating=isFloatFormat(current->getTextureFormat());
-                        if (!floating && current->getTextureFormat()!=TextureFormat::RGBA8)
-                            return [error] { return error("Fbo byte readback requires RGBA8; other integer formats have no supported readback"); };
                         if (floating || channelCount(current->getTextureFormat())<=2) colorSpace="linear";
                         const auto limit = getAdmissionLimits().workingBytes;
                         const size_t bytesPerPixel = floating ? 32 : 8;
