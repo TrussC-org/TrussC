@@ -20,6 +20,7 @@
 #include "stb/stb_image_write.h"
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 
 // Platform bits for internal::currentPid() / internal::processRssBytes()
 #if defined(__APPLE__)
@@ -82,6 +83,67 @@ Json nodeToJson(Node& node, int maxDepth, bool includeDerived) {
 } // namespace trussc
 
 namespace trussc::mcp::internal {
+
+namespace {
+
+int inputInteger(const json& a, const char* name, int minimum, int maximum) {
+    auto it = a.find(name);
+    if (it != a.end() && it->is_number_integer()) {
+        if (it->is_number_unsigned()) {
+            const auto value = it->get<uint64_t>();
+            if ((minimum <= 0 || value >= static_cast<uint64_t>(minimum)) &&
+                value <= static_cast<uint64_t>(maximum)) return static_cast<int>(value);
+        } else {
+            const auto value = it->get<int64_t>();
+            if (value >= minimum && value <= maximum) return static_cast<int>(value);
+        }
+    }
+    throw InputArgumentError(std::string(name) + " must be an integer in [" +
+        std::to_string(minimum) + ", " + std::to_string(maximum) + "]");
+}
+
+int inputKey(const json& a) {
+    const int key = inputInteger(a, "key", SAPP_KEYCODE_SPACE, SAPP_KEYCODE_MENU);
+    // Match the 120 defined nonzero codes; numeric gaps are not keys.
+    if (key == SAPP_KEYCODE_SPACE || key == SAPP_KEYCODE_APOSTROPHE ||
+        (key >= SAPP_KEYCODE_COMMA && key <= SAPP_KEYCODE_9) ||
+        key == SAPP_KEYCODE_SEMICOLON || key == SAPP_KEYCODE_EQUAL ||
+        (key >= SAPP_KEYCODE_A && key <= SAPP_KEYCODE_RIGHT_BRACKET) ||
+        key == SAPP_KEYCODE_GRAVE_ACCENT ||
+        (key >= SAPP_KEYCODE_WORLD_1 && key <= SAPP_KEYCODE_WORLD_2) ||
+        (key >= SAPP_KEYCODE_ESCAPE && key <= SAPP_KEYCODE_END) ||
+        (key >= SAPP_KEYCODE_CAPS_LOCK && key <= SAPP_KEYCODE_PAUSE) ||
+        (key >= SAPP_KEYCODE_F1 && key <= SAPP_KEYCODE_F25) ||
+        (key >= SAPP_KEYCODE_KP_0 && key <= SAPP_KEYCODE_KP_EQUAL) ||
+        (key >= SAPP_KEYCODE_LEFT_SHIFT && key <= SAPP_KEYCODE_MENU)) return key;
+    throw InputArgumentError("key must be a defined nonzero sokol_app key code");
+}
+
+void validateInputModifiers(const json& a) {
+    for (const char* flag : {"shift", "ctrl", "alt", "super"}) {
+        auto it = a.find(flag);
+        if (it != a.end() && !it->is_boolean())
+            throw InputArgumentError(std::string(flag) + " must be a boolean");
+    }
+}
+
+float inputFloat(const json& a, const char* name) {
+    auto it = a.find(name);
+    if (it != a.end() && it->is_number()) {
+        const double value = it->get<double>();
+        // Bound (abi): MCP coordinates and scroll deltas must fit finite float event fields. Overflow returns JSON-RPC -32602 before callbacks or state changes.
+        if (std::isfinite(value) && std::abs(value) <= std::numeric_limits<float>::max())
+            return static_cast<float>(value);
+    }
+    throw InputArgumentError(std::string(name) + " must be a finite float");
+}
+
+int inputMouseButton(const json& a, bool move = false) {
+    if (!a.contains("button")) return move ? -1 : SAPP_MOUSEBUTTON_LEFT;
+    return inputInteger(a, "button", move ? -1 : SAPP_MOUSEBUTTON_LEFT, SAPP_MOUSEBUTTON_MIDDLE);
+}
+
+} // namespace
 
 void downscaleImage(const unsigned char* src, int srcW, int srcH, int channels,
                     std::vector<unsigned char>& dst, int dstW, int dstH) {
@@ -864,9 +926,9 @@ void registerStandardTools(Server& server) {
         .bind([](const json& a) -> json {
             // json bind, not the typed one — the typed bind requires every
             // declared arg, which contradicted "button" being optional.
-            float x = a.at("x").get<float>();
-            float y = a.at("y").get<float>();
-            int button = a.value("button", -1);
+            float x = internal::inputFloat(a, "x");
+            float y = internal::inputFloat(a, "y");
+            int button = internal::inputMouseButton(a, true);
             // If button is pressed, treat as drag
             if (button >= 0) {
                 trussc::internal::MouseEventRaw args;
@@ -905,8 +967,8 @@ void registerStandardTools(Server& server) {
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
         .bind([](const json& a) -> json {
             MouseEventArgs args;
-            args.pos = args.globalPos = Vec2(a.at("x").get<float>(), a.at("y").get<float>());
-            args.button = a.value("button", 0);
+            args.pos = args.globalPos = Vec2(internal::inputFloat(a, "x"), internal::inputFloat(a, "y"));
+            args.button = internal::inputMouseButton(a);
             args.syncLegacy();
 
             ::trussc::internal::currentWindowContext().mouseX = args.pos.x;
@@ -926,8 +988,8 @@ void registerStandardTools(Server& server) {
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
         .bind([](const json& a) -> json {
             MouseEventArgs args;
-            args.pos = args.globalPos = Vec2(a.at("x").get<float>(), a.at("y").get<float>());
-            args.button = a.value("button", 0);
+            args.pos = args.globalPos = Vec2(internal::inputFloat(a, "x"), internal::inputFloat(a, "y"));
+            args.button = internal::inputMouseButton(a);
             args.syncLegacy();
 
             ::trussc::internal::currentWindowContext().mouseX = args.pos.x;
@@ -950,9 +1012,10 @@ void registerStandardTools(Server& server) {
         .arg<bool>("alt", "Hold Alt", false)
         .arg<bool>("super", "Hold Cmd/Super", false)
         .bind([](const json& a) -> json {
+            internal::validateInputModifiers(a);
             MouseEventArgs args;
-            args.pos = args.globalPos = Vec2(a.at("x").get<float>(), a.at("y").get<float>());
-            args.button = a.value("button", 0);
+            args.pos = args.globalPos = Vec2(internal::inputFloat(a, "x"), internal::inputFloat(a, "y"));
+            args.button = internal::inputMouseButton(a);
             args.shift = a.value("shift", false);
             args.ctrl  = a.value("ctrl", false);
             args.alt   = a.value("alt", false);
@@ -978,7 +1041,9 @@ void registerStandardTools(Server& server) {
         .level(ToolLevel::Control)
         .arg<float>("dx", "Horizontal scroll delta")
         .arg<float>("dy", "Vertical scroll delta")
-        .bind<float, float>([](float dx, float dy) {
+        .bind([](const json& a) -> json {
+            const float dx = internal::inputFloat(a, "dx");
+            const float dy = internal::inputFloat(a, "dy");
             ScrollEventArgs args;
             args.pos = args.globalPos = Vec2(::trussc::internal::currentWindowContext().mouseX, ::trussc::internal::currentWindowContext().mouseY);
             args.scroll = Vec2(dx, dy);
@@ -1003,13 +1068,14 @@ void registerStandardTools(Server& server) {
          "pair it with the same flag on tc_key_release, or hold a modifier across several "
          "keys by pressing/releasing its keycode explicitly")
         .level(ToolLevel::Control)
-        .arg<int>("key", "Key code (sokol_app keycode; letters are uppercase ASCII: 'A'=65..'Z'=90)")
+        .arg<int>("key", "Defined nonzero sokol_app key code; letters are uppercase ASCII: 'A'=65..'Z'=90")
         .arg<bool>("shift", "Hold Shift for this press", false)
         .arg<bool>("ctrl", "Hold Ctrl for this press", false)
         .arg<bool>("alt", "Hold Alt for this press", false)
         .arg<bool>("super", "Hold Super/Command for this press", false)
         .bind([](const json& a) -> json {
-            const int key = a.at("key").get<int>();
+            const int key = internal::inputKey(a);
+            internal::validateInputModifiers(a);
 
             // Press the requested modifiers first (skip any already held —
             // whichever side, so an explicit RIGHT_SHIFT hold is respected).
@@ -1038,13 +1104,14 @@ void registerStandardTools(Server& server) {
          "(shift -> keycode 340, ctrl -> 341, alt -> 342, super -> 343), "
          "mirroring tc_key_press")
         .level(ToolLevel::Control)
-        .arg<int>("key", "Key code (sokol_app keycode; letters are uppercase ASCII: 'A'=65..'Z'=90)")
+        .arg<int>("key", "Defined nonzero sokol_app key code; letters are uppercase ASCII: 'A'=65..'Z'=90")
         .arg<bool>("shift", "Also release Shift after this key", false)
         .arg<bool>("ctrl", "Also release Ctrl after this key", false)
         .arg<bool>("alt", "Also release Alt after this key", false)
         .arg<bool>("super", "Also release Super/Command after this key", false)
         .bind([](const json& a) -> json {
-            const int key = a.at("key").get<int>();
+            const int key = internal::inputKey(a);
+            internal::validateInputModifiers(a);
 
             // The key goes up first — while the modifiers are still held, so
             // this event still carries them (as it does on a real keyboard).

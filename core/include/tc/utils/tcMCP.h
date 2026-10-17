@@ -22,6 +22,7 @@
 #include <mutex>
 #include <cctype>
 #include <chrono>
+#include <stdexcept>
 
 // JSON support
 #include "../../nlohmann/json.hpp"
@@ -341,6 +342,12 @@ public:
 
 namespace internal {
 
+// Input handlers use this only for validation before delivering any events.
+class InputArgumentError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
 class Server {
 public:
     // The one registry every tool / resource goes into. Defined in tcMCP.cpp,
@@ -540,6 +547,8 @@ private:
 
             return formatResult(content);
 
+        } catch (const InputArgumentError& e) {
+            return makeError(id, -32602, e.what());
         } catch (const std::exception& e) {
             return internal::toolError(id, std::string("Tool execution error: ") + e.what());
         } catch (...) {

@@ -611,6 +611,11 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   (counted on Linux). The receive thread must not read the client after
   such a notification, which a plain build rarely shows: build it with
   AddressSanitizer (`-DCMAKE_CXX_FLAGS=-fsanitize=address`) to check that.
+- `mcpInputValidation/` — synthetic key and mouse input is validated before
+  callbacks or state changes. Checks all 120 defined key codes, undefined
+  codes and numeric types, transactional modifier validation, 1,024 sequential
+  rejections with a full held set, bounded replies, mouse buttons and finite
+  coordinates/scroll deltas.
 - `mcpHttpGuard/` — the MCP HTTP server refuses browser-driven requests
   (#238): a non-loopback `Host`, a foreign `Origin` (403) and a non-JSON
   `Content-Type` (415), and checks the bearer token on `/mcp` (401). It also
