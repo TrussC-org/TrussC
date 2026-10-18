@@ -1,4 +1,5 @@
 #include "tcApp.h"
+#include <cfloat>
 #include <cmath>
 
 void tcApp::setup() {
