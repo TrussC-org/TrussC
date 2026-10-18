@@ -1562,8 +1562,9 @@ private:
     // slot to drain, twice (once per slot): it waits only for callbacks that
     // were already running, and a callback that read the epoch just before an
     // advance is still caught. The mutex serializes barriers (the epoch
-    // advances of two barriers must not interleave); the audio thread never
-    // takes it. Timed, so waitForAudioCallbacks() keeps its one-second limit
+    // advances of two drain passes must not interleave). A teardown diagnostic
+    // releases it for onLog, then restarts both passes after reacquiring it.
+    // The audio thread never takes it. Timed, so waitForAudioCallbacks() keeps its one-second limit
     // while a framework teardown holds it waiting for a stuck listener.
     std::atomic<uint32_t> callbackEpoch_{0};
     std::atomic<int>      callbacksInFlight_[2]{};

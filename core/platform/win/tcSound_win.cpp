@@ -37,12 +37,13 @@ namespace {
 
     void EnsureMFStartup() {
         static std::once_flag flag;
-        std::call_once(flag, []() {
-            HRESULT hr = MFStartup(MF_VERSION);
-            if (FAILED(hr)) {
-                logError("SoundBuffer") << "MFStartup failed (" << hrHex(hr) << ")";
-            }
-        });
+        HRESULT hr = S_OK;
+        std::call_once(flag, [&]() { hr = MFStartup(MF_VERSION); });
+        // Only the caller that performed startup reports its failure, after
+        // call_once has completed so an onLog listener can load AAC again.
+        if (FAILED(hr)) {
+            logError("SoundBuffer") << "MFStartup failed (" << hrHex(hr) << ")";
+        }
     }
 
     // Common logic for configuring Source Reader and reading samples

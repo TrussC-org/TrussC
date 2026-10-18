@@ -588,7 +588,11 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     if (!pd || !pd->appsrc) return false;
 
     if (!pollRecordingError(pd, result_)) return false;
-    const gsize size = (gsize)pd->width * pd->height * 4;
+    const auto layout = internal::recorderPackedLayout(pd->width, pd->height,
+                                                      internal::RecorderPixelFormat::RGBA8);
+    // Bound (abi): packed take bytes must fit the GStreamer allocation size. Overflow drops the recorder frame and is counted.
+    if (!layout.byteSize) return rejectFrameLayout();
+    const gsize size = layout.byteSize;
     GstBuffer* buf = gst_buffer_new_allocate(nullptr, size, nullptr);
     if (!buf) {
         result_ = SaveResult::fail(SaveError::WriteFailed, "could not allocate frame buffer");
@@ -596,8 +600,21 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
         return false;
     }
 
-    // RGBA top-down -> GStreamer RGBA top-down: a straight copy.
-    gst_buffer_fill(buf, 0, rgba, size);
+    // Map the native buffer and check its writable capacity before copying.
+    GstMapInfo mapped{};
+    // Bound (abi): GStreamer must grant writable access to the native frame. Overflow drops the recorder frame and is counted.
+    if (!gst_buffer_map(buf, &mapped, GST_MAP_WRITE)) {
+        gst_buffer_unref(buf);
+        return rejectFrameLayout();
+    }
+    // Bound (abi): the mapped GStreamer capacity must hold the complete take. Overflow drops the recorder frame and is counted.
+    if (!mapped.data || mapped.size < size) {
+        gst_buffer_unmap(buf, &mapped);
+        gst_buffer_unref(buf);
+        return rejectFrameLayout();
+    }
+    std::memcpy(mapped.data, rgba, size);
+    gst_buffer_unmap(buf, &mapped);
 
     // PTS is decided by the caller (fixed-rate for manual addFrame(), real
     // elapsed time for auto-capture). Duration is one frame at the target fps.

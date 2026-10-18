@@ -1058,3 +1058,17 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   and zero at every public FOV entry point
   (including `Deg`) matches `setupScreenOrtho()`. `setDefaultScreenOrtho()`
   matches `setDefaultScreenFov(0)` and leaves `getDefaultScreenFov() == 0`.
+
+- `recorderFrameSize/` — recorder frames must match the take dimensions and
+  supported format. Injected readbacks exercise taller/wider captures, source
+  row and byte counts, locked destination dimensions, stride, format and real
+  capacity; refused frames are counted with one Warning per take, and matching
+  frames continue encoding. The completion seam also checks that layout
+  diagnostics run after the writer mutex is released. Checked row/total and
+  NV12 byte arithmetic includes a 1080x1920 image with stride 1088: capacity
+  3,133,432 is accepted and one byte less is refused. Arithmetic is exercised
+  without allocating large buffers. Runs headless with a native
+  H.264 encoder.
+  `--gpu-check` on Linux also resizes a recording window taller and wider,
+  returns it to its take size, and checks Fbo/screen readback with a padded
+  pixel pack layout and a bound pack buffer (caller GL state is restored).

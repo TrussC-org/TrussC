@@ -35,11 +35,30 @@ void operator delete[](void* p) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 
 #ifdef TC_ADMISSION_CAPTURE_PROBE
-namespace { int mainCaptureWidth = 32, mainCaptureHeight = 32; bool realCapture = false; }
+#include <GL/gl.h>
+namespace {
+int mainCaptureWidth = 32, mainCaptureHeight = 32;
+bool realCapture = false;
+int reservationReads = -1, dimensionReads = 0, sourceWidth = 0, sourceHeight = 0, pixelReads = 0;
+size_t readbackWorking = 0;
+}
 extern "C" int __real_sapp_width();
 extern "C" int __real_sapp_height();
-extern "C" int __wrap_sapp_width() { return realCapture ? __real_sapp_width() : mainCaptureWidth; }
-extern "C" int __wrap_sapp_height() { return realCapture ? __real_sapp_height() : mainCaptureHeight; }
+extern "C" int __wrap_sapp_width() {
+    if (realCapture) return __real_sapp_width();
+    return reservationReads >= 0 && ++dimensionReads > reservationReads ? sourceWidth : mainCaptureWidth;
+}
+extern "C" int __wrap_sapp_height() {
+    if (realCapture) return __real_sapp_height();
+    return reservationReads >= 0 && dimensionReads > reservationReads ? sourceHeight : mainCaptureHeight;
+}
+extern "C" void __real_glReadPixels(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void*);
+extern "C" void __wrap_glReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum format, GLenum type, void* data) {
+    if (realCapture) { __real_glReadPixels(x, y, w, h, format, type, data); return; }
+    ++pixelReads;
+    readbackWorking = trussc::mcp::internal::workingMemory();
+    std::memset(data, 0, size_t(w) * h * 4);
+}
 #endif
 
 using namespace trussc;
@@ -792,6 +811,64 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         }
     }
     check("capture overflow emits one connections Warning", connectionWarnings == 1);
+    // Keep reservation queries small while the capture observes its own extent.
+    // The existing native dimension wrappers isolate this transition without GL.
+    const auto extentPath = fs::temp_directory_path() / "tc-admission-source-extent.png";
+    {
+        std::error_code ec;
+        fs::remove(extentPath, ec);
+    }
+    for (const char* name : {"tc_get_screenshot", "tc_analyze_image", "tc_save_screenshot"}) {
+        const bool save = std::string(name) == "tc_save_screenshot";
+        for (int extent : {2048, 32, 64}) {
+            dimensions(32, 32);
+            dimensionReads = pixelReads = 0;
+            readbackWorking = 0;
+            reservationReads = save ? 2 : 1; // enqueue + drain for save; drain for get/analyze
+            sourceWidth = sourceHeight = extent;
+            resetHttpChannel();
+            auto promise = std::make_shared<std::promise<ReplyThunk>>();
+            auto future = promise->get_future();
+            json args = std::string(name) == "tc_analyze_image" ?
+                json{{"source", {{"window", 0}}}, {"ops", json::array({{{"op", "stats"}}})}} : json{{"window", 0}};
+            if (save) args["path"] = internal::pathToUtf8(extentPath);
+            if (std::string(name) == "tc_get_screenshot") args["width"] = 16;
+            const auto before = admissionRejections(AdmissionStore::Working);
+            largest = 0; tracking = true;
+            getHttpChannel().send(mcp::McpRequest{request(name, args), promise, std::make_shared<WorkBudget>(true)});
+            mcp::processHttpQueue();
+            drainDeferredResponses();
+            const bool ready = future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+            bool error = false;
+            if (ready) error = toolError(json::parse(future.get()()));
+            tracking = false;
+            if (extent == 2048) {
+                check("source extent above allowance returns error reply", ready && error);
+                check("source extent rejection increments Working once", admissionRejections(AdmissionStore::Working) == before + 1);
+                check("source extent rejection precedes full output allocation and read", largest < size_t(extent) * extent * 4 && pixelReads == 0);
+            } else {
+                check("source extent within allowance succeeds", ready && !error && pixelReads == 1);
+                check("source extent within allowance has no Working rejection", admissionRejections(AdmissionStore::Working) == before);
+                const size_t expected = size_t(extent) * extent * (save ? 64 : 8) + (save ? 1024 * 1024 : 0);
+                check("source extent workspace is reserved before read", readbackWorking >= expected && readbackWorking < small.workingBytes);
+            }
+            check("source extent completion releases deferred work and credits", !hasDeferredResponses() && workingMemory() == 0);
+            if (save) {
+                check("source extent save writes only admitted output", fs::exists(extentPath) == (extent != 2048));
+                std::error_code ec;
+                fs::remove(extentPath, ec);
+            }
+            reservationReads = -1;
+        }
+    }
+    // Application capture has no WorkBudget and keeps its normal behavior.
+    dimensions(32, 32);
+    {
+        Pixels pixels;
+        const auto before = admissionRejections(AdmissionStore::Working);
+        check("application capture without a budget succeeds", captureWindow(pixels) && pixels.getWidth() == 32);
+        check("application capture leaves Working admission unchanged", workingMemory() == 0 && admissionRejections(AdmissionStore::Working) == before);
+    }
     // Shutdown also releases the deferred producer and its credits.
     dimensions(32, 32);
     resetHttpChannel();
@@ -802,6 +879,35 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 
 #endif
     check("admission limits configuration succeeds", mcp::setAdmissionLimits(defaults));
+    {
+        WorkScope scope;
+        reserveWindowCapture(32, 32);
+        const size_t initial = workingMemory();
+        reconcileWindowCapture(32, 32);
+        check("matching source extent retains its existing reservation", workingMemory() == initial);
+        reconcileWindowCapture(16, 16);
+        check("smaller source extent retains its existing reservation", workingMemory() == initial);
+        reconcileWindowCapture(64, 64);
+        check("larger source extent reserves only the difference", workingMemory() == size_t(64) * 64 * 8);
+        const auto before = admissionRejections(AdmissionStore::Working);
+        bool rejected = false;
+        try { reconcileWindowCapture(SIZE_MAX, SIZE_MAX); }
+        catch (const AdmissionError&) { rejected = true; }
+        check("source extent product is checked and counted", rejected && admissionRejections(AdmissionStore::Working) == before + 1);
+    }
+    check("source extent arithmetic checks release credits", workingMemory() == 0);
+    {
+        WorkScope scope;
+        reserveWork(defaults.workingBytes - 32 * 32 * 8);
+        reserveWindowCapture(32, 32);
+        const auto before = admissionRejections(AdmissionStore::Working);
+        bool rejected = false;
+        try { reconcileWindowCapture(64, 64); }
+        catch (const AdmissionError&) { rejected = true; }
+        check("source extent increase shares the existing Working allowance", rejected && admissionRejections(AdmissionStore::Working) == before + 1);
+        check("source extent rejection retains only prior credits", workingMemory() == defaults.workingBytes);
+    }
+    check("shared source extent check releases credits", workingMemory() == 0);
     listener.disconnect();
     printf("mcpAdmissionConstruction: %d/%d checks passed, %d failures\n", checks - failures, checks, failures);
     return failures ? 1 : 0;

@@ -65,7 +65,10 @@ public:
     bool tryReserve(size_t bytes, size_t& capacity, size_t& needed);
     void reply(size_t bytes);
 private:
+    friend void reserveWindowCapture(size_t, size_t, size_t, size_t);
+    friend void reconcileWindowCapture(size_t, size_t);
     size_t reserved_ = 0, reply_ = 0;
+    size_t captureBytes_ = 0, capturePixelBytes_ = 0, captureOverhead_ = 0;
     const bool http_;
 };
 std::shared_ptr<WorkBudget>& currentWorkBudget();
@@ -79,6 +82,11 @@ private:
 // Owns one bounded externally requested screenshot until the deferred job retires.
 std::shared_ptr<void> acquireScreenshotCredit();
 void reserveWork(size_t bytes);
+// Retain the capture allowance in the request budget across deferred stages.
+void reserveWindowCapture(size_t width, size_t height, size_t pixelBytes = 8, size_t overhead = 0);
+// Called with the selected source extent before staging or output allocation.
+// No budget or no admitted window capture leaves application capture unchanged.
+void reconcileWindowCapture(size_t width, size_t height);
 void reserveReply(size_t bytes);
 void checkAdmission(size_t needed, size_t capacity, AdmissionStore store);
 }

@@ -188,32 +188,16 @@ int inputMouseButton(const json& a, bool move = false) {
 
 void reserveWindowReadback() {
     const auto [width, height] = trussc::internal::captureWindowSize(trussc::internal::currentWindowContext());
-    const auto limit = getAdmissionLimits().workingBytes;
-    // Bound (security): framebuffer readback is externally requested working memory. Overflow returns an error and is counted.
-    if (!width || !height) return;
-    if (width > limit / height / 8) {
-        const uint64_t area = uint64_t(width) * height;
-        admissionRejected(AdmissionStore::Working, limit, area > SIZE_MAX / 8 ? SIZE_MAX : size_t(area) * 8);
-        throw AdmissionError();
-    }
-    reserveWork(width * height * 8);
+    // Bound (security): framebuffer readback reserves 8 bytes per pixel before allocation. Overflow returns an error and is counted.
+    reserveWindowCapture(width, height);
 }
 
 // Admit both the GPU staging/readback and the file encoder before either runs.
 // A queued capture repeats this check at drain time, when dimensions may differ.
-size_t screenshotSaveBytes(const trussc::internal::WindowContext& ctx) {
+void reserveWindowSave(const trussc::internal::WindowContext& ctx) {
     const auto [width, height] = trussc::internal::captureWindowSize(ctx);
-    if (!width || !height) return 0;
-    const auto limit = getAdmissionLimits().workingBytes;
     // Bound (security): capture/encoder workspace uses 64 bytes per pixel plus 1 MiB codec overhead. Overflow rejects before readback and is counted.
-    constexpr size_t overhead = 1024 * 1024;
-    if (limit < overhead || width > (limit - overhead) / height / 64) {
-        const uint64_t area = uint64_t(width) * height;
-        admissionRejected(AdmissionStore::Working, limit,
-            area > (SIZE_MAX - overhead) / 64 ? SIZE_MAX : size_t(area) * 64 + overhead);
-        throw AdmissionError();
-    }
-    return width * height * 64 + overhead;
+    reserveWindowCapture(width, height, 64, 1024 * 1024);
 }
 
 // Each entry includes map/string nodes, vector growth and escaped output.
@@ -752,8 +736,7 @@ void registerStandardTools(Server& server) {
             if (!ctx) return err;
             auto credit = acquireScreenshotCredit();
             auto budget = currentWorkBudget();
-            const size_t captureBytes = screenshotSaveBytes(*ctx);
-            reserveWork(captureBytes);
+            reserveWindowSave(*ctx);
             const auto destination = trussc::internal::resolveScreenshotPath(
                 trussc::internal::utf8ToPath(path));
             std::filesystem::path prepared;
@@ -762,10 +745,9 @@ void registerStandardTools(Server& server) {
             // Both windows use MCP deferral: the slot and budget live until
             // capture, expiration, owner cleanup or shutdown releases the job.
             // App-authored saveScreenshot() keeps its independent path queue.
-            mcp::deferToolResultUntilAfterFrame([windowIdx, destination, credit, budget, captureBytes]() -> json {
+            mcp::deferToolResultUntilAfterFrame([windowIdx, destination, credit, budget]() -> json {
                 WorkScope scope(budget);
-                const size_t needed = screenshotSaveBytes(trussc::internal::currentWindowContext());
-                if (needed > captureBytes) reserveWork(needed - captureBytes);
+                reserveWindowSave(trussc::internal::currentWindowContext());
                 bool ok = trussc::internal::captureWindowToFile(destination);
                 if (ok) return json{{"status", "ok"}, {"path", trussc::internal::pathToUtf8(destination)}, {"window", windowIdx}};
                 return json{{"status", "error"}, {"message", "Failed to capture window " + std::to_string(windowIdx)}};

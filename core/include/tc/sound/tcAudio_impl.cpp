@@ -1591,7 +1591,9 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
         // serves the seek and writes on past the writeFrame just read, up
         // to the stream's end.
         g_mixerLagReleased.store(true, std::memory_order_release);
-        for (int i = 0; i < 50; ++i) {
+        // Bound (test): the injected mixer lag waits at most 50 ms (steady clock). Overflow resumes mixing with the current stream state.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+        while (std::chrono::steady_clock::now() < deadline) {
             if (stream->seekEpoch.load(std::memory_order_acquire)
                     != stream->seekAppliedEpoch.load(std::memory_order_relaxed)
                 && stream->endOfStream.load(std::memory_order_acquire)) {
@@ -2321,6 +2323,7 @@ thread_local int t_callbackDepth = 0;
 
 // How long waitForAudioCallbacks() waits. A buffer lasts ~1-100 ms, so a
 // callback still running after this is stuck, not slow.
+// Bound (realtime): the public callback barrier waits at most 1 s (steady clock). Overflow logs one Warning and is reported by the false return; framework teardown logs one Error and keeps draining.
 constexpr std::chrono::seconds kCallbackIdleTimeout{1};
 } // namespace
 
@@ -2385,16 +2388,27 @@ bool AudioEngine::waitForCallbacks(bool giveUp) {
                 std::this_thread::yield();
                 continue;
             }
-            if (giveUp) { warnGaveUp(); return false; }
+            if (giveUp) {
+                lock.unlock();
+                warnGaveUp();
+                return false;
+            }
             // Framework teardown: keep waiting (a use-after-free would be
             // worse than a hang), and say why the app is stuck, once.
             if (!reported) {
                 reported = true;
+                lock.unlock();
                 logError("AudioEngine") << "an audioOut / audioIn listener has not "
                     "returned for " << kCallbackIdleTimeout.count() << " s; the "
                     "teardown keeps waiting for it before it destroys anything the "
                     "listener may use. The listener is most likely waiting on the "
                     "main thread or on a lock.";
+                lock.lock();
+                // A diagnostic listener or another barrier may have advanced
+                // the epoch while unlocked. Drain both slots again under the
+                // barrier lock before allowing teardown to release its owners.
+                pass = -1;
+                break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }

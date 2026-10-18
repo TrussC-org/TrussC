@@ -7825,6 +7825,13 @@ description.en = "Number of video frames accepted by the backend; failed submiss
 description.ja = "バックエンドが受理した映像フレーム数。失敗した追加は含まない。終了処理は別途失敗する可能性がある。"
 description.ko = "백엔드가 수락한 영상 프레임 수. 실패한 제출은 제외한다. 종료 처리는 별도로 실패할 수 있다."
 
+["ScreenRecorder::getRejectedFrameCount"]
+category = "video"
+keywords = ["frames", "refused", "layout", "capacity"]
+description.en = "Number of frames refused in this take because capture/readback failed or dimensions, pixel format, row layout or byte capacity did not match the take or native buffer. Refused frames are skipped whole and do not fail the take. Resets on VideoWriter::open() (also used by ScreenRecorder::start())."
+description.ja = "この録画で、キャプチャ・読み戻しの失敗、または寸法・画素形式・行レイアウト・バイト容量が録画サイズやネイティブバッファに適合せず拒否されたフレーム数。フレーム全体をスキップし、録画自体は失敗扱いにしない。VideoWriter::open()（ScreenRecorder::start() からも使用）でリセットする。"
+description.ko = "현재 녹화에서 캡처·읽기 실패 또는 크기, 픽셀 형식, 행 레이아웃, 바이트 용량이 녹화 크기나 네이티브 버퍼와 맞지 않아 거부된 프레임 수. 거부된 프레임 전체를 건너뛰며 녹화 자체는 실패로 처리하지 않는다. VideoWriter::open()(ScreenRecorder::start()에서도 사용) 시 초기화한다."
+
 ["ScreenRecorder::getPath"]
 category = "video"
 keywords = ["file", "output", "destination"]
@@ -12756,6 +12763,13 @@ keywords = ["resolution", "size", "pixels"]
 description.en = "Encoder output height in pixels"
 description.ja = "エンコーダ出力の高さ（ピクセル）"
 description.ko = "인코더 출력 높이 (픽셀)"
+
+["VideoWriter::getRejectedFrameCount"]
+category = "video"
+keywords = ["frames", "refused", "layout", "capacity"]
+description.en = "Number of frames refused in this take because capture/readback failed or dimensions, pixel format, row layout or byte capacity did not match the take or native buffer. Refused frames are skipped whole and do not fail the take. Resets on VideoWriter::open() (also used by ScreenRecorder::start())."
+description.ja = "この録画で、キャプチャ・読み戻しの失敗、または寸法・画素形式・行レイアウト・バイト容量が録画サイズやネイティブバッファに適合せず拒否されたフレーム数。フレーム全体をスキップし、録画自体は失敗扱いにしない。VideoWriter::open()（ScreenRecorder::start() からも使用）でリセットする。"
+description.ko = "현재 녹화에서 캡처·읽기 실패 또는 크기, 픽셀 형식, 행 레이아웃, 바이트 용량이 녹화 크기나 네이티브 버퍼와 맞지 않아 거부된 프레임 수. 거부된 프레임 전체를 건너뛰며 녹화 자체는 실패로 처리하지 않는다. VideoWriter::open()(ScreenRecorder::start()에서도 사용) 시 초기화한다."
 
 ["VideoWriter::getPath"]
 category = "video"

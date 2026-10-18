@@ -543,7 +543,11 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
 
     const int w = pd->width;
     const int h = pd->height;
-    const DWORD frameBytes = (DWORD)w * h * 4;
+    const auto layout = internal::recorderPackedLayout(w, h, internal::RecorderPixelFormat::BGRA8);
+    // Bound (abi): Media Foundation frame byte counts must fit DWORD. Overflow drops the recorder frame and is counted.
+    if (!layout.byteSize || layout.byteSize > std::numeric_limits<DWORD>::max())
+        return rejectFrameLayout();
+    const DWORD frameBytes = static_cast<DWORD>(layout.byteSize);
 
     IMFMediaBuffer* buffer = nullptr;
     HRESULT hr = MFCreateMemoryBuffer(frameBytes, &buffer);
@@ -554,7 +558,8 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     }
 
     BYTE* dst = nullptr;
-    hr = buffer->Lock(&dst, nullptr, nullptr);
+    DWORD capacity = 0;
+    hr = buffer->Lock(&dst, &capacity, nullptr);
     if (FAILED(hr)) {
         result_ = SaveResult::fail(SaveError::WriteFailed, "IMFSinkWriter append HRESULT=" + formatHresult(hr));
         buffer->Release();
@@ -562,13 +567,20 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
         return false;
     }
 
+    // Bound (abi): the locked Media Foundation buffer must hold the complete take. Overflow drops the recorder frame and is counted.
+    if (!dst || capacity < frameBytes) {
+        buffer->Unlock();
+        buffer->Release();
+        return rejectFrameLayout();
+    }
+
     // RGBA top-down -> BGRA bottom-up (MF RGB32 is bottom-up). Flipping here
     // keeps the recorded video upright, matching the mac/Linux output.
-    const int stride = w * 4;
+    const size_t stride = layout.rowBytes;
     for (int y = 0; y < h; ++y) {
         const unsigned char* srow = rgba + (size_t)y * stride;
         BYTE* drow = dst + (size_t)(h - 1 - y) * stride;
-        for (int x = 0; x < w; ++x) {
+        for (size_t x = 0; x < (size_t)w; ++x) {
             drow[x * 4 + 0] = srow[x * 4 + 2];  // B
             drow[x * 4 + 1] = srow[x * 4 + 1];  // G
             drow[x * 4 + 2] = srow[x * 4 + 0];  // R
