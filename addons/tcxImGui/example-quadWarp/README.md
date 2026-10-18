@@ -5,6 +5,11 @@ perspective quad warp. Click the button or drag the slider. Press **W** to show
 the handles, then drag corners to change the surface; keep the quad convex.
 The orange dot shows the pointer mapped into Fbo pixels.
 
+The Fbo resolution sets the UI's sharpness: the 320 × 240 Fbo is magnified
+several times on screen (about 4× on a Retina display), so text looks soft. A
+larger Fbo, sized for the on-screen quad, gives crisper text but a smaller UI
+in Fbo units, so widget sizes need to grow with it.
+
 `tcApp::screenToFbo(screen, fboPx)` inverts `QuadWarp::getMatrix()`, requires a
 positive homogeneous coordinate, divides by it, and checks the Fbo bounds.
 The quad must stay convex when editing its handles.
