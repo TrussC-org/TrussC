@@ -2187,7 +2187,8 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline bool grabScreen(Pixels& o
 
 namespace internal {
     // Capture every path queued by saveScreenshot() on the CURRENT window's
-    // queue (WindowContext::pendingScreenshotPaths) and clear it. Called right
+    // queue (WindowContext::pendingScreenshotPaths). Requests appended during
+    // the drain remain queued for the next drain. Called right
     // after present() while that window's context — and thus its
     // lastSwapchainDrawable — is current: the main window from the afterFrame
     // listener installed in _setup_cb, each secondary window from its own
@@ -2196,18 +2197,26 @@ namespace internal {
     // (tc_get_screenshot / tc_save_screenshot with a window index): only
     // inside its own tick is its drawable the one a readback sees (#243).
     // The main window's are drained by the same afterFrame listener.
-    inline void drainPendingScreenshots() {
+    // The capture callback also permits headless drain regression tests.
+    inline void drainPendingScreenshots(
+        bool (*capture)(const std::filesystem::path&) = captureWindowToFile) {
         auto& ctx = currentWindowContext();
+        auto& queue = ctx.pendingScreenshotPaths;
+        // Snapshot before any stage that can log: saves queued from a callback
+        // during this drain wait for the next one.
+        const size_t count = queue.size();
         #ifndef __EMSCRIPTEN__
         if (!ctx.isMain) mcp::internal::drainDeferredResponses(&ctx);
         #endif
-        auto& queue = ctx.pendingScreenshotPaths;
         captureScreenshots(ctx.asyncScreenshots);
-        if (queue.empty()) return;
-        for (const auto& p : queue) {
-            captureWindowToFile(p);
+        if (count == 0) return;
+        for (size_t i = 0; i < count && i < queue.size(); ++i) {
+            // Logging callbacks may append without invalidating the local path.
+            auto path = std::move(queue[i]);
+            try { capture(path); }
+            catch (const std::exception& error) { logError("Screenshot") << error.what(); }
         }
-        queue.clear();
+        queue.erase(queue.begin(), queue.begin() + std::min(count, queue.size()));
     }
     // Keeps the afterFrame drain subscription alive for the app's lifetime.
     // Host-only, so a per-module copy is fine: installed in _setup_cb.
