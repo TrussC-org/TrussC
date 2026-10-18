@@ -21,9 +21,12 @@ static bool validMetalReadImage(sg_image image) {
 // Internal helper: blit GPU texture to CPU-readable staging and copy bytes
 static bool readPixelsInternal(sg_image srcImage, int width, int height,
                                MTLPixelFormat mtlFormat, size_t bytesPerRow,
-                               void* dstBuffer, bool reportError = true) {
+                               void* dstBuffer, size_t capacity, bool reportError = true) {
+    size_t requiredBytes = 0;
+    // Bound (abi): Metal staging rows and destination capacity must cover the readback. Overflow drops the recorder frame and is counted.
     if (width <= 0 || height <= 0 || !dstBuffer ||
-        bytesPerRow > std::numeric_limits<size_t>::max() / size_t(height) ||
+        !internal::recorderByteSize(bytesPerRow, size_t(height), requiredBytes) ||
+        requiredBytes > capacity ||
         !validMetalReadImage(srcImage)) return false;
     id<MTLCommandQueue> cmdQueue = (__bridge id<MTLCommandQueue>)sg_mtl_command_queue();
     if (!cmdQueue) {
@@ -37,6 +40,20 @@ static bool readPixelsInternal(sg_image srcImage, int width, int height,
         if (reportError) tc::logError() << "[FBO] Failed to get source MTLTexture";
         return false;
     }
+
+    // Bound (abi): Metal source extent and format must match the Fbo readback. Overflow drops the recorder frame and is counted.
+    if (width <= 0 || height <= 0 || srcTexture.width != (NSUInteger)width ||
+        srcTexture.height != (NSUInteger)height || srcTexture.pixelFormat != mtlFormat)
+        return false;
+
+    const auto sourceDesc = sg_query_image_desc(srcImage);
+    size_t sourceRowBytes, sourceBytes;
+    // Bound (abi): the native row stride must hold the complete source format before any staging copy. Overflow drops the recorder frame and is counted.
+    if (sourceDesc.width != width || sourceDesc.height != height ||
+        !internal::fboReadbackLayout(width, height,
+            size_t(sg_query_pixelformat(sourceDesc.pixel_format).bytes_per_pixel), sourceRowBytes, sourceBytes) ||
+        bytesPerRow != sourceRowBytes)
+        return false;
 
     id<MTLDevice> device = cmdQueue.device;
 
@@ -122,6 +139,7 @@ static MTLPixelFormat toMTLPixelFormat(sg_pixel_format fmt) {
 
 bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
     size_t rowBytes, totalBytes, outputRowBytes, outputBytes;
+    // Bound (abi): native staging and RGBA8 output must each hold the complete readback before allocation or conversion. Overflow drops the recorder frame and is counted.
     if (!allocated_ || !pixels ||
         !internal::fboReadbackLayout(target_.width, target_.height, 4, outputRowBytes, outputBytes) ||
         !internal::fboReadbackLayout(target_.width, target_.height, bytesPerPixel(format_), rowBytes, totalBytes) ||
@@ -129,14 +147,14 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
 
     if (format_ == TextureFormat::RGBA8) {
         return readPixelsInternal(curColorTex_().getImage(), target_.width, target_.height,
-                                  MTLPixelFormatRGBA8Unorm, rowBytes, pixels, reportError);
+                                  MTLPixelFormatRGBA8Unorm, rowBytes, pixels, outputBytes, reportError);
     }
     // Peak staging: one native-format CPU image plus one shared Metal image
     // (up to 32 * width * height bytes for RGBA32F, excluding Metal padding).
     std::vector<unsigned char> raw(totalBytes);
     if (!readPixelsInternal(curColorTex_().getImage(), target_.width, target_.height,
                             toMTLPixelFormat(toSokolFormat(format_)), rowBytes,
-                            raw.data(), reportError)) return false;
+                            raw.data(), raw.size(), reportError)) return false;
     for (int y = 0; y < target_.height; ++y) {
         internal::fboRowToRgba8(raw.data() + size_t(y) * rowBytes,
                               pixels + size_t(y) * outputRowBytes, target_.width, format_);
@@ -147,6 +165,7 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
 bool Fbo::readPixelsFloatPlatform(float* pixels) const {
     const int ch = channelCount(format_);
     size_t bytesPerRow, nativeBytes, outputRowBytes, outputBytes;
+    // Bound (abi): native staging and float output must each hold the complete readback before allocation or conversion. Overflow drops the recorder frame and is counted.
     if (!allocated_ || !pixels ||
         !internal::fboReadbackLayout(target_.width, target_.height, size_t(ch) * sizeof(float),
                                     outputRowBytes, outputBytes) ||
@@ -166,7 +185,7 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
         sgFmt == SG_PIXELFORMAT_RG8 || sgFmt == SG_PIXELFORMAT_BGRA8) {
         std::vector<unsigned char> tmp(nativeBytes);
         bool ok = readPixelsInternal(curColorTex_().getImage(), target_.width, target_.height,
-                                     mtlFmt, bytesPerRow, tmp.data());
+                                     mtlFmt, bytesPerRow, tmp.data(), nativeBytes);
         if (!ok) return false;
         // Convert U8 to float
         for (size_t i = 0; i < total; i++) {
@@ -179,7 +198,7 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
     if (sgFmt == SG_PIXELFORMAT_RGBA16) {
         std::vector<uint16_t> tmp(nativeBytes / sizeof(uint16_t));
         if (!readPixelsInternal(curColorTex_().getImage(), target_.width, target_.height,
-                                mtlFmt, bytesPerRow, tmp.data())) return false;
+                                mtlFmt, bytesPerRow, tmp.data(), nativeBytes)) return false;
         for (size_t i = 0; i < tmp.size(); ++i) pixels[i] = float(tmp[i]) / 65535.0f;
         return true;
     }
@@ -188,7 +207,7 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
     if (sgFmt == SG_PIXELFORMAT_R16F || sgFmt == SG_PIXELFORMAT_RG16F || sgFmt == SG_PIXELFORMAT_RGBA16F) {
         std::vector<uint16_t> tmp(nativeBytes / sizeof(uint16_t));
         bool ok = readPixelsInternal(curColorTex_().getImage(), target_.width, target_.height,
-                                     mtlFmt, bytesPerRow, tmp.data());
+                                     mtlFmt, bytesPerRow, tmp.data(), nativeBytes);
         if (!ok) return false;
         // Convert half-float to float (IEEE 754 binary16)
         for (size_t i = 0; i < total; i++) {
@@ -199,7 +218,7 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
 
     // 32F formats: direct read
     return readPixelsInternal(curColorTex_().getImage(), target_.width, target_.height,
-                              mtlFmt, bytesPerRow, pixels);
+                              mtlFmt, bytesPerRow, pixels, outputBytes);
 }
 
 } // namespace trussc

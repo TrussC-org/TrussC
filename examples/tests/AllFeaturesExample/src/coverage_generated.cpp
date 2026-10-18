@@ -2886,6 +2886,9 @@ struct Cover_ScreenRecorder : af::Scope<ScreenRecorder> {
         (void)af::val<const ScreenRecorder>().getPath();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const ScreenRecorder>().getRejectedFrameCount();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<const ScreenRecorder>().isRecording();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
@@ -4613,6 +4616,9 @@ struct Cover_VideoWriter : af::Scope<VideoWriter> {
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<const VideoWriter>().getPath();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const VideoWriter>().getRejectedFrameCount();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<const VideoWriter>().getSettings();

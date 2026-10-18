@@ -179,6 +179,12 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
             return false;
     }
 
+    // Bound (abi): NV12 dimensions must be even and aligned stride must fit int. Overflow refuses open() and is reported by its false return; no frame exists to count.
+    if ((w & 1) || (h & 1) || w > std::numeric_limits<int>::max() - 15) {
+        result_ = SaveResult::fail(SaveError::WriteFailed, "invalid NV12 frame dimensions");
+        return false;
+    }
+
     AMediaCodec* codec = AMediaCodec_createEncoderByType(mime);
     if (!codec) {
         result_ = SaveResult::fail(SaveError::WriteFailed, std::string("no encoder for ") + mime);
@@ -252,7 +258,6 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     pd->height = h;
     pd->yStride = yStride;
     pd->sliceHeight = sliceHeight;
-    pd->nv12.resize((size_t)yStride * sliceHeight * 3 / 2);
     platform_ = pd;
     return true;
 }
@@ -270,7 +275,9 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
 
     // Wait (briefly) for an input buffer — offline writers can outrun the codec.
     ssize_t inIdx = -1;
-    for (int spins = 0; spins < 1000; ++spins) {
+    // Bound (platform): encoder input waits at most 10 s (steady clock). Overflow rejects the frame and marks the take WriteFailed.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (std::chrono::steady_clock::now() < deadline) {
         inIdx = AMediaCodec_dequeueInputBuffer(pd->codec, 10000);
         if (inIdx >= 0) break;
         if (inIdx != kInfoTryAgainLater) { pd->failed = true; return false; }
@@ -290,27 +297,40 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
         return false;
     }
 
-    // Resolve the encoder's real input row stride once, from the buffer
-    // capacity: cap ~= yStride * sliceHeight * 3/2. Assume the height is not
-    // padded (sliceHeight == height, true on Tensor/Exynos) and round to the
-    // nearest stride. The capacity can be a few bytes short of the full padded
-    // plane, so we never require an exact size — we queue min(need, cap).
+    // Resolve the padded row stride from the native input capacity. Require
+    // every active NV12 pixel to fit; unused final-row padding is optional.
+    auto refuseInput = [&] {
+        AMediaCodec_queueInputBuffer(pd->codec, inIdx, 0, 0, (int64_t)(timeSec * 1e6), 0);
+        return rejectFrameLayout();
+    };
     if (!pd->layoutResolved) {
-        int est = (int)std::llround((double)cap / (1.5 * (double)pd->height));
-        int ys = (est >= pd->width) ? est : ((pd->width + 15) & ~15);
-        ys = (ys + 1) & ~1;  // keep even
+        const double estimate = std::round((double)cap / (1.5 * (double)pd->height));
+        // Bound (abi): inferred even stride must fit the MediaCodec int layout. Overflow drops the frame and is counted.
+        if (estimate > std::numeric_limits<int>::max() - 1) return refuseInput();
+        int ys = estimate >= pd->width ? (int)estimate : ((pd->width + 15) & ~15);
+        ys = (ys + 1) & ~1;
+        size_t bytes = 0;
+        // Bound (abi): scratch holds padded planes while native capacity covers active pixels. Overflow drops the frame and is counted.
+        if (!internal::recorderNV12ByteSize(ys, pd->height, bytes) ||
+            !internal::recorderNV12ImageFits(pd->width, pd->height, ys, pd->height, cap) ||
+            bytes > pd->nv12.max_size()) return refuseInput();
         pd->yStride = ys;
         pd->sliceHeight = pd->height;
-        pd->nv12.resize((size_t)ys * pd->height * 3 / 2);
+        pd->nv12.resize(bytes);
         pd->layoutResolved = true;
         logNotice("VideoWriter")
             << "encoder input stride=" << ys << " slice-height=" << pd->height
-            << " (cap=" << cap << ")";
+            << " (" << cap << " bytes)";
     }
-
+    size_t scratchSize = 0;
+    // Bound (abi): conversion must fit scratch and active pixels must fit the native buffer. Overflow drops the frame and is counted.
+    if (pd->yStride < pd->width || pd->sliceHeight < pd->height ||
+        !internal::recorderNV12ByteSize(pd->yStride, pd->sliceHeight, scratchSize) ||
+        scratchSize > pd->nv12.size() ||
+        !internal::recorderNV12ImageFits(pd->width, pd->height, pd->yStride, pd->sliceHeight, cap)) return refuseInput();
     rgbaToNV12(rgba, pd->width, pd->height, pd->yStride, pd->sliceHeight,
                pd->nv12.data());
-    size_t qsize = pd->nv12.size() < cap ? pd->nv12.size() : cap;
+    const size_t qsize = std::min(scratchSize, cap);
     memcpy(in, pd->nv12.data(), qsize);
 
     int64_t ptsUs = (int64_t)(timeSec * 1e6);
@@ -335,7 +355,9 @@ SaveResult VideoWriter::closePlatform() {
     if (pd->codec && !pd->failed) {
         // Queue an end-of-stream marker on an empty input buffer.
         ssize_t inIdx = -1;
-        for (int spins = 0; spins < 1000 && inIdx < 0; ++spins) {
+        // Bound (platform): encoder EOS input waits at most 10 s (steady clock). Overflow fails finalization through closePlatform()'s result.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (inIdx < 0 && std::chrono::steady_clock::now() < deadline) {
             inIdx = AMediaCodec_dequeueInputBuffer(pd->codec, 10000);
             if (inIdx < 0 && inIdx != kInfoTryAgainLater) { pd->failed = true; break; }
             if (inIdx < 0 && !drainOutput(pd, false, result)) break;

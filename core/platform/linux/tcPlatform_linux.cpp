@@ -21,6 +21,8 @@
 #include <GL/gl.h>
 #include <GL/glext.h>   // glBindFramebuffer / GL_READ_FRAMEBUFFER (per-window capture)
 
+#include "../gl/tcPixelPack.h"
+
 namespace trussc {
 
 void bringWindowToFront() {
@@ -210,8 +212,15 @@ bool captureWindow(Pixels& outPixels) {
         return false;
     }
 
+    mcp::internal::reconcileWindowCapture(size_t(width), size_t(height));
+
     // Allocate pixel buffer
+    const auto layout = internal::recorderPackedLayout(width, height, internal::RecorderPixelFormat::RGBA8);
+    // Bound (abi): packed capture bytes must fit size_t. Overflow drops the recorder frame and is counted.
+    if (!layout.byteSize) return false;
     outPixels.allocate(width, height, 4);
+    // Bound (abi): the pixel allocation must hold every captured row. Overflow drops the recorder frame and is counted.
+    if (!outPixels.getData() || outPixels.getTotalBytes() < layout.byteSize) return false;
 
     // Bind the window's swapchain framebuffer as the read source so the readback
     // targets THIS window's surface, not whatever was last bound (main window's
@@ -222,17 +231,20 @@ bool captureWindow(Pixels& outPixels) {
     }
 
     // Read pixels from OpenGL framebuffer
-    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, outPixels.getData());
+    {
+        internal::ScopedTightPixelPack pack;
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, outPixels.getData());
+    }
 
     // OpenGL reads from bottom-left, so we need to flip vertically
     unsigned char* data = outPixels.getData();
-    std::vector<unsigned char> rowBuffer(width * 4);
+    std::vector<unsigned char> rowBuffer(layout.rowBytes);
     for (int y = 0; y < height / 2; y++) {
-        int topRow = y * width * 4;
-        int bottomRow = (height - 1 - y) * width * 4;
-        memcpy(rowBuffer.data(), &data[topRow], width * 4);
-        memcpy(&data[topRow], &data[bottomRow], width * 4);
-        memcpy(&data[bottomRow], rowBuffer.data(), width * 4);
+        size_t topRow = (size_t)y * layout.rowBytes;
+        size_t bottomRow = (size_t)(height - 1 - y) * layout.rowBytes;
+        memcpy(rowBuffer.data(), &data[topRow], layout.rowBytes);
+        memcpy(&data[topRow], &data[bottomRow], layout.rowBytes);
+        memcpy(&data[bottomRow], rowBuffer.data(), layout.rowBytes);
     }
 
     return true;

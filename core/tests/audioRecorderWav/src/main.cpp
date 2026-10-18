@@ -63,7 +63,9 @@ static void check(const string& name, bool ok, const string& detail = "") {
 // Wait (up to `timeoutMs`) until `pred()` holds.
 template <class Pred>
 static bool waitFor(Pred pred, int timeoutMs) {
-    for (int t = 0; t < timeoutMs; t += 1) {
+    // Steady-clock deadline: sleep granularity differs (about 15.6 ms on Windows).
+    const auto deadline = chrono::steady_clock::now() + chrono::milliseconds(timeoutMs);
+    while (chrono::steady_clock::now() < deadline) {
         if (pred()) return true;
         this_thread::sleep_for(chrono::milliseconds(1));
     }

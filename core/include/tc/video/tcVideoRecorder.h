@@ -1,5 +1,6 @@
 #pragma once
 #include "tc/utils/tcAnnotations.h"
+#include "tcRecorderFrame.h"
 
 // =============================================================================
 // tcVideoRecorder.h - Native video recording (H.264 / HEVC / ProRes -> file)
@@ -69,7 +70,10 @@ class Fbo;
 class Pixels;
 
 // Opaque per-platform encoder state (AVAssetWriter / IMFSinkWriter / GstPipeline)
-namespace internal { struct VideoWriterPlatformData; }
+namespace internal {
+struct VideoWriterPlatformData;
+struct RecorderFrameTestAccess;
+}
 
 // ---------------------------------------------------------------------------
 // Codec / settings
@@ -121,6 +125,18 @@ struct VideoRecordSettings {
 // VideoWriter - low-level encoder you feed frames to.
 // ---------------------------------------------------------------------------
 class TC_PLATFORMS("macos,windows,linux,android,ios") VideoWriter {
+    friend class ScreenRecorder;
+    friend struct internal::RecorderFrameTestAccess;
+    // Each operation snapshots its diagnostics while accessing the encoder.
+    // The recorder delivers the batch after releasing its locks and publishing
+    // completion, so onLog listeners can call stop() on the same recorder.
+    struct Diagnostics {
+        std::vector<std::function<void()>> pending;
+        void log() const { for (const auto& diagnostic : pending) diagnostic(); }
+        void failure(const SaveResult& result) {
+            pending.emplace_back([result] { internal::reportSaveFailure(result, "VideoWriter"); });
+        }
+    };
 public:
     VideoWriter() = default;
     ~VideoWriter() { close(); }
@@ -135,6 +151,7 @@ public:
         close();
         result_ = SaveResult::success();
         callerMistakeLogged_ = false;
+        rejectedFrameCount_.store(0, std::memory_order_relaxed);
         path_.clear();
         if (width <= 0 || height <= 0) {
             const auto message = "invalid size " + std::to_string(width) + "x" + std::to_string(height);
@@ -154,7 +171,12 @@ public:
         settings_ = settings;
         fps_ = (settings_.fps > 0.0f) ? settings_.fps : 60.0f;
         frameCount_ = 0;
-        scratch_.resize((size_t)width_ * height_ * 4);
+        const auto layout = internal::recorderPackedLayout(width_, height_, internal::RecorderPixelFormat::RGBA8);
+        // Bound (abi): take bytes must fit size_t and vector capacity. Overflow refuses open() and is reported by its false return; no frame exists to count.
+        if (!layout.byteSize || layout.byteSize > scratch_.max_size())
+            return result_ = internal::reportSaveFailure(
+                internal::saveFailure(path_, "invalid frame byte size"), "VideoWriter");
+        scratch_.resize(layout.byteSize);
 
         // Platform encoders take UTF-8 (converted to native inside)
         if (!openPlatform(internal::pathToUtf8(path_), width_, height_, fps_, settings_)) {
@@ -171,23 +193,17 @@ public:
 
     // Checked in-place finalization. Repeated calls retain the take result.
     SaveResult close() {
-        if (open_) {
-            auto finalized = closePlatform();
-            if (result_) {
-                result_ = finalized;
-                if (!result_) internal::reportSaveFailure(result_, "VideoWriter");
-            }
-            if (frameCount_ == 0 && callerMistakeLogged_)
-                logWarning("VideoWriter") << "take accepted 0 frames after caller mistakes -> " << path_;
-            else if (result_) logNotice("VideoWriter") << "saved " << frameCount_ << " frames -> " << path_;
-        }
-        open_ = false;
-        return result_;
+        Diagnostics diagnostics;
+        auto result = closeDeferred(diagnostics);
+        diagnostics.log();
+        return result;
     }
 
     bool isOpen() const { return open_; }
     // Frames accepted by the backend; close() reports finalization separately.
     int  getFrameCount() const { return frameCount_; }
+    // Frames refused by recorder layout/capacity validation in this take.
+    uint64_t getRejectedFrameCount() const { return rejectedFrameCount_.load(std::memory_order_relaxed); }
     int  getWidth() const { return width_; }
     int  getHeight() const { return height_; }
     float getFps() const { return fps_; }
@@ -208,10 +224,21 @@ public:
             return sizeMismatch("fbo", fbo.getWidth(), fbo.getHeight());
         }
         if (!fbo.isAllocated()) return callFailed("fbo is not allocated");
-        if (internal::currentWindowContext().currentTarget->isFbo)
+        const auto layout = internal::recorderPackedLayout(width_, height_, internal::RecorderPixelFormat::RGBA8);
+        // Bound (abi): Fbo extent and RGBA8 bytes must match the take and scratch capacity. Overflow drops the recorder frame and is counted.
+        if (fbo.getTextureFormat() != TextureFormat::RGBA8 ||
+            fbo.curColorTex_().getPixelFormat() != SG_PIXELFORMAT_RGBA8 ||
+            fbo.curColorTex_().getWidth() != width_ || fbo.curColorTex_().getHeight() != height_ ||
+            !layout.byteSize || scratch_.size() < layout.byteSize) {
+            rejectFrameLayout();
+            return internal::saveFailure(path_, "frame layout does not match the recording buffer");
+        }
+        if (internal::hasPublicFboActivation())
             return callFailed("fbo readPixels requires fbo.end() first");
-        if (!fbo.readPixelsPlatform(scratch_.data(), false))
-            return callFailed("fbo readPixels failed");
+        if (!fbo.readPixelsPlatform(scratch_.data(), false)) {
+            rejectFrameLayout();
+            return internal::saveFailure(path_, "fbo readPixels failed");
+        }
         return appendRGBA(scratch_.data(), timeSec);
     }
     SaveResult addFrameAt(const Pixels& pixels, double timeSec) {
@@ -219,6 +246,15 @@ public:
         if (!result_) return result_;
         if (pixels.getWidth() != width_ || pixels.getHeight() != height_) {
             return sizeMismatch("pixels", pixels.getWidth(), pixels.getHeight());
+        }
+        size_t elements = 0;
+        // Bound (abi): pixel element format and allocation must cover the take. Overflow drops the recorder frame and is counted.
+        if (pixels.getFormat() != PixelFormat::U8 || !pixels.isAllocated() ||
+            !internal::pixelBufferCount(width_, height_, pixels.getChannels(), 1,
+                                        std::numeric_limits<size_t>::max(), elements) ||
+            pixels.getTotalBytes() < elements) {
+            rejectFrameLayout();
+            return internal::saveFailure(path_, "frame layout does not match the recording buffer");
         }
         if (pixels.getChannels() == 4) return appendRGBA(pixels.getData(), timeSec);
         // Expand to RGBA into the scratch buffer.
@@ -262,10 +298,10 @@ public:
     // on the machine it was generated on. Elsewhere the call fails instead.
     TC_PLATFORMS("macos") unsigned char* lockFrame(int& strideOut) {
 #if TC_ASYNC_SCREEN_CAPTURE
-        if (!open_) { callFailed("not open"); return nullptr; }
-        if (!result_) return nullptr;
-        auto* frame = lockFramePlatform(strideOut);
-        return frame;
+        Diagnostics diagnostics;
+        auto result = lockFrameDeferred(strideOut, diagnostics);
+        diagnostics.log();
+        return result;
 #else
         (void)strideOut;
         callFailed("direct frame locking is not supported on this platform");
@@ -274,13 +310,10 @@ public:
     }
     TC_PLATFORMS("macos") SaveResult submitFrame(double timeSec) {
 #if TC_ASYNC_SCREEN_CAPTURE
-        if (!open_) return callFailed("not open");
-        if (!result_) return result_;
-        if (!submitFramePlatform(timeSec)) {
-            return backendRejected("encoder rejected frame " + std::to_string(frameCount_));
-        }
-        ++frameCount_;
-        return SaveResult::success();
+        Diagnostics diagnostics;
+        auto result = submitFrameDeferred(timeSec, diagnostics);
+        diagnostics.log();
+        return result;
 #else
         (void)timeSec;
         return callFailed("direct frame submission is not supported on this platform");
@@ -292,40 +325,153 @@ public:
     // was opened with settings.audio = true (and audioSampleRate/Channels set);
     // Returns a failed SaveResult otherwise. Channel count / rate must match the settings.
     SaveResult writeAudio(const float* interleaved, int frames, double timeSec) {
-        if (!open_) return callFailed("not open");
-        if (!result_) return result_;
-        if (!interleaved) return callFailed("null audio data");
-        if (frames <= 0) return callFailed("audio frames must be > 0 (got " + std::to_string(frames) + ")");
-        if (!settings_.audio) return callFailed("writer has no audio track");
-        return appendAudioPlatform(interleaved, frames, timeSec)
-            ? SaveResult::success() : backendRejected("encoder rejected audio");
+        Diagnostics diagnostics;
+        auto result = writeAudioDeferred(interleaved, frames, timeSec, diagnostics);
+        diagnostics.log();
+        return result;
     }
 
 private:
-    SaveResult callFailed(const std::string& message) {
+    bool rejectFrameLayout(Diagnostics* diagnostics = nullptr) {
+        if (rejectedFrameCount_.fetch_add(1, std::memory_order_relaxed) == 0) {
+            Diagnostics immediate;
+            auto& batch = diagnostics ? *diagnostics : immediate;
+            batch.pending.emplace_back([] {
+                logWarning("VideoWriter") << "frame layout does not match the recording buffer; frame skipped";
+            });
+            if (!diagnostics) immediate.log();
+        }
+        return false;
+    }
+    bool captureLayoutMatches(const internal::RecorderFrameLayout& layout) const {
+        using F = internal::RecorderPixelFormat;
+        return (layout.format == F::BGRA8 || layout.format == F::RGB10A2) &&
+            internal::recorderFrameFits(layout, width_, height_, layout.format);
+    }
+    // The callbacks keep native buffer ownership in the backend. Tests inject
+    // a readback and a locked buffer through this same completion path.
+    template<class Acquire, class Copy, class Discard, class Submit>
+    bool completeCapture(const internal::RecorderFrameLayout& source,
+                         Acquire acquire, Copy copy, Discard discard, Submit submit,
+                         Diagnostics& diagnostics) {
+        if (!open_ || !result_) return false;
+        // Bound (abi): captured extent and bytes must match the take before acquiring a buffer. Overflow drops the recorder frame and is counted.
+        if (!captureLayoutMatches(source)) return rejectFrameLayout(&diagnostics);
+        const auto destination = acquire();
+        if (!destination.data) return false;
+        // Bound (abi): native destination must fit the take before readback. Overflow drops the recorder frame and is counted.
+        if (!internal::recorderFrameFits(destination.layout, width_, height_,
+                                         internal::RecorderPixelFormat::BGRA8) ||
+            !copy(destination)) {
+            discard();
+            return rejectFrameLayout(&diagnostics);
+        }
+        return submit();
+    }
+    bool recordingSizeMatches(int width, int height) {
+        // Bound (abi): source extent must match the fixed take size. Overflow drops the recorder frame and is counted.
+        return (width == width_ && height == height_) || rejectFrameLayout();
+    }
+
+    SaveResult closeDeferred(Diagnostics& diagnostics) {
+        if (open_) {
+            auto finalized = closePlatform();
+            if (result_) {
+                result_ = finalized;
+                if (!result_) diagnostics.failure(result_);
+            }
+            if (frameCount_ == 0 && callerMistakeLogged_) {
+                diagnostics.pending.emplace_back([path = path_] {
+                    logWarning("VideoWriter") << "take accepted 0 frames after caller mistakes -> " << path;
+                });
+            } else if (result_) {
+                diagnostics.pending.emplace_back([path = path_, count = frameCount_] {
+                    logNotice("VideoWriter") << "saved " << count << " frames -> " << path;
+                });
+            }
+        }
+        open_ = false;
+        return result_;
+    }
+
+    unsigned char* lockFrameDeferred(int& strideOut, Diagnostics& diagnostics) {
+        if (!open_) { callFailed("not open", &diagnostics); return nullptr; }
+        if (!result_) return nullptr;
+        internal::RecorderFrameBuffer buffer;
+        auto* frame = lockFramePlatform(buffer, diagnostics);
+        // Bound (abi): the public stride must fit int. Overflow drops the recorder frame and is counted.
+        if (frame && buffer.layout.rowBytes > static_cast<size_t>(std::numeric_limits<int>::max())) {
+            discardFramePlatform();
+            rejectFrameLayout(&diagnostics);
+            return nullptr;
+        }
+        strideOut = frame ? static_cast<int>(buffer.layout.rowBytes) : 0;
+        return frame;
+    }
+
+    SaveResult submitFrameDeferred(double timeSec, Diagnostics& diagnostics) {
+        if (!open_) return callFailed("not open", &diagnostics);
+        if (!result_) return result_;
+        if (!submitFramePlatform(timeSec)) {
+            return backendRejected("encoder rejected frame " + std::to_string(frameCount_), &diagnostics);
+        }
+        ++frameCount_;
+        return SaveResult::success();
+    }
+
+    SaveResult writeAudioDeferred(const float* interleaved, int frames, double timeSec, Diagnostics& diagnostics) {
+        if (!open_) return callFailed("not open", &diagnostics);
+        if (!result_) return result_;
+        if (!interleaved) return callFailed("null audio data", &diagnostics);
+        if (frames <= 0) return callFailed("audio frames must be > 0 (got " + std::to_string(frames) + ")", &diagnostics);
+        if (!settings_.audio) return callFailed("writer has no audio track", &diagnostics);
+        return appendAudioPlatform(interleaved, frames, timeSec)
+            ? SaveResult::success() : backendRejected("encoder rejected audio", &diagnostics);
+    }
+
+    SaveResult callFailed(const std::string& message, Diagnostics* diagnostics = nullptr) {
         auto failure = internal::saveFailure(path_, message.c_str());
         if (!callerMistakeLogged_) {
             callerMistakeLogged_ = true;
-            internal::reportSaveFailure(failure, "VideoWriter");
+            if (diagnostics) diagnostics->failure(failure);
+            else internal::reportSaveFailure(failure, "VideoWriter");
         }
         return failure;
     }
     SaveResult sizeMismatch(const char* source, int w, int h) {
-        return callFailed(std::string(source) + " size " + std::to_string(w) + "x" +
-            std::to_string(h) + " != writer " + std::to_string(width_) + "x" + std::to_string(height_));
+        rejectFrameLayout();
+        const auto message = std::string(source) + " size " + std::to_string(w) + "x" +
+            std::to_string(h) + " != writer " + std::to_string(width_) + "x" + std::to_string(height_);
+        return internal::saveFailure(path_, message.c_str());
     }
     // Backends supply details without logging. Report only the first rejected
     // submission; subsequent calls return result_ before reaching the backend.
-    SaveResult backendRejected(const std::string& message) {
+    SaveResult backendRejected(const std::string& message, Diagnostics* diagnostics = nullptr) {
         if (result_) result_ = internal::saveFailure(path_, message.c_str());
-        return internal::reportSaveFailure(result_, "VideoWriter");
+        if (!diagnostics) return internal::reportSaveFailure(result_, "VideoWriter");
+        diagnostics->failure(result_);
+        return result_;
     }
     SaveResult appendRGBA(const unsigned char* rgba, double timeSec) {
-        if (!open_) return callFailed("not open");
+        Diagnostics diagnostics;
+        auto result = appendRGBADeferred(rgba, timeSec, diagnostics);
+        diagnostics.log();
+        return result;
+    }
+    SaveResult appendRGBADeferred(const unsigned char* rgba, double timeSec, Diagnostics& diagnostics) {
+        if (!open_) return callFailed("not open", &diagnostics);
         if (!result_) return result_;
-        if (!rgba) return callFailed("null frame data");
-        if (!appendPlatform(rgba, timeSec)) {
-            return backendRejected("encoder rejected frame " + std::to_string(frameCount_));
+        if (!rgba) return callFailed("null frame data", &diagnostics);
+        const auto rejectedBefore = getRejectedFrameCount();
+#if TC_ASYNC_SCREEN_CAPTURE
+        const bool appended = appendPlatformDeferred(rgba, timeSec, diagnostics);
+#else
+        const bool appended = appendPlatform(rgba, timeSec);
+#endif
+        if (!appended) {
+            if (getRejectedFrameCount() != rejectedBefore)
+                return internal::saveFailure(path_, "frame layout does not match the recording buffer");
+            return backendRejected("encoder rejected frame " + std::to_string(frameCount_), &diagnostics);
         }
         ++frameCount_;
         return SaveResult::success();
@@ -335,13 +481,16 @@ private:
     bool openPlatform(const std::string& fullPath, int w, int h, float fps,
                       const VideoRecordSettings& settings);
     bool appendPlatform(const unsigned char* rgba, double timeSec);
+#if TC_ASYNC_SCREEN_CAPTURE
+    bool appendPlatformDeferred(const unsigned char* rgba, double timeSec, Diagnostics& diagnostics);
+#endif
     bool appendAudioPlatform(const float* interleaved, int frames, double timeSec);
     SaveResult closePlatform();
-#if TC_ASYNC_SCREEN_CAPTURE
     // Direct-buffer hooks for the zero-intermediate capture path (macOS).
-    unsigned char* lockFramePlatform(int& strideOut);   // lock & return encoder buffer
+    // Other native backends do not use these; headless tests supply dummy hooks.
+    unsigned char* lockFramePlatform(internal::RecorderFrameBuffer& buffer, Diagnostics& diagnostics);
+    void discardFramePlatform();
     bool submitFramePlatform(double timeSec);            // append the locked buffer
-#endif
 
     internal::VideoWriterPlatformData* platform_ = nullptr;
     fs::path path_;
@@ -351,6 +500,7 @@ private:
     float fps_    = 30.0f;
     VideoRecordSettings settings_;
     int   frameCount_ = 0;
+    std::atomic<uint64_t> rejectedFrameCount_{0};
     bool  open_ = false;
     bool  callerMistakeLogged_ = false;
     SaveResult result_;
@@ -472,48 +622,131 @@ namespace internal { struct ScreenRecorderTestAccess; }
 class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
     friend struct internal::ScreenRecorderTestAccess;
     struct State : std::enable_shared_from_this<State> {
+        // Stack-owned delivery records avoid header-local thread state (which
+        // would split across hot-reload modules). completionMutex_ guards the list.
+        struct Delivery {
+            State& state;
+            const std::thread::id thread = std::this_thread::get_id();
+            Delivery* next;
+            explicit Delivery(State& s) : state(s) {
+                std::lock_guard<std::mutex> lock(state.completionMutex_);
+                link();
+            }
+            // Register stop's delivery in the same critical section as its
+            // final pending-work check, before another stop can pass it.
+            Delivery(State& s, const std::unique_lock<std::mutex>&) : state(s) {
+                link();
+            }
+            Delivery(const Delivery&) = delete;
+            Delivery& operator=(const Delivery&) = delete;
+            void link() {
+                next = state.deliveries_;
+                state.deliveries_ = this;
+            }
+            ~Delivery() {
+                std::unique_lock<std::mutex> lock(state.completionMutex_);
+                if (state.inFlight_.load(std::memory_order_acquire) == 0 && state.closeWhenDone_) {
+                    // stop may have timed out during logging, after the final
+                    // encoder decrement. Honor that close request as well.
+                    lock.unlock();
+                    VideoWriter::Diagnostics diagnostics;
+                    {
+                        std::lock_guard<std::mutex> writerLock(state.writerMutex_);
+                        if (state.audioActive_) state.drainAudio(diagnostics);
+                        state.audioActive_ = false;
+                        state.writer_.closeDeferred(diagnostics);
+                    }
+                    diagnostics.log();
+                    lock.lock();
+                }
+                // Removing the record and checking the close request share
+                // the same lock, so a timed-out stop cannot miss both paths.
+                auto** entry = &state.deliveries_;
+                while (*entry != this) entry = &(*entry)->next;
+                *entry = next;
+            }
+        };
+
+        // completionMutex_ held. A diagnostic's reentrant stop is not an
+        // external teardown barrier: waiting for diagnostic delivery here can
+        // wait for itself (or form a cycle with another reentrant listener).
+        bool pendingWork() const {
+            if (inFlight_.load(std::memory_order_acquire) > 0) return true;
+            for (auto* delivery = deliveries_; delivery; delivery = delivery->next) {
+                if (delivery->thread == std::this_thread::get_id()) return false;
+            }
+            return deliveries_ != nullptr;
+        }
+
+        static constexpr std::chrono::seconds kDrainTimeout{2};
+
         // Stop capturing and finalize the file. Safe to call multiple times.
-        SaveResult stop() {
-            afterFrameListener_ = EventListener{};   // no new captures get queued
-            exitListener_ = EventListener{};
-            audioListener_ = EventListener{};
+        // The private polling interval also lets tests simulate coarse OS sleeps.
+        SaveResult stop(std::chrono::milliseconds drainPollInterval = std::chrono::milliseconds(1)) {
+            {
+                // An external stop may overlap a completion listener's stop.
+                // Never hold this bookkeeping lock across waits or logging.
+                std::lock_guard<std::mutex> lock(stopMutex_);
+                afterFrameListener_ = EventListener{};   // no new captures get queued
+                exitListener_ = EventListener{};
+                audioListener_ = EventListener{};
+                source_ = Source::None;
+                fbo_ = nullptr;
+            }
             // Bounded, like AudioRecorder: a straggling tap writes into this
             // State's ring, which outlives it.
-            if (audioActive_) AudioEngine::getInstance().waitForAudioCallbacks();
-            source_ = Source::None;
-            fbo_ = nullptr;
-#if TC_ASYNC_SCREEN_CAPTURE
-            // Drain async captures still encoding on background threads before we
-            // close the writer (their completion handlers append into it).
-            for (int spins = 0;
-                 inFlight_.load(std::memory_order_acquire) > 0 && spins < 2000;
-                 ++spins) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            if (audioActive_) {
+                Delivery delivery(*this);
+                AudioEngine::getInstance().waitForAudioCallbacks();
             }
-#endif
+            // Drain captures and inline diagnostic deliveries before closing the
+            // writer. Synchronous platforms also have diagnostic deliveries.
+            // Bound (platform): capture and diagnostic draining wait at most 2 s (steady clock). Overflow leaves close pending and is reported by stop() returning WriteFailed, with one Error per take.
+            const auto deadline = std::chrono::steady_clock::now() + kDrainTimeout;
+            while (std::chrono::steady_clock::now() < deadline) {
+                {
+                    std::lock_guard<std::mutex> completionLock(completionMutex_);
+                    if (!pendingWork()) break;
+                }
+                std::this_thread::sleep_for(drainPollInterval);
+            }
             // The request and final decrement must be serialized. A completion
             // either sees this request, or has already finished all writer IO.
             bool pendingCaptures;
+            std::optional<Delivery> delivery;
             {
-                std::lock_guard<std::mutex> completionLock(completionMutex_);
-                pendingCaptures = inFlight_.load(std::memory_order_acquire) > 0;
+                std::unique_lock<std::mutex> completionLock(completionMutex_);
+                pendingCaptures = pendingWork();
                 if (pendingCaptures) closeWhenDone_ = true;
+                delivery.emplace(*this, completionLock);
             }
             // Do not acquire writerMutex_ on timeout: a completion may be
             // stuck inside the encoder while holding it.
             if (pendingCaptures) {
-                if (stopResult_) {
-                    stopResult_ = SaveResult::fail(SaveError::WriteFailed,
+                SaveResult result;
+                bool report;
+                {
+                    std::lock_guard<std::mutex> lock(stopMutex_);
+                    report = stopResult_.ok();
+                    if (report) stopResult_ = SaveResult::fail(SaveError::WriteFailed,
                         "recording still has frames in flight");
-                    logError("ScreenRecorder") << stopResult_.message;
+                    result = stopResult_;
                 }
-                return stopResult_;
+                if (report) logError("ScreenRecorder") << result.message;
+                return result;
             }
-            std::lock_guard<std::mutex> lk(writerMutex_);
-            if (audioActive_) drainAudio();
-            audioActive_ = false;
-            auto closed = writer_.close();
-            return stopResult_ ? closed : stopResult_;
+            VideoWriter::Diagnostics diagnostics;
+            SaveResult result;
+            {
+                std::lock_guard<std::mutex> lk(writerMutex_);
+                if (audioActive_) drainAudio(diagnostics);
+                audioActive_ = false;
+                auto closed = writer_.closeDeferred(diagnostics);
+                std::lock_guard<std::mutex> lock(stopMutex_);
+                result = stopResult_ ? closed : stopResult_;
+            }
+            diagnostics.log();
+            return result;
         }
 
         enum class Source { None, Swapchain, Fbo };
@@ -560,6 +793,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
         }
 
         void onAfterFrame() {
+            Delivery delivery(*this);
             if (source_ == Source::None || !writer_.isOpen()) return;
             // Recorded Fbo was destroyed: finalize instead of reading a dangling
             // pointer. The file stays valid up to the last captured frame.
@@ -576,8 +810,14 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
             // Feed buffered audio to the encoder once per frame (main thread; the
             // audio thread only ever touches the lock-free ring).
             if (audioActive_) {
-                std::lock_guard<std::mutex> lk(writerMutex_);
-                drainAudio();
+                VideoWriter::Diagnostics diagnostics;
+                {
+                    std::lock_guard<std::mutex> lk(writerMutex_);
+                    drainAudio(diagnostics);
+                }
+                diagnostics.log();
+                // A diagnostic listener may have stopped this take.
+                if (source_ == Source::None) return;
             }
 
             // Fixed-duration cutoff. tick.wallPts is the wall-clock PTS this frame would
@@ -608,7 +848,8 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
             double t = pacer_.commitPts(audioActive_ ? audioClockSeconds()
                                                      : tick.wallPts);
             if (source_ == Source::Fbo && fbo_) {
-                writer_.addFrameAt(*fbo_, t);
+                if (writer_.recordingSizeMatches(fbo_->getWidth(), fbo_->getHeight()))
+                    writer_.addFrameAt(*fbo_, t);
                 return;
             }
 #if TC_ASYNC_SCREEN_CAPTURE
@@ -621,23 +862,19 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
             inFlight_.fetch_add(1, std::memory_order_relaxed);
             bool started = internal::captureWindowAsync(
                 [state = shared_from_this(), t](const internal::CaptureReadback& rb) {
-                    std::lock_guard<std::mutex> lk(state->writerMutex_);
-                    if (state->writer_.isOpen()) {
-                        int stride = 0;
-                        if (unsigned char* dst = state->writer_.lockFrame(stride)) {
-                            rb.readInto(dst, stride, /*wantRGBA=*/false);
-                            state->writer_.submitFrame(t);
-                        }
-                    }
-                    state->finishCapture();
+                    state->completeCapture(rb, t);
                 }, stagingPool_);
             if (!started) {
-                std::lock_guard<std::mutex> lk(writerMutex_);
-                finishCapture();
+                finishCaptureAndLog(/*rejectedLayout=*/true);
             }
 #else
             Pixels px;
-            if (grabScreen(px) && px.isAllocated()) writer_.addFrameAt(px, t);
+            if (!grabScreen(px) || !px.isAllocated()) {
+                writer_.rejectFrameLayout();
+                return;
+            }
+            if (writer_.recordingSizeMatches(px.getWidth(), px.getHeight()))
+                writer_.addFrameAt(px, t);
 #endif
         }
 
@@ -732,7 +969,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
 
         // Main thread (writerMutex_ held). Hand every complete frame in the ring
         // to the writer at its sample-accurate PTS.
-        void drainAudio() {
+        void drainAudio(VideoWriter::Diagnostics& diagnostics) {
             if (!writer_.isOpen() || !anchored_.load(std::memory_order_acquire)) return;
             const size_t cap = audioRing_.size();
             size_t n = (size_t)(audioHead_.load(std::memory_order_acquire)
@@ -753,7 +990,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
             consumedFrames_ += (uint64_t)frames;
             // Respect the fixed-duration cutoff (the video side stops there too).
             if (pacer_.duration > 0.0 && pts >= pacer_.duration) return;
-            writer_.writeAudio(audioScratch_.data(), frames, pts);
+            writer_.writeAudioDeferred(audioScratch_.data(), frames, pts, diagnostics);
         }
 
         // "Now" on the audio timeline: extrapolate from the latest (framePosition,
@@ -768,9 +1005,50 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
             return atLast + (noww - wallLast_.load(std::memory_order_relaxed));
         }
 
+        // The encoder hooks and readback are replaceable in headless tests;
+        // production calls this from the Metal completion callback.
+        template<class Readback>
+        void completeCapture(const Readback& rb, double t) {
+            // Keep this scope around the entire operation, including any
+            // diagnostics emitted after writerMutex_ is released.
+            Delivery delivery(*this); // published before the encoder count can reach zero
+            VideoWriter::Diagnostics diagnostics;
+            {
+                std::lock_guard<std::mutex> lk(writerMutex_);
+                if (writer_.isOpen()) {
+                    writer_.completeCapture(rb.getLayout(),
+                        [this, &diagnostics] {
+                            internal::RecorderFrameBuffer buffer;
+                            writer_.lockFramePlatform(buffer, diagnostics);
+                            return buffer;
+                        },
+                        [&rb](const internal::RecorderFrameBuffer& buffer) {
+                            return rb.readInto(buffer.data, buffer.layout.rowBytes,
+                                               buffer.layout.byteSize, /*wantRGBA=*/false);
+                        },
+                        [this] { writer_.discardFramePlatform(); },
+                        [this, t, &diagnostics] { return writer_.submitFrameDeferred(t, diagnostics).ok(); },
+                        diagnostics);
+                }
+                finishCapture(diagnostics);
+            }
+            diagnostics.log();
+        }
+
+        void finishCaptureAndLog(bool rejectedLayout = false) {
+            Delivery delivery(*this);
+            VideoWriter::Diagnostics diagnostics;
+            {
+                std::lock_guard<std::mutex> lk(writerMutex_);
+                if (rejectedLayout) writer_.rejectFrameLayout(&diagnostics);
+                finishCapture(diagnostics);
+            }
+            diagnostics.log();
+        }
+
         // writerMutex_ held. A timed-out stop leaves finalization to the last
         // completion; the audio tap has already been disconnected and barriered.
-        void finishCapture() {
+        void finishCapture(VideoWriter::Diagnostics& diagnostics) {
             // Serialize the close request with the final decrement, so stop
             // cannot miss a completion that just decided it need not close.
             std::unique_lock<std::mutex> completionLock(completionMutex_);
@@ -778,16 +1056,19 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
                 // Never hold the request lock across encoder work: stop must
                 // still be able to publish its request if the encoder hangs.
                 completionLock.unlock();
-                if (audioActive_) drainAudio();
+                if (audioActive_) drainAudio(diagnostics);
                 audioActive_ = false;
-                writer_.close();
+                writer_.closeDeferred(diagnostics);
                 completionLock.lock();
             }
-            // Publish completion only after all writer access has finished.
+            // Publish encoder completion only after all writer access has
+            // finished. The Delivery record still barriers diagnostic callbacks.
             inFlight_.fetch_sub(1, std::memory_order_release);
         }
 
         std::mutex completionMutex_; // close request / final-count handshake; no encoder IO
+        Delivery* deliveries_ = nullptr;
+        std::mutex stopMutex_; // stop bookkeeping only; no encoder IO, waits or logging
         bool closeWhenDone_ = false;
         SaveResult stopResult_;
         VideoWriter writer_;
@@ -858,6 +1139,7 @@ public:
         return state_->source_ != State::Source::None && state_->writer_.isOpen();
     }
     int getFrameCount() const { return state_->writer_.getFrameCount(); }
+    uint64_t getRejectedFrameCount() const { return state_->writer_.getRejectedFrameCount(); }
     fs::path getPath() const { return state_->writer_.getPath(); }
     VideoWriter& writer() { return state_->writer_; }
 

@@ -227,8 +227,29 @@ fs::path internal::platformAppBundlePath() {
 // single getBytes (no intermediate buffer for the common BGRA8 case). For BGRA8
 // + wantRGBA=false (the recorder feeding a BGRA CVPixelBuffer) this is one copy,
 // zero swizzle. Runs on whatever thread the consumer is on.
-void internal::CaptureReadback::readInto(unsigned char* dst, int dstStride,
-                                         bool wantRGBA) const {
+internal::RecorderFrameLayout internal::CaptureReadback::getLayout() const {
+    id<MTLTexture> tex = (__bridge id<MTLTexture>)staging;
+    // Bound (abi): Metal staging extent must match the captured frame. Overflow drops the recorder frame and is counted.
+    if (!tex || width <= 0 || height <= 0 || tex.width != (NSUInteger)width ||
+        tex.height != (NSUInteger)height) return {};
+    const auto format = tex.pixelFormat;
+    const bool packed10 = format == MTLPixelFormatRGB10A2Unorm;
+    // Bound (abi): Metal staging format must match the four-byte capture layout. Overflow drops the recorder frame and is counted.
+    if (packed10 != isRGB10A2 || (!packed10 && format != MTLPixelFormatBGRA8Unorm &&
+                                 format != MTLPixelFormatBGRA8Unorm_sRGB)) return {};
+    return internal::recorderPackedLayout(tex.width, tex.height,
+        packed10 ? internal::RecorderPixelFormat::RGB10A2 : internal::RecorderPixelFormat::BGRA8);
+}
+
+bool internal::CaptureReadback::readInto(unsigned char* dst, size_t dstStride,
+                                         size_t capacity, bool wantRGBA) const {
+    const auto source = getLayout();
+    auto destination = source;
+    destination.rowBytes = dstStride;
+    destination.byteSize = capacity;
+    // Bound (abi): the native readback destination must hold every captured row. Overflow drops the recorder frame and is counted.
+    if (!dst || !internal::recorderFrameFits(destination, source.width, source.height, source.format))
+        return false;
     id<MTLTexture> tex = (__bridge id<MTLTexture>)staging;
     const NSUInteger w = (NSUInteger)width;
     const NSUInteger h = (NSUInteger)height;
@@ -254,7 +275,7 @@ void internal::CaptureReadback::readInto(unsigned char* dst, int dstStride,
                 else          { drow[x*4+0]=b; drow[x*4+1]=g; drow[x*4+2]=r; drow[x*4+3]=a; }
             }
         }
-        return;
+        return true;
     }
 
     // BGRA8: getBytes straight into dst (respecting the destination row stride).
@@ -273,6 +294,7 @@ void internal::CaptureReadback::readInto(unsigned char* dst, int dstStride,
             }
         }
     }
+    return true;
 }
 
 // Free staging textures, returned by each completion after its readback.
@@ -309,7 +331,11 @@ bool internal::captureWindowAsync(
 
     NSUInteger width  = srcTexture.width;
     NSUInteger height = srcTexture.height;
+    mcp::internal::reconcileWindowCapture(width, height);
     MTLPixelFormat pixelFormat = srcTexture.pixelFormat;
+    // Bound (abi): Metal extents must fit the capture int dimensions. Overflow drops the recorder frame and is counted.
+    if (width > (NSUInteger)std::numeric_limits<int>::max() ||
+        height > (NSUInteger)std::numeric_limits<int>::max()) return false;
     id<MTLDevice> device = srcTexture.device;
 
     // sokol sets framebufferOnly=YES on the layer, so getBytes on the drawable
@@ -401,8 +427,8 @@ bool captureWindow(Pixels& outPixels) {
     bool started = internal::captureWindowAsync(
         [&outPixels, &ok, sem](const internal::CaptureReadback& rb) {
             outPixels.allocate(rb.width, rb.height, 4);
-            rb.readInto(outPixels.getData(), rb.width * 4, /*wantRGBA=*/true);
-            ok = true;
+            ok = rb.readInto(outPixels.getData(), (size_t)rb.width * 4,
+                             outPixels.getTotalBytes(), /*wantRGBA=*/true);
             dispatch_semaphore_signal(sem);
         });
     if (!started) {
