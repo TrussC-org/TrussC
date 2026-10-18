@@ -678,8 +678,11 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
             return deliveries_ != nullptr;
         }
 
+        static constexpr std::chrono::seconds kDrainTimeout{2};
+
         // Stop capturing and finalize the file. Safe to call multiple times.
-        SaveResult stop() {
+        // The private polling interval also lets tests simulate coarse OS sleeps.
+        SaveResult stop(std::chrono::milliseconds drainPollInterval = std::chrono::milliseconds(1)) {
             {
                 // An external stop may overlap a completion listener's stop.
                 // Never hold this bookkeeping lock across waits or logging.
@@ -696,15 +699,16 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
                 Delivery delivery(*this);
                 AudioEngine::getInstance().waitForAudioCallbacks();
             }
-            // Drain async captures still encoding on background threads before we
-            // close the writer, including their inline diagnostic listeners.
-            // Bound (platform): capture and diagnostic draining wait at most 2000 one-ms sleeps. Overflow leaves close pending and is reported by stop() returning WriteFailed, with one Error per take.
-            for (int spins = 0; spins < 2000; ++spins) {
+            // Drain captures and inline diagnostic deliveries before closing the
+            // writer. Synchronous platforms also have diagnostic deliveries.
+            // Bound (platform): capture and diagnostic draining wait at most 2 s (steady clock). Overflow leaves close pending and is reported by stop() returning WriteFailed, with one Error per take.
+            const auto deadline = std::chrono::steady_clock::now() + kDrainTimeout;
+            while (std::chrono::steady_clock::now() < deadline) {
                 {
                     std::lock_guard<std::mutex> completionLock(completionMutex_);
                     if (!pendingWork()) break;
                 }
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                std::this_thread::sleep_for(drainPollInterval);
             }
             // The request and final decrement must be serialized. A completion
             // either sees this request, or has already finished all writer IO.

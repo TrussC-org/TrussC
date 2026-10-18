@@ -17,6 +17,7 @@
 #import <CoreMedia/CoreMedia.h>
 
 #include "TrussC.h"
+#include <chrono>
 #include "../metal/tcRecorderPixelBuffer.h"
 #include <cmath>
 
@@ -149,11 +150,12 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     if (!pd || !pd->writer || pd->failed) return false;
 
     @autoreleasepool {
-        int spins = 0;
-        while (!pd->input.readyForMoreMediaData && spins < 5000 &&
+        // Bound (platform): encoder readiness waits at most 5 s (steady clock). Overflow rejects the frame and marks the take WriteFailed.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!pd->input.readyForMoreMediaData &&
+               std::chrono::steady_clock::now() < deadline &&
                pd->writer.status == AVAssetWriterStatusWriting) {
             [NSThread sleepForTimeInterval:0.001];
-            ++spins;
         }
         if (pd->writer.status != AVAssetWriterStatusWriting) {
             const char* message = pd->writer.error.localizedDescription.UTF8String;

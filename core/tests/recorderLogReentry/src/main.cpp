@@ -102,6 +102,10 @@ struct ScreenRecorderTestAccess {
         else state->completeCapture(Readback{}, 0.0);
     }
     static bool complete(const ScreenRecorder& recorder) { return recorder.state_->inFlight_ == 0; }
+    static constexpr auto drainTimeout() { return ScreenRecorder::State::kDrainTimeout; }
+    static SaveResult stopWithCoarseSleep(ScreenRecorder& recorder) {
+        return recorder.state_->stop(std::chrono::milliseconds(16));
+    }
     static void pending(ScreenRecorder& recorder) { recorder.state_->inFlight_ = 1; }
 };
 }
@@ -240,7 +244,8 @@ TC_CORE_TEST_MAIN() {
               : failure == Fault::Close ? "overlapping stop drains finalization Error delivery"
               : "overlapping stop drains zero-frame Warning delivery");
     }
-    {
+    // Exercise the same production wait with a 16-ms polling sleep on Linux too.
+    for (bool coarseSleep : {false, true}) {
         fault = Fault::None;
         ScreenRecorder recorder;
         recorder.writer().open(path, 16, 16);
@@ -254,13 +259,22 @@ TC_CORE_TEST_MAIN() {
         std::thread firstStop([&] { recorder.stop(); });
         while (!entered.load()) std::this_thread::yield();
         const auto before = std::chrono::steady_clock::now();
-        auto stopped = recorder.stop();
+        const auto deadline = before + Access::drainTimeout();
+        const auto margin = std::chrono::seconds(2); // Scheduler/sanitizer margin, independent of poll count.
+        auto stopped = coarseSleep ? Access::stopWithCoarseSleep(recorder) : recorder.stop();
         const auto elapsed = std::chrono::steady_clock::now() - before;
         listener.disconnect();
         resume.store(true);
         firstStop.join();
-        check(!stopped && elapsed < std::chrono::seconds(4),
-              "held stop diagnostic reports failure within the drain bound");
+        std::printf("STOP_FAILURE sleep=%s elapsed_ms=%.3f deadline_ms=%lld margin_ms=%lld\n",
+                    coarseSleep ? "16ms" : "1ms",
+                    std::chrono::duration<double, std::milli>(elapsed).count(),
+                    (long long)std::chrono::duration_cast<std::chrono::milliseconds>(Access::drainTimeout()).count(),
+                    (long long)std::chrono::duration_cast<std::chrono::milliseconds>(margin).count());
+        check(!stopped && stopped.error == SaveError::WriteFailed
+              && before + elapsed >= deadline && before + elapsed < deadline + margin,
+              coarseSleep ? "held stop diagnostic respects deadline with coarse sleep"
+                          : "held stop diagnostic reports failure within the drain bound");
     }
     // Hold an inline completion listener just before its reentrant stop. A
     // successful external stop must drain that listener before its owner can

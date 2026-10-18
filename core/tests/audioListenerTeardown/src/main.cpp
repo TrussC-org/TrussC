@@ -107,7 +107,8 @@ static double secondsSince(Clock::time_point t0) {
 // Wait (up to `timeoutMs`) until `pred()` holds.
 template <class Pred>
 static bool waitFor(Pred pred, int timeoutMs) {
-    for (int t = 0; t < timeoutMs; t += 1) {
+    const auto deadline = Clock::now() + chrono::milliseconds(timeoutMs);
+    while (Clock::now() < deadline) {
         if (pred()) return true;
         this_thread::sleep_for(chrono::milliseconds(1));
     }

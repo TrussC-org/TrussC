@@ -14,6 +14,7 @@
 
 #include "TrussC.h"
 #include <vector>
+#include <chrono>
 #include "tc/video/internal/tcVideoNotifyQueue.h"
 
 #include <windows.h>
@@ -627,10 +628,10 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
 
     // Wait for metadata to load (synchronous load for now)
     // In production, this should be async with callbacks
-    int timeout = 5000; // 5 seconds
-    while (!state_->isReady_ && timeout > 0) {
+    // Bound (platform): metadata readiness waits at most 5 s (steady clock). Overflow fails load() and logs one Error.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!state_->isReady_ && std::chrono::steady_clock::now() < deadline) {
         Sleep(10);
-        timeout -= 10;
 
         drainNotifications();
 

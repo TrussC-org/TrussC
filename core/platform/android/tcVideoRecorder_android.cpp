@@ -275,7 +275,9 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
 
     // Wait (briefly) for an input buffer — offline writers can outrun the codec.
     ssize_t inIdx = -1;
-    for (int spins = 0; spins < 1000; ++spins) {
+    // Bound (platform): encoder input waits at most 10 s (steady clock). Overflow rejects the frame and marks the take WriteFailed.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (std::chrono::steady_clock::now() < deadline) {
         inIdx = AMediaCodec_dequeueInputBuffer(pd->codec, 10000);
         if (inIdx >= 0) break;
         if (inIdx != kInfoTryAgainLater) { pd->failed = true; return false; }
@@ -353,7 +355,9 @@ SaveResult VideoWriter::closePlatform() {
     if (pd->codec && !pd->failed) {
         // Queue an end-of-stream marker on an empty input buffer.
         ssize_t inIdx = -1;
-        for (int spins = 0; spins < 1000 && inIdx < 0; ++spins) {
+        // Bound (platform): encoder EOS input waits at most 10 s (steady clock). Overflow fails finalization through closePlatform()'s result.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (inIdx < 0 && std::chrono::steady_clock::now() < deadline) {
             inIdx = AMediaCodec_dequeueInputBuffer(pd->codec, 10000);
             if (inIdx < 0 && inIdx != kInfoTryAgainLater) { pd->failed = true; break; }
             if (inIdx < 0 && !drainOutput(pd, false, result)) break;

@@ -14,6 +14,7 @@
 #import <CoreMedia/CoreMedia.h>
 
 #include "TrussC.h"
+#include <chrono>
 #include "../metal/tcRecorderPixelBuffer.h"
 #include <cmath>
 
@@ -223,11 +224,12 @@ bool VideoWriter::appendAudioPlatform(const float* interleaved, int frames,
         return false;
 
     @autoreleasepool {
-        int spins = 0;
-        while (!pd->audioInput.readyForMoreMediaData && spins < 5000 &&
+        // Bound (platform): encoder readiness waits at most 5 s (steady clock). Overflow rejects the frame through its failed result.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!pd->audioInput.readyForMoreMediaData &&
+               std::chrono::steady_clock::now() < deadline &&
                pd->writer.status == AVAssetWriterStatusWriting) {
             [NSThread sleepForTimeInterval:0.001];
-            ++spins;
         }
         if (pd->writer.status != AVAssetWriterStatusWriting) {
             const char* message = pd->writer.error.localizedDescription.UTF8String;
@@ -287,12 +289,12 @@ bool VideoWriter::appendPlatformDeferred(const unsigned char* rgba, double timeS
     if (!pd || !pd->writer || pd->failed) return false;
 
     @autoreleasepool {
-        // Offline writer: briefly wait for the input to accept more data.
-        int spins = 0;
-        while (!pd->input.readyForMoreMediaData && spins < 5000 &&
+        // Bound (platform): encoder readiness waits at most 5 s (steady clock). Overflow rejects the frame through its failed result, with at most one Error per take.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!pd->input.readyForMoreMediaData &&
+               std::chrono::steady_clock::now() < deadline &&
                pd->writer.status == AVAssetWriterStatusWriting) {
             [NSThread sleepForTimeInterval:0.001];
-            ++spins;
         }
         if (pd->writer.status != AVAssetWriterStatusWriting) {
             const char* message = pd->writer.error.localizedDescription.UTF8String;
@@ -392,12 +394,12 @@ unsigned char* VideoWriter::lockFramePlatform(internal::RecorderFrameBuffer& buf
     }
 
     // Briefly wait for the encoder input to accept more data.
-    // Bound (platform): encoder readiness waits at most 5000 one-ms sleeps. Overflow rejects the frame and is reported by its failed result, with at most one Error per take.
-    int spins = 0;
-    while (!pd->input.readyForMoreMediaData && spins < 5000 &&
-               pd->writer.status == AVAssetWriterStatusWriting) {
+    // Bound (platform): encoder readiness waits at most 5 s (steady clock). Overflow rejects the frame and is reported by its failed result, with at most one Error per take.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!pd->input.readyForMoreMediaData &&
+           std::chrono::steady_clock::now() < deadline &&
+           pd->writer.status == AVAssetWriterStatusWriting) {
         [NSThread sleepForTimeInterval:0.001];
-        ++spins;
     }
     if (pd->writer.status != AVAssetWriterStatusWriting) {
         const char* message = pd->writer.error.localizedDescription.UTF8String;
