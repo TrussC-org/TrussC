@@ -37,6 +37,7 @@ bool tcApp::pointerInput(Vec2 screenPos, PointerAction action) {
     // A TUIO cursor, OSC message or touch point can call this instead of the mouse.
     // Send Cancel when the cursor disappears. Drag only keeps a press started by
     // Down, so a lost release (#896) cannot resurrect a canceled gesture.
+    if (warp_.isInputEnabled() && action != PointerAction::Cancel) return false; // Warp handles own the pointer.
     if (action == PointerAction::Cancel || !screenToFbo(screenPos, mappedPoint_)) {
         mappedPoint_ = {-FLT_MAX, -FLT_MAX};
         pointerDown_ = pressedLatch_ = false;
@@ -105,4 +106,5 @@ void tcApp::draw() {
 
 void tcApp::keyPressed(int key) {
     if (key == 'w' || key == 'W') warp_.toggleInput();
+    if ((key == 'w' || key == 'W') && warp_.isInputEnabled()) pointerInput({}, PointerAction::Cancel);
 }

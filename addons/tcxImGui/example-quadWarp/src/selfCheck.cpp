@@ -145,8 +145,26 @@ public:
             checkReleasedOutside("outside raw release survives same-frame reentry", clicksAfterBurst_ + 2);
         } else if (frame_ == 26) {
             checkHover("hover position resumes one frame after canceled outside release", clicksAfterBurst_ + 2);
+        } else if (frame_ == 27) {
+            mousePressed(project(buttonCenter_), MOUSE_BUTTON_LEFT);
+            keyPressed('w'); // Enabling handles also cancels an unforwarded UI press.
+            mouseMoved(project(buttonCenter_));
+            mousePressed(project(buttonCenter_), MOUSE_BUTTON_LEFT);
+            mouseDragged(project(buttonCenter_ + Vec2(1, 0)), MOUSE_BUTTON_LEFT);
+        } else if (frame_ == 28) {
+            checkCanceled("warp handles block button press/drag and cancel the pending UI press");
+            check(clicks_ == clicksAfterBurst_ + 2, "drag over button with warp handles causes no click");
+            mouseReleased(project(buttonCenter_), MOUSE_BUTTON_LEFT);
+            keyPressed('w');
+            mouseMoved(project(buttonCenter_));
+            mousePressed(project(buttonCenter_), MOUSE_BUTTON_LEFT);
+        } else if (frame_ == 29) {
+            check(uiContext_->IO.MouseDown[0], "disabling warp handles restores ImGui presses");
+            mouseReleased(project(buttonCenter_), MOUSE_BUTTON_LEFT);
+        } else if (frame_ == 30) {
+            check(clicks_ == clicksAfterBurst_ + 3, "disabling warp handles restores button clicks");
         } else if (frame_ == 31) {
-            check(clicks_ == clicksAfterBurst_ + 2, "idle frames do not replay coalesced or canceled clicks");
+            check(clicks_ == clicksAfterBurst_ + 3, "idle frames do not replay coalesced or canceled clicks");
             check(peakQueued_ <= 2 && peakQueued_ > 0 && framesDrained_,
                   "pending ImGui input stays at most two events and drains each frame");
             check(contextRestored_, "per-frame input forwarding restores the previous context");
