@@ -2584,28 +2584,28 @@ VSYNC  // Frame-rate sentinel: sync to the monitor refresh rate
 
 ## Types
 
-### App — Base application class: subclass it and override setup/update/draw and the input callbacks (mousePressed, keyPressed, etc.) to build a TrussC app
+### App — The base class your app inherits from; TrussC calls its setup(), update() and draw() for you.
 
 ```cpp
-void App::audioIn(const AudioInBuffer & buf)  // Real-time capture callback event (microphone input). RT-safe same as audioOut. Like audioOut, first called right after setup() returns and detached before cleanup() for good; the same rule applies: don't wait on the main thread or on its locks in here.
-void App::audioOut(AudioOutBuffer & buf)  // Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. First called right after setup() returns, so what setup() prepares is ready in here; an App that is never run gets no calls. The framework calls exit(), detaches it and waits as long as necessary for a call in flight before calling cleanup() (exit, hot reload, closing the App's window). cleanup() may free its audio state. Don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). An App runs once: when its window closes it is detached for good; to show the App again, create a new one
-void App::exit()  // App exit callback (override for cleanup before shutdown)
-void App::filesDropped(const std::vector<std::string> & files)  // Files were dropped onto the window
-Window * App::getWindow() const  // The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. `close()` only requests closure; the window remains available until teardown begins. Already nullptr during teardown: inside this App's own exit() / cleanup() and in the window's events().exit listeners, because the native window is destroyed first. Read what you need (title, size, fullscreen) before calling close(), or keep it up to date in update(). Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks
-bool App::isExitRequested() const  // Whether an exit has been requested
-void App::keyPressed(const KeyEventArgs & e) [+1]  // Key pressed. Use KEY_* constants for special keys, or uppercase char literals for printable keys (e.g. key == 'A', key == '1')
-void App::keyReleased(const KeyEventArgs & e) [+1]  // Key released
-void App::mouseDragged(const MouseDragEventArgs & e) [+1]  // Mouse dragged
-void App::mouseMoved(const MouseMoveEventArgs & e) [+1]  // Mouse moved
-void App::mousePressed(const MouseEventArgs & e) [+1]  // Mouse button pressed
-void App::mouseReleased(const MouseEventArgs & e) [+1]  // Mouse button released
-void App::mouseScrolled(const ScrollEventArgs & e) [+1]  // Mouse wheel / trackpad scrolled
-void App::requestExit()  // Request the app to exit
-void App::setSize(float w, float h)  // Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. So does an App no shared_ptr owns yet (e.g. inside its constructor), which also warns once: call it in setup(). Resizing the main window is not implemented on Linux yet
-void App::touchMoved(const TouchEventArgs & touch)  // Touch moved (Android/iOS, multi-touch)
-void App::touchPressed(const TouchEventArgs & touch)  // Touch began (Android/iOS, multi-touch)
-void App::touchReleased(const TouchEventArgs & touch)  // Touch ended or was cancelled (check touch.cancelled)
-void App::windowResized(int width, int height)  // Window resized
+void App::audioIn(const AudioInBuffer & buf)  // Meant for reading incoming audio on the audio thread, but currently never called.
+void App::audioOut(AudioOutBuffer & buf)  // Called on the audio thread once per device buffer, so you can add your own sound to the output.
+void App::exit()  // Called once when the App ends, right before cleanup().
+void App::filesDropped(const std::vector<std::string> & files)  // Called when files are dropped onto the main window, with their paths.
+Window * App::getWindow() const  // Returns the Window this App was put into with Window::setApp(), or nullptr.
+bool App::isExitRequested() const  // Returns whether requestExit() has been called on this App.
+void App::keyPressed(const KeyEventArgs & e) [+1]  // Called when a key is pressed, and again on each auto-repeat while it is held.
+void App::keyReleased(const KeyEventArgs & e) [+1]  // Called when a key is released.
+void App::mouseDragged(const MouseDragEventArgs & e) [+1]  // Called when the pointer moves while a mouse button is held.
+void App::mouseMoved(const MouseMoveEventArgs & e) [+1]  // Called when the pointer moves while no mouse button is held.
+void App::mousePressed(const MouseEventArgs & e) [+1]  // Called when a mouse button is pressed.
+void App::mouseReleased(const MouseEventArgs & e) [+1]  // Called when a mouse button is released, exactly once for each press.
+void App::mouseScrolled(const ScrollEventArgs & e) [+1]  // Called when the mouse wheel or trackpad scrolls.
+void App::requestExit()  // Stops a headless app (runHeadlessApp); a windowed app ignores it.
+void App::setSize(float w, float h)  // Changes the size of the window this App runs in.
+void App::touchMoved(const TouchEventArgs & touch)  // Called when fingers move on the screen.
+void App::touchPressed(const TouchEventArgs & touch)  // Called when one or more fingers touch the screen.
+void App::touchReleased(const TouchEventArgs & touch)  // Called when fingers lift off the screen, or when the OS cancels the touches.
+void App::windowResized(int width, int height)  // Called when the window size changes, and once at startup before setup().
 ```
 
 ### AudioDeviceChangedArgs — Argument type for the AudioEngine::audioDeviceChanged event, fired after every successful init() (initial and re-init). Reports the resolved device's real name (never empty).
@@ -3534,10 +3534,10 @@ void Node::cancelAllAsyncTimers() [macos,windows,linux,android,ios]  // Cancel a
 void Node::cancelAllTimers()  // Cancel all frame timers on this node.
 void Node::cancelAsyncTimer(uint64_t id) [macos,windows,linux,android,ios]  // Cancel an async timer by id. Blocks until its callback finishes if it is running now (unless called from inside the callback). Do not call while holding the mutex the callback uses.
 void Node::cancelTimer(uint64_t id)  // Cancel a frame timer (callAfter/callEvery) by id.
-void Node::cleanup()  // Called once before exit (optional user callback for cleanup)
+void Node::cleanup()  // Called when a node you destroy() is removed from the tree (children first), and for the App at shutdown.
 void Node::destroy()  // Mark node for deferred removal from scene graph (C++ only)
 void Node::disableEvents()  // Disable mouse/key events for this node (C++ only)
-void Node::draw()  // Called every frame after update
+void Node::draw()  // Called on each drawn frame to draw the node, in its own local coordinates and starting from the default style.
 void Node::drawChildren()  // Draw the child nodes (overridable, e.g. for clipping).
 void Node::enableEvents()  // Enable mouse/key events for this node (C++ only)
 void Node::endDraw()  // Hook called after draw() and drawChildren().
@@ -3630,12 +3630,12 @@ void Node::setScale(const Vec3 & s) [+2]  // Set local scale (vector, uniform, o
 void Node::setScaleX(float sx)  // Set local X scale (C++ only)
 void Node::setScaleY(float sy)  // Set local Y scale (C++ only)
 void Node::setScaleZ(float sz)  // Set local Z scale (C++ only)
-void Node::setup()  // Called once at start
+void Node::setup()  // Called once, just before the node is first updated or drawn. Build child nodes and timers here.
 void Node::setVisible(bool visible)  // Set the visible state (invisible: the node and its descendants are not drawn and not hit by the mouse; update() keeps running) (C++ only)
 void Node::setX(float x)  // Set local X position (C++ only)
 void Node::setY(float y)  // Set local Y position (C++ only)
 void Node::setZ(float z)  // Set local Z position (C++ only)
-void Node::update()  // Called every frame before draw
+void Node::update()  // Called on every update step while the node is active, before its mods and its children update.
 ```
 
 ### Node::HitResult
