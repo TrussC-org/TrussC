@@ -2473,7 +2473,9 @@ SOKOL_APP_API_DECL const void* sapp_window_metal_current_drawable(sapp_window wi
 SOKOL_APP_API_DECL const void* sapp_window_metal_depth_stencil_texture(sapp_window win);
 SOKOL_APP_API_DECL const void* sapp_window_metal_msaa_color_texture(sapp_window win);
 
-/* D3D11 swapchain handles -- valid ONLY inside this window's tick_cb
+/* D3D11 swapchain handles -- borrowed until resize or window destruction.
+   Unlike Metal drawables these views persist outside tick_cb, allowing the
+   coordinator to execute a secondary window while another window is parked.
    (render_view is the MSAA target and resolve_view the backbuffer when
    sample_count > 1; otherwise render_view is the backbuffer and
    resolve_view is 0 -- same contract as sapp_swapchain.d3d11) */
@@ -7980,19 +7982,19 @@ const void* sapp_window_macos_get_window(sapp_window win) { (void)win; return 0;
 
 const void* sapp_window_d3d11_render_view(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    if (!w || !w->in_tick) return 0;
+    if (!w) return 0;
     return (w->desc.sample_count > 1) ? (const void*)w->msaa_rtv : (const void*)w->rtv;
 }
 
 const void* sapp_window_d3d11_resolve_view(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    if (!w || !w->in_tick || (w->desc.sample_count <= 1)) return 0;
+    if (!w || (w->desc.sample_count <= 1)) return 0;
     return (const void*)w->rtv;
 }
 
 const void* sapp_window_d3d11_depth_stencil_view(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    if (!w || !w->in_tick) return 0;
+    if (!w) return 0;
     return (const void*)w->dsv;
 }
 

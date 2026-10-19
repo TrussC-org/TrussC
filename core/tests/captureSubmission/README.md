@@ -1,6 +1,9 @@
-Run `allCoreTests captureSubmission --gpu-check [--msaa4]` on GL/D3D11
-(Xvfb/Mesa works on Linux). A begun swapchain and a nested MSAA Fbo park across
-another window's present, then resume with LOAD. Check prefix/suffix pixels,
+Run `allCoreTests captureSubmission --gpu-check [--msaa4]` on GL/D3D11/Metal
+(Xvfb/Mesa works on Linux). The main-window lane always runs, with the same
+prefix, park/resume, onRender and afterFrame assertions on every backend.
+On GL/D3D11 with secondary-window support, a begun swapchain and a nested MSAA
+Fbo park across another window's present, then resume with LOAD. Otherwise
+the main lane parks its own pass directly. Check prefix/suffix pixels,
 source sizes, fixed-size recorder takes and native pack/read state. Screenshot
 cases also cover the first main/secondary frame's public clear/setColor/drawRect
 sequence without an internal pass begin, new CPU drawings after parking,
@@ -9,9 +12,52 @@ the explicit destination seam copies the full swapchain through the shared
 end-pass resolve path under a 1x1 scissor. It does not install completed-frame
 snapshots. The optional recorder integration reports codec absence as a skip.
 
-This explicit foreign-window driver skips Metal: Sokol's secondary drawable
-accessors are valid during that window's native tick. Air/iOS verification must
-use real native ticks and Metal API validation. Install
+On Windows add `--diag` to print every secondary D3D11 capture's context,
+framebuffer extent, saved swapchain extent/format/samples and view identities,
+selected RTV/texture identity and actual DXGI texture description, reconciled
+extent, returned Pixels extent, and the active recorder's input/native packed
+layout. `recorder=0x0` means no recorder is active for that capture. The test
+alone parses this flag and installs the internal observer; normal production
+capture emits no diagnostic output. For example, from the combined runner's
+directory in PowerShell:
+
+```powershell
+.\allCoreTests.exe captureSubmission --gpu-check --diag
+.\allCoreTests.exe captureSubmission --gpu-check --msaa4 --diag
+```
+
+Both A and B use four samples with `--msaa4`. Windows also checks B's native
+views before its first tick and rejects fallback to A when B's saved view is
+absent. The manual coordinator runs from the draw event under the framework's
+Draw scope, before the Node tree's matrix push, since its explicit present()
+calls finish frames and reset their stacks. Stack warnings fail the test.
+
+Only the secondary foreign-window cases skip on Metal: a secondary window's
+drawable can't be acquired outside its native tick. Platforms where
+`internal::supportsSecondaryWindows()` is false print
+`SKIP: secondary windows unsupported on this platform` without calling
+`createWindow`. Each lane skip prints once; skipped cases add no assertions or
+failures. The screenshot Warning/Error counter belongs to the main window,
+so B's refusals do not inflate the main lane's warning-once check. Codec skips
+also print once per recorder category. Executed assertions determine the exit
+code through the display-test cleanup, including on macOS.
+
+From the repository root, run on the Air with Metal API and GPU validation:
+
+```sh
+MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 ./core/tests/allCoreTests/bin/allCoreTests.app/Contents/MacOS/allCoreTests captureSubmission --gpu-check
+MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 ./core/tests/allCoreTests/bin/allCoreTests.app/Contents/MacOS/allCoreTests captureSubmission --gpu-check --msaa4
+```
+
+On the Pi, use its native display and the GLES3/EGL build:
+
+```sh
+./core/tests/allCoreTests/bin/allCoreTests captureSubmission --gpu-check
+./core/tests/allCoreTests/bin/allCoreTests captureSubmission --gpu-check --msaa4
+```
+
+The main-only Metal lane does not cover foreign native ticks. For that device
+protocol, use real native ticks with Metal API validation and install
 `sg_tc_mtl_set_drawable_trace()` (a framework seam, not app API) while running the following protocol (actions:
 0 register, 1 authorize, 2 present, 3 cancel, 4 non-presenting prefix submit):
 

@@ -79,6 +79,16 @@ this repeats sokol's restore; if an exception escapes `sapp_run()` and the calle
 catches it, this is the only restore. `abort()`, `TerminateProcess` and external
 kills cannot restore the console. Console input still uses `std::getline(std::cin)`.
 
+### Windows secondary D3D11 borrowed views (#910)
+
+`sapp_window_d3d11_render_view()`,
+`sapp_window_d3d11_resolve_view()` and
+`sapp_window_d3d11_depth_stencil_view()` return the window's existing
+borrowed views even outside its native tick. These pointers remain valid until
+that window's resize or destruction; the accessors acquire or retain nothing.
+This permits lazy secondary capture during foreign-window execution. Metal
+keeps its native-tick restriction for secondary drawable acquisition.
+
 ### D3D11 device loss (#258)
 
 All three Present paths (main, secondary, and occlusion test) and ResizeBuffers

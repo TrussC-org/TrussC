@@ -33,7 +33,8 @@ struct AdapterState {
 
 // Swapchain provider handed to WindowContext::acquireSwapchain. Unlike Metal
 // there is no per-frame drawable: the flip-model backbuffer views persist and
-// are simply handed back (they are only valid during this window's tick).
+// are simply handed back until resize/destruction, including nested execution
+// by the coordinator outside this window's native tick.
 sg_swapchain acquireSecondarySwapchain(void* user) {
     auto* st = static_cast<AdapterState*>(user);
     sg_swapchain sc = {};

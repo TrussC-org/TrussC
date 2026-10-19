@@ -348,9 +348,9 @@ uint64_t nextTargetOwnerId() {
 WindowCaptureSource windowCaptureSource() {
     auto& window = currentWindowContext();
     WindowCaptureSource source;
-    // This is a borrowed source from the current native tick, never a saved
-    // drawable from a previous frame. Native jobs retain the texture before
-    // returning; Q2 will supply a stable completed image through this seam.
+    // Borrow the current window frame's source (Metal: current native tick;
+    // D3D11: persistent views). Native jobs retain the texture before returning;
+    // Q2 will supply a stable completed image through this seam.
     source.swapchain = window.lastSwapchain;
     source.drawable = window.lastSwapchainDrawable;
 #if defined(SOKOL_METAL)
@@ -358,7 +358,8 @@ WindowCaptureSource windowCaptureSource() {
     // or the next frame's drawable. Also scrub the copied swapchain alias.
     source.swapchain.metal.current_drawable = source.drawable;
 #elif defined(SOKOL_D3D11)
-    if (window.isMain || !source.swapchain.d3d11.render_view)
+    // A missing secondary source must fail capture, never read the main window.
+    if (window.isMain)
         source.swapchain = sglue_swapchain();
 #endif
     source.width = window.isMain ? sapp_width() : window.fbWidth;

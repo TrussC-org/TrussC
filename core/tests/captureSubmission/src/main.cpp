@@ -4,6 +4,9 @@
 #include "../../common/tcDisplayTest.h"
 #include <cstdio>
 #include <cstring>
+#if defined(_WIN32)
+#include "../../../platform/win/tcCaptureTrace_win.h"
+#endif
 #if defined(SOKOL_GLCORE)
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
@@ -18,6 +21,24 @@ using namespace tc;
 namespace {
 int failures = 0;
 bool completed = false;
+#if defined(_WIN32)
+ScreenRecorder* diagnosticRecorder = nullptr;
+void printCaptureTrace(const internal::D3D11CaptureTrace& t) {
+    const int rw = diagnosticRecorder ? diagnosticRecorder->writer().getWidth() : 0;
+    const int rh = diagnosticRecorder ? diagnosticRecorder->writer().getHeight() : 0;
+    const auto layout = internal::recorderPackedLayout(rw, rh, internal::RecorderPixelFormat::RGBA8);
+    std::printf("captureSubmission DIAG secondary isMain=%d fb=%dx%d "
+        "lastSwapchain=%dx%d sgFormat=%d samples=%d renderView=%p resolveView=%p "
+        "selectedRenderView=%p texture=%p desc=%ux%u dxgiFormat=%u samples=%u "
+        "resolveFromSelected=%d reconciled=%ux%u Pixels=%dx%d success=%d "
+        "recorder=%dx%d input=RGBA8 MF=BGRA8 rowBytes=%zu byteSize=%zu\n",
+        int(t.isMain), t.fbWidth, t.fbHeight, t.lastWidth, t.lastHeight, t.lastFormat, t.lastSamples,
+        t.lastRenderView, t.lastResolveView, t.selectedView, t.selectedTexture,
+        t.width, t.height, t.format, t.samples, int(t.samples > 1),
+        t.reconciledWidth, t.reconciledHeight, t.pixelWidth, t.pixelHeight, int(t.succeeded),
+        rw, rh, layout.rowBytes, layout.byteSize);
+}
+#endif
 void check(const char* label, bool ok) {
     std::printf("captureSubmission %s: %s\n", label, ok ? "PASS" : "FAIL");
     if (!ok) ++failures;
@@ -32,11 +53,23 @@ class CaptureApp : public App {
     uint64_t mainOwner_ = 0;
     int mainPresents_ = 0, mainAuthorizations_ = 0, prefixes_ = 0;
     int phaseWarnings_ = 0, phaseErrors_ = 0;
-    EventListener log_, after_, overlay_;
+    int stackWarnings_ = 0;
+    EventListener log_, after_, overlay_, draw_;
 public:
     void setup() override {
-        log_ = getLogger().onLog.listen([this](LogEventArgs& e) {
+        // This driver explicitly presents several frames. Run in the framework
+        // Draw entry before Node::drawTree pushes its own matrix: present()
+        // resets frame stacks and must not consume a live node's push.
+        draw_ = events().draw.listen([this] { runCases(); });
+        auto* mainWindow = &internal::currentWindowContext();
+        log_ = getLogger().onLog.listen([this, mainWindow](LogEventArgs& e) {
+            if (e.level == LogLevel::Warning &&
+                (e.message.find("pushMatrix") != std::string::npos || e.message.find("pushStyle") != std::string::npos))
+                ++stackWarnings_;
             if (e.message.rfind("[Screenshot]", 0) != 0) return;
+            // The once-per-window contract below belongs to A. B's own
+            // refusals must not affect it, whether B runs or is skipped.
+            if (&internal::currentWindowContext() != mainWindow) return;
             if (e.level == LogLevel::Warning) ++phaseWarnings_;
             if (e.level >= LogLevel::Error) ++phaseErrors_;
         });
@@ -50,52 +83,73 @@ public:
                 colorAt(full,16,16,255,255,255) && colorAt(full,48,16,255,255,0) &&
                 colorAt(full,112,16,0,255,0));
             check("repeated outside calls emit only one Warning", phaseWarnings_ == 1 && phaseErrors_ == 0);
+            check("coordinator presents leave stacks balanced", stackWarnings_ == 0);
             exitApp();
         });
 #if defined(__linux__) && defined(SOKOL_GLCORE)
-        // #320: use Xft.dpi=192 under Xvfb to distinguish pre-tick DPI from 1.0.
-        WindowSettings dpiSettings; dpiSettings.setSize(160,96); dpiSettings.setHighDpi(true);
-        auto dpiWindow = createWindow(dpiSettings);
-        check("early DPI window created", bool(dpiWindow));
-        if (dpiWindow) {
-            auto& ctx = dpiWindow->context();
-            const float nativeScale = ctx.fbWidth / 160.0f;
-            check("DPI initialized before first tick", ctx.updateCount == 0 &&
-                nativeScale > 0 && std::abs(ctx.dpiScale - nativeScale) < 0.01f);
-            auto* previous = internal::currentWindowCtx();
-            internal::restoreWindowContext(&ctx);
-            auto extentIs = [&](unsigned width, unsigned height) {
-                auto* display = glXGetCurrentDisplay();
-                XSync(display, False);
-                unsigned w = 0, h = 0;
-                glXQueryDrawable(display, glXGetCurrentDrawable(), GLX_WIDTH, &w);
-                glXQueryDrawable(display, glXGetCurrentDrawable(), GLX_HEIGHT, &h);
-                // X11 rounds physical sizes; the initial extent/160 ratio can
-                // differ slightly from the exact display DPI.
-                return std::abs(int(w) - int(width)) <= 1 &&
-                    std::abs(int(h) - int(height)) <= 1;
-            };
-            dpiWindow->setSize(120,80);
-            check("setSize immediately after create uses native DPI", extentIs(
-                unsigned(120 * nativeScale), unsigned(80 * nativeScale)));
-            const bool pixelPerfect = internal::pixelPerfectMode();
-            internal::pixelPerfectMode() = false;
-            setWindowSize(100,60);
-            check("logical setWindowSize before first tick", extentIs(
-                unsigned(100 * nativeScale), unsigned(60 * nativeScale)));
-            internal::pixelPerfectMode() = true;
-            setWindowSize(200,120);
-            check("pixel-perfect setWindowSize before first tick", extentIs(
-                unsigned(int(200 / nativeScale) * nativeScale),
-                unsigned(int(120 / nativeScale) * nativeScale)));
-            internal::pixelPerfectMode() = pixelPerfect;
-            internal::restoreWindowContext(previous);
-            dpiWindow->close();
+        if (internal::supportsSecondaryWindows()) {
+            // #320: use Xft.dpi=192 under Xvfb to distinguish pre-tick DPI from 1.0.
+            WindowSettings dpiSettings; dpiSettings.setSize(160,96); dpiSettings.setHighDpi(true);
+            auto dpiWindow = createWindow(dpiSettings);
+            check("early DPI window created", bool(dpiWindow));
+            if (dpiWindow) {
+                auto& ctx = dpiWindow->context();
+                const float nativeScale = ctx.fbWidth / 160.0f;
+                check("DPI initialized before first tick", ctx.updateCount == 0 &&
+                    nativeScale > 0 && std::abs(ctx.dpiScale - nativeScale) < 0.01f);
+                auto* previous = internal::currentWindowCtx();
+                internal::restoreWindowContext(&ctx);
+                auto extentIs = [&](unsigned width, unsigned height) {
+                    auto* display = glXGetCurrentDisplay();
+                    XSync(display, False);
+                    unsigned w = 0, h = 0;
+                    glXQueryDrawable(display, glXGetCurrentDrawable(), GLX_WIDTH, &w);
+                    glXQueryDrawable(display, glXGetCurrentDrawable(), GLX_HEIGHT, &h);
+                    // X11 rounds physical sizes; the initial extent/160 ratio can
+                    // differ slightly from the exact display DPI.
+                    return std::abs(int(w) - int(width)) <= 1 &&
+                        std::abs(int(h) - int(height)) <= 1;
+                };
+                dpiWindow->setSize(120,80);
+                check("setSize immediately after create uses native DPI", extentIs(
+                    unsigned(120 * nativeScale), unsigned(80 * nativeScale)));
+                const bool pixelPerfect = internal::pixelPerfectMode();
+                internal::pixelPerfectMode() = false;
+                setWindowSize(100,60);
+                check("logical setWindowSize before first tick", extentIs(
+                    unsigned(100 * nativeScale), unsigned(60 * nativeScale)));
+                internal::pixelPerfectMode() = true;
+                setWindowSize(200,120);
+                check("pixel-perfect setWindowSize before first tick", extentIs(
+                    unsigned(int(200 / nativeScale) * nativeScale),
+                    unsigned(int(120 / nativeScale) * nativeScale)));
+                internal::pixelPerfectMode() = pixelPerfect;
+                internal::restoreWindowContext(previous);
+                dpiWindow->close();
+            }
         }
 #endif
-        WindowSettings settings; settings.setSize(160,96); settings.setHighDpi(false);
-        secondary_ = createWindow(settings);
-        check("secondary created", bool(secondary_));
+        if (!internal::supportsSecondaryWindows()) {
+            std::puts("SKIP: secondary windows unsupported on this platform");
+        } else {
+#if defined(SOKOL_METAL)
+            std::puts("SKIP: secondary foreign-window cases: on Metal, a secondary window's drawable can't be acquired outside its native tick");
+#else
+            WindowSettings settings; settings.setSize(160,96); settings.setHighDpi(false);
+            settings.sampleCount = internal::currentTarget().sampleCount;
+            secondary_ = createWindow(settings);
+            check("secondary created", bool(secondary_));
+#if defined(_WIN32)
+            if (secondary_) {
+                auto& ctx = secondary_->context();
+                const auto sc = ctx.acquireSwapchain(ctx.acquireSwapchainUser);
+                check("D3D11 B views available before its first native tick", sc.d3d11.render_view &&
+                    sc.d3d11.depth_stencil_view && sc.width == ctx.fbWidth && sc.height == ctx.fbHeight &&
+                    sc.sample_count == settings.sampleCount && bool(sc.d3d11.resolve_view) == (settings.sampleCount > 1));
+            }
+#endif
+#endif
+        }
         mainOwner_ = internal::currentWindowContext().swapchainTarget.ownerId;
         sg_tc_mtl_set_drawable_trace([](int action, uint64_t owner, uint64_t, uint64_t, void* user) {
             auto& app = *static_cast<CaptureApp*>(user);
@@ -107,15 +161,20 @@ public:
             }
         }, this);
     }
-    void exit() override { sg_tc_mtl_set_drawable_trace(nullptr,nullptr); }
+    void exit() override {
+        sg_tc_mtl_set_drawable_trace(nullptr,nullptr);
+#if defined(_WIN32)
+        internal::setD3D11CaptureTraceForTests(nullptr);
+#endif
+    }
     void update() override {
         Pixels pixels;
         check("update returns false after beginFrame", !grabScreen(pixels));
         check("repeated update returns false", !grabScreen(pixels));
         check("update rejection warns only once per window", phaseWarnings_ == 1 && phaseErrors_ == 0);
     }
-    void draw() override {
-        if (completed || !secondary_) { exitApp(); return; }
+    void runCases() {
+        if (completed) { exitApp(); return; }
         auto* mainWindow = internal::currentWindowCtx();
         auto& a = internal::currentWindowContext().swapchainTarget;
         clear(1,0,0);
@@ -129,55 +188,76 @@ public:
         const auto frame = a.frameEpoch;
         check("A actually began its pass", a.inPass);
         VideoRecordSettings recordSettings; recordSettings.audio = false; recordSettings.fps = 25;
-        internal::restoreWindowContext(&secondary_->context());
-        {
-            check("switch parked the outgoing pass", !a.inPass && a.activation == token);
-            internal::EntryStackGuard secondaryDraw(internal::AppEntry::Draw);
-            internal::prepareWindowTarget(); beginFrame(); clear(0,0,1);
-            setColor(1); drawRect(8,8,16,16);
-            auto& secondaryTarget = internal::currentTarget();
-            check("first secondary frame has only CPU recordings before capture",
-                !secondaryTarget.inPass && !secondaryTarget.passStartedThisFrame);
-            Pixels secondaryInFrame;
-            check("secondary synchronous capture with A parked", grabScreen(secondaryInFrame) &&
-                colorAt(secondaryInFrame,16,16,255,255,255) &&
-                colorAt(secondaryInFrame,40,40,0,0,255) && !a.inPass);
-            internal::parkWindowPass();
-            setColor(1,1,0); drawRect(72,8,16,16);
-            check("secondary capture flushes new CPU drawings after parking", !secondaryTarget.inPass &&
-                grabScreen(secondaryInFrame) && colorAt(secondaryInFrame,80,16,255,255,0) &&
-                colorAt(secondaryInFrame,16,16,255,255,255) && colorAt(secondaryInFrame,40,40,0,0,255));
-            present();
-            Pixels b;
-            check("B captures its own dimensions and pixels", grabScreen(b) &&
-                b.getWidth() == getFramebufferWidth() && b.getHeight() == getFramebufferHeight() &&
-                b.getWidth() != 256 && colorAt(b,40,40,0,0,255));
-            // Exercise real recorder capture/encode with B's source extent.
-            ScreenRecorder recorder;
-            const auto movie = fs::temp_directory_path() / "tc_capture_submission_secondary.mp4";
-            const auto opened = recorder.start(movie, recordSettings);
-            if (opened) {
-                check("secondary recorder opens at its source size", recorder.writer().getWidth() == b.getWidth() &&
-                    recorder.writer().getHeight() == b.getHeight());
-                for (int marker = 0; marker < 5; ++marker) {
-                    clear(marker == 0 || marker == 3 ? 1 : 0, marker == 1 || marker >= 3 ? 1 : 0,
-                        marker == 2 || marker == 4 ? 1 : 0);
-                    present(); events().afterFrame.notify();
-                    std::this_thread::sleep_for(std::chrono::milliseconds(40));
-                }
-                const auto stopped = recorder.stop();
-                std::printf("captureSubmission recorder accepted=%d size=%dx%d file=%s\n",recorder.getFrameCount(),
-                    recorder.writer().getWidth(),recorder.writer().getHeight(),movie.string().c_str());
-                check("native screen take finalizes with accepted frames", stopped.ok() && recorder.getFrameCount() > 0);
-            } else std::printf("SKIP: captureSubmission recorder codec unavailable: %s\n",opened.message.c_str());
-#if defined(SOKOL_METAL)
-            check("B commits and captures never present begun A", mainPresents_ == 0 && mainAuthorizations_ == 0 && prefixes_ > 0);
+        if (secondary_) {
+            internal::restoreWindowContext(&secondary_->context());
+            {
+                internal::EntryStackGuard secondaryDraw(internal::AppEntry::Draw);
+                internal::prepareWindowTarget(); beginFrame(); clear(0,0,1);
+                const auto estimate = internal::captureWindowSize(internal::currentWindowContext());
+                check("secondary pre-pass capture estimate uses B dimensions", estimate.first == size_t(getFramebufferWidth()) &&
+                    estimate.second == size_t(getFramebufferHeight()));
+                setColor(1); drawRect(8,8,16,16);
+                auto& secondaryTarget = internal::currentTarget();
+                check("first secondary frame has only CPU recordings before capture",
+                    !secondaryTarget.inPass && !secondaryTarget.passStartedThisFrame);
+                Pixels secondaryInFrame;
+                check("secondary synchronous capture with A parked", grabScreen(secondaryInFrame) &&
+                    colorAt(secondaryInFrame,16,16,255,255,255) &&
+                    colorAt(secondaryInFrame,40,40,0,0,255) && !a.inPass);
+                const auto source = internal::windowCaptureSource();
+                check("lazy secondary capture records B swapchain dimensions", source.swapchain.width == getFramebufferWidth() &&
+                    source.swapchain.height == getFramebufferHeight() && source.swapchain.sample_count == a.sampleCount);
+                internal::parkWindowPass();
+                setColor(1,1,0); drawRect(72,8,16,16);
+                check("secondary capture flushes new CPU drawings after parking", !secondaryTarget.inPass &&
+                    grabScreen(secondaryInFrame) && colorAt(secondaryInFrame,80,16,255,255,0) &&
+                    colorAt(secondaryInFrame,16,16,255,255,255) && colorAt(secondaryInFrame,40,40,0,0,255));
+                present();
+                Pixels b;
+                check("B captures its own dimensions and pixels", grabScreen(b) &&
+                    b.getWidth() == getFramebufferWidth() && b.getHeight() == getFramebufferHeight() &&
+                    b.getWidth() != 256 && colorAt(b,40,40,0,0,255));
+                // Exercise real recorder capture/encode with B's source extent.
+                ScreenRecorder recorder;
+#if defined(_WIN32)
+                diagnosticRecorder = &recorder;
 #endif
+                const auto movie = fs::temp_directory_path() / "tc_capture_submission_secondary.mp4";
+                const auto opened = recorder.start(movie, recordSettings);
+                if (opened) {
+                    check("secondary recorder opens at its source size", recorder.writer().getWidth() == b.getWidth() &&
+                        recorder.writer().getHeight() == b.getHeight());
+                    for (int marker = 0; marker < 5; ++marker) {
+                        clear(marker == 0 || marker == 3 ? 1 : 0, marker == 1 || marker >= 3 ? 1 : 0,
+                            marker == 2 || marker == 4 ? 1 : 0);
+                        present(); events().afterFrame.notify();
+                        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+                    }
+                    const auto stopped = recorder.stop();
+                    std::printf("captureSubmission recorder accepted=%d size=%dx%d file=%s\n",recorder.getFrameCount(),
+                        recorder.writer().getWidth(),recorder.writer().getHeight(),movie.string().c_str());
+                    check("native screen take finalizes with accepted frames", stopped.ok() && recorder.getFrameCount() > 0);
+                } else std::printf("SKIP: captureSubmission recorder codec unavailable: %s\n",opened.message.c_str());
+#if defined(_WIN32)
+                diagnosticRecorder = nullptr;
+                auto& ctx = internal::currentWindowContext();
+                const auto saved = ctx.lastSwapchain;
+                ctx.lastSwapchain = {};
+                check("missing secondary view never falls back to A", !internal::windowCaptureSource().swapchain.d3d11.render_view);
+                ctx.lastSwapchain = saved;
+#endif
+            }
+            internal::restoreWindowContext(mainWindow);
+        } else {
+            internal::parkWindowPass();
         }
-        internal::restoreWindowContext(mainWindow);
+        check("parking keeps the outgoing activation", !a.inPass && a.activation == token);
         check("A stays lazy until its next draw", !a.inPass && a.activation == token && a.frameEpoch == frame);
+#if defined(SOKOL_METAL)
+        check("prefix capture and parking never present begun A", mainPresents_ == 0 && mainAuthorizations_ == 0 && prefixes_ > 0);
+#endif
         setColor(1,1,0); drawRect(40,8,16,16);
-        check("main capture flushes new CPU drawings after foreign parking", !a.inPass &&
+        check("main capture flushes new CPU drawings after parking", !a.inPass &&
             grabScreen(inFrame) && colorAt(inFrame,48,16,255,255,0) &&
             colorAt(inFrame,16,16,255,255,255) && colorAt(inFrame,40,40,255,0,0));
         a.flushLayers();
@@ -277,15 +357,21 @@ public:
         Fbo fbo; fbo.allocate(32,24,4); fbo.begin(1,0,0);
         auto& target = internal::currentTarget(); const auto fboToken = target.activation;
         setColor(1,1,1); drawRect(0,0,8,8);
-        internal::restoreWindowContext(&secondary_->context());
+        if (secondary_) {
+            internal::restoreWindowContext(&secondary_->context());
+            present();
+            internal::restoreWindowContext(mainWindow);
+        } else {
+            internal::parkWindowPass();
+        }
         check("Fbo top parks with its activation intact", !target.inPass && target.activation == fboToken);
-        present();
-        internal::restoreWindowContext(mainWindow); internal::ensureCurrentPass();
+        internal::ensureCurrentPass();
         setColor(1,1,0); drawRect(16,0,8,8); fbo.end();
         Pixels fp; fp.allocate(32,24,4);
-        check("Fbo LOAD resume preserves both sides of switch", fbo.readPixels(fp.getData()) &&
+        check("Fbo LOAD resume preserves both sides of parking", fbo.readPixels(fp.getData()) &&
             colorAt(fp,4,4,255,255,255) && colorAt(fp,20,4,255,255,0) && colorAt(fp,28,16,255,0,0));
         // The fixed-size Fbo take detects either resize direction before copy.
+        bool codecSkipPrinted = false;
         for (int resizedWidth : {48,16}) {
             ScreenRecorder fixed;
             const auto path = fs::temp_directory_path() / ("tc_capture_submission_resize_" + std::to_string(resizedWidth) + ".mp4");
@@ -303,7 +389,10 @@ public:
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 events().afterFrame.notify();
                 check("matching Fbo extent resumes the same take", fixed.getFrameCount() == 1 && fixed.stop().ok());
-            } else std::printf("SKIP: captureSubmission Fbo recorder codec unavailable: %s\n",started.message.c_str());
+            } else if (!codecSkipPrinted) {
+                std::printf("SKIP: captureSubmission Fbo recorder codec unavailable: %s\n",started.message.c_str());
+                codecSkipPrinted = true;
+            }
         }
         sg_tc_mtl_set_drawable_trace(nullptr,nullptr);
         // A later onRender overlay must be absent from draw's prefix and
@@ -325,11 +414,13 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (argc < 2 || std::strcmp(argv[1],"--gpu-check")) {
         std::puts("SKIP: captureSubmission requires --gpu-check and a display"); return 0;
     }
-#if defined(SOKOL_METAL)
-    std::puts("SKIP: explicit foreign-window execution is GL/D3D11-only; Metal requires the live native-tick trace protocol in README.md");
-    return 0;
-#endif
     WindowSettings settings; settings.setSize(256,192); settings.setHighDpi(false);
-    settings.sampleCount = argc > 2 && !std::strcmp(argv[2],"--msaa4") ? 4 : 1;
+    settings.sampleCount = 1;
+    for (int i = 2; i < argc; ++i) {
+        if (!std::strcmp(argv[i], "--msaa4")) settings.sampleCount = 4;
+#if defined(_WIN32)
+        if (!std::strcmp(argv[i], "--diag")) internal::setD3D11CaptureTraceForTests(printCaptureTrace);
+#endif
+    }
     return tcCoreTest::runDisplayTest<CaptureApp>(settings, failures, [] { check("all cases completed", completed); });
 }
