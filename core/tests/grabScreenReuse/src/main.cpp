@@ -45,6 +45,7 @@ class CaptureApp : public App {
     Pixels pixels;
     EventListener afterFrame;
     int step = 0, resizeFrames = 0;
+    int fromWidth = 0, fromHeight = 0;
 
     void capture(bool reuse) {
         const int width = getFramebufferWidth(), height = getFramebufferHeight();
@@ -217,13 +218,15 @@ public:
     void update() override {
         if (step == 2) {
             if (++resizeFrames == 1) {
+                fromWidth = getFramebufferWidth();
+                fromHeight = getFramebufferHeight();
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
                 // The desktop Linux public resize function is currently a stub.
                 auto* display = (Display*)sapp_x11_get_display();
-                XResizeWindow(display, (::Window)(uintptr_t)sapp_x11_get_window(), 96, 80);
+                XResizeWindow(display, (::Window)(uintptr_t)sapp_x11_get_window(), 280, 220);
                 XFlush(display);
 #else
-                setWindowSize(96, 80);
+                setWindowSize(280, 220);
 #endif
             }
             if (resizeFrames > 120) {
@@ -242,7 +245,9 @@ public:
     }
 
     void captureFrame() {
-        if (step == 2 && (getFramebufferWidth() != 96 || getFramebufferHeight() != 80)) return;
+        // Windows clamps tiny client sizes, so wait for whichever size was applied.
+        if (step == 2 && (resizeFrames == 0 || (getFramebufferWidth() == fromWidth &&
+                                                getFramebufferHeight() == fromHeight))) return;
         capture(step == 1);
         if (step == 1) captureFailure();
         if (++step < 3) return;
@@ -273,7 +278,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         return 0;
     }
     WindowSettings settings;
-    settings.setSize(64, 48);
+    settings.setSize(200, 160);
     settings.setHighDpi(false);
     return tcCoreTest::runDisplayTest<CaptureApp>(settings, failures, [] {
         check("all capture checks completed", completed);

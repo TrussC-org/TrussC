@@ -15,8 +15,10 @@ print SKIP with the timeout-safety reason above. The post-resize content
 checks also print SKIP on macOS until #911 (the first frame after a resize
 renders with the old viewport) is fixed. All other content checks, and the
 layout, resize and format-mismatch reallocation checks, run on every platform.
-Resizing the window from 64x48 to 96x80 must replace the destination buffer
-and produce matching content and dimensions. RGB and F32 destinations
+Resizing the window from 200x160 to 280x220 must replace the destination
+buffer and produce matching content and dimensions. Both sizes stay above the
+Windows minimum client width, and the test waits for whichever new size the
+platform applies rather than an exact match. RGB and F32 destinations
 of matching dimensions must also be replaced with RGBA8 storage.
 
 On Linux/Android GL, it also injects an unattached framebuffer as the window
