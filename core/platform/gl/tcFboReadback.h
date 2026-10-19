@@ -37,7 +37,7 @@ static bool withGLReadTexture(sg_image image, int width, int height, bool report
     }
     const GLuint texID = sg_gl_query_image_info(image).tex[0];
 
-    internal::CapturePrefixScope capturePhase;
+    internal::CapturePrefixScope capturePhase(internal::CaptureSource::Target);
     internal::GLReadbackState nativeState;
     nativeState.bindTexture(texID);
 

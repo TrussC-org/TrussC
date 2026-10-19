@@ -2513,14 +2513,16 @@ void submitCapturePrefix() {
     sg_tc_submit_prefix();
 }
 
-CapturePrefixScope::CapturePrefixScope()
+CapturePrefixScope::CapturePrefixScope(CaptureSource source)
     : window_(&currentWindowContext()), target_(window_->currentTarget),
       token_(target_->activation), resume_(target_->inPass) {
     // Basic drawing only records CPU commands. Start even a never-opened
     // pass so parking consumes its clear and prefix before native readback.
     // After present(), keep the finished window source until beginFrame().
     // An already-consumed parked prefix needs no pass or native-state changes.
-    if ((target_->passKind != TargetPassKind::Swapchain || window_->framePending) &&
+    // An Fbo's content does not depend on the current target's recording.
+    if (source == CaptureSource::Window &&
+        (target_->passKind != TargetPassKind::Swapchain || window_->framePending) &&
         (!target_->passStartedThisFrame || hasPendingRecording(*target_))) {
         ensureCurrentPass();
         token_ = target_->activation;
