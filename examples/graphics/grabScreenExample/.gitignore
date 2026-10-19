@@ -1,0 +1,9 @@
+# Generated project files
+CMakeLists.txt
+CMakePresets.json
+.trussc
+build/
+build-*/
+build-web.*
+bin/*
+!bin/data/
