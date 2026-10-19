@@ -15732,14 +15732,17 @@ description.ko = "선을 그린다 (2D 또는 3D)."
 details.en = '''
 - Draws a straight line between two points: `(x1, y1)` to `(x2, y2)` for 2D, or `Vec3 p1, Vec3 p2` (also available as six floats) for 3D. Coordinates follow the same local, logical-unit convention as [`drawRect`](#drawRect).
 - The fill/stroke mode and [`setStrokeWeight`](#setStrokeWeight) do **not** apply here: `drawLine` always draws a fixed-width 1px line regardless of color mode. For a thick line with configurable cap/join, use [`drawStroke`](#drawStroke) instead. To draw many independent segments efficiently in one batch, use [`beginLines`](#beginLines) / `endLines()`.
+- Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (the line is always 1 pixel wide; setStrokeWeight() has no effect).
 '''
 details.ja = '''
 - 2点間を結ぶ直線を描画します。2Dの場合は `(x1, y1)` から `(x2, y2)`、3Dの場合は `Vec3 p1, Vec3 p2`（6個のfloatでも指定可能）です。座標は[`drawRect`](#drawRect) と同じローカル・論理単位です。
 - 塗り/線モードや [`setStrokeWeight`](#setStrokeWeight) はこの関数には**適用されません**。`drawLine` は色のモードに関わらず常に固定幅1pxの線を描画します。太さや端点/結合スタイルを指定できる線を描きたい場合は、代わりに[`drawStroke`](#drawStroke) を使ってください。多数の独立したセグメントをまとめて効率よく描きたい場合は [`beginLines`](#beginLines) / `endLines()`を使います。
+- 既知の問題: [#915](https://github.com/TrussC-org/TrussC/issues/915)（線は常に 1 ピクセル幅で、setStrokeWeight() は効かない）。
 '''
 details.ko = '''
 - 두 점을 잇는 직선을 그립니다. 2D에서는 `(x1, y1)`에서 `(x2, y2)`까지, 3D에서는 `Vec3 p1, Vec3 p2`(float 6개로도 지정 가능)입니다. 좌표는 [`drawRect`](#drawRect)와 같은 로컬·논리 단위입니다.
 - 채우기/선 모드와 [`setStrokeWeight`](#setStrokeWeight)는 이 함수에 **적용되지 않습니다**. `drawLine`은 색상 모드와 관계없이 항상 고정 폭 1px 선을 그립니다. 두께나 캡/조인 스타일을 지정할 수 있는 선이 필요하면 대신 [`drawStroke`](#drawStroke)를 사용하세요. 독립적인 다수의 선분을 한 번에 효율적으로 그리려면 [`beginLines`](#beginLines) / `endLines()`를 사용합니다.
+- 알려진 문제: [#915](https://github.com/TrussC-org/TrussC/issues/915)(선은 항상 1픽셀 폭이며 setStrokeWeight()는 효과가 없음).
 '''
 related = ["drawStroke", "beginLines"]
 snippet = '''
@@ -16105,6 +16108,7 @@ details.en = '''
 - It applies to the current blend mode and to every later `setBlendMode()`, image draw and text draw.
 - **The setting is not reset each frame.** Like the blend mode, it stays on across frames and into `Fbo` passes until you call `disableDepthTest()`. An `Fbo` always has a depth buffer, so the depth test also works between `fbo.begin()` and `fbo.end()`, and a change made inside the `Fbo` remains after `end()`.
 - Call `disableDepthTest()` before drawing 2D overlays such as text or a HUD, or the 3D scene can hide them.
+- Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (a style reset inside a camera scope drops the depth test).
 '''
 details.ja = '''
 - `draw()` での通常の描画では、デプステストは最初は無効です。深度を判定・書き込みするのは `EasyCam::begin()`（および `setupScreenPerspective()` などの透視投影の画面設定）が読み込む 3D パイプラインだけなので、カメラの範囲内では手前の物体が奥の物体を隠します。
@@ -16114,6 +16118,7 @@ details.ja = '''
 - 現在のブレンドモードと、それ以降のすべての `setBlendMode()`、画像の描画、文字の描画に適用されます。
 - **この設定はフレームごとにリセットされません。** ブレンドモードと同じく、`disableDepthTest()` を呼ぶまでフレームをまたいで有効のままで、`Fbo` の描画にも引き継がれます。`Fbo` は常に深度バッファを持つので、`fbo.begin()` と `fbo.end()` の間でもデプステストが使えます。`Fbo` の中で変更した設定は `end()` のあとも残ります。
 - テキストや HUD などの 2D の重ね描きの前には `disableDepthTest()` を呼んでください。呼ばないと 3D シーンに隠れることがあります。
+- 既知の問題: [#915](https://github.com/TrussC-org/TrussC/issues/915)（カメラの範囲内でスタイルをリセットすると深度テストが切れる）。
 '''
 details.ko = '''
 - `draw()`에서의 일반 그리기는 처음에는 깊이 테스트가 꺼져 있습니다. 깊이를 판정하고 기록하는 것은 `EasyCam::begin()`(및 `setupScreenPerspective()` 같은 원근 투영 화면 설정)이 불러오는 3D 파이프라인뿐이므로, 카메라 범위 안에서는 가까운 물체가 먼 물체를 가립니다.
@@ -16123,6 +16128,7 @@ details.ko = '''
 - 현재 블렌드 모드와 이후의 모든 `setBlendMode()`, 이미지 그리기, 텍스트 그리기에 적용됩니다.
 - **이 설정은 프레임마다 초기화되지 않습니다.** 블렌드 모드와 마찬가지로 `disableDepthTest()`를 호출할 때까지 프레임을 넘어 유지되며 `Fbo` 그리기에도 이어집니다. `Fbo`는 항상 깊이 버퍼를 가지므로 `fbo.begin()`과 `fbo.end()` 사이에서도 깊이 테스트를 쓸 수 있습니다. `Fbo` 안에서 바꾼 설정은 `end()` 이후에도 남습니다.
 - 텍스트나 HUD 같은 2D 오버레이를 그리기 전에는 `disableDepthTest()`를 호출하세요. 그렇지 않으면 3D 씬에 가려질 수 있습니다.
+- 알려진 문제: [#915](https://github.com/TrussC-org/TrussC/issues/915)(카메라 범위 안에서 스타일을 초기화하면 깊이 테스트가 꺼짐).
 '''
 related = ["disableDepthTest", "isDepthTestEnabled", "setBlendMode"]
 snippet = '''
@@ -16510,14 +16516,17 @@ description.ko = "비트맵 문자열의 너비와 높이를 출력 매개변수
 details.en = '''
 - Writes the measured width and height of `text` into the `width`/`height` reference arguments (UTF-8 and full-width character aware), the same measurement `getBitmapStringWidth()` uses for width.
 - For multi-line text, its height is always `number of lines * getBitmapFontHeight()`; unlike `getBitmapStringHeight()`, it does not take a custom line height set with `setBitmapLineHeight()` into account.
+- Known issue: [#916](https://github.com/TrussC-org/TrussC/issues/916) (the height ignores setBitmapLineHeight()).
 '''
 details.ja = '''
 - `text` の幅と高さを測定し、`width`/`height` の参照引数に書き込みます（UTF-8 と全角文字に対応しており、幅の測定方法は `getBitmapStringWidth()` と同じです）。
 - 複数行テキストの場合、高さは常に「行数 × `getBitmapFontHeight()`」になります。`getBitmapStringHeight()` と異なり、`setBitmapLineHeight()` で設定した行間は反映されません。
+- 既知の問題: [#916](https://github.com/TrussC-org/TrussC/issues/916)（高さが setBitmapLineHeight() の値を反映しない）。
 '''
 details.ko = '''
 - `text`의 너비와 높이를 측정해 `width`/`height` 참조 인자에 기록합니다(UTF-8과 전각 문자를 인식하며, 너비 측정 방식은 `getBitmapStringWidth()`와 같습니다).
 - 여러 줄 텍스트의 경우 높이는 항상 "줄 수 × `getBitmapFontHeight()`"입니다. `getBitmapStringHeight()`와 달리 `setBitmapLineHeight()`로 설정한 줄 간격은 반영되지 않습니다.
+- 알려진 문제: [#916](https://github.com/TrussC-org/TrussC/issues/916)(높이에 setBitmapLineHeight() 값이 반영되지 않음).
 '''
 related = ["getBitmapStringWidth", "getBitmapStringHeight", "getBitmapStringBBox"]
 
@@ -18301,16 +18310,19 @@ details.en = '''
 - If no clipping was active at the matching `pushScissor()`, clipping is turned off again.
 - When the stack is empty, it does the same as `resetScissor()`, without a warning.
 - Coordinates and nesting are explained in `pushScissor`.
+- Known issue: [#914](https://github.com/TrussC-org/TrussC/issues/914) (popping an empty stack silently resets the scissor without a warning).
 '''
 details.ja = '''
 - 対応する `pushScissor()` の時点でクリッピングがなかった場合は、クリッピングなしに戻ります。
 - スタックが空のときは `resetScissor()` と同じ動作になり、警告は出ません。
 - 座標と入れ子の考え方は `pushScissor` を参照してください。
+- 既知の問題: [#914](https://github.com/TrussC-org/TrussC/issues/914)（空のスタックで pop すると、警告なしでシザーがリセットされる）。
 '''
 details.ko = '''
 - 대응하는 `pushScissor()` 시점에 클리핑이 없었다면 클리핑 없음으로 돌아갑니다.
 - 스택이 비어 있으면 `resetScissor()`와 같이 동작하며 경고는 나오지 않습니다.
 - 좌표와 중첩 방식은 `pushScissor`를 참고하세요.
+- 알려진 문제: [#914](https://github.com/TrussC-org/TrussC/issues/914)(빈 스택에서 pop하면 경고 없이 시저가 초기화됨).
 '''
 related = ["pushScissor"]
 
@@ -18332,14 +18344,17 @@ description.ko = "대응하는 pushStyle()이 저장한 스타일을 복원한�
 details.en = '''
 - popStyle() takes the style saved by the matching [`pushStyle`](#pushStyle) off the stack and makes it current again — color, fill/stroke, point and curve settings, text alignment, and blend mode all at once. See [`pushStyle`](#pushStyle) for exactly what is saved and for how TrussC resets style before each Node's draw().
 - Calling popStyle() with nothing left on the stack (more pops than pushes) logs a rate-limited warning and does nothing; the stack and the current style stay as they were.
+- Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (inside a camera scope this turns the depth test off unless enableDepthTest() is on).
 '''
 details.ja = '''
 - popStyle() は、対応する [`pushStyle`](#pushStyle) がスタックに保存したスタイル（色、塗り/ストローク、点や曲線の設定、文字の配置、ブレンドモード）を取り出し、まとめて現在の状態に戻します。何が保存され、Node の draw() の前にどのようにリセットされるかは [`pushStyle`](#pushStyle) を参照してください。
 - スタックに何も残っていない状態で popStyle() を呼ぶと（push より pop が多い場合）、頻度を抑えた警告が出力されて何も起こりません。スタックと現在のスタイルはそのまま保たれます。
+- 既知の問題: [#915](https://github.com/TrussC-org/TrussC/issues/915)（カメラの範囲内では、enableDepthTest() を有効にしていないと深度テストが切れる）。
 '''
 details.ko = '''
 - popStyle()은 대응하는 [`pushStyle`](#pushStyle)이 스택에 저장한 스타일(색상, 채우기/스트로크, 포인트·곡선 설정, 텍스트 정렬, 블렌드 모드)을 꺼내어 한꺼번에 현재 상태로 되돌립니다. 무엇이 저장되는지, Node의 draw() 전에 어떻게 초기화되는지는 [`pushStyle`](#pushStyle)을 참고하세요.
 - 스택에 아무것도 남지 않은 상태에서 popStyle()을 호출하면(push보다 pop이 많은 경우) 빈도를 제한한 경고가 출력되고 아무 일도 일어나지 않습니다. 스택과 현재 스타일은 그대로 유지됩니다.
+- 알려진 문제: [#915](https://github.com/TrussC-org/TrussC/issues/915)(카메라 범위 안에서는 enableDepthTest()를 켜지 않으면 깊이 테스트가 꺼짐).
 '''
 related = ["pushStyle", "popMatrix"]
 
@@ -18419,6 +18434,7 @@ details.en = '''
 - The clipping state is not reset at the start of each frame or before each Node's `draw()`. A push without a pop stays active in later frames.
 - `fbo.begin()` starts with no clipping and an empty stack, and the window's clipping returns after `fbo.end()`. Pushes left unpopped inside an `Fbo` are discarded at `end()` with a warning.
 - A `RectNode` with clipping enabled uses this same stack, so a `pushScissor()` inside such a node is intersected with the node's area.
+- Known issue: [#914](https://github.com/TrussC-org/TrussC/issues/914) (the rectangle is given in render-target pixels, unlike other drawing functions).
 '''
 details.ja = '''
 - 呼んだあとは、矩形の内側のピクセルだけが描かれ、外側は変わりません。必ず同じ `draw()` の中で `popScissor()` と組にしてください。
@@ -18429,6 +18445,7 @@ details.ja = '''
 - クリッピングの状態は、フレームの始めにも各 Node の `draw()` の前にもリセットされません。pop し忘れた push は次のフレーム以降も有効のままです。
 - `fbo.begin()` はクリッピングなし、スタックが空の状態から始まり、`fbo.end()` のあとはウィンドウのクリッピングに戻ります。`Fbo` の中で pop されなかった push は、`end()` で警告とともに破棄されます。
 - クリッピングを有効にした `RectNode` も同じスタックを使うため、そのノードの中での `pushScissor()` はノードの範囲との重なり部分になります。
+- 既知の問題: [#914](https://github.com/TrussC-org/TrussC/issues/914)（他の描画関数と違い、矩形はレンダーターゲットのピクセル単位で指定する）。
 '''
 details.ko = '''
 - 호출한 뒤에는 사각형 안쪽의 픽셀만 그려지고 바깥쪽은 바뀌지 않습니다. 반드시 같은 `draw()` 안에서 `popScissor()`와 짝을 맞추세요.
@@ -18439,6 +18456,7 @@ details.ko = '''
 - 클리핑 상태는 프레임 시작이나 각 Node의 `draw()` 전에 초기화되지 않습니다. pop하지 않은 push는 다음 프레임 이후에도 유지됩니다.
 - `fbo.begin()`은 클리핑 없음, 빈 스택 상태에서 시작하며 `fbo.end()` 이후에는 창의 클리핑으로 돌아갑니다. `Fbo` 안에서 pop되지 않은 push는 `end()`에서 경고와 함께 버려집니다.
 - 클리핑을 켠 `RectNode`도 같은 스택을 쓰므로, 그런 노드 안에서의 `pushScissor()`는 노드 영역과 겹치는 부분이 됩니다.
+- 알려진 문제: [#914](https://github.com/TrussC-org/TrussC/issues/914)(다른 그리기 함수와 달리 사각형을 렌더 타깃의 픽셀 단위로 지정함).
 '''
 related = ["popScissor", "setScissor", "resetScissor", "RectNode::setClipping", "getDpiScale"]
 snippet = '''
@@ -18705,14 +18723,17 @@ description.ko = "현재 스타일을 기본값으로 초기화한다."
 details.en = '''
 - resetStyle() sets the current style back to its defaults: white color (1, 1, 1, 1), fill enabled, stroke disabled, stroke weight 1 logical pixel, point size 1 with the Square point style, curves in tolerance mode at 0.1 pixels, text aligned to the top-left, and blend mode Alpha.
 - This does not touch the [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle) stack: it only changes the current style, so a later popStyle() still restores whatever was pushed before resetStyle() was called, not these defaults. TrussC also calls resetStyle() automatically right before (and again right after) every Node's draw() — see [`pushStyle`](#pushStyle) for what that means for your own draw() code.
+- Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (inside a camera scope this turns the depth test off unless enableDepthTest() is on).
 '''
 details.ja = '''
 - resetStyle() は、現在のスタイルを初期値（白色 (1, 1, 1, 1)、塗り有効、ストローク無効、線幅 1 論理ピクセル、点サイズ 1・Square、曲線は許容誤差モードで 0.1px、文字配置は左上、ブレンドは Alpha）に戻します。
 - これは [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle) のスタックには影響しません。変更するのは現在のスタイルだけなので、あとで popStyle() を呼んだときは resetStyle()を呼ぶ前に push した状態に戻ります（この初期値には戻りません）。また、TrussC は各Node の draw() の直前（と直後）にも自動で resetStyle() を実行します。自分の draw()コードにとっての意味は [`pushStyle`](#pushStyle) を参照してください。
+- 既知の問題: [#915](https://github.com/TrussC-org/TrussC/issues/915)（カメラの範囲内では、enableDepthTest() を有効にしていないと深度テストが切れる）。
 '''
 details.ko = '''
 - resetStyle()은 현재 스타일을 기본값(흰색 (1, 1, 1, 1), 채우기 활성, 스트로크 비활성, 선 두께 1 논리 픽셀, 포인트 크기 1·Square, 곡선은 허용오차 모드 0.1px, 텍스트 정렬은 좌상단, 블렌드는 Alpha)으로 되돌립니다.
 - 이는 [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle) 스택에는 영향을 주지 않습니다. 바뀌는 것은 현재 스타일뿐이므로, 이후 popStyle()을 호출하면 resetStyle()을 부르기 전에 push했던 상태로 돌아갑니다(이 기본값으로 돌아가지 않습니다). 또한 TrussC는 각 Node의 draw() 바로 전(과 바로 후)에도 자동으로 resetStyle()을 실행합니다. 자신의 draw() 코드에 어떤 의미인지는 [`pushStyle`](#pushStyle)을 참고하세요.
+- 알려진 문제: [#915](https://github.com/TrussC-org/TrussC/issues/915)(카메라 범위 안에서는 enableDepthTest()를 켜지 않으면 깊이 테스트가 꺼짐).
 '''
 
 ["rotate"]
@@ -19193,17 +19214,17 @@ description.en = "Set the current color from OKLCH."
 description.ja = "OKLCH で現在の色を設定する。"
 description.ko = "OKLCH로 현재 색상을 설정한다."
 details.en = '''
-- OKLCH is a perceptually uniform color space, useful when you want equal numeric steps to look like equal visual steps (for gradients, palettes, or animating lightness without the color looking like it changes hue). `L` (lightness) is 0-1, `C` (chroma, how saturated) is roughly 0-0.4 depending on hue and lightness, and `H` (hue) is one full turn, 0-1 (0 = 0°, 1 = 360°). Alpha defaults to 1.
+- OKLCH is a perceptually uniform color space, useful when you want equal numeric steps to look like equal visual steps (for gradients, palettes, or animating lightness without the color looking like it changes hue). `L` (lightness) is 0-1, `C` (chroma, how saturated) is roughly 0-0.4 depending on hue and lightness, and `H` (hue) is one full turn, 0-1 (0 = 0°, 1 = 360°) and wraps around outside that range. Alpha defaults to 1.
 - Not every L/C/H combination maps to a displayable color; out-of-range results are not clamped here, so very high chroma can produce colors outside 0-1 sRGB.
 - This sets the same underlying drawing color as `setColor`; see `setColor` for how it applies to fill/stroke and the style stack.
 '''
 details.ja = '''
-- OKLCH は視覚的に均一な色空間で、数値を等間隔に変化させると見た目の変化も等間隔になります（グラデーションやパレット、色相を保ったまま明度だけアニメーションしたいときに便利です）。`L`（明度）は 0-1、`C`（彩度に近い、どれだけ鮮やかか）は色相と明度によって概ね 0-0.4、`H`（色相）は一周分で 0-1 です（0 が 0°、1 が 360°）。アルファ省略時は 1 になります。
+- OKLCH は視覚的に均一な色空間で、数値を等間隔に変化させると見た目の変化も等間隔になります（グラデーションやパレット、色相を保ったまま明度だけアニメーションしたいときに便利です）。`L`（明度）は 0-1、`C`（彩度に近い、どれだけ鮮やかか）は色相と明度によって概ね 0-0.4、`H`（色相）は一周分で 0-1 です（0 が 0°、1 が 360°）。範囲外の値は一周して戻ります。アルファ省略時は 1 になります。
 - L/C/H の組み合わせによっては、表示可能な色にならない場合があります。ここでは範囲外の結果をクランプしないため、彩度を高くしすぎると 0-1 の sRGB 範囲を外れた色になることがあります。
 - これは `setColor` と同じ内部の描画色を設定します。塗りつぶし・輪郭への適用やスタイルスタックとの関係は `setColor` を参照してください。
 '''
 details.ko = '''
-- OKLCH는 지각적으로 균일한 색공간으로, 수치를 같은 간격으로 바꾸면 시각적인 변화도 같은 간격으로 느껴집니다(그라디언트, 팔레트, 색조를 유지한 채 명도만 애니메이션할 때 유용합니다). `L`(명도)은 0-1, `C`(채도에 가까운, 얼마나 선명한지)는 색조와 명도에 따라 대략 0-0.4, `H`(색조)는 한 바퀴를 나타내는 0-1입니다(0은 0°, 1은 360°). 알파를 생략하면 1이 됩니다.
+- OKLCH는 지각적으로 균일한 색공간으로, 수치를 같은 간격으로 바꾸면 시각적인 변화도 같은 간격으로 느껴집니다(그라디언트, 팔레트, 색조를 유지한 채 명도만 애니메이션할 때 유용합니다). `L`(명도)은 0-1, `C`(채도에 가까운, 얼마나 선명한지)는 색조와 명도에 따라 대략 0-0.4, `H`(색조)는 한 바퀴를 나타내는 0-1입니다(0은 0°, 1은 360°). 범위를 벗어난 값은 한 바퀴 돌아 되돌아옵니다. 알파를 생략하면 1이 됩니다.
 - L/C/H 조합에 따라 표시 가능한 색으로 변환되지 않는 경우가 있습니다. 여기서는 범위를 벗어난 결과를 클램프하지 않으므로, 채도를 너무 높이면 0-1 sRGB 범위를 벗어난 색이 나올 수 있습니다.
 - 이것은 `setColor`와 같은 내부 그리기 색상을 설정합니다. 채우기/외곽선 적용 방식과 스타일 스택과의 관계는 `setColor`를 참조하세요.
 '''
@@ -19659,18 +19680,21 @@ details.en = '''
 - Unlike `pushScissor()`, it saves nothing and is not intersected with the current rectangle. A later `popScissor()` replaces it with the saved rectangle.
 - There are `int` and `float` versions. Pass all four values as the same type.
 - For nested areas, or inside nodes, use `pushScissor()` / `popScissor()`. For a node's own area, `RectNode::setClipping(true)` is simpler.
+- Known issue: [#914](https://github.com/TrussC-org/TrussC/issues/914) (the rectangle is given in render-target pixels, unlike other drawing functions).
 '''
 details.ja = '''
 - 矩形の内側のピクセルだけが描かれます。座標は `pushScissor` と同じピクセル単位です。単位と DPI については `pushScissor` を参照してください。
 - `pushScissor()` と違い、何も保存せず、現在の矩形との重なりも取りません。あとで `popScissor()` を呼ぶと、保存されていた矩形に置き換わります。
 - `int` 版と `float` 版があります。4 つの値は同じ型で渡してください。
 - 入れ子にする場合やノードの中では `pushScissor()` / `popScissor()` を使ってください。ノード自身の範囲で切り抜くなら `RectNode::setClipping(true)` のほうが簡単です。
+- 既知の問題: [#914](https://github.com/TrussC-org/TrussC/issues/914)（他の描画関数と違い、矩形はレンダーターゲットのピクセル単位で指定する）。
 '''
 details.ko = '''
 - 사각형 안쪽의 픽셀만 그려집니다. 좌표는 `pushScissor`와 같은 픽셀 단위입니다. 단위와 DPI는 `pushScissor`를 참고하세요.
 - `pushScissor()`와 달리 아무것도 저장하지 않고 현재 사각형과 겹치는 부분도 계산하지 않습니다. 나중에 `popScissor()`를 호출하면 저장되어 있던 사각형으로 바뀝니다.
 - `int` 버전과 `float` 버전이 있습니다. 네 값은 같은 타입으로 전달하세요.
 - 중첩하거나 노드 안에서 쓸 때는 `pushScissor()` / `popScissor()`를 사용하세요. 노드 자신의 영역으로 자를 때는 `RectNode::setClipping(true)`가 더 간단합니다.
+- 알려진 문제: [#914](https://github.com/TrussC-org/TrussC/issues/914)(다른 그리기 함수와 달리 사각형을 렌더 타깃의 픽셀 단위로 지정함).
 '''
 related = ["RectNode::setClipping", "pushScissor"]
 snippet = '''
@@ -19817,16 +19841,19 @@ details.en = '''
 - Sets the width, in logical pixels, used when drawing shape outlines (`noFill()` mode) via `StrokeMesh`. Default is 1.0.
 - `drawLine()` is not affected by this setting: it always draws a fixed 1px line regardless of `setStrokeWeight()`.
 - `pushStyle()` / `popStyle()` save and restore this along with the rest of the drawing style.
+- Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (drawLine() ignores it).
 '''
 details.ja = '''
 - `StrokeMesh` を使ってシェイプの輪郭を描く際（`noFill()` モード）の太さを、論理ピクセル単位で設定します。デフォルトは 1.0 です。
 - `drawLine()` はこの設定の影響を受けません。`setStrokeWeight()` に関わらず、常に固定 1px の線として描かれます。
 - `pushStyle()` / `popStyle()` を使うと、他の描画スタイルと一緒にこの値も保存・復元できます。
+- 既知の問題: [#915](https://github.com/TrussC-org/TrussC/issues/915)（drawLine() には効かない）。
 '''
 details.ko = '''
 - `StrokeMesh`를 사용해 도형의 외곽선을 그릴 때(`noFill()` 모드) 사용하는 두께를 논리 픽셀 단위로 설정합니다. 기본값은 1.0입니다.
 - `drawLine()`은 이 설정의 영향을 받지 않습니다. `setStrokeWeight()`와 관계없이 항상 고정된 1px 선으로 그려집니다.
 - `pushStyle()` / `popStyle()`을 사용하면 다른 드로잉 스타일과 함께 이 값도 저장·복원할 수 있습니다.
+- 알려진 문제: [#915](https://github.com/TrussC-org/TrussC/issues/915)(drawLine()에는 적용되지 않음).
 '''
 related = ["getStrokeWeight", "fill", "drawLine"]
 snippet = '''
