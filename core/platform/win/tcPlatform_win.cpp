@@ -429,7 +429,14 @@ bool captureWindow(Pixels& outPixels) {
     }
 
     // Pixels allocation may fail after Map; always release that native lease.
-    try { outPixels.allocate(width, height, 4); }
+    // Capture overwrites every byte; preserve a matching RGBA8 buffer.
+    try {
+        if (!outPixels.isAllocated() || outPixels.getWidth() != width ||
+            outPixels.getHeight() != height || outPixels.getChannels() != 4 ||
+            outPixels.getFormat() != PixelFormat::U8) {
+            outPixels.allocate(width, height, 4);
+        }
+    }
     catch (const std::bad_alloc&) {
         context->Unmap(stagingTexture, 0); stagingTexture->Release();
         logError("Screenshot") << "pixel allocation failed";

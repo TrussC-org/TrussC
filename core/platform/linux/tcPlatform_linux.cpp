@@ -21,7 +21,6 @@
 #include <GL/gl.h>
 #include <GL/glext.h>   // glBindFramebuffer / GL_READ_FRAMEBUFFER (per-window capture)
 
-#include "../gl/tcPixelPack.h"
 #include "../gl/tcGLReadbackState.h"
 
 namespace trussc {
@@ -213,14 +212,24 @@ bool captureWindow(Pixels& outPixels) {
     const auto layout = internal::recorderPackedLayout(width, height, internal::RecorderPixelFormat::RGBA8);
     // Bound (abi): packed capture bytes must fit size_t. Overflow drops the recorder frame and is counted.
     if (!layout.byteSize) return false;
-    outPixels.allocate(width, height, 4);
+    // Capture overwrites every byte; preserve a matching RGBA8 buffer.
+    if (!outPixels.isAllocated() || outPixels.getWidth() != width ||
+        outPixels.getHeight() != height || outPixels.getChannels() != 4 ||
+        outPixels.getFormat() != PixelFormat::U8) {
+        outPixels.allocate(width, height, 4);
+    }
     // Bound (abi): the pixel allocation must hold every captured row. Overflow drops the recorder frame and is counted.
     if (!outPixels.getData() || outPixels.getTotalBytes() < layout.byteSize) return false;
 
     // Read pixels from OpenGL framebuffer
-    {
-        internal::ScopedTightPixelPack pack;
-        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, outPixels.getData());
+    // GLReadbackState selects the source and normalizes/restores pack state.
+    // Match Fbo readback: only this read's error determines success.
+    while (glGetError() != GL_NO_ERROR) {}
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, outPixels.getData());
+    const GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+        logError("Screenshot") << "glReadPixels failed (GL error 0x" << std::hex << error << ")";
+        return false;
     }
 
     // OpenGL reads from bottom-left, so we need to flip vertically

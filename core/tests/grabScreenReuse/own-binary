@@ -1,0 +1,1 @@
+Observes global array allocation/deallocation to detect buffer replacement even when the allocator returns the same address.
