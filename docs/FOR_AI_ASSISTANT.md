@@ -1980,7 +1980,7 @@ void alertDialogAsync(const std::string & title, const std::string & message, st
 void bindCursorImage(Cursor cursor, int width, int height, const unsigned char * pixels, int hotspotX = 0, int hotspotY = 0) [+1]  // Bind a custom image to a cursor slot (RGBA pixels or Image)
 bool confirmDialog(const std::string & title, const std::string & message) [macos,windows,linux,android,web]  // Show Yes/No confirmation dialog. Returns true if Yes clicked
 void confirmDialogAsync(const std::string & title, const std::string & message, std::function<void (bool)> callback)  // Show Yes/No dialog asynchronously. Callback receives true if Yes clicked
-CoreEvents & events()  // Get the global CoreEvents hub holding all framework events (setup, update, draw, keyPressed, mousePressed, etc.); use events().eventName.listen(callback) to subscribe
+CoreEvents & events()  // Returns the current window context's CoreEvents hub.
 void exitApp(int code = 0)  // Exit the application with normal cleanup (cannot be cancelled). code defaults to 0. On Windows/Linux, runApp returns this code to its caller; on macOS, the process exits with this code after cleanup without returning from runApp. Use a non-zero code for failures.
 Cursor getCursor()  // Get the current mouse cursor shape
 Vec2 getGlobalMousePos()  // Get global mouse position as Vec2
@@ -2789,7 +2789,7 @@ Color ColorOKLab::toRGB() const  // Convert to sRGB Color
 ```cpp
 ```
 
-### CoreEvents — Hub of all framework core events. Each member is an Event you subscribe to with .listen(callback); access the global instance via events()
+### CoreEvents — Collection of framework lifecycle, rendering, and input events.
 
 ```cpp
 ```
@@ -2799,12 +2799,12 @@ Color ColorOKLab::toRGB() const  // Convert to sRGB Color
 ```cpp
 ```
 
-### DeviceLostEventArgs — Arguments for the deviceLost event (Windows D3D11).
+### DeviceLostEventArgs — Carries information about a lost graphics device.
 
 ```cpp
 ```
 
-### DragDropEventArgs — Arguments for filesDropped events
+### DragDropEventArgs — Carries information about dropped files.
 
 ```cpp
 ```
@@ -2880,7 +2880,7 @@ bool Environment::loadProcedural()  // Generate a simple procedural sky environm
 void Environment::release()  // Release GPU resources
 ```
 
-### Event<T> — Generic event you subscribe to with listen(callback) and fire with notify(arg). The template parameter is the argument type passed to listeners by reference; Event<void> is the no-argument specialization (callbacks and notify take no argument). listen() returns an EventListener RAII token that disconnects when destroyed
+### Event<T> — Connects listeners to notifications with a shared argument type.
 
 ```cpp
 void Event::clear()  // Remove all listeners
@@ -2889,14 +2889,14 @@ size_t Event::listenerCount() const  // Number of currently registered listeners
 void Event::notify(T & arg)  // Fire the event, calling all listeners in priority order (no argument for Event<void>); stops early if a listener marks an input arg consumed. A listener removed during the pass on this thread is not called; one added during the pass starts from the next notify()
 ```
 
-### EventListener — RAII token returned by Event::listen(); the listener is automatically disconnected when this token is destroyed or reassigned. Move-only
+### EventListener — Owns an event-listener connection.
 
 ```cpp
-void EventListener::disconnect()  // Explicitly disconnect the listener now (otherwise happens automatically on destruction). On the thread that fires the event it is not called again, even later in a notify() pass already running. It does not wait for a callback running on another thread: for audio, follow it with AudioEngine::waitForAudioCallbacks()
-bool EventListener::isConnected() const  // True while the listener is still connected to its event
+void EventListener::disconnect()  // Explicitly disconnects the listener.
+bool EventListener::isConnected() const  // Returns the token's recorded connection state.
 ```
 
-### ExitRequestEventArgs — Arguments for the exitRequested event
+### ExitRequestEventArgs — Carries a cancellable application exit request.
 
 ```cpp
 ```
@@ -3173,7 +3173,7 @@ void JsonWriteReflector::endGroup()  // Close the current nested JSON object.
 bool JsonWriteReflector::visit(const char * name, float & v) [+7]  // Write one reflected member into the output JSON object.
 ```
 
-### KeyEventArgs — Arguments for keyPressed / keyReleased events
+### KeyEventArgs — Carries keyboard event data.
 
 ```cpp
 ```
@@ -3489,22 +3489,22 @@ void Mod::setup()  // Override: called once when the Mod is attached to the Node
 void Mod::update()  // Override: called every frame AFTER Node::update(). Use for reactions to node state changes. (protected, virtual)
 ```
 
-### MouseDragEventArgs — Arguments for mouseDragged (cursor moving with a button held)
+### MouseDragEventArgs — Carries arguments for cursor movement while a mouse button is held.
 
 ```cpp
-void MouseDragEventArgs::syncLegacy()  // Copy the canonical pos/delta fields into the deprecated x/y/deltaX/deltaY mirror fields (legacy mirrors scheduled for removal in v1.0).
+void MouseDragEventArgs::syncLegacy()  // Copies position and movement into compatibility fields.
 ```
 
-### MouseEventArgs — Arguments for mousePressed / mouseReleased events. pos is local space, globalPos is screen space (equal at app level)
+### MouseEventArgs — Arguments for mouse button press and release events.
 
 ```cpp
-void MouseEventArgs::syncLegacy()  // Copy the canonical pos field into the deprecated x/y mirror fields (legacy mirrors scheduled for removal in v1.0).
+void MouseEventArgs::syncLegacy()  // Copies the cursor position into legacy coordinate fields.
 ```
 
-### MouseMoveEventArgs — Arguments for mouseMoved (cursor moving with no button held)
+### MouseMoveEventArgs — Carries arguments for cursor movement.
 
 ```cpp
-void MouseMoveEventArgs::syncLegacy()  // Copy the canonical pos/delta fields into the deprecated x/y/deltaX/deltaY mirror fields (legacy mirrors scheduled for removal in v1.0).
+void MouseMoveEventArgs::syncLegacy()  // Copies position and movement into compatibility fields.
 ```
 
 ### NetworkInterface — One address entry of a network interface (returned by listNetworkInterfaces)
@@ -3843,7 +3843,7 @@ void Reflector::pushReadOnly()  // Enter a read-only scope (members visited insi
 bool Reflector::visit(const char * name, float & v) [+7]  // Handle one reflected member by name and value; return true if it was edited.
 ```
 
-### ResizeEventArgs — Arguments for windowResized events
+### ResizeEventArgs — Carries the new window dimensions.
 
 ```cpp
 ```
@@ -3920,10 +3920,10 @@ void ScrollContainer::update()  // Apply accumulated scroll deltas to the conten
 void ScrollContainer::updateScrollBounds()  // Recalculate scroll bounds from the content size (ScrollContainer method) (C++ only)
 ```
 
-### ScrollEventArgs — Arguments for mouseScrolled events
+### ScrollEventArgs — Arguments for mouse scroll events.
 
 ```cpp
-void ScrollEventArgs::syncLegacy()  // Copy the canonical scroll field into the deprecated scrollX/scrollY mirror fields (legacy mirrors scheduled for removal in v1.0).
+void ScrollEventArgs::syncLegacy()  // Copies the scroll amounts into legacy scroll fields.
 ```
 
 ### SendResult — Result of sendAsync(). Truthy when the payload was queued; carries the id that onSendComplete reports back.
@@ -4279,15 +4279,15 @@ size_t ThreadChannel::size() const  // Number of queued values. Takes the lock, 
 bool ThreadChannel::tryReceive(T & value) [+1]  // Receive a value without blocking, or waiting at most timeoutMs milliseconds (timeout overload). Returns false immediately/after the timeout if no data.
 ```
 
-### TouchEventArgs — Arguments for touchPressed / touchMoved / touchReleased events (multi-touch, Android/iOS)
+### TouchEventArgs — Carries multitouch event data.
 
 ```cpp
-int TouchEventArgs::id() const  // Convenience: ID of the first touch point
-float TouchEventArgs::x() const  // Convenience: X position of the first touch point
-float TouchEventArgs::y() const  // Convenience: Y position of the first touch point
+int TouchEventArgs::id() const  // Returns the first touch point's identifier.
+float TouchEventArgs::x() const  // Returns the first touch point's X coordinate.
+float TouchEventArgs::y() const  // Returns the first touch point's Y coordinate.
 ```
 
-### TouchPoint — A single finger within a TouchEventArgs
+### TouchPoint — Represents one touch point in a multitouch event.
 
 ```cpp
 ```
@@ -4742,7 +4742,7 @@ enum ChipSoundNote::Wave { Sin, Square, Triangle, Sawtooth, Noise, PinkNoise, Si
 enum Codec { None, LZ4 }  // Compression codec: None (raw) or LZ4.
 enum Cursor { Default, Arrow, IBeam, Crosshair, Hand, ResizeEW, ResizeNS, ResizeNWSE, ResizeNESW, ResizeAll, NotAllowed, Custom0, Custom1, Custom2, Custom3, Custom4, Custom5, Custom6, Custom7, Custom8, Custom9, Custom10, Custom11, Custom12, Custom13, Custom14, Custom15 }  // Mouse cursor shape (Default, Arrow, IBeam, Crosshair, Hand, resize cursors, …).
 enum CurveStyle::Mode { Tolerance, Resolution }  // Curve tessellation mode: adaptive tolerance or fixed resolution
-enum Deliver { Inline, Main }  // Event delivery timing: Inline fires synchronously on the calling thread; Main queues the event to the main thread.
+enum Deliver { Inline, Main }  // Selects the delivery thread for an event listener.
 enum Direction { Left, Center, Right, Top, Bottom, Baseline }  // Alignment / direction: Left, Center, Right, Top, Bottom, Baseline.
 enum EaseMode { In, Out, InOut }  // Easing direction: In, Out, or InOut.
 enum EaseType { Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce, Custom }  // Easing function family (Linear, Quad, Cubic, Sine, Expo, …) for tweens.
