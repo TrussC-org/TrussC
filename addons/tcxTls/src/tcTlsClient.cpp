@@ -3,6 +3,9 @@
 // =============================================================================
 
 #include "tcTlsClient.h"
+#include <mutex>
+#include "tcTlsCaInternal.h"
+#include "tc/network/tcSocketInternal.h"
 #include "tc/utils/tcLog.h"
 #include "tc/events/tcCoreEvents.h"
 
@@ -31,11 +34,7 @@ using namespace tc;
 
 namespace tcx::tls {
 
-// Forward declarations for the generated bundle (see cmake/tcTlsCaBundle.cpp.in).
-namespace tls_internal {
-extern const char* bundledCaPem();
-extern const char* bundledCaBundleDate();
-} // namespace tls_internal
+using tls_internal::countCerts;
 
 // Upper bound on CA PEM file size. Real-world OS trust stores are well
 // under 1 MB (typically ~250 KB; the embedded Mozilla bundle is ~360 KB).
@@ -43,16 +42,8 @@ extern const char* bundledCaBundleDate();
 // unexpectedly large — e.g. a sysadmin symlinked /etc/ssl/cert.pem to
 // the wrong target, or someone passed a non-PEM file to
 // setCACertificateFile() by mistake.
+// Bound (security): a byte cap bounds certificate-file storage. Overflow rejects the CA file.
 inline constexpr std::streamsize kMaxCaPemBytes = 16 * 1024 * 1024;
-
-namespace {
-size_t countCerts(const mbedtls_x509_crt* chain) {
-    size_t n = 0;
-    for (const mbedtls_x509_crt* c = chain; c != nullptr; c = c->next) ++n;
-    return n;
-}
-} // namespace
-
 
 // =============================================================================
 // TLS Context Structure (PIMPL)
@@ -81,6 +72,40 @@ struct TlsClient::TlsContext {
     }
 };
 
+// The TCP run retains this object. No TLS operation resolves a handle's State.
+struct TlsClient::TlsTransport : TcpClient::Transport {
+    TlsTransport();
+    std::unique_ptr<TlsContext> ctx_ = std::make_unique<TlsContext>();
+    std::string hostname_;
+    bool verifyNone_ = false;
+    bool caUserProvided_ = false;
+    bool caAutoLoadAttempted_ = false;
+    std::atomic<bool> handshakePending_{false};
+    bool handshakeStarted_ = false;
+    std::atomic<float> handshakeTimeout_{15.0f};
+    std::chrono::steady_clock::time_point handshakeStart_;
+    std::mutex tlsMutex_;
+    std::vector<unsigned char> tlsRecvBuf_;
+    std::atomic<unsigned> tlsReceiveGeneration_{0};
+    bool setCACertificate(const std::string&);
+    bool setCACertificateFile(const std::string&);
+    void ensureDefaultCAsLoaded();
+    void resetSslContext();
+    void teardown(State&);
+    enum class HandshakeStep { Done, InProgress, Stopped };
+    bool setupHandshake(State&, const AliveToken&);
+    HandshakeStep performHandshake(State&, const AliveToken&);
+    bool failHandshake(State&, const std::string&, const std::string&, int, const AliveToken&);
+    bool connectSocket(State&, const std::string&, int) override;
+    int writeSendStep(State&, const void*, size_t, bool&, int&) override;
+    bool isConnecting(const State& st) const override {
+        return st.connectPending_ || (st.running_ && handshakePending_);
+    }
+    bool processNetworkStep(State&, const AliveToken&) override;
+    std::string getCipherSuite(const State&) const;
+    std::string getTlsVersion(const State&) const;
+};
+
 // =============================================================================
 // mbedTLS Callbacks (socket send/receive)
 // =============================================================================
@@ -95,7 +120,9 @@ static int mbedtls_net_send_callback(void* ctx, const unsigned char* buf, size_t
     }
 #else
     int fd = *static_cast<int*>(ctx);
-    int ret = static_cast<int>(::send(fd, buf, len, 0));
+    // TC_SEND_FLAGS: a peer that closed first makes this fail instead of
+    // raising SIGPIPE
+    int ret = static_cast<int>(::send(fd, buf, len, TC_SEND_FLAGS));
     if (ret < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) return MBEDTLS_ERR_SSL_WANT_WRITE;
         return MBEDTLS_ERR_NET_SEND_FAILED;
@@ -128,8 +155,7 @@ static int mbedtls_net_recv_callback(void* ctx, unsigned char* buf, size_t len) 
 // =============================================================================
 // Constructor / Destructor
 // =============================================================================
-TlsClient::TlsClient() {
-    ctx_ = new TlsContext();
+TlsClient::TlsTransport::TlsTransport() {
 
     // Initialize random number generator
     const char* pers = "trussc_tls_client";
@@ -142,15 +168,10 @@ TlsClient::TlsClient() {
     }
 }
 
-TlsClient::~TlsClient() {
-    disconnect();
-    delete ctx_;
-}
-
 // =============================================================================
 // TLS Configuration
 // =============================================================================
-bool TlsClient::setCACertificate(const std::string& pemData) {
+bool TlsClient::TlsTransport::setCACertificate(const std::string& pemData) {
     int ret = mbedtls_x509_crt_parse(&ctx_->cacert,
                                       reinterpret_cast<const unsigned char*>(pemData.c_str()),
                                       pemData.size() + 1);
@@ -165,7 +186,7 @@ bool TlsClient::setCACertificate(const std::string& pemData) {
     return true;
 }
 
-bool TlsClient::setCACertificateFile(const std::string& path) {
+bool TlsClient::TlsTransport::setCACertificateFile(const std::string& path) {
     // Open at end (ate) to get size via tellg without a separate stat()
     // call — works portably on POSIX and Windows.
     std::ifstream file(path, std::ios::binary | std::ios::ate);
@@ -191,41 +212,33 @@ bool TlsClient::setCACertificateFile(const std::string& path) {
     return setCACertificate(buffer.str());
 }
 
-void TlsClient::setVerifyNone() {
-    verifyNone_ = true;
-}
-
-void TlsClient::setHostname(const std::string& hostname) {
-    hostname_ = hostname;
-}
-
 // =============================================================================
 // Default CA Loading (lazy)
 // =============================================================================
-void TlsClient::ensureDefaultCAsLoaded() {
+void TlsClient::TlsTransport::ensureDefaultCAsLoaded() {
     caAutoLoadAttempted_ = true;
-    const size_t before = countCerts(&ctx_->cacert);
 
 #ifdef _WIN32
     // Windows: enumerate the system ROOT store and feed each cert to mbedtls
     // as DER. Requires linking crypt32 (set in CMakeLists).
+    std::vector<std::vector<unsigned char>> osCertificates;
     HCERTSTORE store = CertOpenSystemStoreW(0, L"ROOT");
     if (store) {
         PCCERT_CONTEXT ctx = nullptr;
-        size_t parsed = 0;
         while ((ctx = CertEnumCertificatesInStore(store, ctx)) != nullptr) {
-            int r = mbedtls_x509_crt_parse_der(
-                &ctx_->cacert, ctx->pbCertEncoded, ctx->cbCertEncoded);
-            if (r == 0) ++parsed;
+            osCertificates.emplace_back(ctx->pbCertEncoded,
+                                        ctx->pbCertEncoded + ctx->cbCertEncoded);
         }
         CertCloseStore(store, 0);
-        if (parsed > 0) {
-            logNotice() << "TlsClient: loaded " << parsed
-                          << " CAs from Windows Cert Store (ROOT)";
-            return;
-        }
+    }
+    const auto counts = tls_internal::loadWindowsDefaultCAs(&ctx_->cacert, osCertificates);
+    if (counts.windowsRoot + counts.bundled > 0) {
+        logNotice() << "TlsClient: loaded " << counts.windowsRoot
+                      << " CAs from Windows ROOT + " << counts.bundled << " bundled";
+        return;
     }
 #else
+    const size_t before = countCerts(&ctx_->cacert);
     // POSIX: try well-known bundle paths in order. Works on macOS (/etc/ssl/cert.pem
     // is maintained by the OS), Linux distros, BSDs, Alpine, etc.
     static const char* kPaths[] = {
@@ -262,8 +275,6 @@ void TlsClient::ensureDefaultCAsLoaded() {
             return;
         }
     }
-#endif
-
     // Fallback: bundled Mozilla cacert.pem embedded at build time.
     const char* bundled = tls_internal::bundledCaPem();
     int ret = mbedtls_x509_crt_parse(
@@ -279,6 +290,7 @@ void TlsClient::ensureDefaultCAsLoaded() {
             return;
         }
     }
+#endif
 
     logError() << "TlsClient: failed to load any default CA certificates. "
                  << "TLS handshakes will fail unless setCACertificate() or "
@@ -288,401 +300,331 @@ void TlsClient::ensureDefaultCAsLoaded() {
 // =============================================================================
 // Connection Management
 // =============================================================================
-bool TlsClient::connect(const std::string& host, int port) {
-    // Disconnect if already connected
-    if (connected_ || running_ || connectPending_ || handshakePending_) {
-        disconnect();
-    }
-
-    // Ensure previous receive thread has finished
-    if (tlsReceiveThread_.joinable()) {
-        tlsReceiveThread_.join();
-    }
-
-    // Reset SSL context (clear previous connection state)
-    if (ctx_) {
-        mbedtls_ssl_free(&ctx_->ssl);
-        mbedtls_ssl_config_free(&ctx_->conf);
-        mbedtls_ssl_init(&ctx_->ssl);
-        mbedtls_ssl_config_init(&ctx_->conf);
-    }
-
-    // Create socket
-    socket_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-#ifdef _WIN32
-    if (socket_ == INVALID_SOCKET) {
-        notifyError("Failed to create socket", WSAGetLastError());
-        return false;
-    }
-#else
-    if (socket_ < 0) {
-        notifyError("Failed to create socket", errno);
-        return false;
-    }
-#endif
-
-    // Set non-blocking if not using threads
-    if (!useThread_) {
-        setBlocking(false);
-    }
-
-    // Resolve hostname
-    struct addrinfo hints, *result;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-
-    std::string portStr = std::to_string(port);
-    int ret = getaddrinfo(host.c_str(), portStr.c_str(), &hints, &result);
-    if (ret != 0) {
-        notifyError("Failed to resolve host: " + host, ret);
-        CLOSE_SOCKET(socket_);
-#ifdef _WIN32
-        socket_ = INVALID_SOCKET;
-#else
-        socket_ = -1;
-#endif
-        return false;
-    }
-
-    // TCP connection
-    ret = ::connect(socket_, result->ai_addr, static_cast<int>(result->ai_addrlen));
-    freeaddrinfo(result);
-
-    remoteHost_ = host;
-    remotePort_ = port;
+bool TlsClient::TlsTransport::connectSocket(State& st, const std::string& host, int port) {
+    resetSslContext();
+    ++tlsReceiveGeneration_;
+    handshakePending_ = false;
     handshakeStarted_ = false;
+    if (!Transport::connectSocket(st, host, port)) return false;
+    handshakePending_ = true;
+    if (!st.connectPending_) handshakeStart_ = std::chrono::steady_clock::now();
+    // Rebind for every run; no State pointer is retained by the transport.
+    mbedtls_ssl_set_bio(&ctx_->ssl, &st.socket_, mbedtls_net_send_callback,
+                        mbedtls_net_recv_callback, nullptr);
+    return true;
+}
 
-    if (ret == SOCKET_ERROR) {
-        int err = SOCKET_ERROR_CODE;
-#ifdef _WIN32
-        if (err == WSAEWOULDBLOCK) {
-#else
-        if (err == EINPROGRESS) {
-#endif
-            // Async connection started
-            connectPending_ = true;
-            running_ = true;
-        } else {
-            notifyError("Failed to connect to " + host + ":" + std::to_string(port), err);
-            CLOSE_SOCKET(socket_);
-#ifdef _WIN32
-            socket_ = INVALID_SOCKET;
-#else
-            socket_ = -1;
-#endif
-            return false;
-        }
-    } else {
-        // TCP Connected immediately
-        running_ = true;
-        handshakePending_ = true;
-        logNotice() << "TCP connected to " << host << ":" << port << ", starting TLS handshake...";
+bool TlsClient::TlsTransport::setupHandshake(State& st, const AliveToken& alive) {
+    int ret;
+    ret = mbedtls_ssl_config_defaults(&ctx_->conf,
+                                       MBEDTLS_SSL_IS_CLIENT,
+                                       MBEDTLS_SSL_TRANSPORT_STREAM,
+                                       MBEDTLS_SSL_PRESET_DEFAULT);
+    if (ret != 0) {
+        char errBuf[256];
+        mbedtls_strerror(ret, errBuf, sizeof(errBuf));
+        failHandshake(st, std::string("TLS config failed: ") + errBuf,
+                      std::string("TLS config failed: ") + errBuf, ret, alive);
+        return false;
     }
 
-    if (running_) {
-        if (useThread_) {
-            // Thread mode: wait for TCP then handshake
-            setBlocking(true);
-            tlsReceiveThread_ = std::thread(&TlsClient::tlsReceiveThreadFunc, this);
-        } else {
-            // Register update listener for async connect/handshake/recv
-            updateListener_ = events().update.listen(this, &TlsClient::processNetwork);
+    // Certificate verification settings.
+    // Default is REQUIRED: handshake aborts if the peer cert chain fails to verify.
+    // VERIFY_OPTIONAL is unsafe here because we do not inspect
+    // mbedtls_ssl_get_verify_result() after the handshake, so failures would be
+    // silently ignored and we'd be talking TLS to an unauthenticated peer.
+    if (verifyNone_) {
+        mbedtls_ssl_conf_authmode(&ctx_->conf, MBEDTLS_SSL_VERIFY_NONE);
+    } else {
+        // If the user never called setCACertificate*(), lazy-load default
+        // trust anchors (Windows ROOT + bundle; POSIX bundle paths with
+        // bundled fallback). Once-per-client.
+        if (!caUserProvided_ && !caAutoLoadAttempted_) {
+            ensureDefaultCAsLoaded();
         }
+        mbedtls_ssl_conf_authmode(&ctx_->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+        mbedtls_ssl_conf_ca_chain(&ctx_->conf, &ctx_->cacert, nullptr);
+    }
+
+    mbedtls_ssl_conf_rng(&ctx_->conf, mbedtls_ctr_drbg_random, &ctx_->ctr_drbg);
+
+    // Setup SSL context
+    ret = mbedtls_ssl_setup(&ctx_->ssl, &ctx_->conf);
+    if (ret != 0) {
+        char errBuf[256];
+        mbedtls_strerror(ret, errBuf, sizeof(errBuf));
+        failHandshake(st, std::string("TLS setup failed: ") + errBuf,
+                      std::string("TLS setup failed: ") + errBuf, ret, alive);
+        return false;
+    }
+
+    // Set hostname (SNI)
+    std::string sniHost = hostname_.empty() ? st.getRemoteHost() : hostname_;
+    ret = mbedtls_ssl_set_hostname(&ctx_->ssl, sniHost.c_str());
+    if (ret != 0) {
+        char errBuf[256];
+        mbedtls_strerror(ret, errBuf, sizeof(errBuf));
+        failHandshake(st, std::string("TLS hostname set failed: ") + errBuf,
+                      std::string("TLS hostname set failed: ") + errBuf, ret, alive);
+        return false;
     }
 
     return true;
 }
 
-bool TlsClient::performHandshake() {
-    int ret;
-
-    // Initialize SSL configuration if not already done
+TlsClient::TlsTransport::HandshakeStep TlsClient::TlsTransport::performHandshake(State& st, const AliveToken& alive) {
     if (!handshakeStarted_) {
-        ret = mbedtls_ssl_config_defaults(&ctx_->conf,
-                                           MBEDTLS_SSL_IS_CLIENT,
-                                           MBEDTLS_SSL_TRANSPORT_STREAM,
-                                           MBEDTLS_SSL_PRESET_DEFAULT);
-        if (ret != 0) {
-            char errBuf[256];
-            mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-            notifyError(std::string("TLS config failed: ") + errBuf, ret);
-            return false;
-        }
-
-        // Certificate verification settings.
-        // Default is REQUIRED: handshake aborts if the peer cert chain fails to verify.
-        // VERIFY_OPTIONAL is unsafe here because we do not inspect
-        // mbedtls_ssl_get_verify_result() after the handshake, so failures would be
-        // silently ignored and we'd be talking TLS to an unauthenticated peer.
-        if (verifyNone_) {
-            mbedtls_ssl_conf_authmode(&ctx_->conf, MBEDTLS_SSL_VERIFY_NONE);
-        } else {
-            // If the user never called setCACertificate*(), lazy-load default
-            // trust anchors (OS store, then bundled fallback). Once-per-client.
-            if (!caUserProvided_ && !caAutoLoadAttempted_) {
-                ensureDefaultCAsLoaded();
-            }
-            mbedtls_ssl_conf_authmode(&ctx_->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
-            mbedtls_ssl_conf_ca_chain(&ctx_->conf, &ctx_->cacert, nullptr);
-        }
-
-        mbedtls_ssl_conf_rng(&ctx_->conf, mbedtls_ctr_drbg_random, &ctx_->ctr_drbg);
-
-        // Setup SSL context
-        ret = mbedtls_ssl_setup(&ctx_->ssl, &ctx_->conf);
-        if (ret != 0) {
-            char errBuf[256];
-            mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-            notifyError(std::string("TLS setup failed: ") + errBuf, ret);
-            return false;
-        }
-
-        // Set hostname (SNI)
-        std::string sniHost = hostname_.empty() ? remoteHost_ : hostname_;
-        ret = mbedtls_ssl_set_hostname(&ctx_->ssl, sniHost.c_str());
-        if (ret != 0) {
-            char errBuf[256];
-            mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-            notifyError(std::string("TLS hostname set failed: ") + errBuf, ret);
-            return false;
-        }
-
-        // Set BIO callbacks
-        mbedtls_ssl_set_bio(&ctx_->ssl, &socket_,
-                             mbedtls_net_send_callback,
-                             mbedtls_net_recv_callback, nullptr);
-        
+        if (!setupHandshake(st, alive)) return HandshakeStep::Stopped;
         handshakeStarted_ = true;
     }
-
+    int ret;
     // Perform handshake step
-    ret = mbedtls_ssl_handshake(&ctx_->ssl);
+    {
+        std::scoped_lock lock(st.socketMutex_, tlsMutex_);
+        if (!st.running_ || st.socket_ == INVALID_SOCKET) return HandshakeStep::Stopped;
+        ret = mbedtls_ssl_handshake(&ctx_->ssl);
+    }
     if (ret == 0) {
-        return true; // Handshake complete
+        return HandshakeStep::Done;
     } else if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
-        return false; // In progress
+        return HandshakeStep::InProgress;
     } else {
         char errBuf[256];
         mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-        notifyError(std::string("TLS handshake failed: ") + errBuf, ret);
-        disconnect(); // Terminate connection on error
-        
-        tc::TcpConnectEventArgs args;
-        args.success = false;
-        args.message = std::string("TLS Handshake failed: ") + errBuf;
-        onConnect.notify(args);
-        return false;
+        failHandshake(st, std::string("TLS handshake failed: ") + errBuf,
+                      std::string("TLS Handshake failed: ") + errBuf, ret, alive);
+        return HandshakeStep::Stopped;
     }
 }
 
-void TlsClient::processNetwork() {
-    if (!running_) return;
+bool TlsClient::TlsTransport::failHandshake(State& st, const std::string& error, const std::string& connectMessage,
+                              int code, const AliveToken& alive) {
+    // A local disconnect() on another thread shut the socket down under
+    // the handshake. It cleared running_ first and tears the connection
+    // down itself: only a failure this thread ran into is handled here.
+    if (!st.running_.exchange(false)) return false;
+
+    // Tear the connection down before telling anyone: a listener that
+    // reconnects from onError or onConnect runs inline, and a teardown
+    // after it returned would take its new connection down.
+    // teardown() leaves this run's thread owned by the State, so teardown
+    // from another thread can still wait for its listener to return.
+    teardown(st);
+    st.notifyError(error, code);
+
+    // An onError listener may have destroyed the client (an owner that
+    // replaces it, as WebSocketClient::connect() does)
+    if (!*alive) return false;
+
+    // An onError listener may have started a newer attempt. That attempt
+    // reports its own result: this one is not reported once the client
+    // is connected or connecting again (running_ is set for every
+    // attempt in progress, the pending connect and the handshake too).
+    if (!st.connected_ && !st.running_ && !isConnecting(st)) {
+        tc::TcpConnectEventArgs args;
+        args.success = false;
+        args.message = connectMessage;
+        // The caller stops after this without reading the client: an
+        // onConnect listener may destroy it too
+        st.onConnect.notify(args);
+    }
+    return false;
+}
+
+bool TlsClient::TlsTransport::processNetworkStep(State& st, const AliveToken& alive) {
+    const unsigned generation = tlsReceiveGeneration_;
+    if (!st.processSendQueue(alive)) return false;
+    // A thread whose connection was replaced does nothing more, not even
+    // the pending connect or the handshake of the new one
+    if (!st.running_ || tlsReceiveGeneration_ != generation) return true;
 
     // 1. Handle TCP connection pending
-    if (connectPending_) {
-        // Re-use TcpClient's connect check logic (simplified here for brevity, 
-        // ideally we'd have a shared checkConnect() method)
-#ifdef _WIN32
-        struct fd_set writefds;
-        FD_ZERO(&writefds);
-        FD_SET(socket_, &writefds);
-        struct timeval tv = {0, 0};
-        if (select(0, NULL, &writefds, NULL, &tv) > 0) {
-#else
-        struct pollfd pfd;
-        pfd.fd = socket_;
-        pfd.events = POLLOUT;
-        if (poll(&pfd, 1, 0) > 0) {
-#endif
-            connectPending_ = false;
-            handshakePending_ = true;
-            logNotice() << "TCP connected (async), starting TLS handshake...";
-        } else {
-            return; // Still connecting
+    if (st.connectPending_) {
+        int error = 0;
+        int state = st.checkPendingConnect(0, error);
+        if (state == -2) return true;
+        if (state < 0) return failHandshake(st, "TCP connection failed or timed out", "Connection failed", error, alive);
+        if (state == 0) {
+            if (st.useThread_) st.waitClientSocket(false, 50);
+            return true;
         }
+        handshakePending_ = true;
+        handshakeStart_ = std::chrono::steady_clock::now();
     }
 
     // 2. Handle TLS handshake pending
     if (handshakePending_) {
-        if (performHandshake()) {
-            handshakePending_ = false;
-            connected_ = true;
-            
-            logNotice() << "TLS connected to " << remoteHost_ << ":" << remotePort_
-                          << " [" << getTlsVersion() << ", " << getCipherSuite() << "]";
-
-            tc::TcpConnectEventArgs args;
-            args.success = true;
-            args.message = "TLS Connected";
-            onConnect.notify(args);
-        } else {
-            return; // Still handshaking or failed (disconnect called inside)
+        // The deadline counts from the TCP connect (setHandshakeTimeout()).
+        // The peer may have accepted the connection and then said nothing.
+        const float timeout = handshakeTimeout_;
+        if (timeout > 0.0f &&
+            std::chrono::steady_clock::now() - handshakeStart_ >=
+                std::chrono::duration<float>(timeout)) {
+            return failHandshake(st, "TLS handshake timeout", "TLS handshake timeout", 0, alive);
         }
+
+        HandshakeStep step = performHandshake(st, alive);
+        if (step == HandshakeStep::Stopped) return false;
+        if (step == HandshakeStep::InProgress) {
+            // With threads the socket is non-blocking during the handshake:
+            // wait for the peer's data in short slices, so the deadline above
+            // is checked again even when nothing arrives
+            if (st.useThread_) st.waitClientSocket(false, 50);
+            return true;
+        }
+
+        if (!st.running_ || tlsReceiveGeneration_ != generation || !*alive) return false;
+        handshakePending_ = false;
+        st.startSendChannel();
+        st.connected_ = true;
+
+        logNotice() << "TLS connected to " << st.getRemoteHost() << ":" << st.getRemotePort()
+                      << " [" << getTlsVersion(st) << ", " << getCipherSuite(st) << "]";
+
+        tc::TcpConnectEventArgs args;
+        args.success = true;
+        args.message = "TLS Connected";
+        st.onConnect.notify(args);
+        // An onConnect listener may have destroyed the client
+        if (!*alive) return false;
     }
 
-    if (!connected_) return;
+    // A listener on onConnect above may have reconnected and waited for the
+    // new connection: connected_ is then the new connection's, and the new
+    // receive thread owns tlsRecvBuf_. Stop before touching it.
+    if (!st.connected_ || tlsReceiveGeneration_ != generation) return true;
 
-    // 3. Handle data receive
-    static std::vector<unsigned char> buffer;
-    if (buffer.size() != receiveBufferSize_) {
-        buffer.resize(receiveBufferSize_);
-    }
-
-    while (connected_) {
-        int ret = mbedtls_ssl_read(&ctx_->ssl, buffer.data(), buffer.size());
+    // Every reader uses its original State. The generation also prevents
+    // an old notification from continuing into the transport's next run.
+    while (st.connected_ && tlsReceiveGeneration_ == generation) {
+        int ret;
+        tc::TcpReceiveEventArgs args;
+        {
+            std::scoped_lock lock(st.socketMutex_, tlsMutex_);
+            if (!st.running_ || st.socket_ == INVALID_SOCKET) break;
+            // A reconnect from a writer listener may start a new run while
+            // this reader returns. Own the bytes before releasing TLS's lock.
+            if (tlsRecvBuf_.size() != st.receiveBufferSize_) tlsRecvBuf_.resize(st.receiveBufferSize_);
+            ret = mbedtls_ssl_read(&ctx_->ssl, tlsRecvBuf_.data(), tlsRecvBuf_.size());
+            if (ret > 0) {
+                args.data.assign(reinterpret_cast<char*>(tlsRecvBuf_.data()),
+                                 reinterpret_cast<char*>(tlsRecvBuf_.data()) + ret);
+            }
+        }
 
         if (ret > 0) {
-            tc::TcpReceiveEventArgs args;
-            args.data.assign(reinterpret_cast<char*>(buffer.data()),
-                            reinterpret_cast<char*>(buffer.data()) + ret);
-            onReceive.notify(args);
-            if (!useThread_) break;
+            st.onReceive.notify(args);
+            // An onReceive listener may have destroyed the client (an owner
+            // that replaces it from a close it handles inline, say)
+            if (!*alive) return false;
+            if (!st.useThread_) break;
         } else if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
-            // Connection closed
-            running_ = false;
-            connected_ = false;
-            tc::TcpDisconnectEventArgs args;
-            args.reason = "Connection closed by remote";
-            args.wasClean = true;
-            onDisconnect.notify(args);
+            // Connection closed. Report it only if this thread is the one
+            // ending the connection. A local disconnect() clears running_
+            // before its shutdown() wakes this read with EOF, and reports the
+            // disconnect itself once it has joined this thread; reporting it
+            // here as a remote close would let a reconnecting listener start
+            // over while disconnect() is still joining this thread.
+            if (st.running_.exchange(false)) {
+                st.connected_ = false;
+                if (!st.processSendQueue(alive)) return false;
+                tc::TcpDisconnectEventArgs args;
+                args.reason = "Connection closed by remote";
+                args.wasClean = true;
+                // This thread stops here, decided before notifying: a
+                // listener may destroy, disconnect or reconnect the client,
+                // so nothing of it is read after the notification (#262).
+                st.onDisconnect.notify(args);
+                return false;
+            }
             break;
         } else if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
             break;
         } else {
-            // Error
-            if (running_) {
-                running_ = false;
-                connected_ = false;
+            // Error. As above: one caused by a local disconnect() is its to report
+            if (st.running_.exchange(false)) {
+                st.connected_ = false;
+                if (!st.processSendQueue(alive)) return false;
                 char errBuf[256];
                 mbedtls_strerror(ret, errBuf, sizeof(errBuf));
                 tc::TcpDisconnectEventArgs args;
                 args.reason = std::string("TLS error: ") + errBuf;
                 args.wasClean = false;
-                onDisconnect.notify(args);
+                // As above: stop without reading the client again
+                st.onDisconnect.notify(args);
+                return false;
             }
             break;
         }
     }
+    return true;
 }
 
-void TlsClient::disconnect() {
-    running_ = false;
-    connectPending_ = false;
-    handshakePending_ = false;
-    updateListener_.disconnect();
-
-    // Send TLS close notification
-    if (ctx_ && connected_) {
-        mbedtls_ssl_close_notify(&ctx_->ssl);
-    }
-
-    // Close socket
-#ifdef _WIN32
-    if (socket_ != INVALID_SOCKET) {
-        shutdown(socket_, SD_BOTH);
-        closesocket(socket_);
-        socket_ = INVALID_SOCKET;
-    }
-#else
-    if (socket_ >= 0) {
-        shutdown(socket_, SHUT_RDWR);
-        close(socket_);
-        socket_ = -1;
-    }
-#endif
-
-    // Wait for receive thread to finish
-    if (tlsReceiveThread_.joinable()) {
-        if (tlsReceiveThread_.get_id() == std::this_thread::get_id()) {
-            tlsReceiveThread_.detach();
-        } else {
-            tlsReceiveThread_.join();
-        }
-    }
-
-    if (connected_) {
-        connected_ = false;
-        tc::TcpDisconnectEventArgs args;
-        args.reason = "Disconnected by client";
-        args.wasClean = true;
-        onDisconnect.notify(args);
-    }
-
-    // Fully reset SSL context and config (for reconnection)
+// Free and re-initialise the SSL context and config (for the next connection)
+void TlsClient::TlsTransport::resetSslContext() {
+    std::lock_guard<std::mutex> lock(tlsMutex_);
     if (ctx_) {
         mbedtls_ssl_free(&ctx_->ssl);
         mbedtls_ssl_config_free(&ctx_->conf);
-
-        // Reinitialize
         mbedtls_ssl_init(&ctx_->ssl);
         mbedtls_ssl_config_init(&ctx_->conf);
     }
 }
 
-// =============================================================================
-// Data Send/Receive
-// =============================================================================
-bool TlsClient::send(const void* data, size_t size) {
-    if (!connected_) {
-        notifyError("Not connected");
-        return false;
-    }
-
-    std::lock_guard<std::mutex> lock(sendMutex_);
-
-    const unsigned char* ptr = static_cast<const unsigned char*>(data);
-    size_t remaining = size;
-
-    while (remaining > 0) {
-        int ret = mbedtls_ssl_write(&ctx_->ssl, ptr, remaining);
-        if (ret < 0) {
-            if (ret == MBEDTLS_ERR_SSL_WANT_WRITE || ret == MBEDTLS_ERR_SSL_WANT_READ) continue;
-            char errBuf[256];
-            mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-            notifyError(std::string("TLS send failed: ") + errBuf, ret);
-            return false;
-        }
-        ptr += ret;
-        remaining -= ret;
-    }
-
-    return true;
+// End a failed handshake before delivering its events; the State retains the worker.
+void TlsClient::TlsTransport::teardown(State& st) {
+    st.running_ = false;
+    st.connectPending_ = false;
+    handshakePending_ = false;
+    st.updateListener_.disconnect();
+    st.closeClientSocket();
+    resetSslContext();
 }
 
-bool TlsClient::send(const std::vector<char>& data) {
-    return send(data.data(), data.size());
-}
-
-bool TlsClient::send(const std::string& message) {
-    return send(message.data(), message.size());
-}
-
-// =============================================================================
-// TLS Receive Thread
-// =============================================================================
-void TlsClient::tlsReceiveThreadFunc() {
-    while (running_) {
-        processNetwork();
-        if (running_) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
+int TlsClient::TlsTransport::writeSendStep(State& st, const void* data, size_t size, bool& forWrite, int& error) {
+    std::scoped_lock lock(st.socketMutex_, tlsMutex_);
+    if (!st.connected_ || st.socket_ == INVALID_SOCKET) return -2;
+    int ret = mbedtls_ssl_write(&ctx_->ssl, static_cast<const unsigned char*>(data), size);
+    if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+        forWrite = ret == MBEDTLS_ERR_SSL_WANT_WRITE;
+        return -1;
     }
+    if (ret < 0) { error = ret; return -2; }
+    return ret;
 }
 
 // =============================================================================
 // TLS Information
 // =============================================================================
-std::string TlsClient::getCipherSuite() const {
-    if (!connected_ || !ctx_) return "";
+std::string TlsClient::TlsTransport::getCipherSuite(const State& st) const {
+    if (!st.connected_ || !ctx_) return "";
     const char* suite = mbedtls_ssl_get_ciphersuite(&ctx_->ssl);
     return suite ? suite : "";
 }
 
-std::string TlsClient::getTlsVersion() const {
-    if (!connected_ || !ctx_) return "";
+std::string TlsClient::TlsTransport::getTlsVersion(const State& st) const {
+    if (!st.connected_ || !ctx_) return "";
     const char* ver = mbedtls_ssl_get_version(&ctx_->ssl);
     return ver ? ver : "";
 }
+
+TlsClient::TlsClient() : transport_(std::make_shared<TlsTransport>()) { setTransport(transport_); }
+// TcpClient closes delivery and joins/retains the run before releasing its transport.
+TlsClient::~TlsClient() = default;
+bool TlsClient::setCACertificate(const std::string& pem) { return transport_->setCACertificate(pem); }
+bool TlsClient::setCACertificateFile(const std::string& path) { return transport_->setCACertificateFile(path); }
+void TlsClient::setVerifyNone() { transport_->verifyNone_ = true; }
+void TlsClient::setHostname(const std::string& hostname) { transport_->hostname_ = hostname; }
+void TlsClient::setHandshakeTimeout(float seconds) { transport_->handshakeTimeout_ = seconds > 0 ? seconds : 0; }
+bool TlsClient::connect(const std::string& host, int port) { return TcpClient::connect(host, port); }
+void TlsClient::disconnect() { TcpClient::disconnect(); }
+bool TlsClient::isConnecting() const { return TcpClient::isConnecting(); }
+bool TlsClient::send(const void* data, size_t size) { return TcpClient::send(data, size); }
+bool TlsClient::send(const std::vector<char>& data) { return TcpClient::send(data); }
+bool TlsClient::send(const std::string& data) { return TcpClient::send(data); }
+void TlsClient::processNetwork() { TcpClient::processNetwork(); }
+std::string TlsClient::getCipherSuite() const { return transport_->getCipherSuite(*state()); }
+std::string TlsClient::getTlsVersion() const { return transport_->getTlsVersion(*state()); }
+std::chrono::steady_clock::time_point TlsClient::getTcpConnectTime() const { return transport_->handshakeStart_; }
 
 }  // namespace tcx::tls

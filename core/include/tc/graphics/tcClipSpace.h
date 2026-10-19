@@ -31,7 +31,7 @@ namespace internal {
 // Test hook: forces the convention without a live GPU (-1 = auto, 0 = GL
 // [-1,1], 1 = zero-to-one). Lets headless tests exercise both readback paths.
 inline int& clipZOverrideForTests() {
-    static int v = -1;
+    static int v = -1;  // test hook for headless tests: a per-module copy is fine
     return v;
 }
 
@@ -61,7 +61,7 @@ inline bool clipZeroToOne() {
 inline Mat4 toBackendClip(const Mat4& glProjection) {
     if (!clipZeroToOne()) return glProjection;
     // z' = 0.5*z + 0.5*w  (maps [-1, 1] -> [0, 1])
-    static const Mat4 zeroToOne(
+    static const Mat4 zeroToOne(  // immutable
         1, 0, 0,    0,
         0, 1, 0,    0,
         0, 0, 0.5f, 0.5f,

@@ -1,0 +1,1 @@
+Spawns fresh copies of itself with piped stdin to isolate the process-wide console lifecycle.

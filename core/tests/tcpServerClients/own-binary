@@ -1,0 +1,1 @@
+Interposes pthread_create() (link-time, whole binary): it would wrap every thread of every test and break sanitizer builds of allCoreTests.

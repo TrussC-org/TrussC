@@ -9,8 +9,10 @@
 // buffered DepthFrame and provides everything built on top of it - distance,
 // world coordinates, color, meshing, threading. An implementation only has to:
 //
-//   1. open / close the device   (openDevice / closeDevice)
-//   2. fill a DepthFrame          (captureInto)
+//   1. open a shared Device      (openDevice)
+//   2. fill a DepthFrame          (Device::captureInto)
+// The Device owns the source and releases it in its destructor; it never
+// retains the backend handle. Capture may outlive that handle on its own thread.
 //
 // It never writes getters, a mutex, or buffer juggling. Drive any camera:
 //
@@ -36,23 +38,26 @@
 #include "tcxDepthTypes.h"
 #include "tcxDepthImage.h"
 #include <mutex>
+#include <memory>
+#include <atomic>
+#include "tc/utils/tcKeptThreads.h"
 #include <utility>
 
 namespace tcx::depthcamera {
 
 using namespace tc;
 
-class DepthCamera : protected tc::Thread {
+class DepthCamera {
 public:
-    DepthCamera()
-        : front_(&buffers_[0]), back_(&buffers_[1]), capture_(&buffers_[2]) {}
+    struct Device {
+        // Produce a COMPLETE frame: carry forward streams that did not refresh,
+        // since the destination buffers rotate. Runs off-thread when requested.
+        virtual StreamFreshness captureInto(DepthFrame& dst) = 0;
+        virtual ~Device() = default;
+    };
 
-    ~DepthCamera() override {
-        if (isThreadRunning()) {
-            stopThread();
-            waitForThread(false);
-        }
-    }
+    DepthCamera() = default;
+    virtual ~DepthCamera() { close(); }
 
     DepthCamera(const DepthCamera&) = delete;
     DepthCamera& operator=(const DepthCamera&) = delete;
@@ -64,50 +69,64 @@ public:
     // Open the device and (if threaded) start the grabber. Returns false on
     // failure. Call setThreaded() beforehand to choose the mode.
     bool setup() {
-        if (!openDevice()) return false;
-        if (threaded_) startThread();
+        close();
+        auto run = std::make_shared<State>();
+        state_ = run;
+        run->device = openDevice();
+        if (!run->device) return false;
+        if (threaded_) {
+            run->running = true;
+            run->threads.start(run->thread, [run] { captureLoop(run); });
+        }
         return true;
     }
 
     // Stop the grabber and release the device.
     void close() {
-        if (isThreadRunning()) {
-            stopThread();
-            waitForThread(false);
+        auto run = state_;
+        run->running = false;
+        const bool fromCapture = run->thread.joinable() &&
+            run->thread.get_id() == std::this_thread::get_id();
+        run->threads.release(run->thread);
+        run->threads.joinOthers();
+        if (fromCapture) {
+            // The worker still owns this run and its device until it returns.
+            state_ = std::make_shared<State>();
+        } else {
+            run->device.reset();
         }
-        closeDevice();
     }
 
     // Publish the latest frame. Call once per app frame.
     void update() {
-        if (isThreadRunning()) {
-            std::lock_guard<std::mutex> lk(mutex_);
-            if (backReady_) {
-                std::swap(back_, front_);
-                freshness_ = pending_;
-                pending_.clear();
-                backReady_ = false;
+        if (state_->running) {
+            std::lock_guard<std::mutex> lk(state_->mutex);
+            if (state_->backReady) {
+                std::swap(state_->back, state_->front);
+                state_->freshness = state_->pending;
+                state_->pending.clear();
+                state_->backReady = false;
             } else {
-                freshness_.clear();  // nothing new this tick
+                state_->freshness.clear();  // nothing new this tick
             }
         } else {
-            StreamFreshness f = captureInto(*back_);
-            if (f.any()) std::swap(back_, front_);
-            freshness_ = f;
+            StreamFreshness f = state_->device ? state_->device->captureInto(*state_->back) : StreamFreshness{};
+            if (f.any()) std::swap(state_->back, state_->front);
+            state_->freshness = f;
         }
         // Mark preview Images for re-upload on the next getXxxImage() call.
-        if (freshness_.color)    colorImageDirty_    = true;
-        if (freshness_.depth)    depthImageDirty_    = true;
-        if (freshness_.infrared) irImageDirty_       = true;
+        if (state_->freshness.color)    colorImageDirty_    = true;
+        if (state_->freshness.depth)    depthImageDirty_    = true;
+        if (state_->freshness.infrared) irImageDirty_       = true;
     }
 
     // -------------------------------------------------------------------------
     // Freshness (per stream, since streams may arrive at different rates)
     // -------------------------------------------------------------------------
-    bool isFrameNew()         const { return freshness_.depth; }
-    bool isColorFrameNew()    const { return freshness_.color; }
-    bool isInfraredFrameNew() const { return freshness_.infrared; }
-    bool isStreamNew(Stream s) const { return freshness_.get(s); }
+    bool isFrameNew()         const { return state_->freshness.depth; }
+    bool isColorFrameNew()    const { return state_->freshness.color; }
+    bool isInfraredFrameNew() const { return state_->freshness.infrared; }
+    bool isStreamNew(Stream s) const { return state_->freshness.get(s); }
 
     // -------------------------------------------------------------------------
     // Threading
@@ -145,17 +164,17 @@ public:
 
     // The current readable frame - this is the thing you use a depth camera for.
     // Read freely on the thread that calls update(); no locking required.
-    const DepthFrame& currentFrame() const { return *front_; }
+    const DepthFrame& currentFrame() const { return *state_->front; }
 
-    int    getWidth()  const { return front_->w; }
-    int    getHeight() const { return front_->h; }
-    double getTimestamp() const { return front_->timestamp; }
-    DepthIntrinsics getDepthIntrinsics() const { return front_->intrinsics; }
+    int    getWidth()  const { return state_->front->w; }
+    int    getHeight() const { return state_->front->h; }
+    double getTimestamp() const { return state_->front->timestamp; }
+    DepthIntrinsics getDepthIntrinsics() const { return state_->front->intrinsics; }
 
     // Distance along the optical axis at (x, y) in meters. 0 = invalid / no data.
     float getDistanceAt(int x, int y) const {
         if (!depthEnabled_) { warnOnce(warnedDepth_, "depth", "enableDepth"); return 0.0f; }
-        const DepthFrame& f = *front_;
+        const DepthFrame& f = *state_->front;
         if (x < 0 || y < 0 || x >= f.w || y >= f.h) return 0.0f;
         const size_t i = static_cast<size_t>(y) * f.w + x;
         return i < f.depth.size() ? f.depth[i] * f.depthScale : 0.0f;
@@ -169,7 +188,7 @@ public:
     // recompute world on playback (rather than storing the whole world image).
     // Returns the origin for invalid depth.
     Vec3 getWorldCoordinateAt(int x, int y) const {
-        const DepthFrame& f = *front_;
+        const DepthFrame& f = *state_->front;
         if (x < 0 || y < 0 || x >= f.w || y >= f.h) return Vec3{0, 0, 0};
         const size_t i = static_cast<size_t>(y) * f.w + x;
         if (i < f.world.size()) return f.world[i];
@@ -205,10 +224,10 @@ public:
     // -------------------------------------------------------------------------
     // Color / IR (color is NATIVE full resolution; mapping is computed on demand)
     // -------------------------------------------------------------------------
-    bool          hasColor()       const { return colorEnabled_ && front_->hasColor(); }
+    bool          hasColor()       const { return colorEnabled_ && state_->front->hasColor(); }
     const Pixels& getColorPixels() const {   // native full-resolution color
         if (!colorEnabled_) warnOnce(warnedColor_, "color", "enableColor");
-        return front_->color;
+        return state_->front->color;
     }
 
     // Normalized UV (0-1) into the (full-resolution) color image for depth pixel
@@ -216,7 +235,7 @@ public:
     // the depth pixel to 3D, transform into color-camera space (depthToColor),
     // and project with colorIntrinsics. Computed lazily - only when you ask.
     Vec2 getColorTexCoordAt(int x, int y) const {
-        const DepthFrame& f = *front_;
+        const DepthFrame& f = *state_->front;
         if (f.w <= 0 || f.h <= 0) return Vec2{0, 0};
         const size_t i = static_cast<size_t>(y) * f.w + x;
         if (i < f.colorUV.size()) return f.colorUV[i];     // precomputed map
@@ -238,7 +257,7 @@ public:
     // Sampled color for depth pixel (x, y): the full-res color sampled at its
     // projected UV.
     Color getColorAt(int x, int y) const {
-        const Pixels& c = front_->color;
+        const Pixels& c = state_->front->color;
         if (!c.isAllocated()) return Color{0, 0, 0, 1};
         const Vec2 uv = getColorTexCoordAt(x, y);
         const int cx = static_cast<int>(uv.x * c.getWidth());
@@ -253,7 +272,7 @@ public:
     // color through the depth->color mapping (the old "registered" image). Not
     // done automatically - call it only if you actually want it.
     Pixels registerColorToDepth() const {
-        const DepthFrame& f = *front_;
+        const DepthFrame& f = *state_->front;
         Pixels out;
         if (!f.color.isAllocated() || f.w <= 0 || f.h <= 0) return out;
         out.allocate(f.w, f.h, 4);
@@ -265,10 +284,10 @@ public:
         return out;
     }
 
-    bool          hasInfrared()       const { return infraredEnabled_ && front_->hasInfrared(); }
+    bool          hasInfrared()       const { return infraredEnabled_ && state_->front->hasInfrared(); }
     const Pixels& getInfraredPixels() const {
         if (!infraredEnabled_) warnOnce(warnedInfrared_, "infrared", "enableInfrared");
-        return front_->ir;
+        return state_->front->ir;
     }
 
     // -------------------------------------------------------------------------
@@ -285,19 +304,19 @@ public:
     // until the next call. If you own the Image yourself (e.g. a DepthFrame from
     // playback), use the free colorToImage()/depthToImage()/irToImage() instead.
     Image& getColorImage() {
-        if (colorImageDirty_) { colorToImage(front_->color, colorImage_); colorImageDirty_ = false; }
+        if (colorImageDirty_) { colorToImage(state_->front->color, colorImage_); colorImageDirty_ = false; }
         return colorImage_;
     }
     Image& getDepthImage(const DepthImageView& view = {}) {
         if (depthImageDirty_ || view != depthImageLastView_) {
-            depthToImage(*front_, depthImage_, view);
+            depthToImage(*state_->front, depthImage_, view);
             depthImageLastView_ = view;
             depthImageDirty_ = false;
         }
         return depthImage_;
     }
     Image& getInfraredImage() {
-        if (irImageDirty_) { irToImage(front_->ir, irImage_); irImageDirty_ = false; }
+        if (irImageDirty_) { irToImage(state_->front->ir, irImage_); irImageDirty_ = false; }
         return irImage_;
     }
 
@@ -311,7 +330,7 @@ public:
     // virtual dispatch). Virtual so an implementation can override with a bulk /
     // GPU path; the default is a correct, portable reference.
     virtual Mesh toMesh(DepthMeshOptions opt = {}) const {
-        const DepthFrame& f = *front_;
+        const DepthFrame& f = *state_->front;
         Mesh m;
         m.setMode(PrimitiveMode::Points);
 
@@ -335,30 +354,34 @@ protected:
     // Implementation hooks
     // -------------------------------------------------------------------------
 
-    // Open / close the underlying device or source (file, network, ...).
-    virtual bool openDevice() = 0;
-    virtual void closeDevice() = 0;
-
-    // Fill dst with one frame and report which streams it refreshed. In threaded
-    // mode this runs on the background grabber; otherwise inline in update().
-    //
-    // IMPORTANT: produce a COMPLETE frame. If a stream did not refresh this tick
-    // (e.g. color runs slower than depth, or vice versa), carry its latest data
-    // forward into dst - the buffers rotate, so dst will NOT retain last tick's
-    // contents. Keep the latest of each stream as a member if your SDK delivers
-    // streams independently; SDKs configured for synchronized capture give both
-    // every time, so this is automatic. The returned StreamFreshness reports
-    // what actually changed (drives isFrameNew / isColorFrameNew).
-    virtual StreamFreshness captureInto(DepthFrame& dst) = 0;
+    // Return a source owning every resource capture touches, or nullptr on
+    // failure. The worker holds only this Device and its run, never the backend.
+    virtual std::shared_ptr<Device> openDevice() = 0;
 
 private:
-    void threadedFunction() override {
-        while (isThreadRunning()) {
-            StreamFreshness f = captureInto(*capture_);
-            std::lock_guard<std::mutex> lk(mutex_);
-            std::swap(capture_, back_);
-            pending_ |= f;
-            backReady_ = true;
+    struct State {
+        DepthFrame buffers[3];
+        DepthFrame* front = &buffers[0];
+        DepthFrame* back = &buffers[1];
+        DepthFrame* capture = &buffers[2];
+        std::mutex mutex;
+        StreamFreshness pending{};
+        StreamFreshness freshness{};
+        bool backReady = false;
+        std::atomic<bool> running{false};
+        std::shared_ptr<Device> device;
+        std::thread thread;
+        tc::internal::KeptThreads threads;
+    };
+
+    static void captureLoop(const std::shared_ptr<State>& run) {
+        while (run->running) {
+            StreamFreshness f = run->device->captureInto(*run->capture);
+            if (!f.any()) continue;
+            std::lock_guard<std::mutex> lk(run->mutex);
+            std::swap(run->capture, run->back);
+            run->pending |= f;
+            run->backReady = true;
         }
     }
 
@@ -371,15 +394,7 @@ private:
             << "() before setup() to use it.";
     }
 
-    DepthFrame buffers_[3];
-    DepthFrame* front_;
-    DepthFrame* back_;
-    DepthFrame* capture_;
-
-    std::mutex mutex_;
-    StreamFreshness pending_{};    // accumulated by worker, guarded by mutex_
-    StreamFreshness freshness_{};  // current frame's flags, main thread only
-    bool backReady_ = false;       // guarded by mutex_
+    std::shared_ptr<State> state_ = std::make_shared<State>();
     bool threaded_ = false;
 
     // Stream enables (all off by default; enable what you use before setup()).

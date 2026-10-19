@@ -3,125 +3,248 @@
 #include "TrussC.h"
 using namespace trussc;
 using namespace std;
-#ifndef _MSC_VER
+// Abstract bases (e.g. VideoPlayerBase) expose members but cannot be constructed.
+// An empty guarded constructor list must not enable sol2's automatic default ctor.
+namespace {
+template<typename Owner, typename... Signatures>
+auto tcxLuaConstructors() {
+    if constexpr (std::is_abstract_v<Owner> || sizeof...(Signatures) == 0) return sol::no_constructor;
+    else return sol::constructors<Signatures...>();
+}
+}
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#else
 #pragma GCC diagnostic push
 #pragma clang diagnostic push
+// Lua retains deprecated compatibility names, including inherited ones.
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
 void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
     {
-        sol::usertype<trussc::Color> t = lua->new_usertype<trussc::Color>("Color",
-            sol::constructors<trussc::Color(), trussc::Color(float, float, float), trussc::Color(float, float, float, float), trussc::Color(float), trussc::Color(float, float)>(),
-            sol::call_constructor, sol::constructors<trussc::Color(), trussc::Color(float, float, float), trussc::Color(float, float, float, float), trussc::Color(float), trussc::Color(float, float)>(),
-            sol::meta_function::addition, [](const trussc::Color& a, const trussc::Color & b){ return a + b; },
-            sol::meta_function::subtraction, [](const trussc::Color& a, const trussc::Color & b){ return a - b; },
-            sol::meta_function::multiplication, [](const trussc::Color& a, float b){ return a * b; },
-            sol::meta_function::division, [](const trussc::Color& a, float b){ return a / b; },
-            sol::meta_function::equal_to, [](const trussc::Color& a, const trussc::Color & b){ return a == b; });
-        t["r"] = &trussc::Color::r;
-        t["g"] = &trussc::Color::g;
-        t["b"] = &trussc::Color::b;
-        t["a"] = &trussc::Color::a;
-        t["set"] = sol::overload([](trussc::Color& self, float r_, float g_, float b_) -> decltype(auto) { return self.set(r_, g_, b_); }, [](trussc::Color& self, float r_, float g_, float b_, float a_) -> decltype(auto) { return self.set(r_, g_, b_, a_); }, [](trussc::Color& self, float gray) -> decltype(auto) { return self.set(gray); }, [](trussc::Color& self, float gray, float a_) -> decltype(auto) { return self.set(gray, a_); }, [](trussc::Color& self, const trussc::Color & c) -> decltype(auto) { return self.set(c); });
-        t["toHex"] = sol::overload([](trussc::Color& self) { return self.toHex(); }, [](trussc::Color& self, bool includeAlpha) { return self.toHex(includeAlpha); });
-        t["toLinear"] = &trussc::Color::toLinear;
-        t["toHSB"] = &trussc::Color::toHSB;
-        t["toOKLab"] = &trussc::Color::toOKLab;
-        t["toOKLCH"] = &trussc::Color::toOKLCH;
-        t["clamped"] = &trussc::Color::clamped;
-        t["lerpRGB"] = &trussc::Color::lerpRGB;
-        t["lerpLinear"] = &trussc::Color::lerpLinear;
-        t["lerpHSB"] = &trussc::Color::lerpHSB;
-        t["lerpOKLab"] = &trussc::Color::lerpOKLab;
-        t["lerpOKLCH"] = &trussc::Color::lerpOKLCH;
-        t["lerp"] = &trussc::Color::lerp;
-        t["fromBytes"] = sol::overload([](int r, int g, int b) { return trussc::Color::fromBytes(r, g, b); }, [](int r, int g, int b, int a) { return trussc::Color::fromBytes(r, g, b, a); });
-        t["fromHex"] = sol::overload([](uint32_t hex) { return trussc::Color::fromHex(hex); }, [](uint32_t hex, bool hasAlpha) { return trussc::Color::fromHex(hex, hasAlpha); });
-        t["fromHSB"] = sol::overload([](float h, float s, float b) { return trussc::Color::fromHSB(h, s, b); }, [](float h, float s, float b, float a) { return trussc::Color::fromHSB(h, s, b, a); });
-        t["fromOKLCH"] = sol::overload([](float L, float C, float H) { return trussc::Color::fromOKLCH(L, C, H); }, [](float L, float C, float H, float a) { return trussc::Color::fromOKLCH(L, C, H, a); });
-        t["fromOKLab"] = sol::overload([](float L, float a_lab, float b_lab) { return trussc::Color::fromOKLab(L, a_lab, b_lab); }, [](float L, float a_lab, float b_lab, float alpha) { return trussc::Color::fromOKLab(L, a_lab, b_lab, alpha); });
-        t["fromLinear"] = sol::overload([](float r, float g, float b) { return trussc::Color::fromLinear(r, g, b); }, [](float r, float g, float b, float a) { return trussc::Color::fromLinear(r, g, b, a); });
+        auto constructors = tcxLuaConstructors<trussc::RectNodeButton
+            , trussc::RectNodeButton()
+        >();
+        sol::usertype<trussc::RectNodeButton> t = lua->new_usertype<trussc::RectNodeButton>("RectNodeButton", constructors, sol::call_constructor, constructors);
+        t["hoverColor"] = &trussc::RectNodeButton::hoverColor;
+        t["label"] = &trussc::RectNodeButton::label;
+        t["localMatrixChanged"] = &trussc::RectNodeButton::localMatrixChanged;
+        t["mouseDragged"] = &trussc::RectNodeButton::mouseDragged;
+        t["mousePressed"] = &trussc::RectNodeButton::mousePressed;
+        t["mouseReleased"] = &trussc::RectNodeButton::mouseReleased;
+        t["mouseScrolled"] = &trussc::RectNodeButton::mouseScrolled;
+        t["normalColor"] = &trussc::RectNodeButton::normalColor;
+        t["pressColor"] = &trussc::RectNodeButton::pressColor;
+        t["addChild"] = sol::overload([](trussc::RectNodeButton& self, trussc::RectNodeButton::Ptr child) { return self.addChild(child); }, [](trussc::RectNodeButton& self, trussc::RectNodeButton::Ptr child, bool keepGlobalPosition) { return self.addChild(child, keepGlobalPosition); });
+        t["callAfter"] = &trussc::RectNodeButton::callAfter;
+        t["callEvery"] = &trussc::RectNodeButton::callEvery;
+        t["callEveryCatchUp"] = &trussc::RectNodeButton::callEveryCatchUp;
+        t["cancelAllTimers"] = &trussc::RectNodeButton::cancelAllTimers;
+        t["cancelTimer"] = &trussc::RectNodeButton::cancelTimer;
+        t["cleanup"] = &trussc::RectNodeButton::cleanup;
+        t["destroy"] = &trussc::RectNodeButton::destroy;
+        t["disableEvents"] = &trussc::RectNodeButton::disableEvents;
+        t["draw"] = &trussc::RectNodeButton::draw;
+        t["enableEvents"] = &trussc::RectNodeButton::enableEvents;
+        t["findByInstanceId"] = &trussc::RectNodeButton::findByInstanceId;
+        t["findHitNode"] = &trussc::RectNodeButton::findHitNode;
+        t["findHitNodeFromScreen"] = &trussc::RectNodeButton::findHitNodeFromScreen;
+        t["getActive"] = &trussc::RectNodeButton::getActive;
+        t["getBottom"] = &trussc::RectNodeButton::getBottom;
+        t["getCameraContext"] = &trussc::RectNodeButton::getCameraContext;
+        t["getChildCount"] = &trussc::RectNodeButton::getChildCount;
+        t["getChildIndex"] = &trussc::RectNodeButton::getChildIndex;
+        t["getChildren"] = &trussc::RectNodeButton::getChildren;
+        t["getDisplayName"] = &trussc::RectNodeButton::getDisplayName;
+        t["getEuler"] = &trussc::RectNodeButton::getEuler;
+        t["getEulerDeg"] = &trussc::RectNodeButton::getEulerDeg;
+        t["getGlobalMatrix"] = &trussc::RectNodeButton::getGlobalMatrix;
+        t["getGlobalMatrixInverse"] = &trussc::RectNodeButton::getGlobalMatrixInverse;
+        t["getGlobalPos"] = &trussc::RectNodeButton::getGlobalPos;
+        t["getHeight"] = &trussc::RectNodeButton::getHeight;
+        t["getInstanceId"] = &trussc::RectNodeButton::getInstanceId;
+        t["getLeft"] = &trussc::RectNodeButton::getLeft;
+        t["getLocalMatrix"] = &trussc::RectNodeButton::getLocalMatrix;
+        t["getModByTypeName"] = &trussc::RectNodeButton::getModByTypeName;
+        t["getModTypeNames"] = &trussc::RectNodeButton::getModTypeNames;
+        t["getMods"] = &trussc::RectNodeButton::getMods;
+        t["getMouseX"] = &trussc::RectNodeButton::getMouseX;
+        t["getMouseY"] = &trussc::RectNodeButton::getMouseY;
+        t["getName"] = &trussc::RectNodeButton::getName;
+        t["getPMouseX"] = &trussc::RectNodeButton::getPMouseX;
+        t["getPMouseY"] = &trussc::RectNodeButton::getPMouseY;
+        t["getParent"] = &trussc::RectNodeButton::getParent;
+        t["getPos"] = &trussc::RectNodeButton::getPos;
+        t["getQuaternion"] = &trussc::RectNodeButton::getQuaternion;
+        t["getRight"] = &trussc::RectNodeButton::getRight;
+        t["getRot"] = &trussc::RectNodeButton::getRot;
+        t["getRotDeg"] = &trussc::RectNodeButton::getRotDeg;
+        t["getScale"] = &trussc::RectNodeButton::getScale;
+        t["getScaleX"] = &trussc::RectNodeButton::getScaleX;
+        t["getScaleY"] = &trussc::RectNodeButton::getScaleY;
+        t["getScaleZ"] = &trussc::RectNodeButton::getScaleZ;
+        t["getSize"] = &trussc::RectNodeButton::getSize;
+        t["getTop"] = &trussc::RectNodeButton::getTop;
+        t["getTypeName"] = &trussc::RectNodeButton::getTypeName;
+        t["getVisible"] = &trussc::RectNodeButton::getVisible;
+        t["getWidth"] = &trussc::RectNodeButton::getWidth;
+        t["getX"] = &trussc::RectNodeButton::getX;
+        t["getY"] = &trussc::RectNodeButton::getY;
+        t["getZ"] = &trussc::RectNodeButton::getZ;
+        t["globalToLocal"] = [](trussc::RectNodeButton& self, const trussc::Vec3 & global) { return self.globalToLocal(global); };
+        t["hasName"] = &trussc::RectNodeButton::hasName;
+        t["hitTest"] = [](trussc::RectNodeButton& self, trussc::Vec2 local) { return self.hitTest(local); };
+        t["insertChild"] = sol::overload([](trussc::RectNodeButton& self, size_t index, trussc::RectNodeButton::Ptr child) { return self.insertChild(index, child); }, [](trussc::RectNodeButton& self, size_t index, trussc::RectNodeButton::Ptr child, bool keepGlobalPosition) { return self.insertChild(index, child, keepGlobalPosition); });
+        t["isActive"] = &trussc::RectNodeButton::isActive;
+        t["isClipping"] = &trussc::RectNodeButton::isClipping;
+        t["isDead"] = &trussc::RectNodeButton::isDead;
+        t["isEventsEnabled"] = &trussc::RectNodeButton::isEventsEnabled;
+        t["isMouseOver"] = &trussc::RectNodeButton::isMouseOver;
+        t["isPressed"] = &trussc::RectNodeButton::isPressed;
+        t["isVisible"] = &trussc::RectNodeButton::isVisible;
+        t["localToGlobal"] = [](trussc::RectNodeButton& self, const trussc::Vec3 & local) { return self.localToGlobal(local); };
+        t["moveToBack"] = &trussc::RectNodeButton::moveToBack;
+        t["moveToFront"] = &trussc::RectNodeButton::moveToFront;
+        t["onChildAdded"] = &trussc::RectNodeButton::onChildAdded;
+        t["onChildRemoved"] = &trussc::RectNodeButton::onChildRemoved;
+        t["removeAllChildren"] = &trussc::RectNodeButton::removeAllChildren;
+        t["removeChild"] = &trussc::RectNodeButton::removeChild;
+        t["setActive"] = &trussc::RectNodeButton::setActive;
+        t["setCameraContext"] = &trussc::RectNodeButton::setCameraContext;
+        t["setClipping"] = &trussc::RectNodeButton::setClipping;
+        t["setEuler"] = sol::overload([](trussc::RectNodeButton& self, const trussc::Vec3 & euler) { return self.setEuler(euler); }, [](trussc::RectNodeButton& self, float pitch, float yaw, float roll) { return self.setEuler(pitch, yaw, roll); });
+        t["setEulerDeg"] = &trussc::RectNodeButton::setEulerDeg;
+        t["setGlobalPos"] = sol::overload([](trussc::RectNodeButton& self, const trussc::Vec3 & global) { return self.setGlobalPos(global); }, [](trussc::RectNodeButton& self, float x, float y) { return self.setGlobalPos(x, y); }, [](trussc::RectNodeButton& self, float x, float y, float z) { return self.setGlobalPos(x, y, z); });
+        t["setHeight"] = &trussc::RectNodeButton::setHeight;
+        t["setIsActive"] = &trussc::RectNodeButton::setIsActive;
+        t["setIsVisible"] = &trussc::RectNodeButton::setIsVisible;
+        t["setName"] = &trussc::RectNodeButton::setName;
+        t["setPos"] = sol::overload([](trussc::RectNodeButton& self, const trussc::Vec3 & pos) { return self.setPos(pos); }, [](trussc::RectNodeButton& self, float x, float y) { return self.setPos(x, y); }, [](trussc::RectNodeButton& self, float x, float y, float z) { return self.setPos(x, y, z); });
+        t["setQuaternion"] = &trussc::RectNodeButton::setQuaternion;
+        t["setRect"] = &trussc::RectNodeButton::setRect;
+        t["setRot"] = &trussc::RectNodeButton::setRot;
+        t["setRotDeg"] = &trussc::RectNodeButton::setRotDeg;
+        t["setScale"] = sol::overload([](trussc::RectNodeButton& self, const trussc::Vec3 & s) { return self.setScale(s); }, [](trussc::RectNodeButton& self, float uniform) { return self.setScale(uniform); }, [](trussc::RectNodeButton& self, float sx, float sy) { return self.setScale(sx, sy); }, [](trussc::RectNodeButton& self, float sx, float sy, float sz) { return self.setScale(sx, sy, sz); });
+        t["setScaleX"] = &trussc::RectNodeButton::setScaleX;
+        t["setScaleY"] = &trussc::RectNodeButton::setScaleY;
+        t["setScaleZ"] = &trussc::RectNodeButton::setScaleZ;
+        t["setSize"] = sol::overload([](trussc::RectNodeButton& self, float w, float h) { return self.setSize(w, h); }, [](trussc::RectNodeButton& self, float size) { return self.setSize(size); }, [](trussc::RectNodeButton& self, const trussc::Vec2 & s) { return self.setSize(s); });
+        t["setVisible"] = &trussc::RectNodeButton::setVisible;
+        t["setWidth"] = &trussc::RectNodeButton::setWidth;
+        t["setX"] = &trussc::RectNodeButton::setX;
+        t["setY"] = &trussc::RectNodeButton::setY;
+        t["setZ"] = &trussc::RectNodeButton::setZ;
+        t["setup"] = &trussc::RectNodeButton::setup;
+        t["update"] = &trussc::RectNodeButton::update;
     }
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
     {
-        sol::usertype<trussc::Serial> t = lua->new_usertype<trussc::Serial>("Serial",
-            sol::constructors<trussc::Serial()>(),
-            sol::call_constructor, sol::constructors<trussc::Serial()>());
-        t["getDeviceList"] = &trussc::Serial::getDeviceList;
-        t["setup"] = sol::overload([](trussc::Serial& self, const std::string & portName, int baudRate) { return self.setup(portName, baudRate); }, [](trussc::Serial& self, int deviceIndex, int baudRate) { return self.setup(deviceIndex, baudRate); });
-        t["close"] = &trussc::Serial::close;
-        t["isInitialized"] = &trussc::Serial::isInitialized;
-        t["getDevicePath"] = &trussc::Serial::getDevicePath;
-        t["available"] = &trussc::Serial::available;
-        t["readByte"] = &trussc::Serial::readByte;
-        t["writeBytes"] = [](trussc::Serial& self, const std::string & buffer) { return self.writeBytes(buffer); };
-        t["writeByte"] = &trussc::Serial::writeByte;
-        t["flushInput"] = &trussc::Serial::flushInput;
-        t["flushOutput"] = &trussc::Serial::flushOutput;
-        t["flush"] = &trussc::Serial::flush;
-        t["drain"] = &trussc::Serial::drain;
-        t["printDevices"] = &trussc::Serial::printDevices;
-        t["listDevices"] = &trussc::Serial::listDevices;
-    }
-#endif
-    {
-        sol::usertype<trussc::IVec2> t = lua->new_usertype<trussc::IVec2>("IVec2",
-            sol::constructors<trussc::IVec2(), trussc::IVec2(int, int), trussc::IVec2(int)>(),
-            sol::call_constructor, sol::constructors<trussc::IVec2(), trussc::IVec2(int, int), trussc::IVec2(int)>(),
-            sol::meta_function::addition, [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a + b; },
-            sol::meta_function::subtraction, [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a - b; },
-            sol::meta_function::unary_minus, [](const trussc::IVec2& a){ return -a; },
-            sol::meta_function::multiplication, [](const trussc::IVec2& a, int b){ return a * b; },
-            sol::meta_function::equal_to, [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a == b; });
-        t["x"] = &trussc::IVec2::x;
-        t["y"] = &trussc::IVec2::y;
-        t["toVec2"] = &trussc::IVec2::toVec2;
+        auto constructors = tcxLuaConstructors<trussc::LayoutMod
+            , trussc::LayoutMod()
+            , trussc::LayoutMod(trussc::LayoutDirection)
+            , trussc::LayoutMod(trussc::LayoutDirection, float)
+        >();
+        sol::usertype<trussc::LayoutMod> t = lua->new_usertype<trussc::LayoutMod>("LayoutMod", constructors, sol::call_constructor, constructors);
+        t["getCrossAxis"] = &trussc::LayoutMod::getCrossAxis;
+        t["getDirection"] = &trussc::LayoutMod::getDirection;
+        t["getMainAxis"] = &trussc::LayoutMod::getMainAxis;
+        t["getOwner"] = [](trussc::LayoutMod& self) { return self.getOwner(); };
+        t["getPaddingBottom"] = &trussc::LayoutMod::getPaddingBottom;
+        t["getPaddingLeft"] = &trussc::LayoutMod::getPaddingLeft;
+        t["getPaddingRight"] = &trussc::LayoutMod::getPaddingRight;
+        t["getPaddingTop"] = &trussc::LayoutMod::getPaddingTop;
+        t["getSpacing"] = &trussc::LayoutMod::getSpacing;
+        t["setCrossAxis"] = &trussc::LayoutMod::setCrossAxis;
+        t["setDirection"] = &trussc::LayoutMod::setDirection;
+        t["setMainAxis"] = &trussc::LayoutMod::setMainAxis;
+        t["setPadding"] = sol::overload([](trussc::LayoutMod& self, float padding) -> decltype(auto) { return self.setPadding(padding); }, [](trussc::LayoutMod& self, float vertical, float horizontal) -> decltype(auto) { return self.setPadding(vertical, horizontal); }, [](trussc::LayoutMod& self, float top, float right, float bottom, float left) -> decltype(auto) { return self.setPadding(top, right, bottom, left); });
+        t["setPaddingBottom"] = &trussc::LayoutMod::setPaddingBottom;
+        t["setPaddingLeft"] = &trussc::LayoutMod::setPaddingLeft;
+        t["setPaddingRight"] = &trussc::LayoutMod::setPaddingRight;
+        t["setPaddingTop"] = &trussc::LayoutMod::setPaddingTop;
+        t["setSpacing"] = &trussc::LayoutMod::setSpacing;
+        t["updateLayout"] = &trussc::LayoutMod::updateLayout;
     }
     {
-        sol::usertype<trussc::SoundStream> t = lua->new_usertype<trussc::SoundStream>("SoundStream",
-            sol::constructors<trussc::SoundStream()>(),
-            sol::call_constructor, sol::constructors<trussc::SoundStream()>());
-        t["loadStream"] = sol::overload([](trussc::SoundStream& self, const fs::path & path) { return self.loadStream(path); }, [](trussc::SoundStream& self, const fs::path & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
-        t["getDuration"] = &trussc::SoundStream::getDuration;
-        t["getPath"] = &trussc::SoundStream::getPath;
-        t["getMaxPolyphony"] = &trussc::SoundStream::getMaxPolyphony;
+        auto constructors = tcxLuaConstructors<trussc::ChipSoundNote
+            , trussc::ChipSoundNote()
+            , trussc::ChipSoundNote(trussc::Wave, float, float)
+            , trussc::ChipSoundNote(trussc::Wave, float, float, float)
+        >();
+        sol::usertype<trussc::ChipSoundNote> t = lua->new_usertype<trussc::ChipSoundNote>("ChipSoundNote", constructors, sol::call_constructor, constructors);
+        t["attack"] = &trussc::ChipSoundNote::attack;
+        t["decay"] = &trussc::ChipSoundNote::decay;
+        t["duration"] = &trussc::ChipSoundNote::duration;
+        t["hz"] = &trussc::ChipSoundNote::hz;
+        t["release"] = &trussc::ChipSoundNote::release;
+        t["sustain"] = &trussc::ChipSoundNote::sustain;
+        t["volume"] = &trussc::ChipSoundNote::volume;
+        t["wave"] = &trussc::ChipSoundNote::wave;
+        t["build"] = &trussc::ChipSoundNote::build;
+        t["generateBuffer"] = &trussc::ChipSoundNote::generateBuffer;
+        t["getTotalDuration"] = &trussc::ChipSoundNote::getTotalDuration;
     }
+    lua->new_usertype<trussc::EaseType>("EaseType",
+        sol::meta_function::equal_to, [](trussc::EaseType a, trussc::EaseType b){ return a == b; },
+        "Linear", sol::var(trussc::EaseType::Linear),
+        "Quad", sol::var(trussc::EaseType::Quad),
+        "Cubic", sol::var(trussc::EaseType::Cubic),
+        "Quart", sol::var(trussc::EaseType::Quart),
+        "Quint", sol::var(trussc::EaseType::Quint),
+        "Sine", sol::var(trussc::EaseType::Sine),
+        "Expo", sol::var(trussc::EaseType::Expo),
+        "Circ", sol::var(trussc::EaseType::Circ),
+        "Back", sol::var(trussc::EaseType::Back),
+        "Elastic", sol::var(trussc::EaseType::Elastic),
+        "Bounce", sol::var(trussc::EaseType::Bounce),
+        "Custom", sol::var(trussc::EaseType::Custom));
     {
-        sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
-        t["view"] = &trussc::CameraContext::view;
-        t["projection"] = &trussc::CameraContext::projection;
-        t["viewW"] = &trussc::CameraContext::viewW;
-        t["viewH"] = &trussc::CameraContext::viewH;
-        t["pickable"] = &trussc::CameraContext::pickable;
-        t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
-        t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
+        sol::usertype<trussc::AudioDeviceChangedArgs> t = lua->new_usertype<trussc::AudioDeviceChangedArgs>("AudioDeviceChangedArgs");
+        t["bufferSize"] = &trussc::AudioDeviceChangedArgs::bufferSize;
+        t["channels"] = &trussc::AudioDeviceChangedArgs::channels;
+        t["deviceName"] = &trussc::AudioDeviceChangedArgs::deviceName;
+        t["isDefaultDevice"] = &trussc::AudioDeviceChangedArgs::isDefaultDevice;
+        t["maxPolyphony"] = &trussc::AudioDeviceChangedArgs::maxPolyphony;
+        t["sampleRate"] = &trussc::AudioDeviceChangedArgs::sampleRate;
     }
-    {
-        sol::usertype<trussc::TcpSendCompleteEventArgs> t = lua->new_usertype<trussc::TcpSendCompleteEventArgs>("TcpSendCompleteEventArgs");
-        t["clientId"] = &trussc::TcpSendCompleteEventArgs::clientId;
-        t["sendId"] = &trussc::TcpSendCompleteEventArgs::sendId;
-        t["error"] = &trussc::TcpSendCompleteEventArgs::error;
-        t["bytesSent"] = &trussc::TcpSendCompleteEventArgs::bytesSent;
-    }
-    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
-        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
-        "Off", sol::var(trussc::KinsokuLevel::Off),
-        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
-        "Standard", sol::var(trussc::KinsokuLevel::Standard));
-    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
-        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
-        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
-        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
-    {
-        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
-        t["note"] = &trussc::ChipSoundBundle::Entry::note;
-        t["time"] = &trussc::ChipSoundBundle::Entry::time;
-    }
+    lua->new_usertype<trussc::EasyCam::Modifier>("EasyCamModifier",
+        sol::meta_function::equal_to, [](trussc::EasyCam::Modifier a, trussc::EasyCam::Modifier b){ return a == b; },
+        "None", sol::var(trussc::EasyCam::Modifier::None),
+        "Shift", sol::var(trussc::EasyCam::Modifier::Shift),
+        "Ctrl", sol::var(trussc::EasyCam::Modifier::Ctrl),
+        "Alt", sol::var(trussc::EasyCam::Modifier::Alt),
+        "Super", sol::var(trussc::EasyCam::Modifier::Super));
+    lua->new_usertype<trussc::VideoCodec>("VideoCodec",
+        sol::meta_function::equal_to, [](trussc::VideoCodec a, trussc::VideoCodec b){ return a == b; },
+        "H264", sol::var(trussc::VideoCodec::H264),
+        "HEVC", sol::var(trussc::VideoCodec::HEVC),
+        "ProRes422", sol::var(trussc::VideoCodec::ProRes422),
+        "ProRes4444", sol::var(trussc::VideoCodec::ProRes4444));
+    lua->new_usertype<trussc::ScrollBar::Direction>("ScrollBarDirection",
+        sol::meta_function::equal_to, [](trussc::ScrollBar::Direction a, trussc::ScrollBar::Direction b){ return a == b; },
+        "Vertical", sol::var(trussc::ScrollBar::Direction::Vertical),
+        "Horizontal", sol::var(trussc::ScrollBar::Direction::Horizontal));
+    lua->new_usertype<trussc::EaseMode>("EaseMode",
+        sol::meta_function::equal_to, [](trussc::EaseMode a, trussc::EaseMode b){ return a == b; },
+        "In", sol::var(trussc::EaseMode::In),
+        "Out", sol::var(trussc::EaseMode::Out),
+        "InOut", sol::var(trussc::EaseMode::InOut));
     {
         sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
         t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
+        t["reason"] = &trussc::ExitRequestEventArgs::reason;
+    }
+    {
+        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
+        t["hit"] = &trussc::Ray::Hit::hit;
+        t["point"] = &trussc::Ray::Hit::point;
+        t["t"] = &trussc::Ray::Hit::t;
     }
 }
-#ifndef _MSC_VER
+#ifdef _MSC_VER
+#pragma warning(pop)
+#else
 #pragma GCC diagnostic pop
 #pragma clang diagnostic pop
 #endif

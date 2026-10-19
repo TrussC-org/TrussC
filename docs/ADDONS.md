@@ -90,10 +90,10 @@ tcxBox2d
 using namespace tcx::box2d;
 
 World world;
-Circle circle;
+CircleBody circle;
 
 void setup() {
-    world.setup(Vec2(0, 300));
+    world.setup(tc::Vec2(0, 300));
     circle.setup(world, 400, 100, 30);
 }
 ```
@@ -174,6 +174,8 @@ addons/tcxMyAddon/
 │   │   └── tcApp.cpp
 │   ├── addons.make          # Addons used by this example
 │   └── CMakeLists.txt       # Shared template
+├── tests/                   # Optional console test harness (run by CI)
+├── tests-<name>/            # Optional extra harness, e.g. one needing a heavy dependency
 └── CMakeLists.txt           # Optional (only for FetchContent, etc.)
 ```
 
@@ -182,6 +184,8 @@ addons/tcxMyAddon/
 - `libs/`: External source code, git submodules, etc.
 - `example-xxx/`: Examples at same level as `src/`. CMakeLists.txt uses shared template
 - `CMakeLists.txt`: Usually not needed. Create only for special processing like FetchContent
+- `tests/`: Console test harness (`src/main.cpp`, non-zero exit fails). CI builds and runs it on every pull request; a `daily-only` marker file in the folder moves it to the daily run instead
+- `tests-<name>/`: An extra harness next to `tests/`, for tests that need a heavy dependency the per-PR `tests/` avoids (e.g. tcxCurl: `tests/` is curl-free, `tests-curl/` links libcurl). Put a `daily-only` marker in it. This applies to addons inside this repository; CI for an external addon repository runs only its `tests/`
 
 ### When CMakeLists.txt Is Not Needed
 
@@ -243,6 +247,30 @@ TrussC copies the file into whatever app consumes the addon — `.app/Contents/<
 no need to know the app target's name. For generated files, `add_dependencies()`
 your addon target on the generator so the file exists before the copy runs.
 
+### Shaders (`trussc_compile_shaders`)
+
+An addon with its own shaders keeps the `.glsl` sources in the addon (for
+example `src/shaders/`) and compiles them from its `CMakeLists.txt` with the
+same function apps and TrussC core use:
+
+```cmake
+# trussc_compile_shaders(<target> <source dir> [OUTPUT_DIR <dir>])
+trussc_compile_shaders(${ADDON_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders")
+target_link_libraries(${ADDON_NAME} PUBLIC ${ADDON_NAME}_shaders) # INTERFACE for header-only addons
+```
+
+Every `*.glsl` under the source dir becomes `<name>.glsl.h` next to it (or in
+`OUTPUT_DIR`), compiled with sokol-shdc for every backend TrussC targets
+(Metal for macOS / iOS / the iOS simulator, HLSL, GLSL 4.30, GLSL ES 3, WGSL).
+The shader target carries the include directory and generation dependency,
+so the addon and every target that links it wait for the headers. Use
+`INTERFACE` instead of `PUBLIC` for a header-only addon. Include the header
+from your code (`#include "shaders/myShader.glsl.h"`, relative to the
+including file, or `#include "myShader.glsl.h"` via the shader target). The
+headers are build output: don't commit them (the repository ignores `*.glsl.h`)
+and don't ship a pre-generated copy.
+An addon with shaders therefore needs a `CMakeLists.txt`.
+
 ### Main Header (tcxMyAddon.h)
 
 ```cpp
@@ -279,6 +307,76 @@ private:
 
 } // namespace tcx::myaddon
 ```
+
+### Events, Threads and Teardown
+
+**Asynchronous work owns everything it touches until it ends; the public class is the handle, and the worker never knows the handle's address.**
+
+- Put asynchronously used buffers, mutexes, queues, rings, OS handles and devices in one heap `State`, held by the public handle's `shared_ptr<State>`. Workers capture only that state, never `this`; use a `weak_ptr` for a delivery target.
+- `stop()` and destruction request stop and wait for completion from another thread. On the worker's own thread they return without waiting, and the worker retains the state until it finishes (`internal::KeptThreads`, in `tc/utils/tcKeptThreads.h`, keeps self-thread handles for a later join and detaches them on self-destruction). Restart creates a new `State`; the old worker finishes with the old state.
+- Delivery uses liveness tokens: `Deliver::Main` carries one automatically; `runOnMainThread(fn, weakToken)` accepts the same `weak_ptr<atomic<bool>>` and drops delivery if it is expired or false. These tokens do not wait for callbacks already running. Workers enqueue and return; they must never wait for the main thread.
+- C callbacks receive the `State` as `user_data`; keep it alive until the API's unregister/stop has returned. On Web without pthreads, nothing waits: callbacks resolving after stop inspect the state's stopped flag and drop their work.
+- Add no teardown timeout. Where an existing bounded wait expires, log and return while the worker keeps the state; never free it underneath a callback.
+- Process-wide owners (audio engine, stream worker, MCP state, console channel, global recorder and main-thread queue) must remain usable during exit: allocate them once and retain them through a static pointer without deleting them. A hot reload guest still stops its workers before unloading.
+
+`tc::Thread` retains its ofThread-compatible subclass contract: call `waitForThread()` in the subclass destructor. It joins from another thread; on itself it requests stop by default and returns, and the base destructor detaches. A self-destroyed worker must then access no members.
+
+Addons often fire an `Event<T>` from a thread they own (a receive thread, a device callback), or listen to one that fires off the main thread (`AudioEngine::audioOut`). `Event` guarantees the first point below; the component that owns the thread takes care of the rest:
+
+1. **Same thread:** a listener removed during `notify()` on the notifying thread is not called again, also not later in the same pass. A listener added during a pass starts from the next `notify()`.
+2. **Across threads, `Event` does not wait.** `disconnect()` (or destroying the `EventListener`) returns while the callback may still be running on the other thread. Two safe patterns:
+   - The receiver listens with `Deliver::Main`: the callback runs on the main thread, and a queued call is dropped if the listener has died.
+   - For latency-critical sources such as audio, **the component that owns the thread provides a "stop and wait for in-flight callbacks" barrier and calls it during teardown**: `AudioEngine::waitForAudioCallbacks()` for `audioOut` / `audioIn`, the async timer scheduler for `callAfterAsync` / `callEveryAsync` (`cancelAllAsyncTimers()`, also run from `~Node`), and `TcpClient::disconnect()`, which joins the receive thread. If your addon owns a thread that fires events, give it such a stop-and-wait, and let it return at once when it is called from that thread itself.
+3. **Order:** the barrier runs before the state the callback touches is destroyed. Call it from the most-derived class's destructor (or from an explicit `close()` / `stop()`), not from a base-class destructor: by the time a base-class destructor runs, the derived members are already gone.
+4. **A listener must return.** The framework's own teardown (an App's `audioOut()` / `audioIn()` on exit, hot reload or window close) waits for a listener in flight without a time limit: one that never returns hangs the app, with an error in the log after one second, rather than letting the App be destroyed under it. The public `AudioEngine::waitForAudioCallbacks()` gives up after one second and returns `false` instead. Either way, a listener on the audio thread (or any thread you stop this way) must not wait on the main thread or on a lock the tearing-down thread may hold.
+
+An addon listener retains its state through any callback still in flight:
+
+```cpp
+class Scope {
+    struct State {
+        std::vector<float> ring;
+        void push(const tc::AudioOutBuffer& b);
+    };
+public:
+    Scope() {
+        listener_ = tc::AudioEngine::getInstance().audioOut.listen(
+            [state = state_](tc::AudioOutBuffer& b) { state->push(b); },
+            tc::audio::priority::Monitor);
+    }
+    ~Scope() {
+        listener_.disconnect();
+        if (!tc::AudioEngine::getInstance().waitForAudioCallbacks()) {
+            tc::logError("Scope") << "Audio callback still running; it retains its state";
+        }
+    }
+private:
+    std::shared_ptr<State> state_ = std::make_shared<State>();
+    tc::EventListener listener_;
+};
+```
+
+### Warning Once
+
+To log a warning only the first time (an unsupported format, a missing device), gate it with a `tc::OnceGate` instead of a `static bool warned` flag. `isFirstTime()` is true the first time; give the constructor an interval in seconds to make it true again once that much time has passed since the last true. It is thread-safe and lock-free, so audio and worker threads can use it too:
+
+```cpp
+static tc::OnceGate unsupportedWarned;
+if (unsupportedWarned.isFirstTime()) {
+    tc::logWarning("tcxMyAddon") << "format not supported; skipping";
+}
+
+static tc::OnceGate queueFull{5.0};               // at most once per 5 s
+if (queueFull.isFirstTime()) {
+    tc::logWarning("tcxMyAddon") << "queue full, dropping frames";
+}
+```
+
+For a warning that should fire once per object (once per connection, say), make the gate a member of that object: `tc::OnceGate timeoutWarned_;`.
+
+### Holding on to Nodes
+
+An addon that keeps a `Node` beyond a single call (a target to follow, a selection, a root to draw) stores it as `std::weak_ptr<tc::Node>`, or as `Node::Ptr` when the addon means to own it, never as a raw `Node*`. The app can remove and free the node at any time, and a raw pointer then dangles. Call `lock()` for each use and keep the returned `shared_ptr` while you work with the node. `tcxNodeInspector` keeps its attached root, drag target and selection this way.
 
 ---
 
@@ -329,7 +427,7 @@ No prefix within namespace:
 ```cpp
 namespace tcx::box2d {
     class World { ... };    // OK: tcx::box2d::World
-    class Circle { ... };   // OK: tcx::box2d::Circle
+    class CircleBody { ... }; // OK: tcx::box2d::CircleBody
 }
 ```
 
@@ -515,8 +613,8 @@ Each addon entry in `registry.json` looks like:
 ```jsonc
 {
   "name": "tcxLua",
-  "owner": "funatsufumiya",            // GitHub user/org. Empty for bundled.
-  "url": "https://github.com/funatsufumiya/tcxLua.git",
+  "owner": "ffunatsu",                 // GitHub user/org. Empty for bundled.
+  "url": "https://github.com/ffunatsu/tcxLua.git",
   "bundled": false,                    // true if shipped inside TrussC core
   "version": "0.1.0",
   "latest_tag": "v0.1.0",
@@ -534,10 +632,10 @@ Each addon entry in `registry.json` looks like:
 
 ### Display Convention for Name Collisions
 
-Two different repos can produce addons with the same `name` (for example, a bundled `tcxLua` and a community `funatsufumiya/tcxLua`). The registry intentionally keeps both. Consumers (trusscli, the website) should display them as:
+Two different repos can produce addons with the same `name` (for example, a bundled `tcxLua` and a community `ffunatsu/tcxLua`). The registry intentionally keeps both. Consumers (trusscli, the website) should display them as:
 
 - `bundled: true` → plain `tcxLua`
-- `bundled: false` → `owner/name` (e.g. `funatsufumiya/tcxLua`)
+- `bundled: false` → `owner/name` (e.g. `ffunatsu/tcxLua`)
 
 `trusscli addon clone <name>` should accept both forms; a bare `<name>` that maps to multiple entries should prompt the user to disambiguate with `<owner>/<name>`.
 
@@ -560,17 +658,12 @@ To make your addon discoverable:
 
 ### tcxBox2d
 
-2D physics engine (Box2D).
-
-**Features:**
-- World (physics world)
-- Body (physics body base class, inherits tc::Node)
-- Circle, Rect, Polygon (shapes)
-- Mouse drag (b2MouseJoint)
-
-**Usage Example:**
+2D physics built on Box2D, with physics and rendering as separate Mods.
+`World` steps automatically each frame. Set up your own World or use
+`defaultWorld().setup()`; add nodes to the scene for automatic transform sync.
 
 ```cpp
+#include <TrussC.h>
 #include <tcxBox2d.h>
 
 using namespace tc;
@@ -578,26 +671,38 @@ using namespace tcx::box2d;
 
 class tcApp : public App {
     World world;
-    Circle circle;
 
     void setup() override {
-        world.setup(Vec2(0, 300));  // Gravity
-        world.createBounds();        // Screen edge walls
-        circle.setup(world, 400, 100, 30);
-    }
-
-    void update() override {
-        world.update();
-        circle.updateTree();  // Sync Box2D → Node coordinates
+        world.setup(Vec2(0, 300));
+        world.createBounds();
+        auto node = std::make_shared<Node>();
+        node->setPos(400, 100);
+        addChild(node);
+        node->addMod<RigidBody2D>(world, Shape2D::circle(30));
+        node->addMod<ColliderRenderer2D>();
     }
 
     void draw() override {
         clear(0.12);
-        setColor(1.0, 0.78, 0.39);
-        circle.drawTree();    // Draw with position/rotation applied
     }
 };
 ```
+
+Mods expose `onCollisionEnter/Stay/Exit` for solid contacts and
+`onTriggerEnter/Stay/Exit` for sensors (`setTrigger()`). Begin/End are delivered
+after each managed sub-step; Stay runs once per update. Raw `b2World::Step()`
+events wait for the next fresh-frame `World::update()`. Listeners may release
+bodies or the World; recheck borrowed payload pointers after release.
+The classic alternative uses `CircleBody`, `RectBody` and `PolyShape` body nodes.
+See the [addon README](../addons/tcxBox2d/README.md) for shapes and the
+[collision event contract](../addons/tcxBox2d/README.md#collision-events).
+
+b2Body user data is reserved by TrussC; put application data in your Body subclass. Fixture user data is reserved too.
+
+Bodies owned by a TrussC Body or RigidBody2D are destroyed through TrussC (`Body::destroy()`, removing the Mod, `World::clear()`); don't call raw `b2World::DestroyBody`/`DestroyFixture` on them. Raw destroys of bodies you created yourself are tracked when the body still has fixtures (the destruction listener); removing a body's last fixture and then the body without an `update()` in between is not tracked.
+
+Use `World::setDestructionListener()` for a borrowed user destruction listener,
+preserving the World's internal observer.
 
 ### tcxCurl
 
@@ -621,9 +726,32 @@ glTF 2.0 / GLB model loader using cgltf.
 
 Hap video codec for fast GPU-accelerated playback.
 
+Playback requires GPU support for the movie's BC-compressed texture format.
+On iOS, TrussC's Metal backend enables BC texture formats when the GPU reports
+BC support (Hap1 and Hap Q playback checked on an iPhone 16 in the #645
+experiment). Where BC is not supported, for example on the Simulator, loading
+fails cleanly with `Compressed texture format not supported on this GPU`,
+without a crash. See
+[tcxHap GPU requirements](../addons/tcxHap/README.md#gpu-requirements).
+
+`HapPlayer::load()` resolves relative paths against the data folder via
+`getDataPath()`, like `VideoPlayer::load()`. Absolute paths pass through;
+there is no working-directory fallback.
+
 **Features:**
 - Hap, Hap Alpha, Hap Q codecs
 - GPU-side decompression (S3TC/DXT)
+- Audio track: PCM (`sowt`, `twos`, `fl32`, `lpcm`; 16-bit integer or 32-bit
+  float, sound description v0/v1/v2), AAC, MP3. Other PCM formats load
+  without audio and log a warning.
+- A/V sync: video time advances by wall-clock `dt * speed`. While audio is
+  playing and speed is positive, it slews toward the audio position with a
+  0.25 s time constant, smoothing the mixer's device-period position steps.
+  Drift above `getResyncThreshold()` triggers hard re-sync; a threshold of
+  0 or less disables hard re-sync while keeping the slew. After shorter
+  audio ends, wall time carries video to its duration. The video drives the
+  loop and restarts/resyncs audio at wraps. Absent audio, reverse and
+  zero-speed playback use wall time alone.
 
 ### tcxImGui
 
@@ -636,6 +764,10 @@ Dear ImGui integration.
 ### tcxLut
 
 3D LUT (Look-Up Table) color grading.
+
+`Lut3D::load()` resolves relative paths against the data folder via
+`getDataPath()`, like `Image::load()`. Absolute paths pass through;
+there is no working-directory fallback.
 
 **Features:**
 - Load .cube LUT files
@@ -677,6 +809,11 @@ TLS/SSL communication support (mbedTLS).
 - Server certificate verification **required by default** (see [SECURITY.md](SECURITY.md))
 - Custom CA bundle via `setCACertificate()` / `setCACertificateFile()`
 - Dev-only opt-out via `setVerifyNone()` (don't ship)
+- TCP connect deadline: `setConnectTimeout(seconds)`, inherited from
+  `TcpClient` (default `0` = the OS deadline; applies from the next connect)
+- Handshake deadline: `setHandshakeTimeout(seconds)` (default 15 s, counted
+  from the TCP connect; `0` = none). On expiry: `onError`, then
+  `onConnect(false)` with "TLS handshake timeout"
 
 ### tcxWebSocket
 
@@ -689,3 +826,45 @@ WebSocket client and server.
 - For `wss://`: TLS cert verification **on by default**. Use
   `setTlsVerifyNone()` or `setTlsCACertificate(pem)` on the client if needed
   (see [SECURITY.md](SECURITY.md))
+- TCP connect deadline: `setConnectTimeout(seconds)` (default `0` = the OS
+  deadline; applies from the next connect), passed to the TCP/TLS transport
+- Handshake deadline: `setHandshakeTimeout(seconds)` (default 15 s), one
+  deadline counted from the TCP connect that covers the TLS handshake and the
+  server's `101`. On expiry: `onError`, then `onClose`
+- Events fire on the client's network threads; use `Deliver::Main` for
+  listeners that touch the scene or GPU (see `tcWebSocketClient.h`)
+
+## MCP tools in addons (v0.8)
+
+Registration declares tools; the app or a dev build grants access. Official
+addons declare a level on every tool; third-party authors choose their own
+levels and are responsible for what they expose. For example:
+
+```cpp
+mcp::tool("tcx_example_reset", "Reset the simulation")
+    .level(mcp::ToolLevel::Control)
+    .bind(std::function<json()>([] { return json{{"reset", true}}; }));
+```
+
+Use `ReadOnly` for inspection and `Control` for mutations. Omitted `.level()`
+means `Public`; use that only for data/actions intended for ordinary access,
+or exclude development-only tools with a preprocessor guard. Only `tc_` is
+reserved for core (registration is rejected); `tcx_` is free for everyone.
+Register during addon setup regardless of the grant, and let the app call
+`mcp::setToolLevel(mcp::ToolLevel::ReadOnly)` (or `Control`) in `setup()`.
+Registration alone never starts a listener. `Control` includes `ReadOnly`;
+list/call checks use the current grant regardless of registration order.
+
+For development use `trusscli run --mcp` (`TRUSSC_MCP_DEV=ON`, Control).
+A build without `--mcp` clears the switch. In an ordinary build,
+`TRUSSC_MCP=1` or `TRUSSC_MCP_PORT` opens only loopback `tc_get_health`,
+which reports `toolLevel`; it does not expose addon tools. `TRUSSC_MCP=0`
+closes even dev builds. HOST/TOKEN environment settings are dev-only;
+ordinary apps choose an address with `startHttpServer(port, host, token)`
+before granting a level. The first opener decides the address.
+
+Without a code grant or a dev build, core and official addons expose nothing
+beyond the loopback health exception. Third-party addons may register Public
+tools; check the startup exposure log or `tools/list` after opting in to a
+listener. See [AI_AUTOMATION.md](AI_AUTOMATION.md) for grants, custom Public
+listeners, compatibility aliases, and the supervisor model.

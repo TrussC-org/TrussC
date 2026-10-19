@@ -228,6 +228,11 @@ HttpResponse HttpClient::request(const std::string& method,
                                  const std::string& path,
                                  const std::string& body,
                                  const std::string& contentType) {
+    if (!tlsCaPem_.empty()) {
+        HttpResponse out;
+        out.error = "tcxCurl[android]: setTlsCACertificate() is not supported on Android yet";
+        return out;
+    }
     std::string url = baseUrl_ + path;
 
     // Compose effective headers: the user's own list plus Content-Type for

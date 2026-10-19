@@ -341,5 +341,19 @@
     "name_ja": "ネットワーク",
     "name_ko": "네트워크",
     "order": 48
+  },
+  {
+    "id": "mcp",
+    "name": "MCP",
+    "name_ja": "MCP",
+    "name_ko": "MCP",
+    "order": 49
+  },
+  {
+    "id": "console",
+    "name": "Console",
+    "name_ja": "コンソール",
+    "name_ko": "콘솔",
+    "order": 50
   }
 ]

@@ -5,6 +5,7 @@
 // =============================================================================
 
 #include "tc/utils/tcFileDialog.h"
+#include "tc/utils/tcMainThread.h"
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
@@ -58,10 +59,9 @@ static TcDocumentPickerDelegate* _tc_activePickerDelegate = nil;
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// Sync versions (linker stubs - never called due to header unavailable attr)
+// Sync versions: iOS can't block the main thread on a modal, so these log an
+// error and return a failed result. Use the async versions below.
 // ---------------------------------------------------------------------------
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wavailability"
 
 void alertDialog(const std::string& title, const std::string& message) {
     logError() << "[FileDialog] Sync alertDialog is not supported on iOS. Use alertDialogAsync.";
@@ -88,19 +88,19 @@ FileDialogResult saveDialog(const std::string& title,
     return FileDialogResult{};
 }
 
-#pragma clang diagnostic pop
-
 // ---------------------------------------------------------------------------
 // alertDialogAsync - UIAlertController
 // ---------------------------------------------------------------------------
 void alertDialogAsync(const std::string& title,
                       const std::string& message,
                       std::function<void()> callback) {
+    const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     auto cb = callback;
     NSString* nsTitle = [NSString stringWithUTF8String:title.c_str()];
     NSString* nsMessage = [NSString stringWithUTF8String:message.c_str()];
 
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (!internal::appRunIsAlive(token)) return;
         UIViewController* vc = _tc_getRootViewController();
         if (!vc) {
             logError() << "[FileDialog] No root view controller available";
@@ -117,6 +117,7 @@ void alertDialogAsync(const std::string& title,
             actionWithTitle:@"OK"
                       style:UIAlertActionStyleDefault
                     handler:^(UIAlertAction* action) {
+            if (!internal::appRunIsAlive(token)) return;
             if (cb) cb();
         }]];
 
@@ -130,11 +131,13 @@ void alertDialogAsync(const std::string& title,
 void confirmDialogAsync(const std::string& title,
                         const std::string& message,
                         std::function<void(bool)> callback) {
+    const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     auto cb = callback;
     NSString* nsTitle = [NSString stringWithUTF8String:title.c_str()];
     NSString* nsMessage = [NSString stringWithUTF8String:message.c_str()];
 
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (!internal::appRunIsAlive(token)) return;
         UIViewController* vc = _tc_getRootViewController();
         if (!vc) {
             logError() << "[FileDialog] No root view controller available";
@@ -151,6 +154,7 @@ void confirmDialogAsync(const std::string& title,
             actionWithTitle:@"Yes"
                       style:UIAlertActionStyleDefault
                     handler:^(UIAlertAction* action) {
+            if (!internal::appRunIsAlive(token)) return;
             if (cb) cb(true);
         }]];
 
@@ -158,6 +162,7 @@ void confirmDialogAsync(const std::string& title,
             actionWithTitle:@"No"
                       style:UIAlertActionStyleCancel
                     handler:^(UIAlertAction* action) {
+            if (!internal::appRunIsAlive(token)) return;
             if (cb) cb(false);
         }]];
 
@@ -173,11 +178,13 @@ void loadDialogAsync(const std::string& title,
                      const fs::path& defaultPath,
                      bool folderSelection,
                      std::function<void(const FileDialogResult&)> callback) {
+    const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     auto cb = callback;
     NSString* nsDefaultPath = defaultPath.empty() ? nil :
         [NSString stringWithUTF8String:defaultPath.c_str()];
 
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (!internal::appRunIsAlive(token)) return;
         UIViewController* vc = _tc_getRootViewController();
         if (!vc) {
             logError() << "[FileDialog] No root view controller available";
@@ -210,7 +217,7 @@ void loadDialogAsync(const std::string& title,
                 result.fileName = [[url lastPathComponent] UTF8String];
                 [url stopAccessingSecurityScopedResource];
             }
-            if (cb) cb(result);
+            if (internal::appRunIsAlive(token) && cb) cb(result);
             _tc_activePickerDelegate = nil;
         };
 
@@ -231,9 +238,11 @@ void saveDialogAsync(const std::string& title,
                      const fs::path& defaultPath,
                      const fs::path& defaultName,
                      std::function<void(const FileDialogResult&)> callback) {
+    const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     auto cb = callback;
 
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (!internal::appRunIsAlive(token)) return;
         UIViewController* vc = _tc_getRootViewController();
         if (!vc) {
             logError() << "[FileDialog] No root view controller available";
@@ -266,7 +275,7 @@ void saveDialogAsync(const std::string& title,
                 result.filePath = [[url path] UTF8String];
                 result.fileName = [[url lastPathComponent] UTF8String];
             }
-            if (cb) cb(result);
+            if (internal::appRunIsAlive(token) && cb) cb(result);
             _tc_activePickerDelegate = nil;
 
             // Clean up temp file

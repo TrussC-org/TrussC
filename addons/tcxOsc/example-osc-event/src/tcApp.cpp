@@ -16,6 +16,7 @@
 // =============================================================================
 
 #include "TrussC.h"
+#include <mutex>
 #include "tcApp.h"
 
 void tcApp::setup() {
@@ -39,6 +40,8 @@ void tcApp::setup() {
     // Member function pointer version (oF style)
     errorListener_ = receiver_.onParseError.listen(this, &tcApp::onParseError);
 
+    // setup() owns the port exclusively: a second launch reaches the error branch.
+    // For shared multicast reception, use setupMulticast(port_, group) instead.
     if (!receiver_.setup(port_)) {
         addReceiveLog("[ERROR] Failed to bind port " + to_string(port_));
     }

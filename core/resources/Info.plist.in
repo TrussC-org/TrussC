@@ -26,6 +26,8 @@
 	<string></string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>LSMinimumSystemVersion</key>
+	<string>${CMAKE_OSX_DEPLOYMENT_TARGET}</string>
 	<key>NSCameraUsageDescription</key>
 	<string>This app uses the camera for video capture.</string>
 	<key>NSMicrophoneUsageDescription</key>

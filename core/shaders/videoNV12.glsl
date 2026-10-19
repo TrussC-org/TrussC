@@ -6,8 +6,8 @@
 
 @vs vs_nv12
 layout(binding=0) uniform vs_params {
-    vec4 screenSizePos;  // xy = screen size (pixels), zw = draw origin (pixels)
-    vec4 sizePad;        // xy = draw size (pixels), zw = unused (padding)
+    mat4 mvp;
+    vec4 rect; // destination x, y, width, height in target coordinates
 };
 
 in vec2 position;   // unit quad: (0,0) → (1,1)
@@ -15,10 +15,7 @@ out vec2 v_uv;
 
 void main() {
     v_uv = position;
-    vec2 pixelPos = screenSizePos.zw + position * sizePad.xy;
-    vec2 ndc = (pixelPos / screenSizePos.xy) * 2.0 - 1.0;
-    ndc.y = -ndc.y;
-    gl_Position = vec4(ndc, 0.0, 1.0);
+    gl_Position = mvp * vec4(rect.xy + position * rect.zw, 0.0, 1.0);
 }
 @end
 

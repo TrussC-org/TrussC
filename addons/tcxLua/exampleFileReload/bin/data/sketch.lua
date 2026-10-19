@@ -19,6 +19,11 @@ function draw()
 end
 
 function keyPressed(key)
+    -- special keys (Shift, arrows, ...) have codes above 255, which string.char rejects
+    if key > 255 then
+        return
+    end
+
     local c = string.char(key)
     print("key: " .. c) 
 

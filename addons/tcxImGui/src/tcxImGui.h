@@ -9,6 +9,7 @@
 #include "sokol_imgui.h"
 #include "tcImGuiHooks.h"
 #include "tcImGuiTools.h"
+#include "tcImGuiTarget.h"
 #include <cstdlib>
 #include <string>
 #include <memory>
@@ -27,25 +28,8 @@ public:
     void setup() {
         if (initialized_) return;
 
-        // Every manager owns a full sokol_imgui instance (own ImGui context,
-        // font atlas, buffers). The classic single-window app just has one.
-        simgui_desc_t desc = {};
-        desc.logger.func = slog_func;
-        // Secondary windows have their own swapchain formats (BGRA8/RGBA8,
-        // not the main window's RGB10A2) -- the imgui pipeline must match
-        // the pass it renders into or sg validation fails.
-        {
-            auto& wctx = tc::internal::currentWindowContext();
-            if (!wctx.isMain) {
-                desc.color_format = wctx.swapchainColorFormat;
-                desc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-                desc.sample_count = wctx.swapchainSampleCount;
-            }
-        }
-        simguiCtx_ = simgui_tc_make_context(&desc);
-        simgui_tc_set_context(simguiCtx_);
-
-        initialized_ = true;
+        offscreenOwner_ = false;
+        initializeContext_();
 
         // Listen to beforePresent for rendering. events() resolves against the
         // CURRENT window context, so these listeners land on this window's
@@ -53,10 +37,17 @@ public:
         renderListener_ = tc::events().onRender.listen([this]() {
             if (renderPending_) {
                 simgui_tc_set_context(simguiCtx_);
-                simgui_render();
+                detail::renderTargetFrame(simguiCtx_);
                 renderPending_ = false;
+            } else {
+                // No imgui frame in this window frame: the values the MCP
+                // tools queued for this context are settled now (swapFrames()
+                // settles them when imgui runs).
+                detail::settleWithoutImGuiFrame(imguiCtx_);
             }
         }, 1000);
+
+        installDeadlineListeners_();
 
         // Listen to rawEvent for input handling
         eventListener_ = tc::events().rawEvent.listen([this](const sapp_event& ev) {
@@ -69,13 +60,13 @@ public:
         // user code can guard raw input (isOverlayHovered/isOverlayFocused).
         // Installed once, shared by all windows: the query resolves the
         // manager of the window whose context is current when it is asked.
-        tc::internal::overlayHoveredQuery = []() {
+        tc::internal::overlayHoveredQuery() = []() {
             ImGuiManager* m = ImGuiManager::findForCurrentWindow();
             if (!m || !m->isInitialized()) return false;
             simgui_tc_set_context(m->simguiCtx_);
             return ImGui::GetIO().WantCaptureMouse;
         };
-        tc::internal::overlayFocusedQuery = []() {
+        tc::internal::overlayFocusedQuery() = []() {
             ImGuiManager* m = ImGuiManager::findForCurrentWindow();
             if (!m || !m->isInitialized()) return false;
             simgui_tc_set_context(m->simguiCtx_);
@@ -126,7 +117,9 @@ public:
     void shutdown() {
         if (!initialized_) return;
         exitListener_ = {};
+        hotReloadUnloadListener_ = {};
         renderListener_ = {};
+        overdueListener_ = {};
         eventListener_ = {};
         mousePressConsume_ = {};
         mouseReleaseConsume_ = {};
@@ -139,35 +132,105 @@ public:
         // through the manager registry — they stay installed (no-op for
         // windows without an initialized manager).
         pointerCaptured_ = false;
-        // GPU teardown only while sokol_gfx is alive. If shutdown runs from the
-        // static destructor during exit() (e.g. an abnormal teardown path where
-        // the exit event never fired), sokol_gfx is already gone and its objects
-        // with it — skipping is the correct cleanup, touching them would crash.
-        if (sg_isvalid()) simgui_tc_destroy_context(simguiCtx_);
+        // shutdown() runs only while the runtime registries are alive.
+        // Keep this guard for an explicit imguiShutdown() after sokol_gfx is gone:
+        // its GPU objects are no longer valid to destroy.
+        if (sg_isvalid()) {
+            forgetContext(imguiCtx_);   // drop its widget registry before the context goes
+            detail::destroyTargetContext(simguiCtx_);
+        }
+        imguiCtx_ = nullptr;
         simguiCtx_ = {};
         initialized_ = false;
+        renderPending_ = false;
+        offscreenFrameCompleted_ = false;
+        attempts_.clear();
         tc::logVerbose() << "ImGui shutdown";
     }
 
-    // Begin frame (call at start of draw). Sizes/dpi/delta are the CURRENT
-    // window's (context-routed), so imgui lays out for the window it draws in.
-    void begin() {
-        if (!initialized_) return;
+    // Independent offscreen contexts install settlement/lifetime listeners only.
+    // Initialize while the owning window is current, before opening a UI scope.
+    ImGuiManager() = default;
+    ImGuiManager(const ImGuiManager&) = delete;
+    ImGuiManager& operator=(const ImGuiManager&) = delete;
+    void setupOffscreen() {
+        if (initialized_) return;
+        offscreenOwner_ = true;
+        const auto previous = simgui_tc_get_context();
+        auto* previousImGui = ImGui::GetCurrentContext();
+        initializeContext_();
+        // Independent UI state must not share the window manager's ini file.
+        ImGui::GetIO().IniFilename = nullptr;
+        simgui_tc_set_context(previous);
+        ImGui::SetCurrentContext(previousImGui);
+        installDeadlineListeners_();
+        // Cached Fbos may skip UI for any number of owning-window frames.
+        renderListener_ = tc::events().onRender.listen([this]() {
+            if (!offscreenFrameCompleted_) detail::settleWithoutImGuiFrame(imguiCtx_);
+            offscreenFrameCompleted_ = false;
+        }, 1000);
+        exitListener_ = tc::events().exit.listen([this]() { shutdown(); });
+    }
 
-        simgui_tc_set_context(simguiCtx_);
+    // Returns false on a refused attempt. Pair every begin with end, and only
+    // submit widgets when begin succeeds. Prefer scoped() for offscreen UI.
+    bool begin() {
+        if (!initialized_) { attempts_.push_back(false); return false; }
+        // Expire queued input before NewFrame can consume it after a long idle.
+        detail::settleOverdueValues(imguiCtx_);
+        auto& target = tc::internal::currentTarget();
+        if (offscreenOwner_ && !target.isFbo) {
+            tc::logError("ImGui") << "offscreen UI requires an active Fbo";
+            attempts_.push_back(false);
+            return false;
+        }
         simgui_frame_desc_t desc = {};
-        desc.width = tc::getFramebufferWidth();
-        desc.height = tc::getFramebufferHeight();
+        desc.width = target.isFbo ? target.width : tc::getFramebufferWidth();
+        desc.height = target.isFbo ? target.height : tc::getFramebufferHeight();
         desc.delta_time = static_cast<float>(tc::getDeltaTime());
-        desc.dpi_scale = tc::getDpiScale();
-        simgui_new_frame(&desc);
+        desc.dpi_scale = target.isFbo ? tc::internal::targetPixelScale() : tc::getDpiScale();
+        const bool accepted = detail::beginTargetFrame(simguiCtx_, desc);
+        attempts_.push_back(accepted);
+        if (accepted) {
+            synchronous_ = target.isFbo;
+            beginFrame();
+        }
+        return accepted;
     }
 
-    // End frame (defers render to beforePresent)
     void end() {
-        if (!initialized_) return;
-        renderPending_ = true;
+        if (attempts_.empty()) return;
+        const bool accepted = attempts_.back();
+        attempts_.pop_back();
+        if (!accepted) return;
+        simgui_tc_set_context(simguiCtx_);
+        if (!detail::validateTargetFrame(simguiCtx_)) return;
+        swapFrames();
+        if (offscreenOwner_) offscreenFrameCompleted_ = true;
+        if (synchronous_) detail::renderTargetFrame(simguiCtx_);
+        else renderPending_ = true;
     }
+
+    class Scope {
+    public:
+        explicit Scope(ImGuiManager& manager) : manager_(manager),
+            previous_(simgui_tc_get_context()), previousImGui_(ImGui::GetCurrentContext()),
+            accepted_(manager.begin()) {}
+        ~Scope() {
+            manager_.end();
+            simgui_tc_set_context(previous_);
+            ImGui::SetCurrentContext(previousImGui_);
+        }
+        Scope(const Scope&) = delete;
+        Scope& operator=(const Scope&) = delete;
+        explicit operator bool() const { return accepted_; }
+    private:
+        ImGuiManager& manager_;
+        simgui_tc_context previous_;
+        ImGuiContext* previousImGui_;
+        bool accepted_;
+    };
+    Scope scoped() { return Scope(*this); }
 
     bool isInitialized() const { return initialized_; }
 
@@ -175,7 +238,10 @@ public:
     // each secondary window's App get their own manager (own ImGui context).
     static ImGuiManager& instance() {
         auto& slot = registry()[&tc::internal::currentWindowContext()];
-        if (!slot) slot.reset(new ImGuiManager());
+        if (!slot) {
+            slot.reset(new ImGuiManager());
+            slot->registryOwned_ = true;
+        }
         return *slot;
     }
 
@@ -187,9 +253,43 @@ public:
     }
 
 public:
-    ~ImGuiManager() { shutdown(); }   // public: owned by unique_ptr in the registry
+    // Explicitly owned managers have RAII teardown. Registry managers use the
+    // exit/unload hooks; other process statics may already be gone at destruction.
+    ~ImGuiManager() { if (!registryOwned_ && detail::hookRegistriesAlive) shutdown(); }
 private:
-    ImGuiManager() = default;
+    void installDeadlineListeners_() {
+        // A value the MCP tools wrote into this context's widgets whose check
+        // frame does not come in time (a cached Fbo or a stopped/slow window)
+        // is settled from the main window's afterFrame, before
+        // tc::mcp's timeout drain there (BeforeApp), whichever window this is.
+        {
+            auto& wctx = tc::internal::currentWindowContext();
+            tc::CoreEvents* mainEvents = wctx.isMain ? &tc::events()
+                                                     : tc::internal::mainWindowContext().coreEvents;
+            if (mainEvents) {
+                overdueListener_ = mainEvents->afterFrame.listen([this]() {
+                    detail::settleOverdueValues(imguiCtx_);
+                }, tc::EventPriority::BeforeApp);
+                // Hot reload: the manager registry is a static of the guest
+                // image, which outlives a reload. Tear down this generation's
+                // manager (the same cleanup as at exit) before the host
+                // unloads it, so no stale listener stays on the host's events
+                // (#416). The host fires it on the main window's events.
+                hotReloadUnloadListener_ = mainEvents->hotReloadUnload.listen([this]() { shutdown(); });
+            }
+        }
+    }
+
+    void initializeContext_() {
+        simgui_desc_t desc = {};
+        desc.logger.func = tc::internal::sokolLog;
+        desc.disable_set_mouse_cursor = offscreenOwner_;
+        simguiCtx_ = simgui_tc_make_context(&desc);
+        simgui_tc_set_context(simguiCtx_);
+        imguiCtx_ = ImGui::GetCurrentContext();
+        setContextOwner(imguiCtx_, &tc::internal::currentWindowContext());
+        initialized_ = true;
+    }
 
     static std::unordered_map<tc::internal::WindowContext*,
                               std::unique_ptr<ImGuiManager>>& registry() {
@@ -199,11 +299,19 @@ private:
     }
 
     simgui_tc_context simguiCtx_ {};
+    ImGuiContext* imguiCtx_ = nullptr;   // the ImGui context inside simguiCtx_
 
     bool initialized_ = false;
     bool renderPending_ = false;
+    bool offscreenOwner_ = false;
+    bool registryOwned_ = false;
+    bool synchronous_ = false;
+    bool offscreenFrameCompleted_ = false;
+    std::vector<bool> attempts_;
     tc::EventListener exitListener_;
+    tc::EventListener hotReloadUnloadListener_;   // on the main window's hotReloadUnload
     tc::EventListener renderListener_;
+    tc::EventListener overdueListener_;   // on the main window's afterFrame
     tc::EventListener eventListener_;
 
     // Input arbitration: consume listeners (BeforeApp) + pointer-gesture capture.
@@ -223,33 +331,28 @@ private:
 
 inline void imguiSetup() {
     ImGuiManager::instance().setup();
-    // Auto-register the ImGui MCP tools when MCP is enabled, so ImGui-based
-    // UIs are AI-drivable without an explicit registerImGuiTools() call.
-    if (const char* m = std::getenv("TRUSSC_MCP"); m && std::string(m) == "1") {
-        registerImGuiTools();
-    }
+    // Registration always happens; the host's tool level controls exposure.
+    registerImGuiTools();
 }
 
 inline void imguiShutdown() {
     ImGuiManager::instance().shutdown();
 }
 
-inline void imguiBegin() {
-    ImGuiManager::instance().begin();
-    beginFrame();
+inline bool imguiBegin() {
+    return ImGuiManager::instance().begin();
 }
 
 inline void imguiEnd() {
     ImGuiManager::instance().end();
-    swapFrames();
 }
 
 inline bool imguiWantsMouse() {
-    return tc::internal::overlayHoveredQuery ? tc::internal::overlayHoveredQuery() : false;
+    return tc::isOverlayHovered();
 }
 
 inline bool imguiWantsKeyboard() {
-    return tc::internal::overlayFocusedQuery ? tc::internal::overlayFocusedQuery() : false;
+    return tc::isOverlayFocused();
 }
 
 } // namespace tcx::imgui

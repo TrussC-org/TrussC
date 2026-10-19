@@ -20,8 +20,12 @@ void tcApp::setup() {
     env.loadProcedural();
     setEnvironment(env);
 
-    // Load default model
+    // Load the bundled model (bin/data/). If it is missing, the loader logs
+    // the shared "file not found" Error.
     loadModel("Duck.glb");
+    if (!model.isLoaded()) {
+        logNotice() << "No model loaded. Drop a .glb/.gltf model to load";
+    }
 }
 
 void tcApp::draw() {
@@ -61,24 +65,17 @@ void tcApp::draw() {
 
 void tcApp::filesDropped(const vector<string>& files) {
     for (const auto& f : files) {
-        // Accept .glb and .gltf files
-        if (f.size() > 4) {
-            string ext = f.substr(f.size() - 4);
-            if (ext == ".glb" || ext == "gltf" || ext == ".glb") {
-                loadModel(f);
-                return;
-            }
-            // Also check 5-char extension .gltf
-            if (f.size() > 5 && f.substr(f.size() - 5) == ".gltf") {
-                loadModel(f);
-                return;
-            }
+        // Accept .glb and .gltf files (any case). Dropped paths are UTF-8.
+        string ext = toLower(getFileExtension(utf8ToPath(f)));
+        if (ext == "glb" || ext == "gltf") {
+            loadModel(f);
+            return;
         }
     }
 }
 
 void tcApp::loadModel(const string& path) {
-    if (model.load(path)) {
+    if (model.load(utf8ToPath(path))) {  // dropped paths are UTF-8
         // Extract filename for display
         auto pos = path.find_last_of("/\\");
         modelName = (pos != string::npos) ? path.substr(pos + 1) : path;

@@ -17,7 +17,11 @@
 #import <CoreMedia/CoreMedia.h>
 
 #include "TrussC.h"
+#include <chrono>
+#include "../metal/tcRecorderPixelBuffer.h"
 #include <cmath>
+
+#include "../metal/tcVideoWriterError.h"
 
 namespace trussc {
 
@@ -59,27 +63,15 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
                 fileType = AVFileTypeQuickTimeMovie; useBitrate = false; break;
         }
         if (fileType == AVFileTypeQuickTimeMovie &&
-            fullPath.size() >= 4 &&
-            fullPath.compare(fullPath.size() - 4, 4, ".mov") != 0) {
+            toLower(getFileExtension(fullPath)) != "mov") {
             logWarning("VideoWriter")
                 << "ProRes is written as QuickTime; prefer a .mov path ("
                 << fullPath << ")";
         }
 
+        // The path is used as given: VideoWriter::open() already refused a
+        // path inside the app bundle (record to getUserDataPath() instead).
         NSString* nsPath = [NSString stringWithUTF8String:fullPath.c_str()];
-        // The app bundle is read-only on iOS, and getDataPath() resolves there.
-        // Redirect bundle-relative outputs to the writable Documents directory
-        // so startRecording("clip.mp4") just works on device.
-        NSString* bundlePath = [[NSBundle mainBundle] bundlePath];
-        if ([nsPath hasPrefix:bundlePath]) {
-            NSString* docs = [NSSearchPathForDirectoriesInDomains(
-                NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-            if (docs) {
-                nsPath = [docs stringByAppendingPathComponent:[nsPath lastPathComponent]];
-                logNotice("VideoWriter")
-                    << "iOS: writing to Documents -> " << nsPath.UTF8String;
-            }
-        }
         NSURL* url = [NSURL fileURLWithPath:nsPath];
         [[NSFileManager defaultManager] removeItemAtURL:url error:nil];
 
@@ -87,9 +79,7 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
         AVAssetWriter* writer =
             [[AVAssetWriter alloc] initWithURL:url fileType:fileType error:&err];
         if (!writer) {
-            logError("VideoWriter")
-                << "AVAssetWriter init failed: "
-                << (err ? err.localizedDescription.UTF8String : "unknown");
+            result_ = internal::videoOpenFailure(err, "AVAssetWriter init failed");
             return false;
         }
 
@@ -128,17 +118,14 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
                                             sourcePixelBufferAttributes:sourceAttrs];
 
         if (![writer canAddInput:input]) {
-            logError("VideoWriter") << "writer cannot add video input (codec "
-                                    << videoCodecName(settings.codec) << ")";
+            result_ = SaveResult::fail(SaveError::WriteFailed, std::string("writer cannot add video input (codec ") +
+                videoCodecName(settings.codec) + ")");
             return false;
         }
         [writer addInput:input];
 
         if (![writer startWriting]) {
-            logError("VideoWriter")
-                << "startWriting failed: "
-                << (writer.error ? writer.error.localizedDescription.UTF8String
-                                 : "unknown");
+            result_ = internal::videoOpenFailure(writer.error, "startWriting failed");
             return false;
         }
         [writer startSessionAtSourceTime:kCMTimeZero];
@@ -163,13 +150,22 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     if (!pd || !pd->writer || pd->failed) return false;
 
     @autoreleasepool {
-        int spins = 0;
-        while (!pd->input.readyForMoreMediaData && spins < 5000) {
+        // Bound (platform): encoder readiness waits at most 5 s (steady clock). Overflow rejects the frame and marks the take WriteFailed.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!pd->input.readyForMoreMediaData &&
+               std::chrono::steady_clock::now() < deadline &&
+               pd->writer.status == AVAssetWriterStatusWriting) {
             [NSThread sleepForTimeInterval:0.001];
-            ++spins;
+        }
+        if (pd->writer.status != AVAssetWriterStatusWriting) {
+            const char* message = pd->writer.error.localizedDescription.UTF8String;
+            result_ = SaveResult::fail(SaveError::WriteFailed,
+                message ? message : "AVAssetWriter is not writing");
+            pd->failed = true;
+            return false;
         }
         if (!pd->input.readyForMoreMediaData) {
-            logError("VideoWriter") << "input not ready (timeout)";
+            result_ = SaveResult::fail(SaveError::WriteFailed, "input not ready (timeout)");
             pd->failed = true;
             return false;
         }
@@ -190,20 +186,32 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
                                 (__bridge CFDictionaryRef)attrs, &pb);
         }
         if (!pb) {
-            logError("VideoWriter") << "could not create pixel buffer";
+            result_ = SaveResult::fail(SaveError::WriteFailed, "could not create pixel buffer");
             pd->failed = true;
             return false;
         }
 
-        CVPixelBufferLockBaseAddress(pb, 0);
+        // Bound (abi): CoreVideo must grant writable access to the native frame. Overflow drops the recorder frame and is counted.
+        if (CVPixelBufferLockBaseAddress(pb, 0) != kCVReturnSuccess) {
+            CVPixelBufferRelease(pb);
+            return rejectFrameLayout();
+        }
         uint8_t* dst = (uint8_t*)CVPixelBufferGetBaseAddress(pb);
-        size_t dstStride = CVPixelBufferGetBytesPerRow(pb);
+        const auto layout = internal::recorderPixelBufferLayout(pb);
+        // Bound (abi): CoreVideo BGRA8 extent, stride and capacity must cover the take. Overflow drops the recorder frame and is counted.
+        if (!dst || !internal::recorderFrameFits(layout, pd->width, pd->height,
+                                                internal::RecorderPixelFormat::BGRA8)) {
+            CVPixelBufferUnlockBaseAddress(pb, 0);
+            CVPixelBufferRelease(pb);
+            return rejectFrameLayout();
+        }
+        const size_t dstStride = layout.rowBytes;
         const int w = pd->width;
         const int h = pd->height;
         for (int y = 0; y < h; ++y) {
             const unsigned char* srow = rgba + (size_t)y * w * 4;
             uint8_t* drow = dst + (size_t)y * dstStride;
-            for (int x = 0; x < w; ++x) {
+            for (size_t x = 0; x < (size_t)w; ++x) {
                 drow[x * 4 + 0] = srow[x * 4 + 2];  // B
                 drow[x * 4 + 1] = srow[x * 4 + 1];  // G
                 drow[x * 4 + 2] = srow[x * 4 + 0];  // R
@@ -213,15 +221,13 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
         CVPixelBufferUnlockBaseAddress(pb, 0);
 
         CMTime t = CMTimeMakeWithSeconds(timeSec, 600);
-        BOOL ok = [pd->adaptor appendPixelBuffer:pb withPresentationTime:t];
+        BOOL ok = pd->writer.status == AVAssetWriterStatusWriting && [pd->adaptor appendPixelBuffer:pb withPresentationTime:t];
         CVPixelBufferRelease(pb);
 
-        if (!ok) {
-            logError("VideoWriter")
-                << "appendPixelBuffer failed: "
-                << (pd->writer.error
-                        ? pd->writer.error.localizedDescription.UTF8String
-                        : "unknown");
+        if (!ok || pd->writer.status != AVAssetWriterStatusWriting) {
+            const char* message = pd->writer.error.localizedDescription.UTF8String;
+            result_ = SaveResult::fail(SaveError::WriteFailed,
+                message ? message : "AVAssetWriter rejected append");
             pd->failed = true;
             return false;
         }
@@ -230,9 +236,10 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     }
 }
 
-void VideoWriter::closePlatform() {
+SaveResult VideoWriter::closePlatform() {
     VideoWriterPlatformData* pd = platform_;
-    if (!pd) return;
+    if (!pd) return SaveResult::success();
+    auto result = SaveResult::success();
 
     @autoreleasepool {
         if (pd->writer && pd->writer.status == AVAssetWriterStatusWriting) {
@@ -243,6 +250,11 @@ void VideoWriter::closePlatform() {
             }];
             dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
         }
+        if (!pd->writer || pd->writer.status != AVAssetWriterStatusCompleted) {
+            const char* message = pd->writer.error.localizedDescription.UTF8String;
+            result = SaveResult::fail(SaveError::WriteFailed,
+                message ? message : "AVAssetWriter did not complete");
+        }
         pd->writer = nil;
         pd->input = nil;
         pd->adaptor = nil;
@@ -250,6 +262,7 @@ void VideoWriter::closePlatform() {
 
     delete pd;
     platform_ = nullptr;
+    return result;
 }
 
 } // namespace trussc

@@ -80,8 +80,10 @@ The Inspector renders each reflected type with the matching ImGui widget
 (`float`/`int`/`bool`/`Vec2`/`Vec3`/`Color`/`string`). Enum values render as a
 combo of their labels when the enum declares them (`TC_ENUM_LABELS`, optional —
 without labels an enum edits as a plain int), and getter-only values render
-greyed out. Want a custom widget for a type? Subclass `tcx::ImGuiReflector`
-and override the relevant `visit()`.
+greyed out. The Inspector always uses the built-in `tcx::ImGuiReflector`, and
+there is no way to plug in a subclass yet. A subclass that overrides a
+`visit()` only helps in an ImGui panel your app draws itself (call
+`node->reflectMembers(r)` there). It does not change the Inspector.
 
 ## Mods
 
@@ -143,6 +145,45 @@ inspector_.style().gizmoLength    = 35.0f;   // handle length / ring radius (scr
 inspector_.style().gizmoThickness = 2.0f;    // handle width (px)
 ```
 
+## What the user changed (touched)
+
+The inspector records every value the user changes by hand, per node: a
+member edited in the Inspector panel (nested members as a path such as
+`outline.color`, mod members under the mod's type), the name field, and the
+`pos` / `rotation` of every node moved or rotated with the gizmo. Changes made
+from code or by the MCP tool `tc_set_node_members` are not recorded, nor is a
+value set with `tcx_imgui_input` on an Inspector value widget (it is applied to
+the member, but it is not an edit by hand). Text typed with `tcx_imgui_input`
+into the name field or a `std::string` member is keyboard input and is
+recorded, as in tcxImGui.
+
+With MCP on, `tcx_imgui_get_touched` returns the record under `inspector`,
+next to tcxImGui's own `widgets`. Each entry carries the member's current value
+in the `tc_get_node_tree` encoding (rotation in radians, derived rotationDeg in degrees, colors `[r,g,b,a]`):
+
+```json
+{"nodeType": "Ball", "nodeName": "a", "nodeId": 2, "member": "outline.color",
+ "value": [0, 0.2, 0.2, 1]}
+```
+
+A destroyed node reports `"destroyed": true`, and a removed mod
+`"modRemoved": true`, each with the value as of the last edit.
+A mod is identified by its node and type, so a mod of the same type added
+again to that node continues the entry and reports its own current value.
+`tcx_imgui_reset_touched` clears the record. From code:
+
+```cpp
+NodeInspector::instance().getTouched();     // the same JSON array
+NodeInspector::instance().resetTouched();
+```
+
+The Hierarchy / Inspector panels are kept out of tcxImGui's `widgets` record:
+their widgets are shared by whichever node is selected, so an ImGui widget ID
+can't say whose value it was. Only the Inspector's own `ImGuiReflector` feeds
+this record. A subclass used in your own panel fills its `edited` list when it
+calls `edit(name, widget)`, but nothing moves that list into the record. The
+old `edit(widget)` form still works but fills nothing.
+
 ## Styling
 
 Inspectors get cramped fast, so the defaults are **compact** with a
@@ -185,6 +226,12 @@ cd example-basic
 trusscli update     # generate build files
 trusscli run        # build + launch
 ```
+
+## Tests
+
+`tests/` is a headless console harness, run by CI through
+`examples/build_all.py --addon-tests-only`. Run it locally with
+`trusscli run -p .` from `tests/`.
 
 ## License
 

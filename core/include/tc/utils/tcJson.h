@@ -21,10 +21,11 @@ using Json = nlohmann::json;
 // Relative paths are resolved via getDataPath (like oF)
 // ---------------------------------------------------------------------------
 inline Json loadJson(const fs::path& path) {
-    fs::path fullPath = getDataPath(path);
+    fs::path fullPath = internal::resolveLoadPath(path);
+    if (!internal::checkLoadFile(fullPath, "Json")) return Json();
     std::ifstream file(fullPath);
     if (!file.is_open()) {
-        logError() << "Cannot open JSON file: " << path;
+        internal::reportMissingLoad(fullPath, "Json");
         return Json();
     }
 
@@ -40,28 +41,22 @@ inline Json loadJson(const fs::path& path) {
 
 // ---------------------------------------------------------------------------
 // JSON file writing
-// Relative paths are resolved via getDataPath (like oF)
+// Relative paths are resolved via getDataPath (like oF), and a missing
+// parent folder is created. A path inside the app bundle is refused (use
+// getUserDataPath()).
 // ---------------------------------------------------------------------------
-inline bool saveJson(const Json& j, const fs::path& path, int indent = 2) {
-    fs::path fullPath = getDataPath(path);
-    std::ofstream file(fullPath);
-    if (!file.is_open()) {
-        logError() << "Cannot create JSON file: " << path;
-        return false;
-    }
-
+inline SaveResult saveJson(const Json& j, const fs::path& path, int indent = 2) {
+    std::string text;
     try {
-        if (indent >= 0) {
-            file << j.dump(indent);
-        } else {
-            file << j.dump();  // Compact format
-        }
-        logVerbose() << "JSON saved: " << fullPath;
-        return true;
+        text = (indent >= 0) ? j.dump(indent) : j.dump();
     } catch (const std::exception& e) {
-        logError() << "JSON write error: " << path << " - " << e.what();
-        return false;
+        return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed,
+            "JSON serialize error: " + internal::pathToDisplayUtf8(path) + " - " + e.what()), "Json");
     }
+    fs::path fullPath;
+    auto prepared = internal::prepareOutputPath(path, fullPath, "Json");
+    if (!prepared) return prepared;
+    return internal::atomicWrite(fullPath, text.data(), text.size(), "Json");
 }
 
 // ---------------------------------------------------------------------------

@@ -132,12 +132,12 @@ const ofOnlyEntries = [
     ]},
     // GUI
     { category: "gui", name: "GUI", name_ja: "GUI", name_ko: "GUI", order: 18, entries: [
-        { of: "ofxGui / ofxImGui", tc: "ImGui (built-in)", notes: "Included by default", notes_ja: "Included by default", notes_ko: "" },
+        { of: "ofxGui / ofxImGui", tc: "Dear ImGui (tcxImGui addon)", notes: "tcxImGui addon (not in core)", notes_ja: "tcxImGui アドオン（コアには含まれない）", notes_ko: "tcxImGui 애드온 (코어에는 포함되지 않음)" },
     ]},
     // I/O
     { category: "io", name: "I/O", name_ja: "I/O", name_ko: "I/O", order: 19, entries: [
-        { of: "ofSystemLoadDialog()", tc: "systemLoadDialog()", notes: "", notes_ja: "", notes_ko: "" },
-        { of: "ofSystemSaveDialog()", tc: "systemSaveDialog()", notes: "", notes_ja: "", notes_ko: "" },
+        { of: "ofSystemLoadDialog()", tc: "loadDialog()", notes: "loadDialogAsync() for a non-blocking variant", notes_ja: "非同期版は loadDialogAsync()", notes_ko: "비동기 버전은 loadDialogAsync()" },
+        { of: "ofSystemSaveDialog()", tc: "saveDialog()", notes: "saveDialogAsync() for a non-blocking variant", notes_ja: "非同期版は saveDialogAsync()", notes_ko: "비동기 버전은 saveDialogAsync()" },
         { of: "ofLoadJson(path)", tc: "loadJson(path)", notes: "nlohmann/json", notes_ja: "nlohmann/json", notes_ko: "" },
         { of: "-", tc: "loadXml(path)", notes: "pugixml", notes_ja: "pugixml", notes_ko: "" },
     ]},
@@ -154,8 +154,10 @@ const ofOnlyEntries = [
     ]},
     // Thread
     { category: "thread", name: "Thread", name_ja: "スレッド", name_ko: "스레드", order: 22, entries: [
-        { of: "ofThread", tc: "std::thread + MainThreadRunner", notes: "Safe sync", notes_ja: "Safe sync", notes_ko: "" },
-        { of: "-", tc: "MainThreadRunner::run(func)", notes: "Execute on main thread", notes_ja: "Execute on main thread", notes_ko: "" },
+        { of: "ofThread", tc: "Thread", notes: "Subclass and override threadedFunction(); startThread() / waitForThread()", notes_ja: "サブクラスで threadedFunction() をオーバーライド。startThread() / waitForThread()", notes_ko: "서브클래스에서 threadedFunction()을 오버라이드. startThread() / waitForThread()" },
+        { of: "-", tc: "runOnMainThread(func)", notes: "Execute on the main thread", notes_ja: "メインスレッドで実行", notes_ko: "메인 스레드에서 실행" },
+        { of: "ofMutex", tc: "std::mutex", notes: "TrussC has no wrapper; use std::mutex", notes_ja: "TrussC にラッパーは無い。std::mutex を使う", notes_ko: "TrussC에는 래퍼가 없음. std::mutex를 사용" },
+        { of: "ofScopedLock", tc: "std::lock_guard / std::scoped_lock", notes: "", notes_ja: "", notes_ko: "" },
     ]},
     // Serial — now a real type (see types section: Serial / SerialDeviceInfo)
 ];

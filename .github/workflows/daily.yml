@@ -1,0 +1,379 @@
+# Daily CI: the HEAVY lane. Everything the per-PR fast lane (build.yml)
+# leaves out: every example (examples/ + every bundled addon example, which
+# includes AllFeaturesExample) on every desktop platform + web, and the
+# behavioral tests again on top of the full build. It catches example rot
+# (API drift, include-order breakage, generated-build-file drift) and addon /
+# third-party build breakage.
+#
+# Runs once a day on main, skipped when main hasn't changed since the last
+# completed daily run. A failure opens (or comments on) a tracking issue with
+# the commit range since the last green daily run, instead of blocking anyone.
+# Being a separate workflow, it never touches the README badge (build.yml).
+name: Daily
+
+on:
+  schedule:
+    - cron: '0 18 * * *' # daily 18:00 UTC = 03:00 JST
+  workflow_dispatch:
+
+concurrency:
+  group: daily
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read   # the check job reads this workflow's previous runs
+  issues: write
+
+jobs:
+  # Skip the day when main is where the last completed daily run left it.
+  # A manual dispatch always runs. Also finds the last GREEN run's commit for
+  # the failure report's range.
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.c.outputs.run }}
+      last_green: ${{ steps.c.outputs.last_green }}
+    steps:
+      - id: c
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # No history yet (first run, or the API can't find it): run.
+          if ! runs=$(gh api "repos/$REPO/actions/workflows/daily.yml/runs?branch=main&per_page=30" \
+                      -q "[.workflow_runs[] | select(.id != $RUN_ID and .status == \"completed\")]" 2>/dev/null); then
+            runs='[]'
+          fi
+          last_done=$(echo "$runs" | jq -r '[.[] | select(.conclusion == "success" or .conclusion == "failure")][0].head_sha // ""')
+          # A skipped day also concludes "success" (its jobs were skipped), so a
+          # commit counts as green only if no run on it failed.
+          last_green=$(echo "$runs" | jq -r '([.[] | select(.conclusion == "failure") | .head_sha]) as $red
+                         | [.[] | select(.conclusion == "success" and ((.head_sha as $s | $red | index($s)) | not))][0].head_sha // ""')
+          echo "last completed: ${last_done:-none}  last green: ${last_green:-none}  now: $SHA"
+          echo "last_green=$last_green" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" = "schedule" ] && [ "$last_done" = "$SHA" ]; then
+            echo "main is unchanged since the last daily run: skipping."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  sweep:
+    needs: check
+    if: needs.check.outputs.run == 'true'
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            preset: macos
+            launcher: ccache
+          # Same runner as build.yml (windows-latest, Ninja; see there why the
+          # old windows-2022 pin was dropped). The weekly sweep this replaces
+          # kept the pin after build.yml was unpinned (86c3f513), and the two
+          # then shared build caches across VS versions (#223).
+          - os: windows-latest
+            preset: windows
+            launcher: sccache
+            cmake_gen: Ninja
+          - os: ubuntu-latest
+            preset: linux
+            launcher: ccache
+
+    runs-on: ${{ matrix.os }}
+
+    env:
+      TRUSSC_CMAKE_GENERATOR: ${{ matrix.cmake_gen }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # Reuse one dependency tree across every configure in this job.
+      - name: Cache FetchContent
+        id: fetchcontent
+        if: github.event_name != 'merge_group'
+        uses: actions/cache@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Cache FetchContent (restore only, merge queue)
+        id: fetchcontent-restore
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Configure shared FetchContent
+        shell: bash
+        env:
+          FETCHCONTENT_CACHE_HIT: ${{ steps.fetchcontent.outputs.cache-hit == 'true' || steps.fetchcontent-restore.outputs.cache-hit == 'true' }}
+        run: |
+          echo "TRUSSC_FETCHCONTENT_DIR=$GITHUB_WORKSPACE/.fetchcontent" >> "$GITHUB_ENV"
+          if [ "$FETCHCONTENT_CACHE_HIT" = "true" ]; then
+            echo "TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON" >> "$GITHUB_ENV"
+          fi
+
+      # Same cache keys as build.yml, so the sweep starts warm from PR builds
+      # (the build-directory cache only when the runner image matches).
+      - name: Setup compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          variant: ${{ matrix.launcher }}
+          key: ${{ matrix.os }}-build
+          max-size: 800M
+
+      - name: Enable compiler launcher
+        shell: bash
+        run: |
+          launcher="${{ matrix.launcher }}"
+          for lang in C CXX OBJC OBJCXX; do
+            echo "CMAKE_${lang}_COMPILER_LAUNCHER=$launcher" >> "$GITHUB_ENV"
+          done
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
+
+      # The build directories' CMakeCache records absolute compiler paths (the
+      # VS / MSVC toolset directory, the Xcode app), so a cache restored onto a
+      # different runner image points at a compiler that isn't there and
+      # configure fails ("is not a full path to an existing compiler tool",
+      # #223: a windows-2022 sweep restored a windows-latest VS 18 cache
+      # through the OS-only prefix). Key on the runner IMAGE: the first build
+      # after an image update is cold (the compiler cache still helps), and a
+      # cache never crosses images.
+      - name: Runner image id (cache key)
+        shell: bash
+        run: echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
+
+      - name: Cache build directories
+        uses: actions/cache@v5
+        with:
+          path: |
+            core/build-${{ matrix.preset }}
+            tools/build
+          key: ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-${{ hashFiles('core/**/*.h', 'core/**/*.cpp', 'core/**/*.mm') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-
+
+      - name: Cache sokol-shdc
+        uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Install Linux dependencies
+        timeout-minutes: 10
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/apt-deps
+
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build trusscli
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
+            sed -i '' 's/open /#open /g' tools/build_mac.command
+            ./tools/build_mac.command
+          elif [ "$RUNNER_OS" == "Linux" ]; then
+            chmod +x tools/build_linux.sh
+            sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
+            sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
+            ./tools/build_linux.sh
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            ./tools/build_win.bat
+          fi
+
+      - name: Build every example
+        shell: bash
+        run: |
+          chmod +x examples/build_all.py
+          ./examples/build_all.py --verbose
+
+      # The behavioral tests again, on top of the full build (cheap next to it).
+      - name: Build & run addon tests
+        shell: bash
+        run: ./examples/build_all.py --addon-tests-only --include-daily --verbose
+
+      - name: Build & run core tests
+        shell: bash
+        run: ./examples/build_all.py --core-tests-only --include-daily --verbose
+
+      - name: Run core display modes (Xvfb + Mesa)
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/50_mesa.json
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl-mesa0
+          xvfb-run -a -s '-screen 0 1280x1024x24' python3 tools/run_core_display_tests.py
+
+      - name: Compiler cache stats
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ matrix.launcher }}" = "sccache" ]; then
+            sccache --show-stats || true
+          else
+            ccache -s || true
+          fi
+
+  sweep-web:
+    needs: check
+    if: needs.check.outputs.run == 'true'
+    timeout-minutes: 180
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # Reuse one dependency tree across every configure in this job.
+      - name: Cache FetchContent
+        id: fetchcontent
+        if: github.event_name != 'merge_group'
+        uses: actions/cache@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Cache FetchContent (restore only, merge queue)
+        id: fetchcontent-restore
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Configure shared FetchContent
+        shell: bash
+        env:
+          FETCHCONTENT_CACHE_HIT: ${{ steps.fetchcontent.outputs.cache-hit == 'true' || steps.fetchcontent-restore.outputs.cache-hit == 'true' }}
+        run: |
+          echo "TRUSSC_FETCHCONTENT_DIR=$GITHUB_WORKSPACE/.fetchcontent" >> "$GITHUB_ENV"
+          if [ "$FETCHCONTENT_CACHE_HIT" = "true" ]; then
+            echo "TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON" >> "$GITHUB_ENV"
+          fi
+
+      - name: Setup compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          variant: ccache
+          key: web-build
+          max-size: 800M
+
+      - name: Enable compiler launcher
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
+
+      - name: Cache build directories
+        uses: actions/cache@v5
+        with:
+          path: |
+            core/build-web
+            tools/build
+          key: web-build-v3-${{ hashFiles('core/**/*.h', 'core/**/*.cpp') }}
+          restore-keys: |
+            web-build-v3-
+
+      - name: Cache sokol-shdc
+        uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      # Same pin as build.yml — bump both together.
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '6.0.2'
+
+      - name: Install Linux dependencies (for trusscli)
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-deps
+
+      - name: Build trusscli
+        run: |
+          chmod +x tools/build_linux.sh
+          sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
+          sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
+          ./tools/build_linux.sh
+
+      - name: Build every example (Web)
+        id: web_examples
+        run: |
+          chmod +x examples/build_all.py
+          ./examples/build_all.py --web-only --verbose
+
+      # The web builds above only compile. Core tests carrying a `web-test`
+      # marker (core/tests/*/web-test) are built for wasm and RUN under node, so
+      # web-only behaviour (#ifdef __EMSCRIPTEN__) is exercised once a day. They
+      # must not touch the canvas / GPU; a non-zero exit fails the job.
+      # An example failure must not hide web regressions; a skipped sweep means
+      # its prerequisites did not complete, so the tests cannot run either.
+      - name: Build and run core tests (Web, under node)
+        if: ${{ !cancelled() && steps.web_examples.outcome != 'skipped' }}
+        run: ./examples/build_all.py --web-only --core-tests-only --include-daily --verbose
+
+      - name: Compiler cache stats
+        if: always()
+        run: ccache -s || true
+
+  # On any failure, open an issue (or comment on the existing open one) so a
+  # red daily run is impossible to miss without blocking anything. The body
+  # names the commits merged since the last green daily run — with several
+  # PRs a day, that range is where the breakage came from.
+  report:
+    needs: [check, sweep, sweep-web]
+    if: always() && contains(needs.*.result, 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open or update tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SERVER: ${{ github.server_url }}
+          SHA: ${{ github.sha }}
+          LAST_GREEN: ${{ needs.check.outputs.last_green }}
+        run: |
+          title="Daily build failed"
+          if [ -n "$LAST_GREEN" ]; then
+            range="Commits since the last green daily run: ${SERVER}/${REPO}/compare/${LAST_GREEN}...${SHA}"
+          else
+            range="No earlier green daily run to compare against (commit ${SHA})."
+          fi
+          body=$(printf 'The daily build failed: %s\n\n%s\n' "$RUN_URL" "$range")
+          existing=$(gh issue list -R "$REPO" --search "\"$title\" in:title" \
+                     --state open --json number -q '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" -R "$REPO" --body "$body"
+          else
+            gh issue create -R "$REPO" --title "$title" --body "$body"
+          fi

@@ -21,7 +21,28 @@
 #
 # =============================================================================
 
+# CI can share dependency sources across otherwise independent app builds.
+# Explicit CMake settings (including -D overrides) always take precedence.
+if(DEFINED ENV{TRUSSC_FETCHCONTENT_DIR} AND NOT DEFINED FETCHCONTENT_BASE_DIR)
+    set(FETCHCONTENT_BASE_DIR "$ENV{TRUSSC_FETCHCONTENT_DIR}" CACHE PATH
+        "Shared FetchContent directory")
+endif()
+if(DEFINED ENV{TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED}
+        AND NOT DEFINED FETCHCONTENT_UPDATES_DISCONNECTED)
+    set(FETCHCONTENT_UPDATES_DISCONNECTED "$ENV{TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED}" CACHE BOOL
+        "Skip FetchContent remote updates")
+endif()
+
+# trussc_compile_shaders() (also used by core and addons)
+include("${CMAKE_CURRENT_LIST_DIR}/trussc_shaders.cmake")
+
 macro(trussc_app)
+    # Keep the binary deployment target and Info.plist minimum consistent,
+    # including manual macOS builds that do not use the generated preset.
+    if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version" FORCE)
+    endif()
+
     # Set default build type to RelWithDebInfo
     if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
         set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
@@ -84,7 +105,14 @@ macro(trussc_app)
     else()
         set(_TC_BUILD_DIR "${TRUSSC_DIR}/build-linux")
     endif()
-    
+    # Ninja keeps its build log in each app's own build tree, so a shared
+    # TrussC folder is rebuilt by every app that builds into it. Under Ninja,
+    # TrussC builds into a per-app folder instead (#372). Makefiles, Xcode and
+    # Visual Studio keep the shared folder above.
+    if(CMAKE_GENERATOR MATCHES "Ninja")
+        set(_TC_BUILD_DIR "${CMAKE_BINARY_DIR}/trussc")
+    endif()
+
     if(NOT TARGET TrussC)
         add_subdirectory(${TRUSSC_DIR} ${_TC_BUILD_DIR})
     endif()
@@ -123,26 +151,18 @@ macro(trussc_app)
     # This means: adding or removing TC_HOT_RELOAD → just rebuild, no
     # manual reconfig needed.
     # =========================================================================
-    set(_TC_HOT_RELOAD OFF)
-    if(NOT EMSCRIPTEN AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
-        foreach(_src ${_TC_SOURCES})
-            if(_src MATCHES "\\.cpp$")
-                file(READ "${_src}" _content)
-                # Match TC_HOT_RELOAD that is NOT on a comment line
-                string(REGEX MATCH "\n[^/\n]*TC_HOT_RELOAD" _match "${_content}")
-                if(_match)
-                    set(_TC_HOT_RELOAD ON)
-                    break()
-                endif()
-                # Also check first line (no preceding newline)
-                string(REGEX MATCH "^[^/\n]*TC_HOT_RELOAD" _match2 "${_content}")
-                if(_match2)
-                    set(_TC_HOT_RELOAD ON)
-                    break()
-                endif()
-            endif()
-        endforeach()
+    # The decision (platform gate + scan rule) lives in
+    # tc_hot_reload_scan.cmake, shared with the pre-build check below so the
+    # two can never disagree (#234, #329).
+    include("${TRUSSC_DIR}/cmake/tc_hot_reload_scan.cmake")
+    # Hot reload is unavailable on Android / Emscripten / iOS: TC_HOT_RELOAD in
+    # source is a no-op there. Computed once here and baked into the pre-build
+    # check, which runs in cmake -P mode where these variables are undefined.
+    set(_TC_HR_PLATFORM_SUPPORTED "TRUE")
+    if(EMSCRIPTEN OR ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        set(_TC_HR_PLATFORM_SUPPORTED "FALSE")
     endif()
+    tc_hot_reload_decide(_TC_HOT_RELOAD ${_TC_HR_PLATFORM_SUPPORTED} ${_TC_SOURCES})
 
     # Save the detection result to the state file
     set(_TC_HR_STATE_FILE "${CMAKE_BINARY_DIR}/.tc_hot_reload_state")
@@ -153,29 +173,31 @@ macro(trussc_app)
     # than a shell script) keeps this cross-platform — Windows doesn't ship
     # `sh` by default.
     #
-    # Hot-reload-unsupported platforms (Android / Emscripten / iOS) force
-    # _TC_HOT_RELOAD off above regardless of the source scan, so the runtime
-    # check must agree — otherwise it spots TC_HOT_RELOAD in .cpp, decides
-    # CURRENT="ON", and fails the build forever with "state changed".
-    set(_TC_HR_PLATFORM_SUPPORTED "TRUE")
-    if(EMSCRIPTEN OR ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
-        set(_TC_HR_PLATFORM_SUPPORTED "FALSE")
-    endif()
+    # The check uses the same tc_hot_reload_decide() with the platform flag
+    # computed above. If it disagreed with the configure step on an
+    # unsupported platform, it would spot TC_HOT_RELOAD in .cpp, decide
+    # CURRENT="ON", and fail the build forever with "state changed".
     set(_TC_HR_CHECK_SCRIPT "${CMAKE_BINARY_DIR}/_tc_check_hot_reload.cmake")
     set(_TC_HR_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
     set(_TC_HR_CMAKELISTS "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
+    # Same file set as the configure scan: the explicit SOURCES list when one
+    # was passed, else every .cpp under src/ (recursively, re-globbed on each
+    # build so a macro added to a new file is still seen).
+    if(_TC_APP_SOURCES)
+        set(_TC_HR_EXPLICIT_SOURCES "${_TC_SOURCES}")
+    else()
+        set(_TC_HR_EXPLICIT_SOURCES "")
+    endif()
+    # Bracket arguments preserve native Windows paths (and explicit source
+    # lists) without interpreting backslashes as CMake string escapes.
     file(WRITE "${_TC_HR_CHECK_SCRIPT}"
 "# Auto-generated by trussc_app.cmake -- checks if TC_HOT_RELOAD state changed.
-set(STATE_FILE \"${_TC_HR_STATE_FILE}\")
-set(SRC_DIR    \"${_TC_HR_SRC_DIR}\")
-set(CMAKELISTS \"${_TC_HR_CMAKELISTS}\")
+set(STATE_FILE [==[${_TC_HR_STATE_FILE}]==])
+set(SRC_DIR    [==[${_TC_HR_SRC_DIR}]==])
+set(CMAKELISTS [==[${_TC_HR_CMAKELISTS}]==])
 set(PLATFORM_SUPPORTED ${_TC_HR_PLATFORM_SUPPORTED})
-
-# Hot reload is unavailable on this platform — TC_HOT_RELOAD in source is
-# treated as a no-op, so just confirm OFF without scanning.
-if(NOT PLATFORM_SUPPORTED)
-    return()
-endif()
+set(EXPLICIT_SOURCES [==[${_TC_HR_EXPLICIT_SOURCES}]==])
+include([==[${TRUSSC_DIR}/cmake/tc_hot_reload_scan.cmake]==])
 
 set(PREV \"\")
 if(EXISTS \"\${STATE_FILE}\")
@@ -183,22 +205,14 @@ if(EXISTS \"\${STATE_FILE}\")
     string(STRIP \"\${PREV}\" PREV)
 endif()
 
-# Scan for uncommented TC_HOT_RELOAD in any .cpp under SRC_DIR
-set(CURRENT \"OFF\")
-file(GLOB _CPPS \"\${SRC_DIR}/*.cpp\")
-foreach(_f \${_CPPS})
-    file(STRINGS \"\${_f}\" _LINES REGEX \"TC_HOT_RELOAD\")
-    foreach(_line \${_LINES})
-        string(REGEX MATCH \"^[ \\t]*//\" _is_comment \"\${_line}\")
-        if(NOT _is_comment)
-            set(CURRENT \"ON\")
-            break()
-        endif()
-    endforeach()
-    if(CURRENT STREQUAL \"ON\")
-        break()
-    endif()
-endforeach()
+# Same files, the same platform gate and the same rule as the configure step
+# (#234, #329). On an unsupported platform this is OFF without scanning.
+if(EXPLICIT_SOURCES)
+    set(_CPPS \"\${EXPLICIT_SOURCES}\")
+else()
+    file(GLOB_RECURSE _CPPS \"\${SRC_DIR}/*.cpp\")
+endif()
+tc_hot_reload_decide(CURRENT \${PLATFORM_SUPPORTED} \${_CPPS})
 
 if(NOT \"\${PREV}\" STREQUAL \"\${CURRENT}\")
     if(CURRENT STREQUAL \"ON\")
@@ -255,7 +269,6 @@ endif()
         add_library(guest SHARED ${_TC_GUEST_SOURCES})
         target_include_directories(guest PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/src"
-            "${TRUSSC_DIR}/include"
         )
         target_compile_features(guest PRIVATE cxx_std_20)
         target_compile_definitions(guest PRIVATE TC_HOT_RELOAD_BUILD TRUSSC_SHOW_CONSOLE)
@@ -326,7 +339,7 @@ endif()
         if(APPLE)
             target_link_options(guest PRIVATE -undefined dynamic_lookup)
         elseif(WIN32)
-            # Windows: Guest links Host's import library (set below)
+            # Windows: Guest imports Host symbols via a separate library (below).
         else()
             # Linux: analogue of macOS `-undefined dynamic_lookup`. The guest
             # deliberately leaves TrussC/sokol symbols unresolved at link time;
@@ -336,7 +349,7 @@ endif()
             # symbols live in a static archive on the Host, not in a .so.
             target_link_options(guest PRIVATE -Wl,--unresolved-symbols=ignore-all)
         endif()
-        # Guest output directory
+        # Guest output directory (multi-config generators append <config>/).
         set_target_properties(guest PROPERTIES
             LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
@@ -344,7 +357,23 @@ endif()
 
         # Host: executable with main.cpp + TrussC core
         add_executable(${PROJECT_NAME} ${_TC_HOST_SOURCES})
-        target_compile_definitions(${PROJECT_NAME} PRIVATE TC_HOT_RELOAD_BUILD)
+        # The guest is built and loaded in the host's configuration (#794).
+        # Multi-config generators (Visual Studio, Xcode, Ninja Multi-Config)
+        # put it in <buildDir>/<config>/; single-config ones in <buildDir>/.
+        get_property(_tc_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+        if(_tc_multi_config)
+            set(_tc_multi_config 1)
+        else()
+            set(_tc_multi_config 0)
+        endif()
+        # Relative to the project root, so a copied or moved tree finds its own
+        # build directory rather than the original one.
+        file(RELATIVE_PATH _tc_rel_build "${CMAKE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}")
+        target_compile_definitions(${PROJECT_NAME} PRIVATE
+            TC_HOT_RELOAD_BUILD TC_HOT_RELOAD_CONFIG="$<CONFIG>"
+            TC_HOT_RELOAD_MULTI_CONFIG=${_tc_multi_config}
+            TC_HOT_RELOAD_CORE_LIB="$<TARGET_FILE:TrussC>"
+            TC_HOT_RELOAD_BUILD_DIR="${_tc_rel_build}")
         set_target_properties(${PROJECT_NAME} PROPERTIES ENABLE_EXPORTS TRUE)
         # Force-load ALL symbols from libTrussC.a into the Host (not just the ones
         # main.cpp uses) AND export them in the dynamic symbol table. This makes
@@ -450,21 +479,45 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
                 /DEF:${_TC_DEF_FILE}
                 /WHOLEARCHIVE:$<TARGET_FILE:TrussC>
             )
-            target_link_libraries(guest PRIVATE ${PROJECT_NAME})
+            # Build the Guest's import library from the same exports, without
+            # linking the Host target. That target-level dependency would
+            # recompile main.cpp after an app-header/shader edit and try to
+            # relink the running EXE (which Windows locks).
+            # Both lib.exe and llvm-lib can create imports before the EXE exists.
+            set(_TC_HOST_IMPORT_LIB "${CMAKE_BINARY_DIR}/trussc_host_import_$<CONFIG>.lib")
+            set(_TC_HOST_IMPORT_DEF "${CMAKE_BINARY_DIR}/trussc_host_import_$<CONFIG>.def")
+            set(_TC_HOST_IMPORT_SCRIPT "${CMAKE_BINARY_DIR}/_tc_host_import_$<CONFIG>.cmake")
+            # llvm-lib ignores /NAME. Put the actual EXE name in the .def
+            # instead, including any configuration-specific name/postfix.
+            # Read the core exports at build time, after their producer ran.
+            file(GENERATE OUTPUT "${_TC_HOST_IMPORT_SCRIPT}" CONTENT
+"file(READ \"${_TC_DEF_FILE}\" _tc_exports)
+file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NAME}>\\\"\\n\${_tc_exports}\")
+")
+            add_custom_command(
+                OUTPUT "${_TC_HOST_IMPORT_LIB}"
+                BYPRODUCTS "${_TC_HOST_IMPORT_DEF}"
+                COMMAND ${CMAKE_COMMAND} -P "${_TC_HOST_IMPORT_SCRIPT}"
+                COMMAND ${CMAKE_AR} /NOLOGO /IGNORE:4102
+                    /DEF:${_TC_HOST_IMPORT_DEF}
+                    /OUT:${_TC_HOST_IMPORT_LIB}
+                    /MACHINE:${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}
+                DEPENDS _tc_gen_exports "${_TC_DEF_FILE}" "${_TC_HOST_IMPORT_SCRIPT}"
+                COMMENT "[HotReload] Generating Guest import library"
+                VERBATIM
+            )
+            add_custom_target(_tc_host_import DEPENDS "${_TC_HOST_IMPORT_LIB}")
+            add_dependencies(guest _tc_host_import)
+            target_link_libraries(guest PRIVATE "${_TC_HOST_IMPORT_LIB}")
         else()
             target_link_options(${PROJECT_NAME} PRIVATE
                 -Wl,--whole-archive $<TARGET_FILE:TrussC> -Wl,--no-whole-archive
                 -rdynamic)
         endif()
 
-        # Mac/Linux: guest doesn't link to host (symbols resolved at runtime via
-        # dlopen), so without an explicit dependency the IDE-driven host build
-        # leaves libguest.dylib stale or missing. Force the IDE/build system
-        # (Xcode, Ninja, Make) to build guest whenever host is built.
-        # Windows already has guest -> host link dependency above.
-        if(NOT WIN32)
-            add_dependencies(${PROJECT_NAME} guest)
-        endif()
+        # A normal Host build also builds the Guest on every platform, while
+        # a reload's --target guest never builds the Host.
+        add_dependencies(${PROJECT_NAME} guest)
 
     elseif(ANDROID)
         add_library(${PROJECT_NAME} SHARED ${_TC_SOURCES})
@@ -657,82 +710,42 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
         message(STATUS "[${PROJECT_NAME}] Loaded local.cmake")
     endif()
 
-    # Compile shaders with sokol-shdc (if any .glsl files exist)
-    file(GLOB_RECURSE _TC_SHADER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.glsl")
-    if(_TC_SHADER_SOURCES)
-        # Select sokol-shdc binary based on host platform
-        # Download from official sokol-tools-bin repository
-        set(_TC_SOKOL_SHDC_BASE_URL "https://raw.githubusercontent.com/floooh/sokol-tools-bin/master/bin")
-        if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
-            if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "arm64")
-                set(_TC_SOKOL_SHDC_DIR "osx_arm64")
-            else()
-                set(_TC_SOKOL_SHDC_DIR "osx")
-            endif()
-        elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
-            set(_TC_SOKOL_SHDC_DIR "win32")
-        else()
-            if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "aarch64")
-                set(_TC_SOKOL_SHDC_DIR "linux_arm64")
-            else()
-                set(_TC_SOKOL_SHDC_DIR "linux")
-            endif()
+    # Bundle identifier for macOS / iOS. local.cmake may set TC_BUNDLE_ID
+    # (e.g. "com.example.myApp"); otherwise com.trussc.<project> is used.
+    if(TC_BUNDLE_ID)
+        set(_TC_BUNDLE_ID "${TC_BUNDLE_ID}")
+    else()
+        set(_TC_BUNDLE_ID "com.trussc.${PROJECT_NAME}")
+    endif()
+
+    # The shader interface exists even for shader-less apps. Hot reload's
+    # guest bypasses TrussC's transitive links, so link its requirements too.
+    trussc_compile_shaders(${PROJECT_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(${PROJECT_NAME} PRIVATE TrussC_shaders ${PROJECT_NAME}_shaders)
+    set(_TC_APP_SHADER_TARGETS TrussC_shaders ${PROJECT_NAME}_shaders)
+    foreach(_TC_SHADER_ADDON IN LISTS _TC_LOADED_ADDONS)
+        if(TARGET ${_TC_SHADER_ADDON}_shaders)
+            list(APPEND _TC_APP_SHADER_TARGETS ${_TC_SHADER_ADDON}_shaders)
         endif()
-        # Windows uses .exe extension
-        if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
-            set(_TC_SOKOL_SHDC_EXT ".exe")
-        else()
-            set(_TC_SOKOL_SHDC_EXT "")
-        endif()
-        set(_TC_SOKOL_SHDC_URL "${_TC_SOKOL_SHDC_BASE_URL}/${_TC_SOKOL_SHDC_DIR}/sokol-shdc${_TC_SOKOL_SHDC_EXT}")
-        set(_TC_SOKOL_SHDC_NAME "sokol-shdc${_TC_SOKOL_SHDC_EXT}")
-
-        set(_TC_SOKOL_SHDC "${TC_ROOT}/core/tools/sokol-shdc/${_TC_SOKOL_SHDC_NAME}")
-
-        # Download sokol-shdc if not present
-        if(NOT EXISTS "${_TC_SOKOL_SHDC}")
-            message(STATUS "[${PROJECT_NAME}] Downloading sokol-shdc...")
-            file(MAKE_DIRECTORY "${TC_ROOT}/core/tools/sokol-shdc")
-            file(DOWNLOAD "${_TC_SOKOL_SHDC_URL}" "${_TC_SOKOL_SHDC}"
-                SHOW_PROGRESS
-                STATUS _TC_DOWNLOAD_STATUS)
-            list(GET _TC_DOWNLOAD_STATUS 0 _TC_DOWNLOAD_ERROR)
-            if(_TC_DOWNLOAD_ERROR)
-                message(FATAL_ERROR "Failed to download sokol-shdc: ${_TC_DOWNLOAD_STATUS}")
+    endforeach()
+    if(NOT TARGET guest)
+        # Under hot reload only the guest gets these: on Windows a guest
+        # build also builds the host (it links the host's import library),
+        # and dirty host objects would relink the running executable.
+        trussc_shader_object_depends(${PROJECT_NAME} ${_TC_APP_SHADER_TARGETS})
+    endif()
+    if(TARGET guest)
+        target_link_libraries(guest PRIVATE TrussC_shaders ${PROJECT_NAME}_shaders)
+        # Include shaders from all loaded addons, including addon dependencies.
+        # Linking archives by file and copying INTERFACE properties above do
+        # not carry these transitive generation requirements.
+        foreach(_TC_SHADER_ADDON IN LISTS _TC_LOADED_ADDONS)
+            if(TARGET ${_TC_SHADER_ADDON}_shaders)
+                target_link_libraries(${PROJECT_NAME} PRIVATE ${_TC_SHADER_ADDON}_shaders)
+                target_link_libraries(guest PRIVATE ${_TC_SHADER_ADDON}_shaders)
             endif()
-            # Make executable on Unix
-            if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
-                file(CHMOD "${_TC_SOKOL_SHDC}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
-            endif()
-            message(STATUS "[${PROJECT_NAME}] sokol-shdc downloaded successfully")
-        endif()
-
-        # Output languages: Metal (macOS/iOS/iOS-simulator), HLSL (Windows),
-        # GLSL 4.30 (Linux desktop, SOKOL_GLCORE), GLSL ES3 (Android/RasPi/
-        # WebGL2), WGSL (Web/WebGPU). metal_sim keeps apps runnable on the
-        # iOS simulator (sg_query_backend() reports SG_BACKEND_METAL_SIMULATOR
-        # there; without it shader lookup returns null sources and crashes).
-        # glsl430 is required for GLCORE — without it every custom shader on
-        # Linux desktop fails with "Failed to get shader desc" (issue #193).
-        set(_TC_SOKOL_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl430:glsl300es:wgsl")
-
-        set(_TC_SHADER_OUTPUTS "")
-        foreach(_shader_src ${_TC_SHADER_SOURCES})
-            set(_shader_out "${_shader_src}.h")
-            list(APPEND _TC_SHADER_OUTPUTS ${_shader_out})
-
-            get_filename_component(_shader_name ${_shader_src} NAME)
-            add_custom_command(
-                OUTPUT ${_shader_out}
-                COMMAND ${_TC_SOKOL_SHDC} -i ${_shader_src} -o ${_shader_out} -l ${_TC_SOKOL_SLANG} --ifdef
-                DEPENDS ${_shader_src}
-                COMMENT "Compiling shader: ${_shader_name}"
-            )
         endforeach()
-
-        add_custom_target(${PROJECT_NAME}_shaders DEPENDS ${_TC_SHADER_OUTPUTS})
-        add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_shaders)
-        message(STATUS "[${PROJECT_NAME}] Shader compilation enabled for ${_TC_SHADER_SOURCES}")
+        trussc_shader_object_depends(guest ${_TC_APP_SHADER_TARGETS})
     endif()
 
     # Output settings
@@ -1029,13 +1042,13 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
         set_target_properties(${PROJECT_NAME} PROPERTIES
             MACOSX_BUNDLE TRUE
             MACOSX_BUNDLE_BUNDLE_NAME "${MACOSX_BUNDLE_DISPLAY_NAME}"
-            MACOSX_BUNDLE_GUI_IDENTIFIER "com.trussc.${PROJECT_NAME}"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "${_TC_BUNDLE_ID}"
             MACOSX_BUNDLE_BUNDLE_VERSION "1.0"
             MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
             MACOSX_BUNDLE_INFO_PLIST "${TRUSSC_DIR}/resources/Info-iOS.plist.in"
             XCODE_GENERATE_SCHEME TRUE
             XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "com.trussc.${PROJECT_NAME}"
+            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${_TC_BUNDLE_ID}"
         )
         # Code signing: always allow automatic signing, let user pick team in Xcode
         set_target_properties(${PROJECT_NAME} PROPERTIES
@@ -1065,8 +1078,8 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
         set_target_properties(${PROJECT_NAME} PROPERTIES
             MACOSX_BUNDLE TRUE
             MACOSX_BUNDLE_BUNDLE_NAME "${MACOSX_BUNDLE_DISPLAY_NAME}"
-            MACOSX_BUNDLE_GUI_IDENTIFIER "com.trussc.${PROJECT_NAME}"
-            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "com.trussc.${PROJECT_NAME}"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "${_TC_BUNDLE_ID}"
+            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${_TC_BUNDLE_ID}"
             MACOSX_BUNDLE_BUNDLE_VERSION "1.0"
             MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
             MACOSX_BUNDLE_INFO_PLIST "${TRUSSC_DIR}/resources/Info.plist.in"
@@ -1092,6 +1105,8 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
         set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
         # Windows: Setup icon
         trussc_setup_icon(${PROJECT_NAME})
+        # Windows: application manifest (UTF-8 process code page, long paths)
+        trussc_setup_manifest(${PROJECT_NAME})
     endif()
 
     # =========================================================================

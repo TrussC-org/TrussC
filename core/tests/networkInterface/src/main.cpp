@@ -10,11 +10,14 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdio>
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -23,7 +26,9 @@ static void check(const char* name, bool ok) {
     if (!ok) ++g_fail;
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     // --- 1. isLoopback ---
     check("isLoopback 127.0.0.1",        isLoopback("127.0.0.1"));
     check("isLoopback 127.5.6.7",        isLoopback("127.5.6.7"));

@@ -3,40 +3,64 @@
 // =============================================================================
 
 #include "TrussC.h"
+#include "stb/stb_image_write.h"
 
 namespace trussc {
 
-bool Pixels::save(const fs::path& path) const {
-    if (!allocated_ || !data_ || format_ == PixelFormat::F32) return false;
+SaveResult internal::writePixelsEncoded(std::FILE* file, const Pixels& pixels,
+                                        const std::string& ext, const fs::path& path) {
+    struct Sink { std::FILE* file; const fs::path& path; SaveResult result; } sink{file, path, {}};
+    auto write = [](void* context, void* data, int size) {
+        auto& sink = *static_cast<Sink*>(context);
+        if (sink.result) sink.result = internal::checkedWriteUnflushed(sink.file, data, size, sink.path);
+    };
+    const int w = pixels.getWidth(), h = pixels.getHeight(), ch = pixels.getChannels();
+    const auto* data = pixels.getData();
+    int encoded;
+    if (ext == "jpg" || ext == "jpeg") encoded = stbi_write_jpg_to_func(write, &sink, w, h, ch, data, 90);
+    else if (ext == "bmp") encoded = stbi_write_bmp_to_func(write, &sink, w, h, ch, data);
+    else if (ext == "tga") encoded = stbi_write_tga_to_func(write, &sink, w, h, ch, data);
+    else encoded = stbi_write_png_to_func(write, &sink, w, h, ch, data, w * ch);
+    if (!sink.result) return sink.result;
+    return encoded ? SaveResult::success() : internal::saveFailure(path, "Screenshot encoding failed");
+}
 
-    // Convert relative paths to data path
-    fs::path savePath = path;
-    if (path.is_relative()) {
-        savePath = getDataPath(path);
-    }
+SaveResult Pixels::save(const fs::path& path) const {
+    if (!allocated_ || !data_ || format_ == PixelFormat::F32)
+        return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed,
+            "Cannot save empty or floating-point pixels"), "Pixels");
+    fs::path savePath;
+    auto prepared = internal::prepareOutputPath(path, savePath, "Pixels");
+    if (!prepared) return prepared;
 
-    auto ext = savePath.extension().string();
-    // UTF-8 for stb (STBIW_WINDOWS_UTF8 makes stb wide-open it on Windows)
-    auto pathStr = internal::pathToUtf8(savePath);
+    // Encode to memory first: an encode error leaves an existing file
+    // untouched. The encoder follows the extension, whatever its case
+    // (.PNG, .Jpg); the file is written under the path as given.
+    auto ext = toLower(getFileExtension(savePath));
+    std::vector<unsigned char> encoded;
+    auto append = [](void* ctx, void* d, int size) {
+        auto* out = static_cast<std::vector<unsigned char>*>(ctx);
+        auto* bytes = static_cast<unsigned char*>(d);
+        out->insert(out->end(), bytes, bytes + size);
+    };
     int result = 0;
-
-    if (ext == ".png" || ext == ".PNG") {
-        result = stbi_write_png(pathStr.c_str(), width_, height_, channels_, data_, width_ * channels_);
-    } else if (ext == ".jpg" || ext == ".jpeg" || ext == ".JPG" || ext == ".JPEG") {
-        result = stbi_write_jpg(pathStr.c_str(), width_, height_, channels_, data_, 90);
-    } else if (ext == ".bmp" || ext == ".BMP") {
-        result = stbi_write_bmp(pathStr.c_str(), width_, height_, channels_, data_);
+    if (ext == "jpg" || ext == "jpeg") {
+        result = stbi_write_jpg_to_func(append, &encoded, width_, height_, channels_, data_, 90);
+    } else if (ext == "bmp") {
+        result = stbi_write_bmp_to_func(append, &encoded, width_, height_, channels_, data_);
     } else {
         // Default is PNG
-        result = stbi_write_png(pathStr.c_str(), width_, height_, channels_, data_, width_ * channels_);
+        result = stbi_write_png_to_func(append, &encoded, width_, height_, channels_, data_, width_ * channels_);
     }
-
-    return result != 0;
+    if (result == 0 || encoded.empty())
+        return internal::reportSaveFailure(internal::saveFailure(savePath, "Cannot encode image"), "Pixels");
+    return internal::atomicWrite(savePath, encoded.data(), encoded.size(), "Pixels");
 }
 
 // Platform-specific image loader fallback (non-Apple stub)
 #ifndef __APPLE__
-bool Pixels::loadPlatform(const fs::path& /*path*/) {
+bool Pixels::loadPlatform(const fs::path& path) {
+    if (!internal::checkLoadFile(internal::resolveLoadPath(path), "Pixels")) return false;
     return false;
 }
 #endif
@@ -113,24 +137,25 @@ void Pixels::halve() {
             int sx0 = std::min(2 * x,     sw - 1);
             int sx1 = std::min(2 * x + 1, sw - 1);
             for (int c = 0; c < ch; c++) {
-                int i00 = (sy0 * sw + sx0) * ch + c;
-                int i01 = (sy0 * sw + sx1) * ch + c;
-                int i10 = (sy1 * sw + sx0) * ch + c;
-                int i11 = (sy1 * sw + sx1) * ch + c;
+                const size_t i00 = internal::pixelOffset(sx0, sy0, sw, ch) + c;
+                const size_t i01 = internal::pixelOffset(sx1, sy0, sw, ch) + c;
+                const size_t i10 = internal::pixelOffset(sx0, sy1, sw, ch) + c;
+                const size_t i11 = internal::pixelOffset(sx1, sy1, sw, ch) + c;
+                const size_t di  = internal::pixelOffset(x, y, newW, ch) + c;
                 if (isF32) {
                     // F32 = already linear, average directly.
                     float avg = (srcF[i00] + srcF[i01] + srcF[i10] + srcF[i11]) * 0.25f;
-                    dstF[(y * newW + x) * ch + c] = avg;
+                    dstF[di] = avg;
                 } else {
                     bool linear = isLinearChannel(ch, c);
-                    auto fetch = [&](int i) -> float {
+                    auto fetch = [&](size_t i) -> float {
                         float v = srcU[i] / 255.0f;
                         return linear ? v : sRGBToLinear(v);
                     };
                     float avg = (fetch(i00) + fetch(i01) + fetch(i10) + fetch(i11)) * 0.25f;
                     if (!linear) avg = linearToSRGB(avg);
                     avg = clampf(avg, 0.0f, 1.0f);
-                    dstU[(y * newW + x) * ch + c] = static_cast<unsigned char>(std::lround(avg * 255.0f));
+                    dstU[di] = static_cast<unsigned char>(std::lround(avg * 255.0f));
                 }
             }
         }
@@ -144,6 +169,7 @@ void Pixels::crop(int x, int y, int w, int h) {
 
     Pixels dst;
     dst.allocate(w, h, channels_, format_);
+    if (!dst.isAllocated()) return;
 
     const size_t bpp = (format_ == PixelFormat::F32)
                        ? (size_t)channels_ * sizeof(float)
@@ -385,10 +411,12 @@ void Pixels::resize(int newW, int newH) {
     // (newW x height_), then vertical into the final (newW x newH).
     Pixels intermediate;
     intermediate.allocate(newW, height_, channels_, format_);
+    if (!intermediate.isAllocated()) return;
     resample1D_X(*this, intermediate);
 
     Pixels final;
     final.allocate(newW, newH, channels_, format_);
+    if (!final.isAllocated()) return;
     resample1D_Y(intermediate, final);
 
     *this = std::move(final);

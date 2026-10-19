@@ -14,6 +14,8 @@
 // GLES3 for screen capture
 #include <GLES3/gl3.h>
 
+#include "../gl/tcPixelPack.h"
+
 namespace trussc {
 
 static bool immersiveMode_ = false;
@@ -225,9 +227,34 @@ fs::path getExecutableDir() {
     return fs::path("/data/local/tmp");
 }
 
+// User data / temp folders. internalDataPath is the app's internal files
+// folder (Context.getFilesDir()); the cache folder (Context.getCacheDir())
+// is its sibling "cache" in the same app data folder.
+fs::path internal::platformUserDataRoot() {
+    auto* activity = (ANativeActivity*)sapp_android_get_native_activity();
+    if (activity && activity->internalDataPath) {
+        return fs::path(activity->internalDataPath);
+    }
+    return fs::path("/data/local/tmp/files");
+}
+
+fs::path internal::platformTempRoot() {
+    fs::path files = platformUserDataRoot().lexically_normal();
+    if (files.filename().empty()) files = files.parent_path();   // trailing '/'
+    return files.parent_path() / "cache";
+}
+
+fs::path internal::platformAppBundlePath() {
+    return {};
+}
+
 // ---------------------------------------------------------------------------
 // Screenshot Functions (GLES3)
 // ---------------------------------------------------------------------------
+
+std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
+    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+}
 
 bool captureWindow(Pixels& outPixels) {
     int width = sapp_width();
@@ -238,58 +265,49 @@ bool captureWindow(Pixels& outPixels) {
         return false;
     }
 
+    const auto layout = internal::recorderPackedLayout(width, height, internal::RecorderPixelFormat::RGBA8);
+    // Bound (abi): packed capture bytes must fit size_t. Overflow drops the recorder frame and is counted.
+    if (!layout.byteSize) return false;
+    mcp::internal::reconcileWindowCapture(size_t(width), size_t(height));
     outPixels.allocate(width, height, 4);
+    // Bound (abi): the pixel allocation must hold every captured row. Overflow drops the recorder frame and is counted.
+    if (!outPixels.getData() || outPixels.getTotalBytes() < layout.byteSize) return false;
 
-    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, outPixels.getData());
+    {
+        internal::ScopedTightPixelPack pack;
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, outPixels.getData());
+    }
 
     // OpenGL reads from bottom-left, flip vertically
     unsigned char* data = outPixels.getData();
-    std::vector<unsigned char> rowBuffer(width * 4);
+    std::vector<unsigned char> rowBuffer(layout.rowBytes);
     for (int y = 0; y < height / 2; y++) {
-        int topRow = y * width * 4;
-        int bottomRow = (height - 1 - y) * width * 4;
-        memcpy(rowBuffer.data(), &data[topRow], width * 4);
-        memcpy(&data[topRow], &data[bottomRow], width * 4);
-        memcpy(&data[bottomRow], rowBuffer.data(), width * 4);
+        size_t topRow = (size_t)y * layout.rowBytes;
+        size_t bottomRow = (size_t)(height - 1 - y) * layout.rowBytes;
+        memcpy(rowBuffer.data(), &data[topRow], layout.rowBytes);
+        memcpy(&data[topRow], &data[bottomRow], layout.rowBytes);
+        memcpy(&data[bottomRow], rowBuffer.data(), layout.rowBytes);
     }
 
     return true;
 }
 
-bool internal::captureWindowToFile(const std::filesystem::path& path) {
-    if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path));
-    }
+bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
     Pixels pixels;
-    if (!captureWindow(pixels)) {
-        return false;
-    }
+    if (!captureWindow(pixels)) return false;
+    return internal::saveScreenshotPixels(pixels, path);
+}
 
-    std::string ext = path.extension().string();
-    std::string pathStr = internal::pathToUtf8(path);   // UTF-8 for stb (STBIW_WINDOWS_UTF8)
+bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    return writeScreenshotPixels(pixels, requestedPath).ok();
+}
 
-    int width = pixels.getWidth();
-    int height = pixels.getHeight();
-    unsigned char* data = pixels.getData();
-
-    int result = 0;
-    if (ext == ".png") {
-        result = stbi_write_png(pathStr.c_str(), width, height, 4, data, width * 4);
-    } else if (ext == ".jpg" || ext == ".jpeg") {
-        result = stbi_write_jpg(pathStr.c_str(), width, height, 4, data, 90);
-    } else if (ext == ".bmp") {
-        result = stbi_write_bmp(pathStr.c_str(), width, height, 4, data);
-    } else {
-        result = stbi_write_png(pathStr.c_str(), width, height, 4, data, width * 4);
-    }
-
-    if (result) {
-        logVerbose("Screenshot") << "Saved: " << path;
-        return true;
-    } else {
-        logError("Screenshot") << "Failed to save: " << path;
-        return false;
-    }
+SaveResult internal::writeScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
+    return internal::atomicWrite(path, [&](std::FILE* file) {
+        return internal::writePixelsEncoded(file, pixels, toLower(getFileExtension(path)), path);
+    }, "Screenshot", true);
 }
 
 // ---------------------------------------------------------------------------

@@ -23,9 +23,11 @@
 // are already included: tcMath.h, tcColor.h, tcBitmapFont.h, sokol_gl.h
 
 #include "tc/graphics/tcCurveTessellation.h"
+#include "tc/utils/tcTypeName.h"
 
 #include <vector>
 #include <string>
+#include <chrono>
 
 namespace trussc {
 
@@ -53,15 +55,10 @@ enum class PointStyle {
     Pixel    // true 1px point (sokol_gl immediate; ignores pointSize)
 };
 
-// Forward declarations
-namespace internal {
-    extern sg_view fontView;
-    extern sg_sampler fontSampler;
-    extern bool fontInitialized;
-    extern bool pixelPerfectMode;
-    // Screen setup / view-projection tracking state lives in WindowContext
-    // (tc/app/tcWindowContext.h, included before this header from TrussC.h).
-}
+// The bitmap-font state (internal::bitmapFontAtlas()) and pixelPerfectMode()
+// are declared in TrussC.h before this header is included. Screen setup /
+// view-projection tracking state lives in WindowContext
+// (tc/app/tcWindowContext.h, also included before this header from TrussC.h).
 
 // ---------------------------------------------------------------------------
 // RenderContext class
@@ -70,6 +67,35 @@ namespace internal {
 // API is the free functions that wrap them. A compat `using` below keeps the
 // names reachable from trussc:: for those wrappers and advanced users.
 namespace internal {
+
+// Entry points where TrussC calls app code (#349). Each value gives its label
+// in the unbalanced push/pop warnings (appEntryLabel) and its own rate limit,
+// so one value names the entry point everywhere. Wrapped by EntryStackGuard
+// (below), except Draw, whose frame-end reset is present()'s.
+enum class AppEntry {
+    Setup,    // the App's (or a secondary window root's) setup(), and the App's construction
+    Prelude,  // per-frame queues before update: runOnMainThread / Deliver::Main, console, MCP
+    Update,   // update(): synced, independent (VSYNC / each fixed-Hz step), headless, secondary windows
+    Draw,     // the frame: draw(), dropped at present() (#232)
+    Event,    // one window event (key, mouse, touch, drop, resize, ...), main or secondary
+    Exit,     // exit() and cleanup()
+    AfterFrame,  // events().afterFrame listeners, after present(), main or secondary
+    Count
+};
+
+inline const char* appEntryLabel(AppEntry e) {
+    switch (e) {
+        case AppEntry::Setup:   return "setup()";
+        case AppEntry::Prelude: return "the main-thread queue (runOnMainThread / Deliver::Main / console / MCP)";
+        case AppEntry::Update:  return "update()";
+        case AppEntry::Draw:    return "draw()";
+        case AppEntry::Event:   return "an event handler";
+        case AppEntry::Exit:    return "exit()";
+        case AppEntry::AfterFrame: return "an afterFrame listener";
+        case AppEntry::Count:   break;
+    }
+    return "?";
+}
 
 class RenderContext {
 public:
@@ -203,7 +229,7 @@ public:
     // accounting for perspective would require per-pixel jacobian inversion
     // at every curve point (overkill).
     float getScale() const {
-        const auto& m = currentMatrix_.m;
+        const auto& m = matrixTarget().currentMatrix.m;
         // Column 0 / column 1 lengths = effective x / y scale of the basis.
         float sx = std::sqrt(m[0]*m[0] + m[4]*m[4] + m[8]*m[8]);
         float sy = std::sqrt(m[1]*m[1] + m[5]*m[5] + m[9]*m[9]);
@@ -251,35 +277,152 @@ public:
     // -----------------------------------------------------------------------
 
     void pushMatrix() {
-        matrixStack_.push_back(currentMatrix_);
-        sgl_push_matrix();
+        matrixTarget().matrixStack.push_back(matrixTarget().currentMatrix);
     }
 
+    // A pop with nothing pushed is a bug in the caller: warn (rate-limited)
+    // and leave both stacks alone, so TrussC's and sokol_gl's stay in step.
+    // Inside a Node's draw() the stack floor (#348) is that node's depth, so a
+    // pop that would reach its parent's entries is refused the same way.
     void popMatrix() {
-        if (!matrixStack_.empty()) {
-            currentMatrix_ = matrixStack_.back();
-            matrixStack_.pop_back();
+        if (matrixTarget().matrixStack.size() <= (stackFloor_.target == &matrixTarget() ? stackFloor_.matrix : 0)) {
+            warnPopAtFloor(popMatrixWarning_, "popMatrix()", "pushMatrix()");
+            return;
         }
-        sgl_pop_matrix();
+        matrixTarget().currentMatrix = matrixTarget().matrixStack.back();
+        matrixTarget().matrixStack.pop_back();
+        internal::applyTargetModelView();
     }
+
+    size_t getMatrixStackDepth() const { return matrixTarget().matrixStack.size(); }
+    size_t getStyleStackDepth() const { return styleStack_.size(); }
 
     // -----------------------------------------------------------------------
     // Style stack
     // -----------------------------------------------------------------------
 
     void pushStyle() {
-        // Capture the live blend mode (it lives in internal::currentWindowContext().currentBlendMode, not in
+        // Capture the live blend mode (it lives in internal::currentWindowContext().currentTarget->currentBlendMode, not in
         // style_) so it is saved/restored alongside color/fill/stroke.
-        style_.blend = internal::currentWindowContext().currentBlendMode;
+        style_.blend = internal::currentWindowContext().currentTarget->currentBlendMode;
         styleStack_.push_back(style_);
     }
 
     void popStyle() {
-        if (!styleStack_.empty()) {
-            style_ = styleStack_.back();
-            styleStack_.pop_back();
-            applyBlend(style_.blend);
+        if (styleStack_.size() <= stackFloor_.style) {
+            warnPopAtFloor(popStyleWarning_, "popStyle()", "pushStyle()");
+            return;
         }
+        style_ = styleStack_.back();
+        styleStack_.pop_back();
+        applyBlend(style_.blend);
+    }
+
+    // Frame end (#232): whatever a frame left pushed is dropped, so a missing
+    // pop stays contained in the frame where it happened instead of drifting
+    // getMatrix() (billboards, screen-fixed text, shader / PBR draws) and
+    // growing the stacks forever. Warns (rate-limited, as AppEntry::Draw:
+    // "draw() ended with ...") when anything was left. Called at the end of
+    // present(), the draw entry point's end (#349); the sokol_gl side is
+    // reset there too.
+    void resetStacksAtFrameEnd() {
+        warnLeftOpen(AppEntry::Draw, matrixTarget().matrixStack.size(), styleStack_.size());
+        matrixTarget().matrixStack.clear();
+        styleStack_.clear();
+        matrixTarget().currentMatrix = Mat4::identity();
+        stackFloor_ = StackFloor{};
+    }
+
+    // Stack floor (#348): popMatrix() / popStyle() never pop below these
+    // depths. Node::drawTree() sets it to the depths it sees before draw(),
+    // with the node's type, so a stray pop in draw() is refused (and names the
+    // node) instead of popping the node's own entry and drawing its children
+    // in the parent's space. A 0 floor with no owner is the plain empty-stack
+    // guard.
+    struct StackFloor {
+        size_t matrix = 0;
+        size_t style = 0;
+        const std::type_info* owner = nullptr;  // node type that set it, or null
+        RenderTarget* target = nullptr;
+    };
+
+    // Set the floor and return the previous one; the caller puts that back
+    // with setStackFloor(prev), since a draw() can run another node's drawTree().
+    StackFloor setStackFloor(size_t matrixDepth, size_t styleDepth, const std::type_info* owner) {
+        StackFloor prev = stackFloor_;
+        stackFloor_ = StackFloor{matrixDepth, styleDepth, owner, &matrixTarget()};
+        return prev;
+    }
+    void setStackFloor(const StackFloor& floor) { stackFloor_ = floor; }
+
+    // When an entry point where TrussC calls app code returns (#349): put the
+    // stacks back to the depths they had when it was entered (EntryStackGuard
+    // records them), naming the entry point in the warning (for an event, the
+    // event's name when given: text only, the rate limit is Event's). Pops go
+    // through popMatrix() / popStyle(), as restoreStackDepth() does, so sokol_gl's
+    // matrix stack returns with TrussC's and the two stay in step, also
+    // mid-frame (the synced update). Only the pushes are undone: a style value
+    // or transform set outside a push carries on.
+    void restoreStacksAtEntryEnd(AppEntry entry, size_t matrixDepth, size_t styleDepth,
+                                 const char* eventName = nullptr, RenderTarget* entryTarget = nullptr) {
+        if (entryTarget && entryTarget != &matrixTarget()) {
+            // An entry cannot consume a different target's live matrix scope.
+            matrixDepth = matrixTarget().matrixStack.size();
+        }
+        const size_t md = matrixTarget().matrixStack.size(), sd = styleStack_.size();
+        if (md == matrixDepth && sd == styleDepth) return;
+        if (md >= matrixDepth && sd >= styleDepth) {
+            warnLeftOpen(entry, md - matrixDepth, sd - styleDepth, eventName);
+        } else {
+            // Popped below the depth it was entered at (possible only when
+            // entered with something pushed, e.g. an event during a frame).
+            warnUnbalanced(entryWarning(entry),
+                entrySubject(entry, eventName) + " ended with the stacks off their depth at entry (pushMatrix " +
+                std::to_string((long long)md - (long long)matrixDepth) + ", pushStyle " +
+                std::to_string((long long)sd - (long long)styleDepth) + "); restored");
+        }
+        while (matrixTarget().matrixStack.size() > matrixDepth) popMatrix();
+        while (styleStack_.size() > styleDepth) popStyle();
+        // The lost entries can't be recovered, but refilling the depth keeps
+        // the caller's pops matched to its pushes.
+        while (matrixTarget().matrixStack.size() < matrixDepth) pushMatrix();
+        while (styleStack_.size() < styleDepth) pushStyle();
+    }
+
+    // After a Node's draw() (and its mods) run: if it left the stacks deeper
+    // than it found them (a missing pop), name the node and pop back to that
+    // depth, so its parent's own pop, its children and every later sibling
+    // see the matrix and style they expect. A stray pop is refused at the
+    // floor above; the shallower branch below is a safety net only.
+    void restoreStackDepth(size_t matrixDepth, size_t styleDepth, const char* who) {
+        const size_t md = matrixTarget().matrixStack.size(), sd = styleStack_.size();
+        if (md == matrixDepth && sd == styleDepth) return;
+        if (md >= matrixDepth && sd >= styleDepth) {
+            // Extra pushes: reported like a stray pop, naming the node (#348).
+            std::string what = std::string(who) + "::draw() called ";
+            if (md > matrixDepth) {
+                what += "pushMatrix() without a matching popMatrix()";
+                if (md - matrixDepth > 1) what += " x" + std::to_string(md - matrixDepth);
+            }
+            if (sd > styleDepth) {
+                if (md > matrixDepth) what += " and ";
+                what += "pushStyle() without a matching popStyle()";
+                if (sd - styleDepth > 1) what += " x" + std::to_string(sd - styleDepth);
+            }
+            warnUnbalanced(nodeDrawWarning_, what + " (dropped)");
+        } else {
+            warnUnbalanced(nodeDrawWarning_,
+                std::string(who) + "::draw() left the stacks unbalanced (pushMatrix " +
+                std::to_string((long long)md - (long long)matrixDepth) + ", pushStyle " +
+                std::to_string((long long)sd - (long long)styleDepth) + ")");
+        }
+        while (matrixTarget().matrixStack.size() > matrixDepth) popMatrix();
+        while (styleStack_.size() > styleDepth) popStyle();
+        // Shallower than expected (only if something got past the floor): the
+        // lost entries can't be recovered, but refilling the depth keeps the
+        // parent's pops matched to its pushes.
+        while (matrixTarget().matrixStack.size() < matrixDepth) pushMatrix();
+        while (styleStack_.size() < styleDepth) pushStyle();
     }
 
     // Reset style to default values (white color, fill enabled, etc.)
@@ -289,21 +432,16 @@ public:
     }
 
 private:
-    // Restore the 2D blend pipeline only when the mode actually changed (a redundant
-    // load is otherwise a no-op that sokol_gl batches away, but we skip it anyway).
-    // No-op inside an FBO pass, which uses its own accumulating pipeline.
     void applyBlend(BlendMode mode) {
-        if (mode == internal::currentWindowContext().currentBlendMode) return;
-        internal::currentWindowContext().currentBlendMode = mode;
-        if (!internal::currentWindowContext().inFboPass) {
-            internal::loadPipeline(internal::active2D(mode));
-        }
+        internal::currentTarget().currentBlendMode = mode;
+        internal::currentTarget().selectedPipeline = internal::fillSelection(mode, internal::currentTarget().depthTestEnabled);
+        internal::loadPipeline(internal::active2D(mode));
     }
 public:
 
     // Main implementation (Vec3)
     void translate(Vec3 pos) {
-        currentMatrix_ = currentMatrix_ * Mat4::translate(pos.x, pos.y, pos.z);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * Mat4::translate(pos.x, pos.y, pos.z);
         sgl_translate(pos.x, pos.y, pos.z);
     }
 
@@ -316,22 +454,22 @@ public:
     }
 
     void rotate(float radians) {
-        currentMatrix_ = currentMatrix_ * Mat4::rotateZ(radians);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * Mat4::rotateZ(radians);
         sgl_rotate(radians, 0.0f, 0.0f, 1.0f);
     }
 
     void rotateX(float radians) {
-        currentMatrix_ = currentMatrix_ * Mat4::rotateX(radians);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * Mat4::rotateX(radians);
         sgl_rotate(radians, 1.0f, 0.0f, 0.0f);
     }
 
     void rotateY(float radians) {
-        currentMatrix_ = currentMatrix_ * Mat4::rotateY(radians);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * Mat4::rotateY(radians);
         sgl_rotate(radians, 0.0f, 1.0f, 0.0f);
     }
 
     void rotateZ(float radians) {
-        currentMatrix_ = currentMatrix_ * Mat4::rotateZ(radians);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * Mat4::rotateZ(radians);
         sgl_rotate(radians, 0.0f, 0.0f, 1.0f);
     }
 
@@ -342,55 +480,46 @@ public:
 
     void rotate(const Quaternion& quat) {
         Mat4 rotMat = quat.toMatrix();
-        currentMatrix_ = currentMatrix_ * rotMat;
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * rotMat;
         // Mat4 is row-major, sokol_gl expects column-major — transpose
         Mat4 t = rotMat.transposed();
         sgl_mult_matrix(t.m);
     }
 
     void scale(float s) {
-        currentMatrix_ = currentMatrix_ * Mat4::scale(s, s, 1.0f);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * Mat4::scale(s, s, 1.0f);
         sgl_scale(s, s, 1.0f);
     }
 
     void scale(float sx, float sy) {
-        currentMatrix_ = currentMatrix_ * Mat4::scale(sx, sy, 1.0f);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * Mat4::scale(sx, sy, 1.0f);
         sgl_scale(sx, sy, 1.0f);
     }
 
     void scale(float sx, float sy, float sz) {
-        currentMatrix_ = currentMatrix_ * Mat4::scale(sx, sy, sz);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * Mat4::scale(sx, sy, sz);
         sgl_scale(sx, sy, sz);
     }
 
     // Current accumulated model matrix.
-    Mat4 getMatrix() const { return currentMatrix_; }
+    Mat4 getMatrix() const { return matrixTarget().currentMatrix; }
     [[deprecated("Use getMatrix() instead. Will be removed in v1.0.0")]]
     Mat4 getCurrentMatrix() const { return getMatrix(); }
 
     void resetMatrix() {
-        currentMatrix_ = Mat4::identity();
-        // Restore default view matrix (camera lookat) set by setupScreenFovWithSize
-        // This works correctly both in main screen and FBO contexts
-        // Note: Mat4 is row-major, sokol_gl expects column-major, so transpose
-        Mat4 t = internal::currentWindowContext().currentViewMatrix.transposed();
-        sgl_load_matrix(t.m);
+        matrixTarget().currentMatrix = Mat4::identity();
+        internal::applyTargetModelView();
     }
 
-    // Multiply the current matrix by `mat` (relative transform, like translate/rotate).
-    // NOTE: this was previously misnamed setMatrix(); that name now REPLACES.
     void multMatrix(const Mat4& mat) {
-        currentMatrix_ = currentMatrix_ * mat;
-        // sokol_gl expects column-major, but Mat4 is row-major
-        Mat4 t = mat.transposed();
-        sgl_mult_matrix(t.m);
+        matrixTarget().currentMatrix = matrixTarget().currentMatrix * mat;
+        internal::applyTargetModelView();
     }
 
-    // Replace the current matrix with `mat` (absolute - use with caution, may break camera setup).
+    // Replace the model matrix while retaining the active camera view.
     void setMatrix(const Mat4& mat) {
-        currentMatrix_ = mat;
-        Mat4 t = mat.transposed();
-        sgl_load_matrix(t.m);
+        matrixTarget().currentMatrix = mat;
+        internal::applyTargetModelView();
     }
     [[deprecated("Use setMatrix() instead. Will be removed in v1.0.0")]]
     void loadMatrix(const Mat4& mat) { setMatrix(mat); }
@@ -971,7 +1100,7 @@ private:
         Direction textAlignH = Direction::Left;
         Direction textAlignV = Direction::Top;
         float bitmapLineHeight = bitmapfont::CHAR_TEX_HEIGHT;
-        // Mirror of internal::currentWindowContext().currentBlendMode. blend state itself lives outside the
+        // Mirror of internal::currentWindowContext().currentTarget->currentBlendMode. blend state itself lives outside the
         // RenderContext (it maps to an sgl pipeline), so push/popStyle capture and
         // restore it explicitly rather than via this field's value alone.
         BlendMode blend = BlendMode::Alpha;
@@ -998,8 +1127,67 @@ private:
     int& circleResolution_ = style_.circleResolution;
 
     // Matrix stack
-    Mat4 currentMatrix_ = Mat4::identity();
-    std::vector<Mat4> matrixStack_;
+    RenderTarget& matrixTarget() const {
+        return *currentWindowContext().currentTarget;
+    }
+
+    // Unbalanced push/pop warnings (#232). A missing pop repeats every frame,
+    // so each kind logs its first occurrence, then at most once per 5 s with
+    // the count since the last line.
+    struct RateLimitedWarning {
+        std::chrono::steady_clock::time_point last{};
+        bool logged = false;
+        int suppressed = 0;
+    };
+    RateLimitedWarning popMatrixWarning_, popStyleWarning_, nodeDrawWarning_;
+    // One per entry point (#349), so a leak in one doesn't hide another's.
+    RateLimitedWarning entryWarnings_[static_cast<size_t>(AppEntry::Count)];
+
+    RateLimitedWarning& entryWarning(AppEntry e) { return entryWarnings_[static_cast<size_t>(e)]; }
+
+    // An event names itself ("keyPressed()") when the caller knows which.
+    static std::string entrySubject(AppEntry e, const char* eventName) {
+        return (e == AppEntry::Event && eventName) ? std::string(eventName) : std::string(appEntryLabel(e));
+    }
+
+    // "<entry> ended with N pushMatrix() and M pushStyle() still open (missing
+    // pop); dropped", under the entry point's own rate limit.
+    void warnLeftOpen(AppEntry e, size_t matrixLeft, size_t styleLeft, const char* eventName = nullptr) {
+        if (matrixLeft == 0 && styleLeft == 0) return;
+        warnUnbalanced(entryWarning(e),
+            entrySubject(e, eventName) + " ended with " + std::to_string(matrixLeft) +
+            " pushMatrix() and " + std::to_string(styleLeft) +
+            " pushStyle() still open (missing pop); dropped");
+    }
+
+    StackFloor stackFloor_;
+
+    // A pop refused at the floor (#348): name the node that set it, or use the
+    // generic message outside any node's draw(). The name is resolved only
+    // here, never per node per frame.
+    void warnPopAtFloor(RateLimitedWarning& generic, const char* pop, const char* push) {
+        if (stackFloor_.owner) {
+            warnUnbalanced(nodeDrawWarning_,
+                typeName(*stackFloor_.owner) + "::draw() called " + pop +
+                " without a matching " + push + " (ignored)");
+        } else {
+            warnUnbalanced(generic, std::string(pop) + " without a matching " + push);
+        }
+    }
+
+    void warnUnbalanced(RateLimitedWarning& w, const std::string& what) {
+        const auto now = std::chrono::steady_clock::now();
+        if (w.logged && now - w.last < std::chrono::seconds(5)) {
+            w.suppressed++;
+            return;
+        }
+        auto line = logWarning("RenderContext");
+        line << what;
+        if (w.suppressed > 0) line << " (+" << w.suppressed << " more since the last report)";
+        w.logged = true;
+        w.last = now;
+        w.suppressed = 0;
+    }
 
     // Text alignment (shortcut to style_)
     Direction& textAlignH_ = style_.textAlignH;
@@ -1041,6 +1229,29 @@ private:
 // static instance — inline would give each module its own copy on Windows.
 // ---------------------------------------------------------------------------
 RenderContext& getDefaultContext();
+
+// Wraps one entry point where TrussC calls app code (#349), as one line at
+// the top of its scope: `EntryStackGuard guard(AppEntry::Update);`. The
+// constructor records the matrix and style stack depths; the destructor puts
+// them back (restoreStacksAtEntryEnd) and warns under the entry point's label
+// and rate limit, so an early return can't skip it. For an event, eventName
+// (a string literal, e.g. "keyPressed()") only names it in the warning.
+class EntryStackGuard {
+public:
+    explicit EntryStackGuard(AppEntry entry, const char* eventName = nullptr)
+        : entry_(entry), eventName_(eventName), rc_(getDefaultContext()),
+          matrixDepth_(rc_.getMatrixStackDepth()), styleDepth_(rc_.getStyleStackDepth()), target_(&currentTarget()) {}
+    ~EntryStackGuard() { rc_.restoreStacksAtEntryEnd(entry_, matrixDepth_, styleDepth_, eventName_, target_); }
+    EntryStackGuard(const EntryStackGuard&) = delete;
+    EntryStackGuard& operator=(const EntryStackGuard&) = delete;
+
+private:
+    AppEntry entry_;
+    const char* eventName_;
+    RenderContext& rc_;
+    size_t matrixDepth_, styleDepth_;
+    RenderTarget* target_;
+};
 
 } // namespace internal
 

@@ -10,12 +10,15 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cmath>
 #include <cstdio>
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -47,7 +50,9 @@ static CameraContext makeContext(const Mat4& glProj, const Mat4& view, float w, 
     return ctx;
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     const float W = 800.0f, H = 600.0f;
     const Vec3 probe(120.0f, -40.0f, 100.0f);
 
@@ -114,10 +119,10 @@ int main() {
     for (int conv = 0; conv <= 1; ++conv) {
         internal::clipZOverrideForTests() = conv;
         auto& wc = internal::currentWindowContext();
-        wc.currentProjectionMatrix = internal::toBackendClip(glOrtho);
-        wc.currentViewMatrix = view;
-        wc.currentViewW = W;
-        wc.currentViewH = H;
+        wc.currentTarget->camera.currentProjectionMatrix = internal::toBackendClip(glOrtho);
+        wc.currentTarget->camera.currentViewMatrix = view;
+        wc.currentTarget->camera.currentViewW = W;
+        wc.currentTarget->camera.currentViewH = H;
 
         Vec3 s = worldToScreen(probe);
         Vec3 back = screenToWorld(Vec2(s.x, s.y), probe.z);
@@ -129,10 +134,10 @@ int main() {
     // Convergence of the free function across conventions
     {
         internal::clipZOverrideForTests() = 0;
-        internal::currentWindowContext().currentProjectionMatrix = internal::toBackendClip(glOrtho);
+        internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix = internal::toBackendClip(glOrtho);
         Vec3 glS = worldToScreen(probe);
         internal::clipZOverrideForTests() = 1;
-        internal::currentWindowContext().currentProjectionMatrix = internal::toBackendClip(glOrtho);
+        internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix = internal::toBackendClip(glOrtho);
         Vec3 nS = worldToScreen(probe);
         check("free worldToScreen equal across conventions", nearv(glS, nS));
     }

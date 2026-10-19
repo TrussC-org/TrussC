@@ -1,0 +1,3 @@
+{test} --pipeline-cycles self 100
+{test} --pipeline-cycles main 100
+{test} --pipeline-cycles early 100

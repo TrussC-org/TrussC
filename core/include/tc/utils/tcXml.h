@@ -28,7 +28,8 @@ public:
 
     // Load from file (relative paths resolved via getDataPath, like loadJson)
     bool load(const fs::path& path) {
-        fs::path fullPath = getDataPath(path);
+        fs::path fullPath = internal::resolveLoadPath(path);
+        if (!internal::checkLoadFile(fullPath, "Xml")) return false;
         // fullPath.c_str() is wchar_t* on Windows — pugixml has a wide
         // load_file overload there, so non-ASCII paths survive.
         XmlParseResult result = doc_.load_file(fullPath.c_str());
@@ -53,17 +54,24 @@ public:
         return true;
     }
 
-    // Save to file (relative paths resolved via getDataPath, like saveJson)
-    bool save(const fs::path& path, const std::string& indent = "  ") const {
-        fs::path fullPath = getDataPath(path);
-        // Wide save_file overload on Windows (see load)
-        bool success = doc_.save_file(fullPath.c_str(), indent.c_str());
-        if (!success) {
-            logError() << "XML write error: " << path;
-            return false;
+    // Save to file (relative paths resolved via getDataPath, like saveJson;
+    // a missing parent folder is created; a path inside the app bundle is
+    // refused, use getUserDataPath())
+    SaveResult save(const fs::path& path, const std::string& indent = "  ") const {
+        std::string text;
+        try {
+            std::ostringstream stream;
+            stream.exceptions(std::ios::badbit | std::ios::failbit);
+            doc_.save(stream, indent.c_str());
+            text = stream.str();
+        } catch (const std::exception& e) {
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed,
+                "XML serialize error: " + internal::pathToDisplayUtf8(path) + " - " + e.what()), "Xml");
         }
-        logVerbose() << "XML saved: " << fullPath;
-        return true;
+        fs::path fullPath;
+        auto prepared = internal::prepareOutputPath(path, fullPath, "Xml");
+        if (!prepared) return prepared;
+        return internal::atomicWrite(fullPath, text.data(), text.size(), "Xml");
     }
 
     // Convert to string

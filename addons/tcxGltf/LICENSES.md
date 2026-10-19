@@ -28,7 +28,8 @@ SOFTWARE.
 
 ## cgltf
 
-Fetched via CMake FetchContent from https://github.com/jkuhlmann/cgltf (v1.14).
+Fetched via CMake FetchContent from https://github.com/jkuhlmann/cgltf. Version: see
+[docs/LICENSE.md](../../docs/LICENSE.md#third-party-libraries).
 
 MIT License
 
@@ -54,7 +55,7 @@ SOFTWARE.
 
 ---
 
-## Duck.glb (example-gltf/data/)
+## Duck.glb (example-gltf/bin/data/)
 
 From [KhronosGroup/glTF-Sample-Models](https://github.com/KhronosGroup/glTF-Sample-Models).
 

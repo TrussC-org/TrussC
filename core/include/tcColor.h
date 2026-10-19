@@ -599,6 +599,8 @@ inline Color colorFromLinear(float r, float g, float b, float a = 1.0f) {
 // =============================================================================
 // Predefined colors
 // =============================================================================
+// Immutable (const Color), so every module's copy is the same and they can stay
+// inline (tools/header_state_allowlist.txt).
 namespace colors {
     // Basic colors
     inline const Color white(1.0f, 1.0f, 1.0f);

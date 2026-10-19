@@ -12,14 +12,17 @@
 // free functions when you own the Image yourself (e.g. a DepthFrame in hand).
 //
 // Each (re)allocates the Image only when the source size/shape changes, fills
-// its pixels, then setDirty() + update() to upload. update() touches the GPU,
-// so call these on the main thread (inside update()/draw()), not on a grabber.
+// its pixels, then setDirty() + update() to upload. When allocate() refuses
+// the size, the Image is left empty and nothing is written. update() touches
+// the GPU, so call these on the main thread (inside update()/draw()), not on a
+// grabber.
 //
 // =============================================================================
 
 #include "tcxDepthTypes.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 
 namespace tcx::depthcamera {
@@ -51,6 +54,7 @@ inline void ensureRGBA(Image& img, int w, int h) {
 inline void colorToImage(const Pixels& c, Image& out) {
     if (!c.isAllocated() || c.getChannels() != 4 || c.isFloat()) return;
     tcd_detail::ensureRGBA(out, c.getWidth(), c.getHeight());
+    if (!out.isAllocated()) return;  // allocate() refused (logged); nothing to write into
     std::memcpy(out.getPixelsData(), c.getData(),
                 static_cast<size_t>(c.getWidth()) * c.getHeight() * 4);
     out.setDirty();
@@ -59,14 +63,19 @@ inline void colorToImage(const Pixels& c, Image& out) {
 
 // Depth (uint16 * depthScale, meters) -> grayscale. near = bright, invalid (0)
 // = black. With view.repeat the near..far band repeats (each band fades bright
-// ->dark again), which reads like depth contours.
+// ->dark again), which reads like depth contours. Draws nothing unless the
+// frame holds a full w*h depth plane.
 inline void depthToImage(const DepthFrame& f, Image& out, const DepthImageView& view = {}) {
-    if (f.w <= 0 || f.h <= 0 || f.depth.empty()) return;
+    if (f.w <= 0 || f.h <= 0) return;
+    // In 64 bits, so the product can't wrap where size_t is 32 bits.
+    const std::uint64_t pixels = static_cast<std::uint64_t>(f.w) * static_cast<std::uint64_t>(f.h);
+    if (f.depth.size() < pixels) return;
     tcd_detail::ensureRGBA(out, f.w, f.h);
+    if (!out.isAllocated()) return;  // allocate() refused (logged); nothing to write into
     unsigned char* d = out.getPixelsData();
     const float span = (view.farM > view.nearM) ? (view.farM - view.nearM) : 1.0f;
-    const int n = f.w * f.h;
-    for (int i = 0; i < n; ++i) {
+    const size_t n = static_cast<size_t>(pixels);
+    for (size_t i = 0; i < n; ++i) {
         unsigned char g = 0;
         if (f.depth[i] != 0) {
             float rel = f.depth[i] * f.depthScale - view.nearM;
@@ -91,14 +100,19 @@ inline void depthToImage(const DepthFrame& f, Image& out, const DepthImageView& 
 // and sqrt-gamma so low returns stay visible.
 inline void irToImage(const Pixels& ir, Image& out) {
     if (!ir.isAllocated() || !ir.isFloat()) return;
-    const int w = ir.getWidth(), h = ir.getHeight(), n = w * h;
+    const int w = ir.getWidth(), h = ir.getHeight();
     tcd_detail::ensureRGBA(out, w, h);
+    if (!out.isAllocated()) return;  // allocate() refused (logged); nothing to write into
+    // In 64 bits, so the product can't wrap where size_t is 32 bits; it fits
+    // size_t because out now holds w*h*4 bytes.
+    const std::uint64_t pixels = static_cast<std::uint64_t>(w) * static_cast<std::uint64_t>(h);
+    const size_t n = static_cast<size_t>(pixels);
     const float* s = ir.getDataF32();
     float mx = 1.0f;
-    for (int i = 0; i < n; ++i) if (s[i] > mx) mx = s[i];
+    for (size_t i = 0; i < n; ++i) if (s[i] > mx) mx = s[i];
     const float inv = 1.0f / mx;
     unsigned char* d = out.getPixelsData();
-    for (int i = 0; i < n; ++i) {
+    for (size_t i = 0; i < n; ++i) {
         float t = s[i] * inv;
         t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
         const unsigned char g = static_cast<unsigned char>(std::sqrt(t) * 255.0f);

@@ -32,22 +32,13 @@ else {
     execFileSync('node', a, { maxBuffer: 256 * 1024 * 1024 });
     structure = JSON.parse(fs.readFileSync(tmp, 'utf8'));
 }
-// --- refuse a partial AST: this file RENDERS TYPES ---------------------------
-// structure.js marks __meta.partialAst when clang failed mid-parse (typical
-// cause: the gitignored generated shader headers, core/include/tc/gpu/shaders/
-// *.glsl.h, are missing in a fresh worktree). Names survive a partial AST but
-// unresolved template types degrade to `int`, silently corrupting every
-// rendered signature here and downstream (emit-forai, luagen, web emits).
+// Refuse cached structures produced by older versions that accepted a failed
+// clang parse. Fresh structures now fail in structure.js before being written.
 if (structure && structure.__meta) {
     const partial = structure.__meta.partialAst;
     delete structure.__meta;
-    if (partial && process.env.TC_ALLOW_PARTIAL_AST !== '1') {
-        console.error(
-            'generate: REFUSING to render from a PARTIAL AST (clang failed mid-parse; see diagnostics above).\n' +
-            'Typical cause: generated shader headers missing in a fresh worktree.\n' +
-            'Fix: run a build once (cmake configure+build generates core/include/tc/gpu/shaders/*.glsl.h),\n' +
-            '     or copy that directory from a built checkout.\n' +
-            'Override (types WILL be wrong): TC_ALLOW_PARTIAL_AST=1');
+    if (partial) {
+        console.error('generate: REFUSING to render from a PARTIAL AST. Regenerate with docs/reference/regenerate.sh.');
         process.exit(1);
     }
 }
@@ -57,10 +48,13 @@ const prose = TOML.parse(fs.readFileSync(path.join(__dirname, 'api-reference.tom
 
 // --- join: structure is the spine; prose enriches ---
 const joined = {};
-for (const id in structure) {
-    const s = structure[id], p = prose[id] || {};
+for (const id of Object.keys(structure).sort()) {
+    const s = structure[id];
+    // Inherited copies share their declaration's prose; the resolved metadata
+    // passes through unchanged for every downstream consumer.
+    const p = prose[id] || prose[s.declaredIn + '::' + s.name] || {};
     joined[id] = {
-        id, kind: s.kind, owner: s.owner, name: s.name, ns: s.ns,
+        id, kind: s.kind, owner: s.owner, declaredIn: s.declaredIn, name: s.name, ns: s.ns,
         signatures: s.signatures, static: s.static || undefined, tparams: s.tparams,
         type: s.type,                                      // field/property C++ type (e.g. "float")
         access: s.access,                                  // 'protected' (public omitted); web emitter hides protected
@@ -69,6 +63,7 @@ for (const id in structure) {
         constructors: s.constructors,                      // public ctor signatures (types only)
         provider: s.provider,                              // 'std' for curated std:: symbols
         platforms: s.platforms, lua_bind: s.lua_bind,      // from TC_PLATFORMS / TC_LUA_BIND
+        lua_skip: s.lua_skip,                              // from TC_LUA_SKIP: not exposed to Lua (luagen, luagen-types, sketch emitters skip it)
 
         deprecated: s.deprecated,                          // from C++ [[deprecated]]
         category: p.category, keywords: p.keywords, of: p.of,

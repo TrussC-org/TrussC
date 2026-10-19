@@ -1,9 +1,12 @@
+#include "GeneratedFile.h"
+#include <mutex>
 // =============================================================================
 // tcApp.cpp - TrussC Project Generator
 // =============================================================================
 
 #include "tcApp.h"
 #include "ProjectGenerator.h"
+#include "ProjectState.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -656,13 +659,7 @@ void tcApp::loadConfig() {
     logNotice("tcApp") << "loadConfig: projectDir = " << projectDir << ", projectName = " << projectName;
 }
 
-void tcApp::saveConfig() {
-    // Create ~/.trussc/ directory
-    fs::path configDir = fs::path(configPath).parent_path();
-    if (!fs::exists(configDir)) {
-        fs::create_directories(configDir);
-    }
-
+bool tcApp::saveConfig() {
     Json config;
     // tc_root is NOT saved (always auto-detect on startup)
     config["last_project_dir"] = projectDir;
@@ -673,7 +670,14 @@ void tcApp::saveConfig() {
     config["generate_ios_build"] = generateIosBuild;
     config["web_backend"] = webBackend;
     config["last_imported_path"] = importedProjectPath;
-    saveJson(config, configPath);
+    try {
+        writeGeneratedFile(configPath, config.dump(2));
+        return true;
+    } catch (const std::exception& e) {
+        logError("tcApp") << e.what();
+        setStatus(e.what(), true);
+        return false;
+    }
 }
 
 void tcApp::scanAddons() {
@@ -840,6 +844,23 @@ void tcApp::importProject(const string& path) {
         addonsFile.close();
     }
 
+    // Use the CLI's read-back, starting with the current GUI defaults so a
+    // project without saved settings keeps the previous import behaviour.
+    const PresetState state = readPresetState(path);
+    auto settings = buildProjectSettings();
+    applyGenerationOptions(settings, state, GenerationFlags());
+    ideType = settings.ideType;
+    generateWebBuild = settings.generateWebBuild;
+    generateAndroidBuild = settings.generateAndroidBuild;
+    generateIosBuild = settings.generateIosBuild;
+    webBackend = settings.webBackend;
+    for (const auto& warning : state.warnings) {
+        logWarning("tcApp") << warning;
+    }
+    if (!state.ideWarning.empty()) {
+        logWarning("tcApp") << state.ideWarning;
+    }
+
     // Set import state
     mode = ProjectMode::Import;
     hasImportedProject = true;
@@ -943,7 +964,10 @@ void tcApp::doGenerateProject() {
         return;
     }
 
-    saveConfig();
+    if (!saveConfig()) {
+        redraw();
+        return;
+    }
 
     // Auto-switch to Import mode after generation
     mode = ProjectMode::Import;

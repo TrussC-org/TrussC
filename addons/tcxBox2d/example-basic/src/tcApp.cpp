@@ -7,7 +7,7 @@
 //   - ColliderRenderer2D: draws the shape
 // The world auto-steps each frame (no world.update() in update()), and the Mods
 // sync the node transform automatically. Shapes flash white on impact via the
-// RigidBody2D::onCollisionBegan event.
+// RigidBody2D::onCollisionEnter event.
 // =============================================================================
 
 #include <TrussC.h>
@@ -38,7 +38,7 @@ public:
         renderer_->setColor(baseColor_);
         renderer_->setFilled(true);
 
-        beganL_ = rb->onCollisionBegan.listen(this, &Shape::onHit);
+        beganL_ = rb->onCollisionEnter.listen(this, &Shape::onHit);
     }
 
     void update() override {

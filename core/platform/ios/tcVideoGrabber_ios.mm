@@ -18,6 +18,14 @@
 
 #include "TrussC.h"
 
+// Text of an Objective-C object (NSString, NSError, ...) for the Logger: its
+// description as UTF-8, or "(null)" for nil (what %@ formatting printed).
+static std::string tcLogText(id obj) {
+    if (!obj) return "(null)";
+    const char* text = [[obj description] UTF8String];
+    return text ? std::string(text) : std::string();
+}
+
 namespace trussc {
 
 // ---------------------------------------------------------------------------
@@ -30,6 +38,9 @@ struct VideoGrabberPlatformData {
     AVCaptureVideoDataOutput* output = nil;
     id<AVCaptureVideoDataOutputSampleBufferDelegate> delegate = nil;
     dispatch_queue_t captureQueue = nil;
+    std::recursive_mutex sessionControl;
+
+    ~VideoGrabberPlatformData() { delete[] backBuffer; }
 
     // Double buffering
     unsigned char* backBuffer = nullptr;
@@ -39,8 +50,9 @@ struct VideoGrabberPlatformData {
 
     // Resize notification
     std::atomic<bool> needsResize{false};
-    int newWidth = 0;
-    int newHeight = 0;
+    // Written by the capture thread before needsResize is set; read on main.
+    std::atomic<int> newWidth{0};
+    std::atomic<int> newHeight{0};
 
     // Background observer tokens
     id<NSObject> bgObserver = nil;
@@ -55,11 +67,10 @@ struct VideoGrabberPlatformData {
 // ---------------------------------------------------------------------------
 // AVCaptureVideoDataOutputSampleBufferDelegate
 // ---------------------------------------------------------------------------
-@interface TrussCVideoGrabberDelegate : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate>
-@property (nonatomic, assign) trussc::VideoGrabberPlatformData* platformData;
-@property (nonatomic, assign) unsigned char* targetPixels;
-@property (nonatomic, assign) std::atomic<bool>* pixelsDirty;
-@property (nonatomic, assign) std::mutex* mutex;
+@interface TrussCVideoGrabberDelegate : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate> {
+@public
+    std::weak_ptr<trussc::internal::GrabberSharedState> captureState;
+}
 @end
 
 @implementation TrussCVideoGrabberDelegate
@@ -67,7 +78,15 @@ struct VideoGrabberPlatformData {
 - (void)captureOutput:(AVCaptureOutput*)output
 didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
        fromConnection:(AVCaptureConnection*)connection {
-    if (!_platformData || !_targetPixels || !_pixelsDirty || !_mutex) return;
+    auto state = captureState.lock();
+    if (!state || state->stopped.load()) return;
+    auto* data = static_cast<trussc::VideoGrabberPlatformData*>(state->platformData.get());
+    if (!data) return;
+
+    // Stamp arrival time on the capture thread, BEFORE any processing.
+    // This stays accurate even when the app's main loop stalls.
+    uint64_t arrivalUs = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
 
     CVImageBufferRef imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
     if (!imageBuffer) return;
@@ -80,26 +99,27 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     size_t height = CVPixelBufferGetHeight(imageBuffer);
 
     // Handle size change (first frame or format change)
-    if (width != _platformData->bufferWidth || height != _platformData->bufferHeight) {
-        NSLog(@"VideoGrabber: Frame size changed: %zu x %zu (was %d x %d)",
-              width, height, _platformData->bufferWidth, _platformData->bufferHeight);
+    if (width != data->bufferWidth || height != data->bufferHeight) {
+        trussc::logVerbose("VideoGrabber") << "Frame size changed: " << width << " x " << height
+            << " (was " << data->bufferWidth << " x "
+            << data->bufferHeight << ")";
 
-        if (_platformData->backBuffer) {
-            delete[] _platformData->backBuffer;
+        if (data->backBuffer) {
+            delete[] data->backBuffer;
         }
-        _platformData->backBuffer = new unsigned char[width * height * 4];
-        _platformData->bufferWidth = (int)width;
-        _platformData->bufferHeight = (int)height;
+        data->backBuffer = new unsigned char[width * height * 4];
+        data->bufferWidth = (int)width;
+        data->bufferHeight = (int)height;
 
         // Notify main thread
-        _platformData->needsResize.store(true);
-        _platformData->newWidth = (int)width;
-        _platformData->newHeight = (int)height;
+        data->newWidth.store((int)width, std::memory_order_relaxed);
+        data->newHeight.store((int)height, std::memory_order_relaxed);
+        data->needsResize.store(true);   // publishes the size above
     }
 
-    if (baseAddress && _platformData->backBuffer) {
+    if (baseAddress && data->backBuffer) {
         unsigned char* src = (unsigned char*)baseAddress;
-        unsigned char* dst = _platformData->backBuffer;
+        unsigned char* dst = data->backBuffer;
 
         // BGRA -> RGBA conversion
         for (size_t y = 0; y < height; y++) {
@@ -117,13 +137,18 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 
         // Copy to main thread buffer
         {
-            std::lock_guard<std::mutex> lock(*_mutex);
-            if (!_platformData->needsResize.load()) {
-                std::memcpy(_targetPixels, _platformData->backBuffer, width * height * 4);
+            // Convert unlocked above; lock only for the copy the main thread reads.
+            std::lock_guard<std::mutex> stateLock(state->mtx);
+            if (state->pixels && !data->needsResize.load() && state->width == (int)width &&
+                state->height == (int)height) {
+                std::memcpy(state->pixels.get(), data->backBuffer, width * height * 4);
             }
         }
 
-        _pixelsDirty->store(true);
+        state->dirty.store(true);
+
+        // Timestamped frame queue (no-op unless enabled via setFrameQueueSize)
+        state->frameQueue.push(data->backBuffer, (int)width, (int)height, arrivalUs);
     }
 
     CVPixelBufferUnlockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
@@ -173,7 +198,7 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
 bool VideoGrabber::setupPlatform() {
     @autoreleasepool {
         auto* data = new VideoGrabberPlatformData();
-        platformHandle_ = data;
+        state_->platformData = std::shared_ptr<VideoGrabberPlatformData>(data);
 
         // Discover devices
         NSArray<AVCaptureDeviceType>* deviceTypes = @[
@@ -186,10 +211,9 @@ bool VideoGrabber::setupPlatform() {
         NSArray<AVCaptureDevice*>* devices = discoverySession.devices;
 
         if (deviceId_ >= (int)devices.count) {
-            NSLog(@"VideoGrabber: Invalid device ID %d (only %lu devices available)",
-                  deviceId_, (unsigned long)devices.count);
-            delete data;
-            platformHandle_ = nullptr;
+            logError("VideoGrabber") << "Invalid device ID " << deviceId_ << " (only "
+                << (unsigned long)devices.count << " devices available)";
+            state_->platformData.reset();
             return false;
         }
 
@@ -208,8 +232,8 @@ bool VideoGrabber::setupPlatform() {
             AVCaptureDeviceFormat* bestFormat = nil;
 
             if (verbose_) {
-                NSLog(@"VideoGrabber: Searching for %dx%d in device formats...",
-                      requestedWidth_, requestedHeight_);
+                logVerbose("VideoGrabber") << "Searching for " << state_->requestedWidth << "x"
+                    << state_->requestedHeight << " in device formats...";
             }
 
             for (AVCaptureDeviceFormat* format in [data->device formats]) {
@@ -221,18 +245,18 @@ bool VideoGrabber::setupPlatform() {
                 int tw = dimensions.width;
                 int th = dimensions.height;
 
-                if (tw == requestedWidth_ && th == requestedHeight_) {
+                if (tw == state_->requestedWidth && th == state_->requestedHeight) {
                     bestW = tw;
                     bestH = th;
                     bestFormat = format;
                     if (verbose_) {
-                        NSLog(@"VideoGrabber: Found exact match: %dx%d", tw, th);
+                        logVerbose("VideoGrabber") << "Found exact match: " << tw << "x" << th;
                     }
                     break;
                 }
 
-                float dx = (float)(tw - requestedWidth_);
-                float dy = (float)(th - requestedHeight_);
+                float dx = (float)(tw - state_->requestedWidth);
+                float dy = (float)(th - state_->requestedHeight);
                 float dist = sqrtf(dx * dx + dy * dy);
 
                 if (dist < smallestDist) {
@@ -244,23 +268,23 @@ bool VideoGrabber::setupPlatform() {
             }
 
             if (bestFormat != nil && bestW > 0 && bestH > 0) {
-                if (bestW != requestedWidth_ || bestH != requestedHeight_) {
+                if (bestW != state_->requestedWidth || bestH != state_->requestedHeight) {
                     if (verbose_) {
-                        NSLog(@"VideoGrabber: Requested %dx%d not available. Using closest: %dx%d",
-                              requestedWidth_, requestedHeight_, bestW, bestH);
+                        logVerbose("VideoGrabber") << "Requested " << state_->requestedWidth << "x" << state_->requestedHeight
+                            << " not available. Using closest: " << bestW << "x" << bestH;
                     }
                 }
                 [data->device setActiveFormat:bestFormat];
-                width_ = bestW;
-                height_ = bestH;
+                state_->width = bestW;
+                state_->height = bestH;
             } else {
                 CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions(
                     data->device.activeFormat.formatDescription);
-                width_ = dimensions.width;
-                height_ = dimensions.height;
+                state_->width = dimensions.width;
+                state_->height = dimensions.height;
                 if (verbose_) {
-                    NSLog(@"VideoGrabber: No suitable format found. Using device default: %dx%d",
-                          width_, height_);
+                    logVerbose("VideoGrabber") << "No suitable format found. Using device default: "
+                        << state_->width << "x" << state_->height;
                 }
             }
 
@@ -281,20 +305,20 @@ bool VideoGrabber::setupPlatform() {
                     data->device.activeVideoMinFrameDuration = CMTimeMake(1, desiredFrameRate_);
                     data->device.activeVideoMaxFrameDuration = CMTimeMake(1, desiredFrameRate_);
                     if (verbose_) {
-                        NSLog(@"VideoGrabber: Set frame rate to %d fps", desiredFrameRate_);
+                        logVerbose("VideoGrabber") << "Set frame rate to " << desiredFrameRate_ << " fps";
                     }
                 } else if (verbose_) {
-                    NSLog(@"VideoGrabber: Requested frame rate %d not supported", desiredFrameRate_);
+                    logWarning("VideoGrabber") << "Requested frame rate " << desiredFrameRate_ << " not supported";
                 }
             }
 
             [data->device unlockForConfiguration];
         } else {
-            NSLog(@"VideoGrabber: Failed to lock device: %@", configError.localizedDescription);
+            logWarning("VideoGrabber") << "Failed to lock device: " << tcLogText(configError.localizedDescription);
             CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions(
                 data->device.activeFormat.formatDescription);
-            width_ = dimensions.width;
-            height_ = dimensions.height;
+            state_->width = dimensions.width;
+            state_->height = dimensions.height;
         }
 
         // Create session
@@ -304,16 +328,14 @@ bool VideoGrabber::setupPlatform() {
         NSError* error = nil;
         data->input = [AVCaptureDeviceInput deviceInputWithDevice:data->device error:&error];
         if (error || !data->input) {
-            NSLog(@"VideoGrabber: Failed to create input: %@", error.localizedDescription);
-            delete data;
-            platformHandle_ = nullptr;
+            logError("VideoGrabber") << "Failed to create input: " << tcLogText(error.localizedDescription);
+            state_->platformData.reset();
             return false;
         }
 
         if (![data->session canAddInput:data->input]) {
-            NSLog(@"VideoGrabber: Cannot add input to session");
-            delete data;
-            platformHandle_ = nullptr;
+            logError("VideoGrabber") << "Cannot add input to session";
+            state_->platformData.reset();
             return false;
         }
         [data->session addInput:data->input];
@@ -327,21 +349,18 @@ bool VideoGrabber::setupPlatform() {
 
         // Capture queue
         data->captureQueue = dispatch_queue_create("trussc.videograbber", DISPATCH_QUEUE_SERIAL);
+        dispatch_queue_set_specific(data->captureQueue, data, data, nullptr);
 
         // Delegate
         TrussCVideoGrabberDelegate* delegate = [[TrussCVideoGrabberDelegate alloc] init];
-        delegate.platformData = data;
-        delegate.targetPixels = pixels_;
-        delegate.pixelsDirty = &pixelsDirty_;
-        delegate.mutex = &mutex_;
+        delegate->captureState = state_;
         data->delegate = delegate;
 
         [data->output setSampleBufferDelegate:delegate queue:data->captureQueue];
 
         if (![data->session canAddOutput:data->output]) {
-            NSLog(@"VideoGrabber: Cannot add output to session");
-            delete data;
-            platformHandle_ = nullptr;
+            logError("VideoGrabber") << "Cannot add output to session";
+            state_->platformData.reset();
             return false;
         }
         [data->session addOutput:data->output];
@@ -357,24 +376,30 @@ bool VideoGrabber::setupPlatform() {
         }
 
         if (verbose_) {
-            NSLog(@"VideoGrabber: Configured format: %dx%d", width_, height_);
+            logVerbose("VideoGrabber") << "Configured format: " << state_->width << "x" << state_->height;
         }
 
         // Back buffer
-        data->bufferWidth = width_;
-        data->bufferHeight = height_;
-        data->backBuffer = new unsigned char[width_ * height_ * 4];
-        std::memset(data->backBuffer, 0, width_ * height_ * 4);
+        data->bufferWidth = state_->width;
+        data->bufferHeight = state_->height;
+        data->backBuffer = new unsigned char[state_->width * state_->height * 4];
+        std::memset(data->backBuffer, 0, state_->width * state_->height * 4);
 
+        std::weak_ptr<internal::GrabberSharedState> observerState = state_;
         // Background/foreground transition observers
         data->bgObserver = [[NSNotificationCenter defaultCenter]
             addObserverForName:UIApplicationDidEnterBackgroundNotification
                         object:nil
                          queue:[NSOperationQueue mainQueue]
                     usingBlock:^(NSNotification* note) {
+            auto state = observerState.lock();
+            if (!state || state->stopped.load()) return;
+            auto* data = static_cast<VideoGrabberPlatformData*>(state->platformData.get());
+            std::lock_guard<std::recursive_mutex> lock(data->sessionControl);
+            if (state->stopped.load()) return;
             if (data->session.isRunning) {
                 [data->session stopRunning];
-                NSLog(@"VideoGrabber: Paused (app entered background)");
+                trussc::logVerbose("VideoGrabber") << "Paused (app entered background)";
             }
         }];
 
@@ -383,17 +408,22 @@ bool VideoGrabber::setupPlatform() {
                         object:nil
                          queue:[NSOperationQueue mainQueue]
                     usingBlock:^(NSNotification* note) {
+            auto state = observerState.lock();
+            if (!state || state->stopped.load()) return;
+            auto* data = static_cast<VideoGrabberPlatformData*>(state->platformData.get());
+            std::lock_guard<std::recursive_mutex> lock(data->sessionControl);
+            if (state->stopped.load()) return;
             if (!data->session.isRunning) {
                 [data->session startRunning];
-                NSLog(@"VideoGrabber: Resumed (app entered foreground)");
+                trussc::logVerbose("VideoGrabber") << "Resumed (app entered foreground)";
             }
         }];
 
         // Start capture
         [data->session startRunning];
 
-        NSLog(@"VideoGrabber: Started capturing at %dx%d from %@",
-              width_, height_, data->device.localizedName);
+        logVerbose("VideoGrabber") << "Started capturing at " << state_->width << "x" << state_->height
+            << " from " << tcLogText(data->device.localizedName);
 
         return true;
     }
@@ -402,12 +432,9 @@ bool VideoGrabber::setupPlatform() {
 // ---------------------------------------------------------------------------
 // closePlatform - stop camera
 // ---------------------------------------------------------------------------
-void VideoGrabber::closePlatform() {
-    if (!platformHandle_) return;
-
+static void stopCapture(const std::shared_ptr<internal::GrabberSharedState>& state) {
     @autoreleasepool {
-        auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
-
+        auto* data = static_cast<VideoGrabberPlatformData*>(state->platformData.get());
         // Remove background/foreground observers
         if (data->bgObserver) {
             [[NSNotificationCenter defaultCenter] removeObserver:data->bgObserver];
@@ -418,15 +445,23 @@ void VideoGrabber::closePlatform() {
             data->fgObserver = nil;
         }
 
+        // Serialize in-flight notification callbacks with session release.
+        // Recursive for close invoked by a notification's final log callback.
+        std::lock_guard<std::recursive_mutex> sessionLock(data->sessionControl);
         if (data->session) {
             [data->session stopRunning];
-            [data->session removeInput:data->input];
-            [data->session removeOutput:data->output];
         }
 
-        if (data->backBuffer) {
-            delete[] data->backBuffer;
-            data->backBuffer = nullptr;
+        // Stop delivery and wait for queued capture callbacks before freeing
+        // the platform data, pixel buffers or the grabber's shared state.
+        [data->output setSampleBufferDelegate:nil queue:NULL];
+        if (data->captureQueue) {
+            dispatch_sync(data->captureQueue, ^{});
+        }
+
+        if (data->session) {
+            [data->session removeInput:data->input];
+            [data->session removeOutput:data->output];
         }
 
         data->session = nil;
@@ -436,17 +471,30 @@ void VideoGrabber::closePlatform() {
         data->delegate = nil;
         data->captureQueue = nil;
 
-        delete data;
-        platformHandle_ = nullptr;
     }
+}
+
+void VideoGrabber::closePlatform() {
+    if (!state_->platformData) return;
+    auto state = state_;
+    auto* data = static_cast<VideoGrabberPlatformData*>(state->platformData.get());
+    if (dispatch_get_specific(data) == data) {
+        // Session stop/drain must not wait for the callback executing it.
+        // This closure owns the old State until unregister and drain finish.
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+            stopCapture(state);
+        });
+        return;
+    }
+    stopCapture(state);
 }
 
 // ---------------------------------------------------------------------------
 // updatePlatform - per-frame update (called on main thread)
 // ---------------------------------------------------------------------------
 void VideoGrabber::updatePlatform() {
-    if (!platformHandle_) return;
-    auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
+    if (!state_->platformData) return;
+    auto* data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
 
     // Update video orientation to match device orientation
     UIInterfaceOrientation orientation = UIInterfaceOrientationPortrait;
@@ -502,42 +550,38 @@ void VideoGrabber::updatePlatform() {
 // Resize notification methods
 // ---------------------------------------------------------------------------
 bool VideoGrabber::checkResizeNeeded() {
-    if (!platformHandle_) return false;
-    auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
+    if (!state_->platformData) return false;
+    auto* data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
     return data->needsResize.load();
 }
 
 void VideoGrabber::getNewSize(int& width, int& height) {
-    if (!platformHandle_) {
+    if (!state_->platformData) {
         width = 0;
         height = 0;
         return;
     }
-    auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
-    width = data->newWidth;
-    height = data->newHeight;
+    auto* data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
+    width = data->newWidth.load(std::memory_order_relaxed);
+    height = data->newHeight.load(std::memory_order_relaxed);
 }
 
 void VideoGrabber::clearResizeFlag() {
-    if (!platformHandle_) return;
-    auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
-    data->needsResize.store(false);
+    if (!state_->platformData) return;
+    auto* data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
+    // Only once the handle has the size last reported: a size change that
+    // arrived after getNewSize() keeps the flag for the next update().
+    // state_->width / height are written on the main thread only.
+    if (state_->width == data->newWidth.load(std::memory_order_relaxed) &&
+        state_->height == data->newHeight.load(std::memory_order_relaxed))
+        data->needsResize.store(false);
 }
 
 // ---------------------------------------------------------------------------
 // updateDelegatePixels - update pixel buffer pointer in delegate
 // ---------------------------------------------------------------------------
 void VideoGrabber::updateDelegatePixels() {
-    if (!platformHandle_) return;
-
-    auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
-    if (data->delegate) {
-        TrussCVideoGrabberDelegate* delegate = (TrussCVideoGrabberDelegate*)data->delegate;
-        delegate.targetPixels = pixels_;
-        if (verbose_) {
-            NSLog(@"VideoGrabber: Updated delegate pixels pointer to %p", pixels_);
-        }
-    }
+    // The delegate reads the State buffer while holding the State lock.
 }
 
 // ---------------------------------------------------------------------------
@@ -552,9 +596,9 @@ void VideoGrabber::requestCameraPermission() {
     [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo
                              completionHandler:^(BOOL granted) {
         if (granted) {
-            NSLog(@"VideoGrabber: Camera permission granted");
+            trussc::logVerbose("VideoGrabber") << "Camera permission granted";
         } else {
-            NSLog(@"VideoGrabber: Camera permission denied");
+            trussc::logWarning("VideoGrabber") << "Camera permission denied";
         }
     }];
 }

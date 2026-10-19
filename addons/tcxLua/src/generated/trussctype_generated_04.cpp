@@ -3,138 +3,254 @@
 #include "TrussC.h"
 using namespace trussc;
 using namespace std;
-#ifndef _MSC_VER
+// Abstract bases (e.g. VideoPlayerBase) expose members but cannot be constructed.
+// An empty guarded constructor list must not enable sol2's automatic default ctor.
+namespace {
+template<typename Owner, typename... Signatures>
+auto tcxLuaConstructors() {
+    if constexpr (std::is_abstract_v<Owner> || sizeof...(Signatures) == 0) return sol::no_constructor;
+    else return sol::constructors<Signatures...>();
+}
+}
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#else
 #pragma GCC diagnostic push
 #pragma clang diagnostic push
+// Lua retains deprecated compatibility names, including inherited ones.
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
 void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
     {
-        sol::usertype<trussc::Font> t = lua->new_usertype<trussc::Font>("Font",
-            sol::constructors<trussc::Font()>(),
-            sol::call_constructor, sol::constructors<trussc::Font()>());
-        t["setOversampling"] = &trussc::Font::setOversampling;
-        t["getOversampling"] = &trussc::Font::getOversampling;
-        t["setGridFit"] = &trussc::Font::setGridFit;
-        t["getGridFit"] = &trussc::Font::getGridFit;
-        t["setMipmaps"] = &trussc::Font::setMipmaps;
-        t["getMipmaps"] = &trussc::Font::getMipmaps;
-        t["load"] = &trussc::Font::load;
-        t["isLoaded"] = &trussc::Font::isLoaded;
-        t["setAlign"] = sol::overload([](trussc::Font& self, trussc::Direction h, trussc::Direction v) { return self.setAlign(h, v); }, [](trussc::Font& self, trussc::Direction h) { return self.setAlign(h); });
-        t["getAlignH"] = &trussc::Font::getAlignH;
-        t["getAlignV"] = &trussc::Font::getAlignV;
-        t["setLineHeight"] = &trussc::Font::setLineHeight;
-        t["setLineHeightEm"] = &trussc::Font::setLineHeightEm;
-        t["resetLineHeight"] = &trussc::Font::resetLineHeight;
-        t["drawString"] = sol::overload([](trussc::Font& self, const std::string & text, float x, float y) { return self.drawString(text, x, y); }, [](trussc::Font& self, const std::string & text, float x, float y, trussc::Direction h, trussc::Direction v) { return self.drawString(text, x, y, h, v); });
-        t["getGlyphPath"] = &trussc::Font::getGlyphPath;
-        t["getStringPath"] = sol::overload([](trussc::Font& self, const std::string & text, float x, float y, trussc::Direction h, trussc::Direction v) { return self.getStringPath(text, x, y, h, v); }, [](trussc::Font& self, const std::string & text, float x, float y) { return self.getStringPath(text, x, y); });
-        t["setWritingMode"] = &trussc::Font::setWritingMode;
-        t["getWritingMode"] = &trussc::Font::getWritingMode;
-        t["setTcyDigits"] = &trussc::Font::setTcyDigits;
-        t["setTcyLatin"] = &trussc::Font::setTcyLatin;
-        t["getTcyLatinMode"] = &trussc::Font::getTcyLatinMode;
-        t["getTcyDigitMax"] = &trussc::Font::getTcyDigitMax;
-        t["enableWrap"] = &trussc::Font::enableWrap;
-        t["isWrapEnabled"] = &trussc::Font::isWrapEnabled;
-        t["setMaxLineLength"] = &trussc::Font::setMaxLineLength;
-        t["getMaxLineLength"] = &trussc::Font::getMaxLineLength;
-        t["setLatinHyphenation"] = &trussc::Font::setLatinHyphenation;
-        t["getLatinHyphenation"] = &trussc::Font::getLatinHyphenation;
-        t["setHangingPunctuation"] = &trussc::Font::setHangingPunctuation;
-        t["getHangingPunctuation"] = &trussc::Font::getHangingPunctuation;
-        t["setKinsoku"] = &trussc::Font::setKinsoku;
-        t["getKinsoku"] = &trussc::Font::getKinsoku;
-        t["forEachGlyph"] = sol::overload([](trussc::Font& self, const std::string & text, float x, float y, trussc::Direction h, trussc::Direction v, const trussc::Font::GlyphVisitor & visitor) { return self.forEachGlyph(text, x, y, h, v, visitor); }, [](trussc::Font& self, const std::string & text, float x, float y, const trussc::Font::GlyphVisitor & visitor) { return self.forEachGlyph(text, x, y, visitor); });
-        t["getWidth"] = &trussc::Font::getWidth;
-        t["stringWidth"] = &trussc::Font::stringWidth;
-        t["getHeight"] = &trussc::Font::getHeight;
-        t["getBBox"] = &trussc::Font::getBBox;
-        t["getLineHeight"] = &trussc::Font::getLineHeight;
-        t["getDefaultLineHeight"] = &trussc::Font::getDefaultLineHeight;
-        t["getAscent"] = &trussc::Font::getAscent;
-        t["getDescent"] = &trussc::Font::getDescent;
-        t["getSize"] = &trussc::Font::getSize;
-        t["getMemoryUsage"] = &trussc::Font::getMemoryUsage;
-        t["getAtlasMemoryUsage"] = &trussc::Font::getAtlasMemoryUsage;
-        t["clearAtlas"] = &trussc::Font::clearAtlas;
-        t["getAtlasCount"] = &trussc::Font::getAtlasCount;
-        t["getSampler"] = &trussc::Font::getSampler;
-        t["getLoadedGlyphCount"] = &trussc::Font::getLoadedGlyphCount;
-        t["setDefaultOversampling"] = &trussc::Font::setDefaultOversampling;
-        t["getDefaultOversampling"] = &trussc::Font::getDefaultOversampling;
-        t["getTotalCacheMemoryUsage"] = &trussc::Font::getTotalCacheMemoryUsage;
+        auto constructors = tcxLuaConstructors<trussc::App
+            , trussc::App()
+        >();
+        sol::usertype<trussc::App> t = lua->new_usertype<trussc::App>("App", constructors, sol::call_constructor, constructors);
+        t["localMatrixChanged"] = &trussc::App::localMatrixChanged;
+        t["addChild"] = sol::overload([](trussc::App& self, trussc::App::Ptr child) { return self.addChild(child); }, [](trussc::App& self, trussc::App::Ptr child, bool keepGlobalPosition) { return self.addChild(child, keepGlobalPosition); });
+        t["audioIn"] = &trussc::App::audioIn;
+        t["audioOut"] = &trussc::App::audioOut;
+        t["callAfter"] = &trussc::App::callAfter;
+        t["callEvery"] = &trussc::App::callEvery;
+        t["callEveryCatchUp"] = &trussc::App::callEveryCatchUp;
+        t["cancelAllTimers"] = &trussc::App::cancelAllTimers;
+        t["cancelTimer"] = &trussc::App::cancelTimer;
+        t["cleanup"] = &trussc::App::cleanup;
+        t["destroy"] = &trussc::App::destroy;
+        t["disableEvents"] = &trussc::App::disableEvents;
+        t["draw"] = &trussc::App::draw;
+        t["enableEvents"] = &trussc::App::enableEvents;
+        t["exit"] = &trussc::App::exit;
+        t["filesDropped"] = &trussc::App::filesDropped;
+        t["findByInstanceId"] = &trussc::App::findByInstanceId;
+        t["findHitNode"] = &trussc::App::findHitNode;
+        t["findHitNodeFromScreen"] = &trussc::App::findHitNodeFromScreen;
+        t["getActive"] = &trussc::App::getActive;
+        t["getBottom"] = &trussc::App::getBottom;
+        t["getCameraContext"] = &trussc::App::getCameraContext;
+        t["getChildCount"] = &trussc::App::getChildCount;
+        t["getChildIndex"] = &trussc::App::getChildIndex;
+        t["getChildren"] = &trussc::App::getChildren;
+        t["getDisplayName"] = &trussc::App::getDisplayName;
+        t["getEuler"] = &trussc::App::getEuler;
+        t["getEulerDeg"] = &trussc::App::getEulerDeg;
+        t["getGlobalMatrix"] = &trussc::App::getGlobalMatrix;
+        t["getGlobalMatrixInverse"] = &trussc::App::getGlobalMatrixInverse;
+        t["getGlobalPos"] = &trussc::App::getGlobalPos;
+        t["getHeight"] = &trussc::App::getHeight;
+        t["getInstanceId"] = &trussc::App::getInstanceId;
+        t["getLeft"] = &trussc::App::getLeft;
+        t["getLocalMatrix"] = &trussc::App::getLocalMatrix;
+        t["getModByTypeName"] = &trussc::App::getModByTypeName;
+        t["getModTypeNames"] = &trussc::App::getModTypeNames;
+        t["getMods"] = &trussc::App::getMods;
+        t["getMouseX"] = &trussc::App::getMouseX;
+        t["getMouseY"] = &trussc::App::getMouseY;
+        t["getName"] = &trussc::App::getName;
+        t["getPMouseX"] = &trussc::App::getPMouseX;
+        t["getPMouseY"] = &trussc::App::getPMouseY;
+        t["getParent"] = &trussc::App::getParent;
+        t["getPos"] = &trussc::App::getPos;
+        t["getQuaternion"] = &trussc::App::getQuaternion;
+        t["getRight"] = &trussc::App::getRight;
+        t["getRot"] = &trussc::App::getRot;
+        t["getRotDeg"] = &trussc::App::getRotDeg;
+        t["getScale"] = &trussc::App::getScale;
+        t["getScaleX"] = &trussc::App::getScaleX;
+        t["getScaleY"] = &trussc::App::getScaleY;
+        t["getScaleZ"] = &trussc::App::getScaleZ;
+        t["getSize"] = &trussc::App::getSize;
+        t["getTop"] = &trussc::App::getTop;
+        t["getTypeName"] = &trussc::App::getTypeName;
+        t["getVisible"] = &trussc::App::getVisible;
+        t["getWidth"] = &trussc::App::getWidth;
+        t["getWindow"] = &trussc::App::getWindow;
+        t["getX"] = &trussc::App::getX;
+        t["getY"] = &trussc::App::getY;
+        t["getZ"] = &trussc::App::getZ;
+        t["globalToLocal"] = [](trussc::App& self, const trussc::Vec3 & global) { return self.globalToLocal(global); };
+        t["handleDraw"] = &trussc::App::handleDraw;
+        t["handleKeyPressed"] = &trussc::App::handleKeyPressed;
+        t["handleKeyReleased"] = &trussc::App::handleKeyReleased;
+        t["handleMousePressed"] = &trussc::App::handleMousePressed;
+        t["handleMouseReleased"] = &trussc::App::handleMouseReleased;
+        t["handleMouseScrolled"] = &trussc::App::handleMouseScrolled;
+        t["handleUpdate"] = &trussc::App::handleUpdate;
+        t["handleWindowResized"] = &trussc::App::handleWindowResized;
+        t["hasName"] = &trussc::App::hasName;
+        t["hitTest"] = [](trussc::App& self, trussc::Vec2 local) { return self.hitTest(local); };
+        t["insertChild"] = sol::overload([](trussc::App& self, size_t index, trussc::App::Ptr child) { return self.insertChild(index, child); }, [](trussc::App& self, size_t index, trussc::App::Ptr child, bool keepGlobalPosition) { return self.insertChild(index, child, keepGlobalPosition); });
+        t["isActive"] = &trussc::App::isActive;
+        t["isClipping"] = &trussc::App::isClipping;
+        t["isDead"] = &trussc::App::isDead;
+        t["isEventsEnabled"] = &trussc::App::isEventsEnabled;
+        t["isExitRequested"] = &trussc::App::isExitRequested;
+        t["isMouseOver"] = &trussc::App::isMouseOver;
+        t["isVisible"] = &trussc::App::isVisible;
+        t["keyPressed"] = sol::overload([](trussc::App& self, const trussc::KeyEventArgs & e) { return self.keyPressed(e); }, [](trussc::App& self, int key) { return self.keyPressed(key); });
+        t["keyReleased"] = sol::overload([](trussc::App& self, const trussc::KeyEventArgs & e) { return self.keyReleased(e); }, [](trussc::App& self, int key) { return self.keyReleased(key); });
+        t["localToGlobal"] = [](trussc::App& self, const trussc::Vec3 & local) { return self.localToGlobal(local); };
+        t["mouseDragged"] = sol::overload([](trussc::App& self, const trussc::MouseDragEventArgs & e) { return self.mouseDragged(e); }, [](trussc::App& self, trussc::Vec2 pos, int button) { return self.mouseDragged(pos, button); });
+        t["mouseMoved"] = sol::overload([](trussc::App& self, const trussc::MouseMoveEventArgs & e) { return self.mouseMoved(e); }, [](trussc::App& self, trussc::Vec2 pos) { return self.mouseMoved(pos); });
+        t["mousePressed"] = sol::overload([](trussc::App& self, const trussc::MouseEventArgs & e) { return self.mousePressed(e); }, [](trussc::App& self, trussc::Vec2 pos, int button) { return self.mousePressed(pos, button); });
+        t["mouseReleased"] = sol::overload([](trussc::App& self, const trussc::MouseEventArgs & e) { return self.mouseReleased(e); }, [](trussc::App& self, trussc::Vec2 pos, int button) { return self.mouseReleased(pos, button); });
+        t["mouseScrolled"] = sol::overload([](trussc::App& self, const trussc::ScrollEventArgs & e) { return self.mouseScrolled(e); }, [](trussc::App& self, trussc::Vec2 delta) { return self.mouseScrolled(delta); });
+        t["moveToBack"] = &trussc::App::moveToBack;
+        t["moveToFront"] = &trussc::App::moveToFront;
+        t["onChildAdded"] = &trussc::App::onChildAdded;
+        t["onChildRemoved"] = &trussc::App::onChildRemoved;
+        t["removeAllChildren"] = &trussc::App::removeAllChildren;
+        t["removeChild"] = &trussc::App::removeChild;
+        t["requestExit"] = &trussc::App::requestExit;
+        t["setActive"] = &trussc::App::setActive;
+        t["setCameraContext"] = &trussc::App::setCameraContext;
+        t["setClipping"] = &trussc::App::setClipping;
+        t["setEuler"] = sol::overload([](trussc::App& self, const trussc::Vec3 & euler) { return self.setEuler(euler); }, [](trussc::App& self, float pitch, float yaw, float roll) { return self.setEuler(pitch, yaw, roll); });
+        t["setEulerDeg"] = &trussc::App::setEulerDeg;
+        t["setGlobalPos"] = sol::overload([](trussc::App& self, const trussc::Vec3 & global) { return self.setGlobalPos(global); }, [](trussc::App& self, float x, float y) { return self.setGlobalPos(x, y); }, [](trussc::App& self, float x, float y, float z) { return self.setGlobalPos(x, y, z); });
+        t["setHeight"] = &trussc::App::setHeight;
+        t["setIsActive"] = &trussc::App::setIsActive;
+        t["setIsVisible"] = &trussc::App::setIsVisible;
+        t["setName"] = &trussc::App::setName;
+        t["setPos"] = sol::overload([](trussc::App& self, const trussc::Vec3 & pos) { return self.setPos(pos); }, [](trussc::App& self, float x, float y) { return self.setPos(x, y); }, [](trussc::App& self, float x, float y, float z) { return self.setPos(x, y, z); });
+        t["setQuaternion"] = &trussc::App::setQuaternion;
+        t["setRect"] = &trussc::App::setRect;
+        t["setRot"] = &trussc::App::setRot;
+        t["setRotDeg"] = &trussc::App::setRotDeg;
+        t["setScale"] = sol::overload([](trussc::App& self, const trussc::Vec3 & s) { return self.setScale(s); }, [](trussc::App& self, float uniform) { return self.setScale(uniform); }, [](trussc::App& self, float sx, float sy) { return self.setScale(sx, sy); }, [](trussc::App& self, float sx, float sy, float sz) { return self.setScale(sx, sy, sz); });
+        t["setScaleX"] = &trussc::App::setScaleX;
+        t["setScaleY"] = &trussc::App::setScaleY;
+        t["setScaleZ"] = &trussc::App::setScaleZ;
+        t["setSize"] = &trussc::App::setSize;
+        t["setVisible"] = &trussc::App::setVisible;
+        t["setWidth"] = &trussc::App::setWidth;
+        t["setX"] = &trussc::App::setX;
+        t["setY"] = &trussc::App::setY;
+        t["setZ"] = &trussc::App::setZ;
+        t["setup"] = &trussc::App::setup;
+        t["touchMoved"] = &trussc::App::touchMoved;
+        t["touchPressed"] = &trussc::App::touchPressed;
+        t["touchReleased"] = &trussc::App::touchReleased;
+        t["update"] = &trussc::App::update;
+        t["windowResized"] = &trussc::App::windowResized;
     }
     {
-        sol::usertype<trussc::HasTexture> t = lua->new_usertype<trussc::HasTexture>("HasTexture");
-        t["getTexture"] = [](trussc::HasTexture& self) -> decltype(auto) { return self.getTexture(); };
-        t["hasTexture"] = &trussc::HasTexture::hasTexture;
-        t["draw"] = sol::overload([](trussc::HasTexture& self, float x, float y) { return self.draw(x, y); }, [](trussc::HasTexture& self, float x, float y, float w, float h) { return self.draw(x, y, w, h); });
-        t["setMinFilter"] = &trussc::HasTexture::setMinFilter;
-        t["setMagFilter"] = &trussc::HasTexture::setMagFilter;
-        t["setFilter"] = &trussc::HasTexture::setFilter;
-        t["getMinFilter"] = &trussc::HasTexture::getMinFilter;
-        t["getMagFilter"] = &trussc::HasTexture::getMagFilter;
-        t["setWrapU"] = &trussc::HasTexture::setWrapU;
-        t["setWrapV"] = &trussc::HasTexture::setWrapV;
-        t["setWrap"] = &trussc::HasTexture::setWrap;
-        t["getWrapU"] = &trussc::HasTexture::getWrapU;
-        t["getWrapV"] = &trussc::HasTexture::getWrapV;
-        t["save"] = &trussc::HasTexture::save;
+        auto constructors = tcxLuaConstructors<trussc::StrokeMesh
+            , trussc::StrokeMesh()
+            , trussc::StrokeMesh(const trussc::Path &)
+        >();
+        sol::usertype<trussc::StrokeMesh> t = lua->new_usertype<trussc::StrokeMesh>("StrokeMesh", constructors, sol::call_constructor, constructors);
+        t["addVertex"] = sol::overload([](trussc::StrokeMesh& self, float x, float y) -> decltype(auto) { return self.addVertex(x, y); }, [](trussc::StrokeMesh& self, float x, float y, float z) -> decltype(auto) { return self.addVertex(x, y, z); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p) -> decltype(auto) { return self.addVertex(p); }, [](trussc::StrokeMesh& self, const trussc::Vec2 & p) -> decltype(auto) { return self.addVertex(p); });
+        t["addVertexWithWidth"] = sol::overload([](trussc::StrokeMesh& self, float x, float y, float width) -> decltype(auto) { return self.addVertexWithWidth(x, y, width); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p, float width) -> decltype(auto) { return self.addVertexWithWidth(p, width); });
+        t["clear"] = &trussc::StrokeMesh::clear;
+        t["draw"] = &trussc::StrokeMesh::draw;
+        t["getMesh"] = &trussc::StrokeMesh::getMesh;
+        t["getPolylines"] = &trussc::StrokeMesh::getPolylines;
+        t["setCapType"] = &trussc::StrokeMesh::setCapType;
+        t["setClosed"] = &trussc::StrokeMesh::setClosed;
+        t["setColor"] = &trussc::StrokeMesh::setColor;
+        t["setJoinType"] = &trussc::StrokeMesh::setJoinType;
+        t["setMiterLimit"] = &trussc::StrokeMesh::setMiterLimit;
+        t["setShape"] = &trussc::StrokeMesh::setShape;
+        t["setWidth"] = &trussc::StrokeMesh::setWidth;
+        t["setWidths"] = &trussc::StrokeMesh::setWidths;
+        t["update"] = &trussc::StrokeMesh::update;
     }
     {
-        sol::usertype<trussc::ChipSoundBundle> t = lua->new_usertype<trussc::ChipSoundBundle>("ChipSoundBundle");
-        t["entries"] = &trussc::ChipSoundBundle::entries;
-        t["volume"] = &trussc::ChipSoundBundle::volume;
-        t["add"] = sol::overload([](trussc::ChipSoundBundle& self, const trussc::ChipSoundNote & note, float time) -> decltype(auto) { return self.add(note, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time) -> decltype(auto) { return self.add(wave, hz, duration, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time, float vol) -> decltype(auto) { return self.add(wave, hz, duration, time, vol); });
-        t["clear"] = &trussc::ChipSoundBundle::clear;
-        t["getDuration"] = &trussc::ChipSoundBundle::getDuration;
-        t["build"] = &trussc::ChipSoundBundle::build;
+        auto constructors = tcxLuaConstructors<trussc::JsonReadReflector
+            , trussc::JsonReadReflector(trussc::Json)
+        >();
+        sol::usertype<trussc::JsonReadReflector> t = lua->new_usertype<trussc::JsonReadReflector>("JsonReadReflector", constructors, sol::call_constructor, constructors);
+        t["applied"] = &trussc::JsonReadReflector::applied;
+        t["readOnly"] = &trussc::JsonReadReflector::readOnly;
+        t["skipped"] = &trussc::JsonReadReflector::skipped;
+        t["endGroup"] = &trussc::JsonReadReflector::endGroup;
+        t["isDerived"] = &trussc::JsonReadReflector::isDerived;
+        t["isReadOnly"] = &trussc::JsonReadReflector::isReadOnly;
+        t["popDerived"] = &trussc::JsonReadReflector::popDerived;
+        t["popReadOnly"] = &trussc::JsonReadReflector::popReadOnly;
+        t["pushDerived"] = &trussc::JsonReadReflector::pushDerived;
+        t["pushReadOnly"] = &trussc::JsonReadReflector::pushReadOnly;
+        t["unknownKeys"] = &trussc::JsonReadReflector::unknownKeys;
     }
     {
-        sol::usertype<trussc::ScrollBar> t = lua->new_usertype<trussc::ScrollBar>("ScrollBar");
-        t["getBarColor"] = &trussc::ScrollBar::getBarColor;
-        t["setBarColor"] = &trussc::ScrollBar::setBarColor;
-        t["getBarWidth"] = &trussc::ScrollBar::getBarWidth;
-        t["setBarWidth"] = &trussc::ScrollBar::setBarWidth;
-        t["getMargin"] = &trussc::ScrollBar::getMargin;
-        t["setMargin"] = &trussc::ScrollBar::setMargin;
-        t["getOffset"] = &trussc::ScrollBar::getOffset;
-        t["updateFromContainer"] = &trussc::ScrollBar::updateFromContainer;
+        auto constructors = tcxLuaConstructors<trussc::FileReader
+            , trussc::FileReader()
+        >();
+        sol::usertype<trussc::FileReader> t = lua->new_usertype<trussc::FileReader>("FileReader", constructors, sol::call_constructor, constructors);
+        t["close"] = &trussc::FileReader::close;
+        t["eof"] = &trussc::FileReader::eof;
+        t["isOpen"] = &trussc::FileReader::isOpen;
+        t["open"] = &trussc::FileReader::open;
+        t["readChar"] = &trussc::FileReader::readChar;
+        t["readLine"] = [](trussc::FileReader& self) { return self.readLine(); };
+        t["remaining"] = &trussc::FileReader::remaining;
+        t["seek"] = &trussc::FileReader::seek;
+        t["tell"] = &trussc::FileReader::tell;
     }
-    lua->new_usertype<trussc::LogLevel>("LogLevel",
-        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
-        "Verbose", sol::var(trussc::LogLevel::Verbose),
-        "Notice", sol::var(trussc::LogLevel::Notice),
-        "Warning", sol::var(trussc::LogLevel::Warning),
-        "Error", sol::var(trussc::LogLevel::Error),
-        "Fatal", sol::var(trussc::LogLevel::Fatal),
-        "Silent", sol::var(trussc::LogLevel::Silent));
     {
-        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener",
-            sol::constructors<trussc::EventListener()>(),
-            sol::call_constructor, sol::constructors<trussc::EventListener()>());
+        sol::usertype<trussc::VideoDeviceInfo> t = lua->new_usertype<trussc::VideoDeviceInfo>("VideoDeviceInfo");
+        t["deviceId"] = &trussc::VideoDeviceInfo::deviceId;
+        t["deviceName"] = &trussc::VideoDeviceInfo::deviceName;
+        t["uniqueId"] = &trussc::VideoDeviceInfo::uniqueId;
+        t["getDeviceID"] = &trussc::VideoDeviceInfo::getDeviceID;
+        t["getDeviceName"] = &trussc::VideoDeviceInfo::getDeviceName;
+        t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
+    }
+    {
+        auto constructors = tcxLuaConstructors<trussc::EventListener
+            , trussc::EventListener()
+        >();
+        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener", constructors, sol::call_constructor, constructors);
         t["disconnect"] = &trussc::EventListener::disconnect;
         t["isConnected"] = &trussc::EventListener::isConnected;
     }
+    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
+        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
+        "Repeat", sol::var(trussc::TextureWrap::Repeat),
+        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
+        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
+    lua->new_usertype<trussc::PointStyle>("PointStyle",
+        sol::meta_function::equal_to, [](trussc::PointStyle a, trussc::PointStyle b){ return a == b; },
+        "Square", sol::var(trussc::PointStyle::Square),
+        "Round", sol::var(trussc::PointStyle::Round),
+        "Pixel", sol::var(trussc::PointStyle::Pixel));
     {
-        sol::usertype<trussc::FpsSettings> t = lua->new_usertype<trussc::FpsSettings>("FpsSettings");
-        t["updateFps"] = &trussc::FpsSettings::updateFps;
-        t["drawFps"] = &trussc::FpsSettings::drawFps;
-        t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
-        t["synced"] = &trussc::FpsSettings::synced;
+        sol::usertype<trussc::CurveStyle> t = lua->new_usertype<trussc::CurveStyle>("CurveStyle");
+        t["mode"] = &trussc::CurveStyle::mode;
+        t["resolution"] = &trussc::CurveStyle::resolution;
+        t["tolerance"] = &trussc::CurveStyle::tolerance;
     }
-    lua->new_usertype<trussc::WritingMode>("WritingMode",
-        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
-        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
-        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
-    {
-        sol::usertype<trussc::TcpErrorEventArgs> t = lua->new_usertype<trussc::TcpErrorEventArgs>("TcpErrorEventArgs");
-        t["message"] = &trussc::TcpErrorEventArgs::message;
-        t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
-    }
+    lua->new_usertype<trussc::Deliver>("Deliver",
+        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
+        "Inline", sol::var(trussc::Deliver::Inline),
+        "Main", sol::var(trussc::Deliver::Main));
 }
-#ifndef _MSC_VER
+#ifdef _MSC_VER
+#pragma warning(pop)
+#else
 #pragma GCC diagnostic pop
 #pragma clang diagnostic pop
 #endif

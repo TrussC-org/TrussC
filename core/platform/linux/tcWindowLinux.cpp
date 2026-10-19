@@ -9,7 +9,7 @@
 //   tick_cb   -> WindowContext switch + per-window dt + update/draw the tree
 //   event_cb  -> CoreEvents + App hooks + Node-tree dispatch (same keycode
 //                semantics as the main window: key == SAPP_KEYCODE_*)
-//   close_cb  -> Window::close()
+//   close_cb  -> Window::teardown() (close button, or a close() request)
 // All rendering shares the one sokol_gfx context; each window gets its own
 // sokol_gl context (same pattern as Fbo). Mirror of platform/win/tcWindowWin.cpp.
 
@@ -77,7 +77,12 @@ sg_swapchain acquireSecondarySwapchain(void* user) {
 // --- tick: drive this window's update/draw with its context active ---------
 void windowTick(sapp_window swin, void* user) {
     trussc::Window* win = static_cast<trussc::Window*>(user);
-    if (!win) return;
+    // A closed Window may outlive its native side. Never dispatch callbacks
+    // or lazily recreate GPU resources after teardown.
+    if (!win || !win->isOpen()) return;
+    // Frame boundary: a setApp() requested before or during this tick is
+    // applied when the scope is entered and left, never inside the tick.
+    internal::WindowDispatchScope scope(*win);
     auto& ctx = win->context();
 
     const int fbw = sapp_window_framebuffer_width(swin);
@@ -85,6 +90,11 @@ void windowTick(sapp_window swin, void* user) {
     if (fbw <= 0 || fbh <= 0) return;
     ctx.fbWidth = fbw;
     ctx.fbHeight = fbh;
+    // Keep target metadata current before update/draw, including resize ticks.
+    ctx.swapchainTarget.width = fbw;
+    ctx.swapchainTarget.height = fbh;
+    ctx.swapchainTarget.sampleCount = sapp_window_sample_count(swin);
+    ctx.swapchainTarget.viewport = {0, 0, (float)fbw, (float)fbh, true};
     ctx.dpiScale = sapp_window_dpi_scale(swin);
 
     // Per-window frame-rate throttle (Window::setFps): the timer keeps pacing at
@@ -112,31 +122,36 @@ void windowTick(sapp_window swin, void* user) {
         ctx.lastUpdateCallTime = callNow;
     }
 
-    auto* prev = internal::currentWindowCtx;
-    internal::currentWindowCtx = &ctx;
+    auto* prev = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &ctx;
 
     // Per-window frame count (Fix 3): advance this window's own tick counter so
     // getFrameCount()/getUpdateCount() report it while this context is active.
     ctx.updateCount++;
 
     // Own sokol_gl context, created lazily on the first tick (sgl is set up
-    // by then). Same lifecycle caveats as Fbo contexts on sgl resize.
-    if (ctx.swapchainTarget.context.id == SG_INVALID_ID) {
+    // by then). New windows use the current shared budget after any resize.
+    if (ctx.swapchainTarget.resources().context.id == SG_INVALID_ID) {
         sgl_context_desc_t cdesc = {};
-        cdesc.max_vertices = 65536;
-        cdesc.max_commands = 16384;
+        cdesc.max_vertices = internal::sglBudget().maxVertices;
+        cdesc.max_commands = internal::sglBudget().maxCommands;
         cdesc.color_format = SG_PIXELFORMAT_RGBA8;
         cdesc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
         cdesc.sample_count = sapp_window_sample_count(swin);
-        ctx.swapchainTarget.context = sgl_make_context(&cdesc);
+        ctx.swapchainTarget.resources().makeContext(cdesc, "a window");
     }
-    sgl_set_context(ctx.swapchainTarget.context);
+    sgl_set_context(ctx.swapchainTarget.resources().context);
     sgl_defaults();
 
     beginFrame();
 
-    win->events().update.notify();
-    win->tickTree();
+    {
+        // This window's update() is an entry point (#349); its draw is
+        // contained at present().
+        internal::EntryStackGuard guard(internal::AppEntry::Update);
+        win->events().update.notify();
+        win->tickTree();
+    }
 
     const Color& cc = win->clearColor_;
     clear(cc.r, cc.g, cc.b, cc.a);
@@ -144,22 +159,28 @@ void windowTick(sapp_window swin, void* user) {
     win->drawTreeNow();
 
     present();
-    win->events().afterFrame.notify();
+    {
+        // This window's afterFrame listeners are an entry point (#349).
+        internal::EntryStackGuard guard(internal::AppEntry::AfterFrame);
+        win->events().afterFrame.notify();
+    }
     // Drain this window's saveScreenshot() queue while ITS context (and its
     // lastSwapchainDrawable) is current — must run before we restore prev.
     internal::drainPendingScreenshots();
 
-    sgl_set_context(sgl_default_context());
-    internal::currentWindowCtx = prev;
+    internal::restoreWindowContext(prev);
 }
 
 // --- events: map sapp_event onto CoreEvents / App hooks / tree dispatch ----
-void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
-    trussc::Window* win = static_cast<trussc::Window*>(user);
-    if (!win) return;
-    auto& ctx = win->context();
-    auto* prev = internal::currentWindowCtx;
-    internal::currentWindowCtx = &ctx;
+// One event is an entry point (#349): the guard restores the stacks while
+// this window's context is still current.
+void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window* win,
+                         internal::WindowContext& ctx) {
+    internal::EntryStackGuard guard(internal::AppEntry::Event,
+        internal::eventEntryName(ev, ctx.mousePressed && ctx.mouseButton >= 0));
+
+    // Raw listeners can change pointer lock; snapshot this move's reliability.
+    const bool recoverButtonsOnMove = internal::mouseMoveHasReliableButtonBits(ev);
 
     // Raw event pass-through (same hook addons use on the main window)
     win->events().rawEvent.notify(*ev);
@@ -173,10 +194,37 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
     const bool hasAlt   = (ev->modifiers & SAPP_MODIFIER_ALT) != 0;
     const bool hasSuper = (ev->modifiers & SAPP_MODIFIER_SUPER) != 0;
 
+    auto releaseMouse = [&](int button) {
+        const unsigned int bit = internal::mouseButtonBit(button);
+        if ((ctx.pressedMouseButtons & bit) == 0) return;
+        ctx.pressedMouseButtons &= ~bit;
+        // Match the base drag-button semantics independently of release tracking.
+        ctx.mouseButton = -1;
+        ctx.mousePressed = false;
+        MouseEventArgs e;
+        e.pos = e.globalPos = Vec2(ctx.lastPointerX, ctx.lastPointerY);
+        e.button = button;
+        e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
+        e.syncLegacy();
+        win->events().mouseReleased.notify(e);
+        if (win->getApp()) win->getApp()->mouseReleased(e);
+        if (!e.consumed) win->dispatchMouseReleaseToTree(e);
+    };
+
+    for (int button = SAPP_MOUSEBUTTON_LEFT; button <= SAPP_MOUSEBUTTON_MIDDLE; ++button) {
+        if (recoverButtonsOnMove && (ctx.pressedMouseButtons & internal::mouseButtonBit(button)) && internal::mouseButtonLostOnMove(ev, button))
+            releaseMouse(button); // last real position, before updating the move
+    }
+
     switch (ev->type) {
+        case SAPP_EVENTTYPE_UNFOCUSED:
+            for (int button = SAPP_MOUSEBUTTON_LEFT; button <= SAPP_MOUSEBUTTON_MIDDLE; ++button)
+                releaseMouse(button);
+            break;
         case SAPP_EVENTTYPE_MOUSE_DOWN: {
             const float x = ev->mouse_x * scale, y = ev->mouse_y * scale;
-            ctx.mouseX = x; ctx.mouseY = y;
+            ctx.mouseX = ctx.lastPointerX = x; ctx.mouseY = ctx.lastPointerY = y;
+            ctx.pressedMouseButtons |= internal::mouseButtonBit(ev->mouse_button);
             ctx.mouseButton = (int)ev->mouse_button;
             ctx.mousePressed = true;
             MouseEventArgs e;
@@ -191,24 +239,15 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
         }
         case SAPP_EVENTTYPE_MOUSE_UP: {
             const float x = ev->mouse_x * scale, y = ev->mouse_y * scale;
-            ctx.mouseX = x; ctx.mouseY = y;
-            ctx.mouseButton = -1;
-            ctx.mousePressed = false;
-            MouseEventArgs e;
-            e.pos = e.globalPos = Vec2(x, y);
-            e.button = (int)ev->mouse_button;
-            e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
-            e.syncLegacy();
-            win->events().mouseReleased.notify(e);
-            if (win->getApp()) win->getApp()->mouseReleased(e);
-            if (!e.consumed) win->dispatchMouseReleaseToTree(e);
+            ctx.mouseX = ctx.lastPointerX = x; ctx.mouseY = ctx.lastPointerY = y;
+            releaseMouse((int)ev->mouse_button);
             break;
         }
         case SAPP_EVENTTYPE_MOUSE_ENTER:
         case SAPP_EVENTTYPE_MOUSE_MOVE: {
             const float x = ev->mouse_x * scale, y = ev->mouse_y * scale;
             ctx.pmouseX = ctx.mouseX; ctx.pmouseY = ctx.mouseY;
-            ctx.mouseX = x; ctx.mouseY = y;
+            ctx.mouseX = ctx.lastPointerX = x; ctx.mouseY = ctx.lastPointerY = y;
             internal::MouseEventRaw raw;
             raw.pos = raw.globalPos = Vec2(x, y);
             raw.delta = raw.globalDelta = Vec2(ev->mouse_dx * scale, ev->mouse_dy * scale);
@@ -277,18 +316,33 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
             logNotice("Window") << "second window visible again - resuming ticks";
             break;
         default:
-            // CHAR / RESIZED / FOCUSED / UNFOCUSED: rawEvent carries them;
+            // CHAR / RESIZED / FOCUSED: rawEvent carries them;
             // size sync happens per tick.
             break;
     }
+}
 
-    internal::currentWindowCtx = prev;
+void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
+    trussc::Window* win = static_cast<trussc::Window*>(user);
+    // A closed Window may outlive its native side. Never dispatch callbacks
+    // or lazily recreate GPU resources after teardown.
+    if (!win || !win->isOpen()) return;
+    auto& ctx = win->context();
+    auto* prev = internal::currentWindowCtx();
+    internal::restoreWindowContext(&ctx);
+    {
+        internal::WindowDispatchScope scope(*win);   // frame boundary, as in windowTick
+        dispatchWindowEvent(ev, swin, win, ctx);
+    }
+    internal::restoreWindowContext(prev);
 }
 
 void windowClosed(sapp_window swin, void* user) {
     (void)swin;
     trussc::Window* win = static_cast<trussc::Window*>(user);
-    if (win) win->close();   // tears down native + app state
+    // The backend's safe point (close button, or a close() request landing):
+    // never inside this window's tick or events.
+    if (win) trussc::internal::WindowRequestAccess::teardown(*win);   // native + app state
 }
 
 } // namespace
@@ -298,32 +352,44 @@ void windowClosed(sapp_window swin, void* user) {
 // ---------------------------------------------------------------------------
 namespace trussc {
 
-Window::~Window() { close(); }
+// Internal headless-test seam. The caller makes win's context current; an
+// invalid native handle uses the backend's unit DPI without creating a window.
+namespace internal {
+void dispatchSecondaryWindowEventForTests(const sapp_event* ev, Window& win) {
+    dispatchWindowEvent(ev, sapp_window{0}, &win, win.context());
+}
+} // namespace internal
 
+Window::~Window() { teardown(); }
+
+// A request (see tcWindow.h): the backend calls close_cb -> teardown() at its
+// next safe point, outside this window's tick and events.
 void Window::close() {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st || closeRequested_) return;
+    closeRequested_ = true;
+    sapp_window_request_close(st->win);
+}
+
+void Window::teardown() {
+    // The window's exit() is an entry point (#349).
+    internal::EntryStackGuard guard(internal::AppEntry::Exit);
     auto* st = static_cast<AdapterState*>(native_);
     if (!st) return;
     native_ = nullptr;             // re-entrancy guard (close_cb)
+    closeRequested_ = false;
+    ctx_.teardownTargets();
     ctx_.acquireSwapchain = nullptr;
     ctx_.acquireSwapchainUser = nullptr;
     sapp_destroy_window(st->win);
-    if (ctx_.swapchainTarget.context.id != SG_INVALID_ID) {
-        sgl_destroy_context(ctx_.swapchainTarget.context);
-        ctx_.swapchainTarget.context.id = SG_INVALID_ID;
-        ctx_.swapchainTarget.cache.clear();
-    }
+    // Frees this window's sgl pipelines and its sgl context (#317).
+    ctx_.swapchainTarget.resources().release();
     delete st;
     // The window's own exit event: per-window resource holders (e.g. the
     // tcxImGui per-window manager) tear down here, while this window's
     // CoreEvents is still alive.
     events_.exit.notify();
-    if (app_) {
-        app_->exit();
-        app_->cleanup();
-        internal::attachedApps.erase(app_.get());
-        app_.reset();
-        ctx_.rootNode = nullptr;
-    }
+    endApp();
 }
 
 void Window::setTitle(const std::string& title) {
@@ -431,15 +497,20 @@ int Window::getHeight() const {
     return st ? sapp_window_height(st->win) : 0;
 }
 
-std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
+bool Window::isOccluded() const {
+    if (auto hook = internal::windowOccludedHookForTests()) return hook(*this);
+    auto* st = static_cast<AdapterState*>(native_);
+    return st ? sapp_window_occluded(st->win) : false;
+}
+
+std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {
     if (headless::isActive()) {
         logError("Window") << "createWindow(): not available in headless mode";
         return nullptr;
     }
     auto win = std::shared_ptr<Window>(new Window());
     win->title_ = settings.title;
-    win->ctx_.swapchainColorFormat = SG_PIXELFORMAT_RGBA8;
-    win->ctx_.swapchainSampleCount = settings.sampleCount > 0 ? settings.sampleCount : 1;
+    win->ctx_.swapchainTarget.colorFormat = SG_PIXELFORMAT_RGBA8;
     auto* st = new AdapterState();
 
     sapp_window_desc d = {};
@@ -464,6 +535,9 @@ std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
 
     st->requestedWidth = settings.width;
     st->requestedHeight = settings.height;
+    win->ctx_.swapchainTarget.sampleCount = sapp_window_sample_count(st->win);
+    win->ctx_.swapchainTarget.width = sapp_window_framebuffer_width(st->win);
+    win->ctx_.swapchainTarget.height = sapp_window_framebuffer_height(st->win);
     win->native_ = st;
     win->ctx_.acquireSwapchain = &acquireSecondarySwapchain;
     win->ctx_.acquireSwapchainUser = st;

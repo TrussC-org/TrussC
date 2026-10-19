@@ -146,6 +146,8 @@ frame. That's it — no getters to write:
 
 ```cpp
 class Orbbec : public DepthCamera {
+public:
+    ~Orbbec() override { close(); }
 protected:
     bool openDevice() override;   // open the SDK device
     void closeDevice() override;
@@ -156,6 +158,18 @@ protected:
     DepthSensorType getSensorType() const override { return DepthSensorType::Stereo; }
 };
 ```
+
+Each backend destructor must call `close()` before its members are destroyed.
+It stops and joins the grabber before calling `closeDevice()`. The base
+destructor only provides a fallback stop/join and logs an error if the worker
+is still running; it runs too late to protect backend members.
+This rule also applies to subclasses of `PlaybackDepthCamera` and
+`SyntheticDepthCamera` that add state used during capture.
+
+`setup()` closes the previous session before opening a new one, so
+`closeDevice()` must be safe when nothing is open and on repeated calls.
+Return an empty `StreamFreshness` for a timeout or end of playback: it keeps
+the published frame unchanged in both threaded and inline modes.
 
 Add capability interfaces for device-specific extras:
 

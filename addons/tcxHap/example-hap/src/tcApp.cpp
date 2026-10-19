@@ -7,6 +7,7 @@ void tcApp::setup() {
 
     // MCP tool for loading video files
     mcp::tool("load_file", "Load a HAP video file")
+        .level(mcp::ToolLevel::Control)
         .arg<string>("path", "Path to HAP-encoded .mov file")
         .bind([this](const json& args) -> json {
             string path = args.at("path").get<string>();

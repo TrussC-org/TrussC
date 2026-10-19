@@ -87,7 +87,7 @@ TrussC has undergone bold structural reforms to solve "complexity" and "performa
 
 * **openFrameworks:**
   * **Naming:** `ofx` prefix (e.g.: `ofxGui`, `ofxOsc`)
-  * **Installation:** Select checkboxes in projectGenerator, or write in `addons.make` file. (TrussC: use `trusscli add` or the GUI)
+  * **Installation:** Select checkboxes in projectGenerator, or write in `addons.make` file. (TrussC: use `trusscli addon add` or the GUI)
   * **Build:** Often requires manually adding paths to IDE project settings.
   * **Namespace:** No standard convention, often defined directly in global namespace.
   * **Issue:** Manual dependency resolution between addons. If "ofxA depends on ofxB", both must be written in addons.make.
@@ -303,7 +303,7 @@ Reference for oF users finding equivalent features in TrussC.
 | `ofFill` | `fill()` |  |
 | `ofNoFill` | `noFill()` |  |
 | `ofPopStyle` | `popStyle()` |  |
-| `ofPushStyle` | `pushStyle()` |  |
+| `ofPushStyle` | `pushStyle()` | Scope-bound form: auto s = scopedStyle(); |
 | `ofEnableBlendMode` | `setBlendMode(mode)` |  |
 | `ofSetColor` | `setColor(r, g, b, a)` | Range 0-1 instead of 0-255 |
 | `ofSetFrameRate` | `setFps(fps)` |  |
@@ -315,7 +315,7 @@ Reference for oF users finding equivalent features in TrussC.
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
 | `ofPopMatrix` | `popMatrix()` |  |
-| `ofPushMatrix` | `pushMatrix()` |  |
+| `ofPushMatrix` | `pushMatrix()` | Scope-bound form: auto m = scopedMatrix(); |
 | `ofRotateRad` | `rotate(radians)` | Always radians (not degrees like oF default) |
 | `ofRotateDeg` | `rotateDeg(degrees)` |  |
 | `ofScale` | `scale(s)` |  |
@@ -354,7 +354,7 @@ Reference for oF users finding equivalent features in TrussC.
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
 | `ofSetupScreenOrtho` | `setupScreenOrtho()` |  |
-| `ofSetupScreenPerspective` | `setupScreenPerspective(fovDeg, nearDist, farDist)` |  |
+| `ofSetupScreenPerspective` | `setupScreenPerspectiveDeg(fovDeg, nearDist, farDist)` |  |
 | `ofWorldToScreen` | `worldToScreen(worldPos)` |  |
 
 ### **Video**
@@ -407,16 +407,16 @@ Reference for oF users finding equivalent features in TrussC.
 
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
-| `ofxGui / ofxImGui` | `ImGui (built-in)` | Included by default |
+| `ofxGui / ofxImGui` | `Dear ImGui (tcxImGui addon)` | tcxImGui addon (not in core) |
 
 ### **I/O**
 
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
+| `ofSystemLoadDialog()` | `loadDialog()` | loadDialogAsync() for a non-blocking variant |
 | `ofLoadJson(path)` | `loadJson(path)` | nlohmann/json |
 | `-` | `loadXml(path)` | pugixml |
-| `ofSystemLoadDialog()` | `systemLoadDialog()` |  |
-| `ofSystemSaveDialog()` | `systemSaveDialog()` |  |
+| `ofSystemSaveDialog()` | `saveDialog()` | saveDialogAsync() for a non-blocking variant |
 
 ### **Network**
 
@@ -436,7 +436,9 @@ Reference for oF users finding equivalent features in TrussC.
 
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
-| `-` | `MainThreadRunner::run(func)` | Execute on main thread |
-| `ofThread` | `std::thread + MainThreadRunner` | Safe sync |
+| `-` | `runOnMainThread(func)` | Execute on the main thread |
+| `ofScopedLock` | `std::lock_guard / std::scoped_lock` |  |
+| `ofMutex` | `std::mutex` | TrussC has no wrapper; use std::mutex |
+| `ofThread` | `Thread` | Subclass and override threadedFunction(); startThread() / waitForThread() |
 
 <!-- AUTO-GENERATED-END -->

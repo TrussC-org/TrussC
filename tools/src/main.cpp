@@ -1,7 +1,12 @@
 #include "TrussC.h"
 #include "tcApp.h"
 #include "ProjectGenerator.h"
+#include "GeneratedFile.h"
+#include "ProjectState.h"
+#include "BuildSetup.h"
 #include "VsDetector.h"
+#include "tc/app/internal/tcHotReloadDiagnostics.h"
+#include "tc/app/internal/tcWindowsBuildOutput.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -14,6 +19,7 @@
 #include <iomanip>
 #ifndef _WIN32
 #include <spawn.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <signal.h>
@@ -93,14 +99,19 @@ static string autoDetectTcRoot() {
     return "";
 }
 
-// Walk up from `startPath` (or CWD if empty) looking for a TrussC project
-// marker (src/ directory). CMakeLists.txt / CMakePresets.json / addons.make
+static bool isTrussCProject(const fs::path& path) {
+    return fs::exists(path / "CMakeLists.txt") && fs::exists(path / "addons.make");
+}
+
+// Check `startPath` (or CWD if empty) and up to five parents above it,
+// looking for a TrussC project marker (src/ directory).
+// CMakeLists.txt / CMakePresets.json / addons.make
 // are generated or optional, so we only rely on src/ here. Non-TrussC projects
 // that happen to have src/ are guarded later by signature check in update().
 static string autoDetectProjectRoot(const string& startPath) {
     fs::path searchPath = fs::absolute(
         startPath.empty() ? fs::current_path() : fs::path(startPath));
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i <= 5; ++i) {
         if (fs::is_directory(searchPath / "src")) {
             return searchPath.string();
         }
@@ -113,13 +124,7 @@ static string autoDetectProjectRoot(const string& startPath) {
 
 // Map IDE name string to enum. Returns true on success.
 static bool parseIdeType(const string& s, IdeType& out) {
-    if      (s == "vscode") out = IdeType::VSCode;
-    else if (s == "cursor") out = IdeType::Cursor;
-    else if (s == "xcode")  out = IdeType::Xcode;
-    else if (s == "vs")     out = IdeType::VisualStudio;
-    else if (s == "cmake")  out = IdeType::CMakeOnly;
-    else return false;
-    return true;
+    return IdeHelper::parseIdeId(s, out);
 }
 
 // Parse a -a / --addon / --addons value: accepts a single name or a comma-list.
@@ -160,18 +165,51 @@ static bool parseAddonValue(const string& value,
 // Subprocess: run an external command with inherited stdout/stderr
 // =============================================================================
 
-// Run a command with argv passed as an array (no shell involvement). stdout and
-// stderr are inherited from the parent process so build output streams through.
+// Run a command with argv passed as an array (no shell involvement). Output
+// streams through; Windows builds can also retain it for failure diagnostics.
 // Returns the child's exit code, or -1 on spawn failure.
-static int runProcess(const vector<string>& argv) {
+static int runProcess(const vector<string>& argv, string* buildOutput = nullptr) {
     if (argv.empty()) return -1;
 #ifdef _WIN32
-    // Build a null-terminated argv for _spawnvp
-    vector<const char*> cargv;
-    for (const auto& a : argv) cargv.push_back(a.c_str());
-    cargv.push_back(nullptr);
-    return (int)_spawnvp(_P_WAIT, cargv[0], cargv.data());
+    if (buildOutput) {
+        string commandLine;
+        for (const auto& a : argv) {
+            if (!commandLine.empty()) commandLine += ' ';
+            commandLine += quoteWindowsArgument(a);
+        }
+        return trussc::internal::runWindowsBuildWithOutput(commandLine, *buildOutput,
+            GetConsoleCP() != 0 ? 0 : CREATE_NO_WINDOW);
+    }
+    if (GetConsoleCP() != 0) {
+        // CLI builds inherit the same console used by configure.
+        vector<const char*> cargv;
+        for (const auto& a : argv) cargv.push_back(a.c_str());
+        cargv.push_back(nullptr);
+        return (int)_spawnvp(_P_WAIT, cargv[0], cargv.data());
+    }
+    // Without a console, keep children hidden just as configure does.
+    string commandLine;
+    for (const auto& a : argv) {
+        if (!commandLine.empty()) commandLine += ' ';
+        commandLine += quoteWindowsArgument(a);
+    }
+    STARTUPINFOA si = {};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    PROCESS_INFORMATION pi = {};
+    if (!CreateProcessA(nullptr, commandLine.data(), nullptr, nullptr, TRUE,
+                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) return -1;
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exitCode = 0;
+    const BOOL gotExitCode = GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return gotExitCode ? static_cast<int>(exitCode) : -1;
 #else
+    (void)buildOutput;
     // POSIX: posix_spawnp + waitpid
     vector<char*> cargv;
     for (const auto& a : argv) cargv.push_back(const_cast<char*>(a.c_str()));
@@ -234,6 +272,36 @@ struct CheckResult {
     string hint;
     bool essential = false;
 };
+
+#ifdef _WIN32
+static CheckResult checkWindowsHeaderDependencies(const string& projectPath) {
+    CheckResult r{"Header dependencies", CheckStatus::Skipped,
+                  "not checked (no Ninja build yet)", "", false};
+    const fs::path dir = fs::absolute(fs::path(projectPath) /
+        ProjectGenerator::buildDirForPreset("windows"));
+    if (!fs::exists(dir / "build.ninja") || !fs::exists(dir / ".ninja_log")) return r;
+
+    string ninja = readCMakeCacheValue((dir / "CMakeCache.txt").string(), "CMAKE_MAKE_PROGRAM");
+    if (ninja.empty()) ninja = "ninja";
+    // Outer quotes preserve a quoted executable path when _popen invokes cmd.
+    auto [code, output] = captureCommand("\"\"" + ninja + "\" -C \"" +
+        dir.string() + "\" -t deps 2>NUL\"");
+    if (code != 0) {
+        r.status = CheckStatus::Warning;
+        r.detail = "unknown (could not read Ninja dependencies)";
+        r.hint = "Check CMAKE_MAKE_PROGRAM in the project's CMakeCache.txt.";
+    } else if (hasMainHeaderDependencies(output)) {
+        r.status = CheckStatus::OK;
+        r.detail = "recorded for main.cpp.obj (last build)";
+    } else {
+        r.status = CheckStatus::Error;
+        r.detail = "none for main.cpp.obj (last build)";
+        r.hint = "Run 'trusscli update' and 'trusscli build --debug' in the same console, "
+                 "then run doctor again.";
+    }
+    return r;
+}
+#endif
 
 static CheckResult checkCMake() {
     CheckResult r{"CMake", CheckStatus::OK, "", "", true};
@@ -431,6 +499,46 @@ static CheckResult checkGit() {
     return r;
 }
 
+// The Visual Studio toolchain the project's "windows" preset pins (ninja,
+// MSVC and Windows SDK folders; see ProjectGenerator::writeCMakePresets).
+// After a VS update or a move to another VS version these paths are gone.
+// One check for both `trusscli doctor` and `trusscli build` (#357).
+static CheckResult checkWindowsPresetToolchain(const string& projectPath,
+                                               ToolchainCheck* out = nullptr) {
+    CheckResult r{"Pinned VS paths", CheckStatus::Skipped, "", "", false};
+    fs::path presetsPath = fs::path(projectPath) / "CMakePresets.json";
+    error_code ec;
+    if (projectPath.empty() || !fs::is_regular_file(presetsPath, ec)) {
+        r.detail = "no CMakePresets.json";
+        return r;
+    }
+    ifstream file(presetsPath, ios::binary);
+    stringstream ss;
+    ss << file.rdbuf();
+    ToolchainCheck check = checkPresetToolchain(ss.str(), [](const string& path) {
+        error_code e;
+        return fs::exists(fs::path(path), e);
+    });
+    if (out) *out = check;
+    if (!check.pinned) {
+        r.detail = "no pinned toolchain paths";
+        return r;
+    }
+    if (!check.stale()) {
+        r.status = CheckStatus::OK;
+        r.detail = "pinned MSVC / SDK / ninja paths exist";
+        return r;
+    }
+    r.status = CheckStatus::Error;
+    r.detail = "Visual Studio changed since this project was generated: " +
+               check.missing[0] + " is missing";
+    if (check.missing.size() > 1) {
+        r.detail += " (+" + to_string(check.missing.size() - 1) + " more)";
+    }
+    r.hint = "'trusscli build' refreshes CMakePresets.json by itself (or run 'trusscli update')";
+    return r;
+}
+
 // -----------------------------------------------------------------------------
 // Version helpers (used by --version and doctor)
 // -----------------------------------------------------------------------------
@@ -573,6 +681,10 @@ static int runProjectUpdate(ProjectSettings& settings, const string& projectPath
     ProjectGenerator gen(settings);
     gen.setLogCallback([](const string& msg) { cout << msg << endl; });
     string err = gen.update(projectPath);
+    // Kept targets whose configure failed: reported, the update stands
+    for (const string& w : gen.getWarnings()) {
+        cerr << "Warning: " << w << "\n";
+    }
     if (!err.empty()) {
         cerr << "Error: " << err << "\n";
         return 1;
@@ -580,21 +692,36 @@ static int runProjectUpdate(ProjectSettings& settings, const string& projectPath
     return 0;
 }
 
+// Regenerate an existing project (update / addon add / addon remove) with
+// the given addon selection. The settings come from prepareRegeneration():
+// the project's own CMakePresets.json first (IDE, targets, web backend),
+// then the explicit flags, which win.
+static int regenerateProject(const string& projectPath, const string& tcRoot,
+                             const vector<string>& availableAddons,
+                             const vector<int>& addonSelected,
+                             const GenerationFlags& flags) {
+    RegenerationSetup setup = prepareRegeneration(projectPath, tcRoot, availableAddons,
+                                                  addonSelected, flags);
+    for (const string& w : setup.warnings) cerr << "Warning: " << w << "\n";
+    if (!setup.summary.empty()) cout << setup.summary << "\n";
+    if (!setup.leftoverNotice.empty()) cout << setup.leftoverNotice << "\n";
+
+    if (int rc = runProjectUpdate(setup.settings, projectPath)) return rc;
+    cout << "Project updated: " << projectPath << "\n";
+    return 0;
+}
+
 // Write an addons.make file containing the selected addon names. Called from
 // add / remove after modifying the selection set.
-static bool writeAddonsMake(const string& projectPath,
+static void writeAddonsMake(const string& projectPath,
                             const vector<string>& selectedAddons) {
     string path = projectPath + "/addons.make";
-    ofstream out(path);
-    if (!out) {
-        cerr << "Error: could not write " << path << "\n";
-        return false;
-    }
+    ostringstream out;
     out << "# TrussC addons - one addon per line\n";
     for (const string& name : selectedAddons) {
         out << name << "\n";
     }
-    return true;
+    writeGeneratedFile(path, out.str());
 }
 
 // Forward declarations for functions defined later
@@ -912,8 +1039,7 @@ static int cmdCp(const vector<string>& args) {
         cerr << "Error: source '" << srcArg << "' is not a directory\n";
         return 1;
     }
-    if (!fs::exists(srcPath / "CMakeLists.txt") ||
-        !fs::exists(srcPath / "addons.make")) {
+    if (!isTrussCProject(srcPath)) {
         cerr << "Error: source '" << srcArg << "' is not a TrussC project "
              << "(missing CMakeLists.txt or addons.make)\n";
         return 1;
@@ -1049,7 +1175,7 @@ static int cmdCp(const vector<string>& args) {
                     fs::copy(srcBinData, dstBinData, fs::copy_options::recursive);
                 } else {
                     fs::create_directories(dstBinData);
-                    ofstream gitkeep((dstBinData / ".gitkeep").string());
+                    writeGeneratedFile(dstBinData / ".gitkeep", "");
                 }
             } catch (const fs::filesystem_error& e) {
                 cerr << "Error: copy failed: " << e.what() << "\n";
@@ -1129,11 +1255,27 @@ static void printUpdateHelp() {
          << "for the TrussC project in the current directory. The addon list is\n"
          << "read from the existing addons.make.\n"
          << "\n"
+         << "The IDE, the Web / Android / iOS targets and the web backend are kept\n"
+         << "from the project's CMakePresets.json. Flags change them: --ide switches\n"
+         << "the IDE, --web adds a target, --no-web drops it. Without a\n"
+         << "CMakePresets.json (e.g. a fresh clone) the defaults apply: vscode,\n"
+         << "native only.\n"
+         << "A kept target is configured again. Its saved toolchain path is reused\n"
+         << "when this shell has no emsdk / NDK set up; if its configure still\n"
+         << "fails, that is a warning (fix the toolchain, or drop the target with\n"
+         << "--no-web / --no-android / --no-ios). A target passed as a flag must\n"
+         << "configure, or update fails.\n"
+         << "A dropped target's build folder and build script stay in place;\n"
+         << "'trusscli clean --all' removes them.\n"
+         << "\n"
          << "Options:\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "      --web                  Enable Web build\n"
          << "      --android              Enable Android build\n"
          << "      --ios                  Enable iOS build\n"
+         << "      --no-web               Disable Web build\n"
+         << "      --no-android           Disable Android build\n"
+         << "      --no-ios               Disable iOS build\n"
          << "      --ide <type>           IDE: vscode, cursor, xcode, vs, cmake\n"
          << "      --tc-root <path>       Path to TrussC root directory\n"
          << "  -h, --help                 Show this help\n";
@@ -1141,8 +1283,7 @@ static void printUpdateHelp() {
 
 static int cmdUpdate(const vector<string>& args) {
     string projectPath;
-    bool web = false, android = false, ios = false;
-    string ideStr = "vscode";
+    GenerationFlags flags;
     string tcRoot;
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
@@ -1160,14 +1301,25 @@ static int cmdUpdate(const vector<string>& args) {
         else if (a == "-p" || a == "--path") {
             if (!needValue(i, a, projectPath)) return 1;
         }
-        else if (a == "--web") web = true;
-        else if (a == "--android") android = true;
-        else if (a == "--ios") ios = true;
         else if (a == "--ide") {
+            string ideStr;
             if (!needValue(i, a, ideStr)) return 1;
+            IdeType ide;
+            if (!parseIdeType(ideStr, ide)) {
+                cerr << "Error: unknown IDE type '" << ideStr
+                     << "'. Valid: vscode, cursor, xcode, vs, cmake\n";
+                return 1;
+            }
+            flags.ide = ide;
         }
         else if (a == "--tc-root") {
             if (!needValue(i, a, tcRoot)) return 1;
+        }
+        else if (string err; parseTargetFlag(a, flags, err)) {
+            if (!err.empty()) {
+                cerr << "Error: " << err << "\n";
+                return 1;
+            }
         }
         else {
             cerr << "Error: unknown argument '" << a << "'\n"
@@ -1187,27 +1339,9 @@ static int cmdUpdate(const vector<string>& args) {
     vector<string> availableAddons;
     scanAddons(tcRoot, availableAddons);
 
-    ProjectSettings settings;
-    settings.tcRoot = tcRoot;
-    settings.projectName = fs::canonical(projectPath).filename().string();
-    settings.addons = availableAddons;
-    parseAddonsMake(projectPath, availableAddons, settings.addonSelected);
-    settings.generateWebBuild = web;
-    settings.generateAndroidBuild = android;
-    settings.generateIosBuild = ios;
-    settings.detectBuildEnvironment();
-
-    if (!parseIdeType(ideStr, settings.ideType)) {
-        cerr << "Error: unknown IDE type '" << ideStr
-             << "'. Valid: vscode, cursor, xcode, vs, cmake\n";
-        return 1;
-    }
-
-    settings.templatePath = tcRoot + "/examples/templates/emptyExample";
-
-    if (int rc = runProjectUpdate(settings, projectPath)) return rc;
-    cout << "Project updated: " << projectPath << "\n";
-    return 0;
+    vector<int> addonSelected;
+    parseAddonsMake(projectPath, availableAddons, addonSelected);
+    return regenerateProject(projectPath, tcRoot, availableAddons, addonSelected, flags);
 }
 
 // =============================================================================
@@ -1305,6 +1439,9 @@ static void printAddHelp() {
          << "Add one or more addons to the TrussC project in the current directory.\n"
          << "The project is detected by walking up from CWD. The addons.make file\n"
          << "is updated and the build files are regenerated.\n"
+         << "The IDE and the Web / Android / iOS targets are kept from the\n"
+         << "project's CMakePresets.json (change them with 'trusscli update').\n"
+         << "A kept target that fails to configure is reported as a warning.\n"
          << "\n"
          << "Options:\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
@@ -1373,7 +1510,7 @@ static int cmdAdd(const vector<string>& args) {
         }
         else if (!a.empty() && a[0] == '-') {
             cerr << "Error: unknown option '" << a << "'\n"
-                 << "Run 'trusscli add --help' for usage.\n";
+                 << "Run 'trusscli addon add --help' for usage.\n";
             return 1;
         }
         else {
@@ -1382,8 +1519,8 @@ static int cmdAdd(const vector<string>& args) {
     }
 
     if (requestedAddons.empty()) {
-        cerr << "Error: 'add' requires at least one addon name\n"
-             << "Usage: trusscli add <addon> [<addon>...]\n";
+        cerr << "Error: 'addon add' requires at least one addon name\n"
+             << "Usage: trusscli addon add <addon> [<addon>...]\n";
         return 1;
     }
 
@@ -1454,7 +1591,7 @@ static int cmdAdd(const vector<string>& args) {
         if (addonSelected[i]) selectedNames.push_back(availableAddons[i]);
     }
 
-    if (!writeAddonsMake(projectPath, selectedNames)) return 1;
+    writeAddonsMake(projectPath, selectedNames);
 
     if (addedNow.empty()) {
         cout << "No changes to addons.make. Regenerating build files anyway...\n";
@@ -1467,18 +1604,8 @@ static int cmdAdd(const vector<string>& args) {
         cout << "\n";
     }
 
-    // Regenerate
-    ProjectSettings settings;
-    settings.tcRoot = resolvedTcRoot;
-    settings.projectName = fs::canonical(projectPath).filename().string();
-    settings.addons = availableAddons;
-    settings.addonSelected = addonSelected;
-    settings.detectBuildEnvironment();
-    settings.templatePath = resolvedTcRoot + "/examples/templates/emptyExample";
-
-    if (int rc = runProjectUpdate(settings, projectPath)) return rc;
-    cout << "Project updated: " << projectPath << "\n";
-    return 0;
+    return regenerateProject(projectPath, resolvedTcRoot, availableAddons, addonSelected,
+                             GenerationFlags());
 }
 
 // =============================================================================
@@ -1491,6 +1618,9 @@ static void printRemoveHelp() {
          << "Remove one or more addons from the TrussC project in the current\n"
          << "directory. The project is detected by walking up from CWD. The\n"
          << "addons.make file is updated and the build files are regenerated.\n"
+         << "The IDE and the Web / Android / iOS targets are kept from the\n"
+         << "project's CMakePresets.json (change them with 'trusscli update').\n"
+         << "A kept target that fails to configure is reported as a warning.\n"
          << "\n"
          << "Options:\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
@@ -1527,7 +1657,7 @@ static int cmdRemove(const vector<string>& args) {
         }
         else if (!a.empty() && a[0] == '-') {
             cerr << "Error: unknown option '" << a << "'\n"
-                 << "Run 'trusscli remove --help' for usage.\n";
+                 << "Run 'trusscli addon remove --help' for usage.\n";
             return 1;
         }
         else {
@@ -1536,8 +1666,8 @@ static int cmdRemove(const vector<string>& args) {
     }
 
     if (requestedAddons.empty()) {
-        cerr << "Error: 'remove' requires at least one addon name\n"
-             << "Usage: trusscli remove <addon> [<addon>...]\n";
+        cerr << "Error: 'addon remove' requires at least one addon name\n"
+             << "Usage: trusscli addon remove <addon> [<addon>...]\n";
         return 1;
     }
 
@@ -1580,7 +1710,7 @@ static int cmdRemove(const vector<string>& args) {
         if (addonSelected[i]) selectedNames.push_back(availableAddons[i]);
     }
 
-    if (!writeAddonsMake(projectPath, selectedNames)) return 1;
+    writeAddonsMake(projectPath, selectedNames);
 
     if (removedNow.empty()) {
         cout << "No changes to addons.make. Regenerating build files anyway...\n";
@@ -1593,17 +1723,8 @@ static int cmdRemove(const vector<string>& args) {
         cout << "\n";
     }
 
-    ProjectSettings settings;
-    settings.tcRoot = resolvedTcRoot;
-    settings.projectName = fs::canonical(projectPath).filename().string();
-    settings.addons = availableAddons;
-    settings.addonSelected = addonSelected;
-    settings.detectBuildEnvironment();
-    settings.templatePath = resolvedTcRoot + "/examples/templates/emptyExample";
-
-    if (int rc = runProjectUpdate(settings, projectPath)) return rc;
-    cout << "Project updated: " << projectPath << "\n";
-    return 0;
+    return regenerateProject(projectPath, resolvedTcRoot, availableAddons, addonSelected,
+                             GenerationFlags());
 }
 
 // =============================================================================
@@ -1730,9 +1851,7 @@ static void writeRegistryCache(const string& jsonText) {
     string path = registryCachePath();
     if (path.empty()) return;
     try {
-        fs::create_directories(fs::path(path).parent_path());
-        ofstream f(path, ios::binary);
-        f.write(jsonText.data(), static_cast<streamsize>(jsonText.size()));
+        writeGeneratedFile(path, jsonText);
     } catch (...) {
         // Best-effort; cache is optional.
     }
@@ -2823,6 +2942,10 @@ static void printDoctorHelp() {
          << "Check your development environment for TrussC build prerequisites.\n"
          << "By default shows only essential checks and any failures. Use --verbose\n"
          << "to see all checks including optional tools and cross-compile targets.\n"
+         << "On Windows, inside a project, it also checks that the Visual Studio\n"
+         << "paths pinned in CMakePresets.json (MSVC, Windows SDK, ninja) still\n"
+         << "exist, and whether the last Ninja build recorded header dependencies\n"
+         << "for main.cpp.obj.\n"
          << "\n"
          << "Options:\n"
          << "      --verbose              Show all checks (including OK / optional / skipped)\n"
@@ -2891,6 +3014,13 @@ static int cmdDoctor(const vector<string>& args) {
     results.push_back(checkTrussCCore(resolvedTcRoot));
     results.push_back(checkVersionMismatch(resolvedTcRoot));
     results.push_back(checkPlatformSDK());
+#ifdef _WIN32
+    // The project's pinned VS toolchain (only a Windows preset pins one)
+    if (!projectPath.empty()) {
+        results.push_back(checkWindowsPresetToolchain(projectPath));
+        results.push_back(checkWindowsHeaderDependencies(projectPath));
+    }
+#endif
 
     // Cross-compile checks: only run if the project targets them
     bool checkWeb = hasTarget("web");
@@ -2958,9 +3088,9 @@ static int cmdDoctor(const vector<string>& args) {
 
         cout << "  " << statusIcon(r.status)
              << " " << r.name;
-        // Pad to align detail
-        int pad = 20 - (int)r.name.size();
-        if (pad > 0) cout << string(pad, ' ');
+        // Pad to align detail; a long name still gets one space before it
+        int pad = max(1, 20 - (int)r.name.size());
+        cout << string(pad, ' ');
         if (!r.detail.empty()) cout << r.detail;
         cout << "\n";
         if (!r.hint.empty() && (r.status != CheckStatus::OK || verbose)) {
@@ -3056,12 +3186,21 @@ static void printBuildHelp() {
          << "      --relwithdebinfo       Build type: RelWithDebInfo (-O2 -g) [default]\n"
          << "      --release              Build type: Release (-O3, no debug info)\n"
          << "      --clean                Clean before building (--clean-first)\n"
+         << "      --mcp                  Enable MCP development tools for this build\n"
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "  -h, --help                 Show this help\n"
          << "\n"
          << "Build type applies to native builds; web/android keep their own\n"
-         << "(MinSizeRel / Release). The three build-type flags are mutually exclusive.\n";
+         << "(MinSizeRel / Release). The three build-type flags are mutually exclusive.\n"
+         << "\n"
+         << "When the target's build folder has no CMake cache (after 'trusscli clean',\n"
+         << "or a deleted folder) or only the cache of a failed configure, build\n"
+         << "configures it first. On Windows, when Visual Studio changed since the\n"
+         << "project was generated (the MSVC, SDK or ninja path in CMakePresets.json\n"
+         << "is gone), build detects Visual Studio again, replaces only those paths\n"
+         << "in CMakePresets.json and removes build-windows before configuring.\n"
+         << "It prints what it did.\n";
 }
 
 // =============================================================================
@@ -3073,10 +3212,11 @@ static void printCleanHelp() {
          << "\n"
          << "Delete build directories for the TrussC project in the current directory.\n"
          << "By default deletes the native platform build directory. Use --all to\n"
-         << "delete all build directories (web, android, ios, etc.).\n"
+         << "delete all build directories (web, android, xcode-ios, etc.) and the\n"
+         << "build scripts trusscli generated (build-web.sh / .command / .bat).\n"
          << "\n"
          << "Options:\n"
-         << "      --all                  Delete all build directories\n"
+         << "      --all                  Delete all build directories and generated build scripts\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "  -h, --help                 Show this help\n";
 }
@@ -3105,30 +3245,51 @@ static int cmdClean(const vector<string>& args) {
         cerr << "Error: not inside a TrussC project.\n";
         return 1;
     }
+    projectPath = fs::absolute(projectPath).string();
+    if (!isTrussCProject(projectPath)) {
+        cerr << "Error: '" << projectPath << "' is not a TrussC project "
+             << "(missing CMakeLists.txt or addons.make). Nothing was removed.\n";
+        return 1;
+    }
 
-    const char* buildDirs[] = {
-        "build-macos", "build-linux", "build-windows",
-        "build-web", "build-android", "build-ios",
-        "build"
-    };
+    cout << "Cleaning project: " << projectPath << "\n";
 
+    // The native folder and "build", or with --all every preset's folder (the
+    // same mapping the presets are written with, so iOS's xcode-ios too)
     int removed = 0;
-    for (const char* dir : buildDirs) {
+    for (const string& dir : buildFoldersToClean(kNativePreset ? kNativePreset : "", cleanAll)) {
         string fullPath = projectPath + "/" + dir;
         if (fs::exists(fullPath)) {
-            if (!cleanAll && string(dir) != string("build-") + kNativePreset && string(dir) != "build") {
-                continue;  // skip non-native dirs unless --all
-            }
             cout << "  Removing " << dir << "/\n";
             fs::remove_all(fullPath);
             removed++;
         }
     }
+    // With --all, also the build scripts trusscli generated (build-web.sh
+    // etc.); only those exact names, and only regular files
+    int removedScripts = 0;
+    for (const string& script : buildScriptsToClean(cleanAll)) {
+        error_code ec;
+        const fs::path fullPath = fs::path(projectPath) / script;
+        if (fs::is_regular_file(fullPath, ec)) {
+            cout << "  Removing " << script << "\n";
+            fs::remove(fullPath, ec);
+            removedScripts++;
+        }
+    }
 
-    if (removed == 0) {
+    if (removed == 0 && removedScripts == 0) {
         cout << "Nothing to clean.\n";
     } else {
-        cout << "Cleaned " << removed << " build director" << (removed == 1 ? "y" : "ies") << ".\n";
+        string what;
+        if (removed > 0) {
+            what = to_string(removed) + " build director" + (removed == 1 ? "y" : "ies");
+        }
+        if (removedScripts > 0) {
+            if (!what.empty()) what += " and ";
+            what += to_string(removedScripts) + " build script" + (removedScripts == 1 ? "" : "s");
+        }
+        cout << "Cleaned " << what << ".\n";
     }
     return 0;
 }
@@ -3136,23 +3297,6 @@ static int cmdClean(const vector<string>& args) {
 // =============================================================================
 // Subcommand: build
 // =============================================================================
-
-// Read CMAKE_BUILD_TYPE from an existing CMake cache. Returns "" if the cache
-// (or the variable) is absent. Used to decide whether a reconfigure is needed
-// to change the build type on single-config generators.
-static string readCachedBuildType(const string& buildDir) {
-    ifstream cache(buildDir + "/CMakeCache.txt");
-    if (!cache) return "";
-    string line;
-    while (getline(cache, line)) {
-        // Format: CMAKE_BUILD_TYPE:STRING=RelWithDebInfo
-        if (line.rfind("CMAKE_BUILD_TYPE:", 0) == 0) {
-            auto eq = line.find('=');
-            if (eq != string::npos) return line.substr(eq + 1);
-        }
-    }
-    return "";
-}
 
 // Map a build-type flag to its CMAKE_BUILD_TYPE value, or nullptr if the
 // argument is not one. --debug / --release / --relwithdebinfo are mutually
@@ -3164,11 +3308,84 @@ static const char* buildTypeForFlag(const string& a) {
     return nullptr;
 }
 
+// Re-pin the Visual Studio toolchain in CMakePresets.json after Visual Studio
+// changed (#357): detect VS again and replace only the "windows" preset's
+// CMAKE_MAKE_PROGRAM and INCLUDE / LIB / PATH. The targets, web backend, IDE
+// (#350), TRUSSC_DIR, the other presets and hand edits stay. build-windows is
+// removed so the next configure starts clean. Nothing is changed when no
+// usable Visual Studio is found, or when its paths are missing too, so the
+// next build tries again. Always prints what it did.
+static int refreshWindowsPresets(const string& projectPath, const ToolchainCheck& toolchain) {
+    const fs::path presetsPath = fs::path(projectPath) / "CMakePresets.json";
+    string presetsText;
+    {
+        ifstream file(presetsPath, ios::binary);
+        stringstream ss;
+        ss << file.rdbuf();
+        presetsText = ss.str();
+    }
+    const string missing = toolchain.missing.empty() ? string() : toolchain.missing[0];
+    const string changed = "Visual Studio changed since this project was generated (" +
+                           missing + " is missing)";
+
+    // The newest install, as `trusscli new` / `update` pick it. Without a VS
+    // the detector returns a fallback entry with no MSVC / SDK version.
+    vector<VsVersionInfo> installed = VsDetector::detectInstalledVersions();
+    if (installed.empty() || !canPinToolchain(installed[0])) {
+        cerr << "Error: " << changed << ", and no Visual Studio with the C++ tools "
+                "was found.\n"
+             << "Install Visual Studio (Desktop development with C++) and run "
+                "'trusscli build' again. CMakePresets.json and "
+             << ProjectGenerator::buildDirForPreset(kNativePreset) << " were left as they are.\n";
+        return 1;
+    }
+    const VsVersionInfo& vs = installed[0];
+
+    string repinned = repinWindowsToolchain(presetsText, windowsToolchainPins(vs));
+    if (repinned.empty()) {
+        cerr << "Error: " << changed << ", and CMakePresets.json has no readable "
+                "\"windows\" preset. Run 'trusscli update' to rewrite it.\n";
+        return 1;
+    }
+    // The detected install's paths must exist, or every build would repeat this
+    ToolchainCheck fresh = checkPresetToolchain(repinned, [](const string& path) {
+        error_code e;
+        return fs::exists(fs::path(path), e);
+    });
+    if (fresh.stale()) {
+        cerr << "Error: " << changed << ", and the paths of the detected "
+             << vs.displayName << " are missing too: " << fresh.missing[0] << "\n"
+             << "That Windows SDK / MSVC folder is incomplete: remove the leftover folder or "
+                "repair the SDK / Visual Studio install (or drop the \"environment\" block "
+                "from the \"windows\" preset). CMakePresets.json was left as it is.\n";
+        return 1;
+    }
+
+    // Remove the old build folder first: if that fails, the presets stay
+    // stale and the next build tries again.
+    const string buildDir = ProjectGenerator::buildDirForPreset(kNativePreset);
+    error_code ec;
+    fs::remove_all(fs::path(projectPath) / buildDir, ec);
+    if (ec) {
+        cerr << "Error: " << changed << ", and " << buildDir << " could not be removed ("
+             << ec.message() << ").\n"
+             << "Close programs that use files in it and run 'trusscli build' again.\n";
+        return 1;
+    }
+    writeGeneratedFile(presetsPath, repinned);
+
+    cout << "[build] " << changed << ": pinned " << vs.displayName
+         << " in CMakePresets.json and removed " << buildDir << "\n";
+    cout.flush();
+    return 0;
+}
+
 static int cmdBuild(const vector<string>& args) {
     string explicitPath;
     string targetPreset;
     string buildType;       // "" = default (RelWithDebInfo); else Debug/Release/RelWithDebInfo
     bool clean = false;
+    bool mcp = false;
     bool warnings = false;
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
@@ -3195,6 +3412,7 @@ static int cmdBuild(const vector<string>& args) {
             buildType = bt;
         }
         else if (a == "--clean")   clean = true;
+        else if (a == "--mcp") mcp = true;
         else if (a == "--warnings") warnings = true;
         else if (a == "-p" || a == "--path") {
             if (!needValue(i, a, explicitPath)) return 1;
@@ -3250,6 +3468,18 @@ static int cmdBuild(const vector<string>& args) {
         return 1;
     }
 
+    // Windows: the presets pin the Visual Studio toolchain found when they were
+    // written. If Visual Studio changed since, rewrite them (same targets and
+    // IDE) and drop the native build folder; the configure below then runs on
+    // the fresh presets. Same check as `trusscli doctor`.
+    if (kNativePreset && targetPreset == kNativePreset) {
+        ToolchainCheck toolchain;
+        checkWindowsPresetToolchain(projectPath, &toolchain);
+        if (shouldRefreshPresets(kNativePreset, targetPreset, toolchain)) {
+            if (int rrc = refreshWindowsPresets(projectPath, toolchain)) return rrc;
+        }
+    }
+
     string cmake = findCMake();
 
     // Determine parallel job count. On Linux, limit based on available RAM
@@ -3298,54 +3528,42 @@ static int cmdBuild(const vector<string>& args) {
     string savedCwd = fs::current_path().string();
     fs::current_path(projectPath);
 
-    // `cmake --build` cannot pass -D, so any cache change needs a configure pass
-    // (`cmake --preset`) first. Accumulate the flags and run it only if needed.
+    // `cmake --build` cannot pass -D and does not configure a build folder
+    // that has no cache (or only the cache of a failed configure), so those
+    // cases need a configure pass
+    // (`cmake --preset`) first. MCP flag changes also require configure;
+    // every configure explicitly sets the requested MCP dev option.
+    // (the cwd is the project now; projectPath may be relative)
+    ConfigureInputs cfgIn = inspectBuildFolder(".", targetPreset,
+                                               kNativePreset ? kNativePreset : "");
+    cfgIn.requestedBuildType = buildType;
+    cfgIn.mcp = mcp;
+    cfgIn.warnings = warnings;
+    ConfigurePlan plan = planConfigure(cfgIn);
+    for (const string& line : plan.messages) cout << line << "\n";
+    cout.flush();   // print before cmake's own output, also through a pipe
     vector<string> cfg = {cmake, "--preset", targetPreset};
-    bool needConfigure = false;
-
-    // --warnings: turn on -Wall/-Wextra for the app's own sources. The cache var
-    // is sticky: it stays on for later builds until a configure without it (or
-    // `trusscli update`) resets it.
-    if (warnings) {
-        cout << "[warnings] Enabling -Wall -Wextra for this project's sources...\n";
-        cfg.push_back("-DTRUSSC_WARNINGS=ON");
-        needConfigure = true;
-    }
-
-    // Build type on a single-config native preset: the `--config` above is
-    // ignored, so pin the build type via CMAKE_BUILD_TYPE at configure time.
-    // Only manage the native preset — web/android bake their own build type
-    // (MinSizeRel / Release) into the preset and must keep it. We touch the cache
-    // only when it actually needs to change, so a steady-state build stays
-    // configure-free on the common path (cache already holds the desired type).
-    if (kNativePreset && targetPreset == kNativePreset) {
-        string cachedType = readCachedBuildType(string("build-") + targetPreset);
-        // Reconfigure to pin CMAKE_BUILD_TYPE when either the cache holds a
-        // different type (switch, or revert to the default after an explicit
-        // build), or there is no cache yet and a non-default type was requested
-        // (pin it before the configure the build triggers). A plain build with
-        // no cache stays configure-free and relies on the trussc_app.cmake default.
-        bool changeType = (!cachedType.empty() && cachedType != effectiveType) ||
-                          (cachedType.empty() && !buildType.empty());
-        if (changeType) {
-            if (cachedType.empty())
-                cout << "[build] Configuring " << effectiveType << " build "
-                        "(CMAKE_BUILD_TYPE=" << effectiveType << ")...\n";
-            else
-                cout << "[build] Switching build type: " << cachedType
-                     << " -> " << effectiveType << " ...\n";
-            cfg.push_back("-DCMAKE_BUILD_TYPE=" + effectiveType);
-            needConfigure = true;
-        }
-    }
+    cfg.insert(cfg.end(), plan.defines.begin(), plan.defines.end());
+    bool needConfigure = plan.configure;
 
     int rc = 0;
+    string buildOutput;
     if (needConfigure) rc = runProcess(cfg);
-    if (rc == 0) rc = runProcess(cmd);
+    if (rc == 0) rc = runProcess(cmd, &buildOutput);
+#ifdef _WIN32
+    // CMake owns this decision and may update it during an automatic reconfigure.
+    string hotReloadState;
+    ifstream(fs::path(cfgIn.buildDir) / ".tc_hot_reload_state") >> hotReloadState;
+#endif
     fs::current_path(savedCwd);
 
     if (rc != 0) {
         cerr << "Build failed (exit code " << rc << ").\n";
+#ifdef _WIN32
+        if (hotReloadState == "ON" && trussc::internal::hasWindowsGuestLinkError(buildOutput)) {
+            cerr << trussc::internal::windowsGuestLinkHint() << '\n';
+        }
+#endif
     }
     return rc;
 }
@@ -3370,6 +3588,7 @@ static void printRunHelp() {
          << "      --debug                Build type: Debug (-O0 -g)\n"
          << "      --relwithdebinfo       Build type: RelWithDebInfo (-O2 -g) [default]\n"
          << "      --release              Build type: Release (-O3, no debug info)\n"
+         << "      --mcp                  Enable MCP development tools for this build\n"
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "  -h, --help                 Show this help\n";
@@ -3380,6 +3599,7 @@ static int cmdRun(const vector<string>& args) {
     string target; // "", "web", "android", "ios"
     string session; // display session backend: "labwc", "x11", ""
     string buildType;  // "" = default; else Debug/Release/RelWithDebInfo
+    bool mcp = false;
     bool warnings = false;
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
@@ -3413,6 +3633,7 @@ static int cmdRun(const vector<string>& args) {
             }
             buildType = bt;
         }
+        else if (a == "--mcp") mcp = true;
         else if (a == "--warnings") warnings = true;
         else if (a == "-p" || a == "--path") {
             if (!needValue(i, a, explicitPath)) return 1;
@@ -3456,6 +3677,7 @@ static int cmdRun(const vector<string>& args) {
         transform(flag.begin(), flag.end(), flag.begin(), ::tolower);
         buildArgs.push_back("--" + flag);
     }
+    if (mcp) buildArgs.push_back("--mcp");
     if (warnings) buildArgs.push_back("--warnings");
     if (!explicitPath.empty()) { buildArgs.push_back("-p"); buildArgs.push_back(explicitPath); }
 
@@ -3528,7 +3750,7 @@ static int cmdRun(const vector<string>& args) {
             // keep the X session alive with sleep infinity.
             string xinitrcPath = "/tmp/trusscli-x11-" + to_string(getpid()) + ".sh";
             {
-                ofstream f(xinitrcPath);
+                ostringstream f;
                 f << "#!/bin/sh\n"
                   << "if command -v twm >/dev/null 2>&1; then\n"
                   << "    exec twm\n"
@@ -3537,6 +3759,7 @@ static int cmdRun(const vector<string>& args) {
                   << "else\n"
                   << "    exec sleep infinity\n"
                   << "fi\n";
+                writeGeneratedFile(xinitrcPath, f.str());
             }
             chmod(xinitrcPath.c_str(), 0755);
 
@@ -3682,9 +3905,9 @@ _trusscli() {
         update|build|run|clean)
             local -a opts
             case "$words[2]" in
-                update) opts=('-p:Project path' '--path:Project path' '--web:Enable web' '--android:Enable android' '--ios:Enable ios' '--ide:IDE type' '--tc-root:TrussC root') ;;
-                build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--clean:Clean first' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
-                run)    opts=('--web:Web' '--android:Android' '--ios:iOS' '--session:Display session' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
+                update) opts=('-p:Project path' '--path:Project path' '--web:Enable web' '--android:Enable android' '--ios:Enable ios' '--no-web:Disable web' '--no-android:Disable android' '--no-ios:Disable ios' '--ide:IDE type' '--tc-root:TrussC root') ;;
+                build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--clean:Clean first' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
+                run)    opts=('--web:Web' '--android:Android' '--ios:iOS' '--session:Display session' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
                 clean)  opts=('--all:Delete all build dirs' '-p:Project path' '--path:Project path') ;;
             esac
             _describe 'option' opts
@@ -3769,9 +3992,9 @@ _trusscli() {
                     ;;
             esac
             case "${COMP_WORDS[1]}" in
-                update) COMPREPLY=($(compgen -W "-p --path --web --android --ios --ide --tc-root" -- "$cur")) ;;
-                build)  COMPREPLY=($(compgen -W "--web --android --ios --debug --relwithdebinfo --release --clean --warnings -p --path" -- "$cur")) ;;
-                run)    COMPREPLY=($(compgen -W "--web --android --ios --session --debug --relwithdebinfo --release --warnings -p --path" -- "$cur")) ;;
+                update) COMPREPLY=($(compgen -W "-p --path --web --android --ios --no-web --no-android --no-ios --ide --tc-root" -- "$cur")) ;;
+                build)  COMPREPLY=($(compgen -W "--web --android --ios --debug --relwithdebinfo --release --clean --mcp --warnings -p --path" -- "$cur")) ;;
+                run)    COMPREPLY=($(compgen -W "--web --android --ios --session --debug --relwithdebinfo --release --mcp --warnings -p --path" -- "$cur")) ;;
                 clean)  COMPREPLY=($(compgen -W "--all -p --path" -- "$cur")) ;;
             esac
             ;;
@@ -3832,7 +4055,7 @@ static void printTopHelp() {
          << "  cp <src> <dst>                 Copy an existing project to <dst>\n"
          << "  update                         Regenerate build files for the project in CWD\n"
          << "  upgrade                        Upgrade TrussC (git pull + rebuild trusscli)\n"
-         << "  addon <add|remove>             Manage addons\n"
+         << "  addon <command>                Manage addons: list, add, remove, clone, pull, search\n"
          << "  info [section]                 Show project / framework info\n"
          << "  doctor                         Check development environment\n"
          << "  clean                          Delete build directories\n"
@@ -3852,6 +4075,7 @@ static void printTopHelp() {
          << "  trusscli new myApp -a tcxOsc -a tcxIME    With addons\n"
          << "  trusscli addon add tcxOsc                 Add an addon to existing project\n"
          << "  trusscli addon remove tcxOsc              Remove an addon\n"
+         << "  trusscli addon clone tcxGPT               Download an addon from the registry\n"
          << "  trusscli update                           Regenerate the project in CWD\n"
          << "  trusscli update -p ./apps/myApp           Regenerate a specific project\n"
          << "\n"
@@ -3862,7 +4086,7 @@ static void printTopHelp() {
 // main: subcommand dispatch
 // =============================================================================
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[]) try {
     vector<string> args(argv + 1, argv + argc);
 
     // No args → launch the GUI (TrussC Project Generator)
@@ -3879,6 +4103,7 @@ int main(int argc, char* argv[]) {
         }
         #endif
         warnIfVersionDrift(autoDetectTcRoot());
+        ProjectGenerator::runChildrenHidden = true;
         WindowSettings settings;
         settings.title = "TrussC Project Generator";
         settings.width = 500;
@@ -3925,5 +4150,8 @@ int main(int argc, char* argv[]) {
 
     cerr << "Error: unknown command '" << first << "'\n"
          << "Run 'trusscli --help' for usage.\n";
+    return 1;
+} catch (const std::exception& e) {
+    cerr << "Error: " << e.what() << "\n";
     return 1;
 }

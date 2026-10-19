@@ -16,8 +16,9 @@ void tcApp::setup() {
     env_.loadProcedural();
     setEnvironment(env_);
 
-    // Load bundled model and center camera on it
-    if (loader_.load("pottedPlant.obj")) {
+    // Optionally load a local model (not bundled) and center camera on it.
+    const auto modelPath = getDataPath("pottedPlant.obj");
+    if (fs::exists(modelPath) && loader_.load(modelPath)) {
         hasModel_ = true;
         // Compute bounding box center for camera target
         Mesh merged = loader_.getMesh();
@@ -33,7 +34,11 @@ void tcApp::setup() {
         cam_.setDistance(size * 1.5f);
     }
 
-    logNotice() << "Drop an OBJ file to load, or press 'E' to export sphere";
+    if (!hasModel_) {
+        logNotice() << "No model loaded. Drop an OBJ file to load, or press 'E' to export sphere";
+    } else {
+        logNotice() << "Drop an OBJ file to load, or press 'E' to export sphere";
+    }
 }
 
 void tcApp::update() {
@@ -79,9 +84,9 @@ void tcApp::keyPressed(int key) {
 void tcApp::filesDropped(const vector<string>& files) {
     for (auto& file : files) {
         // Find first .obj file
-        if (file.size() > 4 && file.substr(file.size() - 4) == ".obj") {
+        if (toLower(getFileExtension(utf8ToPath(file))) == "obj") {
             loader_.clear();
-            if (loader_.load(file)) {
+            if (loader_.load(utf8ToPath(file))) {  // dropped paths are UTF-8
                 hasModel_ = true;
                 logNotice() << "Loaded: " << file << " (" << loader_.getNumGroups() << " groups)";
             }

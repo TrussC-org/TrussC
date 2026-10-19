@@ -13,6 +13,21 @@
 
 #ifdef TC_HOT_RELOAD_BUILD
 
+// The host gets its configuration from CMake. Guest translation units also
+// include this header, but do not run the host runtime.
+#ifndef TC_HOT_RELOAD_CONFIG
+#define TC_HOT_RELOAD_CONFIG ""
+#endif
+#ifndef TC_HOT_RELOAD_CORE_LIB
+#define TC_HOT_RELOAD_CORE_LIB ""
+#endif
+#ifndef TC_HOT_RELOAD_BUILD_DIR
+#define TC_HOT_RELOAD_BUILD_DIR ""
+#endif
+#ifndef TC_HOT_RELOAD_MULTI_CONFIG
+#define TC_HOT_RELOAD_MULTI_CONFIG 0
+#endif
+
 // Note: this header is included BY TrussC.h (after all core types are defined).
 #ifdef _WIN32
 #include <windows.h>
@@ -29,8 +44,9 @@ extern char** environ;
 #include <chrono>
 #include <string>
 #include <vector>
-#include <iostream>
 #include <cstdlib>
+#include "internal/tcHotReloadDiagnostics.h"
+#include "internal/tcWindowsBuildOutput.h"
 
 namespace trussc {
 namespace hot_reload {
@@ -39,8 +55,6 @@ namespace fs = std::filesystem;
 using std::string;
 using std::vector;
 using std::ifstream;
-using std::cout;
-using std::cerr;
 using Clock = std::chrono::steady_clock;
 
 // Function pointer types for Guest exports
@@ -61,6 +75,7 @@ struct GuestLibrary {
     DestroyAppFn destroyApp = nullptr;
     std::shared_ptr<App> app;
     string loadedPath;  // actual path loaded (may be a temp copy on Windows)
+    const void* mcpOwner = nullptr;  // this generation's MCP registrations (create/destroy)
 
     bool load(const string& path) {
         // Always load from a unique temp path. Without this, the OS dynamic
@@ -73,7 +88,7 @@ struct GuestLibrary {
         //               back the OLD code.
         //   - macOS:    dyld usually picks up the replacement, but copying to
         //               a unique path makes behavior identical across OSes.
-        static int loadCounter = 0;
+        static int loadCounter = 0;  // host-only: only the host loads guests
 #ifdef _WIN32
         const char* ext = ".tmp.dll";
 #else
@@ -81,19 +96,19 @@ struct GuestLibrary {
 #endif
         string tempPath = path + "." + std::to_string(loadCounter++) + ext;
         try { fs::copy_file(path, tempPath, fs::copy_options::overwrite_existing); }
-        catch (...) { cerr << "[HotReload] Failed to copy library to " << tempPath << "\n"; return false; }
+        catch (...) { logError("HotReload") << "Failed to copy library to " << tempPath; return false; }
 
 #ifdef _WIN32
         handle = LoadLibraryA(tempPath.c_str());
         if (!handle) {
-            cerr << "[HotReload] LoadLibrary failed (error " << GetLastError() << ")\n";
+            logError("HotReload") << "LoadLibrary failed (error " << GetLastError() << ")";
             try { fs::remove(tempPath); } catch (...) {}
             return false;
         }
         createApp = (CreateAppFn)GetProcAddress(handle, "tcHotReloadCreateApp");
         destroyApp = (DestroyAppFn)GetProcAddress(handle, "tcHotReloadDestroyApp");
         if (!createApp || !destroyApp) {
-            cerr << "[HotReload] GetProcAddress failed\n";
+            logError("HotReload") << "GetProcAddress failed";
             FreeLibrary(handle);
             handle = nullptr;
             try { fs::remove(tempPath); } catch (...) {}
@@ -102,41 +117,90 @@ struct GuestLibrary {
 #else
         handle = dlopen(tempPath.c_str(), RTLD_NOW | RTLD_LOCAL);
         if (!handle) {
-            cerr << "[HotReload] dlopen failed: " << dlerror() << "\n";
+            logError("HotReload") << "dlopen failed: " << dlerror();
             try { fs::remove(tempPath); } catch (...) {}
             return false;
         }
         createApp = (CreateAppFn)dlsym(handle, "tcHotReloadCreateApp");
         destroyApp = (DestroyAppFn)dlsym(handle, "tcHotReloadDestroyApp");
         if (!createApp || !destroyApp) {
-            cerr << "[HotReload] dlsym failed: " << dlerror() << "\n";
+            logError("HotReload") << "dlsym failed: " << dlerror();
             dlclose(handle);
             handle = nullptr;
             try { fs::remove(tempPath); } catch (...) {}
             return false;
         }
 #endif
+        internal::refreshCrashModules();
         loadedPath = tempPath;
         return true;
     }
 
     App* create() {
         if (createApp) {
+            // Everything this guest generation registers with MCP (tools,
+            // resources, status getters) is tagged with it from here on, and
+            // destroy() removes it all before the App those handlers capture
+            // is deleted — no stale tool from an old build lingers in
+            // tools/list pointing at a freed App (#227). The tag is only an
+            // identity, never dereferenced.
+            static uintptr_t generation = 0;  // host-only: only the host creates guests
+            mcpOwner = reinterpret_cast<const void*>(++generation);
+            mcp::internal::setRegistrationOwner(mcpOwner);
+            if (auto token = internal::appRunToken()) token->store(false);
+            internal::cancelResourceBackends();
+            internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
             App* raw = createApp();
             auto deleter = destroyApp;
             app = std::shared_ptr<App>(raw, [deleter](App* p) {
                 if (deleter) deleter(p);
             });
+            // The main window's scene-graph root (getRootNode()), held weakly
+            internal::mainWindowContext().rootNode = app;
             return raw;
         }
         return nullptr;
     }
 
     void destroy() {
+        if (auto token = internal::appRunToken()) token->store(false);
+        internal::cancelResourceBackends();
+        if (mcpOwner) {
+            mcp::internal::removeRegistrationsOwnedBy(mcpOwner);
+            mcp::internal::setRegistrationOwner(nullptr);
+            mcpOwner = nullptr;
+        }
+        // Audio keeps running across a reload. End this generation before
+        // destroying it; normal host exit has already run this sequence.
+        if (app && !internal::appRanCleanup(*app)) {
+            app->exit();
+            internal::detachAppAudio(*app);
+            app->cleanup();
+        }
         app.reset();
+        // Cleanup/destructors can have submitted another old-run operation.
+        internal::cancelResourceBackends();
     }
 
     void unload() {
+        // Tell guest code first, while its App and node references are still
+        // valid: singletons and other statics in the guest image outlive the
+        // App and keep their listeners on the host's events until they drop
+        // them (#416). Dispatched on the main window's events, whichever
+        // window context is current.
+        if (app) {
+            internal::WindowContext*& current = internal::currentWindowCtx();
+            internal::WindowContext* prev = current;
+            current = &internal::mainWindowContext();
+            events().hotReloadUnload.notify();
+            current = prev;
+        }
+        // Drop the window contexts' weak references first (hover, grab,
+        // selection, the main root; #255). Releasing the last weak reference
+        // to a make_shared node runs code of the module that created it, so
+        // none may outlive the guest. Hover, grab and selection start empty
+        // in the new generation.
+        internal::resetNodeRefsForUnload();
         destroy();
         // Intentionally NOT dlclose()d / FreeLibrary()d: the old guest's code
         // can still be referenced from host-owned state even after its App is
@@ -174,8 +238,9 @@ struct FileWatcher {
         if (!fs::exists(srcDir)) return;
         for (const auto& entry : fs::recursive_directory_iterator(srcDir)) {
             if (entry.is_regular_file()) {
-                auto ext = entry.path().extension().string();
-                if (ext == ".cpp" || ext == ".h" || ext == ".hpp" || ext == ".mm") {
+                // Case-insensitive extension match (.CPP, .H)
+                auto ext = toLower(getFileExtension(entry.path()));
+                if (ext == "cpp" || ext == "h" || ext == "hpp" || ext == "mm") {
                     watchPaths.push_back(entry.path());
                 }
             }
@@ -250,7 +315,8 @@ inline string findCMake(const string& buildDir = "") {
 // _spawnvp removes the shell from the loop entirely; any metacharacters
 // become literal argument bytes to cmake.
 // ---------------------------------------------------------------------------
-inline int runBuildCommand(const vector<string>& argv) {
+inline int runBuildCommand(const vector<string>& argv, string& output) {
+    output.clear();
     if (argv.empty()) return -1;
 
 #ifdef _WIN32
@@ -264,26 +330,11 @@ inline int runBuildCommand(const vector<string>& argv) {
         cmdLine += argv[i];
         if (needsQuote) cmdLine += '"';
     }
-    STARTUPINFOA si = {};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdInput  = GetStdHandle(STD_INPUT_HANDLE);
-    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-    si.hStdError  = GetStdHandle(STD_ERROR_HANDLE);
-    PROCESS_INFORMATION pi = {};
-    vector<char> buf(cmdLine.begin(), cmdLine.end());
-    buf.push_back('\0');
-    if (!CreateProcessA(argv[0].c_str(), buf.data(),
-                        nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si, &pi)) {
-        cerr << "[HotReload] Failed to launch: " << argv[0] << "\n";
-        return -1;
+    const int rc = internal::runWindowsBuildWithOutput(cmdLine, output);
+    if (rc == -1) {
+        logError("HotReload") << "Failed to launch: " << argv[0];
     }
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    DWORD exitCode = 1;
-    GetExitCodeProcess(pi.hProcess, &exitCode);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    return (int)exitCode;
+    return rc;
 #else
     vector<char*> cargv;
     cargv.reserve(argv.size() + 1);
@@ -293,8 +344,8 @@ inline int runBuildCommand(const vector<string>& argv) {
     int err = posix_spawnp(&pid, cargv[0], nullptr, nullptr,
                             cargv.data(), environ);
     if (err != 0) {
-        std::cerr << "[HotReload] failed to spawn '" << argv[0]
-                  << "': " << std::strerror(err) << "\n";
+        logError("HotReload") << "Failed to spawn '" << argv[0]
+                              << "': " << std::strerror(err);
         return -1;
     }
     int status = 0;
@@ -319,6 +370,76 @@ struct Host {
     Clock::time_point lastCheck;
     int reloadCount = 0;
     bool initialized = false;
+    bool multiConfig = false;
+    string coreLibPath = TC_HOT_RELOAD_CORE_LIB;
+    string configuredBuildDir = TC_HOT_RELOAD_BUILD_DIR; // relative to projectDir
+    vector<string> buildDirsTried;
+    bool rebuildBlocked = false; // preflight already logged the reason
+
+    bool reportMissingBuildDirectory() {
+        string tried;
+        for (const auto& dir : buildDirsTried) {
+            if (!tried.empty()) tried += ", ";
+            tried += dir;
+        }
+        if (tried.empty()) tried = buildDir;
+        logError("HotReload") << "No build directory with CMakeCache.txt for project "
+                              << projectDir << "; tried: " << tried;
+        rebuildBlocked = true;
+        return false;
+    }
+
+    // Single-config (Ninja/Make): directly under buildDir.
+    // Multi-config (Xcode/VS/Ninja Multi-Config): the host's configuration.
+    void updateGuestLibPath() {
+#ifdef __APPLE__
+        const string guestName = "libguest.dylib";
+#elif defined(_WIN32)
+        const string guestName = "guest.dll";
+#else
+        const string guestName = "libguest.so";
+#endif
+        // The generator type is a configure-time fact (no directory has to
+        // exist before the first guest build).
+        multiConfig = TC_HOT_RELOAD_MULTI_CONFIG != 0 && string(TC_HOT_RELOAD_CONFIG) != "";
+        guestLibPath = buildDir + "/";
+        if (multiConfig) guestLibPath += string(TC_HOT_RELOAD_CONFIG) + "/";
+        guestLibPath += guestName;
+    }
+
+    // The one place that decides where the build directory is: at init, and
+    // again when its CMakeCache.txt has gone by the time of a rebuild.
+    bool findBuildDirectory() { return findBuildDirectory(configuredBuildDir); }
+
+    bool findBuildDirectory(const string& configuredDir) {
+#ifdef __APPLE__
+        const char* presetDirs[] = {"build-macos", "xcode", "build"};
+#elif defined(_WIN32)
+        const char* presetDirs[] = {"build-windows", "vs", "build"};
+#else
+        const char* presetDirs[] = {"build-linux", "build"};
+#endif
+        buildDir.clear();
+        buildDirsTried.clear();
+        rebuildBlocked = false;
+        vector<string> candidates;
+        if (!configuredDir.empty()) {
+            candidates.push_back((fs::path(projectDir) / configuredDir).lexically_normal().string());
+        }
+        for (const char* dir : presetDirs) {
+            candidates.push_back((fs::path(projectDir) / dir).lexically_normal().string());
+        }
+        for (const auto& candidate : candidates) {
+            buildDirsTried.push_back(candidate);
+            std::error_code ec;
+            if (fs::is_regular_file(fs::path(candidate) / "CMakeCache.txt", ec)) {
+                buildDir = candidate;
+                updateGuestLibPath();
+                return true;
+            }
+        }
+        return reportMissingBuildDirectory();
+    }
 
     bool init() {
         // Detect project directory from the executable's location
@@ -340,78 +461,27 @@ struct Host {
         projectDir = searchPath.string();
         srcDir = projectDir + "/src";
 
-        // Detect the build directory — try preset-style names first, fall back to build/
-#ifdef __APPLE__
-        const char* presetDirs[] = {"build-macos", "xcode", "build"};
-#elif defined(_WIN32)
-        const char* presetDirs[] = {"build-windows", "vs", "build"};
-#else
-        const char* presetDirs[] = {"build-linux", "build"};
-#endif
-        buildDir = "";
-        for (const char* d : presetDirs) {
-            string candidate = projectDir + "/" + d;
-            if (fs::exists(candidate + "/CMakeCache.txt")) {
-                buildDir = candidate;
-                break;
-            }
-        }
-        if (buildDir.empty()) {
-            // No configured build dir found — use the first preset name
-            buildDir = projectDir + "/" + presetDirs[0];
-        }
+        // Prefer the configured tree; retain the old names for older builds.
+        if (!findBuildDirectory()) return false;
 
         if (!fs::exists(srcDir)) {
-            cerr << "[HotReload] src/ directory not found at " << srcDir << "\n";
+            logError("HotReload") << "src/ directory not found at " << srcDir;
             return false;
-        }
-
-        // Guest library path: search known locations for the built dylib.
-        // Single-config (Ninja/Make): buildDir直下。
-        // Multi-config (Xcode/VS): <config>/ サブディレクトリ。
-        // Files are searched in priority order; whichever exists wins.
-#ifdef __APPLE__
-        const string guestName = "libguest.dylib";
-#elif defined(_WIN32)
-        const string guestName = "guest.dll";
-#else
-        const string guestName = "libguest.so";
-#endif
-        const char* configs[] = {"Debug", "Release", "RelWithDebInfo", "MinSizeRel"};
-        guestLibPath = "";
-        if (fs::exists(buildDir + "/" + guestName)) {
-            guestLibPath = buildDir + "/" + guestName;
-        } else {
-            for (const char* c : configs) {
-                string candidate = buildDir + "/" + c + "/" + guestName;
-                if (fs::exists(candidate)) { guestLibPath = candidate; break; }
-            }
-        }
-        // Nothing yet — the initial rebuildGuest() below will create it. Pick
-        // a sensible default destination so the post-rebuild load() finds it.
-        // If any config subdir exists, we're in a multi-config tree → Debug/.
-        if (guestLibPath.empty()) {
-            bool multiConfig = false;
-            for (const char* c : configs) {
-                if (fs::exists(buildDir + "/" + c)) { multiConfig = true; break; }
-            }
-            guestLibPath = multiConfig ? (buildDir + "/Debug/" + guestName)
-                                       : (buildDir + "/" + guestName);
         }
 
         // Initial build of the Guest
         if (!rebuildGuest()) {
-            cerr << "[HotReload] Initial Guest build failed\n";
+            if (!rebuildBlocked) logError("HotReload") << "Initial Guest build failed";
             return false;
         }
 
         // Load the Guest and create the initial App instance
         if (!guest.load(guestLibPath)) {
-            cerr << "[HotReload] Failed to load Guest library\n";
+            logError("HotReload") << "Failed to load Guest library";
             return false;
         }
         if (!guest.create()) {
-            cerr << "[HotReload] Failed to create initial App instance\n";
+            logError("HotReload") << "Failed to create initial App instance";
             return false;
         }
 
@@ -426,19 +496,40 @@ struct Host {
     }
 
     bool rebuildGuest() {
+        rebuildBlocked = false;
+        // Missing/unreadable paths cannot establish staleness; keep rebuilding.
+        std::error_code ec;
+        const auto coreTime = fs::last_write_time(coreLibPath, ec);
+        if (!ec) {
+            const auto hostTime = fs::last_write_time(getExecutablePath(), ec);
+            if (!ec && coreTime > hostTime) {
+                logError("HotReload") << "the host executable is older than TrussC; rebuild and restart the app";
+                rebuildBlocked = true;
+                return false;
+            }
+        }
+        if (!fs::is_regular_file(fs::path(buildDir) / "CMakeCache.txt", ec) &&
+            !findBuildDirectory()) {
+            return false;
+        }
         string cmake = findCMake(buildDir);
         logNotice("HotReload") << "Rebuilding guest...";
 
         // Only rebuild the guest target — fast incremental build.
         // argv is passed directly to posix_spawnp / _spawnvp — no shell
         // is involved, so $(...), ``, ; etc. in buildDir cannot run.
-        // For multi-config generators (Xcode, Visual Studio), cmake picks the
-        // generator's default config (Debug) when --config is omitted — which
-        // matches the layout the rest of init() expects (Debug/libguest.dylib).
-        int rc = runBuildCommand({cmake, "--build", buildDir,
-                                  "--target", "guest", "--parallel"});
+        vector<string> command = {cmake, "--build", buildDir,
+                                  "--target", "guest", "--parallel"};
+        if (multiConfig) command.insert(command.end(), {"--config", TC_HOT_RELOAD_CONFIG});
+        string output;
+        int rc = runBuildCommand(command, output);
         if (rc != 0) {
             logError() << "[HotReload] Build failed (exit code " << rc << ")";
+#ifdef _WIN32
+            if (internal::hasWindowsGuestLinkError(output)) {
+                logWarning() << internal::windowsGuestLinkHint();
+            }
+#endif
             return false;
         }
         return true;
@@ -482,7 +573,7 @@ struct Host {
             int w = sapp_width();
             int h = sapp_height();
             float dpiScale = sapp_dpi_scale();
-            float scale = internal::pixelPerfectMode ? 1.0f : (1.0f / dpiScale);
+            float scale = internal::pixelPerfectMode() ? 1.0f : (1.0f / dpiScale);
             newApp->handleWindowResized(static_cast<int>(w * scale),
                                         static_cast<int>(h * scale));
         }
@@ -522,7 +613,8 @@ struct Host {
 };
 
 // ---------------------------------------------------------------------------
-// Global host instance
+// Global host instance. Host-only: only the host's runHotReloadApp uses it; a
+// guest's copy (TrussC.h includes this header there too) is never used.
 // ---------------------------------------------------------------------------
 inline Host g_host;
 
@@ -544,7 +636,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     // Set up callbacks that go through the Host's dynamically loaded App
     internal::appSetupFunc = []() {
         if (!g_host.init()) {
-            logError() << "[HotReload] Host initialization failed. Exiting.";
+            if (!g_host.rebuildBlocked) logError() << "[HotReload] Host initialization failed. Exiting.";
             sapp_quit();
             return;
         }
@@ -575,6 +667,9 @@ inline int runHotReloadApp(const WindowSettings& settings) {
         if (app) {
             events().exit.notify();
             app->exit();
+            // close() requests made so far land before the App's cleanup().
+            internal::closeRequestedWindowsAtShutdown();
+            internal::detachAppAudio(*app);
             app->cleanup();
         }
         g_host.guest.unload();
@@ -618,7 +713,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     };
 
     // Build the sokol descriptor (without template — we handle App* manually)
-    internal::pixelPerfectMode = settings.pixelPerfect;
+    internal::pixelPerfectMode() = settings.pixelPerfect;
 
     sapp_desc desc = {};
     if (settings.pixelPerfect) {
@@ -629,7 +724,8 @@ inline int runHotReloadApp(const WindowSettings& settings) {
         desc.width = settings.width;
         desc.height = settings.height;
     }
-    desc.window_title = settings.title.c_str();
+    const auto& windowTitle = mcp::internal::mainWindowTitle(settings.title);
+    desc.window_title = windowTitle.c_str();
     desc.high_dpi = settings.highDpi;
     desc.sample_count = settings.sampleCount;
     desc.fullscreen = settings.fullscreen;
@@ -638,16 +734,25 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     desc.frame_cb = internal::_frame_cb;
     desc.cleanup_cb = internal::_cleanup_cb;
     desc.event_cb = internal::_event_cb;
-    desc.logger.func = slog_func;
+    desc.logger.func = internal::sokolLog;
     desc.enable_dragndrop = true;
+    // Bound (security): OS file drops can flood delivery; a fixed cap keeps path storage finite. Overflow omits excess files.
     desc.max_dropped_files = 16;
+    // Bound (security): OS drop paths need finite per-path storage. Overflow rejects the drop if a path does not fit.
     desc.max_dropped_file_path_length = 2048;
     desc.enable_clipboard = true;
     desc.clipboard_size = settings.clipboardSize;
     internal::currentWindowContext().clipboardSize = settings.clipboardSize;
+    desc.win32.console_utf8 = true;   // UTF-8 console input/output (see buildAppDescriptor)
 
+    openEnvLogFile();   // TRUSSC_LOG_FILE before sapp_run(): init-time failures too
+#ifdef _WIN32
+    ConsoleCPCtrlGuard consoleCtrl;   // restore both console code pages on exit
+#endif
+    appExitCode() = 0;
+    appSetupCalled() = false;
     sapp_run(&desc);
-    return 0;
+    return appSetupCalled() ? appExitCode() : 1;
 }
 
 } // namespace internal

@@ -8,6 +8,9 @@
 //     JsonWriteReflector w;                // members -> JSON
 //     node.reflectMembers(w);
 //     Json j = w.members;                  // {"pos":[0,0,0],"visible":true,...}
+//                                          // derived values (TC_DERIVED, e.g.
+//                                          // globalPos) are left out unless
+//                                          // w.includeDerived is set
 //
 //     JsonReadReflector r(j);              // JSON -> members. Values go
 //     node.reflectMembers(r);              // through TC_PROPERTY setters, so
@@ -18,6 +21,10 @@
 //     Vec2  -> [x, y]
 //     Vec3  -> [x, y, z]
 //     Color -> [r, g, b, a]   (floats 0-1; reading accepts 3 elems, alpha kept)
+//
+// The reader applies derived keys like any other writable key; they come
+// before their canonical key in the reflect block, so when both are present
+// the canonical key is applied last and wins.
 //
 // The reader applies only the keys present in the source object and records
 // what happened per key (applied / skipped on type mismatch / unknown), so
@@ -43,17 +50,27 @@ namespace trussc {
 struct JsonWriteReflector : Reflector {
     Json members = Json::object();
 
-    bool visit(const char* name, float& v) override { cur()[name] = v; return false; }
-    bool visit(const char* name, int& v) override { cur()[name] = v; return false; }
-    bool visit(const char* name, bool& v) override { cur()[name] = v; return false; }
-    bool visit(const char* name, std::string& v) override { cur()[name] = v; return false; }
-    bool visit(const char* name, Vec2& v) override { cur()[name] = Json::array({v.x, v.y}); return false; }
-    bool visit(const char* name, Vec3& v) override { cur()[name] = Json::array({v.x, v.y, v.z}); return false; }
-    bool visit(const char* name, Color& v) override { cur()[name] = Json::array({v.r, v.g, v.b, v.a}); return false; }
+    // Derived values (TC_DERIVED) are left out by default, so the output is
+    // what a save should contain. Set true to include them (live views such
+    // as the MCP node tools).
+    bool includeDerived = false;
+
+    // Member paths of the derived values encountered (nested groups joined by
+    // '.'), whether or not they were written.
+    std::vector<std::string> derived;
+
+    bool visit(const char* name, float& v) override { if (want(name)) cur()[name] = v; return false; }
+    bool visit(const char* name, int& v) override { if (want(name)) cur()[name] = v; return false; }
+    bool visit(const char* name, bool& v) override { if (want(name)) cur()[name] = v; return false; }
+    bool visit(const char* name, std::string& v) override { if (want(name)) cur()[name] = v; return false; }
+    bool visit(const char* name, Vec2& v) override { if (want(name)) cur()[name] = Json::array({v.x, v.y}); return false; }
+    bool visit(const char* name, Vec3& v) override { if (want(name)) cur()[name] = Json::array({v.x, v.y, v.z}); return false; }
+    bool visit(const char* name, Color& v) override { if (want(name)) cur()[name] = Json::array({v.r, v.g, v.b, v.a}); return false; }
 
     // Enums encode as their label string (readable dumps); out-of-range values
     // fall back to the raw int.
     bool visit(const char* name, int& v, const EnumLabelSpan& labels) override {
+        if (!want(name)) return false;
         if (labels.labels && v >= 0 && v < labels.count) {
             cur()[name] = labels.labels[v];
         } else {
@@ -68,14 +85,27 @@ struct JsonWriteReflector : Reflector {
     void beginGroup(const char* name) override {
         Json& child = (cur()[name] = Json::object());
         stack_.push_back(&child);
+        names_.push_back(name);
     }
     void endGroup() override {
         if (!stack_.empty()) stack_.pop_back();
+        if (!names_.empty()) names_.pop_back();
     }
 
 private:
     std::vector<Json*> stack_;
+    std::vector<std::string> names_;   // open group names (member paths)
     Json& cur() { return stack_.empty() ? members : *stack_.back(); }
+
+    // Whether to write this value: records derived ones, writes them only
+    // when includeDerived is set.
+    bool want(const char* name) {
+        if (!isDerived()) return true;
+        std::string path;
+        for (auto& g : names_) { path += g; path += '.'; }
+        derived.push_back(path + name);
+        return includeDerived;
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -241,10 +271,13 @@ private:
 // Convenience wrappers
 // ---------------------------------------------------------------------------
 
-// All reflected members of obj as a Json object.
+// All reflected members of obj as a Json object. Derived values (TC_DERIVED,
+// e.g. Node's globalPos) are left out unless includeDerived is true, so the
+// default output is what a save should contain.
 template <class T>
-inline Json reflectToJson(T& obj) {
+inline Json reflectToJson(T& obj, bool includeDerived = false) {
     JsonWriteReflector w;
+    w.includeDerived = includeDerived;
     obj.reflectMembers(w);
     return w.members;
 }

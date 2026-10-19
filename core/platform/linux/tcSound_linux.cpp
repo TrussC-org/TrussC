@@ -23,11 +23,8 @@ class GstAacDecoder {
 public:
     GstAacDecoder() {
         // Initialize GStreamer (safe to call multiple times)
-        static bool initialized = false;
-        if (!initialized) {
-            gst_init(nullptr, nullptr);
-            initialized = true;
-        }
+        static std::once_flag initialized;
+        std::call_once(initialized, [] { gst_init(nullptr, nullptr); });
     }
 
     ~GstAacDecoder() {
@@ -44,7 +41,7 @@ public:
             "audio/x-raw,format=F32LE,rate=44100 ! "
             "appsink name=sink sync=false";
 
-        return runPipeline(pipelineStr, buffer);
+        return runPipeline(pipelineStr, buffer, path);
     }
 
     bool decodeMemory(const void* data, size_t dataSize, SoundBuffer& buffer) {
@@ -62,29 +59,30 @@ public:
             "audio/x-raw,format=F32LE,rate=44100 ! "
             "appsink name=sink sync=false";
 
-        return runPipeline(pipelineStr, buffer, true);
+        return runPipeline(pipelineStr, buffer, "memory", true);
     }
 
 private:
-    bool runPipeline(const std::string& pipelineStr, SoundBuffer& buffer, bool useAppsrc = false) {
+    bool runPipeline(const std::string& pipelineStr, SoundBuffer& buffer,
+                     const std::string& source, bool useAppsrc = false) {
         GError* error = nullptr;
         pipeline_ = gst_parse_launch(pipelineStr.c_str(), &error);
 
         if (error) {
-            printf("SoundBuffer: GStreamer pipeline error: %s\n", error->message);
+            logError("SoundBuffer") << "GStreamer pipeline error: " << error->message;
             g_error_free(error);
             return false;
         }
 
         if (!pipeline_) {
-            printf("SoundBuffer: Failed to create GStreamer pipeline\n");
+            logError("SoundBuffer") << "failed to create the GStreamer pipeline";
             return false;
         }
 
         // Get appsink element
         GstElement* sink = gst_bin_get_by_name(GST_BIN(pipeline_), "sink");
         if (!sink) {
-            printf("SoundBuffer: Failed to get appsink element\n");
+            logError("SoundBuffer") << "failed to get the appsink element";
             cleanup();
             return false;
         }
@@ -114,7 +112,7 @@ private:
         // Start pipeline
         GstStateChangeReturn ret = gst_element_set_state(pipeline_, GST_STATE_PLAYING);
         if (ret == GST_STATE_CHANGE_FAILURE) {
-            printf("SoundBuffer: Failed to start GStreamer pipeline\n");
+            logError("SoundBuffer") << "failed to start the GStreamer pipeline";
             gst_object_unref(sink);
             cleanup();
             return false;
@@ -123,28 +121,33 @@ private:
         // Collect decoded samples
         std::vector<float> allSamples;
         int channels = 0;
+        GstBus* bus = gst_element_get_bus(pipeline_);
+        bool decodeFailed = false;
 
         while (true) {
-            GstSample* sample = gst_app_sink_pull_sample(GST_APP_SINK(sink));
+            GstSample* sample = gst_app_sink_try_pull_sample(GST_APP_SINK(sink), 100 * GST_MSECOND);
             if (!sample) {
-                // Check if EOS or error
-                if (gst_app_sink_is_eos(GST_APP_SINK(sink))) {
-                    break;  // End of stream
-                }
-                // Check for errors
+                // A pipeline error need not send EOS to appsink. Check the bus
+                // after every empty try, including when appsink reports EOS.
+                bool eos = gst_app_sink_is_eos(GST_APP_SINK(sink));
                 GstMessage* msg = gst_bus_pop_filtered(
-                    gst_element_get_bus(pipeline_),
+                    bus,
                     static_cast<GstMessageType>(GST_MESSAGE_ERROR | GST_MESSAGE_EOS));
                 if (msg) {
                     if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_ERROR) {
                         GError* err = nullptr;
                         gst_message_parse_error(msg, &err, nullptr);
-                        printf("SoundBuffer: GStreamer error: %s\n", err->message);
+                        logError("SoundBuffer") << "GStreamer error for " << source << ": " << err->message;
                         g_error_free(err);
+                        decodeFailed = true;
                     }
+                    // A bus EOS can race with the last samples reaching
+                    // appsink; appsink reports EOS only once its queue is
+                    // drained, so keep pulling until it does.
                     gst_message_unref(msg);
                 }
-                break;
+                if (decodeFailed || eos) break;
+                continue;
             }
 
             // Get buffer info
@@ -171,11 +174,14 @@ private:
             gst_sample_unref(sample);
         }
 
+        gst_object_unref(bus);
         gst_object_unref(sink);
         cleanup();
 
+        if (decodeFailed) return false;
+
         if (allSamples.empty()) {
-            printf("SoundBuffer: No audio samples decoded\n");
+            logError("SoundBuffer") << "no audio samples decoded";
             return false;
         }
 
@@ -185,8 +191,9 @@ private:
         buffer.sampleRate = 44100;
         buffer.numSamples = buffer.samples.size() / buffer.channels;
 
-        printf("SoundBuffer: Loaded AAC (%d ch, %d Hz, %zu samples)\n",
-               buffer.channels, buffer.sampleRate, buffer.numSamples);
+        logVerbose("SoundBuffer") << "loaded AAC (" << buffer.channels << " ch, "
+                                  << buffer.sampleRate << " Hz, " << buffer.numSamples
+                                  << " samples)";
 
         return true;
     }
@@ -251,21 +258,18 @@ private:
     size_t memoryPos_ = 0;
 };
 
-LoadResult SoundBuffer::loadAac(const fs::path& path) {
-    std::error_code ec;
-    if (!fs::exists(path, ec)) {
-        return LoadResult::fail(LoadError::FileNotFound,
-                                "file not found: " + internal::pathToUtf8(path));
-    }
+LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
     GstAacDecoder decoder;
     return decoder.decodeFile(internal::pathToUtf8(path), *this)
                ? LoadResult::success()
                : LoadResult::fail(LoadError::DecodeFailed,
                                   "GStreamer failed to decode AAC: " +
-                                  internal::pathToUtf8(path));
+                                  internal::pathToDisplayUtf8(path));
 }
 
 LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
+    async_.cancel();
+    internal::clearLoadName(path_);
     GstAacDecoder decoder;
     return decoder.decodeMemory(data, dataSize, *this)
                ? LoadResult::success()

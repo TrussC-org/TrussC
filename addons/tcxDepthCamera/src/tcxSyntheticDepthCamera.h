@@ -51,109 +51,115 @@ public:
     DepthSensorType getSensorType() const override { return DepthSensorType::Unknown; }
 
 protected:
-    bool openDevice() override {
-        frame_ = 0;
-        return width_ > 0 && height_ > 0;
-    }
-    void closeDevice() override {}
+    struct SyntheticDevice : Device {
+        int width_, height_;
+        int colorScale_ = 2;
+        uint64_t frame_ = 0;
+        bool depthEnabled, colorEnabled, threaded;
+        SyntheticDevice(int width, int height, bool depth, bool color, bool useThread)
+            : width_(width), height_(height), depthEnabled(depth), colorEnabled(color), threaded(useThread) {}
+        // Continuous scene depth (meters) at normalized image coords (u, v in
+        // [-0.5, 0.5]) - shared by the depth and (higher-res) color passes.
+        static float sceneDepth(float u, float v, float phase,
+                                float cxs, float cys, float sphereR) {
+            float d = 2.5f + 0.15f * std::sin(u * 12.0f + phase) *
+                                      std::sin(v * 12.0f + phase * 0.8f);
+            const float dd = std::sqrt((u - cxs) * (u - cxs) + (v - cys) * (v - cys));
+            if (dd < sphereR) d = 1.3f - std::sqrt(sphereR * sphereR - dd * dd);
+            return d;
+        }
 
-    // Continuous scene depth (meters) at normalized image coords (u, v in
-    // [-0.5, 0.5]) - shared by the depth and (higher-res) color passes.
-    static float sceneDepth(float u, float v, float phase,
-                            float cxs, float cys, float sphereR) {
-        float d = 2.5f + 0.15f * std::sin(u * 12.0f + phase) *
-                                  std::sin(v * 12.0f + phase * 0.8f);
-        const float dd = std::sqrt((u - cxs) * (u - cxs) + (v - cys) * (v - cys));
-        if (dd < sphereR) d = 1.3f - std::sqrt(sphereR * sphereR - dd * dd);
-        return d;
-    }
+        StreamFreshness captureInto(DepthFrame& dst) override {
+            const int dw = width_;
+            const int dh = height_;
+            const int cw = dw * colorScale_;   // color at higher NATIVE resolution
+            const int ch = dh * colorScale_;
+            const bool wantDepth = depthEnabled;
+            const bool wantColor = colorEnabled;
 
-    StreamFreshness captureInto(DepthFrame& dst) override {
-        const int dw = width_;
-        const int dh = height_;
-        const int cw = dw * colorScale_;   // color at higher NATIVE resolution
-        const int ch = dh * colorScale_;
-        const bool wantDepth = isDepthEnabled();
-        const bool wantColor = isColorEnabled();
+            dst.w = dw;
+            dst.h = dh;
+            dst.depthScale = 0.001f;  // mm
 
-        dst.w = dw;
-        dst.h = dh;
-        dst.depthScale = 0.001f;  // mm
+            // Depth intrinsics (pinhole, ~moderate FOV).
+            dst.intrinsics.width = dw; dst.intrinsics.height = dh;
+            dst.intrinsics.fx = dst.intrinsics.fy = static_cast<float>(dw);
+            dst.intrinsics.cx = dw * 0.5f; dst.intrinsics.cy = dh * 0.5f;
+            // Synthetic color shares the depth optics, just at higher resolution, so
+            // depthToColor is identity and the color intrinsics are the depth ones
+            // scaled by colorScale_.
+            dst.colorIntrinsics.width = cw; dst.colorIntrinsics.height = ch;
+            dst.colorIntrinsics.fx = dst.colorIntrinsics.fy = static_cast<float>(dw * colorScale_);
+            dst.colorIntrinsics.cx = cw * 0.5f; dst.colorIntrinsics.cy = ch * 0.5f;
+            dst.depthToColor = Mat4::identity();
+            dst.colorUV.clear();
 
-        // Depth intrinsics (pinhole, ~moderate FOV).
-        dst.intrinsics.width = dw; dst.intrinsics.height = dh;
-        dst.intrinsics.fx = dst.intrinsics.fy = static_cast<float>(dw);
-        dst.intrinsics.cx = dw * 0.5f; dst.intrinsics.cy = dh * 0.5f;
-        // Synthetic color shares the depth optics, just at higher resolution, so
-        // depthToColor is identity and the color intrinsics are the depth ones
-        // scaled by colorScale_.
-        dst.colorIntrinsics.width = cw; dst.colorIntrinsics.height = ch;
-        dst.colorIntrinsics.fx = dst.colorIntrinsics.fy = static_cast<float>(dw * colorScale_);
-        dst.colorIntrinsics.cx = cw * 0.5f; dst.colorIntrinsics.cy = ch * 0.5f;
-        dst.depthToColor = Mat4::identity();
-        dst.colorUV.clear();
+            const float phase = frame_ * 0.08f;
+            ++frame_;
+            const float sphereR = 0.18f;
+            const float cxs = 0.25f * std::sin(phase);
+            const float cys = 0.15f * std::cos(phase * 1.3f);
 
-        const float phase = frame_ * 0.08f;
-        ++frame_;
-        const float sphereR = 0.18f;
-        const float cxs = 0.25f * std::sin(phase);
-        const float cys = 0.15f * std::cos(phase * 1.3f);
-
-        if (wantDepth) {
-            dst.depth.resize(static_cast<size_t>(dw) * dh);
-            for (int y = 0; y < dh; ++y) {
-                for (int x = 0; x < dw; ++x) {
-                    const float u = (x + 0.5f) / dw - 0.5f;
-                    const float v = (y + 0.5f) / dh - 0.5f;
-                    const float d = sceneDepth(u, v, phase, cxs, cys, sphereR);
-                    dst.depth[static_cast<size_t>(y) * dw + x] =
-                        static_cast<uint16_t>(d * 1000.0f);
+            if (wantDepth) {
+                dst.depth.resize(static_cast<size_t>(dw) * dh);
+                for (int y = 0; y < dh; ++y) {
+                    for (int x = 0; x < dw; ++x) {
+                        const float u = (x + 0.5f) / dw - 0.5f;
+                        const float v = (y + 0.5f) / dh - 0.5f;
+                        const float d = sceneDepth(u, v, phase, cxs, cys, sphereR);
+                        dst.depth[static_cast<size_t>(y) * dw + x] =
+                            static_cast<uint16_t>(d * 1000.0f);
+                    }
                 }
+            } else {
+                dst.depth.clear();
             }
-        } else {
-            dst.depth.clear();
-        }
 
-        if (wantColor) {
-            if (!dst.color.isAllocated() ||
-                dst.color.getWidth() != cw || dst.color.getHeight() != ch) {
-                dst.color.allocate(cw, ch, 4);
-            }
-            uint8_t* col = dst.color.getData();
-            for (int y = 0; y < ch; ++y) {
-                for (int x = 0; x < cw; ++x) {
-                    const float u = (x + 0.5f) / cw - 0.5f;
-                    const float v = (y + 0.5f) / ch - 0.5f;
-                    const float d = sceneDepth(u, v, phase, cxs, cys, sphereR);
-                    float t = (d - 1.0f) / 1.8f;
-                    if (t < 0.0f) t = 0.0f;
-                    if (t > 1.0f) t = 1.0f;
-                    const size_t i = static_cast<size_t>(y) * cw + x;
-                    col[i * 4 + 0] = static_cast<uint8_t>((1.0f - t) * 255.0f);
-                    col[i * 4 + 1] = static_cast<uint8_t>((0.3f + 0.4f * t) * 255.0f);
-                    col[i * 4 + 2] = static_cast<uint8_t>(t * 255.0f);
-                    col[i * 4 + 3] = 255;
+            if (wantColor) {
+                if (!dst.color.isAllocated() ||
+                    dst.color.getWidth() != cw || dst.color.getHeight() != ch) {
+                    dst.color.allocate(cw, ch, 4);
                 }
+                uint8_t* col = dst.color.getData();
+                for (int y = 0; y < ch; ++y) {
+                    for (int x = 0; x < cw; ++x) {
+                        const float u = (x + 0.5f) / cw - 0.5f;
+                        const float v = (y + 0.5f) / ch - 0.5f;
+                        const float d = sceneDepth(u, v, phase, cxs, cys, sphereR);
+                        float t = (d - 1.0f) / 1.8f;
+                        if (t < 0.0f) t = 0.0f;
+                        if (t > 1.0f) t = 1.0f;
+                        const size_t i = static_cast<size_t>(y) * cw + x;
+                        col[i * 4 + 0] = static_cast<uint8_t>((1.0f - t) * 255.0f);
+                        col[i * 4 + 1] = static_cast<uint8_t>((0.3f + 0.4f * t) * 255.0f);
+                        col[i * 4 + 2] = static_cast<uint8_t>(t * 255.0f);
+                        col[i * 4 + 3] = 255;
+                    }
+                }
+            } else if (dst.color.isAllocated()) {
+                dst.color = Pixels{};
             }
-        } else if (dst.color.isAllocated()) {
-            dst.color = Pixels{};
+
+            if (threaded) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(16));
+            }
+
+            StreamFreshness fresh;
+            fresh.depth = wantDepth;
+            fresh.color = wantColor;
+            return fresh;
         }
 
-        if (isThreaded()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(16));
-        }
-
-        StreamFreshness fresh;
-        fresh.depth = wantDepth;
-        fresh.color = wantColor;
-        return fresh;
+    };
+    std::shared_ptr<Device> openDevice() override {
+        if (width_ <= 0 || height_ <= 0) return {};
+        return std::make_shared<SyntheticDevice>(width_, height_, isDepthEnabled(), isColorEnabled(), isThreaded());
     }
 
 private:
     int width_;
     int height_;
-    int colorScale_ = 2;       // color native res = depth res * colorScale_
-    uint64_t frame_ = 0;
+
 };
 
 } // namespace tcx::depthcamera

@@ -1,0 +1,85 @@
+# core/tests/allCoreTests: compile every combinable core test into this app.
+#
+# A test is combined when core/tests/<name>/src/main.cpp exists and the dir
+# has no `own-binary` marker (examples/build_all.py uses the same rule).
+# `daily-only` affects RUN selection in build_all.py, not compilation here:
+# every test stays registered, and the runner checks the full --list against
+# the inventory (including daily-only tests) before selecting PR/daily runs.
+# Every .cpp/.c under its src/ is added, and each gets
+# TC_CORE_TEST_NAME="<name>", which turns its TC_CORE_TEST_MAIN into a
+# registered entry (core/tests/common/tcCoreTest.h). A test's own quoted
+# includes resolve relative to its source file, as when it is built alone.
+#
+# A test's own local.cmake is NOT included here (it is written for its own
+# target and dir); what a combined test needs from it is repeated below.
+
+# TC_CORE_TEST_SELECT: a ;-list of the combined tests to compile. Set by
+# examples/build_all.py (--shard, CI splits the core tests over several jobs)
+# on every configure; empty compiles all of them.
+set(TC_CORE_TEST_SELECT "" CACHE STRING "Combined core tests to compile (empty: all)")
+
+get_filename_component(_TC_CORE_TESTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+file(GLOB _TC_CORE_TEST_DIRS LIST_DIRECTORIES true CONFIGURE_DEPENDS
+    "${_TC_CORE_TESTS_DIR}/*")
+list(SORT _TC_CORE_TEST_DIRS)
+
+set(_TC_CORE_TEST_NAMES "")
+foreach(_TC_DIR IN LISTS _TC_CORE_TEST_DIRS)
+    get_filename_component(_TC_NAME "${_TC_DIR}" NAME)
+    if(_TC_NAME STREQUAL "allCoreTests"
+            OR NOT EXISTS "${_TC_DIR}/src/main.cpp"
+            OR EXISTS "${_TC_DIR}/own-binary")
+        continue()
+    endif()
+    if(TC_CORE_TEST_SELECT AND NOT _TC_NAME IN_LIST TC_CORE_TEST_SELECT)
+        continue()
+    endif()
+    file(GLOB_RECURSE _TC_TEST_SOURCES CONFIGURE_DEPENDS
+        "${_TC_DIR}/src/*.cpp" "${_TC_DIR}/src/*.c")
+    target_sources(${PROJECT_NAME} PRIVATE ${_TC_TEST_SOURCES})
+    set_source_files_properties(${_TC_TEST_SOURCES} PROPERTIES
+        COMPILE_DEFINITIONS "TC_CORE_TEST_NAME=\"${_TC_NAME}\"")
+    source_group("tests/${_TC_NAME}" FILES ${_TC_TEST_SOURCES})
+    list(APPEND _TC_CORE_TEST_NAMES "${_TC_NAME}")
+endforeach()
+
+if("renderRegression" IN_LIST _TC_CORE_TEST_NAMES)
+    # Its own shader target: the app's <name>_shaders already exists (#820).
+    trussc_compile_shaders(renderRegression "${_TC_CORE_TESTS_DIR}/renderRegression/src")
+    target_link_libraries(${PROJECT_NAME} PRIVATE renderRegression_shaders)
+endif()
+if("renderPassStack" IN_LIST _TC_CORE_TEST_NAMES)
+    trussc_compile_shaders(renderPassStack "${_TC_CORE_TESTS_DIR}/renderPassStack/src")
+    target_link_libraries(${PROJECT_NAME} PRIVATE renderPassStack_shaders)
+endif()
+if("pipelineSelection" IN_LIST _TC_CORE_TEST_NAMES)
+    trussc_compile_shaders(pipelineSelection "${_TC_CORE_TESTS_DIR}/pipelineSelection/src")
+    target_link_libraries(${PROJECT_NAME} PRIVATE pipelineSelection_shaders)
+endif()
+if("renderTargetState" IN_LIST _TC_CORE_TEST_NAMES OR "pipelineSelection" IN_LIST _TC_CORE_TEST_NAMES)
+    trussc_compile_shaders(renderTargetState "${_TC_CORE_TESTS_DIR}/renderTargetState/src")
+    target_link_libraries(${PROJECT_NAME} PRIVATE renderTargetState_shaders)
+    # Synthetic inputs exercise these draw paths without codec or addon dependencies.
+    trussc_compile_shaders(targetStateLut "${TRUSSC_DIR}/../addons/tcxLut/src/shaders")
+    trussc_compile_shaders(targetStateHap "${TRUSSC_DIR}/../addons/tcxHap/src/shaders")
+    target_link_libraries(${PROJECT_NAME} PRIVATE targetStateLut_shaders targetStateHap_shaders)
+endif()
+list(LENGTH _TC_CORE_TEST_NAMES _TC_CORE_TEST_COUNT)
+message(STATUS "[${PROJECT_NAME}] ${_TC_CORE_TEST_COUNT} core tests: ${_TC_CORE_TEST_NAMES}")
+
+# trusscliPresets (see its local.cmake): trusscli's project-generation sources
+# and their include dir. The include dir goes on that test's source only.
+if("trusscliPresets" IN_LIST _TC_CORE_TEST_NAMES)
+    set(_TC_TRUSSCLI_SRC "${_TC_CORE_TESTS_DIR}/../../tools/src")
+    get_filename_component(_TC_TRUSSCLI_SRC "${_TC_TRUSSCLI_SRC}" ABSOLUTE)
+    target_sources(${PROJECT_NAME} PRIVATE
+        "${_TC_TRUSSCLI_SRC}/ProjectGenerator.cpp"
+        "${_TC_TRUSSCLI_SRC}/ProjectState.cpp"
+        "${_TC_TRUSSCLI_SRC}/BuildSetup.cpp"
+        "${_TC_TRUSSCLI_SRC}/IdeHelper.cpp"
+        "${_TC_TRUSSCLI_SRC}/VsDetector.cpp"
+        "${_TC_TRUSSCLI_SRC}/GeneratedFile.cpp"
+    )
+    set_property(SOURCE "${_TC_CORE_TESTS_DIR}/trusscliPresets/src/main.cpp"
+        APPEND PROPERTY INCLUDE_DIRECTORIES "${_TC_TRUSSCLI_SRC}")
+endif()

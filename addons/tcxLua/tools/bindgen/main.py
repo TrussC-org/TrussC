@@ -20,13 +20,13 @@ def discoverCompileArgs():
     if system == "Darwin":
         try:
             sdk = subprocess.check_output(
-                ["xcrun", "--show-sdk-path"], text=True
+                ["xcrun", "--show-sdk-path"], text=True, encoding="utf-8"
             ).strip()
             clangxx = subprocess.check_output(
-                ["xcrun", "-find", "clang++"], text=True
+                ["xcrun", "-find", "clang++"], text=True, encoding="utf-8"
             ).strip()
             res = subprocess.check_output(
-                [clangxx, "-print-resource-dir"], text=True
+                [clangxx, "-print-resource-dir"], text=True, encoding="utf-8"
             ).strip()
             args += [
                 "-isysroot", sdk,
@@ -40,7 +40,7 @@ def discoverCompileArgs():
         # Best-effort. CI / contributors may need to set CPLUS_INCLUDE_PATH.
         try:
             res = subprocess.check_output(
-                ["clang++", "-print-resource-dir"], text=True
+                ["clang++", "-print-resource-dir"], text=True, encoding="utf-8"
             ).strip()
             args += ["-resource-dir", res, "-I", f"{res}/include"]
         except (subprocess.CalledProcessError, FileNotFoundError):
@@ -451,7 +451,7 @@ def main():
 
     visitNode(tree.cursor)
 
-    with open(genfile, mode='w') as f:
+    with open(genfile, mode='w', encoding="utf-8") as f:
         f.write(prev)
         f.write("\n")
 

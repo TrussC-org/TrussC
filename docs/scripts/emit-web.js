@@ -40,7 +40,8 @@ const { buildReverseIndex } = require('./scan-examples.js');
 const REF_DATA = path.join(__dirname, '../reference/reference-data.json');
 const CATEGORIES = path.join(__dirname, '../reference/categories.json');
 const API_YAML = path.join(__dirname, '../api-definition.yaml');                 // AUX
-const TRUSSC_API_JS = path.join(__dirname, '../../../trussc.org/generated/trussc-api.js');
+const outputArg = process.argv.indexOf('--out');
+const TRUSSC_API_JS = outputArg >= 0 ? process.argv[outputArg + 1] : path.join(__dirname, '../../../trussc.org/generated/trussc-api.js');
 const EXAMPLES_JSON = path.join(__dirname, '../../../trussc.org/examples/examples.json');
 
 const args = process.argv.slice(2);
@@ -343,7 +344,7 @@ function build(examplesMap) {
                 const sig = sigs[i];
                 const { desc, desc_ja, desc_ko } = prose;
                 const entry = {
-                    name: sym.name,
+                    name: sym.id,
                     params: stripU(simpleParams(sig.params)),
                     params_typed: stripU(sig.params || ''),
                     return_type: (sig.ret !== undefined ? sig.ret : returnType) ?? null,
@@ -413,15 +414,16 @@ function build(examplesMap) {
     const fieldsByOwner = new Map();    // owner -> [field symbol, …]
     const takesInternal = (s) => (s.signatures || []).some(sig => /\binternal::/.test(sig.params || ''));
     for (const sym of REF_VALS) {
+        const owner = sym.ns ? `${sym.ns}::${sym.owner}` : sym.owner;
         if (sym.access === 'protected') continue;            // protected members are kept in the data but hidden from the public web reference
         if (sym.kind === 'method' && sym.owner) {
             if (isOperator(sym)) continue;                   // operators render via yaml schema
             if (takesInternal(sym)) continue;                // methods taking internal:: args (handle*, findHitNodeRecursive) aren't user-callable
-            if (!methodsByOwner.has(sym.owner)) methodsByOwner.set(sym.owner, []);
-            methodsByOwner.get(sym.owner).push(sym);
+            if (!methodsByOwner.has(owner)) methodsByOwner.set(owner, []);
+            methodsByOwner.get(owner).push(sym);
         } else if (sym.kind === 'field' && sym.owner) {
-            if (!fieldsByOwner.has(sym.owner)) fieldsByOwner.set(sym.owner, []);
-            fieldsByOwner.get(sym.owner).push(sym);
+            if (!fieldsByOwner.has(owner)) fieldsByOwner.set(owner, []);
+            fieldsByOwner.get(owner).push(sym);
         }
     }
 
@@ -498,7 +500,7 @@ function build(examplesMap) {
     for (const sym of REF_VALS) {
         if (sym.kind !== 'type') continue;
         if (sym.owner) continue;                             // nested ones are attached to their owner below
-        const typeName = sym.name;
+        const typeName = sym.ns ? `${sym.ns}::${sym.name}` : sym.name;
         const ym = YML_TYPE.get(typeName);
         const { desc, desc_ja, desc_ko } = descTrio(sym.id, ym);
         const typeData = { name: typeName, desc, keywords: refKeywords(sym.id, ym), desc_ja, desc_ko };
@@ -548,7 +550,7 @@ function build(examplesMap) {
             ? sym.members
             : Object.keys(vd).map((name, i) => ({ name, value: i }));
         const out = {
-            name: sym.name,
+            name: sym.id,
             desc, keywords: refKeywords(sym.id, ym),
             values: memberList.map(m => {
                 const d = vd[m.name] || {};

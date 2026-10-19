@@ -1,0 +1,2 @@
+This harness builds mbedTLS, which is heavy for the per-PR CI lane.
+examples/build_all.py runs it only with --include-daily (daily.yml passes it).

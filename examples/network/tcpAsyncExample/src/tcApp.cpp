@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "tcApp.h"
+#include <thread>
 #include <sstream>
 #include <iomanip>
 
@@ -30,7 +31,7 @@ void tcApp::setup() {
     // variable nothing is started and no port is opened.
     // MCP is desktop-only — Web builds skip it.
 #ifndef __EMSCRIPTEN__
-    mcp::registerControlTools();
+    mcp::setToolLevel(mcp::ToolLevel::Control);
 #endif
 
     payload.assign(kPayloadBytes, 'x');

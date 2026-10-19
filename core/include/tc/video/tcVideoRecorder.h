@@ -1,5 +1,6 @@
 #pragma once
 #include "tc/utils/tcAnnotations.h"
+#include "tcRecorderFrame.h"
 
 // =============================================================================
 // tcVideoRecorder.h - Native video recording (H.264 / HEVC / ProRes -> file)
@@ -43,6 +44,9 @@
 #include <thread>
 #include <chrono>
 #include <cstring>
+#include <algorithm>
+#include <optional>
+#include <memory>
 
 // Audio-track recording taps the AudioEngine's master mix (sound never
 // includes video, so this dependency is one-way).
@@ -66,7 +70,10 @@ class Fbo;
 class Pixels;
 
 // Opaque per-platform encoder state (AVAssetWriter / IMFSinkWriter / GstPipeline)
-namespace internal { struct VideoWriterPlatformData; }
+namespace internal {
+struct VideoWriterPlatformData;
+struct RecorderFrameTestAccess;
+}
 
 // ---------------------------------------------------------------------------
 // Codec / settings
@@ -118,6 +125,18 @@ struct VideoRecordSettings {
 // VideoWriter - low-level encoder you feed frames to.
 // ---------------------------------------------------------------------------
 class TC_PLATFORMS("macos,windows,linux,android,ios") VideoWriter {
+    friend class ScreenRecorder;
+    friend struct internal::RecorderFrameTestAccess;
+    // Each operation snapshots its diagnostics while accessing the encoder.
+    // The recorder delivers the batch after releasing its locks and publishing
+    // completion, so onLog listeners can call stop() on the same recorder.
+    struct Diagnostics {
+        std::vector<std::function<void()>> pending;
+        void log() const { for (const auto& diagnostic : pending) diagnostic(); }
+        void failure(const SaveResult& result) {
+            pending.emplace_back([result] { internal::reportSaveFailure(result, "VideoWriter"); });
+        }
+    };
 public:
     VideoWriter() = default;
     ~VideoWriter() { close(); }
@@ -125,59 +144,66 @@ public:
     VideoWriter& operator=(const VideoWriter&) = delete;
 
     // Open the encoder. `path` is resolved via getDataPath() when relative; the
-    // parent directory is created if missing. Returns false if the encoder (or
+    // parent directory is created if missing. Returns a failed SaveResult if the encoder (or
     // the requested codec on this platform) could not be created.
-    bool open(const fs::path& path, int width, int height,
+    SaveResult open(const fs::path& path, int width, int height,
               const VideoRecordSettings& settings = {}) {
         close();
+        result_ = SaveResult::success();
+        callerMistakeLogged_ = false;
+        rejectedFrameCount_.store(0, std::memory_order_relaxed);
+        path_.clear();
         if (width <= 0 || height <= 0) {
-            logError("VideoWriter") << "invalid size " << width << "x" << height;
-            return false;
+            const auto message = "invalid size " + std::to_string(width) + "x" + std::to_string(height);
+            // Validation precedes path resolution; report this request, not the previous take.
+            return result_ = internal::reportSaveFailure(
+                internal::saveFailure(path, message.c_str()), "VideoWriter");
         }
         if ((width & 1) || (height & 1)) {
             logWarning("VideoWriter")
                 << "size " << width << "x" << height
                 << " is odd; most codecs need even dimensions";
         }
-        path_ = getDataPath(path);
-        {   // native encoders won't create intermediate directories
-            std::error_code ec;
-            fs::path parent = path_.parent_path();
-            if (!parent.empty()) std::filesystem::create_directories(parent, ec);
-        }
+        auto prepared = internal::prepareOutputPath(path, path_, "VideoWriter");
+        if (!prepared) return result_ = prepared;
         width_ = width;
         height_ = height;
         settings_ = settings;
         fps_ = (settings_.fps > 0.0f) ? settings_.fps : 60.0f;
         frameCount_ = 0;
-        scratch_.resize((size_t)width_ * height_ * 4);
+        const auto layout = internal::recorderPackedLayout(width_, height_, internal::RecorderPixelFormat::RGBA8);
+        // Bound (abi): take bytes must fit size_t and vector capacity. Overflow refuses open() and is reported by its false return; no frame exists to count.
+        if (!layout.byteSize || layout.byteSize > scratch_.max_size())
+            return result_ = internal::reportSaveFailure(
+                internal::saveFailure(path_, "invalid frame byte size"), "VideoWriter");
+        scratch_.resize(layout.byteSize);
 
         // Platform encoders take UTF-8 (converted to native inside)
         if (!openPlatform(internal::pathToUtf8(path_), width_, height_, fps_, settings_)) {
-            logError("VideoWriter")
-                << "failed to open " << videoCodecName(settings_.codec)
-                << " encoder for " << path_;
-            return false;
+            if (result_) result_ = SaveResult::fail(SaveError::WriteFailed, "Recording backend rejected operation");
+            result_.message = "Cannot open recording: " + internal::pathToDisplayUtf8(path_) + ": " + result_.message;
+            return internal::reportSaveFailure(result_, "VideoWriter");
         }
         open_ = true;
         logNotice("VideoWriter")
             << "writing " << width_ << "x" << height_ << " @ " << fps_ << "fps "
             << videoCodecName(settings_.codec) << " -> " << path_;
-        return true;
+        return SaveResult::success();
     }
 
-    // Finalize and flush the file. Safe to call multiple times.
-    void close() {
-        if (open_) {
-            closePlatform();
-            logNotice("VideoWriter")
-                << "saved " << frameCount_ << " frames -> " << path_;
-        }
-        open_ = false;
+    // Checked in-place finalization. Repeated calls retain the take result.
+    SaveResult close() {
+        Diagnostics diagnostics;
+        auto result = closeDeferred(diagnostics);
+        diagnostics.log();
+        return result;
     }
 
     bool isOpen() const { return open_; }
+    // Frames accepted by the backend; close() reports finalization separately.
     int  getFrameCount() const { return frameCount_; }
+    // Frames refused by recorder layout/capacity validation in this take.
+    uint64_t getRejectedFrameCount() const { return rejectedFrameCount_.load(std::memory_order_relaxed); }
     int  getWidth() const { return width_; }
     int  getHeight() const { return height_; }
     float getFps() const { return fps_; }
@@ -186,37 +212,55 @@ public:
 
     // Append one frame at the fixed-rate clock (frameIndex / fps) — deterministic
     // offline render. Source size must match the writer's size.
-    bool addFrame(const Fbo& fbo)      { return addFrameAt(fbo, frameCount_ / (double)fps_); }
-    bool addFrame(const Pixels& pixels){ return addFrameAt(pixels, frameCount_ / (double)fps_); }
+    SaveResult addFrame(const Fbo& fbo)      { return addFrameAt(fbo, frameCount_ / (double)fps_); }
+    SaveResult addFrame(const Pixels& pixels){ return addFrameAt(pixels, frameCount_ / (double)fps_); }
 
     // Append one frame at an explicit presentation time (seconds). Used by
     // ScreenRecorder for wall-clock live capture, or for custom timing.
-    bool addFrameAt(const Fbo& fbo, double timeSec) {
-        if (!open_) return false;
+    SaveResult addFrameAt(const Fbo& fbo, double timeSec) {
+        if (!open_) return callFailed("not open");
+        if (!result_) return result_;
         if (fbo.getWidth() != width_ || fbo.getHeight() != height_) {
-            logError("VideoWriter")
-                << "fbo size " << fbo.getWidth() << "x" << fbo.getHeight()
-                << " != writer " << width_ << "x" << height_;
-            return false;
+            return sizeMismatch("fbo", fbo.getWidth(), fbo.getHeight());
         }
-        if (!fbo.readPixels(scratch_.data())) {
-            logError("VideoWriter") << "fbo readPixels failed";
-            return false;
+        if (!fbo.isAllocated()) return callFailed("fbo is not allocated");
+        const auto layout = internal::recorderPackedLayout(width_, height_, internal::RecorderPixelFormat::RGBA8);
+        // Bound (abi): Fbo extent and RGBA8 bytes must match the take and scratch capacity. Overflow drops the recorder frame and is counted.
+        if (fbo.getTextureFormat() != TextureFormat::RGBA8 ||
+            fbo.curColorTex_().getPixelFormat() != SG_PIXELFORMAT_RGBA8 ||
+            fbo.curColorTex_().getWidth() != width_ || fbo.curColorTex_().getHeight() != height_ ||
+            !layout.byteSize || scratch_.size() < layout.byteSize) {
+            rejectFrameLayout();
+            return internal::saveFailure(path_, "frame layout does not match the recording buffer");
+        }
+        if (internal::hasPublicFboActivation())
+            return callFailed("fbo readPixels requires fbo.end() first");
+        if (!fbo.readPixelsPlatform(scratch_.data(), false)) {
+            rejectFrameLayout();
+            return internal::saveFailure(path_, "fbo readPixels failed");
         }
         return appendRGBA(scratch_.data(), timeSec);
     }
-    bool addFrameAt(const Pixels& pixels, double timeSec) {
-        if (!open_) return false;
+    SaveResult addFrameAt(const Pixels& pixels, double timeSec) {
+        if (!open_) return callFailed("not open");
+        if (!result_) return result_;
         if (pixels.getWidth() != width_ || pixels.getHeight() != height_) {
-            logError("VideoWriter")
-                << "pixels size " << pixels.getWidth() << "x" << pixels.getHeight()
-                << " != writer " << width_ << "x" << height_;
-            return false;
+            return sizeMismatch("pixels", pixels.getWidth(), pixels.getHeight());
+        }
+        size_t elements = 0;
+        // Bound (abi): pixel element format and allocation must cover the take. Overflow drops the recorder frame and is counted.
+        if (pixels.getFormat() != PixelFormat::U8 || !pixels.isAllocated() ||
+            !internal::pixelBufferCount(width_, height_, pixels.getChannels(), 1,
+                                        std::numeric_limits<size_t>::max(), elements) ||
+            pixels.getTotalBytes() < elements) {
+            rejectFrameLayout();
+            return internal::saveFailure(path_, "frame layout does not match the recording buffer");
         }
         if (pixels.getChannels() == 4) return appendRGBA(pixels.getData(), timeSec);
         // Expand to RGBA into the scratch buffer.
         const unsigned char* src = pixels.getData();
         const int ch = pixels.getChannels();
+        if (!src) return callFailed("null pixel data");
         const size_t n = (size_t)width_ * height_;
         for (size_t i = 0; i < n; ++i) {
             unsigned char r = src[i * ch + 0];
@@ -231,13 +275,11 @@ public:
     // Append a tightly-packed RGBA8 buffer directly (no Pixels wrapper). Used by
     // ScreenRecorder's async capture, where pixels arrive in a raw GPU readback
     // buffer on a background thread.
-    bool addFrameAt(const unsigned char* rgba, int w, int h, double timeSec) {
-        if (!open_) return false;
+    SaveResult addFrameAt(const unsigned char* rgba, int w, int h, double timeSec) {
+        if (!open_) return callFailed("not open");
+        if (!result_) return result_;
         if (w != width_ || h != height_) {
-            logError("VideoWriter")
-                << "frame size " << w << "x" << h
-                << " != writer " << width_ << "x" << height_;
-            return false;
+            return sizeMismatch("frame", w, h);
         }
         return appendRGBA(rgba, timeSec);
     }
@@ -256,60 +298,199 @@ public:
     // on the machine it was generated on. Elsewhere the call fails instead.
     TC_PLATFORMS("macos") unsigned char* lockFrame(int& strideOut) {
 #if TC_ASYNC_SCREEN_CAPTURE
-        if (!open_) return nullptr;
-        return lockFramePlatform(strideOut);
+        Diagnostics diagnostics;
+        auto result = lockFrameDeferred(strideOut, diagnostics);
+        diagnostics.log();
+        return result;
 #else
         (void)strideOut;
+        callFailed("direct frame locking is not supported on this platform");
         return nullptr;
 #endif
     }
-    TC_PLATFORMS("macos") bool submitFrame(double timeSec) {
+    TC_PLATFORMS("macos") SaveResult submitFrame(double timeSec) {
 #if TC_ASYNC_SCREEN_CAPTURE
-        if (!open_) return false;
-        if (!submitFramePlatform(timeSec)) {
-            logError("VideoWriter") << "encoder rejected frame " << frameCount_;
-            return false;
-        }
-        ++frameCount_;
-        return true;
+        Diagnostics diagnostics;
+        auto result = submitFrameDeferred(timeSec, diagnostics);
+        diagnostics.log();
+        return result;
 #else
         (void)timeSec;
-        return false;
+        return callFailed("direct frame submission is not supported on this platform");
 #endif
     }
 
     // Append interleaved float samples to the audio track at an explicit PTS
     // (seconds, same timeline as addFrameAt). Only meaningful when the writer
     // was opened with settings.audio = true (and audioSampleRate/Channels set);
-    // no-op false otherwise. Channel count / rate must match the settings.
-    bool writeAudio(const float* interleaved, int frames, double timeSec) {
-        if (!open_ || !interleaved || frames <= 0) return false;
-        if (!settings_.audio) return false;
-        return appendAudioPlatform(interleaved, frames, timeSec);
+    // Returns a failed SaveResult otherwise. Channel count / rate must match the settings.
+    SaveResult writeAudio(const float* interleaved, int frames, double timeSec) {
+        Diagnostics diagnostics;
+        auto result = writeAudioDeferred(interleaved, frames, timeSec, diagnostics);
+        diagnostics.log();
+        return result;
     }
 
 private:
-    bool appendRGBA(const unsigned char* rgba, double timeSec) {
-        if (!open_ || !rgba) return false;
-        if (!appendPlatform(rgba, timeSec)) {
-            logError("VideoWriter") << "encoder rejected frame " << frameCount_;
-            return false;
+    bool rejectFrameLayout(Diagnostics* diagnostics = nullptr) {
+        if (rejectedFrameCount_.fetch_add(1, std::memory_order_relaxed) == 0) {
+            Diagnostics immediate;
+            auto& batch = diagnostics ? *diagnostics : immediate;
+            batch.pending.emplace_back([] {
+                logWarning("VideoWriter") << "frame layout does not match the recording buffer; frame skipped";
+            });
+            if (!diagnostics) immediate.log();
+        }
+        return false;
+    }
+    bool captureLayoutMatches(const internal::RecorderFrameLayout& layout) const {
+        using F = internal::RecorderPixelFormat;
+        return (layout.format == F::BGRA8 || layout.format == F::RGB10A2) &&
+            internal::recorderFrameFits(layout, width_, height_, layout.format);
+    }
+    // The callbacks keep native buffer ownership in the backend. Tests inject
+    // a readback and a locked buffer through this same completion path.
+    template<class Acquire, class Copy, class Discard, class Submit>
+    bool completeCapture(const internal::RecorderFrameLayout& source,
+                         Acquire acquire, Copy copy, Discard discard, Submit submit,
+                         Diagnostics& diagnostics) {
+        if (!open_ || !result_) return false;
+        // Bound (abi): captured extent and bytes must match the take before acquiring a buffer. Overflow drops the recorder frame and is counted.
+        if (!captureLayoutMatches(source)) return rejectFrameLayout(&diagnostics);
+        const auto destination = acquire();
+        if (!destination.data) return false;
+        // Bound (abi): native destination must fit the take before readback. Overflow drops the recorder frame and is counted.
+        if (!internal::recorderFrameFits(destination.layout, width_, height_,
+                                         internal::RecorderPixelFormat::BGRA8) ||
+            !copy(destination)) {
+            discard();
+            return rejectFrameLayout(&diagnostics);
+        }
+        return submit();
+    }
+    bool recordingSizeMatches(int width, int height) {
+        // Bound (abi): source extent must match the fixed take size. Overflow drops the recorder frame and is counted.
+        return (width == width_ && height == height_) || rejectFrameLayout();
+    }
+
+    SaveResult closeDeferred(Diagnostics& diagnostics) {
+        if (open_) {
+            auto finalized = closePlatform();
+            if (result_) {
+                result_ = finalized;
+                if (!result_) diagnostics.failure(result_);
+            }
+            if (frameCount_ == 0 && callerMistakeLogged_) {
+                diagnostics.pending.emplace_back([path = path_] {
+                    logWarning("VideoWriter") << "take accepted 0 frames after caller mistakes -> " << path;
+                });
+            } else if (result_) {
+                diagnostics.pending.emplace_back([path = path_, count = frameCount_] {
+                    logNotice("VideoWriter") << "saved " << count << " frames -> " << path;
+                });
+            }
+        }
+        open_ = false;
+        return result_;
+    }
+
+    unsigned char* lockFrameDeferred(int& strideOut, Diagnostics& diagnostics) {
+        if (!open_) { callFailed("not open", &diagnostics); return nullptr; }
+        if (!result_) return nullptr;
+        internal::RecorderFrameBuffer buffer;
+        auto* frame = lockFramePlatform(buffer, diagnostics);
+        // Bound (abi): the public stride must fit int. Overflow drops the recorder frame and is counted.
+        if (frame && buffer.layout.rowBytes > static_cast<size_t>(std::numeric_limits<int>::max())) {
+            discardFramePlatform();
+            rejectFrameLayout(&diagnostics);
+            return nullptr;
+        }
+        strideOut = frame ? static_cast<int>(buffer.layout.rowBytes) : 0;
+        return frame;
+    }
+
+    SaveResult submitFrameDeferred(double timeSec, Diagnostics& diagnostics) {
+        if (!open_) return callFailed("not open", &diagnostics);
+        if (!result_) return result_;
+        if (!submitFramePlatform(timeSec)) {
+            return backendRejected("encoder rejected frame " + std::to_string(frameCount_), &diagnostics);
         }
         ++frameCount_;
-        return true;
+        return SaveResult::success();
+    }
+
+    SaveResult writeAudioDeferred(const float* interleaved, int frames, double timeSec, Diagnostics& diagnostics) {
+        if (!open_) return callFailed("not open", &diagnostics);
+        if (!result_) return result_;
+        if (!interleaved) return callFailed("null audio data", &diagnostics);
+        if (frames <= 0) return callFailed("audio frames must be > 0 (got " + std::to_string(frames) + ")", &diagnostics);
+        if (!settings_.audio) return callFailed("writer has no audio track", &diagnostics);
+        return appendAudioPlatform(interleaved, frames, timeSec)
+            ? SaveResult::success() : backendRejected("encoder rejected audio", &diagnostics);
+    }
+
+    SaveResult callFailed(const std::string& message, Diagnostics* diagnostics = nullptr) {
+        auto failure = internal::saveFailure(path_, message.c_str());
+        if (!callerMistakeLogged_) {
+            callerMistakeLogged_ = true;
+            if (diagnostics) diagnostics->failure(failure);
+            else internal::reportSaveFailure(failure, "VideoWriter");
+        }
+        return failure;
+    }
+    SaveResult sizeMismatch(const char* source, int w, int h) {
+        rejectFrameLayout();
+        const auto message = std::string(source) + " size " + std::to_string(w) + "x" +
+            std::to_string(h) + " != writer " + std::to_string(width_) + "x" + std::to_string(height_);
+        return internal::saveFailure(path_, message.c_str());
+    }
+    // Backends supply details without logging. Report only the first rejected
+    // submission; subsequent calls return result_ before reaching the backend.
+    SaveResult backendRejected(const std::string& message, Diagnostics* diagnostics = nullptr) {
+        if (result_) result_ = internal::saveFailure(path_, message.c_str());
+        if (!diagnostics) return internal::reportSaveFailure(result_, "VideoWriter");
+        diagnostics->failure(result_);
+        return result_;
+    }
+    SaveResult appendRGBA(const unsigned char* rgba, double timeSec) {
+        Diagnostics diagnostics;
+        auto result = appendRGBADeferred(rgba, timeSec, diagnostics);
+        diagnostics.log();
+        return result;
+    }
+    SaveResult appendRGBADeferred(const unsigned char* rgba, double timeSec, Diagnostics& diagnostics) {
+        if (!open_) return callFailed("not open", &diagnostics);
+        if (!result_) return result_;
+        if (!rgba) return callFailed("null frame data", &diagnostics);
+        const auto rejectedBefore = getRejectedFrameCount();
+#if TC_ASYNC_SCREEN_CAPTURE
+        const bool appended = appendPlatformDeferred(rgba, timeSec, diagnostics);
+#else
+        const bool appended = appendPlatform(rgba, timeSec);
+#endif
+        if (!appended) {
+            if (getRejectedFrameCount() != rejectedBefore)
+                return internal::saveFailure(path_, "frame layout does not match the recording buffer");
+            return backendRejected("encoder rejected frame " + std::to_string(frameCount_), &diagnostics);
+        }
+        ++frameCount_;
+        return SaveResult::success();
     }
 
     // Platform hooks (defined in platform/<os>/tcVideoRecorder_<os>.*)
     bool openPlatform(const std::string& fullPath, int w, int h, float fps,
                       const VideoRecordSettings& settings);
     bool appendPlatform(const unsigned char* rgba, double timeSec);
-    bool appendAudioPlatform(const float* interleaved, int frames, double timeSec);
-    void closePlatform();
 #if TC_ASYNC_SCREEN_CAPTURE
-    // Direct-buffer hooks for the zero-intermediate capture path (macOS).
-    unsigned char* lockFramePlatform(int& strideOut);   // lock & return encoder buffer
-    bool submitFramePlatform(double timeSec);            // append the locked buffer
+    bool appendPlatformDeferred(const unsigned char* rgba, double timeSec, Diagnostics& diagnostics);
 #endif
+    bool appendAudioPlatform(const float* interleaved, int frames, double timeSec);
+    SaveResult closePlatform();
+    // Direct-buffer hooks for the zero-intermediate capture path (macOS).
+    // Other native backends do not use these; headless tests supply dummy hooks.
+    unsigned char* lockFramePlatform(internal::RecorderFrameBuffer& buffer, Diagnostics& diagnostics);
+    void discardFramePlatform();
+    bool submitFramePlatform(double timeSec);            // append the locked buffer
 
     internal::VideoWriterPlatformData* platform_ = nullptr;
     fs::path path_;
@@ -319,388 +500,665 @@ private:
     float fps_    = 30.0f;
     VideoRecordSettings settings_;
     int   frameCount_ = 0;
+    std::atomic<uint64_t> rejectedFrameCount_{0};
     bool  open_ = false;
+    bool  callerMistakeLogged_ = false;
+    SaveResult result_;
 };
+
+// ---------------------------------------------------------------------------
+// ScreenRecorder frame pacing (internal). A pure state machine, split out so
+// the decimation / PTS math is testable headless (core/tests/frameTiming).
+//
+// `now` is seconds on clockNow(), which the app cannot reset (#229). ScreenRecorder
+// never reads a clock itself: it calls start() and, once per frame, tick(), so
+// the frameTiming checks on those cover its real path. Everything is double: with float,
+// timestamps were quantized after about a day of uptime and frames were
+// dropped after about three, and resetElapsedTimeCounter() mid-recording
+// stalled capture.
+// ---------------------------------------------------------------------------
+namespace internal {
+struct ScreenRecorderPacer {
+    // The pacing clock: framework uptime in seconds, never reset.
+    static double clockNow() { return getUptimeSeconds(); }
+
+    double startTime = 0.0;       // `now` when recording started (PTS origin)
+    double interval = 1.0 / 60.0; // target frame interval (1 / fps)
+    double duration = 0.0;        // fixed-length cutoff in seconds (0 = unlimited)
+    double nextCaptureTime = 0.0; // scheduled time of the next frame to capture
+    double lastFrameTime = 0.0;   // previous source frame time (for source dt)
+    double lastPts = -1.0;        // monotonicity clamp for the video PTS
+    bool   hasNextCapture = false;
+    bool   hasLastFrame = false;
+
+    // Start a recording now (on clockNow()).
+    void start(double fps, double durationSec) { start(clockNow(), fps, durationSec); }
+
+    void start(double now, double fps, double durationSec) {
+        startTime = now;
+        interval = 1.0 / (fps > 0.0 ? fps : 60.0);
+        duration = durationSec > 0.0 ? durationSec : 0.0;
+        nextCaptureTime = 0.0;
+        lastFrameTime = 0.0;
+        lastPts = -1.0;
+        hasNextCapture = false;
+        hasLastFrame = false;
+    }
+
+    // Fixed-duration cutoff: `now - startTime` is the wall-clock PTS this frame
+    // would carry; once it reaches the requested length nothing more is written.
+    bool reachedDuration(double now) const {
+        return duration > 0.0 && (now - startTime) >= duration;
+    }
+
+    // Decimate the (often higher-rate) source frame stream to the target fps by
+    // capturing the frame NEAREST each target slot. nextCaptureTime advances
+    // by exactly one interval (drift-free); a frame is captured once the slot
+    // falls within half a source frame of now, so a frame landing a hair
+    // before its slot (e.g. every other frame on a 120Hz display, where
+    // 16.67ms sat right on the old threshold) still counts instead of aliasing
+    // the rate down (#142). The tolerance is the source frame time dt, not a
+    // fudge constant, so it holds for any source:target ratio (120->60,
+    // 120->30, 144->60, or a source slower than the target).
+    bool shouldCapture(double now) {
+        double dt = hasLastFrame ? (now - lastFrameTime) : interval;
+        lastFrameTime = now;
+        hasLastFrame = true;
+        if (hasNextCapture && (now + 0.5 * dt) < nextCaptureTime) {
+            return false;   // this frame isn't the closest one to the next slot yet
+        }
+        nextCaptureTime = (hasNextCapture ? nextCaptureTime : now) + interval;
+        hasNextCapture = true;
+        if (nextCaptureTime <= now) {
+            nextCaptureTime = now + interval;   // source slower than target: resync
+        }
+        return true;
+    }
+
+    // The writer needs strictly increasing PTS.
+    double commitPts(double t) {
+        t = std::max(t, lastPts + 1e-4);
+        lastPts = t;
+        return t;
+    }
+
+    // What to do with one source frame.
+    struct Tick {
+        bool reachedDuration = false;  // the fixed length is reached: stop, write nothing
+        bool capture = false;          // decimation keeps this frame
+        double wallPts = 0.0;          // its wall-clock PTS (seconds since start)
+    };
+
+    // One source frame, now: reads clockNow() once. ScreenRecorder calls this
+    // once per frame and takes its cutoff, decimation and PTS from it.
+    Tick tick() { return tick(clockNow()); }
+
+    Tick tick(double now) {
+        Tick t;
+        t.wallPts = now - startTime;
+        if (reachedDuration(now)) {
+            t.reachedDuration = true;
+            return t;
+        }
+        t.capture = shouldCapture(now);
+        return t;
+    }
+
+    // One source frame on the wall-clock timeline (no audio track): the PTS to
+    // write it at, or nullopt when decimation skips it or the fixed length is
+    // reached.
+    std::optional<double> onFrame(double now) {
+        Tick t = tick(now);
+        if (!t.capture) return std::nullopt;
+        return commitPts(t.wallPts);
+    }
+};
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // ScreenRecorder - live capture of the window (or an Fbo) at wall-clock speed.
 // ---------------------------------------------------------------------------
+namespace internal { struct ScreenRecorderTestAccess; }
 class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
+    friend struct internal::ScreenRecorderTestAccess;
+    struct State : std::enable_shared_from_this<State> {
+        // Stack-owned delivery records avoid header-local thread state (which
+        // would split across hot-reload modules). completionMutex_ guards the list.
+        struct Delivery {
+            State& state;
+            const std::thread::id thread = std::this_thread::get_id();
+            Delivery* next;
+            explicit Delivery(State& s) : state(s) {
+                std::lock_guard<std::mutex> lock(state.completionMutex_);
+                link();
+            }
+            // Register stop's delivery in the same critical section as its
+            // final pending-work check, before another stop can pass it.
+            Delivery(State& s, const std::unique_lock<std::mutex>&) : state(s) {
+                link();
+            }
+            Delivery(const Delivery&) = delete;
+            Delivery& operator=(const Delivery&) = delete;
+            void link() {
+                next = state.deliveries_;
+                state.deliveries_ = this;
+            }
+            ~Delivery() {
+                std::unique_lock<std::mutex> lock(state.completionMutex_);
+                if (state.inFlight_.load(std::memory_order_acquire) == 0 && state.closeWhenDone_) {
+                    // stop may have timed out during logging, after the final
+                    // encoder decrement. Honor that close request as well.
+                    lock.unlock();
+                    VideoWriter::Diagnostics diagnostics;
+                    {
+                        std::lock_guard<std::mutex> writerLock(state.writerMutex_);
+                        if (state.audioActive_) state.drainAudio(diagnostics);
+                        state.audioActive_ = false;
+                        state.writer_.closeDeferred(diagnostics);
+                    }
+                    diagnostics.log();
+                    lock.lock();
+                }
+                // Removing the record and checking the close request share
+                // the same lock, so a timed-out stop cannot miss both paths.
+                auto** entry = &state.deliveries_;
+                while (*entry != this) entry = &(*entry)->next;
+                *entry = next;
+            }
+        };
+
+        // completionMutex_ held. A diagnostic's reentrant stop is not an
+        // external teardown barrier: waiting for diagnostic delivery here can
+        // wait for itself (or form a cycle with another reentrant listener).
+        bool pendingWork() const {
+            if (inFlight_.load(std::memory_order_acquire) > 0) return true;
+            for (auto* delivery = deliveries_; delivery; delivery = delivery->next) {
+                if (delivery->thread == std::this_thread::get_id()) return false;
+            }
+            return deliveries_ != nullptr;
+        }
+
+        static constexpr std::chrono::seconds kDrainTimeout{2};
+
+        // Stop capturing and finalize the file. Safe to call multiple times.
+        // The private polling interval also lets tests simulate coarse OS sleeps.
+        SaveResult stop(std::chrono::milliseconds drainPollInterval = std::chrono::milliseconds(1)) {
+            {
+                // An external stop may overlap a completion listener's stop.
+                // Never hold this bookkeeping lock across waits or logging.
+                std::lock_guard<std::mutex> lock(stopMutex_);
+                afterFrameListener_ = EventListener{};   // no new captures get queued
+                exitListener_ = EventListener{};
+                audioListener_ = EventListener{};
+                source_ = Source::None;
+                fbo_ = nullptr;
+            }
+            // Bounded, like AudioRecorder: a straggling tap writes into this
+            // State's ring, which outlives it.
+            if (audioActive_) {
+                Delivery delivery(*this);
+                AudioEngine::getInstance().waitForAudioCallbacks();
+            }
+            // Drain captures and inline diagnostic deliveries before closing the
+            // writer. Synchronous platforms also have diagnostic deliveries.
+            // Bound (platform): capture and diagnostic draining wait at most 2 s (steady clock). Overflow leaves close pending and is reported by stop() returning WriteFailed, with one Error per take.
+            const auto deadline = std::chrono::steady_clock::now() + kDrainTimeout;
+            while (std::chrono::steady_clock::now() < deadline) {
+                {
+                    std::lock_guard<std::mutex> completionLock(completionMutex_);
+                    if (!pendingWork()) break;
+                }
+                std::this_thread::sleep_for(drainPollInterval);
+            }
+            // The request and final decrement must be serialized. A completion
+            // either sees this request, or has already finished all writer IO.
+            bool pendingCaptures;
+            std::optional<Delivery> delivery;
+            {
+                std::unique_lock<std::mutex> completionLock(completionMutex_);
+                pendingCaptures = pendingWork();
+                if (pendingCaptures) closeWhenDone_ = true;
+                delivery.emplace(*this, completionLock);
+            }
+            // Do not acquire writerMutex_ on timeout: a completion may be
+            // stuck inside the encoder while holding it.
+            if (pendingCaptures) {
+                SaveResult result;
+                bool report;
+                {
+                    std::lock_guard<std::mutex> lock(stopMutex_);
+                    report = stopResult_.ok();
+                    if (report) stopResult_ = SaveResult::fail(SaveError::WriteFailed,
+                        "recording still has frames in flight");
+                    result = stopResult_;
+                }
+                if (report) logError("ScreenRecorder") << result.message;
+                return result;
+            }
+            VideoWriter::Diagnostics diagnostics;
+            SaveResult result;
+            {
+                std::lock_guard<std::mutex> lk(writerMutex_);
+                if (audioActive_) drainAudio(diagnostics);
+                audioActive_ = false;
+                auto closed = writer_.closeDeferred(diagnostics);
+                std::lock_guard<std::mutex> lock(stopMutex_);
+                result = stopResult_ ? closed : stopResult_;
+            }
+            diagnostics.log();
+            return result;
+        }
+
+        enum class Source { None, Swapchain, Fbo };
+
+        SaveResult startSource(Source src, const Fbo* fbo, int w, int h,
+                         const fs::path& path,
+                         const VideoRecordSettings& settings) {
+            VideoRecordSettings s = settings;
+            if (s.audio) {
+                auto& engine = AudioEngine::getInstance();
+                if (!engine.isInitialized()) {
+                    logWarning("ScreenRecorder")
+                        << "audio requested but AudioEngine is not initialized - "
+                           "recording video only";
+                    s.audio = false;
+                } else {
+                    if (s.audioSampleRate <= 0) s.audioSampleRate = engine.getSampleRate();
+                    if (s.audioChannels   <= 0) s.audioChannels   = engine.getChannels();
+                }
+            }
+            auto opened = writer_.open(path, w, h, s);
+            if (!opened) return opened;
+            source_ = src;
+            fbo_ = fbo;
+            fboAlive_ = fbo ? fbo->lifetimeToken() : std::shared_ptr<void>{};
+            // Pace on the framework clock, which the app cannot reset (#229).
+            pacer_.start(writer_.getFps(), s.duration);
+            if (s.audio) startAudioTap(s.audioSampleRate, s.audioChannels);
+            // Per-window binding (T3): events() resolves through the window context
+            // that is CURRENT when recording starts — so calling recordScreen() from
+            // a secondary window's tick subscribes to THAT window's afterFrame/exit,
+            // and swapchain frames are captured while that window's context (and its
+            // lastSwapchainDrawable) is current. No explicit window handle is needed;
+            // the recorder follows whichever window started it.
+            //   Platform note: the swapchain readback is per-window on all three
+            //   desktop platforms — macOS reads currentWindowContext().lastSwapchainDrawable,
+            //   Windows reads the context's recorded swapchain render_view, and Linux
+            //   reads the window's framebuffer at its own size (see the captureWindow
+            //   backends). Fbo-source recording is per-window everywhere (it reads the
+            //   passed Fbo, not the swapchain).
+            afterFrameListener_ = events().afterFrame.listen([state = shared_from_this()]() { state->onAfterFrame(); });
+            exitListener_ = events().exit.listen([state = shared_from_this()]() { state->stop(); });
+            return SaveResult::success();
+        }
+
+        void onAfterFrame() {
+            Delivery delivery(*this);
+            if (source_ == Source::None || !writer_.isOpen()) return;
+            // Recorded Fbo was destroyed: finalize instead of reading a dangling
+            // pointer. The file stays valid up to the last captured frame.
+            if (source_ == Source::Fbo && fboAlive_.expired()) {
+                logWarning("ScreenRecorder")
+                    << "recorded Fbo was destroyed; stopping and finalizing";
+                stop();
+                return;
+            }
+            // This frame's cutoff, decimation and wall-clock PTS, on the pacer's
+            // clock, which the app cannot reset (#229).
+            const auto tick = pacer_.tick();
+
+            // Feed buffered audio to the encoder once per frame (main thread; the
+            // audio thread only ever touches the lock-free ring).
+            if (audioActive_) {
+                VideoWriter::Diagnostics diagnostics;
+                {
+                    std::lock_guard<std::mutex> lk(writerMutex_);
+                    drainAudio(diagnostics);
+                }
+                diagnostics.log();
+                // A diagnostic listener may have stopped this take.
+                if (source_ == Source::None) return;
+            }
+
+            // Fixed-duration cutoff. tick.wallPts is the wall-clock PTS this frame would
+            // carry; once it reaches the requested length we finalize and append nothing more,
+            // so the output length == duration (to within one frame slot). The cut is
+            // PTS-based, so any async capture already in flight — its PTS was sampled
+            // below when it was issued, always < duration — can't push the file past
+            // the cutoff; stop() just drains those before closing the writer.
+            //
+            // stop() clears afterFrameListener_ from inside this callback (self-removal
+            // mid-dispatch). That is safe here: Event::notify() iterates an RCU
+            // snapshot of the listener list held alive for the whole loop, so removing
+            // ourselves only swaps in a new list for the NEXT fire; the in-progress
+            // dispatch is unaffected, and removeListener() takes a recursive_mutex that
+            // notify() does not hold (no deadlock). No deferral needed.
+            if (tick.reachedDuration) {
+                stop();
+                return;
+            }
+
+            // Decimate to the target fps (see ScreenRecorderPacer::shouldCapture).
+            if (!tick.capture) {
+                return;   // this frame isn't the closest one to the next slot yet
+            }
+            // PTS: wall clock normally; the AUDIO DEVICE clock when an audio track
+            // is being recorded, so frames land exactly where they happened on the
+            // audio timeline (drift-free A/V sync however unstable the fps is).
+            double t = pacer_.commitPts(audioActive_ ? audioClockSeconds()
+                                                     : tick.wallPts);
+            if (source_ == Source::Fbo && fbo_) {
+                if (writer_.recordingSizeMatches(fbo_->getWidth(), fbo_->getHeight()))
+                    writer_.addFrameAt(*fbo_, t);
+                return;
+            }
+#if TC_ASYNC_SCREEN_CAPTURE
+            // Async + zero-intermediate: issue the GPU readback and return — no
+            // main-thread stall. When it completes (Metal background thread), read the
+            // staging straight into the encoder's pixel buffer (BGRA, no swap) and
+            // submit. PTS t is captured now so wall-clock timing is unaffected by
+            // encode latency.
+            if (!stagingPool_) stagingPool_ = internal::makeCaptureStagingPool();
+            inFlight_.fetch_add(1, std::memory_order_relaxed);
+            bool started = internal::captureWindowAsync(
+                [state = shared_from_this(), t](const internal::CaptureReadback& rb) {
+                    state->completeCapture(rb, t);
+                }, stagingPool_);
+            if (!started) {
+                finishCaptureAndLog(/*rejectedLayout=*/true);
+            }
+#else
+            Pixels px;
+            if (!grabScreen(px) || !px.isAllocated()) {
+                writer_.rejectFrameLayout();
+                return;
+            }
+            if (writer_.recordingSizeMatches(px.getWidth(), px.getHeight()))
+                writer_.addFrameAt(px, t);
+#endif
+        }
+
+        // --- audio tap (settings.audio) ------------------------------------------
+        // Same tap pattern as AudioRecorder: a Monitor-priority audioOut listener
+        // copies the master mix into an SPSC ring; the main thread drains it into
+        // the writer. The tap also anchors the AUDIO DEVICE clock: each callback
+        // publishes (framePosition, wall time), and audioClockSeconds() maps "now"
+        // onto the audio timeline by extrapolating from the latest pair. Overflow
+        // (writer stalled >4 s) is repaid as silence so A/V alignment survives.
+
+        static double nowWallSec() {
+            using namespace std::chrono;
+            return duration_cast<duration<double>>(
+                       steady_clock::now().time_since_epoch()).count();
+        }
+
+        void startAudioTap(int rate, int channels) {
+            audioRate_ = rate;
+            audioCh_   = channels;
+            size_t want = (size_t)rate * channels * 4;   // ~4 seconds
+            size_t cap = 1; while (cap < want) cap <<= 1;
+            audioRing_.assign(cap, 0.0f);
+            audioHead_.store(0, std::memory_order_relaxed);
+            audioTail_.store(0, std::memory_order_relaxed);
+            silenceDebt_.store(0, std::memory_order_relaxed);
+            consumedFrames_ = 0;
+            anchored_.store(false, std::memory_order_relaxed);
+            recStartWall_ = nowWallSec();
+            audioActive_ = true;
+            audioListener_ = AudioEngine::getInstance().audioOut.listen(
+                [state = shared_from_this()](AudioOutBuffer& b) { state->onAudioBuffer(b); },
+                audio::priority::Monitor);
+        }
+
+        // Audio thread. Push the mixed buffer (prepending any silence debt) and
+        // publish the clock anchor.
+        void onAudioBuffer(const AudioOutBuffer& b) {
+            if (b.sampleRate != audioRate_ || b.channels != audioCh_) return;
+            const double noww = nowWallSec();
+            if (!anchored_.load(std::memory_order_relaxed)) {
+                // First buffer: its samples STARTED one buffer-duration ago; that
+                // instant, expressed on the recording timeline, is the audio
+                // track's PTS origin.
+                fp0_ = b.framePosition;
+                offset0_ = std::max(
+                    0.0, (noww - (double)b.frameCount / audioRate_) - recStartWall_);
+                anchored_.store(true, std::memory_order_release);
+            }
+            fpLast_.store(b.framePosition + (uint64_t)b.frameCount, std::memory_order_relaxed);
+            wallLast_.store(noww, std::memory_order_relaxed);
+
+            const size_t cap = audioRing_.size();
+            auto space = [&] {
+                return cap - (size_t)(audioHead_.load(std::memory_order_relaxed)
+                                      - audioTail_.load(std::memory_order_acquire));
+            };
+            auto push = [&](const float* src, size_t nFloats) {   // src null = silence
+                const uint64_t head = audioHead_.load(std::memory_order_relaxed);
+                const size_t at = (size_t)(head & (cap - 1));
+                const size_t first = std::min(nFloats, cap - at);
+                if (src) {
+                    std::memcpy(audioRing_.data() + at, src, first * sizeof(float));
+                    if (nFloats > first)
+                        std::memcpy(audioRing_.data(), src + first, (nFloats - first) * sizeof(float));
+                } else {
+                    std::memset(audioRing_.data() + at, 0, first * sizeof(float));
+                    if (nFloats > first)
+                        std::memset(audioRing_.data(), 0, (nFloats - first) * sizeof(float));
+                }
+                audioHead_.store(head + nFloats, std::memory_order_release);
+            };
+
+            // Repay silence debt (frames lost to a previous overflow) first, so
+            // the ring's content stays contiguous on the audio timeline.
+            uint64_t debt = silenceDebt_.load(std::memory_order_relaxed);
+            if (debt > 0) {
+                uint64_t repay = std::min(debt, (uint64_t)(space() / audioCh_));
+                if (repay > 0) {
+                    push(nullptr, (size_t)repay * audioCh_);
+                    silenceDebt_.store(debt - repay, std::memory_order_relaxed);
+                }
+            }
+            const size_t n = (size_t)b.frameCount * audioCh_;
+            if (space() < n || silenceDebt_.load(std::memory_order_relaxed) > 0) {
+                silenceDebt_.fetch_add((uint64_t)b.frameCount, std::memory_order_relaxed);
+                return;
+            }
+            internal::runScreenRecorderCaptureHookForTests(b.frameCount);
+            push(b.data, n);
+        }
+
+        // Main thread (writerMutex_ held). Hand every complete frame in the ring
+        // to the writer at its sample-accurate PTS.
+        void drainAudio(VideoWriter::Diagnostics& diagnostics) {
+            if (!writer_.isOpen() || !anchored_.load(std::memory_order_acquire)) return;
+            const size_t cap = audioRing_.size();
+            size_t n = (size_t)(audioHead_.load(std::memory_order_acquire)
+                                - audioTail_.load(std::memory_order_relaxed));
+            n -= n % (size_t)audioCh_;
+            if (n == 0) return;
+            audioScratch_.resize(n);
+            const uint64_t tail = audioTail_.load(std::memory_order_relaxed);
+            const size_t at = (size_t)(tail & (cap - 1));
+            const size_t first = std::min(n, cap - at);
+            std::memcpy(audioScratch_.data(), audioRing_.data() + at, first * sizeof(float));
+            if (n > first)
+                std::memcpy(audioScratch_.data() + first, audioRing_.data(), (n - first) * sizeof(float));
+            audioTail_.store(tail + n, std::memory_order_release);
+
+            const int frames = (int)(n / (size_t)audioCh_);
+            const double pts = offset0_ + (double)consumedFrames_ / audioRate_;
+            consumedFrames_ += (uint64_t)frames;
+            // Respect the fixed-duration cutoff (the video side stops there too).
+            if (pacer_.duration > 0.0 && pts >= pacer_.duration) return;
+            writer_.writeAudioDeferred(audioScratch_.data(), frames, pts, diagnostics);
+        }
+
+        // "Now" on the audio timeline: extrapolate from the latest (framePosition,
+        // wall time) pair the audio thread published. Before the first callback,
+        // fall back to the wall clock (sub-buffer-length window at start).
+        double audioClockSeconds() {
+            const double noww = nowWallSec();
+            if (!anchored_.load(std::memory_order_acquire))
+                return noww - recStartWall_;
+            const double atLast = offset0_
+                + (double)(fpLast_.load(std::memory_order_relaxed) - fp0_) / audioRate_;
+            return atLast + (noww - wallLast_.load(std::memory_order_relaxed));
+        }
+
+        // The encoder hooks and readback are replaceable in headless tests;
+        // production calls this from the Metal completion callback.
+        template<class Readback>
+        void completeCapture(const Readback& rb, double t) {
+            // Keep this scope around the entire operation, including any
+            // diagnostics emitted after writerMutex_ is released.
+            Delivery delivery(*this); // published before the encoder count can reach zero
+            VideoWriter::Diagnostics diagnostics;
+            {
+                std::lock_guard<std::mutex> lk(writerMutex_);
+                if (writer_.isOpen()) {
+                    writer_.completeCapture(rb.getLayout(),
+                        [this, &diagnostics] {
+                            internal::RecorderFrameBuffer buffer;
+                            writer_.lockFramePlatform(buffer, diagnostics);
+                            return buffer;
+                        },
+                        [&rb](const internal::RecorderFrameBuffer& buffer) {
+                            return rb.readInto(buffer.data, buffer.layout.rowBytes,
+                                               buffer.layout.byteSize, /*wantRGBA=*/false);
+                        },
+                        [this] { writer_.discardFramePlatform(); },
+                        [this, t, &diagnostics] { return writer_.submitFrameDeferred(t, diagnostics).ok(); },
+                        diagnostics);
+                }
+                finishCapture(diagnostics);
+            }
+            diagnostics.log();
+        }
+
+        void finishCaptureAndLog(bool rejectedLayout = false) {
+            Delivery delivery(*this);
+            VideoWriter::Diagnostics diagnostics;
+            {
+                std::lock_guard<std::mutex> lk(writerMutex_);
+                if (rejectedLayout) writer_.rejectFrameLayout(&diagnostics);
+                finishCapture(diagnostics);
+            }
+            diagnostics.log();
+        }
+
+        // writerMutex_ held. A timed-out stop leaves finalization to the last
+        // completion; the audio tap has already been disconnected and barriered.
+        void finishCapture(VideoWriter::Diagnostics& diagnostics) {
+            // Serialize the close request with the final decrement, so stop
+            // cannot miss a completion that just decided it need not close.
+            std::unique_lock<std::mutex> completionLock(completionMutex_);
+            if (inFlight_.load(std::memory_order_relaxed) == 1 && closeWhenDone_) {
+                // Never hold the request lock across encoder work: stop must
+                // still be able to publish its request if the encoder hangs.
+                completionLock.unlock();
+                if (audioActive_) drainAudio(diagnostics);
+                audioActive_ = false;
+                writer_.closeDeferred(diagnostics);
+                completionLock.lock();
+            }
+            // Publish encoder completion only after all writer access has
+            // finished. The Delivery record still barriers diagnostic callbacks.
+            inFlight_.fetch_sub(1, std::memory_order_release);
+        }
+
+        std::mutex completionMutex_; // close request / final-count handshake; no encoder IO
+        Delivery* deliveries_ = nullptr;
+        std::mutex stopMutex_; // stop bookkeeping only; no encoder IO, waits or logging
+        bool closeWhenDone_ = false;
+        SaveResult stopResult_;
+        VideoWriter writer_;
+        Source source_ = Source::None;
+        const Fbo* fbo_ = nullptr;
+        std::weak_ptr<void> fboAlive_;  // expires when the recorded Fbo dies
+        internal::ScreenRecorderPacer pacer_;   // decimation, PTS, duration cutoff
+        EventListener afterFrameListener_;
+        EventListener exitListener_;
+        std::mutex writerMutex_;          // serializes encoder access (completion threads + stop)
+        std::atomic<int> inFlight_{0};    // async captures not yet encoded (macOS)
+#if TC_ASYNC_SCREEN_CAPTURE
+        // Staging textures of this take, reused once each readback is done.
+        std::shared_ptr<internal::CaptureStagingPool> stagingPool_;
+#endif
+
+        // Audio tap state (see the comment block above).
+        std::atomic<bool> audioActive_{false};
+        int  audioRate_ = 0, audioCh_ = 0;
+        std::vector<float> audioRing_, audioScratch_;
+        std::atomic<uint64_t> audioHead_{0}, audioTail_{0};   // in floats
+        std::atomic<uint64_t> silenceDebt_{0};                // in frames
+        uint64_t consumedFrames_ = 0;                         // consumer-only
+        std::atomic<bool>     anchored_{false};
+        uint64_t fp0_ = 0;                // framePosition of the first buffer
+        double   offset0_ = 0.0;          // audio-track PTS origin on the rec timeline
+        double   recStartWall_ = 0.0;
+        std::atomic<uint64_t> fpLast_{0};
+        std::atomic<double>   wallLast_{0.0};
+        EventListener audioListener_;
+    };
+
 public:
     ScreenRecorder() = default;
     ~ScreenRecorder() { stop(); }
     ScreenRecorder(const ScreenRecorder&) = delete;
     ScreenRecorder& operator=(const ScreenRecorder&) = delete;
 
-    // Record the whole window (swapchain) — the same fully-composited image
-    // tc_get_screenshot returns. Size is taken from the framebuffer.
-    bool start(const fs::path& path, const VideoRecordSettings& settings = {}) {
-        return startSource(Source::Swapchain, nullptr,
-                           sapp_width(), sapp_height(), path, settings);
+    // Record the window (swapchain), or an offscreen Fbo that stays alive.
+    // Each take has its own state; late completions keep the old take alive.
+    SaveResult start(const fs::path& path, const VideoRecordSettings& settings = {}) {
+        stop();
+        state_ = std::make_shared<State>();
+        return state_->startSource(State::Source::Swapchain, nullptr,
+                                   sapp_width(), sapp_height(), path, settings);
     }
-
-    // Record an offscreen Fbo every frame (clean output, GUI-free).
-    bool start(const Fbo& fbo, const fs::path& path,
-               const VideoRecordSettings& settings = {}) {
-        return startSource(Source::Fbo, &fbo,
-                           fbo.getWidth(), fbo.getHeight(), path, settings);
+    SaveResult start(const Fbo& fbo, const fs::path& path,
+                     const VideoRecordSettings& settings = {}) {
+        stop();
+        state_ = std::make_shared<State>();
+        return state_->startSource(State::Source::Fbo, &fbo,
+                                   fbo.getWidth(), fbo.getHeight(), path, settings);
     }
-
-    // Fixed-duration convenience: record for `durationSec` seconds, then auto-stop
-    // and finalize the file at exactly that length. Same as filling
-    // settings.duration. (durationSec <= 0 records until stop(), like the default.)
-    bool start(const fs::path& path, float durationSec) {
+    SaveResult start(const fs::path& path, float durationSec) {
         VideoRecordSettings s;
         s.duration = durationSec;
         return start(path, s);
     }
-    bool start(const Fbo& fbo, const fs::path& path, float durationSec) {
+    SaveResult start(const Fbo& fbo, const fs::path& path, float durationSec) {
         VideoRecordSettings s;
         s.duration = durationSec;
         return start(fbo, path, s);
     }
-
-    // Stop capturing and finalize the file. Safe to call multiple times.
-    void stop() {
-        afterFrameListener_ = EventListener{};   // no new captures get queued
-        exitListener_ = EventListener{};
-        audioListener_ = EventListener{};        // audio thread stops feeding
-#if TC_ASYNC_SCREEN_CAPTURE
-        // Drain async captures still encoding on background threads before we
-        // close the writer (their completion handlers append into it).
-        for (int spins = 0;
-             inFlight_.load(std::memory_order_acquire) > 0 && spins < 2000;
-             ++spins) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-#endif
-        source_ = Source::None;
-        fbo_ = nullptr;
-        {
-            std::lock_guard<std::mutex> lk(writerMutex_);
-            if (audioActive_) drainAudio();      // flush the tail of the ring
-            audioActive_ = false;
-            writer_.close();
-        }
+    // Disconnect and drain audio, then wait up to 2 s for GPU readbacks.
+    // A timed-out take reports WriteFailed and finalizes on its last completion.
+    SaveResult stop() { return state_->stop(); }
+    bool isRecording() const {
+        return state_->source_ != State::Source::None && state_->writer_.isOpen();
     }
-
-    bool isRecording() const { return writer_.isOpen(); }
-    int  getFrameCount() const { return writer_.getFrameCount(); }
-    fs::path getPath() const { return writer_.getPath(); }
-    VideoWriter& writer() { return writer_; }   // for advanced introspection
+    int getFrameCount() const { return state_->writer_.getFrameCount(); }
+    uint64_t getRejectedFrameCount() const { return state_->writer_.getRejectedFrameCount(); }
+    fs::path getPath() const { return state_->writer_.getPath(); }
+    VideoWriter& writer() { return state_->writer_; }
 
 private:
-    enum class Source { None, Swapchain, Fbo };
-
-    bool startSource(Source src, const Fbo* fbo, int w, int h,
-                     const fs::path& path,
-                     const VideoRecordSettings& settings) {
-        stop();
-        VideoRecordSettings s = settings;
-        if (s.audio) {
-            auto& engine = AudioEngine::getInstance();
-            if (!engine.isInitialized()) {
-                logWarning("ScreenRecorder")
-                    << "audio requested but AudioEngine is not initialized - "
-                       "recording video only";
-                s.audio = false;
-            } else {
-                if (s.audioSampleRate <= 0) s.audioSampleRate = engine.getSampleRate();
-                if (s.audioChannels   <= 0) s.audioChannels   = engine.getChannels();
-            }
-        }
-        if (!writer_.open(path, w, h, s)) return false;
-        source_ = src;
-        fbo_ = fbo;
-        fboAlive_ = fbo ? fbo->lifetimeToken() : std::shared_ptr<void>{};
-        duration_ = s.duration;
-        startElapsed_ = getElapsedTimef();
-        nextCaptureTime_ = -1.0f;
-        lastFrameTime_ = -1.0f;
-        if (s.audio) startAudioTap(s.audioSampleRate, s.audioChannels);
-        // Per-window binding (T3): events() resolves through the window context
-        // that is CURRENT when recording starts — so calling recordScreen() from
-        // a secondary window's tick subscribes to THAT window's afterFrame/exit,
-        // and swapchain frames are captured while that window's context (and its
-        // lastSwapchainDrawable) is current. No explicit window handle is needed;
-        // the recorder follows whichever window started it.
-        //   Platform note: the swapchain readback is per-window on all three
-        //   desktop platforms — macOS reads currentWindowContext().lastSwapchainDrawable,
-        //   Windows reads the context's recorded swapchain render_view, and Linux
-        //   reads the window's framebuffer at its own size (see the captureWindow
-        //   backends). Fbo-source recording is per-window everywhere (it reads the
-        //   passed Fbo, not the swapchain).
-        afterFrameListener_ = events().afterFrame.listen([this]() { onAfterFrame(); });
-        exitListener_ = events().exit.listen([this]() { stop(); });
-        return true;
-    }
-
-    void onAfterFrame() {
-        if (!writer_.isOpen()) return;
-        // Recorded Fbo was destroyed: finalize instead of reading a dangling
-        // pointer. The file stays valid up to the last captured frame.
-        if (source_ == Source::Fbo && fboAlive_.expired()) {
-            logWarning("ScreenRecorder")
-                << "recorded Fbo was destroyed; stopping and finalizing";
-            stop();
-            return;
-        }
-        float now = getElapsedTimef();
-
-        // Feed buffered audio to the encoder once per frame (main thread; the
-        // audio thread only ever touches the lock-free ring).
-        if (audioActive_) {
-            std::lock_guard<std::mutex> lk(writerMutex_);
-            drainAudio();
-        }
-
-        // Fixed-duration cutoff. `t` is the wall-clock PTS this frame would carry;
-        // once it reaches the requested length we finalize and append nothing more,
-        // so the output length == duration (to within one frame slot). The cut is
-        // PTS-based, so any async capture already in flight — its PTS was sampled
-        // below when it was issued, always < duration — can't push the file past
-        // the cutoff; stop() just drains those before closing the writer.
-        //
-        // stop() clears afterFrameListener_ from inside this callback (self-removal
-        // mid-dispatch). That is safe here: Event::notify() iterates an RCU
-        // snapshot of the listener list held alive for the whole loop, so removing
-        // ourselves only swaps in a new list for the NEXT fire; the in-progress
-        // dispatch is unaffected, and removeListener() takes a recursive_mutex that
-        // notify() does not hold (no deadlock). No deferral needed.
-        if (duration_ > 0.0f && (double)(now - startElapsed_) >= (double)duration_) {
-            stop();
-            return;
-        }
-
-        float interval = 1.0f / writer_.getFps();
-
-        // Decimate the (often higher-rate) frame stream to the target fps by
-        // capturing the frame NEAREST each target slot. nextCaptureTime_ advances
-        // by exactly one interval (drift-free); we capture once the slot falls
-        // within half a frame of now, so a frame landing a hair before its slot
-        // (e.g. every-other frame on a 120Hz display, where 16.67ms sat right on
-        // the old threshold) still counts instead of aliasing the rate down. The
-        // half-frame tolerance is the source frame time dt, not a fudge constant,
-        // so it stays correct for any source:target ratio (120->60, 120->30,
-        // 144->60, or a source slower than the target).
-        float dt = (lastFrameTime_ >= 0.0f) ? (now - lastFrameTime_) : interval;
-        lastFrameTime_ = now;
-        if (nextCaptureTime_ >= 0.0f && (now + 0.5f * dt) < nextCaptureTime_) {
-            return;   // this frame isn't the closest one to the next slot yet
-        }
-        nextCaptureTime_ = (nextCaptureTime_ < 0.0f ? now : nextCaptureTime_) + interval;
-        if (nextCaptureTime_ <= now) {
-            nextCaptureTime_ = now + interval;   // source slower than target: resync
-        }
-        // PTS: wall clock normally; the AUDIO DEVICE clock when an audio track
-        // is being recorded, so frames land exactly where they happened on the
-        // audio timeline (drift-free A/V sync however unstable the fps is).
-        double t = audioActive_ ? audioClockSeconds()
-                                : (double)(now - startElapsed_);
-        t = std::max(t, lastPts_ + 1e-4);   // writer needs monotonic PTS
-        lastPts_ = t;
-        if (source_ == Source::Fbo && fbo_) {
-            writer_.addFrameAt(*fbo_, t);
-            return;
-        }
-#if TC_ASYNC_SCREEN_CAPTURE
-        // Async + zero-intermediate: issue the GPU readback and return — no
-        // main-thread stall. When it completes (Metal background thread), read the
-        // staging straight into the encoder's pixel buffer (BGRA, no swap) and
-        // submit. PTS t is captured now so wall-clock timing is unaffected by
-        // encode latency.
-        inFlight_.fetch_add(1, std::memory_order_relaxed);
-        bool started = internal::captureWindowAsync(
-            [this, t](const internal::CaptureReadback& rb) {
-                {
-                    std::lock_guard<std::mutex> lk(writerMutex_);
-                    if (writer_.isOpen()) {
-                        int stride = 0;
-                        if (unsigned char* dst = writer_.lockFrame(stride)) {
-                            rb.readInto(dst, stride, /*wantRGBA=*/false);
-                            writer_.submitFrame(t);
-                        }
-                    }
-                }
-                inFlight_.fetch_sub(1, std::memory_order_acq_rel);
-            });
-        if (!started) inFlight_.fetch_sub(1, std::memory_order_acq_rel);
-#else
-        Pixels px;
-        if (grabScreen(px) && px.isAllocated()) writer_.addFrameAt(px, t);
-#endif
-    }
-
-    // --- audio tap (settings.audio) ------------------------------------------
-    // Same tap pattern as AudioRecorder: a Monitor-priority audioOut listener
-    // copies the master mix into an SPSC ring; the main thread drains it into
-    // the writer. The tap also anchors the AUDIO DEVICE clock: each callback
-    // publishes (framePosition, wall time), and audioClockSeconds() maps "now"
-    // onto the audio timeline by extrapolating from the latest pair. Overflow
-    // (writer stalled >4 s) is repaid as silence so A/V alignment survives.
-
-    static double nowWallSec() {
-        using namespace std::chrono;
-        return duration_cast<duration<double>>(
-                   steady_clock::now().time_since_epoch()).count();
-    }
-
-    void startAudioTap(int rate, int channels) {
-        audioRate_ = rate;
-        audioCh_   = channels;
-        size_t want = (size_t)rate * channels * 4;   // ~4 seconds
-        size_t cap = 1; while (cap < want) cap <<= 1;
-        audioRing_.assign(cap, 0.0f);
-        audioHead_.store(0, std::memory_order_relaxed);
-        audioTail_.store(0, std::memory_order_relaxed);
-        silenceDebt_.store(0, std::memory_order_relaxed);
-        consumedFrames_ = 0;
-        lastPts_ = -1.0;
-        anchored_.store(false, std::memory_order_relaxed);
-        recStartWall_ = nowWallSec();
-        audioActive_ = true;
-        audioListener_ = AudioEngine::getInstance().audioOut.listen(
-            [this](AudioOutBuffer& b) { onAudioBuffer(b); },
-            audio::priority::Monitor);
-    }
-
-    // Audio thread. Push the mixed buffer (prepending any silence debt) and
-    // publish the clock anchor.
-    void onAudioBuffer(const AudioOutBuffer& b) {
-        if (b.sampleRate != audioRate_ || b.channels != audioCh_) return;
-        const double noww = nowWallSec();
-        if (!anchored_.load(std::memory_order_relaxed)) {
-            // First buffer: its samples STARTED one buffer-duration ago; that
-            // instant, expressed on the recording timeline, is the audio
-            // track's PTS origin.
-            fp0_ = b.framePosition;
-            offset0_ = std::max(
-                0.0, (noww - (double)b.frameCount / audioRate_) - recStartWall_);
-            anchored_.store(true, std::memory_order_release);
-        }
-        fpLast_.store(b.framePosition + (uint64_t)b.frameCount, std::memory_order_relaxed);
-        wallLast_.store(noww, std::memory_order_relaxed);
-
-        const size_t cap = audioRing_.size();
-        auto space = [&] {
-            return cap - (size_t)(audioHead_.load(std::memory_order_relaxed)
-                                  - audioTail_.load(std::memory_order_acquire));
-        };
-        auto push = [&](const float* src, size_t nFloats) {   // src null = silence
-            const uint64_t head = audioHead_.load(std::memory_order_relaxed);
-            const size_t at = (size_t)(head & (cap - 1));
-            const size_t first = std::min(nFloats, cap - at);
-            if (src) {
-                std::memcpy(audioRing_.data() + at, src, first * sizeof(float));
-                if (nFloats > first)
-                    std::memcpy(audioRing_.data(), src + first, (nFloats - first) * sizeof(float));
-            } else {
-                std::memset(audioRing_.data() + at, 0, first * sizeof(float));
-                if (nFloats > first)
-                    std::memset(audioRing_.data(), 0, (nFloats - first) * sizeof(float));
-            }
-            audioHead_.store(head + nFloats, std::memory_order_release);
-        };
-
-        // Repay silence debt (frames lost to a previous overflow) first, so
-        // the ring's content stays contiguous on the audio timeline.
-        uint64_t debt = silenceDebt_.load(std::memory_order_relaxed);
-        if (debt > 0) {
-            uint64_t repay = std::min(debt, (uint64_t)(space() / audioCh_));
-            if (repay > 0) {
-                push(nullptr, (size_t)repay * audioCh_);
-                silenceDebt_.store(debt - repay, std::memory_order_relaxed);
-            }
-        }
-        const size_t n = (size_t)b.frameCount * audioCh_;
-        if (space() < n || silenceDebt_.load(std::memory_order_relaxed) > 0) {
-            silenceDebt_.fetch_add((uint64_t)b.frameCount, std::memory_order_relaxed);
-            return;
-        }
-        push(b.data, n);
-    }
-
-    // Main thread (writerMutex_ held). Hand every complete frame in the ring
-    // to the writer at its sample-accurate PTS.
-    void drainAudio() {
-        if (!writer_.isOpen() || !anchored_.load(std::memory_order_acquire)) return;
-        const size_t cap = audioRing_.size();
-        size_t n = (size_t)(audioHead_.load(std::memory_order_acquire)
-                            - audioTail_.load(std::memory_order_relaxed));
-        n -= n % (size_t)audioCh_;
-        if (n == 0) return;
-        audioScratch_.resize(n);
-        const uint64_t tail = audioTail_.load(std::memory_order_relaxed);
-        const size_t at = (size_t)(tail & (cap - 1));
-        const size_t first = std::min(n, cap - at);
-        std::memcpy(audioScratch_.data(), audioRing_.data() + at, first * sizeof(float));
-        if (n > first)
-            std::memcpy(audioScratch_.data() + first, audioRing_.data(), (n - first) * sizeof(float));
-        audioTail_.store(tail + n, std::memory_order_release);
-
-        const int frames = (int)(n / (size_t)audioCh_);
-        const double pts = offset0_ + (double)consumedFrames_ / audioRate_;
-        consumedFrames_ += (uint64_t)frames;
-        // Respect the fixed-duration cutoff (the video side stops there too).
-        if (duration_ > 0.0f && pts >= (double)duration_) return;
-        writer_.writeAudio(audioScratch_.data(), frames, pts);
-    }
-
-    // "Now" on the audio timeline: extrapolate from the latest (framePosition,
-    // wall time) pair the audio thread published. Before the first callback,
-    // fall back to the wall clock (sub-buffer-length window at start).
-    double audioClockSeconds() {
-        const double noww = nowWallSec();
-        if (!anchored_.load(std::memory_order_acquire))
-            return noww - recStartWall_;
-        const double atLast = offset0_
-            + (double)(fpLast_.load(std::memory_order_relaxed) - fp0_) / audioRate_;
-        return atLast + (noww - wallLast_.load(std::memory_order_relaxed));
-    }
-
-    VideoWriter writer_;
-    Source source_ = Source::None;
-    const Fbo* fbo_ = nullptr;
-    std::weak_ptr<void> fboAlive_;  // expires when the recorded Fbo dies
-    float startElapsed_ = 0.0f;
-    float duration_ = 0.0f;           // fixed-length cutoff in seconds (0 = unlimited)
-    float nextCaptureTime_ = -1.0f;   // scheduled time of the next frame to capture
-    float lastFrameTime_ = -1.0f;     // previous afterFrame time (for source dt)
-    double lastPts_ = -1.0;           // monotonicity clamp for the video PTS
-    EventListener afterFrameListener_;
-    EventListener exitListener_;
-    std::mutex writerMutex_;          // serializes encoder access (completion threads + stop)
-    std::atomic<int> inFlight_{0};    // async captures not yet encoded (macOS)
-
-    // Audio tap state (see the comment block above).
-    bool audioActive_ = false;
-    int  audioRate_ = 0, audioCh_ = 0;
-    std::vector<float> audioRing_, audioScratch_;
-    std::atomic<uint64_t> audioHead_{0}, audioTail_{0};   // in floats
-    std::atomic<uint64_t> silenceDebt_{0};                // in frames
-    uint64_t consumedFrames_ = 0;                         // consumer-only
-    std::atomic<bool>     anchored_{false};
-    uint64_t fp0_ = 0;                // framePosition of the first buffer
-    double   offset0_ = 0.0;          // audio-track PTS origin on the rec timeline
-    double   recStartWall_ = 0.0;
-    std::atomic<uint64_t> fpLast_{0};
-    std::atomic<double>   wallLast_{0.0};
-    EventListener audioListener_;
+    std::shared_ptr<State> state_ = std::make_shared<State>();
 };
 
 // ---------------------------------------------------------------------------
 // Convenience: one global ScreenRecorder for "just record the whole window".
+// Defined in tcGlobal.cpp: one per process, so a recording started from a hot
+// reload guest is the one tc_stop_recording / isRecording() see (#249).
 // ---------------------------------------------------------------------------
 namespace internal {
-    inline ScreenRecorder& globalScreenRecorder() {
-        static ScreenRecorder rec;
-        return rec;
-    }
+    ScreenRecorder& globalScreenRecorder();
 }
 
 // Start recording the whole window to a video file. `path` is required;
 // relative paths resolve via getDataPath(). Auto-finalizes on app exit.
-TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const fs::path& path,
+TC_PLATFORMS("macos,windows,linux,android,ios") inline SaveResult startRecording(const fs::path& path,
                            const VideoRecordSettings& settings = {}) {
     return internal::globalScreenRecorder().start(path, settings);
 }
@@ -708,7 +1166,7 @@ TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const
 // Fixed-duration convenience: record the whole window for `durationSec` seconds,
 // then auto-stop and finalize at exactly that length. (durationSec <= 0 behaves
 // like the unlimited overload above — record until stopRecording().)
-TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const fs::path& path,
+TC_PLATFORMS("macos,windows,linux,android,ios") inline SaveResult startRecording(const fs::path& path,
                            float durationSec) {
     return internal::globalScreenRecorder().start(path, durationSec);
 }
@@ -716,20 +1174,20 @@ TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const
 // Record an offscreen Fbo instead of the window (clean, GUI-free output).
 // The Fbo must stay alive while recording — if it is destroyed mid-recording,
 // the recording stops and finalizes automatically.
-TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const Fbo& fbo,
+TC_PLATFORMS("macos,windows,linux,android,ios") inline SaveResult startRecording(const Fbo& fbo,
                            const fs::path& path,
                            const VideoRecordSettings& settings = {}) {
     return internal::globalScreenRecorder().start(fbo, path, settings);
 }
 
 // Fixed-duration Fbo recording (see above).
-TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const Fbo& fbo,
+TC_PLATFORMS("macos,windows,linux,android,ios") inline SaveResult startRecording(const Fbo& fbo,
                            const fs::path& path,
                            float durationSec) {
     return internal::globalScreenRecorder().start(fbo, path, durationSec);
 }
 
-inline void stopRecording() { internal::globalScreenRecorder().stop(); }
+inline SaveResult stopRecording() { return internal::globalScreenRecorder().stop(); }
 inline bool isRecording()   { return internal::globalScreenRecorder().isRecording(); }
 inline int  recordingFrameCount() { return internal::globalScreenRecorder().getFrameCount(); }
 inline fs::path recordingPath() { return internal::globalScreenRecorder().getPath(); }

@@ -3,8 +3,8 @@
 void tcApp::setup() {
     setWindowTitle("reflect -> inspector + JSON");
 
-    // MCP input tools, so an AI agent can drive the demo (no-op without TRUSSC_MCP).
-    mcp::registerControlTools();
+    // MCP input tools, so an AI agent can drive the demo.
+    mcp::setToolLevel(mcp::ToolLevel::Control);
 
     // A scene container, with one sprite to inspect / serialize.
     sceneRoot_ = make_shared<RectNode>();

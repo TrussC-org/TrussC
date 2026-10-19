@@ -27,7 +27,7 @@ const cats = JSON.parse(fs.readFileSync(path.join(__dirname, 'categories.json'),
 const catName = Object.fromEntries(cats.map(c => [c.id, c.name]));
 const catOrder = Object.fromEntries(cats.map(c => [c.id, c.order]));
 
-const E = Object.values(data).filter(e => !e.hidden);   // `hide = true` symbols are excluded from the public index
+const E = Object.values(data).filter(e => !e.hidden && (!e.declaredIn || e.declaredIn === e.owner));   // `hide = true` symbols are excluded from the public index
 const isOp = e => /::operator/.test(e.id);
 const documented = e => e.documented;
 // DISPLAY-only: drop a single trailing "_" from param names (member-shadow
@@ -70,16 +70,20 @@ for (const cid of catIds) {
 }
 
 // --- 2. type members, grouped per owner type (methods + static methods) ---
+const qualifiedName = (ns, name) => (ns ? ns + '::' : '') + name;
 const typeDecl = {};                           // owner -> its own type entry
-for (const e of E) if (e.kind === 'type') typeDecl[e.name] = e;
+for (const e of E) if (e.kind === 'type') typeDecl[qualifiedName(e.ns, e.name)] = e;
 const membersByOwner = {};
 for (const e of E) {
     if (!documented(e) || isOp(e)) continue;
-    if (e.kind === 'method' && e.owner) (membersByOwner[e.owner] = membersByOwner[e.owner] || []).push(e);
+    if (e.kind === 'method' && e.owner) {
+        const owner = qualifiedName(e.ns, e.owner);
+        (membersByOwner[owner] = membersByOwner[owner] || []).push(e);
+    }
 }
 // a type appears if it has a documented decl OR documented members
 const owners = new Set([...Object.keys(membersByOwner),
-    ...Object.values(typeDecl).filter(documented).map(t => t.name)]);
+    ...Object.values(typeDecl).filter(documented).map(t => qualifiedName(t.ns, t.name))]);
 out += '\n## Types\n';
 for (const owner of [...owners].sort()) {
     const decl = typeDecl[owner];

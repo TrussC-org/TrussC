@@ -17,8 +17,11 @@ namespace trussc {
 // ---------------------------------------------------------------------------
 
 bool VideoPlayer::loadPlatform(const fs::path& path) {
+    webLoadResult_ = LoadResult::success();
+    const double deadline = emscripten_get_now() + internal::webLoadTimeoutMSecs;
     std::string pathStr = internal::pathToUtf8(path);
     // Create video element in JavaScript
+    // Bound (security): the file path is embedded in a fixed-size load script to bound temporary storage. Overflow truncates the script via snprintf; no explicit truncation error is returned.
     char script[8192];
     snprintf(script, sizeof(script), R"JS(
         (function() {
@@ -29,6 +32,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             }
 
             // Initialize state
+            window._trussc_player_error = null;
             window._trussc_player_ready = false;
             window._trussc_player_playing = false;
             window._trussc_player_frameNew = false;
@@ -36,7 +40,6 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             window._trussc_player_width = 0;
             window._trussc_player_height = 0;
             window._trussc_player_duration = 0;
-            window._trussc_player_frameRate = 30;
 
             // Create video element
             var video = document.createElement('video');
@@ -70,6 +73,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             video.src = videoPath;
 
             video.onloadedmetadata = function() {
+                if (window._trussc_player_video !== video) return;
                 window._trussc_player_width = video.videoWidth;
                 window._trussc_player_height = video.videoHeight;
                 window._trussc_player_duration = video.duration;
@@ -86,6 +90,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             };
 
             video.onended = function() {
+                if (window._trussc_player_video !== video) return;
                 window._trussc_player_finished = true;
                 if (video.loop) {
                     window._trussc_player_finished = false;
@@ -93,8 +98,13 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             };
 
             video.onerror = function(e) {
-                console.error('[VideoPlayer] Web: failed to load -', video.error ? video.error.message : 'unknown error');
-                window._trussc_player_ready = false;
+                if (window._trussc_player_video !== video) return;
+                window._trussc_player_error = {
+                    message: video.error && video.error.message || 'Video playback failed',
+                    code: video.error ? video.error.code : 0
+                };
+                video.pause();
+                window._trussc_player_playing = false;
             };
 
             // Start loading
@@ -106,19 +116,39 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
 
     int result = emscripten_run_script_int(script);
     if (result <= 0) {
-        printf("VideoPlayer: failed to load [Web]\n");
+        logError("VideoPlayer") << "failed to load '" << pathStr << "' [Web]";
         return false;
     }
 
-    // Set initial values (metadata loaded asynchronously)
-    width_ = 640;
-    height_ = 480;
+    // A successful synchronous load has a decoded first frame, including in setup().
+    while (!emscripten_run_script_int(
+        "!!window._trussc_player_error || (window._trussc_player_ready && "
+        "window._trussc_player_video.readyState >= 2)")) {
+        if (emscripten_get_now() >= deadline) {
+            closePlatform();
+            webLoadResult_ = internal::reportWebLoadTimeout(path, "VideoPlayer");
+            return false;
+        }
+        emscripten_sleep(10);
+    }
+    if (emscripten_run_script_int("!!window._trussc_player_error")) {
+        logError("VideoPlayer") << "failed to decode '" << pathStr << "' [Web]";
+        closePlatform();
+        return false;
+    }
+    width_ = emscripten_run_script_int("window._trussc_player_width");
+    height_ = emscripten_run_script_int("window._trussc_player_height");
+    if (width_ <= 0 || height_ <= 0) {
+        closePlatform();
+        return false;
+    }
 
     // Allocate pixel buffer
     pixels_ = new unsigned char[width_ * height_ * 4];
     std::memset(pixels_, 0, width_ * height_ * 4);
 
-    printf("VideoPlayer: loading '%s' [Web]\n", pathStr.c_str());
+    updatePlatform();
+    logNotice("VideoPlayer") << "loaded '" << pathStr << "' [Web]";
     return true;
 }
 
@@ -128,9 +158,13 @@ void VideoPlayer::closePlatform() {
         window._trussc_player_playing = false;
 
         if (window._trussc_player_video) {
-            window._trussc_player_video.pause();
-            window._trussc_player_video.remove();
+            var video = window._trussc_player_video;
             window._trussc_player_video = null;
+            video.onloadedmetadata = video.onended = video.onerror = null;
+            video.pause();
+            video.removeAttribute('src');
+            video.load(); // Abort any pending network request.
+            video.remove();
         }
         window._trussc_player_canvas = null;
         window._trussc_player_ctx = null;
@@ -138,7 +172,7 @@ void VideoPlayer::closePlatform() {
         console.log('[VideoPlayer] Web: closed');
     )JS");
 
-    printf("VideoPlayer: closed [Web]\n");
+    logVerbose("VideoPlayer") << "closed [Web]";
 }
 
 void VideoPlayer::playPlatform() {
@@ -171,6 +205,13 @@ void VideoPlayer::setPausedPlatform(bool paused) {
 }
 
 void VideoPlayer::updatePlatform() {
+    if (emscripten_run_script_int("!!window._trussc_player_error")) {
+        const std::string message = emscripten_run_script_string("window._trussc_player_error.message");
+        int code = emscripten_run_script_int("window._trussc_player_error.code");
+        emscripten_run_script("window._trussc_player_error = null;");
+        reportPlaybackError(message, code);
+        return;
+    }
     // Update size if changed
     int newWidth = emscripten_run_script_int("(window._trussc_player_width || 0)");
     int newHeight = emscripten_run_script_int("(window._trussc_player_height || 0)");
@@ -187,7 +228,7 @@ void VideoPlayer::updatePlatform() {
         // Reallocate texture
         texture_.allocate(width_, height_, 4, TextureUsage::Stream);
 
-        printf("VideoPlayer: resized to %dx%d [Web]\n", width_, height_);
+        logVerbose("VideoPlayer") << "resized to " << width_ << "x" << height_ << " [Web]";
     }
 
     if (!pixels_ || width_ <= 0 || height_ <= 0) return;
@@ -299,61 +340,14 @@ void VideoPlayer::setLoopPlatform(bool loop) {
         "if (window._trussc_player_video) window._trussc_player_video.loop = false;");
 }
 
-int VideoPlayer::getCurrentFramePlatform() const {
-    return emscripten_run_script_int(R"JS(
-        (function() {
-            var video = window._trussc_player_video;
-            if (!video || !window._trussc_player_ready) return 0;
-            var fps = window._trussc_player_frameRate || 30;
-            return Math.floor(video.currentTime * fps);
-        })();
-    )JS");
-}
-
-int VideoPlayer::getTotalFramesPlatform() const {
-    return emscripten_run_script_int(R"JS(
-        (function() {
-            var video = window._trussc_player_video;
-            if (!video || !window._trussc_player_ready) return 0;
-            var fps = window._trussc_player_frameRate || 30;
-            return Math.floor(video.duration * fps);
-        })();
-    )JS");
-}
-
-void VideoPlayer::setFramePlatform(int frame) {
-    char script[512];
-    snprintf(script, sizeof(script),
-        "if (window._trussc_player_video && window._trussc_player_ready) {"
-        "var fps = window._trussc_player_frameRate || 30;"
-        "window._trussc_player_video.currentTime = %d / fps;"
-        "}", frame);
-    emscripten_run_script(script);
-}
-
-void VideoPlayer::nextFramePlatform() {
-    emscripten_run_script(R"JS(
-        (function() {
-            var video = window._trussc_player_video;
-            if (video && window._trussc_player_ready) {
-                var fps = window._trussc_player_frameRate || 30;
-                video.currentTime = Math.min(video.duration, video.currentTime + 1/fps);
-            }
-        })();
-    )JS");
-}
-
-void VideoPlayer::previousFramePlatform() {
-    emscripten_run_script(R"JS(
-        (function() {
-            var video = window._trussc_player_video;
-            if (video && window._trussc_player_ready) {
-                var fps = window._trussc_player_frameRate || 30;
-                video.currentTime = Math.max(0, video.currentTime - 1/fps);
-            }
-        })();
-    )JS");
-}
+// HTMLVideoElement does not provide a reliable file frame rate.
+// The shared API guard warns once; time-based seeking remains available.
+float VideoPlayer::getFrameRatePlatform() const { return 0.0f; }
+int VideoPlayer::getCurrentFramePlatform() const { return 0; }
+int VideoPlayer::getTotalFramesPlatform() const { return 0; }
+void VideoPlayer::setFramePlatform(int) {}
+void VideoPlayer::nextFramePlatform() {}
+void VideoPlayer::previousFramePlatform() {}
 
 // ---------------------------------------------------------------------------
 // Audio-related stubs (not yet implemented for Web)

@@ -1,0 +1,1 @@
+Supplies dummy VideoWriter platform hooks so encoder diagnostics are deterministic without a GPU or media codecs.

@@ -26,4 +26,13 @@ public:
 
     // Get IDE display name
     static const char* getIdeName(IdeType type);
+
+    // Stable id of an IDE type, as used by `--ide <id>` and stored in
+    // CMakePresets.json ("vendor": {"trussc": {"ide": <id>}}):
+    // vscode, cursor, xcode, vs, cmake
+    static const char* getIdeId(IdeType type);
+
+    // Parse an id from getIdeId(). Returns false (and leaves `out` alone)
+    // for anything else.
+    static bool parseIdeId(const std::string& id, IdeType& out);
 };

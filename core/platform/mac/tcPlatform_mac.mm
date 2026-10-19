@@ -3,6 +3,8 @@
 // =============================================================================
 
 #include "TrussC.h"
+#include <mutex>
+#include <vector>
 
 #if defined(__APPLE__)
 
@@ -153,15 +155,10 @@ void setWindowDecorated(bool decorated) {
 }
 
 void setWindowSizeLogical(int width, int height) {
-    // メインウィンドウを取得
-    NSWindow* window = [[NSApplication sharedApplication] mainWindow];
-    if (!window) {
-        // mainWindow が nil の場合、最初のウィンドウを試す
-        NSArray* windows = [[NSApplication sharedApplication] windows];
-        if (windows.count > 0) {
-            window = windows[0];
-        }
-    }
+    // The TrussC main window, like the other functions in this file. NOT
+    // [NSApp mainWindow]: that is AppKit's focused window, which is a
+    // secondary window whenever one has focus.
+    NSWindow* window = (__bridge NSWindow*)sapp_macos_get_window();
 
     if (window) {
         // 現在のフレームを取得
@@ -190,6 +187,39 @@ fs::path getExecutableDir() {
 }
 
 // ---------------------------------------------------------------------------
+// User data / temp folders (getUserDataPath / getTempPath)
+// ---------------------------------------------------------------------------
+namespace {
+// The bundle id names the app's folder (the executable name for a binary
+// that does not run from a bundle).
+fs::path appFolderName() {
+    NSString* bundleId = [[NSBundle mainBundle] bundleIdentifier];
+    if (bundleId.length > 0) return fs::path(bundleId.UTF8String);
+    fs::path name = getExecutablePath().filename();
+    return name.empty() ? fs::path("TrussC") : name;
+}
+} // namespace
+
+fs::path internal::platformUserDataRoot() {
+    NSString* support = [NSSearchPathForDirectoriesInDomains(
+        NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+    fs::path base = support ? fs::path(support.UTF8String)
+                            : fs::path(NSHomeDirectory().UTF8String) / "Library" / "Application Support";
+    return base / appFolderName();
+}
+
+fs::path internal::platformTempRoot() {
+    // NSTemporaryDirectory() is $TMPDIR (the per-user temp folder)
+    return fs::path(NSTemporaryDirectory().UTF8String) / appFolderName();
+}
+
+fs::path internal::platformAppBundlePath() {
+    NSString* bundle = [[NSBundle mainBundle] bundlePath];
+    if (!bundle || ![bundle.pathExtension isEqualToString:@"app"]) return {};
+    return fs::path(bundle.UTF8String);
+}
+
+// ---------------------------------------------------------------------------
 // スクリーンショット機能（Metal API を使用）
 // ---------------------------------------------------------------------------
 
@@ -197,8 +227,29 @@ fs::path getExecutableDir() {
 // single getBytes (no intermediate buffer for the common BGRA8 case). For BGRA8
 // + wantRGBA=false (the recorder feeding a BGRA CVPixelBuffer) this is one copy,
 // zero swizzle. Runs on whatever thread the consumer is on.
-void internal::CaptureReadback::readInto(unsigned char* dst, int dstStride,
-                                         bool wantRGBA) const {
+internal::RecorderFrameLayout internal::CaptureReadback::getLayout() const {
+    id<MTLTexture> tex = (__bridge id<MTLTexture>)staging;
+    // Bound (abi): Metal staging extent must match the captured frame. Overflow drops the recorder frame and is counted.
+    if (!tex || width <= 0 || height <= 0 || tex.width != (NSUInteger)width ||
+        tex.height != (NSUInteger)height) return {};
+    const auto format = tex.pixelFormat;
+    const bool packed10 = format == MTLPixelFormatRGB10A2Unorm;
+    // Bound (abi): Metal staging format must match the four-byte capture layout. Overflow drops the recorder frame and is counted.
+    if (packed10 != isRGB10A2 || (!packed10 && format != MTLPixelFormatBGRA8Unorm &&
+                                 format != MTLPixelFormatBGRA8Unorm_sRGB)) return {};
+    return internal::recorderPackedLayout(tex.width, tex.height,
+        packed10 ? internal::RecorderPixelFormat::RGB10A2 : internal::RecorderPixelFormat::BGRA8);
+}
+
+bool internal::CaptureReadback::readInto(unsigned char* dst, size_t dstStride,
+                                         size_t capacity, bool wantRGBA) const {
+    const auto source = getLayout();
+    auto destination = source;
+    destination.rowBytes = dstStride;
+    destination.byteSize = capacity;
+    // Bound (abi): the native readback destination must hold every captured row. Overflow drops the recorder frame and is counted.
+    if (!dst || !internal::recorderFrameFits(destination, source.width, source.height, source.format))
+        return false;
     id<MTLTexture> tex = (__bridge id<MTLTexture>)staging;
     const NSUInteger w = (NSUInteger)width;
     const NSUInteger h = (NSUInteger)height;
@@ -224,7 +275,7 @@ void internal::CaptureReadback::readInto(unsigned char* dst, int dstStride,
                 else          { drow[x*4+0]=b; drow[x*4+1]=g; drow[x*4+2]=r; drow[x*4+3]=a; }
             }
         }
-        return;
+        return true;
     }
 
     // BGRA8: getBytes straight into dst (respecting the destination row stride).
@@ -243,13 +294,34 @@ void internal::CaptureReadback::readInto(unsigned char* dst, int dstStride,
             }
         }
     }
+    return true;
+}
+
+// Free staging textures, returned by each completion after its readback.
+struct internal::CaptureStagingPool {
+    std::mutex mutex;
+    std::vector<id<MTLTexture>> free;
+};
+
+std::shared_ptr<internal::CaptureStagingPool> internal::makeCaptureStagingPool() {
+    return std::make_shared<internal::CaptureStagingPool>();
+}
+
+std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
+    // Admission also runs in the next frame's prelude, before any drawable
+    // exists. Query native framebuffer dimensions without acquiring or messaging
+    // the borrowed drawable from a swapchain pass.
+    if (!ctx.isMain) return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
+    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
 }
 
 bool internal::captureWindowAsync(
-    const std::function<void(const internal::CaptureReadback&)>& completion) {
+    const std::function<void(const internal::CaptureReadback&)>& completion,
+    const std::shared_ptr<internal::CaptureStagingPool>& pool) {
     // Read back the drawable this frame ACTUALLY rendered into (recorded by the
     // swapchain pass). NOT sapp_get_swapchain() — that advances to the next,
-    // unrendered drawable. Fall back only if no pass ran yet.
+    // unrendered drawable. Frame-end cleanup clears this borrowed pointer;
+    // outside that frame (or before its first pass), acquire a current drawable.
     const void* drawablePtr = internal::currentWindowContext().lastSwapchainDrawable;
     if (!drawablePtr) drawablePtr = sapp_get_swapchain().metal.current_drawable;
     id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)drawablePtr;
@@ -259,23 +331,33 @@ bool internal::captureWindowAsync(
 
     NSUInteger width  = srcTexture.width;
     NSUInteger height = srcTexture.height;
+    mcp::internal::reconcileWindowCapture(width, height);
     MTLPixelFormat pixelFormat = srcTexture.pixelFormat;
+    // Bound (abi): Metal extents must fit the capture int dimensions. Overflow drops the recorder frame and is counted.
+    if (width > (NSUInteger)std::numeric_limits<int>::max() ||
+        height > (NSUInteger)std::numeric_limits<int>::max()) return false;
     id<MTLDevice> device = srcTexture.device;
 
     // sokol sets framebufferOnly=YES on the layer, so getBytes on the drawable
-    // asserts — blit into a shared-storage staging texture first. Use a small
-    // ring so an in-flight async readback isn't clobbered by the next frame's
-    // blit (recording keeps a couple captures in flight). Issued only from the
-    // main thread (afterFrame), so the static ring needs no locking.
-    static const int kRing = 3;
-    static id<MTLTexture> s_ring[kRing] = { nil, nil, nil };
-    static int s_ringIdx = 0;
-    int slot = s_ringIdx;
-    s_ringIdx = (s_ringIdx + 1) % kRing;
-    id<MTLTexture> staging = s_ring[slot];
-    if (!staging || staging.device != device
-        || staging.width != width || staging.height != height
-        || staging.pixelFormat != pixelFormat) {
+    // asserts: blit into a shared-storage staging texture first. Each capture
+    // owns its staging texture until its completion has finished reading; only
+    // then does it go back to the pool. A fixed ring could wrap while an older
+    // readback still used a slot (#361).
+    id<MTLTexture> staging = nil;
+    if (pool) {
+        std::lock_guard<std::mutex> lock(pool->mutex);
+        while (!staging && !pool->free.empty()) {
+            id<MTLTexture> t = pool->free.back();
+            pool->free.pop_back();
+            // A texture of another size or device (window resized or moved)
+            // is dropped here.
+            if (t.device == device && t.width == width && t.height == height
+                && t.pixelFormat == pixelFormat) {
+                staging = t;
+            }
+        }
+    }
+    if (!staging) {
         MTLTextureDescriptor* desc =
             [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixelFormat
                                                                width:width
@@ -284,7 +366,6 @@ bool internal::captureWindowAsync(
         desc.usage = MTLTextureUsageShaderRead;
         desc.storageMode = MTLStorageModeShared;
         staging = [device newTextureWithDescriptor:desc];
-        s_ring[slot] = staging;
     }
     if (!staging) return false;
 
@@ -316,6 +397,7 @@ bool internal::captureWindowAsync(
     // `completion`, so both outlive this function until the handler runs. The
     // consumer reads the staging straight into its own destination buffer.
     std::function<void(const internal::CaptureReadback&)> comp = completion;
+    std::shared_ptr<internal::CaptureStagingPool> returnTo = pool;
     NSUInteger w = width, h = height;
     bool isRGB10A2 = (pixelFormat == MTLPixelFormatRGB10A2Unorm);
     [cmdBuf addCompletedHandler:^(id<MTLCommandBuffer> cb) {
@@ -326,6 +408,11 @@ bool internal::captureWindowAsync(
         rb.height    = (int)h;
         rb.isRGB10A2 = isRGB10A2;
         comp(rb);
+        // The readback is done with it: reusable from here on.
+        if (returnTo) {
+            std::lock_guard<std::mutex> lock(returnTo->mutex);
+            returnTo->free.push_back(staging);
+        }
     }];
     [cmdBuf commit];
     return true;
@@ -340,8 +427,8 @@ bool captureWindow(Pixels& outPixels) {
     bool started = internal::captureWindowAsync(
         [&outPixels, &ok, sem](const internal::CaptureReadback& rb) {
             outPixels.allocate(rb.width, rb.height, 4);
-            rb.readInto(outPixels.getData(), rb.width * 4, /*wantRGBA=*/true);
-            ok = true;
+            ok = rb.readInto(outPixels.getData(), (size_t)rb.width * 4,
+                             outPixels.getTotalBytes(), /*wantRGBA=*/true);
             dispatch_semaphore_signal(sem);
         });
     if (!started) {
@@ -352,85 +439,79 @@ bool captureWindow(Pixels& outPixels) {
     return ok;
 }
 
-bool internal::captureWindowToFile(const std::filesystem::path& path) {
-    // Resolve relative paths
-    if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path));
-    }
-    // Capture to Pixels
+bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
     Pixels pixels;
-    if (!captureWindow(pixels)) {
-        return false;
-    }
+    if (!captureWindow(pixels)) return false;
+    return internal::saveScreenshotPixels(pixels, path);
+}
 
-    // CGImage を作成
-    int width = pixels.getWidth();
-    int height = pixels.getHeight();
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    return writeScreenshotPixels(pixels, requestedPath).ok();
+}
 
-    CGContextRef context = CGBitmapContextCreate(
-        pixels.getData(),
-        width, height,
-        8,                          // bitsPerComponent
-        width * 4,                  // bytesPerRow
-        colorSpace,
-        (CGBitmapInfo)kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
-    );
+SaveResult internal::writeScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    // Retire each encoded payload before its async admission slot is released.
+    @autoreleasepool {
+        const auto path = internal::resolveScreenshotPath(requestedPath);
 
-    if (!context) {
+        // CGImage を作成
+        int width = pixels.getWidth();
+        int height = pixels.getHeight();
+        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+
+        CGContextRef context = CGBitmapContextCreate(
+            const_cast<unsigned char*>(pixels.getData()),
+            width, height,
+            8,                          // bitsPerComponent
+            width * 4,                  // bytesPerRow
+            colorSpace,
+            (CGBitmapInfo)kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
+        );
+
+        if (!context) {
+            CGColorSpaceRelease(colorSpace);
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "CGContext の作成に失敗しました"), "Screenshot");
+        }
+
+        CGImageRef cgImage = CGBitmapContextCreateImage(context);
+        CGContextRelease(context);
         CGColorSpaceRelease(colorSpace);
-        logError() << "[Screenshot] CGContext の作成に失敗しました";
-        return false;
+
+        if (!cgImage) {
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "CGImage の作成に失敗しました"), "Screenshot");
+        }
+
+        // NSBitmapImageRep に変換
+        NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithCGImage:cgImage];
+        CGImageRelease(cgImage);
+
+        if (!rep) {
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "NSBitmapImageRep の作成に失敗しました"), "Screenshot");
+        }
+
+        // ファイル拡張子から形式を判定
+        // Case-insensitive extension match on the resolved destination
+        std::string ext = toLower(getFileExtension(path));
+        NSBitmapImageFileType fileType = NSBitmapImageFileTypePNG;
+        if (ext == "jpg" || ext == "jpeg") {
+            fileType = NSBitmapImageFileTypeJPEG;
+        } else if (ext == "tiff" || ext == "tif") {
+            fileType = NSBitmapImageFileTypeTIFF;
+        } else if (ext == "bmp") {
+            fileType = NSBitmapImageFileTypeBMP;
+        } else if (ext == "gif") {
+            fileType = NSBitmapImageFileTypeGIF;
+        }
+
+        // ファイルに保存
+        NSData* data = [rep representationUsingType:fileType properties:@{}];
+        if (!data) {
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "画像データの作成に失敗しました"), "Screenshot");
+        }
+
+        return internal::atomicWrite(path, data.bytes, data.length, "Screenshot", true);
     }
-
-    CGImageRef cgImage = CGBitmapContextCreateImage(context);
-    CGContextRelease(context);
-    CGColorSpaceRelease(colorSpace);
-
-    if (!cgImage) {
-        logError() << "[Screenshot] CGImage の作成に失敗しました";
-        return false;
-    }
-
-    // NSBitmapImageRep に変換
-    NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithCGImage:cgImage];
-    CGImageRelease(cgImage);
-
-    if (!rep) {
-        logError() << "[Screenshot] NSBitmapImageRep の作成に失敗しました";
-        return false;
-    }
-
-    // ファイル拡張子から形式を判定
-    std::string ext = path.extension().string();
-    NSBitmapImageFileType fileType = NSBitmapImageFileTypePNG;
-    if (ext == ".jpg" || ext == ".jpeg") {
-        fileType = NSBitmapImageFileTypeJPEG;
-    } else if (ext == ".tiff" || ext == ".tif") {
-        fileType = NSBitmapImageFileTypeTIFF;
-    } else if (ext == ".bmp") {
-        fileType = NSBitmapImageFileTypeBMP;
-    } else if (ext == ".gif") {
-        fileType = NSBitmapImageFileTypeGIF;
-    }
-
-    // ファイルに保存
-    NSData* data = [rep representationUsingType:fileType properties:@{}];
-    if (!data) {
-        logError() << "[Screenshot] 画像データの作成に失敗しました";
-        return false;
-    }
-
-    NSString* nsPath = [NSString stringWithUTF8String:path.c_str()];
-    BOOL success = [data writeToFile:nsPath atomically:YES];
-
-    if (success) {
-        logVerbose() << "[Screenshot] 保存完了: " << path;
-    } else {
-        logError() << "[Screenshot] 保存に失敗しました: " << path;
-    }
-
-    return success;
 }
 
 // ---------------------------------------------------------------------------

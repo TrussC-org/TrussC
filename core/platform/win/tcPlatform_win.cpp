@@ -181,6 +181,7 @@ void setWindowSizeLogical(int width, int height) {
 fs::path getExecutablePath() {
     // Native UTF-16 straight into fs::path — no UTF-8 round trip, so
     // non-ASCII install paths survive intact.
+    // Bound (platform): the OS executable path uses MAX_PATH storage. Overflow returns the truncated path from GetModuleFileNameW.
     wchar_t path[MAX_PATH] = { 0 };
     GetModuleFileNameW(nullptr, path, MAX_PATH);
     return fs::path(path);
@@ -196,8 +197,80 @@ fs::path getExecutableDir() {
 }
 
 // ---------------------------------------------------------------------------
+// User data / temp folders (getUserDataPath / getTempPath)
+// ---------------------------------------------------------------------------
+namespace {
+// The executable name (without .exe) names the app's folder.
+fs::path appFolderName() {
+    fs::path name = getExecutablePath().stem();
+    return name.empty() ? fs::path(L"TrussC") : name;
+}
+
+// An environment variable as a path (wide, so non-ASCII names survive)
+fs::path envPath(const wchar_t* name) {
+    DWORD cap = GetEnvironmentVariableW(name, nullptr, 0);
+    while (cap > 0) {
+        std::vector<wchar_t> buf(cap);
+        const DWORD n = GetEnvironmentVariableW(name, buf.data(), cap);
+        if (n == 0) return {};
+        if (n < cap) return fs::path(buf.data());
+        cap = n;   // the variable grew between the size query and the read
+    }
+    return {};
+}
+} // namespace
+
+fs::path internal::platformUserDataRoot() {
+    fs::path base = envPath(L"LOCALAPPDATA");
+    if (base.empty()) {
+        fs::path profile = envPath(L"USERPROFILE");
+        if (profile.empty()) return platformTempRoot();
+        base = profile / L"AppData" / L"Local";
+    }
+    return base / appFolderName();
+}
+
+fs::path internal::platformTempRoot() {
+    DWORD cap = GetTempPathW(0, nullptr);   // %TMP%, else %TEMP%, ...
+    while (cap > 0) {
+        std::vector<wchar_t> buf(cap);
+        const DWORD n = GetTempPathW(cap, buf.data());
+        if (n == 0) break;
+        if (n < cap) return fs::path(buf.data()) / appFolderName();
+        cap = n + 1;
+    }
+    return fs::path(L"C:\\Windows\\Temp") / appFolderName();
+}
+
+fs::path internal::platformAppBundlePath() {
+    return {};
+}
+
+// ---------------------------------------------------------------------------
 // captureWindow - 現在のウィンドウをキャプチャ
 // ---------------------------------------------------------------------------
+std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
+    const void* view = !ctx.isMain ? ctx.lastSwapchain.d3d11.render_view : nullptr;
+    if (!view) view = sapp_get_swapchain().d3d11.render_view;
+    if (view) {
+        ID3D11Resource* resource = nullptr;
+        ((ID3D11RenderTargetView*)view)->GetResource(&resource);
+        if (resource) {
+            ID3D11Texture2D* texture = nullptr;
+            const HRESULT hr = resource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&texture);
+            resource->Release();
+            if (SUCCEEDED(hr) && texture) {
+                D3D11_TEXTURE2D_DESC desc;
+                texture->GetDesc(&desc);
+                texture->Release();
+                return {size_t(desc.Width), size_t(desc.Height)};
+            }
+        }
+    }
+    if (!ctx.isMain) return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
+    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+}
+
 bool captureWindow(Pixels& outPixels) {
     // Pick the render-target view of the CURRENT window: a secondary window's
     // context records its own swapchain in lastSwapchain (beginSwapchainPassInternal),
@@ -238,7 +311,23 @@ bool captureWindow(Pixels& outPixels) {
     // テクスチャの情報を取得
     D3D11_TEXTURE2D_DESC desc;
     backBuffer->GetDesc(&desc);
+    try {
+        mcp::internal::reconcileWindowCapture(desc.Width, desc.Height);
+    } catch (...) {
+        backBuffer->Release();
+        throw;
+    }
 
+    const auto layout = internal::recorderPackedLayout(desc.Width, desc.Height,
+                                                      internal::RecorderPixelFormat::RGBA8);
+    // Bound (abi): D3D11 capture extent and format must fit the pixel layout. Overflow drops the recorder frame and is counted.
+    if (!layout.byteSize || desc.Width > (UINT)std::numeric_limits<int>::max() ||
+        desc.Height > (UINT)std::numeric_limits<int>::max() ||
+        (desc.Format != DXGI_FORMAT_R10G10B10A2_UNORM &&
+         desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM && desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM_SRGB)) {
+        backBuffer->Release();
+        return false;
+    }
     int width = (int)desc.Width;
     int height = (int)desc.Height;
 
@@ -318,17 +407,26 @@ bool captureWindow(Pixels& outPixels) {
     // Pixels を確保
     outPixels.allocate(width, height, 4);
     unsigned char* dst = outPixels.getData();
+    size_t mappedBytes = 0;
+    // Bound (abi): mapped D3D11 rows and destination capacity must cover the capture. Overflow drops the recorder frame and is counted.
+    if (!dst || outPixels.getTotalBytes() < layout.byteSize || !mapped.pData ||
+        mapped.RowPitch < layout.rowBytes ||
+        !internal::recorderByteSize(mapped.RowPitch, height, mappedBytes)) {
+        context->Unmap(stagingTexture, 0);
+        stagingTexture->Release();
+        return false;
+    }
 
     bool isRGB10A2 = (desc.Format == DXGI_FORMAT_R10G10B10A2_UNORM);
 
     unsigned char* src = (unsigned char*)mapped.pData;
     for (int y = 0; y < height; y++) {
-        unsigned char* srcRow = src + y * mapped.RowPitch;
-        unsigned char* dstRow = dst + y * width * 4;
+        unsigned char* srcRow = src + (size_t)y * mapped.RowPitch;
+        unsigned char* dstRow = dst + (size_t)y * layout.rowBytes;
         if (isRGB10A2) {
             // R10G10B10A2: [A:2 (31-30)][B:10 (29-20)][G:10 (19-10)][R:10 (9-0)]
             const uint32_t* srcPixels = (const uint32_t*)srcRow;
-            for (int x = 0; x < width; x++) {
+            for (size_t x = 0; x < (size_t)width; x++) {
                 uint32_t pixel = srcPixels[x];
                 uint32_t r10 = (pixel >>  0) & 0x3FF;
                 uint32_t g10 = (pixel >> 10) & 0x3FF;
@@ -341,7 +439,7 @@ bool captureWindow(Pixels& outPixels) {
             }
         } else {
             // BGRA8 fallback
-            for (int x = 0; x < width; x++) {
+            for (size_t x = 0; x < (size_t)width; x++) {
                 dstRow[x * 4 + 0] = srcRow[x * 4 + 2];  // R <- B
                 dstRow[x * 4 + 1] = srcRow[x * 4 + 1];  // G <- G
                 dstRow[x * 4 + 2] = srcRow[x * 4 + 0];  // B <- R
@@ -359,52 +457,22 @@ bool captureWindow(Pixels& outPixels) {
 // ---------------------------------------------------------------------------
 // saveScreenshot - スクリーンショットをファイルに保存
 // ---------------------------------------------------------------------------
-bool internal::captureWindowToFile(const std::filesystem::path& path) {
-    if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path));
-    }
-    // Capture to Pixels
+bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
     Pixels pixels;
-    if (!captureWindow(pixels)) {
-        return false;
-    }
+    if (!captureWindow(pixels)) return false;
+    return internal::saveScreenshotPixels(pixels, path);
+}
 
-    int width = pixels.getWidth();
-    int height = pixels.getHeight();
-    unsigned char* data = pixels.getData();
+bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    return writeScreenshotPixels(pixels, requestedPath).ok();
+}
 
-    // 拡張子から形式を判定
-    std::string ext = path.extension().string();
-
-    // 小文字に変換
-    for (char& c : ext) {
-        c = (char)std::tolower((unsigned char)c);
-    }
-
-    int result = 0;
-    std::string pathStr = internal::pathToUtf8(path);   // UTF-8 for stb (STBIW_WINDOWS_UTF8)
-
-    if (ext == ".png") {
-        result = stbi_write_png(pathStr.c_str(), width, height, 4, data, width * 4);
-    } else if (ext == ".jpg" || ext == ".jpeg") {
-        result = stbi_write_jpg(pathStr.c_str(), width, height, 4, data, 90);
-    } else if (ext == ".bmp") {
-        result = stbi_write_bmp(pathStr.c_str(), width, height, 4, data);
-    } else if (ext == ".tga") {
-        result = stbi_write_tga(pathStr.c_str(), width, height, 4, data);
-    } else {
-        // デフォルトは PNG
-        pathStr += ".png";
-        result = stbi_write_png(pathStr.c_str(), width, height, 4, data, width * 4);
-    }
-
-    if (result) {
-        logVerbose() << "[Screenshot] Saved: " << pathStr;
-        return true;
-    } else {
-        logError() << "[Screenshot] Failed to save: " << pathStr;
-        return false;
-    }
+SaveResult internal::writeScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
+    return internal::atomicWrite(path, [&](std::FILE* file) {
+        return internal::writePixelsEncoded(file, pixels, toLower(getFileExtension(path)), path);
+    }, "Screenshot", true);
 }
 
 // ---------------------------------------------------------------------------

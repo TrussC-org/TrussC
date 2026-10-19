@@ -6,6 +6,7 @@
 
 #include "tcxBox2dWorld.h"
 #include "tcxCollider2D.h"
+#include "tcxCollisionManager.h"
 #include <tcNode.h>
 #include <box2d/box2d.h>
 #include <memory>
@@ -18,38 +19,21 @@ namespace tcx::box2d {
 // Base class for all physics objects (circles, rectangles, polygons, etc.)
 // Inherits from tc::Node for scene graph integration
 // =============================================================================
-class Body : public tc::Node {
+class Body : public tc::Node, public detail::BodyOwner {
 public:
     Body() = default;
 
     virtual ~Body() {
-        destroy();
+        if (body_ && world_) world_->releaseBody(body_, World::ExitDelivery::Deferred);
     }
 
     // Non-copyable
     Body(const Body&) = delete;
     Body& operator=(const Body&) = delete;
 
-    // Movable
-    Body(Body&& other) noexcept
-        : tc::Node()
-        , world_(other.world_)
-        , body_(other.body_)
-    {
-        other.world_ = nullptr;
-        other.body_ = nullptr;
-    }
-
-    Body& operator=(Body&& other) noexcept {
-        if (this != &other) {
-            destroy();
-            world_ = other.world_;
-            body_ = other.body_;
-            other.world_ = nullptr;
-            other.body_ = nullptr;
-        }
-        return *this;
-    }
+    // Stable address: the World holds this owner's back-link.
+    Body(Body&&) = delete;
+    Body& operator=(Body&&) = delete;
 
     // -------------------------------------------------------------------------
     // Node Integration: sync Box2D position to Node each frame
@@ -261,15 +245,30 @@ public:
     // Body Type
     // -------------------------------------------------------------------------
     void setStatic() {
-        if (body_) body_->SetType(b2_staticBody);
+        if (body_) {
+            auto* cm = world_->getCollisionManager();
+            auto operation = cm->mutation();
+            body_->SetType(b2_staticBody);
+            if (cm) cm->drain();
+        }
     }
 
     void setDynamic() {
-        if (body_) body_->SetType(b2_dynamicBody);
+        if (body_) {
+            auto* cm = world_->getCollisionManager();
+            auto operation = cm->mutation();
+            body_->SetType(b2_dynamicBody);
+            if (cm) cm->drain();
+        }
     }
 
     void setKinematic() {
-        if (body_) body_->SetType(b2_kinematicBody);
+        if (body_) {
+            auto* cm = world_->getCollisionManager();
+            auto operation = cm->mutation();
+            body_->SetType(b2_kinematicBody);
+            if (cm) cm->drain();
+        }
     }
 
     bool isStaticBody() const {
@@ -296,6 +295,10 @@ public:
     }
 
     void setSensor(bool sensor) {
+        if (collider_) {
+            collider_->isTrigger = sensor;
+            collider_->appliedTrigger_ = sensor;
+        }
         if (body_) {
             for (b2Fixture* f = body_->GetFixtureList(); f; f = f->GetNext()) {
                 f->SetSensor(sensor);
@@ -312,7 +315,12 @@ public:
     }
 
     void setEnabled(bool enabled) {
-        if (body_) body_->SetEnabled(enabled);
+        if (body_) {
+            auto* cm = world_->getCollisionManager();
+            auto operation = cm->mutation();
+            body_->SetEnabled(enabled);
+            if (cm) cm->drain();
+        }
     }
 
     bool isBodyEnabled() const {
@@ -323,10 +331,7 @@ public:
     // Destruction
     // -------------------------------------------------------------------------
     void destroy() {
-        if (body_ && world_ && world_->getWorld()) {
-            world_->getWorld()->DestroyBody(body_);
-            body_ = nullptr;
-        }
+        if (body_ && world_) world_->releaseBody(body_);
     }
 
     // -------------------------------------------------------------------------
@@ -342,7 +347,10 @@ public:
     const Collider2D* getCollider() const { return collider_.get(); }
 
 protected:
-    void setBody(b2Body* body) { body_ = body; }
+    void setBody(b2Body* body) {
+        body_ = body;
+        if (body_) world_->attachOwner(body_, *this);
+    }
 
     b2Fixture* getFixture() {
         return body_ ? body_->GetFixtureList() : nullptr;
@@ -352,24 +360,38 @@ protected:
         return body_ ? body_->GetFixtureList() : nullptr;
     }
 
-    // Setup collider and link to fixture
+    // Setup collider and link it to every fixture of the body (a compound
+    // body has several; the collider stands for all of them)
     template<typename ColliderType>
     ColliderType* setupCollider() {
         auto collider = std::make_unique<ColliderType>();
         collider->body_ = this;
         collider->fixture_ = getFixture();
 
-        // Store collider pointer in fixture's UserData
-        if (collider->fixture_) {
-            collider->fixture_->GetUserData().pointer =
-                reinterpret_cast<uintptr_t>(collider.get());
+        // Store collider pointer in each fixture's UserData
+        if (body_) {
+            for (b2Fixture* f = body_->GetFixtureList(); f; f = f->GetNext()) {
+                f->GetUserData().pointer = reinterpret_cast<uintptr_t>(collider.get());
+            }
         }
 
+        collider->syncTriggerMode();
         ColliderType* ptr = collider.get();
         collider_ = std::move(collider);
         return ptr;
     }
 
+private:
+    void onWorldReleased() override {
+        body_ = nullptr;
+        world_ = nullptr;
+        if (collider_) collider_->fixture_ = nullptr;
+    }
+
+protected:
+    // A surviving-side Exit may delete the C++ caller during shape setup.
+    // Separate object lifetime from the generation of its borrowed b2Body.
+    std::shared_ptr<int> objectLife = std::make_shared<int>(0);
     World* world_ = nullptr;
     b2Body* body_ = nullptr;
     std::unique_ptr<Collider2D> collider_;

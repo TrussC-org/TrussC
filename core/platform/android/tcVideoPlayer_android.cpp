@@ -30,6 +30,7 @@ float VideoPlayer::getDurationPlatform() const { return 0.0f; }
 void VideoPlayer::setVolumePlatform(float vol) { (void)vol; }
 void VideoPlayer::setSpeedPlatform(float speed) { (void)speed; }
 void VideoPlayer::setLoopPlatform(bool loop) { (void)loop; }
+float VideoPlayer::getFrameRatePlatform() const { return 0.0f; }
 int VideoPlayer::getCurrentFramePlatform() const { return 0; }
 int VideoPlayer::getTotalFramesPlatform() const { return 0; }
 void VideoPlayer::setFramePlatform(int frame) { (void)frame; }

@@ -31,8 +31,9 @@ SOFTWARE.
 Bundled in `src/tiny_obj_loader.h`.
 
 - Repository: https://github.com/tinyobjloader/tinyobjloader
-- Version: release branch (single-header)
-- To update: download latest from https://raw.githubusercontent.com/tinyobjloader/tinyobjloader/release/tiny_obj_loader.h
+- Version: see [docs/LICENSE.md](../../docs/LICENSE.md#third-party-libraries)
+  (single-header, `release` branch), with TrussC patches
+- Provenance, TrussC patches and how to update: [PROVENANCE.md](PROVENANCE.md)
 
 MIT License
 

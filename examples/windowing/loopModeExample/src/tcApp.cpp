@@ -124,6 +124,10 @@ void tcApp::keyPressed(int key) {
     }
     else if (key == '5') {
         mode = 4;
+        // 500 Hz is ~8 update steps per 60 Hz frame, close to the default cap
+        // of 10 steps per frame. Allow 20 (40 ms of updates per frame), so a
+        // short hitch or a slower display catches up instead of dropping time.
+        setMaxUpdateSteps(20);
         setIndependentFps(500, VSYNC);  // Update: 500Hz, Draw: VSync
         logNotice("tcApp") << "Mode: Decoupled (Update 500Hz, Draw VSync)";
     }

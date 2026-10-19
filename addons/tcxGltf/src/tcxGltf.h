@@ -20,8 +20,13 @@
 //
 // Does NOT support (yet):
 //   - Animation, skinning, morph targets
-//   - Multiple scenes (loads scene 0 or the default scene)
+//   - Multiple scenes (loads the default scene or scene 0; a file without
+//     scenes loads every root node)
 //   - Cameras, lights (KHR_lights_punctual)
+//   - Primitives whose POSITION or index accessor has no data in memory (no
+//     buffer view, or a buffer without data), including the valid glTF case
+//     of an index accessor that is all zeros plus sparse values: such a
+//     primitive is skipped with a warning, and the rest of the model loads
 //
 // =============================================================================
 
@@ -52,7 +57,8 @@ public:
     // -------------------------------------------------------------------------
 
     // Load a .gltf or .glb file. Path is resolved via getDataPath().
-    bool load(const std::string& path);
+    // Missing files and decode failures return a LoadResult and log one Error.
+    LoadResult load(const fs::path& path);
 
     bool isLoaded() const { return loaded_; }
 
@@ -85,6 +91,16 @@ private:
     std::vector<std::unique_ptr<Texture>> textures_;
     bool loaded_ = false;
 };
+
+namespace internal {
+
+// Test hook, not a user setting: when set, load() calls it once for each
+// texture it is about to read, so a test can make that step throw and check
+// that load() recovers. nullptr (the default) turns it off. Set it only while
+// no load() is running.
+void setTextureLoadHookForTests(void (*hook)());
+
+} // namespace internal
 
 } // namespace tcx::gltf
 

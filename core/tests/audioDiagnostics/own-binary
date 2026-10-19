@@ -1,0 +1,1 @@
+Replaces the global operator new/delete and interposes libc fclose (link-time, whole binary), so it must not share a binary with other tests.

@@ -87,11 +87,13 @@ FileDialogResult loadDialog(const std::string& title,
         OPENFILENAMEW ofn;
         ZeroMemory(&ofn, sizeof(ofn));
 
+        // Bound (platform): the Windows dialog uses MAX_PATH storage. Overflow fails the dialog call, so no path is returned.
         wchar_t szFileName[MAX_PATH] = L"";
 
         ofn.lStructSize = sizeof(ofn);
         ofn.hwndOwner = GetActiveWindow();
         ofn.lpstrFile = szFileName;
+        // Bound (platform): the dialog must fit the MAX_PATH buffer. Overflow fails the dialog call, so no path is returned.
         ofn.nMaxFile = MAX_PATH;
         ofn.lpstrFilter = L"All Files\0*.*\0";
         ofn.nFilterIndex = 1;
@@ -185,16 +187,19 @@ FileDialogResult saveDialog(const std::string& title,
     OPENFILENAMEW ofn;
     ZeroMemory(&ofn, sizeof(ofn));
 
+    // Bound (platform): the Windows save dialog uses MAX_PATH storage. Overflow fails the dialog call, so no path is returned.
     wchar_t szFileName[MAX_PATH] = L"";
 
     if (!defaultName.empty()) {
         std::wstring nameW = defaultName.wstring();
+        // Bound (platform): the supplied default name must fit MAX_PATH storage. Overflow truncates the default name before opening the dialog.
         wcsncpy_s(szFileName, MAX_PATH, nameW.c_str(), _TRUNCATE);
     }
 
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = GetActiveWindow();
     ofn.lpstrFile = szFileName;
+    // Bound (platform): the save dialog must fit the MAX_PATH buffer. Overflow fails the dialog call, so no path is returned.
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrFilter = L"All Files\0*.*\0";
     ofn.nFilterIndex = 1;

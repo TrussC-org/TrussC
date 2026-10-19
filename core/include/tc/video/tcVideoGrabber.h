@@ -16,6 +16,8 @@
 #include <memory>
 #include <cstdint>
 #include <cstring>
+#include "tc/utils/tcKeptThreads.h"
+#include "tc/utils/tcMainThread.h"
 
 namespace trussc {
 
@@ -48,12 +50,14 @@ struct GrabberFrame {
 
 namespace internal {
 
+struct VideoGrabberTestAccess;
+
 // Frame FIFO shared between the capture thread and the main thread.
-// Held by unique_ptr in VideoGrabber so the address stays stable across moves
-// (the capture callback keeps a raw pointer to it).
+// Owned by the capture State; its address stays stable across handle moves.
 struct GrabberFrameQueue {
     std::mutex mtx;
     std::deque<GrabberFrame> frames;
+    // Bound (security): camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame.
     std::atomic<size_t> maxFrames{0};  // 0 = queueing disabled
 
     // Called from the capture thread. Drops the oldest frame when full so a
@@ -69,6 +73,26 @@ struct GrabberFrameQueue {
         while (frames.size() >= cap) frames.pop_front();
         frames.push_back(std::move(f));
     }
+};
+
+// Everything used by a capture run belongs to this state. Platform callbacks
+// retain it for the duration of their work; none borrow the public handle.
+struct GrabberSharedState {
+    std::mutex mtx;
+    std::atomic<bool> dirty{false};
+    std::atomic<bool> stopped{false};
+    std::unique_ptr<unsigned char[]> pixels;
+    GrabberFrameQueue frameQueue;
+    std::shared_ptr<void> platformData;
+    int width = 0;
+    int height = 0;
+    int requestedWidth = 640;
+    int requestedHeight = 480;
+    uint32_t webId = 0;
+    std::thread captureThread;
+    KeptThreads keptThreads;
+
+    ~GrabberSharedState() { keptThreads.release(captureThread); }
 };
 
 } // namespace internal
@@ -142,12 +166,10 @@ public:
     // If permission is not granted, requests it and returns false.
     // Call update() every frame - it will automatically initialize once permission is granted.
     bool setup(int width = 640, int height = 480) {
-        if (initialized_) {
-            close();
-        }
+        close(); // A new State owns this run; queue capacity is preserved.
 
-        requestedWidth_ = width;
-        requestedHeight_ = height;
+        state_->requestedWidth = width;
+        state_->requestedHeight = height;
 
         // Check permission (macOS 10.14+)
         if (!checkCameraPermission()) {
@@ -162,21 +184,26 @@ public:
 
     // Stop camera
     void close() {
-        if (!initialized_) return;
-
+        auto queueSize = getFrameQueueSize();
+        pendingSetup_ = false;
+        state_->stopped.store(true);
         closePlatform();
-
-        texture_.clear();
-
-        if (pixels_) {
-            delete[] pixels_;
-            pixels_ = nullptr;
+        state_->keptThreads.release(state_->captureThread);
+        state_->keptThreads.joinOthers();
+        if (texture_.isAllocated() && !isMainThread()) {
+            // GPU destruction belongs to the main thread too. This cleanup
+            // owns the texture and must run even though the handle has died.
+            auto texture = std::make_shared<Texture>(std::move(texture_));
+            runOnMainThread([texture] { texture->clear(); });
+        } else {
+            texture_.clear();
         }
+        // The last callback releases the old run, including its pixel buffer.
+        state_ = std::make_shared<internal::GrabberSharedState>();
 
+        setFrameQueueSize(queueSize);
         initialized_ = false;
         frameNew_ = false;
-        width_ = 0;
-        height_ = 0;
     }
 
     // =========================================================================
@@ -206,7 +233,7 @@ public:
         if (checkResizeNeeded()) {
             int newW = 0, newH = 0;
             getNewSize(newW, newH);
-            if (newW > 0 && newH > 0 && (newW != width_ || newH != height_)) {
+            if (newW > 0 && newH > 0 && (newW != state_->width || newH != state_->height)) {
                 // Resize buffers on main thread
                 resizeBuffers(newW, newH);
             }
@@ -214,9 +241,9 @@ public:
         }
 
         // Update texture if buffer was updated
-        if (pixelsDirty_.exchange(false)) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            texture_.loadData(pixels_, width_, height_, 4);
+        if (state_->dirty.exchange(false)) {
+            std::lock_guard<std::mutex> lock(state_->mtx);
+            texture_.loadData(state_->pixels.get(), state_->width, state_->height, 4);
             frameNew_ = true;
         }
     }
@@ -232,8 +259,8 @@ public:
 
     bool isInitialized() const { return initialized_; }
     bool isPendingPermission() const { return pendingSetup_; }
-    int getWidth() const { return width_; }
-    int getHeight() const { return height_; }
+    int getWidth() const { return state_->width; }
+    int getHeight() const { return state_->height; }
 
     // Get current device name
     const std::string& getDeviceName() const { return deviceName_; }
@@ -242,8 +269,8 @@ public:
     // Pixel access
     // =========================================================================
 
-    unsigned char* getPixels() { return pixels_; }
-    const unsigned char* getPixels() const { return pixels_; }
+    unsigned char* getPixels() { return state_->pixels.get(); }
+    const unsigned char* getPixels() const { return state_->pixels.get(); }
 
     // =========================================================================
     // Buffered frames (opt-in, timestamped)
@@ -258,36 +285,38 @@ public:
     // Enable/resize the internal frame queue (0 = disable, the default).
     // When full, the oldest frame is dropped. Sizing hint: keep it at least
     // ceil(cameraFps / appFps) + a little headroom; 8-16 is plenty.
+    // Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame.
     TC_PLATFORMS("macos,windows,linux") void setFrameQueueSize(size_t maxFrames) {
-        frameQueue_->maxFrames.store(maxFrames, std::memory_order_relaxed);
+        state_->frameQueue.maxFrames.store(maxFrames, std::memory_order_relaxed);
         if (maxFrames == 0) {
-            std::lock_guard<std::mutex> lock(frameQueue_->mtx);
-            frameQueue_->frames.clear();
+            std::lock_guard<std::mutex> lock(state_->frameQueue.mtx);
+            state_->frameQueue.frames.clear();
         }
     }
 
+    // Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame.
     TC_PLATFORMS("macos,windows,linux") size_t getFrameQueueSize() const {
-        return frameQueue_->maxFrames.load(std::memory_order_relaxed);
+        return state_->frameQueue.maxFrames.load(std::memory_order_relaxed);
     }
 
     // Drain all frames captured since the last call (appended to out, oldest
     // first). Returns the number of frames appended. Frames are moved out of
     // the internal queue, so each frame is delivered exactly once.
     TC_PLATFORMS("macos,windows,linux") size_t getQueuedFrames(std::vector<GrabberFrame>& out) {
-        std::lock_guard<std::mutex> lock(frameQueue_->mtx);
-        size_t n = frameQueue_->frames.size();
-        for (auto& f : frameQueue_->frames) out.push_back(std::move(f));
-        frameQueue_->frames.clear();
+        std::lock_guard<std::mutex> lock(state_->frameQueue.mtx);
+        size_t n = state_->frameQueue.frames.size();
+        for (auto& f : state_->frameQueue.frames) out.push_back(std::move(f));
+        state_->frameQueue.frames.clear();
         return n;
     }
 
     // Copy to Image
     void copyToImage(Image& image) const {
-        if (!initialized_ || !pixels_) return;
+        if (!initialized_ || !state_->pixels) return;
 
-        image.allocate(width_, height_, 4);
-        std::lock_guard<std::mutex> lock(mutex_);
-        std::memcpy(image.getPixelsData(), pixels_, width_ * height_ * 4);
+        image.allocate(state_->width, state_->height, 4);
+        std::lock_guard<std::mutex> lock(state_->mtx);
+        std::memcpy(image.getPixelsData(), state_->pixels.get(), state_->width * state_->height * 4);
         image.setDirty();
         image.update();
     }
@@ -312,11 +341,8 @@ public:
     static void requestCameraPermission();
 
 private:
-    // Size
-    int width_ = 0;
-    int height_ = 0;
-    int requestedWidth_ = 640;
-    int requestedHeight_ = 480;
+    friend struct internal::VideoGrabberTestAccess;
+
     int deviceId_ = 0;
     int desiredFrameRate_ = -1;  // -1 = unspecified (camera default)
 
@@ -327,33 +353,17 @@ private:
     bool pendingSetup_ = false;  // Waiting for permission
     std::string deviceName_;
 
-    // Pixel data (RGBA)
-    unsigned char* pixels_ = nullptr;
-
-    // Thread synchronization
-    mutable std::mutex mutex_;
-    std::atomic<bool> pixelsDirty_{false};
-
-    // Timestamped frame FIFO (see getQueuedFrames). unique_ptr keeps the
-    // address stable across moves - the capture callback holds a raw pointer.
-    std::unique_ptr<internal::GrabberFrameQueue> frameQueue_ =
-        std::make_unique<internal::GrabberFrameQueue>();
+    std::shared_ptr<internal::GrabberSharedState> state_ =
+        std::make_shared<internal::GrabberSharedState>();
 
     // Texture (Stream mode)
     Texture texture_;
-
-    // Platform-specific handle
-    void* platformHandle_ = nullptr;
 
     // -------------------------------------------------------------------------
     // Internal methods
     // -------------------------------------------------------------------------
 
     void moveFrom(VideoGrabber&& other) {
-        width_ = other.width_;
-        height_ = other.height_;
-        requestedWidth_ = other.requestedWidth_;
-        requestedHeight_ = other.requestedHeight_;
         deviceId_ = other.deviceId_;
         desiredFrameRate_ = other.desiredFrameRate_;
         initialized_ = other.initialized_;
@@ -361,39 +371,35 @@ private:
         verbose_ = other.verbose_;
         pendingSetup_ = other.pendingSetup_;
         deviceName_ = std::move(other.deviceName_);
-        pixels_ = other.pixels_;
-        pixelsDirty_.store(other.pixelsDirty_.load());
+        state_ = std::move(other.state_);
+        other.state_ = std::make_shared<internal::GrabberSharedState>();
         texture_ = std::move(other.texture_);
-        platformHandle_ = other.platformHandle_;
-        frameQueue_ = std::move(other.frameQueue_);
-        other.frameQueue_ = std::make_unique<internal::GrabberFrameQueue>();
 
         // Invalidate source object
-        other.pixels_ = nullptr;
         other.initialized_ = false;
         other.pendingSetup_ = false;
-        other.platformHandle_ = nullptr;
-        other.width_ = 0;
-        other.height_ = 0;
     }
 
     // Complete setup after permission is granted
     bool completeSetup() {
-        // Platform-specific setup (sets width_, height_)
+        // Platform-specific setup (sets state_->width, state_->height)
         if (!setupPlatform()) {
             return false;
         }
 
         // Allocate pixel buffer
-        size_t bufferSize = width_ * height_ * 4;
-        pixels_ = new unsigned char[bufferSize];
-        std::memset(pixels_, 0, bufferSize);
+        size_t bufferSize = state_->width * state_->height * 4;
+        {
+            std::lock_guard<std::mutex> lock(state_->mtx);
+            state_->pixels = std::make_unique<unsigned char[]>(bufferSize);
+            std::memset(state_->pixels.get(), 0, bufferSize);
+        }
 
         // Set pixel buffer pointer for delegate
         updateDelegatePixels();
 
         // Create texture (Stream mode: for per-frame updates)
-        texture_.allocate(width_, height_, 4, TextureUsage::Stream);
+        texture_.allocate(state_->width, state_->height, 4, TextureUsage::Stream);
 
         initialized_ = true;
         return true;
@@ -410,18 +416,17 @@ private:
 
         // Lock mutex and swap old buffer
         {
-            std::lock_guard<std::mutex> lock(mutex_);
-            delete[] pixels_;
-            pixels_ = newPixels;
-            width_ = newWidth;
-            height_ = newHeight;
+            std::lock_guard<std::mutex> lock(state_->mtx);
+            state_->pixels.reset(newPixels);
+            state_->width = newWidth;
+            state_->height = newHeight;
+
+            // Publish the new buffer before capture can use the old pointer.
+            updateDelegatePixels();
         }
 
-        // Notify delegate of new pointer
-        updateDelegatePixels();
-
         // Recreate texture
-        texture_.allocate(width_, height_, 4, TextureUsage::Stream);
+        texture_.allocate(state_->width, state_->height, 4, TextureUsage::Stream);
     }
 
     // -------------------------------------------------------------------------

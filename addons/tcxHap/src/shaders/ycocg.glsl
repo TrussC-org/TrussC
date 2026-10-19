@@ -17,18 +17,14 @@ layout(location=1) in vec2 texcoord0;
 layout(location=2) in vec4 color0;
 
 layout(binding=0) uniform vs_params {
-    vec2 screenSize;
-    vec2 _pad;
+    mat4 mvp;
 };
 
 out vec2 uv;
 out vec4 vertColor;
 
 void main() {
-    // Convert screen coordinates to NDC
-    vec2 ndc = (position.xy / screenSize) * 2.0 - 1.0;
-    ndc.y = -ndc.y;  // Flip Y for OpenGL coordinate system
-    gl_Position = vec4(ndc, position.z, 1.0);
+    gl_Position = mvp * vec4(position, 1.0);
     uv = texcoord0;
     vertColor = color0;
 }

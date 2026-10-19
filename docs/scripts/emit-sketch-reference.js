@@ -36,7 +36,8 @@ const REF_DATA = path.join(__dirname, '../reference/reference-data.json');
 const CATEGORIES = path.join(__dirname, '../reference/categories.json');
 const COLORS = path.join(__dirname, '../reference/colors.json');
 const EXTRAS = path.join(__dirname, '../reference/extras.json');
-const OUT = path.join(__dirname, '../../../trussc.org/generated/trusssketch-ref.js');
+const outputArg = process.argv.indexOf('--out');
+const OUT = outputArg >= 0 ? process.argv[outputArg + 1] : path.join(__dirname, '../../../trussc.org/generated/trusssketch-ref.js');
 
 // Actual Lua binding surface of the HAND-WRITTEN tcxLua usertypes (see the lib
 // header). Hand types are advertised from THIS (bound member names, reserved-
@@ -149,7 +150,7 @@ const OTHER_ID = '__other__';
 const funcsByCat = new Map();   // catId -> [func entry, …]
 for (const id in REF) {
     const e = REF[id];
-    if (e.kind !== 'func' || e.owner || e.ns || e.hidden || e.deprecated) continue;
+    if (e.kind !== 'func' || e.owner || e.ns || e.hidden || e.lua_skip || e.deprecated) continue;
     if (e.tparams && e.tparams.length) continue;
     if (/^operator/.test(e.name)) continue;
     const bindSigs = (e.signatures || []).filter(sigBindable);
@@ -231,7 +232,7 @@ for (const catId of orderedCatIds) {
 const types = [];
 for (const id in REF) {
     const e = REF[id];
-    if (e.kind !== 'type' || e.owner || e.ns || e.hidden) continue;
+    if (e.kind !== 'type' || e.owner || e.ns || e.hidden || e.lua_skip) continue;
     if (UNBOUND_TYPES.has(e.name)) continue;
     // Tween is a template: reference-data holds prose only. Its four value-typed
     // Lua instances are emitted separately (below) from the defineTween surface.
@@ -298,7 +299,7 @@ for (const id in REF) {
             const m = REF[mid];
             if (m.owner !== e.id) continue;
             if (m.access && m.access !== 'public') continue;
-            if (m.hidden || m.deprecated) continue;
+            if (m.hidden || m.lua_skip || m.deprecated) continue;
             if (/^operator/.test(m.name)) continue;
             if (m.kind === 'field') {
                 const ft = m.type || '';
@@ -369,7 +370,7 @@ types.sort((a, b) => a.name.localeCompare(b.name));
 const enums = [];
 for (const id in REF) {
     const e = REF[id];
-    if (e.kind !== 'enum' || e.owner || e.ns || e.hidden) continue;
+    if (e.kind !== 'enum' || e.owner || e.ns || e.hidden || e.lua_skip) continue;
     if (!e.members || !e.members.length) continue;
     const out = {
         name: e.name,
@@ -393,7 +394,7 @@ enums.sort((a, b) => a.name.localeCompare(b.name));
 const constants = [];
 for (const id in REF) {
     const e = REF[id];
-    if (e.kind !== 'var' || e.owner || e.ns || e.hidden) continue;
+    if (e.kind !== 'var' || e.owner || e.ns || e.hidden || e.lua_skip) continue;
     constants.push({
         name: e.name,
         value: extras.constants[e.id] ?? extras.constants[e.name] ?? '',

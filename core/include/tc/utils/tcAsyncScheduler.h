@@ -38,16 +38,13 @@ public:
     using Clock    = std::chrono::steady_clock;
     using Callback = std::function<void()>;
 
-    static AsyncScheduler& get() {
-        static AsyncScheduler instance;
-        return instance;
-    }
+    // The one scheduler thread per process. Defined in tcGlobal.cpp, with
+    // newOwner(): header-inline, each Windows hot reload guest started its own
+    // scheduler thread and numbered owners on its own (#249).
+    static AsyncScheduler& get();
 
     // A unique, non-zero owner token so a Node can group + cancel its timers.
-    static uint64_t newOwner() {
-        static std::atomic<uint64_t> next{1};
-        return next.fetch_add(1, std::memory_order_relaxed);
-    }
+    static uint64_t newOwner();
 
     // Fire `cb` once after `seconds`. Returns a task id (for cancel()).
     uint64_t after(uint64_t owner, double seconds, Callback cb) {
@@ -65,6 +62,7 @@ public:
     void cancel(uint64_t id) {
         std::unique_lock<std::mutex> lk(mtx_);
         eraseIf([id](const Task& t) { return t.id == id; });
+        wakeWorker();
         waitInFlight(lk, [&] { return executingId_ == id; });
     }
 
@@ -73,6 +71,7 @@ public:
         if (owner == 0) return;
         std::unique_lock<std::mutex> lk(mtx_);
         eraseIf([owner](const Task& t) { return t.owner == owner; });
+        wakeWorker();
         waitInFlight(lk, [&] { return executingOwner_ == owner; });
     }
 
@@ -85,17 +84,16 @@ private:
         Callback          cb;
     };
 
-    AsyncScheduler() : worker_([this] { run(); }) {}
-    ~AsyncScheduler() {
-        {
-            std::lock_guard<std::mutex> lk(mtx_);
-            stop_ = true;
-        }
-        cv_.notify_all();
-        if (worker_.joinable()) worker_.join();
-    }
+    AsyncScheduler();
+    ~AsyncScheduler();
     AsyncScheduler(const AsyncScheduler&)            = delete;
     AsyncScheduler& operator=(const AsyncScheduler&) = delete;
+
+    // Caller holds mtx_. Windows waits on a high-resolution timer and an
+    // auto-reset task-change event; unsupported systems use cv_ as before.
+    void wakeWorker();
+    void waitUntil(std::unique_lock<std::mutex>& lk, Clock::time_point when);
+    void closeWaitHandles();
 
     static Clock::duration toDuration(double seconds) {
         return std::chrono::duration_cast<Clock::duration>(
@@ -109,8 +107,8 @@ private:
         {
             std::lock_guard<std::mutex> lk(mtx_);
             tasks_.push_back({id, owner, when, interval, std::move(cb)});
+            wakeWorker();   // wake the worker to recompute its sleep target
         }
-        cv_.notify_all();   // wake the worker to recompute its sleep target
         return id;
     }
 
@@ -140,7 +138,7 @@ private:
                 [](const Task& a, const Task& b) { return a.when < b.when; });
             auto when = next->when;
             if (Clock::now() < when) {
-                cv_.wait_until(lk, when);   // wakes early if a task is added/removed
+                waitUntil(lk, when);        // wakes early if a task is added/removed
                 continue;                  // re-evaluate the earliest task
             }
 
@@ -177,6 +175,10 @@ private:
     uint64_t                executingOwner_ = 0;
     std::thread::id         workerId_;
     bool                    stop_ = false;
+#ifdef _WIN32
+    void*                   timer_ = nullptr;     // waitable timer HANDLE
+    void*                   taskEvent_ = nullptr; // auto-reset event HANDLE
+#endif
     std::thread             worker_;    // declared last: starts after the rest
 };
 

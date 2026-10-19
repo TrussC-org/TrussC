@@ -30,19 +30,36 @@
 
 namespace tcx::nodeinspector {
 
-// Renders each reflected member as the matching ImGui widget. Public so an app
-// can subclass and override a visit() to customize how a given type is edited.
-// Read-only values (getter-only TC_VALUE) render greyed out; enums
-// render as a combo of their labels.
+class NodeInspector;
+
+namespace internal {
+// Tests only: record a hand edit of `member` (of `mod` when non-null) the way
+// the Inspector panel does, without an ImGui frame (tcxNodeInspector/tests).
+void recordTouchedForTests(NodeInspector& inspector, ::tc::Node* node, ::tc::Mod* mod,
+                           const std::string& member);
+}
+
+// Renders each reflected member as the matching ImGui widget. Read-only
+// values (getter-only TC_VALUE) render greyed out; enums render as a combo of
+// their labels. Public so an app can use it (or a subclass that overrides a
+// visit()) in its own ImGui panel via node->reflectMembers(r). The Inspector
+// always builds this base class itself, so a subclass does not change the
+// Inspector's widgets or its touched record.
 struct ImGuiReflector : ::trussc::Reflector {
-    bool visit(const char* n, float& v) override       { return edit([&] { return ImGui::DragFloat(n, &v, 0.5f); }); }
-    bool visit(const char* n, int& v) override         { return edit([&] { return ImGui::DragInt(n, &v); }); }
-    bool visit(const char* n, bool& v) override        { return edit([&] { return ImGui::Checkbox(n, &v); }); }
-    bool visit(const char* n, ::tc::Vec2& v) override  { return edit([&] { return ImGui::DragFloat2(n, &v.x, 0.5f); }); }
-    bool visit(const char* n, ::tc::Vec3& v) override  { return edit([&] { return ImGui::DragFloat3(n, &v.x, 0.5f); }); }
-    bool visit(const char* n, ::tc::Color& v) override { return edit([&] { return ImGui::ColorEdit4(n, &v.r); }); }
+    // Members changed through their widget in this pass, as member paths
+    // ("radius", nested groups joined by '.': "outline.color"). The inspector
+    // records its own reflector's list as touched; in a subclass used
+    // elsewhere, an override that calls edit(name, ...) adds to this list.
+    std::vector<std::string> edited;
+
+    bool visit(const char* n, float& v) override       { return edit(n, [&] { return ImGui::DragFloat(n, &v, 0.5f); }); }
+    bool visit(const char* n, int& v) override         { return edit(n, [&] { return ImGui::DragInt(n, &v); }); }
+    bool visit(const char* n, bool& v) override        { return edit(n, [&] { return ImGui::Checkbox(n, &v); }); }
+    bool visit(const char* n, ::tc::Vec2& v) override  { return edit(n, [&] { return ImGui::DragFloat2(n, &v.x, 0.5f); }); }
+    bool visit(const char* n, ::tc::Vec3& v) override  { return edit(n, [&] { return ImGui::DragFloat3(n, &v.x, 0.5f); }); }
+    bool visit(const char* n, ::tc::Color& v) override { return edit(n, [&] { return ImGui::ColorEdit4(n, &v.r); }); }
     bool visit(const char* n, std::string& v) override {
-        return edit([&] {
+        return edit(n, [&] {
             char buf[256];
             std::snprintf(buf, sizeof(buf), "%s", v.c_str());
             if (ImGui::InputText(n, buf, sizeof(buf))) { v = buf; return true; }
@@ -50,7 +67,7 @@ struct ImGuiReflector : ::trussc::Reflector {
         });
     }
     bool visit(const char* n, int& v, const ::trussc::EnumLabelSpan& labels) override {
-        return edit([&] {
+        return edit(n, [&] {
             const char* preview = (v >= 0 && v < labels.count) ? labels.labels[v] : "(?)";
             bool changed = false;
             if (ImGui::BeginCombo(n, preview)) {
@@ -68,6 +85,7 @@ struct ImGuiReflector : ::trussc::Reflector {
     // its whole subtree so the reflected children draw nothing.
     void beginGroup(const char* name) override {
         depth_++;
+        groupNames_.push_back(name);
         if (suppressDepth_ > 0) { groupState_.push_back(0); return; }
         bool open = ImGui::TreeNodeEx(
             name, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth);
@@ -83,25 +101,43 @@ struct ImGuiReflector : ::trussc::Reflector {
         groupState_.pop_back();
         if (state == 1) ImGui::TreePop();
         if (suppressDepth_ == depth_) suppressDepth_ = 0;
+        groupNames_.pop_back();
         depth_--;
     }
 
 protected:
     // Run a widget; suppress inside a collapsed group, grey out when read-only.
+    // A change is recorded in `edited` under the member's path. A value the
+    // MCP tools wrote (tcx_imgui_input) also makes the widget return true, so
+    // the change is applied, but it is not an edit by hand: not recorded.
     template <class F>
-    bool edit(F&& widget) {
+    bool edit(const char* name, F&& widget) {
         if (suppressDepth_ > 0) return false;
-        if (!isReadOnly()) return widget();
+        if (!isReadOnly()) {
+            const unsigned int injectedBefore = tcx::imgui::detail::injectedValueCount();
+            bool changed = widget();
+            const bool injected = tcx::imgui::detail::injectedValueCount() != injectedBefore;
+            if (changed && name && !injected) {
+                std::string path;
+                for (auto& g : groupNames_) { path += g; path += '.'; }
+                edited.push_back(path + name);
+            }
+            return changed;
+        }
         ImGui::BeginDisabled(true);
         widget();
         ImGui::EndDisabled();
         return false;
     }
+    // Unnamed form (kept for overrides written against it): nothing is recorded.
+    template <class F>
+    bool edit(F&& widget) { return edit(nullptr, std::forward<F>(widget)); }
 
 private:
     int depth_ = 0;                  // current group nesting depth
     int suppressDepth_ = 0;          // >0: suppress until we exit this depth
     std::vector<int> groupState_;    // per open group: 0 suppressed, 1 open, 2 collapsed
+    std::vector<std::string> groupNames_;   // enclosing group names (member paths)
 };
 
 // A single debug overlay per app — NodeInspector is a singleton, not something
@@ -181,6 +217,11 @@ public:
     // from an onRender listener — after the scene is drawn, so the gizmo's camera
     // projection is current-frame, and before tcxImGui's render. Root defaults to
     // getRootNode() (the running App); pass one to inspect a subtree instead.
+    // That root is held weakly (like every node the inspector keeps between
+    // frames): once it is freed, the inspector shows the parent the root was
+    // last seen under (updated every frame while the root lives, so adding
+    // or reparenting it after attach() is followed), and once that is gone
+    // too (or there was none), getRootNode().
     // Each returns the singleton, so a call chains into the instance API
     // (e.g. NodeInspector::attach(KEY_F1).setAccent(...)).
     //
@@ -221,14 +262,30 @@ public:
     void toggleInSelection(::tc::Node* n);            // = Cmd/Ctrl+click
     void clearSelection();
 
+    // -------------------------------------------------------------------------
+    // Touched: what the user changed by hand, per node
+    // -------------------------------------------------------------------------
+    // Every member edited in the Inspector panel (the name field included) and
+    // every node moved / rotated with the gizmo is recorded under its node,
+    // mod and member path until resetTouched(). Changes made from code or by
+    // the MCP tool tc_set_node_members are not recorded. The MCP tool
+    // tcx_imgui_get_touched reports them (key "inspector") with each member's
+    // current value, in the tc_get_node_tree encoding; tcx_imgui_reset_touched
+    // clears them along with the ImGui widgets' record.
+    ::tc::Json getTouched();
+    void resetTouched() { touched_.clear(); }
+
 private:
+    friend void internal::recordTouchedForTests(NodeInspector&, ::tc::Node*, ::tc::Mod*,
+                                                const std::string&);
+
     Style    style_;
     bool     enabled_      = true;
     char     nameBuf_[128] = "";
     uint64_t nameBufFor_   = 0;
 
     // Singleton: no user-constructed instances (use instance() / the static API).
-    NodeInspector() = default;
+    NodeInspector();
     NodeInspector(const NodeInspector&) = delete;
     NodeInspector& operator=(const NodeInspector&) = delete;
 
@@ -239,12 +296,15 @@ private:
     void doAttach();                          // imguiSetup + onRender listener
     void doDetach();                          // drop the frame driver
     void ensureToggleKeyListener();
-    void ensureExitGuard();                   // drop listeners at exit (before teardown)
+    void ensureExitGuard();                   // drop listeners at exit / hot reload unload
+    void releaseListeners();                  // the cleanup both run
     ::tc::EventListener autoDraw_;             // onRender frame driver (attach)
-    ::tc::Node*         attachRoot_ = nullptr; // null => getRootNode() each frame
+    std::weak_ptr<::tc::Node> attachRoot_;     // empty or gone => attachParent_
+    std::weak_ptr<::tc::Node> attachParent_;   // attachRoot_'s last seen parent; gone => getRootNode()
     std::vector<int>    toggleKeys_;
     ::tc::EventListener toggleKeyListener_;    // installed once, then lives on
     ::tc::EventListener exitListener_;         // clears the above while events() is alive
+    ::tc::EventListener hotReloadUnloadListener_;   // same, before a hot reload unloads this generation
 
     // --- gizmo ---------------------------------------------------------------
     enum class GizmoMode { Translate, Rotate };
@@ -285,7 +345,7 @@ private:
     int        hoverAxis_ = -1;       // visual feedback (computed in drawGizmo)
     int        dragAxis_  = -1;       // claimed at press; -1 = not dragging
     GizmoMode  dragMode_  = GizmoMode::Translate;   // locked for the whole gesture
-    ::tc::Node* dragNode_ = nullptr;  // primary at press (cancel if selection dies)
+    std::weak_ptr<::tc::Node> dragNode_;   // primary at press (cancel if selection dies)
     ::tc::Vec3 dragWorldStart_;       // gizmo origin at press (node / centroid)
     ::tc::Vec3 dragAxisDir_;          // world unit axis (move dir / rotation normal)
     float      dragS0_ = 0.0f;        // translate: axis parameter of the grab point
@@ -300,8 +360,25 @@ private:
 
     // --- multi-selection -------------------------------------------------------
     std::vector<std::weak_ptr<::tc::Node>> selection_;
-    ::tc::Node* lastPrimary_ = nullptr;   // last core selectedNode we synced with
+    std::weak_ptr<::tc::Node> lastPrimary_;   // last core selectedNode we synced with
     void reconcileSelection();            // prune dead + collapse on external change
+
+    // --- touched ---------------------------------------------------------------
+    // Keyed by node + mod type (short name, as getModByTypeName()) + member
+    // path. The Inspector's widgets are reused for whichever node is selected
+    // (one ImGuiID for "radius" of every node), so the ImGui-level record
+    // can't say whose value it was — hence this one, and the Hierarchy /
+    // Inspector panels are kept out of the ImGui record.
+    struct TouchedMember {
+        std::weak_ptr<::tc::Node> node;
+        uint64_t          nodeId = 0;
+        std::string       nodeType, nodeName;
+        std::string       modType;         // short type name; empty = the node's own member
+        std::string       member;          // "pos", "outline.color", "name"
+        ::tc::Json        value;           // as of the last edit / read (reported once gone)
+    };
+    std::vector<TouchedMember> touched_;
+    void recordTouched(::tc::Node* node, ::tc::Mod* mod, const std::string& member);
 };
 
 } // namespace tcx::nodeinspector

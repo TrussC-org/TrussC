@@ -1,0 +1,1 @@
+Interposes operator new to measure allocations before admission rejection.

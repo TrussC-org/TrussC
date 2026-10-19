@@ -9,10 +9,11 @@
 // - FontAtlasManager: Atlas management (multi-atlas, dynamic expansion)
 // - Font: User-facing class
 //
-// TODO: Memory optimization
-// - Currently uses RGBA8 (4bytes/pixel)
-// - Could reduce to 1/4 with R8 (1byte/pixel) + custom shader
-// - Requires direct sokol_gfx usage with shader swizzle
+// Atlas pages are R8: one byte of glyph coverage per texel, on the CPU and on
+// the GPU. They are drawn with internal::activeCoverage2D(), whose shader
+// (core/shaders/sglCoverage.glsl) uses R as alpha. A page starts at 256x256 and
+// doubles up to the GPU's max 2D image size, capped at 8192x8192 (4096x4096
+// when the limit cannot be queried); after that a new page is added.
 // =============================================================================
 
 #include <string>
@@ -21,8 +22,10 @@
 #include <memory>
 #include <cstdint>
 #include <fstream>
+#include <filesystem>
 #include <functional>
 #include <cstring>
+#include <cmath>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/fetch.h>
@@ -38,7 +41,9 @@
 #include "stb/stb_truetype.h"
 
 #include "../utils/tcLog.h"
+#include "../utils/tcOnceGate.h"
 #include "tc/utils/tcLoadResult.h"
+#include "tc/utils/tcResourceLoad.h"
 #include "../utils/tcSystemFont.h"
 #include "../types/tcDirection.h"
 #include "../types/tcRectangle.h"
@@ -60,7 +65,7 @@
     #define TC_FONT_SANS_JA  "https://cdn.jsdelivr.net/fontsource/fonts/noto-sans-jp@latest/japanese-400-normal.ttf"
     #define TC_FONT_SERIF_JA "https://cdn.jsdelivr.net/fontsource/fonts/noto-serif-jp@latest/japanese-400-normal.ttf"
 #elif defined(_WIN32)
-    // Windows — resolved via DirectWrite (not yet implemented; falls back to path)
+    // Windows — resolved via DirectWrite
     #define TC_FONT_SANS     "Segoe UI"
     #define TC_FONT_SERIF    "Times New Roman"
     #define TC_FONT_MONO     "Consolas"
@@ -81,7 +86,7 @@
     #define TC_FONT_SANS_JA  "Noto Sans CJK JP"
     #define TC_FONT_SERIF_JA "Noto Serif CJK JP"
 #else
-    // Linux — resolved via fontconfig (not yet implemented; falls back to path)
+    // Linux — resolved via fontconfig
     #define TC_FONT_SANS     "DejaVu Sans"
     #define TC_FONT_SERIF    "DejaVu Serif"
     #define TC_FONT_MONO     "DejaVu Sans Mono"
@@ -95,12 +100,22 @@ namespace trussc {
 // Font class below wraps all of this.
 namespace internal {
 
+// Test hooks, not user settings (core/tests/fontSfntCheck): lower the vertex
+// limit of stb_truetype's CFF counting pass and its flattened point limit,
+// and cap the size STBTT_malloc allocates, so a test reaches these limits
+// with small fonts. Values above the defaults are clamped to them. The reset
+// restores the defaults (stb's vertex and point limits, no size cap). State
+// lives in core/include/impl/stb_impl.cpp.
+void setStbttLimitsForTests(int maxVertices, int maxPoints, size_t mallocMax);
+void resetStbttLimitsForTests();
+
 // ---------------------------------------------------------------------------
-// Font cache key (font path + size)
+// Font cache key (font path + face index + size)
 // ---------------------------------------------------------------------------
 struct FontCacheKey {
     std::string fontPath;
     int fontSize;
+    int faceIndex = 0;      // face inside a collection (.ttc / .otc); 0 for a single font
     bool mipmaps = true;    // allowed to build a mip chain (built lazily on first minified draw)
     int oversample = 1;     // rasterize NxN finer, then box-prefilter back down
 
@@ -110,6 +125,7 @@ struct FontCacheKey {
 
     bool operator==(const FontCacheKey& other) const {
         return fontPath == other.fontPath && fontSize == other.fontSize
+            && faceIndex == other.faceIndex
             && mipmaps == other.mipmaps && oversample == other.oversample;
     }
 };
@@ -120,7 +136,8 @@ struct FontCacheKeyHash {
         size_t h2 = std::hash<int>()(key.fontSize);
         size_t h3 = std::hash<bool>()(key.mipmaps);
         size_t h4 = std::hash<int>()(key.oversample);
-        return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3);
+        size_t h5 = std::hash<int>()(key.faceIndex);
+        return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3) ^ (h5 << 4);
     }
 };
 
@@ -162,6 +179,8 @@ public:
     sg_image getTexture() const { return texture_; }
     sg_view getView() const { return view_; }
     bool isTextureValid() const { return textureValid_; }
+    // CPU copy of the page: width * height bytes, glyph coverage per texel.
+    const std::vector<uint8_t>& getPixels() const { return pixels_; }
 
 private:
     friend class FontAtlasManager;
@@ -179,7 +198,7 @@ private:
     bool textureDirty_ = false;
 
     // CPU-side pixel data (for expansion/update)
-    std::vector<uint8_t> pixels_;  // RGBA
+    std::vector<uint8_t> pixels_;  // R8: glyph coverage, one byte per texel
 };
 
 // ---------------------------------------------------------------------------
@@ -198,18 +217,47 @@ public:
     // -------------------------------------------------------------------------
     // Initialization
     // -------------------------------------------------------------------------
-    bool setup(const std::string& fontPath, int fontSize) {
+    // `faceIndex` picks the face inside a font collection (.ttc / .otc); a
+    // single font has only face 0.
+    static int atlasLimit() {
+        if (!sg_isvalid()) return 4096;
+        const int limit = sg_query_limits().max_image_size_2d;
+        // Bound (gpu): font glyph atlases must fit the GPU limit; the 8192 ceiling also bounds each page allocation. Overflow caps atlas dimensions and uses further pages as needed.
+        return limit > 0 ? std::min(limit, 8192) : 4096;
+    }
+    bool setup(const std::string& fontPath, int fontSize, int faceIndex = 0) {
+        return prepareFile(fontPath, fontSize, faceIndex, atlasLimit());
+    }
+    bool prepareFile(const std::string& fontPath, int fontSize, int faceIndex, int atlasLimit) {
+        maxAtlasSize_ = atlasLimit;
         cleanup();
 
         // Load font file (fontPath is UTF-8 — convert so non-ASCII paths
         // survive on Windows)
-        std::ifstream file(internal::utf8ToPath(fontPath), std::ios::binary | std::ios::ate);
+        const auto path = internal::utf8ToPath(fontPath);
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(path, ec)) {
+            logError() << "FontAtlasManager: not a regular file: " << fontPath;
+            return false;
+        }
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
         if (!file) {
             logError() << "FontAtlasManager: failed to open " << fontPath;
             return false;
         }
 
-        size_t fileSize = file.tellg();
+        const std::streamoff end = file.tellg();
+        if (end < 0) {
+            logError() << "FontAtlasManager: cannot get the size of " << fontPath;
+            return false;
+        }
+        // Same size limit as checkSfntSkeleton, checked before the buffer
+        // is allocated.
+        if ((uint64_t)end >= kMaxFontDataSize) {
+            logWarning() << "FontAtlasManager: not a usable font (" << kTooLargeReason << ")";
+            return false;
+        }
+        const size_t fileSize = (size_t)end;
         file.seekg(0, std::ios::beg);
         fontData_.resize(fileSize);
         if (!file.read(reinterpret_cast<char*>(fontData_.data()), fileSize)) {
@@ -217,16 +265,23 @@ public:
             return false;
         }
 
-        return initFromFontData(fontSize);
+        fontName_ = fontPath;
+        return initFromFontData(fontSize, faceIndex);
     }
 
-    bool setupFromMemory(const uint8_t* data, size_t size, int fontSize) {
+    bool setupFromMemory(const uint8_t* data, size_t size, int fontSize, int faceIndex = 0) {
+        maxAtlasSize_ = atlasLimit();
         cleanup();
 
-        fontData_.resize(size);
-        std::memcpy(fontData_.data(), data, size);
+        if (!data && size > 0) {
+            logWarning() << "FontAtlasManager: font data pointer is null";
+            return false;
+        }
+        // Empty data is rejected by the sfnt check in initFromFontData.
+        fontData_.assign(data, data + size);
 
-        return initFromFontData(fontSize);
+        fontName_ = "font data in memory";
+        return initFromFontData(fontSize, faceIndex);
     }
 
     // Opt-in mipmapping. Must be set before glyphs are uploaded (the atlas
@@ -252,11 +307,68 @@ public:
 
     // Must be set before any glyph is rasterized (glyphs are lazy, so setting
     // it right after setup() is early enough). Clamped to at least 1.
-    void setOversample(int n) { oversample_ = (n < 1) ? 1 : n; }
+    void setOversample(int n) {
+        oversample_ = (n < 1) ? 1 : n;
+        if (loaded_) warnIfGlyphsExceedPage();
+    }
     int getOversample() const { return oversample_; }
 
+    // Test hook (core/tests/fontAtlasLimit), not part of the Font API:
+    // largest atlas page side in texels (the GPU limit, capped at 8192).
+    int getMaxAtlasSizeForTests() const { return maxAtlasSize_; }
+
 private:
-    bool initFromFontData(int fontSize, int fontIndex = 0) {
+    // A glyph fits the largest page when its padded box fits the region the
+    // packer fills first on a page grown to maxAtlasSize_: the right half,
+    // starting GLYPH_PADDING in from the top and from the middle.
+    bool fitsLargestPage(int paddedWidth, int paddedHeight) const {
+        // Bound (gpu): file glyphs must fit the atlas page packing region. Overflow triggers downsampling, then invalidation with a log if the glyph still cannot fit.
+        return paddedWidth <= maxAtlasSize_ / 2 - GLYPH_PADDING &&
+               paddedHeight <= maxAtlasSize_ - GLYPH_PADDING;
+    }
+
+    // Load-time check: the font's overall bounding box at this size and
+    // oversampling against the largest page. When some glyphs can be larger
+    // than a page, those glyphs are rasterized at a lower resolution (see
+    // addGlyphToAtlas); one warning per loaded font says so.
+    void warnIfGlyphsExceedPage() {
+        int bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
+        stbtt_GetFontBoundingBox(&fontInfo_, &bx0, &by0, &bx1, &by1);
+        const double s = (double)scale_ * oversample_;
+        const double w = std::ceil(bx1 * s) - std::floor(bx0 * s) + (oversample_ - 1);
+        const double h = std::ceil(by1 * s) - std::floor(by0 * s) + (oversample_ - 1);
+        const int pw = (int)std::min(w + GLYPH_PADDING, 1e9);
+        const int ph = (int)std::min(h + GLYPH_PADDING, 1e9);
+        if (fitsLargestPage(pw, ph)) return;
+        if (!pageLimitWarned_.isFirstTime()) return;
+        logWarning("Font") << fontName_ << " at size " << fontSize_
+                           << " (oversampling " << oversample_
+                           << "): some glyphs are larger than an atlas page ("
+                           << maxAtlasSize_ << "x" << maxAtlasSize_
+                           << " texels); those glyphs are drawn at a lower resolution";
+    }
+
+    bool initFromFontData(int fontSize, int fontIndex) {
+        // The face index is checked against the number of faces in the data:
+        // the font count of a collection, 1 for a single font.
+        const uint64_t faces = faceCount(fontData_.data(), fontData_.size());
+        if (faces > 0 && (fontIndex < 0 || (uint64_t)fontIndex >= faces)) {
+            logError() << "FontAtlasManager: face index " << fontIndex
+                       << " is out of range (the font has " << faces
+                       << (faces == 1 ? " face)" : " faces)");
+            fontData_.clear();
+            return false;
+        }
+
+        // The sfnt structure is checked against the data size before the data
+        // is given to stb_truetype.
+        std::string reason;
+        if (!checkSfntSkeleton(fontData_.data(), fontData_.size(), fontIndex, reason)) {
+            logWarning() << "FontAtlasManager: not a usable font (" << reason << ")";
+            fontData_.clear();
+            return false;
+        }
+
         // Get font offset (required for .ttc files with multiple fonts)
         int offset = stbtt_GetFontOffsetForIndex(fontData_.data(), fontIndex);
         if (offset < 0) {
@@ -270,6 +382,20 @@ private:
             logError() << "FontAtlasManager: failed to init font";
             fontData_.clear();
             return false;
+        }
+
+        // Usable glyph indices are below maxp numGlyphs, and for a CFF font
+        // also below the number of CharStrings.
+        glyphLimit_ = fontInfo_.numGlyphs;
+        if (!fontInfo_.glyf) {
+            const int count = cffCharStringsCount(fontInfo_.charstrings);
+            if (count < 1) {
+                logWarning() << "FontAtlasManager: not a usable font "
+                                "(CFF CharStrings INDEX cannot be read)";
+                fontData_.clear();
+                return false;
+            }
+            glyphLimit_ = std::min(glyphLimit_, count);
         }
 
         fontSize_ = fontSize;
@@ -288,21 +414,259 @@ private:
         // baseline against the live transform. See Font::fitY().
 
         // Get space advance
-        int spaceIndex = stbtt_FindGlyphIndex(&fontInfo_, ' ');
+        int spaceIndex = findGlyphIndex(' ');
         int advanceWidth, leftSideBearing;
         stbtt_GetGlyphHMetrics(&fontInfo_, spaceIndex, &advanceWidth, &leftSideBearing);
         spaceAdvance_ = advanceWidth * scale_;
-
-        // Query GPU max texture size (cap at 8192 for sanity)
-        if (sg_isvalid()) {
-            int gpuMax = sg_query_limits().max_image_size_2d;
-            maxAtlasSize_ = (gpuMax > 0) ? std::min(gpuMax, 8192) : 4096;
-        }
 
         // Create first atlas
         createNewAtlas();
 
         loaded_ = true;
+        warnIfGlyphsExceedPage();
+        return true;
+    }
+
+    // Glyph index for a codepoint. A glyph index from the cmap past numGlyphs
+    // (for CFF, past the CharStrings count) maps to .notdef (0), and so does a
+    // codepoint above U+10FFFF.
+    int findGlyphIndex(uint32_t codepoint) const {
+        if (codepoint > 0x10FFFF) return 0;
+        const int glyph = stbtt_FindGlyphIndex(&fontInfo_, (int)codepoint);
+        if (glyph < 0 || glyph >= glyphLimit_) return 0;
+        return glyph;
+    }
+
+    // Number of entries in a CFF INDEX (stb's view of the CharStrings INDEX,
+    // which lies within the CFF table), or 0 when the count and its offset
+    // array do not fit in the buffer.
+    static int cffCharStringsCount(const stbtt__buf& index) {
+        if (!index.data || index.size < 3) return 0;
+        const uint64_t count = ((uint64_t)index.data[0] << 8) | index.data[1];
+        const uint64_t offSize = index.data[2];
+        if (count == 0 || offSize < 1 || offSize > 4) return 0;
+        if (3 + (count + 1) * offSize > (uint64_t)index.size) return 0;
+        return (int)count;
+    }
+
+    // -------------------------------------------------------------------------
+    // sfnt skeleton check (stb_truetype backend)
+    //
+    // Checks the collection header, the table directory, the fixed fields of
+    // head / hhea / maxp / cmap, loca and hmtx against the data size before
+    // the data is given to stb_truetype. For cmap subtables it checks only
+    // the format, not their contents, glyph outlines or CFF data. It belongs
+    // to the stb backend: drop it together with stb if the backend is replaced.
+    // Offsets and lengths are added in 64 bits.
+    // -------------------------------------------------------------------------
+    // Bound (abi): the bundled font decoder uses signed offsets; font data must leave room for offset arithmetic. Overflow rejects the font.
+    static constexpr uint64_t kMaxFontDataSize = 0x40000000u;
+    static constexpr const char* kTooLargeReason =
+        "the bundled font engine (stb_truetype) cannot handle fonts larger than 1 GiB";
+
+    // Number of faces in font data: the font count of a collection whose
+    // header and offset table fit in the data, 1 for any other data of at
+    // least 12 bytes, 0 when the header cannot be read (checkSfntSkeleton
+    // gives the reason then).
+    static uint64_t faceCount(const uint8_t* data, size_t size) {
+        if (!data || size < 12) return 0;
+        auto u32 = [data](uint64_t o) -> uint64_t {
+            return ((uint64_t)data[o] << 24) | ((uint64_t)data[o + 1] << 16) |
+                   ((uint64_t)data[o + 2] << 8) | data[o + 3];
+        };
+        if (u32(0) != 0x74746366u) return 1;  // 'ttcf'
+        const uint64_t numFonts = u32(8);
+        if (numFonts == 0 || 12 + 4 * numFonts > (uint64_t)size) return 0;
+        return numFonts;
+    }
+
+    static bool checkSfntSkeleton(const uint8_t* data, size_t size, int fontIndex,
+                                  std::string& reason) {
+        auto u16 = [data](uint64_t o) -> uint64_t {
+            return ((uint64_t)data[o] << 8) | data[o + 1];
+        };
+        auto u32 = [data](uint64_t o) -> uint64_t {
+            return ((uint64_t)data[o] << 24) | ((uint64_t)data[o + 1] << 16) |
+                   ((uint64_t)data[o + 2] << 8) | data[o + 3];
+        };
+        auto tag = [](const char* t) -> uint64_t {
+            return ((uint64_t)(uint8_t)t[0] << 24) | ((uint64_t)(uint8_t)t[1] << 16) |
+                   ((uint64_t)(uint8_t)t[2] << 8) | (uint8_t)t[3];
+        };
+        auto tagName = [](uint64_t t) {
+            std::string s(4, ' ');
+            for (int i = 0; i < 4; i++) {
+                const char c = (char)((t >> (24 - 8 * i)) & 0xff);
+                s[i] = (c >= 0x20 && c < 0x7f) ? c : '?';
+            }
+            return s;
+        };
+
+        const uint64_t n = size;
+        if (n < 12) {
+            reason = "data is " + std::to_string(size) + " bytes, shorter than a font header";
+            return false;
+        }
+        // The stb backend handles fonts below 1 GiB.
+        if (n >= kMaxFontDataSize) {
+            reason = kTooLargeReason;
+            return false;
+        }
+
+        // Font collection (.ttc): pick the font at fontIndex.
+        uint64_t fontStart = 0;
+        if (u32(0) == tag("ttcf")) {
+            const uint64_t version = u32(4);
+            if (version != 0x00010000u && version != 0x00020000u) {
+                reason = "unsupported font collection version";
+                return false;
+            }
+            const uint64_t numFonts = u32(8);
+            if (numFonts == 0 || 12 + 4 * numFonts > n) {
+                reason = "font collection header is truncated";
+                return false;
+            }
+            if (fontIndex < 0 || (uint64_t)fontIndex >= numFonts) {
+                reason = "font index " + std::to_string(fontIndex) + " is out of range";
+                return false;
+            }
+            fontStart = u32(12 + 4 * (uint64_t)fontIndex);
+            if (fontStart + 12 > n) {
+                reason = "font offset in the collection is outside the data";
+                return false;
+            }
+        } else if (fontIndex != 0) {
+            reason = "font index " + std::to_string(fontIndex) + " is out of range";
+            return false;
+        }
+
+        // The sfnt versions stb_truetype accepts.
+        const uint64_t sfntVersion = u32(fontStart);
+        if (sfntVersion != 0x00010000u && sfntVersion != tag("1\0\0\0") &&
+            sfntVersion != tag("true") && sfntVersion != tag("typ1") &&
+            sfntVersion != tag("OTTO")) {
+            reason = "not a TrueType / OpenType font";
+            return false;
+        }
+
+        // Table directory. As in stbtt_InitFont, the first entry with a given
+        // tag is used, and an entry at offset 0 counts as missing.
+        const uint64_t numTables = u16(fontStart + 4);
+        const uint64_t dirStart = fontStart + 12;
+        if (dirStart + 16 * numTables > n) {
+            reason = "table directory is truncated";
+            return false;
+        }
+        struct Table { uint64_t offset = 0, length = 0; bool seen = false, found = false; };
+        Table cmap, head, hhea, hmtx, maxp, glyf, loca, cff;
+        const std::pair<uint64_t, Table*> wanted[] = {
+            {tag("cmap"), &cmap}, {tag("head"), &head}, {tag("hhea"), &hhea},
+            {tag("hmtx"), &hmtx}, {tag("maxp"), &maxp}, {tag("glyf"), &glyf},
+            {tag("loca"), &loca}, {tag("CFF "), &cff},
+        };
+        for (uint64_t i = 0; i < numTables; i++) {
+            const uint64_t rec = dirStart + 16 * i;
+            const uint64_t t = u32(rec);
+            const uint64_t offset = u32(rec + 8);
+            const uint64_t length = u32(rec + 12);
+            if (offset + length > n) {
+                reason = "table '" + tagName(t) + "' is outside the data";
+                return false;
+            }
+            for (const auto& w : wanted) {
+                if (w.first == t && !w.second->seen) {
+                    *w.second = Table{offset, length, true, offset != 0};
+                }
+            }
+        }
+
+        // Required tables, and the fixed fields stb reads from them.
+        const bool trueType = glyf.found;  // same rule as stbtt_InitFont
+        const std::pair<const char*, const Table*> required[] = {
+            {"cmap", &cmap}, {"head", &head}, {"hhea", &hhea}, {"hmtx", &hmtx},
+            {"maxp", &maxp}, {trueType ? "loca" : "CFF ", trueType ? &loca : &cff},
+        };
+        for (const auto& r : required) {
+            if (!r.second->found) {
+                reason = std::string("missing required table '") + r.first + "'";
+                return false;
+            }
+        }
+        if (head.length < 54 || hhea.length < 36 || maxp.length < 6 || cmap.length < 4) {
+            reason = "head / hhea / maxp / cmap table is too short";
+            return false;
+        }
+
+        // cmap encoding records, and the offsets of the subtables stb may pick
+        // (Microsoft Unicode BMP / full, or any Unicode platform record).
+        const uint64_t numSubtables = u16(cmap.offset + 2);
+        if (4 + 8 * numSubtables > cmap.length) {
+            reason = "cmap encoding records are truncated";
+            return false;
+        }
+        bool usableCmap = false;
+        for (uint64_t i = 0; i < numSubtables; i++) {
+            const uint64_t rec = cmap.offset + 4 + 8 * i;
+            const uint64_t platform = u16(rec);
+            const uint64_t encoding = u16(rec + 2);
+            if (platform == 0 || (platform == 3 && (encoding == 1 || encoding == 10))) {
+                if (u32(rec + 4) + 2 > cmap.length) {
+                    reason = "cmap subtable offset is outside the cmap table";
+                    return false;
+                }
+                // Match the vendored stbtt_InitFont selection. Read the format
+                // only after checking this Unicode record's subtable offset.
+                const uint64_t format = u16(cmap.offset + u32(rec + 4));
+                if (format == 0 || format == 4 || format == 6 || format == 12 || format == 13)
+                    usableCmap = true;
+            }
+        }
+        if (!usableCmap) {
+            reason = "no usable Unicode character map (stb_truetype supports cmap formats 0, 4, 6, 12 and 13)";
+            return false;
+        }
+
+        // hmtx: numberOfHMetrics long entries, then one short entry per
+        // remaining glyph.
+        const uint64_t numGlyphs = u16(maxp.offset + 4);
+        const uint64_t numLong = u16(hhea.offset + 34);
+        if (numLong < 1 || numLong > numGlyphs) {
+            reason = "hhea numberOfHMetrics is out of range";
+            return false;
+        }
+        if (4 * numLong + 2 * (numGlyphs - numLong) > hmtx.length) {
+            reason = "hmtx table is too short";
+            return false;
+        }
+
+        // loca: numGlyphs + 1 entries, in non-decreasing order, each within
+        // glyf (a glyph's data runs from its entry to the next one).
+        if (trueType) {
+            const uint64_t locaFormat = u16(head.offset + 50);
+            if (locaFormat > 1) {
+                reason = "unsupported loca format";
+                return false;
+            }
+            const uint64_t entrySize = (locaFormat == 0) ? 2 : 4;
+            if ((numGlyphs + 1) * entrySize > loca.length) {
+                reason = "loca table is too short";
+                return false;
+            }
+            uint64_t previous = 0;
+            for (uint64_t i = 0; i <= numGlyphs; i++) {
+                const uint64_t at = loca.offset + i * entrySize;
+                const uint64_t glyphOffset = (locaFormat == 0) ? u16(at) * 2 : u32(at);
+                if (glyphOffset > glyf.length) {
+                    reason = "loca entry points past the end of glyf";
+                    return false;
+                }
+                if (glyphOffset < previous) {
+                    reason = "loca entries are not in increasing order";
+                    return false;
+                }
+                previous = glyphOffset;
+            }
+        }
         return true;
     }
 
@@ -314,7 +678,14 @@ public:
         // deferred: cleanup() also runs mid-frame when a font is re-loaded
         // via setup(), and draws recorded earlier that frame may still
         // reference the old atlas views.
-        if (sg_isvalid()) {
+        const bool hasGpuResources = !pendingDestroys_.empty() ||
+            std::any_of(atlases_.begin(), atlases_.end(), [](const AtlasState& atlas) { return atlas.textureValid_; });
+        // A cancelled worker owns CPU-only pages. Short-circuit before even
+        // sg_isvalid(): sokol queries also belong to main, not the decoder.
+        if (!hasGpuResources && !atlases_.empty() && !isMainThread()) {
+            internal::probeResourceLoad("font.cpu-atlas-retired", {});
+        }
+        if (hasGpuResources && sg_isvalid()) {
             for (auto& pd : pendingDestroys_) {
                 internal::deferGpuDestroy(pd.view);
                 internal::deferGpuDestroy(pd.image);
@@ -330,6 +701,7 @@ public:
         atlases_.clear();
         glyphs_.clear();
         fontData_.clear();
+        glyphLimit_ = 0;
         loaded_ = false;
     }
 
@@ -342,14 +714,11 @@ public:
             return &it->second;
         }
 
-        // Add glyph
+        // Add glyph. A glyph that cannot be placed is kept with valid_ = false,
+        // so it is not tried again until clearAtlas().
         GlyphInfo info;
-        if (addGlyphToAtlas(codepoint, info)) {
-            glyphs_[codepoint] = info;
-            return &glyphs_[codepoint];
-        }
-
-        return nullptr;
+        if (!addGlyphToAtlas(codepoint, info)) info.valid_ = false;
+        return &(glyphs_[codepoint] = info);
     }
 
     bool hasGlyph(uint32_t codepoint) const {
@@ -361,7 +730,7 @@ public:
     // a CJK Compatibility Forms variant (U+FE10–FE4F) is usable.
     bool fontHasGlyph(uint32_t codepoint) const {
         if (!loaded_) return false;
-        return stbtt_FindGlyphIndex(&fontInfo_, (int)codepoint) != 0;
+        return findGlyphIndex(codepoint) != 0;
     }
 
     // -------------------------------------------------------------------------
@@ -380,7 +749,7 @@ public:
         Path result;
         if (!loaded_) return result;
 
-        int glyphIndex = stbtt_FindGlyphIndex(&fontInfo_, (int)codepoint);
+        int glyphIndex = findGlyphIndex(codepoint);
         if (glyphIndex == 0) {
             logWarning() << "FontAtlasManager: no glyph for U+" << std::hex
                          << codepoint << std::dec;
@@ -441,7 +810,7 @@ public:
     // Em-normalized horizontal advance for this codepoint (1.0 = em).
     float getGlyphAdvanceEm(uint32_t codepoint) const {
         if (!loaded_) return 0.f;
-        int glyphIndex = stbtt_FindGlyphIndex(&fontInfo_, (int)codepoint);
+        int glyphIndex = findGlyphIndex(codepoint);
         if (glyphIndex == 0) return 0.f;
         int advanceWidth = 0, lsb = 0;
         stbtt_GetGlyphHMetrics(&fontInfo_, glyphIndex, &advanceWidth, &lsb);
@@ -528,6 +897,7 @@ private:
     // Font data
     std::vector<uint8_t> fontData_;
     stbtt_fontinfo fontInfo_ = {};
+    int glyphLimit_ = 0;         // glyph indices below this are usable
     int fontSize_ = 0;
     float scale_ = 0;
     float ascent_ = 0;
@@ -540,6 +910,8 @@ private:
     bool wantMipmaps_ = true;    // mip chain allowed (opt out via Font::setMipmaps)
     bool mipsBuilt_ = false;     // ...and actually needed, i.e. something minified
     int oversample_ = 1;         // NxN supersampling of the rasterized glyph
+    std::string fontName_;       // path, for log messages
+    OnceGate pageLimitWarned_;   // load-time page-limit warning, once per font
 
     // Glyph cache
     std::unordered_map<uint32_t, GlyphInfo> glyphs_;
@@ -565,7 +937,7 @@ private:
         atlas.currentX_ = GLYPH_PADDING;
         atlas.currentY_ = GLYPH_PADDING;
         atlas.rowHeight_ = 0;
-        atlas.pixels_.resize(atlas.width_ * atlas.height_ * 4, 0);
+        atlas.pixels_.resize((size_t)atlas.width_ * atlas.height_, 0);
         atlas.textureDirty_ = true;
 
         atlases_.push_back(std::move(atlas));
@@ -578,6 +950,7 @@ private:
         int newWidth = atlas.width_ * 2;
         int newHeight = atlas.height_ * 2;
 
+        // Bound (gpu): glyphs from font files must fit the atlas texture limit. Overflow refuses atlas expansion.
         if (newWidth > maxAtlasSize_ || newHeight > maxAtlasSize_) {
             return false;
         }
@@ -587,13 +960,13 @@ private:
                        << " to " << newWidth << "x" << newHeight;
 
         // Create new buffer
-        std::vector<uint8_t> newPixels(newWidth * newHeight * 4, 0);
+        std::vector<uint8_t> newPixels((size_t)newWidth * newHeight, 0);
 
         // Copy old data
         for (int y = 0; y < atlas.height_; y++) {
-            memcpy(newPixels.data() + y * newWidth * 4,
-                   atlas.pixels_.data() + y * atlas.width_ * 4,
-                   atlas.width_ * 4);
+            memcpy(newPixels.data() + (size_t)y * newWidth,
+                   atlas.pixels_.data() + (size_t)y * atlas.width_,
+                   atlas.width_);
         }
 
         // Update UV coordinates (only for glyphs in this atlas)
@@ -633,7 +1006,7 @@ private:
 
     bool addGlyphToAtlas(uint32_t codepoint, GlyphInfo& outInfo) {
         // Render glyph
-        int glyphIndex = stbtt_FindGlyphIndex(&fontInfo_, codepoint);
+        int glyphIndex = findGlyphIndex(codepoint);
 
         // Get glyph metrics
         int advanceWidth, leftSideBearing;
@@ -646,8 +1019,13 @@ private:
         // there is simply more information in the atlas, whatever the transform.
         // Layout below is in OVERSAMPLED texels; the metrics handed back to the
         // draw path are converted to final pixels at the end.
-        const int   os      = oversample_;
-        const float osScale = scale_ * (float)os;
+        //
+        // `rs` is the raster scale (texels per final pixel) and `os` the
+        // prefilter width. Both start at oversample_; for a glyph larger than
+        // the largest page they are lowered below (rs below 1 if needed).
+        int   os      = oversample_;
+        float rs      = (float)os;
+        float osScale = scale_ * rs;
 
         int x0, y0, x1, y1;
         stbtt_GetGlyphBitmapBox(&fontInfo_, glyphIndex, osScale, osScale, &x0, &y0, &x1, &y1);
@@ -674,6 +1052,45 @@ private:
 
         int paddedWidth = glyphWidth + GLYPH_PADDING;
         int paddedHeight = glyphHeight + GLYPH_PADDING;
+
+        // Checked before any page is created or grown: a glyph whose box does
+        // not fit the largest page is rasterized at a lower resolution that
+        // fits, and drawn scaled up to its size in final pixels. Integer scales
+        // keep the box prefilter; below 1 the glyph is rasterized directly.
+        // Bound (gpu): the atlas page size limits file glyphs; at most 32 raster-scale retries downsample them. Overflow marks a still-oversized glyph invalid with a log.
+        for (int attempt = 0; attempt < 32 && !fitsLargestPage(paddedWidth, paddedHeight); ++attempt) {
+            const float fitW = (float)(maxAtlasSize_ / 2 - 2 * GLYPH_PADDING) / (float)glyphWidth;
+            const float fitH = (float)(maxAtlasSize_ - 2 * GLYPH_PADDING) / (float)glyphHeight;
+            const float next = rs * std::min(fitW, fitH) * 0.99f;
+            if (next >= 1.0f) {
+                os = (int)next;
+                rs = (float)os;
+            } else {
+                os = 1;
+                rs = next;
+            }
+            if (!(rs > 0.0f)) break;
+            osScale = scale_ * rs;
+            stbtt_GetGlyphBitmapBox(&fontInfo_, glyphIndex, osScale, osScale, &x0, &y0, &x1, &y1);
+            glyphWidth  = std::max(x1 - x0, 1) + (os - 1);
+            glyphHeight = std::max(y1 - y0, 1) + (os - 1);
+            paddedWidth = glyphWidth + GLYPH_PADDING;
+            paddedHeight = glyphHeight + GLYPH_PADDING;
+        }
+        // Bound (gpu): a downsampled glyph must fit the atlas page. Overflow marks the glyph invalid with a log and returns false.
+        if (!fitsLargestPage(paddedWidth, paddedHeight)) {
+            logWarning("Font") << "glyph U+" << std::hex << codepoint << std::dec
+                               << " does not fit an atlas page of " << maxAtlasSize_
+                               << "x" << maxAtlasSize_ << " texels; it is not drawn";
+            outInfo.advance_ = advanceWidth * scale_;
+            outInfo.valid_ = false;
+            return false;
+        }
+        if (rs < (float)oversample_) {
+            logVerbose("Font") << "glyph U+" << std::hex << codepoint << std::dec
+                               << " rasterized at " << rs << " texels per pixel"
+                               << " (oversampling " << oversample_ << ")";
+        }
 
         // Find atlas that can fit glyph
         size_t targetAtlas = atlases_.size();
@@ -760,21 +1177,15 @@ private:
                                   glyphBitmap.data(),
                                   glyphWidth, glyphHeight,
                                   glyphWidth,  // stride
-                                  scale_, scale_,
+                                  osScale, osScale,
                                   glyphIndex);
         }
 
-        // Copy to atlas (RGBA)
+        // Copy to atlas (R8 coverage)
         for (int y = 0; y < glyphHeight; y++) {
-            for (int x = 0; x < glyphWidth; x++) {
-                int srcIdx = y * glyphWidth + x;
-                int dstIdx = ((destY + y) * atlas.width_ + (destX + x)) * 4;
-                uint8_t alpha = glyphBitmap[srcIdx];
-                atlas.pixels_[dstIdx + 0] = 255;    // R
-                atlas.pixels_[dstIdx + 1] = 255;    // G
-                atlas.pixels_[dstIdx + 2] = 255;    // B
-                atlas.pixels_[dstIdx + 3] = alpha;  // A
-            }
+            memcpy(atlas.pixels_.data() + (size_t)(destY + y) * atlas.width_ + destX,
+                   glyphBitmap.data() + (size_t)y * glyphWidth,
+                   glyphWidth);
         }
 
         // Set glyph info
@@ -786,7 +1197,7 @@ private:
         // UVs above address oversampled TEXELS; everything the draw path uses is
         // in FINAL pixels, so divide out the oversampling here. This is the only
         // place the two spaces meet -- emitPlacedGlyphsToAtlas needs no changes.
-        const float inv = 1.0f / (float)os;
+        const float inv = 1.0f / rs;
         outInfo.xoff_ = (float)x0 * inv + subX;
         outInfo.yoff_ = (float)y0 * inv + subY;
         outInfo.width_ = (float)glyphWidth * inv;
@@ -867,7 +1278,7 @@ private:
         sg_image_desc img_desc = {};
         img_desc.width = atlas.width_;
         img_desc.height = atlas.height_;
-        img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+        img_desc.pixel_format = SG_PIXELFORMAT_R8;   // coverage, drawn by activeCoverage2D()
         // immutable (default) - can set initial data
         img_desc.data.mip_levels[0].ptr = atlas.pixels_.data();
         img_desc.data.mip_levels[0].size = atlas.pixels_.size();
@@ -875,10 +1286,10 @@ private:
         // Optional mip chain: without it, glyphs minified on screen (far/small
         // text, non-HiDPI displays) alias and shimmer under motion — MSAA can't
         // fix in-texture minification. sokol never auto-generates mipmaps, so we
-        // build the chain on the CPU here. Glyph texels are white (RGB=255) with
-        // coverage in A, so every mip keeps RGB=255 and box-averages only alpha;
-        // that avoids the dark colour fringe straight-alpha RGBA averaging would
-        // produce and keeps minified glyphs clean. (GLYPH_PADDING=2 means very
+        // build the chain on the CPU here. Texels hold coverage only (the colour
+        // comes from the vertex colour in the coverage shader), so each mip
+        // box-averages coverage; there is no colour channel to darken at glyph
+        // edges, and minified glyphs stay clean. (GLYPH_PADDING=2 means very
         // coarse mips bleed slightly between neighbours, but that range is
         // sub-pixel on screen and far preferable to shimmer.)
         std::vector<std::vector<uint8_t>> lowerMips;   // levels 1..N (level 0 = atlas.pixels_)
@@ -903,15 +1314,14 @@ private:
             img_desc.num_mipmaps = numMips;
             for (int level = 1; level < numMips; ++level) {
                 int cw = std::max(1, pw / 2), ch = std::max(1, ph / 2);
-                std::vector<uint8_t> dst(static_cast<size_t>(cw) * ch * 4);
+                std::vector<uint8_t> dst(static_cast<size_t>(cw) * ch);
                 for (int y = 0; y < ch; ++y) {
                     for (int x = 0; x < cw; ++x) {
                         int x0 = x * 2, y0 = y * 2;
                         int x1 = std::min(x0 + 1, pw - 1), y1 = std::min(y0 + 1, ph - 1);
-                        int a = (prev[(y0 * pw + x0) * 4 + 3] + prev[(y0 * pw + x1) * 4 + 3]
-                               + prev[(y1 * pw + x0) * 4 + 3] + prev[(y1 * pw + x1) * 4 + 3] + 2) / 4;
-                        uint8_t* d = &dst[(static_cast<size_t>(y) * cw + x) * 4];
-                        d[0] = 255; d[1] = 255; d[2] = 255; d[3] = static_cast<uint8_t>(a);
+                        int a = (prev[y0 * pw + x0] + prev[y0 * pw + x1]
+                               + prev[y1 * pw + x0] + prev[y1 * pw + x1] + 2) / 4;
+                        dst[static_cast<size_t>(y) * cw + x] = static_cast<uint8_t>(a);
                     }
                 }
                 lowerMips.push_back(std::move(dst));
@@ -937,10 +1347,11 @@ private:
 // ---------------------------------------------------------------------------
 class SharedFontCache {
 public:
-    static SharedFontCache& getInstance() {
-        static SharedFontCache instance;
-        return instance;
-    }
+    // One cache per process, defined in tcGlobal.cpp. It keeps every atlas it
+    // holds until a Font reloads at another key. Header-inline, each hot reload
+    // guest generation filled a cache of its own, and the atlases of every old
+    // generation stayed resident, since a guest library is never unloaded (#249).
+    static SharedFontCache& getInstance();
 
     // Get cached font (returns nullptr if not cached)
     std::shared_ptr<FontAtlasManager> get(const FontCacheKey& key) {
@@ -959,11 +1370,12 @@ public:
         }
 
         auto manager = std::make_shared<FontAtlasManager>();
-        if (!manager->setup(key.fontPath, key.fontSize)) {
+        // Oversampling first, so the load-time page check uses it.
+        manager->setOversample(key.oversample);
+        manager->setMipmaps(key.mipmaps);
+        if (!manager->setup(key.fontPath, key.fontSize, key.faceIndex)) {
             return nullptr;
         }
-        manager->setMipmaps(key.mipmaps);
-        manager->setOversample(key.oversample);
 
         cache_[key] = manager;
         return manager;
@@ -978,14 +1390,23 @@ public:
         }
 
         auto manager = std::make_shared<FontAtlasManager>();
-        if (!manager->setupFromMemory(data, size, key.fontSize)) {
+        // Oversampling first, so the load-time page check uses it.
+        manager->setOversample(key.oversample);
+        manager->setMipmaps(key.mipmaps);
+        if (!manager->setupFromMemory(data, size, key.fontSize, key.faceIndex)) {
             return nullptr;
         }
-        manager->setMipmaps(key.mipmaps);
-        manager->setOversample(key.oversample);
 
         cache_[key] = manager;
         return manager;
+    }
+
+    // Main only: another load may have published the same key during decode.
+    std::shared_ptr<FontAtlasManager> publishPrepared(
+            const FontCacheKey& key, std::shared_ptr<FontAtlasManager> candidate) {
+        if (auto cached = get(key)) return cached;
+        if (candidate) cache_[key] = candidate;
+        return candidate;
     }
 
     // Release specific font
@@ -1026,6 +1447,16 @@ private:
     std::unordered_map<FontCacheKey, std::shared_ptr<FontAtlasManager>, FontCacheKeyHash> cache_;
 };
 
+// The samplers every Font draws with (see Font::initResources). One pair per
+// process, defined in tcGlobal.cpp, like the cache above: nothing destroys
+// them, so a copy per module made a new pair for each hot reload generation.
+struct FontSamplers {
+    sg_sampler sharp = {};    // max_lod 0 (1:1 and above)
+    sg_sampler mipped = {};   // full chain (minified)
+    bool initialized = false;
+};
+FontSamplers& fontSamplers();
+
 } // namespace internal
 
 // ---------------------------------------------------------------------------
@@ -1033,15 +1464,44 @@ private:
 // Inheritable: Override to implement custom font system
 // ---------------------------------------------------------------------------
 class Font {
+    struct LoadInput {
+        std::string name, path;
+        int face = 0;
+        bool isDataFile = false;
+    };
+    struct AsyncState : internal::ResourceLoadState {
+        LoadInput input;
+        internal::FontCacheKey key;
+        std::shared_ptr<internal::FontAtlasManager> candidate;
+        float dpi = 1;
+        int size = 0, limit = 4096;
+        bool preflightFailure = false, unsupportedUrl = false, urlTimeout = false;
+#ifdef __EMSCRIPTEN__
+        emscripten_fetch_t* fetch = nullptr;
+        bool fetchComplete = false;
+        double deadline = 0;
+#endif
+    };
 public:
     Font() = default;
     virtual ~Font() = default;
 
-    // Copyable/movable (lightweight, uses shared_ptr)
-    Font(const Font&) = default;
-    Font& operator=(const Font&) = default;
-    Font(Font&&) = default;
-    Font& operator=(Font&&) = default;
+    // Copies share the committed atlas, start idle and have empty listeners.
+    // Assignments keep the destination listeners. Moving cancels both runs.
+    Font(const Font& other) { copyCommitted(other); }
+    Font& operator=(const Font& other) {
+        if (this != &other) { async_.cancel(); copyCommitted(other); }
+        return *this;
+    }
+    Font(Font&& other) noexcept {
+        other.async_.cancel(); moveCommitted(other);
+    }
+    Font& operator=(Font&& other) noexcept {
+        if (this != &other) {
+            async_.cancel(); other.async_.cancel(); moveCommitted(other);
+        }
+        return *this;
+    }
 
     // -------------------------------------------------------------------------
     // Load font
@@ -1050,8 +1510,16 @@ public:
     //   - A URL (Emscripten only, async load)
     //   - A filesystem path
     //   - A system font name (PostScript or family name) — resolved via
-    //     tc::systemFontPath when the path doesn't exist on disk. Lets users
-    //     write `font.load("HiraginoSans-W3", 24)` cross-platform.
+    //     the OS font lookup (as tc::systemFontPath) when the path doesn't
+    //     exist on disk. Lets users write `font.load("HiraginoSans-W3", 24)`
+    //     cross-platform. The name opens the face the OS resolves it to,
+    //     including a later face of a font collection (.ttc).
+    // `faceIndex` picks the face inside a font collection (.ttc / .otc) given
+    // as a file or URL; a single font has only face 0. It must be below the
+    // number of faces in the file, or the load fails with an error. A system
+    // font name uses the face the OS resolves it to instead. The order of the
+    // faces is part of the file, so a file and a face index load the same
+    // face on every OS; system font names depend on the fonts each OS has.
     // -------------------------------------------------------------------------
     // Oversampling (supersampled glyph rasterization)
     // -------------------------------------------------------------------------
@@ -1069,6 +1537,7 @@ public:
     static int getDefaultOversampling() { return defaultOversample_; }
 
     Font& setOversampling(int n) {
+        async_.cancel();
         n = clampOversample(n);
         if (n == oversample_) return *this;      // nothing to rebuild
         oversample_ = n;
@@ -1104,6 +1573,7 @@ public:
     // so apps that never minify text pay nothing. Turn it off to trade shimmer
     // on small/distant text for ~33% less atlas memory and no rebuild cost.
     Font& setMipmaps(bool enabled) {
+        async_.cancel();
         if (enabled == mipmaps_) return *this;
         mipmaps_ = enabled;
         reresolveAtlas([enabled](internal::FontCacheKey& k) { k.mipmaps = enabled; },
@@ -1138,38 +1608,28 @@ private:
     }
 
 public:
-    LoadResult load(const fs::path& nameOrPath, int size) {
+    LoadResult load(const fs::path& nameOrPath, int size, int faceIndex = 0) {
+        async_.cancel();
         // Render glyphs at physical pixel size for sharp text on HiDPI displays.
         // All metrics/drawing are scaled back to logical coordinates.
-        dpiScale_ = sapp_dpi_scale();
+        dpiScale_ = getDpiScale();
         int physicalSize = (int)(size * dpiScale_ + 0.5f);
         logicalSize_ = size;
 
-        // Create sampler and pipeline if not yet
-        if (!resourcesInitialized_) {
-            initResources();
-        }
+        // Create the shared samplers if not yet
+        initResources();
 
         // Resolve input to a concrete path (file / URL). A font NAME
         // ("HiraginoSans-W3") is a valid relative fs::path, so both spellings
         // arrive here; the UTF-8 string form is what cache keys and the
-        // system-font lookup use.
-        std::string nameStr = internal::pathToUtf8(nameOrPath);
-        std::string actualPath = nameStr;
-        if (!isUrl(nameStr)) {
-            std::ifstream test(nameOrPath, std::ios::binary);
-            if (!test.good()) {
-                // Not a usable file path — try as a system font name.
-                fs::path resolved = systemFontPath(nameStr);
-                if (!resolved.empty()) {
-                    actualPath = internal::pathToUtf8(resolved);
-                    logNotice("Font") << "Resolved \"" << nameStr
-                                      << "\" → " << actualPath;
-                }
-                // If resolution failed, fall through with the original input so
-                // the eventual load error mentions what the user actually asked for.
-            }
-        }
+        // system-font lookup use. A relative file path resolves via
+        // getDataPath, like Image::load; when a file in the data folder and a
+        // system font share a name, the data file wins.
+        auto input = resolveInput(nameOrPath, internal::resolveLoadPath(nameOrPath), faceIndex);
+        const auto& nameStr = input.name;
+        const auto& actualPath = input.path;
+        const int actualFace = input.face;
+        const bool isDataFile = input.isDataFile;
 
         // What this Font was holding before, so a reload at a different key can
         // hand the previous atlas back to the cache. Note this is deliberately
@@ -1182,20 +1642,33 @@ public:
 
         cacheKey_.fontPath = actualPath;
         cacheKey_.fontSize = physicalSize;
+        cacheKey_.faceIndex = actualFace;
         cacheKey_.oversample = oversample_;
         cacheKey_.mipmaps = mipmaps_;
 
         if (isUrl(actualPath)) {
 #ifdef __EMSCRIPTEN__
-            // Async load - returns immediately, font available after fetch completes
-            loadFromUrlAsync(actualPath, physicalSize);
-            return LoadResult::success();  // Will be loaded asynchronously
+            // Yield via Asyncify until fetching and decoding have completed.
+            auto result = loadFromUrl();
+            if (!result) {
+                cacheKey_.fontPath.clear();
+                if (hadAtlas) internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
+                return result;
+            }
 #else
             logError() << "Font: URL loading only supported in WebAssembly";
             return LoadResult::fail(LoadError::UnsupportedFormat,
                                     "URL loading only supported in WebAssembly: " + actualPath);
 #endif
         } else {
+            if (isDataFile) {
+                auto entry = internal::checkLoadFile(internal::utf8ToPath(actualPath), "Font");
+                if (!entry) {
+                    atlasManager_.reset();
+                    if (hadAtlas) internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
+                    return entry;
+                }
+            }
             atlasManager_ = internal::SharedFontCache::getInstance().getOrCreate(cacheKey_);
         }
 
@@ -1205,80 +1678,351 @@ public:
             internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
         }
 
-        if (!atlasManager_) {
-            // Classify: the resolved path doesn't exist on disk -> the font
-            // was never found (bad path or unresolvable system-font name);
-            // otherwise the file opened but stb_truetype rejected it.
-            std::error_code ec;
-            if (!fs::exists(internal::utf8ToPath(actualPath), ec)) {
-                std::string msg = "font not found: \"" + nameStr + "\"";
-                if (actualPath != nameStr) msg += " (resolved to \"" + actualPath + "\")";
-                return LoadResult::fail(LoadError::FileNotFound, msg);
-            }
-            return LoadResult::fail(LoadError::DecodeFailed,
-                                    "failed to init font: " + actualPath);
-        }
-        return LoadResult::success();
+        return classifyLoad(atlasManager_ != nullptr, nameStr, actualPath, actualFace);
     }
 
+    // Prepare owned font bytes/CPU metrics on a worker. GPU/cache work and
+    // onLoad run on main in a later frame; glyphs are still loaded lazily.
+    // Calls and resource access are serialized on main. Web without pthreads
+    // decodes in a later frame, which may stall that preparation frame.
+    // App exit waits for loads still decoding; cancelling never waits.
+    // Completions are delivered during runApp / runHeadlessApp; in a bare main()
+    // without an app run, no completion event fires.
+    void loadAsync(const fs::path& nameOrPath, int size, int faceIndex = 0) {
+        auto state = async_.begin(onLoad, [this](AsyncState& ready) { applyAsync(ready); });
+        state->dpi = sapp_dpi_scale();
+        state->size = size;
+        state->input = resolveInput(nameOrPath, internal::resolveLoadPath(nameOrPath), faceIndex);
+        state->key = {state->input.path, (int)(size * state->dpi + 0.5f),
+                      state->input.face, mipmaps_, oversample_};
+        state->limit = internal::FontAtlasManager::atlasLimit();
+        // Cache access and sampler creation stay on main, including cache hits.
+        initResources();
+        if (isUrl(state->input.path)) {
+#ifdef __EMSCRIPTEN__
+            if (auto cached = internal::SharedFontCache::getInstance().get(state->key)) {
+                state->candidate = std::move(cached);
+                state->result = LoadResult::success();
+                internal::completeResourceLoad(state);
+            } else {
+                internal::startResourceLoad([state] { startUrlAsync(state); });
+            }
+#else
+            logError() << "Font: URL loading only supported in WebAssembly";
+            state->result = LoadResult::fail(LoadError::UnsupportedFormat,
+                "URL loading only supported in WebAssembly: " + state->input.path);
+            state->unsupportedUrl = true;
+            internal::probeResourceLoad("font.unsupported-url", internal::utf8ToPath(state->input.path));
+            internal::completeResourceLoad(state);
+#endif
+            return;
+        }
+        // Match load(): the data-file check precedes a cache lookup.
+        if (state->input.isDataFile) {
+            state->result = internal::checkLoadFile(internal::utf8ToPath(state->input.path), "Font");
+            if (!state->result) {
+                state->preflightFailure = true;
+                internal::probeResourceLoad("font.preflight-failure", internal::utf8ToPath(state->input.path));
+                internal::completeResourceLoad(state);
+                return;
+            }
+        }
+        if (auto cached = internal::SharedFontCache::getInstance().get(state->key)) {
+            state->candidate = std::move(cached);
+            state->result = LoadResult::success();
+            internal::probeResourceLoad("font.cache-hit", internal::utf8ToPath(state->input.path));
+            internal::completeResourceLoad(state);
+            return;
+        }
+        internal::startResourceLoad([state] {
+            internal::probeResourceLoad("font.decode", internal::utf8ToPath(state->input.path));
+            if (state->cancelled.load()) return;
+            auto candidate = std::make_shared<internal::FontAtlasManager>();
+            candidate->setOversample(state->key.oversample);
+            candidate->setMipmaps(state->key.mipmaps);
+            if (candidate->prepareFile(state->input.path, state->key.fontSize,
+                                       state->key.faceIndex, state->limit)) state->candidate = std::move(candidate);
+            state->result = classifyLoad(state->candidate != nullptr, state->input.name,
+                                          state->input.path, state->input.face);
+            internal::probeResourceLoad("font.ready", internal::utf8ToPath(state->input.path));
+            if (!state->cancelled.load()) internal::completeResourceLoad(state);
+            internal::probeResourceLoad("font.queued", internal::utf8ToPath(state->input.path));
+        });
+    }
+    Event<LoadResult> onLoad;
+    bool isLoading() const { return async_.loading(); }
+
 private:
+    internal::ResourceLoadSlot<AsyncState> async_;
+    void copyCommitted(const Font& other) {
+        copySettings(other);
+        atlasManager_ = other.atlasManager_;
+        cacheKey_ = other.cacheKey_;
+    }
+    void moveCommitted(Font& other) {
+        copySettings(other);
+        atlasManager_ = std::move(other.atlasManager_);
+        cacheKey_ = std::move(other.cacheKey_);
+    }
+    void copySettings(const Font& other) {
+        alignH_ = other.alignH_;
+        alignV_ = other.alignV_;
+        lineHeight_ = other.lineHeight_;
+        writingMode_ = other.writingMode_;
+        tcyDigitMax_ = other.tcyDigitMax_;
+        tcyDigitInMode_ = other.tcyDigitInMode_;
+        tcyDigitOverflowMode_ = other.tcyDigitOverflowMode_;
+        tcyLatinMode_ = other.tcyLatinMode_;
+        wrapEnabled_ = other.wrapEnabled_;
+        maxLineLength_ = other.maxLineLength_;
+        latinHyphenation_ = other.latinHyphenation_;
+        hangingPunctuation_ = other.hangingPunctuation_;
+        kinsokuLevel_ = other.kinsokuLevel_;
+        dpiScale_ = other.dpiScale_;
+        oversample_ = other.oversample_;
+        mipmaps_ = other.mipmaps_;
+        gridFit_ = other.gridFit_;
+        logicalSize_ = other.logicalSize_;
+    }
+    static LoadInput resolveInput(const fs::path& nameOrPath, const fs::path& resolvedPath, int faceIndex) {
+        std::string nameStr = internal::pathToUtf8(nameOrPath);
+        std::string actualPath = nameStr;
+        int actualFace = faceIndex;
+        bool isDataFile = false;
+        if (!isUrl(nameStr)) {
+            const fs::path filePath = resolvedPath;   // absolute paths pass through
+            actualPath = internal::pathToUtf8(filePath);
+            isDataFile = internal::isLoadFile(filePath);
+            if (!isDataFile) {
+                // Not a usable file path — try as a system font name. The OS
+                // gives the file and the face inside it.
+                internal::SystemFontFace resolved = internal::systemFontFace(nameStr);
+                if (!resolved.path.empty()) {
+                    actualPath = internal::pathToUtf8(resolved.path);
+                    actualFace = resolved.index;
+                    if (faceIndex != 0) {
+                        logWarning("Font") << "faceIndex " << faceIndex
+                                           << " applies to font files; \"" << nameStr
+                                           << "\" is a system font name and uses face "
+                                           << actualFace;
+                    }
+                    logNotice("Font") << "Resolved \"" << nameStr
+                                      << "\" → " << actualPath << " (face " << actualFace
+                                      << ")";
+                }
+                // If resolution failed, keep the data-folder path: the load
+                // error then names the input and where it was looked for.
+            }
+        }
+
+        return {std::move(nameStr), std::move(actualPath), actualFace, isDataFile};
+    }
+    static LoadResult classifyLoad(bool loaded, const std::string& nameStr,
+                                   const std::string& actualPath, int actualFace) {
+        if (loaded) return LoadResult::success();
+        // Classify: the resolved path doesn't exist on disk -> the font
+        // was never found (bad path or unresolvable system-font name);
+        // otherwise the file opened but stb_truetype rejected it.
+        std::error_code ec;
+        if (!isUrl(actualPath) && !fs::exists(internal::utf8ToPath(actualPath), ec)) {
+            std::string msg = "font not found: \"" + nameStr + "\"";
+            if (actualPath != nameStr) msg += " (resolved to \"" + actualPath + "\")";
+            return LoadResult::fail(LoadError::FileNotFound, msg);
+        }
+        std::string msg = "failed to init font: " + actualPath;
+        if (actualFace != 0) msg += " (face " + std::to_string(actualFace) + ")";
+        return LoadResult::fail(LoadError::DecodeFailed, msg);
+    }
+    void applyAsync(AsyncState& ready) {
+        dpiScale_ = ready.dpi;
+        logicalSize_ = ready.size;
+        const auto previousKey = cacheKey_;
+        const bool hadAtlas = atlasManager_ != nullptr;
+        cacheKey_ = ready.key;
+        if (ready.unsupportedUrl) return; // native URL load keeps the old atlas
+        if (ready.preflightFailure || ready.urlTimeout) {
+            atlasManager_.reset();
+            if (ready.urlTimeout) cacheKey_.fontPath.clear();
+            if (hadAtlas) internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
+            return;
+        }
+        atlasManager_ = internal::SharedFontCache::getInstance().publishPrepared(ready.key, std::move(ready.candidate));
+        if (hadAtlas && !(previousKey == cacheKey_)) {
+            internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
+        }
+        if (atlasManager_) ready.result = LoadResult::success();
+    }
     static bool isUrl(const std::string& path) {
         return path.find("http://") == 0 || path.find("https://") == 0;
     }
 
 #ifdef __EMSCRIPTEN__
+    // The C callback owns a heap-held shared State, never a Font*. Mark
+    // completion before close: abort can reenter onerror synchronously.
+    static void finishUrlAsync(emscripten_fetch_t* fetch, bool success) {
+        auto* holder = static_cast<std::shared_ptr<AsyncState>*>(fetch->userData);
+        auto state = *holder;
+        if (state->fetchComplete) return;
+        state->fetchComplete = true;
+        state->fetch = nullptr;
+        if (!state->cancelled.load()) {
+            if (success) {
+                if (fetch->numBytes > (uint64_t)SIZE_MAX) {
+                    logWarning() << "Font: response too large for " << state->key.fontPath;
+                } else {
+                    auto candidate = std::make_shared<internal::FontAtlasManager>();
+                    candidate->setOversample(state->key.oversample);
+                    candidate->setMipmaps(state->key.mipmaps);
+                    if (candidate->setupFromMemory(reinterpret_cast<const uint8_t*>(fetch->data),
+                            (size_t)fetch->numBytes, state->key.fontSize, state->key.faceIndex)) {
+                        state->candidate = std::move(candidate);
+                        logNotice("Font") << "Loaded from URL: " << state->key.fontPath;
+                    }
+                }
+            } else {
+                state->urlTimeout = emscripten_get_now() >= state->deadline;
+                if (!state->urlTimeout) {
+                    logError() << "Font: failed to fetch " << state->key.fontPath
+                               << " (status: " << fetch->status << ")";
+                }
+            }
+            state->result = state->urlTimeout
+                ? internal::reportWebLoadTimeout(internal::utf8ToPath(state->key.fontPath), "Font")
+                : classifyLoad(state->candidate != nullptr, state->input.name,
+                               state->input.path, state->input.face);
+        }
+        emscripten_fetch_close(fetch);
+        delete holder;
+        if (!state->cancelled.load()) internal::completeResourceLoad(state);
+    }
+    static void startUrlAsync(const std::shared_ptr<AsyncState>& state) {
+        if (state->cancelled.load()) return;
+        state->deadline = emscripten_get_now() + internal::webLoadTimeoutMSecs;
+        emscripten_fetch_attr_t attr;
+        emscripten_fetch_attr_init(&attr);
+        std::strcpy(attr.requestMethod, "GET");
+        attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
+        attr.timeoutMSecs = internal::webLoadTimeoutMSecs;
+        attr.onsuccess = [](emscripten_fetch_t* fetch) { finishUrlAsync(fetch, true); };
+        attr.onerror = [](emscripten_fetch_t* fetch) { finishUrlAsync(fetch, false); };
+        auto* holder = new std::shared_ptr<AsyncState>(state);
+        attr.userData = holder;
+        auto* fetch = emscripten_fetch(&attr, state->key.fontPath.c_str());
+        if (!state->fetchComplete) state->fetch = fetch;
+        if (!fetch && !state->fetchComplete) {
+            state->fetchComplete = true;
+            delete holder;
+            state->result = classifyLoad(false, state->input.name, state->input.path, state->input.face);
+            internal::completeResourceLoad(state);
+            return;
+        }
+        // Keep the existing deadline even if a browser does not deliver its
+        // timeout callback. This timer owns its own State reference.
+        emscripten_async_call([](void* data) {
+            std::unique_ptr<std::shared_ptr<AsyncState>> timer(
+                static_cast<std::shared_ptr<AsyncState>*>(data));
+            auto state = *timer;
+            if (state->fetchComplete) return;
+            auto* fetch = state->fetch;
+            state->fetchComplete = true;
+            state->fetch = nullptr;
+            auto* holder = static_cast<std::shared_ptr<AsyncState>*>(fetch->userData);
+            emscripten_fetch_close(fetch);
+            delete holder;
+            if (!state->cancelled.load()) {
+                state->urlTimeout = true;
+                state->result = internal::reportWebLoadTimeout(internal::utf8ToPath(state->key.fontPath), "Font");
+                internal::completeResourceLoad(state);
+            }
+        }, new std::shared_ptr<AsyncState>(state), internal::webLoadTimeoutMSecs);
+    }
+
     // Context for async font loading
     struct FontLoadContext {
-        Font* font;
         internal::FontCacheKey key;
+        double deadline;
+        bool complete = false;
+        bool timedOut = false;
     };
 
     static void onFetchSuccess(emscripten_fetch_t* fetch) {
         FontLoadContext* ctx = reinterpret_cast<FontLoadContext*>(fetch->userData);
 
-        ctx->font->atlasManager_ = internal::SharedFontCache::getInstance().getOrCreateFromMemory(
+        // A response larger than SIZE_MAX (size_t is 32-bit on wasm32) is
+        // refused. setupFromMemory() rejects an empty response with a warning.
+        if (fetch->numBytes > (uint64_t)SIZE_MAX) {
+            logWarning() << "Font: response too large for " << ctx->key.fontPath;
+            ctx->complete = true;
+            return;
+        }
+
+        auto atlas = internal::SharedFontCache::getInstance().getOrCreateFromMemory(
             ctx->key,
             reinterpret_cast<const uint8_t*>(fetch->data),
-            fetch->numBytes
+            (size_t)fetch->numBytes
         );
 
-        if (ctx->font->atlasManager_) {
+        if (atlas) {
             logNotice("Font") << "Loaded from URL: " << ctx->key.fontPath;
         }
 
-        delete ctx;
-        emscripten_fetch_close(fetch);
+        ctx->complete = true;
     }
 
     static void onFetchError(emscripten_fetch_t* fetch) {
         FontLoadContext* ctx = reinterpret_cast<FontLoadContext*>(fetch->userData);
-        logError() << "Font: failed to fetch " << ctx->key.fontPath
-                     << " (status: " << fetch->status << ")";
-        delete ctx;
-        emscripten_fetch_close(fetch);
+        // Closing an unfinished fetch can call onerror again. The waiting
+        // caller owns closing it, after the result has been recorded.
+        if (ctx->complete) return;
+        ctx->timedOut = emscripten_get_now() >= ctx->deadline;
+        if (!ctx->timedOut) {
+            logError() << "Font: failed to fetch " << ctx->key.fontPath
+                         << " (status: " << fetch->status << ")";
+        }
+        ctx->complete = true;
     }
 
-    void loadFromUrlAsync(const std::string& url, int size) {
+    LoadResult loadFromUrl() {
         // Check cache first (don't try to load from file)
-        internal::FontCacheKey key{url, size};
+        const auto key = cacheKey_;
+        const auto& url = key.fontPath;
         auto cached = internal::SharedFontCache::getInstance().get(key);
         if (cached) {
             atlasManager_ = cached;
-            return;
+            return LoadResult::success();
         }
 
         // Start async fetch
-        FontLoadContext* ctx = new FontLoadContext{this, key};
+        atlasManager_.reset();
+        FontLoadContext ctx{key, emscripten_get_now() + internal::webLoadTimeoutMSecs};
 
         emscripten_fetch_attr_t attr;
         emscripten_fetch_attr_init(&attr);
         std::strcpy(attr.requestMethod, "GET");
         attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
+        attr.timeoutMSecs = internal::webLoadTimeoutMSecs;
         attr.onsuccess = onFetchSuccess;
         attr.onerror = onFetchError;
-        attr.userData = ctx;
+        attr.userData = &ctx;
 
-        emscripten_fetch(&attr, url.c_str());
+        auto* fetch = emscripten_fetch(&attr, url.c_str());
+        if (fetch) {
+            while (!ctx.complete) {
+                if (emscripten_get_now() >= ctx.deadline) {
+                    ctx.timedOut = true;
+                    ctx.complete = true;
+                    break;
+                }
+                emscripten_sleep(10);
+            }
+            // Close before the stack context goes away; callbacks never
+            // close recursively, including Emscripten's abort callback.
+            emscripten_fetch_close(fetch);
+        }
+        if (ctx.timedOut) return internal::reportWebLoadTimeout(internal::utf8ToPath(url), "Font");
+        atlasManager_ = internal::SharedFontCache::getInstance().get(key);
+        // The caller classifies fetch/decode failure from atlasManager_.
+        return LoadResult::success();
     }
 #endif
 
@@ -1615,9 +2359,10 @@ protected:
             const internal::AtlasState& atlas = atlasManager_->getAtlas(atlasIdx);
             if (!atlas.isTextureValid()) continue;
 
-            // Accumulating Fill2D for the active target (swapchain or FBO). Unifies
-            // the old font pipeline (dst_factor_alpha=ZERO destroyed dst alpha).
-            internal::loadPipeline(internal::activeFill2D());
+            // Coverage pipeline for the active target (swapchain or FBO): the
+            // Alpha blend of activeFill2D() (dst alpha accumulates) with a shader
+            // that reads the R8 atlas's R channel as alpha.
+            internal::loadTemporaryPipeline(internal::activeCoverage2D());
             sgl_enable_texture();
             sgl_texture(atlas.getView(), pickSampler());
 
@@ -2360,7 +3105,7 @@ protected:
     // concentration it wins back at 1:1. So grid fit stands down off 1:1.
     bool gridFitLands() const {
         if (!gridFit_) return false;
-        return std::fabs(getDefaultContext().getScale() - 1.0f) < 0.01f;
+        return std::fabs(getDefaultContext().getScale() * internal::targetPixelScale() - 1.0f) < 0.01f;
     }
 
     // Snap a baseline offset to the pixel grid.
@@ -2444,6 +3189,7 @@ public:
 
     // Clear atlas pages (glyphs re-rasterized on next draw)
     void clearAtlas() {
+        async_.cancel();
         if (atlasManager_) atlasManager_->clearAtlas();
     }
 
@@ -2458,7 +3204,7 @@ public:
 
     // Get shared sampler (for debug atlas rendering). Returns the mip-0-pinned
     // one: a debug view of the atlas wants to show the texels as stored.
-    sg_sampler getSampler() { initResources(); return samplerSharp_; }
+    sg_sampler getSampler() { initResources(); return internal::fontSamplers().sharp; }
 
     size_t getLoadedGlyphCount() const {
         return atlasManager_ ? atlasManager_->getLoadedGlyphCount() : 0;
@@ -2483,21 +3229,20 @@ private:
     // 4x4 already costs 16x the atlas; beyond that the prefilter gains nothing
     // a bigger font size would not give more cheaply.
     static int clampOversample(int n) { return (n < 1) ? 1 : (n > 4 ? 4 : n); }
+    // Set and read by the code that loads fonts (app code): harmless per module.
     static inline int defaultOversample_ = 1;
     int logicalSize_ = 0;      // User-requested font size (logical pixels)
 
-    // Shared GPU resources. The TTF draw path loads the active per-target 2D
-    // fill pipeline (internal::activeFill2D()) at draw time, so the font class
-    // only needs its own sampler here.
-    static inline sg_sampler samplerSharp_ = {};    // max_lod 0 (1:1 and above)
-    static inline sg_sampler samplerMipped_ = {};   // full chain (minified)
-    static inline bool resourcesInitialized_ = false;
+    // Shared GPU resources. The TTF draw path loads the active per-target
+    // coverage pipeline (internal::activeCoverage2D()) at draw time, so the font class
+    // only needs its own samplers: internal::fontSamplers(), one pair per
+    // process, lazily created by initResources().
 
     // Minified text wants the mip chain; everything sharper wants the
     // oversampled mip 0. The quantity that decides it is texels per screen
-    // pixel: the quad covers width*oversample texels and width/dpiScale *
-    // getScale() * dpiScale screen pixels, so the dpiScale cancels and it is
-    // just oversample/getScale().
+    // pixel: raster DPI normalizes glyph coordinates, while target pixel scale
+    // converts them to attachment pixels. They cancel only when those scales
+    // agree (e.g. a screen font drawn on its original display).
     //
     // The threshold is 2, not 1, because a bilinear fetch reads a 2x2
     // neighbourhood and copes with 2:1 on its own. Measured on 16px text
@@ -2512,18 +3257,20 @@ private:
     // far more forgiving use of that estimate than choosing a segment count.
     sg_sampler pickSampler() const {
         const int   oversample = atlasManager_->getOversample();
-        const float scale = getDefaultContext().getScale();
+        const float scale = getDefaultContext().getScale() * internal::targetPixelScale() / dpiScale_;
         const float texelsPerPixel = (scale > 0.0f) ? (oversample / scale)
                                                     : (float)oversample;
-        if (texelsPerPixel <= 2.0f) return samplerSharp_;
+        if (texelsPerPixel <= 2.0f) return internal::fontSamplers().sharp;
 
         // First draw below the bilinear-safe rate is what pays for the chain.
         atlasManager_->requestMipmaps();
-        return samplerMipped_;
+        return internal::fontSamplers().mipped;
     }
 
     void initResources() {
-        if (resourcesInitialized_) return;
+        if (!sg_isvalid()) return;
+        internal::FontSamplers& samplers = internal::fontSamplers();
+        if (samplers.initialized) return;
 
         // Two samplers, picked per draw by the effective scale (see
         // pickSampler). Trilinear on both: without mipmap_filter sokol defaults
@@ -2537,7 +3284,7 @@ private:
         smp_desc.mipmap_filter = SG_FILTER_LINEAR;
         smp_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
         smp_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
-        samplerMipped_ = sg_make_sampler(&smp_desc);
+        samplers.mipped = sg_make_sampler(&smp_desc);
 
         // Pinned to mip 0. An NxN atlas is N times denser than the screen, so
         // even a 1:1 draw computes LOD log2(N) and would read a mip that throws
@@ -2549,9 +3296,9 @@ private:
         // silently asks for the whole chain. A small epsilon reads as an
         // explicit value and still floors to level 0 under trilinear.
         smp_desc.max_lod = 0.01f;
-        samplerSharp_ = sg_make_sampler(&smp_desc);
+        samplers.sharp = sg_make_sampler(&smp_desc);
 
-        resourcesInitialized_ = true;
+        samplers.initialized = true;
     }
 
     // UTF-8 decode (simple version)

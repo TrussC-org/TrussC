@@ -13,6 +13,7 @@
 #include <type_traits>
 #include "tcEventListener.h"
 #include "../utils/tcMainThread.h"  // runOnMainThread (for Deliver::Main)
+#include "../utils/tcAtomicSharedPtr.h"  // internal::AtomicSharedPtr (listener snapshot)
 
 // ---------------------------------------------------------------------------
 // Mutex configuration for thread safety
@@ -29,6 +30,7 @@
 namespace trussc {
     struct NullMutex {
         void lock() {}
+        bool try_lock() { return true; }
         void unlock() {}
     };
 }
@@ -41,6 +43,7 @@ namespace trussc {
 #endif
 
 namespace trussc {
+namespace internal { template<class> struct GuardedEventDelivery; }
 
 // ---------------------------------------------------------------------------
 // Event priority
@@ -110,14 +113,16 @@ enum class Deliver { Inline, Main };
 // ---------------------------------------------------------------------------
 // Event<T> - Event with arguments
 // ---------------------------------------------------------------------------
+namespace internal { template<class T> struct EventSnapshotDelivery; }
+
 template<typename T>
 class Event {
 public:
     // Callback type (argument passed by reference - can be modified)
     using Callback = std::function<void(T&)>;
 
-    Event() : alive_(std::make_shared<bool>(true)) {}
-    ~Event() { *alive_ = false; }
+    Event() : alive_(std::make_shared<std::atomic<bool>>(true)) {}
+    ~Event() { alive_->store(false, std::memory_order_relaxed); }
 
     // Copy/Move forbidden (events have fixed location)
     Event(const Event&) = delete;
@@ -201,7 +206,7 @@ private:
         {
             TC_LOCK_GUARD(mutex_);
             id = nextId_++;
-            ConstEntryListPtr cur = std::atomic_load(&entries_);
+            ConstEntryListPtr cur = internal::sharedLoad(entries_);
             auto next = cur ? std::make_shared<EntryList>(*cur)
                             : std::make_shared<EntryList>();
             next->push_back({id, priority, deliver, std::move(callback),
@@ -210,14 +215,14 @@ private:
                 [](const Entry& a, const Entry& b) {
                     return a.priority < b.priority;
                 });
-            std::atomic_store(&entries_, ConstEntryListPtr(next));
+            internal::sharedStore(entries_, ConstEntryListPtr(next));
         }
         // Set EventListener outside lock (removeListener() may be called when disconnecting existing)
         // Capture weak_ptr to check if Event is still alive before removing
-        std::weak_ptr<bool> weak = alive_;
+        std::weak_ptr<std::atomic<bool>> weak = alive_;
         listener = EventListener([this, id, weak]() {
             if (auto alive = weak.lock()) {
-                if (*alive) {
+                if (alive->load(std::memory_order_relaxed)) {
                     this->removeListener(id);
                 }
             }
@@ -226,13 +231,36 @@ private:
 
 public:
 
-    // Fire event. Hot path: a single atomic_load (no allocation, no mutex)
+    // Fire event. Hot path: a single atomic load (no allocation, no mutex)
     // — safe to call from the audio thread.
+    //
+    // Changes to the listener list during a notify() pass (#107, #256):
+    //   - A listener added during the pass starts from the next notify().
+    //   - A listener removed during the pass on the notifying thread (an
+    //     earlier listener disconnects it, or clear() runs) is not called
+    //     again in that pass: its liveness flag is checked before each call.
+    //   - Removal from ANOTHER thread does not wait. A callback already
+    //     running keeps running after disconnect() returns, and one whose
+    //     flag was read just before the removal can still start. The owner
+    //     of the notifying thread provides the barrier for that (e.g.
+    //     AudioEngine::waitForAudioCallbacks()), or the listener uses
+    //     Deliver::Main.
     void notify(T& arg) {
-        ConstEntryListPtr snapshot = std::atomic_load(&entries_);
+        notifySnapshot(internal::sharedLoad(entries_), arg);
+    }
+
+private:
+    template<class> friend struct internal::EventSnapshotDelivery;
+    template<class> friend struct internal::GuardedEventDelivery;
+    // Internal delivery can notify from a snapshot after the Event's owner is gone.
+    // Dispatch accesses only the owned entries and payload, never the Event.
+    static void notifySnapshot(ConstEntryListPtr snapshot, T& arg) {
         if (!snapshot) return;
         for (const auto& entry : *snapshot) {
             if (!entry.callback) continue;
+            // Removed earlier in this pass (the snapshot still holds it).
+            // One acquire load per entry, no lock.
+            if (entry.alive && !entry.alive->load(std::memory_order_acquire)) continue;
 
             // Deliver::Main from a worker thread: copy the payload and run the
             // listener on the main thread next frame. Already-main (or Inline)
@@ -240,14 +268,9 @@ public:
             if (entry.deliver == Deliver::Main && !isMainThread()) {
                 if constexpr (std::is_copy_constructible_v<T>) {
                     T copy = arg;
-                    runOnMainThread([cb = entry.callback, copy,
-                                     w = std::weak_ptr<std::atomic<bool>>(entry.alive)]() mutable {
-                        // Listener died while this call sat in the queue —
-                        // drop it (keeps the EventListener RAII guarantee).
-                        auto alive = w.lock();
-                        if (!alive || !alive->load()) return;
+                    runOnMainThread([cb = entry.callback, copy]() mutable {
                         cb(copy);
-                    });
+                    }, std::weak_ptr<std::atomic<bool>>(entry.alive));
                     continue;
                 }
                 // Non-copyable payload can't be marshalled — fall through and
@@ -267,27 +290,28 @@ public:
         }
     }
 
+public:
     // Get listener count
     size_t listenerCount() const {
-        ConstEntryListPtr snapshot = std::atomic_load(&entries_);
+        ConstEntryListPtr snapshot = internal::sharedLoad(entries_);
         return snapshot ? snapshot->size() : 0;
     }
 
     // Remove all listeners
     void clear() {
         TC_LOCK_GUARD(mutex_);
-        ConstEntryListPtr cur = std::atomic_load(&entries_);
+        ConstEntryListPtr cur = internal::sharedLoad(entries_);
         if (cur) {
             // Invalidate queued Deliver::Main calls too
             for (const auto& e : *cur) if (e.alive) e.alive->store(false);
         }
-        std::atomic_store(&entries_, ConstEntryListPtr{});
+        internal::sharedStore(entries_, ConstEntryListPtr{});
     }
 
 private:
     void removeListener(uint64_t id) {
         TC_LOCK_GUARD(mutex_);
-        ConstEntryListPtr cur = std::atomic_load(&entries_);
+        ConstEntryListPtr cur = internal::sharedLoad(entries_);
         if (!cur) return;
         auto next = std::make_shared<EntryList>();
         next->reserve(cur->size());
@@ -299,12 +323,13 @@ private:
                 next->push_back(e);
             }
         }
-        std::atomic_store(&entries_, ConstEntryListPtr(next));
+        internal::sharedStore(entries_, ConstEntryListPtr(next));
     }
 
-    std::shared_ptr<bool> alive_;
+    // Liveness only, not a teardown barrier or publication of other state.
+    std::shared_ptr<std::atomic<bool>> alive_;
     mutable TC_MUTEX mutex_;            // serializes listen / remove / clear
-    ConstEntryListPtr entries_;          // RCU snapshot, atomic_load/store
+    internal::AtomicSharedPtr<const EntryList> entries_;  // RCU snapshot: sharedLoad (acquire) / sharedStore (release)
     uint64_t nextId_ = 0;
 };
 
@@ -317,8 +342,8 @@ public:
     // Callback type (no arguments)
     using Callback = std::function<void()>;
 
-    Event() : alive_(std::make_shared<bool>(true)) {}
-    ~Event() { *alive_ = false; }
+    Event() : alive_(std::make_shared<std::atomic<bool>>(true)) {}
+    ~Event() { alive_->store(false, std::memory_order_relaxed); }
 
     Event(const Event&) = delete;
     Event& operator=(const Event&) = delete;
@@ -396,7 +421,7 @@ private:
         {
             TC_LOCK_GUARD(mutex_);
             id = nextId_++;
-            ConstEntryListPtr cur = std::atomic_load(&entries_);
+            ConstEntryListPtr cur = internal::sharedLoad(entries_);
             auto next = cur ? std::make_shared<EntryList>(*cur)
                             : std::make_shared<EntryList>();
             next->push_back({id, priority, deliver, std::move(callback),
@@ -405,14 +430,14 @@ private:
                 [](const Entry& a, const Entry& b) {
                     return a.priority < b.priority;
                 });
-            std::atomic_store(&entries_, ConstEntryListPtr(next));
+            internal::sharedStore(entries_, ConstEntryListPtr(next));
         }
         // Set EventListener outside lock (removeListener() may be called when disconnecting existing)
         // Capture weak_ptr to check if Event is still alive before removing
-        std::weak_ptr<bool> weak = alive_;
+        std::weak_ptr<std::atomic<bool>> weak = alive_;
         listener = EventListener([this, id, weak]() {
             if (auto alive = weak.lock()) {
-                if (*alive) {
+                if (alive->load(std::memory_order_relaxed)) {
                     this->removeListener(id);
                 }
             }
@@ -420,22 +445,24 @@ private:
     }
 
 public:
-    // Fire event. Hot path: a single atomic_load, no allocation, no mutex.
-    void notify() {
-        ConstEntryListPtr snapshot = std::atomic_load(&entries_);
+    // Fire event. Hot path: a single atomic load, no allocation, no mutex.
+    // Changes to the listener list during a pass: see Event<T>::notify().
+    void notify() { notifySnapshot(internal::sharedLoad(entries_)); }
+
+private:
+    template<class> friend struct internal::EventSnapshotDelivery;
+    template<class> friend struct internal::GuardedEventDelivery;
+    static void notifySnapshot(ConstEntryListPtr snapshot) {
         if (!snapshot) return;
         for (const auto& entry : *snapshot) {
             if (!entry.callback) continue;
+            // Removed earlier in this pass (the snapshot still holds it).
+            if (entry.alive && !entry.alive->load(std::memory_order_acquire)) continue;
             // Deliver::Main from a worker thread: run on the main thread next
             // frame (no payload to copy for Event<void>).
             if (entry.deliver == Deliver::Main && !isMainThread()) {
-                runOnMainThread([cb = entry.callback,
-                                 w = std::weak_ptr<std::atomic<bool>>(entry.alive)]() {
-                    // Listener died while this call sat in the queue — drop it
-                    auto alive = w.lock();
-                    if (!alive || !alive->load()) return;
-                    cb();
-                });
+                runOnMainThread(entry.callback,
+                                std::weak_ptr<std::atomic<bool>>(entry.alive));
                 continue;
             }
             {
@@ -444,25 +471,26 @@ public:
         }
     }
 
+public:
     size_t listenerCount() const {
-        ConstEntryListPtr snapshot = std::atomic_load(&entries_);
+        ConstEntryListPtr snapshot = internal::sharedLoad(entries_);
         return snapshot ? snapshot->size() : 0;
     }
 
     void clear() {
         TC_LOCK_GUARD(mutex_);
-        ConstEntryListPtr cur = std::atomic_load(&entries_);
+        ConstEntryListPtr cur = internal::sharedLoad(entries_);
         if (cur) {
             // Invalidate queued Deliver::Main calls too
             for (const auto& e : *cur) if (e.alive) e.alive->store(false);
         }
-        std::atomic_store(&entries_, ConstEntryListPtr{});
+        internal::sharedStore(entries_, ConstEntryListPtr{});
     }
 
 private:
     void removeListener(uint64_t id) {
         TC_LOCK_GUARD(mutex_);
-        ConstEntryListPtr cur = std::atomic_load(&entries_);
+        ConstEntryListPtr cur = internal::sharedLoad(entries_);
         if (!cur) return;
         auto next = std::make_shared<EntryList>();
         next->reserve(cur->size());
@@ -474,13 +502,36 @@ private:
                 next->push_back(e);
             }
         }
-        std::atomic_store(&entries_, ConstEntryListPtr(next));
+        internal::sharedStore(entries_, ConstEntryListPtr(next));
     }
 
-    std::shared_ptr<bool> alive_;
+    // Liveness only, not a teardown barrier or publication of other state.
+    std::shared_ptr<std::atomic<bool>> alive_;
     mutable TC_MUTEX mutex_;            // serializes listen / remove / clear
-    ConstEntryListPtr entries_;          // RCU snapshot, atomic_load/store
+    internal::AtomicSharedPtr<const EntryList> entries_;  // RCU snapshot: sharedLoad (acquire) / sharedStore (release)
     uint64_t nextId_ = 0;
 };
 
 } // namespace trussc
+
+// Synchronous internal delivery for borrowed payloads. Own the snapshot before
+// entering user code; prepare reconstructs/cancels the payload before every
+// listener and after each return. Never queue a borrowed payload to Main.
+namespace trussc::internal {
+template<class T> struct GuardedEventDelivery {
+    template<class Prepare>
+    static void notify(Event<T>& source, T& args, Prepare prepare) {
+        auto snapshot = sharedLoad(source.entries_);
+        if (!snapshot) return;
+        for (const auto& entry : *snapshot) {
+            if (!entry.callback || (entry.alive && !entry.alive->load(std::memory_order_acquire))) continue;
+            if (!prepare()) break;
+            entry.callback(args);
+            if (!prepare()) break;
+            if constexpr (requires { args.consumed; }) {
+                if (args.consumed) break;
+            }
+        }
+    }
+};
+} // namespace trussc::internal

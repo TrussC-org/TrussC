@@ -27,7 +27,7 @@ using internal::VideoWriterPlatformData;
 
 bool VideoWriter::openPlatform(const std::string&, int, int, float,
                                const VideoRecordSettings&) {
-    logWarning("VideoWriter") << "video recording is not implemented on web yet";
+    result_ = SaveResult::fail(SaveError::WriteFailed, "video recording is not implemented on web yet");
     return false;
 }
 
@@ -36,7 +36,7 @@ bool VideoWriter::appendAudioPlatform(const float*, int, double) { return false;
 
 bool VideoWriter::appendPlatform(const unsigned char*, double) { return false; }
 
-void VideoWriter::closePlatform() {}
+SaveResult VideoWriter::closePlatform() { return SaveResult::success(); }
 
 } // namespace trussc
 

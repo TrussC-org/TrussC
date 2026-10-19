@@ -129,15 +129,43 @@ fs::path getExecutableDir() {
     return exePath.parent_path();
 }
 
+// User data / temp folders: the app's own container folders (they belong to
+// this app already, so no bundle id subfolder).
+fs::path internal::platformUserDataRoot() {
+    NSString* support = [NSSearchPathForDirectoriesInDomains(
+        NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+    if (support) return fs::path(support.UTF8String);
+    return fs::path(NSHomeDirectory().UTF8String) / "Library" / "Application Support";
+}
+
+fs::path internal::platformTempRoot() {
+    return fs::path(NSTemporaryDirectory().UTF8String);
+}
+
+fs::path internal::platformAppBundlePath() {
+    NSString* bundle = [[NSBundle mainBundle] bundlePath];
+    if (!bundle) return {};
+    return fs::path(bundle.UTF8String);
+}
+
 // ---------------------------------------------------------------------------
 // Screenshot (Metal API)
 // ---------------------------------------------------------------------------
+
+std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
+    // Admission also runs in the next frame's prelude, before any drawable
+    // exists. Query native framebuffer dimensions without acquiring or messaging
+    // the borrowed drawable from a swapchain pass.
+    if (!ctx.isMain) return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
+    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+}
 
 bool captureWindow(Pixels& outPixels) {
     // Read back the drawable this frame ACTUALLY rendered into (recorded by the
     // swapchain pass). NOT sapp_get_swapchain() — that advances to the next,
     // unrendered drawable, scrambling captures on GPU-heavy frames. Fall back
-    // only if no pass ran yet. (Mirrors the macOS fix.)
+    // only before a pass or outside its native frame: frame-end cleanup clears
+    // the borrowed pointer. (Mirrors macOS.)
     const void* drawablePtr = internal::currentWindowContext().lastSwapchainDrawable;
     if (!drawablePtr) drawablePtr = sapp_get_swapchain().metal.current_drawable;
     id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)drawablePtr;
@@ -154,7 +182,14 @@ bool captureWindow(Pixels& outPixels) {
 
     NSUInteger width = srcTexture.width;
     NSUInteger height = srcTexture.height;
+    mcp::internal::reconcileWindowCapture(width, height);
     MTLPixelFormat pixelFormat = srcTexture.pixelFormat;
+    const auto layout = internal::recorderPackedLayout(width, height, internal::RecorderPixelFormat::RGBA8);
+    // Bound (abi): Metal extent and format must fit the packed capture layout. Overflow drops the recorder frame and is counted.
+    if (!layout.byteSize || width > (NSUInteger)std::numeric_limits<int>::max() ||
+        height > (NSUInteger)std::numeric_limits<int>::max() ||
+        (pixelFormat != MTLPixelFormatRGB10A2Unorm && pixelFormat != MTLPixelFormatBGRA8Unorm &&
+         pixelFormat != MTLPixelFormatBGRA8Unorm_sRGB)) return false;
 
     // sokol sets framebufferOnly=YES on the CAMetalLayer, so reading the
     // drawable texture directly asserts under Metal validation. Blit into a
@@ -191,8 +226,8 @@ bool captureWindow(Pixels& outPixels) {
     [cmdBuf waitUntilCompleted];
 
     MTLRegion region = MTLRegionMake2D(0, 0, width, height);
-    NSUInteger bytesPerRow = width * 4;
-    std::vector<uint8_t> rawData(bytesPerRow * height);
+    NSUInteger bytesPerRow = layout.rowBytes;
+    std::vector<uint8_t> rawData(layout.byteSize);
     [stagingTexture getBytes:rawData.data()
                  bytesPerRow:bytesPerRow
                   fromRegion:region
@@ -200,6 +235,8 @@ bool captureWindow(Pixels& outPixels) {
 
     outPixels.allocate((int)width, (int)height, 4);
     unsigned char* dst = outPixels.getData();
+    // Bound (abi): pixel capacity must hold every captured row. Overflow drops the recorder frame and is counted.
+    if (!dst || outPixels.getTotalBytes() < layout.byteSize) return false;
 
     if (pixelFormat == MTLPixelFormatRGB10A2Unorm) {
         // Modern iPhones use a 10-bit wide-color drawable. Unpack to RGBA8.
@@ -225,75 +262,76 @@ bool captureWindow(Pixels& outPixels) {
     return true;
 }
 
-bool internal::captureWindowToFile(const std::filesystem::path& path) {
-    if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path));
-    }
+bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
     Pixels pixels;
-    if (!captureWindow(pixels)) {
-        return false;
-    }
+    if (!captureWindow(pixels)) return false;
+    return internal::saveScreenshotPixels(pixels, path);
+}
 
-    int width = pixels.getWidth();
-    int height = pixels.getHeight();
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    return writeScreenshotPixels(pixels, requestedPath).ok();
+}
 
-    CGContextRef context = CGBitmapContextCreate(
-        pixels.getData(),
-        width, height,
-        8,
-        width * 4,
-        colorSpace,
-        kCGImageAlphaPremultipliedLast | (CGBitmapInfo)kCGBitmapByteOrder32Big
-    );
+SaveResult internal::writeScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    // Retire each encoded payload before its async admission slot is released.
+    @autoreleasepool {
+        const auto path = internal::resolveScreenshotPath(requestedPath);
 
-    if (!context) {
+        int width = pixels.getWidth();
+        int height = pixels.getHeight();
+        const auto ext = toLower(getFileExtension(path));
+        if (ext == "bmp") {
+            // Pixels uses stbi_write_bmp, as on the other native platforms.
+            return internal::atomicWrite(path, [&](std::FILE* file) {
+                return internal::writePixelsEncoded(file, pixels, ext, path);
+            }, "Screenshot", true);
+        }
+        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+
+        CGContextRef context = CGBitmapContextCreate(
+            const_cast<unsigned char*>(pixels.getData()),
+            width, height,
+            8,
+            width * 4,
+            colorSpace,
+            kCGImageAlphaPremultipliedLast | (CGBitmapInfo)kCGBitmapByteOrder32Big
+        );
+
+        if (!context) {
+            CGColorSpaceRelease(colorSpace);
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "Failed to create CGContext"), "Screenshot");
+        }
+
+        CGImageRef cgImage = CGBitmapContextCreateImage(context);
+        CGContextRelease(context);
         CGColorSpaceRelease(colorSpace);
-        logError() << "[Screenshot] Failed to create CGContext";
-        return false;
+
+        if (!cgImage) {
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "Failed to create CGImage"), "Screenshot");
+        }
+
+        // Use UIImage + PNG/JPEG representation
+        UIImage* image = [UIImage imageWithCGImage:cgImage];
+        CGImageRelease(cgImage);
+
+        if (!image) {
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "Failed to create UIImage"), "Screenshot");
+        }
+
+        NSData* data = nil;
+        if (ext == "jpg" || ext == "jpeg") {
+            data = UIImageJPEGRepresentation(image, 0.9);
+        } else {
+            data = UIImagePNGRepresentation(image);
+        }
+
+        if (!data) {
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "Failed to create image data"), "Screenshot");
+        }
+
+        return internal::atomicWrite(path, data.bytes, data.length, "Screenshot", true);
     }
-
-    CGImageRef cgImage = CGBitmapContextCreateImage(context);
-    CGContextRelease(context);
-    CGColorSpaceRelease(colorSpace);
-
-    if (!cgImage) {
-        logError() << "[Screenshot] Failed to create CGImage";
-        return false;
-    }
-
-    // Use UIImage + PNG/JPEG representation
-    UIImage* image = [UIImage imageWithCGImage:cgImage];
-    CGImageRelease(cgImage);
-
-    if (!image) {
-        logError() << "[Screenshot] Failed to create UIImage";
-        return false;
-    }
-
-    NSData* data = nil;
-    std::string ext = path.extension().string();
-    if (ext == ".jpg" || ext == ".jpeg") {
-        data = UIImageJPEGRepresentation(image, 0.9);
-    } else {
-        data = UIImagePNGRepresentation(image);
-    }
-
-    if (!data) {
-        logError() << "[Screenshot] Failed to create image data";
-        return false;
-    }
-
-    NSString* nsPath = [NSString stringWithUTF8String:path.c_str()];
-    BOOL success = [data writeToFile:nsPath atomically:YES];
-
-    if (success) {
-        logVerbose() << "[Screenshot] Saved: " << path;
-    } else {
-        logError() << "[Screenshot] Failed to save: " << path;
-    }
-
-    return success;
 }
 
 // ---------------------------------------------------------------------------
@@ -308,7 +346,6 @@ void installAppMenu() {}
 // ---------------------------------------------------------------------------
 float getSystemVolume() {
     AVAudioSession* session = [AVAudioSession sharedInstance];
-    [session setActive:YES error:nil];
     return session.outputVolume;
 }
 

@@ -8,8 +8,26 @@
 // to access sokol and internal namespace variables
 
 #include "../utils/tcAnnotations.h"
+#include <memory>
+#include <type_traits>
 
 namespace trussc {
+
+namespace internal {
+inline LoadResult checkImageSize(int width, int height) {
+    // Headless Images keep their CPU pixels; there is no GPU limit to query.
+    if (sg_isvalid()) {
+        const int limit = sg_query_limits().max_image_size_2d;
+        // Bound (gpu): file or device image dimensions must fit the device texture limit. Overflow returns LoadError::TooLarge.
+        if (width > limit || height > limit) {
+            return LoadResult::fail(LoadError::TooLarge,
+                "image exceeds GPU texture limit: " + std::to_string(limit));
+        }
+    }
+    return LoadResult::success();
+}
+} // namespace internal
+
 
 // Pixel format for Texture/FBO allocation
 enum class TextureFormat {
@@ -105,8 +123,8 @@ enum class TextureUsage {
 // ---------------------------------------------------------------------------
 class Texture {
 public:
-    Texture() { internal::textureCount++; }
-    ~Texture() { clear(); internal::textureCount--; }
+    Texture() { internal::textureCount()++; }
+    ~Texture() { clear(); internal::textureCount()--; }
 
     // Copy prohibited
     Texture(const Texture&) = delete;
@@ -176,15 +194,27 @@ public:
     // probes, and image-based lighting.
     //
     // `mipLevels` > 1 allocates a mip chain (rounded-down halving); useful
-    // for prefiltered environment maps.
+    // for prefiltered environment maps (RenderTarget only).
     //
-    // Allocation without initial data; use uploadCubemapFace() (Dynamic)
+    // Dynamic / Stream cubemaps have exactly one mip level.
+    // Allocation without initial data; use loadCubemapData() (Dynamic / Stream)
     // or render into each face via getCubemapFaceAttachmentView() (RenderTarget).
 
     void allocateCubemap(int sideSize, TextureFormat format,
                          TextureUsage usage = TextureUsage::RenderTarget,
                          int mipLevels = 1) {
         clear();
+
+        if (usage == TextureUsage::Immutable) {
+            logError() << "[Texture] allocateCubemap: Immutable cubemap needs initial data, which "
+                          "allocateCubemap cannot take; use Dynamic / Stream with loadCubemapData, "
+                          "or RenderTarget";
+            return;
+        }
+        if ((usage == TextureUsage::Dynamic || usage == TextureUsage::Stream) && mipLevels > 1) {
+            logError() << "[Texture] allocateCubemap: Dynamic / Stream cubemaps require exactly one mip level";
+            return;
+        }
 
         width_ = sideSize;
         height_ = sideSize;
@@ -202,61 +232,47 @@ public:
         createCubemapResources();
     }
 
-    // Upload data for one face at one mip level. Requires Dynamic usage.
-    // `data` is a single-face buffer (sideSize(mip) * sideSize(mip) * bpp bytes).
-    void uploadCubemapFace(int face, int mipLevel, const void* data, size_t dataSize) {
+    // Load all six faces (+X, -X, +Y, -Y, +Z, -Z) in one update.
+    // Requires Dynamic / Stream usage and faceSize == sideSize * sideSize * bpp.
+    // As with loadData(), a second upload to the same image in the same device
+    // frame is skipped with a warning.
+    void loadCubemapData(const void* const faces[6], size_t faceSize) {
+        if (!sg_isvalid()) return;
         if (!allocated_ || !isCubemap_) return;
-        if (face < 0 || face >= 6) return;
-        if (mipLevel < 0 || mipLevel >= numMipLevels_) return;
-        if (usage_ == TextureUsage::Immutable) return;
-
-        // sokol's sg_update_image for cubemap expects all 6 faces of one mip
-        // level concatenated. For single-face updates we stage a buffer and
-        // fill the remaining 5 faces with zeros. This is wasteful for rapid
-        // updates but fine for one-off IBL-style baking.
-        int mipW = mipDim(width_, mipLevel);
-        int mipH = mipDim(height_, mipLevel);
-        size_t bpp = computeBytesPerPixel();
-        size_t faceSize = (size_t)mipW * mipH * bpp;
-        if (dataSize != faceSize) {
-            logWarning() << "[Texture] uploadCubemapFace: data size mismatch, expected "
-                         << faceSize << " got " << dataSize;
-            return;
-        }
-        std::vector<uint8_t> buffer(faceSize * 6, 0);
-        std::memcpy(buffer.data() + face * faceSize, data, faceSize);
-
-        sg_image_data img_data = {};
-        for (int m = 0; m < numMipLevels_; ++m) {
-            // Only fill the target mip; other mips get null (ignored by update).
-            if (m == mipLevel) {
-                img_data.mip_levels[m].ptr = buffer.data();
-                img_data.mip_levels[m].size = buffer.size();
-            }
-        }
-        sg_update_image(image_, &img_data);
-    }
-
-    // Upload all 6 faces for one mip level at once. `data` points to 6 face
-    // buffers laid out consecutively (face 0..5, each sideSize(mip)^2 * bpp).
-    void uploadCubemapMip(int mipLevel, const void* data, size_t dataSize) {
-        if (!allocated_ || !isCubemap_) return;
-        if (mipLevel < 0 || mipLevel >= numMipLevels_) return;
-        if (usage_ == TextureUsage::Immutable) return;
-
-        int mipW = mipDim(width_, mipLevel);
-        int mipH = mipDim(height_, mipLevel);
-        size_t bpp = computeBytesPerPixel();
-        size_t expected = (size_t)mipW * mipH * bpp * 6;
-        if (dataSize != expected) {
-            logWarning() << "[Texture] uploadCubemapMip: data size mismatch, expected "
-                         << expected << " got " << dataSize;
+        if (usage_ != TextureUsage::Dynamic && usage_ != TextureUsage::Stream) {
+            logWarning() << "[Texture] loadCubemapData: requires Dynamic / Stream usage";
             return;
         }
 
+        const size_t expected = (size_t)width_ * height_ * computeBytesPerPixel();
+        if (faceSize != expected) {
+            logWarning() << "[Texture] loadCubemapData: data size mismatch, expected "
+                         << expected << " got " << faceSize;
+            return;
+        }
+
+        const uint64_t currentFrame = sapp_frame_count();
+        if (lastUpload_.image == image_.id && lastUpload_.frame == currentFrame) {
+            logWarning() << "[Texture] loadCubemapData() called twice in same frame, skipped";
+            return;
+        }
+        lastUpload_ = {image_.id, currentFrame};
+
+        // sokol expects every face of every mip in one call. Dynamic / Stream
+        // cubemaps have one mip; its six face buffers are concatenated here.
+        // The staging buffer is reused (a Stream cubemap may upload every
+        // frame) and not zero-filled: all of it is overwritten below.
+        const size_t total = faceSize * 6;
+        if (cubemapStagingSize_ != total) {
+            cubemapStaging_.reset(new uint8_t[total]);
+            cubemapStagingSize_ = total;
+        }
+        for (int face = 0; face < 6; ++face) {
+            std::memcpy(cubemapStaging_.get() + face * faceSize, faces[face], faceSize);
+        }
         sg_image_data img_data = {};
-        img_data.mip_levels[mipLevel].ptr = data;
-        img_data.mip_levels[mipLevel].size = dataSize;
+        img_data.mip_levels[0].ptr = cubemapStaging_.get();
+        img_data.mip_levels[0].size = total;
         sg_update_image(image_, &img_data);
     }
 
@@ -264,6 +280,7 @@ public:
     // this cubemap. Used as color_attachment in sg_pass when rendering into
     // cube faces for IBL generation.
     sg_view getCubemapFaceAttachmentView(int face, int mipLevel) {
+        if (!sg_isvalid()) return sg_view{};
         if (!allocated_ || !isCubemap_) return sg_view{};
         if (face < 0 || face >= 6) return sg_view{};
         if (mipLevel < 0 || mipLevel >= numMipLevels_) return sg_view{};
@@ -302,6 +319,7 @@ public:
 
     // Update compressed texture (recreates texture - BC textures are immutable)
     void updateCompressed(const void* data, size_t dataSize) {
+        if (!sg_isvalid()) return;
         if (!allocated_ || pixelFormat_ == SG_PIXELFORMAT_NONE) return;
 
         // Release old resources (deferred: draws recorded this frame may
@@ -339,6 +357,7 @@ public:
         mipmapped_ = mipmaps && mipmapSupported;
         if (mipmapped_) {
             numMipLevels_ = 1 + (int)std::floor(std::log2((float)std::max(width_, height_)));
+            // Bound (gpu): image-derived mip counts must fit the GPU API descriptor array. Overflow clamps the mip count.
             if (numMipLevels_ > SG_MAX_MIPMAPS) numMipLevels_ = SG_MAX_MIPMAPS;
             if (numMipLevels_ < 1) numMipLevels_ = 1;
         } else {
@@ -357,40 +376,7 @@ public:
     }
 
     // Release resources
-    void clear() {
-        if (allocated_) {
-            // Deferred destroy: draws recorded this frame (sokol_gl quads,
-            // deferred PBR bindings) may still reference these handles.
-            internal::deferGpuDestroy(sampler_);
-            internal::deferGpuDestroy(view_);
-            internal::deferGpuDestroy(attachmentView_);
-            for (sg_view v : cubeFaceAttachmentViews_) {
-                internal::deferGpuDestroy(v);
-            }
-            cubeFaceAttachmentViews_.clear();
-            for (sg_view v : mipAttachmentViews_) {
-                internal::deferGpuDestroy(v);
-            }
-            mipAttachmentViews_.clear();
-            for (sg_view v : mipSamplingViews_) {
-                internal::deferGpuDestroy(v);
-            }
-            mipSamplingViews_.clear();
-            internal::deferGpuDestroy(image_);
-            allocated_ = false;
-        }
-        width_ = 0;
-        height_ = 0;
-        channels_ = 0;
-        mipmapped_ = false;
-        isCubemap_ = false;
-        numMipLevels_ = 1;
-        pixelFormat_ = SG_PIXELFORMAT_NONE;
-        image_ = {};
-        view_ = {};
-        attachmentView_ = {};
-        sampler_ = {};
-    }
+    void clear() { clearResources_(true); }
 
     // === State ===
 
@@ -405,6 +391,7 @@ public:
     // === Data update (except Immutable) ===
 
     void loadData(const Pixels& pixels) {
+        if (!sg_isvalid()) return;
         // Dynamic + mipmaps: D3D11 only allows a single mip level on
         // DYNAMIC-usage textures, so we can't use sg_update_image with a
         // full mip chain. Instead we destroy the current image and recreate
@@ -419,11 +406,11 @@ public:
             // frame limit is a device constraint, so this must stay on
             // sapp_frame_count(), NOT the per-window getFrameCount().
             uint64_t currentFrame = sapp_frame_count();
-            if (lastUpdateFrame_ == currentFrame) {
+            if (lastUpload_.image == image_.id && lastUpload_.frame == currentFrame) {
                 logWarning() << "[Texture] loadData() called twice in same frame, skipped";
                 return;
             }
-            lastUpdateFrame_ = currentFrame;
+            lastUpload_ = {image_.id, currentFrame};
 
             const size_t bpp = computeBytesPerPixel();
 
@@ -470,19 +457,20 @@ public:
     }
 
     // Upload pixel data to texture
-    // Note: Due to sokol limitations, can only be called once per frame
-    // Calling twice in same frame ignores second call and logs warning
+    // Note: Due to sokol limitations, can only update each image once per frame
+    // Updating the same image twice ignores the second call and logs a warning
     void loadData(const void* data, int width, int height, int channels) {
+        if (!sg_isvalid()) return;
         if (!allocated_ || usage_ == TextureUsage::Immutable) return;
         if (width != width_ || height != height_ || channels != channels_) return;
 
-        // Can only update once per frame (sokol limitation)
+        // Can only update each image once per device frame (sokol limitation)
         uint64_t currentFrame = sapp_frame_count();
-        if (lastUpdateFrame_ == currentFrame) {
+        if (lastUpload_.image == image_.id && lastUpload_.frame == currentFrame) {
             logWarning() << "[Texture] loadData() called twice in same frame, skipped";
             return;
         }
-        lastUpdateFrame_ = currentFrame;
+        lastUpload_ = {image_.id, currentFrame};
 
         size_t dataSize = (size_t)width * height * computeBytesPerPixel();
 
@@ -632,6 +620,54 @@ public:
     }
 
 private:
+    friend class Fbo;
+
+    // Only Fbo may immediately discard textures it has never published.
+    void clearResources_(bool deferred) {
+        auto destroy = [deferred](auto handle) {
+            if (deferred) internal::deferGpuDestroy(handle);
+            else if (handle.id) {
+                if constexpr (std::is_same_v<decltype(handle), sg_image>) sg_destroy_image(handle);
+                else if constexpr (std::is_same_v<decltype(handle), sg_view>) sg_destroy_view(handle);
+                else sg_destroy_sampler(handle);
+            }
+        };
+        cubemapStaging_.reset();
+        cubemapStagingSize_ = 0;
+        if (allocated_) {
+            // Deferred destroy: draws recorded this frame (sokol_gl quads,
+            // deferred PBR bindings) may still reference these handles.
+            destroy(sampler_);
+            destroy(view_);
+            destroy(attachmentView_);
+            for (sg_view v : cubeFaceAttachmentViews_) {
+                destroy(v);
+            }
+            cubeFaceAttachmentViews_.clear();
+            for (sg_view v : mipAttachmentViews_) {
+                destroy(v);
+            }
+            mipAttachmentViews_.clear();
+            for (sg_view v : mipSamplingViews_) {
+                destroy(v);
+            }
+            mipSamplingViews_.clear();
+            destroy(image_);
+            allocated_ = false;
+        }
+        width_ = 0;
+        height_ = 0;
+        channels_ = 0;
+        mipmapped_ = false;
+        isCubemap_ = false;
+        numMipLevels_ = 1;
+        pixelFormat_ = SG_PIXELFORMAT_NONE;
+        image_ = {};
+        view_ = {};
+        attachmentView_ = {};
+        sampler_ = {};
+    }
+
     sg_image image_ = {};
     sg_view view_ = {};              // Texture view (for sampling)
     sg_view attachmentView_ = {};    // Attachment view (for RenderTarget)
@@ -644,7 +680,14 @@ private:
     bool allocated_ = false;
     bool mipmapped_ = false;
     TextureUsage usage_ = TextureUsage::Immutable;
-    uint64_t lastUpdateFrame_ = UINT64_MAX;  // Last updated frame
+    struct {
+        uint32_t image = SG_INVALID_ID;
+        uint64_t frame = UINT64_MAX;
+    } lastUpload_;
+    // Staging for loadCubemapData(): six faces back to back, allocated on the
+    // first upload of a Dynamic / Stream cubemap, released by clear().
+    std::unique_ptr<uint8_t[]> cubemapStaging_;
+    size_t cubemapStagingSize_ = 0;
     sg_pixel_format pixelFormat_ = SG_PIXELFORMAT_NONE;
 
     TextureFilter minFilter_ = TextureFilter::Linear;
@@ -689,6 +732,7 @@ private:
     }
 
     void createCompressedResources(const void* data, size_t dataSize) {
+        if (!sg_isvalid()) return;
         sg_image_desc img_desc = {};
         img_desc.width = width_;
         img_desc.height = height_;
@@ -710,6 +754,16 @@ private:
     }
 
     void createResources(const void* initialData) {
+        // CPU-only Images are valid in headless apps and before graphics setup.
+        // Leave the texture unallocated so their updates and draws are no-ops.
+        if (!sg_isvalid()) return;
+
+        auto sizeResult = internal::checkImageSize(width_, height_);
+        if (!sizeResult) {
+            logError("Texture") << sizeResult.message;
+            return;
+        }
+
         // Create image
         sg_image_desc img_desc = {};
         img_desc.width = width_;
@@ -745,6 +799,7 @@ private:
                     // RGBA / RGBAF32 here.
                     if (mipmapped_ && channels_ == 4) {
                         int numLevels = 1 + (int)std::floor(std::log2((float)std::max(width_, height_)));
+                        // Bound (gpu): image-derived mip counts must fit the GPU API descriptor array. Overflow clamps the mip count.
                         if (numLevels > SG_MAX_MIPMAPS) numLevels = SG_MAX_MIPMAPS;
                         img_desc.num_mipmaps = numLevels;
 
@@ -786,10 +841,13 @@ private:
         }
 
         image_ = sg_make_image(&img_desc);
-        if (sg_query_image_state(image_) == SG_RESOURCESTATE_FAILED) {
+        if (sg_query_image_state(image_) != SG_RESOURCESTATE_VALID) {
             logError("Texture") << "GPU texture allocation failed ("
                 << width_ << "x" << height_ << ", format "
                 << (int)img_desc.pixel_format << ")";
+            sg_destroy_image(image_);
+            image_ = {};
+            return;
         }
 
         // Create texture view (for sampling)
@@ -836,6 +894,7 @@ private:
     }
 
     void createCubemapResources() {
+        if (!sg_isvalid()) return;
         sg_image_desc img_desc = {};
         img_desc.type = SG_IMAGETYPE_CUBE;
         img_desc.width = width_;
@@ -845,12 +904,9 @@ private:
 
         switch (usage_) {
             case TextureUsage::Immutable:
-                // Immutable cubemap not supported yet (would need initial data
-                // for all 6 faces and all mips). Use Dynamic + uploadCubemapFace
-                // or RenderTarget + face attachment views instead.
-                logWarning() << "[Texture] allocateCubemap Immutable not supported; using Dynamic";
-                img_desc.usage.dynamic_update = true;
-                break;
+                // Refused in allocateCubemap(): an Immutable cubemap would need
+                // initial data for all 6 faces and all mips.
+                return;
             case TextureUsage::Dynamic:
                 img_desc.usage.dynamic_update = true;
                 break;
@@ -905,6 +961,7 @@ private:
     }
 
     void recreateSampler() {
+        if (!sg_isvalid()) return;
         if (!allocated_) return;
         // Deferred: a draw recorded this frame may still bind the old sampler
         internal::deferGpuDestroy(sampler_);
@@ -917,17 +974,15 @@ private:
         // set via setBlendMode() takes priority — texture draws (including
         // Fbo::draw) must honor it, e.g. compositing an Fbo with Subtract.
         // Under the default Alpha mode, behavior is preserved: premultiplied
-        // sources use the premult pipeline on the swapchain, FBO passes use
-        // Fill2D even for premultiplied sources, as before.
-        BlendMode blend = internal::currentWindowContext().currentBlendMode;
+        // sources use the premult pipeline on every destination.
+        BlendMode blend = internal::currentWindowContext().currentTarget->currentBlendMode;
         if (blend != BlendMode::Alpha) {
-            internal::loadPipeline(internal::active2D(blend));
-        } else if (internal::currentWindowContext().inFboPass) {
-            internal::loadPipeline(internal::activeFill2D());
+            internal::loadTemporaryPipeline(internal::active2D(blend));
+
         } else if (premultipliedAlpha_) {
-            internal::loadPipeline(internal::activePremult());
+            internal::loadTemporaryPipeline(internal::activePremult());
         } else {
-            internal::loadPipeline(internal::activeFill2D());
+            internal::loadTemporaryPipeline(internal::activeFill2D());
         }
         sgl_enable_texture();
         sgl_texture(view_, sampler_);
@@ -966,7 +1021,10 @@ private:
         mipAttachmentViews_ = std::move(other.mipAttachmentViews_);
         mipSamplingViews_ = std::move(other.mipSamplingViews_);
         usage_ = other.usage_;
-        lastUpdateFrame_ = other.lastUpdateFrame_;
+        lastUpload_ = other.lastUpload_;
+        cubemapStaging_ = std::move(other.cubemapStaging_);
+        cubemapStagingSize_ = other.cubemapStagingSize_;
+        other.cubemapStagingSize_ = 0;
         pixelFormat_ = other.pixelFormat_;
         minFilter_ = other.minFilter_;
         magFilter_ = other.magFilter_;

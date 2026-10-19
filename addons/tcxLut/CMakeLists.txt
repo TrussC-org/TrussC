@@ -16,3 +16,7 @@ target_include_directories(${ADDON_NAME} INTERFACE
 )
 
 target_link_libraries(${ADDON_NAME} INTERFACE TrussC)
+
+# Compile src/shaders/lut.glsl with sokol-shdc (core/cmake/trussc_shaders.cmake).
+trussc_compile_shaders(${ADDON_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders")
+target_link_libraries(${ADDON_NAME} INTERFACE ${ADDON_NAME}_shaders)

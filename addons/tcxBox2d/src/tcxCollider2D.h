@@ -35,6 +35,8 @@ public:
     // When true, collision is detected but no physics response occurs.
     // Useful for triggers, pickups, detection zones, etc.
     bool isTrigger = false;
+    // Immediate sensor application, including before a raw b2World::Step().
+    void setTrigger(bool on) { isTrigger = on; applyTriggerMode(); }
 
     // -------------------------------------------------------------------------
     // Collision Filtering (wraps Box2D b2Filter)
@@ -42,6 +44,8 @@ public:
     // Category: what this collider "is" (bitmask)
     // Mask: what this collider collides "with" (bitmask)
     // Collision occurs when: (A.category & B.mask) && (B.category & A.mask)
+    // Setters apply to every fixture of the body (a compound body has
+    // several); getters read the first fixture.
 
     void setCategoryBits(uint16_t bits);
     void setMaskBits(uint16_t bits);
@@ -55,23 +59,22 @@ public:
     // Accessors
     // -------------------------------------------------------------------------
     Body* getBody() const { return body_; }
-    b2Fixture* getFixture() const { return fixture_; }
+    b2Fixture* getFixture() const { return fixture_; }   // the body's first fixture
 
     virtual ~Collider2D() = default;
 
 protected:
     friend class Body;
+    friend class World;
     friend class CollisionManager;
 
     Body* body_ = nullptr;
     b2Fixture* fixture_ = nullptr;
 
-    // Internal: called by CollisionManager
-    void notifyEnter(CollisionEvent& e) { onCollisionEnter.notify(e); }
-    void notifyStay(CollisionEvent& e) { onCollisionStay.notify(e); }
-    void notifyExit(CollisionEvent& e) { onCollisionExit.notify(e); }
+    bool appliedTrigger_ = false;
+    void syncTriggerMode() { if (isTrigger != appliedTrigger_) applyTriggerMode(); }
 
-    // Apply isTrigger to fixture
+    // Apply isTrigger to every fixture of the body
     void applyTriggerMode();
 };
 

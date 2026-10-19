@@ -1,5 +1,7 @@
 #pragma once
 #include "tc/utils/tcAnnotations.h"
+#include <mutex>
+#include "tc/utils/tcOnceGate.h"
 
 // =============================================================================
 // tcVideoPlayer.h - Video playback
@@ -22,6 +24,7 @@
 // =============================================================================
 
 #include "tcVideoPlayerBase.h"
+#include <cmath>
 #include "tc/graphics/tcPixels.h"
 
 namespace trussc {
@@ -36,7 +39,7 @@ public:
     VideoPlayer() = default;
     ~VideoPlayer() { close(); }
 
-    // Move-enabled
+    // Move-enabled. onError listeners are not moved.
     VideoPlayer(VideoPlayer&& other) noexcept {
         moveFrom(std::move(other));
     }
@@ -53,37 +56,53 @@ public:
     // Load / Close
     // =========================================================================
 
+    /// Linux: stream audio by default. Set false before load() to preload
+    /// the whole track for sample-accurate loops and seeks. Changing this
+    /// setting applies to the next load(). Native OS players ignore it.
+    void setAudioStreaming(bool streaming) {
+        audioStreaming_ = streaming;
+#if defined(__APPLE__) || defined(_WIN32) || defined(__EMSCRIPTEN__)
+        static OnceGate noticed;
+        if (!streaming && noticed.isFirstTime()) {
+            logNotice("VideoPlayer") << "setAudioStreaming(false) has no effect on this platform; "
+                                       "the native player handles audio";
+        }
+#endif
+    }
+    bool isAudioStreaming() const { return audioStreaming_; }
+
     LoadResult load(const fs::path& path) override {
+        internal::clearLoadName(sourcePath_);
+        const auto previousError = errorMessage_;
         if (initialized_) {
             close();
         }
+        errorMessage_ = previousError;
 
         // Resolve relative paths via getDataPath; URLs pass through untouched
-        // (the web backend streams straight from them)
-        const std::string pathStr = path.string();
+        // (the web backend streams straight from them). Display conversion
+        // cannot create or hide the ASCII URL prefix, and accepts Windows
+        // names holding unpaired UTF-16 surrogates.
+        const std::string pathStr = internal::pathToDisplayUtf8(path);
         bool isUrl = pathStr.rfind("http://", 0) == 0 || pathStr.rfind("https://", 0) == 0;
-        fs::path resolvedPath = isUrl ? path : getDataPath(path);
+        fs::path resolvedPath = internal::resolveLoadPath(path, isUrl);
 
-        // Missing files are classified up front (URLs skip the check —
-        // the platform backends stream straight from them).
-        if (!isUrl) {
-            std::error_code ec;
-            if (!fs::exists(resolvedPath, ec)) {
-                return LoadResult::fail(LoadError::FileNotFound,
-                                        "file not found: " + internal::pathToUtf8(resolvedPath));
-            }
-        }
+        auto entry = internal::checkLoadFile(resolvedPath, "VideoPlayer", isUrl);
+        if (!entry) return entry;
 
         // Platform-specific load
         if (!loadPlatform(resolvedPath)) {
+#ifdef __EMSCRIPTEN__
+            if (!webLoadResult_) return webLoadResult_;
+#endif
             return LoadResult::fail(LoadError::DecodeFailed,
                                     "platform decoder failed to open: " +
-                                    internal::pathToUtf8(resolvedPath));
+                                    internal::pathToDisplayUtf8(resolvedPath));
         }
 
         // Remember the resolved path so instance-level frame extraction
         // (extractFrame / extractKeyFrame with no path arg) and getPath() work.
-        sourcePath_ = resolvedPath;
+        internal::setLoadName(sourcePath_, resolvedPath);
 
         // Create texture(s) for per-frame updates
         if (width_ > 0 && height_ > 0) {
@@ -104,7 +123,9 @@ public:
             }
         }
 
+        clearPlaybackError();
         initialized_ = true;
+        applyCachedStateToPlatform();
         firstFrameReceived_ = false;
         posterActive_ = false;
 
@@ -113,15 +134,22 @@ public:
         // Frame 0 is always a keyframe, so this is exact AND fast.
         // Stream textures accept ONE loadData per frame, so the poster and
         // the black-clear are alternatives, never both.
+#ifdef __EMSCRIPTEN__
+        // loadPlatform already waited for a decoded frame. Upload it now;
+        // the Web frame-extraction stub cannot provide an auto-poster.
+        update();
+#else
         bool postered = autoPoster_ && loadPosterFrame(0.0f);
         if (!postered) clearTexture();
+#endif
         return LoadResult::success();
     }
 
     void close() override {
-        if (!initialized_) return;
+        if (!initialized_) { clearPlaybackError(); return; }
 
         closePlatform();
+        clearPlaybackError();
 
         texture_.clear();
         textureY_.clear();
@@ -158,9 +186,11 @@ public:
         if (!initialized_) return;
 
         frameNew_ = false;
+        if (dispatchPlaybackError()) return;
 
         // Platform-specific update
         updatePlatform();
+        if (dispatchPlaybackError()) return;
 
         // Check for new frame from platform
         if (hasNewFramePlatform()) {
@@ -281,29 +311,12 @@ public:
     // Frame control
     // =========================================================================
 
-    int getCurrentFrame() const override {
-        if (!initialized_) return 0;
-        return getCurrentFramePlatform();
-    }
-
-    int getTotalFrames() const override {
-        if (!initialized_) return 0;
-        return getTotalFramesPlatform();
-    }
-
-    void setFrame(int frame) override {
-        if (!initialized_) return;
-        setFramePlatform(frame);
-    }
-
-    void nextFrame() override {
-        if (!initialized_) return;
-        nextFramePlatform();
-    }
-
-    void previousFrame() override {
-        if (!initialized_) return;
-        previousFramePlatform();
+    /// File frame rate in fps, or 0 when unknown (always 0 on Web).
+    /// Time-based position/duration APIs are portable across backends.
+    float getFrameRate() const override {
+        if (!initialized_) return 0.0f;
+        float rate = getFrameRatePlatform();
+        return std::isfinite(rate) && rate > 0.0f ? rate : 0.0f;
     }
 
     // =========================================================================
@@ -376,6 +389,26 @@ protected:
     // Implementation methods
     // -------------------------------------------------------------------------
 
+    int getCurrentFrameImpl() const override {
+        return getCurrentFramePlatform();
+    }
+
+    int getTotalFramesImpl() const override {
+        return getTotalFramesPlatform();
+    }
+
+    void setFrameImpl(int frame) override {
+        setFramePlatform(frame);
+    }
+
+    void nextFrameImpl() override {
+        nextFramePlatform();
+    }
+
+    void previousFrameImpl() override {
+        previousFramePlatform();
+    }
+
     void playImpl() override {
         playPlatform();
     }
@@ -401,6 +434,9 @@ protected:
         // seek still returns the OLD position. Remember the target: the
         // poster logic in play() uses it until a live frame supersedes it.
         pendingSeekSec_ = pct * getDurationPlatform();
+        // A failed backend stays paused until play(). Use the existing poster
+        // path to show an explicit recovery seek even while it is stopped.
+        if (errorStopped_ && autoPoster_) loadPosterFrame(pendingSeekSec_);
     }
 
     void setVolumeImpl(float vol) override {
@@ -445,6 +481,7 @@ private:
 
     // HW decode preference (default on; Linux backend honors this)
     bool useHwAccel_ = true;
+    bool audioStreaming_ = true;
 
     // Platform-specific handle
     void* platformHandle_ = nullptr;
@@ -458,6 +495,7 @@ private:
     // -------------------------------------------------------------------------
 
     void moveFrom(VideoPlayer&& other) {
+        movePlaybackErrorFrom(other);
         width_ = other.width_;
         height_ = other.height_;
         initialized_ = other.initialized_;
@@ -484,6 +522,7 @@ private:
         lastShownTime_   = other.lastShownTime_;
         pendingSeekSec_  = other.pendingSeekSec_;
         nv12ShaderHandle_ = other.nv12ShaderHandle_;
+        audioStreaming_ = other.audioStreaming_;
         platformHandle_  = other.platformHandle_;
         sourcePath_      = std::move(other.sourcePath_);
 
@@ -556,6 +595,9 @@ private:
     // Platform-specific methods (implemented in tcVideoPlayer_mac.mm, etc.)
     // -------------------------------------------------------------------------
     bool loadPlatform(const fs::path& path);
+#ifdef __EMSCRIPTEN__
+    LoadResult webLoadResult_;
+#endif
     void closePlatform();
     void playPlatform();
     void stopPlatform();
@@ -573,6 +615,7 @@ private:
     void setSpeedPlatform(float speed);
     void setLoopPlatform(bool loop);
 
+    float getFrameRatePlatform() const;
     int getCurrentFramePlatform() const;
     int getTotalFramesPlatform() const;
     void setFramePlatform(int frame);
@@ -713,6 +756,32 @@ namespace internal {
 // Helper class for platform implementations to access protected members
 class VideoPlayerPlatformAccess {
 public:
+    static void reportError(VideoPlayer& player, const VideoErrorEventArgs& error) {
+        player.reportPlaybackError(error.message, error.errorCode);
+    }
+#if defined(__linux__) && !defined(__ANDROID__)
+    // Exercise the real Linux decoder/clock in headless regression tests,
+    // without creating textures or uploading frames to a GPU.
+    static bool loadHeadlessForTests(VideoPlayer& player, const fs::path& path) {
+        player.setUseHwAccel(false);
+        if (!player.loadPlatform(path)) return false;
+        player.initialized_ = true;
+        return true;
+    }
+    static void playHeadlessForTests(VideoPlayer& player) { player.playPlatform(); }
+    static void updateHeadlessForTests(VideoPlayer& player) { player.updatePlatform(); }
+    static void stopAudioForTests(VideoPlayer& player);
+    // Synthetic planes exercise VideoPlayer::draw -> drawNV12Platform without a
+    // decoder/device. The supplied shader is borrowed only for this draw.
+    static void drawNV12ForTests(VideoPlayer& player, void* shader, Texture&& yPlane,
+                                Texture&& uvPlane, float x, float y, float w, float h) {
+        player.nv12Mode_ = true; player.posterActive_ = false;
+        player.nv12ShaderHandle_ = shader;
+        player.textureY_ = std::move(yPlane); player.textureUV_ = std::move(uvPlane);
+        player.draw(x, y, w, h);
+        player.nv12ShaderHandle_ = nullptr; player.nv12Mode_ = false;
+    }
+#endif
     static void setDimensions(VideoPlayer& player, int w, int h) {
         player.width_ = w;
         player.height_ = h;

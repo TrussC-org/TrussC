@@ -1,3 +1,23 @@
+# Per-PR / per-push CI: the FAST lane. Every platform in parallel, each job
+# kept to what catches breakage cheaply: AllFeaturesExample on every platform
+# (desktop, Android, web, iOS), plus the core library + trusscli and the core
+# behavioral tests (core/tests incl. the hot reload host/guest split) on
+# desktop, split over three jobs per OS (#806). The addon test harnesses run
+# in daily.yml. Runs only for main: changes land on next/<topic> branches
+# without CI and reach main as one batch PR per topic. AllFeaturesExample
+# references every documented public core API and the repo-contained bundled
+# addons without running them (its src/coverage.h), so each platform compiles
+# every call and links it against its own implementation. A textual check
+# (tools/check_header_state.py) keeps new mutable state out of header-inline
+# code, where a Windows hot reload guest would get its own copy. Target: about
+# 10 minutes wall-clock (the slowest job). Building every example on every
+# platform lives in daily.yml, once a day on main, opening an issue on failure.
+#
+# Also runs for the merge queue (merge_group): each queued PR is built on top
+# of main plus the PRs queued ahead of it, so PRs no longer need "Update
+# branch" before merging. Queue runs restore caches but never save them (the
+# queue's temporary refs are deleted right after, so a saved cache would only
+# push useful ones out of the 10 GB repo limit).
 name: Build
 
 on:
@@ -5,6 +25,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  merge_group:
   workflow_dispatch:
 
 concurrency:
@@ -21,8 +42,8 @@ env:
 jobs:
   # Path-based change detector. Emits docs_only=true when EVERY file in the diff
   # is documentation (any *.md, or anything under docs/ — prose + doc tooling).
-  # The heavy build jobs gate on this so a docs-only change skips the ~20min
-  # compile matrix while the cheap reference-check still runs. Conservative:
+  # The build jobs gate on this so a docs-only change skips the compile
+  # matrix while the cheap reference-check still runs. Conservative:
   # anything that isn't clearly a doc (and every non-diff event, e.g.
   # workflow_dispatch) counts as code and builds everything.
   changes:
@@ -42,6 +63,9 @@ jobs:
           if [ "$event" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
             head="${{ github.event.pull_request.head.sha }}"
+          elif [ "$event" = "merge_group" ]; then
+            base="${{ github.event.merge_group.base_sha }}"
+            head="${{ github.event.merge_group.head_sha }}"
           elif [ "$event" = "push" ]; then
             base="${{ github.event.before }}"
             head="${{ github.sha }}"
@@ -89,13 +113,20 @@ jobs:
   build:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    timeout-minutes: 180
+    timeout-minutes: 60
+    name: build (${{ matrix.preset }}, shard ${{ matrix.shard }}/3)
     strategy:
       fail-fast: false
       matrix:
+        preset: [macos, windows, linux]
+        # The core tests are split over three jobs per OS (#806):
+        # build_all.py --shard N/3. Shard 1 also builds AllFeaturesExample and
+        # runs the trusscli/tooling checks and the own-binary and unit tests;
+        # shards 2 and 3 build and run half of the combined tests each.
+        shard: [1, 2, 3]
         include:
-          - os: macos-latest
-            preset: macos
+          - preset: macos
+            os: macos-latest
             launcher: ccache
           # Unpinned back to windows-latest (a VS2026 runner). The previous
           # windows-2022 pin blamed projectGenerator's VS-project generation,
@@ -111,12 +142,12 @@ jobs:
           # instead of the Visual Studio generator: the compiler-launcher hook
           # sccache relies on is ignored by the VS generator, and Ninja + cl.exe
           # (from vcvars) is version-agnostic anyway. Local dev is unchanged.
-          - os: windows-latest
-            preset: windows
+          - preset: windows
+            os: windows-latest
             launcher: sccache
             cmake_gen: Ninja
-          - os: ubuntu-latest
-            preset: linux
+          - preset: linux
+            os: ubuntu-latest
             launcher: ccache
 
     runs-on: ${{ matrix.os }}
@@ -126,6 +157,41 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
+      # Reuse one dependency tree across every configure in this job.
+      - name: Cache FetchContent
+        id: fetchcontent
+        if: github.event_name != 'merge_group'
+        uses: actions/cache@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Cache FetchContent (restore only, merge queue)
+        id: fetchcontent-restore
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Configure shared FetchContent
+        shell: bash
+        env:
+          FETCHCONTENT_CACHE_HIT: ${{ steps.fetchcontent.outputs.cache-hit == 'true' || steps.fetchcontent-restore.outputs.cache-hit == 'true' }}
+        run: |
+          echo "TRUSSC_FETCHCONTENT_DIR=$GITHUB_WORKSPACE/.fetchcontent" >> "$GITHUB_ENV"
+          if [ "$FETCHCONTENT_CACHE_HIT" = "true" ]; then
+            echo "TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON" >> "$GITHUB_ENV"
+          fi
 
       # Compiler cache: ccache on mac/linux, sccache on Windows/MSVC (Release
       # builds carry no /Zi, so cl objects are cacheable). Wires the compiler
@@ -137,45 +203,90 @@ jobs:
         with:
           variant: ${{ matrix.launcher }}
           key: ${{ matrix.os }}-build
-          max-size: 800M
+          # 2G per OS (#762): at 800M the Linux cache overflowed mid-job (1.0 GB,
+          # hundreds of cleanups) and the hit rate fell. Three OS caches at 2G
+          # stay well under the 10 GB per-repo limit. Same cap for sccache.
+          # One compiler cache per OS, saved by shard 1 only (#806): its key
+          # gets a timestamp, so every shard would add its own 0.5-1.7 GB entry
+          # and pass the 10 GB repo limit. Shards 2-3 restore it and hit on the
+          # library and trusscli; their test sources miss whenever a core header
+          # changed, which a batch PR nearly always does anyway. (The
+          # actions/cache steps above and below need no shard term: their keys
+          # are the same in every shard, so a key is stored once.)
+          max-size: 2G
+          save: ${{ github.event_name != 'merge_group' && matrix.shard == 1 }}
 
       - name: Enable compiler launcher
         shell: bash
         run: |
-          echo "CMAKE_C_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
+          launcher="${{ matrix.launcher }}"
+          # Include Objective-C++: the macOS platform .mm files need caching too.
+          for lang in C CXX OBJC OBJCXX; do
+            echo "CMAKE_${lang}_COMPILER_LAUNCHER=$launcher" >> "$GITHUB_ENV"
+          done
           # Hash the compiler by content, not mtime: a fresh runner VM installs
           # the same compiler at a different mtime, which otherwise invalidates
           # every restored ccache entry (macOS hit this: 8% hits despite a warm
           # cache). No-op for sccache (ignores CCACHE_*).
           echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
 
+      # The build directories' CMakeCache records absolute compiler paths (the
+      # VS / MSVC toolset directory, the Xcode app), so a cache restored onto a
+      # different runner image points at a compiler that isn't there and
+      # configure fails ("is not a full path to an existing compiler tool",
+      # #223: a windows-2022 sweep restored a windows-latest VS 18 cache
+      # through the OS-only prefix). Key on the runner IMAGE: the first build
+      # after an image update is cold (the compiler cache still helps), and a
+      # cache never crosses images.
+      - name: Runner image id (cache key)
+        shell: bash
+        run: echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
+
       - name: Cache build directories
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
         with:
           path: |
             core/build-${{ matrix.preset }}
             tools/build
-          key: ${{ runner.os }}-build-v4-${{ hashFiles('core/**/*.h', 'core/**/*.cpp', 'core/**/*.mm') }}
+          key: ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-${{ hashFiles('core/**/*.h', 'core/**/*.cpp', 'core/**/*.mm') }}
           restore-keys: |
-            ${{ runner.os }}-build-v4-
+            ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-
+
+      - name: Cache build directories (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            core/build-${{ matrix.preset }}
+            tools/build
+          key: ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-${{ hashFiles('core/**/*.h', 'core/**/*.cpp', 'core/**/*.mm') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-
 
       # sokol-shdc (shader compiler) is downloaded by core CMake from
       # raw.githubusercontent.com, which 429s anonymous CI traffic. Cache the
       # binary under a static key so runs stop re-downloading it (this also
       # pins the tool — bump the key to pick up a newer upstream build).
       - name: Cache sokol-shdc
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
 
       # Linux: Install dependencies using shared script
       - name: Install Linux dependencies
+        timeout-minutes: 10
         if: runner.os == 'Linux'
-        run: |
-          chmod +x tools/install_dependencies_linux.sh
-          ./tools/install_dependencies_linux.sh -y
+        uses: ./.github/actions/apt-deps
 
       # Windows: Setup MSVC environment (provides cl.exe, ninja, etc. in PATH)
       - name: Setup MSVC (Windows)
@@ -200,36 +311,50 @@ jobs:
             find . -name trusscli.exe
           fi
 
+      # trusscli CLI regressions, against the trusscli just built from this
+      # commit: clean refuses a folder that is not a TrussC project (#459), and
+      # generated files are written atomically with LF endings (#373).
+      - name: trusscli regression tests
+        if: runner.os == 'Linux' && matrix.shard == 1
+        shell: bash
+        run: python3 -m unittest discover -s tools/tests -p "test_trusscli_*.py" -v
+
+      # Configure and build must agree on localized /showIncludes bytes (#417).
+      - name: Windows UTF-8 console header dependencies
+        if: runner.os == 'Windows' && matrix.shard == 1
+        shell: cmd
+        run: |
+          chcp 65001 >NUL
+          python tools/tests/test_windows_header_dependencies.py -v
+
+      # Weekly-only tests go stale unnoticed; run the offline upstream-check
+      # tests on every PR too (ls_remote is patched, no network).
+      - name: upstream-check regression tests
+        if: runner.os == 'Linux' && matrix.shard == 1
+        shell: bash
+        run: python3 -m unittest discover -s tools/tests -p test_upstream_check.py -v
+
+      # Compile-and-link canary: every documented core API + the repo-contained
+      # addons (see examples/tests/AllFeaturesExample/src/coverage.h). Every
+      # other example is built daily (daily.yml).
       - name: Build AllFeaturesExample
+        if: matrix.shard == 1
         shell: bash
         run: |
           chmod +x examples/build_all.py
           ./examples/build_all.py --test-only --verbose
 
-      # Per-addon dependency compile coverage: the first example of every bundled
-      # addon. Catches breakage in addons (and their fetched third-party deps)
-      # that AllFeaturesExample doesn't link. The exhaustive every-example sweep
-      # lives in full-sweep.yml (weekly).
-      - name: Build one example per addon
-        shell: bash
-        run: ./examples/build_all.py --one-per-addon --verbose
-
-      # Behavioral test harnesses bundled with monorepo addons (addons/*/tests/):
-      # built AND run (non-zero exit fails the job). The tests are small console
-      # projects. No-op when none exist.
-      - name: Build & run addon tests
-        shell: bash
-        run: ./examples/build_all.py --addon-tests-only --verbose
+      # The addon test harnesses (addons/*/tests/) run in daily.yml only
+      # (--addon-tests-only --include-daily, #806): they were about 15 of the
+      # job's 36-40 minutes.
 
       # Behavioral regression tests for the core (core/tests/*/): built AND run
       # on every build (small headless console projects, non-zero exit fails).
+      # hotReloadLifecycle also covers the host/guest split build with an addon.
+      # This job runs its shard only (see the matrix); ci-ok needs every shard.
       - name: Build & run core tests
         shell: bash
-        run: ./examples/build_all.py --core-tests-only --verbose
-
-      - name: Build HotReloadExample (host/guest split smoke test)
-        shell: bash
-        run: ./examples/build_all.py --test-hot-reload --verbose
+        run: ./examples/build_all.py --core-tests-only --shard ${{ matrix.shard }}/3 --verbose
 
       - name: Compiler cache stats
         if: always()
@@ -238,17 +363,52 @@ jobs:
           if [ "${{ matrix.launcher }}" = "sccache" ]; then
             sccache --show-stats || true
           else
-            ccache -s || true
+            ccache -sv || true
           fi
 
   build-android:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    timeout-minutes: 60
+    timeout-minutes: 30
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5
+
+      # Reuse one dependency tree across every configure in this job.
+      - name: Cache FetchContent
+        id: fetchcontent
+        if: github.event_name != 'merge_group'
+        uses: actions/cache@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Cache FetchContent (restore only, merge queue)
+        id: fetchcontent-restore
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Configure shared FetchContent
+        shell: bash
+        env:
+          FETCHCONTENT_CACHE_HIT: ${{ steps.fetchcontent.outputs.cache-hit == 'true' || steps.fetchcontent-restore.outputs.cache-hit == 'true' }}
+        run: |
+          echo "TRUSSC_FETCHCONTENT_DIR=$GITHUB_WORKSPACE/.fetchcontent" >> "$GITHUB_ENV"
+          if [ "$FETCHCONTENT_CACHE_HIT" = "true" ]; then
+            echo "TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON" >> "$GITHUB_ENV"
+          fi
 
       - name: Setup compiler cache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -256,6 +416,7 @@ jobs:
           variant: ccache
           key: android-build
           max-size: 800M
+          save: ${{ github.event_name != 'merge_group' }}
 
       - name: Enable compiler launcher
         run: |
@@ -284,7 +445,18 @@ jobs:
           echo "ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
 
       - name: Cache Android build
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: |
+            core/build-android
+            tools/build
+          key: android-build-v4-${{ hashFiles('core/**/*.h', 'core/**/*.cpp') }}
+          restore-keys: android-build-v4-
+
+      - name: Cache Android build (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: |
             core/build-android
@@ -294,15 +466,22 @@ jobs:
 
       # See the build job: avoid the 429-prone sokol-shdc download.
       - name: Cache sokol-shdc
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
 
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
       - name: Install Linux dependencies (for trusscli)
-        run: |
-          chmod +x tools/install_dependencies_linux.sh
-          ./tools/install_dependencies_linux.sh -y
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-deps
 
       - name: Build trusscli
         run: |
@@ -331,16 +510,51 @@ jobs:
 
       - name: Compiler cache stats
         if: always()
-        run: ccache -s || true
+        run: ccache -sv || true
 
   build-web:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    timeout-minutes: 120
+    timeout-minutes: 30
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5
+
+      # Reuse one dependency tree across every configure in this job.
+      - name: Cache FetchContent
+        id: fetchcontent
+        if: github.event_name != 'merge_group'
+        uses: actions/cache@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Cache FetchContent (restore only, merge queue)
+        id: fetchcontent-restore
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Configure shared FetchContent
+        shell: bash
+        env:
+          FETCHCONTENT_CACHE_HIT: ${{ steps.fetchcontent.outputs.cache-hit == 'true' || steps.fetchcontent-restore.outputs.cache-hit == 'true' }}
+        run: |
+          echo "TRUSSC_FETCHCONTENT_DIR=$GITHUB_WORKSPACE/.fetchcontent" >> "$GITHUB_ENV"
+          if [ "$FETCHCONTENT_CACHE_HIT" = "true" ]; then
+            echo "TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON" >> "$GITHUB_ENV"
+          fi
 
       - name: Setup compiler cache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -348,6 +562,7 @@ jobs:
           variant: ccache
           key: web-build
           max-size: 800M
+          save: ${{ github.event_name != 'merge_group' }}
 
       - name: Enable compiler launcher
         run: |
@@ -358,7 +573,19 @@ jobs:
           echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
 
       - name: Cache build directories
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: |
+            core/build-web
+            tools/build
+          key: web-build-v3-${{ hashFiles('core/**/*.h', 'core/**/*.cpp') }}
+          restore-keys: |
+            web-build-v3-
+
+      - name: Cache build directories (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: |
             core/build-web
@@ -369,7 +596,15 @@ jobs:
 
       # See the build job: avoid the 429-prone sokol-shdc download.
       - name: Cache sokol-shdc
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
@@ -383,9 +618,8 @@ jobs:
           version: '6.0.2'
 
       - name: Install Linux dependencies (for trusscli)
-        run: |
-          chmod +x tools/install_dependencies_linux.sh
-          ./tools/install_dependencies_linux.sh -y
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-deps
 
       - name: Build trusscli
         run: |
@@ -394,27 +628,25 @@ jobs:
           sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
           ./tools/build_linux.sh
 
+      # Every addon example (web) is built daily (daily.yml).
       - name: Build AllFeaturesExample (Web)
         run: |
           chmod +x examples/build_all.py
           ./examples/build_all.py --web-only --test-only --verbose
 
-      # See the build job: per-addon dependency compile coverage.
-      - name: Build one example per addon (Web)
-        run: ./examples/build_all.py --web-only --one-per-addon --verbose
-
       - name: Compiler cache stats
         if: always()
-        run: ccache -s || true
+        run: ccache -sv || true
 
-  # Compile-only iOS gate: build one addon-free example against the device SDK
-  # with code signing disabled. Catches iOS platform-layer rot at compile time
-  # (the tcFileDialog attribute-order break sat undetected for weeks because
-  # nothing in CI compiled against the iOS SDK). Runtime behavior is still
-  # verified on a real device by hand.
-  # videoPlayerExample, not AllFeaturesExample: tcxLua's generated bindings
-  # reference the sync dialogs (unavailable on iOS) — the binding generator
-  # needs platform awareness before the full example can compile here.
+  # Compile-only iOS gate: AllFeaturesExample and soundPlayerExample against
+  # the device SDK with code signing disabled — every documented core API
+  # compiled and linked for iOS
+  # (the tcFileDialog attribute-order break once sat undetected for weeks
+  # because nothing in CI compiled against the iOS SDK). Runtime behavior is
+  # still verified on a real device by hand. (It used to be videoPlayerExample:
+  # AllFeaturesExample linked tcxLua, whose generated bindings reference the
+  # sync dialogs that don't compile on iOS. tcxLua is no longer in it.)
+  # soundPlayerExample also covers floating-point std::format (iOS 16.3+).
   # No ccache: the Xcode generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER.
   build-ios:
     needs: changes
@@ -425,19 +657,71 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Reuse one dependency tree across every configure in this job.
+      - name: Cache FetchContent
+        id: fetchcontent
+        if: github.event_name != 'merge_group'
+        uses: actions/cache@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Cache FetchContent (restore only, merge queue)
+        id: fetchcontent-restore
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Configure shared FetchContent
+        shell: bash
+        env:
+          FETCHCONTENT_CACHE_HIT: ${{ steps.fetchcontent.outputs.cache-hit == 'true' || steps.fetchcontent-restore.outputs.cache-hit == 'true' }}
+        run: |
+          echo "TRUSSC_FETCHCONTENT_DIR=$GITHUB_WORKSPACE/.fetchcontent" >> "$GITHUB_ENV"
+          if [ "$FETCHCONTENT_CACHE_HIT" = "true" ]; then
+            echo "TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON" >> "$GITHUB_ENV"
+          fi
+
       # See the build job: avoid the 429-prone sokol-shdc download.
       - name: Cache sokol-shdc
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
 
-      - name: Build videoPlayerExample (iOS device SDK, unsigned)
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Build AllFeaturesExample (iOS device SDK, unsigned)
         run: |
-          cd examples/video/videoPlayerExample
+          cd examples/tests/AllFeaturesExample
           cmake -B build-ios -G Xcode \
             -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.3
+          cmake --build build-ios --config Release -- \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+
+      - name: Build soundPlayerExample (iOS device SDK, unsigned)
+        run: |
+          cd examples/sound/soundPlayerExample
+          cmake -B build-ios -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.3
           cmake --build build-ios --config Release -- \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 
@@ -462,8 +746,224 @@ jobs:
       - name: Install doc tooling deps
         run: cd docs && npm ci
 
+      # check.js also parses the headers, so bootstrap shaders before its AST.
+      - name: Generate reference shader headers
+        run: docs/reference/regenerate.sh --shaders-only
+
       - name: reference check (dup / orphan / 100% documented gate)
         run: node docs/reference/check.js --strict
+
+      - name: Regenerate API outputs (macOS)
+        run: docs/reference/regenerate.sh
+
+      - name: Check committed API outputs
+        id: freshness
+        shell: bash
+        run: |
+          # A generator may also add a file (one more Lua shard); git diff only
+          # sees tracked files, so untracked ones in the output dirs fail too
+          # and go into the patch (git add -N).
+          if ! git diff --exit-code -- \
+            docs/FOR_AI_ASSISTANT.md \
+            docs/TrussC_vs_openFrameworks.md \
+            examples/tests/AllFeaturesExample/src/coverage_generated.cpp \
+            'addons/tcxLua/src/generated/*.cpp' \
+            || [ -n "$(git status --porcelain --untracked-files=all -- addons/tcxLua/src/generated examples/tests/AllFeaturesExample/src)" ]; then
+            git add -N -- addons/tcxLua/src/generated examples/tests/AllFeaturesExample/src
+            git diff > regenerated.patch
+            exit 1
+          fi
+
+      - name: Upload regeneration patch
+        if: failure() && steps.freshness.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: regenerated-patch
+          path: regenerated.patch
+          if-no-files-found: error
+
+  # Same-machine pixel comparison for the batch PR / merge queue (#821).
+  render-regression:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+    # Merge-base and head share compiler-cache entries; allow cold-cache startup.
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/50_mesa.json
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/apt-deps
+      - name: Install software display
+        run: sudo apt-get install -y xvfb libgl1-mesa-dri mesa-utils
+      - name: Setup compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          variant: ccache
+          key: ubuntu-latest-render-regression
+          max-size: 1G
+          save: ${{ github.event_name != 'merge_group' }}
+      - name: Enable compiler launcher
+        run: |
+          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
+      - name: Build trusscli
+        run: |
+          cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build tools/build --config Release --parallel 4
+      - name: Compare merge-base and head; self-check head
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: |
+          if [ -z "$BASE_REF" ] || [ "$BASE_REF" = "0000000000000000000000000000000000000000" ]; then
+            BASE_REF="$HEAD_REF^"
+          fi
+          xvfb-run -a -s '-screen 0 1024x768x24' python3 tools/render_regression.py "$BASE_REF" "$HEAD_REF"
+      - name: Compiler cache stats
+        if: always()
+        run: ccache -sv || true
+      - name: Upload render comparisons
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-regression
+          path: |
+            render-regression-output/**/*.png
+            render-regression-output/**/samples.json
+          if-no-files-found: ignore
+
+  # Header-inline state check (#249): core/include must not grow new mutable
+  # header-inline state (a function-local static or an inline variable). A hot
+  # reload guest is a DLL on Windows and compiles its own copy of each, so state
+  # the host and app code share splits there, silently (e.g. the guest's MCP
+  # tools never reached the host). Textual scan that reads every #if branch, so
+  # one Linux run covers every platform's code; about a second. It first checks
+  # its own scanner against tools/header_state_selftest.h. Existing entries,
+  # each with its reason: tools/header_state_allowlist.txt.
+  # The same job runs the core logging check (#311): no printf / cerr / cout /
+  # NSLog in core/include/tc/** and core/platform/**, so core's diagnostics go
+  # through the Logger (log file, onLog, platform log). Textual too; the
+  # Logger's own sinks carry a `log-check: allow` marker.
+  # And the third-party list check (#407): every row of docs/LICENSE.md
+  # "Third-Party Libraries" matches the build (FetchContent GIT_TAG / URL,
+  # vendored version lines, provenance commits), every FetchContent_Declare
+  # has a row, every listed path exists. Reads files only, no network. The
+  # weekly upstream check is upstream-check.yml.
+  # Cheap and independent of the build — always runs (not gated).
+  header-state-check:
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: header-inline state check
+        run: python3 tools/check_header_state.py
+
+      - name: test generated-file guard and regression checks
+        if: always()
+        run: |
+          python3 tools/tests/test_test_generated_files.py -v
+          python3 tools/check_test_generated_files.py
+
+      - name: Python text encoding check
+        if: always()
+        run: |
+          python3 tools/check_python_encoding.py
+          python3 -m unittest discover -s tools/tests -p test_python_encoding.py -v
+
+      - name: core logging check (no printf / cerr / cout / NSLog)
+        if: always()
+        run: python3 tools/check_core_logging.py
+
+      - name: third-party list check (docs/LICENSE.md vs the build)
+        if: always()
+        run: |
+          python3 -m unittest discover -s tools/tests -p test_dependencies.py -v
+          python3 tools/check_dependencies.py
+
+      - name: core test runner regression checks
+        if: always()
+        run: python3 tools/test_core_test_runner.py
+
+      - name: display test verdict regression checks
+        if: always()
+        run: python3 tools/tests/test_display_test_verdicts.py -v
+
+      - name: release workflow offline tests
+        if: always()
+        run: python3 tools/tests/test_release_workflow.py -v
+
+      - name: daily web sequencing regression checks
+        if: always()
+        run: python3 tools/tests/test_daily_workflow.py -v
+
+      - name: build workflow cache regression checks
+        if: always()
+        run: python3 tools/tests/test_build_workflow_caches.py -v
+
+      - name: render regression workflow and driver checks
+        if: always()
+        run: python3 tools/tests/test_render_regression.py -v
+
+      - name: reference regeneration regression checks
+        if: always()
+        run: python3 tools/tests/test_reference_workflow.py -v
+
+      - name: FetchContent CMake regression checks
+        if: always()
+        run: python3 tools/tests/test_fetchcontent_cache.py -v
+
+      - name: apt dependency cache regression checks
+        if: always()
+        run: python3 tools/tests/test_apt_dependencies.py -v
+
+      - name: shader target regression checks
+        if: always()
+        run: python3 tools/tests/test_shader_targets.py -v
+
+      - name: core test symbol checker regression checks
+        if: always()
+        run: python3 tools/tests/test_core_test_symbols.py -v
+
+  # ---------------------------------------------------------------------------
+  # Keep one compiler-cache save per platform (#776). Every ccache-action save
+  # gets a new timestamped key, and the old ones stay until the repository's
+  # 10 GB Actions cache evicts entries, which then drops the newest ccache too.
+  # After the build jobs (and their post-step saves) on a main push, delete all
+  # but the newest main entry per prefix (key minus the timestamp). PR runs
+  # still restore the newest main save through restore-keys. Not part of ci-ok.
+  # ---------------------------------------------------------------------------
+  ccache-prune:
+    runs-on: ubuntu-latest
+    needs: [build, build-android, build-web, render-regression]
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      actions: write
+    steps:
+      - name: Delete older compiler-cache saves on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api --paginate "repos/$REPO/actions/caches?ref=refs/heads/main&sort=created_at&direction=desc&per_page=100" \
+            --jq '.actions_caches[] | select(.key | test("^s?ccache-")) | "\(.id) \(.key)"' > caches.txt
+          # Newest first: the first entry per prefix is kept, later ones deleted.
+          declare -A seen
+          while read -r id key; do
+            prefix="${key%-????-??-??T*}"
+            if [ -n "${seen[$prefix]:-}" ]; then
+              echo "delete $key"
+              gh api -X DELETE "repos/$REPO/actions/caches/$id" || echo "  (could not delete $id)"
+            else
+              seen[$prefix]=1
+              echo "keep   $key"
+            fi
+          done < caches.txt
 
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,
@@ -473,7 +973,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ci-ok:
     runs-on: ubuntu-latest
-    needs: [changes, build, build-android, build-web, build-ios, reference-check]
+    needs: [changes, build, build-android, build-web, build-ios, reference-check, header-state-check, render-regression]
     if: always()
     steps:
       - name: Verify job results
@@ -485,6 +985,9 @@ jobs:
           R_WEB: ${{ needs.build-web.result }}
           R_IOS: ${{ needs.build-ios.result }}
           R_REF: ${{ needs.reference-check.result }}
+          R_HDR: ${{ needs.header-state-check.result }}
+          R_RENDER: ${{ needs.render-regression.result }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           ok=1
           check() { # name result skippable
@@ -505,5 +1008,11 @@ jobs:
           check "build-web"       "$R_WEB"      skippable
           check "build-ios"       "$R_IOS"      skippable
           check "reference-check" "$R_REF"
+          check "header-state-check" "$R_HDR"
+          if [ "$EVENT_NAME" != "pull_request" ] && [ "$EVENT_NAME" != "merge_group" ] && [ "$R_RENDER" = "skipped" ]; then
+            echo "render-regression: skipped outside PR/merge queue (OK)"
+          else
+            check "render-regression" "$R_RENDER" skippable
+          fi
           [ "$ok" = "1" ] || { echo "ci-ok: FAILING"; exit 1; }
           echo "ci-ok: all good"

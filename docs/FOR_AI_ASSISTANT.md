@@ -20,6 +20,12 @@ You are a coding assistant for the TrussC framework.
 - C++20, modern and simple implementation
 - openFrameworks-like API design
 
+### Quiet builds
+TrussC itself builds without compiler warnings on macOS, Windows and Linux, which is unusual for a C++ framework. Two reasons: every warning line costs an AI assistant tokens to read, and a screen of framework warnings hides the one that matters. When TrussC is quiet, a warning you see comes from your own code and is worth fixing.
+- TrussC, sokol and stb headers are included as system headers, so their internals do not warn in your build.
+- `trusscli build --warnings` turns on `-Wall -Wextra` (`/W4` on MSVC) for your own sources only. It never adds `-Werror`, so a warning does not stop your build.
+- Fix a warning in your code rather than silencing it.
+
 ## Coding Conventions
 - Always use namespaces: `using namespace tc;`, `using namespace std;`
 - Addons: `using namespace tcx::box2d;`
@@ -348,6 +354,10 @@ font.setOversampling(2);              // this font (1–4, default 1)
 Font::setDefaultOversampling(2);      // every font loaded afterwards
 ```
 
+For scale: atlas pages store one byte (coverage) per texel. A page starts at
+256² and doubles as glyphs are added, up to the GPU's maximum 2D texture size
+capped at 8192² (64 MB); after that the font adds another page.
+
 Worth it for small text — at 9–13 px it buys +15 to +20% for an atlas that
 was tiny to begin with. Rarely worth it above ~24 px, where the gain falls
 to a few percent and the atlas is already large. If you only draw big text,
@@ -386,6 +396,23 @@ scale(2.0f);
 // ... draw ...
 popMatrix();
 ```
+`pushMatrix()` / `popMatrix()` is the main form. Where a pop is easy to miss
+(early returns, several exits, long blocks), the scoped form pops at the end of
+the scope instead; `scopedStyle()` does the same for `pushStyle()` / `popStyle()`:
+```cpp
+void drawItem(const Item& item) {
+    auto m = scopedMatrix();   // pushMatrix() now
+    auto s = scopedStyle();    // pushStyle() now
+    translate(item.x, item.y);
+    if (!item.visible) return; // both popped here
+    setColor(item.color);
+    drawRect(0, 0, item.w, item.h);
+}                              // ...and here
+```
+Keep the guard in a named variable: `scopedMatrix();` alone pops at once (the
+compiler warns, `[[nodiscard]]`). The guard can't be copied or moved.
+
+Pair each `pushMatrix()` / `pushStyle()` with its pop inside the same callback (`setup()`, `update()`, `draw()`, one event handler such as `keyPressed()`, `exit()`, a `runOnMainThread` job). When a callback returns, TrussC pops whatever it left pushed and logs a warning naming it (`keyPressed() ended with 1 pushMatrix() and 0 pushStyle() still open (missing pop); dropped`). So a push in `update()` with its pop in `draw()` does not work: the push is dropped at the end of `update()`. Values set without a push (`setColor()`, a bare `translate()`) carry on as before.
 
 ## Node System (Scene Graph)
 
@@ -419,7 +446,7 @@ destroy()               Mark for deferred removal (see below!)
 moveToFront()           Z-order: redraw last → on top of siblings
 moveToBack()            Z-order: redraw first → behind siblings
 setActive(false)        Skip update AND draw
-setVisible(false)       Skip draw only
+setVisible(false)       Hide this node and its subtree (update keeps running)
 enableEvents()          Required to receive mouse events
 setPos(x, y)
 setRot(radians)
@@ -561,6 +588,17 @@ img.mirrorH();  img.mirrorV();      // shorthand
 - For per-frame heavy downscale, prefer rendering into a smaller `Fbo`
   over `resize()` — `resize` runs on CPU.
 
+### Cubemap uploads
+
+`Texture::loadCubemapData(const void* const faces[6], size_t faceSize)` loads
+all six faces in +X, -X, +Y, -Y, +Z, -Z order. Each buffer must contain
+`sideSize * sideSize * bytesPerPixel` bytes. Allocate with Dynamic or Stream
+usage and one mip level; requesting multiple levels logs an error and leaves
+the texture unallocated. Immutable and RenderTarget uploads, size mismatches,
+and a second upload to the same image in one device frame warn and return.
+RenderTarget mip chains still use `getCubemapFaceAttachmentView()` for rendering.
+This replaces `uploadCubemapFace()` and `uploadCubemapMip()` in v0.8.
+
 ### Fbo (Off-screen rendering)
 ```cpp
 Fbo fbo;
@@ -662,7 +700,17 @@ img.load("photo.png");          // Loads bin/data/photo.png
 font.load("myfont.ttf", 24);   // Loads bin/data/myfont.ttf
 ```
 
-When building, `bin/` is the working directory. No need for absolute paths.
+Relative asset paths resolve against the data folder via `getDataPath()`, independently of the working directory or launch method. Absolute paths are used as given. Pass `"myfont.ttf"`, rather than `"data/myfont.ttf"`, for a file in `bin/data/`.
+
+File extensions are matched case-insensitively; file names keep their case as written.
+Wherever TrussC picks a format from the extension (`Sound::load`, `Pixels::save`,
+`saveScreenshot`, the hot reload watcher, ...), `photo.JPG`, `loop.Wav` and
+`shot.Png` pick the same decoder or encoder as lower case. The file opened or
+written is exactly the one named (except `saveScreenshot` on Windows, which
+appends `.png` to an unknown extension; see #455): on a case-sensitive file
+system `a.wav` and `a.WAV` stay two files. `getFileExtension()` returns the
+extension as written; compare `toLower(getFileExtension(path))` to do the same
+in app code.
 
 ## 3D
 
@@ -733,6 +781,7 @@ void draw() override {
 - `Light`: Directional, Point, or Spot (with cone falloff). Also supports projector texture and IES profiles
 - `Material`: presets (`Material::gold()`, silver, copper, iron, bronze, emerald, ruby; `plastic(color, roughness)`, `rubber(color)`) or custom via `setBaseColor()` / `setMetallic()` (0–1) / `setRoughness()` (0.045–1) / `setNormalMap()`. Colors are 0–1. Up to 8 lights.
 - `setMaterial()` activates PBR for all subsequent `mesh.draw()` calls until `clearMaterial()`
+- Destroying a `Material` or `Environment` automatically clears its reference from every window context; later draws use unlit rendering or no IBL, respectively. Destruction touches window context state and must run on the main thread, like `Light` destruction.
 
 **Shadow mapping:**
 ```cpp
@@ -771,7 +820,7 @@ light.setIesProfile(&iesProfile);                           // Photometric profi
 
 ### How do I draw a point cloud / lots of points fast?
 
-Put the points in a `Mesh` with `PrimitiveMode::Points` and call `draw()`. A Points-mode mesh is **GPU-resident**: the positions + per-vertex colors are uploaded to a GPU buffer once and drawn with a single draw call, so the per-frame CPU cost is ~constant no matter how many points (millions are fine). Build the cloud once — only rebuild (or `markGpuDirty()`) when the data actually changes, not every frame.
+Put the points in a `Mesh` with `PrimitiveMode::Points` and call `draw()`. A Points-mode mesh is **GPU-resident**: the positions + per-vertex colors are uploaded to a GPU buffer once and drawn with a single draw call, so the per-frame CPU cost is ~constant no matter how many points (millions are fine). Build the cloud once and only rebuild it when the data actually changes, not every frame: every edit re-uploads the whole buffer on the next draw. Any change re-uploads automatically — every mutator (`clear()`, `add*`, `setNormal`, `translate`/`rotate*`/`scale`/`transform`, `append`, `setMode`) and every non-const getter (`getVertices()`, `getColors()`, ...) marks the mesh changed, so writes through `getVertices()[i]` need no `markGpuDirty()`. To only read a mesh, use a `const Mesh&` (or `std::as_const(mesh)`); reading through a non-const reference also re-uploads. If you keep a mutable reference across draws, call `markGpuDirty()` after later writes through it, since only fetching the reference marks the mesh changed.
 
 ```cpp
 Mesh cloud;
@@ -813,20 +862,87 @@ TC_HOT_RELOAD(tcApp)
 
 While the app is running, saving any source file in `src/` triggers an automatic rebuild and reload (1-3 seconds). The app window stays open — only the user code is swapped.
 
-- **State resets on each reload** (setup() runs again) — same model as Processing/p5.js
+- **State resets on each reload** (the old generation's exit() and cleanup() run, then setup() runs again) — same model as Processing/p5.js
 - **Disable**: comment out `TC_HOT_RELOAD` with `//`
 - **Build errors**: the previous version keeps running; fix and save again
 - Works on macOS, Linux, and Windows. Wasm/iOS/Android fall back to static mode
 
 All projects use `TC_RUN_APP(tcApp, settings)` in `main.cpp` by default. This macro automatically selects between normal and hot reload mode — no changes to `main.cpp` needed.
 
+### Adding a `static` or `inline` variable to a TrussC core header?
+
+This is for changes to TrussC itself (`core/include`), not app code. On Windows, a hot-reload app gets its own copy of every such variable, so the app and TrussC would see different values. CI (`tools/check_header_state.py`) flags them. Decide in this order:
+
+1. **A constant?** Make it `constexpr` (or a `const` at namespace scope). Not flagged; done.
+2. **A warn-once flag?** Make it a `static OnceGate` and gate the log line with `isFirstTime()` (see Logging). Accepted by its type; done.
+3. **Otherwise, unsure?** Move it to a `.cpp` (e.g. `tcGlobal.cpp`) and reach it through a function, like `bool& touchAsMouse();` there. Always correct.
+4. **Only a cache of derived data, and sure** a separate copy breaks nothing? Keep it and add it to `tools/header_state_allowlist.txt` with a reason; the check's failure message prints the line to paste.
+
+Details: docs/ARCHITECTURE.md, "One instance per process".
+
 ## AI Automation (MCP)
 
-Every TrussC app can run as an MCP server: launch with `TRUSSC_MCP=1` and the app
-exposes screenshots, input injection, and live node-tree read/write over HTTP —
+Build with `trusscli run --mcp` to expose screenshots, input injection, and live
+node-tree read/write over HTTP. In default builds, `TRUSSC_MCP=1` or
+`TRUSSC_MCP_PORT` opens only loopback health; other tools need a code grant.
 AI agents can drive and verify the running app directly. As a chat assistant you
 won't use this yourself; just know it exists so you can point users to it
 (details: docs/AI_AUTOMATION.md, agent workflows: the trussc-dev-skill repo).
+
+### Numeric image inspection
+
+Use `tc_analyze_image` to verify drawing without image content tokens:
+
+```cpp
+bloomFbo.setDebugName("bloom");
+photo.setDebugName("photo");
+```
+
+```json
+{"source":{"fbo":"bloom"},"ops":[{"op":"stats"}]}
+```
+
+`source` contains exactly one of `window` (index from `tc_list_windows`),
+`fbo` or `image` (debug name or index from `tc_list_fbos` / `tc_list_images`),
+or `path` (saved file). Lists contain index, name, width, height and format;
+unnamed objects remain discoverable by index. Moves transfer names and indices;
+moved-from objects and destroyed objects disappear from the lists. Duplicate
+names require an index. `Texture` is not a source: draw it into a named Fbo.
+VideoPlayer / VideoGrabber are not sources.
+
+The result contains `width`, `height`, `format` (`RGBA8` or `float`),
+`colorSpace` (`sRGB` for byte RGB/RGBA images, `linear` for float or R/RG pixels), and
+`results` in request order. RGBA values stay in their source encoding; byte
+values are normalized to 0–1 and float values (including values above 1)
+pass through. CPU grayscale becomes RGB with alpha 1 (gray+alpha preserves
+alpha); float Fbo R/RG readbacks fill missing GPU components with 0 and alpha 1.
+
+| Op | Arguments | Result |
+|---|---|---|
+| `pixel` | `x`, `y` | `color` (RGBA) |
+| `histogram` | `bins` | `histogram[channel][bin]`, equal bins over 0–1; float outliers go in end bins |
+| `count` | `color` (RGB/RGBA), `tolerance` (nonnegative scalar), or `min`, `max` (RGB/RGBA) | `count`, `bbox`, `centroid` |
+| `stats` | none | RGBA `mean`, `min`, `max` |
+| `grid` | `cols`, `rows` | mean RGBA `colors[row][col]`; integer boundaries cover the region, cells must be nonempty |
+| `diff` | `path`, `threshold`, optional `save` | `count`, `bbox`, `maxDifference`; optional difference image |
+| `line` | `x0`, `y0`, `x1`, `y1` | RGBA `colors` along an inclusive Bresenham line |
+
+Each op accepts optional `rect: [x,y,w,h]` (default: whole image). Coordinates
+use the top-left origin. Rectangles must be nonempty and inside the source.
+Pixel coordinates must be in the rect; line endpoints must be in the image,
+and only samples inside the rect are returned. Bounding boxes use `[x,y,w,h]`,
+centroids use `[x,y]` in image coordinates; no matches yield null bbox/centroid.
+`diff` requires equal dimensions, compares raw RGBA values without color-space
+conversion, and counts pixels whose maximum absolute channel difference is
+strictly greater than `threshold`.
+
+Top-level `save` is optional; omitted or null writes nothing. Both it and
+`diff.save` use the `tc_save_screenshot` path rules (UTF-8, relative to the data
+directory, create missing parents, unsupported extensions append `.png`).
+File output clamps float values to 0–1; analysis preserves them. Fbo and window
+readback run after the frame, so Fbo results include its final pass. Fbo readback
+on web and float Fbo readback on iOS return errors. The existing byte
+readback API supports RGBA8; other integer Fbo formats return an error.
 
 ## Why TrussC & Licensing
 
@@ -897,6 +1013,7 @@ Write a shader once in GLSL; at build time **sokol-shdc** translates it to each 
 ### Coming from openFrameworks — what's different first?
 
 The surface (`setup`/`update`/`draw`, `drawCircle`-style calls) resembles oF, but the foundation differs. First things to know:
+- **Angle units (v0.8.0):** screen FOV and all `Path::arc` overloads use radians; degrees require the `Deg` spelling. Public FOV setters accept `0` (orthographic, also for the `Deg` variants) or `0 < fov < TAU/2` (degrees: `0 < fov < 180`); invalid calls warn once and leave the projection/default unchanged. `setupScreenOrtho()` / `setDefaultScreenOrtho()` are the readable spellings for orthographic setup / defaults. Reflected `rotation` is radians; `rotationDeg` is derived degrees. Both are editable, only `rotation` is saved, and `rotation` wins when a write includes both. Hue is color data (0–1 of a turn), and `tcx::geo::LatLon` is geographic coordinate data (degrees); neither is a rotation angle.
 - **Colors are 0–1.0** (not 0–255). **Angles are radians + `TAU`** by default (degrees via `rotateDeg()`).
 - Function names mostly **drop `of` and lowercase the first letter** (`ofDrawRectangle` → `drawRect`).
 - **A scene graph (`Node`) is standard** — parent/child transforms are automatic (vs oF's flat + manual ofNode).
@@ -907,7 +1024,7 @@ The surface (`setup`/`update`/`draw`, `drawCircle`-style calls) resembles oF, bu
 
 Mostly "drop `of`, lowercase the first letter." Common ones:
 - Drawing: `ofDrawRectangle`→`drawRect`, `ofDrawCircle`→`drawCircle`, `ofSetColor`→`setColor` (**0–1**), `ofSetLineWidth`→`setStrokeWeight`
-- Transform: `ofPushMatrix`/`ofPopMatrix`→`pushMatrix`/`popMatrix`, `ofTranslate`→`translate`, `ofRotateDeg`→`rotateDeg` (default is `rotate(radians)`)
+- Transform: `ofPushMatrix`/`ofPopMatrix`→`pushMatrix`/`popMatrix` (scope-bound form: `auto m = scopedMatrix();`; `scopedStyle()` for `ofPushStyle`), `ofTranslate`→`translate`, `ofRotateDeg`→`rotateDeg` (default is `rotate(radians)`)
 - Math: `ofMap`→`remap`, `ofLerp`→`lerp`, `ofRandom`→`random`, `ofNoise`→`noise`
 - Queries: `ofGetWidth`/`ofGetHeight`→`getWindowWidth`/`getWindowHeight`, `ofGetMouseX`/`Y`→`getMouseX`/`getMouseY`
 - Types: `ofVec2f`/`ofVec3f`→`Vec2`/`Vec3`, `ofColor`→`Color`, `ofMesh`→`Mesh`, `ofImage`→`Image`, `ofTexture`→`Texture`, `ofFbo`→`Fbo`, `ofTrueTypeFont`→`Font`, `ofSoundPlayer`→`Sound`, `ofMatrix4x4`→`Mat4`, `ofQuaternion`→`Quaternion`
@@ -972,13 +1089,14 @@ trusscli upgrade               Upgrade TrussC (git pull + rebuild trusscli)
 trusscli addon add|remove <a>  Add / remove addons (also clone / list / search / pull — see `trusscli addon --help`)
 trusscli info [section]        Project / framework info
 trusscli doctor                Check the dev environment
-trusscli clean                 Delete build directories
-trusscli build                 Build (auto-selects native)
+trusscli clean                 Delete build directories (--all: every target's, incl. xcode-ios, and the generated build-web.* scripts)
+trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache)
 trusscli run                   Build and launch
 trusscli version               Show version (trusscli + current TrussC)
 ```
 Common options: `-p, --path <path>`, `--tc-root <path>`, `-h, --help` (per-command help).
 Examples: `trusscli new myApp -a tcxOsc -a tcxIME` / `trusscli new ./apps/myApp --web` / `trusscli update -p ./apps/myApp`.
+`update`, `addon add` and `addon remove` keep the project's IDE (`--ide`) and its `--web` / `--android` / `--ios` targets, read back from its `CMakePresets.json`, so a plain `trusscli update -p ./apps/myApp` keeps the web target. Pass `--ide <type>` to switch the IDE, and `--no-web` / `--no-android` / `--no-ios` to drop a target (its build folder and `build-web.*` script stay; `trusscli clean --all` removes them). After a fresh clone (`CMakePresets.json` is gitignored) the defaults apply: `vscode`, native only.
 
 ### VSCode / Cursor won't build (no preset selected)
 
@@ -1041,7 +1159,7 @@ If you start copy-pasting the same block into two nodes' `update()`, that block 
 
 ### Constructor vs setup() in a Node? (common trap)
 
-Put **plain state only** in the constructor. Calling `addChild()` / `addMod()` / `callEvery()` in the constructor crashes (`weak_from_this()` isn't ready yet). Do tree work in `setup()` — it's auto-deferred to just before the node's first update/draw (safe even when added mid-frame). Always create nodes with `make_shared<>()` (otherwise `addChild()` fails). Draw in **local coordinates** around (0,0) and move via `setPos / setRot / setScale` — never compute "where am I on screen"; children inherit the parent transform automatically.
+Put **plain state only** in the constructor. Calling `addChild()` / `addMod()` / `callEvery()` in the constructor crashes (`weak_from_this()` isn't ready yet). Do tree work in `setup()` — it's auto-deferred to just before the node's first update/draw (safe even when added mid-frame). Always create nodes with `make_shared<>()` (otherwise `addChild()` fails). The App is a Node too, with two App-specific points: in its constructor (before a `shared_ptr` owns it) `setSize()` doesn't resize the window (it changes only the App's own size and warns once) and `getRootNode()` doesn't return the App yet. Do both in `setup()`. Draw in **local coordinates** around (0,0) and move via `setPos / setRot / setScale` — never compute "where am I on screen"; children inherit the parent transform automatically.
 
 ### How do I structure a whole scene?
 
@@ -1051,7 +1169,7 @@ App itself is the scene-graph root (App inherits RectNode and is window-sized). 
 
 Three different things:
 - **`setActive(false)`**: **stops** the node entirely (disable) — neither `update()` nor `draw()` runs, no mouse events. **Children stop too** (an inactive subtree costs nothing). For pausing or scene switching. Resume with `setActive(true)`.
-- **`setVisible(false)`**: **hides the visuals only.** `draw()` is skipped but `update()` and events still run.
+- **`setVisible(false)`**: **hides** the node **and its whole subtree** — none of them draw, and the mouse can't hit them — but `update()` and timers keep running. Hiding a panel hides its buttons too; to hide only a node's own drawing, skip it inside `draw()`.
 - **`destroy()`**: actually **removes** the node. It is generally **thread-safe and callable any time**, setting a flag so removal is **deferred** to outside update/draw — safe to call mid-traversal. `isDead()` is true right after.
 So: setActive / setVisible to temporarily stop/hide, destroy when you're done with it.
 
@@ -1085,7 +1203,34 @@ public:
 EventListener pauseListener_;             // keep as a member (auto-disconnects on destruction)
 pauseListener_ = btn->pressed.listen([this]() { /* ... */ });
 ```
-**Always store the `EventListener` returned by `listen()` as a member** (it disconnects the moment it goes out of scope). Safer than raw `function<>` callbacks — auto-disconnect, multiple listeners, thread-safe, and safe to remove during notify. Don't call parent methods from a child.
+**Always store the `EventListener` returned by `listen()` as a member** (it disconnects the moment it goes out of scope). Safer than raw `function<>` callbacks — auto-disconnect, multiple listeners, and `listen()` / `disconnect()` work from any thread. On the thread that fires the event, a listener removed during `notify()` is not called again, even later in the same pass. Removal from another thread does not wait for a callback already running there (next section). Don't call parent methods from a child.
+
+### Removing a listener while the event fires: what does Event guarantee?
+
+1. **Same thread: a removed listener is not called again.** Once `disconnect()` returns on the thread that fires the event (or the `EventListener` is destroyed or reassigned, or `clear()` runs), that callback is not called again, also not later in a `notify()` pass that is already running. So a listener may disconnect or destroy a later one in the same pass (e.g. a vector of `Tween`s that reallocates inside an `update` listener). A listener added during a pass starts from the next `notify()`.
+2. **Across threads, `Event` does not wait.** When the event fires on another thread (audio, network, the async timer scheduler, your own `Thread`), `disconnect()` returns while the callback may still be running there, and one that was about to start may still start. Two safe patterns:
+   - Listen with `Deliver::Main`: the callback runs on the main thread, and a queued call is dropped if the listener has died.
+   - For latency-critical sources such as audio, the component that owns the thread provides a "stop and wait for in-flight callbacks" barrier, and teardown calls it after disconnecting. For `audioOut` / `audioIn` that is `AudioEngine::getInstance().waitForAudioCallbacks()`. It waits for every audio listener running at that moment, not only yours, so call it without holding a lock that an audio listener takes (that listener would block, the call would wait up to one second, and the audio drops out meanwhile). The async timers work the same way (`cancelAsyncTimer()` / `cancelAllAsyncTimers()` wait for a callback in flight, and `~Node` cancels leftovers), and so does `TcpClient::disconnect()` (it joins the receive thread).
+3. **Order: the barrier runs before the state the callback touches is destroyed.** Put it in the most-derived class's destructor or in `cleanup()`. A base-class destructor is too late: the derived members are already gone when it runs. The same goes for stopping a thread from a base-class destructor.
+
+```cpp
+class Synth : public Node {
+    vector<float> table_ = vector<float>(4096);
+    EventListener audioListener_;
+public:
+    void setup() override {
+        audioListener_ = AudioEngine::getInstance().audioOut.listen(
+            [this](AudioOutBuffer& b) { render(b); });   // audio thread, reads table_
+    }
+    ~Synth() override {
+        audioListener_.disconnect();                        // no new calls
+        AudioEngine::getInstance().waitForAudioCallbacks();   // none still running
+    }                                                       // table_ is destroyed after this
+    void render(AudioOutBuffer& b);
+};
+```
+
+The App's own `audioOut()` / `audioIn()` overrides are handled for you: the framework subscribes them right after the App's first `setup()` returns, not when the App is constructed (so what `setup()` prepares is ready in them, and an App that is never run gets no callbacks). After `exit()`, it detaches them and waits before calling `cleanup()`, so cleanup may free their audio state (on exit, on a hot reload, and when a secondary window closes, swaps its App, or removes it). That framework wait has no time limit: a listener that never returns is a bug in the app, and the teardown hangs on it (after one second an error in the log says so) rather than destroy the App under it. So **inside an audio listener, never wait on the main thread or on a lock the main thread may hold** (no `runOnMainThread` round-trip, no mutex that `update()` or `cleanup()` holds for long). **An App runs once:** `setup()` when first attached, `exit()` / `cleanup()` when it leaves its window (`close()`, `setApp(other)`, or `setApp(nullptr)`); leaving also detaches its `audioOut()` / `audioIn()` for good. To show it again, create a new App. `Window::setApp()` refuses an App whose `cleanup()` already ran, and any App on a window that is not open; both log an error and leave the window as it is.
 
 ### Bubble events up, don't broadcast?
 
@@ -1141,11 +1286,21 @@ No PR needed — discovery is by GitHub topic. Three conditions: ① the repo ha
 
 ### How do I list / select audio devices?
 
-`AudioEngine` handles devices. `AudioEngine::listDevices()` returns the available devices (`vector<AudioDeviceInfo>`). Select the output device by passing `AudioSettings` (with `deviceName`, sample rate, etc.) to `AudioEngine::getInstance().init(settings)`. An empty `deviceName` selects the system default playback device.
+`AudioEngine` handles devices. `AudioEngine::listDevices()` returns the available devices (`vector<AudioDeviceInfo>`). Select the output device by passing `AudioSettings` (with `deviceName`, sample rate, etc.) to `AudioEngine::getInstance().init(settings)`. An empty `deviceName` selects the system default playback device. For headless runs, set `settings.backend = AudioBackend::Null` and call `init(settings)` before loading sounds; this runs the real mixer and callbacks silently and logs a Notice. Zero-argument `init()` selects `Default`. Enumeration and native `MicInput` follow the engine backend; before init, enumeration probes real backends.
+
+A backend context that opens but cannot open its device leaves the engine stopped; it does not switch to Null. miniaudio reaches Null automatically only when no real backend context can be created. `getStats()` records the last init failure (`initFailure`, `initFailureResult`, `initFailureBackend`) until an init succeeds, using only atomic state. `tc_get_audio_state` includes an `initFailure` object with the reason, result, backend and requested device name while that failure is recorded.
 
 ### Per-buffer synthesis / processing? (audioIn / audioOut)
 
 Real-time synthesis/processing is done through `AudioEngine` events. Listening to `audioOut` gives you one callback's output buffer (`AudioOutBuffer`, mutable — **ADD** to the already-mixed audio), where you write oscillators etc. Listening to `audioIn` gives mic input (`AudioInBuffer`, read-only). The callback runs on the audio thread, so avoid heavy work or engine-API calls and return quickly.
+
+Overriding `App::audioOut()` / `App::audioIn()` needs no setup or teardown code: they are first called right after `setup()` returns, so buffers or tables you allocate in `setup()` are there when they run. The framework calls `exit()`, detaches them and waits for a callback in flight, as long as it takes, before calling `cleanup()`, which may free their audio state (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForAudioCallbacks()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
+
+### How long does a Sound play? (Sound lifetime)
+
+A `Sound` plays only while it, or a copy of it, is alive (like `ofSoundPlayer`). Copies share the voice that `play()` started; when the last `Sound` handle that shares it is destroyed or overwritten (copy or move assignment), the voice stops, looping or one-shot, and its slot is free again. A temporary copy going away does not stop the original. `stop()` and the last handle going away also close a streamed voice's decoder and file.
+
+So keep the `Sound` objects alive, for example as App members. To play overlapping one-shots, keep several of them (e.g. `Sound hits_[4]` and play them in turn); `{ Sound s = hit; s.play(); }` stops at the closing brace. In tcxLua, a script keeps a reference to each `Sound` it wants to hear, or the sound stops when the GC collects it.
 
 ### Output channel mapping? (setChannelMap)
 
@@ -1160,7 +1315,7 @@ Pass a **priority** to `audioOut.listen(...)` and listeners compose in a fixed o
 - **Generator** (oscillators / synths) adds audio into the buffer,
 - **Effect** (reverb / filter / EQ) reads + writes to process it,
 - **Monitor** (scope / FFT / record) **reads last** — it sees the finished buffer, so it's **ideal for visualization.**
-Adding a Generator later never moves it behind Effect / Monitor — order is fixed by priority.
+Adding a Generator later never moves it behind Effect / Monitor — order is fixed by priority. Within one priority, listeners run in the order they subscribed. The App's own `audioOut()` / `audioIn()` overrides run just before the Generator priority, so ahead of every default-priority listener, including one you subscribe in `setup()` (before the framework subscribes the App's hooks); a listener that must see what `App::audioOut()` wrote uses `Effect` or `Monitor`. A default-priority listener subscribed before the App was constructed (a static object, or in `main()` before `runApp()`) used to run before `App::audioOut()` and now runs after it.
 
 ### How do I record the audio the app is playing? (AudioRecorder)
 
@@ -1182,6 +1337,8 @@ rec.start("mono.wav", s);
 ```
 
 With no map: 1ch engine → mono file, 2ch → stereo, 3ch+ → averaged mono downmix. Several recorders can run at once (e.g. a stereo master and a mapped stem simultaneously). The engine must be initialized before `start()`.
+
+`stop()` keeps the buffer a capture was still copying, and to do that it waits on `AudioEngine::waitForAudioCallbacks()`: for every `audioOut` / `audioIn` listener running at that moment, not only the recorder's (usually well under one buffer). So don't call `stop()` (or destroy the recorder) while holding a lock that one of your audio listeners takes: that listener blocks on it, `stop()` waits up to one second for it, and the audio drops out meanwhile. The same goes for calling `waitForAudioCallbacks()` yourself.
 
 ### Abstract anything drawable with HasTexture?
 
@@ -1220,7 +1377,7 @@ While audio is recorded, the **video PTS runs on the audio device clock** (frame
 
 ### Can an AI agent start/stop recording over MCP?
 
-Yes — every TrussC app in MCP mode (`TRUSSC_MCP=1`) exposes `tc_start_recording` and `tc_stop_recording` as standard tools (the video counterpart of `tc_save_screenshot`, always available). `tc_start_recording` takes optional `path` (omit → timestamped file in the data dir), `duration` (fixed-length auto-stop), `fps`, and `codec`, and returns the resolved path; `tc_stop_recording` returns `{path, frames, length}` and is a no-op (not an error) when nothing is recording. See docs/AI_AUTOMATION.md.
+Yes — dev builds (`trusscli run --mcp`) or apps granting `mcp::ToolLevel::ReadOnly` expose `tc_start_recording` and `tc_stop_recording` as standard tools (the video counterpart of `tc_save_screenshot`). `tc_start_recording` takes optional `path` (omit → timestamped file in the data dir), `duration` (fixed-length auto-stop), `fps`, and `codec`, and returns the resolved path; `tc_stop_recording` returns `{path, frames, length}` and is a no-op (not an error) when nothing is recording. See docs/AI_AUTOMATION.md.
 
 ### How do I avoid a black first frame when a VideoPlayer starts?
 
@@ -1334,8 +1491,8 @@ self-contained copy-paste-able RectNode), and a plain code lambda.
 
 ### TCP / UDP networking? (brief)
 
-Core has `TcpClient` / `TcpServer` / `UdpSocket`. It's event-driven — `listen()` to `onReceive` / `onConnect` / `onDisconnect` / `onError` (`Event<T>`), and `connect` / `send` to transmit.
-- TCP: `client.connectAsync(host, port)` → `client.send("...")`. Server: `server.start(port)`, `broadcast(...)` to all clients.
+Core has `TcpClient` / `TcpServer` / `UdpSocket`. It's event-driven — `listen()` to their `Event<T>` members, and `connect` / `send` to transmit. `TcpClient` has `onConnect` / `onReceive` / `onDisconnect` / `onError` / `onSendComplete`; `TcpServer` has `onClientConnect` / `onReceive` / `onClientDisconnect` / `onError` / `onSendComplete`; `UdpSocket` has `onReceive` / `onError`. Most of them fire on a network thread: see "Which thread does my callback run on?".
+- TCP: `client.connectAsync(host, port)` → after a successful `onConnect`, `client.sendAsync("...")`. Server: `server.start(port)`, `server.broadcastAsync(...)` to all clients. Use the async send variants on the main thread so a peer that stops reading cannot stall the frame. Check `SendResult` / `error` (including `QueueFull`) and the accepted-client count from `broadcastAsync()`; queued does not mean delivered.
 - UDP: `udp.bind(port)` (receive thread auto-starts) → `udp.sendTo(host, port, data)`. Broadcast (`setBroadcast`) and multicast (`joinMulticastGroup` / `setMulticastTTL`) supported.
 
 ### Send/receive OSC? (tcxOsc: polling vs callback)
@@ -1363,7 +1520,7 @@ TrussC has no dedicated HTTP-server class, but **cpp-httplib (`httplib.h`) is bu
 
 ### My 2D drawing disappears behind 3D? (default is 3D space)
 
-TrussC is "2D-looking but actually 3D space" by default (same philosophy as oF). The screen is a perspective 3D projection, and 2D drawing also sits on the z=0 plane under depth testing. So **drawing 2D after 3D can put the 2D behind a 3D object** (depending on its z) and make it disappear. It often happens when you draw 3D with `EasyCam` and then draw 2D (HUD, text) after `cam.end()`. If your HUD vanishes, suspect this. The default FOV is set by **`setupScreenPerspective(fovDeg)` (default 45°)**, and for fully-2D situations use **`setupScreenOrtho()`**.
+TrussC is "2D-looking but actually 3D space" by default (same philosophy as oF). The screen is a perspective 3D projection, and 2D drawing also sits on the z=0 plane under depth testing. So **drawing 2D after 3D can put the 2D behind a 3D object** (depending on its z) and make it disappear. It often happens when you draw 3D with `EasyCam` and then draw 2D (HUD, text) after `cam.end()`. If your HUD vanishes, suspect this. The default FOV is set by **`setupScreenPerspective(fovRadians)` (default `TAU/8`, or 45° via `setupScreenPerspectiveDeg`)**, and for fully-2D situations use **`setupScreenOrtho()`**.
 
 ### Centering bitmap text? (default is left / baseline)
 
@@ -1383,6 +1540,10 @@ This also works on the **default screen** (no camera scope): `z = 0` is pixel-id
 
 ### How do I quit the app? (exitApp vs requestExitApp)
 
+Both calls work in windowed and headless apps. In headless mode, `exitApp()`
+stops after the current update step; `requestExitApp()` dispatches the event
+on the main thread after the current pass, including all catch-up steps.
+
 Two options:
 - **`requestExitApp()`**: *requests* exit. Listen to `events().exitRequested` (`Event<ExitRequestEventArgs>`) and set `args.cancel = true` to **cancel** it (for a "save before quit?" prompt). Equivalent to oF's `ofExit`.
 - **`exitApp()`**: exits immediately (not cancellable).
@@ -1391,6 +1552,93 @@ listener_ = events().exitRequested.listen([this](ExitRequestEventArgs& e){
     if (hasUnsavedChanges) e.cancel = true;   // stops the exit
 });
 ```
+
+### My app crashed — how do I find where? (getting a backtrace)
+
+Outside a debugger, a crash usually leaves very little: `Segmentation fault` / exit code 139 on macOS and Linux, or an "Application Error" entry (`0xc0000005`) in the Windows Event Log. That is also all an AI agent sees when it launches the app from a shell. To get the call stack:
+- **Run it under the debugger.** In VS Code / Cursor press F5: it stops at the crash and shows the stack. VS Code uses CodeLLDB on macOS / Linux and the MSVC debugger (`cppvsdbg`) on Windows. Cursor and other forks use CodeLLDB on every OS (see [GET_STARTED.md](GET_STARTED.md)).
+- **From a terminal** (handy for agents), run the app under the debugger in batch mode so it prints the stack and exits:
+  - macOS: `lldb --batch -o run -k bt -k quit -- bin/MyApp.app/Contents/MacOS/MyApp`. After a crash, lldb skips the rest of the `-o` commands and runs only the `-k` ones, so `bt` must be a `-k` command. Use `-k "thread backtrace all"` for every thread.
+  - Linux: `gdb -batch -ex run -ex bt --args bin/MyApp`
+- **After the fact:**
+  - macOS writes a crash report on its own: `~/Library/Logs/DiagnosticReports/MyApp-*.ips`. The crashing thread's frames are in it.
+  - Linux: `coredumpctl gdb MyApp` then `bt`, if systemd-coredump is installed. Ubuntu's default crash handler, apport, ignores programs that don't come from a package, so a TrussC app leaves nothing in `/var/crash`. On Ubuntu, install `systemd-coredump` to get `coredumpctl`, or use the gdb line above.
+  - Windows: Event Viewer → Windows Logs → Application → "Application Error" names the faulting module and offset. For a full dump, see [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md).
+
+Apps build as RelWithDebInfo by default, which includes debug symbols, so the stack shows function names and line numbers.
+
+### What usually makes a TrussC app crash? (safe patterns)
+
+Most crashes come from a handful of patterns. Write it the safe way from the start:
+- **Nodes: create with `make_shared`, build the tree in `setup()`.** Create every node with `make_shared<T>()`. Call `addChild()` / `addMod()` / `callEvery()` in `setup()`, not in the constructor: `weak_from_this()` isn't ready while the constructor runs. The same goes for the App's `setSize()` (until a `shared_ptr` owns the App, as in its constructor, it doesn't resize the window, and warns once) and `getRootNode()` (not this App yet).
+- **Remove with `destroy()` while things are in flight.** From inside an event handler, a timer callback, or while walking the tree, remove nodes with `destroy()`. The removal is deferred to a safe point.
+- **Keep a node beyond one call only as `weak_ptr` (or `Ptr` when you mean to own it), never as a raw pointer.** A `Node*` kept in a member, a global or a lambda capture dangles once the node is removed and freed. `lock()` tells you the node is gone, and the `shared_ptr` it returns keeps the node alive while you use it. The `Node*` from `getSelectedNode()` / `getRootNode()` is for the current call only.
+- **Main-thread-only objects.** GPU objects (`Image`, `Texture`, `Fbo`, `Font`, `Shader`) and the Node tree belong to the main thread. Callbacks from audio, network or async timers must not touch them. See "Which thread does my callback run on?" below.
+- **Stop your own threads before your members go away.** A `Thread` subclass must call `waitForThread()` in its **own** destructor. The base class also stops and joins the thread, but only after your members are already destroyed, and it logs a warning when it finds the thread still running.
+- **Callbacks must not outlive their object.** Keep the `EventListener` returned by `listen()` as a member, so it disconnects when the object dies. For an event fired on another thread (e.g. `audioOut`), also wait for a callback in flight before your members go: disconnect, then `AudioEngine::getInstance().waitForAudioCallbacks()`, in your own destructor or `cleanup()`. Don't capture a raw `this` in callbacks that can outlive the object (`runOnMainThread()`, a raw `std::thread`); capture a `weak_ptr` or copies instead.
+
+### Which thread does my callback run on?
+
+| Callback | Runs on |
+|---|---|
+| `setup()` / `update()` / `draw()`, input handlers, Node events, `callAfter` / `callEvery`, Tween, MCP tools | main thread |
+| `AudioEngine` `audioOut` / `audioIn` listeners | audio thread |
+| `callAfterAsync` / `callEveryAsync` | background scheduler thread |
+| `TcpClient` events (`onConnect`, `onReceive`, `onDisconnect`, `onError`, `onSendComplete`) | the receive, connect or writer thread; events fired directly by an API call run on the calling thread. `onSendComplete` runs on the writer thread, or from `processNetwork()` without threads |
+| `TcpServer` events (`onClientConnect`, `onReceive`, `onClientDisconnect`, `onError`, `onSendComplete`) | the server's threads; errors reported directly by calls such as `start()` or `send()` run on the calling thread |
+| `UdpSocket` events (`onReceive`, `onError`) | the receive thread; errors reported directly by calls such as `bind()` or `sendTo()` run on the calling thread |
+| tcxOsc `onMessageReceived`, tcxMidi `MidiIn::onMessage` | the addon's receive thread. Their polling APIs run on the main thread |
+| `Thread::threadedFunction()` | your thread |
+
+With `setUseThread(false)`, `TcpClient` and `UdpSocket` poll from `update` on the main thread instead. Events fired directly by API calls still run on the calling thread.
+
+On the web (wasm) there are no background threads. `callAfterAsync` / `callEveryAsync`, `Thread` and `TcpServer` are native only; use `callAfter` / `callEvery` there.
+
+Rules for callbacks that are not on the main thread:
+1. **Don't touch nodes, GPU objects or drawing there.** Either copy the data into a mutex-protected member (or a `ThreadChannel`) and consume it in `update()`, or let the event deliver it on the main thread:
+   ```cpp
+   listener_ = client.onReceive.listen([this](TcpReceiveEventArgs& e) {
+       // runs on the main thread (next frame); dropped if listener_ is gone
+   }, Deliver::Main);
+   ```
+   `Deliver::Main` copies the payload and checks that the listener is still alive before calling it. Plain `runOnMainThread(fn)` also moves work to the main thread, but has no such check, so don't capture a raw `this` there.
+2. **Audio callbacks stay on the audio thread.** They need low latency, so don't marshal them. Keep them short: no allocation, no file IO, no locks that the main thread may hold for a long time. Share values through atomics.
+3. **When the receiving object goes away, stop the source first, and wait for it.** `Event` does not wait for a callback that is already running on another thread, so dropping or disconnecting the listener is not enough there. It is enough only for listeners on the main thread and for `Deliver::Main` listeners, whose queued call is dropped. For an inline listener on another thread, call the source's own stop-and-wait before the members the callback uses are destroyed:
+   - `TcpClient::disconnect()` and `UdpSocket::close()` join their threads.
+   - A `Thread` subclass calls `waitForThread()` in its own destructor.
+   - `cancelAsyncTimer()` / `cancelAllAsyncTimers()` wait for an in-flight `callAfterAsync` / `callEveryAsync` callback. `~Node` calls `cancelAllAsyncTimers()` too, but only after your members are gone, so call it yourself in your destructor or `cleanup()`.
+   - For audio, disconnect the listener, then call `AudioEngine::getInstance().waitForAudioCallbacks()` before destroying its state (see "Removing a listener while the event fires" above). Check its result: `false` means the wait timed out and the callback may still be using that state; it is not safe to destroy it yet.
+
+   `Deliver::Main` needs a copyable payload. For a payload type that can't be copied, it runs the listener inline on the firing thread, so it gives no cross-thread protection there.
+
+### Build error: "is not a full path to an existing compiler tool" (after updating Visual Studio)
+
+The build folder's `CMakeCache.txt` still points at the compiler of the old Visual Studio install, for example after moving from VS 2022 to VS 2026 or after an update that changed the MSVC version folder. The project's `CMakePresets.json` pins the same old MSVC, Windows SDK and ninja paths. `trusscli build` handles this: when a pinned path is gone, it detects Visual Studio again, replaces only those paths in the `windows` preset of `CMakePresets.json`, removes `build-windows` and configures again, and prints what it did. A project whose presets pin no Visual Studio path is not touched: delete `build-windows` and run `trusscli build`. `trusscli doctor` reports the missing path. A `--ide vs` project also has a `vs/` solution whose `CMakeCache.txt` still points at the old compiler: run `trusscli update` to regenerate it. With plain CMake, run `trusscli update` (or `trusscli build` once) first. `tools/build_win.bat` detects this for trusscli itself and cleans its cache automatically. When a new Visual Studio is installed next to the old one, the old compiler still exists, so the cache is kept and the build can fail; delete `tools/build` and run `build_win.bat` again.
+
+### Build error: "... is not a directory", "could not load cache", or a missing Makefile / build.ninja
+
+The build folder is missing or empty, e.g. after `trusscli clean` or deleting it by hand. After a configure that failed, the folder has a `CMakeCache.txt` but no build files, and the build stops with "No rule to make target 'Makefile'" or "loading 'build.ninja': No such file or directory". `cmake --build --preset <x>` does not configure by itself. `trusscli build` does: it runs `cmake --preset <x>` first and prints `[build] No CMake cache in <folder>, configuring...`, or after a failed configure `[build] No build files in <folder> (an earlier configure did not finish), configuring...`. With plain CMake, run `cmake --preset <x>` before `cmake --build --preset <x>`.
+
+### Build error: "hot reload state changed -- reconfigure required"
+
+You added or removed `TC_HOT_RELOAD(...)`. Hot reload is switched at configure time, so the build stops once to make CMake reconfigure. It prints "TC_HOT_RELOAD detected." or "TC_HOT_RELOAD removed." first. `trusscli build` reconfigures automatically; with plain CMake, just build again.
+
+### Windows: "... was blocked by your organization's Device Guard policy" (Smart App Control)
+
+Windows 11's Smart App Control starts in an evaluation mode and can switch itself to enforcement days or weeks after setup. From then on, unsigned executables are blocked, including your app and tools built on the machine. SmartScreen's "Run anyway" does not help.
+- **Check:** Event Viewer → Applications and Services Logs → Microsoft → Windows → CodeIntegrity → Operational. Event 3077 records the block.
+- **Fix:** Windows Security → App & browser control → Smart App Control → Off, then restart. Turning it off may be one-way: turning it back on can require reinstalling Windows. Defender and SmartScreen keep running.
+- **For installation PCs**, check this during setup rather than on site. In the long run, code-signing the exe avoids it.
+
+### Running an app unattended for days or weeks on Windows?
+
+Several Windows defaults can stop an unattended app, or hide why it stopped:
+- the display turns off even in fullscreen;
+- Windows Update restarts the PC at night;
+- a crash dialog keeps the dead process open;
+- a Task Scheduler start runs in `C:\Windows\System32`, and the task is stopped after 3 days unless its time limit is turned off.
+
+Most of this is configuration, not code. Follow the checklist in [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md): Smart App Control, power and display, Windows Update, crash dumps without dialogs, auto-start and restart, working directory, GPU selection.
 
 ## Enums (compile-time reflection)
 
@@ -1437,7 +1685,23 @@ Reverse (string → value): `toInt(s)` / `toInt64(s)` / `toFloat(s)` / `toDouble
 
 ## Logging
 
-Use the level functions `logVerbose / logNotice / logWarning / logError / logFatal` (stream style: `logNotice("Module") << "msg"`), not `cout` — stdout is reserved (MCP). Levels live in `enum class LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }`.
+Use the level functions `logVerbose / logNotice / logWarning / logError / logFatal` (stream style: `logNotice("Module") << "msg"`), not `cout` — stdout is reserved (MCP). Levels live in `enum class LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }`. They are safe to call from any thread (each line lands whole in the console and the log file). sokol's own messages go through the logger too, as `[sg]` / `[sapp]` / `[sgl]` / `[simgui]` lines; its info messages are Verbose, hidden by default.
+
+Each output has its own level (default Notice; `LogLevel::Silent` turns it off): the console (`setConsoleLogLevel`), the log file (`setFileLogLevel`) and the OS log on macOS (os_log) and Windows (OutputDebugStringW) (`setSystemLogLevel`; on iOS and Android the OS log is the console). `setLogLevel(level)` sets all three at once; a later per-output call wins. `onLog` listeners get every line whatever the levels.
+
+### How do I log a warning only once? (OnceGate)
+
+Gate the log line with a `OnceGate`, not a `static bool warned` flag. `isFirstTime()` returns true the first time; with an interval (constructor argument, seconds) it returns true again once that much time has passed since the last true. It works with any level (you write the line yourself, and nothing is built while the gate is closed) and is thread-safe and lock-free. The gate object is the key: a `static` one per call site, or a member for once per object:
+```cpp
+static OnceGate unsupportedWarned;              // once
+if (unsupportedWarned.isFirstTime()) logWarning("Sound") << "unsupported extension";
+
+static OnceGate underrun{5.0};                  // at most once per 5 s
+if (underrun.isFirstTime()) logWarning("Audio") << "underrun";
+
+class Connection { OnceGate timeoutWarned_; };  // once per object
+```
+It is not copyable or movable, and a `static` gate still works during static destruction.
 
 ### How do I write logs to a file? (getLogger + setLogFile)
 
@@ -1448,6 +1712,8 @@ logger.setLogFile("app-" + getTimestampString() + ".log");   // unique per run
 logger.setFileLogLevel(LogLevel::Notice);                    // drop Verbose to shrink the file
 logNotice("App") << "started";
 ```
+A relative name lands in the data folder (`getDataPath()`), and a missing folder is created, so `setLogFile("logs/app.log")` works on a fresh install. If the file cannot be opened, `setLogFile` logs why, returns false and keeps the current log file open.
+
 **Watch the volume:** logging every frame (or any hot loop) can grow the file to gigabytes per day and fill the disk. Filter with `setFileLogLevel` and don't log in tight loops.
 
 ### How do I hook every log line? (onLog event)
@@ -1458,6 +1724,7 @@ EventListener logTap_ = getLogger().onLog.listen([](LogEventArgs& e) {
     // e.timestamp / e.level / e.message — e.g. forward to the network
 });
 ```
+The listener runs on whichever thread logged (pass `Deliver::Main` to `listen` before touching nodes or the GPU), outside the logger's own lock, so it may log too.
 
 ## Window & fullscreen
 
@@ -1473,6 +1740,14 @@ Caveats: TrussC has **no display-enumeration API** (`getScreenSize` / `getDispla
 
 ## Console / CLI apps
 
+### How do I receive stdin commands?
+
+Console input is opt-in in both windowed and headless apps. Call `console::start()` in `setup()` and retain an `events().console.listen(...)` listener. Both runners deliver queued `ConsoleEventArgs` on the main thread each loop and call `console::stop()` before app exit/cleanup.
+
+There is one detached stdin reader per process, created on the first `start()`. `stop()` disables delivery and discards queued commands; a later `start()` discards pending commands and enables delivery again. The reader keeps consuming stdin while stopped, dropping those lines, and ends at EOF. It uses raw OS reads, accepts LF/CRLF and a partial last line at EOF, and does not hold a stdio lock that could block process exit. Web has no stdin command support.
+
+**v0.8.0 migration (breaking): stdin commands need `console::start()`.** Existing apps that only subscribe to `events().console` must add the call in `setup()`. See [the migration note](MIGRATION_0_8.md).
+
 ### How do I make a console / CLI app (and optionally open a GUI)?
 
 There's no framework arg API — handle raw `argc`/`argv` in `main()`. A common shape (this is how `trusscli` itself works) launches the **GUI when given no arguments** and dispatches subcommands otherwise, returning an exit code:
@@ -1486,7 +1761,7 @@ int main(int argc, char** argv) {
     return 1;                                                            // exit code
 }
 ```
-If you want an app that runs without a window (update loop only, no `draw()`), use `runHeadlessApp<App>()` (see *Can I make a console / headless app?*). Exit from `main` with a `return` code, or from inside an app via `exitApp()` (immediate) / `requestExitApp()` (cancellable).
+If you want an app that runs without a window (update loop only, no `draw()`), use `runHeadlessApp<App>()` (see *Can I make a console / headless app?*). Exit from `main` with a `return` code, or from inside an app via `exitApp()` (immediate) / `requestExitApp()` (cancellable). Use `exitApp(code)` for a non-zero result, and return `runHeadlessApp<App>()` from `main()` to pass it to the caller.
 
 ### Windows: my console tool detaches from cmd / keeps running after I close the console — how do I make it a real console app?
 
@@ -1520,7 +1795,15 @@ That is the whole procedure — no linker flags, no per-addon steps. In particul
 
 ### How are file paths handled? Japanese / non-ASCII filenames on Windows?
 
-All file-path parameters take `fs::path` (`std::filesystem::path`) — string literals and `std::string` convert implicitly, so just write `img.load("photo.png")` as always. `getDataPath()` also returns `fs::path`; join paths with `/` (`getDataPath("save") / "shot.png"`), not string concatenation. Non-ASCII paths (Japanese filenames, `新しいフォルダー (2)`, spaces) work on every platform including Windows: TrussC converts to the OS-native encoding at the C-library boundary internally, so there is nothing to configure. `setDataPathRoot()` accepts absolute roots on Windows (`C:/data`) too. If you need a narrow string from a path, use `path.string()` on macOS/Linux; avoid it for file IO on Windows (pass the `fs::path` through instead).
+All file-path parameters take `fs::path` (`std::filesystem::path`) — string literals and `std::string` convert implicitly, so just write `img.load("photo.png")` as always. `getDataPath()` also returns `fs::path`; join paths with `/` (`getDataPath("save") / "shot.png"`), not string concatenation. `setDataPathRoot()` accepts absolute roots on Windows (`C:/data`) too.
+
+The file writers (`saveTextFile`, `appendToFile`, `FileWriter::open`, `saveJson`, `Xml::save`, `Pixels::save` / `Image::save`, `setLogFile`) resolve a relative path against `getDataPath()`, use an absolute path as given, and create a missing parent folder (as `saveScreenshot()` and the recorders do). When the folder cannot be created or the file cannot be opened, they return false and log the reason. `saveTextFile`, `appendToFile`, `saveJson` and `Pixels::save` also check writing and closing the file, logging an error and returning false on failure. `saveJson` serializes first and writes in binary mode (LF on every platform); `Pixels::save` encodes in memory first. A serialization or encoding error leaves an existing file untouched. These saves write in place: a crash, power loss or full disk during writing can leave the file truncated. Apps needing crash-safe saves must handle them themselves, for example by writing a new file and renaming it.
+
+Non-ASCII paths (Japanese filenames, `新しいフォルダー (2)`, spaces) work on every platform. Strings are UTF-8 everywhere in TrussC; on Windows that holds for paths because apps built through TrussC's CMake (`trussc_app()`, i.e. every generated project) embed an application manifest that sets the process code page to UTF-8. This needs Windows 10 version 1903 or later. On older Windows, or in an executable built with your own CMake setup, `fs::path(std::string)` decodes in the system code page (CP932 / CP1252) instead: convert with `utf8ToPath(str)`, or build paths from `u8"..."` / `L"..."` literals, `loadDialog()` results or `directory_iterator` entries.
+
+Addons must use `pathToUtf8()` / `utf8ToPath()` for IO or display instead of `path.string()`, and `log << path` for logging; third-party narrow file IO still needs the Windows UTF-8 manifest described above.
+
+For the other direction, path → string (display, `Font`, JSON, a string compare), use `pathToUtf8(path)`, not `path.string()`: it returns UTF-8 on every platform, while `path.string()` on Windows follows the process code page, and throws for characters outside it when that is not UTF-8. On Windows `pathToUtf8()` can still throw for a name that is not valid UTF-16 (an unpaired surrogate, which NTFS allows); to log a path, use `logNotice() << path`, which does not throw. The path helpers (`getFileName()`, `getBaseName()`, `getFileExtension()`, `getParentDirectory()`, `joinPath()`, `getAbsolutePath()`, `listDirectory()`) already return UTF-8 (without the manifest, turn a result back into a path with `utf8ToPath()` before passing it to `load()` / `save()`, not with `fs::path(str)`), and `logNotice() << path` writes the path as UTF-8 (without the quotes `std::ostream` adds). In a Windows console, `runApp()` and `runHeadlessApp()` switch the output code page to UTF-8 while the app runs, so non-ASCII log text prints correctly.
 
 ### "Window / media / basics" → which API?
 
@@ -1539,11 +1822,11 @@ All file-path parameters take `fs::path` (`std::filesystem::path`) — string li
 
 ### What makes TrussC "AI-native"?
 
-Every TrussC app can become an **MCP server.** Launch with `TRUSSC_MCP=1` and the app exposes screenshots, input injection, and **live read/write of the Node tree** over HTTP / JSON-RPC. An AI agent can both **drive and verify** a running app (the app screenshots itself, so no X11 or screen-recording permission is needed). The key is that state comes out as **queryable numbers** (pos / rotation / color …), not pixels. This is built into the design from the start, not bolted on.
+Every TrussC app can become an **MCP server.** Build and launch with `trusscli run --mcp` and the app exposes screenshots, input injection, and **live read/write of the Node tree** over HTTP / JSON-RPC. An AI agent can both **drive and verify** a running app (the app screenshots itself, so no X11 or screen-recording permission is needed). The key is that state comes out as **queryable numbers** (pos / rotation / color …), not pixels. This is built into the design from the start, not bolted on.
 
 ### How does an AI tune/verify a running app over MCP?
 
-A rebuild-free loop: launch (`TRUSSC_MCP=1`) → `tc_get_screenshot` to see the current state → `tc_get_node_tree` to read pos / rotation (degrees) / color as numbers → `tc_set_node_members` to nudge them directly → screenshot to check → repeat → finally bake the values into C++ source. Main tools: `tc_get_node_tree` / `tc_get_selected_node` / `tc_select_node` / `tc_set_node_members`. Mouse/key injection is opt-in via `mcp::registerControlTools()` in `setup()`. Drive ImGui UIs with dedicated tools (`tcx_imgui_get_widgets` / `tcx_imgui_click` / `tcx_imgui_input` / `tcx_imgui_checkbox`) — raw `tc_mouse_click` doesn't reach ImGui. Expose your own state with `TC_REFLECT`, or return JSON via `mcp::tool` / `mcp::resource`. This enables a closed AI development loop, so you can hand off long, autonomous development sessions.
+A rebuild-free loop: build and launch (`trusscli run --mcp`) → `tc_get_screenshot` to see the current state → `tc_get_node_tree` to read pos / rotation (radians) / rotationDeg (derived degrees) / color as numbers → `tc_set_node_members` to nudge them directly → screenshot to check → repeat → finally bake the values into C++ source. Main tools: `tc_get_node_tree` / `tc_get_selected_node` / `tc_select_node` / `tc_set_node_members`. In default builds, mouse/key injection is opt-in via `mcp::setToolLevel(mcp::ToolLevel::Control)` in `setup()`. Drive ImGui UIs with dedicated tools (`tcx_imgui_get_widgets` / `tcx_imgui_click` / `tcx_imgui_input` / `tcx_imgui_checkbox`) — raw `tc_mouse_click` doesn't reach ImGui. `tcx_imgui_get_widgets` also returns each value widget's current value (full-precision floats, `DragFloat3` as one array, colors 0-1 as the variable holds them, `SliderAngle` in radians). `tcx_imgui_input` takes values in the form `tcx_imgui_get_widgets` / `tcx_imgui_get_touched` report (the variable's form): `SliderAngle` input and its response value are radians, with `"unit": "rad"` in the response, although the widget displays degrees. Non-numeric or non-finite angle text returns `{"status": "error", "message": "..."}`. When the user says "make it like this" after tweaking sliders or the NodeInspector by hand, call `tcx_imgui_get_touched`: it lists exactly what they changed since startup, with current values (ImGui value widgets — including `Checkbox`, `MenuItem`/`Selectable` with a `bool*`, `RadioButton` with an `int*` and `ListBox` — + per-node inspector edits; buttons, menu headers, action menu items, `MenuItem(label, shortcut, bool selected)` toggles, plain `Selectable`s and `RadioButton(label, bool)` change no variable and are not listed); write those into the code, then `tcx_imgui_reset_touched`. Expose your own state with `TC_REFLECT`, or return JSON via `mcp::tool` / `mcp::resource`. This enables a closed AI development loop, so you can hand off long, autonomous development sessions.
 
 ## Community & support
 
@@ -1563,7 +1846,7 @@ _Auto-generated C++ API index from `reference-data.json` (structure from the C++
 ### Lifecycle
 
 ```cpp
-int runApp(const WindowSettings & settings = WindowSettings())  // Start the application main loop with your App subclass. Templated on the app type — call TC_RUN_APP(MyApp) (or runApp<MyApp>()) from main().
+int runApp(const WindowSettings & settings = WindowSettings())  // Start the application main loop with your App subclass. Templated on the app type — call TC_RUN_APP(MyApp) (or runApp<MyApp>()) from main(). On desktop, returns 1 if window or GPU startup fails before setup() runs, otherwise 0. On Linux, no available X display causes an abort (a nonzero process status). TC_RUN_APP passes this status to main(); Android and Web use OS/browser-owned loops and do not report shutdown through this return value.
 ```
 
 ### Graphics - Color
@@ -1617,7 +1900,7 @@ float getBitmapStringWidth(const std::string & text)  // Get text width
 Direction getTextAlignH()  // Get horizontal text alignment
 Direction getTextAlignV()  // Get vertical text alignment
 void setBitmapLineHeight(float h)  // Set line height for bitmap string newlines (default: 16)
-void setFps(float fps)  // Set target frame rate (VSYNC = -1.0)
+void setFps(float fps)  // Set the target frame rate; update and draw run together (VSYNC = -1, EVENT_DRIVEN = 0, or a fixed fps). A fixed fps at or just above the display rate draws every display frame. Switching at runtime starts the new rate from the switch (no catch-up; a fixed fps draws the next frame, and the first update's getDeltaTime() leaves out the previous mode: called between updates it counts from the call, called inside an update from that update's start; the time dropped is under a frame in the usual modes, long only after an idle like EVENT_DRIVEN). Calling it again with the current rate does nothing, so it is safe to call every frame; on the frame where the value changes (setFps(guiValue) in draw() while a slider moves), that update's dt counts only from the call and is shorter than the frame
 void setTextAlign(Direction h, Direction v)  // Set text alignment
 void vertex(float x, float y, float z) [+3]  // Add a vertex
 ```
@@ -1650,6 +1933,7 @@ void pushStyle()  // Push current style (color, fill, stroke, blend) onto stack
 void resetBlendMode()  // Reset blend mode to Alpha (default)
 void resetScissor()  // Reset (disable) scissor clipping
 void resetStyle()  // Reset style to default values (white color, fill enabled, stroke disabled)
+StyleScope scopedStyle()  // pushStyle() now, popStyle() at the end of the scope: `auto s = scopedStyle();` returns a StyleScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushStyle() / popStyle() remain the main form. [[nodiscard]]: `scopedStyle();` alone would pop at once and is a compiler warning
 void setBlendMode(BlendMode mode)  // Set blend mode. BlendMode::Alpha (default), Add, Multiply, Screen, Subtract, Disabled. Works on the screen and inside Fbo passes alike; the mode persists until changed (it also carries into a subsequent Fbo::begin)
 void setCircleResolution(int res) ⚠️deprecated  // Deprecated alias for setCurveResolution()
 void setCurveResolution(int n)  // Set fixed curve segment count (switches off adaptive tolerance mode)
@@ -1683,7 +1967,8 @@ void rotateYDeg(float degrees)  // Rotate around Y axis (degrees)
 void rotateZ(float radians)  // Rotate around Z axis
 void rotateZDeg(float degrees)  // Rotate around Z axis (degrees)
 void scale(float s) [+2]  // Scale
-void setMatrix(const Mat4 & mat)  // Replace the current matrix with mat (absolute - use with caution, may break camera setup)
+MatrixScope scopedMatrix()  // pushMatrix() now, popMatrix() at the end of the scope: `auto m = scopedMatrix();` returns a MatrixScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushMatrix() / popMatrix() remain the main form. [[nodiscard]]: `scopedMatrix();` alone would pop at once and is a compiler warning
+void setMatrix(const Mat4 & mat)  // Replace the active target model matrix with mat, retaining its camera view (sgl receives V*M). Pass a model matrix without a baked-in view.
 void translate(Vec3 pos) [+2]  // Move origin
 ```
 
@@ -1696,7 +1981,7 @@ void bindCursorImage(Cursor cursor, int width, int height, const unsigned char *
 bool confirmDialog(const std::string & title, const std::string & message) [macos,windows,linux,android,web]  // Show Yes/No confirmation dialog. Returns true if Yes clicked
 void confirmDialogAsync(const std::string & title, const std::string & message, std::function<void (bool)> callback)  // Show Yes/No dialog asynchronously. Callback receives true if Yes clicked
 CoreEvents & events()  // Get the global CoreEvents hub holding all framework events (setup, update, draw, keyPressed, mousePressed, etc.); use events().eventName.listen(callback) to subscribe
-void exitApp()  // Immediately exit the application (cannot be cancelled)
+void exitApp(int code = 0)  // Exit the application with normal cleanup (cannot be cancelled). code defaults to 0. On Windows/Linux, runApp returns this code to its caller; on macOS, the process exits with this code after cleanup without returning from runApp. Use a non-zero code for failures.
 Cursor getCursor()  // Get the current mouse cursor shape
 Vec2 getGlobalMousePos()  // Get global mouse position as Vec2
 float getGlobalMouseX()  // Get global mouse X (screen coordinates, not window-relative)
@@ -1734,12 +2019,12 @@ void unbindCursorImage(Cursor cursor)  // Unbind a custom cursor image, restorin
 ### Time - Frame
 
 ```cpp
-double getDeltaTime()  // Seconds since last frame
+double getDeltaTime()  // Seconds since the previous update. Measured wall time in VSYNC / setFps modes; in fixed-Hz update mode (setIndependentFps with an update rate) and in runHeadlessApp every step reports exactly 1 / updateFps. Per window; a secondary window still measures its delta with high_resolution_clock (the system clock on Linux) until #307: a forward system clock step (NTP, a manual change) lands in one delta, so that window's due Node timers fire at once, and an uncapped callEveryCatchUp fires once per interval of the step; a backward step makes one delta negative: getDeltaTime() is negative on that tick and the window's Node timers are not counted down on it
 uint64_t getDrawCount()  // Get the number of draw() calls since the app started
-float getFps()  // Get current FPS (alias for getFrameRate)
+float getFps()  // Get the measured FPS (alias for getFrameRate). In a secondary window it is currently the average of the last 10 calls, like getFrameRate()
 FpsSettings getFpsSettings()  // Get the current FPS configuration (update/draw target rates, actual VSync rate, sync flag)
 uint64_t getFrameCount()  // Total frames rendered
-double getFrameRate()  // Current FPS
+double getFrameRate()  // Measured update rate (updates per second over the last 10 frames). In fixed-Hz update mode and runHeadlessApp this is the measured rate, not the configured one: the fixed steps are counted by the time they consumed, so it reads steady when the rate isn't a multiple of the frame rate and drops when time is dropped. Recorded by the main loop and runHeadlessApp; in a secondary window each call currently adds the window's last delta and returns the average of the last 10 calls, so reading it once per second gives a ~10 s average
 uint64_t getUpdateCount()  // Get the number of update() calls since the app started
 void sleepMicros(int micros)  // Block the current thread for the given number of microseconds
 void sleepMillis(int millis)  // Block the current thread for the given number of milliseconds
@@ -1789,18 +2074,19 @@ void setup()  // Initialize sokol_gfx + sokol_gl (called for you by the app loop
 ### Time - Elapsed
 
 ```cpp
-double getElapsedTime()  // Elapsed seconds (double) since program start. A separate clock from getElapsedTimef(); it is NOT reset by resetElapsedTimeCounter().
-float getElapsedTimef()  // Elapsed seconds (float)
-uint64_t getElapsedTimeMicros()  // Elapsed microseconds (int64)
-uint64_t getElapsedTimeMillis()  // Elapsed milliseconds (int64)
-void resetElapsedTimeCounter()  // Reset elapsed time
+double getElapsedTime()  // Elapsed seconds (double) since program start, on a steady clock (system clock changes don't affect it). The same clock as getElapsedTimef/Millis/Micros: resetElapsedTimeCounter() restarts all of them, so the difference of two readings is only a duration if nothing resets the counter in between. Keeps full precision where getElapsedTimef() loses it after long uptimes
+float getElapsedTimef()  // Elapsed seconds (float) since program start. Same clock as getElapsedTime(); a float loses precision after about a day of uptime (7.8 ms steps at 18 h), so use it for animation and display, and getElapsedTime() (double) where precision matters
+uint64_t getElapsedTimeMicros()  // Elapsed microseconds (uint64) since program start. Same clock as getElapsedTime()
+uint64_t getElapsedTimeMillis()  // Elapsed milliseconds (uint64) since program start. Same clock as getElapsedTime()
+double getFrameElapsedTime()  // Elapsed seconds (double) sampled once at the start of the current frame, so every update step and the draw of one frame see the same value (getElapsedTime() moves during the frame). Same clock and reset as getElapsedTime(). Sampled by the main loop and runHeadlessApp; in a secondary window it currently returns the live getElapsedTime()
+void resetElapsedTimeCounter()  // Restart the elapsed-time counter: getElapsedTime/f/Millis/Micros and getFrameElapsedTime count from 0 again. Display only: Node timers, the loop, recording and the tc_get_health uptime keep running on the underlying clock. A duration taken as the difference of two of those readings across a reset comes out wrong (negative, or wrapped for the unsigned Millis/Micros); measure durations with getSystemTimeMicros()
 ```
 
 ### Time - System
 
 ```cpp
-uint64_t getSystemTimeMicros()  // Unix time in microseconds
-uint64_t getSystemTimeMillis()  // Unix time in milliseconds
+uint64_t getSystemTimeMicros()  // Unix time in microseconds (wall clock). To measure a duration, take the difference of two readings as int64_t: it follows system clock adjustments, so a clock step can make t1 < t0 and an unsigned difference would wrap. Unlike the getElapsedTime family, resetElapsedTimeCounter() doesn't affect it
+uint64_t getSystemTimeMillis()  // Unix time in milliseconds (wall clock). It follows system clock adjustments, so take differences as int64_t (see getSystemTimeMicros)
 std::string getTimestampString(const std::string & timestampFormat) [+1]  // Formatted timestamp
 uint64_t getUnixTime()  // Current Unix timestamp in seconds
 ```
@@ -1905,27 +2191,29 @@ float getDpiScale()  // Get display DPI scale factor (e.g. 2.0 for Retina)
 int getFramebufferHeight()  // Get framebuffer height in pixels (window height * DPI scale)
 int getFramebufferWidth()  // Get framebuffer width in pixels (window width * DPI scale)
 bool getKeepScreenOn() [macos,windows,android,ios]  // Check whether keep-screen-on is currently enabled
+int getMaxUpdateSteps()  // The cap on fixed-rate update steps per frame (and per runHeadlessApp loop pass) set by setMaxUpdateSteps(). 10 by default; 0 or less means no cap
 IVec2 getWindowPosition() [macos,windows]  // Get window position in screen coordinates (top-left origin). macOS/Windows only; other platforms return (-1, -1)
-bool grabScreen(Pixels & outPixels)  // Capture current screen to Pixels
+bool grabScreen(Pixels & outPixels) [macos,windows,linux,ios,android]  // Capture current screen to Pixels
 bool isFullscreen()  // Check if window is fullscreen
 bool isRecording()  // Check whether a recording is in progress
-int recordingFrameCount()  // Number of frames captured so far in the current recording
+int recordingFrameCount()  // Number of video frames accepted by the backend; failed submissions are excluded. Finalization may still fail.
 fs::path recordingPath()  // Output file path of the current recording
 void redraw(int count = 1)  // Request extra redraws (useful for event-driven rendering)
-int runHeadlessApp(const HeadlessSettings & settings = HeadlessSettings())  // Run an app class without a window or graphics context (update loop only). Template on the app type; returns the process exit code
-bool saveScreenshot(const std::filesystem::path & path)  // Save a screenshot of the rendered frame (png/jpg/bmp). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written.
+int runHeadlessApp(const HeadlessSettings & settings = HeadlessSettings())  // Run an app class without a window or graphics context (update loop only). Updates are fixed steps at the target rate (getDeltaTime() is 1 / fps), at most setMaxUpdateSteps() per loop pass (default 10; between passes the loop sleeps until the next step is due, at most 1 ms); time beyond that (after a stall, or when update() is slower than its rate) is dropped with a one-time warning. Template on the app type; returns the process exit code
+bool saveScreenshot(const std::filesystem::path & path)  // Save a screenshot of the rendered frame (format picked from the extension, case-insensitive: png/jpg/bmp on most platforms; see the platform note). Safe to call from anywhere; capture is deferred to after present(). Returns true when capture is queued; on native platforms the destination folder is prepared first. This does not mean the file is already written. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned. Keeps bool on every platform: true means queued. Native entry synchronously checks path, parent creation and bundle refusal through prepareOutputPath; the deferred atomic checked write logs one Error on failure. Web remains a download: encoded output is handed to the browser, with no folders or .tmp and no disk-completion guarantee.
 void setClipboardString(const std::string & text)  // Copy text to clipboard
 void setFullscreen(bool full)  // Set fullscreen mode
-void setIndependentFps(float updateFps, float drawFps)  // Set independent update and draw frame rates
+void setIndependentFps(float updateFps, float drawFps)  // Set independent update and draw rates. A fixed update rate runs fixed steps (getDeltaTime() is 1 / updateFps for each), at most setMaxUpdateSteps() per frame (default 10): time beyond that (after a stall, when update() is too slow, or when updateFps is more than that many times the display rate) is dropped with a one-time warning. Switching at runtime starts the new rate from the switch (no catch-up; on the next frame a fixed update rate runs one step, a VSYNC update's getDeltaTime() counts from the call, or from the update's start when called inside an update, and a fixed draw rate draws). Calling it again with the current rates does nothing, and changing only the draw rate keeps the update's phase and drops no time; switching between a synced (setFps) and an independent update counts as an update-mode change even at the same rate (setFps(VSYNC) to setIndependentFps(VSYNC, 30) drops up to a frame). Entering a fixed update rate restarts with one step, which can count more or less than the time since the last update (from a 144 Hz display to a fixed 60, the step is ~9.7 ms longer than the 1/144 s since the last update); entering a VSYNC update drops the time since the last update (under a frame in the usual modes, long only after an idle like EVENT_DRIVEN), and on that frame, called outside update(), its dt counts only from the call
 void setKeepScreenOn(bool enabled) [macos,windows,android,ios]  // Prevent display sleep / auto-lock while the app is running. Supported: Android, iOS, macOS, Windows. Linux / Web: no-op
+void setMaxUpdateSteps(int steps)  // Set the most fixed-rate update steps run in one frame (setIndependentFps with an update rate) or in one runHeadlessApp loop pass. More are pending after a stall, when update() is slower than its own rate, or when the update rate is more than this many times the display rate; the time beyond the cap is dropped with a one-time warning instead of replayed. Default 10. 0 or less removes the cap so every step runs (e.g. a deterministic simulation), at the cost of a freeze while a long stall is replayed and of frames that keep growing while update() is slower than its rate
 void setOrientation(Orientation mask) [android,ios]  // Set allowed screen orientations (mobile). Values: Orientation::Portrait, Landscape, All
 void setWindowDecorated(bool decorated)  // Toggle the window's standard decorations (title bar, borders, buttons). false = borderless but still focusable and closable. Desktop only
 void setWindowPosition(int x, int y) [macos,windows]  // Set window position in screen coordinates (top-left origin). macOS/Windows only; no-op on other platforms
-void setWindowSize(int width, int height)  // Set window size
+void setWindowSize(int width, int height)  // Set window size. Resizing the main window is not implemented on Linux yet
 void setWindowSizeLogical(int width, int height)  // Resize the window to the given logical size (logical pixels)
 void setWindowTitle(const std::string & title)  // Set window title
-bool startRecording(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start recording the window — or an Fbo (clean, GUI-free output) — to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited. Calling it again while recording finalizes the current file first, then starts fresh (same path = the old file is overwritten)
-void stopRecording()  // Stop the current recording and finalize the file
+SaveResult startRecording(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start recording the window — or an Fbo (clean, GUI-free output) — to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited. Calling it again while recording finalizes the current file first, then starts fresh (same path = the old file is overwritten). Returns SaveResult for path preparation and encoder opening. Success starts an in-place stream; check close()/stop() for finalization.
+SaveResult stopRecording()  // Stop the current recording and finalize the file. Returns SaveResult for backend finalization, retaining the first backend failure. Caller errors and transient readback failures do not fail the take. Repeated calls retain the result without another Error. No temporary/rename is used.
 void toggleFullscreen()  // Toggle fullscreen mode
 ```
 
@@ -1954,19 +2242,21 @@ const char * logLevelToString(LogLevel level)  // Return the uppercase name of a
 LogStream logNotice(const std::string & module = std::string(""))  // Print to console
 LogStream logVerbose(const std::string & module = std::string(""))  // Stream-based verbose-level log output
 LogStream logWarning(const std::string & module = std::string(""))  // Stream-based warning-level log output
-Json nodeToJson(Node & node, int maxDepth)  // Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection
+Json nodeToJson(Node & node, int maxDepth, bool includeDerived = false)  // Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection. Derived members (e.g. globalPos) are left out unless includeDerived is true; then they are included and named under "derived"
 Json parseJson(const std::string & str)  // Parse a JSON string into a Json object; returns an empty Json on parse error.
 Xml parseXml(const std::string & str)  // Parse an XML string into an Xml object.
 JsonReadReflector reflectFromJson(T & obj, const Json & j)  // Apply the keys of a Json object onto obj's reflected (TC_REFLECT) members. Returns the reflector so callers can inspect which members were applied, skipped, read-only, or unknown.
-Json reflectToJson(T & obj)  // Return all reflected (TC_REFLECT) members of obj as a Json object. Works on any reflected type such as a Node or Mod.
-void runOnMainThread(std::function<void ()> fn)  // Run a callback on the main (scene) thread; immediately if already on it, otherwise queued to the next frame
+Json reflectToJson(T & obj, bool includeDerived = false)  // Return the reflected (TC_REFLECT) members of obj as a Json object. Works on any reflected type such as a Node or Mod. Derived values (TC_DERIVED, e.g. Node's globalPos) are left out unless includeDerived is true, so the default output is what a save should contain.
+void runOnMainThread(std::function<void ()> fn) [+1]  // Run a callback on the main (scene) thread; immediately if already on it, otherwise enqueue and return without waiting for execution. Each frame drains, in order, the work queued when its drain started; worker submissions during the drain wait until the next frame. There is no queue limit. runOnMainThread(fn, weakToken) accepts the same weak_ptr<atomic<bool>> liveness token as Deliver::Main: at execution time an expired or false token drops the closure. A token does not wait for a callback already running; serialize target teardown with delivery, normally on the main thread. The single-argument form never drops callbacks and the caller owns captured lifetimes. On Web without pthreads both forms run immediately, with the token check for the two-argument form. tc_get_health reports the drain-start count as mainQueuePending. Producers that can drop values use their own bounded or latest-value buffer.
 void setConsoleLogLevel(LogLevel level)  // Set the minimum log level printed to the console
 void setFileLogLevel(LogLevel level)  // Set the minimum log level written to the log file
-bool setLogFile(const fs::path & path)  // Open a file to receive log output
+SaveResult setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns a failed SaveResult, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and a failed SaveResult returned.
+void setLogLevel(LogLevel level)  // Set the console, file and system log levels at once (a later per-output call wins)
+void setSystemLogLevel(LogLevel level)  // Set the minimum log level written to the OS log: os_log on macOS, OutputDebugStringW on Windows
 const std::string & shortTypeName(const std::type_info & ti)  // Short (unqualified) readable name for a type, cached per type
 std::vector<std::string> splitString(const std::string & source, const std::string & delimiter, bool ignoreEmpty = false, bool trim = false)  // Split string by delimiter
-void stringReplace(std::string & input, const std::string & searchStr, const std::string & replaceStr)  // Replace substring in place
-std::size_t stringTimesInString(const std::string & haystack, const std::string & needle)  // Count occurrences of a substring in a string
+void stringReplace(std::string & input, const std::string & searchStr, const std::string & replaceStr)  // Replace substrings in place, left to right without overlapping or searching the replacement. An empty search string leaves the input unchanged.
+std::size_t stringTimesInString(const std::string & haystack, const std::string & needle)  // Count nonoverlapping occurrences of a substring in a string. An empty substring matches nothing and returns 0.
 void tcCloseLogFile() ⚠️deprecated  // Deprecated alias for closeLogFile()
 Logger & tcGetLogger() ⚠️deprecated  // Deprecated alias for getLogger()
 LogStream tcLog(LogLevel level = Notice) ⚠️deprecated  // Deprecated alias for logAt()
@@ -1977,7 +2267,7 @@ LogStream tcLogVerbose(const std::string & module = std::string("")) ⚠️depre
 LogStream tcLogWarning(const std::string & module = std::string("")) ⚠️deprecated  // Deprecated alias for logWarning()
 void tcSetConsoleLogLevel(LogLevel level) ⚠️deprecated  // Deprecated alias for setConsoleLogLevel()
 void tcSetFileLogLevel(LogLevel level) ⚠️deprecated  // Deprecated alias for setFileLogLevel()
-bool tcSetLogFile(const fs::path & path) ⚠️deprecated  // Deprecated alias for setLogFile()
+SaveResult tcSetLogFile(const fs::path & path) ⚠️deprecated  // Deprecated alias for setLogFile()
 std::string toBase64(const unsigned char * bytes, size_t len) [+2]  // Encode raw bytes as a Base64 string
 std::string toBinary(int value) [+4]  // Convert an integer to a binary string
 bool toBool(const std::string & str)  // Parse a string into a bool
@@ -1999,31 +2289,36 @@ const std::string & typeName(const std::type_info & ti) [+1]  // Readable (deman
 ### File
 
 ```cpp
-bool appendToFile(const fs::path & path, const std::string & content)  // Append string to file
+SaveResult appendToFile(const fs::path & path, const std::string & content)  // Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns a failed SaveResult and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and a failed SaveResult returned.
 bool createDirectory(const fs::path & path)  // Create directory (and parents)
 bool directoryExists(const fs::path & path)  // Check if directory exists
 bool fileExists(const fs::path & path)  // Check if file exists
 std::string getAbsolutePath(const fs::path & path)  // Get absolute path
 std::string getBaseName(const fs::path & path)  // Get filename without extension
-fs::path getDataPath(const fs::path & filename)  // Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged.
-fs::path getDataPathRoot()  // Get the current data path root as fs::path.
+fs::path getDataPath(const fs::path & filename)  // Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged. Only the data-directory base is lexically normalized; filename components are preserved. Safe to call from any thread. This is the bundled data the app reads (bin/data in development, the bundle's Resources/data when packaged); files the app writes and keeps go to getUserDataPath().
+fs::path getDataPathRoot()  // Get the current data path root as fs::path. Unless explicitly set, Apple platforms choose one existing folder on first use, in order: <exe>/data (iOS), <exe>/../Resources/data (macOS release), <exe>/../../../data (macOS development). The choice is kept for the process; missing files never fall back to another folder. Only the release workflow copies bin/data into the macOS bundle; normal builds keep using bin/data.
 fs::path getExecutableDir()  // Get the directory containing the running executable.
 fs::path getExecutablePath()  // Get the absolute path of the running executable.
-std::string getFileExtension(const fs::path & path)  // Get file extension without dot
+std::string getFileExtension(const fs::path & path)  // Get file extension without dot, as written (case kept). Compare toLower(getFileExtension(path)) to match it case-insensitively, as TrussC's loaders do.
 std::string getFileName(const fs::path & path)  // Get filename from path
 int64_t getFileSize(const fs::path & path)  // Get file size in bytes
 std::string getParentDirectory(const fs::path & path)  // Get parent directory
+fs::path getTempPath(const fs::path & path = fs::path(""))  // Folder for temporary files, which the OS may delete at any time: $TMPDIR/<bundle id>/ on macOS, %TEMP%\<app>\ on Windows, $TMPDIR (or /tmp) /<app>/ on Linux, the app's tmp/ on iOS, the app's cache folder on Android, in-memory /tmp on web. Created on first use. A relative path is joined to it; an absolute path is returned as is.
+fs::path getUserDataPath(const fs::path & path = fs::path(""))  // Folder for files the app writes and keeps (settings, presets, logs, recordings): always the OS per-user app folder, in development and in a packaged app alike. macOS ~/Library/Application Support/<bundle id>/, Windows %LOCALAPPDATA%\<app>\, Linux $XDG_DATA_HOME/<app>/ (default ~/.local/share/<app>/), iOS the app's Library/Application Support/, Android the app's internal files folder; on web it is in memory and not kept. <app> is the executable name. Created on first use. A relative path is joined to it; an absolute path is returned as is. Write and read back through it: saveJson(j, getUserDataPath("settings.json")) then loadJson(getUserDataPath("settings.json")). setUserDataPathRoot() changes it.
 std::string joinPath(const fs::path & dir, const fs::path & file)  // Join directory and filename
 std::vector<std::string> listDirectory(const fs::path & path)  // List files in directory
 const char * loadErrorName(LoadError e)  // Short label for a LoadError value ("FileNotFound", ...). For log messages
 Json loadJson(const fs::path & path)  // Load a JSON file and return it as a Json object. Relative paths are resolved via getDataPath; returns an empty Json on error.
 std::string loadTextFile(const fs::path & path)  // Load entire text file
 Xml loadXml(const fs::path & path)  // Load an XML file and return it as an Xml object. Relative paths are resolved via getDataPath.
+std::string pathToUtf8(const fs::path & p)  // Convert a path to a UTF-8 std::string, the same on every platform. Use it instead of path.string(), which on Windows converts to the process code page and can throw for characters outside it. On Windows it can still throw for a name that is not valid UTF-16 (an unpaired surrogate); to log a path, use log << path, which does not throw.
 bool removeFile(const fs::path & path)  // Remove file
-bool saveJson(const Json & j, const fs::path & path, int indent = 2)  // Write a Json object to a file. Relative paths are resolved via getDataPath. indent sets the pretty-print width (negative for compact). Returns true on success.
-bool saveTextFile(const fs::path & path, const std::string & content)  // Save string to text file
-void setDataPathRoot(const fs::path & path)  // Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is.
-void setDataPathToResources() [macos,ios]  // Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms.
+SaveResult saveJson(const Json & j, const fs::path & path, int indent = 2)  // Serialize and save JSON (indent sets the pretty-print width; negative means compact). Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
+SaveResult saveTextFile(const fs::path & path, const std::string & content)  // Save text bytes unchanged in binary mode. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
+void setDataPathRoot(const fs::path & path)  // Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is. Call it before starting threads that load files (e.g. in setup()).
+void setDataPathToResources() [macos,ios]  // Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms. Call it before starting threads that load files (e.g. in setup()).
+void setUserDataPathRoot(const fs::path & path)  // Fix the folder getUserDataPath() returns, for installations, several instances of one app, or tests. Mirrors setDataPathRoot(): a relative root is resolved against the executable directory, an absolute root is used as is. The folder is created on first use. A root inside the app bundle (macOS / iOS) still gets its writes refused.
+fs::path utf8ToPath(std::string_view utf8)  // Convert a UTF-8 string to fs::path, decoding it as UTF-8 on every platform. fs::path(std::string) on Windows decodes in the process code page, which is UTF-8 only in apps built with TrussC's Windows manifest (Windows 10 1903 or later).
 ```
 
 ### Sound
@@ -2039,7 +2334,7 @@ void setBeepVolume(float vol)  // Set the output volume for beep() (0.0-1.0).
 size_t getAudioAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest mixed output samples (mono, L+R average) into outBuffer for FFT / visualization. numSamples is capped at the analysis buffer size (4096). Returns the number of samples written.
 size_t getMicAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest microphone input samples into outBuffer. Convenience wrapper over getMicInput().getBuffer(). numSamples is capped at the mic buffer size (4096). Returns the number of samples written.
 MicInput & getMicInput()  // Get the global MicInput singleton (microphone capture). Call start() on it to open the device.
-void initAudio()  // Initialize the global AudioEngine. Called automatically by Sound::load() / play(), so manual use is only needed to start audio early (e.g. before an audioOut synthesis listener).
+void initAudio()  // Initialize the global AudioEngine. Sound::load(), loadStream(), loadTestTone() and loadFromBuffer() call it automatically while the engine is not initialized (play() does not), so manual use is only needed to start audio early (e.g. before an audioOut synthesis listener).
 void shutdownAudio()  // Shut down the global AudioEngine and close the audio device. Usually unnecessary (runs at program exit).
 ```
 
@@ -2047,7 +2342,7 @@ void shutdownAudio()  // Shut down the global AudioEngine and close the audio de
 
 ```cpp
 std::vector<std::string> listSystemFonts() [macos,windows,linux,ios]  // Enumerate names of all fonts known to the OS
-fs::path systemFontPath(const std::string & name) [macos,windows,linux,ios]  // Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS uses CoreText; Linux/Windows currently stub.
+fs::path systemFontPath(const std::string & name) [macos,windows,linux,ios]  // Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS / iOS use CoreText, Linux fontconfig, Windows DirectWrite.
 ```
 
 ### Animation
@@ -2071,9 +2366,9 @@ Color colorFromOKLCH(float L, float C, float H, float a = 1.0) ⚠️deprecated 
 ### Scene Graph
 
 ```cpp
-Node * getRootNode()  // Get the running App as the root of the node tree (set by the framework while the app is alive, null otherwise). Lets tools walk the whole tree without the app passing itself around.
-Node * getSelectedNode()  // Get the currently selected node (the last-clicked node, held by the Node system; null if none). A tool such as an inspector can read it and drive it via setSelectedNode().
-void setSelectedNode(Node * n)  // Set the currently selected node. Pass nullptr to clear the selection.
+Node * getRootNode()  // Get the running App as the root of the node tree (set by the framework while the app is alive, null otherwise). Lets tools walk the whole tree without the app passing itself around. Not yet the App inside its own constructor: use it from setup() on.
+Node * getSelectedNode()  // Get the currently selected node (the last-clicked node, held by the Node system; null if none or once the node is freed). A tool such as an inspector can read it and drive it via setSelectedNode(). The pointer is for the current call; to keep the node, keep its weak_from_this().
+void setSelectedNode(Node * n)  // Set the currently selected node. Pass nullptr to clear the selection; a node no shared_ptr owns also clears it.
 ```
 
 ### 3D Setup
@@ -2082,14 +2377,21 @@ void setSelectedNode(Node * n)  // Set the currently selected node. Pass nullptr
 void disable3D() ⚠️deprecated  // Deprecated alias for setupScreenOrtho()
 void enable3D() ⚠️deprecated  // Deprecated alias for setupScreenPerspective()
 void enable3DPerspective(float fovY = 0.785000026, float nearZ = 0.100000001, float farZ = 1000.0) ⚠️deprecated  // Deprecated alias for setupScreenPerspective()
-float getDefaultScreenFov()  // Get current default screen FOV
+float getDefaultScreenFov()  // Get default screen FOV in radians
+float getDefaultScreenFovDeg()  // Get default screen FOV in degrees
 Vec3 screenToWorld(const Vec2 & screenPos, float worldZ = 0.0)  // Convert screen coordinate to world coordinate on Z plane
-void setDefaultScreenFov(float fovDeg)  // Set default screen FOV (applied at frame start)
+void setDefaultScreenFov(float fovRadians)  // Set default swapchain FOV in radians (frame start only)
+void setDefaultScreenFovDeg(float fovDeg)  // Set default screen FOV in degrees
+void setDefaultScreenOrtho()  // Set orthographic projection as the default (frame start and FBO begin)
 void setFarClip(float farDist)  // Set the default-screen far clipping plane (0 = auto-calculate)
 void setNearClip(float nearDist)  // Set the default-screen near clipping plane (0 = auto-calculate)
-void setupScreenFov(float fovDeg, float nearDist = 0.0, float farDist = 0.0)  // Set up screen projection with specified FOV (0 = ortho, >0 = perspective)
+void setupScreenFov(float fovRadians, float nearDist = 0.0, float farDist = 0.0)  // Set up screen perspective with FOV in radians
+void setupScreenFovDeg(float fovDeg, float nearDist = 0.0, float farDist = 0.0)  // Set up screen perspective with FOV in degrees
+void setupScreenFovWithSize(float fovRadians, float viewW, float viewH, float nearDist = 0.0, float farDist = 0.0)  // Set up perspective with explicit viewport size and FOV in radians
+void setupScreenFovWithSizeDeg(float fovDeg, float viewW, float viewH, float nearDist = 0.0, float farDist = 0.0)  // Set up perspective with explicit viewport size and FOV in degrees
 void setupScreenOrtho()  // Set up orthographic projection (2D mode)
-void setupScreenPerspective(float fovDeg = 45.0, float nearDist = 0.0, float farDist = 0.0)  // Set up perspective projection (oF-style default 3D)
+void setupScreenPerspective(float fovRadians = …, float nearDist = 0.0, float farDist = 0.0)  // Set up screen perspective with FOV in radians (default TAU/8)
+void setupScreenPerspectiveDeg(float fovDeg = 45.0, float nearDist = 0.0, float farDist = 0.0)  // Set up screen perspective with FOV in degrees (default 45)
 Vec3 worldToScreen(const Vec3 & worldPos)  // Convert a world coordinate to screen coordinate (x, y = screen pixels, z = depth 0-1)
 ```
 
@@ -2104,7 +2406,7 @@ float getNearClip()  // Get the near-clip override (0 = auto-calculate from the 
 ### Lighting & PBR
 
 ```cpp
-void addLight(Light & light)  // Add a light to the scene
+void addLight(Light & light)  // Add a light to the scene (up to 8 lights per window; a light added past 8 is not registered, with a one-time warning)
 void beginShadowPass(Light & light)  // Begin shadow depth pass from the light's point of view (up to 4 shadow lights per frame)
 Color calculateLighting(const Vec3 & worldPos, const Vec3 & worldNormal, const Material & material)  // CPU-side lighting result for a world position and normal, summing all active lights with the given material
 void clearEnvironment()  // Clear IBL environment
@@ -2170,6 +2472,51 @@ bool sameSubnet(const std::string & a, const std::string & b, const std::string 
 const char * sendErrorName(SendError e)  // Short label for a SendError value ("QueueFull", ...). For log messages
 ```
 
+### MCP
+
+```cpp
+void mcp::alert(const std::string & msg)  // Log an operator warning and queue it for ReadOnly tc_get_alerts; thread-safe, retains the latest 100 pending alerts.
+void mcp::deferToolResultTwoStage(std::function<std::function<json ()> ()> mainStage, const void * targetWindow = nullptr)  // Defer a main-thread stage until after present; its returned JSON producer runs on the HTTP worker for expensive encoding.
+void mcp::deferToolResultUntilAfterFrame(std::function<json ()> produce, const void * targetWindow = nullptr)  // In a tool handler, defer the JSON result producer until after the target window's present; null targets the main window.
+void mcp::enableDebugger() ⚠️deprecated [macos,windows,linux,ios,android]  // Deprecated no-op; use setToolLevel(ToolLevel::Control). Removal at v1.0.0.
+AdmissionLimits mcp::getAdmissionLimits()  // Return the current MCP admission limits.
+int mcp::getHttpPort() [macos,windows,linux,ios,android]  // Return the bound HTTP port, or 0 when stopped or on Web.
+ToolLevel mcp::getToolLevel()  // Return the current host grant, checked for every tools/list and tools/call.
+bool mcp::hasTool(const std::string & name)  // Whether a tool is registered, regardless of its current exposure.
+bool mcp::isDebuggerEnabled()  // Compatibility query: true when getToolLevel() is at least Control.
+void mcp::processHttpQueue() [macos,windows,linux,ios,android]  // Process queued HTTP requests on the main thread; called automatically by the frame loop. No-op on Web.
+void mcp::registerControlTools() ⚠️deprecated  // Deprecated alias of setToolLevel(ToolLevel::Control); removal at v1.0.0.
+void mcp::registerDebuggerTools() ⚠️deprecated  // Deprecated alias of setToolLevel(ToolLevel::Control); removal at v1.0.0.
+void mcp::registerInspectionTools() ⚠️deprecated  // Deprecated alias of setToolLevel(ToolLevel::ReadOnly); removal at v1.0.0.
+ResourceBuilder mcp::resource(const std::string & uri, const std::string & name)  // Build a URI-addressed text resource registration; registration alone does not open HTTP.
+bool mcp::setAdmissionLimits(const AdmissionLimits & limits)  // Set MCP limits before opening HTTP; return true on success. Zero values, active HTTP or outstanding work return false, log one Warning per rejected call, increment the Configuration rejection counter and preserve all previous settings. Defaults include 4096 histogram bins, 65536 grid cells, 256 operations, 64 MiB per reply and 256 MiB aggregate working memory. Counters and first-Warning state last for the process and do not reset on query or restart. Bound (security): control JSON must fit finite ingress storage. Overflow rejects with 413 and is counted. Bound (security): sockets and pending replies share finite admission. Overflow closes the new socket and is counted. Bound (security): network work must use a finite worker pool. Overflow queues within admission and excess admission is counted. Bound (security): HTTP metadata must stop growing while read. Overflow rejects with 431 and is counted. Bound (security): headers and trailers share finite metadata storage. Overflow rejects with 431 and is counted. Bound (security): header/trailer entries also consume storage. Overflow rejects with 431 and is counted. Bound (security): histogram parameters drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): grid products drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): operation arrays drive repeated work and retained results. Overflow rejects the request and is counted. Bound (security): reply construction must fit finite output storage. Overflow returns an error and is counted. Bound (security): concurrent MCP work shares finite process storage. Overflow rejects admission or returns an error and is counted. Bound (security): analysis image copies and encoders need credits before allocation. Overflow returns an error and is counted. Bound (abi): stb's immutable input view uses an int byte length. Overflow rejects the image and is counted. Bound (security): encoded copies and decoder buffers share working credits. Overflow rejects the image before reading and is counted. Bound (security): decoded pixels, copies and codec scratch need credits before decoding. Overflow rejects the image and is counted. Bound (security): RPC nesting must fit parse and copy stacks. Overflow rejects the request and is counted. Bound (security): audio scratch and result products need credits before allocation. Overflow rejects the request and is counted. Bound (abi): external MCP FFT lengths must fit the int-sized transform API. Overflow returns an error and is counted. Bound (realtime): the audio callback must not allocate; external MCP reads share its fixed history ring. Overflow returns an error and is counted. Bound (security): external snapshot copies need credits before vector growth. Overflow rejects the request and is counted. Bound (abi): codec allocation headers must fit size_t. Overflow returns null and is counted. Bound (security): codec allocations must fit pre-admitted workspace. Overflow returns null and is counted. Bound (abi): chunk sizes must fit the unsigned-long parser. Overflow rejects with 413 and is counted.
+void mcp::setToolLevel(ToolLevel level)  // Set the host grant. ReadOnly or Control opens loopback HTTP unless TRUSSC_MCP=0; dev builds retain Control. Registration order is independent; the grant survives hot reload.
+void mcp::startHttpServer(int port = 0, const std::string & host = std::string("127.0.0.1"), const std::string & token = std::string("")) [macos,windows,linux,ios,android]  // Explicitly open HTTP (default 127.0.0.1, port 0 chooses an OS port); non-loopback requires a token. TRUSSC_MCP=0 closes. Call before setToolLevel() to choose the address: the first opener wins; mismatched later parameters log an Error and change nothing. No-op on Web. Defaults: 1 MiB wire/decoded body, 8 KiB per request/header/trailer line, 64 KiB metadata, 128 fields, 32 outstanding connections and 4 workers. Excess bodies return 413, metadata returns 431, excess connections close. Rejections issue one Warning per store and increment lifetime counters. See setAdmissionLimits(). Request JSON defaults to 64 levels; parse admission failures return 503 with a reason.
+void mcp::status(const std::string & name, std::function<double ()> getter) [+1]  // Publish a numeric or string getter through ReadOnly tc_get_status; registering the same name replaces it.
+void mcp::statusGraph(const std::string & name, std::function<double ()> getter)  // Publish a numeric getter marked for time-series plotting through ReadOnly tc_get_status.
+void mcp::statusImage(const std::string & name, std::function<trussc::Pixels ()> getter)  // Publish a Pixels getter through ReadOnly tc_get_status_image, evaluated on demand on the main thread.
+void mcp::stopHttpServer() [macos,windows,linux,ios,android]  // Stop the HTTP listener and answer pending requests before joining the workers. Discard producers finishing after shutdown. If an error reply cannot fit, return 503 with X-MCP-Reason. No-op on Web.
+ToolBuilder mcp::tool(const std::string & name, const std::string & desc)  // Build a tool registration. Only tc_ is reserved; tcx_ is free. Registration never starts the listener.
+```
+
+### Console
+
+```cpp
+bool console::isEnabled()  // Whether stdin command delivery is enabled. False until the app calls start(), and after stop(); always false on Web.
+void console::start()  // Opt in to stdin commands: call in setup() for windowed or headless apps. Neither runner starts input automatically (breaking in v0.8.0). Drains pending commands before enabling delivery; the first call creates the process's only detached reader, which reads until EOF. Later starts reuse it. LF/CRLF and a partial last line at EOF are supported. Unavailable on Web.
+void console::stop()  // Disable stdin command delivery and discard queued commands. The detached reader continues consuming stdin until EOF, dropping lines read while stopped. start() enables delivery again. Both runners stop delivery before app exit/cleanup. No-op on Web.
+```
+
+### graphics
+
+```cpp
+int getHeight()  // Drawing height in active-target coordinate units; see getWidth.
+Mat4 getProjectionMatrix()  // Return the active target camera projection matrix by value, in backend-native clip space.
+Vec2 getSize()  // Drawing width and height of the active target as Vec2; see getWidth.
+Mat4 getViewMatrix()  // Return the active target camera view matrix by value. Fbo and EasyCam scopes restore the previous camera on exit; Node CameraContexts remain immutable draw-time snapshots.
+int getWidth()  // Drawing width in active-target coordinate units. Fbo: attachment pixels; swapchain: logical units or pixels according to pixelPerfect. Object and window getters keep their own size.
+```
+
 ### Other
 
 ```cpp
@@ -2221,11 +2568,13 @@ float log2(float x) [std]  // Base-2 logarithm
 MOUSE_BUTTON_LEFT  // Left mouse button
 MOUSE_BUTTON_MIDDLE  // Middle mouse button
 MOUSE_BUTTON_RIGHT  // Right mouse button
+Event<ScreenshotSaveEventArgs> & onScreenshotSave()  // Host-owned screenshot completion event. Fires once per saveScreenshotAsync request on main in a later frame, never inline; expired application runs suppress delivery. Retain the EventListener returned by listen(). Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires.
 Vec2 operator*(float s, const Vec2 & v) [+4]  // Component-wise multiplication
 PI ⚠️deprecated  // Ratio of circumference to diameter. ≈ 3.14159. Prefer HALF_TAU for half a turn.
 QUARTER_TAU  // Quarter circle (PI/2)
 float remainder(float x, float y) [std]  // IEEE floating-point remainder of x/y
 Right  // Direction shorthand for Direction::Right
+void saveScreenshotAsync(const fs::path & path)  // Capture the requesting window at its next present, then encode/write on a worker. The destination is frozen at submission. At most four pending jobs per window include capture, writing and undelivered results; further requests report WriteFailed with Screenshot queue is full through onScreenshotSave(). Hidden secondary windows wait for their own present without blocking captures in other windows. Native writes use one global FIFO in capture-completion order; a slow write delays later writes. Closing before capture or calling without a render window reports a deferred failure. Native readback still runs on main and may stall that frame. Web snapshots the canvas and submits a PNG/JPEG download; browser download policy and actual disk completion are unobservable. Serialize other saves to the same destination yourself. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires.
 float tanh(float x) [std]  // Hyperbolic tangent
 TAU  // Ratio of circumference to radius; the radian measure of one full turn. ≈ 6.28318.
 Top  // Direction shorthand for Direction::Top
@@ -2238,10 +2587,11 @@ VSYNC  // Frame-rate sentinel: sync to the monitor refresh rate
 ### App — Base application class: subclass it and override setup/update/draw and the input callbacks (mousePressed, keyPressed, etc.) to build a TrussC app
 
 ```cpp
-void App::audioIn(const AudioInBuffer & buf)  // Real-time capture callback event (microphone input). RT-safe same as audioOut.
-void App::audioOut(AudioOutBuffer & buf)  // Fill the audio output buffer (override to synthesize audio)
+void App::audioIn(const AudioInBuffer & buf)  // Real-time capture callback event (microphone input). RT-safe same as audioOut. Like audioOut, first called right after setup() returns and detached before cleanup() for good; the same rule applies: don't wait on the main thread or on its locks in here.
+void App::audioOut(AudioOutBuffer & buf)  // Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. First called right after setup() returns, so what setup() prepares is ready in here; an App that is never run gets no calls. The framework calls exit(), detaches it and waits as long as necessary for a call in flight before calling cleanup() (exit, hot reload, closing the App's window). cleanup() may free its audio state. Don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). An App runs once: when its window closes it is detached for good; to show the App again, create a new one
 void App::exit()  // App exit callback (override for cleanup before shutdown)
 void App::filesDropped(const std::vector<std::string> & files)  // Files were dropped onto the window
+Window * App::getWindow() const  // The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. `close()` only requests closure; the window remains available until teardown begins. Already nullptr during teardown: inside this App's own exit() / cleanup() and in the window's events().exit listeners, because the native window is destroyed first. Read what you need (title, size, fullscreen) before calling close(), or keep it up to date in update(). Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks
 bool App::isExitRequested() const  // Whether an exit has been requested
 void App::keyPressed(const KeyEventArgs & e) [+1]  // Key pressed. Use KEY_* constants for special keys, or uppercase char literals for printable keys (e.g. key == 'A', key == '1')
 void App::keyReleased(const KeyEventArgs & e) [+1]  // Key released
@@ -2251,7 +2601,7 @@ void App::mousePressed(const MouseEventArgs & e) [+1]  // Mouse button pressed
 void App::mouseReleased(const MouseEventArgs & e) [+1]  // Mouse button released
 void App::mouseScrolled(const ScrollEventArgs & e) [+1]  // Mouse wheel / trackpad scrolled
 void App::requestExit()  // Request the app to exit
-void App::setSize(float w, float h)  // Set the app's size
+void App::setSize(float w, float h)  // Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. So does an App no shared_ptr owns yet (e.g. inside its constructor), which also warns once: call it in setup(). Resizing the main window is not implemented on Linux yet
 void App::touchMoved(const TouchEventArgs & touch)  // Touch moved (Android/iOS, multi-touch)
 void App::touchPressed(const TouchEventArgs & touch)  // Touch began (Android/iOS, multi-touch)
 void App::touchReleased(const TouchEventArgs & touch)  // Touch ended or was cancelled (check touch.cancelled)
@@ -2271,18 +2621,21 @@ void App::windowResized(int width, int height)  // Window resized
 ### AudioEngine — Singleton miniaudio-based mixer engine. Owns the output device, mixes all playing Sound voices, exposes real-time audioOut / audioIn / audioDeviceChanged events, and an FFT analysis ring buffer. Access via AudioEngine::getInstance(); most apps drive it indirectly through the Sound class and the global initAudio() / shutdownAudio() helpers.
 
 ```cpp
-size_t AudioEngine::getAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest mixed output samples (mono, L+R average) into outBuffer. numSamples is capped at 4096. Returns the number of samples written. (Global wrapper: getAudioAnalysisBuffer.)
-int AudioEngine::getBufferSize() const  // Current device buffer size in frames (0 = miniaudio default).
+size_t AudioEngine::getAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest post-clamp output samples (mono, L+R average) into outBuffer. numSamples is capped at 4096; missing startup samples are zero padded. Safe from any thread. Returns the number of samples written, or 0 while stopped or uninitialized. Reuses the previous successful copy if concurrent writes prevent a snapshot. Reads the same two-second, per-channel ring as the MCP-only tc_get_audio_spectrum (full FFT, selectable size/window/channels/frequency range/peak count) and tc_save_audio_capture (recent output as float32 WAV). The audio callback writes the ring without locks. Global wrapper: getAudioAnalysisBuffer.
+int AudioEngine::getBufferSize() const  // Requested buffer size in frames, as passed in AudioSettings::bufferSize (0 = backend default). The size the device actually uses is AudioDeviceChangedArgs::bufferSize.
 int AudioEngine::getChannels() const  // Current engine output channel count.
 AudioEngine & AudioEngine::getInstance()  // Get the global AudioEngine singleton.
 int AudioEngine::getMaxPolyphony() const  // Maximum number of simultaneously-playing Sound voices.
+std::vector<PlayingSoundInfo> AudioEngine::getPlayingSounds() const  // Snapshot of the sounds currently playing or paused (PlayingSoundInfo: slot, path, streaming, position, duration, volume, pan, speed, loop, paused, level). Playbacks left in their slots after shutdown() are listed with level 0. Copied under the engine lock: call it from the main thread, not from an audioOut / audioIn listener.
 int AudioEngine::getSampleRate() const  // Current engine output sample rate (Hz). Returns the default (48000) before init().
-bool AudioEngine::init() [+1]  // Initialize the engine with defaults, or with an AudioSettings override. Re-init on a running engine migrates active voices to the new settings. Returns true on success.
+AudioStats AudioEngine::getStats() const  // Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; stream underrun frames, stalled callbacks and voices stopped by re-init; hard-clipped output samples; master peak / RMS; audio-thread CPU usage. Reads atomics and a steady clock, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers.
+bool AudioEngine::init() [+1]  // Initialize the engine, or re-initialize it with an AudioSettings override. init(settings) keeps the sample rate, channels, buffer size and polyphony even when it fails; init() with no arguments reuses the last ones (the defaults if init(settings) was never called) but always opens the system default device on AudioBackend::Default. Re-init on a running engine migrates active voices to the new settings. miniaudio reaches Null only when no real backend context can be created; if a context opens but its device cannot, init() returns false without switching backend. Set AudioSettings::backend = AudioBackend::Null for intentional silent operation (one Notice per init). getStats() retains the last init failure until a successful init. Returns true on success, false when no output device can be opened; the failure is logged through logError("AudioEngine") with the requested device name. A failed re-init leaves the engine stopped: the running device is closed before the new one is tried. It may be called again later; each failed try opens the device and logs again, so retry on a timer (about once a second) or on a user action, not every frame. Sound::load*() calls init() while the engine is not initialized, so after a failed init(settings) it opens the system default device with those settings; call init(settings) again before loading sounds if you want the requested device.
 bool AudioEngine::isInitialized() const  // True after a successful init().
 std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Enumerate available playback devices (name + isDefault). Empty if unsupported on the platform.
 void AudioEngine::mixAudio(float * buffer, int num_frames, int num_channels)  // Audio output callback: mix all playing sounds into the buffer (internal, called from the audio thread).
 std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> source) [+1]  // Start a new mixer voice for the given source (eager SoundBuffer or streaming SoundStream) and return its live PlayingSound handle. Usually called indirectly via Sound::play().
 void AudioEngine::shutdown()  // Stop and close the audio device.
+bool AudioEngine::waitForAudioCallbacks()  // Teardown barrier for audioOut / audioIn listeners: returns once every audio callback that was running when it was called has finished. EventListener::disconnect() does not wait for a callback running on the audio thread, so an object whose listener uses its members disconnects, calls this, and only then lets the members go (in its own destructor or cleanup(), not in a base-class destructor). Returns true at once when no audio runs or when called from inside a listener; gives up on a listener stuck for about one second (logs a warning, returns false). It waits for every audioOut / audioIn listener running at that moment, not only yours, so don't call it while holding a lock that a listener takes: that listener blocks, the call waits the full second, and the audio drops out meanwhile.
 ```
 
 ### AudioInBuffer — Argument type for the AudioEngine::audioIn event. Holds the interleaved read-only microphone input for a single capture callback. Process and return quickly; do not call engine APIs from here.
@@ -2300,18 +2653,23 @@ void AudioEngine::shutdown()  // Stop and close the audio device.
 ```cpp
 ```
 
-### AudioRecorder — Records the engine's master output (everything the speakers get, Sounds and audioOut synthesis alike) to a WAV file. Taps audioOut at Monitor priority; file IO runs on a background thread, the audio thread never blocks
+### AudioRecorder — Records the engine's master output (everything the speakers get, Sounds and audioOut synthesis alike) to a WAV file. Taps audioOut at Monitor priority; file IO runs on a background thread, the audio thread never blocks. Every file has a 36-byte JUNK chunk after the RIFF header, so the samples start at byte 80 (S16) or 92 (F32). A take over 4 GiB of samples (about 3.1 h of 48 kHz stereo F32) is written as RF64 (EBU Tech 3306); older readers without RF64 support can't open it Destroying an active recorder inside an audio callback is a caller mistake: it returns without waiting, logs one Error, and leaves the WAV header unfinalized.
 
 ```cpp
 uint64_t AudioRecorder::getDroppedFrames() const  // Frames lost to ring-buffer overflow (0 in normal operation; nonzero means the writer thread fell behind)
 fs::path AudioRecorder::getPath() const  // Resolved path of the file being written
-double AudioRecorder::getRecordedSeconds() const  // Seconds actually written to the file so far
+double AudioRecorder::getRecordedSeconds() const  // Seconds actually written to the file so far. Counts complete frames actually written divided by sample rate, including a short write; queued or failed frames are excluded.
 bool AudioRecorder::isRecording() const  // True while recording
-bool AudioRecorder::start(const fs::path & path, const AudioRecordSettings & settings = {std::vector<std::vector<int>>()})  // Start recording the master mix into a WAV file (relative paths resolve via getDataPath). The audio engine must already be initialized; returns false otherwise or when the file cannot be opened
-void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV header sizes). Safe to call when not recording; also runs automatically on destruction
+SaveResult AudioRecorder::start(const fs::path & path, const AudioRecordSettings & settings = {std::vector<std::vector<int>>()})  // Start an in-place WAV recording of the master mix. Returns SaveResult after shared path preparation, opening and checked header writing; the AudioEngine must already be initialized. Relative paths use getDataPath, missing parents are created, and app bundle paths are refused. Every subsequent write is checked; the first failure ends the take and logs exactly one Error.
+SaveResult AudioRecorder::stop()  // Stop, drain pending captures and finalize the WAV/RF64 header and file. Disconnects the audio listener and waits up to one second for all audio callbacks already in flight; if one is still running it logs a Warning and finalizes anyway (that callback's last buffer is not in the file). Do not hold a lock needed by an audio listener. Returns SaveResult for checked header patching and close, or the first take failure; repeated calls preserve that result without another Error. Destruction normally calls stop; destroying an active recorder inside an audio callback instead logs one Error and leaves the header unfinalized. Recording writes in place, without a temporary or rename.
 ```
 
 ### AudioSettings — Configuration passed to AudioEngine::init() to override engine defaults (sample rate, channels, buffer size, polyphony, device). Empty deviceName selects the system default playback device.
+
+```cpp
+```
+
+### AudioStats — Audio engine health counters and meters, returned by AudioEngine::getStats(). Counters are cumulative since the process started (they survive re-init); peak / rms / cpuUsage describe the recent output.
 
 ```cpp
 ```
@@ -2441,6 +2799,11 @@ Color ColorOKLab::toRGB() const  // Convert to sRGB Color
 ```cpp
 ```
 
+### DeviceLostEventArgs — Arguments for the deviceLost event (Windows D3D11).
+
+```cpp
+```
+
 ### DragDropEventArgs — Arguments for filesDropped events
 
 ```cpp
@@ -2455,7 +2818,7 @@ void EasyCam::disableMouseInput()  // Disable mouse input for camera control
 void EasyCam::disableOrtho()  // Disable orthographic projection (use perspective)
 void EasyCam::enableMouseInput()  // Enable mouse input for camera control
 void EasyCam::enableOrtho()  // Enable orthographic projection
-void EasyCam::end()  // Restore previous transform (end 3D mode)
+void EasyCam::end()  // Restore the camera snapshot and selected pipeline from the matching begin on this target, retaining its model and continuous logical blend/depth flags.
 float EasyCam::getAzimuth() const  // Get orbit azimuth (horizontal angle, radians)
 float EasyCam::getDistance() const  // Get distance from target
 Modifier EasyCam::getDragModifier() const  // Get the modifier key required for camera mouse input
@@ -2504,7 +2867,7 @@ void EasyCam::setZoomSensitivity(float s)  // Set zoom sensitivity
 ```cpp
 ```
 
-### Environment — IBL environment map for PBR ambient lighting (irradiance + prefilter + BRDF LUT)
+### Environment — IBL environment map for PBR ambient lighting (irradiance + prefilter + BRDF LUT). Destruction touches window context state and must run on the main thread, like Light destruction.
 
 ```cpp
 const Texture & Environment::getBrdfLut() const  // Get BRDF integration lookup texture
@@ -2512,7 +2875,7 @@ const Texture & Environment::getIrradianceMap() const  // Get irradiance cubemap
 const Texture & Environment::getPrefilterMap() const  // Get prefiltered environment cubemap for specular IBL
 int Environment::getPrefilterMipLevels() const  // Get number of mip levels in the prefilter map
 bool Environment::isLoaded() const  // Check if environment is loaded
-bool Environment::loadFromHDR(const fs::path & path) [+1]  // Load environment from HDR image file
+bool Environment::loadFromHDR(const fs::path & path) [+1]  // Load environment from HDR image file. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
 bool Environment::loadProcedural()  // Generate a simple procedural sky environment
 void Environment::release()  // Release GPU resources
 ```
@@ -2523,13 +2886,13 @@ void Environment::release()  // Release GPU resources
 void Event::clear()  // Remove all listeners
 EventListener Event::listen(Callback callback, int priority = App) [+5]  // Register a listener callback and return an EventListener token; lower priority runs first, and Deliver::Main runs the callback on the main thread
 size_t Event::listenerCount() const  // Number of currently registered listeners
-void Event::notify(T & arg)  // Fire the event, calling all listeners in priority order (no argument for Event<void>); stops early if a listener marks an input arg consumed
+void Event::notify(T & arg)  // Fire the event, calling all listeners in priority order (no argument for Event<void>); stops early if a listener marks an input arg consumed. A listener removed during the pass on this thread is not called; one added during the pass starts from the next notify()
 ```
 
 ### EventListener — RAII token returned by Event::listen(); the listener is automatically disconnected when this token is destroyed or reassigned. Move-only
 
 ```cpp
-void EventListener::disconnect()  // Explicitly disconnect the listener now (otherwise happens automatically on destruction)
+void EventListener::disconnect()  // Explicitly disconnect the listener now (otherwise happens automatically on destruction). On the thread that fires the event it is not called again, even later in a notify() pass already running. It does not wait for a callback running on another thread: for audio, follow it with AudioEngine::waitForAudioCallbacks()
 bool EventListener::isConnected() const  // True while the listener is still connected to its event
 ```
 
@@ -2541,14 +2904,15 @@ bool EventListener::isConnected() const  // True while the listener is still con
 ### Fbo — Framebuffer object for offscreen rendering
 
 ```cpp
-void Fbo::allocate(int w, int h, int sampleCount = 1, TextureFormat format = RGBA8, bool mipmaps = false)  // Allocate framebuffer. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
-void Fbo::begin() [+1]  // Begin rendering to FBO
+void Fbo::allocate(int w, int h, int sampleCount = 1, TextureFormat format = RGBA8, bool mipmaps = false)  // Allocate framebuffer (void). When the size exceeds the device limit or the graphics backend reports a resource creation failure, allocation fails, partial resources are released and isAllocated() stays false. Driver-level out-of-memory may not be reported on every backend; begin()/draw() are no-ops and readPixels()/readPixelsFloat()/copyTo() return false. Oversize requests log one Warning with the requested size and device limit. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
+void Fbo::begin() [+1]  // Begin rendering to FBO. Each activation starts an identity model, empty matrix/camera/scissor scopes, full viewport and a TAU/8 camera in attachment pixels. Distinct Fbos may nest; end resumes the parent with color and depth LOAD. A fresh LOAD activation keeps color and clears depth. Balance scopes on the same target; recursive begin and out-of-order end are rejected.
 void Fbo::clear()  // Release FBO resources
 void Fbo::clearColor(float r, float g, float b, float a)  // Clear the FBO with a solid color
 bool Fbo::copyTo(Image & image) const  // Copy FBO contents to Image
 void Fbo::draw(float x, float y) const [+1]  // Draw FBO contents
-void Fbo::end()  // End rendering to FBO
+void Fbo::end()  // End rendering to FBO and return to the parent target; the returned logical blend takes effect immediately.
 sg_image Fbo::getColorImage() const  // Return the underlying sokol-gfx color image handle (advanced interop).
+const std::string & Fbo::getDebugName() const  // Return the MCP inspection name (empty for unnamed or moved-from objects).
 int Fbo::getHeight() const  // Get height
 int Fbo::getSampleCount() const  // Get MSAA sample count
 sg_sampler Fbo::getSampler() const  // Return the underlying sokol-gfx sampler handle (advanced interop).
@@ -2559,9 +2923,10 @@ int Fbo::getWidth() const  // Get width
 bool Fbo::isActive() const  // Check if currently rendering to FBO
 bool Fbo::isAllocated() const  // Check if allocated
 std::shared_ptr<void> Fbo::lifetimeToken() const  // Lifetime token for observers holding a raw pointer to this Fbo (e.g. ScreenRecorder auto-stops when the recorded Fbo dies). Per-object: it does not transfer on move
-bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android]  // Read FBO contents into a CPU buffer (8-bit per channel)
-bool Fbo::readPixelsFloat(float * pixels) const [macos,windows,linux,android]  // Read FBO contents into a CPU buffer (32-bit float per channel)
-bool Fbo::save(const fs::path & path) const  // Save FBO contents to file
+bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android,web]  // Always read RGBA8 into a CPU buffer, whatever the Fbo format (clamped to 0–1 and quantised to 8 bits)
+bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android,web]  // Read FBO contents into a CPU buffer (32-bit float per channel)
+SaveResult Fbo::save(const fs::path & path) const  // Read back and save FBO pixels. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
+void Fbo::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_fbos lists live objects with index, name, width, height and format. tc_analyze_image accepts source={fbo:name or index} and reads the final Fbo pass after the frame. Moves transfer the name/index and remove the moved-from object; destruction removes the entry. Empty names remain available by index. Web readback and iOS float readback return errors. Non-float Fbo formats are converted to RGBA8 for byte readback. Texture is not a source; draw it into a named Fbo.
 ```
 
 ### FileDialogResult — Result of a load/save file dialog
@@ -2590,7 +2955,7 @@ size_t FileReader::tell()  // Get current position
 void FileWriter::close()  // Close file
 void FileWriter::flush()  // Flush buffer to disk
 bool FileWriter::isOpen() const  // Check if file is open
-bool FileWriter::open(const fs::path & path, bool append = false)  // Open file for writing
+SaveResult FileWriter::open(const fs::path & path, bool append = false)  // Open file for writing (append = true appends to an existing file). Relative paths resolve via getDataPath, and a missing parent folder is created. Returns a failed SaveResult and logs an error when the folder cannot be created or the file cannot be opened. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and a failed SaveResult returned.
 FileWriter & FileWriter::write(const std::string & text) [+2]  // Write data to file
 FileWriter & FileWriter::writeLine(const std::string & text = std::string(""))  // Write line with newline
 ```
@@ -2612,7 +2977,7 @@ void Font::forEachGlyphVertical(const std::string & text, float x, float y, Dire
 Direction Font::getAlignH() const  // Get current horizontal text alignment
 Direction Font::getAlignV() const  // Get current vertical text alignment
 float Font::getAscent() const  // Get the font ascent (distance from baseline to top)
-const internal::AtlasState * Font::getAtlas(size_t index) const  // Return the atlas page at the given index for debug visualization, or nullptr if out of range.
+const internal::AtlasState * Font::getAtlas(size_t index) const  // Return the atlas page at the given index for debug visualization, or nullptr if out of range. Pages are single-channel R8 textures holding glyph coverage in R, so drawing a page's view with the normal pipeline shows it in red.
 size_t Font::getAtlasCount() const  // Get number of atlas pages
 size_t Font::getAtlasMemoryUsage() const  // Get atlas memory usage in bytes (alias of getMemoryUsage)
 Rect Font::getBBox(const std::string & text) const  // Get the bounding box of the text (top-left origin)
@@ -2628,7 +2993,7 @@ bool Font::getLatinHyphenation() const  // Check if Latin hyphenation is enabled
 float Font::getLineHeight() const  // Get line height
 size_t Font::getLoadedGlyphCount() const  // Get number of loaded glyphs
 float Font::getMaxLineLength() const  // Get the current wrap length
-size_t Font::getMemoryUsage() const  // Get atlas memory usage in bytes
+size_t Font::getMemoryUsage() const  // Get atlas memory usage in bytes (one byte per atlas texel: width x height summed over the pages)
 bool Font::getMipmaps() const  // Return whether the glyph atlas is allowed to build mipmaps.
 int Font::getOversampling() const  // Return the oversampling factor this font rasterizes with (1 = off).
 sg_sampler Font::getSampler()  // Return the shared sokol-gfx sampler used for atlas rendering (advanced interop).
@@ -2641,10 +3006,12 @@ float Font::getWidth(const std::string & text) const  // Get text width
 WritingMode Font::getWritingMode() const  // Current writing mode
 bool Font::gridFitLands() const  // Report whether grid fit actually lands on the pixel grid, i.e. whether it is enabled and the current transform maps one model unit to one device pixel.
 bool Font::isLoaded() const  // Check if loaded
+bool Font::isLoading() const  // Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation.
 bool Font::isWrapEnabled() const  // Check if line wrapping is enabled
 bool Font::kinsokuLineEnd(uint32_t cp) const  // Return whether a codepoint is forbidden at the end of a line (kinsoku rule).
 bool Font::kinsokuLineStart(uint32_t cp) const  // Return whether a codepoint is forbidden at the start of a line (kinsoku rule).
-LoadResult Font::load(const fs::path & nameOrPath, int size)  // Load font file
+LoadResult Font::load(const fs::path & nameOrPath, int size, int faceIndex = 0)  // Load a font file or a system font name; faceIndex picks the face in a .ttc. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins. On Web, URL loading waits until the font is usable or fetching/decoding fails.
+void Font::loadAsync(const fs::path & nameOrPath, int size, int faceIndex = 0)  // loadAsync(nameOrPath, size, faceIndex = 0): prepare owned font bytes and CPU metrics on a native worker, then publish the shared atlas and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires.
 void Font::resetLineHeight()  // Reset line height to the font default
 void Font::setAlign(Direction h, Direction v) [+1]  // Set horizontal (and optional vertical) text alignment
 void Font::setDefaultOversampling(int n)  // Set the oversampling factor newly loaded fonts start with; does not affect fonts already loaded.
@@ -2707,7 +3074,7 @@ Texture & HasTexture::getTexture() [+1]  // Get internal texture
 TextureWrap HasTexture::getWrapU() const  // Return the texture wrap mode on the U axis.
 TextureWrap HasTexture::getWrapV() const  // Return the texture wrap mode on the V axis.
 bool HasTexture::hasTexture() const  // Return true if the underlying texture is allocated.
-bool HasTexture::save(const fs::path & path) const  // Save the texture contents to a file; return true on success.
+SaveResult HasTexture::save(const fs::path & path) const  // Save texture contents (subclasses implement saving). Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
 void HasTexture::setFilter(TextureFilter filter)  // Set both the minification and magnification filters.
 void HasTexture::setMagFilter(TextureFilter filter)  // Set the texture magnification filter.
 void HasTexture::setMinFilter(TextureFilter filter)  // Set the texture minification filter.
@@ -2763,24 +3130,28 @@ bool IesProfile::loadFromString(const std::string & data)  // Load IES profile f
 ```cpp
 void Image::allocate(int width, int height, int channels = 4, bool mipmaps = false)  // Allocate empty image for dynamic updates. `mipmaps=true` builds a chain refreshed on every update().
 void Image::clear()  // Release image resources
-void Image::crop(int x, int y, int w, int h)  // Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge.
+void Image::crop(int x, int y, int w, int h)  // Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge. Cancels any pending loadAsync before editing, including invalid or no-op requests.
 int Image::getChannels() const  // Get number of channels
 Color Image::getColor(int x, int y) const  // Get pixel color at position
+const std::string & Image::getDebugName() const  // Return the MCP inspection name (empty for unnamed or moved-from objects).
 int Image::getHeight() const  // Get height
 Pixels & Image::getPixels() [+1]  // Get pixels reference for direct manipulation
 unsigned char * Image::getPixelsData() [+1]  // Get raw pixel data pointer
 Texture & Image::getTexture() [+1]  // Get internal texture
 int Image::getWidth() const  // Get width
-void Image::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
+void Image::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8. Cancels any pending loadAsync before editing, including invalid or no-op requests.
 bool Image::isAllocated() const  // Check if allocated
-LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
-LoadResult Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain.
-void Image::mirror(bool horizontal, bool vertical)  // Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°.
-void Image::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
-void Image::mirrorV()  // Mirror vertically (alias for mirror(false, true))
-void Image::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8. Use FBO sampling for fast paths.
-bool Image::save(const fs::path & path) const  // Save image to file
-void Image::setColor(int x, int y, const Color & c)  // Set pixel color at position (marks image as dirty)
+bool Image::isLoading() const  // Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation.
+LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. Use `loadAsync` for background loading with deferred main-thread application. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels.
+void Image::loadAsync(const fs::path & path, bool mipmaps = false)  // loadAsync(path, mipmaps = false): decode pixels on a native worker, then apply pixels, upload the texture and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires.
+LoadResult Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain. Main thread only; decode in the background with `Pixels::loadFromMemory`. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels.
+void Image::mirror(bool horizontal, bool vertical)  // Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°. Cancels any pending loadAsync before editing, including invalid or no-op requests.
+void Image::mirrorH()  // Mirror horizontally (alias for mirror(true, false)) Cancels any pending loadAsync before editing, including invalid or no-op requests.
+void Image::mirrorV()  // Mirror vertically (alias for mirror(false, true)) Cancels any pending loadAsync before editing, including invalid or no-op requests.
+void Image::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8. Use FBO sampling for fast paths. Cancels any pending loadAsync before editing, including invalid or no-op requests.
+SaveResult Image::save(const fs::path & path) const  // Save image pixels. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
+void Image::setColor(int x, int y, const Color & c)  // Set pixel color at position (marks image as dirty) Cancels any pending loadAsync before editing, including invalid or no-op requests.
+void Image::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_images lists live Images with index, name, width, height and format; moves transfer name/index and remove moved-from entries, destruction removes entries, unnamed Images remain available by index. tc_analyze_image reads CPU pixels with source={image:name or index}; other sources are window:index, fbo:name or index, path:file. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), and results in ops order; byte colors are normalized RGBA, float values above 1 pass through. Ops: pixel(x,y):color; histogram(bins):histogram[channel][bin] over 0-1 (outliers in end bins); count(color,tolerance or min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):mean colors[row][col]; diff(path,threshold,optional save):count,bbox,maxDifference; line(x0,y0,x1,y1):colors along inclusive Bresenham samples. Every op accepts optional rect=[x,y,w,h], default whole image. Coordinates are top-left, bbox=[x,y,w,h], centroid=[x,y]; empty matches yield null bbox/centroid. Rects and grid cells must be nonempty; line endpoints are in the image and samples clip to rect. Count accepts RGB/RGBA bounds or color plus a nonnegative scalar tolerance. Diff compares raw RGBA values with equal image dimensions and counts maximum absolute channel differences strictly above threshold. Optional top-level save (omitted/null writes nothing) and diff.save use tc_save_screenshot paths: UTF-8, data-directory-relative, create parents, unsupported extensions append .png. Float file output is clamped to 0-1; analysis preserves float values. Texture, VideoPlayer and VideoGrabber are not sources. Analysis defaults to 4096 histogram bins, 65536 grid cells and 256 operations; excess parameters return an error before scratch allocation. Replies default to 64 MiB and aggregate MCP working memory to 256 MiB. Limits are set with mcp::setAdmissionLimits(). File sources and diff references use a bounded encoded snapshot, query stb or platform metadata, and reserve decoded storage and estimated codec workspace before decoding. macOS/iOS retain ImageIO formats, including HEIC, TIFF and JPEG 2000.
 void Image::setDirty()  // Mark image as needing update
 void Image::update()  // Apply pixel changes to GPU texture
 ```
@@ -2875,11 +3246,11 @@ void Light::setAmbient(const Color & c) [+1]  // Set ambient light color
 void Light::setAttenuation(float constant, float linear, float quadratic)  // Set distance attenuation factors
 void Light::setDiffuse(const Color & c) [+1]  // Set diffuse (main) light color
 void Light::setDirectional(const Vec3 & direction) [+1]  // Set as directional light
-void Light::setIesProfile(const IesProfile * ies)  // Attach IES photometric profile for angular intensity
+void Light::setIesProfile(const IesProfile * ies)  // Attach IES photometric profile for angular intensity (currently one IES slot: only the first registered light with a profile uses it; further ones log a one-time warning)
 void Light::setIntensity(float i)  // Set light intensity multiplier
 void Light::setLensShift(float sx, float sy)  // Set projector lens shift (-1 to 1, normalized)
 void Light::setPoint(const Vec3 & position) [+1]  // Set as point light
-void Light::setProjectionTexture(const Texture * tex)  // Set texture for projector-style light (gobo)
+void Light::setProjectionTexture(const Texture * tex)  // Set texture for projector-style light (gobo) (currently one projector slot: only the first registered Spot light with a texture projects it; further ones light as plain spots and log a one-time warning)
 void Light::setProjectorAspect(float a)  // Set projector aspect ratio
 Light & Light::setShadowArea(const Vec3 & center, float radius)  // Set the orthographic shadow volume (center + radius) for a directional light (default radius 500)
 void Light::setShadowBias(float bias)  // Set shadow depth bias in world units
@@ -2912,18 +3283,21 @@ LoadResult LoadResult::success()  // Make a success result (static)
 ```cpp
 ```
 
-### Logger — Logging core with console and file output and an onLog event; access the global instance via getLogger()
+### Logger — Logging core with console, file and system (OS log) output, each with its own level, and an onLog event; access the global instance via getLogger()
 
 ```cpp
 void Logger::closeFile()  // Close the current log file
 LogLevel Logger::getConsoleLogLevel() const  // Get the current console log level
 LogLevel Logger::getFileLogLevel() const  // Get the current file log level
-const std::string & Logger::getLogFilePath() const  // Get the path of the current log file
+std::string Logger::getLogFilePath() const  // Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open). On Windows, unpaired UTF-16 surrogates are replaced with U+FFFD for display
+LogLevel Logger::getSystemLogLevel() const  // Get the current system (OS log) level
 bool Logger::isFileOpen() const  // Check whether a log file is currently open
 void Logger::log(LogLevel level, const std::string & message)  // Emit a log message at the given level
 void Logger::setConsoleLogLevel(LogLevel level)  // Set the minimum console log level
 void Logger::setFileLogLevel(LogLevel level)  // Set the minimum file log level
-bool Logger::setLogFile(const fs::path & path)  // Open a file to receive log output
+SaveResult Logger::setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns a failed SaveResult, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path
+void Logger::setLogLevel(LogLevel level)  // Set the console, file and system log levels at once (a later per-output call wins)
+void Logger::setSystemLogLevel(LogLevel level)  // Set the minimum system (OS log) level: os_log on macOS, OutputDebugStringW on Windows
 ```
 
 ### Mat3 — 3x3 matrix for 2D affine / homography transforms (row-major). Includes static factories and a homography solver
@@ -2947,7 +3321,7 @@ float & Mat4::at(int row, int col) [+1]  // Access the element at (row, col)
 Mat4 Mat4::fromHomography(const Mat3 & h)  // Build a Mat4 from a 3x3 homography (for 2D projection)
 Mat4 Mat4::frustum(float left, float right, float bottom, float top, float nearPlane, float farPlane)  // Create an asymmetric perspective (frustum) projection matrix
 Mat4 Mat4::identity()  // Create an identity matrix
-Mat4 Mat4::inverted() const  // Get inverse matrix
+Mat4 Mat4::inverted() const  // Get inverse matrix (identity when |det| < 1e-10, including valid tiny scales; use tryInvert for a relative check)
 Mat4 Mat4::lookAt(const Vec3 & eye, const Vec3 & target, const Vec3 & up)  // Create a view matrix
 Mat4 Mat4::ortho(float left, float right, float bottom, float top, float nearPlane, float farPlane)  // Create an orthographic projection matrix
 Mat4 Mat4::perspective(float fovY, float aspect, float nearPlane, float farPlane)  // Create a perspective projection matrix
@@ -2958,9 +3332,10 @@ Mat4 Mat4::rotateZ(float radians)  // Create Z-axis rotation matrix
 Mat4 Mat4::scale(float sx, float sy, float sz) [+2]  // Create a scaling matrix
 Mat4 Mat4::translate(float tx, float ty, float tz) [+1]  // Create a translation matrix
 Mat4 Mat4::transposed() const  // Get transposed matrix
+bool Mat4::tryInvert(Mat4 & out) const  // Checked inverse: writes the inverse to out and returns true, or returns false (out unchanged) when the matrix is degenerate, e.g. an axis scaled to 0. The test is relative to the matrix scale, so small but valid scales still invert
 ```
 
-### Material — PBR material (metallic-roughness workflow, glTF 2.0 compatible)
+### Material — PBR material (metallic-roughness workflow, glTF 2.0 compatible). Destruction touches window context state and must run on the main thread, like Light destruction.
 
 ```cpp
 Material Material::bronze()  // Bronze material preset
@@ -3032,8 +3407,9 @@ void Mesh::drawNoLightingWithTexture(const Texture & texture) const  // Draw the
 void Mesh::drawWireframe() const  // Draw mesh as wireframe
 void Mesh::drawWithLighting() const  // Draw the mesh with lighting
 std::vector<Color> & Mesh::getColors() [+1]  // Get all vertex colors
-sg_buffer Mesh::getGpuIndexBuffer() const  // The sokol-gfx index buffer handle backing the mesh, or an empty handle if non-indexed (advanced interop).
-int Mesh::getGpuIndexCount() const  // Number of indices currently uploaded to the GPU index buffer (0 if the mesh is non-indexed). Pairs with getGpuIndexBuffer for custom rendering.
+uint64_t Mesh::getDataRevision() const  // Current data revision: changes whenever the mesh data changes (mutators, non-const getters, markGpuDirty). GPU buffers are re-uploaded when it differs from the revision they were uploaded from. Compare with != only.
+sg_buffer Mesh::getGpuIndexBuffer() const  // The sokol-gfx buffer handle holding the uploaded list indices (advanced interop). TriangleStrip and TriangleFan expand to triangle lists; LineStrip and LineLoop expand to line lists. If the mesh has no indices, 0..N-1 (N = vertex count) supplies the source sequence, including for Points. Use getGpuIndexCount for the uploaded count. Custom pipelines must draw triangle modes as triangle lists and line modes as line lists.
+int Mesh::getGpuIndexCount() const  // Number of indices in the uploaded GPU list; pairs with getGpuIndexBuffer for custom rendering. TriangleStrip and TriangleFan expand to triangle lists; LineStrip and LineLoop expand to line lists. If the mesh has no indices, 0..N-1 (N = vertex count) supplies the source sequence, including for Points. Custom pipelines must draw triangle modes as triangle lists and line modes as line lists.
 sg_buffer Mesh::getGpuPointBuffer() const  // The sokol-gfx buffer handle holding the uploaded point data, position + color per point (advanced interop).
 int Mesh::getGpuPointCount() const  // Number of points currently uploaded to the GPU point buffer (PrimitiveMode::Points). Pairs with getGpuPointBuffer for custom rendering.
 sg_buffer Mesh::getGpuVertexBuffer() const  // The sokol-gfx vertex buffer handle backing the mesh (advanced interop).
@@ -3057,7 +3433,7 @@ bool Mesh::hasNormals() const  // Check if mesh has normals
 bool Mesh::hasTangents() const  // Whether the mesh has tangents
 bool Mesh::hasTexCoords() const  // Check if mesh has texture coordinates
 bool Mesh::hasValidTexCoords() const  // Check if texture coordinates match vertex count
-void Mesh::markGpuDirty() const  // Mark GPU buffers stale after editing data in place
+void Mesh::markGpuDirty() const  // Force a GPU re-upload on the next draw (bumps the data revision). Not needed after normal edits: every mutator and non-const getter already does this.
 Mesh & Mesh::rotateX(float radians)  // Rotate mesh around X axis
 Mesh & Mesh::rotateY(float radians)  // Rotate mesh around Y axis
 Mesh & Mesh::rotateZ(float radians)  // Rotate mesh around Z axis
@@ -3074,11 +3450,19 @@ void Mesh::uploadToGpu() const  // Upload the mesh's vertex/index data to its GP
 
 ```cpp
 size_t MicInput::getBuffer(float * outBuffer, size_t numSamples)  // Copy the latest captured samples into outBuffer. numSamples is capped at the ring buffer size (4096). Returns the number of samples written.
+std::string MicInput::getDeviceName() const  // Name of the capture device start() opened; empty while stopped, and on Web (the browser does not expose it).
 int MicInput::getSampleRate() const  // Sample rate the microphone was opened at.
 bool MicInput::isRunning() const  // True while the microphone device is open and capturing.
+bool MicInput::isStarting() const  // True from submission through queued readiness/failure, cleared immediately before onStart. False after cancellation and while merely running. On Web this also tracks legacy start() permission/setup.
 void MicInput::onAudioData(const float * input, size_t frameCount)  // Mic input callback: receive captured input samples (internal, called from the audio thread).
-bool MicInput::start(int sampleRate = DEFAULT_SAMPLE_RATE)  // Open the microphone device at the given sample rate and begin capturing. Returns false on failure.
-void MicInput::stop()  // Stop capture and close the microphone device.
+bool MicInput::start(int sampleRate = DEFAULT_SAMPLE_RATE)  // Open the microphone device at the given sample rate and begin capturing. Native start waits for its lifecycle thread startup result, returns false on failure, and emits no onStart. Web start returns true when the request is submitted; use isStarting/isRunning for actual readiness and startAsync/onStart for failure details. Web requires a secure context and a user gesture. On macOS/iOS, undecided microphone consent requests access and returns false immediately with retry guidance; call start() again after granting. Denied/restricted access fails before capture initialization.
+void MicInput::startAsync(int sampleRate = DEFAULT_SAMPLE_RATE)  // Begin a fresh microphone startup attempt without waiting. onStart reports readiness or failure on main in a later frame. A new start, stop or destruction cancels the pending attempt without waiting and suppresses its event. Each native run owns initialization through teardown on one lifecycle thread; a replacement opens after predecessor cleanup. All handle operations are on main. Web requires a secure context and user gesture: getUserMedia and AudioContext resume begin directly in this call. A suspended context is a failure with retry guidance; an unanswered permission prompt remains pending until stop. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires. On macOS/iOS, microphone consent is checked before capture initialization. An unanswered request keeps isStarting true without a lifecycle worker; stop, destruction and exit return without waiting for consent, and late responses after cancellation are discarded.
+void MicInput::stop()  // Cancel capture/startup immediately and post device teardown without waiting. No cancellation event is emitted. Native teardown runs on the thread that opened the device; application exit waits for retirement.
+```
+
+### MicStartResult — Microphone startup outcome. Success requires usable capture; permission denial or a missing device is a failure. Converts explicitly to bool.
+
+```cpp
 ```
 
 ### Mod — Attachable behavior base class for Node. Subclass it, override the lifecycle and input hooks, and attach with node->addMod<T>(). Lifecycle: setup() on attach, then each frame earlyUpdate() -> Node::update() -> update() -> draw(), and onDestroy() on removal. Override isExclusive() to allow only one instance per Node, and canAttachTo() to restrict attachment.
@@ -3141,10 +3525,11 @@ const std::string & NetworkInterface::getNetmask() const  // Subnet mask
 void Node::addChild(Ptr child, bool keepGlobalPosition = false)  // Add a child node (C++ only)
 T * Node::addMod(Args &&... args)  // Attach a mod of type T to this node, forwarding any arguments to its constructor; returns the mod for chaining (C++ only)
 void Node::beginDraw()  // Hook called before draw() and drawChildren(); override for clipping etc.
-uint64_t Node::callAfter(double delay, std::function<void ()> callback)  // Run callback once after delay seconds. Fired from the update loop (frame-quantized). Returns a timer id.
+uint64_t Node::callAfter(double delay, std::function<void ()> callback)  // Run callback once after delay seconds. A frame timer fired from the update loop: the delay counts down by getDeltaTime() on each update of this node, so it pauses while the node is inactive and resetElapsedTimeCounter() doesn't affect it. Only time after the call counts: it starts with the next update, and in the main window nothing before the call is charged (the earlier part of a long update or setup(), an idle gap or a stall before an event handler or draw() made it). In VSYNC / setFps modes it fires on the first update that starts at least delay after the call. In fixed-Hz update mode it counts step time (1 / updateFps per step): when a frame runs several steps (after a stall, or when updateFps is above the display rate: callAfter(1.0 / 120) made in the first step of a frame at a fixed 120 Hz on a 60 Hz display fires on the next step of that frame) it can fire within that frame, before delay has passed in wall time, and time the loop drops (beyond setMaxUpdateSteps() steps per frame) is not counted, so it fires that much later in wall time. A runtime setFps() / setIndependentFps() that switches the update into a measured mode (VSYNC / setFps) between updates (a key handler, draw()) drops the time since the last update, so the timer fires that much later: under a frame in the usual modes, long only after an idle like EVENT_DRIVEN. Called inside an update, the time counts from that update's start. Changing only the draw rate drops nothing, but switching between synced (setFps) and independent (setIndependentFps) update counts as an update-mode change even at the same rate (setFps(VSYNC) to setIndependentFps(VSYNC, 30) drops up to a frame). Entering a fixed update rate restarts with one step, which can count more or less than the time since the last update (144 Hz display to a fixed 60: the step is ~9.7 ms longer than the 1/144 s since the last update). A node moved during an update, before that update reached it, under a parent the update has already traversed misses that update's countdown (one delta late); a node that moves itself from its own update() is not delayed. In a secondary window, until #307, a timer created in or between its ticks counts the window's whole next delta, time before the call included (after a 3 s setup(), callAfter(2.0) fires about one frame later). Returns a timer id.
 uint64_t Node::callAfterAsync(double delay, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Like callAfter, but fired by a precise background scheduler thread (no frame jitter). The callback runs OFF the main thread: guard shared state with a mutex, never draw from it, and don't cancel while holding that mutex. Native only (uses a real thread). Returns a timer id.
-uint64_t Node::callEvery(double interval, std::function<void ()> callback)  // Run callback repeatedly every interval seconds. Fired from the update loop (frame-quantized). Returns a timer id.
+uint64_t Node::callEvery(double interval, std::function<void ()> callback)  // Run callback repeatedly every interval seconds. A frame timer counted down by getDeltaTime() like callAfter. Keeps its phase (next due = previous due + interval); when an update comes more than a whole interval late it fires once, not once per missed interval (callEveryCatchUp does that). Like callAfter, a runtime setFps() / setIndependentFps() that switches the update into a measured mode between updates drops the time since the last update (under a frame in the usual modes; see callAfter). Returns a timer id.
 uint64_t Node::callEveryAsync(double interval, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Like callEvery, but fired by a precise background scheduler thread with no drift (reschedules at absolute times). Ideal for sequencer clocks and LED/MIDI output timing. Same threading rules as callAfterAsync. Native only. Returns a timer id.
+uint64_t Node::callEveryCatchUp(double interval, std::function<void ()> callback, int maxCatchUp)  // Like callEvery, but calls back once for every interval that came due, at most maxCatchUp times per update (maxCatchUp has no default; 0 or -1, any value <= 0, means no limit), e.g. to keep a counter or a simulation in step after a late update. Past the limit the remaining due intervals are dropped and the phase is kept. Cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or setFps() loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once. In fixed-Hz update mode it counts step time, so time the loop drops beyond its step cap (setMaxUpdateSteps) is not counted. Returns a timer id.
 void Node::cancelAllAsyncTimers() [macos,windows,linux,android,ios]  // Cancel all async timers on this node (e.g. on mode change). Waits out any in-flight callback. Call it WITHOUT holding the callback's mutex to avoid a deadlock.
 void Node::cancelAllTimers()  // Cancel all frame timers on this node.
 void Node::cancelAsyncTimer(uint64_t id) [macos,windows,linux,android,ios]  // Cancel an async timer by id. Blocks until its callback finishes if it is running now (unless called from inside the callback). Do not call while holding the mutex the callback uses.
@@ -3167,7 +3552,7 @@ int Node::getChildIndex() const  // This node's index among its parent's childre
 std::vector<Ptr> Node::getChildren() const  // Get a copy of the child node list (safe to iterate while modifying) (C++ only)
 std::string Node::getDisplayName() const  // Short type-anchored label for trees / inspectors, e.g. "RectNode" or "RectNode (play)" (C++ only) 
 Vec3 Node::getEuler() const  // Get rotation as Euler angles in radians (pitch=X, yaw=Y, roll=Z) (C++ only)
-Vec3 Node::getEulerDeg() const  // Get rotation as Euler angles in degrees (C++ only)
+Vec3 Node::getEulerDeg() const  // Get rotation as Euler angles in degrees
 const Mat4 & Node::getGlobalMatrix() const  // Get this node's global transform matrix, including parent transforms (cached) (C++ only)
 Mat4 Node::getGlobalMatrixInverse() const  // Get the inverse of the global transform matrix (C++ only)
 Vec3 Node::getGlobalPos() const  // Get the node's origin in global (world) space (C++ only)
@@ -3186,7 +3571,7 @@ float Node::getPMouseY() const  // Get previous-frame mouse Y in this node's loc
 const Vec3 & Node::getPos() const  // Get local position (C++ only)
 const Quaternion & Node::getQuaternion() const  // Get rotation as a quaternion (C++ only)
 float Node::getRot() const  // Get 2D Z-axis rotation in radians (C++ only)
-float Node::getRotDeg() const  // Get 2D Z-axis rotation in degrees (C++ only)
+float Node::getRotDeg() const  // Get 2D Z-axis rotation in degrees
 const Vec3 & Node::getScale() const  // Get local scale (C++ only)
 float Node::getScaleX() const  // Get local X scale (C++ only)
 float Node::getScaleY() const  // Get local Y scale (C++ only)
@@ -3206,7 +3591,7 @@ bool Node::isActive() const  // Whether the node is active (inactive: update and
 bool Node::isDead() const  // Check if node is marked for destruction (C++ only)
 bool Node::isEventsEnabled() const  // Whether events are enabled (only such nodes are hit-test targets) (C++ only)
 bool Node::isMouseOver() const  // Whether the mouse is over this node (auto-updated each frame, O(1)) (C++ only)
-bool Node::isVisible() const  // Whether the node is visible (invisible: only draw is skipped) (C++ only)
+bool Node::isVisible() const  // Whether the node is visible (invisible: the node and its descendants are not drawn and not hit by the mouse; update() keeps running) (C++ only)
 Vec3 Node::localToGlobal(const Vec3 & local) const [+1]  // Convert a local coordinate to global space (C++ only)
 void Node::moveToBack()  // Move this node to the beginning of its parent's child list — drawn first, beneath siblings. No-op if no parent or already first (C++ only)
 void Node::moveToFront()  // Move this node to the end of its parent's child list — drawn last, on top of siblings. No-op if no parent or already last (C++ only)
@@ -3224,7 +3609,7 @@ bool Node::onMousePress(const MouseEventArgs & e) [+1]  // Handle a mouse press 
 bool Node::onMouseRelease(const MouseEventArgs & e) [+1]  // Handle a mouse release (event localized to this node); return true to consume.
 bool Node::onMouseScroll(const ScrollEventArgs & e) [+1]  // Handle a scroll event (event localized to this node); return true to consume.
 void Node::onVisibleChanged(bool visible)  // Callback invoked when the node's visible state changes.
-void Node::processTimers()  // Process due timers (callAfter / callEvery), invoked within the update pass.
+void Node::processTimers()  // Count this node's timers (callAfter / callEvery) down by getDeltaTime() and fire the due ones, invoked within the update pass.
 void Node::removeAllChildren()  // Remove all child nodes (C++ only)
 void Node::removeChild(Ptr child)  // Remove a child node (C++ only)
 void Node::removeMod()  // Remove the attached mod of type T, calling its onDestroy() before it is freed (C++ only)
@@ -3232,7 +3617,7 @@ std::pair<const CameraContext *, Ray> Node::resolvePickRay(internal::PickRaySour
 void Node::setActive(bool active)  // Set the active state (inactive: update and draw are skipped) (C++ only)
 void Node::setCameraContext(std::shared_ptr<const CameraContext> ctx)  // Set the camera context for a manually-managed node (normally set automatically by drawTree).
 void Node::setEuler(const Vec3 & euler) [+1]  // Set rotation from Euler angles in radians (pitch=X, yaw=Y, roll=Z) (C++ only)
-void Node::setEulerDeg(const Vec3 & deg)  // Set rotation from Euler angles in degrees (C++ only)
+void Node::setEulerDeg(const Vec3 & deg)  // Set rotation from Euler angles in degrees
 void Node::setGlobalPos(const Vec3 & global) [+1]  // Set the node's position in global (world) space (C++ only)
 void Node::setIsActive(bool active) ⚠️deprecated  // Deprecated alias for setActive()
 void Node::setIsVisible(bool visible) ⚠️deprecated  // Deprecated alias for setVisible()
@@ -3240,13 +3625,13 @@ Node & Node::setName(const std::string & name)  // Set an optional instance name
 void Node::setPos(const Vec3 & pos) [+1]  // Set local position (C++ only)
 void Node::setQuaternion(const Quaternion & q)  // Set rotation from a quaternion (C++ only)
 void Node::setRot(float radians)  // Set 2D Z-axis rotation in radians (C++ only)
-void Node::setRotDeg(float degrees)  // Set 2D Z-axis rotation in degrees (C++ only)
+void Node::setRotDeg(float degrees)  // Set 2D Z-axis rotation in degrees
 void Node::setScale(const Vec3 & s) [+2]  // Set local scale (vector, uniform, or per-axis) (C++ only)
 void Node::setScaleX(float sx)  // Set local X scale (C++ only)
 void Node::setScaleY(float sy)  // Set local Y scale (C++ only)
 void Node::setScaleZ(float sz)  // Set local Z scale (C++ only)
 void Node::setup()  // Called once at start
-void Node::setVisible(bool visible)  // Set the visible state (invisible: only draw is skipped) (C++ only)
+void Node::setVisible(bool visible)  // Set the visible state (invisible: the node and its descendants are not drawn and not hit by the mouse; update() keeps running) (C++ only)
 void Node::setX(float x)  // Set local X position (C++ only)
 void Node::setY(float y)  // Set local Y position (C++ only)
 void Node::setZ(float z)  // Set local Z position (C++ only)
@@ -3259,12 +3644,20 @@ void Node::update()  // Called every frame before draw
 bool Node::HitResult::hit() const  // Whether a node was hit (node is non-null).
 ```
 
+### OnceGate — Gate for a log line (or anything else): isFirstTime() is true the first time, and with an interval, again once that much time has passed since the last true
+
+```cpp
+bool OnceGate::isFirstTime()  // True the first time; with an interval, true again once that much time has passed since the last true. Otherwise false
+void OnceGate::reset()  // Restore the never-fired state so the next isFirstTime() returns true immediately, for both once-only and interval gates. Lock-free and safe from any thread
+```
+
 ### Path — Path/Polyline for lines and curves
 
 ```cpp
 void Path::addVertex(float x, float y) [+3]  // Add a vertex
 void Path::addVertices(const std::vector<Vec2> & verts) [+1]  // Add multiple vertices
-void Path::arc(const Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise = true, int circleResolution = 20) [+5]  // Add an arc (angles in radians)
+void Path::arc(const Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise = true, int circleResolution = 20) [+5]  // Add a circular or elliptical arc (all angles in radians)
+void Path::arcDeg(const Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise = true, int circleResolution = 20) [+2]  // Add an elliptical arc with angles in degrees (all elliptical overloads)
 void Path::bezierTo(const Vec3 & cp1, const Vec3 & cp2, const Vec3 & to, int resolution) [+2]  // Add cubic bezier curve (resolution=-1 uses current curve style)
 std::vector<std::array<float, 2>> Path::buildFillTriangles() const  // Triangulate the path interior into a flat list of 2D triangle vertices
 void Path::clear()  // Clear all vertices
@@ -3310,15 +3703,15 @@ int Pixels::getWidth() const  // Get width
 void Pixels::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
 bool Pixels::isAllocated() const  // Check if allocated
 bool Pixels::isFloat() const  // Whether the pixel data uses 32-bit floats
-LoadResult Pixels::load(const fs::path & path)  // Load image from file
-LoadResult Pixels::loadFromMemory(const unsigned char * buffer, int len)  // Load image from memory
-LoadResult Pixels::loadHDR(const fs::path & path)  // Load an HDR (.hdr) image into a float pixel buffer
+LoadResult Pixels::load(const fs::path & filePath)  // Load image from file into CPU memory. No GPU work, so it is safe on a worker thread; upload the result on the main thread (`Texture::allocate(pixels)`). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
+LoadResult Pixels::loadFromMemory(const unsigned char * buffer, int len)  // Decode an image from memory into CPU pixels. No GPU work, so it is safe on a worker thread.
+LoadResult Pixels::loadHDR(const fs::path & filePath)  // Load an HDR (.hdr) image into a float pixel buffer. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
 bool Pixels::loadPlatform(const fs::path & path)  // Load an image using the platform image decoder
 void Pixels::mirror(bool horizontal, bool vertical)  // Flip in place. Both true is 180°.
 void Pixels::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
 void Pixels::mirrorV()  // Mirror vertically (alias for mirror(false, true))
 void Pixels::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8.
-bool Pixels::save(const fs::path & path) const  // Save image to file
+SaveResult Pixels::save(const fs::path & path) const  // Save pixels (JPG/JPEG, BMP, otherwise PNG; preserve the requested filename). Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
 void Pixels::setColor(int x, int y, const Color & c)  // Set pixel color at position
 void Pixels::setFromFloats(const float * srcData, int width, int height, int channels)  // Fill the buffer from a float array (allocates as needed)
 void Pixels::setFromPixels(const unsigned char * srcData, int width, int height, int channels)  // Copy from external pixel data
@@ -3345,6 +3738,11 @@ const char * Platform::name()  // Short platform name: "web" / "macos" / "ios" /
 ```
 
 ### PlayingSound — A single live mixer voice returned by AudioEngine::play(). Its fields are the real-time playback state the audio thread reads each callback (volume / pan / speed / loop / playing / paused / mixMode / position) plus the channel routing snapshots. Most fields are atomics so the UI thread can mutate them while the audio thread plays; set them directly.
+
+```cpp
+```
+
+### PlayingSoundInfo — One playing (or paused) sound as reported by AudioEngine::getPlayingSounds(): a copy taken under the engine lock, so later changes to the playback are not reflected.
 
 ```cpp
 ```
@@ -3436,8 +3834,11 @@ bool RectNodeButton::onMouseRelease(const MouseEventArgs & e)  // Clear the pres
 ```cpp
 void Reflector::beginGroup(const char * name)  // Enter a nested composite group of reflected members (no-op for flat backends).
 void Reflector::endGroup()  // Leave the current nested group.
+bool Reflector::isDerived() const  // Return true if the current member is a derived value (TC_DERIVED): computed from another member, writable, but not saved.
 bool Reflector::isReadOnly() const  // Return true if the current reflection scope is read-only.
+void Reflector::popDerived()  // Leave the current derived-value scope.
 void Reflector::popReadOnly()  // Leave the current read-only scope.
+void Reflector::pushDerived()  // Enter a derived-value scope (TC_DERIVED visits inside it).
 void Reflector::pushReadOnly()  // Enter a read-only scope (members visited inside cannot be written).
 bool Reflector::visit(const char * name, float & v) [+7]  // Handle one reflected member by name and value; return true if it was edited.
 ```
@@ -3447,15 +3848,29 @@ bool Reflector::visit(const char * name, float & v) [+7]  // Handle one reflecte
 ```cpp
 ```
 
+### SaveResult — Result of a checked save, stream open, recorder submission or finalization. Carries SaveError and a failure message.
+
+```cpp
+SaveResult SaveResult::fail(SaveError error, std::string message = std::string())  // Make a failure result with an error kind and optional message (static)
+bool SaveResult::ok() const  // true if this operation succeeded (error == SaveError::None); recorder submission is backend acceptance, while close/stop checks finalization.
+SaveResult SaveResult::success()  // Make a success result (static)
+```
+
 ### ScreenRecorder — Captures the rendered output to a video file (start/stop recording of the on-screen frames)
 
 ```cpp
-int ScreenRecorder::getFrameCount() const  // Number of frames captured so far
-fs::path ScreenRecorder::getPath() const  // Output file path of the current recording
-bool ScreenRecorder::isRecording() const  // Check if the screen recorder is currently capturing
-bool ScreenRecorder::start(const fs::path & path, const VideoRecordSettings & settings = {}) [+3]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically. Calling start while recording finalizes the current file first. If the recorded Fbo is destroyed mid-recording, the recording stops and finalizes automatically
-void ScreenRecorder::stop()  // Stop live capture and finalize the file
-VideoWriter & ScreenRecorder::writer()  // Access the underlying VideoWriter for advanced introspection
+int ScreenRecorder::getFrameCount() const [macos,windows,linux,android,ios]  // Number of video frames accepted by the backend; failed submissions are excluded. Finalization may still fail.
+fs::path ScreenRecorder::getPath() const [macos,windows,linux,android,ios]  // Output file path of the current recording
+uint64_t ScreenRecorder::getRejectedFrameCount() const [macos,windows,linux,android,ios]  // Number of frames refused in this take because capture/readback failed or dimensions, pixel format, row layout or byte capacity did not match the take or native buffer. Refused frames are skipped whole and do not fail the take. Resets on VideoWriter::open() (also used by ScreenRecorder::start()).
+bool ScreenRecorder::isRecording() const [macos,windows,linux,android,ios]  // Check if the screen recorder is currently capturing
+SaveResult ScreenRecorder::start(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically. Calling start while recording finalizes the current file first. If the recorded Fbo is destroyed mid-recording, the recording stops and finalizes automatically. Returns SaveResult for path preparation and encoder opening. Success starts an in-place stream; check close()/stop() for finalization. If the previous take times out waiting for GPU frames, its last completion finalizes it independently of the new take.
+SaveResult ScreenRecorder::stop() [macos,windows,linux,android,ios]  // Disconnect the audio listener and wait up to one second for audio callbacks (a Warning if one is still running), then wait up to 2 seconds for GPU readbacks before finalizing. If GPU frames remain, logs one Error and returns WriteFailed with message recording still has frames in flight. The callbacks retain their State and writer; the last completion drains audio and closes the file. Returns SaveResult for finalization or the retained failure; repeated calls do not repeat the timeout Error. Caller errors and transient readback failures do not fail the take. No temporary/rename is used.
+VideoWriter & ScreenRecorder::writer() [macos,windows,linux,android,ios]  // Access the underlying VideoWriter for advanced introspection
+```
+
+### ScreenshotSaveEventArgs — Completion of an asynchronous screenshot: the actual destination and save result. Delivered on main in a later frame, including rejected requests.
+
+```cpp
 ```
 
 ### ScrollBar — Visual scroll indicator RectNode that syncs with a ScrollContainer and supports drag scrolling
@@ -3520,22 +3935,24 @@ bool SendResult::ok() const  // true if the payload was queued (error == SendErr
 ### Serial — Cross-platform serial port (USB/COM): connect, read/write bytes
 
 ```cpp
-int Serial::available() const  // Number of bytes available to read
-void Serial::close()  // Disconnect and release resources
-void Serial::drain()  // Wait until output transmission completes
-void Serial::flush()  // Clear both input and output buffers
-void Serial::flushInput()  // Clear the input buffer
-void Serial::flushOutput()  // Clear the output buffer
-std::vector<SerialDeviceInfo> Serial::getDeviceList() ⚠️deprecated  // Deprecated alias for listDevices()
-const std::string & Serial::getDevicePath() const  // Current device path
-bool Serial::isInitialized() const  // Whether currently connected
-std::vector<SerialDeviceInfo> Serial::listDevices()  // List available serial devices
-void Serial::printDevices()  // Log all available serial devices
-int Serial::readByte()  // Read a single byte; 0-255 on success, -1 no data, -2 error
-int Serial::readBytes(void * buffer, int length) [+1]  // Read bytes; returns actual count (>=0) or -1 on error
-bool Serial::setup(const std::string & portName, int baudRate) [+1]  // Connect to a port by path or by index from listDevices()
-bool Serial::writeByte(unsigned char byte)  // Write a single byte; true on success
-int Serial::writeBytes(const void * buffer, int length) [+1]  // Write bytes; returns actual count or -1 on error
+int Serial::available() const [macos,windows,linux,android]  // Number of bytes buffered by TrussC to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)
+void Serial::close() [macos,windows,linux,android]  // Disconnect and release resources; fires onDisconnect (wasClean = true) when the port was open
+void Serial::drain() [macos,windows,linux,android]  // Wait until output transmission completes
+void Serial::flush() [macos,windows,linux,android]  // Clear both input and output buffers
+void Serial::flushInput() [macos,windows,linux,android]  // Clear the input buffer
+void Serial::flushOutput() [macos,windows,linux,android]  // Clear the output buffer
+std::vector<SerialDeviceInfo> Serial::getDeviceList() ⚠️deprecated [macos,windows,linux,android]  // Deprecated alias for listDevices()
+std::string Serial::getDevicePath() const [macos,windows,linux,android]  // Current device path; a copy, since another thread's setup() may change it. Never waits for setup(), close() or an I/O call
+size_t Serial::getDroppedByteCount() const [macos,windows,linux,android]  // Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count. Device input or a stalled reader can fill the deque; a fixed cap keeps memory finite. Overflow drops the oldest bytes and increments the discard count.
+bool Serial::isConnected() const [macos,windows,linux,android]  // Whether the port is open and working; turns false after close() or when a read/write call finds the device gone
+bool Serial::isInitialized() const [macos,windows,linux,android]  // Whether currently connected; same as isConnected()
+std::vector<SerialDeviceInfo> Serial::listDevices() [macos,windows,linux,android]  // List available serial devices
+void Serial::printDevices() [macos,windows,linux,android]  // Log all available serial devices
+int Serial::readByte() [macos,windows,linux,android]  // Read a single byte; 0-255 on success, -1 no data, -2 error (a lost device also closes the port and fires onDisconnect)
+int Serial::readBytes(void * buffer, int length) [+1] [macos,windows,linux,android]  // Read bytes; returns actual count (>=0) or -1 on error (a lost device also closes the port and fires onDisconnect)
+bool Serial::setup(const std::string & portName, int baudRate) [+1] [macos,windows,linux,android]  // Connect to a port by path or by index from listDevices()
+bool Serial::writeByte(unsigned char byte) [macos,windows,linux,android]  // Write a single byte; true on success
+int Serial::writeBytes(const void * buffer, int length) [+1] [macos,windows,linux,android]  // Write bytes; returns actual count or -1 on error (a lost device also closes the port and fires onDisconnect)
 ```
 
 ### SerialDeviceInfo — Info for one serial device (from Serial::listDevices)
@@ -3544,6 +3961,11 @@ int Serial::writeBytes(const void * buffer, int length) [+1]  // Write bytes; re
 int SerialDeviceInfo::getDeviceID() const  // Device index
 const std::string & SerialDeviceInfo::getDeviceName() const  // Device name
 const std::string & SerialDeviceInfo::getDevicePath() const  // Device path
+```
+
+### SerialDisconnectEventArgs — Event args for Serial::onDisconnect
+
+```cpp
 ```
 
 ### Shader — GPU shader program (vertex + fragment) with a begin/end/setUniform API for custom-shaded drawing
@@ -3555,8 +3977,9 @@ void Shader::clear()  // Destroy the shader's GPU resources and reset it to the 
 sg_pipeline_desc Shader::createPipelineDesc()  // Build the pipeline descriptor (standard vertex layout); overridable by subclasses.
 void Shader::createVertexBuffer()  // Create the dynamic vertex/index buffers; overridable by subclasses.
 void Shader::end()  // End shader (pops from stack)
+void Shader::fillTextureBindings(sg_bindings & bind) const  // Copy the textures set with setTexture() into sg_bindings; a sampler is written only for slots below sokol's sampler limit (12).
 bool Shader::isLoaded() const  // Check if shader is loaded
-bool Shader::load(const sg_shader_desc *(*)(sg_backend) descFn)  // Load from sokol-shdc generated function
+bool Shader::load(const sg_shader_desc *(*)(sg_backend) descFn)  // Load a sokol-shdc program and capture the subclass pipeline recipe. Target-compatible pipelines are created lazily at drawing; target-specific pipeline failures are reported then.
 void Shader::onBegin()  // Hook called when the shader scope begins; override to set up bindings.
 void Shader::onEnd()  // Hook called when the shader scope ends.
 sg_pipeline Shader::pipelineForCurrentTarget()  // Return the pipeline matching the current render target, building and caching one per (format, sampleCount).
@@ -3572,7 +3995,7 @@ void Shader::submitVertices(const ShaderVertex * data, int count, PrimitiveType 
 ```cpp
 ```
 
-### Sound — Audio playback
+### Sound — Audio playback. A Sound plays only while it, or a copy of it, is alive: copies share the voice, and when the last handle is destroyed or overwritten the voice stops (looping or one-shot) and its slot is freed. Keep Sound objects alive (e.g. as members) to play overlapping one-shots.
 
 ```cpp
 void Sound::clearChannelGains()  // Clear per-channel gains (back to uniform 1.0).
@@ -3582,37 +4005,37 @@ std::shared_ptr<const std::vector<std::vector<int>>> Sound::getChannelMap() cons
 float Sound::getDuration() const  // Get total duration in seconds
 MixMode Sound::getMixMode() const  // Current channel mix policy (Auto / DownmixMono). Overridden when a non-empty channel map is set.
 float Sound::getPan() const  // Get current panning
-float Sound::getPosition() const  // Get playback position in seconds
+float Sound::getPosition() const  // Get playback position in seconds. On a stream, right after setPosition() and until the audio has moved there, this is the requested position. See Sound::setPosition() for measured stream seek latency.
 float Sound::getSpeed() const  // Get current playback speed
 float Sound::getVolume() const  // Get current volume
 bool Sound::isLoaded() const  // Check if loaded
 bool Sound::isLoop() const  // Check if loop mode is enabled
 bool Sound::isPaused() const  // Check if paused
-bool Sound::isPlaying() const  // Check if playing
+bool Sound::isPlaying() const  // Check if playing (false while paused). A stream halted by a decoder failure stops after its buffered audio drains, including looping streams. The error is logged once; TrussC does not retry automatically.
 bool Sound::isStreaming() const  // True if this Sound was loaded via loadStream() (vs eager load())
-LoadResult Sound::load(const fs::path & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
+LoadResult Sound::load(const fs::path & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the file name keeps its case as written). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
 void Sound::loadFromBuffer(const SoundBuffer & buf) [+1]  // Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr.
-LoadResult Sound::loadStream(const fs::path & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
+LoadResult Sound::loadStream(const fs::path & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
 void Sound::loadTestTone(float frequency = 440.0, float duration = 1.0)  // Load a generated sine test tone (no file needed). Handy for verifying audio output.
 void Sound::pause()  // Pause playback
-void Sound::play()  // Play audio
+bool Sound::play()  // Play from the beginning (this Sound's previous voice is stopped first). Returns false when nothing will play: not loaded, or the engine dropped the play (every voice busy, the stream's maxPolyphony reached by a copy of a streamed Sound, the stream file could not be reopened, or no output device running). Drops are logged as warnings and counted in AudioEngine::getStats().
 void Sound::resume()  // Resume playback
 void Sound::setChannelGains(const std::vector<float> & gains)  // Per-output-channel gain multiplier. Entries beyond .size() default to 1.0. No internal normalization (setVolume is the overall gain).
 void Sound::setChannelMap(const std::vector<int> & map) [+1]  // Per-output-channel routing. 1D: each entry is a src ch index (-1 = silent). 2D: each entry lists src ch indices that sum into that output.
 void Sound::setLoop(bool loop)  // Set loop mode
 void Sound::setMixMode(MixMode m)  // Channel routing preset. Auto (default) = mono broadcasts / multi 1:1. DownmixMono = average src to all out ch.
 void Sound::setPan(float pan)  // Set panning (-1.0=left, 0.0=center, 1.0=right)
-void Sound::setPosition(float seconds)  // Seek to a specific time in seconds. On streams, costs ~10 ms blackout while the ring refills.
+void Sound::setPosition(float seconds)  // Seek to a specific time in seconds. On streams the audio moves after the decoder seeks and the ring refills. Measured seek to first post-seek output callback on WASAPI/CoreAudio: about 1.5 audio callbacks on average, about 2 at p95 (13–16 ms mean with 10 ms callbacks). PulseAudio on main averaged 25.4 ms. These are callback-level timings, not speaker/DAC latency or silence duration; slow storage or an MP3 several hours long can take longer. See issue #550 for measurements. getPosition() reports the new position at once, the last of several calls wins, and a paused stream resumes from there. A stream whose length is unknown (getDuration() is 0) cannot seek: the call is ignored with a warning.
 void Sound::setSpeed(float speed)  // Set playback speed (1.0=normal)
 void Sound::setVolume(float vol)  // Set volume (0.0-1.0)
-void Sound::stop()  // Stop audio
+void Sound::stop()  // Stop audio and release the voice (a streamed voice also closes its decoder and file). Copies that share the voice see it stopped.
 ```
 
 ### SoundBuffer — Eager sound source: the full file decoded into interleaved float PCM held in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Also provides waveform generators, an ADSR envelope, and mixing helpers, so it doubles as a procedural-audio scratch buffer. Best for short SFX and zero-latency play / seek / multi-instance.
 
 ```cpp
-void SoundBuffer::applyADSR(float attack, float decay, float sustainLevel, float release)  // Apply an ADSR amplitude envelope to the buffer in place (attack / decay / release in seconds, sustainLevel 0-1).
-void SoundBuffer::clip()  // Hard-clip all samples into the -1.0 .. 1.0 range.
+void SoundBuffer::applyADSR(float attack, float decay, float sustainLevel, float release)  // Apply an ADSR amplitude envelope to the buffer in place (attack / decay / release in seconds, sustainLevel 0-1). Cancels any pending loadAsync before editing, including invalid or no-op requests.
+void SoundBuffer::clip()  // Hard-clip all samples into the -1.0 .. 1.0 range. Cancels any pending loadAsync before editing, including invalid or no-op requests.
 void SoundBuffer::createAdtsHeader(uint8_t * header, int frameLength, int sampleRate, int channels, int profile = 2)  // Write a 7-byte ADTS header for one raw AAC frame into header (AAC-in-MOV container helper).
 void SoundBuffer::generateNoise(float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with mono white noise.
 void SoundBuffer::generatePinkNoise(float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with mono pink noise (1/f spectrum, Paul Kellet's method).
@@ -3623,19 +4046,22 @@ void SoundBuffer::generateSquareWave(float frequency, float duration, float volu
 void SoundBuffer::generateTriangleWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with a mono triangle wave.
 int SoundBuffer::getAdtsSampleRateIndex(int sampleRate)  // ADTS sample-rate index for the given rate (AAC-in-MOV container helper).
 float SoundBuffer::getDuration() const  // Duration in seconds (numSamples / sampleRate).
-LoadResult SoundBuffer::load(const fs::path & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure.
-LoadResult SoundBuffer::loadAac(const fs::path & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms).
-LoadResult SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios,web]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
-LoadResult SoundBuffer::loadFlac(const fs::path & path)  // Decode a FLAC file into PCM.
+fs::path SoundBuffer::getPath() const  // Resolved path of the last successful file load, including direct loadAac(). Empty after a failed load, a memory/PCM load, or generation.
+bool SoundBuffer::isLoading() const  // Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation.
+LoadResult SoundBuffer::load(const fs::path & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure. Relative paths resolve via getDataPath(); absolute paths pass through.
+LoadResult SoundBuffer::loadAac(const fs::path & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms). Relative paths resolve via getDataPath(); absolute paths pass through. On Web, load waits for decoded PCM using OfflineAudioContext, including in setup().
+LoadResult SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
+void SoundBuffer::loadAsync(const fs::path & path)  // loadAsync(path): prepare PCM and metadata on a native worker, apply and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires.
+LoadResult SoundBuffer::loadFlac(const fs::path & path)  // Decode a FLAC file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through.
 LoadResult SoundBuffer::loadFlacFromMemory(const void * data, size_t dataSize)  // Decode FLAC data from a memory buffer.
-LoadResult SoundBuffer::loadMp3(const fs::path & path)  // Decode an MP3 file into PCM.
+LoadResult SoundBuffer::loadMp3(const fs::path & path)  // Decode an MP3 file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through.
 LoadResult SoundBuffer::loadMp3FromMemory(const void * data, size_t dataSize)  // Decode MP3 data from a memory buffer.
-LoadResult SoundBuffer::loadOgg(const fs::path & path)  // Decode an OGG Vorbis file into PCM (via stb_vorbis).
+LoadResult SoundBuffer::loadOgg(const fs::path & path)  // Decode an OGG Vorbis file into PCM (via stb_vorbis). Relative paths resolve via getDataPath(); absolute paths pass through.
 LoadResult SoundBuffer::loadOggFromMemory(const void * data, size_t dataSize)  // Decode OGG Vorbis data from a memory buffer.
-LoadResult SoundBuffer::loadPcmFromMemory(const void * data, size_t dataSize, int numChannels, int rate, int bitsPerSample = 16, bool bigEndian = false)  // Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths.
-LoadResult SoundBuffer::loadWav(const fs::path & path)  // Decode a WAV file into PCM.
+LoadResult SoundBuffer::loadPcmFromMemory(const void * data, size_t dataSize, int numChannels, int rate, int bitsPerSample = 16, bool bigEndian = false)  // Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths, a channel count below 1, a data size that is not a whole number of frames, or more samples than a buffer can hold.
+LoadResult SoundBuffer::loadWav(const fs::path & path)  // Decode a WAV file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through.
 LoadResult SoundBuffer::loadWavFromMemory(const void * data, size_t dataSize)  // Decode WAV data from a memory buffer.
-void SoundBuffer::mixFrom(const SoundBuffer & other, size_t offsetSamples, float volume = 1.0)  // Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed.
+void SoundBuffer::mixFrom(const SoundBuffer & other, size_t offsetSamples, float volume = 1.0)  // Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed. offsetSamples is in frames (samples per channel, like numSamples). Both buffers must have the same channel count; otherwise nothing is mixed and an error is logged. Cancels any pending loadAsync before editing, including invalid or no-op requests.
 ```
 
 ### SoundSource — Abstract base for anything Sound::play() can consume. Two concrete subclasses: SoundBuffer (eager, full PCM in RAM) and SoundStream (decoded on demand from disk). Holds the shared channels / sampleRate fields and the kind() / getDuration() interface.
@@ -3645,13 +4071,13 @@ float SoundSource::getDuration() const  // Duration in seconds. numSamples/sampl
 Kind SoundSource::kind() const  // Source kind (Eager for SoundBuffer, Stream for SoundStream). Lets the mixer dispatch without a virtual call per frame.
 ```
 
-### SoundStream — Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a ~10 ms refill, and each polyphony slot costs one open file handle + decoder + ring buffer.
+### SoundStream — Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a ring-buffer refill (see Sound::setPosition() for measured latency; a file whose length is unknown cannot seek), and each polyphony slot costs one open file handle + decoder + ring buffer.
 
 ```cpp
-float SoundStream::getDuration() const  // Decoded file duration in seconds.
+float SoundStream::getDuration() const  // Decoded file duration in seconds. 0 when the file does not record its length (e.g. a FLAC encoded to a pipe); such a stream plays to its end but cannot seek, and an engine re-init at another sample rate restarts it from the beginning.
 int SoundStream::getMaxPolyphony() const  // Number of concurrent decoder slots reserved at loadStream().
-fs::path SoundStream::getPath() const  // Path the stream was opened from.
-LoadResult SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened or the format is unsupported.
+fs::path SoundStream::getPath() const  // Path the stream was opened from. Relative names are resolved via getDataPath(); empty after a failed load.
+LoadResult SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened, the format is unsupported, or the file has no audio frames (DecodeFailed). Relative paths resolve via getDataPath(); absolute paths pass through.
 ```
 
 ### StrokeMesh — Variable-width polyline stroke geometry with caps, joins and miter limit; build it from points or a Path, then update() and draw()
@@ -3677,19 +4103,29 @@ void StrokeMesh::update()  // Rebuild the internal triangle mesh (call before dr
 ### TcpClient — TCP client connection (connect, send/receive a stream)
 
 ```cpp
-bool TcpClient::connect(const std::string & host, int port)  // Connect to a server (blocking)
-void TcpClient::connectAsync(const std::string & host, int port)  // Connect asynchronously (notifies via onConnect)
-void TcpClient::disconnect()  // Disconnect
-std::string TcpClient::getRemoteHost() const  // Remote host name
-int TcpClient::getRemotePort() const  // Remote port
-bool TcpClient::isConnected() const  // Whether currently connected
-bool TcpClient::isUsingThread() const  // Whether threading is in use
-void TcpClient::notifyError(const std::string & msg, int code = 0)  // Report an error (message + code) from a derived class.
-void TcpClient::processNetwork()  // Pump pending TCP I/O; normally auto-driven by the update event, but can be called manually for synchronous polling.
-bool TcpClient::send(const void * data, size_t size) [+2]  // Send data to the server
-void TcpClient::setBlocking(bool blocking)  // Set blocking mode
-void TcpClient::setReceiveBufferSize(size_t size)  // Set the receive buffer size
-void TcpClient::setUseThread(bool useThread)  // Whether to use threads (must be false on Wasm)
+bool TcpClient::connect(const std::string & host, int port) [macos,windows,linux,android,ios]  // Connect to a server (blocking)
+void TcpClient::connectAsync(const std::string & host, int port) [macos,windows,linux,android,ios]  // Start a cancellable connection attempt; the same pending target is a silent no-op, a different target replaces it
+void TcpClient::disconnect() [macos,windows,linux,android,ios]  // Disconnect
+std::string TcpClient::getRemoteHost() const [macos,windows,linux,android,ios]  // Remote host name
+int TcpClient::getRemotePort() const [macos,windows,linux,android,ios]  // Remote port
+size_t TcpClient::getSendAsyncBufferSize() const [macos,windows,linux,android,ios]  // Get the send queue high-water mark in bytes. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
+size_t TcpClient::getSendAsyncPendingBytes() const [macos,windows,linux,android,ios]  // Bytes queued but not yet completed
+bool TcpClient::isConnected() const [macos,windows,linux,android,ios]  // Whether currently connected
+bool TcpClient::isConnecting() const [macos,windows,linux,android,ios]  // Whether a TCP connection attempt or TLS handshake is in progress
+bool TcpClient::isUsingThread() const [macos,windows,linux,android,ios]  // Whether threading is in use
+void TcpClient::notifyError(const std::string & msg, int code = 0) [macos,windows,linux,android,ios]  // Report an error (message + code) from a derived class.
+void TcpClient::processNetwork() [macos,windows,linux,android,ios]  // Pump pending TCP I/O; normally auto-driven by the update event, but can be called manually for synchronous polling.
+bool TcpClient::processNetworkStep(const AliveToken & alive) [macos,windows,linux,android,ios]  // processNetwork()'s work for derived classes and the receive thread. Returns false when the calling thread must stop without reading the client again: it reported the end of the connection, or a listener destroyed the client.
+bool TcpClient::send(const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Send data to the server
+SendResult TcpClient::sendAsync(const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Queue owned bytes without waiting; returns SendResult and reports once through onSendComplete
+void TcpClient::setBlocking(bool blocking) [macos,windows,linux,android,ios]  // Set blocking mode
+void TcpClient::setConnectTimeout(float seconds) [macos,windows,linux,android,ios]  // Set the TCP connect deadline in seconds; default 0 uses the OS deadline
+void TcpClient::setReceiveBufferSize(size_t size) [macos,windows,linux,android,ios]  // Set the receive buffer size. Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads.
+void TcpClient::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android,ios]  // Set the send queue high-water mark; default 16 MB, 0 unlimited. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
+void TcpClient::setSendTimeout(float seconds) [macos,windows,linux,android,ios]  // Set the idle send timeout in seconds; default 60, 0 waits forever
+void TcpClient::setTransport(std::shared_ptr<Transport> transport) [macos,windows,linux,android,ios]  // Subclass hook: set the transport this client's connections use (TlsClient installs its TLS transport here). Call it before connecting; later connections keep it.
+void TcpClient::setUseThread(bool useThread) [macos,windows,linux,android,ios]  // Whether to use threads (must be false on Wasm)
+std::shared_ptr<State> TcpClient::state() const [macos,windows,linux,android,ios]  // Subclass hook: retain the current run's State. Load once at function entry and use that shared pointer throughout the function.
 ```
 
 ### TcpClientConnectEventArgs — Event args for TcpServer::onClientConnect
@@ -3730,24 +4166,24 @@ void TcpClient::setUseThread(bool useThread)  // Whether to use threads (must be
 ### TcpServer — TCP server (accept clients, send/broadcast)
 
 ```cpp
-void TcpServer::broadcast(const void * data, size_t size) [+2]  // Broadcast data to all clients and wait for every one of them (blocking)
-int TcpServer::broadcastAsync(const void * data, size_t size) [+2]  // Queue data for every client and return at once; returns how many accepted it
-void TcpServer::disconnectAllClients()  // Disconnect all clients
-void TcpServer::disconnectClient(int clientId)  // Disconnect a specific client
-const TcpServerClient * TcpServer::getClient(int clientId) const  // Client info (nullptr if not found)
-int TcpServer::getClientCount() const  // Number of connected clients
-std::vector<int> TcpServer::getClientIds() const  // IDs of all connected clients
-int TcpServer::getPort() const  // The listening port
-size_t TcpServer::getSendAsyncBufferSize() const  // The current high-water mark for one client's send queue, in bytes
-size_t TcpServer::getSendAsyncPendingBytes(int clientId) const  // How much a client has queued and not yet completed, in bytes (0 for an unknown client)
-bool TcpServer::isRunning() const  // Whether the server is running
-bool TcpServer::send(int clientId, const void * data, size_t size) [+2]  // Send data to a specific client (blocking)
-SendResult TcpServer::sendAsync(int clientId, const void * data, size_t size) [+2]  // Queue data for a client and return at once, without waiting for it to be written
-void TcpServer::setReceiveBufferSize(size_t size)  // Set the receive buffer size
-void TcpServer::setSendAsyncBufferSize(size_t bytes)  // Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB
-void TcpServer::setSendTimeout(float seconds)  // Set how long a send may stall without progress before giving up, in seconds (0 = wait indefinitely)
-bool TcpServer::start(int port, int maxClients = 10)  // Start listening on a port
-void TcpServer::stop()  // Stop the server
+void TcpServer::broadcast(const void * data, size_t size) [+2] [macos,windows,linux,android]  // Broadcast data to all clients and wait for every one of them (blocking)
+int TcpServer::broadcastAsync(const void * data, size_t size) [+2] [macos,windows,linux,android]  // Queue data for every client and return at once; returns how many accepted it
+void TcpServer::disconnectAllClients() [macos,windows,linux,android]  // Disconnect all clients
+void TcpServer::disconnectClient(int clientId) [macos,windows,linux,android]  // Disconnect a specific client
+const TcpServerClient * TcpServer::getClient(int clientId) const [macos,windows,linux,android]  // Client info (nullptr if not found)
+int TcpServer::getClientCount() const [macos,windows,linux,android]  // Number of connected clients
+std::vector<int> TcpServer::getClientIds() const [macos,windows,linux,android]  // IDs of all connected clients
+int TcpServer::getPort() const [macos,windows,linux,android]  // The port the server is bound to. After start(0) this is the port the OS picked; for a fixed port it is that port
+size_t TcpServer::getSendAsyncBufferSize() const [macos,windows,linux,android]  // The current high-water mark for one client's send queue, in bytes. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
+size_t TcpServer::getSendAsyncPendingBytes(int clientId) const [macos,windows,linux,android]  // How much a client has queued and not yet completed, in bytes (0 for an unknown client)
+bool TcpServer::isRunning() const [macos,windows,linux,android]  // Whether the server is running
+bool TcpServer::send(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Send data to a specific client (blocking)
+SendResult TcpServer::sendAsync(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Queue data for a client and return at once, without waiting for it to be written
+void TcpServer::setReceiveBufferSize(size_t size) [macos,windows,linux,android]  // Set the receive buffer size. Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads.
+void TcpServer::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android]  // Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
+void TcpServer::setSendTimeout(float seconds) [macos,windows,linux,android]  // Set how long a send may stall without progress before giving up, in seconds (0 = wait indefinitely)
+bool TcpServer::start(int port, int maxClients = 0) [macos,windows,linux,android]  // Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default). Untrusted connection floods can retain clients; an optional cap keeps client memory finite. At the cap, newly accepted sockets are closed.
+void TcpServer::stop() [macos,windows,linux,android]  // Stop the server
 ```
 
 ### TcpServerClient — A client connected to a TcpServer (read-only handle)
@@ -3773,7 +4209,7 @@ int TcpServerClient::getPort() const  // Client port
 ```cpp
 void Texture::allocate(int width, int height, int channels = 4, TextureUsage usage = Immutable, int sampleCount = 1) [+2]  // Allocate texture
 void Texture::allocateCompressed(int width, int height, sg_pixel_format format, const void * data, size_t dataSize)  // Allocate an immutable compressed texture (BC1/BC3/BC7 etc.) from the given data.
-void Texture::allocateCubemap(int sideSize, TextureFormat format, TextureUsage usage = RenderTarget, int mipLevels = 1)  // Allocate a cubemap texture without initial data
+void Texture::allocateCubemap(int sideSize, TextureFormat format, TextureUsage usage = RenderTarget, int mipLevels = 1)  // Allocate a cubemap texture without initial data. Dynamic / Stream requires one mip level; requesting more logs an error and leaves the texture unallocated. RenderTarget supports mip chains. Immutable is refused with an error (it would need initial data).
 void Texture::bind() const  // Bind texture for rendering
 void Texture::clear()  // Release texture resources
 void Texture::draw(float x, float y) const [+1]  // Draw texture
@@ -3801,33 +4237,32 @@ bool Texture::isAllocated() const  // Check if allocated
 bool Texture::isCompressed() const  // Whether this texture uses a compressed pixel format
 bool Texture::isCubemap() const  // Whether this texture is a cubemap
 bool Texture::isPremultipliedAlpha() const  // Whether the texture color is premultiplied by alpha
+void Texture::loadCubemapData(const void *const * faces, size_t faceSize)  // Load all six cubemap faces (+X, -X, +Y, -Y, +Z, -Z) in one update. Requires Dynamic / Stream usage and faceSize equal to sideSize squared times bytes per pixel. Immutable / RenderTarget or a size mismatch logs a warning and returns. A second upload to the same image in the same device frame is skipped with the loadData warning. Replaces uploadCubemapFace / uploadCubemapMip in v0.8.
 void Texture::loadData(const Pixels & pixels) [+2]  // Load pixel data to texture
 void Texture::setFilter(TextureFilter filter)  // Set both min and mag filters
 void Texture::setMagFilter(TextureFilter filter)  // Set magnification filter
 void Texture::setMinFilter(TextureFilter filter)  // Set minification filter
-void Texture::setPremultipliedAlpha(bool v)  // Set whether the texture color is premultiplied by alpha
+void Texture::setPremultipliedAlpha(bool v)  // Set whether texture color is premultiplied by alpha. Alpha blending honors this flag on both windows and Fbos.
 void Texture::setWrap(TextureWrap wrap)  // Set both wrap modes
 void Texture::setWrapU(TextureWrap wrap)  // Set horizontal wrap mode
 void Texture::setWrapV(TextureWrap wrap)  // Set vertical wrap mode
 void Texture::unbind() const  // Unbind texture
 void Texture::updateCompressed(const void * data, size_t dataSize)  // Upload compressed pixel data to an already-allocated texture
-void Texture::uploadCubemapFace(int face, int mipLevel, const void * data, size_t dataSize)  // Upload pixel data for one cubemap face at one mip level
-void Texture::uploadCubemapMip(int mipLevel, const void * data, size_t dataSize)  // Upload pixel data for all six faces of one cubemap mip level
 ```
 
-### Thread — Base class for background threads (ofThread compatible). Subclass it, override the protected pure-virtual threadedFunction() with a while (isThreadRunning()) { ... } loop, then control it with startThread()/stopThread()/waitForThread(). A protected mutex dataMutex_ is available for sharing data.
+### Thread — Base class for background threads (ofThread compatible). Subclass it, override the protected pure-virtual threadedFunction() with a while (isThreadRunning()) { ... } loop, then control it with startThread()/stopThread()/waitForThread(). A protected mutex dataMutex_ is available for sharing data. A subclass must call waitForThread() in its own destructor: the base destructor also stops and joins, but only after the subclass members are destroyed, and logs a warning if threadedFunction() is still running. A subclass that does not wait may be destroyed before its worker has called threadedFunction() (e.g. right after startThread()), and then it depends on when the worker makes that call: while the subclass destructor runs, the real threadedFunction() runs and may use members that are already destroyed (undefined behaviour, usually without an abort); at about the moment ~Thread() starts, it can still end in "pure virtual method called"; after that, threadedFunction() is skipped and the base destructor warns and joins. Only waiting in the subclass destructor (waitForThread()) rules out all three. Hold subclasses via unique_ptr / shared_ptr (moving a Thread is deprecated: it does not move the running thread). When called on the worker itself, waitForThread() returns without joining (requesting stop by default); self-destruction detaches, and the worker must not access members afterward.
 
 ```cpp
-std::thread::id Thread::getMainThreadId()  // Get the main thread ID, recording the current thread's ID on the first call.
-std::thread::id Thread::getThreadId() const  // Get the underlying thread's ID.
-bool Thread::isCurrentThreadTheMainThread()  // Whether the current thread is the main thread. The main thread ID must be recorded first (call getMainThreadId() from the main thread).
-bool Thread::isThreadRunning() const  // Whether the thread is currently running.
-void Thread::sleep(unsigned long milliseconds)  // Pause the current thread for the given number of milliseconds.
-void Thread::startThread()  // Start the background thread (runs threadedFunction). No-op if already running.
-void Thread::stopThread()  // Send the stop signal: isThreadRunning() returns false inside threadedFunction so a while-loop can exit. Does not block.
-void Thread::threadedFunction()  // Override this with the work to run on the thread; recommended pattern is while (isThreadRunning()) { ... }. (protected, pure virtual)
-void Thread::waitForThread(bool callStopThread = true)  // Wait (join) for the thread to finish. If callStopThread is true (default), calls stopThread() first.
-void Thread::yield()  // Yield execution to other threads.
+std::thread::id Thread::getMainThreadId() [macos,windows,linux,android,ios]  // Get the main thread ID, recording the current thread's ID on the first call.
+std::thread::id Thread::getThreadId() const [macos,windows,linux,android,ios]  // Get the underlying thread's ID.
+bool Thread::isCurrentThreadTheMainThread() [macos,windows,linux,android,ios]  // Whether the current thread is the main thread. The main thread ID must be recorded first (call getMainThreadId() from the main thread).
+bool Thread::isThreadRunning() const [macos,windows,linux,android,ios]  // Whether the thread is currently running.
+void Thread::sleep(unsigned long milliseconds) [macos,windows,linux,android,ios]  // Pause the current thread for the given number of milliseconds.
+void Thread::startThread() [macos,windows,linux,android,ios]  // Start the background thread (runs threadedFunction). No-op if already running.
+void Thread::stopThread() [macos,windows,linux,android,ios]  // Send the stop signal: isThreadRunning() returns false inside threadedFunction so a while-loop can exit. Does not block.
+void Thread::threadedFunction() [macos,windows,linux,android,ios]  // Override this with the work to run on the thread; recommended pattern is while (isThreadRunning()) { ... }. (protected, pure virtual)
+void Thread::waitForThread(bool callStopThread = true) [macos,windows,linux,android,ios]  // Wait (join) for the thread to finish. If callStopThread is true (default), calls stopThread() first. A subclass must call it in its own destructor. On the worker itself, returns without joining and leaves the handle available for a later join from another thread. Self-destruction detaches in the base destructor; after destroying itself, the worker must not access members.
+void Thread::yield() [macos,windows,linux,android,ios]  // Yield execution to other threads.
 ```
 
 ### ThreadChannel<T> — Thread-safe FIFO queue for one-way inter-thread communication (ofThreadChannel compatible), template<typename T>. Producer-Consumer pattern: a worker thread send()s values and another thread receive()s them. Use two channels for bidirectional communication.
@@ -3835,11 +4270,12 @@ void Thread::yield()  // Yield execution to other threads.
 ```cpp
 void ThreadChannel::clear()  // Clear the queue, discarding all pending values.
 void ThreadChannel::close()  // Close the channel, waking all waiting threads. After closing, send/receive return false.
-bool ThreadChannel::empty() const  // Whether the queue is empty (approximate).
+bool ThreadChannel::empty() const  // Whether the queue is empty. Takes the lock, so it is safe while other threads send; they may send or receive right after it returns.
 bool ThreadChannel::isClosed() const  // Whether the channel has been closed.
 bool ThreadChannel::receive(T & value)  // Receive a value (blocking): waits until data arrives, writing it into value. Returns false if the channel is closed.
+std::vector<T> ThreadChannel::receiveAll()  // Receive everything queued right now without blocking and return it as a std::vector<T> in FIFO order, e.g. for (auto& msg : channel.receiveAll()) handle(msg);. Under the lock it only swaps the queue with an empty one; the values are moved into the vector after the lock is released, so other threads wait only for the swap. Values sent afterwards stay queued for the next receive. Returns an empty vector if the channel is empty or closed.
 bool ThreadChannel::send(const T & value) [+1]  // Send a value onto the queue (copy or move overload). Returns false if the channel is closed (with the move overload the value is invalidated even on failure).
-size_t ThreadChannel::size() const  // Number of queued values (approximate).
+size_t ThreadChannel::size() const  // Number of queued values. Takes the lock, so it is safe while other threads send; they may send or receive right after it returns.
 bool ThreadChannel::tryReceive(T & value) [+1]  // Receive a value without blocking, or waiting at most timeoutMs milliseconds (timeout overload). Returns false immediately/after the timeout if no data.
 ```
 
@@ -3932,34 +4368,34 @@ TweenMod & TweenMod::start()  // Start (or restart) the tween from its configure
 ### UdpSocket — UDP socket (send/receive datagrams, broadcast, multicast)
 
 ```cpp
-bool UdpSocket::bind(int port, bool startReceiving = true)  // Bind a port for receiving (startReceiving auto-starts the receive thread)
-void UdpSocket::close()  // Close the socket
-bool UdpSocket::connect(const std::string & host, int port)  // Set the destination for send()
-bool UdpSocket::create()  // Create the socket explicitly (usually auto-created by bind/connect)
-const std::string & UdpSocket::getConnectedHost() const  // Destination host from connect()
-int UdpSocket::getConnectedPort() const  // Destination port from connect()
-int UdpSocket::getLocalPort() const  // The bound local port
-bool UdpSocket::isReceiving() const  // Whether the receive thread is active
-bool UdpSocket::isValid() const  // Whether the socket is valid
-bool UdpSocket::joinMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string(""))  // Join a multicast group for receiving (call after bind; "" = default route) 
-bool UdpSocket::leaveMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string(""))  // Leave a previously joined multicast group
-void UdpSocket::processNetwork()  // Pump pending UDP I/O; normally auto-driven by the update event, but can be called manually for synchronous polling.
-int UdpSocket::receive(void * buffer, size_t bufferSize) [+1]  // Blocking receive (for non-event use); returns byte count or -1
-bool UdpSocket::send(const void * data, size_t size) [+1]  // Send to the destination set by connect()
-bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+1]  // Send data to a specific host and port
-bool UdpSocket::setBroadcast(bool enable)  // Allow broadcast sending
-bool UdpSocket::setMulticastInterface(const std::string & interfaceAddr)  // Pick the NIC for outgoing multicast ("" = default route) 
-bool UdpSocket::setMulticastLoopback(bool enable)  // Whether outgoing multicast loops back to local listeners (default on)
-bool UdpSocket::setMulticastTTL(int ttl)  // Hop limit for outgoing multicast (default 1 = local subnet)
-bool UdpSocket::setNonBlocking(bool nonBlocking)  // Set non-blocking mode
-bool UdpSocket::setReceiveBufferSize(int size)  // Set the receive buffer size
-bool UdpSocket::setReceiveTimeout(int timeoutMs)  // Set the receive timeout (0 = infinite)
-bool UdpSocket::setReuseAddress(bool enable)  // Allow address reuse (set before bind)
-bool UdpSocket::setReusePort(bool enable)  // Allow multiple sockets on the same port (multicast receivers; set before bind)
-bool UdpSocket::setSendBufferSize(int size)  // Set the send buffer size
-void UdpSocket::setUseThread(bool useThread)  // Whether to use a receive thread (must be false on Wasm)
-void UdpSocket::startReceiving()  // Start the receive thread (auto-called after bind)
-void UdpSocket::stopReceiving()  // Stop the receive thread
+bool UdpSocket::bind(int port, bool startReceiving = true) [macos,windows,linux,android,ios]  // Bind a port for receiving (startReceiving auto-starts the receive thread)
+void UdpSocket::close() [macos,windows,linux,android,ios]  // Close the socket
+bool UdpSocket::connect(const std::string & host, int port) [macos,windows,linux,android,ios]  // Set the destination for send()
+bool UdpSocket::create() [macos,windows,linux,android,ios]  // Create the socket explicitly (usually auto-created by bind/connect)
+const std::string & UdpSocket::getConnectedHost() const [macos,windows,linux,android,ios]  // Destination host from connect()
+int UdpSocket::getConnectedPort() const [macos,windows,linux,android,ios]  // Destination port from connect()
+int UdpSocket::getLocalPort() const [macos,windows,linux,android,ios]  // The bound local port
+bool UdpSocket::isReceiving() const [macos,windows,linux,android,ios]  // Whether the receive thread is active
+bool UdpSocket::isValid() const [macos,windows,linux,android,ios]  // Whether the socket is valid
+bool UdpSocket::joinMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Join a multicast group for receiving (call after bind; "" = default route) 
+bool UdpSocket::leaveMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Leave a previously joined multicast group
+void UdpSocket::processNetwork() [macos,windows,linux,android,ios]  // Pump pending UDP I/O; normally auto-driven by the update event, but can be called manually for synchronous polling.
+int UdpSocket::receive(void * buffer, size_t bufferSize) [+1] [macos,windows,linux,android,ios]  // Blocking receive (for non-event use); returns byte count or -1
+bool UdpSocket::send(const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Send to the destination set by connect()
+bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Send data to a specific host and port
+bool UdpSocket::setBroadcast(bool enable) [macos,windows,linux,android,ios]  // Allow broadcast sending
+bool UdpSocket::setMulticastInterface(const std::string & interfaceAddr) [macos,windows,linux,android,ios]  // Pick the NIC for outgoing multicast ("" = default route) 
+bool UdpSocket::setMulticastLoopback(bool enable) [macos,windows,linux,android,ios]  // Whether outgoing multicast loops back to local listeners (default on)
+bool UdpSocket::setMulticastTTL(int ttl) [macos,windows,linux,android,ios]  // Hop limit for outgoing multicast (default 1 = local subnet)
+bool UdpSocket::setNonBlocking(bool nonBlocking) [macos,windows,linux,android,ios]  // Set non-blocking mode
+bool UdpSocket::setReceiveBufferSize(int size) [macos,windows,linux,android,ios]  // Set the receive buffer size. Untrusted datagram floods can fill the OS queue; the configured buffer keeps queued memory finite. On overflow, the OS drops datagrams.
+bool UdpSocket::setReceiveTimeout(int timeoutMs) [macos,windows,linux,android,ios]  // Set the receive timeout (0 = infinite)
+bool UdpSocket::setReuseAddress(bool enable) [macos,windows,linux,android,ios]  // Allow address reuse (set before bind)
+bool UdpSocket::setReusePort(bool enable) [macos,windows,linux,android,ios]  // Allow multiple sockets on the same port (multicast receivers; set before bind)
+bool UdpSocket::setSendBufferSize(int size) [macos,windows,linux,android,ios]  // Set the send buffer size
+void UdpSocket::setUseThread(bool useThread) [macos,windows,linux,android,ios]  // Whether to use a receive thread (must be false on Wasm)
+void UdpSocket::startReceiving() [macos,windows,linux,android,ios]  // Start the receive thread (auto-called after bind)
+void UdpSocket::stopReceiving() [macos,windows,linux,android,ios]  // Stop the receive thread
 ```
 
 ### Vec2 — 2D vector (x, y)
@@ -4024,91 +4460,106 @@ const std::string & VideoDeviceInfo::getDeviceName() const  // Get the human-rea
 const std::string & VideoDeviceInfo::getUniqueId() const  // Get the stable unique identifier for the device
 ```
 
+### VideoErrorEventArgs — Runtime video error event payload.
+
+```cpp
+```
+
 ### VideoGrabber — Webcam capture source. Call setup() once, then update() every frame; getTexture() (via HasTexture) gives the live frame. Move-only. Camera permission is requested automatically on macOS
 
 ```cpp
-bool VideoGrabber::checkCameraPermission()  // Return whether camera access has been granted (macOS 10.14+)
-void VideoGrabber::close()  // Stop the camera and release its resources
-void VideoGrabber::copyToImage(Image & image) const  // Copy the current frame into an Image (allocating/updating it as needed)
-int VideoGrabber::getDesiredFrameRate() const  // Return the requested frame rate (-1 if unspecified)
-int VideoGrabber::getDeviceID() const  // Return the selected device ID
-const std::string & VideoGrabber::getDeviceName() const  // Return the name of the active capture device
-size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux]  // Return the frame queue capacity (0 = queueing disabled)
-int VideoGrabber::getHeight() const  // Return the captured frame height in pixels
-unsigned char * VideoGrabber::getPixels() [+1]  // Return a pointer to the current RGBA pixel buffer
+bool VideoGrabber::checkCameraPermission() [macos,windows,linux,ios,web]  // Return whether camera access has been granted (macOS 10.14+)
+void VideoGrabber::close() [macos,windows,linux,ios,web]  // Stop the camera and release its resources
+void VideoGrabber::copyToImage(Image & image) const [macos,windows,linux,ios,web]  // Copy the current frame into an Image (allocating/updating it as needed)
+int VideoGrabber::getDesiredFrameRate() const [macos,windows,linux,ios,web]  // Return the requested frame rate (-1 if unspecified)
+int VideoGrabber::getDeviceID() const [macos,windows,linux,ios,web]  // Return the selected device ID
+const std::string & VideoGrabber::getDeviceName() const [macos,windows,linux,ios,web]  // Return the name of the active capture device
+size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux]  // Return the frame queue capacity (0 = queueing disabled). Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame.
+int VideoGrabber::getHeight() const [macos,windows,linux,ios,web]  // Return the captured frame height in pixels
+unsigned char * VideoGrabber::getPixels() [+1] [macos,windows,linux,ios,web]  // Return a pointer to the current RGBA pixel buffer
 size_t VideoGrabber::getQueuedFrames(std::vector<GrabberFrame> & out) [macos,windows,linux]  // Drain all frames captured since the last call (appended to the given vector, oldest first; returns the count). Each GrabberFrame carries a monotonic timestamp stamped on the capture thread, so timestamps stay truthful even if the main loop stalls, and no frame is lost when the camera runs faster than the app loop. Requires setFrameQueueSize() > 0; getPixels()/isFrameNew() are unaffected
-Texture & VideoGrabber::getTexture() [+1]  // Return the texture holding the live camera frame (HasTexture override)
-int VideoGrabber::getWidth() const  // Return the captured frame width in pixels
-bool VideoGrabber::isFrameNew() const  // Return true if a new frame arrived during the most recent update()
-bool VideoGrabber::isInitialized() const  // Return true once the camera is set up and capturing
-bool VideoGrabber::isPendingPermission() const  // Return true while waiting for camera permission to be granted
-bool VideoGrabber::isVerbose() const  // Return whether verbose logging is enabled
-std::vector<VideoDeviceInfo> VideoGrabber::listDevices()  // Return the list of available camera devices
-void VideoGrabber::requestCameraPermission()  // Request camera access asynchronously (macOS)
-void VideoGrabber::setDesiredFrameRate(int fps)  // Request a capture frame rate; call before setup()
-void VideoGrabber::setDeviceID(int deviceId)  // Select which camera to use; call before setup()
-void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux]  // Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup()
-bool VideoGrabber::setup(int width = 640, int height = 480)  // Start the camera at the requested size. Returns false if permission is not yet granted (it is requested asynchronously); keep calling update() and capture begins once granted
-void VideoGrabber::setVerbose(bool verbose)  // Enable or disable verbose logging
-void VideoGrabber::update()  // Poll for a new frame and upload it to the texture. Call every frame; also completes a setup() that was waiting on permission
+Texture & VideoGrabber::getTexture() [+1] [macos,windows,linux,ios,web]  // Return the texture holding the live camera frame (HasTexture override)
+int VideoGrabber::getWidth() const [macos,windows,linux,ios,web]  // Return the captured frame width in pixels
+bool VideoGrabber::isFrameNew() const [macos,windows,linux,ios,web]  // Return true if a new frame arrived during the most recent update()
+bool VideoGrabber::isInitialized() const [macos,windows,linux,ios,web]  // Return true once the camera is set up and capturing
+bool VideoGrabber::isPendingPermission() const [macos,windows,linux,ios,web]  // Return true while waiting for camera permission to be granted
+bool VideoGrabber::isVerbose() const [macos,windows,linux,ios,web]  // Return whether verbose logging is enabled
+std::vector<VideoDeviceInfo> VideoGrabber::listDevices() [macos,windows,linux,ios,web]  // Return the list of available camera devices
+void VideoGrabber::requestCameraPermission() [macos,windows,linux,ios,web]  // Request camera access asynchronously (macOS)
+void VideoGrabber::setDesiredFrameRate(int fps) [macos,windows,linux,ios,web]  // Request a capture frame rate; call before setup()
+void VideoGrabber::setDeviceID(int deviceId) [macos,windows,linux,ios,web]  // Select which camera to use; call before setup()
+void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux]  // Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup(). Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame.
+bool VideoGrabber::setup(int width = 640, int height = 480) [macos,windows,linux,ios,web]  // Start the camera at the requested size. Returns false if permission is not yet granted (it is requested asynchronously); keep calling update() and capture begins once granted
+void VideoGrabber::setVerbose(bool verbose) [macos,windows,linux,ios,web]  // Enable or disable verbose logging
+void VideoGrabber::update() [macos,windows,linux,ios,web]  // Poll for a new frame and upload it to the texture. Call every frame; also completes a setup() that was waiting on permission
 ```
 
 ### VideoPlayer — Plays a video file: load/play/stop, per-frame update, and a texture you can draw each frame
 
 ```cpp
-void VideoPlayer::close()  // Close the video and release resources
-void VideoPlayer::draw(float x, float y) const [+1]  // Draw the current video frame at (x, y), optionally scaled to w x h
-bool VideoPlayer::extractFrame(const fs::path & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3]  // Extract the exact frame at a given time from a video file. Frame-accurate on every platform
-bool VideoPlayer::extractKeyFrame(const fs::path & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3]  // Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate
+void VideoPlayer::close() [macos,windows,linux,ios,web]  // Close the video and release resources
+void VideoPlayer::draw(float x, float y) const [+1] [macos,windows,linux,ios,web]  // Draw the current video frame at (x, y), optionally scaled to w x h
+bool VideoPlayer::extractFrame(const fs::path & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3] [macos,windows,linux,ios,web]  // Extract the exact frame at a given time from a video file. Frame-accurate on every platform
+bool VideoPlayer::extractKeyFrame(const fs::path & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3] [macos,windows,linux,ios,web]  // Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate
 int VideoPlayer::getAudioChannels() const [macos,windows,linux,ios]  // Number of audio channels (0 if no audio)
 uint32_t VideoPlayer::getAudioCodec() const [macos,windows,linux,ios]  // FourCC of the audio codec in the loaded video (0 if none)
 std::vector<uint8_t> VideoPlayer::getAudioData() const [macos,windows,linux,ios]  // Raw decoded audio data for the loaded video
 int VideoPlayer::getAudioSampleRate() const [macos,windows,linux,ios]  // Audio sample rate in Hz (0 if no audio)
-bool VideoPlayer::getAutoPoster() const  // Return whether the auto poster is enabled (default true)
-int VideoPlayer::getCurrentFrame() const  // Get current frame number
-float VideoPlayer::getDuration() const  // Get total duration in seconds
-float VideoPlayer::getGammaCorrection() const  // Get current gamma correction value
-std::string VideoPlayer::getHwAccelName() const  // Get the name of the active decode backend. Returns 'vaapi', 'v4l2m2m', 'cuda', 'videotoolbox', 'mediafoundation', 'software', or 'none'
-fs::path VideoPlayer::getPath() const  // Path of the currently loaded video file (resolved via getDataPath); empty string when nothing is loaded
-unsigned char * VideoPlayer::getPixels() [+1]  // Pointer to the current RGBA pixel buffer (mutable)
-unsigned char * VideoPlayer::getPixelsUV()  // Pointer to the interleaved UV (chroma) plane when decoding NV12; null otherwise
-unsigned char * VideoPlayer::getPixelsY()  // Pointer to the Y (luma) plane when decoding NV12/YUV; null otherwise
-float VideoPlayer::getPosition() const  // Get current position (0.0 to 1.0)
-int VideoPlayer::getTotalFrames() const  // Get total number of frames
-bool VideoPlayer::getUseHwAccel() const  // Get HW accel preference (not the actual backend — use isUsingHwAccel() for that)
-bool VideoPlayer::hasAudio() const  // Check if the loaded video has an audio track
-bool VideoPlayer::isUsingHwAccel() const  // Check if hardware decoding is currently active (after load)
-LoadResult VideoPlayer::load(const fs::path & path)  // Load a video file
-void VideoPlayer::nextFrame()  // Advance to the next frame
-void VideoPlayer::play()  // Start or resume playback. With the auto poster (default), a seek made while stopped/paused is bridged with the exact frame at the new position before playback, so it never starts on a stale picture
-void VideoPlayer::playImpl()  // Backend implementation of playImpl for this platform's video player.
-void VideoPlayer::previousFrame()  // Go back to the previous frame
-void VideoPlayer::setAutoPoster(bool on)  // Auto poster (default ON): on load/stop/play the player synchronously puts the frame at the current position on the texture, so drawing never shows black or a stale picture. Turn off to skip the one-time synchronous decode
-void VideoPlayer::setFrame(int frame)  // Seek to a specific frame number
-void VideoPlayer::setGammaCorrection(float gamma)  // Set gamma correction (1.0 = none). Use ~0.45 to brighten on platforms with dark output (e.g. macOS AVFoundation)
-void VideoPlayer::setLoopImpl(bool loop)  // Backend implementation of setLoopImpl for this platform's video player.
-void VideoPlayer::setPanImpl(float pan)  // Backend implementation of setPanImpl for this platform's video player.
-void VideoPlayer::setPausedImpl(bool paused)  // Backend implementation of setPausedImpl for this platform's video player.
-void VideoPlayer::setPositionImpl(float pct)  // Backend implementation of setPositionImpl for this platform's video player.
-void VideoPlayer::setSpeedImpl(float speed)  // Backend implementation of setSpeedImpl for this platform's video player.
-void VideoPlayer::setUseHwAccel(bool enable)  // Enable/disable hardware decoding. Must be called before load(). Default: true. When enabled, the player probes available HW backends (VAAPI, V4L2M2M, CUDA, etc.) and falls back to software if none are available. Currently affects the Linux backend only.
-void VideoPlayer::setVolumeImpl(float vol)  // Backend implementation of setVolumeImpl for this platform's video player.
-void VideoPlayer::stopImpl()  // Backend implementation of stopImpl for this platform's video player.
-void VideoPlayer::update()  // Update the video frame. Call once per frame in update()
+bool VideoPlayer::getAutoPoster() const [macos,windows,linux,ios,web]  // Return whether the auto poster is enabled (default true)
+int VideoPlayer::getCurrentFrameImpl() const [macos,windows,linux,ios,web]  // Protected implementation hook: return the current frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
+float VideoPlayer::getDuration() const [macos,windows,linux,ios,web]  // Get total duration in seconds
+float VideoPlayer::getFrameRate() const [macos,windows,linux,ios,web]  // Get the file frame rate in fps, or 0 when unknown or unloaded. Web returns 0.
+float VideoPlayer::getGammaCorrection() const [macos,windows,linux,ios,web]  // Get current gamma correction value
+std::string VideoPlayer::getHwAccelName() const [macos,windows,linux,ios,web]  // Get the name of the active decode backend. Returns 'vaapi', 'v4l2m2m', 'cuda', 'videotoolbox', 'mediafoundation', 'software', or 'none'
+fs::path VideoPlayer::getPath() const [macos,windows,linux,ios,web]  // Path of the currently loaded video file (resolved via getDataPath); empty string when nothing is loaded
+unsigned char * VideoPlayer::getPixels() [+1] [macos,windows,linux,ios,web]  // Pointer to the current RGBA pixel buffer (mutable)
+unsigned char * VideoPlayer::getPixelsUV() [macos,windows,linux,ios,web]  // Pointer to the interleaved UV (chroma) plane when decoding NV12; null otherwise
+unsigned char * VideoPlayer::getPixelsY() [macos,windows,linux,ios,web]  // Pointer to the Y (luma) plane when decoding NV12/YUV; null otherwise
+float VideoPlayer::getPosition() const [macos,windows,linux,ios,web]  // Get current position (0.0 to 1.0)
+int VideoPlayer::getTotalFramesImpl() const [macos,windows,linux,ios,web]  // Protected implementation hook: return the total frame count. Called after VideoPlayerBase's public frame API accepts the frame rate.
+bool VideoPlayer::getUseHwAccel() const [macos,windows,linux,ios,web]  // Get HW accel preference (not the actual backend — use isUsingHwAccel() for that)
+bool VideoPlayer::hasAudio() const [macos,windows,linux,ios,web]  // Check if the loaded video has an audio track
+bool VideoPlayer::isAudioStreaming() const [macos,windows,linux,ios,web]  // Return the audio streaming preference (default true); on Linux it applies to the next load(). Native OS players ignore the preference.
+bool VideoPlayer::isUsingHwAccel() const [macos,windows,linux,ios,web]  // Check if hardware decoding is currently active (after load)
+LoadResult VideoPlayer::load(const fs::path & path) [macos,windows,linux,ios,web]  // Load a video file On Web, load waits for a decoded first frame instead of returning placeholder dimensions.
+void VideoPlayer::nextFrameImpl() [macos,windows,linux,ios,web]  // Protected implementation hook: advance to the next frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
+void VideoPlayer::play() [macos,windows,linux,ios,web]  // Start or resume playback. With the auto poster (default), a seek made while stopped/paused is bridged with the exact frame at the new position before playback, so it never starts on a stale picture
+void VideoPlayer::playImpl() [macos,windows,linux,ios,web]  // Backend implementation of playImpl for this platform's video player.
+void VideoPlayer::previousFrameImpl() [macos,windows,linux,ios,web]  // Protected implementation hook: step back to the previous frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
+void VideoPlayer::setAudioStreaming(bool streaming) [macos,windows,linux,ios,web]  // Choose Linux audio streaming (default true). Call before load(); false preloads the whole track for sample-accurate loops and seeks. Changes apply to the next load.
+void VideoPlayer::setAutoPoster(bool on) [macos,windows,linux,ios,web]  // Auto poster (default ON): on load/stop/play the player synchronously puts the frame at the current position on the texture, so drawing never shows black or a stale picture. Turn off to skip the one-time synchronous decode
+void VideoPlayer::setFrameImpl(int frame) [macos,windows,linux,ios,web]  // Protected implementation hook: seek to the given frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
+void VideoPlayer::setGammaCorrection(float gamma) [macos,windows,linux,ios,web]  // Set gamma correction (1.0 = none). Use ~0.45 to brighten on platforms with dark output (e.g. macOS AVFoundation)
+void VideoPlayer::setLoopImpl(bool loop) [macos,windows,linux,ios,web]  // Backend implementation of setLoopImpl for this platform's video player.
+void VideoPlayer::setPanImpl(float pan) [macos,windows,linux,ios,web]  // Backend implementation of setPanImpl for this platform's video player.
+void VideoPlayer::setPausedImpl(bool paused) [macos,windows,linux,ios,web]  // Backend implementation of setPausedImpl for this platform's video player.
+void VideoPlayer::setPositionImpl(float pct) [macos,windows,linux,ios,web]  // Backend implementation of setPositionImpl for this platform's video player.
+void VideoPlayer::setSpeedImpl(float speed) [macos,windows,linux,ios,web]  // Backend implementation of setSpeedImpl for this platform's video player.
+void VideoPlayer::setUseHwAccel(bool enable) [macos,windows,linux,ios,web]  // Enable/disable hardware decoding. Must be called before load(). Default: true. When enabled, the player probes available HW backends (VAAPI, V4L2M2M, CUDA, etc.) and falls back to software if none are available. Currently affects the Linux backend only.
+void VideoPlayer::setVolumeImpl(float vol) [macos,windows,linux,ios,web]  // Backend implementation of setVolumeImpl for this platform's video player.
+void VideoPlayer::stopImpl() [macos,windows,linux,ios,web]  // Backend implementation of stopImpl for this platform's video player.
+void VideoPlayer::update() [macos,windows,linux,ios,web]  // Update the video frame. Call once per frame in update()
 ```
 
 ### VideoPlayerBase — Abstract base class for video playback. Use VideoPlayer for the concrete implementation.
 
 ```cpp
+void VideoPlayerBase::applyCachedStateToPlatform()  // Subclass hook: after the backend has loaded, reapply the loop, volume and pan set before load(). Speed is applied by play().
+bool VideoPlayerBase::canUseFrameApis() const  // Protected helper: reject unloaded players or nonpositive/nonfinite frame rates; warn once per loaded player instance for an unknown rate.
+void VideoPlayerBase::clearPlaybackError()  // Subclass hook: clear pending and delivered errors on successful load and close.
 void VideoPlayerBase::close()  // Close the video and release its resources.
+bool VideoPlayerBase::dispatchPlaybackError(const char * logModule = "VideoPlayer")  // Subclass hook: call from update() on the main thread outside backend locks. Pause the backend, retain the frame, set error state and notify. Return immediately when true, since a listener may close or reload the player.
 void VideoPlayerBase::firstFrame()  // Go to the first frame
 int VideoPlayerBase::getAudioChannels() const  // Return the number of audio channels, or 0 if no audio.
 uint32_t VideoPlayerBase::getAudioCodec() const  // Return the audio codec as a FourCC ('aac ', 'mp3 ', ...), or 0 if no audio.
 std::vector<uint8_t> VideoPlayerBase::getAudioData() const  // Return the raw (undecoded) audio data, or an empty vector if no audio.
 int VideoPlayerBase::getAudioSampleRate() const  // Return the audio sample rate in Hz, or 0 if no audio.
-int VideoPlayerBase::getCurrentFrame() const  // Return the index of the current frame.
+int VideoPlayerBase::getCurrentFrame() const  // Get current frame number; 0 when the frame rate is unknown.
+int VideoPlayerBase::getCurrentFrameImpl() const  // Protected implementation hook: return the current frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
 float VideoPlayerBase::getCurrentTime() const  // Get current playback time in seconds
 float VideoPlayerBase::getDuration() const  // Return the video duration in seconds.
+const std::string & VideoPlayerBase::getErrorMessage() const  // Last runtime error message, or an empty string when there is no error. Query on the main thread after update().
+float VideoPlayerBase::getFrameRate() const  // Return the file frame rate in fps, or 0 when unknown or unloaded. Implemented by each video player.
 float VideoPlayerBase::getHeight() const  // Get video height in pixels
 std::string VideoPlayerBase::getHwAccelName() const  // Return the name of the active decode backend (e.g. "videotoolbox", "software", "none").
 float VideoPlayerBase::getPan() const  // Get current stereo pan
@@ -4117,27 +4568,34 @@ float VideoPlayerBase::getPosition() const  // Return the current playback posit
 float VideoPlayerBase::getResyncThreshold() const  // Get the current resync threshold in seconds
 float VideoPlayerBase::getSpeed() const  // Get current playback speed
 Texture & VideoPlayerBase::getTexture() [+1]  // Return the texture holding the current video frame.
-int VideoPlayerBase::getTotalFrames() const  // Return the total number of frames in the video.
+int VideoPlayerBase::getTotalFrames() const  // Get total frame count; 0 when the frame rate is unknown.
+int VideoPlayerBase::getTotalFramesImpl() const  // Protected implementation hook: return the total frame count. Called after VideoPlayerBase's public frame API accepts the frame rate.
 float VideoPlayerBase::getVolume() const  // Get current volume
 float VideoPlayerBase::getWidth() const  // Get video width in pixels
 bool VideoPlayerBase::hasAudio() const  // Return true if the video has an audio track.
+bool VideoPlayerBase::hasError() const  // Whether update() has delivered a runtime playback failure. Cleared by a successful load() or close(), retained through seek and play().
 bool VideoPlayerBase::isDone() const  // Check if playback has reached the end
 bool VideoPlayerBase::isFrameNew() const  // Return true if a new frame was decoded since the last update.
 bool VideoPlayerBase::isLoaded() const  // Check if a video is loaded
 bool VideoPlayerBase::isLoop() const  // Check if looping is enabled
 bool VideoPlayerBase::isPaused() const  // Check if video is paused
-bool VideoPlayerBase::isPlaying() const  // Check if video is currently playing (not paused)
+bool VideoPlayerBase::isPlaying() const  // Check if video is currently playing (not paused). False after a runtime playback error.
 bool VideoPlayerBase::isReady() const  // True while the texture holds a real picture — i.e. drawing shows actual video, not black. With the default auto poster this is true from load() on; false only if the poster failed and no frame has arrived yet
 bool VideoPlayerBase::isUsingHwAccel() const  // Return true if hardware-accelerated decoding is currently active.
 LoadResult VideoPlayerBase::load(const fs::path & path)  // Load a video from the given file path; return true on success.
 void VideoPlayerBase::markDone()  // Mark playback as done, clearing playing unless looping.
 void VideoPlayerBase::markFrameNew()  // Mark that a new frame has arrived (sets frameNew and firstFrameReceived).
-void VideoPlayerBase::nextFrame()  // Advance to the next frame.
+void VideoPlayerBase::movePlaybackErrorFrom(VideoPlayerBase & other)  // Subclass hook: transfer pending and delivered error state when moving a player. Event listeners stay with their original object.
+void VideoPlayerBase::nextFrame()  // Advance one frame; does nothing when the frame rate is unknown (0).
+void VideoPlayerBase::nextFrameImpl()  // Protected implementation hook: advance to the next frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
 void VideoPlayerBase::play()  // Start or resume playback
 void VideoPlayerBase::playImpl()  // Platform hook: start playback. Pure virtual, implemented per backend.
-void VideoPlayerBase::previousFrame()  // Step back to the previous frame.
+void VideoPlayerBase::previousFrame()  // Go back one frame; does nothing when the frame rate is unknown (0).
+void VideoPlayerBase::previousFrameImpl()  // Protected implementation hook: step back to the previous frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
+void VideoPlayerBase::reportPlaybackError(const std::string & message, int64_t code = 0)  // Subclass hook: enqueue a backend failure from any thread; coalesces pending reports until update dispatches them.
 void VideoPlayerBase::setCurrentTime(float seconds)  // Seek to a specific time in seconds
-void VideoPlayerBase::setFrame(int frame)  // Seek to the given frame index.
+void VideoPlayerBase::setFrame(int frame)  // Seek to a frame number; does nothing when the frame rate is unknown (0).
+void VideoPlayerBase::setFrameImpl(int frame)  // Protected implementation hook: seek to the given frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
 void VideoPlayerBase::setLoop(bool loop)  // Enable/disable looping
 void VideoPlayerBase::setLoopImpl(bool loop)  // Platform hook: set looping. Pure virtual, implemented per backend.
 void VideoPlayerBase::setPan(float pan)  // Set stereo pan (-1.0 left, 0.0 center, 1.0 right)
@@ -4146,7 +4604,7 @@ void VideoPlayerBase::setPaused(bool paused)  // Pause or resume playback
 void VideoPlayerBase::setPausedImpl(bool paused)  // Platform hook: set paused state. Pure virtual, implemented per backend.
 void VideoPlayerBase::setPosition(float pct)  // Seek to a playback position given as a fraction (0-1).
 void VideoPlayerBase::setPositionImpl(float pct)  // Platform hook: seek to a normalized position. Pure virtual, implemented per backend.
-void VideoPlayerBase::setResyncThreshold(float seconds)  // Set the maximum video/audio drift before hard re-sync. When drift exceeds this threshold, video seeks to match audio position instead of catching up frame-by-frame. Set to 0 to disable. Default: 0.5s. Primarily affects Linux (FFmpeg) backend.
+void VideoPlayerBase::setResyncThreshold(float seconds)  // Set the maximum video/audio drift before hard re-sync (video seeks to the audio position). Set to 0 or negative to disable hard re-sync. Default: 0.5s. Affects the Linux (FFmpeg) backend and tcxHap's HapPlayer. HapPlayer advances by wall-clock dt * speed and slews toward playing audio with a 0.25s time constant; slewing remains enabled when hard re-sync is disabled.
 void VideoPlayerBase::setSpeed(float speed)  // Set playback speed (1.0 = normal, 2.0 = double speed)
 void VideoPlayerBase::setSpeedImpl(float speed)  // Platform hook: set playback speed. Pure virtual, implemented per backend.
 void VideoPlayerBase::setVolume(float vol)  // Set audio volume (0.0 to 1.0)
@@ -4165,48 +4623,50 @@ void VideoPlayerBase::update()  // Decode the next frame and refresh internal st
 ### VideoWriter — Encodes frames to a video file: open a path, write frames, then close to finalize the file
 
 ```cpp
-bool VideoWriter::addFrame(const Fbo & fbo) [+1]  // Append one frame at the fixed-rate clock (frameIndex/fps)
-bool VideoWriter::addFrameAt(const Fbo & fbo, double timeSec) [+2]  // Append one frame at an explicit presentation time (seconds)
-void VideoWriter::close()  // Finalize and flush the video file
-float VideoWriter::getFps() const  // Fixed encoding frame rate
-int VideoWriter::getFrameCount() const  // Number of frames written so far
-int VideoWriter::getHeight() const  // Encoder output height in pixels
-fs::path VideoWriter::getPath() const  // Resolved output file path
-const VideoRecordSettings & VideoWriter::getSettings() const  // Encoder settings the writer was opened with
-int VideoWriter::getWidth() const  // Encoder output width in pixels
-bool VideoWriter::isOpen() const  // Check if the encoder is open and accepting frames
+SaveResult VideoWriter::addFrame(const Fbo & fbo) [+1] [macos,windows,linux,android,ios]  // Append one frame at the fixed-rate clock (frameIndex/fps). Returns SaveResult for this backend submission, not disk completion: Linux checks gst_app_src_push_buffer and polls bus errors during the take; Apple checks append and AVAssetWriter status/error; Windows checks WriteSample HRESULT. Check close()/stop() for finalization.
+SaveResult VideoWriter::addFrameAt(const Fbo & fbo, double timeSec) [+2] [macos,windows,linux,android,ios]  // Append one frame at an explicit presentation time (seconds). Returns SaveResult for this backend submission, not disk completion: Linux checks gst_app_src_push_buffer and polls bus errors during the take; Apple checks append and AVAssetWriter status/error; Windows checks WriteSample HRESULT. Check close()/stop() for finalization.
+SaveResult VideoWriter::close() [macos,windows,linux,android,ios]  // Finalize and flush the video file. Returns SaveResult for backend finalization, retaining the first backend failure. Caller errors and transient readback failures do not fail the take. Repeated calls retain the result without another Error. No temporary/rename is used.
+float VideoWriter::getFps() const [macos,windows,linux,android,ios]  // Fixed encoding frame rate
+int VideoWriter::getFrameCount() const [macos,windows,linux,android,ios]  // Number of video frames accepted by the backend; failed submissions are excluded. Finalization may still fail.
+int VideoWriter::getHeight() const [macos,windows,linux,android,ios]  // Encoder output height in pixels
+fs::path VideoWriter::getPath() const [macos,windows,linux,android,ios]  // Resolved output file path
+uint64_t VideoWriter::getRejectedFrameCount() const [macos,windows,linux,android,ios]  // Number of frames refused in this take because capture/readback failed or dimensions, pixel format, row layout or byte capacity did not match the take or native buffer. Refused frames are skipped whole and do not fail the take. Resets on VideoWriter::open() (also used by ScreenRecorder::start()).
+const VideoRecordSettings & VideoWriter::getSettings() const [macos,windows,linux,android,ios]  // Encoder settings the writer was opened with
+int VideoWriter::getWidth() const [macos,windows,linux,android,ios]  // Encoder output width in pixels
+bool VideoWriter::isOpen() const [macos,windows,linux,android,ios]  // Check if the encoder is open and accepting frames
 unsigned char * VideoWriter::lockFrame(int & strideOut) [macos]  // Lock and return the encoder's frame buffer for zero-copy fills; strideOut receives the row stride. Pair with submitFrame
-bool VideoWriter::open(const fs::path & path, int width, int height, const VideoRecordSettings & settings = {})  // Open the encoder at the given size (path resolved via getDataPath)
-bool VideoWriter::submitFrame(double timeSec) [macos]  // Append the previously locked frame at the given presentation time (seconds)
-bool VideoWriter::writeAudio(const float * interleaved, int frames, double timeSec)  // Append interleaved float32 samples to the audio track at an explicit PTS (seconds, same timeline as addFrameAt). Only meaningful when opened with settings.audio = true and audioSampleRate/audioChannels set; returns false otherwise
+SaveResult VideoWriter::open(const fs::path & path, int width, int height, const VideoRecordSettings & settings = {}) [macos,windows,linux,android,ios]  // Open the native encoder. Returns SaveResult for path preparation and encoder opening. Success starts an in-place stream; check close()/stop() for finalization.
+SaveResult VideoWriter::submitFrame(double timeSec) [macos]  // Submit the previously locked frame at the given PTS. Returns SaveResult from the append BOOL and AVAssetWriter status/error. Accepted frames increase getFrameCount(); close() checks finalization.
+SaveResult VideoWriter::writeAudio(const float * interleaved, int frames, double timeSec) [macos,windows,linux,android,ios]  // Append float32 audio at the given PTS; an absent audio track returns a failed SaveResult. Returns SaveResult for this backend submission, not disk completion: Linux checks gst_app_src_push_buffer and polls bus errors during the take; Apple checks append and AVAssetWriter status/error; Windows checks WriteSample HRESULT. Check close()/stop() for finalization.
 ```
 
 ### Window — A secondary application window (macOS only for now). Owns its own Node tree, events, mouse state and render context; ticks at its display's refresh rate. GPU resources are shared with every other window
 
 ```cpp
-void Window::close()  // Close the native window; the main window and other windows keep running
-CoreEvents & Window::events()  // This window's own event stream (mousePressed / keyPressed / draw / ...)
-std::shared_ptr<App> Window::getApp() const  // Get the App attached to this window
-float Window::getFps() const  // This window's target frame rate set via setFps (0 = free-run at vsync); not a measured rate
-int Window::getHeight() const  // Window height in logical points (matches its coordinate system)
-const std::string & Window::getTitle() const  // Last title set for this window (via WindowSettings or setTitle)
-int Window::getWidth() const  // Window width in logical points (matches its coordinate system)
-bool Window::isFullscreen() const  // Whether this window is currently fullscreen (macOS reads the live window state; the transition is animated)
-bool Window::isOpen() const  // Whether the native window is still open
-void Window::setApp(std::shared_ptr<App> app)  // Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window
-void Window::setClearColor(const Color & c)  // Background clear color for this window
-void Window::setFps(float fps)  // Set this window's target frame rate; <= 0 (or >= the display rate) free-runs at vsync, otherwise update/draw run at ~fps by skipping display ticks
-void Window::setFullscreen(bool full)  // Enter or leave fullscreen for this window (macOS native fullscreen, Windows borderless-fullscreen, Linux EWMH _NET_WM_STATE_FULLSCREEN)
-void Window::setSize(int width, int height)  // Resize this window's content area to the given logical size (points)
-void Window::setTitle(const std::string & title)  // Set the window title
-void Window::toggleFullscreen()  // Toggle this window's fullscreen state
+void Window::close() [macos,windows,linux]  // Close the native window; the main window and other windows keep running. A request, like exitApp() for the main window: it returns at once and the window closes at its backend's next safe point (after the current run-loop pass on Linux / Windows, after the next main-window tick on macOS), through the same path as its close button. Until then isOpen() is true and getApp() / App::getWindow() still return the App and the window. Safe to call from the window's own App (update() / draw() / keyPressed()). Destroying the Window (its last shared_ptr) still closes it immediately
+CoreEvents & Window::events() [macos,windows,linux]  // This window's own event stream (mousePressed / keyPressed / draw / ...)
+std::shared_ptr<App> Window::getApp() const [macos,windows,linux]  // Get the App attached to this window
+float Window::getFps() const [macos,windows,linux]  // This window's target frame rate set via setFps (0 = free-run at vsync); not a measured rate
+int Window::getHeight() const [macos,windows,linux]  // Window height in logical points (matches its coordinate system)
+const std::string & Window::getTitle() const [macos,windows,linux]  // Last title set for this window (via WindowSettings or setTitle)
+int Window::getWidth() const [macos,windows,linux]  // Window width in logical points (matches its coordinate system)
+bool Window::isFullscreen() const [macos,windows,linux]  // Whether this window is currently fullscreen (macOS reads the live window state; the transition is animated)
+bool Window::isOccluded() const [macos,windows,linux]  // Whether the OS reports this window as not visible, so it renders no frames (its update/draw pause until it is visible again): macOS minimized, fully covered or on another Space; Windows minimized or DXGI-occluded; Linux (X11) minimized or fully obscured (without a compositing manager). False for a closed window
+bool Window::isOpen() const [macos,windows,linux]  // Whether the native window is still open (true until a requested close() lands)
+void Window::setApp(std::shared_ptr<App> app) [macos,windows,linux]  // Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window. An App runs once: setup() when first attached, exit() / cleanup() when it leaves its window (close(), setApp(other), or setApp(nullptr)), and leaving also detaches its audioOut() / audioIn() for good. To show it again, create a new App: setApp() refuses an App whose cleanup() already ran, and any App on a window that is not open or is closing (both log an error and leave the window as it is). setApp() is a request: it returns at once and the window applies it at its next frame boundary (before or after one of its ticks or events), wherever it is called from, including the App's own update() / draw() / keyPressed(). Until then getApp() returns the current App. The last setApp() before the boundary wins, a close() requested before it wins over it, and the checks run again when the request is applied
+void Window::setClearColor(const Color & c) [macos,windows,linux]  // Background clear color for this window
+void Window::setFps(float fps) [macos,windows,linux]  // Set this window's target frame rate; <= 0 (or >= the display rate) free-runs at vsync, otherwise update/draw run at ~fps by skipping display ticks
+void Window::setFullscreen(bool full) [macos,windows,linux]  // Enter or leave fullscreen for this window (macOS native fullscreen, Windows borderless-fullscreen, Linux EWMH _NET_WM_STATE_FULLSCREEN)
+void Window::setSize(int width, int height) [macos,windows,linux]  // Resize this window's content area to the given logical size (points)
+void Window::setTitle(const std::string & title) [macos,windows,linux]  // Set the window title
+void Window::toggleFullscreen() [macos,windows,linux]  // Toggle this window's fullscreen state
 ```
 
 ### WindowSettings — Window configuration passed to the app at startup (size, title, DPI, MSAA, fullscreen, decoration, VSync). Setters chain
 
 ```cpp
 WindowSettings & WindowSettings::reserveUniformBuffer(int bytes)  // Reserve the per-frame GPU uniform buffer in bytes, vector::reserve style; 0 = backend default 4MB ≈ 8k draw calls. Metal/WebGPU/Vulkan only — GL/D3D11 have no such cap (chainable)
-WindowSettings & WindowSettings::setClipboardSize(int size)  // Set clipboard buffer size in bytes (chainable)
+WindowSettings & WindowSettings::setClipboardSize(int size)  // Set clipboard buffer size in bytes (chainable). OS clipboard text needs finite storage in the window backend. On reads, macOS and web truncate to size - 1 bytes; Windows fails UTF-8 conversion on overflow; X11 rejects oversized or incremental selections (standalone returns empty, legacy returns null). On writes, macOS and web send the full text to the OS and truncate the local copy; Windows rejects overflowing UTF-16 conversion and truncates the local UTF-8 copy after success; standalone X11 rejects oversized writes, while legacy X11 logs and truncates. Clipboard access is unsupported on iOS and Android.
 WindowSettings & WindowSettings::setDecorated(bool enabled)  // false = borderless/chromeless window that can still take focus and be closed programmatically (chainable)
 WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Enable/disable fullscreen at startup (chainable)
 WindowSettings & WindowSettings::setHighDpi(bool enabled)  // Enable/disable high DPI support (chainable)
@@ -4228,13 +4688,52 @@ bool Xml::empty() const  // Return true if the document has no content.
 bool Xml::load(const fs::path & path)  // Load an XML document from a file. Relative paths are resolved via getDataPath. Returns true on success.
 bool Xml::parse(const std::string & str)  // Parse an XML document from a string. Returns true on success.
 XmlNode Xml::root() [+1]  // Get the document's root element node.
-bool Xml::save(const fs::path & path, const std::string & indent = std::string("  ")) const  // Save the document to a file. Relative paths are resolved via getDataPath. indent sets the per-level indentation string. Returns true on success.
+SaveResult Xml::save(const fs::path & path, const std::string & indent = std::string("  ")) const  // Serialize and save XML. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
 std::string Xml::toString(const std::string & indent = std::string("  ")) const  // Serialize the document to an XML string. indent sets the per-level indentation string.
+```
+
+### mcp::AdmissionLimits — MCP admission settings with finite defaults; all values must be positive. Change through setAdmissionLimits() while stopped. Excess requests are rejected as whole units.
+
+```cpp
+```
+
+### mcp::Resource — URI-addressed resource metadata and content handler.
+
+```cpp
+```
+
+### mcp::ResourceBuilder — Resource registration builder; finish with bind().
+
+```cpp
+void mcp::ResourceBuilder::bind(std::function<std::string ()> func)  // Register the resource's text producer, called on the main thread.
+ResourceBuilder & mcp::ResourceBuilder::desc(const std::string & d)  // Set the resource description.
+ResourceBuilder & mcp::ResourceBuilder::mime(const std::string & m)  // Set the resource MIME type.
+```
+
+### mcp::Tool — Tool registration data: name, description, level, arguments and handler.
+
+```cpp
+json mcp::Tool::getSchema() const  // Build the JSON input schema from the arguments.
+```
+
+### mcp::ToolArg — One argument in a tool's input schema.
+
+```cpp
+```
+
+### mcp::ToolBuilder — Fluent tool registration builder; finish with bind(). Tools default to Public.
+
+```cpp
+ToolBuilder & mcp::ToolBuilder::arg(const std::string & name, const std::string & desc, bool required = true)  // Add a typed named argument and its description; required defaults to true.
+void mcp::ToolBuilder::bind(std::function<json (const json &)> func) [+4]  // Register a handler taking JSON arguments or a typed std::function. Runs on the main thread; exposure follows the current grant.
+ToolBuilder & mcp::ToolBuilder::level(ToolLevel value)  // Declare the required grant for this tool. Core and official addons specify every tool's level.
 ```
 
 ## Enums
 
 ```cpp
+enum AudioBackend { Default, Null }  // Audio backend selection: Default uses the platform backend order; Null explicitly runs the real mixer silently without a device.
+enum AudioInitFailure { None, NoBackend, DeviceOpen, DeviceStart }  // Initialization failure stage: None, NoBackend (context creation), DeviceOpen, or DeviceStart.
 enum AudioRecordSettings::SampleFormat { S16, F32 }  // WAV sample format: S16 = 16-bit PCM (default), F32 = 32-bit IEEE float (headroom survives, no clipping in the file)
 enum AxisMode { None, Fill, Content }  // Layout axis sizing: None (fixed), Fill (expand to the parent), Content (fit children).
 enum Beep { ping, success, complete, coin, error, warning, cancel, click, typing, notify, sweep }  // Built-in system beep sounds (ping, success, error, …) for beep().
@@ -4252,8 +4751,9 @@ enum ImageType { Color, Grayscale }  // Image type: Color or Grayscale.
 enum KinsokuLevel { Off, PunctuationOnly, Standard }  // Line-breaking (kinsoku) strictness for vertical / Japanese text
 enum LayoutDirection { Vertical, Horizontal }  // Layout axis direction: Vertical or Horizontal.
 enum LightType { Directional, Point, Spot }  // Light type: Directional, Point, or Spot.
-enum LoadError { None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown }  // Load failure kind: None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown.
-enum LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }  // Log severity, from Verbose (most detailed) to Fatal; Silent disables logging.
+enum LoadError { None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown, TooLarge, Cancelled }  // Load failure kind: None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown, TooLarge, Cancelled.
+enum LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }  // Log severity, from Verbose (most detailed) to Fatal. Each output (console, file, system) shows lines at its own level and above; Silent as an output's level turns that output off.
+enum mcp::ToolLevel { Public, ReadOnly, Control }  // Tool exposure level: Public < ReadOnly < Control. Tools default to Public; Control includes inspection.
 enum MixMode { Auto, DownmixMono }  // Sound channel mixing: Auto (match the output) or DownmixMono.
 enum MouseButton { Left, Right, Middle, None }  // Mouse button: Left, Right, Middle, or None.
 enum Orientation { Portrait, PortraitUpsideDown, LandscapeLeft, LandscapeRight, Landscape, All, AllButUpsideDown }  // Screen orientation mask passed to setOrientation (iOS/Android); values are bit flags and can be combined with |
@@ -4261,6 +4761,7 @@ enum PixelFormat { U8, F32 }  // CPU pixel data format: U8 (8-bit) or F32 (float
 enum PointStyle { Square, Round, Pixel }  // Shape used to draw points: Square, Round, Pixel.
 enum PrimitiveMode { Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points }  // Draw primitive mode: Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points.
 enum PrimitiveType { Points, Lines, LineStrip, Triangles, TriangleStrip, Quads }  // Geometry primitive type: Points, Lines, LineStrip, Triangles, TriangleStrip, Quads.
+enum SaveError { None, AccessDenied, NoSpace, WriteFailed, Unknown }  // Save failure kind: None, AccessDenied (including bundle refusal), NoSpace, WriteFailed, Unknown. Rename failure is always WriteFailed.
 enum SendError { None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning }  // Why a send could not be queued, or how a queued one finished: None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning.
 enum SoundSource::Kind { Eager, Stream }  // Source kind tag on SoundSource, letting the mixer dispatch without a per-frame virtual call: Eager (SoundBuffer, full PCM in RAM) vs Stream (SoundStream, decoded on demand).
 enum StrokeCap { Butt, Round, Square }  // Line cap style for strokes: Butt, Round, Square.
@@ -4316,6 +4817,44 @@ category, platforms, dependencies, repo URL for each addon):
 Always check the registry before assuming a feature needs to be built from scratch —
 it may already be an addon.
 
+### tcxBox2d contact delivery (v0.8 migration)
+
+World delivers Begin/End in Box2D order after each managed fixed sub-step;
+Stay runs once per update. Enter callbacks now observe the completed sub-step
+and may destroy bodies, nodes/Mods, clear/setup the World, or delete the World.
+Release invalidates borrowed handles and cancels later listeners for an invalid
+Begin/Stay. Exit can still reach a surviving recipient with its counterpart null.
+Clear/setup/World deletion cancel the whole old notification immediately. Recheck
+`WorldContact::a/b`, `CollisionEvent::other`, and `Contact2D::other/otherNode`
+after mutation, even inside the executing callback; retain application IDs for
+later use. Mutation-generated Exits run after the initiating callback returns.
+Owner destructors/Mod removal never invoke listeners during teardown.
+
+Raw `getWorld()->Step()` defers both Begin and End to the next fresh-frame
+`World::update()`, even with no managed sub-step. Each aggregated transition is
+preserved (Begin/End/Begin across raw Steps); compound fixture hand-over folding
+is limited to one managed sub-step. Earlier raw records can delay an otherwise
+immediate wrapper Exit until update to preserve order. Use Stay for once-per-frame
+work rather than assuming only one transition per update.
+
+Bodies owned by a TrussC Body or RigidBody2D are destroyed through TrussC (`Body::destroy()`, removing the Mod, `World::clear()`); don't call raw `b2World::DestroyBody`/`DestroyFixture` on them. Raw destroys of bodies you created yourself are tracked when the body still has fixtures (the destruction listener); removing a body's last fixture and then the body without an `update()` in between is not tracked.
+
+Classic `Collider2D::isTrigger` now applies sensor response to every fixture;
+changed flag assignments synchronize before each managed sub-step. Use
+`Collider2D::setTrigger(bool)` or `Body::setSensor(bool)` for immediate application
+before raw Step. An unchanged flag preserves raw per-fixture sensor overrides.
+Sensors retain classic collision event names; Mods use `onTrigger*` when any
+contributing fixture is a sensor, including mixed classic/Mod contacts. Mode
+changes alone do not synthesize Enter/Exit; later phases use current sensor state.
+Sensor geometry may be zero and impulses remain unimplemented.
+
+World reserves Box2D's destruction-listener slot to retire owned and ownerless
+endpoints before storage reuse. Migrate raw `SetDestructionListener` registration
+to `World::setDestructionListener(b2DestructionListener*)`; the non-owning user
+delegate receives fixture callbacks after endpoint retirement, also receives
+joint callbacks, and survives clear/setup. See [tcxBox2d tests](../addons/tcxBox2d/tests/README.md) for regression
+setups and supported delivery boundaries.
+
 ### Bundled Addons (ship with TrussC)
 
 <!-- ADDON-LIST-START -->
@@ -4369,7 +4908,7 @@ trusscli addon clone <owner>/<name>    # exact GitHub repo
 trusscli addon clone <git-url>         # any HTTPS or SSH URL
 ```
 
-Ambiguous names (e.g. a bundled `tcxLua` colliding with `funatsufumiya/tcxLua`) require `owner/name` disambiguation.
+Ambiguous names (e.g. a bundled `tcxLua` colliding with `ffunatsu/tcxLua`) require `owner/name` disambiguation.
 
 ### Browsing
 
@@ -4569,7 +5108,7 @@ EventListener synthListener;
 synthListener = AudioEngine::getInstance().audioOut.listen(
     [](AudioOutBuffer& buf) { /* ... */ });
 ```
-`audioOut` runs on the audio thread. Keep it RT-safe: no allocations, no engine API calls, no heavy locks. ADD to `buf.data` (other Sound voices already mixed in).
+`audioOut` runs on the audio thread. Keep it RT-safe: no allocations, no engine API calls, no heavy locks. ADD to `buf.data` (other Sound voices already mixed in). The App override is detached for you before `cleanup()` (after `exit()`), and any callback in flight has returned; a listener that captures `this` elsewhere is disconnected, then `AudioEngine::getInstance().waitForAudioCallbacks()` runs, in the owner's own destructor, before its members go.
 
 ### audioDeviceChanged — Device / Rate Change Event
 Fires on every successful `init()` (initial AND re-init):
@@ -4630,7 +5169,7 @@ Sound sfx = bundle.build();
 9. **GPU classes are main-thread only.** `Image` / `Texture` / `Fbo` / `Font` call into sokol; using them on a background thread crashes (no framework assert catches it). Load `Pixels` on the background thread, create the `Image`/`Texture` on the main thread.
 10. **`Pixels` / `Image` / `Texture` are non-copyable** (deleted copy ctor). Use `std::move()`, or `Pixels::clone()` for a deep copy.
 11. **Create nodes with `make_shared<>()`.** `addChild()` asserts if the node isn't owned by a `shared_ptr`.
-12. **Never `addChild()` in a constructor** — `weak_from_this()` isn't valid until the `shared_ptr` exists (debug builds assert with "move to setup()"). Do it in the node's `setup()` override.
+12. **Never `addChild()` in a constructor** — `weak_from_this()` isn't valid until the `shared_ptr` exists (debug builds assert with "move to setup()"). Do it in the node's `setup()` override. In the App's constructor, `setSize()` doesn't resize the window either (no `shared_ptr` owns the App yet: it changes only the App's own size and warns once), and `getRootNode()` doesn't return the App yet: call both in `setup()`.
 13. **Event-driven draw needs `redraw()`.** With `setIndependentFps(updateFps, EVENT_DRIVEN)`, draw runs only when `redraw()` was called — forgetting it looks like a frozen screen.
 14. **Prefer `Event<T>` + `EventListener` over raw `function<>` callbacks.** `EventListener` is RAII: it auto-disconnects on destruction, so no dangling-callback crashes.
 15. **`LayoutMod` never auto-relayouts.** Call `updateLayout()` after adding/removing/resizing children (property setters like `setSpacing()` do trigger it).
@@ -4931,10 +5470,11 @@ void tcApp::setup() {
 ### IDE Setup
 - Ask which IDE they use first: VSCode, Cursor, or Xcode
 - VSCode/Cursor: After generating, open the project in IDE. Three required extensions will be suggested automatically:
-  1. **C/C++** (`ms-vscode.cpptools`) — IntelliSense and syntax highlighting
-  2. **CMake Tools** (`ms-vscode.cmake-tools`) — Build integration
-  3. **CodeLLDB** (`vadimcn.vscode-lldb`) — Debugger
+  1. **CMake Tools** (`ms-vscode.cmake-tools`) — Build integration (every editor)
+  2. **CodeLLDB** (`vadimcn.vscode-lldb`) — Debugger (every editor)
+  3. IntelliSense: **C/C++** (`ms-vscode.cpptools`) in VSCode only; **clangd** (`llvm-vs-code-extensions.vscode-clangd`) in VS Code forks (Cursor, Antigravity, VSCodium, Windsurf). The C/C++ extension refuses to run outside the official VS Code, so don't suggest it for forks, and don't install clangd next to it in VSCode.
   - If the popup doesn't appear, open Extensions panel and search for each one
+  - For a VS Code fork, generate the project with `--ide cursor` (e.g. `trusscli update --ide cursor`): its popup suggests clangd, and its `launch.json` uses CodeLLDB on every OS. This matters on Windows, where the MSVC debugger (`cppvsdbg`) that VSCode projects use is not available in forks. See [GET_STARTED.md](GET_STARTED.md).
 - Build key is F5.
 - Xcode: Can build directly. The .xcodeproj file is inside the `xcode` folder within the project.
 
@@ -4959,4 +5499,3 @@ TrussC/
     ├── build_win.bat
     └── build_linux.sh
 ```
-

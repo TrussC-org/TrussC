@@ -45,19 +45,20 @@ bool matchLooksLikeRequest(FcPattern* match, const std::string& wanted) {
 
 } // namespace
 
-fs::path systemFontPath(const std::string& name) {
-    if (name.empty()) return "";
+internal::SystemFontFace internal::systemFontFace(const std::string& name) {
+    SystemFontFace out;
+    if (name.empty()) return out;
 
     // FcConfigGetCurrent() lazily calls FcInit() on first use, so we don't
     // need a separate init step. fontconfig caches the config thereafter.
     FcConfig* config = FcConfigGetCurrent();
-    if (!config) return "";
+    if (!config) return out;
 
     // FcNameParse handles the full fontconfig name grammar
     // ("Noto Sans CJK JP:style=Bold" etc.) so callers can pass either a
     // bare family name or a more specific pattern.
     FcPattern* pat = FcNameParse((const FcChar8*)name.c_str());
-    if (!pat) return "";
+    if (!pat) return out;
     FcConfigSubstitute(config, pat, FcMatchPattern);
     FcDefaultSubstitute(pat);
 
@@ -65,15 +66,25 @@ fs::path systemFontPath(const std::string& name) {
     FcPattern* match = FcFontMatch(config, pat, &result);
     FcPatternDestroy(pat);
 
-    std::string out;
     if (match && result == FcResultMatch && matchLooksLikeRequest(match, name)) {
         FcChar8* file = nullptr;
         if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file) {
-            out.assign((const char*)file);
+            out.path = fs::path((const char*)file);
+            // FC_INDEX is the face index in the file. For a variable font the
+            // bits above 16 carry the named instance, which is not a face of
+            // the file, so only the low 16 bits are used.
+            int index = 0;
+            if (FcPatternGetInteger(match, FC_INDEX, 0, &index) == FcResultMatch) {
+                out.index = index & 0xFFFF;
+            }
         }
     }
     if (match) FcPatternDestroy(match);
     return out;
+}
+
+fs::path systemFontPath(const std::string& name) {
+    return internal::systemFontFace(name).path;
 }
 
 std::vector<std::string> listSystemFonts() {

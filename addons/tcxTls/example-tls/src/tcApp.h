@@ -1,6 +1,7 @@
 #pragma once
 
 #include <TrussC.h>
+#include <mutex>
 #include "tcTlsClient.h"
 using namespace tc;
 

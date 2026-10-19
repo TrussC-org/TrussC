@@ -1,6 +1,7 @@
 #pragma once
 
 #include <TrussC.h>
+#include <deque>
 #include <set>
 using namespace std;
 using namespace tc;

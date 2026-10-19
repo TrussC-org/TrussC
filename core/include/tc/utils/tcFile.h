@@ -16,20 +16,23 @@ namespace trussc {
 // =============================================================================
 // File Path Utilities
 // =============================================================================
+// The strings returned here are UTF-8 on every platform (pathToUtf8).
+// path::string() would return active-code-page bytes on Windows, and throw
+// for characters the code page cannot represent.
 
 // Get filename from path: "dir/test.txt" -> "test.txt"
 inline std::string getFileName(const fs::path& path) {
-    return path.filename().string();
+    return pathToUtf8(path.filename());
 }
 
 // Get filename without extension: "dir/test.txt" -> "test"
 inline std::string getBaseName(const fs::path& path) {
-    return path.stem().string();
+    return pathToUtf8(path.stem());
 }
 
 // Get file extension without dot: "dir/test.txt" -> "txt"
 inline std::string getFileExtension(const fs::path& path) {
-    std::string ext = path.extension().string();
+    std::string ext = pathToUtf8(path.extension());
     if (!ext.empty() && ext[0] == '.') {
         ext = ext.substr(1);
     }
@@ -38,17 +41,17 @@ inline std::string getFileExtension(const fs::path& path) {
 
 // Get parent directory: "dir/test.txt" -> "dir"
 inline std::string getParentDirectory(const fs::path& path) {
-    return path.parent_path().string();
+    return pathToUtf8(path.parent_path());
 }
 
 // Join paths: ("dir", "file.txt") -> "dir/file.txt"
 inline std::string joinPath(const fs::path& dir, const fs::path& file) {
-    return (dir / file).string();
+    return pathToUtf8(dir / file);
 }
 
 // Get absolute path
 inline std::string getAbsolutePath(const fs::path& path) {
-    return std::filesystem::absolute(path).string();
+    return pathToUtf8(std::filesystem::absolute(path));
 }
 
 // =============================================================================
@@ -92,12 +95,20 @@ inline std::vector<std::string> listDirectory(const fs::path& path) {
         return result;
     }
 
-    try {
-        for (const auto& entry : std::filesystem::directory_iterator(fullPath)) {
-            result.push_back(entry.path().filename().string());
+    // Error codes instead of exceptions, and one conversion per entry: an
+    // entry that fails is logged and skipped, the listing goes on.
+    std::error_code ec;
+    std::filesystem::directory_iterator it(fullPath, ec);
+    std::filesystem::directory_iterator end;
+    for (; !ec && it != end; it.increment(ec)) {
+        try {
+            result.push_back(pathToUtf8(it->path().filename()));
+        } catch (const std::exception& e) {
+            logWarning() << "listDirectory: skipped an entry in " << path << " - " << e.what();
         }
-    } catch (const std::exception& e) {
-        logError() << "Failed to list directory: " << path << " - " << e.what();
+    }
+    if (ec) {
+        logError() << "Failed to list directory: " << path << " - " << ec.message();
     }
 
     return result;
@@ -133,10 +144,11 @@ inline int64_t getFileSize(const fs::path& path) {
 // (binary mode: the returned string is the file's exact bytes on every
 // platform; Windows text mode would silently fold \r\n into \n)
 inline std::string loadTextFile(const fs::path& path) {
-    fs::path fullPath = getDataPath(path);
+    fs::path fullPath = internal::resolveLoadPath(path);
+    if (!internal::checkLoadFile(fullPath, "File")) return "";
     std::ifstream file(fullPath, std::ios::binary);
     if (!file.is_open()) {
-        logError() << "Cannot open file: " << path;
+        internal::reportMissingLoad(fullPath, "File");
         return "";
     }
 
@@ -145,32 +157,30 @@ inline std::string loadTextFile(const fs::path& path) {
     return content;
 }
 
-// Save string to text file
+// Save string to text file. Relative paths resolve via getDataPath, and a
+// missing parent folder is created. A path inside the app bundle is refused
+// (use getUserDataPath()).
 // (binary mode: what you pass is what lands on disk on every platform;
 // Windows text mode would expand \n to \r\n, changing the file size)
-inline bool saveTextFile(const fs::path& path, const std::string& content) {
-    fs::path fullPath = getDataPath(path);
-    std::ofstream file(fullPath, std::ios::binary);
-    if (!file.is_open()) {
-        logError() << "Cannot create file: " << path;
-        return false;
-    }
-
-    file << content;
-    return true;
+inline SaveResult saveTextFile(const fs::path& path, const std::string& content) {
+    fs::path fullPath;
+    auto prepared = internal::prepareOutputPath(path, fullPath, "File");
+    if (!prepared) return prepared;
+    return internal::atomicWrite(fullPath, content.data(), content.size(), "File");
 }
 
-// Append string to text file
-inline bool appendToFile(const fs::path& path, const std::string& content) {
-    fs::path fullPath = getDataPath(path);
-    std::ofstream file(fullPath, std::ios::app | std::ios::binary);
-    if (!file.is_open()) {
-        logError() << "Cannot open file for append: " << path;
-        return false;
-    }
-
-    file << content;
-    return true;
+// Append in place, checking both the flushed write and the close.
+inline SaveResult appendToFile(const fs::path& path, const std::string& content) {
+    fs::path fullPath;
+    auto prepared = internal::prepareOutputPath(path, fullPath, "File");
+    if (!prepared) return prepared;
+    errno = 0;
+    auto* file = internal::openFile(fullPath, "ab");
+    if (!file) return internal::reportSaveFailure(internal::saveErrno(fullPath, "Cannot open file"), "File");
+    auto result = internal::checkedWrite(file, content.data(), content.size(), fullPath);
+    auto closed = internal::checkedClose(file, fullPath);
+    if (result) result = closed;
+    return result ? result : internal::reportSaveFailure(result, "File");
 }
 
 // =============================================================================
@@ -190,34 +200,36 @@ public:
     FileWriter& operator=(const FileWriter&) = delete;
 
     // Movable
-    FileWriter(FileWriter&& other) noexcept : file_(std::move(other.file_)) {}
+    FileWriter(FileWriter&& other) noexcept : file_(std::move(other.file_)), path_(std::move(other.path_)) {}
     FileWriter& operator=(FileWriter&& other) noexcept {
         if (this != &other) {
             close();
             file_ = std::move(other.file_);
+            path_ = std::move(other.path_);
         }
         return *this;
     }
 
-    // Open file (append = true to append to existing file)
-    bool open(const fs::path& path, bool append = false) {
+    // Open file (append = true to append to existing file). Relative paths
+    // resolve via getDataPath, and a missing parent folder is created. A
+    // path inside the app bundle is refused (use getUserDataPath()).
+    SaveResult open(const fs::path& path, bool append = false) {
         close();
-        fs::path fullPath = getDataPath(path);
-        auto mode = std::ios::out | std::ios::binary;
-        if (append) mode |= std::ios::app;
-
-        file_.open(fullPath, mode);
-        if (!file_.is_open()) {
-            logError() << "FileWriter: Cannot open file: " << path;
-            return false;
-        }
-        return true;
+        auto result = internal::prepareOutputPath(path, path_, "FileWriter");
+        if (!result) return result;
+        errno = 0;
+        file_.open(path_, std::ios::out | std::ios::binary | (append ? std::ios::app : std::ios::trunc));
+        if (!file_.is_open())
+            return internal::reportSaveFailure(internal::saveErrno(path_, "Cannot open file"), "FileWriter");
+        return SaveResult::success();
     }
 
     // Close file
     void close() {
         if (file_.is_open()) {
+            errno = 0;
             file_.close();
+            if (file_.fail()) internal::reportSaveFailure(internal::saveErrno(path_, "Close error"), "FileWriter");
         }
     }
 
@@ -229,8 +241,9 @@ public:
     // Write string
     FileWriter& write(const std::string& text) {
         if (file_.is_open()) {
+            errno = 0;
             file_.write(text.data(), text.size());
-            file_.flush();
+            checkWrite();
         }
         return *this;
     }
@@ -238,8 +251,9 @@ public:
     // Write single character
     FileWriter& write(char c) {
         if (file_.is_open()) {
+            errno = 0;
             file_.put(c);
-            file_.flush();
+            checkWrite();
         }
         return *this;
     }
@@ -247,8 +261,9 @@ public:
     // Write binary data
     FileWriter& write(const void* data, size_t size) {
         if (file_.is_open()) {
+            errno = 0;
             file_.write(static_cast<const char*>(data), size);
-            file_.flush();
+            checkWrite();
         }
         return *this;
     }
@@ -263,7 +278,7 @@ public:
     // Explicit flush (already done after each write, but available if needed)
     void flush() {
         if (file_.is_open()) {
-            file_.flush();
+            checkWrite();
         }
     }
 
@@ -271,14 +286,24 @@ public:
     template<typename T>
     FileWriter& operator<<(const T& value) {
         if (file_.is_open()) {
+            errno = 0;
             file_ << value;
-            file_.flush();
+            checkWrite();
         }
         return *this;
     }
 
 private:
+    void checkWrite() {
+        auto result = internal::checkOutputStream(file_, path_);
+        if (!result) {
+            // Stop on the first failure, before reporting (listeners may write).
+            file_.close();
+            internal::reportSaveFailure(result, "FileWriter");
+        }
+    }
     std::ofstream file_;
+    fs::path path_;
 };
 
 // =============================================================================
@@ -310,10 +335,11 @@ public:
     // Open file for reading
     bool open(const fs::path& path) {
         close();
-        fs::path fullPath = getDataPath(path);
+        fs::path fullPath = internal::resolveLoadPath(path);
+        if (!internal::checkLoadFile(fullPath, "FileReader")) return false;
         file_.open(fullPath, std::ios::in | std::ios::binary);
         if (!file_.is_open()) {
-            logError() << "FileReader: Cannot open file: " << path;
+            internal::reportMissingLoad(fullPath, "FileReader");
             return false;
         }
         return true;

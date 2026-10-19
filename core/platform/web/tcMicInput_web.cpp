@@ -1,183 +1,118 @@
-// =============================================================================
-// tcMicInput Web implementation
-// Microphone input using getUserMedia + Web Audio API
-// =============================================================================
-
 #ifdef __EMSCRIPTEN__
-
 #include <emscripten.h>
-#include "tc/sound/tcSound.h"
-#include "tc/utils/tcLog.h"
-#include <string>
-#include <format>
+#include "tc/sound/tcMicInputInternal.h"
+#include <map>
 
 namespace trussc {
-
-// ---------------------------------------------------------------------------
-// MicInput Web implementation
-// ---------------------------------------------------------------------------
-
-MicInput::~MicInput() {
-    stop();
+namespace internal {
+namespace {
+unsigned nextMicKey = 0;
+auto& micStates() {
+    static auto* states = new std::map<unsigned, std::shared_ptr<MicState>>;
+    return *states;
 }
-
-bool MicInput::start(int sampleRate) {
-    if (running_) {
-        stop();
-    }
-
-    sampleRate_ = sampleRate;
-    buffer_.resize(BUFFER_SIZE, 0.0f);
-    writePos_ = 0;
-
-    // Initialize microphone on JavaScript side (async)
-    std::string script = std::format(R"JS(
-        (function() {{
-            var sampleRate = {};
-            var bufferSize = {};
-
-            // Stop existing microphone if any
-            if (window._trussc_mic_stream) {{
-                window._trussc_mic_stream.getTracks().forEach(function(t) {{ t.stop(); }});
-            }}
-
-            // Initialize ring buffer
-            window._trussc_mic_buffer = new Float32Array(bufferSize);
-            window._trussc_mic_writePos = 0;
-            window._trussc_mic_running = false;
-
-            // Request microphone access via getUserMedia (async)
-            navigator.mediaDevices.getUserMedia({{
-                audio: {{
-                    sampleRate: sampleRate,
-                    channelCount: 1,
-                    echoCancellation: false,
-                    noiseSuppression: false,
-                    autoGainControl: false
-                }}
-            }}).then(function(stream) {{
-                window._trussc_mic_stream = stream;
-
-                // Web Audio API setup
-                var audioCtx = new (window.AudioContext || window.webkitAudioContext)({{
-                    sampleRate: sampleRate
-                }});
-                window._trussc_mic_ctx = audioCtx;
-
-                var source = audioCtx.createMediaStreamSource(stream);
-
-                // ScriptProcessorNode to capture samples
-                var processor = audioCtx.createScriptProcessor(bufferSize, 1, 1);
-                window._trussc_mic_processor = processor;
-
-                processor.onaudioprocess = function(e) {{
-                    if (!window._trussc_mic_running) return;
-
-                    var input = e.inputBuffer.getChannelData(0);
-                    var buffer = window._trussc_mic_buffer;
-                    var size = buffer.length;
-
-                    for (var i = 0; i < input.length; i++) {{
-                        buffer[window._trussc_mic_writePos] = input[i];
-                        window._trussc_mic_writePos = (window._trussc_mic_writePos + 1) % size;
-                    }}
-                }};
-
-                source.connect(processor);
-                processor.connect(audioCtx.destination);
-
-                window._trussc_mic_running = true;
-                console.log('[MicInput] Web: started (' + audioCtx.sampleRate + ' Hz)');
-
-            }}).catch(function(err) {{
-                console.error('[MicInput] Web: failed to start -', err.message);
-                window._trussc_mic_running = false;
-            }});
-        }})();
-    )JS", sampleRate, BUFFER_SIZE);
-
-    emscripten_run_script(script.c_str());
-
-    running_ = true;
-    logNotice("MicInput") << "started (" << sampleRate << " Hz, mono) [Web]";
-    return true;
+using ReadyCallback = void (*)(unsigned, int, const char*, int);
+using AudioCallback = void (*)(unsigned, const float*, int);
+void ready(unsigned key, int success, const char* message, int rate) {
+    auto found = micStates().find(key);
+    if (found == micStates().end()) return;
+    auto state = found->second;
+    state->result = {success != 0, message};
+    if (success) state->sampleRate = rate;
+    completeMic(state);
 }
-
-void MicInput::stop() {
-    if (!running_) return;
-
-    emscripten_run_script(R"JS(
-        window._trussc_mic_running = false;
-
-        if (window._trussc_mic_processor) {
-            window._trussc_mic_processor.disconnect();
-            window._trussc_mic_processor = null;
-        }
-        if (window._trussc_mic_ctx) {
-            window._trussc_mic_ctx.close();
-            window._trussc_mic_ctx = null;
-        }
-        if (window._trussc_mic_stream) {
-            window._trussc_mic_stream.getTracks().forEach(function(t) { t.stop(); });
-            window._trussc_mic_stream = null;
-        }
-
-        console.log('[MicInput] Web: stopped');
-    )JS");
-
-    running_ = false;
-    logNotice("MicInput") << "stopped [Web]";
+void audio(unsigned key, const float* samples, int frames) {
+    auto found = micStates().find(key);
+    if (found != micStates().end() && !found->second->cancelled)
+        found->second->audio(samples, frames);
 }
-
-size_t MicInput::getBuffer(float* outBuffer, size_t numSamples) {
-    if (!running_ || numSamples == 0) return 0;
-
-    numSamples = std::min(numSamples, (size_t)BUFFER_SIZE);
-
-    // Pass pointer via global variable
-    std::string script = std::format(R"JS(
-        (function() {{
-            if (!window._trussc_mic_running || !window._trussc_mic_buffer) {{
-                return 0;
-            }}
-
-            var outBuffer = {};
-            var numSamples = {};
-            var buffer = window._trussc_mic_buffer;
-            var size = buffer.length;
-            var writePos = window._trussc_mic_writePos;
-
-            numSamples = Math.min(numSamples, size);
-
-            // Get latest samples from ring buffer
-            var readPos = (writePos + size - numSamples) % size;
-
-            for (var i = 0; i < numSamples; i++) {{
-                HEAPF32[(outBuffer >> 2) + i] = buffer[(readPos + i) % size];
-            }}
-
-            return numSamples;
-        }})();
-    )JS", (unsigned int)(uintptr_t)outBuffer, (int)numSamples);
-
-    int result = emscripten_run_script_int(script.c_str());
-    return (size_t)result;
+EM_JS_DEPS(micAsyncDeps, "$getWasmTableEntry,$stringToNewUTF8");
+EM_JS(void, beginWebMic, (unsigned key, int rate, int frames, ReadyCallback readyFn, AudioCallback audioFn), {
+    const states = Module.trusscMicStates || (Module.trusscMicStates = new Map());
+    const state = { stopped: false, delivered: false };
+    states.set(key, state);
+    state.cleanup = () => {
+        if (state.stopped) return;
+        state.stopped = true;
+        const release = fn => { try { fn(); } catch (error) {} };
+        if (state.processor) { state.processor.onaudioprocess = null; release(() => state.processor.disconnect()); }
+        if (state.source) release(() => state.source.disconnect());
+        if (state.stream) state.stream.getTracks().forEach(track => release(() => track.stop()));
+        if (state.ctx) { state.ctx.onstatechange = null; release(() => state.ctx.close().catch(() => {})); }
+        if (state.samples) { _free(state.samples); state.samples = 0; }
+    };
+    const finish = (success, message) => {
+        if (state.stopped || state.delivered) return;
+        state.delivered = true;
+        if (state.ctx) state.ctx.onstatechange = null;
+        if (!success) state.cleanup();
+        const text = stringToNewUTF8(message);
+        try { getWasmTableEntry(readyFn)(key, success, text, state.ctx ? state.ctx.sampleRate : rate); }
+        finally { _free(text); }
+    };
+    const fail = error => finish(0, (error.name || 'Error') + ': ' + (error.message || error) +
+        '; retry microphone startup from a user gesture in a secure context');
+    try {
+        // Snapshot before async permission/resume work consumes activation.
+        const activated = navigator.userActivation ? navigator.userActivation.isActive : undefined;
+        // Both operations start in the initiating gesture, before any deferral.
+        state.ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: rate });
+        const connect = () => {
+            if (state.stopped || state.delivered || !state.stream || state.ctx.state !== 'running') return;
+            try {
+                state.source = state.ctx.createMediaStreamSource(state.stream);
+                state.processor = state.ctx.createScriptProcessor(frames, 1, 1);
+                state.samples = _malloc(frames * 4);
+                state.processor.onaudioprocess = event => {
+                    if (state.stopped) return;
+                    const input = event.inputBuffer.getChannelData(0);
+                    HEAPF32.set(input, state.samples >> 2);
+                    getWasmTableEntry(audioFn)(key, state.samples, input.length);
+                };
+                state.source.connect(state.processor);
+                state.processor.connect(state.ctx.destination);
+                finish(1, "");
+            } catch (error) { fail(error); }
+        };
+        state.ctx.onstatechange = connect;
+        Promise.resolve(state.ctx.resume()).then(connect, fail);
+        navigator.mediaDevices.getUserMedia({ audio: {
+            sampleRate: rate, channelCount: 1, echoCancellation: false,
+            noiseSuppression: false, autoGainControl: false
+        }}).then(stream => {
+            if (state.stopped) { stream.getTracks().forEach(track => track.stop()); return; }
+            state.stream = stream;
+            if (activated === false && state.ctx.state === 'suspended') {
+                fail(new Error('Microphone audio needs a user gesture: AudioContext is still suspended'));
+                return;
+            }
+            // Permitted startup (or unknown activation on older browsers) can
+            // take arbitrarily long. Resume or a running statechange connects;
+            // stop/destroy still release everything immediately.
+            connect();
+        }).catch(fail);
+    } catch (error) { fail(error); }
+});
 }
-
-void MicInput::onAudioData(const float* input, size_t frameCount) {
-    // Not used in Web version (processed directly in JS)
-    (void)input;
-    (void)frameCount;
+void launchMic(const std::shared_ptr<MicState>& state, bool) {
+    state->ring.resize(MicInput::BUFFER_SIZE, 0.0f);
+    do { state->webKey = ++nextMicKey; } while (!state->webKey || micStates().contains(state->webKey));
+    micStates().emplace(state->webKey, state);
+    beginWebMic(state->webKey, state->sampleRate, MicInput::BUFFER_SIZE, ready, audio);
 }
-
-// ---------------------------------------------------------------------------
-// Global instance
-// ---------------------------------------------------------------------------
-MicInput& getMicInput() {
-    static MicInput instance;
-    return instance;
+void cancelMic(const std::shared_ptr<MicState>& state) {
+    state->cancelled = true;
+    EM_ASM({
+        const states = Module.trusscMicStates;
+        const state = states && states.get($0);
+        if (state) { state.cleanup(); states.delete($0); }
+    }, state->webKey);
+    micStates().erase(state->webKey);
+    state->predecessor.reset();
+    state->done = true;
 }
-
-} // namespace trussc
-
-#endif // __EMSCRIPTEN__
+void setMicBackendForTests(MicOpen, MicClose) {}
+}
+int MicInput::selectedBackend() { return -1; }
+}
+#endif

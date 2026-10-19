@@ -19,9 +19,8 @@
 //      between bright and dark colours read as too dark in lower mips —
 //      both noticeably wrong on textures that include high-contrast areas.
 //
-// The source mip level is selected via a per-mip texture view, not through
-// the LOD parameter. The `srcMipLevel` uniform is retained for padding but
-// no longer read by the shader.
+// Native texture views rebase the source mip to LOD 0. GL without texture
+// views (including GLES3) binds the original image and needs an explicit LOD.
 // =============================================================================
 
 @vs vs
@@ -38,6 +37,7 @@ void main() {
 @fs fs
 layout(binding=0) uniform texture2D srcTex;
 layout(binding=0) uniform sampler   srcSmp;
+layout(binding=0) uniform mip_params { vec4 sourceMip; };
 
 in vec2 uv;
 out vec4 frag_color;
@@ -48,16 +48,15 @@ vec3 srgb_to_linear(vec3 c) { return pow(c, vec3(2.2)); }
 vec3 linear_to_srgb(vec3 c) { return pow(c, vec3(1.0 / 2.2)); }
 
 void main() {
-    // The bound view covers exactly one mip level (the source), so sample
-    // at LOD 0 — the view's base level is already the correct source mip.
-    vec2 srcSize = max(vec2(textureSize(sampler2D(srcTex, srcSmp), 0)), vec2(1.0));
+    float lod = sourceMip.x;
+    vec2 srcSize = max(vec2(textureSize(sampler2D(srcTex, srcSmp), int(lod))), vec2(1.0));
     vec2 texel = 1.0 / srcSize;
 
     // Four bilinear taps at ±0.5 source texels = 4x4 source footprint.
-    vec4 s0 = textureLod(sampler2D(srcTex, srcSmp), uv + vec2(-0.5, -0.5) * texel, 0.0);
-    vec4 s1 = textureLod(sampler2D(srcTex, srcSmp), uv + vec2( 0.5, -0.5) * texel, 0.0);
-    vec4 s2 = textureLod(sampler2D(srcTex, srcSmp), uv + vec2(-0.5,  0.5) * texel, 0.0);
-    vec4 s3 = textureLod(sampler2D(srcTex, srcSmp), uv + vec2( 0.5,  0.5) * texel, 0.0);
+    vec4 s0 = textureLod(sampler2D(srcTex, srcSmp), uv + vec2(-0.5, -0.5) * texel, lod);
+    vec4 s1 = textureLod(sampler2D(srcTex, srcSmp), uv + vec2( 0.5, -0.5) * texel, lod);
+    vec4 s2 = textureLod(sampler2D(srcTex, srcSmp), uv + vec2(-0.5,  0.5) * texel, lod);
+    vec4 s3 = textureLod(sampler2D(srcTex, srcSmp), uv + vec2( 0.5,  0.5) * texel, lod);
 
     // Average in linear light, then encode back to sRGB. Alpha stays linear
     // (it's already a linear coverage value, not a perceptual quantity).
@@ -77,12 +76,13 @@ void main() {
 @fs blit_fs
 layout(binding=0) uniform texture2D srcTex;
 layout(binding=0) uniform sampler   srcSmp;
+layout(binding=0) uniform mip_params { vec4 sourceMip; };
 
 in vec2 uv;
 out vec4 frag_color;
 
 void main() {
-    frag_color = textureLod(sampler2D(srcTex, srcSmp), uv, 0.0);
+    frag_color = textureLod(sampler2D(srcTex, srcSmp), uv, sourceMip.x);
 }
 @end
 

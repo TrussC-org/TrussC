@@ -23,9 +23,13 @@ C++20 + sokol で構築されており、シンプルに書けてクロスプラ
 
 | OS | コンパイラ |
 |----|----------|
-| macOS | Xcode Command Line Tools (`xcode-select --install`) |
+| macOS 14+ (Sonoma) | Xcode Command Line Tools (`xcode-select --install`) |
+| iOS 16.4+ | macOS 上の Xcode（iOS SDK） |
 | Windows | Visual Studio 2022 |
 | Linux | GCC 10+ または Clang 10+ |
+
+iOS の最低バージョンは、Metal の BC テクスチャ対応を判定できる 16.4 です。浮動小数点の `std::format` も使えます。
+既存の iOS プロジェクトには `trusscli update` でこのデプロイメントターゲットを適用できます。
 
 **CMake** も必要です。インストールしてください（入れない場合、ビルドが通らないことがあります）:
 ```bash
@@ -63,21 +67,20 @@ Linux では追加の開発パッケージが必要です。ヘルパースク�
 
 ### エディタのセットアップ
 
-#### VSCode
+入れる拡張機能はどのエディタでも共通です。エディタによって変わるのは IntelliSense だけです。
 
-| 拡張機能 | 用途 |
-|-----------|---------|
-| **CMake Tools** | ビルド連携 |
-| **C/C++** | IntelliSense + デバッグ |
-| **CodeLLDB** | デバッグ実行 (macOS / Linux) |
+| 拡張機能 | 用途 | 対象 |
+|-----------|---------|------|
+| **CMake Tools** | ビルド連携 | すべてのエディタ |
+| **CodeLLDB** | デバッグ | すべてのエディタ |
+| **C/C++**（Microsoft） | IntelliSense（Windows ではデバッグも） | VSCode のみ |
+| **clangd** | IntelliSense | VS Code のフォーク（Cursor、Antigravity、VSCodium、Windsurf など） |
 
-#### Cursor
-
-| 拡張機能 | 用途 |
-|-----------|---------|
-| **CMake Tools** | ビルド連携 |
-| **clangd** | IntelliSense (Cursor では C/C++ 拡張が使用不可) |
-| **CodeLLDB** | デバッグ実行 (macOS / Linux) |
+- **VS Code のフォーク**では Microsoft の C/C++ 拡張が動きません（公式の VS Code 以外では起動を拒否します）。そのため clangd を使います。
+- VSCode では C/C++ 拡張と clangd を一緒に入れないでください。IntelliSense がぶつかります。
+- Windows + VSCode でも CodeLLDB を入れて問題ありません。生成される `launch.json` は Windows では C/C++ 拡張のデバッガ（`cppvsdbg`）を使うので、CodeLLDB は使われないだけです。
+- **Windows + VS Code のフォーク**では `cppvsdbg` が使えません。プロジェクトを `--ide cursor` で生成してください（例: `trusscli update --ide cursor`）。この `launch.json` はどの OS でも CodeLLDB を使います。制限として、LLDB は MSVC ビルドを PDB 経由でデバッグするため、変数の表示や式の評価は Visual Studio のデバッガより弱くなります。
+- プロジェクトは IDE を覚えています。その後の `trusscli update`、`trusscli addon add`、`trusscli addon remove` は `--ide cursor`（と `--web` / `--android` / `--ios` のターゲット）を付け直さなくても保ちます。保存先はプロジェクトの `CMakePresets.json` で、マシンごとのファイル（gitignore 対象）なので、clone し直すと `vscode` からになります。戻すときは `trusscli update --ide vscode` です。
 
 ---
 
@@ -264,3 +267,24 @@ myProject/
 - `.ico` - Windows アイコン形式
 - `.png` - ImageMagick があれば `.ico` に自動変換されます
 
+
+## 9. 展示・常設での運用
+
+何日も何週間も無人で動かす場合（展示、サイネージなど）は、ビルドとは別にマシン側の設定が必要です。
+
+- **Windows:** [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md)（英語）で次の設定を説明しています。
+  - Smart App Control
+  - 画面を消さない設定
+  - Windows Update による再起動
+  - ダイアログを出さずにクラッシュダンプを残す方法
+  - 自動起動と再起動
+- **Linux（Raspberry Pi などの SBC）:** 起動時の自動起動とモニタのスリープ対策は、[GET_STARTED_CONSOLE_MODE.md](GET_STARTED_CONSOLE_MODE.md) を参照してください。
+
+相手機器の電源が切れる構成では、`connectAsync()` の前に
+`client.setConnectTimeout(5)` を設定します。既定では OS の TCP 接続期限
+（Linux では約127秒）に任せるため、次の再試行まで約1分待つことがあります。
+展示では IP アドレスで接続し、DNS を待たないようにします。
+接続中の同じホスト・ポートへの `connectAsync()` は何もせず、`isConnecting()`
+で進行中か確認できます。描画ループでは `sendAsync()` を使うと、相手が読まなく
+なっても描画を止めずに送信できます。送信は既定で進捗なし60秒でタイムアウトし、
+エラーを通知して切断します。

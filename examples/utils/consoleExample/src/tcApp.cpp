@@ -1,4 +1,18 @@
 #include "tcApp.h"
+#include <cerrno>
+#include <cmath>
+#include <cstdlib>
+
+namespace {
+bool parseNumber(const string& text, float& value) {
+    char* end = nullptr;
+    errno = 0;
+    value = std::strtof(text.c_str(), &end);
+    // Require a complete, finite number within the float range.
+    return end != text.c_str() && end == text.c_str() + text.size() &&
+           errno == 0 && std::isfinite(value);
+}
+} // namespace
 
 void tcApp::setup() {
     // Listen to console events (retain the listener)
@@ -14,8 +28,12 @@ void tcApp::setup() {
 
         if (e.args[0] == "spawn" && e.args.size() >= 3) {
             // spawn x y - Spawn a ball
-            float x = stof(e.args[1]);
-            float y = stof(e.args[2]);
+            float x, y;
+            if (!parseNumber(e.args[1], x) || !parseNumber(e.args[2], y)) {
+                // JSON output for external process communication (intentionally using cout)
+                cout << "{\"status\":\"error\",\"command\":\"spawn\",\"message\":\"Expected numeric x and y\"}" << endl;
+                return;
+            }
             Ball ball;
             ball.x = x;
             ball.y = y;
@@ -31,6 +49,8 @@ void tcApp::setup() {
             cout << "{\"status\":\"ok\",\"command\":\"clear\"}" << endl;
         }
     });
+
+    console::start();  // Opt in to stdin commands.
 
     // JSON output for external process communication (intentionally using cout)
     cout << "consoleExample started. Ready for commands." << endl;

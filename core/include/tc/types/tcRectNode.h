@@ -151,7 +151,10 @@ public:
             // Use this node's effective camera context, same as the base does.
             auto [ctx, ray] = resolvePickRay(pick, inheritedCtx, globalRay);
             (void)ctx;
-            Mat4 localInverse = getLocalMatrix().inverted();
+            // Degenerate local matrix (an axis scaled to 0): no area, so
+            // nothing in this subtree can be hit.
+            Mat4 localInverse;
+            if (!getLocalMatrix().tryInvert(localInverse)) return HitResult{};
             Mat4 globalInverse = localInverse * parentInverseMatrix;
             Ray localRay = ray.transformed(globalInverse);
 
@@ -188,7 +191,7 @@ protected:
             float gx1 = g1.x, gy1 = g1.y, gx2 = g2.x, gy2 = g2.y;
 
             // Calculate rectangle in screen coordinates (considering DPI scale)
-            float dpi = getDpiScale();
+            float dpi = internal::targetPixelScale();
             float sx = std::min(gx1, gx2) * dpi;
             float sy = std::min(gy1, gy2) * dpi;
             float sw = std::abs(gx2 - gx1) * dpi;

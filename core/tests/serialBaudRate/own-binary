@@ -1,0 +1,1 @@
+Interposes libc ioctl() (fakeDriver.cpp, link-time, whole binary), so it must not share a binary with other tests.

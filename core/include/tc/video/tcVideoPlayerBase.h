@@ -6,13 +6,43 @@
 // Common interface and state management for VideoPlayer and HapPlayer.
 
 #include <string>
+#include <cmath>
 #include <atomic>
 #include <mutex>
 #include <filesystem>
 #include "tc/gpu/tcHasTexture.h"
+#include "tc/events/tcEvent.h"
 #include "tc/utils/tcLoadResult.h"
+#include "tc/utils/tcLog.h"
+#include "tc/utils/tcOnceGate.h"
 
 namespace trussc {
+
+// Runtime playback failure. errorCode is backend-specific, or zero if unavailable.
+struct VideoErrorEventArgs {
+    std::string message;
+    int64_t errorCode = 0;
+};
+
+namespace internal {
+// Backend callbacks only enqueue; the owner consumes errors in update().
+class VideoErrorQueue {
+public:
+    void report(const std::string& message, int64_t code = 0) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (pending_.message.empty()) pending_ = {message, code};
+    }
+    VideoErrorEventArgs take() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        VideoErrorEventArgs result = std::move(pending_);
+        pending_ = {};
+        return result;
+    }
+private:
+    std::mutex mutex_;
+    VideoErrorEventArgs pending_;
+};
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // VideoPlayerBase - Abstract base class for video playback
@@ -44,6 +74,7 @@ public:
         // still holds the last picture, so drawing does not show black.
         // It resets only when the texture actually goes empty/black:
         // load(), stop() (clears the texture) and close().
+        errorStopped_ = false;
         done_ = false;
         playImpl();
         playing_ = true;
@@ -85,6 +116,12 @@ public:
     // =========================================================================
     // State queries
     // =========================================================================
+
+    // Call update() on the main thread to receive runtime errors.
+    // onError listeners are not moved; they stay with their original object.
+    Event<VideoErrorEventArgs> onError;
+    bool hasError() const { return !errorMessage_.empty(); }
+    const std::string& getErrorMessage() const { return errorMessage_; }
 
     bool isPlaying() const { return playing_ && !paused_; }
     bool isPaused() const { return paused_; }
@@ -164,11 +201,33 @@ public:
     // Frame control
     // =========================================================================
 
-    virtual int getCurrentFrame() const = 0;
-    virtual int getTotalFrames() const = 0;
-    virtual void setFrame(int frame) = 0;
-    virtual void nextFrame() = 0;
-    virtual void previousFrame() = 0;
+    virtual float getFrameRate() const = 0;
+
+    // Non-virtual entry points enforce the shared guard before backend dispatch.
+    int getCurrentFrame() const {
+        if (!canUseFrameApis()) return 0;
+        return getCurrentFrameImpl();
+    }
+
+    int getTotalFrames() const {
+        if (!canUseFrameApis()) return 0;
+        return getTotalFramesImpl();
+    }
+
+    void setFrame(int frame) {
+        if (!canUseFrameApis()) return;
+        setFrameImpl(frame);
+    }
+
+    void nextFrame() {
+        if (!canUseFrameApis()) return;
+        nextFrameImpl();
+    }
+
+    void previousFrame() {
+        if (!canUseFrameApis()) return;
+        previousFrameImpl();
+    }
 
     void firstFrame() {
         setFrame(0);
@@ -224,8 +283,10 @@ public:
 
     /// Set the maximum allowed video/audio drift (in seconds) before a hard
     /// re-sync (video seeks to the audio position). Set to 0 or negative to
-    /// disable. Primarily affects the Linux (FFmpeg) backend — other
-    /// platforms delegate sync to their native framework.
+    /// disable hard re-sync. Affects the Linux (FFmpeg) backend and tcxHap's
+    /// HapPlayer, which slews wall-clock time toward playing audio and uses
+    /// this threshold for hard re-sync. Slewing remains enabled when <= 0.
+    /// Other platforms delegate sync to their native framework.
     /// Default: 0.5s
     virtual void setResyncThreshold(float seconds) { resyncThreshold_ = seconds; }
 
@@ -240,6 +301,65 @@ public:
     const Texture& getTexture() const override { return texture_; }
 
 protected:
+    bool canUseFrameApis() const {
+        if (!initialized_) return false;
+        const float rate = getFrameRate();
+        if (std::isfinite(rate) && rate > 0.0f) return true;
+        if (unknownFrameRateWarning_.isFirstTime()) {
+            logWarning("VideoPlayer") << "Frame rate is unknown; frame APIs return 0 or do nothing. "
+                                      "Use getPosition()/setPosition() and getDuration().";
+        }
+        return false;
+    }
+
+    // Reapply persistent settings once the derived player has loaded its backend.
+    // Speed is applied by play(): setting the rate can start native playback.
+    void applyCachedStateToPlatform() {
+        setLoopImpl(loop_);
+        setVolumeImpl(volume_);
+        setPanImpl(pan_);
+    }
+
+    // Safe on decoder threads. No listeners or playback state are touched here.
+    void reportPlaybackError(const std::string& message, int64_t code = 0) {
+        playbackErrors_.report(message, code);
+    }
+
+    // Derived update() calls this on the main thread, outside backend locks.
+    // Return immediately when true: a listener may close or reload this player.
+    bool dispatchPlaybackError(const char* logModule = "VideoPlayer") {
+        auto error = playbackErrors_.take();
+        if (error.message.empty() || errorStopped_) return false;
+        errorMessage_ = error.message;
+        errorStopped_ = true;
+        setPausedImpl(true); // stop without rewinding or replacing the last frame
+        playing_ = false;
+        paused_ = false;
+        frameNew_ = false;
+        done_ = false;
+        logError(logModule) << error.message << " (code " << error.errorCode << ")";
+        onError.notify(error);
+        return true;
+    }
+
+    void clearPlaybackError() {
+        playbackErrors_.take();
+        errorMessage_.clear();
+        errorStopped_ = false;
+    }
+
+    void movePlaybackErrorFrom(VideoPlayerBase& other) {
+        errorMessage_ = std::move(other.errorMessage_);
+        errorStopped_ = other.errorStopped_;
+        auto pending = other.playbackErrors_.take();
+        if (!pending.message.empty()) reportPlaybackError(pending.message, pending.errorCode);
+        other.clearPlaybackError();
+    }
+
+    std::string errorMessage_;
+    bool errorStopped_ = false;
+    internal::VideoErrorQueue playbackErrors_;
+
     // -------------------------------------------------------------------------
     // State (accessible to derived classes)
     // -------------------------------------------------------------------------
@@ -266,6 +386,12 @@ protected:
     // -------------------------------------------------------------------------
     // Implementation methods (to be overridden by derived classes)
     // -------------------------------------------------------------------------
+    virtual int getCurrentFrameImpl() const = 0;
+    virtual int getTotalFramesImpl() const = 0;
+    virtual void setFrameImpl(int frame) = 0;
+    virtual void nextFrameImpl() = 0;
+    virtual void previousFrameImpl() = 0;
+
     virtual void playImpl() = 0;
     virtual void stopImpl() = 0;
     virtual void setPausedImpl(bool paused) = 0;
@@ -288,6 +414,8 @@ protected:
             playing_ = false;
         }
     }
+private:
+    mutable OnceGate unknownFrameRateWarning_;
 };
 
 } // namespace trussc

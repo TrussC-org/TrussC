@@ -6,6 +6,8 @@
 // `args[]` ({type, name, hasDefault, isRef?, isConst?, isPointer?, isArray?}), so
 // binding generation is fully DETERMINISTIC — no string parsing, no heuristics, no
 // denylist. Correctness is verified by COMPILING this output (witness).
+// `TC_LUA_SKIP` on the C++ declaration (e.lua_skip) marks symbols that have no
+// meaning in Lua, such as an RAII guard.
 //
 //   node luagen.js <reference-data.json> > trussc_generated.cpp   (report -> stderr)
 //
@@ -79,6 +81,8 @@ function variantsOf(args) {
     return out;
 }
 
+const { platformGuard } = require('../platform-guards');
+
 function emit(e) {
     if (e.tparams && e.tparams.length) { skip.template++; return ''; }
     // `provider:"std"` symbols (sin/cos/min…) are std's, not trussc:: members —
@@ -110,10 +114,15 @@ for (const id of Object.keys(data)) {
     const e = data[id];
     if (e.kind !== 'func') continue;
     if (e.hidden) { skip.hidden = (skip.hidden || 0) + 1; continue; }   // `hide = true`: public C++ but not API, don't bind
+    if (e.lua_skip) { skip.luaSkip = (skip.luaSkip || 0) + 1; continue; }   // TC_LUA_SKIP: not exposed to Lua
     if (e.owner) { skip.member++; continue; }    // type member -> Phase 2
     if (e.ns) { skip.ns++; continue; }           // sub-namespaced -> Phase 2 (Lua tables)
     const s = emit(e);
-    if (s) { body += s; count++; }
+    if (s) {
+        const guard = platformGuard(e.platforms);
+        body += guard ? `#if ${guard}\n${s}#endif\n` : s;
+        count++;
+    }
 }
 
 process.stdout.write(`// AUTO-GENERATED from reference-data.json by luagen.js — DO NOT EDIT.
@@ -126,7 +135,10 @@ using namespace std;
 // The Lua API deliberately keeps binding deprecated C++ compat names
 // (colorFromHSB, tcLog*, ...) so existing Lua scripts stay stable — this shim
 // layer is exempt from the CI deprecation gate (-Werror=deprecated-declarations).
-#ifndef _MSC_VER
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#else
 #pragma GCC diagnostic push
 #pragma clang diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -136,11 +148,13 @@ using namespace std;
 void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) {
 ${body}}
 
-#ifndef _MSC_VER
+#ifdef _MSC_VER
+#pragma warning(pop)
+#else
 #pragma GCC diagnostic pop
 #pragma clang diagnostic pop
 #endif
 `);
 
-console.error(`[luagen] bound free functions: ${count} | skipped: members ${skip.member}, ns ${skip.ns}, templates ${skip.template}, unbindable ${skip.unbindable}, no-args(structure.js gap) ${skip.noargs}`);
+console.error(`[luagen] bound free functions: ${count} | skipped: members ${skip.member}, ns ${skip.ns}, templates ${skip.template}, unbindable ${skip.unbindable}, TC_LUA_SKIP ${skip.luaSkip || 0}, no-args(structure.js gap) ${skip.noargs}`);
 if (noargsFns.length) console.error(`  missing args[] (report to structure.js): ${[...new Set(noargsFns)].join(', ')}`);

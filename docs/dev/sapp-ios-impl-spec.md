@@ -365,25 +365,44 @@ event)`.
 _sapp_init_event(type);
 // enumerate ALL active touches (event.allTouches), not just the changed set:
 for (UITouch* t in event.allTouches) {
-    if (num_touches+1 < SAPP_MAX_TOUCHPOINTS) {
+    bool changed = [touches containsObject:t];
+    int dst_index = -1;
+    if (num_touches < SAPP_MAX_TOUCHPOINTS) {
+        dst_index = num_touches++;
+    } else {
+        // Warn once via _SAPP_WARN_MSG(TOUCHPOINTS_DROPPED, ...) in the implementation.
+        // A changed overflow point replaces the last kept unchanged point, if any.
+        if (changed) dst_index = last_kept_unchanged_index_or_minus_one;
+    }
+    if (dst_index >= 0) {
         CGPoint p = [t locationInView:_sapp.ios.view];
-        sapp_touchpoint* cp = &event.touches[num_touches++];
+        sapp_touchpoint* cp = &event.touches[dst_index];
         cp->identifier = (uintptr_t)t;              // pointer identity as stable id
         cp->pos_x = p.x * dpi_scale;                // framebuffer-space
         cp->pos_y = p.y * dpi_scale;
-        cp->changed = [touches containsObject:t];   // was THIS the changed touch?
+        cp->changed = changed;                     // was THIS the changed touch?
     }
 }
 if (num_touches > 0) _sapp_call_event(&event);
 ```
 - Event type map: BEGAN→`TOUCHES_BEGAN`, MOVED→`TOUCHES_MOVED`, ENDED→`TOUCHES_ENDED`,
   CANCELLED→`TOUCHES_CANCELLED`.
-- **All active touches are emitted every event**, with `changed` distinguishing which
+- **Up to 32 touchpoints are emitted every event** (`SAPP_MAX_TOUCHPOINTS = 32`,
+  matching `TouchEventArgs::MAX_TOUCHES`; fixed arrays, guarded by a `static_assert`
+  at the TrussC conversion). At or below the cap, `event.allTouches` enumeration
+  order is unchanged and all 32 slots can be used. Only on overflow, changed
+  points replace unchanged points from the tail; existing changed points are
+  retained. If more than 32 points changed, only 32 can fit. The backend emits
+  `_SAPP_WARN_MSG` once on overflow, using an implementation-local once-flag.
+- `changed` distinguishes which
   points this call is about — the app reconstructs deltas from `identifier`. Positions
   are CSS→wait, iOS points × `dpi_scale` = framebuffer pixels.
 - TrussC consumes these in `_event_cb` (TrussC.h:2373–2440): maps to `TouchEventArgs`,
   tracks began/moved/ended, `cancelled` flag from CANCELLED. **Keep the `changed` flag
   and `identifier` semantics intact** — TrussC's touch tracking relies on them.
+- Manual regression check: temporarily lower both caps to 2, use 3 fingers on
+  an iPad, and lift each in turn. Every press/release must contain a changed point,
+  with one overflow warning. Restore 32 and repeat with 8 or more fingers.
 
 ### tvOS press events (6611–6634, 6892–6902) — DEAD-but-kept
 `_sapp_tvos_press_event` maps Apple-TV remote `UIPress` arrow/select/menu/playpause to

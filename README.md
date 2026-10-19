@@ -135,6 +135,7 @@ src/                  # Platform-specific implementations
 - [ADDONS.md](docs/ADDONS.md) - How to use addons
 - [AI_AUTOMATION.md](docs/AI_AUTOMATION.md) - MCP Integration & Automation
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Design philosophy and architecture
+- [CONTRIBUTING.md](docs/CONTRIBUTING.md) - How changes are proposed, decided and merged
 - [BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md) - CMake build system details
 - [ROADMAP.md](docs/ROADMAP.md) - Development roadmap
 

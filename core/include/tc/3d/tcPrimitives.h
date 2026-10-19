@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 
 // 3D primitive generation functions
 // Returns Mesh, so tc/graphics/tcMesh.h must be included first

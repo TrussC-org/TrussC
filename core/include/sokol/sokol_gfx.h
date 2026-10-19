@@ -4854,6 +4854,8 @@ typedef struct sg_stats {
     _SG_LOGITEM_XMACRO(VALIDATE_UPDIMG_USAGE, "sg_update_image: cannot update immutable image") \
     _SG_LOGITEM_XMACRO(VALIDATE_UPDIMG_ONCE, "sg_update_image: only one update allowed per image and frame") \
     _SG_LOGITEM_XMACRO(VALIDATION_FAILED, "validation layer checks failed") \
+    /* [TrussC] Routed to the process-once RenderTarget Notice in tcGlobal.cpp. */ \
+    _SG_LOGITEM_XMACRO(TRUSSC_GL_V3D_RESOLVE_FLUSH, "Mesa V3D: flushing before MSAA resolve (Mesa bug fixed in 25.1.5)") \
 
 #define _SG_LOGITEM_XMACRO(item,msg) SG_LOGITEM_##item,
 typedef enum sg_log_item {
@@ -5382,6 +5384,11 @@ SOKOL_GFX_API_DECL const void* sg_mtl_render_command_encoder(void);
 SOKOL_GFX_API_DECL const void* sg_mtl_compute_command_encoder(void);
 // Metal: return __bridge-casted MTLCommandQueue
 SOKOL_GFX_API_DECL const void* sg_mtl_command_queue(void);
+// [TrussC] Submit and wait for pending Metal commands between passes, without
+// ending the frame or presenting drawables. The next pass lazily starts a new
+// command buffer. Preserves listeners, frame index and uniform ring state.
+// No-op on other backends; requires no active pass on every backend.
+SOKOL_GFX_API_DECL void sg_tc_mtl_flush(void);
 // Metal: get internal __bridge-casted buffer resource objects
 SOKOL_GFX_API_DECL sg_mtl_buffer_info sg_mtl_query_buffer_info(sg_buffer buf);
 // Metal: get internal __bridge-casted image resource objects
@@ -5769,6 +5776,7 @@ inline int sg_append_buffer(sg_buffer buf_id, const sg_range& data) { return sg_
         #define GL_DRAW_FRAMEBUFFER 0x8CA9
         #define GL_FRAMEBUFFER_COMPLETE 0x8CD5
         #define GL_NUM_EXTENSIONS 0x821D
+        #define GL_RENDERER 0x1F01
         #define GL_INFO_LOG_LENGTH 0x8B84
         #define GL_VERTEX_SHADER 0x8B31
         #define GL_INCR 0x1E02
@@ -6549,6 +6557,8 @@ typedef struct {
     _sg_gl_cache_t cache;
     bool ext_anisotropic;
     GLint max_anisotropy;
+    // [TrussC] Mesa V3D requires submission before MSAA resolves (#858).
+    bool v3d_resolve_flush;
     sg_store_action color_store_actions[SG_MAX_COLOR_ATTACHMENTS];
     sg_store_action depth_store_action;
     sg_store_action stencil_store_action;
@@ -6839,6 +6849,7 @@ typedef struct {
     id<MTLRenderCommandEncoder> render_cmd_encoder;
     id<MTLComputeCommandEncoder> compute_cmd_encoder;
     id<CAMetalDrawable> cur_drawable;
+    NSMutableArray* pending_drawables; // [TrussC] present only at sg_commit, never at a mid-frame flush
     id<MTLBuffer> uniform_buffers[SG_NUM_INFLIGHT_FRAMES];
 } _sg_mtl_backend_t;
 
@@ -9098,6 +9109,8 @@ _SOKOL_PRIVATE void _sg_dummy_update_image(_sg_image_t* img, const sg_image_data
     _SG_XMACRO(glBindFramebuffer,                 void, (GLenum target, GLuint framebuffer)) \
     _SG_XMACRO(glBindRenderbuffer,                void, (GLenum target, GLuint renderbuffer)) \
     _SG_XMACRO(glGetStringi,                      const GLubyte *, (GLenum name, GLuint index)) \
+    _SG_XMACRO(glGetString,                       const GLubyte *, (GLenum name)) \
+    _SG_XMACRO(glFlush,                           void, (void)) \
     _SG_XMACRO(glClearBufferfi,                   void, (GLenum buffer, GLint drawbuffer, GLfloat depth, GLint stencil)) \
     _SG_XMACRO(glClearBufferfv,                   void, (GLenum buffer, GLint drawbuffer, const GLfloat * value)) \
     _SG_XMACRO(glClearBufferuiv,                  void, (GLenum buffer, GLint drawbuffer, const GLuint * value)) \
@@ -10626,6 +10639,10 @@ _SOKOL_PRIVATE void _sg_gl_setup_backend(const sg_desc* desc) {
         _sg_gl_init_caps_gles3();
     #endif
 
+    // [TrussC] Native Pi 5 ("V3D 7.1.10.2") / Pi 4 ("V3D 4.2") only; exclude Zink's wrapped Vulkan device name.
+    const char* renderer = (const char*) glGetString(GL_RENDERER);
+    _sg.gl.v3d_resolve_flush = renderer && (strncmp(renderer, "V3D ", 4) == 0);
+
     // create and bind global vertex array object which will be mutated as needed
     glGenVertexArrays(1, &_sg.gl.vao);
     glBindVertexArray(_sg.gl.vao);
@@ -11668,7 +11685,16 @@ _SOKOL_PRIVATE void _sg_gl_end_render_pass(const _sg_attachments_ptrs_t* atts) {
             // perform MSAA resolve if needed
             const _sg_view_t* rsv_view = atts->resolve_views[i];
             if (rsv_view && rsv_view->gl.msaa_resolve_frame_buffer) {
+                // [TrussC] Mesa V3D fast TLB blit bug (#858), fix d0163f1096dac8925579c7ce56d1e2ae50f3fb36 (fixed in Mesa 25.1.5 / 25.2.0); remove once Pi OS ships fixed Mesa.
+                if (_sg.gl.v3d_resolve_flush && !fb_read_bound) {
+                    glFlush();
+                    // [TrussC] Report actual activation through the existing logger bridge.
+                    _SG_INFO(TRUSSC_GL_V3D_RESOLVE_FLUSH);
+                }
                 if (!fb_read_bound) {
+                    // [TrussC] Resolve the whole attachment, regardless of the last draw's scissor (#861).
+                    // Scissor enable isn't cached: _sg_gl_reset_state_cache() keeps it always enabled.
+                    glDisable(GL_SCISSOR_TEST);
                     glBindFramebuffer(GL_READ_FRAMEBUFFER, _sg.gl.fb);
                     fb_read_bound = true;
                 }
@@ -11680,6 +11706,11 @@ _SOKOL_PRIVATE void _sg_gl_end_render_pass(const _sg_attachments_ptrs_t* atts) {
                 glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
                 fb_draw_bound = true;
             }
+        }
+
+        // [TrussC] Restore sokol's always-enabled scissor invariant after all resolve blits (#861).
+        if (fb_read_bound) {
+            glEnable(GL_SCISSOR_TEST);
         }
 
         // invalidate framebuffers
@@ -14724,6 +14755,29 @@ _SOKOL_PRIVATE MTLPrimitiveType _sg_mtl_primitive_type(sg_primitive_type t) {
 }
 
 _SOKOL_PRIVATE MTLPixelFormat _sg_mtl_pixel_format(sg_pixel_format fmt) {
+    // [TrussC] BC mappings on iOS (#645). Guard the iOS 16.4 enum values
+    // so existing projects targeting 16.3 also build without availability warnings.
+    #if !defined(_SG_TARGET_MACOS)
+    if (@available(iOS 16.4, *)) {
+    #endif
+    switch (fmt) {
+        case SG_PIXELFORMAT_BC1_RGBA:               return MTLPixelFormatBC1_RGBA;
+        case SG_PIXELFORMAT_BC2_RGBA:               return MTLPixelFormatBC2_RGBA;
+        case SG_PIXELFORMAT_BC3_RGBA:               return MTLPixelFormatBC3_RGBA;
+        case SG_PIXELFORMAT_BC3_SRGBA:              return MTLPixelFormatBC3_RGBA_sRGB;
+        case SG_PIXELFORMAT_BC4_R:                  return MTLPixelFormatBC4_RUnorm;
+        case SG_PIXELFORMAT_BC4_RSN:                return MTLPixelFormatBC4_RSnorm;
+        case SG_PIXELFORMAT_BC5_RG:                 return MTLPixelFormatBC5_RGUnorm;
+        case SG_PIXELFORMAT_BC5_RGSN:               return MTLPixelFormatBC5_RGSnorm;
+        case SG_PIXELFORMAT_BC6H_RGBF:              return MTLPixelFormatBC6H_RGBFloat;
+        case SG_PIXELFORMAT_BC6H_RGBUF:             return MTLPixelFormatBC6H_RGBUfloat;
+        case SG_PIXELFORMAT_BC7_RGBA:               return MTLPixelFormatBC7_RGBAUnorm;
+        case SG_PIXELFORMAT_BC7_SRGBA:              return MTLPixelFormatBC7_RGBAUnorm_sRGB;
+        default: break;
+    }
+    #if !defined(_SG_TARGET_MACOS)
+    }
+    #endif
     switch (fmt) {
         case SG_PIXELFORMAT_R8:                     return MTLPixelFormatR8Unorm;
         case SG_PIXELFORMAT_R8SN:                   return MTLPixelFormatR8Snorm;
@@ -14768,20 +14822,7 @@ _SOKOL_PRIVATE MTLPixelFormat _sg_mtl_pixel_format(sg_pixel_format fmt) {
         case SG_PIXELFORMAT_RGBA32F:                return MTLPixelFormatRGBA32Float;
         case SG_PIXELFORMAT_DEPTH:                  return MTLPixelFormatDepth32Float;
         case SG_PIXELFORMAT_DEPTH_STENCIL:          return MTLPixelFormatDepth32Float_Stencil8;
-        #if defined(_SG_TARGET_MACOS)
-        case SG_PIXELFORMAT_BC1_RGBA:               return MTLPixelFormatBC1_RGBA;
-        case SG_PIXELFORMAT_BC2_RGBA:               return MTLPixelFormatBC2_RGBA;
-        case SG_PIXELFORMAT_BC3_RGBA:               return MTLPixelFormatBC3_RGBA;
-        case SG_PIXELFORMAT_BC3_SRGBA:              return MTLPixelFormatBC3_RGBA_sRGB;
-        case SG_PIXELFORMAT_BC4_R:                  return MTLPixelFormatBC4_RUnorm;
-        case SG_PIXELFORMAT_BC4_RSN:                return MTLPixelFormatBC4_RSnorm;
-        case SG_PIXELFORMAT_BC5_RG:                 return MTLPixelFormatBC5_RGUnorm;
-        case SG_PIXELFORMAT_BC5_RGSN:               return MTLPixelFormatBC5_RGSnorm;
-        case SG_PIXELFORMAT_BC6H_RGBF:              return MTLPixelFormatBC6H_RGBFloat;
-        case SG_PIXELFORMAT_BC6H_RGBUF:             return MTLPixelFormatBC6H_RGBUfloat;
-        case SG_PIXELFORMAT_BC7_RGBA:               return MTLPixelFormatBC7_RGBAUnorm;
-        case SG_PIXELFORMAT_BC7_SRGBA:              return MTLPixelFormatBC7_RGBAUnorm_sRGB;
-        #else
+        #if !defined(_SG_TARGET_MACOS)
         case SG_PIXELFORMAT_ETC2_RGB8:              return MTLPixelFormatETC2_RGB8;
         case SG_PIXELFORMAT_ETC2_SRGB8:             return MTLPixelFormatETC2_RGB8_sRGB;
         case SG_PIXELFORMAT_ETC2_RGB8A1:            return MTLPixelFormatETC2_RGB8A1;
@@ -15248,7 +15289,16 @@ _SOKOL_PRIVATE void _sg_mtl_init_caps(void) {
     #endif
     _sg_pixelformat_srmd(&_sg.formats[SG_PIXELFORMAT_DEPTH]);
     _sg_pixelformat_srmd(&_sg.formats[SG_PIXELFORMAT_DEPTH_STENCIL]);
+    // [TrussC] Enable BC on iOS only when the device supports it (#645).
+    bool supports_bc = false;
     #if defined(_SG_TARGET_MACOS)
+        supports_bc = true;
+    #else
+        if (@available(iOS 16.4, *)) {
+            supports_bc = [_sg.mtl.device supportsBCTextureCompression];
+        }
+    #endif
+    if (supports_bc) {
         _sg_pixelformat_sf(&_sg.formats[SG_PIXELFORMAT_BC1_RGBA]);
         _sg_pixelformat_sf(&_sg.formats[SG_PIXELFORMAT_BC2_RGBA]);
         _sg_pixelformat_sf(&_sg.formats[SG_PIXELFORMAT_BC3_RGBA]);
@@ -15261,7 +15311,8 @@ _SOKOL_PRIVATE void _sg_mtl_init_caps(void) {
         _sg_pixelformat_sf(&_sg.formats[SG_PIXELFORMAT_BC6H_RGBUF]);
         _sg_pixelformat_sf(&_sg.formats[SG_PIXELFORMAT_BC7_RGBA]);
         _sg_pixelformat_sf(&_sg.formats[SG_PIXELFORMAT_BC7_SRGBA]);
-    #else
+    }
+    #if !defined(_SG_TARGET_MACOS)
         _sg_pixelformat_sf(&_sg.formats[SG_PIXELFORMAT_ETC2_RGB8]);
         _sg_pixelformat_sf(&_sg.formats[SG_PIXELFORMAT_ETC2_SRGB8]);
         _sg_pixelformat_sf(&_sg.formats[SG_PIXELFORMAT_ETC2_RGB8A1]);
@@ -15330,6 +15381,7 @@ _SOKOL_PRIVATE void _sg_mtl_setup_backend(const sg_desc* desc) {
     _sg.mtl.sem = dispatch_semaphore_create(SG_NUM_INFLIGHT_FRAMES);
     _sg.mtl.device = (__bridge id<MTLDevice>) desc->environment.metal.device;
     _sg.mtl.cmd_queue = [_sg.mtl.device newCommandQueue];
+    _sg.mtl.pending_drawables = [[NSMutableArray alloc] init]; // [TrussC]
 
     for (int i = 0; i < SG_NUM_INFLIGHT_FRAMES; i++) {
         _sg.mtl.uniform_buffers[i] = [_sg.mtl.device
@@ -15379,6 +15431,7 @@ _SOKOL_PRIVATE void _sg_mtl_discard_backend(void) {
     _SG_OBJC_RELEASE(_sg.mtl.sem);
     _SG_OBJC_RELEASE(_sg.mtl.device);
     _SG_OBJC_RELEASE(_sg.mtl.cmd_queue);
+    _SG_OBJC_RELEASE(_sg.mtl.pending_drawables); // [TrussC]
     for (int i = 0; i < SG_NUM_INFLIGHT_FRAMES; i++) {
         _SG_OBJC_RELEASE(_sg.mtl.uniform_buffers[i]);
     }
@@ -16187,7 +16240,7 @@ _SOKOL_PRIVATE void _sg_mtl_begin_render_pass(const sg_pass* pass, const _sg_att
             pass_desc.colorAttachments[0].resolveTexture = _sg.mtl.cur_drawable.texture;
             // [TrussC] Modified by tettou771: honor the swapchain-pass "preserve
             // contents" hint (action->depth.store_action == SG_STOREACTION_STORE,
-            // set by trussc::ensureSwapchainPass/resumeSwapchainPass for passes
+            // set by the RenderTarget continuation policy for passes
             // that may be suspended and resumed within one frame). Upstream
             // hardcodes MultisampleResolve, which discards the msaa texture, so
             // a later pass on the same swapchain with SG_LOADACTION_LOAD would
@@ -16243,15 +16296,11 @@ _SOKOL_PRIVATE void _sg_mtl_begin_render_pass(const sg_pass* pass, const _sg_att
     #endif
 }
 
-_SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachments_ptrs_t* atts) {
-    SOKOL_ASSERT(pass && atts);
+// [TrussC modification] Every committed frame must take an in-flight slot,
+// even when uploads are its only work. Use the same command buffer creation
+// and completion handler for the first pass and for a pass-less commit (#332).
+_SOKOL_PRIVATE void _sg_mtl_ensure_command_buffer(void) {
     SOKOL_ASSERT(_sg.mtl.cmd_queue);
-    SOKOL_ASSERT(nil == _sg.mtl.compute_cmd_encoder);
-    SOKOL_ASSERT(nil == _sg.mtl.render_cmd_encoder);
-    SOKOL_ASSERT(nil == _sg.mtl.cur_drawable);
-    _sg_mtl_clear_state_cache();
-
-    // if this is the first pass in the frame, create one command buffer and blit-cmd-encoder for the entire frame
     if (nil == _sg.mtl.cmd_buffer) {
         // block until the oldest frame in flight has finished
         dispatch_semaphore_wait(_sg.mtl.sem, DISPATCH_TIME_FOREVER);
@@ -16267,6 +16316,19 @@ _SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachment
             dispatch_semaphore_signal(_sg.mtl.sem);
         }];
     }
+}
+// [TrussC modification end]
+
+_SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachments_ptrs_t* atts) {
+    SOKOL_ASSERT(pass && atts);
+    SOKOL_ASSERT(_sg.mtl.cmd_queue);
+    SOKOL_ASSERT(nil == _sg.mtl.compute_cmd_encoder);
+    SOKOL_ASSERT(nil == _sg.mtl.render_cmd_encoder);
+    SOKOL_ASSERT(nil == _sg.mtl.cur_drawable);
+    _sg_mtl_clear_state_cache();
+
+    // [TrussC modification] Shared with upload-only commits (#332).
+    _sg_mtl_ensure_command_buffer();
 
     // if this is first pass in frame, get uniform buffer base pointer
     if (0 == _sg.mtl.cur_ub_base_ptr) {
@@ -16314,9 +16376,13 @@ _SOKOL_PRIVATE void _sg_mtl_end_pass(const _sg_attachments_ptrs_t* atts) {
         // NOTE: MTLComputeCommandEncoder is autoreleased
         _sg.mtl.compute_cmd_encoder = nil;
     }
-    // if this is a swapchain pass, present the drawable
+    // [TrussC] A mid-frame readback may submit this command buffer. Queue
+    // presentation until sg_commit so suspended/resumed swapchains remain ours.
+    // A drawable used by several passes is presented only once.
     if (nil != _sg.mtl.cur_drawable) {
-        [_sg.mtl.cmd_buffer presentDrawable:_sg.mtl.cur_drawable];
+        if (![_sg.mtl.pending_drawables containsObject:_sg.mtl.cur_drawable]) {
+            [_sg.mtl.pending_drawables addObject:_sg.mtl.cur_drawable];
+        }
         _sg.mtl.cur_drawable = nil;
     }
 }
@@ -16325,10 +16391,18 @@ _SOKOL_PRIVATE void _sg_mtl_commit(void) {
     SOKOL_ASSERT(nil == _sg.mtl.render_cmd_encoder);
     SOKOL_ASSERT(nil == _sg.mtl.compute_cmd_encoder);
 
-    // commit the frame's command buffer
-    if (_sg.mtl.cmd_buffer) {
-        [_sg.mtl.cmd_buffer commit];
+    // [TrussC modification] An upload-only frame still advances frame_index
+    // and the uniform ring. Acquire its slot and submit an empty command
+    // buffer so completion ordering also protects deferred resource GC (#332).
+    _sg_mtl_ensure_command_buffer();
+    // [TrussC] Present only at the real commit, including after a flush with
+    // no subsequent pass. #599 already guarantees this final command buffer.
+    for (id<CAMetalDrawable> drawable in _sg.mtl.pending_drawables) {
+        [_sg.mtl.cmd_buffer presentDrawable:drawable];
     }
+    [_sg.mtl.pending_drawables removeAllObjects];
+    [_sg.mtl.cmd_buffer commit];
+    // [TrussC modification end]
 
     // garbage-collect resources pending for release
     _sg_mtl_garbage_collect(_sg.frame_index);
@@ -26556,6 +26630,26 @@ SOKOL_API_IMPL const void* sg_mtl_command_queue(void) {
         }
     #else
         return 0;
+    #endif
+}
+
+// [TrussC] Synchronous mid-frame submission for Fbo readback (#270).
+SOKOL_API_IMPL void sg_tc_mtl_flush(void) {
+    SOKOL_ASSERT(_sg.valid);
+    SOKOL_ASSERT(!_sg.cur_pass.in_pass);
+    #if defined(SOKOL_METAL)
+        SOKOL_ASSERT(nil == _sg.mtl.render_cmd_encoder);
+        SOKOL_ASSERT(nil == _sg.mtl.compute_cmd_encoder);
+        if (_sg.mtl.cmd_buffer) {
+            [_sg.mtl.cmd_buffer commit];
+            // Extra command buffers must not turn the in-flight semaphore into
+            // permission to reuse a uniform ring slot still read by the GPU.
+            // Waiting drains preceding submissions on this same queue too.
+            // The installed completion handler returns this buffer's permit;
+            // do not signal it here. Keep the current uniform offset/base/slot.
+            [_sg.mtl.cmd_buffer waitUntilCompleted];
+            _sg.mtl.cmd_buffer = nil;
+        }
     #endif
 }
 

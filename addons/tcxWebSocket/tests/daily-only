@@ -1,0 +1,3 @@
+This harness links tcxWebSocket, which depends on tcxTls and so builds mbedTLS;
+that is heavy for the per-PR CI lane.
+examples/build_all.py runs it only with --include-daily (daily.yml passes it).

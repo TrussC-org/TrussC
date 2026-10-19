@@ -1,0 +1,45 @@
+# Weekly upstream check (#407): asks each third-party upstream in the one
+# list (docs/LICENSE.md, "Third-Party Libraries") whether something newer
+# exists, with tools/check_upstream_versions.py, and comments on one tracking
+# issue, "Third-party updates available", the same way daily.yml reports
+# failures. It comments only when the set of entries with something newer
+# changes, so the issue does not get the same comment every week. It never
+# changes a version and never blocks anything: a person reads the upstream
+# release notes and decides. The PR-time check that the list matches the
+# build runs separately in build.yml (tools/check_dependencies.py).
+#
+# Weekly, not part of daily.yml: upstream releases are rare, and daily.yml
+# skips its run when main has not changed, which says nothing about upstream.
+name: Upstream check
+
+on:
+  schedule:
+    - cron: '23 0 * * 1' # Mondays 00:23 UTC = 09:23 JST
+  workflow_dispatch:
+
+concurrency:
+  group: upstream-check
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  upstream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Test upstream reporting without network
+        run: python3 -m unittest discover -s tools/tests -p test_upstream_check.py -v
+
+      - name: Ask each upstream for its newest release
+        run: python3 tools/check_upstream_versions.py --body upstream.md --fingerprint upstream.key
+
+      - name: Comment on the tracking issue when the set changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 tools/update_upstream_issue.py --body upstream.md --fingerprint upstream.key

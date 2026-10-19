@@ -10,6 +10,11 @@
 #include <cstdint>
 #include <functional>
 #include <thread>
+#include <array>
+#include <atomic>
+#include <limits>
+#include <tc/utils/tcLog.h>
+#include <utility>
 
 // HAP reference decoder (BSD-2-Clause)
 extern "C" {
@@ -66,10 +71,21 @@ inline size_t getBytesPerBlock(HapFormat format) {
 // Calculate texture data size
 inline size_t calculateTextureSize(uint32_t width, uint32_t height, HapFormat format) {
     // DXT textures are 4x4 block compressed
-    uint32_t blocksX = (width + 3) / 4;
-    uint32_t blocksY = (height + 3) / 4;
-    return blocksX * blocksY * getBytesPerBlock(format);
+    const size_t blockSize = getBytesPerBlock(format);
+    const uint64_t blocksX = (uint64_t(width) + 3) / 4;
+    const uint64_t blocksY = (uint64_t(height) + 3) / 4;
+    // Bound (abi): Texture bytes must fit size_t and HAP unsigned long; Overflow rejects the frame and is counted.
+    const size_t limit = std::numeric_limits<size_t>::max() < std::numeric_limits<unsigned long>::max() ?
+                         std::numeric_limits<size_t>::max() : std::numeric_limits<unsigned long>::max();
+    if (blockSize == 0 || blocksX == 0 || blocksY == 0 || blocksX > limit / blockSize / blocksY) return 0;
+    return size_t(blocksX * blocksY * blockSize);
 }
+
+} // namespace tcx::hap
+
+#include "impl/tcxHapFrameValidation.h"
+
+namespace tcx::hap {
 
 // -----------------------------------------------------------------------------
 // Decoded frame result
@@ -92,8 +108,9 @@ class HapDecoder {
 public:
     HapDecoder() = default;
 
-    // Get last chunk count (for debugging, -1 = callback not called)
+    // Get last decoded chunk count (for debugging, -1 = no count available)
     int getLastChunkCount() const { return lastChunkCount_; }
+    uint64_t getInvalidFrameCount() const { return invalidFrameCount_; }
 
     // Decode a HAP frame
     // Input: raw HAP frame data from MOV container
@@ -102,27 +119,12 @@ public:
                 uint32_t width, uint32_t height,
                 HapDecodedFrame& result) {
 
-        if (!frameData || frameSize == 0) {
-            return false;
-        }
-
-        // Get texture count (HAP can have multiple textures per frame)
-        unsigned int textureCount = 0;
-        unsigned int hapResult = HapGetFrameTextureCount(frameData, frameSize, &textureCount);
-        if (hapResult != HapResult_No_Error || textureCount == 0) {
-            return false;
-        }
-
-        // Get format of first texture
-        unsigned int hapFormat = 0;
-        hapResult = HapGetFrameTextureFormat(frameData, frameSize, 0, &hapFormat);
-        if (hapResult != HapResult_No_Error) {
-            return false;
-        }
-
-        result.format = hapTextureFormatToEnum(hapFormat);
-        if (result.format == HapFormat::Unknown) {
-            return false;
+        result = {};
+        lastChunkCount_ = -1;
+        lastErrorCode_ = HapResult_Bad_Frame;
+        if (!detail::validateHapFrame(frameData, frameSize, width, height, result.format)) {
+            result = {};
+            return invalidFrame();
         }
 
         result.width = width;
@@ -136,7 +138,7 @@ public:
         unsigned long bytesUsed = 0;
         unsigned int outputFormat = 0;
 
-        hapResult = HapDecode(
+        unsigned int hapResult = HapDecode(
             frameData, frameSize,
             0,  // texture index
             hapDecodeCallback, this,
@@ -144,11 +146,15 @@ public:
             &bytesUsed, &outputFormat
         );
 
-        if (hapResult != HapResult_No_Error) {
-            result.data.clear();
-            return false;
+        lastErrorCode_ = hapResult == HapResult_No_Error && bytesUsed != outputSize ?
+                         HapResult_Bad_Frame : hapResult;
+        if (hapResult != HapResult_No_Error || bytesUsed != outputSize) {
+            result = {};
+            return lastErrorCode_ == HapResult_Bad_Frame ? invalidFrame() : false;
         }
 
+        // HAP decodes simple single-chunk frames without invoking the callback.
+        if (lastChunkCount_ < 0) lastChunkCount_ = 1;
         return true;
     }
 
@@ -158,25 +164,19 @@ public:
                         uint8_t* outputBuffer, size_t outputBufferSize,
                         HapFormat& outFormat) {
 
-        if (!frameData || frameSize == 0 || !outputBuffer) {
-            return false;
-        }
-
-        // Get format
-        unsigned int hapFormat = 0;
-        unsigned int hapResult = HapGetFrameTextureFormat(frameData, frameSize, 0, &hapFormat);
-        if (hapResult != HapResult_No_Error) {
-            return false;
-        }
-
-        outFormat = hapTextureFormatToEnum(hapFormat);
-        if (outFormat == HapFormat::Unknown) {
-            return false;
+        lastChunkCount_ = -1;
+        lastErrorCode_ = HapResult_Bad_Arguments;
+        outFormat = HapFormat::Unknown;
+        if (!outputBuffer) return false;
+        if (!detail::validateHapFrame(frameData, frameSize, width, height, outFormat)) {
+            outFormat = HapFormat::Unknown;
+            return invalidFrame();
         }
 
         // Verify buffer size
         size_t requiredSize = calculateTextureSize(width, height, outFormat);
         if (outputBufferSize < requiredSize) {
+            lastErrorCode_ = HapResult_Buffer_Too_Small;
             return false;
         }
 
@@ -184,19 +184,41 @@ public:
         unsigned long bytesUsed = 0;
         unsigned int outputFormatOut = 0;
 
-        hapResult = HapDecode(
+        unsigned int hapResult = HapDecode(
             frameData, frameSize,
             0,
             hapDecodeCallback, this,
-            outputBuffer, outputBufferSize,
+            outputBuffer, requiredSize,
             &bytesUsed, &outputFormatOut
         );
 
-        return hapResult == HapResult_No_Error;
+        lastErrorCode_ = hapResult == HapResult_No_Error && bytesUsed != requiredSize ?
+                         HapResult_Bad_Frame : hapResult;
+        if (lastErrorCode_ != HapResult_No_Error) {
+            outFormat = HapFormat::Unknown;
+            return lastErrorCode_ == HapResult_Bad_Frame ? invalidFrame() : false;
+        }
+        // HAP decodes simple single-chunk frames without invoking the callback.
+        if (lastChunkCount_ < 0) lastChunkCount_ = 1;
+        return true;
     }
 
 private:
-    mutable int lastChunkCount_ = -1;  // -1 = callback never called
+    friend class HapPlayer;
+    unsigned int lastErrorCode_ = 0;
+    mutable int lastChunkCount_ = -1;  // -1 = no count available
+    // Copies preserve the diagnostic state; later warnings are independent.
+    bool invalidFrameWarned_ = false;
+    uint64_t invalidFrameCount_ = 0;
+
+    bool invalidFrame() {
+        lastErrorCode_ = HapResult_Bad_Frame;
+        ++invalidFrameCount_;
+        if (!std::exchange(invalidFrameWarned_, true)) {
+            trussc::logWarning("HapDecoder") << "Skipping invalid HAP frame; invalid frames will be skipped";
+        }
+        return false;
+    }
 
     // HAP decode callback for parallel decoding
     static void hapDecodeCallback(HapDecodeWorkFunction work, void* p, unsigned int count, void* info) {
@@ -214,18 +236,34 @@ private:
             return;
         }
 
-        // Parallel decode using threads
-        std::vector<std::thread> threads;
-        threads.reserve(count);
-
-        for (unsigned int i = 0; i < count; i++) {
-            threads.emplace_back([work, p, i]() {
+        // Bound (resource): File-controlled chunk counts must not determine OS thread usage.
+        constexpr unsigned int maxWorkers = 8;
+        std::array<std::thread, maxWorkers> threads;
+        std::atomic<unsigned int> nextChunk{0};
+        auto decodeChunks = [&]() {
+            for (;;) {
+                const unsigned int i = nextChunk.fetch_add(1, std::memory_order_relaxed);
+                if (i >= count) return;
                 work(p, i);
-            });
+            }
+        };
+        const unsigned int workerCount = count < maxWorkers ? count : maxWorkers;
+        try {
+            for (unsigned int i = 0; i < workerCount; ++i) {
+                threads[i] = std::thread(decodeChunks);
+            }
+        } catch (...) {
+            // A failed thread construction must not unwind past joinable workers.
+            for (auto& t : threads) {
+                if (t.joinable()) t.join();
+            }
+            decodeChunks();
+            return;
         }
 
+        // Workers and their captured callback data never outlive this call.
         for (auto& t : threads) {
-            t.join();
+            if (t.joinable()) t.join();
         }
     }
 };
@@ -236,22 +274,21 @@ private:
 
 // Check if data looks like a HAP frame
 inline bool isHapFrame(const uint8_t* data, size_t size) {
-    if (!data || size < 4) return false;
-
-    unsigned int textureCount = 0;
-    unsigned int result = HapGetFrameTextureCount(data, size, &textureCount);
-    return result == HapResult_No_Error && textureCount > 0;
+    HapFormat format = HapFormat::Unknown;
+    return detail::validateHapFrame(data, size, 0, 0, format, false);
 }
 
 // Get HAP format from frame data
 inline HapFormat getHapFrameFormat(const uint8_t* data, size_t size) {
-    if (!data || size < 4) return HapFormat::Unknown;
-
-    unsigned int hapFormat = 0;
-    unsigned int result = HapGetFrameTextureFormat(data, size, 0, &hapFormat);
-    if (result != HapResult_No_Error) return HapFormat::Unknown;
-
-    return hapTextureFormatToEnum(hapFormat);
+    // Discovery only reads the texture header; decode validates its tables/data.
+    detail::HapSection texture;
+    if (!data || !detail::readHapSection(data, size, texture)) return HapFormat::Unknown;
+    if (texture.type == 0xd) {
+        detail::HapSection first;
+        if (!detail::readHapSection(texture.data, texture.size, first)) return HapFormat::Unknown;
+        texture = first;
+    }
+    return detail::hapSectionFormat(texture.type);
 }
 
 } // namespace tcx::hap

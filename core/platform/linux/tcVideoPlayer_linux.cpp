@@ -67,7 +67,7 @@ public:
     void update(VideoPlayer* player);
 
     bool hasNewFrame() const { return hasNewFrame_; }
-    bool isFinished() const { return isFinished_; }
+    bool isFinished() const { return isFinished_ && !isLoop_ && !isPlaying_; }
 
     float getPosition() const;
     void setPosition(float pct);
@@ -77,6 +77,7 @@ public:
     void setSpeed(float speed);
     void setLoop(bool loop);
 
+    float getFrameRate() const { return static_cast<float>(frameRate_); }
     int getCurrentFrame() const;
     int getTotalFrames() const;
     void setFrame(int frame);
@@ -106,6 +107,29 @@ private:
     bool loadAudioForPlayback();
     void decodeThread();
     bool decodeNextFrame();
+    internal::VideoErrorQueue playbackErrors_;
+    // Both decode paths share a per-player budget. Only the decoder accesses
+    // these counters; include the current skip in each report, then reset.
+    OnceGate invalidDataWarningGate_{5.0};
+    uint64_t skippedInvalidPackets_ = 0;
+    uint64_t skippedInvalidFrames_ = 0;
+    void warnInvalidData(bool packet) {
+        if (packet) ++skippedInvalidPackets_;
+        else ++skippedInvalidFrames_;
+        if (!invalidDataWarningGate_.isFirstTime()) return;
+        logWarning("VideoPlayer")
+            << (packet ? "avcodec_send_packet: skipping invalid packet" :
+                         "avcodec_receive_frame: skipping invalid frame")
+            << "; skipped " << skippedInvalidPackets_ << " invalid packets and "
+            << skippedInvalidFrames_ << " invalid frames since the last report";
+        skippedInvalidPackets_ = skippedInvalidFrames_ = 0;
+    }
+    void decodeError(const char* operation, int code) {
+        char message[AV_ERROR_MAX_STRING_SIZE];
+        av_strerror(code, message, sizeof(message));
+        isPlaying_ = false;
+        playbackErrors_.report(std::string(operation) + ": " + message, code);
+    }
     void seekToTime(double seconds);
     void probeHwOutputFormat();
 
@@ -143,7 +167,7 @@ private:
     int width_ = 0;
     int height_ = 0;
     double duration_ = 0.0;
-    double frameRate_ = 30.0;
+    double frameRate_ = 0.0;
     AVRational timeBase_ = {1, 1};
 
     // Playback state
@@ -159,6 +183,7 @@ private:
 
     float volume_ = 1.0f;
     float speed_ = 1.0f;
+    double lastAudioPts_ = 0.0;
 
     // Threading
     std::thread decodeThread_;
@@ -173,6 +198,7 @@ private:
         double pts;
     };
     std::queue<FrameData> frameQueue_;
+    // Bound (security): decoded file frames can outpace presentation; a cap keeps queued frame memory finite. Overflow waits for the consumer before decoding more.
     static constexpr size_t MAX_QUEUE_SIZE = 4;
 
     // Timing
@@ -317,6 +343,8 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     height_ = codecCtx_->height;
     timeBase_ = videoStream->time_base;
 
+    // Unknown metadata must not retain a previous rate or guess 30 fps.
+    frameRate_ = 0.0;
     // Calculate frame rate
     if (videoStream->avg_frame_rate.num > 0 && videoStream->avg_frame_rate.den > 0) {
         frameRate_ = av_q2d(videoStream->avg_frame_rate);
@@ -372,10 +400,18 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
 
     isLoaded_ = true;
 
-    // Pre-decode audio for playback using FFmpeg (audio stream only)
+    // Audio uses the shared stream worker unless the app opts into preloading.
     if (hasAudio_) {
-        if (loadAudioForPlayback()) {
-            logNotice("VideoPlayer") << "Audio decoded and ready";
+        bool ready = false;
+        try {
+            ready = player->isAudioStreaming()
+                ? (bool)internal::loadFFmpegAudioStream(utf8ToPath(filePath_), audioSound_)
+                : loadAudioForPlayback();
+        } catch (const std::bad_alloc&) {
+            logWarning("VideoPlayer") << "Not enough memory to load audio; continuing video-only";
+        }
+        if (ready) {
+            logNotice("VideoPlayer") << "Audio ready";
         } else {
             logWarning("VideoPlayer") << "Failed to decode audio";
         }
@@ -456,6 +492,7 @@ void TCVideoPlayerImpl::close() {
     width_ = 0;
     height_ = 0;
     audioSound_.stop();
+    audioSound_ = Sound{};
     audioBuffer_.reset();
     hasAudio_ = false;
     audioStreamIndex_ = -1;
@@ -487,10 +524,11 @@ void TCVideoPlayerImpl::play() {
     isPaused_ = false;
     cv_.notify_all();
 
-    if (audioBuffer_) {
+    if (audioSound_.isLoaded()) {
         audioSound_.play();
         audioSound_.setPosition(static_cast<float>(currentPts_));
         audioSound_.setVolume(volume_);
+        lastAudioPts_ = currentPts_;
     }
 }
 
@@ -526,7 +564,7 @@ void TCVideoPlayerImpl::setPaused(bool paused) {
         cv_.notify_all();
     }
 
-    if (audioBuffer_) {
+    if (audioSound_.isLoaded()) {
         if (paused) audioSound_.pause();
         else audioSound_.resume();
     }
@@ -535,13 +573,30 @@ void TCVideoPlayerImpl::setPaused(bool paused) {
 void TCVideoPlayerImpl::update(VideoPlayer* player) {
     hasNewFrame_ = false;
 
+    auto error = playbackErrors_.take();
+    if (!error.message.empty()) {
+        if (player) internal::VideoPlayerPlatformAccess::reportError(*player, error);
+        return;
+    }
     if (!isLoaded_ || !isPlaying_ || isPaused_) return;
 
     // Target PTS: use audio as master clock when available (no drift).
-    // Fall back to wall clock for audio-less videos.
+    // Fall back to wall clock when audio is absent or its voice has stopped.
     double targetPts;
-    if (audioBuffer_) {
+    if (audioSound_.isPlaying()) {
         targetPts = audioSound_.getPosition();
+        // Keep a wall-clock anchor ready in case the audio voice stops.
+        if (speed_ > 0.0f)
+            playbackStartTime_ = av_gettime_relative() / 1000000.0 - targetPts / speed_;
+        // The stream worker pre-fills across EOF; eager voices wrap in the
+        // mixer. Follow their clock without resetting audio at video EOF.
+        if (isLoop_ && targetPts < lastAudioPts_) {
+            seekToTime(targetPts);
+            isFinished_ = false;
+            lastAudioPts_ = targetPts;
+            return;
+        }
+        lastAudioPts_ = targetPts;
     } else {
         double elapsed = av_gettime_relative() / 1000000.0 - playbackStartTime_;
         targetPts = elapsed * speed_;
@@ -596,11 +651,20 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
     // Check if finished
     if (frameQueue_.empty() && isFinished_) {
         if (isLoop_) {
-            if (audioBuffer_) {
-                audioSound_.setPosition(0.0f);
+            if (audioSound_.isPlaying()) {
+                // Both stream and eager voices loop in the mixer. Wait for
+                // the audio clock to wrap, then seek only the video above.
+                cv_.notify_all();
+                return;
             }
             seekToTime(0.0);
             playbackStartTime_ = av_gettime_relative() / 1000000.0;
+            if (audioSound_.isLoaded()) {
+                // Recover a stopped voice at the video loop boundary.
+                audioSound_.play();
+                audioSound_.setPosition(0.0f);
+                lastAudioPts_ = 0.0;
+            }
             isFinished_ = false;
             cv_.notify_all();
         } else {
@@ -618,7 +682,7 @@ void TCVideoPlayerImpl::decodeThread() {
             std::unique_lock<std::mutex> lock(mutex_);
             cv_.wait(lock, [this] {
                 return shouldStop_ ||
-                       (isPlaying_ && !isPaused_ && frameQueue_.size() < MAX_QUEUE_SIZE) ||
+                       (isPlaying_ && !isPaused_ && !isFinished_ && frameQueue_.size() < MAX_QUEUE_SIZE) ||
                        seekRequested_;
             });
         }
@@ -633,6 +697,7 @@ void TCVideoPlayerImpl::decodeThread() {
             int64_t timestamp = (int64_t)(target / av_q2d(timeBase_));
             av_seek_frame(formatCtx_, videoStreamIndex_, timestamp, AVSEEK_FLAG_BACKWARD);
             avcodec_flush_buffers(codecCtx_);
+            isFinished_ = false;
 
             // Any packet held from a previous EAGAIN is invalidated by the seek.
             if (packetPending_) {
@@ -649,6 +714,7 @@ void TCVideoPlayerImpl::decodeThread() {
             }
 
             currentPts_ = target;
+            isFinished_ = false;
             continue;
         }
 
@@ -670,6 +736,7 @@ void TCVideoPlayerImpl::probeHwOutputFormat() {
 
     AVFrame* probeFrame = av_frame_alloc();
     bool captured = false;
+    // Bound (security): untrusted file packets may never yield a frame; a probe cap bounds startup work. Overflow ends the probe without a captured frame.
     constexpr int kMaxPackets = 64;  // keep probe bounded
 
     for (int i = 0; i < kMaxPackets && !captured; ++i) {
@@ -739,13 +806,34 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
                 if (rret == AVERROR_EOF) {
                     // Enter drain mode so remaining buffered frames are
                     // flushed out on following receive_frame calls.
-                    avcodec_send_packet(codecCtx_, nullptr);
+                    int drain = avcodec_send_packet(codecCtx_, nullptr);
+                    if (drain < 0 && drain != AVERROR_EOF && drain != AVERROR(EAGAIN)) {
+                        decodeError("avcodec_send_packet (drain)", drain);
+                        return false;
+                    }
                     continue;
                 }
+                if (rret == AVERROR(EAGAIN)) {
+                    std::unique_lock<std::mutex> lock(mutex_);
+                    cv_.wait_for(lock, std::chrono::milliseconds(10), [this] {
+                        return shouldStop_ || seekRequested_ || !isPlaying_ || isPaused_;
+                    });
+                    return true;
+                }
                 if (rret < 0) {
+                    decodeError("av_read_frame", rret);
                     av_strerror(rret, errbuf, sizeof(errbuf));
                     logWarning("VideoPlayer") << "av_read_frame ended: " << errbuf
                                               << " (pts=" << currentPts_ << ")";
+                    return false;
+                }
+                // Demuxers can return a short packet instead of a read error
+                // at a truncated file's end. Distinguish that incomplete read
+                // from a complete packet whose encoded contents are invalid.
+                if ((packet_->flags & AV_PKT_FLAG_CORRUPT) && formatCtx_->pb &&
+                    avio_feof(formatCtx_->pb)) {
+                    av_packet_unref(packet_);
+                    decodeError("av_read_frame (truncated packet)", AVERROR_INVALIDDATA);
                     return false;
                 }
                 if (packet_->stream_index != videoStreamIndex_) {
@@ -765,10 +853,16 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             av_packet_unref(packet_);
             packetPending_ = false;
 
+            if (sret == AVERROR_INVALIDDATA) {
+                warnInvalidData(true);
+                continue;
+            }
             if (sret < 0 && sret != AVERROR_EOF) {
+                decodeError("avcodec_send_packet", sret);
                 av_strerror(sret, errbuf, sizeof(errbuf));
                 logWarning("VideoPlayer") << "send_packet failed: " << errbuf
                                           << " (pts=" << currentPts_ << ")";
+                return false;
             }
             continue;
         }
@@ -777,7 +871,12 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             // Decoder fully drained after EOF was signalled upstream.
             return false;
         }
+        if (ret == AVERROR_INVALIDDATA) {
+            warnInvalidData(false);
+            continue;
+        }
         if (ret < 0) {
+            decodeError("avcodec_receive_frame", ret);
             av_strerror(ret, errbuf, sizeof(errbuf));
             logWarning("VideoPlayer") << "receive_frame failed: " << errbuf
                                       << " (pts=" << currentPts_ << ")";
@@ -793,11 +892,12 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             // avoid an extra pixel-format conversion during transfer. The
             // scaler is rebuilt lazily on format change (lastScalerFmt_).
             swFrame->format = AV_PIX_FMT_NONE;
-            if (av_hwframe_transfer_data(swFrame, frame_, 0) < 0) {
-                logWarning("VideoPlayer") << "HW frame transfer failed, dropping frame";
+            int transfer = av_hwframe_transfer_data(swFrame, frame_, 0);
+            if (transfer < 0) {
+                decodeError("av_hwframe_transfer_data", transfer);
                 av_frame_free(&swFrame);
                 av_frame_unref(frame_);
-                continue;
+                return false;
             }
             srcFrame = swFrame;
         }
@@ -901,6 +1001,7 @@ bool TCVideoPlayerImpl::loadAudioForPlayback() {
         return false;
     }
     AVCodecContext* audioCtx = avcodec_alloc_context3(codec);
+    if (!audioCtx) { avformat_close_input(&fmtCtx); return false; }
     avcodec_parameters_to_context(audioCtx, par);
     if (avcodec_open2(audioCtx, codec, nullptr) < 0) {
         avcodec_free_context(&audioCtx);
@@ -925,30 +1026,57 @@ bool TCVideoPlayerImpl::loadAudioForPlayback() {
         return false;
     }
 
-    // Reserve estimated buffer space
+    // Duration is only a hint, bounded by what the file plausibly decodes to.
     std::vector<float> samples;
-    if (duration_ > 0)
-        samples.reserve((size_t)(duration_ * engineSampleRate * 2 * 1.05));
 
     AVFrame* frame = av_frame_alloc();
     AVPacket* pkt  = av_packet_alloc();
+    if (!frame || !pkt) {
+        av_frame_free(&frame);
+        av_packet_free(&pkt);
+        swr_free(&swr);
+        avcodec_free_context(&audioCtx);
+        avformat_close_input(&fmtCtx);
+        logWarning("VideoPlayer") << "Not enough memory to decode audio";
+        return false;
+    }
 
+    // Set when growing the buffer fails; decoding stops and the load fails.
+    bool outOfMemory = false;
+    try {
+        if (duration_ > 0) {
+            const double statedFrames = duration_ * engineSampleRate * 1.05;
+            const uint64_t frames = statedFrames < 1.8e19
+                ? static_cast<uint64_t>(statedFrames) : ~uint64_t{0};
+            std::error_code sizeEc;
+            const uintmax_t fileBytes = fs::file_size(filePath_, sizeEc);
+            samples.reserve(internal::decodeReserveSamples(
+                frames, 2, sizeEc ? 0 : static_cast<uint64_t>(fileBytes),
+                internal::kReserveSamplesPerInputByte, samples.max_size()));
+        }
+    } catch (const std::exception&) {
+        // The reserve is only an estimate; a real shortage fails while growing.
+    }
     auto appendConverted = [&](int nbIn) {
         int outN = av_rescale_rnd(
             swr_get_delay(swr, audioCtx->sample_rate) + nbIn,
             engineSampleRate, audioCtx->sample_rate, AV_ROUND_UP);
-        std::vector<float> buf(outN * 2);
-        uint8_t* outData[1] = { (uint8_t*)buf.data() };
-        int n = swr_convert(swr, outData, outN,
-                            nbIn > 0 ? (const uint8_t**)frame->data : nullptr, nbIn);
-        if (n > 0)
-            samples.insert(samples.end(), buf.begin(), buf.begin() + n * 2);
+        try {
+            std::vector<float> buf(outN * 2);
+            uint8_t* outData[1] = { (uint8_t*)buf.data() };
+            int n = swr_convert(swr, outData, outN,
+                                nbIn > 0 ? (const uint8_t**)frame->data : nullptr, nbIn);
+            if (n > 0)
+                samples.insert(samples.end(), buf.begin(), buf.begin() + n * 2);
+        } catch (const std::exception&) {
+            outOfMemory = true;
+        }
     };
 
-    while (av_read_frame(fmtCtx, pkt) >= 0) {
+    while (!outOfMemory && av_read_frame(fmtCtx, pkt) >= 0) {
         if (pkt->stream_index == audioIdx) {
             if (avcodec_send_packet(audioCtx, pkt) == 0) {
-                while (avcodec_receive_frame(audioCtx, frame) == 0) {
+                while (!outOfMemory && avcodec_receive_frame(audioCtx, frame) == 0) {
                     appendConverted(frame->nb_samples);
                     av_frame_unref(frame);
                 }
@@ -957,15 +1085,17 @@ bool TCVideoPlayerImpl::loadAudioForPlayback() {
         av_packet_unref(pkt);
     }
 
-    // Flush decoder
-    avcodec_send_packet(audioCtx, nullptr);
-    while (avcodec_receive_frame(audioCtx, frame) == 0) {
-        appendConverted(frame->nb_samples);
-        av_frame_unref(frame);
+    if (!outOfMemory) {
+        // Flush decoder
+        avcodec_send_packet(audioCtx, nullptr);
+        while (!outOfMemory && avcodec_receive_frame(audioCtx, frame) == 0) {
+            appendConverted(frame->nb_samples);
+            av_frame_unref(frame);
+        }
     }
 
     // Flush resampler
-    appendConverted(0);
+    if (!outOfMemory) appendConverted(0);
 
     av_frame_free(&frame);
     av_packet_free(&pkt);
@@ -973,19 +1103,34 @@ bool TCVideoPlayerImpl::loadAudioForPlayback() {
     avcodec_free_context(&audioCtx);
     avformat_close_input(&fmtCtx);
 
+    if (outOfMemory) {
+        logError("VideoPlayer") << "not enough memory to decode the audio of " << filePath_
+                                << " (" << samples.size() / 2 << " frames decoded, estimated "
+                                << duration_ * engineSampleRate * 2 * sizeof(float) << " bytes)";
+        return false;
+    }
+
     if (samples.empty()) return false;
 
-    auto buf = std::make_shared<SoundBuffer>();
-    buf->samples   = std::move(samples);
-    buf->channels  = 2;
-    buf->sampleRate = engineSampleRate;
-    buf->numSamples = buf->samples.size() / 2;
-    audioBuffer_ = buf;
-    audioSound_.loadFromBuffer(audioBuffer_);
+    try {
+        auto buf = std::make_shared<SoundBuffer>();
+        buf->samples   = std::move(samples);
+        buf->channels  = 2;
+        buf->sampleRate = engineSampleRate;
+        buf->numSamples = buf->samples.size() / 2;
+        audioBuffer_ = buf;
+        audioSound_.loadFromBuffer(audioBuffer_);
 
-    logNotice("VideoPlayer") << "Audio: " << buf->numSamples << " frames @ "
-                              << buf->sampleRate << " Hz";
-    return true;
+        logNotice("VideoPlayer") << "Audio: " << buf->numSamples << " frames @ "
+                                  << buf->sampleRate << " Hz";
+        return true;
+    } catch (const std::bad_alloc&) {
+        audioBuffer_.reset();
+        audioSound_ = Sound{};
+        logWarning("VideoPlayer") << "Not enough memory to retain decoded audio (estimated "
+                                  << duration_ * engineSampleRate * 2 * sizeof(float) << " bytes)";
+        return false;
+    }
 }
 
 // Helper: sample rate index for ADTS header
@@ -1071,9 +1216,10 @@ float TCVideoPlayerImpl::getPosition() const {
 
 void TCVideoPlayerImpl::setPosition(float pct) {
     double targetTime = pct * duration_;
+    lastAudioPts_ = targetTime;
     seekToTime(targetTime);
     playbackStartTime_ = av_gettime_relative() / 1000000.0 - targetTime;
-    if (audioBuffer_) {
+    if (audioSound_.isLoaded()) {
         audioSound_.setPosition(static_cast<float>(targetTime));
     }
 }
@@ -1096,6 +1242,7 @@ void TCVideoPlayerImpl::setSpeed(float speed) {
 
 void TCVideoPlayerImpl::setLoop(bool loop) {
     isLoop_ = loop;
+    audioSound_.setLoop(loop);
 }
 
 int TCVideoPlayerImpl::getCurrentFrame() const {
@@ -1135,81 +1282,14 @@ void TCVideoPlayerImpl::previousFrame() {
 // VideoPlayer platform methods (Linux implementation)
 // =============================================================================
 
-#include "tc/gpu/shaders/videoNV12.glsl.h"
-
-// NV12 immediate-draw shader (immutable unit-quad, uniform-based positioning)
-class NV12VideoShader : public Shader {
-public:
-    void loadShader() { load(tc_video_nv12_nv12_shader_desc); }
-
-    void draw(float x, float y, float w, float h,
-              const Texture& texY, const Texture& texUV) {
-        if (!loaded) return;
-
-        ensureSwapchainPass();
-        sgl_draw();
-
-        sg_apply_pipeline(pipeline);
-
-        // x/y/w/h come in logical coordinates (same space tcApp draws in),
-        // but sapp_width()/sapp_height() are physical framebuffer pixels.
-        // Divide by DPI scale so the shader's viewport matches its inputs.
-        const float dpiScale = sapp_dpi_scale();
-        const float vpW = (float)sapp_width()  / dpiScale;
-        const float vpH = (float)sapp_height() / dpiScale;
-
-        struct VsParams { float v[8]; } p = {{
-            vpW, vpH, x, y,
-            w,   h,   0.0f, 0.0f
-        }};
-        sg_range range = { &p, sizeof(p) };
-        sg_apply_uniforms(0, &range);
-
-        sg_bindings bind = {};
-        bind.vertex_buffers[0] = vertexBuffer;
-        bind.index_buffer      = indexBuffer;
-        bind.views[0]    = texY.getView();
-        bind.samplers[0] = texY.getSampler();
-        bind.views[1]    = texUV.getView();
-        bind.samplers[1] = texUV.getSampler();
-        sg_apply_bindings(&bind);
-
-        sg_draw(0, 6, 1);
-
-        sg_reset_state_cache();
-        sgl_defaults();
-        trussc::internal::sglLoadProjection(trussc::internal::screen2DProjection(vpW, vpH));
-        sgl_matrix_mode_modelview();
-        sgl_load_identity();
-    }
-
-protected:
-    sg_pipeline_desc createPipelineDesc() override {
-        sg_pipeline_desc desc = {};
-        desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;
-        desc.colors[0].blend.enabled = false;
-        desc.index_type = SG_INDEXTYPE_UINT16;
-        desc.label = "tc_nv12_pipeline";
-        return desc;
-    }
-
-    void createVertexBuffer() override {
-        float verts[] = { 0.f,0.f, 1.f,0.f, 1.f,1.f, 0.f,1.f };
-        sg_buffer_desc vd = {};
-        vd.data  = SG_RANGE(verts);
-        vd.label = "tc_nv12_verts";
-        vertexBuffer = sg_make_buffer(&vd);
-
-        uint16_t idx[] = { 0, 1, 2, 0, 2, 3 };
-        sg_buffer_desc id = {};
-        id.usage.index_buffer = true;
-        id.data  = SG_RANGE(idx);
-        id.label = "tc_nv12_idx";
-        indexBuffer = sg_make_buffer(&id);
-    }
-};
+#include "tcVideoNV12Shader.h"
 
 namespace trussc {
+
+void internal::VideoPlayerPlatformAccess::stopAudioForTests(VideoPlayer& player) {
+    if (player.platformHandle_)
+        static_cast<TCVideoPlayerImpl*>(player.platformHandle_)->audioSound_.stop();
+}
 
 bool VideoPlayer::loadPlatform(const fs::path& path) {
     auto impl = new TCVideoPlayerImpl();
@@ -1233,7 +1313,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             std::memset(pixelsY_,  0, width_ * height_);
             std::memset(pixelsUV_, 128, width_ * height_ / 2);  // 128 = neutral chroma in NV12
 
-            auto* shader = new NV12VideoShader();
+            auto* shader = new internal::NV12VideoShader();
             shader->loadShader();
             nv12ShaderHandle_ = shader;
         } else {
@@ -1247,7 +1327,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
 
 void VideoPlayer::closePlatform() {
     if (nv12ShaderHandle_) {
-        delete static_cast<NV12VideoShader*>(nv12ShaderHandle_);
+        delete static_cast<internal::NV12VideoShader*>(nv12ShaderHandle_);
         nv12ShaderHandle_ = nullptr;
     }
     if (platformHandle_) {
@@ -1258,7 +1338,7 @@ void VideoPlayer::closePlatform() {
 }
 
 void VideoPlayer::drawNV12Platform(float x, float y, float w, float h) const {
-    static_cast<NV12VideoShader*>(nv12ShaderHandle_)->draw(x, y, w, h, textureY_, textureUV_);
+    static_cast<internal::NV12VideoShader*>(nv12ShaderHandle_)->draw(x, y, w, h, textureY_, textureUV_);
 }
 
 void VideoPlayer::playPlatform() {
@@ -1335,6 +1415,11 @@ void VideoPlayer::setLoopPlatform(bool loop) {
     if (platformHandle_) {
         static_cast<TCVideoPlayerImpl*>(platformHandle_)->setLoop(loop);
     }
+}
+
+float VideoPlayer::getFrameRatePlatform() const {
+    if (!platformHandle_) return 0.0f;
+    return static_cast<TCVideoPlayerImpl*>(platformHandle_)->getFrameRate();
 }
 
 int VideoPlayer::getCurrentFramePlatform() const {

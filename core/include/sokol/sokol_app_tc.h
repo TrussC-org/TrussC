@@ -805,16 +805,27 @@
 
     The HTML5 drag'n'drop API doesn't return file paths, but instead
     black-box 'file objects' which must be used to load the content
-    of dropped files. This is the reason why sokol_app.h adds two
+    of dropped files. This is the reason why sokol_app.h adds
     HTML5-specific functions to the drag'n'drop API:
 
         uint32_t sapp_html5_get_dropped_file_size(int index)
-            Returns the size in bytes of a dropped file.
+            Returns the size in bytes, saturated at UINT32_MAX.
+
+        uint64_t sapp_html5_get_dropped_file_size64(int index)
+            Returns the full size in bytes of a dropped file, or zero for an
+            unavailable file or a size outside the JavaScript safe integer range.
+            Returns zero on non-HTML5 platforms.
 
         void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request* request)
             Asynchronously loads the content of a dropped file into a
             provided memory buffer (which must be big enough to hold
-            the file content)
+            the file content). Files above 256 MiB or the buffer capacity are
+            rejected before reading. At most four reads may be active at once.
+            A buffer capacity rejection reports SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+            other limit, invalid size or index, and reader failures report
+            SAPP_HTML5_FETCH_ERROR_OTHER. Each failure invokes the callback once
+            with no data and logs one warning. Application shutdown cancels
+            pending reads before cleanup, without invoking their callbacks.
 
     To start loading the first dropped file after an SAPP_EVENTTYPE_FILES_DROPPED
     event is received:
@@ -1329,8 +1340,8 @@
     via the following Windows-specific sapp_desc flags:
 
         sapp_desc.win32.console_utf8 (default: false)
-            When set to true, the output console codepage will be switched
-            to UTF-8 (and restored to the original codepage on exit)
+            When set to true, the input and output console codepages will be
+            switched to UTF-8 (and each restored to its original codepage on exit)
 
         sapp_desc.win32.console_attach (default: false)
             When set to true, stdout and stderr will be attached to the
@@ -1486,8 +1497,10 @@ extern "C" {
 
 /* misc constants */
 enum {
-    SAPP_MAX_TOUCHPOINTS = 8,
+    // Bound (platform): OS touch events use a fixed SDK array to avoid per-event allocation. Overflow omits excess points, preferring changed points where supported.
+    SAPP_MAX_TOUCHPOINTS = 32,
     SAPP_MAX_MOUSEBUTTONS = 3,
+    // Bound (platform): OS scancodes index the fixed SDK translation table. Overflow maps out-of-range scancodes to SAPP_KEYCODE_INVALID.
     SAPP_MAX_KEYCODES = 512,
     SAPP_MAX_ICONIMAGES = 8,
 };
@@ -1525,6 +1538,7 @@ typedef enum sapp_event_type {
     SAPP_EVENTTYPE_QUIT_REQUESTED,
     SAPP_EVENTTYPE_CLIPBOARD_PASTED,
     SAPP_EVENTTYPE_FILES_DROPPED,
+    SAPP_EVENTTYPE_TC_DEVICE_LOST,      // TrussC: shared D3D11 device lost (once per run)
     _SAPP_EVENTTYPE_NUM,
     _SAPP_EVENTTYPE_FORCE_U32 = 0x7FFFFFFF
 } sapp_event_type;
@@ -1751,6 +1765,7 @@ typedef struct sapp_event {
     int window_height;
     int framebuffer_width;              // = window_width * dpi_scale
     int framebuffer_height;             // = window_height * dpi_scale
+    uint32_t device_lost_reason;       // GetDeviceRemovedReason HRESULT bits, TC_DEVICE_LOST only
 } sapp_event;
 
 /*
@@ -1859,6 +1874,7 @@ typedef struct sapp_allocator {
     _SAPP_LOGITEM_XMACRO(WIN32_WGL_INCOMPATIBLE_DEVICE_CONTEXT, "CreateContextAttribsARB failed with ERROR_INCOMPATIBLE_DEVICE_CONTEXTS_ARB") \
     _SAPP_LOGITEM_XMACRO(WIN32_WGL_CREATE_CONTEXT_ATTRIBS_FAILED_OTHER, "CreateContextAttribsARB failed for other reason") \
     _SAPP_LOGITEM_XMACRO(WIN32_D3D11_CREATE_DEVICE_AND_SWAPCHAIN_WITH_DEBUG_FAILED, "D3D11CreateDeviceAndSwapChain() with D3D11_CREATE_DEVICE_DEBUG failed, retrying without debug flag.") \
+    _SAPP_LOGITEM_XMACRO(WIN32_D3D11_DEVICE_LOST, "D3D11 device lost") \
     _SAPP_LOGITEM_XMACRO(WIN32_D3D11_GET_IDXGIFACTORY_FAILED, "could not obtain IDXGIFactory object") \
     _SAPP_LOGITEM_XMACRO(WIN32_D3D11_GET_IDXGIADAPTER_FAILED, "could not obtain IDXGIAdapter object") \
     _SAPP_LOGITEM_XMACRO(WIN32_D3D11_QUERY_INTERFACE_IDXGIDEVICE1_FAILED, "could not obtain IDXGIDevice1 interface") \
@@ -1964,6 +1980,7 @@ typedef struct sapp_allocator {
     _SAPP_LOGITEM_XMACRO(IMAGE_DATA_SIZE_MISMATCH, "image data size mismatch (must be width*height*4 bytes)") \
     _SAPP_LOGITEM_XMACRO(DROPPED_FILE_PATH_TOO_LONG, "dropped file path too long (sapp_desc.max_dropped_filed_path_length)") \
     _SAPP_LOGITEM_XMACRO(CLIPBOARD_STRING_TOO_BIG, "clipboard string didn't fit into clipboard buffer") \
+    _SAPP_LOGITEM_XMACRO(TOUCHPOINTS_DROPPED, "touch event exceeds SAPP_MAX_TOUCHPOINTS; some points were dropped") \
 
 #define _SAPP_LOGITEM_XMACRO(item,msg) SAPP_LOGITEM_##item,
 typedef enum sapp_log_item {
@@ -2131,7 +2148,7 @@ typedef struct sapp_gl_desc {
 } sapp_gl_desc;
 
 typedef struct sapp_win32_desc {
-    bool console_utf8;            // if true, set the output console codepage to UTF-8
+    bool console_utf8;            // if true, set the input and output console codepages to UTF-8
     bool console_create;          // if true, attach stdout/stderr to a new console window
     bool console_attach;          // if true, attach stdout/stderr to parent process
 } sapp_win32_desc;
@@ -2346,8 +2363,10 @@ SOKOL_APP_API_DECL const void* sapp_egl_get_context(void);
 
 /* HTML5: enable or disable the hardwired "Leave Site?" dialog box */
 SOKOL_APP_API_DECL void sapp_html5_ask_leave_site(bool ask);
-/* HTML5: get byte size of a dropped file */
+/* HTML5: get byte size of a dropped file, saturated at UINT32_MAX */
 SOKOL_APP_API_DECL uint32_t sapp_html5_get_dropped_file_size(int index);
+/* HTML5: get full byte size of a dropped file (zero if unavailable) */
+SOKOL_APP_API_DECL uint64_t sapp_html5_get_dropped_file_size64(int index);
 /* HTML5: asynchronously load the content of a dropped file */
 SOKOL_APP_API_DECL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request* request);
 
@@ -2419,6 +2438,11 @@ typedef struct sapp_window_desc {
 
 SOKOL_APP_API_DECL sapp_window sapp_create_window(const sapp_window_desc* desc);
 SOKOL_APP_API_DECL void sapp_destroy_window(sapp_window win);
+/* ask for the window to be closed, like a click on its close button: sets a
+   per-window flag that the backend handles where it handles quit_requested
+   (outside any tick / event of the window), which then calls close_cb.
+   Safe to call from the window's own tick_cb / event_cb. */
+SOKOL_APP_API_DECL void sapp_window_request_close(sapp_window win);
 SOKOL_APP_API_DECL bool sapp_window_valid(sapp_window win);
 
 /* geometry (valid whenever the window is alive) */
@@ -2428,6 +2452,15 @@ SOKOL_APP_API_DECL int sapp_window_framebuffer_width(sapp_window win);   /* pixe
 SOKOL_APP_API_DECL int sapp_window_framebuffer_height(sapp_window win);
 SOKOL_APP_API_DECL float sapp_window_dpi_scale(sapp_window win);         /* fb / logical, ONE source */
 SOKOL_APP_API_DECL int sapp_window_sample_count(sapp_window win);
+/* true while this window skips its tick_cb because the OS reports it as not
+   visible -- the same flags that gate the tick, so "true" means "renders no
+   frames right now":
+     macOS: occlusionState is not visible (minimized, fully covered, on
+            another Space), kept current by windowDidChangeOcclusionState
+     Win32: minimized (WM_SIZE SIZE_MINIMIZED), or the last Present returned
+            DXGI_STATUS_OCCLUDED
+     X11:   iconified (WM_STATE IconicState), or VisibilityFullyObscured
+   false for an invalid handle */
 SOKOL_APP_API_DECL bool sapp_window_occluded(sapp_window win);
 SOKOL_APP_API_DECL void sapp_window_set_title(sapp_window win, const char* title);
 
@@ -2466,11 +2499,70 @@ SOKOL_APP_API_DECL const void* sapp_window_x11_get_window(sapp_window win);
 #if defined(SOKOL_APP_TC_IMPL_INCLUDED) && !defined(SOKOL_APP_TC_IMPL_DONE)
 #define SOKOL_APP_TC_IMPL_DONE (1)
 
+#include "../tc/app/tcExit.h"
+
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stdio.h>
+#include <stdarg.h>
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
+#endif
+#if defined(__ANDROID__)
+#include <android/log.h>    /* the no-logger fallback below (system header) */
+#endif
+
+/* The fork's own diagnostics -- the _SAPP_* log macros of the iOS, GLES3
+   Linux, Android and web backends, the X11 / GLX init failures and the
+   sapp_create_window() "not supported" stubs -- go through sapp_desc.logger,
+   the way upstream sokol_app.h reports everything, so the host's logger (and
+   its log file) sees them too. The desktop / web / iOS backends store the
+   desc at the very start of sapp_run(), before any of them can fire; Android
+   stores it in ANativeActivity_onCreate() once sokol_main() returns.
+   Without a logger -- also on Android before that point -- they go where
+   they went before: stderr ("sokol_app_tc.h: <kind><message>"), or on
+   Android the system log (logcat, tag "sokol_app_tc", "<kind><message>";
+   stderr goes nowhere there).
+   level: 0=panic, 1=error, 2=warning, 3=info. A panic site still calls
+   abort() itself once this returns. */
+static inline void _sapp_tc_log(const sapp_logger* logger, uint32_t level, uint32_t item,
+                                uint32_t line_nr, const char* kind, const char* fmt, ...) {
+    /* room for the longest caller message (the WebGPU device callbacks pass
+       up to 1024 bytes) plus "<CODE>: " in front of it */
+    char msg[1024 + 128];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, args);
+    va_end(args);
+    if (logger && logger->func) {
+        logger->func("sapp", level, item, msg, line_nr, 0, logger->user_data);
+    } else {
+        #if defined(__ANDROID__)
+        int prio;
+        switch (level) {
+            case 0:  prio = ANDROID_LOG_FATAL; break;
+            case 1:  prio = ANDROID_LOG_ERROR; break;
+            case 2:  prio = ANDROID_LOG_WARN; break;
+            default: prio = ANDROID_LOG_INFO; break;
+        }
+        __android_log_print(prio, "sokol_app_tc", "%s%s", kind, msg);
+        #else
+        fprintf(stderr, "sokol_app_tc.h: %s%s\n", kind, msg);
+        #endif
+    }
+}
+
+// Bound (security): allow large media files while limiting each whole-file browser allocation to 256 MiB.
+#define _SAPP_TC_MAX_DROP_CONTENT_SIZE (256u * 1024u * 1024u)
+// Bound (security): at most four readers keep total pending file content within 1 GiB.
+#define _SAPP_TC_MAX_DROP_READERS (4)
+
+#if !defined(__EMSCRIPTEN__)
+uint64_t sapp_html5_get_dropped_file_size64(int index) {
+    (void)index;
+    return 0;
+}
 #endif
 
 #if defined(__APPLE__) && TARGET_OS_OSX
@@ -2511,6 +2603,7 @@ typedef struct _sapp_tc_window_t {
     double last_tick_time;              /* CADisplayLink timestamp */
     bool occluded;
     bool in_tick;
+    bool close_requested;               /* sapp_window_request_close(): closed after the main tick */
 } _sapp_tc_window_t;
 
 #define _SAPP_TC_MAX_WINDOWS (32)
@@ -2755,6 +2848,24 @@ static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
     w->desc.event_cb(ev, handle, w->desc.user_data);
 }
 
+/* Secondary windows: store the window server's occlusionState in w->occluded
+   and send SUSPENDED / RESUMED when it changes. Called from
+   windowDidChangeOcclusionState (a hidden view's display link is suspended,
+   so the tick alone often never sees the window become hidden) and from the
+   tick gate (the transition race). Both run on the main run loop; the
+   compare keeps them from sending an event twice. Returns the new state. */
+static bool _sapp_tc_update_occluded(_sapp_tc_window_t* w) {
+    const bool occluded = (w->window.occlusionState & NSWindowOcclusionStateVisible) == 0;
+    if (occluded != w->occluded) {
+        w->occluded = occluded;
+        sapp_event e;
+        memset(&e, 0, sizeof(e));
+        e.type = occluded ? SAPP_EVENTTYPE_SUSPENDED : SAPP_EVENTTYPE_RESUMED;
+        _sapp_tc_send(w, &e);
+    }
+    return occluded;
+}
+
 /*-- main window: event routing to the sapp_desc callbacks ------------------*/
 static bool _sapp_tc_app_events_enabled(void) {
     /* same gate as sokol_app.h: nothing fires before the first tick's init_cb */
@@ -2977,12 +3088,14 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
     memset(_sapp_tc.app.drop_buffer, 0, (size_t)max_files * (size_t)max_path);
     _sapp_tc.app.drop_num_files = 0;
     int num = (int)pboard.pasteboardItems.count;
+    // Bound (security): OS drop lists can flood delivery; a fixed cap keeps path storage finite. Overflow omits excess files.
     if (num > max_files) num = max_files;
     for (int i = 0; i < num; i++) {
         NSString* str = [pboard.pasteboardItems[(NSUInteger)i] stringForType:NSPasteboardTypeFileURL];
         if (!str) return NO;
         NSURL* url = [NSURL URLWithString:str];
         const char* path = url.standardizedURL.path.UTF8String;
+        // Bound (security): OS drop paths must fit fixed per-path storage to keep memory finite. Overflow rejects the drop.
         if (!path || (int)strlen(path) >= max_path) return NO;  /* path too long: drop everything */
         strcpy(_sapp_tc.app.drop_buffer + (size_t)i * (size_t)max_path, path);
     }
@@ -3045,15 +3158,7 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
        structurally impossible: the acquiring code below only runs for a
        provably visible window. (The display link also auto-suspends for
        occluded views; this gate covers the transition race.) */
-    const bool occluded = (w->window.occlusionState & NSWindowOcclusionStateVisible) == 0;
-    if (occluded != w->occluded) {
-        w->occluded = occluded;
-        sapp_event e;
-        memset(&e, 0, sizeof(e));
-        e.type = occluded ? SAPP_EVENTTYPE_SUSPENDED : SAPP_EVENTTYPE_RESUMED;
-        _sapp_tc_send(w, &e);
-    }
-    if (occluded) return;
+    if (_sapp_tc_update_occluded(w)) return;
 
     /* measured tick interval (the display's refresh period) */
     if (w->last_tick_time > 0.0) {
@@ -3133,11 +3238,8 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
 static void _sapp_tc_start_fallback_timer(void);
 static void _sapp_tc_stop_fallback_timer(void);
 
-@implementation _sapp_tc_win_delegate
-- (BOOL)windowShouldClose:(id)sender {
-    (void)sender;
-    _sapp_tc_window_t* w = self.w;
-    if (!w || !w->is_main) return YES;
+static BOOL _sapp_tc_request_exit(void) {
+    _sapp_tc_window_t* w = _sapp_tc.app.main;
     /* main window: sokol_app.h's cancellable quit dance. sapp_quit() pre-sets
        quit_ordered (unvetoable); otherwise QUIT_REQUESTED is delivered and a
        handler may call sapp_cancel_quit() to keep the window open. */
@@ -3151,6 +3253,15 @@ static void _sapp_tc_stop_fallback_timer(void);
         }
     }
     return _sapp_tc.app.quit_ordered ? YES : NO;
+}
+
+@implementation _sapp_tc_win_delegate
+- (BOOL)windowShouldClose:(id)sender {
+    (void)sender;
+    _sapp_tc_window_t* w = self.w;
+    if (!w || !w->is_main) return YES;
+    trussc::internal::setExitReasonIfEmpty("window-close");
+    return _sapp_tc_request_exit();
 }
 - (void)windowWillClose:(NSNotification*)n {
     (void)n;
@@ -3181,7 +3292,14 @@ static void _sapp_tc_stop_fallback_timer(void);
 - (void)windowDidChangeOcclusionState:(NSNotification*)n {
     (void)n;
     _sapp_tc_window_t* w = self.w;
-    if (!w || !w->is_main) return;
+    if (!w) return;
+    if (!w->is_main) {
+        /* keeps sapp_window_occluded() current and sends SUSPENDED / RESUMED
+           (the display link of a hidden secondary window is suspended, so
+           its tick would not notice) */
+        _sapp_tc_update_occluded(w);
+        return;
+    }
     if (w->window.occlusionState & NSWindowOcclusionStateVisible) {
         _sapp_tc_stop_fallback_timer();     /* the display link auto-resumes */
     } else {
@@ -3191,8 +3309,10 @@ static void _sapp_tc_stop_fallback_timer(void);
 - (void)windowDidMiniaturize:(NSNotification*)n {
     (void)n;
     _sapp_tc_window_t* w = self.w;
-    if (!w || !w->is_main) return;
-    _sapp_tc_start_fallback_timer();
+    if (!w) return;
+    /* the fallback timer is main-only; secondary windows get the event too
+       (Win32 / X11 parity; their occluded flag follows occlusionState) */
+    if (w->is_main) _sapp_tc_start_fallback_timer();
     sapp_event e; memset(&e, 0, sizeof(e));
     e.type = SAPP_EVENTTYPE_ICONIFIED;
     _sapp_tc_send(w, &e);
@@ -3200,8 +3320,8 @@ static void _sapp_tc_stop_fallback_timer(void);
 - (void)windowDidDeminiaturize:(NSNotification*)n {
     (void)n;
     _sapp_tc_window_t* w = self.w;
-    if (!w || !w->is_main) return;
-    _sapp_tc_stop_fallback_timer();
+    if (!w) return;
+    if (w->is_main) _sapp_tc_stop_fallback_timer();
     sapp_event e; memset(&e, 0, sizeof(e));
     e.type = SAPP_EVENTTYPE_RESTORED;
     _sapp_tc_send(w, &e);
@@ -3335,6 +3455,18 @@ static void _sapp_tc_main_tick(CADisplayLink* link) {
         w->in_tick = false;
         w->frame_drawable = nil;    /* presented by sg_commit; release our ref */
     }
+    /* sapp_window_request_close() lands here, after the main tick and
+       outside every window's tick: -close (not performClose:, which only
+       plays the alert sound on a borderless window) sends windowWillClose:,
+       which calls close_cb like a click on the close button. Re-fetch each
+       slot: a close destroys windows. */
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+        _sapp_tc_window_t* cw = _sapp_tc.windows[i];
+        if (!cw || cw->is_main || !cw->close_requested) continue;
+        cw->close_requested = false;
+        NSWindow* nsw = cw->window;   /* strong: outlives the destroy in close_cb */
+        if (nsw) [nsw close];
+    }
     if (_sapp_tc.app.quit_requested || _sapp_tc.app.quit_ordered) {
         [w->window performClose:nil];
     }
@@ -3357,17 +3489,36 @@ static void _sapp_tc_stop_fallback_timer(void) {
     _sapp_tc.app.fallback_timer = nil;
 }
 
-static void _sapp_tc_create_main_window(void) {
+static bool _sapp_tc_create_main_window(void) {
     const sapp_desc* d = &_sapp_tc.app.desc;
     int slot = -1;
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         if (_sapp_tc.windows[i] == 0) { slot = i; break; }
     }
-    if (slot < 0) return;
+    if (slot < 0) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                     "error: ", "Main window creation failed: no free window slot");
+        return false;
+    }
 
     _sapp_tc_window_t* w = new _sapp_tc_window_t();
     w->win_id = ++_sapp_tc.next_id;
     w->is_main = true;
+    auto fail = [w, slot](const char* operation) {
+        // These creation APIs have no NSError output parameter.
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                     "error: ", "%s returned nil (no NSError available)", operation);
+        w->view.w = 0;
+        w->delegate.w = 0;
+        w->window.delegate = nil;
+        [w->link invalidate];
+        [w->window orderOut:nil];
+        _sapp_tc.windows[slot] = 0;
+        _sapp_tc.app.main = 0;
+        _sapp_tc.app.device = nil;
+        delete w;
+        return false;
+    };
     w->color_fmt = MTLPixelFormatRGB10A2Unorm;  /* TrussC 10-bit output */
     w->dpi_scale = 1.0f;
 
@@ -3386,6 +3537,7 @@ static void _sapp_tc_create_main_window(void) {
     w->desc.event_cb = _sapp_tc_main_event_tramp;
 
     id<MTLDevice> dev = MTLCreateSystemDefaultDevice();
+    if (dev == nil) return fail("MTLCreateSystemDefaultDevice");
     _sapp_tc.app.device = dev;
 
     const NSRect rect = NSMakeRect(0, 0, width, height);
@@ -3393,15 +3545,18 @@ static void _sapp_tc_create_main_window(void) {
                                     NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
     w->window = [[NSWindow alloc] initWithContentRect:rect styleMask:style
                                   backing:NSBackingStoreBuffered defer:NO];
+    if (w->window == nil) return fail("NSWindow initWithContentRect");
     w->window.title = [NSString stringWithUTF8String:_sapp_tc.app.window_title];
     w->window.releasedWhenClosed = NO;  /* the object must outlive performClose */
     w->window.acceptsMouseMovedEvents = YES;
     w->window.restorable = YES;
 
     _sapp_tc_view* view = [[_sapp_tc_view alloc] initWithFrame:rect];
+    if (view == nil) return fail("Main window view initWithFrame");
     view.w = w;
     w->view = view;
     w->layer = [CAMetalLayer layer];
+    if (w->layer == nil) return fail("CAMetalLayer layer");
     w->layer.device = dev;
     w->layer.pixelFormat = w->color_fmt;
     w->layer.opaque = YES;
@@ -3414,6 +3569,7 @@ static void _sapp_tc_create_main_window(void) {
     [w->window makeFirstResponder:view];
 
     _sapp_tc_win_delegate* del = [_sapp_tc_win_delegate new];
+    if (del == nil) return fail("Main window delegate allocation");
     del.w = w;
     w->delegate = del;
     w->window.delegate = del;
@@ -3421,7 +3577,6 @@ static void _sapp_tc_create_main_window(void) {
     [w->window center];
     _sapp_tc.windows[slot] = w;
     _sapp_tc.app.main = w;
-    _sapp_tc.app.valid = true;
 
     if (d->fullscreen) {
         _sapp_tc.app.fullscreen = true;
@@ -3430,14 +3585,23 @@ static void _sapp_tc_create_main_window(void) {
     [w->window makeKeyAndOrderFront:nil];
     _sapp_tc_update_main_dimensions(false);     /* silent startup sizing */
 
+    /* A zero-sized view defers texture allocation until it has a drawable size. */
+    if (w->fb_width > 0 && w->fb_height > 0) {
+        if (w->depth_tex == nil) return fail("Metal depth texture creation");
+        if (d->sample_count > 1 && w->msaa_tex == nil) return fail("Metal MSAA texture creation");
+    }
+
     /* window #0's vsync source; swap_interval > 1 divides the display rate */
     w->link = [view displayLinkWithTarget:view selector:@selector(tick:)];
+    if (w->link == nil) return fail("Main window display link creation");
     if (d->swap_interval > 1) {
         const float maxfps = (float)[NSScreen mainScreen].maximumFramesPerSecond;
         const float p = maxfps / (float)d->swap_interval;
         w->link.preferredFrameRateRange = CAFrameRateRangeMake(p, p, p);
     }
     [w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    _sapp_tc.app.valid = true;
+    return true;
 }
 
 @interface _sapp_tc_app_delegate : NSObject <NSApplicationDelegate>
@@ -3449,7 +3613,15 @@ static void _sapp_tc_create_main_window(void) {
     /* activation policy must be set before window creation (sokol #1500) */
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
     _sapp_tc_init_cursors();
-    _sapp_tc_create_main_window();
+    if (!_sapp_tc_create_main_window()) {
+        /* Wake the event loop after stopping it so sapp_run can report failure. */
+        [NSApp stop:nil];
+        NSEvent* event = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
+            location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0
+            context:nil subtype:0 data1:0 data2:0];
+        [NSApp postEvent:event atStart:YES];
+        return;
+    }
     [NSEvent setMouseCoalescingEnabled:NO];
     [NSApp activateIgnoringOtherApps:YES];
     /* focus workaround (sokol #982): make sure the window has focus even if
@@ -3469,6 +3641,34 @@ static void _sapp_tc_create_main_window(void) {
     (void)sender;
     return YES;
 }
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender {
+    (void)sender;
+    if (!_sapp_tc.app.quit_ordered) {
+        // Cocoa forwards the quit Apple event's reason for OS session exits.
+        // keyAEQuitReason ('why?'). [TrussC] Any other quit (Cmd+Q, the Dock's
+        // Quit, an AppleScript quit) carries no session reason: app-quit, so
+        // the main window's windowShouldClose: does not fill in window-close.
+        // IfEmpty keeps a reason an earlier exit request already recorded.
+        // A real logout sends the reason as an event attribute, not a
+        // parameter (seen on macOS); read the attribute first.
+        NSAppleEventDescriptor* event = [[NSAppleEventManager sharedAppleEventManager] currentAppleEvent];
+        NSAppleEventDescriptor* reason = [event attributeDescriptorForKeyword:0x7768793f];
+        if (!reason) reason = [event paramDescriptorForKeyword:0x7768793f];
+        const AEEventID why = [reason enumCodeValue];
+        switch (why) {
+            case 0x6c6f676f: // kAELogOut ('logo')
+            case 0x726c676f: // kAEReallyLogOut ('rlgo')
+                trussc::internal::setExitReason("os-logoff"); break;
+            case 0x72657374: // kAERestart ('rest')
+                trussc::internal::setExitReason("os-restart"); break;
+            case 0x73687574: // kAEShutDown ('shut')
+                trussc::internal::setExitReason("os-shutdown"); break;
+            default:
+                trussc::internal::setExitReasonIfEmpty("app-quit"); break;
+        }
+    }
+    return _sapp_tc_request_exit() ? NSTerminateNow : NSTerminateCancel;
+}
 - (void)applicationWillTerminate:(NSNotification*)n {
     (void)n;
     /* stop all tick sources first so no frame runs during teardown */
@@ -3479,7 +3679,7 @@ static void _sapp_tc_create_main_window(void) {
     }
     /* user cleanup runs BEFORE any GPU object release (the app shuts down
        sokol_gfx here; we only hold the device/layer references) */
-    if (!_sapp_tc.app.cleanup_called) {
+    if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
         _sapp_tc.app.cleanup_called = true;
         if (_sapp_tc.app.desc.cleanup_cb) {
             _sapp_tc.app.desc.cleanup_cb();
@@ -3541,6 +3741,7 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     w->layer.device = (__bridge id<MTLDevice>)w->desc.mtl_device;
     w->layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
     w->layer.opaque = YES;
+    w->layer.framebufferOnly = NO;      /* [TrussC] captureWindow() reads the drawable (#879) */
     view.wantsLayer = YES;
     view.layer = w->layer;
     w->window.contentView = view;
@@ -3584,6 +3785,12 @@ void sapp_destroy_window(sapp_window win) {
     w->msaa_tex = nil;
     w->frame_drawable = nil;
     delete w;
+}
+
+void sapp_window_request_close(sapp_window win) {
+    _sapp_tc_window_t* w = _sapp_tc_lookup(win);
+    if (!w || w->is_main) return;   /* the main window: sapp_request_quit() */
+    w->close_requested = true;
 }
 
 bool sapp_window_valid(sapp_window win) {
@@ -3718,7 +3925,14 @@ void sapp_run(const sapp_desc* desc) {
             return event;
         }];
     [NSApp run];
-    /* never returns; cleanup runs in applicationWillTerminate */
+    /* Failed startup stops the loop; terminate: would instead exit with 0. */
+    if (!_sapp_tc.app.valid) {
+        [_sapp_tc.app.dlg applicationWillTerminate:nil];
+        NSApp.delegate = nil;
+        _sapp_tc.app.dlg = nil;
+        return;
+    }
+    /* Normal termination never returns; cleanup runs in applicationWillTerminate. */
 }
 
 bool sapp_isvalid(void) {
@@ -3880,6 +4094,7 @@ const char* sapp_get_clipboard_string(void) {
         if ([pboard.types containsObject:NSPasteboardTypeString]) {
             NSString* str = [pboard stringForType:NSPasteboardTypeString];
             if (str) {
+                // Bound (security): OS clipboard text uses finite macOS storage. Overflow truncates to clipboard_size - 1 bytes.
                 strncpy(_sapp_tc.app.clipboard, str.UTF8String,
                         (size_t)_sapp_tc.app.clipboard_size - 1);
                 _sapp_tc.app.clipboard[_sapp_tc.app.clipboard_size - 1] = 0;
@@ -4078,12 +4293,13 @@ sapp_swapchain sapp_get_swapchain(void) {
 #define _SAPP_OBJC_RELEASE(obj) { [obj release]; obj = nil; }
 #endif
 
-/* controlled failure instead of sokol_app.h's log-item machinery */
-#define _SAPP_PANIC(code) do { fprintf(stderr, "sokol_app_tc.h: panic: " #code "\n"); abort(); } while (0)
-#define _SAPP_ERROR(code) fprintf(stderr, "sokol_app_tc.h: error: " #code "\n")
-#define _SAPP_ERROR_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: error: " #code ": %s\n", msg)
-#define _SAPP_WARN_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: warn: " #code ": %s\n", msg)
-#define _SAPP_INFO_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: info: " #code ": %s\n", msg)
+/* controlled failure instead of sokol_app.h's log-item machinery, reported
+   through sapp_desc.logger (_sapp_tc_log) */
+#define _SAPP_PANIC(code) do { _sapp_tc_log(&_sapp_tc.desc.logger, 0, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "panic: ", "%s", #code); abort(); } while (0)
+#define _SAPP_ERROR(code) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s", #code)
+#define _SAPP_ERROR_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s: %s", #code, msg)
+#define _SAPP_WARN_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s: %s", #code, msg)
+#define _SAPP_INFO_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s: %s", #code, msg)
 typedef struct {
     #if defined(_SAPP_APPLE)
         struct {
@@ -4932,13 +5148,35 @@ _SOKOL_PRIVATE void _sapp_tc_ios_touch_event(sapp_event_type type, NSSet<UITouch
         NSEnumerator* enumerator = event.allTouches.objectEnumerator;
         UITouch* ios_touch;
         while ((ios_touch = [enumerator nextObject])) {
-            if ((_sapp_tc.event.num_touches + 1) < SAPP_MAX_TOUCHPOINTS) {
+            const bool changed = [touches containsObject:ios_touch];
+            int dst_index = -1;
+            // Bound (platform): iOS touch input must fit the SDK touch-event array. Overflow drops a touch point, preferring changed points, and warns once.
+            if (_sapp_tc.event.num_touches < SAPP_MAX_TOUCHPOINTS) {
+                dst_index = _sapp_tc.event.num_touches++;
+            } else {
+                // Implementation-only state: warn once for this backend's lifetime.
+                static bool warned = false;
+                if (!warned) {
+                    warned = true;
+                    _SAPP_WARN_MSG(TOUCHPOINTS_DROPPED, "iOS: touch event exceeds SAPP_MAX_TOUCHPOINTS; some points were dropped");
+                }
+                // Preserve platform order until full, then replace an unchanged tail point.
+                if (changed) {
+                    for (int i = SAPP_MAX_TOUCHPOINTS - 1; i >= 0; i--) {
+                        if (!_sapp_tc.event.touches[i].changed) {
+                            dst_index = i;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (dst_index >= 0) {
                 CGPoint ios_pos = [ios_touch locationInView:_sapp_tc.ios.view];
-                sapp_touchpoint* cur_point = &_sapp_tc.event.touches[_sapp_tc.event.num_touches++];
+                sapp_touchpoint* cur_point = &_sapp_tc.event.touches[dst_index];
                 cur_point->identifier = (uintptr_t) ios_touch;
                 cur_point->pos_x = ios_pos.x * _sapp_tc.dpi_scale;
                 cur_point->pos_y = ios_pos.y * _sapp_tc.dpi_scale;
-                cur_point->changed = [touches containsObject:ios_touch];
+                cur_point->changed = changed;
             }
         }
         if (_sapp_tc.event.num_touches > 0) {
@@ -5345,7 +5583,9 @@ SOKOL_API_IMPL bool sapp_high_dpi(void) {
 }
 
 SOKOL_API_IMPL float sapp_dpi_scale(void) {
-    return _sapp_tc.dpi_scale;
+    /* [TrussC fork] before sapp_run (headless, no window) report 1.0 like the
+       desktop backends instead of the zero-initialized state (#841) */
+    return _sapp_tc.dpi_scale > 0.0f ? _sapp_tc.dpi_scale : 1.0f;
 }
 
 SOKOL_API_IMPL const void* sapp_egl_get_display(void) {
@@ -5621,16 +5861,8 @@ SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
 }
 
 SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size(int index) {
-    SOKOL_ASSERT((index >= 0) && (index < _sapp_tc.drop.num_files));
-    #if defined(_SAPP_EMSCRIPTEN)
-        if (!_sapp_tc.drop.enabled) {
-            return 0;
-        }
-        return _sapp_tc_js_dropped_file_size(index);
-    #else
-        (void)index;
-        return 0;
-    #endif
+    const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+    return (size > UINT32_MAX) ? UINT32_MAX : (uint32_t)size;
 }
 
 SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request* request) {
@@ -5644,9 +5876,13 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
         sapp_html5_fetch_error error_code = SAPP_HTML5_FETCH_ERROR_NO_ERROR;
         if ((index < 0) || (index >= _sapp_tc.drop.num_files)) {
             error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
-        }
-        if (sapp_html5_get_dropped_file_size(index) > request->buffer.size) {
-            error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+        } else {
+            const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+            if (size > request->buffer.size) {
+                error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+            } else if (size > _SAPP_TC_MAX_DROP_CONTENT_SIZE) {
+                error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
+            }
         }
         if (SAPP_HTML5_FETCH_ERROR_NO_ERROR != error_code) {
             _sapp_tc_emsc_invoke_fetch_cb(index,
@@ -5662,7 +5898,9 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
                 request->callback,
                 (void*)request->buffer.ptr,
                 request->buffer.size,
-                request->user_data);
+                request->user_data,
+                _SAPP_TC_MAX_DROP_CONTENT_SIZE,
+                _SAPP_TC_MAX_DROP_READERS);
         }
     #else
         (void)request;
@@ -5912,11 +6150,13 @@ const void* sapp_d3d11_get_device_context(void) { return 0; }
    a second window is not representable */
 sapp_window sapp_create_window(const sapp_window_desc* desc) {
     _SOKOL_UNUSED(desc);
-    fprintf(stderr, "sokol_app_tc.h: sapp_create_window() is not supported on iOS (single-window platform)\n");
+    _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                 "", "sapp_create_window() is not supported on iOS (single-window platform)");
     sapp_window w = {0};
     return w;
 }
 void sapp_destroy_window(sapp_window win) { _SOKOL_UNUSED(win); }
+void sapp_window_request_close(sapp_window win) { _SOKOL_UNUSED(win); }
 bool sapp_window_valid(sapp_window win) { _SOKOL_UNUSED(win); return false; }
 int sapp_window_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
 int sapp_window_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
@@ -5963,6 +6203,7 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); retur
 #include <shellapi.h>   /* DragAcceptFiles / DragQueryFileW */
 #include <d3d11.h>
 #include <dxgi1_3.h>    /* IDXGIFactory2 / IDXGISwapChain2 (frame latency waitable) */
+#include "util/sokol_d3d11_device_loss.h"
 
 #if defined(_MSC_VER)
 #pragma comment (lib, "kernel32")
@@ -6033,6 +6274,7 @@ typedef struct _sapp_tc_window_t {
     bool occluded;
     bool iconified;
     bool in_tick;
+    bool close_requested;       /* sapp_window_request_close(): WM_CLOSE posted at the loop tail */
     bool mouse_tracked;         /* TrackMouseEvent enter/leave state */
     bool mouse_pos_valid;
     float mouse_x, mouse_y;     /* last position in event coordinates */
@@ -6070,6 +6312,9 @@ static struct {
         bool dpi_aware;
         uint64_t frame_count;
         _sapp_tc_window_t* main;
+        bool device_lost_notified;  /* one notification across every swapchain */
+        bool device_lost_event_pending; /* deliver after app initialization */
+        uint32_t device_lost_reason; /* preserve the first removal reason */
         ID3D11Device* device;
         ID3D11DeviceContext* device_context;
         /* mouse cursor */
@@ -6079,8 +6324,10 @@ static struct {
         HCURSOR custom_cursors[_SAPP_MOUSECURSOR_NUM];
         bool custom_cursor_bound[_SAPP_MOUSECURSOR_NUM];
         /* console */
-        bool console_utf8_set;
-        UINT orig_codepage;
+        bool console_output_utf8_set;
+        bool console_input_utf8_set;
+        UINT orig_output_codepage;
+        UINT orig_input_codepage;
         /* clipboard */
         bool clipboard_enabled;
         int clipboard_size;
@@ -6096,7 +6343,7 @@ static struct {
 
 static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal);
 static bool _sapp_tc_win32_update_dimensions(_sapp_tc_window_t* w);
-static void _sapp_tc_d3d11_resize(_sapp_tc_window_t* w);
+static bool _sapp_tc_d3d11_resize(_sapp_tc_window_t* w);
 static void _sapp_tc_win32_apply_cursor(sapp_mouse_cursor cursor, bool shown, bool skip_area_test);
 
 /*-- timing -----------------------------------------------------------------*/
@@ -6512,17 +6759,63 @@ static void _sapp_tc_win32_init_console(void) {
         }
     }
     if (d->win32.console_utf8) {
-        _sapp_tc.app.orig_codepage = GetConsoleOutputCP();
+        /* [TrussC #754] Keep the console UTF-8 in both directions. */
+        _sapp_tc.app.orig_output_codepage = GetConsoleOutputCP();
+        _sapp_tc.app.orig_input_codepage = GetConsoleCP();
         if (SetConsoleOutputCP(CP_UTF8)) {
-            _sapp_tc.app.console_utf8_set = true;
+            _sapp_tc.app.console_output_utf8_set = true;
+        }
+        if (SetConsoleCP(CP_UTF8)) {
+            _sapp_tc.app.console_input_utf8_set = true;
         }
     }
 }
 
 static void _sapp_tc_win32_restore_console(void) {
-    if (_sapp_tc.app.console_utf8_set) {
-        SetConsoleOutputCP(_sapp_tc.app.orig_codepage);
+    if (_sapp_tc.app.console_output_utf8_set) {
+        SetConsoleOutputCP(_sapp_tc.app.orig_output_codepage);
     }
+    if (_sapp_tc.app.console_input_utf8_set) {
+        SetConsoleCP(_sapp_tc.app.orig_input_codepage);
+    }
+}
+
+/* The device belongs to the app, even when a secondary window detects loss.
+   Route the notification to the main callback, never a secondary Node tree. */
+static void _sapp_tc_d3d11_dispatch_pending_device_loss(void) {
+    if (!_sapp_tc_d3d11_take_pending_device_loss(_sapp_tc.app.init_called,
+            &_sapp_tc.app.device_lost_event_pending)) return;
+    sapp_event ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = SAPP_EVENTTYPE_TC_DEVICE_LOST;
+    ev.device_lost_reason = _sapp_tc.app.device_lost_reason;
+    _sapp_tc_send(_sapp_tc.app.main, &ev);
+}
+
+static bool _sapp_tc_d3d11_check_device_loss(HRESULT hr) {
+    if (!_sapp_tc_d3d11_is_device_loss((uint32_t)hr)) return false;
+    if (_sapp_tc_d3d11_first_device_loss((uint32_t)hr, &_sapp_tc.app.device_lost_notified)) {
+        const HRESULT reason = _sapp_tc.app.device->GetDeviceRemovedReason();
+        _sapp_tc.app.device_lost_reason = (uint32_t)reason;
+        /* A dead device may never signal another frame-latency credit. Keep
+           all windows timer-paced if the app opts to continue non-GPU work. */
+        for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+            _sapp_tc_window_t* w = _sapp_tc.windows[i];
+            if (w) {
+                w->credit_held = true;
+                w->earliest_next = _sapp_tc_now() + w->refresh_period;
+            }
+        }
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1,
+            (uint32_t)SAPP_LOGITEM_WIN32_D3D11_DEVICE_LOST, __LINE__, "error: ",
+            "D3D11 device lost: HRESULT=0x%08X, GetDeviceRemovedReason=0x%08X",
+            (unsigned int)hr, (unsigned int)reason);
+        /* Preserve pre-init loss until listeners are ready, without changing
+           the first tick's dimension-update/resize ordering. */
+        _sapp_tc.app.device_lost_event_pending = true;
+        _sapp_tc_d3d11_dispatch_pending_device_loss();
+    }
+    return true;
 }
 
 /*-- D3D11 / DXGI -----------------------------------------------------------*/
@@ -6553,6 +6846,10 @@ static bool _sapp_tc_d3d11_create_device(void) {
         hr = _sapp_tc_d3d11_try_create_device(flags & ~(UINT)D3D11_CREATE_DEVICE_DEBUG);
     }
 #endif
+    if (FAILED(hr)) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                     "error: ", "D3D11CreateDevice failed (HRESULT 0x%08lX)", (unsigned long)hr);
+    }
     return SUCCEEDED(hr);
 }
 
@@ -6565,11 +6862,19 @@ static void _sapp_tc_d3d11_destroy_render_targets(_sapp_tc_window_t* w) {
     _SAPP_TC_RELEASE(w->rt);
 }
 
+/* Log only terminal failures: compatibility retries happen before this. */
+static bool _sapp_tc_d3d11_check(HRESULT hr, const char* operation) {
+    if (SUCCEEDED(hr)) return true;
+    _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                 "error: ", "%s failed (HRESULT 0x%08lX)", operation, (unsigned long)hr);
+    return false;
+}
+
 static bool _sapp_tc_d3d11_create_render_targets(_sapp_tc_window_t* w) {
     ID3D11Device* dev = _sapp_tc.app.device;
     if (!dev || !w->swap_chain) return false;
-    if (FAILED(w->swap_chain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&w->rt))) return false;
-    if (FAILED(dev->CreateRenderTargetView((ID3D11Resource*)w->rt, NULL, &w->rtv))) return false;
+    if (!_sapp_tc_d3d11_check(w->swap_chain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&w->rt), "GetBuffer")) return false;
+    if (!_sapp_tc_d3d11_check(dev->CreateRenderTargetView((ID3D11Resource*)w->rt, NULL, &w->rtv), "CreateRenderTargetView")) return false;
     D3D11_TEXTURE2D_DESC td;
     memset(&td, 0, sizeof(td));
     td.Width = (UINT)(w->fb_width > 0 ? w->fb_width : 1);
@@ -6584,18 +6889,18 @@ static bool _sapp_tc_d3d11_create_render_targets(_sapp_tc_window_t* w) {
            separate MSAA texture, sokol_gfx resolves into the backbuffer */
         td.Format = w->color_fmt;
         td.BindFlags = D3D11_BIND_RENDER_TARGET;
-        if (FAILED(dev->CreateTexture2D(&td, NULL, &w->msaa_rt))) return false;
-        if (FAILED(dev->CreateRenderTargetView((ID3D11Resource*)w->msaa_rt, NULL, &w->msaa_rtv))) return false;
+        if (!_sapp_tc_d3d11_check(dev->CreateTexture2D(&td, NULL, &w->msaa_rt), "CreateTexture2D")) return false;
+        if (!_sapp_tc_d3d11_check(dev->CreateRenderTargetView((ID3D11Resource*)w->msaa_rt, NULL, &w->msaa_rtv), "CreateRenderTargetView")) return false;
     }
     td.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
     td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-    if (FAILED(dev->CreateTexture2D(&td, NULL, &w->ds))) return false;
-    if (FAILED(dev->CreateDepthStencilView((ID3D11Resource*)w->ds, NULL, &w->dsv))) return false;
+    if (!_sapp_tc_d3d11_check(dev->CreateTexture2D(&td, NULL, &w->ds), "CreateTexture2D")) return false;
+    if (!_sapp_tc_d3d11_check(dev->CreateDepthStencilView((ID3D11Resource*)w->ds, NULL, &w->dsv), "CreateDepthStencilView")) return false;
     return true;
 }
 
-static void _sapp_tc_d3d11_resize(_sapp_tc_window_t* w) {
-    if (!w->swap_chain) return;
+static bool _sapp_tc_d3d11_resize(_sapp_tc_window_t* w) {
+    if (!w->swap_chain || _sapp_tc.app.device_lost_notified) return false;
     _sapp_tc_d3d11_destroy_render_targets(w);
     /* flip model: EVERY backbuffer reference must be gone before
        ResizeBuffers, including an RTV still bound on the shared immediate
@@ -6606,21 +6911,23 @@ static void _sapp_tc_d3d11_resize(_sapp_tc_window_t* w) {
     }
     /* the creation flags (frame latency waitable!) must be passed unchanged
        on every resize, or the waitable handle is silently invalidated */
-    w->swap_chain->ResizeBuffers(2, (UINT)w->fb_width, (UINT)w->fb_height,
+    const HRESULT hr = w->swap_chain->ResizeBuffers(2, (UINT)w->fb_width, (UINT)w->fb_height,
                                  w->color_fmt, w->swapchain_flags);
+    if (_sapp_tc_d3d11_check_device_loss(hr)) return false;
     _sapp_tc_d3d11_create_render_targets(w);
+    return true;
 }
 
 static bool _sapp_tc_d3d11_create_swapchain(_sapp_tc_window_t* w) {
     IDXGIDevice1* dxgi_device = 0;
     IDXGIAdapter* adapter = 0;
     IDXGIFactory2* factory = 0;
-    if (FAILED(_sapp_tc.app.device->QueryInterface(__uuidof(IDXGIDevice1), (void**)&dxgi_device))) {
+    if (!_sapp_tc_d3d11_check(_sapp_tc.app.device->QueryInterface(__uuidof(IDXGIDevice1), (void**)&dxgi_device), "QueryInterface(IDXGIDevice1)")) {
         return false;
     }
     bool ok = false;
-    if (SUCCEEDED(dxgi_device->GetAdapter(&adapter)) &&
-        SUCCEEDED(adapter->GetParent(__uuidof(IDXGIFactory2), (void**)&factory))) {
+    if (_sapp_tc_d3d11_check(dxgi_device->GetAdapter(&adapter), "GetAdapter") &&
+        _sapp_tc_d3d11_check(adapter->GetParent(__uuidof(IDXGIFactory2), (void**)&factory), "GetParent(IDXGIFactory2)")) {
         DXGI_SWAP_CHAIN_DESC1 d;
         memset(&d, 0, sizeof(d));
         d.Width = (UINT)(w->fb_width > 0 ? w->fb_width : 1);
@@ -6641,7 +6948,7 @@ static bool _sapp_tc_d3d11_create_swapchain(_sapp_tc_window_t* w) {
             hr = factory->CreateSwapChainForHwnd((IUnknown*)_sapp_tc.app.device,
                 w->hwnd, &d, NULL, NULL, &w->swap_chain);
         }
-        if (SUCCEEDED(hr)) {
+        if (_sapp_tc_d3d11_check(hr, "CreateSwapChainForHwnd")) {
             w->swapchain_flags = d.Flags;
             /* fullscreen is driven here (borderless); kill DXGI's Alt-Enter */
             factory->MakeWindowAssociation(w->hwnd, DXGI_MWA_NO_ALT_ENTER | DXGI_MWA_NO_PRINT_SCREEN);
@@ -6811,6 +7118,7 @@ static void _sapp_tc_win32_files_dropped(_sapp_tc_window_t* w, HDROP hdrop) {
     memset(_sapp_tc.app.drop_buffer, 0, (size_t)max_files * (size_t)max_path);
     _sapp_tc.app.drop_num_files = 0;
     int num = (int)DragQueryFileW(hdrop, 0xFFFFFFFF, NULL, 0);
+    // Bound (security): OS drop lists can flood delivery; a fixed cap keeps path storage finite. Overflow omits excess files.
     if (num > max_files) num = max_files;
     bool ok = (num > 0);
     WCHAR* wpath = (WCHAR*)calloc((size_t)max_path, sizeof(WCHAR));
@@ -6821,6 +7129,7 @@ static void _sapp_tc_win32_files_dropped(_sapp_tc_window_t* w, HDROP hdrop) {
             break;
         }
         char* dst = _sapp_tc.app.drop_buffer + (size_t)i * (size_t)max_path;
+        // Bound (security): OS drop paths must fit fixed UTF-8 storage to keep memory finite. Overflow rejects the drop.
         if (!_sapp_tc_win32_wide_to_utf8(wpath, dst, max_path)) {
             ok = false;     /* path too long: drop everything */
             break;
@@ -6904,7 +7213,7 @@ static bool _sapp_tc_win32_window_due(_sapp_tc_window_t* w) {
 }
 
 static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
-    if (w->in_tick || !w->swap_chain) return;
+    if (_sapp_tc.app.quit_ordered || w->in_tick || !w->swap_chain) return;
     /* the due-check just consumed a waitable credit (unless one was already
        held); hold it until a real Present returns it through the swapchain.
        Clear waitable_ready: this signal is now spent (the next one comes from
@@ -6919,8 +7228,9 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
            per-WM_SIZE ResizeBuffers blows up memory on some drivers). During
            a modal size-move loop the swapchain keeps its size (DXGI stretch)
            and one resize lands on the first normal tick after the drag. */
-        if (!from_modal && _sapp_tc_win32_update_dimensions(w)) {
-            _sapp_tc_d3d11_resize(w);
+        if (!_sapp_tc.app.device_lost_notified &&
+            !from_modal && _sapp_tc_win32_update_dimensions(w)) {
+            if (!_sapp_tc_d3d11_resize(w)) return;
             _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESIZED);
         }
         w->in_tick = true;
@@ -6931,6 +7241,11 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
             } else if (_sapp_tc.app.desc.init_userdata_cb) {
                 _sapp_tc.app.desc.init_userdata_cb(_sapp_tc.app.desc.user_data);
             }
+            _sapp_tc_d3d11_dispatch_pending_device_loss();
+            if (_sapp_tc.app.quit_ordered) {
+                w->in_tick = false;
+                return;
+            }
         }
         if (_sapp_tc.app.desc.frame_cb) {
             _sapp_tc.app.desc.frame_cb();
@@ -6940,13 +7255,14 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
         _sapp_tc.app.frame_count++;
         w->in_tick = false;
         bool presented = false;
-        if (_sapp_tc.app.skip_present) {
+        if (_sapp_tc.app.skip_present || _sapp_tc.app.device_lost_notified) {
             /* one-shot event-driven present suppression (TrussC patch: keeps
                the last image on screen when a frame decides not to draw) */
             _sapp_tc.app.skip_present = false;
         } else {
             const UINT flags = from_modal ? DXGI_PRESENT_DO_NOT_WAIT : 0;
             const HRESULT hr = w->swap_chain->Present((UINT)swap_interval, flags);
+            if (_sapp_tc_d3d11_check_device_loss(hr)) return;
             presented = SUCCEEDED(hr) && (hr != DXGI_STATUS_OCCLUDED);
         }
         if (presented) {
@@ -6967,10 +7283,11 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
             _sapp_tc_win32_pace(w, w->refresh_period);
             return;
         }
-        if (w->occluded) {
+        if (w->occluded && !_sapp_tc.app.device_lost_notified) {
             /* cheap visibility poll: a fully covered window costs one
                present-test per pace period and never renders or stalls */
             const HRESULT hr = w->swap_chain->Present(0, DXGI_PRESENT_TEST);
+            if (_sapp_tc_d3d11_check_device_loss(hr)) return;
             if (hr == DXGI_STATUS_OCCLUDED) {
                 _sapp_tc_win32_pace(w, w->refresh_period);
                 return;
@@ -6978,8 +7295,8 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
             w->occluded = false;
             _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESUMED);
         }
-        if (!from_modal && _sapp_tc_win32_update_dimensions(w)) {
-            _sapp_tc_d3d11_resize(w);
+        if (!_sapp_tc.app.device_lost_notified && !from_modal && _sapp_tc_win32_update_dimensions(w)) {
+            if (!_sapp_tc_d3d11_resize(w)) return;
             _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESIZED);
         }
         w->in_tick = true;
@@ -6988,8 +7305,13 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
             w->desc.tick_cb(handle, w->desc.user_data);
         }
         w->in_tick = false;
+        if (_sapp_tc.app.device_lost_notified) {
+            _sapp_tc_win32_pace(w, w->refresh_period);
+            return;
+        }
         const UINT flags = from_modal ? DXGI_PRESENT_DO_NOT_WAIT : 0;
         const HRESULT hr = w->swap_chain->Present(1, flags);
+        if (_sapp_tc_d3d11_check_device_loss(hr)) return;
         if (hr == DXGI_STATUS_OCCLUDED) {
             w->occluded = true;
             _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_SUSPENDED);
@@ -7007,6 +7329,25 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
     }
 }
 
+static bool _sapp_tc_win32_request_exit(_sapp_tc_window_t* w) {
+    if (!_sapp_tc.app.quit_ordered) {
+        _sapp_tc.app.quit_requested = true;
+        _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_QUIT_REQUESTED);
+    }
+    return _sapp_tc.app.quit_ordered || _sapp_tc.app.quit_requested;
+}
+
+static void _sapp_tc_win32_cleanup(void) {
+    // Both sapp_run and an early/reentrant WM_ENDSESSION must obey this guard.
+    if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
+        _sapp_tc.app.cleanup_called = true;
+        if (_sapp_tc.app.main) ShutdownBlockReasonDestroy(_sapp_tc.app.main->hwnd);
+        if (_sapp_tc.app.desc.cleanup_cb) _sapp_tc.app.desc.cleanup_cb();
+        else if (_sapp_tc.app.desc.cleanup_userdata_cb)
+            _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
+    }
+}
+
 /*-- window procedure --------------------------------------------------------*/
 static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_NCCREATE) {
@@ -7021,17 +7362,52 @@ static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
     switch (msg) {
+        case WM_QUERYENDSESSION:
+            if (!w->is_main) return TRUE;
+            trussc::internal::setExitReason("os-session-end");
+            if (_sapp_tc_win32_request_exit(w)) {
+                // Do not end the run loop until WM_ENDSESSION(TRUE): another
+                // app may still veto the session. No QUIT_REQUESTED twice.
+                _sapp_tc.app.quit_requested = false;
+                ShutdownBlockReasonDestroy(hwnd);
+                return TRUE;
+            } else {
+                std::string reason = trussc::internal::exitBlockReason();
+                if (reason.empty()) reason = "The app is still busy.";
+                const int count = MultiByteToWideChar(CP_UTF8, 0, reason.c_str(), -1, NULL, 0);
+                if (count > 0) {
+                    std::wstring wide((size_t)count, L'\0');
+                    MultiByteToWideChar(CP_UTF8, 0, reason.c_str(), -1, &wide[0], count);
+                    ShutdownBlockReasonCreate(hwnd, wide.c_str());
+                }
+                return FALSE;
+            }
+        case WM_ENDSESSION:
+            if (!w->is_main) return 0;
+            ShutdownBlockReasonDestroy(hwnd);
+            if (wParam) {
+                // Forced shutdown can arrive after a veto. Cleanup must finish
+                // inside this message; Windows may kill us as soon as it returns.
+                trussc::internal::setExitReason("os-session-end");
+                _sapp_tc.app.quit_ordered = true;
+                _sapp_tc_win32_cleanup();
+                // This is what Windows does after we return; cleanup and logs
+                // are complete. Do not run DLL detach or guest static destructors.
+                TerminateProcess(GetCurrentProcess(),
+                    trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1);
+            } else {
+                _sapp_tc.app.quit_requested = false;
+                _sapp_tc.app.quit_ordered = false;
+                trussc::internal::clearExitReason();
+                trussc::internal::setExitBlockReason("");
+            }
+            return 0;
         case WM_CLOSE:
             if (w->is_main) {
-                /* the cancellable quit dance (sokol_app.h parity): sapp_quit()
-                   pre-sets quit_ordered (unvetoable); otherwise QUIT_REQUESTED
-                   is delivered and a handler may sapp_cancel_quit() */
-                if (!_sapp_tc.app.quit_ordered) {
-                    _sapp_tc.app.quit_requested = true;
-                    _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_QUIT_REQUESTED);
-                    if (_sapp_tc.app.quit_requested) {
-                        _sapp_tc.app.quit_ordered = true;
-                    }
+                trussc::internal::setExitReasonIfEmpty("window-close");
+                if (_sapp_tc_win32_request_exit(w)) {
+                    _sapp_tc.app.quit_ordered = true;
+                    ShutdownBlockReasonDestroy(hwnd);
                 }
                 if (_sapp_tc.app.quit_ordered) {
                     PostQuitMessage(0);
@@ -7223,9 +7599,8 @@ static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
 }
 
 /*-- window creation / destruction ------------------------------------------*/
-static void _sapp_tc_win32_ensure_wndclass(void) {
-    if (_sapp_tc.wndclass_registered) return;
-    _sapp_tc.wndclass_registered = true;
+static bool _sapp_tc_win32_ensure_wndclass(void) {
+    if (_sapp_tc.wndclass_registered) return true;
     WNDCLASSW wndclassw;
     memset(&wndclassw, 0, sizeof(wndclassw));
     wndclassw.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
@@ -7234,7 +7609,17 @@ static void _sapp_tc_win32_ensure_wndclass(void) {
     wndclassw.hCursor = LoadCursor(NULL, IDC_ARROW);
     wndclassw.hIcon = LoadIcon(NULL, IDI_WINLOGO);
     wndclassw.lpszClassName = L"SOKOLAPP_TC";
-    RegisterClassW(&wndclassw);
+    if (!RegisterClassW(&wndclassw)) {
+        const DWORD error = GetLastError();
+        if (error != ERROR_CLASS_ALREADY_EXISTS) {
+            _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                         "error: ", "RegisterClassW failed (Win32 error %lu, HRESULT 0x%08lX)",
+                         (unsigned long)error, (unsigned long)HRESULT_FROM_WIN32(error));
+            return false;
+        }
+    }
+    _sapp_tc.wndclass_registered = true;
+    return true;
 }
 
 /* create the HWND at the desc's logical size: first against 96 DPI, then --
@@ -7242,7 +7627,7 @@ static void _sapp_tc_win32_ensure_wndclass(void) {
    the window actually landed on (the standard create-then-resize dance) */
 static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wchar_t* title,
         DWORD style, DWORD ex_style, int x, int y, bool use_default_size) {
-    _sapp_tc_win32_ensure_wndclass();
+    if (!_sapp_tc_win32_ensure_wndclass()) return false;
     int outer_w = CW_USEDEFAULT;
     int outer_h = CW_USEDEFAULT;
     if (!use_default_size) {
@@ -7256,7 +7641,13 @@ static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wcha
         (y >= 0) ? y : CW_USEDEFAULT,
         outer_w, outer_h,
         NULL, NULL, GetModuleHandleW(NULL), w);
-    if (!w->hwnd) return false;
+    if (!w->hwnd) {
+        const DWORD error = GetLastError();
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                     "error: ", "CreateWindowExW failed (Win32 error %lu, HRESULT 0x%08lX)",
+                     (unsigned long)error, (unsigned long)HRESULT_FROM_WIN32(error));
+        return false;
+    }
     w->hmonitor = MonitorFromWindow(w->hwnd, MONITOR_DEFAULTTONEAREST);
     _sapp_tc_win32_update_refresh(w);
     _sapp_tc_win32_update_scale(w);
@@ -7299,7 +7690,11 @@ static bool _sapp_tc_win32_create_main_window(void) {
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         if (_sapp_tc.windows[i] == 0) { slot = i; break; }
     }
-    if (slot < 0) return false;
+    if (slot < 0) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                     "error: ", "Main window creation failed: no free window slot");
+        return false;
+    }
 
     _sapp_tc_window_t* w = new _sapp_tc_window_t();
     w->win_id = ++_sapp_tc.next_id;
@@ -7345,17 +7740,34 @@ static bool _sapp_tc_win32_create_main_window(void) {
 
 /*-- the run loop -------------------------------------------------------------
     Blocks in MsgWaitForMultipleObjectsEx on the due windows' frame latency
-    waitables (plus a timeout for timer-paced windows), drains ALL pending
+    waitables (plus a timer for timer-paced windows), drains ALL pending
     messages, then ticks every due window. Replaces upstream's PeekMessage
-    busy-render-loop: the process sleeps whenever nothing is due. */
+    busy-render-loop: the process sleeps whenever nothing is due.
+
+    Timer-paced windows (earliest_next in the future, e.g. after a tick without
+    a Present) are woken by one high-resolution waitable timer armed for the
+    earliest earliest_next and waited on after the windows' waitables. A plain
+    millisecond timeout ends on the system timer tick (15.625 ms by default),
+    which would start those ticks on that grid instead of near the requested
+    time (#481). Same convention as internal::HeadlessSleeper (tcGlobal.cpp):
+    no timeBeginPeriod. Before Windows 10 1803 the flag is rejected, no timer
+    is created and the wait keeps the millisecond timeout. */
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002   /* Windows SDK 10.0.17134+ */
+#endif
+
 static void _sapp_tc_win32_run_loop(void) {
+    /* auto-reset (synchronization) timer; NULL before Windows 10 1803 */
+    HANDLE pace_timer = CreateWaitableTimerExW(NULL, NULL,
+        CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_MODIFY_STATE | SYNCHRONIZE);
     bool done = false;
     while (!done && !_sapp_tc.app.quit_ordered) {
-        HANDLE handles[_SAPP_TC_MAX_WINDOWS];
+        HANDLE handles[_SAPP_TC_MAX_WINDOWS + 1];   /* + the pace timer */
         _sapp_tc_window_t* handle_owner[_SAPP_TC_MAX_WINDOWS];
-        DWORD num_handles = 0;
+        DWORD num_handles = 0;          /* frame latency waitables (handle_owner) */
         const double now = _sapp_tc_now();
-        double wake_at = now + 0.1;     /* robustness cap; messages wake us anyway */
+        const double wake_cap = now + 0.1;  /* robustness cap; messages wake us anyway */
+        double wake_at = wake_cap;
         for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
             if (!w || !w->swap_chain || w->in_tick) continue;
@@ -7370,8 +7782,19 @@ static void _sapp_tc_win32_run_loop(void) {
         }
         double timeout_s = wake_at - now;
         if (timeout_s < 0.0) timeout_s = 0.0;
-        DWORD wr = MsgWaitForMultipleObjectsEx(num_handles, handles,
-            (DWORD)(timeout_s * 1000.0), QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        DWORD timeout_ms = (DWORD)(timeout_s * 1000.0);
+        DWORD num_wait = num_handles;
+        if (pace_timer && wake_at > now && wake_at < wake_cap) {
+            /* a timer-paced window is next: wake on the timer, not the tick */
+            LARGE_INTEGER due;
+            due.QuadPart = -(LONGLONG)ceil(timeout_s * 1e7);   /* relative, 100 ns units */
+            if (SetWaitableTimer(pace_timer, &due, 0, NULL, NULL, FALSE)) {
+                handles[num_wait++] = pace_timer;
+                timeout_ms = (DWORD)ceil((wake_cap - now) * 1000.0);   /* only the cap */
+            }
+        }
+        DWORD wr = MsgWaitForMultipleObjectsEx(num_wait, handles,
+            timeout_ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
         /* If a frame latency waitable satisfied the wait, it was auto-reset here.
            Record it so the due-check consumes THIS signal instead of re-waiting
            the (now-unsignaled) handle. Only one handle is reported per wait; the
@@ -7379,6 +7802,10 @@ static void _sapp_tc_win32_run_loop(void) {
         if (wr >= WAIT_OBJECT_0 && wr < WAIT_OBJECT_0 + num_handles) {
             handle_owner[wr - WAIT_OBJECT_0]->waitable_ready = true;
         }
+        /* WAIT_OBJECT_0 + num_handles (when armed) is the pace timer: nothing to
+           record, the due-check below sees earliest_next has passed. A timer
+           left signaled (the wait ended on a message or waitable first) is only
+           waited on again after SetWaitableTimer re-arms it, which resets it. */
         MSG msg;
         while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
             if (WM_QUIT == msg.message) {
@@ -7397,12 +7824,22 @@ static void _sapp_tc_win32_run_loop(void) {
                 _sapp_tc_win32_tick(w, false);
             }
         }
+        /* sapp_window_request_close(): post WM_CLOSE to that window, so the
+           close lands through the same WM_CLOSE branch (close_cb) as a click
+           on its close button, outside every tick */
+        for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+            _sapp_tc_window_t* w = _sapp_tc.windows[i];
+            if (!w || w->is_main || !w->close_requested) continue;
+            w->close_requested = false;
+            if (w->hwnd) PostMessageW(w->hwnd, WM_CLOSE, 0, 0);
+        }
         /* route programmatic quits through the same WM_CLOSE dance so the
            QUIT_REQUESTED semantics stay identical (upstream parity) */
         if (_sapp_tc.app.quit_requested && _sapp_tc.app.main) {
             PostMessageW(_sapp_tc.app.main->hwnd, WM_CLOSE, 0, 0);
         }
     }
+    if (pace_timer) CloseHandle(pace_timer);
 }
 
 /*-- public API ---------------------------------------------------------------*/
@@ -7471,6 +7908,12 @@ void sapp_destroy_window(sapp_window win) {
     delete w;
 }
 
+void sapp_window_request_close(sapp_window win) {
+    _sapp_tc_window_t* w = _sapp_tc_lookup(win);
+    if (!w || w->is_main) return;   /* the main window: sapp_request_quit() */
+    w->close_requested = true;
+}
+
 bool sapp_window_valid(sapp_window win) {
     return _sapp_tc_lookup(win) != 0;
 }
@@ -7506,8 +7949,9 @@ int sapp_window_sample_count(sapp_window win) {
 }
 
 bool sapp_window_occluded(sapp_window win) {
+    /* both flags gate the secondary tick (see the declaration) */
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    return w ? w->occluded : false;
+    return w ? (w->occluded || w->iconified) : false;
 }
 
 void sapp_window_set_title(sapp_window win, const char* title) {
@@ -7605,14 +8049,7 @@ void sapp_run(const sapp_desc* desc) {
 
     /* user cleanup runs BEFORE any GPU/window teardown (the app shuts down
        sokol_gfx here, which still needs the device) */
-    if (!_sapp_tc.app.cleanup_called) {
-        _sapp_tc.app.cleanup_called = true;
-        if (_sapp_tc.app.desc.cleanup_cb) {
-            _sapp_tc.app.desc.cleanup_cb();
-        } else if (_sapp_tc.app.desc.cleanup_userdata_cb) {
-            _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
-        }
-    }
+    _sapp_tc_win32_cleanup();
     /* destroy any windows the app left open (secondary first, then main) */
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         _sapp_tc_window_t* w = _sapp_tc.windows[i];
@@ -7818,6 +8255,7 @@ const char* sapp_get_clipboard_string(void) {
     if (object) {
         const wchar_t* wchar_buf = (const wchar_t*)GlobalLock(object);
         if (wchar_buf) {
+            // Bound (security): OS clipboard text must fit the Windows UTF-8 buffer. Overflow fails conversion; the buffer is NUL-terminated.
             _sapp_tc_win32_wide_to_utf8(wchar_buf, _sapp_tc.app.clipboard,
                                         _sapp_tc.app.clipboard_size);
             GlobalUnlock(object);
@@ -8003,6 +8441,7 @@ sapp_swapchain sapp_get_swapchain(void) {
 #endif
 
 #define _SAPP_TC_MAX_WINDOWS (32)
+// Bound (platform): X11 keycodes use the protocol eight-bit range. Overflow maps out-of-range keycodes to invalid or zero.
 #define _SAPP_X11_MAX_X11_KEYCODES (256)
 #define _SAPP_TC_XDND_VERSION (5)
 
@@ -8033,6 +8472,7 @@ typedef struct _sapp_tc_window_t {
     bool iconified;             /* WM_STATE == IconicState */
     bool occluded;              /* VisibilityFullyObscured (secondary windows only) */
     bool in_tick;
+    bool close_requested;       /* sapp_window_request_close(): close_cb at the loop tail */
     bool mouse_pos_valid;
     float mouse_x, mouse_y;     /* last position in event coordinates (raw px) */
     float mouse_dx, mouse_dy;
@@ -9776,6 +10216,7 @@ static bool _sapp_tc_x11_parse_dropped_files_list(const char* src) {
             src_count = 0;
             _sapp_tc.app.drop_num_files++;
             // too many files is not an error
+            // Bound (security): X11 drop lists can flood delivery; a fixed cap keeps path storage finite. Overflow stops parsing further files.
             if (_sapp_tc.app.drop_num_files >= _sapp_tc.app.drop_max_files) {
                 break;
             }
@@ -9791,6 +10232,7 @@ static bool _sapp_tc_x11_parse_dropped_files_list(const char* src) {
         }
         if (dst_chr) {
             // dst_end_ptr already has adjustment for terminating zero
+            // Bound (security): X11 drop paths must fit fixed per-path storage to keep memory finite. Overflow aborts parsing the drop.
             if (dst_ptr < dst_end_ptr) {
                 *dst_ptr++ = dst_chr;
             } else {
@@ -9988,6 +10430,7 @@ static void _sapp_tc_x11_on_clientmessage(XEvent* event) {
                 /* the cancellable quit dance runs at the loop tail (upstream
                    parity): QUIT_REQUESTED is delivered there and a handler
                    may sapp_cancel_quit() */
+                trussc::internal::setExitReasonIfEmpty("window-close");
                 _sapp_tc.app.quit_requested = true;
             } else if (w->desc.close_cb) {
                 /* user closed a secondary window: notify; the app accepts by
@@ -10098,16 +10541,19 @@ static _sapp_tc_glx_voidfn_t _sapp_tc_glx_getprocaddr(const char* name) {
 static bool _sapp_tc_glx_init(void) {
     int error_base = 0, event_base = 0;
     if (!glXQueryExtension(_sapp_tc.display, &error_base, &event_base)) {
-        fprintf(stderr, "sokol_app_tc.h: GLX extension not present on the X server\n");
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_EXTENSION_NOT_FOUND, __LINE__,
+                     "", "GLX extension not present on the X server");
         return false;
     }
     int major = 0, minor = 0;
     if (!glXQueryVersion(_sapp_tc.display, &major, &minor)) {
-        fprintf(stderr, "sokol_app_tc.h: glXQueryVersion() failed\n");
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_QUERY_VERSION_FAILED, __LINE__,
+                     "", "glXQueryVersion() failed");
         return false;
     }
     if ((major < 1) || ((major == 1) && (minor < 3))) {
-        fprintf(stderr, "sokol_app_tc.h: GLX version 1.3 or higher required\n");
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_VERSION_TOO_LOW, __LINE__,
+                     "", "GLX version 1.3 or higher required");
         return false;
     }
     const char* exts = glXQueryExtensionsString(_sapp_tc.display, _sapp_tc.screen);
@@ -10126,7 +10572,8 @@ static bool _sapp_tc_glx_init(void) {
             _sapp_tc_glx_getprocaddr("glXCreateContextAttribsARB");
     }
     if (!_sapp_tc.CreateContextAttribsARB) {
-        fprintf(stderr, "sokol_app_tc.h: GLX_ARB_create_context(_profile) required\n");
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_REQUIRED_EXTENSIONS_MISSING, __LINE__,
+                     "", "GLX_ARB_create_context(_profile) required");
         return false;
     }
     return true;
@@ -10145,6 +10592,8 @@ static bool _sapp_tc_glx_choose_fbconfig(void) {
     GLXFBConfig* configs = glXGetFBConfigs(_sapp_tc.display, _sapp_tc.screen, &count);
     if (!configs || (count == 0)) {
         if (configs) XFree(configs);
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_NO_GLXFBCONFIGS, __LINE__,
+                     "", "glXGetFBConfigs() returned no GLXFBConfigs");
         return false;
     }
     const int want_samples = (_sapp_tc.app.desc.sample_count > 1) ? _sapp_tc.app.desc.sample_count : 0;
@@ -10179,7 +10628,8 @@ static bool _sapp_tc_glx_choose_fbconfig(void) {
         _sapp_tc.app.desc.sample_count = (got_samples > 1) ? got_samples : 1;
         ok = true;
     } else {
-        fprintf(stderr, "sokol_app_tc.h: no suitable GLXFBConfig found\n");
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_NO_SUITABLE_GLXFBCONFIG, __LINE__,
+                     "", "no suitable GLXFBConfig found");
     }
     XFree(configs);
     return ok;
@@ -10204,7 +10654,8 @@ static bool _sapp_tc_glx_create_context(void) {
                                                     NULL, True, attribs);
     _sapp_tc_x11_release_error_handler();
     if (!_sapp_tc.ctx) {
-        fprintf(stderr, "sokol_app_tc.h: failed to create GL %d.%d core context\n", gl_major, gl_minor);
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_CREATE_CONTEXT_FAILED, __LINE__,
+                     "", "failed to create GL %d.%d core context", gl_major, gl_minor);
         return false;
     }
     return true;
@@ -10226,6 +10677,8 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* 
         int width_pt, int height_pt, bool borderless) {
     XVisualInfo* vi = glXGetVisualFromFBConfig(_sapp_tc.display, _sapp_tc.fbconfig);
     if (!vi) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_GET_VISUAL_FROM_FBCONFIG_FAILED, __LINE__,
+                     "", "glXGetVisualFromFBConfig() failed");
         return false;
     }
     w->colormap = XCreateColormap(_sapp_tc.display, _sapp_tc.root, vi->visual, AllocNone);
@@ -10257,6 +10710,8 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* 
     _sapp_tc_x11_release_error_handler();
     XFree(vi);
     if (!w->xwin) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_X11_CREATE_WINDOW_FAILED, __LINE__,
+                     "", "XCreateWindow() failed");
         return false;
     }
     Atom protocols[] = { _sapp_tc.WM_DELETE_WINDOW };
@@ -10285,6 +10740,8 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* 
     w->glx_win = glXCreateWindow(_sapp_tc.display, _sapp_tc.fbconfig, w->xwin, NULL);
     _sapp_tc_x11_release_error_handler();
     if (!w->glx_win) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_CREATE_WINDOW_FAILED, __LINE__,
+                     "", "glXCreateWindow() failed");
         return false;
     }
     _sapp_tc_timing_reset(&w->timing);
@@ -10617,6 +11074,18 @@ static void _sapp_tc_x11_run_loop(void) {
             }
         }
         XFlush(_sapp_tc.display);
+        /* sapp_window_request_close() lands here, outside every tick and
+           event: the same close_cb a WM_DELETE_WINDOW sends (re-fetch each
+           slot: a close may destroy windows) */
+        for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+            _sapp_tc_window_t* w = _sapp_tc.windows[i];
+            if (!w || w->is_main || !w->close_requested) continue;
+            w->close_requested = false;
+            if (w->desc.close_cb) {
+                sapp_window handle = { w->win_id };
+                w->desc.close_cb(handle, w->desc.user_data);
+            }
+        }
         /* the cancellable quit dance (upstream parity): WM_DELETE_WINDOW or
            sapp_request_quit() land here; sapp_quit() pre-sets quit_ordered */
         if (_sapp_tc.app.quit_requested && !_sapp_tc.app.quit_ordered) {
@@ -10741,6 +11210,12 @@ void sapp_destroy_window(sapp_window win) {
     }
 }
 
+void sapp_window_request_close(sapp_window win) {
+    _sapp_tc_window_t* w = _sapp_tc_lookup(win);
+    if (!w || w->is_main) return;   /* the main window: sapp_request_quit() */
+    w->close_requested = true;
+}
+
 bool sapp_window_valid(sapp_window win) {
     return _sapp_tc_lookup(win) != 0;
 }
@@ -10776,8 +11251,9 @@ int sapp_window_sample_count(sapp_window win) {
 }
 
 bool sapp_window_occluded(sapp_window win) {
+    /* both flags gate the secondary tick (see the declaration) */
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    return w ? w->occluded : false;
+    return w ? (w->occluded || w->iconified) : false;
 }
 
 void sapp_window_set_title(sapp_window win, const char* title) {
@@ -10849,7 +11325,9 @@ void sapp_run(const sapp_desc* desc) {
     XrmInitialize();
     _sapp_tc.display = XOpenDisplay(NULL);
     if (!_sapp_tc.display) {
-        fprintf(stderr, "sokol_app_tc.h: XOpenDisplay() failed (no X server / DISPLAY not set)\n");
+        /* the desc (and its logger) is already stored above */
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 0, (uint32_t)SAPP_LOGITEM_LINUX_X11_OPEN_DISPLAY_FAILED, __LINE__,
+                     "", "XOpenDisplay() failed (no X server / DISPLAY not set)");
         abort();
     }
     _sapp_tc.screen = DefaultScreen(_sapp_tc.display);
@@ -10870,7 +11348,7 @@ void sapp_run(const sapp_desc* desc) {
 
     /* user cleanup runs BEFORE any GL/window teardown (the app shuts down
        sokol_gfx here, which still needs a current context) */
-    if (!_sapp_tc.app.cleanup_called) {
+    if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
         _sapp_tc.app.cleanup_called = true;
         if (_sapp_tc.app.desc.cleanup_cb) {
             _sapp_tc.app.desc.cleanup_cb();
@@ -11095,6 +11573,7 @@ const char* sapp_get_clipboard_string(void) {
         return _sapp_tc.app.clipboard;
     }
     /* INCR (incremental transfer) is rejected: pastes beyond the buffer fail */
+    // Bound (security): X11 selection data must fit fixed clipboard storage to keep retained memory finite. Overflow rejects the selection.
     if ((actual_type != incremental) && (item_count < (unsigned long)_sapp_tc.app.clipboard_size)) {
         strncpy(_sapp_tc.app.clipboard, data, (size_t)_sapp_tc.app.clipboard_size - 1);
         _sapp_tc.app.clipboard[_sapp_tc.app.clipboard_size - 1] = 0;
@@ -11263,14 +11742,15 @@ sapp_swapchain sapp_get_swapchain(void) {
 #define _SAPP_CLEAR_ARC_STRUCT(type, item) { _sapp_tc_clear(&item, sizeof(item)); }
 #endif
 
-/* controlled failure instead of sokol_app.h's log-item machinery */
-#define _SAPP_PANIC(code) do { fprintf(stderr, "sokol_app_tc.h: panic: " #code "\n"); abort(); } while (0)
-#define _SAPP_ERROR(code) fprintf(stderr, "sokol_app_tc.h: error: " #code "\n")
-#define _SAPP_ERROR_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: error: " #code ": %s\n", msg)
-#define _SAPP_WARN_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: warn: " #code ": %s\n", msg)
-#define _SAPP_INFO_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: info: " #code ": %s\n", msg)
-#define _SAPP_INFO(code) fprintf(stderr, "sokol_app_tc.h: info: " #code "\n")
-#define _SAPP_WARN(code) fprintf(stderr, "sokol_app_tc.h: warn: " #code "\n")
+/* controlled failure instead of sokol_app.h's log-item machinery, reported
+   through sapp_desc.logger (_sapp_tc_log) */
+#define _SAPP_PANIC(code) do { _sapp_tc_log(&_sapp_tc.desc.logger, 0, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "panic: ", "%s", #code); abort(); } while (0)
+#define _SAPP_ERROR(code) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s", #code)
+#define _SAPP_ERROR_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s: %s", #code, msg)
+#define _SAPP_WARN_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s: %s", #code, msg)
+#define _SAPP_INFO_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s: %s", #code, msg)
+#define _SAPP_INFO(code) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s", #code)
+#define _SAPP_WARN(code) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s", #code)
 typedef struct {
     #if defined(_SAPP_APPLE)
         struct {
@@ -11414,6 +11894,7 @@ _SOKOL_PRIVATE double _sapp_tc_timing_get(_sapp_tc_timing_t* t) {
 #if defined(_SAPP_LINUX)
 
 #define _SAPP_X11_XDND_VERSION (5)
+// Bound (platform): X11 keycodes use the protocol eight-bit range. Overflow maps out-of-range keycodes to invalid or zero.
 #define _SAPP_X11_MAX_X11_KEYCODES (256)
 
 #define GLX_VENDOR 1
@@ -11704,7 +12185,7 @@ _SOKOL_PRIVATE void _sapp_tc_call_frame(void) {
 }
 
 _SOKOL_PRIVATE void _sapp_tc_call_cleanup(void) {
-    if (!_sapp_tc.cleanup_called) {
+    if (_sapp_tc.init_called && !_sapp_tc.cleanup_called) {
         if (_sapp_tc.desc.cleanup_cb) {
             _sapp_tc.desc.cleanup_cb();
         } else if (_sapp_tc.desc.cleanup_userdata_cb) {
@@ -13788,6 +14269,7 @@ _SOKOL_PRIVATE const char* _sapp_tc_x11_get_clipboard_string(void) {
         }
         return NULL;
     }
+    // Bound (security): X11 selection data must fit the fixed clipboard buffer to keep memory finite. Overflow rejects the selection.
     if ((actualType == incremental) || (itemCount >= (size_t)_sapp_tc.clipboard.buf_size)) {
         _SAPP_ERROR(CLIPBOARD_STRING_TOO_BIG);
         XFree(data);
@@ -14206,6 +14688,7 @@ _SOKOL_PRIVATE bool _sapp_tc_x11_parse_dropped_files_list(const char* src) {
             src_count = 0;
             _sapp_tc.drop.num_files++;
             // too many files is not an error
+            // Bound (security): X11 drop lists can flood delivery; a fixed cap keeps path storage finite. Overflow stops parsing further files.
             if (_sapp_tc.drop.num_files >= _sapp_tc.drop.max_files) {
                 break;
             }
@@ -14221,6 +14704,7 @@ _SOKOL_PRIVATE bool _sapp_tc_x11_parse_dropped_files_list(const char* src) {
         }
         if (dst_chr) {
             // dst_end_ptr already has adjustment for terminating zero
+            // Bound (security): X11 drop paths must fit fixed per-path storage to keep memory finite. Overflow aborts parsing the drop.
             if (dst_ptr < dst_end_ptr) {
                 *dst_ptr++ = dst_chr;
             } else {
@@ -14427,6 +14911,7 @@ _SOKOL_PRIVATE void _sapp_tc_x11_on_clientmessage(XEvent* event) {
     if (event->xclient.message_type == _sapp_tc.x11.WM_PROTOCOLS) {
         const Atom protocol = (Atom)event->xclient.data.l[0];
         if (protocol == _sapp_tc.x11.WM_DELETE_WINDOW) {
+            trussc::internal::setExitReasonIfEmpty("window-close");
             _sapp_tc.quit_requested = true;
         }
     } else if (event->xclient.message_type == _sapp_tc.x11.xdnd.XdndEnter) {
@@ -14640,6 +15125,7 @@ _SOKOL_PRIVATE void _sapp_tc_egl_init(void) {
         EGL_NONE,
     };
 
+    // Bound (platform): the EGL SDK writes only the requested number of configuration handles into this fixed array. Overflow omits further configurations.
     EGLConfig egl_configs[32];
     EGLint config_count;
     if (!eglChooseConfig(_sapp_tc.egl.display, config_attrs, egl_configs, 32, &config_count) || config_count == 0) {
@@ -14964,7 +15450,9 @@ SOKOL_API_IMPL bool sapp_high_dpi(void) {
 }
 
 SOKOL_API_IMPL float sapp_dpi_scale(void) {
-    return _sapp_tc.dpi_scale;
+    /* [TrussC fork] before sapp_run (headless, no window) report 1.0 like the
+       desktop backends instead of the zero-initialized state (#841) */
+    return _sapp_tc.dpi_scale > 0.0f ? _sapp_tc.dpi_scale : 1.0f;
 }
 
 SOKOL_API_IMPL const void* sapp_egl_get_display(void) {
@@ -15240,16 +15728,8 @@ SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
 }
 
 SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size(int index) {
-    SOKOL_ASSERT((index >= 0) && (index < _sapp_tc.drop.num_files));
-    #if defined(_SAPP_EMSCRIPTEN)
-        if (!_sapp_tc.drop.enabled) {
-            return 0;
-        }
-        return _sapp_tc_js_dropped_file_size(index);
-    #else
-        (void)index;
-        return 0;
-    #endif
+    const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+    return (size > UINT32_MAX) ? UINT32_MAX : (uint32_t)size;
 }
 
 SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request* request) {
@@ -15263,9 +15743,13 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
         sapp_html5_fetch_error error_code = SAPP_HTML5_FETCH_ERROR_NO_ERROR;
         if ((index < 0) || (index >= _sapp_tc.drop.num_files)) {
             error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
-        }
-        if (sapp_html5_get_dropped_file_size(index) > request->buffer.size) {
-            error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+        } else {
+            const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+            if (size > request->buffer.size) {
+                error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+            } else if (size > _SAPP_TC_MAX_DROP_CONTENT_SIZE) {
+                error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
+            }
         }
         if (SAPP_HTML5_FETCH_ERROR_NO_ERROR != error_code) {
             _sapp_tc_emsc_invoke_fetch_cb(index,
@@ -15281,7 +15765,9 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
                 request->callback,
                 (void*)request->buffer.ptr,
                 request->buffer.size,
-                request->user_data);
+                request->user_data,
+                _SAPP_TC_MAX_DROP_CONTENT_SIZE,
+                _SAPP_TC_MAX_DROP_READERS);
         }
     #else
         (void)request;
@@ -15521,11 +16007,13 @@ const void* sapp_d3d11_get_device_context(void) { return 0; }
    the GLCORE branch */
 sapp_window sapp_create_window(const sapp_window_desc* desc) {
     _SOKOL_UNUSED(desc);
-    fprintf(stderr, "sokol_app_tc.h: sapp_create_window() is not supported on GLES3 Linux (single-window platform)\n");
+    _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                 "", "sapp_create_window() is not supported on GLES3 Linux (single-window platform)");
     sapp_window w = {0};
     return w;
 }
 void sapp_destroy_window(sapp_window win) { _SOKOL_UNUSED(win); }
+void sapp_window_request_close(sapp_window win) { _SOKOL_UNUSED(win); }
 bool sapp_window_valid(sapp_window win) { _SOKOL_UNUSED(win); return false; }
 int sapp_window_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
 int sapp_window_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
@@ -15638,16 +16126,19 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); retur
 #define _SAPP_CLEAR_ARC_STRUCT(type, item) { _sapp_tc_clear(&item, sizeof(item)); }
 #endif
 
-/* controlled failure instead of sokol_app.h's log-item machinery.
-   stderr goes nowhere on Android -- route to the system log (liblog). */
-#include <android/log.h>
-#define _SAPP_PANIC(code) do { __android_log_print(ANDROID_LOG_FATAL, "sokol_app_tc", "panic: " #code); abort(); } while (0)
-#define _SAPP_ERROR(code) __android_log_print(ANDROID_LOG_ERROR, "sokol_app_tc", "error: " #code)
-#define _SAPP_ERROR_MSG(code, msg) __android_log_print(ANDROID_LOG_ERROR, "sokol_app_tc", "error: " #code ": %s", msg)
-#define _SAPP_WARN_MSG(code, msg) __android_log_print(ANDROID_LOG_WARN, "sokol_app_tc", "warn: " #code ": %s", msg)
-#define _SAPP_INFO_MSG(code, msg) __android_log_print(ANDROID_LOG_INFO, "sokol_app_tc", "info: " #code ": %s", msg)
-#define _SAPP_INFO(code) __android_log_print(ANDROID_LOG_INFO, "sokol_app_tc", "info: " #code)
-#define _SAPP_WARN(code) __android_log_print(ANDROID_LOG_WARN, "sokol_app_tc", "warn: " #code)
+/* controlled failure instead of sokol_app.h's log-item machinery, reported
+   through sapp_desc.logger (_sapp_tc_log). The ones that run before
+   _sapp_tc_init_state() stores the desc -- ANDROID_NATIVE_ACTIVITY_ONCREATE
+   at the top of ANativeActivity_onCreate() -- find no logger and reach
+   logcat through _sapp_tc_log's fallback ("sokol_app_tc" tag), as before.
+   (<android/log.h> comes from the implementation preamble.) */
+#define _SAPP_PANIC(code) do { _sapp_tc_log(&_sapp_tc.desc.logger, 0, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "panic: ", "%s", #code); abort(); } while (0)
+#define _SAPP_ERROR(code) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s", #code)
+#define _SAPP_ERROR_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s: %s", #code, msg)
+#define _SAPP_WARN_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s: %s", #code, msg)
+#define _SAPP_INFO_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s: %s", #code, msg)
+#define _SAPP_INFO(code) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s", #code)
+#define _SAPP_WARN(code) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s", #code)
 typedef struct {
     #if defined(_SAPP_APPLE)
         struct {
@@ -16245,6 +16736,7 @@ _SOKOL_PRIVATE bool _sapp_tc_android_init_egl(void) {
         EGL_STENCIL_SIZE, 0,
         EGL_NONE,
     };
+    // Bound (platform): the Android EGL SDK writes only the requested number of configuration handles into this fixed array. Overflow omits further configurations.
     EGLConfig available_cfgs[32];
     EGLint cfg_count;
     eglChooseConfig(display, cfg_attributes, available_cfgs, 32, &cfg_count);
@@ -16469,18 +16961,31 @@ _SOKOL_PRIVATE bool _sapp_tc_android_touch_event(const AInputEvent* e) {
     int32_t idx = action_idx >> AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
     _sapp_tc_init_event(type);
     _sapp_tc.event.num_touches = (int)AMotionEvent_getPointerCount(e);
+    // Bound (platform): OS touch input must fit the SDK touch-event array. Overflow clamps the touch count and warns once.
     if (_sapp_tc.event.num_touches > SAPP_MAX_TOUCHPOINTS) {
+        // Implementation-only state: warn once for this backend's lifetime.
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            _SAPP_WARN_MSG(TOUCHPOINTS_DROPPED, "Android: touch event exceeds SAPP_MAX_TOUCHPOINTS; some points were dropped");
+        }
         _sapp_tc.event.num_touches = SAPP_MAX_TOUCHPOINTS;
     }
     for (int32_t i = 0; i < _sapp_tc.event.num_touches; i++) {
+        // Only substitute the last slot when the changed pointer would be dropped.
+        int32_t src_index = i;
+        if (i == SAPP_MAX_TOUCHPOINTS - 1 && idx >= SAPP_MAX_TOUCHPOINTS &&
+            (action == AMOTION_EVENT_ACTION_POINTER_DOWN || action == AMOTION_EVENT_ACTION_POINTER_UP)) {
+            src_index = idx;
+        }
         sapp_touchpoint* dst = &_sapp_tc.event.touches[i];
-        dst->identifier = (uintptr_t)AMotionEvent_getPointerId(e, (size_t)i);
-        dst->pos_x = (AMotionEvent_getX(e, (size_t)i) / _sapp_tc.window_width) * _sapp_tc.framebuffer_width;
-        dst->pos_y = (AMotionEvent_getY(e, (size_t)i) / _sapp_tc.window_height) * _sapp_tc.framebuffer_height;
-        dst->android_tooltype = (sapp_android_tooltype) AMotionEvent_getToolType(e, (size_t)i);
+        dst->identifier = (uintptr_t)AMotionEvent_getPointerId(e, (size_t)src_index);
+        dst->pos_x = (AMotionEvent_getX(e, (size_t)src_index) / _sapp_tc.window_width) * _sapp_tc.framebuffer_width;
+        dst->pos_y = (AMotionEvent_getY(e, (size_t)src_index) / _sapp_tc.window_height) * _sapp_tc.framebuffer_height;
+        dst->android_tooltype = (sapp_android_tooltype) AMotionEvent_getToolType(e, (size_t)src_index);
         if (action == AMOTION_EVENT_ACTION_POINTER_DOWN ||
             action == AMOTION_EVENT_ACTION_POINTER_UP) {
-            dst->changed = (i == idx);
+            dst->changed = (src_index == idx);
         } else {
             dst->changed = true;
         }
@@ -16721,13 +17226,17 @@ _SOKOL_PRIVATE void* _sapp_tc_android_loop(void* arg) {
     ALooper_removeFd(_sapp_tc.android.looper, _sapp_tc.android.pt.read_from_main_fd);
     ALooper_release(_sapp_tc.android.looper);*/
 
-    /* signal "destroyed" */
+    /* log BEFORE signalling "destroyed": once is_thread_stopped is set,
+       onDestroy on the UI thread goes on to exit(0), which destroys the
+       host's statics (TrussC's Logger among them) while this thread would
+       still be logging */
+    _SAPP_INFO(ANDROID_LOOP_THREAD_DONE);
+
+    /* signal "destroyed" -- nothing may log after this */
     pthread_mutex_lock(&_sapp_tc.android.pt.mutex);
     _sapp_tc.android.is_thread_stopped = true;
     pthread_cond_broadcast(&_sapp_tc.android.pt.cond);
     pthread_mutex_unlock(&_sapp_tc.android.pt.mutex);
-
-    _SAPP_INFO(ANDROID_LOOP_THREAD_DONE);
     return NULL;
 }
 
@@ -17061,7 +17570,9 @@ SOKOL_API_IMPL bool sapp_high_dpi(void) {
 }
 
 SOKOL_API_IMPL float sapp_dpi_scale(void) {
-    return _sapp_tc.dpi_scale;
+    /* [TrussC fork] before sapp_run (headless, no window) report 1.0 like the
+       desktop backends instead of the zero-initialized state (#841) */
+    return _sapp_tc.dpi_scale > 0.0f ? _sapp_tc.dpi_scale : 1.0f;
 }
 
 SOKOL_API_IMPL const void* sapp_egl_get_display(void) {
@@ -17337,16 +17848,8 @@ SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
 }
 
 SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size(int index) {
-    SOKOL_ASSERT((index >= 0) && (index < _sapp_tc.drop.num_files));
-    #if defined(_SAPP_EMSCRIPTEN)
-        if (!_sapp_tc.drop.enabled) {
-            return 0;
-        }
-        return _sapp_tc_js_dropped_file_size(index);
-    #else
-        (void)index;
-        return 0;
-    #endif
+    const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+    return (size > UINT32_MAX) ? UINT32_MAX : (uint32_t)size;
 }
 
 SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request* request) {
@@ -17360,9 +17863,13 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
         sapp_html5_fetch_error error_code = SAPP_HTML5_FETCH_ERROR_NO_ERROR;
         if ((index < 0) || (index >= _sapp_tc.drop.num_files)) {
             error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
-        }
-        if (sapp_html5_get_dropped_file_size(index) > request->buffer.size) {
-            error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+        } else {
+            const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+            if (size > request->buffer.size) {
+                error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+            } else if (size > _SAPP_TC_MAX_DROP_CONTENT_SIZE) {
+                error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
+            }
         }
         if (SAPP_HTML5_FETCH_ERROR_NO_ERROR != error_code) {
             _sapp_tc_emsc_invoke_fetch_cb(index,
@@ -17378,7 +17885,9 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
                 request->callback,
                 (void*)request->buffer.ptr,
                 request->buffer.size,
-                request->user_data);
+                request->user_data,
+                _SAPP_TC_MAX_DROP_CONTENT_SIZE,
+                _SAPP_TC_MAX_DROP_READERS);
         }
     #else
         (void)request;
@@ -17618,11 +18127,13 @@ const void* sapp_d3d11_get_device_context(void) { return 0; }
    representable */
 sapp_window sapp_create_window(const sapp_window_desc* desc) {
     _SOKOL_UNUSED(desc);
-    __android_log_print(ANDROID_LOG_ERROR, "sokol_app_tc", "sapp_create_window() is not supported on Android (single-window platform)");
+    _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                 "", "sapp_create_window() is not supported on Android (single-window platform)");
     sapp_window w = {0};
     return w;
 }
 void sapp_destroy_window(sapp_window win) { _SOKOL_UNUSED(win); }
+void sapp_window_request_close(sapp_window win) { _SOKOL_UNUSED(win); }
 bool sapp_window_valid(sapp_window win) { _SOKOL_UNUSED(win); return false; }
 int sapp_window_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
 int sapp_window_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
@@ -17721,12 +18232,13 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); retur
 #define _SAPP_CLEAR_ARC_STRUCT(type, item) { _sapp_tc_clear(&item, sizeof(item)); }
 #endif
 
-/* controlled failure instead of sokol_app.h's log-item machinery */
-#define _SAPP_PANIC(code) do { fprintf(stderr, "sokol_app_tc.h: panic: " #code "\n"); abort(); } while (0)
-#define _SAPP_ERROR(code) fprintf(stderr, "sokol_app_tc.h: error: " #code "\n")
-#define _SAPP_ERROR_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: error: " #code ": %s\n", msg)
-#define _SAPP_WARN_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: warn: " #code ": %s\n", msg)
-#define _SAPP_INFO_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: info: " #code ": %s\n", msg)
+/* controlled failure instead of sokol_app.h's log-item machinery, reported
+   through sapp_desc.logger (_sapp_tc_log) */
+#define _SAPP_PANIC(code) do { _sapp_tc_log(&_sapp_tc.desc.logger, 0, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "panic: ", "%s", #code); abort(); } while (0)
+#define _SAPP_ERROR(code) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s", #code)
+#define _SAPP_ERROR_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s: %s", #code, msg)
+#define _SAPP_WARN_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s: %s", #code, msg)
+#define _SAPP_INFO_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s: %s", #code, msg)
 
 /* the internal monotonic clock is deliberately unused on web: all timing
    comes from the timestamp the browser hands to the frame callback */
@@ -18453,6 +18965,7 @@ _SOKOL_PRIVATE void _sapp_tc_wgpu_device_lost_cb(const WGPUDevice* dev, WGPUDevi
     // NOTE: on wgpuInstanceRelease(), the device lost callback is always called with
     // WGPUDeviceLostReason_CallbackCancelled (even though no device should exist at that point)
     if (reason != WGPUDeviceLostReason_CallbackCancelled) {
+        trussc::internal::setExitReason("device-lost");
         SOKOL_ASSERT(msg.data && (msg.length > 0));
         char buf[1024];
         _sapp_tc_strcpy_range(msg.data, msg.length, buf, sizeof(buf));
@@ -18691,6 +19204,7 @@ typedef void (*_sapp_tc_html5_fetch_callback) (const sapp_html5_fetch_response*)
 
 EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_onpaste(const char* str) {
     if (_sapp_tc.clipboard.enabled) {
+        // Bound (security): pasted browser text uses finite clipboard storage. Overflow truncates to buf_size - 1 bytes.
         _sapp_tc_strcpy(str, _sapp_tc.clipboard.buffer, (size_t)_sapp_tc.clipboard.buf_size);
         if (_sapp_tc_events_enabled()) {
             _sapp_tc_init_event(SAPP_EVENTTYPE_CLIPBOARD_PASTED);
@@ -18711,6 +19225,7 @@ EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_begin_drop(int num) {
     if (num < 0) {
         num = 0;
     }
+    // Bound (security): browser drop lists can flood delivery; a fixed cap keeps path storage finite. Overflow omits excess files.
     if (num > _sapp_tc.drop.max_files) {
         num = _sapp_tc.drop.max_files;
     }
@@ -18730,6 +19245,7 @@ EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_drop(int i, const char* name) {
     if ((i < 0) || (i >= _sapp_tc.drop.num_files)) {
         return;
     }
+    // Bound (security): browser drop names must fit fixed per-path storage to keep memory finite. Overflow rejects the drop and logs an error.
     if (!_sapp_tc_strcpy(name, _sapp_tc_dropped_file_path_ptr(i), (size_t)_sapp_tc.drop.max_path_length)) {
         _SAPP_ERROR(DROPPED_FILE_PATH_TOO_LONG);
         _sapp_tc.drop.num_files = 0;
@@ -18771,6 +19287,10 @@ EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_invoke_fetch_cb(int index, int success, 
     response.buffer.ptr = buf_ptr;
     response.buffer.size = buf_size;
     response.user_data = user_data;
+    if (!success) {
+        _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+            "warning: ", "dropped file fetch failed (index %d, error %d)", index, error_code);
+    }
     callback(&response);
 }
 
@@ -18877,36 +19397,109 @@ EM_JS(void, _sapp_tc_js_add_dragndrop_listeners, (void), {
     canvas.addEventListener('drop',      Module.sokol_drop, false);
 })
 
-EM_JS(uint32_t, _sapp_tc_js_dropped_file_size, (int index), {
+EM_JS(double, _sapp_tc_js_dropped_file_size, (int index), {
     \x2F\x2A\x2A @suppress {missingProperties} \x2A\x2F
     const files = Module.sokol_dropped_files;
-    if ((index < 0) || (index >= files.length)) {
+    if (!files || (index < 0) || (index >= files.length)) {
         return 0;
     } else {
         return files[index].size;
     }
 })
 
-EM_JS(void, _sapp_tc_js_fetch_dropped_file, (int index, _sapp_tc_html5_fetch_callback callback, void* buf_ptr, uint32_t buf_size, void* user_data), {
-    const reader = new FileReader();
-    reader.onload = (loadEvent) => {
-        const content = loadEvent.target.result;
-        if (content.byteLength > buf_size) {
-            // SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL
-            __sapp_tc_emsc_invoke_fetch_cb(index, 0, 1, callback, 0, buf_ptr, buf_size, user_data);
-        } else {
-            HEAPU8.set(new Uint8Array(content), buf_ptr);
-            __sapp_tc_emsc_invoke_fetch_cb(index, 1, 0, callback, content.byteLength, buf_ptr, buf_size, user_data);
+EM_JS(void, _sapp_tc_js_fetch_dropped_file, (int index, _sapp_tc_html5_fetch_callback callback, void* buf_ptr, uint32_t buf_size, void* user_data, uint32_t max_content_size, int max_readers), {
+    buf_size = buf_size >>> 0;
+    const files = Module.sokol_dropped_files;
+    const file = files && files[index];
+    const active = Module.sokol_active_drop_readers || 0;
+    let error = 0;
+    if (!file || !Number.isSafeInteger(file.size) || (file.size < 0)) {
+        error = 2; // SAPP_HTML5_FETCH_ERROR_OTHER
+    } else if (file.size > buf_size) {
+        error = 1; // SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL
+    } else if ((file.size > max_content_size) || (active >= max_readers)) {
+        error = 2; // SAPP_HTML5_FETCH_ERROR_OTHER
+    }
+    if (error !== 0) {
+        __sapp_tc_emsc_invoke_fetch_cb(index, 0, error, callback, 0, buf_ptr, buf_size, user_data);
+        return;
+    }
+    // The pending set also identifies this run; retained handlers cannot affect a later run.
+    const pending = Module.sokol_pending_drop_readers || (Module.sokol_pending_drop_readers = new Set());
+    Module.sokol_active_drop_readers = active + 1;
+    let reader;
+    let finished = false;
+    const release = () => {
+        if (finished) {
+            return false;
+        }
+        finished = true;
+        pending.delete(cancel);
+        if (Module.sokol_pending_drop_readers === pending) {
+            Module.sokol_active_drop_readers--;
+        }
+        if (reader) {
+            reader.onload = reader.onerror = reader.onabort = null;
+        }
+        return true;
+    };
+    const cancel = () => {
+        if (release() && reader) {
+            // Clear handlers and close the slot before abort can dispatch an event.
+            try { reader.abort(); } catch (error) {}
         }
     };
-    reader.onerror = () => {
-        // SAPP_HTML5_FETCH_ERROR_OTHER
-        __sapp_tc_emsc_invoke_fetch_cb(index, 0, 2, callback, 0, buf_ptr, buf_size, user_data);
+    const finish = (success, error_code, size) => {
+        if ((Module.sokol_pending_drop_readers !== pending) || !release()) {
+            return;
+        }
+        __sapp_tc_emsc_invoke_fetch_cb(index, success, error_code, callback, size, buf_ptr, buf_size, user_data);
     };
-    \x2F\x2A\x2A @suppress {missingProperties} \x2A\x2F
-    const files = Module.sokol_dropped_files;
-    reader.readAsArrayBuffer(files[index]);
+    pending.add(cancel);
+    try {
+        reader = new FileReader();
+        reader.onload = (loadEvent) => {
+            if (finished || (Module.sokol_pending_drop_readers !== pending)) {
+                return;
+            }
+            const content = loadEvent.target.result;
+            if ((content.byteLength > buf_size) || (content.byteLength > max_content_size)) {
+                finish(0, content.byteLength > buf_size ? 1 : 2, 0);
+            } else {
+                HEAPU8.set(new Uint8Array(content), buf_ptr);
+                finish(1, 0, content.byteLength);
+            }
+        };
+        reader.onerror = reader.onabort = () => {
+            finish(0, 2, 0); // SAPP_HTML5_FETCH_ERROR_OTHER
+        };
+        reader.readAsArrayBuffer(file);
+    } catch (error) {
+        finish(0, 2, 0); // SAPP_HTML5_FETCH_ERROR_OTHER
+    }
 })
+
+EM_JS(void, _sapp_tc_js_cancel_dropped_file_reads, (void), {
+    const pending = Module.sokol_pending_drop_readers;
+    if (pending) {
+        for (const cancel of pending) {
+            cancel();
+        }
+        Module.sokol_pending_drop_readers = null;
+    }
+})
+
+SOKOL_API_IMPL uint64_t sapp_html5_get_dropped_file_size64(int index) {
+    if (!_sapp_tc.drop.enabled || (index < 0) || (index >= _sapp_tc.drop.num_files)) {
+        return 0;
+    }
+    const double size = _sapp_tc_js_dropped_file_size(index);
+    if (!((size >= 0.0) && (size <= 9007199254740991.0))) {
+        return 0;
+    }
+    const uint64_t result = (uint64_t)size;
+    return ((double)result == size) ? result : 0;
+}
 
 EM_JS(void, _sapp_tc_js_remove_dragndrop_listeners, (void), {
     \x2F\x2A\x2A @suppress {missingProperties} \x2A\x2F
@@ -19311,6 +19904,7 @@ _SOKOL_PRIVATE EM_BOOL _sapp_tc_emsc_mouse_cb(int emsc_type, const EmscriptenMou
         _sapp_tc.mouse.y = new_y;
         _sapp_tc.mouse.pos_valid = true;
     }
+    // Bound (platform): browser mouse-button indices must match the SDK-supported button range. Overflow ignores the event.
     if (_sapp_tc_events_enabled() && (emsc_event->button >= 0) && (emsc_event->button < SAPP_MAX_MOUSEBUTTONS)) {
         sapp_event_type type;
         bool is_button_event = false;
@@ -19613,12 +20207,34 @@ _SOKOL_PRIVATE EM_BOOL _sapp_tc_emsc_touch_cb(int emsc_type, const EmscriptenTou
             _sapp_tc_init_event(type);
             _sapp_tc.event.modifiers = _sapp_tc_emsc_touch_event_mods(emsc_event);
             _sapp_tc.event.num_touches = emsc_event->numTouches;
+            // Bound (platform): OS touch input must fit the SDK touch-event array. Overflow clamps the touch count and warns once.
             if (_sapp_tc.event.num_touches > SAPP_MAX_TOUCHPOINTS) {
+                // Implementation-only state: warn once for this backend's lifetime.
+                static bool warned = false;
+                if (!warned) {
+                    warned = true;
+                    _SAPP_WARN_MSG(TOUCHPOINTS_DROPPED, "Web: touch event exceeds SAPP_MAX_TOUCHPOINTS; some points were dropped");
+                }
                 _sapp_tc.event.num_touches = SAPP_MAX_TOUCHPOINTS;
             }
-            for (int i = 0; i < _sapp_tc.event.num_touches; i++) {
+            for (int i = 0; i < emsc_event->numTouches; i++) {
                 const EmscriptenTouchPoint* src = &emsc_event->touches[i];
-                sapp_touchpoint* dst = &_sapp_tc.event.touches[i];
+                int dst_index = i;
+                if (i >= SAPP_MAX_TOUCHPOINTS) {
+                    dst_index = -1;
+                    if (src->isChanged) {
+                        for (int j = SAPP_MAX_TOUCHPOINTS - 1; j >= 0; j--) {
+                            if (!_sapp_tc.event.touches[j].changed) {
+                                dst_index = j;
+                                break;
+                            }
+                        }
+                    }
+                    if (dst_index < 0) {
+                        continue;
+                    }
+                }
+                sapp_touchpoint* dst = &_sapp_tc.event.touches[dst_index];
                 dst->identifier = (uintptr_t)src->identifier;
                 dst->pos_x = src->targetX * _sapp_tc.dpi_scale;
                 dst->pos_y = src->targetY * _sapp_tc.dpi_scale;
@@ -19780,6 +20396,7 @@ _SOKOL_PRIVATE EM_BOOL _sapp_tc_emsc_frame_animation_loop(double time, void* use
         }
     }
     if (_sapp_tc.quit_ordered) {
+        _sapp_tc_js_cancel_dropped_file_reads();
         _sapp_tc_emsc_unregister_eventhandlers();
         #if defined(SOKOL_WGPU)
             _sapp_tc_wgpu_discard();
@@ -19969,7 +20586,9 @@ SOKOL_API_IMPL bool sapp_high_dpi(void) {
 }
 
 SOKOL_API_IMPL float sapp_dpi_scale(void) {
-    return _sapp_tc.dpi_scale;
+    /* [TrussC fork] before sapp_run (headless, no window) report 1.0 like the
+       desktop backends instead of the zero-initialized state (#841) */
+    return _sapp_tc.dpi_scale > 0.0f ? _sapp_tc.dpi_scale : 1.0f;
 }
 
 SOKOL_API_IMPL const void* sapp_egl_get_display(void) {
@@ -20245,16 +20864,8 @@ SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
 }
 
 SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size(int index) {
-    SOKOL_ASSERT((index >= 0) && (index < _sapp_tc.drop.num_files));
-    #if defined(_SAPP_EMSCRIPTEN)
-        if (!_sapp_tc.drop.enabled) {
-            return 0;
-        }
-        return _sapp_tc_js_dropped_file_size(index);
-    #else
-        (void)index;
-        return 0;
-    #endif
+    const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+    return (size > UINT32_MAX) ? UINT32_MAX : (uint32_t)size;
 }
 
 SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request* request) {
@@ -20268,9 +20879,13 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
         sapp_html5_fetch_error error_code = SAPP_HTML5_FETCH_ERROR_NO_ERROR;
         if ((index < 0) || (index >= _sapp_tc.drop.num_files)) {
             error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
-        }
-        if (sapp_html5_get_dropped_file_size(index) > request->buffer.size) {
-            error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+        } else {
+            const uint64_t size = sapp_html5_get_dropped_file_size64(index);
+            if (size > request->buffer.size) {
+                error_code = SAPP_HTML5_FETCH_ERROR_BUFFER_TOO_SMALL;
+            } else if (size > _SAPP_TC_MAX_DROP_CONTENT_SIZE) {
+                error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
+            }
         }
         if (SAPP_HTML5_FETCH_ERROR_NO_ERROR != error_code) {
             _sapp_tc_emsc_invoke_fetch_cb(index,
@@ -20286,7 +20901,9 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
                 request->callback,
                 (void*)request->buffer.ptr,
                 request->buffer.size,
-                request->user_data);
+                request->user_data,
+                _SAPP_TC_MAX_DROP_CONTENT_SIZE,
+                _SAPP_TC_MAX_DROP_READERS);
         }
     #else
         (void)request;
@@ -20514,11 +21131,13 @@ SOKOL_API_IMPL void sapp_skip_present(void) {
    a second window is not representable in a browser tab */
 sapp_window sapp_create_window(const sapp_window_desc* desc) {
     _SOKOL_UNUSED(desc);
-    fprintf(stderr, "sokol_app_tc.h: sapp_create_window() is not supported on the web (single-canvas platform)\n");
+    _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                 "", "sapp_create_window() is not supported on the web (single-canvas platform)");
     sapp_window w = {0};
     return w;
 }
 void sapp_destroy_window(sapp_window win) { _SOKOL_UNUSED(win); }
+void sapp_window_request_close(sapp_window win) { _SOKOL_UNUSED(win); }
 bool sapp_window_valid(sapp_window win) { _SOKOL_UNUSED(win); return false; }
 int sapp_window_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
 int sapp_window_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
@@ -20555,6 +21174,7 @@ extern "C" {
 #endif
 sapp_window sapp_create_window(const sapp_window_desc* desc) { (void)desc; sapp_window w = {0}; return w; }
 void sapp_destroy_window(sapp_window win) { (void)win; }
+void sapp_window_request_close(sapp_window win) { (void)win; }
 bool sapp_window_valid(sapp_window win) { (void)win; return false; }
 int sapp_window_width(sapp_window win) { (void)win; return 0; }
 int sapp_window_height(sapp_window win) { (void)win; return 0; }

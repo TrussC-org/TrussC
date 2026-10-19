@@ -47,6 +47,10 @@ an addon adds).
   parses the types it knows (depth/color) and *skips any it doesn't* by length.
   Addons can add block types (`>= 0x80`, e.g. body / hand tracking) and an
   official player still plays depth/color, ignoring them — forward-compatible.
+  A block's length is its whole payload. Files recorded before this was fixed
+  state a color block's length 4 bytes short (13 + compressed size instead of
+  17 + compressed size); the official player reads both, and a reader that
+  uses a color block's length should accept exactly that older value too.
 - **Stream manifest** in the header lists every block type present, so a reader
   knows what's inside up front: `hasBlockType()`, `getBlockTypes()`,
   `hasUnknownBlocks()` ("playable, but contains streams this build can't decode").
@@ -83,6 +87,11 @@ skipped); only the addon's player decodes the extra stream.
 
 - Playback loops by default (`setLoop(false)` to stop at the end). Frames are
   served one-per-`update()`; real-time pacing from timestamps is a future option.
+- Playback refuses a file whose header gives a negative frame size or one too
+  large for an RGBA image (width x height x 4 above INT_MAX), and checks each
+  block's sizes against the frame before decoding. A block that doesn't match
+  is skipped (its stream is left empty and isn't marked new for that frame),
+  and the first one is logged as a warning.
 - Infrared is not yet serialized (depth + color in v1; IR/custom via blocks later).
 - Endianness: little-endian host assumed (no byte-swap in v1).
 

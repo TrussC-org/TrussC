@@ -1,4 +1,6 @@
 #pragma once
+#include "tc/utils/tcDebugName.h"
+#include "tc/utils/tcResourceLoad.h"
 
 // =============================================================================
 // tcImage.h - Image loading, drawing, and saving
@@ -23,9 +25,18 @@ enum class ImageType {
 // Image class - Unified class holding Pixels (CPU) + Texture (GPU)
 // ---------------------------------------------------------------------------
 class Image : public HasTexture {
+    struct AsyncState : internal::ResourceLoadState {
+        fs::path path;
+        Pixels pixels;
+        bool mipmaps = false;
+    };
 public:
     Image() = default;
     ~Image() { clear(); }
+
+    // Name this object for MCP inspection; empty names are listed by index.
+    void setDebugName(const std::string& name) { debugName_.set(name); }
+    const std::string& getDebugName() const { return debugName_.get(); }
 
     // No copy
     Image(const Image&) = delete;
@@ -33,12 +44,14 @@ public:
 
     // Move support
     Image(Image&& other) noexcept
-        : pixels_(std::move(other.pixels_))
+        : debugName_(std::move(other.debugName_), this)
+        , pixels_(std::move(other.pixels_))
         , texture_(std::move(other.texture_))
         , dirty_(other.dirty_)
         , mipmaps_(other.mipmaps_)
         , usage_(other.usage_)
     {
+        other.async_.cancel();
         other.dirty_ = false;
         other.mipmaps_ = false;
         other.usage_ = TextureUsage::Immutable;
@@ -46,6 +59,9 @@ public:
 
     Image& operator=(Image&& other) noexcept {
         if (this != &other) {
+            async_.cancel();
+            other.async_.cancel();
+            debugName_.moveFrom(other.debugName_);
             pixels_ = std::move(other.pixels_);
             texture_ = std::move(other.texture_);
             dirty_ = other.dirty_;
@@ -70,17 +86,41 @@ public:
     LoadResult load(const fs::path& path, bool mipmaps = false) {
         clear();
 
-        fs::path resolved = getDataPath(path);   // absolute paths pass through
-        LoadResult r = pixels_.load(resolved);
+        LoadResult r = pixels_.load(path);
         if (!r) {
             return r;
         }
 
-        mipmaps_ = mipmaps;
-        usage_ = TextureUsage::Immutable;
-        texture_.allocate(pixels_, TextureUsage::Immutable, mipmaps);
-        return LoadResult::success();
+        return finishLoad(path, mipmaps);
     }
+
+    // Prepare pixels on a worker; apply and notify on main at a later frame.
+    // All resource access and lifecycle operations are serialized on main.
+    // Web without pthreads decodes in a later frame, which may stall that frame.
+    // App exit waits for loads still decoding; cancelling never waits.
+    // Completions are delivered during runApp / runHeadlessApp; in a bare main()
+    // without an app run, no completion event fires.
+    void loadAsync(const fs::path& path, bool mipmaps = false) {
+        auto state = async_.begin(onLoad, [this](AsyncState& ready) {
+            clearCommitted();
+            if (ready.result) {
+                pixels_ = std::move(ready.pixels);
+                ready.result = finishLoad(ready.path, ready.mipmaps);
+            }
+        });
+        state->path = internal::resolveLoadPath(path);
+        state->mipmaps = mipmaps;
+        internal::startResourceLoad([state] {
+            internal::probeResourceLoad("image.decode", state->path);
+            if (state->cancelled.load()) return;
+            state->result = state->pixels.load(state->path);
+            internal::probeResourceLoad("image.ready", state->path);
+            if (!state->cancelled.load()) internal::completeResourceLoad(state);
+            internal::probeResourceLoad("image.queued", state->path);
+        });
+    }
+    Event<LoadResult> onLoad;
+    bool isLoading() const { return async_.loading(); }
 
     // Load image from memory
     LoadResult loadFromMemory(const unsigned char* buffer, int len, bool mipmaps = false) {
@@ -91,15 +131,26 @@ public:
             return r;
         }
 
+        r = internal::checkImageSize(pixels_.getWidth(), pixels_.getHeight());
+        if (!r) {
+            logError("Image") << r.message << " (" << pixels_.getWidth()
+                              << "x" << pixels_.getHeight() << ")";
+            clear();
+            return r;
+        }
         mipmaps_ = mipmaps;
         usage_ = TextureUsage::Immutable;
         texture_.allocate(pixels_, TextureUsage::Immutable, mipmaps);
+        if (sg_isvalid() && !texture_.isAllocated()) {
+            clear();
+            return LoadResult::fail(LoadError::Unknown, "image texture upload failed");
+        }
         return LoadResult::success();
     }
 
     // Save image (override of HasTexture::save())
     // Image has pixels, so save directly (no need to read back from texture)
-    bool save(const fs::path& path) const override {
+    SaveResult save(const fs::path& path) const override {
         return pixels_.save(path);
     }
 
@@ -115,6 +166,7 @@ public:
     void allocate(int width, int height, int channels = 4, bool mipmaps = false) {
         clear();
         pixels_.allocate(width, height, channels);
+        if (!pixels_.isAllocated()) return;  // Pixels logged why
         mipmaps_ = mipmaps;
         usage_ = TextureUsage::Dynamic;
         // Dynamic so the texture can be re-uploaded with update(). When
@@ -124,11 +176,8 @@ public:
 
     // Release resources
     void clear() {
-        pixels_.clear();
-        texture_.clear();
-        dirty_ = false;
-        mipmaps_ = false;
-        usage_ = TextureUsage::Immutable;
+        async_.cancel();
+        clearCommitted();
     }
 
     // === State ===
@@ -154,6 +203,7 @@ public:
     }
 
     void setColor(int x, int y, const Color& c) {
+        async_.cancel();
         pixels_.setColor(x, y, c);
         dirty_ = true;
     }
@@ -169,6 +219,7 @@ public:
     // Replace the buffer with its 2x2 box-averaged half. New dimensions are
     // max(width/2, 1) x max(height/2, 1). Useful for cheap downsampling.
     void halve() {
+        async_.cancel();
         if (!pixels_.isAllocated()) return;
         pixels_.halve();
         rebuildTexture_();
@@ -178,6 +229,7 @@ public:
     // version. Each axis is BoxArea on downscale, Catmull-Rom bicubic on
     // upscale; computations run in linear light for U8 buffers.
     void resize(int newW, int newH) {
+        async_.cancel();
         if (!pixels_.isAllocated() || newW <= 0 || newH <= 0) return;
         pixels_.resize(newW, newH);
         rebuildTexture_();
@@ -187,6 +239,7 @@ public:
     // clamp-to-edge for out-of-bounds samples so the destination is always
     // exactly (w x h).
     void crop(int x, int y, int w, int h) {
+        async_.cancel();
         if (!pixels_.isAllocated() || w <= 0 || h <= 0) return;
         pixels_.crop(x, y, w, h);
         rebuildTexture_();
@@ -197,6 +250,7 @@ public:
     // but the GPU texture is still pushed so the change is visible after
     // the next draw (no need to call update() separately).
     void mirror(bool horizontal, bool vertical) {
+        async_.cancel();
         if (!pixels_.isAllocated() || (!horizontal && !vertical)) return;
         pixels_.mirror(horizontal, vertical);
         rebuildTexture_();
@@ -228,6 +282,33 @@ public:
     // draw() uses HasTexture default implementation
 
 private:
+    internal::ResourceLoadSlot<AsyncState> async_;
+    void clearCommitted() {
+        pixels_.clear();
+        texture_.clear();
+        dirty_ = false;
+        mipmaps_ = false;
+        usage_ = TextureUsage::Immutable;
+    }
+    LoadResult finishLoad(const fs::path& path, bool mipmaps) {
+        auto result = internal::checkImageSize(pixels_.getWidth(), pixels_.getHeight());
+        if (!result) {
+            logError("Image") << result.message << " (" << pixels_.getWidth()
+                              << "x" << pixels_.getHeight() << "): "
+                              << internal::pathToDisplayUtf8(internal::resolveLoadPath(path));
+            clearCommitted();
+            return result;
+        }
+        mipmaps_ = mipmaps;
+        usage_ = TextureUsage::Immutable;
+        texture_.allocate(pixels_, TextureUsage::Immutable, mipmaps);
+        if (sg_isvalid() && !texture_.isAllocated()) {
+            clearCommitted();
+            return LoadResult::fail(LoadError::Unknown, "image texture upload failed");
+        }
+        return LoadResult::success();
+    }
+    internal::DebugName debugName_{internal::DebugObjectKind::Image, this};
     // Re-allocate the GPU texture from the current pixels_ contents using the
     // Image's stored usage and mipmaps flag. Called by halve/resize/crop/
     // mirror; works whether the Image was originally Immutable (load) or

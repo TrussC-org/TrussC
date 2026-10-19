@@ -1,43 +1,28 @@
 #pragma once
 
+// =============================================================================
+// AllFeaturesExample — CI's compile-and-link canary.
+//
+// setup() calls af::coverAll(), which references every documented public core
+// API (coverage_generated.cpp, from docs/reference/emit-coverage.js) and the
+// bundled addons listed in addons.make (coverage_manual.cpp). Nothing of it
+// runs: it only has to compile and link on each platform. What does run is a
+// small scene with an ImGui panel.
+// =============================================================================
+
 #include <TrussC.h>
-
-// Core Features are included in TrussC.h
-
-// Addons
-#include "tcxBox2d.h"
-#include "tcxOsc.h"
-#include "tcTlsClient.h"
-#include "tcWebSocketClient.h"
-#include "tcLut.h"
+#include <tcxImGui.h>
+#include "coverage.h"
 
 using namespace std;
 using namespace tc;
+using namespace tcx;
 
 class tcApp : public App {
 public:
     void setup() override;
-    void update() override;
     void draw() override;
 
-    void keyPressed(int key) override;
-    void keyReleased(int key) override;
-
-    void mousePressed(const MouseEventArgs& e) override;
-    void mouseReleased(const MouseEventArgs& e) override;
-    void mouseMoved(const MouseMoveEventArgs& e) override;
-    void mouseDragged(const MouseDragEventArgs& e) override;
-    void mouseScrolled(const ScrollEventArgs& e) override;
-
-    void windowResized(int width, int height) override;
-    void filesDropped(const vector<string>& files) override;
-    void exit() override;
-
-    // Addon instances to verify linking
-    tcx::box2d::World box2d;
-    tcx::OscSender oscSender;
-    tcx::OscReceiver oscReceiver;
-
-    // LUT addon
-    tcx::lut::Lut3D lut;
+private:
+    float speed_ = 0.5f;
 };

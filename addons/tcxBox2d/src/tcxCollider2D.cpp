@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "tcxCollider2D.h"
+#include "tcxBox2dBody.h"
 
 namespace tcx::box2d {
 
@@ -10,25 +11,36 @@ namespace tcx::box2d {
 // Collision Filtering
 // =============================================================================
 
+// Setters change every fixture of the body (a compound body has several);
+// getters read the first one.
+template<typename F>
+static void forEachFixture(b2Fixture* first, F&& f) {
+    if (!first) return;
+    for (b2Fixture* fx = first->GetBody()->GetFixtureList(); fx; fx = fx->GetNext()) f(fx);
+}
+
 void Collider2D::setCategoryBits(uint16_t bits) {
-    if (!fixture_) return;
-    b2Filter filter = fixture_->GetFilterData();
-    filter.categoryBits = bits;
-    fixture_->SetFilterData(filter);
+    forEachFixture(fixture_, [bits](b2Fixture* f) {
+        b2Filter filter = f->GetFilterData();
+        filter.categoryBits = bits;
+        f->SetFilterData(filter);
+    });
 }
 
 void Collider2D::setMaskBits(uint16_t bits) {
-    if (!fixture_) return;
-    b2Filter filter = fixture_->GetFilterData();
-    filter.maskBits = bits;
-    fixture_->SetFilterData(filter);
+    forEachFixture(fixture_, [bits](b2Fixture* f) {
+        b2Filter filter = f->GetFilterData();
+        filter.maskBits = bits;
+        f->SetFilterData(filter);
+    });
 }
 
 void Collider2D::setGroupIndex(int16_t index) {
-    if (!fixture_) return;
-    b2Filter filter = fixture_->GetFilterData();
-    filter.groupIndex = index;
-    fixture_->SetFilterData(filter);
+    forEachFixture(fixture_, [index](b2Fixture* f) {
+        b2Filter filter = f->GetFilterData();
+        filter.groupIndex = index;
+        f->SetFilterData(filter);
+    });
 }
 
 uint16_t Collider2D::getCategoryBits() const {
@@ -51,8 +63,12 @@ int16_t Collider2D::getGroupIndex() const {
 // =============================================================================
 
 void Collider2D::applyTriggerMode() {
-    if (fixture_) {
-        fixture_->SetSensor(isTrigger);
+    bool on = isTrigger;
+    appliedTrigger_ = on;
+    // fixture_ is borrowed and raw DestroyFixture may already have recycled it.
+    // Resolve sensors through the owner, including changed-flag synchronization.
+    if (auto* body = body_ ? body_->getBody() : nullptr) {
+        for (auto* f = body->GetFixtureList(); f; f = f->GetNext()) f->SetSensor(on);
     }
 }
 
