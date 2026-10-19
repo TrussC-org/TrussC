@@ -231,7 +231,12 @@ bool captureWindow(Pixels& outPixels) {
                   fromRegion:region
                  mipmapLevel:0];
 
-    outPixels.allocate((int)width, (int)height, 4);
+    // Capture overwrites every byte; preserve a matching RGBA8 buffer.
+    if (!outPixels.isAllocated() || outPixels.getWidth() != (int)width ||
+        outPixels.getHeight() != (int)height || outPixels.getChannels() != 4 ||
+        outPixels.getFormat() != PixelFormat::U8) {
+        outPixels.allocate((int)width, (int)height, 4);
+    }
     unsigned char* dst = outPixels.getData();
     // Bound (abi): pixel capacity must hold every captured row. Overflow drops the recorder frame and is counted.
     if (!dst || outPixels.getTotalBytes() < layout.byteSize) return false;
