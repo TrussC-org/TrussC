@@ -1,6 +1,5 @@
 #include "tcApp.h"
 #include <cfloat>
-#include <cmath>
 
 void tcApp::setup() {
     fbo_.allocate(320, 240);
@@ -20,15 +19,9 @@ void tcApp::setup() {
 }
 
 bool tcApp::screenToFbo(Vec2 screen, Vec2& fboPx) {
-    // Keep the quad convex when editing its handles.
-    Mat4 inverse;
-    if (!warp_.getMatrix().tryInvert(inverse)) return false;
-    Vec4 source = inverse * Vec4(screen.x, screen.y, 0, 1);
-    if (!(source.w > 0)) return false;
-    // Homogeneous coordinates need a projective divide, even for a 2D UI.
-    Vec2 pixel(source.x / source.w, source.y / source.w);
-    if (!std::isfinite(pixel.x) || !std::isfinite(pixel.y) ||
-        pixel.x < 0 || pixel.y < 0 || pixel.x >= fbo_.getWidth() || pixel.y >= fbo_.getHeight()) return false;
+    Vec2 pixel;
+    if (!warp_.screenToSource(screen, pixel)) return false;
+    if (pixel.x < 0 || pixel.y < 0 || pixel.x >= fbo_.getWidth() || pixel.y >= fbo_.getHeight()) return false;
     fboPx = pixel;
     return true;
 }
