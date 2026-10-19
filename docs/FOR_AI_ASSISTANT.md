@@ -1852,124 +1852,124 @@ int runApp(const WindowSettings & settings = WindowSettings())  // Start the app
 ### Graphics - Color
 
 ```cpp
-void clear(float r, float g, float b, float a = 1.0) [+3]  // Clear screen. No args = transparent black (0,0,0,0)
-float linearToSrgb(float x)  // Convert a single linear RGB channel value to sRGB
-void setColor(float r, float g, float b, float a = 1.0) [+2]  // Set drawing color (0.0-1.0)
-void setColorHSB(float h, float s, float b, float a = 1.0)  // Set color from HSB (H: 0-1)
-void setColorOKLab(float L, float a_lab, float b_lab, float alpha = 1.0)  // Set color from OKLab
-void setColorOKLCH(float L, float C, float H, float alpha = 1.0)  // Set color from OKLCH
-float srgbToLinear(float x)  // Convert a single sRGB channel value to linear RGB
+void clear(float r, float g, float b, float a = 1.0) [+3]  // Clear the current render target to a solid color.
+float linearToSrgb(float x)  // Convert a single linear RGB channel value to sRGB.
+void setColor(float r, float g, float b, float a = 1.0) [+2]  // Set the current drawing color.
+void setColorHSB(float h, float s, float b, float a = 1.0)  // Set the current color from HSB.
+void setColorOKLab(float L, float a_lab, float b_lab, float alpha = 1.0)  // Set the current color from OKLab.
+void setColorOKLCH(float L, float C, float H, float alpha = 1.0)  // Set the current color from OKLCH.
+float srgbToLinear(float x)  // Convert a single sRGB channel value to linear RGB.
 ```
 
 ### Graphics - Shapes
 
 ```cpp
-void appendArc(float cx, float cy, float radius, float angleBegin, float angleEnd) [+1]  // Append arc vertices to the current shape (use between beginShape/endShape)
-void appendCurve(const std::vector<Vec3> & points) [+1]  // Append Catmull-Rom curve vertices to the current shape (use between beginShape/endShape; needs >=4 points, closed=true wraps around)
-void appendSuperellipse(float x, float y, float w, float h, float n = 5.0) [+1]  // Append the closed outline of a superellipse inscribed in a rect to the current shape (use between beginShape/endShape)
-void beginLines()  // Begin batch line drawing. Add vertex pairs with vertex(), then call endLines(). Each pair of vertices draws one independent line segment. Use setColor() between vertices for per-line colors.
-void beginShape()  // Begin drawing a shape
-void beginStroke()  // Begin drawing a stroke (uses StrokeMesh internally)
-void drawArc(Vec3 center, float radius, float angleBegin, float angleEnd) [+1]  // Draw arc (partial circle, angles in radians)
-void drawBezier(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3) [+2]  // Draw bezier curve (cubic with 4 points, quadratic with 3, or N-th order via vector)
-void drawBitmapString(const std::string & text, Vec3 pos, bool screenFixed = true) [+5]  // Draw text. The Vec3 overloads project through the current camera context — a screen-aligned 3D label; z=0 on the default screen matches plain 2D; behind-camera draws nothing; screenFixed picks fixed-pixel vs perspective size
-void drawBitmapStringHighlight(const std::string & text, float x, float y, const Color & background = Color(0, 0, 0), const Color & foreground = Color(1, 1, 1))  // Draw text with background highlight
-void drawBox(float w, float h, float d) [+5]  // Draw 3D box (respects fill/noFill)
-void drawCircle(Vec3 center, float radius) [+1]  // Draw circle
-void drawCone(float radius, float height, int resolution = 16) [+2]  // Draw 3D cone (respects fill/noFill)
-void drawCurve(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3) [+2]  // Draw Catmull-Rom curve (4 control points draw p1->p2; vector chains segments passing through interior points; closed=true wraps around)
-void drawEllipse(Vec3 center, Vec2 radii) [+2]  // Draw ellipse
-void drawLine(Vec3 p1, Vec3 p2) [+2]  // Draw line (2D or 3D)
-void drawPoint(Vec3 pos) [+1]  // Draw a single point
-void drawRect(Vec3 pos, Vec2 size) [+2]  // Draw rectangle
-void drawRectRounded(Vec3 pos, Vec2 size, float radius) [+1]  // Draw rounded rectangle (circular arc corners)
-void drawRectSquircle(Vec3 pos, Vec2 size, float radius) [+1]  // Draw squircle rectangle (curvature-continuous corners, iOS-style)
-void drawSphere(float radius, int resolution = 16) [+2]  // Draw 3D sphere (respects fill/noFill)
-void drawStroke(float x1, float y1, float x2, float y2) [+1]  // Draw a single stroke segment (thick line with cap/join)
-void drawSuperellipse(Vec3 pos, Vec2 size, float n = 5.0) [+1]  // Draw a superellipse (Lamé curve) inscribed in a rect — Apple-icon-like by default (n=5)
-void drawTriangle(Vec3 p1, Vec3 p2, Vec3 p3) [+1]  // Draw triangle
-void endLines()  // End batch line drawing and render all accumulated line segments
-void endShape(bool close = false)  // End drawing a shape
-void endStroke(bool close = false)  // End drawing a stroke
-float getBitmapFontHeight()  // Get bitmap font height
-float getBitmapLineHeight()  // Get line height for bitmap string newlines
-Rect getBitmapStringBBox(const std::string & text)  // Get text bounding box
-void getBitmapStringBounds(const std::string & text, float & width, float & height)  // Get bitmap string bounding box size
-float getBitmapStringHeight(const std::string & text)  // Get text height
-float getBitmapStringWidth(const std::string & text)  // Get text width
-Direction getTextAlignH()  // Get horizontal text alignment
-Direction getTextAlignV()  // Get vertical text alignment
-void setBitmapLineHeight(float h)  // Set line height for bitmap string newlines (default: 16)
-void setFps(float fps)  // Set the target frame rate; update and draw run together (VSYNC = -1, EVENT_DRIVEN = 0, or a fixed fps). A fixed fps at or just above the display rate draws every display frame. Switching at runtime starts the new rate from the switch (no catch-up; a fixed fps draws the next frame, and the first update's getDeltaTime() leaves out the previous mode: called between updates it counts from the call, called inside an update from that update's start; the time dropped is under a frame in the usual modes, long only after an idle like EVENT_DRIVEN). Calling it again with the current rate does nothing, so it is safe to call every frame; on the frame where the value changes (setFps(guiValue) in draw() while a slider moves), that update's dt counts only from the call and is shorter than the frame
-void setTextAlign(Direction h, Direction v)  // Set text alignment
-void vertex(float x, float y, float z) [+3]  // Add a vertex
+void appendArc(float cx, float cy, float radius, float angleBegin, float angleEnd) [+1]  // Append arc vertices to the current shape (use between beginShape/endShape).
+void appendCurve(const std::vector<Vec3> & points) [+1]  // Append Catmull-Rom curve vertices to the current shape.
+void appendSuperellipse(float x, float y, float w, float h, float n = 5.0) [+1]  // Append the closed outline of a superellipse inscribed in a rect to the current shape (use between beginShape/endShape).
+void beginLines()  // Begin batch drawing of independent line segments.
+void beginShape()  // Open a vertex buffer for a custom polygon, closed with endShape().
+void beginStroke()  // Begin drawing a stroke.
+void drawArc(Vec3 center, float radius, float angleBegin, float angleEnd) [+1]  // Draw a circular arc spanning two angles.
+void drawBezier(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3) [+2]  // Draw a Bezier curve.
+void drawBitmapString(const std::string & text, Vec3 pos, bool screenFixed = true) [+5]  // Draw fixed-size bitmap text at a 2D position, or as a screen-facing label in 3D space.
+void drawBitmapStringHighlight(const std::string & text, float x, float y, const Color & background = Color(0, 0, 0), const Color & foreground = Color(1, 1, 1))  // Draw bitmap text with a solid background rectangle behind it.
+void drawBox(float w, float h, float d) [+5]  // Draw a 3D box.
+void drawCircle(Vec3 center, float radius) [+1]  // Draw a circle.
+void drawCone(float radius, float height, int resolution = 16) [+2]  // Draw a 3D cone.
+void drawCurve(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3) [+2]  // Draw a Catmull-Rom curve through a series of points, as a polyline.
+void drawEllipse(Vec3 center, Vec2 radii) [+2]  // Draw an ellipse.
+void drawLine(Vec3 p1, Vec3 p2) [+2]  // Draw a line (2D or 3D).
+void drawPoint(Vec3 pos) [+1]  // Draw a single point.
+void drawRect(Vec3 pos, Vec2 size) [+2]  // Draw an axis-aligned rectangle.
+void drawRectRounded(Vec3 pos, Vec2 size, float radius) [+1]  // Draw a rounded rectangle (circular arc corners).
+void drawRectSquircle(Vec3 pos, Vec2 size, float radius) [+1]  // Draw a squircle rectangle (curvature-continuous corners, iOS-style).
+void drawSphere(float radius, int resolution = 16) [+2]  // Draw a 3D sphere.
+void drawStroke(float x1, float y1, float x2, float y2) [+1]  // Draw a single thick stroke segment.
+void drawSuperellipse(Vec3 pos, Vec2 size, float n = 5.0) [+1]  // Draw a superellipse (Lamé curve) inscribed in a rect — Apple-icon-like by default (n=5).
+void drawTriangle(Vec3 p1, Vec3 p2, Vec3 p3) [+1]  // Draw a triangle.
+void endLines()  // End batch line drawing and render all accumulated line segments.
+void endShape(bool close = false)  // Finish drawing the current shape.
+void endStroke(bool close = false)  // Finish drawing the current stroke.
+float getBitmapFontHeight()  // Get the bitmap font's fixed cell height in pixels.
+float getBitmapLineHeight()  // Get the current line spacing used for newlines in bitmap text.
+Rect getBitmapStringBBox(const std::string & text)  // Get the text's bounding box as a Rect.
+void getBitmapStringBounds(const std::string & text, float & width, float & height)  // Get a bitmap string's width and height through output parameters.
+float getBitmapStringHeight(const std::string & text)  // Get the text's rendered height in pixels.
+float getBitmapStringWidth(const std::string & text)  // Get the text's rendered width in pixels.
+Direction getTextAlignH()  // Get the current horizontal text alignment.
+Direction getTextAlignV()  // Get the current vertical text alignment.
+void setBitmapLineHeight(float h)  // Set the line spacing used for newlines in bitmap text.
+void setFps(float fps)  // Set the target frame rate that update and draw run at together.
+void setTextAlign(Direction h, Direction v)  // Set the anchor point used when drawing bitmap text.
+void vertex(float x, float y, float z) [+3]  // Add a vertex to the shape, lines or stroke buffer that is currently open.
 ```
 
 ### Graphics - Style
 
 ```cpp
-void disableDepthTest()  // Disable depth test/write on the blend pipelines again (the default). Call before drawing 2D overlays (HUD, text) so they are not occluded by the 3D scene
-void enableDepthTest()  // Re-enable depth test/write on the blend pipelines (compare LESS_EQUAL + depth write, same as the 3D pipeline). Use to restore depth after setBlendMode() mid-scene; persists like the blend mode (across frames and Fbo passes) until disableDepthTest()
-void fill()  // Enable fill mode (shapes are solid, no outline)
-BlendMode getBlendMode()  // Get current blend mode
-int getCircleResolution() ⚠️deprecated  // Deprecated alias for getCurveResolution()
-Color getColor()  // Get current fill color
-CurveStyle::Mode getCurveMode()  // Current curve tessellation mode (fixed segment count vs. adaptive tolerance)
-int getCurveResolution()  // Get current curve resolution
-float getCurveTolerance()  // Get current curve tessellation tolerance (in pixels)
-float getPointSize()  // Get the current point size (logical px).
-PointStyle getPointStyle()  // Get the current point shape (PointStyle).
-StrokeCap getStrokeCap()  // Get current stroke cap style
-StrokeJoin getStrokeJoin()  // Get current stroke join style
-float getStrokeWeight()  // Get current stroke width
-bool isDepthTestEnabled()  // Whether the depth-tested blend pipeline variant is active (set by enableDepthTest)
-bool isFillEnabled()  // Check if fill mode is enabled
-bool isStrokeEnabled()  // Check if stroke mode is enabled
-void noFill()  // Enable stroke mode (shapes show outline only)
-void popScissor()  // Pop scissor clipping rectangle from stack
-void popStyle()  // Pop style from stack, restoring previous state
-void pushScissor(float x, float y, float w, float h)  // Push scissor clipping rectangle onto stack
-void pushStyle()  // Push current style (color, fill, stroke, blend) onto stack
-void resetBlendMode()  // Reset blend mode to Alpha (default)
-void resetScissor()  // Reset (disable) scissor clipping
-void resetStyle()  // Reset style to default values (white color, fill enabled, stroke disabled)
-StyleScope scopedStyle()  // pushStyle() now, popStyle() at the end of the scope: `auto s = scopedStyle();` returns a StyleScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushStyle() / popStyle() remain the main form. [[nodiscard]]: `scopedStyle();` alone would pop at once and is a compiler warning
-void setBlendMode(BlendMode mode)  // Set blend mode. BlendMode::Alpha (default), Add, Multiply, Screen, Subtract, Disabled. Works on the screen and inside Fbo passes alike; the mode persists until changed (it also carries into a subsequent Fbo::begin)
-void setCircleResolution(int res) ⚠️deprecated  // Deprecated alias for setCurveResolution()
-void setCurveResolution(int n)  // Set fixed curve segment count (switches off adaptive tolerance mode)
-void setCurveTolerance(float pixels)  // Set adaptive curve tessellation tolerance in pixels (smaller = smoother, scale-aware)
-void setPointSize(float px)  // Set the point size in logical pixels (Square/Round point styles; Pixel is always 1px).
-void setPointStyle(PointStyle s)  // Set the point shape: PointStyle::Square, Round or Pixel.
-void setScissor(float x, float y, float w, float h) [+1]  // Set scissor clipping rectangle. Also available via RectNode::setClipping(true)
-void setStrokeCap(StrokeCap cap)  // Set stroke cap style (Butt, Round, Square)
-void setStrokeJoin(StrokeJoin join)  // Set stroke join style (Miter, Round, Bevel)
-void setStrokeWeight(float weight)  // Set stroke width
+void disableDepthTest()  // Turns the depth test for ordinary (blend-mode) drawing off again, which is the default.
+void enableDepthTest()  // Turns the depth test on for ordinary (blend-mode) drawing, so nearer shapes hide farther ones.
+void fill()  // Enable fill mode.
+BlendMode getBlendMode()  // Get the current blend mode.
+int getCircleResolution() ⚠️deprecated  // Deprecated alias for getCurveResolution().
+Color getColor()  // Get the current drawing color.
+CurveStyle::Mode getCurveMode()  // Get the current curve tessellation mode.
+int getCurveResolution()  // Get the segment count used in resolution mode.
+float getCurveTolerance()  // Get the current curve tessellation tolerance, in pixels.
+float getPointSize()  // Get the current point size, in logical pixels.
+PointStyle getPointStyle()  // Get the current point shape.
+StrokeCap getStrokeCap()  // Get the current stroke cap style.
+StrokeJoin getStrokeJoin()  // Get the current stroke join style.
+float getStrokeWeight()  // Get the current stroke width.
+bool isDepthTestEnabled()  // Returns whether the depth test for ordinary (blend-mode) drawing is on.
+bool isFillEnabled()  // Check whether fill mode is enabled.
+bool isStrokeEnabled()  // Check whether stroke mode is enabled.
+void noFill()  // Enable stroke mode.
+void popScissor()  // Restores the clipping rectangle saved by the matching pushScissor().
+void popStyle()  // Restore the style saved by the matching pushStyle().
+void pushScissor(float x, float y, float w, float h)  // Saves the current clipping rectangle and limits drawing to a new rectangle inside it.
+void pushStyle()  // Save the current style onto a stack.
+void resetBlendMode()  // Reset the blend mode to Alpha (the default).
+void resetScissor()  // Turns clipping off so the whole window or Fbo can be drawn again.
+void resetStyle()  // Reset the current style to its default values.
+StyleScope scopedStyle()  // Push the style now; pop it automatically when the scope ends.
+void setBlendMode(BlendMode mode)  // Set the blend mode used by drawing from now on.
+void setCircleResolution(int res) ⚠️deprecated  // Deprecated alias for setCurveResolution().
+void setCurveResolution(int n)  // Use a fixed segment count for circles, arcs and curves.
+void setCurveTolerance(float pixels)  // Set how closely curves must follow their ideal shape, in pixels.
+void setPointSize(float px)  // Set the point size, in logical pixels.
+void setPointStyle(PointStyle s)  // Set the point shape: Square, Round, or Pixel.
+void setScissor(float x, float y, float w, float h) [+1]  // Sets the clipping rectangle directly, replacing the current one.
+void setStrokeCap(StrokeCap cap)  // Set the stroke cap style.
+void setStrokeJoin(StrokeJoin join)  // Set the stroke join style.
+void setStrokeWeight(float weight)  // Set the stroke width.
 ```
 
 ### Transform
 
 ```cpp
-Mat4 getCurrentMatrix() ⚠️deprecated  // Deprecated alias for getMatrix()
-float getCurrentScale() ⚠️deprecated  // Deprecated alias for getScale()
-Mat4 getMatrix()  // Get the current transformation matrix
-float getScale()  // Effective uniform scale of the current matrix (max of x/y basis lengths)
-void loadMatrix(const Mat4 & mat) ⚠️deprecated  // Deprecated alias for setMatrix()
-void multMatrix(const Mat4 & mat)  // Multiply the current matrix by mat (relative transform, like translate/rotate)
-void popMatrix()  // Restore transform state
-void pushMatrix()  // Save transform state
-void resetMatrix()  // Reset transformation matrix to identity
-void rotate(float radians) [+3]  // Rotate by radians (single axis, euler angles, or quaternion)
-void rotateDeg(float degrees) [+2]  // Rotate by degrees
-void rotateX(float radians)  // Rotate around X axis
-void rotateXDeg(float degrees)  // Rotate around X axis (degrees)
-void rotateY(float radians)  // Rotate around Y axis
-void rotateYDeg(float degrees)  // Rotate around Y axis (degrees)
-void rotateZ(float radians)  // Rotate around Z axis
-void rotateZDeg(float degrees)  // Rotate around Z axis (degrees)
-void scale(float s) [+2]  // Scale
-MatrixScope scopedMatrix()  // pushMatrix() now, popMatrix() at the end of the scope: `auto m = scopedMatrix();` returns a MatrixScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushMatrix() / popMatrix() remain the main form. [[nodiscard]]: `scopedMatrix();` alone would pop at once and is a compiler warning
-void setMatrix(const Mat4 & mat)  // Replace the active target model matrix with mat, retaining its camera view (sgl receives V*M). Pass a model matrix without a baked-in view.
-void translate(Vec3 pos) [+2]  // Move origin
+Mat4 getCurrentMatrix() ⚠️deprecated  // Deprecated alias for getMatrix().
+float getCurrentScale() ⚠️deprecated  // Deprecated alias for getScale().
+Mat4 getMatrix()  // Get the current transformation matrix.
+float getScale()  // Get the effective uniform scale of the current matrix.
+void loadMatrix(const Mat4 & mat) ⚠️deprecated  // Deprecated alias for setMatrix().
+void multMatrix(const Mat4 & mat)  // Multiply the current matrix by another matrix.
+void popMatrix()  // Restore the transform last saved by pushMatrix().
+void pushMatrix()  // Save the current transform onto the matrix stack.
+void resetMatrix()  // Reset the current transform to identity.
+void rotate(float radians) [+3]  // Rotate subsequent drawing, in radians.
+void rotateDeg(float degrees) [+2]  // Rotate subsequent drawing, in degrees.
+void rotateX(float radians)  // Rotate around the X axis, in radians.
+void rotateXDeg(float degrees)  // Rotate around the X axis, in degrees.
+void rotateY(float radians)  // Rotate around the Y axis, in radians.
+void rotateYDeg(float degrees)  // Rotate around the Y axis, in degrees.
+void rotateZ(float radians)  // Rotate around the Z axis, in radians.
+void rotateZDeg(float degrees)  // Rotate around the Z axis, in degrees.
+void scale(float s) [+2]  // Scale subsequent drawing.
+MatrixScope scopedMatrix()  // RAII guard that pushes now and pops at the end of the scope.
+void setMatrix(const Mat4 & mat)  // Replace the current matrix outright.
+void translate(Vec3 pos) [+2]  // Move the origin of subsequent drawing.
 ```
 
 ### Window & Input
