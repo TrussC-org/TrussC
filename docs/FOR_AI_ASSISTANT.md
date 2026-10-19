@@ -2038,7 +2038,7 @@ size_t getMemoryUsage()  // Get process memory usage in bytes (platform-specific
 size_t getNodeCount()  // Get number of active Node objects in scene graph
 int getSokolMemoryAllocs()  // Number of active allocations in sokol libraries
 int getSokolMemoryBytes()  // Total bytes allocated by sokol libraries
-size_t getTextureCount()  // Get number of active Texture objects
+size_t getTextureCount()  // Returns the Texture object counter.
 void releaseSglBuffers()  // Release sokol_gl vertex/command buffers (auto re-allocated on next draw)
 ```
 
@@ -2438,9 +2438,9 @@ Mesh createTorus(float radius, float tubeRadius, int sides = 24, int rings = 16)
 ### Graphics - Texture & GPU
 
 ```cpp
-int bytesPerPixel(TextureFormat fmt)  // Bytes per pixel for a TextureFormat
-int channelCount(TextureFormat fmt)  // Number of color channels for a TextureFormat (1, 2, or 4)
-bool isFloatFormat(TextureFormat fmt)  // Whether a TextureFormat uses floating-point components
+int bytesPerPixel(TextureFormat fmt)  // Returns the byte size of one pixel for a TextureFormat.
+int channelCount(TextureFormat fmt)  // Returns the number of channels in a TextureFormat.
+bool isFloatFormat(TextureFormat fmt)  // Reports whether a TextureFormat uses floating-point components.
 ```
 
 ### Graphics - Shader
@@ -2901,32 +2901,32 @@ bool EventListener::isConnected() const  // True while the listener is still con
 ```cpp
 ```
 
-### Fbo — Framebuffer object for offscreen rendering
+### Fbo — Stores off-screen rendering results in a texture.
 
 ```cpp
-void Fbo::allocate(int w, int h, int sampleCount = 1, TextureFormat format = RGBA8, bool mipmaps = false)  // Allocate framebuffer (void). When the size exceeds the device limit or the graphics backend reports a resource creation failure, allocation fails, partial resources are released and isAllocated() stays false. Driver-level out-of-memory may not be reported on every backend; begin()/draw() are no-ops and readPixels()/readPixelsFloat()/copyTo() return false. Oversize requests log one Warning with the requested size and device limit. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
-void Fbo::begin() [+1]  // Begin rendering to FBO. Each activation starts an identity model, empty matrix/camera/scissor scopes, full viewport and a TAU/8 camera in attachment pixels. Distinct Fbos may nest; end resumes the parent with color and depth LOAD. A fresh LOAD activation keeps color and clears depth. Balance scopes on the same target; recursive begin and out-of-order end are rejected.
-void Fbo::clear()  // Release FBO resources
-void Fbo::clearColor(float r, float g, float b, float a)  // Clear the FBO with a solid color
-bool Fbo::copyTo(Image & image) const  // Copy FBO contents to Image
-void Fbo::draw(float x, float y) const [+1]  // Draw FBO contents
-void Fbo::end()  // End rendering to FBO and return to the parent target; the returned logical blend takes effect immediately.
-sg_image Fbo::getColorImage() const  // Return the underlying sokol-gfx color image handle (advanced interop).
-const std::string & Fbo::getDebugName() const  // Return the MCP inspection name (empty for unnamed or moved-from objects).
-int Fbo::getHeight() const  // Get height
-int Fbo::getSampleCount() const  // Get MSAA sample count
-sg_sampler Fbo::getSampler() const  // Return the underlying sokol-gfx sampler handle (advanced interop).
-Texture & Fbo::getTexture() [+1]  // Get FBO texture
-TextureFormat Fbo::getTextureFormat() const  // Get the FBO's color texture format
-sg_view Fbo::getTextureView() const  // Return the underlying sokol-gfx color texture view handle (advanced interop).
-int Fbo::getWidth() const  // Get width
-bool Fbo::isActive() const  // Check if currently rendering to FBO
-bool Fbo::isAllocated() const  // Check if allocated
-std::shared_ptr<void> Fbo::lifetimeToken() const  // Lifetime token for observers holding a raw pointer to this Fbo (e.g. ScreenRecorder auto-stops when the recorded Fbo dies). Per-object: it does not transfer on move
-bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android,web]  // Always read RGBA8 into a CPU buffer, whatever the Fbo format (clamped to 0–1 and quantised to 8 bits)
-bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android,web]  // Read FBO contents into a CPU buffer (32-bit float per channel)
-SaveResult Fbo::save(const fs::path & path) const  // Read back and save FBO pixels. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
-void Fbo::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_fbos lists live objects with index, name, width, height and format. tc_analyze_image accepts source={fbo:name or index} and reads the final Fbo pass after the frame. Moves transfer the name/index and remove the moved-from object; destruction removes the entry. Empty names remain available by index. Web readback and iOS float readback return errors. Non-float Fbo formats are converted to RGBA8 for byte readback. Texture is not a source; draw it into a named Fbo.
+void Fbo::allocate(int w, int h, int sampleCount = 1, TextureFormat format = RGBA8, bool mipmaps = false)  // Allocates the framebuffer attachments.
+void Fbo::begin() [+1]  // Begins rendering into the framebuffer.
+void Fbo::clear()  // Releases the framebuffer resources.
+void Fbo::clearColor(float r, float g, float b, float a)  // Clears the active framebuffer to a solid color.
+bool Fbo::copyTo(Image & image) const  // Copies the framebuffer contents into an Image.
+void Fbo::draw(float x, float y) const [+1]  // Draws the framebuffer contents onto the current target.
+void Fbo::end()  // Finishes framebuffer rendering and returns to the parent target.
+sg_image Fbo::getColorImage() const  // Returns the underlying sokol color image handle.
+const std::string & Fbo::getDebugName() const  // Returns the Fbo's inspection name.
+int Fbo::getHeight() const  // Returns the framebuffer height.
+int Fbo::getSampleCount() const  // Returns the framebuffer's MSAA sample count.
+sg_sampler Fbo::getSampler() const  // Returns the underlying sokol sampler handle.
+Texture & Fbo::getTexture() [+1]  // Returns the framebuffer's current color texture.
+TextureFormat Fbo::getTextureFormat() const  // Returns the framebuffer's color texture format.
+sg_view Fbo::getTextureView() const  // Returns the underlying sokol color texture view handle.
+int Fbo::getWidth() const  // Returns the framebuffer width.
+bool Fbo::isActive() const  // Reports whether the framebuffer has an active rendering scope.
+bool Fbo::isAllocated() const  // Reports whether framebuffer allocation succeeded.
+std::shared_ptr<void> Fbo::lifetimeToken() const  // Returns a token for observing this Fbo object's lifetime.
+bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android,web]  // Reads framebuffer contents into a CPU RGBA8 buffer.
+bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android,web]  // Reads framebuffer contents into a CPU float buffer.
+SaveResult Fbo::save(const fs::path & path) const  // Saves framebuffer contents to an image file.
+void Fbo::setDebugName(const std::string & name)  // Sets the Fbo's inspection name.
 ```
 
 ### FileDialogResult — Result of a load/save file dialog
@@ -3070,7 +3070,7 @@ const char * GraphicsBackend::name()  // Short backend name: "opengl" / "gles3" 
 void HasTexture::draw(float x, float y) const [+1]  // Draw the texture at the given position (and optional size).
 TextureFilter HasTexture::getMagFilter() const  // Return the texture magnification filter.
 TextureFilter HasTexture::getMinFilter() const  // Return the texture minification filter.
-Texture & HasTexture::getTexture() [+1]  // Get internal texture
+Texture & HasTexture::getTexture() [+1]  // Provides access to an object's texture.
 TextureWrap HasTexture::getWrapU() const  // Return the texture wrap mode on the U axis.
 TextureWrap HasTexture::getWrapV() const  // Return the texture wrap mode on the V axis.
 bool HasTexture::hasTexture() const  // Return true if the underlying texture is allocated.
@@ -3125,35 +3125,35 @@ bool IesProfile::load(const fs::path & path)  // Load IES profile from file
 bool IesProfile::loadFromString(const std::string & data)  // Load IES profile from inline string data
 ```
 
-### Image — Image with CPU pixels and GPU texture
+### Image — An image containing CPU pixels and a GPU texture.
 
 ```cpp
-void Image::allocate(int width, int height, int channels = 4, bool mipmaps = false)  // Allocate empty image for dynamic updates. `mipmaps=true` builds a chain refreshed on every update().
-void Image::clear()  // Release image resources
-void Image::crop(int x, int y, int w, int h)  // Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge. Cancels any pending loadAsync before editing, including invalid or no-op requests.
-int Image::getChannels() const  // Get number of channels
-Color Image::getColor(int x, int y) const  // Get pixel color at position
-const std::string & Image::getDebugName() const  // Return the MCP inspection name (empty for unnamed or moved-from objects).
-int Image::getHeight() const  // Get height
-Pixels & Image::getPixels() [+1]  // Get pixels reference for direct manipulation
-unsigned char * Image::getPixelsData() [+1]  // Get raw pixel data pointer
-Texture & Image::getTexture() [+1]  // Get internal texture
-int Image::getWidth() const  // Get width
-void Image::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8. Cancels any pending loadAsync before editing, including invalid or no-op requests.
-bool Image::isAllocated() const  // Check if allocated
-bool Image::isLoading() const  // Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation.
-LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. Use `loadAsync` for background loading with deferred main-thread application. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels.
-void Image::loadAsync(const fs::path & path, bool mipmaps = false)  // loadAsync(path, mipmaps = false): decode pixels on a native worker, then apply pixels, upload the texture and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires.
-LoadResult Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain. Main thread only; decode in the background with `Pixels::loadFromMemory`. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels.
-void Image::mirror(bool horizontal, bool vertical)  // Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°. Cancels any pending loadAsync before editing, including invalid or no-op requests.
-void Image::mirrorH()  // Mirror horizontally (alias for mirror(true, false)) Cancels any pending loadAsync before editing, including invalid or no-op requests.
-void Image::mirrorV()  // Mirror vertically (alias for mirror(false, true)) Cancels any pending loadAsync before editing, including invalid or no-op requests.
-void Image::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8. Use FBO sampling for fast paths. Cancels any pending loadAsync before editing, including invalid or no-op requests.
-SaveResult Image::save(const fs::path & path) const  // Save image pixels. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
-void Image::setColor(int x, int y, const Color & c)  // Set pixel color at position (marks image as dirty) Cancels any pending loadAsync before editing, including invalid or no-op requests.
-void Image::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_images lists live Images with index, name, width, height and format; moves transfer name/index and remove moved-from entries, destruction removes entries, unnamed Images remain available by index. tc_analyze_image reads CPU pixels with source={image:name or index}; other sources are window:index, fbo:name or index, path:file. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), and results in ops order; byte colors are normalized RGBA, float values above 1 pass through. Ops: pixel(x,y):color; histogram(bins):histogram[channel][bin] over 0-1 (outliers in end bins); count(color,tolerance or min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):mean colors[row][col]; diff(path,threshold,optional save):count,bbox,maxDifference; line(x0,y0,x1,y1):colors along inclusive Bresenham samples. Every op accepts optional rect=[x,y,w,h], default whole image. Coordinates are top-left, bbox=[x,y,w,h], centroid=[x,y]; empty matches yield null bbox/centroid. Rects and grid cells must be nonempty; line endpoints are in the image and samples clip to rect. Count accepts RGB/RGBA bounds or color plus a nonnegative scalar tolerance. Diff compares raw RGBA values with equal image dimensions and counts maximum absolute channel differences strictly above threshold. Optional top-level save (omitted/null writes nothing) and diff.save use tc_save_screenshot paths: UTF-8, data-directory-relative, create parents, unsupported extensions append .png. Float file output is clamped to 0-1; analysis preserves float values. Texture, VideoPlayer and VideoGrabber are not sources. Analysis defaults to 4096 histogram bins, 65536 grid cells and 256 operations; excess parameters return an error before scratch allocation. Replies default to 64 MiB and aggregate MCP working memory to 256 MiB. Limits are set with mcp::setAdmissionLimits(). File sources and diff references use a bounded encoded snapshot, query stb or platform metadata, and reserve decoded storage and estimated codec workspace before decoding. macOS/iOS retain ImageIO formats, including HEIC, TIFF and JPEG 2000.
-void Image::setDirty()  // Mark image as needing update
-void Image::update()  // Apply pixel changes to GPU texture
+void Image::allocate(int width, int height, int channels = 4, bool mipmaps = false)  // Allocates an image for pixel updates.
+void Image::clear()  // Releases the image pixels and texture.
+void Image::crop(int x, int y, int w, int h)  // Replaces the image with a rectangular crop.
+int Image::getChannels() const  // Returns the CPU pixel channel count.
+Color Image::getColor(int x, int y) const  // Returns a CPU pixel color.
+const std::string & Image::getDebugName() const  // Returns the image name used for MCP inspection.
+int Image::getHeight() const  // Returns the image height.
+Pixels & Image::getPixels() [+1]  // Returns a reference to the CPU pixel buffer.
+unsigned char * Image::getPixelsData() [+1]  // Returns a pointer to the CPU pixel storage.
+Texture & Image::getTexture() [+1]  // Returns a reference to the GPU texture.
+int Image::getWidth() const  // Returns the image width.
+void Image::halve()  // Reduces the image with 2×2 averaging.
+bool Image::isAllocated() const  // Reports whether CPU pixels are allocated.
+bool Image::isLoading() const  // Reports whether an asynchronous image load is pending.
+LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Loads an image from a file.
+void Image::loadAsync(const fs::path & path, bool mipmaps = false)  // Loads an image asynchronously.
+LoadResult Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Loads an encoded image from memory.
+void Image::mirror(bool horizontal, bool vertical)  // Flips the image horizontally or vertically.
+void Image::mirrorH()  // Flips the image horizontally.
+void Image::mirrorV()  // Flips the image vertically.
+void Image::resize(int newW, int newH)  // Resamples the image to a new size.
+SaveResult Image::save(const fs::path & path) const  // Saves the CPU image pixels to a file.
+void Image::setColor(int x, int y, const Color & c)  // Sets a CPU pixel color.
+void Image::setDebugName(const std::string & name)  // Sets the image name used for MCP inspection.
+void Image::setDirty()  // Marks the image as needing a texture update.
+void Image::update()  // Uploads pending CPU pixel changes to the texture.
 ```
 
 ### JsonReadReflector — Reflector backend that applies a JSON object onto reflected members through their setters.
@@ -3683,38 +3683,38 @@ int Path::size() const  // Get vertex count
 Mesh Path::toFillMesh() const  // Build a fillable Mesh from the path interior
 ```
 
-### Pixels — Pixel buffer for image manipulation
+### Pixels — Stores image pixels in CPU memory.
 
 ```cpp
-void Pixels::allocate(int width, int height, int channels = 4, PixelFormat format = U8)  // Allocate pixel buffer
-void Pixels::clear()  // Release pixel buffer
-Pixels Pixels::clone() const  // Return a deep copy of the pixel buffer
-void Pixels::copyTo(unsigned char * dst) const  // Copy to external buffer
-void Pixels::crop(int x, int y, int w, int h)  // Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge.
-int Pixels::getChannels() const  // Get number of channels
-Color Pixels::getColor(int x, int y) const  // Get pixel color at position
-unsigned char * Pixels::getData() [+1]  // Get raw data pointer
-float * Pixels::getDataF32() [+1]  // Get raw data pointer as float (float-format buffers)
-void * Pixels::getDataVoid() [+1]  // Get raw data pointer as void* (any format)
-PixelFormat Pixels::getFormat() const  // Get the pixel format
-int Pixels::getHeight() const  // Get height
-size_t Pixels::getTotalBytes() const  // Get total byte size
-int Pixels::getWidth() const  // Get width
-void Pixels::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
-bool Pixels::isAllocated() const  // Check if allocated
-bool Pixels::isFloat() const  // Whether the pixel data uses 32-bit floats
-LoadResult Pixels::load(const fs::path & filePath)  // Load image from file into CPU memory. No GPU work, so it is safe on a worker thread; upload the result on the main thread (`Texture::allocate(pixels)`). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
-LoadResult Pixels::loadFromMemory(const unsigned char * buffer, int len)  // Decode an image from memory into CPU pixels. No GPU work, so it is safe on a worker thread.
-LoadResult Pixels::loadHDR(const fs::path & filePath)  // Load an HDR (.hdr) image into a float pixel buffer. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
-bool Pixels::loadPlatform(const fs::path & path)  // Load an image using the platform image decoder
-void Pixels::mirror(bool horizontal, bool vertical)  // Flip in place. Both true is 180°.
-void Pixels::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
-void Pixels::mirrorV()  // Mirror vertically (alias for mirror(false, true))
-void Pixels::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8.
-SaveResult Pixels::save(const fs::path & path) const  // Save pixels (JPG/JPEG, BMP, otherwise PNG; preserve the requested filename). Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
-void Pixels::setColor(int x, int y, const Color & c)  // Set pixel color at position
-void Pixels::setFromFloats(const float * srcData, int width, int height, int channels)  // Fill the buffer from a float array (allocates as needed)
-void Pixels::setFromPixels(const unsigned char * srcData, int width, int height, int channels)  // Copy from external pixel data
+void Pixels::allocate(int width, int height, int channels = 4, PixelFormat format = U8)  // Allocates a pixel buffer.
+void Pixels::clear()  // Releases the pixel buffer.
+Pixels Pixels::clone() const  // Returns an independent copy of the pixel buffer.
+void Pixels::copyTo(unsigned char * dst) const  // Copies pixel bytes to an external buffer.
+void Pixels::crop(int x, int y, int w, int h)  // Replaces the pixels with a cropped region.
+int Pixels::getChannels() const  // Returns the number of channels per pixel.
+Color Pixels::getColor(int x, int y) const  // Returns the color of a pixel.
+unsigned char * Pixels::getData() [+1]  // Returns the pixel storage as a byte pointer.
+float * Pixels::getDataF32() [+1]  // Returns the pixel storage as a float pointer.
+void * Pixels::getDataVoid() [+1]  // Returns the untyped pixel storage pointer.
+PixelFormat Pixels::getFormat() const  // Returns the CPU pixel format.
+int Pixels::getHeight() const  // Returns the buffer height.
+size_t Pixels::getTotalBytes() const  // Returns the total size of the pixel data in bytes.
+int Pixels::getWidth() const  // Returns the buffer width.
+void Pixels::halve()  // Reduces the buffer to half size by averaging pixels.
+bool Pixels::isAllocated() const  // Returns whether the buffer is allocated.
+bool Pixels::isFloat() const  // Returns whether the pixel format uses 32-bit floats.
+LoadResult Pixels::load(const fs::path & filePath)  // Loads an image file into CPU pixels.
+LoadResult Pixels::loadFromMemory(const unsigned char * buffer, int len)  // Decodes an image from memory into CPU pixels.
+LoadResult Pixels::loadHDR(const fs::path & filePath)  // Loads HDR images into floating-point CPU pixels.
+bool Pixels::loadPlatform(const fs::path & path)  // Loads an image through the platform decoder.
+void Pixels::mirror(bool horizontal, bool vertical)  // Flips the pixel buffer horizontally or vertically.
+void Pixels::mirrorH()  // Flips the pixel buffer horizontally.
+void Pixels::mirrorV()  // Flips the pixel buffer vertically.
+void Pixels::resize(int newW, int newH)  // Resamples the pixel buffer to new dimensions.
+SaveResult Pixels::save(const fs::path & path) const  // Saves CPU pixels to an image file.
+void Pixels::setColor(int x, int y, const Color & c)  // Sets the color of a pixel.
+void Pixels::setFromFloats(const float * srcData, int width, int height, int channels)  // Copies a float array into the pixel buffer.
+void Pixels::setFromPixels(const unsigned char * srcData, int width, int height, int channels)  // Copies a byte array into the pixel buffer.
 ```
 
 ### PlacedGlyph — One laid-out glyph emitted by Font::forEachGlyph (nested as Font::PlacedGlyph). Carries the final codepoint and pen position so visitors can render quads, build vector paths, or hit-test independently of the layout pass
@@ -4204,50 +4204,50 @@ int TcpServerClient::getPort() const  // Client port
 ```cpp
 ```
 
-### Texture — GPU texture for rendering
+### Texture — Manages a GPU texture and its sampling settings.
 
 ```cpp
-void Texture::allocate(int width, int height, int channels = 4, TextureUsage usage = Immutable, int sampleCount = 1) [+2]  // Allocate texture
-void Texture::allocateCompressed(int width, int height, sg_pixel_format format, const void * data, size_t dataSize)  // Allocate an immutable compressed texture (BC1/BC3/BC7 etc.) from the given data.
-void Texture::allocateCubemap(int sideSize, TextureFormat format, TextureUsage usage = RenderTarget, int mipLevels = 1)  // Allocate a cubemap texture without initial data. Dynamic / Stream requires one mip level; requesting more logs an error and leaves the texture unallocated. RenderTarget supports mip chains. Immutable is refused with an error (it would need initial data).
-void Texture::bind() const  // Bind texture for rendering
-void Texture::clear()  // Release texture resources
-void Texture::draw(float x, float y) const [+1]  // Draw texture
-void Texture::drawFlippedY(float x, float y, float w, float h) const  // Draw the texture vertically flipped
-void Texture::drawSubsection(float x, float y, float w, float h, float sx, float sy, float sw, float sh) const  // Draw subsection of texture
-sg_view Texture::getAttachmentView() const  // Return the sokol-gfx color attachment view used to render into this RenderTarget (advanced interop).
-sg_view Texture::getAttachmentViewForMip(int level) const  // Return the sokol-gfx color attachment view for the given mip level (advanced interop).
-int Texture::getChannels() const  // Get number of channels
-sg_view Texture::getCubemapFaceAttachmentView(int face, int mipLevel)  // Return (lazily creating) the sokol-gfx attachment view for one (face, mip) of this cubemap (advanced interop).
-int Texture::getHeight() const  // Get height
-sg_image Texture::getImage() const  // Return the underlying sokol-gfx image handle (advanced interop).
-TextureFilter Texture::getMagFilter() const  // Get magnification filter
-TextureFilter Texture::getMinFilter() const  // Get minification filter
-int Texture::getNumMipLevels() const  // Number of mip levels
-sg_pixel_format Texture::getPixelFormat() const  // Return the texture's sokol-gfx pixel format.
-int Texture::getSampleCount() const  // Get MSAA sample count
-sg_sampler Texture::getSampler() const  // Return the underlying sokol-gfx sampler handle (advanced interop).
-TextureUsage Texture::getUsage() const  // Get texture usage mode
-sg_view Texture::getView() const  // Return the underlying sokol-gfx texture view handle (advanced interop).
-sg_view Texture::getViewForMip(int level) const  // Return the sokol-gfx texture view for sampling a single mip level (advanced interop).
-int Texture::getWidth() const  // Get width
-TextureWrap Texture::getWrapU() const  // Get horizontal wrap mode
-TextureWrap Texture::getWrapV() const  // Get vertical wrap mode
-bool Texture::isAllocated() const  // Check if allocated
-bool Texture::isCompressed() const  // Whether this texture uses a compressed pixel format
-bool Texture::isCubemap() const  // Whether this texture is a cubemap
-bool Texture::isPremultipliedAlpha() const  // Whether the texture color is premultiplied by alpha
-void Texture::loadCubemapData(const void *const * faces, size_t faceSize)  // Load all six cubemap faces (+X, -X, +Y, -Y, +Z, -Z) in one update. Requires Dynamic / Stream usage and faceSize equal to sideSize squared times bytes per pixel. Immutable / RenderTarget or a size mismatch logs a warning and returns. A second upload to the same image in the same device frame is skipped with the loadData warning. Replaces uploadCubemapFace / uploadCubemapMip in v0.8.
-void Texture::loadData(const Pixels & pixels) [+2]  // Load pixel data to texture
-void Texture::setFilter(TextureFilter filter)  // Set both min and mag filters
-void Texture::setMagFilter(TextureFilter filter)  // Set magnification filter
-void Texture::setMinFilter(TextureFilter filter)  // Set minification filter
-void Texture::setPremultipliedAlpha(bool v)  // Set whether texture color is premultiplied by alpha. Alpha blending honors this flag on both windows and Fbos.
-void Texture::setWrap(TextureWrap wrap)  // Set both wrap modes
-void Texture::setWrapU(TextureWrap wrap)  // Set horizontal wrap mode
-void Texture::setWrapV(TextureWrap wrap)  // Set vertical wrap mode
-void Texture::unbind() const  // Unbind texture
-void Texture::updateCompressed(const void * data, size_t dataSize)  // Upload compressed pixel data to an already-allocated texture
+void Texture::allocate(int width, int height, int channels = 4, TextureUsage usage = Immutable, int sampleCount = 1) [+2]  // Allocates GPU texture storage.
+void Texture::allocateCompressed(int width, int height, sg_pixel_format format, const void * data, size_t dataSize)  // Allocates an immutable texture from compressed data.
+void Texture::allocateCubemap(int sideSize, TextureFormat format, TextureUsage usage = RenderTarget, int mipLevels = 1)  // Allocates a cubemap texture.
+void Texture::bind() const  // Selects the texture for immediate-mode textured drawing.
+void Texture::clear()  // Releases the texture resources.
+void Texture::draw(float x, float y) const [+1]  // Draws the texture as a rectangle.
+void Texture::drawFlippedY(float x, float y, float w, float h) const  // Draws the texture with its vertical direction reversed.
+void Texture::drawSubsection(float x, float y, float w, float h, float sx, float sy, float sw, float sh) const  // Draws a rectangular region of the texture.
+sg_view Texture::getAttachmentView() const  // Returns the sokol view used to render into the texture.
+sg_view Texture::getAttachmentViewForMip(int level) const  // Returns a color attachment view for a mip level.
+int Texture::getChannels() const  // Returns the stored channel count.
+sg_view Texture::getCubemapFaceAttachmentView(int face, int mipLevel)  // Returns a color attachment view for one cubemap face and mip level.
+int Texture::getHeight() const  // Returns the stored texture height.
+sg_image Texture::getImage() const  // Returns the underlying sokol image handle.
+TextureFilter Texture::getMagFilter() const  // Returns the magnification filter setting.
+TextureFilter Texture::getMinFilter() const  // Returns the minification filter setting.
+int Texture::getNumMipLevels() const  // Returns the stored number of mip levels.
+sg_pixel_format Texture::getPixelFormat() const  // Returns the stored sokol pixel format.
+int Texture::getSampleCount() const  // Returns the stored sample count.
+sg_sampler Texture::getSampler() const  // Returns the underlying sokol sampler handle.
+TextureUsage Texture::getUsage() const  // Returns the stored texture usage mode.
+sg_view Texture::getView() const  // Returns the sokol view used to sample the texture.
+sg_view Texture::getViewForMip(int level) const  // Returns a sampling view for a mip level.
+int Texture::getWidth() const  // Returns the stored texture width.
+TextureWrap Texture::getWrapU() const  // Returns the horizontal wrap setting.
+TextureWrap Texture::getWrapV() const  // Returns the vertical wrap setting.
+bool Texture::isAllocated() const  // Returns the texture allocation flag.
+bool Texture::isCompressed() const  // Reports whether the stored pixel format is compressed.
+bool Texture::isCubemap() const  // Returns the stored cubemap flag.
+bool Texture::isPremultipliedAlpha() const  // Returns whether the texture is marked as using premultiplied alpha.
+void Texture::loadCubemapData(const void *const * faces, size_t faceSize)  // Uploads all six cubemap faces together.
+void Texture::loadData(const Pixels & pixels) [+2]  // Uploads pixel data to an allocated texture.
+void Texture::setFilter(TextureFilter filter)  // Sets both minification and magnification filters.
+void Texture::setMagFilter(TextureFilter filter)  // Sets the magnification filter.
+void Texture::setMinFilter(TextureFilter filter)  // Sets the minification filter.
+void Texture::setPremultipliedAlpha(bool v)  // Sets whether drawing treats the texture as using premultiplied alpha.
+void Texture::setWrap(TextureWrap wrap)  // Sets both horizontal and vertical wrap modes.
+void Texture::setWrapU(TextureWrap wrap)  // Sets the horizontal wrap mode.
+void Texture::setWrapV(TextureWrap wrap)  // Sets the vertical wrap mode.
+void Texture::unbind() const  // Disables immediate-mode texturing.
+void Texture::updateCompressed(const void * data, size_t dataSize)  // Recreates the texture from replacement compressed data.
 ```
 
 ### Thread — Base class for background threads (ofThread compatible). Subclass it, override the protected pure-virtual threadedFunction() with a while (isThreadRunning()) { ... } loop, then control it with startThread()/stopThread()/waitForThread(). A protected mutex dataMutex_ is available for sharing data. A subclass must call waitForThread() in its own destructor: the base destructor also stops and joins, but only after the subclass members are destroyed, and logs a warning if threadedFunction() is still running. A subclass that does not wait may be destroyed before its worker has called threadedFunction() (e.g. right after startThread()), and then it depends on when the worker makes that call: while the subclass destructor runs, the real threadedFunction() runs and may use members that are already destroyed (undefined behaviour, usually without an abort); at about the moment ~Thread() starts, it can still end in "pure virtual method called"; after that, threadedFunction() is skipped and the base destructor warns and joins. Only waiting in the subclass destructor (waitForThread()) rules out all three. Hold subclasses via unique_ptr / shared_ptr (moving a Thread is deprecated: it does not move the running thread). When called on the worker itself, waitForThread() returns without joining (requesting stop by default); self-destruction detaches, and the worker must not access members afterward.
@@ -4757,7 +4757,7 @@ enum mcp::ToolLevel { Public, ReadOnly, Control }  // Tool exposure level: Publi
 enum MixMode { Auto, DownmixMono }  // Sound channel mixing: Auto (match the output) or DownmixMono.
 enum MouseButton { Left, Right, Middle, None }  // Mouse button: Left, Right, Middle, or None.
 enum Orientation { Portrait, PortraitUpsideDown, LandscapeLeft, LandscapeRight, Landscape, All, AllButUpsideDown }  // Screen orientation mask passed to setOrientation (iOS/Android); values are bit flags and can be combined with |
-enum PixelFormat { U8, F32 }  // CPU pixel data format: U8 (8-bit) or F32 (float).
+enum PixelFormat { U8, F32 }  // Specifies the component storage type of CPU pixel data.
 enum PointStyle { Square, Round, Pixel }  // Shape used to draw points: Square, Round, Pixel.
 enum PrimitiveMode { Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points }  // Draw primitive mode: Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points.
 enum PrimitiveType { Points, Lines, LineStrip, Triangles, TriangleStrip, Quads }  // Geometry primitive type: Points, Lines, LineStrip, Triangles, TriangleStrip, Quads.
@@ -4769,10 +4769,10 @@ enum StrokeJoin { Miter, Round, Bevel }  // Line join style for strokes: Miter, 
 enum StrokeMesh::CapType { CAP_BUTT, CAP_ROUND, CAP_SQUARE }  // Line cap shape for the ends of an open stroke
 enum StrokeMesh::JoinType { JOIN_MITER, JOIN_ROUND, JOIN_BEVEL }  // Line join shape at the corners of a stroke
 enum TcyMode { Rotate, Upright, Combine }  // Tate-chu-yoko: how Latin / digit runs are laid out within vertical text
-enum TextureFilter { Nearest, Linear }  // Texture sampling filter: Nearest or Linear.
-enum TextureFormat { RGBA8, RGBA16F, RGBA32F, R8, R16F, R32F, RG8, RG16F, RG32F, BGRA8, RGBA16 }  // GPU texture format (RGBA8, RGBA16F, R8, …) — channel layout and bit depth.
+enum TextureFilter { Nearest, Linear }  // Specifies how texture samples are filtered.
+enum TextureFormat { RGBA8, RGBA16F, RGBA32F, R8, R16F, R32F, RG8, RG16F, RG32F, BGRA8, RGBA16 }  // Specifies the channel layout and component precision of a GPU texture.
 enum TextureUsage { Immutable, Dynamic, Stream, RenderTarget }  // Texture update pattern: Immutable, Dynamic, Stream, or RenderTarget.
-enum TextureWrap { Repeat, ClampToEdge, MirroredRepeat }  // Texture wrap mode: Repeat, ClampToEdge, MirroredRepeat.
+enum TextureWrap { Repeat, ClampToEdge, MirroredRepeat }  // Specifies how texture coordinates wrap beyond the texture edges.
 enum ThermalState { Nominal, Fair, Serious, Critical }  // Device thermal state, from Nominal to Critical.
 enum VideoCodec { H264, HEVC, ProRes422, ProRes4444 }  // Video codec: H264, HEVC, ProRes422, ProRes4444.
 enum WindowType { Rect, Hanning, Hamming, Blackman }  // FFT window function: Rect, Hanning, Hamming, Blackman.
