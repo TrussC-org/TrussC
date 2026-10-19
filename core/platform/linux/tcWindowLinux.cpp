@@ -151,6 +151,9 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
     internal::EntryStackGuard guard(internal::AppEntry::Event,
         internal::eventEntryName(ev, ctx.mousePressed && ctx.mouseButton >= 0));
 
+    // Raw listeners can change pointer lock; snapshot this move's reliability.
+    const bool recoverButtonsOnMove = internal::mouseMoveHasReliableButtonBits(ev);
+
     // Raw event pass-through (same hook addons use on the main window)
     win->events().rawEvent.notify(*ev);
 
@@ -163,10 +166,37 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
     const bool hasAlt   = (ev->modifiers & SAPP_MODIFIER_ALT) != 0;
     const bool hasSuper = (ev->modifiers & SAPP_MODIFIER_SUPER) != 0;
 
+    auto releaseMouse = [&](int button) {
+        const unsigned int bit = internal::mouseButtonBit(button);
+        if ((ctx.pressedMouseButtons & bit) == 0) return;
+        ctx.pressedMouseButtons &= ~bit;
+        // Match the base drag-button semantics independently of release tracking.
+        ctx.mouseButton = -1;
+        ctx.mousePressed = false;
+        MouseEventArgs e;
+        e.pos = e.globalPos = Vec2(ctx.lastPointerX, ctx.lastPointerY);
+        e.button = button;
+        e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
+        e.syncLegacy();
+        win->events().mouseReleased.notify(e);
+        if (win->getApp()) win->getApp()->mouseReleased(e);
+        if (!e.consumed) win->dispatchMouseReleaseToTree(e);
+    };
+
+    for (int button = SAPP_MOUSEBUTTON_LEFT; button <= SAPP_MOUSEBUTTON_MIDDLE; ++button) {
+        if (recoverButtonsOnMove && (ctx.pressedMouseButtons & internal::mouseButtonBit(button)) && internal::mouseButtonLostOnMove(ev, button))
+            releaseMouse(button); // last real position, before updating the move
+    }
+
     switch (ev->type) {
+        case SAPP_EVENTTYPE_UNFOCUSED:
+            for (int button = SAPP_MOUSEBUTTON_LEFT; button <= SAPP_MOUSEBUTTON_MIDDLE; ++button)
+                releaseMouse(button);
+            break;
         case SAPP_EVENTTYPE_MOUSE_DOWN: {
             const float x = ev->mouse_x * scale, y = ev->mouse_y * scale;
-            ctx.mouseX = x; ctx.mouseY = y;
+            ctx.mouseX = ctx.lastPointerX = x; ctx.mouseY = ctx.lastPointerY = y;
+            ctx.pressedMouseButtons |= internal::mouseButtonBit(ev->mouse_button);
             ctx.mouseButton = (int)ev->mouse_button;
             ctx.mousePressed = true;
             MouseEventArgs e;
@@ -181,24 +211,15 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
         }
         case SAPP_EVENTTYPE_MOUSE_UP: {
             const float x = ev->mouse_x * scale, y = ev->mouse_y * scale;
-            ctx.mouseX = x; ctx.mouseY = y;
-            ctx.mouseButton = -1;
-            ctx.mousePressed = false;
-            MouseEventArgs e;
-            e.pos = e.globalPos = Vec2(x, y);
-            e.button = (int)ev->mouse_button;
-            e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
-            e.syncLegacy();
-            win->events().mouseReleased.notify(e);
-            if (win->getApp()) win->getApp()->mouseReleased(e);
-            if (!e.consumed) win->dispatchMouseReleaseToTree(e);
+            ctx.mouseX = ctx.lastPointerX = x; ctx.mouseY = ctx.lastPointerY = y;
+            releaseMouse((int)ev->mouse_button);
             break;
         }
         case SAPP_EVENTTYPE_MOUSE_ENTER:
         case SAPP_EVENTTYPE_MOUSE_MOVE: {
             const float x = ev->mouse_x * scale, y = ev->mouse_y * scale;
             ctx.pmouseX = ctx.mouseX; ctx.pmouseY = ctx.mouseY;
-            ctx.mouseX = x; ctx.mouseY = y;
+            ctx.mouseX = ctx.lastPointerX = x; ctx.mouseY = ctx.lastPointerY = y;
             internal::MouseEventRaw raw;
             raw.pos = raw.globalPos = Vec2(x, y);
             raw.delta = raw.globalDelta = Vec2(ev->mouse_dx * scale, ev->mouse_dy * scale);
@@ -267,7 +288,7 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
             logNotice("Window") << "second window visible again - resuming ticks";
             break;
         default:
-            // CHAR / RESIZED / FOCUSED / UNFOCUSED: rawEvent carries them;
+            // CHAR / RESIZED / FOCUSED: rawEvent carries them;
             // size sync happens per tick.
             break;
     }
@@ -302,6 +323,14 @@ void windowClosed(sapp_window swin, void* user) {
 // Window methods (Linux implementations)
 // ---------------------------------------------------------------------------
 namespace trussc {
+
+// Internal headless-test seam. The caller makes win's context current; an
+// invalid native handle uses the backend's unit DPI without creating a window.
+namespace internal {
+void dispatchSecondaryWindowEventForTests(const sapp_event* ev, Window& win) {
+    dispatchWindowEvent(ev, sapp_window{0}, &win, win.context());
+}
+} // namespace internal
 
 Window::~Window() { teardown(); }
 
