@@ -16,6 +16,11 @@ public:
     void draw();
     
     tc::Mat4 getMatrix() const;
+
+    // Inverse warp, without clamping. On invalid geometry/results, leaves source unchanged.
+    bool screenToSource(const tc::Vec2& screen, tc::Vec2& source) const;
+    // Forward warp, without clamping. On invalid geometry/results, leaves screen unchanged.
+    bool sourceToScreen(const tc::Vec2& source, tc::Vec2& screen) const;
     
     // Input control
     void setInputEnabled(bool enabled);

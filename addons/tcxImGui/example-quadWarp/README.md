@@ -10,9 +10,10 @@ several times on screen (about 4× on a Retina display), so text looks soft. A
 larger Fbo, sized for the on-screen quad, gives crisper text but a smaller UI
 in Fbo units, so widget sizes need to grow with it.
 
-`tcApp::screenToFbo(screen, fboPx)` inverts `QuadWarp::getMatrix()`, requires a
-positive homogeneous coordinate, divides by it, and checks the Fbo bounds.
-The quad must stay convex when editing its handles.
+`tcApp::screenToFbo(screen, fboPx)` uses `QuadWarp::screenToSource()` for the
+inverse warp, then checks the Fbo bounds. The helper rejects invalid or folded
+quads and non-finite results or non-positive homogeneous coordinates.
+Keep the quad convex when editing its handles so rendering and input stay valid.
 `pointerInput(screenPos, action)` uses this helper and records the latest
 position and button state, with one latch to preserve a short click. `update()`
 forwards the position and at most one button transition to offscreen ImGui per
