@@ -17,6 +17,8 @@
 
 #if defined(__linux__) && defined(SOKOL_GLCORE) && !defined(__ANDROID__)
 #include <X11/Xlib.h>       // XResizeWindow (per-window setSize)
+#include <X11/Xutil.h>      // XSizeHints (win_gravity for setPosition)
+#include <X11/Xatom.h>      // XA_CARDINAL (_NET_FRAME_EXTENTS)
 #include "sokol_app_tc.h"   // declarations only (impl lives in sokol_impl.cpp)
 
 using namespace trussc;
@@ -53,6 +55,41 @@ void sendWmState(Display* dpy, ::Window xwin, bool add,
 
     XSendEvent(dpy, DefaultRootWindow(dpy), False,
                SubstructureRedirectMask | SubstructureNotifyMask, &xev);
+}
+
+// The WM's decoration thickness, [left, right, top, bottom]. Zeroed when the
+// property is missing (no decorations, or a WM that does not publish it).
+void frameExtents(Display* dpy, ::Window xwin, long out[4]) {
+    out[0] = out[1] = out[2] = out[3] = 0;
+    Atom prop = XInternAtom(dpy, "_NET_FRAME_EXTENTS", False);
+    Atom type = None;
+    int format = 0;
+    unsigned long count = 0, remaining = 0;
+    unsigned char* data = nullptr;
+    if (XGetWindowProperty(dpy, xwin, prop, 0, 4, False, XA_CARDINAL, &type, &format,
+                           &count, &remaining, &data) != Success || !data) {
+        return;
+    }
+    const long* values = (const long*)data;
+    for (unsigned long i = 0; i < count && i < 4; i++) out[i] = values[i];
+    XFree(data);
+}
+
+// win_gravity decides which corner a move request names. sokol_app asks for
+// CenterGravity (it wants resizes to grow around the center), and WMs read that
+// literally for moves too: KWin then offsets by half the title bar, so the same
+// request lands differently per WM and getPosition() cannot round-trip.
+// NorthWestGravity is the one the other platforms already implement -- the
+// request names the decorated frame's top-left, like Windows SetWindowPos and
+// macOS setFrameTopLeftPoint:.
+void pinMoveGravity(Display* dpy, ::Window xwin) {
+    XSizeHints hints = {};
+    long supplied = 0;
+    if (!XGetWMNormalHints(dpy, xwin, &hints, &supplied)) hints = XSizeHints{};
+    if (hints.win_gravity == NorthWestGravity && (hints.flags & PWinGravity)) return;
+    hints.flags |= PWinGravity;
+    hints.win_gravity = NorthWestGravity;
+    XSetWMNormalHints(dpy, xwin, &hints);
 }
 
 // Swapchain provider handed to WindowContext::acquireSwapchain. On GL the
@@ -438,6 +475,12 @@ void Window::setPosition(int x, int y) {
     // rather than after checking the property. Un-maximizing restores the WM's
     // own guess of a size (1280x676 on KWin), so the last requested size
     // (createWindow / setSize) is re-applied with the move.
+    //
+    // x and y name the decorated frame's top-left, the corner Windows and macOS
+    // use. On X11 that is win_gravity's job, so pin it before asking (see
+    // pinMoveGravity): with sokol_app's CenterGravity the same request lands at
+    // a different pixel on KWin than on Mutter.
+    pinMoveGravity(dpy, xwin);
     if (fullscreenRequested_) sendWmState(dpy, xwin, false, "_NET_WM_STATE_FULLSCREEN");
     sendWmState(dpy, xwin, false, "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ");
     if (st->requestedWidth > 0 && st->requestedHeight > 0) {
@@ -457,16 +500,20 @@ IVec2 Window::getPosition() const {
     Display* dpy = (Display*)(void*)sapp_x11_get_display();
     ::Window xwin = (::Window)(uintptr_t)sapp_window_x11_get_window(st->win);
     if (!dpy || !xwin) return IVec2(-1, -1);
-    // XGetWindowAttributes reports coordinates relative to the parent, which
-    // under a reparenting WM is the frame, not the root. Translate to root
-    // coordinates so the value round-trips with setPosition().
+    // XTranslateCoordinates gives the CLIENT area's origin in root coordinates,
+    // which sits below the title bar. setPosition() names the decorated frame's
+    // top-left, so subtract the WM's frame extents to report the same corner and
+    // round-trip. A caller that reads back and re-applies -- an app nudging a
+    // window -- would otherwise walk it down the screen by one title bar per step.
     ::Window root = DefaultRootWindow(dpy);
     int rx = 0, ry = 0;
     ::Window child = 0;
     if (!XTranslateCoordinates(dpy, xwin, root, 0, 0, &rx, &ry, &child)) {
         return IVec2(-1, -1);
     }
-    return IVec2(rx, ry);
+    long extents[4];
+    frameExtents(dpy, xwin, extents);
+    return IVec2(rx - (int)extents[0], ry - (int)extents[2]);
 }
 
 void Window::setFullscreen(bool full) {

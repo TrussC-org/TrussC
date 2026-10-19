@@ -41,11 +41,10 @@ void tcApp::draw() {
     drawBitmapString(second && second->isOpen() ? "second window: OPEN" : "second window: closed", 20, 50);
 
     if (second && second->isOpen()) {
-        IVec2 p = second->getPosition();
-        drawBitmapString("second window at (" + toString(p.x) + ", " + toString(p.y) + ")"
+        drawBitmapString("second window asked at (" + toString(secondPos.x) + ", " + toString(secondPos.y) + ")"
                          + (second->isFullscreen() ? "  [fullscreen]" : ""), 20, 66);
         setColor(0.7f);
-        drawBitmapString("arrows: move it by 50px   F: fullscreen it", 20, 340);
+        drawBitmapString("arrows: move it by 50px   F: fullscreen it   G: log asked vs reported", 20, 340);
     }
 
     // The same FBO also drawn here
@@ -63,13 +62,17 @@ void tcApp::keyPressed(int key) {
     // main window instead.
     if (second && second->isOpen()) {
         const int step = 50;
-        IVec2 p = second->getPosition();
-        if (key == KEY_LEFT)  { second->setPosition(p.x - step, p.y); return; }
-        if (key == KEY_RIGHT) { second->setPosition(p.x + step, p.y); return; }
-        if (key == KEY_UP)    { second->setPosition(p.x, p.y - step); return; }
-        if (key == KEY_DOWN)  { second->setPosition(p.x, p.y + step); return; }
+        if (key == KEY_LEFT)  { secondPos.x -= step; second->setPosition(secondPos.x, secondPos.y); return; }
+        if (key == KEY_RIGHT) { secondPos.x += step; second->setPosition(secondPos.x, secondPos.y); return; }
+        if (key == KEY_UP)    { secondPos.y -= step; second->setPosition(secondPos.x, secondPos.y); return; }
+        if (key == KEY_DOWN)  { secondPos.y += step; second->setPosition(secondPos.x, secondPos.y); return; }
         if (key == 'F')       { second->toggleFullscreen(); return; }
-        if (key == 'G')       { logNotice("tcApp") << "second window at " << p.x << ", " << p.y; return; }
+        if (key == 'G') {
+            const IVec2 p = second->getPosition();
+            logNotice("tcApp") << "second window: asked (" << secondPos.x << ", " << secondPos.y
+                               << ")  reported (" << p.x << ", " << p.y << ")";
+            return;
+        }
     }
 
     if (key == 'W') {
@@ -87,6 +90,9 @@ void tcApp::keyPressed(int key) {
             subApp = make_shared<SubApp>();
             subApp->sharedFbo = &fbo;
             second->setApp(subApp);
+            // Place it where this app thinks it is, so the arrow keys and the
+            // window agree from the first press.
+            second->setPosition(secondPos.x, secondPos.y);
         }
     }
 }
