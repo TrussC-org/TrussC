@@ -352,9 +352,14 @@ bool popTarget(RenderTarget& target, uint64_t token);
 void ensureCurrentPass();
 void parkWindowPass();
 void submitCapturePrefix();
+// Window: a capture of the current window's pixels; even a never-opened pass
+// starts so its clear and recorded prefix reach the source.
+// Target: an Fbo readback; only an open pass is parked and resumed, as with
+// Metal's transfer target, so the caller's swapchain pass state is unchanged.
+enum class CaptureSource { Window, Target };
 class CapturePrefixScope {
 public:
-    CapturePrefixScope();
+    explicit CapturePrefixScope(CaptureSource source = CaptureSource::Window);
     ~CapturePrefixScope() noexcept;
     // A failed native capture must not retry a stalled GPU slot just to resume.
     void leaveParked() noexcept { resume_ = false; }
