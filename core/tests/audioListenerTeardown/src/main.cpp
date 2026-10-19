@@ -74,6 +74,11 @@ struct ScreenRecorderTestAccess {
     static std::unique_lock<std::mutex> lockWriter(ScreenRecorder& recorder) {
         return std::unique_lock<std::mutex>(recorder.state_->writerMutex_);
     }
+    static bool admit(ScreenRecorder& recorder) { return recorder.state_->admitCapture(); }
+    static uint64_t skips(ScreenRecorder& recorder) { return recorder.state_->busySkipped_; }
+    static void finish(ScreenRecorder& recorder) {
+        recorder.state_->finishCaptureAndLog();
+    }
     static auto pendingCapture(ScreenRecorder& recorder) {
         auto state = recorder.state_;
         state->inFlight_.fetch_add(1);
@@ -676,6 +681,9 @@ TC_CORE_TEST_MAIN() {
         const size_t before = countErrors("recording still has frames in flight");
         thread stopper([&] { result = rec->stop(); returned = true; });
         const bool returnedWhileLocked = waitFor([&] { return returned.load(); }, 5000);
+        const auto refused = rec->start(fs::temp_directory_path() / "tc_refused_restart.mp4");
+        check("ScreenRecorder refuses restart while old operation is pending",
+              !refused && lifetime.lock() == internal::ScreenRecorderTestAccess::lifetime(*rec).lock());
         lock.unlock();
         stopper.join();
         check("ScreenRecorder timeout returns while a completion owns the writer lock",
@@ -687,6 +695,17 @@ TC_CORE_TEST_MAIN() {
         complete = {};
         check("ScreenRecorder late completion releases State with one timeout Error",
               lifetime.expired() && countErrors("recording still has frames in flight") == before + 1);
+    }
+
+    {
+        ScreenRecorder rec;
+        check("ScreenRecorder admits one capture operation", internal::ScreenRecorderTestAccess::admit(rec));
+        for (int tick = 0; tick < 3; ++tick)
+            check("ScreenRecorder skips busy operation before issue", !internal::ScreenRecorderTestAccess::admit(rec));
+        check("ScreenRecorder counts all busy opportunities", internal::ScreenRecorderTestAccess::skips(rec) == 3);
+        internal::ScreenRecorderTestAccess::finish(rec);
+        check("ScreenRecorder admits after terminal completion", internal::ScreenRecorderTestAccess::admit(rec));
+        internal::ScreenRecorderTestAccess::finish(rec);
     }
 
     // --- Destroy AudioRecorder from inside its own capture -------------------

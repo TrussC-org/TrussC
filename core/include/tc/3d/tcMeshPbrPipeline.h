@@ -236,9 +236,9 @@ public:
 
         // Shadow map texture array (or fallback array = never sampled because
         // the shader sees numShadowSlots == 0)
-        if (sh.count > 0 && shadowColorTexView_.id != 0) {
-            bind.views[VIEW_tc_pbr_shadowMap]      = shadowColorTexView_;
-            bind.samplers[SMP_tc_pbr_shadowMapSmp] = shadowSampler_;
+        if (sh.count > 0 && shadowStorage().colorTexture.id != 0) {
+            bind.views[VIEW_tc_pbr_shadowMap]      = shadowStorage().colorTexture;
+            bind.samplers[SMP_tc_pbr_shadowMapSmp] = shadowStorage().sampler;
         } else {
             bind.views[VIEW_tc_pbr_shadowMap]      = fallbackShadowArrayView_;
             bind.samplers[SMP_tc_pbr_shadowMapSmp] = fallbackSampler_;
@@ -377,7 +377,7 @@ public:
         // Per-window shadow key (Fix 3/5): getFrameCount() is the CURRENT
         // window's updateCount, and sh is this window's slot state.
         int liveSlotCount = (sh.frame + 1 >= getFrameCount()) ? sh.count : 0;
-        fsp.shadowMapParams[0] = static_cast<float>(shadowTexResolution_);
+        fsp.shadowMapParams[0] = static_cast<float>(shadowStorage().resolution);
         fsp.shadowMapParams[1] = static_cast<float>(liveSlotCount);
         // z flags a top-left-origin backend (Metal / D3D11 / WebGPU): the
         // shader must v-flip its shadow UV to sample the offscreen map
@@ -408,9 +408,9 @@ public:
         // composites on top. Both pass types keep the same submission order.
         PbrDrawCommand cmd{ pip, selection.generation, bind, vsp, fsp,
                             mesh.getGpuIndexCount(), mesh.getGpuVertexCount() };
-        wctx.currentTarget->deferredPbrDraws.push_back({ wctx.currentTarget->sglLayerNext, cmd });
-        wctx.currentTarget->sglLayerNext++;
-        sgl_layer(wctx.currentTarget->sglLayerNext);
+        if (!internal::appendTargetRecording(*wctx.currentTarget, wctx.currentTarget->deferredPbrDraws,
+                DeferredPbrDraw{wctx.currentTarget->sglLayerNext, cmd})) return;
+        wctx.currentTarget->advanceLayer();
     }
 
     // Submit a packaged PBR draw to the GPU. Used immediately for FBO passes and
@@ -616,8 +616,8 @@ public:
 
         // Begin shadow depth pass into this slot's array layer
         sg_pass pass = {};
-        pass.attachments.colors[0] = shadowColorAttView_[slot];
-        pass.attachments.depth_stencil = shadowDepthAttView_;
+        pass.attachments.colors[0] = shadowStorage().colorAttachments[slot];
+        pass.attachments.depth_stencil = shadowStorage().depthAttachment;
         pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
         pass.action.colors[0].clear_value = { 10000.0f, 0.0f, 0.0f, 1.0f };  // R32F: far distance
         pass.action.depth.load_action = SG_LOADACTION_CLEAR;
@@ -630,7 +630,7 @@ public:
         target.fixedPipeline = shadowRecipe_;
         target.hasFixedPipeline = true;
         target.clearAction = pass.action;
-        target.width = target.height = shadowTexResolution_;
+        target.width = target.height = shadowStorage().resolution;
         target.colorFormat = SG_PIXELFORMAT_R32F;
         target.sampleCount = 1;
         target.hasDepth = true;
@@ -663,7 +663,7 @@ public:
         target.finalize = [](void* owner) { static_cast<internal::ShadowSlotState*>(owner)->inPass = false; };
 
         // Render at the shared array resolution (max of all requested sizes)
-        sg_apply_viewport(0, 0, shadowTexResolution_, shadowTexResolution_, true);
+        sg_apply_viewport(0, 0, shadowStorage().resolution, shadowStorage().resolution, true);
         const auto selected = internal::currentTarget().pipeline(shadowRecipe_);
         if (!selected.raw.id) { sh.scope.reset(); return; }
         sg_apply_pipeline(selected.raw);
@@ -674,10 +674,12 @@ public:
     void shadowDrawMesh(const Mesh& mesh) {
         auto& sh = internal::currentWindowContext().shadow;
         if (!sh.inPass || isLineMesh(mesh.getMode())) return;
-        if (internal::currentWindowContext().currentTarget != &sh.target || !sh.target.inPass) {
+        if (internal::currentWindowContext().currentTarget != &sh.target) {
             logWarning("Shadow") << "shadowDraw rejected while a child target is active";
             return;
         }
+        internal::ensureCurrentPass();
+        if (!sh.target.inPass) return;
         mesh.uploadToGpu();
         if (mesh.getGpuVertexBuffer().id == 0) return;
 
@@ -717,7 +719,7 @@ public:
 
         int count = mesh.getGpuIndexCount() > 0 ? mesh.getGpuIndexCount() : mesh.getGpuVertexCount();
         sg_draw(0, count, 1);
-        shadowDrawCount_++;
+        shadowStorage().drawCount++;
     }
 
     void endShadowPass() {
@@ -729,7 +731,7 @@ public:
         }
         sh.scope.reset();
         sh.inPass = false;
-        shadowDrawCount_ = 0;
+        shadowStorage().drawCount = 0;
     }
 
 private:
@@ -775,18 +777,18 @@ private:
     // It is only recreated when it needs to GROW; lights requesting a smaller
     // resolution render into (and sample from) the shared larger map.
     void ensureShadowTexture(int resolution) {
-        if (resolution <= shadowTexResolution_) return;
+        if (resolution <= shadowStorage().resolution) return;
 
         // Release old resources (deferred: a deferred PBR draw recorded this
         // frame may still bind the old shadow map view/sampler)
-        internal::deferGpuDestroy(shadowColorImage_);
+        internal::deferGpuDestroy(shadowStorage().colorImage);
         for (int s = 0; s < internal::maxShadowLights; s++) {
-            internal::deferGpuDestroy(shadowColorAttView_[s]);
+            internal::deferGpuDestroy(shadowStorage().colorAttachments[s]);
         }
-        internal::deferGpuDestroy(shadowColorTexView_);
-        internal::deferGpuDestroy(shadowDepthImage_);
-        internal::deferGpuDestroy(shadowDepthAttView_);
-        internal::deferGpuDestroy(shadowSampler_);
+        internal::deferGpuDestroy(shadowStorage().colorTexture);
+        internal::deferGpuDestroy(shadowStorage().depthImage);
+        internal::deferGpuDestroy(shadowStorage().depthAttachment);
+        internal::deferGpuDestroy(shadowStorage().sampler);
 
         // R32F color target array (stores depth value for sampling), one
         // layer per shadow slot
@@ -799,20 +801,20 @@ private:
         cd.pixel_format = SG_PIXELFORMAT_R32F;
         cd.sample_count = 1;
         cd.label = "tc_shadow_color_array";
-        shadowColorImage_ = sg_make_image(&cd);
+        shadowStorage().colorImage = sg_make_image(&cd);
 
         // Per-layer attachment views for rendering...
         for (int s = 0; s < internal::maxShadowLights; s++) {
             sg_view_desc cav = {};
-            cav.color_attachment.image = shadowColorImage_;
+            cav.color_attachment.image = shadowStorage().colorImage;
             cav.color_attachment.slice = s;
-            shadowColorAttView_[s] = sg_make_view(&cav);
+            shadowStorage().colorAttachments[s] = sg_make_view(&cav);
         }
 
         // ...and one full-array texture view for sampling
         sg_view_desc ctv = {};
-        ctv.texture.image = shadowColorImage_;
-        shadowColorTexView_ = sg_make_view(&ctv);
+        ctv.texture.image = shadowStorage().colorImage;
+        shadowStorage().colorTexture = sg_make_view(&ctv);
 
         // Depth buffer (for correct depth testing during shadow pass; a
         // single 2D image reused by every slot's pass)
@@ -823,11 +825,11 @@ private:
         dd.pixel_format = SG_PIXELFORMAT_DEPTH;
         dd.sample_count = 1;
         dd.label = "tc_shadow_depth";
-        shadowDepthImage_ = sg_make_image(&dd);
+        shadowStorage().depthImage = sg_make_image(&dd);
 
         sg_view_desc dav = {};
-        dav.depth_stencil_attachment.image = shadowDepthImage_;
-        shadowDepthAttView_ = sg_make_view(&dav);
+        dav.depth_stencil_attachment.image = shadowStorage().depthImage;
+        shadowStorage().depthAttachment = sg_make_view(&dav);
 
         // Standard sampler (nearest, manual comparison in shader)
         sg_sampler_desc sd = {};
@@ -836,9 +838,9 @@ private:
         sd.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
         sd.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
         sd.label = "tc_shadow_smp";
-        shadowSampler_ = sg_make_sampler(&sd);
+        shadowStorage().sampler = sg_make_sampler(&sd);
 
-        shadowTexResolution_ = resolution;
+        shadowStorage().resolution = resolution;
     }
 
     // --- PBR pipeline state ---
@@ -852,24 +854,12 @@ private:
     bool shadowReady_{false};
     bool shadowInitialized_{false};
 
-    sg_image shadowColorImage_{};   // SG_IMAGETYPE_ARRAY, maxShadowLights layers
-    sg_view shadowColorAttView_[internal::maxShadowLights]{};  // per-layer render views
-    sg_view shadowColorTexView_{};  // full-array sampling view
-    sg_image shadowDepthImage_{};   // shared 2D depth, reused per slot pass
-    sg_view shadowDepthAttView_{};
-    sg_sampler shadowSampler_{};
-    int shadowTexResolution_{0};
+    // Q1 plugs in per-owner allocation behind the host accessor. Until then
+    // preserve the existing shared resources and allocation timing.
+    ShadowStorage& shadowStorage() const {
+        return shadowStorageForWindow(currentWindowContext());
+    }
 
-    // Transient within a single begin/end shadow pass (which completes inside
-    // one serialized window tick), so it can stay shared in the singleton.
-    int shadowDrawCount_{0};
-
-    // NOTE: the per-frame shadow SLOT state (frame epoch, slot count, current
-    // slot, owned target scope, and the per-slot VP / param
-    // arrays) is now PER-WINDOW: it lives in WindowContext::shadow
-    // (ShadowSlotState, tc/app/tcWindowContext.h). Only the GPU shadow-map
-    // array / views / sampler / pipeline above stay shared — they are reused
-    // serially across windows (see ShadowSlotState's comment).
     bool shadowOverflowWarned_{false};
     OnceGate projectorSlotWarned_;   // a projector light got no slot
     OnceGate iesSlotWarned_;         // an IES light got no slot

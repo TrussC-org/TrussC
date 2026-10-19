@@ -60,14 +60,13 @@ struct LinesVertex;
 // ---------------------------------------------------------------------------
 inline constexpr int maxLights = 8;
 inline constexpr int maxShadowLights = 4;
+static_assert(std::extent_v<decltype(ShadowStorage::colorAttachments)> == maxShadowLights,
+    "shadow storage must match the shader's slot count");
 
 // ---------------------------------------------------------------------------
-// Per-window shadow-slot state (was in the PbrPipeline singleton). The GPU
-// shadow-map array/views/sampler/pipeline STAY shared in the singleton; only
-// the per-frame slot ASSIGNMENT moves here. Window ticks run strictly
-// serialized on the main thread and each window's shadow passes + PBR flush
-// complete within its own tick, so the shared array layers can be reused
-// serially across windows with zero extra GPU memory.
+// Per-window shadow-slot state. Mutable GPU storage is selected through
+// shadowStorageForWindow(); part 1 keeps the existing shared allocation policy.
+// Q1 will supply per-owner generations through that single accessor.
 // ---------------------------------------------------------------------------
 struct ShadowSlotState {
     // Slot assignment: `frame` (the per-window updateCount at the last reset)
@@ -137,6 +136,9 @@ struct WindowContext {
     std::vector<TargetStackEntry> targetStack;
     uint64_t nextTargetToken = 1;
     uint64_t renderEpoch = 0;
+    // A capture must start/flush an unfinished frame, but must leave the
+    // completed afterFrame source intact until the next beginFrame().
+    bool framePending = true;
     // Borrowed Metal drawable rendered into this frame. Valid only until the
     // native frame callback returns; clear after afterFrame and capture drains.
     const void* lastSwapchainDrawable = nullptr;
@@ -164,6 +166,9 @@ struct WindowContext {
     float dpiScale = 1.0f;
     sg_swapchain (*acquireSwapchain)(void* user) = nullptr;
     void* acquireSwapchainUser = nullptr;
+    // Restore the native drawable before parking/reading a window. The GL
+    // adapter supplies this; other backends have a shared device context.
+    void (*activateNative)(void*) = nullptr;
 
     // --- per-window frame count ---
     // getFrameCount()/getUpdateCount() resolve through the current context.

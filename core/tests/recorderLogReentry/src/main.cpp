@@ -80,6 +80,9 @@ void VideoWriter::discardFramePlatform() {}
 bool VideoWriter::submitFramePlatform(double) { ++submits; return fault != Fault::Submit; }
 }
 namespace trussc::internal {
+struct RecorderFrameTestAccess {
+    static auto diagnostics() { return VideoWriter::Diagnostics{}; }
+};
 struct ScreenRecorderTestAccess {
     static void audio(ScreenRecorder& recorder) {
         auto& s = *recorder.state_;
@@ -101,6 +104,15 @@ struct ScreenRecorderTestAccess {
         if (failedStart) state->finishCaptureAndLog(fault == Fault::SourceLayout);
         else state->completeCapture(Readback{}, 0.0);
     }
+    static void nativeCleanup(ScreenRecorder& recorder) {
+        auto state = recorder.state_;
+        state->inFlight_ = 1;
+        auto diagnostics = RecorderFrameTestAccess::diagnostics();
+        state->completeCapture(Readback{}, 0.0, false, &diagnostics);
+        check(state->inFlight_ == 1 && !diagnostics.pending.empty(),
+              "native capture keeps slot and batches warnings until cleanup");
+        state->finishCaptureAndLog(false, &diagnostics);
+    }
     static bool complete(const ScreenRecorder& recorder) { return recorder.state_->inFlight_ == 0; }
     static constexpr auto drainTimeout() { return ScreenRecorder::State::kDrainTimeout; }
     static SaveResult stopWithCoarseSleep(ScreenRecorder& recorder) {
@@ -120,7 +132,7 @@ TC_CORE_TEST_MAIN() {
     getLogger().setLogLevel(LogLevel::Verbose);
     const auto path = fs::temp_directory_path() / "tc-recorder-log-reentry.mp4";
     using Access = internal::ScreenRecorderTestAccess;
-    enum class Site { Stop, Drain, Complete, FailedStart };
+    enum class Site { Stop, Drain, Complete, FailedStart, NativeCleanup };
     const auto run = [&](const char* name, Site site, Fault failure, bool audio,
                          bool writerAudio, bool mistake, const std::vector<std::string>& expected) {
         fault = failure;
@@ -136,11 +148,12 @@ TC_CORE_TEST_MAIN() {
         auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
             if (e.message.find("[VideoWriter]") == std::string::npos) return;
             messages.push_back(e.message);
-            if (site == Site::Complete || site == Site::FailedStart)
+            if (site == Site::Complete || site == Site::FailedStart || site == Site::NativeCleanup)
                 completeBeforeLog &= Access::complete(recorder);
             recorder.stop(); // Deliberately reenter on EVERY diagnostic, including nested close logs.
         });
         switch (site) {
+            case Site::NativeCleanup: Access::nativeCleanup(recorder); break;
             case Site::Stop: recorder.stop(); break;
             case Site::Drain: Access::afterFrame(recorder); break;
             case Site::Complete:
@@ -193,6 +206,9 @@ TC_CORE_TEST_MAIN() {
         check(submits == 0 && readbacks == (failure == Fault::CopyLayout ? 1 : 0),
               "layout rejection prevents unsafe copy and submission");
     }
+    run("native cleanup precedes layout Warning and reentrant stop", Site::NativeCleanup,
+        Fault::CopyLayout, false, false, false,
+        {"frame layout does not match the recording buffer; frame skipped", "saved 0 frames -> "});
     run("failed-start layout Warning reenters stop after completion publication", Site::FailedStart,
         Fault::SourceLayout, false, false, false,
         {"frame layout does not match the recording buffer; frame skipped", "saved 0 frames -> "});

@@ -79,6 +79,16 @@ this repeats sokol's restore; if an exception escapes `sapp_run()` and the calle
 catches it, this is the only restore. `abort()`, `TerminateProcess` and external
 kills cannot restore the console. Console input still uses `std::getline(std::cin)`.
 
+### Windows secondary D3D11 borrowed views (#910)
+
+`sapp_window_d3d11_render_view()`,
+`sapp_window_d3d11_resolve_view()` and
+`sapp_window_d3d11_depth_stencil_view()` return the window's existing
+borrowed views even outside its native tick. These pointers remain valid until
+that window's resize or destruction; the accessors acquire or retain nothing.
+This permits lazy secondary capture during foreign-window execution. Metal
+keeps its native-tick restriction for secondary drawable acquisition.
+
 ### D3D11 device loss (#258)
 
 All three Present paths (main, secondary, and occlusion test) and ResizeBuffers
@@ -270,12 +280,9 @@ sokol_gl, or present a partially rendered swapchain.
   buffers cannot let a later frame overwrite an in-flight uniform slot.
   Flush never manually signals the semaphore. The separate, synchronous
   readback blit does not participate in sokol's semaphore.
-- `_sg_mtl_end_pass()` retains each used drawable once in `pending_drawables`.
-  Only `_sg_mtl_commit()` schedules their presentation and empties the list,
-  after #599's unconditional buffer acquisition and before its commit. This
-  also works after a flush with no subsequent pass, using the final buffer
-  #599 already guarantees. A mid-frame flush never presents these drawables.
-  This presentation change applies to both Metal platforms.
+- Unmanaged Sokol drawables retain the ordinary `pending_drawables` contract.
+  TrussC window drawables use the owner-authorized records described below.
+  A mid-frame flush never presents either kind. This applies to macOS/iOS.
 
 The shared macOS/iOS Fbo caller (`platform/metal/tcFboReadback.h`, #641)
 suspends an open swapchain pass and resumes with the existing LOAD/store
@@ -328,9 +335,9 @@ in-flight semaphore before rotating uniform slots or collecting resources.
   even when no pass created one or #270's flush cleared the previous buffer.
   Existing pass frames reuse their command buffer and semaphore slot.
   Retained/unretained-reference settings remain respected.
-- #270 layers deferred presentation onto this base: between ensuring the
-  buffer and committing it, present each retained `pending_drawables` entry
-  once and clear the list. Acquisition never depends on the list being nonempty.
+- Between ensuring the buffer and committing it, present unmanaged pending
+  drawables and ready managed records once. Unready managed records survive
+  foreign commits. Acquisition never depends on either list being nonempty.
   Garbage collection, uniform-ring rotation/reset, and frame advancement still
   belong only to the real commit; flush neither duplicates nor bypasses them.
 
@@ -563,3 +570,70 @@ header-inline mutable state, or Mesa version check is added.
   main window and iOS. Window capture blits from the drawable texture, which
   Metal does not allow for a framebuffer-only texture (validation aborts with
   "sourceTexture must not be a framebufferOnly texture").
+
+### Target completion, capture prefixes and presentation (#821 PR 5, #864)
+
+All changes carry `[TrussC]` markers; no upstream Sokol API is replaced.
+
+The twelve declarations `sgl_tc_context_target_owned`, `sgl_tc_context_complete`,
+`sgl_tc_context_dependencies`, `sg_tc_submit_prefix`, `sg_tc_gl_resolve_swapchain`,
+`sg_tc_mtl_command_buffer`, `sg_tc_mtl_register_drawable`,
+`sg_tc_mtl_authorize_drawable`, `sg_tc_mtl_cancel_drawables`,
+`sg_tc_mtl_drawable_trace`, `sg_tc_mtl_set_drawable_trace`, and
+`sapp_tc_gl_make_current` are each a TrussC-internal framework seam, not app API.
+The trace typedef, setter, storage and callback emission exist only with
+`SOKOL_TC_TEST_HOOKS`; tests enable it in both the consumer and Sokol implementation.
+Production builds omit the declarations and storage and use a no-op emission helper.
+
+- `sgl_tc_context_target_owned()` opts framework-created contexts into explicit
+  CPU completion. Every device commit invalidates their upload epoch/cache;
+  `sgl_tc_context_complete()` rewinds only its argument. Ordinary sokol-gl
+  contexts keep automatic commit rewind. Pool return and teardown complete
+  only their own contexts. `sgl_tc_context_dependencies()` visits unconsumed
+  pipeline/view/sampler references for typed resource retirement, including
+  pipeline-to-shader and view-to-image dependencies in the host.
+- Metal registration retains a drawable with a stable owner ID, resource
+  generation and frame serial. Parking/end-pass leaves it unready. Only final
+  owner completion authorizes that exact frame; stale/duplicate authorization
+  fails. Ordinary commit presents/removes ready records once, retaining all
+  unready owners. Close/discard cancels the owner's records. Unmanaged Sokol
+  drawables retain automatic end-pass/commit behavior.
+  Each record retains the acquired drawable/depth/MSAA generation so the saved
+  swapchain descriptor remains valid across resize and foreign commits until
+  owner presentation/cancellation. End-pass completion retains that immutable
+  attachment array through native completion, also after owner cancellation
+  with unretained-reference command buffers. Completion threads never access
+  the mutable owner/presentation records; registration, authorization,
+  cancellation and presentation scheduling stay on the renderer thread.
+- `sg_tc_submit_prefix()` requires no open pass and submits without presenting,
+  completion listeners, device-frame advancement or uniform/stream rotation.
+  Metal commits its renderer buffer and preserves the uniform slot/offset;
+  the next buffer acquires its own normal semaphore permit. GL uses `glFlush`;
+  D3D11 uses the immediate context's `Flush`. Synchronous native capture first
+  parks the global pass and submits this prefix. Metal async staging uses
+  `sg_tc_mtl_command_buffer()` to encode its blit in the prefix, then submits
+  before rendering can overwrite the source. `sg_tc_mtl_flush()` remains the
+  synchronous between-pass submission used by Fbo readback.
+  Capture command-buffer acquisition uses a bounded ten-second semaphore wait
+  (#884), sharing command-buffer setup with the ordinary renderer throttle.
+  The macOS synchronous window wrapper also bounds completion to ten seconds,
+  owns late results and leaves the pass parked on failure rather than retrying
+  the renderer throttle while returning an error.
+- `sg_tc_gl_resolve_swapchain()` supplies an explicit destination to the shared
+  end-pass resolve machinery. It shares native `V3D ` detection, the activation
+  Notice and one pre-first-MSAA-resolve flush with attachment resolves. Scissor
+  is disabled before full-extent blits and restored enabled; READ/DRAW bindings
+  and source read-buffer selection are restored before return. No independent
+  platform resolve or `glFinish` is added.
+- `sapp_tc_gl_make_current()` restores the GLX drawable around nested window
+  execution. The host coordinator parks the outgoing pass before selecting
+  the incoming window and resumes its attachments with LOAD on the next draw.
+
+Part 1 installs no completed-frame snapshot allocation or per-window shadow
+allocation. `windowCaptureSource`/`finishWindowCaptureSource` and
+`shadowStorageForWindow` are the respective host integration interfaces.
+Presentation authorization follows final owner pass completion today; the Q2
+copy will be inserted before that authorization. Existing backend capture
+sources remain in use, including their existing presentation-time limitations.
+Native Metal presentation/API validation, Windows debug-layer execution and
+Pi V3D swapchain pixels remain required device checks.

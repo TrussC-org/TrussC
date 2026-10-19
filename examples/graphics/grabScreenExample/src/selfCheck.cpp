@@ -10,7 +10,7 @@ void check(bool passed, const char* label) {
     else { logError("self-check") << "FAIL: " << label; ++failures; }
 }
 
-bool near(Color actual, Color expected) {
+bool nearColor(Color actual, Color expected) {
     return abs(actual.r - expected.r) < 0.02f &&
            abs(actual.g - expected.g) < 0.02f &&
            abs(actual.b - expected.b) < 0.02f;
@@ -30,9 +30,9 @@ public:
                 // draw() uses window coordinates; readback uses framebuffer pixels.
                 int x = 100 * getFramebufferWidth() / getWidth();
                 int y = 150 * getFramebufferHeight() / getHeight();
-                check(near(pixels_.getColor(x, y), Color(1, 0, 0)),
+                check(nearColor(pixels_.getColor(x, y), Color(1, 0, 0)),
                       "rectangle interior is red");
-                check(near(pixels_.getColor(10, getFramebufferHeight() - 10),
+                check(nearColor(pixels_.getColor(10, getFramebufferHeight() - 10),
                            Color(0.08f, 0.1f, 0.14f)),
                       "background color and readback orientation match");
             }

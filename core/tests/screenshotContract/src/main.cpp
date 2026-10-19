@@ -182,6 +182,52 @@ TC_CORE_TEST_MAIN() {
 #else
     std::printf("-- native build --\n");
 
+    // No GPU is initialized: rejection must happen before any backend call,
+    // including update nested in an otherwise open draw phase.
+    Pixels outside;
+    outside.allocate(1, 1, 4);
+    outside.getData()[0] = 73;
+    std::string phaseWarning;
+    bool reentryRejected = false;
+    auto phaseLog = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level != LogLevel::Warning || e.message.rfind("[Screenshot]", 0) != 0) return;
+        phaseWarning = e.message;
+        reentryRejected = !grabScreen(outside);
+    });
+    {
+        internal::EntryStackGuard draw(internal::AppEntry::Draw);
+        internal::EntryStackGuard update(internal::AppEntry::Update);
+        check("update inside a frame returns false", !grabScreen(outside));
+        check("repeated update returns false", !grabScreen(outside));
+    }
+    check("update emits exactly one Warning and no Error", screenshotWarnings == 1 && screenshotErrors == 0);
+    check("Warning points to afterFrame and saveScreenshot", phaseWarning.find("events().afterFrame") != std::string::npos &&
+          phaseWarning.find("saveScreenshot()") != std::string::npos);
+    check("Warning reentry returns false without another Warning", reentryRejected && screenshotWarnings == 1);
+    for (auto phase : {internal::AppEntry::Setup, internal::AppEntry::Prelude,
+                       internal::AppEntry::Event, internal::AppEntry::Exit}) {
+        internal::EntryStackGuard guard(phase);
+        check("other non-frame phase returns false", !grabScreen(outside));
+    }
+    check("unscoped call returns false after guard restoration", !grabScreen(outside));
+    check("rejection preserves output Pixels", outside.getWidth() == 1 && outside.getData()[0] == 73);
+    check("all outside calls share one Warning", screenshotWarnings == 1 && screenshotErrors == 0);
+    phaseLog = EventListener{};
+    // A different window gets its own warning, without inheriting A's Draw.
+    {
+        internal::EntryStackGuard draw(internal::AppEntry::Draw);
+        internal::WindowContext otherWindow;
+        internal::RenderContext otherRender;
+        otherWindow.render = &otherRender;
+        auto* previous = internal::currentWindowCtx();
+        internal::restoreWindowContext(&otherWindow);
+        check("another window does not inherit the draw phase", !grabScreen(outside));
+        check("another window repeats without another Warning", !grabScreen(outside));
+        internal::restoreWindowContext(previous);
+    }
+    check("warning is once per window", screenshotWarnings == 2 && screenshotErrors == 0);
+    const int warningsBeforeSave = screenshotWarnings;
+
     // Sandbox under the OS temp dir; the nested folder does not exist yet, so
     // saveScreenshot() has to create it.
     const fs::path sandbox = fs::temp_directory_path() / "tc_screenshotContract_test";
@@ -195,7 +241,7 @@ TC_CORE_TEST_MAIN() {
           queue.size() == 1 && queue.front() == target);
     check("the destination folder was created", fs::is_directory(target.parent_path()));
     check("no screenshot warnings or errors logged",
-          screenshotWarnings == 0 && screenshotErrors == 0);
+          screenshotWarnings == warningsBeforeSave && screenshotErrors == 0);
 
     queue.clear();
 

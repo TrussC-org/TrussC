@@ -22,6 +22,7 @@
 #include <GL/glext.h>   // glBindFramebuffer / GL_READ_FRAMEBUFFER (per-window capture)
 
 #include "../gl/tcPixelPack.h"
+#include "../gl/tcGLReadbackState.h"
 
 namespace trussc {
 
@@ -192,28 +193,22 @@ std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowCont
 }
 
 bool captureWindow(Pixels& outPixels) {
-    // Read back the CURRENT window's framebuffer. A secondary window's context
-    // records its own swapchain (framebuffer id + size) in lastSwapchain, and the
-    // capture runs inside that window's tick while its GL drawable is current, so
-    // reading its framebuffer at its own size is correct. The main window keeps
-    // using sapp_width()/height() and the default framebuffer — byte-identical.
-    auto& winCtx = internal::currentWindowContext();
-    int width, height;
-    if (!winCtx.isMain && winCtx.fbWidth > 0 && winCtx.fbHeight > 0) {
-        width  = winCtx.fbWidth;
-        height = winCtx.fbHeight;
-    } else {
-        width  = sapp_width();
-        height = sapp_height();
-    }
+    if (!sg_isvalid()) return false;
+    if (internal::hasPublicFboActivation()) return false;
+    internal::CapturePrefixScope capturePhase;
+    const auto source = internal::windowCaptureSource();
+    const int width = source.width, height = source.height;
 
-    if (width <= 0 || height <= 0) {
+    size_t rowBytes = 0, totalBytes = 0;
+    if (!internal::captureLayout(width, height, 4, rowBytes, totalBytes)) {
         logError("Screenshot") << "Invalid window dimensions";
         return false;
     }
 
     mcp::internal::reconcileWindowCapture(size_t(width), size_t(height));
 
+    internal::GLReadbackState nativeState;
+    nativeState.bindSource(source.swapchain.gl.framebuffer);
     // Allocate pixel buffer
     const auto layout = internal::recorderPackedLayout(width, height, internal::RecorderPixelFormat::RGBA8);
     // Bound (abi): packed capture bytes must fit size_t. Overflow drops the recorder frame and is counted.
@@ -221,14 +216,6 @@ bool captureWindow(Pixels& outPixels) {
     outPixels.allocate(width, height, 4);
     // Bound (abi): the pixel allocation must hold every captured row. Overflow drops the recorder frame and is counted.
     if (!outPixels.getData() || outPixels.getTotalBytes() < layout.byteSize) return false;
-
-    // Bind the window's swapchain framebuffer as the read source so the readback
-    // targets THIS window's surface, not whatever was last bound (main window's
-    // framebuffer id is 0 / lastSwapchain unset for capture-only frames, so this
-    // is a no-op there).
-    if (!winCtx.isMain) {
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, winCtx.lastSwapchain.gl.framebuffer);
-    }
 
     // Read pixels from OpenGL framebuffer
     {

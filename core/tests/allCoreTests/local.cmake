@@ -83,3 +83,8 @@ if("trusscliPresets" IN_LIST _TC_CORE_TEST_NAMES)
     set_property(SOURCE "${_TC_CORE_TESTS_DIR}/trusscliPresets/src/main.cpp"
         APPEND PROPERTY INCLUDE_DIRECTORIES "${_TC_TRUSSCLI_SRC}")
 endif()
+
+if("captureSubmission" IN_LIST _TC_CORE_TEST_NAMES)
+    # Match the fixture's test-only declarations in the Sokol implementation.
+    target_compile_definitions(TrussC PRIVATE SOKOL_TC_TEST_HOOKS)
+endif()

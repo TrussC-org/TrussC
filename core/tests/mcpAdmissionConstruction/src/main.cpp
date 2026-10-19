@@ -38,9 +38,21 @@ void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 #include <GL/gl.h>
 namespace {
 int mainCaptureWidth = 32, mainCaptureHeight = 32;
-bool realCapture = false;
+bool realCapture = false, modeledCapture = false;
+int capturePrefixes = 0;
 int reservationReads = -1, dimensionReads = 0, sourceWidth = 0, sourceHeight = 0, pixelReads = 0;
 size_t readbackWorking = 0;
+}
+// Headless capture models a valid renderer and its submit boundary. Display
+// modes forward both seams to the real renderer, as they do native dimensions.
+extern "C" bool __real_sg_isvalid();
+extern "C" bool __wrap_sg_isvalid() {
+    return modeledCapture || __real_sg_isvalid();
+}
+extern "C" void __real_sg_tc_submit_prefix();
+extern "C" void __wrap_sg_tc_submit_prefix() {
+    if (realCapture) __real_sg_tc_submit_prefix();
+    else ++capturePrefixes;
 }
 extern "C" int __real_sapp_width();
 extern "C" int __real_sapp_height();
@@ -818,11 +830,12 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         std::error_code ec;
         fs::remove(extentPath, ec);
     }
+    modeledCapture = true;
     for (const char* name : {"tc_get_screenshot", "tc_analyze_image", "tc_save_screenshot"}) {
         const bool save = std::string(name) == "tc_save_screenshot";
         for (int extent : {2048, 32, 64}) {
             dimensions(32, 32);
-            dimensionReads = pixelReads = 0;
+            dimensionReads = pixelReads = capturePrefixes = 0;
             readbackWorking = 0;
             reservationReads = save ? 2 : 1; // enqueue + drain for save; drain for get/analyze
             sourceWidth = sourceHeight = extent;
@@ -842,6 +855,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             bool error = false;
             if (ready) error = toolError(json::parse(future.get()()));
             tracking = false;
+            check("modeled capture submits its renderer prefix", capturePrefixes == 1);
             if (extent == 2048) {
                 check("source extent above allowance returns error reply", ready && error);
                 check("source extent rejection increments Working once", admissionRejections(AdmissionStore::Working) == before + 1);
@@ -869,6 +883,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         check("application capture without a budget succeeds", captureWindow(pixels) && pixels.getWidth() == 32);
         check("application capture leaves Working admission unchanged", workingMemory() == 0 && admissionRejections(AdmissionStore::Working) == before);
     }
+    modeledCapture = false;
     // Shutdown also releases the deferred producer and its credits.
     dimensions(32, 32);
     resetHttpChannel();

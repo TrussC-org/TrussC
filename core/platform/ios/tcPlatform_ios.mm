@@ -161,13 +161,12 @@ std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowCont
 }
 
 bool captureWindow(Pixels& outPixels) {
-    // Read back the drawable this frame ACTUALLY rendered into (recorded by the
-    // swapchain pass). NOT sapp_get_swapchain() — that advances to the next,
-    // unrendered drawable, scrambling captures on GPU-heavy frames. Fall back
-    // only before a pass or outside its native frame: frame-end cleanup clears
-    // the borrowed pointer. (Mirrors macOS.)
-    const void* drawablePtr = internal::currentWindowContext().lastSwapchainDrawable;
-    if (!drawablePtr) drawablePtr = sapp_get_swapchain().metal.current_drawable;
+    if (!sg_isvalid()) return false;
+    if (internal::hasPublicFboActivation()) return false;
+    internal::CapturePrefixScope capturePhase;
+    // Select only this native tick's rendered drawable. The host clears the
+    // borrowed pointer at frame end; this job owns its texture until cleanup.
+    const void* drawablePtr = internal::windowCaptureSource().drawable;
     id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)drawablePtr;
     if (!drawable) {
         logError() << "[Screenshot] Failed to get Metal drawable";
@@ -208,11 +207,9 @@ bool captureWindow(Pixels& outPixels) {
         return false;
     }
 
-    static id<MTLCommandQueue> s_blitQueue = nil;
-    if (!s_blitQueue || s_blitQueue.device != device) {
-        s_blitQueue = [device newCommandQueue];
-    }
-    id<MTLCommandBuffer>      cmdBuf  = [s_blitQueue commandBuffer];
+    id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)sg_mtl_command_queue();
+    if (!queue || queue.device != device) return false;
+    id<MTLCommandBuffer> cmdBuf = [queue commandBuffer];
     id<MTLBlitCommandEncoder> blitEnc = [cmdBuf blitCommandEncoder];
     [blitEnc copyFromTexture:srcTexture
                  sourceSlice:0 sourceLevel:0
@@ -224,6 +221,7 @@ bool captureWindow(Pixels& outPixels) {
     [blitEnc endEncoding];
     [cmdBuf commit];
     [cmdBuf waitUntilCompleted];
+    if (cmdBuf.status != MTLCommandBufferStatusCompleted) return false;
 
     MTLRegion region = MTLRegionMake2D(0, 0, width, height);
     NSUInteger bytesPerRow = layout.rowBytes;

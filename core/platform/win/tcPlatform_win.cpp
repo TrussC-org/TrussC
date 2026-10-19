@@ -16,6 +16,7 @@
 #include <windows.h>
 #include <shellscalingapi.h>
 #include <d3d11.h>
+#include "tcCaptureTrace_win.h"
 
 // sokol_app のウィンドウ取得
 #include "sokol_app_tc.h"
@@ -249,9 +250,34 @@ fs::path internal::platformAppBundlePath() {
 // ---------------------------------------------------------------------------
 // captureWindow - 現在のウィンドウをキャプチャ
 // ---------------------------------------------------------------------------
+namespace {
+internal::D3D11CaptureTraceHook captureTraceHook = nullptr;
+struct CaptureTraceScope {
+    internal::D3D11CaptureTrace trace;
+    internal::D3D11CaptureTraceHook hook;
+    CaptureTraceScope() : hook(captureTraceHook) {
+        const auto& ctx = internal::currentWindowContext();
+        if (ctx.isMain) hook = nullptr;
+        if (!hook) return;
+        trace.isMain = ctx.isMain;
+        trace.fbWidth = ctx.fbWidth; trace.fbHeight = ctx.fbHeight;
+        trace.lastWidth = ctx.lastSwapchain.width; trace.lastHeight = ctx.lastSwapchain.height;
+        trace.lastFormat = int(ctx.lastSwapchain.color_format); trace.lastSamples = ctx.lastSwapchain.sample_count;
+        trace.lastRenderView = ctx.lastSwapchain.d3d11.render_view;
+        trace.lastResolveView = ctx.lastSwapchain.d3d11.resolve_view;
+    }
+    ~CaptureTraceScope() { if (hook) hook(trace); }
+};
+}
+void internal::setD3D11CaptureTraceForTests(D3D11CaptureTraceHook hook) {
+    captureTraceHook = hook;
+}
+
 std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
-    const void* view = !ctx.isMain ? ctx.lastSwapchain.d3d11.render_view : nullptr;
-    if (!view) view = sapp_get_swapchain().d3d11.render_view;
+    // Acquisition-free estimate, also before B's first pass or after resize.
+    // lastSwapchain may still refer to the previous native resource generation.
+    if (!ctx.isMain) return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
+    const void* view = sapp_get_swapchain().d3d11.render_view;
     if (view) {
         ID3D11Resource* resource = nullptr;
         ((ID3D11RenderTargetView*)view)->GetResource(&resource);
@@ -267,23 +293,17 @@ std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowCont
             }
         }
     }
-    if (!ctx.isMain) return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
     return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
 }
 
 bool captureWindow(Pixels& outPixels) {
-    // Pick the render-target view of the CURRENT window: a secondary window's
-    // context records its own swapchain in lastSwapchain (beginSwapchainPassInternal),
-    // so its screenshot / recording reads back ITS surface. The main window has no
-    // per-window swapchain recorded here for capture-only frames, so it keeps using
-    // sapp_get_swapchain() — byte-identical to the previous behavior.
-    const void* renderView = nullptr;
-    auto& winCtx = internal::currentWindowContext();
-    if (!winCtx.isMain && winCtx.lastSwapchain.d3d11.render_view) {
-        renderView = winCtx.lastSwapchain.d3d11.render_view;
-    } else {
-        renderView = sapp_get_swapchain().d3d11.render_view;
-    }
+    if (!sg_isvalid()) return false;
+    if (internal::hasPublicFboActivation()) return false;
+    internal::CapturePrefixScope capturePhase;
+    CaptureTraceScope diagnostic;
+    const auto source = internal::windowCaptureSource();
+    const void* renderView = source.swapchain.d3d11.render_view;
+    diagnostic.trace.selectedView = renderView;
     if (!renderView) {
         logError() << "[Screenshot] D3D11 render target view is null";
         return false;
@@ -311,8 +331,12 @@ bool captureWindow(Pixels& outPixels) {
     // テクスチャの情報を取得
     D3D11_TEXTURE2D_DESC desc;
     backBuffer->GetDesc(&desc);
+    diagnostic.trace.selectedTexture = backBuffer;
+    diagnostic.trace.width = desc.Width; diagnostic.trace.height = desc.Height;
+    diagnostic.trace.format = unsigned(desc.Format); diagnostic.trace.samples = desc.SampleDesc.Count;
     try {
         mcp::internal::reconcileWindowCapture(desc.Width, desc.Height);
+        diagnostic.trace.reconciledWidth = desc.Width; diagnostic.trace.reconciledHeight = desc.Height;
     } catch (...) {
         backBuffer->Release();
         throw;
@@ -404,8 +428,13 @@ bool captureWindow(Pixels& outPixels) {
         return false;
     }
 
-    // Pixels を確保
-    outPixels.allocate(width, height, 4);
+    // Pixels allocation may fail after Map; always release that native lease.
+    try { outPixels.allocate(width, height, 4); }
+    catch (const std::bad_alloc&) {
+        context->Unmap(stagingTexture, 0); stagingTexture->Release();
+        logError("Screenshot") << "pixel allocation failed";
+        return false;
+    }
     unsigned char* dst = outPixels.getData();
     size_t mappedBytes = 0;
     // Bound (abi): mapped D3D11 rows and destination capacity must cover the capture. Overflow drops the recorder frame and is counted.
@@ -451,6 +480,8 @@ bool captureWindow(Pixels& outPixels) {
     context->Unmap(stagingTexture, 0);
     stagingTexture->Release();
 
+    diagnostic.trace.succeeded = true;
+    diagnostic.trace.pixelWidth = outPixels.getWidth(); diagnostic.trace.pixelHeight = outPixels.getHeight();
     return true;
 }
 
