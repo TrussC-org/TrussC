@@ -6,10 +6,13 @@
 #include <string>
 #include <vector>
 
-// Include the production adapter to exercise its private dispatcher without
-// opening an X11 window. Its Window methods satisfy the static library link.
-#if defined(__linux__) && defined(SOKOL_GLCORE) && !defined(__ANDROID__)
-#include "../../../platform/linux/tcWindowLinux.cpp"
+// Private adapter seam, declared only here: no native window or OS input.
+#if (defined(__APPLE__) && TARGET_OS_OSX) || defined(_WIN32) || \
+    (defined(__linux__) && defined(SOKOL_GLCORE) && !defined(__ANDROID__))
+#define TC_TEST_SECONDARY_DISPATCH
+namespace trussc::internal {
+void dispatchSecondaryWindowEventForTests(const sapp_event* ev, Window& win);
+}
 #endif
 
 using namespace tc;
@@ -61,6 +64,18 @@ bool moveBitsSupported() {
 #endif
 }
 
+void printMoveBitsSkip() {
+#if defined(__APPLE__) && TARGET_OS_OSX
+    std::puts("SKIP: move-bit recovery (macOS moves carry no button bits)");
+#elif defined(__ANDROID__)
+    std::puts("SKIP: move-bit recovery (Android uses touch events)");
+#elif defined(__APPLE__) && TARGET_OS_IPHONE
+    std::puts("SKIP: move-bit recovery (iOS uses touch events)");
+#else
+    std::puts("SKIP: move-bit recovery (backend has no reliable move button bits)");
+#endif
+}
+
 void feedTouch(sapp_event_type type) {
     sapp_event e{};
     e.type = type;
@@ -71,11 +86,11 @@ void feedTouch(sapp_event_type type) {
     internal::_event_cb(&e);
 }
 
-#if defined(__linux__) && defined(SOKOL_GLCORE) && !defined(__ANDROID__)
+#ifdef TC_TEST_SECONDARY_DISPATCH
 // Like windowSetApp's stand-in: permit real setApp() without creating an OS
 // window, and remove the stand-in before the platform destructor runs.
 struct HeadlessWindow : tc::Window {
-    AdapterState standIn;
+    int standIn = 0; // setApp() needs an open Window; dispatch never reads native_
     HeadlessWindow() { native_ = &standIn; }
     ~HeadlessWindow() { native_ = nullptr; }
 };
@@ -85,13 +100,13 @@ struct Fixture {
     std::shared_ptr<TestApp> app = std::make_shared<TestApp>();
     std::shared_ptr<Probe> probe = std::make_shared<Probe>();
     internal::WindowContext* previous = internal::currentWindowCtx();
-#if defined(__linux__) && defined(SOKOL_GLCORE) && !defined(__ANDROID__)
+#ifdef TC_TEST_SECONDARY_DISPATCH
     std::unique_ptr<HeadlessWindow> window;
 #endif
     explicit Fixture(bool secondary) {
         app->RectNode::setSize(100, 100);
         app->addChild(probe);
-#if defined(__linux__) && defined(SOKOL_GLCORE) && !defined(__ANDROID__)
+#ifdef TC_TEST_SECONDARY_DISPATCH
         if (secondary) {
             window = std::make_unique<HeadlessWindow>();
             window->setApp(app);
@@ -109,7 +124,7 @@ struct Fixture {
         ctx.mousePressed = false; ctx.mouseButton = -1;
     }
     ~Fixture() {
-#if defined(__linux__) && defined(SOKOL_GLCORE) && !defined(__ANDROID__)
+#ifdef TC_TEST_SECONDARY_DISPATCH
         if (window) internal::WindowRequestAccess::endApp(*window);
 #endif
         internal::currentWindowCtx() = previous;
@@ -117,12 +132,12 @@ struct Fixture {
     }
     void send(sapp_event_type type, int button = SAPP_MOUSEBUTTON_LEFT,
               unsigned int modifiers = 0, float x = 10, float y = 20) {
-#if defined(__linux__) && defined(SOKOL_GLCORE) && !defined(__ANDROID__)
+#ifdef TC_TEST_SECONDARY_DISPATCH
         if (window) {
             sapp_event e{};
             e.type = type; e.mouse_button = static_cast<sapp_mousebutton>(button);
             e.modifiers = modifiers; e.mouse_x = x; e.mouse_y = y;
-            dispatchWindowEvent(&e, sapp_window{0}, window.get(), window->context());
+            internal::dispatchSecondaryWindowEventForTests(&e, *window);
             return;
         }
 #endif
@@ -265,7 +280,7 @@ void multiScenario(int kind, bool secondary) {
           f.app->drags == appDrags && f.probe->drags == nodeDrags && f.app->moves == appMoves + 1);
 }
 
-#if defined(__linux__) && defined(SOKOL_GLCORE) && !defined(__ANDROID__)
+#ifdef TC_TEST_SECONDARY_DISPATCH
 void secondaryLeaveScenario(bool focusLoss) {
     Fixture f(true);
     auto& ctx = internal::currentWindowContext();
@@ -298,6 +313,8 @@ TC_CORE_TEST_MAIN() {
     internal::appMouseReleasedFunc = [](const MouseEventArgs& e) { activeApp->handleMouseReleased(e); };
     internal::appMouseMovedFunc = [](const internal::MouseEventRaw& e) { activeApp->handleMouseMoved(e); };
     internal::appMouseDraggedFunc = [](const internal::MouseEventRaw& e) { activeApp->handleMouseDragged(e); };
+    // One line covers all gated move-bit scenarios, in either dispatch path.
+    if (!moveBitsSupported()) printMoveBitsSkip();
     const unsigned int bits[] = {SAPP_MODIFIER_LMB, SAPP_MODIFIER_RMB, SAPP_MODIFIER_MMB};
     for (int button = 0; button < 3; ++button) {
         for (int kind = 0; kind < 5; ++kind) {
@@ -311,13 +328,28 @@ TC_CORE_TEST_MAIN() {
         if ((kind == 3 || kind == 4) && !moveBitsSupported()) continue;
         multiScenario(kind, false);
     }
-#if defined(__linux__) && defined(SOKOL_GLCORE) && !defined(__ANDROID__)
+#ifdef TC_TEST_SECONDARY_DISPATCH
     for (int button = 0; button < 3; ++button)
-        for (int kind = 0; kind < 5; ++kind)
+        for (int kind = 0; kind < 5; ++kind) {
+            if (kind == 1 && !moveBitsSupported()) continue;
             scenario(kind, button, bits[button], true);
-    for (int kind = 0; kind < 6; ++kind) multiScenario(kind, true);
+        }
+    for (int kind = 0; kind < 6; ++kind) {
+        if ((kind == 3 || kind == 4) && !moveBitsSupported()) continue;
+        multiScenario(kind, true);
+    }
     secondaryLeaveScenario(true);
-    secondaryLeaveScenario(false);
+    if (moveBitsSupported()) secondaryLeaveScenario(false);
+#elif defined(__EMSCRIPTEN__)
+    std::puts("SKIP: secondary-window dispatch (Web has no secondary-window adapter)");
+#elif defined(__ANDROID__)
+    std::puts("SKIP: secondary-window dispatch (Android has no secondary-window adapter)");
+#elif defined(__APPLE__) && TARGET_OS_IPHONE
+    std::puts("SKIP: secondary-window dispatch (iOS has no secondary-window adapter)");
+#elif defined(__linux__)
+    std::puts("SKIP: secondary-window dispatch (Linux backend requires GLCORE)");
+#else
+    std::puts("SKIP: secondary-window dispatch (no adapter for this platform/backend)");
 #endif
     internal::appMousePressedFunc = nullptr;
     internal::appMouseReleasedFunc = nullptr;

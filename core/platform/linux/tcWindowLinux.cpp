@@ -324,6 +324,14 @@ void windowClosed(sapp_window swin, void* user) {
 // ---------------------------------------------------------------------------
 namespace trussc {
 
+// Internal headless-test seam. The caller makes win's context current; an
+// invalid native handle uses the backend's unit DPI without creating a window.
+namespace internal {
+void dispatchSecondaryWindowEventForTests(const sapp_event* ev, Window& win) {
+    dispatchWindowEvent(ev, sapp_window{0}, &win, win.context());
+}
+} // namespace internal
+
 Window::~Window() { teardown(); }
 
 // A request (see tcWindow.h): the backend calls close_cb -> teardown() at its
