@@ -3255,18 +3255,51 @@ related = ["EaseType", "EaseMode", "Tween<T>", "easeIn", "easeOut", "easeInOut"]
 ["EasyCam"]
 keywords = ["camera", "orbit", "trackball", "viewport", "of easycam"]
 of = ["ofEasyCam"]
-description.en = "3D camera with mouse control"
-description.ja = "マウス操作対応3Dカメラ"
-description.ko = "마우스 조작 가능한 3D 카메라"
+description.en = "A 3D orbit camera with optional mouse control."
+description.ja = "マウス操作に対応した3D周回カメラ。"
+description.ko = "마우스 조작을 지원하는 3D 궤도 카메라이다."
+details.en = '''
+- The camera looks at a target from a specified distance; azimuth selects the viewing direction around the up axis, and elevation selects the height of the view. A quaternion stores the orientation and allows rotation over the poles.
+- Initially, the target is `(0, 0, 0)`, the up axis is `(0, 1, 0)`, the distance is `400`, and the orientation is the identity quaternion. Azimuth and elevation are zero, placing the camera at `(0, 0, 400)`.
+- Perspective projection is initially selected, with a field of view of `0.785398` radians, a near clipping distance of `0.1`, and a far clipping distance of `10000`. Mouse input is initially disabled, and no control area is set.
+- See `EasyCam::begin` for drawing scopes, `EasyCam::enableMouseInput` for mouse controls, `EasyCam::setAzimuth` for angle conventions, and `EasyCam::enableOrtho` for orthographic projection.
+'''
+details.ja = '''
+- 注視点から指定した距離にカメラを配置します。方位角は上方向の軸を中心とする見る方向を、仰角は見下ろす高さを指定します。姿勢はクォータニオンで保持され、極を越えて回転できます。
+- 初期値は、注視点が `(0, 0, 0)`、上方向の軸が `(0, 1, 0)`、距離が `400`、姿勢が単位クォータニオンです。方位角と仰角はともにゼロで、カメラ位置は `(0, 0, 400)` になります。
+- 初期状態は透視投影で、視野角は `0.785398` ラジアン、近クリップ距離は `0.1`、遠クリップ距離は `10000` です。マウス入力は無効で、操作領域は設定されていません。
+- 描画範囲は `EasyCam::begin`、マウス操作は `EasyCam::enableMouseInput`、角度の規約は `EasyCam::setAzimuth`、正射影は `EasyCam::enableOrtho` を参照してください。
+'''
+details.ko = '''
+- 카메라를 주시점에서 지정한 거리만큼 떨어진 곳에 배치합니다. 방위각은 위쪽 축을 중심으로 보는 방향을, 고도각은 내려다보는 높이를 지정합니다. 자세는 쿼터니언으로 저장하며 극을 넘어 회전할 수 있습니다.
+- 초기값은 주시점이 `(0, 0, 0)`, 위쪽 축이 `(0, 1, 0)`, 거리가 `400`, 자세가 단위 쿼터니언입니다. 방위각과 고도각은 모두 0이며 카메라 위치는 `(0, 0, 400)`이 됩니다.
+- 초기 상태는 원근 투영이며 시야각은 `0.785398` 라디안, 근거리 클리핑 거리는 `0.1`, 원거리 클리핑 거리는 `10000`입니다. 마우스 입력은 비활성화되어 있으며 조작 영역은 설정되어 있지 않습니다.
+- 그리기 범위는 `EasyCam::begin`, 마우스 조작은 `EasyCam::enableMouseInput`, 각도 규약은 `EasyCam::setAzimuth`, 정사영은 `EasyCam::enableOrtho`를 참조하세요.
+'''
 of_category = "camera-types"
-related = ["setupScreenPerspective", "worldToScreen", "Ray"]
+related = ["setupScreenPerspective", "worldToScreen", "Ray", "EasyCam::begin", "EasyCam::enableMouseInput", "EasyCam::enableOrtho"]
+snippet = '''
+EasyCam camera;
+void tcApp::setup() {
+    camera.enableMouseInput();
+}
+'''
 
 ["EasyCam::Modifier"]
 keywords = ["shift", "ctrl", "alt", "camera", "gate", "drag"]
-description.en = "Modifier key that must be held for EasyCam mouse input (orbit / pan / zoom), so the camera can share the mouse with scene interaction"
-description.ja = "EasyCam のマウス入力（オービット / パン / ズーム）に必要な修飾キー。カメラとシーン操作でマウスを共有するために使う"
-description.ko = "EasyCam 마우스 입력(오비트 / 팬 / 줌)에 필요한 수정자 키. 카메라와 씬 조작이 마우스를 공유할 수 있게 한다"
-related = ["EasyCam::setDragModifier", "EasyCam::getDragModifier"]
+description.en = "Specifies a modifier key for camera mouse control."
+description.ja = "カメラのマウス操作に必要な修飾キーを指定する。"
+description.ko = "카메라 마우스 조작에 필요한 수정자 키를 지정한다."
+details.en = '''
+- Pass a value such as `EasyCam::Modifier::Shift` to `setDragModifier()` to share the mouse with scene interaction; see `EasyCam::enableMouseInput` for when the modifier is checked.
+'''
+details.ja = '''
+- `EasyCam::Modifier::Shift` などを `setDragModifier()` に渡すと、カメラ操作とシーン操作でマウスを使い分けられます。修飾キーを確認するタイミングは `EasyCam::enableMouseInput` を参照してください。
+'''
+details.ko = '''
+- `EasyCam::Modifier::Shift` 등을 `setDragModifier()`에 전달하면 카메라 조작과 씬 조작에서 마우스를 나누어 사용할 수 있습니다. 수정자 키를 확인하는 시점은 `EasyCam::enableMouseInput`을 참조하세요.
+'''
+related = ["EasyCam::setDragModifier", "EasyCam::getDragModifier", "EasyCam::enableMouseInput"]
 value_desc.None.en = "No modifier — plain drags control the camera (default)"
 value_desc.None.ja = "修飾キー不要 — そのままのドラッグでカメラが動く（デフォルト）"
 value_desc.None.ko = "수정자 없음 — 그냥 드래그하면 카메라가 움직인다(기본값)"
@@ -3286,319 +3319,981 @@ value_desc.Super.ko = "플랫폼 키(Cmd / Win)를 누른 채로 카메라 조�
 ["EasyCam::begin"]
 category = "graphics_camera"
 keywords = ["start", "bind", "enter", "render to"]
-description.en = "Apply camera transform (start 3D mode)"
-description.ja = "カメラ視点を適用（3Dモード開始）"
-description.ko = "카메라 변환을 적용 (3D 모드 시작)"
-related = ["setupScreenPerspective", "pushMatrix"]
+description.en = "Applies the camera for 3D drawing."
+description.ja = "3D描画にカメラを適用する。"
+description.ko = "3D 그리기에 카메라를 적용한다."
+details.en = '''
+- Call `begin()`, draw the scene, then call `end()` on the same camera and render target. Scopes may be nested and must end in reverse order.
+- Applies the camera view and the selected perspective or orthographic projection, using the full render target size for the aspect ratio. Window sizes use logical pixels unless pixel-perfect mode is enabled; Fbo sizes use attachment pixels.
+- Selects the 3D pipeline with alpha blending, depth testing, and depth writing, without changing the logical blend-mode or depth-test flags. The current model transform remains in effect.
+- Saves the previous camera state and selected pipeline. After `end()`, drawing uses that previous camera, so 2D drawing can follow when the saved state was the normal screen view.
+- Updates the matrices used by `worldToScreen` and records the camera context for mouse picking of nodes drawn within the scope.
+- Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (popStyle(), resetStyle(), and each child Node's draw turn depth testing off inside the camera scope unless enableDepthTest() is enabled).
+'''
+details.ja = '''
+- `begin()`、シーンの描画、`end()` の順に呼び出してください。開始時と同じカメラと描画先で終了します。入れ子にでき、終了は開始と逆の順序で行います。
+- カメラのビューと、選択されている透視投影または正射影を適用します。アスペクト比には描画先全体のサイズを使います。ウィンドウでは pixelPerfect が有効な場合を除いて論理ピクセル、Fbo ではアタッチメントのピクセルを使います。
+- アルファブレンド、深度テスト、深度書き込みを行う3Dパイプラインを選択します。ブレンドモードと深度テストの論理フラグは変更せず、現在のモデル変換も維持します。
+- 直前のカメラ状態と選択パイプラインを保存します。`end()` 後はそのカメラに戻るため、保存した状態が通常の画面表示なら、そのまま2D描画を続けられます。
+- `worldToScreen` が使う行列を更新し、範囲内で描画したノードのマウス判定に使うカメラ情報を記録します。
+- 既知の問題: [#915](https://github.com/TrussC-org/TrussC/issues/915)（enableDepthTest() が有効でない場合、カメラの範囲内で popStyle()、resetStyle()、各子 Node の描画が深度テストを無効にします）。
+'''
+details.ko = '''
+- `begin()`, 씬 그리기, `end()` 순서로 호출하세요. 시작할 때와 같은 카메라와 렌더 타깃에서 종료해야 합니다. 범위를 중첩할 수 있으며 시작한 순서의 역순으로 종료해야 합니다.
+- 카메라 뷰와 선택된 원근 투영 또는 정사영을 적용합니다. 종횡비에는 렌더 타깃 전체 크기를 사용합니다. 윈도에서는 pixelPerfect가 활성화된 경우를 제외하고 논리 픽셀을, Fbo에서는 어태치먼트 픽셀을 사용합니다.
+- 알파 블렌딩, 깊이 테스트, 깊이 쓰기를 수행하는 3D 파이프라인을 선택합니다. 블렌드 모드와 깊이 테스트의 논리 플래그는 변경하지 않으며 현재 모델 변환도 유지합니다.
+- 이전 카메라 상태와 선택된 파이프라인을 저장합니다. `end()` 후에는 해당 카메라로 돌아가므로 저장한 상태가 일반 화면 뷰였다면 이어서 2D를 그릴 수 있습니다.
+- `worldToScreen`이 사용하는 행렬을 갱신하고 범위 안에서 그린 노드의 마우스 판정에 사용할 카메라 정보를 기록합니다.
+- 알려진 문제: [#915](https://github.com/TrussC-org/TrussC/issues/915)(enableDepthTest()가 활성화되어 있지 않으면 카메라 범위 안에서 popStyle(), resetStyle(), 각 자식 Node의 그리기가 깊이 테스트를 비활성화합니다).
+'''
+related = ["setupScreenPerspective", "pushMatrix", "EasyCam::end", "EasyCam::enableOrtho", "enableDepthTest"]
+snippet = '''
+void tcApp::draw() {
+    EasyCam camera;
+    camera.begin();
+    drawBox(80);
+    camera.end();
+}
+'''
 
 ["EasyCam::clearControlArea"]
 category = "graphics_camera"
 keywords = ["control area", "unconstrain", "region"]
-description.en = "Clear the camera mouse-input control area constraint"
-description.ja = "カメラのマウス入力制限領域を解除"
-description.ko = "카메라 마우스 입력 제한 영역을 해제"
+description.en = "Removes the camera mouse-control area restriction."
+description.ja = "カメラのマウス操作領域の制限を解除する。"
+description.ko = "카메라의 마우스 조작 영역 제한을 해제한다."
+details.en = '''
+- Disables the area check without changing the stored rectangle or an active drag; see `EasyCam::enableMouseInput` for control-area behavior.
+'''
+details.ja = '''
+- 保存した矩形や進行中のドラッグを変更せず、領域の判定を無効にします。操作領域の動作は `EasyCam::enableMouseInput` を参照してください。
+'''
+details.ko = '''
+- 저장된 사각형이나 진행 중인 드래그를 변경하지 않고 영역 검사를 비활성화합니다. 조작 영역의 동작은 `EasyCam::enableMouseInput`을 참조하세요.
+'''
+related = ["EasyCam::setControlArea", "EasyCam::enableMouseInput"]
 
 ["EasyCam::disableMouseInput"]
 category = "graphics_camera"
 keywords = ["mouse control", "lock", "freeze", "disable input", "no drag"]
-description.en = "Disable mouse input for camera control"
-description.ja = "マウス入力によるカメラ操作を無効化"
-description.ko = "카메라 조작을 위한 마우스 입력 비활성화"
+description.en = "Disables automatic mouse control of the camera."
+description.ja = "マウス入力によるカメラの自動操作を無効にする。"
+description.ko = "마우스 입력을 통한 카메라 자동 조작을 비활성화한다."
+details.en = '''
+- Disconnects the mouse listeners and clears active orbit and pan gestures when automatic input is enabled. Repeated calls while disabled do nothing.
+- Camera parameters remain unchanged, and manual mouse handlers remain callable; see `EasyCam::enableMouseInput` for automatic controls.
+'''
+details.ja = '''
+- 自動入力が有効な場合、マウスのリスナーを解除し、進行中の周回とパンを終了します。無効な状態で再度呼んでも何もしません。
+- カメラのパラメーターは変更せず、手動のマウス処理関数も引き続き呼び出せます。自動操作は `EasyCam::enableMouseInput` を参照してください。
+'''
+details.ko = '''
+- 자동 입력이 활성화되어 있으면 마우스 리스너를 해제하고 진행 중인 궤도 회전과 패닝을 종료합니다. 비활성화된 상태에서 다시 호출해도 아무 작업도 하지 않습니다.
+- 카메라 매개변수는 변경하지 않으며 수동 마우스 처리 함수도 계속 호출할 수 있습니다. 자동 조작은 `EasyCam::enableMouseInput`을 참조하세요.
+'''
 related = ["EasyCam::enableMouseInput"]
 
 ["EasyCam::disableOrtho"]
 category = "graphics_camera"
 keywords = ["perspective", "projection"]
-description.en = "Disable orthographic projection (use perspective)"
-description.ja = "正射影を無効化（透視投影を使用）"
-description.ko = "정사영을 비활성화 (원근 투영 사용)"
+description.en = "Selects perspective projection."
+description.ja = "透視投影を選択する。"
+description.ko = "원근 투영을 선택한다."
+details.en = '''
+- Clears the orthographic flag for the next `begin()` without changing distance or field of view; see `EasyCam::enableOrtho` for projection behavior.
+'''
+details.ja = '''
+- 距離や視野角を変更せず、次の `begin()` で使う正射影フラグを無効にします。投影の動作は `EasyCam::enableOrtho` を参照してください。
+'''
+details.ko = '''
+- 거리나 시야각을 변경하지 않고 다음 `begin()`에서 사용할 정사영 플래그를 비활성화합니다. 투영 동작은 `EasyCam::enableOrtho`를 참조하세요.
+'''
+related = ["EasyCam::enableOrtho", "EasyCam::getOrtho"]
 
 ["EasyCam::enableMouseInput"]
 category = "graphics_camera"
 keywords = ["mouse control", "interactive", "drag", "orbit", "navigate"]
-description.en = "Enable mouse input for camera control"
-description.ja = "マウス入力によるカメラ操作を有効化"
-description.ko = "카메라 조작을 위한 마우스 입력 활성화"
-related = ["EasyCam::disableMouseInput", "EasyCam::setSensitivity"]
+description.en = "Enables automatic mouse control of the camera."
+description.ja = "マウス入力によるカメラの自動操作を有効にする。"
+description.ko = "마우스 입력을 통한 카메라 자동 조작을 활성화한다."
+details.en = '''
+- Subscribes to mouse movement, presses, releases, drags, and scrolling. By default, the left button (`0`) orbits and the middle button (`2`) pans; change them with `setOrbitButton()` and `setPanButton()`. If both bindings use the same button, orbit takes precedence.
+- `setDragModifier()` selects a required key, initially `Modifier::None`. The key is checked on press and scroll; a started drag continues until release even after the key is released.
+- Orbit uses horizontal and vertical movement at `0.01 * sensitivity` radians per coordinate unit, with sensitivity initially `1`. It rotates around the world up axis and camera right axis without an elevation clamp.
+- Pan moves the target in the camera right/up plane by `0.5 * panSensitivity` world units per coordinate unit, with pan sensitivity initially `1`. Coordinates use window logical pixels; pixel-perfect mode changes them to actual pixels only in the main window. Secondary windows always use logical pixels.
+- Scrolling changes distance by `-dy * zoomSensitivity`, with zoom sensitivity initially `10` and a minimum distance of `0.1`; horizontal scrolling is ignored. See `EasyCam::enableOrtho` for zoom in orthographic mode.
+- `setControlArea()` restricts presses and scrolling to a rectangle, including its edges. Drags that start inside continue outside it. Scrolling checks the last position recorded by a mouse move, press, or drag; a rectangle with nonpositive width or height removes the restriction.
+- Accepted camera presses, drags, releases, and scrolls set `e.consumed = true`, stopping later listeners and delivery to scene nodes. The App callbacks still run. Mouse movement only records the position and is not consumed.
+- Listeners attach to the current window when this function is called. For a secondary window, call it from that window's App lifecycle. Calling it again while enabled does nothing and does not switch windows.
+- `disableMouseInput()` disconnects the listeners and ends active gestures. The listeners also disconnect when the camera is destroyed.
+'''
+details.ja = '''
+- マウスの移動、押下、解放、ドラッグ、スクロールを受け取ります。標準では左ボタン（`0`）で周回し、中ボタン（`2`）でパンします。`setOrbitButton()` と `setPanButton()` で変更できます。同じボタンを両方に割り当てた場合は周回が優先されます。
+- `setDragModifier()` で必要なキーを指定し、初期値は `Modifier::None` です。キーは押下時とスクロール時に確認します。開始したドラッグは、途中でキーを離してもボタンを離すまで続きます。
+- 周回では、横と縦の移動に対して座標1単位あたり `0.01 * sensitivity` ラジアン回転します。感度の初期値は `1` です。ワールドの上方向の軸とカメラの右方向の軸を中心に回転し、仰角は制限しません。
+- パンでは、カメラの右方向と上方向の平面内で、座標1単位あたり `0.5 * panSensitivity` ワールド単位だけ注視点を移動します。パン感度の初期値は `1` です。座標にはウィンドウの論理ピクセルを使い、メインウィンドウで pixelPerfect モードが有効な場合だけ実ピクセルを使います。サブウィンドウでは常に論理ピクセルを使います。
+- スクロールは距離を `-dy * zoomSensitivity` だけ変更します。ズーム感度の初期値は `10`、距離の下限は `0.1` で、横スクロールは無視します。正射影でのズームは `EasyCam::enableOrtho` を参照してください。
+- `setControlArea()` は押下とスクロールを矩形内に制限し、境界も含みます。内側で開始したドラッグは外側でも続きます。スクロールの判定には、移動、押下、ドラッグで最後に記録した位置を使います。幅または高さがゼロ以下の矩形を指定すると制限を解除します。
+- カメラが受け付けた押下、ドラッグ、解放、スクロールは `e.consumed = true` にし、後続のリスナーとシーンのノードには届かなくなります。App のコールバックは引き続き呼ばれます。マウス移動は位置を記録するだけで、処理済みにはしません。
+- 呼び出した時点で現在のウィンドウにリスナーを登録します。サブウィンドウでは、そのウィンドウの App のライフサイクル内で呼び出してください。有効な状態で再度呼んでも何もせず、対象ウィンドウも切り替えません。
+- `disableMouseInput()` はリスナーを解除し、進行中の操作を終了します。カメラの破棄時にもリスナーは解除されます。
+'''
+details.ko = '''
+- 마우스 이동, 누름, 놓음, 드래그, 스크롤을 수신합니다. 기본적으로 왼쪽 버튼(`0`)으로 궤도 회전하고 가운데 버튼(`2`)으로 패닝합니다. `setOrbitButton()`과 `setPanButton()`으로 변경할 수 있습니다. 같은 버튼을 둘 다에 할당하면 궤도 회전이 우선합니다.
+- `setDragModifier()`로 필요한 키를 지정하며 초기값은 `Modifier::None`입니다. 키는 누름과 스크롤 시점에 확인합니다. 시작한 드래그는 도중에 키를 놓아도 버튼을 놓을 때까지 계속됩니다.
+- 궤도 회전은 가로와 세로 이동에 대해 좌표 1단위당 `0.01 * sensitivity` 라디안을 적용합니다. 감도의 초기값은 `1`입니다. 월드 위쪽 축과 카메라 오른쪽 축을 중심으로 회전하며 고도각을 제한하지 않습니다.
+- 패닝은 카메라의 오른쪽과 위쪽 평면에서 좌표 1단위당 `0.5 * panSensitivity` 월드 단위만큼 주시점을 이동합니다. 패닝 감도의 초기값은 `1`입니다. 좌표에는 윈도의 논리 픽셀을 사용하며 메인 윈도에서 pixelPerfect 모드가 활성화된 경우에만 실제 픽셀을 사용합니다. 보조 윈도에서는 항상 논리 픽셀을 사용합니다.
+- 스크롤은 거리를 `-dy * zoomSensitivity`만큼 변경합니다. 줌 감도의 초기값은 `10`, 거리의 최솟값은 `0.1`이며 가로 스크롤은 무시합니다. 정사영에서의 줌은 `EasyCam::enableOrtho`를 참조하세요.
+- `setControlArea()`는 누름과 스크롤을 경계를 포함한 사각형 안으로 제한합니다. 안에서 시작한 드래그는 밖에서도 계속됩니다. 스크롤 검사는 이동, 누름, 드래그에서 마지막으로 기록한 위치를 사용합니다. 너비나 높이가 0 이하인 사각형을 지정하면 제한을 해제합니다.
+- 카메라가 받아들인 누름, 드래그, 놓음, 스크롤은 `e.consumed = true`로 설정하여 이후 리스너와 씬 노드에 전달되지 않게 합니다. App 콜백은 계속 호출됩니다. 마우스 이동은 위치만 기록하며 처리됨으로 표시하지 않습니다.
+- 호출 시점의 현재 윈도에 리스너를 등록합니다. 보조 윈도에서는 해당 윈도 App의 생명주기 안에서 호출하세요. 활성화된 상태에서 다시 호출해도 아무 작업도 하지 않으며 대상 윈도도 바꾸지 않습니다.
+- `disableMouseInput()`은 리스너를 해제하고 진행 중인 조작을 종료합니다. 카메라가 소멸할 때도 리스너가 해제됩니다.
+'''
+related = ["EasyCam::disableMouseInput", "EasyCam::setSensitivity", "EasyCam::setOrbitButton", "EasyCam::setPanButton", "EasyCam::setDragModifier", "EasyCam::setControlArea", "EasyCam::enableOrtho"]
+snippet = '''
+EasyCam camera;
+void tcApp::setup() {
+    camera.setDragModifier(EasyCam::Modifier::Shift);
+    camera.enableMouseInput();
+}
+'''
 
 ["EasyCam::enableOrtho"]
 category = "graphics_camera"
 keywords = ["orthographic", "projection", "parallel", "2d"]
-description.en = "Enable orthographic projection"
-description.ja = "正射影を有効化"
-description.ko = "정사영을 활성화"
+description.en = "Selects orthographic projection."
+description.ja = "正射影を選択する。"
+description.ko = "정사영을 선택한다."
+details.en = '''
+- Sets the orthographic flag used by the next `begin()`; calling it during an active scope does not immediately rebuild the projection.
+- The visible height is `2 * distance * tan(fov / 2)`, and the width is that height multiplied by the render target aspect ratio. Distance and field of view therefore control the visible size in orthographic mode.
+- Switching between perspective and orthographic projection preserves apparent size at the target plane. Scrolling and `setDistance()` control zoom in both modes.
+- `disableOrtho()` selects perspective, `setOrtho(bool)` selects either mode, and `getOrtho()` returns the selected flag.
+'''
+details.ja = '''
+- 次の `begin()` で使う正射影フラグを有効にします。描画範囲の途中で呼んでも、その場では投影行列を作り直しません。
+- 表示範囲の高さは `2 * distance * tan(fov / 2)`、幅はその高さに描画先のアスペクト比を掛けた値です。このため、正射影でも距離と視野角が表示サイズに影響します。
+- 透視投影と正射影を切り替えても、注視点を通る平面での見かけの大きさを維持します。どちらのモードでも、スクロールと `setDistance()` でズームできます。
+- `disableOrtho()` は透視投影を選択し、`setOrtho(bool)` は両モードを切り替えます。`getOrtho()` は選択されているフラグを返します。
+'''
+details.ko = '''
+- 다음 `begin()`에서 사용할 정사영 플래그를 활성화합니다. 활성 범위 안에서 호출해도 즉시 투영 행렬을 다시 만들지는 않습니다.
+- 표시 범위의 높이는 `2 * distance * tan(fov / 2)`이며 너비는 이 높이에 렌더 타깃의 종횡비를 곱한 값입니다. 따라서 정사영에서도 거리와 시야각이 표시 크기에 영향을 줍니다.
+- 원근 투영과 정사영을 전환해도 주시점을 지나는 평면에서의 겉보기 크기를 유지합니다. 두 모드 모두 스크롤과 `setDistance()`로 줌을 조절할 수 있습니다.
+- `disableOrtho()`는 원근 투영을 선택하고 `setOrtho(bool)`은 두 모드를 전환합니다. `getOrtho()`는 선택된 플래그를 반환합니다.
+'''
+related = ["EasyCam::disableOrtho", "EasyCam::setOrtho", "EasyCam::getOrtho", "EasyCam::setDistance", "EasyCam::setFov"]
+snippet = '''
+EasyCam camera;
+void tcApp::setup() {
+    camera.enableOrtho();
+    camera.setDistance(400);
+}
+'''
 
 ["EasyCam::end"]
 category = "graphics_camera"
 keywords = ["finish", "stop", "unbind", "exit"]
-description.en = "Restore the camera snapshot and selected pipeline from the matching begin on this target, retaining its model and continuous logical blend/depth flags."
-description.ja = "同じ描画先の begin 時点のカメラと選択パイプラインを復元する。モデルと blend/depth の論理値は維持する。"
-description.ko = "같은 타깃의 begin 시점 카메라와 선택 파이프라인을 복원한다. 모델과 논리 blend/depth 값은 유지한다."
-related = ["popMatrix"]
+description.en = "Restores the camera state saved by the matching begin()."
+description.ja = "対応する begin() が保存したカメラ状態を復元する。"
+description.ko = "대응하는 begin()이 저장한 카메라 상태를 복원한다."
+details.en = '''
+- Restores the saved camera state and selected pipeline on the current render target; see `EasyCam::begin` for scope order and drawing 2D afterward.
+- Leaves the current model transform and logical blend-mode and depth-test flags unchanged, including changes made inside the scope.
+- If the current target has no scope, or its innermost scope belongs to another camera, leaves the state unchanged and logs a warning only on the first such failure.
+'''
+details.ja = '''
+- 現在の描画先で、保存したカメラ状態と選択パイプラインを復元します。範囲の呼び出し順と終了後の2D描画は `EasyCam::begin` を参照してください。
+- 現在のモデル変換と、ブレンドモードおよび深度テストの論理フラグは変更しません。範囲内で行った変更も維持します。
+- 現在の描画先に範囲がない場合や、最も内側の範囲が別のカメラのものである場合は、状態を変更せず、この失敗が初めて起きたときだけ警告を出します。
+'''
+details.ko = '''
+- 현재 렌더 타깃에서 저장된 카메라 상태와 선택된 파이프라인을 복원합니다. 범위의 호출 순서와 종료 후 2D 그리기는 `EasyCam::begin`을 참조하세요.
+- 현재 모델 변환과 블렌드 모드 및 깊이 테스트의 논리 플래그는 변경하지 않습니다. 범위 안에서 변경한 값도 유지합니다.
+- 현재 타깃에 범위가 없거나 가장 안쪽 범위가 다른 카메라의 것이면 상태를 변경하지 않고 이러한 실패가 처음 발생했을 때만 경고를 기록합니다.
+'''
+related = ["popMatrix", "EasyCam::begin"]
+snippet = '''
+void tcApp::draw() {
+    EasyCam camera;
+    camera.begin();
+    drawBox(80);
+    camera.end();
+}
+'''
 
 ["EasyCam::getAzimuth"]
 category = "graphics_camera"
 keywords = ["orbit", "horizontal angle", "yaw", "longitude"]
-description.en = "Get orbit azimuth (horizontal angle, radians)"
-description.ja = "周回の方位角（水平角・ラジアン）を取得"
-description.ko = "궤도 방위각(수평각, 라디안)을 얻음"
+description.en = "Returns the camera's orbit azimuth."
+description.ja = "カメラの周回方位角を返す。"
+description.ko = "카메라의 궤도 방위각을 반환한다."
+details.en = '''
+- Returns a `float` derived from the current orientation, including mouse rotation, using `atan2` in the range `[-TAU / 2, TAU / 2]`.
+- See `EasyCam::setAzimuth` for radian units and angle conventions.
+'''
+details.ja = '''
+- マウスによる回転を含む現在の姿勢から `atan2` で求めた `float` を返します。範囲は `[-TAU / 2, TAU / 2]` です。
+- ラジアン単位と角度の規約は `EasyCam::setAzimuth` を参照してください。
+'''
+details.ko = '''
+- 마우스 회전을 포함한 현재 자세에서 `atan2`로 구한 `float`를 반환합니다. 범위는 `[-TAU / 2, TAU / 2]`입니다.
+- 라디안 단위와 각도 규약은 `EasyCam::setAzimuth`를 참조하세요.
+'''
 related = ["EasyCam::setAzimuth"]
 
 ["EasyCam::getDistance"]
 category = "graphics_camera"
 keywords = ["zoom", "radius", "range"]
-description.en = "Get distance from target"
-description.ja = "注視点からの距離を取得"
-description.ko = "타겟으로부터의 거리를 얻음"
-related = ["EasyCam::setDistance"]
+description.en = "Returns the camera's distance from its target."
+description.ja = "注視点からカメラまでの距離を返す。"
+description.ko = "주시점에서 카메라까지의 거리를 반환한다."
+details.en = '''
+- Returns the stored distance as a `float` in world units. `setDistance()` and scrolling enforce a minimum of `0.1`.
+- See `EasyCam` for the orbit model and `EasyCam::enableOrtho` for how distance controls orthographic zoom.
+'''
+details.ja = '''
+- 保存している距離をワールド単位の `float` で返します。`setDistance()` とスクロールでは下限を `0.1` に制限します。
+- 周回の仕組みは `EasyCam`、距離による正射影のズームは `EasyCam::enableOrtho` を参照してください。
+'''
+details.ko = '''
+- 저장된 거리를 월드 단위의 `float`로 반환합니다. `setDistance()`와 스크롤은 최솟값을 `0.1`로 제한합니다.
+- 궤도 방식은 `EasyCam`, 거리를 통한 정사영 줌은 `EasyCam::enableOrtho`를 참조하세요.
+'''
+related = ["EasyCam::setDistance", "EasyCam", "EasyCam::enableOrtho"]
 
 ["EasyCam::getDragModifier"]
 category = "graphics_camera"
 keywords = ["shift", "ctrl", "alt"]
-description.en = "Get the modifier key required for camera mouse input"
-description.ja = "カメラのマウス入力に必要な修飾キーを取得"
-description.ko = "카메라 마우스 입력에 필요한 수정자 키를 얻음"
+description.en = "Returns the modifier selected for camera mouse input."
+description.ja = "カメラのマウス入力に設定された修飾キーを返す。"
+description.ko = "카메라 마우스 입력에 설정된 수정자 키를 반환한다."
+details.en = '''
+- Returns the configured `EasyCam::Modifier`, rather than the current keyboard state; see `EasyCam::enableMouseInput` for when it is checked.
+'''
+details.ja = '''
+- 現在のキーの押下状態ではなく、設定された `EasyCam::Modifier` を返します。確認するタイミングは `EasyCam::enableMouseInput` を参照してください。
+'''
+details.ko = '''
+- 현재 키의 누름 상태가 아니라 설정된 `EasyCam::Modifier`를 반환합니다. 확인하는 시점은 `EasyCam::enableMouseInput`을 참조하세요.
+'''
+related = ["EasyCam::Modifier", "EasyCam::setDragModifier", "EasyCam::enableMouseInput"]
 
 ["EasyCam::getElevation"]
 category = "graphics_camera"
 keywords = ["orbit", "vertical angle", "pitch", "tilt", "latitude"]
-description.en = "Get orbit elevation (vertical angle, radians)"
-description.ja = "周回の仰角（垂直角・ラジアン）を取得"
-description.ko = "궤도 고도각(수직각, 라디안)을 얻음"
-related = ["EasyCam::setElevation"]
+description.en = "Returns the camera's orbit elevation."
+description.ja = "カメラの周回仰角を返す。"
+description.ko = "카메라의 궤도 고도각을 반환한다."
+details.en = '''
+- Returns a `float` computed as `asin` of the dot product between the camera's backward direction and the stored up axis, clamped to `[-1, 1]` before `asin`. The result lies in `[-TAU / 4, TAU / 4]`, even after rotation over a pole.
+- See `EasyCam::setAzimuth` for radian units and angle conventions.
+'''
+details.ja = '''
+- カメラの後ろ方向と保存された上方向の軸の内積を `[-1, 1]` に制限し、`asin` で求めた `float` を返します。極を越えて回転した場合も、戻り値の範囲は `[-TAU / 4, TAU / 4]` です。
+- ラジアン単位と角度の規約は `EasyCam::setAzimuth` を参照してください。
+'''
+details.ko = '''
+- 카메라 뒤쪽 방향과 저장된 위쪽 축의 내적을 `[-1, 1]`로 제한한 뒤 `asin`으로 구한 `float`를 반환합니다. 극을 넘어 회전한 경우에도 반환 범위는 `[-TAU / 4, TAU / 4]`입니다.
+- 라디안 단위와 각도 규약은 `EasyCam::setAzimuth`를 참조하세요.
+'''
+related = ["EasyCam::setElevation", "EasyCam::setAzimuth"]
 
 ["EasyCam::getFov"]
 category = "graphics_camera"
 keywords = ["field of view", "lens", "angle", "perspective"]
-description.en = "Get field of view in radians"
-description.ja = "視野角をラジアンで取得"
-description.ko = "시야각을 라디안으로 얻음"
-related = ["EasyCam::setFov"]
+description.en = "Returns the camera's field of view."
+description.ja = "カメラの視野角を返す。"
+description.ko = "카메라의 시야각을 반환한다."
+details.en = '''
+- Returns the stored vertical field of view as a `float` in radians, including values set through `setFovDeg()`; see `EasyCam::setAzimuth` for angle conventions.
+- See `EasyCam::enableOrtho` for how field of view also determines the orthographic extent.
+'''
+details.ja = '''
+- 保存している垂直視野角をラジアン単位の `float` で返します。`setFovDeg()` で設定した場合もラジアンです。角度の規約は `EasyCam::setAzimuth` を参照してください。
+- 視野角による正射影の表示範囲の決まり方は `EasyCam::enableOrtho` を参照してください。
+'''
+details.ko = '''
+- 저장된 수직 시야각을 라디안 단위의 `float`로 반환합니다. `setFovDeg()`로 설정한 경우에도 라디안입니다. 각도 규약은 `EasyCam::setAzimuth`를 참조하세요.
+- 시야각이 정사영의 표시 범위를 결정하는 방식은 `EasyCam::enableOrtho`를 참조하세요.
+'''
+related = ["EasyCam::setFov", "EasyCam::setFovDeg", "EasyCam::setAzimuth", "EasyCam::enableOrtho"]
 
 ["EasyCam::getOrbitButton"]
 category = "graphics_camera"
 keywords = ["mouse button", "binding"]
-description.en = "Get the mouse button that orbits the camera"
-description.ja = "カメラを回転させるマウスボタンを取得"
-description.ko = "카메라를 회전시키는 마우스 버튼을 얻음"
+description.en = "Returns the mouse button assigned to orbit rotation."
+description.ja = "周回回転に割り当てられたマウスボタンを返す。"
+description.ko = "궤도 회전에 할당된 마우스 버튼을 반환한다."
+details.en = '''
+- Returns the configured button as an `int`, rather than its pressed state; see `EasyCam::enableMouseInput` for button values and control behavior.
+'''
+details.ja = '''
+- 押下状態ではなく、設定されたボタンを `int` で返します。ボタンの値と操作の動作は `EasyCam::enableMouseInput` を参照してください。
+'''
+details.ko = '''
+- 누름 상태가 아니라 설정된 버튼을 `int`로 반환합니다. 버튼 값과 조작 동작은 `EasyCam::enableMouseInput`을 참조하세요.
+'''
+related = ["EasyCam::setOrbitButton", "EasyCam::enableMouseInput"]
 
 ["EasyCam::getOrientation"]
 category = "graphics_camera"
 keywords = ["quaternion", "rotation", "camera"]
-description.en = "Get the camera orientation quaternion"
-description.ja = "カメラの姿勢クォータニオンを取得"
-description.ko = "카메라 방향 쿼터니언을 얻음"
+description.en = "Returns the camera's orientation quaternion."
+description.ja = "カメラの姿勢クォータニオンを返す。"
+description.ko = "카메라의 자세 쿼터니언을 반환한다."
+details.en = '''
+- Returns a copy of the current `Quaternion`. It rotates local right `(1, 0, 0)`, up `(0, 1, 0)`, and backward `(0, 0, 1)` directions into world space.
+- The quaternion reflects mouse rotation and explicit orientation changes; see `EasyCam` for the orbit model.
+'''
+details.ja = '''
+- 現在の `Quaternion` のコピーを返します。ローカルの右方向 `(1, 0, 0)`、上方向 `(0, 1, 0)`、後ろ方向 `(0, 0, 1)` をワールド空間へ回転する姿勢です。
+- マウスによる回転と明示的な姿勢変更を反映します。周回の仕組みは `EasyCam` を参照してください。
+'''
+details.ko = '''
+- 현재 `Quaternion`의 복사본을 반환합니다. 로컬 오른쪽 `(1, 0, 0)`, 위쪽 `(0, 1, 0)`, 뒤쪽 `(0, 0, 1)` 방향을 월드 공간으로 회전하는 자세입니다.
+- 마우스 회전과 명시적인 자세 변경을 반영합니다. 궤도 방식은 `EasyCam`을 참조하세요.
+'''
+related = ["EasyCam::setOrientation", "EasyCam::getPosition", "EasyCam"]
 
 ["EasyCam::getOrtho"]
 category = "graphics_camera"
 keywords = ["orthographic", "projection"]
-description.en = "Get whether orthographic projection is enabled"
-description.ja = "正射影が有効かどうかを取得"
-description.ko = "정사영이 활성화되었는지 얻음"
+description.en = "Returns whether orthographic projection is selected."
+description.ja = "正射影が選択されているかを返す。"
+description.ko = "정사영이 선택되어 있는지 반환한다."
+details.en = '''
+- Returns the stored projection flag as a `bool`; it does not inspect the currently applied projection matrix. See `EasyCam::enableOrtho` for when the flag takes effect.
+'''
+details.ja = '''
+- 保存している投影フラグを `bool` で返し、現在適用されている投影行列は調べません。フラグが反映されるタイミングは `EasyCam::enableOrtho` を参照してください。
+'''
+details.ko = '''
+- 저장된 투영 플래그를 `bool`로 반환하며 현재 적용된 투영 행렬을 검사하지 않습니다. 플래그가 반영되는 시점은 `EasyCam::enableOrtho`를 참조하세요.
+'''
+related = ["EasyCam::enableOrtho", "EasyCam::disableOrtho", "EasyCam::setOrtho"]
 
 ["EasyCam::getPanButton"]
 category = "graphics_camera"
 keywords = ["mouse button", "binding"]
-description.en = "Get the mouse button that pans the camera"
-description.ja = "カメラをパンさせるマウスボタンを取得"
-description.ko = "카메라를 패닝하는 마우스 버튼을 얻음"
+description.en = "Returns the mouse button assigned to panning."
+description.ja = "パンに割り当てられたマウスボタンを返す。"
+description.ko = "패닝에 할당된 마우스 버튼을 반환한다."
+details.en = '''
+- Returns the configured button as an `int`, rather than its pressed state; see `EasyCam::enableMouseInput` for button values and control behavior.
+'''
+details.ja = '''
+- 押下状態ではなく、設定されたボタンを `int` で返します。ボタンの値と操作の動作は `EasyCam::enableMouseInput` を参照してください。
+'''
+details.ko = '''
+- 누름 상태가 아니라 설정된 버튼을 `int`로 반환합니다. 버튼 값과 조작 동작은 `EasyCam::enableMouseInput`을 참조하세요.
+'''
+related = ["EasyCam::setPanButton", "EasyCam::enableMouseInput"]
 
 ["EasyCam::getPosition"]
 category = "graphics_camera"
 keywords = ["location", "eye", "3d"]
-description.en = "Get camera position"
-description.ja = "カメラ位置を取得"
-description.ko = "카메라 위치를 얻음"
+description.en = "Returns the camera's position."
+description.ja = "カメラの位置を返す。"
+description.ko = "카메라의 위치를 반환한다."
+details.en = '''
+- Returns a world-space `Vec3` computed as `getTarget() + getOrientation().rotate(Vec3(0, 0, 1)) * getDistance()`; see `EasyCam` for the orbit model.
+'''
+details.ja = '''
+- `getTarget() + getOrientation().rotate(Vec3(0, 0, 1)) * getDistance()` で求めたワールド空間の `Vec3` を返します。周回の仕組みは `EasyCam` を参照してください。
+'''
+details.ko = '''
+- `getTarget() + getOrientation().rotate(Vec3(0, 0, 1)) * getDistance()`로 구한 월드 공간의 `Vec3`를 반환합니다. 궤도 방식은 `EasyCam`을 참조하세요.
+'''
+related = ["EasyCam::getTarget", "EasyCam::getOrientation", "EasyCam::getDistance", "EasyCam"]
 
 ["EasyCam::getTarget"]
 category = "graphics_camera"
 keywords = ["look at", "focus", "center", "aim", "pivot"]
-description.en = "Get camera look-at target"
-description.ja = "カメラの注視点を取得"
-description.ko = "카메라의 look-at 타겟을 얻음"
-related = ["EasyCam::setTarget"]
+description.en = "Returns the camera's look-at target."
+description.ja = "カメラの注視点を返す。"
+description.ko = "카메라의 주시점을 반환한다."
+details.en = '''
+- Returns a copy of the world-space target as a `Vec3`, reflecting both `setTarget()` and panning; see `EasyCam` for the orbit model.
+'''
+details.ja = '''
+- ワールド空間の注視点を `Vec3` のコピーで返します。`setTarget()` とパンによる変更を反映します。周回の仕組みは `EasyCam` を参照してください。
+'''
+details.ko = '''
+- 월드 공간의 주시점을 `Vec3` 복사본으로 반환합니다. `setTarget()`과 패닝으로 변경한 값을 반영합니다. 궤도 방식은 `EasyCam`을 참조하세요.
+'''
+related = ["EasyCam::setTarget", "EasyCam"]
 
 ["EasyCam::getUpAxis"]
 category = "graphics_camera"
 keywords = ["up axis", "orientation", "coordinate"]
-description.en = "Get the camera up axis"
-description.ja = "カメラのアップ軸を取得"
-description.ko = "카메라 업 축을 얻음"
+description.en = "Returns the camera's configured up axis."
+description.ja = "カメラに設定された上方向の軸を返す。"
+description.ko = "카메라에 설정된 위쪽 축을 반환한다."
+details.en = '''
+- Returns a copy of the stored world-space up axis as a `Vec3`, without normalizing it.
+- This is the orbit up axis, rather than the camera's tilted local up direction; see `EasyCam` for the orbit model.
+'''
+details.ja = '''
+- 保存しているワールド空間の上方向の軸を、正規化せずに `Vec3` のコピーで返します。
+- カメラの傾きを反映したローカルの上方向ではなく、周回に使う上方向の軸です。周回の仕組みは `EasyCam` を参照してください。
+'''
+details.ko = '''
+- 저장된 월드 공간의 위쪽 축을 정규화하지 않고 `Vec3` 복사본으로 반환합니다.
+- 카메라의 기울기를 반영한 로컬 위쪽 방향이 아니라 궤도 회전에 사용하는 위쪽 축입니다. 궤도 방식은 `EasyCam`을 참조하세요.
+'''
+related = ["EasyCam::setUpAxis", "EasyCam::getOrientation", "EasyCam"]
 
 ["EasyCam::isMouseInputEnabled"]
 category = "graphics_camera"
 keywords = ["mouse control", "interactive", "state"]
-description.en = "Check if mouse input is enabled"
-description.ja = "マウス入力が有効かどうか確認"
-description.ko = "마우스 입력이 활성화되어 있는지 확인"
+description.en = "Returns whether automatic mouse input is enabled."
+description.ja = "マウスの自動入力が有効かを返す。"
+description.ko = "자동 마우스 입력이 활성화되어 있는지 반환한다."
+details.en = '''
+- Returns the automatic-input flag as a `bool`, rather than whether a gesture or modifier is active; see `EasyCam::enableMouseInput` for input behavior.
+'''
+details.ja = '''
+- 操作中かどうかや修飾キーの状態ではなく、自動入力のフラグを `bool` で返します。入力の動作は `EasyCam::enableMouseInput` を参照してください。
+'''
+details.ko = '''
+- 조작 중인지 또는 수정자 키가 눌렸는지가 아니라 자동 입력 플래그를 `bool`로 반환합니다. 입력 동작은 `EasyCam::enableMouseInput`을 참조하세요.
+'''
+related = ["EasyCam::enableMouseInput", "EasyCam::disableMouseInput"]
 
 ["EasyCam::mouseDragged"]
 category = "graphics_camera"
 keywords = ["drag", "swipe", "move", "pan", "pointer"]
-description.en = "Handle mouse drag event"
-description.ja = "マウスドラッグイベントを処理"
-description.ko = "마우스 드래그 이벤트 처리"
+description.en = "Processes a manually forwarded mouse drag."
+description.ja = "手動で渡されたマウスドラッグを処理する。"
+description.ko = "수동으로 전달된 마우스 드래그를 처리한다."
+details.en = '''
+- Call `mouseDragged(int x, int y, int button)` with absolute window coordinates. A matching orbit or pan must already have been started by a press; see `EasyCam::enableMouseInput` for the movement rules and coordinate units.
+- Uses the difference from the last recorded position, then records the supplied position even when no gesture matches. It does not check the control area or modifier.
+- Works independently of the automatic-input flag and returns `void`; it does not mark an event as consumed. Forwarding a drag already handled by the automatic listeners processes it again.
+'''
+details.ja = '''
+- ウィンドウ内の絶対座標を使って `mouseDragged(int x, int y, int button)` を呼び出します。対応する周回またはパンが、押下によって開始済みである必要があります。移動の規則と座標の単位は `EasyCam::enableMouseInput` を参照してください。
+- 最後に記録した位置との差分を使い、対応する操作がなくても渡された位置を記録します。操作領域と修飾キーは確認しません。
+- 自動入力フラグに関係なく動作し、戻り値は `void` です。イベントを処理済みにはしません。自動リスナーが処理したドラッグも手動で渡すと、再度処理します。
+'''
+details.ko = '''
+- 윈도 안의 절대 좌표로 `mouseDragged(int x, int y, int button)`을 호출합니다. 대응하는 궤도 회전이나 패닝이 누름으로 이미 시작되어 있어야 합니다. 이동 규칙과 좌표 단위는 `EasyCam::enableMouseInput`을 참조하세요.
+- 마지막으로 기록한 위치와의 차이를 사용하며 대응하는 조작이 없어도 전달된 위치를 기록합니다. 조작 영역과 수정자 키는 확인하지 않습니다.
+- 자동 입력 플래그와 관계없이 동작하며 반환형은 `void`입니다. 이벤트를 처리됨으로 표시하지 않습니다. 자동 리스너가 처리한 드래그도 수동으로 전달하면 다시 처리합니다.
+'''
+related = ["EasyCam::mousePressed", "EasyCam::mouseReleased", "EasyCam::enableMouseInput"]
 
 ["EasyCam::mousePressed"]
 category = "graphics_camera"
 keywords = ["click", "press", "mousedown"]
-description.en = "Handle mouse press event"
-description.ja = "マウス押下イベントを処理"
-description.ko = "마우스 누름 이벤트 처리"
+description.en = "Processes a manually forwarded mouse press."
+description.ja = "手動で渡されたマウス押下を処理する。"
+description.ko = "수동으로 전달된 마우스 누름을 처리한다."
+details.en = '''
+- Call `mousePressed(int x, int y, int button)` with absolute window coordinates to start an orbit or pan gesture; see `EasyCam::enableMouseInput` for button bindings, coordinate units, and control-area rules.
+- A press outside the control area is ignored. Inside it, the position is recorded even if the button matches neither binding.
+- Does not check the automatic-input flag or required modifier. Returns `void` and does not mark an event as consumed; route subsequent drags and the matching release when managing input manually.
+'''
+details.ja = '''
+- ウィンドウ内の絶対座標を使って `mousePressed(int x, int y, int button)` を呼び出すと、周回またはパンを開始します。ボタンの割り当て、座標の単位、操作領域の規則は `EasyCam::enableMouseInput` を参照してください。
+- 操作領域の外側での押下は無視します。内側では、ボタンがどちらの割り当てにも一致しなくても位置を記録します。
+- 自動入力フラグと必要な修飾キーは確認しません。戻り値は `void` で、イベントを処理済みにはしません。手動で入力を管理する場合は、その後のドラッグと対応する解放も渡してください。
+'''
+details.ko = '''
+- 윈도 안의 절대 좌표로 `mousePressed(int x, int y, int button)`을 호출하면 궤도 회전이나 패닝을 시작합니다. 버튼 할당, 좌표 단위, 조작 영역 규칙은 `EasyCam::enableMouseInput`을 참조하세요.
+- 조작 영역 밖의 누름은 무시합니다. 안에서는 버튼이 어느 할당과도 일치하지 않아도 위치를 기록합니다.
+- 자동 입력 플래그와 필요한 수정자 키는 확인하지 않습니다. 반환형은 `void`이며 이벤트를 처리됨으로 표시하지 않습니다. 입력을 수동으로 관리할 때는 이후 드래그와 대응하는 놓음도 전달하세요.
+'''
+related = ["EasyCam::mouseDragged", "EasyCam::mouseReleased", "EasyCam::enableMouseInput"]
 
 ["EasyCam::mouseReleased"]
 category = "graphics_camera"
 keywords = ["release", "mouseup", "click", "up", "lift"]
-description.en = "Handle mouse release event"
-description.ja = "マウス離上イベントを処理"
-description.ko = "마우스 떼기 이벤트 처리"
+description.en = "Handles a mouse button release for the camera."
+description.ja = "カメラのマウスボタン解放を処理する。"
+description.ko = "카메라의 마우스 버튼 해제를 처리한다."
+details.en = '''
+- Call `mouseReleased(int x, int y, int button)` when routing input manually; this is not an overridable App callback. `EasyCam::enableMouseInput` already registers automatic release handling.
+- A matching orbit or pan button ends that active drag. The coordinates are ignored, so releasing outside the control area also ends the drag.
+- Manual calls work with automatic input disabled, do not check modifiers, and do not mark an event as consumed. See `EasyCam::enableMouseInput` for automatic input rules.
+'''
+details.ja = '''
+- 入力を手動で渡す場合に `mouseReleased(int x, int y, int button)` を呼び出します。App のコールバックとしてオーバーライドする関数ではありません。`EasyCam::enableMouseInput` を使う場合は、解放処理が自動登録されます。
+- 周回またはパンに設定したボタンを離すと、対応する進行中のドラッグが終了します。座標は使わないため、操作領域の外で離した場合も終了します。
+- 手動呼び出しは自動入力が無効でも動作し、修飾キーを確認せず、イベントを処理済みにもしません。自動入力の規則は `EasyCam::enableMouseInput` を参照してください。
+'''
+details.ko = '''
+- 입력을 직접 전달할 때 `mouseReleased(int x, int y, int button)`을 호출합니다. App 콜백으로 오버라이드하는 함수가 아닙니다. `EasyCam::enableMouseInput`을 사용하면 해제 처리가 자동으로 등록됩니다.
+- 궤도 회전 또는 패닝에 지정한 버튼을 놓으면 해당 드래그가 진행 중인 경우 종료합니다. 좌표는 사용하지 않으므로 제어 영역 밖에서 놓아도 종료합니다.
+- 직접 호출하면 자동 입력이 비활성화되어 있어도 동작하며, 수정자 키를 확인하거나 이벤트를 처리된 상태로 표시하지 않습니다. 자동 입력 규칙은 `EasyCam::enableMouseInput`을 참조하세요.
+'''
+related = ["EasyCam::enableMouseInput", "EasyCam::mousePressed", "EasyCam::mouseDragged"]
 
 ["EasyCam::mouseScrolled"]
 category = "graphics_camera"
 keywords = ["scroll", "wheel", "zoom", "event", "dolly"]
-description.en = "Handle mouse scroll event (for zoom)"
-description.ja = "マウススクロールイベントを処理（ズーム用）"
-description.ko = "마우스 스크롤 이벤트 처리 (줌용)"
+description.en = "Handles mouse scrolling to zoom the camera."
+description.ja = "マウススクロールによるカメラのズームを処理する。"
+description.ko = "마우스 스크롤로 카메라 줌을 처리한다."
+details.en = '''
+- Call `mouseScrolled(float dx, float dy)` when routing input manually; this is not an overridable App callback. `EasyCam::enableMouseInput` already registers automatic scroll handling.
+- `dx` is ignored. The distance changes by `-dy * zoomSensitivity` and is limited to a minimum of `0.1`; this controls zoom in both projection modes.
+- The control area is checked against the last mouse position recorded by the camera, rather than a position supplied with this call.
+- Manual calls work with automatic input disabled, bypass the modifier requirement, and do not mark an event as consumed. See `EasyCam::enableMouseInput` for automatic input rules.
+'''
+details.ja = '''
+- 入力を手動で渡す場合に `mouseScrolled(float dx, float dy)` を呼び出します。App のコールバックとしてオーバーライドする関数ではありません。`EasyCam::enableMouseInput` を使う場合は、スクロール処理が自動登録されます。
+- `dx` は使いません。距離を `-dy * zoomSensitivity` だけ変更し、最小値を `0.1` に制限します。どちらの投影モードでも、この距離でズームを調整します。
+- 操作領域の判定には、この呼び出しで指定する位置ではなく、カメラが最後に記録したマウス位置を使います。
+- 手動呼び出しは自動入力が無効でも動作し、修飾キーの条件を確認せず、イベントを処理済みにもしません。自動入力の規則は `EasyCam::enableMouseInput` を参照してください。
+'''
+details.ko = '''
+- 입력을 직접 전달할 때 `mouseScrolled(float dx, float dy)`를 호출합니다. App 콜백으로 오버라이드하는 함수가 아닙니다. `EasyCam::enableMouseInput`을 사용하면 스크롤 처리가 자동으로 등록됩니다.
+- `dx`는 사용하지 않습니다. 거리를 `-dy * zoomSensitivity`만큼 변경하고 최솟값을 `0.1`로 제한합니다. 두 투영 모드 모두 이 거리로 줌을 조절합니다.
+- 제어 영역은 이 호출에서 전달한 위치가 아니라 카메라가 마지막으로 기록한 마우스 위치를 기준으로 확인합니다.
+- 직접 호출하면 자동 입력이 비활성화되어 있어도 동작하며, 수정자 키 조건을 확인하거나 이벤트를 처리된 상태로 표시하지 않습니다. 자동 입력 규칙은 `EasyCam::enableMouseInput`을 참조하세요.
+'''
+related = ["EasyCam::enableMouseInput", "EasyCam::setZoomSensitivity", "EasyCam::setControlArea", "EasyCam::enableOrtho"]
 
 ["EasyCam::reset"]
 category = "graphics_camera"
 keywords = ["restart", "rewind", "clear", "zero"]
-description.en = "Reset camera to default position"
-description.ja = "カメラをデフォルト位置にリセット"
-description.ko = "카메라를 기본 위치로 초기화"
+description.en = "Restores the camera target, distance, and orientation."
+description.ja = "カメラの注視点、距離、姿勢を初期状態に戻す。"
+description.ko = "카메라의 주시점, 거리, 자세를 초기 상태로 되돌린다."
+details.en = '''
+- Sets the target to `(0, 0, 0)`, the distance to `400`, and the orientation to the zero-azimuth, zero-elevation pose for the current up axis.
+- Other settings and active drag flags remain unchanged. See `EasyCam` for the orbit model and initial settings.
+'''
+details.ja = '''
+- 注視点を `(0, 0, 0)`、距離を `400` にし、現在の上方向の軸に対して方位角と仰角がゼロになる姿勢に戻します。
+- その他の設定と進行中のドラッグを示すフラグは変更しません。周回モデルと初期設定は `EasyCam` を参照してください。
+'''
+details.ko = '''
+- 주시점을 `(0, 0, 0)`, 거리를 `400`으로 설정하고 현재 위쪽 축을 기준으로 방위각과 고도각이 0인 자세로 되돌립니다.
+- 다른 설정과 진행 중인 드래그 상태 플래그는 변경하지 않습니다. 궤도 모델과 초기 설정은 `EasyCam`을 참조하세요.
+'''
+related = ["EasyCam", "EasyCam::setUpAxis", "EasyCam::setOrientation"]
 
 ["EasyCam::setAzimuth"]
 category = "graphics_camera"
 keywords = ["orbit", "yaw", "horizontal angle"]
-description.en = "Set orbit azimuth (horizontal angle, radians)"
-description.ja = "周回の方位角（水平角・ラジアン）を設定"
-description.ko = "궤도 방위각(수평각, 라디안)을 설정"
-related = ["EasyCam::getAzimuth"]
+description.en = "Sets the camera's orbit azimuth."
+description.ja = "カメラの周回の方位角を設定する。"
+description.ko = "카메라 궤도의 방위각을 설정한다."
+details.en = '''
+- `setAzimuth(float radians)` sets rotation around the configured up axis, using `getElevation()` for the elevation.
+- Camera angles use radians; `TAU` is one full turn. Functions with a `Deg` suffix, such as `setFovDeg`, accept degrees.
+- Rebuilds the orientation from the two orbit angles, discarding any additional roll. See `EasyCam` for the orbit model.
+'''
+details.ja = '''
+- `setAzimuth(float radians)` は、設定した上方向の軸を中心とする回転角を設定し、仰角には `getElevation()` の値を使います。
+- カメラの角度はラジアンで指定し、`TAU` が一周です。`setFovDeg` など、名前の末尾に `Deg` が付く関数は度数を受け取ります。
+- 2 つの周回角から姿勢を作り直すため、追加のロール回転は失われます。周回モデルは `EasyCam` を参照してください。
+'''
+details.ko = '''
+- `setAzimuth(float radians)`는 설정한 위쪽 축을 중심으로 회전각을 설정하며, 고도각에는 `getElevation()` 값을 사용합니다.
+- 카메라 각도는 라디안으로 지정하며 `TAU`가 한 바퀴입니다. `setFovDeg`처럼 이름이 `Deg`로 끝나는 함수는 도 단위를 받습니다.
+- 두 궤도 각도로 자세를 다시 구성하므로 추가 롤 회전은 사라집니다. 궤도 모델은 `EasyCam`을 참조하세요.
+'''
+related = ["EasyCam::getAzimuth", "EasyCam::setElevation", "EasyCam::setFovDeg", "EasyCam"]
+snippet = '''
+void tcApp::setup() {
+    EasyCam camera;
+    camera.setAzimuth(TAU / 8.0f);
+    camera.setElevation(TAU / 12.0f);
+}
+'''
 
 ["EasyCam::setControlArea"]
 category = "graphics_camera"
 keywords = ["control area", "viewport", "rect", "constrain", "region"]
-description.en = "Constrain camera mouse input to a screen rectangle"
-description.ja = "カメラのマウス入力を画面の矩形領域に制限"
-description.ko = "카메라 마우스 입력을 화면 사각 영역으로 제한"
+description.en = "Sets the screen rectangle for camera mouse input."
+description.ja = "カメラのマウス入力に使う画面上の矩形を設定する。"
+description.ko = "카메라 마우스 입력에 사용할 화면 사각형을 설정한다."
+details.en = '''
+- `setControlArea(const Rect& area)` copies a rectangle in mouse-event coordinates; its edges are included. This controls input and does not change the rendering viewport.
+- A width or height of zero or less removes the restriction, as does `clearControlArea()`.
+- See `EasyCam::enableMouseInput` for how the area applies to presses, ongoing drags, and scrolling.
+'''
+details.ja = '''
+- `setControlArea(const Rect& area)` は、マウスイベントと同じ座標系の矩形をコピーし、境界も領域に含めます。入力を制御する設定で、描画のビューポートは変更しません。
+- 幅または高さがゼロ以下の場合は制限を解除します。`clearControlArea()` でも解除できます。
+- ボタンを押したとき、ドラッグ中、スクロール時の領域の扱いは `EasyCam::enableMouseInput` を参照してください。
+'''
+details.ko = '''
+- `setControlArea(const Rect& area)`는 마우스 이벤트와 같은 좌표계의 사각형을 복사하며 경계도 영역에 포함합니다. 입력을 제어하는 설정이며 렌더링 뷰포트는 변경하지 않습니다.
+- 너비 또는 높이가 0 이하이면 제한을 해제합니다. `clearControlArea()`로도 해제할 수 있습니다.
+- 버튼을 누를 때, 드래그 중일 때, 스크롤할 때 영역을 적용하는 규칙은 `EasyCam::enableMouseInput`을 참조하세요.
+'''
+related = ["EasyCam::clearControlArea", "EasyCam::enableMouseInput"]
 
 ["EasyCam::setDistance"]
 category = "graphics_camera"
 keywords = ["zoom", "radius", "dolly", "range"]
-description.en = "Set distance from target"
-description.ja = "注視点からの距離を設定"
-description.ko = "타겟으로부터의 거리를 설정"
-related = ["EasyCam::getDistance"]
+description.en = "Sets the camera's distance from its target."
+description.ja = "注視点からカメラまでの距離を設定する。"
+description.ko = "주시점에서 카메라까지의 거리를 설정한다."
+details.en = '''
+- `setDistance(float d)` sets the distance in world units and clamps values below `0.1` to `0.1`.
+- The target and orientation remain unchanged. See `EasyCam` for the orbit model and `EasyCam::enableOrtho` for how distance controls orthographic zoom.
+'''
+details.ja = '''
+- `setDistance(float d)` はワールド座標の単位で距離を設定し、`0.1` 未満の値を `0.1` に制限します。
+- 注視点と姿勢は変更しません。周回モデルは `EasyCam`、距離による正射影のズームは `EasyCam::enableOrtho` を参照してください。
+'''
+details.ko = '''
+- `setDistance(float d)`는 월드 좌표 단위로 거리를 설정하며 `0.1`보다 작은 값은 `0.1`로 제한합니다.
+- 주시점과 자세는 변경하지 않습니다. 궤도 모델은 `EasyCam`, 거리로 정사영 줌을 조절하는 방식은 `EasyCam::enableOrtho`를 참조하세요.
+'''
+related = ["EasyCam::getDistance", "EasyCam", "EasyCam::enableOrtho"]
+snippet = '''
+void tcApp::setup() {
+    EasyCam camera;
+    camera.setDistance(600.0f);
+}
+'''
 
 ["EasyCam::setDragModifier"]
 category = "graphics_camera"
 keywords = ["shift", "ctrl", "alt", "camera input", "gate"]
-description.en = "Set the modifier key required for camera mouse input (default: None)"
-description.ja = "カメラのマウス入力に必要な修飾キーを設定（デフォルト：None）"
-description.ko = "카메라 마우스 입력에 필요한 수정자 키를 설정 (기본: None)"
+description.en = "Sets the modifier required for automatic camera mouse input."
+description.ja = "カメラの自動マウス入力に必要な修飾キーを設定する。"
+description.ko = "카메라의 자동 마우스 입력에 필요한 수정자 키를 설정한다."
+details.en = '''
+- Accepts `EasyCam::Modifier::None`, `Shift`, `Ctrl`, `Alt`, or `Super` and returns `EasyCam&` for chaining. The default is `None`.
+- See `EasyCam::enableMouseInput` for when modifiers are checked for orbiting, panning, and zooming.
+'''
+details.ja = '''
+- `EasyCam::Modifier::None`、`Shift`、`Ctrl`、`Alt`、`Super` を受け取り、呼び出しを連結できるように `EasyCam&` を返します。初期値は `None` です。
+- 周回、パン、ズームで修飾キーを確認するタイミングは `EasyCam::enableMouseInput` を参照してください。
+'''
+details.ko = '''
+- `EasyCam::Modifier::None`, `Shift`, `Ctrl`, `Alt`, `Super`를 받으며 호출을 연결할 수 있도록 `EasyCam&`를 반환합니다. 초기값은 `None`입니다.
+- 궤도 회전, 패닝, 줌에서 수정자 키를 확인하는 시점은 `EasyCam::enableMouseInput`을 참조하세요.
+'''
+related = ["EasyCam::Modifier", "EasyCam::getDragModifier", "EasyCam::enableMouseInput"]
 
 ["EasyCam::setElevation"]
 category = "graphics_camera"
 keywords = ["orbit", "pitch", "vertical angle"]
-description.en = "Set orbit elevation (vertical angle, radians; clamped to ~±80°)"
-description.ja = "周回の仰角（垂直角・ラジアン、約±80°でクランプ）を設定"
-description.ko = "궤도 고도각(수직각, 라디안; 약 ±80°로 제한)을 설정"
-related = ["EasyCam::getElevation"]
+description.en = "Sets the camera's orbit elevation."
+description.ja = "カメラの周回の仰角を設定する。"
+description.ko = "카메라 궤도의 고도각을 설정한다."
+details.en = '''
+- `setElevation(float radians)` rebuilds the orientation using the supplied elevation and `getAzimuth()`, discarding any additional roll.
+- Elevation is not clamped; `TAU / 4.0f` gives a straight-down view with a unit up axis. Elevations in `0 < elevation <= TAU / 4.0f` place the camera above the target relative to that axis.
+- See `EasyCam::setAzimuth` for angle units and `EasyCam` for the orbit model.
+'''
+details.ja = '''
+- `setElevation(float radians)` は、指定した仰角と `getAzimuth()` の値から姿勢を作り直すため、追加のロール回転は失われます。
+- 仰角は制限しません。上方向の軸が単位ベクトルの場合、`TAU / 4.0f` で真下を見る姿勢になります。`0 < elevation <= TAU / 4.0f` の範囲では、その軸を基準に注視点より上にカメラを配置します。
+- 角度の単位は `EasyCam::setAzimuth`、周回モデルは `EasyCam` を参照してください。
+'''
+details.ko = '''
+- `setElevation(float radians)`는 지정한 고도각과 `getAzimuth()` 값으로 자세를 다시 구성하므로 추가 롤 회전은 사라집니다.
+- 고도각은 제한하지 않습니다. 위쪽 축이 단위 벡터인 경우 `TAU / 4.0f`로 설정하면 수직으로 아래를 바라봅니다. `0 < elevation <= TAU / 4.0f` 범위에서는 해당 축을 기준으로 카메라를 주시점 위에 배치합니다.
+- 각도 단위는 `EasyCam::setAzimuth`, 궤도 모델은 `EasyCam`을 참조하세요.
+'''
+related = ["EasyCam::getElevation", "EasyCam::setAzimuth", "EasyCam"]
 
 ["EasyCam::setFarClip"]
 category = "graphics_camera"
 keywords = ["far plane", "clipping", "frustum", "z far"]
-description.en = "Set far clipping plane"
-description.ja = "遠クリップ面を設定"
-description.ko = "원평면(far clip plane)을 설정"
-related = ["getFarClip"]
+description.en = "Sets the camera's far clipping distance."
+description.ja = "カメラの遠クリップ距離を設定する。"
+description.ko = "카메라의 원거리 클리핑 거리를 설정한다."
+details.en = '''
+- `setFarClip(float farClip)` stores a distance from the camera in world units, used by the next `begin()` in either projection mode. The initial value is `10000`.
+- The value is stored without validation; zero does not select automatic calculation. This is separate from the screen-projection override returned by the free function `getFarClip()`.
+'''
+details.ja = '''
+- `setFarClip(float farClip)` は、カメラからの距離をワールド座標の単位で保存し、どちらの投影モードでも次の `begin()` で使います。初期値は `10000` です。
+- 値は検証せずに保存し、ゼロを指定しても自動計算にはなりません。自由関数 `getFarClip()` が返す画面投影の上書き値とは別の設定です。
+'''
+details.ko = '''
+- `setFarClip(float farClip)`은 카메라에서의 거리를 월드 좌표 단위로 저장하며, 두 투영 모드 모두 다음 `begin()`에서 사용합니다. 초기값은 `10000`입니다.
+- 값을 검증 없이 저장하며 0을 지정해도 자동 계산을 선택하지 않습니다. 자유 함수 `getFarClip()`이 반환하는 화면 투영 재정의 값과는 별도의 설정입니다.
+'''
+related = ["getFarClip", "EasyCam::setNearClip", "EasyCam::begin"]
 
 ["EasyCam::setFov"]
 category = "graphics_camera"
 keywords = ["field of view", "zoom", "lens", "angle", "perspective"]
-description.en = "Set field of view in radians"
-description.ja = "視野角をラジアンで設定"
-description.ko = "시야각을 라디안으로 설정"
-related = ["EasyCam::getFov", "EasyCam::setFovDeg", "setupScreenFov", "Mat4::perspective"]
+description.en = "Sets the camera's vertical field of view."
+description.ja = "カメラの垂直視野角を設定する。"
+description.ko = "카메라의 수직 시야각을 설정한다."
+details.en = '''
+- `setFov(float fov)` stores the vertical field of view in radians without validation; the next `begin()` uses it. The initial value is approximately `TAU / 8.0f` (45 degrees).
+- In orthographic mode, this value controls the visible extent rather than perspective. See `EasyCam::enableOrtho` for orthographic sizing.
+- Zero does not enable orthographic mode. See `EasyCam::setAzimuth` for angle units and the `Deg` naming convention.
+'''
+details.ja = '''
+- `setFov(float fov)` は垂直視野角をラジアンで検証せずに保存し、次の `begin()` で使います。初期値は約 `TAU / 8.0f`（45 度）です。
+- 正射影モードでは、遠近感ではなく表示範囲の大きさを調整します。正射影の範囲の決め方は `EasyCam::enableOrtho` を参照してください。
+- ゼロを指定しても正射影モードにはなりません。角度の単位と `Deg` の命名規則は `EasyCam::setAzimuth` を参照してください。
+'''
+details.ko = '''
+- `setFov(float fov)`는 수직 시야각을 라디안으로 검증 없이 저장하며 다음 `begin()`에서 사용합니다. 초기값은 약 `TAU / 8.0f`(45도)입니다.
+- 정사영 모드에서는 원근감 대신 표시 범위의 크기를 조절합니다. 정사영 범위를 정하는 방식은 `EasyCam::enableOrtho`를 참조하세요.
+- 0을 지정해도 정사영 모드가 되지 않습니다. 각도 단위와 `Deg` 명명 규칙은 `EasyCam::setAzimuth`을 참조하세요.
+'''
+related = ["EasyCam::getFov", "EasyCam::setFovDeg", "setupScreenFov", "Mat4::perspective", "EasyCam::enableOrtho", "EasyCam::setAzimuth"]
+snippet = '''
+void tcApp::setup() {
+    EasyCam camera;
+    camera.setFov(TAU / 6.0f);
+}
+'''
 
 ["EasyCam::setFovDeg"]
 category = "graphics_camera"
 keywords = ["field of view", "degrees", "lens", "angle"]
-description.en = "Set field of view in degrees"
-description.ja = "視野角を度数で設定"
-description.ko = "시야각을 도(degree)로 설정"
+description.en = "Sets the camera's vertical field of view in degrees."
+description.ja = "カメラの垂直視野角を度数で設定する。"
+description.ko = "카메라의 수직 시야각을 도 단위로 설정한다."
+details.en = '''
+- `setFovDeg(float degrees)` converts degrees to radians and stores the result without validation.
+- It has the same projection behavior as `EasyCam::setFov`; `getFov()` returns radians. See `EasyCam::setAzimuth` for the angle naming convention.
+'''
+details.ja = '''
+- `setFovDeg(float degrees)` は度数をラジアンに変換し、結果を検証せずに保存します。
+- 投影に対する動作は `EasyCam::setFov` と同じで、`getFov()` はラジアンを返します。角度の命名規則は `EasyCam::setAzimuth` を参照してください。
+'''
+details.ko = '''
+- `setFovDeg(float degrees)`는 도 단위를 라디안으로 변환하고 결과를 검증 없이 저장합니다.
+- 투영에 대한 동작은 `EasyCam::setFov`와 같으며 `getFov()`는 라디안을 반환합니다. 각도 명명 규칙은 `EasyCam::setAzimuth`을 참조하세요.
+'''
+related = ["EasyCam::setFov", "EasyCam::getFov", "EasyCam::setAzimuth"]
 
 ["EasyCam::setNearClip"]
 category = "graphics_camera"
 keywords = ["near plane", "clipping", "frustum", "z near"]
-description.en = "Set near clipping plane"
-description.ja = "近クリップ面を設定"
-description.ko = "근평면(near clip plane)을 설정"
-related = ["getNearClip"]
+description.en = "Sets the camera's near clipping distance."
+description.ja = "カメラの近クリップ距離を設定する。"
+description.ko = "카메라의 근거리 클리핑 거리를 설정한다."
+details.en = '''
+- `setNearClip(float nearClip)` stores a distance from the camera in world units, used by the next `begin()` in either projection mode. The initial value is `0.1`.
+- The value is stored without validation; zero does not select automatic calculation. This is separate from the screen-projection override returned by the free function `getNearClip()`.
+'''
+details.ja = '''
+- `setNearClip(float nearClip)` は、カメラからの距離をワールド座標の単位で保存し、どちらの投影モードでも次の `begin()` で使います。初期値は `0.1` です。
+- 値は検証せずに保存し、ゼロを指定しても自動計算にはなりません。自由関数 `getNearClip()` が返す画面投影の上書き値とは別の設定です。
+'''
+details.ko = '''
+- `setNearClip(float nearClip)`은 카메라에서의 거리를 월드 좌표 단위로 저장하며, 두 투영 모드 모두 다음 `begin()`에서 사용합니다. 초기값은 `0.1`입니다.
+- 값을 검증 없이 저장하며 0을 지정해도 자동 계산을 선택하지 않습니다. 자유 함수 `getNearClip()`이 반환하는 화면 투영 재정의 값과는 별도의 설정입니다.
+'''
+related = ["getNearClip", "EasyCam::setFarClip", "EasyCam::begin"]
 
 ["EasyCam::setOrbitButton"]
 category = "graphics_camera"
 keywords = ["mouse button", "binding", "rotate", "control"]
-description.en = "Set the mouse button that orbits the camera (default: left)"
-description.ja = "カメラを回転させるマウスボタンを設定（デフォルト：左）"
-description.ko = "카메라를 회전시키는 마우스 버튼을 설정 (기본: 왼쪽)"
+description.en = "Sets the mouse button used to orbit the camera."
+description.ja = "カメラの周回に使うマウスボタンを設定する。"
+description.ko = "카메라 궤도 회전에 사용할 마우스 버튼을 설정한다."
+details.en = '''
+- `setOrbitButton(int button)` stores a mouse button and returns `EasyCam&` for chaining. The default is `MOUSE_BUTTON_LEFT`.
+- If the orbit and pan buttons are the same, orbiting takes precedence when a drag starts.
+- See `EasyCam::enableMouseInput` for mouse controls and input handling rules.
+'''
+details.ja = '''
+- `setOrbitButton(int button)` はマウスボタンを保存し、呼び出しを連結できるように `EasyCam&` を返します。初期値は `MOUSE_BUTTON_LEFT` です。
+- 周回とパンに同じボタンを指定した場合、ドラッグ開始時は周回を優先します。
+- マウス操作と入力処理の規則は `EasyCam::enableMouseInput` を参照してください。
+'''
+details.ko = '''
+- `setOrbitButton(int button)`은 마우스 버튼을 저장하며 호출을 연결할 수 있도록 `EasyCam&`를 반환합니다. 초기값은 `MOUSE_BUTTON_LEFT`입니다.
+- 궤도 회전과 패닝에 같은 버튼을 지정하면 드래그를 시작할 때 궤도 회전을 우선합니다.
+- 마우스 조작과 입력 처리 규칙은 `EasyCam::enableMouseInput`을 참조하세요.
+'''
+related = ["EasyCam::getOrbitButton", "EasyCam::setPanButton", "EasyCam::enableMouseInput"]
 
 ["EasyCam::setOrientation"]
 category = "graphics_camera"
 keywords = ["quaternion", "rotation", "camera"]
-description.en = "Set the camera orientation quaternion"
-description.ja = "カメラの姿勢クォータニオンを設定"
-description.ko = "카메라 방향 쿼터니언을 설정"
+description.en = "Sets the camera's orientation quaternion."
+description.ja = "カメラの姿勢をクォータニオンで設定する。"
+description.ko = "카메라 자세를 쿼터니언으로 설정한다."
+details.en = '''
+- `setOrientation(const Quaternion& q)` stores a normalized copy; a zero-length quaternion becomes the identity orientation.
+- The rotated local `+Z` axis determines the offset from the target, and the rotated local `+Y` axis determines camera up. The target and distance remain unchanged.
+- Later calls to `setAzimuth`, `setElevation`, `setUpAxis`, or `reset` rebuild the orientation. See `EasyCam` for the orbit model.
+'''
+details.ja = '''
+- `setOrientation(const Quaternion& q)` は正規化したコピーを保存します。長さがゼロのクォータニオンは単位クォータニオンになります。
+- 回転後のローカル `+Z` 軸で注視点からの方向を決め、回転後のローカル `+Y` 軸をカメラの上方向に使います。注視点と距離は変更しません。
+- その後に `setAzimuth`、`setElevation`、`setUpAxis`、`reset` を呼び出すと姿勢を作り直します。周回モデルは `EasyCam` を参照してください。
+'''
+details.ko = '''
+- `setOrientation(const Quaternion& q)`는 정규화한 복사본을 저장합니다. 길이가 0인 쿼터니언은 단위 쿼터니언이 됩니다.
+- 회전한 로컬 `+Z` 축으로 주시점에서 카메라로 향하는 방향을 정하고, 회전한 로컬 `+Y` 축을 카메라의 위쪽으로 사용합니다. 주시점과 거리는 변경하지 않습니다.
+- 이후 `setAzimuth`, `setElevation`, `setUpAxis`, `reset`을 호출하면 자세를 다시 구성합니다. 궤도 모델은 `EasyCam`을 참조하세요.
+'''
+related = ["EasyCam::getOrientation", "EasyCam::setAzimuth", "EasyCam::setElevation", "EasyCam::setUpAxis", "EasyCam"]
 
 ["EasyCam::setOrtho"]
 category = "graphics_camera"
 keywords = ["orthographic", "projection", "toggle"]
-description.en = "Set orthographic projection on/off"
-description.ja = "正射影のオン/オフを設定"
-description.ko = "정사영 켜기/끄기를 설정"
+description.en = "Selects orthographic or perspective projection."
+description.ja = "正射影と透視投影を切り替える。"
+description.ko = "정사영과 원근 투영을 전환한다."
+details.en = '''
+- `setOrtho(bool ortho)` selects orthographic projection with `true` and perspective projection with `false`, taking effect at the next `begin()`.
+- See `EasyCam::enableOrtho` for orthographic sizing and zoom behavior.
+'''
+details.ja = '''
+- `setOrtho(bool ortho)` は `true` で正射影、`false` で透視投影を選び、次の `begin()` で反映します。
+- 正射影の範囲とズームの動作は `EasyCam::enableOrtho` を参照してください。
+'''
+details.ko = '''
+- `setOrtho(bool ortho)`는 `true`일 때 정사영, `false`일 때 원근 투영을 선택하며 다음 `begin()`에서 적용합니다.
+- 정사영 범위와 줌 동작은 `EasyCam::enableOrtho`를 참조하세요.
+'''
+related = ["EasyCam::enableOrtho", "EasyCam::disableOrtho", "EasyCam::getOrtho"]
 
 ["EasyCam::setPanButton"]
 category = "graphics_camera"
 keywords = ["mouse button", "binding", "translate", "control"]
-description.en = "Set the mouse button that pans the camera (default: middle)"
-description.ja = "カメラをパンさせるマウスボタンを設定（デフォルト：中）"
-description.ko = "카메라를 패닝하는 마우스 버튼을 설정 (기본: 가운데)"
+description.en = "Sets the mouse button used to pan the camera."
+description.ja = "カメラのパンに使うマウスボタンを設定する。"
+description.ko = "카메라 패닝에 사용할 마우스 버튼을 설정한다."
+details.en = '''
+- `setPanButton(int button)` stores a mouse button and returns `EasyCam&` for chaining. The default is `MOUSE_BUTTON_MIDDLE`.
+- If the pan and orbit buttons are the same, orbiting takes precedence when a drag starts.
+- See `EasyCam::enableMouseInput` for mouse controls and input handling rules.
+'''
+details.ja = '''
+- `setPanButton(int button)` はマウスボタンを保存し、呼び出しを連結できるように `EasyCam&` を返します。初期値は `MOUSE_BUTTON_MIDDLE` です。
+- パンと周回に同じボタンを指定した場合、ドラッグ開始時は周回を優先します。
+- マウス操作と入力処理の規則は `EasyCam::enableMouseInput` を参照してください。
+'''
+details.ko = '''
+- `setPanButton(int button)`은 마우스 버튼을 저장하며 호출을 연결할 수 있도록 `EasyCam&`를 반환합니다. 초기값은 `MOUSE_BUTTON_MIDDLE`입니다.
+- 패닝과 궤도 회전에 같은 버튼을 지정하면 드래그를 시작할 때 궤도 회전을 우선합니다.
+- 마우스 조작과 입력 처리 규칙은 `EasyCam::enableMouseInput`을 참조하세요.
+'''
+related = ["EasyCam::getPanButton", "EasyCam::setOrbitButton", "EasyCam::enableMouseInput"]
 
 ["EasyCam::setPanSensitivity"]
 category = "graphics_camera"
 keywords = ["pan speed", "drag speed", "translate speed", "tuning"]
-description.en = "Set pan sensitivity"
-description.ja = "パン感度を設定"
-description.ko = "팬 감도를 설정"
+description.en = "Sets the sensitivity of mouse panning."
+description.ja = "マウスによるパンの感度を設定する。"
+description.ko = "마우스 패닝 감도를 설정한다."
+details.en = '''
+- `setPanSensitivity(float s)` stores the multiplier without clamping; the initial value is `1`.
+- Each mouse-coordinate unit moves the target by `0.5 * s` world units: horizontal dragging moves opposite camera right, and vertical dragging moves along camera up.
+- See `EasyCam::enableMouseInput` for mouse controls and input handling rules.
+'''
+details.ja = '''
+- `setPanSensitivity(float s)` は倍率を制限せずに保存します。初期値は `1` です。
+- マウス座標が 1 単位変わるごとに、注視点をワールド座標で `0.5 * s` 単位移動します。横方向のドラッグではカメラの右方向と逆に、縦方向ではカメラの上方向に移動します。
+- マウス操作と入力処理の規則は `EasyCam::enableMouseInput` を参照してください。
+'''
+details.ko = '''
+- `setPanSensitivity(float s)`는 배율을 제한 없이 저장합니다. 초기값은 `1`입니다.
+- 마우스 좌표가 1단위 변할 때마다 주시점을 월드 좌표에서 `0.5 * s`단위 이동합니다. 가로 드래그는 카메라의 오른쪽과 반대 방향으로, 세로 드래그는 카메라의 위쪽 방향으로 이동합니다.
+- 마우스 조작과 입력 처리 규칙은 `EasyCam::enableMouseInput`을 참조하세요.
+'''
+related = ["EasyCam::setSensitivity", "EasyCam::setZoomSensitivity", "EasyCam::enableMouseInput"]
 
 ["EasyCam::setSensitivity"]
 category = "graphics_camera"
 keywords = ["rotation speed", "drag speed", "responsiveness", "tuning"]
-description.en = "Set rotation sensitivity"
-description.ja = "回転感度を設定"
-description.ko = "회전 감도를 설정"
+description.en = "Sets the sensitivity of mouse orbit rotation."
+description.ja = "マウスによる周回回転の感度を設定する。"
+description.ko = "마우스 궤도 회전 감도를 설정한다."
+details.en = '''
+- `setSensitivity(float s)` stores the rotation multiplier without clamping; the initial value is `1`.
+- Horizontal and vertical drag deltas produce rotations of `-dx * 0.01 * s` and `-dy * 0.01 * s` radians around the configured up axis and camera right axis, respectively.
+- See `EasyCam::enableMouseInput` for mouse controls and input handling rules.
+'''
+details.ja = '''
+- `setSensitivity(float s)` は回転の倍率を制限せずに保存します。初期値は `1` です。
+- 横と縦のドラッグの変化量から、それぞれ設定した上方向の軸とカメラの右方向の軸を中心に、`-dx * 0.01 * s`、`-dy * 0.01 * s` ラジアン回転します。
+- マウス操作と入力処理の規則は `EasyCam::enableMouseInput` を参照してください。
+'''
+details.ko = '''
+- `setSensitivity(float s)`는 회전 배율을 제한 없이 저장합니다. 초기값은 `1`입니다.
+- 가로와 세로 드래그 변화량에 따라 각각 설정한 위쪽 축과 카메라의 오른쪽 축을 중심으로 `-dx * 0.01 * s`, `-dy * 0.01 * s`라디안 회전합니다.
+- 마우스 조작과 입력 처리 규칙은 `EasyCam::enableMouseInput`을 참조하세요.
+'''
+related = ["EasyCam::setPanSensitivity", "EasyCam::setZoomSensitivity", "EasyCam::enableMouseInput"]
 
 ["EasyCam::setTarget"]
 category = "graphics_camera"
 keywords = ["look at", "focus", "center", "aim", "pivot"]
-description.en = "Set camera look-at target"
-description.ja = "カメラの注視点を設定"
-description.ko = "카메라의 look-at 타겟을 설정"
-related = ["EasyCam::getTarget", "Mat4::lookAt"]
+description.en = "Sets the camera's look-at target."
+description.ja = "カメラの注視点を設定する。"
+description.ko = "카메라의 주시점을 설정한다."
+details.en = '''
+- Accepts `setTarget(float x, float y, float z)` or `setTarget(const Vec3& t)` in world coordinates and copies the position.
+- Distance and orientation remain unchanged, so moving the target also moves the camera by the same offset. See `EasyCam` for the orbit model.
+'''
+details.ja = '''
+- ワールド座標の `setTarget(float x, float y, float z)` または `setTarget(const Vec3& t)` を受け取り、位置をコピーします。
+- 距離と姿勢は変更しないため、注視点を移動するとカメラも同じ量だけ移動します。周回モデルは `EasyCam` を参照してください。
+'''
+details.ko = '''
+- 월드 좌표의 `setTarget(float x, float y, float z)` 또는 `setTarget(const Vec3& t)`를 받아 위치를 복사합니다.
+- 거리와 자세는 변경하지 않으므로 주시점을 이동하면 카메라도 같은 양만큼 이동합니다. 궤도 모델은 `EasyCam`을 참조하세요.
+'''
+related = ["EasyCam::getTarget", "Mat4::lookAt", "EasyCam"]
+snippet = '''
+void tcApp::setup() {
+    EasyCam camera;
+    camera.setTarget(0.0f, 50.0f, 0.0f);
+    camera.setDistance(600.0f);
+}
+'''
 
 ["EasyCam::setUpAxis"]
 category = "graphics_camera"
 keywords = ["up axis", "y-up", "z-up"]
-description.en = "Set the camera up axis (default Y-up; use (0,0,1) for Z-up)"
-description.ja = "カメラのアップ軸を設定（デフォルトY-up、Z-upは(0,0,1)）"
-description.ko = "카메라 업 축을 설정 (기본 Y-up, Z-up은 (0,0,1))"
+description.en = "Sets the up axis used for camera orbiting."
+description.ja = "カメラの周回に使う上方向の軸を設定する。"
+description.ko = "카메라 궤도 회전에 사용할 위쪽 축을 설정한다."
+details.en = '''
+- Accepts `setUpAxis(const Vec3& up)` or `setUpAxis(float x, float y, float z)`. The default is Y-up `(0, 1, 0)`; use `(0, 0, 1)` for Z-up.
+- Copies the axis without normalizing it and resets the orientation to the base pose for that axis. Set the up axis before setting orbit angles or a custom orientation.
+- Target and distance remain unchanged. See `EasyCam` for the orbit model.
+'''
+details.ja = '''
+- `setUpAxis(const Vec3& up)` または `setUpAxis(float x, float y, float z)` を受け取ります。初期値は Y-up の `(0, 1, 0)` で、Z-up には `(0, 0, 1)` を指定します。
+- 軸は正規化せずにコピーし、姿勢をその軸に対する基準姿勢に戻します。周回角や独自の姿勢を設定する前に、上方向の軸を設定してください。
+- 注視点と距離は変更しません。周回モデルは `EasyCam` を参照してください。
+'''
+details.ko = '''
+- `setUpAxis(const Vec3& up)` 또는 `setUpAxis(float x, float y, float z)`를 받습니다. 초기값은 Y-up인 `(0, 1, 0)`이며 Z-up에는 `(0, 0, 1)`을 지정합니다.
+- 축을 정규화하지 않고 복사하며 자세를 해당 축의 기본 자세로 되돌립니다. 궤도 각도나 사용자 지정 자세를 설정하기 전에 위쪽 축을 설정하세요.
+- 주시점과 거리는 변경하지 않습니다. 궤도 모델은 `EasyCam`을 참조하세요.
+'''
+related = ["EasyCam::getUpAxis", "EasyCam::setAzimuth", "EasyCam::setElevation", "EasyCam::setOrientation", "EasyCam"]
 
 ["EasyCam::setZoomSensitivity"]
 category = "graphics_camera"
 keywords = ["zoom speed", "scroll speed", "dolly speed", "tuning"]
-description.en = "Set zoom sensitivity"
-description.ja = "ズーム感度を設定"
-description.ko = "줌 감도를 설정"
+description.en = "Sets the sensitivity of mouse-wheel zooming."
+description.ja = "マウスホイールによるズームの感度を設定する。"
+description.ko = "마우스 휠 줌 감도를 설정한다."
+details.en = '''
+- `setZoomSensitivity(float s)` stores the multiplier without clamping; the initial value is `10`.
+- Scrolling changes the distance by `-dy * s` world units, with a minimum distance of `0.1`.
+- See `EasyCam::enableMouseInput` for input rules and `EasyCam::enableOrtho` for orthographic zoom behavior.
+'''
+details.ja = '''
+- `setZoomSensitivity(float s)` は倍率を制限せずに保存します。初期値は `10` です。
+- スクロールで距離をワールド座標の `-dy * s` 単位だけ変更し、距離の最小値を `0.1` に制限します。
+- 入力の規則は `EasyCam::enableMouseInput`、正射影でのズームの動作は `EasyCam::enableOrtho` を参照してください。
+'''
+details.ko = '''
+- `setZoomSensitivity(float s)`는 배율을 제한 없이 저장합니다. 초기값은 `10`입니다.
+- 스크롤하면 거리를 월드 좌표의 `-dy * s`단위만큼 변경하며 거리의 최솟값을 `0.1`로 제한합니다.
+- 입력 규칙은 `EasyCam::enableMouseInput`, 정사영 줌 동작은 `EasyCam::enableOrtho`를 참조하세요.
+'''
+related = ["EasyCam::setDistance", "EasyCam::enableMouseInput", "EasyCam::enableOrtho"]
 
 ["Environment"]
 keywords = ["ibl", "skybox", "hdr"]
@@ -20222,10 +20917,25 @@ related = ["BlendMode", "setBlendMode"]
 ["getCameraPosition"]
 category = "graphics_camera"
 keywords = ["camera position", "eye", "view vector", "specular", "viewpoint"]
-description.en = "Current camera position used for specular/PBR view vector"
-description.ja = "specular/PBRの視線ベクトルに使う現在のカメラ位置"
-description.ko = "specular/PBR 시선 벡터에 사용하는 현재 카메라 위치"
-related = ["setCameraPosition", "setMaterial"]
+description.en = "Returns the camera position stored for lighting."
+description.ja = "ライティング用に保存されたカメラ位置を返す。"
+description.ko = "조명용으로 저장된 카메라 위치를 반환한다."
+details.en = '''
+- Returns `const Vec3&` to the current render target's stored world-space camera position, used for specular and PBR view vectors. The initial value is `(0, 0, 0)`.
+- This is the value set by `setCameraPosition()`, not a position derived from the current view matrix. `EasyCam::begin()` and screen-projection setup do not update it; use `setCameraPosition(camera.getPosition())` when lighting should follow an EasyCam.
+- Each render target stores its own value. `EasyCam::end()` restores the value saved by its matching `begin()`.
+'''
+details.ja = '''
+- 現在の描画先に保存されたワールド座標のカメラ位置を `const Vec3&` で返します。スペキュラ反射と PBR の視線ベクトルに使う値で、初期値は `(0, 0, 0)` です。
+- `setCameraPosition()` で設定した値であり、現在のビュー行列から求める位置ではありません。`EasyCam::begin()` や画面投影の設定では更新しないため、ライティングを EasyCam に合わせる場合は `setCameraPosition(camera.getPosition())` を使います。
+- 描画先ごとに独立した値を保存します。`EasyCam::end()` は、対応する `begin()` で保存した値に戻します。
+'''
+details.ko = '''
+- 현재 렌더링 대상에 저장된 월드 좌표 카메라 위치를 `const Vec3&`로 반환합니다. 스페큘러 반사와 PBR 시선 벡터에 사용하는 값이며 초기값은 `(0, 0, 0)`입니다.
+- 현재 뷰 행렬에서 계산한 위치가 아니라 `setCameraPosition()`으로 설정한 값입니다. `EasyCam::begin()`이나 화면 투영 설정은 이 값을 갱신하지 않으므로 조명이 EasyCam을 따르게 하려면 `setCameraPosition(camera.getPosition())`을 사용합니다.
+- 렌더링 대상마다 별도의 값을 저장합니다. `EasyCam::end()`는 대응하는 `begin()`에서 저장한 값으로 되돌립니다.
+'''
+related = ["setCameraPosition", "setMaterial", "EasyCam::getPosition", "EasyCam::begin", "EasyCam::end"]
 
 ["getCircleResolution"]
 category = "graphics_style"
@@ -20536,10 +21246,25 @@ Android は "" を返す（アセットは AAssetManager 経由）。Web はハ�
 ["getFarClip"]
 category = "graphics_camera"
 keywords = ["far plane", "clipping", "frustum", "z far"]
-description.en = "Get the far-clip override (0 = auto-calculate from the camera distance)."
-description.ja = "ファークリップのオーバーライド値を取得（0 = カメラ距離から自動計算）。"
-description.ko = "파 클립 오버라이드 값을 가져온다 (0 = 카메라 거리에서 자동 계산)."
-related = ["setFarClip"]
+description.en = "Returns the stored screen-projection far-clip override."
+description.ja = "画面投影の遠クリップの上書き値を返す。"
+description.ko = "저장된 화면 투영의 원거리 클리핑 재정의 값을 반환한다."
+details.en = '''
+- Returns the `float` stored by the free function `setFarClip()`. The initial value is `0`; it is a shared setting across windows, not an EasyCam value or the far distance of the active projection.
+- For perspective screen setup, nonzero far-distance arguments are used directly. When the argument is `0`, a positive override is used if available; otherwise the far distance is calculated as ten times the screen camera distance. This getter returns the stored override, not that calculated distance.
+- Orthographic screen setup uses the chosen far distance for symmetric depth bounds. `EasyCam` uses its separate `setFarClip()` setting.
+'''
+details.ja = '''
+- 自由関数 `setFarClip()` が保存した `float` 値を返します。初期値は `0` で、ウィンドウ間で共有する設定です。EasyCam の値や、現在の投影の遠クリップ距離ではありません。
+- 透視投影の画面設定では、遠クリップ距離の引数が `0` 以外なら、その値をそのまま使います。引数が `0` の場合に限り、上書き値が正ならそれを使い、正でなければ画面カメラの距離の 10 倍で計算します。この関数は計算後の距離ではなく、保存された上書き値を返します。
+- 正射影の画面設定では、選ばれた遠クリップ距離を使って奥行きの範囲を前後対称に設定します。`EasyCam` は独立した `setFarClip()` の設定を使います。
+'''
+details.ko = '''
+- 자유 함수 `setFarClip()`이 저장한 `float` 값을 반환합니다. 초기값은 `0`이며 창 사이에서 공유하는 설정입니다. EasyCam의 값이나 현재 투영의 원거리 클리핑 거리가 아닙니다.
+- 원근 투영 화면 설정에서는 원거리 인수가 `0`이 아니면 그 값을 그대로 사용합니다. 인수가 `0`일 때만 재정의 값이 양수이면 그 값을 사용하고, 양수가 아니면 화면 카메라 거리의 10배로 계산합니다. 이 함수는 계산된 거리가 아니라 저장된 재정의 값을 반환합니다.
+- 정사영 화면 설정은 선택한 원거리 값을 사용해 깊이 범위를 앞뒤 대칭으로 설정합니다. `EasyCam`은 별도의 `setFarClip()` 설정을 사용합니다.
+'''
+related = ["setFarClip", "getNearClip", "setupScreenFov", "EasyCam::setFarClip"]
 
 ["getFboCount"]
 category = "memory"
@@ -20866,10 +21591,25 @@ related = ["getMouseX", "getMousePos"]
 ["getNearClip"]
 category = "graphics_camera"
 keywords = ["near plane", "clipping", "frustum", "z near"]
-description.en = "Get the near-clip override (0 = auto-calculate from the camera distance)."
-description.ja = "ニアクリップのオーバーライド値を取得（0 = カメラ距離から自動計算）。"
-description.ko = "니어 클립 오버라이드 값을 가져온다 (0 = 카메라 거리에서 자동 계산)."
-related = ["setNearClip"]
+description.en = "Returns the stored screen-projection near-clip override."
+description.ja = "画面投影の近クリップの上書き値を返す。"
+description.ko = "저장된 화면 투영의 근거리 클리핑 재정의 값을 반환한다."
+details.en = '''
+- Returns the `float` stored by the free function `setNearClip()`. The initial value is `0`; it is a shared setting across windows, not an EasyCam value or the near distance of the active projection.
+- For perspective screen setup, nonzero near-distance arguments are used directly. When the argument is `0`, a positive override is used if available; otherwise the near distance is calculated as one tenth of the screen camera distance. This getter returns the stored override, not that calculated distance.
+- Orthographic screen setup uses symmetric depth bounds derived from the far distance, so this override does not set its near boundary. `EasyCam` uses its separate `setNearClip()` setting.
+'''
+details.ja = '''
+- 自由関数 `setNearClip()` が保存した `float` 値を返します。初期値は `0` で、ウィンドウ間で共有する設定です。EasyCam の値や、現在の投影の近クリップ距離ではありません。
+- 透視投影の画面設定では、近クリップ距離の引数が `0` 以外なら、その値をそのまま使います。引数が `0` の場合に限り、上書き値が正ならそれを使い、正でなければ画面カメラの距離の 10 分の 1 で計算します。この関数は計算後の距離ではなく、保存された上書き値を返します。
+- 正射影の画面設定は遠クリップ距離から前後対称の奥行き範囲を作るため、この上書き値は近い側の境界には使いません。`EasyCam` は独立した `setNearClip()` の設定を使います。
+'''
+details.ko = '''
+- 자유 함수 `setNearClip()`이 저장한 `float` 값을 반환합니다. 초기값은 `0`이며 창 사이에서 공유하는 설정입니다. EasyCam의 값이나 현재 투영의 근거리 클리핑 거리가 아닙니다.
+- 원근 투영 화면 설정에서는 근거리 인수가 `0`이 아니면 그 값을 그대로 사용합니다. 인수가 `0`일 때만 재정의 값이 양수이면 그 값을 사용하고, 양수가 아니면 화면 카메라 거리의 10분의 1로 계산합니다. 이 함수는 계산된 거리가 아니라 저장된 재정의 값을 반환합니다.
+- 정사영 화면 설정은 원거리 값에서 앞뒤 대칭 깊이 범위를 만들므로 이 재정의 값은 가까운 쪽 경계를 설정하지 않습니다. `EasyCam`은 별도의 `setNearClip()` 설정을 사용합니다.
+'''
+related = ["setNearClip", "getFarClip", "setupScreenFov", "EasyCam::setNearClip"]
 
 ["getNodeCount"]
 category = "memory"

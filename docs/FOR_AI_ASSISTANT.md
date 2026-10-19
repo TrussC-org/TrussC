@@ -2398,9 +2398,9 @@ Vec3 worldToScreen(const Vec3 & worldPos)  // Convert a world coordinate to scre
 ### 3D Camera
 
 ```cpp
-const Vec3 & getCameraPosition()  // Current camera position used for specular/PBR view vector
-float getFarClip()  // Get the far-clip override (0 = auto-calculate from the camera distance).
-float getNearClip()  // Get the near-clip override (0 = auto-calculate from the camera distance).
+const Vec3 & getCameraPosition()  // Returns the camera position stored for lighting.
+float getFarClip()  // Returns the stored screen-projection far-clip override.
+float getNearClip()  // Returns the stored screen-projection near-clip override.
 ```
 
 ### Lighting & PBR
@@ -2809,52 +2809,52 @@ Color ColorOKLab::toRGB() const  // Convert to sRGB Color
 ```cpp
 ```
 
-### EasyCam — 3D camera with mouse control
+### EasyCam — A 3D orbit camera with optional mouse control.
 
 ```cpp
-void EasyCam::begin()  // Apply camera transform (start 3D mode)
-void EasyCam::clearControlArea()  // Clear the camera mouse-input control area constraint
-void EasyCam::disableMouseInput()  // Disable mouse input for camera control
-void EasyCam::disableOrtho()  // Disable orthographic projection (use perspective)
-void EasyCam::enableMouseInput()  // Enable mouse input for camera control
-void EasyCam::enableOrtho()  // Enable orthographic projection
-void EasyCam::end()  // Restore the camera snapshot and selected pipeline from the matching begin on this target, retaining its model and continuous logical blend/depth flags.
-float EasyCam::getAzimuth() const  // Get orbit azimuth (horizontal angle, radians)
-float EasyCam::getDistance() const  // Get distance from target
-Modifier EasyCam::getDragModifier() const  // Get the modifier key required for camera mouse input
-float EasyCam::getElevation() const  // Get orbit elevation (vertical angle, radians)
-float EasyCam::getFov() const  // Get field of view in radians
-int EasyCam::getOrbitButton() const  // Get the mouse button that orbits the camera
-Quaternion EasyCam::getOrientation() const  // Get the camera orientation quaternion
-bool EasyCam::getOrtho() const  // Get whether orthographic projection is enabled
-int EasyCam::getPanButton() const  // Get the mouse button that pans the camera
-Vec3 EasyCam::getPosition() const  // Get camera position
-Vec3 EasyCam::getTarget() const  // Get camera look-at target
-Vec3 EasyCam::getUpAxis() const  // Get the camera up axis
-bool EasyCam::isMouseInputEnabled() const  // Check if mouse input is enabled
-void EasyCam::mouseDragged(int x, int y, int button)  // Handle mouse drag event
-void EasyCam::mousePressed(int x, int y, int button)  // Handle mouse press event
-void EasyCam::mouseReleased(int x, int y, int button)  // Handle mouse release event
-void EasyCam::mouseScrolled(float dx, float dy)  // Handle mouse scroll event (for zoom)
-void EasyCam::reset()  // Reset camera to default position
-void EasyCam::setAzimuth(float radians)  // Set orbit azimuth (horizontal angle, radians)
-void EasyCam::setControlArea(const Rect & area)  // Constrain camera mouse input to a screen rectangle
-void EasyCam::setDistance(float d)  // Set distance from target
-EasyCam & EasyCam::setDragModifier(Modifier m)  // Set the modifier key required for camera mouse input (default: None)
-void EasyCam::setElevation(float radians)  // Set orbit elevation (vertical angle, radians; clamped to ~±80°)
-void EasyCam::setFarClip(float farClip)  // Set far clipping plane
-void EasyCam::setFov(float fov)  // Set field of view in radians
-void EasyCam::setFovDeg(float degrees)  // Set field of view in degrees
-void EasyCam::setNearClip(float nearClip)  // Set near clipping plane
-EasyCam & EasyCam::setOrbitButton(int button)  // Set the mouse button that orbits the camera (default: left)
-void EasyCam::setOrientation(const Quaternion & q)  // Set the camera orientation quaternion
-void EasyCam::setOrtho(bool ortho)  // Set orthographic projection on/off
-EasyCam & EasyCam::setPanButton(int button)  // Set the mouse button that pans the camera (default: middle)
-void EasyCam::setPanSensitivity(float s)  // Set pan sensitivity
-void EasyCam::setSensitivity(float s)  // Set rotation sensitivity
-void EasyCam::setTarget(float x, float y, float z) [+1]  // Set camera look-at target
-void EasyCam::setUpAxis(const Vec3 & up) [+1]  // Set the camera up axis (default Y-up; use (0,0,1) for Z-up)
-void EasyCam::setZoomSensitivity(float s)  // Set zoom sensitivity
+void EasyCam::begin()  // Applies the camera for 3D drawing.
+void EasyCam::clearControlArea()  // Removes the camera mouse-control area restriction.
+void EasyCam::disableMouseInput()  // Disables automatic mouse control of the camera.
+void EasyCam::disableOrtho()  // Selects perspective projection.
+void EasyCam::enableMouseInput()  // Enables automatic mouse control of the camera.
+void EasyCam::enableOrtho()  // Selects orthographic projection.
+void EasyCam::end()  // Restores the camera state saved by the matching begin().
+float EasyCam::getAzimuth() const  // Returns the camera's orbit azimuth.
+float EasyCam::getDistance() const  // Returns the camera's distance from its target.
+Modifier EasyCam::getDragModifier() const  // Returns the modifier selected for camera mouse input.
+float EasyCam::getElevation() const  // Returns the camera's orbit elevation.
+float EasyCam::getFov() const  // Returns the camera's field of view.
+int EasyCam::getOrbitButton() const  // Returns the mouse button assigned to orbit rotation.
+Quaternion EasyCam::getOrientation() const  // Returns the camera's orientation quaternion.
+bool EasyCam::getOrtho() const  // Returns whether orthographic projection is selected.
+int EasyCam::getPanButton() const  // Returns the mouse button assigned to panning.
+Vec3 EasyCam::getPosition() const  // Returns the camera's position.
+Vec3 EasyCam::getTarget() const  // Returns the camera's look-at target.
+Vec3 EasyCam::getUpAxis() const  // Returns the camera's configured up axis.
+bool EasyCam::isMouseInputEnabled() const  // Returns whether automatic mouse input is enabled.
+void EasyCam::mouseDragged(int x, int y, int button)  // Processes a manually forwarded mouse drag.
+void EasyCam::mousePressed(int x, int y, int button)  // Processes a manually forwarded mouse press.
+void EasyCam::mouseReleased(int x, int y, int button)  // Handles a mouse button release for the camera.
+void EasyCam::mouseScrolled(float dx, float dy)  // Handles mouse scrolling to zoom the camera.
+void EasyCam::reset()  // Restores the camera target, distance, and orientation.
+void EasyCam::setAzimuth(float radians)  // Sets the camera's orbit azimuth.
+void EasyCam::setControlArea(const Rect & area)  // Sets the screen rectangle for camera mouse input.
+void EasyCam::setDistance(float d)  // Sets the camera's distance from its target.
+EasyCam & EasyCam::setDragModifier(Modifier m)  // Sets the modifier required for automatic camera mouse input.
+void EasyCam::setElevation(float radians)  // Sets the camera's orbit elevation.
+void EasyCam::setFarClip(float farClip)  // Sets the camera's far clipping distance.
+void EasyCam::setFov(float fov)  // Sets the camera's vertical field of view.
+void EasyCam::setFovDeg(float degrees)  // Sets the camera's vertical field of view in degrees.
+void EasyCam::setNearClip(float nearClip)  // Sets the camera's near clipping distance.
+EasyCam & EasyCam::setOrbitButton(int button)  // Sets the mouse button used to orbit the camera.
+void EasyCam::setOrientation(const Quaternion & q)  // Sets the camera's orientation quaternion.
+void EasyCam::setOrtho(bool ortho)  // Selects orthographic or perspective projection.
+EasyCam & EasyCam::setPanButton(int button)  // Sets the mouse button used to pan the camera.
+void EasyCam::setPanSensitivity(float s)  // Sets the sensitivity of mouse panning.
+void EasyCam::setSensitivity(float s)  // Sets the sensitivity of mouse orbit rotation.
+void EasyCam::setTarget(float x, float y, float z) [+1]  // Sets the camera's look-at target.
+void EasyCam::setUpAxis(const Vec3 & up) [+1]  // Sets the up axis used for camera orbiting.
+void EasyCam::setZoomSensitivity(float s)  // Sets the sensitivity of mouse-wheel zooming.
 ```
 
 ### Entry — One scheduled note in a ChipSoundBundle: the note itself plus the time it starts at. `ChipSoundBundle::entries` is a vector of these, so a melody can be inspected or edited directly as well as built with add().
@@ -4746,7 +4746,7 @@ enum Deliver { Inline, Main }  // Selects the delivery thread for an event liste
 enum Direction { Left, Center, Right, Top, Bottom, Baseline }  // Alignment / direction: Left, Center, Right, Top, Bottom, Baseline.
 enum EaseMode { In, Out, InOut }  // Easing direction: In, Out, or InOut.
 enum EaseType { Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce, Custom }  // Easing function family (Linear, Quad, Cubic, Sine, Expo, …) for tweens.
-enum EasyCam::Modifier { None, Shift, Ctrl, Alt, Super }  // Modifier key that must be held for EasyCam mouse input (orbit / pan / zoom), so the camera can share the mouse with scene interaction
+enum EasyCam::Modifier { None, Shift, Ctrl, Alt, Super }  // Specifies a modifier key for camera mouse control.
 enum ImageType { Color, Grayscale }  // Image type: Color or Grayscale.
 enum KinsokuLevel { Off, PunctuationOnly, Standard }  // Line-breaking (kinsoku) strictness for vertical / Japanese text
 enum LayoutDirection { Vertical, Horizontal }  // Layout axis direction: Vertical or Horizontal.
