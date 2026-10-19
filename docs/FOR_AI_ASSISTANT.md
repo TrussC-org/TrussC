@@ -3094,7 +3094,7 @@ HeadlessSettings & HeadlessSettings::setFps(float fps)  // Set the target update
 ```cpp
 ```
 
-### HitResult — Result of a node hit test (this is Node::HitResult). Returned by Node::findHitNode() / findHitNodeFromScreen(); call hit() to check whether anything was hit.
+### HitResult — Stores the result of a node hit search.
 
 ```cpp
 ```
@@ -3519,129 +3519,129 @@ const std::string & NetworkInterface::getName() const  // Interface name
 const std::string & NetworkInterface::getNetmask() const  // Subnet mask
 ```
 
-### Node — Base scene-graph node: transform hierarchy with parent/children, update/draw, input events and attachable Mods (C++ only, managed via shared_ptr / NodePtr)
+### Node — Base class for nodes in the scene graph.
 
 ```cpp
-void Node::addChild(Ptr child, bool keepGlobalPosition = false)  // Add a child node (C++ only)
-T * Node::addMod(Args &&... args)  // Attach a mod of type T to this node, forwarding any arguments to its constructor; returns the mod for chaining (C++ only)
-void Node::beginDraw()  // Hook called before draw() and drawChildren(); override for clipping etc.
-uint64_t Node::callAfter(double delay, std::function<void ()> callback)  // Run callback once after delay seconds. A frame timer fired from the update loop: the delay counts down by getDeltaTime() on each update of this node, so it pauses while the node is inactive and resetElapsedTimeCounter() doesn't affect it. Only time after the call counts: it starts with the next update, and in the main window nothing before the call is charged (the earlier part of a long update or setup(), an idle gap or a stall before an event handler or draw() made it). In VSYNC / setFps modes it fires on the first update that starts at least delay after the call. In fixed-Hz update mode it counts step time (1 / updateFps per step): when a frame runs several steps (after a stall, or when updateFps is above the display rate: callAfter(1.0 / 120) made in the first step of a frame at a fixed 120 Hz on a 60 Hz display fires on the next step of that frame) it can fire within that frame, before delay has passed in wall time, and time the loop drops (beyond setMaxUpdateSteps() steps per frame) is not counted, so it fires that much later in wall time. A runtime setFps() / setIndependentFps() that switches the update into a measured mode (VSYNC / setFps) between updates (a key handler, draw()) drops the time since the last update, so the timer fires that much later: under a frame in the usual modes, long only after an idle like EVENT_DRIVEN. Called inside an update, the time counts from that update's start. Changing only the draw rate drops nothing, but switching between synced (setFps) and independent (setIndependentFps) update counts as an update-mode change even at the same rate (setFps(VSYNC) to setIndependentFps(VSYNC, 30) drops up to a frame). Entering a fixed update rate restarts with one step, which can count more or less than the time since the last update (144 Hz display to a fixed 60: the step is ~9.7 ms longer than the 1/144 s since the last update). A node moved during an update, before that update reached it, under a parent the update has already traversed misses that update's countdown (one delta late); a node that moves itself from its own update() is not delayed. In a secondary window, until #307, a timer created in or between its ticks counts the window's whole next delta, time before the call included (after a 3 s setup(), callAfter(2.0) fires about one frame later). Returns a timer id.
-uint64_t Node::callAfterAsync(double delay, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Like callAfter, but fired by a precise background scheduler thread (no frame jitter). The callback runs OFF the main thread: guard shared state with a mutex, never draw from it, and don't cancel while holding that mutex. Native only (uses a real thread). Returns a timer id.
-uint64_t Node::callEvery(double interval, std::function<void ()> callback)  // Run callback repeatedly every interval seconds. A frame timer counted down by getDeltaTime() like callAfter. Keeps its phase (next due = previous due + interval); when an update comes more than a whole interval late it fires once, not once per missed interval (callEveryCatchUp does that). Like callAfter, a runtime setFps() / setIndependentFps() that switches the update into a measured mode between updates drops the time since the last update (under a frame in the usual modes; see callAfter). Returns a timer id.
-uint64_t Node::callEveryAsync(double interval, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Like callEvery, but fired by a precise background scheduler thread with no drift (reschedules at absolute times). Ideal for sequencer clocks and LED/MIDI output timing. Same threading rules as callAfterAsync. Native only. Returns a timer id.
-uint64_t Node::callEveryCatchUp(double interval, std::function<void ()> callback, int maxCatchUp)  // Like callEvery, but calls back once for every interval that came due, at most maxCatchUp times per update (maxCatchUp has no default; 0 or -1, any value <= 0, means no limit), e.g. to keep a counter or a simulation in step after a late update. Past the limit the remaining due intervals are dropped and the phase is kept. Cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or setFps() loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once. In fixed-Hz update mode it counts step time, so time the loop drops beyond its step cap (setMaxUpdateSteps) is not counted. Returns a timer id.
-void Node::cancelAllAsyncTimers() [macos,windows,linux,android,ios]  // Cancel all async timers on this node (e.g. on mode change). Waits out any in-flight callback. Call it WITHOUT holding the callback's mutex to avoid a deadlock.
-void Node::cancelAllTimers()  // Cancel all frame timers on this node.
-void Node::cancelAsyncTimer(uint64_t id) [macos,windows,linux,android,ios]  // Cancel an async timer by id. Blocks until its callback finishes if it is running now (unless called from inside the callback). Do not call while holding the mutex the callback uses.
-void Node::cancelTimer(uint64_t id)  // Cancel a frame timer (callAfter/callEvery) by id.
+void Node::addChild(Ptr child, bool keepGlobalPosition = false)  // Appends a child node.
+T * Node::addMod(Args &&... args)  // Creates and attaches a Mod of type T.
+void Node::beginDraw()  // Runs before this node's drawing and child drawing.
+uint64_t Node::callAfter(double delay, std::function<void ()> callback)  // Schedules a callback to run once after a delay.
+uint64_t Node::callAfterAsync(double delay, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Schedules a callback to run once on the background scheduler.
+uint64_t Node::callEvery(double interval, std::function<void ()> callback)  // Schedules a callback to run repeatedly at an interval.
+uint64_t Node::callEveryAsync(double interval, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Schedules a repeating callback on the background scheduler.
+uint64_t Node::callEveryCatchUp(double interval, std::function<void ()> callback, int maxCatchUp)  // Schedules a repeating callback that catches up on missed intervals.
+void Node::cancelAllAsyncTimers() [macos,windows,linux,android,ios]  // Cancels all background scheduler timers owned by this node.
+void Node::cancelAllTimers()  // Cancels all frame timers on this node.
+void Node::cancelAsyncTimer(uint64_t id) [macos,windows,linux,android,ios]  // Cancels a background scheduler timer by ID.
+void Node::cancelTimer(uint64_t id)  // Cancels a frame timer by ID.
 void Node::cleanup()  // Called when a node you destroy() is removed from the tree (children first), and for the App at shutdown.
-void Node::destroy()  // Mark node for deferred removal from scene graph (C++ only)
-void Node::disableEvents()  // Disable mouse/key events for this node (C++ only)
+void Node::destroy()  // Marks this node for deferred removal.
+void Node::disableEvents()  // Disables this node's event flag.
 void Node::draw()  // Called on each drawn frame to draw the node, in its own local coordinates and starting from the default style.
-void Node::drawChildren()  // Draw the child nodes (overridable, e.g. for clipping).
-void Node::enableEvents()  // Enable mouse/key events for this node (C++ only)
-void Node::endDraw()  // Hook called after draw() and drawChildren().
-Node * Node::findByInstanceId(uint64_t id)  // Find a node in this subtree (self included) by instance id, depth-first (null if not found) (C++ only)
-HitResult Node::findHitNode(const Ray & globalRay)  // Hit test the whole tree with a global ray, returning the frontmost node (C++ only)
-HitResult Node::findHitNodeFromScreen(float screenX, float screenY)  // Hit test the whole tree from a screen point, using each node's own camera context (C++ only)
-HitResult Node::findHitNodeRecursive(internal::PickRaySource & pick, const CameraContext * inheritedCtx, Ray globalRay, const Mat4 & parentInverseMatrix)  // Recursive hit test in reverse draw order; override for clipping-aware picking.
-bool Node::getActive() const ⚠️deprecated  // Deprecated alias for isActive()
-std::shared_ptr<const CameraContext> Node::getCameraContext() const  // Return the camera context this node was last drawn under (null if never drawn).
-size_t Node::getChildCount() const  // Get the number of child nodes (C++ only)
-int Node::getChildIndex() const  // This node's index among its parent's children (-1 if no parent) (C++ only)
-std::vector<Ptr> Node::getChildren() const  // Get a copy of the child node list (safe to iterate while modifying) (C++ only)
-std::string Node::getDisplayName() const  // Short type-anchored label for trees / inspectors, e.g. "RectNode" or "RectNode (play)" (C++ only) 
-Vec3 Node::getEuler() const  // Get rotation as Euler angles in radians (pitch=X, yaw=Y, roll=Z) (C++ only)
-Vec3 Node::getEulerDeg() const  // Get rotation as Euler angles in degrees
-const Mat4 & Node::getGlobalMatrix() const  // Get this node's global transform matrix, including parent transforms (cached) (C++ only)
-Mat4 Node::getGlobalMatrixInverse() const  // Get the inverse of the global transform matrix (C++ only)
-Vec3 Node::getGlobalPos() const  // Get the node's origin in global (world) space (C++ only)
-uint64_t Node::getInstanceId() const  // Per-process unique id, assigned once at construction and stable across reparenting (C++ only)
-const Mat4 & Node::getLocalMatrix() const  // Get this node's local transform matrix (cached) (C++ only)
-T * Node::getMod()  // Get the attached mod of type T, or nullptr if this node has none (C++ only)
-Mod * Node::getModByTypeName(const std::string & name) const  // Find an attached mod by its short type name, e.g. "LayoutMod" (null if not attached) (C++ only) 
-std::vector<Mod *> Node::getMods() const  // Get all attached mods (pointers stay owned by this node) (C++ only)
-std::vector<std::string> Node::getModTypeNames() const  // Get the short (unqualified) type names of the attached mods (C++ only)
-float Node::getMouseX() const  // Get mouse X in this node's local coordinate system (C++ only)
-float Node::getMouseY() const  // Get mouse Y in this node's local coordinate system (C++ only)
-const std::string & Node::getName() const  // Get the optional instance name (empty unless setName() was called) (C++ only)
-Ptr Node::getParent() const  // Get the parent node (null if none) (C++ only)
-float Node::getPMouseX() const  // Get previous-frame mouse X in this node's local coordinate system (C++ only)
-float Node::getPMouseY() const  // Get previous-frame mouse Y in this node's local coordinate system (C++ only)
-const Vec3 & Node::getPos() const  // Get local position (C++ only)
-const Quaternion & Node::getQuaternion() const  // Get rotation as a quaternion (C++ only)
-float Node::getRot() const  // Get 2D Z-axis rotation in radians (C++ only)
-float Node::getRotDeg() const  // Get 2D Z-axis rotation in degrees
-const Vec3 & Node::getScale() const  // Get local scale (C++ only)
-float Node::getScaleX() const  // Get local X scale (C++ only)
-float Node::getScaleY() const  // Get local Y scale (C++ only)
-float Node::getScaleZ() const  // Get local Z scale (C++ only)
-const std::string & Node::getTypeName() const  // C++ class name (most-derived type) via RTTI, e.g. "trussc::RectNode" (cached) (C++ only) 
-bool Node::getVisible() const ⚠️deprecated  // Deprecated alias for isVisible()
-float Node::getX() const  // Get local X position (C++ only)
-float Node::getY() const  // Get local Y position (C++ only)
-float Node::getZ() const  // Get local Z position (C++ only)
-Vec3 Node::globalToLocal(const Vec3 & global) const [+1]  // Convert a global coordinate to this node's local space (C++ only)
-bool Node::hasMod() const  // Whether a mod of type T is attached to this node (C++ only)
-bool Node::hasName() const  // Whether an instance name has been set (C++ only)
-bool Node::hitTest(const Ray & localRay, float & outDistance) [+1]  // Geometric hit-test predicate in local space; override to make a node pickable.
-int Node::indexOfChild(const Node * child) const  // Index of the given child among this node's children (-1 if not a child) (C++ only)
-void Node::insertChild(size_t index, Ptr child, bool keepGlobalPosition = false)  // Insert a child node at a specific index (C++ only)
-bool Node::isActive() const  // Whether the node is active (inactive: update and draw are skipped) (C++ only)
-bool Node::isDead() const  // Check if node is marked for destruction (C++ only)
-bool Node::isEventsEnabled() const  // Whether events are enabled (only such nodes are hit-test targets) (C++ only)
-bool Node::isMouseOver() const  // Whether the mouse is over this node (auto-updated each frame, O(1)) (C++ only)
-bool Node::isVisible() const  // Whether the node is visible (invisible: the node and its descendants are not drawn and not hit by the mouse; update() keeps running) (C++ only)
-Vec3 Node::localToGlobal(const Vec3 & local) const [+1]  // Convert a local coordinate to global space (C++ only)
-void Node::moveToBack()  // Move this node to the beginning of its parent's child list — drawn first, beneath siblings. No-op if no parent or already first (C++ only)
-void Node::moveToFront()  // Move this node to the end of its parent's child list — drawn last, on top of siblings. No-op if no parent or already last (C++ only)
-void Node::onActiveChanged(bool active)  // Callback invoked when the node's active state changes.
-void Node::onChildAdded(Ptr child)  // Callback fired when a child is added (overridable) (C++ only)
-void Node::onChildRemoved(Ptr child)  // Callback fired when a child is removed (overridable) (C++ only)
-bool Node::onKeyPress(const KeyEventArgs & e) [+1]  // Handle a key press (broadcast to all nodes); return true to consume.
-bool Node::onKeyRelease(const KeyEventArgs & e) [+1]  // Handle a key release (broadcast to all nodes); return true to consume.
-void Node::onLocalMatrixChanged()  // Hook for custom behavior when the local matrix changes.
-bool Node::onMouseDrag(const MouseDragEventArgs & e) [+1]  // Handle a mouse drag (event localized to this node); return true to consume.
-void Node::onMouseEnter()  // Hook called when the pointer enters this node (hover begins).
-void Node::onMouseLeave()  // Hook called when the pointer leaves this node (hover ends).
-bool Node::onMouseMove(const MouseMoveEventArgs & e) [+1]  // Handle mouse movement (event localized to this node); return true to consume.
-bool Node::onMousePress(const MouseEventArgs & e) [+1]  // Handle a mouse press (event localized to this node); return true to consume.
-bool Node::onMouseRelease(const MouseEventArgs & e) [+1]  // Handle a mouse release (event localized to this node); return true to consume.
-bool Node::onMouseScroll(const ScrollEventArgs & e) [+1]  // Handle a scroll event (event localized to this node); return true to consume.
-void Node::onVisibleChanged(bool visible)  // Callback invoked when the node's visible state changes.
-void Node::processTimers()  // Count this node's timers (callAfter / callEvery) down by getDeltaTime() and fire the due ones, invoked within the update pass.
-void Node::removeAllChildren()  // Remove all child nodes (C++ only)
-void Node::removeChild(Ptr child)  // Remove a child node (C++ only)
-void Node::removeMod()  // Remove the attached mod of type T, calling its onDestroy() before it is freed (C++ only)
-std::pair<const CameraContext *, Ray> Node::resolvePickRay(internal::PickRaySource & pick, const CameraContext * inheritedCtx, const Ray & globalRay) const  // Resolve this node's effective camera context and the global ray to hit-test it with.
-void Node::setActive(bool active)  // Set the active state (inactive: update and draw are skipped) (C++ only)
-void Node::setCameraContext(std::shared_ptr<const CameraContext> ctx)  // Set the camera context for a manually-managed node (normally set automatically by drawTree).
-void Node::setEuler(const Vec3 & euler) [+1]  // Set rotation from Euler angles in radians (pitch=X, yaw=Y, roll=Z) (C++ only)
-void Node::setEulerDeg(const Vec3 & deg)  // Set rotation from Euler angles in degrees
-void Node::setGlobalPos(const Vec3 & global) [+1]  // Set the node's position in global (world) space (C++ only)
-void Node::setIsActive(bool active) ⚠️deprecated  // Deprecated alias for setActive()
-void Node::setIsVisible(bool visible) ⚠️deprecated  // Deprecated alias for setVisible()
-Node & Node::setName(const std::string & name)  // Set an optional instance name (chainable) (C++ only)
-void Node::setPos(const Vec3 & pos) [+1]  // Set local position (C++ only)
-void Node::setQuaternion(const Quaternion & q)  // Set rotation from a quaternion (C++ only)
-void Node::setRot(float radians)  // Set 2D Z-axis rotation in radians (C++ only)
-void Node::setRotDeg(float degrees)  // Set 2D Z-axis rotation in degrees
-void Node::setScale(const Vec3 & s) [+2]  // Set local scale (vector, uniform, or per-axis) (C++ only)
-void Node::setScaleX(float sx)  // Set local X scale (C++ only)
-void Node::setScaleY(float sy)  // Set local Y scale (C++ only)
-void Node::setScaleZ(float sz)  // Set local Z scale (C++ only)
+void Node::drawChildren()  // Draws this node's children.
+void Node::enableEvents()  // Enables this node's event flag.
+void Node::endDraw()  // Runs after this node's drawing and child drawing.
+Node * Node::findByInstanceId(uint64_t id)  // Finds a node in this subtree by instance ID.
+HitResult Node::findHitNode(const Ray & globalRay)  // Finds a node hit by a global ray.
+HitResult Node::findHitNodeFromScreen(float screenX, float screenY)  // Finds a node hit at a screen position.
+HitResult Node::findHitNodeRecursive(internal::PickRaySource & pick, const CameraContext * inheritedCtx, Ray globalRay, const Mat4 & parentInverseMatrix)  // Searches a subtree for a hit in reverse draw order.
+bool Node::getActive() const ⚠️deprecated  // Returns the node's active flag through a deprecated alias.
+std::shared_ptr<const CameraContext> Node::getCameraContext() const  // Returns the camera context stored on this node.
+size_t Node::getChildCount() const  // Returns the number of direct children.
+int Node::getChildIndex() const  // Returns this node's position in its parent's child list.
+std::vector<Ptr> Node::getChildren() const  // Returns a copy of the child list.
+std::string Node::getDisplayName() const  // Returns a short type-based display label.
+Vec3 Node::getEuler() const  // Returns the local rotation as Euler angles in radians.
+Vec3 Node::getEulerDeg() const  // Returns the local rotation as Euler angles in degrees.
+const Mat4 & Node::getGlobalMatrix() const  // Returns this node's global transform matrix.
+Mat4 Node::getGlobalMatrixInverse() const  // Returns the inverse of this node's global transform matrix.
+Vec3 Node::getGlobalPos() const  // Returns this node's origin in global space.
+uint64_t Node::getInstanceId() const  // Returns this node's instance ID.
+const Mat4 & Node::getLocalMatrix() const  // Returns this node's local transform matrix.
+T * Node::getMod()  // Returns the attached Mod of type T.
+Mod * Node::getModByTypeName(const std::string & name) const  // Finds an attached Mod by its short type name.
+std::vector<Mod *> Node::getMods() const  // Returns pointers to all Mods attached to this node.
+std::vector<std::string> Node::getModTypeNames() const  // Returns the short type names of this node's attached Mods.
+float Node::getMouseX() const  // Returns the mouse X coordinate in this node's local space.
+float Node::getMouseY() const  // Returns the mouse Y coordinate in this node's local space.
+const std::string & Node::getName() const  // Returns the optional instance name.
+Ptr Node::getParent() const  // Returns the parent node.
+float Node::getPMouseX() const  // Returns the previous-frame mouse X coordinate in this node's local space.
+float Node::getPMouseY() const  // Returns the previous-frame mouse Y coordinate in this node's local space.
+const Vec3 & Node::getPos() const  // Returns the local position.
+const Quaternion & Node::getQuaternion() const  // Returns the local rotation quaternion.
+float Node::getRot() const  // Returns the local Z Euler angle in radians.
+float Node::getRotDeg() const  // Returns the local Z Euler angle in degrees.
+const Vec3 & Node::getScale() const  // Returns the local scale.
+float Node::getScaleX() const  // Returns the local X scale.
+float Node::getScaleY() const  // Returns the local Y scale.
+float Node::getScaleZ() const  // Returns the local Z scale.
+const std::string & Node::getTypeName() const  // Returns the node's C++ class name.
+bool Node::getVisible() const ⚠️deprecated  // Returns the node's visible flag through a deprecated alias.
+float Node::getX() const  // Returns the local X position.
+float Node::getY() const  // Returns the local Y position.
+float Node::getZ() const  // Returns the local Z position.
+Vec3 Node::globalToLocal(const Vec3 & global) const [+1]  // Converts a global position to this node's local space.
+bool Node::hasMod() const  // Reports whether this node has a Mod of type T.
+bool Node::hasName() const  // Returns whether the instance name is nonempty.
+bool Node::hitTest(const Ray & localRay, float & outDistance) [+1]  // Tests whether a local ray or point hits this node.
+int Node::indexOfChild(const Node * child) const  // Returns a child's position in this node's child list.
+void Node::insertChild(size_t index, Ptr child, bool keepGlobalPosition = false)  // Inserts a child node at a specified position.
+bool Node::isActive() const  // Returns the node's active flag.
+bool Node::isDead() const  // Returns whether this node is marked dead.
+bool Node::isEventsEnabled() const  // Returns this node's event-enabled flag.
+bool Node::isMouseOver() const  // Returns whether this node is the current hovered node.
+bool Node::isVisible() const  // Returns the node's visible flag.
+Vec3 Node::localToGlobal(const Vec3 & local) const [+1]  // Converts a local position to global space.
+void Node::moveToBack()  // Moves this node to the beginning of its sibling list.
+void Node::moveToFront()  // Moves this node to the end of its sibling list.
+void Node::onActiveChanged(bool active)  // Called when the node's active flag changes.
+void Node::onChildAdded(Ptr child)  // Called when a direct child is added.
+void Node::onChildRemoved(Ptr child)  // Called when a direct child is removed.
+bool Node::onKeyPress(const KeyEventArgs & e) [+1]  // Handles a key press.
+bool Node::onKeyRelease(const KeyEventArgs & e) [+1]  // Handles a key release.
+void Node::onLocalMatrixChanged()  // Handles changes to this node's local transform.
+bool Node::onMouseDrag(const MouseDragEventArgs & e) [+1]  // Handles pointer movement while this node holds the pointer grab.
+void Node::onMouseEnter()  // Runs when this node becomes the hovered node.
+void Node::onMouseLeave()  // Runs when this node stops being the hovered node.
+bool Node::onMouseMove(const MouseMoveEventArgs & e) [+1]  // Handles pointer movement.
+bool Node::onMousePress(const MouseEventArgs & e) [+1]  // Handles a mouse button press.
+bool Node::onMouseRelease(const MouseEventArgs & e) [+1]  // Handles a mouse button release.
+bool Node::onMouseScroll(const ScrollEventArgs & e) [+1]  // Handles scrolling at the pointer position.
+void Node::onVisibleChanged(bool visible)  // Called when the node's visible flag changes.
+void Node::processTimers()  // Advances this node's frame timers and runs callbacks that are due.
+void Node::removeAllChildren()  // Detaches all direct child nodes.
+void Node::removeChild(Ptr child)  // Detaches a child node.
+void Node::removeMod()  // Removes the attached Mod of type T.
+std::pair<const CameraContext *, Ray> Node::resolvePickRay(internal::PickRaySource & pick, const CameraContext * inheritedCtx, const Ray & globalRay) const  // Selects the camera context and global ray used to hit-test this node.
+void Node::setActive(bool active)  // Sets the node's active state.
+void Node::setCameraContext(std::shared_ptr<const CameraContext> ctx)  // Sets the camera context stored on this node.
+void Node::setEuler(const Vec3 & euler) [+1]  // Sets the local rotation from Euler angles in radians.
+void Node::setEulerDeg(const Vec3 & deg)  // Sets the local rotation from Euler angles in degrees.
+void Node::setGlobalPos(const Vec3 & global) [+1]  // Sets this node's position in global space.
+void Node::setIsActive(bool active) ⚠️deprecated  // Sets the active state through a deprecated alias.
+void Node::setIsVisible(bool visible) ⚠️deprecated  // Sets the visible state through a deprecated alias.
+Node & Node::setName(const std::string & name)  // Sets the optional instance name.
+void Node::setPos(const Vec3 & pos) [+1]  // Sets the local position.
+void Node::setQuaternion(const Quaternion & q)  // Sets the local rotation from a quaternion.
+void Node::setRot(float radians)  // Sets a local rotation around the Z axis.
+void Node::setRotDeg(float degrees)  // Sets a local Z-axis rotation in degrees.
+void Node::setScale(const Vec3 & s) [+2]  // Sets the local scale.
+void Node::setScaleX(float sx)  // Sets the local X scale.
+void Node::setScaleY(float sy)  // Sets the local Y scale.
+void Node::setScaleZ(float sz)  // Sets the local Z scale.
 void Node::setup()  // Called once, just before the node is first updated or drawn. Build child nodes and timers here.
-void Node::setVisible(bool visible)  // Set the visible state (invisible: the node and its descendants are not drawn and not hit by the mouse; update() keeps running) (C++ only)
-void Node::setX(float x)  // Set local X position (C++ only)
-void Node::setY(float y)  // Set local Y position (C++ only)
-void Node::setZ(float z)  // Set local Z position (C++ only)
+void Node::setVisible(bool visible)  // Sets the node's visible state.
+void Node::setX(float x)  // Sets the local X position.
+void Node::setY(float y)  // Sets the local Y position.
+void Node::setZ(float z)  // Sets the local Z position.
 void Node::update()  // Called on every update step while the node is active, before its mods and its children update.
 ```
 
 ### Node::HitResult
 
 ```cpp
-bool Node::HitResult::hit() const  // Whether a node was hit (node is non-null).
+bool Node::HitResult::hit() const  // Returns whether the result contains a hit node.
 ```
 
 ### OnceGate — Gate for a log line (or anything else): isFirstTime() is true the first time, and with an interval, again once that much time has passed since the last true
@@ -3789,35 +3789,35 @@ bool Rect::intersects(const Rect & other) const  // Check if intersects with ano
 Rect & Rect::set(float x, float y, float w, float h) [+1]  // Set rectangle bounds
 ```
 
-### RectNode — 2D UI rectangle node: size, clipping and ray-based hit testing, plus subscribable mouse Event members
+### RectNode — A rectangular Node for 2D interfaces.
 
 ```cpp
-void RectNode::beginDraw()  // Begin the draw scope, pushing the rect's clip region.
-void RectNode::draw()  // Draw the rectangle node; override in derived classes (draws nothing by default).
-void RectNode::drawRectFill()  // Helper that draws the rectangle filled.
-void RectNode::drawRectFillAndStroke()  // Helper that draws the rectangle with both fill and stroke.
-void RectNode::drawRectStroke()  // Helper that draws the rectangle outline.
-void RectNode::endDraw()  // End the draw scope, popping the clip region.
-HitResult RectNode::findHitNodeRecursive(internal::PickRaySource & pick, const CameraContext * inheritedCtx, Ray globalRay, const Mat4 & parentInverseMatrix)  // Clipping-aware recursive hit test (overrides Node's to respect the rect bounds).
-float RectNode::getBottom() const  // Local bottom edge (equals height) (RectNode method) (C++ only)
-float RectNode::getHeight() const  // Get the node height (RectNode method) (C++ only)
-float RectNode::getLeft() const  // Local left edge (always 0) (RectNode method) (C++ only)
-float RectNode::getRight() const  // Local right edge (equals width) (RectNode method) (C++ only)
-Vec2 RectNode::getSize() const  // Get the node size as a Vec2 (RectNode method) (C++ only)
-float RectNode::getTop() const  // Local top edge (always 0) (RectNode method) (C++ only)
-float RectNode::getWidth() const  // Get the node width (RectNode method) (C++ only)
-bool RectNode::hitTest(const Ray & localRay, float & outDistance) [+1]  // Hit-test the rectangle against a ray (with out distance) or a 2D point (RectNode method) (C++ only)
-bool RectNode::isClipping() const  // Whether scissor clipping is enabled (RectNode method) (C++ only)
-bool RectNode::onMouseDrag(const MouseDragEventArgs & e)  // Fire the mouseDragged event and forward to the legacy simple-form hook.
-bool RectNode::onMousePress(const MouseEventArgs & e)  // Fire the mousePressed event and forward to the legacy simple-form hook. Returns true (consume); return false from an override to bubble the press to the parent chain — the consumer becomes the drag/release grab target.
-bool RectNode::onMouseRelease(const MouseEventArgs & e)  // Fire the mouseReleased event and forward to the legacy simple-form hook.
-bool RectNode::onMouseScroll(const ScrollEventArgs & e)  // Fire the scroll event; returns false to allow bubbling to a parent (e.g. ScrollContainer).
-void RectNode::onSizeChanged()  // Callback invoked when the rect's size changes.
-void RectNode::setClipping(bool enabled)  // Enable/disable scissor clipping for RectNode (C++ only)
-void RectNode::setHeight(float h)  // Set the node height (RectNode method) (C++ only)
-void RectNode::setRect(float x, float y, float w, float h)  // Set position and size at once (RectNode method) (C++ only)
-void RectNode::setSize(float w, float h) [+2]  // Set size (C++ only)
-void RectNode::setWidth(float w)  // Set the node width (RectNode method) (C++ only)
+void RectNode::beginDraw()  // Applies the rectangle's clipping before drawing.
+void RectNode::draw()  // Draws the rectangle node's custom content.
+void RectNode::drawRectFill()  // Draws the rectangle with a solid fill.
+void RectNode::drawRectFillAndStroke()  // Draws the rectangle's fill and outline.
+void RectNode::drawRectStroke()  // Draws the rectangle's outline.
+void RectNode::endDraw()  // Restores the previous clipping after drawing.
+HitResult RectNode::findHitNodeRecursive(internal::PickRaySource & pick, const CameraContext * inheritedCtx, Ray globalRay, const Mat4 & parentInverseMatrix)  // Searches this subtree for a hit while respecting rectangle clipping.
+float RectNode::getBottom() const  // Returns the rectangle's local bottom edge.
+float RectNode::getHeight() const  // Returns the rectangle's height.
+float RectNode::getLeft() const  // Returns the rectangle's local left edge.
+float RectNode::getRight() const  // Returns the rectangle's local right edge.
+Vec2 RectNode::getSize() const  // Returns the rectangle's size as a Vec2.
+float RectNode::getTop() const  // Returns the rectangle's local top edge.
+float RectNode::getWidth() const  // Returns the rectangle's width.
+bool RectNode::hitTest(const Ray & localRay, float & outDistance) [+1]  // Tests whether a local point or ray hits the rectangle.
+bool RectNode::isClipping() const  // Returns whether rectangle clipping is enabled.
+bool RectNode::onMouseDrag(const MouseDragEventArgs & e)  // Handles a mouse drag and notifies mouseDragged listeners.
+bool RectNode::onMousePress(const MouseEventArgs & e)  // Handles a mouse press and notifies mousePressed listeners.
+bool RectNode::onMouseRelease(const MouseEventArgs & e)  // Handles a mouse release and notifies mouseReleased listeners.
+bool RectNode::onMouseScroll(const ScrollEventArgs & e)  // Handles mouse scrolling and notifies mouseScrolled listeners.
+void RectNode::onSizeChanged()  // Called when a size setter changes the rectangle's dimensions.
+void RectNode::setClipping(bool enabled)  // Enables or disables rectangle clipping.
+void RectNode::setHeight(float h)  // Sets the rectangle's height.
+void RectNode::setRect(float x, float y, float w, float h)  // Sets the node's position and rectangle size.
+void RectNode::setSize(float w, float h) [+2]  // Sets the rectangle's dimensions.
+void RectNode::setWidth(float w)  // Sets the rectangle's width.
 ```
 
 ### RectNodeButton — Simple clickable button node (a RectNode subclass). Set normalColor/hoverColor/pressColor and label; it draws a filled rect that changes color on hover/press and a centered label. Events are enabled on construction. Listen on its inherited mousePressed/mouseReleased events for clicks.
