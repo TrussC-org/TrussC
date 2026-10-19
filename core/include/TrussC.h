@@ -2858,6 +2858,48 @@ namespace internal {
         }
     }
 
+    inline unsigned int mouseButtonBit(int button) {
+        switch (button) {
+            case SAPP_MOUSEBUTTON_LEFT:   return 1u << 0;
+            case SAPP_MOUSEBUTTON_RIGHT:  return 1u << 1;
+            case SAPP_MOUSEBUTTON_MIDDLE: return 1u << 2;
+            default: return 0;
+        }
+    }
+
+    // Recover from absent button bits only on unlocked Windows/X11/Web moves.
+    // In particular, EGL's XI2 raw-motion producer reads xmotion.state from
+    // a GenericEvent, which is not button state. Exclude locked moves even
+    // on backends that do supply bits. This fork's Win32 and X11/GLCORE
+    // multi-window backends have no pointer lock/raw input or lock query
+    // implementation; all their moves are ordinary WM_MOUSEMOVE/MotionNotify.
+    // AppKit supplies keyboard modifiers only; iOS/Android use touch events.
+    // UNFOCUSED recovery is independent of this gate on every backend.
+    inline bool mouseMoveHasReliableButtonBits(const sapp_event* ev) {
+#if defined(_WIN32) || defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
+        if (ev->type != SAPP_EVENTTYPE_MOUSE_MOVE) return false;
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(SOKOL_GLCORE))
+        if (sapp_mouse_locked()) return false;
+#endif
+        return true;
+#else
+        (void)ev;
+        return false;
+#endif
+    }
+
+    // Call only for moves whose reliability was captured before raw listeners.
+    inline bool mouseButtonLostOnMove(const sapp_event* ev, int button) {
+        unsigned int bit = 0;
+        switch (button) {
+            case SAPP_MOUSEBUTTON_LEFT:   bit = SAPP_MODIFIER_LMB; break;
+            case SAPP_MOUSEBUTTON_RIGHT:  bit = SAPP_MODIFIER_RMB; break;
+            case SAPP_MOUSEBUTTON_MIDDLE: bit = SAPP_MODIFIER_MMB; break;
+            default: return false;
+        }
+        return (ev->modifiers & bit) == 0;
+    }
+
     inline void _event_cb(const sapp_event* ev) {
         CrashPhaseScope crashPhase("event dispatch");
         if (ev->type >= SAPP_EVENTTYPE_KEY_DOWN && ev->type <= SAPP_EVENTTYPE_TOUCHES_CANCELLED) {
@@ -2871,6 +2913,10 @@ namespace internal {
         // found them.
         EntryStackGuard guard(AppEntry::Event, eventEntryName(ev, currentMouseButton >= 0));
 
+        // A raw listener can change pointer lock; keep this move's original
+        // button-bit reliability for the entire dispatch.
+        const bool recoverButtonsOnMove = mouseMoveHasReliableButtonBits(ev);
+
         // Notify raw event listeners (used by addons like tcxImGui)
         events().rawEvent.notify(*ev);
 
@@ -2883,7 +2929,41 @@ namespace internal {
         bool hasModAlt = (ev->modifiers & SAPP_MODIFIER_ALT) != 0;
         bool hasModSuper = (ev->modifiers & SAPP_MODIFIER_SUPER) != 0;
 
+        auto& ctx = internal::currentWindowContext();
+        auto releaseMouse = [&](int button) {
+            const unsigned int bit = mouseButtonBit(button);
+            if ((ctx.pressedMouseButtons & bit) == 0) return;
+            // Clear this press before notifying. Keep the base drag semantics:
+            // any delivered release ends the current drag-button report.
+            ctx.pressedMouseButtons &= ~bit;
+            currentMouseButton = -1;
+            ctx.mouseButton = -1;
+            ctx.mousePressed = false;
+            MouseEventArgs args;
+            args.pos = args.globalPos = Vec2(ctx.lastPointerX, ctx.lastPointerY);
+            args.button = button;
+            args.shift = hasModShift;
+            args.ctrl = hasModCtrl;
+            args.alt = hasModAlt;
+            args.super = hasModSuper;
+            args.syncLegacy();
+            events().mouseReleased.notify(args);
+            if (appMouseReleasedFunc) appMouseReleasedFunc(args);
+        };
+
+        for (int button = SAPP_MOUSEBUTTON_LEFT; button <= SAPP_MOUSEBUTTON_MIDDLE; ++button) {
+            if (recoverButtonsOnMove && (ctx.pressedMouseButtons & mouseButtonBit(button)) && mouseButtonLostOnMove(ev, button)) {
+                releaseMouse(button); // last real position, before updating the move
+                touchMouseMapper().reset();
+            }
+        }
+
         switch (ev->type) {
+            case SAPP_EVENTTYPE_UNFOCUSED:
+                touchMouseMapper().reset();
+                for (int button = SAPP_MOUSEBUTTON_LEFT; button <= SAPP_MOUSEBUTTON_MIDDLE; ++button)
+                    releaseMouse(button);
+                break;
             case SAPP_EVENTTYPE_KEY_DOWN: {
                 // Notify event system
                 KeyEventArgs args;
@@ -2922,9 +3002,10 @@ namespace internal {
                 break;
             }
             case SAPP_EVENTTYPE_MOUSE_DOWN: {
+                ctx.pressedMouseButtons |= mouseButtonBit(ev->mouse_button);
                 currentMouseButton = ev->mouse_button;
-                internal::currentWindowContext().mouseX = ev->mouse_x * scale;
-                internal::currentWindowContext().mouseY = ev->mouse_y * scale;
+                ctx.mouseX = ctx.lastPointerX = ev->mouse_x * scale;
+                ctx.mouseY = ctx.lastPointerY = ev->mouse_y * scale;
                 internal::currentWindowContext().mouseButton = ev->mouse_button;
                 internal::currentWindowContext().mousePressed = true;
 
@@ -2943,30 +3024,16 @@ namespace internal {
                 break;
             }
             case SAPP_EVENTTYPE_MOUSE_UP: {
-                currentMouseButton = -1;
-                internal::currentWindowContext().mouseX = ev->mouse_x * scale;
-                internal::currentWindowContext().mouseY = ev->mouse_y * scale;
-                internal::currentWindowContext().mouseButton = -1;
-                internal::currentWindowContext().mousePressed = false;
-
-                MouseEventArgs args;
-                args.pos = args.globalPos = Vec2(internal::currentWindowContext().mouseX, internal::currentWindowContext().mouseY);
-                args.button = ev->mouse_button;
-                args.shift = hasModShift;
-                args.ctrl = hasModCtrl;
-                args.alt = hasModAlt;
-                args.super = hasModSuper;
-                args.syncLegacy();
-                events().mouseReleased.notify(args);
-
-                if (appMouseReleasedFunc) appMouseReleasedFunc(args);
+                ctx.mouseX = ctx.lastPointerX = ev->mouse_x * scale;
+                ctx.mouseY = ctx.lastPointerY = ev->mouse_y * scale;
+                releaseMouse(ev->mouse_button);
                 break;
             }
             case SAPP_EVENTTYPE_MOUSE_MOVE: {
                 float prevX = internal::currentWindowContext().mouseX;
                 float prevY = internal::currentWindowContext().mouseY;
-                internal::currentWindowContext().mouseX = ev->mouse_x * scale;
-                internal::currentWindowContext().mouseY = ev->mouse_y * scale;
+                ctx.mouseX = ctx.lastPointerX = ev->mouse_x * scale;
+                ctx.mouseY = ctx.lastPointerY = ev->mouse_y * scale;
 
                 // Rich carrier (internal::MouseEventRaw); the per-kind public type is
                 // built from it at the boundary (internal::toDragArgs / internal::toMoveArgs).
@@ -3060,8 +3127,9 @@ namespace internal {
                 float ty = action.y;
 
                 if (action.kind == internal::TouchMouseAction::Kind::Press) {
+                    ctx.pressedMouseButtons |= mouseButtonBit(SAPP_MOUSEBUTTON_LEFT);
                     currentMouseButton = 0;
-                    internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                    ctx.mouseX = ctx.lastPointerX = tx; ctx.mouseY = ctx.lastPointerY = ty;
                     internal::currentWindowContext().mouseButton = 0;
                     internal::currentWindowContext().mousePressed = true;
 
@@ -3073,7 +3141,7 @@ namespace internal {
                     if (appMousePressedFunc) appMousePressedFunc(margs);
                 } else if (action.kind == internal::TouchMouseAction::Kind::Drag) {
                     float prevX = internal::currentWindowContext().mouseX, prevY = internal::currentWindowContext().mouseY;
-                    internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                    ctx.mouseX = ctx.lastPointerX = tx; ctx.mouseY = ctx.lastPointerY = ty;
 
                     internal::MouseEventRaw margs;
                     margs.pos = margs.globalPos = Vec2(tx, ty);
@@ -3084,8 +3152,9 @@ namespace internal {
                     margs.consumed = dragArgs.consumed;
                     if (appMouseDraggedFunc) appMouseDraggedFunc(margs);
                 } else if (action.kind == internal::TouchMouseAction::Kind::Release) {
+                    ctx.pressedMouseButtons &= ~mouseButtonBit(SAPP_MOUSEBUTTON_LEFT);
                     currentMouseButton = -1;
-                    internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                    ctx.mouseX = ctx.lastPointerX = tx; ctx.mouseY = ctx.lastPointerY = ty;
                     internal::currentWindowContext().mouseButton = -1;
                     internal::currentWindowContext().mousePressed = false;
 
