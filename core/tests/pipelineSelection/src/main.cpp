@@ -291,10 +291,18 @@ void lazyResizeChecks() {
         sgl_begin_triangles(); sgl_v2f(-0.75f,0.75f); sgl_v2f(0.25f,0.75f); sgl_v2f(-0.75f,-0.25f); sgl_end();
         check("resize probe starts with one lazy triangle",!internal::currentTarget().inPass && sgl_num_vertices()==3 && sgl_tc_context_has_pending_draws(sgl_get_context()));
     };
-    auto backendPixels = [] {
+    auto backendPixels = [](const char* label) {
+        auto& owner = internal::currentWindowContext();
+        const auto epoch = owner.renderEpoch;
         Pixels pixels;
-        check("lazy resize backend readback",grabScreen(pixels));
-        expect(pixels,pixels.getWidth()/5,pixels.getHeight()/5,Color(1,0,0),"lazy resize triangle reached backend");
+        // present() is host-owned. This synthetic tick reads the completed
+        // owner's source through the internal path, before its next beginFrame,
+        // rather than treating another owner's pending frame as a screenshot.
+        const bool captured = captureWindow(pixels);
+        check("lazy resize finished-owner readback",captured);
+        check("lazy resize capture keeps the finished owner closed",!owner.framePending &&
+            !owner.swapchainTarget.inPass && !owner.swapchainTarget.passStartedThisFrame && owner.renderEpoch==epoch);
+        if (captured) expect(pixels,pixels.getWidth()/5,pixels.getHeight()/5,Color(1,0,0),label);
     };
     triangle();
     const int budgetCommands=sgl_num_commands();
@@ -306,7 +314,7 @@ void lazyResizeChecks() {
     auto draws = sg_query_stats().prev_frame.num_draw;
     std::printf("LAZY RESIZE GPU budget draws=%u expected=1\n",draws);
     check("budget resize submits exactly one backend draw",draws==1);
-    backendPixels();
+    backendPixels("budget resize triangle reached backend");
     beginFrame();
     check("budget rebuild retries after present",main.swapchainTarget.resources().generation!=generationBefore && budget.maxVertices==1024 && budget.maxCommands==256 && !budget.pendingResize);
     internal::resizeSgl(oldVertices,oldCommands);
@@ -332,9 +340,13 @@ void lazyResizeChecks() {
         draws=sg_query_stats().prev_frame.num_draw;
         std::printf("LAZY RESIZE GPU dimensions draws=%u expected=1\n",draws);
         check("dimension resize submits exactly one backend draw",draws==1);
-        // This coordinator uses the main drawable; capture at its native size.
-        internal::currentWindowCtx()=&main; backendPixels();
-        internal::currentWindowCtx()=&secondary;
+        // The coordinator's dimensions are synthetic; read its borrowed native
+        // drawable at the actual size, keeping the completed owner selected.
+        // Capturing main here would start its pending frame and CLEAR the same
+        // surface. Real secondary windows own a separate native drawable.
+        secondary.fbWidth=secondary.lastSwapchain.width; secondary.fbHeight=secondary.lastSwapchain.height;
+        backendPixels("dimension resize triangle reached backend");
+        secondary.fbWidth=320; secondary.fbHeight=240;
         internal::prepareWindowTarget();
         check("dimension rebuild retries after present",secondary.swapchainTarget.resources().context.id!=oldContext && secondary.swapchainTarget.resources().width==320);
         secondary.teardownTargets();
