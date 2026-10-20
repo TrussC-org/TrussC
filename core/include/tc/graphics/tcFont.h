@@ -28,7 +28,7 @@
 #include <cmath>
 
 #ifdef __EMSCRIPTEN__
-#include <emscripten/fetch.h>
+#include "tcBoundedFontFetch.h"
 #include <emscripten.h>
 #endif
 
@@ -56,7 +56,7 @@
 // ---------------------------------------------------------------------------
 // Names are resolved at load time via tc::systemFontPath (CoreText / DirectWrite
 // / fontconfig per platform). Web keeps URLs since browsers don't expose system
-// fonts — Font::load handles URL inputs directly via emscripten_fetch.
+// fonts — Font::load handles URL inputs directly via bounded streaming fetch.
 #ifdef __EMSCRIPTEN__
     // Web: Use Google Fonts via jsDelivr CDN (async load)
     #define TC_FONT_SANS     "https://cdn.jsdelivr.net/fontsource/fonts/noto-sans@latest/latin-400-normal.ttf"
@@ -1477,28 +1477,29 @@ class Font {
         int size = 0, limit = 4096;
         bool preflightFailure = false, unsupportedUrl = false, urlTimeout = false;
 #ifdef __EMSCRIPTEN__
-        emscripten_fetch_t* fetch = nullptr;
+        internal::BoundedFontFetch* fetch = nullptr;
         bool fetchComplete = false;
         double deadline = 0;
+        std::shared_ptr<std::function<void()>> stopFetch;
 #endif
     };
 public:
     Font() = default;
-    virtual ~Font() = default;
+    virtual ~Font() { cancelAsync(); }
 
     // Copies share the committed atlas, start idle and have empty listeners.
     // Assignments keep the destination listeners. Moving cancels both runs.
     Font(const Font& other) { copyCommitted(other); }
     Font& operator=(const Font& other) {
-        if (this != &other) { async_.cancel(); copyCommitted(other); }
+        if (this != &other) { cancelAsync(); copyCommitted(other); }
         return *this;
     }
     Font(Font&& other) noexcept {
-        other.async_.cancel(); moveCommitted(other);
+        other.cancelAsync(); moveCommitted(other);
     }
     Font& operator=(Font&& other) noexcept {
         if (this != &other) {
-            async_.cancel(); other.async_.cancel(); moveCommitted(other);
+            cancelAsync(); other.cancelAsync(); moveCommitted(other);
         }
         return *this;
     }
@@ -1537,7 +1538,7 @@ public:
     static int getDefaultOversampling() { return defaultOversample_; }
 
     Font& setOversampling(int n) {
-        async_.cancel();
+        cancelAsync();
         n = clampOversample(n);
         if (n == oversample_) return *this;      // nothing to rebuild
         oversample_ = n;
@@ -1573,7 +1574,7 @@ public:
     // so apps that never minify text pay nothing. Turn it off to trade shimmer
     // on small/distant text for ~33% less atlas memory and no rebuild cost.
     Font& setMipmaps(bool enabled) {
-        async_.cancel();
+        cancelAsync();
         if (enabled == mipmaps_) return *this;
         mipmaps_ = enabled;
         reresolveAtlas([enabled](internal::FontCacheKey& k) { k.mipmaps = enabled; },
@@ -1609,7 +1610,7 @@ private:
 
 public:
     LoadResult load(const fs::path& nameOrPath, int size, int faceIndex = 0) {
-        async_.cancel();
+        cancelAsync();
         // Render glyphs at physical pixel size for sharp text on HiDPI displays.
         // All metrics/drawing are scaled back to logical coordinates.
         dpiScale_ = getDpiScale();
@@ -1689,6 +1690,7 @@ public:
     // Completions are delivered during runApp / runHeadlessApp; in a bare main()
     // without an app run, no completion event fires.
     void loadAsync(const fs::path& nameOrPath, int size, int faceIndex = 0) {
+        cancelAsync();
         auto state = async_.begin(onLoad, [this](AsyncState& ready) { applyAsync(ready); });
         state->dpi = sapp_dpi_scale();
         state->size = size;
@@ -1705,6 +1707,7 @@ public:
                 state->result = LoadResult::success();
                 internal::completeResourceLoad(state);
             } else {
+                urlState_ = state;
                 internal::startResourceLoad([state] { startUrlAsync(state); });
             }
 #else
@@ -1754,6 +1757,19 @@ public:
 
 private:
     internal::ResourceLoadSlot<AsyncState> async_;
+#ifdef __EMSCRIPTEN__
+    std::weak_ptr<AsyncState> urlState_;
+#endif
+    void cancelAsync() {
+#ifdef __EMSCRIPTEN__
+        if (auto state = urlState_.lock()) {
+            state->cancelled.store(true);
+            if (state->fetch) finishUrlAsync(state->fetch, false);
+        }
+        urlState_.reset();
+#endif
+        async_.cancel();
+    }
     void copyCommitted(const Font& other) {
         copySettings(other);
         atlasManager_ = other.atlasManager_;
@@ -1858,30 +1874,27 @@ private:
 
 #ifdef __EMSCRIPTEN__
     // The C callback owns a heap-held shared State, never a Font*. Mark
-    // completion before close: abort can reenter onerror synchronously.
-    static void finishUrlAsync(emscripten_fetch_t* fetch, bool success) {
+    // completion before releasing the streaming backend and its callback holder.
+    static void finishUrlAsync(internal::BoundedFontFetch* fetch, bool success) {
         auto* holder = static_cast<std::shared_ptr<AsyncState>*>(fetch->userData);
         auto state = *holder;
         if (state->fetchComplete) return;
         state->fetchComplete = true;
         state->fetch = nullptr;
+        state->stopFetch.reset();
         if (!state->cancelled.load()) {
             if (success) {
-                if (fetch->numBytes > (uint64_t)SIZE_MAX) {
-                    logWarning() << "Font: response too large for " << state->key.fontPath;
-                } else {
-                    auto candidate = std::make_shared<internal::FontAtlasManager>();
-                    candidate->setOversample(state->key.oversample);
-                    candidate->setMipmaps(state->key.mipmaps);
-                    if (candidate->setupFromMemory(reinterpret_cast<const uint8_t*>(fetch->data),
-                            (size_t)fetch->numBytes, state->key.fontSize, state->key.faceIndex)) {
-                        state->candidate = std::move(candidate);
-                        logNotice("Font") << "Loaded from URL: " << state->key.fontPath;
-                    }
+                auto candidate = std::make_shared<internal::FontAtlasManager>();
+                candidate->setOversample(state->key.oversample);
+                candidate->setMipmaps(state->key.mipmaps);
+                if (candidate->setupFromMemory(reinterpret_cast<const uint8_t*>(fetch->data),
+                        fetch->numBytes, state->key.fontSize, state->key.faceIndex)) {
+                    state->candidate = std::move(candidate);
+                    logNotice("Font") << "Loaded from URL: " << state->key.fontPath;
                 }
             } else {
                 state->urlTimeout = emscripten_get_now() >= state->deadline;
-                if (!state->urlTimeout) {
+                if (!state->urlTimeout && fetch->status != -1) {
                     logError() << "Font: failed to fetch " << state->key.fontPath
                                << " (status: " << fetch->status << ")";
                 }
@@ -1891,24 +1904,25 @@ private:
                 : classifyLoad(state->candidate != nullptr, state->input.name,
                                state->input.path, state->input.face);
         }
-        emscripten_fetch_close(fetch);
+        internal::closeBoundedFontFetch(fetch);
         delete holder;
         if (!state->cancelled.load()) internal::completeResourceLoad(state);
     }
     static void startUrlAsync(const std::shared_ptr<AsyncState>& state) {
         if (state->cancelled.load()) return;
         state->deadline = emscripten_get_now() + internal::webLoadTimeoutMSecs;
-        emscripten_fetch_attr_t attr;
-        emscripten_fetch_attr_init(&attr);
-        std::strcpy(attr.requestMethod, "GET");
-        attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
-        attr.timeoutMSecs = internal::webLoadTimeoutMSecs;
-        attr.onsuccess = [](emscripten_fetch_t* fetch) { finishUrlAsync(fetch, true); };
-        attr.onerror = [](emscripten_fetch_t* fetch) { finishUrlAsync(fetch, false); };
         auto* holder = new std::shared_ptr<AsyncState>(state);
-        attr.userData = holder;
-        auto* fetch = emscripten_fetch(&attr, state->key.fontPath.c_str());
-        if (!state->fetchComplete) state->fetch = fetch;
+        auto* fetch = internal::startBoundedFontFetch(state->key.fontPath.c_str(), holder,
+            internal::webLoadTimeoutMSecs, finishUrlAsync);
+        if (!state->fetchComplete) {
+            state->fetch = fetch;
+            state->stopFetch = internal::registerResourceStop([weak = std::weak_ptr<AsyncState>(state)] {
+                if (auto active = weak.lock()) {
+                    active->cancelled.store(true);
+                    if (active->fetch) finishUrlAsync(active->fetch, false);
+                }
+            });
+        }
         if (!fetch && !state->fetchComplete) {
             state->fetchComplete = true;
             delete holder;
@@ -1926,8 +1940,9 @@ private:
             auto* fetch = state->fetch;
             state->fetchComplete = true;
             state->fetch = nullptr;
+            state->stopFetch.reset();
             auto* holder = static_cast<std::shared_ptr<AsyncState>*>(fetch->userData);
-            emscripten_fetch_close(fetch);
+            internal::closeBoundedFontFetch(fetch);
             delete holder;
             if (!state->cancelled.load()) {
                 state->urlTimeout = true;
@@ -1945,17 +1960,10 @@ private:
         bool timedOut = false;
     };
 
-    static void onFetchSuccess(emscripten_fetch_t* fetch) {
+    static void onFetchSuccess(internal::BoundedFontFetch* fetch) {
         FontLoadContext* ctx = reinterpret_cast<FontLoadContext*>(fetch->userData);
 
-        // A response larger than SIZE_MAX (size_t is 32-bit on wasm32) is
-        // refused. setupFromMemory() rejects an empty response with a warning.
-        if (fetch->numBytes > (uint64_t)SIZE_MAX) {
-            logWarning() << "Font: response too large for " << ctx->key.fontPath;
-            ctx->complete = true;
-            return;
-        }
-
+        // The streaming backend admits the complete response before copying.
         auto atlas = internal::SharedFontCache::getInstance().getOrCreateFromMemory(
             ctx->key,
             reinterpret_cast<const uint8_t*>(fetch->data),
@@ -1969,13 +1977,12 @@ private:
         ctx->complete = true;
     }
 
-    static void onFetchError(emscripten_fetch_t* fetch) {
+    static void onFetchError(internal::BoundedFontFetch* fetch) {
         FontLoadContext* ctx = reinterpret_cast<FontLoadContext*>(fetch->userData);
-        // Closing an unfinished fetch can call onerror again. The waiting
-        // caller owns closing it, after the result has been recorded.
+        // The waiting caller owns closing the stream after recording its result.
         if (ctx->complete) return;
         ctx->timedOut = emscripten_get_now() >= ctx->deadline;
-        if (!ctx->timedOut) {
+        if (!ctx->timedOut && fetch->status != -1) {
             logError() << "Font: failed to fetch " << ctx->key.fontPath
                          << " (status: " << fetch->status << ")";
         }
@@ -1996,16 +2003,10 @@ private:
         atlasManager_.reset();
         FontLoadContext ctx{key, emscripten_get_now() + internal::webLoadTimeoutMSecs};
 
-        emscripten_fetch_attr_t attr;
-        emscripten_fetch_attr_init(&attr);
-        std::strcpy(attr.requestMethod, "GET");
-        attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
-        attr.timeoutMSecs = internal::webLoadTimeoutMSecs;
-        attr.onsuccess = onFetchSuccess;
-        attr.onerror = onFetchError;
-        attr.userData = &ctx;
-
-        auto* fetch = emscripten_fetch(&attr, url.c_str());
+        auto* fetch = internal::startBoundedFontFetch(url.c_str(), &ctx,
+            internal::webLoadTimeoutMSecs, [](internal::BoundedFontFetch* result, bool success) {
+                if (success) onFetchSuccess(result); else onFetchError(result);
+            });
         if (fetch) {
             while (!ctx.complete) {
                 if (emscripten_get_now() >= ctx.deadline) {
@@ -2015,9 +2016,9 @@ private:
                 }
                 emscripten_sleep(10);
             }
-            // Close before the stack context goes away; callbacks never
-            // close recursively, including Emscripten's abort callback.
-            emscripten_fetch_close(fetch);
+            // Abort before the stack context goes away; cancelled JS callbacks
+            // cannot enter C++ after closeBoundedFontFetch returns.
+            internal::closeBoundedFontFetch(fetch);
         }
         if (ctx.timedOut) return internal::reportWebLoadTimeout(internal::utf8ToPath(url), "Font");
         atlasManager_ = internal::SharedFontCache::getInstance().get(key);
@@ -3189,7 +3190,7 @@ public:
 
     // Clear atlas pages (glyphs re-rasterized on next draw)
     void clearAtlas() {
-        async_.cancel();
+        cancelAsync();
         if (atlasManager_) atlasManager_->clearAtlas();
     }
 

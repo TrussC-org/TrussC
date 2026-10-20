@@ -40,3 +40,41 @@ skips it. A non-zero exit fails the job. Run it locally with:
 ```bash
 trusscli run -p .          # from this directory
 ```
+# Response admission
+
+The local HTTPS fixture also exercises complete response boundaries, decoded
+responses, streaming responses, metadata admission, upload replies, redirects,
+incomplete transfers and timeout/retry cleanup. Linux checks the peak and release
+of C++-owned response allocations. These checks do not measure libcurl/TLS C-heap
+allocations or Android SDK allocations.
+
+Additional loopback cases cover response framing/trailers, bodyless HTTP
+semantics, backend header-loss reporting, per-client limits, upload replies,
+and invalid-zero setter input. C++ allocation tracing counts reserved string
+capacity along with receive chunks.
+
+Redirect fixtures start two plain HTTP listeners and one local HTTPS listener,
+all on 127.0.0.1 with ephemeral ports. They cover default following, explicit
+false, HTTP(S) target policy, HTTPS downgrade refusal and HTTP upgrade, all six
+credential headers across same/different origins, neutral headers, POST method
+rules (301/302/303/307/308), PUT/HEAD on 303, multipart 303/307, five-hop success,
+sixth-hop failure, intermediate body admission and cumulative metadata.
+An app-supplied initial file URL is also preserved.
+
+Request-header regressions cover all six credential names with surrounding
+space/tab and mixed case: same-origin peers receive trimmed names, and other
+origins receive no credential headers. Invalid names fail request/upload before
+any perform call. A transport trace drives the production redirect loop with
+real curl URL parsing to check same/changed scoped IPv6 zones; it never contacts
+link-local interfaces. Body budgets are cumulative across hops: 4+4 bytes fail
+under limit 4, while 2+2 publishes the final two bytes. Empty gzip bodies also
+check the independent cumulative wire budget.
+
+Invalid name/value tests also query a loopback peer's accepted-connection count
+before and after request/upload attempts, asserting that it receives nothing.
+Value cases cover CR, LF and embedded NUL at the start, middle and end through
+addHeader, setBearerToken and Content-Type arguments for requests with a body.
+Names and values share one Warning per client
+across retries, clearing headers and a successful request; fresh clients warn
+independently. Warning text contains no app values. Android validation ordering
+is covered by source review and test_redirect_policy.py, without runtime claims.

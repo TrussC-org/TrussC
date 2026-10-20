@@ -37,7 +37,11 @@
 #include <functional>
 #include <cctype>
 #include <cstdio>
+#include <chrono>
+#include <climits>
 #include <nlohmann/json.hpp>
+#include "tcHttpResponseBounds.h"
+#include "tc/utils/tcAnnotations.h"
 
 #ifdef TCX_HTTP_CURL
 #include "tcCurlTlsInternal.h"
@@ -53,13 +57,13 @@ struct HttpResponse {
 
     bool ok() const { return statusCode >= 200 && statusCode < 300; }
 
+    // Parse within 16 MiB input, depth 64 and 1,000,000 nodes (including keys),
+    // plus an internal 128 MiB working budget that can reject earlier.
+    // Budget rejection returns an empty object and logs one first-loss Warning
+    // shared by JSON parsing across clients. Empty/invalid JSON also returns an
+    // empty object, without a budget Warning unless a budget was exceeded.
     nlohmann::json json() const {
-        if (body.empty()) return nlohmann::json::object();
-        try {
-            return nlohmann::json::parse(body);
-        } catch (...) {
-            return nlohmann::json::object();
-        }
+        return detail::parseResponseJson(body);
     }
 };
 
@@ -81,22 +85,44 @@ namespace detail {
         static CurlGlobalGuard guard;
     }
 
-    // Credential headers: setVerbose() output shows their name but not their
-    // value. Matched by name only (case-insensitive).
+    // Shared by verbose redaction and cross-origin redirect filtering.
+    // Keep AndroidHttpClient.CREDENTIAL_HEADERS mirrored with this list.
+    inline constexpr std::string_view credentialHeaders[] = {
+        "Authorization", "Proxy-Authorization", "X-Api-Key", "Api-Key", "X-Auth-Token", "Cookie",
+    };
+    inline bool asciiWhitespace(unsigned char c) {
+        return c == ' ' || (c >= '\t' && c <= '\r');
+    }
+    inline std::string_view trimHeaderName(std::string_view name) {
+        while (!name.empty() && asciiWhitespace(name.front())) name.remove_prefix(1);
+        while (!name.empty() && asciiWhitespace(name.back())) name.remove_suffix(1);
+        return name;
+    }
+    inline bool validHeaderName(std::string_view name) {
+        // RFC 9110 field-name = token; only ASCII tchar is permitted.
+        return !name.empty() && std::all_of(name.begin(), name.end(), [](unsigned char c) {
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                (c >= '0' && c <= '9') || std::string_view("!#$%&'*+-.^_`|~").find(c) != std::string_view::npos;
+        });
+    }
+    inline bool validHeaderValue(std::string_view value) {
+        return value.find_first_of(std::string_view("\r\n\0", 3)) == std::string_view::npos;
+    }
+    inline bool equalHeaderName(std::string_view a, std::string_view b) {
+        return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
+            // HTTP names and DNS hosts use ASCII case folding, independent of locale.
+            const auto lower = [](unsigned char c) { return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c; };
+            return lower(x) == lower(y);
+        });
+    }
+    inline bool isCredentialHeader(std::string_view name) {
+        name = trimHeaderName(name);
+        return std::any_of(std::begin(credentialHeaders), std::end(credentialHeaders),
+            [&](auto candidate) { return equalHeaderName(name, candidate); });
+    }
     inline bool credentialNameAt(std::string_view line, size_t pos, size_t& colon) {
-        static constexpr std::string_view names[] = {
-            "authorization", "proxy-authorization", "x-api-key", "api-key",
-        };
-        for (auto name : names) {
-            if (line.size() - pos > name.size() && line[pos + name.size()] == ':' &&
-                std::equal(name.begin(), name.end(), line.begin() + pos, [](char n, char c) {
-                    return n == std::tolower(static_cast<unsigned char>(c));
-                })) {
-                colon = pos + name.size();
-                return true;
-            }
-        }
-        return false;
+        colon = line.find(':', pos);
+        return colon != std::string_view::npos && isCredentialHeader(line.substr(pos, colon - pos));
     }
 
     // curl echoes a proxy taken from the environment, userinfo included, on
@@ -332,7 +358,11 @@ public:
 
     // --- Custom headers ---
 
-    // Add a custom header
+    // Add a custom header. Names must be valid HTTP field names; surrounding
+    // ASCII whitespace is ignored. Values must not contain CR, LF or NUL.
+    // An invalid header fails the request before anything is sent: statusCode 0,
+    // empty body and response.error set. Names and values share one Warning per
+    // client on the first invalid-header request. The Web stub sends nothing.
     void addHeader(const std::string& key, const std::string& value) {
         // Overwrite if key already exists
         for (auto& h : headers_) {
@@ -341,7 +371,8 @@ public:
         headers_.push_back({key, value});
     }
 
-    // Set Bearer token for Authorization header
+    // Set Bearer token for Authorization header. CR, LF or NUL fails the request
+    // before I/O, using the same per-client Warning gate as invalid app headers.
     void setBearerToken(const std::string& token) {
         if (token.empty()) {
             // Remove Authorization header
@@ -360,13 +391,33 @@ public:
     // Set request timeout in seconds (default: 30)
     void setTimeout(long seconds) { timeoutSeconds_ = seconds; }
 
-    // Follow 3xx redirects (default off). Needed for e.g. public file shares that
-    // redirect the download to a signed URL. Off by default so existing callers
-    // (which expect the raw response) are unaffected.
+    // Redirects are followed by default on every backend (v0.8 change); false
+    // returns the 3xx itself. The Web backend is still a stub.
+    // Follow at most 5 redirects, to http/https only, with no https->http downgrade.
+    // On a different origin (scheme, host, port, IPv6 zone), omit Authorization,
+    // Proxy-Authorization, X-Api-Key, Api-Key, X-Auth-Token and Cookie for the
+    // remaining hops of this request.
     void setFollowRedirects(bool follow) { followRedirects_ = follow; }
 
+    // Per-client response limit, default 64 MiB (67,108,864 bytes), for the whole
+    // request including redirect hops and upload replies. Applies to decoded
+    // bytes and independently to wire bytes. No effect on the Web stub.
+    // Bound: a server controls response size. Exceeding the limit fails the whole
+    // response: statusCode 0, empty body, error set; one first-loss Warning shared
+    // across clients. Zero is ignored, preserving the limit, with a once Warning.
+    // Storage grows only with received data. Initialized payload peaks at about
+    // one response on desktop, twice on Android; desktop reserved capacity can
+    // temporarily approach twice the response during final copying.
+    // No stream-to-file API yet. Android multipart upload remains unsupported.
+    TC_PLATFORMS("macos,windows,linux,android,web")
+    void setResponseLimit(size_t bytes) {
+        if (!bytes) { detail::reportInvalidResponseLimit(); return; }
+        responseLimit_ = bytes;
+    }
+
     // Enable verbose curl logging to stderr (for debugging). The values of
-    // the Authorization, Proxy-Authorization, X-Api-Key and Api-Key headers
+    // the Authorization, Proxy-Authorization, X-Api-Key, Api-Key,
+    // X-Auth-Token and Cookie headers
     // are shown as <redacted>, and so is a proxy URL with user:password taken
     // from the environment (https_proxy etc.) and the user name on curl's
     // "Proxy auth using ..." / "Server auth using ..." lines. Only those are
@@ -421,6 +472,7 @@ public:
 
     // Generic request with an explicit HTTP/WebDAV method (GET, POST, PUT, DELETE,
     // MKCOL, PROPFIND, COPY, MOVE, ...). The typed helpers above wrap this.
+    // A sent Content-Type value follows addHeader's CR/LF/NUL rejection rule.
     HttpResponse request(const std::string& method, const std::string& path,
                          const std::string& body = "",
                          const std::string& contentType = "application/json");
@@ -432,9 +484,34 @@ private:
     std::string baseUrl_;
     std::vector<std::pair<std::string, std::string>> headers_;
     long timeoutSeconds_ = 30;
-    bool followRedirects_ = false;
+    bool followRedirects_ = true;
+    size_t responseLimit_ = detail::responseByteLimit;
     bool verbose_ = false;
     std::string tlsCaPem_;
+    mutable detail::RequestHeaderWarning invalidHeaderWarned_; // shared by invalid names/values
+
+    // Canonicalize once as app headers become request headers, before backend I/O.
+    bool prepareHeaders(std::vector<std::pair<std::string, std::string>>& result, HttpResponse& response,
+                        const std::string* contentType = nullptr) const {
+        if (contentType && !detail::validHeaderValue(*contentType)) {
+            response.error = "Invalid HTTP header value";
+            detail::reportInvalidRequestHeader(invalidHeaderWarned_, "Invalid HTTP header value");
+            return false;
+        }
+        for (const auto& h : headers_) {
+            const auto name = detail::trimHeaderName(h.first);
+            const char* invalid = !detail::validHeaderName(name) ? "Invalid HTTP header name" :
+                !detail::validHeaderValue(h.second) ? "Invalid HTTP header value" : nullptr;
+            if (invalid) {
+                response.error = invalid;
+                // Do not log the app's header name or value (it may be a credential).
+                detail::reportInvalidRequestHeader(invalidHeaderWarned_, invalid);
+                return false;
+            }
+            result.emplace_back(std::string(name), h.second);
+        }
+        return true;
+    }
 
 #ifdef TCX_HTTP_CURL
     // TLS options shared by request() and uploadFile(). Returns false, with
@@ -483,15 +560,255 @@ private:
 
     // libcurl write callback
     static size_t writeCallback(void* contents, size_t size, size_t nmemb, void* userp) {
-        auto* response = static_cast<std::string*>(userp);
-        size_t totalSize = size * nmemb;
-        response->append(static_cast<char*>(contents), totalSize);
-        return totalSize;
+        auto* response = static_cast<detail::ResponseBuffer*>(userp);
+        if (size != 0 && nmemb > SIZE_MAX / size) {
+            response->reject(detail::ResponseLoss::Body, SIZE_MAX);
+            return 0;
+        }
+        const size_t count = size * nmemb;
+        return response->append(static_cast<const char*>(contents), count) ? count : 0;
+    }
+
+    static size_t headerCallback(char* data, size_t size, size_t count, void* userp) {
+        auto& response = *static_cast<detail::ResponseBuffer*>(userp);
+        if (size && count > SIZE_MAX / size) {
+            response.reject(detail::ResponseLoss::Metadata, SIZE_MAX);
+            return 0;
+        }
+        const size_t bytes = size * count;
+        if (response.expectStatus && !response.bodyStarted) {
+            // libcurl emits this after an outgoing request, or a 1xx block.
+            // CURLINFO_RESPONSE_CODE supplies the parsed status independently.
+            long code = 0;
+            curl_easy_getinfo(static_cast<CURL*>(response.easy), CURLINFO_RESPONSE_CODE, &code);
+            const bool interim = response.status >= 100 && response.status < 200;
+            // A late debug piece alone cannot reopen a completed header block.
+            // Require parsed status/redirect progress, or an interim response.
+            if (!response.headersEnded || interim || code != response.status) {
+                response.clear();
+                response.status = static_cast<int>(code);
+                response.headersEnded = false;
+            }
+            response.expectStatus = false;
+        }
+        const bool accepted = response.header(data, bytes);
+        if (bytes == 2 && data[0] == '\r' && data[1] == '\n') {
+            response.headersEnded = true;
+            if (response.status >= 100 && response.status < 200) response.expectStatus = true;
+        }
+        return accepted ? bytes : 0;
+    }
+    static int progressCallback(void* userp, curl_off_t, curl_off_t downloaded,
+                                curl_off_t, curl_off_t) {
+        auto& response = *static_cast<detail::ResponseBuffer*>(userp);
+        if (downloaded > 0) {
+            if (static_cast<uint64_t>(downloaded) > response.limit - response.wireTotal)
+                response.reject(detail::ResponseLoss::Body, response.limit == SIZE_MAX ? response.limit : response.limit + 1);
+            else response.hopWire = (std::max)(response.hopWire, static_cast<size_t>(downloaded));
+        }
+        return response.rejected ? 1 : 0;
+    }
+    static bool configureResponse(CURL* curl, detail::ResponseBuffer& response) {
+        response.easy = curl;
+        if (curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, response.backendError) != CURLE_OK) return false;
+        if (curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, debugCallback) != CURLE_OK) return false;
+        if (curl_easy_setopt(curl, CURLOPT_DEBUGDATA, &response) != CURLE_OK) return false;
+        if (curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L) != CURLE_OK) return false;
+        if (curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback) != CURLE_OK) return false;
+        if (curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response) != CURLE_OK) return false;
+        if (curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, headerCallback) != CURLE_OK) return false;
+        if (curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response) != CURLE_OK) return false;
+        if (curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progressCallback) != CURLE_OK) return false;
+        if (curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &response) != CURLE_OK) return false;
+        if (curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L) != CURLE_OK) return false;
+        // curl decodes incrementally, so the write callback bounds expanded
+        // bytes, independently of the wire-byte progress callback.
+        if (curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "") != CURLE_OK) return false;
+        // Each easy handle is destroyed after the request: DNS results, TLS
+        // state and failed/redirected transfer storage cannot collect in a cache.
+        if (curl_easy_setopt(curl, CURLOPT_DNS_CACHE_TIMEOUT, 0L) != CURLE_OK) return false;
+        return true;
+    }
+    static void finishResponse(CURL* curl, CURLcode result,
+                               detail::ResponseBuffer& buffer, HttpResponse& response) {
+        // A libcurl header ceiling can fire before HEADERFUNCTION. Its bounded
+        // error buffer identifies that cause on newer versions. Older curl reports
+        // OOM without a diagnostic for both a partial overlong line and an
+        // allocation failure in headers: report that ambiguous backend reason
+        // separately, never claim it is our metadata overflow.
+        bool backendHeaderResourceFailure = result == CURLE_OUT_OF_MEMORY;
+#if LIBCURL_VERSION_NUM >= 0x080600
+        backendHeaderResourceFailure = backendHeaderResourceFailure || result == CURLE_TOO_LARGE;
+#endif
+        if (!buffer.rejected && result != CURLE_OK &&
+            (std::strstr(buffer.backendError, "Too large response header") ||
+             std::strstr(buffer.backendError, "Header overflow") ||
+             (backendHeaderResourceFailure && !buffer.bodyStarted &&
+              (buffer.metadata > 0 || buffer.requestIssued) &&
+              (!buffer.headersEnded || buffer.expectStatus)))) {
+            buffer.backendHeaderLimit = true;
+        }
+        buffer.report(); // after the C callbacks, on the synchronous caller
+        if (buffer.rejected || result != CURLE_OK) {
+            response.error = buffer.rejected ? (buffer.loss == detail::ResponseLoss::HeaderSyntax
+                ? "Ambiguous HTTP response trailer" : buffer.loss == detail::ResponseLoss::RedirectPolicy
+                ? "HTTP redirect policy refused target" : buffer.loss == detail::ResponseLoss::Redirects
+                ? "HTTP redirect limit exceeded" : "HTTP response exceeded its memory limit") : curl_easy_strerror(result);
+            return;
+        }
+        try {
+            buffer.publish(response.body);
+            long code = 0;
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
+            response.statusCode = static_cast<int>(code);
+        } catch (...) {
+            response.body.clear();
+            response.error = "HTTP response allocation failed";
+        }
+    }
+
+    // Both normal requests and multipart replies use the same hop admission.
+    void performHops(CURL* curl, detail::ResponseBuffer& buffer, HttpResponse& response,
+                     std::string url, std::string method, const std::string& body,
+                     const std::string& contentType, const std::string* filePath, long timeout,
+                     const std::vector<std::pair<std::string, std::string>>& requestHeaders) {
+        bool forwardCredentials = true, sendBody = true;
+        const auto start = std::chrono::steady_clock::now();
+        for (size_t redirects = 0;; ++redirects) {
+            // Dispose per-hop storage; decoded/wire/metadata admission belongs to the request.
+            buffer.clear();
+            buffer.wireTotal += buffer.hopWire;
+            buffer.hopWire = 0;
+            buffer.expectStatus = true; buffer.headersEnded = false;
+            buffer.status = 0; buffer.requestIssued = false; buffer.backendError[0] = 0;
+            curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+            // The initial URL remains app-chosen, including file:// and ftp://.
+            // Never enable CURLOPT_FOLLOWLOCATION: validate each server-chosen target below.
+            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, static_cast<char*>(nullptr));
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, static_cast<char*>(nullptr));
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(0));
+            curl_easy_setopt(curl, CURLOPT_MIMEPOST, static_cast<curl_mime*>(nullptr));
+            curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+            // Rebuild multipart state per hop so file streams start at byte zero.
+            curl_mime* mime = nullptr;
+            if (sendBody && filePath) {
+                mime = curl_mime_init(curl);
+                curl_mimepart* part = mime ? curl_mime_addpart(mime) : nullptr;
+                if (!part) {
+                    curl_mime_free(mime);
+                    response.error = "HTTP upload allocation failed"; return;
+                }
+                curl_mime_name(part, "file");
+                curl_mime_filedata(part, filePath->c_str());
+                curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
+            } else if (sendBody && !body.empty()) {
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.data());
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(body.size()));
+            }
+            if (method == "HEAD") curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
+            else if (method == "POST") {
+                // CURLOPT_POST would replace curl's multipart request mode.
+                if (!(sendBody && mime)) curl_easy_setopt(curl, CURLOPT_POST, 1L);
+            }
+            // Preserve curl's default command behavior for app-chosen FTP URLs.
+            else if (method != "GET" || (sendBody && !body.empty()))
+                curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str());
+
+            struct curl_slist* headers = nullptr;
+            for (const auto& h : requestHeaders) {
+                if (!forwardCredentials && detail::isCredentialHeader(h.first)) continue;
+                headers = curl_slist_append(headers, (h.first + ": " + h.second).c_str());
+            }
+            if (sendBody && !body.empty())
+                headers = curl_slist_append(headers, ("Content-Type: " + contentType).c_str());
+            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            const int64_t timeoutMs = timeout <= 0 ? 0 : timeout > INT64_MAX / 1000 ? INT64_MAX : static_cast<int64_t>(timeout) * 1000;
+            const int64_t remaining = timeoutMs - elapsed;
+            if (timeout > 0) curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS,
+                static_cast<long>((std::clamp)(remaining, int64_t{1}, static_cast<int64_t>(LONG_MAX))));
+            CURLcode result = timeout > 0 && remaining <= 0 ? CURLE_OPERATION_TIMEDOUT : curl_easy_perform(curl);
+            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, static_cast<curl_slist*>(nullptr));
+            curl_slist_free_all(headers);
+            curl_easy_setopt(curl, CURLOPT_MIMEPOST, static_cast<curl_mime*>(nullptr));
+            curl_mime_free(mime);
+            if (verbose_) flushPendingHeaderOut(*static_cast<detail::VerboseState*>(buffer.verboseState));
+            if (result != CURLE_OK || buffer.rejected || !followRedirects_) {
+                finishResponse(curl, result, buffer, response); return;
+            }
+            long status = 0;
+            char* redirectUrl = nullptr;
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+            curl_easy_getinfo(curl, CURLINFO_REDIRECT_URL, &redirectUrl);
+            if (!redirectUrl || !(status == 301 || status == 302 || status == 303 || status == 307 || status == 308)) {
+                finishResponse(curl, result, buffer, response); return;
+            }
+            // Bound (security): peer redirect chains retain metadata and connection state. Overflow rejects the whole response and is counted.
+            if (redirects == 5) {
+                buffer.reject(detail::ResponseLoss::Redirects, 6);
+                finishResponse(curl, CURLE_OK, buffer, response); return;
+            }
+            const size_t bytes = std::strlen(redirectUrl);
+            if (bytes > detail::metadataByteLimit - buffer.metadata) {
+                buffer.reject(detail::ResponseLoss::Metadata, detail::metadataByteLimit + 1);
+                finishResponse(curl, CURLE_OK, buffer, response); return;
+            }
+            buffer.metadata += bytes;
+            std::string next(redirectUrl);
+            auto origin = [](const std::string& value, std::string& scheme, std::string& host, std::string& zone, std::string& port) {
+                CURLU* parsed = curl_url();
+                if (!parsed) return false;
+                bool ok = curl_url_set(parsed, CURLUPART_URL, value.c_str(), CURLU_NON_SUPPORT_SCHEME) == CURLUE_OK;
+                auto part = [&](CURLUPart key, std::string& out, unsigned flags = 0) {
+                    char* text = nullptr;
+                    if (curl_url_get(parsed, key, &text, flags) != CURLUE_OK) return false;
+                    out = text; curl_free(text); return true;
+                };
+                ok = ok && part(CURLUPART_SCHEME, scheme) && part(CURLUPART_HOST, host) && part(CURLUPART_PORT, port, CURLU_DEFAULT_PORT);
+                // HOST excludes the scope. Read the raw ZONEID as the transport
+                // uses it: %25/raw % delimiters are consumed by curl, but escapes
+                // inside interface names stay literal. Zones are case-sensitive.
+                char* scope = nullptr;
+                const auto zoneResult = curl_url_get(parsed, CURLUPART_ZONEID, &scope, 0);
+                if (zoneResult == CURLUE_OK) { zone = scope; curl_free(scope); }
+                else if (zoneResult != CURLUE_NO_ZONEID) ok = false;
+                curl_url_cleanup(parsed);
+                return ok;
+            };
+            std::string scheme, host, zone, port, nextScheme, nextHost, nextZone, nextPort;
+            // Bound (security): servers choose redirect schemes and TLS transitions. Overflow refuses non-HTTP(S) targets or HTTPS downgrades and is counted.
+            char* effectiveUrl = nullptr;
+            curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effectiveUrl);
+            if (!effectiveUrl || !origin(effectiveUrl, scheme, host, zone, port) || !origin(next, nextScheme, nextHost, nextZone, nextPort) ||
+                (nextScheme != "http" && nextScheme != "https") || (scheme == "https" && nextScheme == "http")) {
+                buffer.reject(detail::ResponseLoss::RedirectPolicy, 1);
+                finishResponse(curl, CURLE_OK, buffer, response); return;
+            }
+            // Escaped interface names are ambiguous across transports. Treat
+            // either escaped zone as an origin change, even if the strings match.
+            if (scheme != nextScheme || !detail::equalHeaderName(host, nextHost) || zone != nextZone || port != nextPort ||
+                zone.find('%') != std::string::npos || nextZone.find('%') != std::string::npos)
+                forwardCredentials = false;
+            if (((status == 301 || status == 302) && method == "POST") || (status == 303 && method != "HEAD")) {
+                method = "GET"; sendBody = false;
+            }
+            url = std::move(next);
+        }
     }
 
     // setVerbose() output: detail::formatVerbose() builds the text, written
     // to stderr here.
     static int debugCallback(CURL*, curl_infotype type, char* data, size_t size, void* userp) {
+        auto& response = *static_cast<detail::ResponseBuffer*>(userp);
+        if (type == CURLINFO_HEADER_OUT) response.requestIssued = true;
+        // Outgoing headers can arrive in multiple debug pieces, including
+        // after the peer has responded. Only arm a new response for an initial
+        // request or a status for which curl can actually retry/follow.
+        if (type == CURLINFO_HEADER_OUT && !response.bodyStarted &&
+            (response.status == 0 || (response.status >= 300 && response.status < 400) ||
+             response.status == 401 || response.status == 407)) response.expectStatus = true;
+        if (!response.verbose) return 0;
         detail::VerboseKind kind;
         switch (type) {
             case CURLINFO_TEXT:       kind = detail::VerboseKind::Text; break;
@@ -500,7 +817,7 @@ private:
             default: return 0;  // bodies and TLS records (not shown by CURLOPT_VERBOSE either)
         }
         std::string out;
-        detail::formatVerbose(static_cast<detail::VerboseState*>(userp), kind,
+        detail::formatVerbose(static_cast<detail::VerboseState*>(response.verboseState), kind,
                               std::string_view(data, size), out);
         writeVerbose(out);
         return 0;
@@ -530,16 +847,24 @@ inline HttpResponse HttpClient::request(const std::string& method, const std::st
     HttpResponse response;
     std::string url = baseUrl_ + path;
 
+    std::vector<std::pair<std::string, std::string>> requestHeaders;
+    if (!prepareHeaders(requestHeaders, response, body.empty() ? nullptr : &contentType)) return response;
     CURL* curl = curl_easy_init();
     if (!curl) {
         response.error = "Failed to initialize curl";
         return response;
     }
 
-    std::string responseBody;
+    detail::ResponseBuffer responseBody(responseLimit_);
+    responseBody.verbose = verbose_;
+    detail::VerboseState verboseState;
+    responseBody.verboseState = &verboseState;
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);
+    if (!configureResponse(curl, responseBody)) {
+        response.error = "HTTP response bounds are unsupported by this libcurl";
+        curl_easy_cleanup(curl);
+        return response;
+    }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSeconds_);
     // No short CURLOPT_CONNECTTIMEOUT: curl's Schannel backend reuses the connect
     // deadline for mid-transfer TLS *renegotiation*, so a 10s connect timeout made
@@ -551,61 +876,12 @@ inline HttpResponse HttpClient::request(const std::string& method, const std::st
         curl_easy_cleanup(curl);
         return response;
     }
-    if (followRedirects_) {
-        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-        curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
-    }
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPIDLE, 30L);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPINTVL, 15L);
-    detail::VerboseState verboseState;
-    if (verbose_) {
-        curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, debugCallback);
-        curl_easy_setopt(curl, CURLOPT_DEBUGDATA, &verboseState);
-        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-    }
 
-    // Set method
-    if (method == "POST") {
-        curl_easy_setopt(curl, CURLOPT_POST, 1L);
-    } else if (method == "DELETE") {
-        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
-    } else if (method == "PUT") {
-        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
-    } else if (method != "GET") {
-        // Generic verb (MKCOL, PROPFIND, COPY, MOVE, ...) for WebDAV etc.
-        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str());
-    }
+    performHops(curl, responseBody, response, url, method, body, contentType, nullptr, timeoutSeconds_, requestHeaders);
 
-    // Build headers
-    struct curl_slist* headers = nullptr;
-    for (const auto& h : headers_) {
-        std::string line = h.first + ": " + h.second;
-        headers = curl_slist_append(headers, line.c_str());
-    }
-    if (!body.empty()) {
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, body.size());
-        std::string ct = "Content-Type: " + contentType;
-        headers = curl_slist_append(headers, ct.c_str());
-    }
-    if (headers) {
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    }
-
-    CURLcode res = curl_easy_perform(curl);
-    flushPendingHeaderOut(verboseState);
-
-    if (res != CURLE_OK) {
-        response.error = curl_easy_strerror(res);
-    } else {
-        long httpCode = 0;
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
-        response.statusCode = static_cast<int>(httpCode);
-        response.body = std::move(responseBody);
-    }
-
-    if (headers) curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
     return response;
 }
@@ -614,16 +890,24 @@ inline HttpResponse HttpClient::uploadFile(const std::string& path, const std::s
     HttpResponse response;
     std::string url = baseUrl_ + path;
 
+    std::vector<std::pair<std::string, std::string>> requestHeaders;
+    if (!prepareHeaders(requestHeaders, response)) return response;
     CURL* curl = curl_easy_init();
     if (!curl) {
         response.error = "Failed to initialize curl";
         return response;
     }
 
-    std::string responseBody;
+    detail::ResponseBuffer responseBody(responseLimit_);
+    responseBody.verbose = verbose_;
+    detail::VerboseState verboseState;
+    responseBody.verboseState = &verboseState;
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);
+    if (!configureResponse(curl, responseBody)) {
+        response.error = "HTTP response bounds are unsupported by this libcurl";
+        curl_easy_cleanup(curl);
+        return response;
+    }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 600L);  // 10 min for large RAW files
     if (!applyTlsOptions(curl, response)) {
         curl_easy_cleanup(curl);
@@ -633,37 +917,8 @@ inline HttpResponse HttpClient::uploadFile(const std::string& path, const std::s
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPIDLE, 30L);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPINTVL, 15L);
 
-    // Custom headers
-    struct curl_slist* headers = nullptr;
-    for (const auto& h : headers_) {
-        std::string line = h.first + ": " + h.second;
-        headers = curl_slist_append(headers, line.c_str());
-    }
-    if (headers) {
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    }
+    performHops(curl, responseBody, response, url, "POST", "", "", &filePath, 600L, requestHeaders);
 
-    // Multipart form
-    curl_mime* mime = curl_mime_init(curl);
-    curl_mimepart* part = curl_mime_addpart(mime);
-    curl_mime_name(part, "file");
-    curl_mime_filedata(part, filePath.c_str());
-
-    curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
-
-    CURLcode res = curl_easy_perform(curl);
-
-    if (res != CURLE_OK) {
-        response.error = curl_easy_strerror(res);
-    } else {
-        long httpCode = 0;
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
-        response.statusCode = static_cast<int>(httpCode);
-        response.body = std::move(responseBody);
-    }
-
-    if (headers) curl_slist_free_all(headers);
-    curl_mime_free(mime);
     curl_easy_cleanup(curl);
     return response;
 }
