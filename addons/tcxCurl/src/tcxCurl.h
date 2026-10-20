@@ -93,6 +93,35 @@ namespace detail {
     inline bool asciiWhitespace(unsigned char c) {
         return c == ' ' || (c >= '\t' && c <= '\r');
     }
+    // Extract from the original authority, before any URL parser can decode it.
+    // False means there is no explicit, unambiguous authority to compare.
+    inline bool rawUrlZone(std::string_view url, std::string_view& zone) {
+        zone = {};
+        size_t start = 0;
+        if (url.substr(0, 2) != "//") {
+            const auto scheme = url.find("://");
+            if (scheme == std::string_view::npos) return false;
+            start = scheme + 1;
+        }
+        start += 2;
+        auto authority = url.substr(start, url.find_first_of("/?#", start) - start);
+        const auto user = authority.rfind('@');
+        if (user != std::string_view::npos) authority.remove_prefix(user + 1);
+        if (authority.empty()) return false;
+        if (authority.front() != '[') return true;
+        const auto end = authority.find(']');
+        if (end == std::string_view::npos) return false;
+        const auto literal = authority.substr(1, end - 1);
+        const auto scope = literal.find('%');
+        if (scope == std::string_view::npos) return true;
+        const auto separator = literal.substr(scope, 3) == "%25" ? 3 : 1;
+        zone = literal.substr(scope + separator);
+        return !zone.empty();
+    }
+    inline bool relativeUrlReference(std::string_view url) {
+        if (url.empty() || url.substr(0, 2) == "//") return false;
+        return url.substr(0, url.find_first_of("/?#")).find(':') == std::string_view::npos;
+    }
     inline std::string_view trimHeaderName(std::string_view name) {
         while (!name.empty() && asciiWhitespace(name.front())) name.remove_prefix(1);
         while (!name.empty() && asciiWhitespace(name.back())) name.remove_suffix(1);
@@ -592,6 +621,19 @@ private:
             response.expectStatus = false;
         }
         const bool accepted = response.header(data, bytes);
+        if (accepted && !response.headersEnded) {
+            const std::string_view line(data, bytes);
+            if (response.locationSeen && !line.empty() && (line.front() == ' ' || line.front() == '\t'))
+                response.ambiguousLocation = true;
+            const auto colon = line.find(':');
+            if (colon != std::string_view::npos && detail::equalHeaderName(line.substr(0, colon), "Location")) {
+                if (response.locationSeen) response.ambiguousLocation = true;
+                response.locationSeen = true;
+                try { response.rawLocation = detail::trimHeaderName(line.substr(colon + 1)); }
+                catch (...) { response.reject(detail::ResponseLoss::Metadata, detail::metadataByteLimit + 1); return 0; }
+                if (response.rawLocation.empty()) response.ambiguousLocation = true;
+            }
+        }
         if (bytes == 2 && data[0] == '\r' && data[1] == '\n') {
             response.headersEnded = true;
             if (response.status >= 100 && response.status < 200) response.expectStatus = true;
@@ -766,9 +808,8 @@ private:
                     out = text; curl_free(text); return true;
                 };
                 ok = ok && part(CURLUPART_SCHEME, scheme) && part(CURLUPART_HOST, host) && part(CURLUPART_PORT, port, CURLU_DEFAULT_PORT);
-                // HOST excludes the scope. Read the raw ZONEID as the transport
-                // uses it: %25/raw % delimiters are consumed by curl, but escapes
-                // inside interface names stay literal. Zones are case-sensitive.
+                // HOST excludes the scope. ZONEID can already be decoded by
+                // curl (including with flags 0); verify it against raw input below.
                 char* scope = nullptr;
                 const auto zoneResult = curl_url_get(parsed, CURLUPART_ZONEID, &scope, 0);
                 if (zoneResult == CURLUE_OK) { zone = scope; curl_free(scope); }
@@ -785,10 +826,20 @@ private:
                 buffer.reject(detail::ResponseLoss::RedirectPolicy, 1);
                 finishResponse(curl, CURLE_OK, buffer, response); return;
             }
-            // Escaped interface names are ambiguous across transports. Treat
-            // either escaped zone as an origin change, even if the strings match.
-            if (scheme != nextScheme || !detail::equalHeaderName(host, nextHost) || zone != nextZone || port != nextPort ||
-                zone.find('%') != std::string::npos || nextZone.find('%') != std::string::npos)
+            // EFFECTIVE_URL and REDIRECT_URL are curl-built and can lose escapes.
+            // Keep the app/hop input and the callback's Location as raw evidence.
+            std::string_view rawZone, rawNextZone;
+            const bool currentKnown = detail::rawUrlZone(url, rawZone);
+            bool nextKnown = detail::rawUrlZone(buffer.rawLocation, rawNextZone);
+            if (!nextKnown && detail::relativeUrlReference(buffer.rawLocation)) {
+                rawNextZone = rawZone;
+                nextKnown = currentKnown;
+            }
+            const bool exactZones = currentKnown && nextKnown && !buffer.ambiguousLocation &&
+                rawZone == rawNextZone && rawZone == zone && rawNextZone == nextZone &&
+                rawZone.find('%') == std::string_view::npos && rawNextZone.find('%') == std::string_view::npos;
+            if (scheme != nextScheme || !detail::equalHeaderName(host, nextHost) || port != nextPort ||
+                !exactZones)
                 forwardCredentials = false;
             if (((status == 301 || status == 302) && method == "POST") || (status == 303 && method != "HEAD")) {
                 method = "GET"; sendBody = false;

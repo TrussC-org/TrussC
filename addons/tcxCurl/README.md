@@ -21,6 +21,10 @@ If you only need plain **HTTP**, you can use `httplib::Client` directly from `<i
 | **Linux** | `sudo apt install libcurl4-openssl-dev` | |
 | **Windows** | **自動ダウンロード** | CMake の FetchContent で curl をソースからビルド（Schannel 使用） |
 
+On Windows the bundled libcurl is built HTTP(S)-only; other platforms use the system libcurl with its own protocol set.
+
+Windows同梱のlibcurlはHTTP(S)専用で、他のプラットフォームはシステムのlibcurlが対応するプロトコルを使用します。
+
 ### Windows での動作
 
 Windows では `find_package(CURL)` が失敗した場合、CMake が自動的に libcurl（バージョンは [docs/LICENSE.md](../../docs/LICENSE.md#third-party-libraries)）をダウンロードしてスタティックライブラリとしてビルドします。TLS には Windows ネイティブの **Schannel** を使用するため、OpenSSL のインストールは不要です。

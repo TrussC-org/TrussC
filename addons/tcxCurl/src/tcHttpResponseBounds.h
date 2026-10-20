@@ -54,6 +54,8 @@ struct ResponseBuffer {
     void* easy = nullptr;
     void* verboseState = nullptr;
     char backendError[256] = {};
+    std::string rawLocation; // bounded by admitted header bytes, before curl URL normalization
+    bool locationSeen = false, ambiguousLocation = false;
     ResponseLoss loss = ResponseLoss::Body;
 
     explicit ResponseBuffer(size_t bytes = responseByteLimit) : limit(bytes) {}
@@ -64,6 +66,9 @@ struct ResponseBuffer {
         last = nullptr;
         length = capacity = 0;
         bodyStarted = false;
+        rawLocation.clear();
+        locationSeen = false;
+        ambiguousLocation = false;
     }
     bool reject(ResponseLoss reason, size_t amount) {
         if (!rejected) { rejected = true; loss = reason; needed = amount; }

@@ -55,12 +55,22 @@ static struct {
     bool enabled = false;
     size_t hop = 0;
     std::string url, target;
+    std::string location, locationPrefix, builtUrl, builtTarget;
+    bool normalize = false, omitLocation = false, parserDisagrees = false;
+    curl_write_callback header = nullptr;
+    void* headerData = nullptr;
     std::vector<std::string> headers;
 } g_zoneTrace;
 
 template<class T>
 static CURLcode testCurlSetopt(CURL* handle, CURLoption option, T value) {
     if (g_zoneTrace.enabled) {
+        if constexpr (std::is_same_v<T, curl_write_callback>) {
+            if (option == CURLOPT_HEADERFUNCTION) g_zoneTrace.header = value;
+        }
+        if constexpr (std::is_convertible_v<T, void*>) {
+            if (option == CURLOPT_HEADERDATA) g_zoneTrace.headerData = value;
+        }
         if constexpr (std::is_same_v<T, const char*>) {
             if (option == CURLOPT_URL) g_zoneTrace.url = value;
         }
@@ -96,7 +106,19 @@ static CURLcode testCurlSetopt(CURL* handle, CURLoption option, T value) {
 }
 
 static CURLcode testCurlPerform(CURL* handle) {
-    if (g_zoneTrace.enabled) { ++g_zoneTrace.hop; return CURLE_OK; }
+    if (g_zoneTrace.enabled) {
+        ++g_zoneTrace.hop;
+        if (g_zoneTrace.hop == 1 && !g_zoneTrace.omitLocation) {
+            const auto headers = g_zoneTrace.locationPrefix + "Location: " + g_zoneTrace.location + "\r\n";
+            for (size_t start = 0, end; start < headers.size(); start = end + 2) {
+                end = headers.find("\r\n", start);
+                const auto line = headers.substr(start, end + 2 - start);
+                if (!g_zoneTrace.header || g_zoneTrace.header(const_cast<char*>(line.data()), 1, line.size(), g_zoneTrace.headerData) != line.size())
+                    return CURLE_WRITE_ERROR;
+            }
+        }
+        return CURLE_OK;
+    }
     if (!g_tlsTrace.enabled) return curl_easy_perform(handle);
     g_tlsTrace.performed = true;
     return g_tlsTrace.transferResult;
@@ -109,9 +131,21 @@ static CURLcode testCurlGetinfo(CURL* handle, CURLINFO info, T output) {
             if (info == CURLINFO_RESPONSE_CODE) { *output = g_zoneTrace.hop == 1 ? 302 : 200; return CURLE_OK; }
         }
         if constexpr (std::is_same_v<T, char**>) {
-            if (info == CURLINFO_EFFECTIVE_URL) { *output = g_zoneTrace.url.data(); return CURLE_OK; }
+            if (info == CURLINFO_EFFECTIVE_URL) {
+                g_zoneTrace.builtUrl = g_zoneTrace.url;
+                if (g_zoneTrace.normalize) {
+                    const auto escape = g_zoneTrace.builtUrl.find("eth%30");
+                    if (escape != std::string::npos) g_zoneTrace.builtUrl.replace(escape, 6, "eth0");
+                }
+                *output = g_zoneTrace.builtUrl.data(); return CURLE_OK;
+            }
             if (info == CURLINFO_REDIRECT_URL) {
-                *output = g_zoneTrace.hop == 1 ? g_zoneTrace.target.data() : nullptr;
+                g_zoneTrace.builtTarget = g_zoneTrace.target;
+                if (g_zoneTrace.normalize) {
+                    const auto escape = g_zoneTrace.builtTarget.find("eth%30");
+                    if (escape != std::string::npos) g_zoneTrace.builtTarget.replace(escape, 6, "eth0");
+                }
+                *output = g_zoneTrace.hop == 1 ? g_zoneTrace.builtTarget.data() : nullptr;
                 return CURLE_OK;
             }
         }
@@ -119,15 +153,28 @@ static CURLcode testCurlGetinfo(CURL* handle, CURLINFO info, T output) {
     return curl_easy_getinfo(handle, info, output);
 }
 
+static CURLUcode testCurlUrlGet(CURLU* url, CURLUPart part, char** output, unsigned flags) {
+    // Simulate curl 8.22 decoding zones even when the caller passes flags 0.
+    if (g_zoneTrace.enabled && g_zoneTrace.normalize && part == CURLUPART_ZONEID) flags |= CURLU_URLDECODE;
+    const auto result = curl_url_get(url, part, output, flags);
+    if (result == CURLUE_OK && part == CURLUPART_ZONEID && g_zoneTrace.parserDisagrees) {
+        curl_free(*output);
+        *output = curl_easy_unescape(nullptr, "different-interface", 0, nullptr);
+    }
+    return result;
+}
+
 #undef curl_easy_setopt
 #define curl_easy_setopt testCurlSetopt
 #define curl_easy_perform testCurlPerform
 #undef curl_easy_getinfo
 #define curl_easy_getinfo testCurlGetinfo
+#define curl_url_get testCurlUrlGet
 #include <tcxCurl.h>
 #undef curl_easy_setopt
 #undef curl_easy_perform
 #undef curl_easy_getinfo
+#undef curl_url_get
 
 #include <chrono>
 #include <cstdio>
@@ -166,6 +213,46 @@ static string readFile(const fs::path& p) {
     stringstream ss;
     ss << f.rdbuf();
     return ss.str();
+}
+
+static string fileUrl(const fs::path& path) {
+    const auto text = fs::absolute(path).generic_u8string();
+    string url = text.front() == '/' ? "file://" : "file:///";
+    const char hex[] = "0123456789ABCDEF";
+    for (const unsigned char c : text) {
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_' || c == '~' || c == '/' || c == ':')
+            url += static_cast<char>(c);
+        else { url += '%'; url += hex[c >> 4]; url += hex[c & 15]; }
+    }
+    return url;
+}
+
+static void testInitialFileUrls(const fs::path& dir) {
+    const auto* info = curl_version_info(CURLVERSION_NOW);
+    bool supportsFile = false;
+    if (info && info->protocols) {
+        for (const char* const* protocol = info->protocols; *protocol; ++protocol) {
+            if (string(*protocol) == "file") { supportsFile = true; break; }
+        }
+    }
+    if (!supportsFile) {
+        printf("N/A: this libcurl has no FILE support\n");
+        return;
+    }
+    // Binary fixture and comparison: Windows text-mode CRLF conversion must not
+    // obscure whether an app-chosen initial non-HTTP URL is still supported.
+    const string expected("hello\r\n\0binary\n", 15);
+    for (const char* name : {"initial.txt", "initial space %#.txt"}) {
+        const auto path = dir / name;
+        { ofstream output(path, ios::binary); output.write(expected.data(), expected.size()); }
+        const auto url = fileUrl(path);
+        tcx::HttpClient client;
+        const auto res = client.get(url);
+        check("app chosen initial file URL still works", res.error.empty() && res.body == readFile(path) && res.body == expected,
+              "URL=" + url + "; error=" + res.error + "; received=" + to_string(res.body.size()) +
+              "; file=" + to_string(readFile(path).size()));
+    }
 }
 
 static void testTlsOptions() {
@@ -302,52 +389,70 @@ static void testHeaderNamesAndZones() {
         const char* name;
         const char* from;
         const char* to;
-        const char* rawFrom;
-        const char* rawTo;
         bool keep;
+        const char* location = nullptr;
+        bool omitLocation = false, parserDisagrees = false;
+        const char* locationPrefix = "";
     };
-    for (const auto& zone : {
-        ZoneCase{"same IPv6 zone retains credentials", "%251", "%251", "1", "1", true},
-        ZoneCase{"changed IPv6 zone drops credentials", "%251", "%252", "1", "2", false},
-        ZoneCase{"encoded delimiter and raw numeric zone retain credentials", "%251", "%1", "1", "1", true},
-        ZoneCase{"encoded interface name drops credentials", "%25eth0", "%25eth%30", "eth0", "eth%30", false},
-        ZoneCase{"encoded source interface drops credentials", "%25eth%30", "%25eth0", "eth%30", "eth0", false},
-        ZoneCase{"identical escaped zones conservatively drop credentials", "%25eth%30", "%25eth%30", "eth%30", "eth%30", false},
-        ZoneCase{"same literal interface retains credentials", "%25eth0", "%25eth0", "eth0", "eth0", true},
-        ZoneCase{"interface names are case sensitive", "%25eth0", "%25ETH0", "eth0", "ETH0", false}
-    }) {
-        const string from = "http://[fe80::1" + string(zone.from) + "]:1/start";
-        const string to = "http://[fe80::1" + string(zone.to) + "]:1/next";
-        auto rawZone = [](const string& url, const char* expected) {
-            CURLU* parsed = curl_url();
-            if (!parsed) return false;
-            char* raw = nullptr;
-            const bool ok = curl_url_set(parsed, CURLUPART_URL, url.c_str(), 0) == CURLUE_OK &&
-                curl_url_get(parsed, CURLUPART_ZONEID, &raw, 0) == CURLUE_OK && raw && string(raw) == expected;
-            curl_free(raw);
-            curl_url_cleanup(parsed);
-            return ok;
-        };
-        check(string("actual curl raw zone parse: ") + zone.name,
-              rawZone(from, zone.rawFrom) && rawZone(to, zone.rawTo));
-        g_zoneTrace = {};
-        g_zoneTrace.enabled = true;
-        g_zoneTrace.target = to;
-        tcx::HttpClient client;
-        for (auto name : tcx::curl::detail::credentialHeaders) client.addHeader(string(name), "zone-secret");
-        client.addHeader("X-Neutral", "kept");
-        const auto res = client.get(from);
-        bool credentials = g_zoneTrace.headers.size() == 2;
-        if (credentials) {
-            for (auto name : tcx::curl::detail::credentialHeaders) {
-                const string header = string(name) + ": zone-secret";
-                credentials = credentials && g_zoneTrace.headers[0].find(header) != string::npos &&
-                    (g_zoneTrace.headers[1].find(header) != string::npos) == zone.keep;
+    for (const bool normalizing : {false, true}) {
+        for (const auto& zone : {
+            ZoneCase{"same IPv6 zone retains credentials", "%251", "%251", true},
+            ZoneCase{"changed IPv6 zone drops credentials", "%251", "%252", false},
+            ZoneCase{"encoded delimiter and raw numeric zone retain credentials", "%251", "%1", true},
+            ZoneCase{"encoded interface name drops credentials", "%25eth0", "%25eth%30", false},
+            ZoneCase{"encoded source interface drops credentials", "%25eth%30", "%25eth0", false},
+            ZoneCase{"identical escaped zones conservatively drop credentials", "%25eth%30", "%25eth%30", false},
+            ZoneCase{"same literal interface retains credentials", "%25eth0", "%25eth0", true},
+            ZoneCase{"interface names are case sensitive", "%25eth0", "%25ETH0", false},
+            ZoneCase{"relative redirect inherits plain zone", "%25eth0", "%25eth0", true, "/next"},
+            ZoneCase{"relative redirect from escaped zone drops credentials", "%25eth%30", "%25eth%30", false, "/next"},
+            ZoneCase{"network-path escaped zone drops credentials", "%25eth0", "%25eth%30", false, "//[fe80::1%25eth%30]:1/next"},
+            ZoneCase{"missing raw Location for zoned redirect drops credentials", "%25eth0", "%25eth0", false, nullptr, true},
+            ZoneCase{"empty then valid Location drops credentials", "%25eth0", "%25eth0", false, nullptr, false, false, "Location:\r\n"},
+            ZoneCase{"empty Location then continuation drops credentials", "%25eth0", "%25eth0", false, nullptr, false, false, "Location:\r\n\tcontinued\r\n"},
+            ZoneCase{"empty Location drops credentials", "%25eth0", "%25eth0", false, ""},
+            ZoneCase{"duplicate Location drops credentials", "%25eth0", "%25eth0", false, nullptr, false, false, "Location: http://[fe80::1%25eth0]:1/next\r\n"},
+            ZoneCase{"parser disagreement with plain zone drops credentials", "%25eth0", "%25eth0", false, nullptr, false, true}
+        }) {
+            const string from = "http://[fe80::1" + string(zone.from) + "]:1/start";
+            const string to = "http://[fe80::1" + string(zone.to) + "]:1/next";
+            auto parsedZone = [](const string& url) {
+                CURLU* parsed = curl_url();
+                if (!parsed) return string("<allocation failed>");
+                char* raw = nullptr;
+                const bool ok = curl_url_set(parsed, CURLUPART_URL, url.c_str(), 0) == CURLUE_OK &&
+                    curl_url_get(parsed, CURLUPART_ZONEID, &raw, 0) == CURLUE_OK && raw;
+                const string result = ok ? raw : "<parse failed>";
+                curl_free(raw);
+                curl_url_cleanup(parsed);
+                return result;
+            };
+            if (!normalizing) printf("  [INFO] actual curl raw zone parse: %s: %s -> %s\n",
+                zone.name, parsedZone(from).c_str(), parsedZone(to).c_str());
+            g_zoneTrace = {};
+            g_zoneTrace.enabled = true;
+            g_zoneTrace.target = to;
+            g_zoneTrace.location = zone.location ? zone.location : to;
+            g_zoneTrace.locationPrefix = zone.locationPrefix;
+            g_zoneTrace.omitLocation = zone.omitLocation;
+            g_zoneTrace.parserDisagrees = zone.parserDisagrees;
+            g_zoneTrace.normalize = normalizing;
+            tcx::HttpClient client;
+            for (auto name : tcx::curl::detail::credentialHeaders) client.addHeader(string(name), "zone-secret");
+            client.addHeader("X-Neutral", "kept");
+            const auto res = client.get(from);
+            bool credentials = g_zoneTrace.headers.size() == 2;
+            if (credentials) {
+                for (auto name : tcx::curl::detail::credentialHeaders) {
+                    const string header = string(name) + ": zone-secret";
+                    credentials = credentials && g_zoneTrace.headers[0].find(header) != string::npos &&
+                        (g_zoneTrace.headers[1].find(header) != string::npos) == zone.keep;
+                }
             }
+            check(string(normalizing ? "normalizing zone parser: " : "") + zone.name, res.statusCode == 200 && res.error.empty() && credentials &&
+                  g_zoneTrace.headers.size() == 2 && g_zoneTrace.headers[1].find("X-Neutral: kept") != string::npos);
+            g_zoneTrace.enabled = false;
         }
-        check(zone.name, res.statusCode == 200 && res.error.empty() && credentials &&
-              g_zoneTrace.headers[1].find("X-Neutral: kept") != string::npos);
-        g_zoneTrace.enabled = false;
     }
 }
 
@@ -729,7 +834,7 @@ static void testCaCertificate(const fs::path& dir, const string& python) {
     }
     fs::path uploadPath = dir / "upload.txt";
     {
-        ofstream f(uploadPath);
+        ofstream f(uploadPath, ios::binary);
         f << "hello\n";
     }
     {
@@ -792,8 +897,7 @@ static void testCaCertificate(const fs::path& dir, const string& python) {
               up.error.empty() && up.statusCode == 200,
               up.error.empty() ? to_string(up.statusCode) : up.error);
 
-        const string fixtureFilePath = fs::absolute(uploadPath).generic_string();
-        const string fixtureFileUrl = "file://" + (fixtureFilePath.front() == '/' ? string() : string("/")) + fixtureFilePath;
+        const string fixtureFileUrl = fileUrl(uploadPath);
         const string tlsUrl = "https://127.0.0.1:" + to_string(port);
         const string plainUrl = "http://127.0.0.1:" + readFile(portFile.string() + ".http");
         const string otherUrl = "http://127.0.0.1:" + readFile(portFile.string() + ".other");
@@ -905,9 +1009,6 @@ static void testCaCertificate(const fs::path& dir, const string& python) {
         res = redirects.get("/hop/6");
         check("sixth redirect rejects whole response", wholeFailure(res) &&
               responseLossCountForTests(ResponseLoss::Redirects) == countBefore + 1);
-        tcx::HttpClient localFile;
-        res = localFile.get(fixtureFileUrl);
-        check("app chosen initial file URL still works", res.error.empty() && res.body == readFile(uploadPath));
 
         using namespace tcx::curl::detail;
         size_t bodyWarnings = 0, metadataWarnings = 0;
@@ -1108,12 +1209,18 @@ static void testCaCertificate(const fs::path& dir, const string& python) {
 
 int main() {
     setvbuf(stdout, nullptr, _IONBF, 0);
-    printf("tcxCurl tests\n");
+    printf("tcxCurl tests (%s)\n", curl_version());
     testTlsOptions();
     testHeaderNamesAndZones();
 
+    fs::path dir = fs::temp_directory_path() /
+                   ("tcxcurl-tests-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(dir);
+    testInitialFileUrls(dir);
+
     if (run(string("openssl version > ") + kNull + " 2>&1") != 0) {
         printf("  [SKIP] no openssl command on PATH: HTTPS handshake checks skipped\n");
+        fs::remove_all(dir);
         return g_failures ? 1 : 0;
     }
     string python;
@@ -1125,12 +1232,10 @@ int main() {
     }
     if (python.empty()) {
         printf("  [SKIP] no Python with ssl on PATH: HTTPS handshake checks skipped\n");
+        fs::remove_all(dir);
         return g_failures ? 1 : 0;
     }
 
-    fs::path dir = fs::temp_directory_path() /
-                   ("tcxcurl-tests-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(dir);
     testCaCertificate(dir, python);
     std::error_code ec;
     fs::remove_all(dir, ec);

@@ -59,7 +59,12 @@ false, HTTP(S) target policy, HTTPS downgrade refusal and HTTP upgrade, all six
 credential headers across same/different origins, neutral headers, POST method
 rules (301/302/303/307/308), PUT/HEAD on 303, multipart 303/307, five-hop success,
 sixth-hop failure, intermediate body admission and cumulative metadata.
-An app-supplied initial file URL is also preserved.
+App-supplied initial file URLs are tested independently of the HTTPS tools,
+including escaped filenames and binary/CRLF data. Failures include the URL,
+error and received/file sizes. If the linked libcurl does not list FILE support,
+these checks print `N/A: this libcurl has no FILE support` and are skipped.
+The bundled Windows libcurl is HTTP(S)-only. Initial URLs remain unrestricted
+by the client; redirect targets are restricted to HTTP(S).
 
 Request-header regressions cover all six credential names with surrounding
 space/tab and mixed case: same-origin peers receive trimmed names, and other
@@ -69,6 +74,13 @@ real curl URL parsing to check same/changed scoped IPv6 zones; it never contacts
 link-local interfaces. Body budgets are cumulative across hops: 4+4 bytes fail
 under limit 4, while 2+2 publishes the final two bytes. Empty gzip bodies also
 check the independent cumulative wire budget.
+
+Zone traces extract scopes from the original URL and raw Location header.
+Actual curl zone parsing is printed as information because curl versions differ.
+Hard policy checks also inject a decoding parser and normalized effective/redirect
+URLs, checking escaped zones, parser disagreement, relative/network-path targets,
+and missing raw evidence. Plain identical zones keep credentials only when the
+raw and parsed scope texts agree.
 
 Invalid name/value tests also query a loopback peer's accepted-connection count
 before and after request/upload attempts, asserting that it receives nothing.

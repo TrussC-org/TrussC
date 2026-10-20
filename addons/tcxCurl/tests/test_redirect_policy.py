@@ -7,6 +7,10 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 class RedirectPolicyTest(unittest.TestCase):
+    def test_windows_bundled_curl_stays_http_only(self):
+        cmake = (ROOT / 'addons/tcxCurl/CMakeLists.txt').read_text(encoding='utf-8')
+        self.assertIn('set(HTTP_ONLY ON CACHE BOOL "" FORCE)', cmake)
+
     def test_header_value_validation_before_android_io(self):
         java = (ROOT / 'addons/tcxCurl/android/java/com/trussc/tcx/curl/AndroidHttpClient.java').read_text(encoding='utf-8')
         cpp = (ROOT / 'addons/tcxCurl/src/tcxCurl.h').read_text(encoding='utf-8')
@@ -30,11 +34,37 @@ class RedirectPolicyTest(unittest.TestCase):
         self.assertIn('host.substring(start, end)', zone)
         self.assertNotIn('decode', zone.split('int start', 1)[1])
         host = java.split('static boolean sameHost', 1)[1].split('static final class LimitException', 1)[0]
-        self.assertIn("leftZone.indexOf('%') < 0 && rightZone.indexOf('%') < 0", host)
+        self.assertIn("leftZone.indexOf('%') >= 0 || rightZone.indexOf('%') >= 0", host)
         self.assertIn('leftZone.equals(rightZone)', host)
+        self.assertIn('rawAuthorityHost(a.toExternalForm())', host)
+        self.assertIn('rawAuthorityHost(rawLocation)', host)
+        self.assertIn('leftZone.equals(originZone(left))', host)
+        self.assertIn('rightZone.equals(originZone(right))', host)
         self.assertIn('curl_url_get(parsed, CURLUPART_ZONEID, &scope, 0)', cpp)
-        self.assertIn("zone.find('%') != std::string::npos", cpp)
-        self.assertIn("nextZone.find('%') != std::string::npos", cpp)
+        self.assertIn('detail::rawUrlZone(url, rawZone)', cpp)
+        self.assertIn('detail::rawUrlZone(buffer.rawLocation, rawNextZone)', cpp)
+        self.assertIn('rawZone == zone && rawNextZone == nextZone', cpp)
+        self.assertIn("rawZone.find('%') == std::string_view::npos", cpp)
+        self.assertIn("rawNextZone.find('%') == std::string_view::npos", cpp)
+
+    def test_location_evidence_mirror(self):
+        java = (ROOT / 'addons/tcxCurl/android/java/com/trussc/tcx/curl/AndroidHttpClient.java').read_text(encoding='utf-8')
+        cpp = (ROOT / 'addons/tcxCurl/src/tcxCurl.h').read_text(encoding='utf-8')
+        # Count every admitted field, including empty values, per response.
+        admission = java.split('int status = conn.getResponseCode();', 1)[1].split('boolean redirecting', 1)[0]
+        self.assertIn('int locationCount = 0;', admission)
+        self.assertRegex(admission, r'if \("Location".equalsIgnoreCase\(key\)\) \+\+locationCount;')
+        self.assertLess(admission.index('metadata += (int)bytes;'), admission.index('++locationCount'))
+        decision = java.split('if (redirecting) {', 1)[1].split('target = next;', 1)[0]
+        self.assertRegex(decision, re.compile(r'if \(locationCount != 1 \|\| location.isEmpty\(\) \|\|.*?forwardCredentials = false;', re.S))
+        self.assertIn('!buffer.ambiguousLocation', cpp)
+        self.assertIn('response.locationSeen && !line.empty()', cpp)
+        bounds = (ROOT / 'addons/tcxCurl/src/tcHttpResponseBounds.h').read_text(encoding='utf-8')
+        reset = bounds.split('void clear() {', 1)[1].split('bool reject(', 1)[0]
+        self.assertIn('locationSeen = false;', reset)
+        self.assertIn('ambiguousLocation = false;', reset)
+        self.assertIn('if (response.locationSeen) response.ambiguousLocation = true;', cpp)
+        self.assertIn('if (response.rawLocation.empty()) response.ambiguousLocation = true;', cpp)
 
     def test_shared_credential_list(self):
         cpp = (ROOT / 'addons/tcxCurl/src/tcxCurl.h').read_text(encoding='utf-8')

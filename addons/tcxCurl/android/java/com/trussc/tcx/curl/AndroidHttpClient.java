@@ -83,28 +83,59 @@ public final class AndroidHttpClient {
     static int originPort(URL url) { return url.getPort() == -1 ? url.getDefaultPort() : url.getPort(); }
 
     static String originZone(String host) {
+        if (!host.startsWith("[") || !host.endsWith("]")) return "";
         int scope = host.indexOf('%');
         if (scope < 0) return "";
-        // Match curl's raw ZONEID: consume the delimiter (%25 or raw %),
+        // Consume only the raw delimiter (%25 or raw %),
         // but never percent-decode the interface name itself.
         int start = scope + (host.startsWith("%25", scope) ? 3 : 1);
         int end = host.endsWith("]") ? host.length() - 1 : host.length();
         return host.substring(start, end);
     }
 
-    static boolean sameHost(URL a, URL b) throws IOException {
+    static String rawAuthorityHost(String url) {
+        int start = 0;
+        if (!url.startsWith("//")) {
+            int scheme = url.indexOf("://");
+            if (scheme < 0) return null;
+            start = scheme + 1;
+        }
+        start += 2;
+        int end = start;
+        while (end < url.length() && "/?#".indexOf(url.charAt(end)) < 0) ++end;
+        String authority = url.substring(start, end);
+        String host = authority.substring(authority.lastIndexOf('@') + 1);
+        if (host.startsWith("[")) {
+            int bracket = host.indexOf(']');
+            return bracket < 0 ? null : host.substring(0, bracket + 1);
+        }
+        return host;
+    }
+    static boolean relativeReference(String url) {
+        if (url.isEmpty() || url.startsWith("//")) return false;
+        for (int i = 0; i < url.length(); ++i) {
+            char c = url.charAt(i);
+            if ("/?#".indexOf(c) >= 0) return true;
+            if (c == ':') return false;
+        }
+        return true;
+    }
+    static boolean sameHost(URL a, URL b, String rawLocation) throws IOException {
         try {
-            // URI.getHost retains %scope for scoped IPv6 literals. The scope
-            // identifies an interface and is case-sensitive; the address is not.
             String left = a.toURI().getHost(), right = b.toURI().getHost();
             if (left == null || right == null) return false;
+            String rawLeft = rawAuthorityHost(a.toExternalForm());
+            String rawRight = rawAuthorityHost(rawLocation);
+            if (rawRight == null && relativeReference(rawLocation)) rawRight = rawLeft;
+            if (rawLeft == null || rawRight == null) return false;
+            String leftZone = originZone(rawLeft), rightZone = originZone(rawRight);
+            // Compare original text and require parser agreement. No transport's
+            // percent decoding may make escaped or changed interfaces equal.
+            if (leftZone.indexOf('%') >= 0 || rightZone.indexOf('%') >= 0 ||
+                !leftZone.equals(rightZone) || !leftZone.equals(originZone(left)) ||
+                !rightZone.equals(originZone(right))) return false;
             int l = left.indexOf('%'), r = right.indexOf('%');
-            String leftZone = originZone(left), rightZone = originZone(right);
-            // Escaped interface names are ambiguous across transports. Drop
-            // credentials even when both raw zones contain the same escape.
-            return leftZone.indexOf('%') < 0 && rightZone.indexOf('%') < 0 &&
-                leftZone.equals(rightZone) &&
-                (l < 0 ? left : left.substring(0, l)).equalsIgnoreCase(r < 0 ? right : right.substring(0, r));
+            return (l < 0 ? left : left.substring(0, l)).equalsIgnoreCase(r < 0 ? right : right.substring(0, r));
         } catch (java.net.URISyntaxException invalid) { throw new IOException("Invalid HTTP origin", invalid); }
     }
 
@@ -216,6 +247,7 @@ public final class AndroidHttpClient {
                         try (OutputStream output = conn.getOutputStream()) { output.write(body); }
                     }
                     int status = conn.getResponseCode();
+                    int locationCount = 0;
                     if (metadata > METADATA_LIMIT - 2) throw new LimitException(2);
                     metadata += 2; // empty line after each response header block
                     for (int index = 0;; ++index) {
@@ -226,6 +258,7 @@ public final class AndroidHttpClient {
                         long bytes = (key == null ? 2L : 4L) + metadataBytes(key) + metadataBytes(value);
                         if (bytes > METADATA_LIMIT - metadata) throw new LimitException(2);
                         metadata += (int)bytes;
+                        if ("Location".equalsIgnoreCase(key)) ++locationCount;
                     }
                     String location = conn.getHeaderField("Location");
                     boolean redirecting = followRedirects && location != null &&
@@ -267,8 +300,10 @@ public final class AndroidHttpClient {
                         if ((!next.getProtocol().equals("http") && !next.getProtocol().equals("https")) ||
                             (target.getProtocol().equals("https") && next.getProtocol().equals("http")))
                             throw new LimitException(4);
-                        if (!next.getProtocol().equals(target.getProtocol()) ||
-                            !sameHost(next, target) || originPort(next) != originPort(target))
+                        // A selected SDK value cannot establish unique original evidence.
+                        if (locationCount != 1 || location.isEmpty() ||
+                            !next.getProtocol().equals(target.getProtocol()) ||
+                            !sameHost(target, next, location) || originPort(next) != originPort(target))
                             forwardCredentials = false;
                         target = next;
                         if ((status == 303 && !method.equals("HEAD")) || ((status == 301 || status == 302) && method.equals("POST"))) {
