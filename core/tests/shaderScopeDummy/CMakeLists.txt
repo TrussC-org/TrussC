@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 project(shaderScopeDummy LANGUAGES C CXX)
+# The shared core archive below must be an NDEBUG build (RelWithDebInfo, as the
+# comments below assume): shadowAllocationGl injects invalid native GL names that
+# sokol's debug assertions would abort on. examples/build_all.py configures
+# standalone tests without a build type on Makefile generators, so default it here.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+endif()
 add_executable(shaderScopeDummy main.cpp)
 target_compile_features(shaderScopeDummy PRIVATE cxx_std_20)
 if(APPLE)
@@ -29,6 +36,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(shadowAllocationGl shadowAllocationGl.cpp)
     target_compile_features(shadowAllocationGl PRIVATE cxx_std_20)
     target_link_libraries(shadowAllocationGl PRIVATE tc::TrussC ${CMAKE_DL_LIBS})
+    # Tell the fixture whether the core archive it links kept sokol's assertions.
+    target_compile_definitions(shadowAllocationGl PRIVATE
+        TC_CORE_SOKOL_ASSERTS=$<IF:$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<CONFIG:MinSizeRel>>,0,1>)
 endif()
 
 option(TC_DUMMY_SANITIZERS "Instrument the real coordinator and dummy regressions" OFF)
