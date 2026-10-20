@@ -4180,9 +4180,11 @@ bool TcpServer::isRunning() const [macos,windows,linux,android]  // Returns whet
 bool TcpServer::send(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Sends data to a specified client.
 SendResult TcpServer::sendAsync(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Queues data for a specified client.
 void TcpServer::setReceiveBufferSize(size_t size) [macos,windows,linux,android]  // Sets the client receive buffer size.
-void TcpServer::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android]  // Sets the send queue threshold.
+void TcpServer::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android]  // Sets the per-client send high-water mark.
+void TcpServer::setSendItemLimit(size_t bytes) [macos,windows,linux,android]  // Sets the maximum owned send payload capacity.
 void TcpServer::setSendTimeout(float seconds) [macos,windows,linux,android]  // Sets the send inactivity timeout.
-bool TcpServer::start(int port, int maxClients = 0) [macos,windows,linux,android]  // Starts listening for TCP connections.
+void TcpServer::setTotalSendBufferSize(size_t bytes) [macos,windows,linux,android]  // Sets aggregate TCP server send credits.
+bool TcpServer::start(int port, int maxClients = 64) [macos,windows,linux,android]  // Starts listening for TCP connections.
 void TcpServer::stop() [macos,windows,linux,android]  // Stops the TCP server.
 ```
 

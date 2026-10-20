@@ -77,7 +77,7 @@ def main():
     # Some ffmpeg builds (e.g. Homebrew) ship only the native, experimental
     # `vorbis` encoder; prefer libvorbis and record which one was used.
     encoders = subprocess.run([ffmpeg, "-hide_banner", "-encoders"], check=True,
-                              capture_output=True, text=True).stdout
+                              capture_output=True, text=True, encoding="utf-8").stdout
     if any(line.split()[1:2] == ["libvorbis"] for line in encoders.splitlines()):
         vorbis, vorbis_args = "libvorbis", ["-c:a", "libvorbis", "-q:a", "2"]
     else:
