@@ -8912,295 +8912,964 @@ void tcApp::setup() {
 ["Font"]
 keywords = ["typeface", "ttf", "of true type font"]
 of = ["ofTrueTypeFont"]
-description.en = "TrueType font for text rendering"
-description.ja = "テキストレンダリング用TrueTypeフォント"
-description.ko = "텍스트 렌더링용 트루타입 폰트"
+description.en = "Provides TrueType font rendering and text layout."
+description.ja = "TrueType フォントによる文字描画とテキストの配置を行う。"
+description.ko = "트루타입 폰트로 텍스트를 렌더링하고 배치한다."
+details.en = '''
+- Use `load(nameOrPath, size, faceIndex = 0)` to load a font file or system font name, and check the returned `LoadResult` for success; see `Font::load` for path resolution, collection faces, and Web URL loading.
+- `drawString` draws UTF-8 text using the current drawing color, and `getStringPath` returns its vector outlines; without a loaded font, drawing does nothing and the returned path is empty.
+- The requested font size and reported metrics use logical pixels; glyphs are rasterized using the DPI scale captured when loading.
+- Horizontal writing, no automatic wrapping, and the font's own line height are the defaults.
+- The `drawString` and `getStringPath` overloads without alignment arguments use the current global text alignment; `Font::setAlign` does not change the alignment used by these overloads.
+- Glyphs are rasterized on the CPU as needed, including during `getWidth`; drawing uploads changed atlas textures to the GPU, so the first use of new characters can cost more.
+- Perform Font access, loading, copying, moving, and destruction on the main thread; see `Font::loadAsync` for background preparation and completion delivery.
+- Copies share the loaded glyph atlas, and separate loads with the same resolved path, face, physical size, oversampling, and mipmap setting also share it; `clearAtlas` affects every Font sharing that atlas.
+- Destroying a Font does not evict its atlas from the shared cache; reloading with a different cache key releases the previous cached atlas if no other Font uses it.
+'''
+details.ja = '''
+- `load(nameOrPath, size, faceIndex = 0)` でフォントファイルまたはシステムフォント名を読み込み、戻り値の `LoadResult` で成功を確認します。パスの解決、コレクション内の書体、Web の URL 読み込みについては `Font::load` を参照してください。
+- `drawString` は現在の描画色で UTF-8 テキストを描画し、`getStringPath` はそのベクター輪郭を返します。フォントが読み込まれていない場合、描画は何も行わず、返されるパスは空になります。
+- 指定するフォントサイズと取得するメトリクスの単位は論理ピクセルです。グリフは読み込み時に記録した DPI スケールでラスタライズされます。
+- 既定では横書きで、自動折り返しは無効になり、フォント固有の行の高さを使用します。
+- 配置の引数を省略した `drawString` と `getStringPath` は、現在のグローバルなテキスト配置を使用します。`Font::setAlign` は、これらのオーバーロードで使われる配置を変更しません。
+- グリフは必要に応じて CPU でラスタライズされ、`getWidth` の呼び出しでも生成されます。描画時には変更されたアトラステクスチャを GPU に転送するため、新しい文字を初めて使うときは処理負荷が増える場合があります。
+- Font の参照、読み込み、コピー、移動、破棄はメインスレッドで行ってください。バックグラウンドでの準備と完了通知については `Font::loadAsync` を参照してください。
+- コピーは読み込み済みのグリフアトラスを共有します。別々に読み込んだ場合も、解決後のパス、書体、物理ピクセルでのサイズ、オーバーサンプリング、ミップマップ設定が同じなら共有します。`clearAtlas` は同じアトラスを共有するすべての Font に影響します。
+- Font を破棄しても、アトラスは共有キャッシュから削除されません。異なるキャッシュキーで読み直すと、ほかの Font が使用していない場合に以前のアトラスがキャッシュから解放されます。
+'''
+details.ko = '''
+- `load(nameOrPath, size, faceIndex = 0)`로 폰트 파일이나 시스템 폰트 이름을 로드하고 반환된 `LoadResult`로 성공 여부를 확인합니다. 경로 해석, 컬렉션 내 서체, Web URL 로드는 `Font::load`를 참조합니다.
+- `drawString`은 현재 그리기 색상으로 UTF-8 텍스트를 그리며, `getStringPath`는 텍스트의 벡터 윤곽선을 반환합니다. 로드된 폰트가 없으면 그리기는 아무 작업도 하지 않고 반환되는 경로는 비어 있습니다.
+- 지정하는 폰트 크기와 반환되는 메트릭의 단위는 논리 픽셀입니다. 글리프는 로드할 때 기록한 DPI 배율로 래스터화합니다.
+- 기본값은 가로쓰기이며, 자동 줄바꿈을 사용하지 않고 폰트 자체의 줄 높이를 사용합니다.
+- 정렬 인수를 생략한 `drawString`과 `getStringPath`는 현재 전역 텍스트 정렬을 사용합니다. `Font::setAlign`은 이 오버로드에서 사용하는 정렬을 변경하지 않습니다.
+- 글리프는 필요할 때 CPU에서 래스터화하며, `getWidth` 호출 중에도 생성합니다. 그릴 때 변경된 아틀라스 텍스처를 GPU에 업로드하므로 새로운 문자를 처음 사용하면 처리 비용이 증가할 수 있습니다.
+- Font 접근, 로드, 복사, 이동, 소멸은 메인 스레드에서 수행합니다. 백그라운드 준비와 완료 알림은 `Font::loadAsync`를 참조합니다.
+- 복사본은 로드된 글리프 아틀라스를 공유합니다. 별도로 로드해도 해석된 경로, 서체, 물리 픽셀 크기, 오버샘플링, 밉맵 설정이 같으면 공유합니다. `clearAtlas`는 해당 아틀라스를 공유하는 모든 Font에 영향을 줍니다.
+- Font를 소멸해도 아틀라스는 공유 캐시에서 제거되지 않습니다. 다른 캐시 키로 다시 로드하면 다른 Font가 사용하지 않는 이전 아틀라스를 캐시에서 해제합니다.
+'''
 of_category = "text-types"
-related = ["Font::drawString", "Font::getStringPath"]
+related = ["Font::drawString", "Font::getStringPath", "Font::load", "Font::loadAsync"]
+snippet = '''
+Font font;
+void tcApp::setup() {
+    if (!font.load("fonts/Example.ttf", 24)) logError() << "Font load failed";
+}
+void tcApp::draw() {
+    font.drawString("Hello, TrussC!", 20, 40);
+}
+'''
 
 ["Font::clearAtlas"]
-description.en = "Clear font atlas (GPU memory freed, glyphs re-rasterized on next draw)"
-description.ja = "フォントアトラスをクリア（GPU解放、次の描画時に再ラスタライズ）"
-description.ko = "폰트 아틀라스를 지움 (GPU 메모리 해제, 다음 그리기에서 글리프 재래스터화)"
+description.en = "Clears the font's cached glyphs and atlas pages."
+description.ja = "フォントのキャッシュ済みグリフとアトラスページを消去する。"
+description.ko = "폰트의 캐시된 글리프와 아틀라스 페이지를 지운다."
+details.en = '''
+- Preserves the loaded font data and metrics, clears cached glyphs, and replaces the atlas pages with one empty 256 × 256 page when a font is loaded.
+- Glyphs are rasterized again when next needed by drawing, layout, or measurement; GPU resource destruction is deferred so previously queued text can finish drawing.
+- Also cancels this Font's pending asynchronous load without delivering its completion event.
+- Other fonts sharing this atlas are affected; see `Font::getMemoryUsage` for sharing rules and `Font::drawString` for thread rules.
+'''
+details.ja = '''
+- 読み込んだフォントデータとメトリクスを保持したまま、キャッシュ済みグリフを消去します。フォントが読み込み済みの場合、アトラスページは空の 256 × 256 ページ 1 枚に置き換わります。
+- 次の描画、配置、計測で必要になったグリフを再ラスタライズします。すでに描画キューに入ったテキストを描画できるよう、GPU リソースの破棄は遅延されます。
+- この Font で進行中の非同期読み込みもキャンセルし、その完了イベントは通知しません。
+- 同じアトラスを共有する他のフォントにも影響します。共有の扱いは `Font::getMemoryUsage`、スレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- 로드된 폰트 데이터와 메트릭은 유지하면서 캐시된 글리프를 지웁니다. 폰트가 로드되어 있으면 아틀라스 페이지를 빈 256 × 256 페이지 하나로 교체합니다.
+- 이후 그리기, 배치 또는 측정에 필요한 글리프를 다시 래스터화합니다. 이미 대기 중인 텍스트 그리기를 완료할 수 있도록 GPU 리소스 해제를 지연합니다.
+- 이 Font에서 진행 중인 비동기 로드도 취소하며 완료 이벤트를 전달하지 않습니다.
+- 같은 아틀라스를 공유하는 다른 폰트에도 영향을 줍니다. 공유 규칙은 `Font::getMemoryUsage`, 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 
 ["Font::drawString"]
 category = "font"
 keywords = ["text", "print", "label"]
-description.en = "Draw text"
-description.ja = "テキストを描画"
-description.ko = "텍스트를 그림"
+description.en = "Draws text with the loaded font."
+description.ja = "読み込んだフォントでテキストを描画する。"
+description.ko = "로드된 폰트로 텍스트를 그린다."
+details.en = '''
+- Draws UTF-8 `text` at the alignment anchor `(x, y)` using the current color, transform, and rendering target; an unloaded font or empty string draws nothing.
+- The three-argument overload uses the global alignment set by `setTextAlign`, rather than the values stored by `Font::setAlign`; the five-argument overload uses its explicit `Direction h, Direction v` arguments.
+- Horizontal writing advances left to right and starts a new row at each newline; `WritingMode::VerticalRL` advances top to bottom and starts successive columns to the left. Horizontal tabs advance by four spaces; vertical tabs are ignored.
+- Wrapping, kinsoku, hanging punctuation, and tate-chu-yoko settings affect placement; see `Font::enableWrap` and `Font::forEachGlyph`.
+- Except for the em-normalized result of `Font::getGlyphPath`, font coordinates, sizes, and metrics use logical pixels before the current transform; rasterization uses the DPI scale captured when loading.
+- New glyphs are rasterized into the shared CPU atlas on demand, and drawing uploads changed atlas textures to the GPU; even const measurement and layout calls can populate this cache.
+- Call Font methods on the main thread. `loadAsync` handles background preparation internally, while shared-cache access, GPU work, and completion delivery occur on the main thread.
+'''
+details.ja = '''
+- UTF-8 の `text` を、揃えの基準点 `(x, y)` に現在の色、変換、描画先で描画します。フォントが未読み込みの場合や文字列が空の場合は何も描画しません。
+- 引数が 3 個の版は、`Font::setAlign` が保持する値ではなく、`setTextAlign` で設定したグローバルな揃えを使います。引数が 5 個の版は、明示した `Direction h, Direction v` を使います。
+- 横書きは左から右に進み、改行で次の行へ移ります。`WritingMode::VerticalRL` は上から下に進み、改行で左隣の列へ移ります。横書きのタブはスペース 4 個分進み、縦書きのタブは無視します。
+- 折り返し、禁則、ぶら下げ約物、縦中横の設定が配置に反映されます。`Font::enableWrap` と `Font::forEachGlyph` を参照してください。
+- em 単位に正規化される `Font::getGlyphPath` の結果を除き、フォントの座標、サイズ、メトリクスの単位は現在の変換を適用する前の論理ピクセルです。ラスタライズには読み込み時の DPI スケールを使います。
+- 新しいグリフは必要になったときに共有 CPU アトラスへラスタライズし、描画時に変更済みのアトラステクスチャを GPU へアップロードします。const の計測関数や配置関数でも、このキャッシュにグリフを追加する場合があります。
+- Font の関数はメインスレッドで呼び出してください。`loadAsync` は内部でバックグラウンドの準備を行いますが、共有キャッシュへのアクセス、GPU 処理、完了通知はメインスレッドで行います。
+'''
+details.ko = '''
+- UTF-8 `text`를 정렬 기준점 `(x, y)`에 현재 색상, 변환 및 렌더링 대상으로 그립니다. 폰트가 로드되지 않았거나 문자열이 비어 있으면 아무것도 그리지 않습니다.
+- 인수가 세 개인 오버로드는 `Font::setAlign`에 저장된 값 대신 `setTextAlign`으로 설정한 전역 정렬을 사용합니다. 인수가 다섯 개인 오버로드는 명시한 `Direction h, Direction v`를 사용합니다.
+- 가로쓰기는 왼쪽에서 오른쪽으로 진행하고 줄바꿈에서 다음 행으로 이동합니다. `WritingMode::VerticalRL`은 위에서 아래로 진행하고 줄바꿈에서 왼쪽 열로 이동합니다. 가로쓰기의 탭은 공백 네 개만큼 진행하며 세로쓰기의 탭은 무시합니다.
+- 자동 줄바꿈, 금칙, 구두점 내어쓰기 및 다테추요코 설정이 배치에 반영됩니다. `Font::enableWrap`과 `Font::forEachGlyph`를 참조하세요.
+- em 단위로 정규화되는 `Font::getGlyphPath`의 결과를 제외하면 폰트 좌표, 크기 및 메트릭은 현재 변환을 적용하기 전의 논리 픽셀 단위입니다. 래스터화에는 로드 시 기록한 DPI 배율을 사용합니다.
+- 새 글리프는 필요할 때 공유 CPU 아틀라스에 래스터화하며, 그릴 때 변경된 아틀라스 텍스처를 GPU에 업로드합니다. const 측정 함수와 배치 함수도 이 캐시에 글리프를 추가할 수 있습니다.
+- Font 함수는 메인 스레드에서 호출하세요. `loadAsync`는 내부적으로 백그라운드 준비를 수행하지만 공유 캐시 접근, GPU 작업 및 완료 알림은 메인 스레드에서 처리합니다.
+'''
 related = ["drawBitmapString", "Font::getStringPath"]
+snippet = '''
+void tcApp::draw() {
+    static Font font;
+    if (!font.isLoaded()) font.load(TC_FONT_SANS, 24);
+    font.drawString("Hello", 20, 40, Direction::Left, Direction::Top);
+}
+'''
 
 ["Font::enableWrap"]
 keywords = ["line break", "fold", "text"]
-description.en = "Enable or disable line wrapping (default off)"
-description.ja = "行の折り返しを有効/無効化（既定はオフ）"
-description.ko = "줄 바꿈을 활성화/비활성화 (기본 꺼짐)"
+description.en = "Enables or disables automatic text wrapping."
+description.ja = "テキストの自動折り返しを有効または無効にする。"
+description.ko = "텍스트 자동 줄바꿈을 활성화하거나 비활성화한다."
+details.en = '''
+- `enableWrap(true)` enables automatic wrapping and `enableWrap(false)` disables it; the default is false.
+- Also set a positive limit with `setMaxLineLength`: it limits row width in horizontal writing and column height in vertical writing. The initial limit is zero, which leaves text unchanged even when wrapping is enabled.
+- Drawing, glyph iteration, string outlines, and text measurements use the wrapped text; explicit newlines remain effective when automatic wrapping is disabled.
+- Wrapping uses the current kinsoku and hanging-punctuation settings; horizontal wrapping also uses the hyphenation flag. See `Font::drawString` for units and thread rules.
+'''
+details.ja = '''
+- `enableWrap(true)` で自動折り返しを有効にし、`enableWrap(false)` で無効にします。既定値は false です。
+- `setMaxLineLength` で正の上限も設定してください。横書きでは行の幅、縦書きでは列の高さの上限になります。初期値は 0 なので、折り返しを有効にしてもテキストは変わりません。
+- 描画、グリフの走査、文字列の輪郭生成、テキストの計測は折り返し後の文字列を使います。自動折り返しが無効でも、明示した改行は有効です。
+- 折り返しには現在の禁則とぶら下げ約物の設定を使い、横書きではハイフネーションのフラグも使います。単位とスレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- `enableWrap(true)`는 자동 줄바꿈을 활성화하고 `enableWrap(false)`는 비활성화합니다. 기본값은 false입니다.
+- `setMaxLineLength`로 양수인 한도도 설정해야 합니다. 가로쓰기에서는 행 너비, 세로쓰기에서는 열 높이의 한도입니다. 초기값은 0이므로 자동 줄바꿈을 활성화해도 텍스트가 바뀌지 않습니다.
+- 그리기, 글리프 순회, 문자열 윤곽선 생성 및 텍스트 측정은 줄바꿈이 적용된 문자열을 사용합니다. 자동 줄바꿈을 비활성화해도 명시적인 줄바꿈은 유효합니다.
+- 줄바꿈에는 현재 금칙 및 구두점 내어쓰기 설정을 사용하며, 가로쓰기에서는 하이픈 처리 플래그도 사용합니다. 단위와 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 
 ["Font::forEachGlyph"]
 keywords = ["layout", "visitor", "iterate"]
-description.en = "Invoke a visitor once per laid-out glyph (positions follow writing mode, wrap, kinsoku, and TCY). Backend-agnostic layout pass shared by drawing, vector outlines, and hit testing"
-description.ja = "配置された各グリフごとにビジターを呼ぶ（位置は書字方向・折返し・禁則・縦中横に従う）。描画・ベクター輪郭・ヒットテストで共有されるレイアウトパス"
-description.ko = "배치된 각 글리프마다 비지터를 호출 (위치는 쓰기 방향·줄 바꿈·금칙·TCY를 따름). 그리기·벡터 윤곽·히트 테스트가 공유하는 레이아웃 패스"
+description.en = "Calls a visitor for each laid-out glyph."
+description.ja = "配置された各グリフについてビジターを呼び出す。"
+description.ko = "배치된 각 글리프에 대해 방문 함수를 호출한다."
+details.en = '''
+- Accepts UTF-8 text, anchor coordinates `(x, y)`, and a `GlyphVisitor` receiving `const Font::PlacedGlyph&`; the overload with `Direction h, Direction v` uses explicit alignment, and the other overload uses global text alignment.
+- Applies writing mode, wrapping, kinsoku, hanging punctuation, and tate-chu-yoko through the layout used by drawing and string outlines; the visitor can use these positions for custom rendering or hit testing.
+- Each record supplies the final codepoint, pen position `drawX`, baseline `baselineY`, clockwise rotation `rotationCw` in radians, rotation pivot, and horizontal `scaleX`; vertical-form substitution may change the codepoint.
+- Calls the visitor synchronously and does not retain it; copy any record needed after the callback because the reference is temporary. Newlines and tabs do not produce callbacks, while valid space glyphs can.
+- An unloaded font or empty string produces no callbacks, and invalid cached glyphs are skipped. Layout can rasterize glyphs into the CPU atlas but does not upload textures or draw; see `Font::drawString` for units and thread rules.
+'''
+details.ja = '''
+- UTF-8 の文字列、基準座標 `(x, y)`、`const Font::PlacedGlyph&` を受け取る `GlyphVisitor` を指定します。`Direction h, Direction v` を受け取る版は明示した揃えを使い、もう一方の版はグローバルなテキスト揃えを使います。
+- 描画と文字列の輪郭生成で使う配置処理を通して、書字方向、折り返し、禁則、ぶら下げ約物、縦中横を適用します。ビジターでは、その位置を独自描画やヒットテストに利用できます。
+- 各レコードには最終的なコードポイント、ペン位置 `drawX`、ベースライン `baselineY`、ラジアン単位の時計回りの回転 `rotationCw`、回転中心、水平倍率 `scaleX` が入ります。縦書き用字形への置換でコードポイントが変わる場合があります。
+- ビジターは同期的に呼び出し、保持しません。渡される参照は一時的なので、コールバック後も必要なレコードはコピーしてください。改行とタブでは呼び出しませんが、有効なスペースのグリフでは呼び出す場合があります。
+- フォントが未読み込みの場合や文字列が空の場合は呼び出さず、キャッシュ内の無効なグリフも飛ばします。配置処理は CPU アトラスへグリフをラスタライズする場合がありますが、テクスチャのアップロードや描画は行いません。単位とスレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- UTF-8 문자열, 기준 좌표 `(x, y)` 및 `const Font::PlacedGlyph&`를 받는 `GlyphVisitor`를 지정합니다. `Direction h, Direction v`를 받는 오버로드는 명시한 정렬을 사용하고 다른 오버로드는 전역 텍스트 정렬을 사용합니다.
+- 그리기 및 문자열 윤곽선 생성과 같은 배치 처리를 통해 쓰기 방향, 자동 줄바꿈, 금칙, 구두점 내어쓰기 및 다테추요코를 적용합니다. 방문 함수에서 이 위치를 사용자 정의 렌더링이나 적중 검사에 활용할 수 있습니다.
+- 각 레코드는 최종 코드 포인트, 펜 위치 `drawX`, 기준선 `baselineY`, 라디안 단위의 시계 방향 회전 `rotationCw`, 회전 중심 및 가로 배율 `scaleX`를 제공합니다. 세로쓰기용 글리프로 대체되면 코드 포인트가 바뀔 수 있습니다.
+- 방문 함수는 동기적으로 호출하며 보관하지 않습니다. 전달된 참조는 임시 참조이므로 콜백 이후에도 필요한 레코드는 복사해야 합니다. 줄바꿈과 탭에서는 호출하지 않지만 유효한 공백 글리프에서는 호출할 수 있습니다.
+- 폰트가 로드되지 않았거나 문자열이 비어 있으면 호출하지 않으며 캐시의 유효하지 않은 글리프도 건너뜁니다. 배치 처리에서 CPU 아틀라스에 글리프를 래스터화할 수 있지만 텍스처 업로드나 그리기는 수행하지 않습니다. 단위와 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 
 ["Font::getAlignH"]
 keywords = ["anchor", "horizontal", "text"]
-description.en = "Get current horizontal text alignment"
-description.ja = "現在の水平テキスト揃えを取得"
-description.ko = "현재 수평 텍스트 정렬을 얻음"
+description.en = "Returns the font's stored horizontal alignment."
+description.ja = "フォントに保存された水平方向の揃えを返す。"
+description.ko = "폰트에 저장된 수평 정렬을 반환한다."
+details.en = '''
+- Returns the `Direction` stored by `setAlign`; the default is `Direction::Left`.
+- Drawing, glyph iteration, and string outlines without explicit alignment use global text alignment instead; pass this value explicitly to use it.
+'''
+details.ja = '''
+- `setAlign` が保存した `Direction` を返します。既定値は `Direction::Left` です。
+- 揃えを明示しない描画、グリフの走査、文字列の輪郭生成は、代わりにグローバルなテキスト揃えを使います。この値を使う場合は引数として明示してください。
+'''
+details.ko = '''
+- `setAlign`이 저장한 `Direction`을 반환합니다. 기본값은 `Direction::Left`입니다.
+- 정렬을 명시하지 않은 그리기, 글리프 순회 및 문자열 윤곽선 생성은 전역 텍스트 정렬을 사용합니다. 이 값을 사용하려면 인수로 명시하세요.
+'''
 
 ["Font::getAlignV"]
 keywords = ["anchor", "vertical", "text"]
-description.en = "Get current vertical text alignment"
-description.ja = "現在の垂直テキスト揃えを取得"
-description.ko = "현재 수직 텍스트 정렬을 얻음"
+description.en = "Returns the font's stored vertical alignment."
+description.ja = "フォントに保存された垂直方向の揃えを返す。"
+description.ko = "폰트에 저장된 수직 정렬을 반환한다."
+details.en = '''
+- Returns the vertical `Direction` stored by the two-argument `setAlign`; the default is `Direction::Top`.
+- Drawing, glyph iteration, and string outlines without explicit alignment use global text alignment instead; pass this value explicitly to use it.
+'''
+details.ja = '''
+- 引数が 2 個の `setAlign` が保存した垂直方向の `Direction` を返します。既定値は `Direction::Top` です。
+- 揃えを明示しない描画、グリフの走査、文字列の輪郭生成は、代わりにグローバルなテキスト揃えを使います。この値を使う場合は引数として明示してください。
+'''
+details.ko = '''
+- 인수가 두 개인 `setAlign`이 저장한 수직 `Direction`을 반환합니다. 기본값은 `Direction::Top`입니다.
+- 정렬을 명시하지 않은 그리기, 글리프 순회 및 문자열 윤곽선 생성은 전역 텍스트 정렬을 사용합니다. 이 값을 사용하려면 인수로 명시하세요.
+'''
 
 ["Font::getAscent"]
 keywords = ["metrics", "baseline", "height"]
-description.en = "Get the font ascent (distance from baseline to top)"
-description.ja = "フォントのアセント（ベースラインから上端までの距離）を取得"
-description.ko = "폰트 어센트(기준선에서 상단까지의 거리)를 얻음"
+description.en = "Returns the font's ascent above the baseline."
+description.ja = "ベースラインより上側のアセントを返す。"
+description.ko = "기준선 위쪽의 어센트를 반환한다."
+details.en = '''
+- Returns the font's ascent metric scaled for the loaded size, or zero when no font is loaded.
+- `setLineHeight` and grid fitting do not change this metric; see `Font::drawString` for units and thread rules.
+'''
+details.ja = '''
+- 読み込みサイズに合わせて拡大縮小したフォントのアセントを返します。フォントが未読み込みの場合は 0 を返します。
+- `setLineHeight` やグリッドフィットはこのメトリクスを変更しません。単位とスレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- 로드한 크기에 맞게 조정된 폰트의 어센트 메트릭을 반환합니다. 폰트가 로드되지 않았으면 0을 반환합니다.
+- `setLineHeight`와 그리드 맞춤은 이 메트릭을 변경하지 않습니다. 단위와 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 
 ["Font::getAtlasCount"]
-description.en = "Get number of atlas pages"
-description.ja = "アトラスページ数を取得"
-description.ko = "아틀라스 페이지 수를 얻음"
+description.en = "Returns the number of atlas pages."
+description.ja = "アトラスページ数を返す。"
+description.ko = "아틀라스 페이지 수를 반환한다."
+details.en = '''
+- Returns the current page count as `size_t`, or zero when no font is loaded; a newly created atlas starts with one page, while a cache hit retains the existing page count.
+- `clearAtlas` resets a loaded atlas to one empty page. See `Font::getMemoryUsage` for atlas sharing and `Font::drawString` for thread rules.
+'''
+details.ja = '''
+- 現在のページ数を `size_t` で返します。フォントが未読み込みの場合は 0 です。新しく作成されたアトラスは 1 ページから始まり、キャッシュにあるアトラスを再利用する場合は既存のページ数を保持します。
+- `clearAtlas` は読み込み済みのアトラスを空の 1 ページに戻します。アトラスの共有は `Font::getMemoryUsage`、スレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- 현재 페이지 수를 `size_t`로 반환합니다. 폰트가 로드되지 않았으면 0을 반환하며, 새로 생성된 아틀라스는 한 페이지로 시작하고, 캐시된 아틀라스를 재사용하면 기존 페이지 수를 유지합니다.
+- `clearAtlas`는 로드된 아틀라스를 빈 페이지 하나로 초기화합니다. 아틀라스 공유는 `Font::getMemoryUsage`, 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 
 ["Font::getAtlasMemoryUsage"]
 keywords = ["bytes"]
-description.en = "Get atlas memory usage in bytes (alias of getMemoryUsage)"
-description.ja = "アトラスのメモリ使用量をバイトで取得（getMemoryUsage のエイリアス）"
-description.ko = "아틀라스 메모리 사용량을 바이트로 얻음 (getMemoryUsage의 별칭)"
+description.en = "Returns atlas memory usage."
+description.ja = "アトラスのメモリ使用量を返す。"
+description.ko = "아틀라스 메모리 사용량을 반환한다."
+details.en = '''
+- An alias of `getMemoryUsage`, returning the same `size_t` byte count, or zero when no font is loaded.
+- See `Font::getMemoryUsage` for what is counted and how atlas memory is shared.
+'''
+details.ja = '''
+- `getMemoryUsage` の別名で、同じバイト数を `size_t` で返します。フォントが未読み込みの場合は 0 です。
+- 集計対象とアトラスメモリの共有については `Font::getMemoryUsage` を参照してください。
+'''
+details.ko = '''
+- `getMemoryUsage`의 별칭으로 같은 바이트 수를 `size_t`로 반환합니다. 폰트가 로드되지 않았으면 0입니다.
+- 집계 대상과 아틀라스 메모리 공유는 `Font::getMemoryUsage`를 참조하세요.
+'''
 
 ["Font::getBBox"]
 keywords = ["bounds", "bbox", "measure", "rect"]
-description.en = "Get the bounding box of the text (top-left origin)"
-description.ja = "テキストのバウンディングボックスを取得（左上原点）"
-description.ko = "텍스트의 경계 상자를 얻음 (좌상단 원점)"
+description.en = "Returns a rectangle containing the text's measured dimensions."
+description.ja = "テキストの計測寸法を持つ矩形を返す。"
+description.ko = "텍스트의 측정 크기를 담은 사각형을 반환한다."
+details.en = '''
+- Returns `Rect(0, 0, getWidth(text), getHeight(text))`; the origin is always the top-left `(0, 0)`, independent of alignment or drawing position.
+- This is a measurement rectangle, rather than the tight bounds of visible glyph outlines; see `Font::getWidth` and `Font::getHeight` for wrapping, vertical-writing behavior, and empty-text results.
+- Measurement can populate the glyph cache; see `Font::drawString` for units and thread rules.
+'''
+details.ja = '''
+- `Rect(0, 0, getWidth(text), getHeight(text))` を返します。揃えや描画位置に関係なく、原点は常に左上の `(0, 0)` です。
+- これは計測値から作る矩形で、見えているグリフの輪郭に密着した境界ではありません。折り返し、縦書き時の動作、空文字列の結果は `Font::getWidth` と `Font::getHeight` を参照してください。
+- 計測によってグリフがキャッシュに追加される場合があります。単位とスレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- `Rect(0, 0, getWidth(text), getHeight(text))`를 반환합니다. 정렬이나 그리기 위치와 관계없이 원점은 항상 왼쪽 위 `(0, 0)`입니다.
+- 측정값으로 만든 사각형이며 보이는 글리프 윤곽선에 꼭 맞는 경계는 아닙니다. 자동 줄바꿈, 세로쓰기 동작 및 빈 문자열 결과는 `Font::getWidth`와 `Font::getHeight`를 참조하세요.
+- 측정 중 글리프가 캐시에 추가될 수 있습니다. 단위와 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 
 ["Font::getDefaultLineHeight"]
 keywords = ["line height", "leading", "metrics"]
-description.en = "Get the font's default line height (unaffected by setLineHeight)"
-description.ja = "フォントの既定の行の高さを取得（setLineHeight の影響を受けない）"
-description.ko = "폰트의 기본 줄 높이를 얻음 (setLineHeight의 영향을 받지 않음)"
+description.en = "Returns the font's default line height."
+description.ja = "フォントの既定の行の高さを返す。"
+description.ko = "폰트의 기본 줄 높이를 반환한다."
+details.en = '''
+- Returns the scaled font metrics `ascent - descent + lineGap`, or zero when no font is loaded.
+- This value is unaffected by `setLineHeight`, `setLineHeightEm`, or grid fitting; see `Font::drawString` for units and thread rules.
+'''
+details.ja = '''
+- フォントのメトリクス `ascent - descent + lineGap` を拡大縮小した値を返します。フォントが未読み込みの場合は 0 です。
+- `setLineHeight`、`setLineHeightEm`、グリッドフィットの影響は受けません。単位とスレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- 폰트 메트릭 `ascent - descent + lineGap`을 크기에 맞게 조정한 값을 반환합니다. 폰트가 로드되지 않았으면 0입니다.
+- `setLineHeight`, `setLineHeightEm` 및 그리드 맞춤의 영향을 받지 않습니다. 단위와 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 
 ["Font::getDescent"]
 keywords = ["metrics", "baseline", "depth"]
-description.en = "Get the font descent (distance from baseline to bottom; negative)"
-description.ja = "フォントのディセント（ベースラインから下端までの距離、負値）を取得"
-description.ko = "폰트 디센트(기준선에서 하단까지의 거리, 음수)를 얻음"
+description.en = "Returns the font's descent below the baseline."
+description.ja = "ベースラインより下側のディセントを返す。"
+description.ko = "기준선 아래쪽의 디센트를 반환한다."
+details.en = '''
+- Returns the font's signed descent metric scaled for the loaded size, normally a negative value, or zero when no font is loaded.
+- `setLineHeight` and grid fitting do not change this metric; see `Font::drawString` for units and thread rules.
+'''
+details.ja = '''
+- 読み込みサイズに合わせて拡大縮小した、符号付きのディセントを返します。通常は負の値で、フォントが未読み込みの場合は 0 です。
+- `setLineHeight` やグリッドフィットはこのメトリクスを変更しません。単位とスレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- 로드한 크기에 맞게 조정된 부호 있는 디센트 메트릭을 반환합니다. 일반적으로 음수이며 폰트가 로드되지 않았으면 0입니다.
+- `setLineHeight`와 그리드 맞춤은 이 메트릭을 변경하지 않습니다. 단위와 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 
 ["Font::getGlyphPath"]
-description.en = "Vector outline of a single glyph as one Path with one subpath per contour. Em-normalized (1.0 = em), screen Y-down, baseline at y=0, pen at x=0. Use Path::drawFill() for filled rendering — holes (e, a, O, 日 ...) are auto-detected via earcut."
-description.ja = "単一グリフの輪郭を Path として取得 (1 contour = 1 subpath)。em 正規化 (1.0 = em)、画面 Y-down、ベースライン y=0、ペン位置 x=0。drawFill() で塗り — 穴 (e, a, O, 日 等) は earcut で自動検出。"
-description.ko = "단일 글리프 윤곽선 (1 contour = 1 subpath의 Path). em 정규화 (1.0 = em), 화면 Y-down, 기준선 y=0, 펜 위치 x=0. drawFill()로 채움 — 구멍 자동 검출."
+description.en = "Returns a single glyph's vector outline as a Path."
+description.ja = "単一グリフのベクター輪郭を Path として返す。"
+description.ko = "단일 글리프의 벡터 윤곽선을 Path로 반환한다."
+details.en = '''
+- Takes a Unicode codepoint and returns one `Path` with a closed subpath for each contour; coordinates are em-normalized with `1.0` equal to one em, the pen at `x = 0`, the baseline at `y = 0`, and positive Y downward.
+- Returns an empty path when no font is loaded or the glyph has no outline, such as a space; an unavailable codepoint also returns an empty path and logs a warning.
+- Use `path.drawFill()` for filled rendering: its earcut tessellation handles holes in glyphs such as `e`, `a`, `O`, and `日`.
+- Extracts outlines on the CPU without populating the raster atlas; quadratic curves use 12 segments and cubic curves use 16. See `Font::drawString` for thread rules.
+'''
+details.ja = '''
+- Unicode コードポイントを受け取り、輪郭ごとに閉じたサブパスを持つ 1 個の `Path` を返します。座標は em 単位に正規化され、`1.0` が 1 em、ペン位置が `x = 0`、ベースラインが `y = 0`、Y の正方向が下です。
+- フォントが未読み込みの場合や、スペースのようにグリフに輪郭がない場合は空のパスを返します。存在しないコードポイントでも空のパスを返し、警告を記録します。
+- 塗りつぶす場合は `path.drawFill()` を使います。earcut による三角形分割で、`e`、`a`、`O`、`日` などの穴も処理します。
+- CPU 上で輪郭を抽出し、ラスターアトラスには追加しません。2 次曲線は 12 分割、3 次曲線は 16 分割します。スレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- Unicode 코드 포인트를 받아 윤곽마다 닫힌 하위 경로를 갖는 하나의 `Path`를 반환합니다. 좌표는 em 단위로 정규화되며 `1.0`은 1 em, 펜 위치는 `x = 0`, 기준선은 `y = 0`, Y의 양의 방향은 아래쪽입니다.
+- 폰트가 로드되지 않았거나 공백처럼 글리프에 윤곽선이 없으면 빈 경로를 반환합니다. 없는 코드 포인트도 빈 경로를 반환하며 경고를 기록합니다.
+- 채우기에는 `path.drawFill()`을 사용합니다. earcut 삼각분할로 `e`, `a`, `O`, `日` 같은 글리프의 구멍도 처리합니다.
+- CPU에서 윤곽선을 추출하며 래스터 아틀라스에는 추가하지 않습니다. 이차 곡선은 12개, 삼차 곡선은 16개의 선분으로 나눕니다. 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 
 ["Font::getHangingPunctuation"]
 keywords = ["kinsoku", "cjk"]
-description.en = "Check if hanging punctuation is enabled"
-description.ja = "ぶら下げ約物が有効か確認"
-description.ko = "내어쓰기 구두점이 활성화되었는지 확인"
+description.en = "Returns whether hanging punctuation is enabled."
+description.ja = "ぶら下げ約物が有効かどうかを返す。"
+description.ko = "구두점 내어쓰기가 활성화되어 있는지 반환한다."
+details.en = '''
+- Returns the flag set by `setHangingPunctuation`; the default is false.
+- During wrapping, true allows consecutive prohibited line-start characters to extend beyond the row or column limit; the active `KinsokuLevel` determines these characters, so `KinsokuLevel::Off` disables this effect.
+'''
+details.ja = '''
+- `setHangingPunctuation` で設定したフラグを返します。既定値は false です。
+- true の場合、折り返し時に連続する行頭禁則文字を行や列の上限より外側へぶら下げます。対象文字は現在の `KinsokuLevel` で決まるため、`KinsokuLevel::Off` ではこの効果はありません。
+'''
+details.ko = '''
+- `setHangingPunctuation`으로 설정한 플래그를 반환합니다. 기본값은 false입니다.
+- true이면 줄바꿈 시 연속된 행두 금칙 문자가 행이나 열의 한도를 넘어가도록 허용합니다. 대상 문자는 현재 `KinsokuLevel`로 결정되므로 `KinsokuLevel::Off`에서는 효과가 없습니다.
+'''
 
 ["Font::getHeight"]
 category = "font"
 keywords = ["resolution", "size", "pixels", "dimension"]
-description.en = "Get text height"
-description.ja = "テキストの高さを取得"
-description.ko = "텍스트 높이를 얻음"
+description.en = "Returns the text's measured height."
+description.ja = "テキストの計測上の高さを返す。"
+description.ko = "텍스트의 측정 높이를 반환한다."
+details.en = '''
+- Applies automatic wrapping, then returns `getLineHeight()` multiplied by one plus the number of newlines; empty text therefore has one line of height when a font is loaded.
+- Returns zero when no font is loaded, even if a custom line height is set. In vertical writing it still uses the newline count rather than measuring the drawn column height.
+- This is line-based height rather than tight glyph bounds; see `Font::drawString` for measurement costs, units, and thread rules.
+'''
+details.ja = '''
+- 自動折り返しを適用してから、改行数に 1 を加えた数に `getLineHeight()` を掛けて返します。そのため、フォントが読み込み済みなら空文字列でも 1 行分の高さになります。
+- フォントが未読み込みの場合は、行の高さを明示的に設定していても 0 を返します。縦書きでも、描画される列の高さではなく改行数を使います。
+- グリフに密着した境界ではなく、行数に基づく高さです。計測の処理負荷、単位、スレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- 자동 줄바꿈을 적용한 뒤 줄바꿈 개수에 1을 더한 값과 `getLineHeight()`를 곱해 반환합니다. 따라서 폰트가 로드되어 있으면 빈 문자열도 한 줄 높이를 갖습니다.
+- 폰트가 로드되지 않았으면 사용자 지정 줄 높이가 있어도 0을 반환합니다. 세로쓰기에서도 그려지는 열 높이 대신 줄바꿈 개수를 사용합니다.
+- 글리프에 꼭 맞는 경계가 아니라 줄 수에 기반한 높이입니다. 측정 비용, 단위 및 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 
 ["Font::getKinsoku"]
 keywords = ["wrap", "cjk", "punctuation"]
-description.en = "Get the current kinsoku level"
-description.ja = "現在の禁則レベルを取得"
-description.ko = "현재 금칙 레벨을 얻음"
+description.en = "Returns the current kinsoku level."
+description.ja = "現在の禁則レベルを返す。"
+description.ko = "현재 금칙 수준을 반환한다."
+details.en = '''
+- Returns `KinsokuLevel::Off`, `KinsokuLevel::PunctuationOnly`, or `KinsokuLevel::Standard`; the default is `Off`.
+- `PunctuationOnly` prohibits selected punctuation at line starts; `Standard` also covers closing brackets, small kana, the prolonged sound mark (ー), iteration marks, and prohibited opening brackets at line ends. The level governs both wrap break points and hanging punctuation in either writing mode.
+'''
+details.ja = '''
+- `KinsokuLevel::Off`、`KinsokuLevel::PunctuationOnly`、`KinsokuLevel::Standard` のいずれかを返します。既定値は `Off` です。
+- `PunctuationOnly` は一部の句読点類を行頭禁則にします。`Standard` は閉じ括弧、小書き仮名、長音符（ー）、繰り返し記号、および行末禁則の開き括弧も対象にします。このレベルは、どちらの書字方向でも折り返し位置とぶら下げ約物を制御します。
+'''
+details.ko = '''
+- `KinsokuLevel::Off`, `KinsokuLevel::PunctuationOnly` 또는 `KinsokuLevel::Standard`를 반환합니다. 기본값은 `Off`입니다.
+- `PunctuationOnly`는 일부 구두점을 행두 금칙 문자로 지정합니다. `Standard`는 닫는 괄호, 작은 가나, 장음 부호(ー), 반복 기호 및 행말 금칙인 여는 괄호도 포함합니다. 이 수준은 두 쓰기 방향 모두에서 줄바꿈 위치와 구두점 내어쓰기를 제어합니다.
+'''
 
 ["Font::getLatinHyphenation"]
 keywords = ["wrap", "break"]
-description.en = "Check if Latin hyphenation is enabled"
-description.ja = "Latin ハイフネーションが有効か確認"
-description.ko = "라틴 하이픈 처리가 활성화되었는지 확인"
+description.en = "Returns whether forced-break hyphen insertion is enabled."
+description.ja = "強制折り返し時のハイフン挿入が有効かどうかを返す。"
+description.ko = "강제 줄바꿈 시 하이픈 삽입이 활성화되어 있는지 반환한다."
+details.en = '''
+- Returns the flag set by `setLatinHyphenation`; the default is false.
+- During horizontal wrapping, true inserts `-` before a forced break when no permitted break point was found; this insertion does not check whether the characters are Latin letters. Vertical wrapping does not insert hyphens.
+'''
+details.ja = '''
+- `setLatinHyphenation` で設定したフラグを返します。既定値は false です。
+- true の場合、横書きの折り返しで許可された改行位置が見つからなければ、強制改行の直前に `-` を挿入します。この挿入では文字が Latin 文字かどうかを確認しません。縦書きの折り返しではハイフンを挿入しません。
+'''
+details.ko = '''
+- `setLatinHyphenation`으로 설정한 플래그를 반환합니다. 기본값은 false입니다.
+- true이면 가로쓰기 줄바꿈에서 허용된 분리 위치를 찾지 못했을 때 강제 줄바꿈 직전에 `-`를 삽입합니다. 이 삽입은 문자가 라틴 문자인지 확인하지 않습니다. 세로쓰기 줄바꿈에서는 하이픈을 삽입하지 않습니다.
+'''
 
 ["Font::getLineHeight"]
 category = "font"
 keywords = ["leading", "spacing", "vertical"]
-description.en = "Get line height"
-description.ja = "行の高さを取得"
-description.ko = "줄 높이를 얻음"
+description.en = "Returns the current line spacing."
+description.ja = "現在の行送りを返す。"
+description.ko = "현재 줄 간격을 반환한다."
+details.en = '''
+- Returns the custom line height when it is positive; otherwise returns `getDefaultLineHeight()`.
+- A positive custom value is returned even when no font is loaded; without a positive override or loaded font, the result is zero.
+- Controls row spacing in horizontal writing and column spacing in vertical writing; see `Font::drawString` for units and thread rules.
+'''
+details.ja = '''
+- 明示的に設定した行の高さが正なら、その値を返します。それ以外は `getDefaultLineHeight()` を返します。
+- 正の設定値はフォントが未読み込みでも返します。正の設定値も読み込み済みフォントもなければ、結果は 0 です。
+- 横書きでは行の間隔、縦書きでは列の間隔を制御します。単位とスレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- 사용자 지정 줄 높이가 양수이면 그 값을 반환하고, 그렇지 않으면 `getDefaultLineHeight()`를 반환합니다.
+- 양수인 사용자 지정 값은 폰트가 로드되지 않았어도 반환합니다. 양수인 설정값도 로드된 폰트도 없으면 결과는 0입니다.
+- 가로쓰기에서는 행 간격, 세로쓰기에서는 열 간격을 제어합니다. 단위와 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 
 ["Font::getLoadedGlyphCount"]
-description.en = "Get number of loaded glyphs"
-description.ja = "読み込み済みグリフ数を取得"
-description.ko = "로드된 글리프 수를 얻음"
+description.en = "Returns the number of cached glyph entries."
+description.ja = "キャッシュされたグリフ項目数を返す。"
+description.ko = "캐시된 글리프 항목 수를 반환한다."
+details.en = '''
+- Returns the number of cached codepoint entries as `size_t`, or zero when no font is loaded; this is not the number of glyphs available in the font.
+- Includes entries for spaces and failed glyph rasterizations. `clearAtlas` resets the count to zero.
+- The count belongs to the shared atlas; see `Font::getMemoryUsage` for sharing rules and `Font::drawString` for thread rules.
+'''
+details.ja = '''
+- キャッシュされたコードポイントの項目数を `size_t` で返します。フォントが未読み込みの場合は 0 です。フォントが収録するグリフの総数ではありません。
+- スペースやラスタライズに失敗したグリフの項目も含みます。`clearAtlas` で 0 に戻ります。
+- この数は共有アトラスに属します。共有の扱いは `Font::getMemoryUsage`、スレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- 캐시된 코드 포인트 항목 수를 `size_t`로 반환합니다. 폰트가 로드되지 않았으면 0입니다. 폰트에 포함된 전체 글리프 수는 아닙니다.
+- 공백과 글리프 래스터화에 실패한 항목도 포함합니다. `clearAtlas`는 개수를 0으로 초기화합니다.
+- 이 개수는 공유 아틀라스에 속합니다. 공유 규칙은 `Font::getMemoryUsage`, 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 
 ["Font::getMaxLineLength"]
 keywords = ["wrap", "line length", "width", "column"]
-description.en = "Get the current wrap length"
-description.ja = "現在の折り返し長を取得"
-description.ko = "현재 줄 바꿈 길이를 얻음"
+description.en = "Returns the configured wrapping limit."
+description.ja = "設定された折り返しの上限を返す。"
+description.ko = "설정된 줄바꿈 한도를 반환한다."
+details.en = '''
+- Returns the value set by `setMaxLineLength`, initially zero: row width for horizontal writing or column height for vertical writing.
+- Automatic wrapping requires both `enableWrap(true)` and a positive limit; this getter returns the stored value even when wrapping is disabled.
+- See `Font::drawString` for units and thread rules.
+'''
+details.ja = '''
+- `setMaxLineLength` で設定した値を返します。初期値は 0 で、横書きでは行の幅、縦書きでは列の高さを表します。
+- 自動折り返しには `enableWrap(true)` と正の上限の両方が必要です。この関数は折り返しが無効でも保存された値を返します。
+- 単位とスレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- `setMaxLineLength`로 설정한 값을 반환합니다. 초기값은 0이며 가로쓰기에서는 행 너비, 세로쓰기에서는 열 높이를 나타냅니다.
+- 자동 줄바꿈에는 `enableWrap(true)`와 양수인 한도가 모두 필요합니다. 이 함수는 줄바꿈이 비활성화되어 있어도 저장된 값을 반환합니다.
+- 단위와 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 
 ["Font::getMemoryUsage"]
-description.en = "Get atlas memory usage in bytes (one byte per atlas texel: width x height summed over the pages)"
-description.ja = "アトラスのメモリ使用量（バイト）を取得（アトラス 1 テクセルにつき 1 バイト。各ページの幅 x 高さの合計）"
-description.ko = "아틀라스 메모리 사용량을 바이트로 얻음 (아틀라스 텍셀당 1바이트: 각 페이지의 폭 x 높이 합계)"
+description.en = "Returns the CPU atlas pixel storage size."
+description.ja = "CPU 上のアトラス画素データのサイズを返す。"
+description.ko = "CPU 아틀라스 픽셀 데이터의 크기를 반환한다."
+details.en = '''
+- Returns a `size_t` byte count equal to the sum of each atlas page's width × height, including unused texels, at one byte per texel; returns zero when no font is loaded.
+- Counts CPU pixel data only, excluding font-file bytes, glyph metadata, GPU textures, mipmaps, and deferred GPU resources; it is not total font memory or total GPU memory.
+- Copies and fonts with the same resolved font path, face index, physical raster size, oversampling, and mipmap setting share an atlas, so their counts overlap and `clearAtlas` affects all sharers. See `Font::drawString` for thread rules.
+'''
+details.ja = '''
+- 各アトラスページの幅 × 高さを合計したバイト数を `size_t` で返します。未使用のテクセルも含み、1 テクセルあたり 1 バイトです。フォントが未読み込みの場合は 0 を返します。
+- CPU の画素データだけを数え、フォントファイルのデータ、グリフ情報、GPU テクスチャ、ミップマップ、破棄待ちの GPU リソースは含みません。フォント全体や GPU 全体のメモリ使用量ではありません。
+- コピーした Font や、解決済みフォントパス、フェイス番号、物理ラスタライズサイズ、オーバーサンプリング、ミップマップ設定が同じフォントはアトラスを共有します。そのため使用量は重複し、`clearAtlas` は共有するすべての Font に影響します。スレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- 각 아틀라스 페이지의 너비 × 높이를 합산한 바이트 수를 `size_t`로 반환합니다. 사용하지 않는 텍셀도 포함하며 텍셀당 1바이트입니다. 폰트가 로드되지 않았으면 0을 반환합니다.
+- CPU 픽셀 데이터만 집계하며 폰트 파일 데이터, 글리프 메타데이터, GPU 텍스처, 밉맵 및 해제 대기 중인 GPU 리소스는 포함하지 않습니다. 폰트 전체나 GPU 전체의 메모리 사용량은 아닙니다.
+- 복사한 Font와 해석된 폰트 경로, 페이스 인덱스, 물리 래스터 크기, 오버샘플링 및 밉맵 설정이 같은 폰트는 아틀라스를 공유합니다. 따라서 사용량이 중복되며 `clearAtlas`는 공유하는 모든 Font에 영향을 줍니다. 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 
 ["Font::getSize"]
 category = "font"
 keywords = ["pointsize", "scale", "font size", "px"]
-description.en = "Get font size"
-description.ja = "フォントサイズを取得"
-description.ko = "폰트 크기를 얻음"
+description.en = "Returns the requested font size."
+description.ja = "指定されたフォントサイズを返す。"
+description.ko = "지정된 폰트 크기를 반환한다."
+details.en = '''
+- Returns the stored requested size as an `int`, initially zero; this is not the physical atlas raster size.
+- The size does not indicate whether loading succeeded; check `isLoaded()` separately. See `Font::drawString` for units and thread rules.
+'''
+details.ja = '''
+- 保存された指定サイズを `int` で返します。初期値は 0 で、アトラスの物理ラスタライズサイズではありません。
+- このサイズは読み込みの成功を示しません。`isLoaded()` で別途確認してください。単位とスレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- 저장된 요청 크기를 `int`로 반환합니다. 초기값은 0이며 아틀라스의 물리 래스터 크기는 아닙니다.
+- 이 크기는 로드 성공 여부를 나타내지 않습니다. `isLoaded()`로 별도 확인하세요. 단위와 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 
 ["Font::getStringPath"]
 category = "font"
 keywords = ["outline", "vector", "contour", "shape", "glyph"]
-description.en = "Vector outline of the whole string at (x, y) as one Path containing every glyph's contours (one subpath each). Uses the same layout pipeline as drawString (writing mode, alignment, wrap, kinsoku, TCY). Logical pixels — drawStroke / drawFill / transform freely."
-description.ja = "文字列全体の輪郭を 1 個の Path として返す (全グリフの contour が subpath として連結)。drawString と同じレイアウトパイプライン (書字方向 / 揃え / 折返し / 禁則 / 縦中横) 経由。座標は論理ピクセル — drawStroke / drawFill / 変形自由。"
-description.ko = "(x, y) 위치의 전체 문자열 윤곽선을 단일 Path로 (모든 글리프 contour가 subpath로 연결). drawString과 동일한 레이아웃 파이프라인 사용. 좌표는 논리 픽셀."
+description.en = "Returns a string's vector outlines as one Path."
+description.ja = "文字列のベクター輪郭を 1 個の Path として返す。"
+description.ko = "문자열의 벡터 윤곽선을 하나의 Path로 반환한다."
+details.en = '''
+- Takes UTF-8 text and anchor coordinates `(x, y)`, returning one `Path` with a separate subpath for every glyph contour; draw it with `drawStroke()` or `drawFill()`, or transform it as needed.
+- Uses the same placement as `drawString`, including writing mode, alignment, wrapping, kinsoku, and tate-chu-yoko; the three-argument overload uses global text alignment, while the five-argument overload uses explicit `Direction h, Direction v`.
+- Scales each em-normalized outline by `getSize()`, then applies the glyph's horizontal scale, position, and rotation; the returned coordinates use the logical-pixel convention described in `Font::drawString`.
+- Returns an empty path for an unloaded font or empty string and omits glyphs with empty or unavailable outlines. Layout may populate the CPU atlas, but this call does not upload textures or draw; see `Font::drawString` for thread rules.
+'''
+details.ja = '''
+- UTF-8 の文字列と基準座標 `(x, y)` を受け取り、各グリフの各輪郭を別のサブパスとして持つ 1 個の `Path` を返します。`drawStroke()` や `drawFill()` で描画でき、必要に応じて変形できます。
+- `drawString` と同じ配置処理を使い、書字方向、揃え、折り返し、禁則、縦中横を反映します。引数が 3 個の版はグローバルなテキスト揃えを使い、引数が 5 個の版は明示した `Direction h, Direction v` を使います。
+- em 単位に正規化した各輪郭に `getSize()` を掛けてから、グリフの水平倍率、位置、回転を適用します。結果の座標には `Font::drawString` で説明する論理ピクセルの規則を使います。
+- フォントが未読み込みの場合や文字列が空の場合は空のパスを返し、輪郭が空または存在しないグリフは省略します。配置処理で CPU アトラスにグリフを追加する場合がありますが、この呼び出しではテクスチャのアップロードや描画は行いません。スレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- UTF-8 문자열과 기준 좌표 `(x, y)`를 받아 각 글리프의 각 윤곽을 별도 하위 경로로 갖는 하나의 `Path`를 반환합니다. `drawStroke()` 또는 `drawFill()`로 그리거나 필요에 따라 변형할 수 있습니다.
+- `drawString`과 같은 배치를 사용하며 쓰기 방향, 정렬, 자동 줄바꿈, 금칙 및 다테추요코를 반영합니다. 인수가 세 개인 오버로드는 전역 텍스트 정렬을 사용하고 인수가 다섯 개인 오버로드는 명시한 `Direction h, Direction v`를 사용합니다.
+- em 단위로 정규화한 각 윤곽에 `getSize()`를 곱한 뒤 글리프의 가로 배율, 위치 및 회전을 적용합니다. 결과 좌표에는 `Font::drawString`에서 설명하는 논리 픽셀 규칙을 사용합니다.
+- 폰트가 로드되지 않았거나 문자열이 비어 있으면 빈 경로를 반환하며, 윤곽이 비어 있거나 없는 글리프는 생략합니다. 배치 중 CPU 아틀라스에 글리프를 추가할 수 있지만 이 호출은 텍스처 업로드나 그리기를 수행하지 않습니다. 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 related = ["Path", "drawStroke", "Font::drawString"]
+snippet = '''
+void tcApp::draw() {
+    static Font font;
+    if (!font.isLoaded()) font.load(TC_FONT_SANS, 48);
+    Path path = font.getStringPath("TrussC", 20, 80, Direction::Left, Direction::Top);
+    path.drawFill();
+}
+'''
 
 ["Font::getTcyDigitMax"]
 keywords = ["tate-chu-yoko", "digits", "vertical"]
-description.en = "Get the maximum digit-run length that uses tate-chu-yoko combine mode"
-description.ja = "縦中横の Combine モードを使う数字連続の最大桁数を取得"
-description.ko = "다테추요코 결합 모드를 사용하는 숫자 연속의 최대 자릿수를 얻음"
+description.en = "Returns the digit-run threshold for tate-chu-yoko."
+description.ja = "数字列の縦中横モードを切り替える桁数の上限を返す。"
+description.ko = "숫자열의 다테추요코 모드를 구분하는 자릿수 한도를 반환한다."
+details.en = '''
+- Returns the integer threshold set by `setTcyDigits` for consecutive ASCII digits in vertical writing.
+- Runs at or below the threshold use the configured `inMode`, initially `TcyMode::Combine`; longer runs use `overflowMode`, initially `TcyMode::Rotate`.
+- The initial threshold is zero, so all nonempty digit runs use the overflow mode.
+'''
+details.ja = '''
+- 縦書きで連続する ASCII 数字に対して、`setTcyDigits` で設定した整数の上限を返します。
+- 上限以下の桁数では設定した `inMode` を使い、初期値は `TcyMode::Combine` です。上限を超える数字列は `overflowMode` を使い、初期値は `TcyMode::Rotate` です。
+- 上限の初期値は 0 なので、空でない数字列はすべて上限超過時のモードを使います。
+'''
+details.ko = '''
+- 세로쓰기에서 연속된 ASCII 숫자에 대해 `setTcyDigits`로 설정한 정수 한도를 반환합니다.
+- 한도 이하인 숫자열은 설정한 `inMode`를 사용하며 초기값은 `TcyMode::Combine`입니다. 더 긴 숫자열은 `overflowMode`를 사용하며 초기값은 `TcyMode::Rotate`입니다.
+- 한도의 초기값은 0이므로 비어 있지 않은 모든 숫자열은 한도 초과 모드를 사용합니다.
+'''
 
 ["Font::getTcyLatinMode"]
 keywords = ["tate-chu-yoko", "vertical"]
-description.en = "Get the tate-chu-yoko mode for Latin letter runs"
-description.ja = "Latin 文字連続の縦中横モードを取得"
-description.ko = "라틴 문자 연속의 다테추요코 모드를 얻음"
+description.en = "Returns the tate-chu-yoko mode for Latin letter runs."
+description.ja = "Latin 文字列の縦中横モードを返す。"
+description.ko = "라틴 문자열의 다테추요코 모드를 반환한다."
+details.en = '''
+- Returns the `TcyMode` set by `setTcyLatin` for consecutive ASCII letters in vertical writing; the default is `TcyMode::Rotate`.
+- `Rotate` rotates the whole run 90 degrees clockwise, `Upright` places each letter upright in its own cell, and `Combine` places the run horizontally in one cell, compressing its width only when necessary.
+'''
+details.ja = '''
+- 縦書きで連続する ASCII 英字に対して、`setTcyLatin` で設定した `TcyMode` を返します。既定値は `TcyMode::Rotate` です。
+- `Rotate` は文字列全体を時計回りに 90 度回転し、`Upright` は各文字を 1 マスずつ正立させます。`Combine` は文字列を 1 マスに横向きで配置し、必要な場合だけ幅を縮めます。
+'''
+details.ko = '''
+- 세로쓰기에서 연속된 ASCII 영문자에 대해 `setTcyLatin`으로 설정한 `TcyMode`를 반환합니다. 기본값은 `TcyMode::Rotate`입니다.
+- `Rotate`는 문자열 전체를 시계 방향으로 90도 회전하고, `Upright`는 각 문자를 별도 칸에 똑바로 배치합니다. `Combine`은 문자열을 한 칸에 가로로 배치하며 필요한 경우에만 너비를 압축합니다.
+'''
 
 ["Font::getTotalCacheMemoryUsage"]
 keywords = ["shared"]
-description.en = "Total memory used by the shared font atlas cache across all fonts"
-description.ja = "全フォントで共有されるフォントアトラスキャッシュの合計メモリ使用量"
-description.ko = "모든 폰트가 공유하는 폰트 아틀라스 캐시의 총 메모리 사용량"
+description.en = "Returns the shared font cache's total atlas pixel storage size."
+description.ja = "共有フォントキャッシュ全体のアトラス画素データのサイズを返す。"
+description.ko = "공유 폰트 캐시 전체의 아틀라스 픽셀 데이터 크기를 반환한다."
+details.en = '''
+- This static function returns a `size_t` byte count by summing `getMemoryUsage()` once for each atlas in the shared font cache, including retained cache entries that no Font currently uses.
+- Shared atlases are counted once rather than once per Font; an empty cache returns zero. See `Font::getMemoryUsage` for the included storage and `Font::drawString` for thread rules.
+'''
+details.ja = '''
+- この static 関数は、共有フォントキャッシュ内の各アトラスについて `getMemoryUsage()` を 1 回ずつ合計し、バイト数を `size_t` で返します。現在どの Font も使っていない、保持中のキャッシュ項目も含みます。
+- 共有アトラスは Font ごとではなく 1 回だけ数えます。空のキャッシュでは 0 を返します。集計対象は `Font::getMemoryUsage`、スレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- 이 static 함수는 공유 폰트 캐시의 각 아틀라스에 대해 `getMemoryUsage()`를 한 번씩 합산하여 바이트 수를 `size_t`로 반환합니다. 현재 어떤 Font도 사용하지 않지만 캐시에 유지되는 항목도 포함합니다.
+- 공유 아틀라스는 Font마다 중복 집계하지 않고 한 번만 집계합니다. 캐시가 비어 있으면 0을 반환합니다. 집계 대상은 `Font::getMemoryUsage`, 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 
 ["Font::getWidth"]
 category = "font"
 keywords = ["resolution", "size", "pixels", "dimension"]
-description.en = "Get text width"
-description.ja = "テキストの幅を取得"
-description.ko = "텍스트 너비를 얻음"
+description.en = "Returns the text's measured width."
+description.ja = "テキストの計測上の幅を返す。"
+description.ko = "텍스트의 측정 너비를 반환한다."
+details.en = '''
+- Applies automatic wrapping to UTF-8 text and returns the largest sum of glyph advances between newlines; spaces contribute their advance, tabs contribute four space advances, and kerning is not applied.
+- Returns zero for an unloaded font or empty string and skips invalid cached glyphs. Even in vertical writing, it sums horizontal advances rather than measuring the drawn column block.
+- This measures advances rather than tight outline bounds and can populate the CPU glyph cache; see `Font::drawString` for units and thread rules.
+'''
+details.ja = '''
+- UTF-8 の文字列に自動折り返しを適用し、改行で区切った各部分のグリフ送り幅の合計の最大値を返します。スペースはその送り幅、タブはスペース 4 個分を加算し、カーニングは適用しません。
+- フォントが未読み込みの場合や文字列が空の場合は 0 を返し、キャッシュ内の無効なグリフは飛ばします。縦書きでも、描画される列全体の幅ではなく水平方向の送り幅を合計します。
+- 輪郭に密着した境界ではなく送り幅を計測し、CPU のグリフキャッシュに項目を追加する場合があります。単位とスレッドの扱いは `Font::drawString` を参照してください。
+'''
+details.ko = '''
+- UTF-8 문자열에 자동 줄바꿈을 적용한 뒤 줄바꿈 사이의 글리프 전진 폭 합계 중 최댓값을 반환합니다. 공백은 자체 전진 폭, 탭은 공백 네 개의 전진 폭을 더하며 커닝은 적용하지 않습니다.
+- 폰트가 로드되지 않았거나 문자열이 비어 있으면 0을 반환하고 캐시의 유효하지 않은 글리프는 건너뜁니다. 세로쓰기에서도 그려지는 열 블록 너비 대신 수평 전진 폭을 합산합니다.
+- 윤곽선에 꼭 맞는 경계가 아니라 전진 폭을 측정하며 CPU 글리프 캐시에 항목을 추가할 수 있습니다. 단위와 스레드 규칙은 `Font::drawString`을 참조하세요.
+'''
 related = ["Font::getStringPath", "Font::getLineHeight"]
 
 ["Font::getWritingMode"]
-description.en = "Current writing mode"
-description.ja = "現在の書字方向を取得"
-description.ko = "현재 쓰기 방향을 얻음"
+description.en = "Returns the current writing mode."
+description.ja = "現在の書字方向を返す。"
+description.ko = "현재 쓰기 방향을 반환한다."
+details.en = '''
+- Returns the `WritingMode` set by `setWritingMode`; the default is `WritingMode::Horizontal`.
+- `Horizontal` lays text out left to right in rows; `VerticalRL` lays it out top to bottom in columns that progress right to left.
+'''
+details.ja = '''
+- `setWritingMode` で設定した `WritingMode` を返します。既定値は `WritingMode::Horizontal` です。
+- `Horizontal` は行内を左から右へ配置し、`VerticalRL` は列内を上から下へ、列を右から左へ配置します。
+'''
+details.ko = '''
+- `setWritingMode`로 설정한 `WritingMode`를 반환합니다. 기본값은 `WritingMode::Horizontal`입니다.
+- `Horizontal`은 행 안에서 왼쪽에서 오른쪽으로 배치하고, `VerticalRL`은 열 안에서 위에서 아래로, 열은 오른쪽에서 왼쪽으로 배치합니다.
+'''
 
 ["Font::isLoaded"]
 category = "font"
 keywords = ["ready", "available", "valid"]
-description.en = "Check if loaded"
-description.ja = "読み込み済みか確認"
-description.ko = "로드되었는지 확인"
+description.en = "Returns whether the font is loaded."
+description.ja = "フォントが読み込み済みかを返す。"
+description.ko = "폰트가 로드되었는지 반환한다."
+details.en = '''
+- Returns `true` when this font holds an atlas manager, and `false` otherwise; glyphs and GPU textures need not have been generated yet.
+- During `loadAsync()`, this reports the currently committed font, not whether loading is in progress.
+'''
+details.ja = '''
+- このフォントがアトラス管理オブジェクトを保持していれば `true`、それ以外は `false` を返します。グリフや GPU テクスチャがまだ生成されていない場合もあります。
+- `loadAsync()` の実行中は、読み込みの進行状況ではなく、現在反映されているフォントの状態を返します。
+'''
+details.ko = '''
+- 이 폰트가 아틀라스 관리 객체를 보유하면 `true`, 그렇지 않으면 `false`를 반환합니다. 글리프나 GPU 텍스처는 아직 생성되지 않았을 수 있습니다.
+- `loadAsync()` 실행 중에는 로드 진행 상태가 아니라 현재 적용된 폰트의 상태를 반환합니다.
+'''
 
 ["Font::isWrapEnabled"]
 keywords = ["line break", "text"]
-description.en = "Check if line wrapping is enabled"
-description.ja = "行の折り返しが有効か確認"
-description.ko = "줄 바꿈이 활성화되었는지 확인"
+description.en = "Returns whether automatic text wrapping is enabled."
+description.ja = "テキストの自動折り返しが有効かを返す。"
+description.ko = "텍스트 자동 줄 바꿈이 활성화되었는지 반환한다."
+details.en = '''
+- Returns the flag set by `enableWrap()`; the default is `false`.
+- Actual wrapping also requires a loaded font and a positive maximum line length; see `Font::setMaxLineLength`.
+'''
+details.ja = '''
+- `enableWrap()` で設定したフラグを返します。既定値は `false` です。
+- 実際の折り返しには、読み込み済みのフォントと正の最大行長も必要です。`Font::setMaxLineLength` を参照してください。
+'''
+details.ko = '''
+- `enableWrap()`으로 설정한 플래그를 반환합니다. 기본값은 `false`입니다.
+- 실제 줄 바꿈에는 로드된 폰트와 양수인 최대 줄 길이도 필요합니다. `Font::setMaxLineLength`를 참조하세요.
+'''
 
 ["Font::load"]
 category = "font"
 keywords = ["open", "read", "file", "ttc", "font collection", "face index", "system font name"]
-description.en = "Load a font file or a system font name; faceIndex picks the face in a .ttc. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins. On Web, URL loading waits until the font is usable or fetching/decoding fails."
-description.ja = "フォントファイルまたはシステムフォント名を読み込む。faceIndex で .ttc 内の書体を選ぶ。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う。データフォルダのファイルとシステムフォントが同名なら、データフォルダのファイルを使う。Web の URL 読み込みはフォントが使える状態になるか取得・デコードが失敗するまで待つ。"
-description.ko = "폰트 파일 또는 시스템 폰트 이름을 로드. faceIndex로 .ttc 안의 서체를 선택. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용. 데이터 폴더의 파일과 시스템 폰트 이름이 같으면 데이터 폴더의 파일을 사용. Web URL 로드는 폰트를 사용할 수 있거나 가져오기/디코딩에 실패할 때까지 기다린다."
-details.en = """
-`load(nameOrPath, size, faceIndex = 0)`. `nameOrPath` is a font file, a URL (web), or a system font name such as `"Noto Sans CJK SC"`.
+description.en = "Loads a font from a file, a system font name, or a Web URL."
+description.ja = "ファイル、システムフォント名、または Web の URL からフォントを読み込む。"
+description.ko = "파일, 시스템 폰트 이름 또는 Web URL에서 폰트를 로드한다."
+details.en = '''
+- Call `load(nameOrPath, size, faceIndex = 0)` with an integer font size in logical pixels. Rasterization uses the display DPI scale captured at loading, while drawing and metrics use logical coordinates.
+- Relative file paths resolve against the data folder through `getDataPath()`; absolute paths are used as given. A regular file at the resolved path takes precedence over a system font with the same name.
+- `faceIndex` selects a face in a file or URL containing a font collection (`.ttc` or `.otc`); a single font has only face 0. A negative index or an index at or beyond the face count logs an error and fails.
+- System font names such as `"Noto Sans CJK SC"` use the face selected by the OS, including later faces in collections: fontconfig `FC_INDEX` on Linux, DirectWrite on Windows, and the CoreText font's PostScript name on macOS and iOS. `faceIndex` does not override this selection; a nonzero argument logs a warning.
+- Face order belongs to the file, whereas name resolution depends on installed fonts. Bundle a font in `data/` and select its file and face index to use the same face across operating systems.
+- Returns a `LoadResult` that evaluates to `true` on success. Missing fonts or unreadable data files report `FileNotFound`; rejected font data or face indices report `DecodeFailed`. File-load failure clears the current font.
+- On Web, HTTP and HTTPS URLs yield through Asyncify until fetching and decoding finish, with a 30-second timeout reported as `Unknown`. Fetch or decode failure reports `DecodeFailed` and leaves the font unloaded. Native URL loading returns `UnsupportedFormat` and retains any previous atlas.
+- Cancels any pending `loadAsync()` operation. Matching resolved paths, faces, physical sizes, oversampling settings, and mipmap settings share an atlas; changing any of these selects a separate cache entry. Glyphs are rasterized lazily.
+'''
+details.ja = '''
+- `load(nameOrPath, size, faceIndex = 0)` に、論理ピクセル単位の整数のフォントサイズを渡します。ラスタライズには読み込み時の画面の DPI スケールを使い、描画と寸法の取得には論理座標を使います。
+- 相対ファイルパスは `getDataPath()` を通じてデータフォルダ基準で解決し、絶対パスはそのまま使います。解決先に通常のファイルがあれば、同名のシステムフォントより優先します。
+- `faceIndex` は、ファイルまたは URL で指定したフォントコレクション（`.ttc`、`.otc`）内の書体を選びます。単一フォントは書体 0 のみです。負の値や書体数以上の値は、エラーを記録して失敗します。
+- `"Noto Sans CJK SC"` などのシステムフォント名は、コレクションの 2 番目以降も含め、OS が選んだ書体を使います。Linux では fontconfig の `FC_INDEX`、Windows では DirectWrite、macOS と iOS では CoreText フォントの PostScript 名を使います。`faceIndex` ではこの選択を変更できず、0 以外を渡すと警告を記録します。
+- 書体の順序はファイルで決まり、名前の解決はインストール済みのフォントに依存します。OS 間で同じ書体を使うには、フォントを `data/` に同梱し、ファイルと書体インデックスで指定してください。
+- 成功時に `true` として評価される `LoadResult` を返します。フォントが見つからない場合やデータファイルを開けない場合は `FileNotFound`、フォントデータや書体インデックスが拒否された場合は `DecodeFailed` です。ファイルの読み込みに失敗すると、現在のフォントを解除します。
+- Web では HTTP と HTTPS の URL に対応し、取得とデコードが終わるまで Asyncify で実行を譲ります。30 秒のタイムアウトは `Unknown`、取得やデコードの失敗は `DecodeFailed` となり、フォントは未読み込みになります。ネイティブ環境の URL 読み込みは `UnsupportedFormat` を返し、以前のアトラスを保持します。
+- 処理中の `loadAsync()` をキャンセルします。解決済みパス、書体、物理サイズ、オーバーサンプリング設定、ミップマップ設定が一致する場合はアトラスを共有し、いずれかが異なる場合は別のキャッシュ項目を使います。グリフは必要になった時点でラスタライズします。
+'''
+details.ko = '''
+- `load(nameOrPath, size, faceIndex = 0)`에 논리 픽셀 단위의 정수 폰트 크기를 전달합니다. 래스터화에는 로드 시점의 화면 DPI 배율을 사용하고, 그리기와 치수 측정에는 논리 좌표를 사용합니다.
+- 상대 파일 경로는 `getDataPath()`를 통해 데이터 폴더 기준으로 해석하며, 절대 경로는 그대로 사용합니다. 해석된 경로에 일반 파일이 있으면 같은 이름의 시스템 폰트보다 우선합니다.
+- `faceIndex`는 파일이나 URL로 지정한 폰트 컬렉션(`.ttc`, `.otc`) 안의 서체를 선택합니다. 단일 폰트에는 서체 0만 있습니다. 음수이거나 서체 수 이상이면 오류를 기록하고 실패합니다.
+- `"Noto Sans CJK SC"` 같은 시스템 폰트 이름은 컬렉션의 두 번째 이후 서체를 포함하여 OS가 선택한 서체를 사용합니다. Linux에서는 fontconfig의 `FC_INDEX`, Windows에서는 DirectWrite, macOS와 iOS에서는 CoreText 폰트의 PostScript 이름을 사용합니다. `faceIndex`로 이 선택을 바꿀 수 없으며, 0 이외의 값을 전달하면 경고를 기록합니다.
+- 서체 순서는 파일에 속하지만 이름 해석은 설치된 폰트에 따라 달라집니다. 운영체제 간에 같은 서체를 사용하려면 폰트를 `data/`에 포함하고 파일과 서체 인덱스로 지정하세요.
+- 성공하면 `true`로 평가되는 `LoadResult`를 반환합니다. 폰트를 찾지 못하거나 데이터 파일을 열지 못하면 `FileNotFound`, 폰트 데이터나 서체 인덱스가 거부되면 `DecodeFailed`를 보고합니다. 파일 로드에 실패하면 현재 폰트를 해제합니다.
+- Web에서는 HTTP와 HTTPS URL을 지원하며 가져오기와 디코딩이 끝날 때까지 Asyncify로 실행을 양보합니다. 30초 시간 초과는 `Unknown`, 가져오기나 디코딩 실패는 `DecodeFailed`로 보고하며 폰트는 로드되지 않은 상태가 됩니다. 네이티브 환경의 URL 로드는 `UnsupportedFormat`을 반환하고 이전 아틀라스를 유지합니다.
+- 진행 중인 `loadAsync()`를 취소합니다. 해석된 경로, 서체, 물리 크기, 오버샘플링 설정, 밉맵 설정이 일치하면 아틀라스를 공유하며, 하나라도 다르면 별도의 캐시 항목을 사용합니다. 글리프는 필요할 때 래스터화합니다.
+'''
+snippet = '''
+// tcApp.h (inside class tcApp : public App)
+Font font;
 
-- `faceIndex` picks the face inside a font collection (`.ttc` / `.otc`) given as a file or URL. A single font has only face 0. An index below 0, or at or past the number of faces in the file, fails the load with an error log.
-- A system font name opens the face the OS resolves it to, including a later face of a `.ttc` (fontconfig `FC_INDEX` on Linux, DirectWrite on Windows, the CoreText font's PostScript name on macOS / iOS). `faceIndex` does not apply to a name.
-- The order of faces is part of the file, so a file and a face index load the same face on every OS. System font names depend on the fonts each OS has. For identical text on every OS, bundle the font in `data/` and load it by file and face index.
-- Each (file, face index, size) gets its own glyph atlas.
-"""
-details.ja = """
-`load(nameOrPath, size, faceIndex = 0)`。`nameOrPath` はフォントファイル、URL（Web）、または `"Noto Sans CJK SC"` のようなシステムフォント名。
-
-- `faceIndex` はファイルや URL で渡したフォントコレクション（`.ttc` / `.otc`）内の書体を選ぶ。単一フォントは書体 0 だけ。0 未満、またはファイル内の書体数以上のインデックスはエラーログを出して読み込みに失敗する。
-- システムフォント名は OS が解決した書体を開く。`.ttc` の 2 番目以降の書体も含む（Linux は fontconfig の `FC_INDEX`、Windows は DirectWrite、macOS / iOS は CoreText フォントの PostScript 名）。名前には `faceIndex` は使われない。
-- 書体の順番はファイルの一部なので、ファイルと書体インデックスの組はどの OS でも同じ書体を読み込む。システムフォント名は各 OS にあるフォントに依存する。どの OS でも同じ文字にするには、フォントを `data/` に同梱してファイルと書体インデックスで読み込む。
-- （ファイル、書体インデックス、サイズ）ごとにグリフアトラスが別に作られる。
-"""
-details.ko = """
-`load(nameOrPath, size, faceIndex = 0)`. `nameOrPath`는 폰트 파일, URL(웹), 또는 `"Noto Sans CJK SC"` 같은 시스템 폰트 이름.
-
-- `faceIndex`는 파일이나 URL로 지정한 폰트 컬렉션(`.ttc` / `.otc`) 안의 서체를 선택한다. 단일 폰트는 서체 0만 있다. 0 미만이거나 파일의 서체 수 이상인 인덱스는 에러 로그를 남기고 로드에 실패한다.
-- 시스템 폰트 이름은 OS가 해석한 서체를 연다. `.ttc`의 두 번째 이후 서체도 포함한다(Linux는 fontconfig `FC_INDEX`, Windows는 DirectWrite, macOS / iOS는 CoreText 폰트의 PostScript 이름). 이름에는 `faceIndex`가 쓰이지 않는다.
-- 서체 순서는 파일의 일부이므로 파일과 서체 인덱스의 조합은 모든 OS에서 같은 서체를 로드한다. 시스템 폰트 이름은 각 OS에 있는 폰트에 따라 달라진다. 모든 OS에서 같은 글자를 쓰려면 폰트를 `data/`에 넣고 파일과 서체 인덱스로 로드한다.
-- (파일, 서체 인덱스, 크기)마다 글리프 아틀라스가 따로 만들어진다.
-"""
+// tcApp.cpp
+void tcApp::setup() {
+    if (!font.load(TC_FONT_SANS, 24)) return;
+}
+'''
 
 ["Font::resetLineHeight"]
 keywords = ["line height", "default", "leading"]
-description.en = "Reset line height to the font default"
-description.ja = "行の高さをフォント既定値に戻す"
-description.ko = "줄 높이를 폰트 기본값으로 되돌림"
+description.en = "Restores the font's default line spacing."
+description.ja = "行間隔をフォントの既定値に戻す。"
+description.ko = "줄 간격을 폰트 기본값으로 되돌린다."
+details.en = '''
+- Clears the custom line height so `getLineHeight()` uses the loaded font's default, or returns 0 when no font is loaded.
+- This spacing separates baselines in horizontal text and columns in vertical text; see `Font::setLineHeight`.
+'''
+details.ja = '''
+- 行の高さの指定を解除し、`getLineHeight()` が読み込み済みフォントの既定値を使うようにします。未読み込みの場合は 0 を返します。
+- この間隔は横書きではベースライン間、縦書きでは列間に使います。`Font::setLineHeight` を参照してください。
+'''
+details.ko = '''
+- 사용자 지정 줄 높이를 해제하여 `getLineHeight()`가 로드된 폰트의 기본값을 사용하도록 합니다. 로드되지 않았으면 0을 반환합니다.
+- 이 간격은 가로쓰기에서는 베이스라인 사이에, 세로쓰기에서는 열 사이에 사용합니다. `Font::setLineHeight`를 참조하세요.
+'''
 
 ["Font::setAlign"]
 keywords = ["anchor", "justify", "text"]
-description.en = "Set horizontal (and optional vertical) text alignment"
-description.ja = "テキストの水平（および任意で垂直）揃えを設定"
-description.ko = "텍스트의 수평(및 선택적 수직) 정렬을 설정"
+description.en = "Stores horizontal and optional vertical alignment settings."
+description.ja = "水平方向と任意の垂直方向の揃え設定を保存する。"
+description.ko = "수평 및 선택적인 수직 정렬 설정을 저장한다."
+details.en = '''
+- `setAlign(h, v)` stores both `Direction` values; `setAlign(h)` changes only the horizontal value. The stored defaults are `Direction::Left` and `Direction::Top`.
+- `getAlignH()` and `getAlignV()` return these values, but the default `drawString()`, `forEachGlyph()`, and `getStringPath()` overloads use global `setTextAlign()` settings. Pass explicit alignment arguments to those functions to choose alignment per call.
+'''
+details.ja = '''
+- `setAlign(h, v)` は両方の `Direction` 値を保存し、`setAlign(h)` は水平の値だけを変更します。保存される値の既定値は `Direction::Left` と `Direction::Top` です。
+- `getAlignH()` と `getAlignV()` はこれらの値を返しますが、`drawString()`、`forEachGlyph()`、`getStringPath()` の既定のオーバーロードは、グローバルな `setTextAlign()` の設定を使います。呼び出しごとに揃えを選ぶには、これらの関数に揃えの引数を明示してください。
+'''
+details.ko = '''
+- `setAlign(h, v)`는 두 `Direction` 값을 저장하고, `setAlign(h)`는 수평 값만 변경합니다. 저장된 값의 기본값은 `Direction::Left`와 `Direction::Top`입니다.
+- `getAlignH()`와 `getAlignV()`는 이 값을 반환하지만, `drawString()`, `forEachGlyph()`, `getStringPath()`의 기본 오버로드는 전역 `setTextAlign()` 설정을 사용합니다. 호출마다 정렬을 선택하려면 해당 함수에 정렬 인수를 명시하세요.
+'''
 
 ["Font::setHangingPunctuation"]
 keywords = ["kinsoku", "cjk"]
-description.en = "Let prohibited line-start CJK punctuation hang past the line edge instead of wrapping (default off)"
-description.ja = "行頭禁則の CJK 約物を折り返さず行末からはみ出させる（既定オフ）"
-description.ko = "줄 시작 금지 CJK 구두점을 줄 바꿈하지 않고 줄 끝 밖으로 내보냄 (기본 꺼짐)"
+description.en = "Controls whether prohibited line-start characters hang beyond the wrapping boundary."
+description.ja = "行頭禁則文字を折り返し境界の外へぶら下げるかを設定する。"
+description.ko = "줄 시작 금지 문자를 줄 바꿈 경계 밖으로 내보낼지 설정한다."
+details.en = '''
+- When enabled, an overflowing character prohibited at line start, together with consecutive prohibited characters, stays at the end of the current horizontal line or vertical column. The default is `false`.
+- Requires active wrapping and a kinsoku level other than `KinsokuLevel::Off`; the selected table determines which characters can hang. See `Font::setMaxLineLength` and `Font::setKinsoku`.
+'''
+details.ja = '''
+- 有効にすると、境界を超えた行頭禁則文字と、それに続く行頭禁則文字を、現在の横書きの行末または縦書きの列末に残します。既定値は `false` です。
+- 折り返しが有効で、禁則レベルが `KinsokuLevel::Off` 以外の場合に働きます。選択したテーブルによって、ぶら下げる文字が決まります。`Font::setMaxLineLength` と `Font::setKinsoku` を参照してください。
+'''
+details.ko = '''
+- 활성화하면 경계를 넘은 줄 시작 금지 문자와 그 뒤에 연속되는 금지 문자를 현재 가로 줄이나 세로 열의 끝에 유지합니다. 기본값은 `false`입니다.
+- 줄 바꿈이 활성화되어 있고 금칙 수준이 `KinsokuLevel::Off`가 아닐 때 작동합니다. 선택한 테이블이 내보낼 문자를 결정합니다. `Font::setMaxLineLength`와 `Font::setKinsoku`를 참조하세요.
+'''
 
 ["Font::setKinsoku"]
 keywords = ["wrap", "cjk", "punctuation"]
-description.en = "Choose which CJK kinsoku (line-break prohibition) table to apply during wrap"
-description.ja = "折り返し時に適用する CJK 禁則テーブルを選択"
-description.ko = "줄 바꿈 시 적용할 CJK 금칙 테이블을 선택"
+description.en = "Selects the CJK line-breaking prohibition table."
+description.ja = "CJK の改行禁則テーブルを選択する。"
+description.ko = "CJK 줄 바꿈 금칙 테이블을 선택한다."
+details.en = '''
+- `KinsokuLevel::Off` is the default and disables the prohibition tables. `PunctuationOnly` prohibits selected commas, periods, colons, semicolons, question marks, exclamation marks, and ellipses at line start, including their supported CJK and fullwidth forms.
+- `Standard` additionally prohibits closing brackets, small kana, sound marks, and iteration marks at line start, and opening brackets at line end. The selected table also controls hanging punctuation.
+- Applies to automatic wrapping in both writing modes; see `Font::setMaxLineLength`. If no permitted break is available, wrapping can still force a break at a prohibited boundary.
+'''
+details.ja = '''
+- 既定値の `KinsokuLevel::Off` は禁則テーブルを無効にします。`PunctuationOnly` は、対応する CJK・全角の文字を含む、コンマ、ピリオド、コロン、セミコロン、疑問符、感嘆符、リーダーの一部を行頭禁則にします。
+- `Standard` はさらに、閉じ括弧、小書き仮名、長音符、繰り返し記号を行頭禁則にし、開き括弧を行末禁則にします。選択したテーブルは、ぶら下げる文字の判定にも使います。
+- 両方の書字方向の自動折り返しに適用します。`Font::setMaxLineLength` を参照してください。改行可能な位置がない場合は、禁則に当たる位置でも強制的に改行することがあります。
+'''
+details.ko = '''
+- 기본값인 `KinsokuLevel::Off`는 금칙 테이블을 비활성화합니다. `PunctuationOnly`는 지원되는 CJK 및 전각 형태를 포함하여 일부 쉼표, 마침표, 콜론, 세미콜론, 물음표, 느낌표, 줄임표를 줄 시작 금지 문자로 지정합니다.
+- `Standard`는 닫는 괄호, 작은 가나, 장음 부호, 반복 부호도 줄 시작에서 금지하고, 여는 괄호는 줄 끝에서 금지합니다. 선택한 테이블은 경계 밖으로 내보낼 문자를 판단할 때도 사용합니다.
+- 두 쓰기 방향의 자동 줄 바꿈에 적용합니다. `Font::setMaxLineLength`를 참조하세요. 허용된 줄 바꿈 위치가 없으면 금지된 경계에서도 강제로 줄을 바꿀 수 있습니다.
+'''
 
 ["Font::setLatinHyphenation"]
 keywords = ["wrap", "break"]
-description.en = "When wrapping a Latin run with no break point, insert '-' before the forced break (default off)"
-description.ja = "改行位置のない Latin 連続を折り返す際、強制改行前に '-' を挿入（既定オフ）"
-description.ko = "줄 바꿈 지점이 없는 라틴 연속을 줄 바꿈할 때 강제 줄 바꿈 앞에 '-' 삽입 (기본 꺼짐)"
+description.en = "Controls hyphen insertion at forced horizontal line breaks."
+description.ja = "横書きの強制改行時にハイフンを挿入するかを設定する。"
+description.ko = "가로쓰기의 강제 줄 바꿈에 하이픈을 삽입할지 설정한다."
+details.en = '''
+- When enabled, horizontal wrapping appends `-` before a forced break when no earlier break opportunity is available. The default is `false`; vertical wrapping does not use this setting.
+- This check is not limited to Latin characters, and the inserted hyphen's width is not reserved within the maximum line length.
+- Wrapping requirements are described in `Font::setMaxLineLength`.
+'''
+details.ja = '''
+- 有効にすると、横書きの折り返しで、それより前に改行可能な位置がない場合の強制改行直前に `-` を追加します。既定値は `false` です。縦書きの折り返しでは使いません。
+- この判定は Latin 文字に限定されず、挿入するハイフンの幅も最大行長の中に確保しません。
+- 折り返しの条件は `Font::setMaxLineLength` を参照してください。
+'''
+details.ko = '''
+- 활성화하면 가로쓰기 줄 바꿈에서 앞선 줄 바꿈 가능 위치가 없을 때 강제 줄 바꿈 직전에 `-`를 추가합니다. 기본값은 `false`이며, 세로쓰기 줄 바꿈에는 사용하지 않습니다.
+- 이 판단은 라틴 문자로 제한되지 않으며, 삽입하는 하이픈의 너비를 최대 줄 길이 안에 미리 확보하지 않습니다.
+- 줄 바꿈 조건은 `Font::setMaxLineLength`를 참조하세요.
+'''
 
 ["Font::setLineHeight"]
 keywords = ["line height", "leading", "spacing", "newline"]
-description.en = "Set line height in pixels (0 = use font default)"
-description.ja = "行の高さをピクセルで設定（0 = フォント既定値を使用）"
-description.ko = "줄 높이를 픽셀로 설정 (0 = 폰트 기본값 사용)"
+description.en = "Sets the spacing between text lines or columns."
+description.ja = "テキストの行または列の間隔を設定する。"
+description.ko = "텍스트 줄 또는 열 사이의 간격을 설정한다."
+details.en = '''
+- A positive `pixels` value specifies spacing in logical pixels: baseline spacing in horizontal writing and column spacing in vertical writing. Vertical character cells still use the font size.
+- A value of 0 or less selects the font's default line height, as does `resetLineHeight()`.
+- The value is stored directly and persists across font loads; `getLineHeight()` returns the effective spacing.
+'''
+details.ja = '''
+- 正の `pixels` は、横書きではベースライン間、縦書きでは列間の間隔を論理ピクセル単位で指定します。縦書きの文字セルには引き続きフォントサイズを使います。
+- 0 以下を指定すると、`resetLineHeight()` と同様にフォントの既定の行の高さを使います。
+- 指定値はそのまま保存され、フォントを読み直しても保持されます。`getLineHeight()` は実際に使う間隔を返します。
+'''
+details.ko = '''
+- 양수인 `pixels`는 가로쓰기에서는 베이스라인 사이, 세로쓰기에서는 열 사이의 간격을 논리 픽셀 단위로 지정합니다. 세로쓰기의 문자 셀에는 계속 폰트 크기를 사용합니다.
+- 0 이하를 지정하면 `resetLineHeight()`와 마찬가지로 폰트의 기본 줄 높이를 사용합니다.
+- 지정한 값은 그대로 저장되며 폰트를 다시 로드해도 유지됩니다. `getLineHeight()`는 실제로 사용하는 간격을 반환합니다.
+'''
 
 ["Font::setLineHeightEm"]
 keywords = ["line height", "leading", "multiplier"]
-description.en = "Set line height as a multiple of the font default (1.0 = default, 1.5 = 1.5x)"
-description.ja = "行の高さをフォント既定値の倍率で設定（1.0 = 既定、1.5 = 1.5倍）"
-description.ko = "줄 높이를 폰트 기본값의 배수로 설정 (1.0 = 기본, 1.5 = 1.5배)"
+description.en = "Sets line spacing as a multiple of the font's default line height."
+description.ja = "フォントの既定の行の高さに対する倍率で行間隔を設定する。"
+description.ko = "폰트 기본 줄 높이의 배수로 줄 간격을 설정한다."
+details.en = '''
+- Stores `getDefaultLineHeight() * multiplier` as a fixed logical-pixel value: `1.0f` uses the current default and `1.5f` uses 1.5 times that height. This is a multiple of default line height, not font size.
+- The multiplier is not retained or reapplied after loading another font. Calling before a font is loaded stores 0; a nonpositive result uses the default.
+- Horizontal and vertical spacing behavior is described in `Font::setLineHeight`.
+'''
+details.ja = '''
+- `getDefaultLineHeight() * multiplier` を固定の論理ピクセル値として保存します。`1.0f` は現在の既定値、`1.5f` はその 1.5 倍です。フォントサイズではなく、既定の行の高さに対する倍率です。
+- 倍率自体は保持せず、別のフォントを読み込んでも再計算しません。フォントの読み込み前に呼ぶと 0 を保存します。計算結果が 0 以下の場合は既定値を使います。
+- 横書きと縦書きでの間隔の扱いは `Font::setLineHeight` を参照してください。
+'''
+details.ko = '''
+- `getDefaultLineHeight() * multiplier`를 고정된 논리 픽셀 값으로 저장합니다. `1.0f`는 현재 기본값, `1.5f`는 그 높이의 1.5배입니다. 폰트 크기가 아니라 기본 줄 높이에 대한 배수입니다.
+- 배수 자체는 보관하지 않으며 다른 폰트를 로드해도 다시 계산하지 않습니다. 폰트를 로드하기 전에 호출하면 0을 저장합니다. 계산 결과가 0 이하이면 기본값을 사용합니다.
+- 가로쓰기와 세로쓰기의 간격 동작은 `Font::setLineHeight`를 참조하세요.
+'''
 
 ["Font::setMaxLineLength"]
 keywords = ["wrap", "line length", "width", "column"]
-description.en = "Set the wrap length (horizontal: line width; vertical: column height)"
-description.ja = "折り返し長を設定（横書き: 行幅、縦書き: 列高）"
-description.ko = "줄 바꿈 길이를 설정 (가로: 줄 너비, 세로: 열 높이)"
+description.en = "Sets the length used for automatic text wrapping."
+description.ja = "テキストの自動折り返しに使う長さを設定する。"
+description.ko = "텍스트 자동 줄 바꿈에 사용할 길이를 설정한다."
+details.en = '''
+- `length` is in logical pixels: line width for horizontal writing and column height for vertical writing. The default is 0.
+- Wrapping requires `enableWrap(true)`, a positive length, and a loaded font. Drawing, glyph iteration, string paths, and text measurements use the resulting inserted newlines; explicit newlines remain effective.
+- This is a wrapping threshold rather than a clipping boundary. A single oversized character or indivisible vertical Latin or digit run can exceed it, as can hanging punctuation and inserted hyphens.
+'''
+details.ja = '''
+- `length` は論理ピクセル単位で、横書きでは行幅、縦書きでは列の高さです。既定値は 0 です。
+- 折り返しには `enableWrap(true)`、正の長さ、読み込み済みのフォントが必要です。描画、グリフの列挙、文字列のパス、テキストの寸法計算は、挿入した改行を使います。明示した改行も有効です。
+- この値は折り返しの目安で、クリッピング境界ではありません。単独で長さを超える文字や、分割しない縦書きの Latin・数字の連続は、指定値を超えることがあります。ぶら下げ文字や挿入したハイフンも同様です。
+'''
+details.ko = '''
+- `length`는 논리 픽셀 단위이며, 가로쓰기에서는 줄 너비, 세로쓰기에서는 열 높이입니다. 기본값은 0입니다.
+- 줄 바꿈에는 `enableWrap(true)`, 양수인 길이, 로드된 폰트가 필요합니다. 그리기, 글리프 순회, 문자열 경로, 텍스트 치수 측정은 삽입된 줄 바꿈을 사용합니다. 명시적인 줄 바꿈도 유효합니다.
+- 이 값은 줄 바꿈 기준이며 클리핑 경계가 아닙니다. 단독으로 길이를 초과하는 문자나 분할하지 않는 세로쓰기의 라틴 문자 및 숫자 묶음은 지정값을 넘을 수 있습니다. 경계 밖으로 내보낸 문자와 삽입된 하이픈도 넘을 수 있습니다.
+'''
 
 ["Font::setTcyDigits"]
-description.en = "Tate-chu-yoko config for ASCII digit runs in vertical text. Runs with <= maxDigits use inMode (typically Combine — squeezed into one cell); longer runs fall back to overflowMode (typically Rotate)."
-description.ja = "縦書きで連続する ASCII 数字の縦中横設定。maxDigits 桁以内なら inMode (通常 Combine = 1セルに圧縮)、超えたら overflowMode (通常 Rotate)"
-description.ko = "세로쓰기에서 연속된 ASCII 숫자의 다테추요코 설정"
+description.en = "Configures how ASCII digit runs are placed in vertical text."
+description.ja = "縦書きでの連続する ASCII 数字の配置方法を設定する。"
+description.ko = "세로쓰기에서 연속된 ASCII 숫자의 배치 방식을 설정한다."
+details.en = '''
+- `setTcyDigits(maxDigits, inMode, overflowMode)` applies `inMode` to runs of at most `maxDigits` ASCII digits (`0`–`9`) and `overflowMode` to longer runs. With `maxDigits <= 0`, every run uses `overflowMode`.
+- `TcyMode::Rotate` rotates the entire run clockwise by `TAU / 4`; `Upright` gives each digit its own upright cell; `Combine` centers the run in one font-size cell and compresses it horizontally only if needed.
+- The defaults are 0, `TcyMode::Combine`, and `TcyMode::Rotate`. This setting affects vertical placement and wrapping, but has no effect in horizontal writing.
+'''
+details.ja = '''
+- `setTcyDigits(maxDigits, inMode, overflowMode)` は、`maxDigits` 桁以内の連続する ASCII 数字（`0`～`9`）に `inMode`、それより長い連続に `overflowMode` を適用します。`maxDigits <= 0` では、すべての連続に `overflowMode` を使います。
+- `TcyMode::Rotate` は連続全体を時計回りに `TAU / 4` 回転し、`Upright` は各数字を個別のセルに正立で配置します。`Combine` は連続全体をフォントサイズの 1 セルに中央揃えし、必要な場合だけ水平方向に圧縮します。
+- 既定値は順に 0、`TcyMode::Combine`、`TcyMode::Rotate` です。縦書きの配置と折り返しに適用し、横書きには影響しません。
+'''
+details.ko = '''
+- `setTcyDigits(maxDigits, inMode, overflowMode)`는 `maxDigits`자리 이하의 연속된 ASCII 숫자(`0`–`9`)에 `inMode`를, 더 긴 묶음에 `overflowMode`를 적용합니다. `maxDigits <= 0`이면 모든 묶음에 `overflowMode`를 사용합니다.
+- `TcyMode::Rotate`는 묶음 전체를 시계 방향으로 `TAU / 4` 회전하고, `Upright`는 각 숫자를 개별 셀에 똑바로 배치합니다. `Combine`은 묶음을 폰트 크기의 한 셀에 가운데 정렬하고 필요할 때만 가로로 압축합니다.
+- 기본값은 순서대로 0, `TcyMode::Combine`, `TcyMode::Rotate`입니다. 세로쓰기 배치와 줄 바꿈에 적용하며 가로쓰기에는 영향을 주지 않습니다.
+'''
 
 ["Font::setTcyLatin"]
-description.en = "Tate-chu-yoko mode for Latin letter runs in vertical text. Default is Rotate (whole run rotated 90 CW)."
-description.ja = "縦書きで連続する Latin 文字の表示方式。デフォルトは Rotate (連続を 90度 CW 回転)"
-description.ko = "세로쓰기에서 연속된 라틴 문자의 표시 방식"
+description.en = "Sets how ASCII letter runs are placed in vertical text."
+description.ja = "縦書きでの連続する ASCII 英字の配置方法を設定する。"
+description.ko = "세로쓰기에서 연속된 ASCII 영문자의 배치 방식을 설정한다."
+details.en = '''
+- Applies one `TcyMode` to consecutive ASCII letters (`A`–`Z`, `a`–`z`); the default is `TcyMode::Rotate`, which rotates the whole run clockwise by `TAU / 4`.
+- `Upright` and `Combine` use the same cell and compression rules described in `Font::setTcyDigits`. This affects vertical placement and wrapping, but has no effect in horizontal writing.
+'''
+details.ja = '''
+- 連続する ASCII 英字（`A`～`Z`、`a`～`z`）に 1 つの `TcyMode` を適用します。既定値の `TcyMode::Rotate` は連続全体を時計回りに `TAU / 4` 回転します。
+- `Upright` と `Combine` のセルと圧縮の扱いは `Font::setTcyDigits` と同じです。縦書きの配置と折り返しに適用し、横書きには影響しません。
+'''
+details.ko = '''
+- 연속된 ASCII 영문자(`A`–`Z`, `a`–`z`)에 하나의 `TcyMode`를 적용합니다. 기본값인 `TcyMode::Rotate`는 묶음 전체를 시계 방향으로 `TAU / 4` 회전합니다.
+- `Upright`와 `Combine`의 셀 및 압축 규칙은 `Font::setTcyDigits`와 같습니다. 세로쓰기 배치와 줄 바꿈에 적용하며 가로쓰기에는 영향을 주지 않습니다.
+'''
 
 ["Font::setWritingMode"]
-description.en = "Switch between horizontal and vertical (tategaki) writing. Default is Horizontal (existing behavior unchanged)."
-description.ja = "横書き / 縦書きを切り替え。デフォルトは Horizontal (既存挙動と同じ)"
-description.ko = "가로쓰기 / 세로쓰기 전환. 기본값은 Horizontal"
+description.en = "Selects horizontal or vertical text layout."
+description.ja = "テキストの横書きまたは縦書きを選択する。"
+description.ko = "텍스트의 가로쓰기 또는 세로쓰기를 선택한다."
+details.en = '''
+- The default `WritingMode::Horizontal` places text left to right. `WritingMode::VerticalRL` places characters top to bottom and columns right to left; newlines start a new column.
+- Applies to `drawString()`, `forEachGlyph()`, `getStringPath()`, and wrapping. Vertical layout uses supported Unicode vertical-form glyphs when available, with rotation or positional fallbacks.
+- This does not switch `getWidth()` and `getHeight()` to vertical block measurements; they retain horizontal advance and line-count calculations after wrapping.
+'''
+details.ja = '''
+- 既定値の `WritingMode::Horizontal` は左から右へ配置します。`WritingMode::VerticalRL` は文字を上から下へ、列を右から左へ配置し、改行で次の列を始めます。
+- `drawString()`、`forEachGlyph()`、`getStringPath()`、折り返しに適用します。縦書きでは、対応する Unicode の縦書き字形があれば使い、なければ回転や位置調整で補います。
+- `getWidth()` と `getHeight()` は縦書きのブロック寸法の計算には切り替わりません。折り返し後のテキストについて、横方向の送り幅と行数による計算を続けます。
+'''
+details.ko = '''
+- 기본값인 `WritingMode::Horizontal`은 왼쪽에서 오른쪽으로 배치합니다. `WritingMode::VerticalRL`은 문자를 위에서 아래로, 열을 오른쪽에서 왼쪽으로 배치하며 줄 바꿈으로 새 열을 시작합니다.
+- `drawString()`, `forEachGlyph()`, `getStringPath()`, 줄 바꿈에 적용합니다. 세로쓰기에서는 지원되는 Unicode 세로쓰기 글리프가 있으면 사용하고, 없으면 회전이나 위치 조정으로 대체합니다.
+- `getWidth()`와 `getHeight()`를 세로쓰기 블록 치수 계산으로 전환하지는 않습니다. 줄 바꿈 후 텍스트에 대해 가로 전진 폭과 줄 수를 이용한 계산을 계속합니다.
+'''
 
 ["Font::stringWidth"]
 keywords = ["measure", "text", "metrics"]
-description.en = "Pixel width of the text (alias of getWidth)"
-description.ja = "テキストのピクセル幅（getWidth のエイリアス）"
-description.ko = "텍스트의 픽셀 너비 (getWidth의 별칭)"
+description.en = "Returns the text width through the getWidth compatibility alias."
+description.ja = "互換用の getWidth の別名としてテキストの幅を返す。"
+description.ko = "getWidth의 호환용 별칭으로 텍스트 너비를 반환한다."
+details.en = '''
+- Calls `getWidth(text)` and returns the greatest line advance in logical pixels after automatic wrapping, or 0 if no font is loaded. Tabs count as four space advances.
+- This measures horizontal advances even in vertical writing; see `Font::getWidth` for the measurement contract.
+'''
+details.ja = '''
+- `getWidth(text)` を呼び、自動折り返し後の各行の送り幅の最大値を論理ピクセル単位で返します。フォントが未読み込みの場合は 0 です。タブはスペース 4 個分の送り幅として扱います。
+- 縦書きでも横方向の送り幅を測ります。寸法計算の扱いは `Font::getWidth` を参照してください。
+'''
+details.ko = '''
+- `getWidth(text)`를 호출하여 자동 줄 바꿈 후 각 줄의 전진 폭 중 최댓값을 논리 픽셀 단위로 반환합니다. 폰트가 로드되지 않았으면 0입니다. 탭은 공백 네 개의 전진 폭으로 계산합니다.
+- 세로쓰기에서도 가로 전진 폭을 측정합니다. 치수 계산 규칙은 `Font::getWidth`를 참조하세요.
+'''
 
 ["FpsSettings"]
 keywords = ["framerate", "vsync", "timing", "refresh"]
@@ -21365,45 +22034,126 @@ void tcApp::setup() {
 
 ["Font::PlacedGlyph"]
 keywords = ["layout", "font", "position", "character", "typeset"]
-description.en = "One laid-out glyph emitted by Font::forEachGlyph (nested as Font::PlacedGlyph). Carries the final codepoint and pen position so visitors can render quads, build vector paths, or hit-test independently of the layout pass"
-description.ja = "Font::forEachGlyph が出力するレイアウト済みグリフ 1 個（Font::PlacedGlyph としてネスト）。最終的な codepoint とペン位置を持ち、ビジターがレイアウトパスとは独立に quad 描画・ベクターパス生成・ヒットテストを行える"
-description.ko = "Font::forEachGlyph가 출력하는 배치 완료된 글리프 하나(Font::PlacedGlyph로 중첩). 최종 codepoint와 펜 위치를 담아, 비지터가 레이아웃 패스와 독립적으로 quad 렌더링, 벡터 경로 생성, 히트 테스트를 수행 가능"
+description.en = "Describes one glyph positioned by Font's text layout."
+description.ja = "Font のテキストレイアウトで配置した 1 個のグリフを表す。"
+description.ko = "Font의 텍스트 레이아웃으로 배치한 글리프 하나를 나타낸다."
+details.en = '''
+- `Font::forEachGlyph()` passes a `const Font::PlacedGlyph&` to the visitor for each placed glyph, allowing custom quad rendering, vector paths, or hit testing with the same layout.
+- `codepoint` is the final character after any vertical-form substitution. `drawX` and `baselineY` locate the pen before glyph offsets; `scaleX` scales local horizontal offsets and widths, then `rotationCw` rotates the result around `pivotX` and `pivotY`.
+- Positions and pivots use logical pixels in the layout's coordinate space, with positive Y downward; rotations use radians. Horizontal layout emits rotation 0 and scale 1; vertical layout may rotate by `TAU / 4` or compress combined runs.
+- The callback reference is temporary; copy the value to retain it. It contains placement data only and does not own a glyph, font, or atlas.
+'''
+details.ja = '''
+- `Font::forEachGlyph()` は、配置したグリフごとに `const Font::PlacedGlyph&` をビジターへ渡します。同じレイアウトを使って、独自のクワッド描画、ベクターパス生成、ヒットテストを行えます。
+- `codepoint` は縦書き字形への置換後の文字です。`drawX` と `baselineY` はグリフのオフセットを加える前のペン位置です。`scaleX` で局所的な横方向のオフセットと幅を拡縮してから、`rotationCw` で `pivotX`、`pivotY` の周りに回転します。
+- 位置と回転中心は、下方向を Y の正とするレイアウト座標系の論理ピクセルです。回転はラジアン単位です。横書きでは回転 0、スケール 1 となり、縦書きでは `TAU / 4` の回転や縦中横の圧縮が加わる場合があります。
+- コールバックの参照は一時的なものなので、保持する場合は値をコピーしてください。配置データだけを持ち、グリフ、フォント、アトラスは所有しません。
+'''
+details.ko = '''
+- `Font::forEachGlyph()`는 배치한 글리프마다 비지터에 `const Font::PlacedGlyph&`를 전달합니다. 같은 레이아웃으로 사용자 지정 쿼드 렌더링, 벡터 경로 생성, 히트 테스트를 수행할 수 있습니다.
+- `codepoint`는 세로쓰기 글리프 치환 후의 문자입니다. `drawX`와 `baselineY`는 글리프 오프셋을 더하기 전의 펜 위치입니다. `scaleX`로 로컬 가로 오프셋과 너비를 조정한 다음 `rotationCw`로 `pivotX`, `pivotY` 주위를 회전합니다.
+- 위치와 회전 중심은 아래쪽이 Y의 양수인 레이아웃 좌표계의 논리 픽셀 단위입니다. 회전은 라디안 단위입니다. 가로쓰기는 회전 0과 배율 1을 출력하며, 세로쓰기는 `TAU / 4` 회전이나 가로로 모아 쓰는 묶음의 압축을 적용할 수 있습니다.
+- 콜백의 참조는 일시적이므로 보관하려면 값을 복사하세요. 배치 데이터만 포함하며 글리프, 폰트, 아틀라스를 소유하지 않습니다.
+'''
 related = ["Font", "Font::getStringPath"]
 
 ["Font::PlacedGlyph::baselineY"]
-description.en = "Baseline Y position; the glyph's own yoffset is added on top"
-description.ja = "ベースラインの Y 位置。グリフ自身の yoffset がさらに加算される"
-description.ko = "베이스라인의 Y 위치. 글리프 자체의 yoffset이 추가로 더해짐"
+description.en = "Stores the glyph's baseline Y position."
+description.ja = "グリフのベースラインの Y 位置を保持する。"
+description.ko = "글리프 베이스라인의 Y 위치를 저장한다."
+details.en = '''
+- Glyph rendering adds the glyph's own Y offset to this position before rotation. Coordinate units and transformation order are described in `Font::PlacedGlyph`.
+'''
+details.ja = '''
+- グリフの描画では、回転する前にこの位置へグリフ自身の Y オフセットを加えます。座標の単位と変換順序は `Font::PlacedGlyph` を参照してください。
+'''
+details.ko = '''
+- 글리프를 그릴 때 회전 전에 이 위치에 글리프 자체의 Y 오프셋을 더합니다. 좌표 단위와 변환 순서는 `Font::PlacedGlyph`를 참조하세요.
+'''
 
 ["Font::PlacedGlyph::codepoint"]
-description.en = "Final codepoint after vertical-form mapping"
-description.ja = "縦書きフォームマッピング後の最終 codepoint"
-description.ko = "세로쓰기 폼 매핑 후의 최종 codepoint"
+description.en = "Stores the final Unicode codepoint selected for the glyph."
+description.ja = "グリフに選択した最終的な Unicode コードポイントを保持する。"
+description.ko = "글리프에 선택된 최종 Unicode 코드 포인트를 저장한다."
+details.en = '''
+- Vertical layout substitutes a mapped vertical-form codepoint when the font supports it; otherwise this remains the original codepoint. See `Font::PlacedGlyph` for the shared layout contract.
+'''
+details.ja = '''
+- 縦書きでは、対応する縦書き字形がフォントにあれば、そのコードポイントに置き換えます。それ以外は元のコードポイントです。共通のレイアウトの扱いは `Font::PlacedGlyph` を参照してください。
+'''
+details.ko = '''
+- 세로쓰기에서는 대응하는 세로쓰기 글리프를 폰트가 지원하면 해당 코드 포인트로 치환하고, 그렇지 않으면 원래 코드 포인트를 유지합니다. 공통 레이아웃 규칙은 `Font::PlacedGlyph`를 참조하세요.
+'''
 
 ["Font::PlacedGlyph::drawX"]
-description.en = "Pen X position; the glyph's own xoffset is added on top"
-description.ja = "ペンの X 位置。グリフ自身の xoffset がさらに加算される"
-description.ko = "펜의 X 위치. 글리프 자체의 xoffset이 추가로 더해짐"
+description.en = "Stores the glyph's pen X position."
+description.ja = "グリフのペンの X 位置を保持する。"
+description.ko = "글리프 펜의 X 위치를 저장한다."
+details.en = '''
+- Glyph rendering adds the glyph's own X offset multiplied by `scaleX` to this position before rotation. Coordinate units and transformation order are described in `Font::PlacedGlyph`.
+'''
+details.ja = '''
+- グリフの描画では、回転する前にこの位置へグリフ自身の X オフセットに `scaleX` を掛けた値を加えます。座標の単位と変換順序は `Font::PlacedGlyph` を参照してください。
+'''
+details.ko = '''
+- 글리프를 그릴 때 회전 전에 이 위치에 글리프 자체의 X 오프셋과 `scaleX`를 곱한 값을 더합니다. 좌표 단위와 변환 순서는 `Font::PlacedGlyph`를 참조하세요.
+'''
 
 ["Font::PlacedGlyph::pivotX"]
-description.en = "Rotation center X (used only when rotationCw is non-zero)"
-description.ja = "回転中心 X（rotationCw が 0 でない場合のみ使用）"
-description.ko = "회전 중심 X(rotationCw가 0이 아닐 때만 사용)"
+description.en = "Stores the X coordinate of the glyph's rotation center."
+description.ja = "グリフの回転中心の X 座標を保持する。"
+description.ko = "글리프 회전 중심의 X 좌표를 저장한다."
+details.en = '''
+- Used with `pivotY` only when `rotationCw` is nonzero. Coordinate units and transformation order are described in `Font::PlacedGlyph`.
+'''
+details.ja = '''
+- `rotationCw` が 0 以外の場合だけ、`pivotY` と組み合わせて使います。座標の単位と変換順序は `Font::PlacedGlyph` を参照してください。
+'''
+details.ko = '''
+- `rotationCw`가 0이 아닐 때만 `pivotY`와 함께 사용합니다. 좌표 단위와 변환 순서는 `Font::PlacedGlyph`를 참조하세요.
+'''
 
 ["Font::PlacedGlyph::pivotY"]
-description.en = "Rotation center Y (used only when rotationCw is non-zero)"
-description.ja = "回転中心 Y（rotationCw が 0 でない場合のみ使用）"
-description.ko = "회전 중심 Y(rotationCw가 0이 아닐 때만 사용)"
+description.en = "Stores the Y coordinate of the glyph's rotation center."
+description.ja = "グリフの回転中心の Y 座標を保持する。"
+description.ko = "글리프 회전 중심의 Y 좌표를 저장한다."
+details.en = '''
+- Used with `pivotX` only when `rotationCw` is nonzero. Coordinate units and transformation order are described in `Font::PlacedGlyph`.
+'''
+details.ja = '''
+- `rotationCw` が 0 以外の場合だけ、`pivotX` と組み合わせて使います。座標の単位と変換順序は `Font::PlacedGlyph` を参照してください。
+'''
+details.ko = '''
+- `rotationCw`가 0이 아닐 때만 `pivotX`와 함께 사용합니다. 좌표 단위와 변환 순서는 `Font::PlacedGlyph`를 참조하세요.
+'''
 
 ["Font::PlacedGlyph::rotationCw"]
-description.en = "Clockwise rotation in radians: 0 (upright) or TAU/4 (90 degrees, vertical text)"
-description.ja = "時計回りの回転（ラジアン）: 0（正立）または TAU/4（90 度、縦書き）"
-description.ko = "시계 방향 회전(라디안): 0(정립) 또는 TAU/4(90도, 세로쓰기)"
+description.en = "Stores the glyph's clockwise rotation angle."
+description.ja = "グリフの時計回りの回転角を保持する。"
+description.ko = "글리프의 시계 방향 회전각을 저장한다."
+details.en = '''
+- Font layout emits 0 for upright glyphs or `TAU / 4` radians for glyphs rotated clockwise in vertical text. The rotation center and transformation order are described in `Font::PlacedGlyph`.
+'''
+details.ja = '''
+- Font のレイアウトは、正立のグリフには 0、縦書きで時計回りに回転するグリフには `TAU / 4` ラジアンを設定します。回転中心と変換順序は `Font::PlacedGlyph` を参照してください。
+'''
+details.ko = '''
+- Font 레이아웃은 똑바른 글리프에는 0을, 세로쓰기에서 시계 방향으로 회전하는 글리프에는 `TAU / 4` 라디안을 설정합니다. 회전 중심과 변환 순서는 `Font::PlacedGlyph`를 참조하세요.
+'''
 
 ["Font::PlacedGlyph::scaleX"]
-description.en = "Horizontal scale (1.0 normally, less than 1 for TCY combine)"
-description.ja = "水平スケール（通常 1.0、TCY 合成では 1 未満）"
-description.ko = "수평 스케일(보통 1.0, TCY 합성 시 1 미만)"
+description.en = "Stores the glyph's horizontal scale factor."
+description.ja = "グリフの水平方向の拡縮率を保持する。"
+description.ko = "글리프의 가로 배율을 저장한다."
+details.en = '''
+- Normally 1; `TcyMode::Combine` reduces it below 1 only when a run is wider than one font-size cell. It scales horizontal glyph offsets and widths without scaling height; see `Font::PlacedGlyph` for transformation order.
+'''
+details.ja = '''
+- 通常は 1 です。`TcyMode::Combine` では、連続する文字の幅がフォントサイズの 1 セルを超える場合だけ 1 未満にします。高さを変えずに横方向のグリフのオフセットと幅を拡縮します。変換順序は `Font::PlacedGlyph` を参照してください。
+'''
+details.ko = '''
+- 보통 1입니다. `TcyMode::Combine`은 문자 묶음의 너비가 폰트 크기의 한 셀보다 넓을 때만 1 미만으로 줄입니다. 높이는 바꾸지 않고 가로 글리프 오프셋과 너비를 조정합니다. 변환 순서는 `Font::PlacedGlyph`를 참조하세요.
+'''
 
 ["Platform"]
 keywords = ["os", "operating system", "target", "compile time", "device check"]
@@ -43773,12 +44523,34 @@ void tcApp::setup() {
 ["listSystemFonts"]
 category = "font"
 keywords = ["enumerate", "available", "os fonts", "installed"]
-description.en = "Enumerate names of all fonts known to the OS"
-description.ja = "OS が認識している全フォント名を取得"
-description.ko = "시스템에 설치된 모든 폰트 이름을 나열"
+description.en = "List font family names available to the operating system."
+description.ja = "OS で利用できるフォントファミリー名を列挙する。"
+description.ko = "운영체제에서 사용할 수 있는 폰트 패밀리 이름을 나열한다."
+details.en = '''
+- Returns a sorted `vector<string>` of UTF-8 family names, not a list of every font file or face. Name availability depends on the operating system and installed fonts.
+- Linux includes available localized family names and removes duplicates. Windows selects the English US family name when available, otherwise the first localized name, and removes duplicates.
+- An unavailable backend or failed enumeration can return an empty vector.
+'''
+details.ja = '''
+- UTF-8 のファミリー名をソート済みの `vector<string>` で返します。すべてのフォントファイルや書体の一覧ではありません。利用できる名前は OS とインストール済みフォントに依存します。
+- Linux では利用可能な各言語のファミリー名を含め、重複を除きます。Windows では米国英語のファミリー名があれば使い、なければ最初の言語の名前を使って、重複を除きます。
+- バックエンドを利用できない場合や列挙に失敗した場合は、空のベクタを返すことがあります。
+'''
+details.ko = '''
+- 정렬된 UTF-8 패밀리 이름을 `vector<string>`으로 반환합니다. 모든 폰트 파일이나 개별 서체의 목록은 아닙니다. 사용 가능한 이름은 운영체제와 설치된 폰트에 따라 달라집니다.
+- Linux에서는 사용 가능한 각 언어의 패밀리 이름을 포함하고 중복을 제거합니다. Windows에서는 미국 영어 패밀리 이름이 있으면 사용하고, 없으면 첫 번째 언어의 이름을 사용하며 중복을 제거합니다.
+- 백엔드를 사용할 수 없거나 열거에 실패하면 빈 벡터를 반환할 수 있습니다.
+'''
 related = ["systemFontPath"]
-platform_note.en = "Enumerate installed font names. Stub on Android and Web/WASM (always returns empty vector)."
-platform_note.ja = "インストール済みフォント名を列挙する。Android と Web/WASM ではスタブで常に空ベクタを返す。"
+platform_note.en = '''
+- macOS and iOS use CoreText, Linux uses fontconfig, and Windows uses DirectWrite. Android and Web/WASM always return an empty vector.
+'''
+platform_note.ja = '''
+- macOS と iOS は CoreText、Linux は fontconfig、Windows は DirectWrite を使います。Android と Web/WASM は常に空のベクタを返します。
+'''
+platform_note.ko = '''
+- macOS와 iOS는 CoreText, Linux는 fontconfig, Windows는 DirectWrite를 사용합니다. Android와 Web/WASM은 항상 빈 벡터를 반환합니다.
+'''
 
 ["loadDialog"]
 category = "window_input"
@@ -44185,10 +44957,37 @@ related = ["OnceGate", "OnceGate::isFirstTime"]
 ["logVerbose"]
 category = "utility"
 keywords = ["trace", "debug", "print"]
-description.en = "Stream-based verbose-level log output"
-description.ja = "ストリームベースの verbose レベルログ出力"
-description.ko = "스트림 기반 verbose 레벨 로그 출력"
-related = ["logNotice", "setConsoleLogLevel"]
+description.en = "Creates a stream for verbose-level log messages."
+description.ja = "verbose レベルのログメッセージを書き込むストリームを作る。"
+description.ko = "verbose 레벨 로그 메시지를 작성하는 스트림을 만든다."
+details.en = '''
+- Returns a `LogStream` that accepts values with `<<`; the optional `module` string defaults to empty and, when nonempty, prefixes the message with `[module] `.
+- The message is submitted when the stream is destroyed, normally at the end of the statement; `endl` inserts a newline but does not submit the message early.
+- All output thresholds default to `LogLevel::Notice`, so verbose messages are hidden by default; use `setConsoleLogLevel(LogLevel::Verbose)` to enable them in the console.
+- Message construction still occurs when output thresholds hide the message, and `getLogger().onLog` still receives it.
+- See `Logger` for threading rules, output destinations, and independent output thresholds.
+'''
+details.ja = '''
+- `<<` で値を書き込める `LogStream` を返します。省略可能な `module` 文字列の既定値は空で、空でない場合はメッセージの先頭に `[module] ` を付けます。
+- メッセージはストリームの破棄時に送られ、通常は文の終わりで送られます。`endl` は改行を挿入しますが、その時点ではメッセージを送りません。
+- すべての出力のしきい値は既定で `LogLevel::Notice` のため、verbose メッセージは表示されません。コンソールで表示するには `setConsoleLogLevel(LogLevel::Verbose)` を使用してください。
+- 出力のしきい値によって表示されない場合もメッセージは組み立てられ、`getLogger().onLog` に届きます。
+- スレッドの扱い、出力先、出力ごとの独立したしきい値については `Logger` を参照してください。
+'''
+details.ko = '''
+- `<<`로 값을 작성할 수 있는 `LogStream`을 반환합니다. 선택적 `module` 문자열의 기본값은 빈 문자열이며, 비어 있지 않으면 메시지 앞에 `[module] `을 붙입니다.
+- 메시지는 스트림이 소멸할 때 전달하며, 일반적으로 문장이 끝날 때 전달합니다. `endl`은 줄바꿈을 삽입하지만 그 시점에 메시지를 전달하지는 않습니다.
+- 모든 출력의 임계값은 기본적으로 `LogLevel::Notice`이므로 verbose 메시지는 표시하지 않습니다. 콘솔에 표시하려면 `setConsoleLogLevel(LogLevel::Verbose)`를 사용합니다.
+- 출력 임계값으로 메시지가 표시되지 않아도 메시지를 구성하며, `getLogger().onLog`에도 전달합니다.
+- 스레드 규칙, 출력 대상, 출력별 독립적인 임계값은 `Logger`를 참조합니다.
+'''
+related = ["logNotice", "setConsoleLogLevel", "Logger"]
+snippet = '''
+void tcApp::setup() {
+    setConsoleLogLevel(LogLevel::Verbose);
+    logVerbose("setup") << "Window size: " << getWidth() << " x " << getHeight();
+}
+'''
 
 ["logWarning"]
 category = "utility"
@@ -47893,15 +48692,39 @@ related = ["isStringInString", "splitString"]
 ["systemFontPath"]
 category = "font"
 keywords = ["resolve", "lookup", "find", "os font"]
-description.en = "Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS / iOS use CoreText, Linux fontconfig, Windows DirectWrite."
-description.ja = "システムフォント名（PostScript 名や family 名）をファイルパスに解決。見つからなければ空文字を返す。macOS / iOS は CoreText、Linux は fontconfig、Windows は DirectWrite"
-description.ko = "시스템 폰트 이름을 파일 경로로 변환"
+description.en = "Resolve a system font name to its file path."
+description.ja = "システムフォント名をファイルパスに解決する。"
+description.ko = "시스템 폰트 이름을 파일 경로로 해석한다."
+details.en = '''
+- Accepts a UTF-8 PostScript name or family name and returns its file path as `fs::path`. An empty name or failed lookup returns an empty path; accepted names depend on the platform.
+- The result contains only the path, not the face index within a font collection. Pass the name directly to `Font::load` to preserve the face selected by the operating system.
+- `Font::load` already performs this lookup when its input does not identify a usable file, so direct calls are mainly useful for font selection and inspection.
+'''
+details.ja = '''
+- UTF-8 の PostScript 名またはファミリー名を受け取り、ファイルパスを `fs::path` で返します。名前が空の場合や検索に失敗した場合は空のパスを返します。受け付ける名前はプラットフォームに依存します。
+- 結果はパスだけで、フォントコレクション内の書体インデックスは含みません。OS が選んだ書体を保つには、名前を直接 `Font::load` に渡してください。
+- `Font::load` は入力が利用可能なファイルを指さない場合にこの検索を行うため、直接の呼び出しは主にフォント選択や情報の確認に使います。
+'''
+details.ko = '''
+- UTF-8 PostScript 이름 또는 패밀리 이름을 받아 파일 경로를 `fs::path`로 반환합니다. 이름이 비어 있거나 검색에 실패하면 빈 경로를 반환합니다. 허용되는 이름은 플랫폼에 따라 달라집니다.
+- 결과에는 경로만 있으며 폰트 컬렉션 내부의 서체 인덱스는 포함하지 않습니다. 운영체제가 선택한 서체를 유지하려면 이름을 직접 `Font::load`에 전달합니다.
+- `Font::load`는 입력이 사용 가능한 파일을 가리키지 않으면 이미 이 검색을 수행하므로, 직접 호출은 주로 폰트 선택과 정보 확인에 사용합니다.
+'''
 related = ["listSystemFonts"]
 platform_note.en = '''
-Resolve a font name to a file path. Stub on Android and Web/WASM (always returns "").
+- macOS and iOS use CoreText, Linux uses fontconfig, and Windows uses DirectWrite.
+- Windows first tries a family name with regular weight, normal stretch, and normal style, then searches PostScript names without case sensitivity. Linux rejects a match unless a family, full, or PostScript name contains the original query without case sensitivity.
+- Android and Web/WASM always return an empty path.
 '''
 platform_note.ja = '''
-フォント名をファイルパスに解決する。Android と Web/WASM ではスタブで常に "" を返す。
+- macOS と iOS は CoreText、Linux は fontconfig、Windows は DirectWrite を使います。
+- Windows はまずファミリー名から通常の太さ・幅・スタイルを探し、次に大文字小文字を区別せず PostScript 名を探します。Linux は、ファミリー名、フルネーム、PostScript 名のいずれにも元の検索文字列が大文字小文字を区別せず含まれない場合、その一致を採用しません。
+- Android と Web/WASM は常に空のパスを返します。
+'''
+platform_note.ko = '''
+- macOS와 iOS는 CoreText, Linux는 fontconfig, Windows는 DirectWrite를 사용합니다.
+- Windows는 먼저 패밀리 이름에서 보통 굵기, 보통 너비, 보통 스타일을 찾은 뒤 대소문자를 구분하지 않고 PostScript 이름을 검색합니다. Linux는 패밀리 이름, 전체 이름, PostScript 이름 중 어느 것에도 원래 검색 문자열이 대소문자 구분 없이 포함되지 않으면 해당 일치를 거부합니다.
+- Android와 Web/WASM은 항상 빈 경로를 반환합니다.
 '''
 
 ["tan"]
@@ -50186,14 +51009,41 @@ details.ko = '''
 '''
 
 ["Font::getAtlas"]
-description.en = "Return the atlas page at the given index for debug visualization, or nullptr if out of range. Pages are single-channel R8 textures holding glyph coverage in R, so drawing a page's view with the normal pipeline shows it in red."
-description.ja = "デバッグ表示用に指定インデックスのアトラスページを返す。範囲外なら nullptr。ページはグリフのカバレッジを R に持つ単一チャンネルの R8 テクスチャなので、ページの view を通常のパイプラインで描くと赤く表示される。"
-description.ko = "디버그 시각화용으로 지정 인덱스의 아틀라스 페이지를 반환한다. 범위를 벗어나면 nullptr. 페이지는 글리프 커버리지를 R에 담는 단일 채널 R8 텍스처이므로, 페이지의 view를 일반 파이프라인으로 그리면 빨갛게 표시된다."
+description.en = "Returns a glyph atlas page for inspection."
+description.ja = "確認用にグリフのアトラスページを返す。"
+description.ko = "확인용 글리프 아틀라스 페이지를 반환한다."
+details.en = '''
+- Returns a borrowed `const internal::AtlasState*`, or `nullptr` if no font is loaded. A loaded font does not check the index; require `index < getAtlasCount()` before calling.
+- Pages store glyph coverage in the R channel of an R8 texture. Drawing a page view with the normal texture pipeline displays it in red; font drawing uses a coverage pipeline instead.
+- This accessor does not upload textures. Adding glyphs may invalidate page pointers, and atlas updates may replace GPU images and views; reacquire them after changes. Clearing or releasing the owning atlas also invalidates them.
+'''
+details.ja = '''
+- 所有権を渡さずに `const internal::AtlasState*` を返し、フォントが未読み込みなら `nullptr` を返します。読み込み済みの場合はインデックスを検査しないため、呼び出す前に `index < getAtlasCount()` を確認してください。
+- ページは R8 テクスチャの R チャンネルにグリフのカバレッジを保存します。ページのビューを通常のテクスチャ用パイプラインで描くと赤く表示されます。フォント描画ではカバレッジ用パイプラインを使います。
+- この取得処理ではテクスチャをアップロードしません。グリフの追加でページへのポインタが無効になる場合があり、アトラスの更新で GPU 画像やビューが置き換わる場合もあります。変更後は取得し直してください。所有元のアトラスのクリアや解放でも無効になります。
+'''
+details.ko = '''
+- 소유권을 넘기지 않는 `const internal::AtlasState*`를 반환하며, 폰트가 로드되지 않았으면 `nullptr`를 반환합니다. 로드된 폰트는 인덱스를 검사하지 않으므로 호출 전에 `index < getAtlasCount()`를 확인해야 합니다.
+- 페이지는 R8 텍스처의 R 채널에 글리프 커버리지를 저장합니다. 페이지 뷰를 일반 텍스처 파이프라인으로 그리면 빨갛게 표시됩니다. 폰트 그리기는 커버리지 파이프라인을 사용합니다.
+- 이 접근자는 텍스처를 업로드하지 않습니다. 글리프를 추가하면 페이지 포인터가 무효화될 수 있고, 아틀라스를 갱신하면 GPU 이미지와 뷰가 교체될 수 있으므로 변경 후 다시 가져와야 합니다. 소유 아틀라스를 지우거나 해제해도 무효화됩니다.
+'''
 
 ["Font::getSampler"]
-description.en = "Return the shared sokol-gfx sampler used for atlas rendering (advanced interop)."
-description.ja = "アトラス描画に使う共有 sokol-gfx sampler を返す（高度な相互運用向け）。"
-description.ko = "아틀라스 렌더링에 쓰이는 공유 sokol-gfx sampler를 반환한다(고급 상호운용용)."
+description.en = "Returns the shared sampler for inspecting glyph atlases."
+description.ja = "グリフアトラスの確認用の共有サンプラーを返す。"
+description.ko = "글리프 아틀라스 확인용 공유 샘플러를 반환한다."
+details.en = '''
+- Returns the shared `sg_sampler` with linear filtering, edge clamping, and LOD limited to approximately mip level 0. Normal font rendering may choose a different sampler for minified text.
+- Creates shared samplers lazily when sokol-gfx is initialized; before initialization, the returned handle can be zero. The sampler is shared framework state and must not be destroyed by the caller.
+'''
+details.ja = '''
+- 線形フィルタリングと端へのクランプを使い、LOD をほぼミップレベル 0 に制限した共有の `sg_sampler` を返します。通常のフォント描画では、縮小時に別のサンプラーを選ぶ場合があります。
+- sokol-gfx が初期化済みなら、必要になった時点で共有サンプラーを作成します。初期化前はハンドルが 0 の場合があります。フレームワークが共有するサンプラーなので、呼び出し側で破棄しないでください。
+'''
+details.ko = '''
+- 선형 필터링과 가장자리 클램핑을 사용하고 LOD를 대략 밉 레벨 0으로 제한한 공유 `sg_sampler`를 반환합니다. 일반 폰트 렌더링은 축소된 텍스트에 다른 샘플러를 선택할 수 있습니다.
+- sokol-gfx가 초기화되어 있으면 필요할 때 공유 샘플러를 생성합니다. 초기화 전에는 반환 핸들이 0일 수 있습니다. 프레임워크가 공유하는 샘플러이므로 호출자가 파괴하면 안 됩니다.
+'''
 
 ["IesProfile::getView"]
 description.en = "Returns the profile's sokol-gfx texture view."
@@ -51568,59 +52418,241 @@ details.ko = '''
 '''
 
 ["Font::forEachGlyphHorizontal"]
-description.en = "Run the horizontal-writing layout pass over pre-wrapped text, invoking the visitor per placed glyph."
-description.ja = "折り返し済みテキストに対し横書きレイアウトを実行し、配置されたグリフごとにビジターを呼ぶ。"
-description.ko = "줄바꿈된 텍스트에 가로쓰기 레이아웃을 수행하며 배치된 글리프마다 비지터를 호출한다."
+description.en = "Visits glyphs positioned by horizontal text layout."
+description.ja = "横書きレイアウトで配置したグリフを順に処理する。"
+description.ko = "가로쓰기 레이아웃으로 배치한 글리프를 순회한다."
+details.en = '''
+- This protected helper takes pre-wrapped UTF-8 text, an `(x, y)` anchor, horizontal and vertical `Direction` values, and a `GlyphVisitor`. It always uses horizontal layout; it does not apply wrapping or inspect the writing mode.
+- Loads required glyphs and invokes the visitor synchronously for each valid glyph. Newlines advance to the next baseline, tabs advance four spaces without a callback, and missing atlas data or empty text produces no callbacks.
+- Horizontal alignment uses each line's advance width; vertical alignment uses line height times the line count, with `Direction::Baseline` placing the first baseline at `y`. Baseline offsets use the current grid-fit setting. Units and callback lifetime are described in `Font::PlacedGlyph`.
+'''
+details.ja = '''
+- サブクラスから使う protected の補助関数です。折り返し済みの UTF-8 テキスト、基準位置 `(x, y)`、水平と垂直の `Direction`、`GlyphVisitor` を受け取ります。常に横書きで配置し、折り返し処理や書字方向の確認は行いません。
+- 必要なグリフを読み込み、有効なグリフごとに同期的にビジターを呼びます。改行では次のベースラインへ進み、タブではコールバックを呼ばずにスペース 4 個分進みます。アトラスがない場合や空文字列の場合は呼びません。
+- 水平揃えには各行の送り幅、垂直揃えには行の高さと行数の積を使います。`Direction::Baseline` は最初のベースラインを `y` に置きます。ベースラインのオフセットには現在のグリッドフィット設定を適用します。単位とコールバックの参照の有効期間は `Font::PlacedGlyph` を参照してください。
+'''
+details.ko = '''
+- 서브클래스에서 사용하는 protected 보조 함수입니다. 줄 바꿈 처리된 UTF-8 텍스트, 기준 위치 `(x, y)`, 수평 및 수직 `Direction`, `GlyphVisitor`를 받습니다. 항상 가로쓰기로 배치하며 줄 바꿈 처리나 쓰기 방향 확인은 수행하지 않습니다.
+- 필요한 글리프를 로드하고 유효한 글리프마다 비지터를 동기적으로 호출합니다. 줄 바꿈은 다음 베이스라인으로 이동하고, 탭은 콜백 없이 공백 네 개만큼 이동합니다. 아틀라스가 없거나 텍스트가 비어 있으면 콜백을 호출하지 않습니다.
+- 수평 정렬에는 각 줄의 전진 폭을, 수직 정렬에는 줄 높이와 줄 수의 곱을 사용합니다. `Direction::Baseline`은 첫 베이스라인을 `y`에 배치합니다. 베이스라인 오프셋에는 현재 그리드 맞춤 설정을 적용합니다. 단위와 콜백 참조의 유효 기간은 `Font::PlacedGlyph`를 참조하세요.
+'''
 
 ["Font::emitPlacedGlyphsToAtlas"]
-description.en = "Emit atlas quads for a stream of placed glyphs (shared by horizontal and vertical layout)."
-description.ja = "配置済みグリフ列に対してアトラスクワッドを生成する（横書き・縦書き共通）。"
-description.ko = "배치된 글리프 스트림에 대해 아틀라스 쿼드를 생성한다(가로·세로 레이아웃 공용)."
+description.en = "Emits textured quads for positioned glyphs."
+description.ja = "配置済みグリフのテクスチャ付きクワッドを出力する。"
+description.ko = "배치된 글리프의 텍스처 쿼드를 출력한다."
+details.en = '''
+- This protected helper accepts a `vector<PlacedGlyph>` from either writing mode and submits quads using the current drawing color and the active target's coverage pipeline. Placement and transformations follow `Font::PlacedGlyph`.
+- Updates dirty atlas textures before emitting quads, then batches by atlas page. Invalid glyphs, glyphs with no drawable area, and pages without a valid texture are skipped; an empty vector or unloaded font produces no output.
+- Texture updates can recreate GPU resources, and minified rendering can request mipmaps. Disables texturing and restores the current pipeline after each page.
+'''
+details.ja = '''
+- サブクラスから使う protected の補助関数で、どちらの書字方向の `vector<PlacedGlyph>` も受け取ります。現在の描画色と描画先のカバレッジ用パイプラインを使ってクワッドを送ります。配置と変換は `Font::PlacedGlyph` に従います。
+- クワッドの出力前に変更済みのアトラステクスチャを更新し、ページごとにまとめて出力します。無効なグリフ、描画領域のないグリフ、有効なテクスチャのないページは省略します。空の配列や未読み込みのフォントでは何も出力しません。
+- テクスチャの更新で GPU リソースを作り直す場合があり、縮小描画ではミップマップの生成を要求する場合があります。各ページの処理後にテクスチャリングを無効にし、現在のパイプラインを復元します。
+'''
+details.ko = '''
+- 서브클래스에서 사용하는 protected 보조 함수로, 두 쓰기 방향의 `vector<PlacedGlyph>`를 모두 받습니다. 현재 그리기 색상과 활성 대상의 커버리지 파이프라인으로 쿼드를 제출합니다. 배치와 변환은 `Font::PlacedGlyph`를 따릅니다.
+- 쿼드를 출력하기 전에 변경된 아틀라스 텍스처를 갱신한 다음 페이지별로 묶어 출력합니다. 유효하지 않은 글리프, 그릴 영역이 없는 글리프, 유효한 텍스처가 없는 페이지는 건너뜁니다. 빈 벡터나 로드되지 않은 폰트는 아무것도 출력하지 않습니다.
+- 텍스처 갱신으로 GPU 리소스를 다시 생성할 수 있으며, 축소 렌더링은 밉맵 생성을 요청할 수 있습니다. 각 페이지 처리 후 텍스처링을 비활성화하고 현재 파이프라인을 복원합니다.
+'''
 
 ["Font::drawStringInternal"]
-description.en = "Draw pre-wrapped text in horizontal writing mode (internal layout + atlas emit)."
-description.ja = "折り返し済みテキストを横書きで描画する（内部レイアウト＋アトラス出力）。"
-description.ko = "줄바꿈된 텍스트를 가로쓰기로 그린다(내부 레이아웃 + 아틀라스 출력)."
+description.en = "Draws pre-wrapped text with horizontal glyph layout."
+description.ja = "折り返し済みテキストを横書きのグリフ配置で描画する。"
+description.ko = "줄 바꿈 처리된 텍스트를 가로쓰기 글리프 배치로 그린다."
+details.en = '''
+- This protected helper takes UTF-8 text, an `(x, y)` anchor, and explicit horizontal and vertical `Direction` values. It always draws horizontally and does not perform automatic wrapping.
+- Collects placements through `Font::forEachGlyphHorizontal` and renders them through `Font::emitPlacedGlyphsToAtlas`; those entries describe alignment and atlas rendering. An unloaded font or empty text produces no output.
+'''
+details.ja = '''
+- サブクラスから使う protected の補助関数です。UTF-8 テキスト、基準位置 `(x, y)`、明示的な水平と垂直の `Direction` を受け取ります。常に横書きで描画し、自動折り返しは行いません。
+- `Font::forEachGlyphHorizontal` で配置を集め、`Font::emitPlacedGlyphsToAtlas` で描画します。揃えとアトラス描画の扱いは、それぞれの項目を参照してください。フォントが未読み込みの場合や空文字列の場合は何も出力しません。
+'''
+details.ko = '''
+- 서브클래스에서 사용하는 protected 보조 함수입니다. UTF-8 텍스트, 기준 위치 `(x, y)`, 명시적인 수평 및 수직 `Direction`을 받습니다. 항상 가로쓰기로 그리며 자동 줄 바꿈은 수행하지 않습니다.
+- `Font::forEachGlyphHorizontal`로 배치를 수집하고 `Font::emitPlacedGlyphsToAtlas`로 그립니다. 정렬과 아틀라스 렌더링 규칙은 각 항목을 참조하세요. 폰트가 로드되지 않았거나 텍스트가 비어 있으면 아무것도 출력하지 않습니다.
+'''
 
 ["Font::forEachGlyphVertical"]
-description.en = "Run the vertical-writing layout pass over pre-wrapped text, invoking the visitor per placed glyph."
-description.ja = "折り返し済みテキストに対し縦書きレイアウトを実行し、配置されたグリフごとにビジターを呼ぶ。"
-description.ko = "줄바꿈된 텍스트에 세로쓰기 레이아웃을 수행하며 배치된 글리프마다 비지터를 호출한다."
+description.en = "Visit each glyph placed by the vertical text layout."
+description.ja = "縦書きレイアウトで配置した各グリフに対してビジターを呼び出す。"
+description.ko = "세로쓰기 레이아웃으로 배치한 각 글리프에 대해 방문 함수를 호출한다."
+details.en = '''
+- This protected helper accepts pre-wrapped UTF-8 text, an anchor `(x, y)` in logical pixels, horizontal and vertical alignment, and a `GlyphVisitor`; it does not insert wrapping.
+- Text advances downward, and each newline starts a column to the left. Tabs are ignored. Ordinary cells use the requested font size as their height, and column spacing uses `getLineHeight()`.
+- Horizontal alignment positions the column block. Vertical alignment is applied separately to each column, and `Direction::Baseline` behaves like `Direction::Top`.
+- Vertical-form glyphs and punctuation offsets are used where supported. Latin and digit runs follow the configured TCY modes; rotation is clockwise by `TAU / 4`, and `Combine` compresses only horizontally when needed.
+- The visitor receives a `const PlacedGlyph&` for each valid glyph. Unloaded fonts and empty text produce no callbacks; glyph preparation may populate the CPU atlas, but this helper does not emit drawing commands.
+'''
+details.ja = '''
+- この protected ヘルパーは、折り返し済みの UTF-8 テキスト、論理ピクセル単位のアンカー `(x, y)`、水平・垂直アラインメント、`GlyphVisitor` を受け取ります。折り返しは挿入しません。
+- 文字は下へ進み、改行ごとに左隣の列を開始します。タブは無視します。通常のセルの高さには指定したフォントサイズを使い、列間隔には `getLineHeight()` を使います。
+- 水平アラインメントは列全体の位置を決めます。垂直アラインメントは列ごとに適用し、`Direction::Baseline` は `Direction::Top` と同じ扱いになります。
+- 対応する縦書き用グリフや句読点の位置補正を使います。英字と数字の連続部分には設定された TCY モードを適用します。回転は時計回りに `TAU / 4` で、`Combine` は必要な場合に横方向だけを縮小します。
+- 有効なグリフごとに `const PlacedGlyph&` をビジターへ渡します。フォントが未読み込みの場合やテキストが空の場合は呼び出しません。グリフの準備で CPU アトラスを更新することがありますが、このヘルパーは描画コマンドを出しません。
+'''
+details.ko = '''
+- 이 protected 헬퍼는 줄바꿈을 마친 UTF-8 텍스트, 논리 픽셀 단위의 기준점 `(x, y)`, 수평·수직 정렬, `GlyphVisitor`를 받습니다. 자동 줄바꿈은 삽입하지 않습니다.
+- 문자는 아래로 진행하며, 개행마다 왼쪽 열을 시작합니다. 탭은 무시합니다. 일반 셀의 높이는 지정한 폰트 크기를 사용하고, 열 간격은 `getLineHeight()`를 사용합니다.
+- 수평 정렬은 열 전체의 위치를 결정합니다. 수직 정렬은 열마다 따로 적용하며, `Direction::Baseline`은 `Direction::Top`과 동일하게 처리합니다.
+- 지원되는 세로쓰기용 글리프와 문장 부호 위치 보정을 사용합니다. 연속된 영문자와 숫자에는 설정된 TCY 모드를 적용합니다. 회전은 시계 방향으로 `TAU / 4`이며, `Combine`은 필요한 경우 가로 방향만 축소합니다.
+- 유효한 글리프마다 `const PlacedGlyph&`를 방문 함수에 전달합니다. 폰트를 로드하지 않았거나 텍스트가 비어 있으면 호출하지 않습니다. 글리프 준비 과정에서 CPU 아틀라스를 갱신할 수 있지만, 이 헬퍼는 그리기 명령을 생성하지 않습니다.
+'''
+related = ["Font::forEachGlyph", "Font::PlacedGlyph", "Font::setTcyDigits", "Font::setTcyLatin"]
 
 ["Font::drawStringVerticalInternal"]
-description.en = "Draw pre-wrapped text in vertical writing mode (internal layout + atlas emit)."
-description.ja = "折り返し済みテキストを縦書きで描画する（内部レイアウト＋アトラス出力）。"
-description.ko = "줄바꿈된 텍스트를 세로쓰기로 그린다(내부 레이아웃 + 아틀라스 출력)."
+description.en = "Draw pre-wrapped text with vertical glyph layout."
+description.ja = "折り返し済みテキストを縦書きレイアウトで描画する。"
+description.ko = "줄바꿈을 마친 텍스트를 세로쓰기 레이아웃으로 그린다."
+details.en = '''
+- This protected helper accepts UTF-8 text, an anchor `(x, y)`, and horizontal and vertical alignment. Layout, coordinates, and TCY behavior follow `Font::forEachGlyphVertical`; wrapping must already be applied.
+- It collects the placed glyphs, updates dirty atlas textures, and emits textured quads using the current drawing color. Invalid glyphs and glyphs without visible area are skipped.
+- It does nothing when the font has no atlas or the text is empty. Use `Font::drawString` for the public drawing entry point.
+'''
+details.ja = '''
+- この protected ヘルパーは UTF-8 テキスト、アンカー `(x, y)`、水平・垂直アラインメントを受け取ります。レイアウト、座標、TCY の扱いは `Font::forEachGlyphVertical` と同じで、折り返しは事前に適用する必要があります。
+- 配置したグリフを集め、更新が必要なアトラステクスチャを更新して、現在の描画色でテクスチャ付きの四角形を出力します。無効なグリフと表示面積のないグリフは描画しません。
+- フォントにアトラスがない場合やテキストが空の場合は何もしません。通常の描画には公開関数の `Font::drawString` を使ってください。
+'''
+details.ko = '''
+- 이 protected 헬퍼는 UTF-8 텍스트, 기준점 `(x, y)`, 수평·수직 정렬을 받습니다. 레이아웃, 좌표, TCY 처리는 `Font::forEachGlyphVertical`과 같으며, 자동 줄바꿈은 미리 적용해야 합니다.
+- 배치된 글리프를 모으고 갱신이 필요한 아틀라스 텍스처를 갱신한 뒤, 현재 그리기 색상으로 텍스처 사각형을 생성합니다. 유효하지 않거나 표시 면적이 없는 글리프는 그리지 않습니다.
+- 폰트에 아틀라스가 없거나 텍스트가 비어 있으면 아무 작업도 하지 않습니다. 일반적인 그리기에는 공개 함수인 `Font::drawString`을 사용합니다.
+'''
+related = ["Font::drawString", "Font::forEachGlyphVertical", "Font::emitPlacedGlyphsToAtlas"]
 
 ["Font::kinsokuLineStart"]
-description.en = "Return whether a codepoint is forbidden at the start of a line (kinsoku rule)."
-description.ja = "あるコードポイントが行頭禁則かどうかを返す（禁則処理）。"
-description.ko = "어떤 코드포인트가 줄 시작에 금지되는지 반환한다(긴소쿠 규칙)."
+description.en = "Test whether a codepoint is prohibited at the start of a wrapped line."
+description.ja = "コードポイントが行頭禁則の対象かどうかを返す。"
+description.ko = "코드 포인트가 줄 시작 금지 대상인지 반환한다."
+details.en = '''
+- This protected helper accepts a Unicode codepoint and returns the result for the current `KinsokuLevel`. The default `Off` always returns `false`.
+- `PunctuationOnly` recognizes `, . : ; ? ! ， ． ： ； ？ ！ 、 。 … ‥`.
+- `Standard` also recognizes the listed closing brackets, small kana, prolonged sound mark, and kana iteration marks. This is a fixed character table, not a general Unicode line-breaking test.
+'''
+details.ja = '''
+- この protected ヘルパーは Unicode コードポイントを受け取り、現在の `KinsokuLevel` に従って判定します。既定の `Off` では常に `false` を返します。
+- `PunctuationOnly` の対象は `, . : ; ? ! ， ． ： ； ？ ！ 、 。 … ‥` です。
+- `Standard` では、表に含まれる閉じ括弧、小書き仮名、長音符、仮名の繰り返し記号も対象になります。固定の文字表による判定で、Unicode 全般の改行規則を判定するものではありません。
+'''
+details.ko = '''
+- 이 protected 헬퍼는 Unicode 코드 포인트를 받아 현재 `KinsokuLevel`에 따라 판정합니다. 기본값인 `Off`에서는 항상 `false`를 반환합니다.
+- `PunctuationOnly`의 대상은 `, . : ; ? ! ， ． ： ； ？ ！ 、 。 … ‥`입니다.
+- `Standard`에서는 표에 포함된 닫는 괄호, 작은 가나, 장음 기호, 가나 반복 기호도 대상으로 합니다. 고정된 문자 표를 사용하며, Unicode 전체의 줄바꿈 규칙을 판정하지는 않습니다.
+'''
+related = ["Font::setKinsoku", "Font::kinsokuLineEnd"]
 
 ["Font::kinsokuLineEnd"]
-description.en = "Return whether a codepoint is forbidden at the end of a line (kinsoku rule)."
-description.ja = "あるコードポイントが行末禁則かどうかを返す（禁則処理）。"
-description.ko = "어떤 코드포인트가 줄 끝에 금지되는지 반환한다(긴소쿠 규칙)."
+description.en = "Test whether a codepoint is prohibited at the end of a wrapped line."
+description.ja = "コードポイントが行末禁則の対象かどうかを返す。"
+description.ko = "코드 포인트가 줄 끝 금지 대상인지 반환한다."
+details.en = '''
+- This protected helper accepts a Unicode codepoint. `KinsokuLevel::Off` and `KinsokuLevel::PunctuationOnly` always return `false`.
+- `KinsokuLevel::Standard` returns `true` for the opening brackets `「 『 〈 《 【 〔 〖 〘 ( [ { （ ［ ｛` and `false` for other codepoints.
+'''
+details.ja = '''
+- この protected ヘルパーは Unicode コードポイントを受け取ります。`KinsokuLevel::Off` と `KinsokuLevel::PunctuationOnly` では常に `false` を返します。
+- `KinsokuLevel::Standard` では、開き括弧 `「 『 〈 《 【 〔 〖 〘 ( [ { （ ［ ｛` に対して `true` を返し、それ以外には `false` を返します。
+'''
+details.ko = '''
+- 이 protected 헬퍼는 Unicode 코드 포인트를 받습니다. `KinsokuLevel::Off`와 `KinsokuLevel::PunctuationOnly`에서는 항상 `false`를 반환합니다.
+- `KinsokuLevel::Standard`에서는 여는 괄호 `「 『 〈 《 【 〔 〖 〘 ( [ { （ ［ ｛`에 대해 `true`를 반환하고, 나머지 코드 포인트에는 `false`를 반환합니다.
+'''
+related = ["Font::setKinsoku", "Font::kinsokuLineStart"]
 
 ["Font::wrapTextHorizontal"]
-description.en = "Insert hard newlines into text for horizontal word wrapping at maxLineLength."
-description.ja = "横書きの折り返しのため、maxLineLength でテキストに改行を挿入する。"
-description.ko = "가로 줄바꿈을 위해 maxLineLength에서 텍스트에 개행을 삽입한다."
+description.en = "Insert newlines to wrap horizontal text."
+description.ja = "横書きテキストの折り返し位置に改行を挿入する。"
+description.ko = "가로쓰기 텍스트의 줄바꿈 위치에 개행을 삽입한다."
+details.en = '''
+- This protected helper returns a UTF-8 string wrapped to `maxLineLength_`, measured as line width in logical pixels. It returns the input unchanged when wrapping is disabled, the limit is nonpositive, or no font atlas is loaded.
+- Existing newlines and whitespace are preserved. Width uses glyph advances, with a tab measured as four spaces; measuring uncached glyphs may populate the CPU atlas.
+- It prefers the last available break after a space, tab, or hyphen, or at a CJK boundary allowed by the current kinsoku settings.
+- If no break is available, it breaks before the overflowing codepoint even if that violates kinsoku. When Latin hyphenation is enabled, every such forced break appends `-`, including breaks outside Latin words; the added hyphen is not included in the width budget.
+- A first codepoint wider than the limit remains on the line. With hanging punctuation enabled, consecutive prohibited line-start characters at the overflow point remain on the current line beyond the limit.
+'''
+details.ja = '''
+- この protected ヘルパーは、`maxLineLength_` を論理ピクセル単位の行幅として折り返した UTF-8 文字列を返します。折り返しが無効、上限が 0 以下、またはフォントアトラスが未読み込みの場合は入力をそのまま返します。
+- 既存の改行と空白は保持します。幅にはグリフの送り幅を使い、タブはスペース 4 個分として測ります。未キャッシュのグリフを測る際に CPU アトラスを更新することがあります。
+- スペース、タブ、ハイフンの直後、または現在の禁則設定で許可される CJK 文字の境界のうち、最後に見つかった位置で折り返します。
+- 折り返せる位置がない場合は、禁則に反していても幅を超えるコードポイントの直前で改行します。英単語のハイフネーションが有効な場合は、英単語以外も含め、この強制改行のたびに `-` を追加します。追加するハイフンの幅は上限の判定に含めません。
+- 行の最初のコードポイントが上限より広い場合は、その行に残します。ぶら下げが有効な場合は、幅を超える位置にある連続した行頭禁則文字を上限の外まで同じ行に残します。
+'''
+details.ko = '''
+- 이 protected 헬퍼는 `maxLineLength_`를 논리 픽셀 단위의 줄 너비로 사용하여 줄바꿈한 UTF-8 문자열을 반환합니다. 줄바꿈이 비활성화되었거나, 제한이 0 이하이거나, 폰트 아틀라스를 로드하지 않았으면 입력을 그대로 반환합니다.
+- 기존 개행과 공백은 유지합니다. 너비는 글리프의 진행 폭으로 계산하며, 탭은 공백 네 개의 너비로 측정합니다. 캐시되지 않은 글리프를 측정하면서 CPU 아틀라스를 갱신할 수 있습니다.
+- 공백, 탭, 하이픈 뒤 또는 현재 금칙 설정이 허용하는 CJK 문자 경계 중 마지막으로 발견한 위치에서 줄을 바꿉니다.
+- 줄바꿈 가능한 위치가 없으면 금칙에 어긋나더라도 너비를 초과하는 코드 포인트 직전에 개행합니다. 영단어 하이픈 삽입이 활성화되어 있으면 영단어 밖을 포함하여 이러한 강제 개행마다 `-`를 추가합니다. 추가한 하이픈의 너비는 제한 판정에 포함하지 않습니다.
+- 줄의 첫 코드 포인트가 제한보다 넓으면 해당 줄에 그대로 둡니다. 문장 부호 내어쓰기가 활성화되어 있으면 초과 지점의 연속된 줄 시작 금지 문자를 제한 밖까지 같은 줄에 유지합니다.
+'''
+related = ["Font::enableWrap", "Font::setMaxLineLength", "Font::setLatinHyphenation", "Font::setHangingPunctuation"]
 
 ["Font::wrapTextVertical"]
-description.en = "Insert hard newlines into text for vertical wrapping by column-height budget."
-description.ja = "縦書きの折り返しのため、列高予算でテキストに改行を挿入する。"
-description.ko = "세로 줄바꿈을 위해 열 높이 예산에 따라 텍스트에 개행을 삽입한다."
+description.en = "Insert newlines to wrap vertical text into columns."
+description.ja = "縦書きテキストの列の折り返し位置に改行を挿入する。"
+description.ko = "세로쓰기 텍스트의 열 줄바꿈 위치에 개행을 삽입한다."
+details.en = '''
+- This protected helper returns a UTF-8 string wrapped to `maxLineLength_`, measured as column height in logical pixels. It returns the input unchanged when wrapping is disabled, the limit is nonpositive, or no font atlas is loaded.
+- Height follows `Font::forEachGlyphVertical`: ordinary characters occupy one font-size cell, while Latin and digit runs use their configured TCY mode. Measuring rotated runs may populate the CPU atlas.
+- Existing newlines are preserved. It prefers the last token boundary allowed by kinsoku, then falls back to a forced token boundary; a Latin or digit run is never split, so a run taller than the limit can overflow.
+- With hanging punctuation enabled, consecutive prohibited line-start characters at the overflow point remain in the current column beyond the limit. This helper never inserts hyphens.
+- Tabs do not create tokens. Original byte ranges between retained tokens can preserve tabs, and tabs inside a Latin or digit token participate in its width or character-count measurement; tabs outside emitted ranges are omitted.
+'''
+details.ja = '''
+- この protected ヘルパーは、`maxLineLength_` を論理ピクセル単位の列の高さとして折り返した UTF-8 文字列を返します。折り返しが無効、上限が 0 以下、またはフォントアトラスが未読み込みの場合は入力をそのまま返します。
+- 高さの計算は `Font::forEachGlyphVertical` に従います。通常の文字はフォントサイズ 1 個分のセルを使い、英字と数字の連続部分には設定された TCY モードを使います。回転する連続部分を測る際に CPU アトラスを更新することがあります。
+- 既存の改行は保持します。禁則で許可される最後のまとまりの境界を優先し、見つからなければ境界で強制改行します。英字や数字の連続部分は分割しないため、それ自体が上限より高い場合は上限を超えることがあります。
+- ぶら下げが有効な場合は、高さを超える位置にある連続した行頭禁則文字を上限の外まで同じ列に残します。このヘルパーはハイフンを挿入しません。
+- タブは独立したまとまりを作りません。保持したまとまりの間にある元のバイト範囲にはタブが残ることがあり、英字や数字のまとまりの内部にあるタブは幅や文字数の計算に含まれます。出力する範囲の外にあるタブは省かれます。
+'''
+details.ko = '''
+- 이 protected 헬퍼는 `maxLineLength_`를 논리 픽셀 단위의 열 높이로 사용하여 줄바꿈한 UTF-8 문자열을 반환합니다. 줄바꿈이 비활성화되었거나, 제한이 0 이하이거나, 폰트 아틀라스를 로드하지 않았으면 입력을 그대로 반환합니다.
+- 높이 계산은 `Font::forEachGlyphVertical`을 따릅니다. 일반 문자는 폰트 크기 하나에 해당하는 셀을 사용하며, 연속된 영문자와 숫자는 설정된 TCY 모드를 사용합니다. 회전하는 문자열을 측정하면서 CPU 아틀라스를 갱신할 수 있습니다.
+- 기존 개행은 유지합니다. 금칙이 허용하는 마지막 토큰 경계를 우선 사용하고, 없으면 토큰 경계에서 강제로 개행합니다. 연속된 영문자나 숫자는 분할하지 않으므로, 해당 문자열 자체가 제한보다 높으면 초과할 수 있습니다.
+- 문장 부호 내어쓰기가 활성화되어 있으면 초과 지점의 연속된 줄 시작 금지 문자를 제한 밖까지 같은 열에 유지합니다. 이 헬퍼는 하이픈을 삽입하지 않습니다.
+- 탭은 별도 토큰을 만들지 않습니다. 유지된 토큰 사이의 원래 바이트 범위에는 탭이 남을 수 있으며, 영문자나 숫자 토큰 내부의 탭은 너비 또는 문자 수 계산에 포함됩니다. 출력 범위 밖의 탭은 생략합니다.
+'''
+related = ["Font::forEachGlyphVertical", "Font::enableWrap", "Font::setMaxLineLength", "Font::setKinsoku"]
 
 ["Font::wrapTextIfEnabled"]
-description.en = "Wrap text per the current writing mode when wrapping is enabled, else return it unchanged."
-description.ja = "折り返しが有効なら現在の書字方向で折り返し、無効ならそのまま返す。"
-description.ko = "줄바꿈이 켜져 있으면 현재 쓰기 방향으로 줄바꿈하고, 아니면 그대로 반환한다."
+description.en = "Apply wrapping for the current writing mode."
+description.ja = "現在の書字方向に応じた折り返しを適用する。"
+description.ko = "현재 쓰기 방향에 맞는 줄바꿈을 적용한다."
+details.en = '''
+- This protected helper returns the input unchanged when wrapping is disabled. Otherwise, `WritingMode::VerticalRL` uses vertical wrapping, and other modes use horizontal wrapping.
+- Limits, unchanged-input cases, and inserted characters follow `Font::wrapTextVertical` or `Font::wrapTextHorizontal`.
+'''
+details.ja = '''
+- この protected ヘルパーは、折り返しが無効な場合は入力をそのまま返します。有効な場合は、`WritingMode::VerticalRL` では縦書き用、それ以外では横書き用の折り返しを使います。
+- 上限、入力を変更しない条件、挿入する文字の扱いは `Font::wrapTextVertical` または `Font::wrapTextHorizontal` を参照してください。
+'''
+details.ko = '''
+- 이 protected 헬퍼는 줄바꿈이 비활성화되어 있으면 입력을 그대로 반환합니다. 활성화되어 있으면 `WritingMode::VerticalRL`에서는 세로쓰기 줄바꿈을, 나머지 모드에서는 가로쓰기 줄바꿈을 사용합니다.
+- 제한, 입력을 변경하지 않는 조건, 삽입하는 문자는 `Font::wrapTextVertical` 또는 `Font::wrapTextHorizontal`을 참조합니다.
+'''
+related = ["Font::wrapTextHorizontal", "Font::wrapTextVertical", "Font::setWritingMode"]
 
 ["Font::calcAlignOffset"]
-description.en = "Compute the alignment offset for text given horizontal and vertical alignment."
-description.ja = "水平・垂直アラインメントを考慮したテキストの整列オフセットを計算する。"
-description.ko = "수평·수직 정렬을 고려한 텍스트의 정렬 오프셋을 계산한다."
+description.en = "Calculate a text alignment offset."
+description.ja = "テキストのアラインメント用オフセットを計算する。"
+description.ko = "텍스트 정렬 오프셋을 계산한다."
+details.en = '''
+- This protected helper returns a `Vec2` offset in logical pixels. For text width `w = getWidth(text)`, `Left`, `Center`, and `Right` produce X offsets of `0`, `-w / 2`, and `-w`; other directions leave X at zero.
+- With `ascent = getAscent()` and `totalHeight = getAscent() - getDescent()`, `Top`, `Baseline`, `Center`, and `Bottom` produce Y offsets of `0`, `-ascent`, `-totalHeight / 2`, and `-totalHeight`; other directions leave Y at zero.
+- Width follows `Font::getWidth`, including wrapping. Vertical alignment uses ascent and descent only, not the total height of multiline text.
+'''
+details.ja = '''
+- この protected ヘルパーは、論理ピクセル単位のオフセットを `Vec2` で返します。テキスト幅を `w = getWidth(text)` とすると、`Left`、`Center`、`Right` の X オフセットはそれぞれ `0`、`-w / 2`、`-w` です。それ以外の方向では X は 0 のままです。
+- `ascent = getAscent()`、`totalHeight = getAscent() - getDescent()` とすると、`Top`、`Baseline`、`Center`、`Bottom` の Y オフセットはそれぞれ `0`、`-ascent`、`-totalHeight / 2`、`-totalHeight` です。それ以外の方向では Y は 0 のままです。
+- 幅は折り返しを含めて `Font::getWidth` に従います。垂直アラインメントにはアセントとディセントだけを使い、複数行全体の高さは使いません。
+'''
+details.ko = '''
+- 이 protected 헬퍼는 논리 픽셀 단위의 오프셋을 `Vec2`로 반환합니다. 텍스트 너비를 `w = getWidth(text)`로 두면 `Left`, `Center`, `Right`의 X 오프셋은 각각 `0`, `-w / 2`, `-w`입니다. 나머지 방향에서는 X가 0으로 유지됩니다.
+- `ascent = getAscent()`, `totalHeight = getAscent() - getDescent()`로 두면 `Top`, `Baseline`, `Center`, `Bottom`의 Y 오프셋은 각각 `0`, `-ascent`, `-totalHeight / 2`, `-totalHeight`입니다. 나머지 방향에서는 Y가 0으로 유지됩니다.
+- 너비는 자동 줄바꿈을 포함하여 `Font::getWidth`를 따릅니다. 수직 정렬에는 어센트와 디센트만 사용하며, 여러 줄 전체의 높이는 사용하지 않습니다.
+'''
+related = ["Font::getWidth", "Font::getAscent", "Font::getDescent", "Font::setAlign"]
 
 ["Shader::storeUniform"]
 description.en = "Copies raw uniform bytes into a stored block."
@@ -53692,61 +54724,197 @@ hide = true
 
 ["Font::setOversampling"]
 keywords = ["oversampling", "supersample", "sharpness", "quality", "atlas"]
-description.en = "Rasterize glyphs at N x N the target size and box-filter them down, trading N^2 atlas memory for sharper text under arbitrary transforms (1 = off)."
-description.ja = "グリフを N x N 倍の解像度でラスタライズしてから縮小し、アトラスのメモリを N^2 倍払う代わりに任意の変換下で文字を鮮明にする（1 = 無効）。"
-description.ko = "글리프를 N x N 배 해상도로 래스터화한 뒤 축소하여, 아틀라스 메모리를 N^2 배 쓰는 대신 임의의 변환에서도 글자를 또렷하게 만든다(1 = 끔)."
+description.en = "Set the glyph rasterization oversampling factor."
+description.ja = "グリフのラスタライズに使うオーバーサンプリング倍率を設定する。"
+description.ko = "글리프 래스터화에 사용할 오버샘플링 배수를 설정한다."
+details.en = '''
+- Clamps `n` to an integer from 1 to 4 and returns this `Font` by reference. A value of 1 disables oversampling; the initial factor comes from the default in effect when the `Font` is constructed.
+- Glyphs are rasterized at `n` times the resolution on each axis and box-filtered, retaining a denser atlas for drawing under scaling and rotation. Atlas memory grows roughly with `n * n`; oversized glyphs may use a lower raster resolution to fit an atlas page.
+- This setter and `Font::setMipmaps` can be called before or after loading. A changed option selects or creates the corresponding shared atlas for a loaded file; an unloaded font records it for the next load. For URL-loaded fonts, the change takes effect on the next load and produces a warning.
+- Both setters cancel a pending asynchronous load before checking whether the value changed. Threading and cancellation rules are described in `Font::loadAsync`.
+'''
+details.ja = '''
+- `n` を 1〜4 の整数に制限し、この `Font` への参照を返します。1 はオーバーサンプリングなしです。初期倍率は `Font` の構築時点の既定値から取得します。
+- 各軸で `n` 倍の解像度にラスタライズしてボックスフィルターを適用し、拡大縮小や回転時の描画に使う高密度のアトラスを保持します。アトラスのメモリはおおむね `n * n` に比例して増えます。大きすぎるグリフは、アトラスのページに収めるため解像度を下げることがあります。
+- この関数と `Font::setMipmaps` は読み込みの前後どちらでも呼べます。読み込み済みのファイルでは、値が変わると対応する共有アトラスを取得または作成します。未読み込みの場合は次回の読み込み用に記録します。URL から読み込んだフォントでは次回の読み込みから反映され、警告を出します。
+- どちらの設定関数も、値が変わるかを確認する前に進行中の非同期読み込みを取り消します。スレッドと取消しの扱いは `Font::loadAsync` を参照してください。
+'''
+details.ko = '''
+- `n`을 1~4의 정수로 제한하고 이 `Font`의 참조를 반환합니다. 1은 오버샘플링을 사용하지 않는 값입니다. 초기 배수는 `Font`를 생성할 때의 기본값에서 가져옵니다.
+- 각 축에서 `n`배 해상도로 래스터화하고 박스 필터를 적용하여, 크기 조절과 회전 시 그리기에 사용할 고밀도 아틀라스를 유지합니다. 아틀라스 메모리는 대략 `n * n`에 비례하여 증가합니다. 너무 큰 글리프는 아틀라스 페이지에 맞추기 위해 더 낮은 해상도를 사용할 수 있습니다.
+- 이 함수와 `Font::setMipmaps`는 로드 전후에 호출할 수 있습니다. 로드된 파일에서는 값이 바뀌면 해당 공유 아틀라스를 가져오거나 생성합니다. 로드하지 않은 폰트는 다음 로드에 사용할 값을 기록합니다. URL에서 로드한 폰트는 다음 로드부터 변경을 적용하며 경고를 출력합니다.
+- 두 설정 함수 모두 값의 변경 여부를 확인하기 전에 진행 중인 비동기 로드를 취소합니다. 스레드와 취소 처리는 `Font::loadAsync`를 참조합니다.
+'''
+related = ["Font::getOversampling", "Font::setDefaultOversampling", "Font::setMipmaps", "Font::loadAsync"]
 
 ["Font::getOversampling"]
 keywords = ["oversampling", "supersample", "quality"]
-description.en = "Return the oversampling factor this font rasterizes with (1 = off)."
-description.ja = "このフォントがラスタライズに使うオーバーサンプリング倍率を返す（1 = 無効）。"
-description.ko = "이 폰트가 래스터화에 사용하는 오버샘플링 배수를 반환한다(1 = 끔)."
+description.en = "Return the configured oversampling factor."
+description.ja = "設定されたオーバーサンプリング倍率を返す。"
+description.ko = "설정된 오버샘플링 배수를 반환한다."
+details.en = '''
+- Returns the configured integer from 1 to 4, where 1 disables oversampling. Atlas replacement, reduced resolution for oversized glyphs, and deferred changes for URL fonts are described in `Font::setOversampling`.
+'''
+details.ja = '''
+- 設定された 1〜4 の整数を返します。1 はオーバーサンプリングなしです。アトラスの切り替え、大きすぎるグリフの解像度低下、URL フォントへの変更の反映時期は `Font::setOversampling` を参照してください。
+'''
+details.ko = '''
+- 설정된 1~4의 정수를 반환합니다. 1은 오버샘플링을 사용하지 않는 값입니다. 아틀라스 교체, 너무 큰 글리프의 해상도 감소, URL 폰트의 변경 적용 시점은 `Font::setOversampling`을 참조합니다.
+'''
+related = ["Font::setOversampling", "Font::getDefaultOversampling"]
 
 ["Font::setDefaultOversampling"]
 keywords = ["oversampling", "default", "global", "quality"]
-description.en = "Set the oversampling factor newly loaded fonts start with; does not affect fonts already loaded."
-description.ja = "以降に読み込むフォントの既定のオーバーサンプリング倍率を設定する。読み込み済みのフォントには影響しない。"
-description.ko = "이후 로드하는 폰트의 기본 오버샘플링 배수를 설정한다. 이미 로드된 폰트에는 영향을 주지 않는다."
+description.en = "Set the oversampling default for newly constructed fonts."
+description.ja = "新しく構築するフォントの既定のオーバーサンプリング倍率を設定する。"
+description.ko = "새로 생성할 폰트의 기본 오버샘플링 배수를 설정한다."
+details.en = '''
+- This static setter clamps `n` to an integer from 1 to 4. The initial default is 1.
+- The value is copied when a `Font` is constructed. Existing objects are unaffected, including objects that have not loaded a font yet; use `Font::setOversampling` to change them.
+'''
+details.ja = '''
+- この static 設定関数は `n` を 1〜4 の整数に制限します。最初の既定値は 1 です。
+- 値は `Font` の構築時にコピーされます。まだフォントを読み込んでいない場合も含め、既存のオブジェクトには影響しません。既存のオブジェクトを変更するには `Font::setOversampling` を使ってください。
+'''
+details.ko = '''
+- 이 static 설정 함수는 `n`을 1~4의 정수로 제한합니다. 최초 기본값은 1입니다.
+- 값은 `Font`를 생성할 때 복사합니다. 아직 폰트를 로드하지 않은 경우를 포함하여 기존 객체에는 영향을 주지 않습니다. 기존 객체를 변경하려면 `Font::setOversampling`을 사용합니다.
+'''
+related = ["Font::getDefaultOversampling", "Font::setOversampling"]
 
 ["Font::getDefaultOversampling"]
 keywords = ["oversampling", "default", "global"]
-description.en = "Return the oversampling factor newly loaded fonts start with."
-description.ja = "以降に読み込むフォントの既定のオーバーサンプリング倍率を返す。"
-description.ko = "이후 로드하는 폰트의 기본 오버샘플링 배수를 반환한다."
+description.en = "Return the oversampling default for newly constructed fonts."
+description.ja = "新しく構築するフォントの既定のオーバーサンプリング倍率を返す。"
+description.ko = "새로 생성할 폰트의 기본 오버샘플링 배수를 반환한다."
+details.en = '''
+- Returns the current static default from 1 to 4, initially 1. The value is adopted at construction as described in `Font::setDefaultOversampling`.
+'''
+details.ja = '''
+- 現在の static な既定値を 1〜4 の整数で返します。初期値は 1 です。`Font::setDefaultOversampling` に記載のとおり、構築時にこの値を取り込みます。
+'''
+details.ko = '''
+- 현재 static 기본값을 1~4의 정수로 반환합니다. 초기값은 1입니다. `Font::setDefaultOversampling`에 설명된 대로 생성 시 이 값을 적용합니다.
+'''
+related = ["Font::setDefaultOversampling", "Font::getOversampling"]
 
 ["Font::setMipmaps"]
 keywords = ["mipmap", "minification", "shimmer", "scale", "quality"]
-description.en = "Enable mipmapping of the glyph atlas so text stays stable when drawn much smaller than its loaded size (on by default; the chain is built lazily on the first minified draw)."
-description.ja = "グリフアトラスのミップマップを有効にし、読み込みサイズよりかなり小さく描画してもテキストがちらつかないようにする（既定で有効。ミップ列は最初に縮小描画された時点で生成される）。"
-description.ko = "글리프 아틀라스의 밉맵을 활성화하여 로드 크기보다 훨씬 작게 그려도 텍스트가 흔들리지 않게 한다(기본 활성화. 밉 체인은 첫 축소 렌더링 시점에 생성된다)."
+description.en = "Set whether the glyph atlas may generate mipmaps."
+description.ja = "グリフアトラスのミップマップ生成を許可するか設定する。"
+description.ko = "글리프 아틀라스의 밉맵 생성을 허용할지 설정한다."
+details.en = '''
+- Enables or disables mipmap generation and returns this `Font` by reference. The default is `true`; mipmaps reduce flicker when text is drawn small.
+- Generation is requested lazily when drawing exceeds two atlas texels per target pixel, accounting for oversampling, load-time DPI, the drawing transform, and target pixel scale. The chain is generated during a subsequent dirty-atlas texture update.
+- A full chain adds approximately one third to the base atlas texture memory and adds CPU filtering work when dirty atlas textures are rebuilt. Disabling it avoids that chain and its rebuild cost.
+- Atlas replacement, deferred changes for URL fonts, and cancellation of pending loads follow `Font::setOversampling`.
+'''
+details.ja = '''
+- ミップマップ生成を有効または無効にし、この `Font` への参照を返します。既定値は `true` です。ミップマップは文字を小さく描く際のちらつきを抑えます。
+- オーバーサンプリング、読み込み時の DPI、描画変換、描画先のピクセル倍率を考慮し、描画先の 1 ピクセルに対してアトラスのテクセルが 2 個を超える描画で初めて生成を要求します。ミップ列は、その後に行われる更新対象のアトラステクスチャの更新時に生成します。
+- 完全なミップ列は、元のアトラステクスチャに対して約 3 分の 1 のメモリを追加し、更新対象のアトラステクスチャを再構築する際に CPU のフィルター処理を追加します。無効にすると、このミップ列と再構築の負荷を省けます。
+- アトラスの切り替え、URL フォントへの変更の反映時期、進行中の読み込みの取消しは `Font::setOversampling` と同じです。
+'''
+details.ko = '''
+- 밉맵 생성을 활성화하거나 비활성화하고 이 `Font`의 참조를 반환합니다. 기본값은 `true`입니다. 밉맵은 텍스트를 작게 그릴 때 깜박임을 줄입니다.
+- 오버샘플링, 로드 시 DPI, 그리기 변환, 대상 픽셀 배율을 고려하여 대상 픽셀 하나당 아틀라스 텍셀이 두 개를 초과하는 그리기에서 처음 생성을 요청합니다. 밉 체인은 이후 갱신이 필요한 아틀라스 텍스처를 갱신할 때 생성합니다.
+- 전체 밉 체인은 기본 아틀라스 텍스처 메모리의 약 3분의 1을 추가하며, 갱신이 필요한 아틀라스 텍스처를 다시 만들 때 CPU 필터링 작업을 추가합니다. 비활성화하면 이 체인과 재생성 비용을 줄일 수 있습니다.
+- 아틀라스 교체, URL 폰트의 변경 적용 시점, 진행 중인 로드의 취소는 `Font::setOversampling`과 같습니다.
+'''
+related = ["Font::getMipmaps", "Font::setOversampling"]
 
 ["Font::getMipmaps"]
 keywords = ["mipmap", "minification", "quality"]
-description.en = "Return whether the glyph atlas is allowed to build mipmaps."
-description.ja = "グリフアトラスがミップマップを生成してよいかどうかを返す。"
-description.ko = "글리프 아틀라스가 밉맵을 생성해도 되는지 여부를 반환한다."
+description.en = "Return whether glyph atlas mipmaps are enabled."
+description.ja = "グリフアトラスのミップマップが有効かどうかを返す。"
+description.ko = "글리프 아틀라스의 밉맵이 활성화되어 있는지 반환한다."
+details.en = '''
+- Returns the configured permission, initially `true`, rather than whether a mip chain has already been built. Generation timing and deferred URL-font changes are described in `Font::setMipmaps`.
+'''
+details.ja = '''
+- ミップ列が生成済みかどうかではなく、設定された生成の許可状態を返します。初期値は `true` です。生成の時期と URL フォントへの変更の反映時期は `Font::setMipmaps` を参照してください。
+'''
+details.ko = '''
+- 밉 체인의 생성 완료 여부가 아니라 설정된 생성 허용 상태를 반환합니다. 초기값은 `true`입니다. 생성 시점과 URL 폰트의 변경 적용 시점은 `Font::setMipmaps`를 참조합니다.
+'''
+related = ["Font::setMipmaps"]
 
 ["Font::setGridFit"]
 keywords = ["grid fit", "hinting", "baseline", "pixel grid", "sharpness"]
-description.en = "Snap every baseline to a whole pixel at draw time so horizontal strokes stay sharp, at no memory cost and one rounding per line (on by default; automatically stands down when the transform is not 1:1, where rounding in model space would hurt instead)."
-description.ja = "描画時に各行のベースラインを整数ピクセルにスナップして横画を鮮明に保つ。メモリコストはなく、行あたり丸め1回だけ（既定で有効。1:1 でない変換下ではモデル空間での丸めが逆効果になるため自動的に無効化される）。"
-description.ko = "그리기 시점에 각 줄의 베이스라인을 정수 픽셀에 맞춰 가로획을 또렷하게 유지한다. 메모리 비용은 없고 줄당 반올림 한 번뿐이다(기본 활성화. 1:1이 아닌 변환에서는 모델 공간 반올림이 역효과이므로 자동으로 해제된다)."
+description.en = "Set whether drawn baseline offsets are rounded to whole units."
+description.ja = "描画時のベースラインオフセットを整数に丸めるか設定する。"
+description.ko = "그릴 때 베이스라인 오프셋을 정수로 반올림할지 설정한다."
+details.en = '''
+- Sets the placement option and returns this `Font` by reference. It is enabled by default and does not reload the font, rebuild the atlas, or add atlas memory.
+- When `Font::gridFitLands` permits fitting, accumulated baseline offsets are rounded once, shifting a baseline by at most half a logical pixel. Horizontal layout rounds once per line; reported metrics and glyph advances remain unchanged.
+- The anchor itself is not rounded, allowing smooth fractional movement. Fitting automatically stands down when the scale test fails; see `Font::gridFitLands` and `Font::fitY`.
+'''
+details.ja = '''
+- 配置の設定を変更し、この `Font` への参照を返します。既定では有効です。フォントの再読み込み、アトラスの再構築、アトラスメモリの追加は行いません。
+- `Font::gridFitLands` が適用を許可する場合は、累積したベースラインオフセットを一度だけ丸めます。ベースラインの移動量は最大で論理ピクセルの半分です。横書きでは行ごとに一度丸め、取得するメトリクスとグリフの送り幅は変えません。
+- アンカー自体は丸めないため、小数座標で滑らかに移動できます。倍率の判定条件を満たさない場合は自動的に適用しません。`Font::gridFitLands` と `Font::fitY` を参照してください。
+'''
+details.ko = '''
+- 배치 옵션을 설정하고 이 `Font`의 참조를 반환합니다. 기본적으로 활성화되어 있습니다. 폰트를 다시 로드하거나 아틀라스를 다시 만들지 않으며 아틀라스 메모리를 추가하지 않습니다.
+- `Font::gridFitLands`가 적용을 허용하면 누적된 베이스라인 오프셋을 한 번 반올림합니다. 베이스라인 이동량은 최대 논리 픽셀의 절반입니다. 가로쓰기에서는 줄마다 한 번 반올림하며, 반환하는 메트릭과 글리프 진행 폭은 변경하지 않습니다.
+- 기준점 자체는 반올림하지 않으므로 소수 좌표로 부드럽게 이동할 수 있습니다. 배율 판정 조건을 만족하지 않으면 자동으로 적용하지 않습니다. `Font::gridFitLands`와 `Font::fitY`를 참조합니다.
+'''
+related = ["Font::getGridFit", "Font::gridFitLands", "Font::fitY"]
 
 ["Font::getGridFit"]
 keywords = ["grid fit", "hinting", "baseline"]
-description.en = "Return whether vertical grid fit is enabled for this font."
-description.ja = "このフォントで縦方向のグリッドフィットが有効かどうかを返す。"
-description.ko = "이 폰트에 세로 그리드 피팅이 활성화되어 있는지 여부를 반환한다."
+description.en = "Return whether baseline grid fitting is enabled."
+description.ja = "ベースラインのグリッドフィットが有効かどうかを返す。"
+description.ko = "베이스라인 그리드 피팅이 활성화되어 있는지 반환한다."
+details.en = '''
+- Returns the configured flag, initially `true`. This does not test whether the current transform permits fitting; that test is described in `Font::gridFitLands`.
+'''
+details.ja = '''
+- 設定されたフラグを返します。初期値は `true` です。現在の変換で適用できるかは判定しません。その判定は `Font::gridFitLands` を参照してください。
+'''
+details.ko = '''
+- 설정된 플래그를 반환합니다. 초기값은 `true`입니다. 현재 변환에서 적용 가능한지는 판정하지 않습니다. 해당 판정은 `Font::gridFitLands`를 참조합니다.
+'''
+related = ["Font::setGridFit", "Font::gridFitLands"]
 
 ["Font::gridFitLands"]
-description.en = "Report whether grid fit actually lands on the pixel grid, i.e. whether it is enabled and the current transform maps one model unit to one device pixel."
-description.ja = "グリッドフィットが実際にピクセル境界に乗るかどうかを返す。有効であり、かつ現在の変換で1モデル単位が1デバイスピクセルに対応する場合のみ真。"
-description.ko = "그리드 피팅이 실제로 픽셀 격자에 맞는지 여부를 반환한다. 활성화되어 있고 현재 변환이 1 모델 단위를 1 디바이스 픽셀로 매핑할 때만 참이다."
+description.en = "Test whether the current scale permits baseline grid fitting."
+description.ja = "現在の倍率でベースラインのグリッドフィットを適用できるか判定する。"
+description.ko = "현재 배율에서 베이스라인 그리드 피팅을 적용할 수 있는지 판정한다."
+details.en = '''
+- This protected helper returns `true` only when grid fitting is enabled and the effective scale differs from 1 by less than `0.01`.
+- Effective scale is the larger X/Y basis length of the model-view matrix, replaced with 1 if nonpositive, then multiplied by the target pixel scale. The test does not account for anchor translation or camera projection, so `true` does not guarantee that the final baseline lies on an absolute device-pixel boundary.
+'''
+details.ja = '''
+- この protected ヘルパーは、グリッドフィットが有効で、実効倍率と 1 の差の絶対値が `0.01` 未満の場合だけ `true` を返します。
+- 実効倍率には、モデルビュー行列の X/Y 基底の長さの大きい方を使い、その値が 0 以下なら 1 に置き換えてから描画先のピクセル倍率を掛けます。アンカーの平行移動とカメラの投影は判定しないため、`true` でも最終的なベースラインが絶対的なデバイスピクセル境界に乗るとは限りません。
+'''
+details.ko = '''
+- 이 protected 헬퍼는 그리드 피팅이 활성화되어 있고 실효 배율과 1의 차이의 절댓값이 `0.01` 미만일 때만 `true`를 반환합니다.
+- 실효 배율은 모델뷰 행렬의 X/Y 기저 길이 중 큰 값이 0 이하이면 1로 바꾼 뒤 대상 픽셀 배율을 곱한 값입니다. 기준점의 평행 이동과 카메라 투영은 판정하지 않으므로, `true`여도 최종 베이스라인이 절대적인 장치 픽셀 경계에 놓인다고 보장하지 않습니다.
+'''
+related = ["Font::setGridFit", "Font::getGridFit", "Font::fitY"]
 
 ["Font::fitY"]
-description.en = "Snap a baseline offset accumulated from the anchor to the pixel grid, or pass it through unchanged when grid fit does not land. Callers must accumulate first and round once: rounding the line height and stepping by it would compound into a whole-pixel layout drift."
-description.ja = "アンカーからの累積ベースラインオフセットをピクセル境界にスナップする。グリッドフィットが働かない場合はそのまま返す。呼び出し側は必ず累積してから1回だけ丸めること。行の高さを丸めてから加算すると誤差が積み上がり、レイアウトが1ピクセル分ずれてしまう。"
-description.ko = "앵커에서 누적된 베이스라인 오프셋을 픽셀 격자에 맞추고, 그리드 피팅이 유효하지 않으면 그대로 돌려준다. 호출자는 반드시 먼저 누적한 뒤 한 번만 반올림해야 한다. 줄 높이를 반올림해 더해 나가면 오차가 쌓여 레이아웃이 한 픽셀만큼 어긋난다."
+description.en = "Round a baseline offset when grid fitting is applicable."
+description.ja = "グリッドフィットを適用できる場合にベースラインオフセットを丸める。"
+description.ko = "그리드 피팅을 적용할 수 있으면 베이스라인 오프셋을 반올림한다."
+details.en = '''
+- This protected helper returns `round(offsetFromAnchor)` when `Font::gridFitLands` is `true`; otherwise, it returns the input unchanged. The offset is measured in logical pixels.
+- Pass the offset accumulated from the anchor, such as `getAscent() + lineIdx * getLineHeight()`, then round once. Rounding the line height before repeated addition causes layout error to accumulate across lines.
+- Add the returned offset to the unchanged anchor. This preserves fractional anchor movement while limiting each fitted baseline offset to half a unit of rounding error.
+'''
+details.ja = '''
+- この protected ヘルパーは、`Font::gridFitLands` が `true` の場合に `round(offsetFromAnchor)` を返し、それ以外では入力をそのまま返します。オフセットの単位は論理ピクセルです。
+- `getAscent() + lineIdx * getLineHeight()` のようにアンカーから累積したオフセットを渡し、一度だけ丸めてください。行の高さを先に丸めて繰り返し加算すると、行が増えるほど配置の誤差が蓄積します。
+- 返されたオフセットを、変更していないアンカーに加えます。これによりアンカーの小数座標での移動を保ち、各ベースラインオフセットの丸め誤差を最大で半単位に抑えます。
+'''
+details.ko = '''
+- 이 protected 헬퍼는 `Font::gridFitLands`가 `true`이면 `round(offsetFromAnchor)`를 반환하고, 그렇지 않으면 입력을 그대로 반환합니다. 오프셋의 단위는 논리 픽셀입니다.
+- `getAscent() + lineIdx * getLineHeight()`처럼 기준점에서 누적한 오프셋을 전달한 뒤 한 번만 반올림합니다. 줄 높이를 먼저 반올림하여 반복해서 더하면 줄 수가 늘어날수록 배치 오차가 누적됩니다.
+- 반환된 오프셋을 변경하지 않은 기준점에 더합니다. 이렇게 하면 기준점의 소수 좌표 이동을 유지하면서 각 베이스라인 오프셋의 반올림 오차를 최대 반 단위로 제한합니다.
+'''
+related = ["Font::gridFitLands", "Font::setGridFit", "Font::getLineHeight"]
 
 ["TcpClient::isConnecting"]
 description.en = "Returns whether a connection attempt is in progress."
@@ -55016,9 +56184,27 @@ void tcApp::draw() {
 
 ["getSize"]
 category = "graphics"
-description.en = "Drawing width and height of the active target as Vec2; see getWidth."
-description.ja = "現在の描画先の幅と高さを Vec2 で返す。getWidth を参照。"
-description.ko = "현재 렌더 타깃의 너비와 높이를 Vec2로 반환한다. getWidth 참조."
+description.en = "Returns the width and height of the active drawing target as a Vec2."
+description.ja = "現在の描画先の幅と高さを Vec2 で返す。"
+description.ko = "현재 그리기 대상의 너비와 높이를 Vec2로 반환한다."
+details.en = '''
+- Returns `Vec2(float(getWidth()), float(getHeight()))`, with width in `x` and height in `y`; the dimensions are truncated to integers before conversion to floating point.
+- The size follows the active drawing target, including an active Fbo; see `getWidth` for coordinate units, DPI scaling, and `pixelPerfect` behavior.
+'''
+details.ja = '''
+- `Vec2(float(getWidth()), float(getHeight()))` を返し、`x` が幅、`y` が高さです。寸法は小数部分を切り捨てた整数になってから浮動小数点数に変換されます。
+- サイズは使用中の Fbo を含む現在の描画先に応じて変わります。座標の単位、DPI スケール、`pixelPerfect` の動作については `getWidth` を参照してください。
+'''
+details.ko = '''
+- `Vec2(float(getWidth()), float(getHeight()))`를 반환하며, `x`는 너비이고 `y`는 높이입니다. 크기는 소수 부분을 버린 정수로 만든 뒤 부동소수점 수로 변환합니다.
+- 크기는 사용 중인 Fbo를 포함한 현재 그리기 대상에 따라 달라집니다. 좌표 단위, DPI 배율, `pixelPerfect` 동작은 `getWidth`를 참조합니다.
+'''
+snippet = '''
+void tcApp::draw() {
+    Vec2 size = tc::getSize();
+    drawCircle(size.x * 0.5f, size.y * 0.5f, 30.0f);
+}
+'''
 
 ["getViewMatrix"]
 category = "graphics"
@@ -55208,36 +56394,97 @@ related = ["SoundBuffer::loadAsync", "SoundBuffer::onLoad"]
 
 ["Font::loadAsync"]
 keywords = ["async", "background", "load", "cancel"]
-description.en = "loadAsync(nameOrPath, size, faceIndex = 0): prepare owned font bytes and CPU metrics on a native worker, then publish the shared atlas and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires."
-description.ja = "loadAsync(nameOrPath, size, faceIndex = 0)。ネイティブでは専用 State をワーカーで準備し、後のフレームでメインに反映して通知する。通知は呼び出し中には行わない。終了時はデコード中の読み込みを待つが、取消しでは待たない。 完了通知はアプリ実行中（runApp / runHeadlessApp）に配信される。これらを使わない単独の main() では完了イベントは発火しない。"
-description.ko = "loadAsync(nameOrPath, size, faceIndex = 0). 네이티브 워커가 전용 State를 준비하고 이후 프레임의 메인 스레드에서 반영 및 알림. 호출 중에는 알리지 않는다. 앱 종료는 디코딩 중인 로드를 기다리며 취소는 기다리지 않는다. 완료 알림은 앱 실행 중(runApp / runHeadlessApp)에 전달된다. 앱 실행이 없는 일반 main()에서는 완료 이벤트가 발생하지 않는다."
-details.en = """
-Copies share the committed atlas, start idle with empty listeners and leave the source loading. Copy assignment cancels only the destination and keeps its listeners. Moves cancel both pending loads, transfer committed data and leave listeners with their handles.
-Keeps file/system-name precedence, face selection, DPI and atlas options. CPU font preparation runs off-thread; cache and GPU access stay on main. Glyph rasterization remains lazy. Web URLs retain the existing fetch timeout policy.
-All handle operations, access, copy/move and teardown are serialized on main. Existing committed data remains readable until application. Any new request (including an identical request), synchronous load/clear/allocation/generation or atlas-rebuilding setter cancels pending delivery. Move cancels both handles; destruction discards pending delivery. Cancellation emits no event or diagnostic; a running decoder may already have emitted its ordinary logs. Replaced decodes finish privately and may temporarily overlap.
-The shared host completion mailbox takes one snapshot before each frame/headless prelude. Work submitted during that pass waits for another pass, including failures and cache hits. isLoading() stays true until surviving application, then becomes false before the single onLoad event. A listener may restart, move or delete the emitter; retain the listener token as usual.
-Web without pthreads defers VFS/CPU preparation to a main-loop pass, which may stall that frame, then queues application for a subsequent pass. This entry point never Asyncify-waits. The run token drops results across app exit and hot reload.
-"""
-details.ja = """
-操作・参照・コピー・移動・破棄はメインで直列に行う。反映までは既存データを参照できる。同期 load と同じパス解決・失敗時の状態・エラー・ログを使う。同一引数でも新しい要求は古い要求を取り消す。同期読み込み、clear、割当て、生成、アトラスを再構築する設定も取り消す。移動は両側、破棄は自身の処理を取り消し、結果とイベントを捨てる。取消し自体はログを出さず、古いデコードは専用 State のまま終了する。
-フレーム／ヘッドレス処理の冒頭でキューを一括取得し、その処理中の追加分は次回に回す。失敗・キャッシュヒットも同じ経路。反映後に isLoading() が false になってから onLoad を一度通知する。リスナーは再読み込み・移動・自身の破棄が可能。コピーは確定済みデータだけを持ち、アイドル・空のリスナーで開始。コピー代入は代入先だけを取り消しリスナーを保持する。
-Web の pthreads なしでは後のフレームで VFS 読み込みと CPU デコードを行うため、そのフレームは停止し得る。さらに後のフレームで反映し、この入口では Asyncify 待機をしない。Font のグリフ生成は遅延のまま。終了・ホットリロード後の古い結果は捨てる。
-"""
-details.ko = """
-핸들 조작, 접근, 복사/이동, 파괴는 메인 스레드에서 직렬화한다. 반영 전까지 기존 데이터를 읽을 수 있다. 동기 load와 같은 경로 해석, 실패 상태, 오류 및 로그를 유지한다. 같은 인수라도 새 요청은 이전 요청을 취소한다. 동기 로드, clear, 할당, 생성, 아틀라스를 다시 만드는 설정도 취소한다. 이동은 양쪽, 파괴는 자신의 미완료 결과와 이벤트를 버린다. 취소 자체는 로그를 남기지 않으며 오래된 디코드는 전용 State로 종료한다.
-프레임/헤드리스 패스 시작에 큐를 일괄 획득하고 패스 중 추가된 작업은 다음 패스로 넘긴다. 실패와 캐시 적중도 같은 경로를 쓴다. 반영 뒤 isLoading()이 false가 된 후 onLoad를 한 번 알린다. 리스너는 재시작, 이동, 발신자 파괴를 할 수 있다. 복사본은 확정된 데이터만 가지고 유휴 상태와 빈 리스너로 시작한다. 복사 대입은 대상만 취소하며 대상 리스너를 유지한다.
-pthreads 없는 Web에서는 이후 프레임에서 VFS/CPU 디코드를 수행하여 그 프레임이 멈출 수 있고 다음 패스에 반영한다. 이 진입점은 Asyncify로 기다리지 않는다. Font 글리프 생성은 지연 상태를 유지한다. 종료/핫 리로드 뒤 이전 결과는 버린다.
-"""
+description.en = "Load a font asynchronously and report completion through an event."
+description.ja = "フォントを非同期で読み込み、イベントで完了を通知する。"
+description.ko = "폰트를 비동기로 로드하고 이벤트로 완료를 알린다."
+details.en = '''
+- Call `loadAsync(nameOrPath, size, faceIndex = 0)` with a file path, system font name, or Web URL. Size is in logical pixels; path precedence and collection-face selection follow `Font::load`.
+- Returns no result directly. Success, failure, and cache hits are applied on the main thread in a later frame, never during this call; `isLoading()` becomes `false` before the single `onLoad` notification.
+- On native platforms, a worker prepares owned font bytes and CPU metrics. Shared-cache access and GPU work remain on the main thread, glyph rasterization stays lazy, and the request captures the current DPI, oversampling, and mipmap options.
+- Serialize all operations on each `Font`, including access, copying, moving, and destruction, on the main thread. Previously committed data remains readable until the new result is applied.
+- Failure normally clears the committed atlas. A URL request on a native platform reports `UnsupportedFormat` and keeps the old atlas, while still applying the requested size and captured DPI.
+- A new asynchronous request, even with identical arguments, synchronous `load`, `clearAtlas`, `setOversampling`, or `setMipmaps` cancels pending delivery. The two atlas-option setters cancel even when their value is unchanged; destruction also discards pending delivery.
+- Cancellation does not wait and emits no completion event or cancellation diagnostic. A running decoder may already have logged ordinary messages and can finish privately while a replacement load runs; application exit waits for native decoders still running.
+- Completions are processed from one batch taken before each frame or headless pass. Work queued during that processing waits for another pass. Delivery requires `runApp` or `runHeadlessApp`; a bare `main()` has no completion delivery, and results from an ended or hot-reloaded app run are discarded.
+- Copy construction shares committed data, starts idle with empty listeners, and leaves the source request running. Copy assignment cancels only the destination request and preserves its listeners.
+- Moving cancels pending requests on both handles and transfers committed data; listeners remain with their original handles. Listener lifetime and callbacks that restart, move, or destroy the font are described in `Font::onLoad`.
+- On Web, CPU preparation is deferred to a main-loop pass and can stall that pass, including without pthreads; application follows in a subsequent pass. This entry point does not wait through Asyncify, and URL fetching uses a 30-second timeout.
+'''
+details.ja = '''
+- `loadAsync(nameOrPath, size, faceIndex = 0)` にファイルパス、システムフォント名、または Web の URL を渡します。サイズの単位は論理ピクセルです。パスの優先順位とコレクション内の書体選択は `Font::load` と同じです。
+- 結果を直接返しません。成功、失敗、キャッシュへの一致はいずれも後のフレームでメインスレッドに反映し、この呼び出し中には通知しません。`isLoading()` が `false` になってから `onLoad` を一度通知します。
+- ネイティブ環境では、ワーカーが所有するフォントデータと CPU メトリクスを準備します。共有キャッシュへのアクセスと GPU 処理はメインスレッドで行い、グリフのラスタライズは遅延したままです。要求時点の DPI、オーバーサンプリング、ミップマップ設定を記録します。
+- 参照、コピー、移動、破棄を含む各 `Font` の操作は、すべてメインスレッドで直列に行ってください。新しい結果が反映されるまでは、確定済みのデータを参照できます。
+- 失敗時は通常、確定済みのアトラスを解除します。ネイティブ環境で URL を要求した場合は `UnsupportedFormat` を通知して以前のアトラスを保持しますが、指定サイズと記録した DPI は反映します。
+- 同じ引数を含む新しい非同期要求、同期の `load`、`clearAtlas`、`setOversampling`、`setMipmaps` は、未完了の結果の反映と通知を取り消します。2 つのアトラス設定関数は値が同じ場合も取り消します。破棄時も未完了の結果と通知を捨てます。
+- 取消しは完了を待たず、完了イベントや取消しの診断メッセージを出しません。実行中のデコーダーは通常のログを出していることがあり、置き換え後の読み込みと並行して内部で終了することがあります。アプリ終了時は、実行中のネイティブデコーダーの終了を待ちます。
+- フレームまたはヘッドレス処理の前に取得した一括分の完了を処理します。その処理中に追加されたものは次回に回します。通知には `runApp` または `runHeadlessApp` が必要です。単独の `main()` では完了を通知せず、終了済みまたはホットリロード前のアプリ実行に属する結果は捨てます。
+- コピー構築では確定済みデータを共有し、読み込み中ではない状態と空のリスナーで開始します。コピー元の要求は継続します。コピー代入は代入先の要求だけを取り消し、代入先のリスナーを保持します。
+- 移動は両方のハンドルの未完了要求を取り消して確定済みデータを移し、リスナーは元のハンドルに残します。リスナーの寿命と、再読み込み・移動・フォント自身の破棄を行うコールバックについては `Font::onLoad` を参照してください。
+- Web では CPU の準備を後のメインループ処理に回すため、その処理が停止することがあります。pthreads がない場合も同様で、結果はさらに後の処理で反映します。この関数は Asyncify で待機しません。URL の取得には 30 秒のタイムアウトを使います。
+'''
+details.ko = '''
+- `loadAsync(nameOrPath, size, faceIndex = 0)`에 파일 경로, 시스템 폰트 이름 또는 Web URL을 전달합니다. 크기의 단위는 논리 픽셀입니다. 경로 우선순위와 컬렉션 내 서체 선택은 `Font::load`와 같습니다.
+- 결과를 직접 반환하지 않습니다. 성공, 실패, 캐시 적중 모두 이후 프레임의 메인 스레드에서 반영하며, 이 호출 중에는 알리지 않습니다. `isLoading()`이 `false`가 된 뒤 `onLoad`를 한 번 알립니다.
+- 네이티브 환경에서는 워커가 소유한 폰트 데이터와 CPU 메트릭을 준비합니다. 공유 캐시 접근과 GPU 작업은 메인 스레드에서 수행하며 글리프 래스터화는 지연 상태를 유지합니다. 요청 시점의 DPI, 오버샘플링, 밉맵 옵션을 기록합니다.
+- 접근, 복사, 이동, 파괴를 포함하여 각 `Font`의 모든 작업을 메인 스레드에서 직렬로 수행합니다. 새 결과가 반영되기 전까지 확정된 기존 데이터를 읽을 수 있습니다.
+- 실패하면 일반적으로 확정된 아틀라스를 해제합니다. 네이티브 환경에서 URL을 요청하면 `UnsupportedFormat`을 알리고 기존 아틀라스를 유지하지만, 지정한 크기와 기록한 DPI는 반영합니다.
+- 인수가 같더라도 새로운 비동기 요청, 동기 `load`, `clearAtlas`, `setOversampling`, `setMipmaps`는 미완료 결과의 반영과 알림을 취소합니다. 두 아틀라스 설정 함수는 값이 같아도 취소합니다. 파괴 시에도 미완료 결과와 알림을 버립니다.
+- 취소는 완료를 기다리지 않으며 완료 이벤트나 취소 진단 메시지를 생성하지 않습니다. 실행 중인 디코더는 이미 일반 로그를 출력했을 수 있으며, 대체 로드와 동시에 내부적으로 종료될 수 있습니다. 앱을 종료할 때는 실행 중인 네이티브 디코더의 종료를 기다립니다.
+- 프레임 또는 헤드리스 처리 전에 한 번 가져온 완료 묶음을 처리합니다. 그 처리 중 추가된 작업은 다음 처리로 넘깁니다. 알림에는 `runApp` 또는 `runHeadlessApp`이 필요합니다. 단독 `main()`에서는 완료를 알리지 않으며, 종료되었거나 핫 리로드 이전인 앱 실행의 결과는 버립니다.
+- 복사 생성은 확정된 데이터를 공유하고 로드 중이 아닌 상태와 빈 리스너로 시작합니다. 원본 요청은 계속 실행됩니다. 복사 대입은 대상 요청만 취소하며 대상 리스너를 유지합니다.
+- 이동은 양쪽 핸들의 미완료 요청을 취소하고 확정된 데이터를 옮기며, 리스너는 원래 핸들에 남습니다. 리스너 수명과 재로드, 이동, 폰트 자체의 파괴를 수행하는 콜백은 `Font::onLoad`를 참조합니다.
+- Web에서는 CPU 준비를 이후 메인 루프 처리로 미루므로 해당 처리가 멈출 수 있습니다. pthreads가 없는 경우도 같으며, 결과는 그다음 처리에서 반영합니다. 이 함수는 Asyncify로 기다리지 않습니다. URL 가져오기는 30초 타임아웃을 사용합니다.
+'''
+related = ["Font::load", "Font::onLoad", "Font::isLoading", "LoadResult"]
+snippet = '''
+// tcApp members: Font font; EventListener fontLoadListener;
+void tcApp::setup() {
+    fontLoadListener = font.onLoad.listen([](LoadResult& result) {
+        if (!result) logError("Font") << result.message;
+    });
+    font.loadAsync(TC_FONT_SANS, 24);
+}
+'''
 
 ["Font::onLoad"]
-description.en = "LoadResult event delivered once on main after the surviving asynchronous result is applied; cancellation has no event. Retain the listener token."
-description.ja = "生き残った非同期結果の反映後、メインで一度通知する LoadResult イベント。取消しは通知しない。リスナートークンを保持する。"
-description.ko = "유효한 비동기 결과를 반영한 뒤 메인에서 한 번 알리는 LoadResult 이벤트. 취소는 알리지 않으며 리스너 토큰을 유지한다."
+description.en = "Notify listeners when an asynchronous font load completes."
+description.ja = "非同期フォント読み込みの完了をリスナーに通知する。"
+description.ko = "비동기 폰트 로드의 완료를 리스너에 알린다."
+details.en = '''
+- This `Event<LoadResult>` fires once on the main thread after the surviving asynchronous result is applied, for either success or failure. `isLoading()` is already `false`; cancellation produces no event.
+- Retain the `EventListener` returned by `onLoad.listen(...)` for as long as notifications are needed, and keep the font alive until completion.
+- A listener may start another load, move the font, or destroy the emitting font. Delivery timing, thread rules, and copy/move behavior follow `Font::loadAsync`.
+'''
+details.ja = '''
+- この `Event<LoadResult>` は、有効な非同期結果を反映したあと、成功・失敗のどちらでもメインスレッドで一度発火します。この時点で `isLoading()` は `false` です。取消しでは発火しません。
+- 通知が必要な間は `onLoad.listen(...)` が返す `EventListener` を保持し、完了まではフォントを生存させてください。
+- リスナーから別の読み込みを開始したり、フォントを移動したり、通知元のフォントを破棄したりできます。通知の時期、スレッド、コピー・移動の扱いは `Font::loadAsync` を参照してください。
+'''
+details.ko = '''
+- 이 `Event<LoadResult>`는 유효한 비동기 결과를 반영한 뒤 성공과 실패 모두 메인 스레드에서 한 번 발생합니다. 이때 `isLoading()`은 이미 `false`입니다. 취소 시에는 발생하지 않습니다.
+- 알림이 필요한 동안 `onLoad.listen(...)`이 반환한 `EventListener`를 보관하고, 완료될 때까지 폰트를 유지합니다.
+- 리스너에서 다른 로드를 시작하거나, 폰트를 이동하거나, 이벤트를 발생시킨 폰트를 파괴할 수 있습니다. 알림 시점, 스레드 규칙, 복사·이동 처리는 `Font::loadAsync`를 참조합니다.
+'''
+related = ["Font::loadAsync", "Font::isLoading", "LoadResult", "EventListener"]
 
 ["Font::isLoading"]
-description.en = "Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation."
-description.ja = "現在の非同期要求が準備中またはメイン反映待ちか。onLoad の前と取消し後は false。"
-description.ko = "현재 비동기 요청이 준비 중이거나 메인 반영을 기다리는지. onLoad 직전 및 취소 후에는 false."
+description.en = "Return whether an asynchronous font request is pending."
+description.ja = "非同期フォント読み込みの要求が未完了かどうかを返す。"
+description.ko = "비동기 폰트 로드 요청이 미완료 상태인지 반환한다."
+details.en = '''
+- Returns `true` while the current request is preparing or awaiting main-thread application, provided its app run is still active.
+- Returns `false` before `onLoad` fires, after cancellation, and after the app run ends. Threading and delivery rules follow `Font::loadAsync`.
+'''
+details.ja = '''
+- 現在の要求が準備中またはメインスレッドへの反映待ちで、そのアプリ実行が有効な間は `true` を返します。
+- `onLoad` の発火前、取消し後、アプリ実行の終了後は `false` を返します。スレッドと通知の扱いは `Font::loadAsync` を参照してください。
+'''
+details.ko = '''
+- 현재 요청이 준비 중이거나 메인 스레드 반영을 기다리고 있으며 해당 앱 실행이 유효하면 `true`를 반환합니다.
+- `onLoad` 발생 전, 취소 후, 앱 실행 종료 후에는 `false`를 반환합니다. 스레드와 알림 처리는 `Font::loadAsync`를 참조합니다.
+'''
+related = ["Font::loadAsync", "Font::onLoad"]
 
 ["ScreenshotSaveEventArgs"]
 description.en = "Carries the result of an asynchronous screenshot request."
