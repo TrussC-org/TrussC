@@ -111,6 +111,11 @@ struct WindowContext {
     float pmouseY = 0.0f;
     int mouseButton = -1;   // Currently pressed button (-1 = none)
     bool mousePressed = false;
+    // Outstanding presses are independent of the legacy current drag button.
+    unsigned int pressedMouseButtons = 0;
+    // MOUSE_LEAVE parks mouseX/Y offscreen for hover clearing.
+    float lastPointerX = 0.0f;
+    float lastPointerY = 0.0f;
     std::unordered_set<int> keysPressed;
 
     // --- scene / hover state (per window's node tree) ---
