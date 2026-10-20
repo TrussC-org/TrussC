@@ -10,6 +10,7 @@ from the existing renderRegression manifest.
 | --- | --- |
 | Linux GL | Unchanged full suite under Xvfb: 16 actual/reference pairs. |
 | Windows D3D11 | Full suite: the same 16 pairs, real secondary windows and native close. The coordinator drives secondary frames in a Draw entry, as in captureSubmission; persistent D3D11 backbuffer views are available before the first native tick. Screen captures use captureWindow (including BGRA-to-RGBA conversion), and Fbo captures use Fbo::readPixels. |
+| Linux GLES3 (Raspberry Pi / EGL) | Main window only: the same three Fbo pairs and assertions as Metal below. `supportsSecondaryWindows()` is false: this path has single-window stubs, whereas the full Linux GL suite needs real GLX secondary windows. |
 | macOS / iOS Metal | Main window only: three Fbo pairs (default 1024, an older 64 recording after growth to 256, and the grown 256 generation), deferred generation pins/retirement, visible-shadow sanity and lazy zero allocation. An unused WindowContext needs no second native window. Fbo work is submitted/read back without repeatedly presenting the main drawable within one native tick. |
 
 Every reference is rendered in isolation on the **same backend in the same
@@ -18,7 +19,7 @@ cross-backend golden files. Windows has no skipped sub-cases. Metal emits one
 precise SKIP for secondary-window cases: the Air's second window is occluded /
 not reliably presented in the lab. This skips A/B interleaving, foreign commits,
 foreign shadow-pass parking and secondary native close, while the main-window
-checks must pass. Other backends emit a whole-suite SKIP.
+checks must pass. Linux GLES emits a separate precise SKIP for those secondary-window cases because the EGL/GLES path does not support secondary windows; its main-window checks must pass. Other backends emit a whole-suite SKIP.
 
 In the full Linux/Windows suite, two windows render different slot-0 occluders and light matrices. Each result
 must match its own isolated reference across the entire image (RGBA tolerance
@@ -74,3 +75,10 @@ LIBGL_ALWAYS_SOFTWARE=1 \
 __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json \
 xvfb-run -a core/tests/allCoreTests/bin/allCoreTests perWindowShadows --gpu-check
 ```
+
+On Raspberry Pi (GLES3), run
+`core/tests/allCoreTests/bin/allCoreTests perWindowShadows --gpu-check`.
+Expect exit 0, three comparison lines with zero pixels outside tolerance 2,
+and one secondary-window SKIP naming the unsupported EGL/GLES window path.
+With `TC_SHADOW_OUTPUT` set, expect six PNGs. A GLES3 syntax check alone does not establish pixel results on a real Pi;
+collect those results on the device.
