@@ -65,7 +65,7 @@ void runNativeClipChecks() {
     internal::pixelPerfectMode() = savedPixelMode;
 }
 
-class InspectFont : public Font {
+class InspectFont : public tc::Font {
 public:
     bool fits() const { return gridFitLands(); }
 };

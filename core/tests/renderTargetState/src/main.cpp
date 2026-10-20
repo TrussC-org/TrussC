@@ -3,6 +3,9 @@
 #include "../../common/tcDisplayTest.h"
 #include <cstdio>
 #include <cstring>
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+#include <X11/Xlib.h>
+#endif
 
 #include "state.glsl.h"
 #include "../../../../addons/tcxLut/src/tcLut.h"
@@ -134,9 +137,19 @@ bool sameMatrix(const Mat4&, const Mat4&);
 #include "matrixChecks.h"
 #include "depthSetterChecks.h"
 #include "cameraChecks.h"
+#include "resizeChecks.h"
 }
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
+    if (argc > 1 && std::strcmp(argv[1], "--resize-check") == 0) {
+        int samples = 1;
+        bool pixelPerfect = false;
+        for (int i = 2; i < argc; ++i) {
+            if (std::strcmp(argv[i], "--msaa4") == 0) samples = 4;
+            if (std::strcmp(argv[i], "--pixel-perfect") == 0) pixelPerfect = true;
+        }
+        return runResizeStateChecks(samples, pixelPerfect);
+    }
     checkTargetOwnership();
     checkLogicalHandoff();
     checkCpuCoordinates();

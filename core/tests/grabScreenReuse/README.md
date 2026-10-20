@@ -11,9 +11,7 @@ caller's `Pixels`.
 The test captures two different, two-color scenes into the same `Pixels`,
 checks that the data pointer stays unchanged without array allocation/release,
 and compares every RGBA byte. On macOS the pointer/allocation stability checks
-print SKIP with the timeout-safety reason above. The post-resize content
-checks also print SKIP on macOS until #911 (the first frame after a resize
-renders with the old viewport) is fixed. All other content checks, and the
+print SKIP with the timeout-safety reason above. All content checks, and the
 layout, resize and format-mismatch reallocation checks, run on every platform.
 Resizing the window from 200x160 to 280x220 must replace the destination
 buffer and produce matching content and dimensions. Both sizes stay above the

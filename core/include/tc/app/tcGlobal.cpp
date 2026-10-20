@@ -473,6 +473,7 @@ void selectTarget(RenderTarget& target) {
     if (target.resources().context.id) {
         sgl_set_context(target.resources().context);
         sgl_layer(target.sglLayerNext);
+        if (target.windowDrawingSizeStale) refreshWindowDrawingSize();
         applyTargetDrawingState();
     }
 }
@@ -536,6 +537,10 @@ void RenderTarget::beginPass(TargetPassStart reason) {
     }
     inPass = true;
     passStartedThisFrame = true;
+    // update() may acquire after a synchronous resize, before the draw-boundary
+    // refresh. Repair automatic state against these retained attachments now,
+    // so direct draws in update() also see the correct viewport and scissor.
+    if (passKind == TargetPassKind::Swapchain) refreshWindowDrawingSize();
 }
 
 void RenderTarget::endPass() {
@@ -2269,6 +2274,51 @@ bool hasRecordedWork(RenderTarget& target) {
     return target.passStartedThisFrame || hasPendingRecording(target);
 }
 }
+void refreshWindowDrawingSize() {
+    auto& target = currentWindowContext().swapchainTarget;
+    // A synchronous resize in update() can change the public framebuffer
+    // extent after beginFrame set the screen camera. Refresh before draw()
+    // records any geometry, without acquiring another swapchain. A begun
+    // frame (including a parked foreign owner) keeps its acquired attachments.
+    const bool retainedFrame = target.inPass || target.passStartedThisFrame;
+    const int width = retainedFrame ? target.width : getFramebufferWidth();
+    const int height = retainedFrame ? target.height : getFramebufferHeight();
+    const float scale = pixelPerfectMode() ? 1.0f : getDpiScale();
+    const bool extentChanged = target.width != width || target.height != height;
+    const auto& vp = target.viewport;
+    const bool automaticViewport = target.automaticViewport && vp.active && vp.x == 0 && vp.y == 0 &&
+        vp.w == target.automaticScreenWidth && vp.h == target.automaticScreenHeight;
+    // Projection and viewport provenance are independent. An early acquire
+    // already updates target.width/height, even with an explicit camera, but
+    // its still-automatic viewport can retain the previous frame's extent.
+    const bool viewportChanged = automaticViewport && (vp.w != width || vp.h != height);
+    // A closing camera scope can restore an old automatic camera even when
+    // the viewport/target already followed the resize. Begun frames reconcile
+    // to their retained attachment extent, never to a newly acquired drawable.
+    target.windowDrawingSizeStale = extentChanged || viewportChanged || (target.automaticScreenProjection &&
+        (target.camera.currentViewW != width / scale || target.camera.currentViewH != height / scale));
+    // A child owns the current recording context. Reconcile its parent only
+    // when selectTarget restores it, before any window geometry is recorded.
+    if (!target.windowDrawingSizeStale || &currentTarget() != &target) return;
+    target.automaticViewport = automaticViewport;
+    // Extent alone changes neither SGL's fixed recording budgets nor pipeline
+    // formats/samples. Keep the context and all application-selected SGL state.
+    // Leave resource metadata untouched: prepareWindowTarget reconciles it at
+    // the next frame boundary, after this owner's recording has been consumed.
+    target.width = width;
+    target.height = height;
+    if (target.automaticViewport)
+        target.viewport = {0, 0, float(target.width), float(target.height), true};
+    if (target.automaticScreenProjection) {
+        updateScreenCameraWithSize(target.camera.currentScreenFov, target.width / scale, target.height / scale);
+        target.automaticScreenProjection = true;
+    }
+    target.automaticScreenWidth = target.width;
+    target.automaticScreenHeight = target.height;
+    target.windowDrawingSizeStale = false;
+    applyTargetDrawingState();
+}
+
 void prepareWindowTarget() {
     auto& window = currentWindowContext();
     auto& target = window.swapchainTarget;

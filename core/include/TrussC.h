@@ -444,6 +444,12 @@ inline void beginFrame() {
 
     // Setup screen with default FOV (60 = perspective, 0 = ortho)
     internal::setupScreenFov(internal::defaultScreenFov());
+    auto& target = internal::currentTarget();
+    target.automaticScreenProjection = true;
+    target.automaticViewport = true;
+    target.windowDrawingSizeStale = false;
+    target.automaticScreenWidth = target.width;
+    target.automaticScreenHeight = target.height;
 }
 
 // Clear screen (RGB float: 0.0 ~ 1.0)
@@ -739,101 +745,53 @@ namespace internal {
     // Minimum FOV for calculating camera distance and clip planes (even in ortho mode)
     constexpr float minFovForCalc = TAU / 36.0f;
 
-    // Core implementation with explicit width/height (for FBO support)
-    inline void setupScreenFovWithSize(float fovRadians, float viewW, float viewH, float nearDist, float farDist, bool pickable) {
-        // Skip in headless mode
+    // Recompute only the automatic camera. A mid-frame extent repair must
+    // preserve the current SGL recording state (texture, layer, pipeline, etc.).
+    inline void updateScreenCameraWithSize(float fovRadians, float viewW, float viewH,
+                                          float nearDist = 0.0f, float farDist = 0.0f,
+                                          bool pickable = true) {
         if (headless::isActive()) return;
+        const float effectiveFov = fovRadians <= 0.0f ? minFovForCalc : fovRadians;
+        const float dist = viewH / (2.0f * std::tan(effectiveFov * 0.5f));
+        auto& camera = currentTarget().camera;
+        camera.currentScreenFov = fovRadians;
+        camera.currentViewW = viewW;
+        camera.currentViewH = viewH;
+        camera.currentCameraDist = dist;
 
-        // Calculate camera distance using effective FOV (min 10° for ortho)
-        float effectiveFov = (fovRadians <= 0.0f) ? minFovForCalc : fovRadians;
-        float halfFov = effectiveFov * 0.5f;  // half FOV in radians
-        float theTan = std::tan(halfFov);
-        float dist = viewH / (2.0f * theTan);
-
-        // Save current screen state for 2D drawing
-        internal::currentWindowContext().currentTarget->camera.currentScreenFov = fovRadians;
-        internal::currentWindowContext().currentTarget->camera.currentViewW = viewW;
-        internal::currentWindowContext().currentTarget->camera.currentViewH = viewH;
-        internal::currentWindowContext().currentTarget->camera.currentCameraDist = dist;
-
-        // Apply clip overrides or auto-calculate
         const float nearOverride = nearClipOverride();
         const float farOverride = farClipOverride();
-        if (nearDist == 0.0f) nearDist = (nearOverride > 0.0f) ? nearOverride : dist / 10.0f;
-        if (farDist == 0.0f) farDist = (farOverride > 0.0f) ? farOverride : dist * 10.0f;
-
-        float eyeX = viewW / 2.0f;
-        float eyeY = viewH / 2.0f;
+        if (nearDist == 0.0f) nearDist = nearOverride > 0.0f ? nearOverride : dist / 10.0f;
+        if (farDist == 0.0f) farDist = farOverride > 0.0f ? farOverride : dist * 10.0f;
 
         if (fovRadians <= 0.0f) {
-            // Orthographic projection (2D mode)
-            sgl_defaults();
-            // 2D alpha pipeline for the active target (swapchain or FBO).
-            loadPipeline(activeFill2D());
-            // Ortho volume CENTERED on the camera: the lookat below moves the
-            // world center to the view origin, so the volume must span
-            // [-W/2, W/2] x [H/2, -H/2] (Y flipped) — a [0, W] x [H, 0] volume
-            // here double-offsets everything by half a screen.
-            // Built as a Mat4 and remapped to the backend's clip-z convention
-            // (#134); the SAME matrix is stored and fed to sgl so the sgl and
-            // mesh (PBR/points) pipelines agree on depth.
-            Mat4 proj = internal::toBackendClip(
-                Mat4::ortho(-viewW / 2.0f, viewW / 2.0f, viewH / 2.0f, -viewH / 2.0f, -farDist, farDist));
-            internal::sglLoadProjection(proj);
-            sgl_matrix_mode_modelview();
-            sgl_load_identity();
-            // Camera position (for consistent Z behavior with perspective)
-            sgl_lookat(
-                eyeX, eyeY, dist,
-                eyeX, eyeY, 0.0f,
-                0.0f, 1.0f, 0.0f
-            );
-
-            // Save matrices for worldToScreen/screenToWorld
-            internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix = proj;
-            internal::currentWindowContext().currentTarget->camera.currentViewMatrix = Mat4::lookAt(
-                Vec3(eyeX, eyeY, dist),
-                Vec3(eyeX, eyeY, 0.0f),
-                Vec3(0.0f, 1.0f, 0.0f)
-            );
+            // Centered on the camera, with Y down. Store backend-native clip Z
+            // so immediate, mesh and picking paths all use the same matrix.
+            camera.currentProjectionMatrix = toBackendClip(Mat4::ortho(
+                -viewW / 2.0f, viewW / 2.0f, viewH / 2.0f, -viewH / 2.0f, -farDist, farDist));
         } else {
-            // Perspective projection (3D mode) — format-correct 3D for the active target.
-            loadPipeline(active3D());
-
-            float aspect = viewW / viewH;
-
-            // Set perspective projection with Y-flip for screen coordinates (Y down)
-            float top = nearDist * tanf(fovRadians * 0.5f);
-            float bottom = -top;
-            float right = top * aspect;
-            float left = -right;
-            // Swap top/bottom to flip Y axis (screen coords: Y increases
-            // downward). Backend-native clip-z, same reasoning as ortho above.
-            Mat4 proj = internal::toBackendClip(
-                Mat4::frustum(left, right, top, bottom, nearDist, farDist));
-            internal::sglLoadProjection(proj);
-
-            // Set view matrix (camera at viewport center, looking at Z=0)
-            sgl_matrix_mode_modelview();
-            sgl_load_identity();
-            sgl_lookat(
-                eyeX, eyeY, dist,    // eye position
-                eyeX, eyeY, 0.0f,    // look at center
-                0.0f, 1.0f, 0.0f     // up vector
-            );
-
-            // Save matrices for worldToScreen/screenToWorld
-            internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix = proj;
-            internal::currentWindowContext().currentTarget->camera.currentViewMatrix = Mat4::lookAt(
-                Vec3(eyeX, eyeY, dist),
-                Vec3(eyeX, eyeY, 0.0f),
-                Vec3(0.0f, 1.0f, 0.0f)
-            );
+            const float top = nearDist * tanf(fovRadians * 0.5f);
+            const float right = top * (viewW / viewH);
+            camera.currentProjectionMatrix = toBackendClip(Mat4::frustum(
+                -right, right, top, -top, nearDist, farDist));
         }
+        camera.currentViewMatrix = Mat4::lookAt(
+            Vec3(viewW / 2.0f, viewH / 2.0f, dist),
+            Vec3(viewW / 2.0f, viewH / 2.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f));
+        registerCameraContext(camera.currentViewMatrix, camera.currentProjectionMatrix, viewW, viewH, pickable);
+    }
 
-        // Register this camera scope so nodes drawn from here on stamp it
-        // (draw-time stamping → per-context pick rays; see tcCameraContext.h).
-        registerCameraContext(internal::currentWindowContext().currentTarget->camera.currentViewMatrix, internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix, viewW, viewH, pickable);
+    // Explicit screen setup retains its existing defaults/pipeline behavior.
+    // Automatic extent repair calls only the camera calculation above.
+    inline void setupScreenFovWithSize(float fovRadians, float viewW, float viewH, float nearDist, float farDist, bool pickable) {
+        if (headless::isActive()) return;
+        if (fovRadians <= 0.0f) {
+            sgl_defaults();
+            loadPipeline(activeFill2D());
+        } else {
+            loadPipeline(active3D());
+        }
+        updateScreenCameraWithSize(fovRadians, viewW, viewH, nearDist, farDist, pickable);
         applyTargetDrawingState();
     }
 
@@ -841,6 +799,7 @@ namespace internal {
     inline void setupScreenFov(float fovRadians, float nearDist, float farDist) {
         auto& target = internal::currentTarget();
         if (!target.isFbo) {
+            target.automaticViewport = false;
             target.width = getFramebufferWidth();
             target.height = getFramebufferHeight();
             target.viewport = {0, 0, (float)target.width, (float)target.height, true};
@@ -2796,6 +2755,7 @@ namespace internal {
 
             // If Update is synced to Draw, call Update here
             runSyncedUpdate();
+            refreshWindowDrawingSize();
 
             {
                 EntryStackGuard drawEntry(AppEntry::Draw);
