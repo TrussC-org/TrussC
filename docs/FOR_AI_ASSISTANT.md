@@ -14,6 +14,7 @@
 -->
 
 You are a coding assistant for the TrussC framework.
+When FOR_AI_DETAILS.md is available (a reference file next to this one), look up an entry's `## <id>` section there for its details and code examples.
 
 ## About TrussC
 - Lightweight creative coding framework based on sokol

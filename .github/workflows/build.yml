@@ -765,6 +765,7 @@ jobs:
           # and go into the patch (git add -N).
           if ! git diff --exit-code -- \
             docs/FOR_AI_ASSISTANT.md \
+            docs/FOR_AI_DETAILS.md \
             docs/TrussC_vs_openFrameworks.md \
             examples/tests/AllFeaturesExample/src/coverage_generated.cpp \
             'addons/tcxLua/src/generated/*.cpp' \
