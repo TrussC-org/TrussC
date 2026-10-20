@@ -16,105 +16,191 @@ namespace trussc {
 // VideoPlayer Web implementation
 // ---------------------------------------------------------------------------
 
+// The URL is data, never JavaScript source; the script size is constant.
+EM_JS(int, tcVideoBeginLoad, (const char* pathPtr, size_t pathLength), {
+    // Stop existing video if any
+    if (window._trussc_player_video) {
+        window._trussc_player_video.pause();
+        window._trussc_player_video.remove();
+    }
+
+    if (window._trussc_player_object_url) {
+        URL.revokeObjectURL(window._trussc_player_object_url);
+        window._trussc_player_object_url = null;
+    }
+    // Initialize state
+    window._trussc_player_error = null;
+    window._trussc_player_ready = false;
+    window._trussc_player_playing = false;
+    window._trussc_player_frameNew = false;
+    window._trussc_player_finished = false;
+    window._trussc_player_width = 0;
+    window._trussc_player_height = 0;
+    window._trussc_player_duration = 0;
+    window._trussc_player_staging_bytes = 0;
+    window._trussc_player_staging_peak = 0;
+
+    // Create video element
+    var video = document.createElement('video');
+    video.setAttribute("playsinline", "true");
+    video.crossOrigin = 'anonymous';
+    // preload the first frame so update() can upload it BEFORE play()
+    // (the web equivalent of the auto-poster: no black flash)
+    video.preload = 'auto';
+    video.style.display = 'none';
+    document.body.appendChild(video);
+    window._trussc_player_video = video;
+
+    // Resolve path (data/xxx.mp4 -> xxx.mp4 or absolute URL)
+    var videoPath = UTF8ToString(pathPtr, pathLength);
+    if (videoPath.startsWith('data/')) {
+        videoPath = videoPath.substring(5);
+    }
+
+    // Lookup failure alone means this is a URL. Once a file is
+    // found, staging failures must remain structured load failures.
+    var node = null;
+    try { node = FS.lookupPath(videoPath).node; } catch (e) {}
+    if (node) {
+        try {
+            var blob;
+            if (node.contents instanceof Blob) {
+                // WORKERFS already has a Blob: reuse it with no copy.
+                blob = node.contents;
+            } else if (node.contents && node.contents.subarray) {
+                // MEMFS is app-packaged/app-written data. Blob snapshots
+                // this view: one file-sized staging copy (formerly two).
+                var view = node.contents.subarray(0, node.usedBytes);
+                blob = new Blob([view], { type: 'video/mp4' });
+            } else {
+                var capacity = 67108864;
+                var needed = FS.stat(videoPath).size;
+                function rejectStaging(bytes) {
+                    window._trussc_player_error = {message: 'Video file staging exceeds 64 MiB',
+                        code: -863, store: 'staging', needed: bytes, capacity: capacity};
+                }
+                // Bound (security): other-filesystem input is at most 64 MiB, with chunks plus Blob charged as staging copies. Overflow rejects the whole load and is counted.
+                if (needed > capacity) { rejectStaging(needed); return 1; }
+                var chunks = [], total = 0, retained = 0;
+                var stream = FS.open(videoPath, 'r');
+                try {
+                    var eof = false;
+                    while (!eof) {
+                        if (total === capacity) {
+                            // Probe one byte using admitted storage. On overflow
+                            // it is discarded with the rest of the whole load.
+                            if (FS.read(stream, chunks[0], 0, 1) > 0) {
+                                needed = total + 1;
+                                // The opened handle supplies diagnostics only; its size never sizes a read.
+                                try { needed = Math.max(needed, FS.fstat(stream.fd).size); } catch (e) {}
+                                rejectStaging(needed); return 1;
+                            }
+                            break;
+                        }
+                        var chunk = new Uint8Array(Math.min(1048576, capacity - total));
+                        var filled = 0;
+                        while (filled < chunk.length) {
+                            var count = FS.read(stream, chunk, filled, chunk.length - filled);
+                            if (count === 0) { eof = true; break; }
+                            filled += count;
+                            total += count;
+                        }
+                        if (filled) {
+                            chunks.push(chunk.subarray(0, filled));
+                            retained += chunk.byteLength;
+                        }
+                        window._trussc_player_staging_peak = Math.max(
+                            window._trussc_player_staging_peak, retained + (filled ? 0 : chunk.byteLength));
+                        chunk = null;
+                    }
+                } finally { FS.close(stream); }
+                // At most 64 MiB of chunk capacity plus 64 MiB of Blob.
+                // No Blob or URL is published until the complete read passes.
+                window._trussc_player_staging_peak = Math.max(
+                    window._trussc_player_staging_peak, retained + total);
+                blob = new Blob(chunks, { type: 'video/mp4' });
+                chunks = null;
+                window._trussc_player_staging_bytes = total;
+            }
+            videoPath = URL.createObjectURL(blob);
+            window._trussc_player_object_url = videoPath;
+        } catch (e) {
+            window._trussc_player_error = {message: 'Video file staging failed: ' + String(e), code: -864};
+            return 1;
+        }
+    }
+
+    video.src = videoPath;
+
+    video.onloadedmetadata = function() {
+        if (window._trussc_player_video !== video) return;
+        var w = video.videoWidth, h = video.videoHeight;
+        if (w <= 0 || h <= 0 || w > 8192 || h > 8192 || w * h * 4 > 134217728) {
+            window._trussc_player_error = {message: 'Video frame exceeds decode limits', code: -863};
+            video.pause(); return;
+        }
+        window._trussc_player_width = video.videoWidth;
+        window._trussc_player_height = video.videoHeight;
+        window._trussc_player_duration = video.duration;
+        window._trussc_player_ready = true;
+
+        // Create canvas
+        var canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        window._trussc_player_canvas = canvas;
+        window._trussc_player_ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+        console.log('[VideoPlayer] Web: loaded (' + video.videoWidth + 'x' + video.videoHeight + ', ' + video.duration.toFixed(2) + 's)');
+    };
+
+    video.onended = function() {
+        if (window._trussc_player_video !== video) return;
+        window._trussc_player_finished = true;
+        if (video.loop) {
+            window._trussc_player_finished = false;
+        }
+    };
+
+    video.onerror = function(e) {
+        if (window._trussc_player_video !== video) return;
+        window._trussc_player_error = {
+            message: video.error && video.error.message || 'Video playback failed',
+            code: video.error ? video.error.code : 0
+        };
+        video.pause();
+        window._trussc_player_playing = false;
+    };
+
+    // Start loading
+    video.load();
+
+    return 1;
+});
+
+EM_JS(double, tcVideoStagingBytes, (), { return window._trussc_player_staging_bytes || 0; });
+EM_JS(double, tcVideoStagingPeak, (), { return window._trussc_player_staging_peak || 0; });
+EM_JS(double, tcVideoErrorNeeded, (), { return window._trussc_player_error.needed || 0; });
+EM_JS(double, tcVideoErrorCapacity, (), { return window._trussc_player_error.capacity || 134217728; });
+EM_JS(int, tcVideoErrorIsStaging, (), { return window._trussc_player_error.store === 'staging'; });
+
+static void reportWebVideoStorageError(internal::VideoDecodeBudget& budget) {
+    budget.reject(uint64_t(tcVideoErrorNeeded()), uint64_t(tcVideoErrorCapacity()),
+        tcVideoErrorIsStaging() ? "Video file staging" : "Video decode storage");
+    budget.warn();
+}
+
 bool VideoPlayer::loadPlatform(const fs::path& path) {
     webLoadResult_ = LoadResult::success();
+    decodeBudget_ = std::make_shared<internal::VideoDecodeBudget>();
     const double deadline = emscripten_get_now() + internal::webLoadTimeoutMSecs;
     std::string pathStr = internal::pathToUtf8(path);
-    // Create video element in JavaScript
-    // Bound (security): the file path is embedded in a fixed-size load script to bound temporary storage. Overflow truncates the script via snprintf; no explicit truncation error is returned.
-    char script[8192];
-    snprintf(script, sizeof(script), R"JS(
-        (function() {
-            // Stop existing video if any
-            if (window._trussc_player_video) {
-                window._trussc_player_video.pause();
-                window._trussc_player_video.remove();
-            }
-
-            // Initialize state
-            window._trussc_player_error = null;
-            window._trussc_player_ready = false;
-            window._trussc_player_playing = false;
-            window._trussc_player_frameNew = false;
-            window._trussc_player_finished = false;
-            window._trussc_player_width = 0;
-            window._trussc_player_height = 0;
-            window._trussc_player_duration = 0;
-
-            // Create video element
-            var video = document.createElement('video');
-            video.setAttribute('playsinline', '');
-            video.crossOrigin = 'anonymous';
-            // preload the first frame so update() can upload it BEFORE play()
-            // (the web equivalent of the auto-poster: no black flash)
-            video.preload = 'auto';
-            video.style.display = 'none';
-            document.body.appendChild(video);
-            window._trussc_player_video = video;
-
-            // Resolve path (data/xxx.mp4 -> xxx.mp4 or absolute URL)
-            var videoPath = '%s';
-            if (videoPath.startsWith('data/')) {
-                videoPath = videoPath.substring(5);
-            }
-
-            // Check WASM preloaded files
-            var blob = null;
-            try {
-                var data = FS.readFile(videoPath);
-                blob = new Blob([data], { type: 'video/mp4' });
-                videoPath = URL.createObjectURL(blob);
-                console.log('[VideoPlayer] Web: loaded from virtual FS');
-            } catch(e) {
-                // Not in filesystem, use as URL directly
-                console.log('[VideoPlayer] Web: loading from URL -', videoPath);
-            }
-
-            video.src = videoPath;
-
-            video.onloadedmetadata = function() {
-                if (window._trussc_player_video !== video) return;
-                window._trussc_player_width = video.videoWidth;
-                window._trussc_player_height = video.videoHeight;
-                window._trussc_player_duration = video.duration;
-                window._trussc_player_ready = true;
-
-                // Create canvas
-                var canvas = document.createElement('canvas');
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                window._trussc_player_canvas = canvas;
-                window._trussc_player_ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-                console.log('[VideoPlayer] Web: loaded (' + video.videoWidth + 'x' + video.videoHeight + ', ' + video.duration.toFixed(2) + 's)');
-            };
-
-            video.onended = function() {
-                if (window._trussc_player_video !== video) return;
-                window._trussc_player_finished = true;
-                if (video.loop) {
-                    window._trussc_player_finished = false;
-                }
-            };
-
-            video.onerror = function(e) {
-                if (window._trussc_player_video !== video) return;
-                window._trussc_player_error = {
-                    message: video.error && video.error.message || 'Video playback failed',
-                    code: video.error ? video.error.code : 0
-                };
-                video.pause();
-                window._trussc_player_playing = false;
-            };
-
-            // Start loading
-            video.load();
-
-            return 1;
-        })();
-    )JS", pathStr.c_str());
-
-    int result = emscripten_run_script_int(script);
+    int result = tcVideoBeginLoad(pathStr.c_str(), pathStr.size());
+    // JS admits the read phase separately (chunks + Blob <= 128 MiB),
+    // before any decoded output. Keep its peak and retained Blob in credits.
+    const size_t stagingPeak = size_t(tcVideoStagingPeak());
+    if (!decodeBudget_->acquire(stagingPeak)) { closePlatform(); return false; }
+    decodeBudget_->release(stagingPeak);
     if (result <= 0) {
         logError("VideoPlayer") << "failed to load '" << pathStr << "' [Web]";
         return false;
@@ -132,20 +218,31 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
         emscripten_sleep(10);
     }
     if (emscripten_run_script_int("!!window._trussc_player_error")) {
-        logError("VideoPlayer") << "failed to decode '" << pathStr << "' [Web]";
+        if (emscripten_run_script_int("window._trussc_player_error.code == -863")) {
+            reportWebVideoStorageError(*decodeBudget_);
+        }
+        const std::string message = emscripten_run_script_string("window._trussc_player_error.message");
+        webLoadResult_ = LoadResult::fail(LoadError::DecodeFailed, message);
+        logError("VideoPlayer") << "failed to decode '" << pathStr << "' [Web]: " << message;
         closePlatform();
         return false;
     }
     width_ = emscripten_run_script_int("window._trussc_player_width");
     height_ = emscripten_run_script_int("window._trussc_player_height");
-    if (width_ <= 0 || height_ <= 0) {
+    size_t bytes = 0;
+    if (!internal::VideoDecodeLimits::rgba(width_, height_, bytes)) {
+        decodeBudget_->reject(bytes, internal::VideoDecodeLimits::frameBytes);
+        decodeBudget_->warn();
         closePlatform();
         return false;
     }
 
+    webDecodeBytes_ = bytes * 3 + size_t(tcVideoStagingBytes()); // WASM mirror, canvas, delivered RGBA and retained staging Blob
+    if (!decodeBudget_->acquire(webDecodeBytes_)) { webDecodeBytes_ = 0; closePlatform(); return false; }
     // Allocate pixel buffer
-    pixels_ = new unsigned char[width_ * height_ * 4];
-    std::memset(pixels_, 0, width_ * height_ * 4);
+    pixels_ = new (std::nothrow) unsigned char[bytes];
+    if (!pixels_) { closePlatform(); return false; }
+    std::memset(pixels_, 0, bytes);
 
     updatePlatform();
     logNotice("VideoPlayer") << "loaded '" << pathStr << "' [Web]";
@@ -153,6 +250,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
 }
 
 void VideoPlayer::closePlatform() {
+    if (webDecodeBytes_) { decodeBudget_->release(webDecodeBytes_); webDecodeBytes_ = 0; }
     emscripten_run_script(R"JS(
         window._trussc_player_ready = false;
         window._trussc_player_playing = false;
@@ -165,6 +263,10 @@ void VideoPlayer::closePlatform() {
             video.removeAttribute('src');
             video.load(); // Abort any pending network request.
             video.remove();
+        }
+        if (window._trussc_player_object_url) {
+            URL.revokeObjectURL(window._trussc_player_object_url);
+            window._trussc_player_object_url = null;
         }
         window._trussc_player_canvas = null;
         window._trussc_player_ctx = null;
@@ -208,22 +310,43 @@ void VideoPlayer::updatePlatform() {
     if (emscripten_run_script_int("!!window._trussc_player_error")) {
         const std::string message = emscripten_run_script_string("window._trussc_player_error.message");
         int code = emscripten_run_script_int("window._trussc_player_error.code");
+        if (code == -863 && decodeBudget_) {
+            reportWebVideoStorageError(*decodeBudget_);
+        }
         emscripten_run_script("window._trussc_player_error = null;");
         reportPlaybackError(message, code);
         return;
     }
     // Update size if changed
-    int newWidth = emscripten_run_script_int("(window._trussc_player_width || 0)");
-    int newHeight = emscripten_run_script_int("(window._trussc_player_height || 0)");
+    int newWidth = emscripten_run_script_int("(window._trussc_player_video ? window._trussc_player_video.videoWidth : 0)");
+    int newHeight = emscripten_run_script_int("(window._trussc_player_video ? window._trussc_player_video.videoHeight : 0)");
 
+    size_t bytes = 0;
+    if (newWidth > 0 && newHeight > 0 && !internal::VideoDecodeLimits::rgba(newWidth, newHeight, bytes)) {
+        decodeBudget_->reject(bytes, internal::VideoDecodeLimits::frameBytes);
+        decodeBudget_->warn();
+        reportPlaybackError("Video frame exceeds decode limits", -863);
+        return;
+    }
     if (newWidth > 0 && newHeight > 0 && (newWidth != width_ || newHeight != height_)) {
+        // Release the old canvas and texture before allocating the new size.
+        emscripten_run_script("if (window._trussc_player_canvas) { window._trussc_player_canvas.width = 0; window._trussc_player_canvas.height = 0; }");
+        texture_.clear();
         width_ = newWidth;
         height_ = newHeight;
 
-        // Reallocate pixel buffer
+        // Reallocate pixel buffer after admitting the entire replacement.
         delete[] pixels_;
-        pixels_ = new unsigned char[width_ * height_ * 4];
-        std::memset(pixels_, 0, width_ * height_ * 4);
+        pixels_ = nullptr;
+        decodeBudget_->release(webDecodeBytes_);
+        webDecodeBytes_ = bytes * 3 + size_t(tcVideoStagingBytes());
+        if (!decodeBudget_->acquire(webDecodeBytes_)) {
+            webDecodeBytes_ = 0;
+            reportPlaybackError("Video working budget exceeded", -863); return;
+        }
+        pixels_ = new (std::nothrow) unsigned char[bytes];
+        if (!pixels_) { reportPlaybackError("Video frame allocation failed", -863); return; }
+        std::memset(pixels_, 0, bytes);
 
         // Reallocate texture
         texture_.allocate(width_, height_, 4, TextureUsage::Stream);
@@ -249,8 +372,16 @@ void VideoPlayer::updatePlatform() {
             // readyState >= 2 (HAVE_CURRENT_DATA) means frame is available
             if (video.readyState < 2) return 0;
 
-            var w = canvas.width;
-            var h = canvas.height;
+            var w = video.videoWidth;
+            var h = video.videoHeight;
+            if (w <= 0 || h <= 0 || w > 8192 || h > 8192 || w * h * 4 > 134217728) {
+                window._trussc_player_error = {message: 'Video frame exceeds decode limits', code: -863};
+                video.pause(); return 0;
+            }
+            if (w != %d || h != %d) return 0;
+            if (canvas.width != w || canvas.height != h) {
+                canvas.width = w; canvas.height = h;
+            }
 
             // Draw video to canvas
             ctx.drawImage(video, 0, 0, w, h);
@@ -258,6 +389,10 @@ void VideoPlayer::updatePlatform() {
             // Get pixel data
             var imageData = ctx.getImageData(0, 0, w, h);
             var data = imageData.data;
+            if (data.length != w * h * 4) {
+                window._trussc_player_error = {message: 'Invalid video frame layout', code: -863};
+                video.pause(); return 0;
+            }
 
             // Copy to WASM memory (RGBA)
             var outBuffer = %u;
@@ -268,7 +403,7 @@ void VideoPlayer::updatePlatform() {
             window._trussc_player_frameNew = true;
             return 1;
         })();
-    )JS", (unsigned int)(uintptr_t)pixels_);
+    )JS", width_, height_, (unsigned int)(uintptr_t)pixels_);
 
     emscripten_run_script_int(script);
 }
@@ -396,11 +531,11 @@ std::string VideoPlayer::getHwAccelNamePlatform() const {
 // element preloads its first frame and update() uploads it before play().
 // =============================================================================
 
-bool VideoPlayer::extractFramePlatform(const fs::path&, Pixels&, float, float*) {
+bool VideoPlayer::extractFramePlatform(const fs::path&, Pixels&, float, float*, std::shared_ptr<internal::VideoDecodeBudget>) {
     return false;
 }
 
-bool VideoPlayer::extractKeyFramePlatform(const fs::path&, Pixels&, float, float*) {
+bool VideoPlayer::extractKeyFramePlatform(const fs::path&, Pixels&, float, float*, std::shared_ptr<internal::VideoDecodeBudget>) {
     return false;
 }
 
