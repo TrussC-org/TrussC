@@ -476,11 +476,11 @@ void ffmpegChecks(const tc::fs::path& dir, bool large) {
     check("changed size segment generated", makeVideo(dir / "second.m2v", 64, 32, 2, "mpeg2video", AV_CODEC_ID_MPEG2VIDEO));
     check("changed size timeline muxed", changedSizeVideo(dir));
     playHeadless(dir / "changed.mkv", "mid-stream size change plays safely");
-    check("small fixture generated", makeVideo(dir / "small.mkv", 32, 16, 8));
+    check("small fixture generated", makeVideo(dir / "small.mkv", 64, 32, 8));
     playHeadless(dir / "small.mkv", "small video loads");
     tc::Pixels image;
-    check("thumbnail uses bounded decoder", tc::VideoPlayer::extractFrame(dir / "small.mkv", image, 0) && image.getWidth() == 32 && image.getData()[0] != 0);
-    check("long fixture generated", makeVideo(dir / "long.mkv", 32, 16, 4000));
+    check("thumbnail uses bounded decoder", tc::VideoPlayer::extractFrame(dir / "small.mkv", image, 0) && image.getWidth() == 64 && image.getData()[0] != 0);
+    check("long fixture generated", makeVideo(dir / "long.mkv", 64, 32, 4000));
     playHeadless(dir / "long.mkv", "long video streams without duration cap");
     if (large) {
         check("exact-limit fixture generated", makeVideo(dir / "limit.mkv", 8192, 4096, 3));

@@ -28,11 +28,12 @@ def main():
             '-pix_fmt', 'yuv420p', '-level:v', '6.2',
             *(['-x264-params', 'repeat-headers=1', '-f', 'h264'] if raw else []), name)
 
-    video('small.mp4', '32x16', 8)
+    # 64 px wide: H.264 narrower than 48 coded pixels never decodes on Windows MediaFoundation (#937).
+    video('small.mp4', '64x32', 8)
     video('limit.mp4', '8192x4096', 3)
     video('8k.mp4', '7680x4320', 3)
     video('oversized-header.mp4', '8194x2', 1)
-    video('long.mp4', '32x16', 4000, 1000)
+    video('long.mp4', '64x32', 4000, 1000)
     video('first.h264', '32x16', 2, raw=True)
     video('second.h264', '64x32', 2, raw=True)
     (args.output / 'changed.h264').write_bytes(
