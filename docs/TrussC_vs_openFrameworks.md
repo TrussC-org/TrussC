@@ -293,6 +293,7 @@ Reference for oF users finding equivalent features in TrussC.
 | `ofDrawBox` | `drawBox(w, h, d)` |  |
 | `ofDrawCircle` | `drawCircle(center, radius)` |  |
 | `ofDrawCone` | `drawCone(radius, height, resolution)` |  |
+| `ofDrawCurve` | `drawCurve(p0, p1, p2, p3)` |  |
 | `ofDrawEllipse` | `drawEllipse(center, radii)` |  |
 | `ofDrawLine` | `drawLine(p1, p2)` |  |
 | `ofDrawRectangle` | `drawRect(pos, size)` |  |
