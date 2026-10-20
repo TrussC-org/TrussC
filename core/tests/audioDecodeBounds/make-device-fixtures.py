@@ -74,11 +74,20 @@ def main():
     if size <= 64 * 1024:
         raise ValueError(f"moov must exceed 64 KiB, got {size}")
     record(large, "load", duration=400, moov_bytes=size)
-    for name, codec in [("small.mp3", ["-c:a", "libmp3lame", "-b:a", "64k"]),
-                        ("small.flac", ["-c:a", "flac"]),
-                        ("small.wav", ["-c:a", "pcm_s16le"]),
-                        ("small.ogg", ["-c:a", "libvorbis", "-q:a", "2"])]:
-        record(encode(name, codec), "load")
+    # Some ffmpeg builds (e.g. Homebrew) ship only the native, experimental
+    # `vorbis` encoder; prefer libvorbis and record which one was used.
+    encoders = subprocess.run([ffmpeg, "-hide_banner", "-encoders"], check=True,
+                              capture_output=True, text=True).stdout
+    if any(line.split()[1:2] == ["libvorbis"] for line in encoders.splitlines()):
+        vorbis, vorbis_args = "libvorbis", ["-c:a", "libvorbis", "-q:a", "2"]
+    else:
+        vorbis, vorbis_args = "vorbis", ["-c:a", "vorbis", "-strict", "experimental"]
+    print(f"ogg encoder: {vorbis}", flush=True)
+    for name, codec, extra in [("small.mp3", ["-c:a", "libmp3lame", "-b:a", "64k"], {}),
+                               ("small.flac", ["-c:a", "flac"], {}),
+                               ("small.wav", ["-c:a", "pcm_s16le"], {}),
+                               ("small.ogg", vorbis_args, {"encoder": vorbis})]:
+        record(encode(name, codec), "load", **extra)
     # Preserve a valid M4A prefix, extending locally without another encode.
     oversized = args.output / "over-encoded.m4a"
     shutil.copyfile(args.output / "small.m4a", oversized)
