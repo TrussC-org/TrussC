@@ -25612,9 +25612,50 @@ details.ko = '''
 ["ScreenRecorder::start"]
 category = "video"
 keywords = ["begin", "record", "capture", "go"]
-description.en = "Start live capture of the originating window or an Fbo at its actual pixel size at start. The take keeps fixed encoder dimensions and stays open across source resizes: mismatched frames are skipped before copying and counted by getRejectedFrameCount(), and recording resumes when the original size returns. stop() finalizes the take. One capture/encode operation may be pending: busy opportunities are counted and skipped while wall/audio PTS gaps are preserved. Calling start finalizes the previous take first and refuses replacement while an old operation remains pending. Destroying the source Fbo stops/finalizes automatically. Returns SaveResult for path preparation and encoder opening; check stop() for finalization."
-description.ja = "開始元のウィンドウまたは Fbo を開始時の実際のピクセル寸法で録画する。録画中のエンコーダ寸法は固定され、ソースのサイズ変更後も録画は開いたままとなる。寸法が一致しないフレームはコピー前にスキップして getRejectedFrameCount() に加算し、元の寸法に戻ると録画を再開する。stop() で録画を確定する。キャプチャ・エンコードは同時に1件までとし、処理中の機会はスキップ数に加算して実時間・音声 PTS の間隔を保つ。start は前の録画を確定し、古い処理が未完了なら再開始を拒否する。ソース Fbo の破棄時は自動停止・確定する。パス準備とエンコーダ開始の SaveResult を返し、確定結果は stop() で確認する。"
-description.ko = "시작한 윈도우 또는 Fbo의 시작 시점 실제 픽셀 크기로 녹화한다. 인코더 크기는 녹화 동안 고정되며 소스 크기가 바뀌어도 녹화는 열린 상태를 유지한다. 크기가 맞지 않는 프레임은 복사 전에 건너뛰고 getRejectedFrameCount()에 집계하며 원래 크기로 돌아오면 녹화를 재개한다. stop()으로 녹화를 확정한다. 캡처·인코딩 작업은 한 번에 하나만 허용하며 처리 중 기회는 건너뛴 횟수에 포함하고 실제 시간·오디오 PTS 간격을 유지한다. start는 이전 녹화를 확정하고 오래된 작업이 남아 있으면 재시작을 거부한다. 소스 Fbo가 파괴되면 자동 정지·확정한다. 경로 준비와 인코더 열기의 SaveResult를 반환하며 확정 결과는 stop()으로 확인한다."
+description.en = "Starts recording the window or an Fbo to a video file."
+description.ja = "ウィンドウまたは Fbo の録画を開始する。"
+description.ko = "윈도우 또는 Fbo의 녹화를 시작한다."
+details.en = '''
+- `start(path)` records the window, and `start(fbo, path)` records the contents of an Fbo (without the on-screen UI). After that, a frame is captured automatically at the end of every frame until you call `stop()`. Keep the `ScreenRecorder` as a member of your tcApp. When you need only one recording at a time, `startRecording()` does the same with a shared recorder.
+- A relative `path` is resolved with `getDataPath()`, and missing folders are created. Pass `VideoRecordSettings` to choose the codec, the frame rate or audio. To record for a fixed time, pass the length in seconds, as in `start("clip.mp4", 5.0f)`; the recording then stops and the file is finalized automatically.
+- The video size is fixed at the actual pixel size of the source when recording starts. For the window this is the framebuffer size, which is twice the logical size on a Retina display. If the source changes size during recording, frames of the wrong size are skipped and counted by `getRejectedFrameCount()`, and recording continues once the original size returns.
+- The returned `SaveResult` only tells you whether the file could be prepared and the encoder opened. Whether the file was written correctly is reported by the result of `stop()`.
+- Calling `start()` while a recording is running first stops and finalizes the previous one. If frames of the previous recording are still being processed after that wait, `start()` returns that failure and does not begin a new recording.
+- The recorder belongs to the window that is current when `start()` is called, and it stops automatically when that window closes. When you record an Fbo, keep the Fbo alive; if it is destroyed, the recording stops and the file is finalized.
+- On macOS the window is read back in the background, one frame at a time. If the previous frame is still being processed, that frame is skipped, and the video keeps real-time timing.
+'''
+details.ja = '''
+- `start(path)` でウィンドウを、`start(fbo, path)` で Fbo の内容を録画します（Fbo の場合、画面上の UI は映りません）。開始すると、`stop()` を呼ぶまで毎フレームの終わりに自動で録画されます。`ScreenRecorder` は tcApp のメンバーとして持っておいてください。同時に 1 本だけ録画できればよい場合は、共有のレコーダーを使う `startRecording()` でも同じことができます。
+- 相対パスは `getDataPath()` で解決され、存在しないフォルダーは作成されます。コーデック、フレームレート、音声は `VideoRecordSettings` で指定します。決まった時間だけ録画したい場合は、`start("clip.mp4", 5.0f)` のように秒数を渡してください。その時間が経つと自動的に停止し、ファイルが確定されます。
+- 動画のサイズは、録画を始めた時点のソースの実際のピクセル数で固定されます。ウィンドウの場合はフレームバッファのサイズなので、Retina ディスプレイでは論理サイズの 2 倍になります。録画中にソースのサイズが変わると、サイズの合わないフレームはスキップされて `getRejectedFrameCount()` に数えられ、元のサイズに戻ると録画が再開されます。
+- 戻り値の `SaveResult` が示すのは、ファイルの準備とエンコーダーの起動に成功したかどうかだけです。ファイルが正しく書き込まれたかどうかは、`stop()` の戻り値で確認してください。
+- 録画中に `start()` を呼ぶと、まず前の録画を停止して確定します。その待ち時間のあとも前の録画のフレームが処理中の場合は、その失敗を返し、新しい録画は始めません。
+- レコーダーは `start()` を呼んだときのウィンドウに結び付き、そのウィンドウが閉じると自動的に停止します。Fbo を録画するときは、その Fbo を破棄しないでください。破棄された場合は録画が停止し、ファイルが確定されます。
+- macOS では、ウィンドウの読み戻しを 1 フレームずつバックグラウンドで行います。前のフレームがまだ処理中の場合はそのフレームをスキップし、動画の時間は実時間のまま保たれます。
+'''
+details.ko = '''
+- `start(path)`는 윈도우를, `start(fbo, path)`는 Fbo의 내용을 녹화합니다(Fbo의 경우 화면의 UI는 찍히지 않습니다). 시작하면 `stop()`을 호출할 때까지 매 프레임이 끝날 때 자동으로 녹화됩니다. `ScreenRecorder`는 tcApp의 멤버로 가지고 있으세요. 한 번에 하나만 녹화하면 되는 경우에는 공유 레코더를 쓰는 `startRecording()`으로도 같은 일을 할 수 있습니다.
+- 상대 경로는 `getDataPath()`로 해석되며, 없는 폴더는 만들어집니다. 코덱, 프레임 레이트, 오디오는 `VideoRecordSettings`로 지정합니다. 정해진 시간만 녹화하려면 `start("clip.mp4", 5.0f)`처럼 초 단위 길이를 넘깁니다. 그 시간이 지나면 자동으로 멈추고 파일이 확정됩니다.
+- 비디오 크기는 녹화를 시작한 시점의 소스 실제 픽셀 크기로 고정됩니다. 윈도우는 프레임버퍼 크기이므로 Retina 디스플레이에서는 논리 크기의 2배가 됩니다. 녹화 중에 소스 크기가 바뀌면 크기가 맞지 않는 프레임은 건너뛰고 `getRejectedFrameCount()`에 집계되며, 원래 크기로 돌아오면 녹화가 다시 이어집니다.
+- 반환되는 `SaveResult`는 파일 준비와 인코더 시작이 성공했는지만 알려 줍니다. 파일이 올바르게 기록되었는지는 `stop()`의 반환값으로 확인합니다.
+- 녹화 중에 `start()`를 호출하면 먼저 이전 녹화를 멈추고 확정합니다. 그 대기 후에도 이전 녹화의 프레임이 처리 중이면 그 실패를 반환하고 새 녹화는 시작하지 않습니다.
+- 레코더는 `start()`를 호출한 시점의 윈도우에 묶이며, 그 윈도우가 닫히면 자동으로 멈춥니다. Fbo를 녹화하는 동안에는 그 Fbo가 살아 있어야 합니다. 파괴되면 녹화가 멈추고 파일이 확정됩니다.
+- macOS에서는 윈도우 읽기를 한 프레임씩 백그라운드에서 처리합니다. 이전 프레임이 아직 처리 중이면 그 프레임은 건너뛰며, 비디오의 시간은 실제 시간 그대로 유지됩니다.
+'''
+snippet = '''
+// tcApp.h (inside class tcApp : public App)
+ScreenRecorder recorder;
+
+// tcApp.cpp
+void tcApp::keyPressed(int key) {
+    if (key != 'R') return;   // letters arrive uppercase
+    if (!recorder.isRecording()) {
+        if (!recorder.start("capture.mp4")) logError() << "Could not start recording";
+    } else if (auto result = recorder.stop(); !result) {
+        logError() << "Recording failed: " << result.message;
+    }
+}
+'''
 
 ["ScreenRecorder::stop"]
 category = "video"
@@ -44858,12 +44899,25 @@ keywords = ["segments", "deprecated"]
 description.en = "Deprecated alias for getCurveResolution()."
 description.ja = "getCurveResolution() の非推奨エイリアス。"
 description.ko = "getCurveResolution()의 지원 종료(deprecated) 별칭이다."
-details = '''
+details.en = '''
 Kept for backward compatibility; new code should call
-[`getCurveResolution`](#getCurveResolution). It only returns the value last
-passed to [`setCircleResolution`](#setCircleResolution) (20 if that was never
-called), so it does not reflect a resolution set with
+[`getCurveResolution`](#getCurveResolution). Returns the current curve resolution,
+including values set with [`setCircleResolution`](#setCircleResolution) or
 [`setCurveResolution`](#setCurveResolution). Scheduled for removal in v1.0.0.
+'''
+details.ja = '''
+後方互換性のために残されています。新しいコードでは
+[`getCurveResolution`](#getCurveResolution) を使用してください。
+[`setCircleResolution`](#setCircleResolution) または
+[`setCurveResolution`](#setCurveResolution) で設定した現在の曲線解像度を返します。
+v1.0.0 で削除予定です。
+'''
+details.ko = '''
+하위 호환성을 위해 유지됩니다. 새 코드에서는
+[`getCurveResolution`](#getCurveResolution)을 사용하세요.
+[`setCircleResolution`](#setCircleResolution) 또는
+[`setCurveResolution`](#setCurveResolution)으로 설정한 현재 곡선 해상도를 반환합니다.
+v1.0.0에서 제거될 예정입니다.
 '''
 related = ["getCurveResolution"]
 
@@ -50522,11 +50576,20 @@ keywords = ["segments", "deprecated"]
 description.en = "Deprecated alias for setCurveResolution()."
 description.ja = "setCurveResolution() の非推奨エイリアス。"
 description.ko = "setCurveResolution()의 지원 종료(deprecated) 별칭이다."
-details = '''
-Kept as a backward-compatible alias; new code should call
-[`setCurveResolution`](#setCurveResolution), or
-[`setCurveTolerance`](#setCurveTolerance) for adaptive, scale-aware quality.
-Scheduled for removal in v1.0.0.
+details.en = '''
+- This is an old name kept so that existing code still builds. Using it shows a deprecation warning at compile time, and it is scheduled for removal in v1.0.0.
+- It does the same as `setCurveResolution(res)`: circles, arcs and other curves are drawn with a fixed number of segments. In new code, call `setCurveResolution()`, or `setCurveTolerance()` if you want the quality to adapt to the size and scale of each shape.
+- The value set here is returned by `getCurveResolution()`, and also by the deprecated `getCircleResolution()`.
+'''
+details.ja = '''
+- 既存のコードがそのままビルドできるように残されている古い名前です。使うとコンパイル時に非推奨の警告が出ます。v1.0.0 で削除される予定です。
+- 動作は `setCurveResolution(res)` と同じで、円や円弧などの曲線を決まった分割数で描くようになります。新しいコードでは `setCurveResolution()` を使ってください。図形の大きさや拡大率に合わせて品質を自動で調整したい場合は `setCurveTolerance()` を使います。
+- ここで設定した値は `getCurveResolution()` で取得できます。非推奨の `getCircleResolution()` でも同じ値が返ります。
+'''
+details.ko = '''
+- 기존 코드가 그대로 빌드되도록 남겨 둔 이전 이름입니다. 사용하면 컴파일할 때 지원 종료(deprecated) 경고가 나옵니다. v1.0.0에서 제거될 예정입니다.
+- 동작은 `setCurveResolution(res)`와 같으며, 원이나 호 같은 곡선을 정해진 분할 수로 그립니다. 새 코드에서는 `setCurveResolution()`을 사용하세요. 도형의 크기와 확대율에 맞춰 품질을 자동으로 조정하려면 `setCurveTolerance()`를 사용합니다.
+- 여기서 설정한 값은 `getCurveResolution()`으로 얻을 수 있습니다. 지원 종료된 `getCircleResolution()`도 같은 값을 반환합니다.
 '''
 related = ["setCurveResolution"]
 
@@ -51564,6 +51627,18 @@ keywords = ["point cloud", "points", "splat size"]
 description.en = "Get the current point size, in logical pixels."
 description.ja = "現在の点サイズ（論理ピクセル）を取得する。"
 description.ko = "현재 포인트 크기(논리 픽셀)를 얻는다."
+details.en = '''
+- Returns the value last set with `setPointSize()`. The default is 1, in logical pixels like `setStrokeWeight()`.
+- The value is saved and restored by `pushStyle()` and `popStyle()`, and `resetStyle()` sets it back to 1.
+'''
+details.ja = '''
+- `setPointSize()` で最後に設定した値を返します。初期値は 1 で、単位は `setStrokeWeight()` と同じ論理ピクセルです。
+- この値は `pushStyle()` と `popStyle()` で保存・復元され、`resetStyle()` で 1 に戻ります。
+'''
+details.ko = '''
+- `setPointSize()`로 마지막에 설정한 값을 반환합니다. 초기값은 1이며, 단위는 `setStrokeWeight()`와 같은 논리 픽셀입니다.
+- 이 값은 `pushStyle()`과 `popStyle()`로 저장·복원되며, `resetStyle()`을 호출하면 1로 돌아갑니다.
+'''
 related = ["setPointSize", "getPointStyle"]
 
 ["setPointStyle"]
@@ -51589,6 +51664,18 @@ keywords = ["point cloud", "points", "shape"]
 description.en = "Get the current point shape."
 description.ja = "現在の点の形を取得する。"
 description.ko = "현재 포인트 모양을 얻는다."
+details.en = '''
+- Returns the shape last set with `setPointStyle()`. The default is `PointStyle::Square`.
+- The value is saved and restored by `pushStyle()` and `popStyle()`, and `resetStyle()` sets it back to `PointStyle::Square`.
+'''
+details.ja = '''
+- `setPointStyle()` で最後に設定した形を返します。初期値は `PointStyle::Square` です。
+- この値は `pushStyle()` と `popStyle()` で保存・復元され、`resetStyle()` で `PointStyle::Square` に戻ります。
+'''
+details.ko = '''
+- `setPointStyle()`로 마지막에 설정한 모양을 반환합니다. 초기값은 `PointStyle::Square`입니다.
+- 이 값은 `pushStyle()`과 `popStyle()`로 저장·복원되며, `resetStyle()`을 호출하면 `PointStyle::Square`로 돌아갑니다.
+'''
 related = ["setPointStyle", "getPointSize"]
 
 ["setStrokeWeight"]

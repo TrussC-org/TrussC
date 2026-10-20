@@ -8599,6 +8599,31 @@ void tcApp::setup() {
 - Returns `true` when a capture source is selected and the underlying writer is open. This does not indicate that every submission or finalization will succeed.
 - Becomes `false` as soon as stopping disconnects capture, even if pending work still keeps the writer open.
 
+## ScreenRecorder::start
+
+- `start(path)` records the window, and `start(fbo, path)` records the contents of an Fbo (without the on-screen UI). After that, a frame is captured automatically at the end of every frame until you call `stop()`. Keep the `ScreenRecorder` as a member of your tcApp. When you need only one recording at a time, `startRecording()` does the same with a shared recorder.
+- A relative `path` is resolved with `getDataPath()`, and missing folders are created. Pass `VideoRecordSettings` to choose the codec, the frame rate or audio. To record for a fixed time, pass the length in seconds, as in `start("clip.mp4", 5.0f)`; the recording then stops and the file is finalized automatically.
+- The video size is fixed at the actual pixel size of the source when recording starts. For the window this is the framebuffer size, which is twice the logical size on a Retina display. If the source changes size during recording, frames of the wrong size are skipped and counted by `getRejectedFrameCount()`, and recording continues once the original size returns.
+- The returned `SaveResult` only tells you whether the file could be prepared and the encoder opened. Whether the file was written correctly is reported by the result of `stop()`.
+- Calling `start()` while a recording is running first stops and finalizes the previous one. If frames of the previous recording are still being processed after that wait, `start()` returns that failure and does not begin a new recording.
+- The recorder belongs to the window that is current when `start()` is called, and it stops automatically when that window closes. When you record an Fbo, keep the Fbo alive; if it is destroyed, the recording stops and the file is finalized.
+- On macOS the window is read back in the background, one frame at a time. If the previous frame is still being processed, that frame is skipped, and the video keeps real-time timing.
+
+```cpp
+// tcApp.h (inside class tcApp : public App)
+ScreenRecorder recorder;
+
+// tcApp.cpp
+void tcApp::keyPressed(int key) {
+    if (key != 'R') return;   // letters arrive uppercase
+    if (!recorder.isRecording()) {
+        if (!recorder.start("capture.mp4")) logError() << "Could not start recording";
+    } else if (auto result = recorder.stop(); !result) {
+        logError() << "Recording failed: " << result.message;
+    }
+}
+```
+
 ## ScreenRecorder::stop
 
 - Disconnects capture and the audio listener, then returns a `SaveResult` for finalization or a retained failure. The destination is finalized directly without a temporary file or rename.
@@ -14988,6 +15013,13 @@ void tcApp::update() {
 - This is the value set by `setCameraPosition()`, not a position derived from the current view matrix. `EasyCam::begin()` and screen-projection setup do not update it; use `setCameraPosition(camera.getPosition())` when lighting should follow an EasyCam.
 - Each render target stores its own value. `EasyCam::end()` restores the value saved by its matching `begin()`.
 
+## getCircleResolution
+
+Kept for backward compatibility; new code should call
+[`getCurveResolution`](#getCurveResolution). Returns the current curve resolution,
+including values set with [`setCircleResolution`](#setCircleResolution) or
+[`setCurveResolution`](#setCurveResolution). Scheduled for removal in v1.0.0.
+
 ## getClipboardString
 
 - Returns a `string` copy of the clipboard text; desktop implementations query the system clipboard, and disabled clipboard support returns an empty string.
@@ -16765,6 +16797,12 @@ void tcApp::draw() {
 - This function does not change the view or projection matrix. A newly initialized camera state uses `(0, 0, 0)`.
 - The value follows render-target and camera scopes rather than a single global setting; `getCameraPosition()` reads the current value.
 
+## setCircleResolution
+
+- This is an old name kept so that existing code still builds. Using it shows a deprecation warning at compile time, and it is scheduled for removal in v1.0.0.
+- It does the same as `setCurveResolution(res)`: circles, arcs and other curves are drawn with a fixed number of segments. In new code, call `setCurveResolution()`, or `setCurveTolerance()` if you want the quality to adapt to the size and scale of each shape.
+- The value set here is returned by `getCurveResolution()`, and also by the deprecated `getCircleResolution()`.
+
 ## setClipboardString
 
 - Pass a UTF-8 string; the function returns `void` and provides no success status.
@@ -17148,9 +17186,19 @@ void tcApp::draw() {
 
 - Draw state for [`PrimitiveMode`](#PrimitiveMode)`::Points` meshes, the point-cloud analogue of [`setStrokeWeight`](#setStrokeWeight). The unit is **logical pixels** (like `strokeWeight`), so it stays the same apparent size across DPIs. Affects the `Square` and `Round` [`PointStyle`](#PointStyle) splats; `Pixel` is a true 1px point and ignores it. Saved/restored by [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle). In an Fbo, sizes use attachment pixels independently of host DPI and pixelPerfect. Target projection/view/model move point centers; model scale does not enlarge the splats.
 
+## getPointSize
+
+- Returns the value last set with `setPointSize()`. The default is 1, in logical pixels like `setStrokeWeight()`.
+- The value is saved and restored by `pushStyle()` and `popStyle()`, and `resetStyle()` sets it back to 1.
+
 ## setPointStyle
 
 - Draw state choosing how a [`PrimitiveMode`](#PrimitiveMode)`::Points` mesh is drawn — see [`PointStyle`](#PointStyle) for the shapes (all GPU-resident). `Square` (the default, and the lightest to draw) and `Round` are billboard splats sized by [`setPointSize`](#setPointSize); `Pixel` is a true 1px point primitive and ignores the point size entirely. Saved/restored by [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle).
+
+## getPointStyle
+
+- Returns the shape last set with `setPointStyle()`. The default is `PointStyle::Square`.
+- The value is saved and restored by `pushStyle()` and `popStyle()`, and `resetStyle()` sets it back to `PointStyle::Square`.
 
 ## setStrokeWeight
 
