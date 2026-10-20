@@ -714,6 +714,7 @@ static void writeAddonsMake(const string& projectPath,
 
 // Forward declarations for functions defined later
 static string findCMake();
+static int parseJobsFlag(const vector<string>& args, size_t& i, int& jobs);
 static vector<string> readProjectAddons(const string& projectPath);
 
 // =============================================================================
@@ -1348,13 +1349,18 @@ static void printUpgradeHelp() {
          << "\n"
          << "Options:\n"
          << "      --tc-root <path>       Path to TrussC root directory\n"
+         << "  -j, --jobs <N>             Run at most N compile jobs in the rebuild\n"
          << "  -h, --help                 Show this help\n";
 }
 
 static int cmdUpgrade(const vector<string>& args) {
     string tcRoot;
+    int jobs = 0;           // 0 = not given
 
     for (size_t i = 0; i < args.size(); ++i) {
+        const int jobsFlag = parseJobsFlag(args, i, jobs);
+        if (jobsFlag < 0) return 1;
+        if (jobsFlag > 0) continue;
         const string& a = args[i];
         if (a == "-h" || a == "--help") { printUpgradeHelp(); return 0; }
         else if (a == "--tc-root") {
@@ -1405,7 +1411,8 @@ static int cmdUpgrade(const vector<string>& args) {
         return 1;
     }
 
-    rc = runProcess({cmake, "--build", buildDir, "--parallel"});
+    rc = runProcess({cmake, "--build", buildDir,
+                     jobs > 0 ? "--parallel=" + to_string(jobs) : string("--parallel")});
     if (rc != 0) {
         cerr << "Error: build failed.\n";
         return 1;
@@ -3176,8 +3183,13 @@ static void printBuildHelp() {
          << "      --clean                Clean before building (--clean-first)\n"
          << "      --mcp                  Enable MCP development tools for this build\n"
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
+         << "  -j, --jobs <N>             Run at most N compile jobs at once\n"
+         << "      --dry-run              Print the cmake commands instead of running them\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "  -h, --help                 Show this help\n"
+         << "\n"
+         << "Without -j the build tool decides the job count (Linux limits it by\n"
+         << "available RAM).\n"
          << "\n"
          << "Build type applies to native builds; web/android keep their own\n"
          << "(MinSizeRel / Release). The three build-type flags are mutually exclusive.\n"
@@ -3296,6 +3308,40 @@ static const char* buildTypeForFlag(const string& a) {
     return nullptr;
 }
 
+// Parse a positive job count ("4"); 0 when the text is not one.
+static int parseJobCount(const string& s) {
+    if (s.empty() || s.size() > 4) return 0;
+    for (char c : s) if (c < '0' || c > '9') return 0;
+    return stoi(s);
+}
+
+// Recognize -j N, -jN, --jobs N and --jobs=N at args[i]. Returns 1 and stores
+// the count (advancing i past a separate value), 0 when args[i] is not a jobs
+// flag, -1 after reporting a missing or invalid value.
+static int parseJobsFlag(const vector<string>& args, size_t& i, int& jobs) {
+    const string& a = args[i];
+    string value;
+    if (a == "-j" || a == "--jobs") {
+        if (i + 1 >= args.size()) {
+            cerr << "Error: " << a << " requires a value\n";
+            return -1;
+        }
+        value = args[++i];
+    } else if (a.rfind("--jobs=", 0) == 0) {
+        value = a.substr(7);
+    } else if (a.size() > 2 && a.rfind("-j", 0) == 0) {
+        value = a.substr(2);
+    } else {
+        return 0;
+    }
+    jobs = parseJobCount(value);
+    if (jobs == 0) {
+        cerr << "Error: invalid job count '" << value << "' (expected a positive number)\n";
+        return -1;
+    }
+    return 1;
+}
+
 // Re-pin the Visual Studio toolchain in CMakePresets.json after Visual Studio
 // changed (#357): detect VS again and replace only the "windows" preset's
 // CMAKE_MAKE_PROGRAM and INCLUDE / LIB / PATH. The targets, web backend, IDE
@@ -3375,6 +3421,8 @@ static int cmdBuild(const vector<string>& args) {
     bool clean = false;
     bool mcp = false;
     bool warnings = false;
+    bool dryRun = false;
+    int jobs = 0;           // 0 = not given
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
         if (i + 1 >= args.size()) {
@@ -3386,8 +3434,12 @@ static int cmdBuild(const vector<string>& args) {
     };
 
     for (size_t i = 0; i < args.size(); ++i) {
+        const int jobsFlag = parseJobsFlag(args, i, jobs);
+        if (jobsFlag < 0) return 1;
+        if (jobsFlag > 0) continue;
         const string& a = args[i];
         if (a == "-h" || a == "--help") { printBuildHelp(); return 0; }
+        else if (a == "--dry-run") dryRun = true;
         else if (a == "--web")     targetPreset = "web";
         else if (a == "--android") targetPreset = "android";
         else if (a == "--ios")     targetPreset = "ios";
@@ -3436,6 +3488,10 @@ static int cmdBuild(const vector<string>& args) {
     // e.g. `trusscli build --web` implies `trusscli update --web`.
     string cmakeListsPath = projectPath + "/CMakeLists.txt";
     string presetsFile = projectPath + "/CMakePresets.json";
+    if ((!fs::exists(cmakeListsPath) || !fs::exists(presetsFile)) && dryRun) {
+        cerr << "Error: --dry-run needs the project's build files; run 'trusscli update' first.\n";
+        return 1;
+    }
     if (!fs::exists(cmakeListsPath) || !fs::exists(presetsFile)) {
         cout << "[update] Build files not found, running 'trusscli update' first...\n";
         vector<string> updateArgs;
@@ -3464,17 +3520,27 @@ static int cmdBuild(const vector<string>& args) {
         ToolchainCheck toolchain;
         checkWindowsPresetToolchain(projectPath, &toolchain);
         if (shouldRefreshPresets(kNativePreset, targetPreset, toolchain)) {
-            if (int rrc = refreshWindowsPresets(projectPath, toolchain)) return rrc;
+            if (dryRun) {
+                cout << "[dry-run] would re-pin the Visual Studio paths in CMakePresets.json "
+                        "and remove the native build folder\n";
+            } else if (int rrc = refreshWindowsPresets(projectPath, toolchain)) {
+                return rrc;
+            }
         }
     }
 
     string cmake = findCMake();
 
-    // Determine parallel job count. On Linux, limit based on available RAM
-    // (~1.5 GB per compile job) to prevent OOM on memory-constrained SBCs.
+    // Determine the parallel job count. -j wins. Without it, Linux limits jobs
+    // by available RAM (~1.5 GB per compile job) to prevent OOM on
+    // memory-constrained SBCs; elsewhere the build tool decides.
     string parallelArg = "--parallel";
+    if (jobs > 0) {
+        parallelArg = "--parallel=" + to_string(jobs);
+        cout << "  * Parallel jobs: " << jobs << " (-j)\n";
+    }
 #ifdef __linux__
-    {
+    else {
         ifstream meminfo("/proc/meminfo");
         string line;
         long availKB = 0;
@@ -3486,18 +3552,18 @@ static int cmdBuild(const vector<string>& args) {
         }
         if (availKB > 0) {
             const long kbPerJob = 1572864; // 1.5 GiB
-            int jobs = max(1, (int)(availKB / kbPerJob));
+            int ramJobs = max(1, (int)(availKB / kbPerJob));
             // Cap at CPU count + 2
             long cpus = sysconf(_SC_NPROCESSORS_ONLN);
-            if (cpus > 0 && jobs > (int)cpus + 2) jobs = (int)cpus + 2;
+            if (cpus > 0 && ramJobs > (int)cpus + 2) ramJobs = (int)cpus + 2;
             // Only show message if RAM is the limiting factor
             if (availKB < kbPerJob * (cpus > 0 ? cpus : 4)) {
                 float availGB = availKB / 1048576.0f;
-                cout << "  * Parallel jobs limited to " << jobs
+                cout << "  * Parallel jobs limited to " << ramJobs
                      << " (" << fixed << setprecision(1) << availGB
                      << " GB RAM available, ~1.5 GB per job)\n";
             }
-            parallelArg = "--parallel=" + to_string(jobs);
+            parallelArg = "--parallel=" + to_string(ramJobs);
         }
     }
 #endif
@@ -3534,6 +3600,22 @@ static int cmdBuild(const vector<string>& args) {
     cfg.insert(cfg.end(), plan.defines.begin(), plan.defines.end());
     bool needConfigure = plan.configure;
 
+    if (dryRun) {
+        // Print the commands instead of running them (one line each).
+        auto printCommand = [](const vector<string>& argv) {
+            cout << "[dry-run]";
+            for (const string& a : argv) {
+                if (a.find_first_of(" \t\"") == string::npos && !a.empty()) cout << ' ' << a;
+                else cout << " \"" << a << '"';
+            }
+            cout << "\n";
+        };
+        if (needConfigure) printCommand(cfg);
+        printCommand(cmd);
+        fs::current_path(savedCwd);
+        return 0;
+    }
+
     int rc = 0;
     if (needConfigure) rc = runProcess(cfg);
     if (rc == 0) rc = runProcess(cmd);
@@ -3567,6 +3649,7 @@ static void printRunHelp() {
          << "      --release              Build type: Release (-O3, no debug info)\n"
          << "      --mcp                  Enable MCP development tools for this build\n"
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
+         << "  -j, --jobs <N>             Run at most N compile jobs at once\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "  -h, --help                 Show this help\n";
 }
@@ -3578,6 +3661,7 @@ static int cmdRun(const vector<string>& args) {
     string buildType;  // "" = default; else Debug/Release/RelWithDebInfo
     bool mcp = false;
     bool warnings = false;
+    int jobs = 0;           // 0 = not given
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
         if (i + 1 >= args.size()) {
@@ -3589,6 +3673,9 @@ static int cmdRun(const vector<string>& args) {
     };
 
     for (size_t i = 0; i < args.size(); ++i) {
+        const int jobsFlag = parseJobsFlag(args, i, jobs);
+        if (jobsFlag < 0) return 1;
+        if (jobsFlag > 0) continue;
         const string& a = args[i];
         if (a == "-h" || a == "--help") { printRunHelp(); return 0; }
         else if (a == "--web")      target = "web";
@@ -3656,6 +3743,7 @@ static int cmdRun(const vector<string>& args) {
     }
     if (mcp) buildArgs.push_back("--mcp");
     if (warnings) buildArgs.push_back("--warnings");
+    if (jobs > 0) { buildArgs.push_back("-j"); buildArgs.push_back(to_string(jobs)); }
     if (!explicitPath.empty()) { buildArgs.push_back("-p"); buildArgs.push_back(explicitPath); }
 
     int buildRc = cmdBuild(buildArgs);
@@ -3883,8 +3971,8 @@ _trusscli() {
             local -a opts
             case "$words[2]" in
                 update) opts=('-p:Project path' '--path:Project path' '--web:Enable web' '--android:Enable android' '--ios:Enable ios' '--no-web:Disable web' '--no-android:Disable android' '--no-ios:Disable ios' '--ide:IDE type' '--tc-root:TrussC root') ;;
-                build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--clean:Clean first' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
-                run)    opts=('--web:Web' '--android:Android' '--ios:iOS' '--session:Display session' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
+                build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--clean:Clean first' '--dry-run:Print cmake commands only' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-j:Parallel jobs' '--jobs:Parallel jobs' '-p:Project path' '--path:Project path') ;;
+                run)    opts=('--web:Web' '--android:Android' '--ios:iOS' '--session:Display session' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-j:Parallel jobs' '--jobs:Parallel jobs' '-p:Project path' '--path:Project path') ;;
                 clean)  opts=('--all:Delete all build dirs' '-p:Project path' '--path:Project path') ;;
             esac
             _describe 'option' opts
@@ -3970,8 +4058,8 @@ _trusscli() {
             esac
             case "${COMP_WORDS[1]}" in
                 update) COMPREPLY=($(compgen -W "-p --path --web --android --ios --no-web --no-android --no-ios --ide --tc-root" -- "$cur")) ;;
-                build)  COMPREPLY=($(compgen -W "--web --android --ios --debug --relwithdebinfo --release --clean --mcp --warnings -p --path" -- "$cur")) ;;
-                run)    COMPREPLY=($(compgen -W "--web --android --ios --session --debug --relwithdebinfo --release --mcp --warnings -p --path" -- "$cur")) ;;
+                build)  COMPREPLY=($(compgen -W "--web --android --ios --debug --relwithdebinfo --release --clean --dry-run --mcp --warnings -j --jobs -p --path" -- "$cur")) ;;
+                run)    COMPREPLY=($(compgen -W "--web --android --ios --session --debug --relwithdebinfo --release --mcp --warnings -j --jobs -p --path" -- "$cur")) ;;
                 clean)  COMPREPLY=($(compgen -W "--all -p --path" -- "$cur")) ;;
             esac
             ;;
