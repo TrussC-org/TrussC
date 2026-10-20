@@ -1696,6 +1696,7 @@ description.ja = "音声ソースのミキサーボイスを開始する。"
 description.ko = "오디오 소스의 믹서 보이스를 시작한다."
 details.en = '''
 - Accepts a shared `SoundSource`, either an eager `SoundBuffer` or streaming `SoundStream`, and returns a shared `PlayingSound` handle; normally called through `Sound::play()`.
+- The engine keeps its own shared pointer to the voice, so discarding the `shared_ptr<PlayingSound>` returned directly by this function does not stop playback.
 - Starts from position `0` with volume `1`, pan `0`, speed `1`, looping disabled, and playback unpaused; the voice retains shared ownership of its source.
 - Returns null for a null source, an uninitialized engine, exhausted engine slots, a reached per-source streaming limit, or a stream decoder open failure. It does not initialize the engine automatically.
 - Rejected plays other than a null source are counted in `getStats()`; paused voices still occupy playback slots and count toward streaming limits.
@@ -1703,6 +1704,7 @@ details.en = '''
 '''
 details.ja = '''
 - 読み込み済みの `SoundBuffer` またはストリーミング用の `SoundStream` を共有 `SoundSource` として受け取り、共有 `PlayingSound` ハンドルを返します。通常は `Sound::play()` 経由で呼びます。
+- エンジンもボイスへの共有ポインタを保持するため、この関数が直接返した `shared_ptr<PlayingSound>` を破棄しても再生は停止しません。
 - 位置 `0`、音量 `1`、パン `0`、速度 `1`、ループなし、一時停止なしで開始します。ボイスはソースの共有所有権を保持します。
 - ソースが null、エンジンが未初期化、エンジンの空きスロットがない、ストリームのソース別上限に達した、ストリームのデコーダーを開けない場合は null を返します。エンジンを自動では初期化しません。
 - null ソース以外の再生拒否は `getStats()` に数えられます。一時停止中の再生もスロットを占有し、ストリームの上限に数えられます。
@@ -1710,6 +1712,7 @@ details.ja = '''
 '''
 details.ko = '''
 - 미리 로드된 `SoundBuffer`나 스트리밍용 `SoundStream`을 공유 `SoundSource`로 받아 공유 `PlayingSound` 핸들을 반환합니다. 보통 `Sound::play()`를 통해 호출합니다.
+- 엔진도 보이스의 공유 포인터를 유지하므로 이 함수가 직접 반환한 `shared_ptr<PlayingSound>`를 버려도 재생은 정지하지 않습니다.
 - 위치 `0`, 볼륨 `1`, 팬 `0`, 속도 `1`, 반복 없음, 일시 정지 없음으로 시작합니다. 보이스는 소스의 공유 소유권을 유지합니다.
 - 소스가 null이거나, 엔진이 초기화되지 않았거나, 엔진 슬롯이 가득 찼거나, 스트림 소스별 한도에 도달했거나, 스트림 디코더를 열지 못하면 null을 반환합니다. 엔진을 자동으로 초기화하지 않습니다.
 - null 소스를 제외한 재생 거부는 `getStats()`에 집계합니다. 일시 정지한 재생도 슬롯을 차지하며 스트리밍 한도에 포함됩니다.
@@ -3590,6 +3593,8 @@ description.ko = "알파 값을 가진 sRGB 색상을 나타낸다."
 details.en = '''
 - `Color(r, g, b, a = 1.0f)` stores floating-point RGBA components, normally in the 0–1 range. `Color(gray, a = 1.0f)` sets all three RGB components to `gray`; the default constructor creates opaque black.
 - Use `Color::fromBytes()` for 0–255 components and `Color::fromHex()` for `0xRRGGBB`. Pass `true` as the second argument to `fromHex()` to read `0xRRGGBBAA`; `toHex(true)` includes alpha and clamps and truncates each component to a byte.
+- The predefined colors `colors::darkGray`, `colors::gray`, and `colors::dimGray` have equal RGB channels of `0.662745f`, `0.501961f`, and `0.411765f`, respectively, with alpha `1.0f`; `darkGray` is lighter than `gray`.
+- `colors::green` and `colors::lime` both have RGBA values `(0, 1, 0, 1)`, so swapping them does not change the color value.
 - `toLinear()`, `toHSB()`, `toOKLab()`, and `toOKLCH()` convert to the corresponding color type and preserve alpha. The static factories `fromLinear()`, `fromHSB()`, `fromOKLab()`, and `fromOKLCH()` convert back to `Color`.
 - `lerp(target, t)` interpolates in OKLab space. Use `lerpRGB()`, `lerpLinear()`, `lerpHSB()`, or `lerpOKLCH()` to choose another space; alpha is interpolated linearly.
 - For all five color types, constructors, color-space conversions, and interpolation do not clamp component values. Arithmetic on `Color` and `ColorLinear` does not clamp components. Interpolation also leaves `t` unclamped: use 0–1 for interpolation and values outside that range for extrapolation.
@@ -3599,6 +3604,8 @@ details.en = '''
 details.ja = '''
 - `Color(r, g, b, a = 1.0f)` は浮動小数点の RGBA 成分を保持し、通常は 0〜1 の範囲で指定します。`Color(gray, a = 1.0f)` は RGB の 3 成分をすべて `gray` にし、デフォルトコンストラクターは不透明な黒を作成します。
 - 0〜255 の成分には `Color::fromBytes()`、`0xRRGGBB` には `Color::fromHex()` を使います。`fromHex()` の第 2 引数に `true` を渡すと `0xRRGGBBAA` として読み込みます。`toHex(true)` はアルファ値も含め、各成分をクランプしてから端数を切り捨ててバイトに変換します。
+- 定義済みの色 `colors::darkGray`、`colors::gray`、`colors::dimGray` は、それぞれ RGB の各成分が `0.662745f`、`0.501961f`、`0.411765f` で、アルファ値は `1.0f` です。`darkGray` は `gray` より明るい色です。
+- `colors::green` と `colors::lime` の RGBA 値はどちらも `(0, 1, 0, 1)` なので、入れ替えても色の値は変わりません。
 - `toLinear()`、`toHSB()`、`toOKLab()`、`toOKLCH()` は対応する色型に変換し、アルファ値を保持します。静的ファクトリー関数の `fromLinear()`、`fromHSB()`、`fromOKLab()`、`fromOKLCH()` は `Color` に変換します。
 - `lerp(target, t)` は OKLab 空間で補間します。別の空間を使う場合は `lerpRGB()`、`lerpLinear()`、`lerpHSB()`、`lerpOKLCH()` を選びます。アルファ値は線形補間します。
 - 5 種類の色型すべてで、コンストラクター、色空間変換、補間は成分値をクランプしません。`Color` と `ColorLinear` の算術演算も成分値をクランプしません。補間係数 `t` もクランプせず、0〜1 で補間し、範囲外の値では外挿します。
@@ -3608,6 +3615,8 @@ details.ja = '''
 details.ko = '''
 - `Color(r, g, b, a = 1.0f)`는 부동소수점 RGBA 성분을 저장하며, 일반적으로 0–1 범위로 지정합니다. `Color(gray, a = 1.0f)`는 RGB 세 성분을 모두 `gray`로 설정하며, 기본 생성자는 불투명한 검정색을 만듭니다.
 - 0–255 성분에는 `Color::fromBytes()`를, `0xRRGGBB`에는 `Color::fromHex()`를 사용합니다. `fromHex()`의 두 번째 인수에 `true`를 전달하면 `0xRRGGBBAA`로 읽습니다. `toHex(true)`는 알파도 포함하며, 각 성분을 클램프한 뒤 소수 부분을 버리고 바이트로 변환합니다.
+- 미리 정의된 색상 `colors::darkGray`, `colors::gray`, `colors::dimGray`는 각각 RGB의 각 성분이 `0.662745f`, `0.501961f`, `0.411765f`이며 알파는 `1.0f`입니다. `darkGray`는 `gray`보다 밝습니다.
+- `colors::green`과 `colors::lime`의 RGBA 값은 모두 `(0, 1, 0, 1)`이므로 서로 바꾸어도 색상 값은 달라지지 않습니다.
 - `toLinear()`, `toHSB()`, `toOKLab()`, `toOKLCH()`는 해당 색상 타입으로 변환하며 알파를 유지합니다. 정적 팩터리 함수인 `fromLinear()`, `fromHSB()`, `fromOKLab()`, `fromOKLCH()`는 `Color`로 변환합니다.
 - `lerp(target, t)`는 OKLab 공간에서 보간합니다. 다른 공간을 사용하려면 `lerpRGB()`, `lerpLinear()`, `lerpHSB()`, `lerpOKLCH()`를 선택합니다. 알파는 선형 보간합니다.
 - 다섯 색상 타입 모두 생성자, 색 공간 변환, 보간에서 성분 값을 클램프하지 않습니다. `Color`와 `ColorLinear`의 산술 연산도 성분 값을 클램프하지 않습니다. 보간 계수 `t`도 클램프하지 않으며, 0–1에서는 보간하고 범위 밖에서는 외삽합니다.
@@ -7686,14 +7695,17 @@ description.ja = "リスナーの接続を明示的に切断する。"
 description.ko = "리스너 연결을 명시적으로 해제한다."
 details.en = '''
 - Returns no value and leaves the token disconnected; repeated calls have no effect, and no exceptions escape.
+- Calling `disconnect()` after the event has finished being destroyed is safe.
 - For removal during `notify()`, pending main-thread calls, and synchronization with callbacks on another thread, see `Event<T>`.
 '''
 details.ja = '''
 - 戻り値はなく、トークンを未接続にします。繰り返し呼んでも影響はなく、例外は外へ送出しません。
+- イベントの破棄が完了したあとでも、`disconnect()` を安全に呼び出せます。
 - `notify()` 中の削除、メインスレッドでの実行待ちの呼び出し、別スレッドのコールバックとの同期については `Event<T>` を参照してください。
 '''
 details.ko = '''
 - 반환값은 없으며 토큰을 연결되지 않은 상태로 만듭니다. 반복해서 호출해도 영향이 없고 예외를 외부로 전달하지 않습니다.
+- 이벤트 소멸이 완료된 뒤에도 `disconnect()`를 안전하게 호출할 수 있습니다.
 - `notify()` 도중의 제거, 메인 스레드에서 실행을 기다리는 호출, 다른 스레드의 콜백과의 동기화는 `Event<T>`를 참조하세요.
 '''
 
@@ -9108,6 +9120,7 @@ description.ko = "로드된 폰트로 텍스트를 그린다."
 details.en = '''
 - Draws UTF-8 `text` at the alignment anchor `(x, y)` using the current color, transform, and rendering target; an unloaded font or empty string draws nothing.
 - The three-argument overload uses the global alignment set by `setTextAlign`, rather than the values stored by `Font::setAlign`; the five-argument overload uses its explicit `Direction h, Direction v` arguments.
+- Missing characters use glyph index `0` in the loaded font; there is no automatic fallback to OS fonts. Load a font that contains the characters you need.
 - Horizontal writing advances left to right and starts a new row at each newline; `WritingMode::VerticalRL` advances top to bottom and starts successive columns to the left. Horizontal tabs advance by four spaces; vertical tabs are ignored.
 - Wrapping, kinsoku, hanging punctuation, and tate-chu-yoko settings affect placement; see `Font::enableWrap` and `Font::forEachGlyph`.
 - Except for the em-normalized result of `Font::getGlyphPath`, font coordinates, sizes, and metrics use logical pixels before the current transform; rasterization uses the DPI scale captured when loading.
@@ -9117,6 +9130,7 @@ details.en = '''
 details.ja = '''
 - UTF-8 の `text` を、揃えの基準点 `(x, y)` に現在の色、変換、描画先で描画します。フォントが未読み込みの場合や文字列が空の場合は何も描画しません。
 - 引数が 3 個の版は、`Font::setAlign` が保持する値ではなく、`setTextAlign` で設定したグローバルな揃えを使います。引数が 5 個の版は、明示した `Direction h, Direction v` を使います。
+- 読み込んだフォントにない文字はグリフ番号 `0` を使い、OS のフォントには自動で切り替わりません。必要な文字を含むフォントを読み込んでください。
 - 横書きは左から右に進み、改行で次の行へ移ります。`WritingMode::VerticalRL` は上から下に進み、改行で左隣の列へ移ります。横書きのタブはスペース 4 個分進み、縦書きのタブは無視します。
 - 折り返し、禁則、ぶら下げ約物、縦中横の設定が配置に反映されます。`Font::enableWrap` と `Font::forEachGlyph` を参照してください。
 - em 単位に正規化される `Font::getGlyphPath` の結果を除き、フォントの座標、サイズ、メトリクスの単位は現在の変換を適用する前の論理ピクセルです。ラスタライズには読み込み時の DPI スケールを使います。
@@ -9126,6 +9140,7 @@ details.ja = '''
 details.ko = '''
 - UTF-8 `text`를 정렬 기준점 `(x, y)`에 현재 색상, 변환 및 렌더링 대상으로 그립니다. 폰트가 로드되지 않았거나 문자열이 비어 있으면 아무것도 그리지 않습니다.
 - 인수가 세 개인 오버로드는 `Font::setAlign`에 저장된 값 대신 `setTextAlign`으로 설정한 전역 정렬을 사용합니다. 인수가 다섯 개인 오버로드는 명시한 `Direction h, Direction v`를 사용합니다.
+- 로드한 폰트에 없는 문자는 글리프 인덱스 `0`을 사용하며 OS 폰트로 자동 전환하지 않습니다. 필요한 문자가 포함된 폰트를 로드해야 합니다.
 - 가로쓰기는 왼쪽에서 오른쪽으로 진행하고 줄바꿈에서 다음 행으로 이동합니다. `WritingMode::VerticalRL`은 위에서 아래로 진행하고 줄바꿈에서 왼쪽 열로 이동합니다. 가로쓰기의 탭은 공백 네 개만큼 진행하며 세로쓰기의 탭은 무시합니다.
 - 자동 줄바꿈, 금칙, 구두점 내어쓰기 및 다테추요코 설정이 배치에 반영됩니다. `Font::enableWrap`과 `Font::forEachGlyph`를 참조하세요.
 - em 단위로 정규화되는 `Font::getGlyphPath`의 결과를 제외하면 폰트 좌표, 크기 및 메트릭은 현재 변환을 적용하기 전의 논리 픽셀 단위입니다. 래스터화에는 로드 시 기록한 DPI 배율을 사용합니다.
@@ -27545,6 +27560,7 @@ details.en = '''
 - Copies share the source and any voice already started. When the last handle sharing a voice is destroyed or overwritten, that voice stops and its playback slot becomes reusable, whether playback is looping or one-shot. Keep playback handles alive, for example as members, to let sounds continue.
 - `play()` stops this handle's previous voice before starting from the beginning; copies sharing that previous voice also observe it stopped. For overlapping one-shots, keep multiple `Sound` objects alive and play them separately.
 - `stop()` releases the voice, including its streaming decoder and file; streaming cleanup can finish on the decoding worker if it is still using them.
+- The default channel mixing mode is `MixMode::Auto`.
 - Defaults are volume 1, centered pan 0, speed 1, and looping disabled. Serialize operations on each handle; audio-listener restrictions are described in `AudioEngine`.
 '''
 details.ja = '''
@@ -27552,6 +27568,7 @@ details.ja = '''
 - コピーは音源と、すでに開始したボイスを共有します。同じボイスを共有する最後のハンドルが破棄または上書きされると、ループ再生でも単発再生でも停止し、再生スロットが再利用可能になります。再生を続けるには、メンバーにするなどしてハンドルを生かしておいてください。
 - `play()` はこのハンドルの前のボイスを停止してから、先頭から再生します。そのボイスを共有するコピーからも停止した状態になります。単発の音を重ねるには、複数の `Sound` オブジェクトを生かしておき、それぞれ再生してください。
 - `stop()` はボイスを解放し、ストリーミングの場合はデコーダとファイルも解放します。デコード用ワーカーがまだ使っている場合、その後始末はワーカー側で完了することがあります。
+- チャンネルのミックス方式の既定値は `MixMode::Auto` です。
 - 既定値は音量 1、中央のパン 0、速度 1、ループ無効です。各ハンドルの操作は順に行ってください。オーディオのリスナー内での制約は `AudioEngine` を参照してください。
 '''
 details.ko = '''
@@ -27559,6 +27576,7 @@ details.ko = '''
 - 복사본은 음원과 이미 시작된 보이스를 공유합니다. 같은 보이스를 공유하는 마지막 핸들이 파괴되거나 덮어써지면 반복 재생과 단발 재생 모두 정지하며 재생 슬롯을 다시 사용할 수 있게 됩니다. 재생을 계속하려면 멤버로 보관하는 등의 방법으로 핸들을 유지해야 합니다.
 - `play()`는 이 핸들의 이전 보이스를 정지한 뒤 처음부터 재생합니다. 이전 보이스를 공유하는 복사본에서도 정지 상태가 됩니다. 단발음을 겹쳐 재생하려면 여러 `Sound` 객체를 유지하고 각각 재생해야 합니다.
 - `stop()`은 보이스를 해제하며 스트리밍의 경우 디코더와 파일도 해제합니다. 디코딩 작업 스레드가 아직 사용 중이면 해당 스레드에서 정리를 마칠 수 있습니다.
+- 채널 믹싱 방식의 기본값은 `MixMode::Auto`입니다.
 - 기본값은 볼륨 1, 중앙 패닝 0, 속도 1, 반복 비활성화입니다. 각 핸들의 작업은 순서대로 수행해야 합니다. 오디오 리스너 내부의 제약은 `AudioEngine`을 참조하세요.
 '''
 of_category = "audio-types"
@@ -28284,16 +28302,19 @@ details.en = '''
 - `speed` is a playback-rate multiplier: `1.0f` is normal speed and the default, and `2.0f` doubles the speed and raises the pitch. The setting updates the current voice and is retained for subsequent `play()` calls.
 - Values are clamped to `[-10, 10]`. Negative values play fully decoded sounds backward from the current position; use `setPosition()` after `play()` to start near the end. If a streaming source is already loaded, negative input is clamped to `0`.
 - A speed of `0` freezes the position while continuing to output the same interpolated sample; it does not pause or release the voice. Positive values have no minimum above zero.
+- For non-looping reverse playback, call `setSpeed(0)`, `play()`, `setPosition(getDuration())`, then `setSpeed(-1)` on the sound; starting with negative speed can stop the voice before you seek, and seeking does not restart it.
 '''
 details.ja = '''
 - `speed` は再生速度の倍率です。`1.0f` が通常速度で既定値、`2.0f` は速度が 2 倍になり、音程も上がります。現在のボイスに反映され、その後の `play()` にも設定が引き継がれます。
 - 値は `[-10, 10]` に制限されます。全体をデコード済みの音声では、負の値で現在位置から逆再生します。末尾付近から始めるには `play()` の後に `setPosition()` を呼び出してください。ストリーミングの音源がすでに読み込まれている場合、負の入力値は `0` になります。
 - `0` にすると位置を進めず、同じ補間サンプルを出力し続けます。一時停止やボイスの解放は行いません。正の値には、ゼロより大きい最小値の制限はありません。
+- ループなしで逆再生するには、同じ音声に `setSpeed(0)`、`play()`、`setPosition(getDuration())`、`setSpeed(-1)` の順で呼び出します。負の速度で開始するとシーク前にボイスが停止する場合があり、シークしても再生は再開しません。
 '''
 details.ko = '''
 - `speed`는 재생 속도의 배율입니다. `1.0f`는 기본값인 일반 속도이며, `2.0f`는 속도가 두 배가 되고 음높이도 올라갑니다. 현재 보이스에 반영되며 이후 `play()` 호출에도 설정이 유지됩니다.
 - 값은 `[-10, 10]`으로 제한됩니다. 전체가 디코딩된 사운드는 음수 값으로 현재 위치부터 역재생합니다. 끝부분에서 시작하려면 `play()` 다음에 `setPosition()`을 호출합니다. 스트리밍 소스가 이미 로드되어 있으면 음수 입력은 `0`으로 제한됩니다.
 - `0`은 위치를 고정하고 같은 보간 샘플을 계속 출력합니다. 일시 정지하거나 보이스를 해제하지는 않습니다. 양수 값에는 0보다 큰 최솟값 제한이 없습니다.
+- 반복 없이 역재생하려면 같은 사운드에서 `setSpeed(0)`, `play()`, `setPosition(getDuration())`, `setSpeed(-1)` 순서로 호출합니다. 음수 속도로 시작하면 시크 전에 보이스가 정지할 수 있으며, 시크해도 재생을 다시 시작하지 않습니다.
 '''
 related = ["Sound", "Sound::getSpeed", "Sound::play", "Sound::setPosition"]
 snippet = '''
@@ -31110,14 +31131,17 @@ description.ko = "클라이언트의 미완료 전송 바이트 수를 반환한
 details.en = '''
 - Returns the total payload bytes accepted but not yet completed for `clientId`, including the payload currently being written. Returns 0 for an unknown client.
 - The count decreases by the whole payload size when that send completes, rather than after each partial write. Compare it with `getSendAsyncBufferSize()` to monitor queue pressure; see `TcpServer::setSendAsyncBufferSize` for the threshold rules.
+- To estimate pending bytes across all clients, iterate `server.getClientIds()` and sum `server.getSendAsyncPendingBytes(id)`; the counts can change between calls.
 '''
 details.ja = '''
 - `clientId` に対して受け付けられ、まだ完了していないデータの合計バイト数を返します。書き込み中のデータも含みます。存在しないクライアントでは 0 を返します。
 - 部分的な書き込みのたびではなく、その送信が完了した時点でデータ全体のサイズを差し引きます。`getSendAsyncBufferSize()` と比較するとキューの混雑状況を確認できます。しきい値の規則は `TcpServer::setSendAsyncBufferSize` を参照してください。
+- 全クライアントの未完了バイト数の目安は、`server.getClientIds()` を反復して `server.getSendAsyncPendingBytes(id)` を合計すると求められます。呼び出しの間に値が変わる場合があります。
 '''
 details.ko = '''
 - `clientId`에 대해 수락되었으나 아직 완료되지 않은 데이터의 총 바이트 수를 반환하며, 현재 쓰는 중인 데이터도 포함합니다. 존재하지 않는 클라이언트이면 0을 반환합니다.
 - 부분 쓰기마다 줄어드는 것이 아니라 해당 전송이 완료될 때 데이터 전체 크기만큼 줄어듭니다. `getSendAsyncBufferSize()`와 비교하여 큐에 데이터가 쌓이는 정도를 확인할 수 있습니다. 기준값 규칙은 `TcpServer::setSendAsyncBufferSize`에 설명되어 있습니다.
+- 전체 클라이언트의 미완료 바이트 수를 추정하려면 `server.getClientIds()`를 순회하며 `server.getSendAsyncPendingBytes(id)`를 합산합니다. 호출 사이에 값이 바뀔 수 있습니다.
 '''
 keywords = ["backpressure", "queue", "pending", "async"]
 related = ["TcpServer::sendAsync", "TcpServer::setSendAsyncBufferSize"]
@@ -31304,6 +31328,7 @@ description.ko = "지정한 클라이언트의 큐에 데이터를 넣는다."
 details.en = '''
 - Returns without waiting for network writes. The pointer-and-byte-count and `string` overloads copy the payload; the `vector<char>&&` overload takes ownership by moving it. Byte format follows `TcpServer::send`.
 - A successful `SendResult` has a nonzero `id` matched by `onSendComplete`. A false result means nothing was queued, with `error` set to `NotRunning`, `ClientNotFound`, `Disconnected`, or `QueueFull`.
+- On a running server, an unknown `clientId` returns `SendResult{SendError::ClientNotFound, 0}`, which evaluates to false, and emits `onError` with the message `"Client not found"`.
 - A full queue returns `QueueFull` without disconnecting the client. See `TcpServer::setSendAsyncBufferSize` for the threshold rules and `TcpServer::onError` for error notifications.
 - Each client has a writer thread that processes accepted sends in queue order, including synchronous sends. Calls from different threads are ordered when they enter the queue.
 - Use this from frame callbacks when a slow peer must not make the frame wait. See `TcpServer::onSendComplete` for completion and `TcpServer::setSendTimeout` for write timeouts.
@@ -31311,6 +31336,7 @@ details.en = '''
 details.ja = '''
 - ネットワーク書き込みを待たずに戻ります。ポインタとバイト数を受け取る版と `string` 版はデータをコピーし、`vector<char>&&` 版はムーブして所有権を受け取ります。バイト列の形式は `TcpServer::send` と同じです。
 - 成功した `SendResult` の `id` は 0 以外で、`onSendComplete` の ID と対応します。偽の結果は何もキュー投入されなかったことを示し、`error` は `NotRunning`、`ClientNotFound`、`Disconnected`、`QueueFull` のいずれかです。
+- 動作中のサーバでは、存在しない `clientId` に対して偽と評価される `SendResult{SendError::ClientNotFound, 0}` を返し、メッセージ `"Client not found"` で `onError` を通知します。
 - キューが満杯の場合は、クライアントを切断せずに `QueueFull` を返します。しきい値の規則は `TcpServer::setSendAsyncBufferSize`、エラー通知は `TcpServer::onError` を参照してください。
 - 各クライアントには送信スレッドがあり、同期送信も含め、受け付けた送信をキューの順序で処理します。異なるスレッドからの呼び出しは、キューに入った時点で順序が決まります。
 - 通信相手が遅くてもフレームを待機させたくない場合に、フレームのコールバックから使ってください。完了は `TcpServer::onSendComplete`、書き込みのタイムアウトは `TcpServer::setSendTimeout` を参照してください。
@@ -31318,6 +31344,7 @@ details.ja = '''
 details.ko = '''
 - 네트워크 쓰기를 기다리지 않고 반환합니다. 포인터와 바이트 수를 받는 오버로드와 `string` 오버로드는 데이터를 복사하며, `vector<char>&&` 오버로드는 이동하여 소유권을 받습니다. 바이트 형식은 `TcpServer::send`와 같습니다.
 - 성공한 `SendResult`의 `id`는 0이 아니며 `onSendComplete`의 ID와 대응합니다. 거짓 결과는 큐에 아무것도 들어가지 않았음을 의미하며, `error`는 `NotRunning`, `ClientNotFound`, `Disconnected`, `QueueFull` 중 하나입니다.
+- 실행 중인 서버에서 존재하지 않는 `clientId`를 전달하면 거짓으로 평가되는 `SendResult{SendError::ClientNotFound, 0}`을 반환하고 메시지 `"Client not found"`로 `onError`를 알립니다.
 - 큐가 가득 차면 클라이언트 연결을 해제하지 않고 `QueueFull`을 반환합니다. 기준값 규칙은 `TcpServer::setSendAsyncBufferSize`에, 오류 알림은 `TcpServer::onError`에 설명되어 있습니다.
 - 각 클라이언트에는 송신 스레드가 있으며, 동기 전송을 포함하여 수락된 전송을 큐 순서대로 처리합니다. 서로 다른 스레드에서 호출하면 큐에 들어갈 때 순서가 정해집니다.
 - 상대가 느려도 프레임을 대기시키지 않아야 할 때 프레임 콜백에서 사용합니다. 완료는 `TcpServer::onSendComplete`에, 쓰기 타임아웃은 `TcpServer::setSendTimeout`에 설명되어 있습니다.
@@ -33440,16 +33467,19 @@ description.ko = "재생 전 대기 시간을 설정한다."
 details.en = '''
 - `delay(float seconds)` sets a delay in seconds before the first iteration and each repeat; the default is `0`, and nonpositive values do not add a wait.
 - `start()` copies this setting into the pending delay; changing it does not alter a delay already in progress.
+- If an update exceeds the remaining delay, playback advances by the excess time in the same update.
 - Returns the same tween for chaining.
 '''
 details.ja = '''
 - `delay(float seconds)` は、最初の再生と各繰り返しの前に待つ時間を秒で設定します。既定値は `0` で、0 以下では待ち時間を追加しません。
 - `start()` はこの設定を待ち時間として取り込みます。設定を変更しても、すでに進行中の待ち時間は変わりません。
+- 更新間隔が残りの待ち時間を超えた場合は、同じ更新で超過分だけ再生を進めます。
 - チェインできるように同じトゥイーンを返します。
 '''
 details.ko = '''
 - `delay(float seconds)`는 첫 재생과 각 반복 전에 기다릴 시간을 초 단위로 설정합니다. 기본값은 `0`이며, 0 이하이면 대기 시간을 추가하지 않습니다.
 - `start()`는 이 설정을 대기 시간으로 복사합니다. 설정을 변경해도 이미 진행 중인 대기 시간은 바뀌지 않습니다.
+- 갱신 간격이 남은 대기 시간을 초과하면 같은 갱신에서 초과한 시간만큼 재생을 진행합니다.
 - 체이닝할 수 있도록 같은 트윈을 반환합니다.
 '''
 
@@ -33668,16 +33698,19 @@ description.ja = "現在のイージング後の値を返す。"
 description.ko = "현재 이징이 적용된 값을 반환한다."
 details.en = '''
 - Evaluates the easing curve at `getProgress()` and returns the interpolated value as `T`; a reversed yoyo iteration interpolates from the end value toward the start value.
+- `getValue()` does not clamp the eased factor or the returned value; for `Tween<float>`, curves such as `EaseType::Back` can produce values outside the start-to-end range, including negative values when easing in from `0` to `1`.
 - Does not advance playback. It recalculates on every call, including while paused or complete, so a custom function is evaluated each time.
 - `float` uses arithmetic interpolation; other types must provide `a.lerp(b, t)`. See `Tween::start` for automatic updates and lifetime.
 '''
 details.ja = '''
 - `getProgress()` の位置でイージングカーブを評価し、補間した値を `T` として返します。反転中の yoyo 反復では、終了値から開始値へ補間します。
+- `getValue()` はイージング後の係数や戻り値を範囲内に制限しません。`Tween<float>` では、`EaseType::Back` などのカーブで開始値と終了値の範囲を超えることがあり、`0` から `1` へのイーズインでは負の値にもなります。
 - 再生は進めません。一時停止中や完了後も呼ぶたびに計算し直すため、カスタム関数も毎回評価します。
 - `float` は算術式で補間し、ほかの型には `a.lerp(b, t)` が必要です。自動更新と寿命については `Tween::start` を参照してください。
 '''
 details.ko = '''
 - `getProgress()` 위치에서 이징 곡선을 평가하고 보간한 값을 `T`로 반환합니다. 반전된 yoyo 반복에서는 종료 값에서 시작 값으로 보간합니다.
+- `getValue()`는 이징이 적용된 계수나 반환값을 범위 안으로 제한하지 않습니다. `Tween<float>`에서는 `EaseType::Back` 같은 곡선이 시작값과 종료값의 범위를 벗어날 수 있으며, `0`에서 `1`로 이즈인할 때 음수가 될 수도 있습니다.
 - 재생을 진행하지 않습니다. 일시정지 중이나 완료 후에도 호출할 때마다 다시 계산하므로 커스텀 함수도 매번 평가합니다.
 - `float`는 산술식으로 보간하며, 다른 타입은 `a.lerp(b, t)`를 제공해야 합니다. 자동 갱신과 수명은 `Tween::start`를 참조하세요.
 '''
@@ -43162,15 +43195,21 @@ description.ja = "2つの角度の範囲で円弧を描画する。"
 description.ko = "두 각도 사이의 원호를 그린다."
 details.en = '''
 - Draws a circular arc centered at `(x, y)` (or `Vec3 center` for 3D) with the given `radius`, spanning `angleBegin` to `angleEnd` **radians** — use `TAU`/`HALF_TAU`/`QUARTER_TAU`, not degrees; see [`rotate`](#rotate) for the radians-vs-degrees convention used across TrussC. Angles increase in the mathematical (counter-clockwise) direction, but because `y` grows downward on screen (see [`drawRect`](#drawRect)), an increasing angle visually sweeps clockwise: `0` points right, and `QUARTER_TAU` points down. A quick semicircle is `drawArc(x, y, r, 0, HALF_TAU)`.
+- The span is `angleEnd - angleBegin`, with no automatic wrapping through `TAU`; from `5.5` to `0.5`, angles decrease over `5.0` radians.
 - **Stroke** draws just the open curve. **Fill** is the one shape in this group where fill and stroke do not share the same boundary: it closes the arc to the center as a pie slice, matching p5.js/Processing — convenient since filling a partial arc almost always means "I want a pie slice." If you need a different closure (a chord, an open fill, or a custom shape), build it yourself from [`appendArc`](#appendArc) inside [`beginShape`](#beginShape)/`endShape()`, which emits only the rim points. Segment count follows the current curve settings — see [`drawCurve`](#drawCurve).
+- Draws nothing when `radius <= 0` or `angleBegin == angleEnd`.
 '''
 details.ja = '''
 - 中心 `(x, y)`（3Dの場合は `Vec3 center`）、半径 `radius` の円弧を、`angleBegin` から `angleEnd` まで**ラジアン**で描画します。角度には度数ではなく `TAU`/`HALF_TAU`/`QUARTER_TAU` を使ってください。ラジアンと度数の使い分けについては [`rotate`](#rotate) を参照してください。角度は数学的な（反時計回りの）方向に増加しますが、画面では `y` が下方向に増えるため（[`drawRect`](#drawRect) 参照）、角度が増えると見た目には時計回りに進みます。`0` は右方向、`QUARTER_TAU` は下方向を指します。半円を手早く描くには`drawArc(x, y, r, 0, HALF_TAU)` とします。
+- 角度の範囲は `angleEnd - angleBegin` で、`TAU` をまたぐ自動調整は行いません。`5.5` から `0.5` では、角度が減る方向に `5.0` ラジアン進みます。
 - **輪郭線**（stroke）の場合は開いた曲線だけが描かれます。**塗りつぶし**（fill）はこのグループの中で唯一、塗りと輪郭線で境界が一致しない図形です。p5.jsやProcessingと同様に、中心まで閉じた扇形として塗りつぶされます。これは意図的な仕様で、部分的な弧を塗りつぶすときはほとんどの場合「扇形にしたい」ためです。別の閉じ方（弦、開いたままの塗りつぶし、独自の形状）が必要な場合は、[`beginShape`](#beginShape) / `endShape()` の中で、輪郭の点だけを生成する [`appendArc`](#appendArc) を使って自分で組み立ててください。分割数は現在のカーブ設定に従います。詳しくは [`drawCurve`](#drawCurve) を参照してください。
+- `radius <= 0` または `angleBegin == angleEnd` の場合は何も描画しません。
 '''
 details.ko = '''
 - 중심 `(x, y)`(3D에서는 `Vec3 center`), 반지름 `radius`인 원호를 `angleBegin`부터 `angleEnd`까지 **라디안**으로 그립니다. 각도에는 도(degree)가 아니라 `TAU`/`HALF_TAU`/`QUARTER_TAU`를 사용하세요. 라디안과 도 사용 구분에 대해서는 [`rotate`](#rotate)를 참조하세요. 각도는 수학적인(반시계 방향) 방향으로 증가하지만, 화면에서는 `y`가 아래로 증가하므로 ([`drawRect`](#drawRect) 참조) 각도가 증가하면 시각적으로는 시계 방향으로 진행합니다. `0`은 오른쪽, `QUARTER_TAU`는 아래쪽을 가리킵니다. 반원을 빠르게 그리려면 `drawArc(x, y, r, 0, HALF_TAU)`를 사용합니다.
+- 각도 범위는 `angleEnd - angleBegin`이며 `TAU`를 넘도록 자동 조정하지 않습니다. `5.5`에서 `0.5`까지는 각도가 감소하는 방향으로 `5.0`라디안 진행합니다.
 - **윤곽선**(stroke)은 열린 곡선만 그립니다. **채우기**(fill)는 이 그룹에서 유일하게 채우기와 윤곽선의 경계가 일치하지 않는 도형입니다. p5.js나 Processing과 같이 중심까지 닫힌 부채꼴로 채워집니다. 이는 의도된 동작으로, 부분적인 호를 채우는 것은 대부분 "부채꼴을 원한다"는 뜻이기 때문입니다. 다른 방식으로 닫고 싶다면(현, 열린 채우기, 커스텀 형태), 윤곽 점만 생성하는 [`appendArc`](#appendArc)를 [`beginShape`](#beginShape) / `endShape()` 안에서 직접 사용해 구성하세요. 분할 수는 현재의 커브 설정을 따릅니다. 자세한 내용은 [`drawCurve`](#drawCurve)를 참조하세요.
+- `radius <= 0` 또는 `angleBegin == angleEnd`이면 아무것도 그리지 않습니다.
 '''
 related = ["appendArc", "drawCircle"]
 snippet = '''
@@ -43195,6 +43234,7 @@ drawBezier(Vec3(50, 150, 0), Vec3(100, 20, 0),
            Vec3(200, 20, 0), Vec3(250, 150, 0));
 ```
 - The curve is tessellated into line segments using the current curve quality setting — see [`drawCurve`](#drawCurve) for the Tolerance/Resolution modes and their defaults. Like [`drawLine`](#drawLine), `drawBezier` always draws a thin (1px) line strip: it ignores [`fill`](#fill)/[`noFill`](#noFill) and is not affected by the current stroke weight, because an open curve has no natural fillable interior. For a filled curved shape, or a thick stroked curve, build the points with [`Path::bezierTo`](#Path::bezierTo) or feed sampled points into [`beginStroke`](#beginStroke).
+- The vector overload draws nothing with fewer than two control points and draws a straight line with exactly two.
 '''
 details.ja = '''
 - ベジェ曲線をポリラインとして描画します。`drawBezier(p0, p1, p2, p3)` は3 次（制御点 4 個）、`drawBezier(p0, p1, p2)` は 2 次（制御点 3 個）、`drawBezier(std::vector<Vec3>)` は与えた制御多角形からより高い次数を扱います（制御点が 2 個なら直線、3 個・4 個なら高速な 2 次・3 次の経路を使います）。既定の Tolerance モードでは、vector 版が受け付ける制御点は 64 個までです。それを超えると警告を出して呼び出しを拒否し、何も描画しません。その場合は3 次ベジェをつなげてください。
@@ -43203,6 +43243,7 @@ drawBezier(Vec3(50, 150, 0), Vec3(100, 20, 0),
            Vec3(200, 20, 0), Vec3(250, 150, 0));
 ```
 - 曲線は現在の曲線品質設定に従って線分に分割されます。Tolerance / Resolutionの 2 つのモードとそのデフォルト値については [`drawCurve`](#drawCurve) を参照してください。[`drawLine`](#drawLine) と同様に `drawBezier` は常に細い（1px）折れ線として描かれます。開いた曲線には自然な塗りつぶし領域がないため、[`fill`](#fill)/[`noFill`](#noFill) の設定は無視され、現在の線の太さの影響も受けません。塗りつぶされた曲線形状や太い線幅の曲線が必要な場合は、[`Path::bezierTo`](#Path::bezierTo) で点を組み立てるか、サンプリングした点を[`beginStroke`](#beginStroke) に渡してください。
+- vector 版は制御点が 2 個未満なら何も描画せず、ちょうど 2 個なら直線を描画します。
 '''
 details.ko = '''
 - 베지어 곡선을 폴리라인으로 그립니다. `drawBezier(p0, p1, p2, p3)`는 3차 (제어점 4개), `drawBezier(p0, p1, p2)`는 2차(제어점 3개), `drawBezier(std::vector<Vec3>)`는 주어진 제어 다각형으로 더 높은 차수를 처리합니다(제어점이 2개면 직선, 3개·4개면 빠른 2차·3차 경로를 사용합니다). 기본 Tolerance 모드에서 vector 버전이 받는 제어점은 64개까지입니다. 이를 넘으면 경고와 함께 호출을 거부하고 아무것도 그리지 않으므로, 그럴 때는 3차 베지어를 이어 붙이세요.
@@ -43211,6 +43252,7 @@ drawBezier(Vec3(50, 150, 0), Vec3(100, 20, 0),
            Vec3(200, 20, 0), Vec3(250, 150, 0));
 ```
 - 곡선은 현재 곡선 품질 설정에 따라 선분으로 분할됩니다. Tolerance / Resolution 두 모드와 기본값은 [`drawCurve`](#drawCurve)를 참고하세요. [`drawLine`](#drawLine)과 마찬가지로 `drawBezier`는 항상 가는(1px) 꺾은선으로 그려집니다. 열린 곡선에는 자연스럽게 채울 영역이 없으므로 [`fill`](#fill)/[`noFill`](#noFill) 설정은 무시되며, 현재 선 두께의 영향도 받지 않습니다. 채워진 곡선 모양이나 두꺼운 선의 곡선이 필요하면 [`Path::bezierTo`](#Path::bezierTo)로 점을 구성하거나, 샘플링한 점을 [`beginStroke`](#beginStroke)에 넘기세요.
+- vector 버전은 제어점이 두 개 미만이면 아무것도 그리지 않고, 정확히 두 개이면 직선을 그립니다.
 '''
 
 ["drawBitmapString"]
@@ -43222,6 +43264,7 @@ description.ja = "2D座標に固定サイズのビットマップテキストを
 description.ko = "2D 좌표에 고정 크기 비트맵 텍스트를 그린다. 3D 공간에서는 화면을 향하는 라벨로 그린다."
 details.en = '''
 - Draws `text` using the built-in bitmap font. Each ASCII character occupies an 8x16 pixel cell (a 13-pixel-tall glyph plus padding); non-ASCII characters use their own registered width, falling back to a half-width placeholder glyph when not registered. The position (x, y) follows the same coordinate conventions as other 2D drawing — see `drawRect` for the basics.
+- Printable ASCII (`U+0020`–`U+007E`) always uses the built-in glyphs, even after `bitmapfont::registerGlyph()`; use a non-ASCII codepoint such as `U+E000` for a custom glyph.
 - By default (`screenFixed = true`, used by `(text, x, y)` and `(text, x, y, screenFixed)`), the glyph size stays fixed in pixels and ignores any rotation or scale from `pushMatrix`; only the position moves with the current matrix. Pass `screenFixed = false`, or use the `(text, x, y, scale)` overload, to make the text rotate and scale together with the current transform.
 - A newline (`\n`) starts a new line. The spacing between lines defaults to the font height (`getBitmapFontHeight()`) and can be changed with `setBitmapLineHeight()`. A tab (`\t`) advances by 8 character widths.
 - The anchor point used for (x, y) is controlled by `setTextAlign()`; see that entry for the available alignments and what they affect.
@@ -43232,6 +43275,7 @@ details.en = '''
 '''
 details.ja = '''
 - `text` を組み込みのビットマップフォントで描画します。ASCII 文字は 8x16 ピクセルのセル（13ピクセルの高さのグリフにパディングを加えたもの）を占め、ASCII 以外の文字は登録済みの幅を使用し、未登録の場合は半角相当のプレースホルダーグリフになります。位置 (x, y) の座標の考え方は他の2D描画と同じです。基本的な考え方は `drawRect` を参照してください。
+- 表示可能な ASCII（`U+0020`〜`U+007E`）は、`bitmapfont::registerGlyph()` で登録しても常に組み込みの字形を使います。独自の字形には `U+E000` など ASCII 以外のコードポイントを使ってください。
 - デフォルト（`screenFixed = true`。`(text, x, y)` と `(text, x, y, screenFixed)` で使用）では、グリフのサイズはピクセル単位で固定され、`pushMatrix` による回転や拡大縮小の影響を受けません。位置だけが現在の行列に従って移動します。テキストを現在の変形と一緒に回転・拡大縮小させたい場合は、`screenFixed = false` を指定するか、`(text, x, y, scale)` オーバーロードを使用してください。
 - 改行文字 (`\n`) で次の行に移ります。行の間隔はデフォルトでフォントの高さ（`getBitmapFontHeight()` の値）になり、`setBitmapLineHeight()` で変更できます。タブ文字 (`\t`) は半角文字8個分だけ進みます。
 - (x, y) の基準点は `setTextAlign()` で設定します。利用できる配置の種類と影響範囲はそちらを参照してください。
@@ -43242,6 +43286,7 @@ details.ja = '''
 '''
 details.ko = '''
 - `text`를 내장된 비트맵 폰트로 그립니다. ASCII 문자는 8x16 픽셀 셀(13픽셀 높이의 글리프에 여백을 더한 것)을 차지하며, ASCII가 아닌 문자는 등록된 고유 너비를 사용하고, 등록되지 않은 경우 반각 크기의 대체 글리프가 사용됩니다. 위치 (x, y)의 좌표 개념은 다른 2D 드로잉과 동일합니다. 기본 개념은 `drawRect`를 참조하세요.
+- 출력 가능한 ASCII(`U+0020`–`U+007E`)는 `bitmapfont::registerGlyph()`로 등록해도 항상 내장 글리프를 사용합니다. 사용자 정의 글리프에는 `U+E000`처럼 ASCII가 아닌 코드 포인트를 사용합니다.
 - 기본값(`screenFixed = true`, `(text, x, y)` 및 `(text, x, y, screenFixed)`에서 사용)에서는 글리프 크기가 픽셀 단위로 고정되어 `pushMatrix`에 의한 회전이나 크기 조절의 영향을 받지 않습니다. 위치만 현재 행렬을 따라 이동합니다. 텍스트를 현재 변환과 함께 회전·확대/축소하려면 `screenFixed = false`를 지정하거나 `(text, x, y, scale)` 오버로드를 사용하세요.
 - 줄바꿈 문자(`\n`)로 다음 줄로 넘어갑니다. 줄 간격은 기본적으로 폰트 높이(`getBitmapFontHeight()` 값)이며, `setBitmapLineHeight()`로 변경할 수 있습니다. 탭 문자(`\t`)는 반각 문자 8개 너비만큼 이동합니다.
 - (x, y)의 기준점은 `setTextAlign()`으로 설정합니다. 사용 가능한 정렬 종류와 영향 범위는 해당 항목을 참조하세요.
@@ -43574,14 +43619,17 @@ description.ja = "角丸矩形を描画する（円弧コーナー）。"
 description.ko = "둥근 모서리 사각형을 그린다 (원호 모서리)."
 details.en = '''
 - Same `(x, y, w, h)` / `Vec3 pos, Vec2 size` arguments and top-left anchor as [`drawRect`](#drawRect) — see `drawRect` for the coordinate convention — plus a `radius` for the corner circles. `radius` is clamped to half of the smaller of `w`/`h`, so passing a very large value safely caps out at a stadium/pill shape instead of distorting the rectangle. A `radius` of `0` or less falls back to a plain [`drawRect`](#drawRect).
+- Rounded rectangles use local `z = 0` and ignore `pos.z`; the plain rectangle fallback preserves `pos.z`.
 - Each corner is a quarter-circle arc; the curve quality (segment count) follows the current curve settings — see [`drawCurve`](#drawCurve) for resolution vs. tolerance mode. Negative `w`/`h` are normalized internally, same as `drawRect`. Fills and strokes according to the current [`fill`](#fill) / [`noFill`](#noFill) mode.
 '''
 details.ja = '''
 - [`drawRect`](#drawRect) と同じ `(x, y, w, h)` / `Vec3 pos, Vec2 size` の引数と左上基準を使います（座標の考え方は `drawRect` を参照してください）。加えて角の円弧の半径を `radius` で指定します。`radius` は `w`/`h` の小さいほうの半分を上限にクランプされるため、大きすぎる値を渡しても矩形が歪むことはなく、スタジアム（カプセル）形状になるだけです。`radius` が `0` 以下のときは通常の[`drawRect`](#drawRect) として描画されます。
+- 角丸長方形はローカル座標の `z = 0` に描画し、`pos.z` を無視します。通常の長方形に切り替わる場合は `pos.z` を保持します。
 - 各コーナーは四分円の円弧です。曲線の精度（分割数）は現在のカーブ設定に従います。解像度モードと許容誤差モードについては [`drawCurve`](#drawCurve) を参照してください。負の `w`/`h` は `drawRect` と同様に内部で正規化されます。現在の [`fill`](#fill) / [`noFill`](#noFill) モードに従って塗りつぶされるか輪郭線で描かれます。
 '''
 details.ko = '''
 - [`drawRect`](#drawRect)와 같은 `(x, y, w, h)` / `Vec3 pos, Vec2 size` 인자와 좌상단 기준을 사용합니다(좌표 개념은 `drawRect`를 참조하세요). 여기에 모서리 원호의 반지름을 `radius`로 지정합니다. `radius`는 `w`/`h` 중 작은 값의 절반으로 클램프되므로, 너무 큰 값을 전달해도 사각형이 일그러지지 않고 스타디움(캡슐) 형태가 됩니다. `radius`가 `0` 이하이면 일반 [`drawRect`](#drawRect)로 그려집니다.
+- 둥근 모서리 사각형은 로컬 좌표의 `z = 0`에 그리며 `pos.z`를 무시합니다. 일반 사각형으로 대체되는 경우에는 `pos.z`를 유지합니다.
 - 각 모서리는 4분원 호입니다. 곡선 품질(분할 수)은 현재의 커브 설정을 따릅니다. 해상도 모드와 허용 오차 모드에 대해서는 [`drawCurve`](#drawCurve)를 참조하세요. 음수 `w`/`h`는 `drawRect`와 동일하게 내부에서 정규화됩니다. 현재의 [`fill`](#fill) / [`noFill`](#noFill) 모드에 따라 채워지거나 윤곽선으로 그려집니다.
 '''
 related = ["drawRectSquircle", "drawSuperellipse"]
@@ -44826,16 +44874,19 @@ details.en = '''
 - Returns a `string` copy of the clipboard text; desktop implementations query the system clipboard, and disabled clipboard support returns an empty string.
 - Web returns the buffer populated by browser paste events rather than querying the clipboard synchronously; iOS and Android return the internal buffer without reading the system clipboard.
 - Storage is limited by `WindowSettings::setClipboardSize`, with a default of 65536 bytes; oversized text may be truncated or rejected depending on the platform.
+- If the underlying clipboard read returns a null pointer, returns an empty string.
 '''
 details.ja = '''
 - クリップボードのテキストを `string` にコピーして返します。デスクトップ実装はシステムのクリップボードを読み取り、クリップボード機能が無効な場合は空文字列を返します。
 - Web では同期的にクリップボードを読み取らず、ブラウザの貼り付けイベントで更新されたバッファを返します。iOS と Android ではシステムのクリップボードを読み取らず、内部バッファを返します。
 - 保存容量は `WindowSettings::setClipboardSize` で指定し、既定値は65536バイトです。容量を超えるテキストは、プラットフォームによって切り詰められるか拒否されることがあります。
+- 内部のクリップボード読み取りがヌルポインターを返した場合は、空文字列を返します。
 '''
 details.ko = '''
 - 클립보드 텍스트를 `string`으로 복사해 반환합니다. 데스크톱 구현은 시스템 클립보드를 읽으며, 클립보드 기능이 비활성화되어 있으면 빈 문자열을 반환합니다.
 - Web에서는 클립보드를 동기식으로 읽지 않고 브라우저 붙여넣기 이벤트로 갱신된 버퍼를 반환합니다. iOS와 Android에서는 시스템 클립보드를 읽지 않고 내부 버퍼를 반환합니다.
 - 저장 용량은 `WindowSettings::setClipboardSize`로 지정하며 기본값은 65536바이트입니다. 용량을 넘는 텍스트는 플랫폼에 따라 잘리거나 거부될 수 있습니다.
+- 내부 클립보드 읽기가 널 포인터를 반환하면 빈 문자열을 반환합니다.
 '''
 related = ["setClipboardString", "WindowSettings::setClipboardSize"]
 
@@ -49007,16 +49058,19 @@ description.ja = "対応する pushStyle() が保存したスタイルを復元�
 description.ko = "대응하는 pushStyle()이 저장한 스타일을 복원한다."
 details.en = '''
 - popStyle() takes the style saved by the matching [`pushStyle`](#pushStyle) off the stack and makes it current again — color, fill/stroke, point and curve settings, text alignment, and blend mode all at once. See [`pushStyle`](#pushStyle) for exactly what is saved and for how TrussC resets style before each Node's draw().
+- Depth testing is not saved by `pushStyle()` or restored by `popStyle()`; `popStyle()` restores the blend mode using the current depth setting, so call `disableDepthTest()` explicitly to turn depth testing off.
 - Calling popStyle() with nothing left on the stack (more pops than pushes) logs a rate-limited warning and does nothing; the stack and the current style stay as they were.
 - Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (inside a camera scope this turns the depth test off unless enableDepthTest() is on).
 '''
 details.ja = '''
 - popStyle() は、対応する [`pushStyle`](#pushStyle) がスタックに保存したスタイル（色、塗り/ストローク、点や曲線の設定、文字の配置、ブレンドモード）を取り出し、まとめて現在の状態に戻します。何が保存され、Node の draw() の前にどのようにリセットされるかは [`pushStyle`](#pushStyle) を参照してください。
+- デプステストの有効状態は `pushStyle()` で保存されず、`popStyle()` でも復元されません。`popStyle()` は現在のデプステスト設定でブレンドモードを復元するため、無効に戻すには `disableDepthTest()` を明示的に呼んでください。
 - スタックに何も残っていない状態で popStyle() を呼ぶと（push より pop が多い場合）、頻度を抑えた警告が出力されて何も起こりません。スタックと現在のスタイルはそのまま保たれます。
 - 既知の問題: [#915](https://github.com/TrussC-org/TrussC/issues/915)（カメラの範囲内では、enableDepthTest() を有効にしていないと深度テストが切れる）。
 '''
 details.ko = '''
 - popStyle()은 대응하는 [`pushStyle`](#pushStyle)이 스택에 저장한 스타일(색상, 채우기/스트로크, 포인트·곡선 설정, 텍스트 정렬, 블렌드 모드)을 꺼내어 한꺼번에 현재 상태로 되돌립니다. 무엇이 저장되는지, Node의 draw() 전에 어떻게 초기화되는지는 [`pushStyle`](#pushStyle)을 참고하세요.
+- 깊이 테스트의 활성 상태는 `pushStyle()`로 저장되거나 `popStyle()`로 복원되지 않습니다. `popStyle()`은 현재 깊이 테스트 설정으로 블렌드 모드를 복원하므로, 깊이 테스트를 끄려면 `disableDepthTest()`를 명시적으로 호출해야 합니다.
 - 스택에 아무것도 남지 않은 상태에서 popStyle()을 호출하면(push보다 pop이 많은 경우) 빈도를 제한한 경고가 출력되고 아무 일도 일어나지 않습니다. 스택과 현재 스타일은 그대로 유지됩니다.
 - 알려진 문제: [#915](https://github.com/TrussC-org/TrussC/issues/915)(카메라 범위 안에서는 enableDepthTest()를 켜지 않으면 깊이 테스트가 꺼짐).
 '''
@@ -50414,18 +50468,18 @@ description.ja = "これ以降の描画が使うブレンドモードを設定�
 description.ko = "이후 그리기에 사용할 블렌드 모드를 설정한다."
 details.en = '''
 - setBlendMode() chooses how new drawing combines with what is already on the target: `BlendMode::Alpha` (the default, normal alpha blending), `Add` (additive), `Multiply`, `Screen`, `Subtract`, or `Disabled` (the new color simply overwrites the old one, with no blending at all).
+- Use `setBlendMode(BlendMode::Add)` for additive blending: the resulting RGB is `sourceRGB * sourceAlpha + destinationRGB`, with RGB factors `SRC_ALPHA` and `ONE`. Use `setBlendMode(BlendMode::Screen)` for screen blending: source RGB is premultiplied by alpha, and its RGB factors are `ONE` and `ONE_MINUS_SRC_COLOR`. `Alpha`, `Multiply`, and `Screen` use `sourceAlpha + destinationAlpha * (1 - sourceAlpha)` for output alpha, with alpha factors `ONE` and `ONE_MINUS_SRC_ALPHA`; two overlapping draws with alpha `0.5` on a transparent target produce `0.75`. `Add` and `Subtract` add the two alpha values, with alpha factors `ONE` and `ONE`; `Disabled` overwrites without blending.
 - The mode works the same way on the main window and inside an [`Fbo`](#Fbo) pass, and it persists until you change it again: it survives across frames and carries into a later [`Fbo::begin`](#Fbo::begin), so a stray Add or Multiply left on can quietly affect drawing you did not mean it to. Call [`resetBlendMode`](#resetBlendMode) (or wrap the change in [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle)) when you are done with a temporary mode.
-- In every mode, the alpha channel itself accumulates the same way (rather than being multiplied away), so drawing with `Add`, `Multiply`, `Screen` or `Subtract` onto an [`Fbo`](#Fbo) does not make previously drawn pixels more transparent — only the color channels follow the mode's own math.
 '''
 details.ja = '''
 - setBlendMode() は、これから描くものが既に描かれている内容とどのように合成されるかを選びます。`BlendMode::Alpha`（デフォルト。通常のアルファブレンディング）、`Add`（加算）、`Multiply`（乗算）、`Screen`（スクリーン）、`Subtract`（減算）、`Disabled`（ブレンドせず新しい色でそのまま上書き）です。
+- 加算合成には `setBlendMode(BlendMode::Add)` を使います。合成後の RGB は `sourceRGB * sourceAlpha + destinationRGB` で、RGB の係数は `SRC_ALPHA` と `ONE` です。スクリーン合成には `setBlendMode(BlendMode::Screen)` を使います。描画元の RGB にはあらかじめアルファを掛け、RGB の係数は `ONE` と `ONE_MINUS_SRC_COLOR` です。`Alpha`、`Multiply`、`Screen` の出力アルファは `sourceAlpha + destinationAlpha * (1 - sourceAlpha)` で、アルファの係数は `ONE` と `ONE_MINUS_SRC_ALPHA` です。透明な描画先にアルファ `0.5` で 2 回重ねると `0.75` になります。`Add` と `Subtract` は両方のアルファを加算し、アルファの係数は `ONE` と `ONE` です。`Disabled` はブレンドせず上書きします。
 - このモードはメインウィンドウでも [`Fbo`](#Fbo) のパス内でも同じように働き、変更するまで持続します。フレームをまたいでも、その後の [`Fbo::begin`](#Fbo::begin)にも引き継がれるため、Add や Multiply を設定したままにしておくと、意図しない描画にも影響してしまいます。一時的なモードが済んだら [`resetBlendMode`](#resetBlendMode) を呼ぶか、[`pushStyle`](#pushStyle) / [`popStyle`](#popStyle) で変更を囲んでください。
-- どのモードでも、アルファチャンネル自体は（打ち消されるのではなく）同じように加算されていくため、[`Fbo`](#Fbo) に対して `Add` / `Multiply` / `Screen` / `Subtract`で描画しても、既に描かれていたピクセルが透明になることはありません。色チャンネルだけが各モードの計算に従います。
 '''
 details.ko = '''
 - setBlendMode()은 지금부터 그리는 내용이 이미 그려진 내용과 어떻게 합성될지 선택합니다. `BlendMode::Alpha`(기본값, 일반 알파 블렌딩), `Add`(가산), `Multiply`(곱셈), `Screen`(스크린), `Subtract`(감산), `Disabled`(블렌딩 없이 새 색으로 그대로 덮어쓰기)입니다.
+- 가산 합성에는 `setBlendMode(BlendMode::Add)`를 사용합니다. 합성된 RGB는 `sourceRGB * sourceAlpha + destinationRGB`이며 RGB 계수는 `SRC_ALPHA`와 `ONE`입니다. 스크린 합성에는 `setBlendMode(BlendMode::Screen)`을 사용합니다. 소스 RGB에 알파를 미리 곱하며 RGB 계수는 `ONE`과 `ONE_MINUS_SRC_COLOR`입니다. `Alpha`, `Multiply`, `Screen`의 출력 알파는 `sourceAlpha + destinationAlpha * (1 - sourceAlpha)`이며 알파 계수는 `ONE`과 `ONE_MINUS_SRC_ALPHA`입니다. 투명한 대상에 알파 `0.5`로 두 번 겹쳐 그리면 `0.75`가 됩니다. `Add`와 `Subtract`는 두 알파 값을 더하며 알파 계수는 `ONE`과 `ONE`입니다. `Disabled`는 혼합 없이 덮어씁니다.
 - 이 모드는 메인 윈도우에서나 [`Fbo`](#Fbo) 패스 안에서나 동일하게 동작하며, 다시 바꾸기 전까지 유지됩니다. 프레임을 넘어서도, 이후의 [`Fbo::begin`](#Fbo::begin)에도 이어지기 때문에, Add나 Multiply를 켜 둔 채로 두면 의도하지 않은 그리기에도 영향을 줄 수 있습니다. 임시 모드가 끝나면 [`resetBlendMode`](#resetBlendMode)를 호출하거나 [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle)로 변경을 감싸세요.
-- 어느 모드에서든 알파 채널 자체는(사라지지 않고) 동일하게 누적되므로, [`Fbo`](#Fbo)에 `Add` / `Multiply` / `Screen` / `Subtract`로 그려도 이미 그려져 있던 픽셀이 투명해지지는 않습니다. 색 채널만 각 모드의 계산을 따릅니다.
 '''
 related = ["BlendMode", "getBlendMode", "clear"]
 snippet = '''
@@ -50673,12 +50727,15 @@ description.ja = "円・円弧・曲線の分割数を固定値にする。"
 description.ko = "원·호·곡선의 분할 수를 고정값으로 사용한다."
 details.en = '''
 - Switches curve quality to resolution mode and sets the segment count used for a full circle; see [`drawCurve`](#drawCurve) for how this interacts with [`setCurveTolerance`](#setCurveTolerance) and the default. Arcs use a proportional share of this count, and every curved primitive (circles, ellipses, arcs, beziers, rounded rects) shares the same setting. Useful for an intentionally chunky, low-poly look, or to put a hard cap on vertex count for many small shapes regardless of their radius. Saved/restored by [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle).
+- `drawCircle()` uses at least three segments in resolution mode, so `setCurveResolution(1)` produces a triangle.
 '''
 details.ja = '''
 - 曲線の品質設定を「分割数」モードに切り替え、円一周分のセグメント数を設定します。[`setCurveTolerance`](#setCurveTolerance) との関係やデフォルト値は[`drawCurve`](#drawCurve) を参照してください。円弧ではこの数に比例した分割数が使われ、円・楕円・円弧・ベジエ・角丸長方形などすべての曲線系プリミティブが同じ設定を共有します。意図的にローポリな見た目にしたい場合や、半径にかかわらず多数の小さな図形の頂点数に上限を設けたい場合に有効です。[`pushStyle`](#pushStyle) /[`popStyle`](#popStyle) で保存・復元されます。
+- 分割数モードの `drawCircle()` は最低 3 分割で描画するため、`setCurveResolution(1)` を指定すると三角形になります。
 '''
 details.ko = '''
 - 곡선 품질 설정을 "분할 수" 모드로 전환하고, 원 한 바퀴에 사용할 세그먼트 수를 설정합니다. [`setCurveTolerance`](#setCurveTolerance)와의 관계와 기본값은 [`drawCurve`](#drawCurve)를 참고하세요. 호(arc)는 이 수에 비례한 분할 수를 사용하며, 원·타원·호·베지어·라운드 사각형 등 모든 곡선 기반 primitive가 같은 설정을 공유합니다. 의도적으로 로우폴리한 느낌을 주고 싶을 때, 혹은 반지름과 무관하게 작은 도형 다수의 꼭짓점 수를 제한하고 싶을 때 유용합니다. [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle)로 저장·복원됩니다.
+- 분할 수 모드의 `drawCircle()`은 최소 3개 세그먼트로 그리므로 `setCurveResolution(1)`을 지정하면 삼각형이 됩니다.
 '''
 related = ["setCurveTolerance", "getCurveResolution", "getCurveMode", "drawCurve"]
 snippet = '''
@@ -50948,19 +51005,19 @@ description.ja = "updateとdrawを同じレートで回す、目標フレーム�
 description.ko = "update와 draw를 같은 레이트로 돌리는 목표 프레임레이트를 설정한다."
 related = ["getFps", "setIndependentFps", "getFpsSettings"]
 details.en = '''
-- Takes a frame rate in fps, or one of two special values: `VSYNC` (-1) syncs to the display's refresh rate, and `EVENT_DRIVEN` (0) redraws only when something requests it (for example `redraw()`), otherwise sitting idle. A fixed fps at or just above the display's refresh rate draws every display frame.
+- Takes a target rate in fps. In the main window, `VSYNC` (-1) follows the display refresh rate and `EVENT_DRIVEN` (0) waits for a frame request such as `redraw()`. In a secondary window's callbacks, it sets that window's throttle; values at or below zero, including `EVENT_DRIVEN`, run at the display refresh rate without additional throttling. A fixed fps at or just above the display's refresh rate draws every display frame.
 - Under `setFps`, `update()` and `draw()` are called together at the same rate; to run them at independent rates (for example a fast simulation with a slower draw, or the reverse), use `setIndependentFps()` instead.
 - Switching the rate at runtime takes effect immediately from the moment of the call, with no catch-up: on a fixed fps the next frame is drawn right away, and the first `update()` after the switch has a `getDeltaTime()` that excludes time spent in the previous mode. Called between updates, the new timer starts from the call; called from inside an `update()`, it starts from that update's beginning. The time this drops is under one frame in the usual modes, and only grows larger after an idle period such as `EVENT_DRIVEN` waiting for a redraw.
 - Calling `setFps` again with the rate it is already at does nothing, so it is safe to call every frame (for example from a GUI slider). On the one frame where the value actually changes, that update's `getDeltaTime()` is shorter than a normal frame, since it is measured only from the moment of the call.
 '''
 details.ja = '''
-- フレームレートを fps 単位で指定するか、2 つの特別な値のいずれかを指定します。`VSYNC`(-1)はディスプレイのリフレッシュレートに同期し、`EVENT_DRIVEN`(0)は `redraw()` などで要求されたときだけ再描画し、それ以外は待機します。ディスプレイのリフレッシュレートと同じか少し上の固定fpsを指定すると、毎フレーム描画されます。
+- 目標レートを fps 単位で指定します。メインウィンドウでは、`VSYNC` (-1) はディスプレイのリフレッシュレートに同期し、`EVENT_DRIVEN` (0) は `redraw()` などのフレーム要求を待ちます。サブウィンドウのコールバック内では、そのウィンドウの実行頻度を設定し、`EVENT_DRIVEN` を含む 0 以下の値では追加の間引きをせずにディスプレイのリフレッシュレートで動作します。ディスプレイのリフレッシュレートと同じか少し上の固定fpsを指定すると、毎フレーム描画されます。
 - `setFps` のもとでは `update()` と `draw()` は同じレートでまとめて呼ばれます。それぞれを独立したレートで動かしたい場合(高速なシミュレーションに低速な描画を組み合わせる場合など)は、代わりに `setIndependentFps()` を使用してください。
 - 実行中にレートを切り替えると、呼び出した瞬間から即座に新しいレートで動き始め、遅れを取り戻す動作はしません。固定fpsの場合、次のフレームはすぐに描画され、切り替え後最初の `update()` の `getDeltaTime()` には前のモードで経過した時間は含まれません。update の外で呼び出した場合はその呼び出し時点から、update の中で呼び出した場合はその update の開始時点から数え始めます。ここで捨てられる時間は通常のモードでは1フレーム未満で、`EVENT_DRIVEN` の待機のようなアイドル期間のあとだけ大きくなります。
 - 現在と同じレートで `setFps` を呼んでも何も起きないため、GUIのスライダー操作中など、毎フレーム呼び出しても安全です。値が実際に変わったそのフレームだけは、その update の `getDeltaTime()` が呼び出し時点からの時間になるため、通常のフレームより短くなります。
 '''
 details.ko = '''
-- 프레임레이트를 fps 단위로 지정하거나, 두 가지 특수 값 중 하나를 지정할 수 있습니다. `VSYNC`(-1)는 디스플레이의 리프레시 레이트에 동기화되고, `EVENT_DRIVEN`(0)은 `redraw()` 등으로 요청되었을 때만 다시 그리고 그 외에는 대기합니다. 디스플레이 리프레시 레이트와 같거나 약간 높은 고정 fps를 지정하면 매 프레임 그려집니다.
+- 목표 속도를 fps 단위로 지정합니다. 메인 윈도우에서 `VSYNC` (-1)는 디스플레이 주사율에 동기화하며 `EVENT_DRIVEN` (0)은 `redraw()` 등의 프레임 요청을 기다립니다. 보조 윈도우의 콜백 안에서는 해당 윈도우의 실행 빈도를 설정하며, `EVENT_DRIVEN`을 포함한 0 이하의 값에서는 추가로 프레임을 건너뛰지 않고 디스플레이 주사율로 실행합니다. 디스플레이 리프레시 레이트와 같거나 약간 높은 고정 fps를 지정하면 매 프레임 그려집니다.
 - `setFps` 아래에서는 `update()`와 `draw()`가 같은 레이트로 함께 호출됩니다. 각각을 독립된 레이트로 돌리고 싶다면(예: 빠른 시뮬레이션에 느린 그리기를 조합하는 경우 등) 대신 `setIndependentFps()`를 사용하세요.
 - 실행 중에 레이트를 전환하면 호출한 순간부터 즉시 새 레이트로 동작하며, 밀린 시간을 따라잡지 않습니다. 고정 fps의 경우 다음 프레임이 바로 그려지며, 전환 후 첫 `update()`의 `getDeltaTime()`에는 이전 모드에서 경과한 시간이 포함되지 않습니다. update 밖에서 호출했다면 호출 시점부터, update 안에서 호출했다면 그 update의 시작 시점부터 셉니다. 여기서 버려지는 시간은 일반적인 모드에서는 1프레임 미만이며, `EVENT_DRIVEN`의 대기처럼 유휴 기간이 있었을 때만 커집니다.
 - 현재와 같은 레이트로 `setFps`를 호출하면 아무 일도 일어나지 않으므로, GUI 슬라이더 조작 중처럼 매 프레임 호출해도 안전합니다. 값이 실제로 바뀐 그 프레임에서만 해당 update의 `getDeltaTime()`이 호출 시점부터의 시간이 되어 일반 프레임보다 짧아집니다.
@@ -51670,16 +51727,19 @@ description.ko = "터치 입력에서 마우스 이벤트도 생성할지 설정
 details.en = '''
 - Enabled by default on all platforms; pass `false` to disable mouse events generated from touch input, including on Android and iOS.
 - Only the first finger drives the left mouse button: touch begin generates a press, movement generates a drag, and ending or cancelling that touch generates a release.
+- The finger used for mouse input is identified by its ID, so changing the order of `touches` does not switch it to `touches[0]`.
 - Touch events are delivered before the corresponding mouse events and remain enabled when this setting is `false`.
 '''
 details.ja = '''
 - すべてのプラットフォームで既定は有効です。Android や iOS を含め、タッチ入力から生成するマウスイベントを無効にするには `false` を渡します。
 - 最初の指だけがマウスの左ボタンを操作します。タッチ開始でプレス、移動でドラッグ、そのタッチの終了またはキャンセルでリリースを生成します。
+- マウス入力に使う指は ID で識別するため、`touches` の順番が変わっても `touches[0]` の指に切り替わりません。
 - タッチイベントは対応するマウスイベントより先に呼ばれ、この設定が `false` でも有効です。
 '''
 details.ko = '''
 - 모든 플랫폼에서 기본적으로 활성화합니다. Android와 iOS를 포함하여 터치 입력에서 생성하는 마우스 이벤트를 비활성화하려면 `false`를 전달합니다.
 - 첫 번째 손가락만 마우스 왼쪽 버튼을 조작합니다. 터치 시작 시 누름, 이동 시 드래그, 해당 터치의 종료 또는 취소 시 놓음 이벤트를 생성합니다.
+- 마우스 입력에 사용하는 손가락은 ID로 식별하므로 `touches`의 순서가 바뀌어도 `touches[0]`의 손가락으로 바뀌지 않습니다.
 - 터치 이벤트는 해당 마우스 이벤트보다 먼저 전달하며, 이 설정이 `false`여도 활성 상태를 유지합니다.
 '''
 related = ["getTouchAsMouse"]
@@ -53142,19 +53202,19 @@ description.ja = "以降の描画の原点を移動する。"
 description.ko = "이후 그리기의 원점을 이동한다."
 related = ["rotate", "scale", "pushMatrix"]
 details.en = '''
-- Shifts the current matrix by `(x, y, z)` (z defaults to 0 for the 2-argument form); everything drawn after this call is offset by that amount, until the matrix is restored by `popMatrix()`, `resetMatrix()`, or another `translate()`.
+- `translate()` composes an additional translation with the current matrix; it does not restore it. The two-argument form adds zero Z translation, so from identity, `translate(0, 0, 7); translate(10, 20);` produces `(10, 20, 7)`. Use `popMatrix()` to restore a saved matrix or `resetMatrix()` to return to identity.
 - Units are the same logical pixels (or world units in 3D) as `drawRect` and the other drawing functions; see `drawRect` for the coordinate basics.
 - Order matters when combined with `rotate()` / `scale()`: `translate()` then `rotate()` rotates around the translated point; doing it the other way around rotates around the original origin and then moves along the rotated axes.
 - Usually wrapped in a `pushMatrix()` / `popMatrix()` pair so the offset does not leak into drawing that follows.
 '''
 details.ja = '''
-- 現在の行列を `(x, y, z)`（2引数の形では z は 0）だけ移動します。この呼び出し以降に描くものはすべて、`popMatrix()` や `resetMatrix()`、または別の `translate()` で行列が戻るまでその分だけずれます。
+- `translate()` は現在の行列に追加の平行移動を組み合わせ、行列を元には戻しません。2 引数の形で追加する Z の移動量は 0 なので、単位行列から `translate(0, 0, 7); translate(10, 20);` と呼ぶと移動量は `(10, 20, 7)` になります。保存した行列に戻すには `popMatrix()`、単位行列に戻すには `resetMatrix()` を使います。
 - 単位は `drawRect` など他の描画関数と同じ論理ピクセル（3D の場合はワールド単位）です。座標の考え方は `drawRect` を参照してください。
 - `rotate()` / `scale()` と組み合わせるときは順番が重要です。`translate()` の後に `rotate()` すると、移動した先の点を中心に回転します。逆の順番だと、元の原点を中心に回転してから、回転した軸に沿って移動します。
 - 通常は `pushMatrix()` / `popMatrix()` で囲み、この移動がその後の描画に残らないようにします。
 '''
 details.ko = '''
-- 현재 행렬을 `(x, y, z)`만큼 이동합니다(인자가 2개인 형태에서는 z는 0). 이 호출 이후에 그리는 모든 것은 `popMatrix()`, `resetMatrix()` 또는 또 다른 `translate()`로 행렬이 복원되기 전까지 그만큼 이동된 상태로 그려집니다.
+- `translate()`는 현재 행렬에 추가 이동을 결합하며 행렬을 복원하지 않습니다. 인자가 두 개인 형태에서 추가하는 Z 이동량은 0이므로 단위 행렬에서 `translate(0, 0, 7); translate(10, 20);`을 호출하면 이동량은 `(10, 20, 7)`이 됩니다. 저장한 행렬을 복원하려면 `popMatrix()`를, 단위 행렬로 돌아가려면 `resetMatrix()`를 사용합니다.
 - 단위는 `drawRect` 등 다른 그리기 함수와 같은 논리 픽셀(3D에서는 월드 단위)입니다. 좌표의 기본 개념은 `drawRect`를 참조하세요.
 - `rotate()` / `scale()`과 함께 쓸 때는 순서가 중요합니다. `translate()` 다음에 `rotate()`를 하면 이동한 지점을 중심으로 회전합니다. 순서를 반대로 하면 원래 원점을 중심으로 회전한 뒤, 회전된 축을 따라 이동합니다.
 - 보통 `pushMatrix()` / `popMatrix()`로 감싸서 이 이동이 이후의 그리기에 남지 않도록 합니다.
@@ -53399,17 +53459,17 @@ description.en = "Wraps a value around a repeating range."
 description.ja = "値を繰り返し範囲内に折り返す。"
 description.ko = "값을 반복 범위 안으로 순환시킨다."
 details.en = '''
-- `wrap(value, min, max)` takes and returns `float` values; for `max > min`, it wraps around the range `[min, max)` instead of stopping at a boundary, and `max` wraps to `min`.
+- `wrap(value, min, max)` takes and returns `float` values; for `max > min`, it wraps cyclically and maps `max` to `min`, but rounding can return `max`. For finite angles strictly in `[0, TAU)`, use `float a = wrap(angle, 0.0f, TAU); if (a >= TAU) a = 0.0f;`.
 - Negative offsets wrap from the upper end; `wrap(-30, 0, 360)` returns 330, and `wrap(370, 0, 360)` returns 10.
 - Returns `min` when `max <= min`, without reordering the bounds.
 '''
 details.ja = '''
-- `wrap(value, min, max)` は `float` を受け取り、`float` を返します。`max > min` の場合は境界で止めずに `[min, max)` の範囲内へ折り返し、`max` は `min` になります。
+- `wrap(value, min, max)` は `float` を受け取り、`float` を返します。`max > min` では循環して折り返し、`max` は `min` になりますが、丸めによって `max` を返す場合があります。有限の角度を厳密に `[0, TAU)` に収めるには、`float a = wrap(angle, 0.0f, TAU); if (a >= TAU) a = 0.0f;` を使ってください。
 - 負方向にはみ出した値は上限側から折り返します。`wrap(-30, 0, 360)` は 330、`wrap(370, 0, 360)` は 10 を返します。
 - `max <= min` の場合は上下限を並べ替えずに `min` を返します。
 '''
 details.ko = '''
-- `wrap(value, min, max)`는 `float`를 받고 `float`를 반환합니다. `max > min`이면 경계에서 멈추지 않고 `[min, max)` 범위 안으로 순환시키며 `max`는 `min`이 됩니다.
+- `wrap(value, min, max)`는 `float`를 받고 `float`를 반환합니다. `max > min`이면 순환시키고 `max`를 `min`으로 변환하지만 반올림으로 `max`를 반환할 수 있습니다. 유한한 각도를 엄밀히 `[0, TAU)`에 넣으려면 `float a = wrap(angle, 0.0f, TAU); if (a >= TAU) a = 0.0f;`를 사용합니다.
 - 음의 방향으로 벗어난 값은 상한 쪽에서 순환합니다. `wrap(-30, 0, 360)`은 330을, `wrap(370, 0, 360)`은 10을 반환합니다.
 - `max <= min`이면 경계값의 순서를 바꾸지 않고 `min`을 반환합니다.
 '''
