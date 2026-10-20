@@ -1460,7 +1460,11 @@ public:
     }
 };
 
+int runRecordedFormatsTests();
+
 int main(int argc, char** argv) {
+    if (argc > 1 && string(argv[1]) == "--recorded-formats") return runRecordedFormatsTests();
+    g_fail += runRecordedFormatsTests();
     if (argc > 1 && string(argv[1]) == "--shader-failure") {
         WindowSettings settings;
         settings.setSize(64, 64);
