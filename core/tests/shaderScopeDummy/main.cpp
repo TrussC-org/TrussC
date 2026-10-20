@@ -19,15 +19,35 @@
 #include <sys/wait.h>
 #include <unistd.h>
 using namespace tc;
+// ELF overrides of host-private native checks; no production hook or Sokol
+// seam. Simulate a null native object while the dummy SG handle stays VALID.
+static int nativeChecksUntilFailure = -1;
+static bool nativeFailureWasValid = false;
+template<class Handle, class Query>
+bool checkedNativeObject(Handle handle, Query query) {
+    if (nativeChecksUntilFailure < 0) return true;
+    if (nativeChecksUntilFailure-- != 0) return true;
+    nativeFailureWasValid = query(handle) == SG_RESOURCESTATE_VALID;
+    return false;
+}
 // Generated native shaders have no dummy-backend descriptor. The dummy sgl
 // shader is sufficient for descriptor/lifetime probes; GPU suites test pixels.
 namespace trussc::internal {
 sg_shader sglPremultShader() { return {}; }
 sg_shader sglCoverageShader() { return {}; }
+bool shadowNativeValid(sg_image handle) { return checkedNativeObject(handle, sg_query_image_state); }
+bool shadowNativeValid(sg_view handle) { return checkedNativeObject(handle, sg_query_view_state); }
+bool shadowNativeValid(sg_sampler handle) { return checkedNativeObject(handle, sg_query_sampler_state); }
 }
 // One-shot failure at the real deferred replay allocation, as in the review.
 static bool failAllocation = false;
+// Unlike the older one-shot probes, reject every allocation until explicitly
+// restored, including allocations attempted during cleanup and error delivery.
+static int allocationsUntilFailure = -1;
+static int rejectedAllocations = 0;
 void* operator new(std::size_t size) {
+    if (allocationsUntilFailure == 0) { ++rejectedAllocations; throw std::bad_alloc(); }
+    if (allocationsUntilFailure > 0) --allocationsUntilFailure;
     if (failAllocation) { failAllocation = false; throw std::bad_alloc(); }
     if (void* result = std::malloc(size ? size : 1)) return result;
     throw std::bad_alloc();
@@ -614,6 +634,247 @@ bool parkedWindowProbe(bool fboTop) {
     return ok;
 }
 
+// Raw PBR precedes newly recorded SGL state, so native state must already
+// match the parked target when shadow-slot replay begins.
+bool shadowReplayDrawingStateProbe() {
+    DummyWindowPair windows;
+    internal::restoreWindowContext(nullptr);
+    auto& target = internal::currentTarget();
+    bool ok = internal::ensureShadowStorage(windows.main,64);
+    sg_shader_desc sd = {};
+    sd.uniform_blocks[UB_tc_pbr_vs_params].stage = SG_SHADERSTAGE_VERTEX;
+    sd.uniform_blocks[UB_tc_pbr_vs_params].size = sizeof(tc_pbr_vs_params_t);
+    sd.uniform_blocks[UB_tc_pbr_fs_params].stage = SG_SHADERSTAGE_FRAGMENT;
+    sd.uniform_blocks[UB_tc_pbr_fs_params].size = sizeof(tc_pbr_fs_params_t);
+    const auto shader = sg_make_shader(sd);
+    sg_pipeline_desc pd = {}; pd.shader = shader; pd.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
+    internal::PbrDrawCommand cmd = {}; cmd.pip = sg_make_pipeline(pd); cmd.vertexCount = 3;
+    float vertices[9] = {}; sg_buffer_desc bd = {}; bd.data = {vertices,sizeof(vertices)};
+    cmd.bind.vertex_buffers[0] = sg_make_buffer(bd);
+    cmd.shadowGeneration = windows.main.shadow.storage; cmd.fsp.shadowMapParams[1] = 1;
+    internal::ensureCurrentPass();
+    setScissor(5,6,7,8); target.viewport = {9,10,11,12,true};
+    internal::applyTargetDrawingState(); internal::parkWindowPass();
+    struct Trace { int sx=0,sy=0,sw=0,sh=0,vx=0,vy=0,vw=0,vh=0,draws=0; bool ok=true; } trace;
+    auto saved = _sg.hooks;
+    sg_trace_hooks hooks = {}; hooks.user_data = &trace;
+    hooks.begin_pass = [](const sg_pass*,void* u) {
+        auto& t = *static_cast<Trace*>(u); t.sx=t.sy=t.vx=t.vy=0; t.sw=t.vw=256; t.sh=t.vh=192;
+    };
+    hooks.apply_scissor_rect = [](int x,int y,int w,int h,bool,void* u) {
+        auto& t = *static_cast<Trace*>(u); t.sx=x;t.sy=y;t.sw=w;t.sh=h;
+    };
+    hooks.apply_viewport = [](int x,int y,int w,int h,bool,void* u) {
+        auto& t = *static_cast<Trace*>(u); t.vx=x;t.vy=y;t.vw=w;t.vh=h;
+    };
+    hooks.draw = [](int,int,int,void* u) {
+        auto& t = *static_cast<Trace*>(u); ++t.draws;
+        t.ok &= t.sx==5 && t.sy==6 && t.sw==7 && t.sh==8 && t.vx==9 && t.vy==10 && t.vw==11 && t.vh==12;
+    };
+    sg_install_trace_hooks(&hooks);
+    target.deferredPbrDraws.push_back({0,cmd}); target.advanceLayer();
+    internal::consumeShadowSlot(0);
+    target.deferredPbrDraws.push_back({0,cmd}); target.advanceLayer();
+    internal::ensureCurrentPass(); target.flushLayers(); target.endPass();
+    sg_install_trace_hooks(&saved);
+    ok &= trace.ok && trace.draws == 2;
+    sg_destroy_pipeline(cmd.pip); sg_destroy_buffer(cmd.bind.vertex_buffers[0]); sg_destroy_shader(shader);
+    std::printf("SHADOW REPLAY scissor=5,6,7,8 viewport=9,10,11,12 draws=%d ok=%d\n",trace.draws,ok);
+    return ok;
+}
+
+bool shadowNativeFailureProbe() {
+    DummyWindowPair windows;
+    internal::restoreWindowContext(nullptr);
+    auto& a = windows.main; auto& b = windows.secondary.context();
+    bool ok = internal::ensureShadowStorage(b,64);
+    const auto foreign = b.shadow.storage;
+    int errors = 0;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Error && e.message.find("shadow use discarded") != std::string::npos) ++errors;
+    });
+    // Every generation resource, including all attachment views and the
+    // sampling view, can fail natively despite a VALID dummy SG state.
+    for (int stage = 0; stage < 9; ++stage) {
+        ok &= internal::ensureShadowStorage(a,64);
+        const auto old = a.shadow.storage->colorImage;
+        struct Created { sg_image images[2] = {}; sg_view views[6] = {}; sg_sampler sampler = {}; int ni=0,nv=0; } made;
+        auto saved = _sg.hooks; sg_trace_hooks hooks = {}; hooks.user_data = &made;
+        hooks.make_image = [](const sg_image_desc*,sg_image h,void* u) { auto& c=*static_cast<Created*>(u); c.images[c.ni++]=h; };
+        hooks.make_view = [](const sg_view_desc*,sg_view h,void* u) { auto& c=*static_cast<Created*>(u); c.views[c.nv++]=h; };
+        hooks.make_sampler = [](const sg_sampler_desc*,sg_sampler h,void* u) { static_cast<Created*>(u)->sampler=h; };
+        sg_install_trace_hooks(&hooks);
+        a.shadow.count = 2; const auto failures = a.shadow.allocationFailures;
+        nativeFailureWasValid = false; nativeChecksUntilFailure = stage;
+        const bool rejected = !internal::ensureShadowStorage(a,128);
+        nativeChecksUntilFailure = -1;
+        sg_install_trace_hooks(&saved);
+        ok &= rejected && nativeFailureWasValid && !a.shadow.storage && a.shadow.count == 0 &&
+            a.shadow.allocationFailures == failures+1 && b.shadow.storage == foreign &&
+            sg_query_image_state(foreign->colorImage) == SG_RESOURCESTATE_VALID;
+        internal::endGpuFrame();
+        ok &= sg_query_image_state(old) == SG_RESOURCESTATE_INVALID;
+        for (int i=0;i<made.ni;++i) ok &= sg_query_image_state(made.images[i]) == SG_RESOURCESTATE_INVALID;
+        for (int i=0;i<made.nv;++i) ok &= sg_query_view_state(made.views[i]) == SG_RESOURCESTATE_INVALID;
+        if (made.sampler.id) ok &= sg_query_sampler_state(made.sampler) == SG_RESOURCESTATE_INVALID;
+    }
+    ok &= errors == 9 && internal::ensureShadowStorage(a,64);
+    std::printf("SHADOW NATIVE null_objects=9 partial_retirement/foreign/recovery=%d errors=%d expected=9\n",ok,errors);
+    return ok;
+}
+
+// Run after all drawing tests; deliberately start two fresh devices so native
+// IDs recycle exactly, then exercise the real cleanup and retirement collector.
+bool shadowDeviceRestartProbe() {
+    cleanup();
+    sg_desc desc = {}; sg_setup(&desc); sgl_desc_t sd = {}; sgl_setup(&sd);
+    auto& owner = internal::mainWindowContext();
+    bool ok = internal::ensureShadowStorage(owner,64);
+    if (!owner.shadow.storage) return false;
+    const auto old = owner.shadow.storage->colorImage;
+    cleanup();
+    sg_setup(&desc); sgl_setup(&sd);
+    ok &= internal::ensureShadowStorage(owner,64);
+    if (!owner.shadow.storage) return false;
+    const auto fresh = owner.shadow.storage->colorImage;
+    internal::drainPendingGpuDestroys();
+    ok &= old.id == fresh.id && sg_query_image_state(fresh) == SG_RESOURCESTATE_VALID;
+    std::printf("SHADOW RESTART old=%x fresh=%x live=%d ok=%d\n",old.id,fresh.id,sg_query_image_state(fresh),ok);
+    cleanup();
+    return ok;
+}
+
+// Exercise host allocation/retirement without allocating native image memory.
+bool shadowOwnershipProbe() {
+    DummyWindowPair windows;
+    auto& a = windows.main;
+    auto& b = windows.secondary.context();
+    internal::restoreWindowContext(&a);
+    bool ok = !a.shadow.storage && !b.shadow.storage;
+    ok &= internal::ensureShadowStorage(a,64) && internal::ensureShadowStorage(b,128);
+    const auto foreign = b.shadow.storage;
+    const auto oldImage = a.shadow.storage->colorImage;
+    const auto oldView = a.shadow.storage->colorTexture;
+    std::weak_ptr<internal::ShadowStorage> old = a.shadow.storage;
+    internal::PbrDrawCommand cmd = {};
+    cmd.shadowGeneration = a.shadow.storage;
+    cmd.bind.views[VIEW_tc_pbr_shadowMap] = oldView;
+    cmd.bind.samplers[SMP_tc_pbr_shadowMapSmp] = a.shadow.storage->sampler;
+    a.swapchainTarget.deferredPbrDraws.push_back({0,std::move(cmd)});
+    ok &= internal::ensureShadowStorage(a,128) && a.shadow.count == 0;
+    internal::restoreWindowContext(&b);
+    internal::endGpuFrame();
+    ok &= !old.expired() && sg_query_image_state(oldImage) == SG_RESOURCESTATE_VALID &&
+        sg_query_view_state(oldView) == SG_RESOURCESTATE_VALID;
+    a.swapchainTarget.deferredPbrDraws.clear();
+    internal::endGpuFrame();
+    ok &= old.expired() && sg_query_image_state(oldImage) == SG_RESOURCESTATE_INVALID &&
+        sg_query_view_state(oldView) == SG_RESOURCESTATE_INVALID;
+    internal::restoreWindowContext(&a);
+    int failures = 0;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Error && e.message.find("shadow use discarded") != std::string::npos) ++failures;
+    });
+    // Image, view and sampler pool exhaustion fail at different construction
+    // stages. Restore the pool before retiring partial generations.
+    for (auto* pool : {&_sg.pools.image_pool,&_sg.pools.view_pool,&_sg.pools.sampler_pool}) {
+        ok &= internal::ensureShadowStorage(a,64);
+        a.shadow.count = 2;
+        const int available = pool->queue_top;
+        pool->queue_top = 0;
+        const bool rejected = !internal::ensureShadowStorage(a,256);
+        pool->queue_top = available;
+        ok &= rejected && !a.shadow.storage && a.shadow.count == 0 && !a.shadow.inPass &&
+            b.shadow.storage == foreign && sg_query_image_state(foreign->colorImage) == SG_RESOURCESTATE_VALID;
+        internal::endGpuFrame();
+    }
+    ok &= internal::ensureShadowStorage(a,64);
+    failAllocation = true;
+    ok &= !internal::ensureShadowStorage(a,256) && !a.shadow.storage && a.shadow.count == 0;
+    for (int extent : {0,-1,INT_MAX})
+        ok &= !internal::ensureShadowStorage(a,extent) && !a.shadow.storage;
+    ok &= failures == 7 && b.shadow.storage == foreign;
+    size_t color,depth,total;
+    ok &= internal::shadowImageLayout(1024,color,depth,total) && total == 20971520 &&
+        !internal::shadowImageLayout(INT_MAX,color,depth,total);
+    std::printf("SHADOW OWNERSHIP lazy/generation/pins/failure/foreign=%d errors=%d expected=7\n",ok,failures);
+    return ok;
+}
+
+bool shadowSustainedAllocationProbe() {
+    DummyWindowPair windows;
+    auto& a = windows.main;
+    auto& b = windows.secondary.context();
+    internal::restoreWindowContext(&a);
+    bool ok = internal::ensureShadowStorage(a,64) && internal::ensureShadowStorage(b,128);
+    const auto foreign = b.shadow.storage;
+    const auto foreignImage = foreign->colorImage;
+    int errors = 0;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Error && e.message.find("shadow use discarded") != std::string::npos) ++errors;
+    });
+    auto intact = [&] {
+        return b.shadow.storage == foreign && sg_query_image_state(foreignImage) == SG_RESOURCESTATE_VALID;
+    };
+    // Growth fails before the new object or during shared_ptr control-block
+    // creation. Keep OOM active through fail(), final pin release and collection.
+    for (int successfulAllocations : {0,1}) {
+        ok &= internal::ensureShadowStorage(a,64);
+        const auto oldImage = a.shadow.storage->colorImage;
+        auto pin = a.shadow.storage;
+        a.shadow.count = 2;
+        const auto before = a.shadow.allocationFailures;
+        allocationsUntilFailure = successfulAllocations;
+        ok &= !internal::ensureShadowStorage(a,256) && !a.shadow.storage && a.shadow.count == 0 &&
+            a.shadow.allocationFailures == before + 1 && intact();
+        pin.reset();
+        internal::endGpuFrame(); // Cannot build reference closure yet; retry later.
+        ok &= sg_query_image_state(oldImage) == SG_RESOURCESTATE_VALID;
+        allocationsUntilFailure = -1;
+        internal::endGpuFrame();
+        ok &= sg_query_image_state(oldImage) == SG_RESOURCESTATE_INVALID && intact();
+    }
+    // Fail after the color image exists: the native partial generation and the
+    // owner's old generation must both retire without allocating.
+    ok &= internal::ensureShadowStorage(a,64);
+    const auto oldImage = a.shadow.storage->colorImage;
+    sg_image partial = {};
+    auto hooks = _sg.hooks;
+    auto injectedHooks = hooks;
+    injectedHooks.make_image = [](const sg_image_desc*, sg_image image, void* user) {
+        *static_cast<sg_image*>(user) = image;
+        allocationsUntilFailure = 0;
+        _sg.pools.view_pool.queue_top = 0;
+    };
+    injectedHooks.user_data = &partial;
+    const int availableViews = _sg.pools.view_pool.queue_top;
+    sg_install_trace_hooks(&injectedHooks);
+    ok &= !internal::ensureShadowStorage(a,256) && !a.shadow.storage && intact();
+    _sg.pools.view_pool.queue_top = availableViews;
+    sg_install_trace_hooks(&hooks);
+    ok &= partial.id && allocationsUntilFailure == 0 && errors == 3;
+    allocationsUntilFailure = -1;
+    internal::endGpuFrame();
+    ok &= sg_query_image_state(partial) == SG_RESOURCESTATE_INVALID &&
+        sg_query_image_state(oldImage) == SG_RESOURCESTATE_INVALID;
+    // Real WindowContext close with pending PBR is also noexcept under OOM.
+    ok &= internal::ensureShadowStorage(a,64);
+    const auto closeImage = a.shadow.storage->colorImage;
+    internal::PbrDrawCommand cmd = {};
+    cmd.shadowGeneration = a.shadow.storage;
+    a.swapchainTarget.deferredPbrDraws.push_back({0,std::move(cmd)});
+    allocationsUntilFailure = 0;
+    a.teardownTargets();
+    ok &= !a.shadow.storage && a.swapchainTarget.deferredPbrDraws.empty() && intact() && errors == 3;
+    allocationsUntilFailure = -1;
+    internal::endGpuFrame();
+    ok &= sg_query_image_state(closeImage) == SG_RESOURCESTATE_INVALID &&
+        internal::ensureShadowStorage(a,64) && intact() && rejectedAllocations >= 4;
+    std::printf("SHADOW SUSTAINED growth/control_block/partial/pin/close/recovery=%d errors=%d expected=3 rejected=%d\n",
+        ok,errors,rejectedAllocations);
+    return ok;
+}
+
 bool parkedShadowProbe() {
     DummyWindowPair windows;
     internal::restoreWindowContext(nullptr);
@@ -919,6 +1180,12 @@ bool activeDestructionProbe() {
 
 }
 int main(int argc, char** argv) {
+    if (argc == 2 && std::strcmp(argv[1],"--native-allocation-check") == 0) {
+        const auto executable = fs::read_symlink("/proc/self/exe").parent_path() / "shadowAllocationGl";
+        execl(executable.c_str(),executable.c_str(),"--gpu-check",static_cast<char*>(nullptr));
+        std::perror("shadowAllocationGl exec");
+        return 2;
+    }
     sg_desc desc = {};
     // Multiple independent windows warm caches in this one process.
     desc.pipeline_pool_size = 2048;
@@ -946,6 +1213,10 @@ int main(int argc, char** argv) {
     const bool parity = noDrawParityProbe(false,true) && noDrawParityProbe(true,true) && noDrawParityProbe(false,false);
     const bool rawKinds = rawKindsLifetimeProbe();
     const bool parking = parkedWindowProbe(false) && parkedWindowProbe(true);
+    const bool shadowOwnership = shadowOwnershipProbe();
+    const bool shadowReplay = shadowReplayDrawingStateProbe();
+    const bool shadowNative = shadowNativeFailureProbe();
+    const bool shadowSustained = shadowSustainedAllocationProbe();
     const bool shadowParking = parkedShadowProbe();
     const bool capturePhase = synchronousCapturePhaseProbe(false) && synchronousCapturePhaseProbe(true);
     const bool foreignTeardown = foreignTeardownReplayFailureProbe();
@@ -954,8 +1225,8 @@ int main(int argc, char** argv) {
     const bool growth = growthFailureProbe();
     const bool rawFailure = rawFailureProbe();
     const bool destruction = activeDestructionProbe();
-    const int result=teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && destruction ? 0 : 1;
-    sgl_shutdown(); sg_shutdown();
+    const bool shadowRestart = shadowDeviceRestartProbe();
+    const int result=shadowReplay && shadowNative && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowSustained && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && destruction ? 0 : 1;
     return result;
 }
 #else
