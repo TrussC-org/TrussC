@@ -3683,6 +3683,8 @@ struct Cover_TcpServer : af::Scope<TcpServer> {
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().setSendAsyncBufferSize(af::val<size_t>());
+        (void)af::val<TcpServer>().setSendItemLimit(af::val<size_t>());
+        (void)af::val<TcpServer>().setTotalSendBufferSize(af::val<size_t>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().setSendTimeout(af::val<float>());

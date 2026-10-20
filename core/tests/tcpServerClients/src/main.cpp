@@ -12,7 +12,7 @@
 //   - start(port, N) caps the connected clients at N: a connection beyond that
 //     is closed at once, a burst of them logs one warning, and a slot that
 //     frees up can be taken again.
-//   - start(port) with no limit accepts any number of clients.
+//   - start(port) admits clients within the default limit.
 //   - A second server cannot start on a port the first one is listening on:
 //     its start() returns false and the first keeps running and taking
 //     clients.
@@ -585,13 +585,13 @@ static void testLimit() {
 }
 
 // -----------------------------------------------------------------------------
-// start(port) accepts any number of clients
+// start(port) accepts ordinary loads within the default limit
 // -----------------------------------------------------------------------------
-static void testDefaultUnlimited() {
+static void testDefaultLimit() {
     WarningCounter warnings;
     TcpServer server;
     const int port = startOnFreePort(server, -1);
-    check("default: server started without a limit", port != 0);
+    check("default: server started with the default limit", port != 0);
     if (!port) return;
 
     const int kClients = 16;
@@ -849,6 +849,8 @@ static void stopFromOnErrorAfterSendTimeout() {
     auto server = make_unique<TcpServer>();
     TcpServer* srv = server.get();
     srv->setSendTimeout(0.3f);
+    // This teardown scenario deliberately sends one larger finite payload.
+    srv->setSendItemLimit(32 * 1024 * 1024);
     atomic<bool> errorIn{false}, removedFirst{false}, stopped{false}, notCut{false};
     EventListener onErr = srv->onError.listen([&, srv](TcpServerErrorEventArgs& e) {
         if (e.message.find("mid-payload") == string::npos || errorIn.exchange(true)) return;
@@ -1928,7 +1930,7 @@ int main() {
 
     testReclaim();
     testLimit();
-    testDefaultUnlimited();
+    testDefaultLimit();
     testPortInUse();
     testRestartSamePort(true);
     testRestartSamePort(false);

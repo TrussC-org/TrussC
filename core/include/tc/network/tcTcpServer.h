@@ -17,6 +17,7 @@
 #include <memory>
 #include <unordered_map>
 #include <functional>
+#include <array>
 #include "tc/events/tcEvent.h"
 #include "tc/events/tcEventListener.h"
 #include "tc/network/tcSendResult.h"
@@ -35,6 +36,7 @@
 #endif
 namespace trussc {
 namespace internal {
+struct TcpServerTestAccess;
 // Test hook, not a user setting: stop(), on the thread that has just joined
 // the accept thread, calls fn before it disconnects the clients and joins
 // their threads, so a test can hold it there. Applies to every TcpServer; an
@@ -100,14 +102,15 @@ struct TcpServerErrorEventArgs {
 // TcpServer class
 // =============================================================================
 class TC_PLATFORMS("macos,windows,linux,android") TcpServer {
+    friend struct internal::TcpServerTestAccess;
     struct State : std::enable_shared_from_this<State> {
         internal::EventSnapshotDelivery<TcpClientConnectEventArgs> onClientConnect;
         internal::EventSnapshotDelivery<TcpServerReceiveEventArgs> onReceive;
         internal::EventSnapshotDelivery<TcpClientDisconnectEventArgs> onClientDisconnect;
         internal::EventSnapshotDelivery<TcpServerErrorEventArgs> onError;
         internal::EventSnapshotDelivery<TcpSendCompleteEventArgs> onSendComplete;
-        // Untrusted connection floods can retain clients; an optional cap keeps client memory finite. At the cap, newly accepted sockets are closed.
-        bool start(int port, int maxClients = 0);
+        // Bounds per-connection channels and workers; excess sockets are closed before allocation.
+        bool start(int port, int maxClients = 64);
         void stop();
         bool isRunning() const;
         void disconnectClient(int clientId);
@@ -130,9 +133,9 @@ class TC_PLATFORMS("macos,windows,linux,android") TcpServer {
         // Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads.
         void setReceiveBufferSize(size_t size);
         void setSendTimeout(float seconds);
-        // A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
+        // A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; one item within the owned-item and aggregate limits can cross the mark.
         void setSendAsyncBufferSize(size_t bytes);
-        // A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
+        // A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; one item within the owned-item and aggregate limits can cross the mark.
         size_t getSendAsyncBufferSize() const;
         size_t getSendAsyncPendingBytes(int clientId) const;
         int getPort() const;
@@ -152,7 +155,10 @@ class TC_PLATFORMS("macos,windows,linux,android") TcpServer {
     #endif
         std::mutex listenSocketMutex_;
         int port_ = 0;
-        int maxClients_ = 0;
+        int maxClients_ = 64;
+        std::atomic<size_t> workerClients_{0};
+        std::atomic<uint64_t> rejectedConnections_{0};
+        std::atomic<bool> connectionRejectionWarned_{false};
         std::thread acceptThread_;
         std::mutex acceptThreadMutex_;
         int stopsInProgress_ = 0;
@@ -168,15 +174,55 @@ class TC_PLATFORMS("macos,windows,linux,android") TcpServer {
         // Bound (security): network reads use finite chunks to bound each receive allocation. Overflow continues in later reads.
         size_t receiveBufferSize_ = 65536;
         std::atomic<float> sendTimeout_{60.0f};
-        // Bound (security): a stalled network peer can retain queued sends; a high-water mark limits further queue growth. Overflow refuses sendAsync with QueueFull or makes send wait; a single send can exceed the mark.
+        // Bound (security): stalled peers retain queued sends; a finite item bounds one-item overshoot. Overflow rejects whole async sends (sync sends wait) and is counted.
         std::atomic<size_t> sendAsyncBufferSize_{16 * 1024 * 1024};
+        // Bound (security): bulk owned sends must not allocate without a finite item budget. Overflow rejects the whole send and is counted.
+        std::atomic<size_t> sendItemLimit_{16 * 1024 * 1024};
+        // Bound (security): slow peers must not multiply retained sends across clients. Overflow rejects whole async sends and writer-thread sync sends (other sync sends wait) and is counted.
+        size_t totalSendBufferSize_ = 64 * 1024 * 1024;
+        // Bound (security): empty sends still retain queue metadata. Overflow rejects whole async sends (sync sends wait) and is counted.
+        static constexpr size_t kSendEntryLimit = 4096;
+        std::mutex sendMutex_;
+        std::condition_variable sendRoom_;
+        size_t totalSendBytes_ = 0;
+        size_t waitingSenders_ = 0;
+        // Lifetime totals and once gates belong to this State, across stop/start.
+        uint64_t rejectedSends_[4]{}; // item, high-water, entry, aggregate
+        bool sendRejectionWarned_[4]{};
+        struct SendCredit {
+            std::shared_ptr<State> owner;
+            size_t bytes = 0;
+            ~SendCredit();
+        };
+        struct SendRejection {
+            bool warn = false;
+            size_t limit = 0, needed = 0;
+        };
+        using SendRejections = std::array<SendRejection, 4>;
+        struct SendRejectionReporter {
+            State& owner;
+            SendRejections pending{};
+            explicit SendRejectionReporter(State& state) : owner(state) {}
+            SendRejectionReporter(const SendRejectionReporter&) = delete;
+            SendRejectionReporter& operator=(const SendRejectionReporter&) = delete;
+            ~SendRejectionReporter() noexcept { report(); }
+            void report() noexcept { owner.reportSendRejections(pending); }
+        };
+        void recordSendRejection(SendRejections& reports, size_t reason, size_t limit, size_t needed);
+        void reportSendRejections(SendRejections& reports) noexcept;
+        // Private fault-injection seam: fail the next recipient after a rejection.
+        void (*beforeSendEnqueueForTest_)(const SendRejections&) = nullptr;
+        void setSendItemLimit(size_t bytes);
+        void setTotalSendBufferSize(size_t bytes);
         std::atomic<uint64_t> nextSendId_{0};
         std::shared_ptr<internal::TcpSendChannel> findChannel(int clientId) const;
         std::vector<std::pair<int, std::shared_ptr<internal::TcpSendChannel>>> snapshotChannels() const;
         SendResult enqueue(const std::shared_ptr<internal::TcpSendChannel>& ch, int clientId,
-                           internal::TcpSendItem&& item);
+                           internal::TcpSendItem&& item, SendRejections& reports, size_t ownedBytes = 0,
+                           const std::function<void(internal::TcpSendItem&, const std::shared_ptr<void>&)>& prepare = {});
         void completeSend(int clientId, const std::shared_ptr<internal::TcpSendChannel>& ch,
-                          const internal::TcpSendItem& item, SendError error, size_t bytesSent);
+                          internal::TcpSendItem& item, SendError error, size_t bytesSent,
+                          const char* failure = nullptr, int code = 0);
         bool shutChannel(const std::shared_ptr<internal::TcpSendChannel>& ch);
         internal::KeptThreads keptThreads_;
         ~State();
@@ -239,12 +285,11 @@ public:
     // -------------------------------------------------------------------------
     // Start server (listen on specified port).
     //
-    // maxClients caps how many clients can be connected at once (0 =
-    // unlimited, the default). A connection that arrives while the server is
-    // full is closed right away and a warning is logged, at most once every few
-    // seconds however many arrive. A slot frees up as soon as a client
-    // disconnects. The listen backlog is a fixed value, independent of
-    // maxClients.
+    // maxClients defaults to 64 and must be positive. A full server closes
+    // newly accepted sockets before creating channels or threads. Closed clients
+    // retain their slot until their workers return. Rejections have one Warning
+    // and a cumulative internal counter for the server object's lifetime.
+    // The kernel listen backlog is independent of maxClients.
     //
     // It calls stop() first, which also joins any thread a listener's stop()
     // left running. When a stop() on another thread is still tearing the
@@ -255,8 +300,8 @@ public:
     // Events above) or on a client's receive or writer thread (onReceive,
     // onSendComplete, onClientDisconnect, onError from those threads), it logs
     // an error and returns false without stopping anything.
-    // Untrusted connection floods can retain clients; an optional cap keeps client memory finite. At the cap, newly accepted sockets are closed.
-    bool start(int port, int maxClients = 0);
+    // Bounds per-connection channels and workers; excess sockets are closed before allocation.
+    bool start(int port, int maxClients = 64);
     // Stop server. Returns once the accept thread and every client thread have
     // ended and every client is disconnected. When two threads call it at
     // once, only one of them waits for the accept thread.
@@ -329,19 +374,26 @@ public:
     // peer trips it, short enough that a dead one cannot hang a send forever.
     // Applies to every send that starts after this call, on every client.
     void setSendTimeout(float seconds);
-    // Set the high-water mark for one client's send queue, in bytes
-    // (0 = unlimited). Defaults to 16 MB.
-    //
-    // It is a mark, not a cap: sendAsync() is refused with QueueFull only when
-    // the queue ALREADY holds this much, so a single message of any size still
-    // goes through on an empty queue and there is no separate "too large" case.
-    // A full queue does not disconnect anyone — only the idle timeout does.
-    // send() waits for room instead of failing, so QueueFull is something only
-    // sendAsync() can return.
-    // A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
+    // Per-client high-water mark (default 16 MiB). Zero is a configuration
+    // error and leaves the setting unchanged. One item may cross the mark;
+    // owned items are also subject to setSendItemLimit() and aggregate credits.
+    // Full per-client queues reject async sends with QueueFull and make sync sends wait.
+    // Bound (security): slow peers retain sends; one-item overshoot stays finite. Overflow rejects whole async sends (sync sends wait) and is counted.
     void setSendAsyncBufferSize(size_t bytes);
-    // A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
     size_t getSendAsyncBufferSize() const;
+    // Maximum owned payload capacity (default 16 MiB). Zero is rejected.
+    // Bound (security): bulk owned sends need a finite pre-copy budget. Overflow rejects the whole send with QueueFull and is counted.
+    void setSendItemLimit(size_t bytes);
+    // Aggregate send credits (default 64 MiB), reserved before copying/fanout.
+    // Each recipient consumes credits; shared payload storage retains its first
+    // credit until its last reference is released. Zero is rejected. Lowering
+    // either limit preserves existing sends; the new value governs admission.
+    // Borrowed sync sends charge a finite window, with no owned payload copy.
+    // In send-thread callbacks (e.g. onSendComplete/onError), sync sends and
+    // broadcasts fail immediately if aggregate credits are full; they still
+    // wait for room in the destination client's own queue.
+    // Bound (security): slow peers must not multiply retained sends across clients. Overflow rejects whole async sends and writer-thread sync sends (other sync sends wait) and is counted.
+    void setTotalSendBufferSize(size_t bytes);
     // How much this client has queued and not yet completed, in bytes.
     // 0 for an unknown client.
     size_t getSendAsyncPendingBytes(int clientId) const;
