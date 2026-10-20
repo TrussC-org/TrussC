@@ -417,8 +417,30 @@ a capture prefix submits encoded work without authorizing presentation.
 Synchronous capture parks/submits the renderer prefix before native staging.
 Metal async capture stages in that prefix before later source writes. The host
 source-selection/finalization interface currently preserves each backend's
-existing source behavior. Completed-frame snapshots and per-window mutable
-shadow allocation are separate, deferred integrations.
+existing source behavior. Completed-frame snapshots remain a separate integration.
+
+Each window owns its shadow maps, allocated the first time that window uses
+shadows. Its four R32F array layers and shared depth image use 20 MiB of image
+payload at the unchanged 1024 default, plus views, sampler and driver overhead.
+Windows without shadows allocate none. Deferred PBR, including PBR in an Fbo,
+pins its window's map generation and copied slot matrices. Growth creates a new
+generation; final pin release links the generation itself into host retirement
+without allocating. The GPU dependency collector destroys its fixed handles
+after their recordings are consumed and a device boundary permits retirement.
+Shutdown drains retired generations before destroying the device, and exit
+reclaims any remaining CPU retirement nodes. Partial creation and allocation
+failure use the same path. Shadow creation
+checks each resource's Sokol state; a GL-only helper also checks native names
+and errors within each creation call, draining earlier user errors immediately
+before that call and reporting each code in a separate Warning as pending before
+shadow allocation. These earlier errors do not reject the allocation. Reuse and
+invalid-size rejection do not consume GL errors. Native view failures are detected.
+Before a shadow pass rewrites a sampled slot, the target stack consumes queued
+PBR that needs its current contents, including a lazy ancestor above which an
+Fbo is active. Replay restores the target's viewport/scissor after opening its
+pass, before queued PBR runs. Unrelated Fbo production preserves lazy parent
+recordings.
+Open shadow passes can park across foreign ticks.
 
 ScreenRecorder binds the originating window or Fbo and opens at its source
 extent. A take keeps fixed encoder dimensions; mismatched frames are counted and
@@ -663,7 +685,7 @@ void tcApp::draw() {
 
 **PBR Material Presets:** `Material::gold()`, `Material::silver()`, `Material::copper()`, `Material::iron()`, `Material::plastic(color)`, `Material::rubber(color)`
 
-**Features:** IES photometric profiles, IBL environment maps (HDR/procedural), normal maps, PBR texture maps (glTF 2.0), shadow mapping with PCF (up to 4 shadow-casting lights per frame — run one `beginShadowPass()`/`endShadowPass()` cycle per light; each renders into its own layer of a shared shadow map array)
+**Features:** IES photometric profiles, IBL environment maps (HDR/procedural), normal maps, PBR texture maps (glTF 2.0), shadow mapping with PCF (up to 4 shadow-casting lights per frame — run one `beginShadowPass()`/`endShadowPass()` cycle per light; each renders into its own layer of that window's shadow map array)
 
 > **Platform note — IBL on iOS/iPadOS Safari (wasm):** The IBL bake renders into cube-face render targets, which iOS/iPadOS Safari (both WebGPU and WebGL2) cannot do without breaking the canvas swapchain. So `loadProcedural()` / `loadFromHDR()` are **auto-skipped on iOS Safari**: PBR meshes fall back to a flat hemisphere ambient + direct lights (no environment reflections). Direct lighting, normal maps, shadows and plain FBOs all work fine. Native, desktop web, and Android web bake IBL normally. For a consistent look across iOS and other targets, don't rely on IBL reflections. See `tc/3d/tcEnvironment.h`.
 

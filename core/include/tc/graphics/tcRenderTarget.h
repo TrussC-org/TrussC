@@ -390,14 +390,23 @@ struct WindowCaptureSource {
 };
 WindowCaptureSource windowCaptureSource();
 bool finishWindowCaptureSource(RenderTarget& target);
-// Q1 plug-in: mutable shadow storage is accessed only through this owner seam.
+// One host-allocated generation per shadow-using window. Deferred PBR retains
+// its generation; final release links it into host retirement without allocating.
 struct ShadowStorage {
+    ShadowStorage() = default;
+    ShadowStorage(const ShadowStorage&) = delete;
+    ShadowStorage& operator=(const ShadowStorage&) = delete;
+    ~ShadowStorage() noexcept;
     sg_image colorImage = {}, depthImage = {};
     sg_view colorAttachments[4] = {}, colorTexture = {}, depthAttachment = {};
     sg_sampler sampler = {};
-    int resolution = 0, drawCount = 0;
+    int resolution = 0;
+    size_t imageBytes = 0;
+    ShadowStorage* retiredNext = nullptr;
 };
-ShadowStorage& shadowStorageForWindow(WindowContext& window);
+bool shadowImageLayout(int resolution, size_t& colorBytes, size_t& depthBytes, size_t& totalBytes);
+bool ensureShadowStorage(WindowContext& window, int resolution);
+void consumeShadowSlot(int slot);
 bool hasPublicFboActivation();
 RenderTargetResources* leaseTargetResources(sg_pixel_format format, int samples,
     sg_pixel_format depth = SG_PIXELFORMAT_DEPTH_STENCIL);
