@@ -29,6 +29,7 @@
 #include <fstream>
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <cstring>
 #include <filesystem>
@@ -59,7 +60,7 @@ protected:
     // Custom stream decoders subclass this Device, never the camera handle.
     struct PlaybackDevice : Device {
         std::atomic<bool> loop_{true};
-        int getFrameCount() const { return static_cast<int>(index_.size()); }
+        int getFrameCount() const { return static_cast<int>(std::min<std::uint32_t>(header_.frameCount, INT_MAX)); }
         DepthSensorType getSensorType() const {
             return static_cast<DepthSensorType>(header_.sensorType);
         }
@@ -86,16 +87,18 @@ protected:
             return false;
         }
 
-        bool open(const std::string& path) {
+        bool open(const std::string& path) try {
             // Start from an empty state, so a failed open leaves no manifest or
             // frame index from a file opened before. Clear the stream's error state
             // as well, so this open starts fresh after setup() closes it.
             if (file_.is_open()) file_.close();
             file_.clear();
             header_ = TcdcHeader{};
-            index_.clear();
+            skippedBlocks_ = 0;
             fileSize_ = 0;
             cursor_ = 0;
+            slots_ = {};
+            std::vector<std::uint8_t>().swap(scratch_);
             warnedSkippedBlock_ = false;
             // getDataPath passes absolute paths through unchanged
             std::filesystem::path resolved = getDataPath(path);
@@ -109,6 +112,10 @@ protected:
                 logError("tcxDepthRecord") << "PlaybackDepthCamera: not a .tcdc file: " << resolved;
                 return refuseOpen();
             }
+            if (header_.version != TCDC_VERSION) {
+                logError("tcxDepthRecord") << "PlaybackDepthCamera: unsupported recording version";
+                return refuseOpen();
+            }
             if (header_.streamTypeCount > TCDC_MAX_STREAM_TYPES) {
                 logError("tcxDepthRecord")
                     << "PlaybackDepthCamera: the stream manifest lists "
@@ -120,10 +127,10 @@ protected:
             // with int sizes and indices. DepthRecorder copies the first frame's
             // size, and a DepthFrame starts at 0x0, so a 0x0 header is kept (the
             // file plays without depth).
-            const std::int64_t rgbaBytes = static_cast<std::int64_t>(header_.width) *
-                                           static_cast<std::int64_t>(header_.height) * 4;
-            // Bound (abi): file frame dimensions must fit int-sized image byte counts and indices. Overflow refuses to open the file.
-            if (header_.width < 0 || header_.height < 0 || rgbaBytes > INT_MAX) {
+            const std::uint64_t rgbaBytes = header_.width > 0 && header_.height > 0
+                ? static_cast<std::uint64_t>(header_.width) * static_cast<std::uint64_t>(header_.height) * 4 : 0;
+            // Bound (security): recorded frames obey 8192-axis and 128 MiB image limits before allocation. Overflow refuses the file with an Error.
+            if (header_.width < 0 || header_.height < 0 || header_.width > 8192 || header_.height > 8192 || rgbaBytes > tcd_detail::playbackFrameBytes) {
                 logError("tcxDepthRecord")
                     << "PlaybackDepthCamera: the frame size " << header_.width << "x"
                     << header_.height << " is out of range: " << resolved;
@@ -133,39 +140,72 @@ protected:
             file_.seekg(0, std::ios::end);
             const std::streamoff fileEnd = file_.tellg();
             fileSize_ = fileEnd > 0 ? static_cast<std::uint64_t>(fileEnd) : 0;
-            if (header_.indexOffset != 0 && header_.frameCount > 0) {
-                file_.seekg(static_cast<std::streamoff>(header_.indexOffset));
-                for (std::uint32_t i = 0; i < header_.frameCount; ++i) {
-                    Entry e;
-                    if (!tcd_detail::rd(file_, e.ts) || !tcd_detail::rd(file_, e.offset)) break;
-                    index_.push_back(e);
+            // Bound (security): index count times 16 must fit the remaining file before reading; no full index is allocated (under 64 MiB / 1,000,000 resident entries). Overflow refuses the file with an Error.
+            if (header_.frameCount && (header_.indexOffset < sizeof(TcdcHeader) ||
+                header_.indexOffset > fileSize_ || header_.frameCount > (fileSize_ - header_.indexOffset) / 16)) {
+                logError("tcxDepthRecord") << "PlaybackDepthCamera: index does not fit the file";
+                return refuseOpen();
+            }
+            Entry previous;
+            for (std::uint32_t i = 0; i < header_.frameCount; ++i) {
+                Entry entry;
+                if (!readEntry(i, entry) || entry.offset < sizeof(TcdcHeader) ||
+                    entry.offset > header_.indexOffset || header_.indexOffset - entry.offset < sizeof(double) ||
+                    (i && (entry.offset <= previous.offset || entry.offset - previous.offset < sizeof(double)))) {
+                    logError("tcxDepthRecord") << "PlaybackDepthCamera: invalid frame index";
+                    return refuseOpen();
                 }
+                previous = entry;
             }
             logNotice("tcxDepthRecord")
-                << "PlaybackDepthCamera: " << index_.size() << " frames ("
+                << "PlaybackDepthCamera: " << header_.frameCount << " frames ("
                 << header_.width << "x" << header_.height << "), "
                 << static_cast<int>(header_.streamTypeCount) << " stream type(s)"
                 << (hasUnknownBlocks() ? " [has unknown stream(s)]" : "");
             return true;
+        } catch (const std::exception&) {
+            logError("tcxDepthRecord") << "PlaybackDepthCamera: open allocation failed";
+            return refuseOpen();
         }
 
         StreamFreshness captureInto(DepthFrame& dst) override {
             StreamFreshness fresh;
-            if (index_.empty()) return fresh;
-            if (cursor_ >= index_.size()) {
+            if (!header_.frameCount) return fresh;
+            if (cursor_ >= header_.frameCount) {
                 if (!loop_) return fresh;
                 cursor_ = 0;
             }
-            const std::uint64_t nextOffset =
-                (cursor_ + 1 < index_.size()) ? index_[cursor_ + 1].offset
-                                              : header_.indexOffset;
-            const std::uint64_t frameEnd = std::min(nextOffset, fileSize_);
+            // The base rotates at most three stable frame addresses. Save sizes,
+            // not pointers to read from other threads, when a capture completes.
+            Slot* slot = nullptr;
+            std::uint64_t otherSlotsBytes = 0;
+            for (auto& candidate : slots_) {
+                if (candidate.frame == &dst) slot = &candidate;
+                else otherSlotsBytes += candidate.bytes;
+            }
+            if (!slot) for (auto& candidate : slots_) if (!candidate.frame) { slot = &candidate; break; }
+            if (!slot) {
+                reportSkippedBlock(0, "more than three live playback slots");
+                return fresh;
+            }
+            slot->frame = &dst;
+            Entry current, following;
+            if (!readEntry(cursor_, current) ||
+                (cursor_ + 1 < header_.frameCount &&
+                 (!readEntry(cursor_ + 1, following) || following.offset <= current.offset || following.offset - current.offset < sizeof(double)))) {
+                reportSkippedBlock(0, "index read failed");
+                ++cursor_;
+                return fresh;
+            }
+            const std::uint64_t frameEnd = std::min(cursor_ + 1 < header_.frameCount ? following.offset : header_.indexOffset, fileSize_);
             file_.clear();
-            file_.seekg(static_cast<std::streamoff>(index_[cursor_].offset));
+            file_.seekg(static_cast<std::streamoff>(current.offset));
 
             tcd_detail::applyHeader(header_, dst);
-            dst.world.clear();
-            dst.depth.clear();
+            std::vector<Vec3>().swap(dst.world);
+            const std::uint64_t depthSamples = static_cast<std::uint64_t>(header_.width) * header_.height;
+            if (dst.depth.capacity() != depthSamples) std::vector<std::uint16_t>().swap(dst.depth);
+            else dst.depth.clear();
             if (dst.color.isAllocated()) dst.color = Pixels{};
 
             double ts = 0.0;
@@ -191,8 +231,8 @@ protected:
                     std::uint64_t used = 0;
                     const char* why = nullptr;
                     const bool ok = (type == BLOCK_DEPTH)
-                        ? tcd_detail::parseDepthPayload(file_, header_, len, room, dst, scratch_, used, why)
-                        : tcd_detail::parseColorPayload(file_, header_, len, room, dst, scratch_, used, why);
+                        ? tcd_detail::parseDepthPayload(file_, header_, len, room, dst, scratch_, used, why, otherSlotsBytes)
+                        : tcd_detail::parseColorPayload(file_, header_, len, room, dst, scratch_, used, why, otherSlotsBytes);
                     if (ok) {
                         if (type == BLOCK_DEPTH) fresh.depth = true;
                         else fresh.color = true;
@@ -207,20 +247,29 @@ protected:
                     // color length that is four bytes short of its known payload.
                     if (used == 0) break;
                     next = payload + std::max<std::uint64_t>(len, used);
+                } else if (len > tcd_detail::playbackMetadataBytes) {
+                    reportSkippedBlock(type, "custom block exceeds 64 MiB", len, tcd_detail::playbackMetadataBytes);
                 } else {
-                    // unknown / custom: read the payload and offer it to a subclass.
-                    std::vector<std::uint8_t> buf(len);
-                    if (len && !file_.read(reinterpret_cast<char*>(buf.data()), len)) {
+                    // Preserve the hook for subclasses that consume a type
+                    // without advertising it through decodesBlockType().
+                    // Bound (security): custom block metadata is limited to 64 MiB before copy and fits the 512 MiB triple-buffered playback set. Overflow skips the whole block and is counted.
+                    if (scratch_.capacity() != len) std::vector<std::uint8_t>().swap(scratch_);
+                    if (!tcd_detail::playbackResize(scratch_, len)) {
+                        logError("tcxDepthRecord") << "PlaybackDepthCamera: custom block allocation failed";
+                        break;
+                    }
+                    if (len && !file_.read(reinterpret_cast<char*>(scratch_.data()), len)) {
                         reportSkippedBlock(type, "block is cut off");
                         break;
                     }
-                    readExtraBlock(type, buf.data(), len, ts);
+                    readExtraBlock(type, scratch_.data(), len, ts);
                 }
                 // The next block starts right after this one, however much of it
                 // was read.
                 file_.clear();
                 file_.seekg(static_cast<std::streamoff>(next));
             }
+            slot->bytes = dst.depth.capacity() * sizeof(std::uint16_t) + dst.color.getTotalBytes();
             ++cursor_;
             return fresh;
         }
@@ -247,19 +296,32 @@ protected:
 
         // Warns about the first skipped block since open; a damaged file would
         // otherwise log on every frame of every loop.
-        void reportSkippedBlock(std::uint8_t type, const char* why) {
+        void reportSkippedBlock(std::uint8_t type, const char* why, std::uint64_t needed = 0, std::uint64_t capacity = 0) {
+            ++skippedBlocks_;
             if (warnedSkippedBlock_) return;
             warnedSkippedBlock_ = true;
             const char* kind = type == BLOCK_DEPTH ? "depth"
                              : type == BLOCK_COLOR ? "color" : "custom";
-            logWarning("tcxDepthRecord")
-                << "PlaybackDepthCamera: skipped a " << kind << " block in frame " << cursor_
-                << " (" << why << "); later skipped blocks are not reported";
+            auto warning = logWarning("tcxDepthRecord");
+            warning << "PlaybackDepthCamera: skipped a " << kind << " block in frame " << cursor_
+                    << " (" << why << ")";
+            if (capacity) warning << "; needed " << needed << " bytes, capacity " << capacity << " bytes";
+            warning << "; later skipped blocks are not reported";
         }
 
         std::ifstream file_;
         TcdcHeader header_{};
-        std::vector<Entry> index_;
+        bool readEntry(std::size_t index, Entry& entry) {
+            file_.clear();
+            file_.seekg(static_cast<std::streamoff>(header_.indexOffset + std::uint64_t(index) * 16));
+            return tcd_detail::rd(file_, entry.ts) && tcd_detail::rd(file_, entry.offset) &&
+                entry.offset >= sizeof(TcdcHeader) && entry.offset <= header_.indexOffset &&
+                header_.indexOffset - entry.offset >= sizeof(double);
+        }
+        struct Slot { const DepthFrame* frame = nullptr; std::uint64_t bytes = 0; };
+        std::array<Slot, 3> slots_{};
+        std::uint64_t skippedBlocks_ = 0;
+        friend struct PlaybackBudgetTestAccess;
         std::size_t cursor_ = 0;
         std::vector<std::uint8_t> scratch_;
         std::uint64_t fileSize_ = 0;
