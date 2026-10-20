@@ -14,6 +14,10 @@
 #include <limits>
 #include <chrono>
 #include <thread>
+#include <iterator>
+#include <cctype>
+#include <cmath>
+#include <nlohmann/json.hpp>
 
 #if defined(__linux__) && !defined(__ANDROID__)
 void audioMallocProbeArm();
@@ -303,13 +307,176 @@ void frameAccounting() {
     internal::setAudioWorkingLimitForTests(0);
 }
 #endif
+
+// Real device fixtures use the production thresholds, in a fresh process.
+vector<char> readDeviceFile(const fs::path& path, size_t limit) {
+    ifstream file(path, ios::binary);
+    if (!file) throw runtime_error("cannot open device input");
+    const auto size = min<uintmax_t>(fs::file_size(path), limit);
+    vector<char> bytes(static_cast<size_t>(size));
+    file.read(bytes.data(), static_cast<streamsize>(bytes.size()));
+    if (file.bad() || file.fail() || file.gcount() != static_cast<streamsize>(bytes.size()))
+        throw runtime_error("cannot read device input completely");
+    return bytes;
 }
 
-TC_CORE_TEST_MAIN() {
+void deviceFixtureChecks(const fs::path& inputPath, const string& expect) {
+    const auto path = fs::absolute(inputPath);
+    const bool reject = expect == "reject-encoded" || expect == "reject-format";
+    const bool notice = expect == "notice";
+    check("known expectation", reject || notice || expect == "load");
+    size_t notices = 0, warnings = 0;
+    string rejectionMessage;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
+        if (event.level == LogLevel::Notice && event.message.find("decoded audio exceeds") != string::npos) {
+            ++notices;
+            check("Notice recommends streaming", event.message.find("SoundStream::loadStream()") != string::npos);
+        }
+        if (event.level == LogLevel::Warning && event.message.find("rejecting whole sound") != string::npos) {
+            ++warnings;
+            rejectionMessage = event.message;
+        }
+    });
+    // Bound (test): retain at most 64 MiB + 1 encoded bytes for rejection probes, and 1 MiB of manifest JSON.
+    const auto bytes = readDeviceFile(path, 64 * 1024 * 1024 + 1);
+    check("fixture is nonempty", !bytes.empty());
+    const auto manifestBytes = readDeviceFile(path.parent_path() / "manifest.json", 1024 * 1024);
+    const auto manifest = nlohmann::json::parse(manifestBytes.begin(), manifestBytes.end());
+    // Read only the scalar expectations by reference: copying a whole manifest
+    // row would recurse through any nested value it carries.
+    const nlohmann::json* expected = nullptr;
+    for (const auto& entry : manifest) {
+        if (entry.is_object() && entry.contains("file") && entry["file"].is_string() &&
+            entry["file"].get<string>() == path.filename().string()) {
+            if (expected) throw runtime_error("duplicate fixture in manifest");
+            expected = &entry;
+        }
+    }
+    if (!expected) throw runtime_error("fixture missing from manifest");
+    check("manifest expectation matches command", expected->at("expect").get<string>() == expect);
+    const nlohmann::json* pcm = expected;
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (expected->contains("linux_pcm")) pcm = &expected->at("linux_pcm");
+#endif
+    const auto channels = expected->at("channels").get<int>();
+    const auto rate = pcm->at("sample_rate").get<int>();
+    const auto frames = pcm->at("frames").get<int64_t>();
+    const auto tolerance = expected->at("frame_tolerance").get<int64_t>();
+    if (channels <= 0 || rate <= 0 || frames <= 0 || tolerance < 0 || tolerance >= frames)
+        throw runtime_error("invalid manifest PCM expectation");
+    auto checkPcm = [&](const SoundBuffer& b) {
+        check("PCM channels match manifest", b.channels == channels);
+        check("PCM sample rate matches manifest", b.sampleRate == rate);
+        check("PCM frames match full manifest duration", abs(double(b.numSamples) - double(frames)) <= double(tolerance));
+        check("complete PCM layout", b.channels > 0 && b.numSamples <= b.samples.size() / size_t(b.channels) &&
+              b.samples.size() == b.numSamples * size_t(b.channels));
+        check("decoded frame count replaced seed", b.numSamples != 1);
+        check("decoded PCM content replaced seed", b.samples != vector<float>{0.25f});
+    };
+    auto checkDuration = [&](const Sound& sound) {
+        // Sound exposes float seconds; allow its rounding in addition to codec padding.
+        const double duration = double(frames) / rate;
+        const double secondsTolerance = double(tolerance) / rate +
+            2 * numeric_limits<float>::epsilon() * max(1.0, duration);
+        check("Sound duration matches manifest", abs(double(sound.getDuration()) - duration) <= secondsTolerance);
+    };
+    string ext = path.extension().string();
+    transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return char(tolower(c)); });
+    auto memoryLoad = [&](SoundBuffer& b) -> LoadResult {
+        if (ext == ".wav") return b.loadWavFromMemory(bytes.data(), bytes.size());
+        if (ext == ".mp3") return b.loadMp3FromMemory(bytes.data(), bytes.size());
+        if (ext == ".flac") return b.loadFlacFromMemory(bytes.data(), bytes.size());
+        if (ext == ".ogg") return b.loadOggFromMemory(bytes.data(), bytes.size());
+        return b.loadAacFromMemory(bytes.data(), bytes.size());
+    };
+    AudioSettings settings;
+    settings.backend = AudioBackend::Null;
+    auto& engine = AudioEngine::getInstance();
+    check("null backend starts (decode only)", engine.init(settings));
+    auto run = [&](const char* label, auto load) {
+        for (int repeat = 0; repeat < 2; ++repeat) {
+            const auto before = internal::audioDecodeRejections();
+            SoundBuffer b;
+            b.samples = {0.25f}; b.channels = 1; b.sampleRate = 48000; b.numSamples = 1;
+            const bool ok = bool(load(b));
+            check(label, ok == !reject);
+            check("whole-load rejection count", internal::audioDecodeRejections() == before + (reject ? 1 : 0));
+            if (reject) check("failed load keeps previous PCM", intact(b));
+            else {
+                checkPcm(b);
+                if (notice) check("actual PCM exceeds 256 MiB", b.samples.size() > internal::audioLargeLoadNoticeBytes / sizeof(float));
+            }
+        }
+    };
+    if (!failures) {
+        run("SoundBuffer file load", [&](SoundBuffer& b) { return b.load(path); });
+        run("SoundBuffer memory load", memoryLoad);
+        // Sound has no encoded-memory API. Attach the memory-decoded buffer
+        // through its public loadFromBuffer entry instead.
+        run("Sound memory buffer attachment", [&](SoundBuffer& b) {
+            auto result = memoryLoad(b);
+            if (result) {
+                auto decoded = make_shared<SoundBuffer>(std::move(b));
+                {
+                    Sound sound;
+                    sound.loadFromBuffer(decoded);
+                    check("Sound memory attachment loaded state", sound.isLoaded());
+                    checkDuration(sound);
+                }
+                b = std::move(*decoded);
+            }
+            return result;
+        });
+        for (int repeat = 0; repeat < 2; ++repeat) {
+            Sound sound;
+            const auto before = internal::audioDecodeRejections();
+            check("Sound file load", bool(sound.load(path)) == !reject);
+            check("Sound loaded state", sound.isLoaded() == !reject);
+            if (!reject) checkDuration(sound);
+            check("Sound rejection count", internal::audioDecodeRejections() == before + (reject ? 1 : 0));
+        }
+#if defined(__APPLE__) || defined(_WIN32)
+        // Explicit native MP3 coverage: automatic .mp3 dispatch is miniaudio.
+        if (ext == ".mp3") {
+            run("native MP3 file load", [&](SoundBuffer& b) { return b.loadAac(path); });
+            run("native MP3 memory load", [&](SoundBuffer& b) { return b.loadAacFromMemory(bytes.data(), bytes.size()); });
+        }
+#endif
+        check("one Notice across repeated loads", notices == (notice ? 1u : 0u));
+        check("one first rejection Warning", warnings == (reject ? 1u : 0u));
+        if (expect == "reject-encoded") check("encoded rejection reason", rejectionMessage.find("encoded audio bytes") != string::npos);
+        if (expect == "reject-format") check("format rejection reason", rejectionMessage.find("audio channels") != string::npos || rejectionMessage.find("audio sample rate") != string::npos);
+    }
+}
+
+int deviceFixture(const fs::path& inputPath, const string& expect) {
+    try {
+        deviceFixtureChecks(inputPath, expect);
+    } catch (const bad_alloc&) {
+        check("device fixture allocation failed", false);
+    } catch (const exception& error) {
+        printf("Device fixture error: %s\n", error.what());
+        check("device fixture input or decode failed", false);
+    }
+    AudioEngine::getInstance().shutdown();
+    printf("Audio device fixture: %s (%d failures)\n", failures ? "FAIL" : "PASS", failures);
+    fflush(stdout); // iOS launchers consume the verdict even when main's status is unavailable.
+    return failures ? 1 : 0;
+}
+}
+
+TC_CORE_TEST_MAIN(int argc, char** argv) {
     using namespace tc;
     using namespace std;
     using internal::AudioDecodeBudget;
     getMainThreadId();
+    if (argc != 1) {
+        if (argc == 4 && string(argv[1]) == "--device-fixture")
+            return deviceFixture(argv[2], argv[3]);
+        check("usage: --device-fixture <path> <load|reject-encoded|reject-format|notice>", false);
+        printf("Audio device fixture: FAIL (%d failures)\n", failures);
+        return 1;
+    }
     const auto dir = fs::temp_directory_path() / "tc_audioDecodeBounds";
     fs::create_directories(dir);
     size_t warnings = 0, streamWarnings = 0, notices = 0, allocationErrors = 0;
