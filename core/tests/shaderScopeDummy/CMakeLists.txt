@@ -3,6 +3,7 @@ project(shaderScopeDummy LANGUAGES C CXX)
 add_executable(shaderScopeDummy main.cpp)
 target_compile_features(shaderScopeDummy PRIVATE cxx_std_20)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_compile_options(shaderScopeDummy PRIVATE -UNDEBUG)
     # Preserve the reviewer's real-Shader/Fbo dummy probe. The dummy symbols
     # precede the native archive; only the windowless probe uses this override.
     # A standalone unit test has no src/ and does not use trussc_app().

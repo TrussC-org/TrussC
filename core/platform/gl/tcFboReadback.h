@@ -12,7 +12,7 @@
 #include <GL/glext.h>
 #endif
 
-#include "tcPixelPack.h"
+#include "tcGLReadbackState.h"
 
 namespace trussc {
 
@@ -37,15 +37,9 @@ static bool withGLReadTexture(sg_image image, int width, int height, bool report
     }
     const GLuint texID = sg_gl_query_image_info(image).tex[0];
 
-    GLint prevReadFbo, prevDrawFbo;
-    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevReadFbo);
-    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevDrawFbo);
-    internal::ScopedTightPixelPack pack;
-
-    GLuint tempFbo;
-    glGenFramebuffers(1, &tempFbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, tempFbo);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texID, 0);
+    internal::CapturePrefixScope capturePhase(internal::CaptureSource::Target);
+    internal::GLReadbackState nativeState;
+    nativeState.bindTexture(texID);
 
     bool ok = false;
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
@@ -56,9 +50,6 @@ static bool withGLReadTexture(sg_image image, int width, int height, bool report
         if (reportError) tc::logError("Fbo") << "Temporary FBO is incomplete";
     }
 
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, prevReadFbo);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, prevDrawFbo);
-    glDeleteFramebuffers(1, &tempFbo);
     return ok;
 }
 

@@ -306,10 +306,10 @@ bool pipelineGenerationProbe() {
         survivor.end();
         const auto retried=target.pipeline(failedRequest);
         ok &= retried.raw.id!=0;
-        sg_commit(); internal::drainPendingGpuDestroys();
+        internal::endGpuFrame();
     }
     internal::retirePipelineProgram(shader); internal::deferGpuDestroy(shader);
-    sg_commit(); internal::drainPendingGpuDestroys();
+    internal::endGpuFrame();
     internal::currentWindowCtx()=previous;
     std::printf("PIPELINE failure cached/retry + resize x50=%d expected=1\n",ok);
     return ok;
@@ -434,9 +434,7 @@ bool windowTickRestoreProbe(bool dimensions) {
     return ok;
 }
 
-// Document the pre-existing global rewind honestly: B's present loses A's
-// lazy immediate triangle even WITHOUT resize. Raw deferred work survives,
-// so it must continue to block a rebuild after that global SGL rewind.
+// Foreign commits preserve every unconsumed recording and defer exact resize requests.
 bool interleavedRewindProbe(bool resize, bool raw) {
     DummyWindowPair windows;
     internal::restoreWindowContext(nullptr);
@@ -461,26 +459,442 @@ bool interleavedRewindProbe(bool resize, bool raw) {
         beginFrame(); // A still has pending work: this retry must defer too.
         ok &= target.resources().context.id == before.id && sgl_tc_context_has_pending_draws(before);
     }
-    present(); // Global commit rewinds A as well as B.
+    present(); // B completes only B.
     const bool rewound = !sgl_tc_context_has_pending_draws(before);
-    ok &= rewound;
+    ok &= !rewound;
     internal::restoreWindowContext(nullptr);
     if (resize) {
         beginFrame(); // Rebuild now, unless A still owns a raw deferred draw.
-        if (raw) ok &= internal::sglBudget().pendingResize == 3072 && target.resources().context.id == before.id;
-        else ok &= !internal::sglBudget().pendingResize && target.resources().generation != generation;
+        ok &= internal::sglBudget().pendingResize == 3072 && target.resources().context.id == before.id && target.resources().generation == generation;
     }
     submittedDraws = 0;
     present();
     const int draws = submittedDraws;
-    ok &= draws == (raw ? 1 : 0); // The immediate triangle was already lost.
+    ok &= draws == (raw ? 2 : 1);
     if (resize) {
         beginFrame(); // Raw work has now drained too: first safe retry succeeds.
         auto* context = _sgl_lookup_context(target.resources().context.id);
         ok &= !internal::sglBudget().pendingResize && context->desc.max_vertices == 3072 && context->desc.max_commands == 377;
     }
     std::printf("CROSS WINDOW REWIND resize=%d raw=%d rewound=%d draws=%d expected=%d retry=%d\n",
-        resize,raw,rewound,draws,raw ? 1 : 0,ok);
+        resize,raw,rewound,draws,raw ? 2 : 1,ok);
+    return ok;
+}
+
+// Exercise the production no-draw predicate and endGpuFrame, with an actual
+// unrelated buffer update. No replacement scheduler/reset helper is involved.
+bool noDrawParityProbe(bool upload, bool raw) {
+    DummyWindowPair windows;
+    internal::restoreWindowContext(nullptr);
+    present();
+    Shader shader;
+    bool ok = shader.load(descriptor);
+    recordTriangle();
+    if (raw) { shader.begin(); submit(shader); shader.end(); }
+    auto& target = windows.main.swapchainTarget;
+    sg_buffer buffer = {};
+    if (upload) {
+        sg_buffer_desc desc = {}; desc.size = 16; desc.usage.vertex_buffer = true; desc.usage.dynamic_update = true;
+        buffer = sg_make_buffer(desc);
+        uint32_t bytes[4] = {}; sg_update_buffer(buffer, SG_RANGE(bytes));
+    }
+    const bool work = tc_internal_gpu_frame_has_work();
+    ok &= work == upload;
+    if (work) internal::endGpuFrame(); // TrussC's conditional no-draw boundary
+    ok &= !target.inPass && target.deferredShaderDraws.size() == (raw ? 1u : 0u);
+    ok &= sgl_tc_context_has_pending_draws(target.resources().context) == !upload;
+    submittedDraws = 0;
+    present();
+    const int expected = (raw ? 1 : 0) + (upload ? 0 : 1);
+    ok &= submittedDraws == expected && target.deferredShaderDraws.empty();
+    std::printf("NO DRAW PARITY upload=%d raw=%d gpu_work=%d draws=%d expected=%d ok=%d\n",
+        upload, raw, work, submittedDraws, expected, ok);
+    if (buffer.id) sg_destroy_buffer(buffer);
+    return ok;
+}
+
+// The generated native PBR/point shaders have no dummy descriptors. Supply
+// valid dummy pipelines to their real captured-command replay paths instead.
+bool rawKindsLifetimeProbe() {
+    DummyWindowPair windows;
+    internal::restoreWindowContext(nullptr);
+    present();
+    auto& target = windows.main.swapchainTarget;
+    sg_shader_desc pbrDesc = {}, pointDesc = {};
+    pbrDesc.uniform_blocks[UB_tc_pbr_vs_params].stage = SG_SHADERSTAGE_VERTEX;
+    pbrDesc.uniform_blocks[UB_tc_pbr_vs_params].size = sizeof(tc_pbr_vs_params_t);
+    pbrDesc.uniform_blocks[UB_tc_pbr_fs_params].stage = SG_SHADERSTAGE_FRAGMENT;
+    pbrDesc.uniform_blocks[UB_tc_pbr_fs_params].size = sizeof(tc_pbr_fs_params_t);
+    pointDesc.uniform_blocks[UB_tc_pointcloud_vs_params].stage = SG_SHADERSTAGE_VERTEX;
+    pointDesc.uniform_blocks[UB_tc_pointcloud_vs_params].size = sizeof(tc_pointcloud_vs_params_t);
+    const sg_shader pbrShader = sg_make_shader(&pbrDesc), pointShader = sg_make_shader(&pointDesc);
+    sg_pipeline_desc pd = {}; pd.shader = pbrShader;
+    pd.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
+    const sg_pipeline pbrPipeline = sg_make_pipeline(&pd);
+    pd.shader = pointShader;
+    const sg_pipeline pointPipeline = sg_make_pipeline(&pd);
+    auto generation = std::make_shared<internal::PipelineGeneration>();
+    std::weak_ptr<internal::PipelineGeneration> lifetime = generation;
+    const float vertices[9] = {};
+    sg_buffer_desc bd = {}; bd.data = SG_RANGE(vertices);
+    const sg_buffer buffer = sg_make_buffer(&bd);
+    internal::PbrDrawCommand pbr = {}; pbr.pip = pbrPipeline; pbr.generation = generation;
+    pbr.bind.vertex_buffers[0] = buffer;
+    pbr.vertexCount = 3;
+    std::memset(&pbr.vsp, 0x21, sizeof(pbr.vsp));
+    std::memset(&pbr.fsp, 0x32, sizeof(pbr.fsp));
+    internal::PointDrawCommand point = {}; point.pip = pointPipeline; point.generation = generation;
+    point.bind.vertex_buffers[0] = buffer;
+    point.numElements = 3; point.numInstances = 1;
+    std::memset(&point.vsp, 0x43, sizeof(point.vsp));
+    bool ok = internal::appendTargetRecording(target, target.deferredPbrDraws,
+        internal::DeferredPbrDraw{target.sglLayerNext, pbr}) && target.advanceLayer();
+    ok &= internal::appendTargetRecording(target, target.deferredPointDraws,
+        internal::DeferredPointDraw{target.sglLayerNext, point}) && target.advanceLayer();
+    pbr.generation.reset(); point.generation.reset(); generation.reset();
+    internal::deferGpuDestroy(buffer);
+    internal::endGpuFrame(); // an own upload/completion does not consume raw draws
+    internal::restoreWindowContext(&windows.secondary.context());
+    for (int i = 0; i < 3; ++i) present();
+    internal::restoreWindowContext(nullptr);
+    ok &= !lifetime.expired() && target.deferredPbrDraws.size() == 1 && target.deferredPointDraws.size() == 1 &&
+        sg_query_buffer_state(buffer) == SG_RESOURCESTATE_VALID;
+    if (ok) {
+        const auto& savedPbr = target.deferredPbrDraws.front();
+        const auto& savedPoint = target.deferredPointDraws.front();
+        ok &= savedPbr.layerId < savedPoint.layerId &&
+            !std::memcmp(&savedPbr.cmd.vsp, &pbr.vsp, sizeof(pbr.vsp)) &&
+            !std::memcmp(&savedPbr.cmd.fsp, &pbr.fsp, sizeof(pbr.fsp)) &&
+            !std::memcmp(&savedPoint.cmd.vsp, &point.vsp, sizeof(point.vsp));
+    }
+    submittedDraws = 0; present();
+    ok &= submittedDraws == 2 && target.deferredPbrDraws.empty() && target.deferredPointDraws.empty() && lifetime.expired() &&
+        sg_query_buffer_state(buffer) == SG_RESOURCESTATE_INVALID;
+    present(); ok &= submittedDraws == 2;
+    std::printf("RAW KINDS PBR_and_point copied_uniforms_pins_consume_once=%d draws=%d expected=2\n", ok, submittedDraws);
+    sg_destroy_pipeline(pbrPipeline); sg_destroy_pipeline(pointPipeline);
+    sg_destroy_shader(pbrShader); sg_destroy_shader(pointShader);
+    return ok;
+}
+
+bool parkedWindowProbe(bool fboTop) {
+    DummyWindowPair windows;
+    internal::restoreWindowContext(nullptr);
+    Fbo fbo;
+    if (fboTop) { fbo.allocate(16,16,4); fbo.begin(0,0,0); }
+    internal::ensureCurrentPass();
+    auto& target = internal::currentTarget();
+    const auto token = target.activation;
+    const auto context = target.resources().context;
+    const auto binding = target.binding;
+    Shader shader;
+    bool ok = shader.load(descriptor);
+    shader.begin(); submit(shader); recordTriangle();
+    const auto stackSize = windows.main.targetStack.size();
+    const auto startDraws = submittedDraws;
+    internal::restoreWindowContext(&windows.secondary.context());
+    ok &= !target.inPass && target.activation == token && target.openShaderScopes == 1 &&
+        windows.main.targetStack.size() == stackSize && submittedDraws == startDraws + 2;
+    for (int i = 0; i < 3; ++i) present();
+    internal::restoreWindowContext(nullptr);
+    ok &= !target.inPass && sgl_get_context().id == context.id;
+    const auto beforePrefix = commits;
+    internal::submitCapturePrefix();
+    ok &= commits == beforePrefix && target.openShaderScopes == 1;
+    internal::ensureCurrentPass();
+    ok &= target.inPass && target.activation == token &&
+        passes.back().action.colors[0].load_action == SG_LOADACTION_LOAD &&
+        target.binding.attachments.colors[0].id == binding.attachments.colors[0].id;
+    submit(shader); shader.end();
+    if (fboTop) fbo.end();
+    present();
+    ok &= submittedDraws == startDraws + 3;
+    std::printf("PARK WINDOW fbo=%d LOAD=1 prefix_commits=0 draws=%d expected=3 ok=%d\n",
+        fboTop, submittedDraws - startDraws, ok);
+    return ok;
+}
+
+bool parkedShadowProbe() {
+    DummyWindowPair windows;
+    internal::restoreWindowContext(nullptr);
+    auto& sh = windows.main.shadow;
+    auto& target = sh.target;
+    sg_image_desc im = {}; im.width = im.height = 16;
+    im.pixel_format = SG_PIXELFORMAT_RGBA8; im.usage.color_attachment = true;
+    const auto image = sg_make_image(im);
+    sg_view_desc vd = {}; vd.color_attachment.image = image;
+    const auto view = sg_make_view(vd);
+    sg_shader_desc sd = {};
+    sd.uniform_blocks[UB_tc_shadow_shadow_vs_params].stage = SG_SHADERSTAGE_VERTEX;
+    sd.uniform_blocks[UB_tc_shadow_shadow_vs_params].size = sizeof(tc_shadow_shadow_vs_params_t);
+    const auto shader = sg_make_shader(sd);
+    sg_pipeline_desc pd = {}; pd.shader = shader;
+    pd.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
+    pd.index_type = SG_INDEXTYPE_UINT32;
+    pd.depth.pixel_format = SG_PIXELFORMAT_NONE;
+    target.passKind = internal::TargetPassKind::Fixed; target.isFbo = true;
+    target.width = target.height = 16; target.colorFormat = SG_PIXELFORMAT_RGBA8;
+    target.sampleCount = 1; target.hasDepth = false; target.depthFormat = SG_PIXELFORMAT_NONE;
+    target.binding.attachments.colors[0] = view;
+    target.hasFixedPipeline = true;
+    target.fixedPipeline = internal::PipelineKey::raw(internal::PipelineRole::Shader,pd);
+    target.pooledResources = internal::leaseTargetResources(SG_PIXELFORMAT_RGBA8,1,SG_PIXELFORMAT_NONE);
+    Mesh mesh; mesh.addVertex(0,0,0).addVertex(1,0,0).addVertex(0,1,0);
+    int prefix = 0, suffix = 0;
+    bool childRejected = false, resumed = false;
+    {
+        internal::TargetPassScope scope(target);
+        sh.inPass = true; sh.current = 0;
+        const int start = submittedDraws;
+        shadowDraw(mesh);
+        prefix = submittedDraws - start;
+        internal::restoreWindowContext(&windows.secondary.context()); present();
+        internal::restoreWindowContext(nullptr);
+        const int beforeSuffix = submittedDraws;
+        shadowDraw(mesh);
+        internal::getPbrPipeline().shadowDrawMesh(mesh);
+        suffix = submittedDraws - beforeSuffix;
+        resumed = target.inPass && passes.back().action.colors[0].load_action == SG_LOADACTION_LOAD;
+        Fbo child; child.allocate(8,8); child.begin(0,0,0);
+        const auto beforeChild = submittedDraws;
+        shadowDraw(mesh);
+        childRejected = submittedDraws == beforeChild && !target.inPass;
+        child.end();
+        sh.inPass = false;
+    }
+    present();
+    sg_destroy_view(view); sg_destroy_image(image); sg_destroy_shader(shader);
+    std::printf("PARKED SHADOW prefix=%d suffix_after_park=%d LOAD=%d child_rejected=%d expected=1/2/1/1\n",prefix,suffix,resumed,childRejected);
+    return prefix == 1 && suffix == 2 && resumed && childRejected;
+}
+bool foreignTeardownReplayFailureProbe() {
+    DummyWindowPair windows;
+    internal::restoreWindowContext(nullptr);
+    Shader shader;
+    bool ok = shader.load(descriptor);
+    internal::ensureCurrentPass();
+    shader.begin(); submit(shader);
+    auto& target = internal::currentTarget();
+    const auto token = target.activation;
+    const auto before = submittedDraws;
+    failAllocation = true;
+    windows.secondary.context().teardownTargets();
+    ok &= !failAllocation && !target.inPass && !_sg.cur_pass.in_pass && target.recordingFailed &&
+        target.deferredShaderDraws.empty() && !target.openShaderScopes && windows.main.shaderStack.empty() &&
+        !sgl_tc_context_has_pending_draws(target.resources().context) && target.activation == token &&
+        &internal::currentWindowContext() == &windows.main && submittedDraws == before;
+    // The owner boundary completes the discarded recording before new work.
+    present();
+    ok &= submittedDraws == before && !target.recordingFailed;
+    // Recovery permits a new pass, with neither a stale draw nor a scope.
+    internal::ensureCurrentPass(); recordTriangle(); present();
+    ok &= submittedDraws == before + 1 && !target.recordingFailed;
+    std::printf("FOREIGN TEARDOWN replay_allocation_failure_cleanup=%d expected=1\n",ok);
+    return ok;
+}
+
+// Same production scope used by Metal captureWindow, including calls nested
+// inside present() and a foreign tick. The dummy backend cannot test GPU waits.
+bool synchronousCapturePhaseProbe(bool secondary) {
+    DummyWindowPair windows;
+    auto* owner = secondary ? &windows.secondary.context() : &windows.main;
+    auto* foreign = secondary ? &windows.main : &windows.secondary.context();
+    internal::restoreWindowContext(owner);
+    auto& target = internal::currentTarget();
+    const auto token = target.activation;
+    const auto epoch = owner->renderEpoch;
+    const auto beforeCommits = commits;
+    const auto beforeDraws = submittedDraws;
+    beginFrame(); clear(1,0,0); setColor(1); drawRect(8,8,16,16);
+    bool ok = !target.inPass && !target.passStartedThisFrame;
+    const auto firstPassIndex = passes.size();
+    auto capture = [&] {
+        const auto before = commits;
+        {
+            internal::CapturePrefixScope phase;
+            ok &= !target.inPass && !_sg.cur_pass.in_pass && commits == before &&
+                target.activation == token && owner->renderEpoch == epoch;
+        }
+        ok &= target.inPass && passes.back().action.colors[0].load_action == SG_LOADACTION_LOAD;
+    };
+    capture(); // draw() phase
+    ok &= submittedDraws == beforeDraws + 1 && !sgl_tc_context_has_pending_draws(target.resources().context);
+    std::printf("PREFIX PROBE secondary=%d after scope draws=%d pending=%d expected_draws=1\n",
+        secondary, submittedDraws - beforeDraws, sgl_tc_context_has_pending_draws(target.resources().context));
+    ok &= passes.size() == firstPassIndex + 2;
+    if (passes.size() > firstPassIndex) {
+        const auto& firstPass = passes[firstPassIndex];
+        ok &= firstPass.action.colors[0].load_action == SG_LOADACTION_CLEAR &&
+            firstPass.action.colors[0].clear_value.r == 1 && firstPass.action.colors[0].clear_value.g == 0;
+    }
+    recordTriangle();
+    internal::restoreWindowContext(foreign); internal::ensureCurrentPass(); recordTriangle();
+    auto& foreignTarget = internal::currentTarget();
+    internal::restoreWindowContext(owner); // parks the other window's pass
+    ok &= !foreignTarget.inPass && !target.inPass;
+    const auto emptyParkedPasses = passes.size();
+    {
+        internal::CapturePrefixScope phase;
+    }
+    ok &= !target.inPass && !foreignTarget.inPass && passes.size() == emptyParkedPasses;
+    setColor(1); drawRect(40,8,16,16); // new CPU work on the lazy parked target
+    const auto beforeParkedCapture = submittedDraws;
+    capture();
+    ok &= !foreignTarget.inPass && submittedDraws == beforeParkedCapture + 1 &&
+        !sgl_tc_context_has_pending_draws(target.resources().context);
+    {
+        internal::CapturePrefixScope phase;
+        phase.leaveParked(); // native capture failure/timeout
+    }
+    ok &= !target.inPass && !_sg.cur_pass.in_pass && target.activation == token;
+    recordTriangle();
+    int renderCaptures = 0;
+    auto listener = events().onRender.listen([&] { ++renderCaptures; capture(); recordTriangle(); });
+    present();
+    ok &= renderCaptures == 1 && commits == beforeCommits + 1 && submittedDraws == beforeDraws + 6 &&
+        owner->renderEpoch == epoch + 1;
+    const auto finishedPasses = passes.size();
+    {
+        internal::CapturePrefixScope phase; // completed afterFrame source
+    }
+    ok &= passes.size() == finishedPasses && !target.inPass && !owner->framePending;
+    beginFrame(); clear(0,0,1); // the following frame has only a pending clear
+    {
+        internal::CapturePrefixScope phase;
+        ok &= !target.inPass && passes.back().action.colors[0].load_action == SG_LOADACTION_CLEAR &&
+            passes.back().action.colors[0].clear_value.b == 1 && submittedDraws == beforeDraws + 6;
+        phase.leaveParked();
+    }
+    std::printf("SYNC CAPTURE PHASE secondary=%d draw_onRender_foreign_LOAD=%d expected=1\n", secondary,ok);
+    return ok;
+}
+
+bool begunResizeProbe() {
+    DummyWindowPair windows;
+    internal::restoreWindowContext(nullptr);
+    auto& target = internal::currentTarget();
+    const auto context = target.resources().context;
+    const auto generation = target.resources().generation;
+    int oldDrawable = 1, oldDepth = 2, oldMsaa = 3;
+    int newDrawable = 4, newDepth = 5, newMsaa = 6;
+    auto acquired = dummySwapchain(nullptr);
+    acquired.metal.current_drawable = &oldDrawable;
+    acquired.metal.depth_stencil_texture = &oldDepth;
+    acquired.metal.msaa_color_texture = &oldMsaa;
+    windows.main.acquireSwapchainUser = &acquired;
+    windows.main.acquireSwapchain = [](void* value) { return *static_cast<sg_swapchain*>(value); };
+    submittedDraws = 0;
+    internal::ensureCurrentPass(); recordTriangle(); target.flushLayers();
+    bool ok = target.passStartedThisFrame && !sgl_tc_context_has_pending_draws(context);
+    internal::restoreWindowContext(&windows.secondary.context());
+    // Model native resize replacing the attachment generation while A is
+    // parked. Dummy pointers test descriptor identity, not Objective-C retain.
+    acquired.metal.current_drawable = &newDrawable;
+    acquired.metal.depth_stencil_texture = &newDepth;
+    acquired.metal.msaa_color_texture = &newMsaa;
+    acquired.width = 128; acquired.height = 96;
+    internal::resizeSgl(3072,377);
+    for (int i = 0; i < SG_NUM_INFLIGHT_FRAMES + 3; ++i) { beginFrame(); present(); }
+    ok &= internal::sglBudget().pendingResize == 3072 && target.resources().context.id == context.id;
+    internal::restoreWindowContext(nullptr); beginFrame();
+    ok &= target.resources().generation == generation;
+    internal::ensureCurrentPass();
+    ok &= passes.back().action.colors[0].load_action == SG_LOADACTION_LOAD;
+    ok &= passes.back().swapchain.metal.current_drawable == &oldDrawable &&
+        passes.back().swapchain.metal.depth_stencil_texture == &oldDepth &&
+        passes.back().swapchain.metal.msaa_color_texture == &oldMsaa &&
+        passes.back().swapchain.width == 256 && passes.back().swapchain.height == 192;
+    recordTriangle(); present();
+    ok &= submittedDraws == 2;
+    beginFrame();
+    auto* selected = _sgl_lookup_context(target.resources().context.id);
+    ok &= !internal::sglBudget().pendingResize && selected->desc.max_vertices == 3072 && selected->desc.max_commands == 377;
+    internal::ensureCurrentPass();
+    ok &= passes.back().swapchain.metal.current_drawable == &newDrawable &&
+        passes.back().swapchain.metal.depth_stencil_texture == &newDepth &&
+        passes.back().swapchain.metal.msaa_color_texture == &newMsaa;
+    present();
+    windows.main.acquireSwapchain = dummySwapchain;
+    windows.main.acquireSwapchainUser = nullptr;
+    std::printf("BEGUN FRAME RESIZE deferred=1 LOAD=1 retained_attachments=1 draws=%d expected=2 capacities=3072/377 ok=%d\n",submittedDraws,ok);
+    return ok;
+}
+
+bool resourceRetirementProbe() {
+    DummyWindowPair windows;
+    internal::restoreWindowContext(nullptr);
+    sg_image_desc imageDesc = {}; imageDesc.width = imageDesc.height = 2;
+    imageDesc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    imageDesc.usage.dynamic_update = true;
+    const auto image = sg_make_image(imageDesc);
+    sg_view_desc viewDesc = {}; viewDesc.texture.image = image;
+    const auto view = sg_make_view(viewDesc);
+    const auto sampler = sg_make_sampler(sg_sampler_desc{});
+    sgl_enable_texture(); sgl_texture(view, sampler); recordTriangle(); sgl_disable_texture();
+    internal::deferGpuDestroy(view); internal::deferGpuDestroy(image); internal::deferGpuDestroy(sampler);
+    internal::restoreWindowContext(&windows.secondary.context());
+    present(); // Warm B's caches; A's referenced resources remain pending.
+    sg_buffer_desc bufferDesc = {}; bufferDesc.size = 16; bufferDesc.usage.vertex_buffer = true; bufferDesc.usage.dynamic_update = true;
+    const auto unrelated = sg_make_buffer(bufferDesc);
+    internal::deferGpuDestroy(unrelated);
+    failAllocation = true;
+    internal::drainPendingGpuDestroys();
+    bool ok = sg_query_buffer_state(unrelated) == SG_RESOURCESTATE_VALID;
+    internal::drainPendingGpuDestroys(); // Recover and retire only unrelated work.
+    for (int i = 0; i < 3; ++i) present();
+    ok &=  sg_query_view_state(view) == SG_RESOURCESTATE_VALID &&
+        sg_query_image_state(image) == SG_RESOURCESTATE_VALID && sg_query_sampler_state(sampler) == SG_RESOURCESTATE_VALID &&
+        sg_query_buffer_state(unrelated) != SG_RESOURCESTATE_VALID;
+    internal::restoreWindowContext(nullptr);
+    present();
+    ok &= sg_query_view_state(view) != SG_RESOURCESTATE_VALID &&
+        sg_query_image_state(image) != SG_RESOURCESTATE_VALID && sg_query_sampler_state(sampler) != SG_RESOURCESTATE_VALID;
+    std::printf("RECORDING REFERENCES related_retained=1 unrelated_retired=1 consumed_retired=1 ok=%d\n",ok);
+    return ok;
+}
+
+bool growthFailureProbe() {
+    const auto context = sgl_make_context(sgl_context_desc_t{});
+    auto* ctx = _sgl_lookup_context(context.id);
+    bool ok = _sgl_checked_capacity(INT_MAX, INT_MAX, 1, sizeof(_sgl_vertex_t)) == 0 &&
+        _sgl_checked_capacity(4,4,1,SIZE_MAX) == 0 &&
+        _sgl_needed_gpu_vertices(SIZE_MAX, 40) == 0 && _sgl_needed_gpu_vertices(INT_MAX, 40) == 0;
+    const int oldCap = ctx->vertices.cap, oldNext = ctx->vertices.next;
+    ctx->vertices.cap = ctx->vertices.next = INT_MAX;
+    ok &= !_sgl_next_vertex(ctx) && ctx->error.vertices_full;
+    ctx->vertices.cap = oldCap; ctx->vertices.next = oldNext;
+    const auto allocator = _sgl.desc.allocator;
+    _sgl.desc.allocator.alloc_fn = [](size_t,void*) -> void* { return nullptr; };
+    ctx->vertices.next = ctx->vertices.cap;
+    ok &= !_sgl_next_vertex(ctx) && ctx->error.any;
+    ctx->vertices.next = oldNext;
+    _sgl.desc.allocator = allocator;
+    sgl_destroy_context(context);
+    std::printf("RECORDING GROWTH representation_and_allocation_failure=%d\n",ok);
+    return ok;
+}
+
+bool rawFailureProbe() {
+    DummyWindowPair windows;
+    internal::restoreWindowContext(&windows.secondary.context()); recordTriangle();
+    const auto foreign = windows.secondary.context().swapchainTarget.resources().context;
+    internal::restoreWindowContext(nullptr); recordTriangle();
+    auto& target = internal::currentTarget();
+    target.sglLayerNext = INT_MAX;
+    Shader shader; bool ok = shader.load(descriptor);
+    shader.begin();
+    ok &= target.recordingFailed && !target.openShaderScopes && target.deferredShaderDraws.empty() &&
+        !sgl_tc_context_has_pending_draws(target.resources().context) && sgl_tc_context_has_pending_draws(foreign);
+    present();
+    internal::DeferredShaderDraw draw;
+    target.deferredShaderDraws.shrink_to_fit();
+    failAllocation = true;
+    ok &= !internal::appendTargetRecording(target, target.deferredShaderDraws, std::move(draw)) && target.recordingFailed;
+    ok &= sgl_tc_context_has_pending_draws(foreign);
+    present();
+    internal::restoreWindowContext(&windows.secondary.context());
+    submittedDraws = 0; present(); ok &= submittedDraws == 1;
+    std::printf("RAW FAILURE layer_overflow_and_allocation=1 foreign_draws=%d expected=1 ok=%d\n",submittedDraws,ok);
     return ok;
 }
 
@@ -529,8 +943,18 @@ int main(int argc, char** argv) {
     const bool lazyResize = lazyResizeProbe(false) && lazyResizeProbe(true);
     const bool tickRestore = windowTickRestoreProbe(false) && windowTickRestoreProbe(true);
     const bool interleaved = interleavedRewindProbe(false,false) && interleavedRewindProbe(true,false) && interleavedRewindProbe(true,true);
+    const bool parity = noDrawParityProbe(false,true) && noDrawParityProbe(true,true) && noDrawParityProbe(false,false);
+    const bool rawKinds = rawKindsLifetimeProbe();
+    const bool parking = parkedWindowProbe(false) && parkedWindowProbe(true);
+    const bool shadowParking = parkedShadowProbe();
+    const bool capturePhase = synchronousCapturePhaseProbe(false) && synchronousCapturePhaseProbe(true);
+    const bool foreignTeardown = foreignTeardownReplayFailureProbe();
+    const bool begunResize = begunResizeProbe();
+    const bool retirement = resourceRetirementProbe();
+    const bool growth = growthFailureProbe();
+    const bool rawFailure = rawFailureProbe();
     const bool destruction = activeDestructionProbe();
-    const int result=teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && destruction ? 0 : 1;
+    const int result=teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && destruction ? 0 : 1;
     sgl_shutdown(); sg_shutdown();
     return result;
 }

@@ -260,7 +260,7 @@ void screenUi(bool pixelMode) {
 }
 void screenCapture(const std::string& name) {
     Pixels image; const bool captured=bool(grabScreen(image));
-    check("screen readback",captured);
+    check("afterFrame grabScreen includes finished ImGui",captured);
     if(!captured) return;
     pixel(image,20,20,{255,0,0,255},"DPI 2 first device pixel",false);
     pixel(image,59,59,{255,0,0,255},"DPI 2 last device pixel",false);

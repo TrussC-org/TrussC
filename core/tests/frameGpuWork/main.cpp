@@ -143,6 +143,21 @@ int main() {
     check("consecutive uploads do not raise VALIDATE_UPDIMG_ONCE",
           repeatedUploads == errorsBefore);
 
+    // TrussC contexts opt into owner completion; standalone contexts retain
+    // their ordinary automatic commit rewind. Global upload epochs still move.
+    sgl_context_desc_t ownerDesc = {};
+    const auto owner = sgl_make_context(&ownerDesc);
+    sgl_tc_context_target_owned(owner);
+    sgl_set_context(owner);
+    sgl_begin_triangles(); sgl_v2f(0,0); sgl_v2f(1,0); sgl_v2f(0,1); sgl_end();
+    const auto epoch = _sgl_lookup_context(owner.id)->frame_id;
+    sg_commit();
+    check("foreign commit retains target CPU recording", sgl_tc_context_has_pending_draws(owner));
+    check("foreign commit invalidates target upload epoch", _sgl_lookup_context(owner.id)->frame_id != epoch &&
+        _sgl_lookup_context(owner.id)->upload_vbuf_id == SG_INVALID_ID);
+    sgl_tc_context_complete(owner);
+    check("owner completion rewinds only its immediate recording", !sgl_tc_context_has_pending_draws(owner));
+    sgl_destroy_context(owner);
     sgl_destroy_context(context);
     sg_destroy_view(view);
     sg_destroy_image(target);

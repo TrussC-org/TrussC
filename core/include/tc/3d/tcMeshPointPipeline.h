@@ -156,9 +156,9 @@ public:
         if (!cmd.pip.id) return;
 
         // Defer on the active target, sharing the PBR/shader layer space.
-        wctx.currentTarget->deferredPointDraws.push_back({ wctx.currentTarget->sglLayerNext, cmd });
-        wctx.currentTarget->sglLayerNext++;
-        sgl_layer(wctx.currentTarget->sglLayerNext);
+        if (!internal::appendTargetRecording(*wctx.currentTarget, wctx.currentTarget->deferredPointDraws,
+                DeferredPointDraw{wctx.currentTarget->sglLayerNext, cmd})) return;
+        wctx.currentTarget->advanceLayer();
     }
 
 private:

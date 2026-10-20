@@ -38,6 +38,7 @@ static DXGI_FORMAT readbackDXGIFormat(TextureFormat format) {
 
 bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
     if (!allocated_ || !pixels) return false;
+    internal::CapturePrefixScope capturePhase(internal::CaptureSource::Target);
 
     size_t nativeRowBytes, nativeBytes, outputRowBytes, outputBytes;
     // Bound (abi): native and output rows must fit size_t before staging or copying. Overflow drops the recorder frame and is counted.
@@ -116,6 +117,7 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
 
 bool Fbo::readPixelsFloatPlatform(float* pixels) const {
     if (!allocated_ || !pixels) return false;
+    internal::CapturePrefixScope capturePhase(internal::CaptureSource::Target);
 
     size_t nativeRowBytes, nativeBytes, outputRowBytes, outputBytes;
     // Bound (abi): native and output rows must fit size_t before staging or copying. Overflow drops the recorder frame and is counted.

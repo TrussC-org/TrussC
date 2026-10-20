@@ -132,6 +132,10 @@ void WorkBudget::reply(size_t bytes) {
     reserve(bytes);
     reply_ += bytes;
 }
+WindowCaptureAdmission*& WindowCaptureAdmission::current() {
+    static thread_local WindowCaptureAdmission* value = nullptr;
+    return value;
+}
 std::shared_ptr<WorkBudget>& currentWorkBudget() {
     static thread_local std::shared_ptr<WorkBudget> budget;
     return budget;

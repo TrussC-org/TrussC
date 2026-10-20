@@ -440,7 +440,7 @@ inline void Window::applyPendingApp() {
     if (next && !canAttach(next)) return;
     // The outgoing App is released with this window's context active.
     auto* prev = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &ctx_;
+    internal::restoreWindowContext(&ctx_);
     std::shared_ptr<App> outgoing = std::move(app_);
     auto& attached = internal::attachedApps();
     if (outgoing) attached.erase(outgoing.get());
@@ -459,7 +459,7 @@ inline void Window::applyPendingApp() {
         outgoing->cleanup();
     }
     outgoing.reset();
-    internal::currentWindowCtx() = prev;
+    internal::restoreWindowContext(prev);
 }
 
 inline void Window::endApp() {

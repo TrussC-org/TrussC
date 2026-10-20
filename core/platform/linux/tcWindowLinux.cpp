@@ -95,7 +95,7 @@ void windowTick(sapp_window swin, void* user) {
     }
 
     auto* prev = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &ctx;
+    internal::restoreWindowContext(&ctx);
 
     // Per-window frame count (Fix 3): advance this window's own tick counter so
     // getFrameCount()/getUpdateCount() report it while this context is active.
@@ -125,12 +125,15 @@ void windowTick(sapp_window swin, void* user) {
         win->tickTree();
     }
 
-    const Color& cc = win->clearColor_;
-    clear(cc.r, cc.g, cc.b, cc.a);
-    win->events().draw.notify();
-    win->drawTreeNow();
+    {
+        internal::EntryStackGuard drawEntry(internal::AppEntry::Draw);
+        const Color& cc = win->clearColor_;
+        clear(cc.r, cc.g, cc.b, cc.a);
+        win->events().draw.notify();
+        win->drawTreeNow();
 
-    present();
+        present();
+    }
     {
         // This window's afterFrame listeners are an entry point (#349).
         internal::EntryStackGuard guard(internal::AppEntry::AfterFrame);
@@ -353,6 +356,7 @@ void Window::teardown() {
     ctx_.teardownTargets();
     ctx_.acquireSwapchain = nullptr;
     ctx_.acquireSwapchainUser = nullptr;
+    ctx_.activateNative = nullptr;
     sapp_destroy_window(st->win);
     // Frees this window's sgl pipelines and its sgl context (#317).
     ctx_.swapchainTarget.resources().release();
@@ -469,9 +473,15 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     win->ctx_.swapchainTarget.sampleCount = sapp_window_sample_count(st->win);
     win->ctx_.swapchainTarget.width = sapp_window_framebuffer_width(st->win);
     win->ctx_.swapchainTarget.height = sapp_window_framebuffer_height(st->win);
+    win->ctx_.fbWidth = win->ctx_.swapchainTarget.width;
+    win->ctx_.fbHeight = win->ctx_.swapchainTarget.height;
+    win->ctx_.dpiScale = sapp_window_dpi_scale(st->win);
     win->native_ = st;
     win->ctx_.acquireSwapchain = &acquireSecondarySwapchain;
     win->ctx_.acquireSwapchainUser = st;
+    win->ctx_.activateNative = [](void* user) {
+        sapp_tc_gl_make_current(static_cast<AdapterState*>(user)->win);
+    };
     return win;
 }
 

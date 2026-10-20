@@ -14290,9 +14290,9 @@ description.ko = "화면 녹화가 현재 캡처 중인지 확인"
 ["ScreenRecorder::start"]
 category = "video"
 keywords = ["begin", "record", "capture", "go"]
-description.en = "Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically. Calling start while recording finalizes the current file first. If the recorded Fbo is destroyed mid-recording, the recording stops and finalizes automatically. Returns SaveResult for path preparation and encoder opening. Success starts an in-place stream; check close()/stop() for finalization. If the previous take times out waiting for GPU frames, its last completion finalizes it independently of the new take."
-description.ja = "ライブ録画開始（ウィンドウ、またはGUIなしのクリーン出力はFbo）。サイズは自動取得。録画中に start を呼ぶと現在のファイルを確定してから新規開始。録画中の Fbo が破棄された場合は自動で停止・確定する パス準備とエンコーダ開始結果を SaveResult で返す。成功後は直接ストリーム書き込みを行い、完了結果は close()/stop() で確認する。 前の録画が GPU フレームの待機上限に達した場合は、新しい録画と独立して最後の完了ハンドラが確定する。"
-description.ko = "라이브 녹화 시작 (윈도우, 또는 GUI 없는 클린 출력은 Fbo); 크기는 자동 취득. 녹화 중에 start를 호출하면 현재 파일을 마무리한 뒤 새로 시작. 녹화 중인 Fbo가 파괴되면 자동으로 정지·마무리 경로 준비와 인코더 열기 결과를 SaveResult로 반환한다. 성공하면 파일에 직접 기록하며 완료 결과는 close()/stop()으로 확인한다. 이전 녹화가 GPU 프레임 대기 제한에 도달하면 새 녹화와 독립적으로 마지막 완료 핸들러가 이전 파일을 확정한다."
+description.en = "Start live capture of the originating window or an Fbo at its actual pixel size at start. The take keeps fixed encoder dimensions and stays open across source resizes: mismatched frames are skipped before copying and counted by getRejectedFrameCount(), and recording resumes when the original size returns. stop() finalizes the take. One capture/encode operation may be pending: busy opportunities are counted and skipped while wall/audio PTS gaps are preserved. Calling start finalizes the previous take first and refuses replacement while an old operation remains pending. Destroying the source Fbo stops/finalizes automatically. Returns SaveResult for path preparation and encoder opening; check stop() for finalization."
+description.ja = "開始元のウィンドウまたは Fbo を開始時の実際のピクセル寸法で録画する。録画中のエンコーダ寸法は固定され、ソースのサイズ変更後も録画は開いたままとなる。寸法が一致しないフレームはコピー前にスキップして getRejectedFrameCount() に加算し、元の寸法に戻ると録画を再開する。stop() で録画を確定する。キャプチャ・エンコードは同時に1件までとし、処理中の機会はスキップ数に加算して実時間・音声 PTS の間隔を保つ。start は前の録画を確定し、古い処理が未完了なら再開始を拒否する。ソース Fbo の破棄時は自動停止・確定する。パス準備とエンコーダ開始の SaveResult を返し、確定結果は stop() で確認する。"
+description.ko = "시작한 윈도우 또는 Fbo의 시작 시점 실제 픽셀 크기로 녹화한다. 인코더 크기는 녹화 동안 고정되며 소스 크기가 바뀌어도 녹화는 열린 상태를 유지한다. 크기가 맞지 않는 프레임은 복사 전에 건너뛰고 getRejectedFrameCount()에 집계하며 원래 크기로 돌아오면 녹화를 재개한다. stop()으로 녹화를 확정한다. 캡처·인코딩 작업은 한 번에 하나만 허용하며 처리 중 기회는 건너뛴 횟수에 포함하고 실제 시간·오디오 PTS 간격을 유지한다. start는 이전 녹화를 확정하고 오래된 작업이 남아 있으면 재시작을 거부한다. 소스 Fbo가 파괴되면 자동 정지·확정한다. 경로 준비와 인코더 열기의 SaveResult를 반환하며 확정 결과는 stop()으로 확인한다."
 
 ["ScreenRecorder::stop"]
 category = "video"
@@ -23837,12 +23837,100 @@ description.ko = "현재 연도"
 ["grabScreen"]
 category = "window_system"
 keywords = ["screenshot", "capture", "snapshot", "pixels", "readback"]
-description.en = "Capture current screen to Pixels"
-description.ja = "現在の画面をPixelsにキャプチャ"
-description.ko = "현재 화면을 Pixels에 캡처"
-related = ["Pixels", "saveScreenshot", "captureWindow"]
-platform_note.en = "Not implemented on web (no canvas readback): always returns false and logs a one-time warning. Take screenshots with the browser's own tools there."
-platform_note.ja = "Web では未実装（canvas の読み戻しはない）: 常に false を返し、警告を1回だけ出す。Web ではブラウザ自身のスクリーンショット機能を使う。"
+description.en = "Read this window's screen into Pixels. What is captured depends on when you call it"
+description.ja = "そのウィンドウの画面を Pixels に読み出す。どの時点で呼ぶかで、写るものが変わる"
+description.ko = "이 윈도우의 화면을 Pixels로 읽어 온다. 호출하는 시점에 따라 담기는 내용이 달라진다"
+related = ["Pixels", "saveScreenshot", "Fbo::readPixels", "CoreEvents::afterFrame"]
+details.en = '''
+- In `update()`, `setup()`, and other phases outside a frame or an `events().afterFrame` listener: returns `false` with exactly one Warning per window, pointing to `events().afterFrame` or `saveScreenshot()`.
+- In `draw()`: submits and reads the frame drawn so far. ImGui, child nodes drawn later and later overlays are not included. This is slow and intended for debugging; on macOS, the capture completion wait is limited to 10 s for a hung GPU.
+- Inside an `events().afterFrame` listener: reads the full finished frame, including ImGui.
+
+The current window's innermost app-entry scope defines the phase: the draw phase spans app/tree drawing through `present()` (including `onRender`); the afterFrame phase is the framework's afterFrame notification scope. Nested setup, update or other entry scopes override it. `beginFrame()` or an open GPU/Fbo pass alone does not count: synced update runs after `beginFrame()`, and setup has no finished window frame to read.
+
+Drawing to the screen inside afterFrame doesn't appear (it lands under the next frame's clear()); there, only read, or render into an Fbo. Use `saveScreenshot()` for files and `Fbo::readPixels()` for Fbo contents; `grabScreen()` never reads an active Fbo.
+
+Keep the listener in an `EventListener` member so it stays subscribed:
+
+```cpp
+class CaptureApp : public tc::App {
+    tc::EventListener captureListener;
+    bool captureRequested = true;
+public:
+    void setup() override {
+        captureListener = tc::events().afterFrame.listen([this] {
+            if (!captureRequested) return;
+            tc::Pixels pixels;
+            tc::grabScreen(pixels);
+            captureRequested = false;
+        });
+    }
+};
+```
+
+One call costs about 3–7 ms on desktop GPUs and about 15 ms on a Raspberry Pi at 720p, mostly waiting for the GPU, so reading less doesn't make it much cheaper; prefer calling on demand rather than every frame.
+'''
+details.ja = '''
+- `update()`、`setup()`、フレーム内でも `events().afterFrame` リスナー内でもない他のフェーズ: `false` を返す。ウィンドウごとに Warning をちょうど1回出し、`events().afterFrame` または `saveScreenshot()` を案内する。
+- `draw()` 内: その時点までに描いたフレームを送信して読み出す。ImGui、後で描かれる子ノード、後続のオーバーレイは含まれない。遅い処理なのでデバッグ用。macOS では、GPU が固まった場合のキャプチャ完了待機は最大10秒。
+- `events().afterFrame` リスナー内: ImGui を含む、描画済みのフレーム全体を読み出す。
+
+現在のウィンドウの最も内側のアプリ入口スコープでフェーズを決める。描画フェーズはアプリとツリーの描画から `present()`（`onRender` を含む）まで。afterFrame フェーズはフレームワークによる afterFrame 通知のスコープ。入れ子の setup、update などの入口スコープがあればそちらを優先する。`beginFrame()` の実行や GPU/Fbo パスが開いているだけではフレーム内とは見なさない。同期 update は `beginFrame()` 後に走り、setup には読み出せる描画済みのウィンドウフレームがない。
+
+afterFrame 内で画面に描いても表示されない（次のフレームの `clear()` の下に入る）。そこでは読み出すだけにするか、Fbo に描画する。ファイル保存には `saveScreenshot()`、Fbo の内容には `Fbo::readPixels()` を使う。`grabScreen()` はアクティブな Fbo を読み出さない。
+
+購読を維持するため、リスナーを `EventListener` メンバに保持する:
+
+```cpp
+class CaptureApp : public tc::App {
+    tc::EventListener captureListener;
+    bool captureRequested = true;
+public:
+    void setup() override {
+        captureListener = tc::events().afterFrame.listen([this] {
+            if (!captureRequested) return;
+            tc::Pixels pixels;
+            tc::grabScreen(pixels);
+            captureRequested = false;
+        });
+    }
+};
+```
+
+1回の呼び出しはデスクトップ GPU で約3〜7 ms、Raspberry Pi の720pで約15 msかかる。大半は GPU の待機時間なので、読み出し量を減らしてもあまり安くならない。毎フレームではなく、必要なときだけ呼ぶ。
+'''
+details.ko = '''
+- `update()`, `setup()`, 프레임 안이나 `events().afterFrame` 리스너 안이 아닌 다른 단계: `false`를 반환한다. 윈도우마다 Warning을 정확히 한 번 출력하며 `events().afterFrame` 또는 `saveScreenshot()`을 안내한다.
+- `draw()` 안: 그 시점까지 그린 프레임을 제출하고 읽는다. ImGui, 나중에 그리는 자식 노드와 이후 오버레이는 포함되지 않는다. 느린 디버깅용 처리이며, macOS에서는 GPU가 멈췄을 때 캡처 완료 대기가 최대 10초로 제한된다.
+- `events().afterFrame` 리스너 안: ImGui를 포함한 완성된 전체 프레임을 읽는다.
+
+현재 윈도우의 가장 안쪽 앱 진입 스코프로 단계를 정한다. 그리기 단계는 앱과 트리 그리기부터 `present()`(`onRender` 포함)까지이며, afterFrame 단계는 프레임워크의 afterFrame 알림 스코프다. 중첩된 setup, update 등의 진입 스코프가 우선한다. `beginFrame()` 실행이나 열린 GPU/Fbo 패스만으로는 프레임 안으로 보지 않는다. 동기 update는 `beginFrame()` 다음에 실행되며, setup에는 읽을 수 있는 완성된 윈도우 프레임이 없다.
+
+afterFrame 안에서 화면에 그려도 나타나지 않는다(다음 프레임의 `clear()` 아래에 놓인다). 여기서는 읽기만 하거나 Fbo에 그린다. 파일에는 `saveScreenshot()`, Fbo 내용에는 `Fbo::readPixels()`를 사용한다. `grabScreen()`은 활성 Fbo를 읽지 않는다.
+
+구독을 유지하도록 리스너를 `EventListener` 멤버에 보관한다:
+
+```cpp
+class CaptureApp : public tc::App {
+    tc::EventListener captureListener;
+    bool captureRequested = true;
+public:
+    void setup() override {
+        captureListener = tc::events().afterFrame.listen([this] {
+            if (!captureRequested) return;
+            tc::Pixels pixels;
+            tc::grabScreen(pixels);
+            captureRequested = false;
+        });
+    }
+};
+```
+
+호출 한 번은 데스크톱 GPU에서 약 3–7 ms, Raspberry Pi의 720p에서 약 15 ms가 든다. 대부분 GPU를 기다리는 시간이므로 읽는 양을 줄여도 비용이 크게 줄지 않는다. 매 프레임보다 필요할 때만 호출하는 편이 좋다.
+'''
+platform_note.en = "Not implemented on web (no synchronous canvas readback): always returns false and logs a one-time warning. Use saveScreenshot() for a deferred canvas download or the browser's screenshot tools."
+platform_note.ja = "Web では未実装（同期 canvas 読み出しはない）: 常に false を返し、警告を1回だけ出す。遅延 canvas ダウンロードには saveScreenshot()、またはブラウザのスクリーンショット機能を使う。"
+platform_note.ko = "Web에서는 미구현(동기 canvas 읽기 없음): 항상 false를 반환하고 한 번 경고한다. 지연 canvas 다운로드에는 saveScreenshot()을 쓰거나 브라우저의 스크린샷 기능을 사용한다."
 
 ["hexToInt"]
 category = "utility"
