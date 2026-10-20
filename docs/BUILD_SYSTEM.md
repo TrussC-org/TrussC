@@ -157,6 +157,23 @@ trusscli run --warnings
 The flag is sticky in the CMake cache: once you build with `--warnings`, later builds
 keep it on until you reconfigure without it (e.g. `trusscli update`).
 
+**Parallel jobs:**
+
+`trusscli build -j N` (also `--jobs N`, and the same on `trusscli run` and `trusscli upgrade`)
+runs at most N compile jobs at once, for example to keep several builds side by side within
+RAM. trusscli passes it as `cmake --build … --parallel=N` on every OS. Without `-j` the build
+tool decides (Ninja: CPU threads + 2), except on Linux, where trusscli limits the count by
+available RAM (about 1.5 GB per job). An environment `CMAKE_BUILD_PARALLEL_LEVEL` has no
+effect, because trusscli always passes `--parallel`.
+
+`trusscli build --dry-run` prints the cmake commands it would run (configure and build), one
+per line starting with `[dry-run]`, without running them.
+
+```bash
+trusscli build -j 4
+trusscli build -j 4 --dry-run
+```
+
 **Web Build (WASM):**
 The Project Generator creates a helper script (`build-web.command`, `build-web.bat`, or `build-web.sh`) in your project folder. This script automatically handles Emscripten environment setup.
 
