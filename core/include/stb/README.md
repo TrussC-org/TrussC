@@ -7,7 +7,7 @@ and contributors, under the stb dual license (MIT or Public Domain, see
 
 | File | Version string | Source | Commit | Imported | TrussC patches |
 |---|---|---|---|---|---|
-| `stb_image.h` | v2.30 | [nvpro-samples/stb](https://github.com/nvpro-samples/stb), branch `nv/all-fixes` | `1cafe0e01eeaf4142f05b36218793cb46c7ce433` (2025-12-24) | 2026-09-30 | 2 |
+| `stb_image.h` | v2.30 | [nvpro-samples/stb](https://github.com/nvpro-samples/stb), branch `nv/all-fixes` | `1cafe0e01eeaf4142f05b36218793cb46c7ce433` (2025-12-24) | 2026-09-30 | 4 |
 | `stb_image_write.h` | v1.16 | [nothings/stb](https://github.com/nothings/stb), `master` | `1ee679ca2ef753a528db5ba6801e1067b40481b8` (2021-07-11) | 2025-12-16 | 1 |
 | `stb_perlin.h` | v0.5 | [nothings/stb](https://github.com/nothings/stb), `master` | `2bb4a0accd4003c1db4c24533981e01b1adfd656` (2020-02-02) | 2025-12-16 | none |
 | `stb_truetype.h` | v1.26 | [nothings/stb](https://github.com/nothings/stb), `master` | `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (2024-07-15) | 2025-12-16 | 4 |
@@ -28,6 +28,11 @@ workspace reserved by the MCP owner. All scoped buffers are freed before the
 scope ends; outside a scope these hooks use ordinary malloc/realloc/free with
 unchanged pointer layout. Keep these hooks when updating stb_image and run
 `httpAdmission`, `mcpAdmission` and `mcpAnalyzeImage` after changes.
+
+Ordinary Pixels decoding also observes allocation failures through an internal
+thread-local scope; it imposes no separate working-memory budget. File and
+memory entry points inspect metadata against the recorded GPU axis limit
+(16384 before GPU setup or in headless use) and admit at most 64 MiB encoded.
 
 No other configuration macro is set: every stb_image format is enabled.
 
@@ -55,7 +60,13 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
      4096-entry buffer and written out with a loop, instead of one recursive
      call per link. The per-pixel body moved into a new helper,
      `stbi__out_gif_pixel`. Output is unchanged.
-- **Covered by**: `core/tests/mediaDecode` (every format, plus one check per
+  3. `stbi__parse_png_file`: validate memory IDAT spans before allocation,
+     calculate the scanline storage from IHDR (including Adam7), and decode
+     into that fixed destination. Decoder failure leaves no partial pixels.
+  4. BMP metadata reports positive row counts for top-down images, matching
+     decoded dimensions. The shared header reader rejects a height whose
+     absolute value cannot fit the decoder's integer indices.
+- **Covered by**: `core/tests/imageDecodeBounds`, `core/tests/mediaDecode` (every format, plus one check per
   patch).
 
 ## stb_image_write.h

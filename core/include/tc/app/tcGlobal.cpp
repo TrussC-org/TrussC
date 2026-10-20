@@ -23,6 +23,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "impl/tcImageDecode.h"
 #if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
 #include "../../../platform/gl/tcShadowAllocation.h"
 #endif
@@ -98,6 +99,7 @@ void setup() {
     sgdesc.allocator.alloc_fn = smemtrack_alloc;
     sgdesc.allocator.free_fn = smemtrack_free;
     sg_setup(&sgdesc);
+    internal::recordImageDecodeLimit(sg_isvalid() ? sg_query_limits().max_image_size_2d : 0);
 
     // Initialize sokol_gl (with memory tracking allocator)
     sgl_desc_t sgldesc = {};
@@ -194,6 +196,7 @@ void cleanup() {
         fontAtlas.initialized = false;
     }
     sgl_shutdown();
+    internal::recordImageDecodeLimit(0);
     sg_shutdown();
 }
 
@@ -1706,6 +1709,17 @@ struct ShadowRetirementCleanup {
     ~ShadowRetirementCleanup() { discardRetiredShadows(); }
 } shadowRetirementCleanup;
 
+TextureRetirement* retiredTextures = nullptr;
+void discardRetiredTextures() noexcept {
+    while (auto* storage = retiredTextures) {
+        retiredTextures = storage->next;
+        delete storage;
+    }
+}
+struct TextureRetirementCleanup {
+    ~TextureRetirementCleanup() { discardRetiredTextures(); }
+} textureRetirementCleanup;
+
 struct PendingGpuDestroys {
     std::vector<sg_buffer>   buffers;
     std::vector<sg_image>    images;
@@ -1724,6 +1738,22 @@ PendingGpuDestroys& pendingGpuDestroys() {
     return *q;
 }
 } // anonymous namespace
+
+TextureRetirement::~TextureRetirement() noexcept {
+    if (!sg_isvalid()) return;
+    for (auto handle : cubeViews) if (handle.id) sg_destroy_view(handle);
+    for (auto handle : mipAttachments) if (handle.id) sg_destroy_view(handle);
+    for (auto handle : mipViews) if (handle.id) sg_destroy_view(handle);
+    if (view.id) sg_destroy_view(view);
+    if (attachment.id) sg_destroy_view(attachment);
+    if (image.id) sg_destroy_image(image);
+    if (sampler.id) sg_destroy_sampler(sampler);
+}
+void retireTexture(TextureRetirement* storage) noexcept {
+    if (!sg_isvalid()) { delete storage; return; }
+    storage->next = retiredTextures;
+    retiredTextures = storage;
+}
 
 void deferGpuDestroy(sg_buffer buf) {
     if (buf.id != 0) pendingGpuDestroys().buffers.push_back(buf);
@@ -1796,6 +1826,7 @@ void drainPendingGpuDestroys() {
     if (!sg_isvalid()) {
         q = {};
         discardRetiredShadows();
+        discardRetiredTextures();
         return;
     }
     try {
@@ -1820,6 +1851,16 @@ void drainPendingGpuDestroys() {
         retire(q.samplers, refs.samplers, sg_destroy_sampler);
         retire(q.pipelines, refs.pipelines, sg_destroy_pipeline);
         retire(q.shaders, refs.shaders, sg_destroy_shader);
+        auto** textureLink = &retiredTextures;
+        while (auto* storage = *textureLink) {
+            bool pinned = refs.images.count(storage->image.id) || refs.views.count(storage->view.id) ||
+                refs.views.count(storage->attachment.id) || refs.samplers.count(storage->sampler.id);
+            for (const auto* views : {&storage->cubeViews, &storage->mipAttachments, &storage->mipViews})
+                for (auto view : *views) pinned |= refs.views.count(view.id) != 0;
+            if (pinned) { textureLink = &storage->next; continue; }
+            *textureLink = storage->next;
+            delete storage;
+        }
         auto** link = &retiredShadows;
         while (auto* storage = *link) {
             bool pinned = refs.images.count(storage->colorImage.id) ||
