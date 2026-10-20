@@ -1186,8 +1186,8 @@ public:
         const size_t headerSize = (bytes[sample.offset] == 0 &&
                                    bytes[sample.offset + 1] == 0 &&
                                    bytes[sample.offset + 2] == 0) ? 8 : 4;
-        bytes[sample.offset + headerSize] = 0x80;
-        bytes[sample.offset + headerSize + 1] = 0x80;
+        bytes[sample.offset + headerSize] = static_cast<char>(0x80);
+        bytes[sample.offset + headerSize + 1] = static_cast<char>(0x80);
         bytes[sample.offset + headerSize + 2] = 0x04; // 65536 bytes (varint)
         written = writeBytes(tmp, bytes);
         check("decoder failure fixture written", written);

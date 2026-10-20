@@ -246,6 +246,7 @@ int runPlaybackBudgetTests() {
         check("threaded color-only playback survives depth slot reuse", complete);
     }
     recording(path, 1000001);
+    {   // The reader holds the file open; it must be gone before the file is removed (Windows).
     Probe::Reader reader;
     largestRequest = 0; failAbove = 65536; measuring = true;
     bool opened = false;
@@ -325,6 +326,8 @@ int runPlaybackBudgetTests() {
     catch (...) { threw = true; }
     measuring = false; failAbove = SIZE_MAX;
     check("block allocation failure returns cleanly", !allocated && !threw && dst.depth.empty());
-    tc::fs::remove(path);
+    }
+    std::error_code removeError;
+    tc::fs::remove(path, removeError);
     return failures;
 }

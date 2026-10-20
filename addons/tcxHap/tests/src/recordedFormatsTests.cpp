@@ -410,6 +410,7 @@ int runRecordedFormatsTests() {
     check("changing table keeps PCM destination bounded", guardHealthy &&
           (!changingLoaded || changingBuffer.numSamples == watchedBytes / 2));
     changingPcm.close();
-    tc::fs::remove(path);
+    std::error_code removeError;
+    tc::fs::remove(path, removeError);
     return failures;
 }
