@@ -15,10 +15,17 @@ and fifty secondary-window generation checks); both Fbo resize checks still run.
 GL adversarial resize regressions record one triangle on a lazy bottom target,
 request a budget rebuild or change secondary-window dimensions, then present:
 each must submit exactly one draw, produce a red triangle in native readback,
-and rebuild at the following boundary. This multi-present synthetic window probe
-is GL-only because Metal retains one drawable per app tick.
-Without `--record`, Linux GLCORE expects 685 assertions per mode. Linux GLES3
-expects 622: 51 fewer for the secondary-window SKIP and 12 fewer for the existing
+and rebuild at the following boundary. Readback uses the internal capture path
+with the completed owner current, before its next beginFrame(), and checks that
+capture leaves that owner's pass closed. The synthetic secondary borrows the
+main drawable and temporarily reports its native dimensions for readback; a
+capture through the still-pending main owner would clear that shared surface.
+This tests lazy recording and finished-owner capture, rather than public
+grabScreen() admission (covered by captureSubmission and screenshotContract).
+This multi-present synthetic window probe is GL-only because Metal retains one
+drawable per app tick.
+Without `--record`, Linux GLCORE expects 687 assertions per mode. Linux GLES3
+expects 622: 51 fewer for the secondary-window SKIP and 14 fewer for the existing
 GL-only lazy-resize SKIP. Float-format targets (RGBA16F/RGBA32F) are read with
 readPixelsFloat(): GLES3 cannot read a float attachment as unsigned bytes.
 The dummy suite also forces buffer growth after each rebuild and verifies that
