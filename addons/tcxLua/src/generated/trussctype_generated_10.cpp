@@ -90,6 +90,8 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
 #endif
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
         t["setSendAsyncBufferSize"] = &trussc::TcpServer::setSendAsyncBufferSize;
+        t["setSendItemLimit"] = &trussc::TcpServer::setSendItemLimit;
+        t["setTotalSendBufferSize"] = &trussc::TcpServer::setTotalSendBufferSize;
 #endif
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
         t["setSendTimeout"] = &trussc::TcpServer::setSendTimeout;
