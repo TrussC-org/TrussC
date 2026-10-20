@@ -84,7 +84,7 @@ def main():
     else:
         print('HEIC skipped: use --heic on macOS with sips.', flush=True)
     print(f'write {root / "manifest.json"}', flush=True)
-    (root / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    (root / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
 
 
 if __name__ == '__main__':

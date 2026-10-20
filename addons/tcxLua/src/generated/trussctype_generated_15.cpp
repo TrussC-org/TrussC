@@ -148,35 +148,32 @@ void tcxLuaGenShard_15(const std::shared_ptr<sol::state>& lua) {
         t["getTotalCacheMemoryUsage"] = &trussc::Font::getTotalCacheMemoryUsage;
         t["setDefaultOversampling"] = &trussc::Font::setDefaultOversampling;
     }
-    lua->new_usertype<trussc::Cursor>("Cursor",
-        sol::meta_function::equal_to, [](trussc::Cursor a, trussc::Cursor b){ return a == b; },
-        "Default", sol::var(trussc::Cursor::Default),
-        "Arrow", sol::var(trussc::Cursor::Arrow),
-        "IBeam", sol::var(trussc::Cursor::IBeam),
-        "Crosshair", sol::var(trussc::Cursor::Crosshair),
-        "Hand", sol::var(trussc::Cursor::Hand),
-        "ResizeEW", sol::var(trussc::Cursor::ResizeEW),
-        "ResizeNS", sol::var(trussc::Cursor::ResizeNS),
-        "ResizeNWSE", sol::var(trussc::Cursor::ResizeNWSE),
-        "ResizeNESW", sol::var(trussc::Cursor::ResizeNESW),
-        "ResizeAll", sol::var(trussc::Cursor::ResizeAll),
-        "NotAllowed", sol::var(trussc::Cursor::NotAllowed),
-        "Custom0", sol::var(trussc::Cursor::Custom0),
-        "Custom1", sol::var(trussc::Cursor::Custom1),
-        "Custom2", sol::var(trussc::Cursor::Custom2),
-        "Custom3", sol::var(trussc::Cursor::Custom3),
-        "Custom4", sol::var(trussc::Cursor::Custom4),
-        "Custom5", sol::var(trussc::Cursor::Custom5),
-        "Custom6", sol::var(trussc::Cursor::Custom6),
-        "Custom7", sol::var(trussc::Cursor::Custom7),
-        "Custom8", sol::var(trussc::Cursor::Custom8),
-        "Custom9", sol::var(trussc::Cursor::Custom9),
-        "Custom10", sol::var(trussc::Cursor::Custom10),
-        "Custom11", sol::var(trussc::Cursor::Custom11),
-        "Custom12", sol::var(trussc::Cursor::Custom12),
-        "Custom13", sol::var(trussc::Cursor::Custom13),
-        "Custom14", sol::var(trussc::Cursor::Custom14),
-        "Custom15", sol::var(trussc::Cursor::Custom15));
+    {
+        auto constructors = tcxLuaConstructors<trussc::ColorLinear
+            , trussc::ColorLinear()
+            , trussc::ColorLinear(float, float, float)
+            , trussc::ColorLinear(float, float, float, float)
+            , trussc::ColorLinear(float)
+            , trussc::ColorLinear(float, float)
+        >();
+        sol::usertype<trussc::ColorLinear> t = lua->new_usertype<trussc::ColorLinear>("ColorLinear", constructors, sol::call_constructor, constructors);
+        t[sol::meta_function::multiplication] = sol::overload([](const trussc::ColorLinear& a, float b){ return a * b; }, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a * b; });
+        t[sol::meta_function::addition] = [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a + b; };
+        t[sol::meta_function::subtraction] = [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a - b; };
+        t[sol::meta_function::division] = [](const trussc::ColorLinear& a, float b){ return a / b; };
+        t[sol::meta_function::equal_to] = [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a == b; };
+        t["a"] = &trussc::ColorLinear::a;
+        t["b"] = &trussc::ColorLinear::b;
+        t["g"] = &trussc::ColorLinear::g;
+        t["r"] = &trussc::ColorLinear::r;
+        t["clamped"] = &trussc::ColorLinear::clamped;
+        t["clampedLDR"] = &trussc::ColorLinear::clampedLDR;
+        t["lerp"] = &trussc::ColorLinear::lerp;
+        t["toHSB"] = &trussc::ColorLinear::toHSB;
+        t["toOKLCH"] = &trussc::ColorLinear::toOKLCH;
+        t["toOKLab"] = &trussc::ColorLinear::toOKLab;
+        t["toSRGB"] = &trussc::ColorLinear::toSRGB;
+    }
     {
         sol::usertype<trussc::ChipSoundBundle> t = lua->new_usertype<trussc::ChipSoundBundle>("ChipSoundBundle");
         t["entries"] = &trussc::ChipSoundBundle::entries;
@@ -187,45 +184,46 @@ void tcxLuaGenShard_15(const std::shared_ptr<sol::state>& lua) {
         t["getDuration"] = &trussc::ChipSoundBundle::getDuration;
     }
     {
-        sol::usertype<trussc::PlayingSound> t = lua->new_usertype<trussc::PlayingSound>("PlayingSound");
-        t["buffer"] = &trussc::PlayingSound::buffer;
-        t["level"] = &trussc::PlayingSound::level;
-        t["loop"] = &trussc::PlayingSound::loop;
-        t["mixMode"] = &trussc::PlayingSound::mixMode;
-        t["pan"] = &trussc::PlayingSound::pan;
-        t["paused"] = &trussc::PlayingSound::paused;
-        t["playing"] = &trussc::PlayingSound::playing;
-        t["positionF"] = &trussc::PlayingSound::positionF;
-        t["rateRatio"] = &trussc::PlayingSound::rateRatio;
-        t["speed"] = &trussc::PlayingSound::speed;
-        t["volume"] = &trussc::PlayingSound::volume;
+        sol::usertype<trussc::BuildInfo> t = lua->new_usertype<trussc::BuildInfo>("BuildInfo");
+        t["date"] = &trussc::BuildInfo::date;
+        t["dateTime"] = &trussc::BuildInfo::dateTime;
+        t["day"] = &trussc::BuildInfo::day;
+        t["hour"] = &trussc::BuildInfo::hour;
+        t["minute"] = &trussc::BuildInfo::minute;
+        t["month"] = &trussc::BuildInfo::month;
+        t["second"] = &trussc::BuildInfo::second;
+        t["time"] = &trussc::BuildInfo::time;
+        t["timestamp"] = &trussc::BuildInfo::timestamp;
+        t["year"] = &trussc::BuildInfo::year;
+    }
+    lua->new_usertype<trussc::PrimitiveType>("PrimitiveType",
+        sol::meta_function::equal_to, [](trussc::PrimitiveType a, trussc::PrimitiveType b){ return a == b; },
+        "Points", sol::var(trussc::PrimitiveType::Points),
+        "Lines", sol::var(trussc::PrimitiveType::Lines),
+        "LineStrip", sol::var(trussc::PrimitiveType::LineStrip),
+        "Triangles", sol::var(trussc::PrimitiveType::Triangles),
+        "TriangleStrip", sol::var(trussc::PrimitiveType::TriangleStrip),
+        "Quads", sol::var(trussc::PrimitiveType::Quads));
+    {
+        sol::usertype<trussc::TcpSendCompleteEventArgs> t = lua->new_usertype<trussc::TcpSendCompleteEventArgs>("TcpSendCompleteEventArgs");
+        t["bytesSent"] = &trussc::TcpSendCompleteEventArgs::bytesSent;
+        t["clientId"] = &trussc::TcpSendCompleteEventArgs::clientId;
+        t["error"] = &trussc::TcpSendCompleteEventArgs::error;
+        t["sendId"] = &trussc::TcpSendCompleteEventArgs::sendId;
     }
     {
-        sol::usertype<trussc::ShaderVertex> t = lua->new_usertype<trussc::ShaderVertex>("ShaderVertex");
-        t["a"] = &trussc::ShaderVertex::a;
-        t["b"] = &trussc::ShaderVertex::b;
-        t["g"] = &trussc::ShaderVertex::g;
-        t["r"] = &trussc::ShaderVertex::r;
-        t["u"] = &trussc::ShaderVertex::u;
-        t["v"] = &trussc::ShaderVertex::v;
-        t["x"] = &trussc::ShaderVertex::x;
-        t["y"] = &trussc::ShaderVertex::y;
-        t["z"] = &trussc::ShaderVertex::z;
+        sol::usertype<trussc::TouchEventArgs> t = lua->new_usertype<trussc::TouchEventArgs>("TouchEventArgs");
+        t["cancelled"] = &trussc::TouchEventArgs::cancelled;
+        t["numTouches"] = &trussc::TouchEventArgs::numTouches;
+        t["id"] = &trussc::TouchEventArgs::id;
+        t["x"] = &trussc::TouchEventArgs::x;
+        t["y"] = &trussc::TouchEventArgs::y;
     }
-    lua->new_usertype<trussc::AudioRecordSettings::SampleFormat>("AudioRecordSettingsSampleFormat",
-        sol::meta_function::equal_to, [](trussc::AudioRecordSettings::SampleFormat a, trussc::AudioRecordSettings::SampleFormat b){ return a == b; },
-        "S16", sol::var(trussc::AudioRecordSettings::SampleFormat::S16),
-        "F32", sol::var(trussc::AudioRecordSettings::SampleFormat::F32));
-    lua->new_usertype<trussc::WindowType>("WindowType",
-        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
-        "Rect", sol::var(trussc::WindowType::Rect),
-        "Hanning", sol::var(trussc::WindowType::Hanning),
-        "Hamming", sol::var(trussc::WindowType::Hamming),
-        "Blackman", sol::var(trussc::WindowType::Blackman));
-    lua->new_usertype<trussc::SoundStream::Kind>("SoundStreamKind",
-        sol::meta_function::equal_to, [](trussc::SoundStream::Kind a, trussc::SoundStream::Kind b){ return a == b; },
-        "Eager", sol::var(trussc::SoundStream::Kind::Eager),
-        "Stream", sol::var(trussc::SoundStream::Kind::Stream));
+    lua->new_usertype<trussc::TcyMode>("TcyMode",
+        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
+        "Rotate", sol::var(trussc::TcyMode::Rotate),
+        "Upright", sol::var(trussc::TcyMode::Upright),
+        "Combine", sol::var(trussc::TcyMode::Combine));
     {
         sol::usertype<trussc::TcpServerReceiveEventArgs> t = lua->new_usertype<trussc::TcpServerReceiveEventArgs>("TcpServerReceiveEventArgs");
         t["clientId"] = &trussc::TcpServerReceiveEventArgs::clientId;

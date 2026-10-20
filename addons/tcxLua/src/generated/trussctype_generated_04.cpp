@@ -210,43 +210,46 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["seek"] = &trussc::FileReader::seek;
         t["tell"] = &trussc::FileReader::tell;
     }
+    lua->new_usertype<trussc::SendError>("SendError",
+        sol::meta_function::equal_to, [](trussc::SendError a, trussc::SendError b){ return a == b; },
+        "None", sol::var(trussc::SendError::None),
+        "ClientNotFound", sol::var(trussc::SendError::ClientNotFound),
+        "Disconnected", sol::var(trussc::SendError::Disconnected),
+        "Timeout", sol::var(trussc::SendError::Timeout),
+        "QueueFull", sol::var(trussc::SendError::QueueFull),
+        "NotRunning", sol::var(trussc::SendError::NotRunning));
+    lua->new_usertype<trussc::AudioInitFailure>("AudioInitFailure",
+        sol::meta_function::equal_to, [](trussc::AudioInitFailure a, trussc::AudioInitFailure b){ return a == b; },
+        "None", sol::var(trussc::AudioInitFailure::None),
+        "NoBackend", sol::var(trussc::AudioInitFailure::NoBackend),
+        "DeviceOpen", sol::var(trussc::AudioInitFailure::DeviceOpen),
+        "DeviceStart", sol::var(trussc::AudioInitFailure::DeviceStart));
     {
-        sol::usertype<trussc::VideoDeviceInfo> t = lua->new_usertype<trussc::VideoDeviceInfo>("VideoDeviceInfo");
-        t["deviceId"] = &trussc::VideoDeviceInfo::deviceId;
-        t["deviceName"] = &trussc::VideoDeviceInfo::deviceName;
-        t["uniqueId"] = &trussc::VideoDeviceInfo::uniqueId;
-        t["getDeviceID"] = &trussc::VideoDeviceInfo::getDeviceID;
-        t["getDeviceName"] = &trussc::VideoDeviceInfo::getDeviceName;
-        t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
+        sol::usertype<trussc::Node::HitResult> t = lua->new_usertype<trussc::Node::HitResult>("NodeHitResult");
+        t["distance"] = &trussc::Node::HitResult::distance;
+        t["localPoint"] = &trussc::Node::HitResult::localPoint;
+        t["node"] = &trussc::Node::HitResult::node;
+        t["hit"] = &trussc::Node::HitResult::hit;
+    }
+    lua->new_usertype<trussc::CurveStyle::Mode>("CurveStyleMode",
+        sol::meta_function::equal_to, [](trussc::CurveStyle::Mode a, trussc::CurveStyle::Mode b){ return a == b; },
+        "Tolerance", sol::var(trussc::CurveStyle::Mode::Tolerance),
+        "Resolution", sol::var(trussc::CurveStyle::Mode::Resolution));
+    {
+        sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
+        t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::EventListener
-            , trussc::EventListener()
-        >();
-        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener", constructors, sol::call_constructor, constructors);
-        t["disconnect"] = &trussc::EventListener::disconnect;
-        t["isConnected"] = &trussc::EventListener::isConnected;
+        sol::usertype<trussc::SendResult> t = lua->new_usertype<trussc::SendResult>("SendResult");
+        t["error"] = &trussc::SendResult::error;
+        t["id"] = &trussc::SendResult::id;
+        t["ok"] = &trussc::SendResult::ok;
     }
-    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
-        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
-        "Repeat", sol::var(trussc::TextureWrap::Repeat),
-        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
-        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
-    lua->new_usertype<trussc::PointStyle>("PointStyle",
-        sol::meta_function::equal_to, [](trussc::PointStyle a, trussc::PointStyle b){ return a == b; },
-        "Square", sol::var(trussc::PointStyle::Square),
-        "Round", sol::var(trussc::PointStyle::Round),
-        "Pixel", sol::var(trussc::PointStyle::Pixel));
     {
-        sol::usertype<trussc::CurveStyle> t = lua->new_usertype<trussc::CurveStyle>("CurveStyle");
-        t["mode"] = &trussc::CurveStyle::mode;
-        t["resolution"] = &trussc::CurveStyle::resolution;
-        t["tolerance"] = &trussc::CurveStyle::tolerance;
+        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
+        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
     }
-    lua->new_usertype<trussc::Deliver>("Deliver",
-        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
-        "Inline", sol::var(trussc::Deliver::Inline),
-        "Main", sol::var(trussc::Deliver::Main));
 }
 #ifdef _MSC_VER
 #pragma warning(pop)
