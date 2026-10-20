@@ -206,6 +206,7 @@ void returnTargetResources(RenderTargetResources& lease);
 void invalidateTargetBucket(sg_pixel_format format, int samples, sg_pixel_format depth);
 bool rebuildTargetResources();
 void prepareWindowTarget();
+void refreshWindowDrawingSize();
 
 // C++17 vectors support incomplete elements; these draw snapshots are defined
 // later in TrussC.h. Targets are constructed where those definitions are complete.
@@ -234,6 +235,7 @@ struct TargetCameraScope {
     TargetCameraState camera;
     ImmediateSelection selectedPipeline;
     const void* owner;
+    bool automaticScreenProjection = false;
 };
 
 uint64_t nextTargetOwnerId();
@@ -289,6 +291,12 @@ struct RenderTarget {
     Mat4 currentMatrix = Mat4::identity();
     std::vector<Mat4> matrixStack;
     ScissorRect viewport = {0, 0, 0, 0, false};
+    // Only beginFrame opts into resize-following screen state. Application
+    // camera/viewport choices opt out independently until the next frame.
+    bool automaticScreenProjection = false;
+    bool automaticViewport = false;
+    bool windowDrawingSizeStale = false;
+    int automaticScreenWidth = 0, automaticScreenHeight = 0;
     ScissorRect currentScissor = {0, 0, 0, 0, false};
     std::vector<ScissorRect> scissorStack;
     BlendMode currentBlendMode = BlendMode::Alpha;

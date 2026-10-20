@@ -132,6 +132,7 @@ void windowTick(sapp_window swin, void* user) {
     }
 
     {
+        internal::refreshWindowDrawingSize();
         internal::EntryStackGuard drawEntry(internal::AppEntry::Draw);
         const Color& cc = win->clearColor_;
         clear(cc.r, cc.g, cc.b, cc.a);

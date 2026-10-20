@@ -452,6 +452,7 @@ inline void registerCameraContext(const Mat4& view, const Mat4& projection,
     ctx->viewH = viewH;
     ctx->pickable = pickable;
     currentWindowContext().currentTarget->camera.currentCameraContext = std::move(ctx);
+    currentTarget().automaticScreenProjection = false;
 }
 
 } // namespace internal

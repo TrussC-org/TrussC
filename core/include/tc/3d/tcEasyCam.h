@@ -40,7 +40,7 @@ public:
     // Start camera mode (set 3D perspective + view matrix)
     void begin() {
         auto& target = internal::currentTarget();
-        target.cameraStack.push_back({target.camera, target.selectedPipeline, this});
+        target.cameraStack.push_back({target.camera, target.selectedPipeline, this, target.automaticScreenProjection});
         // 3D pipeline for the active target (swapchain or FBO) — RenderTarget picks
         // the format-correct one; no per-site swapchain/FBO branch.
         internal::loadPipeline(internal::active3D());
@@ -106,7 +106,13 @@ public:
         }
         target.camera = target.cameraStack.back().camera;
         target.selectedPipeline = target.cameraStack.back().selectedPipeline;
+        target.automaticScreenProjection = target.cameraStack.back().automaticScreenProjection;
         target.cameraStack.pop_back();
+        // A resize may have been reconciled while this explicit camera was
+        // active. Repair the saved automatic screen camera before recording.
+        if (target.automaticScreenProjection &&
+            &target == &internal::currentWindowContext().swapchainTarget)
+            internal::refreshWindowDrawingSize();
         internal::applyTargetDrawingState();
     }
 
