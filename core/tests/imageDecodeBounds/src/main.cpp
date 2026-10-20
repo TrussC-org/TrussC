@@ -562,7 +562,9 @@ void allocationChecks(const fs::path& root) {
     internal::appRunToken()->store(false);
 }
 } // namespace
-TC_CORE_TEST_MAIN() {
+#include "deviceFixtures.h"
+TC_CORE_TEST_MAIN(int argc, char** argv) {
+    if (argc > 1) return imageDeviceMain(argc, argv);
     const auto root = fs::temp_directory_path() / "tc_imageDecodeBounds";
     fs::create_directories(root);
     atomic<int> warnings{0}, errors{0};
