@@ -6,7 +6,7 @@
 //
 // Multi-window support: every piece of state that is conceptually "per window"
 // — input, hover/scene, render-target routing, per-window frame count,
-// lighting/material/environment, and the per-frame shadow-slot assignment —
+// lighting/material/environment, and mutable shadow maps and slots —
 // lives in one WindowContext instead of scattered process globals.
 // currentWindowContext() == mainWindowContext() while only the main window is
 // running; each secondary native window owns its own context and the native
@@ -64,9 +64,8 @@ static_assert(std::extent_v<decltype(ShadowStorage::colorAttachments)> == maxSha
     "shadow storage must match the shader's slot count");
 
 // ---------------------------------------------------------------------------
-// Per-window shadow-slot state. Mutable GPU storage is selected through
-// shadowStorageForWindow(); part 1 keeps the existing shared allocation policy.
-// Q1 will supply per-owner generations through that single accessor.
+// Per-window shadow state, including lazy host-owned GPU generations. A nested
+// foreign tick can park the pass without changing this owner's slots or maps.
 // ---------------------------------------------------------------------------
 struct ShadowSlotState {
     // Slot assignment: `frame` (the per-window updateCount at the last reset)
@@ -78,6 +77,8 @@ struct ShadowSlotState {
     int count = 0;
     int current = -1;
     bool inPass = false;
+    uint64_t allocationFailures = 0;
+    std::shared_ptr<ShadowStorage> storage;
     RenderTarget target;
     std::unique_ptr<TargetPassScope> scope;
     Mat4  viewProj[maxShadowLights]{};
@@ -193,7 +194,7 @@ struct WindowContext {
     float pbrExposure = 1.0f;              // global exposure scalar (pre-ACES tonemap)
     Environment* currentEnvironment = nullptr;
 
-    // --- per-window shadow-slot assignment (GPU resources stay shared) ---
+    // --- per-window shadow maps, slot assignment and active pass ---
     ShadowSlotState shadow;
 
     // --- frame timing (per window) ---
@@ -451,6 +452,7 @@ inline void registerCameraContext(const Mat4& view, const Mat4& projection,
     ctx->viewH = viewH;
     ctx->pickable = pickable;
     currentWindowContext().currentTarget->camera.currentCameraContext = std::move(ctx);
+    currentTarget().automaticScreenProjection = false;
 }
 
 } // namespace internal

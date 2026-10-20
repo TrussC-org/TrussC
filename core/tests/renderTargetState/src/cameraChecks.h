@@ -177,6 +177,8 @@ public:
 };
 
 int runCameraChecks(int samples = 1) {
+    gpuWarnings = {};
+    gpuWarningLog = getLogger().onLog.listen([](LogEventArgs& e) { gpuWarnings.observe(e); });
     WindowSettings settings;
     // Windows may clamp a small window's client area (96 → 120), so checks
     // compare against the size the window actually got.
@@ -185,6 +187,8 @@ int runCameraChecks(int samples = 1) {
     settings.setHighDpi(true);
     settings.sampleCount = samples;
     return tcCoreTest::runDisplayTest<CameraChecksApp>(settings, failures, [] {
+        check("GPU checks emit no unexpected stack or target warnings", gpuWarnings.unexpected == 0);
+        check("GPU checks emit exactly one intended unmatched-Fbo warning", gpuWarnings.expected == 1);
         check("all six camera scenarios completed", cameraChecksFinished);
         check("review behavior probes and screen readback completed", reviewDrawn && reviewCaptured);
         check("all three overlapping-depth variants captured", depthCaptures == 3);

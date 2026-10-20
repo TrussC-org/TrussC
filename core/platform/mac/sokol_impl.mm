@@ -22,6 +22,7 @@
 #include "sokol_glue.h"
 #include "util/sokol_gl_tc.h"
 #include "util/sokol_memtrack.h"
+#include "../metal/tcShadowAllocation.h"
 
 #if defined(__GNUC__) || defined(__clang__)
 #  pragma GCC diagnostic pop

@@ -1,2 +1,6 @@
 {test} --gpu-check
 {test} --gpu-check --msaa4
+{test} --resize-check
+{test} --resize-check --msaa4
+{test} --resize-check --pixel-perfect
+{test} --resize-check --pixel-perfect --msaa4

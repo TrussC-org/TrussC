@@ -19,15 +19,35 @@
 #include <sys/wait.h>
 #include <unistd.h>
 using namespace tc;
+// ELF overrides of host-private native checks; no production hook or Sokol
+// seam. Simulate a null native object while the dummy SG handle stays VALID.
+static int nativeChecksUntilFailure = -1;
+static bool nativeFailureWasValid = false;
+template<class Handle, class Query>
+bool checkedNativeObject(Handle handle, Query query) {
+    if (nativeChecksUntilFailure < 0) return true;
+    if (nativeChecksUntilFailure-- != 0) return true;
+    nativeFailureWasValid = query(handle) == SG_RESOURCESTATE_VALID;
+    return false;
+}
 // Generated native shaders have no dummy-backend descriptor. The dummy sgl
 // shader is sufficient for descriptor/lifetime probes; GPU suites test pixels.
 namespace trussc::internal {
 sg_shader sglPremultShader() { return {}; }
 sg_shader sglCoverageShader() { return {}; }
+bool shadowNativeValid(sg_image handle) { return checkedNativeObject(handle, sg_query_image_state); }
+bool shadowNativeValid(sg_view handle) { return checkedNativeObject(handle, sg_query_view_state); }
+bool shadowNativeValid(sg_sampler handle) { return checkedNativeObject(handle, sg_query_sampler_state); }
 }
 // One-shot failure at the real deferred replay allocation, as in the review.
 static bool failAllocation = false;
+// Unlike the older one-shot probes, reject every allocation until explicitly
+// restored, including allocations attempted during cleanup and error delivery.
+static int allocationsUntilFailure = -1;
+static int rejectedAllocations = 0;
 void* operator new(std::size_t size) {
+    if (allocationsUntilFailure == 0) { ++rejectedAllocations; throw std::bad_alloc(); }
+    if (allocationsUntilFailure > 0) --allocationsUntilFailure;
     if (failAllocation) { failAllocation = false; throw std::bad_alloc(); }
     if (void* result = std::malloc(size ? size : 1)) return result;
     throw std::bad_alloc();
@@ -46,7 +66,23 @@ struct LateShader : Shader {
 // Constructed before the host registries, destroyed after them and sg_shutdown.
 LateShader lateShader;
 int submittedDraws = 0;
-void drawn(int, int, int, void*) { ++submittedDraws; }
+std::vector<int>* drawOrder = nullptr;
+struct RasterAtDraw {
+    internal::ScissorRect viewport, scissor;
+};
+RasterAtDraw appliedRaster;
+std::vector<RasterAtDraw>* rasterAtDraw = nullptr;
+void viewportApplied(int x, int y, int w, int h, bool topLeft, void*) {
+    appliedRaster.viewport = {float(x), float(y), float(w), float(h), topLeft};
+}
+void scissorApplied(int x, int y, int w, int h, bool topLeft, void*) {
+    appliedRaster.scissor = {float(x), float(y), float(w), float(h), topLeft};
+}
+void drawn(int, int count, int, void*) {
+    ++submittedDraws;
+    if (drawOrder) drawOrder->push_back(count);
+    if (rasterAtDraw) rasterAtDraw->push_back(appliedRaster);
+}
 std::vector<sg_pass> passes;
 int commits = 0;
 sg_pipeline_desc appliedPipeline = {};
@@ -614,6 +650,247 @@ bool parkedWindowProbe(bool fboTop) {
     return ok;
 }
 
+// Raw PBR precedes newly recorded SGL state, so native state must already
+// match the parked target when shadow-slot replay begins.
+bool shadowReplayDrawingStateProbe() {
+    DummyWindowPair windows;
+    internal::restoreWindowContext(nullptr);
+    auto& target = internal::currentTarget();
+    bool ok = internal::ensureShadowStorage(windows.main,64);
+    sg_shader_desc sd = {};
+    sd.uniform_blocks[UB_tc_pbr_vs_params].stage = SG_SHADERSTAGE_VERTEX;
+    sd.uniform_blocks[UB_tc_pbr_vs_params].size = sizeof(tc_pbr_vs_params_t);
+    sd.uniform_blocks[UB_tc_pbr_fs_params].stage = SG_SHADERSTAGE_FRAGMENT;
+    sd.uniform_blocks[UB_tc_pbr_fs_params].size = sizeof(tc_pbr_fs_params_t);
+    const auto shader = sg_make_shader(sd);
+    sg_pipeline_desc pd = {}; pd.shader = shader; pd.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
+    internal::PbrDrawCommand cmd = {}; cmd.pip = sg_make_pipeline(pd); cmd.vertexCount = 3;
+    float vertices[9] = {}; sg_buffer_desc bd = {}; bd.data = {vertices,sizeof(vertices)};
+    cmd.bind.vertex_buffers[0] = sg_make_buffer(bd);
+    cmd.shadowGeneration = windows.main.shadow.storage; cmd.fsp.shadowMapParams[1] = 1;
+    internal::ensureCurrentPass();
+    setScissor(5,6,7,8); target.viewport = {9,10,11,12,true};
+    internal::applyTargetDrawingState(); internal::parkWindowPass();
+    struct Trace { int sx=0,sy=0,sw=0,sh=0,vx=0,vy=0,vw=0,vh=0,draws=0; bool ok=true; } trace;
+    auto saved = _sg.hooks;
+    sg_trace_hooks hooks = {}; hooks.user_data = &trace;
+    hooks.begin_pass = [](const sg_pass*,void* u) {
+        auto& t = *static_cast<Trace*>(u); t.sx=t.sy=t.vx=t.vy=0; t.sw=t.vw=256; t.sh=t.vh=192;
+    };
+    hooks.apply_scissor_rect = [](int x,int y,int w,int h,bool,void* u) {
+        auto& t = *static_cast<Trace*>(u); t.sx=x;t.sy=y;t.sw=w;t.sh=h;
+    };
+    hooks.apply_viewport = [](int x,int y,int w,int h,bool,void* u) {
+        auto& t = *static_cast<Trace*>(u); t.vx=x;t.vy=y;t.vw=w;t.vh=h;
+    };
+    hooks.draw = [](int,int,int,void* u) {
+        auto& t = *static_cast<Trace*>(u); ++t.draws;
+        t.ok &= t.sx==5 && t.sy==6 && t.sw==7 && t.sh==8 && t.vx==9 && t.vy==10 && t.vw==11 && t.vh==12;
+    };
+    sg_install_trace_hooks(&hooks);
+    target.deferredPbrDraws.push_back({0,cmd}); target.advanceLayer();
+    internal::consumeShadowSlot(0);
+    target.deferredPbrDraws.push_back({0,cmd}); target.advanceLayer();
+    internal::ensureCurrentPass(); target.flushLayers(); target.endPass();
+    sg_install_trace_hooks(&saved);
+    ok &= trace.ok && trace.draws == 2;
+    sg_destroy_pipeline(cmd.pip); sg_destroy_buffer(cmd.bind.vertex_buffers[0]); sg_destroy_shader(shader);
+    std::printf("SHADOW REPLAY scissor=5,6,7,8 viewport=9,10,11,12 draws=%d ok=%d\n",trace.draws,ok);
+    return ok;
+}
+
+bool shadowNativeFailureProbe() {
+    DummyWindowPair windows;
+    internal::restoreWindowContext(nullptr);
+    auto& a = windows.main; auto& b = windows.secondary.context();
+    bool ok = internal::ensureShadowStorage(b,64);
+    const auto foreign = b.shadow.storage;
+    int errors = 0;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Error && e.message.find("shadow use discarded") != std::string::npos) ++errors;
+    });
+    // Every generation resource, including all attachment views and the
+    // sampling view, can fail natively despite a VALID dummy SG state.
+    for (int stage = 0; stage < 9; ++stage) {
+        ok &= internal::ensureShadowStorage(a,64);
+        const auto old = a.shadow.storage->colorImage;
+        struct Created { sg_image images[2] = {}; sg_view views[6] = {}; sg_sampler sampler = {}; int ni=0,nv=0; } made;
+        auto saved = _sg.hooks; sg_trace_hooks hooks = {}; hooks.user_data = &made;
+        hooks.make_image = [](const sg_image_desc*,sg_image h,void* u) { auto& c=*static_cast<Created*>(u); c.images[c.ni++]=h; };
+        hooks.make_view = [](const sg_view_desc*,sg_view h,void* u) { auto& c=*static_cast<Created*>(u); c.views[c.nv++]=h; };
+        hooks.make_sampler = [](const sg_sampler_desc*,sg_sampler h,void* u) { static_cast<Created*>(u)->sampler=h; };
+        sg_install_trace_hooks(&hooks);
+        a.shadow.count = 2; const auto failures = a.shadow.allocationFailures;
+        nativeFailureWasValid = false; nativeChecksUntilFailure = stage;
+        const bool rejected = !internal::ensureShadowStorage(a,128);
+        nativeChecksUntilFailure = -1;
+        sg_install_trace_hooks(&saved);
+        ok &= rejected && nativeFailureWasValid && !a.shadow.storage && a.shadow.count == 0 &&
+            a.shadow.allocationFailures == failures+1 && b.shadow.storage == foreign &&
+            sg_query_image_state(foreign->colorImage) == SG_RESOURCESTATE_VALID;
+        internal::endGpuFrame();
+        ok &= sg_query_image_state(old) == SG_RESOURCESTATE_INVALID;
+        for (int i=0;i<made.ni;++i) ok &= sg_query_image_state(made.images[i]) == SG_RESOURCESTATE_INVALID;
+        for (int i=0;i<made.nv;++i) ok &= sg_query_view_state(made.views[i]) == SG_RESOURCESTATE_INVALID;
+        if (made.sampler.id) ok &= sg_query_sampler_state(made.sampler) == SG_RESOURCESTATE_INVALID;
+    }
+    ok &= errors == 9 && internal::ensureShadowStorage(a,64);
+    std::printf("SHADOW NATIVE null_objects=9 partial_retirement/foreign/recovery=%d errors=%d expected=9\n",ok,errors);
+    return ok;
+}
+
+// Run after all drawing tests; deliberately start two fresh devices so native
+// IDs recycle exactly, then exercise the real cleanup and retirement collector.
+bool shadowDeviceRestartProbe() {
+    cleanup();
+    sg_desc desc = {}; sg_setup(&desc); sgl_desc_t sd = {}; sgl_setup(&sd);
+    auto& owner = internal::mainWindowContext();
+    bool ok = internal::ensureShadowStorage(owner,64);
+    if (!owner.shadow.storage) return false;
+    const auto old = owner.shadow.storage->colorImage;
+    cleanup();
+    sg_setup(&desc); sgl_setup(&sd);
+    ok &= internal::ensureShadowStorage(owner,64);
+    if (!owner.shadow.storage) return false;
+    const auto fresh = owner.shadow.storage->colorImage;
+    internal::drainPendingGpuDestroys();
+    ok &= old.id == fresh.id && sg_query_image_state(fresh) == SG_RESOURCESTATE_VALID;
+    std::printf("SHADOW RESTART old=%x fresh=%x live=%d ok=%d\n",old.id,fresh.id,sg_query_image_state(fresh),ok);
+    cleanup();
+    return ok;
+}
+
+// Exercise host allocation/retirement without allocating native image memory.
+bool shadowOwnershipProbe() {
+    DummyWindowPair windows;
+    auto& a = windows.main;
+    auto& b = windows.secondary.context();
+    internal::restoreWindowContext(&a);
+    bool ok = !a.shadow.storage && !b.shadow.storage;
+    ok &= internal::ensureShadowStorage(a,64) && internal::ensureShadowStorage(b,128);
+    const auto foreign = b.shadow.storage;
+    const auto oldImage = a.shadow.storage->colorImage;
+    const auto oldView = a.shadow.storage->colorTexture;
+    std::weak_ptr<internal::ShadowStorage> old = a.shadow.storage;
+    internal::PbrDrawCommand cmd = {};
+    cmd.shadowGeneration = a.shadow.storage;
+    cmd.bind.views[VIEW_tc_pbr_shadowMap] = oldView;
+    cmd.bind.samplers[SMP_tc_pbr_shadowMapSmp] = a.shadow.storage->sampler;
+    a.swapchainTarget.deferredPbrDraws.push_back({0,std::move(cmd)});
+    ok &= internal::ensureShadowStorage(a,128) && a.shadow.count == 0;
+    internal::restoreWindowContext(&b);
+    internal::endGpuFrame();
+    ok &= !old.expired() && sg_query_image_state(oldImage) == SG_RESOURCESTATE_VALID &&
+        sg_query_view_state(oldView) == SG_RESOURCESTATE_VALID;
+    a.swapchainTarget.deferredPbrDraws.clear();
+    internal::endGpuFrame();
+    ok &= old.expired() && sg_query_image_state(oldImage) == SG_RESOURCESTATE_INVALID &&
+        sg_query_view_state(oldView) == SG_RESOURCESTATE_INVALID;
+    internal::restoreWindowContext(&a);
+    int failures = 0;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Error && e.message.find("shadow use discarded") != std::string::npos) ++failures;
+    });
+    // Image, view and sampler pool exhaustion fail at different construction
+    // stages. Restore the pool before retiring partial generations.
+    for (auto* pool : {&_sg.pools.image_pool,&_sg.pools.view_pool,&_sg.pools.sampler_pool}) {
+        ok &= internal::ensureShadowStorage(a,64);
+        a.shadow.count = 2;
+        const int available = pool->queue_top;
+        pool->queue_top = 0;
+        const bool rejected = !internal::ensureShadowStorage(a,256);
+        pool->queue_top = available;
+        ok &= rejected && !a.shadow.storage && a.shadow.count == 0 && !a.shadow.inPass &&
+            b.shadow.storage == foreign && sg_query_image_state(foreign->colorImage) == SG_RESOURCESTATE_VALID;
+        internal::endGpuFrame();
+    }
+    ok &= internal::ensureShadowStorage(a,64);
+    failAllocation = true;
+    ok &= !internal::ensureShadowStorage(a,256) && !a.shadow.storage && a.shadow.count == 0;
+    for (int extent : {0,-1,INT_MAX})
+        ok &= !internal::ensureShadowStorage(a,extent) && !a.shadow.storage;
+    ok &= failures == 7 && b.shadow.storage == foreign;
+    size_t color,depth,total;
+    ok &= internal::shadowImageLayout(1024,color,depth,total) && total == 20971520 &&
+        !internal::shadowImageLayout(INT_MAX,color,depth,total);
+    std::printf("SHADOW OWNERSHIP lazy/generation/pins/failure/foreign=%d errors=%d expected=7\n",ok,failures);
+    return ok;
+}
+
+bool shadowSustainedAllocationProbe() {
+    DummyWindowPair windows;
+    auto& a = windows.main;
+    auto& b = windows.secondary.context();
+    internal::restoreWindowContext(&a);
+    bool ok = internal::ensureShadowStorage(a,64) && internal::ensureShadowStorage(b,128);
+    const auto foreign = b.shadow.storage;
+    const auto foreignImage = foreign->colorImage;
+    int errors = 0;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Error && e.message.find("shadow use discarded") != std::string::npos) ++errors;
+    });
+    auto intact = [&] {
+        return b.shadow.storage == foreign && sg_query_image_state(foreignImage) == SG_RESOURCESTATE_VALID;
+    };
+    // Growth fails before the new object or during shared_ptr control-block
+    // creation. Keep OOM active through fail(), final pin release and collection.
+    for (int successfulAllocations : {0,1}) {
+        ok &= internal::ensureShadowStorage(a,64);
+        const auto oldImage = a.shadow.storage->colorImage;
+        auto pin = a.shadow.storage;
+        a.shadow.count = 2;
+        const auto before = a.shadow.allocationFailures;
+        allocationsUntilFailure = successfulAllocations;
+        ok &= !internal::ensureShadowStorage(a,256) && !a.shadow.storage && a.shadow.count == 0 &&
+            a.shadow.allocationFailures == before + 1 && intact();
+        pin.reset();
+        internal::endGpuFrame(); // Cannot build reference closure yet; retry later.
+        ok &= sg_query_image_state(oldImage) == SG_RESOURCESTATE_VALID;
+        allocationsUntilFailure = -1;
+        internal::endGpuFrame();
+        ok &= sg_query_image_state(oldImage) == SG_RESOURCESTATE_INVALID && intact();
+    }
+    // Fail after the color image exists: the native partial generation and the
+    // owner's old generation must both retire without allocating.
+    ok &= internal::ensureShadowStorage(a,64);
+    const auto oldImage = a.shadow.storage->colorImage;
+    sg_image partial = {};
+    auto hooks = _sg.hooks;
+    auto injectedHooks = hooks;
+    injectedHooks.make_image = [](const sg_image_desc*, sg_image image, void* user) {
+        *static_cast<sg_image*>(user) = image;
+        allocationsUntilFailure = 0;
+        _sg.pools.view_pool.queue_top = 0;
+    };
+    injectedHooks.user_data = &partial;
+    const int availableViews = _sg.pools.view_pool.queue_top;
+    sg_install_trace_hooks(&injectedHooks);
+    ok &= !internal::ensureShadowStorage(a,256) && !a.shadow.storage && intact();
+    _sg.pools.view_pool.queue_top = availableViews;
+    sg_install_trace_hooks(&hooks);
+    ok &= partial.id && allocationsUntilFailure == 0 && errors == 3;
+    allocationsUntilFailure = -1;
+    internal::endGpuFrame();
+    ok &= sg_query_image_state(partial) == SG_RESOURCESTATE_INVALID &&
+        sg_query_image_state(oldImage) == SG_RESOURCESTATE_INVALID;
+    // Real WindowContext close with pending PBR is also noexcept under OOM.
+    ok &= internal::ensureShadowStorage(a,64);
+    const auto closeImage = a.shadow.storage->colorImage;
+    internal::PbrDrawCommand cmd = {};
+    cmd.shadowGeneration = a.shadow.storage;
+    a.swapchainTarget.deferredPbrDraws.push_back({0,std::move(cmd)});
+    allocationsUntilFailure = 0;
+    a.teardownTargets();
+    ok &= !a.shadow.storage && a.swapchainTarget.deferredPbrDraws.empty() && intact() && errors == 3;
+    allocationsUntilFailure = -1;
+    internal::endGpuFrame();
+    ok &= sg_query_image_state(closeImage) == SG_RESOURCESTATE_INVALID &&
+        internal::ensureShadowStorage(a,64) && intact() && rejectedAllocations >= 4;
+    std::printf("SHADOW SUSTAINED growth/control_block/partial/pin/close/recovery=%d errors=%d expected=3 rejected=%d\n",
+        ok,errors,rejectedAllocations);
+    return ok;
+}
+
 bool parkedShadowProbe() {
     DummyWindowPair windows;
     internal::restoreWindowContext(nullptr);
@@ -898,6 +1175,678 @@ bool rawFailureProbe() {
     return ok;
 }
 
+// Model macOS's synchronous update() resize after beginFrame, on Linux
+// without a display. The real coordinator must refresh before CPU recording,
+// not merely change the native pass extent after geometry was recorded.
+bool resizeBeforeDrawProbe(float dpi, bool pixelPerfect, float fov) {
+    internal::WindowContext window;
+    window.isMain = false;
+    window.fbWidth = 64; window.fbHeight = 48; window.dpiScale = dpi;
+    struct Acquisition { internal::WindowContext* window; int count = 0; } acquisition{&window};
+    window.acquireSwapchainUser = &acquisition;
+    window.acquireSwapchain = [](void* user) {
+        auto& state = *static_cast<Acquisition*>(user);
+        ++state.count;
+        auto swapchain = dummySwapchain(nullptr);
+        swapchain.width = state.window->fbWidth;
+        swapchain.height = state.window->fbHeight;
+        return swapchain;
+    };
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &window;
+    const bool previousPixelPerfect = internal::pixelPerfectMode();
+    const float previousFov = internal::defaultScreenFov();
+    internal::pixelPerfectMode() = pixelPerfect;
+    internal::defaultScreenFov() = fov;
+    beginFrame();
+    auto& target = window.swapchainTarget;
+    bool ok = target.viewport.active && target.viewport.w == 64 && target.camera.currentViewH == 48 / (pixelPerfect ? 1 : dpi);
+    const auto automaticCamera = target.camera;
+    target.viewport = {3, 4, 50, 30, true};
+    target.camera.currentProjectionMatrix = Mat4::scale(7, 8, 9);
+    internal::refreshWindowDrawingSize();
+    ok &= target.viewport.x == 3 && target.camera.currentProjectionMatrix.m[0] == 7;
+    target.camera = automaticCamera;
+    target.viewport = {0, 0, 64, 48, true};
+    window.fbWidth = 96; window.fbHeight = 80; // update() applies resize immediately
+    internal::refreshWindowDrawingSize();
+    const float viewW = float(getWindowWidth()), viewH = float(getWindowHeight());
+    const Vec3 corner = worldToScreen(Vec3(viewW, viewH, 0));
+    ok &= acquisition.count == 0 && target.width == 96 && target.height == 80 &&
+        target.viewport.active && target.viewport.x == 0 && target.viewport.y == 0 &&
+        target.viewport.w == 96 && target.viewport.h == 80 &&
+        target.camera.currentViewW == viewW && target.camera.currentViewH == viewH &&
+        std::abs(corner.x - viewW) < 0.001f && std::abs(corner.y - viewH) < 0.001f;
+    drawRect(0, 0, viewW, viewH);
+    internal::ensureCurrentPass();
+    ok &= acquisition.count == 1 && target.binding.swapchain.width == 96 && target.binding.swapchain.height == 80;
+    // Unchanged dimensions must preserve an explicit camera/viewport, and
+    // park/resume must retain the owner's acquisition even if the OS resizes.
+    target.viewport = {1, 2, 30, 20, true};
+    const auto projection = target.camera.currentProjectionMatrix;
+    internal::refreshWindowDrawingSize();
+    target.endPass();
+    window.fbWidth = 128; window.fbHeight = 96;
+    internal::refreshWindowDrawingSize();
+    internal::ensureCurrentPass();
+    ok &= acquisition.count == 1 && target.width == 96 && target.viewport.x == 1 &&
+        target.viewport.w == 30 && target.camera.currentProjectionMatrix.m[0] == projection.m[0];
+    present();
+    // The next frame resets the previous active viewport on every backend.
+    beginFrame();
+    ok &= target.width == 128 && target.viewport.x == 0 && target.viewport.w == 128 && target.viewport.h == 96;
+    present();
+    ok &= acquisition.count == 2;
+    window.teardownTargets();
+    target.resources().release();
+    internal::pixelPerfectMode() = previousPixelPerfect;
+    internal::defaultScreenFov() = previousFov;
+    internal::currentWindowCtx() = previous;
+    std::printf("RESIZE BEFORE DRAW dpi=%.0f pixelPerfect=%d fov=%.3f first_frame=%d\n", dpi, pixelPerfect, fov, ok);
+    return ok;
+}
+
+
+// Exercise the GPU fixture's unmatched-Fbo and review stack sequences through
+// real Node dispatch. An empty child pop is intentionally rejected only in the
+// negative variant: it never consumes the suspended window's live Node push.
+bool targetStackDispatchProbe(bool rejectedPop) {
+    internal::WindowContext window;
+    window.isMain = false; window.fbWidth = 64; window.fbHeight = 48;
+    window.acquireSwapchain = dummySwapchain;
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &window;
+    int unmatchedWarnings = 0, popWarnings = 0, unexpectedWarnings = 0;
+    bool expectingUnmatched = false, expectingPop = false;
+    auto log = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level != LogLevel::Warning) return;
+        if (expectingUnmatched && e.message == "[Fbo] end() discarded unmatched matrix, camera or scissor pushes")
+            ++unmatchedWarnings;
+        else if (expectingPop && e.message == "[RenderContext] trussc::App::draw() called popMatrix() without a matching pushMatrix() (ignored)")
+            ++popWarnings;
+        else ++unexpectedWarnings;
+    });
+    struct StackApp : App {
+        bool rejectedPop, ok = true;
+        bool& expectingUnmatched;
+        bool& expectingPop;
+        StackApp(bool rejectedPop, bool& unmatched, bool& pop)
+            : rejectedPop(rejectedPop), expectingUnmatched(unmatched), expectingPop(pop) { setPos(2, 3); }
+        void draw() override {
+            auto& screen = internal::currentTarget();
+            const auto depth = screen.matrixStack.size();
+            const auto model = getMatrix();
+            const auto camera = screen.camera;
+            Fbo fbo; fbo.allocate(16, 12);
+            fbo.begin();
+            EasyCam unmatched;
+            if (!rejectedPop) { pushMatrix(); pushScissor(1, 1, 2, 2); unmatched.begin(); }
+            expectingUnmatched = !rejectedPop; fbo.end(); expectingUnmatched = false;
+            ok &= screen.matrixStack.size() == depth && depth == 1 &&
+                screen.cameraStack.empty() && screen.scissorStack.empty() &&
+                screen.camera.currentCameraContext == camera.currentCameraContext &&
+                std::memcmp(getMatrix().m, model.m, sizeof(model.m)) == 0;
+            fbo.begin();
+            ok &= internal::currentTarget().matrixStack.empty() && internal::currentTarget().cameraStack.empty() &&
+                internal::currentTarget().scissorStack.empty();
+            fbo.end();
+            pushMatrix(); translate(4, 5);
+            const auto screenModel = getMatrix();
+            auto& rc = internal::getDefaultContext();
+            const auto floor = rc.setStackFloor(depth + 1, rc.getStyleStackDepth(), &typeid(App));
+            fbo.begin();
+            if (rejectedPop) { expectingPop = true; popMatrix(); expectingPop = false; }
+            ok &= internal::currentTarget().matrixStack.empty() && screen.matrixStack.size() == depth + 1;
+            pushMatrix(); translate(2, 3); popMatrix();
+            ok &= internal::currentTarget().matrixStack.empty() && !sgl_error().stack_underflow;
+            fbo.end();
+            ok &= screen.matrixStack.size() == depth + 1 &&
+                std::memcmp(getMatrix().m, screenModel.m, sizeof(model.m)) == 0;
+            rc.setStackFloor(floor); popMatrix();
+            ok &= screen.matrixStack.size() == depth &&
+                std::memcmp(getMatrix().m, model.m, sizeof(model.m)) == 0;
+        }
+    };
+    bool ok;
+    {
+        StackApp app(rejectedPop, expectingUnmatched, expectingPop);
+        beginFrame();
+        { internal::EntryStackGuard draw(internal::AppEntry::Draw); app.handleDraw(); }
+        auto& screen = window.swapchainTarget;
+        ok = app.ok && screen.matrixStack.empty() && screen.cameraStack.empty() && screen.scissorStack.empty() &&
+            internal::getDefaultContext().getStyleStackDepth() == 0 &&
+            screen.currentMatrix.m[3] == 0 && screen.currentMatrix.m[7] == 0;
+        present();
+    }
+    window.teardownTargets(); window.swapchainTarget.resources().release();
+    internal::currentWindowCtx() = previous;
+    ok &= unmatchedWarnings == int(!rejectedPop) && popWarnings == int(rejectedPop) && unexpectedWarnings == 0;
+    std::printf("TARGET STACK DISPATCH rejectedPop=%d unmatched=%d pop=%d unexpected=%d ok=%d\n",
+        rejectedPop, unmatchedWarnings, popWarnings, unexpectedWarnings, ok);
+    return ok;
+}
+
+// Keep deliberate diagnostics and their OnceGate/rate-limit state local to
+// this probe; the remaining suite also tests device teardown and ID reuse.
+bool targetStackDispatchChecks() {
+    std::fflush(stdout);
+    const pid_t child = fork();
+    if (child == 0) {
+        const bool ok = targetStackDispatchProbe(false) && targetStackDispatchProbe(true);
+        std::fflush(stdout);
+        _exit(ok ? 0 : 1);
+    }
+    if (child < 0) return false;
+    int status = 0;
+    return waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+// Match the native resize driver's complete dispatch, including the implicit
+// Node matrix push. Restore a child opened in update in events().draw,
+// before handleDraw pushes that matrix; camera.end can still run in draw().
+bool resizeAppDispatchProbe(bool resize, bool cameraScope) {
+    internal::WindowContext window;
+    window.isMain = false; window.fbWidth = 64; window.fbHeight = 48;
+    int acquisitions = 0, warnings = 0;
+    window.acquireSwapchainUser = &acquisitions;
+    window.acquireSwapchain = [](void* user) {
+        ++*static_cast<int*>(user);
+        auto swapchain = dummySwapchain(nullptr);
+        swapchain.width = getFramebufferWidth(); swapchain.height = getFramebufferHeight();
+        return swapchain;
+    };
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &window;
+    auto log = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Warning) ++warnings;
+    });
+    struct ResizeApp : App {
+        bool resize, cameraScope, ok = true, drew = false;
+        EasyCam camera;
+        Fbo fbo;
+        EventListener beforeDraw;
+        internal::TargetCameraState selected;
+        ResizeApp(bool resize, bool cameraScope) : resize(resize), cameraScope(cameraScope) {}
+        void setup() override {
+            setPos(2, 3);
+            beforeDraw = events().draw.listen([this] {
+                auto& window = internal::currentWindowContext();
+                auto& child = internal::currentTarget();
+                ok &= child.isFbo && child.width == 16 && child.height == 12 &&
+                    child.matrixStack.empty() && child.cameraStack.empty() && child.scissorStack.empty();
+                fbo.end();
+                auto& target = internal::currentTarget();
+                ok &= &target == &window.swapchainTarget && target.matrixStack.empty() &&
+                    target.width == window.fbWidth && target.height == window.fbHeight &&
+                    target.viewport.w == window.fbWidth && target.viewport.h == window.fbHeight;
+                if (cameraScope) {
+                    ok &= target.cameraStack.size() == 1 && !target.automaticScreenProjection;
+                    for (int i = 0; i < 16; ++i)
+                        ok &= target.camera.currentProjectionMatrix.m[i] == selected.currentProjectionMatrix.m[i] &&
+                            target.camera.currentViewMatrix.m[i] == selected.currentViewMatrix.m[i];
+                }
+            });
+        }
+        void update() override {
+            if (cameraScope) camera.begin();
+            selected = internal::currentTarget().camera;
+            if (resize) {
+                internal::currentWindowContext().fbWidth = 96;
+                internal::currentWindowContext().fbHeight = 80;
+            }
+            fbo.allocate(16, 12); fbo.begin();
+        }
+        void draw() override {
+            drew = true;
+            auto& target = internal::currentTarget();
+            ok &= !target.isFbo && target.matrixStack.size() == 1 &&
+                target.currentMatrix.m[3] == 2 && target.currentMatrix.m[7] == 3;
+            if (cameraScope) camera.end();
+            ok &= target.cameraStack.empty() && target.automaticScreenProjection &&
+                target.camera.currentViewW == getWindowWidth() && target.camera.currentViewH == getWindowHeight();
+            const auto corner = worldToScreen(Vec3(getWindowWidth(), getWindowHeight(), 0));
+            ok &= std::abs(corner.x - getWindowWidth()) < 0.001f &&
+                std::abs(corner.y - getWindowHeight()) < 0.001f;
+            drawRect(0, 0, getWindowWidth(), getWindowHeight());
+        }
+    };
+    bool ok;
+    {
+        ResizeApp app(resize, cameraScope);
+        beginFrame();
+        { internal::EntryStackGuard update(internal::AppEntry::Update); app.handleUpdate(0, 0); }
+        auto* child = &internal::currentTarget();
+        const auto context = sgl_get_context();
+        internal::refreshWindowDrawingSize();
+        ok = &internal::currentTarget() == child && sgl_get_context().id == context.id && acquisitions == 0;
+        {
+            internal::EntryStackGuard draw(internal::AppEntry::Draw);
+            events().draw.notify();
+            app.handleDraw();
+            auto& target = window.swapchainTarget;
+            ok &= app.ok && app.drew && target.matrixStack.empty() && target.cameraStack.empty() &&
+                internal::getDefaultContext().getStyleStackDepth() == 0 &&
+                target.currentMatrix.m[3] == 0 && target.currentMatrix.m[7] == 0;
+            present();
+        }
+        ok &= acquisitions == 1;
+    }
+    window.teardownTargets(); window.swapchainTarget.resources().release();
+    ok &= warnings == 0;
+    internal::currentWindowCtx() = previous;
+    std::printf("RESIZE APP DISPATCH resize=%d camera=%d warnings=%d acquisitions=%d ok=%d\n",
+        resize, cameraScope, warnings, acquisitions, ok);
+    return ok;
+}
+
+// Public camera APIs opt out of automatic projection repair, independently
+// of the viewport. Exercise real callback guards and Fbo parent restoration.
+bool resizeSelectedStateProbe(int scenario) {
+    const char* labels[] = {"explicit_ortho", "explicit_old_size", "easycam", "resize_listener",
+                            "custom_viewport", "matrix_scope", "active_fbo", "active_fbo_camera",
+                            "camera_closed_update", "camera_closed_draw", "camera_closed_after_fbo",
+                            "nested_camera", "model_set_load"};
+    internal::WindowContext window;
+    window.isMain = false; window.fbWidth = 64; window.fbHeight = 48;
+    int acquisitions = 0;
+    struct Provider { internal::WindowContext& window; int& count; } provider{window, acquisitions};
+    window.acquireSwapchainUser = &provider;
+    window.acquireSwapchain = [](void* user) {
+        auto& state = *static_cast<Provider*>(user);
+        ++state.count;
+        auto swapchain = dummySwapchain(nullptr);
+        swapchain.width = state.window.fbWidth; swapchain.height = state.window.fbHeight;
+        return swapchain;
+    };
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &window;
+    const float previousFov = internal::defaultScreenFov();
+    const bool previousPixel = internal::pixelPerfectMode();
+    internal::defaultScreenFov() = TAU / 6;
+    internal::pixelPerfectMode() = false;
+    beginFrame();
+    auto& target = window.swapchainTarget;
+    EasyCam cam, innerCam;
+    Fbo fbo, nested;
+    const bool customProjection = scenario <= 3 || scenario == 7;
+    const bool activeFbo = scenario == 6 || scenario == 7 || scenario == 10;
+    {
+        internal::EntryStackGuard update(internal::AppEntry::Update);
+        if (scenario < 8) { window.fbWidth = 96; window.fbHeight = 80; }
+        if (scenario == 0 || scenario == 7) setupScreenFovWithSize(0, 96, 80);
+        if (scenario == 1) setupScreenFovWithSize(0, 64, 48);
+        if (scenario == 2) cam.begin();
+        if (scenario == 3) {
+            internal::EntryStackGuard listener(internal::AppEntry::Event, "windowResized");
+            setupScreenFovWithSize(0, 96, 80);
+        }
+        if (scenario == 4) {
+            // There is no public setViewport API in this frozen revision;
+            // model an internal/custom viewport selection directly.
+            target.viewport = {3, 4, 50, 30, true};
+        }
+        if (scenario == 5) {
+            pushMatrix(); translate(7, 8, 9); popMatrix();
+        }
+        if (scenario == 8) { cam.begin(); cam.end(); }
+        if (scenario == 9 || scenario == 10 || scenario == 11) cam.begin();
+        if (scenario == 11) innerCam.begin();
+        if (scenario == 12) {
+            pushMatrix();
+            setMatrix(Mat4::translate(7, 8, 9));
+            loadMatrix(Mat4::translate(3, 4, 5));
+            popMatrix();
+            translate(2, 3, 0);
+        }
+        if (scenario >= 8) { window.fbWidth = 96; window.fbHeight = 80; }
+        if (activeFbo) {
+            fbo.allocate(16, 12); fbo.begin();
+            nested.allocate(8, 6); nested.begin();
+        }
+    }
+    const auto camera = target.camera;
+    const auto viewport = target.viewport;
+    const auto childCamera = internal::currentTarget().camera;
+    const auto childViewport = internal::currentTarget().viewport;
+    const auto childContext = sgl_get_context();
+    internal::refreshWindowDrawingSize();
+    bool ok = acquisitions == 0;
+    if (activeFbo) {
+        ok &= sgl_get_context().id == childContext.id &&
+            internal::currentTarget().camera.currentCameraContext == childCamera.currentCameraContext &&
+            internal::currentTarget().viewport.w == childViewport.w;
+    }
+    {
+        internal::EntryStackGuard draw(internal::AppEntry::Draw);
+        if (activeFbo) { nested.end(); fbo.end(); }
+        if (scenario == 11) {
+            innerCam.end();
+            ok &= !target.automaticScreenProjection && target.cameraStack.size() == 1;
+        }
+        if (scenario == 9 || scenario == 10 || scenario == 11) cam.end();
+        ok &= target.width == 96 && target.height == 80;
+        if (scenario == 4) {
+            ok &= target.viewport.x == viewport.x && target.viewport.y == viewport.y &&
+                target.viewport.w == viewport.w && target.viewport.h == viewport.h;
+        } else {
+            ok &= target.viewport.x == 0 && target.viewport.y == 0 &&
+                target.viewport.w == 96 && target.viewport.h == 80;
+        }
+        if (customProjection) {
+            for (int i = 0; i < 16; ++i)
+                ok &= target.camera.currentViewMatrix.m[i] == camera.currentViewMatrix.m[i] &&
+                    target.camera.currentProjectionMatrix.m[i] == camera.currentProjectionMatrix.m[i];
+            ok &= target.camera.currentCameraContext == camera.currentCameraContext &&
+                target.camera.currentViewW == camera.currentViewW && target.camera.currentViewH == camera.currentViewH;
+        } else {
+            ok &= target.camera.currentViewW == 96 && target.camera.currentViewH == 80;
+            const auto corner = worldToScreen(Vec3(96, 80, 0));
+            ok &= std::abs(corner.x - 96) < 0.001f && std::abs(corner.y - 80) < 0.001f;
+        }
+        if (scenario == 2) ok &= target.cameraStack.size() == 1;
+        drawRect(0, 0, 96, 80); internal::ensureCurrentPass();
+        ok &= acquisitions == 1 && target.binding.swapchain.width == 96 && target.binding.swapchain.height == 80;
+        if (scenario == 2) {
+            cam.end();
+            ok &= target.automaticScreenProjection && target.camera.currentViewW == 96 && target.camera.currentViewH == 80;
+            // Check actual screen geometry after closing a camera that already
+            // recorded into the acquired frame, not just the explicit camera.
+            const Vec4 clip = target.camera.currentProjectionMatrix * target.camera.currentViewMatrix * Vec4(48, 40, 0, 1);
+            ok &= std::abs((clip.x / clip.w + 1) * 0.5f * target.viewport.w - 48) < 0.001f &&
+                  std::abs((1 - clip.y / clip.w) * 0.5f * target.viewport.h - 40) < 0.001f;
+            drawRect(0, 40, 96, 40);
+        }
+        if (!customProjection) {
+            const Vec4 clip = target.camera.currentProjectionMatrix * target.camera.currentViewMatrix * Vec4(48, 40, 0, 1);
+            const float viewportW = scenario == 4 ? 50 : 96;
+            const float viewportH = scenario == 4 ? 30 : 80;
+            ok &= std::abs((clip.x / clip.w + 1) * 0.5f * 96 - 48) < 0.001f &&
+                  std::abs((1 - clip.y / clip.w) * 0.5f * 80 - 40) < 0.001f &&
+                  target.viewport.w == viewportW && target.viewport.h == viewportH;
+            if (scenario == 12) ok &= target.currentMatrix.m[3] == 2 && target.currentMatrix.m[7] == 3;
+        }
+    }
+    std::printf("RESIZE SELECTED %s pass=%dx%d viewport=%.0fx%.0f view=%.0fx%.0f ok=%d\n",
+        labels[scenario], target.binding.swapchain.width, target.binding.swapchain.height,
+        target.viewport.w, target.viewport.h, target.camera.currentViewW, target.camera.currentViewH, ok);
+    present();
+    window.teardownTargets();
+    target.resources().release();
+    internal::defaultScreenFov() = previousFov;
+    internal::pixelPerfectMode() = previousPixel;
+    internal::currentWindowCtx() = previous;
+    return ok;
+}
+
+// An empty Shader scope reserves its ordering layer in update(). Resizing
+// keeps the recording context; immediate geometry must still follow
+// the deferred triangle, before ensureCurrentPass can reselect the target.
+bool resizeOpenShaderProbe(bool resize, bool selectedState) {
+    internal::WindowContext window;
+    window.isMain = false; window.fbWidth = 64; window.fbHeight = 48;
+    int acquisitions = 0;
+    window.acquireSwapchainUser = &acquisitions;
+    window.acquireSwapchain = [](void* user) {
+        ++*static_cast<int*>(user);
+        auto swapchain = dummySwapchain(nullptr);
+        swapchain.width = getFramebufferWidth(); swapchain.height = getFramebufferHeight();
+        return swapchain;
+    };
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &window;
+    beginFrame();
+    auto& target = window.swapchainTarget;
+    Shader shader;
+    bool ok = shader.load(descriptor);
+    {
+        internal::EntryStackGuard update(internal::AppEntry::Update);
+        if (selectedState) {
+            translate(2, 3, 0);
+            setScissor(1, 2, 28, 26);
+            enableDepthTest(); setBlendMode(BlendMode::Add);
+            target.viewport = {3, 4, 50, 30, true};
+            internal::applyTargetDrawingState();
+        }
+        shader.begin();
+        if (resize) { window.fbWidth = 96; window.fbHeight = 80; }
+    }
+    const auto context = sgl_get_context();
+    const auto selection = target.selectedPipeline;
+    const int layer = target.sglLayerNext;
+    ok &= layer == 1 && target.openShaderScopes == 1 && !target.inPass &&
+        !sgl_tc_context_has_pending_draws(context);
+    internal::refreshWindowDrawingSize();
+    auto* ctx = _sgl_lookup_context(target.resources().context.id);
+    ok &= context.id == sgl_get_context().id && ctx->layer_id == layer &&
+        target.selectedPipeline == selection && acquisitions == 0;
+    // Audit every other SGL state that target reselection reapplies, before
+    // shader.end() or pass acquisition has a chance to repair it again.
+    const auto projection = target.camera.currentProjectionMatrix.transposed();
+    const auto modelview = (target.camera.currentViewMatrix * target.currentMatrix).transposed();
+    ok &= std::memcmp(_sgl_matrix_projection(ctx), projection.m, sizeof(projection.m)) == 0 &&
+        std::memcmp(_sgl_matrix_modelview(ctx), modelview.m, sizeof(modelview.m)) == 0 &&
+        ctx->pip_stack[ctx->pip_tos].id == target.pipeline(internal::PipelineKey::immediate(selection)).immediate.id;
+    _sgl_viewport_args_t viewport = {};
+    _sgl_scissor_rect_args_t clip = {};
+    for (int i = 0; i < ctx->commands.next; ++i) {
+        const auto& command = ctx->commands.ptr[i];
+        if (command.cmd == SGL_COMMAND_VIEWPORT) viewport = command.args.viewport;
+        if (command.cmd == SGL_COMMAND_SCISSOR_RECT) clip = command.args.scissor_rect;
+    }
+    const int width = resize ? 96 : 64, height = resize ? 80 : 48;
+    ok &= target.width == width && target.height == height;
+    ok &= viewport.x == (selectedState ? 3 : 0) && viewport.y == (selectedState ? 4 : 0) &&
+        viewport.w == (selectedState ? 50 : width) && viewport.h == (selectedState ? 30 : height) &&
+        viewport.origin_top_left && clip.x == (selectedState ? 1 : 0) && clip.y == (selectedState ? 2 : 0) &&
+        clip.w == (selectedState ? 28 : width) && clip.h == (selectedState ? 26 : height) && clip.origin_top_left;
+    const Vec3 corner = worldToScreen(Vec3(float(width), float(height), 0));
+    ok &= std::abs(corner.x - width) < 0.001f && std::abs(corner.y - height) < 0.001f;
+    std::vector<int> counts;
+    drawOrder = &counts;
+    {
+        internal::EntryStackGuard draw(internal::AppEntry::Draw);
+        ShaderVertex triangle[3] = {{0,0,0,0,0,1,0,0,1}, {30,0,0,0,0,1,0,0,1}, {0,30,0,0,0,1,0,0,1}};
+        shader.submitVertices(triangle, 3, PrimitiveType::Triangles);
+        shader.end();
+        drawRect(0, 0, 30, 30);
+        for (int i = 0; i < ctx->commands.next; ++i)
+            if (ctx->commands.ptr[i].cmd == SGL_COMMAND_DRAW) ok &= ctx->commands.ptr[i].layer_id == layer;
+        ok &= acquisitions == 0;
+    }
+    present();
+    drawOrder = nullptr;
+    ok &= counts == std::vector<int>{3, 6} && acquisitions == 1;
+    std::printf("RESIZE OPEN SHADER resize=%d selected=%d order=", resize, selectedState);
+    for (int count : counts) std::printf("%d ", count);
+    std::printf("expected=3 6 ok=%d\n", ok);
+    window.teardownTargets();
+    target.resources().release();
+    internal::currentWindowCtx() = previous;
+    return ok;
+}
+
+// Public Texture::bind stores its enabled flag, view and sampler in SGL,
+// outside the target's CPU drawing state. Both empty and nonempty recordings
+// must retain that selection through ortho/perspective extent repair.
+bool resizeBoundTextureProbe(float fov, bool pending, bool resize) {
+    internal::WindowContext window;
+    window.isMain = false; window.fbWidth = 64; window.fbHeight = 48;
+    int acquisitions = 0;
+    window.acquireSwapchainUser = &acquisitions;
+    window.acquireSwapchain = [](void* user) {
+        ++*static_cast<int*>(user);
+        auto swapchain = dummySwapchain(nullptr);
+        swapchain.width = getFramebufferWidth(); swapchain.height = getFramebufferHeight();
+        return swapchain;
+    };
+    auto* previous = internal::currentWindowCtx();
+    const float previousFov = internal::defaultScreenFov();
+    internal::currentWindowCtx() = &window;
+    internal::defaultScreenFov() = fov;
+    beginFrame();
+    auto& target = window.swapchainTarget;
+    const auto context = sgl_get_context();
+    const auto generation = target.resources().generation;
+    Texture texture;
+    texture.allocate(1, 1, 4, TextureUsage::Dynamic);
+    const unsigned char red[4] = {255, 0, 0, 255};
+    texture.loadData(red, 1, 1, 4);
+    bool ok = texture.isAllocated();
+    {
+        internal::EntryStackGuard update(internal::AppEntry::Update);
+        texture.bind();
+        if (pending) drawRect(0, 0, 8, 8);
+        if (resize) { window.fbWidth = 96; window.fbHeight = 80; }
+    }
+    internal::refreshWindowDrawingSize();
+    auto* ctx = _sgl_lookup_context(sgl_get_context().id);
+    ok &= context.id == sgl_get_context().id && generation == target.resources().generation &&
+        target.resources().width == 64 && target.resources().height == 48 &&
+        ctx->texturing_enabled && ctx->cur_view.id == texture.getView().id &&
+        ctx->cur_smp.id == texture.getSampler().id && acquisitions == 0;
+    {
+        internal::EntryStackGuard draw(internal::AppEntry::Draw);
+        drawRect(0, 0, 30, 30);
+        texture.unbind();
+    }
+    int draws = 0;
+    for (int i = 0; i < ctx->commands.next; ++i) {
+        const auto& command = ctx->commands.ptr[i];
+        if (command.cmd == SGL_COMMAND_DRAW) {
+            ++draws;
+            ok &= command.args.draw.view.id == texture.getView().id &&
+                command.args.draw.smp.id == texture.getSampler().id;
+        }
+    }
+    ok &= draws > 0 && acquisitions == 0 &&
+        target.width == (resize ? 96 : 64) && target.height == (resize ? 80 : 48);
+    present();
+    ok &= acquisitions == 1;
+    // Resource reconciliation still happens at the next safe beginFrame.
+    beginFrame();
+    ok &= target.resources().width == window.fbWidth && target.resources().height == window.fbHeight;
+    present();
+    std::printf("RESIZE BOUND TEXTURE fov=%.3f pending=%d resize=%d ok=%d\n", fov, pending, resize, ok);
+    window.teardownTargets();
+    target.resources().release();
+    internal::defaultScreenFov() = previousFov;
+    internal::currentWindowCtx() = previous;
+    return ok;
+}
+
+// FullscreenShader acquires inside update(), before the normal refresh. Both
+// native direct draws and subsequent SGL recording must use the acquired
+// extent even if an explicit projection/camera is active. Selection controls
+// cover custom viewport/scissor; restoring the old automatic viewport isolates
+// refresh's own predicate from the initial-pass repair.
+bool resizeEarlyAcquireProbe(int mode, bool resize, int selection) {
+    const char* modes[] = {"automatic", "explicit_ortho", "easycam"};
+    const char* selections[] = {"automatic", "custom_viewport", "custom_scissor", "restored_viewport"};
+    internal::WindowContext window;
+    window.isMain = false; window.fbWidth = 64; window.fbHeight = 48;
+    int acquisitions = 0;
+    window.acquireSwapchainUser = &acquisitions;
+    window.acquireSwapchain = [](void* user) {
+        ++*static_cast<int*>(user);
+        auto swapchain = dummySwapchain(nullptr);
+        swapchain.width = getFramebufferWidth(); swapchain.height = getFramebufferHeight();
+        return swapchain;
+    };
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &window;
+    beginFrame();
+    auto& target = window.swapchainTarget;
+    const auto context = sgl_get_context();
+    const auto generation = target.resources().generation;
+    const auto oldViewport = target.viewport;
+    EasyCam camera;
+    FullscreenShader fullscreen;
+    bool ok = fullscreen.load(descriptor);
+    Mat4 projection, view;
+    const int width = resize ? 96 : 64, height = resize ? 80 : 48;
+    auto stateMatches = [&] {
+        const auto& vp = target.viewport;
+        const auto& clip = target.currentScissor;
+        bool matches = vp.x == (selection == 1 ? 3 : 0) && vp.y == (selection == 1 ? 4 : 0) &&
+            vp.w == (selection == 1 ? 50 : width) && vp.h == (selection == 1 ? 30 : height);
+        // Inspect actual commands and raw-sg state, not just CPU bookkeeping.
+        auto* ctx = _sgl_lookup_context(context.id);
+        _sgl_viewport_args_t recorded = {};
+        _sgl_scissor_rect_args_t scissor = {};
+        for (int i = 0; i < ctx->commands.next; ++i) {
+            const auto& command = ctx->commands.ptr[i];
+            if (command.cmd == SGL_COMMAND_VIEWPORT) recorded = command.args.viewport;
+            if (command.cmd == SGL_COMMAND_SCISSOR_RECT) scissor = command.args.scissor_rect;
+        }
+        matches &= recorded.x == vp.x && recorded.y == vp.y && recorded.w == vp.w && recorded.h == vp.h &&
+            recorded.origin_top_left && scissor.x == (clip.active ? clip.x : 0) &&
+            scissor.y == (clip.active ? clip.y : 0) && scissor.w == (clip.active ? clip.w : width) &&
+            scissor.h == (clip.active ? clip.h : height) && scissor.origin_top_left;
+        if (mode != 0) {
+            matches &= std::memcmp(target.camera.currentProjectionMatrix.m, projection.m, sizeof(projection.m)) == 0 &&
+                std::memcmp(target.camera.currentViewMatrix.m, view.m, sizeof(view.m)) == 0 &&
+                !target.automaticScreenProjection;
+        }
+        if (mode == 1 && selection != 1) {
+            const auto corner = target.camera.currentProjectionMatrix * target.camera.currentViewMatrix *
+                Vec4(float(width), float(height), 0, 1);
+            matches &= std::abs((corner.x / corner.w + 1) * 0.5f * recorded.w - width) < 0.001f &&
+                std::abs((1 - corner.y / corner.w) * 0.5f * recorded.h - height) < 0.001f;
+        }
+        return matches;
+    };
+    {
+        internal::EntryStackGuard update(internal::AppEntry::Update);
+        window.fbWidth = width; window.fbHeight = height;
+        if (mode == 1) setupScreenFovWithSize(0, width, height);
+        if (mode == 2) camera.begin();
+        if (selection == 1) target.viewport = {3, 4, 50, 30, true};
+        if (selection == 2) setScissor(1, 2, 28, 26);
+        projection = target.camera.currentProjectionMatrix;
+        view = target.camera.currentViewMatrix;
+        std::vector<RasterAtDraw> directDraws;
+        rasterAtDraw = &directDraws;
+        fullscreen.draw();
+        rasterAtDraw = nullptr;
+        ok &= directDraws.size() == 1;
+        for (const auto& state : directDraws) {
+            ok &= state.viewport.x == (selection == 1 ? 3 : 0) && state.viewport.y == (selection == 1 ? 4 : 0) &&
+                state.viewport.w == (selection == 1 ? 50 : width) && state.viewport.h == (selection == 1 ? 30 : height) &&
+                state.viewport.active && state.scissor.x == (selection == 2 ? 1 : 0) &&
+                state.scissor.y == (selection == 2 ? 2 : 0) && state.scissor.w == (selection == 2 ? 28 : width) &&
+                state.scissor.h == (selection == 2 ? 26 : height) && state.scissor.active;
+        }
+        ok &= stateMatches(); // Must already be repaired inside update().
+        drawRect(0, 0, width, height);
+        ok &= stateMatches();
+    }
+    const auto binding = target.binding.swapchain;
+    if (selection == 3) {
+        target.viewport = oldViewport;
+        target.automaticScreenWidth = 64; target.automaticScreenHeight = 48;
+        internal::applyTargetDrawingState();
+    }
+    internal::refreshWindowDrawingSize();
+    ok &= stateMatches() && acquisitions == 1 && target.width == width && target.height == height &&
+        binding.width == width && binding.height == height && sgl_get_context().id == context.id &&
+        target.resources().generation == generation;
+    {
+        internal::EntryStackGuard draw(internal::AppEntry::Draw);
+        drawRect(0, 0, width, height);
+        ok &= stateMatches();
+        if (mode == 2) camera.end();
+    }
+    present();
+    ok &= acquisitions == 1;
+    std::printf("RESIZE EARLY ACQUIRE %s resize=%d selection=%s pass=%dx%d viewport=%.0fx%.0f acquisitions=%d ok=%d\n",
+        modes[mode], resize, selections[selection], binding.width, binding.height,
+        target.viewport.w, target.viewport.h, acquisitions, ok);
+    window.teardownTargets();
+    target.resources().release();
+    internal::currentWindowCtx() = previous;
+    return ok;
+}
+
 bool activeDestructionProbe() {
     std::fflush(stdout);
     const pid_t child = fork();
@@ -919,6 +1868,12 @@ bool activeDestructionProbe() {
 
 }
 int main(int argc, char** argv) {
+    if (argc == 2 && std::strcmp(argv[1],"--native-allocation-check") == 0) {
+        const auto executable = fs::read_symlink("/proc/self/exe").parent_path() / "shadowAllocationGl";
+        execl(executable.c_str(),executable.c_str(),"--gpu-check",static_cast<char*>(nullptr));
+        std::perror("shadowAllocationGl exec");
+        return 2;
+    }
     sg_desc desc = {};
     // Multiple independent windows warm caches in this one process.
     desc.pipeline_pool_size = 2048;
@@ -928,7 +1883,9 @@ int main(int argc, char** argv) {
     sg_setup(&desc);
     sgl_desc_t gl = {}; gl.pipeline_pool_size = 256; sgl_setup(&gl);
     if (!lateShader.load(descriptor)) return 1;
-    sg_trace_hooks hooks = {}; hooks.draw = drawn; hooks.begin_pass = began; hooks.commit = committed; hooks.apply_pipeline = applied; sg_install_trace_hooks(&hooks);
+    sg_trace_hooks hooks = {}; hooks.draw = drawn; hooks.begin_pass = began; hooks.commit = committed; hooks.apply_pipeline = applied;
+    hooks.apply_viewport = viewportApplied; hooks.apply_scissor_rect = scissorApplied; sg_install_trace_hooks(&hooks);
+    const bool targetStacks = targetStackDispatchChecks();
     bool teardown = true;
     for (bool explicitTeardown : {false,true}) for (bool otherCurrent : {false,true})
         teardown &= teardownProbe(explicitTeardown,otherCurrent);
@@ -946,6 +1903,10 @@ int main(int argc, char** argv) {
     const bool parity = noDrawParityProbe(false,true) && noDrawParityProbe(true,true) && noDrawParityProbe(false,false);
     const bool rawKinds = rawKindsLifetimeProbe();
     const bool parking = parkedWindowProbe(false) && parkedWindowProbe(true);
+    const bool shadowOwnership = shadowOwnershipProbe();
+    const bool shadowReplay = shadowReplayDrawingStateProbe();
+    const bool shadowNative = shadowNativeFailureProbe();
+    const bool shadowSustained = shadowSustainedAllocationProbe();
     const bool shadowParking = parkedShadowProbe();
     const bool capturePhase = synchronousCapturePhaseProbe(false) && synchronousCapturePhaseProbe(true);
     const bool foreignTeardown = foreignTeardownReplayFailureProbe();
@@ -953,9 +1914,22 @@ int main(int argc, char** argv) {
     const bool retirement = resourceRetirementProbe();
     const bool growth = growthFailureProbe();
     const bool rawFailure = rawFailureProbe();
+    bool resizeBeforeDraw = true;
+    for (float dpi : {1.0f, 2.0f}) for (bool pixelPerfect : {false, true}) for (float fov : {0.0f, TAU / 6})
+        resizeBeforeDraw &= resizeBeforeDrawProbe(dpi, pixelPerfect, fov);
+    for (int scenario = 0; scenario < 13; ++scenario) resizeBeforeDraw &= resizeSelectedStateProbe(scenario);
+    for (bool resize : {false, true}) for (bool camera : {false, true})
+        resizeBeforeDraw &= resizeAppDispatchProbe(resize, camera);
+    for (bool resize : {false, true}) for (bool selected : {false, true})
+        resizeBeforeDraw &= resizeOpenShaderProbe(resize, selected);
     const bool destruction = activeDestructionProbe();
-    const int result=teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && destruction ? 0 : 1;
-    sgl_shutdown(); sg_shutdown();
+    for (float fov : {0.0f, TAU / 6}) for (bool pending : {false, true}) for (bool resize : {false, true})
+        resizeBeforeDraw &= resizeBoundTextureProbe(fov, pending, resize);
+    for (int mode = 0; mode < 3; ++mode) for (bool resize : {false, true}) for (int selection = 0; selection < 4; ++selection)
+        resizeBeforeDraw &= resizeEarlyAcquireProbe(mode, resize, selection);
+    // Last: it shuts the device down and re-creates it.
+    const bool shadowRestart = shadowDeviceRestartProbe();
+    const int result=targetStacks && shadowReplay && shadowNative && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowSustained && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && resizeBeforeDraw && destruction ? 0 : 1;
     return result;
 }
 #else

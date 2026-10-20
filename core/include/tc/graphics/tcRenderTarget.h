@@ -206,6 +206,7 @@ void returnTargetResources(RenderTargetResources& lease);
 void invalidateTargetBucket(sg_pixel_format format, int samples, sg_pixel_format depth);
 bool rebuildTargetResources();
 void prepareWindowTarget();
+void refreshWindowDrawingSize();
 
 // C++17 vectors support incomplete elements; these draw snapshots are defined
 // later in TrussC.h. Targets are constructed where those definitions are complete.
@@ -234,6 +235,7 @@ struct TargetCameraScope {
     TargetCameraState camera;
     ImmediateSelection selectedPipeline;
     const void* owner;
+    bool automaticScreenProjection = false;
 };
 
 uint64_t nextTargetOwnerId();
@@ -289,6 +291,12 @@ struct RenderTarget {
     Mat4 currentMatrix = Mat4::identity();
     std::vector<Mat4> matrixStack;
     ScissorRect viewport = {0, 0, 0, 0, false};
+    // Only beginFrame opts into resize-following screen state. Application
+    // camera/viewport choices opt out independently until the next frame.
+    bool automaticScreenProjection = false;
+    bool automaticViewport = false;
+    bool windowDrawingSizeStale = false;
+    int automaticScreenWidth = 0, automaticScreenHeight = 0;
     ScissorRect currentScissor = {0, 0, 0, 0, false};
     std::vector<ScissorRect> scissorStack;
     BlendMode currentBlendMode = BlendMode::Alpha;
@@ -390,14 +398,23 @@ struct WindowCaptureSource {
 };
 WindowCaptureSource windowCaptureSource();
 bool finishWindowCaptureSource(RenderTarget& target);
-// Q1 plug-in: mutable shadow storage is accessed only through this owner seam.
+// One host-allocated generation per shadow-using window. Deferred PBR retains
+// its generation; final release links it into host retirement without allocating.
 struct ShadowStorage {
+    ShadowStorage() = default;
+    ShadowStorage(const ShadowStorage&) = delete;
+    ShadowStorage& operator=(const ShadowStorage&) = delete;
+    ~ShadowStorage() noexcept;
     sg_image colorImage = {}, depthImage = {};
     sg_view colorAttachments[4] = {}, colorTexture = {}, depthAttachment = {};
     sg_sampler sampler = {};
-    int resolution = 0, drawCount = 0;
+    int resolution = 0;
+    size_t imageBytes = 0;
+    ShadowStorage* retiredNext = nullptr;
 };
-ShadowStorage& shadowStorageForWindow(WindowContext& window);
+bool shadowImageLayout(int resolution, size_t& colorBytes, size_t& depthBytes, size_t& totalBytes);
+bool ensureShadowStorage(WindowContext& window, int resolution);
+void consumeShadowSlot(int slot);
 bool hasPublicFboActivation();
 RenderTargetResources* leaseTargetResources(sg_pixel_format format, int samples,
     sg_pixel_format depth = SG_PIXELFORMAT_DEPTH_STENCIL);

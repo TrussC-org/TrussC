@@ -23,6 +23,9 @@
 // =============================================================================
 
 #include <TrussC.h>
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+#include "../../../platform/gl/tcShadowAllocation.h"
+#endif
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -45,6 +48,14 @@
 #include <cstdlib>
 
 namespace trussc {
+
+namespace internal {
+namespace { void discardRetiredShadows() noexcept; }
+// Metal's host backend inspects native objects in its implementation TU.
+bool shadowNativeValid(sg_image);
+bool shadowNativeValid(sg_view);
+bool shadowNativeValid(sg_sampler);
+}
 
 // ---------------------------------------------------------------------------
 // Initialization (setup)
@@ -160,6 +171,9 @@ void cleanup() {
     // Submit it without presentation before Metal waits for semaphore permits
     // during shutdown, and before destroying any referenced native resources.
     if (sg_isvalid()) sg_tc_submit_prefix();
+    // Retired handles belong to this device. Dispose of them before shutdown
+    // can recycle their IDs into another device's live resources.
+    internal::discardRetiredShadows();
     // The 2D blend / 3D / premultiplied / clear sgl pipelines live in the
     // swapchain and per-FBO RenderTarget caches. sgl pipelines are in one
     // global pool (sgl_destroy_context() frees only the context's own default
@@ -408,12 +422,14 @@ void WindowContext::teardownTargets() noexcept {
     shadow.scope.reset();
     shadow.inPass = false;
     shadow.current = -1;
+    shadow.count = 0;
     if (swapchainTarget.inPass) {
         attempt([&] { swapchainTarget.flushLayers(); });
         attempt([&] { swapchainTarget.endPass(); });
     }
     swapchainTarget.deferredShaderDraws.clear();
     swapchainTarget.deferredPbrDraws.clear();
+    shadow.storage.reset();
     swapchainTarget.deferredPointDraws.clear();
     swapchainTarget.openShaderScopes = 0;
     swapchainTarget.sglLayerNext = 0;
@@ -457,6 +473,7 @@ void selectTarget(RenderTarget& target) {
     if (target.resources().context.id) {
         sgl_set_context(target.resources().context);
         sgl_layer(target.sglLayerNext);
+        if (target.windowDrawingSizeStale) refreshWindowDrawingSize();
         applyTargetDrawingState();
     }
 }
@@ -520,6 +537,10 @@ void RenderTarget::beginPass(TargetPassStart reason) {
     }
     inPass = true;
     passStartedThisFrame = true;
+    // update() may acquire after a synchronous resize, before the draw-boundary
+    // refresh. Repair automatic state against these retained attachments now,
+    // so direct draws in update() also see the correct viewport and scissor.
+    if (passKind == TargetPassKind::Swapchain) refreshWindowDrawingSize();
 }
 
 void RenderTarget::endPass() {
@@ -1663,6 +1684,28 @@ uint64_t AsyncScheduler::newOwner() {
 
 // Deferred GPU destroys (tcGpuDestroyQueue.h)
 namespace {
+// The generation is its own retirement node. Neither enqueue nor final release
+// uses the growable typed queues, including shared_ptr construction failure.
+ShadowStorage* retiredShadows = nullptr;
+
+void retireShadowStorage(ShadowStorage* storage) noexcept {
+    if (!sg_isvalid()) { delete storage; return; }
+    storage->retiredNext = retiredShadows;
+    retiredShadows = storage;
+}
+
+void discardRetiredShadows() noexcept {
+    while (retiredShadows) {
+        auto* storage = retiredShadows;
+        retiredShadows = storage->retiredNext;
+        delete storage;
+    }
+}
+
+struct ShadowRetirementCleanup {
+    ~ShadowRetirementCleanup() { discardRetiredShadows(); }
+} shadowRetirementCleanup;
+
 struct PendingGpuDestroys {
     std::vector<sg_buffer>   buffers;
     std::vector<sg_image>    images;
@@ -1752,6 +1795,7 @@ void drainPendingGpuDestroys() {
     auto& q = pendingGpuDestroys();
     if (!sg_isvalid()) {
         q = {};
+        discardRetiredShadows();
         return;
     }
     try {
@@ -1776,12 +1820,24 @@ void drainPendingGpuDestroys() {
         retire(q.samplers, refs.samplers, sg_destroy_sampler);
         retire(q.pipelines, refs.pipelines, sg_destroy_pipeline);
         retire(q.shaders, refs.shaders, sg_destroy_shader);
+        auto** link = &retiredShadows;
+        while (auto* storage = *link) {
+            bool pinned = refs.images.count(storage->colorImage.id) ||
+                refs.images.count(storage->depthImage.id) || refs.samplers.count(storage->sampler.id) ||
+                refs.views.count(storage->colorTexture.id) || refs.views.count(storage->depthAttachment.id);
+            for (auto view : storage->colorAttachments) pinned |= refs.views.count(view.id) != 0;
+            if (pinned) { link = &storage->retiredNext; continue; }
+            *link = storage->retiredNext;
+            delete storage;
+        }
     } catch (const std::bad_alloc&) {
         // No handle retires before the complete reference closure is known.
         // Keep this batch intact and retry at the next device boundary.
-        logWarning("RenderTarget") << "resource retirement allocation failed; deferred collection";
+        try { getLogger().log(LogLevel::Warning, "[RenderTarget] resource retirement allocation failed; deferred collection"); }
+        catch (...) {} // Collection must also survive sustained allocation failure.
     } catch (const std::length_error&) {
-        logWarning("RenderTarget") << "resource retirement size cannot be represented; deferred collection";
+        try { getLogger().log(LogLevel::Warning, "[RenderTarget] resource retirement size cannot be represented; deferred collection"); }
+        catch (...) {}
     }
 }
 
@@ -1795,10 +1851,193 @@ ScreenRecorder& globalScreenRecorder() {
     return *rec;
 }
 
-ShadowStorage& shadowStorageForWindow(WindowContext&) {
-    // Q1 changes only this ownership policy after the owner's decision.
-    static ShadowStorage storage;
-    return storage;
+ShadowStorage::~ShadowStorage() noexcept {
+    if (!sg_isvalid()) return;
+    for (auto view : colorAttachments) if (view.id) sg_destroy_view(view);
+    if (colorTexture.id) sg_destroy_view(colorTexture);
+    if (depthAttachment.id) sg_destroy_view(depthAttachment);
+    if (colorImage.id) sg_destroy_image(colorImage);
+    if (depthImage.id) sg_destroy_image(depthImage);
+    if (sampler.id) sg_destroy_sampler(sampler);
+}
+
+#if defined(SOKOL_D3D11)
+bool shadowNativeValid(sg_image image) {
+    return sg_d3d11_query_image_info(image).res != nullptr;
+}
+bool shadowNativeValid(sg_view view) {
+    const auto desc = sg_query_view_desc(view);
+    const auto info = sg_d3d11_query_view_info(view);
+    if (desc.texture.image.id) return info.srv != nullptr;
+    if (desc.color_attachment.image.id) return info.rtv != nullptr;
+    return desc.depth_stencil_attachment.image.id && info.dsv != nullptr;
+}
+bool shadowNativeValid(sg_sampler sampler) {
+    return sg_d3d11_query_sampler_info(sampler).smp != nullptr;
+}
+#elif !defined(SOKOL_METAL) && !defined(SOKOL_GLCORE) && !defined(SOKOL_GLES3)
+bool shadowNativeValid(sg_image) { return true; }
+bool shadowNativeValid(sg_view) { return true; }
+bool shadowNativeValid(sg_sampler) { return true; }
+#endif
+
+namespace {
+// Prepared before main: reporting CPU exhaustion must not build a LogStream or
+// copy its message. Inline listeners and the normal console sink need no new
+// allocation. If an application listener/sink throws, retain the stderr Error.
+LogEventArgs shadowAllocationError{LogLevel::Error,
+    "[Shadow] could not allocate this window's shadow maps; shadow use discarded"};
+
+void reportShadowAllocationFailure() noexcept {
+    try { getLogger().onLog.notify(shadowAllocationError); }
+    catch (...) { std::fputs("[ERROR] [Shadow] shadow use discarded (allocation failure)\n", stderr); } // log-check: allow (allocation-free fallback)
+}
+
+template<class Handle, class Desc, class Make, class State>
+bool makeShadowResource(Handle& handle, const Desc& desc, Make make, State state) {
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+    const bool gl = sg_query_backend() == SG_BACKEND_GLCORE || sg_query_backend() == SG_BACKEND_GLES3;
+    GLPendingErrors pending;
+    if (gl) pending = beginGLShadowCreation();
+#endif
+    handle = make(&desc);
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+    const bool nativeOK = !gl || endGLShadowCreation();
+    reportGLPendingErrors(pending);
+    return state(handle) == SG_RESOURCESTATE_VALID && nativeOK && shadowNativeValid(handle);
+#else
+    return state(handle) == SG_RESOURCESTATE_VALID && shadowNativeValid(handle);
+#endif
+}
+} // namespace
+
+bool shadowImageLayout(int resolution, size_t& colorBytes, size_t& depthBytes, size_t& totalBytes) {
+    colorBytes = depthBytes = totalBytes = 0;
+    if (resolution <= 0) return false;
+    const size_t side = static_cast<size_t>(resolution);
+    // Bound (representation): image byte products and their sum must fit size_t. Overflow rejects a generation and is counted in its owner's allocationFailures by ensureShadowStorage.
+    if (side > SIZE_MAX / side) return false;
+    const size_t texels = side * side;
+    constexpr size_t colorTexelBytes = maxShadowLights * 4; // four R32F layers
+    constexpr size_t depthTexelBytes = 4; // SG_PIXELFORMAT_DEPTH
+    if (texels > SIZE_MAX / (colorTexelBytes + depthTexelBytes)) return false;
+    colorBytes = texels * colorTexelBytes;
+    depthBytes = texels * depthTexelBytes;
+    totalBytes = colorBytes + depthBytes;
+    return true;
+}
+
+bool ensureShadowStorage(WindowContext& window, int resolution) {
+    auto& sh = window.shadow;
+    auto fail = [&] {
+        sh.count = 0;
+        sh.current = -1;
+        sh.storage.reset();
+        ++sh.allocationFailures;
+        reportShadowAllocationFailure();
+        return false;
+    };
+    size_t colorBytes, depthBytes, totalBytes;
+    const auto limits = sg_query_limits();
+    // Bound (device): attachment extents and array layers must fit Sokol's device limits. Overflow discards this owner's shadow use, emits an Error and is counted in allocationFailures.
+    if (!shadowImageLayout(resolution, colorBytes, depthBytes, totalBytes) ||
+        resolution > limits.max_image_size_2d || resolution > limits.max_image_size_array ||
+        maxShadowLights > limits.max_image_array_layers) return fail();
+    if (sh.storage && resolution <= sh.storage->resolution) return true;
+    try {
+        auto next = std::shared_ptr<ShadowStorage>(new ShadowStorage, retireShadowStorage);
+        next->resolution = resolution;
+        next->imageBytes = totalBytes;
+        sg_image_desc cd = {};
+        cd.type = SG_IMAGETYPE_ARRAY;
+        cd.num_slices = maxShadowLights;
+        cd.usage.color_attachment = true;
+        cd.width = cd.height = resolution;
+        cd.pixel_format = SG_PIXELFORMAT_R32F;
+        cd.sample_count = 1;
+        cd.label = "tc_shadow_color_array";
+        if (!makeShadowResource(next->colorImage, cd, static_cast<sg_image (*)(const sg_image_desc*)>(sg_make_image), sg_query_image_state)) return fail();
+        for (int slot = 0; slot < maxShadowLights; ++slot) {
+            sg_view_desc vd = {};
+            vd.color_attachment.image = next->colorImage;
+            vd.color_attachment.slice = slot;
+            if (!makeShadowResource(next->colorAttachments[slot], vd, static_cast<sg_view (*)(const sg_view_desc*)>(sg_make_view), sg_query_view_state)) return fail();
+        }
+        sg_view_desc tv = {};
+        tv.texture.image = next->colorImage;
+        if (!makeShadowResource(next->colorTexture, tv, static_cast<sg_view (*)(const sg_view_desc*)>(sg_make_view), sg_query_view_state)) return fail();
+        sg_image_desc dd = {};
+        dd.usage.depth_stencil_attachment = true;
+        dd.width = dd.height = resolution;
+        dd.pixel_format = SG_PIXELFORMAT_DEPTH;
+        dd.sample_count = 1;
+        dd.label = "tc_shadow_depth";
+        if (!makeShadowResource(next->depthImage, dd, static_cast<sg_image (*)(const sg_image_desc*)>(sg_make_image), sg_query_image_state)) return fail();
+        sg_view_desc dv = {};
+        dv.depth_stencil_attachment.image = next->depthImage;
+        if (!makeShadowResource(next->depthAttachment, dv, static_cast<sg_view (*)(const sg_view_desc*)>(sg_make_view), sg_query_view_state)) return fail();
+        sg_sampler_desc sd = {};
+        sd.min_filter = sd.mag_filter = SG_FILTER_NEAREST;
+        sd.wrap_u = sd.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
+        sd.label = "tc_shadow_smp";
+        if (!makeShadowResource(next->sampler, sd, static_cast<sg_sampler (*)(const sg_sampler_desc*)>(sg_make_sampler), sg_query_sampler_state)) return fail();
+        // Publish only a complete generation. New storage contains no old slots;
+        // previously queued draws retain both the old maps and copied matrices.
+        sh.storage = std::move(next);
+        sh.count = 0;
+        sh.current = -1;
+        return true;
+    } catch (const std::bad_alloc&) { return fail(); }
+      catch (const std::length_error&) { return fail(); }
+}
+
+void consumeShadowSlot(int slot) {
+    auto& window = currentWindowContext();
+    const auto generation = window.shadow.storage;
+    auto needsSlot = [&](const RenderTarget& target) {
+        for (const auto& draw : target.deferredPbrDraws)
+            if (draw.cmd.shadowGeneration == generation && draw.cmd.fsp.shadowMapParams[1] > slot)
+                return true;
+        return false;
+    };
+    bool needed = false;
+    for (const auto& entry : window.targetStack) needed |= needsSlot(*entry.target);
+    if (!needed) return;
+
+    // A shadow pass can be nested inside an Fbo above a lazy consumer. Keep
+    // activations/leases intact while visiting only the affected stack owners.
+    auto& top = *window.currentTarget;
+    const bool resume = top.inPass;
+    parkWindowPass();
+    std::exception_ptr failure;
+    try {
+        for (const auto& entry : window.targetStack) {
+            auto& target = *entry.target;
+            if (!needsSlot(target)) continue;
+            selectTarget(target);
+            target.beginPass(target.passStartedThisFrame ? TargetPassStart::Resume : TargetPassStart::Initial);
+            selectTarget(target);
+            target.flushLayers();
+            target.endPass();
+        }
+    } catch (const std::bad_alloc&) {
+        failure = std::current_exception();
+        currentTarget().failRecording("shadow consumer replay allocation failed");
+        currentTarget().endPass();
+    } catch (const std::length_error&) {
+        failure = std::current_exception();
+        currentTarget().failRecording("shadow consumer replay size cannot be represented");
+        currentTarget().endPass();
+    } catch (...) {
+        failure = std::current_exception();
+        currentTarget().endPass();
+    }
+    selectTarget(top);
+    if (resume) {
+        top.beginPass(TargetPassStart::Resume);
+        selectTarget(top);
+    }
+    if (failure) std::rethrow_exception(failure);
 }
 
 PbrPipeline& getPbrPipeline() {
@@ -2035,6 +2274,51 @@ bool hasRecordedWork(RenderTarget& target) {
     return target.passStartedThisFrame || hasPendingRecording(target);
 }
 }
+void refreshWindowDrawingSize() {
+    auto& target = currentWindowContext().swapchainTarget;
+    // A synchronous resize in update() can change the public framebuffer
+    // extent after beginFrame set the screen camera. Refresh before draw()
+    // records any geometry, without acquiring another swapchain. A begun
+    // frame (including a parked foreign owner) keeps its acquired attachments.
+    const bool retainedFrame = target.inPass || target.passStartedThisFrame;
+    const int width = retainedFrame ? target.width : getFramebufferWidth();
+    const int height = retainedFrame ? target.height : getFramebufferHeight();
+    const float scale = pixelPerfectMode() ? 1.0f : getDpiScale();
+    const bool extentChanged = target.width != width || target.height != height;
+    const auto& vp = target.viewport;
+    const bool automaticViewport = target.automaticViewport && vp.active && vp.x == 0 && vp.y == 0 &&
+        vp.w == target.automaticScreenWidth && vp.h == target.automaticScreenHeight;
+    // Projection and viewport provenance are independent. An early acquire
+    // already updates target.width/height, even with an explicit camera, but
+    // its still-automatic viewport can retain the previous frame's extent.
+    const bool viewportChanged = automaticViewport && (vp.w != width || vp.h != height);
+    // A closing camera scope can restore an old automatic camera even when
+    // the viewport/target already followed the resize. Begun frames reconcile
+    // to their retained attachment extent, never to a newly acquired drawable.
+    target.windowDrawingSizeStale = extentChanged || viewportChanged || (target.automaticScreenProjection &&
+        (target.camera.currentViewW != width / scale || target.camera.currentViewH != height / scale));
+    // A child owns the current recording context. Reconcile its parent only
+    // when selectTarget restores it, before any window geometry is recorded.
+    if (!target.windowDrawingSizeStale || &currentTarget() != &target) return;
+    target.automaticViewport = automaticViewport;
+    // Extent alone changes neither SGL's fixed recording budgets nor pipeline
+    // formats/samples. Keep the context and all application-selected SGL state.
+    // Leave resource metadata untouched: prepareWindowTarget reconciles it at
+    // the next frame boundary, after this owner's recording has been consumed.
+    target.width = width;
+    target.height = height;
+    if (target.automaticViewport)
+        target.viewport = {0, 0, float(target.width), float(target.height), true};
+    if (target.automaticScreenProjection) {
+        updateScreenCameraWithSize(target.camera.currentScreenFov, target.width / scale, target.height / scale);
+        target.automaticScreenProjection = true;
+    }
+    target.automaticScreenWidth = target.width;
+    target.automaticScreenHeight = target.height;
+    target.windowDrawingSizeStale = false;
+    applyTargetDrawingState();
+}
+
 void prepareWindowTarget() {
     auto& window = currentWindowContext();
     auto& target = window.swapchainTarget;

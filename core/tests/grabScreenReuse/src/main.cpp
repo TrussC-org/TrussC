@@ -92,13 +92,6 @@ class CaptureApp : public App {
                 }
             }
         }
-#if defined(__APPLE__) && TARGET_OS_OSX
-        // TODO(#911): remove once the first frame after a resize renders at the new size.
-        if (step >= 2) {
-            std::printf("SKIP post-resize captured content: known: #911\n");
-            return;
-        }
-#endif
         check("every captured byte matches the current scene", correct);
     }
 
