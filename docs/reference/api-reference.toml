@@ -28707,7 +28707,7 @@ details.en = '''
 - File loaders resolve relative paths with `getDataPath()` and use absolute paths unchanged; successful loads record the resolved path in `getPath()`.
 - Returns `LoadResult`, which converts to true on success; inspect `error` and `message` for failure details. Missing or unreadable files report `LoadError::FileNotFound`; an existing file with an unsupported extension reports `LoadError::UnsupportedFormat`.
 - All synchronous file, encoded-memory, and PCM loaders cancel a pending `loadAsync` and clear `getPath()` before loading, including requests that fail.
-- WAV, MP3, FLAC, and OGG loaders preserve existing samples and audio metadata on failure; AAC failure behavior depends on the platform, as described in `SoundBuffer::loadAac`.
+- All encoded audio loaders preserve previous PCM and audio metadata on any failure and never publish a partial sound. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Encoded inputs above 64 MiB are not loaded fully; allocation failure is a clean Error.
 - Serialize handle operations and direct sample access on the main thread. Synchronous loading, generation, and editing do not lock the audio mixer, so do not modify a buffer while any playing `Sound` reads it.
 '''
 details.ja = '''
@@ -28715,7 +28715,7 @@ details.ja = '''
 - ファイル読み込みでは相対パスを `getDataPath()` で解決し、絶対パスはそのまま使います。成功すると解決済みパスを `getPath()` に記録します。
 - 成功時に真として評価できる `LoadResult` を返します。失敗の詳細は `error` と `message` で確認できます。存在しないファイルや開けないファイルは `LoadError::FileNotFound`、存在するファイルの非対応拡張子は `LoadError::UnsupportedFormat` になります。
 - 同期的なファイル・エンコード済みメモリ・PCMの読み込みは、失敗する要求も含め、読み込み前に進行中の `loadAsync` をキャンセルして `getPath()` を空にします。
-- WAV、MP3、FLAC、OGGの読み込みは、失敗時に既存のサンプルと音声メタデータを保持します。AACの失敗時の動作はプラットフォームによって異なり、`SoundBuffer::loadAac` で説明しています。
+- エンコード済み音声の読み込みは、どの失敗でも以前のPCMと音声メタデータを保持し、部分的な音声を公開しません。全体読み込みには長さの上限はありません。デコード済みPCMが256 MiBを超えると、プロセスで一度だけNoticeを出し、長い曲には `SoundStream::loadStream()` / `Sound::loadStream()` を推奨します。エンコード済み入力が64 MiBを超える場合は全体を読み込まず、メモリ確保の失敗はErrorとして安全に失敗します。
 - ハンドルの操作とサンプルへの直接アクセスはメインスレッドで順に行ってください。同期読み込み・生成・編集はオーディオミキサーをロックしないため、再生中の `Sound` が読み取るバッファは変更しないでください。
 '''
 details.ko = '''
@@ -28723,7 +28723,7 @@ details.ko = '''
 - 파일 로더는 상대 경로를 `getDataPath()`로 해석하고 절대 경로는 그대로 사용합니다. 성공하면 해석된 경로를 `getPath()`에 기록합니다.
 - 성공 시 참으로 평가되는 `LoadResult`를 반환합니다. 실패 정보는 `error`와 `message`로 확인합니다. 없거나 열 수 없는 파일은 `LoadError::FileNotFound`를, 존재하는 파일의 미지원 확장자는 `LoadError::UnsupportedFormat`을 보고합니다.
 - 동기 파일, 인코딩된 메모리, PCM 로더는 실패하는 요청도 포함해 로드 전에 진행 중인 `loadAsync`를 취소하고 `getPath()`를 비웁니다.
-- WAV, MP3, FLAC, OGG 로더는 실패 시 기존 샘플과 오디오 메타데이터를 보존합니다. AAC의 실패 동작은 플랫폼에 따라 다르며 `SoundBuffer::loadAac`에서 설명합니다.
+- 인코딩된 오디오 로더는 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 전체 로드에는 길이 제한이 없습니다. 디코딩된 PCM이 256 MiB를 넘으면 프로세스에서 한 번만 Notice를 기록하며 긴 트랙에는 `SoundStream::loadStream()` / `Sound::loadStream()`을 권장합니다. 인코딩된 입력이 64 MiB를 넘으면 전체를 로드하지 않으며 메모리 할당 실패는 안전하게 Error로 처리합니다.
 - 핸들 조작과 샘플 직접 접근은 메인 스레드에서 순서대로 수행해야 합니다. 동기 로드, 생성, 편집은 오디오 믹서를 잠그지 않으므로 재생 중인 `Sound`가 읽는 버퍼를 변경하지 않아야 합니다.
 '''
 snippet = '''
@@ -28741,20 +28741,17 @@ description.ko = "AAC 또는 M4A 파일을 버퍼로 디코딩한다."
 details.en = '''
 - Returns `LoadResult`; see `SoundBuffer::load` for path resolution, cancellation, and threading rules.
 - On Web, waits for `OfflineAudioContext` decoding to finish even inside `setup()`, with a 30-second timeout, and stores PCM at 44100 Hz.
-- Failure does not uniformly preserve audio data: on macOS/iOS, a read failure after allocation clears `samples` but leaves the assigned channel count, sample rate, and frame count.
-- On Windows, a sample-reading error after successful format setup can still return success with the samples collected so far.
+- On any failure, previous PCM and audio metadata are preserved; no partial sound is published. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Encoded inputs above 64 MiB are not loaded fully; allocation failure is a clean Error.
 '''
 details.ja = '''
 - `LoadResult` を返します。パスの解決、キャンセル、スレッドの扱いは `SoundBuffer::load` を参照してください。
 - Webでは `setup()` 内でも `OfflineAudioContext` によるデコード完了まで待ち、30秒でタイムアウトします。PCMは44100 Hzで保持します。
-- 失敗時に音声データを保持するとは限りません。macOS/iOSでは、領域確保後の読み取りに失敗すると `samples` を空にしますが、設定済みのチャンネル数・サンプルレート・フレーム数は残ります。
-- Windowsでは、形式の設定に成功した後のサンプル読み取りエラーでも、それまでに取得したサンプルで成功を返す場合があります。
+- どの失敗でも以前のPCMと音声メタデータを保持し、部分的な音声を公開しません。全体読み込みには長さの上限はありません。デコード済みPCMが256 MiBを超えると、プロセスで一度だけNoticeを出し、長い曲には `SoundStream::loadStream()` / `Sound::loadStream()` を推奨します。エンコード済み入力が64 MiBを超える場合は全体を読み込まず、メモリ確保の失敗はErrorとして安全に失敗します。
 '''
 details.ko = '''
 - `LoadResult`를 반환합니다. 경로 해석, 취소, 스레드 규칙은 `SoundBuffer::load`를 참조하세요.
 - Web에서는 `setup()` 안에서도 `OfflineAudioContext` 디코딩 완료를 기다리며 30초 후 시간 초과로 처리합니다. PCM은 44100 Hz로 저장합니다.
-- 실패 시 오디오 데이터를 항상 보존하지는 않습니다. macOS/iOS에서는 메모리 할당 후 읽기에 실패하면 `samples`를 비우지만 설정한 채널 수, 샘플레이트, 프레임 수는 유지합니다.
-- Windows에서는 형식 설정에 성공한 뒤 샘플 읽기 오류가 발생해도 그때까지 수집한 샘플로 성공을 반환할 수 있습니다.
+- 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 전체 로드에는 길이 제한이 없습니다. 디코딩된 PCM이 256 MiB를 넘으면 프로세스에서 한 번만 Notice를 기록하며 긴 트랙에는 `SoundStream::loadStream()` / `Sound::loadStream()`을 권장합니다. 인코딩된 입력이 64 MiB를 넘으면 전체를 로드하지 않으며 메모리 할당 실패는 안전하게 Error로 처리합니다.
 '''
 platform_note.en = '''
 - AAC/M4A files loaded through `Sound::load` or this function use AudioToolbox `ExtAudioFile` on macOS/iOS, Media Foundation on Windows, GStreamer on Linux, and Web Audio on Web; Linux output is also fixed at 44100 Hz.
@@ -28779,17 +28776,17 @@ description.ko = "메모리의 AAC 데이터를 디코딩한다."
 details.en = '''
 - `data` points to encoded data and `dataSize` is its size in bytes; decoding completes before returning a `LoadResult`.
 - See `SoundBuffer::loadWavFromMemory` for input lifetime and `SoundBuffer::load` for cancellation and threading rules.
-- AAC failure and partial-read behavior follow the platform differences described in `SoundBuffer::loadAac`.
+- On any failure, previous PCM and audio metadata are preserved; no partial sound is published. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Encoded inputs above 64 MiB are not loaded fully; allocation failure is a clean Error.
 '''
 details.ja = '''
 - `data` はエンコード済みデータへのポインター、`dataSize` はバイト数です。デコードを完了してから `LoadResult` を返します。
 - 入力の有効期間は `SoundBuffer::loadWavFromMemory`、キャンセルとスレッドの扱いは `SoundBuffer::load` を参照してください。
-- AACの失敗時と部分的な読み取り時の動作には、`SoundBuffer::loadAac` で説明しているプラットフォーム差があります。
+- どの失敗でも以前のPCMと音声メタデータを保持し、部分的な音声を公開しません。全体読み込みには長さの上限はありません。デコード済みPCMが256 MiBを超えると、プロセスで一度だけNoticeを出し、長い曲には `SoundStream::loadStream()` / `Sound::loadStream()` を推奨します。エンコード済み入力が64 MiBを超える場合は全体を読み込まず、メモリ確保の失敗はErrorとして安全に失敗します。
 '''
 details.ko = '''
 - `data`는 인코딩된 데이터의 포인터이고 `dataSize`는 바이트 수입니다. 디코딩을 완료한 뒤 `LoadResult`를 반환합니다.
 - 입력의 유효 기간은 `SoundBuffer::loadWavFromMemory`를, 취소 및 스레드 규칙은 `SoundBuffer::load`를 참조하세요.
-- AAC의 실패 및 부분 읽기 동작에는 `SoundBuffer::loadAac`에서 설명한 플랫폼 차이가 적용됩니다.
+- 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 전체 로드에는 길이 제한이 없습니다. 디코딩된 PCM이 256 MiB를 넘으면 프로세스에서 한 번만 Notice를 기록하며 긴 트랙에는 `SoundStream::loadStream()` / `Sound::loadStream()`을 권장합니다. 인코딩된 입력이 64 MiB를 넘으면 전체를 로드하지 않으며 메모리 할당 실패는 안전하게 Error로 처리합니다.
 '''
 platform_note.en = '''
 - Implemented with AudioToolbox on macOS/iOS, Media Foundation on Windows, and GStreamer on Linux.
@@ -61476,7 +61473,7 @@ description.ko = "디코딩된 오디오 데이터의 비동기 로드를 시작
 details.en = '''
 - `loadAsync(path)` returns no result directly and uses the same path resolution, format selection, errors, and decoder logs as `SoundBuffer::load`. Native builds prepare private PCM and metadata on a worker; existing committed data remains readable until the result is applied.
 - Results are applied on the main thread in a later frame, never during this call. Each frame or headless loop pass takes one batch of pending completions; work queued during that pass waits for another pass. After application, `isLoading()` becomes `false` before one `onLoad` event delivers the `LoadResult`.
-- A successful replacement of PCM and metadata holds the audio mixer lock, including when the buffer is playing. Failure reproduces the synchronous loader's field changes, including clearing the recorded path; ordinary failures preserve existing PCM and metadata.
+- A successful replacement of PCM and metadata holds the audio mixer lock, including when the buffer is playing. On any failure, previous PCM and audio metadata are preserved and no partial sound is published; the recorded path is cleared as with synchronous loads.
 - A new request, even for the same path, cancels pending delivery. Synchronous loading, waveform generation, `applyADSR`, `mixFrom`, and `clip` also cancel it. Cancellation does not wait, emit an event, or log a diagnostic; decoding already underway may finish privately, retain its ordinary logs, and temporarily overlap a replacement.
 - Serialize handle operations, access, copying, moving, and destruction on the main thread. Direct sample access and copy/move operations still require synchronization with audio playback.
 - Copy construction copies committed data into an idle buffer with no listeners and leaves the source request running. Assignment between different buffers cancels the destination request and retains its listeners; move construction and move assignment also cancel the source request and transfer committed data while listeners remain with their original handles.
@@ -61487,7 +61484,7 @@ details.en = '''
 details.ja = '''
 - `loadAsync(path)` は結果を直接返さず、パスの解決、形式の選択、エラー、デコーダーのログは `SoundBuffer::load` と同じです。ネイティブではワーカーが専用の PCM とメタデータを準備し、結果が反映されるまでは確定済みのデータを参照できます。
 - 結果は後のフレームのメインスレッドで反映され、この呼び出し中には反映されません。各フレームまたはヘッドレスのループ処理では、保留中の完了処理を一括で取り出し、その処理中に追加された分は次回に回します。反映後に `isLoading()` が `false` になり、続いて `onLoad` が `LoadResult` を一度通知します。
-- 成功時の PCM とメタデータの置き換えは、再生中のバッファでもオーディオミキサーのロックを保持して行います。失敗時は同期読み込みと同じフィールド変更を反映し、記録されたパスも消去します。通常の失敗では既存の PCM とメタデータを保持します。
+- 成功時の PCM とメタデータの置き換えは、再生中のバッファでもオーディオミキサーのロックを保持して行います。どの失敗でも以前の PCM と音声メタデータを保持し、部分的な音声を公開しません。記録されたパスは同期読み込みと同様に消去します。
 - 同じパスでも、新しい要求は保留中の反映と通知を取り消します。同期読み込み、波形生成、`applyADSR`、`mixFrom`、`clip` も取り消します。取り消しは待機せず、イベントも診断ログも出しません。開始済みのデコードは専用データで終了することがあり、通常のログを出したり、新しいデコードと一時的に並行したりする場合があります。
 - ハンドルの操作、参照、コピー、移動、破棄はメインスレッドで直列に行ってください。サンプルへの直接アクセスとコピー・移動には、引き続き音声再生との同期が必要です。
 - コピー構築では確定済みのデータをコピーし、新しいバッファはリスナーのない待機状態になります。コピー元の読み込みは継続します。異なるバッファ間の代入は代入先の要求を取り消し、代入先のリスナーを保持します。移動構築と移動代入では移動元の要求も取り消し、確定済みのデータを移しますが、リスナーは元のハンドルに残ります。
@@ -61498,7 +61495,7 @@ details.ja = '''
 details.ko = '''
 - `loadAsync(path)`는 결과를 직접 반환하지 않으며 경로 해석, 형식 선택, 오류, 디코더 로그는 `SoundBuffer::load`와 같습니다. 네이티브 빌드에서는 워커가 별도의 PCM과 메타데이터를 준비하며, 결과가 반영될 때까지 기존에 확정된 데이터를 읽을 수 있습니다.
 - 결과는 이후 프레임의 메인 스레드에서 반영되며 이 호출 중에는 반영되지 않습니다. 각 프레임 또는 헤드리스 루프 실행은 대기 중인 완료 처리를 한 번에 가져오며, 처리 중 추가된 작업은 다음 실행까지 기다립니다. 반영 후 `isLoading()`이 `false`가 되고 이어서 `onLoad`가 `LoadResult`를 한 번 전달합니다.
-- 성공 시 PCM과 메타데이터를 교체할 때는 재생 중인 버퍼도 오디오 믹서 잠금을 유지합니다. 실패 시에는 기록된 경로 삭제를 포함하여 동기 로더와 같은 필드 변경을 반영합니다. 일반적인 실패는 기존 PCM과 메타데이터를 유지합니다.
+- 성공 시 PCM과 메타데이터를 교체할 때는 재생 중인 버퍼도 오디오 믹서 잠금을 유지합니다. 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 기록된 경로는 동기 로드와 같이 비웁니다.
 - 같은 경로라도 새 요청은 대기 중인 반영과 알림을 취소합니다. 동기 로드, 파형 생성, `applyADSR`, `mixFrom`, `clip`도 이를 취소합니다. 취소는 기다리지 않으며 이벤트나 진단 로그를 남기지 않습니다. 이미 시작된 디코딩은 별도 데이터로 끝날 수 있으며 일반 로그를 남기거나 새 디코딩과 일시적으로 겹칠 수 있습니다.
 - 핸들 조작, 접근, 복사, 이동, 파괴는 메인 스레드에서 순차적으로 수행해야 합니다. 샘플에 대한 직접 접근과 복사·이동 작업에는 여전히 오디오 재생과의 동기화가 필요합니다.
 - 복사 생성은 확정된 데이터를 복사하여 리스너가 없는 유휴 버퍼를 만들며 원본의 로드는 계속됩니다. 서로 다른 버퍼 간 대입은 대상 요청을 취소하고 대상 리스너를 유지합니다. 이동 생성과 이동 대입은 원본 요청도 취소하고 확정된 데이터를 옮기지만 리스너는 원래 핸들에 남습니다.

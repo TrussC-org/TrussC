@@ -11,7 +11,7 @@ and contributors, under the stb dual license (MIT or Public Domain, see
 | `stb_image_write.h` | v1.16 | [nothings/stb](https://github.com/nothings/stb), `master` | `1ee679ca2ef753a528db5ba6801e1067b40481b8` (2021-07-11) | 2025-12-16 | 1 |
 | `stb_perlin.h` | v0.5 | [nothings/stb](https://github.com/nothings/stb), `master` | `2bb4a0accd4003c1db4c24533981e01b1adfd656` (2020-02-02) | 2025-12-16 | none |
 | `stb_truetype.h` | v1.26 | [nothings/stb](https://github.com/nothings/stb), `master` | `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (2024-07-15) | 2025-12-16 | 4 |
-| `../stb_vorbis.c` | v1.22 | [sezero/stb](https://github.com/sezero/stb), branch `stb_vorbis-sezero` | `dd0c5eccaf092012b531d69d595fb587ece79571` (2026-07-13) | 2026-09-30 | none |
+| `../stb_vorbis.c` | v1.22 | [sezero/stb](https://github.com/sezero/stb), branch `stb_vorbis-sezero` | `dd0c5eccaf092012b531d69d595fb587ece79571` (2026-07-13) | 2026-09-30 | 2 |
 
 `stb_vorbis.c` lives one level up, in `core/include/`, because
 `core/include/tc/sound/tcSound_impl.cpp` includes it as `"stb_vorbis.c"`.
@@ -148,11 +148,33 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
   as upstream.
 - **Before 2026-09-30**: unmodified upstream nothings/stb v1.22,
   `1ee679ca2ef753a528db5ba6801e1067b40481b8` (2021-07-11).
-- **TrussC patches**: none.
-- **Covered by**: `core/tests/mediaDecode` (file and memory decode) and
-  `core/tests/audioDiagnostics` (a failed `stb_vorbis_open_file` with
-  `close_on_free` closes the `FILE` once; `SoundBuffer::loadOgg` relies on
-  that).
+- **TrussC patches** (2; search for `STB_VORBIS_VALIDATE_FORMAT` and
+  `TrussC patch` in
+  `../stb_vorbis.c`): opt-in `STB_VORBIS_VALIDATE_FORMAT(channels, rate)`
+  checks the identification header before setup/codebook work. Rejection takes
+  the existing invalid-header error path. `tcSound_impl.cpp` supplies the hook
+  in a scoped per-load format checker, then undefines it. Without the macro,
+  format handling retains its upstream default.
+  The second patch makes `STB_VORBIS_NO_COMMENTS` consume vendor/user strings
+  without allocating them, checking each length byte and string byte against
+  packet/input end. TrussC defines this existing opt-out macro because it does
+  not use comment metadata. The normal comments-enabled configuration is
+  unchanged. Truncated comments fail through the existing invalid-setup path.
+  The earlier setup allocator hooks were removed with the full-load PCM quota;
+  upstream malloc/free still handles codec setup and decoded PCM.
+  SoundBuffer file loads use the bounded encoded-memory reader.
+- **Re-apply on update**: restore identification-header validation before any
+  format-driven setup, and keep the hook definition/scope in `tcSound_impl.cpp`.
+  Restore the checked no-comments parsing path and its macro in the wrapper.
+  Run `audioDecodeBounds`: `Vorbis source format is checked before setup` fails
+  if the format hook is lost. `Vorbis comment length cannot request large raw
+  malloc` observes raw malloc on Linux (standalone and combined harnesses use
+  `--wrap=malloc`); 1 GiB vendor/user claims must fail with small requests and
+  unchanged PCM/metadata. A generated valid comment packet still loads through
+  file and memory entry points. Also run full-load growth, direct PCM malloc/free and
+  file ownership checks in the harnesses below.
+- **Covered by**: `core/tests/mediaDecode`, `core/tests/audioDiagnostics`
+  (file ownership and decoder growth), and `core/tests/audioDecodeBounds`.
 
 ## Updating
 
