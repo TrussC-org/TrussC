@@ -17,6 +17,7 @@
 #define STBIW_WINDOWS_UTF8
 
 #include "tcMcpImageAdmission.h"
+#include "tcImageDecode.h"
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -38,8 +39,13 @@ ImageAllocationScope::~ImageAllocationScope() {
     imageAllocationScope = previous_;
 }
 void* mcpImageMalloc(size_t size) {
+    if (!trussc::internal::imageDecodeAllocationAllowed(size)) return nullptr;
     auto* scope = imageAllocationScope;
-    if (!scope) return std::malloc(size);
+    if (!scope) {
+        auto* result = std::malloc(size);
+        if (!result) trussc::internal::imageDecodeAllocationFailed();
+        return result;
+    }
     // Bound (abi): codec allocation headers must fit size_t. Overflow returns null and is counted.
     if (size > SIZE_MAX - sizeof(ImageAllocation)) { scope->needed_ = SIZE_MAX; return nullptr; }
     const auto total = size + sizeof(ImageAllocation);
@@ -50,7 +56,7 @@ void* mcpImageMalloc(size_t size) {
         return nullptr;
     }
     auto* block = static_cast<ImageAllocation*>(std::malloc(total));
-    if (!block) return nullptr;
+    if (!block) { trussc::internal::imageDecodeAllocationFailed(); return nullptr; }
     block->owner = scope;
     block->size = size;
     block->previous = nullptr;
@@ -73,7 +79,12 @@ void mcpImageFree(void* pointer) {
     std::free(block);
 }
 void* mcpImageRealloc(void* pointer, size_t size) {
-    if (!imageAllocationScope) return std::realloc(pointer, size);
+    if (!imageAllocationScope) {
+        if (!trussc::internal::imageDecodeAllocationAllowed(size)) return nullptr;
+        auto* result = std::realloc(pointer, size);
+        if (!result && size) trussc::internal::imageDecodeAllocationFailed();
+        return result;
+    }
     if (!pointer) return mcpImageMalloc(size);
     if (!size) { mcpImageFree(pointer); return nullptr; }
     const auto previousSize = (static_cast<ImageAllocation*>(pointer) - 1)->size;

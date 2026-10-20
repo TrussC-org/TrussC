@@ -1,22 +1,17 @@
 // =============================================================================
-// tcPixels_mac.mm - Platform-specific image loader using ImageIO
-// Supports HEIC/HEIF, TIFF, JPEG 2000, and any format the OS can decode.
-// Built on macOS and iOS (core/CMakeLists.txt adds it to the iOS sources).
+// ImageIO fallback shared by macOS and iOS; keeps HEIC/HEIF, TIFF and JPEG 2000.
 // =============================================================================
-
 #include "TrussC.h"
+#include "impl/tcImageDecode.h"
 #include "impl/tcMcpImageAdmission.h"
 #include <climits>
 
 #if defined(__APPLE__)
-
 #import <ImageIO/ImageIO.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
 
 namespace trussc {
-
-namespace mcp::internal {
 namespace {
 template<class T> struct ImageRef {
     T value;
@@ -25,26 +20,31 @@ template<class T> struct ImageRef {
     ImageRef(const ImageRef&) = delete;
     ImageRef& operator=(const ImageRef&) = delete;
 };
-}
 
-bool loadMcpPlatformImage(Pixels& pixels, const unsigned char* encoded, size_t length) {
+LoadResult decodeImageIO(Pixels& pixels, const unsigned char* encoded, size_t length, bool mcpAdmission) {
+    auto admitted = internal::admitImageEncodedSize(length);
+    if (!admitted) return admitted;
+    if (!encoded || !length) return LoadResult::fail(LoadError::DecodeFailed, "empty ImageIO input");
     @autoreleasepool {
-        // Borrow the already admitted immutable snapshot, never reopen the path.
         ImageRef<CFDataRef> data(CFDataCreateWithBytesNoCopy(kCFAllocatorDefault,
             encoded, CFIndex(length), kCFAllocatorNull));
-        if (!data.value) return false;
+        if (!data.value) return internal::imageDecodeOutOfMemory();
         const void* keys[] = {kCGImageSourceShouldCache, kCGImageSourceShouldAllowFloat};
         const void* values[] = {kCFBooleanFalse, kCFBooleanFalse};
         ImageRef<CFDictionaryRef> options(CFDictionaryCreate(kCFAllocatorDefault,
             keys, values, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
-        if (!options.value) return false;
+        if (!options.value) return internal::imageDecodeOutOfMemory();
         ImageRef<CGImageSourceRef> source(CGImageSourceCreateWithData(data.value, options.value));
-        if (!source.value) return false;
-        // ImageIO reports pixel dimensions without decoding; caching is disabled
-        // for both metadata and image creation. This path is shared by macOS/iOS.
+        if (!source.value) {
+            try { getLogger().log(LogLevel::Error, "[Pixels] ImageIO source creation failed (unsupported data or allocation)"); } catch (...) {}
+            return LoadResult::fail(LoadError::DecodeFailed, "ImageIO rejected image source");
+        }
+        // Metadata only, before CGImage creation; disable eager caching.
         ImageRef<CFDictionaryRef> properties(CGImageSourceCopyPropertiesAtIndex(source.value, 0, options.value));
-        if (!properties.value)
-            throw std::runtime_error("ImageIO cannot report image size before decoding on this platform");
+        if (!properties.value) {
+            try { getLogger().log(LogLevel::Error, "[Pixels] ImageIO metadata creation failed (decode or allocation)"); } catch (...) {}
+            return LoadResult::fail(LoadError::DecodeFailed, "ImageIO cannot report image size");
+        }
         auto number = [&](CFStringRef key, int64_t fallback) {
             auto value = CFDictionaryGetValue(properties.value, key);
             int64_t result = fallback;
@@ -56,100 +56,85 @@ bool loadMcpPlatformImage(Pixels& pixels, const unsigned char* encoded, size_t l
         const auto w = number(kCGImagePropertyPixelWidth, -1);
         const auto h = number(kCGImagePropertyPixelHeight, -1);
         const auto depth = number(kCGImagePropertyDepth, 32);
-        if (w <= 0 || h <= 0 || depth <= 0)
-            throw std::runtime_error("ImageIO cannot report image size before decoding on this platform");
-        checkAdmission(uint64_t(w), INT_MAX, AdmissionStore::Working);
-        checkAdmission(uint64_t(h), INT_MAX, AdmissionStore::Working);
-        // Bound (security): ImageIO samples are capped at 128 bits to bound decoded workspace; larger metadata rejects before decoding and increments the working counter.
-        checkAdmission(uint64_t(depth), 128, AdmissionStore::Working);
+        admitted = internal::admitImageDimensions(w, h, 4, 1);
+        if (!admitted) return admitted;
+        if (depth <= 0) return LoadResult::fail(LoadError::DecodeFailed, "invalid ImageIO sample depth");
         const auto model = CFDictionaryGetValue(properties.value, kCGImagePropertyColorModel);
         const size_t colorChannels = model && CFEqual(model, kCGImagePropertyColorModelGray) ? 1 :
             model && (CFEqual(model, kCGImagePropertyColorModelRGB) || CFEqual(model, kCGImagePropertyColorModelLab)) ? 3 : 4;
         const auto alpha = CFDictionaryGetValue(properties.value, kCGImagePropertyHasAlpha);
         const size_t sourceChannels = colorChannels + (alpha && CFEqual(alpha, kCFBooleanTrue) ? 1 : 0);
-        // Count source color/alpha channels and the four-channel RGBA output.
-        // ImageIO exposes no codec workspace size or allocator hook: admit a
-        // conservative block-padded estimate before calling the decoder.
-        reserveImageDecode(int(w), int(h), std::max<size_t>(4, sourceChannels) * ((size_t(depth) + 7) / 8));
+        const uint64_t sampleBytes = uint64_t(depth) / 8 + (uint64_t(depth) % 8 != 0);
+        if (sampleBytes > SIZE_MAX) return internal::rejectImageDecode(LoadError::TooLarge, "ImageIO sample size exceeds size_t capacity");
+        admitted = internal::admitImageDimensions(w, h, sourceChannels, size_t(sampleBytes));
+        if (!admitted) return admitted;
+        if (mcpAdmission) {
+            // Preserve the existing, stricter MCP request-owner workspace policy.
+            // Bound (security): MCP ImageIO samples fit its admitted workspace. Overflow rejects the whole image and is counted by MCP.
+            mcp::internal::checkAdmission(uint64_t(depth), 128, mcp::internal::AdmissionStore::Working);
+            mcp::internal::reserveImageDecode(int(w), int(h), std::max<size_t>(4, sourceChannels) * size_t(sampleBytes));
+        }
+        // ImageIO does not expose its internal codec allocator or workspace size.
         ImageRef<CGImageRef> image(CGImageSourceCreateImageAtIndex(source.value, 0, options.value));
-        if (!image.value || CGImageGetWidth(image.value) != size_t(w) ||
-            CGImageGetHeight(image.value) != size_t(h)) return false;
+        if (!image.value) {
+            try { getLogger().log(LogLevel::Error, "[Pixels] ImageIO image creation failed (decode or allocation)"); } catch (...) {}
+            return LoadResult::fail(LoadError::DecodeFailed, "ImageIO image creation failed");
+        }
+        const size_t actualW = CGImageGetWidth(image.value), actualH = CGImageGetHeight(image.value);
+        if (actualW != size_t(w) || actualH != size_t(h))
+            return LoadResult::fail(LoadError::DecodeFailed, "ImageIO dimensions changed during decode");
+        const size_t rowBytes = CGImageGetBytesPerRow(image.value);
+        const size_t bitsPerPixel = CGImageGetBitsPerPixel(image.value);
+        // Bound (abi): SDK row strides and packed pixel products must fit size_t before any copy. Overflow rejects the whole image and is reported by LoadResult.
+        if (!bitsPerPixel) return LoadResult::fail(LoadError::DecodeFailed, "invalid ImageIO pixel depth");
+        if (actualW > (SIZE_MAX - 7) / bitsPerPixel || rowBytes > SIZE_MAX / actualH)
+            return internal::rejectImageDecode(LoadError::TooLarge,
+                ("ImageIO pixel store " + std::to_string(actualW) + "x" + std::to_string(actualH) +
+                 ", row bytes " + std::to_string(rowBytes) + ", bits per pixel " + std::to_string(bitsPerPixel) +
+                 " exceeds size_t capacity " + std::to_string(SIZE_MAX)).c_str());
+        if (rowBytes < (actualW * bitsPerPixel + 7) / 8)
+            return LoadResult::fail(LoadError::DecodeFailed, "invalid ImageIO row stride");
         Pixels result;
-        result.allocate(int(w), int(h), 4);
+        internal::ImageDecodeAllocationScope allocation;
+        if (!internal::ImageLoadAccess::allocate(result, int(w), int(h))) return internal::imageDecodeOutOfMemory();
         ImageRef<CGColorSpaceRef> color(CGColorSpaceCreateDeviceRGB());
-        if (!color.value) return false;
-        ImageRef<CGContextRef> context(CGBitmapContextCreate(result.getData(), size_t(w), size_t(h),
-            8, size_t(w) * 4, color.value,
+        if (!color.value) return internal::imageDecodeOutOfMemory();
+        ImageRef<CGContextRef> context(CGBitmapContextCreate(result.getData(), actualW, actualH,
+            8, actualW * 4, color.value,
             (CGBitmapInfo)kCGImageAlphaNoneSkipLast | kCGBitmapByteOrder32Big));
-        if (!context.value) return false;
+        if (!context.value) return internal::imageDecodeOutOfMemory();
         CGContextDrawImage(context.value, CGRectMake(0, 0, w, h), image.value);
-        for (size_t i = 3, count = size_t(w) * size_t(h) * 4; i < count; i += 4)
-            result.getData()[i] = 255;
+        for (size_t i = 3, count = result.getTotalBytes(); i < count; i += 4) result.getData()[i] = 255;
         pixels = std::move(result);
-        return true;
+        return LoadResult::success();
     }
 }
-} // namespace mcp::internal
+} // namespace
 
+LoadResult internal::decodePlatformImage(Pixels& pixels, const unsigned char* bytes, size_t length) {
+    try { return decodeImageIO(pixels, bytes, length, false); }
+    catch (const std::bad_alloc&) { return imageDecodeOutOfMemory(); }
+}
+bool mcp::internal::loadMcpPlatformImage(Pixels& pixels, const unsigned char* encoded, size_t length) {
+    try {
+        const auto result = decodeImageIO(pixels, encoded, length, true);
+        return bool(result);
+    } catch (const std::bad_alloc&) {
+        trussc::internal::imageDecodeOutOfMemory();
+        return false;
+    }
+}
 bool Pixels::loadPlatform(const fs::path& filePath) {
-    const auto path = internal::resolveLoadPath(filePath);
-    if (!internal::checkLoadFile(path, "Pixels")) return false;
-    @autoreleasepool {
-        NSString* nsPath = [NSString stringWithUTF8String:internal::pathToUtf8(path).c_str()];
-        NSURL* url = [NSURL fileURLWithPath:nsPath];
-
-        // Create image source
-        CGImageSourceRef source = CGImageSourceCreateWithURL((__bridge CFURLRef)url, nullptr);
-        if (!source) return false;
-
-        // Create CGImage
-        CGImageRef cgImage = CGImageSourceCreateImageAtIndex(source, 0, nullptr);
-        CFRelease(source);
-        if (!cgImage) return false;
-
-        int w = (int)CGImageGetWidth(cgImage);
-        int h = (int)CGImageGetHeight(cgImage);
-        int channels = 4; // Always RGBA
-
-        size_t size = (size_t)w * h * channels;
-        auto* pixels = new unsigned char[size];
-
-        // Draw into RGBA bitmap context
-        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-        CGContextRef ctx = CGBitmapContextCreate(
-            pixels, w, h, 8, w * channels, colorSpace,
-            (CGBitmapInfo)kCGImageAlphaNoneSkipLast | kCGBitmapByteOrder32Big
-        );
-        CGColorSpaceRelease(colorSpace);
-
-        if (!ctx) {
-            delete[] pixels;
-            CGImageRelease(cgImage);
-            return false;
-        }
-
-        CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), cgImage);
-        CGContextRelease(ctx);
-        CGImageRelease(cgImage);
-
-        // Fill alpha channel to 0xFF (kCGImageAlphaNoneSkipLast leaves it undefined)
-        for (size_t i = 3; i < size; i += 4) {
-            pixels[i] = 0xFF;
-        }
-
-        // Assign to Pixels members
-        clear();
-        width_ = w;
-        height_ = h;
-        channels_ = channels;
-        format_ = PixelFormat::U8;
-        data_ = pixels;
-        allocated_ = true;
-
-        return true;
+    try {
+        std::unique_ptr<unsigned char[]> bytes;
+        size_t length = 0;
+        auto result = internal::readEncodedImage(internal::resolveLoadPath(filePath), bytes, length);
+        if (result) result = internal::decodePlatformImage(*this, bytes.get(), length);
+        return bool(result);
+    } catch (const std::bad_alloc&) {
+        internal::imageDecodeOutOfMemory();
+        return false;
     }
 }
-
 } // namespace trussc
-
 #endif

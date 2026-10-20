@@ -1,4 +1,5 @@
 #include <TrussC.h>
+#include "impl/tcImageDecode.h"
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
 #include <condition_variable>
@@ -345,11 +346,13 @@ void parity() {
     for (const fs::path& path : {png, broken, fixtureDir / "missing.png"}) {
         Image sync, async; sync.load(png); async.load(png);
         LoadResult expected, actual;
+        const auto rejectedBefore = internal::imageDecodeRejectionsForTests();
         vector<string> syncLogs;
         { Logs logs; expected = sync.load(path, true); syncLogs = logs.lines; }
         auto listener = async.onLoad.listen([&](LoadResult& r) { actual = r; });
         vector<string> asyncLogs;
         { Logs logs; async.loadAsync(path, true); finish(); asyncLogs = logs.lines; }
+        check("ordinary Image loads have zero bound rejections", internal::imageDecodeRejectionsForTests() == rejectedBefore);
         check("Image sync/async result, logs and populated failure parity", sameResult(expected, actual) && syncLogs == asyncLogs &&
               sync.getWidth() == async.getWidth() && sync.getHeight() == async.getHeight() && sync.isAllocated() == async.isAllocated());
     }
