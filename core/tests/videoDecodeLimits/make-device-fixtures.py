@@ -38,6 +38,8 @@ def main():
     (args.output / 'changed.h264').write_bytes(
         (args.output / 'first.h264').read_bytes() + (args.output / 'second.h264').read_bytes())
     run('-r', 25, '-i', 'changed.h264', '-c:v', 'copy', '-tag:v', 'avc3', 'changed.mp4')
+    # AVFoundation has no avc3 decoder: macOS/iOS use the same bitstream tagged avc1.
+    run('-r', 25, '-i', 'changed.h264', '-c:v', 'copy', '-tag:v', 'avc1', 'changed-avc1.mp4')
     run('-f', 'lavfi', '-i', 'sine=frequency=997:sample_rate=48000', '-t', 2,
         '-c:a', 'aac', '-b:a', '192k', '-ac', 2, 'audio-seed.aac')
     for label, size in [('below', 63 * 1024 * 1024), ('above', 65 * 1024 * 1024)]:
