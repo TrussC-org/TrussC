@@ -46,7 +46,7 @@ This is the one list of third-party code in TrussC and the version the build use
 | Library | Version | Pinned / vendored in | Upstream | License | Author/Organization |
 |---------|---------|----------------------|----------|---------|---------------------|
 | **sokol** | commit `082152c` (+ TrussC patches, see [TRUSSC_MODIFICATIONS.md](../core/include/sokol/TRUSSC_MODIFICATIONS.md)) | `core/include/sokol/` | https://github.com/floooh/sokol | zlib License | Andre Weissflog |
-| **stb_image** | 2.30, commit `1cafe0e` (fork, branch `nv/all-fixes`, + 2 TrussC patches, see [stb/README.md](../core/include/stb/README.md)) | `core/include/stb/stb_image.h` | https://github.com/nvpro-samples/stb | Public Domain or MIT | Sean Barrett |
+| **stb_image** | 2.30, commit `1cafe0e` (fork, branch `nv/all-fixes`, + 4 TrussC patches, see [stb/README.md](../core/include/stb/README.md)) | `core/include/stb/stb_image.h` | https://github.com/nvpro-samples/stb | Public Domain or MIT | Sean Barrett |
 | **stb_image_write** | 1.16, commit `1ee679c` (+ 1 TrussC patch) | `core/include/stb/stb_image_write.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
 | **stb_perlin** | 0.5, commit `2bb4a0a` | `core/include/stb/stb_perlin.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
 | **stb_truetype** | 1.26, commit `6e9f34d` (+ 3 TrussC patches) | `core/include/stb/stb_truetype.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |

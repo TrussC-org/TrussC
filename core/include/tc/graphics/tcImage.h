@@ -1,6 +1,7 @@
 #pragma once
 #include "tc/utils/tcDebugName.h"
 #include "tc/utils/tcResourceLoad.h"
+#include "impl/tcImageDecode.h"
 
 // =============================================================================
 // tcImage.h - Image loading, drawing, and saving
@@ -83,7 +84,7 @@ public:
     // onto a 3D surface that moves toward/away from the camera) — without
     // mipmaps, small projected sizes shimmer/moiré. Costs about +33% GPU
     // memory and a one-time CPU box-average to build the chain.
-    LoadResult load(const fs::path& path, bool mipmaps = false) {
+    LoadResult load(const fs::path& path, bool mipmaps = false) try {
         clear();
 
         LoadResult r = pixels_.load(path);
@@ -92,6 +93,9 @@ public:
         }
 
         return finishLoad(path, mipmaps);
+    } catch (const std::bad_alloc&) {
+        clear();
+        return internal::imageDecodeOutOfMemory();
     }
 
     // Prepare pixels on a worker; apply and notify on main at a later frame.
@@ -123,7 +127,7 @@ public:
     bool isLoading() const { return async_.loading(); }
 
     // Load image from memory
-    LoadResult loadFromMemory(const unsigned char* buffer, int len, bool mipmaps = false) {
+    LoadResult loadFromMemory(const unsigned char* buffer, int len, bool mipmaps = false) try {
         clear();
 
         LoadResult r = pixels_.loadFromMemory(buffer, len);
@@ -140,12 +144,18 @@ public:
         }
         mipmaps_ = mipmaps;
         usage_ = TextureUsage::Immutable;
-        texture_.allocate(pixels_, TextureUsage::Immutable, mipmaps);
+        if (!texture_.allocateImageLoad(pixels_, mipmaps)) {
+            clearCommitted();
+            return internal::imageDecodeOutOfMemory();
+        }
         if (sg_isvalid() && !texture_.isAllocated()) {
             clear();
             return LoadResult::fail(LoadError::Unknown, "image texture upload failed");
         }
         return LoadResult::success();
+    } catch (const std::bad_alloc&) {
+        clear();
+        return internal::imageDecodeOutOfMemory();
     }
 
     // Save image (override of HasTexture::save())
@@ -283,14 +293,14 @@ public:
 
 private:
     internal::ResourceLoadSlot<AsyncState> async_;
-    void clearCommitted() {
+    void clearCommitted() noexcept {
         pixels_.clear();
         texture_.clear();
         dirty_ = false;
         mipmaps_ = false;
         usage_ = TextureUsage::Immutable;
     }
-    LoadResult finishLoad(const fs::path& path, bool mipmaps) {
+    LoadResult finishLoad(const fs::path& path, bool mipmaps) try {
         auto result = internal::checkImageSize(pixels_.getWidth(), pixels_.getHeight());
         if (!result) {
             logError("Image") << result.message << " (" << pixels_.getWidth()
@@ -301,12 +311,18 @@ private:
         }
         mipmaps_ = mipmaps;
         usage_ = TextureUsage::Immutable;
-        texture_.allocate(pixels_, TextureUsage::Immutable, mipmaps);
+        if (!texture_.allocateImageLoad(pixels_, mipmaps)) {
+            clearCommitted();
+            return internal::imageDecodeOutOfMemory();
+        }
         if (sg_isvalid() && !texture_.isAllocated()) {
             clearCommitted();
             return LoadResult::fail(LoadError::Unknown, "image texture upload failed");
         }
         return LoadResult::success();
+    } catch (const std::bad_alloc&) {
+        clear();
+        return internal::imageDecodeOutOfMemory();
     }
     internal::DebugName debugName_{internal::DebugObjectKind::Image, this};
     // Re-allocate the GPU texture from the current pixels_ contents using the

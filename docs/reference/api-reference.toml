@@ -8478,26 +8478,26 @@ description.ko = "리소스 로드 오류의 종류를 나타낸다."
 details.en = '''
 - This scoped enum contains `None`, `FileNotFound`, `UnsupportedFormat`, `DecodeFailed`, `Unknown`, `TooLarge`, and `Cancelled`; `None` has value `0` and means success.
 - `FileNotFound` covers missing files or files that could not be opened; `UnsupportedFormat` identifies an unsupported extension or container, and `DecodeFailed` identifies data rejected by the decoder.
-- `TooLarge` identifies image dimensions exceeding the GPU texture limit; CPU-only `Pixels` are not subject to that limit. `Cancelled` identifies cancellation, and `Unknown` covers failures without a more specific classification.
+- `TooLarge` identifies an image dimension or encoded-input size limit, including CPU-only `Pixels`. Image dimensions use the recorded GPU texture limit, or 16384 per axis when unknown; encoded inputs are limited to 64 MiB. `Cancelled` identifies cancellation, and `Unknown` covers failures without a more specific classification.
 '''
 details.ja = '''
 - スコープ付き列挙型で、`None`、`FileNotFound`、`UnsupportedFormat`、`DecodeFailed`、`Unknown`、`TooLarge`、`Cancelled` があります。`None` の値は `0` で、成功を表します。
 - `FileNotFound` はファイルが存在しない場合や開けない場合、`UnsupportedFormat` は未対応の拡張子やコンテナー、`DecodeFailed` はデコーダーがデータを読み取れなかった場合を表します。
-- `TooLarge` は画像サイズが GPU テクスチャ上限を超えた場合を表します。CPU 上だけで扱う `Pixels` にはこの上限を適用しません。`Cancelled` はキャンセル、`Unknown` はより具体的に分類できない失敗を表します。
+- `TooLarge` は、CPU 上の `Pixels` を含め、画像の寸法または符号化済み入力サイズの上限超過を表します。寸法は記録済みの GPU テクスチャ上限、不明な場合は各軸 16384 ピクセル、符号化済み入力は 64 MiB が上限です。`Cancelled` はキャンセル、`Unknown` はより具体的に分類できない失敗を表します。
 '''
 details.ko = '''
 - 범위가 지정된 열거형으로 `None`, `FileNotFound`, `UnsupportedFormat`, `DecodeFailed`, `Unknown`, `TooLarge`, `Cancelled`가 있습니다. `None`의 값은 `0`이며 성공을 나타냅니다.
 - `FileNotFound`는 파일이 없거나 열 수 없는 경우, `UnsupportedFormat`은 지원하지 않는 확장자나 컨테이너, `DecodeFailed`는 디코더가 데이터를 읽지 못한 경우를 나타냅니다.
-- `TooLarge`는 이미지 크기가 GPU 텍스처 한도를 초과한 경우를 나타냅니다. CPU에서만 처리하는 `Pixels`에는 이 한도를 적용하지 않습니다. `Cancelled`는 취소를, `Unknown`은 더 구체적으로 분류할 수 없는 실패를 나타냅니다.
+- `TooLarge`는 CPU 전용 `Pixels`를 포함하여 이미지 크기나 인코딩된 입력 크기 한도를 초과한 경우를 나타냅니다. 이미지 크기는 기록된 GPU 텍스처 한도, 알 수 없으면 축당 16384픽셀을 사용하며 인코딩된 입력은 64 MiB로 제한됩니다. `Cancelled`는 취소를, `Unknown`은 더 구체적으로 분류할 수 없는 실패를 나타냅니다.
 '''
 related = ["LoadResult"]
 value_desc.None.en = "Success (no error)"
 value_desc.FileNotFound.en = "The (resolved) path does not exist or could not be opened"
 value_desc.UnsupportedFormat.en = "Extension / container not supported on this platform"
 value_desc.DecodeFailed.en = "The decoder rejected the data (corrupt, truncated, wrong codec)"
-value_desc.TooLarge.en = "Image dimensions exceed the GPU texture limit (CPU Pixels are not limited)"
-value_desc.TooLarge.ja = "画像サイズが GPU テクスチャ上限を超える（CPU の Pixels には適用しない）"
-value_desc.TooLarge.ko = "이미지 크기가 GPU 텍스처 한도를 초과함 (CPU Pixels에는 적용하지 않음)"
+value_desc.TooLarge.en = "Image dimensions or encoded input exceed the load limit"
+value_desc.TooLarge.ja = "画像の寸法または符号化済み入力が読み込み上限を超える"
+value_desc.TooLarge.ko = "이미지 크기나 인코딩된 입력이 로드 한도를 초과함"
 value_desc.Cancelled.en = "Loading was cancelled"
 value_desc.Cancelled.ja = "読み込みがキャンセルされた"
 value_desc.Cancelled.ko = "로드가 취소됨"
@@ -11453,6 +11453,7 @@ description.en = "Loads an image from a file."
 description.ja = "ファイルから画像を読み込む。"
 description.ko = "파일에서 이미지를 로드한다."
 details.en = '''
+- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - `load(path, mipmaps = false)` decodes the file into four-channel U8 RGBA pixels and uploads an Immutable texture. Relative paths resolve through `getDataPath()`; absolute paths are used as given.
 - The decoder supports JPEG, PNG, TGA, BMP, PSD, GIF, Radiance HDR, Softimage PIC and binary PPM/PGM, subject to each decoder's supported variants. This method produces U8 pixels even for HDR or higher-bit-depth input; use `Pixels::loadHDR()` for floating-point HDR pixels.
 - On macOS and iOS, files rejected by the first decoder are tried with ImageIO, including HEIC/HEIF, TIFF and JPEG 2000 where supported by the OS. This fallback sets alpha to 1.
@@ -11462,6 +11463,7 @@ details.en = '''
 - Call on the main thread; see `Texture` for GPU resource rules. Use `loadAsync()` for deferred loading, or `Pixels::load()` for CPU decoding on a worker.
 '''
 details.ja = '''
+- Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
 - `load(path, mipmaps = false)` はファイルを 4 チャンネルの U8 RGBA ピクセルにデコードし、Immutable テクスチャに転送します。相対パスは `getDataPath()` で解決し、絶対パスはそのまま使います。
 - デコーダーは JPEG、PNG、TGA、BMP、PSD、GIF、Radiance HDR、Softimage PIC、バイナリ PPM/PGM に対応します。各形式の対応範囲はデコーダーによります。HDR や高ビット深度の入力も、このメソッドでは U8 ピクセルになります。浮動小数点の HDR ピクセルには `Pixels::loadHDR()` を使ってください。
 - macOS と iOS では、最初のデコーダーが読み込めなかったファイルを ImageIO でも試します。OS が対応する HEIC/HEIF、TIFF、JPEG 2000 などを読み込めます。このフォールバックではアルファを 1 にします。
@@ -11471,6 +11473,7 @@ details.ja = '''
 - メインスレッドで呼び出してください。GPU リソースの扱いは `Texture` を参照してください。遅延読み込みには `loadAsync()`、ワーカーでの CPU デコードには `Pixels::load()` を使ってください。
 '''
 details.ko = '''
+- Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
 - `load(path, mipmaps = false)`는 파일을 4채널 U8 RGBA 픽셀로 디코딩하고 Immutable 텍스처에 업로드합니다. 상대 경로는 `getDataPath()`로 해석하며 절대 경로는 그대로 사용합니다.
 - 디코더는 JPEG, PNG, TGA, BMP, PSD, GIF, Radiance HDR, Softimage PIC, 바이너리 PPM/PGM을 지원합니다. 각 형식의 세부 지원 범위는 디코더에 따릅니다. 이 메서드는 HDR이나 높은 비트 깊이의 입력도 U8 픽셀로 변환합니다. 부동소수점 HDR 픽셀에는 `Pixels::loadHDR()`를 사용합니다.
 - macOS와 iOS에서는 첫 디코더가 읽지 못한 파일을 ImageIO로도 시도합니다. OS가 지원하는 HEIC/HEIF, TIFF, JPEG 2000 등을 읽을 수 있습니다. 이 대체 경로는 알파를 1로 설정합니다.
@@ -11496,18 +11499,21 @@ description.en = "Loads an encoded image from memory."
 description.ja = "メモリ上の符号化された画像を読み込む。"
 description.ko = "메모리에서 인코딩된 이미지를 로드한다."
 details.en = '''
+- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - `loadFromMemory(buffer, len, mipmaps = false)` decodes `len` bytes of encoded image data into four-channel U8 RGBA pixels and uploads an Immutable texture. It copies the decoded pixels and does not retain the input buffer.
 - Uses the same primary decoder as `Image::load`, without the platform file-loading fallback. `mipmaps = true` builds a mip chain.
 - Returns `LoadResult`: `DecodeFailed` for rejected data, `TooLarge` for dimensions above the active GPU texture limit, or `Unknown` for texture upload failure. Clears the previous image and cancels asynchronous loading before decoding; failure leaves the image empty.
 - Without an active GPU, successful decoding keeps CPU pixels and leaves the texture unallocated. Call on the main thread; see `Texture` for GPU resource rules. For worker decoding, use `Pixels::loadFromMemory()`.
 '''
 details.ja = '''
+- Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
 - `loadFromMemory(buffer, len, mipmaps = false)` は、符号化された画像データ `len` バイトを 4 チャンネルの U8 RGBA ピクセルにデコードし、Immutable テクスチャに転送します。デコードしたピクセルをコピーし、入力バッファは保持しません。
 - `Image::load` と同じ最初のデコーダーを使いますが、プラットフォーム固有のファイル読み込みへのフォールバックは行いません。`mipmaps = true` はミップマップ連鎖を作成します。
 - `LoadResult` を返し、デコードできないデータは `DecodeFailed`、使用中の GPU のテクスチャ上限を超える寸法は `TooLarge`、テクスチャ転送の失敗は `Unknown` です。デコード前に以前の画像を消去して非同期読み込みを取り消し、失敗時は画像が空になります。
 - 有効な GPU がない場合、デコード成功時は CPU ピクセルを保持し、テクスチャは未確保のままです。メインスレッドで呼び出してください。GPU リソースの扱いは `Texture` を参照してください。ワーカーでのデコードには `Pixels::loadFromMemory()` を使ってください。
 '''
 details.ko = '''
+- Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
 - `loadFromMemory(buffer, len, mipmaps = false)`는 인코딩된 이미지 데이터 `len`바이트를 4채널 U8 RGBA 픽셀로 디코딩하고 Immutable 텍스처에 업로드합니다. 디코딩된 픽셀을 복사하며 입력 버퍼는 보관하지 않습니다.
 - `Image::load`와 같은 기본 디코더를 사용하지만 플랫폼별 파일 로드 대체 경로는 사용하지 않습니다. `mipmaps = true`는 밉맵 체인을 생성합니다.
 - `LoadResult`를 반환하며, 디코딩할 수 없는 데이터는 `DecodeFailed`, 활성 GPU의 텍스처 한도를 초과하는 크기는 `TooLarge`, 텍스처 업로드 실패는 `Unknown`을 반환합니다. 디코딩 전에 이전 이미지를 비우고 비동기 로드를 취소하며, 실패하면 이미지는 빈 상태가 됩니다.
@@ -22726,18 +22732,21 @@ description.en = "Loads an image file into CPU pixels."
 description.ja = "画像ファイルを CPU ピクセルに読み込む。"
 description.ko = "이미지 파일을 CPU 픽셀로 읽는다."
 details.en = '''
+- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - Clears existing pixels, decodes with stb_image, and tries `loadPlatform()` if decoding fails; successful loading produces four-channel `PixelFormat::U8` data.
 - Returns a `LoadResult` that evaluates to `true` on success; an unavailable file reports `LoadError::FileNotFound`, and failed decoding reports `LoadError::DecodeFailed`. The buffer remains cleared on failure.
 - Performs no GPU work and can run on a worker thread; upload the result with `Texture::allocate(pixels)` on the main thread. See `Texture` for GPU resource rules.
 - See `Image::load` for supported file formats and path resolution, including relative paths through `getDataPath()` and unchanged absolute paths.
 '''
 details.ja = '''
+- Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
 - 既存のピクセルを解放して stb_image でデコードし、デコードに失敗した場合は `loadPlatform()` を試します。成功すると 4 チャンネルの `PixelFormat::U8` データになります。
 - 成功時に `true` と評価される `LoadResult` を返します。ファイルを利用できない場合は `LoadError::FileNotFound`、デコード失敗時は `LoadError::DecodeFailed` を返し、バッファは解放状態のままです。
 - GPU 処理を行わないため、ワーカースレッドで実行できます。結果のアップロードはメインスレッドで `Texture::allocate(pixels)` を使ってください。GPU リソースの扱いは `Texture` を参照してください。
 - 対応形式とパスの解決は `Image::load` を参照してください。相対パスは `getDataPath()` を使い、絶対パスはそのまま使います。
 '''
 details.ko = '''
+- Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
 - 기존 픽셀을 해제하고 stb_image로 디코딩하며, 디코딩에 실패하면 `loadPlatform()`을 시도합니다. 성공하면 4채널 `PixelFormat::U8` 데이터가 됩니다.
 - 성공 시 `true`로 평가되는 `LoadResult`를 반환합니다. 파일을 이용할 수 없으면 `LoadError::FileNotFound`, 디코딩에 실패하면 `LoadError::DecodeFailed`를 반환하며 버퍼는 해제 상태로 남습니다.
 - GPU 작업을 하지 않으므로 작업자 스레드에서 실행할 수 있습니다. 결과 업로드는 메인 스레드에서 `Texture::allocate(pixels)`를 사용합니다. GPU 리소스 규칙은 `Texture`를 참조합니다.
@@ -22761,18 +22770,21 @@ description.en = "Decodes an image from memory into CPU pixels."
 description.ja = "メモリ上の画像を CPU ピクセルにデコードする。"
 description.ko = "메모리의 이미지를 CPU 픽셀로 디코딩한다."
 details.en = '''
+- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - `loadFromMemory(const unsigned char* buffer, int len)` reads encoded image bytes, with `len` in bytes, and produces four-channel `PixelFormat::U8` pixels; this is not an import of raw pixel values.
-- Clears existing pixels before decoding and returns `LoadResult`; failure reports `LoadError::DecodeFailed` and leaves the buffer cleared. It does not try the platform decoder.
+- Clears existing pixels before decoding and returns `LoadResult`; rejected data reports `LoadError::DecodeFailed`, size limits report `TooLarge`, and allocation failure reports `Unknown`. Failure leaves the buffer cleared. It does not try the platform decoder.
 - Performs no GPU work and can run on a worker thread; see `Image::load` for stb_image formats and `Texture` for GPU upload rules.
 '''
 details.ja = '''
+- Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
 - `loadFromMemory(const unsigned char* buffer, int len)` はエンコード済みの画像データを読み、4 チャンネルの `PixelFormat::U8` ピクセルを生成します。`len` の単位はバイトで、生のピクセル値を取り込む関数ではありません。
-- デコード前に既存のピクセルを解放し、`LoadResult` を返します。失敗時は `LoadError::DecodeFailed` を返し、バッファは解放状態のままです。プラットフォームのデコーダは試しません。
+- デコード前に既存のピクセルを解放し、`LoadResult` を返します。不正なデータは `LoadError::DecodeFailed`、サイズ制限は `TooLarge`、メモリ確保の失敗は `Unknown` です。失敗時のバッファは解放状態のままです。プラットフォームのデコーダは試しません。
 - GPU 処理を行わないため、ワーカースレッドで実行できます。stb_image の対応形式は `Image::load`、GPU アップロードの規則は `Texture` を参照してください。
 '''
 details.ko = '''
+- Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
 - `loadFromMemory(const unsigned char* buffer, int len)`는 인코딩된 이미지 바이트를 읽어 4채널 `PixelFormat::U8` 픽셀을 생성합니다. `len`의 단위는 바이트이며 원시 픽셀 값을 가져오는 함수가 아닙니다.
-- 디코딩 전에 기존 픽셀을 해제하고 `LoadResult`를 반환합니다. 실패하면 `LoadError::DecodeFailed`를 반환하고 버퍼는 해제 상태로 남습니다. 플랫폼 디코더는 시도하지 않습니다.
+- 디코딩 전에 기존 픽셀을 해제하고 `LoadResult`를 반환합니다. 잘못된 데이터는 `LoadError::DecodeFailed`, 크기 제한은 `TooLarge`, 메모리 할당 실패는 `Unknown`입니다. 실패하면 버퍼는 해제 상태로 남습니다. 플랫폼 디코더는 시도하지 않습니다.
 - GPU 작업을 하지 않으므로 작업자 스레드에서 실행할 수 있습니다. stb_image 지원 형식은 `Image::load`, GPU 업로드 규칙은 `Texture`를 참조합니다.
 '''
 
@@ -22783,16 +22795,19 @@ description.en = "Loads HDR images into floating-point CPU pixels."
 description.ja = "HDR 画像を浮動小数点の CPU ピクセルに読み込む。"
 description.ko = "HDR 이미지를 부동소수점 CPU 픽셀로 읽는다."
 details.en = '''
+- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - Decodes Radiance HDR data into four-channel `PixelFormat::F32` pixels with linear RGB values and alpha set to 1; the float decoder also accepts supported non-HDR images and converts them to floats.
 - Clears existing pixels first and returns `LoadResult`; unavailable files report `LoadError::FileNotFound`, and decoding failures report `LoadError::DecodeFailed`, leaving the buffer cleared. There is no platform decoder fallback.
 - Performs no GPU work; see `Image::load` for path resolution, including relative paths through `getDataPath()` and unchanged absolute paths.
 '''
 details.ja = '''
+- Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
 - Radiance HDR データを線形 RGB 値の 4 チャンネル `PixelFormat::F32` ピクセルにデコードし、アルファを 1 にします。float デコーダは対応する非 HDR 画像も受け付け、浮動小数点に変換します。
 - 最初に既存のピクセルを解放し、`LoadResult` を返します。ファイルを利用できない場合は `LoadError::FileNotFound`、デコード失敗時は `LoadError::DecodeFailed` を返し、バッファは解放状態のままです。プラットフォームのデコーダへの切り替えはありません。
 - GPU 処理は行いません。パスの解決は `Image::load` を参照してください。相対パスは `getDataPath()` を使い、絶対パスはそのまま使います。
 '''
 details.ko = '''
+- Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
 - Radiance HDR 데이터를 선형 RGB 값의 4채널 `PixelFormat::F32` 픽셀로 디코딩하고 알파를 1로 설정합니다. float 디코더는 지원되는 비 HDR 이미지도 받아 부동소수점으로 변환합니다.
 - 먼저 기존 픽셀을 해제하고 `LoadResult`를 반환합니다. 파일을 이용할 수 없으면 `LoadError::FileNotFound`, 디코딩에 실패하면 `LoadError::DecodeFailed`를 반환하며 버퍼는 해제 상태로 남습니다. 플랫폼 디코더로 대체하지 않습니다.
 - GPU 작업은 하지 않습니다. 경로 해석은 `Image::load`를 참조합니다. 상대 경로는 `getDataPath()`를 사용하고 절대 경로는 그대로 사용합니다.
@@ -22813,16 +22828,19 @@ description.en = "Loads an image through the platform decoder."
 description.ja = "プラットフォームのデコーダで画像を読み込む。"
 description.ko = "플랫폼 디코더로 이미지를 읽는다."
 details.en = '''
+- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding. Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - On macOS and iOS, uses ImageIO to decode the first image into four-channel U8 pixels and forces every alpha value to 255; see `Image::load` for supported formats and path resolution.
 - Returns `true` after replacing the buffer on success; returns `false` without changing existing pixels on failure.
 - On non-Apple platforms, checks file availability and always returns `false` without changing the buffer.
 '''
 details.ja = '''
+- Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
 - macOS と iOS では ImageIO で最初の画像を 4 チャンネルの U8 ピクセルにデコードし、すべてのアルファ値を 255 にします。対応形式とパスの解決は `Image::load` を参照してください。
 - 成功時はバッファを置き換えて `true` を返し、失敗時は既存のピクセルを変更せず `false` を返します。
 - Apple 以外のプラットフォームではファイルを利用できるか確認し、バッファを変更せず常に `false` を返します。
 '''
 details.ko = '''
+- Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다. GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
 - macOS와 iOS에서는 ImageIO로 첫 번째 이미지를 4채널 U8 픽셀로 디코딩하며 모든 알파 값을 255로 설정합니다. 지원 형식과 경로 해석은 `Image::load`를 참조합니다.
 - 성공하면 버퍼를 교체하고 `true`를 반환하며, 실패하면 기존 픽셀을 변경하지 않고 `false`를 반환합니다.
 - Apple 이외의 플랫폼에서는 파일 이용 가능 여부를 확인하고 버퍼를 변경하지 않은 채 항상 `false`를 반환합니다.
@@ -61385,6 +61403,7 @@ description.en = "Loads an image asynchronously."
 description.ja = "画像を非同期に読み込む。"
 description.ko = "이미지를 비동기로 로드한다."
 details.en = '''
+- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - `loadAsync(path, mipmaps = false)` returns without a result; retain an `onLoad` listener to receive the `LoadResult`. Path resolution, formats and load errors follow `Image::load`.
 - On native platforms, a worker decodes into private CPU pixels. A later main-thread frame applies the result, uploads the Immutable texture, optionally builds mipmaps and sends `onLoad`; notification never occurs inside `loadAsync()`.
 - The committed image remains readable until application. A surviving failure clears it, as with synchronous loading. Headless loading retains CPU pixels without allocating a texture.
@@ -61397,6 +61416,7 @@ details.en = '''
 - On Web, VFS reading and CPU decoding are deferred to a main-loop pass and may stall that frame; application follows in a subsequent pass. This entry point does not wait through Asyncify.
 '''
 details.ja = '''
+- Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
 - `loadAsync(path, mipmaps = false)` は結果を返しません。`LoadResult` を受け取るには `onLoad` のリスナーを保持してください。パス解決、対応形式、読み込みエラーは `Image::load` と同じです。
 - ネイティブではワーカーが専用の CPU ピクセルにデコードします。後のメインスレッドのフレームで結果を反映し、Immutable テクスチャへの転送と任意のミップマップ生成を行ってから `onLoad` を通知します。`loadAsync()` の呼び出し中には通知しません。
 - 結果を反映するまでは確定済み画像を参照できます。取り消されていない要求が失敗すると、同期読み込みと同様に画像を空にします。ヘッドレスではテクスチャを確保せず CPU ピクセルを保持します。
@@ -61409,6 +61429,7 @@ details.ja = '''
 - Web では VFS 読み込みと CPU デコードを後のメインループ処理に回すため、そのフレームが停止することがあります。結果はさらに後の処理で反映します。この入口では Asyncify による待機を行いません。
 '''
 details.ko = '''
+- Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
 - `loadAsync(path, mipmaps = false)`는 결과를 반환하지 않습니다. `LoadResult`를 받으려면 `onLoad` 리스너를 유지합니다. 경로 해석, 지원 형식과 로드 오류는 `Image::load`를 따릅니다.
 - 네이티브 플랫폼에서는 워커가 전용 CPU 픽셀로 디코딩합니다. 이후 메인 스레드 프레임에서 결과를 반영하고 Immutable 텍스처 업로드와 선택적인 밉맵 생성을 수행한 뒤 `onLoad`로 알립니다. `loadAsync()` 호출 중에는 알리지 않습니다.
 - 결과를 반영하기 전까지 확정된 이미지를 읽을 수 있습니다. 취소되지 않은 요청이 실패하면 동기 로드와 마찬가지로 이미지를 비웁니다. 헤드리스에서는 텍스처를 할당하지 않고 CPU 픽셀을 유지합니다.
