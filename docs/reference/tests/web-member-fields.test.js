@@ -43,3 +43,15 @@ test('unannotated members gain no empty authored fields', () => {
     const api = emit({ Type: symbol('Type', 'type'), 'Type::method': symbol('Type::method', 'method', { owner: 'Type' }) });
     assert.deepEqual(api.types[0].methods[0], { name: 'method', signatures: [{ ret: 'void', params: '' }], desc: '' });
 });
+test('members copied from a base carry the declaring type; own members do not', () => {
+    const api = emit({
+        Base: symbol('Base', 'type'), Derived: symbol('Derived', 'type'),
+        'Base::shared': symbol('Base::shared', 'method', { owner: 'Base' }),
+        'Derived::shared': symbol('Derived::shared', 'method', { owner: 'Derived', declaredIn: 'Base' }),
+        'Derived::own': symbol('Derived::own', 'method', { owner: 'Derived' }),
+    });
+    const methods = (name) => Object.fromEntries(api.types.find(t => t.name === name).methods.map(m => [m.name, m]));
+    assert.equal(methods('Derived').shared.inherited, 'Base');
+    assert.equal(methods('Derived').own.inherited, undefined);
+    assert.equal(methods('Base').shared.inherited, undefined);
+});

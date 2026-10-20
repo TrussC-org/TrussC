@@ -462,6 +462,9 @@ function build(examplesMap) {
         };
         const dep = mergeDeprecated(refId, ym);
         if (dep) out.deprecated = dep;
+        // A member copied from a public base carries the declaring type, so
+        // consumers (the MCP corpus) can point at one card instead of a copy each.
+        if (sym.declaredIn) out.inherited = sym.declaredIn;
         return attachMemberNotes(out, sym, ym);
     };
 
