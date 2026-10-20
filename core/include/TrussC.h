@@ -1153,7 +1153,7 @@ inline void setCircleResolution(int res) {
 
 [[deprecated("Use getCurveResolution() instead. Will be removed in v1.0.0")]]
 inline int getCircleResolution() {
-    return getDefaultContext().getCircleResolution();
+    return getCurveResolution();
 }
 
 // Check fill/stroke state
