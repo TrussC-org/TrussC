@@ -2793,19 +2793,19 @@ description.ko = "그리기 색상을 기존 이미지와 혼합하는 방식을
 details.en = '''
 - Select a mode with `setBlendMode` and read it with `getBlendMode`. The default is `Alpha`, which uses the source alpha for normal compositing.
 - `Add` adds source RGB multiplied by source alpha; `Subtract` subtracts that contribution from the destination. Both add source and destination alpha. `Disabled` overwrites the destination without blending.
-- `Multiply` darkens by multiplication and respects source alpha; it is accurate over an opaque destination but approximate over a partially transparent one and tends toward black over a fully transparent one. `Screen` produces a lighter result and also respects source alpha.
+- Drawing with `Multiply` into a transparent FBO whose RGBA values are all zero leaves RGB black because both RGB terms multiply by the destination RGB, which is zero. `Multiply` darkens by multiplication and respects source alpha; it is accurate over an opaque destination but approximate over a partially transparent one and tends toward black over a fully transparent one. `Screen` produces a lighter result and also respects source alpha.
 '''
 details.ja = '''
 - `setBlendMode` で指定し、`getBlendMode` で取得します。既定値は、描画元のアルファを使って通常の合成を行う `Alpha` です。
 - `Add` は描画元の RGB に描画元のアルファを掛けた値を加算し、`Subtract` はその値を描画先から減算します。どちらもアルファは描画元と描画先の値を加算します。`Disabled` はブレンドせず描画先を上書きします。
-- `Multiply` は描画元のアルファを反映して乗算で暗くします。不透明な描画先では正確ですが、半透明な描画先では近似となり、完全に透明な描画先では黒に近づきます。`Screen` は明るく合成し、描画元のアルファも反映します。
+- RGBA がすべてゼロの透明な FBO に `Multiply` で描画すると、RGB の計算の両方の項にゼロの描画先 RGB が掛かるため、RGB は黒のままになります。`Multiply` は描画元のアルファを反映して乗算で暗くします。不透明な描画先では正確ですが、半透明な描画先では近似となり、完全に透明な描画先では黒に近づきます。`Screen` は明るく合成し、描画元のアルファも反映します。
 '''
 details.ko = '''
 - `setBlendMode`로 지정하고 `getBlendMode`로 조회합니다. 기본값은 소스 알파를 사용해 일반 합성을 수행하는 `Alpha`입니다.
 - `Add`는 소스 RGB에 소스 알파를 곱한 값을 더하고, `Subtract`는 그 값을 대상에서 뺍니다. 두 모드 모두 소스와 대상 알파를 더합니다. `Disabled`는 혼합 없이 대상을 덮어씁니다.
-- `Multiply`는 소스 알파를 반영하며 곱셈으로 어둡게 만듭니다. 불투명한 대상에서는 정확하지만 반투명한 대상에서는 근사값이며 완전히 투명한 대상에서는 검정에 가까워집니다. `Screen`은 더 밝게 합성하며 소스 알파도 반영합니다.
+- RGBA가 모두 0인 투명한 FBO에 `Multiply`로 그리면 RGB 계산의 두 항 모두에 0인 대상 RGB를 곱하므로 RGB는 검정으로 남습니다. `Multiply`는 소스 알파를 반영하며 곱셈으로 어둡게 만듭니다. 불투명한 대상에서는 정확하지만 반투명한 대상에서는 근사값이며 완전히 투명한 대상에서는 검정에 가까워집니다. `Screen`은 더 밝게 합성하며 소스 알파도 반영합니다.
 '''
-keywords = ["alpha", "additive", "multiply"]
+keywords = ["alpha", "additive", "multiply", "transparent FBO", "RGBA zero", "RGB stays black", "destination color", "blend factors"]
 related = ["setBlendMode", "getBlendMode"]
 value_desc.Alpha.en = "Normal alpha blending (default)"
 value_desc.Add.en = "Additive blending"
@@ -19134,7 +19134,7 @@ related = ["NetworkInterface::getNetmask"]
 
 ["Node"]
 category = "scene_graph"
-keywords = ["scene graph", "object", "entity", "transform", "hierarchy"]
+keywords = ["scene graph", "object", "entity", "transform", "hierarchy", "zero Z scale", "children cannot click", "flat UI", "mouse picking", "singular matrix"]
 description.en = "Base class for nodes in the scene graph."
 description.ja = "シーングラフのノードの基底クラス。"
 description.ko = "씬 그래프 노드의 기반 클래스이다."
@@ -19144,6 +19144,7 @@ details.en = '''
 - Add children from `setup()` or later, after the parent is owned by a shared pointer. Adding children from the parent's constructor fails an assertion in debug builds because shared ownership is not ready.
 - Adding a node does not call its `setup()` immediately. The framework calls it once when the node first reaches an active update or draw traversal; see `Node::setup`, `Node::update`, `Node::draw`, and `Node::cleanup` for lifecycle behavior.
 - See `Node::addChild` for tree changes, `Node::setPos`, `Node::setRot`, and `Node::setScale` for local transforms, `Node::localToGlobal` for coordinate conversion, and `Node::setActive` for active and visible states.
+- Setting a parent's Z scale to zero for a flat UI prevents all its children from being clicked. Mouse picking requires an invertible local matrix at every node it traverses; a zero scale on any axis makes that matrix singular, so the node and its entire subtree are skipped.
 - The reflected `rotation` value is Euler X/Y/Z in radians; `rotationDeg` exposes the same rotation in degrees. Both can be read and edited through MCP and the inspector, and `rotation` takes precedence when both are written together.
 - Default JSON serialization saves `rotation` and omits the derived `rotationDeg` value. Convert older degree-valued `rotation` data to radians, or load it under `rotationDeg`.
 '''
@@ -19153,6 +19154,7 @@ details.ja = '''
 - 子の追加は、親が共有ポインタで所有された後の `setup()` 以降に行ってください。親のコンストラクター内では共有所有権の準備ができていないため、子を追加するとデバッグビルドでアサーションに失敗します。
 - ノードを追加しても、その `setup()` は即座には呼ばれません。フレームワークは、そのノードが有効な update または draw の走査で初めて処理されるときに一度だけ呼びます。ライフサイクルの動作は `Node::setup`、`Node::update`、`Node::draw`、`Node::cleanup` を参照してください。
 - ツリーの変更は `Node::addChild`、ローカル変換は `Node::setPos`、`Node::setRot`、`Node::setScale`、座標変換は `Node::localToGlobal`、有効・表示状態は `Node::setActive` を参照してください。
+- 平面的な UI にするために親の Z スケールをゼロにすると、その子はすべてクリックできなくなります。マウスでの選択判定には、走査する各ノードのローカル行列に逆行列が必要です。いずれかの軸のスケールがゼロだと逆行列を作れないため、そのノードとすべての子孫が判定から除外されます。
 - リフレクションの `rotation` 値は、ラジアン単位の X/Y/Z のオイラー角です。`rotationDeg` は同じ回転を度単位で表します。どちらも MCP とインスペクタで読み書きでき、両方を同時に書き込む場合は `rotation` が優先されます。
 - 既定の JSON シリアライズでは `rotation` を保存し、派生値の `rotationDeg` は保存しません。古い度単位の `rotation` データはラジアンに変換するか、`rotationDeg` として読み込んでください。
 '''
@@ -19162,6 +19164,7 @@ details.ko = '''
 - 자식은 부모가 공유 포인터로 소유된 뒤인 `setup()` 이후에 추가하세요. 부모의 생성자에서는 공유 소유권이 아직 준비되지 않았으므로 자식을 추가하면 디버그 빌드에서 어설션에 실패합니다.
 - 노드를 추가해도 해당 노드의 `setup()`은 즉시 호출되지 않습니다. 프레임워크는 해당 노드가 활성 update 또는 draw 순회에서 처음 처리될 때 한 번만 호출합니다. 수명 주기 동작은 `Node::setup`, `Node::update`, `Node::draw`, `Node::cleanup`을 참조하세요.
 - 트리 변경은 `Node::addChild`를, 로컬 변환은 `Node::setPos`, `Node::setRot`, `Node::setScale`을, 좌표 변환은 `Node::localToGlobal`을, 활성 및 표시 상태는 `Node::setActive`를 참조하세요.
+- 평면 UI를 만들려고 부모의 Z 배율을 0으로 설정하면 모든 자식을 클릭할 수 없게 됩니다. 마우스 선택 판정에는 순회하는 모든 노드의 로컬 행렬에 역행렬이 필요합니다. 어느 축이든 배율이 0이면 역행렬을 만들 수 없으므로 해당 노드와 모든 자손을 판정에서 제외합니다.
 - 리플렉션의 `rotation` 값은 라디안 단위의 X/Y/Z 오일러 각도입니다. `rotationDeg`는 같은 회전을 도 단위로 나타냅니다. 둘 다 MCP와 인스펙터에서 읽고 쓸 수 있으며 동시에 쓰면 `rotation`이 우선합니다.
 - 기본 JSON 직렬화는 `rotation`을 저장하고 파생 값인 `rotationDeg`는 저장하지 않습니다. 기존의 도 단위 `rotation` 데이터는 라디안으로 변환하거나 `rotationDeg`로 읽어 들이세요.
 '''
@@ -21163,7 +21166,7 @@ related = ["Node::hasName", "Node::getName", "Node::getDisplayName", "Node::getI
 
 ["Node::setPos"]
 category = "scene_graph"
-keywords = ["position", "move", "translate", "place"]
+keywords = ["position", "move", "translate", "place", "move parent", "child matrix", "cached global matrix", "automatic update", "getGlobalMatrix"]
 description.en = "Sets the local position."
 description.ja = "ローカル位置を設定する。"
 description.ko = "로컬 위치를 설정한다."
@@ -21171,19 +21174,19 @@ details.en = '''
 - Accepts `setPos(const Vec3& pos)` or `setPos(float x, float y, float z = 0.0f)`. Calling the two-argument form sets Z to zero rather than preserving it.
 - Position is expressed in the parent's coordinate units, without unit conversion; the initial value is `(0, 0, 0)`. See `Node::localToGlobal` for local and global coordinates.
 - The local matrix is `T * R * S`, where T is translation, R is quaternion rotation, and S is scale. A point is therefore scaled first, rotated second, and translated last, regardless of setter call order.
-- If any position component differs by exact comparison, the node's local and global matrix caches and all descendants' global matrix caches are invalidated. Matrices are recalculated when requested; `onLocalMatrixChanged()` is called immediately, followed by the `localMatrixChanged` event. Setting the same value does nothing.
+- After moving a parent, you do not need to update its children's cached matrices manually: the next `getGlobalMatrix()` call recalculates the child's matrix using the parent's current matrix. If any position component differs by exact comparison, the node's local and global matrix caches and all descendants' global matrix caches are invalidated. Matrices are recalculated when requested; `onLocalMatrixChanged()` is called immediately, followed by the `localMatrixChanged` event. Setting the same value does nothing.
 '''
 details.ja = '''
 - `setPos(const Vec3& pos)` または `setPos(float x, float y, float z = 0.0f)` を使います。引数を 2 つだけ渡すと、Z は保持されずゼロになります。
 - 位置は親の座標系の単位で指定し、単位の変換は行いません。初期値は `(0, 0, 0)` です。ローカル座標とグローバル座標については `Node::localToGlobal` を参照してください。
 - ローカル行列は `T * R * S` で、T は平行移動、R はクォータニオンによる回転、S はスケールです。このため、セッターを呼ぶ順序に関係なく、点にはスケール、回転、平行移動の順に適用されます。
-- 位置のいずれかの成分が完全一致の比較で異なる場合、このノードのローカル行列とグローバル行列、およびすべての子孫のグローバル行列のキャッシュを無効にします。行列は取得時に再計算され、`onLocalMatrixChanged()` と `localMatrixChanged` イベントはこの順に即座に呼ばれます。同じ値を設定しても何も行いません。
+- 親を動かした後に、子のキャッシュ済み行列を手動で更新する必要はありません。次の `getGlobalMatrix()` 呼び出しで、親の現在の行列を使って子の行列を再計算します。位置のいずれかの成分が完全一致の比較で異なる場合、このノードのローカル行列とグローバル行列、およびすべての子孫のグローバル行列のキャッシュを無効にします。行列は取得時に再計算され、`onLocalMatrixChanged()` と `localMatrixChanged` イベントはこの順に即座に呼ばれます。同じ値を設定しても何も行いません。
 '''
 details.ko = '''
 - `setPos(const Vec3& pos)` 또는 `setPos(float x, float y, float z = 0.0f)`를 사용합니다. 인수를 두 개만 전달하면 Z를 유지하지 않고 0으로 설정합니다.
 - 위치는 부모 좌표계의 단위로 지정하며 단위 변환은 수행하지 않습니다. 초깃값은 `(0, 0, 0)`입니다. 로컬 좌표와 전역 좌표는 `Node::localToGlobal`을 참조하세요.
 - 로컬 행렬은 `T * R * S`이며 T는 평행 이동, R은 쿼터니언 회전, S는 배율입니다. 따라서 세터 호출 순서와 관계없이 점에는 배율, 회전, 평행 이동 순서로 적용됩니다.
-- 위치 성분 중 하나라도 정확한 값 비교에서 다르면 이 노드의 로컬 및 전역 행렬 캐시와 모든 자손의 전역 행렬 캐시를 무효화합니다. 행렬은 요청할 때 다시 계산하며, `onLocalMatrixChanged()`와 `localMatrixChanged` 이벤트는 이 순서로 즉시 호출됩니다. 같은 값을 설정하면 아무 작업도 수행하지 않습니다.
+- 부모를 이동한 뒤 자식의 캐시된 행렬을 수동으로 업데이트할 필요는 없습니다. 다음 `getGlobalMatrix()` 호출에서 부모의 현재 행렬을 사용해 자식의 행렬을 다시 계산합니다. 위치 성분 중 하나라도 정확한 값 비교에서 다르면 이 노드의 로컬 및 전역 행렬 캐시와 모든 자손의 전역 행렬 캐시를 무효화합니다. 행렬은 요청할 때 다시 계산하며, `onLocalMatrixChanged()`와 `localMatrixChanged` 이벤트는 이 순서로 즉시 호출됩니다. 같은 값을 설정하면 아무 작업도 수행하지 않습니다.
 '''
 related = ["Node::getPos", "Node::setGlobalPos", "Node::localToGlobal"]
 snippet = '''
@@ -35763,22 +35766,22 @@ details.ko = '''
 '''
 
 ["Vec2::fromAngle"]
-keywords = ["vector", "direction", "polar", "heading", "unit"]
+keywords = ["vector", "direction", "polar", "heading", "unit", "evenly spaced points", "circle circumference", "points around a circle", "TAU", "circle coordinates"]
 description.en = "Creates a vector from an angle and a length."
 description.ja = "角度と長さからベクトルを作成する。"
 description.ko = "각도와 길이로 벡터를 생성한다."
 details.en = '''
-- Call the static function as `Vec2::fromAngle(radians, length)`; it returns `Vec2(cos(radians) * length, sin(radians) * length)`.
+- To place `n` points evenly around a circle, use `angle = float(i) / n * TAU` and `point = center + Vec2::fromAngle(angle, radius)` for `i` from 0 to `n - 1`. The static function `Vec2::fromAngle(radians, length)` returns `Vec2(cos(radians) * length, sin(radians) * length)`.
 - `length` defaults to `1.0f`, producing a unit vector; a negative value reverses the direction.
 - See `Vec2::angle` for angle units and orientation.
 '''
 details.ja = '''
-- 静的関数を `Vec2::fromAngle(radians, length)` と呼び出すと、`Vec2(cos(radians) * length, sin(radians) * length)` を返します。
+- 円周上に `n` 個の点を均等に置くには、`i` を 0 から `n - 1` として、`angle = float(i) / n * TAU` と `point = center + Vec2::fromAngle(angle, radius)` で角度と座標を求めます。静的関数 `Vec2::fromAngle(radians, length)` は、`Vec2(cos(radians) * length, sin(radians) * length)` を返します。
 - `length` の既定値は `1.0f` で、単位ベクトルを作成します。負の値を指定すると向きが反転します。
 - 角度の単位と向きについては `Vec2::angle` を参照してください。
 '''
 details.ko = '''
-- 정적 함수를 `Vec2::fromAngle(radians, length)`로 호출하면 `Vec2(cos(radians) * length, sin(radians) * length)`를 반환합니다.
+- 원 둘레에 점 `n`개를 균등하게 배치하려면 `i`를 0부터 `n - 1`까지 사용하여 `angle = float(i) / n * TAU`와 `point = center + Vec2::fromAngle(angle, radius)`로 각도와 좌표를 구합니다. 정적 함수 `Vec2::fromAngle(radians, length)`는 `Vec2(cos(radians) * length, sin(radians) * length)`를 반환합니다.
 - `length`의 기본값은 `1.0f`이며 단위 벡터를 생성합니다. 음수를 지정하면 방향이 반전됩니다.
 - 각도의 단위와 방향은 `Vec2::angle`을 참조하세요.
 '''
