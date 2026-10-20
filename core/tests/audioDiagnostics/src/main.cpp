@@ -27,8 +27,8 @@
 //   it, a memory decode, PCM fill or generator clears it (a voice must not
 //   report the previous file).
 // - A file named .ogg that is not Ogg Vorbis fails to load (DecodeFailed,
-//   logged), and the file is closed once: stb_vorbis closes it on the failed
-//   open, SoundBuffer does not close it again (counted by fcloseProbe.cpp on
+//   logged), and the bounded file reader closes its file once before decoder
+//   initialization (counted by fcloseProbe.cpp on
 //   Linux).
 // - SoundBuffer::loadPcmFromMemory() validates the format before it touches
 //   the buffer: a channel count below 1, or a byte size that is not a whole
@@ -687,11 +687,28 @@ static void checkDecodeSizing(const fs::path& dir, const string& tag) {
     // The same FLAC under a memory limit below its length: the load fails
     // with an error once the buffer cannot grow any further
     SoundBuffer limited;
+    limited.samples = {0.25f};
+    limited.channels = 1;
+    limited.sampleRate = 48000;
+    limited.numSamples = 1;
+    const auto allocationErrorsBefore = countLogs(LogLevel::Error, "audio allocation failed");
+#ifndef __EMSCRIPTEN__
+    allocProbeFailAbove((size_t)(longFrames / 2) * sizeof(float));
+#else
     internal::setAllocationLimitForTests((size_t)(longFrames / 2) * sizeof(float));
+#endif
     const bool limitedOk = (bool)limited.loadFlacFromMemory(longFlac.data(), longFlac.size());
+#ifndef __EMSCRIPTEN__
+    allocProbeFailAbove(0);
+#else
     internal::setAllocationLimitForTests(0);
+#endif
     check("decode: a FLAC that does not fit under a memory limit fails to load", !limitedOk,
           to_string(limited.numSamples) + " frames");
+    check("decode: allocation failure is a clean Error and preserves previous PCM and metadata",
+          limited.samples == vector<float>{0.25f} && limited.channels == 1 &&
+          limited.sampleRate == 48000 && limited.numSamples == 1 &&
+          countLogs(LogLevel::Error, "audio allocation failed") == allocationErrorsBefore + 1);
 
 #ifndef __EMSCRIPTEN__
     // A FLAC stating more than it holds, where every reserve above its

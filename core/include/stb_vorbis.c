@@ -1653,6 +1653,29 @@ static int get32_packet(vorb *f)
    x += (uint32) get8_packet(f) << 24;
    return x;
 }
+#else
+// TrussC patch: validate and consume unused comments without length-driven allocations.
+static int get_comment_length(vorb *f, uint32 *length)
+{
+   int i, byte;
+   *length = 0;
+   for (i = 0; i < 4; ++i) {
+      byte = get8_packet(f);
+      if (byte == EOP || f->eof) return error(f, VORBIS_invalid_setup);
+      *length |= (uint32) byte << (8*i);
+   }
+   return TRUE;
+}
+
+static int skip_comment(vorb *f)
+{
+   uint32 length;
+   if (!get_comment_length(f, &length)) return FALSE;
+   while (length--) {
+      if (get8_packet(f) == EOP || f->eof) return error(f, VORBIS_invalid_setup);
+   }
+   return TRUE;
+}
 #endif
 
 static void flush_packet(vorb *f)
@@ -3687,8 +3710,12 @@ static int start_decoder(vorb *f)
    // vorbis_version
    if (get32(f) != 0)                               return error(f, VORBIS_invalid_first_page);
    f->channels = get8(f); if (!f->channels)         return error(f, VORBIS_invalid_first_page);
-   if (f->channels > STB_VORBIS_MAX_CHANNELS)       return error(f, VORBIS_too_many_channels);
    f->sample_rate = get32(f); if (!f->sample_rate)  return error(f, VORBIS_invalid_first_page);
+#ifdef STB_VORBIS_VALIDATE_FORMAT
+   // Bound (security): validate external audio format before setup allocations. Overflow rejects the whole sound and is counted by the caller.
+   if (!STB_VORBIS_VALIDATE_FORMAT(f->channels, f->sample_rate)) return error(f, VORBIS_invalid_first_page);
+#endif
+   if (f->channels > STB_VORBIS_MAX_CHANNELS)       return error(f, VORBIS_too_many_channels);
    get32(f); // bitrate_maximum
    get32(f); // bitrate_nominal
    get32(f); // bitrate_minimum
@@ -3713,12 +3740,12 @@ static int start_decoder(vorb *f)
 
    if (!start_packet(f))                            return FALSE;
 
-#ifndef STB_VORBIS_NO_COMMENTS
    if (!next_segment(f))                            return FALSE;
 
    if (get8_packet(f) != VORBIS_packet_comment)            return error(f, VORBIS_invalid_setup);
    for (i=0; i < 6; ++i) header[i] = get8_packet(f);
    if (!vorbis_validate(header))                    return error(f, VORBIS_invalid_setup);
+#ifndef STB_VORBIS_NO_COMMENTS
    //file vendor
    len = get32_packet(f);
    f->vendor = (char*)setup_malloc(f, sizeof(char) * (len+1));
@@ -3755,14 +3782,21 @@ static int start_decoder(vorb *f)
       f->comment_list[i][len] = (char)'\0';
    }
 
-   // framing_flag
-   x = get8_packet(f);
-   if (!(x & 1))                                    return error(f, VORBIS_invalid_setup);
+#else
+   {
+      uint32 count;
+      if (!skip_comment(f)) return FALSE; // vendor
+      if (!get_comment_length(f, &count)) return FALSE;
+      while (count--) if (!skip_comment(f)) return FALSE;
+   }
+#endif // STB_VORBIS_NO_COMMENTS
 
+   // framing_flag
+   i = get8_packet(f);
+   if (i == EOP || f->eof || !(i & 1))               return error(f, VORBIS_invalid_setup);
 
    skip(f, f->bytes_in_seg);
    f->bytes_in_seg = 0;
-#endif // STB_VORBIS_NO_COMMENTS
 
    do {
       len = next_segment(f);
