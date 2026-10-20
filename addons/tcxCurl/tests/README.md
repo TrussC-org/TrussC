@@ -10,10 +10,22 @@ keep curl defaults. No network or display is needed.
 Windows this builds curl from source with Schannel; macOS/Linux use the
 system libcurl.
 
+Response admission checks also cover lazy storage, complete boundary values,
+whole-response rejection, JSON structure/working memory, cumulative rejection
+counts and a single first-loss Warning. Linux additionally traces C++ allocation
+peaks and release. SDK/libcurl C-heap allocations are outside that trace.
+
+Run the Web font streaming fixtures (the actual EM_JS implementation, with a
+real Node byte ReadableStream and WASM allocation observation) from the repository root:
+
+```bash
+node addons/tcxCurl/tests/test_font_stream.js
+```
+
 Line rules (`redactCredentialLine`):
 
-- the values of `Authorization`, `Proxy-Authorization`, `X-Api-Key` and
-  `Api-Key` header lines, any letter case;
+- the values of `Authorization`, `Proxy-Authorization`, `X-Api-Key`,
+  `Api-Key`, `X-Auth-Token` and `Cookie` header lines, any letter case, with surrounding space/tab variants;
 - the same names on `[HTTP/2] [n] [name: value]` info lines (the value runs
   to the last `]`), and on the older `h2h3 [...]` / `h2 [...]` forms;
 - curl's echo of an environment proxy with `user:password@`, also when curl
@@ -44,4 +56,24 @@ locally with:
 
 ```bash
 trusscli run -p .          # from this directory
+```
+
+The stream fixture also checks default-reader compatibility, storage admission,
+cancellation and retry. After building this addon, run the completion lifetime
+probe with ASan and a synchronous Logger listener:
+
+```bash
+/home/toru/TrussC-dev/trussc-ai-tools/tcbuild.sh python3 addons/tcxCurl/tests/test_font_lifetime.py
+```
+
+The probe uses production completion/close functions and the real Logger. It
+models the Font callback ownership edge; it does not run a browser. Android
+Java/JNI changes have code-review coverage only in this environment.
+
+The six credential headers use one C++ list for verbose redaction and redirect
+filtering. The addon tests check both consumers; `tests-curl` exercises all six
+on real same-origin and cross-origin hops. Verify the Java mirror and its use with:
+
+```bash
+python3 addons/tcxCurl/tests/test_redirect_policy.py
 ```

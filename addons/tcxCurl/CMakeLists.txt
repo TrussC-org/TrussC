@@ -11,7 +11,8 @@ if(ANDROID)
     # src/tcxCurl_android.cpp + android/java/.../AndroidHttpClient.java.
     # Both are picked up automatically: the .cpp via target_sources here,
     # the .java by trussc_app.cmake which globs <addon>/android/java/.
-    add_library(tcxCurl STATIC ${CMAKE_CURRENT_SOURCE_DIR}/src/tcxCurl_android.cpp)
+    add_library(tcxCurl STATIC ${CMAKE_CURRENT_SOURCE_DIR}/src/tcxCurl_android.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tcHttpResponseBounds.cpp)
     target_include_directories(tcxCurl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_definitions(tcxCurl PUBLIC TCX_HTTP_ANDROID=1)
     # JNI symbols come from libnativewindow / the Android runtime — no explicit
@@ -22,20 +23,21 @@ if(ANDROID)
     return()
 endif()
 
-add_library(tcxCurl INTERFACE)
-target_include_directories(tcxCurl INTERFACE
+add_library(tcxCurl STATIC ${CMAKE_CURRENT_SOURCE_DIR}/src/tcHttpResponseBounds.cpp)
+target_link_libraries(tcxCurl PUBLIC TrussC)
+target_include_directories(tcxCurl PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 if(EMSCRIPTEN)
     # WASM: use Emscripten Fetch API
-    target_compile_definitions(tcxCurl INTERFACE TCX_HTTP_EMSCRIPTEN=1)
-    target_link_options(tcxCurl INTERFACE -sFETCH=1)
+    target_compile_definitions(tcxCurl PUBLIC TCX_HTTP_EMSCRIPTEN=1)
+    target_link_options(tcxCurl PUBLIC -sFETCH=1)
 elseif(NOT WIN32)
     # macOS/Linux: use system libcurl (SecureTransport / OpenSSL)
     find_package(CURL REQUIRED)
-    target_compile_definitions(tcxCurl INTERFACE TCX_HTTP_CURL=1)
-    target_link_libraries(tcxCurl INTERFACE CURL::libcurl)
+    target_compile_definitions(tcxCurl PUBLIC TCX_HTTP_CURL=1)
+    target_link_libraries(tcxCurl PUBLIC CURL::libcurl)
 else()
     # Windows: fetch curl from source, built against Schannel — the native
     # Windows TLS stack. Schannel uses the OS certificate store (no bundled CA
@@ -94,8 +96,8 @@ else()
         add_library(CURL::libcurl ALIAS libcurl_static)
     endif()
 
-    target_compile_definitions(tcxCurl INTERFACE TCX_HTTP_CURL=1)
-    target_link_libraries(tcxCurl INTERFACE CURL::libcurl)
+    target_compile_definitions(tcxCurl PUBLIC TCX_HTTP_CURL=1)
+    target_link_libraries(tcxCurl PUBLIC CURL::libcurl)
 endif()
 
 message(STATUS "[tcxCurl] Addon loaded")

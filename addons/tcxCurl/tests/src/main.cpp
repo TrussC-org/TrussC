@@ -21,6 +21,8 @@
 // =============================================================================
 
 #include "../../src/tcxCurl.h"
+#include "../ResponseMemoryTrace.h"
+#include "TrussC.h"
 
 #include <cstdio>
 #include <string>
@@ -86,7 +88,108 @@ static string replayPieces(const std::vector<Step>& steps, size_t piece) {
     return replay(split);
 }
 
+static void testResponseBounds() {
+    size_t jsonWarnings = 0;
+    auto listener = trussc::getLogger().onLog.listen([&](trussc::LogEventArgs& event) {
+        if (event.level == trussc::LogLevel::Warning && event.message.find("response JSON") != string::npos) ++jsonWarnings;
+    });
+    const size_t before = responseLossCountForTests(ResponseLoss::Json);
+    tcx::curl::HttpResponse response;
+    response.body = "{\"ok\":[1,true,\"complete\"]}";
+#ifdef __linux__
+    responseMemoryTrace::begin();
+#endif
+    check("JSON complete object", response.json()["ok"].size() == 3);
+    response.body = string(jsonDepthLimit, '[') + "0" + string(jsonDepthLimit, ']');
+    check("JSON depth boundary", response.json().is_array());
+    response.body = "[" + response.body + "]";
+    auto rejected = response.json();
+    check("JSON depth admission", rejected.is_object() && rejected.empty());
+    rejected = nullptr;
+    response.body.assign(jsonByteLimit + 1, ' ');
+    check("JSON byte admission", response.json().empty());
+    response.body = string(jsonByteLimit - 2, ' ') + "[]";
+    check("JSON byte boundary", response.json().is_array());
+    response.body = "[";
+    for (size_t i = 0; i < 100000; ++i) response.body += "{},";
+    response.body.back() = ']';
+    auto complete = response.json();
+    check("JSON full DOM under budget", complete.is_array() && complete.size() == 100000 && complete.back().is_object());
+    complete = nullptr;
+    response.body = "\"" + string(jsonByteLimit - 2, 'j') + "\"";
+    complete = response.json();
+    check("JSON full string boundary", complete.is_string() && complete.get_ref<const string&>().size() == jsonByteLimit - 2);
+    complete = nullptr;
+    response.body = "\"" + string(jsonByteLimit - 1, 'j');
+    check("JSON incomplete long string rejected whole", response.json().empty());
+    response.body.assign(jsonByteLimit, '9');
+    check("JSON unrepresentable number rejected whole", response.json().empty());
+    response.body = "[";
+    for (size_t i = 0; i < 600000; ++i) response.body += "[],";
+    response.body.back() = ']';
+    check("JSON working admission", response.json().empty());
+    check("JSON rejection counter persists", responseLossCountForTests(ResponseLoss::Json) == before + 3);
+
+#ifdef __linux__
+    responseMemoryTrace::end();
+    check("JSON measured C++ working allocation budget", responseMemoryTrace::peak.load() <= jsonWorkingLimit);
+    string().swap(response.body);
+    string().swap(response.error);
+    check("JSON working storage released", responseMemoryTrace::live.load() == 0);
+#endif
+    check("one JSON first-loss Warning", jsonWarnings == 1);
+    ResponseBuffer buffer;
+    check("response storage is lazy", buffer.capacity == 0 && !buffer.first);
+    string block(16384, 'b');
+    for (size_t i = 0; i < responseByteLimit / block.size(); ++i)
+        if (!buffer.append(block.data(), block.size())) break;
+    check("buffer admits complete boundary", buffer.length == responseByteLimit && buffer.capacity <= responseByteLimit);
+    check("buffer rejects whole overflowing response", !buffer.append("x", 1) && !buffer.first && buffer.length == 0);
+    check("buffer stays failed", !buffer.append("x", 1));
+    ResponseBuffer redirected;
+    redirected.append("body", 4);
+    redirected.header("HTTP/extra: value\r\n", 19);
+    check("trailer preserves body", redirected.length == 4);
+    redirected.clear(); // only the backend may signal a new response
+    check("backend response boundary releases previous body", redirected.length == 0 && !redirected.first);
+    ResponseBuffer small(3);
+    check("configured body limit admits exact bytes", small.append("abc", 3));
+    check("configured body limit rejects whole excess", !small.append("d", 1) && small.length == 0);
+    for (const char* trailer : {"HTTP/1.1 200: yes\r\n", "HTTP/1.1 200 OK: yes\r\n"}) {
+        ResponseBuffer ambiguous;
+        ambiguous.append("body", 4);
+        ambiguous.headersEnded = true;
+        check("status-like trailer fails whole response", !ambiguous.header(trailer, std::strlen(trailer)) && ambiguous.length == 0);
+    }
+    ResponseBuffer packed;
+    packed.append("x", 1);
+    check("one byte allocates just one fixed block", packed.capacity == ResponseBuffer::blockSize);
+    std::string published;
+    packed.publish(published);
+    check("publish frees all chunks", published == "x" && !packed.first && packed.capacity == 0);
+    ResponseBuffer metadata;
+    check("metadata complete boundary", metadata.header(block.data(), block.size()) &&
+          metadata.header(block.data(), block.size()) && metadata.header(block.data(), block.size()) &&
+          metadata.header(block.data(), block.size()));
+    check("metadata overflow", !metadata.header("x", 1));
+}
+
 int main() {
+    testResponseBounds();
+    // Exercise the shared list through both consumers, with case variations.
+    check("shared credential list contains the six documented headers", std::size(credentialHeaders) == 6);
+    for (auto name : credentialHeaders) {
+        string mixed(name);
+        for (size_t i = 0; i < mixed.size(); ++i)
+            mixed[i] = i % 2 ? std::tolower(mixed[i]) : std::toupper(mixed[i]);
+        for (auto spelling : {string(name), mixed, string(name) + " ", mixed + "\t", " " + mixed, "\t " + mixed + " \t"}) {
+            check(string("redirect filter and verbose variants: ") + spelling,
+                  isCredentialHeader(spelling) &&
+                  redactCredentialLine(spelling + ": test-secret\r\n").find("test-secret") == string::npos);
+        }
+    }
+    check("neutral header stays in both consumers", !isCredentialHeader("X-Neutral") &&
+          redactCredentialLine("X-Neutral: value") == "X-Neutral: value");
     // TLS defaults: certificate verification remains enabled; only unavailable
     // revocation information becomes best-effort on Windows.
 #ifdef _WIN32
