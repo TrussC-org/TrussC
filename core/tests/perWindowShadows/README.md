@@ -1,12 +1,26 @@
 # Per-window shadows (#821 PR 5, part 2)
 
 `allCoreTests perWindowShadows` checks lazy construction and byte arithmetic
-without a display. `--gpu-check` runs the real Linux GL coordinator under Xvfb.
+without a display. `--gpu-check` runs the native GPU coordinator.
 The display lane discovers this mode through `display-test`. Set
 `TC_SHADOW_OUTPUT` to a directory to save actual/reference PNG pairs separately
 from the existing renderRegression manifest.
 
-Two windows render different slot-0 occluders and light matrices. Each result
+| Backend | GPU coverage |
+| --- | --- |
+| Linux GL | Unchanged full suite under Xvfb: 16 actual/reference pairs. |
+| Windows D3D11 | Full suite: the same 16 pairs, real secondary windows and native close. The coordinator drives secondary frames in a Draw entry, as in captureSubmission; persistent D3D11 backbuffer views are available before the first native tick. Screen captures use captureWindow (including BGRA-to-RGBA conversion), and Fbo captures use Fbo::readPixels. |
+| macOS / iOS Metal | Main window only: three Fbo pairs (default 1024, an older 64 recording after growth to 256, and the grown 256 generation), deferred generation pins/retirement, visible-shadow sanity and lazy zero allocation. An unused WindowContext needs no second native window. Fbo work is submitted/read back without repeatedly presenting the main drawable within one native tick. |
+
+Every reference is rendered in isolation on the **same backend in the same
+run**; all comparisons use full-image RGBA tolerance 2. There are no
+cross-backend golden files. Windows has no skipped sub-cases. Metal emits one
+precise SKIP for secondary-window cases: the Air's second window is occluded /
+not reliably presented in the lab. This skips A/B interleaving, foreign commits,
+foreign shadow-pass parking and secondary native close, while the main-window
+checks must pass. Other backends emit a whole-suite SKIP.
+
+In the full Linux/Windows suite, two windows render different slot-0 occluders and light matrices. Each result
 must match its own isolated reference across the entire image (RGBA tolerance
 2). Cases cover both execution orders, distinct resolutions, Fbo PBR, growth
 while an older recording remains queued, foreign commits, a parked open shadow
@@ -43,6 +57,17 @@ On macOS, the standalone dummy project's `shadowMetalSyntax` object target
 compiles the host's actual native checks as Objective-C++ against Metal/Sokol,
 without creating a device or adding a Sokol seam. Native Metal execution still
 requires a macOS/iOS machine.
+
+After building allCoreTests on Windows, run
+`core/tests/allCoreTests/bin/allCoreTests.exe perWindowShadows --gpu-check`.
+On the Air, run
+`core/tests/allCoreTests/bin/allCoreTests.app/Contents/MacOS/allCoreTests perWindowShadows --gpu-check`.
+On iOS, launch the test through the device runner with `perWindowShadows --gpu-check`.
+Expect exit 0, every executed assertion PASS and respectively 16 / 3 comparison
+lines with zero pixels outside tolerance 2. With `TC_SHADOW_OUTPUT` set, these
+produce respectively 32 / 6 PNGs. Native Windows and Apple runtime results must
+be collected on those devices; a cross-compiler syntax check does not establish
+their pixel results.
 
 ```sh
 LIBGL_ALWAYS_SOFTWARE=1 \

@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 
 using namespace tc;
 namespace {
@@ -27,7 +28,7 @@ void layoutChecks() {
     internal::WindowContext unused;
     check("unused window has no shadow generation", !unused.shadow.storage);
 }
-#if defined(SOKOL_GLCORE) && defined(__linux__)
+#if (defined(SOKOL_GLCORE) && defined(__linux__)) || (defined(SOKOL_D3D11) && defined(_WIN32)) || defined(SOKOL_METAL)
 class ShadowApp : public App {
     internal::WindowContext* a_ = nullptr;
     std::shared_ptr<Window> b_, unused_;
@@ -42,9 +43,22 @@ class ShadowApp : public App {
     int closeWait_ = 0;
     sg_image closingImage_{};
     std::weak_ptr<internal::ShadowStorage> closing_;
+#if defined(SOKOL_D3D11) && defined(_WIN32)
+    std::optional<internal::EntryStackGuard> secondaryDraw_;
+#endif
 
     internal::WindowContext& owner(int n) { return n ? b_->context() : *a_; }
-    void select(int n) { internal::restoreWindowContext(&owner(n)); }
+    void select(int n) {
+#if defined(SOKOL_D3D11) && defined(_WIN32)
+        secondaryDraw_.reset();
+#endif
+        internal::restoreWindowContext(&owner(n));
+#if defined(SOKOL_D3D11) && defined(_WIN32)
+        // Like captureSubmission, drive B's frame in a Draw entry. D3D11's
+        // persistent backbuffer views also work outside B's native tick.
+        if (n) secondaryDraw_.emplace(internal::AppEntry::Draw);
+#endif
+    }
     void start(int n, int resolution) {
         select(n);
         internal::prepareWindowTarget();
@@ -82,7 +96,13 @@ class ShadowApp : public App {
             fbo_.end();
             pixels.allocate(128,96,4);
             check("Fbo readback", fbo_.readPixels(pixels.getData()));
+#if defined(SOKOL_METAL)
+            // Submit/retire Fbo work without presenting the main drawable
+            // repeatedly inside its one native tick.
+            internal::endGpuFrame();
+#else
             present();
+#endif
         } else {
             present();
             check("screen readback", captureWindow(pixels));
@@ -171,6 +191,54 @@ class ShadowApp : public App {
         queue(true);
         matches("Fbo PBR after foreign shadow writes uses its owner maps",finish(true),reference);
     }
+#if defined(SOKOL_METAL)
+    void runMainCases() {
+        if (ran_) return;
+        ran_ = true;
+        std::puts("SKIP: perWindowShadows secondary-window cases on Metal: the Air's second window is occluded / not reliably presented in the lab; interleaving, foreign commits, parked foreign shadow passes and native secondary close require it");
+
+        // No second native window/drawable is needed for lazy allocation.
+        internal::WindowContext unused;
+        check("unused window context allocates zero shadow bytes", !unused.shadow.storage);
+        start(0,1024);
+        queue(true);
+        check("main Fbo PBR without shadows has no shadow generation", !a_->shadow.storage &&
+            !internal::currentTarget().deferredPbrDraws.back().cmd.shadowGeneration);
+        finish(true);
+
+        auto reference = isolated(0,1024,true);
+        check("main shadow default remains 1024", a_->shadow.storage && a_->shadow.storage->resolution == 1024);
+        matches("single-owner Fbo PBR matches isolated reference",isolated(0,1024,true),reference);
+        a_->shadow.storage.reset(); a_->shadow.count = 0;
+        auto oldReference = isolated(0,64,true);
+        auto withoutShadow = isolated(0,64,true,false,false);
+        const auto visible = different(oldReference,withoutShadow);
+        check("reference contains a visible cast shadow", visible > 40 && visible != SIZE_MAX);
+
+        start(0,64); shadow(0); queue(true);
+        auto& pending = internal::currentTarget().deferredPbrDraws;
+        std::weak_ptr<internal::ShadowStorage> old = a_->shadow.storage;
+        const auto oldImage = a_->shadow.storage->colorImage;
+        const auto oldView = a_->shadow.storage->colorTexture;
+        check("main Fbo PBR is deferred and pins its owner generation", pending.size() == 1 &&
+            pending.back().cmd.shadowGeneration == old.lock() &&
+            pending.back().cmd.bind.views[VIEW_tc_pbr_shadowMap].id == oldView.id);
+        check("growth preserves older Fbo recording", internal::ensureShadowStorage(*a_,256) &&
+            a_->shadow.storage->resolution == 256 && a_->shadow.count == 0 &&
+            pending.size() == 1 && pending.back().cmd.shadowGeneration == old.lock() &&
+            !old.expired() && sg_query_image_state(oldImage) == SG_RESOURCESTATE_VALID &&
+            sg_query_view_state(oldView) == SG_RESOURCESTATE_VALID);
+        matches("older Fbo recording renders after growth",finish(true),oldReference);
+        check("old generation retires after consumer commit", old.expired() &&
+            sg_query_image_state(oldImage) == SG_RESOURCESTATE_INVALID && sg_query_view_state(oldView) == SG_RESOURCESTATE_INVALID);
+        auto grownReference = isolated(0,256,true);
+        matches("grown Fbo PBR matches isolated reference",isolated(0,256,true),grownReference);
+        check("unused window context still allocates zero shadow bytes", !unused.shadow.storage);
+        check("no unexpected rendering errors", unexpectedErrors_ == 0);
+        completed = true;
+        exitApp();
+    }
+#else
     void runCases() {
         if (ran_) {
             if (b_->isOpen() && ++closeWait_ < 60) return;
@@ -188,10 +256,17 @@ class ShadowApp : public App {
         ran_ = true;
         // PBR without a shadow pass must not allocate an owner's map set.
         internal::restoreWindowContext(&unused_->context());
+#if defined(SOKOL_D3D11) && defined(_WIN32)
+        {
+        internal::EntryStackGuard unusedDraw(internal::AppEntry::Draw);
+#endif
         internal::prepareWindowTarget(); beginFrame(); clear(0,0,0,1); queue();
         check("PBR without shadows has no shadow generation", !unused_->context().shadow.storage &&
             !internal::currentTarget().deferredPbrDraws.back().cmd.shadowGeneration);
         present();
+#if defined(SOKOL_D3D11) && defined(_WIN32)
+        }
+#endif
         // Both owners initially use the public default; unused_ never shadows.
         pair(0,1024,1024);
         check("default unchanged for both windows", a_->shadow.storage->resolution == 1024 &&
@@ -268,17 +343,33 @@ class ShadowApp : public App {
         select(0);
         b_->close(); // Verify actual native teardown on the next main tick.
     }
+#endif
 public:
     void setup() override {
         a_ = &internal::currentWindowContext();
         log_ = getLogger().onLog.listen([this](LogEventArgs& e) {
             if (e.level >= LogLevel::Error) ++unexpectedErrors_;
         });
+#if defined(SOKOL_METAL)
+        check("main window starts without shadow maps", !a_->shadow.storage);
+#else
         WindowSettings settings; settings.setSize(128,96); settings.setHighDpi(false); settings.sampleCount = 1;
         b_ = createWindow(settings); unused_ = createWindow(settings);
         check("secondary and unused windows created", b_ && unused_);
         check("all windows start without shadow maps", !a_->shadow.storage &&
             b_ && !b_->context().shadow.storage && unused_ && !unused_->context().shadow.storage);
+#if defined(SOKOL_D3D11) && defined(_WIN32)
+        for (const auto& window : {b_,unused_}) {
+            if (!window) continue;
+            auto& ctx = window->context();
+            const auto sc = ctx.acquireSwapchain(ctx.acquireSwapchainUser);
+            check("D3D11 secondary views available before native tick", sc.d3d11.render_view &&
+                sc.d3d11.depth_stencil_view && !sc.d3d11.resolve_view &&
+                sc.width == 128 && sc.height == 96 && sc.sample_count == 1 &&
+                sc.color_format == SG_PIXELFORMAT_BGRA8);
+        }
+#endif
+#endif
         for (int n : {0,1}) {
             lights_[n].setDirectional(n ? -0.4f : 0.6f,0,-1);
             lights_[n].setDiffuse(1,1,1); lights_[n].setAmbient(0,0,0);
@@ -290,7 +381,11 @@ public:
         receiver_ = createPlane(112,80);
         material_.setBaseColor(0.5f,0.5f,0.5f).setRoughness(1);
         fbo_.allocate(128,96);
+#if defined(SOKOL_METAL)
+        draw_ = events().draw.listen([this] { runMainCases(); });
+#else
         draw_ = events().draw.listen([this] { if (b_ && unused_) runCases(); else exitApp(); });
+#endif
     }
     void exit() override { clearLights(); }
 };
@@ -300,12 +395,14 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     layoutChecks();
     if (argc == 1) return failures ? 1 : 0;
     if (argc != 2 || std::strcmp(argv[1],"--gpu-check")) return 2;
-#if defined(SOKOL_GLCORE) && defined(__linux__)
+#if (defined(SOKOL_GLCORE) && defined(__linux__)) || (defined(SOKOL_D3D11) && defined(_WIN32)) || defined(SOKOL_METAL)
+#if !defined(SOKOL_METAL)
     if (!internal::supportsSecondaryWindows()) { std::puts("SKIP: secondary windows unavailable"); return failures ? 1 : 0; }
+#endif
     WindowSettings settings; settings.setSize(128,96); settings.setHighDpi(false); settings.sampleCount = 1;
     return tcCoreTest::runDisplayTest<ShadowApp>(settings,failures,[] { check("all shadow cases completed",completed); });
 #else
-    std::puts("SKIP: perWindowShadows pixel coordinator requires Linux GL");
+    std::puts("SKIP: perWindowShadows GPU suite requires Linux GL, Windows D3D11 or Apple Metal");
     return failures ? 1 : 0;
 #endif
 }
