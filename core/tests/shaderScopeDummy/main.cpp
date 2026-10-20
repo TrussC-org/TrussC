@@ -1247,6 +1247,198 @@ bool resizeBeforeDrawProbe(float dpi, bool pixelPerfect, float fov) {
 }
 
 
+// Exercise the GPU fixture's unmatched-Fbo and review stack sequences through
+// real Node dispatch. An empty child pop is intentionally rejected only in the
+// negative variant: it never consumes the suspended window's live Node push.
+bool targetStackDispatchProbe(bool rejectedPop) {
+    internal::WindowContext window;
+    window.isMain = false; window.fbWidth = 64; window.fbHeight = 48;
+    window.acquireSwapchain = dummySwapchain;
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &window;
+    int unmatchedWarnings = 0, popWarnings = 0, unexpectedWarnings = 0;
+    bool expectingUnmatched = false, expectingPop = false;
+    auto log = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level != LogLevel::Warning) return;
+        if (expectingUnmatched && e.message == "[Fbo] end() discarded unmatched matrix, camera or scissor pushes")
+            ++unmatchedWarnings;
+        else if (expectingPop && e.message == "[RenderContext] trussc::App::draw() called popMatrix() without a matching pushMatrix() (ignored)")
+            ++popWarnings;
+        else ++unexpectedWarnings;
+    });
+    struct StackApp : App {
+        bool rejectedPop, ok = true;
+        bool& expectingUnmatched;
+        bool& expectingPop;
+        StackApp(bool rejectedPop, bool& unmatched, bool& pop)
+            : rejectedPop(rejectedPop), expectingUnmatched(unmatched), expectingPop(pop) { setPos(2, 3); }
+        void draw() override {
+            auto& screen = internal::currentTarget();
+            const auto depth = screen.matrixStack.size();
+            const auto model = getMatrix();
+            const auto camera = screen.camera;
+            Fbo fbo; fbo.allocate(16, 12);
+            fbo.begin();
+            EasyCam unmatched;
+            if (!rejectedPop) { pushMatrix(); pushScissor(1, 1, 2, 2); unmatched.begin(); }
+            expectingUnmatched = !rejectedPop; fbo.end(); expectingUnmatched = false;
+            ok &= screen.matrixStack.size() == depth && depth == 1 &&
+                screen.cameraStack.empty() && screen.scissorStack.empty() &&
+                screen.camera.currentCameraContext == camera.currentCameraContext &&
+                std::memcmp(getMatrix().m, model.m, sizeof(model.m)) == 0;
+            fbo.begin();
+            ok &= internal::currentTarget().matrixStack.empty() && internal::currentTarget().cameraStack.empty() &&
+                internal::currentTarget().scissorStack.empty();
+            fbo.end();
+            pushMatrix(); translate(4, 5);
+            const auto screenModel = getMatrix();
+            auto& rc = internal::getDefaultContext();
+            const auto floor = rc.setStackFloor(depth + 1, rc.getStyleStackDepth(), &typeid(App));
+            fbo.begin();
+            if (rejectedPop) { expectingPop = true; popMatrix(); expectingPop = false; }
+            ok &= internal::currentTarget().matrixStack.empty() && screen.matrixStack.size() == depth + 1;
+            pushMatrix(); translate(2, 3); popMatrix();
+            ok &= internal::currentTarget().matrixStack.empty() && !sgl_error().stack_underflow;
+            fbo.end();
+            ok &= screen.matrixStack.size() == depth + 1 &&
+                std::memcmp(getMatrix().m, screenModel.m, sizeof(model.m)) == 0;
+            rc.setStackFloor(floor); popMatrix();
+            ok &= screen.matrixStack.size() == depth &&
+                std::memcmp(getMatrix().m, model.m, sizeof(model.m)) == 0;
+        }
+    };
+    bool ok;
+    {
+        StackApp app(rejectedPop, expectingUnmatched, expectingPop);
+        beginFrame();
+        { internal::EntryStackGuard draw(internal::AppEntry::Draw); app.handleDraw(); }
+        auto& screen = window.swapchainTarget;
+        ok = app.ok && screen.matrixStack.empty() && screen.cameraStack.empty() && screen.scissorStack.empty() &&
+            internal::getDefaultContext().getStyleStackDepth() == 0 &&
+            screen.currentMatrix.m[3] == 0 && screen.currentMatrix.m[7] == 0;
+        present();
+    }
+    window.teardownTargets(); window.swapchainTarget.resources().release();
+    internal::currentWindowCtx() = previous;
+    ok &= unmatchedWarnings == int(!rejectedPop) && popWarnings == int(rejectedPop) && unexpectedWarnings == 0;
+    std::printf("TARGET STACK DISPATCH rejectedPop=%d unmatched=%d pop=%d unexpected=%d ok=%d\n",
+        rejectedPop, unmatchedWarnings, popWarnings, unexpectedWarnings, ok);
+    return ok;
+}
+
+// Keep deliberate diagnostics and their OnceGate/rate-limit state local to
+// this probe; the remaining suite also tests device teardown and ID reuse.
+bool targetStackDispatchChecks() {
+    std::fflush(stdout);
+    const pid_t child = fork();
+    if (child == 0) {
+        const bool ok = targetStackDispatchProbe(false) && targetStackDispatchProbe(true);
+        std::fflush(stdout);
+        _exit(ok ? 0 : 1);
+    }
+    if (child < 0) return false;
+    int status = 0;
+    return waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+// Match the native resize driver's complete dispatch, including the implicit
+// Node matrix push. Restore a child opened in update in events().draw,
+// before handleDraw pushes that matrix; camera.end can still run in draw().
+bool resizeAppDispatchProbe(bool resize, bool cameraScope) {
+    internal::WindowContext window;
+    window.isMain = false; window.fbWidth = 64; window.fbHeight = 48;
+    int acquisitions = 0, warnings = 0;
+    window.acquireSwapchainUser = &acquisitions;
+    window.acquireSwapchain = [](void* user) {
+        ++*static_cast<int*>(user);
+        auto swapchain = dummySwapchain(nullptr);
+        swapchain.width = getFramebufferWidth(); swapchain.height = getFramebufferHeight();
+        return swapchain;
+    };
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &window;
+    auto log = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Warning) ++warnings;
+    });
+    struct ResizeApp : App {
+        bool resize, cameraScope, ok = true, drew = false;
+        EasyCam camera;
+        Fbo fbo;
+        EventListener beforeDraw;
+        internal::TargetCameraState selected;
+        ResizeApp(bool resize, bool cameraScope) : resize(resize), cameraScope(cameraScope) {}
+        void setup() override {
+            setPos(2, 3);
+            beforeDraw = events().draw.listen([this] {
+                auto& window = internal::currentWindowContext();
+                auto& child = internal::currentTarget();
+                ok &= child.isFbo && child.width == 16 && child.height == 12 &&
+                    child.matrixStack.empty() && child.cameraStack.empty() && child.scissorStack.empty();
+                fbo.end();
+                auto& target = internal::currentTarget();
+                ok &= &target == &window.swapchainTarget && target.matrixStack.empty() &&
+                    target.width == window.fbWidth && target.height == window.fbHeight &&
+                    target.viewport.w == window.fbWidth && target.viewport.h == window.fbHeight;
+                if (cameraScope) {
+                    ok &= target.cameraStack.size() == 1 && !target.automaticScreenProjection;
+                    for (int i = 0; i < 16; ++i)
+                        ok &= target.camera.currentProjectionMatrix.m[i] == selected.currentProjectionMatrix.m[i] &&
+                            target.camera.currentViewMatrix.m[i] == selected.currentViewMatrix.m[i];
+                }
+            });
+        }
+        void update() override {
+            if (cameraScope) camera.begin();
+            selected = internal::currentTarget().camera;
+            if (resize) {
+                internal::currentWindowContext().fbWidth = 96;
+                internal::currentWindowContext().fbHeight = 80;
+            }
+            fbo.allocate(16, 12); fbo.begin();
+        }
+        void draw() override {
+            drew = true;
+            auto& target = internal::currentTarget();
+            ok &= !target.isFbo && target.matrixStack.size() == 1 &&
+                target.currentMatrix.m[3] == 2 && target.currentMatrix.m[7] == 3;
+            if (cameraScope) camera.end();
+            ok &= target.cameraStack.empty() && target.automaticScreenProjection &&
+                target.camera.currentViewW == getWindowWidth() && target.camera.currentViewH == getWindowHeight();
+            const auto corner = worldToScreen(Vec3(getWindowWidth(), getWindowHeight(), 0));
+            ok &= std::abs(corner.x - getWindowWidth()) < 0.001f &&
+                std::abs(corner.y - getWindowHeight()) < 0.001f;
+            drawRect(0, 0, getWindowWidth(), getWindowHeight());
+        }
+    };
+    bool ok;
+    {
+        ResizeApp app(resize, cameraScope);
+        beginFrame();
+        { internal::EntryStackGuard update(internal::AppEntry::Update); app.handleUpdate(0, 0); }
+        auto* child = &internal::currentTarget();
+        const auto context = sgl_get_context();
+        internal::refreshWindowDrawingSize();
+        ok = &internal::currentTarget() == child && sgl_get_context().id == context.id && acquisitions == 0;
+        {
+            internal::EntryStackGuard draw(internal::AppEntry::Draw);
+            events().draw.notify();
+            app.handleDraw();
+            auto& target = window.swapchainTarget;
+            ok &= app.ok && app.drew && target.matrixStack.empty() && target.cameraStack.empty() &&
+                internal::getDefaultContext().getStyleStackDepth() == 0 &&
+                target.currentMatrix.m[3] == 0 && target.currentMatrix.m[7] == 0;
+            present();
+        }
+        ok &= acquisitions == 1;
+    }
+    window.teardownTargets(); window.swapchainTarget.resources().release();
+    ok &= warnings == 0;
+    internal::currentWindowCtx() = previous;
+    std::printf("RESIZE APP DISPATCH resize=%d camera=%d warnings=%d acquisitions=%d ok=%d\n",
+        resize, cameraScope, warnings, acquisitions, ok);
+    return ok;
+}
+
 // Public camera APIs opt out of automatic projection repair, independently
 // of the viewport. Exercise real callback guards and Fbo parent restoration.
 bool resizeSelectedStateProbe(int scenario) {
@@ -1693,6 +1885,7 @@ int main(int argc, char** argv) {
     if (!lateShader.load(descriptor)) return 1;
     sg_trace_hooks hooks = {}; hooks.draw = drawn; hooks.begin_pass = began; hooks.commit = committed; hooks.apply_pipeline = applied;
     hooks.apply_viewport = viewportApplied; hooks.apply_scissor_rect = scissorApplied; sg_install_trace_hooks(&hooks);
+    const bool targetStacks = targetStackDispatchChecks();
     bool teardown = true;
     for (bool explicitTeardown : {false,true}) for (bool otherCurrent : {false,true})
         teardown &= teardownProbe(explicitTeardown,otherCurrent);
@@ -1725,6 +1918,8 @@ int main(int argc, char** argv) {
     for (float dpi : {1.0f, 2.0f}) for (bool pixelPerfect : {false, true}) for (float fov : {0.0f, TAU / 6})
         resizeBeforeDraw &= resizeBeforeDrawProbe(dpi, pixelPerfect, fov);
     for (int scenario = 0; scenario < 13; ++scenario) resizeBeforeDraw &= resizeSelectedStateProbe(scenario);
+    for (bool resize : {false, true}) for (bool camera : {false, true})
+        resizeBeforeDraw &= resizeAppDispatchProbe(resize, camera);
     for (bool resize : {false, true}) for (bool selected : {false, true})
         resizeBeforeDraw &= resizeOpenShaderProbe(resize, selected);
     const bool destruction = activeDestructionProbe();
@@ -1734,7 +1929,7 @@ int main(int argc, char** argv) {
         resizeBeforeDraw &= resizeEarlyAcquireProbe(mode, resize, selection);
     // Last: it shuts the device down and re-creates it.
     const bool shadowRestart = shadowDeviceRestartProbe();
-    const int result=shadowReplay && shadowNative && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowSustained && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && resizeBeforeDraw && destruction ? 0 : 1;
+    const int result=targetStacks && shadowReplay && shadowNative && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowSustained && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && resizeBeforeDraw && destruction ? 0 : 1;
     return result;
 }
 #else

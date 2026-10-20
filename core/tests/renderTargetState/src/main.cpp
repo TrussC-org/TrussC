@@ -25,6 +25,32 @@ void check(const char* label, bool passed) {
     if (!passed) ++failures;
 }
 
+bool isStackTargetWarning(const LogEventArgs& e) {
+    if (e.level != LogLevel::Warning) return false;
+    for (const char* source : {"[RenderContext]", "[Fbo]", "[EasyCam]", "[RenderTarget]", "[sokol_gl]", "[sgl]"})
+        if (e.message.rfind(source, 0) == 0) return true;
+    return false;
+}
+
+struct GpuWarningChecks {
+    static constexpr const char* unmatched = "[Fbo] end() discarded unmatched matrix, camera or scissor pushes";
+    bool expectingUnmatched = false;
+    int expected = 0, unexpected = 0;
+    void observe(const LogEventArgs& e) {
+        if (!isStackTargetWarning(e)) return;
+        if (expectingUnmatched && e.message == unmatched) ++expected;
+        else {
+            ++unexpected;
+            internal::appExitCode() = 1;
+        }
+    }
+} gpuWarnings;
+
+// Survive returning Web/Android loops, App destruction, the Exit stack
+// guard and framework graphics cleanup. Late warnings must also raise the
+// in-app exit code on platforms whose runApp() never returns at shutdown.
+EventListener gpuWarningLog, resizeWarningLog;
+
 void checkTargetOwnership() {
     internal::WindowContext firstWindow;
     internal::WindowContext secondWindow;
@@ -148,11 +174,17 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             if (std::strcmp(argv[i], "--msaa4") == 0) samples = 4;
             if (std::strcmp(argv[i], "--pixel-perfect") == 0) pixelPerfect = true;
         }
-        return runResizeStateChecks(samples, pixelPerfect);
+        const int result = runResizeStateChecks(samples, pixelPerfect);
+        return ResizeStateApp::stackWarnings ? 1 : result;
     }
     checkTargetOwnership();
     checkLogicalHandoff();
     checkCpuCoordinates();
-    if (argc > 1 && std::strcmp(argv[1], "--gpu-check") == 0) return runCameraChecks(argc > 2 && std::strcmp(argv[2], "--msaa4") == 0 ? 4 : 1);
+    if (argc > 1 && std::strcmp(argv[1], "--gpu-check") == 0) {
+        const int result = runCameraChecks(argc > 2 && std::strcmp(argv[2], "--msaa4") == 0 ? 4 : 1);
+        // Blocking loops return after teardown, later than the final callback.
+        // Async loops return before drawing: exact-once belongs in that callback.
+        return gpuWarnings.unexpected ? 1 : result;
+    }
     return failures ? 1 : 0;
 }

@@ -7,7 +7,25 @@ class ResizeStateApp : public App {
     internal::TargetCameraState selected;
     int scenario = 0, attempts = 0, oldWidth = 0, oldHeight = 0;
     bool ready = false;
+    EventListener draw_;
 public:
+    void setup() override {
+        draw_ = events().draw.listen([this] {
+            if (!ready || (scenario != 3 && scenario != 7)) return;
+            check("resize leaves active Fbo state intact", tc::getWidth() == 16 && tc::getHeight() == 12);
+            // Restore before App::handleDraw/Node::drawTree pushes its own
+            // matrix on the selected target. Closing the Fbo inside draw()
+            // would discard that live framework push on the child target.
+            fbo.end();
+            if (scenario == 7) {
+                const auto& target = internal::currentTarget();
+                check("Fbo restore preserves the open window camera", target.cameraStack.size() == 1 &&
+                      sameMatrix(target.camera.currentProjectionMatrix, selected.currentProjectionMatrix) &&
+                      sameMatrix(target.camera.currentViewMatrix, selected.currentViewMatrix) &&
+                      target.camera.currentCameraContext == selected.currentCameraContext);
+            }
+        });
+    }
     void update() override {
         if (attempts++ == 0) {
             oldWidth = getFramebufferWidth(); oldHeight = getFramebufferHeight();
@@ -34,10 +52,6 @@ public:
     }
     void draw() override {
         if (!ready) return;
-        if (scenario == 3 || scenario == 7) {
-            check("resize leaves active Fbo state intact", tc::getWidth() == 16 && tc::getHeight() == 12);
-            fbo.end();
-        }
         if (scenario == 6 || scenario == 7) camera.end();
         auto& target = internal::currentTarget();
         check("first resized draw uses the full viewport", target.viewport.w == getFramebufferWidth() &&
@@ -82,9 +96,17 @@ public:
         attempts = 0; ready = false;
     }
     inline static bool resizeStateCompleted = false;
+    inline static int stackWarnings = 0;
 };
 int runResizeStateChecks(int samples, bool pixelPerfect) {
     ResizeStateApp::resizeStateCompleted = false;
+    ResizeStateApp::stackWarnings = 0;
+    resizeWarningLog = getLogger().onLog.listen([](LogEventArgs& e) {
+        if (isStackTargetWarning(e)) {
+            ++ResizeStateApp::stackWarnings;
+            internal::appExitCode() = 1;
+        }
+    });
     WindowSettings settings;
     settings.setSize(200, 160);
     settings.setHighDpi(true);
@@ -92,5 +114,6 @@ int runResizeStateChecks(int samples, bool pixelPerfect) {
     settings.setPixelPerfect(pixelPerfect);
     return tcCoreTest::runDisplayTest<ResizeStateApp>(settings, failures, [] {
         check("native resize scenarios completed", ResizeStateApp::resizeStateCompleted);
+        check("native resize scenarios emit no stack or target warnings", ResizeStateApp::stackWarnings == 0);
     });
 }
