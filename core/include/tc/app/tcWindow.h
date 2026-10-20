@@ -549,8 +549,13 @@ inline void App::setSize(float w, float h) {
     }
     if (internal::pixelPerfectMode()) {
         float scale = sapp_dpi_scale();
+#if defined(_WIN32)
+        internal::setWindowSizeWin32(sapp_win32_get_hwnd(), double(width) / scale, double(height) / scale);
+        return;
+#else
         width = static_cast<int>(width / scale);
         height = static_cast<int>(height / scale);
+#endif
     }
     setWindowSizeLogical(width, height);   // main window only; never routed
 }
