@@ -157,6 +157,14 @@ public:
 }
 int main(int argc, char** argv) {
     if (argc != 2 || std::strcmp(argv[1],"--gpu-check")) return 2;
+#if TC_CORE_SOKOL_ASSERTS
+    // The injected invalid native names and GL errors would trip sokol's debug
+    // assertions in the core archive itself (unless using the isolated debug backend).
+    if (!std::getenv("TC_SHADOW_DEBUG_BACKEND")) {
+        std::puts("SKIP: native allocation check needs a core built without sokol assertions (NDEBUG)");
+        return 0;
+    }
+#endif
     WindowSettings settings; settings.setSize(64,64); settings.setHighDpi(false); settings.sampleCount = 1;
     return tcCoreTest::runDisplayTest<AllocationApp>(settings,failures,[] { check("native allocation cases completed",completed); });
 }
