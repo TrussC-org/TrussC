@@ -31,3 +31,9 @@ target_include_directories(${ADDON_NAME} PRIVATE
 )
 
 target_link_libraries(${ADDON_NAME} PUBLIC TrussC)
+
+# STL allocation failures must reach the loader's recovery path on Web too.
+if(EMSCRIPTEN)
+    target_compile_options(${ADDON_NAME} PRIVATE -fexceptions)
+    target_link_options(${ADDON_NAME} INTERFACE -fexceptions -sABORTING_MALLOC=0)
+endif()

@@ -35,10 +35,25 @@
 //   - a file with no scene loads from its root nodes; with no nodes it fails
 //   - a 20000-deep node chain loads without recursion; node cycles and
 //     repeated scene nodes fail to load
-// Every failed load logs an Error and leaves the model empty.
+// Failed loads leave the model empty; allocation-failure diagnostics are best effort.
 // =============================================================================
 
 #include <tcxGltf.h>
+#include "../../../../core/tests/common/tcModelAllocationProbe.h"
+
+namespace tcx::gltf::internal {
+void setAllocationHookForTests(bool (*hook)(size_t));
+bool jsonOffsetsFit(size_t bytes);
+bool jsonObjectMembersFit(size_t members);
+bool jsonSkipFits(size_t tokens, size_t members);
+size_t liveParserAllocationsForTests();
+void setParserAllocatorForTests(void* (*allocate)(size_t), void (*release)(void*));
+size_t parserTableBytesForTests();
+size_t parserMemoryLimitForTests(size_t inputBytes);
+void setJsonPaddingForTests(size_t bytes);
+void setJsonObjectMembersForTests(size_t members);
+bool jsonTokenFits(size_t count, size_t length, bool stringToken);
+}
 
 #include <chrono>
 #include <cmath>
@@ -259,6 +274,43 @@ static GltfBuilder texturedTriangle(const string& imageJson) {
     return b;
 }
 
+static size_t parserAllocationCount = 0;
+static size_t rejectParserAllocation = 0;
+static bool observeParserAllocation(size_t bytes) {
+    ++parserAllocationCount;
+    return modelAllocationProbe::observe(bytes) &&
+           (!rejectParserAllocation || parserAllocationCount != rejectParserAllocation);
+}
+
+// Observe actual malloc/free calls independently of registry bookkeeping.
+struct ParserBlock { void* pointer; size_t bytes; };
+static ParserBlock parserBlocks[4096]{};
+static size_t outstandingParserBytes = 0, actualParserAllocations = 0;
+static size_t grantedParserBytes = 0, peakParserBytes = 0, largestParserBlock = 0;
+static void* trackParserMalloc(size_t bytes) {
+    void* pointer = std::malloc(bytes);
+    if (!pointer) return nullptr;
+    for (auto& block : parserBlocks) if (!block.pointer) {
+        block = {pointer, bytes};
+        outstandingParserBytes += bytes;
+        ++actualParserAllocations;
+        grantedParserBytes += bytes;
+        peakParserBytes = (std::max)(peakParserBytes, outstandingParserBytes);
+        largestParserBlock = (std::max)(largestParserBlock, bytes);
+        return pointer;
+    }
+    std::abort(); // Test tracker capacity, never a model acceptance limit.
+}
+static void trackParserFree(void* pointer) {
+    for (auto& block : parserBlocks) if (block.pointer == pointer) {
+        outstandingParserBytes -= block.bytes;
+        block = {};
+        std::free(pointer);
+        return;
+    }
+    std::abort(); // A double free or untracked pointer is a test failure.
+}
+
 static void throwRuntimeError() { throw runtime_error("injected failure"); }
 static void throwInt() { throw 42; }
 
@@ -292,6 +344,335 @@ int main() {
               !model.isLoaded() && model.getNodeCount() == 0);
         setDataPathRoot(oldRoot);
     }
+
+    {
+        const size_t maxInt = static_cast<size_t>(INT_MAX);
+        check("JSON offsets use ptrdiff_t rather than int",
+              gltf_internal::jsonOffsetsFit(static_cast<size_t>(PTRDIFF_MAX)) &&
+              !gltf_internal::jsonOffsetsFit(static_cast<size_t>(PTRDIFF_MAX) + 1));
+        if (PTRDIFF_MAX > INT_MAX)
+            check("JSON bytes above INT_MAX are representable", gltf_internal::jsonOffsetsFit(maxInt + 4096));
+        check("JSON token count fits int and sentinel allocation",
+              gltf_internal::jsonTokenFits(1, 0, false) &&
+              !gltf_internal::jsonTokenFits(maxInt + 1, 0, false));
+        if (sizeof(size_t) > sizeof(int))
+            check("JSON token count at int boundary fits on wide hosts",
+                  gltf_internal::jsonTokenFits(maxInt, 0, false));
+        check("JSON string length leaves room for int terminator addition",
+              gltf_internal::jsonTokenFits(1, maxInt - 1, true) &&
+              !gltf_internal::jsonTokenFits(1, maxInt, true));
+        check("JSON primitive token length fits int",
+              gltf_internal::jsonTokenFits(1, maxInt, false) &&
+              !gltf_internal::jsonTokenFits(1, maxInt + 1, false));
+    }
+
+    {
+        auto path = writeGltf(triangle());
+        ofstream(path, ios::binary | ios::app).write("\0\0\0", 3);
+        GltfModel model;
+        check("glTF trailing NULs match parser end of input", model.load(path).ok() && model.getNodeCount() == 1);
+        auto b = triangle();
+        while (b.json(false).size() % 4 == 0) b.extra += ' ';
+        auto bytes = b.glb();
+        uint32_t length;
+        memcpy(&length, bytes.data() + 12, 4);
+        size_t padding = 0;
+        for (size_t i = 20 + length; i > 20 && bytes[i - 1] == ' '; --i) {
+            bytes[i - 1] = 0;
+            ++padding;
+        }
+        path = g_dir / "nulpad.glb";
+        ofstream(path, ios::binary).write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        check("GLB NUL JSON padding matches parser end of input",
+              padding > 0 && model.load(path).ok() && model.getNodeCount() == 1);
+        if (PTRDIFF_MAX > INT_MAX) {
+            path = writeGltf(triangle());
+            // The size gate sees virtual trailing whitespace, while scanning
+            // and cgltf still receive the small physical document.
+            gltf_internal::setJsonPaddingForTests(static_cast<size_t>(INT_MAX));
+            auto result = model.load(path);
+            gltf_internal::setJsonPaddingForTests(0);
+            check("load admits JSON document size beyond INT_MAX", result.ok() && model.getNodeCount() == 1);
+        }
+        const size_t maxMembers = static_cast<size_t>(INT_MAX) / 2;
+        check("JSON object member product fits signed skip arithmetic",
+              gltf_internal::jsonObjectMembersFit(maxMembers) &&
+              !gltf_internal::jsonObjectMembersFit(maxMembers + 1));
+        check("JSON cumulative skip end includes start and member additions",
+              gltf_internal::jsonSkipFits(maxMembers + 1, maxMembers) &&
+              !gltf_internal::jsonSkipFits(maxMembers + 3, maxMembers) &&
+              !gltf_internal::jsonSkipFits(3, SIZE_MAX));
+        path = writeGltf(triangle());
+        gltf_internal::setJsonObjectMembersForTests(maxMembers);
+        auto result = model.load(path);
+        gltf_internal::setJsonObjectMembersForTests(0);
+        check("load rejects object member product overflow", !result && !model.isLoaded() && model.getNodeCount() == 0);
+        // Each container is below the old product limit, but cumulative skip
+        // accounting cannot be represented. No huge JSON/token fixture needed.
+        gltf_internal::setJsonObjectMembersForTests(maxMembers - 100);
+        result = model.load(path);
+        gltf_internal::setJsonObjectMembersForTests(0);
+        check("load rejects cumulative JSON skip end overflow",
+              !result && !model.isLoaded() && model.getNodeCount() == 0);
+    }
+    for (int kind = 0; kind < 5; ++kind) {
+        auto b = triangle();
+        if (kind == 0) b.views[0] = R"({"buffer":0,"byteOffset":2,"byteLength":36})";
+        if (kind == 1) b.views[0] = R"({"buffer":0,"byteOffset":0,"byteLength":36,"byteStride":14})";
+        if (kind == 2) b.accessors[0] = accessorJson(0, CT_FLOAT, "2", "VEC3", R"(,"byteOffset":2)");
+        if (kind >= 3) {
+            const uint16_t index = 0;
+            const float value[3] = {0, 0, 0};
+            int iv = b.addView(&index, sizeof(index));
+            int vv = b.addView(value, sizeof(value));
+            b.accessors[0] = accessorJson(-1, CT_FLOAT, "3", "VEC3",
+                ",\"sparse\":{\"count\":1,\"indices\":{\"bufferView\":" + to_string(iv) +
+                ",\"componentType\":5123,\"byteOffset\":" + (kind == 3 ? "1" : "0") +
+                "},\"values\":{\"bufferView\":" + to_string(vv) +
+                ",\"byteOffset\":" + (kind == 4 ? "2" : "0") + "}}");
+        }
+        GltfModel model;
+        auto result = model.load(writeGltf(b));
+        check("misaligned accessor reports alignment cause " + to_string(kind),
+              !result && result.message.find("align") != string::npos && model.getNodeCount() == 0);
+    }
+    {
+        // Exercise both legal unpadded tails through the actual load path.
+        for (size_t tail : {size_t(1), size_t(2)}) {
+            auto b = triangle();
+            while (b.bin.size() % 3 != tail) b.bin.push_back(0);
+            string json = b.json();
+            size_t end = json.find('"', json.find(";base64,") + 8);
+            while (json[end - 1] == '=') { json.erase(end - 1, 1); --end; }
+            auto path = g_dir / "unpadded.gltf";
+            ofstream(path, ios::binary) << json;
+            GltfModel model;
+            check("unpadded base64 loads tail " + to_string(tail),
+                  model.load(path).ok() && model.getNodeCount() == 1 &&
+                  model.getNode(0).mesh.getNumVertices() == 3);
+            // One residual character cannot supply a complete decoded byte.
+            json.replace(json.find(";base64,") + 8, end - (json.find(";base64,") + 8), "A");
+            ofstream(path, ios::binary) << json;
+            check("one-character base64 tail rejects the whole model",
+                  !model.load(path) && !model.isLoaded() && model.getNodeCount() == 0);
+        }
+    }
+    {
+        constexpr size_t MiB = 1024 * 1024;
+        check("parse memory floor and factor use overflow-safe arithmetic",
+              gltf_internal::parserMemoryLimitForTests(300000) == 256 * MiB &&
+              gltf_internal::parserMemoryLimitForTests(12 * MiB) == 768 * MiB &&
+              gltf_internal::parserMemoryLimitForTests(SIZE_MAX) == SIZE_MAX);
+        auto materialJson = [](size_t count, bool padded) {
+            string json = R"({"asset":{"version":"2.0"},"nodes":[{}],"materials":[)";
+            string material = padded ? "{}" + string(197, ' ') : "{}";
+            json.reserve(count * (material.size() + 1) + 100);
+            for (size_t i = 0; i < count; ++i) { if (i) json += ','; json += material; }
+            return json + "]}";
+        };
+        auto path = g_dir / "parse-memory.gltf";
+        // ~5.25 MB JSON requests ~2.42 GB of tables. The real 64x limit
+        // rejects the material array before malloc, keeping physical use small.
+        string json = materialJson(1750000, false);
+        ofstream(path, ios::binary) << json;
+        GltfModel model;
+        const size_t limit = (std::max)(256 * MiB, 64 * json.size());
+        gltf_internal::setParserAllocatorForTests(trackParserMalloc, trackParserFree);
+        actualParserAllocations = grantedParserBytes = peakParserBytes = largestParserBlock = 0;
+        WarningCounter logs;
+        string warning;
+        auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+            if (e.level == LogLevel::Warning) warning = e.message;
+        });
+        auto start = chrono::steady_clock::now();
+        auto result = model.load(path);
+        double seconds = chrono::duration<double>(chrono::steady_clock::now() - start).count();
+        size_t reached = gltf_internal::parserTableBytesForTests();
+        printf("parse memory rejection: input=%zu tables-requested=%zu limit=%zu "
+               "malloc-granted=%zu malloc-peak=%zu malloc-largest=%zu seconds=%.6f\n",
+               json.size(), reached, limit, grantedParserBytes, peakParserBytes, largestParserBlock, seconds);
+        check("real parse memory limit rejects the entire file with Warning and Error",
+              !result && !model.isLoaded() && model.getNodeCount() == 0 &&
+              result.error == LoadError::DecodeFailed && logs.errors == 1 && logs.count == 2 &&
+              warning == "[GltfModel] parser table allocations would reach " +
+                         to_string(reached) + " bytes (limit " + to_string(limit) + " bytes)" &&
+              json.size() >= 5000000 && limit > 256 * MiB && reached > limit);
+        // Count only successful calls to the real malloc. Including source
+        // bytes and ownership headers makes this stricter than the table cap.
+        check("over-limit parser request is refused before obtaining memory",
+              actualParserAllocations > 1 && grantedParserBytes <= limit &&
+              largestParserBlock < reached && peakParserBytes <= limit &&
+              outstandingParserBytes == 0 && gltf_internal::liveParserAllocationsForTests() == 0);
+        actualParserAllocations = grantedParserBytes = peakParserBytes = largestParserBlock = 0;
+        json = materialJson(60000, true); // ~12 MB JSON, ~83 MB tables (~7x).
+        ofstream(path, ios::binary) << json;
+        logs.errors = logs.count = 0;
+        start = chrono::steady_clock::now();
+        result = model.load(path);
+        seconds = chrono::duration<double>(chrono::steady_clock::now() - start).count();
+        size_t tables = gltf_internal::parserTableBytesForTests();
+        printf("parse memory ordinary: input=%zu tables=%zu ratio=%.3f limit=%zu "
+               "malloc-granted=%zu malloc-peak=%zu seconds=%.6f\n",
+               json.size(), tables, double(tables) / json.size(), 64 * json.size(),
+               grantedParserBytes, peakParserBytes, seconds);
+        check("NodePerformance-sized ordinary parse loads under real budget",
+              result.ok() && model.isLoaded() && logs.count == 0 && json.size() >= 12000000 &&
+              // Table sizes depend on pointer width: ~7.0x on 64-bit, ~6.1x on wasm32.
+              tables > 60 * MiB && tables < 90 * MiB && tables < 64 * json.size() &&
+              double(tables) / json.size() > 5 && double(tables) / json.size() < 8);
+        check("parse memory rejection permits retry and frees parser storage",
+              gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0);
+        gltf_internal::setParserAllocatorForTests(nullptr, nullptr);
+    }
+    gltf_internal::setAllocationHookForTests(&observeParserAllocation);
+    {
+        GltfBuilder b = triangle();
+        b.bufferLength = 1000000000;
+        auto path = writeGltf(b);
+        GltfModel model;
+        modelAllocationProbe::begin();
+        auto result = model.load(path);
+        modelAllocationProbe::end();
+        check("inline buffer length checked before allocation", !result && !model.isLoaded() &&
+              model.getNodeCount() == 0 && modelAllocationProbe::largest < 65536);
+    }
+    {
+        GltfBuilder b = triangle();
+        b.extra = "\"unused\":" + string(65, '[') + "0" + string(65, ']') + ",";
+        GltfModel model;
+        loadCase("nested JSON exceeds parser depth", b, false, model);
+        b.extra = "\"unused\":" + string(63, '[') + "0" + string(63, ']') + ",";
+        loadCase("JSON at parser depth boundary", b, true, model);
+    }
+    {
+        GltfBuilder b = triangle();
+        b.accessors[0] = accessorJson(0, CT_FLOAT, "18446744073709551616", "VEC3");
+        GltfModel model;
+        loadCase("integer count outside parser width", b, false, model);
+        b = triangle();
+        b.primitive = R"({"attributes":{"POSITION":4294967296},"indices":1})";
+        loadCase("integer reference outside parser width", b, false, model);
+        b = triangle();
+        b.views[0] = R"({"buffer":0,"byteOffset":-1,"byteLength":36})";
+        loadCase("negative buffer offset", b, false, model);
+    }
+    for (bool missingIndices : {false, true}) {
+        GltfBuilder b = triangle();
+        const uint16_t sparseIndex = 1;
+        const float sparseValue[3] = {5, 5, 5};
+        int storedIndex = b.addView(&sparseIndex, sizeof(sparseIndex));
+        int storedValue = b.addView(sparseValue, sizeof(sparseValue));
+        int absentView = static_cast<int>(b.views.size());
+        b.extraBuffers.push_back(R"({"byteLength":12})");
+        b.views.push_back(R"({"buffer":1,"byteLength":12})");
+        b.addAccessor(accessorJson(0, CT_FLOAT, "3", "VEC3",
+            ",\"sparse\":{\"count\":1,\"indices\":{\"bufferView\":" +
+            to_string(missingIndices ? absentView : storedIndex) +
+            ",\"componentType\":5123},\"values\":{\"bufferView\":" +
+            to_string(missingIndices ? storedValue : absentView) + "}}"));
+        b.primitive = R"({"attributes":{"POSITION":3},"indices":1})";
+        GltfModel model;
+        loadCase(missingIndices ? "sparse index storage absent" : "sparse value storage absent", b, false, model);
+    }
+    {
+        auto bytes = triangle().glb();
+        bytes[8] = 20; bytes[9] = bytes[10] = bytes[11] = 0;
+        auto path = g_dir / "length.glb";
+        ofstream(path, ios::binary).write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        GltfModel model;
+        auto result = model.load(path);
+        check("GLB chunks must fit the declared file length", !result && !model.isLoaded());
+    }
+    {
+        // Faults in both the C parser allocator and STL output allocations
+        // must release partial state and allow the same model to load again.
+        auto path = writeGltf(triangle());
+        GltfModel model;
+        for (bool persistent : {false, true}) {
+            for (size_t request : {size_t(1), size_t(8192)}) {
+                check("glTF starts allocation test with a loaded model", model.load(path).ok());
+                LoadResult result;
+                bool escaped = false;
+                modelAllocationProbe::begin(request, persistent);
+                try { result = model.load(path); }
+                catch (const bad_alloc&) { escaped = true; }
+                modelAllocationProbe::end();
+                check(persistent ? "persistent allocation failure returns empty failure" :
+                                   "STL allocation failure returns empty failure",
+                      modelAllocationProbe::failed && !escaped && !result &&
+                      result.error == LoadError::DecodeFailed && !model.isLoaded() && model.getNodeCount() == 0);
+                check("retry after parser allocation failure succeeds", model.load(path).ok());
+            }
+        }
+    }
+    {
+        auto path = writeGltf(triangle());
+        GltfModel model;
+        gltf_internal::setParserAllocatorForTests(trackParserMalloc, trackParserFree);
+        actualParserAllocations = 0;
+        parserAllocationCount = 0;
+        bool ok = model.load(path).ok();
+        size_t allocations = parserAllocationCount;
+        for (size_t nth = 1; nth <= allocations; ++nth) {
+            parserAllocationCount = 0;
+            rejectParserAllocation = nth;
+            auto result = model.load(path);
+            ok = ok && !result && !model.isLoaded() && model.getNodeCount() == 0;
+            check("failed parse releases every registry allocation",
+                  gltf_internal::liveParserAllocationsForTests() == 0 &&
+                  actualParserAllocations > 0 && outstandingParserBytes == 0);
+            rejectParserAllocation = 0;
+        }
+        check("every parser allocation can fail cleanly", ok && allocations > 10);
+        check("retry after every parser allocation failure succeeds", model.load(path).ok());
+        check("actual parser allocator has no outstanding bytes", outstandingParserBytes == 0);
+        // Also reclaim deliberately leaked blocks in cleanup-mutation runs.
+        for (auto& block : parserBlocks) if (block.pointer) trackParserFree(block.pointer);
+        gltf_internal::setParserAllocatorForTests(nullptr, nullptr);
+    }
+    {
+        Pixels pixels;
+        pixels.allocate(2, 2, 4);
+        pixels.save(g_dir / "sweep.png");
+        for (int shape = 0; shape < 3; ++shape) {
+            auto b = shape == 2 ? texturedTriangle(R"({"uri":"sweep.png"})") : triangle();
+            auto path = shape == 1 ? writeGlb(b) : writeGltf(b);
+            if (shape == 2) {
+                Json document = Json::parse(b.json());
+                document["buffers"][0]["uri"] = "sweep.bin";
+                ofstream(g_dir / "sweep.bin", ios::binary).write(reinterpret_cast<const char*>(b.bin.data()), b.bin.size());
+                ofstream(path, ios::binary) << document.dump();
+            }
+            { GltfModel warm; warm.load(path); }
+            size_t requests = 0;
+            { GltfModel model;
+              modelAllocationProbe::begin();
+              model.load(path);
+              modelAllocationProbe::end();
+              requests = modelAllocationProbe::requests; }
+            for (bool persistent : {false, true}) {
+                bool clean = requests > 0;
+                for (size_t nth = 1; nth <= requests; ++nth) {
+                    // Retire prior dummy resources between cases, as an app
+                    // does after a frame, before enabling fault injection.
+                    sg_commit();
+                    tc::internal::drainPendingGpuDestroys();
+                    GltfModel model;
+                    LoadResult result;
+                    bool escaped = false;
+                    modelAllocationProbe::beginNth(nth, persistent);
+                    try { result = model.load(path); } catch (...) { escaped = true; }
+                    modelAllocationProbe::end();
+                    clean = clean && modelAllocationProbe::failed && !escaped &&
+                            (result.ok() || (result.error == LoadError::DecodeFailed && !model.isLoaded() && model.getNodeCount() == 0));
+                    clean = clean && model.load(path).ok();
+                }
+                check(persistent ? "glTF every allocation: persistent recovery and retry" :
+                                   "glTF every allocation: single recovery and retry", clean);
+            }
+        }
+    }
+    gltf_internal::setAllocationHookForTests(nullptr);
 
     // Decode each URI once, including escaped '%' and UTF-8 bytes, while
     // leaving the literal '%' in the model's parent directory untouched.
@@ -910,6 +1291,15 @@ int main() {
         check("same file without the hook: both primitives", m.getNodeCount() == 2);
     }
 
+    {
+        GltfModel model;
+        string warning;
+        gltf_internal::setTextureLoadHookForTests(+[] { throw length_error("mesh vertex count exceeds the Mesh index width"); });
+        loadCase("mesh width failure", texturedTriangle(R"({"uri":"missing.png"})"), false, model, &warning);
+        gltf_internal::setTextureLoadHookForTests(nullptr);
+        check("mesh width failure preserves the cause",
+              warning.find("Mesh index width") != string::npos && warning.find("not enough memory") == string::npos);
+    }
     // ----- scenes and node hierarchy ---------------------------------------------
     {
         // No scenes: every node without a parent is a root. Node 1 is a
