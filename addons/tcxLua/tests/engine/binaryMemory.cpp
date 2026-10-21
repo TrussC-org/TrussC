@@ -28,13 +28,20 @@ int main() {
     for (int i = 0; i < 4000; ++i) source += "value = 7\n";
     int status = luaL_loadbuffer(L, source.data(), source.size(), "memory");
     std::vector<char> binary;
-    auto writer = [](lua_State*, const void* bytes, size_t size, void* context) -> int {
-        auto& out = *static_cast<std::vector<char>*>(context);
-        const auto* begin = static_cast<const char*>(bytes);
-        out.insert(out.end(), begin, begin + size);
-        return 0;
+    auto writer = [](lua_State*, const void* bytes, size_t size, void* context) noexcept -> int {
+        try {
+            auto& out = *static_cast<std::vector<char>*>(context);
+            const auto* begin = static_cast<const char*>(bytes);
+            out.insert(out.end(), begin, begin + size);
+            return 0;
+        } catch (...) { return 1; }
     };
     if (!status) status = lua_dump(L, writer, &binary, 0);
+    if (status || binary.empty()) {
+        std::fputs("compile/dump tight-memory fixture: FAIL\n", stderr);
+        lua_close(L);
+        return 1;
+    }
     lua_settop(L, 0);
     lua_gc(L, LUA_GCCOLLECT);
     const size_t before = memory.live;

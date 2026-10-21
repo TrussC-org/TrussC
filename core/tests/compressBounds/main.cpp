@@ -11,14 +11,14 @@
 #include <sys/mman.h>
 #endif
 namespace {
-size_t largestRequest = 0;
+size_t largestRequest = 0, injectedRefusals = 0;
 size_t watchedSize = 0, watchedRequests = 0;
 bool track = false, failNext = false, failEveryAllocation = false;
 }
 void* operator new(size_t bytes) {
     if (track && bytes > largestRequest) largestRequest = bytes;
     if (track && bytes == watchedSize) ++watchedRequests;
-    if (failNext || failEveryAllocation) { failNext = false; throw std::bad_alloc(); }
+    if (failNext || failEveryAllocation) { ++injectedRefusals; failNext = false; throw std::bad_alloc(); }
     if (void* result = std::malloc(bytes ? bytes : 1)) return result;
     throw std::bad_alloc();
 }
@@ -89,19 +89,21 @@ int main() {
         check("LZ4 short literal-only blocks remain valid", shortLiterals);
     }
     std::vector<uint8_t>().swap(out);
+    injectedRefusals = 0;
     failNext = true;
     bool allocationResult = true;
     try { allocationResult = trussc::decompress(encoded.data(), encoded.size(), out, input.size(), trussc::Codec::LZ4); }
     catch (...) { check("allocation failure contained", false); }
     failNext = false;
-    check("allocation failure returns empty failure", !allocationResult && out.empty());
+    check("allocation failure returns empty failure", injectedRefusals > 0 && !allocationResult && out.empty());
     std::vector<uint8_t>().swap(out);
+    injectedRefusals = 0;
     failEveryAllocation = true;
     bool persistentResult = true, persistentThrew = false;
     try { persistentResult = trussc::decompress(encoded.data(), encoded.size(), out, input.size(), trussc::Codec::LZ4); }
     catch (...) { persistentThrew = true; }
     failEveryAllocation = false;
-    check("persistent allocation failure and reporting are contained", !persistentResult && !persistentThrew && out.empty());
+    check("persistent allocation failure and reporting are contained", injectedRefusals > 0 && !persistentResult && !persistentThrew && out.empty());
     check("next valid load recovers", trussc::decompress(encoded.data(), encoded.size(), out, input.size(), trussc::Codec::LZ4));
     check("empty identity input", trussc::decompress(nullptr, 0, out, 0, trussc::Codec::None) && out.empty());
     const std::vector<uint8_t> identitySource(1500, 23);

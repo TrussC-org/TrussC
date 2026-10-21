@@ -3,24 +3,58 @@
 #include <cstdio>
 #include <chrono>
 #include <fstream>
+#include <new>
+#ifdef _WIN32
+#include <malloc.h>
+#endif
 #ifdef __linux__
 #include <unistd.h>
 #endif
-#ifdef TC_LOCAL_TEXT_WRAP_NEW
+#if defined(TC_LOCAL_TEXT_WRAP_NEW) || defined(_WIN32)
 namespace {
 thread_local size_t failAllocationAt = 0;
 thread_local bool failEveryAllocation = false;
 thread_local size_t largestAllocation = 0;
-}
-extern "C" void* __real__Znwm(size_t);
-extern "C" void* __wrap__Znwm(size_t size) {
+thread_local size_t injectedRefusals = 0;
+void recordAllocation(size_t size) {
     largestAllocation = std::max(largestAllocation, size);
     if (failAllocationAt && size >= failAllocationAt) {
+        ++injectedRefusals;
         if (!failEveryAllocation) failAllocationAt = 0;
         throw std::bad_alloc();
     }
+}
+}
+#ifdef TC_LOCAL_TEXT_WRAP_NEW
+extern "C" void* __real__Znwm(size_t);
+extern "C" void* __wrap__Znwm(size_t size) {
+    recordAllocation(size);
     return __real__Znwm(size);
 }
+#else
+// This test owns its binary, so Windows can replace new without affecting
+// other tests. Thresholds tolerate STL padding; counters prove each refusal.
+void* operator new(size_t size) {
+    recordAllocation(size);
+    if (void* p = std::malloc(size ? size : 1)) return p;
+    throw std::bad_alloc();
+}
+void* operator new[](size_t size) { return ::operator new(size); }
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete[](void* p) noexcept { std::free(p); }
+void operator delete(void* p, size_t) noexcept { std::free(p); }
+void operator delete[](void* p, size_t) noexcept { std::free(p); }
+void* operator new(size_t size, std::align_val_t align) {
+    recordAllocation(size);
+    if (void* p = _aligned_malloc(size ? size : 1, static_cast<size_t>(align))) return p;
+    throw std::bad_alloc();
+}
+void* operator new[](size_t size, std::align_val_t align) { return ::operator new(size, align); }
+void operator delete(void* p, std::align_val_t) noexcept { _aligned_free(p); }
+void operator delete[](void* p, std::align_val_t align) noexcept { ::operator delete(p, align); }
+void operator delete(void* p, size_t, std::align_val_t align) noexcept { ::operator delete(p, align); }
+void operator delete[](void* p, size_t, std::align_val_t align) noexcept { ::operator delete(p, align); }
+#endif
 #endif
 namespace {
 int runLocalTextRead() {
@@ -88,7 +122,7 @@ int runLocalTextRead() {
         }
 #endif
     }
-#ifdef TC_LOCAL_TEXT_WRAP_NEW
+#if defined(TC_LOCAL_TEXT_WRAP_NEW) || defined(_WIN32)
     int allocationErrors = 0;
     {
         auto listener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
@@ -96,29 +130,36 @@ int runLocalTextRead() {
         });
         bool allocationThrew = false;
         std::string failedRead;
+        injectedRefusals = 0;
         failAllocationAt = 64 * 1024;
         try { failedRead = tc::loadTextFile(path); } catch (...) { allocationThrew = true; }
         failAllocationAt = 0;
-        check("text allocation failure returns empty Error", !allocationThrew && failedRead.empty() && allocationErrors == 1);
+        check("text allocation failure returns empty Error", injectedRefusals > 0 && !allocationThrew && failedRead.empty() && allocationErrors == 1);
         reader.open(path);
         std::string().swap(output);
         allocationErrors = 0;
+        injectedRefusals = 0;
         failAllocationAt = 1024 * 1024;
         bool lineResult = reader.readLine(output);
         failAllocationAt = 0;
-        check("line allocation failure returns empty Error", !lineResult && output.empty() && output.capacity() == std::string().capacity() && allocationErrors == 1);
+        check("line allocation failure returns empty Error", injectedRefusals > 0 && !lineResult && output.empty() && output.capacity() == std::string().capacity() && allocationErrors == 1);
         reader.close();
         allocationThrew = false;
-        failAllocationAt = 1; failEveryAllocation = true;
+        injectedRefusals = 0;
+        // 64 bytes is comfortably above MSVC Debug's two-pointer iterator
+        // proxy. Refuse payload/report growth, allowing noexcept empty strings.
+        constexpr size_t persistentFaultBytes = 64;
+        failAllocationAt = persistentFaultBytes; failEveryAllocation = true;
         try { failedRead = tc::loadTextFile(path); } catch (...) { allocationThrew = true; }
         failAllocationAt = 0; failEveryAllocation = false;
-        check("persistent text/report allocation failure contained", !allocationThrew && failedRead.empty());
+        check("persistent text/report allocation failure contained", injectedRefusals > 0 && !allocationThrew && failedRead.empty());
         reader.open(path);
         std::string().swap(output);
-        failAllocationAt = 1; failEveryAllocation = true;
+        injectedRefusals = 0;
+        failAllocationAt = persistentFaultBytes; failEveryAllocation = true;
         lineResult = reader.readLine(output);
         failAllocationAt = 0; failEveryAllocation = false;
-        check("persistent line/report allocation failure contained", !lineResult && output.empty());
+        check("persistent line/report allocation failure contained", injectedRefusals > 0 && !lineResult && output.empty());
         reader.close();
     }
 #endif
@@ -127,7 +168,10 @@ int runLocalTextRead() {
     const auto largePath = dir / "large.txt";
     { std::ofstream out(largePath, std::ios::binary); }
     constexpr size_t noticeBytes = 256u * 1024u * 1024u;
-    tc::fs::resize_file(largePath, noticeBytes);
+    // Leave unread bytes when the Notice fires: libc++ filebuf does not
+    // pick up appends after it has already reached EOF.
+    constexpr size_t fixtureBytes = noticeBytes + 8u * 1024u;
+    tc::fs::resize_file(largePath, fixtureBytes);
     int notices = 0, warnings = 0;
     {
         auto listener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
@@ -138,13 +182,13 @@ int runLocalTextRead() {
             }
             if (event.level == tc::LogLevel::Warning) ++warnings;
         });
-#ifdef TC_LOCAL_TEXT_WRAP_NEW
+#if defined(TC_LOCAL_TEXT_WRAP_NEW) || defined(_WIN32)
         largestAllocation = 0;
 #endif
         auto large = tc::loadTextFile(largePath);
         check("large local read notices once and includes growth", notices == 1 && warnings == 0 &&
-              large.size() == noticeBytes + 20 && large.substr(noticeBytes) == "appended during read");
-#ifdef TC_LOCAL_TEXT_WRAP_NEW
+              large.size() == fixtureBytes + 20 && large.substr(fixtureBytes) == "appended during read");
+#if defined(TC_LOCAL_TEXT_WRAP_NEW) || defined(_WIN32)
         check("single allocation stays proportional to bytes read", largestAllocation <= 2 * (large.size() + 65536));
 #endif
     }

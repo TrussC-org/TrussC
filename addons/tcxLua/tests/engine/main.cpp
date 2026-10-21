@@ -17,9 +17,14 @@ extern "C" {
 
 namespace {
 bool track = false, failNext = false, failEveryAllocation = false;
-size_t allocated = 0;
+size_t failNextMinBytes = 0;
+size_t allocated = 0, injectedRefusals = 0;
 void recordAllocation(size_t bytes) {
-    if (failNext || failEveryAllocation) { failNext = false; throw std::bad_alloc(); }
+    // Persistent faults must allow MSVC Debug's small iterator proxies, whose
+    // allocation is inside noexcept empty-container constructors.
+    if ((failNext && bytes >= failNextMinBytes) || (failEveryAllocation && bytes >= 64)) {
+        ++injectedRefusals; failNext = false; throw std::bad_alloc();
+    }
     if (track) { allocated += bytes; if (allocated > 8u*1024u*1024u) throw std::bad_alloc(); }
 }
 struct Probe {
@@ -102,7 +107,7 @@ int TCXLUA_ENGINE_TEST_ENTRY() {
     check("text mode rejects binary on first reader call", status == LUA_ERRSYNTAX && textMode.count == 7);
     lua_pop(state, 1);
 
-    auto writerLarge = [](lua_State*, const void* bytes, size_t size, void* context) -> int {
+    auto writerLarge = [](lua_State*, const void* bytes, size_t size, void* context) noexcept -> int {
         auto* f = static_cast<FILE*>(context);
         return std::fwrite(bytes, 1, size, f) != size;
     };
@@ -170,7 +175,7 @@ int TCXLUA_ENGINE_TEST_ENTRY() {
         check("load io.lines 8192 has no cumulative cap", status == 0);
         lua_settop(state, 0); std::remove("tc-reader.lua");
     }
-    status = luaL_dostring(state,
+    const char* finalizerSource =
         "gcRuns=0; gcFailures=0; collectgarbage('stop'); "
 #if LUA_VERSION_NUM >= 502
         "for i=1,2000 do setmetatable({}, {__gc=function() gcRuns=gcRuns+1; "
@@ -183,7 +188,8 @@ int TCXLUA_ENGINE_TEST_ENTRY() {
 #else
         "end end; "
 #endif
-        "collectgarbage('restart')");
+        "collectgarbage('restart')";
+    status = luaL_dostring(state, finalizerSource);
     std::string gcSource;
     for (int i=0; i<20000; ++i) gcSource += "function f" + std::to_string(i) + "(a,b) local c=a*7+b; if c>10 then return c-1 end return c end\n";
     check("finalizer setup", status == 0);
@@ -197,12 +203,27 @@ int TCXLUA_ENGINE_TEST_ENTRY() {
     for (int i = 0; i < 4000; ++i) source += "value = 7\n";
     check("compile generated chunk", luaL_loadbuffer(state, source.data(), source.size(), "bounds") == 0);
     std::vector<char> binary;
-    auto writer = [](lua_State*, const void* bytes, size_t size, void* context) -> int {
-        auto& out = *static_cast<std::vector<char>*>(context);
-        const auto* begin = static_cast<const char*>(bytes);
-        out.insert(out.end(), begin, begin + size);
-        return 0;
+    auto writer = [](lua_State*, const void* bytes, size_t size, void* context) noexcept -> int {
+        try {
+            auto& out = *static_cast<std::vector<char>*>(context);
+            const auto* begin = static_cast<const char*>(bytes);
+            out.insert(out.end(), begin, begin + size);
+            return 0;
+        } catch (...) { return 1; }
     };
+    bool dumpThrew = false;
+    injectedRefusals = 0;
+    failNext = true;
+    int failedDump = 0;
+    try {
+#if LUA_VERSION_NUM < 503 && !defined(lua_dump)
+        failedDump = lua_dump(state, writer, &binary);
+#else
+        failedDump = lua_dump(state, writer, &binary, 0);
+#endif
+    } catch (...) { dumpThrew = true; }
+    failNext = false;
+    check("dump writer contains allocation failure", injectedRefusals > 0 && !dumpThrew && failedDump != 0);
 #if LUA_VERSION_NUM < 503 && !defined(lua_dump)
     status = lua_dump(state, writer, &binary);
 #else
@@ -301,17 +322,44 @@ int TCXLUA_ENGINE_TEST_ENTRY() {
     track = false;
     check("long identifier suggestion uses linear storage", !threw && allocated < 1024u*1024u &&
           issues.size() == 1 && issues[0].name == "missingName" && issues[0].suggestion.empty());
-    failNext = true;
-    auto allocationFailure = tcxLuaLintUndefinedGlobals(state, files);
+    // Lua allocates through its native allocator, independently of global new.
+    // Arm only once compilation starts, after the list sentinel exists. Skip
+    // small allocations so FileScan's Debug iterator proxies finish construction;
+    // repeated reads then force a recoverable reads.emplace_back growth >1 KiB.
+    std::string faultSource;
+    for (int i = 0; i < 128; ++i) faultSource += "local value = missingName\n";
+    const std::vector<std::pair<std::string, std::string>> faultFiles{{"scan-storage", faultSource}};
+    struct ArmLintFailure {
+        lua_Alloc previous;
+        void* data;
+        bool armed = false;
+        static void* allocate(void* context, void* ptr, size_t oldSize, size_t size) noexcept {
+            auto& hook = *static_cast<ArmLintFailure*>(context);
+            if (size && !hook.armed) { hook.armed = true; failNext = true; }
+            return hook.previous(hook.data, ptr, oldSize, size);
+        }
+    };
+    check("prepare lint fault stack", lua_checkstack(state, 64) != 0);
+    ArmLintFailure hook{};
+    hook.previous = lua_getallocf(state, &hook.data);
+    injectedRefusals = 0;
+    failNextMinBytes = 1024;
+    lua_setallocf(state, ArmLintFailure::allocate, &hook);
+    auto allocationFailure = tcxLuaLintUndefinedGlobals(state, faultFiles);
+    lua_setallocf(state, hook.previous, hook.data);
     failNext = false;
-    check("lint allocation failure is diagnostic", allocationFailure.size() == 1 && allocationFailure[0].chunk == "long-name");
+    failNextMinBytes = 0;
+    check("lint allocation failure is diagnostic", hook.armed && injectedRefusals > 0 &&
+          allocationFailure.size() == 1 && allocationFailure[0].chunk == "scan-storage" &&
+          allocationFailure[0].line == 0 && allocationFailure[0].name.find("lint check failed: ") == 0);
     std::vector<LuaLintIssue> unavailableDiagnostic;
     bool persistentThrew = false;
+    injectedRefusals = 0;
     failEveryAllocation = true;
     try { unavailableDiagnostic = tcxLuaLintUndefinedGlobals(state, files); }
     catch (...) { persistentThrew = true; }
     failEveryAllocation = false;
-    check("persistent lint/report allocation failure contained", !persistentThrew && unavailableDiagnostic.empty());
+    check("persistent lint/report allocation failure contained", injectedRefusals > 0 && !persistentThrew && unavailableDiagnostic.empty());
     auto typo = tcxLuaLintUndefinedGlobals(state, {{"typo", "local thing = 1; return thign"}});
     check("transposition suggestion", typo.size() == 1 && typo[0].suggestion == "thing");
     const std::pair<const char*, const char*> suggestionCases[] = {

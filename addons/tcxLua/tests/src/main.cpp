@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace std;
@@ -60,11 +61,119 @@ static fs::path writeFile(const fs::path& dir, const string& name, const string&
     return p;
 }
 
-int main() {
-    check("engine load/lint regressions", runLuaEngineTests() == 0);
+static bool preCompileAllocationFailure(const fs::path& dir, bool solPanic) {
+    struct Memory {
+        bool deny = false;
+        bool solPanic = false;
+        size_t refused = 0, panics = 0;
+        static void* allocate(void* context, void* ptr, size_t oldSize, size_t size) noexcept {
+            auto& memory = *static_cast<Memory*>(context);
+            if (!size) { std::free(ptr); return nullptr; }
+            if (memory.deny && (!ptr || size > oldSize)) { ++memory.refused; return nullptr; }
+            return std::realloc(ptr, size);
+        }
+        static int panic(lua_State* state) {
+            void* context = nullptr;
+            lua_getallocf(state, &context);
+            auto& memory = *static_cast<Memory*>(context);
+            ++memory.panics;
+            if (memory.solPanic) return sol::default_at_panic(state);
+            std::fputs("FAIL: panic during pre-compile allocation regression\n", stderr);
+            std::_Exit(87);
+        }
+    } memory;
+    memory.solPanic = solPanic;
+    const auto path = writeFile(dir, "pre-compile.lua", "");
+    sol::state lua(sol::default_at_panic, Memory::allocate, &memory);
+    lua_State* raw = lua.lua_state();
+    lua_atpanic(raw, Memory::panic);
+    if (!lua_checkstack(raw, 64)) return false;
+    lua_gc(raw, LUA_GCCOLLECT, 0);
+    // Preserve several different values, including values below the top. A
+    // restored height alone cannot detect a panic that overwrote caller slots.
+    const int base = lua_gettop(raw);
+    lua_pushboolean(raw, 1);
+    lua_pushinteger(raw, 973);
+    lua_pushliteral(raw, "caller sentinel");
+    lua_newtable(raw);
+    const void* table = lua_topointer(raw, -1);
+    const int top = lua_gettop(raw);
+    bool result = true, threw = false;
+    // State setup, stack reservation and every C++ object above predate the
+    // fault. Refuse native Lua growth before even constructing the handler.
+    memory.deny = true;
+    try { result = tcxLua::runFile(lua, path); } catch (...) { threw = true; }
+    memory.deny = false;
+    return memory.refused > 0 && memory.panics == 0 && !result && !threw && lua_gettop(raw) == top &&
+        lua_type(raw, base + 1) == LUA_TBOOLEAN && lua_toboolean(raw, base + 1) &&
+        lua_type(raw, base + 2) == LUA_TNUMBER && lua_tointeger(raw, base + 2) == 973 &&
+        lua_type(raw, base + 3) == LUA_TSTRING &&
+        string_view(lua_tostring(raw, base + 3)) == "caller sentinel" &&
+        lua_type(raw, base + 4) == LUA_TTABLE && lua_topointer(raw, base + 4) == table;
+}
+
+// The large-load Notice is delivered after compilation and before execution.
+// Use that existing boundary to refuse native Lua growth, not C++ allocations.
+static bool postCompileAllocationFailure(const fs::path& dir) {
+    struct Memory {
+        bool deny = false;
+        size_t refused = 0;
+        static void* allocate(void* context, void* ptr, size_t oldSize, size_t size) noexcept {
+            auto& memory = *static_cast<Memory*>(context);
+            if (!size) { std::free(ptr); return nullptr; }
+            if (memory.deny && (!ptr || size > oldSize)) { ++memory.refused; return nullptr; }
+            return std::realloc(ptr, size);
+        }
+    } memory;
+    sol::state lua(sol::default_at_panic, Memory::allocate, &memory);
+    lua_State* raw = lua.lua_state();
+    int ref;
+    do { lua_pushboolean(raw, 1); ref = luaL_ref(raw, LUA_REGISTRYINDEX); } while (ref < 1024);
+    luaL_unref(raw, LUA_REGISTRYINDEX, 1024);
+    const auto path = dir / "post-compile.lua";
+    {
+        ofstream file(path, ios::binary);
+        const string comment = "--" + string(8190, 'x') + "\n";
+        for (int i = 0; i < 32768; ++i) file << comment;
+        file << "return {}\n";
+        if (!file) return false;
+    }
+    const int top = lua_gettop(raw);
+    int compiled = 0, errors = 0;
+    auto listener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
+        if (event.level == tc::LogLevel::Notice &&
+            event.message.find("Loading a large local script") != string::npos &&
+            // The protected setup frame contains its context, handler and chunk.
+            lua_gettop(raw) == 3 && lua_isfunction(raw, -2) && lua_isfunction(raw, -1)) {
+            ++compiled;
+            memory.deny = true;
+        }
+        if (memory.deny && event.level == tc::LogLevel::Error) ++errors;
+    });
+    bool result = true, threw = false;
+    try { result = tcxLua::runFile(lua, path); } catch (...) { threw = true; }
+    memory.deny = false;
+    fs::remove(path);
+    return compiled == 1 && memory.refused > 0 && errors == 1 &&
+        !result && !threw && lua_gettop(raw) == top;
+}
+
+int main(int argc, char** argv) {
     fs::path dir = fs::temp_directory_path() /
         ("tcxLua-tests-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(dir);
+    check("pre-compile allocation failure: custom panic", preCompileAllocationFailure(dir, false));
+    check("pre-compile allocation failure: sol panic", preCompileAllocationFailure(dir, true));
+    if (argc > 1 && string(argv[1]) == "--pre-compile-allocation") {
+        fs::remove_all(dir);
+        return g_fail ? 1 : 0;
+    }
+    check("post-compile Lua allocation failure contained", postCompileAllocationFailure(dir));
+    if (argc > 1 && string(argv[1]) == "--post-compile-allocation") {
+        fs::remove_all(dir);
+        return g_fail ? 1 : 0;
+    }
+    check("engine load/lint regressions", runLuaEngineTests() == 0);
 
     tcxLua tcx;
     auto lua = tcx.getLuaState();
@@ -86,10 +195,11 @@ int main() {
     check("large source ran", L["largeCommentLoaded"].get_or(0) == 1);
     const int beforeFailedLoad = lua_gettop(L.lua_state());
     bool persistentResult = true, persistentThrew = false;
+    injectedRefusals = 0;
     failEveryAllocation = true;
     try { persistentResult = tcxLua::runFile(L, largeComment); } catch (...) { persistentThrew = true; }
     failEveryAllocation = false;
-    check("persistent load/report allocation failure contained", !persistentResult && !persistentThrew &&
+    check("persistent load/report allocation failure contained", injectedRefusals > 0 && !persistentResult && !persistentThrew &&
           lua_gettop(L.lua_state()) == beforeFailedLoad);
     const auto largeLiteral = dir / "large-literal.lua";
     {
@@ -112,11 +222,13 @@ int main() {
     int compileStatus = luaL_loadbuffer(raw, bytecodeSource.data(), bytecodeSource.size(), "bounds");
     check("compile generated chunk", compileStatus == 0);
     vector<char> bytecode;
-    auto writer = [](lua_State*, const void* bytes, size_t size, void* data) -> int {
-        auto& output = *static_cast<vector<char>*>(data);
-        const auto* begin = static_cast<const char*>(bytes);
-        output.insert(output.end(), begin, begin + size);
-        return 0;
+    auto writer = [](lua_State*, const void* bytes, size_t size, void* data) noexcept -> int {
+        try {
+            auto& output = *static_cast<vector<char>*>(data);
+            const auto* begin = static_cast<const char*>(bytes);
+            output.insert(output.end(), begin, begin + size);
+            return 0;
+        } catch (...) { return 1; }
     };
 #if LUA_VERSION_NUM < 503 && !defined(lua_dump)
     int dumpStatus = lua_dump(raw, writer, &bytecode);
@@ -138,6 +250,10 @@ int main() {
         "function keyPressed(key) return string.char(key) end\n");
     fs::path syntaxFile = writeFile(dir, "syntax.lua", "function draw(\n  x = = 1\n");
     fs::path runtimeFile = writeFile(dir, "runtime.lua", "error('top-level error')\n");
+    fs::path tracebackFile = writeFile(dir, "startup.lua",
+        "local function initialize() error('startup failed', 0) end;\ninitialize()\n");
+    fs::path numericErrorFile = writeFile(dir, "numeric-error.lua", "error(42)\n");
+    fs::path returnsFile = writeFile(dir, "returns.lua", "return 1, 2, 3\n");
     fs::path unicodeDir = dir / fs::path(u8"日本語");
     fs::create_directories(unicodeDir);
     fs::path unicodeFile = unicodeDir / fs::path(u8"スクリプト.lua");
@@ -151,6 +267,22 @@ int main() {
     check("runFile: syntax error names the file", errors.size() == 1 &&
         errors.back().find("syntax.lua:") != string::npos);
     checkNoThrow("runFile: top-level error() returns false", false, [&] { return tcxLua::runFile(L, runtimeFile); });
+    errors.clear();
+    checkNoThrow("runFile: startup error returns false", false, [&] { return tcxLua::runFile(L, tracebackFile); });
+    check("runFile: startup traceback names file and both frames", errors.size() == 1 &&
+        errors.back().find("startup failed") != string::npos &&
+        errors.back().find("stack traceback:") != string::npos &&
+        errors.back().find("startup.lua:1:") != string::npos &&
+        errors.back().find("initialize") != string::npos &&
+        errors.back().find("startup.lua:2:") != string::npos &&
+        errors.back().find("main chunk") != string::npos);
+    lua_pushboolean(raw, 1);
+    const int sentinelTop = lua_gettop(raw);
+    checkNoThrow("runFile: numeric error returns false", false, [&] { return tcxLua::runFile(L, numericErrorFile); });
+    check("runFile: error preserves caller stack", lua_gettop(raw) == sentinelTop && lua_toboolean(raw, -1));
+    checkNoThrow("runFile: returned values are discarded", true, [&] { return tcxLua::runFile(L, returnsFile); });
+    check("runFile: success preserves caller stack", lua_gettop(raw) == sentinelTop && lua_toboolean(raw, -1));
+    lua_pop(raw, 1);
     errors.clear();
     checkNoThrow("runFile: missing file returns false", false, [&] { return tcxLua::runFile(L, dir / "missing.lua"); });
     check("runFile: missing file logs an error", errors.size() == 1 &&
