@@ -20,7 +20,7 @@ public:
 
     // Deepest bundle nesting fromBytes() accepts, counting the outermost
     // bundle as level 1. Data nested deeper fails to parse as a whole.
-    // Bound (security): untrusted bundles can nest recursively; a depth cap bounds stack memory. Overflow rejects the bundle.
+    // Bound (security): untrusted bundles can nest recursively; a depth cap bounds stack memory. Overflow rejects the whole packet; the receiver counts rejected datagrams.
     static constexpr int MAX_NESTING_DEPTH = 16;
 
     OscBundle() : timetag_(TIMETAG_IMMEDIATELY) {}
@@ -91,6 +91,8 @@ public:
     // truncated (its size runs past the end of the data), or any nested
     // message or bundle fails to parse (see OscMessage::fromBytes()): the
     // whole bundle is rejected, not a part of it.
+    // Allocation-free preflight also limits the whole outer packet to
+    // 65,536 bytes and 4096 bundle elements/argument tags combined.
     static OscBundle fromBytes(const uint8_t* data, size_t size, bool& ok);
     // Same, and paddingMissing tells whether any message in the bundle ends
     // before its zero padding to 4 bytes (it still parses, as in

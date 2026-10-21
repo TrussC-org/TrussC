@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <new>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -121,7 +122,7 @@ bool UdpSocket::State::bind(int port, bool startReceiving) {
     logNotice() << "UDP socket bound to port " << port;
 
     if (startReceiving) {
-        this->startReceiving();
+        return this->startReceiving();
     }
 
     return true;
@@ -296,10 +297,10 @@ int UdpSocket::State::receive(void* buffer, size_t bufferSize, std::string& remo
 // ---------------------------------------------------------------------------
 // Receive thread
 // ---------------------------------------------------------------------------
-void UdpSocket::State::startReceiving() {
-    if (socket_->handle == INVALID_SOCKET_HANDLE) return;
+bool UdpSocket::State::startReceiving() {
+    if (socket_->handle == INVALID_SOCKET_HANDLE) return false;
     if (receiving_.load()) {
-        return;  // Already receiving
+        return true;  // Already receiving
     }
 
     // A receive thread that a listener's stopReceiving() or close() let go
@@ -307,6 +308,13 @@ void UdpSocket::State::startReceiving() {
     // the new one. The calling thread itself, if kept, stays.
     keptThreads_.joinOthers();
 
+    // Every run has its own State; never resize a retired run's live buffer.
+    try {
+        if (receiveBuffer_.empty()) receiveBuffer_.resize(RECEIVE_BUFFER_SIZE);
+    } catch (const std::bad_alloc&) {
+        notifyError("Failed to allocate UDP receive buffer");
+        return false;
+    }
     shouldStop_ = false;
     receiving_ = true;
 
@@ -319,6 +327,7 @@ void UdpSocket::State::startReceiving() {
         setNonBlocking(true);
         updateListener_ = events().update.listen([state = shared_from_this()] { state->processNetwork(); }, EventPriority::BeforeApp);
     }
+    return true;
 }
 
 void UdpSocket::State::stopReceiving() {

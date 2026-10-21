@@ -68,7 +68,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
         bool send(const std::string& message);
         int receive(void* buffer, size_t bufferSize);
         int receive(void* buffer, size_t bufferSize, std::string& remoteHost, int& remotePort);
-        void startReceiving();
+        bool startReceiving();
         void stopReceiving();
         bool isReceiving() const { return receiving_.load(); }
         bool setNonBlocking(bool nonBlocking);
@@ -122,7 +122,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
         EventListener updateListener_;
         // Bound (platform): a UDP datagram fits within the IP length limit; a fixed receive buffer avoids per-packet growth. Overflow truncates an oversized datagram on POSIX or fails the receive on Windows.
         static constexpr size_t RECEIVE_BUFFER_SIZE = 65536;
-        std::vector<char> receiveBuffer_ = std::vector<char>(RECEIVE_BUFFER_SIZE);
+        std::vector<char> receiveBuffer_; // allocated only before publishing a receive run
     };
     std::shared_ptr<Socket> socketOwner_ = std::make_shared<Socket>();
     internal::AtomicSharedPtr<State> state_{std::make_shared<State>(socketOwner_)};
