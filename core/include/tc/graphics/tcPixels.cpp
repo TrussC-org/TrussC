@@ -349,12 +349,23 @@ LoadResult Pixels::loadFromMemory(const unsigned char* buffer, int len) try {
     return internal::imageDecodeOutOfMemory();
 }
 
+static SaveResult imageEncodeCallbackFailure(bool report) noexcept {
+    SaveResult failure{SaveError::WriteFailed, {}};
+    try {
+        failure.message = "Image encoding callback failed";
+        if (report) return internal::reportSaveFailure(std::move(failure), "Pixels");
+        return failure;
+    } catch (...) { return SaveResult{SaveError::WriteFailed, {}}; }
+}
+
 SaveResult internal::writePixelsEncoded(std::FILE* file, const Pixels& pixels,
                                         const std::string& ext, const fs::path& path) {
-    struct Sink { std::FILE* file; const fs::path& path; SaveResult result; } sink{file, path, {}};
-    auto write = [](void* context, void* data, int size) {
+    struct Sink { std::FILE* file; const fs::path& path; SaveResult result; bool failed = false; } sink{file, path, {}};
+    auto write = [](void* context, void* data, int size) noexcept {
         auto& sink = *static_cast<Sink*>(context);
-        if (sink.result) sink.result = internal::checkedWriteUnflushed(sink.file, data, size, sink.path);
+        if (sink.failed || !sink.result) return;
+        try { sink.result = internal::checkedWriteUnflushed(sink.file, data, size, sink.path); }
+        catch (...) { sink.failed = true; }
     };
     const int w = pixels.getWidth(), h = pixels.getHeight(), ch = pixels.getChannels();
     const auto* data = pixels.getData();
@@ -363,6 +374,7 @@ SaveResult internal::writePixelsEncoded(std::FILE* file, const Pixels& pixels,
     else if (ext == "bmp") encoded = stbi_write_bmp_to_func(write, &sink, w, h, ch, data);
     else if (ext == "tga") encoded = stbi_write_tga_to_func(write, &sink, w, h, ch, data);
     else encoded = stbi_write_png_to_func(write, &sink, w, h, ch, data, w * ch);
+    if (sink.failed) return imageEncodeCallbackFailure(false);
     if (!sink.result) return sink.result;
     return encoded ? SaveResult::success() : internal::saveFailure(path, "Screenshot encoding failed");
 }
@@ -379,11 +391,13 @@ SaveResult Pixels::save(const fs::path& path) const {
     // untouched. The encoder follows the extension, whatever its case
     // (.PNG, .Jpg); the file is written under the path as given.
     auto ext = toLower(getFileExtension(savePath));
-    std::vector<unsigned char> encoded;
-    auto append = [](void* ctx, void* d, int size) {
-        auto* out = static_cast<std::vector<unsigned char>*>(ctx);
+    struct Encoded { std::vector<unsigned char> bytes; bool failed = false; } encoded;
+    auto append = [](void* ctx, void* d, int size) noexcept {
+        auto& out = *static_cast<Encoded*>(ctx);
+        if (out.failed) return;
         auto* bytes = static_cast<unsigned char*>(d);
-        out->insert(out->end(), bytes, bytes + size);
+        try { out.bytes.insert(out.bytes.end(), bytes, bytes + size); }
+        catch (...) { out.failed = true; }
     };
     int result = 0;
     if (ext == "jpg" || ext == "jpeg") {
@@ -394,9 +408,12 @@ SaveResult Pixels::save(const fs::path& path) const {
         // Default is PNG
         result = stbi_write_png_to_func(append, &encoded, width_, height_, channels_, data_, width_ * channels_);
     }
-    if (result == 0 || encoded.empty())
+    // stb's void callback cannot cancel encoding. Discard partial bytes and
+    // report only after it returns, without unwinding through its C linkage.
+    if (encoded.failed) return imageEncodeCallbackFailure(true);
+    if (result == 0 || encoded.bytes.empty())
         return internal::reportSaveFailure(internal::saveFailure(savePath, "Cannot encode image"), "Pixels");
-    return internal::atomicWrite(savePath, encoded.data(), encoded.size(), "Pixels");
+    return internal::atomicWrite(savePath, encoded.bytes.data(), encoded.bytes.size(), "Pixels");
 }
 
 // Platform-specific image loader fallback (non-Apple stub)

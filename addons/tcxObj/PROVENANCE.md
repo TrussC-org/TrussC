@@ -6,11 +6,10 @@ and contributors, under the MIT license (see [LICENSES.md](LICENSES.md)).
 
 | File | Version | Source | Commit | Imported | TrussC patches |
 |---|---|---|---|---|---|
-| `src/tiny_obj_loader.h` | 2.0.0 (last entry of the version history in the file) | [tinyobjloader/tinyobjloader](https://github.com/tinyobjloader/tinyobjloader), branch `release` | `45636bdcef1a4fec140346b90c0b50bf0bc3e23b` (2026-06-19) | 2026-10-08 | 2 |
+| `src/tiny_obj_loader.h` | 2.0.0 (last entry of the version history in the file) | [tinyobjloader/tinyobjloader](https://github.com/tinyobjloader/tinyobjloader), branch `release` | `45636bdcef1a4fec140346b90c0b50bf0bc3e23b` (2026-06-19) | 2026-10-08 | 5 |
 
 "Commit" pins the `release` branch snapshot used for this update. Before
-TrussC patches, the header is byte-identical to that snapshot. Both patches
-below still apply; neither has been replaced by an upstream equivalent.
+TrussC patches, the header is byte-identical to that snapshot. The patches below still apply; none has been replaced by an upstream equivalent.
 
 The latest tag, `v2.0.0rc13` (2024-01-26), predates the previous vendored
 commit `966edce`. Upstream's [release notes](https://github.com/tinyobjloader/tinyobjloader/releases)
@@ -35,8 +34,10 @@ There are no intervening release tags.
   separate C11 loader. The MIT license text is unchanged.
 
 The implementation is compiled in `src/tcxObjLoader.cpp`
-(`TINYOBJLOADER_IMPLEMENTATION`), which calls `tinyobj::LoadObj()` with its
-defaults (triangulate on). No other configuration macro is set; in
+(`TINYOBJLOADER_IMPLEMENTATION`), which calls the implementation-only
+`tinyobj::detail::LoadObjWithoutTags()` entry with triangulation on (patch 5
+below). Public tinyobj declarations and signatures remain upstream-compatible.
+No other configuration macro is set; in
 particular `TINYOBJLOADER_USE_MAPBOX_EARCUT` is not, so polygons with more
 than four vertices go through the built-in ear clipping.
 
@@ -55,6 +56,35 @@ Each is marked `// TrussC patch:` in the file.
    which TrussC does not compile but is kept consistent. Valid faces
    triangulate as before, since the position array always holds whole xyz
    triples.
+
+3. Remove the 256 MiB `StreamReader` cap and the
+   `TINYOBJLOADER_STREAM_READER_MAX_BYTES` macro, including its documentation
+   and mmap checks. This affects default direct callers as well as TrussC,
+   including `std::istream` callers with non-local sources; defining the old
+   macro no longer limits input. Buffered reads still check vector and stream
+   widths. Every mmap deletion site has a patch marker.
+4. Validate tag count representation, same-line value availability and output
+   widths before resizing or discarding. Negative/unrepresentable counts and
+   declarations exceeding their available tokens reject the OBJ, whereas
+   upstream clamps or supplies defaults. Preserve upstream's slash whitespace,
+   omitted fields, values starting with `#`, and the 8192-value clamp for
+   retained payloads. Direct callers retaining tags get upstream's silent
+   truncation to 8192 values per kind. Check MTL
+   index representation before narrowing to int; an unrepresentable index throws
+   `length_error` and the addon rejects the unit. Material syntax/parse errors
+   remain optional-material diagnostics, handled as Warnings by the addon.
+5. An implementation-only `detail::LoadObjWithoutTags` entry selects the
+   internal tag opt-out for `ObjLoader`, without changing any public tinyobj
+   signature or default tag output. It validates the full tag declaration and
+   discards unused payloads before allocation or per-shape copies, so the
+   framework has no tag count cap. Tests compare actual framework allocations
+   across groups and separately check default retained-tag output.
+
+The default-path differences from upstream are patches 1–4 above: compiler
+compatibility, index validation, removal of the stream cap/configuration macro,
+and structural/representation rejection of invalid tag/material counts. Patch 5
+changes only the explicit implementation-only framework entry. Valid tag
+whitespace and incomplete triples keep upstream acceptance.
 
 **Covered by**: `tests/`: a valid quad and a valid concave pentagon (the
 result is unchanged), and a quad and a pentagon with a vertex index one

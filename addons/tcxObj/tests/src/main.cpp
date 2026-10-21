@@ -26,6 +26,19 @@
 // =============================================================================
 
 #include <tcxObj.h>
+#include "tiny_obj_loader.h"
+#include "../../../../core/tests/common/tcModelAllocationProbe.h"
+
+// Taking addresses with the exact upstream types detects public API widening.
+using VendorFileLoader = bool (*)(tinyobj::attrib_t*, std::vector<tinyobj::shape_t>*,
+    std::vector<tinyobj::material_t>*, std::string*, std::string*, const char*,
+    const char*, bool, bool);
+using VendorStreamLoader = bool (*)(tinyobj::attrib_t*, std::vector<tinyobj::shape_t>*,
+    std::vector<tinyobj::material_t>*, std::string*, std::string*, std::istream*,
+    tinyobj::MaterialReader*, bool, bool);
+static_assert(requires { static_cast<VendorFileLoader>(&tinyobj::LoadObj); });
+static_assert(requires { static_cast<VendorStreamLoader>(&tinyobj::LoadObj); });
+
 #ifdef TCX_OBJ_TEST_GPU
 #include "../../../../core/tests/common/tcDisplayTest.h"
 #endif
@@ -35,6 +48,7 @@
 #include <cstdio>
 #include <fstream>
 #include <string>
+#include <sstream>
 #ifndef _WIN32
 #include <unistd.h>
 #endif
@@ -235,6 +249,234 @@ static int runTests() {
     g_dir = fs::temp_directory_path() /
             utf8ToPath("tcxObj-テスト-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(g_dir);
+    // Match a running app: Material destruction lazily initializes core's
+    // window context. Do that before injecting addon allocation failures.
+    { ObjLoader warm; warm.load(writeObj(TRI_V + "f 1 2 3\n")); }
+
+    {
+        const string input = TRI_V + "t name 0/0/1 #label\nf 1 2 3\n";
+        auto path = writeObj(input);
+        tinyobj::attrib_t attrib;
+        vector<tinyobj::shape_t> shapes;
+        vector<tinyobj::material_t> materials;
+        string warnings, errors;
+        bool ok = tinyobj::LoadObj(&attrib, &shapes, &materials, &warnings, &errors,
+                                   pathToUtf8(path).c_str());
+        check("vendor file tags accept a value starting with hash", ok && shapes.size() == 1 &&
+              shapes[0].mesh.tags[0].stringValues == vector<string>{"#label"});
+        istringstream stream(input);
+        ok = tinyobj::LoadObj(&attrib, &shapes, &materials, &warnings, &errors, &stream);
+        check("vendor stream tags accept a value starting with hash", ok && shapes.size() == 1 &&
+              shapes[0].mesh.tags[0].stringValues == vector<string>{"#label"});
+        ObjLoader loader;
+        check("framework tags accept a value starting with hash",
+              loader.load(path).ok() && loader.getNumGroups() == 1);
+    }
+    {
+        vector<LogLevel> levels;
+        string warning;
+        auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+            if (e.level >= LogLevel::Warning) levels.push_back(e.level);
+            if (e.level == LogLevel::Warning) warning += e.message;
+        });
+        ObjLoader loader;
+        auto result = loader.load(writeObj(TRI_V +
+            "mtllib missing-rejection.mtl\nt name 2/0/0 1\nf 1 2 3\n"));
+        check("rejected OBJ retains pending missing-MTL Warning before Error",
+              !result && loader.getNumGroups() == 0 &&
+              warning.find("missing-rejection.mtl") != string::npos &&
+              levels == vector<LogLevel>{LogLevel::Warning, LogLevel::Error});
+    }
+
+    // Declared tag storage must follow the actual available values.
+    for (const string& counts : {string("1000000000/0/0"), string("-1/0/0"),
+                                 string("0/1000000000/0"), string("0/0/1000000000"),
+                                 string("2147483648/0/0"), string("2/0/0")}) {
+        auto path = writeObj(TRI_V + "f 1 2 3\nt sample " + counts + " 1\n");
+        ObjLoader loader;
+        modelAllocationProbe::begin();
+        auto result = loader.load(path);
+        modelAllocationProbe::end();
+        check("tag counts: failure leaves no model", !result && loader.getNumGroups() == 0);
+        check("tag counts: no amplified allocation requested", modelAllocationProbe::largest < 32768);
+    }
+    {
+        string input = TRI_V + "t sample 9000/0/0";
+        for (int i = 0; i < 9000; ++i) input += " 7";
+        input += "\nf 1 2 3\n";
+        tinyobj::attrib_t attrib;
+        vector<tinyobj::shape_t> shapes;
+        vector<tinyobj::material_t> materials;
+        string warnings, errors;
+        istringstream stream(input);
+        bool ok = tinyobj::LoadObj(&attrib, &shapes, &materials, &warnings, &errors, &stream);
+        check("default vendor tags retain the upstream clamp", ok && shapes.size() == 1 &&
+              shapes[0].mesh.tags.size() == 1 && shapes[0].mesh.tags[0].intValues.size() == 8192 &&
+              shapes[0].mesh.tags[0].intValues.back() == 7);
+
+        ObjLoader loader;
+        auto path = writeObj(input);
+        for (bool persistent : {false, true}) {
+            check("OBJ starts allocation test with a loaded model", loader.load(path).ok());
+            LoadResult result;
+            bool escaped = false;
+            modelAllocationProbe::begin(1, persistent);
+            try { result = loader.load(path); }
+            catch (const bad_alloc&) { escaped = true; }
+            modelAllocationProbe::end();
+            check(persistent ? "OBJ persistent allocation failure returns empty failure" :
+                               "OBJ allocation failure returns clean empty failure",
+                  modelAllocationProbe::failed && !escaped && !result &&
+                  result.error == LoadError::DecodeFailed && loader.getNumGroups() == 0);
+            check("OBJ retry after allocation failure succeeds", loader.load(path).ok());
+        }
+    }
+    {
+        string tag = "t sample 9000/0/0";
+        for (int i = 0; i < 9000; ++i) tag += " 7";
+        for (int groupCount : {1, 32}) {
+            string input = TRI_V + tag + "\n";
+            for (int i = 0; i < groupCount; ++i)
+                input += "g group" + to_string(i) + "\nf 1 2 3\n";
+            tinyobj::attrib_t attrib;
+            vector<tinyobj::shape_t> shapes;
+            vector<tinyobj::material_t> materials;
+            string warnings, errors;
+            istringstream stream(input);
+            bool ok = tinyobj::LoadObj(&attrib, &shapes, &materials, &warnings, &errors,
+                                       &stream);
+            size_t retainedTagValues = 0;
+            for (const auto& shape : shapes)
+                for (const auto& value : shape.mesh.tags)
+                    retainedTagValues += value.intValues.size() + value.floatValues.size() + value.stringValues.size();
+            check("default vendor tag clamp is preserved across groups",
+                  ok && shapes.size() == static_cast<size_t>(groupCount) &&
+                  retainedTagValues == static_cast<size_t>(groupCount) * 8192);
+            ObjLoader loader;
+            auto path = writeObj(input);
+            modelAllocationProbe::begin();
+            auto result = loader.load(path);
+            modelAllocationProbe::end();
+            check("OBJ framework path preserves all tagged groups",
+                  result.ok() && loader.getNumGroups() == groupCount);
+            const size_t taggedBytes = modelAllocationProbe::totalBytes;
+            string withoutTags = input;
+            withoutTags.replace(TRI_V.size(), tag.size(), string(tag.size(), ' '));
+            auto plainPath = writeObj(withoutTags);
+            ObjLoader plainLoader;
+            modelAllocationProbe::begin();
+            auto plainResult = plainLoader.load(plainPath);
+            modelAllocationProbe::end();
+            // Equal-length files and identical geometry isolate tag storage.
+            // A retained int payload alone costs >=32768 bytes per copy.
+            check("OBJ framework path allocates no tag payload",
+                  plainResult.ok() && taggedBytes < modelAllocationProbe::totalBytes + 16384);
+        }
+    }
+    {
+        // Warm core context first; sweep fresh loaders so reserve/emplace and
+        // every later group allocation are covered, including point-only OBJ.
+        Pixels pixels;
+        pixels.allocate(2, 2, 4);
+        pixels.save(g_dir / "sweep.png");
+        ofstream(g_dir / "sweep.mtl") << "newmtl sample\nmap_Kd sweep.png\n";
+        for (const string& input : {TRI_V + "mtllib sweep.mtl\nusemtl sample\ng first\nf 1 2 3\ng second\nf 1 2 3\n", TRI_V}) {
+            auto path = writeObj(input);
+            { ObjLoader warm; warm.load(path); }
+            size_t requests = 0;
+            { ObjLoader model;
+              modelAllocationProbe::begin();
+              model.load(path);
+              modelAllocationProbe::end();
+              requests = modelAllocationProbe::requests; }
+            for (bool persistent : {false, true}) {
+                bool clean = requests > 0;
+                for (size_t nth = 1; nth <= requests; ++nth) {
+                    // Retire prior dummy resources between cases, as an app
+                    // does after a frame, before enabling fault injection.
+                    sg_commit();
+                    tc::internal::drainPendingGpuDestroys();
+                    ObjLoader model;
+                    LoadResult result;
+                    bool escaped = false;
+                    modelAllocationProbe::beginNth(nth, persistent);
+                    try { result = model.load(path); } catch (...) { escaped = true; }
+                    modelAllocationProbe::end();
+                    // Optional texture failure can still produce a valid model.
+                    clean = clean && modelAllocationProbe::failed && !escaped &&
+                            (result.ok() || (result.error == LoadError::DecodeFailed && model.getNumGroups() == 0));
+                    clean = clean && model.load(path).ok();
+                }
+                check(persistent ? "OBJ every allocation: persistent recovery and retry" :
+                                   "OBJ every allocation: single recovery and retry", clean);
+            }
+        }
+    }
+    for (const string& tag : {string("t crease 2/ 0/ 0 1 2"),
+                              string("t crease 1/0 5"), string("t subdiv")}) {
+        tinyobj::attrib_t attrib;
+        vector<tinyobj::shape_t> shapes;
+        vector<tinyobj::material_t> materials;
+        string warnings, errors;
+        istringstream stream(TRI_V + tag + "\nf 1 2 3\n");
+        check("base-compatible tag grammar: " + tag,
+              tinyobj::LoadObj(&attrib, &shapes, &materials, &warnings, &errors, &stream) &&
+              shapes.size() == 1 && shapes[0].mesh.tags.size() == 1);
+        ObjLoader loader;
+        check("framework accepts base-compatible tag grammar: " + tag,
+              loader.load(writeObj(TRI_V + tag + "\nf 1 2 3\n")).ok());
+    }
+    {
+        // An MTL stream-open allocation can be translated into failbit by
+        // iostreams. Losing optional materials must still issue a Warning.
+        ofstream(g_dir / "oom.mtl") << "newmtl red\nKd 1 0 0\n";
+        auto path = writeObj("mtllib oom.mtl\n" + TRI_V + "usemtl red\nf 1 2 3\n");
+        size_t warnings = 0;
+        auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+            if (e.level == LogLevel::Warning) ++warnings;
+        });
+        size_t requests;
+        { ObjLoader loader;
+          modelAllocationProbe::begin();
+          loader.load(path);
+          modelAllocationProbe::end();
+          requests = modelAllocationProbe::requests; }
+        bool reported = true, sawMissingMaterials = false;
+        for (size_t nth = 1; nth <= requests; ++nth) {
+            ObjLoader loader;
+            warnings = 0;
+            modelAllocationProbe::beginNth(nth, false);
+            auto result = loader.load(path);
+            modelAllocationProbe::end();
+            if (result && loader.getNumGroups() &&
+                loader.getGroups()[0].material.getBaseColor().g != 0) {
+                sawMissingMaterials = true;
+                reported = reported && warnings > 0;
+            }
+        }
+        check("MTL open allocation failure warns when geometry survives",
+              sawMissingMaterials && reported);
+    }
+    // Sparse on-disk comments keep this fixture cheap to create. Both the OBJ
+    // and its MTL are local inputs and may exceed the former stream threshold.
+    for (bool materialFile : {false, true}) {
+        const size_t commentBytes = size_t(256) * 1024 * 1024 + 1;
+        auto path = g_dir / (materialFile ? "large.mtl" : "large.obj");
+        ofstream(path, ios::binary) << '#';
+        fs::resize_file(path, commentBytes);
+        ofstream(path, ios::binary | ios::app) << (materialFile ? "\nnewmtl sample\nKd 1 0 0\n" : "\n" + TRI_V + "f 1 2 3\n");
+        ObjLoader loader;
+        auto obj = materialFile ? writeObj("mtllib large.mtl\n" + TRI_V + "usemtl sample\nf 1 2 3\n") : path;
+        auto result = loader.load(obj);
+        check("large local " + string(materialFile ? "MTL" : "OBJ") + " loads without a byte cap",
+              result.ok() && loader.getMesh().getNumVertices() == 3);
+        if (materialFile && result && loader.getNumGroups())
+            check("large local MTL keeps its material",
+                  loader.getGroups()[0].material.getBaseColor().r == 1 &&
+                  loader.getGroups()[0].material.getBaseColor().g == 0 &&
+                  loader.getGroups()[0].material.getBaseColor().b == 0);
+        fs::remove(path);
+    }
 
     // The shared entry reports missing and broken files exactly once.
     {
@@ -255,14 +497,26 @@ static int runTests() {
         check("broken OBJ: DecodeFailed and exactly one Error",
               result.error == LoadError::DecodeFailed && !result.message.empty() &&
               errors.size() == 1 && errors[0] == "[ObjLoader] " + result.message && loader.getNumGroups() == 0);
-        // A malformed .mtl is not a failed load: LoadObj returns true with the
-        // material reader's error in err. The geometry is usable, so the model
-        // loads and the material message is a Warning, not an Error.
+        // Material parse errors keep usable geometry and issue a Warning.
         errors.clear();
         ofstream(g_dir / "broken.mtl", ios::binary) << "newmtl red\nKd x y z\n";
         result = loader.load(writeObj("mtllib broken.mtl\n" + TRI_V + "f 1 2 3\n"));
         check("OBJ with a malformed .mtl still loads without an Error",
               result.ok() && errors.empty() && loader.getNumGroups() > 0);
+        size_t warnings = 0;
+        auto warningListener = getLogger().onLog.listen([&](LogEventArgs& e) {
+            if (e.level == LogLevel::Warning) ++warnings;
+        });
+        for (const string& statement : {string("d -halo 0.5"), string("Tf xyz 1 1 1"),
+                                         string("Ka spectral file.rfl"), string("unknown_property 1")}) {
+            errors.clear();
+            warnings = 0;
+            ofstream(g_dir / "valid.mtl") << "newmtl red\n" << statement << '\n';
+            result = loader.load(writeObj("mtllib valid.mtl\n" + TRI_V + "usemtl red\nf 1 2 3\n"));
+            check("valid MTL form keeps geometry with Warning: " + statement,
+                  result.ok() && errors.empty() && warnings > 0 &&
+                  loader.getMesh().getNumVertices() == 3);
+        }
         setDataPathRoot(oldRoot);
     }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <TrussC.h>
+#include <tcxImGui.h>   // host sees addon declarations too (#371)
 #include "reloadHeaderProbe.h"
 // Both host and guest must wait for app and INTERFACE-addon shader headers.
 #include "shaders/reloadProbe.glsl.h"
@@ -46,7 +47,8 @@ using namespace tc;
 // tcxImGui): two addon singletons that live in the guest image and listen on
 // the host's events, so a reload must not leave the previous generation's
 // copies listening (#416). This also checks the guest target for addon include
-// directories and for linking the addon archives.
+// directories and for linking the addon archives. The host includes tcxImGui
+// above too: its header must not emit guest-only ImGui hooks (#371).
 // =============================================================================
 
 // What guest code sees of state the host set (readSharedState).

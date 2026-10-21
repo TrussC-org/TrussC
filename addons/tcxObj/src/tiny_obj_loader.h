@@ -1210,6 +1210,8 @@ OptResult LoadObjOptTyped(const char *filename,
 #include <cstring>
 #include <fstream>
 #include <limits>
+// TrussC patch: representation failures throw length_error for addon recovery.
+#include <stdexcept>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -5917,13 +5919,6 @@ MaterialReader::~MaterialReader() {}
 // Every byte access is guarded by an EOF check.
 class StreamReader {
  public:
-// Maximum number of bytes StreamReader will buffer from std::istream.
-// Define this macro to a larger value if your application needs to parse
-// very large streamed OBJ/MTL content.
-#ifndef TINYOBJLOADER_STREAM_READER_MAX_BYTES
-#define TINYOBJLOADER_STREAM_READER_MAX_BYTES (size_t(256) * size_t(1024) * size_t(1024))
-#endif
-
   StreamReader(const char *buf, size_t length)
       : buf_(buf), length_(length), idx_(0), line_num_(1), col_num_(1) {}
 
@@ -5933,7 +5928,10 @@ class StreamReader {
 
   // Build from std::istream by reading all content into an internal buffer.
   explicit StreamReader(std::istream &is) : buf_(NULL), length_(0), idx_(0), line_num_(1), col_num_(1) {
-    const size_t max_stream_bytes = TINYOBJLOADER_STREAM_READER_MAX_BYTES;
+    // TrussC patch: remove the stream byte cap and TINYOBJLOADER_STREAM_READER_MAX_BYTES.
+    // Bound (abi): buffered reads must fit vector and stream sizes. Overflow rejects the whole stream and is reported by the load result.
+    const size_t max_stream_bytes = (std::min)(owned_buf_.max_size(),
+        static_cast<size_t>((std::numeric_limits<std::streamsize>::max)()));
     std::streampos start_pos = is.tellg();
     bool can_seek = (start_pos != std::streampos(-1));
     if (can_seek) {
@@ -7299,23 +7297,61 @@ static inline void sr_skipTagField(StreamReader &sr) {
   }
 }
 
+// TrussC patch: validate declared tag counts before allocation or discarding.
 static tag_sizes sr_parseTagTriple(StreamReader &sr) {
   tag_sizes ts;
-
-  sr.skip_space();
-  ts.num_ints = sr_parseIntNoSkip(sr);
-  sr_skipTagField(sr);
-  if (!sr.eof() && sr.peek() == '/') {
-    sr.advance(1);
+  int *fields[] = {&ts.num_ints, &ts.num_reals, &ts.num_strings};
+  for (size_t field = 0; field < 3; ++field) {
     sr.skip_space();
-    ts.num_reals = sr_parseIntNoSkip(sr);
-    sr_skipTagField(sr);
-    if (!sr.eof() && sr.peek() == '/') {
+    int value = 0;
+    // Preserve upstream's omitted fields, optional plus and slash whitespace.
+    bool negative = sr.peek() == '-';
+    if (negative || sr.peek() == '+') sr.advance(1);
+    while (!sr.eof() && sr.peek() >= '0' && sr.peek() <= '9') {
+      int digit = sr.peek() - '0';
+      // Bound (abi): tinyobj tag counts use int. Overflow rejects the model and is reported by the load result.
+      if (value > ((std::numeric_limits<int>::max)() - digit) / 10) {
+        ts.num_ints = -1;
+        return ts;
+      }
+      value = value * 10 + digit;
       sr.advance(1);
-      ts.num_strings = sr_parseInt(sr);
     }
+    if (negative && value) { ts.num_ints = -1; return ts; }
+    *fields[field] = value;
+    sr_skipTagField(sr);
+    if (field == 2 || sr.eof() || sr.peek() != '/') break;
+    sr.advance(1);
   }
   return ts;
+}
+
+// TrussC patch: check actual same-line tokens before tag allocation or discard.
+static bool sr_tagValuesFit(const StreamReader &sr, const tag_sizes &ts) {
+  if (ts.num_ints < 0 || ts.num_reals < 0 || ts.num_strings < 0) return false;
+  size_t counts[] = {static_cast<size_t>(ts.num_ints),
+                     static_cast<size_t>(ts.num_reals),
+                     static_cast<size_t>(ts.num_strings)};
+  size_t needed = 0;
+  for (size_t i = 0; i < 3; ++i) {
+    // Bound (abi): tag count sums must fit remaining text and output storage. Overflow rejects the model and is reported by the load result.
+    if (counts[i] > sr.remaining() - needed) return false;
+    needed += counts[i];
+  }
+  if (counts[0] > std::vector<int>().max_size() ||
+      counts[1] > std::vector<real_t>().max_size() ||
+      counts[2] > std::vector<std::string>().max_size()) return false;
+  const char *text = sr.current_ptr();
+  size_t tokens = 0;
+  bool in_token = false;
+  for (size_t i = 0; i < sr.remaining(); ++i) {
+    char c = text[i];
+    if (c == '\r' || c == '\n') break;
+    bool space = IS_SPACE(c);
+    if (!space && !in_token) ++tokens;
+    in_token = !space;
+  }
+  return needed <= tokens;
 }
 
 static inline int sr_parseIntNoSkip(StreamReader &sr) {
@@ -8331,6 +8367,10 @@ static bool LoadMtlInternal(std::map<std::string, int> *material_map,
     if (sr.match("newmtl", 6) && (sr.peek_at(6) == ' ' || sr.peek_at(6) == '\t')) {
       // flush previous material.
       if (!material.name.empty()) {
+        // TrussC patch: reject an unrepresentable material index before narrowing.
+        // Bound (abi): tinyobj material indices use int; overflow rejects the model through addon recovery.
+        if (materials->size() >= static_cast<size_t>((std::numeric_limits<int>::max)()))
+          throw std::length_error("material count exceeds tinyobj's index width");
         material_map->insert(std::pair<std::string, int>(
             material.name, static_cast<int>(materials->size())));
         materials->push_back(material);
@@ -8710,6 +8750,10 @@ static bool LoadMtlInternal(std::map<std::string, int> *material_map,
   }
   // flush last material (only if it was actually defined).
   if (!material.name.empty()) {
+    // TrussC patch: reject an unrepresentable material index before narrowing.
+    // Bound (abi): tinyobj material indices use int; overflow rejects the model through addon recovery.
+    if (materials->size() >= static_cast<size_t>((std::numeric_limits<int>::max)()))
+      throw std::length_error("material count exceeds tinyobj's index width");
     material_map->insert(std::pair<std::string, int>(
         material.name, static_cast<int>(materials->size())));
     materials->push_back(material);
@@ -8757,16 +8801,7 @@ bool MaterialFileReader::operator()(const std::string &matId,
       {
         MappedFile mf;
         if (!mf.open(filepath.c_str())) continue;
-        if (mf.size > TINYOBJLOADER_STREAM_READER_MAX_BYTES) {
-          if (err) {
-            std::stringstream ss;
-            ss << "input stream too large (" << mf.size
-               << " bytes exceeds limit "
-               << TINYOBJLOADER_STREAM_READER_MAX_BYTES << " bytes)\n";
-            (*err) += ss.str();
-          }
-          return false;
-        }
+        // TrussC patch: mmap MTL input has no policy byte cap.
         StreamReader sr(mf.data, mf.size);
         return LoadMtlInternal(matMap, materials, sr, warn, err, filepath);
       }
@@ -8798,16 +8833,7 @@ bool MaterialFileReader::operator()(const std::string &matId,
     {
       MappedFile mf;
       if (mf.open(filepath.c_str())) {
-        if (mf.size > TINYOBJLOADER_STREAM_READER_MAX_BYTES) {
-          if (err) {
-            std::stringstream ss;
-            ss << "input stream too large (" << mf.size
-               << " bytes exceeds limit "
-               << TINYOBJLOADER_STREAM_READER_MAX_BYTES << " bytes)\n";
-            (*err) += ss.str();
-          }
-          return false;
-        }
+        // TrussC patch: mmap MTL input has no policy byte cap.
         StreamReader sr(mf.data, mf.size);
         return LoadMtlInternal(matMap, materials, sr, warn, err, filepath);
       }
@@ -8853,13 +8879,15 @@ bool MaterialStreamReader::operator()(const std::string &matId,
   return LoadMtlInternal(matMap, materials, mtl_sr, warn, err, "<stream>");
 }
 
+// TrussC patch: thread the implementation-only tag retention choice.
 static bool LoadObjInternal(attrib_t *attrib, std::vector<shape_t> *shapes,
                             std::vector<material_t> *materials,
                             std::string *warn, std::string *err,
                             StreamReader &sr,
                             MaterialReader *readMatFn, bool triangulate,
                             bool default_vcols_fallback,
-                            const std::string &filename = "<stream>") {
+                            const std::string &filename = "<stream>",
+                            bool retain_tags = true) {
   if (sr.has_errors()) {
     if (err) {
       (*err) += sr.get_errors();
@@ -9284,7 +9312,6 @@ static bool LoadObjInternal(attrib_t *attrib, std::vector<shape_t> *shapes,
     }
 
     if (sr.peek() == 't' && (sr.peek_at(1) == ' ' || sr.peek_at(1) == '\t')) {
-      const int max_tag_nums = 8192;
       tag_t tag;
 
       sr.advance(2);
@@ -9293,26 +9320,24 @@ static bool LoadObjInternal(attrib_t *attrib, std::vector<shape_t> *shapes,
 
       tag_sizes ts = sr_parseTagTriple(sr);
 
-      if (ts.num_ints < 0) {
-        ts.num_ints = 0;
-      }
-      if (ts.num_ints > max_tag_nums) {
-        ts.num_ints = max_tag_nums;
-      }
-
-      if (ts.num_reals < 0) {
-        ts.num_reals = 0;
-      }
-      if (ts.num_reals > max_tag_nums) {
-        ts.num_reals = max_tag_nums;
+      // TrussC patch: reject declarations exceeding actual same-line values.
+      if (!sr_tagValuesFit(sr, ts)) {
+        if (err) (*err) += "Invalid tag value counts.\n";
+        return false;
       }
 
-      if (ts.num_strings < 0) {
-        ts.num_strings = 0;
+      // TrussC patch: ObjLoader does not consume tags. Validate above, then
+      // discard the payload before any per-tag allocation or per-shape copy.
+      if (!retain_tags) {
+        sr.skip_line();
+        continue;
       }
-      if (ts.num_strings > max_tag_nums) {
-        ts.num_strings = max_tag_nums;
-      }
+
+      // TrussC patch: retain upstream's default tag clamp for direct callers.
+      // Bound (security): limit retained-tag copy amplification for direct callers. Overflow truncates silently to 8192 values per kind (upstream behavior); ObjLoader discards tags above.
+      ts.num_ints = (std::min)(ts.num_ints, 8192);
+      ts.num_reals = (std::min)(ts.num_reals, 8192);
+      ts.num_strings = (std::min)(ts.num_strings, 8192);
 
       tag.intValues.resize(static_cast<size_t>(ts.num_ints));
 
@@ -9417,10 +9442,11 @@ static bool LoadObjInternal(attrib_t *attrib, std::vector<shape_t> *shapes,
   return true;
 }
 
-bool LoadObj(attrib_t *attrib, std::vector<shape_t> *shapes,
+// TrussC patch: rename the file implementation to preserve public signatures.
+static bool LoadObjFileInternal(attrib_t *attrib, std::vector<shape_t> *shapes,
              std::vector<material_t> *materials, std::string *warn,
              std::string *err, const char *filename, const char *mtl_basedir,
-             bool triangulate, bool default_vcols_fallback) {
+             bool triangulate, bool default_vcols_fallback, bool retain_tags) {
   attrib->vertices.clear();
   attrib->vertex_weights.clear();
   attrib->normals.clear();
@@ -9452,20 +9478,11 @@ bool LoadObj(attrib_t *attrib, std::vector<shape_t> *shapes,
       }
       return false;
     }
-    if (mf.size > TINYOBJLOADER_STREAM_READER_MAX_BYTES) {
-      if (err) {
-        std::stringstream ss;
-        ss << "input stream too large (" << mf.size
-           << " bytes exceeds limit "
-           << TINYOBJLOADER_STREAM_READER_MAX_BYTES << " bytes)\n";
-        (*err) += ss.str();
-      }
-      return false;
-    }
+    // TrussC patch: mmap OBJ input has no policy byte cap.
     StreamReader sr(mf.data, mf.size);
     return LoadObjInternal(attrib, shapes, materials, warn, err, sr,
                            &matFileReader, triangulate, default_vcols_fallback,
-                           filename);
+                           filename, retain_tags);  // TrussC patch: forward the internal tag choice.
   }
 #else   // !TINYOBJLOADER_USE_MMAP
 #ifdef _WIN32
@@ -9485,9 +9502,30 @@ bool LoadObj(attrib_t *attrib, std::vector<shape_t> *shapes,
     StreamReader sr(ifs);
     return LoadObjInternal(attrib, shapes, materials, warn, err, sr,
                            &matFileReader, triangulate, default_vcols_fallback,
-                           filename);
+                           filename, retain_tags);  // TrussC patch: forward the internal tag choice.
   }
 #endif  // TINYOBJLOADER_USE_MMAP
+}
+
+// TrussC patch: implementation-only entry for the framework's unused tags.
+// Neither this entry nor its selection changes a public tinyobj signature.
+namespace detail {
+static bool LoadObjWithoutTags(attrib_t *attrib, std::vector<shape_t> *shapes,
+                              std::vector<material_t> *materials, std::string *warn,
+                              std::string *err, const char *filename,
+                              const char *mtl_basedir) {
+  return LoadObjFileInternal(attrib, shapes, materials, warn, err, filename,
+                             mtl_basedir, true, true, false);
+}
+}  // namespace detail
+
+// TrussC patch: public file entry retains upstream signature and tag output.
+bool LoadObj(attrib_t *attrib, std::vector<shape_t> *shapes,
+             std::vector<material_t> *materials, std::string *warn,
+             std::string *err, const char *filename, const char *mtl_basedir,
+             bool triangulate, bool default_vcols_fallback) {
+  return LoadObjFileInternal(attrib, shapes, materials, warn, err, filename,
+                             mtl_basedir, triangulate, default_vcols_fallback, true);
 }
 
 bool LoadObj(attrib_t *attrib, std::vector<shape_t> *shapes,
@@ -9506,7 +9544,8 @@ bool LoadObj(attrib_t *attrib, std::vector<shape_t> *shapes,
 
   StreamReader sr(*inStream);
   return LoadObjInternal(attrib, shapes, materials, warn, err, sr,
-                         readMatFn, triangulate, default_vcols_fallback);
+                         readMatFn, triangulate, default_vcols_fallback,
+                         "<stream>", true);  // TrussC patch: public streams retain tags.
 }
 
 
