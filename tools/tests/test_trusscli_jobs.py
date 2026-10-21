@@ -25,13 +25,13 @@ class JobsTests(unittest.TestCase):
         self.project = Path(self.scratch.name) / "sample project"
         (self.project / "src").mkdir(parents=True)
         (self.project / "CMakeLists.txt").write_text(
-            "cmake_minimum_required(VERSION 3.20)\nproject(sample NONE)\n")
-        (self.project / "addons.make").write_text("")
+            "cmake_minimum_required(VERSION 3.20)\nproject(sample NONE)\n", encoding="utf-8")
+        (self.project / "addons.make").write_text("", encoding="utf-8")
         (self.project / "CMakePresets.json").write_text(
             '{"version": 3, "configurePresets": [{"name": "%s", '
             '"binaryDir": "${sourceDir}/build-%s"}], '
             '"buildPresets": [{"name": "%s", "configurePreset": "%s"}]}\n'
-            % (NATIVE, NATIVE, NATIVE, NATIVE))
+            % (NATIVE, NATIVE, NATIVE, NATIVE), encoding="utf-8")
 
     def cli(self, *args, env=None):
         environment = dict(os.environ, TRUSSC_DIR=str(ROOT))
