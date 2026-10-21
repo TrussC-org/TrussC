@@ -35,3 +35,9 @@ The harness uses a plain `main()` without starting the TrussC app loop.
 The double does not verify native backend error generation or physical delivery.
 Compile the production header against the pinned libremidi as well, and check
 actual devices separately. Port removal/reconnection belongs to #415.
+
+Input storage tests also drive the production callback with the existing mock.
+They check copied port-name accounting, exact oldest-message eviction, shrink
+and zero-limit behavior, a whole over-budget message, 1024 64,000-byte messages,
+and one automatic main-thread Warning without polling. Counters and gates
+survive close/reopen; inline events remain independent of polling losses.

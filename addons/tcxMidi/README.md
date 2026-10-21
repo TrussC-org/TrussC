@@ -71,11 +71,29 @@ Enumeration follows the TrussC convention (`AudioEngine::listDevices()` etc.):
 number, -1 if virtual), `isVirtual()`, `ignoreTypes(sysex, timing, sensing)`,
 `onMessage` event, and the polling API `hasNewMessage()` / `getNextMessage()` /
 `setBufferSize()` / `getDroppedMessageCount()`. The polling queue holds up to 1024
-messages by default; when it is full the oldest message is dropped (shrinking it
-with `setBufferSize()` also discards the oldest queued ones). Dropped messages are
-counted in `getDroppedMessageCount()` and logged as a warning (at most once every 2 s).
-Raise `setBufferSize()` if you see it.
-Device input or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow drops the oldest messages and is counted.
+messages by default and has a fixed **64 MiB retained-storage budget**, allocated
+on demand. The charge includes message objects, byte-vector capacity, copied
+port-name storage, and queue nodes. Oldest whole messages are evicted before
+admission, using the copy's measured capacity; a single over-budget message is
+rejected whole. `setBufferSize(0)` keeps zero messages; shrinking discards the
+oldest whole messages. These losses count in `getDroppedMessageCount()` since
+construction; querying and close/reopen do not reset the total. Inline events
+are independent of queue eviction.
+
+The first queue loss automatically logs one Warning on the main thread, naming
+the store, limit, needed amount and units, even without another poll. Its once
+gate survives close/reopen. Drain more often, or raise `setBufferSize()` for
+message-count pressure; the storage budget remains fixed. Backend assembly and
+main-thread event delivery are separate stores from this polling queue.
+
+`setBufferSize()` / `getBufferSize()` reason: device input or a stalled reader can
+fill this queue; finite count and storage bounds keep memory finite. Overflow
+and shrinking evict oldest whole messages and increment the counter.
+日本語: デバイス入力や停止した読み手によるメモリ増加を抑えるため、件数と保存量を制限します。
+上限超過時と縮小時は古いメッセージを丸ごと破棄し、カウンターに加算します。
+한국어: 장치 입력이나 멈춘 소비자로 인한 메모리 증가를 막기 위해 메시지 수와 저장량을 제한합니다.
+초과하거나 한도를 줄이면 오래된 메시지 전체를 버리고 카운터에 더합니다.
+
 
 **`MidiOut`** — `listDevices()`, `openPort(index|name)`, `openVirtualPort(name)`,
 `getName()` / `getPort()` / `isVirtual()`, `sendNoteOn/Off`,

@@ -10,6 +10,7 @@
 #include <algorithm>
 
 namespace tcx::osc {
+namespace osc_internal { struct PollingStorage; }
 
 // =============================================================================
 // Endian conversion utilities
@@ -278,6 +279,8 @@ public:
     // 1.0 tag, a ']' has no '[' before it or a '[' is not closed, or an
     // argument runs past the end of the data (e.g. a blob larger than the
     // bytes left).
+    // Incoming packets are preflighted before allocation: 65,536 bytes and
+    // 4096 aggregate bundle elements/argument tags; overflow rejects whole.
     static OscMessage fromBytes(const uint8_t* data, size_t size, bool& ok);
     // Same, and paddingMissing tells whether the data ends before the zero
     // padding that aligns its last item to 4 bytes. Such a message still
@@ -335,6 +338,7 @@ private:
         return &it->value;
     }
 
+    friend struct osc_internal::PollingStorage;
     friend struct OscMessageTestAccess;  // lets the addon tests count args_
 
     std::string address_;

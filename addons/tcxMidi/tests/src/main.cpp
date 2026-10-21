@@ -86,7 +86,10 @@ void inputLifecycle() {
 }
 }
 
+void testInputStorage();
+
 int main() {
+    testInputStorage();
     const std::vector<SendCase> cases = {
         {"note on", [](MidiOut& o) { return o.sendNoteOn(1, 60, 100); }, {0x90, 60, 100}},
         {"note off", [](MidiOut& o) { return o.sendNoteOff(2, 61); }, {0x81, 61, 0}},
