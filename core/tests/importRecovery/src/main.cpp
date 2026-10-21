@@ -75,7 +75,8 @@ void* operator new(size_t size) {
     if (failBake && size == 1024) { failBake = false; failAll = true; }
     if (remaining == 0 || failAll || failNext) { failNext = false; ++failedRequests; throw bad_alloc(); }
     if (remaining > 0) --remaining;
-    if (armSourceBytes && size == armSourceBytes) {
+    // MSVC's allocator may add alignment overhead to source blocks >= 4096 bytes.
+    if (armSourceBytes && size >= armSourceBytes && size - armSourceBytes <= 64) {
         armSourceBytes = 0;
         remaining = sourceBudget;
     }
@@ -203,27 +204,50 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     }
     if (mode == "all" || mode == "font-init") {
         auto font = makeFont();
-        for (int budget = 1; budget <= 3; ++budget) {
+        bool sawFailure = false, sawSuccess = false;
+        // Sweep allocations after the source copy until a fault-free load.
+        // The stopping budget depends on the STL, not on the test fixture.
+        for (int budget = 0; ; ++budget) {
             internal::FontAtlasManager manager;
             bool returned = false, loaded = true;
-            remaining = budget;
+            failedRequests = 0;
+            armSourceBytes = font.size(); sourceBudget = budget;
             try { loaded = manager.setupFromMemory(font.data(), font.size(), 16); returned = true; } catch (...) {}
-            remaining = -1;
-            check("font memory initialization recovers after the source copy", returned && !loaded && manager.getAtlasCount() == 0);
-            check("rejected font source capacity is released", manager.getFontDataCapacityForTests() == 0);
-            check("font cleanup resets metrics", manager.getFontSize() == 0 && manager.getLineHeight() == 0);
-            check("font manager is reusable after failed initialization", manager.setupFromMemory(font.data(), font.size(), 16));
+            remaining = -1; armSourceBytes = 0;
+            if (failedRequests > 0) {
+                sawFailure = true;
+                check("font memory initialization recovers after the source copy", returned && !loaded && manager.getAtlasCount() == 0);
+                check("rejected font source capacity is released", manager.getFontDataCapacityForTests() == 0);
+                check("font cleanup resets metrics", manager.getFontSize() == 0 && manager.getLineHeight() == 0);
+                check("font manager is reusable after failed initialization", manager.setupFromMemory(font.data(), font.size(), 16));
+            } else {
+                sawSuccess = returned && loaded;
+                break;
+            }
         }
+        check("font memory budgets exercise both failure and success", sawFailure && sawSuccess);
     }
     if (mode == "all" || mode == "font-reason") {
         auto font = makeFont();
         font[0] = 0xfe;
-        internal::FontAtlasManager manager;
-        bool returned = false, loaded = true;
-        remaining = 2; // source and name succeed; validation diagnostics fail
-        try { loaded = manager.setupFromMemory(font.data(), font.size(), 16); returned = true; } catch (...) {}
-        remaining = -1;
-        check("font validation-reason exhaustion returns failure", returned && !loaded && manager.getAtlasCount() == 0);
+        bool sawFailure = false, sawRejection = false;
+        // Include name/diagnostic allocations without assuming their indices.
+        for (int budget = 0; ; ++budget) {
+            internal::FontAtlasManager manager;
+            bool returned = false, loaded = true;
+            failedRequests = 0;
+            armSourceBytes = font.size(); sourceBudget = budget;
+            try { loaded = manager.setupFromMemory(font.data(), font.size(), 16); returned = true; } catch (...) {}
+            remaining = -1; armSourceBytes = 0;
+            if (failedRequests > 0) {
+                sawFailure = true;
+                check("font validation-reason exhaustion returns failure", returned && !loaded && manager.getAtlasCount() == 0);
+            } else {
+                sawRejection = returned && !loaded && manager.getAtlasCount() == 0;
+                break;
+            }
+        }
+        check("font reason budgets exercise exhaustion and ordinary rejection", sawFailure && sawRejection);
     }
     if (mode == "all" || mode == "font-file" || mode == "font-async") {
         auto font = makeFont();
@@ -231,24 +255,35 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         { ofstream file(path, ios::binary); file.write((const char*)font.data(), font.size()); }
         const string filename = path.string();
         if (mode != "font-async") {
-            for (int budget = 0; budget < 3; ++budget) {
+            bool sawFailure = false, sawSuccess = false;
+            for (int budget = 0; ; ++budget) {
                 internal::FontAtlasManager manager;
                 bool returned = false, loaded = true;
+                failedRequests = 0;
                 armSourceBytes = font.size(); sourceBudget = budget;
                 try { loaded = manager.prepareFile(filename, 16, 0, 4096); returned = true; } catch (...) {}
                 remaining = -1; armSourceBytes = 0;
-                check("font file initialization recovers after the source read", returned && !loaded && manager.getAtlasCount() == 0);
+                if (failedRequests > 0) {
+                    sawFailure = true;
+                    check("font file initialization recovers after the source read", returned && !loaded && manager.getAtlasCount() == 0);
+                } else {
+                    sawSuccess = returned && loaded;
+                    break;
+                }
             }
+            check("font file budgets exercise both failure and success", sawFailure && sawSuccess);
         }
         if (mode != "font-file") {
             internal::appRunToken() = make_shared<atomic<bool>>(true);
-            for (int budget = 0; budget < 3; ++budget) {
+            bool sawFailure = false, sawSuccess = false;
+            for (int budget = 0; ; ++budget) {
                 Font async;
-                bool delivered = false, rejected = false;
+                bool delivered = false, rejected = false, loaded = false;
                 atomic<bool> faultReached{false};
                 auto listener = async.onLoad.listen([&](LoadResult& result) {
                     delivered = true;
                     rejected = !result && result.error == LoadError::DecodeFailed && !async.isLoaded() && !async.isLoading();
+                    loaded = result && async.isLoaded() && !async.isLoading();
                 });
                 internal::setResourceLoadProbeForTests([&](const char* stage, const fs::path&) {
                     if (strcmp(stage, "font.decode") == 0) {
@@ -267,8 +302,15 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
                 internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
 #endif
                 internal::setResourceLoadProbeForTests({});
-                check("async font reports failure after persistent init exhaustion", faultReached && delivered && rejected);
+                if (faultReached) {
+                    sawFailure = true;
+                    check("async font reports failure after persistent init exhaustion", delivered && rejected);
+                } else {
+                    sawSuccess = delivered && loaded;
+                    break;
+                }
             }
+            check("async font budgets exercise both failure and success", sawFailure && sawSuccess);
         }
         fs::remove(path);
     }

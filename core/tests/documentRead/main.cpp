@@ -16,7 +16,7 @@ EM_JS(void, installReadErrors, (), {
     };
     for (const path in inputs) {
         const prefix = new TextEncoder().encode(inputs[path]);
-        FS.writeFile(path, inputs[path] + 'unread-invalid-tail');
+        FS.writeFile(path, inputs[path] + ' \n');
         const node = FS.lookupPath(path).node;
         node.stream_ops = {...node.stream_ops, read(stream, buffer, offset, length, position) {
             if (position >= prefix.length) throw new FS.ErrnoError(29);
@@ -30,10 +30,11 @@ EM_JS(void, installReadErrors, (), {
 namespace {
 // A seekable filebuf model: size includes the tail, reads stop at the prefix
 // with ordinary EOF, as libc++/MSVC may do on an underlying read error.
+// The unread whitespace is valid, so a read without the fault would succeed.
 class ShortFile : public std::streambuf {
 public:
     explicit ShortFile(const std::string& prefix)
-        : bytes_(prefix + "unread-invalid-tail"), limit_(prefix.size()) {}
+        : bytes_(prefix + " \n"), limit_(prefix.size()) {}
 private:
     std::string bytes_;
     size_t limit_, position_ = 0;
@@ -99,7 +100,7 @@ int main() {
     const char* paths[] = {"/read.json", "/read.ies", "/read.cube"};
 #endif
     for (int i = 0; i < 3; ++i) {
-        std::istringstream complete(inputs[i]);
+        std::istringstream complete(inputs[i] + " \n");
         ShortFile buffer(inputs[i]);
         std::istream shortRead(&buffer);
         const bool good = readers[i](complete);

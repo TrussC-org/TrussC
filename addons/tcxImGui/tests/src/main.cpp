@@ -63,6 +63,9 @@
 #include <thread>
 
 using namespace std;
+namespace {
+#include "../../../../core/tests/asyncLoads/src/fontFixture.h"
+}
 using harness::callTool;
 using harness::check;
 using harness::ImGuiHarness;
@@ -1374,17 +1377,30 @@ static void testLocalImports() {
     allocator.largestRequest = 0;
     ImGui::LoadIniSettingsFromMemory(invalidTable);
     check("ini table count rejects before handler mutation or allocation", before == ImGui::SaveIniSettingsToMemory() && allocator.largestRequest < 1024u * 1024u);
+    const char replacementIni[] = "[Window][Import fixture]\nPos=9,9\nSize=100,100\nCollapsed=0\n";
     allocator.failNext = true;
-    ImGui::LoadIniSettingsFromMemory(validIni);
-    check("ini allocation failure preserves existing settings", before == ImGui::SaveIniSettingsToMemory());
+    ImGui::LoadIniSettingsFromMemory(replacementIni);
+    const bool iniFaultConsumed = !allocator.failNext;
+    allocator.failNext = false;
+    check("ini allocation failure preserves existing settings", iniFaultConsumed && before == ImGui::SaveIniSettingsToMemory());
+    ImGui::LoadIniSettingsFromMemory(replacementIni);
+    check("same ini replacement loads without an allocation fault", before != ImGui::SaveIniSettingsToMemory());
     allocator.ownedInput = IM_ALLOC(128);
     memset(allocator.ownedInput, 0, 128);
     check("rejected owned font input is released once", io.Fonts->AddFontFromMemoryTTF(allocator.ownedInput, 128, 16) == nullptr && allocator.inputFrees == 1);
+    allocator.ownedInput = nullptr;
+    const auto font = makeFont();
     const auto fontPath = std::filesystem::current_path() / ".imgui-font-import-test.ttf";
-    { std::ofstream file(fontPath, std::ios::binary); file.write((const char*)shortFont, sizeof(shortFont)); }
+    { std::ofstream file(fontPath, std::ios::binary); file.write((const char*)font.data(), font.size()); }
+    const auto fontFilename = fontPath.string();
     allocator.failNext = true;
     config.Flags |= ImFontFlags_NoLoadError;
-    check("font file allocation failure returns cleanly", io.Fonts->AddFontFromFileTTF(fontPath.string().c_str(), 16, &config) == nullptr);
+    config.FontDataOwnedByAtlas = true;
+    auto* failedFont = io.Fonts->AddFontFromFileTTF(fontFilename.c_str(), 16, &config);
+    const bool fontFaultConsumed = !allocator.failNext;
+    allocator.failNext = false;
+    check("font file allocation failure returns cleanly", failedFont == nullptr && fontFaultConsumed && io.Fonts->Fonts.Size == fontsBefore);
+    check("same font file loads without an allocation fault", io.Fonts->AddFontFromFileTTF(fontFilename.c_str(), 16, &config) != nullptr && io.Fonts->Fonts.Size == fontsBefore + 1);
     std::filesystem::remove(fontPath);
     ImGui::SetAllocatorFunctions(allocator.allocate, allocator.release, allocator.originalData);
 }
