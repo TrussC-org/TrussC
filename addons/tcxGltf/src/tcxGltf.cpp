@@ -1,5 +1,6 @@
 // cgltf is not vendored in this repo: CMakeLists.txt fetches the upstream
-// single header at tag v1.15 (github.com/jkuhlmann/cgltf), unmodified.
+// single header at tag v1.15 (github.com/jkuhlmann/cgltf). The build copy
+// guards partial-tree cleanup after callback failure; see PROVENANCE.md.
 // load() runs its own range checks (checkDataRanges()) and then
 // cgltf_validate() on every file, before any accessor, index or image data
 // is read.
@@ -10,7 +11,7 @@
 
 namespace {
 thread_local bool invalidModelInteger = false;
-long long modelInteger(const char* text) {
+long long modelInteger(const char* text) noexcept {
     char* end = nullptr;
     errno = 0;
     long long value = std::strtoll(text, &end, 10);
@@ -22,7 +23,7 @@ long long modelInteger(const char* text) {
     }
     return value;
 }
-int modelInt(const char* text) {
+int modelInt(const char* text) noexcept {
     long long value = modelInteger(text);
     // Bound (abi): cgltf reference and enum fields use int. Overflow rejects the model and is reported by LoadResult.
     if (value > INT_MAX) {
@@ -36,8 +37,16 @@ int modelInt(const char* text) {
 // cgltf's default atoi/atoll silently narrow file counts and references.
 #define CGLTF_ATOI(text) modelInt(text)
 #define CGLTF_ATOLL(text) modelInteger(text)
+namespace tcx::gltf {
+static bool gltfCallbackFailed(void* user) noexcept;
+static void recordGltfOutOfMemory(void* user) noexcept;
+}
+#define CGLTF_TRUSSC_CALLBACK_FAILED(user) tcx::gltf::gltfCallbackFailed(user)
+#define CGLTF_TRUSSC_RECORD_OOM(user) tcx::gltf::recordGltfOutOfMemory(user)
 #define CGLTF_IMPLEMENTATION
-#include "cgltf.h"
+#include "tcxGltfCgltf.h"
+#undef CGLTF_TRUSSC_CALLBACK_FAILED
+#undef CGLTF_TRUSSC_RECORD_OOM
 
 #include "tcxGltf.h"
 
@@ -64,21 +73,18 @@ namespace tcx::gltf {
 static thread_local size_t g_liveParserAllocations = 0;
 // Implementation-local allocator seam observes real frees independently of
 // registry counters. Production always uses malloc/free.
+static void releaseParserBlock(void* block) noexcept { std::free(block); }
 static thread_local void* (*g_parserMalloc)(size_t) = &std::malloc;
-static thread_local void (*g_parserFree)(void*) = &std::free;
+static thread_local void (*g_parserFree)(void*) noexcept = &releaseParserBlock;
 static thread_local size_t g_parserTableBytesForTests = 0;
 
 static size_t parserMemoryLimit(size_t inputBytes) {
     const size_t scaled = inputBytes > SIZE_MAX / 64 ? SIZE_MAX : inputBytes * 64;
     return (std::max)(size_t(256) * 1024 * 1024, scaled);
 }
-struct ParserMemoryExceeded : exception {
-    const char* what() const noexcept override { return "parser working memory limit exceeded"; }
-};
-
 struct GltfFileContext {
     // cgltf publishes some counts before checking allocation success. Keep
-    // ownership independent of its partial parse tree, and unwind on OOM.
+    // ownership independent of its partial parse tree; callbacks never unwind.
     struct alignas(max_align_t) Allocation {
         Allocation* previous;
         Allocation* next;
@@ -87,10 +93,16 @@ struct GltfFileContext {
     size_t parseTableBytes = 0;
     size_t parseLimit = 0;
     bool parsingTables = false;
+    enum class Failure { None, ParserMemoryExceeded, OutOfMemory, IoError };
+    Failure failure = Failure::None;
+    size_t rejectedTableBytes = 0;
+    void recordFailure(Failure reason) noexcept {
+        if (failure == Failure::None) failure = reason;
+    }
     fs::path modelPath;
     explicit GltfFileContext(const fs::path& path) : modelPath(path) {}
     ~GltfFileContext() {
-        g_parserTableBytesForTests = parseTableBytes;
+        g_parserTableBytesForTests = rejectedTableBytes ? rejectedTableBytes : parseTableBytes;
         while (allocations) {
             Allocation* next = allocations->next;
             g_parserFree(allocations);
@@ -101,12 +113,28 @@ struct GltfFileContext {
     bool readingModel = true;
 };
 
+// The build-copy parse guard runs before cgltf's partial-tree cleanup and
+// pointer fixup. The registry owns all blocks left after callback failure.
+static bool gltfCallbackFailed(void* user) noexcept {
+    return user && static_cast<GltfFileContext*>(user)->failure != GltfFileContext::Failure::None;
+}
+static void recordGltfOutOfMemory(void* user) noexcept {
+    if (user) static_cast<GltfFileContext*>(user)->recordFailure(GltfFileContext::Failure::OutOfMemory);
+}
+
 namespace internal {
 // These are implementation-only helpers, also exercised with synthetic sizes.
+bool parserCallocOverflowForTests() {
+    GltfFileContext files{fs::path{}};
+    cgltf_options options{};
+    options.memory.user_data = &files;
+    return cgltf_calloc(&options, 2, SIZE_MAX) == nullptr &&
+        files.failure == GltfFileContext::Failure::OutOfMemory && !files.allocations;
+}
 size_t liveParserAllocationsForTests() { return g_liveParserAllocations; }
-void setParserAllocatorForTests(void* (*allocate)(size_t), void (*release)(void*)) {
+void setParserAllocatorForTests(void* (*allocate)(size_t), void (*release)(void*) noexcept) {
     g_parserMalloc = allocate ? allocate : &std::malloc;
-    g_parserFree = release ? release : &std::free;
+    g_parserFree = release ? release : &releaseParserBlock;
 }
 size_t parserTableBytesForTests() { return g_parserTableBytesForTests; }
 size_t parserMemoryLimitForTests(size_t inputBytes) { return parserMemoryLimit(inputBytes); }
@@ -235,37 +263,49 @@ void setAllocationHookForTests(bool (*hook)(size_t)) {
     g_allocationHook.store(hook, memory_order_relaxed);
 }
 }
-static void* allocateGltf(void* user, cgltf_size size) {
-    if (auto hook = g_allocationHook.load(memory_order_relaxed)) {
-        if (!hook(size)) throw bad_alloc();
-    }
+static void* allocateGltf(void* user, cgltf_size size) noexcept {
     auto& context = *static_cast<GltfFileContext*>(user);
-    if (context.parsingTables) {
-        // Bound (security): cgltf parse-table allocation totals may not exceed max(256 MiB, 64 times input bytes). Overflow rejects the file with a Warning reporting requested bytes and the limit, then an Error.
-        if (size > context.parseLimit - context.parseTableBytes) {
-            size_t reached = size > SIZE_MAX - context.parseTableBytes ? SIZE_MAX : context.parseTableBytes + size;
-            g_parserTableBytesForTests = reached;
-            // Keep the rejected request visible after context teardown too.
-            context.parseTableBytes = reached;
-            getLogger().log(LogLevel::Warning, "[GltfModel] parser table allocations would reach " +
-                            to_string(reached) + " bytes (limit " + to_string(context.parseLimit) + " bytes)");
-            throw ParserMemoryExceeded();
+    if (context.failure != GltfFileContext::Failure::None) return nullptr;
+    try {
+        if (auto hook = g_allocationHook.load(memory_order_relaxed)) {
+            if (!hook(size)) {
+                context.recordFailure(GltfFileContext::Failure::OutOfMemory);
+                return nullptr;
+            }
         }
+        if (context.parsingTables) {
+            // Bound (security): cgltf parse-table allocation totals may not exceed max(256 MiB, 64 times input bytes). Overflow rejects the file with a Warning reporting requested bytes and the limit, then an Error.
+            if (size > context.parseLimit - context.parseTableBytes) {
+                context.rejectedTableBytes = size > SIZE_MAX - context.parseTableBytes ?
+                    SIZE_MAX : context.parseTableBytes + size;
+                context.recordFailure(GltfFileContext::Failure::ParserMemoryExceeded);
+                return nullptr;
+            }
+        }
+        using Allocation = GltfFileContext::Allocation;
+        // Bound (abi): each parser allocation and its ownership header must fit size_t. Overflow rejects the model and is reported by LoadResult.
+        if (size > SIZE_MAX - sizeof(Allocation)) {
+            context.recordFailure(GltfFileContext::Failure::OutOfMemory);
+            return nullptr;
+        }
+        auto* block = static_cast<Allocation*>(g_parserMalloc(sizeof(Allocation) + (size ? size : 1)));
+        if (!block) {
+            context.recordFailure(GltfFileContext::Failure::OutOfMemory);
+            return nullptr;
+        }
+        if (context.parsingTables) context.parseTableBytes += size;
+        block->previous = nullptr;
+        block->next = context.allocations;
+        if (block->next) block->next->previous = block;
+        context.allocations = block;
+        ++g_liveParserAllocations;
+        return block + 1;
+    } catch (...) {
+        context.recordFailure(GltfFileContext::Failure::OutOfMemory);
+        return nullptr;
     }
-    using Allocation = GltfFileContext::Allocation;
-    // Bound (abi): each parser allocation and its ownership header must fit size_t. Overflow rejects the model and is reported by LoadResult.
-    if (size > SIZE_MAX - sizeof(Allocation)) throw bad_alloc();
-    auto* block = static_cast<Allocation*>(g_parserMalloc(sizeof(Allocation) + (size ? size : 1)));
-    if (!block) throw bad_alloc();
-    if (context.parsingTables) context.parseTableBytes += size;
-    block->previous = nullptr;
-    block->next = context.allocations;
-    if (block->next) block->next->previous = block;
-    context.allocations = block;
-    ++g_liveParserAllocations;
-    return block + 1;
 }
-static void freeGltf(void* user, void* data) {
+static void freeGltf(void* user, void* data) noexcept {
     if (!data) return;
     auto* block = static_cast<GltfFileContext::Allocation*>(data) - 1;
     auto& context = *static_cast<GltfFileContext*>(user);
@@ -277,16 +317,16 @@ static void freeGltf(void* user, void* data) {
 }
 
 static void releaseGltfFile(const cgltf_memory_options* memory,
-                            const cgltf_file_options*, void* data) {
+                            const cgltf_file_options*, void* data) noexcept {
     if (memory->free_func) memory->free_func(memory->user_data, data);
     else std::free(data);
 }
 
 static cgltf_result readGltfFile(const cgltf_memory_options* memory,
                                  const cgltf_file_options* options,
-                                 const char* uri, cgltf_size* size, void** data) {
+                                 const char* uri, cgltf_size* size, void** data) noexcept {
+    auto& context = *static_cast<GltfFileContext*>(options->user_data);
     try {
-        auto& context = *static_cast<GltfFileContext*>(options->user_data);
         fs::path path = context.modelPath;
         if (!context.readingModel) {
             // operator/ appends a relative URI and keeps an absolute one.
@@ -322,8 +362,10 @@ static cgltf_result readGltfFile(const cgltf_memory_options* memory,
         *data = buffer;
         return cgltf_result_success;
     } catch (const bad_alloc&) {
+        context.recordFailure(GltfFileContext::Failure::OutOfMemory);
         return cgltf_result_out_of_memory;
     } catch (...) {
+        context.recordFailure(GltfFileContext::Failure::IoError);
         return cgltf_result_io_error;
     }
 }
@@ -863,8 +905,9 @@ LoadResult GltfModel::load(const fs::path& path) {
         auto entry = tc::internal::checkLoadFile(resolvedPath, "GltfModel");
         if (!entry) return entry;
 
-        // Parse with cgltf. The parsed data is freed on every path out of
-        // this block, including an exception.
+        // Normal trees use cgltf_free. After callback failure the build-copy
+        // parse guard skips internal cleanup and pointer fixup; the deleter
+        // below also skips tree traversal. files releases all remaining blocks.
         GltfFileContext files{resolvedPath};
         cgltf_options options = {};
         options.memory.alloc_func = allocateGltf;
@@ -873,10 +916,25 @@ LoadResult GltfModel::load(const fs::path& path) {
         options.file.read = readGltfFile;
         options.file.release = releaseGltfFile;
         options.file.user_data = &files;
+        auto callbackFailure = [&]() {
+            if (files.failure == GltfFileContext::Failure::ParserMemoryExceeded) {
+                getLogger().log(LogLevel::Warning, "[GltfModel] parser table allocations would reach " +
+                    to_string(files.rejectedTableBytes) + " bytes (limit " + to_string(files.parseLimit) + " bytes)");
+                return decodeFailure("parser working memory limit exceeded");
+            }
+            if (files.failure == GltfFileContext::Failure::OutOfMemory)
+                return recoveryFailure("not enough memory for the model data");
+            return decodeFailure("error while reading the model");
+        };
         cgltf_data* parsed = nullptr;
         invalidModelInteger = false;
         cgltf_result result = cgltf_parse_file(&options, "", &parsed);
-        unique_ptr<cgltf_data, decltype(&cgltf_free)> dataOwner(parsed, &cgltf_free);
+        // Do not even adopt or inspect a potentially partial output on failure.
+        if (files.failure != GltfFileContext::Failure::None) return callbackFailure();
+        auto releaseTree = [&files](cgltf_data* tree) noexcept {
+            if (files.failure == GltfFileContext::Failure::None) cgltf_free(tree);
+        };
+        unique_ptr<cgltf_data, decltype(releaseTree)> dataOwner(parsed, releaseTree);
         cgltf_data* data = dataOwner.get();
         files.parsingTables = false;
         if (result != cgltf_result_success || invalidModelInteger) {
@@ -888,6 +946,7 @@ LoadResult GltfModel::load(const fs::path& path) {
         // Load external buffers (for .gltf with separate .bin)
         files.readingModel = false;
         result = cgltf_load_buffers(&options, data, "");
+        if (files.failure != GltfFileContext::Failure::None) return callbackFailure();
         if (result != cgltf_result_success) {
             return decodeFailure("failed to load buffers");
         }
@@ -897,6 +956,7 @@ LoadResult GltfModel::load(const fs::path& path) {
             return decodeFailure(reason);
         }
         result = cgltf_validate(data);
+        if (files.failure != GltfFileContext::Failure::None) return callbackFailure();
         if (result != cgltf_result_success) {
             return decodeFailure("model data failed validation (cgltf result " +
                                  to_string(static_cast<int>(result)) + ")");

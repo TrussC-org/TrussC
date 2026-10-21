@@ -63,6 +63,15 @@ request. Failed loads clear the model, release the parser's independently owned
 allocations, and permit a successful retry. The parser sweep checks registry counts and outstanding bytes observed at the
 actual malloc/free calls after each failure, including partially published trees.
 Removing a free while retaining the bookkeeping decrement fails this check.
+NULL, `bad_alloc`, and non-standard allocator failures are injected directly
+at the parser seam, including persistent failure, for glTF, GLB, and external
+buffers. C callbacks contain all exceptions; diagnostics run after cgltf
+returns. A documented build-copy guard prevents cgltf's own error cleanup from
+walking partially published tables. Every assertion also requires zero live
+registry blocks and zero independently tracked outstanding bytes.
+STL tests use Nth-allocation injection so they do not depend on filebuf using
+operator new on Windows. Image encoding callback failures are also exercised
+for PNG, BMP, and JPEG, preserving any existing destination file.
 The addon enables exception recovery and non-aborting malloc on Emscripten too.
 Synthetic size tests exercise the actual token-count, individual-length and
 ptrdiff_t offset limits without large fixtures. A synthetic trailing-whitespace

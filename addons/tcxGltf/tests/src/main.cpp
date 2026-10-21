@@ -42,12 +42,13 @@
 #include "../../../../core/tests/common/tcModelAllocationProbe.h"
 
 namespace tcx::gltf::internal {
+bool parserCallocOverflowForTests();
 void setAllocationHookForTests(bool (*hook)(size_t));
 bool jsonOffsetsFit(size_t bytes);
 bool jsonObjectMembersFit(size_t members);
 bool jsonSkipFits(size_t tokens, size_t members);
 size_t liveParserAllocationsForTests();
-void setParserAllocatorForTests(void* (*allocate)(size_t), void (*release)(void*));
+void setParserAllocatorForTests(void* (*allocate)(size_t), void (*release)(void*) noexcept);
 size_t parserTableBytesForTests();
 size_t parserMemoryLimitForTests(size_t inputBytes);
 void setJsonPaddingForTests(size_t bytes);
@@ -70,8 +71,10 @@ using namespace tc;
 using tcx::gltf::GltfModel;
 namespace gltf_internal = tcx::gltf::internal;
 
+static size_t outstandingParserBytes = 0;
 static int g_pass = 0, g_fail = 0;
 static void check(const string& name, bool ok) {
+    ok = ok && gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0;
     printf("%-60s %s\n", name.c_str(), ok ? "PASS" : "FAIL");
     fflush(stdout);  // flush each line so CI logs survive a later crash
     ok ? ++g_pass : ++g_fail;
@@ -126,6 +129,7 @@ struct GltfBuilder {
     long long bufferLength = -1;         // -1 = bin.size()
     vector<string> extraBuffers;         // JSON of buffers 1, 2, ...
     string extra;                        // more top-level members, each ending in ","
+    bool meshesLast = false;             // put mapping allocation last before fixup
 
     // Append raw bytes (padded to 4) and a buffer view over them.
     int addView(const void* data, size_t size, int byteStride = 0) {
@@ -160,14 +164,17 @@ struct GltfBuilder {
         if (!scenes.empty()) j += "\"scenes\":" + scenes + ",";
         if (!nodes.empty()) j += "\"nodes\":" + nodes + ",";
         j += extra;
-        j += "\"meshes\":[{\"primitives\":[" + primitive + "]}],";
+        const string meshTable = "\"meshes\":[{\"primitives\":[" + primitive + "]}]";
+        if (!meshesLast) j += meshTable + ",";
         j += "\"accessors\":[" + join(accessors) + "],";
         j += "\"bufferViews\":[" + join(views) + "],";
         j += "\"buffers\":[{\"byteLength\":" + to_string(len);
         if (embedUri) j += ",\"uri\":\"data:application/octet-stream;base64," + base64(bin) + "\"";
         j += "}";
         for (const auto& eb : extraBuffers) j += "," + eb;
-        j += "]}";
+        j += "]";
+        if (meshesLast) j += "," + meshTable;
+        j += "}";
         return j;
     }
 
@@ -274,18 +281,25 @@ static GltfBuilder texturedTriangle(const string& imageJson) {
     return b;
 }
 
-static size_t parserAllocationCount = 0;
-static size_t rejectParserAllocation = 0;
+static size_t parserAllocationCount = 0, rejectParserAllocation = 0;
+static bool parserFaultPersistent = false;
+static int parserFaultKind = 0;
 static bool observeParserAllocation(size_t bytes) {
     ++parserAllocationCount;
-    return modelAllocationProbe::observe(bytes) &&
-           (!rejectParserAllocation || parserAllocationCount != rejectParserAllocation);
+    if (!modelAllocationProbe::observe(bytes)) return false;
+    if (!rejectParserAllocation || parserAllocationCount < rejectParserAllocation ||
+        (!parserFaultPersistent && parserAllocationCount != rejectParserAllocation)) return true;
+    if (parserFaultKind == 1) throw bad_alloc();
+    if (parserFaultKind == 2) throw 42;
+    return false;
 }
 
 // Observe actual malloc/free calls independently of registry bookkeeping.
 struct ParserBlock { void* pointer; size_t bytes; };
-static ParserBlock parserBlocks[4096]{};
-static size_t outstandingParserBytes = 0, actualParserAllocations = 0;
+// The deep-node fixture alone has 20000 child tables. This is observer
+// capacity for these fixed tests, independent of production model admission.
+static ParserBlock parserBlocks[65536]{};
+static size_t actualParserAllocations = 0;
 static size_t grantedParserBytes = 0, peakParserBytes = 0, largestParserBlock = 0;
 static void* trackParserMalloc(size_t bytes) {
     void* pointer = std::malloc(bytes);
@@ -301,7 +315,7 @@ static void* trackParserMalloc(size_t bytes) {
     }
     std::abort(); // Test tracker capacity, never a model acceptance limit.
 }
-static void trackParserFree(void* pointer) {
+static void trackParserFree(void* pointer) noexcept {
     for (auto& block : parserBlocks) if (block.pointer == pointer) {
         outstandingParserBytes -= block.bytes;
         block = {};
@@ -325,6 +339,56 @@ int main() {
             utf8ToPath("tcxGltf-テスト-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(g_dir);
 
+    gltf_internal::setParserAllocatorForTests(trackParserMalloc, trackParserFree);
+
+    {
+        // Model fixtures exercise stb too. Fail the growing encoder output
+        // buffer, after path preparation, without relying on filebuf storage.
+        Pixels pixels;
+        pixels.allocate(128, 128, 4);
+        uint32_t noise = 1;
+        for (size_t i = 0; i < 128 * 128 * 4; ++i) {
+            noise = noise * 1664525u + 1013904223u;
+            pixels.getData()[i] = static_cast<unsigned char>(noise >> 24);
+        }
+        for (const string& ext : {string("png"), string("bmp"), string("jpg")}) {
+            auto path = g_dir / ("encoder-fault." + ext);
+            for (bool persistent : {false, true}) {
+                ofstream(path, ios::binary) << "previous";
+                modelAllocationProbe::begin(4096, persistent);
+                SaveResult result;
+                bool escaped = false;
+                try { result = pixels.save(path); } catch (...) { escaped = true; }
+                modelAllocationProbe::end();
+                check("stb " + ext + (persistent ? " persistent" : " single") + " callback failure returns after C",
+                      modelAllocationProbe::failed && !escaped && !result && result.error == SaveError::WriteFailed);
+                ifstream saved(path, ios::binary);
+                string content((istreambuf_iterator<char>(saved)), {});
+                check("stb failure preserves existing " + ext, content == "previous");
+            }
+        }
+        for (const string& ext : {string("png"), string("bmp"), string("tga"), string("jpg")}) {
+            const auto path = g_dir / "read-only-encoder-output";
+            ofstream(path, ios::binary) << "previous";
+            for (bool persistent : {false, true}) {
+                // Writing a read-only FILE fails on every native platform.
+                // Fault the first C++ allocation while building that error.
+                FILE* file = tc::internal::openFile(path, "rb");
+                SaveResult result;
+                bool escaped = false;
+                if (file) {
+                    modelAllocationProbe::beginNth(1, persistent);
+                    try { result = tc::internal::writePixelsEncoded(file, pixels, ext, path); }
+                    catch (...) { escaped = true; }
+                    modelAllocationProbe::end();
+                    fclose(file);
+                }
+                check("stb FILE " + ext + (persistent ? " persistent" : " single") + " error callback contains exception",
+                      file && modelAllocationProbe::failed && !escaped && !result && result.error == SaveError::WriteFailed);
+            }
+        }
+    }
+
     {
         fs::path oldRoot = getDataPathRoot();
         setDataPathRoot(g_dir);
@@ -347,6 +411,8 @@ int main() {
 
     {
         const size_t maxInt = static_cast<size_t>(INT_MAX);
+        check("cgltf calloc overflow records failure without invoking allocator",
+              gltf_internal::parserCallocOverflowForTests());
         check("JSON offsets use ptrdiff_t rather than int",
               gltf_internal::jsonOffsetsFit(static_cast<size_t>(PTRDIFF_MAX)) &&
               !gltf_internal::jsonOffsetsFit(static_cast<size_t>(PTRDIFF_MAX) + 1));
@@ -522,7 +588,6 @@ int main() {
               double(tables) / json.size() > 5 && double(tables) / json.size() < 8);
         check("parse memory rejection permits retry and frees parser storage",
               gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0);
-        gltf_internal::setParserAllocatorForTests(nullptr, nullptr);
     }
     gltf_internal::setAllocationHookForTests(&observeParserAllocation);
     {
@@ -589,46 +654,72 @@ int main() {
         auto path = writeGltf(triangle());
         GltfModel model;
         for (bool persistent : {false, true}) {
-            for (size_t request : {size_t(1), size_t(8192)}) {
+            for (size_t request : {size_t(1), size_t(2)}) {
                 check("glTF starts allocation test with a loaded model", model.load(path).ok());
                 LoadResult result;
                 bool escaped = false;
-                modelAllocationProbe::begin(request, persistent);
+                // Nth requests fire on MSVC as well; its filebuf bypasses
+                // operator new and large std::allocator requests are padded.
+                modelAllocationProbe::beginNth(request, persistent);
                 try { result = model.load(path); }
                 catch (const bad_alloc&) { escaped = true; }
                 modelAllocationProbe::end();
                 check(persistent ? "persistent allocation failure returns empty failure" :
                                    "STL allocation failure returns empty failure",
                       modelAllocationProbe::failed && !escaped && !result &&
-                      result.error == LoadError::DecodeFailed && !model.isLoaded() && model.getNodeCount() == 0);
+                      result.error == LoadError::DecodeFailed && !model.isLoaded() && model.getNodeCount() == 0 &&
+                      gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0);
                 check("retry after parser allocation failure succeeds", model.load(path).ok());
             }
         }
     }
     {
-        auto path = writeGltf(triangle());
-        GltfModel model;
-        gltf_internal::setParserAllocatorForTests(trackParserMalloc, trackParserFree);
-        actualParserAllocations = 0;
-        parserAllocationCount = 0;
-        bool ok = model.load(path).ok();
-        size_t allocations = parserAllocationCount;
-        for (size_t nth = 1; nth <= allocations; ++nth) {
+        // Sweep NULL, bad_alloc, and non-standard exceptions at the actual C
+        // allocator seam, independently of platform STL/filebuf allocation.
+        // Extra tables reproduce cgltf's count-before-NULL-check cleanup sites.
+        // Mappings come last: their NULL allocation can still return a positive
+        // root index, so the failure guard must precede pointer fixup too.
+        auto b = triangle();
+        b.meshesLast = true;
+        b.primitive = R"({"attributes":{"POSITION":0},"targets":[{"POSITION":0}],"extras":{"x":1},"extensions":{"unknown":{"x":1},"KHR_materials_variants":{"mappings":[{"material":0,"variants":[0]}]}}})";
+        b.extra = R"("materials":[{}],"extensionsUsed":["unknown","KHR_materials_variants"],"extensionsRequired":["unknown"],"extensions":{"unknown":{"x":1},"KHR_materials_variants":{"variants":[{"name":"sample"}]}},)";
+        for (int shape = 0; shape < 3; ++shape) {
+            auto path = shape == 1 ? writeGlb(b) : writeGltf(b);
+            if (shape == 2) {
+                string document = b.json();
+                size_t uri = document.find("data:application/octet-stream;base64,");
+                document.replace(uri, document.find('"', uri) - uri, "fault.bin");
+                ofstream(g_dir / "fault.bin", ios::binary).write(reinterpret_cast<const char*>(b.bin.data()), b.bin.size());
+                ofstream(path, ios::binary) << document;
+            }
+            GltfModel model;
             parserAllocationCount = 0;
-            rejectParserAllocation = nth;
-            auto result = model.load(path);
-            ok = ok && !result && !model.isLoaded() && model.getNodeCount() == 0;
-            check("failed parse releases every registry allocation",
-                  gltf_internal::liveParserAllocationsForTests() == 0 &&
-                  actualParserAllocations > 0 && outstandingParserBytes == 0);
-            rejectParserAllocation = 0;
+            bool ok = model.load(path).ok();
+            size_t allocations = parserAllocationCount;
+            printf("parser seam shape=%d requests=%zu (mappings last in parse)\n", shape, allocations);
+            for (bool persistent : {false, true}) {
+                for (int fault = 0; fault < 3; ++fault) {
+                    bool clean = ok && allocations > 10;
+                    for (size_t nth = 1; nth <= allocations; ++nth) {
+                        parserAllocationCount = 0;
+                        rejectParserAllocation = nth;
+                        parserFaultPersistent = persistent;
+                        parserFaultKind = fault;
+                        auto result = model.load(path);
+                        clean = clean && parserAllocationCount >= nth && !result &&
+                            result.error == LoadError::DecodeFailed &&
+                            result.message.find("not enough memory") != string::npos &&
+                            !model.isLoaded() && model.getNodeCount() == 0 &&
+                            gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0;
+                        rejectParserAllocation = 0;
+                        clean = clean && model.load(path).ok() &&
+                            gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0;
+                    }
+                    check("parser seam shape=" + to_string(shape) + " fault=" + to_string(fault) +
+                          (persistent ? " persistent cleanup and retry" : " single cleanup and retry"), clean);
+                }
+            }
         }
-        check("every parser allocation can fail cleanly", ok && allocations > 10);
-        check("retry after every parser allocation failure succeeds", model.load(path).ok());
-        check("actual parser allocator has no outstanding bytes", outstandingParserBytes == 0);
-        // Also reclaim deliberately leaked blocks in cleanup-mutation runs.
-        for (auto& block : parserBlocks) if (block.pointer) trackParserFree(block.pointer);
-        gltf_internal::setParserAllocatorForTests(nullptr, nullptr);
     }
     {
         Pixels pixels;
@@ -665,7 +756,9 @@ int main() {
                     modelAllocationProbe::end();
                     clean = clean && modelAllocationProbe::failed && !escaped &&
                             (result.ok() || (result.error == LoadError::DecodeFailed && !model.isLoaded() && model.getNodeCount() == 0));
-                    clean = clean && model.load(path).ok();
+                    clean = clean && gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0;
+                    clean = clean && model.load(path).ok() &&
+                            gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0;
                 }
                 check(persistent ? "glTF every allocation: persistent recovery and retry" :
                                    "glTF every allocation: single recovery and retry", clean);
