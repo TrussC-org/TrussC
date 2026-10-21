@@ -659,3 +659,88 @@ copy will be inserted before that authorization. Existing backend capture
 sources remain in use, including their existing presentation-time limitations.
 Native Metal presentation/API validation, Windows debug-layer execution and
 Pi V3D swapchain pixels remain required device checks.
+
+### Checked WebGPU uniform growth (#863, lane 4B)
+
+- `_sg_wgpu_uniform_reserve()` checks wide size arithmetic, the device buffer
+  limit and uint32 dynamic offsets before allocating CPU/GPU replacements.
+  Uploads retain the 64 KiB binding extent and device alignment (256 bytes on
+  WebGPU). TrussC starts WebGPU at 1 MiB; explicit reservations still apply.
+- Growth copies staging without changing any block offset, uploads the old
+  buffer's recorded prefix, then releases the backend's reference. WebGPU
+  encoders/commands and bind groups retain referenced resources through queue
+  submission/completion; the backend never destroys a retired buffer.
+  Old shader uniform groups (including idle shaders) are retired on growth;
+  replacements are built lazily by generation, so uploads split
+  between stages of one draw keep valid offsets into the copied data.
+- Fallible allocations publish only after success. One Error suppresses later
+  uploads/draws/dispatches until commit; the next frame can retry. One
+  `WGPU_UNIFORM_BUFFER_GROWN` warning is emitted per backend initialization.
+- WebGPU reports GPU out-of-memory and validation failures asynchronously: the
+  creation call returns a non-null error object. Each uniform buffer and
+  uniform bind-group creation is wrapped in OutOfMemory and Validation error
+  scopes (`_sg_wgpu_uniform_push_scopes`/`_pop_scopes`). Each buffer creation
+  starts a generation (token) that its bind groups share. Growth stays
+  synchronous, and the last confirmed buffer stays referenced until the new one
+  is confirmed. A failure reported by the pop callback is latched for the
+  current generation. At every frame's first pass, whether or not the frame
+  uploads uniforms (`_sg_wgpu_uniform_system_on_frame_begin()` in
+  `_sg_wgpu_begin_pass`), `_sg_wgpu_uniform_recover()` releases the errored
+  buffer, returns to the last good buffer and size, retires the uniform bind
+  groups that reference the buffer (so none built from an error object stays
+  cached) and logs one `WGPU_UNIFORM_BUFFER_CREATION_FAILED` Error. The same
+  frame boundary releases a confirmed predecessor. Growth is retried only when
+  an upload needs more space again. On a GPU out-of-memory the affected frame
+  may be dropped: draws recorded before the callback fires use the error
+  object.
+- When the failed buffer has no confirmed predecessor (the initial buffer
+  failed), recovery leaves no buffer. The next upload or uniform group that
+  needs one creates it again at the initial reservation; nothing retries while
+  nothing needs it, and shader creation does not fail for lack of it.
+- A shader without uniform blocks has an empty group 0 that references no
+  buffer. It is created without one and kept across growth and recovery. Its
+  creation scopes are tracked separately: if an empty group fails, recovery
+  rebuilds the empty groups and reports the same one Error.
+- A failure of a generation that a later growth already replaced (an errored
+  buffer followed by a valid larger one before the results arrive) keeps the
+  valid buffer but is still reported with the same one Error.
+- Errors from using an unconfirmed error object are contained, not leaked as
+  uncaptured errors: while creation results are pending (or a failure is not
+  yet recovered), the old-buffer prefix write during growth and, in
+  `_sg_wgpu_commit`, the uniform `wgpuQueueWriteBuffer`, `wgpuCommandEncoderFinish`
+  and `wgpuQueueSubmit` (which surface bind/draw errors recorded in passes) run
+  inside OutOfMemory + Validation scopes. Frames whose uniform resources are all
+  confirmed open no scope. Every error these containment scopes capture is
+  logged as `WGPU_UNIFORM_CHECK_CAPTURED_ERROR` with the WebGPU message (cut at
+  200 bytes) instead of reaching the device's uncaptured-error handler; none is
+  attributed or dropped, so an app's own error in such a frame stays visible.
+  On a GPU out-of-memory, a validation message for the dropped frame may
+  therefore also be logged next to the one recovery Error. Logging rolls
+  nothing back. No settlement order between error-scope results is assumed:
+  each creation result only sets flags for its own generation.
+- Callback lifetime: tokens come from a process-wide counter that never
+  restarts. Each backend records its first token, and discard raises it past
+  every issued token, so a result from an earlier backend is ignored. The
+  callbacks only compare tokens and set flags in static `_sg` storage. A
+  callback that fires after `sg_shutdown()` (cancelled or late) or during a
+  later backend therefore changes nothing. Emscripten delivers it
+  spontaneously from the main-thread event loop; native Dawn delivers it in
+  `wgpuInstanceProcessEvents()`.
+- The direct-mapped resource bind-group cache retains its default 1024 slots
+  (`Bound (cache)`). Failed/null creation is never cached; failed native
+  groups release their pool slot. Disabled-cache failures also skip the draw.
+  Normal collisions still evict without a Warning or loss counter.
+- `core/tests/webgpuUniformGrowth` owns the Release browser pixel/fault harness.
+  It compares tiny/large reservations across raster and compute passes and
+  frames, and injects a real asynchronous buffer validation error in a frame
+  that keeps uploading, binding and drawing with the error object; `run.py
+  --build` captures the Chrome console verdict, including any uncaptured
+  WebGPU error. Its native mock (run when emdawn's headers are found) models
+  error objects, late error-scope results, and the validation errors that
+  writing or binding an error object raises.
+
+This patch does not change Metal or Vulkan, or TrussC's API. In this sokol fork
+it adds four `sg_log_item` entries (`WGPU_UNIFORM_BUFFER_GROWN`,
+`WGPU_UNIFORM_UPLOAD_FAILED`, `WGPU_UNIFORM_BUFFER_CREATION_FAILED`,
+`WGPU_UNIFORM_CHECK_CAPTURED_ERROR`). The earlier note that WebGPU is untouched
+applies only to the historical Metal-only patch.
