@@ -23,6 +23,8 @@
 #include "lj_bcdump.h"
 #include "lj_parse.h"
 
+#include "tcloadbuffer.h"
+
 /* -- Load Lua source code and bytecode ----------------------------------- */
 
 static TValue *cpparser(lua_State *L, lua_CFunction dummy, void *ud)
@@ -63,14 +65,17 @@ LUA_API int lua_loadx(lua_State *L, lua_Reader reader, void *data,
 		      const char *chunkname, const char *mode)
 {
   LexState ls;
+  TcLuaLoadGuard guard;
   int status;
-  ls.rfunc = reader;
-  ls.rdata = data;
+  tcLuaLoadBegin(L, &guard, reader, data, mode);
+  ls.rfunc = tcLuaLoadRead;
+  ls.rdata = &guard;
   ls.chunkarg = chunkname ? chunkname : "?";
   ls.mode = mode;
   lj_buf_init(L, &ls.sb);
   status = lj_vm_cpcall(L, NULL, &ls, cpparser);
   lj_lex_cleanup(L, &ls);
+  tcLuaLoadEnd(L, &guard);
   lj_gc_check(L);
   return status;
 }

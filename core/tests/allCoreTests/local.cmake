@@ -97,3 +97,9 @@ if("externalMainDelivery" IN_LIST _TC_CORE_TEST_NAMES)
     set_property(SOURCE "${_TC_CORE_TESTS_DIR}/externalMainDelivery/src/main.cpp"
         APPEND PROPERTY INCLUDE_DIRECTORIES "${_TC_CORE_TESTS_DIR}/../../addons/tcxMidi/tests/mocks" "${_TC_CORE_TESTS_DIR}/../../addons/tcxTls/src")
 endif()
+
+if("localTextRead" IN_LIST _TC_CORE_TEST_NAMES AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set_property(SOURCE "${_TC_CORE_TESTS_DIR}/localTextRead/src/main.cpp"
+        APPEND PROPERTY COMPILE_DEFINITIONS TC_LOCAL_TEXT_WRAP_NEW)
+    target_link_options(${PROJECT_NAME} PRIVATE "-Wl,--wrap=_Znwm")
+endif()

@@ -8837,16 +8837,19 @@ description.en = "Reads one line from the file."
 description.ja = "ファイルから 1 行読み込む。"
 description.ko = "파일에서 한 줄을 읽는다."
 details.en = '''
+- Local lines have no size cap and use amortized linear growth. Failure clears the output; Detected I/O or allocation failure logs an Error. Some standard libraries report read errors as EOF (libc++ and MSVC filebuf), so a partial final line can be returned there. Lines of at least 256 MiB emit a Notice.
 - `readLine()` returns a string; `readLine(string& line)` stores the line in the supplied string and returns whether reading succeeded. A final nonempty line without a newline is still a successful read.
 - Removes the separating `'\n'` and one trailing `'\r'`, if present. Other bytes are preserved without text decoding.
 - The no-argument form returns an empty string for a blank line, a closed file, or EOF with no more characters. The output-argument form distinguishes a successful blank line from failure by returning `true`; it returns `false` for a closed file, EOF with no more characters, or a read failure.
 '''
 details.ja = '''
+- ローカルの行にサイズ上限はなく、償却線形時間で領域を増やします。失敗時は出力を空にし、検出できた I/O または確保の失敗は Error を記録します。libc++ と MSVC の filebuf は読み取りエラーを EOF として扱うため、途中の最終行を返す場合があります。256 MiB 以上の行には Notice を出します。
 - `readLine()` は文字列を返し、`readLine(string& line)` は渡した文字列に行を格納して読み取りが成功したかを返します。末尾に改行がなくても、最後の空でない行は読み取り成功として扱います。
 - 区切りの `'\n'` と、末尾にあれば 1 つの `'\r'` を取り除きます。それ以外のバイトはテキストのデコードを行わずに保持します。
 - 引数なしの形式は、空行、閉じたファイル、残りの文字がない EOF で空文字列を返します。出力引数の形式は、空行の読み取りに成功した場合は `true` を返すため、失敗と区別できます。閉じたファイル、残りの文字がない EOF、読み取り失敗では `false` を返します。
 '''
 details.ko = '''
+- 로컬 줄에는 크기 상한이 없으며 분할 상환 선형 시간으로 저장 공간을 늘립니다. 실패 시 출력을 비우고 감지된 I/O 또는 할당 실패는 Error를 기록합니다. libc++와 MSVC filebuf는 읽기 오류를 EOF로 처리하므로 불완전한 마지막 줄을 반환할 수 있습니다. 256 MiB 이상의 줄은 Notice를 기록합니다.
 - `readLine()`은 문자열을 반환하고, `readLine(string& line)`은 전달한 문자열에 줄을 저장한 뒤 읽기 성공 여부를 반환합니다. 마지막 줄이 비어 있지 않으면 끝에 줄바꿈이 없어도 읽기에 성공합니다.
 - 구분자인 `'\n'`과 끝에 있는 `'\r'` 하나를 제거합니다. 나머지 바이트는 텍스트를 디코딩하지 않고 유지합니다.
 - 인수 없는 형식은 빈 줄, 닫힌 파일, 더 읽을 문자가 없는 EOF에서 빈 문자열을 반환합니다. 출력 인수 형식은 빈 줄 읽기에 성공하면 `true`를 반환하므로 실패와 구분할 수 있습니다. 닫힌 파일, 더 읽을 문자가 없는 EOF, 읽기 실패에서는 `false`를 반환합니다.
@@ -43148,22 +43151,22 @@ description.ko = "지정한 코덱으로 바이트 버퍼의 압축을 해제한
 details.en = '''
 - Pass the compressed buffer `src`, its byte count `nbytes`, and the codec used by `compress()`; `Codec::None` copies the input unchanged.
 - The vector overload `decompress(src, nbytes, out, decompressedSize, codec)` requires the known original byte count, resizes `out` to that size, and returns `true` only when exactly that many bytes are produced. Failure or a size mismatch clears `out` and returns `false`.
-- The raw overload `decompress(src, nbytes, dst, dstCapacity, codec)` writes into caller-owned storage and returns the number of bytes written as `int`, or `-1` on failure. A result smaller than `dstCapacity` is allowed; this overload does not check the expected original size. For `Codec::None`, keep `nbytes` representable as `int`; larger copies do not reliably return their byte count or `-1`.
-- LZ4 casts both `nbytes` and `dstCapacity` to `int` without checking their ranges; keep both representable as `int`.
+- The raw overload `decompress(src, nbytes, dst, dstCapacity, codec)` writes into caller-owned storage and returns the number of bytes written as `int`, or `-1` on failure. A result smaller than `dstCapacity` is allowed; this overload does not check the expected original size. Inputs whose byte count cannot be represented as `int` return `-1`.
+- The vector overload checks encoded lengths and proves the exact LZ4 output size before allocation. Output has no policy cap; LZ4 output over 256 MiB emits one Notice. It logs an Error on failure. The raw overload has no output policy cap; it checks that `nbytes` fits `int` and clamps LZ4 `dstCapacity` to `INT_MAX` before decoding.
 - For source and destination storage rules, see `compress`.
 '''
 details.ja = '''
 - 圧縮済みのバッファ `src`、そのバイト数 `nbytes`、`compress()` で使ったコーデックを渡します。`Codec::None` は入力をそのままコピーします。
 - vector 版の `decompress(src, nbytes, out, decompressedSize, codec)` には既知の元のバイト数を渡します。`out` をそのサイズに変更し、出力が指定バイト数と一致した場合だけ `true` を返します。失敗やサイズの不一致では `out` を空にして `false` を返します。
-- raw 版の `decompress(src, nbytes, dst, dstCapacity, codec)` は呼び出し側が用意した領域に書き込み、書き込んだバイト数を `int` で返します。失敗時は `-1` を返します。出力が `dstCapacity` より小さくても成功し、期待する元のサイズとの一致は検査しません。`Codec::None` では `nbytes` を `int` で表せる範囲にしてください。それを超えるコピーでは、バイト数や `-1` が正しく返る保証はありません。
-- LZ4 は `nbytes` と `dstCapacity` を範囲の検査なしに `int` に変換するため、両方とも `int` で表せる範囲にしてください。
+- raw 版の `decompress(src, nbytes, dst, dstCapacity, codec)` は呼び出し側が用意した領域に書き込み、書き込んだバイト数を `int` で返します。失敗時は `-1` を返します。出力が `dstCapacity` より小さくても成功し、期待する元のサイズとの一致は検査しません。バイト数を `int` で表せない入力は `-1` を返します。
+- vector 版は確保前に符号化データの長さと LZ4 の正確な出力サイズを検査します。出力にポリシー上限はなく、256 MiB を超える LZ4 出力には Notice を一度出します。失敗時は Error を記録します。raw 版に出力のポリシー上限はなく、復号前に `nbytes` が `int` に収まるか検査し、LZ4 の `dstCapacity` は `INT_MAX` にクランプします。
 - 入力と出力の領域の扱いは `compress` を参照してください。
 '''
 details.ko = '''
 - 압축 버퍼 `src`, 해당 바이트 수 `nbytes`, `compress()`에서 사용한 코덱을 전달합니다. `Codec::None`은 입력을 그대로 복사합니다.
 - vector 오버로드 `decompress(src, nbytes, out, decompressedSize, codec)`에는 알고 있는 원본 바이트 수를 전달합니다. `out`을 해당 크기로 조정하고 정확히 그 바이트 수가 출력된 경우에만 `true`를 반환합니다. 실패하거나 크기가 일치하지 않으면 `out`을 비우고 `false`를 반환합니다.
-- raw 오버로드 `decompress(src, nbytes, dst, dstCapacity, codec)`은 호출자가 마련한 저장 공간에 기록하고, 기록한 바이트 수를 `int`로 반환합니다. 실패하면 `-1`을 반환합니다. 출력이 `dstCapacity`보다 작아도 성공하며, 예상 원본 크기와의 일치는 검사하지 않습니다. `Codec::None`에서는 `nbytes`를 `int`로 표현할 수 있는 범위로 유지해야 합니다. 그보다 큰 복사에서는 바이트 수나 `-1`이 올바르게 반환된다고 보장할 수 없습니다.
-- LZ4는 범위를 검사하지 않고 `nbytes`와 `dstCapacity`를 모두 `int`로 변환하므로, 두 값 모두 `int`로 표현할 수 있는 범위로 유지해야 합니다.
+- raw 오버로드 `decompress(src, nbytes, dst, dstCapacity, codec)`은 호출자가 마련한 저장 공간에 기록하고, 기록한 바이트 수를 `int`로 반환합니다. 실패하면 `-1`을 반환합니다. 출력이 `dstCapacity`보다 작아도 성공하며, 예상 원본 크기와의 일치는 검사하지 않습니다. 바이트 수를 `int`로 표현할 수 없는 입력은 `-1`을 반환합니다.
+- vector 오버로드는 할당 전에 인코딩 길이와 정확한 LZ4 출력 크기를 검사합니다. 출력 정책 상한은 없으며 256 MiB를 넘는 LZ4 출력에는 Notice를 한 번 기록합니다. 실패하면 Error를 기록합니다. raw 오버로드에는 출력 정책 상한이 없으며 디코딩 전에 `nbytes`가 `int` 범위인지 검사하고 LZ4의 `dstCapacity`를 `INT_MAX`로 제한합니다.
 - 입력과 출력 저장 공간의 사용 규칙은 `compress`를 참조하세요.
 '''
 related = ["Codec", "compress", "compressBound"]
@@ -48204,20 +48207,20 @@ description.ja = "ディレクトリ直下のファイルとディレクトリ�
 description.ko = "디렉터리 바로 아래의 파일과 디렉터리 목록을 반환한다."
 details.en = '''
 - Resolves `path` through `getDataPath()` and returns a `vector<string>` of entry names without parent paths. Includes files and directories, does not recurse, and does not sort the result.
-- Returns an empty vector if the path is missing or is not a directory. Errors in these initial filesystem queries can throw exceptions.
-- An error while opening or advancing the directory iterator is logged as Error, and the entries collected so far are returned. A filename-conversion exception is logged as Warning, and that entry is skipped.
+- Returns an empty vector if the path is missing or is not a directory. Local listings have no entry or name-size policy cap; entries are streamed and only result names are retained.
+- I/O or allocation failure logs an Error and returns an empty vector. A filename-conversion error logs a Warning and skips that entry.
 - Names are converted through `pathToUtf8()`; see `pathToUtf8` for encoding rules.
 '''
 details.ja = '''
 - `path` を `getDataPath()` で解決し、親パスを含まない項目名を `vector<string>` で返します。ファイルとディレクトリを含み、再帰的な列挙や並べ替えは行いません。
-- パスが存在しない場合やディレクトリでない場合は空の vector を返します。これらの最初のファイルシステム照会では例外が発生する場合があります。
-- ディレクトリ反復子の開始時や次の項目への移動時のエラーは Error としてログに出し、それまでに集めた項目を返します。ファイル名の変換で例外が発生した場合は Warning としてログに出し、その項目をスキップします。
+- パスが存在しない場合やディレクトリでない場合は空の vector を返します。ローカルの一覧に項目数や名前のサイズのポリシー上限はなく、項目を逐次列挙して結果の名前だけを保持します。
+- I/O または確保の失敗は Error を記録して空の vector を返します。ファイル名の変換エラーは Warning を記録し、その項目をスキップします。
 - 名前は `pathToUtf8()` で変換します。エンコーディングの規則は `pathToUtf8` を参照してください。
 '''
 details.ko = '''
 - `path`를 `getDataPath()`로 해석하고 상위 경로를 포함하지 않는 항목 이름을 `vector<string>`으로 반환합니다. 파일과 디렉터리를 포함하며 재귀적으로 나열하거나 결과를 정렬하지 않습니다.
-- 경로가 없거나 디렉터리가 아니면 빈 vector를 반환합니다. 이러한 초기 파일 시스템 조회에서 예외가 발생할 수 있습니다.
-- 디렉터리 반복자를 열거나 다음 항목으로 이동할 때 발생한 오류는 Error로 로그에 남기고 그때까지 수집한 항목을 반환합니다. 파일명 변환 예외는 Warning으로 로그에 남기고 해당 항목을 건너뜁니다.
+- 경로가 없거나 디렉터리가 아니면 빈 vector를 반환합니다. 로컬 목록의 항목 수와 이름 크기에는 정책 상한이 없으며 항목을 순차적으로 열거하고 결과 이름만 유지합니다.
+- I/O 또는 할당 실패는 Error를 기록하고 빈 vector를 반환합니다. 파일명 변환 오류는 Warning을 기록하고 해당 항목을 건너뜁니다.
 - 이름은 `pathToUtf8()`로 변환합니다. 인코딩 규칙은 `pathToUtf8`을 참조하세요.
 '''
 related = ["directoryExists", "getFileName", "getDataPath", "pathToUtf8"]
@@ -48461,20 +48464,20 @@ description.ko = "파일 전체를 문자열로 읽는다."
 details.en = '''
 - `loadTextFile(path)` returns the file's bytes as a string. Binary mode preserves line endings, including Windows `"\r\n"`, and embedded null bytes without decoding the text.
 - Relative paths are resolved through `getDataPath()`; absolute paths are used unchanged. The target must be an openable regular file.
-- A missing, non-regular, or unopenable file logs an Error with a file-not-found message and returns an empty string. An empty file also returns an empty string; no explicit read-error check is made after opening.
-- The whole file is read synchronously into memory. Use `FileReader` for incremental reading.
+- A missing, non-regular, or unopenable file logs an Error with a file-not-found message and returns an empty string. An empty file also returns an empty string. Detected I/O or allocation failure logs an Error and returns an empty string. libc++ and MSVC filebuf can report read errors as EOF; a partial result is possible there.
+- The whole file is read synchronously, appending only bytes actually read in chunks, without a local size cap. Reads of at least 256 MiB emit a Notice. Use `FileReader` to retain only part of the file.
 '''
 details.ja = '''
 - `loadTextFile(path)` はファイルのバイト列を文字列として返します。バイナリモードを使い、Windows の `"\r\n"` を含む改行や途中のヌルバイトを、テキストのデコードを行わずに保持します。
 - 相対パスは `getDataPath()` で解決し、絶対パスはそのまま使います。対象は開くことができる通常ファイルである必要があります。
-- 対象が存在しない場合、通常ファイルでない場合、開けない場合は、ファイルが見つからないというメッセージを Error としてログに出し、空文字列を返します。空のファイルも空文字列を返します。開いたあとの読み取りエラーを明示的に確認する処理はありません。
-- ファイル全体を同期的にメモリへ読み込みます。少しずつ読み込む場合は `FileReader` を使ってください。
+- 対象が存在しない場合、通常ファイルでない場合、開けない場合は、ファイルが見つからないというメッセージを Error としてログに出し、空文字列を返します。空のファイルも空文字列を返します。検出できた I/O または確保の失敗は Error を記録し、空文字列を返します。libc++ と MSVC の filebuf は読み取りエラーを EOF として扱うため、部分的な結果を返す場合があります。
+- ローカルのサイズ上限は設けず、実際に読めたバイトだけをチャンク単位で同期的に追記します。256 MiB 以上の読み込みには Notice を出します。一部だけを保持する場合は `FileReader` を使ってください。
 '''
 details.ko = '''
 - `loadTextFile(path)`는 파일의 바이트를 문자열로 반환합니다. 바이너리 모드로 Windows의 `"\r\n"`을 포함한 줄바꿈과 중간의 널 바이트를 유지하며 텍스트를 디코딩하지 않습니다.
 - 상대 경로는 `getDataPath()`로 해석하고 절대 경로는 그대로 사용합니다. 대상은 열 수 있는 일반 파일이어야 합니다.
-- 대상이 없거나 일반 파일이 아니거나 열 수 없으면 파일을 찾을 수 없다는 메시지를 Error로 로그에 남기고 빈 문자열을 반환합니다. 빈 파일도 빈 문자열을 반환합니다. 연 뒤의 읽기 오류를 명시적으로 확인하지 않습니다.
-- 파일 전체를 동기적으로 메모리에 읽습니다. 조금씩 읽으려면 `FileReader`를 사용하세요.
+- 대상이 없거나 일반 파일이 아니거나 열 수 없으면 파일을 찾을 수 없다는 메시지를 Error로 로그에 남기고 빈 문자열을 반환합니다. 빈 파일도 빈 문자열을 반환합니다. 감지된 I/O 또는 할당 실패 시 Error를 기록하고 빈 문자열을 반환합니다. libc++와 MSVC filebuf는 읽기 오류를 EOF로 처리하므로 부분 결과를 반환할 수 있습니다.
+- 로컬 크기 상한 없이 실제로 읽은 바이트만 청크 단위로 동기적으로 추가합니다. 256 MiB 이상 읽으면 Notice를 기록합니다. 일부만 유지하려면 `FileReader`를 사용하세요.
 '''
 related = ["saveTextFile", "loadJson", "getFileSize", "FileReader", "getDataPath"]
 snippet = '''

@@ -53,7 +53,10 @@ bool compress(const void* src, std::size_t nbytes,
 
 // Decompress `nbytes` from `src` into `out`. `decompressedSize` is the known
 // original byte count (store it next to the compressed data). Returns false on
-// failure or size mismatch (and clears `out`).
+// failure or size mismatch (and clears `out`). Checks the encoded size before
+// allocation; LZ4 output over 256 MiB emits one Notice. There is no output
+// policy cap. LZ4 lengths and results must fit int; identity copies use size_t.
+// Failure releases storage.
 bool decompress(const void* src, std::size_t nbytes,
                 std::vector<std::uint8_t>& out, std::size_t decompressedSize,
                 Codec codec);

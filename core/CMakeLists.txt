@@ -215,9 +215,10 @@ target_include_directories(TrussC SYSTEM PUBLIC
 # Platform-specific configuration
 # =============================================================================
 if(TC_PLATFORM_EMSCRIPTEN)
-    # Audio full loads grow to available memory. A vector probe cannot guarantee
-    # that its later allocation succeeds: retain bad_alloc catches in these TUs.
+    # Owned audio/file/buffer loads contain allocation failures. A vector probe
+    # cannot guarantee its later allocation: retain bad_alloc catches in these TUs.
     set_property(SOURCE ${TC_SOUND_SOURCES} platform/web/tcSound_web.cpp
+        include/tc/utils/tcFile.cpp include/tc/utils/tcCompress.cpp
         APPEND PROPERTY COMPILE_OPTIONS -fexceptions)
     target_link_options(TrussC INTERFACE -fexceptions)
     if(TC_GRAPHICS_BACKEND STREQUAL "WGPU")

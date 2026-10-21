@@ -87,32 +87,7 @@ inline bool createDirectory(const fs::path& path) {
 
 // List files and directories in a directory
 // Returns vector of filenames (not full paths)
-inline std::vector<std::string> listDirectory(const fs::path& path) {
-    std::vector<std::string> result;
-    fs::path fullPath = getDataPath(path);
-
-    if (!std::filesystem::exists(fullPath) || !std::filesystem::is_directory(fullPath)) {
-        return result;
-    }
-
-    // Error codes instead of exceptions, and one conversion per entry: an
-    // entry that fails is logged and skipped, the listing goes on.
-    std::error_code ec;
-    std::filesystem::directory_iterator it(fullPath, ec);
-    std::filesystem::directory_iterator end;
-    for (; !ec && it != end; it.increment(ec)) {
-        try {
-            result.push_back(pathToUtf8(it->path().filename()));
-        } catch (const std::exception& e) {
-            logWarning() << "listDirectory: skipped an entry in " << path << " - " << e.what();
-        }
-    }
-    if (ec) {
-        logError() << "Failed to list directory: " << path << " - " << ec.message();
-    }
-
-    return result;
-}
+std::vector<std::string> listDirectory(const fs::path& path);
 
 // Remove file
 inline bool removeFile(const fs::path& path) {
@@ -143,19 +118,7 @@ inline int64_t getFileSize(const fs::path& path) {
 // Load entire text file into string
 // (binary mode: the returned string is the file's exact bytes on every
 // platform; Windows text mode would silently fold \r\n into \n)
-inline std::string loadTextFile(const fs::path& path) {
-    fs::path fullPath = internal::resolveLoadPath(path);
-    if (!internal::checkLoadFile(fullPath, "File")) return "";
-    std::ifstream file(fullPath, std::ios::binary);
-    if (!file.is_open()) {
-        internal::reportMissingLoad(fullPath, "File");
-        return "";
-    }
-
-    std::string content((std::istreambuf_iterator<char>(file)),
-                         std::istreambuf_iterator<char>());
-    return content;
-}
+std::string loadTextFile(const fs::path& path);
 
 // Save string to text file. Relative paths resolve via getDataPath, and a
 // missing parent folder is created. A path inside the app bundle is refused
@@ -363,30 +326,10 @@ public:
     }
 
     // Read single line (returns empty string at EOF)
-    std::string readLine() {
-        std::string line;
-        if (file_.is_open() && std::getline(file_, line)) {
-            // Remove \r if present (for Windows line endings)
-            if (!line.empty() && line.back() == '\r') {
-                line.pop_back();
-            }
-        }
-        return line;
-    }
+    std::string readLine();
 
-    // Read line into provided string (returns false at EOF)
-    bool readLine(std::string& line) {
-        if (!file_.is_open()) return false;
-
-        if (std::getline(file_, line)) {
-            // Remove \r if present (for Windows line endings)
-            if (!line.empty() && line.back() == '\r') {
-                line.pop_back();
-            }
-            return true;
-        }
-        return false;
-    }
+    // Read line into provided string (returns false at EOF or on failure)
+    bool readLine(std::string& line);
 
     // Read single character (-1 at EOF)
     int readChar() {
