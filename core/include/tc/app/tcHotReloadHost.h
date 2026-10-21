@@ -36,6 +36,8 @@
 #include <dlfcn.h>
 #include <spawn.h>
 #include <sys/wait.h>
+#include <poll.h>
+#include <unistd.h>
 #include <cstring>
 extern char** environ;
 #endif
@@ -47,6 +49,8 @@ extern char** environ;
 #include <cstdlib>
 #include "internal/tcHotReloadDiagnostics.h"
 #include "internal/tcWindowsBuildOutput.h"
+#include "internal/tcHotReloadScan.h"
+#include "internal/tcPosixBuildOutput.h"
 
 namespace trussc {
 namespace hot_reload {
@@ -231,19 +235,12 @@ struct GuestLibrary {
 struct FileWatcher {
     vector<fs::path> watchPaths;
     fs::file_time_type lastBuildTime;
+    internal::HotReloadScanLoss scanLoss;
 
     void init(const string& srcDir) {
-        watchPaths.clear();
-        if (!fs::exists(srcDir)) return;
-        for (const auto& entry : fs::recursive_directory_iterator(srcDir)) {
-            if (entry.is_regular_file()) {
-                // Case-insensitive extension match (.CPP, .H)
-                auto ext = toLower(getFileExtension(entry.path()));
-                if (ext == "cpp" || ext == "h" || ext == "hpp" || ext == "mm") {
-                    watchPaths.push_back(entry.path());
-                }
-            }
-        }
+        // Release old path storage before constructing the bounded replacement.
+        vector<fs::path>().swap(watchPaths);
+        watchPaths = internal::hotReloadSources(srcDir, scanLoss);
         lastBuildTime = fs::file_time_type::clock::now();
     }
 
@@ -278,15 +275,17 @@ inline string findCMake(const string& buildDir = "") {
     // know the generator used by the current build (e.g. "Visual Studio 18 2026").
     if (!buildDir.empty()) {
         fs::path cachePath = fs::path(buildDir) / "CMakeCache.txt";
-        if (fs::exists(cachePath)) {
-            ifstream cache(cachePath);
-            string line;
-            while (getline(cache, line)) {
-                if (line.rfind("CMAKE_COMMAND:INTERNAL=", 0) == 0) {
-                    string path = line.substr(23);
-                    if (fs::exists(path)) return path;
-                }
-            }
+        auto& loss = internal::hotReloadCacheLoss();
+        const auto path = internal::hotReloadCMakeCommand(cachePath, loss);
+        try {
+            std::error_code error;
+            if (!path.empty() && fs::is_regular_file(path, error)) return path;
+        } catch (const fs::filesystem_error&) {
+            ++loss.rejectedCaches;
+            loss.warn();
+        } catch (const std::bad_alloc&) {
+            ++loss.rejectedCaches;
+            loss.warn();
         }
     }
 #ifdef __APPLE__
@@ -335,23 +334,7 @@ inline int runBuildCommand(const vector<string>& argv, string& output) {
     }
     return rc;
 #else
-    vector<char*> cargv;
-    cargv.reserve(argv.size() + 1);
-    for (const auto& a : argv) cargv.push_back(const_cast<char*>(a.c_str()));
-    cargv.push_back(nullptr);
-    pid_t pid;
-    int err = posix_spawnp(&pid, cargv[0], nullptr, nullptr,
-                            cargv.data(), environ);
-    if (err != 0) {
-        logError("HotReload") << "Failed to spawn '" << argv[0]
-                              << "': " << std::strerror(err);
-        return -1;
-    }
-    int status = 0;
-    waitpid(pid, &status, 0);
-    if (WIFEXITED(status))   return WEXITSTATUS(status);
-    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
-    return -1;
+    return internal::runPosixBuildWithOutput(argv, output);
 #endif
 }
 

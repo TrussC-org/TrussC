@@ -3,11 +3,13 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <string>
+#include "tcBuildOutputCapture.h"
+#include <new>
 
 namespace trussc::internal {
 
-// Keep each stream's original destination while retaining complete lines from
-// both for failure diagnostics. Drain both pipes so either can exceed its pipe
+// Keep each stream's original destination and bounded diagnostics from
+// both. Drain both pipes so either can exceed its pipe
 // buffer without blocking the child. The caller supplies a quoted argv command
 // line; no shell is involved.
 inline int runWindowsBuildWithOutput(std::string commandLine, std::string& output,
@@ -41,46 +43,70 @@ inline int runWindowsBuildWithOutput(std::string commandLine, std::string& outpu
         return -1;
     }
     const HANDLE destinations[2] = {GetStdHandle(STD_OUTPUT_HANDLE), GetStdHandle(STD_ERROR_HANDLE)};
-    std::string pending[2];
+    BuildOutputCapture captured[2];
+    bool finished = false;
+    DWORD remaining[2] = {};
     while (reads[0] || reads[1]) {
+        if (!finished && WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0) {
+            finished = true;
+            // Bound (security): after direct-child exit, drain only each pipe's readable snapshot, then close; surviving writers cannot extend the wait.
+            for (int i = 0; i < 2; ++i)
+                if (reads[i]) PeekNamedPipe(reads[i], nullptr, 0, nullptr, &remaining[i], nullptr);
+        }
         bool received = false;
         for (int i = 0; i < 2; ++i) {
             if (!reads[i]) continue;
+            if (finished && !remaining[i]) {
+                CloseHandle(reads[i]); reads[i] = nullptr; continue;
+            }
             DWORD available = 0;
-            // Bound (security/latency): child-process output uses finite per-read storage. Overflow continues in the next read.
+            // Fixed read chunk; capture overflow is handled and counted by BuildOutputCapture.
             char buffer[4096];
             DWORD count = 0;
             const bool open = PeekNamedPipe(reads[i], nullptr, 0, nullptr, &available, nullptr) != 0;
-            if (!open || (available &&
+            if (finished && available > remaining[i]) available = remaining[i];
+            if (!open || (finished && !available) || (available &&
                 !ReadFile(reads[i], buffer, available < sizeof(buffer) ? available : sizeof(buffer),
                           &count, nullptr))) {
-                // Separate unterminated fragments so stdout and stderr cannot
-                // accidentally form a diagnostic together.
-                if (!pending[i].empty()) output.append(pending[i]).push_back('\n');
                 CloseHandle(reads[i]);
                 reads[i] = nullptr;
                 continue;
             }
             if (!count) continue;
             received = true;
-            pending[i].append(buffer, count);
-            const auto end = pending[i].rfind('\n');
-            if (end != std::string::npos) {
-                output.append(pending[i], 0, end + 1);
-                pending[i].erase(0, end + 1);
-            }
-            DWORD offset = 0;
-            DWORD written = 0;
-            while (offset < count && WriteFile(destinations[i], buffer + offset, count - offset,
-                                               &written, nullptr) && written != 0) {
-                offset += written;
-            }
+            captured[i].append(buffer, count);
+            if (finished) remaining[i] -= count;
         }
         if (!received && (reads[0] || reads[1])) Sleep(1);
     }
     WaitForSingleObject(pi.hProcess, INFINITE);
     DWORD exitCode = 0;
     const BOOL gotExitCode = GetExitCodeProcess(pi.hProcess, &exitCode);
+    buildOutputLoss().record(captured[0].omittedBytes() + captured[1].omittedBytes());
+    // Defer forwarding until the child has exited: a blocked destination must
+    // never prevent us from draining either child pipe.
+#if defined(__cpp_exceptions)
+    try {
+#endif
+        bool forwardingFailed = false;
+        for (int stream = 0; stream < 2; ++stream) {
+            const auto text = captured[stream].text();
+            if (stream && !output.empty() && output.back() != '\n') output += '\n';
+            output += text;
+            size_t offset = 0;
+            DWORD written = 0;
+            while (offset < text.size() && WriteFile(destinations[stream], text.data() + offset,
+                    static_cast<DWORD>(text.size() - offset), &written, nullptr) && written)
+                offset += written;
+            if (offset != text.size()) forwardingFailed = true;
+        }
+        if (forwardingFailed) buildOutputLoss().recordForwardingFailure();
+#if defined(__cpp_exceptions)
+    } catch (const std::bad_alloc&) {
+        output.clear();
+        try { buildOutputLoss().recordStorageFailure(); } catch (...) {}
+    }
+#endif
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     return gotExitCode ? static_cast<int>(exitCode) : -1;
