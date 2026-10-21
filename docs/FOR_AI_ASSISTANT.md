@@ -3943,7 +3943,7 @@ void Serial::flushInput() [macos,windows,linux,android]  // Discards buffered in
 void Serial::flushOutput() [macos,windows,linux,android]  // Discards pending output.
 std::vector<SerialDeviceInfo> Serial::getDeviceList() ⚠️deprecated [macos,windows,linux,android]  // Provides the deprecated alias for `listDevices()`.
 std::string Serial::getDevicePath() const [macos,windows,linux,android]  // Returns the stored device path.
-size_t Serial::getDroppedByteCount() const [macos,windows,linux,android]  // Returns the number of received bytes discarded because the receive buffer overflowed.
+size_t Serial::getDroppedByteCount() const [macos,windows,linux,android]  // Returns the number of received bytes discarded because the receive buffer overflowed or allocation failed.
 bool Serial::isConnected() const [macos,windows,linux,android]  // Returns the current serial connection state.
 bool Serial::isInitialized() const [macos,windows,linux,android]  // Returns the same connection state as `isConnected()`.
 std::vector<SerialDeviceInfo> Serial::listDevices() [macos,windows,linux,android]  // Lists serial devices found on the system.

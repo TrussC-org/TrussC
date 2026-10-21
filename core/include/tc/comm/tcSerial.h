@@ -32,18 +32,24 @@
 // 50 ms; Android USB read timeout: 250 ms). Desktop moves transfer the worker
 // with its connection. Windows uses overlapped reads and writes.
 //
-// Each open port has a worker draining RX into a 1 MiB TrussC buffer. Past
-// the cap the oldest bytes are dropped; getDroppedByteCount() counts them.
-// available() reports this buffer; readBytes()/readByte() consume it. Desktop workers
-// defer loss and overflow/driver warnings to app I/O, so callbacks never
-// run from those workers. Overflow warnings include the running total and
-// use a OnceGate with a 5 s interval; Android uses the same receive policy.
+// Each open port has a worker draining RX into storage allocated on demand,
+// up to 64 MiB. Past the cap the oldest bytes are dropped;
+// getDroppedByteCount() counts them. available() reports this buffer;
+// readBytes()/readByte() consume it. One Warning when buffering first exceeds
+// 1 MiB, and one on first loss, are delivered automatically on the main
+// thread where it runs queued work (runOnMainThread's queue: every frame,
+// also EVENT_DRIVEN frames without update, and between headless passes),
+// without another I/O call. Both OnceGates live per connection and reset on
+// a new connection. Loss warnings include the cumulative total. Workers
+// never allocate or log for these; a warning captured before close is still
+// delivered. Driver warnings and disconnect callbacks remain deferred
+// to app I/O; unknown driver loss is separate from the exact byte count.
 //
 // Logger listeners: Serial logs only with its lock released (what to log is
 // decided under the lock, the line goes out after it), so a Logger listener
 // that runs inline may call this Serial. One exception, on Android: the USB
 // worker thread logs too (permission timeout, connected, lost connection,
-// RX overflow, open errors). A listener running inline on that thread must
+// open errors). A listener running inline on that thread must
 // not call an I/O call, setup() or close() on the Serial, nor destroy it:
 // - setup() and close() stop a USB worker and wait for it, which a worker
 //   must not do. On any Serial's USB worker thread they are refused at once,
@@ -81,6 +87,7 @@
 #include <thread>
 #include <memory>
 #include "tcSerialRx.h"
+#include "tc/utils/tcMainThread.h"
 #if !defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__)
     #include <condition_variable>
 #endif
@@ -253,6 +260,46 @@ namespace internal {
 
     private:
         std::vector<std::pair<LogLevel, std::string>> lines_;
+    };
+    // Receive state of one connection, shared by its worker, its Serial and a
+    // queued warning delivery. The worker appends with buffer.mutex held;
+    // when that captures a warning it posts the preallocated main-thread
+    // slot, which allocates, throws and logs nothing on the worker, and
+    // queues at most one delivery. The queue holds this state until the
+    // drain, so a move, close, reopen or destruction before it is safe; a
+    // warning captured before close is still delivered.
+    struct SerialRxState : MainThreadSlot, std::enable_shared_from_this<SerialRxState> {
+        SerialRxBuffer buffer;
+
+        SerialRxState() : MainThreadSlot(&deliver) {}
+
+        // Worker, with buffer.mutex held.
+        void append(const uint8_t* data, size_t length) noexcept {
+            buffer.append(data, length);
+            if (buffer.hasWarnings() && !isQueued()) post(weak_from_this().lock());
+        }
+
+    private:
+        // Main-thread drain. No RX or port lock while Logger listeners run;
+        // a listener may close, move or destroy the Serial.
+        static void deliver(MainThreadSlot& slot) {
+            auto& self = static_cast<SerialRxState&>(slot);
+            SerialRxBuffer::Warnings warning;
+            {
+                std::lock_guard<std::mutex> lock(self.buffer.mutex);
+                warning = self.buffer.takeWarnings();
+            }
+            if (warning.backlog) {
+                logWarning() << "Serial: RX buffer exceeds 1 MiB; app is falling behind; buffered bytes: "
+                             << warning.buffered << "; capacity bytes: " << SerialRxBuffer::capacity;
+            }
+            if (warning.loss) {
+                logWarning() << "Serial: RX buffer overflow or allocation failure, dropping data; capacity bytes: "
+                             << SerialRxBuffer::capacity << "; needed bytes: " << warning.needed
+                             << "; total dropped bytes: " << warning.dropped
+                             << (warning.allocationFailed ? "; receive allocation failed" : "; dropping oldest bytes");
+            }
+        }
     };
 }
 
@@ -1108,17 +1155,17 @@ public:
             return androidserial::available(aimpl_);
 #else
             std::lock_guard<std::mutex> rxLock(rx_->buffer.mutex);
-            return static_cast<int>(rx_->buffer.bytes.size());
+            return static_cast<int>(rx_->buffer.size());
 #endif
         }();
         closeLost(loss);
         return n;
     }
 
-    // Received bytes discarded by the 1 MiB buffer, since the last setup().
+    // Received bytes discarded by the 64 MiB buffer (or allocation failure), since the last setup().
     // Flush/close preserve the count; Windows driver flags cannot supply an
     // exact byte count and are warned about separately.
-    // Device input or a stalled reader can fill the deque; a fixed cap keeps memory finite. Overflow drops the oldest bytes and increments the discard count.
+    // Device input or a stalled reader can fill the receive storage; a fixed cap keeps memory finite. Overflow drops the oldest bytes and increments the discard count.
     size_t getDroppedByteCount() const {
         Shared lock(lock_);
 #if defined(__ANDROID__)
@@ -1301,7 +1348,7 @@ public:
         if (!isOpenLocked()) return;
 #if !defined(__ANDROID__)
         std::lock_guard<std::mutex> rxLock(rx_->buffer.mutex);
-        rx_->buffer.bytes.clear();
+        rx_->buffer.clear();
 #endif
 #if defined(_WIN32)
         PurgeComm(handle_, PURGE_RXCLEAR);
@@ -1331,7 +1378,7 @@ public:
         if (!isOpenLocked()) return;
 #if !defined(__ANDROID__)
         std::lock_guard<std::mutex> rxLock(rx_->buffer.mutex);
-        rx_->buffer.bytes.clear();
+        rx_->buffer.clear();
 #endif
 #if defined(_WIN32)
         PurgeComm(handle_, PURGE_RXCLEAR | PURGE_TXCLEAR);
@@ -1359,10 +1406,11 @@ public:
 private:
 #if !defined(__ANDROID__)
     // The worker uses only this stable connection state, never the Serial
-    // object: moving an open Serial simply transfers ownership. It records
-    // loss/warnings; app I/O delivers them with Serial's lock released.
+    // object: moving an open Serial simply transfers ownership. A queued
+    // warning delivery holds the shared RX state, never a Serial or DesktopRx.
     struct DesktopRx {
-        internal::SerialRxBuffer buffer;
+        std::shared_ptr<internal::SerialRxState> state = std::make_shared<internal::SerialRxState>();
+        internal::SerialRxBuffer& buffer = state->buffer;
         std::thread worker;
         std::atomic<bool> stop{false};
         std::atomic<bool> lost{false};
@@ -1376,7 +1424,6 @@ private:
         }
     };
     std::unique_ptr<DesktopRx> rx_;
-    mutable OnceGate dropWarned_{5.0};
     mutable OnceGate lineWarned_{5.0};
 
     void startReader() {
@@ -1386,7 +1433,7 @@ private:
 #if defined(_WIN32)
         const HANDLE port = handle_;
         rx->worker = std::thread([rx, port] {
-            // Bound (security/latency): 4096-byte device reads bound per-read storage and work. Overflow continues in the next read.
+            // Bound (security): 4096-byte device reads bound per-read storage and work. Overflow continues in the next read.
             uint8_t data[4096];
             OVERLAPPED operation{};
             operation.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
@@ -1410,7 +1457,7 @@ private:
                     rx->errors |= errors;
                     DWORD n = 0;
                     ResetEvent(operation.hEvent);
-                    // Bound (security/latency): the device read is limited to the fixed chunk. Overflow continues in the next read.
+                    // Bound (security): the device read is limited to the fixed chunk. Overflow continues in the next read.
                     BOOL ok = ReadFile(port, data, sizeof(data), &n, &operation);
                     if (!ok && GetLastError() == ERROR_IO_PENDING) {
                         // A bounded wait also makes shutdown independent of a
@@ -1428,7 +1475,7 @@ private:
                         }
                     } else if (n) {
                         idle = false;
-                        rx->buffer.append(data, n);
+                        rx->state->append(data, n);
                     }
                 }
                 // Poll briefly with overlapped reads: a waiting writer never
@@ -1440,7 +1487,7 @@ private:
 #else
         const int port = fd_;
         rx->worker = std::thread([rx, port] {
-            // Bound (security/latency): 4096-byte device reads bound per-read storage and work. Overflow continues in the next read.
+            // Bound (security): 4096-byte device reads bound per-read storage and work. Overflow continues in the next read.
             uint8_t data[4096];
             while (!rx->stop.load()) {
                 pollfd event{port, POLLIN, 0};
@@ -1459,9 +1506,9 @@ private:
                 if (!ready) continue;
                 {
                     std::lock_guard<std::mutex> lock(rx->buffer.mutex);
-                    // Bound (security/latency): the device read is limited to the fixed chunk. Overflow continues in the next read.
+                    // Bound (security): the device read is limited to the fixed chunk. Overflow continues in the next read.
                     const ssize_t n = ::read(port, data, sizeof(data));
-                    if (n > 0) rx->buffer.append(data, static_cast<size_t>(n));
+                    if (n > 0) rx->state->append(data, static_cast<size_t>(n));
                     else if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
                         rx->lose(std::string("read: ") + std::strerror(errno));
                         break;
@@ -1481,15 +1528,11 @@ private:
         rx_->stop = true;
         if (rx_->worker.joinable()) rx_->worker.join();
         std::lock_guard<std::mutex> lock(rx_->buffer.mutex);
-        rx_->buffer.bytes.clear();
+        rx_->buffer.clear();
     }
 
     // Called with buffer.mutex held. Lines are emitted after the port lock.
-    void reportRxWarnings(internal::SerialHeldLog& held) const {
-        if (rx_->buffer.takeWarning(dropWarned_)) {
-            held(LogLevel::Warning) << "Serial: RX buffer overflow, dropping oldest data; total dropped bytes: "
-                                    << rx_->buffer.dropped.load();
-        }
+    void reportRxWarnings([[maybe_unused]] internal::SerialHeldLog& held) const {
 #if defined(_WIN32)
         const DWORD flags = rx_->errors & (CE_RXOVER | CE_OVERRUN | CE_FRAME | CE_RXPARITY);
         if (flags && lineWarned_.isFirstTime()) {
