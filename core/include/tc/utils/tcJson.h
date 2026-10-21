@@ -36,21 +36,21 @@ inline Json loadJson(const fs::path& path) {
             logNotice("Json") << "loading a local document larger than 16 MiB: " << fullPath;
         std::string bytes;
         if (!internal::readDocumentBytes(file, bytes)) {
-            internal::reportImportError("Json", "failed to read the complete JSON document");
+            internal::reportImportError("Json", "failed to read the complete JSON document: ", path);
             return Json();
         }
         // The bundled lexer treats raw NUL as EOF; reject it before parsing
         // so a valid prefix cannot hide an unread tail. Escaped NUL is valid.
         if (bytes.find('\0') != std::string::npos) {
-            internal::reportImportError("Json", "invalid JSON document: raw NUL");
+            internal::reportImportError("", "JSON parse error: ", path, "invalid JSON document: raw NUL");
             return Json();
         }
         Json j = Json::parse(bytes, nullptr, false);
-        if (j.is_discarded()) { internal::reportImportError("Json", "invalid JSON document"); return Json(); }
+        if (j.is_discarded()) { internal::reportImportError("", "JSON parse error: ", path, "invalid JSON document"); return Json(); }
         logVerbose() << "JSON loaded: " << fullPath;
         return j;
     } catch (const std::exception& e) {
-        internal::reportImportError("Json", "JSON load failed: ", e.what());
+        internal::reportImportError("Json", "JSON load failed: ", path, e.what());
         return Json();
     }
 }

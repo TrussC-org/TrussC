@@ -165,7 +165,7 @@ int findFaceInFileByPostScriptName(const fs::path& path, const std::string& post
     }
     return -1;
     } catch (const std::bad_alloc&) {
-        reportImportError("SystemFont", "cannot allocate font lookup table");
+        reportImportError("SystemFont", "cannot allocate font lookup table: ", path);
         return -1;
     }
 }

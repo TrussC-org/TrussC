@@ -424,4 +424,6 @@ font-object and vector allocations in `AddFont`/`ImFontAtlasBuildInit` remain
 unchecked and are outside the allocation-recovery guarantee. Keep these `[TrussC]`
 patches on update. Import recovery diagnostics use a guarded direct logger with
 a C stdio fallback so persistent C++ allocation exhaustion cannot terminate in
-`LogStream` destruction.
+`LogStream` destruction. File imports pass their filename explicitly through the
+shared ini/font implementations into those diagnostics; memory imports keep
+their pathless messages. No ambient filename state or public API is added.

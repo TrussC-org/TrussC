@@ -40,16 +40,17 @@ public:
             XmlDocument parsed;
             XmlParseResult result = parsed.load_file(fullPath.c_str());
             if (!result) {
-                logError() << "XML load error: " << path
-                             << " - " << result.description()
-                             << " (offset: " << result.offset << ")";
+                char detail[256];
+                std::snprintf(detail, sizeof(detail), "%s (offset: %lld)", result.description(),
+                              static_cast<long long>(result.offset));
+                internal::reportImportError("", "XML load error: ", path, detail);
                 return false;
             }
             logVerbose() << "XML loaded: " << fullPath;
             doc_ = std::move(parsed);
             return true;
         } catch (const std::exception& e) {
-            internal::reportImportError("Xml", "XML load failed: ", e.what());
+            internal::reportImportError("Xml", "XML load failed: ", path, e.what());
             return false;
         }
     }

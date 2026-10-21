@@ -118,9 +118,42 @@ TC_CORE_TEST_MAIN() {
 
     const fs::path folder = fs::current_path() / ".document-import-test";
     fs::create_directories(folder);
+    // Portable counterpart of filePath's Windows surrogate-name error check.
+    // Keep the caller's spelling and legacy prefix, with no filesystem quoting.
+    const fs::path brokenJson = folder / fs::path(u8"壊れた Café.json");
+    { ofstream file(brokenJson, ios::binary); file << "{"; }
+    check("JSON file parse error names the non-ASCII file with its legacy prefix",
+          loadJson(brokenJson).is_null() && lastError.rfind("JSON parse error: ", 0) == 0 &&
+          lastError.find(internal::pathToDisplayUtf8(brokenJson)) != string::npos);
+    const auto oldDataRoot = getDataPathRoot();
+    setDataPathRoot(folder);
+    const fs::path relativeJson = brokenJson.filename();
+    check("JSON file parse error retains the caller's relative path",
+          loadJson(relativeJson).is_null() &&
+          lastError.rfind("JSON parse error: " + internal::pathToDisplayUtf8(relativeJson) + " - ", 0) == 0);
+    setDataPathRoot(oldDataRoot);
+    const fs::path brokenXml = folder / fs::path(u8"壊れた Café.xml");
+    { ofstream file(brokenXml, ios::binary); file << "<broken>"; }
+    check("XML file error retains the path, parser description and offset",
+          !xml.load(brokenXml) && lastError.rfind("XML load error: ", 0) == 0 &&
+          lastError.find(internal::pathToDisplayUtf8(brokenXml)) != string::npos &&
+          lastError.find(" - ") != string::npos && lastError.find(" (offset: ") != string::npos);
+    const fs::path brokenIes = folder / fs::path(u8"壊れた Café.ies");
+    { ofstream file(brokenIes, ios::binary); file << "invalid"; }
+    IesProfile ies;
+    check("IES file parser error names the non-ASCII file",
+          !ies.load(brokenIes) && lastError.find(internal::pathToDisplayUtf8(brokenIes)) != string::npos);
+    const fs::path brokenFont = folder / fs::path(u8"壊れた Café.ttf");
+    { ofstream file(brokenFont, ios::binary); file << "invalid"; }
+    internal::FontAtlasManager rejectedFont;
+    check("font file validation error names the non-ASCII file",
+          !rejectedFont.prepareFile(pathToUtf8(brokenFont), 16, 0, 4096) &&
+          lastError.rfind("FontAtlasManager: not a usable font (", 0) == 0 &&
+          lastError.find(internal::pathToDisplayUtf8(brokenFont)) != string::npos);
     const auto nulPath = folder / "nul.json";
     { ofstream file(nulPath, ios::binary); file.write(nulJson.data(), nulJson.size()); }
     check("JSON raw NUL rejects the complete local file", loadJson(nulPath).is_null());
+    check("JSON raw NUL file error names the file", lastError.find(pathToUtf8(nulPath)) != string::npos);
     const fs::path jsonPath = folder / "large.json";
     const fs::path xmlPath = folder / "large.xml";
     const string payload(16u * 1024u * 1024u + 32, 'a');

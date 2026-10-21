@@ -22,7 +22,7 @@ int main() {
         std::printf("%-64s %s\n", label, ok ? "PASS" : "FAIL");
         if (!ok) ++failures;
     };
-    const auto path = std::filesystem::current_path() / ".lut-import-test.cube";
+    const auto path = std::filesystem::current_path() / std::filesystem::path(u8".lut-import-test-日本.cube");
     {
         std::ofstream file(path);
         file << "TITLE \"fixture\"\nLUT_3D_SIZE 2\n";
@@ -37,7 +37,14 @@ int main() {
     check("LUT file entry recovers from the first persistent allocation failure",
           returned && !loaded && failedRequests > 0 && !lut.isAllocated() &&
           lut.getSize() == 0 && lut.getTitle().empty());
+    std::string lastError;
+    auto logs = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
+        if (event.level == tc::LogLevel::Error) lastError = event.message;
+    });
     check("load reports failure when no GPU can create the texture", !lut.load(path) && !lut.isAllocated());
+    check("LUT resource error names the non-ASCII file", lastError.find(tc::pathToUtf8(path)) != std::string::npos);
+    { std::ofstream file(path); file << "LUT_3D_SIZE invalid\n"; }
+    check("LUT parser error names the non-ASCII file", !lut.load(path) && lastError.find(tc::pathToUtf8(path)) != std::string::npos);
     lut.allocate(std::numeric_limits<int>::max());
     check("invalid direct allocation leaves an empty LUT", !lut.isAllocated() && lut.getSize() == 0);
     std::filesystem::remove(path);

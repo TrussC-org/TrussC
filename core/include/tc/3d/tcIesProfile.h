@@ -64,8 +64,9 @@ public:
     // Load from file path (.ies). Path is resolved via getDataPath()
     // (relative to the project data/ directory).
     bool load(const fs::path& path) {
+        fs::path resolved;
         try {
-            fs::path resolved = internal::resolveLoadPath(path);
+            resolved = internal::resolveLoadPath(path);
             if (!internal::checkLoadFile(resolved, "IesProfile")) return false;
             std::ifstream ifs(resolved, std::ios::binary);
             if (!ifs.is_open()) {
@@ -76,21 +77,24 @@ public:
             if (fs::file_size(resolved, ec) > 16u * 1024u * 1024u && !ec)
                 logNotice("IesProfile") << "loading a local IES document larger than 16 MiB";
             std::string data;
-            if (!internal::readDocumentBytes(ifs, data)) { internal::reportImportError("IesProfile", "failed to read the complete IES document"); return false; }
-            return loadFromString(data);
+            if (!internal::readDocumentBytes(ifs, data)) { internal::reportImportError("IesProfile", "failed to read the complete IES document: ", resolved); return false; }
+            return loadDocument(data, &resolved);
         } catch (const std::exception&) {
-            internal::reportImportError("IesProfile", "cannot allocate IES document");
+            internal::reportImportError("IesProfile", "cannot allocate IES document: ", resolved.empty() ? path : resolved);
             return false;
         }
     }
 
     // Prepare the full replacement before retiring the previous profile.
-    bool loadFromString(const std::string& data) {
+    bool loadFromString(const std::string& data) { return loadDocument(data, nullptr); }
+
+private:
+    bool loadDocument(const std::string& data, const fs::path* sourcePath) {
         try {
             internal::IesParseResult parsed;
             std::string error;
             if (!internal::parseIes(data, parsed, error)) {
-                internal::reportImportError("IesProfile", error.c_str());
+                internal::reportImportError("IesProfile", error.c_str(), sourcePath);
                 return false;
             }
             const int width = 256;
@@ -108,14 +112,14 @@ public:
             desc.label = "tc_ies_profile";
             resources->image = sg_make_image(&desc);
             if (sg_query_image_state(resources->image) != SG_RESOURCESTATE_VALID) {
-                internal::reportImportError("IesProfile", "cannot create IES image");
+                internal::reportImportError("IesProfile", "cannot create IES image", sourcePath);
                 return false;
             }
             sg_view_desc vd = {};
             vd.texture.image = resources->image;
             resources->view = sg_make_view(&vd);
             if (sg_query_view_state(resources->view) != SG_RESOURCESTATE_VALID) {
-                internal::reportImportError("IesProfile", "cannot create IES view");
+                internal::reportImportError("IesProfile", "cannot create IES view", sourcePath);
                 return false;
             }
             sg_sampler_desc sd = {};
@@ -126,7 +130,7 @@ public:
             sd.label = "tc_ies_smp";
             resources->sampler = sg_make_sampler(&sd);
             if (sg_query_sampler_state(resources->sampler) != SG_RESOURCESTATE_VALID) {
-                internal::reportImportError("IesProfile", "cannot create IES texture");
+                internal::reportImportError("IesProfile", "cannot create IES texture", sourcePath);
                 return false;
             }
 
@@ -148,7 +152,7 @@ public:
             loaded_ = true;
             return true;
         } catch (const std::exception&) {
-            internal::reportImportError("IesProfile", "cannot allocate IES profile");
+            internal::reportImportError("IesProfile", "cannot allocate IES profile", sourcePath);
             return false;
         }
     }
@@ -157,6 +161,7 @@ public:
     // Accessors
     // -------------------------------------------------------------------------
 
+public:
     bool isLoaded() const { return loaded_; }
 
     // Max vertical angle in radians (typically PI for full sphere, PI/2 for downlight)

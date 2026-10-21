@@ -3224,16 +3224,23 @@ ImFont* ImFontAtlas::AddFontDefaultVector(const ImFontConfig* font_cfg_template)
 #endif
 }
 
+static ImFont* TcAddFontFromMemoryTTF(ImFontAtlas* atlas, void* font_data, int font_data_size, float size_pixels,
+                                      const ImFontConfig* font_cfg_template, const ImWchar* glyph_ranges, const char* filename);
+
 ImFont* ImFontAtlas::AddFontFromFileTTF(const char* filename, float size_pixels, const ImFontConfig* font_cfg_template, const ImWchar* glyph_ranges)
 {
     IM_ASSERT(!Locked && "Cannot modify a locked ImFontAtlas!");
     // [TrussC] Check the backend addressing range before reading a file font.
     ImFileHandle tc_font_file = ImFileOpen(filename, "rb");
-    if (!tc_font_file) return NULL;
+    if (!tc_font_file) {
+        if (font_cfg_template == NULL || (font_cfg_template->Flags & ImFontFlags_NoLoadError) == 0)
+            trussc::internal::reportImportError("ImGui", "cannot read or allocate font file: ", filename);
+        return NULL;
+    }
     const ImU64 tc_font_bytes = ImFileGetSize(tc_font_file);
     ImFileClose(tc_font_file);
     if (tc_font_bytes >= trussc::internal::kFontBackendSize) {
-        trussc::internal::reportImportError("ImGui", "font exceeds the backend addressing range");
+        trussc::internal::reportImportError("ImGui", "font exceeds the backend addressing range: ", filename);
         return NULL;
     }
     size_t data_size = 0;
@@ -3243,7 +3250,7 @@ ImFont* ImFontAtlas::AddFontFromFileTTF(const char* filename, float size_pixels,
         if (font_cfg_template == NULL || (font_cfg_template->Flags & ImFontFlags_NoLoadError) == 0)
         {
             IMGUI_DEBUG_LOG("While loading '%s'\n", filename);
-            trussc::internal::reportImportError("ImGui", "cannot read or allocate font file");
+            trussc::internal::reportImportError("ImGui", "cannot read or allocate font file: ", filename);
         }
         return NULL;
     }
@@ -3257,10 +3264,10 @@ ImFont* ImFontAtlas::AddFontFromFileTTF(const char* filename, float size_pixels,
     }
     if (data_size >= trussc::internal::kFontBackendSize) {
         IM_FREE(data);
-        trussc::internal::reportImportError("ImGui", "font size changed beyond the backend addressing range");
+        trussc::internal::reportImportError("ImGui", "font size changed beyond the backend addressing range: ", filename);
         return NULL;
     }
-    ImFont* tc_font = AddFontFromMemoryTTF(data, (int)data_size, size_pixels, &font_cfg, glyph_ranges);
+    ImFont* tc_font = TcAddFontFromMemoryTTF(this, data, (int)data_size, size_pixels, &font_cfg, glyph_ranges, filename);
     if (!tc_font && !font_cfg.FontDataOwnedByAtlas) IM_FREE(data);
     return tc_font;
 }
@@ -3268,7 +3275,13 @@ ImFont* ImFontAtlas::AddFontFromFileTTF(const char* filename, float size_pixels,
 // NB: Transfer ownership of 'font_data' to ImFontAtlas, unless font_cfg_template->FontDataOwnedByAtlas == false. Owned TTF buffer will be deleted after Build().
 ImFont* ImFontAtlas::AddFontFromMemoryTTF(void* font_data, int font_data_size, float size_pixels, const ImFontConfig* font_cfg_template, const ImWchar* glyph_ranges)
 {
-    IM_ASSERT(!Locked && "Cannot modify a locked ImFontAtlas!");
+    return TcAddFontFromMemoryTTF(this, font_data, font_data_size, size_pixels, font_cfg_template, glyph_ranges, NULL);
+}
+
+static ImFont* TcAddFontFromMemoryTTF(ImFontAtlas* atlas, void* font_data, int font_data_size, float size_pixels,
+                                      const ImFontConfig* font_cfg_template, const ImWchar* glyph_ranges, const char* filename)
+{
+    IM_ASSERT(!atlas->Locked && "Cannot modify a locked ImFontAtlas!");
     ImFontConfig font_cfg = font_cfg_template ? *font_cfg_template : ImFontConfig();
     IM_ASSERT(font_cfg.FontData == NULL);
     // [TrussC] Validate the entire sfnt directory before any font importer or copy.
@@ -3279,7 +3292,8 @@ ImFont* ImFontAtlas::AddFontFromMemoryTTF(void* font_data, int font_data_size, f
             trussc::internal::checkFontSfnt((const unsigned char*)font_data, (size_t)font_data_size, font_cfg.FontNo, tc_reason);
     } catch (const std::exception&) { tc_reason = "out of memory"; }
     if (!tc_valid) {
-        trussc::internal::reportImportError("ImGui", "font import rejected: ", tc_reason.c_str());
+        if (filename) trussc::internal::reportImportError("ImGui", "font import rejected: ", filename, tc_reason.c_str());
+        else trussc::internal::reportImportError("ImGui", "font import rejected: ", tc_reason.c_str());
         if (font_cfg.FontDataOwnedByAtlas) IM_FREE(font_data);
         return NULL;
     }
@@ -3288,7 +3302,7 @@ ImFont* ImFontAtlas::AddFontFromMemoryTTF(void* font_data, int font_data_size, f
     font_cfg.SizePixels = size_pixels > 0.0f ? size_pixels : font_cfg.SizePixels;
     if (glyph_ranges)
         font_cfg.GlyphRanges = glyph_ranges;
-    return AddFont(&font_cfg);
+    return atlas->AddFont(&font_cfg);
 }
 
 // [TrussC] Validate token spans and decoded counts before the decompressor allocates.

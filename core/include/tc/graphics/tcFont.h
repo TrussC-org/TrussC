@@ -260,7 +260,8 @@ public:
         // Same size limit as checkSfntSkeleton, checked before the buffer
         // is allocated.
         if ((uint64_t)end >= kMaxFontDataSize) {
-            logError() << "FontAtlasManager: not a usable font (" << kTooLargeReason << ")";
+            const std::string reason = std::string("FontAtlasManager: not a usable font (") + kTooLargeReason + "): ";
+            internal::reportImportError("", reason.c_str(), fontPath.c_str());
             return false;
         }
         const size_t fileSize = (size_t)end;
@@ -275,10 +276,10 @@ public:
         }
 
         fontName_ = fontPath;
-        if (!initFromFontData(fontSize, faceIndex)) { cleanup(); return false; }
+        if (!initFromFontData(fontSize, faceIndex, &path)) { cleanup(); return false; }
         return true;
         } catch (const std::exception&) {
-            return initializationFailed();
+            return initializationFailed(fontPath.c_str());
         }
     }
 
@@ -343,11 +344,12 @@ public:
     int getMaxAtlasSizeForTests() const { return maxAtlasSize_; }
 
 private:
-    bool initializationFailed() {
+    bool initializationFailed(const char* sourcePath = nullptr) {
         // Preparation owns CPU-only pages; release the rejected source/atlas
         // before reporting, even when every subsequent allocation still fails.
         cleanup();
-        internal::reportImportError("Font", "font initialization failed");
+        internal::reportImportError("Font", sourcePath ? "font initialization failed: " : "font initialization failed",
+                                    sourcePath ? sourcePath : "");
         return false;
     }
 
@@ -389,12 +391,17 @@ private:
                            << " texels); those glyphs are drawn at a lower resolution";
     }
 
-    bool initFromFontData(int fontSize, int fontIndex) {
+    bool initFromFontData(int fontSize, int fontIndex, const fs::path* sourcePath = nullptr) {
         // The face index is checked against the number of faces in the data:
         // the font count of a collection, 1 for a single font.
         const uint64_t faces = faceCount(fontData_.data(), fontData_.size());
         if (faces > 0 && (fontIndex < 0 || (uint64_t)fontIndex >= faces)) {
-            logError() << "FontAtlasManager: face index " << fontIndex
+            if (sourcePath) {
+                char detail[160];
+                std::snprintf(detail, sizeof(detail), "FontAtlasManager: face index %d is out of range (the font has %llu %s)",
+                              fontIndex, static_cast<unsigned long long>(faces), faces == 1 ? "face" : "faces");
+                internal::reportImportError("", detail, sourcePath);
+            } else logError() << "FontAtlasManager: face index " << fontIndex
                        << " is out of range (the font has " << faces
                        << (faces == 1 ? " face)" : " faces)");
             fontData_.clear();
@@ -405,7 +412,12 @@ private:
         // is given to stb_truetype.
         std::string reason;
         if (!checkFontSfnt(fontData_.data(), fontData_.size(), fontIndex, reason)) {
-            logError() << "FontAtlasManager: not a usable font (" << reason << ")";
+            if (sourcePath) {
+                // Reason formatting remains inside prepareFile's recovery guard.
+                reason.insert(0, "FontAtlasManager: not a usable font (");
+                reason += ')';
+                internal::reportImportError("", reason.c_str(), sourcePath);
+            } else logError() << "FontAtlasManager: not a usable font (" << reason << ")";
             fontData_.clear();
             return false;
         }
@@ -413,14 +425,19 @@ private:
         // Get font offset (required for .ttc files with multiple fonts)
         int offset = stbtt_GetFontOffsetForIndex(fontData_.data(), fontIndex);
         if (offset < 0) {
-            logError() << "FontAtlasManager: invalid font index " << fontIndex;
+            if (sourcePath) {
+                char detail[96];
+                std::snprintf(detail, sizeof(detail), "FontAtlasManager: invalid font index %d", fontIndex);
+                internal::reportImportError("", detail, sourcePath);
+            } else logError() << "FontAtlasManager: invalid font index " << fontIndex;
             fontData_.clear();
             return false;
         }
 
         // Initialize with stb_truetype
         if (!stbtt_InitFont(&fontInfo_, fontData_.data(), offset)) {
-            logError() << "FontAtlasManager: failed to init font";
+            if (sourcePath) internal::reportImportError("", "FontAtlasManager: failed to init font", sourcePath);
+            else logError() << "FontAtlasManager: failed to init font";
             fontData_.clear();
             return false;
         }
@@ -431,7 +448,8 @@ private:
         if (!fontInfo_.glyf) {
             const int count = cffCharStringsCount(fontInfo_.charstrings);
             if (count < 1) {
-                logError() << "FontAtlasManager: not a usable font "
+                if (sourcePath) internal::reportImportError("", "FontAtlasManager: not a usable font (CFF CharStrings INDEX cannot be read)", sourcePath);
+                else logError() << "FontAtlasManager: not a usable font "
                                 "(CFF CharStrings INDEX cannot be read)";
                 fontData_.clear();
                 return false;
@@ -1669,7 +1687,7 @@ public:
                 state->candidate.reset();
                 state->result.error = LoadError::DecodeFailed;
                 state->result.message.clear();
-                internal::reportImportError("Font", "asynchronous font initialization failed");
+                internal::reportImportError("Font", "asynchronous font initialization failed: ", state->input.path.c_str());
             }
             internal::probeResourceLoad("font.ready", path);
             if (!state->cancelled.load()) internal::publishResourceLoad(completion);

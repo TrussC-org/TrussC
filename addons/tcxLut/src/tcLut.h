@@ -70,11 +70,12 @@ public:
     // Load from .cube file. Relative paths resolve via getDataPath, like
     // Image::load.
     bool load(const fs::path& filePath) {
+        fs::path path;
         try {
-            const fs::path path = getDataPath(filePath); // absolute paths pass through
+            path = getDataPath(filePath); // absolute paths pass through
             std::ifstream file(path, std::ios::binary);
             if (!file) {
-                internal::reportImportError("Lut3D", "failed to open LUT document");
+                internal::reportImportError("Lut3D", "failed to open LUT document: ", path);
                 return false;
             }
             std::error_code ec;
@@ -84,19 +85,19 @@ public:
             std::string error;
             std::string bytes;
             if (!internal::readDocumentBytes(file, bytes)) {
-                internal::reportImportError("Lut3D", "failed to read the complete LUT document");
+                internal::reportImportError("Lut3D", "failed to read the complete LUT document: ", path);
                 return false;
             }
             std::istringstream input(std::move(bytes));
             if (!detail::parseCube(input, parsed, error)) {
-                internal::reportImportError("Lut3D", error.c_str());
+                internal::reportImportError("Lut3D", error.c_str(), &path);
                 return false;
             }
             // Prepare all allocating metadata and resources before publishing.
             std::string title = parsed.title.empty() ? pathToUtf8(path.stem()) : std::move(parsed.title);
             Lut3D prepared;
             prepared.filter_ = filter_;
-            prepared.allocate(parsed.side, parsed.rgb.data());
+            prepared.allocateDocument(parsed.side, parsed.rgb.data(), &path);
             if (!prepared.isAllocated()) return false;
             prepared.title_.swap(title);
             std::swap(image_, prepared.image_);
@@ -107,20 +108,23 @@ public:
             title_.swap(prepared.title_);
             return true;
         } catch (const std::exception&) {
-            internal::reportImportError("Lut3D", "cannot allocate LUT document");
+            internal::reportImportError("Lut3D", "cannot allocate LUT document: ", path.empty() ? filePath : path);
             return false;
         }
     }
 
     // Allocate empty or with data
-    void allocate(int size, const float* rgbData = nullptr) {
+    void allocate(int size, const float* rgbData = nullptr) { allocateDocument(size, rgbData, nullptr); }
+
+private:
+    void allocateDocument(int size, const float* rgbData, const fs::path* sourcePath) {
         clear();
 
         size_t rgbaBytes = 0;
         // Bound (gpu): 3D texture dimensions must fit the active device before CPU conversion. Overflow rejects the whole LUT and is counted.
         if (!detail::cubeElements(size, 4, rgbaBytes) || !sg_isvalid() ||
             size > sg_query_limits().max_image_size_3d) {
-            internal::reportImportError("Lut3D", "LUT dimensions exceed the texture or storage range");
+            internal::reportImportError("Lut3D", "LUT dimensions exceed the texture or storage range", sourcePath);
             return;
         }
         size_ = size;
@@ -129,7 +133,7 @@ public:
         // .cube format: R varies fastest, then G, then B (depth)
         std::vector<unsigned char> rgba;
         try { rgba.resize(rgbaBytes); }
-        catch (const std::exception&) { internal::reportImportError("Lut3D", "cannot allocate LUT conversion"); size_ = 0; return; }
+        catch (const std::exception&) { internal::reportImportError("Lut3D", "cannot allocate LUT conversion", sourcePath); size_ = 0; return; }
 
         if (rgbData) {
             for (size_t i = 0; i < rgbaBytes / 4; i++) {
@@ -172,7 +176,7 @@ public:
 
         if (sg_query_view_state(view_) != SG_RESOURCESTATE_VALID ||
             sg_query_sampler_state(sampler_) != SG_RESOURCESTATE_VALID) {
-            internal::reportImportError("Lut3D", "failed to create LUT view or sampler");
+            internal::reportImportError("Lut3D", "failed to create LUT view or sampler", sourcePath);
             sg_destroy_sampler(sampler_);
             sg_destroy_view(view_);
             sg_destroy_image(image_);
@@ -181,6 +185,8 @@ public:
         }
         allocated_ = true;
     }
+
+public:
 
     // Release resources
     void clear() {

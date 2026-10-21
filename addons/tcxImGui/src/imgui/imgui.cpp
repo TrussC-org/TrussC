@@ -2619,7 +2619,7 @@ void*   ImFileLoadToMemory(const char* filename, const char* mode, size_t* out_f
     if (padding_bytes < 0 || encoded_size == (ImU64)-1 ||
         encoded_size > std::numeric_limits<size_t>::max() - (size_t)padding_bytes)
     {
-        trussc::internal::reportImportError("ImGui", "file import size is not representable");
+        trussc::internal::reportImportError("ImGui", "file import size is not representable: ", filename);
         ImFileClose(f);
         return NULL;
     }
@@ -15775,6 +15775,8 @@ void ImGui::CleanupIniSettings(ImGuiSettingsCleanupArgs* args)
                 handler.CleanupFn(&g, &handler, args);
 }
 
+static void TcLoadIniSettingsFromMemory(const char* ini_data, size_t ini_size, const char* filename);
+
 void ImGui::LoadIniSettingsFromDisk(const char* ini_filename)
 {
     size_t file_data_size = 0;
@@ -15782,7 +15784,7 @@ void ImGui::LoadIniSettingsFromDisk(const char* ini_filename)
     if (!file_data)
         return;
     if (file_data_size > 0)
-        LoadIniSettingsFromMemory(file_data, (size_t)file_data_size);
+        TcLoadIniSettingsFromMemory(file_data, (size_t)file_data_size, ini_filename);
     IM_FREE(file_data);
 }
 
@@ -15875,6 +15877,12 @@ static bool TcPrepareIniStorage(const ImVector<char>& old, size_t bytes, ImVecto
 
 void ImGui::LoadIniSettingsFromMemory(const char* ini_data, size_t ini_size)
 {
+    TcLoadIniSettingsFromMemory(ini_data, ini_size, NULL);
+}
+
+static void TcLoadIniSettingsFromMemory(const char* ini_data, size_t ini_size, const char* filename)
+{
+    using namespace ImGui;
     ImGuiContext& g = *GImGui;
     IM_ASSERT(g.Initialized);
     //IM_ASSERT(!g.WithinFrameScope && "Cannot be called between NewFrame() and EndFrame()");
@@ -15887,24 +15895,24 @@ void ImGui::LoadIniSettingsFromMemory(const char* ini_data, size_t ini_size)
     // Bound (abi): SettingsIniData.Buf retains the input plus its NUL in ImVector<char>; both Size and Capacity are int. Reject only when that actual storage count cannot fit.
     if (ini_size >= (size_t)std::numeric_limits<int>::max() || memchr(ini_data, 0, ini_size))
     {
-        trussc::internal::reportImportError("ImGui", "ini import has an invalid text size or embedded terminator");
+        trussc::internal::reportImportError("ImGui", filename ? "ini import has an invalid text size or embedded terminator: " : "ini import has an invalid text size or embedded terminator", filename ? filename : "");
         return;
     }
     if (ini_size > 16u * 1024u * 1024u)
         trussc::logNotice("ImGui") << "loading local ini settings larger than 16 MiB";
     size_t tc_window_bytes = 0, tc_table_bytes = 0;
     if (!TcPreflightIniStorage(g, ini_data, ini_size, tc_window_bytes, tc_table_bytes)) {
-        trussc::internal::reportImportError("ImGui", "invalid ini settings structure or decoded chunk size");
+        trussc::internal::reportImportError("ImGui", filename ? "invalid ini settings structure or decoded chunk size: " : "invalid ini settings structure or decoded chunk size", filename ? filename : "");
         return;
     }
     ImVector<char> tc_windows, tc_tables, tc_text;
     if (!TcPrepareIniStorage(g.SettingsWindows.Buf, tc_window_bytes, tc_windows) ||
         !TcPrepareIniStorage(g.SettingsTables.Buf, tc_table_bytes, tc_tables)) {
-        trussc::internal::reportImportError("ImGui", "cannot allocate decoded ini settings");
+        trussc::internal::reportImportError("ImGui", filename ? "cannot allocate decoded ini settings: " : "cannot allocate decoded ini settings", filename ? filename : "");
         return;
     }
     tc_text.Data = (char*)IM_ALLOC(ini_size + 1);
-    if (!tc_text.Data) { trussc::internal::reportImportError("ImGui", "cannot allocate ini import"); return; }
+    if (!tc_text.Data) { trussc::internal::reportImportError("ImGui", filename ? "cannot allocate ini import: " : "cannot allocate ini import", filename ? filename : ""); return; }
     tc_text.Size = tc_text.Capacity = (int)ini_size + 1;
     memcpy(tc_text.Data, ini_data, ini_size);
     tc_text.Data[ini_size] = 0;

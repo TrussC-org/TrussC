@@ -1319,6 +1319,10 @@ static void testToolLevels() {
 static void testLocalImports() {
     ImGuiHarness h;
     auto& io = ImGui::GetIO();
+    string lastImportError;
+    auto importLogs = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
+        if (event.level == tc::LogLevel::Error) lastImportError = event.message;
+    });
     const string repeatedTable = "[Table][0x12345678,511]\nRefScale=42\n";
     string repeatedIni;
     for (int i = 0; i < 1000; ++i) repeatedIni += repeatedTable;
@@ -1340,6 +1344,13 @@ static void testLocalImports() {
     const char invalidIni[] = "[Window][Invalid]\n\0Pos=9,9\n";
     ImGui::LoadIniSettingsFromMemory(invalidIni, sizeof(invalidIni) - 1);
     check("ini structural failure preserves previous settings", before == ImGui::SaveIniSettingsToMemory());
+    check("ini memory error keeps its pathless message", lastImportError == "[ImGui] ini import has an invalid text size or embedded terminator");
+    const auto iniPath = std::filesystem::current_path() / std::filesystem::path(u8".imgui-import-日本.ini");
+    const auto iniFilename = tc::pathToUtf8(iniPath);
+    { std::ofstream file(iniPath, std::ios::binary); file.write(invalidIni, sizeof(invalidIni) - 1); }
+    ImGui::LoadIniSettingsFromDisk(iniFilename.c_str());
+    check("ini file validation error names the non-ASCII file", lastImportError == "[ImGui] ini import has an invalid text size or embedded terminator: " + iniFilename);
+    std::filesystem::remove(iniPath);
     const char empty = 0;
     ImGui::LoadIniSettingsFromMemory(&empty, size_t(INT_MAX));
     check("ini size check runs before buffer copy", before == ImGui::SaveIniSettingsToMemory());
@@ -1401,7 +1412,15 @@ static void testLocalImports() {
     allocator.failNext = false;
     check("font file allocation failure returns cleanly", failedFont == nullptr && fontFaultConsumed && io.Fonts->Fonts.Size == fontsBefore);
     check("same font file loads without an allocation fault", io.Fonts->AddFontFromFileTTF(fontFilename.c_str(), 16, &config) != nullptr && io.Fonts->Fonts.Size == fontsBefore + 1);
+    { std::ofstream file(fontPath, std::ios::binary); file << "invalid"; }
+    check("font file validation error retains the path and parser reason",
+          io.Fonts->AddFontFromFileTTF(fontFilename.c_str(), 16, &config) == nullptr &&
+          lastImportError.rfind("[ImGui] font import rejected: " + fontFilename + " - ", 0) == 0);
     std::filesystem::remove(fontPath);
+    config.Flags &= ~ImFontFlags_NoLoadError;
+    check("missing font file error retains its filename",
+          io.Fonts->AddFontFromFileTTF(fontFilename.c_str(), 16, &config) == nullptr &&
+          lastImportError == "[ImGui] cannot read or allocate font file: " + fontFilename);
     ImGui::SetAllocatorFunctions(allocator.allocate, allocator.release, allocator.originalData);
 }
 
