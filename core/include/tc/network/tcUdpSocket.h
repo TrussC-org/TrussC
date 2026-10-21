@@ -26,7 +26,7 @@
     #define INVALID_SOCKET_HANDLE (-1)
 #endif
 namespace trussc {
-namespace internal { struct UdpSocketTestAccess; struct UdpSocketLifecycleTestAccess; }
+namespace internal { struct UdpSocketTestAccess; struct UdpSocketLifecycleTestAccess; struct ExternalUdpDeliveryTestAccess; }
 // ---------------------------------------------------------------------------
 // UDP receive event arguments
 // ---------------------------------------------------------------------------
@@ -271,6 +271,7 @@ private:
     std::shared_ptr<internal::EventSnapshotDelivery<UdpErrorEventArgs>::Target> onErrorTarget_;
     void attachTargets();
     friend struct internal::UdpSocketTestAccess;
+    friend struct internal::ExternalUdpDeliveryTestAccess;
     friend struct internal::UdpSocketLifecycleTestAccess;
     using ErrorKind = State::ErrorKind;
     void notifyError(const std::string& message, int code = 0);

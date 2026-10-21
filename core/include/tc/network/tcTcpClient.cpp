@@ -161,6 +161,7 @@ bool TcpClient::State::connect(const std::string& host, int port) {
     // new socket next to the new receive thread (or, without threads, next
     // to the update event).
     const unsigned generation = ++receiveGeneration_;
+    internal::sharedStore(receiveDeliveryRun_, std::make_shared<std::atomic<bool>>(true));
 
     if (!transport_->connectSocket(*this, host, port)) return false;
     if (!transport_->isConnecting(*this)) {
@@ -447,6 +448,29 @@ void TcpClient::State::resetConnection() {
     // receiveThreadFunc()'s) end on their own once running_ is cleared or a
     // newer receive thread has taken over.
     if (tcpWorkerState != this) keptThreads_.release(receiveThread_);
+}
+
+bool TcpClient::State::deliverReceive(TcpReceiveEventArgs& args) {
+    auto run = internal::sharedLoad(receiveDeliveryRun_);
+    if (onReceive.notifyExternal(args, run)) return true;
+    run->store(false, std::memory_order_release);
+    // An Inline listener may have reconnected or destroyed the owner. The old
+    // run still loses its queued chunks, but must not notify the replacement.
+    if (!*alive_) return false;
+    // A missing chunk is a stream gap. Close before notifying user code;
+    // socket teardown runs inline; send completions keep their uncapped path.
+    running_ = false;
+    connected_ = false;
+    connectPending_ = false;
+    resetConnection();
+    // Teardown can complete pending sends, whose Inline listeners may
+    // reconnect; check again so a retired run never notifies the replacement.
+    if (!*alive_) return false;
+    TcpDisconnectEventArgs disconnected;
+    disconnected.reason = "External main-thread delivery overflow";
+    disconnected.wasClean = false;
+    onDisconnect.notify(disconnected);
+    return false;
 }
 
 bool TcpClient::State::isConnected() const {
@@ -752,7 +776,7 @@ bool TcpClient::State::drainSendChannel(const std::shared_ptr<ClientSendChannel>
     if (failed && *alive) {
         closeClientSocket();
         stopSendChannel();
-        notifyError(timedOut ? "Send timed out; client disconnected" : "Send failed", error);
+        notifyError(timedOut ? "Send timed out; client disconnected" : "Send failed", error, !timedOut);
         if (*alive && !connected_ && !running_) {
             TcpDisconnectEventArgs args;
             args.reason = "Send failed";
@@ -901,7 +925,7 @@ bool TcpClient::State::processPlainNetworkStep(const AliveToken& alive) {
         if (received > 0) {
             TcpReceiveEventArgs args;
             args.data.assign(recvBuf_.begin(), recvBuf_.begin() + received);
-            onReceive.notify(args);
+            if (!deliverReceive(args)) return false;
             // An onReceive listener may have destroyed the client (an owner
             // that replaces it from a close it handles inline, say)
             if (!*alive) return false;
@@ -925,7 +949,7 @@ bool TcpClient::State::processPlainNetworkStep(const AliveToken& alive) {
                 // This thread stops here, decided before notifying: a
                 // listener may destroy, disconnect or reconnect the client,
                 // so nothing of it is read after the notification (#262).
-                onDisconnect.notify(args);
+                onDisconnect.notifyExternal(args);
                 return false;
             }
             break;
@@ -942,7 +966,7 @@ bool TcpClient::State::processPlainNetworkStep(const AliveToken& alive) {
                 args.reason = "Connection error";
                 args.wasClean = false;
                 // As above: stop without reading the client again
-                onDisconnect.notify(args);
+                onDisconnect.notifyExternal(args);
                 return false;
             }
             break;
@@ -1024,11 +1048,12 @@ int TcpClient::State::getRemotePort() const {
 // =============================================================================
 // Error notification
 // =============================================================================
-void TcpClient::State::notifyError(const std::string& msg, int code) {
+void TcpClient::State::notifyError(const std::string& msg, int code, bool external) {
     TcpErrorEventArgs args;
     args.message = msg;
     args.errorCode = code;
-    onError.notify(args);
+    if (external) onError.notifyExternal(args);
+    else onError.notify(args);
 }
 
 

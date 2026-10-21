@@ -12,6 +12,7 @@
 #include <memory>
 #include <type_traits>
 #include "tcEventListener.h"
+#include "tcExternalDelivery.h"
 #include "../utils/tcMainThread.h"  // runOnMainThread (for Deliver::Main)
 #include "../utils/tcAtomicSharedPtr.h"  // internal::AtomicSharedPtr (listener snapshot)
 
@@ -100,7 +101,12 @@ namespace priority {
 //     participate in `consumed` propagation. Fine for reactive events
 //     (onReceive); input events that use `consumed` already fire on the main
 //     thread, where Main is a no-op anyway.
-//   - Requires T to be copy-constructible (enforced by static_assert).
+//   - External network/device sources opt into internal admission: 1024
+//     pending Main deliveries / 64 MiB retained payload per event store.
+//     Each Main copy is admitted at its listener turn, after earlier Inline
+//     edits. A rejected copy is counted and warns once automatically on main.
+//     App-authored notify() and runOnMainThread() remain growable.
+//   - Requires T to be copy-constructible (otherwise delivered inline).
 //   - Listener lifetime is honored across the marshal boundary: a call queued
 //     for next frame re-checks the listener's liveness token when it runs, so
 //     it is dropped if the EventListener was destroyed (or removeListener /
@@ -221,7 +227,7 @@ private:
         Deliver deliver;
         // Set once at registration; immutable in every published COW snapshot.
         bool frameworkOwned;
-        Callback callback;
+        std::shared_ptr<Callback> callback;
         // Liveness token, shared by every COW snapshot of this entry. A
         // marshalled Deliver::Main call holds a weak_ptr and re-checks the
         // VALUE at drain time: removeListener/clear() flip it to false, which
@@ -235,6 +241,8 @@ private:
 
     void listenImpl(EventListener& listener, Callback callback,
                     Deliver deliver, int priority, bool frameworkOwned = false) {
+        // Share registration storage across COW snapshots without copying an
+        // executing callable. Queued invocations copy the callable separately.
         uint64_t id;
         {
             TC_LOCK_GUARD(mutex_);
@@ -242,7 +250,8 @@ private:
             ConstEntryListPtr cur = internal::sharedLoad(entries_);
             auto next = cur ? std::make_shared<EntryList>(*cur)
                             : std::make_shared<EntryList>();
-            next->push_back({id, priority, deliver, frameworkOwned, std::move(callback),
+            next->push_back({id, priority, deliver, frameworkOwned,
+                             callback ? std::make_shared<Callback>(std::move(callback)) : nullptr,
                              std::make_shared<std::atomic<bool>>(true)});
             std::stable_sort(next->begin(), next->end(),
                 [](const Entry& a, const Entry& b) {
@@ -279,17 +288,27 @@ public:
     //     AudioEngine::waitForAudioCallbacks()), or the listener uses
     //     Deliver::Main.
     void notify(T& arg) {
-        notifySnapshot(internal::sharedLoad(entries_), arg);
+        notifySnapshot(internal::sharedLoad(entries_), arg, {}, alive_);
     }
 
 private:
     friend struct internal::FrameworkEventAccess;
     template<class> friend struct internal::EventSnapshotDelivery;
+    template<class> friend struct internal::ExternalEventDelivery;
     template<class> friend struct internal::GuardedEventDelivery;
     // Internal delivery can notify from a snapshot after the Event's owner is gone.
     // Dispatch accesses only the owned entries and payload, never the Event.
-    static void notifySnapshot(ConstEntryListPtr snapshot, T& arg) {
-        if (!snapshot) return;
+    static bool notifySnapshot(ConstEntryListPtr snapshot, T& arg,
+                               std::shared_ptr<internal::ExternalDeliveryStore> store = {},
+                               std::weak_ptr<std::atomic<bool>> sourceAlive = {},
+                               std::shared_ptr<std::atomic<bool>> run = {}) {
+        if (!snapshot) return true;
+        struct OwnedCopy {
+            std::shared_ptr<internal::ExternalDeliveryStore::Lease> lease;
+            T payload;
+            Callback callback;
+        };
+        bool accepted = true;
         for (const auto& entry : *snapshot) {
             if (!entry.callback) continue;
             // Removed earlier in this pass (the snapshot still holds it).
@@ -301,9 +320,16 @@ private:
             // takes the hot path below unchanged.
             if (entry.deliver == Deliver::Main && !isMainThread()) {
                 if constexpr (std::is_copy_constructible_v<T>) {
-                    T copy = arg;
-                    runOnMainThread([cb = entry.callback, copy]() mutable {
-                        cb(copy);
+                    std::shared_ptr<internal::ExternalDeliveryStore::Lease> lease;
+                    if (store) {
+                        // Reserve before either copy, using the value after
+                        // earlier Inline listeners have finished editing it.
+                        lease = store->reserve(1, internal::ExternalPayload<T>::bytes(arg));
+                        if (!lease) { accepted = false; continue; }
+                    }
+                    auto copy = std::make_shared<OwnedCopy>(std::move(lease), arg, *entry.callback);
+                    runOnMainThread([copy, run, sourceAlive]() mutable {
+                        if (internal::eventSourceIsAlive(sourceAlive) && (!run || run->load(std::memory_order_acquire))) copy->callback(copy->payload);
                     }, std::weak_ptr<std::atomic<bool>>(entry.alive));
                     continue;
                 }
@@ -311,7 +337,7 @@ private:
                 // run inline (documented limitation of Deliver::Main).
             }
 
-            entry.callback(arg);
+            (*entry.callback)(arg);
             // Stop propagation once a listener marks the event consumed.
             // Only arg types that carry a `consumed` flag (input events)
             // participate; all others ignore this branch at compile time.
@@ -322,6 +348,7 @@ private:
                 if (arg.consumed) break;
             }
         }
+        return accepted;
     }
 
 public:
@@ -333,42 +360,53 @@ public:
 
     // Remove user listeners, preserving framework-owned listeners and their live tokens.
     void clear() {
-        TC_LOCK_GUARD(mutex_);
-        ConstEntryListPtr cur = internal::sharedLoad(entries_);
-        if (!cur) return;
-        const auto retained = std::count_if(cur->begin(), cur->end(),
-            [](const Entry& e) { return e.frameworkOwned; });
-        // Allocate only for survivors. Clearing ordinary listeners needs no allocation.
-        std::shared_ptr<EntryList> next;
-        if (retained) {
-            next = std::make_shared<EntryList>();
-            next->reserve(retained);
-            for (const auto& e : *cur) if (e.frameworkOwned) next->push_back(e);
+        // User captures in the old snapshot may reenter a network owner.
+        // Release them (`cur`) only after releasing the listener-list mutex.
+        ConstEntryListPtr cur;
+        {
+            TC_LOCK_GUARD(mutex_);
+            cur = internal::sharedLoad(entries_);
+            if (!cur) return;
+            const auto retained = std::count_if(cur->begin(), cur->end(),
+                [](const Entry& e) { return e.frameworkOwned; });
+            // Allocate only for survivors. Clearing ordinary listeners needs no allocation.
+            std::shared_ptr<EntryList> next;
+            if (retained) {
+                next = std::make_shared<EntryList>();
+                next->reserve(retained);
+                for (const auto& e : *cur) if (e.frameworkOwned) next->push_back(e);
+            }
+            // Finish copying before invalidating tokens, so allocation failure leaves
+            // the existing snapshot and its liveness intact. Invalidation also
+            // cancels queued Deliver::Main calls of the removed listeners.
+            for (const auto& e : *cur) {
+                if (!e.frameworkOwned && e.alive) e.alive->store(false);
+            }
+            internal::sharedStore(entries_, ConstEntryListPtr(next));
         }
-        // Finish copying before invalidating tokens, so allocation failure leaves
-        // the existing snapshot and its liveness intact.
-        for (const auto& e : *cur) {
-            if (!e.frameworkOwned && e.alive) e.alive->store(false);
-        }
-        internal::sharedStore(entries_, ConstEntryListPtr(next));
     }
 
 private:
     void removeListener(uint64_t id) {
-        TC_LOCK_GUARD(mutex_);
-        ConstEntryListPtr cur = internal::sharedLoad(entries_);
-        if (!cur) return;
-        auto next = std::make_shared<EntryList>();
-        next->reserve(cur->size());
-        for (const auto& e : *cur) {
-            if (e.id == id) {
-                // Invalidate queued Deliver::Main calls too
-                if (e.alive) e.alive->store(false);
-            } else {
-                next->push_back(e);
+        // User captures in the old snapshot may reenter a network owner.
+        // Release them only after releasing the listener-list mutex.
+        ConstEntryListPtr cur;
+        {
+            TC_LOCK_GUARD(mutex_);
+            cur = internal::sharedLoad(entries_);
+            if (!cur) return;
+            auto next = std::make_shared<EntryList>();
+            next->reserve(cur->size());
+            for (const auto& e : *cur) {
+                if (e.id == id) {
+                    // Invalidate queued Deliver::Main calls too
+                    if (e.alive) e.alive->store(false);
+                } else {
+                    next->push_back(e);
+                }
             }
+            internal::sharedStore(entries_, ConstEntryListPtr(next));
         }
-        internal::sharedStore(entries_, ConstEntryListPtr(next));
     }
 
     // Liveness only, not a teardown barrier or publication of other state.
@@ -377,6 +415,8 @@ private:
     mutable TC_MUTEX mutex_;            // serializes listen / remove / clear
     internal::AtomicSharedPtr<const EntryList> entries_;  // RCU snapshot: sharedLoad (acquire) / sharedStore (release)
     uint64_t nextId_ = 0;
+    // Created only when an external source first marshals to Main.
+    std::shared_ptr<internal::ExternalDeliveryStore> externalStore_;
 };
 
 // ---------------------------------------------------------------------------
@@ -483,7 +523,7 @@ private:
         Deliver deliver;
         // Set once at registration; immutable in every published COW snapshot.
         bool frameworkOwned;
-        Callback callback;
+        std::shared_ptr<Callback> callback;
         // Liveness token — see Event<T>::Entry::alive
         std::shared_ptr<std::atomic<bool>> alive;
     };
@@ -500,7 +540,8 @@ private:
             ConstEntryListPtr cur = internal::sharedLoad(entries_);
             auto next = cur ? std::make_shared<EntryList>(*cur)
                             : std::make_shared<EntryList>();
-            next->push_back({id, priority, deliver, frameworkOwned, std::move(callback),
+            next->push_back({id, priority, deliver, frameworkOwned,
+                             callback ? std::make_shared<Callback>(std::move(callback)) : nullptr,
                              std::make_shared<std::atomic<bool>>(true)});
             std::stable_sort(next->begin(), next->end(),
                 [](const Entry& a, const Entry& b) {
@@ -523,14 +564,22 @@ private:
 public:
     // Fire event. Hot path: a single atomic load, no allocation, no mutex.
     // Changes to the listener list during a pass: see Event<T>::notify().
-    void notify() { notifySnapshot(internal::sharedLoad(entries_)); }
+    void notify() { notifySnapshot(internal::sharedLoad(entries_), {}, alive_); }
 
 private:
     friend struct internal::FrameworkEventAccess;
     template<class> friend struct internal::EventSnapshotDelivery;
+    template<class> friend struct internal::ExternalEventDelivery;
     template<class> friend struct internal::GuardedEventDelivery;
-    static void notifySnapshot(ConstEntryListPtr snapshot) {
-        if (!snapshot) return;
+    static bool notifySnapshot(ConstEntryListPtr snapshot,
+                               std::shared_ptr<internal::ExternalDeliveryStore> store = {},
+                               std::weak_ptr<std::atomic<bool>> sourceAlive = {}) {
+        if (!snapshot) return true;
+        struct OwnedCall {
+            std::shared_ptr<internal::ExternalDeliveryStore::Lease> lease;
+            Callback callback; // Destroy the callable before returning its credit.
+        };
+        bool accepted = true;
         for (const auto& entry : *snapshot) {
             if (!entry.callback) continue;
             // Removed earlier in this pass (the snapshot still holds it).
@@ -538,14 +587,22 @@ private:
             // Deliver::Main from a worker thread: run on the main thread next
             // frame (no payload to copy for Event<void>).
             if (entry.deliver == Deliver::Main && !isMainThread()) {
-                runOnMainThread(entry.callback,
-                                std::weak_ptr<std::atomic<bool>>(entry.alive));
+                std::shared_ptr<internal::ExternalDeliveryStore::Lease> lease;
+                if (store) {
+                    lease = store->reserve(1, 0);
+                    if (!lease) { accepted = false; continue; }
+                }
+                auto call = std::make_shared<OwnedCall>(std::move(lease), *entry.callback);
+                runOnMainThread([call, sourceAlive] {
+                    if (internal::eventSourceIsAlive(sourceAlive)) call->callback();
+                }, std::weak_ptr<std::atomic<bool>>(entry.alive));
                 continue;
             }
             {
-                entry.callback();
+                (*entry.callback)();
             }
         }
+        return accepted;
     }
 
 public:
@@ -555,42 +612,53 @@ public:
     }
 
     void clear() {
-        TC_LOCK_GUARD(mutex_);
-        ConstEntryListPtr cur = internal::sharedLoad(entries_);
-        if (!cur) return;
-        const auto retained = std::count_if(cur->begin(), cur->end(),
-            [](const Entry& e) { return e.frameworkOwned; });
-        // Allocate only for survivors. Clearing ordinary listeners needs no allocation.
-        std::shared_ptr<EntryList> next;
-        if (retained) {
-            next = std::make_shared<EntryList>();
-            next->reserve(retained);
-            for (const auto& e : *cur) if (e.frameworkOwned) next->push_back(e);
+        // User captures in the old snapshot may reenter a network owner.
+        // Release them (`cur`) only after releasing the listener-list mutex.
+        ConstEntryListPtr cur;
+        {
+            TC_LOCK_GUARD(mutex_);
+            cur = internal::sharedLoad(entries_);
+            if (!cur) return;
+            const auto retained = std::count_if(cur->begin(), cur->end(),
+                [](const Entry& e) { return e.frameworkOwned; });
+            // Allocate only for survivors. Clearing ordinary listeners needs no allocation.
+            std::shared_ptr<EntryList> next;
+            if (retained) {
+                next = std::make_shared<EntryList>();
+                next->reserve(retained);
+                for (const auto& e : *cur) if (e.frameworkOwned) next->push_back(e);
+            }
+            // Finish copying before invalidating tokens, so allocation failure leaves
+            // the existing snapshot and its liveness intact. Invalidation also
+            // cancels queued Deliver::Main calls of the removed listeners.
+            for (const auto& e : *cur) {
+                if (!e.frameworkOwned && e.alive) e.alive->store(false);
+            }
+            internal::sharedStore(entries_, ConstEntryListPtr(next));
         }
-        // Finish copying before invalidating tokens, so allocation failure leaves
-        // the existing snapshot and its liveness intact.
-        for (const auto& e : *cur) {
-            if (!e.frameworkOwned && e.alive) e.alive->store(false);
-        }
-        internal::sharedStore(entries_, ConstEntryListPtr(next));
     }
 
 private:
     void removeListener(uint64_t id) {
-        TC_LOCK_GUARD(mutex_);
-        ConstEntryListPtr cur = internal::sharedLoad(entries_);
-        if (!cur) return;
-        auto next = std::make_shared<EntryList>();
-        next->reserve(cur->size());
-        for (const auto& e : *cur) {
-            if (e.id == id) {
-                // Invalidate queued Deliver::Main calls too
-                if (e.alive) e.alive->store(false);
-            } else {
-                next->push_back(e);
+        // User captures in the old snapshot may reenter a network owner.
+        // Release them only after releasing the listener-list mutex.
+        ConstEntryListPtr cur;
+        {
+            TC_LOCK_GUARD(mutex_);
+            cur = internal::sharedLoad(entries_);
+            if (!cur) return;
+            auto next = std::make_shared<EntryList>();
+            next->reserve(cur->size());
+            for (const auto& e : *cur) {
+                if (e.id == id) {
+                    // Invalidate queued Deliver::Main calls too
+                    if (e.alive) e.alive->store(false);
+                } else {
+                    next->push_back(e);
+                }
             }
+            internal::sharedStore(entries_, ConstEntryListPtr(next));
         }
-        internal::sharedStore(entries_, ConstEntryListPtr(next));
     }
 
     // Liveness only, not a teardown barrier or publication of other state.
@@ -599,6 +667,8 @@ private:
     mutable TC_MUTEX mutex_;            // serializes listen / remove / clear
     internal::AtomicSharedPtr<const EntryList> entries_;  // RCU snapshot: sharedLoad (acquire) / sharedStore (release)
     uint64_t nextId_ = 0;
+    // Created only when an external source first marshals to Main.
+    std::shared_ptr<internal::ExternalDeliveryStore> externalStore_;
 };
 
 } // namespace trussc
@@ -628,12 +698,41 @@ template<class T> struct GuardedEventDelivery {
         for (const auto& entry : *snapshot) {
             if (!entry.callback || (entry.alive && !entry.alive->load(std::memory_order_acquire))) continue;
             if (!prepare()) break;
-            entry.callback(args);
+            (*entry.callback)(args);
             if (!prepare()) break;
             if constexpr (requires { args.consumed; }) {
                 if (args.consumed) break;
             }
         }
+    }
+};
+} // namespace trussc::internal
+
+// Internal opt-in: application-authored Event::notify remains growable. A
+// snapshot plus its store is acquired before entering user code; after that
+// dispatch never accesses the Event, even if a listener destroys its owner.
+namespace trussc::internal {
+template<class T> struct ExternalEventDelivery {
+    static std::shared_ptr<ExternalDeliveryStore> diagnostics(Event<T>& source) {
+        TC_LOCK_GUARD(source.mutex_);
+        return source.externalStore_;
+    }
+    static std::shared_ptr<ExternalDeliveryStore> store(Event<T>& source,
+                                                       const typename Event<T>::ConstEntryListPtr& snapshot) {
+        if (isMainThread() || !snapshot) return {};
+        bool needed = false;
+        for (const auto& entry : *snapshot)
+            if (entry.deliver == Deliver::Main && entry.callback && entry.alive->load()) { needed = true; break; }
+        if (!needed) return {};
+        TC_LOCK_GUARD(source.mutex_);
+        if (!source.externalStore_) source.externalStore_ = std::make_shared<ExternalDeliveryStore>();
+        return source.externalStore_;
+    }
+    template<class... Args>
+    static bool notify(Event<T>& source, Args&... args) {
+        auto snapshot = sharedLoad(source.entries_);
+        auto ownedStore = store(source, snapshot);
+        return Event<T>::notifySnapshot(std::move(snapshot), args..., std::move(ownedStore), source.alive_);
     }
 };
 } // namespace trussc::internal

@@ -555,7 +555,7 @@ void TcpServer::State::acceptThreadFunc() {
         if (f.log.admit()) {
             logWarning() << "TCP server on port " << port_ << ": " << f.what
                          << " (error " << code << "); backing off";
-            notifyError(f.what, code, clientId);
+            notifyError(f.what, code, clientId, true);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(backoffMs));
     };
@@ -685,7 +685,7 @@ void TcpServer::State::acceptThreadFunc() {
         args.clientId = clientId;
         args.host = hostStr;
         args.port = clientPort;
-        onClientConnect.notify(args);
+        onClientConnect.notifyExternal(args);
 
         // Start receive thread for client
         bool receiving = false;
@@ -855,7 +855,7 @@ void TcpServer::State::clientThreadFunc(int clientId) {
                 args.clientId = clientId;
                 args.reason = "Connection error";
                 args.wasClean = false;
-                onClientDisconnect.notify(args);
+                onClientDisconnect.notifyExternal(args);
 
                 removeClient(clientId);
             }
@@ -875,14 +875,23 @@ void TcpServer::State::clientThreadFunc(int clientId) {
             TcpServerReceiveEventArgs args;
             args.clientId = clientId;
             args.data.assign(buffer.begin(), buffer.begin() + received);
-            onReceive.notify(args);
+            if (!onReceive.notifyExternal(args, channel->receiveDeliveryRun)) {
+                channel->receiveDeliveryRun->store(false, std::memory_order_release);
+                removeClient(clientId);
+                TcpClientDisconnectEventArgs disconnected;
+                disconnected.clientId = clientId;
+                disconnected.reason = "External main-thread delivery overflow";
+                disconnected.wasClean = false;
+                onClientDisconnect.notify(disconnected);
+                break;
+            }
         } else if (received == 0) {
             // Client closed connection
             TcpClientDisconnectEventArgs args;
             args.clientId = clientId;
             args.reason = "Connection closed by client";
             args.wasClean = true;
-            onClientDisconnect.notify(args);
+            onClientDisconnect.notifyExternal(args);
 
             logNotice() << "Client " << clientId << " disconnected";
             removeClient(clientId);
@@ -900,7 +909,7 @@ void TcpServer::State::clientThreadFunc(int clientId) {
                 args.clientId = clientId;
                 args.reason = "Connection error";
                 args.wasClean = false;
-                onClientDisconnect.notify(args);
+                onClientDisconnect.notifyExternal(args);
 
                 removeClient(clientId);
             }
@@ -1339,7 +1348,7 @@ void TcpServer::State::completeSend(int clientId, const std::shared_ptr<internal
 
     // Error callbacks must see the failed item's storage and entry returned,
     // just like successful completions. Keep onError before onSendComplete.
-    if (failure) notifyError(failure, code, clientId);
+    if (failure) notifyError(failure, code, clientId, error != SendError::Timeout);
 
     TcpSendCompleteEventArgs args;
     args.clientId = clientId;
@@ -1704,12 +1713,13 @@ int TcpServer::State::getPort() const {
 // =============================================================================
 // Error notification
 // =============================================================================
-void TcpServer::State::notifyError(const std::string& msg, int code, int clientId) {
+void TcpServer::State::notifyError(const std::string& msg, int code, int clientId, bool external) {
     TcpServerErrorEventArgs args;
     args.message = msg;
     args.errorCode = code;
     args.clientId = clientId;
-    onError.notify(args);
+    if (external) onError.notifyExternal(args);
+    else onError.notify(args);
 }
 
 

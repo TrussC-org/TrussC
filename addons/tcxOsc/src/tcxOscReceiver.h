@@ -20,6 +20,7 @@ namespace tcx::osc {
 // OscReceiver - OSC receiver class
 // =============================================================================
 class OscReceiver {
+    friend struct OscDeliveryTestAccess;
 public:
     // Events
     tc::Event<OscMessage> onMessageReceived;   // Message received
@@ -245,7 +246,7 @@ private:
         void parsePacket(const uint8_t* data, size_t size, uint64_t generation) {
             if (size < 4) {
                 std::string err = "Packet too small";
-                onParseError.notify(err);
+                onParseError.notifyExternal(err);
                 return;
             }
 
@@ -261,7 +262,7 @@ private:
                 }
                 else {
                     std::string err = "Failed to parse bundle";
-                    onParseError.notify(err);
+                    onParseError.notifyExternal(err);
                 }
             }
             else {
@@ -272,11 +273,11 @@ private:
                     if (paddingMissing) warnPaddingMissing();
                     enqueue(msg);  // only if the polling queue is enabled
                     // Always notify listeners
-                    onMessageReceived.notify(msg);
+                    onMessageReceived.notifyExternal(msg);
                 }
                 else {
                     std::string err = "Failed to parse message";
-                    onParseError.notify(err);
+                    onParseError.notifyExternal(err);
                 }
             }
         }
@@ -296,13 +297,13 @@ private:
             // Event<T>::notify() takes T&, and listeners could always edit the
             // bundle before its elements are dispatched. Every node belongs to
             // the non-const bundle parsePacket() owns, so the cast is well-defined.
-            onBundleReceived.notify(const_cast<OscBundle&>(bundle));
+            onBundleReceived.notifyExternal(const_cast<OscBundle&>(bundle));
 
             for (size_t i = 0; i < bundle.getElementCount() && generation == generation_; ++i) {
                 if (bundle.isMessage(i)) {
                     OscMessage msg = bundle.getMessageAt(i);
                     enqueue(msg);  // only if the polling queue is enabled
-                    onMessageReceived.notify(msg);
+                    onMessageReceived.notifyExternal(msg);
                 }
                 else if (const OscBundle* child = bundle.bundleAt(i)) {
                     dispatchBundle(*child, generation);
@@ -338,7 +339,8 @@ private:
         errorListener_ = socket_.onError.listen([state, generation](tc::UdpErrorEventArgs& args) {
             if (generation != state->generation_) return;
             std::string msg = "Socket error: " + args.message;
-            state->onParseError.notify(msg);
+            if (tc::internal::ExternalEventScope::isExternal(&args)) state->onParseError.notifyExternal(msg);
+            else state->onParseError.notify(msg);
         });
         return socket_.create();
     }

@@ -371,7 +371,7 @@ void UdpSocket::State::processNetwork() {
             args.remoteHost = hostStr;
             args.remotePort = ntohs(fromAddr.sin_port);
 
-            onReceive.notify(args);
+            onReceive.notifyExternal(args);
             
             // If not threaded, we process one packet per update to avoid stalling?
             // Or process all pending? All pending is better for latency.
@@ -475,7 +475,7 @@ void UdpSocket::State::receiveThreadFunc() {
                 args.remoteHost = hostStr;
                 args.remotePort = ntohs(fromAddr.sin_port);
 
-                onReceive.notify(args);
+                onReceive.notifyExternal(args);
             } else if (received < 0) {
                 int err = SOCKET_ERROR_CODE;
                 // Ignore wouldblock in case of spurious wakeup
@@ -701,7 +701,8 @@ void UdpSocket::State::notifyError(ErrorKind kind, const std::string& message, i
     UdpErrorEventArgs args;
     args.message = message;
     args.errorCode = code;
-    onError.notify(args);
+    if (kind == ErrorKind::Receive) onError.notifyExternal(args);
+    else onError.notify(args);
 }
 
 void UdpSocket::State::notifyRecovery(ErrorKind kind) {
