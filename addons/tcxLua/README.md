@@ -149,6 +149,8 @@ historical context — these were on by default until 2026-05-27 (PR #97).
 
 ## Development
 
+Local patches to both bundled Lua engines are recorded in [TRUSSC_MODIFICATIONS.md](TRUSSC_MODIFICATIONS.md).
+
 ### Bindgen
 
 Please read [tools/bindgen/README.md](tools/bindgen/README.md) in detail.
