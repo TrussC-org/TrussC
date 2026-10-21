@@ -7,7 +7,7 @@ description.en = "The base class your app inherits from; TrussC calls its setup(
 description.ja = "アプリが継承する基底クラスで、setup()・update()・draw() を TrussC が代わりに呼んでくれる。"
 description.ko = "앱이 상속하는 기반 클래스로, setup(), update(), draw()는 TrussC가 대신 호출한다."
 details.en = '''
-- Main/host event delivery is BeforeApp → App (100, including its tree) → AfterApp. **Consumed input skips App virtuals too.** Equal priority uses registration order, and clear() keeps the App binding. See App::mousePressed for the v0.8 changes and the deferred secondary/headless scope.
+- Main/host event delivery is BeforeApp → App (100, including its tree) → AfterApp. **Consumed input skips App virtuals too.** Equal priority uses registration order, and clear() keeps the App binding. See App::mousePressed for the v0.8 changes and the deferred secondary-window scope and headless update/exit.
 - Your tcApp inherits `App` and overrides the functions it needs. `main()` returns `TC_RUN_APP(tcApp, settings)` (see `runApp`).
 - `App` is a `RectNode` and the root of the scene graph, so you can call `addChild()` on it directly. Its size always follows the logical size of the window.
 - Keep the constructor to plain member setup, and do tree building, `setSize()` and file loading in `setup()`. In the constructor no `shared_ptr` owns the App yet, so `addChild()` asserts, `setSize()` does not resize the window, and `getRootNode()` is not this App. The same rule for nodes is described in `Node::setup`.
@@ -17,11 +17,11 @@ details.en = '''
 - `audioOut()`/`audioIn()` run on the audio thread (see `App::audioOut`). Every other callback runs on the main thread.
 - Shutdown is described in `App::exit`. An App runs only once: after it has shut down, `Window::setApp()` refuses it, so create a new App.
 - Hot reload (`TC_HOT_RELOAD`) creates a fresh App on every reload, so the App's state is reset.
-- With `runHeadlessApp`, `setup()` runs before the loop, and after that only `App::update()` is called at a fixed step. Child nodes, mods and timers are not updated, and there is no draw, no input and no `windowResized()`.
+- With `runHeadlessApp`, `setup()` runs before the loop, and each fixed step notifies `events().update` with App::update() at 100, followed on shutdown by `events().exit` with App::exit() at 100. Child nodes, mods and timers are not updated, and there is no draw, no input and no `windowResized()`.
 - Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (runHeadlessApp runs only App::update(), not the node tree).
 '''
 details.ja = '''
-- メインとホストでは BeforeApp → App（100、ツリーを含む）→ AfterApp の順です。**消費済み入力は App 仮想関数にも届きません。** 同順位は登録順で、clear() 後も App 登録は残ります。v0.8 の変更と、副ウィンドウ・ヘッドレスの未移行範囲は App::mousePressed を参照してください。
+- メインとホストでは BeforeApp → App（100、ツリーを含む）→ AfterApp の順です。**消費済み入力は App 仮想関数にも届きません。** 同順位は登録順で、clear() 後も App 登録は残ります。v0.8 の変更と、副ウィンドウの未移行範囲とヘッドレスの update/exitは App::mousePressed を参照してください。
 - 自分の tcApp を `App` から継承して作り、必要な関数をオーバーライドします。`main()` は `TC_RUN_APP(tcApp, settings)` を返します（`runApp` を参照してください）。
 - `App` は `RectNode` であり、シーングラフのルートです。そのため `addChild()` をそのまま使えます。サイズは常にウィンドウの論理サイズに合わせて変わります。
 - コンストラクタではメンバーの初期化だけを行い、ツリーの組み立て、`setSize()`、ファイルの読み込みは `setup()` に書いてください。コンストラクタの時点ではまだ `shared_ptr` が App を保持していないため、`addChild()` は assert になり、`setSize()` はウィンドウをリサイズせず、`getRootNode()` もこの App になりません。ノード側の同じルールは `Node::setup` で説明しています。
@@ -31,11 +31,11 @@ details.ja = '''
 - `audioOut()`/`audioIn()` はオーディオスレッドで呼ばれます（`App::audioOut` を参照してください）。それ以外のコールバックはメインスレッドで呼ばれます。
 - 終了の流れは `App::exit` で説明しています。App は 1 回しか実行できません。終了した App を `Window::setApp()` に渡しても受け付けられないため、新しい App を作成してください。
 - ホットリロード（`TC_HOT_RELOAD`）では、リロードのたびに新しい App が作られるため、App の状態はリセットされます。
-- `runHeadlessApp` では、ループの前に `setup()` が呼ばれ、その後は一定の間隔で `App::update()` だけが呼ばれます。子ノード、Mod、タイマーは更新されず、draw、入力、`windowResized()` もありません。
+- `runHeadlessApp` では、ループの前に `setup()` が呼ばれ、固定ステップごとに `events().update`（App::update() は 100）、終了時に `events().exit`（App::exit() は 100）を通知します。子ノード、Mod、タイマーは更新されず、draw、入力、`windowResized()` もありません。
 - 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（runHeadlessApp は App::update() だけを呼び、ノードツリーは更新しない）。
 '''
 details.ko = '''
-- 메인/호스트에서는 BeforeApp → App(100, 트리 포함) → AfterApp 순서입니다. **소비된 입력은 App 가상 함수에도 전달되지 않습니다.** 같은 우선순위는 등록 순서이며 clear() 후에도 App 등록은 남습니다. v0.8 변경과 보조 윈도우/헤드리스 미전환 범위는 App::mousePressed를 참조하세요.
+- 메인/호스트에서는 BeforeApp → App(100, 트리 포함) → AfterApp 순서입니다. **소비된 입력은 App 가상 함수에도 전달되지 않습니다.** 같은 우선순위는 등록 순서이며 clear() 후에도 App 등록은 남습니다. v0.8 변경과 보조 윈도우 미전환 범위와 헤드리스 update/exit는 App::mousePressed를 참조하세요.
 - 자신의 tcApp을 `App`에서 상속해 만들고 필요한 함수를 오버라이드합니다. `main()`은 `TC_RUN_APP(tcApp, settings)`를 반환합니다(`runApp` 참조).
 - `App`은 `RectNode`이며 씬 그래프의 루트입니다. 그래서 `addChild()`를 그대로 사용할 수 있습니다. 크기는 항상 윈도우의 논리 크기를 따라갑니다.
 - 생성자에서는 멤버 초기화만 하고, 트리 구성, `setSize()`, 파일 로드는 `setup()`에 작성하세요. 생성자 시점에는 아직 `shared_ptr`가 App을 보유하지 않으므로 `addChild()`는 assert가 되고, `setSize()`는 윈도우를 리사이즈하지 않으며, `getRootNode()`도 이 App이 아닙니다. 노드 쪽의 같은 규칙은 `Node::setup`에서 설명합니다.
@@ -45,7 +45,7 @@ details.ko = '''
 - `audioOut()`/`audioIn()`은 오디오 스레드에서 호출됩니다(`App::audioOut` 참조). 그 밖의 콜백은 메인 스레드에서 호출됩니다.
 - 종료 흐름은 `App::exit`에서 설명합니다. App은 한 번만 실행할 수 있습니다. 종료된 App은 `Window::setApp()`에 넘겨도 거부되므로 새 App을 만드세요.
 - 핫 리로드(`TC_HOT_RELOAD`)에서는 리로드할 때마다 새 App이 만들어지므로 App 상태가 초기화됩니다.
-- `runHeadlessApp`에서는 루프 전에 `setup()`이 호출되고, 그 뒤에는 정해진 간격으로 `App::update()`만 호출됩니다. 자식 노드, Mod, 타이머는 갱신되지 않으며 draw, 입력, `windowResized()`도 없습니다.
+- `runHeadlessApp`에서는 루프 전에 `setup()`이 호출되고, 고정 스텝마다 `events().update`(App::update(): 100), 종료 시 `events().exit`(App::exit(): 100)를 알립니다. 자식 노드, Mod, 타이머는 갱신되지 않으며 draw, 입력, `windowResized()`도 없습니다.
 - 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(runHeadlessApp은 App::update()만 호출하고 노드 트리는 갱신하지 않음).
 '''
 related = ["runApp", "runHeadlessApp", "Node::setup", "App::exit", "App::mousePressed", "App::audioOut", "App::windowResized", "App::setSize", "App::getWindow", "Window::setApp", "RectNode", "events", "getRootNode", "WindowSettings"]
@@ -203,7 +203,7 @@ exitListener = events().exitRequested.listen([](ExitRequestEventArgs& args) { ar
 ```
 
 - Only the root App receives `cleanup()`. At app exit, child nodes receive no `cleanup()`; only their destructors run.
-- Headless: it runs after the loop ends, followed by audio detach and `cleanup()`. `events().exit` is not fired, and the audio device keeps running.
+- Headless: it runs after the loop ends, followed by audio detach and `cleanup()`. `events().exit` delivers BeforeApp → App::exit() (100) → AfterApp shutdown hooks once; the App and mandatory teardown survive `clear()`. The audio device keeps running.
 - Hot reload: after `events().hotReloadUnload`, the old App receives `exit()` and `cleanup()`. `events().exit` fires only at the final exit.
 - A sub-window App: it runs when its window closes (after that window's `events().exit`) or when `setApp()` swaps it out. `getWindow()` is already nullptr there.
 - An App added as a child node never receives `exit()`.
@@ -223,7 +223,7 @@ exitListener = events().exitRequested.listen([](ExitRequestEventArgs& args) { ar
 ```
 
 - `cleanup()` が呼ばれるのはルートの App だけです。アプリ終了時、子ノードには `cleanup()` は呼ばれず、デストラクタだけが実行されます。
-- ヘッドレスでは、ループが終わった後に呼ばれ、続いてオーディオの切り離しと `cleanup()` が行われます。`events().exit` は発行されず、オーディオデバイスは動作したままです。
+- ヘッドレスでは、ループが終わった後に呼ばれ、続いてオーディオの切り離しと `cleanup()` が行われます。`events().exit` は BeforeApp → App::exit()（100）→ AfterApp の終了フックの順に一度通知され、App と必須の終了処理は `clear()` 後も残ります。音声デバイスは動作を続けます。
 - ホットリロードでは、`events().hotReloadUnload` の後に古い App の `exit()` と `cleanup()` が呼ばれます。`events().exit` は本当に終了するときだけ発行されます。
 - サブウィンドウの App では、ウィンドウが閉じたとき（そのウィンドウの `events().exit` の後）か、`setApp()` で入れ替えられたときに呼ばれます。その中ではすでに `getWindow()` が nullptr です。
 - 子ノードとして追加した App では `exit()` は呼ばれません。
@@ -243,7 +243,7 @@ exitListener = events().exitRequested.listen([](ExitRequestEventArgs& args) { ar
 ```
 
 - `cleanup()`이 호출되는 것은 루트 App뿐입니다. 앱 종료 시 자식 노드에는 `cleanup()`이 호출되지 않고 소멸자만 실행됩니다.
-- 헤드리스에서는 루프가 끝난 뒤 호출되고, 이어서 오디오 분리와 `cleanup()`이 진행됩니다. `events().exit`는 발생하지 않으며 오디오 장치는 계속 동작합니다.
+- 헤드리스에서는 루프가 끝난 뒤 호출되고, 이어서 오디오 분리와 `cleanup()`이 진행됩니다. `events().exit`는 BeforeApp → App::exit()(100) → AfterApp 종료 훅 순서로 한 번 전달되며 App과 필수 종료 처리는 `clear()` 후에도 남습니다. 오디오 장치는 계속 동작합니다.
 - 핫 리로드에서는 `events().hotReloadUnload` 뒤에 이전 App의 `exit()`와 `cleanup()`이 호출됩니다. `events().exit`는 실제로 종료할 때만 발생합니다.
 - 서브 윈도우 App에서는 윈도우가 닫힐 때(그 윈도우의 `events().exit` 뒤) 또는 `setApp()`으로 교체될 때 호출됩니다. 그 안에서는 이미 `getWindow()`가 nullptr입니다.
 - 자식 노드로 추가한 App에서는 `exit()`가 호출되지 않습니다.
@@ -418,7 +418,7 @@ description.ko = "키가 눌렸을 때 호출된다. 누르고 있으면 자동 
 details.en = '''
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
-- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless update/exit migration is separate. App input virtuals keep const arguments and cannot consume.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - When you write a function with this name in tcApp (your class derived from App), TrussC calls it when a key is pressed (this is called an override). There are two forms: the simple `keyPressed(int key)`, and `keyPressed(const KeyEventArgs& e)`, which also tells you the modifier keys (`e.shift`, `e.ctrl`, `e.alt`, `e.super`) and whether the call is an auto-repeat (`e.isRepeat`). Override only one of them (if you write both, only the KeyEventArgs version is called).
 - `key` is a key code, not the typed character. Letters always arrive as uppercase ASCII, with or without Shift, so write `key == 'A'` (`key == 'a'` never matches). Digits are `'0'` to `'9'` and the space bar is 32. For other keys, use the `KEY_*` constants such as `KEY_ESCAPE`, `KEY_ENTER`, `KEY_LEFT`, `KEY_F1` and `KEY_LEFT_SHIFT`.
 - While a key is held, the OS auto-repeat calls this function again with `e.isRepeat == true`. The int version cannot tell repeats apart, so if you only want the first press, use the KeyEventArgs version and write `if (e.isRepeat) return;` at the top.
@@ -436,7 +436,7 @@ keyListener = events().keyPressed.listen([](KeyEventArgs& e) { e.consumed = true
 details.ja = '''
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
 - **v0.8: 消費済み入力は App の仮想関数にも届かなくなります。** メインウィンドウ・ホスト・MCP では、先行リスナーが `consumed` を設定すると、App、ツリー、後続リスナーは呼ばれません。App の枠では 引数が const の仮想関数、ツリーの順に呼びます。App ルートのオーバーライドを含むノードの明示的な消費は後続リスナーを止めます。イベントを有効にした App ルートも、背景の押下・解放・ドラッグを既定では消費しません。ノードハンドラーで true を返すか、ノードイベントで明示的に消費してください。既定のルートは背景で grab しません。
-- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit 移行は別です。App の入力仮想関数の引数は const のままで消費できません。
+- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit は App 仮想関数だけを呼びます（runHeadlessApp 参照）。App の入力仮想関数の引数は const のままで消費できません。
 - tcApp（App を継承した自分のクラス）に同じ名前の関数を書くと、キーが押されたときに TrussC が呼び出します（オーバーライド）。書き方は 2 通りあります。手軽な `keyPressed(int key)` と、修飾キー（`e.shift`、`e.ctrl`、`e.alt`、`e.super`）やオートリピートかどうか（`e.isRepeat`）も分かる `keyPressed(const KeyEventArgs& e)` です。どちらか片方をオーバーライドしてください（両方書いた場合は KeyEventArgs 版だけが呼ばれます）。
 - `key` は入力された文字ではなく、キーコードです。英字は Shift の有無にかかわらず大文字の ASCII で届くため、`key == 'A'` と書いてください（`key == 'a'` は一致しません）。数字は `'0'`〜`'9'`、スペースは 32 です。それ以外のキーには、`KEY_ESCAPE`、`KEY_ENTER`、`KEY_LEFT`、`KEY_F1`、`KEY_LEFT_SHIFT` などの `KEY_*` 定数を使います。
 - キーを押し続けると、OS のオートリピートによって `e.isRepeat == true` の状態で再び呼ばれます。int 版ではリピートを区別できないため、最初の 1 回だけを扱いたい場合は KeyEventArgs 版を使い、先頭に `if (e.isRepeat) return;` と書いてください。
@@ -454,7 +454,7 @@ keyListener = events().keyPressed.listen([](KeyEventArgs& e) { e.consumed = true
 details.ko = '''
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
 - **v0.8: 소비된 입력은 App 가상 함수에도 전달되지 않습니다.** 메인 윈도우/호스트/MCP에서는 앞선 리스너가 `consumed`를 설정하면 App, 트리, 이후 리스너를 건너뜁니다. App 위치에서는 const 인자를 받는 가상 함수 다음에 트리를 실행합니다. App 루트 오버라이드를 포함한 노드의 명시적 소비는 이후 리스너를 막습니다. 이벤트가 활성화된 App 루트도 기본적으로 배경 누름/놓음/드래그를 소비하지 않습니다. 노드 핸들러에서 true를 반환하거나 노드 이벤트에서 명시적으로 소비하세요. 기본 루트는 배경에서 grab하지 않습니다.
-- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit 전환은 별도입니다. App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
+- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit는 App 가상 함수만 호출합니다(runHeadlessApp 참조). App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
 - tcApp(App을 상속한 자신의 클래스)에 같은 이름의 함수를 작성하면 키가 눌렸을 때 TrussC가 호출합니다(오버라이드). 작성 방법은 두 가지입니다. 간단한 `keyPressed(int key)`와, 수식 키(`e.shift`, `e.ctrl`, `e.alt`, `e.super`)와 자동 반복 여부(`e.isRepeat`)도 알 수 있는 `keyPressed(const KeyEventArgs& e)`입니다. 둘 중 하나만 오버라이드하세요(둘 다 작성하면 KeyEventArgs 버전만 호출됩니다).
 - `key`는 입력된 문자가 아니라 키 코드입니다. 영문자는 Shift 여부와 관계없이 대문자 ASCII로 전달되므로 `key == 'A'`로 작성합니다(`key == 'a'`는 일치하지 않습니다). 숫자는 `'0'`~`'9'`, 스페이스는 32입니다. 그 밖의 키에는 `KEY_ESCAPE`, `KEY_ENTER`, `KEY_LEFT`, `KEY_F1`, `KEY_LEFT_SHIFT` 같은 `KEY_*` 상수를 사용합니다.
 - 키를 계속 누르고 있으면 OS의 자동 반복으로 `e.isRepeat == true` 상태로 다시 호출됩니다. int 버전으로는 반복을 구분할 수 없으므로, 처음 한 번만 처리하려면 KeyEventArgs 버전을 사용하고 맨 앞에 `if (e.isRepeat) return;`을 작성합니다.
@@ -492,7 +492,7 @@ description.ko = "키가 떼졌을 때 호출된다."
 details.en = '''
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
-- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless update/exit migration is separate. App input virtuals keep const arguments and cannot consume.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - When you write a function with this name in tcApp, TrussC calls it when a key is released. There are two forms: the simple `keyReleased(int key)`, and `keyReleased(const KeyEventArgs& e)`. Override only one of them.
 - Key codes work the same as in `App::keyPressed`: letters are uppercase, and other keys use the `KEY_*` constants.
 - `e.isRepeat` is always false. The modifier fields show the state at the moment the key was released.
@@ -502,7 +502,7 @@ details.en = '''
 details.ja = '''
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
 - **v0.8: 消費済み入力は App の仮想関数にも届かなくなります。** メインウィンドウ・ホスト・MCP では、先行リスナーが `consumed` を設定すると、App、ツリー、後続リスナーは呼ばれません。App の枠では 引数が const の仮想関数、ツリーの順に呼びます。App ルートのオーバーライドを含むノードの明示的な消費は後続リスナーを止めます。イベントを有効にした App ルートも、背景の押下・解放・ドラッグを既定では消費しません。ノードハンドラーで true を返すか、ノードイベントで明示的に消費してください。既定のルートは背景で grab しません。
-- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit 移行は別です。App の入力仮想関数の引数は const のままで消費できません。
+- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit は App 仮想関数だけを呼びます（runHeadlessApp 参照）。App の入力仮想関数の引数は const のままで消費できません。
 - tcApp に同じ名前の関数を書くと、キーが離されたときに TrussC が呼び出します。書き方は 2 通りあります。手軽な `keyReleased(int key)` と、`keyReleased(const KeyEventArgs& e)` です。どちらか片方をオーバーライドしてください。
 - キーコードの扱いは `App::keyPressed` と同じです。英字は大文字で届き、それ以外のキーには `KEY_*` 定数を使います。
 - `e.isRepeat` は常に false です。修飾キーの値は、キーを離した瞬間の状態になります。
@@ -512,7 +512,7 @@ details.ja = '''
 details.ko = '''
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
 - **v0.8: 소비된 입력은 App 가상 함수에도 전달되지 않습니다.** 메인 윈도우/호스트/MCP에서는 앞선 리스너가 `consumed`를 설정하면 App, 트리, 이후 리스너를 건너뜁니다. App 위치에서는 const 인자를 받는 가상 함수 다음에 트리를 실행합니다. App 루트 오버라이드를 포함한 노드의 명시적 소비는 이후 리스너를 막습니다. 이벤트가 활성화된 App 루트도 기본적으로 배경 누름/놓음/드래그를 소비하지 않습니다. 노드 핸들러에서 true를 반환하거나 노드 이벤트에서 명시적으로 소비하세요. 기본 루트는 배경에서 grab하지 않습니다.
-- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit 전환은 별도입니다. App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
+- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit는 App 가상 함수만 호출합니다(runHeadlessApp 참조). App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
 - tcApp에 같은 이름의 함수를 작성하면 키가 떼졌을 때 TrussC가 호출합니다. 작성 방법은 두 가지입니다. 간단한 `keyReleased(int key)`와 `keyReleased(const KeyEventArgs& e)`입니다. 둘 중 하나만 오버라이드하세요.
 - 키 코드의 취급은 `App::keyPressed`와 같습니다. 영문자는 대문자로 전달되고, 그 밖의 키에는 `KEY_*` 상수를 사용합니다.
 - `e.isRepeat`는 항상 false입니다. 수식 키 값은 키를 뗀 순간의 상태입니다.
@@ -539,7 +539,7 @@ description.ko = "마우스 버튼을 누른 채 포인터가 움직일 때 호�
 details.en = '''
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
-- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless update/exit migration is separate. App input virtuals keep const arguments and cannot consume.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - When you write a function with this name in tcApp, TrussC calls it when the pointer moves with a button held. Use the `mouseDragged(const MouseDragEventArgs& e)` form: `e` gives you the position (`e.pos`), the movement since the last event (`e.delta`), the button (`e.button`) and modifier keys such as `e.shift`. The shorter form `mouseDragged(Vec2 pos, int button)` is also available. Override only one of them.
 - `e.button` is the button that was pressed most recently.
 - `e.delta` is how far the pointer has moved since the last recorded position, in the same units as `e.pos`. Here `e.globalDelta` has the same value.
@@ -552,7 +552,7 @@ details.en = '''
 details.ja = '''
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
 - **v0.8: 消費済み入力は App の仮想関数にも届かなくなります。** メインウィンドウ・ホスト・MCP では、先行リスナーが `consumed` を設定すると、App、ツリー、後続リスナーは呼ばれません。App の枠では 引数が const の仮想関数、ツリーの順に呼びます。App ルートのオーバーライドを含むノードの明示的な消費は後続リスナーを止めます。イベントを有効にした App ルートも、背景の押下・解放・ドラッグを既定では消費しません。ノードハンドラーで true を返すか、ノードイベントで明示的に消費してください。既定のルートは背景で grab しません。
-- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit 移行は別です。App の入力仮想関数の引数は const のままで消費できません。
+- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit は App 仮想関数だけを呼びます（runHeadlessApp 参照）。App の入力仮想関数の引数は const のままで消費できません。
 - tcApp に同じ名前の関数を書くと、ボタンを押したままポインタが動いたときに TrussC が呼び出します。基本は `mouseDragged(const MouseDragEventArgs& e)` の形を使ってください。`e` から位置（`e.pos`）、前回からの移動量（`e.delta`）、ボタン（`e.button`）、修飾キー（`e.shift` など）を取り出せます。`mouseDragged(Vec2 pos, int button)` という短い形でも書けます。オーバーライドするのはどちらか片方にしてください。
 - `e.button` は、一番最後に押されたボタンです。
 - `e.delta` は前回記録した位置からポインタが動いた量で、単位は `e.pos` と同じです。ここでは `e.globalDelta` も同じ値になります。
@@ -565,7 +565,7 @@ details.ja = '''
 details.ko = '''
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
 - **v0.8: 소비된 입력은 App 가상 함수에도 전달되지 않습니다.** 메인 윈도우/호스트/MCP에서는 앞선 리스너가 `consumed`를 설정하면 App, 트리, 이후 리스너를 건너뜁니다. App 위치에서는 const 인자를 받는 가상 함수 다음에 트리를 실행합니다. App 루트 오버라이드를 포함한 노드의 명시적 소비는 이후 리스너를 막습니다. 이벤트가 활성화된 App 루트도 기본적으로 배경 누름/놓음/드래그를 소비하지 않습니다. 노드 핸들러에서 true를 반환하거나 노드 이벤트에서 명시적으로 소비하세요. 기본 루트는 배경에서 grab하지 않습니다.
-- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit 전환은 별도입니다. App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
+- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit는 App 가상 함수만 호출합니다(runHeadlessApp 참조). App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
 - tcApp에 같은 이름의 함수를 작성하면 버튼을 누른 채 포인터가 움직였을 때 TrussC가 호출합니다. 기본적으로 `mouseDragged(const MouseDragEventArgs& e)` 형태를 사용하세요. `e`에서 위치(`e.pos`), 이전 이벤트 이후의 이동량(`e.delta`), 버튼(`e.button`), 수식 키(`e.shift` 등)을 얻을 수 있습니다. `mouseDragged(Vec2 pos, int button)`라는 짧은 형태로도 작성할 수 있습니다. 둘 중 하나만 오버라이드하세요.
 - `e.button`은 가장 마지막에 눌린 버튼입니다.
 - `e.delta`는 이전에 기록된 위치에서 포인터가 움직인 양이며, 단위는 `e.pos`와 같습니다. 여기서는 `e.globalDelta`도 같은 값입니다.
@@ -598,7 +598,7 @@ description.ko = "마우스 버튼을 누르지 않은 상태에서 포인터가
 details.en = '''
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
-- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless update/exit migration is separate. App input virtuals keep const arguments and cannot consume.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - When you write a function with this name in tcApp, TrussC calls it when the pointer moves. Use the `mouseMoved(const MouseMoveEventArgs& e)` form: `e` gives you the position (`e.pos`), the movement since the last event (`e.delta`) and modifier keys such as `e.shift`. The shorter form `mouseMoved(Vec2 pos)` is also available. Override only one of them.
 - While a button is held, moves go to `mouseDragged` instead. If you hold two buttons and release one, moves come back here.
 - There is no button field. `e.delta` is how far the pointer has moved since the last recorded position, in the same units as `e.pos`. Here `e.globalDelta` has the same value.
@@ -608,7 +608,7 @@ details.en = '''
 details.ja = '''
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
 - **v0.8: 消費済み入力は App の仮想関数にも届かなくなります。** メインウィンドウ・ホスト・MCP では、先行リスナーが `consumed` を設定すると、App、ツリー、後続リスナーは呼ばれません。App の枠では 引数が const の仮想関数、ツリーの順に呼びます。App ルートのオーバーライドを含むノードの明示的な消費は後続リスナーを止めます。イベントを有効にした App ルートも、背景の押下・解放・ドラッグを既定では消費しません。ノードハンドラーで true を返すか、ノードイベントで明示的に消費してください。既定のルートは背景で grab しません。
-- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit 移行は別です。App の入力仮想関数の引数は const のままで消費できません。
+- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit は App 仮想関数だけを呼びます（runHeadlessApp 参照）。App の入力仮想関数の引数は const のままで消費できません。
 - tcApp に同じ名前の関数を書くと、ポインタが動いたときに TrussC が呼び出します。基本は `mouseMoved(const MouseMoveEventArgs& e)` の形を使ってください。`e` から位置（`e.pos`）、前回からの移動量（`e.delta`）、修飾キー（`e.shift` など）を取り出せます。`mouseMoved(Vec2 pos)` という短い形でも書けます。オーバーライドするのはどちらか片方にしてください。
 - ボタンを押している間の移動は、ここではなく `mouseDragged` に届きます。2 つのボタンを押していて片方を離すと、移動は再びここに届くようになります。
 - ボタンの値はありません。`e.delta` は前回記録した位置からポインタが動いた量で、単位は `e.pos` と同じです。ここでは `e.globalDelta` も同じ値になります。
@@ -618,7 +618,7 @@ details.ja = '''
 details.ko = '''
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
 - **v0.8: 소비된 입력은 App 가상 함수에도 전달되지 않습니다.** 메인 윈도우/호스트/MCP에서는 앞선 리스너가 `consumed`를 설정하면 App, 트리, 이후 리스너를 건너뜁니다. App 위치에서는 const 인자를 받는 가상 함수 다음에 트리를 실행합니다. App 루트 오버라이드를 포함한 노드의 명시적 소비는 이후 리스너를 막습니다. 이벤트가 활성화된 App 루트도 기본적으로 배경 누름/놓음/드래그를 소비하지 않습니다. 노드 핸들러에서 true를 반환하거나 노드 이벤트에서 명시적으로 소비하세요. 기본 루트는 배경에서 grab하지 않습니다.
-- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit 전환은 별도입니다. App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
+- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit는 App 가상 함수만 호출합니다(runHeadlessApp 참조). App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
 - tcApp에 같은 이름의 함수를 작성하면 포인터가 움직였을 때 TrussC가 호출합니다. 기본적으로 `mouseMoved(const MouseMoveEventArgs& e)` 형태를 사용하세요. `e`에서 위치(`e.pos`), 이전 이벤트 이후의 이동량(`e.delta`), 수식 키(`e.shift` 등)을 얻을 수 있습니다. `mouseMoved(Vec2 pos)`라는 짧은 형태로도 작성할 수 있습니다. 둘 중 하나만 오버라이드하세요.
 - 버튼을 누르고 있는 동안의 이동은 여기가 아니라 `mouseDragged`로 전달됩니다. 두 버튼을 누르고 있다가 하나를 떼면 이동은 다시 여기로 전달됩니다.
 - 버튼 값은 없습니다. `e.delta`는 이전에 기록된 위치에서 포인터가 움직인 양이며, 단위는 `e.pos`와 같습니다. 여기서는 `e.globalDelta`도 같은 값입니다.
@@ -646,7 +646,7 @@ description.ko = "마우스 버튼이 눌렸을 때 호출된다."
 details.en = '''
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
-- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless update/exit migration is separate. App input virtuals keep const arguments and cannot consume.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - When you write a function with this name in tcApp (your class derived from App), TrussC calls it when a button is pressed (this is called an override). Use the `mousePressed(const MouseEventArgs& e)` form: `e` gives you the position (`e.pos`), the button (`e.button`) and modifier keys such as `e.shift`. The shorter form `mousePressed(Vec2 pos, int button)` is also available. Override only one of them (if you write both, only the MouseEventArgs version is called).
 - `button` is 0 for left, 1 for right and 2 for middle. You can also compare it with constants, as in `if (e.button == MOUSE_BUTTON_LEFT)`.
 - Coordinates start at (0, 0) in the top-left corner of the window. They are in logical pixels, the same units as the window size, and do not change on high-resolution screens such as Retina. Only when you enable pixelPerfect in `WindowSettings` are they real pixels.
@@ -663,7 +663,7 @@ clickListener = events().mousePressed.listen([](MouseEventArgs& e) { e.consumed 
 details.ja = '''
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
 - **v0.8: 消費済み入力は App の仮想関数にも届かなくなります。** メインウィンドウ・ホスト・MCP では、先行リスナーが `consumed` を設定すると、App、ツリー、後続リスナーは呼ばれません。App の枠では 引数が const の仮想関数、ツリーの順に呼びます。App ルートのオーバーライドを含むノードの明示的な消費は後続リスナーを止めます。イベントを有効にした App ルートも、背景の押下・解放・ドラッグを既定では消費しません。ノードハンドラーで true を返すか、ノードイベントで明示的に消費してください。既定のルートは背景で grab しません。
-- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit 移行は別です。App の入力仮想関数の引数は const のままで消費できません。
+- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit は App 仮想関数だけを呼びます（runHeadlessApp 参照）。App の入力仮想関数の引数は const のままで消費できません。
 - tcApp（App を継承した自分のクラス）に同じ名前の関数を書くと、ボタンが押されたときに TrussC が呼び出します（オーバーライド）。基本は `mousePressed(const MouseEventArgs& e)` の形を使ってください。`e` から位置（`e.pos`）、ボタン（`e.button`）、Shift などの修飾キー（`e.shift` など）を取り出せます。`mousePressed(Vec2 pos, int button)` という短い形でも書けます。オーバーライドするのはどちらか片方にしてください（両方書いた場合は MouseEventArgs 版だけが呼ばれます）。
 - `button` は 0 が左、1 が右、2 が中ボタンです。`if (e.button == MOUSE_BUTTON_LEFT)` のように定数でも比較できます。
 - 座標はウィンドウの左上が (0, 0) です。単位はウィンドウサイズと同じ論理ピクセルで、Retina のような高解像度の画面でも変わりません。`WindowSettings` で pixelPerfect にしたときだけ、実際のピクセルになります。
@@ -680,7 +680,7 @@ clickListener = events().mousePressed.listen([](MouseEventArgs& e) { e.consumed 
 details.ko = '''
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
 - **v0.8: 소비된 입력은 App 가상 함수에도 전달되지 않습니다.** 메인 윈도우/호스트/MCP에서는 앞선 리스너가 `consumed`를 설정하면 App, 트리, 이후 리스너를 건너뜁니다. App 위치에서는 const 인자를 받는 가상 함수 다음에 트리를 실행합니다. App 루트 오버라이드를 포함한 노드의 명시적 소비는 이후 리스너를 막습니다. 이벤트가 활성화된 App 루트도 기본적으로 배경 누름/놓음/드래그를 소비하지 않습니다. 노드 핸들러에서 true를 반환하거나 노드 이벤트에서 명시적으로 소비하세요. 기본 루트는 배경에서 grab하지 않습니다.
-- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit 전환은 별도입니다. App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
+- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit는 App 가상 함수만 호출합니다(runHeadlessApp 참조). App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
 - tcApp(App을 상속한 자신의 클래스)에 같은 이름의 함수를 작성하면 버튼이 눌렸을 때 TrussC가 호출합니다(오버라이드). 기본적으로 `mousePressed(const MouseEventArgs& e)` 형태를 사용하세요. `e`에서 위치(`e.pos`), 버튼(`e.button`), Shift 같은 수식 키(`e.shift` 등)를 얻을 수 있습니다. `mousePressed(Vec2 pos, int button)`라는 짧은 형태로도 작성할 수 있습니다. 둘 중 하나만 오버라이드하세요(둘 다 작성하면 MouseEventArgs 버전만 호출됩니다).
 - `button`은 0이 왼쪽, 1이 오른쪽, 2가 가운데 버튼입니다. `if (e.button == MOUSE_BUTTON_LEFT)`처럼 상수로도 비교할 수 있습니다.
 - 좌표는 창의 왼쪽 위가 (0, 0)입니다. 단위는 창 크기와 같은 논리 픽셀이며, Retina 같은 고해상도 화면에서도 바뀌지 않습니다. `WindowSettings`에서 pixelPerfect를 켰을 때만 실제 픽셀이 됩니다.
@@ -716,7 +716,7 @@ description.ko = "마우스 버튼이 떼졌을 때, 프레스 1회당 반드시
 details.en = '''
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
-- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless update/exit migration is separate. App input virtuals keep const arguments and cannot consume.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - When you write a function with this name in tcApp, TrussC calls it when a button is released. Use the `mouseReleased(const MouseEventArgs& e)` form: `e` gives you the position (`e.pos`), the button (`e.button`) and modifier keys such as `e.shift`. The shorter form `mouseReleased(Vec2 pos, int button)` is also available. Override only one of them.
 - **You receive exactly one release for each press**, so this is a safe place to end a drag. TrussC records which of the left, right and middle buttons are held in each window, and ignores an OS release for a button it never saw pressed.
 - Inside this function the press has already been cleared: `isMousePressed()` is false and `getMouseButton()` is -1. `e.pos` is the position where the button was released.
@@ -729,7 +729,7 @@ details.en = '''
 details.ja = '''
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
 - **v0.8: 消費済み入力は App の仮想関数にも届かなくなります。** メインウィンドウ・ホスト・MCP では、先行リスナーが `consumed` を設定すると、App、ツリー、後続リスナーは呼ばれません。App の枠では 引数が const の仮想関数、ツリーの順に呼びます。App ルートのオーバーライドを含むノードの明示的な消費は後続リスナーを止めます。イベントを有効にした App ルートも、背景の押下・解放・ドラッグを既定では消費しません。ノードハンドラーで true を返すか、ノードイベントで明示的に消費してください。既定のルートは背景で grab しません。
-- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit 移行は別です。App の入力仮想関数の引数は const のままで消費できません。
+- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit は App 仮想関数だけを呼びます（runHeadlessApp 参照）。App の入力仮想関数の引数は const のままで消費できません。
 - tcApp に同じ名前の関数を書くと、ボタンが離されたときに TrussC が呼び出します。基本は `mouseReleased(const MouseEventArgs& e)` の形を使ってください。`e` から位置（`e.pos`）、ボタン（`e.button`）、修飾キー（`e.shift` など）を取り出せます。`mouseReleased(Vec2 pos, int button)` という短い形でも書けます。オーバーライドするのはどちらか片方にしてください。
 - **1 回のプレスにつき、リリースは必ず 1 回だけ届きます。** そのため、ドラッグを終える処理はここに書くと確実です。TrussC はウィンドウごとに左・右・中ボタンのどれが押されているかを記録していて、押されたのを見ていないボタンの OS リリースは無視します。
 - この関数の中では、押された状態はすでに解除されています。`isMousePressed()` は false、`getMouseButton()` は -1 です。`e.pos` はボタンを離した位置です。
@@ -742,7 +742,7 @@ details.ja = '''
 details.ko = '''
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
 - **v0.8: 소비된 입력은 App 가상 함수에도 전달되지 않습니다.** 메인 윈도우/호스트/MCP에서는 앞선 리스너가 `consumed`를 설정하면 App, 트리, 이후 리스너를 건너뜁니다. App 위치에서는 const 인자를 받는 가상 함수 다음에 트리를 실행합니다. App 루트 오버라이드를 포함한 노드의 명시적 소비는 이후 리스너를 막습니다. 이벤트가 활성화된 App 루트도 기본적으로 배경 누름/놓음/드래그를 소비하지 않습니다. 노드 핸들러에서 true를 반환하거나 노드 이벤트에서 명시적으로 소비하세요. 기본 루트는 배경에서 grab하지 않습니다.
-- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit 전환은 별도입니다. App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
+- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit는 App 가상 함수만 호출합니다(runHeadlessApp 참조). App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
 - tcApp에 같은 이름의 함수를 작성하면 버튼이 떼졌을 때 TrussC가 호출합니다. 기본적으로 `mouseReleased(const MouseEventArgs& e)` 형태를 사용하세요. `e`에서 위치(`e.pos`), 버튼(`e.button`), 수식 키(`e.shift` 등)을 얻을 수 있습니다. `mouseReleased(Vec2 pos, int button)`라는 짧은 형태로도 작성할 수 있습니다. 둘 중 하나만 오버라이드하세요.
 - **프레스 1회당 릴리스는 반드시 1회만 전달됩니다.** 따라서 드래그를 끝내는 처리는 여기에 작성하면 확실합니다. TrussC는 창마다 왼쪽·오른쪽·가운데 버튼 중 어느 것이 눌려 있는지 기록하고, 눌린 것을 보지 못한 버튼의 OS 릴리스는 무시합니다.
 - 이 함수 안에서는 눌린 상태가 이미 해제되어 있습니다. `isMousePressed()`는 false, `getMouseButton()`은 -1입니다. `e.pos`는 버튼을 뗀 위치입니다.
@@ -773,7 +773,7 @@ description.ko = "마우스 휠이나 트랙패드로 스크롤할 때 호출된
 details.en = '''
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
-- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless update/exit migration is separate. App input virtuals keep const arguments and cannot consume.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - When you write a function with this name in tcApp, TrussC calls it when the user scrolls. Use the `mouseScrolled(const ScrollEventArgs& e)` form: `e` gives you the scroll amount (`e.scroll`), the cursor position (`e.pos`) and modifier keys such as `e.shift`. The shorter form `mouseScrolled(Vec2 delta)`, which receives `e.scroll`, is also available. Override only one of them.
 - `e.scroll.x` is the horizontal amount and `e.scroll.y` is the vertical amount. TrussC passes the value from sokol through unchanged, with no DPI scaling or unit conversion.
 - On Windows and X11, rolling the wheel forward gives a positive `scroll.y`.
@@ -785,7 +785,7 @@ details.en = '''
 details.ja = '''
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
 - **v0.8: 消費済み入力は App の仮想関数にも届かなくなります。** メインウィンドウ・ホスト・MCP では、先行リスナーが `consumed` を設定すると、App、ツリー、後続リスナーは呼ばれません。App の枠では 引数が const の仮想関数、ツリーの順に呼びます。App ルートのオーバーライドを含むノードの明示的な消費は後続リスナーを止めます。イベントを有効にした App ルートも、背景の押下・解放・ドラッグを既定では消費しません。ノードハンドラーで true を返すか、ノードイベントで明示的に消費してください。既定のルートは背景で grab しません。
-- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit 移行は別です。App の入力仮想関数の引数は const のままで消費できません。
+- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit は App 仮想関数だけを呼びます（runHeadlessApp 参照）。App の入力仮想関数の引数は const のままで消費できません。
 - tcApp に同じ名前の関数を書くと、スクロールしたときに TrussC が呼び出します。基本は `mouseScrolled(const ScrollEventArgs& e)` の形を使ってください。`e` からスクロール量（`e.scroll`）、カーソル位置（`e.pos`）、修飾キー（`e.shift` など）を取り出せます。`e.scroll` だけを受け取る `mouseScrolled(Vec2 delta)` という短い形でも書けます。オーバーライドするのはどちらか片方にしてください。
 - `e.scroll.x` が横方向、`e.scroll.y` が縦方向の量です。TrussC は sokol から来た値をそのまま渡しており、DPI スケールも単位の変換も行いません。
 - Windows と X11 では、ホイールを奥に回すと `scroll.y` がプラスになります。
@@ -797,7 +797,7 @@ details.ja = '''
 details.ko = '''
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
 - **v0.8: 소비된 입력은 App 가상 함수에도 전달되지 않습니다.** 메인 윈도우/호스트/MCP에서는 앞선 리스너가 `consumed`를 설정하면 App, 트리, 이후 리스너를 건너뜁니다. App 위치에서는 const 인자를 받는 가상 함수 다음에 트리를 실행합니다. App 루트 오버라이드를 포함한 노드의 명시적 소비는 이후 리스너를 막습니다. 이벤트가 활성화된 App 루트도 기본적으로 배경 누름/놓음/드래그를 소비하지 않습니다. 노드 핸들러에서 true를 반환하거나 노드 이벤트에서 명시적으로 소비하세요. 기본 루트는 배경에서 grab하지 않습니다.
-- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit 전환은 별도입니다. App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
+- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit는 App 가상 함수만 호출합니다(runHeadlessApp 참조). App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
 - tcApp에 같은 이름의 함수를 작성하면 스크롤했을 때 TrussC가 호출합니다. 기본적으로 `mouseScrolled(const ScrollEventArgs& e)` 형태를 사용하세요. `e`에서 스크롤 양(`e.scroll`), 커서 위치(`e.pos`), 수식 키(`e.shift` 등)을 얻을 수 있습니다. `e.scroll`만 받는 `mouseScrolled(Vec2 delta)`라는 짧은 형태로도 작성할 수 있습니다. 둘 중 하나만 오버라이드하세요.
 - `e.scroll.x`가 가로 방향, `e.scroll.y`가 세로 방향의 양입니다. TrussC는 sokol에서 온 값을 그대로 넘기며, DPI 스케일이나 단위 변환을 하지 않습니다.
 - Windows와 X11에서는 휠을 앞으로 돌리면 `scroll.y`가 양수가 됩니다.
@@ -5256,7 +5256,7 @@ description.ko = "프레임워크의 수명 주기, 렌더링 및 입력 이벤�
 details.en = '''
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
-- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless update/exit migration is separate. App input virtuals keep const arguments and cannot consume.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - On events the App receives, listen() defaults to BeforeApp; other events keep 100. This covers update, draw, exit, key, mouse, touch, windowResized, and filesDropped; setup is unchanged.
 - Each member is an `Event<T>` or `Event<void>`; see `Event<T>` for `listen()`, listener lifetime, priorities, and delivery threads.
 - `events()` returns the current window context's hub; `Window::events()` accesses a particular secondary window's hub directly.
@@ -5265,7 +5265,7 @@ details.en = '''
 details.ja = '''
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
 - **v0.8: 消費済み入力は App の仮想関数にも届かなくなります。** メインウィンドウ・ホスト・MCP では、先行リスナーが `consumed` を設定すると、App、ツリー、後続リスナーは呼ばれません。App の枠では 引数が const の仮想関数、ツリーの順に呼びます。App ルートのオーバーライドを含むノードの明示的な消費は後続リスナーを止めます。イベントを有効にした App ルートも、背景の押下・解放・ドラッグを既定では消費しません。ノードハンドラーで true を返すか、ノードイベントで明示的に消費してください。既定のルートは背景で grab しません。
-- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit 移行は別です。App の入力仮想関数の引数は const のままで消費できません。
+- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit は App 仮想関数だけを呼びます（runHeadlessApp 参照）。App の入力仮想関数の引数は const のままで消費できません。
 - App が受け取るイベントでは listen() の既定値は BeforeApp、それ以外のイベントでは 100 です。 対象は update、draw、exit、キー、マウス、タッチ、windowResized、filesDropped で、setup は変更しません。
 - 各メンバーは `Event<T>` または `Event<void>` です。`listen()`、リスナーの寿命、優先度、呼び出すスレッドについては `Event<T>` を参照してください。
 - `events()` は現在のウィンドウコンテキストのイベント群を返します。特定のサブウィンドウのイベント群には `Window::events()` で直接アクセスできます。
@@ -5274,7 +5274,7 @@ details.ja = '''
 details.ko = '''
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
 - **v0.8: 소비된 입력은 App 가상 함수에도 전달되지 않습니다.** 메인 윈도우/호스트/MCP에서는 앞선 리스너가 `consumed`를 설정하면 App, 트리, 이후 리스너를 건너뜁니다. App 위치에서는 const 인자를 받는 가상 함수 다음에 트리를 실행합니다. App 루트 오버라이드를 포함한 노드의 명시적 소비는 이후 리스너를 막습니다. 이벤트가 활성화된 App 루트도 기본적으로 배경 누름/놓음/드래그를 소비하지 않습니다. 노드 핸들러에서 true를 반환하거나 노드 이벤트에서 명시적으로 소비하세요. 기본 루트는 배경에서 grab하지 않습니다.
-- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit 전환은 별도입니다. App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
+- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit는 App 가상 함수만 호출합니다(runHeadlessApp 참조). App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
 - App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트는 100을 유지합니다. update, draw, exit, 키, 마우스, 터치, windowResized, filesDropped가 해당하며 setup은 변경하지 않습니다.
 - 각 멤버는 `Event<T>` 또는 `Event<void>`입니다. `listen()`, 리스너 수명, 우선순위 및 호출 스레드는 `Event<T>`를 참조하세요.
 - `events()`는 현재 윈도우 컨텍스트의 이벤트 모음을 반환합니다. 특정 보조 윈도우의 이벤트 모음에는 `Window::events()`로 직접 접근합니다.
@@ -5430,18 +5430,18 @@ description.ja = "描画フレームを通知する。メインとホストの�
 description.ko = "렌더링 프레임을 알린다. 메인/호스트 그리기는 100에서 BeforeApp과 AfterApp 사이에 실행된다."
 details.en = '''
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
-- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless update/exit migration is separate. App input virtuals keep const arguments and cannot consume.
-- Each update step or rendered frame has one notify. The App listener runs setup once, then the corresponding tree; BeforeApp listeners on the first step may run before setup. Headless does not emit these events; secondary windows still notify before directly ticking/drawing their tree.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
+- Each update step or rendered frame has one notify. The App listener runs setup once, then the corresponding tree; BeforeApp listeners on the first step may run before setup. Headless emits update with App::update() at 100, without tree traversal or draw; secondary windows still notify before directly ticking/drawing their tree.
 '''
 details.ja = '''
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
-- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit 移行は別です。App の入力仮想関数の引数は const のままで消費できません。
-- update ステップまたは描画フレームごとに一度 notify します。App リスナーは setup を一度実行して対応するツリーを処理します。最初の BeforeApp リスナーは setup 前に呼ばれることがあります。ヘッドレスでは発火せず、副ウィンドウは notify 後にツリーを直接処理します。
+- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit は App 仮想関数だけを呼びます（runHeadlessApp 参照）。App の入力仮想関数の引数は const のままで消費できません。
+- update ステップまたは描画フレームごとに一度 notify します。App リスナーは setup を一度実行して対応するツリーを処理します。最初の BeforeApp リスナーは setup 前に呼ばれることがあります。ヘッドレスでは update のみ通知し、100 で App::update() を呼びます（ツリーと draw は対象外）。副ウィンドウは notify 後にツリーを直接処理します。
 '''
 details.ko = '''
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
-- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit 전환은 별도입니다. App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
-- update 단계 또는 렌더링 프레임마다 한 번 notify합니다. App 리스너는 setup을 한 번 실행하고 해당 트리를 처리합니다. 첫 BeforeApp 리스너는 setup 전에 실행될 수 있습니다. 헤드리스에서는 발생하지 않으며 보조 윈도우는 notify 후 트리를 직접 처리합니다.
+- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit는 App 가상 함수만 호출합니다(runHeadlessApp 참조). App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
+- update 단계 또는 렌더링 프레임마다 한 번 notify합니다. App 리스너는 setup을 한 번 실행하고 해당 트리를 처리합니다. 첫 BeforeApp 리스너는 setup 전에 실행될 수 있습니다. 헤드리스에서는 update만 알리고 100에서 App::update()을 호출합니다(트리와 draw 제외). 보조 윈도우는 notify 후 트리를 직접 처리합니다.
 '''
 related = ["Node::draw", "CoreEvents::update", "events", "EventListener"]
 
@@ -5452,17 +5452,17 @@ description.ja = "終了を通知する。メインとホストでは 100 で Ap
 description.ko = "종료를 알린다. 메인/호스트 App::exit는 100에서, 리소스 해제 훅은 AfterApp에서 실행한다."
 details.en = '''
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
-- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless update/exit migration is separate. App input virtuals keep const arguments and cannot consume.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - Main/host shutdown: exit notify calls App::exit at 100, then AfterApp shutdown hooks (ImGui including offscreen manager, NodeInspector, ScreenRecorder), then audio detach and cleanup. Guest swaps still call exit directly after hotReloadUnload; they do not emit events().exit. Startup and reload resize seeds remain App-only.
 '''
 details.ja = '''
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
-- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit 移行は別です。App の入力仮想関数の引数は const のままで消費できません。
+- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit は App 仮想関数だけを呼びます（runHeadlessApp 参照）。App の入力仮想関数の引数は const のままで消費できません。
 - メインとホストの終了では exit notify が 100 で App::exit を呼び、その後 AfterApp で ImGui（オフスクリーン管理を含む）、NodeInspector、ScreenRecorder を終了し、音声を切り離して cleanup します。ゲスト交換では hotReloadUnload 後に exit を直接呼び、events().exit は発火しません。起動・リロード時のサイズ初期化は App のみです。
 '''
 details.ko = '''
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
-- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit 전환은 별도입니다. App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
+- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit는 App 가상 함수만 호출합니다(runHeadlessApp 참조). App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
 - 메인/호스트 종료 시 exit notify가 100에서 App::exit를 호출하고 AfterApp에서 ImGui(오프스크린 관리자 포함), NodeInspector, ScreenRecorder를 종료한 뒤 오디오를 분리하고 cleanup합니다. 게스트 교체는 hotReloadUnload 후 exit를 직접 호출하며 events().exit를 발생시키지 않습니다. 시작/리로드 크기 초기화는 App 전용입니다.
 '''
 related = ["App::exit", "Node::cleanup", "CoreEvents::update", "events", "EventListener"]
@@ -5882,18 +5882,18 @@ description.ja = "update ごとに一度通知し、メインとホストでは�
 description.ko = "update 단계마다 한 번 알리며 메인/호스트 App 트리를 우선순위 100에서 처리한다."
 details.en = '''
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
-- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless update/exit migration is separate. App input virtuals keep const arguments and cannot consume.
-- Each update step or rendered frame has one notify. The App listener runs setup once, then the corresponding tree; BeforeApp listeners on the first step may run before setup. Headless does not emit these events; secondary windows still notify before directly ticking/drawing their tree.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
+- Each update step or rendered frame has one notify. The App listener runs setup once, then the corresponding tree; BeforeApp listeners on the first step may run before setup. Headless emits update with App::update() at 100, without tree traversal or draw; secondary windows still notify before directly ticking/drawing their tree.
 '''
 details.ja = '''
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
-- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit 移行は別です。App の入力仮想関数の引数は const のままで消費できません。
-- update ステップまたは描画フレームごとに一度 notify します。App リスナーは setup を一度実行して対応するツリーを処理します。最初の BeforeApp リスナーは setup 前に呼ばれることがあります。ヘッドレスでは発火せず、副ウィンドウは notify 後にツリーを直接処理します。
+- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit は App 仮想関数だけを呼びます（runHeadlessApp 参照）。App の入力仮想関数の引数は const のままで消費できません。
+- update ステップまたは描画フレームごとに一度 notify します。App リスナーは setup を一度実行して対応するツリーを処理します。最初の BeforeApp リスナーは setup 前に呼ばれることがあります。ヘッドレスでは update のみ通知し、100 で App::update() を呼びます（ツリーと draw は対象外）。副ウィンドウは notify 後にツリーを直接処理します。
 '''
 details.ko = '''
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
-- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit 전환은 별도입니다. App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
-- update 단계 또는 렌더링 프레임마다 한 번 notify합니다. App 리스너는 setup을 한 번 실행하고 해당 트리를 처리합니다. 첫 BeforeApp 리스너는 setup 전에 실행될 수 있습니다. 헤드리스에서는 발생하지 않으며 보조 윈도우는 notify 후 트리를 직접 처리합니다.
+- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit는 App 가상 함수만 호출합니다(runHeadlessApp 참조). App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
+- update 단계 또는 렌더링 프레임마다 한 번 notify합니다. App 리스너는 setup을 한 번 실행하고 해당 트리를 처리합니다. 첫 BeforeApp 리스너는 setup 전에 실행될 수 있습니다. 헤드리스에서는 update만 알리고 100에서 App::update()을 호출합니다(트리와 draw 제외). 보조 윈도우는 notify 후 트리를 직접 처리합니다.
 '''
 related = ["Node::update", "CoreEvents::draw", "EventListener", "events", "CoreEvents::setup", "setIndependentFps"]
 snippet = '''
@@ -7791,19 +7791,19 @@ description.ko = "나중에 호출할 리스너의 우선순위를 나타낸다.
 details.en = '''
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
-- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless update/exit migration is separate. App input virtuals keep const arguments and cannot consume.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - Its integer value is `200`; see `EventPriority::BeforeApp` for listener order and `consumed`, and `App::mousePressed` for the order relative to App callbacks and nodes.
 '''
 details.ja = '''
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
 - **v0.8: 消費済み入力は App の仮想関数にも届かなくなります。** メインウィンドウ・ホスト・MCP では、先行リスナーが `consumed` を設定すると、App、ツリー、後続リスナーは呼ばれません。App の枠では 引数が const の仮想関数、ツリーの順に呼びます。App ルートのオーバーライドを含むノードの明示的な消費は後続リスナーを止めます。イベントを有効にした App ルートも、背景の押下・解放・ドラッグを既定では消費しません。ノードハンドラーで true を返すか、ノードイベントで明示的に消費してください。既定のルートは背景で grab しません。
-- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit 移行は別です。App の入力仮想関数の引数は const のままで消費できません。
+- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit は App 仮想関数だけを呼びます（runHeadlessApp 参照）。App の入力仮想関数の引数は const のままで消費できません。
 - 整数値は `200` です。リスナーの順番と `consumed` については `EventPriority::BeforeApp` を、App のコールバックやノードとの順番については `App::mousePressed` を参照してください。
 '''
 details.ko = '''
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
 - **v0.8: 소비된 입력은 App 가상 함수에도 전달되지 않습니다.** 메인 윈도우/호스트/MCP에서는 앞선 리스너가 `consumed`를 설정하면 App, 트리, 이후 리스너를 건너뜁니다. App 위치에서는 const 인자를 받는 가상 함수 다음에 트리를 실행합니다. App 루트 오버라이드를 포함한 노드의 명시적 소비는 이후 리스너를 막습니다. 이벤트가 활성화된 App 루트도 기본적으로 배경 누름/놓음/드래그를 소비하지 않습니다. 노드 핸들러에서 true를 반환하거나 노드 이벤트에서 명시적으로 소비하세요. 기본 루트는 배경에서 grab하지 않습니다.
-- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit 전환은 별도입니다. App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
+- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit는 App 가상 함수만 호출합니다(runHeadlessApp 참조). App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
 - 정수 값은 `200`입니다. 리스너 순서와 `consumed`는 `EventPriority::BeforeApp`을, App 콜백 및 노드와의 순서는 `App::mousePressed`를 참조하세요.
 '''
 
@@ -7815,7 +7815,7 @@ description.ko = "먼저 호출할 리스너의 우선순위를 나타낸다."
 details.en = '''
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
-- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless update/exit migration is separate. App input virtuals keep const arguments and cannot consume.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - On App-facing events, the default changes from `100` to `0`. An omitted priority now ties with explicit `0` in registration order: default `a` registered before explicit-0 `b` runs `ab` (previously `ba`). Defaults now precede explicit `1–99` (previously followed them) and explicit `100` (previously tied and interleaved by registration). A consuming default listener therefore pre-empts even an explicit-100 listener registered earlier.
 - The predefined integer priorities are `BeforeApp = 0`, `App = 100`, and `AfterApp = 200`. On events the App receives, listen() defaults to BeforeApp; other events keep 100. Explicit priorities accept every integer.
 - Listeners run from smaller priority values to larger ones. Listeners with the same value run in registration order.
@@ -7825,7 +7825,7 @@ details.en = '''
 details.ja = '''
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
 - **v0.8: 消費済み入力は App の仮想関数にも届かなくなります。** メインウィンドウ・ホスト・MCP では、先行リスナーが `consumed` を設定すると、App、ツリー、後続リスナーは呼ばれません。App の枠では 引数が const の仮想関数、ツリーの順に呼びます。App ルートのオーバーライドを含むノードの明示的な消費は後続リスナーを止めます。イベントを有効にした App ルートも、背景の押下・解放・ドラッグを既定では消費しません。ノードハンドラーで true を返すか、ノードイベントで明示的に消費してください。既定のルートは背景で grab しません。
-- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit 移行は別です。App の入力仮想関数の引数は const のままで消費できません。
+- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit は App 仮想関数だけを呼びます（runHeadlessApp 参照）。App の入力仮想関数の引数は const のままで消費できません。
 - App 向けイベントの既定値は `100` から `0` に変わります。省略時は明示的な `0` と同順位になり、登録順に呼ばれます。既定の `a` を明示的な 0 の `b` より先に登録すると `ab` です（従来は `ba`）。既定のリスナーは明示的な `1–99`（従来はその後）と `100`（従来は同順位で登録順に混在）より先に呼ばれます。このため、既定のリスナーがイベントを消費すると、先に登録された明示的な 100 のリスナーにも届きません。
 - 定義済みの整数の優先度は `BeforeApp = 0`、`App = 100`、`AfterApp = 200` です。App が受け取るイベントでは listen() の既定値は BeforeApp、それ以外のイベントでは 100 です。 明示する優先度には任意の整数値を指定できます。
 - 数値が小さいリスナーから順に呼ばれます。同じ値のリスナーは登録した順に呼ばれます。
@@ -7835,7 +7835,7 @@ details.ja = '''
 details.ko = '''
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
 - **v0.8: 소비된 입력은 App 가상 함수에도 전달되지 않습니다.** 메인 윈도우/호스트/MCP에서는 앞선 리스너가 `consumed`를 설정하면 App, 트리, 이후 리스너를 건너뜁니다. App 위치에서는 const 인자를 받는 가상 함수 다음에 트리를 실행합니다. App 루트 오버라이드를 포함한 노드의 명시적 소비는 이후 리스너를 막습니다. 이벤트가 활성화된 App 루트도 기본적으로 배경 누름/놓음/드래그를 소비하지 않습니다. 노드 핸들러에서 true를 반환하거나 노드 이벤트에서 명시적으로 소비하세요. 기본 루트는 배경에서 grab하지 않습니다.
-- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit 전환은 별도입니다. App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
+- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit는 App 가상 함수만 호출합니다(runHeadlessApp 참조). App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
 - App 대상 이벤트의 기본값은 `100`에서 `0`으로 바뀝니다. 우선순위를 생략하면 명시적 `0`과 같은 우선순위로 등록 순서에 따라 실행됩니다. 기본값 `a`를 명시적 0인 `b`보다 먼저 등록하면 `ab`입니다(이전에는 `ba`). 기본 리스너는 명시적 `1–99`(이전에는 그 뒤) 및 `100`(이전에는 같은 우선순위로 등록 순서에 따라 섞임)보다 먼저 실행됩니다. 따라서 기본 리스너가 이벤트를 소비하면 먼저 등록된 명시적 100 리스너도 실행되지 않습니다.
 - 미리 정의된 정수 우선순위는 `BeforeApp = 0`, `App = 100`, `AfterApp = 200`입니다. App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트는 100을 유지합니다. 명시적 우선순위에는 모든 정수를 사용할 수 있습니다.
 - 값이 작은 리스너부터 순서대로 호출합니다. 값이 같으면 등록한 순서대로 호출합니다.
@@ -34002,21 +34002,21 @@ details.en = '''
 - Subsequent `events().update` notifications advance time using `getDeltaTime()` before the app's update callback in the normal windowed loop. Read the animated result with `getValue()`; no manual tween update call is needed.
 - Automatic updates run on the main thread in the normal app loop. Tween state has no synchronization, so access the tween on that thread while automatic playback is active.
 - Keep the tween alive for the desired playback duration, for example as a member. Destruction disconnects automatic updates; moving a tween transfers its state and completion event and reconnects updates if it is playing. Copying is disabled.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (`runHeadlessApp` does not emit update events, so automatic tween playback does not advance).
+- Automatic playback also advances in `runHeadlessApp`, through `events().update` before App::update().
 '''
 details.ja = '''
 - 経過時間 `0` から再生を初期化し、設定済みの待ち時間と繰り返し回数を読み直し、完了状態とループ回数を解除して順方向に戻します。チェインできるように同じトゥイーンを返します。
 - 通常のウィンドウ付きアプリでは、以後の `events().update` 通知により、アプリの更新コールバックより前に `getDeltaTime()` を使って時間を進めます。結果は `getValue()` で取得し、トゥイーンを手動更新する必要はありません。
 - 通常のアプリループではメインスレッドで自動更新します。トゥイーンの状態には同期処理がないため、自動再生中は同じスレッドでアクセスしてください。
 - メンバーにするなどして、再生したい期間中はトゥイーンを保持してください。破棄すると自動更新を解除します。ムーブすると状態と完了イベントを引き継ぎ、再生中なら自動更新を登録し直します。コピーはできません。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（`runHeadlessApp` は更新イベントを通知しないため、トゥイーンの自動再生は進みません）。
+- `runHeadlessApp` でも、App::update() より前の `events().update` によって自動再生が進みます。
 '''
 details.ko = '''
 - 경과 시간 `0`부터 재생을 초기화하고, 설정된 대기 시간과 반복 횟수를 다시 불러오며, 완료 상태와 루프 횟수를 초기화하고 정방향으로 복원합니다. 체이닝할 수 있도록 같은 트윈을 반환합니다.
 - 일반적인 창이 있는 앱에서는 이후의 `events().update` 알림이 앱의 갱신 콜백 전에 `getDeltaTime()`으로 시간을 진행합니다. 결과는 `getValue()`로 읽으며 트윈을 수동으로 갱신할 필요는 없습니다.
 - 일반 앱 루프의 자동 갱신은 메인 스레드에서 실행합니다. 트윈 상태에는 동기화 처리가 없으므로 자동 재생 중에는 같은 스레드에서 접근합니다.
 - 멤버로 보관하는 등의 방법으로 원하는 재생 기간 동안 트윈을 유지합니다. 소멸하면 자동 갱신을 해제합니다. 이동하면 상태와 완료 이벤트를 이전하고, 재생 중이면 자동 갱신을 다시 등록합니다. 복사는 지원하지 않습니다.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(`runHeadlessApp`은 갱신 이벤트를 알리지 않으므로 트윈의 자동 재생이 진행되지 않습니다).
+- `runHeadlessApp`에서도 App::update()보다 먼저 실행되는 `events().update`를 통해 자동 재생이 진행됩니다.
 '''
 related = ["Tween<T>", "Tween::getValue", "Tween::resume", "Tween::reset"]
 snippet = '''
@@ -47149,17 +47149,17 @@ description.ko = "현재 윈도우의 업데이트 횟수를 반환한다."
 details.en = '''
 - Returns a `uint64_t` counter that starts at zero and advances before each framework update; multiple update steps between draws each advance it.
 - It returns the same value as `getFrameCount()`. Secondary windows have independent counters; outside a window-specific context, it uses the main window.
-- The `runHeadlessApp` loop does not advance this counter, even though it calls `App::update()`.
+- The `runHeadlessApp` loop also advances this counter before each `events().update` notification, so per-update services such as Box2d can distinguish successive steps.
 '''
 details.ja = '''
 - ゼロから始まり、フレームワークの各更新の前に増える `uint64_t` のカウンターを返します。描画の間に複数回更新する場合も、更新ごとに増えます。
 - `getFrameCount()` と同じ値を返します。サブウィンドウは独立したカウンターを持ち、特定のウィンドウの処理中でなければメインウィンドウを使います。
-- `runHeadlessApp` のループは `App::update()` を呼びますが、このカウンターは増やしません。
+- `runHeadlessApp` でも各 `events().update` 通知の前に増えます。Box2d など、更新ごとに処理するサービスが連続するステップを区別できます。
 '''
 details.ko = '''
 - 0에서 시작하여 프레임워크의 각 업데이트 전에 증가하는 `uint64_t` 카운터를 반환합니다. 그리기 사이에 여러 번 업데이트하면 각 업데이트마다 증가합니다.
 - `getFrameCount()`와 같은 값을 반환합니다. 보조 윈도우는 독립된 카운터를 가지며, 특정 윈도우의 처리 중이 아니면 메인 윈도우를 사용합니다.
-- `runHeadlessApp` 루프는 `App::update()`를 호출하지만 이 카운터를 증가시키지 않습니다.
+- `runHeadlessApp`도 각 `events().update` 알림 전에 이 카운터를 증가시킵니다. Box2d처럼 업데이트마다 처리하는 서비스가 연속된 스텝을 구별할 수 있습니다.
 '''
 
 ["getVersion"]
@@ -50098,29 +50098,32 @@ description.ja = "ウィンドウやグラフィックスコンテキストな�
 description.ko = "윈도우나 그래픽스 컨텍스트 없이 앱을 실행한다."
 details.en = '''
 - Pass the app class as the template argument, as in `runHeadlessApp<tcApp>()`. Optional `HeadlessSettings` sets the target update rate, which defaults to 60 updates per second; the function returns the process exit code.
-- Constructs the app as the scene root and calls `setup()` once. The loop calls only the app's `update()`; it does not call `draw()` or traverse child nodes, mods, and node timers for updates.
+- Constructs the app as the scene root, registers its `update()` and `exit()` at `EventPriority::App` (100), then calls `setup()` once. Each fixed step notifies `events().update`: BeforeApp → App::update() → AfterApp. Equal priorities use registration order; explicit 100 listeners registered before the runner precede the App, and those registered in setup follow it. The App registration survives `clear()`. There is no draw or traversal of child nodes, mods, or node timers.
 - Updates use a fixed step, so `getDeltaTime()` is `1 / settings.targetFps`. Each loop pass runs at most `setMaxUpdateSteps()` steps, with a default limit of 10; a nonpositive limit removes the cap.
 - Excess whole steps after a stall or slow update are discarded with a one-time warning. Between passes, the loop sleeps until the next step is due, requesting at most 1 ms of sleep.
 - The runner's thread is used as the main thread, and queued `runOnMainThread` callbacks are processed between update passes.
-- On exit, calls `exit()`, detaches the app's audio callbacks and waits for any running callback, then calls `cleanup()`. The audio device itself remains running.
+- On exit, notifies `events().exit` once: BeforeApp → App::exit() → AfterApp shutdown hooks. Mandatory framework teardown survives `events().exit.clear()` in App::exit(). Then it detaches the app's audio callbacks, waits for running callbacks, and calls `cleanup()`. The audio device remains running.
+- Update-event services now work headless: Tween, update-mode TcpClient/UdpSocket receive, tcxBox2d auto stepping, and WebSocket timeouts.
 - Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (headless updates call only the app's `update()`, leaving child, mod, and timer updates unprocessed).
 '''
 details.ja = '''
 - `runHeadlessApp<tcApp>()` のように、アプリのクラスをテンプレート引数に指定します。省略可能な `HeadlessSettings` で目標更新レートを指定でき、既定値は毎秒 60 回です。プロセスの終了コードを返します。
-- アプリをシーンのルートとして生成し、`setup()` を 1 回呼び出します。ループではアプリ自身の `update()` だけを呼び出し、`draw()` や、子ノード・Mod・ノードのタイマーを巡回する更新処理は実行しません。
+- アプリをシーンのルートとして生成し、`update()` と `exit()` を `EventPriority::App`（100）に登録してから `setup()` を 1 回呼びます。固定ステップごとに `events().update` を通知し、BeforeApp → App::update() → AfterApp の順に実行します。同順位は登録順で、実行開始前の明示的な 100 のリスナーは App より前、setup 内で登録したものは後です。App 登録は `clear()` 後も残ります。draw や、子ノード・Mod・ノードのタイマーを巡回する更新はありません。
 - 更新は固定ステップで、`getDeltaTime()` は `1 / settings.targetFps` です。ループ 1 周の更新回数は `setMaxUpdateSteps()` の設定が上限で、既定値は 10 回です。0 以下を指定すると上限をなくします。
 - 停止や遅い更新処理によって上限を超えた分は、整数ステップ単位で捨て、一度だけ警告します。ループの周回間では次のステップが必要になるまで待機し、スリープに指定する時間は最大 1 ms です。
 - 実行するスレッドをメインスレッドとして扱い、更新処理の周回間にキュー内の `runOnMainThread` コールバックを処理します。
-- 終了時は `exit()` を呼び出し、アプリの音声コールバックを解除して実行中のコールバックが終わるまで待ってから、`cleanup()` を呼び出します。音声デバイス自体は動作を続けます。
+- 終了時は `events().exit` を一度通知し、BeforeApp → App::exit() → AfterApp の終了フックの順に実行します。App::exit() 内で `events().exit.clear()` を呼んでも必須の終了処理は残ります。その後、音声コールバックを解除し、実行中のコールバックを待ってから `cleanup()` を呼びます。音声デバイス自体は動作を続けます。
+- Tween、更新モードの TcpClient/UdpSocket 受信、tcxBox2d の自動ステップ、WebSocket のタイムアウトなど、update イベントに依存する処理がヘッドレスでも動作します。
 - 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（ヘッドレス実行ではアプリ自身の `update()` だけを呼び出し、子ノード・Mod・タイマーを更新しません）。
 '''
 details.ko = '''
 - `runHeadlessApp<tcApp>()`처럼 앱 클래스를 템플릿 인자로 지정합니다. 선택적인 `HeadlessSettings`로 목표 갱신 속도를 지정하며 기본값은 초당 60회입니다. 프로세스 종료 코드를 반환합니다.
-- 앱을 씬 루트로 생성하고 `setup()`을 한 번 호출합니다. 루프는 앱 자체의 `update()`만 호출하며 `draw()`나 자식 노드·Mod·노드 타이머를 순회하는 갱신 처리는 실행하지 않습니다.
+- 앱을 씬 루트로 생성하고 `update()`와 `exit()`을 `EventPriority::App`(100)에 등록한 뒤 `setup()`을 한 번 호출합니다. 고정 스텝마다 `events().update`를 알리며 BeforeApp → App::update() → AfterApp 순서로 실행합니다. 같은 우선순위는 등록 순서이므로 실행 전에 등록한 명시적 100 리스너는 App보다 먼저, setup에서 등록한 것은 나중에 실행합니다. App 등록은 `clear()` 후에도 남습니다. draw나 자식 노드·Mod·노드 타이머를 순회하는 갱신은 없습니다.
 - 갱신은 고정 스텝을 사용하므로 `getDeltaTime()`은 `1 / settings.targetFps`입니다. 루프 한 회의 갱신 횟수는 `setMaxUpdateSteps()` 설정이 상한이며 기본값은 10회입니다. 0 이하이면 상한을 없앱니다.
 - 정지나 느린 갱신으로 상한을 초과한 시간은 정수 스텝 단위로 버리고 경고를 한 번 출력합니다. 루프 회차 사이에는 다음 스텝이 필요할 때까지 기다리며 슬립에 지정하는 시간은 최대 1ms입니다.
 - 실행하는 스레드를 메인 스레드로 취급하며 갱신 루프 회차 사이에 큐의 `runOnMainThread` 콜백을 처리합니다.
-- 종료 시 `exit()`을 호출하고 앱의 오디오 콜백을 해제한 뒤 실행 중인 콜백이 끝날 때까지 기다린 다음 `cleanup()`을 호출합니다. 오디오 장치 자체는 계속 실행됩니다.
+- 종료 시 `events().exit`를 한 번 알리며 BeforeApp → App::exit() → AfterApp 종료 훅 순서로 실행합니다. App::exit()에서 `events().exit.clear()`를 호출해도 필수 종료 처리는 남습니다. 이후 오디오 콜백을 해제하고 실행 중인 콜백을 기다린 다음 `cleanup()`을 호출합니다. 오디오 장치는 계속 실행됩니다.
+- Tween, 업데이트 모드 TcpClient/UdpSocket 수신, tcxBox2d 자동 스텝, WebSocket 타임아웃 등 update 이벤트에 의존하는 처리가 헤드리스에서도 동작합니다.
 - 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(헤드리스 실행은 앱 자체의 `update()`만 호출하며 자식 노드·Mod·타이머를 갱신하지 않습니다).
 '''
 related = ["HeadlessSettings", "runApp", "setMaxUpdateSteps"]
@@ -55546,19 +55549,19 @@ details.en = '''
 - In polling mode, selected with `setUseThread(false)` before starting reception, the update event calls this function automatically. It can also be called manually for synchronous polling; it does nothing when automatic receiving is stopped.
 - For each nonempty datagram, fires `onReceive` with its bytes, source IPv4 address, and source port. See `UdpSocket` for listener threading and lifetime.
 - Continues receiving until no data is available, the receive call is interrupted, an empty datagram is received, an error occurs, or receiving is stopped. An empty datagram does not fire `onReceive`; other receive errors fire `onError` without disabling receiving.
-- There is no datagram limit per call, so continuous incoming traffic can delay the return.
+- Receives at most 256 datagrams per call. Remaining datagrams stay queued for a later call or update; reaching this limit does not drop them or count them as loss. Listener work can still delay the call.
 '''
 details.ja = '''
 - 受信開始前に `setUseThread(false)` を指定したポーリングモードでは、update イベントから自動的に呼ばれます。同期ポーリングのために手動でも呼び出せます。自動受信が停止中の場合は何もしません。
 - 空でないデータグラムごとに、受信バイト列、送信元の IPv4 アドレス、送信元ポートを渡して `onReceive` を呼び出します。リスナーのスレッドと寿命については `UdpSocket` を参照してください。
 - 受信可能なデータがなくなるか、受信呼び出しが割り込まれるか、空のデータグラムを受信するか、エラーが発生するか、受信が停止されるまで受信を続けます。空のデータグラムでは `onReceive` を呼び出しません。それ以外の受信エラーでは、受信を無効にせず `onError` を呼び出します。
-- 1 回の呼び出しで処理するデータグラム数に上限がないため、データが到着し続けると戻るまでに時間がかかる場合があります。
+- 1 回の呼び出しで受信するデータグラムは最大 256 個です。残りは次回の呼び出しや update までキューに残り、この上限に達しても破棄や損失としての計数は行いません。リスナーの処理によって呼び出しが長引く場合はあります。
 '''
 details.ko = '''
 - 수신을 시작하기 전에 `setUseThread(false)`로 선택한 폴링 모드에서는 update 이벤트가 자동으로 호출합니다. 동기 폴링을 위해 직접 호출할 수도 있으며, 자동 수신이 중지된 상태에서는 아무 작업도 하지 않습니다.
 - 비어 있지 않은 데이터그램마다 수신 바이트, 송신자의 IPv4 주소, 송신자 포트를 전달하여 `onReceive`를 호출합니다. 리스너의 스레드와 수명은 `UdpSocket`을 참조하세요.
 - 수신 가능한 데이터가 없거나, 수신 호출이 인터럽트되거나, 빈 데이터그램을 받거나, 오류가 발생하거나, 수신이 중지될 때까지 계속 수신합니다. 빈 데이터그램은 `onReceive`를 호출하지 않습니다. 그 외의 수신 오류는 수신을 비활성화하지 않고 `onError`를 호출합니다.
-- 호출당 처리하는 데이터그램 수에 제한이 없으므로, 데이터가 계속 도착하면 반환이 지연될 수 있습니다.
+- 호출당 최대 256개의 데이터그램을 수신합니다. 나머지는 다음 호출이나 update까지 큐에 남으며, 이 제한에 도달해도 버리거나 손실로 집계하지 않습니다. 리스너의 처리로 호출이 지연될 수는 있습니다.
 '''
 
 ["TcpClient::processNetwork"]
@@ -56056,19 +56059,19 @@ description.ko = "우선순위 100을 나타낸다. 메인/호스트 App의 위�
 details.en = '''
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
-- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless update/exit migration is separate. App input virtuals keep const arguments and cannot consume.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - Its integer value is `100`, the default for generic and audio events; see `EventPriority::BeforeApp` for priority values, listener order, and `consumed`.
 '''
 details.ja = '''
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
 - **v0.8: 消費済み入力は App の仮想関数にも届かなくなります。** メインウィンドウ・ホスト・MCP では、先行リスナーが `consumed` を設定すると、App、ツリー、後続リスナーは呼ばれません。App の枠では 引数が const の仮想関数、ツリーの順に呼びます。App ルートのオーバーライドを含むノードの明示的な消費は後続リスナーを止めます。イベントを有効にした App ルートも、背景の押下・解放・ドラッグを既定では消費しません。ノードハンドラーで true を返すか、ノードイベントで明示的に消費してください。既定のルートは背景で grab しません。
-- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit 移行は別です。App の入力仮想関数の引数は const のままで消費できません。
+- 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit は App 仮想関数だけを呼びます（runHeadlessApp 参照）。App の入力仮想関数の引数は const のままで消費できません。
 - 整数値は `100` で、汎用イベントと音声イベントの既定値です。優先度の値、呼ばれる順番、`consumed` については `EventPriority::BeforeApp` を参照してください。
 '''
 details.ko = '''
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
 - **v0.8: 소비된 입력은 App 가상 함수에도 전달되지 않습니다.** 메인 윈도우/호스트/MCP에서는 앞선 리스너가 `consumed`를 설정하면 App, 트리, 이후 리스너를 건너뜁니다. App 위치에서는 const 인자를 받는 가상 함수 다음에 트리를 실행합니다. App 루트 오버라이드를 포함한 노드의 명시적 소비는 이후 리스너를 막습니다. 이벤트가 활성화된 App 루트도 기본적으로 배경 누름/놓음/드래그를 소비하지 않습니다. 노드 핸들러에서 true를 반환하거나 노드 이벤트에서 명시적으로 소비하세요. 기본 루트는 배경에서 grab하지 않습니다.
-- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit 전환은 별도입니다. App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
+- 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit는 App 가상 함수만 호출합니다(runHeadlessApp 참조). App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
 - 정수 값은 `100`이며 일반 이벤트와 오디오 이벤트의 기본값입니다. 우선순위 값, 호출 순서, `consumed`는 `EventPriority::BeforeApp`을 참조하세요.
 '''
 
