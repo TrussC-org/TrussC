@@ -108,7 +108,9 @@ public:
         // Auto-teardown at the framework's exit event, while sokol_gfx and the
         // event system are still alive. Apps don't need to call imguiShutdown()
         // themselves (calling it stays harmless — shutdown() is idempotent).
-        exitListener_ = tc::events().exit.listen([this]() { shutdown(); }, tc::EventPriority::App);
+        // Mandatory teardown survives clear() from App::exit().
+        exitListener_ = tc::internal::FrameworkEventAccess::listen(tc::events().exit,
+            [this]() { shutdown(); }, tc::EventPriority::AfterApp);
 
         tc::logVerbose() << "ImGui initialized";
     }
@@ -169,7 +171,8 @@ public:
             if (!offscreenFrameCompleted_) detail::settleWithoutImGuiFrame(imguiCtx_);
             offscreenFrameCompleted_ = false;
         }, 1000);
-        exitListener_ = tc::events().exit.listen([this]() { shutdown(); }, tc::EventPriority::App);
+        exitListener_ = tc::internal::FrameworkEventAccess::listen(tc::events().exit,
+            [this]() { shutdown(); }, tc::EventPriority::AfterApp);
     }
 
     // Returns false on a refused attempt. Pair every begin with end, and only

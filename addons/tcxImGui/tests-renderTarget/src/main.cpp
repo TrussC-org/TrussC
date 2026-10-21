@@ -366,30 +366,98 @@ void inputPriorityChecks() {
 
 class Fixture : public App {
     int frame_=0;
-    EventListener render_,after_,log_;
+    int exitCalls_=0, imguiShutdowns_=0, recorderFinalizations_=0, userExitCalls_=0;
+    bool appExitFinished_=false;
+    EventListener render_,after_,log_,userExit_;
     Clock::time_point started_=Clock::now();
     std::shared_ptr<Window> secondary_;
 #ifndef TC_IMGUI_BASE_FIXTURE
     ImGuiManager recovery_;
     Fbo recoveryFbo_;
+#ifndef __EMSCRIPTEN__
+    Fbo recordingFbo_;
+    fs::path recordingFile_;
+#endif
     simgui_tc_context pendingAcrossCommit_ = {};
     ImGuiContext* pendingImGui_ = nullptr;
     bool pendingReadback_=false, pendingChecked_=false;
     float pendingDpi_ = 1; // DPI the pending frame was built at (frame 0, before screenUi())
 #endif
 public:
+    void exit() override {
+        ++exitCalls_;
+        auto* manager = ImGuiManager::findForCurrentWindow();
+        check("ImGui remains initialized inside App::exit", manager && manager->isInitialized());
+#ifndef TC_IMGUI_BASE_FIXTURE
+        if (!screenOnly) check("offscreen ImGui remains initialized inside App::exit", recovery_.isInitialized());
+        // Keep the actual inspector hook live, with observable teardown state.
+        tcx::NodeInspector::attach();
+        check("NodeInspector remains attached inside App::exit", tcx::NodeInspector::isAttached());
+#ifndef __EMSCRIPTEN__
+        if (!screenOnly) check("recorder remains live inside App::exit", isRecording() && recordingFrameCount()>0);
+#endif
+#endif
+        const auto subscriptionsBeforeClear=events().exit.listenerCount();
+        events().exit.clear();
+        check("App exit clear removes ordinary subscriptions", events().exit.listenerCount()+1==subscriptionsBeforeClear);
+#ifndef TC_IMGUI_BASE_FIXTURE
+        size_t mandatoryHooks=screenOnly?2:3; // window/offscreen ImGui + inspector
+#ifndef __EMSCRIPTEN__
+        if (!screenOnly) ++mandatoryHooks; // recorder
+#endif
+        check("clear preserves each mandatory teardown subscription", events().exit.listenerCount()==mandatoryHooks+1);
+#endif
+        appExitFinished_=true;
+    }
+    void cleanup() override {
+        check("App exit ran exactly once", exitCalls_==1);
+        check("cleared ordinary exit hook did not run", userExitCalls_==0);
+        auto* manager = ImGuiManager::findForCurrentWindow();
+        check("ImGui shuts down before App::cleanup", !manager || !manager->isInitialized());
+#ifndef TC_IMGUI_BASE_FIXTURE
+        check("offscreen ImGui shuts down before App::cleanup", !recovery_.isInitialized());
+        check("each ImGui teardown ran once after App exit clear", imguiShutdowns_==(screenOnly?1:2));
+        check("NodeInspector teardown ran after App exit clear", !tcx::NodeInspector::isAttached());
+        // The App binding is the only remaining exit subscription: the
+        // mandatory hooks disconnected themselves during this notification.
+        check("each surviving teardown hook disconnected itself", events().exit.listenerCount()==1);
+#ifndef __EMSCRIPTEN__
+        if (!screenOnly) {
+            check("recorder finalized once after App exit clear", !isRecording() && recorderFinalizations_==1);
+            check("finalized recording is nonempty", fs::exists(recordingFile_) && fs::file_size(recordingFile_)>0);
+            if (!isRecording()) {
+                VideoPlayer player;
+                check("finalized recording loads", bool(player.load(recordingFile_)));
+            }
+            // Only after the verdict: avoid leaving a live encoder on failure.
+            stopRecording();
+            std::error_code ignored;
+            fs::remove(recordingFile_,ignored);
+        }
+#endif
+#endif
+    }
     void setup() override {
 #ifndef TC_IMGUI_BASE_FIXTURE
         inputPriorityChecks();
 #endif
         sg_enable_stats();
-        log_=getLogger().onLog.listen([](LogEventArgs& args){
+        log_=getLogger().onLog.listen([this](LogEventArgs& args){
+            if(args.message=="ImGui shutdown" && exitCalls_ && internal::currentWindowContext().isMain) {
+                ++imguiShutdowns_;
+                check("ImGui teardown follows App::exit", appExitFinished_);
+            }
+            if(args.message.starts_with("[VideoWriter] saved ") && exitCalls_) {
+                ++recorderFinalizations_;
+                check("recorder finalization follows App::exit", appExitFinished_);
+            }
             if(args.level==LogLevel::Error) {
                 ++errors;
                 if(args.message.find("[sg]")!=std::string::npos) ++validationErrors;
             }
         });
         imguiSetup(); fixedContext();
+        userExit_=events().exit.listen([this] { ++userExitCalls_; }, EventPriority::AfterApp);
         manifest["requestedScreenSamples"]=screenSamples;
         manifest["screenSamples"]=internal::currentWindowContext().swapchainTarget.sampleCount;
         manifest["version"]=getVersion();
@@ -491,6 +559,13 @@ public:
         if(frame_==0 && !screenOnly) {
             recovery_.setupOffscreen(); fixedContext(); recoveryFbo_.allocate(32,32);
             recoveryFbo_.begin(0,0,0,0); {auto ui=recovery_.scoped(); if(ui) marker(IM_COL32(255,0,0,255));} recoveryFbo_.end();
+#ifndef __EMSCRIPTEN__
+            recordingFbo_.allocate(32,32);
+            recordingFbo_.begin(1,0,0,1); recordingFbo_.end();
+            recordingFile_=fs::temp_directory_path()/("tc-imgui-exit-clear-"+
+                std::to_string(Clock::now().time_since_epoch().count())+".mp4");
+            check("live recorder starts for exit-clear regression", bool(startRecording(recordingFbo_,recordingFile_)));
+#endif
         }
 #endif
 #ifndef TC_IMGUI_BASE_FIXTURE

@@ -1000,7 +1000,9 @@ void NodeInspector::ensureToggleKeyListener() {
 // and taking input (#416).
 void NodeInspector::ensureExitGuard() {
     if (exitListener_) return;
-    exitListener_ = events().exit.listen([this] { releaseListeners(); }, EventPriority::App);
+    // App::exit() may clear application subscriptions before our teardown runs.
+    exitListener_ = tc::internal::FrameworkEventAccess::listen(events().exit,
+        [this] { releaseListeners(); }, EventPriority::AfterApp);
     hotReloadUnloadListener_ = events().hotReloadUnload.listen([this] { releaseListeners(); }, EventPriority::App);
 }
 

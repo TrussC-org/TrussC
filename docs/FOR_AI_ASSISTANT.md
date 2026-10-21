@@ -1150,6 +1150,9 @@ The floor target is the **Raspberry Pi Zero** (defaults like small draw buffers 
 
 App itself is the scene-graph root Node. The basic loop is `setup()` (once) → `update()` → `draw()` each frame. Nodes form a parent/child transform hierarchy; input is dispatched depth-first and stops propagating once `consumed` (children receive events in their parent's local coordinates). Drawing is sokol_gl-based — a procedural, "immediate-mode-style" API (`setColor()` → `drawRect()`), but internally deferred (vertices accumulate into buffers and are submitted later, so nothing is drawn the instant you call it). Each Node's `draw()` starts from a clean default style (white, fill, no stroke — parent style does not cascade, favoring predictability). Behavior can be added by subclassing or by attaching `Mod`s (`addMod<T>()`). The tree and GPU resources (Texture / Fbo) are main-thread-owned; hand work from other threads via `runOnMainThread()`.
 
+On the main window (also Android/iOS/Web), the hot-reload host and MCP input, App-facing events use one notify: BeforeApp (default 0) → App (100, virtual then tree where applicable) → AfterApp (200). **Consumed input skips App virtuals as well as the tree and later listeners.** The framework App binding survives clear(); explicit 100 follows registration order. Touch defaults run before App touch callbacks, and the host forwards touch to the current guest. An enabled App root no longer consumes background mouse input by default. EasyCam starts gestures after the tree, tracks moves/releases before it, and checks scroll's own position. Headless and secondary-window activation remain separate work under #947. Startup/reload resize seeds and guest-swap exit remain direct App-only calls.
+
+
 ### Subclass a Node, or attach a Mod?
 
 TrussC's app structure is openFrameworks-like on the surface but **Unity-like** in intent — Node subclasses (≈ GameObjects, owning their own state/draw/input) with Mods (≈ Components, cross-cutting behavior) attached. The rule:
@@ -2600,6 +2603,9 @@ void App::mouseMoved(const MouseMoveEventArgs & e) [+1]  // Called when the poin
 void App::mousePressed(const MouseEventArgs & e) [+1]  // Called when a mouse button is pressed.
 void App::mouseReleased(const MouseEventArgs & e) [+1]  // Called when a mouse button is released, exactly once for each press.
 void App::mouseScrolled(const ScrollEventArgs & e) [+1]  // Called when the mouse wheel or trackpad scrolls.
+bool App::onMouseDrag(const MouseDragEventArgs & e)  // Handles App-root mouse input without default consumption.
+bool App::onMousePress(const MouseEventArgs & e)  // Handles App-root mouse input without default consumption.
+bool App::onMouseRelease(const MouseEventArgs & e)  // Handles App-root mouse input without default consumption.
 void App::requestExit()  // Stops a headless app (runHeadlessApp); a windowed app ignores it.
 void App::setSize(float w, float h)  // Changes the size of the window this App runs in.
 void App::touchMoved(const TouchEventArgs & touch)  // Called when fingers move on the screen.

@@ -3044,7 +3044,9 @@ SaveResult ScreenRecorder::State::startSource(Source src, const Fbo* fbo, int w,
     //   backends). Fbo-source recording is per-window everywhere (it reads the
     //   passed Fbo, not the swapchain).
     afterFrameListener_ = events().afterFrame.listen([state = shared_from_this()]() { state->onAfterFrame(); });
-    exitListener_ = events().exit.listen([state = shared_from_this()]() { state->stop(); }, EventPriority::App);
+    // App::exit() may clear application subscriptions during this notification.
+    exitListener_ = internal::FrameworkEventAccess::listen(events().exit,
+        [state = shared_from_this()]() { state->stop(); }, EventPriority::AfterApp);
     return SaveResult::success();
 }
 

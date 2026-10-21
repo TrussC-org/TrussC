@@ -649,67 +649,29 @@ inline int runHotReloadApp(const WindowSettings& settings) {
 
         internal::updateFrameCount++;
         events().update.notify();
-        App* app = g_host.getApp();
-        if (app) {
-            app->handleUpdate(internal::currentWindowContext().mouseX, internal::currentWindowContext().mouseY);
-        }
     };
 
     internal::appDrawFunc = []() {
         events().draw.notify();
-        App* app = g_host.getApp();
-        if (app) app->handleDraw();
     };
 
     internal::appCleanupFunc = []() {
-        App* app = g_host.getApp();
+        auto app = g_host.guest.app;
         if (app) {
             events().exit.notify();
-            app->exit();
             // close() requests made so far land before the App's cleanup().
             internal::closeRequestedWindowsAtShutdown();
             internal::detachAppAudio(*app);
             app->cleanup();
         }
         g_host.guest.unload();
+        internal::mainWindowContext().appEventListeners.clear();
     };
 
-    internal::appKeyPressedFunc = [](const KeyEventArgs& e) {
-        App* app = g_host.getApp();
-        if (app) app->handleKeyPressed(e);
-    };
-    internal::appKeyReleasedFunc = [](const KeyEventArgs& e) {
-        App* app = g_host.getApp();
-        if (app) app->handleKeyReleased(e);
-    };
-    internal::appMousePressedFunc = [](const MouseEventArgs& e) {
-        App* app = g_host.getApp();
-        if (app) app->handleMousePressed(e);
-    };
-    internal::appMouseReleasedFunc = [](const MouseEventArgs& e) {
-        App* app = g_host.getApp();
-        if (app) app->handleMouseReleased(e);
-    };
-    internal::appMouseMovedFunc = [](const internal::MouseEventRaw& e) {
-        App* app = g_host.getApp();
-        if (app) app->handleMouseMoved(e);
-    };
-    internal::appMouseDraggedFunc = [](const internal::MouseEventRaw& e) {
-        App* app = g_host.getApp();
-        if (app) app->handleMouseDragged(e);
-    };
-    internal::appMouseScrolledFunc = [](const ScrollEventArgs& e) {
-        App* app = g_host.getApp();
-        if (app) app->handleMouseScrolled(e);
-    };
     internal::appWindowResizedFunc = [](int w, int h) {
-        App* app = g_host.getApp();
-        if (app) app->handleWindowResized(w, h);
+        if (auto* app = g_host.getApp()) app->handleWindowResized(w, h);
     };
-    internal::appFilesDroppedFunc = [](const std::vector<std::string>& files) {
-        App* app = g_host.getApp();
-        if (app) app->filesDropped(files);
-    };
+    internal::registerAppEventListeners([] { return g_host.getApp(); });
 
     // Build the sokol descriptor (without template — we handle App* manually)
     internal::pixelPerfectMode() = settings.pixelPerfect;
