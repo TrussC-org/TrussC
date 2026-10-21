@@ -1,3 +1,4 @@
+#include "impl/tcImportError.h"
 // dear imgui, v1.92.9b
 // (main code and documentation)
 
@@ -1249,6 +1250,13 @@ IMPLEMENTING SUPPORT for ImGuiBackendFlags_RendererHasTextures:
 #define IMGUI_DEFINE_MATH_OPERATORS
 #endif
 
+// [TrussC] Local import diagnostics; no local-file size policy cap.
+#include "tc/utils/tcLog.h"
+#include <limits>
+#include <string_view>
+#include <charconv>
+#include <vector>
+#include <algorithm>
 #include "imgui.h"
 #ifndef IMGUI_DISABLE
 #include "imgui_internal.h"
@@ -2606,7 +2614,16 @@ void*   ImFileLoadToMemory(const char* filename, const char* mode, size_t* out_f
     if ((f = ImFileOpen(filename, mode)) == NULL)
         return NULL;
 
-    size_t file_size = (size_t)ImFileGetSize(f);
+    const ImU64 encoded_size = ImFileGetSize(f);
+    // Bound (abi): file sizes and padding must fit size_t before narrowing or addition. Overflow rejects the whole import and is counted.
+    if (padding_bytes < 0 || encoded_size == (ImU64)-1 ||
+        encoded_size > std::numeric_limits<size_t>::max() - (size_t)padding_bytes)
+    {
+        trussc::internal::reportImportError("ImGui", "file import size is not representable");
+        ImFileClose(f);
+        return NULL;
+    }
+    const size_t file_size = (size_t)encoded_size;
     if (file_size == (size_t)-1)
     {
         ImFileClose(f);
@@ -15771,6 +15788,91 @@ void ImGui::LoadIniSettingsFromDisk(const char* ini_filename)
 
 // Zero-tolerance, no error reporting, cheap .ini parsing
 // Set ini_size==0 to let us use strlen(ini_data). Do not call this function with a 0 if your buffer is actually empty!
+// [TrussC] Prepare builtin decoded settings storage before any read handler mutates it.
+static bool TcPreflightIniStorage(ImGuiContext& g, const char* data, size_t bytes,
+                                 size_t& windowBytes, size_t& tableBytes)
+{
+    try {
+    // Mirror ReadOpen/Create: repeated IDs reuse storage; a larger table
+    // invalidates its old chunk but retains that chunk in the stream.
+    std::vector<ImGuiID> windows;
+    std::vector<std::pair<ImGuiID, int>> tables;
+    for (auto* w = g.SettingsWindows.begin(); w; w = g.SettingsWindows.next_chunk(w))
+        if (!w->WantDelete) windows.push_back(w->ID);
+    for (auto* t = g.SettingsTables.begin(); t; t = g.SettingsTables.next_chunk(t))
+        tables.emplace_back(t->ID, t->ColumnsCountMax);
+    windowBytes = (size_t)g.SettingsWindows.Buf.Size;
+    tableBytes = (size_t)g.SettingsTables.Buf.Size;
+    const auto addChunk = [](size_t& total, size_t payload) {
+        const size_t chunk = (payload + 4 + 3) & ~size_t(3);
+        // Bound (abi): decoded chunks and their int-indexed buffers must fit before resize. Overflow rejects the whole ini import and is counted.
+        if (total > size_t(INT_MAX) || chunk > size_t(INT_MAX) - total) return false;
+        total += chunk;
+        return true;
+    };
+    const std::string_view input(data, bytes);
+    for (size_t at = 0; at < bytes; ) {
+        size_t end = input.find_first_of("\r\n", at);
+        if (end == std::string_view::npos) end = bytes;
+        const auto line = input.substr(at, end - at);
+        at = end < bytes ? end + 1 : bytes;
+        if (line.size() < 3 || line.front() != '[' || line.back() != ']') continue;
+        const size_t typeEnd = line.find(']');
+        const size_t nameStart = line.find('[', typeEnd + 1);
+        if (nameStart == std::string_view::npos || nameStart + 1 >= line.size()) continue;
+        const auto type = line.substr(1, typeEnd - 1);
+        auto name = line.substr(nameStart + 1, line.size() - nameStart - 2);
+        if (type == "Window") {
+            const ImGuiID id = name.empty() ? ImHashStr("") : ImHashStr(name.data(), name.size());
+            if (std::find(windows.begin(), windows.end(), id) != windows.end()) continue;
+            windows.push_back(id);
+            if (!g.IO.ConfigDebugIniSettings) {
+                const size_t marker = name.rfind("###");
+                if (marker != std::string_view::npos) name.remove_prefix(marker + 3);
+            }
+            if (!addChunk(windowBytes, sizeof(ImGuiWindowSettings) + name.size() + 1)) return false;
+        } else if (type == "Table") {
+            const size_t comma = name.find(',');
+            if (comma == std::string_view::npos || comma < 3 || comma > 10 || name.substr(0, 2) != "0x") return false;
+            ImU32 tableId = 0;
+            const auto id = std::from_chars(name.data() + 2, name.data() + comma, tableId, 16);
+            if (id.ec != std::errc() || id.ptr != name.data() + comma) return false;
+            name.remove_prefix(comma + 1);
+            while (!name.empty() && (name.front() == ' ' || name.front() == '\t')) name.remove_prefix(1);
+            if (!name.empty() && name.front() == '+') name.remove_prefix(1);
+            int columns = 0;
+            const auto count = std::from_chars(name.data(), name.data() + name.size(), columns);
+            if (count.ec != std::errc()) return false;
+            name.remove_prefix(size_t(count.ptr - name.data()));
+            while (!name.empty() && (name.front() == ' ' || name.front() == '\t')) name.remove_prefix(1);
+            // Bound (abi): imported columns must fit ImGui's compiled table representation. Overflow rejects the whole ini import and is counted.
+            if (!name.empty() || columns <= 0 || columns >= IMGUI_TABLE_MAX_COLUMNS) return false;
+            auto existing = std::find_if(tables.begin(), tables.end(),
+                [tableId](const auto& entry) { return entry.first == tableId; });
+            if (existing != tables.end()) {
+                if (existing->second >= columns) continue;
+                existing->first = 0;
+            }
+            tables.emplace_back(tableId, columns);
+            const size_t payload = sizeof(ImGuiTableSettings) + size_t(columns) * sizeof(ImGuiTableColumnSettings);
+            if (!addChunk(tableBytes, payload)) return false;
+        }
+    }
+    return true;
+    } catch (const std::exception&) { return false; }
+}
+
+static bool TcPrepareIniStorage(const ImVector<char>& old, size_t bytes, ImVector<char>& replacement)
+{
+    if (!bytes) return true;
+    replacement.Data = (char*)IM_ALLOC(bytes);
+    if (!replacement.Data) return false;
+    replacement.Capacity = (int)bytes;
+    replacement.Size = old.Size;
+    if (old.Size) memcpy(replacement.Data, old.Data, (size_t)old.Size);
+    return true;
+}
+
 void ImGui::LoadIniSettingsFromMemory(const char* ini_data, size_t ini_size)
 {
     ImGuiContext& g = *GImGui;
@@ -15781,12 +15883,37 @@ void ImGui::LoadIniSettingsFromMemory(const char* ini_data, size_t ini_size)
     // For user convenience, we allow passing a non zero-terminated string (hence the ini_size parameter).
     // For our convenience and to make the code simpler, we'll also write zero-terminators within the buffer. So let's create a writable copy..
     if (ini_size == 0)
-        ini_size = ImStrlen(ini_data);
-    g.SettingsIniData.Buf.resize((int)ini_size + 1);
+        ini_size = strlen(ini_data);
+    // Bound (abi): SettingsIniData.Buf retains the input plus its NUL in ImVector<char>; both Size and Capacity are int. Reject only when that actual storage count cannot fit.
+    if (ini_size >= (size_t)std::numeric_limits<int>::max() || memchr(ini_data, 0, ini_size))
+    {
+        trussc::internal::reportImportError("ImGui", "ini import has an invalid text size or embedded terminator");
+        return;
+    }
+    if (ini_size > 16u * 1024u * 1024u)
+        trussc::logNotice("ImGui") << "loading local ini settings larger than 16 MiB";
+    size_t tc_window_bytes = 0, tc_table_bytes = 0;
+    if (!TcPreflightIniStorage(g, ini_data, ini_size, tc_window_bytes, tc_table_bytes)) {
+        trussc::internal::reportImportError("ImGui", "invalid ini settings structure or decoded chunk size");
+        return;
+    }
+    ImVector<char> tc_windows, tc_tables, tc_text;
+    if (!TcPrepareIniStorage(g.SettingsWindows.Buf, tc_window_bytes, tc_windows) ||
+        !TcPrepareIniStorage(g.SettingsTables.Buf, tc_table_bytes, tc_tables)) {
+        trussc::internal::reportImportError("ImGui", "cannot allocate decoded ini settings");
+        return;
+    }
+    tc_text.Data = (char*)IM_ALLOC(ini_size + 1);
+    if (!tc_text.Data) { trussc::internal::reportImportError("ImGui", "cannot allocate ini import"); return; }
+    tc_text.Size = tc_text.Capacity = (int)ini_size + 1;
+    memcpy(tc_text.Data, ini_data, ini_size);
+    tc_text.Data[ini_size] = 0;
+    // Keep old text alive through parsing: ini_data may alias the previous buffer.
+    g.SettingsIniData.Buf.swap(tc_text);
+    g.SettingsWindows.Buf.swap(tc_windows);
+    g.SettingsTables.Buf.swap(tc_tables);
     char* const buf = g.SettingsIniData.Buf.Data;
     char* const buf_end = buf + ini_size;
-    memcpy(buf, ini_data, ini_size);
-    buf_end[0] = 0;
 
     // Call pre-read handlers
     // Some types will clear their data (e.g. dock information) some types will allow merge/override (window)

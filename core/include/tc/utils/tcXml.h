@@ -9,6 +9,7 @@
 #include <sstream>
 #include "pugixml/pugixml.hpp"
 #include "tcLog.h"
+#include "impl/tcImportError.h"
 #include "tcUtils.h"   // getDataPath
 
 namespace trussc {
@@ -28,29 +29,47 @@ public:
 
     // Load from file (relative paths resolved via getDataPath, like loadJson)
     bool load(const fs::path& path) {
-        fs::path fullPath = internal::resolveLoadPath(path);
-        if (!internal::checkLoadFile(fullPath, "Xml")) return false;
-        // fullPath.c_str() is wchar_t* on Windows — pugixml has a wide
-        // load_file overload there, so non-ASCII paths survive.
-        XmlParseResult result = doc_.load_file(fullPath.c_str());
-        if (!result) {
-            logError() << "XML load error: " << path
-                         << " - " << result.description()
-                         << " (offset: " << result.offset << ")";
+        try {
+            fs::path fullPath = internal::resolveLoadPath(path);
+            if (!internal::checkLoadFile(fullPath, "Xml")) return false;
+            // fullPath.c_str() is wchar_t* on Windows — pugixml has a wide
+            // load_file overload there, so non-ASCII paths survive.
+            std::error_code ec;
+            if (fs::file_size(fullPath, ec) > 16u * 1024u * 1024u && !ec)
+                logNotice("Xml") << "loading a local document larger than 16 MiB: " << fullPath;
+            XmlDocument parsed;
+            XmlParseResult result = parsed.load_file(fullPath.c_str());
+            if (!result) {
+                logError() << "XML load error: " << path
+                             << " - " << result.description()
+                             << " (offset: " << result.offset << ")";
+                return false;
+            }
+            logVerbose() << "XML loaded: " << fullPath;
+            doc_ = std::move(parsed);
+            return true;
+        } catch (const std::exception& e) {
+            internal::reportImportError("Xml", "XML load failed: ", e.what());
             return false;
         }
-        logVerbose() << "XML loaded: " << fullPath;
-        return true;
     }
 
     // Load from string
     bool parse(const std::string& str) {
-        XmlParseResult result = doc_.load_string(str.c_str());
+        if (str.find('\0') != std::string::npos) {
+            logError("Xml") << "embedded terminator in XML input";
+            return false;
+        }
+        if (str.size() > 16u * 1024u * 1024u)
+            logNotice("Xml") << "parsing a document larger than 16 MiB";
+        XmlDocument parsed;
+        XmlParseResult result = parsed.load_buffer(str.data(), str.size());
         if (!result) {
             logError() << "XML parse error: " << result.description()
                          << " (offset: " << result.offset << ")";
             return false;
         }
+        doc_ = std::move(parsed);
         return true;
     }
 

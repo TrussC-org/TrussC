@@ -219,6 +219,9 @@ if(TC_PLATFORM_EMSCRIPTEN)
     # that its later allocation succeeds: retain bad_alloc catches in these TUs.
     set_property(SOURCE ${TC_SOUND_SOURCES} platform/web/tcSound_web.cpp
         APPEND PROPERTY COMPILE_OPTIONS -fexceptions)
+    # Document/font loaders and reflection also catch allocation failures in
+    # shared headers; compile both their callers and the framework with EH.
+    target_compile_options(TrussC PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-fexceptions>)
     target_link_options(TrussC INTERFACE -fexceptions)
     if(TC_GRAPHICS_BACKEND STREQUAL "WGPU")
         target_compile_definitions(TrussC PUBLIC SOKOL_WGPU)

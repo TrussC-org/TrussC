@@ -1,4 +1,6 @@
 #pragma once
+#include "impl/tcDocumentInput.h"
+#include "impl/tcImportError.h"
 
 // =============================================================================
 // tcIesProfile.h - IES photometric profile loader
@@ -22,6 +24,7 @@
 
 #include <string>
 #include <vector>
+#include <memory>
 #include <fstream>
 #include <cmath>
 #include <algorithm>
@@ -61,25 +64,93 @@ public:
     // Load from file path (.ies). Path is resolved via getDataPath()
     // (relative to the project data/ directory).
     bool load(const fs::path& path) {
-        fs::path resolved = internal::resolveLoadPath(path);
-        if (!internal::checkLoadFile(resolved, "IesProfile")) return false;
-        std::ifstream ifs(resolved);
-        if (!ifs.is_open()) {
-            internal::reportMissingLoad(resolved, "IesProfile");
+        try {
+            fs::path resolved = internal::resolveLoadPath(path);
+            if (!internal::checkLoadFile(resolved, "IesProfile")) return false;
+            std::ifstream ifs(resolved, std::ios::binary);
+            if (!ifs.is_open()) {
+                internal::reportMissingLoad(resolved, "IesProfile");
+                return false;
+            }
+            std::error_code ec;
+            if (fs::file_size(resolved, ec) > 16u * 1024u * 1024u && !ec)
+                logNotice("IesProfile") << "loading a local IES document larger than 16 MiB";
+            std::string data;
+            if (!internal::readDocumentBytes(ifs, data)) { internal::reportImportError("IesProfile", "failed to read the complete IES document"); return false; }
+            return loadFromString(data);
+        } catch (const std::exception&) {
+            internal::reportImportError("IesProfile", "cannot allocate IES document");
             return false;
         }
-        std::string data((std::istreambuf_iterator<char>(ifs)),
-                          std::istreambuf_iterator<char>());
-        return loadFromString(data);
     }
 
-    // Load from in-memory string
+    // Prepare the full replacement before retiring the previous profile.
     bool loadFromString(const std::string& data) {
-        release();
-        if (!parse(data)) return false;
-        bakeTexture();
-        loaded_ = true;
-        return true;
+        try {
+            internal::IesParseResult parsed;
+            std::string error;
+            if (!internal::parseIes(data, parsed, error)) {
+                internal::reportImportError("IesProfile", error.c_str());
+                return false;
+            }
+            const int width = 256;
+            const auto pixels = bakePixels(parsed, width);
+            // Pre-own retirement storage so replacing/releasing GPU handles
+            // cannot allocate after the preparation has succeeded.
+            auto resources = std::make_unique<internal::TextureRetirement>();
+            sg_image_desc desc = {};
+            desc.type = SG_IMAGETYPE_2D;
+            desc.width = width;
+            desc.height = 1;
+            desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+            desc.data.mip_levels[0].ptr = pixels.data();
+            desc.data.mip_levels[0].size = pixels.size();
+            desc.label = "tc_ies_profile";
+            resources->image = sg_make_image(&desc);
+            if (sg_query_image_state(resources->image) != SG_RESOURCESTATE_VALID) {
+                internal::reportImportError("IesProfile", "cannot create IES image");
+                return false;
+            }
+            sg_view_desc vd = {};
+            vd.texture.image = resources->image;
+            resources->view = sg_make_view(&vd);
+            if (sg_query_view_state(resources->view) != SG_RESOURCESTATE_VALID) {
+                internal::reportImportError("IesProfile", "cannot create IES view");
+                return false;
+            }
+            sg_sampler_desc sd = {};
+            sd.min_filter = SG_FILTER_LINEAR;
+            sd.mag_filter = SG_FILTER_LINEAR;
+            sd.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
+            sd.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
+            sd.label = "tc_ies_smp";
+            resources->sampler = sg_make_sampler(&sd);
+            if (sg_query_sampler_state(resources->sampler) != SG_RESOURCESTATE_VALID) {
+                internal::reportImportError("IesProfile", "cannot create IES texture");
+                return false;
+            }
+
+            // Commit only non-allocating swaps/assignments after all CPU/GPU
+            // preparation; failed loads preserve both metadata and resources.
+            release();
+            vertAngles_.swap(parsed.vertAngles);
+            horizAngles_.swap(parsed.horizAngles);
+            candela_.swap(parsed.candela);
+            maxCandela_ = parsed.maxCandela;
+            maxVertAngle_ = vertAngles_.back() * PI_F / 180.0f;
+            numVertAngles_ = static_cast<int>(vertAngles_.size());
+            numHorizAngles_ = static_cast<int>(horizAngles_.size());
+            texWidth_ = width;
+            image_ = resources->image;
+            view_ = resources->view;
+            sampler_ = resources->sampler;
+            resources_ = resources.release();
+            loaded_ = true;
+            return true;
+        } catch (const std::exception&) {
+            internal::reportImportError("IesProfile", "cannot allocate IES profile");
+            return false;
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -103,60 +174,40 @@ public:
 
 private:
     // -------------------------------------------------------------------------
-    // IES LM-63 parser
-    // -------------------------------------------------------------------------
-
-    bool parse(const std::string& data) {
-        internal::IesParseResult parsed;
-        std::string error;
-        if (!internal::parseIes(data, parsed, error)) {
-            logWarning() << "[IesProfile] " << error;
-            return false;
-        }
-
-        vertAngles_ = std::move(parsed.vertAngles);
-        horizAngles_ = std::move(parsed.horizAngles);
-        candela_ = std::move(parsed.candela);
-        maxCandela_ = parsed.maxCandela;
-        maxVertAngle_ = vertAngles_.back() * PI_F / 180.0f;
-        numVertAngles_ = static_cast<int>(vertAngles_.size());
-        numHorizAngles_ = static_cast<int>(horizAngles_.size());
-        return true;
-    }
-
-    // -------------------------------------------------------------------------
     // Linear interpolation of candela at a given vertical angle (degrees).
     // Averages across all horizontal angles for rotationally-averaged lookup.
     // -------------------------------------------------------------------------
 
-    float interpolateVertical(float vertDeg) const {
+    static float interpolateVertical(const internal::IesParseResult& parsed, float vertDeg) {
+        const auto& vertAngles = parsed.vertAngles;
+        const auto& candela = parsed.candela;
         // Clamp to range
-        if (vertDeg <= vertAngles_.front()) {
+        if (vertDeg <= vertAngles.front()) {
             float sum = 0;
-            for (auto& row : candela_) sum += row.front();
-            return sum / candela_.size();
+            for (auto& row : candela) sum += row.front();
+            return sum / candela.size();
         }
-        if (vertDeg >= vertAngles_.back()) {
+        if (vertDeg >= vertAngles.back()) {
             float sum = 0;
-            for (auto& row : candela_) sum += row.back();
-            return sum / candela_.size();
+            for (auto& row : candela) sum += row.back();
+            return sum / candela.size();
         }
 
         // Find bracketing indices
         int lo = 0;
-        for (int i = 1; i < numVertAngles_; i++) {
-            if (vertAngles_[i] >= vertDeg) { lo = i - 1; break; }
+        for (int i = 1; i < static_cast<int>(vertAngles.size()); i++) {
+            if (vertAngles[i] >= vertDeg) { lo = i - 1; break; }
         }
         int hi = lo + 1;
-        float t = (vertDeg - vertAngles_[lo]) /
-                  std::max(vertAngles_[hi] - vertAngles_[lo], 1e-6f);
+        float t = (vertDeg - vertAngles[lo]) /
+                  std::max(vertAngles[hi] - vertAngles[lo], 1e-6f);
 
         // Average across horizontal angles
         float sum = 0;
-        for (auto& row : candela_) {
+        for (auto& row : candela) {
             sum += row[lo] * (1.0f - t) + row[hi] * t;
         }
-        return sum / candela_.size();
+        return sum / candela.size();
     }
 
     // -------------------------------------------------------------------------
@@ -164,62 +215,36 @@ private:
     // R channel = normalized intensity [0,1].
     // -------------------------------------------------------------------------
 
-    void bakeTexture() {
-        texWidth_ = 256;  // vertical angle resolution
-        const int w = texWidth_;
-        const int h = 1;
-
-        std::vector<uint8_t> pixels(w * h * 4);
-        for (int x = 0; x < w; x++) {
-            // Map texel center to vertical angle in degrees
-            float vertDeg = ((float)x + 0.5f) / w * vertAngles_.back();
-            float cd = interpolateVertical(vertDeg);
-            float norm = (maxCandela_ > 0.0f) ? cd / maxCandela_ : 0.0f;
-            uint8_t val = (uint8_t)(std::min(std::max(norm, 0.0f), 1.0f) * 255.0f);
+    static std::vector<uint8_t> bakePixels(const internal::IesParseResult& parsed, int width) {
+        std::vector<uint8_t> pixels(size_t(width) * 4);
+        for (int x = 0; x < width; x++) {
+            const float vertDeg = (static_cast<float>(x) + 0.5f) / width * parsed.vertAngles.back();
+            const float cd = interpolateVertical(parsed, vertDeg);
+            const float norm = parsed.maxCandela > 0.0f ? cd / parsed.maxCandela : 0.0f;
+            const uint8_t val = static_cast<uint8_t>(std::clamp(norm, 0.0f, 1.0f) * 255.0f);
             pixels[x * 4 + 0] = val;
             pixels[x * 4 + 1] = val;
             pixels[x * 4 + 2] = val;
             pixels[x * 4 + 3] = 255;
         }
-
-        // Create sokol image
-        sg_image_desc desc = {};
-        desc.type = SG_IMAGETYPE_2D;
-        desc.width = w;
-        desc.height = h;
-        desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-        desc.data.mip_levels[0].ptr = pixels.data();
-        desc.data.mip_levels[0].size = pixels.size();
-        desc.label = "tc_ies_profile";
-        image_ = sg_make_image(&desc);
-
-        sg_view_desc vd = {};
-        vd.texture.image = image_;
-        view_ = sg_make_view(&vd);
-
-        sg_sampler_desc sd = {};
-        sd.min_filter = SG_FILTER_LINEAR;
-        sd.mag_filter = SG_FILTER_LINEAR;
-        sd.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
-        sd.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
-        sd.label = "tc_ies_smp";
-        sampler_ = sg_make_sampler(&sd);
+        return pixels;
     }
 
     // -------------------------------------------------------------------------
     // Resource management
     // -------------------------------------------------------------------------
 
-    void release() {
+    void release() noexcept {
         // Deferred destroy: a deferred PBR draw recorded this frame may still
         // bind these handles (drained in present(), after end-of-frame flush)
-        internal::deferGpuDestroy(sampler_); sampler_ = {};
-        internal::deferGpuDestroy(view_);    view_ = {};
-        internal::deferGpuDestroy(image_);   image_ = {};
+        if (resources_) internal::retireTexture(resources_);
+        resources_ = nullptr;
+        sampler_ = {}; view_ = {}; image_ = {};
         loaded_ = false;
     }
 
     void moveFrom(IesProfile&& other) {
+        resources_ = other.resources_; other.resources_ = nullptr;
         image_   = other.image_;   other.image_   = {};
         view_    = other.view_;    other.view_    = {};
         sampler_ = other.sampler_; other.sampler_ = {};
@@ -235,7 +260,8 @@ private:
         candela_        = std::move(other.candela_);
     }
 
-    // sokol resources
+    // sokol resources and preallocated retirement ownership
+    internal::TextureRetirement* resources_ = nullptr;
     sg_image   image_   = {};
     sg_view    view_    = {};
     sg_sampler sampler_ = {};
