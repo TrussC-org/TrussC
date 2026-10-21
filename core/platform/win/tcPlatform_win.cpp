@@ -16,6 +16,7 @@
 #include <windows.h>
 #include <shellscalingapi.h>
 #include <d3d11.h>
+#include "tcCaptureTrace_win.h"
 
 // sokol_app のウィンドウ取得
 #include "sokol_app_tc.h"
@@ -146,33 +147,59 @@ void setWindowDecorated(bool decorated) {
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
 }
 
-void setWindowSizeLogical(int width, int height) {
-    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+void internal::setWindowSizeWin32(const void* handle, double logicalWidth, double logicalHeight) {
+    HWND hwnd = (HWND)handle;
     if (!hwnd) {
         logWarning() << "[Platform] Failed to get window handle";
         return;
     }
 
-    // 現在のウィンドウスタイルを取得
-    DWORD style = GetWindowLong(hwnd, GWL_STYLE);
-    DWORD exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+    // Resolve the Windows 10 APIs dynamically so older systems still load.
+    // Cache only the entry points: DPI must be read again after monitor moves.
+    using GetWindowDpi = UINT (WINAPI*)(HWND);
+    using AdjustRectForDpi = BOOL (WINAPI*)(LPRECT, DWORD, BOOL, DWORD, UINT);
+    static const HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    static const auto getWindowDpi = user32
+        ? (GetWindowDpi)GetProcAddress(user32, "GetDpiForWindow") : nullptr;
+    static const auto adjustRectForDpi = user32
+        ? (AdjustRectForDpi)GetProcAddress(user32, "AdjustWindowRectExForDpi") : nullptr;
+    // Match sokol's effective window scale when GetDpiForWindow is absent.
+    UINT dpi = getWindowDpi ? getWindowDpi(hwnd) : 96;
+    if (!dpi) dpi = 96;
 
-    // クライアント領域のサイズからウィンドウ全体のサイズを計算
-    RECT rect = { 0, 0, width, height };
-    AdjustWindowRectEx(&rect, style, FALSE, exStyle);
+    // Bound (abi): client and frame extents must fit SetWindowPos's positive int sizes. Overflow rejects the resize with one Warning and is counted.
+    const auto rejectSize = [] {
+        static std::uint64_t rejectedResizeCount = 0;
+        if (rejectedResizeCount != (std::numeric_limits<std::uint64_t>::max)()) ++rejectedResizeCount;
+        logWarning() << "[Platform] Window resize size is invalid or unrepresentable; rejected=" << rejectedResizeCount;
+    };
+    const int clientWidth = windowClientExtentPixels(logicalWidth, dpi);
+    const int clientHeight = windowClientExtentPixels(logicalHeight, dpi);
+    if (!clientWidth || !clientHeight) {
+        rejectSize();
+        return;
+    }
 
-    int windowWidth = rect.right - rect.left;
-    int windowHeight = rect.bottom - rect.top;
+    const DWORD style = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
+    const DWORD exStyle = (DWORD)GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    // Measure the frame on an empty client rect so native LONG arithmetic
+    // cannot overflow while adding it to a large requested client extent.
+    RECT rect = {0, 0, 0, 0};
+    if (!adjustRectForDpi || !adjustRectForDpi(&rect, style, FALSE, exStyle, dpi)) {
+        AdjustWindowRectEx(&rect, style, FALSE, exStyle);
+    }
+    const int windowWidth = windowOuterExtentPixels(clientWidth, std::int64_t(rect.right) - rect.left);
+    const int windowHeight = windowOuterExtentPixels(clientHeight, std::int64_t(rect.bottom) - rect.top);
+    if (!windowWidth || !windowHeight) {
+        rejectSize();
+        return;
+    }
+    SetWindowPos(hwnd, nullptr, 0, 0, windowWidth, windowHeight,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
 
-    // 現在のウィンドウ位置を取得
-    RECT currentRect;
-    GetWindowRect(hwnd, &currentRect);
-
-    // 位置を維持してサイズのみ変更
-    SetWindowPos(hwnd, nullptr,
-                 currentRect.left, currentRect.top,
-                 windowWidth, windowHeight,
-                 SWP_NOZORDER | SWP_NOACTIVATE);
+void setWindowSizeLogical(int width, int height) {
+    internal::setWindowSizeWin32(sapp_win32_get_hwnd(), width, height);
 }
 
 // ---------------------------------------------------------------------------
@@ -249,9 +276,34 @@ fs::path internal::platformAppBundlePath() {
 // ---------------------------------------------------------------------------
 // captureWindow - 現在のウィンドウをキャプチャ
 // ---------------------------------------------------------------------------
+namespace {
+internal::D3D11CaptureTraceHook captureTraceHook = nullptr;
+struct CaptureTraceScope {
+    internal::D3D11CaptureTrace trace;
+    internal::D3D11CaptureTraceHook hook;
+    CaptureTraceScope() : hook(captureTraceHook) {
+        const auto& ctx = internal::currentWindowContext();
+        if (ctx.isMain) hook = nullptr;
+        if (!hook) return;
+        trace.isMain = ctx.isMain;
+        trace.fbWidth = ctx.fbWidth; trace.fbHeight = ctx.fbHeight;
+        trace.lastWidth = ctx.lastSwapchain.width; trace.lastHeight = ctx.lastSwapchain.height;
+        trace.lastFormat = int(ctx.lastSwapchain.color_format); trace.lastSamples = ctx.lastSwapchain.sample_count;
+        trace.lastRenderView = ctx.lastSwapchain.d3d11.render_view;
+        trace.lastResolveView = ctx.lastSwapchain.d3d11.resolve_view;
+    }
+    ~CaptureTraceScope() { if (hook) hook(trace); }
+};
+}
+void internal::setD3D11CaptureTraceForTests(D3D11CaptureTraceHook hook) {
+    captureTraceHook = hook;
+}
+
 std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
-    const void* view = !ctx.isMain ? ctx.lastSwapchain.d3d11.render_view : nullptr;
-    if (!view) view = sapp_get_swapchain().d3d11.render_view;
+    // Acquisition-free estimate, also before B's first pass or after resize.
+    // lastSwapchain may still refer to the previous native resource generation.
+    if (!ctx.isMain) return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
+    const void* view = sapp_get_swapchain().d3d11.render_view;
     if (view) {
         ID3D11Resource* resource = nullptr;
         ((ID3D11RenderTargetView*)view)->GetResource(&resource);
@@ -267,23 +319,17 @@ std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowCont
             }
         }
     }
-    if (!ctx.isMain) return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
     return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
 }
 
 bool captureWindow(Pixels& outPixels) {
-    // Pick the render-target view of the CURRENT window: a secondary window's
-    // context records its own swapchain in lastSwapchain (beginSwapchainPassInternal),
-    // so its screenshot / recording reads back ITS surface. The main window has no
-    // per-window swapchain recorded here for capture-only frames, so it keeps using
-    // sapp_get_swapchain() — byte-identical to the previous behavior.
-    const void* renderView = nullptr;
-    auto& winCtx = internal::currentWindowContext();
-    if (!winCtx.isMain && winCtx.lastSwapchain.d3d11.render_view) {
-        renderView = winCtx.lastSwapchain.d3d11.render_view;
-    } else {
-        renderView = sapp_get_swapchain().d3d11.render_view;
-    }
+    if (!sg_isvalid()) return false;
+    if (internal::hasPublicFboActivation()) return false;
+    internal::CapturePrefixScope capturePhase;
+    CaptureTraceScope diagnostic;
+    const auto source = internal::windowCaptureSource();
+    const void* renderView = source.swapchain.d3d11.render_view;
+    diagnostic.trace.selectedView = renderView;
     if (!renderView) {
         logError() << "[Screenshot] D3D11 render target view is null";
         return false;
@@ -311,8 +357,12 @@ bool captureWindow(Pixels& outPixels) {
     // テクスチャの情報を取得
     D3D11_TEXTURE2D_DESC desc;
     backBuffer->GetDesc(&desc);
+    diagnostic.trace.selectedTexture = backBuffer;
+    diagnostic.trace.width = desc.Width; diagnostic.trace.height = desc.Height;
+    diagnostic.trace.format = unsigned(desc.Format); diagnostic.trace.samples = desc.SampleDesc.Count;
     try {
         mcp::internal::reconcileWindowCapture(desc.Width, desc.Height);
+        diagnostic.trace.reconciledWidth = desc.Width; diagnostic.trace.reconciledHeight = desc.Height;
     } catch (...) {
         backBuffer->Release();
         throw;
@@ -404,8 +454,20 @@ bool captureWindow(Pixels& outPixels) {
         return false;
     }
 
-    // Pixels を確保
-    outPixels.allocate(width, height, 4);
+    // Pixels allocation may fail after Map; always release that native lease.
+    // Capture overwrites every byte; preserve a matching RGBA8 buffer.
+    try {
+        if (!outPixels.isAllocated() || outPixels.getWidth() != width ||
+            outPixels.getHeight() != height || outPixels.getChannels() != 4 ||
+            outPixels.getFormat() != PixelFormat::U8) {
+            outPixels.allocate(width, height, 4);
+        }
+    }
+    catch (const std::bad_alloc&) {
+        context->Unmap(stagingTexture, 0); stagingTexture->Release();
+        logError("Screenshot") << "pixel allocation failed";
+        return false;
+    }
     unsigned char* dst = outPixels.getData();
     size_t mappedBytes = 0;
     // Bound (abi): mapped D3D11 rows and destination capacity must cover the capture. Overflow drops the recorder frame and is counted.
@@ -451,6 +513,8 @@ bool captureWindow(Pixels& outPixels) {
     context->Unmap(stagingTexture, 0);
     stagingTexture->Release();
 
+    diagnostic.trace.succeeded = true;
+    diagnostic.trace.pixelWidth = outPixels.getWidth(); diagnostic.trace.pixelHeight = outPixels.getHeight();
     return true;
 }
 

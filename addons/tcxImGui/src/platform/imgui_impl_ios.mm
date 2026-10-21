@@ -15,7 +15,10 @@
 #include "imgui/imgui_demo.cpp"
 
 // TrussC ImGui test engine hooks (must be before sokol_imgui)
-#include "tcImGuiHooks.h"
+#include "tcImGuiHooksImpl.h"
 
 // sokol_imgui implementation
 #include "tcImGuiTargetImpl.h"
+
+// Public addon API implementation (after the backend on every platform).
+#include "tcxImGuiImpl.h"

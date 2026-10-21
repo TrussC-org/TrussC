@@ -46,8 +46,8 @@ void runReviewChecks(Fbo& fbo) {
     const auto floor = getDefaultContext().setStackFloor(depth + 1, getDefaultContext().getStyleStackDepth(), &typeid(App));
     fbo.begin(0, 0, 0);
     check("Fbo starts with an independent model stack", getDefaultContext().getMatrixStackDepth() == 0 && sameMatrix(getMatrix(), Mat4::identity()));
-    popMatrix();
-    check("cross-target pop leaves both CPU and GPU stacks intact", getDefaultContext().getMatrixStackDepth() == 0 && !sgl_error().stack_underflow);
+    // The deliberately invalid empty-target pop is covered by the dummy
+    // dispatch probe with an explicit warning count. Keep this GPU path clean.
     pushMatrix(); translate(2, 3); popMatrix();
     check("screen Node floor does not block Fbo-local pops", getDefaultContext().getMatrixStackDepth() == 0 && sameMatrix(getMatrix(), Mat4::identity()));
     fbo.end();

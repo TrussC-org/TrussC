@@ -5389,6 +5389,30 @@ SOKOL_GFX_API_DECL const void* sg_mtl_command_queue(void);
 // command buffer. Preserves listeners, frame index and uniform ring state.
 // No-op on other backends; requires no active pass on every backend.
 SOKOL_GFX_API_DECL void sg_tc_mtl_flush(void);
+// [TrussC] Framework seam, not app API.
+// Between-pass prefix submission: no presentation, listeners or frame
+// rotation. Metal preserves the uniform-ring offset; GL flushes; D3D11 Flushes
+// its immediate context. All subsequent passes must reapply their state.
+SOKOL_GFX_API_DECL void sg_tc_submit_prefix(void);
+// [TrussC] Framework seam, not app API. Q2 destination hook, sharing end-pass
+// resolve ordering. No image is allocated here. Caller supplies compatible
+// single-sample FBO/extent/format.
+SOKOL_GFX_API_DECL void sg_tc_gl_resolve_swapchain(const sg_swapchain* source, uint32_t destination);
+// [TrussC] Framework seam, not app API. Encode staging into the renderer
+// prefix before any later overwrite.
+SOKOL_GFX_API_DECL const void* sg_tc_mtl_command_buffer(void);
+// [TrussC] Framework seams, not app API (register/authorize/cancel).
+// Managed drawable authority (unmanaged Sokol callers are unchanged).
+SOKOL_GFX_API_DECL bool sg_tc_mtl_register_drawable(const sg_swapchain* swapchain, uint64_t owner, uint64_t generation, uint64_t frame);
+SOKOL_GFX_API_DECL bool sg_tc_mtl_authorize_drawable(uint64_t owner, uint64_t generation, uint64_t frame);
+SOKOL_GFX_API_DECL void sg_tc_mtl_cancel_drawables(uint64_t owner);
+#if defined(SOKOL_TC_TEST_HOOKS)
+// [TrussC] Framework seam, not app API. Test-only native-device verification
+// trace (typedef and setter). No history is retained.
+// action: 0 registered, 1 authorized, 2 presented, 3 cancelled, 4 prefix submit.
+typedef void (*sg_tc_mtl_drawable_trace)(int action, uint64_t owner, uint64_t generation, uint64_t frame, void* user);
+SOKOL_GFX_API_DECL void sg_tc_mtl_set_drawable_trace(sg_tc_mtl_drawable_trace trace, void* user);
+#endif
 // Metal: get internal __bridge-casted buffer resource objects
 SOKOL_GFX_API_DECL sg_mtl_buffer_info sg_mtl_query_buffer_info(sg_buffer buf);
 // Metal: get internal __bridge-casted image resource objects
@@ -5491,6 +5515,7 @@ inline int sg_append_buffer(sg_buffer buf_id, const sg_range& data) { return sg_
 #include <stdlib.h> // malloc, free, qsort
 #include <string.h> // memset
 #include <stdio.h> // snprintf ([TrussC modification] metal uniform-buffer auto-grow log)
+#include <limits.h> // INT_MAX ([TrussC] checked Metal uniform cursor growth)
 #include <float.h> // FLT_MAX
 
 #ifndef SOKOL_API_IMPL
@@ -6849,7 +6874,12 @@ typedef struct {
     id<MTLRenderCommandEncoder> render_cmd_encoder;
     id<MTLComputeCommandEncoder> compute_cmd_encoder;
     id<CAMetalDrawable> cur_drawable;
-    NSMutableArray* pending_drawables; // [TrussC] present only at sg_commit, never at a mid-frame flush
+    NSMutableArray* pending_drawables; // [TrussC] unmanaged Sokol drawables
+    NSMutableArray* managed_drawables; // [TrussC] strong drawable + owner/generation/frame/ready
+    #if defined(SOKOL_TC_TEST_HOOKS)
+    sg_tc_mtl_drawable_trace drawable_trace;
+    void* drawable_trace_user;
+    #endif
     id<MTLBuffer> uniform_buffers[SG_NUM_INFLIGHT_FRAMES];
 } _sg_mtl_backend_t;
 
@@ -11675,7 +11705,19 @@ _SOKOL_PRIVATE void _sg_gl_begin_pass(const sg_pass* pass, const _sg_attachments
     _SG_GL_CHECK_ERROR();
 }
 
-_SOKOL_PRIVATE void _sg_gl_end_render_pass(const _sg_attachments_ptrs_t* atts) {
+// [TrussC] Shared by attachment resolves and the explicit swapchain end-pass
+// destination. The first multisample resolve flushes V3D before any blit;
+// scissor is disabled for the entire attachment-wide resolve interval.
+_SOKOL_PRIVATE void _sg_gl_begin_resolve(bool multisample) {
+    if (multisample && _sg.gl.v3d_resolve_flush) {
+        glFlush();
+        _SG_INFO(TRUSSC_GL_V3D_RESOLVE_FLUSH);
+    }
+    glDisable(GL_SCISSOR_TEST);
+}
+
+_SOKOL_PRIVATE void _sg_gl_end_render_pass(const _sg_attachments_ptrs_t* atts,
+    const sg_swapchain* snapshot_source, GLuint snapshot_destination) {
     SOKOL_ASSERT(atts);
     if (!atts->empty) {
         bool fb_read_bound = false;
@@ -11685,16 +11727,8 @@ _SOKOL_PRIVATE void _sg_gl_end_render_pass(const _sg_attachments_ptrs_t* atts) {
             // perform MSAA resolve if needed
             const _sg_view_t* rsv_view = atts->resolve_views[i];
             if (rsv_view && rsv_view->gl.msaa_resolve_frame_buffer) {
-                // [TrussC] Mesa V3D fast TLB blit bug (#858), fix d0163f1096dac8925579c7ce56d1e2ae50f3fb36 (fixed in Mesa 25.1.5 / 25.2.0); remove once Pi OS ships fixed Mesa.
-                if (_sg.gl.v3d_resolve_flush && !fb_read_bound) {
-                    glFlush();
-                    // [TrussC] Report actual activation through the existing logger bridge.
-                    _SG_INFO(TRUSSC_GL_V3D_RESOLVE_FLUSH);
-                }
                 if (!fb_read_bound) {
-                    // [TrussC] Resolve the whole attachment, regardless of the last draw's scissor (#861).
-                    // Scissor enable isn't cached: _sg_gl_reset_state_cache() keeps it always enabled.
-                    glDisable(GL_SCISSOR_TEST);
+                    _sg_gl_begin_resolve(true);
                     glBindFramebuffer(GL_READ_FRAMEBUFFER, _sg.gl.fb);
                     fb_read_bound = true;
                 }
@@ -11739,13 +11773,30 @@ _SOKOL_PRIVATE void _sg_gl_end_render_pass(const _sg_attachments_ptrs_t* atts) {
             glInvalidateFramebuffer(GL_DRAW_FRAMEBUFFER, att_index, invalidate_atts);
         }
         #endif
+    } else if (snapshot_source) {
+        // Explicit swapchain destination: same resolve path, before swap or
+        // invalidation. Parking without a destination never snapshots.
+        GLint read_fbo, draw_fbo, read_buffer;
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, snapshot_source->gl.framebuffer);
+        glGetIntegerv(GL_READ_BUFFER, &read_buffer);
+        _sg_gl_begin_resolve(snapshot_source->sample_count > 1);
+        glReadBuffer(snapshot_source->gl.framebuffer ? GL_COLOR_ATTACHMENT0 : GL_BACK);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, snapshot_destination);
+        glBlitFramebuffer(0, 0, snapshot_source->width, snapshot_source->height,
+            0, 0, snapshot_source->width, snapshot_source->height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        glReadBuffer((GLenum)read_buffer);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read_fbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw_fbo);
+        glEnable(GL_SCISSOR_TEST);
     }
 }
 
 _SOKOL_PRIVATE void _sg_gl_end_pass(const _sg_attachments_ptrs_t* atts) {
     _SG_GL_CHECK_ERROR();
     if (!_sg.cur_pass.is_compute) {
-        _sg_gl_end_render_pass(atts);
+        _sg_gl_end_render_pass(atts, 0, 0);
     }
     _SG_GL_CHECK_ERROR();
 }
@@ -15382,6 +15433,7 @@ _SOKOL_PRIVATE void _sg_mtl_setup_backend(const sg_desc* desc) {
     _sg.mtl.device = (__bridge id<MTLDevice>) desc->environment.metal.device;
     _sg.mtl.cmd_queue = [_sg.mtl.device newCommandQueue];
     _sg.mtl.pending_drawables = [[NSMutableArray alloc] init]; // [TrussC]
+    _sg.mtl.managed_drawables = [[NSMutableArray alloc] init]; // [TrussC]
 
     for (int i = 0; i < SG_NUM_INFLIGHT_FRAMES; i++) {
         _sg.mtl.uniform_buffers[i] = [_sg.mtl.device
@@ -15432,6 +15484,7 @@ _SOKOL_PRIVATE void _sg_mtl_discard_backend(void) {
     _SG_OBJC_RELEASE(_sg.mtl.device);
     _SG_OBJC_RELEASE(_sg.mtl.cmd_queue);
     _SG_OBJC_RELEASE(_sg.mtl.pending_drawables); // [TrussC]
+    _SG_OBJC_RELEASE(_sg.mtl.managed_drawables); // [TrussC]
     for (int i = 0; i < SG_NUM_INFLIGHT_FRAMES; i++) {
         _SG_OBJC_RELEASE(_sg.mtl.uniform_buffers[i]);
     }
@@ -16076,33 +16129,6 @@ _SOKOL_PRIVATE void _sg_mtl_discard_view(_sg_view_t* view) {
     }
 }
 
-_SOKOL_PRIVATE void _sg_mtl_bind_uniform_buffers(void) {
-    // In the Metal backend, uniform buffer bindings happen once in sg_begin_pass() and
-    // remain valid for the entire pass. Only binding offsets will be updated
-    // in sg_apply_uniforms()
-    if (_sg.cur_pass.is_compute) {
-        SOKOL_ASSERT(nil != _sg.mtl.compute_cmd_encoder);
-        for (size_t slot = 0; slot < SG_MAX_UNIFORMBLOCK_BINDSLOTS; slot++) {
-            [_sg.mtl.compute_cmd_encoder
-                setBuffer:_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index]
-                offset:0
-                atIndex:slot];
-        }
-    } else {
-        SOKOL_ASSERT(nil != _sg.mtl.render_cmd_encoder);
-        for (size_t slot = 0; slot < SG_MAX_UNIFORMBLOCK_BINDSLOTS; slot++) {
-            [_sg.mtl.render_cmd_encoder
-                setVertexBuffer:_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index]
-                offset:0
-                atIndex:slot];
-            [_sg.mtl.render_cmd_encoder
-                setFragmentBuffer:_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index]
-                offset:0
-                atIndex:slot];
-        }
-    }
-}
-
 _SOKOL_PRIVATE void _sg_mtl_begin_compute_pass(const sg_pass* pass) {
     SOKOL_ASSERT(pass); (void)pass;
     SOKOL_ASSERT(nil != _sg.mtl.cmd_buffer);
@@ -16299,15 +16325,19 @@ _SOKOL_PRIVATE void _sg_mtl_begin_render_pass(const sg_pass* pass, const _sg_att
 // [TrussC modification] Every committed frame must take an in-flight slot,
 // even when uploads are its only work. Use the same command buffer creation
 // and completion handler for the first pass and for a pass-less commit (#332).
-_SOKOL_PRIVATE void _sg_mtl_ensure_command_buffer(void) {
+_SOKOL_PRIVATE bool _sg_mtl_acquire_command_buffer(dispatch_time_t timeout) {
     SOKOL_ASSERT(_sg.mtl.cmd_queue);
     if (nil == _sg.mtl.cmd_buffer) {
         // block until the oldest frame in flight has finished
-        dispatch_semaphore_wait(_sg.mtl.sem, DISPATCH_TIME_FOREVER);
+        if (dispatch_semaphore_wait(_sg.mtl.sem, timeout) != 0) return false;
         if (_sg.desc.metal.use_command_buffer_with_retained_references) {
             _sg.mtl.cmd_buffer = [_sg.mtl.cmd_queue commandBuffer];
         } else {
             _sg.mtl.cmd_buffer = [_sg.mtl.cmd_queue commandBufferWithUnretainedReferences];
+        }
+        if (nil == _sg.mtl.cmd_buffer) {
+            dispatch_semaphore_signal(_sg.mtl.sem);
+            return false;
         }
         [_sg.mtl.cmd_buffer enqueue];
         [_sg.mtl.cmd_buffer addCompletedHandler:^(id<MTLCommandBuffer> cmd_buf) {
@@ -16316,8 +16346,41 @@ _SOKOL_PRIVATE void _sg_mtl_ensure_command_buffer(void) {
             dispatch_semaphore_signal(_sg.mtl.sem);
         }];
     }
+    return nil != _sg.mtl.cmd_buffer;
+}
+_SOKOL_PRIVATE void _sg_mtl_ensure_command_buffer(void) {
+    _sg_mtl_acquire_command_buffer(DISPATCH_TIME_FOREVER);
 }
 // [TrussC modification end]
+
+// [TrussC #859] Replace storage transactionally. Pending draws may still bind
+// the previous buffer: retain it through the existing submission-safe queue.
+_SOKOL_PRIVATE bool _sg_mtl_resize_uniform_buffer(int new_size) {
+    const int next_release = (_sg.mtl.idpool.release_queue_front + 1) % _sg.mtl.idpool.num_slots;
+    // Bound (gpu): Metal objects live in a fixed id table sized from the resource pools, so retiring the old buffer needs a free slot. Overflow rejects this growth and is reported by METAL_CREATE_BUFFER_FAILED.
+    if ((_sg.mtl.idpool.free_queue_top == 0) ||
+        (next_release == _sg.mtl.idpool.release_queue_back)) {
+        _SG_ERROR(METAL_CREATE_BUFFER_FAILED);
+        return false;
+    }
+    id<MTLBuffer> buffer = [_sg.mtl.device
+        newBufferWithLength:(NSUInteger)new_size
+        options:MTLResourceCPUCacheModeWriteCombined|MTLResourceStorageModeShared
+    ];
+    if (nil == buffer) {
+        _SG_ERROR(METAL_CREATE_BUFFER_FAILED);
+        return false;
+    }
+    #if defined(SOKOL_DEBUG)
+        buffer.label = [NSString stringWithFormat:@"sg-uniform-buffer.%d", _sg.mtl.cur_frame_rotate_index];
+    #endif
+    _sg_mtl_release_resource(_sg.frame_index,
+        _sg_mtl_add_resource(_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index]));
+    _SG_OBJC_RELEASE(_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index]);
+    _sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index] = buffer;
+    _sg.mtl.cur_ub_base_ptr = (uint8_t*)[buffer contents];
+    return true;
+}
 
 _SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachments_ptrs_t* atts) {
     SOKOL_ASSERT(pass && atts);
@@ -16336,20 +16399,14 @@ _SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachment
         // frame while this rotate slot was in flight, replace its (smaller)
         // buffer now: the inflight-frame semaphore acquired above guarantees the
         // GPU is done with this slot's previous command buffer.
-        id<MTLBuffer> ub = _sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index];
-        if ((int)[ub length] < _sg.mtl.ub_size) {
-            _sg_mtl_release_resource(_sg.frame_index, _sg_mtl_add_resource(ub));
-            ub = [_sg.mtl.device
-                newBufferWithLength:(NSUInteger)_sg.mtl.ub_size
-                options:MTLResourceCPUCacheModeWriteCombined|MTLResourceStorageModeShared
-            ];
-            #if defined(SOKOL_DEBUG)
-                ub.label = [NSString stringWithFormat:@"sg-uniform-buffer.%d", _sg.mtl.cur_frame_rotate_index];
-            #endif
-            _sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index] = ub;
+        if ((int)[_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index] length] < _sg.mtl.ub_size) {
+            if (!_sg_mtl_resize_uniform_buffer(_sg.mtl.ub_size)) {
+                _sg.cur_pass.valid = false;
+                return;
+            }
         }
         // [TrussC modification end]
-        _sg.mtl.cur_ub_base_ptr = (uint8_t*)[ub contents];
+        _sg.mtl.cur_ub_base_ptr = (uint8_t*)[_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index] contents];
     }
 
     if (pass->compute) {
@@ -16358,10 +16415,19 @@ _SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachment
         _sg_mtl_begin_render_pass(pass, atts);
     }
 
-    // bind uniform buffers, those bindings remain valid for the entire pass
-    if (_sg.cur_pass.valid) {
-        _sg_mtl_bind_uniform_buffers();
-    }
+    // [TrussC #859] Each upload binds its own stage/slot. A pending draw can
+    // legitimately use blocks from several buffer generations after growth.
+}
+
+// [TrussC] Trace native scheduling without a second registry or retained log.
+_SOKOL_PRIVATE void _sg_mtl_trace_drawable(int action, NSDictionary* record) {
+    #if defined(SOKOL_TC_TEST_HOOKS)
+    if (_sg.mtl.drawable_trace) _sg.mtl.drawable_trace(action,
+        [record[@"owner"] unsignedLongLongValue], [record[@"generation"] unsignedLongLongValue],
+        [record[@"frame"] unsignedLongLongValue], _sg.mtl.drawable_trace_user);
+    #else
+    _SOKOL_UNUSED(action); _SOKOL_UNUSED(record);
+    #endif
 }
 
 _SOKOL_PRIVATE void _sg_mtl_end_pass(const _sg_attachments_ptrs_t* atts) {
@@ -16380,7 +16446,23 @@ _SOKOL_PRIVATE void _sg_mtl_end_pass(const _sg_attachments_ptrs_t* atts) {
     // presentation until sg_commit so suspended/resumed swapchains remain ours.
     // A drawable used by several passes is presented only once.
     if (nil != _sg.mtl.cur_drawable) {
-        if (![_sg.mtl.pending_drawables containsObject:_sg.mtl.cur_drawable]) {
+        bool managed = false;
+        for (NSDictionary* record in _sg.mtl.managed_drawables) {
+            if (record[@"drawable"] == _sg.mtl.cur_drawable) {
+                managed = true;
+                // Native work can outlive owner cancellation, including with
+                // unretained-reference command buffers. This completion owns
+                // the immutable attachment generation, never the mutable
+                // presentation record changed by owner authorization.
+                NSArray* attachments = record[@"attachments"];
+                [_sg.mtl.cmd_buffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
+                    _SOKOL_UNUSED(buffer);
+                    _SOKOL_UNUSED(attachments);
+                }];
+                break;
+            }
+        }
+        if (!managed && ![_sg.mtl.pending_drawables containsObject:_sg.mtl.cur_drawable]) {
             [_sg.mtl.pending_drawables addObject:_sg.mtl.cur_drawable];
         }
         _sg.mtl.cur_drawable = nil;
@@ -16401,6 +16483,16 @@ _SOKOL_PRIVATE void _sg_mtl_commit(void) {
         [_sg.mtl.cmd_buffer presentDrawable:drawable];
     }
     [_sg.mtl.pending_drawables removeAllObjects];
+    // [TrussC] A foreign commit never authorizes an unfinished owner. Remove
+    // only ready records, after scheduling their one native presentation.
+    for (NSInteger i = (NSInteger)_sg.mtl.managed_drawables.count - 1; i >= 0; --i) {
+        NSDictionary* record = _sg.mtl.managed_drawables[(NSUInteger)i];
+        if ([record[@"ready"] boolValue]) {
+            [_sg.mtl.cmd_buffer presentDrawable:record[@"drawable"]];
+            _sg_mtl_trace_drawable(2, record);
+            [_sg.mtl.managed_drawables removeObjectAtIndex:(NSUInteger)i];
+        }
+    }
     [_sg.mtl.cmd_buffer commit];
     // [TrussC modification end]
 
@@ -16723,49 +16815,55 @@ _SOKOL_PRIVATE bool _sg_mtl_apply_bindings(_sg_bindings_ptrs_t* bnd) {
 // builds and silently corrupts uniforms (flipped/black frames). Instead, when an
 // sg_apply_uniforms() call would overflow the ring, swap in a bigger MTLBuffer
 // for the CURRENT rotate slot and continue at offset 0:
-//   - draws already encoded this frame captured the old buffer binding at encode
-//     time (Metal encoders snapshot bindings per draw), so their data stays valid
+//   - each upload binds only its own stage/slot; previously applied blocks of
+//     the pending draw and already encoded draws keep their original bindings
 //   - the old buffer is retired through the normal deferred-release queue, so it
 //     outlives all in-flight command buffers that reference it
 //   - the other rotate slot(s) may still be in flight and are replaced lazily at
 //     the start of their next frame (see _sg_mtl_begin_pass), where the inflight
 //     semaphore guarantees the GPU is done with them
-_SOKOL_PRIVATE void _sg_mtl_grow_uniform_buffer(size_t data_size) {
+_SOKOL_PRIVATE bool _sg_mtl_grow_uniform_buffer(size_t data_size) {
     const int old_size = _sg.mtl.ub_size;
+    // Bound (abi): the aligned uniform cursor is an int. Overflow rejects this upload and is reported by METAL_CREATE_BUFFER_FAILED.
+    const int largest_size = INT_MAX & ~(_SG_MTL_UB_ALIGN - 1);
+    if (data_size > (size_t)largest_size || old_size >= largest_size) {
+        _SG_ERROR(METAL_CREATE_BUFFER_FAILED);
+        return false;
+    }
     int new_size = old_size;
     do {
-        new_size *= 2;
+        new_size = new_size <= largest_size / 2 ? new_size * 2 : largest_size;
     } while ((size_t)new_size < data_size);
-    id old_buf = _sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index];
-    _sg_mtl_release_resource(_sg.frame_index, _sg_mtl_add_resource(old_buf));
-    id<MTLBuffer> new_buf = [_sg.mtl.device
-        newBufferWithLength:(NSUInteger)new_size
-        options:MTLResourceCPUCacheModeWriteCombined|MTLResourceStorageModeShared
-    ];
-    #if defined(SOKOL_DEBUG)
-        new_buf.label = [NSString stringWithFormat:@"sg-uniform-buffer.%d", _sg.mtl.cur_frame_rotate_index];
-    #endif
-    _sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index] = new_buf;
+    if (!_sg_mtl_resize_uniform_buffer(new_size)) {
+        return false;
+    }
     _sg.mtl.ub_size = new_size;
     _sg.mtl.cur_ub_offset = 0;
-    _sg.mtl.cur_ub_base_ptr = (uint8_t*)[new_buf contents];
-    // rebind so subsequent setXXXBufferOffset calls resolve into the new buffer
-    if (_sg.cur_pass.valid) {
-        _sg_mtl_bind_uniform_buffers();
-    }
     char log_msg[160];
     snprintf(log_msg, sizeof(log_msg),
         "per-frame uniform buffer overflowed, auto-grown %d -> %d bytes (metal); use sg_desc.uniform_buffer_size to pre-allocate",
         old_size, new_size);
     _sg_log(SG_LOGITEM_METAL_UNIFORM_BUFFER_GROWN, 2, log_msg, __LINE__);
+    return true;
 }
 // <<[TrussC modification]
 
 _SOKOL_PRIVATE void _sg_mtl_apply_uniforms(int ub_slot, const sg_range* data) {
     SOKOL_ASSERT((ub_slot >= 0) && (ub_slot < SG_MAX_UNIFORMBLOCK_BINDSLOTS));
     // [TrussC modification] grow instead of overflowing (see _sg_mtl_grow_uniform_buffer)
-    if (((size_t)_sg.mtl.cur_ub_offset + data->size) > (size_t)_sg.mtl.ub_size) {
-        _sg_mtl_grow_uniform_buffer(data->size);
+    // Bound (abi): the uniform cursor is an int, so one aligned upload must stay below INT_MAX. Overflow invalidates this draw and is reported by METAL_CREATE_BUFFER_FAILED.
+    if (data->size > (size_t)(INT_MAX - (_SG_MTL_UB_ALIGN - 1))) {
+        _SG_ERROR(METAL_CREATE_BUFFER_FAILED);
+        _sg.next_draw_valid = false;
+        return;
+    }
+    const size_t required_size = (size_t)_sg.mtl.cur_ub_offset + data->size;
+    if ((required_size > (size_t)_sg.mtl.ub_size) ||
+        (required_size > (size_t)(INT_MAX & ~(_SG_MTL_UB_ALIGN - 1)))) {
+        if (!_sg_mtl_grow_uniform_buffer(data->size)) {
+            _sg.next_draw_valid = false;
+            return;
+        }
     }
     SOKOL_ASSERT(((size_t)_sg.mtl.cur_ub_offset + data->size) <= (size_t)_sg.mtl.ub_size);
     SOKOL_ASSERT((_sg.mtl.cur_ub_offset & (_SG_MTL_UB_ALIGN-1)) == 0);
@@ -16782,15 +16880,18 @@ _SOKOL_PRIVATE void _sg_mtl_apply_uniforms(int ub_slot, const sg_range* data) {
     memcpy(dst, data->ptr, data->size);
     if (stage == SG_SHADERSTAGE_VERTEX) {
         SOKOL_ASSERT(nil != _sg.mtl.render_cmd_encoder);
-        [_sg.mtl.render_cmd_encoder setVertexBufferOffset:(NSUInteger)_sg.mtl.cur_ub_offset atIndex:mtl_slot];
+        [_sg.mtl.render_cmd_encoder setVertexBuffer:_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index]
+            offset:(NSUInteger)_sg.mtl.cur_ub_offset atIndex:mtl_slot];
         _sg_stats_inc(metal.uniforms.num_set_vertex_buffer_offset);
     } else if (stage == SG_SHADERSTAGE_FRAGMENT) {
         SOKOL_ASSERT(nil != _sg.mtl.render_cmd_encoder);
-        [_sg.mtl.render_cmd_encoder setFragmentBufferOffset:(NSUInteger)_sg.mtl.cur_ub_offset atIndex:mtl_slot];
+        [_sg.mtl.render_cmd_encoder setFragmentBuffer:_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index]
+            offset:(NSUInteger)_sg.mtl.cur_ub_offset atIndex:mtl_slot];
         _sg_stats_inc(metal.uniforms.num_set_fragment_buffer_offset);
     } else if (stage == SG_SHADERSTAGE_COMPUTE) {
         SOKOL_ASSERT(nil != _sg.mtl.compute_cmd_encoder);
-        [_sg.mtl.compute_cmd_encoder setBufferOffset:(NSUInteger)_sg.mtl.cur_ub_offset atIndex:mtl_slot];
+        [_sg.mtl.compute_cmd_encoder setBuffer:_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index]
+            offset:(NSUInteger)_sg.mtl.cur_ub_offset atIndex:mtl_slot];
         _sg_stats_inc(metal.uniforms.num_set_compute_buffer_offset);
     } else {
         SOKOL_UNREACHABLE;
@@ -26650,6 +26751,126 @@ SOKOL_API_IMPL void sg_tc_mtl_flush(void) {
             [_sg.mtl.cmd_buffer waitUntilCompleted];
             _sg.mtl.cmd_buffer = nil;
         }
+    #endif
+}
+
+SOKOL_API_IMPL void sg_tc_gl_resolve_swapchain(const sg_swapchain* source, uint32_t destination) {
+    SOKOL_ASSERT(_sg.valid && !_sg.cur_pass.in_pass);
+    SOKOL_ASSERT(source && source->width > 0 && source->height > 0 && destination);
+    #if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+        _sg_attachments_ptrs_t atts;
+        _sg_clear(&atts, sizeof(atts));
+        atts.empty = true;
+        _sg_gl_end_render_pass(&atts, source, (GLuint)destination);
+    #else
+        _SOKOL_UNUSED(source); _SOKOL_UNUSED(destination);
+    #endif
+}
+
+// [TrussC] Prefix submission deliberately does not use sg_commit: stream and
+// uniform epochs remain unchanged, so retained upload offsets remain valid.
+SOKOL_API_IMPL void sg_tc_submit_prefix(void) {
+    SOKOL_ASSERT(_sg.valid && !_sg.cur_pass.in_pass);
+    #if defined(SOKOL_METAL)
+        SOKOL_ASSERT(nil == _sg.mtl.render_cmd_encoder && nil == _sg.mtl.compute_cmd_encoder);
+        if (_sg.mtl.cmd_buffer) {
+            [_sg.mtl.cmd_buffer commit];
+            _sg.mtl.cmd_buffer = nil;
+            _sg_mtl_trace_drawable(4, nil);
+        }
+    #elif defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+        glFlush();
+    #elif defined(SOKOL_D3D11)
+        #if defined(__cplusplus)
+            _sg.d3d11.ctx->Flush();
+        #else
+            _sg.d3d11.ctx->lpVtbl->Flush(_sg.d3d11.ctx);
+        #endif
+    #endif
+}
+
+SOKOL_API_IMPL const void* sg_tc_mtl_command_buffer(void) {
+    SOKOL_ASSERT(_sg.valid && !_sg.cur_pass.in_pass);
+    #if defined(SOKOL_METAL)
+        // Bound (platform): capture must fail if Metal cannot supply an in-flight
+        // slot within ten seconds, rather than block the native frame forever.
+        if (!_sg_mtl_acquire_command_buffer(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC))) return 0;
+        return (__bridge const void*)_sg.mtl.cmd_buffer;
+    #else
+        return 0;
+    #endif
+}
+
+#if defined(SOKOL_TC_TEST_HOOKS)
+SOKOL_API_IMPL void sg_tc_mtl_set_drawable_trace(sg_tc_mtl_drawable_trace trace, void* user) {
+    #if defined(SOKOL_METAL)
+        _sg.mtl.drawable_trace = trace;
+        _sg.mtl.drawable_trace_user = user;
+    #else
+        _SOKOL_UNUSED(trace); _SOKOL_UNUSED(user);
+    #endif
+}
+
+#endif // SOKOL_TC_TEST_HOOKS
+
+SOKOL_API_IMPL bool sg_tc_mtl_register_drawable(const sg_swapchain* swapchain, uint64_t owner, uint64_t generation, uint64_t frame) {
+    #if defined(SOKOL_METAL)
+        if (!swapchain || !swapchain->metal.current_drawable) return false;
+        id<CAMetalDrawable> native = (__bridge id<CAMetalDrawable>)swapchain->metal.current_drawable;
+        for (NSDictionary* record in _sg.mtl.managed_drawables) {
+            if ([record[@"owner"] unsignedLongLongValue] == owner) {
+                return [record[@"generation"] unsignedLongLongValue] == generation &&
+                    [record[@"frame"] unsignedLongLongValue] == frame && record[@"drawable"] == native;
+            }
+        }
+        NSMutableDictionary* record = [@{@"drawable":native, @"owner":@(owner),
+            @"generation":@(generation), @"frame":@(frame), @"ready":@NO} mutableCopy];
+        if (!record) return false;
+        // The saved swapchain borrows all three objects. Pin this attachment
+        // generation until owner presentation/cancellation, independent of
+        // window resize and the device-frame pass-descriptor collector.
+        NSMutableArray* attachments = [NSMutableArray arrayWithObject:native];
+        if (swapchain->metal.depth_stencil_texture) [attachments addObject:(__bridge id)swapchain->metal.depth_stencil_texture];
+        if (swapchain->metal.msaa_color_texture) [attachments addObject:(__bridge id)swapchain->metal.msaa_color_texture];
+        record[@"attachments"] = [NSArray arrayWithArray:attachments];
+        [_sg.mtl.managed_drawables addObject:record];
+        _sg_mtl_trace_drawable(0, record);
+        _SG_OBJC_RELEASE(record);
+    #else
+        _SOKOL_UNUSED(swapchain); _SOKOL_UNUSED(owner); _SOKOL_UNUSED(generation); _SOKOL_UNUSED(frame);
+    #endif
+    return true;
+}
+
+SOKOL_API_IMPL bool sg_tc_mtl_authorize_drawable(uint64_t owner, uint64_t generation, uint64_t frame) {
+    #if defined(SOKOL_METAL)
+        for (NSMutableDictionary* record in _sg.mtl.managed_drawables) {
+            if ([record[@"owner"] unsignedLongLongValue] == owner &&
+                [record[@"generation"] unsignedLongLongValue] == generation &&
+                [record[@"frame"] unsignedLongLongValue] == frame && ![record[@"ready"] boolValue]) {
+                record[@"ready"] = @YES;
+                _sg_mtl_trace_drawable(1, record);
+                return true;
+            }
+        }
+        return false;
+    #else
+        _SOKOL_UNUSED(owner); _SOKOL_UNUSED(generation); _SOKOL_UNUSED(frame);
+        return true;
+    #endif
+}
+
+SOKOL_API_IMPL void sg_tc_mtl_cancel_drawables(uint64_t owner) {
+    #if defined(SOKOL_METAL)
+        for (NSInteger i = (NSInteger)_sg.mtl.managed_drawables.count - 1; i >= 0; --i) {
+            NSDictionary* record = _sg.mtl.managed_drawables[(NSUInteger)i];
+            if ([record[@"owner"] unsignedLongLongValue] == owner) {
+                _sg_mtl_trace_drawable(3, record);
+                [_sg.mtl.managed_drawables removeObjectAtIndex:(NSUInteger)i];
+            }
+        }
+    #else
+        _SOKOL_UNUSED(owner);
     #endif
 }
 

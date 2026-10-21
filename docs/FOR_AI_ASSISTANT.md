@@ -1090,7 +1090,7 @@ trusscli addon add|remove <a>  Add / remove addons (also clone / list / search /
 trusscli info [section]        Project / framework info
 trusscli doctor                Check the dev environment
 trusscli clean                 Delete build directories (--all: every target's, incl. xcode-ios, and the generated build-web.* scripts)
-trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache)
+trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache; -j N caps parallel jobs; --dry-run prints the cmake commands)
 trusscli run                   Build and launch
 trusscli version               Show version (trusscli + current TrussC)
 ```
@@ -1846,2952 +1846,2954 @@ _Auto-generated C++ API index from `reference-data.json` (structure from the C++
 ### Lifecycle
 
 ```cpp
-int runApp(const WindowSettings & settings = WindowSettings())  // Start the application main loop with your App subclass. Templated on the app type — call TC_RUN_APP(MyApp) (or runApp<MyApp>()) from main(). On desktop, returns 1 if window or GPU startup fails before setup() runs, otherwise 0. On Linux, no available X display causes an abort (a nonzero process status). TC_RUN_APP passes this status to main(); Android and Web use OS/browser-owned loops and do not report shutdown through this return value.
+int runApp(const WindowSettings & settings = WindowSettings())  // Starts the application loop for an App subclass.
 ```
 
 ### Graphics - Color
 
 ```cpp
-void clear(float r, float g, float b, float a = 1.0) [+3]  // Clear screen. No args = transparent black (0,0,0,0)
-float linearToSrgb(float x)  // Convert a single linear RGB channel value to sRGB
-void setColor(float r, float g, float b, float a = 1.0) [+2]  // Set drawing color (0.0-1.0)
-void setColorHSB(float h, float s, float b, float a = 1.0)  // Set color from HSB (H: 0-1)
-void setColorOKLab(float L, float a_lab, float b_lab, float alpha = 1.0)  // Set color from OKLab
-void setColorOKLCH(float L, float C, float H, float alpha = 1.0)  // Set color from OKLCH
-float srgbToLinear(float x)  // Convert a single sRGB channel value to linear RGB
+void clear(float r, float g, float b, float a = 1.0) [+3]  // Clear the current render target to a solid color.
+float linearToSrgb(float x)  // Convert a single linear RGB channel value to sRGB.
+void setColor(float r, float g, float b, float a = 1.0) [+2]  // Set the current drawing color.
+void setColorHSB(float h, float s, float b, float a = 1.0)  // Set the current color from HSB.
+void setColorOKLab(float L, float a_lab, float b_lab, float alpha = 1.0)  // Set the current color from OKLab.
+void setColorOKLCH(float L, float C, float H, float alpha = 1.0)  // Set the current color from OKLCH.
+float srgbToLinear(float x)  // Convert a single sRGB channel value to linear RGB.
 ```
 
 ### Graphics - Shapes
 
 ```cpp
-void appendArc(float cx, float cy, float radius, float angleBegin, float angleEnd) [+1]  // Append arc vertices to the current shape (use between beginShape/endShape)
-void appendCurve(const std::vector<Vec3> & points) [+1]  // Append Catmull-Rom curve vertices to the current shape (use between beginShape/endShape; needs >=4 points, closed=true wraps around)
-void appendSuperellipse(float x, float y, float w, float h, float n = 5.0) [+1]  // Append the closed outline of a superellipse inscribed in a rect to the current shape (use between beginShape/endShape)
-void beginLines()  // Begin batch line drawing. Add vertex pairs with vertex(), then call endLines(). Each pair of vertices draws one independent line segment. Use setColor() between vertices for per-line colors.
-void beginShape()  // Begin drawing a shape
-void beginStroke()  // Begin drawing a stroke (uses StrokeMesh internally)
-void drawArc(Vec3 center, float radius, float angleBegin, float angleEnd) [+1]  // Draw arc (partial circle, angles in radians)
-void drawBezier(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3) [+2]  // Draw bezier curve (cubic with 4 points, quadratic with 3, or N-th order via vector)
-void drawBitmapString(const std::string & text, Vec3 pos, bool screenFixed = true) [+5]  // Draw text. The Vec3 overloads project through the current camera context — a screen-aligned 3D label; z=0 on the default screen matches plain 2D; behind-camera draws nothing; screenFixed picks fixed-pixel vs perspective size
-void drawBitmapStringHighlight(const std::string & text, float x, float y, const Color & background = Color(0, 0, 0), const Color & foreground = Color(1, 1, 1))  // Draw text with background highlight
-void drawBox(float w, float h, float d) [+5]  // Draw 3D box (respects fill/noFill)
-void drawCircle(Vec3 center, float radius) [+1]  // Draw circle
-void drawCone(float radius, float height, int resolution = 16) [+2]  // Draw 3D cone (respects fill/noFill)
-void drawCurve(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3) [+2]  // Draw Catmull-Rom curve (4 control points draw p1->p2; vector chains segments passing through interior points; closed=true wraps around)
-void drawEllipse(Vec3 center, Vec2 radii) [+2]  // Draw ellipse
-void drawLine(Vec3 p1, Vec3 p2) [+2]  // Draw line (2D or 3D)
-void drawPoint(Vec3 pos) [+1]  // Draw a single point
-void drawRect(Vec3 pos, Vec2 size) [+2]  // Draw rectangle
-void drawRectRounded(Vec3 pos, Vec2 size, float radius) [+1]  // Draw rounded rectangle (circular arc corners)
-void drawRectSquircle(Vec3 pos, Vec2 size, float radius) [+1]  // Draw squircle rectangle (curvature-continuous corners, iOS-style)
-void drawSphere(float radius, int resolution = 16) [+2]  // Draw 3D sphere (respects fill/noFill)
-void drawStroke(float x1, float y1, float x2, float y2) [+1]  // Draw a single stroke segment (thick line with cap/join)
-void drawSuperellipse(Vec3 pos, Vec2 size, float n = 5.0) [+1]  // Draw a superellipse (Lamé curve) inscribed in a rect — Apple-icon-like by default (n=5)
-void drawTriangle(Vec3 p1, Vec3 p2, Vec3 p3) [+1]  // Draw triangle
-void endLines()  // End batch line drawing and render all accumulated line segments
-void endShape(bool close = false)  // End drawing a shape
-void endStroke(bool close = false)  // End drawing a stroke
-float getBitmapFontHeight()  // Get bitmap font height
-float getBitmapLineHeight()  // Get line height for bitmap string newlines
-Rect getBitmapStringBBox(const std::string & text)  // Get text bounding box
-void getBitmapStringBounds(const std::string & text, float & width, float & height)  // Get bitmap string bounding box size
-float getBitmapStringHeight(const std::string & text)  // Get text height
-float getBitmapStringWidth(const std::string & text)  // Get text width
-Direction getTextAlignH()  // Get horizontal text alignment
-Direction getTextAlignV()  // Get vertical text alignment
-void setBitmapLineHeight(float h)  // Set line height for bitmap string newlines (default: 16)
-void setFps(float fps)  // Set the target frame rate; update and draw run together (VSYNC = -1, EVENT_DRIVEN = 0, or a fixed fps). A fixed fps at or just above the display rate draws every display frame. Switching at runtime starts the new rate from the switch (no catch-up; a fixed fps draws the next frame, and the first update's getDeltaTime() leaves out the previous mode: called between updates it counts from the call, called inside an update from that update's start; the time dropped is under a frame in the usual modes, long only after an idle like EVENT_DRIVEN). Calling it again with the current rate does nothing, so it is safe to call every frame; on the frame where the value changes (setFps(guiValue) in draw() while a slider moves), that update's dt counts only from the call and is shorter than the frame
-void setTextAlign(Direction h, Direction v)  // Set text alignment
-void vertex(float x, float y, float z) [+3]  // Add a vertex
+void appendArc(float cx, float cy, float radius, float angleBegin, float angleEnd) [+1]  // Append arc vertices to the current shape (use between beginShape/endShape).
+void appendCurve(const std::vector<Vec3> & points) [+1]  // Append Catmull-Rom curve vertices to the current shape.
+void appendSuperellipse(float x, float y, float w, float h, float n = 5.0) [+1]  // Append the closed outline of a superellipse inscribed in a rect to the current shape (use between beginShape/endShape).
+void beginLines()  // Begin batch drawing of independent line segments.
+void beginShape()  // Open a vertex buffer for a custom polygon, closed with endShape().
+void beginStroke()  // Begin drawing a stroke.
+void drawArc(Vec3 center, float radius, float angleBegin, float angleEnd) [+1]  // Draw a circular arc spanning two angles.
+void drawBezier(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3) [+2]  // Draw a Bezier curve.
+void drawBitmapString(const std::string & text, Vec3 pos, bool screenFixed = true) [+5]  // Draw fixed-size bitmap text at a 2D position, or as a screen-facing label in 3D space.
+void drawBitmapStringHighlight(const std::string & text, float x, float y, const Color & background = Color(0, 0, 0), const Color & foreground = Color(1, 1, 1))  // Draw bitmap text with a solid background rectangle behind it.
+void drawBox(float w, float h, float d) [+5]  // Draw a 3D box.
+void drawCircle(Vec3 center, float radius) [+1]  // Draw a circle.
+void drawCone(float radius, float height, int resolution = 16) [+2]  // Draw a 3D cone.
+void drawCurve(Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3) [+2]  // Draw a Catmull-Rom curve through a series of points, as a polyline.
+void drawEllipse(Vec3 center, Vec2 radii) [+2]  // Draw an ellipse.
+void drawLine(Vec3 p1, Vec3 p2) [+2]  // Draw a line (2D or 3D).
+void drawPoint(Vec3 pos) [+1]  // Draw a single point.
+void drawRect(Vec3 pos, Vec2 size) [+2]  // Draw an axis-aligned rectangle.
+void drawRectRounded(Vec3 pos, Vec2 size, float radius) [+1]  // Draw a rounded rectangle (circular arc corners).
+void drawRectSquircle(Vec3 pos, Vec2 size, float radius) [+1]  // Draw a squircle rectangle (curvature-continuous corners, iOS-style).
+void drawSphere(float radius, int resolution = 16) [+2]  // Draw a 3D sphere.
+void drawStroke(float x1, float y1, float x2, float y2) [+1]  // Draw a single thick stroke segment.
+void drawSuperellipse(Vec3 pos, Vec2 size, float n = 5.0) [+1]  // Draw a superellipse (Lamé curve) inscribed in a rect — Apple-icon-like by default (n=5).
+void drawTriangle(Vec3 p1, Vec3 p2, Vec3 p3) [+1]  // Draw a triangle.
+void endLines()  // End batch line drawing and render all accumulated line segments.
+void endShape(bool close = false)  // Finish drawing the current shape.
+void endStroke(bool close = false)  // Finish drawing the current stroke.
+float getBitmapFontHeight()  // Get the bitmap font's fixed cell height in pixels.
+float getBitmapLineHeight()  // Get the current line spacing used for newlines in bitmap text.
+Rect getBitmapStringBBox(const std::string & text)  // Get the text's bounding box as a Rect.
+void getBitmapStringBounds(const std::string & text, float & width, float & height)  // Get a bitmap string's width and height through output parameters.
+float getBitmapStringHeight(const std::string & text)  // Get the text's rendered height in pixels.
+float getBitmapStringWidth(const std::string & text)  // Get the text's rendered width in pixels.
+Direction getTextAlignH()  // Get the current horizontal text alignment.
+Direction getTextAlignV()  // Get the current vertical text alignment.
+void setBitmapLineHeight(float h)  // Set the line spacing used for newlines in bitmap text.
+void setFps(float fps)  // Set the target frame rate that update and draw run at together.
+void setTextAlign(Direction h, Direction v)  // Set the anchor point used when drawing bitmap text.
+void vertex(float x, float y, float z) [+3]  // Add a vertex to the shape, lines or stroke buffer that is currently open.
 ```
 
 ### Graphics - Style
 
 ```cpp
-void disableDepthTest()  // Disable depth test/write on the blend pipelines again (the default). Call before drawing 2D overlays (HUD, text) so they are not occluded by the 3D scene
-void enableDepthTest()  // Re-enable depth test/write on the blend pipelines (compare LESS_EQUAL + depth write, same as the 3D pipeline). Use to restore depth after setBlendMode() mid-scene; persists like the blend mode (across frames and Fbo passes) until disableDepthTest()
-void fill()  // Enable fill mode (shapes are solid, no outline)
-BlendMode getBlendMode()  // Get current blend mode
-int getCircleResolution() ⚠️deprecated  // Deprecated alias for getCurveResolution()
-Color getColor()  // Get current fill color
-CurveStyle::Mode getCurveMode()  // Current curve tessellation mode (fixed segment count vs. adaptive tolerance)
-int getCurveResolution()  // Get current curve resolution
-float getCurveTolerance()  // Get current curve tessellation tolerance (in pixels)
-float getPointSize()  // Get the current point size (logical px).
-PointStyle getPointStyle()  // Get the current point shape (PointStyle).
-StrokeCap getStrokeCap()  // Get current stroke cap style
-StrokeJoin getStrokeJoin()  // Get current stroke join style
-float getStrokeWeight()  // Get current stroke width
-bool isDepthTestEnabled()  // Whether the depth-tested blend pipeline variant is active (set by enableDepthTest)
-bool isFillEnabled()  // Check if fill mode is enabled
-bool isStrokeEnabled()  // Check if stroke mode is enabled
-void noFill()  // Enable stroke mode (shapes show outline only)
-void popScissor()  // Pop scissor clipping rectangle from stack
-void popStyle()  // Pop style from stack, restoring previous state
-void pushScissor(float x, float y, float w, float h)  // Push scissor clipping rectangle onto stack
-void pushStyle()  // Push current style (color, fill, stroke, blend) onto stack
-void resetBlendMode()  // Reset blend mode to Alpha (default)
-void resetScissor()  // Reset (disable) scissor clipping
-void resetStyle()  // Reset style to default values (white color, fill enabled, stroke disabled)
-StyleScope scopedStyle()  // pushStyle() now, popStyle() at the end of the scope: `auto s = scopedStyle();` returns a StyleScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushStyle() / popStyle() remain the main form. [[nodiscard]]: `scopedStyle();` alone would pop at once and is a compiler warning
-void setBlendMode(BlendMode mode)  // Set blend mode. BlendMode::Alpha (default), Add, Multiply, Screen, Subtract, Disabled. Works on the screen and inside Fbo passes alike; the mode persists until changed (it also carries into a subsequent Fbo::begin)
-void setCircleResolution(int res) ⚠️deprecated  // Deprecated alias for setCurveResolution()
-void setCurveResolution(int n)  // Set fixed curve segment count (switches off adaptive tolerance mode)
-void setCurveTolerance(float pixels)  // Set adaptive curve tessellation tolerance in pixels (smaller = smoother, scale-aware)
-void setPointSize(float px)  // Set the point size in logical pixels (Square/Round point styles; Pixel is always 1px).
-void setPointStyle(PointStyle s)  // Set the point shape: PointStyle::Square, Round or Pixel.
-void setScissor(float x, float y, float w, float h) [+1]  // Set scissor clipping rectangle. Also available via RectNode::setClipping(true)
-void setStrokeCap(StrokeCap cap)  // Set stroke cap style (Butt, Round, Square)
-void setStrokeJoin(StrokeJoin join)  // Set stroke join style (Miter, Round, Bevel)
-void setStrokeWeight(float weight)  // Set stroke width
+void disableDepthTest()  // Turns the depth test for ordinary (blend-mode) drawing off again, which is the default.
+void enableDepthTest()  // Turns the depth test on for ordinary (blend-mode) drawing, so nearer shapes hide farther ones.
+void fill()  // Enable fill mode.
+BlendMode getBlendMode()  // Get the current blend mode.
+int getCircleResolution() ⚠️deprecated  // Deprecated alias for getCurveResolution().
+Color getColor()  // Get the current drawing color.
+CurveStyle::Mode getCurveMode()  // Get the current curve tessellation mode.
+int getCurveResolution()  // Get the segment count used in resolution mode.
+float getCurveTolerance()  // Get the current curve tessellation tolerance, in pixels.
+float getPointSize()  // Get the current point size, in logical pixels.
+PointStyle getPointStyle()  // Get the current point shape.
+StrokeCap getStrokeCap()  // Get the current stroke cap style.
+StrokeJoin getStrokeJoin()  // Get the current stroke join style.
+float getStrokeWeight()  // Get the current stroke width.
+bool isDepthTestEnabled()  // Returns whether the depth test for ordinary (blend-mode) drawing is on.
+bool isFillEnabled()  // Check whether fill mode is enabled.
+bool isStrokeEnabled()  // Check whether stroke mode is enabled.
+void noFill()  // Enable stroke mode.
+void popScissor()  // Restores the clipping rectangle saved by the matching pushScissor().
+void popStyle()  // Restore the style saved by the matching pushStyle().
+void pushScissor(float x, float y, float w, float h)  // Saves the current clipping rectangle and limits drawing to a new rectangle inside it.
+void pushStyle()  // Save the current style onto a stack.
+void resetBlendMode()  // Reset the blend mode to Alpha (the default).
+void resetScissor()  // Turns clipping off so the whole window or Fbo can be drawn again.
+void resetStyle()  // Reset the current style to its default values.
+StyleScope scopedStyle()  // Push the style now; pop it automatically when the scope ends.
+void setBlendMode(BlendMode mode)  // Set the blend mode used by drawing from now on.
+void setCircleResolution(int res) ⚠️deprecated  // Deprecated alias for setCurveResolution().
+void setCurveResolution(int n)  // Use a fixed segment count for circles, arcs and curves.
+void setCurveTolerance(float pixels)  // Set how closely curves must follow their ideal shape, in pixels.
+void setPointSize(float px)  // Set the point size, in logical pixels.
+void setPointStyle(PointStyle s)  // Set the point shape: Square, Round, or Pixel.
+void setScissor(float x, float y, float w, float h) [+1]  // Sets the clipping rectangle directly, replacing the current one.
+void setStrokeCap(StrokeCap cap)  // Set the stroke cap style.
+void setStrokeJoin(StrokeJoin join)  // Set the stroke join style.
+void setStrokeWeight(float weight)  // Set the stroke width.
 ```
 
 ### Transform
 
 ```cpp
-Mat4 getCurrentMatrix() ⚠️deprecated  // Deprecated alias for getMatrix()
-float getCurrentScale() ⚠️deprecated  // Deprecated alias for getScale()
-Mat4 getMatrix()  // Get the current transformation matrix
-float getScale()  // Effective uniform scale of the current matrix (max of x/y basis lengths)
-void loadMatrix(const Mat4 & mat) ⚠️deprecated  // Deprecated alias for setMatrix()
-void multMatrix(const Mat4 & mat)  // Multiply the current matrix by mat (relative transform, like translate/rotate)
-void popMatrix()  // Restore transform state
-void pushMatrix()  // Save transform state
-void resetMatrix()  // Reset transformation matrix to identity
-void rotate(float radians) [+3]  // Rotate by radians (single axis, euler angles, or quaternion)
-void rotateDeg(float degrees) [+2]  // Rotate by degrees
-void rotateX(float radians)  // Rotate around X axis
-void rotateXDeg(float degrees)  // Rotate around X axis (degrees)
-void rotateY(float radians)  // Rotate around Y axis
-void rotateYDeg(float degrees)  // Rotate around Y axis (degrees)
-void rotateZ(float radians)  // Rotate around Z axis
-void rotateZDeg(float degrees)  // Rotate around Z axis (degrees)
-void scale(float s) [+2]  // Scale
-MatrixScope scopedMatrix()  // pushMatrix() now, popMatrix() at the end of the scope: `auto m = scopedMatrix();` returns a MatrixScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushMatrix() / popMatrix() remain the main form. [[nodiscard]]: `scopedMatrix();` alone would pop at once and is a compiler warning
-void setMatrix(const Mat4 & mat)  // Replace the active target model matrix with mat, retaining its camera view (sgl receives V*M). Pass a model matrix without a baked-in view.
-void translate(Vec3 pos) [+2]  // Move origin
+Mat4 getCurrentMatrix() ⚠️deprecated  // Deprecated alias for getMatrix().
+float getCurrentScale() ⚠️deprecated  // Deprecated alias for getScale().
+Mat4 getMatrix()  // Get the current transformation matrix.
+float getScale()  // Get the effective uniform scale of the current matrix.
+void loadMatrix(const Mat4 & mat) ⚠️deprecated  // Deprecated alias for setMatrix().
+void multMatrix(const Mat4 & mat)  // Multiply the current matrix by another matrix.
+void popMatrix()  // Restore the transform last saved by pushMatrix().
+void pushMatrix()  // Save the current transform onto the matrix stack.
+void resetMatrix()  // Reset the current transform to identity.
+void rotate(float radians) [+3]  // Rotate subsequent drawing, in radians.
+void rotateDeg(float degrees) [+2]  // Rotate subsequent drawing, in degrees.
+void rotateX(float radians)  // Rotate around the X axis, in radians.
+void rotateXDeg(float degrees)  // Rotate around the X axis, in degrees.
+void rotateY(float radians)  // Rotate around the Y axis, in radians.
+void rotateYDeg(float degrees)  // Rotate around the Y axis, in degrees.
+void rotateZ(float radians)  // Rotate around the Z axis, in radians.
+void rotateZDeg(float degrees)  // Rotate around the Z axis, in degrees.
+void scale(float s) [+2]  // Scale subsequent drawing.
+MatrixScope scopedMatrix()  // RAII guard that pushes now and pops at the end of the scope.
+void setMatrix(const Mat4 & mat)  // Replace the current matrix outright.
+void translate(Vec3 pos) [+2]  // Move the origin of subsequent drawing.
 ```
 
 ### Window & Input
 
 ```cpp
-void alertDialog(const std::string & title, const std::string & message) [macos,windows,linux,android,web]  // Show alert dialog with OK button
-void alertDialogAsync(const std::string & title, const std::string & message, std::function<void ()> callback = std::function<void ()>(nullptr))  // Show alert dialog asynchronously. Callback is called when dismissed
-void bindCursorImage(Cursor cursor, int width, int height, const unsigned char * pixels, int hotspotX = 0, int hotspotY = 0) [+1]  // Bind a custom image to a cursor slot (RGBA pixels or Image)
-bool confirmDialog(const std::string & title, const std::string & message) [macos,windows,linux,android,web]  // Show Yes/No confirmation dialog. Returns true if Yes clicked
-void confirmDialogAsync(const std::string & title, const std::string & message, std::function<void (bool)> callback)  // Show Yes/No dialog asynchronously. Callback receives true if Yes clicked
-CoreEvents & events()  // Get the global CoreEvents hub holding all framework events (setup, update, draw, keyPressed, mousePressed, etc.); use events().eventName.listen(callback) to subscribe
-void exitApp(int code = 0)  // Exit the application with normal cleanup (cannot be cancelled). code defaults to 0. On Windows/Linux, runApp returns this code to its caller; on macOS, the process exits with this code after cleanup without returning from runApp. Use a non-zero code for failures.
-Cursor getCursor()  // Get the current mouse cursor shape
-Vec2 getGlobalMousePos()  // Get global mouse position as Vec2
-float getGlobalMouseX()  // Get global mouse X (screen coordinates, not window-relative)
-float getGlobalMouseY()  // Get global mouse Y (screen coordinates, not window-relative)
-float getGlobalPMouseX()  // Get previous frame global mouse X
-float getGlobalPMouseY()  // Get previous frame global mouse Y
-int getMouseButton()  // Get currently pressed mouse button
-Vec2 getMousePos()  // Get mouse position as Vec2
-float getMouseX()  // Get mouse X position
-float getMouseY()  // Get mouse Y position
-bool getTouchAsMouse()  // Get touchAsMouse state
-int getWindowHeight()  // Get canvas height
-Vec2 getWindowSize()  // Get canvas size as Vec2
-int getWindowWidth()  // Get canvas width
-void hideCursor()  // Hide the mouse cursor
-bool isAltPressed()  // True while either Alt / Option key (left or right) is held
-bool isControlPressed()  // True while either Control key (left or right) is held
-bool isKeyPressed(int key)  // Is specific key currently pressed
-bool isMousePressed()  // Is mouse button pressed
-bool isOverlayFocused()  // True when an overlay currently owns keyboard focus (e.g. a text input is active); guard raw key input so typing into a UI field is not also handled by the app
-bool isOverlayHovered()  // True when an overlay currently has the pointer over it (e.g. cursor over a tcxImGui panel); guard raw mouse input so clicks on UI panels are not also handled by the app
-bool isShiftPressed()  // True while either Shift key (left or right) is held
-bool isSuperPressed()  // True while either Super / Cmd / Win key (left or right) is held
-FileDialogResult loadDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), bool folderSelection = false) [macos,windows,linux,android]  // Show file open dialog. Returns FileDialogResult with filePath, fileName, success
-void loadDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback)  // Show file open dialog asynchronously. Callback receives FileDialogResult
-void requestExitApp()  // Request application exit. Can be cancelled by listening to events().exitRequested and setting args.cancel = true
-FileDialogResult saveDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), const fs::path & defaultName = fs::path()) [macos,windows,linux,android]  // Show file save dialog. Returns FileDialogResult with filePath, fileName, success
-void saveDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName, std::function<void (const FileDialogResult &)> callback)  // Show file save dialog asynchronously. Callback receives FileDialogResult
-void setCursor(Cursor cursor)  // Set the mouse cursor shape
-void setTouchAsMouse(bool enabled)  // Enable/disable touch events firing as mouse events (for Android/iOS)
-void showCursor()  // Show the mouse cursor (default)
-void unbindCursorImage(Cursor cursor)  // Unbind a custom cursor image, restoring the system default
+void alertDialog(const std::string & title, const std::string & message) [macos,windows,linux,android,web]  // Shows an alert dialog.
+void alertDialogAsync(const std::string & title, const std::string & message, std::function<void ()> callback = std::function<void ()>(nullptr))  // Shows an alert dialog with a completion callback.
+void bindCursorImage(Cursor cursor, int width, int height, const unsigned char * pixels, int hotspotX = 0, int hotspotY = 0) [+1]  // Assigns an image to a mouse cursor slot.
+bool confirmDialog(const std::string & title, const std::string & message) [macos,windows,linux,android,web]  // Shows a confirmation dialog.
+void confirmDialogAsync(const std::string & title, const std::string & message, std::function<void (bool)> callback)  // Shows a confirmation dialog with a result callback.
+CoreEvents & events()  // Returns the current window context's CoreEvents hub.
+void exitApp(int code = 0)  // Orders the application to exit with normal cleanup.
+Cursor getCursor()  // Returns the selected mouse cursor shape.
+Vec2 getGlobalMousePos()  // Returns the mouse position in the current window.
+float getGlobalMouseX()  // Returns the current mouse X coordinate in the active window.
+float getGlobalMouseY()  // Returns the current mouse Y coordinate in the active window.
+float getGlobalPMouseX()  // Returns the saved previous mouse X coordinate.
+float getGlobalPMouseY()  // Returns the saved previous mouse Y coordinate.
+int getMouseButton()  // Returns the recorded mouse button.
+Vec2 getMousePos()  // Returns the mouse position in the current window.
+float getMouseX()  // Return the mouse X coordinate in window space.
+float getMouseY()  // Return the mouse Y coordinate in window space.
+bool getTouchAsMouse()  // Returns whether touch input is mapped to mouse input.
+int getWindowHeight()  // Returns the current window height.
+Vec2 getWindowSize()  // Returns the current window's drawing dimensions.
+int getWindowWidth()  // Returns the current window width.
+void hideCursor()  // Hides the mouse cursor.
+bool isAltPressed()  // Returns whether either Alt or Option key is recorded as pressed.
+bool isControlPressed()  // Returns whether either Control key is recorded as pressed.
+bool isKeyPressed(int key)  // Returns whether a key is recorded as pressed.
+bool isMousePressed()  // Returns the recorded mouse press state.
+bool isOverlayFocused()  // Report whether an overlay claims keyboard input.
+bool isOverlayHovered()  // Report whether an overlay claims mouse input.
+bool isShiftPressed()  // Returns whether either Shift key is recorded as pressed.
+bool isSuperPressed()  // Returns whether either Super, Command, or Windows key is recorded as pressed.
+FileDialogResult loadDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), bool folderSelection = false) [macos,windows,linux,android]  // Shows a file or folder selection dialog.
+void loadDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback)  // Shows a file or folder picker with a result callback.
+void requestExitApp()  // Requests a cancellable application exit.
+FileDialogResult saveDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), const fs::path & defaultName = fs::path()) [macos,windows,linux,android]  // Shows a file save dialog.
+void saveDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName, std::function<void (const FileDialogResult &)> callback)  // Shows a save destination picker with a result callback.
+void setCursor(Cursor cursor)  // Sets the mouse cursor shape.
+void setTouchAsMouse(bool enabled)  // Controls whether touch input also generates mouse events.
+void showCursor()  // Shows the mouse cursor.
+void unbindCursorImage(Cursor cursor)  // Removes a custom cursor image.
 ```
 
 ### Time - Frame
 
 ```cpp
-double getDeltaTime()  // Seconds since the previous update. Measured wall time in VSYNC / setFps modes; in fixed-Hz update mode (setIndependentFps with an update rate) and in runHeadlessApp every step reports exactly 1 / updateFps. Per window; a secondary window still measures its delta with high_resolution_clock (the system clock on Linux) until #307: a forward system clock step (NTP, a manual change) lands in one delta, so that window's due Node timers fire at once, and an uncapped callEveryCatchUp fires once per interval of the step; a backward step makes one delta negative: getDeltaTime() is negative on that tick and the window's Node timers are not counted down on it
-uint64_t getDrawCount()  // Get the number of draw() calls since the app started
-float getFps()  // Get the measured FPS (alias for getFrameRate). In a secondary window it is currently the average of the last 10 calls, like getFrameRate()
-FpsSettings getFpsSettings()  // Get the current FPS configuration (update/draw target rates, actual VSync rate, sync flag)
-uint64_t getFrameCount()  // Total frames rendered
-double getFrameRate()  // Measured update rate (updates per second over the last 10 frames). In fixed-Hz update mode and runHeadlessApp this is the measured rate, not the configured one: the fixed steps are counted by the time they consumed, so it reads steady when the rate isn't a multiple of the frame rate and drops when time is dropped. Recorded by the main loop and runHeadlessApp; in a secondary window each call currently adds the window's last delta and returns the average of the last 10 calls, so reading it once per second gives a ~10 s average
-uint64_t getUpdateCount()  // Get the number of update() calls since the app started
-void sleepMicros(int micros)  // Block the current thread for the given number of microseconds
-void sleepMillis(int millis)  // Block the current thread for the given number of milliseconds
+double getDeltaTime()  // Returns the current update's time step in seconds.
+uint64_t getDrawCount()  // Returns the main window's frame counter.
+float getFps()  // Returns the measured update rate.
+FpsSettings getFpsSettings()  // Returns the main loop's frame-rate configuration.
+uint64_t getFrameCount()  // Returns the current window's update counter.
+double getFrameRate()  // Returns the measured number of updates per second.
+uint64_t getUpdateCount()  // Return the current window's update counter.
+void sleepMicros(int micros)  // Pauses the calling thread for a duration in microseconds.
+void sleepMillis(int millis)  // Pauses the calling thread for a duration in milliseconds.
 ```
 
 ### Memory
 
 ```cpp
-size_t getFboCount()  // Get number of active FBO objects
-size_t getMemoryUsage()  // Get process memory usage in bytes (platform-specific)
-size_t getNodeCount()  // Get number of active Node objects in scene graph
-int getSokolMemoryAllocs()  // Number of active allocations in sokol libraries
-int getSokolMemoryBytes()  // Total bytes allocated by sokol libraries
-size_t getTextureCount()  // Get number of active Texture objects
-void releaseSglBuffers()  // Release sokol_gl vertex/command buffers (auto re-allocated on next draw)
+size_t getFboCount()  // Returns the number of living Fbo objects.
+size_t getMemoryUsage()  // Returns the process memory usage.
+size_t getNodeCount()  // Returns the number of living Node objects.
+int getSokolMemoryAllocs()  // Returns the number of active tracked sokol allocations.
+int getSokolMemoryBytes()  // Returns the current tracked sokol memory usage.
+size_t getTextureCount()  // Returns the Texture object counter.
+void releaseSglBuffers()  // Releases idle sokol_gl drawing buffers.
 ```
 
 ### Platform
 
 ```cpp
-bool captureWindow(Pixels & outPixels) [macos,windows,linux,ios,android]  // Capture the current window contents into a Pixels object. Returns true on success
-Vec3 getAccelerometer() [android,ios]  // Get accelerometer reading in g-force (1.0 = Earth gravity). Mobile only; desktop returns zero
-float getBatteryLevel() [macos,android,ios]  // Get battery charge level (0.0-1.0), or -1 if unavailable (e.g. desktop without a battery)
-float getCompassHeading() [android,ios]  // Get compass heading in radians (0 = north, clockwise). Mobile only
-Quaternion getDeviceOrientation() [android,ios]  // Get the fused device attitude (accelerometer + gyroscope + magnetometer) as a quaternion. Mobile only
-Vec3 getGyroscope() [android,ios]  // Get gyroscope angular velocity in rad/s. Mobile only; desktop returns zero
-bool getImmersiveMode() [android,ios]  // Return whether immersive mode is currently enabled
-Location getLocation() [macos,android,ios]  // Get the most recent GPS / WiFi location fix. Starts location updates on the first call
-float getSystemBrightness() [macos,android,ios]  // Get screen brightness (0.0-1.0). iOS: linear. Android: gamma-corrected (perceptual). Desktop: returns -1 (not supported)
-float getSystemVolume()  // Get system output volume (0.0-1.0)
-ThermalState getThermalState() [macos,ios,android]  // Get the coarse-grained device thermal state (Nominal / Fair / Serious / Critical)
-float getThermalTemperature() []  // Get device temperature in Celsius, or -1 if unavailable
-bool isBatteryCharging() [macos,android,ios]  // Return true if the battery is currently charging
-bool isProximityClose() [android,ios]  // Return true when the proximity sensor detects a nearby object (e.g. phone held to the ear)
-void setImmersiveMode(bool enabled) [android,ios]  // Hide system UI for immersive fullscreen. Android: sticky immersive (status + navigation bars). iOS: hides status bar + home indicator. Desktop: no-op
-void setSystemBrightness(float brightness) [macos,android,ios]  // Set screen brightness (0.0-1.0). Meaning of the value differs by platform (iOS linear, Android perceptual). Desktop: not supported
-void setSystemVolume(float volume)  // Set system output volume (0.0-1.0). iOS: not supported by the OS (logs a warning)
+bool captureWindow(Pixels & outPixels) [macos,windows,linux,ios,android]  // Copies the current window image into CPU pixels.
+Vec3 getAccelerometer() [android,ios]  // Returns the latest accelerometer reading.
+float getBatteryLevel() [macos,android,ios]  // Returns the battery charge level.
+float getCompassHeading() [android,ios]  // Returns the device compass heading.
+Quaternion getDeviceOrientation() [android,ios]  // Returns the device attitude as a quaternion.
+Vec3 getGyroscope() [android,ios]  // Returns the latest gyroscope reading.
+bool getImmersiveMode() [android,ios]  // Returns the immersive-mode setting.
+Location getLocation() [macos,android,ios]  // Returns the latest location fix.
+float getSystemBrightness() [macos,android,ios]  // Returns the screen brightness.
+float getSystemVolume()  // Returns the system output volume.
+ThermalState getThermalState() [macos,ios,android]  // Returns the device thermal state.
+float getThermalTemperature() []  // Queries the device temperature.
+bool isBatteryCharging() [macos,android,ios]  // Returns the battery charging status.
+bool isProximityClose() [android,ios]  // Reports whether the proximity sensor detects a nearby object.
+void setImmersiveMode(bool enabled) [android,ios]  // Controls whether system bars are hidden for immersive display.
+void setSystemBrightness(float brightness) [macos,android,ios]  // Sets the screen brightness.
+void setSystemVolume(float volume)  // Sets the system output volume.
 ```
 
 ### Graphics Backend
 
 ```cpp
-void cleanup()  // Shut down sokol_gfx + sokol_gl (called for you by the app loop)
-void setup()  // Initialize sokol_gfx + sokol_gl (called for you by the app loop)
+void cleanup()  // Shuts down the graphics backend.
+void setup()  // Initializes the graphics backend.
 ```
 
 ### Time - Elapsed
 
 ```cpp
-double getElapsedTime()  // Elapsed seconds (double) since program start, on a steady clock (system clock changes don't affect it). The same clock as getElapsedTimef/Millis/Micros: resetElapsedTimeCounter() restarts all of them, so the difference of two readings is only a duration if nothing resets the counter in between. Keeps full precision where getElapsedTimef() loses it after long uptimes
-float getElapsedTimef()  // Elapsed seconds (float) since program start. Same clock as getElapsedTime(); a float loses precision after about a day of uptime (7.8 ms steps at 18 h), so use it for animation and display, and getElapsedTime() (double) where precision matters
-uint64_t getElapsedTimeMicros()  // Elapsed microseconds (uint64) since program start. Same clock as getElapsedTime()
-uint64_t getElapsedTimeMillis()  // Elapsed milliseconds (uint64) since program start. Same clock as getElapsedTime()
-double getFrameElapsedTime()  // Elapsed seconds (double) sampled once at the start of the current frame, so every update step and the draw of one frame see the same value (getElapsedTime() moves during the frame). Same clock and reset as getElapsedTime(). Sampled by the main loop and runHeadlessApp; in a secondary window it currently returns the live getElapsedTime()
-void resetElapsedTimeCounter()  // Restart the elapsed-time counter: getElapsedTime/f/Millis/Micros and getFrameElapsedTime count from 0 again. Display only: Node timers, the loop, recording and the tc_get_health uptime keep running on the underlying clock. A duration taken as the difference of two of those readings across a reset comes out wrong (negative, or wrapped for the unsigned Millis/Micros); measure durations with getSystemTimeMicros()
+double getElapsedTime()  // Returns elapsed seconds on the application clock.
+float getElapsedTimef()  // Returns elapsed time in seconds as a float.
+uint64_t getElapsedTimeMicros()  // Returns elapsed time in microseconds.
+uint64_t getElapsedTimeMillis()  // Returns elapsed time in milliseconds.
+double getFrameElapsedTime()  // Returns elapsed seconds sampled for the current frame.
+void resetElapsedTimeCounter()  // Restarts the public elapsed-time counter.
 ```
 
 ### Time - System
 
 ```cpp
-uint64_t getSystemTimeMicros()  // Unix time in microseconds (wall clock). To measure a duration, take the difference of two readings as int64_t: it follows system clock adjustments, so a clock step can make t1 < t0 and an unsigned difference would wrap. Unlike the getElapsedTime family, resetElapsedTimeCounter() doesn't affect it
-uint64_t getSystemTimeMillis()  // Unix time in milliseconds (wall clock). It follows system clock adjustments, so take differences as int64_t (see getSystemTimeMicros)
-std::string getTimestampString(const std::string & timestampFormat) [+1]  // Formatted timestamp
-uint64_t getUnixTime()  // Current Unix timestamp in seconds
+uint64_t getSystemTimeMicros()  // Returns the current Unix time in microseconds.
+uint64_t getSystemTimeMillis()  // Returns the current Unix time in milliseconds.
+std::string getTimestampString(const std::string & timestampFormat) [+1]  // Formats the current local date and time as a string.
+uint64_t getUnixTime()  // Returns the current Unix timestamp in seconds.
 ```
 
 ### Time - Current
 
 ```cpp
-int getDay()  // Current day (1-31)
-int getHours()  // Current hours (0-23)
-int getMinutes()  // Current minutes (0-59)
-int getMonth()  // Current month (1-12)
-int getSeconds()  // Current seconds (0-59)
-int getWeekday()  // Weekday (0=Sun, 6=Sat)
-int getYear()  // Current year
+int getDay()  // Returns the current day of the month.
+int getHours()  // Returns the current hour.
+int getMinutes()  // Returns the current minute.
+int getMonth()  // Returns the current month.
+int getSeconds()  // Returns the current second.
+int getWeekday()  // Returns the current day of the week.
+int getYear()  // Returns the current year.
 ```
 
 ### Math - Random & Noise
 
 ```cpp
-float fbm(float x, float y, int octaves = 4, float lacunarity = 2.0, float gain = 0.5) [+1]  // Fractal Brownian Motion noise
-float noise(float x) [+6]  // Perlin noise
-float random() [+2]  // Random number
-int randomInt(int max) [+1]  // Random integer. randomInt(max) returns 0 to max-1 (max exclusive); randomInt(min, max) returns min to max (inclusive).
-void randomSeed(unsigned int seed)  // Set random seed
-float signedNoise(float x) [+6]  // Perlin noise (-1.0 to 1.0)
+float fbm(float x, float y, int octaves = 4, float lacunarity = 2.0, float gain = 0.5) [+1]  // Combines Perlin noise layers into fractal Brownian motion noise.
+float noise(float x) [+6]  // Returns Perlin noise mapped around a midpoint of 0.5.
+float random() [+2]  // Returns a uniformly distributed random floating-point value.
+int randomInt(int max) [+1]  // Returns a uniformly distributed random integer.
+void randomSeed(unsigned int seed)  // Sets the random number generator seed.
+float signedNoise(float x) [+6]  // Returns signed Perlin noise.
 ```
 
 ### Math - Interpolation
 
 ```cpp
-float clamp(float value, float min, float max)  // Clamp value to range
-float lerp(float a, float b, float t) [std]  // Linear interpolation
-float remap(float value, float inMin, float inMax, float outMin, float outMax)  // Remap value from one range to another
+float clamp(float value, float min, float max)  // Limits a value to a range.
+float lerp(float a, float b, float t) [std]  // Linearly interpolates between two numeric values.
+float remap(float value, float inMin, float inMax, float outMin, float outMax)  // Maps a value linearly from one range to another.
 ```
 
 ### Math - Trigonometry
 
 ```cpp
-float acos(float x) [std]  // Arc cosine
-float asin(float x) [std]  // Arc sine
-float atan(float x) [std]  // Arc tangent
-float atan2(float y, float x) [std]  // Arc tangent of y/x
-float cos(float x) [std]  // Cosine
-float deg2rad(float deg)  // Degrees to radians
-float rad2deg(float rad)  // Radians to degrees
-float sin(float x) [std]  // Sine
-float tan(float x) [std]  // Tangent
+float acos(float x) [std]  // Returns the inverse cosine of a value.
+float asin(float x) [std]  // Returns the inverse sine of a value.
+float atan(float x) [std]  // Returns the inverse tangent of a value.
+float atan2(float y, float x) [std]  // Returns the direction angle of a two-dimensional vector.
+float cos(float x) [std]  // Returns the cosine of an angle.
+float deg2rad(float deg)  // Converts degrees to radians.
+float rad2deg(float rad)  // Converts an angle from radians to degrees.
+float sin(float x) [std]  // Returns the sine of an angle.
+float tan(float x) [std]  // Returns the tangent of an angle.
 ```
 
 ### Math - General
 
 ```cpp
-float abs(float x) [std]  // Absolute value
-float angleDifference(float angle1, float angle2)  // Shortest angle difference in radians [-TAU/2, TAU/2]
-float angleDifferenceDeg(float deg1, float deg2)  // Shortest angle difference in degrees [-180, 180]
-void applyWindow(std::vector<float> & signal, WindowType type) [+1]  // Apply a window function (in place) to a signal to reduce spectral leakage before FFT
-float binToFrequency(int bin, int fftSize, int sampleRate)  // Convert an FFT bin index to its frequency in Hz
-float ceil(float x) [std]  // Round up
-float exp(float x) [std]  // Exponential (e^x)
-void fft(std::vector<std::complex<float>> & data)  // In-place forward FFT (Cooley-Tukey radix-2); the data size must be a power of two
-std::vector<float> fftMagnitude(const std::vector<std::complex<float>> & spectrum)  // Return the magnitude (amplitude) of each bin in a spectrum
-std::vector<float> fftMagnitudeDb(const std::vector<std::complex<float>> & spectrum, float minDb)  // Return the magnitude of each bin in decibels, clamped to minDb
-std::vector<float> fftPhase(const std::vector<std::complex<float>> & spectrum)  // Return the phase angle (radians) of each bin in a spectrum
-std::vector<float> fftPower(const std::vector<std::complex<float>> & spectrum)  // Return the power spectrum (magnitude squared) of each bin
-std::vector<std::complex<float>> fftReal(const std::vector<float> & signal) [+1]  // Compute the FFT of a real-valued signal, optionally applying a window function first
-float floor(float x) [std]  // Round down
-float fmod(float x, float y) [std]  // Floating-point modulo
-float fract(float value)  // Fractional part
-int frequencyToBin(float freq, int fftSize, int sampleRate)  // Convert a frequency in Hz to the nearest FFT bin index
-void ifft(std::vector<std::complex<float>> & data)  // In-place inverse FFT; the data size must be a power of two
-bool isPowerOfTwo(int n)  // Return true if n is a positive power of two
-float log(float x) [std]  // Natural logarithm
-float max(float a, float b) [std]  // Maximum
-float min(float a, float b) [std]  // Minimum
-int nextPowerOfTwo(int n)  // Return the smallest power of two greater than or equal to n
-float pow(float x, float y) [std]  // Power (x^y)
-float round(float x) [std]  // Round to nearest
-float sign(float value)  // Sign (-1, 0, 1)
-float sq(float value)  // Square (x*x)
-float sqrt(float x) [std]  // Square root
-std::vector<std::complex<float>> toComplex(const std::vector<float> & real)  // Convert a real-valued signal into a complex array with zero imaginary parts
-float windowFunction(WindowType type, int i, int n)  // Return the window coefficient for sample i of n for the given window type
-float wrap(float value, float min, float max)  // Wrap value within range [min, max)
+float abs(float x) [std]  // Returns the absolute value of a number.
+float angleDifference(float angle1, float angle2)  // Returns the shortest signed difference between two angles in radians.
+float angleDifferenceDeg(float deg1, float deg2)  // Returns the shortest signed difference between two angles in degrees.
+void applyWindow(std::vector<float> & signal, WindowType type) [+1]  // Applies a window to a signal in place.
+float binToFrequency(int bin, int fftSize, int sampleRate)  // Converts an FFT bin index to a frequency.
+float ceil(float x) [std]  // Rounds a number toward positive infinity.
+float exp(float x) [std]  // Returns e raised to the given power.
+void fft(std::vector<std::complex<float>> & data)  // Transforms complex samples into a frequency spectrum in place.
+std::vector<float> fftMagnitude(const std::vector<std::complex<float>> & spectrum)  // Returns the magnitude of each spectrum bin.
+std::vector<float> fftMagnitudeDb(const std::vector<std::complex<float>> & spectrum, float minDb)  // Returns spectrum magnitudes in decibels.
+std::vector<float> fftPhase(const std::vector<std::complex<float>> & spectrum)  // Returns the phase angle of each spectrum bin.
+std::vector<float> fftPower(const std::vector<std::complex<float>> & spectrum)  // Returns the squared magnitude of each spectrum bin.
+std::vector<std::complex<float>> fftReal(const std::vector<float> & signal) [+1]  // Computes the frequency spectrum of a real-valued signal.
+float floor(float x) [std]  // Rounds a number toward negative infinity.
+float fmod(float x, float y) [std]  // Returns the floating-point remainder of a division.
+float fract(float value)  // Returns the fractional part relative to the floor of a value.
+int frequencyToBin(float freq, int fftSize, int sampleRate)  // Converts a frequency to an FFT bin index.
+void ifft(std::vector<std::complex<float>> & data)  // Transforms a complex spectrum back into samples in place.
+bool isPowerOfTwo(int n)  // Tests whether an integer is a positive power of two.
+float log(float x) [std]  // Returns the natural logarithm of a value.
+float max(float a, float b) [std]  // Returns the greater of two values.
+float min(float a, float b) [std]  // Returns the lesser of two values.
+int nextPowerOfTwo(int n)  // Returns the smallest positive power of two at least as large as a value.
+float pow(float x, float y) [std]  // Returns a base raised to an exponent.
+float round(float x) [std]  // Rounds a number to the nearest integer value.
+float sign(float value)  // Returns the sign of a value.
+float sq(float value)  // Returns the square of a value.
+float sqrt(float x) [std]  // Returns the square root of a value.
+std::vector<std::complex<float>> toComplex(const std::vector<float> & real)  // Converts real samples to complex samples with zero imaginary parts.
+float windowFunction(WindowType type, int i, int n)  // Returns a window coefficient for a sample.
+float wrap(float value, float min, float max)  // Wraps a value around a repeating range.
 ```
 
 ### Math - Geometry
 
 ```cpp
-float dist(float x1, float y1, float x2, float y2) [+2]  // Distance between points
-float distSquared(float x1, float y1, float x2, float y2) [+2]  // Squared distance
+float dist(float x1, float y1, float x2, float y2) [+2]  // Returns the Euclidean distance between two points.
+float distSquared(float x1, float y1, float x2, float y2) [+2]  // Returns the squared distance between two points.
 ```
 
 ### Window & System
 
 ```cpp
-void bringWindowToFront()  // Activate and raise the application window, giving it focus. Desktop only; no-op on mobile/web
-float getAspectRatio()  // Get window aspect ratio (width / height)
-std::string getBackendName()  // Get the active graphics backend name (e.g. "Metal (macOS)", "D3D11", "OpenGL", "WebGPU") 
-std::string getClipboardString()  // Get text from clipboard
-float getDisplayScaleFactor()  // Get the DPI scale of the main display (available before window creation). macOS: 1.0 or 2.0 (Retina); other platforms: 1.0
-float getDpiScale()  // Get display DPI scale factor (e.g. 2.0 for Retina)
-int getFramebufferHeight()  // Get framebuffer height in pixels (window height * DPI scale)
-int getFramebufferWidth()  // Get framebuffer width in pixels (window width * DPI scale)
-bool getKeepScreenOn() [macos,windows,android,ios]  // Check whether keep-screen-on is currently enabled
-int getMaxUpdateSteps()  // The cap on fixed-rate update steps per frame (and per runHeadlessApp loop pass) set by setMaxUpdateSteps(). 10 by default; 0 or less means no cap
-IVec2 getWindowPosition() [macos,windows]  // Get window position in screen coordinates (top-left origin). macOS/Windows only; other platforms return (-1, -1)
-bool grabScreen(Pixels & outPixels) [macos,windows,linux,ios,android]  // Capture current screen to Pixels
-bool isFullscreen()  // Check if window is fullscreen
-bool isRecording()  // Check whether a recording is in progress
-int recordingFrameCount()  // Number of video frames accepted by the backend; failed submissions are excluded. Finalization may still fail.
-fs::path recordingPath()  // Output file path of the current recording
-void redraw(int count = 1)  // Request extra redraws (useful for event-driven rendering)
-int runHeadlessApp(const HeadlessSettings & settings = HeadlessSettings())  // Run an app class without a window or graphics context (update loop only). Updates are fixed steps at the target rate (getDeltaTime() is 1 / fps), at most setMaxUpdateSteps() per loop pass (default 10; between passes the loop sleeps until the next step is due, at most 1 ms); time beyond that (after a stall, or when update() is slower than its rate) is dropped with a one-time warning. Template on the app type; returns the process exit code
-bool saveScreenshot(const std::filesystem::path & path)  // Save a screenshot of the rendered frame (format picked from the extension, case-insensitive: png/jpg/bmp on most platforms; see the platform note). Safe to call from anywhere; capture is deferred to after present(). Returns true when capture is queued; on native platforms the destination folder is prepared first. This does not mean the file is already written. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned. Keeps bool on every platform: true means queued. Native entry synchronously checks path, parent creation and bundle refusal through prepareOutputPath; the deferred atomic checked write logs one Error on failure. Web remains a download: encoded output is handed to the browser, with no folders or .tmp and no disk-completion guarantee.
-void setClipboardString(const std::string & text)  // Copy text to clipboard
-void setFullscreen(bool full)  // Set fullscreen mode
-void setIndependentFps(float updateFps, float drawFps)  // Set independent update and draw rates. A fixed update rate runs fixed steps (getDeltaTime() is 1 / updateFps for each), at most setMaxUpdateSteps() per frame (default 10): time beyond that (after a stall, when update() is too slow, or when updateFps is more than that many times the display rate) is dropped with a one-time warning. Switching at runtime starts the new rate from the switch (no catch-up; on the next frame a fixed update rate runs one step, a VSYNC update's getDeltaTime() counts from the call, or from the update's start when called inside an update, and a fixed draw rate draws). Calling it again with the current rates does nothing, and changing only the draw rate keeps the update's phase and drops no time; switching between a synced (setFps) and an independent update counts as an update-mode change even at the same rate (setFps(VSYNC) to setIndependentFps(VSYNC, 30) drops up to a frame). Entering a fixed update rate restarts with one step, which can count more or less than the time since the last update (from a 144 Hz display to a fixed 60, the step is ~9.7 ms longer than the 1/144 s since the last update); entering a VSYNC update drops the time since the last update (under a frame in the usual modes, long only after an idle like EVENT_DRIVEN), and on that frame, called outside update(), its dt counts only from the call
-void setKeepScreenOn(bool enabled) [macos,windows,android,ios]  // Prevent display sleep / auto-lock while the app is running. Supported: Android, iOS, macOS, Windows. Linux / Web: no-op
-void setMaxUpdateSteps(int steps)  // Set the most fixed-rate update steps run in one frame (setIndependentFps with an update rate) or in one runHeadlessApp loop pass. More are pending after a stall, when update() is slower than its own rate, or when the update rate is more than this many times the display rate; the time beyond the cap is dropped with a one-time warning instead of replayed. Default 10. 0 or less removes the cap so every step runs (e.g. a deterministic simulation), at the cost of a freeze while a long stall is replayed and of frames that keep growing while update() is slower than its rate
-void setOrientation(Orientation mask) [android,ios]  // Set allowed screen orientations (mobile). Values: Orientation::Portrait, Landscape, All
-void setWindowDecorated(bool decorated)  // Toggle the window's standard decorations (title bar, borders, buttons). false = borderless but still focusable and closable. Desktop only
-void setWindowPosition(int x, int y) [macos,windows]  // Set window position in screen coordinates (top-left origin). macOS/Windows only; no-op on other platforms
-void setWindowSize(int width, int height)  // Set window size. Resizing the main window is not implemented on Linux yet
-void setWindowSizeLogical(int width, int height)  // Resize the window to the given logical size (logical pixels)
-void setWindowTitle(const std::string & title)  // Set window title
-SaveResult startRecording(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start recording the window — or an Fbo (clean, GUI-free output) — to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited. Calling it again while recording finalizes the current file first, then starts fresh (same path = the old file is overwritten). Returns SaveResult for path preparation and encoder opening. Success starts an in-place stream; check close()/stop() for finalization.
-SaveResult stopRecording()  // Stop the current recording and finalize the file. Returns SaveResult for backend finalization, retaining the first backend failure. Caller errors and transient readback failures do not fail the take. Repeated calls retain the result without another Error. No temporary/rename is used.
-void toggleFullscreen()  // Toggle fullscreen mode
+void bringWindowToFront()  // Requests that the application window move to the foreground and receive focus.
+float getAspectRatio()  // Returns the current window's aspect ratio.
+std::string getBackendName()  // Returns the active graphics backend's name.
+std::string getClipboardString()  // Returns clipboard text.
+float getDisplayScaleFactor()  // Returns the platform display scale factor.
+float getDpiScale()  // Returns the current window's DPI scale factor.
+int getFramebufferHeight()  // Returns the current window framebuffer's height.
+int getFramebufferWidth()  // Returns the current window framebuffer's width.
+bool getKeepScreenOn() [macos,windows,android,ios]  // Returns the keep-screen-on setting.
+int getMaxUpdateSteps()  // Returns the limit on fixed-rate update steps.
+IVec2 getWindowPosition() [macos,windows]  // Returns the window position on the screen.
+bool grabScreen(Pixels & outPixels) [macos,windows,linux,ios,android]  // Read this window's screen into Pixels. What is captured depends on when you call it
+bool isFullscreen()  // Returns whether the current window is fullscreen.
+bool isRecording()  // Returns whether the global screen recorder is capturing.
+int recordingFrameCount()  // Returns the global recording's accepted video frame count.
+fs::path recordingPath()  // Returns the global recording's output path.
+void redraw(int count = 1)  // Requests additional frames in event-driven rendering.
+int runHeadlessApp(const HeadlessSettings & settings = HeadlessSettings())  // Runs an app without a window or graphics context.
+bool saveScreenshot(const std::filesystem::path & path)  // Queues a screenshot of the rendered window.
+void setClipboardString(const std::string & text)  // Copies text to the clipboard.
+void setFullscreen(bool full)  // Sets the window fullscreen state.
+void setIndependentFps(float updateFps, float drawFps)  // Sets separate update and drawing rates.
+void setKeepScreenOn(bool enabled) [macos,windows,android,ios]  // Controls whether display sleep and automatic locking are inhibited.
+void setMaxUpdateSteps(int steps)  // Sets the maximum number of fixed update steps per loop pass.
+void setOrientation(Orientation mask) [android,ios]  // Sets the allowed screen orientations.
+void setWindowDecorated(bool decorated)  // Controls the main window's standard decorations.
+void setWindowPosition(int x, int y) [macos,windows]  // Moves the window to a screen position.
+void setWindowSize(int width, int height)  // Resizes the window in the current coordinate units.
+void setWindowSizeLogical(int width, int height)  // Resizes the main window using logical dimensions.
+void setWindowTitle(const std::string & title)  // Sets the window title.
+SaveResult startRecording(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Starts recording a window or Fbo to a video file.
+SaveResult stopRecording()  // Stops the global recording and finalizes its file.
+void toggleFullscreen()  // Toggles the window fullscreen state.
 ```
 
 ### Utility
 
 ```cpp
-void beep() [+3]  // Play a beep sound
-void closeLogFile()  // Close the current log file
-bool compress(const void * src, std::size_t nbytes, std::vector<std::uint8_t> & out, Codec codec) [+1]  // Compress a byte buffer with the given codec (Codec::None or Codec::LZ4). The vector overload resizes out and returns true on success; the raw (dst pointer) overload returns the number of bytes written, or -1 on failure (no resizing).
-std::size_t compressBound(std::size_t nbytes, Codec codec)  // Worst-case compressed size, for sizing a destination buffer
-bool decompress(const void * src, std::size_t nbytes, std::vector<std::uint8_t> & out, std::size_t decompressedSize, Codec codec) [+1]  // Decompress a byte buffer; decompressedSize is the known original byte count. The vector overload resizes out and returns true on success (false / cleared out on mismatch or failure); the raw (dst pointer) overload returns the number of bytes written, or -1 on failure.
-std::vector<unsigned char> fromBase64(const std::string & encoded)  // Decode a Base64 string back into raw bytes
-Logger & getLogger()  // Access the global logger instance
-std::thread::id getMainThreadId()  // Get the main thread ID. Records the current thread's ID on the first call, so it must first be called from the main thread.
-const char * getVersion()  // TrussC version string from git describe (e.g. "v0.6.2" or "v0.6.2-14-gabc123")
-int hexToInt(const std::string & hexStr)  // Parse a hex string into a signed int
-unsigned int hexToUInt(const std::string & hexStr)  // Parse a hex string into an unsigned int
-void intersectRect(float x1, float y1, float w1, float h1, float x2, float y2, float w2, float h2, float & ox, float & oy, float & ow, float & oh)  // Compute intersection of two rectangles
-bool isMainThread()  // Whether the calling thread is the main (scene) thread. The main thread ID is recorded on the first call to getMainThreadId().
-bool isStringInString(const std::string & haystack, const std::string & needle)  // Check whether one string contains another
-std::string joinString(const std::vector<std::string> & stringElements, const std::string & delimiter)  // Join strings with delimiter
-LogStream logAt(LogLevel level = Notice)  // Stream-based log output at a runtime-selected level
-LogStream logError(const std::string & module = std::string(""))  // Stream-based error-level log output
-LogStream logFatal(const std::string & module = std::string(""))  // Stream-based fatal-level log output
-const char * logLevelToString(LogLevel level)  // Return the uppercase name of a log level (e.g. "NOTICE", "WARNING") 
-LogStream logNotice(const std::string & module = std::string(""))  // Print to console
-LogStream logVerbose(const std::string & module = std::string(""))  // Stream-based verbose-level log output
-LogStream logWarning(const std::string & module = std::string(""))  // Stream-based warning-level log output
-Json nodeToJson(Node & node, int maxDepth, bool includeDerived = false)  // Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection. Derived members (e.g. globalPos) are left out unless includeDerived is true; then they are included and named under "derived"
-Json parseJson(const std::string & str)  // Parse a JSON string into a Json object; returns an empty Json on parse error.
-Xml parseXml(const std::string & str)  // Parse an XML string into an Xml object.
-JsonReadReflector reflectFromJson(T & obj, const Json & j)  // Apply the keys of a Json object onto obj's reflected (TC_REFLECT) members. Returns the reflector so callers can inspect which members were applied, skipped, read-only, or unknown.
-Json reflectToJson(T & obj, bool includeDerived = false)  // Return the reflected (TC_REFLECT) members of obj as a Json object. Works on any reflected type such as a Node or Mod. Derived values (TC_DERIVED, e.g. Node's globalPos) are left out unless includeDerived is true, so the default output is what a save should contain.
-void runOnMainThread(std::function<void ()> fn) [+1]  // Run a callback on the main (scene) thread; immediately if already on it, otherwise enqueue and return without waiting for execution. Each frame drains, in order, the work queued when its drain started; worker submissions during the drain wait until the next frame. There is no queue limit. runOnMainThread(fn, weakToken) accepts the same weak_ptr<atomic<bool>> liveness token as Deliver::Main: at execution time an expired or false token drops the closure. A token does not wait for a callback already running; serialize target teardown with delivery, normally on the main thread. The single-argument form never drops callbacks and the caller owns captured lifetimes. On Web without pthreads both forms run immediately, with the token check for the two-argument form. tc_get_health reports the drain-start count as mainQueuePending. Producers that can drop values use their own bounded or latest-value buffer.
-void setConsoleLogLevel(LogLevel level)  // Set the minimum log level printed to the console
-void setFileLogLevel(LogLevel level)  // Set the minimum log level written to the log file
-SaveResult setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns a failed SaveResult, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and a failed SaveResult returned.
-void setLogLevel(LogLevel level)  // Set the console, file and system log levels at once (a later per-output call wins)
-void setSystemLogLevel(LogLevel level)  // Set the minimum log level written to the OS log: os_log on macOS, OutputDebugStringW on Windows
-const std::string & shortTypeName(const std::type_info & ti)  // Short (unqualified) readable name for a type, cached per type
-std::vector<std::string> splitString(const std::string & source, const std::string & delimiter, bool ignoreEmpty = false, bool trim = false)  // Split string by delimiter
-void stringReplace(std::string & input, const std::string & searchStr, const std::string & replaceStr)  // Replace substrings in place, left to right without overlapping or searching the replacement. An empty search string leaves the input unchanged.
-std::size_t stringTimesInString(const std::string & haystack, const std::string & needle)  // Count nonoverlapping occurrences of a substring in a string. An empty substring matches nothing and returns 0.
-void tcCloseLogFile() ⚠️deprecated  // Deprecated alias for closeLogFile()
-Logger & tcGetLogger() ⚠️deprecated  // Deprecated alias for getLogger()
-LogStream tcLog(LogLevel level = Notice) ⚠️deprecated  // Deprecated alias for logAt()
-LogStream tcLogError(const std::string & module = std::string("")) ⚠️deprecated  // Deprecated alias for logError()
-LogStream tcLogFatal(const std::string & module = std::string("")) ⚠️deprecated  // Deprecated alias for logFatal()
-LogStream tcLogNotice(const std::string & module = std::string("")) ⚠️deprecated  // Deprecated alias for logNotice()
-LogStream tcLogVerbose(const std::string & module = std::string("")) ⚠️deprecated  // Deprecated alias for logVerbose()
-LogStream tcLogWarning(const std::string & module = std::string("")) ⚠️deprecated  // Deprecated alias for logWarning()
-void tcSetConsoleLogLevel(LogLevel level) ⚠️deprecated  // Deprecated alias for setConsoleLogLevel()
-void tcSetFileLogLevel(LogLevel level) ⚠️deprecated  // Deprecated alias for setFileLogLevel()
-SaveResult tcSetLogFile(const fs::path & path) ⚠️deprecated  // Deprecated alias for setLogFile()
-std::string toBase64(const unsigned char * bytes, size_t len) [+2]  // Encode raw bytes as a Base64 string
-std::string toBinary(int value) [+4]  // Convert an integer to a binary string
-bool toBool(const std::string & str)  // Parse a string into a bool
-double toDouble(const std::string & str)  // Parse a string into a double
-float toFloat(const std::string & str)  // Convert string to float
-std::string toHex(const T & value) [+2]  // Convert an integer (zero-padded to width) or string bytes to a hexadecimal string
-int toInt(const std::string & str)  // Convert string to int
-int64_t toInt64(const std::string & str)  // Parse a string into a 64-bit integer
-std::string toJsonString(const Json & j, int indent = 2)  // Serialize a Json object to a string. indent sets the pretty-print width (negative for compact).
-std::string toLower(const std::string & src)  // Convert to lower case
-std::string toString(const T & value) [+4]  // Convert to string
-std::string toUpper(const std::string & src)  // Convert to upper case
-std::string trim(const std::string & src)  // Trim whitespace from both ends of a string
-std::string trimBack(const std::string & src)  // Trim trailing whitespace from a string
-std::string trimFront(const std::string & src)  // Trim leading whitespace from a string
-const std::string & typeName(const std::type_info & ti) [+1]  // Readable (demangled) fully-qualified name for a type, cached per type
+void beep() [+3]  // Play a short notification sound.
+void closeLogFile()  // Closes the global logger's current file.
+bool compress(const void * src, std::size_t nbytes, std::vector<std::uint8_t> & out, Codec codec) [+1]  // Compresses a byte buffer with the selected codec.
+std::size_t compressBound(std::size_t nbytes, Codec codec)  // Returns an upper bound for the compressed buffer size.
+bool decompress(const void * src, std::size_t nbytes, std::vector<std::uint8_t> & out, std::size_t decompressedSize, Codec codec) [+1]  // Decompresses a byte buffer with the selected codec.
+std::vector<unsigned char> fromBase64(const std::string & encoded)  // Decode a Base64 string into bytes.
+Logger & getLogger()  // Returns the global logger.
+std::thread::id getMainThreadId()  // Returns the recorded main thread identifier.
+const char * getVersion()  // Returns the TrussC version string.
+int hexToInt(const std::string & hexStr)  // Parse a hexadecimal string as a signed integer.
+unsigned int hexToUInt(const std::string & hexStr)  // Parse a hexadecimal string as an unsigned integer.
+void intersectRect(float x1, float y1, float w1, float h1, float x2, float y2, float w2, float h2, float & ox, float & oy, float & ow, float & oh)  // Computes the intersection of two rectangles.
+bool isMainThread()  // Reports whether the calling thread is the main thread.
+bool isStringInString(const std::string & haystack, const std::string & needle)  // Check whether a string contains a substring.
+std::string joinString(const std::vector<std::string> & stringElements, const std::string & delimiter)  // Join strings with a delimiter.
+LogStream logAt(LogLevel level = Notice)  // Creates a log stream at the selected severity.
+LogStream logError(const std::string & module = std::string(""))  // Creates a stream for error-level logging.
+LogStream logFatal(const std::string & module = std::string(""))  // Creates a log stream at Fatal severity.
+const char * logLevelToString(LogLevel level)  // Returns the uppercase name of a log level.
+LogStream logNotice(const std::string & module = std::string(""))  // Logs a message at Notice level.
+LogStream logVerbose(const std::string & module = std::string(""))  // Creates a stream for verbose-level log messages.
+LogStream logWarning(const std::string & module = std::string(""))  // Creates a stream for warning-level logging.
+Json nodeToJson(Node & node, int maxDepth, bool includeDerived = false)  // Serializes a node and its subtree to JSON.
+Json parseJson(const std::string & str)  // Parses a JSON string into a Json value.
+Xml parseXml(const std::string & str)  // Parses an XML string into an Xml object.
+JsonReadReflector reflectFromJson(T & obj, const Json & j)  // Applies JSON values to an object's reflected members.
+Json reflectToJson(T & obj, bool includeDerived = false)  // Returns an object's reflected members as JSON.
+void runOnMainThread(std::function<void ()> fn) [+1]  // Dispatches a callback to the main thread.
+void setConsoleLogLevel(LogLevel level)  // Sets the minimum severity for console output.
+void setFileLogLevel(LogLevel level)  // Sets the minimum severity for log file output.
+SaveResult setLogFile(const fs::path & path)  // Opens a file for the global logger's output.
+void setLogLevel(LogLevel level)  // Sets all three log output thresholds together.
+void setSystemLogLevel(LogLevel level)  // Sets the minimum severity for system log output.
+const std::string & shortTypeName(const std::type_info & ti)  // Returns a readable type name without its outer qualification.
+std::vector<std::string> splitString(const std::string & source, const std::string & delimiter, bool ignoreEmpty = false, bool trim = false)  // Split a string at a delimiter.
+void stringReplace(std::string & input, const std::string & searchStr, const std::string & replaceStr)  // Replace substrings in place.
+std::size_t stringTimesInString(const std::string & haystack, const std::string & needle)  // Count occurrences of a substring.
+void tcCloseLogFile() ⚠️deprecated  // Provides a deprecated alias for closeLogFile().
+Logger & tcGetLogger() ⚠️deprecated  // Provides a deprecated alias for getLogger().
+LogStream tcLog(LogLevel level = Notice) ⚠️deprecated  // Provides a deprecated alias for logAt().
+LogStream tcLogError(const std::string & module = std::string("")) ⚠️deprecated  // Provides a deprecated alias for logError().
+LogStream tcLogFatal(const std::string & module = std::string("")) ⚠️deprecated  // Provides a deprecated alias for logFatal().
+LogStream tcLogNotice(const std::string & module = std::string("")) ⚠️deprecated  // Provides a deprecated alias for logNotice().
+LogStream tcLogVerbose(const std::string & module = std::string("")) ⚠️deprecated  // Provides a deprecated alias for logVerbose().
+LogStream tcLogWarning(const std::string & module = std::string("")) ⚠️deprecated  // Provides a deprecated alias for logWarning().
+void tcSetConsoleLogLevel(LogLevel level) ⚠️deprecated  // Provides a deprecated alias for setConsoleLogLevel().
+void tcSetFileLogLevel(LogLevel level) ⚠️deprecated  // Provides a deprecated alias for setFileLogLevel().
+SaveResult tcSetLogFile(const fs::path & path) ⚠️deprecated  // Provides a deprecated alias for setLogFile().
+std::string toBase64(const unsigned char * bytes, size_t len) [+2]  // Encode bytes as a Base64 string.
+std::string toBinary(int value) [+4]  // Convert integers or string bytes to binary text.
+bool toBool(const std::string & str)  // Convert a string to a Boolean value.
+double toDouble(const std::string & str)  // Parse a string as a double.
+float toFloat(const std::string & str)  // Parse a string as a float.
+std::string toHex(const T & value) [+2]  // Convert a value or string bytes to hexadecimal text.
+int toInt(const std::string & str)  // Parse a string as an integer.
+int64_t toInt64(const std::string & str)  // Converts a string to a 64-bit integer.
+std::string toJsonString(const Json & j, int indent = 2)  // Serializes a Json value to a string.
+std::string toLower(const std::string & src)  // Return a lowercase copy of a string.
+std::string toString(const T & value) [+4]  // Convert a value to a string.
+std::string toUpper(const std::string & src)  // Return an uppercase copy of a string.
+std::string trim(const std::string & src)  // Remove whitespace from both ends of a string.
+std::string trimBack(const std::string & src)  // Remove trailing whitespace from a string.
+std::string trimFront(const std::string & src)  // Returns a string with leading whitespace removed.
+const std::string & typeName(const std::type_info & ti) [+1]  // Returns a readable, fully qualified type name.
 ```
 
 ### File
 
 ```cpp
-SaveResult appendToFile(const fs::path & path, const std::string & content)  // Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns a failed SaveResult and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and a failed SaveResult returned.
-bool createDirectory(const fs::path & path)  // Create directory (and parents)
-bool directoryExists(const fs::path & path)  // Check if directory exists
-bool fileExists(const fs::path & path)  // Check if file exists
-std::string getAbsolutePath(const fs::path & path)  // Get absolute path
-std::string getBaseName(const fs::path & path)  // Get filename without extension
-fs::path getDataPath(const fs::path & filename)  // Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged. Only the data-directory base is lexically normalized; filename components are preserved. Safe to call from any thread. This is the bundled data the app reads (bin/data in development, the bundle's Resources/data when packaged); files the app writes and keeps go to getUserDataPath().
-fs::path getDataPathRoot()  // Get the current data path root as fs::path. Unless explicitly set, Apple platforms choose one existing folder on first use, in order: <exe>/data (iOS), <exe>/../Resources/data (macOS release), <exe>/../../../data (macOS development). The choice is kept for the process; missing files never fall back to another folder. Only the release workflow copies bin/data into the macOS bundle; normal builds keep using bin/data.
-fs::path getExecutableDir()  // Get the directory containing the running executable.
-fs::path getExecutablePath()  // Get the absolute path of the running executable.
-std::string getFileExtension(const fs::path & path)  // Get file extension without dot, as written (case kept). Compare toLower(getFileExtension(path)) to match it case-insensitively, as TrussC's loaders do.
-std::string getFileName(const fs::path & path)  // Get filename from path
-int64_t getFileSize(const fs::path & path)  // Get file size in bytes
-std::string getParentDirectory(const fs::path & path)  // Get parent directory
-fs::path getTempPath(const fs::path & path = fs::path(""))  // Folder for temporary files, which the OS may delete at any time: $TMPDIR/<bundle id>/ on macOS, %TEMP%\<app>\ on Windows, $TMPDIR (or /tmp) /<app>/ on Linux, the app's tmp/ on iOS, the app's cache folder on Android, in-memory /tmp on web. Created on first use. A relative path is joined to it; an absolute path is returned as is.
-fs::path getUserDataPath(const fs::path & path = fs::path(""))  // Folder for files the app writes and keeps (settings, presets, logs, recordings): always the OS per-user app folder, in development and in a packaged app alike. macOS ~/Library/Application Support/<bundle id>/, Windows %LOCALAPPDATA%\<app>\, Linux $XDG_DATA_HOME/<app>/ (default ~/.local/share/<app>/), iOS the app's Library/Application Support/, Android the app's internal files folder; on web it is in memory and not kept. <app> is the executable name. Created on first use. A relative path is joined to it; an absolute path is returned as is. Write and read back through it: saveJson(j, getUserDataPath("settings.json")) then loadJson(getUserDataPath("settings.json")). setUserDataPathRoot() changes it.
-std::string joinPath(const fs::path & dir, const fs::path & file)  // Join directory and filename
-std::vector<std::string> listDirectory(const fs::path & path)  // List files in directory
-const char * loadErrorName(LoadError e)  // Short label for a LoadError value ("FileNotFound", ...). For log messages
-Json loadJson(const fs::path & path)  // Load a JSON file and return it as a Json object. Relative paths are resolved via getDataPath; returns an empty Json on error.
-std::string loadTextFile(const fs::path & path)  // Load entire text file
-Xml loadXml(const fs::path & path)  // Load an XML file and return it as an Xml object. Relative paths are resolved via getDataPath.
-std::string pathToUtf8(const fs::path & p)  // Convert a path to a UTF-8 std::string, the same on every platform. Use it instead of path.string(), which on Windows converts to the process code page and can throw for characters outside it. On Windows it can still throw for a name that is not valid UTF-16 (an unpaired surrogate); to log a path, use log << path, which does not throw.
-bool removeFile(const fs::path & path)  // Remove file
-SaveResult saveJson(const Json & j, const fs::path & path, int indent = 2)  // Serialize and save JSON (indent sets the pretty-print width; negative means compact). Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
-SaveResult saveTextFile(const fs::path & path, const std::string & content)  // Save text bytes unchanged in binary mode. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
-void setDataPathRoot(const fs::path & path)  // Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is. Call it before starting threads that load files (e.g. in setup()).
-void setDataPathToResources() [macos,ios]  // Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms. Call it before starting threads that load files (e.g. in setup()).
-void setUserDataPathRoot(const fs::path & path)  // Fix the folder getUserDataPath() returns, for installations, several instances of one app, or tests. Mirrors setDataPathRoot(): a relative root is resolved against the executable directory, an absolute root is used as is. The folder is created on first use. A root inside the app bundle (macOS / iOS) still gets its writes refused.
-fs::path utf8ToPath(std::string_view utf8)  // Convert a UTF-8 string to fs::path, decoding it as UTF-8 on every platform. fs::path(std::string) on Windows decodes in the process code page, which is UTF-8 only in apps built with TrussC's Windows manifest (Windows 10 1903 or later).
+SaveResult appendToFile(const fs::path & path, const std::string & content)  // Appends a string to a file.
+bool createDirectory(const fs::path & path)  // Creates a directory and any missing parent directories.
+bool directoryExists(const fs::path & path)  // Checks whether a path refers to an existing directory.
+bool fileExists(const fs::path & path)  // Checks whether a path refers to an existing regular file.
+std::string getAbsolutePath(const fs::path & path)  // Returns an absolute path.
+std::string getBaseName(const fs::path & path)  // Returns a filename without its final extension.
+fs::path getDataPath(const fs::path & filename)  // Resolves a path relative to the application data directory.
+fs::path getDataPathRoot()  // Return the current data path root.
+fs::path getExecutableDir()  // Returns the directory containing the running executable.
+fs::path getExecutablePath()  // Returns the path of the running executable.
+std::string getFileExtension(const fs::path & path)  // Returns a file's final extension without its leading dot.
+std::string getFileName(const fs::path & path)  // Returns the final filename component of a path.
+int64_t getFileSize(const fs::path & path)  // Returns a file's size in bytes.
+std::string getParentDirectory(const fs::path & path)  // Returns the parent portion of a path.
+fs::path getTempPath(const fs::path & path = fs::path(""))  // Return a path for temporary files.
+fs::path getUserDataPath(const fs::path & path = fs::path(""))  // Return a path for files the app writes and keeps.
+std::string joinPath(const fs::path & dir, const fs::path & file)  // Joins two filesystem paths.
+std::vector<std::string> listDirectory(const fs::path & path)  // Lists the immediate files and directories in a directory.
+const char * loadErrorName(LoadError e)  // Returns the short name of a load error.
+Json loadJson(const fs::path & path)  // Loads a JSON value from a file.
+std::string loadTextFile(const fs::path & path)  // Loads an entire file into a string.
+Xml loadXml(const fs::path & path)  // Loads an XML file into an Xml object.
+std::string pathToUtf8(const fs::path & p)  // Converts a filesystem path to a UTF-8 string.
+bool removeFile(const fs::path & path)  // Removes a file or an empty directory.
+SaveResult saveJson(const Json & j, const fs::path & path, int indent = 2)  // Serializes a Json value and saves it to a file.
+SaveResult saveTextFile(const fs::path & path, const std::string & content)  // Saves a string as a file.
+void setDataPathRoot(const fs::path & path)  // Set the root for relative data paths.
+void setDataPathToResources() [macos,ios]  // Sets the data root to the macOS app bundle’s Resources data folder.
+void setUserDataPathRoot(const fs::path & path)  // Override the user-data root directory.
+fs::path utf8ToPath(std::string_view utf8)  // Converts a UTF-8 string to a filesystem path.
 ```
 
 ### Sound
 
 ```cpp
-float getBeepVolume()  // Get the current beep() output volume (0.0-1.0).
-void setBeepVolume(float vol)  // Set the output volume for beep() (0.0-1.0).
+float getBeepVolume()  // Return the current beep volume.
+void setBeepVolume(float vol)  // Set the beep volume.
 ```
 
 ### AudioEngine
 
 ```cpp
-size_t getAudioAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest mixed output samples (mono, L+R average) into outBuffer for FFT / visualization. numSamples is capped at the analysis buffer size (4096). Returns the number of samples written.
-size_t getMicAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest microphone input samples into outBuffer. Convenience wrapper over getMicInput().getBuffer(). numSamples is capped at the mic buffer size (4096). Returns the number of samples written.
-MicInput & getMicInput()  // Get the global MicInput singleton (microphone capture). Call start() on it to open the device.
-void initAudio()  // Initialize the global AudioEngine. Sound::load(), loadStream(), loadTestTone() and loadFromBuffer() call it automatically while the engine is not initialized (play() does not), so manual use is only needed to start audio early (e.g. before an audioOut synthesis listener).
-void shutdownAudio()  // Shut down the global AudioEngine and close the audio device. Usually unnecessary (runs at program exit).
+size_t getAudioAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copies recent mixed output samples for analysis.
+size_t getMicAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copies recent samples from the shared microphone input.
+MicInput & getMicInput()  // Returns the shared microphone input instance.
+void initAudio()  // Initializes the shared audio output engine.
+void shutdownAudio()  // Shuts down the global audio engine.
 ```
 
 ### Font
 
 ```cpp
-std::vector<std::string> listSystemFonts() [macos,windows,linux,ios]  // Enumerate names of all fonts known to the OS
-fs::path systemFontPath(const std::string & name) [macos,windows,linux,ios]  // Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS / iOS use CoreText, Linux fontconfig, Windows DirectWrite.
+std::vector<std::string> listSystemFonts() [macos,windows,linux,ios]  // List font family names available to the operating system.
+fs::path systemFontPath(const std::string & name) [macos,windows,linux,ios]  // Resolve a system font name to its file path.
 ```
 
 ### Animation
 
 ```cpp
-float ease(float t, EaseType type, EaseMode mode) [+1]  // Apply easing to a normalized value (0-1) with an EaseType or a custom EaseFunction
-float easeIn(float t, EaseType type) [+1]  // Apply ease-in (accelerate) to value (0-1); takes an EaseType or a custom EaseFunction
-float easeInOut(float t, EaseType type) [+2]  // Apply ease-in-out to value (0-1); takes an EaseType, an asymmetric type pair, or a custom EaseFunction
-float easeOut(float t, EaseType type) [+1]  // Apply ease-out (decelerate) to value (0-1); takes an EaseType or a custom EaseFunction
+float ease(float t, EaseType type, EaseMode mode) [+1]  // Evaluates an easing curve.
+float easeIn(float t, EaseType type) [+1]  // Evaluate an ease-in curve.
+float easeInOut(float t, EaseType type) [+2]  // Evaluate an ease-in-out curve.
+float easeOut(float t, EaseType type) [+1]  // Evaluate an ease-out curve.
 ```
 
 ### Types - Color
 
 ```cpp
-Color colorFromHSB(float h, float s, float b, float a = 1.0) ⚠️deprecated  // Create Color from HSB (alias for Color::fromHSB)
-Color colorFromLinear(float r, float g, float b, float a = 1.0) ⚠️deprecated  // Deprecated alias for Color::fromLinear()
-Color colorFromOKLab(float L, float a_lab, float b_lab, float alpha = 1.0) ⚠️deprecated  // Deprecated alias for Color::fromOKLab()
-Color colorFromOKLCH(float L, float C, float H, float a = 1.0) ⚠️deprecated  // Deprecated alias for Color::fromOKLCH()
+Color colorFromHSB(float h, float s, float b, float a = 1.0) ⚠️deprecated  // Creates an sRGB color from HSB components.
+Color colorFromLinear(float r, float g, float b, float a = 1.0) ⚠️deprecated  // Creates an sRGB color from linear RGB components.
+Color colorFromOKLab(float L, float a_lab, float b_lab, float alpha = 1.0) ⚠️deprecated  // Creates an sRGB color from OKLab components.
+Color colorFromOKLCH(float L, float C, float H, float a = 1.0) ⚠️deprecated  // Creates an sRGB color from OKLCH components.
 ```
 
 ### Scene Graph
 
 ```cpp
-Node * getRootNode()  // Get the running App as the root of the node tree (set by the framework while the app is alive, null otherwise). Lets tools walk the whole tree without the app passing itself around. Not yet the App inside its own constructor: use it from setup() on.
-Node * getSelectedNode()  // Get the currently selected node (the last-clicked node, held by the Node system; null if none or once the node is freed). A tool such as an inspector can read it and drive it via setSelectedNode(). The pointer is for the current call; to keep the node, keep its weak_from_this().
-void setSelectedNode(Node * n)  // Set the currently selected node. Pass nullptr to clear the selection; a node no shared_ptr owns also clears it.
+Node * getRootNode()  // Return the current window's App as the root node.
+Node * getSelectedNode()  // Return the currently selected node.
+void setSelectedNode(Node * n)  // Set the currently selected node.
 ```
 
 ### 3D Setup
 
 ```cpp
-void disable3D() ⚠️deprecated  // Deprecated alias for setupScreenOrtho()
-void enable3D() ⚠️deprecated  // Deprecated alias for setupScreenPerspective()
-void enable3DPerspective(float fovY = 0.785000026, float nearZ = 0.100000001, float farZ = 1000.0) ⚠️deprecated  // Deprecated alias for setupScreenPerspective()
-float getDefaultScreenFov()  // Get default screen FOV in radians
-float getDefaultScreenFovDeg()  // Get default screen FOV in degrees
-Vec3 screenToWorld(const Vec2 & screenPos, float worldZ = 0.0)  // Convert screen coordinate to world coordinate on Z plane
-void setDefaultScreenFov(float fovRadians)  // Set default swapchain FOV in radians (frame start only)
-void setDefaultScreenFovDeg(float fovDeg)  // Set default screen FOV in degrees
-void setDefaultScreenOrtho()  // Set orthographic projection as the default (frame start and FBO begin)
-void setFarClip(float farDist)  // Set the default-screen far clipping plane (0 = auto-calculate)
-void setNearClip(float nearDist)  // Set the default-screen near clipping plane (0 = auto-calculate)
-void setupScreenFov(float fovRadians, float nearDist = 0.0, float farDist = 0.0)  // Set up screen perspective with FOV in radians
-void setupScreenFovDeg(float fovDeg, float nearDist = 0.0, float farDist = 0.0)  // Set up screen perspective with FOV in degrees
-void setupScreenFovWithSize(float fovRadians, float viewW, float viewH, float nearDist = 0.0, float farDist = 0.0)  // Set up perspective with explicit viewport size and FOV in radians
-void setupScreenFovWithSizeDeg(float fovDeg, float viewW, float viewH, float nearDist = 0.0, float farDist = 0.0)  // Set up perspective with explicit viewport size and FOV in degrees
-void setupScreenOrtho()  // Set up orthographic projection (2D mode)
-void setupScreenPerspective(float fovRadians = …, float nearDist = 0.0, float farDist = 0.0)  // Set up screen perspective with FOV in radians (default TAU/8)
-void setupScreenPerspectiveDeg(float fovDeg = 45.0, float nearDist = 0.0, float farDist = 0.0)  // Set up screen perspective with FOV in degrees (default 45)
-Vec3 worldToScreen(const Vec3 & worldPos)  // Convert a world coordinate to screen coordinate (x, y = screen pixels, z = depth 0-1)
+void disable3D() ⚠️deprecated  // Provides a deprecated alias for orthographic screen setup.
+void enable3D() ⚠️deprecated  // Selects the 3D drawing pipeline through a deprecated API.
+void enable3DPerspective(float fovY = 0.785000026, float nearZ = 0.100000001, float farZ = 1000.0) ⚠️deprecated  // Sets a perspective projection through a deprecated API.
+float getDefaultScreenFov()  // Returns the default screen field of view in radians.
+float getDefaultScreenFovDeg()  // Returns the default screen field of view in degrees.
+Vec3 screenToWorld(const Vec2 & screenPos, float worldZ = 0.0)  // Converts a screen position to a world position on a constant-Z plane.
+void setDefaultScreenFov(float fovRadians)  // Sets the default screen field of view.
+void setDefaultScreenFovDeg(float fovDeg)  // Sets the default screen field of view in degrees.
+void setDefaultScreenOrtho()  // Sets orthographic projection as the screen default.
+void setFarClip(float farDist)  // Sets the default screen far clipping distance.
+void setNearClip(float nearDist)  // Sets the default screen near clipping distance.
+void setupScreenFov(float fovRadians, float nearDist = 0.0, float farDist = 0.0)  // Sets the current screen projection from a field of view in radians.
+void setupScreenFovDeg(float fovDeg, float nearDist = 0.0, float farDist = 0.0)  // Sets the current screen projection from a field of view in degrees.
+void setupScreenFovWithSize(float fovRadians, float viewW, float viewH, float nearDist = 0.0, float farDist = 0.0)  // Sets the current projection with an explicit size and a field of view in radians.
+void setupScreenFovWithSizeDeg(float fovDeg, float viewW, float viewH, float nearDist = 0.0, float farDist = 0.0)  // Sets the current projection with an explicit size and a field of view in degrees.
+void setupScreenOrtho()  // Sets orthographic projection for the current drawing target.
+void setupScreenPerspective(float fovRadians = …, float nearDist = 0.0, float farDist = 0.0)  // Sets screen perspective from a field of view in radians.
+void setupScreenPerspectiveDeg(float fovDeg = 45.0, float nearDist = 0.0, float farDist = 0.0)  // Sets screen perspective from a field of view in degrees.
+Vec3 worldToScreen(const Vec3 & worldPos)  // Projects a world position into screen coordinates and depth.
 ```
 
 ### 3D Camera
 
 ```cpp
-const Vec3 & getCameraPosition()  // Current camera position used for specular/PBR view vector
-float getFarClip()  // Get the far-clip override (0 = auto-calculate from the camera distance).
-float getNearClip()  // Get the near-clip override (0 = auto-calculate from the camera distance).
+const Vec3 & getCameraPosition()  // Returns the camera position stored for lighting.
+float getFarClip()  // Returns the stored screen-projection far-clip override.
+float getNearClip()  // Returns the stored screen-projection near-clip override.
 ```
 
 ### Lighting & PBR
 
 ```cpp
-void addLight(Light & light)  // Add a light to the scene (up to 8 lights per window; a light added past 8 is not registered, with a one-time warning)
-void beginShadowPass(Light & light)  // Begin shadow depth pass from the light's point of view (up to 4 shadow lights per frame)
-Color calculateLighting(const Vec3 & worldPos, const Vec3 & worldNormal, const Material & material)  // CPU-side lighting result for a world position and normal, summing all active lights with the given material
-void clearEnvironment()  // Clear IBL environment
-void clearLights()  // Remove all lights from the scene
-void clearMaterial()  // Clear material (return to default rendering)
-void endShadowPass()  // End shadow depth pass
-Environment * getEnvironment()  // Get the current environment (IBL/skybox), or nullptr if none is set
-int getNumLights()  // Number of currently active lights
-void removeLight(Light & light)  // Remove a light from the scene
-void setCameraPosition(const Vec3 & pos) [+1]  // Set camera position for specular calculation
-void setEnvironment(Environment & env)  // Set IBL environment for PBR ambient lighting
-void setMaterial(Material & material)  // Set material for subsequent mesh draws (activates PBR)
-void shadowDraw(const Mesh & mesh)  // Draw a mesh into the shadow depth pass (depth only)
+void addLight(Light & light)  // Registers a light in the current window.
+void beginShadowPass(Light & light)  // Begins a shadow-depth pass from a light's viewpoint.
+Color calculateLighting(const Vec3 & worldPos, const Vec3 & worldNormal, const Material & material)  // Calculates a CPU lighting color for a world position, normal, and material.
+void clearEnvironment()  // Clears the current window's environment selection.
+void clearLights()  // Unregisters all lights from the current window.
+void clearMaterial()  // Clears the current window's material selection.
+void endShadowPass()  // Ends the active shadow-depth pass.
+Environment * getEnvironment()  // Returns the current window's selected environment.
+int getNumLights()  // Returns the number of registered lights in the current window.
+void removeLight(Light & light)  // Unregisters a light from the current window.
+void setCameraPosition(const Vec3 & pos) [+1]  // Sets the camera position used for lighting calculations.
+void setEnvironment(Environment & env)  // Selects an environment for PBR lighting in the current window.
+void setMaterial(Material & material)  // Selects a material for subsequent mesh drawing.
+void shadowDraw(const Mesh & mesh)  // Draws a mesh's depth into the active shadow pass.
 ```
 
 ### Graphics - Advanced
 
 ```cpp
-Mesh createBox(float width, float height, float depth) [+1]  // Create a box mesh
-Mesh createCapsule(float radius, float cylinderHeight, int resolution = 16)  // Create a capsule mesh (Y-up: cylinder capped by two hemispheres)
-Mesh createCone(float radius, float height, int resolution = 16)  // Create a cone mesh
-Mesh createCylinder(float radius, float height, int resolution = 16)  // Create a cylinder mesh
-Mesh createIcoSphere(float radius, int subdivisions = 2)  // Create an icosphere mesh (geodesic sphere with uniform triangles)
-Mesh createPlane(float width, float height, int cols = 2, int rows = 2)  // Create a plane mesh (subdivided quad on the XY plane)
-Mesh createSphere(float radius, int resolution = 16)  // Create a sphere mesh
-Mesh createTorus(float radius, float tubeRadius, int sides = 24, int rings = 16)  // Create a torus (donut) mesh
+Mesh createBox(float width, float height, float depth) [+1]  // Creates a box mesh.
+Mesh createCapsule(float radius, float cylinderHeight, int resolution = 16)  // Creates a capsule mesh with hemispherical ends.
+Mesh createCone(float radius, float height, int resolution = 16)  // Creates a cone mesh.
+Mesh createCylinder(float radius, float height, int resolution = 16)  // Creates a cylinder mesh.
+Mesh createIcoSphere(float radius, int subdivisions = 2)  // Creates a sphere mesh by subdividing an icosahedron.
+Mesh createPlane(float width, float height, int cols = 2, int rows = 2)  // Creates a subdivided rectangular mesh on the XY plane.
+Mesh createSphere(float radius, int resolution = 16)  // Creates a sphere mesh with latitude and longitude divisions.
+Mesh createTorus(float radius, float tubeRadius, int sides = 24, int rings = 16)  // Creates a torus mesh.
 ```
 
 ### Graphics - Texture & GPU
 
 ```cpp
-int bytesPerPixel(TextureFormat fmt)  // Bytes per pixel for a TextureFormat
-int channelCount(TextureFormat fmt)  // Number of color channels for a TextureFormat (1, 2, or 4)
-bool isFloatFormat(TextureFormat fmt)  // Whether a TextureFormat uses floating-point components
+int bytesPerPixel(TextureFormat fmt)  // Returns the byte size of one pixel for a TextureFormat.
+int channelCount(TextureFormat fmt)  // Returns the number of channels in a TextureFormat.
+bool isFloatFormat(TextureFormat fmt)  // Reports whether a TextureFormat uses floating-point components.
 ```
 
 ### Graphics - Shader
 
 ```cpp
-void popShader()  // Pop shader from stack
-void pushShader(Shader & shader)  // Push shader to stack (subsequent draws use this shader)
+void popShader()  // Ends the current shader scope.
+void pushShader(Shader & shader)  // Begins a shader scope for subsequent drawing.
 ```
 
 ### Video
 
 ```cpp
-const char * videoCodecName(VideoCodec c)  // Return a human-readable name for a VideoCodec value (e.g. "H.264", "HEVC", "ProRes 422") 
+const char * videoCodecName(VideoCodec c)  // Returns a readable name for a video codec.
 ```
 
 ### Network
 
 ```cpp
-std::string getLocalIp() [macos,windows,linux,android,ios]  // The most likely LAN address (skips loopback/down, IPv4 preferred). "" if none 
-std::vector<std::string> getLocalIps() [macos,windows,linux,android,ios]  // Every non-loopback address (one per interface entry)
-std::string getOui(const std::string & mac)  // The OUI (first 3 bytes) of a MAC, uppercase "A4:83:E7". "" if unparseable 
-bool isLinkLocal(const std::string & addr)  // True if addr is link-local (169.254/16 or fe80::/10)
-bool isLocallyAdministered(const std::string & mac)  // True if the MAC's locally-administered bit is set (randomized/virtual MAC)
-bool isLoopback(const std::string & addr)  // True if addr is a loopback address (127.0.0.0/8 or ::1)
-bool isPrivate(const std::string & addr)  // True if addr is a private IPv4 (10/8, 172.16/12, 192.168/16)
-std::vector<NetworkInterface> listNetworkInterfaces() [macos,windows,linux,android,ios]  // List all network interface address entries (IPv4/IPv6, loopback, up or down)
-void printNetworkInterfaces() [macos,windows,linux,android,ios]  // Log the interface list (one line per entry)
-bool sameSubnet(const std::string & a, const std::string & b, const std::string & netmask)  // True if IPv4 a and b are on the same subnet under netmask
-const char * sendErrorName(SendError e)  // Short label for a SendError value ("QueueFull", ...). For log messages
+std::string getLocalIp() [macos,windows,linux,android,ios]  // Returns a preferred local IP address.
+std::vector<std::string> getLocalIps() [macos,windows,linux,android,ios]  // Returns local IP addresses from active non-loopback interfaces.
+std::string getOui(const std::string & mac)  // Returns the OUI prefix of a MAC address.
+bool isLinkLocal(const std::string & addr)  // Checks whether an address is link-local.
+bool isLocallyAdministered(const std::string & mac)  // Checks whether a MAC address has its locally administered bit set.
+bool isLoopback(const std::string & addr)  // Checks whether an address is a loopback address.
+bool isPrivate(const std::string & addr)  // Checks whether an address is a private IPv4 address.
+std::vector<NetworkInterface> listNetworkInterfaces() [macos,windows,linux,android,ios]  // Lists the host's network interface addresses.
+void printNetworkInterfaces() [macos,windows,linux,android,ios]  // Logs the network interface list.
+bool sameSubnet(const std::string & a, const std::string & b, const std::string & netmask)  // Checks whether two IPv4 addresses share a subnet under a supplied mask.
+const char * sendErrorName(SendError e)  // Returns a short name for a send error.
 ```
 
 ### MCP
 
 ```cpp
-void mcp::alert(const std::string & msg)  // Log an operator warning and queue it for ReadOnly tc_get_alerts; thread-safe, retains the latest 100 pending alerts.
-void mcp::deferToolResultTwoStage(std::function<std::function<json ()> ()> mainStage, const void * targetWindow = nullptr)  // Defer a main-thread stage until after present; its returned JSON producer runs on the HTTP worker for expensive encoding.
-void mcp::deferToolResultUntilAfterFrame(std::function<json ()> produce, const void * targetWindow = nullptr)  // In a tool handler, defer the JSON result producer until after the target window's present; null targets the main window.
-void mcp::enableDebugger() ⚠️deprecated [macos,windows,linux,ios,android]  // Deprecated no-op; use setToolLevel(ToolLevel::Control). Removal at v1.0.0.
-AdmissionLimits mcp::getAdmissionLimits()  // Return the current MCP admission limits.
-int mcp::getHttpPort() [macos,windows,linux,ios,android]  // Return the bound HTTP port, or 0 when stopped or on Web.
-ToolLevel mcp::getToolLevel()  // Return the current host grant, checked for every tools/list and tools/call.
-bool mcp::hasTool(const std::string & name)  // Whether a tool is registered, regardless of its current exposure.
-bool mcp::isDebuggerEnabled()  // Compatibility query: true when getToolLevel() is at least Control.
-void mcp::processHttpQueue() [macos,windows,linux,ios,android]  // Process queued HTTP requests on the main thread; called automatically by the frame loop. No-op on Web.
-void mcp::registerControlTools() ⚠️deprecated  // Deprecated alias of setToolLevel(ToolLevel::Control); removal at v1.0.0.
-void mcp::registerDebuggerTools() ⚠️deprecated  // Deprecated alias of setToolLevel(ToolLevel::Control); removal at v1.0.0.
-void mcp::registerInspectionTools() ⚠️deprecated  // Deprecated alias of setToolLevel(ToolLevel::ReadOnly); removal at v1.0.0.
-ResourceBuilder mcp::resource(const std::string & uri, const std::string & name)  // Build a URI-addressed text resource registration; registration alone does not open HTTP.
-bool mcp::setAdmissionLimits(const AdmissionLimits & limits)  // Set MCP limits before opening HTTP; return true on success. Zero values, active HTTP or outstanding work return false, log one Warning per rejected call, increment the Configuration rejection counter and preserve all previous settings. Defaults include 4096 histogram bins, 65536 grid cells, 256 operations, 64 MiB per reply and 256 MiB aggregate working memory. Counters and first-Warning state last for the process and do not reset on query or restart. Bound (security): control JSON must fit finite ingress storage. Overflow rejects with 413 and is counted. Bound (security): sockets and pending replies share finite admission. Overflow closes the new socket and is counted. Bound (security): network work must use a finite worker pool. Overflow queues within admission and excess admission is counted. Bound (security): HTTP metadata must stop growing while read. Overflow rejects with 431 and is counted. Bound (security): headers and trailers share finite metadata storage. Overflow rejects with 431 and is counted. Bound (security): header/trailer entries also consume storage. Overflow rejects with 431 and is counted. Bound (security): histogram parameters drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): grid products drive scratch and reply allocation. Overflow rejects the operation and is counted. Bound (security): operation arrays drive repeated work and retained results. Overflow rejects the request and is counted. Bound (security): reply construction must fit finite output storage. Overflow returns an error and is counted. Bound (security): concurrent MCP work shares finite process storage. Overflow rejects admission or returns an error and is counted. Bound (security): analysis image copies and encoders need credits before allocation. Overflow returns an error and is counted. Bound (abi): stb's immutable input view uses an int byte length. Overflow rejects the image and is counted. Bound (security): encoded copies and decoder buffers share working credits. Overflow rejects the image before reading and is counted. Bound (security): decoded pixels, copies and codec scratch need credits before decoding. Overflow rejects the image and is counted. Bound (security): RPC nesting must fit parse and copy stacks. Overflow rejects the request and is counted. Bound (security): audio scratch and result products need credits before allocation. Overflow rejects the request and is counted. Bound (abi): external MCP FFT lengths must fit the int-sized transform API. Overflow returns an error and is counted. Bound (realtime): the audio callback must not allocate; external MCP reads share its fixed history ring. Overflow returns an error and is counted. Bound (security): external snapshot copies need credits before vector growth. Overflow rejects the request and is counted. Bound (abi): codec allocation headers must fit size_t. Overflow returns null and is counted. Bound (security): codec allocations must fit pre-admitted workspace. Overflow returns null and is counted. Bound (abi): chunk sizes must fit the unsigned-long parser. Overflow rejects with 413 and is counted.
-void mcp::setToolLevel(ToolLevel level)  // Set the host grant. ReadOnly or Control opens loopback HTTP unless TRUSSC_MCP=0; dev builds retain Control. Registration order is independent; the grant survives hot reload.
-void mcp::startHttpServer(int port = 0, const std::string & host = std::string("127.0.0.1"), const std::string & token = std::string("")) [macos,windows,linux,ios,android]  // Explicitly open HTTP (default 127.0.0.1, port 0 chooses an OS port); non-loopback requires a token. TRUSSC_MCP=0 closes. Call before setToolLevel() to choose the address: the first opener wins; mismatched later parameters log an Error and change nothing. No-op on Web. Defaults: 1 MiB wire/decoded body, 8 KiB per request/header/trailer line, 64 KiB metadata, 128 fields, 32 outstanding connections and 4 workers. Excess bodies return 413, metadata returns 431, excess connections close. Rejections issue one Warning per store and increment lifetime counters. See setAdmissionLimits(). Request JSON defaults to 64 levels; parse admission failures return 503 with a reason.
-void mcp::status(const std::string & name, std::function<double ()> getter) [+1]  // Publish a numeric or string getter through ReadOnly tc_get_status; registering the same name replaces it.
-void mcp::statusGraph(const std::string & name, std::function<double ()> getter)  // Publish a numeric getter marked for time-series plotting through ReadOnly tc_get_status.
-void mcp::statusImage(const std::string & name, std::function<trussc::Pixels ()> getter)  // Publish a Pixels getter through ReadOnly tc_get_status_image, evaluated on demand on the main thread.
-void mcp::stopHttpServer() [macos,windows,linux,ios,android]  // Stop the HTTP listener and answer pending requests before joining the workers. Discard producers finishing after shutdown. If an error reply cannot fit, return 503 with X-MCP-Reason. No-op on Web.
-ToolBuilder mcp::tool(const std::string & name, const std::string & desc)  // Build a tool registration. Only tc_ is reserved; tcx_ is free. Registration never starts the listener.
+void mcp::alert(const std::string & msg)  // Logs and queues an operator alert.
+void mcp::deferToolResultTwoStage(std::function<std::function<json ()> ()> mainStage, const void * targetWindow = nullptr)  // Defers a tool result through main-thread and HTTP-worker stages.
+void mcp::deferToolResultUntilAfterFrame(std::function<json ()> produce, const void * targetWindow = nullptr)  // Defers a tool result producer until after a window presents a frame.
+void mcp::enableDebugger() ⚠️deprecated [macos,windows,linux,ios,android]  // Provides a deprecated compatibility function that does nothing.
+AdmissionLimits mcp::getAdmissionLimits()  // Returns the current MCP admission limits.
+int mcp::getHttpPort() [macos,windows,linux,ios,android]  // Returns the MCP HTTP listener's bound port.
+ToolLevel mcp::getToolLevel()  // Returns the host's current MCP tool access level.
+bool mcp::hasTool(const std::string & name)  // Reports whether a tool name is registered.
+bool mcp::isDebuggerEnabled()  // Reports whether the host grants MCP control access.
+void mcp::processHttpQueue() [macos,windows,linux,ios,android]  // Processes queued MCP HTTP requests.
+void mcp::registerControlTools() ⚠️deprecated  // Sets control access through a deprecated compatibility alias.
+void mcp::registerDebuggerTools() ⚠️deprecated  // Sets control access through a deprecated debugger compatibility alias.
+void mcp::registerInspectionTools() ⚠️deprecated  // Sets inspection access through a deprecated compatibility alias.
+ResourceBuilder mcp::resource(const std::string & uri, const std::string & name)  // Creates a builder for registering a URI-addressed MCP resource.
+bool mcp::setAdmissionLimits(const AdmissionLimits & limits)  // Replaces the MCP admission limits.
+void mcp::setToolLevel(ToolLevel level)  // Sets the host's MCP tool access level.
+void mcp::startHttpServer(int port = 0, const std::string & host = std::string("127.0.0.1"), const std::string & token = std::string("")) [macos,windows,linux,ios,android]  // Explicitly starts the MCP HTTP listener.
+void mcp::status(const std::string & name, std::function<double ()> getter) [+1]  // Publishes a named numeric or string status getter.
+void mcp::statusGraph(const std::string & name, std::function<double ()> getter)  // Publishes a numeric status getter with a time-series plotting hint.
+void mcp::statusImage(const std::string & name, std::function<trussc::Pixels ()> getter)  // Publishes a named image getter for MCP monitoring.
+void mcp::stopHttpServer() [macos,windows,linux,ios,android]  // Stops the MCP HTTP listener.
+ToolBuilder mcp::tool(const std::string & name, const std::string & desc)  // Creates a builder for registering an MCP tool.
 ```
 
 ### Console
 
 ```cpp
-bool console::isEnabled()  // Whether stdin command delivery is enabled. False until the app calls start(), and after stop(); always false on Web.
-void console::start()  // Opt in to stdin commands: call in setup() for windowed or headless apps. Neither runner starts input automatically (breaking in v0.8.0). Drains pending commands before enabling delivery; the first call creates the process's only detached reader, which reads until EOF. Later starts reuse it. LF/CRLF and a partial last line at EOF are supported. Unavailable on Web.
-void console::stop()  // Disable stdin command delivery and discard queued commands. The detached reader continues consuming stdin until EOF, dropping lines read while stopped. start() enables delivery again. Both runners stop delivery before app exit/cleanup. No-op on Web.
+bool console::isEnabled()  // Reports whether standard-input command delivery is enabled.
+void console::start()  // Enables command delivery from standard input.
+void console::stop()  // Disables command delivery from standard input.
 ```
 
 ### graphics
 
 ```cpp
-int getHeight()  // Drawing height in active-target coordinate units; see getWidth.
-Mat4 getProjectionMatrix()  // Return the active target camera projection matrix by value, in backend-native clip space.
-Vec2 getSize()  // Drawing width and height of the active target as Vec2; see getWidth.
-Mat4 getViewMatrix()  // Return the active target camera view matrix by value. Fbo and EasyCam scopes restore the previous camera on exit; Node CameraContexts remain immutable draw-time snapshots.
-int getWidth()  // Drawing width in active-target coordinate units. Fbo: attachment pixels; swapchain: logical units or pixels according to pixelPerfect. Object and window getters keep their own size.
+int getHeight()  // Returns the current drawing target's height.
+Mat4 getProjectionMatrix()  // Returns the current drawing target's camera projection matrix.
+Vec2 getSize()  // Returns the width and height of the active drawing target as a Vec2.
+Mat4 getViewMatrix()  // Returns the current drawing target's camera view matrix.
+int getWidth()  // Returns the current drawing target's width.
 ```
 
 ### Other
 
 ```cpp
-float atanh(float x) [std]  // Inverse hyperbolic tangent
-Baseline  // Direction shorthand for Direction::Baseline (text baseline)
-Bottom  // Direction shorthand for Direction::Bottom
-Center  // Direction shorthand for Direction::Center
-std::shared_ptr<Window> createWindow(const WindowSettings & settings = {}) [macos,windows,linux]  // Create a secondary window (macOS / Windows / desktop Linux; returns nullptr on single-window platforms). It ticks on its own display's vsync; closing it leaves the app running. Give it content with Window::setApp()
-const char * enumLabel(E value)  // Return the display string for one enum value (TC_ENUM_LABELS override, else reflected name).
-const std::array<std::string_view, internal::enumValidCount<E> enumNames()  // Return a compile-time array of all valid enumerator names of E.
-EnumLabelSpan enumReflectedSpan()  // Return an EnumLabelSpan synthesized from reflection (valid for contiguous zero-based enums).
-const std::array<E, internal::enumValidCount<E> enumValues()  // Return a compile-time array of all valid enumerator values of E, parallel to enumNames.
-EVENT_DRIVEN  // Frame-rate sentinel: only redraw on demand (event-driven)
-float exp2(float x) [std]  // Base-2 exponential (2^x)
-HALF_TAU  // Half circle (PI)
-KEY_BACKSPACE  // Backspace key
-KEY_DELETE  // Delete key
-KEY_DOWN  // Down arrow key
-KEY_ENTER  // Enter/Return key
-KEY_ESCAPE  // Escape key
-KEY_F1  // F1 function key
-KEY_F10  // F10 function key
-KEY_F11  // F11 function key
-KEY_F12  // F12 function key
-KEY_F2  // F2 function key
-KEY_F3  // F3 function key
-KEY_F4  // F4 function key
-KEY_F5  // F5 function key
-KEY_F6  // F6 function key
-KEY_F7  // F7 function key
-KEY_F8  // F8 function key
-KEY_F9  // F9 function key
-KEY_LEFT  // Left arrow key
-KEY_LEFT_ALT  // Left Alt/Option key
-KEY_LEFT_CONTROL  // Left Control key
-KEY_LEFT_SHIFT  // Left Shift key
-KEY_LEFT_SUPER  // Left Super/Command key
-KEY_RIGHT  // Right arrow key
-KEY_RIGHT_ALT  // Right Alt/Option key
-KEY_RIGHT_CONTROL  // Right Control key
-KEY_RIGHT_SHIFT  // Right Shift key
-KEY_RIGHT_SUPER  // Right Super/Command key
-KEY_SPACE  // Space key
-KEY_TAB  // Tab key
-KEY_UP  // Up arrow key
-Left  // Direction shorthand for Direction::Left
-float log10(float x) [std]  // Base-10 (common) logarithm
-float log2(float x) [std]  // Base-2 logarithm
-MOUSE_BUTTON_LEFT  // Left mouse button
-MOUSE_BUTTON_MIDDLE  // Middle mouse button
-MOUSE_BUTTON_RIGHT  // Right mouse button
-Event<ScreenshotSaveEventArgs> & onScreenshotSave()  // Host-owned screenshot completion event. Fires once per saveScreenshotAsync request on main in a later frame, never inline; expired application runs suppress delivery. Retain the EventListener returned by listen(). Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires.
-Vec2 operator*(float s, const Vec2 & v) [+4]  // Component-wise multiplication
-PI ⚠️deprecated  // Ratio of circumference to diameter. ≈ 3.14159. Prefer HALF_TAU for half a turn.
-QUARTER_TAU  // Quarter circle (PI/2)
-float remainder(float x, float y) [std]  // IEEE floating-point remainder of x/y
-Right  // Direction shorthand for Direction::Right
-void saveScreenshotAsync(const fs::path & path)  // Capture the requesting window at its next present, then encode/write on a worker. The destination is frozen at submission. At most four pending jobs per window include capture, writing and undelivered results; further requests report WriteFailed with Screenshot queue is full through onScreenshotSave(). Hidden secondary windows wait for their own present without blocking captures in other windows. Native writes use one global FIFO in capture-completion order; a slow write delays later writes. Closing before capture or calling without a render window reports a deferred failure. Native readback still runs on main and may stall that frame. Web snapshots the canvas and submits a PNG/JPEG download; browser download policy and actual disk completion are unobservable. Serialize other saves to the same destination yourself. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires.
-float tanh(float x) [std]  // Hyperbolic tangent
-TAU  // Ratio of circumference to radius; the radian measure of one full turn. ≈ 6.28318.
-Top  // Direction shorthand for Direction::Top
-float trunc(float x) [std]  // Truncate toward zero (drop the fractional part)
-VSYNC  // Frame-rate sentinel: sync to the monitor refresh rate
+float atanh(float x) [std]  // Returns the inverse hyperbolic tangent.
+Baseline  // Provides shorthand for text baseline alignment.
+Bottom  // Provides shorthand for bottom alignment.
+Center  // Provides shorthand for center alignment.
+std::shared_ptr<Window> createWindow(const WindowSettings & settings = {}) [macos,windows,linux]  // Creates a secondary application window.
+const char * enumLabel(E value)  // Returns the display string for an enum value.
+const std::array<std::string_view, internal::enumValidCount<E> enumNames()  // Returns the automatically discovered names of an enum's enumerators.
+EnumLabelSpan enumReflectedSpan()  // Returns an enum label table built from reflection.
+const std::array<E, internal::enumValidCount<E> enumValues()  // Returns the automatically discovered values of an enum's enumerators.
+EVENT_DRIVEN  // Selects rendering on demand.
+float exp2(float x) [std]  // Returns two raised to the given power.
+HALF_TAU  // Represents half a turn in radians.
+KEY_BACKSPACE  // Identifies the Backspace key.
+KEY_DELETE  // Identifies the Delete key.
+KEY_DOWN  // Identifies the Down arrow key.
+KEY_ENTER  // Identifies the Enter/Return key.
+KEY_ESCAPE  // Identifies the Escape key.
+KEY_F1  // Identifies the F1 function key.
+KEY_F10  // Identifies the F10 function key.
+KEY_F11  // Identifies the F11 function key.
+KEY_F12  // Identifies the F12 function key.
+KEY_F2  // Identifies the F2 function key.
+KEY_F3  // Identifies the F3 function key.
+KEY_F4  // Identifies the F4 function key.
+KEY_F5  // Identifies the F5 function key.
+KEY_F6  // Identifies the F6 function key.
+KEY_F7  // Identifies the F7 function key.
+KEY_F8  // Identifies the F8 function key.
+KEY_F9  // Identifies the F9 function key.
+KEY_LEFT  // Identifies the Left arrow key.
+KEY_LEFT_ALT  // Identifies the left Alt/Option key.
+KEY_LEFT_CONTROL  // Identifies the left Control key.
+KEY_LEFT_SHIFT  // Identifies the left Shift key.
+KEY_LEFT_SUPER  // Identifies the left Super/Command key.
+KEY_RIGHT  // Identifies the Right arrow key.
+KEY_RIGHT_ALT  // Identifies the right Alt/Option key.
+KEY_RIGHT_CONTROL  // Identifies the right Control key.
+KEY_RIGHT_SHIFT  // Identifies the right Shift key.
+KEY_RIGHT_SUPER  // Identifies the right Super/Command key.
+KEY_SPACE  // Identifies the Space key.
+KEY_TAB  // Identifies the Tab key.
+KEY_UP  // Identifies the Up Arrow key.
+Left  // Provides shorthand for `Direction::Left`.
+float log10(float x) [std]  // Returns the base-ten logarithm.
+float log2(float x) [std]  // Returns the base-two logarithm.
+MOUSE_BUTTON_LEFT  // Identifies the left mouse button.
+MOUSE_BUTTON_MIDDLE  // Identifies the middle mouse button.
+MOUSE_BUTTON_RIGHT  // Identifies the right mouse button.
+Event<ScreenshotSaveEventArgs> & onScreenshotSave()  // Returns the asynchronous screenshot completion event.
+Vec2 operator*(float s, const Vec2 & v) [+4]  // Multiplies values according to their operand types.
+PI ⚠️deprecated  // Represents the ratio of a circle's circumference to its diameter.
+QUARTER_TAU  // Defines a quarter turn in radians.
+float remainder(float x, float y) [std]  // Returns the IEEE floating-point remainder.
+Right  // Provides shorthand for `Direction::Right`.
+void saveScreenshotAsync(const fs::path & path)  // Requests an asynchronous screenshot save.
+float tanh(float x) [std]  // Returns the hyperbolic tangent.
+TAU  // Represents one full turn in radians.
+Top  // Provides the shorthand constant for Direction::Top.
+float trunc(float x) [std]  // Discards the fractional part by rounding toward zero.
+VSYNC  // Selects frame scheduling at the display refresh rate.
 ```
 
 ## Types
 
-### App — Base application class: subclass it and override setup/update/draw and the input callbacks (mousePressed, keyPressed, etc.) to build a TrussC app
+### App — The base class your app inherits from; TrussC calls its setup(), update() and draw() for you.
 
 ```cpp
-void App::audioIn(const AudioInBuffer & buf)  // Real-time capture callback event (microphone input). RT-safe same as audioOut. Like audioOut, first called right after setup() returns and detached before cleanup() for good; the same rule applies: don't wait on the main thread or on its locks in here.
-void App::audioOut(AudioOutBuffer & buf)  // Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. First called right after setup() returns, so what setup() prepares is ready in here; an App that is never run gets no calls. The framework calls exit(), detaches it and waits as long as necessary for a call in flight before calling cleanup() (exit, hot reload, closing the App's window). cleanup() may free its audio state. Don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). An App runs once: when its window closes it is detached for good; to show the App again, create a new one
-void App::exit()  // App exit callback (override for cleanup before shutdown)
-void App::filesDropped(const std::vector<std::string> & files)  // Files were dropped onto the window
-Window * App::getWindow() const  // The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. `close()` only requests closure; the window remains available until teardown begins. Already nullptr during teardown: inside this App's own exit() / cleanup() and in the window's events().exit listeners, because the native window is destroyed first. Read what you need (title, size, fullscreen) before calling close(), or keep it up to date in update(). Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks
-bool App::isExitRequested() const  // Whether an exit has been requested
-void App::keyPressed(const KeyEventArgs & e) [+1]  // Key pressed. Use KEY_* constants for special keys, or uppercase char literals for printable keys (e.g. key == 'A', key == '1')
-void App::keyReleased(const KeyEventArgs & e) [+1]  // Key released
-void App::mouseDragged(const MouseDragEventArgs & e) [+1]  // Mouse dragged
-void App::mouseMoved(const MouseMoveEventArgs & e) [+1]  // Mouse moved
-void App::mousePressed(const MouseEventArgs & e) [+1]  // Mouse button pressed
-void App::mouseReleased(const MouseEventArgs & e) [+1]  // Mouse button released
-void App::mouseScrolled(const ScrollEventArgs & e) [+1]  // Mouse wheel / trackpad scrolled
-void App::requestExit()  // Request the app to exit
-void App::setSize(float w, float h)  // Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. So does an App no shared_ptr owns yet (e.g. inside its constructor), which also warns once: call it in setup(). Resizing the main window is not implemented on Linux yet
-void App::touchMoved(const TouchEventArgs & touch)  // Touch moved (Android/iOS, multi-touch)
-void App::touchPressed(const TouchEventArgs & touch)  // Touch began (Android/iOS, multi-touch)
-void App::touchReleased(const TouchEventArgs & touch)  // Touch ended or was cancelled (check touch.cancelled)
-void App::windowResized(int width, int height)  // Window resized
+void App::audioIn(const AudioInBuffer & buf)  // Meant for reading incoming audio on the audio thread, but currently never called.
+void App::audioOut(AudioOutBuffer & buf)  // Called on the audio thread once per device buffer, so you can add your own sound to the output.
+void App::exit()  // Called once when the App ends, right before cleanup().
+void App::filesDropped(const std::vector<std::string> & files)  // Called when files are dropped onto the main window, with their paths.
+Window * App::getWindow() const  // Returns the Window this App was put into with Window::setApp(), or nullptr.
+bool App::isExitRequested() const  // Returns whether requestExit() has been called on this App.
+void App::keyPressed(const KeyEventArgs & e) [+1]  // Called when a key is pressed, and again on each auto-repeat while it is held.
+void App::keyReleased(const KeyEventArgs & e) [+1]  // Called when a key is released.
+void App::mouseDragged(const MouseDragEventArgs & e) [+1]  // Called when the pointer moves while a mouse button is held.
+void App::mouseMoved(const MouseMoveEventArgs & e) [+1]  // Called when the pointer moves while no mouse button is held.
+void App::mousePressed(const MouseEventArgs & e) [+1]  // Called when a mouse button is pressed.
+void App::mouseReleased(const MouseEventArgs & e) [+1]  // Called when a mouse button is released, exactly once for each press.
+void App::mouseScrolled(const ScrollEventArgs & e) [+1]  // Called when the mouse wheel or trackpad scrolls.
+void App::requestExit()  // Stops a headless app (runHeadlessApp); a windowed app ignores it.
+void App::setSize(float w, float h)  // Changes the size of the window this App runs in.
+void App::touchMoved(const TouchEventArgs & touch)  // Called when fingers move on the screen.
+void App::touchPressed(const TouchEventArgs & touch)  // Called when one or more fingers touch the screen.
+void App::touchReleased(const TouchEventArgs & touch)  // Called when fingers lift off the screen, or when the OS cancels the touches.
+void App::windowResized(int width, int height)  // Called when the window size changes, and once at startup before setup().
 ```
 
-### AudioDeviceChangedArgs — Argument type for the AudioEngine::audioDeviceChanged event, fired after every successful init() (initial and re-init). Reports the resolved device's real name (never empty).
+### AudioDeviceChangedArgs — Carries information about the audio device opened by the engine.
 
 ```cpp
 ```
 
-### AudioDeviceInfo — One entry in the list returned by AudioEngine::listDevices().
+### AudioDeviceInfo — Describes an available audio playback device.
 
 ```cpp
 ```
 
-### AudioEngine — Singleton miniaudio-based mixer engine. Owns the output device, mixes all playing Sound voices, exposes real-time audioOut / audioIn / audioDeviceChanged events, and an FFT analysis ring buffer. Access via AudioEngine::getInstance(); most apps drive it indirectly through the Sound class and the global initAudio() / shutdownAudio() helpers.
+### AudioEngine — Manages the output device and mixes sound playback using miniaudio.
 
 ```cpp
-size_t AudioEngine::getAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest post-clamp output samples (mono, L+R average) into outBuffer. numSamples is capped at 4096; missing startup samples are zero padded. Safe from any thread. Returns the number of samples written, or 0 while stopped or uninitialized. Reuses the previous successful copy if concurrent writes prevent a snapshot. Reads the same two-second, per-channel ring as the MCP-only tc_get_audio_spectrum (full FFT, selectable size/window/channels/frequency range/peak count) and tc_save_audio_capture (recent output as float32 WAV). The audio callback writes the ring without locks. Global wrapper: getAudioAnalysisBuffer.
-int AudioEngine::getBufferSize() const  // Requested buffer size in frames, as passed in AudioSettings::bufferSize (0 = backend default). The size the device actually uses is AudioDeviceChangedArgs::bufferSize.
-int AudioEngine::getChannels() const  // Current engine output channel count.
-AudioEngine & AudioEngine::getInstance()  // Get the global AudioEngine singleton.
-int AudioEngine::getMaxPolyphony() const  // Maximum number of simultaneously-playing Sound voices.
-std::vector<PlayingSoundInfo> AudioEngine::getPlayingSounds() const  // Snapshot of the sounds currently playing or paused (PlayingSoundInfo: slot, path, streaming, position, duration, volume, pan, speed, loop, paused, level). Playbacks left in their slots after shutdown() are listed with level 0. Copied under the engine lock: call it from the main thread, not from an audioOut / audioIn listener.
-int AudioEngine::getSampleRate() const  // Current engine output sample rate (Hz). Returns the default (48000) before init().
-AudioStats AudioEngine::getStats() const  // Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; stream underrun frames, stalled callbacks and voices stopped by re-init; hard-clipped output samples; master peak / RMS; audio-thread CPU usage. Reads atomics and a steady clock, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers.
-bool AudioEngine::init() [+1]  // Initialize the engine, or re-initialize it with an AudioSettings override. init(settings) keeps the sample rate, channels, buffer size and polyphony even when it fails; init() with no arguments reuses the last ones (the defaults if init(settings) was never called) but always opens the system default device on AudioBackend::Default. Re-init on a running engine migrates active voices to the new settings. miniaudio reaches Null only when no real backend context can be created; if a context opens but its device cannot, init() returns false without switching backend. Set AudioSettings::backend = AudioBackend::Null for intentional silent operation (one Notice per init). getStats() retains the last init failure until a successful init. Returns true on success, false when no output device can be opened; the failure is logged through logError("AudioEngine") with the requested device name. A failed re-init leaves the engine stopped: the running device is closed before the new one is tried. It may be called again later; each failed try opens the device and logs again, so retry on a timer (about once a second) or on a user action, not every frame. Sound::load*() calls init() while the engine is not initialized, so after a failed init(settings) it opens the system default device with those settings; call init(settings) again before loading sounds if you want the requested device.
-bool AudioEngine::isInitialized() const  // True after a successful init().
-std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Enumerate available playback devices (name + isDefault). Empty if unsupported on the platform.
-void AudioEngine::mixAudio(float * buffer, int num_frames, int num_channels)  // Audio output callback: mix all playing sounds into the buffer (internal, called from the audio thread).
-std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> source) [+1]  // Start a new mixer voice for the given source (eager SoundBuffer or streaming SoundStream) and return its live PlayingSound handle. Usually called indirectly via Sound::play().
-void AudioEngine::shutdown()  // Stop and close the audio device.
-bool AudioEngine::waitForAudioCallbacks()  // Teardown barrier for audioOut / audioIn listeners: returns once every audio callback that was running when it was called has finished. EventListener::disconnect() does not wait for a callback running on the audio thread, so an object whose listener uses its members disconnects, calls this, and only then lets the members go (in its own destructor or cleanup(), not in a base-class destructor). Returns true at once when no audio runs or when called from inside a listener; gives up on a listener stuck for about one second (logs a warning, returns false). It waits for every audioOut / audioIn listener running at that moment, not only yours, so don't call it while holding a lock that a listener takes: that listener blocks, the call waits the full second, and the audio drops out meanwhile.
+size_t AudioEngine::getAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copies recent audio output into a mono analysis buffer.
+int AudioEngine::getBufferSize() const  // Returns the requested audio buffer size.
+int AudioEngine::getChannels() const  // Returns the engine output channel count.
+AudioEngine & AudioEngine::getInstance()  // Returns the global AudioEngine singleton.
+int AudioEngine::getMaxPolyphony() const  // Returns the engine's playback slot capacity.
+std::vector<PlayingSoundInfo> AudioEngine::getPlayingSounds() const  // Returns a snapshot of playing and paused sounds.
+int AudioEngine::getSampleRate() const  // Returns the engine output sample rate.
+AudioStats AudioEngine::getStats() const  // Returns a snapshot of audio engine diagnostics.
+bool AudioEngine::init() [+1]  // Initializes or reinitializes the audio output engine.
+bool AudioEngine::isInitialized() const  // Returns whether audio output is initialized.
+std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Lists available audio playback devices.
+void AudioEngine::mixAudio(float * buffer, int num_frames, int num_channels)  // Mixes audio voices and listeners into an output buffer.
+std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> source) [+1]  // Starts a mixer voice for an audio source.
+void AudioEngine::shutdown()  // Stops and closes the audio output device.
+bool AudioEngine::waitForAudioCallbacks()  // Waits for audio listeners to finish during teardown.
 ```
 
-### AudioInBuffer — Argument type for the AudioEngine::audioIn event. Holds the interleaved read-only microphone input for a single capture callback. Process and return quickly; do not call engine APIs from here.
+### AudioInBuffer — Describes a read-only audio input buffer.
 
 ```cpp
 ```
 
-### AudioOutBuffer — Argument type for the AudioEngine::audioOut event. Holds the interleaved mutable output buffer for a single audio callback. Listeners should ADD their contribution to data (voices are already mixed in); do not call engine APIs from here.
+### AudioOutBuffer — Provides the writable audio output buffer for a callback.
 
 ```cpp
 ```
 
-### AudioRecordSettings — Settings for AudioRecorder::start(): sample format (S16/F32) and an optional channel map
+### AudioRecordSettings — Configures the sample format and channel routing for audio recording.
 
 ```cpp
 ```
 
-### AudioRecorder — Records the engine's master output (everything the speakers get, Sounds and audioOut synthesis alike) to a WAV file. Taps audioOut at Monitor priority; file IO runs on a background thread, the audio thread never blocks. Every file has a 36-byte JUNK chunk after the RIFF header, so the samples start at byte 80 (S16) or 92 (F32). A take over 4 GiB of samples (about 3.1 h of 48 kHz stereo F32) is written as RF64 (EBU Tech 3306); older readers without RF64 support can't open it Destroying an active recorder inside an audio callback is a caller mistake: it returns without waiting, logs one Error, and leaves the WAV header unfinalized.
+### AudioRecorder — Records the audio engine's master mix to a WAV file.
 
 ```cpp
-uint64_t AudioRecorder::getDroppedFrames() const  // Frames lost to ring-buffer overflow (0 in normal operation; nonzero means the writer thread fell behind)
-fs::path AudioRecorder::getPath() const  // Resolved path of the file being written
-double AudioRecorder::getRecordedSeconds() const  // Seconds actually written to the file so far. Counts complete frames actually written divided by sample rate, including a short write; queued or failed frames are excluded.
-bool AudioRecorder::isRecording() const  // True while recording
-SaveResult AudioRecorder::start(const fs::path & path, const AudioRecordSettings & settings = {std::vector<std::vector<int>>()})  // Start an in-place WAV recording of the master mix. Returns SaveResult after shared path preparation, opening and checked header writing; the AudioEngine must already be initialized. Relative paths use getDataPath, missing parents are created, and app bundle paths are refused. Every subsequent write is checked; the first failure ends the take and logs exactly one Error.
-SaveResult AudioRecorder::stop()  // Stop, drain pending captures and finalize the WAV/RF64 header and file. Disconnects the audio listener and waits up to one second for all audio callbacks already in flight; if one is still running it logs a Warning and finalizes anyway (that callback's last buffer is not in the file). Do not hold a lock needed by an audio listener. Returns SaveResult for checked header patching and close, or the first take failure; repeated calls preserve that result without another Error. Destruction normally calls stop; destroying an active recorder inside an audio callback instead logs one Error and leaves the header unfinalized. Recording writes in place, without a temporary or rename.
+uint64_t AudioRecorder::getDroppedFrames() const  // Returns the number of captured audio frames discarded.
+fs::path AudioRecorder::getPath() const  // Returns the resolved recording file path.
+double AudioRecorder::getRecordedSeconds() const  // Returns the duration of audio written to the recording.
+bool AudioRecorder::isRecording() const  // Returns whether recording is active.
+SaveResult AudioRecorder::start(const fs::path & path, const AudioRecordSettings & settings = {std::vector<std::vector<int>>()})  // Starts recording the master mix to a WAV file.
+SaveResult AudioRecorder::stop()  // Stops recording and finalizes the audio file.
 ```
 
-### AudioSettings — Configuration passed to AudioEngine::init() to override engine defaults (sample rate, channels, buffer size, polyphony, device). Empty deviceName selects the system default playback device.
+### AudioSettings — Configures audio engine initialization.
 
 ```cpp
 ```
 
-### AudioStats — Audio engine health counters and meters, returned by AudioEngine::getStats(). Counters are cumulative since the process started (they survive re-init); peak / rms / cpuUsage describe the recent output.
+### AudioStats — Reports audio engine counters, output levels, and processing load.
 
 ```cpp
 ```
 
-### BuildInfo — Build timestamp info injected as compile definitions by trussc_app() at CMake configure time. Refreshes when cmake reconfigures. Date/time fields are local time; timestamp is UTC Unix seconds.
+### BuildInfo — Provides build configuration timestamps.
 
 ```cpp
-const char * BuildInfo::date()  // Build date in "YYYY-MM-DD" form (local time) 
-const char * BuildInfo::dateTime()  // Build date-time in "YYYY-MM-DD HH:MM:SS" form (local time) 
-int BuildInfo::day()  // Build day of month (1-31)
-int BuildInfo::hour()  // Build hour (0-23)
-int BuildInfo::minute()  // Build minute (0-59)
-int BuildInfo::month()  // Build month (1-12)
-int BuildInfo::second()  // Build second (0-59)
-const char * BuildInfo::time()  // Build time in "HH:MM:SS" form (local time) 
-int64_t BuildInfo::timestamp()  // Build timestamp as Unix seconds (UTC)
-int BuildInfo::year()  // Build year (e.g. 2026)
+const char * BuildInfo::date()  // Returns the build date.
+const char * BuildInfo::dateTime()  // Returns the build date and time.
+int BuildInfo::day()  // Returns the day of the month when the build was configured.
+int BuildInfo::hour()  // Returns the hour when the build was configured.
+int BuildInfo::minute()  // Returns the minute when the build was configured.
+int BuildInfo::month()  // Returns the month when the build was configured.
+int BuildInfo::second()  // Returns the second when the build was configured.
+const char * BuildInfo::time()  // Returns the build time.
+int64_t BuildInfo::timestamp()  // Returns the build timestamp.
+int BuildInfo::year()  // Returns the year when the build was configured.
 ```
 
-### CameraContext — A snapshot of the camera (view / projection / viewport) that a part of the scene was drawn under. One is registered per camera scope (screen setup, EasyCam::begin, Fbo::begin) and stamped on each node at draw time, so mouse picking unprojects the cursor through the same camera the node was rendered with.
+### CameraContext — Stores the camera snapshot used to render part of a scene.
 
 ```cpp
-Ray CameraContext::screenPointToRay(float screenX, float screenY) const  // Unproject a screen point (pixels, top-left origin) into a world-space ray.
-Vec3 CameraContext::worldToScreen(const Vec3 & worldPos) const  // Convert world coordinate to screen coordinate (x, y = screen pos, z = depth 0-1)
+Ray CameraContext::screenPointToRay(float screenX, float screenY) const  // Converts a screen point into a world-space ray.
+Vec3 CameraContext::worldToScreen(const Vec3 & worldPos) const  // Projects a world position into screen coordinates.
 ```
 
-### ChipSoundBundle — A timeline of chiptune notes (ChipSoundNote + start time) that builds into a single mixed Sound. Add notes at times, then call build() to render the mix with ADSR and clipping applied.
+### ChipSoundBundle — Combines timed chiptune notes into a single sound.
 
 ```cpp
-ChipSoundBundle & ChipSoundBundle::add(const ChipSoundNote & note, float time) [+1]  // Schedule a note to start at the given time (seconds). The second overload constructs the note inline from wave / frequency / duration.
-Sound ChipSoundBundle::build() const  // Render all scheduled notes into a single mixed, clipped Sound ready to play.
-ChipSoundBundle & ChipSoundBundle::clear()  // Remove all scheduled notes.
-float ChipSoundBundle::getDuration() const  // Total duration in seconds, auto-computed from the last note's end.
+ChipSoundBundle & ChipSoundBundle::add(const ChipSoundNote & note, float time) [+1]  // Adds a note to the bundle at a specified start time.
+Sound ChipSoundBundle::build() const  // Renders the bundle into a single mixed Sound.
+ChipSoundBundle & ChipSoundBundle::clear()  // Removes every note from the bundle.
+float ChipSoundBundle::getDuration() const  // Returns the bundle's total duration.
 ```
 
-### ChipSoundNote — One 8-bit-style note: a plain aggregate of public fields (wave, hz, volume, duration, and the ADSR envelope attack/decay/sustain/release). Set fields directly via designated initializers ({ .wave = Wave::Square, .hz = 440, .duration = 0.2f }) or the constructor, then build() it into a Sound (or add() it to a ChipSoundBundle).
+### ChipSoundNote — Defines one synthesized note with a waveform and ADSR envelope.
 
 ```cpp
-Sound ChipSoundNote::build() const  // Render this note (with its ADSR envelope) into a playable Sound
-void ChipSoundNote::generateBuffer(SoundBuffer & buf) const  // Write this note's raw waveform (without the ADSR envelope) into buf. Used internally by build() and by ChipSoundBundle mixing.
-float ChipSoundNote::getTotalDuration() const  // Total note duration in seconds (used by ChipSoundBundle to lay out note timing).
+Sound ChipSoundNote::build() const  // Builds a playable Sound from the note.
+void ChipSoundNote::generateBuffer(SoundBuffer & buf) const  // Generates the note waveform in a SoundBuffer.
+float ChipSoundNote::getTotalDuration() const  // Returns the note duration.
 ```
 
-### ClipboardPastedEventArgs — Arguments for clipboardPasted events; the only reliable way to read the clipboard on the Web platform
+### ClipboardPastedEventArgs — Carries text received by a clipboard paste event.
 
 ```cpp
 ```
 
-### Color — RGBA color (0.0-1.0 range)
+### Color — Represents an sRGB color with alpha.
 
 ```cpp
-Color Color::clamped() const  // Get clamped copy (0.0-1.0)
-Color Color::fromBytes(int r, int g, int b, int a = 255)  // Create from 0-255 values
-Color Color::fromHex(uint32_t hex, bool hasAlpha = false)  // Create from hex value
-Color Color::fromHSB(float h, float s, float b, float a = 1.0)  // Create from HSB (H: 0-1)
-Color Color::fromLinear(float r, float g, float b, float a = 1.0)  // Create from linear RGB
-Color Color::fromOKLab(float L, float a_lab, float b_lab, float alpha = 1.0)  // Create from OKLab (L: 0-1, a: ~-0.4-0.4, b: ~-0.4-0.4)
-Color Color::fromOKLCH(float L, float C, float H, float a = 1.0)  // Create from OKLCH (L: 0-1, C: 0-0.4, H: 0-1)
-Color Color::lerp(const Color & target, float t) const  // Interpolate in OKLab space
-Color Color::lerpHSB(const Color & target, float t) const  // Interpolate in HSB space
-Color Color::lerpLinear(const Color & target, float t) const  // Interpolate in linear RGB space
-Color Color::lerpOKLab(const Color & target, float t) const  // Interpolate in OKLab space (perceptually uniform)
-Color Color::lerpOKLCH(const Color & target, float t) const  // Interpolate in OKLCH space (shortest hue path)
-Color Color::lerpRGB(const Color & target, float t) const  // Interpolate in RGB space
-Color & Color::set(float r, float g, float b, float a = 1.0) [+2]  // Set color components
-uint32_t Color::toHex(bool includeAlpha = false) const  // Convert to hex value
-ColorHSB Color::toHSB() const  // Convert to HSB (H: 0-1, S: 0-1, B: 0-1)
-ColorLinear Color::toLinear() const  // Convert to linear RGB color space
-ColorOKLab Color::toOKLab() const  // Convert to OKLab (perceptually uniform)
-ColorOKLCH Color::toOKLCH() const  // Convert to OKLCH (L: 0-1, C: 0-0.4, H: 0-1)
+Color Color::clamped() const  // Returns a copy with all components clamped.
+Color Color::fromBytes(int r, int g, int b, int a = 255)  // Creates a color from integer RGBA components.
+Color Color::fromHex(uint32_t hex, bool hasAlpha = false)  // Creates a color from a hexadecimal RGB or RGBA value.
+Color Color::fromHSB(float h, float s, float b, float a = 1.0)  // Creates an sRGB color from HSB components.
+Color Color::fromLinear(float r, float g, float b, float a = 1.0)  // Creates an sRGB color from linear RGB components.
+Color Color::fromOKLab(float L, float a_lab, float b_lab, float alpha = 1.0)  // Creates an sRGB color from OKLab components.
+Color Color::fromOKLCH(float L, float C, float H, float a = 1.0)  // Creates an sRGB color from OKLCH components.
+Color Color::lerp(const Color & target, float t) const  // Interpolates toward another color in OKLab space.
+Color Color::lerpHSB(const Color & target, float t) const  // Interpolates toward another color in HSB space.
+Color Color::lerpLinear(const Color & target, float t) const  // Interpolates toward another color in linear RGB space.
+Color Color::lerpOKLab(const Color & target, float t) const  // Interpolates toward another color in OKLab space.
+Color Color::lerpOKLCH(const Color & target, float t) const  // Interpolates toward another color in OKLCH space.
+Color Color::lerpRGB(const Color & target, float t) const  // Interpolates toward another color directly in sRGB space.
+Color & Color::set(float r, float g, float b, float a = 1.0) [+2]  // Sets the color components.
+uint32_t Color::toHex(bool includeAlpha = false) const  // Converts the color to a hexadecimal RGB or RGBA value.
+ColorHSB Color::toHSB() const  // Converts the color to HSB.
+ColorLinear Color::toLinear() const  // Converts the color to linear RGB.
+ColorOKLab Color::toOKLab() const  // Converts an sRGB color to OKLab.
+ColorOKLCH Color::toOKLCH() const  // Converts the color to OKLCH.
 ```
 
-### ColorHSB — HSB color space (H/S/B: 0-1)
+### ColorHSB — Represents a color using hue, saturation, and brightness.
 
 ```cpp
-ColorHSB ColorHSB::lerp(const ColorHSB & target, float t, bool shortestPath = true) const  // Interpolate in HSB space (shortest hue path)
-ColorLinear ColorHSB::toLinear() const  // Convert to linear RGB color space
-ColorOKLab ColorHSB::toOKLab() const  // Convert to OKLab color space
-ColorOKLCH ColorHSB::toOKLCH() const  // Convert to OKLCH color space
-Color ColorHSB::toRGB() const  // Convert ColorHSB to Color (RGB)
+ColorHSB ColorHSB::lerp(const ColorHSB & target, float t, bool shortestPath = true) const  // Interpolates between HSB colors.
+ColorLinear ColorHSB::toLinear() const  // Converts an HSB color to linear RGB.
+ColorOKLab ColorHSB::toOKLab() const  // Converts an HSB color to OKLab.
+ColorOKLCH ColorHSB::toOKLCH() const  // Converts an HSB color to OKLCH.
+Color ColorHSB::toRGB() const  // Converts an HSB color to an sRGB Color.
 ```
 
-### ColorLinear — A color in linear RGB space (no gamma encoding), 0.0-1.0 float per channel
+### ColorLinear — Represents a color in linear RGB space.
 
 ```cpp
-ColorLinear ColorLinear::clamped() const  // Clamp to non-negative RGB (HDR-safe) with alpha in 0-1
-ColorLinear ColorLinear::clampedLDR() const  // Clamp every channel to the 0-1 LDR range
-ColorLinear ColorLinear::lerp(const ColorLinear & target, float t) const  // Interpolate in linear space (physically correct)
-ColorHSB ColorLinear::toHSB() const  // Convert to HSB color space
-ColorOKLab ColorLinear::toOKLab() const  // Convert to OKLab color space
-ColorOKLCH ColorLinear::toOKLCH() const  // Convert to OKLCH color space
-Color ColorLinear::toSRGB() const  // Convert to sRGB (gamma-encoded) Color
+ColorLinear ColorLinear::clamped() const  // Returns a copy with nonnegative RGB and bounded alpha.
+ColorLinear ColorLinear::clampedLDR() const  // Returns a copy with every component clamped to 0–1.
+ColorLinear ColorLinear::lerp(const ColorLinear & target, float t) const  // Interpolates between linear RGB colors.
+ColorHSB ColorLinear::toHSB() const  // Converts a linear RGB color to HSB.
+ColorOKLab ColorLinear::toOKLab() const  // Converts a linear RGB color to OKLab.
+ColorOKLCH ColorLinear::toOKLCH() const  // Converts a linear RGB color to OKLCH.
+Color ColorLinear::toSRGB() const  // Converts a linear RGB color to a gamma-encoded sRGB Color.
 ```
 
-### ColorOKLCH — Perceptually uniform OKLCH color
+### ColorOKLCH — Represents a color using perceptual lightness, chroma, and hue.
 
 ```cpp
-ColorOKLCH ColorOKLCH::lerp(const ColorOKLCH & target, float t, bool shortestPath = true) const  // Interpolate in OKLCH space (shortest hue path, perceptually uniform)
-ColorHSB ColorOKLCH::toHSB() const  // Convert to HSB color space
-ColorLinear ColorOKLCH::toLinear() const  // Convert to linear RGB color space
-ColorOKLab ColorOKLCH::toOKLab() const  // Convert to OKLab color space
-Color ColorOKLCH::toRGB() const  // Convert ColorOKLCH to Color (RGB)
+ColorOKLCH ColorOKLCH::lerp(const ColorOKLCH & target, float t, bool shortestPath = true) const  // Interpolates between colors in OKLCH space.
+ColorHSB ColorOKLCH::toHSB() const  // Converts the color to HSB.
+ColorLinear ColorOKLCH::toLinear() const  // Converts the color to linear RGB.
+ColorOKLab ColorOKLCH::toOKLab() const  // Converts the color to OKLab.
+Color ColorOKLCH::toRGB() const  // Converts the color to an sRGB Color.
 ```
 
-### ColorOKLab — A color in the OKLab perceptual color space (lightness + two opponent axes)
+### ColorOKLab — Represents a color in the perceptually uniform OKLab space.
 
 ```cpp
-ColorOKLab ColorOKLab::lerp(const ColorOKLab & target, float t) const  // Interpolate in OKLab space (perceptually uniform)
-ColorHSB ColorOKLab::toHSB() const  // Convert to HSB color space
-ColorLinear ColorOKLab::toLinear() const  // Convert to linear RGB color space
-ColorOKLCH ColorOKLab::toOKLCH() const  // Convert to OKLCH color space
-Color ColorOKLab::toRGB() const  // Convert to sRGB Color
+ColorOKLab ColorOKLab::lerp(const ColorOKLab & target, float t) const  // Interpolates between colors in OKLab space.
+ColorHSB ColorOKLab::toHSB() const  // Converts the color to HSB.
+ColorLinear ColorOKLab::toLinear() const  // Converts the color to linear RGB.
+ColorOKLCH ColorOKLab::toOKLCH() const  // Converts the color to OKLCH.
+Color ColorOKLab::toRGB() const  // Converts the color to an sRGB Color.
 ```
 
-### ConsoleEventArgs — Arguments for the console event (a command line received from stdin)
+### ConsoleEventArgs — Carries a command line received from standard input.
 
 ```cpp
 ```
 
-### CoreEvents — Hub of all framework core events. Each member is an Event you subscribe to with .listen(callback); access the global instance via events()
+### CoreEvents — Collection of framework lifecycle, rendering, and input events.
 
 ```cpp
 ```
 
-### CurveStyle — Curve tessellation settings: Mode (Tolerance or Resolution), the pixel tolerance, and the fixed resolution fallback
+### CurveStyle — Controls how curves are approximated by line segments.
 
 ```cpp
 ```
 
-### DeviceLostEventArgs — Arguments for the deviceLost event (Windows D3D11).
+### DeviceLostEventArgs — Carries information about a lost graphics device.
 
 ```cpp
 ```
 
-### DragDropEventArgs — Arguments for filesDropped events
+### DragDropEventArgs — Carries information about dropped files.
 
 ```cpp
 ```
 
-### EasyCam — 3D camera with mouse control
+### EasyCam — A 3D orbit camera with optional mouse control.
 
 ```cpp
-void EasyCam::begin()  // Apply camera transform (start 3D mode)
-void EasyCam::clearControlArea()  // Clear the camera mouse-input control area constraint
-void EasyCam::disableMouseInput()  // Disable mouse input for camera control
-void EasyCam::disableOrtho()  // Disable orthographic projection (use perspective)
-void EasyCam::enableMouseInput()  // Enable mouse input for camera control
-void EasyCam::enableOrtho()  // Enable orthographic projection
-void EasyCam::end()  // Restore the camera snapshot and selected pipeline from the matching begin on this target, retaining its model and continuous logical blend/depth flags.
-float EasyCam::getAzimuth() const  // Get orbit azimuth (horizontal angle, radians)
-float EasyCam::getDistance() const  // Get distance from target
-Modifier EasyCam::getDragModifier() const  // Get the modifier key required for camera mouse input
-float EasyCam::getElevation() const  // Get orbit elevation (vertical angle, radians)
-float EasyCam::getFov() const  // Get field of view in radians
-int EasyCam::getOrbitButton() const  // Get the mouse button that orbits the camera
-Quaternion EasyCam::getOrientation() const  // Get the camera orientation quaternion
-bool EasyCam::getOrtho() const  // Get whether orthographic projection is enabled
-int EasyCam::getPanButton() const  // Get the mouse button that pans the camera
-Vec3 EasyCam::getPosition() const  // Get camera position
-Vec3 EasyCam::getTarget() const  // Get camera look-at target
-Vec3 EasyCam::getUpAxis() const  // Get the camera up axis
-bool EasyCam::isMouseInputEnabled() const  // Check if mouse input is enabled
-void EasyCam::mouseDragged(int x, int y, int button)  // Handle mouse drag event
-void EasyCam::mousePressed(int x, int y, int button)  // Handle mouse press event
-void EasyCam::mouseReleased(int x, int y, int button)  // Handle mouse release event
-void EasyCam::mouseScrolled(float dx, float dy)  // Handle mouse scroll event (for zoom)
-void EasyCam::reset()  // Reset camera to default position
-void EasyCam::setAzimuth(float radians)  // Set orbit azimuth (horizontal angle, radians)
-void EasyCam::setControlArea(const Rect & area)  // Constrain camera mouse input to a screen rectangle
-void EasyCam::setDistance(float d)  // Set distance from target
-EasyCam & EasyCam::setDragModifier(Modifier m)  // Set the modifier key required for camera mouse input (default: None)
-void EasyCam::setElevation(float radians)  // Set orbit elevation (vertical angle, radians; clamped to ~±80°)
-void EasyCam::setFarClip(float farClip)  // Set far clipping plane
-void EasyCam::setFov(float fov)  // Set field of view in radians
-void EasyCam::setFovDeg(float degrees)  // Set field of view in degrees
-void EasyCam::setNearClip(float nearClip)  // Set near clipping plane
-EasyCam & EasyCam::setOrbitButton(int button)  // Set the mouse button that orbits the camera (default: left)
-void EasyCam::setOrientation(const Quaternion & q)  // Set the camera orientation quaternion
-void EasyCam::setOrtho(bool ortho)  // Set orthographic projection on/off
-EasyCam & EasyCam::setPanButton(int button)  // Set the mouse button that pans the camera (default: middle)
-void EasyCam::setPanSensitivity(float s)  // Set pan sensitivity
-void EasyCam::setSensitivity(float s)  // Set rotation sensitivity
-void EasyCam::setTarget(float x, float y, float z) [+1]  // Set camera look-at target
-void EasyCam::setUpAxis(const Vec3 & up) [+1]  // Set the camera up axis (default Y-up; use (0,0,1) for Z-up)
-void EasyCam::setZoomSensitivity(float s)  // Set zoom sensitivity
+void EasyCam::begin()  // Applies the camera for 3D drawing.
+void EasyCam::clearControlArea()  // Removes the camera mouse-control area restriction.
+void EasyCam::disableMouseInput()  // Disables automatic mouse control of the camera.
+void EasyCam::disableOrtho()  // Selects perspective projection.
+void EasyCam::enableMouseInput()  // Enables automatic mouse control of the camera.
+void EasyCam::enableOrtho()  // Selects orthographic projection.
+void EasyCam::end()  // Restores the camera state saved by the matching begin().
+float EasyCam::getAzimuth() const  // Returns the camera's orbit azimuth.
+float EasyCam::getDistance() const  // Returns the camera's distance from its target.
+Modifier EasyCam::getDragModifier() const  // Returns the modifier selected for camera mouse input.
+float EasyCam::getElevation() const  // Returns the camera's orbit elevation.
+float EasyCam::getFov() const  // Returns the camera's field of view.
+int EasyCam::getOrbitButton() const  // Returns the mouse button assigned to orbit rotation.
+Quaternion EasyCam::getOrientation() const  // Returns the camera's orientation quaternion.
+bool EasyCam::getOrtho() const  // Returns whether orthographic projection is selected.
+int EasyCam::getPanButton() const  // Returns the mouse button assigned to panning.
+Vec3 EasyCam::getPosition() const  // Returns the camera's position.
+Vec3 EasyCam::getTarget() const  // Returns the camera's look-at target.
+Vec3 EasyCam::getUpAxis() const  // Returns the camera's configured up axis.
+bool EasyCam::isMouseInputEnabled() const  // Returns whether automatic mouse input is enabled.
+void EasyCam::mouseDragged(int x, int y, int button)  // Processes a manually forwarded mouse drag.
+void EasyCam::mousePressed(int x, int y, int button)  // Processes a manually forwarded mouse press.
+void EasyCam::mouseReleased(int x, int y, int button)  // Handles a mouse button release for the camera.
+void EasyCam::mouseScrolled(float dx, float dy)  // Handles mouse scrolling to zoom the camera.
+void EasyCam::reset()  // Restores the camera target, distance, and orientation.
+void EasyCam::setAzimuth(float radians)  // Sets the camera's orbit azimuth.
+void EasyCam::setControlArea(const Rect & area)  // Sets the screen rectangle for camera mouse input.
+void EasyCam::setDistance(float d)  // Sets the camera's distance from its target.
+EasyCam & EasyCam::setDragModifier(Modifier m)  // Sets the modifier required for automatic camera mouse input.
+void EasyCam::setElevation(float radians)  // Sets the camera's orbit elevation.
+void EasyCam::setFarClip(float farClip)  // Sets the camera's far clipping distance.
+void EasyCam::setFov(float fov)  // Sets the camera's vertical field of view.
+void EasyCam::setFovDeg(float degrees)  // Sets the camera's vertical field of view in degrees.
+void EasyCam::setNearClip(float nearClip)  // Sets the camera's near clipping distance.
+EasyCam & EasyCam::setOrbitButton(int button)  // Sets the mouse button used to orbit the camera.
+void EasyCam::setOrientation(const Quaternion & q)  // Sets the camera's orientation quaternion.
+void EasyCam::setOrtho(bool ortho)  // Selects orthographic or perspective projection.
+EasyCam & EasyCam::setPanButton(int button)  // Sets the mouse button used to pan the camera.
+void EasyCam::setPanSensitivity(float s)  // Sets the sensitivity of mouse panning.
+void EasyCam::setSensitivity(float s)  // Sets the sensitivity of mouse orbit rotation.
+void EasyCam::setTarget(float x, float y, float z) [+1]  // Sets the camera's look-at target.
+void EasyCam::setUpAxis(const Vec3 & up) [+1]  // Sets the up axis used for camera orbiting.
+void EasyCam::setZoomSensitivity(float s)  // Sets the sensitivity of mouse-wheel zooming.
 ```
 
-### Entry — One scheduled note in a ChipSoundBundle: the note itself plus the time it starts at. `ChipSoundBundle::entries` is a vector of these, so a melody can be inspected or edited directly as well as built with add().
+### Entry — Pairs a chip-synth note with its scheduled start time.
 
 ```cpp
 ```
 
-### EnumLabelSpan — Label table for one enum type: a view over its human-readable enumerator names.
+### EnumLabelSpan — Provides a view of an enum's display labels.
 
 ```cpp
 ```
 
-### Environment — IBL environment map for PBR ambient lighting (irradiance + prefilter + BRDF LUT). Destruction touches window context state and must run on the main thread, like Light destruction.
+### Environment — Holds environment textures for image-based PBR lighting.
 
 ```cpp
-const Texture & Environment::getBrdfLut() const  // Get BRDF integration lookup texture
-const Texture & Environment::getIrradianceMap() const  // Get irradiance cubemap for diffuse IBL
-const Texture & Environment::getPrefilterMap() const  // Get prefiltered environment cubemap for specular IBL
-int Environment::getPrefilterMipLevels() const  // Get number of mip levels in the prefilter map
-bool Environment::isLoaded() const  // Check if environment is loaded
-bool Environment::loadFromHDR(const fs::path & path) [+1]  // Load environment from HDR image file. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
-bool Environment::loadProcedural()  // Generate a simple procedural sky environment
-void Environment::release()  // Release GPU resources
+const Texture & Environment::getBrdfLut() const  // Returns the BRDF integration lookup texture.
+const Texture & Environment::getIrradianceMap() const  // Returns the irradiance cubemap for diffuse image-based lighting.
+const Texture & Environment::getPrefilterMap() const  // Returns the prefiltered cubemap for specular image-based lighting.
+int Environment::getPrefilterMipLevels() const  // Returns the configured prefilter mip-level count.
+bool Environment::isLoaded() const  // Returns the environment's load flag.
+bool Environment::loadFromHDR(const fs::path & path) [+1]  // Bakes environment lighting textures from an HDR image.
+bool Environment::loadProcedural()  // Generates and bakes a procedural sky environment.
+void Environment::release()  // Releases the environment's texture resources.
 ```
 
-### Event<T> — Generic event you subscribe to with listen(callback) and fire with notify(arg). The template parameter is the argument type passed to listeners by reference; Event<void> is the no-argument specialization (callbacks and notify take no argument). listen() returns an EventListener RAII token that disconnects when destroyed
+### Event<T> — Connects listeners to notifications with a shared argument type.
 
 ```cpp
-void Event::clear()  // Remove all listeners
-EventListener Event::listen(Callback callback, int priority = App) [+5]  // Register a listener callback and return an EventListener token; lower priority runs first, and Deliver::Main runs the callback on the main thread
-size_t Event::listenerCount() const  // Number of currently registered listeners
-void Event::notify(T & arg)  // Fire the event, calling all listeners in priority order (no argument for Event<void>); stops early if a listener marks an input arg consumed. A listener removed during the pass on this thread is not called; one added during the pass starts from the next notify()
+void Event::clear()  // Removes all listeners from the event.
+EventListener Event::listen(Callback callback, int priority = App) [+5]  // Registers an event listener and returns its connection token.
+size_t Event::listenerCount() const  // Returns the number of registered listeners.
+void Event::notify(T & arg)  // Notifies the event's listeners.
 ```
 
-### EventListener — RAII token returned by Event::listen(); the listener is automatically disconnected when this token is destroyed or reassigned. Move-only
+### EventListener — Owns an event-listener connection.
 
 ```cpp
-void EventListener::disconnect()  // Explicitly disconnect the listener now (otherwise happens automatically on destruction). On the thread that fires the event it is not called again, even later in a notify() pass already running. It does not wait for a callback running on another thread: for audio, follow it with AudioEngine::waitForAudioCallbacks()
-bool EventListener::isConnected() const  // True while the listener is still connected to its event
+void EventListener::disconnect()  // Explicitly disconnects the listener.
+bool EventListener::isConnected() const  // Returns the token's recorded connection state.
 ```
 
-### ExitRequestEventArgs — Arguments for the exitRequested event
+### ExitRequestEventArgs — Carries a cancellable application exit request.
 
 ```cpp
 ```
 
-### Fbo — Framebuffer object for offscreen rendering
+### Fbo — Stores off-screen rendering results in a texture.
 
 ```cpp
-void Fbo::allocate(int w, int h, int sampleCount = 1, TextureFormat format = RGBA8, bool mipmaps = false)  // Allocate framebuffer (void). When the size exceeds the device limit or the graphics backend reports a resource creation failure, allocation fails, partial resources are released and isAllocated() stays false. Driver-level out-of-memory may not be reported on every backend; begin()/draw() are no-ops and readPixels()/readPixelsFloat()/copyTo() return false. Oversize requests log one Warning with the requested size and device limit. `mipmaps=true` builds a full mip chain that is refreshed automatically at end().
-void Fbo::begin() [+1]  // Begin rendering to FBO. Each activation starts an identity model, empty matrix/camera/scissor scopes, full viewport and a TAU/8 camera in attachment pixels. Distinct Fbos may nest; end resumes the parent with color and depth LOAD. A fresh LOAD activation keeps color and clears depth. Balance scopes on the same target; recursive begin and out-of-order end are rejected.
-void Fbo::clear()  // Release FBO resources
-void Fbo::clearColor(float r, float g, float b, float a)  // Clear the FBO with a solid color
-bool Fbo::copyTo(Image & image) const  // Copy FBO contents to Image
-void Fbo::draw(float x, float y) const [+1]  // Draw FBO contents
-void Fbo::end()  // End rendering to FBO and return to the parent target; the returned logical blend takes effect immediately.
-sg_image Fbo::getColorImage() const  // Return the underlying sokol-gfx color image handle (advanced interop).
-const std::string & Fbo::getDebugName() const  // Return the MCP inspection name (empty for unnamed or moved-from objects).
-int Fbo::getHeight() const  // Get height
-int Fbo::getSampleCount() const  // Get MSAA sample count
-sg_sampler Fbo::getSampler() const  // Return the underlying sokol-gfx sampler handle (advanced interop).
-Texture & Fbo::getTexture() [+1]  // Get FBO texture
-TextureFormat Fbo::getTextureFormat() const  // Get the FBO's color texture format
-sg_view Fbo::getTextureView() const  // Return the underlying sokol-gfx color texture view handle (advanced interop).
-int Fbo::getWidth() const  // Get width
-bool Fbo::isActive() const  // Check if currently rendering to FBO
-bool Fbo::isAllocated() const  // Check if allocated
-std::shared_ptr<void> Fbo::lifetimeToken() const  // Lifetime token for observers holding a raw pointer to this Fbo (e.g. ScreenRecorder auto-stops when the recorded Fbo dies). Per-object: it does not transfer on move
-bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android,web]  // Always read RGBA8 into a CPU buffer, whatever the Fbo format (clamped to 0–1 and quantised to 8 bits)
-bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android,web]  // Read FBO contents into a CPU buffer (32-bit float per channel)
-SaveResult Fbo::save(const fs::path & path) const  // Read back and save FBO pixels. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
-void Fbo::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_fbos lists live objects with index, name, width, height and format. tc_analyze_image accepts source={fbo:name or index} and reads the final Fbo pass after the frame. Moves transfer the name/index and remove the moved-from object; destruction removes the entry. Empty names remain available by index. Web readback and iOS float readback return errors. Non-float Fbo formats are converted to RGBA8 for byte readback. Texture is not a source; draw it into a named Fbo.
+void Fbo::allocate(int w, int h, int sampleCount = 1, TextureFormat format = RGBA8, bool mipmaps = false)  // Allocates the framebuffer attachments.
+void Fbo::begin() [+1]  // Begins rendering into the framebuffer.
+void Fbo::clear()  // Releases the framebuffer resources.
+void Fbo::clearColor(float r, float g, float b, float a)  // Clears the active framebuffer to a solid color.
+bool Fbo::copyTo(Image & image) const  // Copies the framebuffer contents into an Image.
+void Fbo::draw(float x, float y) const [+1]  // Draws the framebuffer contents onto the current target.
+void Fbo::end()  // Finishes framebuffer rendering and returns to the parent target.
+sg_image Fbo::getColorImage() const  // Returns the underlying sokol color image handle.
+const std::string & Fbo::getDebugName() const  // Returns the Fbo's inspection name.
+int Fbo::getHeight() const  // Returns the framebuffer height.
+int Fbo::getSampleCount() const  // Returns the framebuffer's MSAA sample count.
+sg_sampler Fbo::getSampler() const  // Returns the underlying sokol sampler handle.
+Texture & Fbo::getTexture() [+1]  // Returns the framebuffer's current color texture.
+TextureFormat Fbo::getTextureFormat() const  // Returns the framebuffer's color texture format.
+sg_view Fbo::getTextureView() const  // Returns the underlying sokol color texture view handle.
+int Fbo::getWidth() const  // Returns the framebuffer width.
+bool Fbo::isActive() const  // Reports whether the framebuffer has an active rendering scope.
+bool Fbo::isAllocated() const  // Reports whether framebuffer allocation succeeded.
+std::shared_ptr<void> Fbo::lifetimeToken() const  // Returns a token for observing this Fbo object's lifetime.
+bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android,web]  // Reads framebuffer contents into a CPU RGBA8 buffer.
+bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android,web]  // Reads framebuffer contents into a CPU float buffer.
+SaveResult Fbo::save(const fs::path & path) const  // Saves framebuffer contents to an image file.
+void Fbo::setDebugName(const std::string & name)  // Sets the Fbo's inspection name.
 ```
 
-### FileDialogResult — Result of a load/save file dialog
+### FileDialogResult — Contains the result of a file selection dialog.
 
 ```cpp
 ```
 
-### FileReader — Streaming file reader for large files
+### FileReader — Reads files incrementally through an input stream.
 
 ```cpp
-void FileReader::close()  // Close file
-bool FileReader::eof() const  // Check if at end of file
-bool FileReader::isOpen() const  // Check if file is open
-bool FileReader::open(const fs::path & path)  // Open file for reading
-size_t FileReader::read(void * buffer, size_t size)  // Read binary data
-int FileReader::readChar()  // Read one character (-1 at EOF)
-std::string FileReader::readLine() [+1]  // Read one line
-size_t FileReader::remaining()  // Get remaining bytes
-void FileReader::seek(size_t pos)  // Seek to position
-size_t FileReader::tell()  // Get current position
+void FileReader::close()  // Closes the reader's file.
+bool FileReader::eof() const  // Reports whether the reader is closed or its end-of-file flag is set.
+bool FileReader::isOpen() const  // Reports whether the reader has an open file.
+bool FileReader::open(const fs::path & path)  // Opens a file for reading.
+size_t FileReader::read(void * buffer, size_t size)  // Reads bytes into a caller-provided buffer.
+int FileReader::readChar()  // Reads one byte as an integer.
+std::string FileReader::readLine() [+1]  // Reads one line from the file.
+size_t FileReader::remaining()  // Calculates the bytes remaining after the current read position.
+void FileReader::seek(size_t pos)  // Moves the read position to a byte offset.
+size_t FileReader::tell()  // Returns the current read position.
 ```
 
-### FileWriter — Streaming file writer with immediate flush
+### FileWriter — Writes files incrementally with a flush after each write.
 
 ```cpp
-void FileWriter::close()  // Close file
-void FileWriter::flush()  // Flush buffer to disk
-bool FileWriter::isOpen() const  // Check if file is open
-SaveResult FileWriter::open(const fs::path & path, bool append = false)  // Open file for writing (append = true appends to an existing file). Relative paths resolve via getDataPath, and a missing parent folder is created. Returns a failed SaveResult and logs an error when the folder cannot be created or the file cannot be opened. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and a failed SaveResult returned.
-FileWriter & FileWriter::write(const std::string & text) [+2]  // Write data to file
-FileWriter & FileWriter::writeLine(const std::string & text = std::string(""))  // Write line with newline
+void FileWriter::close()  // Closes the output file.
+void FileWriter::flush()  // Flushes buffered output to the file.
+bool FileWriter::isOpen() const  // Returns whether the output file is open.
+SaveResult FileWriter::open(const fs::path & path, bool append = false)  // Opens a file for writing.
+FileWriter & FileWriter::write(const std::string & text) [+2]  // Writes text, a character, or binary data to the file.
+FileWriter & FileWriter::writeLine(const std::string & text = std::string(""))  // Writes text followed by a newline.
 ```
 
-### Font — TrueType font for text rendering
+### Font — Provides TrueType font rendering and text layout.
 
 ```cpp
-Vec2 Font::calcAlignOffset(const std::string & text, Direction h, Direction v) const  // Compute the alignment offset for text given horizontal and vertical alignment.
-void Font::clearAtlas()  // Clear font atlas (GPU memory freed, glyphs re-rasterized on next draw)
-void Font::drawString(const std::string & text, float x, float y) const [+1]  // Draw text
-void Font::drawStringInternal(const std::string & text, float x, float y, Direction h, Direction v) const  // Draw pre-wrapped text in horizontal writing mode (internal layout + atlas emit).
-void Font::drawStringVerticalInternal(const std::string & text, float x, float y, Direction h, Direction v) const  // Draw pre-wrapped text in vertical writing mode (internal layout + atlas emit).
-void Font::emitPlacedGlyphsToAtlas(const std::vector<PlacedGlyph> & placed) const  // Emit atlas quads for a stream of placed glyphs (shared by horizontal and vertical layout).
-void Font::enableWrap(bool enabled)  // Enable or disable line wrapping (default off)
-float Font::fitY(float offsetFromAnchor) const  // Snap a baseline offset accumulated from the anchor to the pixel grid, or pass it through unchanged when grid fit does not land. Callers must accumulate first and round once: rounding the line height and stepping by it would compound into a whole-pixel layout drift.
-void Font::forEachGlyph(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const [+1]  // Invoke a visitor once per laid-out glyph (positions follow writing mode, wrap, kinsoku, and TCY). Backend-agnostic layout pass shared by drawing, vector outlines, and hit testing
-void Font::forEachGlyphHorizontal(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const  // Run the horizontal-writing layout pass over pre-wrapped text, invoking the visitor per placed glyph.
-void Font::forEachGlyphVertical(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const  // Run the vertical-writing layout pass over pre-wrapped text, invoking the visitor per placed glyph.
-Direction Font::getAlignH() const  // Get current horizontal text alignment
-Direction Font::getAlignV() const  // Get current vertical text alignment
-float Font::getAscent() const  // Get the font ascent (distance from baseline to top)
-const internal::AtlasState * Font::getAtlas(size_t index) const  // Return the atlas page at the given index for debug visualization, or nullptr if out of range. Pages are single-channel R8 textures holding glyph coverage in R, so drawing a page's view with the normal pipeline shows it in red.
-size_t Font::getAtlasCount() const  // Get number of atlas pages
-size_t Font::getAtlasMemoryUsage() const  // Get atlas memory usage in bytes (alias of getMemoryUsage)
-Rect Font::getBBox(const std::string & text) const  // Get the bounding box of the text (top-left origin)
-float Font::getDefaultLineHeight() const  // Get the font's default line height (unaffected by setLineHeight)
-int Font::getDefaultOversampling()  // Return the oversampling factor newly loaded fonts start with.
-float Font::getDescent() const  // Get the font descent (distance from baseline to bottom; negative)
-Path Font::getGlyphPath(uint32_t codepoint) const  // Vector outline of a single glyph as one Path with one subpath per contour. Em-normalized (1.0 = em), screen Y-down, baseline at y=0, pen at x=0. Use Path::drawFill() for filled rendering — holes (e, a, O, 日 ...) are auto-detected via earcut.
-bool Font::getGridFit() const  // Return whether vertical grid fit is enabled for this font.
-bool Font::getHangingPunctuation() const  // Check if hanging punctuation is enabled
-float Font::getHeight(const std::string & text) const  // Get text height
-KinsokuLevel Font::getKinsoku() const  // Get the current kinsoku level
-bool Font::getLatinHyphenation() const  // Check if Latin hyphenation is enabled
-float Font::getLineHeight() const  // Get line height
-size_t Font::getLoadedGlyphCount() const  // Get number of loaded glyphs
-float Font::getMaxLineLength() const  // Get the current wrap length
-size_t Font::getMemoryUsage() const  // Get atlas memory usage in bytes (one byte per atlas texel: width x height summed over the pages)
-bool Font::getMipmaps() const  // Return whether the glyph atlas is allowed to build mipmaps.
-int Font::getOversampling() const  // Return the oversampling factor this font rasterizes with (1 = off).
-sg_sampler Font::getSampler()  // Return the shared sokol-gfx sampler used for atlas rendering (advanced interop).
-int Font::getSize() const  // Get font size
-Path Font::getStringPath(const std::string & text, float x, float y, Direction h, Direction v) const [+1]  // Vector outline of the whole string at (x, y) as one Path containing every glyph's contours (one subpath each). Uses the same layout pipeline as drawString (writing mode, alignment, wrap, kinsoku, TCY). Logical pixels — drawStroke / drawFill / transform freely.
-int Font::getTcyDigitMax() const  // Get the maximum digit-run length that uses tate-chu-yoko combine mode
-TcyMode Font::getTcyLatinMode() const  // Get the tate-chu-yoko mode for Latin letter runs
-size_t Font::getTotalCacheMemoryUsage()  // Total memory used by the shared font atlas cache across all fonts
-float Font::getWidth(const std::string & text) const  // Get text width
-WritingMode Font::getWritingMode() const  // Current writing mode
-bool Font::gridFitLands() const  // Report whether grid fit actually lands on the pixel grid, i.e. whether it is enabled and the current transform maps one model unit to one device pixel.
-bool Font::isLoaded() const  // Check if loaded
-bool Font::isLoading() const  // Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation.
-bool Font::isWrapEnabled() const  // Check if line wrapping is enabled
-bool Font::kinsokuLineEnd(uint32_t cp) const  // Return whether a codepoint is forbidden at the end of a line (kinsoku rule).
-bool Font::kinsokuLineStart(uint32_t cp) const  // Return whether a codepoint is forbidden at the start of a line (kinsoku rule).
-LoadResult Font::load(const fs::path & nameOrPath, int size, int faceIndex = 0)  // Load a font file or a system font name; faceIndex picks the face in a .ttc. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins. On Web, URL loading waits until the font is usable or fetching/decoding fails.
-void Font::loadAsync(const fs::path & nameOrPath, int size, int faceIndex = 0)  // loadAsync(nameOrPath, size, faceIndex = 0): prepare owned font bytes and CPU metrics on a native worker, then publish the shared atlas and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires.
-void Font::resetLineHeight()  // Reset line height to the font default
-void Font::setAlign(Direction h, Direction v) [+1]  // Set horizontal (and optional vertical) text alignment
-void Font::setDefaultOversampling(int n)  // Set the oversampling factor newly loaded fonts start with; does not affect fonts already loaded.
-Font & Font::setGridFit(bool enabled)  // Snap every baseline to a whole pixel at draw time so horizontal strokes stay sharp, at no memory cost and one rounding per line (on by default; automatically stands down when the transform is not 1:1, where rounding in model space would hurt instead).
-void Font::setHangingPunctuation(bool enabled)  // Let prohibited line-start CJK punctuation hang past the line edge instead of wrapping (default off)
-void Font::setKinsoku(KinsokuLevel level)  // Choose which CJK kinsoku (line-break prohibition) table to apply during wrap
-void Font::setLatinHyphenation(bool enabled)  // When wrapping a Latin run with no break point, insert '-' before the forced break (default off)
-void Font::setLineHeight(float pixels)  // Set line height in pixels (0 = use font default)
-void Font::setLineHeightEm(float multiplier)  // Set line height as a multiple of the font default (1.0 = default, 1.5 = 1.5x)
-void Font::setMaxLineLength(float length)  // Set the wrap length (horizontal: line width; vertical: column height)
-Font & Font::setMipmaps(bool enabled)  // Enable mipmapping of the glyph atlas so text stays stable when drawn much smaller than its loaded size (on by default; the chain is built lazily on the first minified draw).
-Font & Font::setOversampling(int n)  // Rasterize glyphs at N x N the target size and box-filter them down, trading N^2 atlas memory for sharper text under arbitrary transforms (1 = off).
-void Font::setTcyDigits(int maxDigits, TcyMode inMode, TcyMode overflowMode)  // Tate-chu-yoko config for ASCII digit runs in vertical text. Runs with <= maxDigits use inMode (typically Combine — squeezed into one cell); longer runs fall back to overflowMode (typically Rotate).
-void Font::setTcyLatin(TcyMode mode)  // Tate-chu-yoko mode for Latin letter runs in vertical text. Default is Rotate (whole run rotated 90 CW).
-void Font::setWritingMode(WritingMode mode)  // Switch between horizontal and vertical (tategaki) writing. Default is Horizontal (existing behavior unchanged).
-float Font::stringWidth(const std::string & text) const  // Pixel width of the text (alias of getWidth)
-std::string Font::wrapTextHorizontal(const std::string & text) const  // Insert hard newlines into text for horizontal word wrapping at maxLineLength.
-std::string Font::wrapTextIfEnabled(const std::string & text) const  // Wrap text per the current writing mode when wrapping is enabled, else return it unchanged.
-std::string Font::wrapTextVertical(const std::string & text) const  // Insert hard newlines into text for vertical wrapping by column-height budget.
+Vec2 Font::calcAlignOffset(const std::string & text, Direction h, Direction v) const  // Calculate a text alignment offset.
+void Font::clearAtlas()  // Clears the font's cached glyphs and atlas pages.
+void Font::drawString(const std::string & text, float x, float y) const [+1]  // Draws text with the loaded font.
+void Font::drawStringInternal(const std::string & text, float x, float y, Direction h, Direction v) const  // Draws pre-wrapped text with horizontal glyph layout.
+void Font::drawStringVerticalInternal(const std::string & text, float x, float y, Direction h, Direction v) const  // Draw pre-wrapped text with vertical glyph layout.
+void Font::emitPlacedGlyphsToAtlas(const std::vector<PlacedGlyph> & placed) const  // Emits textured quads for positioned glyphs.
+void Font::enableWrap(bool enabled)  // Enables or disables automatic text wrapping.
+float Font::fitY(float offsetFromAnchor) const  // Round a baseline offset when grid fitting is applicable.
+void Font::forEachGlyph(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const [+1]  // Calls a visitor for each laid-out glyph.
+void Font::forEachGlyphHorizontal(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const  // Visits glyphs positioned by horizontal text layout.
+void Font::forEachGlyphVertical(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const  // Visit each glyph placed by the vertical text layout.
+Direction Font::getAlignH() const  // Returns the font's stored horizontal alignment.
+Direction Font::getAlignV() const  // Returns the font's stored vertical alignment.
+float Font::getAscent() const  // Returns the font's ascent above the baseline.
+const internal::AtlasState * Font::getAtlas(size_t index) const  // Returns a glyph atlas page for inspection.
+size_t Font::getAtlasCount() const  // Returns the number of atlas pages.
+size_t Font::getAtlasMemoryUsage() const  // Returns atlas memory usage.
+Rect Font::getBBox(const std::string & text) const  // Returns a rectangle containing the text's measured dimensions.
+float Font::getDefaultLineHeight() const  // Returns the font's default line height.
+int Font::getDefaultOversampling()  // Return the oversampling default for newly constructed fonts.
+float Font::getDescent() const  // Returns the font's descent below the baseline.
+Path Font::getGlyphPath(uint32_t codepoint) const  // Returns a single glyph's vector outline as a Path.
+bool Font::getGridFit() const  // Return whether baseline grid fitting is enabled.
+bool Font::getHangingPunctuation() const  // Returns whether hanging punctuation is enabled.
+float Font::getHeight(const std::string & text) const  // Returns the text's measured height.
+KinsokuLevel Font::getKinsoku() const  // Returns the current kinsoku level.
+bool Font::getLatinHyphenation() const  // Returns whether forced-break hyphen insertion is enabled.
+float Font::getLineHeight() const  // Returns the current line spacing.
+size_t Font::getLoadedGlyphCount() const  // Returns the number of cached glyph entries.
+float Font::getMaxLineLength() const  // Returns the configured wrapping limit.
+size_t Font::getMemoryUsage() const  // Returns the CPU atlas pixel storage size.
+bool Font::getMipmaps() const  // Return whether glyph atlas mipmaps are enabled.
+int Font::getOversampling() const  // Return the configured oversampling factor.
+sg_sampler Font::getSampler()  // Returns the shared sampler for inspecting glyph atlases.
+int Font::getSize() const  // Returns the requested font size.
+Path Font::getStringPath(const std::string & text, float x, float y, Direction h, Direction v) const [+1]  // Returns a string's vector outlines as one Path.
+int Font::getTcyDigitMax() const  // Returns the digit-run threshold for tate-chu-yoko.
+TcyMode Font::getTcyLatinMode() const  // Returns the tate-chu-yoko mode for Latin letter runs.
+size_t Font::getTotalCacheMemoryUsage()  // Returns the shared font cache's total atlas pixel storage size.
+float Font::getWidth(const std::string & text) const  // Returns the text's measured width.
+WritingMode Font::getWritingMode() const  // Returns the current writing mode.
+bool Font::gridFitLands() const  // Test whether the current scale permits baseline grid fitting.
+bool Font::isLoaded() const  // Returns whether the font is loaded.
+bool Font::isLoading() const  // Return whether an asynchronous font request is pending.
+bool Font::isWrapEnabled() const  // Returns whether automatic text wrapping is enabled.
+bool Font::kinsokuLineEnd(uint32_t cp) const  // Test whether a codepoint is prohibited at the end of a wrapped line.
+bool Font::kinsokuLineStart(uint32_t cp) const  // Test whether a codepoint is prohibited at the start of a wrapped line.
+LoadResult Font::load(const fs::path & nameOrPath, int size, int faceIndex = 0)  // Loads a font from a file, a system font name, or a Web URL.
+void Font::loadAsync(const fs::path & nameOrPath, int size, int faceIndex = 0)  // Load a font asynchronously and report completion through an event.
+void Font::resetLineHeight()  // Restores the font's default line spacing.
+void Font::setAlign(Direction h, Direction v) [+1]  // Stores horizontal and optional vertical alignment settings.
+void Font::setDefaultOversampling(int n)  // Set the oversampling default for newly constructed fonts.
+Font & Font::setGridFit(bool enabled)  // Set whether drawn baseline offsets are rounded to whole units.
+void Font::setHangingPunctuation(bool enabled)  // Controls whether prohibited line-start characters hang beyond the wrapping boundary.
+void Font::setKinsoku(KinsokuLevel level)  // Selects the CJK line-breaking prohibition table.
+void Font::setLatinHyphenation(bool enabled)  // Controls hyphen insertion at forced horizontal line breaks.
+void Font::setLineHeight(float pixels)  // Sets the spacing between text lines or columns.
+void Font::setLineHeightEm(float multiplier)  // Sets line spacing as a multiple of the font's default line height.
+void Font::setMaxLineLength(float length)  // Sets the length used for automatic text wrapping.
+Font & Font::setMipmaps(bool enabled)  // Set whether the glyph atlas may generate mipmaps.
+Font & Font::setOversampling(int n)  // Set the glyph rasterization oversampling factor.
+void Font::setTcyDigits(int maxDigits, TcyMode inMode, TcyMode overflowMode)  // Configures how ASCII digit runs are placed in vertical text.
+void Font::setTcyLatin(TcyMode mode)  // Sets how ASCII letter runs are placed in vertical text.
+void Font::setWritingMode(WritingMode mode)  // Selects horizontal or vertical text layout.
+float Font::stringWidth(const std::string & text) const  // Returns the text width through the getWidth compatibility alias.
+std::string Font::wrapTextHorizontal(const std::string & text) const  // Insert newlines to wrap horizontal text.
+std::string Font::wrapTextIfEnabled(const std::string & text) const  // Apply wrapping for the current writing mode.
+std::string Font::wrapTextVertical(const std::string & text) const  // Insert newlines to wrap vertical text into columns.
 ```
 
-### FpsSettings — FPS configuration returned by getFpsSettings(). Rates use VSYNC (-1) and EVENT_DRIVEN (0) sentinels, or a fixed fps
+### FpsSettings — Reports the main loop’s frame-rate configuration.
 
 ```cpp
 ```
 
-### FullscreenShader — Shader specialization for fullscreen post-processing effects (position + texcoord quad). Set uniforms via setParams, then call draw to render a fullscreen quad.
+### FullscreenShader — Provides a shader for fullscreen post-processing effects.
 
 ```cpp
-sg_pipeline_desc FullscreenShader::createPipelineDesc()  // Build the fullscreen-quad pipeline descriptor (overrides Shader's).
-void FullscreenShader::createVertexBuffer()  // Create the fullscreen-quad vertex/index buffers (overrides Shader's).
-void FullscreenShader::draw()  // Draw a fullscreen quad with this shader applied
-void FullscreenShader::setParams(const T & params)  // Set the uniform block for the fullscreen pass; call before draw (C++ only)
+sg_pipeline_desc FullscreenShader::createPipelineDesc()  // Builds the pipeline descriptor for the fullscreen quad.
+void FullscreenShader::createVertexBuffer()  // Creates the vertex and index buffers for the fullscreen quad.
+void FullscreenShader::draw()  // Draws a fullscreen quad with this shader.
+void FullscreenShader::setParams(const T & params)  // Sets the uniform parameter block for fullscreen drawing.
 ```
 
-### GrabberFrame — One captured camera frame with its capture-time timestamp: Pixels (RGBA8) plus timestampUs (monotonic steady_clock microseconds, stamped on the capture thread). Returned by VideoGrabber::getQueuedFrames(). Pixels and timestamp travel together so there is no race between reading the pixels and reading the time
+### GrabberFrame — Pairs a captured camera frame with its capture-time timestamp.
 
 ```cpp
 ```
 
-### GraphicsBackend — Runtime sokol_gfx backend query. Values are meaningful only after sg_setup() has completed (i.e. after the first setup() call).
+### GraphicsBackend — Queries the active graphics backend.
 
 ```cpp
-bool GraphicsBackend::isD3D11()  // True when running on Direct3D 11
-bool GraphicsBackend::isMetal()  // True when running on Apple Metal
-bool GraphicsBackend::isOpenGL()  // True when running on OpenGL (core or GLES3)
-bool GraphicsBackend::isVulkan()  // True when running on Vulkan
-bool GraphicsBackend::isWebGL2()  // True when running on WebGL2 (GLES3 under Emscripten)
-bool GraphicsBackend::isWebGPU()  // True when running on WebGPU
-const char * GraphicsBackend::name()  // Short backend name: "opengl" / "gles3" / "webgl2" / "d3d11" / "metal" / "webgpu" / "vulkan" / "dummy" / "unknown" 
+bool GraphicsBackend::isD3D11()  // Checks whether the active graphics backend is Direct3D 11.
+bool GraphicsBackend::isMetal()  // Checks whether the active graphics backend is Apple Metal.
+bool GraphicsBackend::isOpenGL()  // Checks whether the active graphics backend belongs to the OpenGL family.
+bool GraphicsBackend::isVulkan()  // Checks whether the active graphics backend is Vulkan.
+bool GraphicsBackend::isWebGL2()  // Checks whether the active graphics backend is WebGL2.
+bool GraphicsBackend::isWebGPU()  // Checks whether the active graphics backend is WebGPU.
+const char * GraphicsBackend::name()  // Returns the short name of the active graphics backend.
 ```
 
-### HasTexture — Base class for objects that own a texture (e.g. Image, Fbo, VideoPlayer); exposes getTexture().
+### HasTexture — Provides a common interface for objects with a texture.
 
 ```cpp
-void HasTexture::draw(float x, float y) const [+1]  // Draw the texture at the given position (and optional size).
-TextureFilter HasTexture::getMagFilter() const  // Return the texture magnification filter.
-TextureFilter HasTexture::getMinFilter() const  // Return the texture minification filter.
-Texture & HasTexture::getTexture() [+1]  // Get internal texture
-TextureWrap HasTexture::getWrapU() const  // Return the texture wrap mode on the U axis.
-TextureWrap HasTexture::getWrapV() const  // Return the texture wrap mode on the V axis.
-bool HasTexture::hasTexture() const  // Return true if the underlying texture is allocated.
-SaveResult HasTexture::save(const fs::path & path) const  // Save texture contents (subclasses implement saving). Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
-void HasTexture::setFilter(TextureFilter filter)  // Set both the minification and magnification filters.
-void HasTexture::setMagFilter(TextureFilter filter)  // Set the texture magnification filter.
-void HasTexture::setMinFilter(TextureFilter filter)  // Set the texture minification filter.
-void HasTexture::setWrap(TextureWrap wrap)  // Set the texture wrap mode on both the U and V axes.
-void HasTexture::setWrapU(TextureWrap wrap)  // Set the texture wrap mode on the U (horizontal) axis.
-void HasTexture::setWrapV(TextureWrap wrap)  // Set the texture wrap mode on the V (vertical) axis.
+void HasTexture::draw(float x, float y) const [+1]  // Draws the texture at a specified position and optional size.
+TextureFilter HasTexture::getMagFilter() const  // Returns the texture magnification filter.
+TextureFilter HasTexture::getMinFilter() const  // Returns the texture minification filter.
+Texture & HasTexture::getTexture() [+1]  // Provides access to an object's texture.
+TextureWrap HasTexture::getWrapU() const  // Returns the texture wrap mode on the U axis.
+TextureWrap HasTexture::getWrapV() const  // Returns the texture wrap mode on the V axis.
+bool HasTexture::hasTexture() const  // Returns whether the underlying texture is allocated.
+SaveResult HasTexture::save(const fs::path & path) const  // Provides a virtual interface for saving texture contents.
+void HasTexture::setFilter(TextureFilter filter)  // Sets both texture minification and magnification filters.
+void HasTexture::setMagFilter(TextureFilter filter)  // Sets the texture magnification filter.
+void HasTexture::setMinFilter(TextureFilter filter)  // Sets the texture minification filter.
+void HasTexture::setWrap(TextureWrap wrap)  // Sets texture wrapping on both the U and V axes.
+void HasTexture::setWrapU(TextureWrap wrap)  // Sets texture wrapping on the horizontal U axis.
+void HasTexture::setWrapV(TextureWrap wrap)  // Sets texture wrapping on the vertical V axis.
 ```
 
-### HeadlessSettings — Settings for runHeadlessApp() (no window / graphics). Currently just the target update rate
+### HeadlessSettings — Configures the headless application runner.
 
 ```cpp
-HeadlessSettings & HeadlessSettings::setFps(float fps)  // Set the target update rate (chainable)
+HeadlessSettings & HeadlessSettings::setFps(float fps)  // Sets the target update rate for a headless app.
 ```
 
-### Hit — Result of a ray intersection (this is Ray::Hit). Returned by every intersect* overload; `hit` says whether anything was hit, and `t` / `point` are only meaningful when it did. Convertible to bool, so it reads directly as a condition: `if (auto h = ray.intersectSphere(r))`.
+### Hit — Stores the result of a ray intersection test.
 
 ```cpp
 ```
 
-### HitResult — Result of a node hit test (this is Node::HitResult). Returned by Node::findHitNode() / findHitNodeFromScreen(); call hit() to check whether anything was hit.
+### HitResult — Stores the result of a node hit search.
 
 ```cpp
 ```
 
-### IVec2 — 2D integer vector (x, y)
+### IVec2 — A two-dimensional integer vector.
 
 ```cpp
-Vec2 IVec2::toVec2() const  // Convert to Vec2 (float)
+Vec2 IVec2::toVec2() const  // Converts an integer vector to a floating-point vector.
 ```
 
-### IVec3 — 3D integer vector (x, y, z)
+### IVec3 — A three-dimensional integer vector.
 
 ```cpp
-Vec3 IVec3::toVec3() const  // Convert to Vec3 (float)
-IVec2 IVec3::xy() const  // Get XY components as IVec2
+Vec3 IVec3::toVec3() const  // Converts an integer vector to a floating-point vector.
+IVec2 IVec3::xy() const  // Returns the x and y components as an integer vector.
 ```
 
-### IesProfile — IESNA LM-63 photometric profile for angular light intensity
+### IesProfile — Stores an IESNA LM-63 angular light-intensity profile.
 
 ```cpp
-float IesProfile::getMaxCandela() const  // Get maximum candela value in the profile
-float IesProfile::getMaxVerticalAngle() const  // Get maximum vertical angle in the profile (radians)
-sg_sampler IesProfile::getSampler() const  // Return the sokol-gfx sampler of the IES profile for pipeline binding (advanced interop).
-int IesProfile::getTextureWidth() const  // Get width of the generated 1D lookup texture
-sg_view IesProfile::getView() const  // Return the sokol-gfx texture view of the IES profile for pipeline binding (advanced interop).
-bool IesProfile::isLoaded() const  // Check if profile is loaded
-bool IesProfile::load(const fs::path & path)  // Load IES profile from file
-bool IesProfile::loadFromString(const std::string & data)  // Load IES profile from inline string data
+float IesProfile::getMaxCandela() const  // Returns the stored peak candela value.
+float IesProfile::getMaxVerticalAngle() const  // Returns the stored maximum vertical angle in radians.
+sg_sampler IesProfile::getSampler() const  // Returns the profile's sokol-gfx sampler.
+int IesProfile::getTextureWidth() const  // Returns the width of the generated lookup texture.
+sg_view IesProfile::getView() const  // Returns the profile's sokol-gfx texture view.
+bool IesProfile::isLoaded() const  // Returns whether the profile is marked as loaded.
+bool IesProfile::load(const fs::path & path)  // Loads an IES profile from a file.
+bool IesProfile::loadFromString(const std::string & data)  // Loads an IES profile from string data.
 ```
 
-### Image — Image with CPU pixels and GPU texture
+### Image — An image containing CPU pixels and a GPU texture.
 
 ```cpp
-void Image::allocate(int width, int height, int channels = 4, bool mipmaps = false)  // Allocate empty image for dynamic updates. `mipmaps=true` builds a chain refreshed on every update().
-void Image::clear()  // Release image resources
-void Image::crop(int x, int y, int w, int h)  // Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge. Cancels any pending loadAsync before editing, including invalid or no-op requests.
-int Image::getChannels() const  // Get number of channels
-Color Image::getColor(int x, int y) const  // Get pixel color at position
-const std::string & Image::getDebugName() const  // Return the MCP inspection name (empty for unnamed or moved-from objects).
-int Image::getHeight() const  // Get height
-Pixels & Image::getPixels() [+1]  // Get pixels reference for direct manipulation
-unsigned char * Image::getPixelsData() [+1]  // Get raw pixel data pointer
-Texture & Image::getTexture() [+1]  // Get internal texture
-int Image::getWidth() const  // Get width
-void Image::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8. Cancels any pending loadAsync before editing, including invalid or no-op requests.
-bool Image::isAllocated() const  // Check if allocated
-bool Image::isLoading() const  // Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation.
-LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. Use `loadAsync` for background loading with deferred main-thread application. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels.
-void Image::loadAsync(const fs::path & path, bool mipmaps = false)  // loadAsync(path, mipmaps = false): decode pixels on a native worker, then apply pixels, upload the texture and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires.
-LoadResult Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain. Main thread only; decode in the background with `Pixels::loadFromMemory`. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels.
-void Image::mirror(bool horizontal, bool vertical)  // Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°. Cancels any pending loadAsync before editing, including invalid or no-op requests.
-void Image::mirrorH()  // Mirror horizontally (alias for mirror(true, false)) Cancels any pending loadAsync before editing, including invalid or no-op requests.
-void Image::mirrorV()  // Mirror vertically (alias for mirror(false, true)) Cancels any pending loadAsync before editing, including invalid or no-op requests.
-void Image::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8. Use FBO sampling for fast paths. Cancels any pending loadAsync before editing, including invalid or no-op requests.
-SaveResult Image::save(const fs::path & path) const  // Save image pixels. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
-void Image::setColor(int x, int y, const Color & c)  // Set pixel color at position (marks image as dirty) Cancels any pending loadAsync before editing, including invalid or no-op requests.
-void Image::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_images lists live Images with index, name, width, height and format; moves transfer name/index and remove moved-from entries, destruction removes entries, unnamed Images remain available by index. tc_analyze_image reads CPU pixels with source={image:name or index}; other sources are window:index, fbo:name or index, path:file. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), and results in ops order; byte colors are normalized RGBA, float values above 1 pass through. Ops: pixel(x,y):color; histogram(bins):histogram[channel][bin] over 0-1 (outliers in end bins); count(color,tolerance or min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):mean colors[row][col]; diff(path,threshold,optional save):count,bbox,maxDifference; line(x0,y0,x1,y1):colors along inclusive Bresenham samples. Every op accepts optional rect=[x,y,w,h], default whole image. Coordinates are top-left, bbox=[x,y,w,h], centroid=[x,y]; empty matches yield null bbox/centroid. Rects and grid cells must be nonempty; line endpoints are in the image and samples clip to rect. Count accepts RGB/RGBA bounds or color plus a nonnegative scalar tolerance. Diff compares raw RGBA values with equal image dimensions and counts maximum absolute channel differences strictly above threshold. Optional top-level save (omitted/null writes nothing) and diff.save use tc_save_screenshot paths: UTF-8, data-directory-relative, create parents, unsupported extensions append .png. Float file output is clamped to 0-1; analysis preserves float values. Texture, VideoPlayer and VideoGrabber are not sources. Analysis defaults to 4096 histogram bins, 65536 grid cells and 256 operations; excess parameters return an error before scratch allocation. Replies default to 64 MiB and aggregate MCP working memory to 256 MiB. Limits are set with mcp::setAdmissionLimits(). File sources and diff references use a bounded encoded snapshot, query stb or platform metadata, and reserve decoded storage and estimated codec workspace before decoding. macOS/iOS retain ImageIO formats, including HEIC, TIFF and JPEG 2000.
-void Image::setDirty()  // Mark image as needing update
-void Image::update()  // Apply pixel changes to GPU texture
+void Image::allocate(int width, int height, int channels = 4, bool mipmaps = false)  // Allocates an image for pixel updates.
+void Image::clear()  // Releases the image pixels and texture.
+void Image::crop(int x, int y, int w, int h)  // Replaces the image with a rectangular crop.
+int Image::getChannels() const  // Returns the CPU pixel channel count.
+Color Image::getColor(int x, int y) const  // Returns a CPU pixel color.
+const std::string & Image::getDebugName() const  // Returns the image name used for MCP inspection.
+int Image::getHeight() const  // Returns the image height.
+Pixels & Image::getPixels() [+1]  // Returns a reference to the CPU pixel buffer.
+unsigned char * Image::getPixelsData() [+1]  // Returns a pointer to the CPU pixel storage.
+Texture & Image::getTexture() [+1]  // Returns a reference to the GPU texture.
+int Image::getWidth() const  // Returns the image width.
+void Image::halve()  // Reduces the image with 2×2 averaging.
+bool Image::isAllocated() const  // Reports whether CPU pixels are allocated.
+bool Image::isLoading() const  // Reports whether an asynchronous image load is pending.
+LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Loads an image from a file.
+void Image::loadAsync(const fs::path & path, bool mipmaps = false)  // Loads an image asynchronously.
+LoadResult Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Loads an encoded image from memory.
+void Image::mirror(bool horizontal, bool vertical)  // Flips the image horizontally or vertically.
+void Image::mirrorH()  // Flips the image horizontally.
+void Image::mirrorV()  // Flips the image vertically.
+void Image::resize(int newW, int newH)  // Resamples the image to a new size.
+SaveResult Image::save(const fs::path & path) const  // Saves the CPU image pixels to a file.
+void Image::setColor(int x, int y, const Color & c)  // Sets a CPU pixel color.
+void Image::setDebugName(const std::string & name)  // Sets the image name used for MCP inspection.
+void Image::setDirty()  // Marks the image as needing a texture update.
+void Image::update()  // Uploads pending CPU pixel changes to the texture.
 ```
 
-### JsonReadReflector — Reflector backend that applies a JSON object onto reflected members through their setters.
+### JsonReadReflector — Reads JSON values into reflected members.
 
 ```cpp
-void JsonReadReflector::beginGroup(const char * name)  // Descend into the nested JSON object for a composite member.
-void JsonReadReflector::endGroup()  // Return from the nested JSON object.
-std::vector<std::string> JsonReadReflector::unknownKeys() const  // Return the source keys that matched no reflected member (typos etc.); valid after reflectMembers runs.
-bool JsonReadReflector::visit(const char * name, float & v) [+7]  // Apply the JSON value for one member through its setter, recording applied/skipped/read-only.
+void JsonReadReflector::beginGroup(const char * name)  // Enters a nested source JSON object.
+void JsonReadReflector::endGroup()  // Returns to the parent source JSON object.
+std::vector<std::string> JsonReadReflector::unknownKeys() const  // Returns unrecognized keys from the source JSON object.
+bool JsonReadReflector::visit(const char * name, float & v) [+7]  // Reads the JSON value for one reflected member.
 ```
 
-### JsonWriteReflector — Reflector backend that writes reflected members into a JSON object.
+### JsonWriteReflector — Writes reflected values into a JSON object.
 
 ```cpp
-void JsonWriteReflector::beginGroup(const char * name)  // Open a nested JSON object for a composite member.
-void JsonWriteReflector::endGroup()  // Close the current nested JSON object.
-bool JsonWriteReflector::visit(const char * name, float & v) [+7]  // Write one reflected member into the output JSON object.
+void JsonWriteReflector::beginGroup(const char * name)  // Opens a nested JSON object for a composite member.
+void JsonWriteReflector::endGroup()  // Closes the current nested JSON object.
+bool JsonWriteReflector::visit(const char * name, float & v) [+7]  // Writes one reflected member into the output JSON object.
 ```
 
-### KeyEventArgs — Arguments for keyPressed / keyReleased events
+### KeyEventArgs — Carries keyboard event data.
 
 ```cpp
 ```
 
-### LayoutMod — Layout modifier (Mod) that auto-arranges child RectNodes in a vertical or horizontal stack with spacing, padding and axis sizing
+### LayoutMod — A Mod that arranges child RectNodes in a vertical or horizontal stack.
 
 ```cpp
-bool LayoutMod::canAttachTo(Node * node)  // Restrict attachment to RectNode owners.
-void LayoutMod::earlyUpdate()  // Mod lifecycle: early-update hook (relayout point).
-AxisMode LayoutMod::getCrossAxis() const  // Get the cross-axis sizing mode (LayoutMod method) (C++ only)
-LayoutDirection LayoutMod::getDirection() const  // Get the layout direction (Vertical/Horizontal) (LayoutMod method) (C++ only)
-AxisMode LayoutMod::getMainAxis() const  // Get the main-axis sizing mode (LayoutMod method) (C++ only)
-float LayoutMod::getPaddingBottom() const  // Get the bottom padding (LayoutMod method) (C++ only)
-float LayoutMod::getPaddingLeft() const  // Get the left padding (LayoutMod method) (C++ only)
-float LayoutMod::getPaddingRight() const  // Get the right padding (LayoutMod method) (C++ only)
-float LayoutMod::getPaddingTop() const  // Get the top padding (LayoutMod method) (C++ only)
-float LayoutMod::getSpacing() const  // Get the spacing between children (LayoutMod method) (C++ only)
-bool LayoutMod::isExclusive() const  // Return true: only one LayoutMod may attach per node.
-LayoutMod & LayoutMod::setCrossAxis(AxisMode mode)  // Set the cross-axis sizing mode and re-layout (LayoutMod method) (C++ only)
-LayoutMod & LayoutMod::setDirection(LayoutDirection dir)  // Set the layout direction and re-layout (LayoutMod method) (C++ only)
-LayoutMod & LayoutMod::setMainAxis(AxisMode mode)  // Set the main-axis sizing mode and re-layout (LayoutMod method) (C++ only)
-LayoutMod & LayoutMod::setPadding(float padding) [+2]  // Set padding (uniform, vertical/horizontal, or per-side) and re-layout (LayoutMod method) (C++ only)
-LayoutMod & LayoutMod::setPaddingBottom(float v)  // Set the bottom padding and re-layout (LayoutMod method) (C++ only)
-LayoutMod & LayoutMod::setPaddingLeft(float v)  // Set the left padding and re-layout (LayoutMod method) (C++ only)
-LayoutMod & LayoutMod::setPaddingRight(float v)  // Set the right padding and re-layout (LayoutMod method) (C++ only)
-LayoutMod & LayoutMod::setPaddingTop(float v)  // Set the top padding and re-layout (LayoutMod method) (C++ only)
-LayoutMod & LayoutMod::setSpacing(float spacing)  // Set the spacing between children and re-layout (LayoutMod method) (C++ only)
-void LayoutMod::setup()  // Mod lifecycle: lay out the children once when attached.
-void LayoutMod::updateLayout()  // Recalculate layout (call after adding/removing children) (C++ only)
+bool LayoutMod::canAttachTo(Node * node)  // Checks whether a prospective owner is a RectNode.
+void LayoutMod::earlyUpdate()  // Provides an empty early-update hook.
+AxisMode LayoutMod::getCrossAxis() const  // Returns the cross-axis sizing mode.
+LayoutDirection LayoutMod::getDirection() const  // Returns the layout direction.
+AxisMode LayoutMod::getMainAxis() const  // Returns the main-axis sizing mode.
+float LayoutMod::getPaddingBottom() const  // Returns the bottom padding.
+float LayoutMod::getPaddingLeft() const  // Returns the left padding.
+float LayoutMod::getPaddingRight() const  // Returns the right padding.
+float LayoutMod::getPaddingTop() const  // Returns the top padding.
+float LayoutMod::getSpacing() const  // Returns the spacing between children.
+bool LayoutMod::isExclusive() const  // Reports that the layout modifier is exclusive.
+LayoutMod & LayoutMod::setCrossAxis(AxisMode mode)  // Sets the cross-axis sizing mode.
+LayoutMod & LayoutMod::setDirection(LayoutDirection dir)  // Sets the layout direction.
+LayoutMod & LayoutMod::setMainAxis(AxisMode mode)  // Sets the main-axis sizing mode.
+LayoutMod & LayoutMod::setPadding(float padding) [+2]  // Sets padding around the children.
+LayoutMod & LayoutMod::setPaddingBottom(float v)  // Sets the bottom padding.
+LayoutMod & LayoutMod::setPaddingLeft(float v)  // Sets the left padding.
+LayoutMod & LayoutMod::setPaddingRight(float v)  // Sets the right padding.
+LayoutMod & LayoutMod::setPaddingTop(float v)  // Sets the top padding.
+LayoutMod & LayoutMod::setSpacing(float spacing)  // Sets the spacing between children.
+void LayoutMod::setup()  // Performs the initial child layout when the modifier is attached.
+void LayoutMod::updateLayout()  // Recalculates the child layout.
 ```
 
-### Light — Light source for 3D PBR rendering (directional, point, or spot)
+### Light — Defines a directional, point, or spot light for 3D rendering.
 
 ```cpp
-Color Light::calculate(const Vec3 & worldPos, const Vec3 & worldNormal, const Material & material, const Vec3 & viewPos) const  // Compute the CPU Phong lighting contribution at a world position/normal for a material
-Mat4 Light::computeProjectorViewProj(float nearClip = 0.100000001, float farClip = 10000.0) const  // Build the projector's view-projection matrix from spot params and lens shift
-Mat4 Light::computeShadowViewProj() const  // Build the light's view-projection matrix for rendering + sampling the shadow map (spot: projector frustum; directional: orthographic box)
-void Light::disable()  // Disable this light
-void Light::disableShadow()  // Disable shadow casting
-void Light::enable()  // Enable this light
-void Light::enableShadow(int resolution = 1024)  // Enable shadow casting (depth map at given resolution; up to 4 shadow lights per frame)
-const Color & Light::getAmbient() const  // Get ambient light color
-float Light::getConstantAttenuation() const  // Get constant attenuation factor
-const Color & Light::getDiffuse() const  // Get diffuse (main) light color
-const Vec3 & Light::getDirection() const  // Get light direction
-const IesProfile * Light::getIesProfile() const  // Get attached IES photometric profile
-float Light::getIntensity() const  // Get light intensity
-float Light::getLensShiftX() const  // Get projector horizontal lens shift
-float Light::getLensShiftY() const  // Get projector vertical lens shift
-float Light::getLinearAttenuation() const  // Get linear attenuation factor
-const Vec3 & Light::getPosition() const  // Get light position
-const Texture * Light::getProjectionTexture() const  // Get projection texture (gobo)
-float Light::getProjectorAspect() const  // Get projector aspect ratio
-float Light::getQuadraticAttenuation() const  // Get quadratic attenuation factor
-const Vec3 & Light::getShadowAreaCenter() const  // Get directional shadow volume center
-float Light::getShadowAreaRadius() const  // Get directional shadow volume radius (half-extent)
-float Light::getShadowBias() const  // Get shadow depth bias
-int Light::getShadowResolution() const  // Get shadow map resolution
-int Light::getShadowSamples() const  // Get PCSS PCF tap count
-float Light::getShadowSoftness() const  // Get shadow softness (emitter size in world units)
-const Color & Light::getSpecular() const  // Get specular light color
-float Light::getSpotInnerCos() const  // Get spot light inner cone cosine
-float Light::getSpotOuterCos() const  // Get spot light outer cone cosine
-LightType Light::getType() const  // Get light type (Directional, Point, or Spot)
-bool Light::hasIesProfile() const  // Check if an IES profile is attached
-bool Light::hasProjectionTexture() const  // Check if a projection texture is set
-bool Light::isEnabled() const  // Check if light is enabled
-bool Light::isShadowEnabled() const  // Check if shadow casting is enabled
-void Light::setAmbient(const Color & c) [+1]  // Set ambient light color
-void Light::setAttenuation(float constant, float linear, float quadratic)  // Set distance attenuation factors
-void Light::setDiffuse(const Color & c) [+1]  // Set diffuse (main) light color
-void Light::setDirectional(const Vec3 & direction) [+1]  // Set as directional light
-void Light::setIesProfile(const IesProfile * ies)  // Attach IES photometric profile for angular intensity (currently one IES slot: only the first registered light with a profile uses it; further ones log a one-time warning)
-void Light::setIntensity(float i)  // Set light intensity multiplier
-void Light::setLensShift(float sx, float sy)  // Set projector lens shift (-1 to 1, normalized)
-void Light::setPoint(const Vec3 & position) [+1]  // Set as point light
-void Light::setProjectionTexture(const Texture * tex)  // Set texture for projector-style light (gobo) (currently one projector slot: only the first registered Spot light with a texture projects it; further ones light as plain spots and log a one-time warning)
-void Light::setProjectorAspect(float a)  // Set projector aspect ratio
-Light & Light::setShadowArea(const Vec3 & center, float radius)  // Set the orthographic shadow volume (center + radius) for a directional light (default radius 500)
-void Light::setShadowBias(float bias)  // Set shadow depth bias in world units
-Light & Light::setShadowSamples(int taps)  // Set the PCSS PCF tap count (clamped 1-36, default 16); only affects soft shadows (softness > 0)
-Light & Light::setShadowSoftness(float size)  // Set shadow softness as the light's emitter size in world units (0 = hard, default); drives PCSS penumbra
-void Light::setSpecular(const Color & c) [+1]  // Set specular light color
-void Light::setSpot(const Vec3 & position, const Vec3 & direction, float innerHalfAngle = 0.0, float outerHalfAngle = 0.785399973) [+1]  // Set as spot light with cone angles
+Color Light::calculate(const Vec3 & worldPos, const Vec3 & worldNormal, const Material & material, const Vec3 & viewPos) const  // Calculates this light's CPU Phong lighting contribution.
+Mat4 Light::computeProjectorViewProj(float nearClip = 0.100000001, float farClip = 10000.0) const  // Builds the projector's view-projection matrix.
+Mat4 Light::computeShadowViewProj() const  // Builds the view-projection matrix for shadow rendering and sampling.
+void Light::disable()  // Disables this light.
+void Light::disableShadow()  // Disables this light's shadow flag.
+void Light::enable()  // Enables this light.
+void Light::enableShadow(int resolution = 1024)  // Enables the shadow flag and sets the requested shadow-map resolution.
+const Color & Light::getAmbient() const  // Returns the ambient light color.
+float Light::getConstantAttenuation() const  // Returns the constant attenuation coefficient.
+const Color & Light::getDiffuse() const  // Returns the diffuse light color.
+const Vec3 & Light::getDirection() const  // Returns the light's travel direction.
+const IesProfile * Light::getIesProfile() const  // Returns the attached IES photometric profile.
+float Light::getIntensity() const  // Returns the light intensity.
+float Light::getLensShiftX() const  // Returns the projector's horizontal lens shift.
+float Light::getLensShiftY() const  // Returns the projector's vertical lens shift.
+float Light::getLinearAttenuation() const  // Returns the linear attenuation coefficient.
+const Vec3 & Light::getPosition() const  // Returns the light's position.
+const Texture * Light::getProjectionTexture() const  // Returns the projection texture.
+float Light::getProjectorAspect() const  // Returns the projector aspect ratio.
+float Light::getQuadraticAttenuation() const  // Returns the quadratic attenuation coefficient.
+const Vec3 & Light::getShadowAreaCenter() const  // Returns the directional shadow volume's center.
+float Light::getShadowAreaRadius() const  // Returns the directional shadow volume's half-extent.
+float Light::getShadowBias() const  // Returns the shadow depth bias.
+int Light::getShadowResolution() const  // Returns the requested shadow-map resolution.
+int Light::getShadowSamples() const  // Returns the soft-shadow PCF sample count.
+float Light::getShadowSoftness() const  // Returns the shadow softness parameter.
+const Color & Light::getSpecular() const  // Returns the specular light color.
+float Light::getSpotInnerCos() const  // Returns the cosine of the spot light's inner half-angle.
+float Light::getSpotOuterCos() const  // Returns the cosine of the spot light's outer half-angle.
+LightType Light::getType() const  // Returns the light type.
+bool Light::hasIesProfile() const  // Reports whether an IES profile pointer is attached.
+bool Light::hasProjectionTexture() const  // Reports whether a projection texture pointer is attached.
+bool Light::isEnabled() const  // Returns the light's enabled flag.
+bool Light::isShadowEnabled() const  // Returns the light's shadow enabled flag.
+void Light::setAmbient(const Color & c) [+1]  // Sets the ambient light color.
+void Light::setAttenuation(float constant, float linear, float quadratic)  // Sets the distance attenuation coefficients.
+void Light::setDiffuse(const Color & c) [+1]  // Sets the main light color.
+void Light::setDirectional(const Vec3 & direction) [+1]  // Configures the light as a directional light.
+void Light::setIesProfile(const IesProfile * ies)  // Attaches an IES angular intensity profile.
+void Light::setIntensity(float i)  // Sets the light intensity multiplier.
+void Light::setLensShift(float sx, float sy)  // Sets the projector lens shift.
+void Light::setPoint(const Vec3 & position) [+1]  // Configures the light as a point light.
+void Light::setProjectionTexture(const Texture * tex)  // Attaches a texture for projector-style lighting.
+void Light::setProjectorAspect(float a)  // Sets the projector aspect ratio.
+Light & Light::setShadowArea(const Vec3 & center, float radius)  // Sets the directional light's shadow volume.
+void Light::setShadowBias(float bias)  // Sets the shadow depth bias.
+Light & Light::setShadowSamples(int taps)  // Sets the soft-shadow filter sample count.
+Light & Light::setShadowSoftness(float size)  // Sets the light's effective emitter size for soft shadows.
+void Light::setSpecular(const Color & c) [+1]  // Sets the specular light color.
+void Light::setSpot(const Vec3 & position, const Vec3 & direction, float innerHalfAngle = 0.0, float outerHalfAngle = 0.785399973) [+1]  // Configures the light as a spot light.
 ```
 
-### LoadResult — Result of a resource load (Image, SoundBuffer, VideoPlayer, Font, ...). Truthy on success; on failure carries a LoadError and a human-readable message.
+### LoadResult — Represents the result of loading a resource.
 
 ```cpp
-LoadResult LoadResult::fail(LoadError e, std::string msg = std::string())  // Make a failure result with an error kind and optional message (static)
-bool LoadResult::ok() const  // true if the load succeeded (error == LoadError::None)
-LoadResult LoadResult::success()  // Make a success result (static)
+LoadResult LoadResult::fail(LoadError e, std::string msg = std::string())  // Creates a load result from an error and optional message.
+bool LoadResult::ok() const  // Reports whether the load result indicates success.
+LoadResult LoadResult::success()  // Creates a successful load result.
 ```
 
-### Location — GPS / WiFi location fix returned by getLocation()
+### Location — Holds location data returned by `getLocation()`.
 
 ```cpp
 ```
 
-### LogEventArgs — Arguments delivered for each log message (level, text, and timestamp)
+### LogEventArgs — Carries the severity, message and timestamp of a log event.
 
 ```cpp
 ```
 
-### LogStream — Stream-based log output — the object returned by logNotice() / logWarning() / logError(), accepting values via operator<<.
+### LogStream — Builds a log message through stream insertion.
 
 ```cpp
 ```
 
-### Logger — Logging core with console, file and system (OS log) output, each with its own level, and an onLog event; access the global instance via getLogger()
+### Logger — Routes log messages to console, file and system outputs and an event.
 
 ```cpp
-void Logger::closeFile()  // Close the current log file
-LogLevel Logger::getConsoleLogLevel() const  // Get the current console log level
-LogLevel Logger::getFileLogLevel() const  // Get the current file log level
-std::string Logger::getLogFilePath() const  // Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open). On Windows, unpaired UTF-16 surrogates are replaced with U+FFFD for display
-LogLevel Logger::getSystemLogLevel() const  // Get the current system (OS log) level
-bool Logger::isFileOpen() const  // Check whether a log file is currently open
-void Logger::log(LogLevel level, const std::string & message)  // Emit a log message at the given level
-void Logger::setConsoleLogLevel(LogLevel level)  // Set the minimum console log level
-void Logger::setFileLogLevel(LogLevel level)  // Set the minimum file log level
-SaveResult Logger::setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns a failed SaveResult, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path
-void Logger::setLogLevel(LogLevel level)  // Set the console, file and system log levels at once (a later per-output call wins)
-void Logger::setSystemLogLevel(LogLevel level)  // Set the minimum system (OS log) level: os_log on macOS, OutputDebugStringW on Windows
+void Logger::closeFile()  // Closes the current log file.
+LogLevel Logger::getConsoleLogLevel() const  // Returns the current console log level.
+LogLevel Logger::getFileLogLevel() const  // Returns the current file log level.
+std::string Logger::getLogFilePath() const  // Returns the path of the current log file.
+LogLevel Logger::getSystemLogLevel() const  // Returns the current system log level.
+bool Logger::isFileOpen() const  // Reports whether a log file is open.
+void Logger::log(LogLevel level, const std::string & message)  // Emits a log message at the specified level.
+void Logger::setConsoleLogLevel(LogLevel level)  // Sets the minimum console log level.
+void Logger::setFileLogLevel(LogLevel level)  // Sets the minimum file log level.
+SaveResult Logger::setLogFile(const fs::path & path)  // Opens a file for log output.
+void Logger::setLogLevel(LogLevel level)  // Sets all three output log levels.
+void Logger::setSystemLogLevel(LogLevel level)  // Sets the minimum system log level.
 ```
 
-### Mat3 — 3x3 matrix for 2D affine / homography transforms (row-major). Includes static factories and a homography solver
+### Mat3 — A 3×3 matrix for two-dimensional affine and projective transformations.
 
 ```cpp
-float & Mat3::at(int row, int col) [+1]  // Access the element at (row, col)
-float Mat3::determinant() const  // Compute the determinant
-Mat3 Mat3::getHomography(const Vec2 * src, const Vec2 * dst)  // Compute the homography matrix mapping 4 source points to 4 destination points (solves H * src = dst)
-Mat3 Mat3::identity()  // Return the identity matrix
-Mat3 Mat3::inverted() const  // Return the inverse matrix (identity if singular)
-Mat3 Mat3::rotate(float radians)  // Build a 2D rotation matrix (radians)
-Mat3 Mat3::scale(float sx, float sy) [+2]  // Build a 2D scale matrix
-Mat3 Mat3::translate(float tx, float ty) [+1]  // Build a 2D translation matrix
-Mat3 Mat3::transposed() const  // Return the transpose of this matrix
+float & Mat3::at(int row, int col) [+1]  // Returns a reference to a matrix element.
+float Mat3::determinant() const  // Returns the determinant of the matrix.
+Mat3 Mat3::getHomography(const Vec2 * src, const Vec2 * dst)  // Computes a homography matrix from four pairs of points.
+Mat3 Mat3::identity()  // Returns the identity matrix.
+Mat3 Mat3::inverted() const  // Returns the inverse of the matrix.
+Mat3 Mat3::rotate(float radians)  // Creates a 2D rotation matrix.
+Mat3 Mat3::scale(float sx, float sy) [+2]  // Creates a 2D scaling matrix.
+Mat3 Mat3::translate(float tx, float ty) [+1]  // Creates a 2D translation matrix.
+Mat3 Mat3::transposed() const  // Returns the transpose of the matrix.
 ```
 
-### Mat4 — 4x4 matrix for 3D transformations
+### Mat4 — A 4×4 matrix for three-dimensional transformations and projections.
 
 ```cpp
-float & Mat4::at(int row, int col) [+1]  // Access the element at (row, col)
-Mat4 Mat4::fromHomography(const Mat3 & h)  // Build a Mat4 from a 3x3 homography (for 2D projection)
-Mat4 Mat4::frustum(float left, float right, float bottom, float top, float nearPlane, float farPlane)  // Create an asymmetric perspective (frustum) projection matrix
-Mat4 Mat4::identity()  // Create an identity matrix
-Mat4 Mat4::inverted() const  // Get inverse matrix (identity when |det| < 1e-10, including valid tiny scales; use tryInvert for a relative check)
-Mat4 Mat4::lookAt(const Vec3 & eye, const Vec3 & target, const Vec3 & up)  // Create a view matrix
-Mat4 Mat4::ortho(float left, float right, float bottom, float top, float nearPlane, float farPlane)  // Create an orthographic projection matrix
-Mat4 Mat4::perspective(float fovY, float aspect, float nearPlane, float farPlane)  // Create a perspective projection matrix
-Mat4 Mat4::rotate(float radians, const Vec3 & axis)  // Create a rotation matrix about an arbitrary axis
-Mat4 Mat4::rotateX(float radians)  // Create X-axis rotation matrix
-Mat4 Mat4::rotateY(float radians)  // Create Y-axis rotation matrix
-Mat4 Mat4::rotateZ(float radians)  // Create Z-axis rotation matrix
-Mat4 Mat4::scale(float sx, float sy, float sz) [+2]  // Create a scaling matrix
-Mat4 Mat4::translate(float tx, float ty, float tz) [+1]  // Create a translation matrix
-Mat4 Mat4::transposed() const  // Get transposed matrix
-bool Mat4::tryInvert(Mat4 & out) const  // Checked inverse: writes the inverse to out and returns true, or returns false (out unchanged) when the matrix is degenerate, e.g. an axis scaled to 0. The test is relative to the matrix scale, so small but valid scales still invert
+float & Mat4::at(int row, int col) [+1]  // Accesses a matrix element by row and column.
+Mat4 Mat4::fromHomography(const Mat3 & h)  // Creates a 4×4 matrix from a 2D homography.
+Mat4 Mat4::frustum(float left, float right, float bottom, float top, float nearPlane, float farPlane)  // Creates an asymmetric perspective projection matrix.
+Mat4 Mat4::identity()  // Creates an identity matrix.
+Mat4 Mat4::inverted() const  // Returns the inverse of this matrix.
+Mat4 Mat4::lookAt(const Vec3 & eye, const Vec3 & target, const Vec3 & up)  // Creates a view matrix from an eye position and target.
+Mat4 Mat4::ortho(float left, float right, float bottom, float top, float nearPlane, float farPlane)  // Creates an orthographic projection matrix.
+Mat4 Mat4::perspective(float fovY, float aspect, float nearPlane, float farPlane)  // Creates a perspective projection matrix.
+Mat4 Mat4::rotate(float radians, const Vec3 & axis)  // Creates a rotation matrix about an arbitrary axis.
+Mat4 Mat4::rotateX(float radians)  // Creates a rotation matrix about the X axis.
+Mat4 Mat4::rotateY(float radians)  // Creates a rotation matrix about the Y axis.
+Mat4 Mat4::rotateZ(float radians)  // Creates a rotation matrix about the Z axis.
+Mat4 Mat4::scale(float sx, float sy, float sz) [+2]  // Creates a scaling matrix.
+Mat4 Mat4::translate(float tx, float ty, float tz) [+1]  // Creates a translation matrix.
+Mat4 Mat4::transposed() const  // Returns the transpose of this matrix.
+bool Mat4::tryInvert(Mat4 & out) const  // Attempts to compute an inverse matrix and reports success.
 ```
 
-### Material — PBR material (metallic-roughness workflow, glTF 2.0 compatible). Destruction touches window context state and must run on the main thread, like Light destruction.
+### Material — Represents a PBR surface material using the glTF-compatible metallic-roughness workflow.
 
 ```cpp
-Material Material::bronze()  // Bronze material preset
-Material Material::copper()  // Copper material preset
-Material Material::emerald()  // Emerald material preset
-Material Material::fromPhong(const Color & diffuse, const Color & specular, float shininess, const Color & emissive = Color(0, 0, 0))  // Convert Phong material parameters to PBR (roughness from shininess, metallic estimated from specular luminance)
-float Material::getAo() const  // Get ambient occlusion factor
-const Color & Material::getBaseColor() const  // Get base color (albedo)
-const Texture * Material::getBaseColorTexture() const  // Get base color texture
-const Color & Material::getEmissive() const  // Get emissive color
-float Material::getEmissiveStrength() const  // Get emissive strength multiplier
-const Texture * Material::getEmissiveTexture() const  // Get emissive texture
-float Material::getMetallic() const  // Get metallic factor
-const Texture * Material::getMetallicRoughnessTexture() const  // Get metallic-roughness texture
-const Texture * Material::getNormalMap() const  // Get normal map texture
-const Texture * Material::getOcclusionTexture() const  // Get occlusion texture
-float Material::getRoughness() const  // Get roughness factor
-Material Material::gold()  // Gold material preset
-bool Material::hasBaseColorTexture() const  // Check if a base color texture is set
-bool Material::hasEmissiveTexture() const  // Check if an emissive texture is set
-bool Material::hasMetallicRoughnessTexture() const  // Check if a metallic-roughness texture is set
-bool Material::hasNormalMap() const  // Check if a normal map is set
-bool Material::hasOcclusionTexture() const  // Check if an occlusion texture is set
-Material Material::iron()  // Iron material preset
-Material Material::plastic(const Color & baseColor, float roughness = 0.5)  // Plastic material preset
-Material Material::rubber(const Color & baseColor)  // Rubber material preset
-Material Material::ruby()  // Ruby material preset
-Material & Material::setAo(float ao)  // Set ambient occlusion factor
-Material & Material::setBaseColor(const Color & c) [+1]  // Set base color (albedo)
-Material & Material::setBaseColorTexture(const Texture * tex)  // Set base color (albedo) texture map
-Material & Material::setEmissive(const Color & c) [+1]  // Set emissive color
-Material & Material::setEmissiveStrength(float s)  // Set emissive strength multiplier
-Material & Material::setEmissiveTexture(const Texture * tex)  // Set emissive texture map
-Material & Material::setMetallic(float m)  // Set metallic factor (0=dielectric, 1=metal)
-Material & Material::setMetallicRoughnessTexture(const Texture * tex)  // Set metallic-roughness texture (glTF: G=roughness, B=metallic)
-Material & Material::setNormalMap(const Texture * tex)  // Set normal map texture for bump mapping
-Material & Material::setOcclusionTexture(const Texture * tex)  // Set occlusion texture map
-Material & Material::setRoughness(float r)  // Set roughness factor (0=mirror, 1=matte)
-Material Material::silver()  // Silver material preset
+Material Material::bronze()  // Creates a bronze material preset.
+Material Material::copper()  // Creates a copper material preset.
+Material Material::emerald()  // Creates an emerald material preset.
+Material Material::fromPhong(const Color & diffuse, const Color & specular, float shininess, const Color & emissive = Color(0, 0, 0))  // Converts Phong material parameters into a PBR material.
+float Material::getAo() const  // Returns the ambient occlusion factor.
+const Color & Material::getBaseColor() const  // Returns the material's base color.
+const Texture * Material::getBaseColorTexture() const  // Returns the base color texture pointer.
+const Color & Material::getEmissive() const  // Returns the emissive color.
+float Material::getEmissiveStrength() const  // Returns the emissive strength multiplier.
+const Texture * Material::getEmissiveTexture() const  // Returns the emissive texture pointer.
+float Material::getMetallic() const  // Returns the metallic factor.
+const Texture * Material::getMetallicRoughnessTexture() const  // Returns the metallic-roughness texture pointer.
+const Texture * Material::getNormalMap() const  // Returns the normal map texture pointer.
+const Texture * Material::getOcclusionTexture() const  // Returns the occlusion texture pointer.
+float Material::getRoughness() const  // Returns the roughness factor.
+Material Material::gold()  // Creates a gold material preset.
+bool Material::hasBaseColorTexture() const  // Checks whether a base color texture pointer is set.
+bool Material::hasEmissiveTexture() const  // Checks whether an emissive texture pointer is set.
+bool Material::hasMetallicRoughnessTexture() const  // Checks whether a metallic-roughness texture pointer is set.
+bool Material::hasNormalMap() const  // Checks whether a normal map pointer is set.
+bool Material::hasOcclusionTexture() const  // Checks whether an occlusion texture pointer is set.
+Material Material::iron()  // Creates an iron material preset.
+Material Material::plastic(const Color & baseColor, float roughness = 0.5)  // Creates a plastic-like material with the supplied color.
+Material Material::rubber(const Color & baseColor)  // Creates a rubber-like material with the supplied color.
+Material Material::ruby()  // Creates a ruby material preset.
+Material & Material::setAo(float ao)  // Sets the ambient occlusion factor.
+Material & Material::setBaseColor(const Color & c) [+1]  // Sets the material's base color.
+Material & Material::setBaseColorTexture(const Texture * tex)  // Sets the base color texture map.
+Material & Material::setEmissive(const Color & c) [+1]  // Sets the material's emissive color.
+Material & Material::setEmissiveStrength(float s)  // Sets the material's emissive strength multiplier.
+Material & Material::setEmissiveTexture(const Texture * tex)  // Sets the material's emissive texture.
+Material & Material::setMetallic(float m)  // Sets the material's metallic factor.
+Material & Material::setMetallicRoughnessTexture(const Texture * tex)  // Sets the material's combined metallic-roughness texture.
+Material & Material::setNormalMap(const Texture * tex)  // Sets the material's normal map for bump mapping.
+Material & Material::setOcclusionTexture(const Texture * tex)  // Sets the material's ambient occlusion texture.
+Material & Material::setRoughness(float r)  // Sets the material's surface roughness.
+Material Material::silver()  // Returns a silver material preset.
 ```
 
-### Mesh — 3D mesh with vertices, colors, normals, indices
+### Mesh — Stores mesh geometry and vertex attributes for drawing.
 
 ```cpp
-Mesh & Mesh::addColor(const Color & c) [+1]  // Add a vertex color
-Mesh & Mesh::addColors(const std::vector<Color> & cols)  // Add multiple vertex colors
-Mesh & Mesh::addIndex(unsigned int index)  // Add an index
-Mesh & Mesh::addIndices(const std::vector<unsigned int> & inds)  // Add multiple indices
-Mesh & Mesh::addNormal(float nx, float ny, float nz) [+1]  // Add a normal vector
-Mesh & Mesh::addNormals(const std::vector<Vec3> & norms)  // Add multiple normals
-Mesh & Mesh::addTangent(float tx, float ty, float tz, float tw = 1.0) [+2]  // Add a tangent vector (xyz direction + w handedness)
-Mesh & Mesh::addTexCoord(float u, float v) [+1]  // Add a texture coordinate
-Mesh & Mesh::addTriangle(unsigned int i0, unsigned int i1, unsigned int i2)  // Add a triangle (3 indices)
-Mesh & Mesh::addVertex(float x, float y, float z = 0.0) [+2]  // Add a vertex
-Mesh & Mesh::addVertices(const std::vector<Vec3> & verts)  // Add multiple vertices
-Mesh & Mesh::append(const Mesh & other)  // Append another mesh
-Mesh & Mesh::clear()  // Clear all mesh data
-Mesh & Mesh::clearColors()  // Clear colors only
-Mesh & Mesh::clearIndices()  // Clear indices only
-Mesh & Mesh::clearNormals()  // Clear normals only
-Mesh & Mesh::clearTangents()  // Remove all tangents
-Mesh & Mesh::clearTexCoords()  // Clear texture coordinates only
-Mesh & Mesh::clearVertices()  // Clear vertices only
-void Mesh::draw() const [+2]  // Draw the mesh
-void Mesh::drawGpuPbr() const  // Draw the mesh through the GPU PBR pipeline (retained GPU buffer + active lights, material and environment).
-void Mesh::drawGpuPoints() const  // Draw a Points-mode mesh as a GPU-resident point cloud (Square/Round splats or 1px Pixel points).
-void Mesh::drawNoLighting() const  // Draw the mesh without lighting
-void Mesh::drawNoLightingWithTexture(const Texture & texture) const  // Draw the mesh textured without lighting
-void Mesh::drawWireframe() const  // Draw mesh as wireframe
-void Mesh::drawWithLighting() const  // Draw the mesh with lighting
-std::vector<Color> & Mesh::getColors() [+1]  // Get all vertex colors
-uint64_t Mesh::getDataRevision() const  // Current data revision: changes whenever the mesh data changes (mutators, non-const getters, markGpuDirty). GPU buffers are re-uploaded when it differs from the revision they were uploaded from. Compare with != only.
-sg_buffer Mesh::getGpuIndexBuffer() const  // The sokol-gfx buffer handle holding the uploaded list indices (advanced interop). TriangleStrip and TriangleFan expand to triangle lists; LineStrip and LineLoop expand to line lists. If the mesh has no indices, 0..N-1 (N = vertex count) supplies the source sequence, including for Points. Use getGpuIndexCount for the uploaded count. Custom pipelines must draw triangle modes as triangle lists and line modes as line lists.
-int Mesh::getGpuIndexCount() const  // Number of indices in the uploaded GPU list; pairs with getGpuIndexBuffer for custom rendering. TriangleStrip and TriangleFan expand to triangle lists; LineStrip and LineLoop expand to line lists. If the mesh has no indices, 0..N-1 (N = vertex count) supplies the source sequence, including for Points. Custom pipelines must draw triangle modes as triangle lists and line modes as line lists.
-sg_buffer Mesh::getGpuPointBuffer() const  // The sokol-gfx buffer handle holding the uploaded point data, position + color per point (advanced interop).
-int Mesh::getGpuPointCount() const  // Number of points currently uploaded to the GPU point buffer (PrimitiveMode::Points). Pairs with getGpuPointBuffer for custom rendering.
-sg_buffer Mesh::getGpuVertexBuffer() const  // The sokol-gfx vertex buffer handle backing the mesh (advanced interop).
-int Mesh::getGpuVertexCount() const  // Number of vertices currently uploaded to the GPU vertex buffer. Pairs with getGpuVertexBuffer (e.g. as the draw count for a custom pipeline).
-std::vector<unsigned int> & Mesh::getIndices() [+1]  // Get all indices
-PrimitiveMode Mesh::getMode() const  // Get current primitive mode
-Vec3 Mesh::getNormal(size_t index) const  // Get normal at index
-std::vector<Vec3> & Mesh::getNormals() [+1]  // Get all normals
-int Mesh::getNumColors() const  // Get vertex color count
-int Mesh::getNumIndices() const  // Get index count
-int Mesh::getNumNormals() const  // Get normal count
-int Mesh::getNumTangents() const  // Number of tangents
-int Mesh::getNumTexCoords() const  // Get texture coordinate count
-int Mesh::getNumVertices() const  // Get vertex count
-std::vector<Vec4> & Mesh::getTangents() [+1]  // Get the tangent array (mutable)
-std::vector<Vec2> & Mesh::getTexCoords() [+1]  // Get all texture coordinates
-std::vector<Vec3> & Mesh::getVertices() [+1]  // Get all vertices
-bool Mesh::hasColors() const  // Check if mesh has vertex colors
-bool Mesh::hasIndices() const  // Check if mesh has indices
-bool Mesh::hasNormals() const  // Check if mesh has normals
-bool Mesh::hasTangents() const  // Whether the mesh has tangents
-bool Mesh::hasTexCoords() const  // Check if mesh has texture coordinates
-bool Mesh::hasValidTexCoords() const  // Check if texture coordinates match vertex count
-void Mesh::markGpuDirty() const  // Force a GPU re-upload on the next draw (bumps the data revision). Not needed after normal edits: every mutator and non-const getter already does this.
-Mesh & Mesh::rotateX(float radians)  // Rotate mesh around X axis
-Mesh & Mesh::rotateY(float radians)  // Rotate mesh around Y axis
-Mesh & Mesh::rotateZ(float radians)  // Rotate mesh around Z axis
-Mesh & Mesh::scale(float x, float y, float z) [+2]  // Scale mesh
-Mesh & Mesh::setMode(PrimitiveMode mode)  // Set primitive mode (Triangles, Lines, Points, etc.)
-Mesh & Mesh::setNormal(size_t index, const Vec3 & n)  // Set normal at index
-Mesh & Mesh::transform(const Mat4 & m)  // Apply transformation matrix
-Mesh & Mesh::translate(float x, float y, float z) [+1]  // Translate all vertices
-void Mesh::uploadPointsToGpu() const  // Upload the point cloud (positions + colors) to its GPU buffer now (for the Points / custom-render path).
-void Mesh::uploadToGpu() const  // Upload the mesh's vertex/index data to its GPU buffers now (for the PBR / custom-render path).
+Mesh & Mesh::addColor(const Color & c) [+1]  // Appends a vertex color.
+Mesh & Mesh::addColors(const std::vector<Color> & cols)  // Appends multiple vertex colors.
+Mesh & Mesh::addIndex(unsigned int index)  // Appends a vertex index.
+Mesh & Mesh::addIndices(const std::vector<unsigned int> & inds)  // Appends multiple vertex indices.
+Mesh & Mesh::addNormal(float nx, float ny, float nz) [+1]  // Appends a normal vector.
+Mesh & Mesh::addNormals(const std::vector<Vec3> & norms)  // Appends multiple normal vectors.
+Mesh & Mesh::addTangent(float tx, float ty, float tz, float tw = 1.0) [+2]  // Appends a tangent vector.
+Mesh & Mesh::addTexCoord(float u, float v) [+1]  // Appends a texture coordinate.
+Mesh & Mesh::addTriangle(unsigned int i0, unsigned int i1, unsigned int i2)  // Appends three indices for a triangle.
+Mesh & Mesh::addVertex(float x, float y, float z = 0.0) [+2]  // Appends a vertex position.
+Mesh & Mesh::addVertices(const std::vector<Vec3> & verts)  // Appends multiple vertex positions.
+Mesh & Mesh::append(const Mesh & other)  // Appends another mesh's data.
+Mesh & Mesh::clear()  // Removes all mesh data.
+Mesh & Mesh::clearColors()  // Removes all vertex colors.
+Mesh & Mesh::clearIndices()  // Removes all vertex indices.
+Mesh & Mesh::clearNormals()  // Removes all normal vectors.
+Mesh & Mesh::clearTangents()  // Removes all tangent vectors.
+Mesh & Mesh::clearTexCoords()  // Removes all texture coordinates.
+Mesh & Mesh::clearVertices()  // Removes all vertex positions.
+void Mesh::draw() const [+2]  // Draws the mesh.
+void Mesh::drawGpuPbr() const  // Draws the mesh with GPU PBR lighting.
+void Mesh::drawGpuPoints() const  // Draws the mesh vertices as a GPU point cloud.
+void Mesh::drawNoLighting() const  // Draws the mesh without lighting.
+void Mesh::drawNoLightingWithTexture(const Texture & texture) const  // Draws the mesh with a texture and no lighting.
+void Mesh::drawWireframe() const  // Draws the mesh's triangle edges.
+void Mesh::drawWithLighting() const  // Draws the mesh with CPU-calculated lighting.
+std::vector<Color> & Mesh::getColors() [+1]  // Returns the vertex color array.
+uint64_t Mesh::getDataRevision() const  // Returns the mesh's current data revision.
+sg_buffer Mesh::getGpuIndexBuffer() const  // Returns the mesh's GPU index buffer handle.
+int Mesh::getGpuIndexCount() const  // Returns the uploaded GPU index count.
+sg_buffer Mesh::getGpuPointBuffer() const  // Returns the mesh's GPU point buffer handle.
+int Mesh::getGpuPointCount() const  // Returns the uploaded GPU point count.
+sg_buffer Mesh::getGpuVertexBuffer() const  // Returns the mesh's GPU vertex buffer handle.
+int Mesh::getGpuVertexCount() const  // Returns the uploaded GPU vertex count.
+std::vector<unsigned int> & Mesh::getIndices() [+1]  // Returns the mesh's index array.
+PrimitiveMode Mesh::getMode() const  // Returns the mesh's primitive mode.
+Vec3 Mesh::getNormal(size_t index) const  // Returns the normal at the specified index.
+std::vector<Vec3> & Mesh::getNormals() [+1]  // Returns the mesh's normal array.
+int Mesh::getNumColors() const  // Returns the number of vertex colors.
+int Mesh::getNumIndices() const  // Returns the number of indices.
+int Mesh::getNumNormals() const  // Returns the number of normals.
+int Mesh::getNumTangents() const  // Returns the number of tangents.
+int Mesh::getNumTexCoords() const  // Returns the number of texture coordinates.
+int Mesh::getNumVertices() const  // Returns the number of vertices.
+std::vector<Vec4> & Mesh::getTangents() [+1]  // Returns the mesh's tangent array.
+std::vector<Vec2> & Mesh::getTexCoords() [+1]  // Returns the mesh's texture coordinate array.
+std::vector<Vec3> & Mesh::getVertices() [+1]  // Returns the mesh's vertex array.
+bool Mesh::hasColors() const  // Checks whether the mesh contains vertex colors.
+bool Mesh::hasIndices() const  // Checks whether the mesh contains indices.
+bool Mesh::hasNormals() const  // Checks whether the mesh contains normals.
+bool Mesh::hasTangents() const  // Checks whether the mesh contains tangents.
+bool Mesh::hasTexCoords() const  // Checks whether the mesh contains texture coordinates.
+bool Mesh::hasValidTexCoords() const  // Checks whether the mesh has enough texture coordinates for its vertices.
+void Mesh::markGpuDirty() const  // Marks the mesh for GPU re-upload.
+Mesh & Mesh::rotateX(float radians)  // Rotates the mesh around the X axis.
+Mesh & Mesh::rotateY(float radians)  // Rotates the mesh around the Y axis.
+Mesh & Mesh::rotateZ(float radians)  // Rotates the mesh around the Z axis.
+Mesh & Mesh::scale(float x, float y, float z) [+2]  // Scales the mesh around its local origin.
+Mesh & Mesh::setMode(PrimitiveMode mode)  // Sets the mesh's primitive mode.
+Mesh & Mesh::setNormal(size_t index, const Vec3 & n)  // Sets the normal at the specified index.
+Mesh & Mesh::transform(const Mat4 & m)  // Applies a matrix to the mesh's vertices and normals.
+Mesh & Mesh::translate(float x, float y, float z) [+1]  // Translates all vertices in the mesh.
+void Mesh::uploadPointsToGpu() const  // Uploads vertex positions and colors to the GPU point buffer.
+void Mesh::uploadToGpu() const  // Uploads mesh data to the GPU vertex and index buffers.
 ```
 
-### MicInput — Microphone capture (miniaudio). Opens an input device and exposes the latest samples through a ring buffer. Use the global getMicInput() to access the shared instance, then start() it; getMicAnalysisBuffer() is a convenience wrapper over getBuffer().
+### MicInput — Captures microphone samples into a ring buffer.
 
 ```cpp
-size_t MicInput::getBuffer(float * outBuffer, size_t numSamples)  // Copy the latest captured samples into outBuffer. numSamples is capped at the ring buffer size (4096). Returns the number of samples written.
-std::string MicInput::getDeviceName() const  // Name of the capture device start() opened; empty while stopped, and on Web (the browser does not expose it).
-int MicInput::getSampleRate() const  // Sample rate the microphone was opened at.
-bool MicInput::isRunning() const  // True while the microphone device is open and capturing.
-bool MicInput::isStarting() const  // True from submission through queued readiness/failure, cleared immediately before onStart. False after cancellation and while merely running. On Web this also tracks legacy start() permission/setup.
-void MicInput::onAudioData(const float * input, size_t frameCount)  // Mic input callback: receive captured input samples (internal, called from the audio thread).
-bool MicInput::start(int sampleRate = DEFAULT_SAMPLE_RATE)  // Open the microphone device at the given sample rate and begin capturing. Native start waits for its lifecycle thread startup result, returns false on failure, and emits no onStart. Web start returns true when the request is submitted; use isStarting/isRunning for actual readiness and startAsync/onStart for failure details. Web requires a secure context and a user gesture. On macOS/iOS, undecided microphone consent requests access and returns false immediately with retry guidance; call start() again after granting. Denied/restricted access fails before capture initialization.
-void MicInput::startAsync(int sampleRate = DEFAULT_SAMPLE_RATE)  // Begin a fresh microphone startup attempt without waiting. onStart reports readiness or failure on main in a later frame. A new start, stop or destruction cancels the pending attempt without waiting and suppresses its event. Each native run owns initialization through teardown on one lifecycle thread; a replacement opens after predecessor cleanup. All handle operations are on main. Web requires a secure context and user gesture: getUserMedia and AudioContext resume begin directly in this call. A suspended context is a failure with retry guidance; an unanswered permission prompt remains pending until stop. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires. On macOS/iOS, microphone consent is checked before capture initialization. An unanswered request keeps isStarting true without a lifecycle worker; stop, destruction and exit return without waiting for consent, and late responses after cancellation are discarded.
-void MicInput::stop()  // Cancel capture/startup immediately and post device teardown without waiting. No cancellation event is emitted. Native teardown runs on the thread that opened the device; application exit waits for retirement.
+size_t MicInput::getBuffer(float * outBuffer, size_t numSamples)  // Copies the latest microphone samples.
+std::string MicInput::getDeviceName() const  // Returns the capture device name.
+int MicInput::getSampleRate() const  // Returns the stored microphone sample rate.
+bool MicInput::isRunning() const  // Reports whether microphone capture is running.
+bool MicInput::isStarting() const  // Reports whether microphone startup is pending.
+void MicInput::onAudioData(const float * input, size_t frameCount)  // Writes input samples into the microphone ring buffer.
+bool MicInput::start(int sampleRate = DEFAULT_SAMPLE_RATE)  // Starts microphone capture.
+void MicInput::startAsync(int sampleRate = DEFAULT_SAMPLE_RATE)  // Starts a microphone capture attempt asynchronously.
+void MicInput::stop()  // Stops microphone capture or cancels startup.
 ```
 
-### MicStartResult — Microphone startup outcome. Success requires usable capture; permission denial or a missing device is a failure. Converts explicitly to bool.
+### MicStartResult — Reports the outcome of starting microphone capture.
 
 ```cpp
 ```
 
-### Mod — Attachable behavior base class for Node. Subclass it, override the lifecycle and input hooks, and attach with node->addMod<T>(). Lifecycle: setup() on attach, then each frame earlyUpdate() -> Node::update() -> update() -> draw(), and onDestroy() on removal. Override isExclusive() to allow only one instance per Node, and canAttachTo() to restrict attachment.
+### Mod — Provides a base class for behaviors attached to a `Node`.
 
 ```cpp
-bool Mod::canAttachTo(Node * node)  // Override to restrict which Node types this Mod can attach to. Return false to reject attachment. Default true. (protected, virtual)
-void Mod::draw()  // Override: called during the draw phase, after Node::draw(). (protected, virtual)
-void Mod::earlyUpdate()  // Override: called every frame BEFORE Node::update(). Use for applying transforms, tweens, physics. (protected, virtual)
-Node * Mod::getOwner() [+1]  // Get the owner Node this Mod is attached to.
-bool Mod::hitTest(const Ray & localRay, float & outDistance)  // Override: screen-space pointer picking (NOT physics collision). Define a hit shape in the node's LOCAL space; if the node's own test OR any mod's returns true, the node is the hit. (protected, virtual)
-bool Mod::isExclusive() const  // Override to return true if only one instance of this Mod type may be attached per Node (e.g. LayoutMod). Default false. (protected, virtual)
-void Mod::onDestroy()  // Override: called when the Mod is removed or the Node is destroyed. (protected, virtual)
-bool Mod::onKeyPress(const KeyEventArgs & e)  // Override: key press (broadcast to mods on every node). Return true to consume. (protected, virtual)
-bool Mod::onKeyRelease(const KeyEventArgs & e)  // Override: key release (broadcast to mods on every node). Return true to consume. (protected, virtual)
-bool Mod::onMouseDrag(const MouseDragEventArgs & e)  // Override: mouse drag on the hit node. Return true to consume. (protected, virtual)
-void Mod::onMouseEnter()  // Override: pointer entered the owner node. (protected, virtual)
-void Mod::onMouseLeave()  // Override: pointer left the owner node. (protected, virtual)
-bool Mod::onMouseMove(const MouseMoveEventArgs & e)  // Override: mouse move over the hit node. Return true to consume. (protected, virtual)
-bool Mod::onMousePress(const MouseEventArgs & e)  // Override: mouse press on the hit node. Return true to consume the event (counts as the node consuming it). (protected, virtual)
-bool Mod::onMouseRelease(const MouseEventArgs & e)  // Override: mouse release on the hit node. Return true to consume. (protected, virtual)
-bool Mod::onMouseScroll(const ScrollEventArgs & e)  // Override: mouse scroll over the hit node. Return true to consume. (protected, virtual)
-void Mod::removeSelf()  // Remove this Mod from its owner (no need to name its own type). Safe to call from inside the Mod's own update/draw/event handler; destruction is deferred until the current dispatch finishes. (protected)
-void Mod::setup()  // Override: called once when the Mod is attached to the Node. (protected, virtual)
-void Mod::update()  // Override: called every frame AFTER Node::update(). Use for reactions to node state changes. (protected, virtual)
+bool Mod::canAttachTo(Node * node)  // Declares whether this Mod accepts a node as its owner.
+void Mod::draw()  // Draws additional content for the owner node.
+void Mod::earlyUpdate()  // Updates this Mod before the owner node updates.
+Node * Mod::getOwner() [+1]  // Returns the node that owns this Mod.
+bool Mod::hitTest(const Ray & localRay, float & outDistance)  // Tests a local ray against an additional pointer hit shape.
+bool Mod::isExclusive() const  // Declares whether this Mod type requests a single instance per node.
+void Mod::onDestroy()  // Runs before a removed Mod or its owner node is destroyed.
+bool Mod::onKeyPress(const KeyEventArgs & e)  // Handles a key press delivered to the owner node.
+bool Mod::onKeyRelease(const KeyEventArgs & e)  // Handles a key release delivered to the owner node.
+bool Mod::onMouseDrag(const MouseDragEventArgs & e)  // Handles pointer dragging captured by the owner node.
+void Mod::onMouseEnter()  // Runs when the owner node becomes the hovered node.
+void Mod::onMouseLeave()  // Runs when the owner node stops being the hovered node.
+bool Mod::onMouseMove(const MouseMoveEventArgs & e)  // Handles pointer movement delivered to the owner node.
+bool Mod::onMousePress(const MouseEventArgs & e)  // Handles a mouse button press delivered to the owner node.
+bool Mod::onMouseRelease(const MouseEventArgs & e)  // Handles a mouse button release delivered to the owner node.
+bool Mod::onMouseScroll(const ScrollEventArgs & e)  // Handles scrolling delivered to the owner node.
+void Mod::removeSelf()  // Removes this Mod from its owner.
+void Mod::setup()  // Initializes this Mod when it is attached to a node.
+void Mod::update()  // Updates this Mod after the owner node updates.
 ```
 
-### MouseDragEventArgs — Arguments for mouseDragged (cursor moving with a button held)
+### MouseDragEventArgs — Carries arguments for cursor movement while a mouse button is held.
 
 ```cpp
-void MouseDragEventArgs::syncLegacy()  // Copy the canonical pos/delta fields into the deprecated x/y/deltaX/deltaY mirror fields (legacy mirrors scheduled for removal in v1.0).
+void MouseDragEventArgs::syncLegacy()  // Copies position and movement into compatibility fields.
 ```
 
-### MouseEventArgs — Arguments for mousePressed / mouseReleased events. pos is local space, globalPos is screen space (equal at app level)
+### MouseEventArgs — Arguments for mouse button press and release events.
 
 ```cpp
-void MouseEventArgs::syncLegacy()  // Copy the canonical pos field into the deprecated x/y mirror fields (legacy mirrors scheduled for removal in v1.0).
+void MouseEventArgs::syncLegacy()  // Copies the cursor position into legacy coordinate fields.
 ```
 
-### MouseMoveEventArgs — Arguments for mouseMoved (cursor moving with no button held)
+### MouseMoveEventArgs — Carries arguments for cursor movement.
 
 ```cpp
-void MouseMoveEventArgs::syncLegacy()  // Copy the canonical pos/delta fields into the deprecated x/y/deltaX/deltaY mirror fields (legacy mirrors scheduled for removal in v1.0).
+void MouseMoveEventArgs::syncLegacy()  // Copies position and movement into compatibility fields.
 ```
 
-### NetworkInterface — One address entry of a network interface (returned by listNetworkInterfaces)
+### NetworkInterface — Holds one network interface address returned by `listNetworkInterfaces()`.
 
 ```cpp
-const std::string & NetworkInterface::getAddress() const  // IP address
-bool NetworkInterface::getIsIPv4() const  // Whether the address is IPv4
-bool NetworkInterface::getIsLoopback() const  // Whether this is a loopback interface
-bool NetworkInterface::getIsUp() const  // Whether the link is up
-const std::string & NetworkInterface::getMac() const  // MAC address
-const std::string & NetworkInterface::getName() const  // Interface name
-const std::string & NetworkInterface::getNetmask() const  // Subnet mask
+const std::string & NetworkInterface::getAddress() const  // Returns the stored IP address.
+bool NetworkInterface::getIsIPv4() const  // Returns whether the entry represents an IPv4 address.
+bool NetworkInterface::getIsLoopback() const  // Returns whether the entry belongs to a loopback interface.
+bool NetworkInterface::getIsUp() const  // Returns whether the interface is marked as up.
+const std::string & NetworkInterface::getMac() const  // Returns the stored MAC address.
+const std::string & NetworkInterface::getName() const  // Returns the stored interface name.
+const std::string & NetworkInterface::getNetmask() const  // Returns the stored subnet mask.
 ```
 
-### Node — Base scene-graph node: transform hierarchy with parent/children, update/draw, input events and attachable Mods (C++ only, managed via shared_ptr / NodePtr)
+### Node — Base class for nodes in the scene graph.
 
 ```cpp
-void Node::addChild(Ptr child, bool keepGlobalPosition = false)  // Add a child node (C++ only)
-T * Node::addMod(Args &&... args)  // Attach a mod of type T to this node, forwarding any arguments to its constructor; returns the mod for chaining (C++ only)
-void Node::beginDraw()  // Hook called before draw() and drawChildren(); override for clipping etc.
-uint64_t Node::callAfter(double delay, std::function<void ()> callback)  // Run callback once after delay seconds. A frame timer fired from the update loop: the delay counts down by getDeltaTime() on each update of this node, so it pauses while the node is inactive and resetElapsedTimeCounter() doesn't affect it. Only time after the call counts: it starts with the next update, and in the main window nothing before the call is charged (the earlier part of a long update or setup(), an idle gap or a stall before an event handler or draw() made it). In VSYNC / setFps modes it fires on the first update that starts at least delay after the call. In fixed-Hz update mode it counts step time (1 / updateFps per step): when a frame runs several steps (after a stall, or when updateFps is above the display rate: callAfter(1.0 / 120) made in the first step of a frame at a fixed 120 Hz on a 60 Hz display fires on the next step of that frame) it can fire within that frame, before delay has passed in wall time, and time the loop drops (beyond setMaxUpdateSteps() steps per frame) is not counted, so it fires that much later in wall time. A runtime setFps() / setIndependentFps() that switches the update into a measured mode (VSYNC / setFps) between updates (a key handler, draw()) drops the time since the last update, so the timer fires that much later: under a frame in the usual modes, long only after an idle like EVENT_DRIVEN. Called inside an update, the time counts from that update's start. Changing only the draw rate drops nothing, but switching between synced (setFps) and independent (setIndependentFps) update counts as an update-mode change even at the same rate (setFps(VSYNC) to setIndependentFps(VSYNC, 30) drops up to a frame). Entering a fixed update rate restarts with one step, which can count more or less than the time since the last update (144 Hz display to a fixed 60: the step is ~9.7 ms longer than the 1/144 s since the last update). A node moved during an update, before that update reached it, under a parent the update has already traversed misses that update's countdown (one delta late); a node that moves itself from its own update() is not delayed. In a secondary window, until #307, a timer created in or between its ticks counts the window's whole next delta, time before the call included (after a 3 s setup(), callAfter(2.0) fires about one frame later). Returns a timer id.
-uint64_t Node::callAfterAsync(double delay, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Like callAfter, but fired by a precise background scheduler thread (no frame jitter). The callback runs OFF the main thread: guard shared state with a mutex, never draw from it, and don't cancel while holding that mutex. Native only (uses a real thread). Returns a timer id.
-uint64_t Node::callEvery(double interval, std::function<void ()> callback)  // Run callback repeatedly every interval seconds. A frame timer counted down by getDeltaTime() like callAfter. Keeps its phase (next due = previous due + interval); when an update comes more than a whole interval late it fires once, not once per missed interval (callEveryCatchUp does that). Like callAfter, a runtime setFps() / setIndependentFps() that switches the update into a measured mode between updates drops the time since the last update (under a frame in the usual modes; see callAfter). Returns a timer id.
-uint64_t Node::callEveryAsync(double interval, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Like callEvery, but fired by a precise background scheduler thread with no drift (reschedules at absolute times). Ideal for sequencer clocks and LED/MIDI output timing. Same threading rules as callAfterAsync. Native only. Returns a timer id.
-uint64_t Node::callEveryCatchUp(double interval, std::function<void ()> callback, int maxCatchUp)  // Like callEvery, but calls back once for every interval that came due, at most maxCatchUp times per update (maxCatchUp has no default; 0 or -1, any value <= 0, means no limit), e.g. to keep a counter or a simulation in step after a late update. Past the limit the remaining due intervals are dropped and the phase is kept. Cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or setFps() loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once. In fixed-Hz update mode it counts step time, so time the loop drops beyond its step cap (setMaxUpdateSteps) is not counted. Returns a timer id.
-void Node::cancelAllAsyncTimers() [macos,windows,linux,android,ios]  // Cancel all async timers on this node (e.g. on mode change). Waits out any in-flight callback. Call it WITHOUT holding the callback's mutex to avoid a deadlock.
-void Node::cancelAllTimers()  // Cancel all frame timers on this node.
-void Node::cancelAsyncTimer(uint64_t id) [macos,windows,linux,android,ios]  // Cancel an async timer by id. Blocks until its callback finishes if it is running now (unless called from inside the callback). Do not call while holding the mutex the callback uses.
-void Node::cancelTimer(uint64_t id)  // Cancel a frame timer (callAfter/callEvery) by id.
-void Node::cleanup()  // Called once before exit (optional user callback for cleanup)
-void Node::destroy()  // Mark node for deferred removal from scene graph (C++ only)
-void Node::disableEvents()  // Disable mouse/key events for this node (C++ only)
-void Node::draw()  // Called every frame after update
-void Node::drawChildren()  // Draw the child nodes (overridable, e.g. for clipping).
-void Node::enableEvents()  // Enable mouse/key events for this node (C++ only)
-void Node::endDraw()  // Hook called after draw() and drawChildren().
-Node * Node::findByInstanceId(uint64_t id)  // Find a node in this subtree (self included) by instance id, depth-first (null if not found) (C++ only)
-HitResult Node::findHitNode(const Ray & globalRay)  // Hit test the whole tree with a global ray, returning the frontmost node (C++ only)
-HitResult Node::findHitNodeFromScreen(float screenX, float screenY)  // Hit test the whole tree from a screen point, using each node's own camera context (C++ only)
-HitResult Node::findHitNodeRecursive(internal::PickRaySource & pick, const CameraContext * inheritedCtx, Ray globalRay, const Mat4 & parentInverseMatrix)  // Recursive hit test in reverse draw order; override for clipping-aware picking.
-bool Node::getActive() const ⚠️deprecated  // Deprecated alias for isActive()
-std::shared_ptr<const CameraContext> Node::getCameraContext() const  // Return the camera context this node was last drawn under (null if never drawn).
-size_t Node::getChildCount() const  // Get the number of child nodes (C++ only)
-int Node::getChildIndex() const  // This node's index among its parent's children (-1 if no parent) (C++ only)
-std::vector<Ptr> Node::getChildren() const  // Get a copy of the child node list (safe to iterate while modifying) (C++ only)
-std::string Node::getDisplayName() const  // Short type-anchored label for trees / inspectors, e.g. "RectNode" or "RectNode (play)" (C++ only) 
-Vec3 Node::getEuler() const  // Get rotation as Euler angles in radians (pitch=X, yaw=Y, roll=Z) (C++ only)
-Vec3 Node::getEulerDeg() const  // Get rotation as Euler angles in degrees
-const Mat4 & Node::getGlobalMatrix() const  // Get this node's global transform matrix, including parent transforms (cached) (C++ only)
-Mat4 Node::getGlobalMatrixInverse() const  // Get the inverse of the global transform matrix (C++ only)
-Vec3 Node::getGlobalPos() const  // Get the node's origin in global (world) space (C++ only)
-uint64_t Node::getInstanceId() const  // Per-process unique id, assigned once at construction and stable across reparenting (C++ only)
-const Mat4 & Node::getLocalMatrix() const  // Get this node's local transform matrix (cached) (C++ only)
-T * Node::getMod()  // Get the attached mod of type T, or nullptr if this node has none (C++ only)
-Mod * Node::getModByTypeName(const std::string & name) const  // Find an attached mod by its short type name, e.g. "LayoutMod" (null if not attached) (C++ only) 
-std::vector<Mod *> Node::getMods() const  // Get all attached mods (pointers stay owned by this node) (C++ only)
-std::vector<std::string> Node::getModTypeNames() const  // Get the short (unqualified) type names of the attached mods (C++ only)
-float Node::getMouseX() const  // Get mouse X in this node's local coordinate system (C++ only)
-float Node::getMouseY() const  // Get mouse Y in this node's local coordinate system (C++ only)
-const std::string & Node::getName() const  // Get the optional instance name (empty unless setName() was called) (C++ only)
-Ptr Node::getParent() const  // Get the parent node (null if none) (C++ only)
-float Node::getPMouseX() const  // Get previous-frame mouse X in this node's local coordinate system (C++ only)
-float Node::getPMouseY() const  // Get previous-frame mouse Y in this node's local coordinate system (C++ only)
-const Vec3 & Node::getPos() const  // Get local position (C++ only)
-const Quaternion & Node::getQuaternion() const  // Get rotation as a quaternion (C++ only)
-float Node::getRot() const  // Get 2D Z-axis rotation in radians (C++ only)
-float Node::getRotDeg() const  // Get 2D Z-axis rotation in degrees
-const Vec3 & Node::getScale() const  // Get local scale (C++ only)
-float Node::getScaleX() const  // Get local X scale (C++ only)
-float Node::getScaleY() const  // Get local Y scale (C++ only)
-float Node::getScaleZ() const  // Get local Z scale (C++ only)
-const std::string & Node::getTypeName() const  // C++ class name (most-derived type) via RTTI, e.g. "trussc::RectNode" (cached) (C++ only) 
-bool Node::getVisible() const ⚠️deprecated  // Deprecated alias for isVisible()
-float Node::getX() const  // Get local X position (C++ only)
-float Node::getY() const  // Get local Y position (C++ only)
-float Node::getZ() const  // Get local Z position (C++ only)
-Vec3 Node::globalToLocal(const Vec3 & global) const [+1]  // Convert a global coordinate to this node's local space (C++ only)
-bool Node::hasMod() const  // Whether a mod of type T is attached to this node (C++ only)
-bool Node::hasName() const  // Whether an instance name has been set (C++ only)
-bool Node::hitTest(const Ray & localRay, float & outDistance) [+1]  // Geometric hit-test predicate in local space; override to make a node pickable.
-int Node::indexOfChild(const Node * child) const  // Index of the given child among this node's children (-1 if not a child) (C++ only)
-void Node::insertChild(size_t index, Ptr child, bool keepGlobalPosition = false)  // Insert a child node at a specific index (C++ only)
-bool Node::isActive() const  // Whether the node is active (inactive: update and draw are skipped) (C++ only)
-bool Node::isDead() const  // Check if node is marked for destruction (C++ only)
-bool Node::isEventsEnabled() const  // Whether events are enabled (only such nodes are hit-test targets) (C++ only)
-bool Node::isMouseOver() const  // Whether the mouse is over this node (auto-updated each frame, O(1)) (C++ only)
-bool Node::isVisible() const  // Whether the node is visible (invisible: the node and its descendants are not drawn and not hit by the mouse; update() keeps running) (C++ only)
-Vec3 Node::localToGlobal(const Vec3 & local) const [+1]  // Convert a local coordinate to global space (C++ only)
-void Node::moveToBack()  // Move this node to the beginning of its parent's child list — drawn first, beneath siblings. No-op if no parent or already first (C++ only)
-void Node::moveToFront()  // Move this node to the end of its parent's child list — drawn last, on top of siblings. No-op if no parent or already last (C++ only)
-void Node::onActiveChanged(bool active)  // Callback invoked when the node's active state changes.
-void Node::onChildAdded(Ptr child)  // Callback fired when a child is added (overridable) (C++ only)
-void Node::onChildRemoved(Ptr child)  // Callback fired when a child is removed (overridable) (C++ only)
-bool Node::onKeyPress(const KeyEventArgs & e) [+1]  // Handle a key press (broadcast to all nodes); return true to consume.
-bool Node::onKeyRelease(const KeyEventArgs & e) [+1]  // Handle a key release (broadcast to all nodes); return true to consume.
-void Node::onLocalMatrixChanged()  // Hook for custom behavior when the local matrix changes.
-bool Node::onMouseDrag(const MouseDragEventArgs & e) [+1]  // Handle a mouse drag (event localized to this node); return true to consume.
-void Node::onMouseEnter()  // Hook called when the pointer enters this node (hover begins).
-void Node::onMouseLeave()  // Hook called when the pointer leaves this node (hover ends).
-bool Node::onMouseMove(const MouseMoveEventArgs & e) [+1]  // Handle mouse movement (event localized to this node); return true to consume.
-bool Node::onMousePress(const MouseEventArgs & e) [+1]  // Handle a mouse press (event localized to this node); return true to consume.
-bool Node::onMouseRelease(const MouseEventArgs & e) [+1]  // Handle a mouse release (event localized to this node); return true to consume.
-bool Node::onMouseScroll(const ScrollEventArgs & e) [+1]  // Handle a scroll event (event localized to this node); return true to consume.
-void Node::onVisibleChanged(bool visible)  // Callback invoked when the node's visible state changes.
-void Node::processTimers()  // Count this node's timers (callAfter / callEvery) down by getDeltaTime() and fire the due ones, invoked within the update pass.
-void Node::removeAllChildren()  // Remove all child nodes (C++ only)
-void Node::removeChild(Ptr child)  // Remove a child node (C++ only)
-void Node::removeMod()  // Remove the attached mod of type T, calling its onDestroy() before it is freed (C++ only)
-std::pair<const CameraContext *, Ray> Node::resolvePickRay(internal::PickRaySource & pick, const CameraContext * inheritedCtx, const Ray & globalRay) const  // Resolve this node's effective camera context and the global ray to hit-test it with.
-void Node::setActive(bool active)  // Set the active state (inactive: update and draw are skipped) (C++ only)
-void Node::setCameraContext(std::shared_ptr<const CameraContext> ctx)  // Set the camera context for a manually-managed node (normally set automatically by drawTree).
-void Node::setEuler(const Vec3 & euler) [+1]  // Set rotation from Euler angles in radians (pitch=X, yaw=Y, roll=Z) (C++ only)
-void Node::setEulerDeg(const Vec3 & deg)  // Set rotation from Euler angles in degrees
-void Node::setGlobalPos(const Vec3 & global) [+1]  // Set the node's position in global (world) space (C++ only)
-void Node::setIsActive(bool active) ⚠️deprecated  // Deprecated alias for setActive()
-void Node::setIsVisible(bool visible) ⚠️deprecated  // Deprecated alias for setVisible()
-Node & Node::setName(const std::string & name)  // Set an optional instance name (chainable) (C++ only)
-void Node::setPos(const Vec3 & pos) [+1]  // Set local position (C++ only)
-void Node::setQuaternion(const Quaternion & q)  // Set rotation from a quaternion (C++ only)
-void Node::setRot(float radians)  // Set 2D Z-axis rotation in radians (C++ only)
-void Node::setRotDeg(float degrees)  // Set 2D Z-axis rotation in degrees
-void Node::setScale(const Vec3 & s) [+2]  // Set local scale (vector, uniform, or per-axis) (C++ only)
-void Node::setScaleX(float sx)  // Set local X scale (C++ only)
-void Node::setScaleY(float sy)  // Set local Y scale (C++ only)
-void Node::setScaleZ(float sz)  // Set local Z scale (C++ only)
-void Node::setup()  // Called once at start
-void Node::setVisible(bool visible)  // Set the visible state (invisible: the node and its descendants are not drawn and not hit by the mouse; update() keeps running) (C++ only)
-void Node::setX(float x)  // Set local X position (C++ only)
-void Node::setY(float y)  // Set local Y position (C++ only)
-void Node::setZ(float z)  // Set local Z position (C++ only)
-void Node::update()  // Called every frame before draw
+void Node::addChild(Ptr child, bool keepGlobalPosition = false)  // Appends a child node.
+T * Node::addMod(Args &&... args)  // Creates and attaches a Mod of type T.
+void Node::beginDraw()  // Runs before this node's drawing and child drawing.
+uint64_t Node::callAfter(double delay, std::function<void ()> callback)  // Schedules a callback to run once after a delay.
+uint64_t Node::callAfterAsync(double delay, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Schedules a callback to run once on the background scheduler.
+uint64_t Node::callEvery(double interval, std::function<void ()> callback)  // Schedules a callback to run repeatedly at an interval.
+uint64_t Node::callEveryAsync(double interval, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Schedules a repeating callback on the background scheduler.
+uint64_t Node::callEveryCatchUp(double interval, std::function<void ()> callback, int maxCatchUp)  // Schedules a repeating callback that catches up on missed intervals.
+void Node::cancelAllAsyncTimers() [macos,windows,linux,android,ios]  // Cancels all background scheduler timers owned by this node.
+void Node::cancelAllTimers()  // Cancels all frame timers on this node.
+void Node::cancelAsyncTimer(uint64_t id) [macos,windows,linux,android,ios]  // Cancels a background scheduler timer by ID.
+void Node::cancelTimer(uint64_t id)  // Cancels a frame timer by ID.
+void Node::cleanup()  // Called when a node you destroy() is removed from the tree (children first), and for the App at shutdown.
+void Node::destroy()  // Marks this node for deferred removal.
+void Node::disableEvents()  // Disables this node's event flag.
+void Node::draw()  // Called on each drawn frame to draw the node, in its own local coordinates and starting from the default style.
+void Node::drawChildren()  // Draws this node's children.
+void Node::enableEvents()  // Enables this node's event flag.
+void Node::endDraw()  // Runs after this node's drawing and child drawing.
+Node * Node::findByInstanceId(uint64_t id)  // Finds a node in this subtree by instance ID.
+HitResult Node::findHitNode(const Ray & globalRay)  // Finds a node hit by a global ray.
+HitResult Node::findHitNodeFromScreen(float screenX, float screenY)  // Finds a node hit at a screen position.
+HitResult Node::findHitNodeRecursive(internal::PickRaySource & pick, const CameraContext * inheritedCtx, Ray globalRay, const Mat4 & parentInverseMatrix)  // Searches a subtree for a hit in reverse draw order.
+bool Node::getActive() const ⚠️deprecated  // Returns the node's active flag through a deprecated alias.
+std::shared_ptr<const CameraContext> Node::getCameraContext() const  // Returns the camera context stored on this node.
+size_t Node::getChildCount() const  // Returns the number of direct children.
+int Node::getChildIndex() const  // Returns this node's position in its parent's child list.
+std::vector<Ptr> Node::getChildren() const  // Returns a copy of the child list.
+std::string Node::getDisplayName() const  // Returns a short type-based display label.
+Vec3 Node::getEuler() const  // Returns the local rotation as Euler angles in radians.
+Vec3 Node::getEulerDeg() const  // Returns the local rotation as Euler angles in degrees.
+const Mat4 & Node::getGlobalMatrix() const  // Returns this node's global transform matrix.
+Mat4 Node::getGlobalMatrixInverse() const  // Returns the inverse of this node's global transform matrix.
+Vec3 Node::getGlobalPos() const  // Returns this node's origin in global space.
+uint64_t Node::getInstanceId() const  // Returns this node's instance ID.
+const Mat4 & Node::getLocalMatrix() const  // Returns this node's local transform matrix.
+T * Node::getMod()  // Returns the attached Mod of type T.
+Mod * Node::getModByTypeName(const std::string & name) const  // Finds an attached Mod by its short type name.
+std::vector<Mod *> Node::getMods() const  // Returns pointers to all Mods attached to this node.
+std::vector<std::string> Node::getModTypeNames() const  // Returns the short type names of this node's attached Mods.
+float Node::getMouseX() const  // Returns the mouse X coordinate in this node's local space.
+float Node::getMouseY() const  // Returns the mouse Y coordinate in this node's local space.
+const std::string & Node::getName() const  // Returns the optional instance name.
+Ptr Node::getParent() const  // Returns the parent node.
+float Node::getPMouseX() const  // Returns the previous-frame mouse X coordinate in this node's local space.
+float Node::getPMouseY() const  // Returns the previous-frame mouse Y coordinate in this node's local space.
+const Vec3 & Node::getPos() const  // Returns the local position.
+const Quaternion & Node::getQuaternion() const  // Returns the local rotation quaternion.
+float Node::getRot() const  // Returns the local Z Euler angle in radians.
+float Node::getRotDeg() const  // Returns the local Z Euler angle in degrees.
+const Vec3 & Node::getScale() const  // Returns the local scale.
+float Node::getScaleX() const  // Returns the local X scale.
+float Node::getScaleY() const  // Returns the local Y scale.
+float Node::getScaleZ() const  // Returns the local Z scale.
+const std::string & Node::getTypeName() const  // Returns the node's C++ class name.
+bool Node::getVisible() const ⚠️deprecated  // Returns the node's visible flag through a deprecated alias.
+float Node::getX() const  // Returns the local X position.
+float Node::getY() const  // Returns the local Y position.
+float Node::getZ() const  // Returns the local Z position.
+Vec3 Node::globalToLocal(const Vec3 & global) const [+1]  // Converts a global position to this node's local space.
+bool Node::hasMod() const  // Reports whether this node has a Mod of type T.
+bool Node::hasName() const  // Returns whether the instance name is nonempty.
+bool Node::hitTest(const Ray & localRay, float & outDistance) [+1]  // Tests whether a local ray or point hits this node.
+int Node::indexOfChild(const Node * child) const  // Returns a child's position in this node's child list.
+void Node::insertChild(size_t index, Ptr child, bool keepGlobalPosition = false)  // Inserts a child node at a specified position.
+bool Node::isActive() const  // Returns the node's active flag.
+bool Node::isDead() const  // Returns whether this node is marked dead.
+bool Node::isEventsEnabled() const  // Returns this node's event-enabled flag.
+bool Node::isMouseOver() const  // Returns whether this node is the current hovered node.
+bool Node::isVisible() const  // Returns the node's visible flag.
+Vec3 Node::localToGlobal(const Vec3 & local) const [+1]  // Converts a local position to global space.
+void Node::moveToBack()  // Moves this node to the beginning of its sibling list.
+void Node::moveToFront()  // Moves this node to the end of its sibling list.
+void Node::onActiveChanged(bool active)  // Called when the node's active flag changes.
+void Node::onChildAdded(Ptr child)  // Called when a direct child is added.
+void Node::onChildRemoved(Ptr child)  // Called when a direct child is removed.
+bool Node::onKeyPress(const KeyEventArgs & e) [+1]  // Handles a key press.
+bool Node::onKeyRelease(const KeyEventArgs & e) [+1]  // Handles a key release.
+void Node::onLocalMatrixChanged()  // Handles changes to this node's local transform.
+bool Node::onMouseDrag(const MouseDragEventArgs & e) [+1]  // Handles pointer movement while this node holds the pointer grab.
+void Node::onMouseEnter()  // Runs when this node becomes the hovered node.
+void Node::onMouseLeave()  // Runs when this node stops being the hovered node.
+bool Node::onMouseMove(const MouseMoveEventArgs & e) [+1]  // Handles pointer movement.
+bool Node::onMousePress(const MouseEventArgs & e) [+1]  // Handles a mouse button press.
+bool Node::onMouseRelease(const MouseEventArgs & e) [+1]  // Handles a mouse button release.
+bool Node::onMouseScroll(const ScrollEventArgs & e) [+1]  // Handles scrolling at the pointer position.
+void Node::onVisibleChanged(bool visible)  // Called when the node's visible flag changes.
+void Node::processTimers()  // Advances this node's frame timers and runs callbacks that are due.
+void Node::removeAllChildren()  // Detaches all direct child nodes.
+void Node::removeChild(Ptr child)  // Detaches a child node.
+void Node::removeMod()  // Removes the attached Mod of type T.
+std::pair<const CameraContext *, Ray> Node::resolvePickRay(internal::PickRaySource & pick, const CameraContext * inheritedCtx, const Ray & globalRay) const  // Selects the camera context and global ray used to hit-test this node.
+void Node::setActive(bool active)  // Sets the node's active state.
+void Node::setCameraContext(std::shared_ptr<const CameraContext> ctx)  // Sets the camera context stored on this node.
+void Node::setEuler(const Vec3 & euler) [+1]  // Sets the local rotation from Euler angles in radians.
+void Node::setEulerDeg(const Vec3 & deg)  // Sets the local rotation from Euler angles in degrees.
+void Node::setGlobalPos(const Vec3 & global) [+1]  // Sets this node's position in global space.
+void Node::setIsActive(bool active) ⚠️deprecated  // Sets the active state through a deprecated alias.
+void Node::setIsVisible(bool visible) ⚠️deprecated  // Sets the visible state through a deprecated alias.
+Node & Node::setName(const std::string & name)  // Sets the optional instance name.
+void Node::setPos(const Vec3 & pos) [+1]  // Sets the local position.
+void Node::setQuaternion(const Quaternion & q)  // Sets the local rotation from a quaternion.
+void Node::setRot(float radians)  // Sets a local rotation around the Z axis.
+void Node::setRotDeg(float degrees)  // Sets a local Z-axis rotation in degrees.
+void Node::setScale(const Vec3 & s) [+2]  // Sets the local scale.
+void Node::setScaleX(float sx)  // Sets the local X scale.
+void Node::setScaleY(float sy)  // Sets the local Y scale.
+void Node::setScaleZ(float sz)  // Sets the local Z scale.
+void Node::setup()  // Called once, just before the node is first updated or drawn. Build child nodes and timers here.
+void Node::setVisible(bool visible)  // Sets the node's visible state.
+void Node::setX(float x)  // Sets the local X position.
+void Node::setY(float y)  // Sets the local Y position.
+void Node::setZ(float z)  // Sets the local Z position.
+void Node::update()  // Called on every update step while the node is active, before its mods and its children update.
 ```
 
 ### Node::HitResult
 
 ```cpp
-bool Node::HitResult::hit() const  // Whether a node was hit (node is non-null).
+bool Node::HitResult::hit() const  // Returns whether the result contains a hit node.
 ```
 
-### OnceGate — Gate for a log line (or anything else): isFirstTime() is true the first time, and with an interval, again once that much time has passed since the last true
+### OnceGate — Controls whether an action runs once or at a specified interval.
 
 ```cpp
-bool OnceGate::isFirstTime()  // True the first time; with an interval, true again once that much time has passed since the last true. Otherwise false
-void OnceGate::reset()  // Restore the never-fired state so the next isFirstTime() returns true immediately, for both once-only and interval gates. Lock-free and safe from any thread
+bool OnceGate::isFirstTime()  // Checks whether the gate allows an action.
+void OnceGate::reset()  // Restores the gate to its initial state.
 ```
 
-### Path — Path/Polyline for lines and curves
+### Path — Stores paths made from straight lines and curves.
 
 ```cpp
-void Path::addVertex(float x, float y) [+3]  // Add a vertex
-void Path::addVertices(const std::vector<Vec2> & verts) [+1]  // Add multiple vertices
-void Path::arc(const Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise = true, int circleResolution = 20) [+5]  // Add a circular or elliptical arc (all angles in radians)
-void Path::arcDeg(const Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise = true, int circleResolution = 20) [+2]  // Add an elliptical arc with angles in degrees (all elliptical overloads)
-void Path::bezierTo(const Vec3 & cp1, const Vec3 & cp2, const Vec3 & to, int resolution) [+2]  // Add cubic bezier curve (resolution=-1 uses current curve style)
-std::vector<std::array<float, 2>> Path::buildFillTriangles() const  // Triangulate the path interior into a flat list of 2D triangle vertices
-void Path::clear()  // Clear all vertices
-void Path::close()  // Close the path
-void Path::curveTo(const Vec3 & to, int resolution) [+2]  // Add Catmull-Rom curve segment (needs >=4 consecutive calls; resolution=-1 uses current curve style)
-void Path::draw() const  // Draw the polyline (fill + 1px stroke based on current style — fill uses triangle fan, convex only). For concave shapes / holes use drawFill.
-void Path::drawFill() const  // Fill the path as a concave polygon with holes (earcut tessellation). Subpaths follow the non-zero winding rule (SVG / PostScript default): a subpath wound opposite to its enclosing ring becomes a hole; same-direction subpaths union (never punch holes). Handles glyphs with holes (e, a, O, 日 ...), overlapping contours, and both TrueType / CFF winding conventions. To cut a hole in a hand-built Path, wind the inner subpath opposite (see reverseWinding).
-void Path::drawStroke() const  // Thick stroke via StrokeMesh (respects strokeWeight / strokeCap / strokeJoin), per-subpath. Use draw() for 1-pixel lines.
-bool Path::empty() const  // Check if polyline is empty
-Rect Path::getBounds() const  // Get bounding box as Rect
-size_t Path::getNumSubpaths() const  // Number of subpaths (contours)
-float Path::getPerimeter() const  // Get total path length
-std::pair<size_t, size_t> Path::getSubpathRange(size_t i) const  // Vertex index range [begin, end) of subpath i
-const std::vector<Vec3> & Path::getVertices() const [+1]  // Get all vertices
-bool Path::isClosed() const  // Check if path is closed
-bool Path::isSubpathClosed(size_t i) const  // Whether subpath i is closed
-void Path::lineTo(float x, float y, float z = 0) [+2]  // Add line segment to point
-void Path::moveTo(float x, float y, float z = 0) [+2]  // Start a new subpath at (x, y). A single Path can hold multiple disjoint contours (think SVG `<path>` with `M ... M ...`) — used by Font::getGlyphPath to keep an outer ring and its holes in one Path so drawFill can detect holes.
-void Path::quadBezierTo(const Vec3 & cp, const Vec3 & to, int resolution) [+2]  // Add quadratic bezier curve (resolution=-1 uses current curve style)
-Path & Path::reverseWinding(size_t i) [+1]  // Reverse the winding direction (vertex order) of all subpaths, or of one subpath. Under drawFill's non-zero winding rule, reversing a subpath toggles it between filling and cutting — e.g. build a circle contour, then reverseWinding(i) it into a hole punch. Reversing ALL subpaths leaves the render unchanged (only relative direction matters) — handy for imported outlines using the opposite convention.
-void Path::setClosed(bool closed)  // Set closed state
-int Path::size() const  // Get vertex count
-Mesh Path::toFillMesh() const  // Build a fillable Mesh from the path interior
+void Path::addVertex(float x, float y) [+3]  // Appends a vertex to the current subpath.
+void Path::addVertices(const std::vector<Vec2> & verts) [+1]  // Appends multiple vertices to the current subpath.
+void Path::arc(const Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise = true, int circleResolution = 20) [+5]  // Appends a circular or elliptical arc.
+void Path::arcDeg(const Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise = true, int circleResolution = 20) [+2]  // Appends an elliptical arc using angles in degrees.
+void Path::bezierTo(const Vec3 & cp1, const Vec3 & cp2, const Vec3 & to, int resolution) [+2]  // Appends a cubic Bézier curve.
+std::vector<std::array<float, 2>> Path::buildFillTriangles() const  // Triangulates the path interior into two-dimensional triangle vertices.
+void Path::clear()  // Removes all vertices and resets the subpaths.
+void Path::close()  // Closes the current subpath.
+void Path::curveTo(const Vec3 & to, int resolution) [+2]  // Appends Catmull–Rom spline segments.
+void Path::draw() const  // Draws each subpath with the current drawing style.
+void Path::drawFill() const  // Fills the path, including concave contours and holes.
+void Path::drawStroke() const  // Draws a thick outline for each subpath.
+bool Path::empty() const  // Reports whether the path has no stored vertices.
+Rect Path::getBounds() const  // Returns the path's two-dimensional bounding rectangle.
+size_t Path::getNumSubpaths() const  // Returns the number of subpaths.
+float Path::getPerimeter() const  // Returns the total length of the stored path segments.
+std::pair<size_t, size_t> Path::getSubpathRange(size_t i) const  // Returns the vertex index range of a subpath.
+const std::vector<Vec3> & Path::getVertices() const [+1]  // Returns a reference to all stored vertices.
+bool Path::isClosed() const  // Reports whether the current subpath is closed.
+bool Path::isSubpathClosed(size_t i) const  // Reports whether the specified subpath is closed.
+void Path::lineTo(float x, float y, float z = 0) [+2]  // Appends the endpoint of a straight segment.
+void Path::moveTo(float x, float y, float z = 0) [+2]  // Starts a subpath at the specified position.
+void Path::quadBezierTo(const Vec3 & cp, const Vec3 & to, int resolution) [+2]  // Appends a quadratic Bézier curve.
+Path & Path::reverseWinding(size_t i) [+1]  // Reverses the vertex order within subpaths.
+void Path::setClosed(bool closed)  // Sets the current subpath's closed state.
+int Path::size() const  // Returns the number of stored vertices.
+Mesh Path::toFillMesh() const  // Builds a mesh from the path's filled interior.
 ```
 
-### Pixels — Pixel buffer for image manipulation
+### Pixels — Stores image pixels in CPU memory.
 
 ```cpp
-void Pixels::allocate(int width, int height, int channels = 4, PixelFormat format = U8)  // Allocate pixel buffer
-void Pixels::clear()  // Release pixel buffer
-Pixels Pixels::clone() const  // Return a deep copy of the pixel buffer
-void Pixels::copyTo(unsigned char * dst) const  // Copy to external buffer
-void Pixels::crop(int x, int y, int w, int h)  // Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge.
-int Pixels::getChannels() const  // Get number of channels
-Color Pixels::getColor(int x, int y) const  // Get pixel color at position
-unsigned char * Pixels::getData() [+1]  // Get raw data pointer
-float * Pixels::getDataF32() [+1]  // Get raw data pointer as float (float-format buffers)
-void * Pixels::getDataVoid() [+1]  // Get raw data pointer as void* (any format)
-PixelFormat Pixels::getFormat() const  // Get the pixel format
-int Pixels::getHeight() const  // Get height
-size_t Pixels::getTotalBytes() const  // Get total byte size
-int Pixels::getWidth() const  // Get width
-void Pixels::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
-bool Pixels::isAllocated() const  // Check if allocated
-bool Pixels::isFloat() const  // Whether the pixel data uses 32-bit floats
-LoadResult Pixels::load(const fs::path & filePath)  // Load image from file into CPU memory. No GPU work, so it is safe on a worker thread; upload the result on the main thread (`Texture::allocate(pixels)`). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
-LoadResult Pixels::loadFromMemory(const unsigned char * buffer, int len)  // Decode an image from memory into CPU pixels. No GPU work, so it is safe on a worker thread.
-LoadResult Pixels::loadHDR(const fs::path & filePath)  // Load an HDR (.hdr) image into a float pixel buffer. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
-bool Pixels::loadPlatform(const fs::path & path)  // Load an image using the platform image decoder
-void Pixels::mirror(bool horizontal, bool vertical)  // Flip in place. Both true is 180°.
-void Pixels::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
-void Pixels::mirrorV()  // Mirror vertically (alias for mirror(false, true))
-void Pixels::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8.
-SaveResult Pixels::save(const fs::path & path) const  // Save pixels (JPG/JPEG, BMP, otherwise PNG; preserve the requested filename). Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
-void Pixels::setColor(int x, int y, const Color & c)  // Set pixel color at position
-void Pixels::setFromFloats(const float * srcData, int width, int height, int channels)  // Fill the buffer from a float array (allocates as needed)
-void Pixels::setFromPixels(const unsigned char * srcData, int width, int height, int channels)  // Copy from external pixel data
+void Pixels::allocate(int width, int height, int channels = 4, PixelFormat format = U8)  // Allocates a pixel buffer.
+void Pixels::clear()  // Releases the pixel buffer.
+Pixels Pixels::clone() const  // Returns an independent copy of the pixel buffer.
+void Pixels::copyTo(unsigned char * dst) const  // Copies pixel bytes to an external buffer.
+void Pixels::crop(int x, int y, int w, int h)  // Replaces the pixels with a cropped region.
+int Pixels::getChannels() const  // Returns the number of channels per pixel.
+Color Pixels::getColor(int x, int y) const  // Returns the color of a pixel.
+unsigned char * Pixels::getData() [+1]  // Returns the pixel storage as a byte pointer.
+float * Pixels::getDataF32() [+1]  // Returns the pixel storage as a float pointer.
+void * Pixels::getDataVoid() [+1]  // Returns the untyped pixel storage pointer.
+PixelFormat Pixels::getFormat() const  // Returns the CPU pixel format.
+int Pixels::getHeight() const  // Returns the buffer height.
+size_t Pixels::getTotalBytes() const  // Returns the total size of the pixel data in bytes.
+int Pixels::getWidth() const  // Returns the buffer width.
+void Pixels::halve()  // Reduces the buffer to half size by averaging pixels.
+bool Pixels::isAllocated() const  // Returns whether the buffer is allocated.
+bool Pixels::isFloat() const  // Returns whether the pixel format uses 32-bit floats.
+LoadResult Pixels::load(const fs::path & filePath)  // Loads an image file into CPU pixels.
+LoadResult Pixels::loadFromMemory(const unsigned char * buffer, int len)  // Decodes an image from memory into CPU pixels.
+LoadResult Pixels::loadHDR(const fs::path & filePath)  // Loads HDR images into floating-point CPU pixels.
+bool Pixels::loadPlatform(const fs::path & path)  // Loads an image through the platform decoder.
+void Pixels::mirror(bool horizontal, bool vertical)  // Flips the pixel buffer horizontally or vertically.
+void Pixels::mirrorH()  // Flips the pixel buffer horizontally.
+void Pixels::mirrorV()  // Flips the pixel buffer vertically.
+void Pixels::resize(int newW, int newH)  // Resamples the pixel buffer to new dimensions.
+SaveResult Pixels::save(const fs::path & path) const  // Saves CPU pixels to an image file.
+void Pixels::setColor(int x, int y, const Color & c)  // Sets the color of a pixel.
+void Pixels::setFromFloats(const float * srcData, int width, int height, int channels)  // Copies a float array into the pixel buffer.
+void Pixels::setFromPixels(const unsigned char * srcData, int width, int height, int channels)  // Copies a byte array into the pixel buffer.
 ```
 
-### PlacedGlyph — One laid-out glyph emitted by Font::forEachGlyph (nested as Font::PlacedGlyph). Carries the final codepoint and pen position so visitors can render quads, build vector paths, or hit-test independently of the layout pass
-
-```cpp
-```
-
-### Platform — Compile-time OS detection. All methods are constexpr and resolve at compile time based on the target platform.
-
-```cpp
-bool Platform::isAndroid()  // True on Android
-bool Platform::isApple()  // True on any Apple platform (macOS or iOS)
-bool Platform::isDesktop()  // True on desktop (macOS, Windows, or Linux)
-bool Platform::isIOS()  // True on iOS
-bool Platform::isLinux()  // True on Linux (desktop, excludes Android)
-bool Platform::isMacOS()  // True on macOS
-bool Platform::isMobile()  // True on mobile (iOS or Android)
-bool Platform::isWeb()  // True on Web (Emscripten / WASM)
-bool Platform::isWindows()  // True on Windows
-const char * Platform::name()  // Short platform name: "web" / "macos" / "ios" / "windows" / "android" / "linux" / "unknown" 
-```
-
-### PlayingSound — A single live mixer voice returned by AudioEngine::play(). Its fields are the real-time playback state the audio thread reads each callback (volume / pan / speed / loop / playing / paused / mixMode / position) plus the channel routing snapshots. Most fields are atomics so the UI thread can mutate them while the audio thread plays; set them directly.
+### PlacedGlyph — Describes one glyph positioned by Font's text layout.
 
 ```cpp
 ```
 
-### PlayingSoundInfo — One playing (or paused) sound as reported by AudioEngine::getPlayingSounds(): a copy taken under the engine lock, so later changes to the playback are not reflected.
+### Platform — Identifies the operating system targeted by the build.
+
+```cpp
+bool Platform::isAndroid()  // Reports whether the build targets Android.
+bool Platform::isApple()  // Reports whether the build targets macOS or iOS.
+bool Platform::isDesktop()  // Reports whether the build targets macOS, Windows, or desktop Linux.
+bool Platform::isIOS()  // Reports whether the build targets iOS.
+bool Platform::isLinux()  // Reports whether the build targets desktop Linux.
+bool Platform::isMacOS()  // Reports whether the build targets macOS.
+bool Platform::isMobile()  // Reports whether the build targets iOS or Android.
+bool Platform::isWeb()  // Reports whether the build targets the Web through Emscripten.
+bool Platform::isWindows()  // Reports whether the build targets Windows.
+const char * Platform::name()  // Returns the short name of the target platform.
+```
+
+### PlayingSound — Holds the live state of one mixer voice.
 
 ```cpp
 ```
 
-### Quaternion — Unit quaternion for 3D rotations
-
-```cpp
-Quaternion Quaternion::conjugate() const  // Get conjugate quaternion
-Quaternion Quaternion::fromAxisAngle(const Vec3 & axis, float radians)  // Create quaternion from axis-angle
-Quaternion Quaternion::fromEuler(float pitch, float yaw, float roll) [+1]  // Create quaternion from Euler angles
-Quaternion Quaternion::identity()  // Create an identity quaternion
-float Quaternion::length() const  // Get quaternion length
-float Quaternion::lengthSquared() const  // Get the squared length (avoids the sqrt)
-Quaternion & Quaternion::normalize()  // Normalize this quaternion in place and return *this
-Quaternion Quaternion::normalized() const  // Get normalized quaternion
-Vec3 Quaternion::rotate(const Vec3 & v) const  // Rotate a vector
-Quaternion Quaternion::slerp(const Quaternion & a, const Quaternion & b, float t)  // Spherical linear interpolation
-Vec3 Quaternion::toEuler() const  // Convert to Euler angles
-Mat4 Quaternion::toMatrix() const  // Convert to rotation matrix
-```
-
-### Ray — A ray with an origin and a normalized direction, used for unified hit testing and picking
-
-```cpp
-Vec3 Ray::at(float t) const  // Get the point along the ray at distance t: origin + direction * t
-Ray Ray::fromScreenPoint2D(float screenX, float screenY, float startZ = 1000.0)  // Build an orthographic Z-parallel ray from a 2D screen point
-Hit Ray::intersectAABB(const Vec3 & boxMin, const Vec3 & boxMax) const [+1]  // Intersect an axis-aligned bounding box and return a Ray::Hit carrying the distance and hit point. The out-param overload is deprecated and goes away in v1.0.0.
-Hit Ray::intersectPlane(const Vec3 & planeNormal, float planeD) const [+1]  // Intersect an arbitrary plane and return a Ray::Hit carrying the distance and hit point. The out-param overload is deprecated and goes away in v1.0.0.
-Hit Ray::intersectSphere(float radius) const [+1]  // Intersect a sphere centered at the origin and return a Ray::Hit carrying the distance and hit point. The out-param overload is deprecated and goes away in v1.0.0.
-Hit Ray::intersectZPlane() const [+1]  // Intersect the Z=0 plane and return a Ray::Hit carrying the distance and hit point. The out-param overload is deprecated and goes away in v1.0.0.
-Ray Ray::transformed(const Mat4 & inverseMatrix) const  // Transform the ray by a matrix (typically an inverse to map into local space)
-```
-
-### Rect — Rectangle (x, y, width, height)
-
-```cpp
-bool Rect::contains(float px, float py) const  // Check if point is inside
-float Rect::getBottom() const  // Get bottom edge (y + height)
-Vec2 Rect::getCenter() const  // Get the center point of the rectangle
-float Rect::getCenterX() const  // Get center X
-float Rect::getCenterY() const  // Get center Y
-float Rect::getRight() const  // Get right edge (x + width)
-bool Rect::intersects(const Rect & other) const  // Check if intersects with another rect
-Rect & Rect::set(float x, float y, float w, float h) [+1]  // Set rectangle bounds
-```
-
-### RectNode — 2D UI rectangle node: size, clipping and ray-based hit testing, plus subscribable mouse Event members
-
-```cpp
-void RectNode::beginDraw()  // Begin the draw scope, pushing the rect's clip region.
-void RectNode::draw()  // Draw the rectangle node; override in derived classes (draws nothing by default).
-void RectNode::drawRectFill()  // Helper that draws the rectangle filled.
-void RectNode::drawRectFillAndStroke()  // Helper that draws the rectangle with both fill and stroke.
-void RectNode::drawRectStroke()  // Helper that draws the rectangle outline.
-void RectNode::endDraw()  // End the draw scope, popping the clip region.
-HitResult RectNode::findHitNodeRecursive(internal::PickRaySource & pick, const CameraContext * inheritedCtx, Ray globalRay, const Mat4 & parentInverseMatrix)  // Clipping-aware recursive hit test (overrides Node's to respect the rect bounds).
-float RectNode::getBottom() const  // Local bottom edge (equals height) (RectNode method) (C++ only)
-float RectNode::getHeight() const  // Get the node height (RectNode method) (C++ only)
-float RectNode::getLeft() const  // Local left edge (always 0) (RectNode method) (C++ only)
-float RectNode::getRight() const  // Local right edge (equals width) (RectNode method) (C++ only)
-Vec2 RectNode::getSize() const  // Get the node size as a Vec2 (RectNode method) (C++ only)
-float RectNode::getTop() const  // Local top edge (always 0) (RectNode method) (C++ only)
-float RectNode::getWidth() const  // Get the node width (RectNode method) (C++ only)
-bool RectNode::hitTest(const Ray & localRay, float & outDistance) [+1]  // Hit-test the rectangle against a ray (with out distance) or a 2D point (RectNode method) (C++ only)
-bool RectNode::isClipping() const  // Whether scissor clipping is enabled (RectNode method) (C++ only)
-bool RectNode::onMouseDrag(const MouseDragEventArgs & e)  // Fire the mouseDragged event and forward to the legacy simple-form hook.
-bool RectNode::onMousePress(const MouseEventArgs & e)  // Fire the mousePressed event and forward to the legacy simple-form hook. Returns true (consume); return false from an override to bubble the press to the parent chain — the consumer becomes the drag/release grab target.
-bool RectNode::onMouseRelease(const MouseEventArgs & e)  // Fire the mouseReleased event and forward to the legacy simple-form hook.
-bool RectNode::onMouseScroll(const ScrollEventArgs & e)  // Fire the scroll event; returns false to allow bubbling to a parent (e.g. ScrollContainer).
-void RectNode::onSizeChanged()  // Callback invoked when the rect's size changes.
-void RectNode::setClipping(bool enabled)  // Enable/disable scissor clipping for RectNode (C++ only)
-void RectNode::setHeight(float h)  // Set the node height (RectNode method) (C++ only)
-void RectNode::setRect(float x, float y, float w, float h)  // Set position and size at once (RectNode method) (C++ only)
-void RectNode::setSize(float w, float h) [+2]  // Set size (C++ only)
-void RectNode::setWidth(float w)  // Set the node width (RectNode method) (C++ only)
-```
-
-### RectNodeButton — Simple clickable button node (a RectNode subclass). Set normalColor/hoverColor/pressColor and label; it draws a filled rect that changes color on hover/press and a centered label. Events are enabled on construction. Listen on its inherited mousePressed/mouseReleased events for clicks.
-
-```cpp
-void RectNodeButton::draw()  // Draw the button: fills the rect with the state-dependent color and draws the centered label. (override)
-bool RectNodeButton::isPressed() const  // Whether the button is currently pressed.
-bool RectNodeButton::onMousePress(const MouseEventArgs & e)  // Set the pressed state, then fire the base RectNode press handling.
-bool RectNodeButton::onMouseRelease(const MouseEventArgs & e)  // Clear the pressed state, then fire the base RectNode release handling.
-```
-
-### Reflector — Visitor base for the TC_REFLECT reflection system; backends (inspector, JSON, codec) subclass it with one visit() per supported type.
-
-```cpp
-void Reflector::beginGroup(const char * name)  // Enter a nested composite group of reflected members (no-op for flat backends).
-void Reflector::endGroup()  // Leave the current nested group.
-bool Reflector::isDerived() const  // Return true if the current member is a derived value (TC_DERIVED): computed from another member, writable, but not saved.
-bool Reflector::isReadOnly() const  // Return true if the current reflection scope is read-only.
-void Reflector::popDerived()  // Leave the current derived-value scope.
-void Reflector::popReadOnly()  // Leave the current read-only scope.
-void Reflector::pushDerived()  // Enter a derived-value scope (TC_DERIVED visits inside it).
-void Reflector::pushReadOnly()  // Enter a read-only scope (members visited inside cannot be written).
-bool Reflector::visit(const char * name, float & v) [+7]  // Handle one reflected member by name and value; return true if it was edited.
-```
-
-### ResizeEventArgs — Arguments for windowResized events
+### PlayingSoundInfo — Holds a snapshot of one playing or paused sound.
 
 ```cpp
 ```
 
-### SaveResult — Result of a checked save, stream open, recorder submission or finalization. Carries SaveError and a failure message.
+### Quaternion — A quaternion for representing three-dimensional rotations.
 
 ```cpp
-SaveResult SaveResult::fail(SaveError error, std::string message = std::string())  // Make a failure result with an error kind and optional message (static)
-bool SaveResult::ok() const  // true if this operation succeeded (error == SaveError::None); recorder submission is backend acceptance, while close/stop checks finalization.
-SaveResult SaveResult::success()  // Make a success result (static)
+Quaternion Quaternion::conjugate() const  // Returns the conjugate quaternion.
+Quaternion Quaternion::fromAxisAngle(const Vec3 & axis, float radians)  // Creates a quaternion from a rotation axis and angle.
+Quaternion Quaternion::fromEuler(float pitch, float yaw, float roll) [+1]  // Creates a quaternion from Euler angles.
+Quaternion Quaternion::identity()  // Creates an identity quaternion.
+float Quaternion::length() const  // Returns the quaternion length.
+float Quaternion::lengthSquared() const  // Returns the squared quaternion length.
+Quaternion & Quaternion::normalize()  // Normalizes this quaternion in place.
+Quaternion Quaternion::normalized() const  // Returns a normalized quaternion.
+Vec3 Quaternion::rotate(const Vec3 & v) const  // Rotates a vector by this quaternion.
+Quaternion Quaternion::slerp(const Quaternion & a, const Quaternion & b, float t)  // Interpolates between quaternion rotations.
+Vec3 Quaternion::toEuler() const  // Converts this quaternion to Euler angles.
+Mat4 Quaternion::toMatrix() const  // Converts this quaternion to a rotation matrix.
 ```
 
-### ScreenRecorder — Captures the rendered output to a video file (start/stop recording of the on-screen frames)
+### Ray — Represents a ray for hit testing and picking.
 
 ```cpp
-int ScreenRecorder::getFrameCount() const [macos,windows,linux,android,ios]  // Number of video frames accepted by the backend; failed submissions are excluded. Finalization may still fail.
-fs::path ScreenRecorder::getPath() const [macos,windows,linux,android,ios]  // Output file path of the current recording
-uint64_t ScreenRecorder::getRejectedFrameCount() const [macos,windows,linux,android,ios]  // Number of frames refused in this take because capture/readback failed or dimensions, pixel format, row layout or byte capacity did not match the take or native buffer. Refused frames are skipped whole and do not fail the take. Resets on VideoWriter::open() (also used by ScreenRecorder::start()).
-bool ScreenRecorder::isRecording() const [macos,windows,linux,android,ios]  // Check if the screen recorder is currently capturing
-SaveResult ScreenRecorder::start(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically. Calling start while recording finalizes the current file first. If the recorded Fbo is destroyed mid-recording, the recording stops and finalizes automatically. Returns SaveResult for path preparation and encoder opening. Success starts an in-place stream; check close()/stop() for finalization. If the previous take times out waiting for GPU frames, its last completion finalizes it independently of the new take.
-SaveResult ScreenRecorder::stop() [macos,windows,linux,android,ios]  // Disconnect the audio listener and wait up to one second for audio callbacks (a Warning if one is still running), then wait up to 2 seconds for GPU readbacks before finalizing. If GPU frames remain, logs one Error and returns WriteFailed with message recording still has frames in flight. The callbacks retain their State and writer; the last completion drains audio and closes the file. Returns SaveResult for finalization or the retained failure; repeated calls do not repeat the timeout Error. Caller errors and transient readback failures do not fail the take. No temporary/rename is used.
-VideoWriter & ScreenRecorder::writer() [macos,windows,linux,android,ios]  // Access the underlying VideoWriter for advanced introspection
+Vec3 Ray::at(float t) const  // Returns a point along the ray.
+Ray Ray::fromScreenPoint2D(float screenX, float screenY, float startZ = 1000.0)  // Creates a Z-parallel ray from a 2D screen point.
+Hit Ray::intersectAABB(const Vec3 & boxMin, const Vec3 & boxMax) const [+1]  // Tests the ray against an axis-aligned bounding box.
+Hit Ray::intersectPlane(const Vec3 & planeNormal, float planeD) const [+1]  // Tests the ray against an arbitrary plane.
+Hit Ray::intersectSphere(float radius) const [+1]  // Tests the ray against a sphere centered at the coordinate origin.
+Hit Ray::intersectZPlane() const [+1]  // Tests the ray against the Z=0 plane.
+Ray Ray::transformed(const Mat4 & inverseMatrix) const  // Returns a ray transformed by a matrix.
 ```
 
-### ScreenshotSaveEventArgs — Completion of an asynchronous screenshot: the actual destination and save result. Delivered on main in a later frame, including rejected requests.
+### Rect — Represents a rectangle using position and size.
 
 ```cpp
+bool Rect::contains(float px, float py) const  // Tests whether a point is inside the rectangle.
+float Rect::getBottom() const  // Returns the rectangle's bottom coordinate.
+Vec2 Rect::getCenter() const  // Returns the rectangle's center point.
+float Rect::getCenterX() const  // Returns the rectangle's center X coordinate.
+float Rect::getCenterY() const  // Returns the rectangle's center Y coordinate.
+float Rect::getRight() const  // Returns the rectangle's right coordinate.
+bool Rect::intersects(const Rect & other) const  // Tests whether the rectangle overlaps another rectangle.
+Rect & Rect::set(float x, float y, float w, float h) [+1]  // Sets the rectangle's position and size.
 ```
 
-### ScrollBar — Visual scroll indicator RectNode that syncs with a ScrollContainer and supports drag scrolling
+### RectNode — A rectangular Node for 2D interfaces.
 
 ```cpp
-void ScrollBar::draw()  // Draw the scrollbar as a rounded-cap stroked slot.
-Color ScrollBar::getBarColor() const  // Get the scroll-bar color (ScrollBar method) (C++ only)
-float ScrollBar::getBarWidth() const  // Get the scroll-bar thickness (ScrollBar method) (C++ only)
-float ScrollBar::getMargin() const  // Get the margin between the bar and the container edge (ScrollBar method) (C++ only)
-float ScrollBar::getOffset() const  // Get the rounded-cap draw offset (round(barWidth/2)) (ScrollBar method) (C++ only)
-void ScrollBar::handleHorizontalDrag(float localX)  // Map a horizontal drag position to the container's scrollX.
-void ScrollBar::handleVerticalDrag(float localY)  // Map a vertical drag position to the container's scrollY.
-bool ScrollBar::onMouseDrag(const MouseDragEventArgs & e)  // Translate a drag into a scroll position via the vertical or horizontal handler.
-bool ScrollBar::onMousePress(const MouseEventArgs & e)  // Begin dragging the bar, recording the grab offset.
-bool ScrollBar::onMouseRelease(const MouseEventArgs & e)  // End dragging the bar.
-void ScrollBar::setBarColor(const Color & color)  // Set the scroll-bar color (ScrollBar method) (C++ only)
-void ScrollBar::setBarWidth(float width)  // Set the scroll-bar thickness (ScrollBar method) (C++ only)
-void ScrollBar::setMargin(float margin)  // Set the margin between the bar and the container edge (ScrollBar method) (C++ only)
-void ScrollBar::updateFromContainer()  // Resync the bar size and position from its ScrollContainer (ScrollBar method) (C++ only)
-void ScrollBar::updateHorizontal()  // Size and position the bar for a horizontal scroll container (or hide it).
-void ScrollBar::updateVertical()  // Size and position the bar for a vertical scroll container (or hide it).
+void RectNode::beginDraw()  // Applies the rectangle's clipping before drawing.
+void RectNode::draw()  // Draws the rectangle node's custom content.
+void RectNode::drawRectFill()  // Draws the rectangle with a solid fill.
+void RectNode::drawRectFillAndStroke()  // Draws the rectangle's fill and outline.
+void RectNode::drawRectStroke()  // Draws the rectangle's outline.
+void RectNode::endDraw()  // Restores the previous clipping after drawing.
+HitResult RectNode::findHitNodeRecursive(internal::PickRaySource & pick, const CameraContext * inheritedCtx, Ray globalRay, const Mat4 & parentInverseMatrix)  // Searches this subtree for a hit while respecting rectangle clipping.
+float RectNode::getBottom() const  // Returns the rectangle's local bottom edge.
+float RectNode::getHeight() const  // Returns the rectangle's height.
+float RectNode::getLeft() const  // Returns the rectangle's local left edge.
+float RectNode::getRight() const  // Returns the rectangle's local right edge.
+Vec2 RectNode::getSize() const  // Returns the rectangle's size as a Vec2.
+float RectNode::getTop() const  // Returns the rectangle's local top edge.
+float RectNode::getWidth() const  // Returns the rectangle's width.
+bool RectNode::hitTest(const Ray & localRay, float & outDistance) [+1]  // Tests whether a local point or ray hits the rectangle.
+bool RectNode::isClipping() const  // Returns whether rectangle clipping is enabled.
+bool RectNode::onMouseDrag(const MouseDragEventArgs & e)  // Handles a mouse drag and notifies mouseDragged listeners.
+bool RectNode::onMousePress(const MouseEventArgs & e)  // Handles a mouse press and notifies mousePressed listeners.
+bool RectNode::onMouseRelease(const MouseEventArgs & e)  // Handles a mouse release and notifies mouseReleased listeners.
+bool RectNode::onMouseScroll(const ScrollEventArgs & e)  // Handles mouse scrolling and notifies mouseScrolled listeners.
+void RectNode::onSizeChanged()  // Called when a size setter changes the rectangle's dimensions.
+void RectNode::setClipping(bool enabled)  // Enables or disables rectangle clipping.
+void RectNode::setHeight(float h)  // Sets the rectangle's height.
+void RectNode::setRect(float x, float y, float w, float h)  // Sets the node's position and rectangle size.
+void RectNode::setSize(float w, float h) [+2]  // Sets the rectangle's dimensions.
+void RectNode::setWidth(float w)  // Sets the rectangle's width.
 ```
 
-### ScrollContainer — Scrollable RectNode that clips and scrolls a single content node when it overflows the container bounds
+### RectNodeButton — Provides a rectangular button with hover and press feedback.
 
 ```cpp
-Node::Ptr ScrollContainer::getContent() const  // Get the scrollable content node (ScrollContainer method) (C++ only)
-RectNode * ScrollContainer::getContentRect() const  // Get the content node cast to RectNode (null if not a RectNode) (ScrollContainer method) (C++ only)
-float ScrollContainer::getMaxScrollX() const  // Get the maximum horizontal scroll (ScrollContainer method) (C++ only)
-float ScrollContainer::getMaxScrollY() const  // Get the maximum vertical scroll (ScrollContainer method) (C++ only)
-Vec2 ScrollContainer::getScroll() const  // Get the scroll position as a Vec2 (ScrollContainer method) (C++ only)
-float ScrollContainer::getScrollSpeed() const  // Get the scroll speed (wheel/trackpad sensitivity) (ScrollContainer method) (C++ only)
-float ScrollContainer::getScrollX() const  // Get the horizontal scroll position (ScrollContainer method) (C++ only)
-float ScrollContainer::getScrollY() const  // Get the vertical scroll position (ScrollContainer method) (C++ only)
-bool ScrollContainer::isHorizontalScrollEnabled() const  // Whether horizontal scrolling is enabled (ScrollContainer method) (C++ only)
-bool ScrollContainer::isVerticalScrollEnabled() const  // Whether vertical scrolling is enabled (ScrollContainer method) (C++ only)
-bool ScrollContainer::onMouseScroll(const ScrollEventArgs & e)  // Accumulate the scroll delta for processing in update(); consume if scrollable.
-void ScrollContainer::onSizeChanged()  // Recompute scroll bounds when the container's size changes.
-void ScrollContainer::setContent(Node::Ptr newContent)  // Set content node for ScrollContainer (C++ only)
-void ScrollContainer::setHorizontalScrollEnabled(bool enabled)  // Enable or disable horizontal scrolling (ScrollContainer method) (C++ only)
-void ScrollContainer::setScroll(float x, float y) [+1]  // Set the scroll position from x/y or a Vec2 (clamped) (ScrollContainer method) (C++ only)
-void ScrollContainer::setScrollSpeed(float speed)  // Set the scroll speed (wheel/trackpad sensitivity) (ScrollContainer method) (C++ only)
-void ScrollContainer::setScrollX(float x)  // Set the horizontal scroll position (clamped) (ScrollContainer method) (C++ only)
-void ScrollContainer::setScrollY(float y)  // Set vertical scroll position (C++ only)
-void ScrollContainer::setVerticalScrollEnabled(bool enabled)  // Enable or disable vertical scrolling (ScrollContainer method) (C++ only)
-void ScrollContainer::update()  // Apply accumulated scroll deltas to the content position.
-void ScrollContainer::updateScrollBounds()  // Recalculate scroll bounds from the content size (ScrollContainer method) (C++ only)
+void RectNodeButton::draw()  // Draws the button background and its centered label.
+bool RectNodeButton::isPressed() const  // Returns whether the button is in its pressed state.
+bool RectNodeButton::onMousePress(const MouseEventArgs & e)  // Sets the button's pressed state and runs the inherited press handling.
+bool RectNodeButton::onMouseRelease(const MouseEventArgs & e)  // Clears the button's pressed state and runs the inherited release handling.
 ```
 
-### ScrollEventArgs — Arguments for mouseScrolled events
+### Reflector — Defines the visitor interface for reflected values.
 
 ```cpp
-void ScrollEventArgs::syncLegacy()  // Copy the canonical scroll field into the deprecated scrollX/scrollY mirror fields (legacy mirrors scheduled for removal in v1.0).
+void Reflector::beginGroup(const char * name)  // Begins a group of nested reflected members.
+void Reflector::endGroup()  // Ends a group of nested reflected members.
+bool Reflector::isDerived() const  // Reports whether reflection is in a derived-value scope.
+bool Reflector::isReadOnly() const  // Reports whether the current reflection scope is read-only.
+void Reflector::popDerived()  // Leaves a derived-value reflection scope.
+void Reflector::popReadOnly()  // Leaves a read-only reflection scope.
+void Reflector::pushDerived()  // Enters a derived-value reflection scope.
+void Reflector::pushReadOnly()  // Enters a read-only reflection scope.
+bool Reflector::visit(const char * name, float & v) [+7]  // Processes one reflected member.
 ```
 
-### SendResult — Result of sendAsync(). Truthy when the payload was queued; carries the id that onSendComplete reports back.
-
-```cpp
-bool SendResult::ok() const  // true if the payload was queued (error == SendError::None)
-```
-
-### Serial — Cross-platform serial port (USB/COM): connect, read/write bytes
-
-```cpp
-int Serial::available() const [macos,windows,linux,android]  // Number of bytes buffered by TrussC to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)
-void Serial::close() [macos,windows,linux,android]  // Disconnect and release resources; fires onDisconnect (wasClean = true) when the port was open
-void Serial::drain() [macos,windows,linux,android]  // Wait until output transmission completes
-void Serial::flush() [macos,windows,linux,android]  // Clear both input and output buffers
-void Serial::flushInput() [macos,windows,linux,android]  // Clear the input buffer
-void Serial::flushOutput() [macos,windows,linux,android]  // Clear the output buffer
-std::vector<SerialDeviceInfo> Serial::getDeviceList() ⚠️deprecated [macos,windows,linux,android]  // Deprecated alias for listDevices()
-std::string Serial::getDevicePath() const [macos,windows,linux,android]  // Current device path; a copy, since another thread's setup() may change it. Never waits for setup(), close() or an I/O call
-size_t Serial::getDroppedByteCount() const [macos,windows,linux,android]  // Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count. Device input or a stalled reader can fill the deque; a fixed cap keeps memory finite. Overflow drops the oldest bytes and increments the discard count.
-bool Serial::isConnected() const [macos,windows,linux,android]  // Whether the port is open and working; turns false after close() or when a read/write call finds the device gone
-bool Serial::isInitialized() const [macos,windows,linux,android]  // Whether currently connected; same as isConnected()
-std::vector<SerialDeviceInfo> Serial::listDevices() [macos,windows,linux,android]  // List available serial devices
-void Serial::printDevices() [macos,windows,linux,android]  // Log all available serial devices
-int Serial::readByte() [macos,windows,linux,android]  // Read a single byte; 0-255 on success, -1 no data, -2 error (a lost device also closes the port and fires onDisconnect)
-int Serial::readBytes(void * buffer, int length) [+1] [macos,windows,linux,android]  // Read bytes; returns actual count (>=0) or -1 on error (a lost device also closes the port and fires onDisconnect)
-bool Serial::setup(const std::string & portName, int baudRate) [+1] [macos,windows,linux,android]  // Connect to a port by path or by index from listDevices()
-bool Serial::writeByte(unsigned char byte) [macos,windows,linux,android]  // Write a single byte; true on success
-int Serial::writeBytes(const void * buffer, int length) [+1] [macos,windows,linux,android]  // Write bytes; returns actual count or -1 on error (a lost device also closes the port and fires onDisconnect)
-```
-
-### SerialDeviceInfo — Info for one serial device (from Serial::listDevices)
-
-```cpp
-int SerialDeviceInfo::getDeviceID() const  // Device index
-const std::string & SerialDeviceInfo::getDeviceName() const  // Device name
-const std::string & SerialDeviceInfo::getDevicePath() const  // Device path
-```
-
-### SerialDisconnectEventArgs — Event args for Serial::onDisconnect
+### ResizeEventArgs — Carries the new window dimensions.
 
 ```cpp
 ```
 
-### Shader — GPU shader program (vertex + fragment) with a begin/end/setUniform API for custom-shaded drawing
+### SaveResult — Represents the result of a save or recording operation.
 
 ```cpp
-void Shader::applyUniforms()  // Apply all stored uniforms to the bound shader.
-void Shader::begin()  // Begin shader (pushes to stack)
-void Shader::clear()  // Destroy the shader's GPU resources and reset it to the unloaded state.
-sg_pipeline_desc Shader::createPipelineDesc()  // Build the pipeline descriptor (standard vertex layout); overridable by subclasses.
-void Shader::createVertexBuffer()  // Create the dynamic vertex/index buffers; overridable by subclasses.
-void Shader::end()  // End shader (pops from stack)
-void Shader::fillTextureBindings(sg_bindings & bind) const  // Copy the textures set with setTexture() into sg_bindings; a sampler is written only for slots below sokol's sampler limit (12).
-bool Shader::isLoaded() const  // Check if shader is loaded
-bool Shader::load(const sg_shader_desc *(*)(sg_backend) descFn)  // Load a sokol-shdc program and capture the subclass pipeline recipe. Target-compatible pipelines are created lazily at drawing; target-specific pipeline failures are reported then.
-void Shader::onBegin()  // Hook called when the shader scope begins; override to set up bindings.
-void Shader::onEnd()  // Hook called when the shader scope ends.
-sg_pipeline Shader::pipelineForCurrentTarget()  // Return the pipeline matching the current render target, building and caching one per (format, sampleCount).
-void Shader::setTexture(int slot, sg_image image, sg_sampler sampler) [+1]  // Bind texture to slot
-void Shader::setUniform(int slot, float value) [+9]  // Set uniform variable by slot (vector overloads send arrays; Vec3 array is padded to Vec4 per std140)
-void Shader::setupBindings(sg_bindings & bind)  // Hook to populate the sg_bindings before a draw; override for custom inputs.
-void Shader::storeUniform(int slot, const void * data, size_t size)  // Store raw uniform bytes for the given slot, to be applied at draw time.
-void Shader::submitVertices(const ShaderVertex * data, int count, PrimitiveType type)  // Submit a batch of vertices for deferred drawing with this shader (lines are unsupported).
+SaveResult SaveResult::fail(SaveError error, std::string message = std::string())  // Creates an operation result with an error category and message.
+bool SaveResult::ok() const  // Returns whether the operation succeeded.
+SaveResult SaveResult::success()  // Creates a successful operation result.
 ```
 
-### ShaderVertex — Standard vertex format for shader drawing (position, normal, texcoord, color).
+### ScreenRecorder — Records rendered window or Fbo frames to a video file.
 
 ```cpp
+int ScreenRecorder::getFrameCount() const [macos,windows,linux,android,ios]  // Returns the number of video frames accepted by the encoder.
+fs::path ScreenRecorder::getPath() const [macos,windows,linux,android,ios]  // Returns the recording's output path.
+uint64_t ScreenRecorder::getRejectedFrameCount() const [macos,windows,linux,android,ios]  // Returns the number of frames rejected during capture or layout validation.
+bool ScreenRecorder::isRecording() const [macos,windows,linux,android,ios]  // Returns whether the recorder is capturing frames.
+SaveResult ScreenRecorder::start(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start live capture of the originating window or an Fbo at its actual pixel size at start. The take keeps fixed encoder dimensions and stays open across source resizes: mismatched frames are skipped before copying and counted by getRejectedFrameCount(), and recording resumes when the original size returns. stop() finalizes the take. One capture/encode operation may be pending: busy opportunities are counted and skipped while wall/audio PTS gaps are preserved. Calling start finalizes the previous take first and refuses replacement while an old operation remains pending. Destroying the source Fbo stops/finalizes automatically. Returns SaveResult for path preparation and encoder opening; check stop() for finalization.
+SaveResult ScreenRecorder::stop() [macos,windows,linux,android,ios]  // Stops capturing and finalizes the recording file.
+VideoWriter & ScreenRecorder::writer() [macos,windows,linux,android,ios]  // Returns access to the recorder's underlying video writer.
 ```
 
-### Sound — Audio playback. A Sound plays only while it, or a copy of it, is alive: copies share the voice, and when the last handle is destroyed or overwritten the voice stops (looping or one-shot) and its slot is freed. Keep Sound objects alive (e.g. as members) to play overlapping one-shots.
-
-```cpp
-void Sound::clearChannelGains()  // Clear per-channel gains (back to uniform 1.0).
-void Sound::clearChannelMap()  // Clear the explicit channel map; routing falls back to setMixMode rules.
-std::shared_ptr<const std::vector<float>> Sound::getChannelGains() const  // Current per-output-channel gain multipliers snapshot, or null if none set.
-std::shared_ptr<const std::vector<std::vector<int>>> Sound::getChannelMap() const  // Current per-output-channel source routing snapshot, or null if mixMode rules apply.
-float Sound::getDuration() const  // Get total duration in seconds
-MixMode Sound::getMixMode() const  // Current channel mix policy (Auto / DownmixMono). Overridden when a non-empty channel map is set.
-float Sound::getPan() const  // Get current panning
-float Sound::getPosition() const  // Get playback position in seconds. On a stream, right after setPosition() and until the audio has moved there, this is the requested position. See Sound::setPosition() for measured stream seek latency.
-float Sound::getSpeed() const  // Get current playback speed
-float Sound::getVolume() const  // Get current volume
-bool Sound::isLoaded() const  // Check if loaded
-bool Sound::isLoop() const  // Check if loop mode is enabled
-bool Sound::isPaused() const  // Check if paused
-bool Sound::isPlaying() const  // Check if playing (false while paused). A stream halted by a decoder failure stops after its buffered audio drains, including looping streams. The error is logged once; TrussC does not retry automatically.
-bool Sound::isStreaming() const  // True if this Sound was loaded via loadStream() (vs eager load())
-LoadResult Sound::load(const fs::path & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the file name keeps its case as written). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
-void Sound::loadFromBuffer(const SoundBuffer & buf) [+1]  // Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr.
-LoadResult Sound::loadStream(const fs::path & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
-void Sound::loadTestTone(float frequency = 440.0, float duration = 1.0)  // Load a generated sine test tone (no file needed). Handy for verifying audio output.
-void Sound::pause()  // Pause playback
-bool Sound::play()  // Play from the beginning (this Sound's previous voice is stopped first). Returns false when nothing will play: not loaded, or the engine dropped the play (every voice busy, the stream's maxPolyphony reached by a copy of a streamed Sound, the stream file could not be reopened, or no output device running). Drops are logged as warnings and counted in AudioEngine::getStats().
-void Sound::resume()  // Resume playback
-void Sound::setChannelGains(const std::vector<float> & gains)  // Per-output-channel gain multiplier. Entries beyond .size() default to 1.0. No internal normalization (setVolume is the overall gain).
-void Sound::setChannelMap(const std::vector<int> & map) [+1]  // Per-output-channel routing. 1D: each entry is a src ch index (-1 = silent). 2D: each entry lists src ch indices that sum into that output.
-void Sound::setLoop(bool loop)  // Set loop mode
-void Sound::setMixMode(MixMode m)  // Channel routing preset. Auto (default) = mono broadcasts / multi 1:1. DownmixMono = average src to all out ch.
-void Sound::setPan(float pan)  // Set panning (-1.0=left, 0.0=center, 1.0=right)
-void Sound::setPosition(float seconds)  // Seek to a specific time in seconds. On streams the audio moves after the decoder seeks and the ring refills. Measured seek to first post-seek output callback on WASAPI/CoreAudio: about 1.5 audio callbacks on average, about 2 at p95 (13–16 ms mean with 10 ms callbacks). PulseAudio on main averaged 25.4 ms. These are callback-level timings, not speaker/DAC latency or silence duration; slow storage or an MP3 several hours long can take longer. See issue #550 for measurements. getPosition() reports the new position at once, the last of several calls wins, and a paused stream resumes from there. A stream whose length is unknown (getDuration() is 0) cannot seek: the call is ignored with a warning.
-void Sound::setSpeed(float speed)  // Set playback speed (1.0=normal)
-void Sound::setVolume(float vol)  // Set volume (0.0-1.0)
-void Sound::stop()  // Stop audio and release the voice (a streamed voice also closes its decoder and file). Copies that share the voice see it stopped.
-```
-
-### SoundBuffer — Eager sound source: the full file decoded into interleaved float PCM held in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Also provides waveform generators, an ADSR envelope, and mixing helpers, so it doubles as a procedural-audio scratch buffer. Best for short SFX and zero-latency play / seek / multi-instance.
-
-```cpp
-void SoundBuffer::applyADSR(float attack, float decay, float sustainLevel, float release)  // Apply an ADSR amplitude envelope to the buffer in place (attack / decay / release in seconds, sustainLevel 0-1). Cancels any pending loadAsync before editing, including invalid or no-op requests.
-void SoundBuffer::clip()  // Hard-clip all samples into the -1.0 .. 1.0 range. Cancels any pending loadAsync before editing, including invalid or no-op requests.
-void SoundBuffer::createAdtsHeader(uint8_t * header, int frameLength, int sampleRate, int channels, int profile = 2)  // Write a 7-byte ADTS header for one raw AAC frame into header (AAC-in-MOV container helper).
-void SoundBuffer::generateNoise(float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with mono white noise.
-void SoundBuffer::generatePinkNoise(float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with mono pink noise (1/f spectrum, Paul Kellet's method).
-void SoundBuffer::generateSawtoothWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with a mono sawtooth wave.
-void SoundBuffer::generateSilence(float duration, int sr = 44100)  // Fill the buffer with silence of the given duration (useful as a base for mixFrom).
-void SoundBuffer::generateSineWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with a mono sine wave of the given frequency (Hz) and duration (seconds).
-void SoundBuffer::generateSquareWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with a mono square wave.
-void SoundBuffer::generateTriangleWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with a mono triangle wave.
-int SoundBuffer::getAdtsSampleRateIndex(int sampleRate)  // ADTS sample-rate index for the given rate (AAC-in-MOV container helper).
-float SoundBuffer::getDuration() const  // Duration in seconds (numSamples / sampleRate).
-fs::path SoundBuffer::getPath() const  // Resolved path of the last successful file load, including direct loadAac(). Empty after a failed load, a memory/PCM load, or generation.
-bool SoundBuffer::isLoading() const  // Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation.
-LoadResult SoundBuffer::load(const fs::path & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure. Relative paths resolve via getDataPath(); absolute paths pass through.
-LoadResult SoundBuffer::loadAac(const fs::path & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms). Relative paths resolve via getDataPath(); absolute paths pass through. On Web, load waits for decoded PCM using OfflineAudioContext, including in setup().
-LoadResult SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
-void SoundBuffer::loadAsync(const fs::path & path)  // loadAsync(path): prepare PCM and metadata on a native worker, apply and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits. Completions are delivered during an app run (runApp / runHeadlessApp); in a bare main() without one, no completion event fires.
-LoadResult SoundBuffer::loadFlac(const fs::path & path)  // Decode a FLAC file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through.
-LoadResult SoundBuffer::loadFlacFromMemory(const void * data, size_t dataSize)  // Decode FLAC data from a memory buffer.
-LoadResult SoundBuffer::loadMp3(const fs::path & path)  // Decode an MP3 file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through.
-LoadResult SoundBuffer::loadMp3FromMemory(const void * data, size_t dataSize)  // Decode MP3 data from a memory buffer.
-LoadResult SoundBuffer::loadOgg(const fs::path & path)  // Decode an OGG Vorbis file into PCM (via stb_vorbis). Relative paths resolve via getDataPath(); absolute paths pass through.
-LoadResult SoundBuffer::loadOggFromMemory(const void * data, size_t dataSize)  // Decode OGG Vorbis data from a memory buffer.
-LoadResult SoundBuffer::loadPcmFromMemory(const void * data, size_t dataSize, int numChannels, int rate, int bitsPerSample = 16, bool bigEndian = false)  // Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths, a channel count below 1, a data size that is not a whole number of frames, or more samples than a buffer can hold.
-LoadResult SoundBuffer::loadWav(const fs::path & path)  // Decode a WAV file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through.
-LoadResult SoundBuffer::loadWavFromMemory(const void * data, size_t dataSize)  // Decode WAV data from a memory buffer.
-void SoundBuffer::mixFrom(const SoundBuffer & other, size_t offsetSamples, float volume = 1.0)  // Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed. offsetSamples is in frames (samples per channel, like numSamples). Both buffers must have the same channel count; otherwise nothing is mixed and an error is logged. Cancels any pending loadAsync before editing, including invalid or no-op requests.
-```
-
-### SoundSource — Abstract base for anything Sound::play() can consume. Two concrete subclasses: SoundBuffer (eager, full PCM in RAM) and SoundStream (decoded on demand from disk). Holds the shared channels / sampleRate fields and the kind() / getDuration() interface.
-
-```cpp
-float SoundSource::getDuration() const  // Duration in seconds. numSamples/sampleRate for buffers; the decoded file's duration for streams.
-Kind SoundSource::kind() const  // Source kind (Eager for SoundBuffer, Stream for SoundStream). Lets the mixer dispatch without a virtual call per frame.
-```
-
-### SoundStream — Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a ring-buffer refill (see Sound::setPosition() for measured latency; a file whose length is unknown cannot seek), and each polyphony slot costs one open file handle + decoder + ring buffer.
-
-```cpp
-float SoundStream::getDuration() const  // Decoded file duration in seconds. 0 when the file does not record its length (e.g. a FLAC encoded to a pipe); such a stream plays to its end but cannot seek, and an engine re-init at another sample rate restarts it from the beginning.
-int SoundStream::getMaxPolyphony() const  // Number of concurrent decoder slots reserved at loadStream().
-fs::path SoundStream::getPath() const  // Path the stream was opened from. Relative names are resolved via getDataPath(); empty after a failed load.
-LoadResult SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened, the format is unsupported, or the file has no audio frames (DecodeFailed). Relative paths resolve via getDataPath(); absolute paths pass through.
-```
-
-### StrokeMesh — Variable-width polyline stroke geometry with caps, joins and miter limit; build it from points or a Path, then update() and draw()
-
-```cpp
-StrokeMesh & StrokeMesh::addVertex(float x, float y, float z = 0) [+2]  // Append a vertex to the stroke path
-StrokeMesh & StrokeMesh::addVertexWithWidth(float x, float y, float width) [+1]  // Append a vertex with a per-vertex width
-StrokeMesh & StrokeMesh::clear()  // Remove all vertices
-void StrokeMesh::draw()  // Draw the stroke mesh
-Mesh & StrokeMesh::getMesh()  // Get a reference to the underlying generated triangle Mesh
-std::vector<Path> & StrokeMesh::getPolylines()  // Get a reference to the stroke's source polylines
-StrokeMesh & StrokeMesh::setCapType(CapType type)  // Set the line cap shape (StrokeMesh::CapType: Butt, Round, Square)
-StrokeMesh & StrokeMesh::setClosed(bool closed)  // Set whether the stroke forms a closed loop
-StrokeMesh & StrokeMesh::setColor(const Color & color)  // Set the stroke color
-StrokeMesh & StrokeMesh::setJoinType(JoinType type)  // Set the line join shape (StrokeMesh::JoinType: Miter, Round, Bevel)
-StrokeMesh & StrokeMesh::setMiterLimit(float limit)  // Set the miter limit for sharp corners
-StrokeMesh & StrokeMesh::setShape(const Path & polyline)  // Set the stroke shape from a Path
-StrokeMesh & StrokeMesh::setWidth(float width)  // Set the stroke width
-StrokeMesh & StrokeMesh::setWidths(const std::vector<float> & w)  // Set per-vertex widths from a list
-void StrokeMesh::update()  // Rebuild the internal triangle mesh (call before draw after edits)
-```
-
-### TcpClient — TCP client connection (connect, send/receive a stream)
-
-```cpp
-bool TcpClient::connect(const std::string & host, int port) [macos,windows,linux,android,ios]  // Connect to a server (blocking)
-void TcpClient::connectAsync(const std::string & host, int port) [macos,windows,linux,android,ios]  // Start a cancellable connection attempt; the same pending target is a silent no-op, a different target replaces it
-void TcpClient::disconnect() [macos,windows,linux,android,ios]  // Disconnect
-std::string TcpClient::getRemoteHost() const [macos,windows,linux,android,ios]  // Remote host name
-int TcpClient::getRemotePort() const [macos,windows,linux,android,ios]  // Remote port
-size_t TcpClient::getSendAsyncBufferSize() const [macos,windows,linux,android,ios]  // Get the send queue high-water mark in bytes. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
-size_t TcpClient::getSendAsyncPendingBytes() const [macos,windows,linux,android,ios]  // Bytes queued but not yet completed
-bool TcpClient::isConnected() const [macos,windows,linux,android,ios]  // Whether currently connected
-bool TcpClient::isConnecting() const [macos,windows,linux,android,ios]  // Whether a TCP connection attempt or TLS handshake is in progress
-bool TcpClient::isUsingThread() const [macos,windows,linux,android,ios]  // Whether threading is in use
-void TcpClient::notifyError(const std::string & msg, int code = 0) [macos,windows,linux,android,ios]  // Report an error (message + code) from a derived class.
-void TcpClient::processNetwork() [macos,windows,linux,android,ios]  // Pump pending TCP I/O; normally auto-driven by the update event, but can be called manually for synchronous polling.
-bool TcpClient::processNetworkStep(const AliveToken & alive) [macos,windows,linux,android,ios]  // processNetwork()'s work for derived classes and the receive thread. Returns false when the calling thread must stop without reading the client again: it reported the end of the connection, or a listener destroyed the client.
-bool TcpClient::send(const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Send data to the server
-SendResult TcpClient::sendAsync(const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Queue owned bytes without waiting; returns SendResult and reports once through onSendComplete
-void TcpClient::setBlocking(bool blocking) [macos,windows,linux,android,ios]  // Set blocking mode
-void TcpClient::setConnectTimeout(float seconds) [macos,windows,linux,android,ios]  // Set the TCP connect deadline in seconds; default 0 uses the OS deadline
-void TcpClient::setReceiveBufferSize(size_t size) [macos,windows,linux,android,ios]  // Set the receive buffer size. Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads.
-void TcpClient::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android,ios]  // Set the send queue high-water mark; default 16 MB, 0 unlimited. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
-void TcpClient::setSendTimeout(float seconds) [macos,windows,linux,android,ios]  // Set the idle send timeout in seconds; default 60, 0 waits forever
-void TcpClient::setTransport(std::shared_ptr<Transport> transport) [macos,windows,linux,android,ios]  // Subclass hook: set the transport this client's connections use (TlsClient installs its TLS transport here). Call it before connecting; later connections keep it.
-void TcpClient::setUseThread(bool useThread) [macos,windows,linux,android,ios]  // Whether to use threads (must be false on Wasm)
-std::shared_ptr<State> TcpClient::state() const [macos,windows,linux,android,ios]  // Subclass hook: retain the current run's State. Load once at function entry and use that shared pointer throughout the function.
-```
-
-### TcpClientConnectEventArgs — Event args for TcpServer::onClientConnect
+### ScreenshotSaveEventArgs — Carries the result of an asynchronous screenshot request.
 
 ```cpp
 ```
 
-### TcpClientDisconnectEventArgs — Event args for TcpServer::onClientDisconnect
+### ScrollBar — Displays a draggable scroll indicator for a ScrollContainer.
+
+```cpp
+void ScrollBar::draw()  // Draws the scroll bar as a stroke with round caps.
+Color ScrollBar::getBarColor() const  // Returns the scroll-bar color.
+float ScrollBar::getBarWidth() const  // Returns the scroll-bar thickness.
+float ScrollBar::getMargin() const  // Returns the margin between the bar and the container edges.
+float ScrollBar::getOffset() const  // Returns the rounded half-thickness offset.
+void ScrollBar::handleHorizontalDrag(float localX)  // Maps a horizontal drag position to the container's horizontal scroll position.
+void ScrollBar::handleVerticalDrag(float localY)  // Maps a vertical drag position to the container's vertical scroll position.
+bool ScrollBar::onMouseDrag(const MouseDragEventArgs & e)  // Converts dragging the bar into scrolling its container.
+bool ScrollBar::onMousePress(const MouseEventArgs & e)  // Starts dragging the bar and records the grab offset.
+bool ScrollBar::onMouseRelease(const MouseEventArgs & e)  // Ends dragging when the left mouse button is released.
+void ScrollBar::setBarColor(const Color & color)  // Sets the scroll-bar color.
+void ScrollBar::setBarWidth(float width)  // Sets the scroll-bar thickness.
+void ScrollBar::setMargin(float margin)  // Sets the margin between the bar and the container edges.
+void ScrollBar::updateFromContainer()  // Synchronizes the bar's size and position with its scroll container.
+void ScrollBar::updateHorizontal()  // Updates the horizontal bar's geometry and active state.
+void ScrollBar::updateVertical()  // Updates the vertical bar's geometry and active state.
+```
+
+### ScrollContainer — Provides a clipped viewport for scrollable content.
+
+```cpp
+Node::Ptr ScrollContainer::getContent() const  // Returns the scrollable content node.
+RectNode * ScrollContainer::getContentRect() const  // Returns the content node as a RectNode.
+float ScrollContainer::getMaxScrollX() const  // Returns the maximum horizontal scroll position.
+float ScrollContainer::getMaxScrollY() const  // Returns the maximum vertical scroll position.
+Vec2 ScrollContainer::getScroll() const  // Returns the scroll position as a Vec2.
+float ScrollContainer::getScrollSpeed() const  // Returns the wheel and trackpad scroll sensitivity.
+float ScrollContainer::getScrollX() const  // Returns the horizontal scroll position.
+float ScrollContainer::getScrollY() const  // Returns the vertical scroll position.
+bool ScrollContainer::isHorizontalScrollEnabled() const  // Returns whether horizontal scrolling is enabled.
+bool ScrollContainer::isVerticalScrollEnabled() const  // Returns whether vertical scrolling is enabled.
+bool ScrollContainer::onMouseScroll(const ScrollEventArgs & e)  // Accumulates scroll input for the next update.
+void ScrollContainer::onSizeChanged()  // Recalculates scroll bounds when the container size changes.
+void ScrollContainer::setContent(Node::Ptr newContent)  // Sets the scrollable content node.
+void ScrollContainer::setHorizontalScrollEnabled(bool enabled)  // Enables or disables horizontal scrolling.
+void ScrollContainer::setScroll(float x, float y) [+1]  // Sets the scroll position.
+void ScrollContainer::setScrollSpeed(float speed)  // Sets the wheel and trackpad scroll sensitivity.
+void ScrollContainer::setScrollX(float x)  // Sets the horizontal scroll position.
+void ScrollContainer::setScrollY(float y)  // Sets the vertical scroll position.
+void ScrollContainer::setVerticalScrollEnabled(bool enabled)  // Enables or disables vertical scrolling.
+void ScrollContainer::update()  // Applies accumulated scroll input to the content position.
+void ScrollContainer::updateScrollBounds()  // Recalculates the scroll limits from the content size.
+```
+
+### ScrollEventArgs — Arguments for mouse scroll events.
+
+```cpp
+void ScrollEventArgs::syncLegacy()  // Copies the scroll amounts into legacy scroll fields.
+```
+
+### SendResult — Contains the immediate result of an asynchronous send request.
+
+```cpp
+bool SendResult::ok() const  // Returns whether the result has no error.
+```
+
+### Serial — Connects to serial ports and reads or writes bytes.
+
+```cpp
+int Serial::available() const [macos,windows,linux,android]  // Returns the number of received bytes ready to read.
+void Serial::close() [macos,windows,linux,android]  // Closes the serial connection.
+void Serial::drain() [macos,windows,linux,android]  // Waits for pending output transmission to finish.
+void Serial::flush() [macos,windows,linux,android]  // Discards buffered input and output.
+void Serial::flushInput() [macos,windows,linux,android]  // Discards buffered input.
+void Serial::flushOutput() [macos,windows,linux,android]  // Discards pending output.
+std::vector<SerialDeviceInfo> Serial::getDeviceList() ⚠️deprecated [macos,windows,linux,android]  // Provides the deprecated alias for `listDevices()`.
+std::string Serial::getDevicePath() const [macos,windows,linux,android]  // Returns the stored device path.
+size_t Serial::getDroppedByteCount() const [macos,windows,linux,android]  // Returns the number of received bytes discarded because the receive buffer overflowed.
+bool Serial::isConnected() const [macos,windows,linux,android]  // Returns the current serial connection state.
+bool Serial::isInitialized() const [macos,windows,linux,android]  // Returns the same connection state as `isConnected()`.
+std::vector<SerialDeviceInfo> Serial::listDevices() [macos,windows,linux,android]  // Lists serial devices found on the system.
+void Serial::printDevices() [macos,windows,linux,android]  // Logs the serial device list.
+int Serial::readByte() [macos,windows,linux,android]  // Reads one received byte.
+int Serial::readBytes(void * buffer, int length) [+1] [macos,windows,linux,android]  // Reads received bytes into a buffer or string.
+bool Serial::setup(const std::string & portName, int baudRate) [+1] [macos,windows,linux,android]  // Opens a serial connection by device path or list index.
+bool Serial::writeByte(unsigned char byte) [macos,windows,linux,android]  // Writes one byte to the serial connection.
+int Serial::writeBytes(const void * buffer, int length) [+1] [macos,windows,linux,android]  // Writes bytes from a buffer or string to the serial connection.
+```
+
+### SerialDeviceInfo — Holds information about one enumerated serial device.
+
+```cpp
+int SerialDeviceInfo::getDeviceID() const  // Returns the device's list index.
+const std::string & SerialDeviceInfo::getDeviceName() const  // Returns the device's display name.
+const std::string & SerialDeviceInfo::getDevicePath() const  // Returns the device path.
+```
+
+### SerialDisconnectEventArgs — Describes a serial connection that ended.
 
 ```cpp
 ```
 
-### TcpConnectEventArgs — Event args for TcpClient::onConnect
+### Shader — Provides a GPU shader program integrated with TrussC drawing.
+
+```cpp
+void Shader::applyUniforms()  // Uploads all stored uniform blocks to the current GPU pipeline.
+void Shader::begin()  // Starts a scope for drawing with this shader.
+void Shader::clear()  // Releases this shader's GPU resources and resets its loaded state.
+sg_pipeline_desc Shader::createPipelineDesc()  // Builds the pipeline settings used by this shader.
+void Shader::createVertexBuffer()  // Creates the vertex and index buffers for shader drawing.
+void Shader::end()  // Ends this shader's active drawing scope.
+void Shader::fillTextureBindings(sg_bindings & bind) const  // Copies stored texture bindings into a sokol bindings structure.
+bool Shader::isLoaded() const  // Returns whether shader loading succeeded.
+bool Shader::load(const sg_shader_desc *(*)(sg_backend) descFn)  // Loads a shader from a sokol-shdc descriptor function.
+void Shader::onBegin()  // Runs when this shader's drawing scope begins.
+void Shader::onEnd()  // Runs when this shader's drawing scope ends.
+sg_pipeline Shader::pipelineForCurrentTarget()  // Returns a shader pipeline compatible with the current render target.
+void Shader::setTexture(int slot, sg_image image, sg_sampler sampler) [+1]  // Stores a texture binding for a shader slot.
+void Shader::setUniform(int slot, float value) [+9]  // Stores uniform-block data for a shader slot.
+void Shader::setupBindings(sg_bindings & bind)  // Customizes GPU resource bindings for a draw.
+void Shader::storeUniform(int slot, const void * data, size_t size)  // Copies raw uniform bytes into a stored block.
+void Shader::submitVertices(const ShaderVertex * data, int count, PrimitiveType type)  // Records vertices for deferred drawing with this shader.
+```
+
+### ShaderVertex — Defines the vertex layout used for custom shader drawing.
 
 ```cpp
 ```
 
-### TcpDisconnectEventArgs — Event args for TcpClient::onDisconnect
+### Sound — Loads audio sources and controls their playback.
+
+```cpp
+void Sound::clearChannelGains()  // Clear the per-output-channel gains.
+void Sound::clearChannelMap()  // Clear the explicit channel routing.
+std::shared_ptr<const std::vector<float>> Sound::getChannelGains() const  // Return a snapshot of the per-output-channel gains.
+std::shared_ptr<const std::vector<std::vector<int>>> Sound::getChannelMap() const  // Return a snapshot of the explicit channel routing.
+float Sound::getDuration() const  // Return the total audio duration.
+MixMode Sound::getMixMode() const  // Return the stored channel mixing mode.
+float Sound::getPan() const  // Return the stored stereo balance.
+float Sound::getPosition() const  // Return the playback position.
+float Sound::getSpeed() const  // Return the stored playback speed.
+float Sound::getVolume() const  // Return the stored volume multiplier.
+bool Sound::isLoaded() const  // Report whether a source is assigned.
+bool Sound::isLoop() const  // Return the stored loop setting.
+bool Sound::isPaused() const  // Report the current voice's pause state.
+bool Sound::isPlaying() const  // Report whether the current voice is playing.
+bool Sound::isStreaming() const  // Report whether the assigned source uses streaming.
+LoadResult Sound::load(const fs::path & path)  // Load an audio file into memory.
+void Sound::loadFromBuffer(const SoundBuffer & buf) [+1]  // Assign a prepared PCM buffer as the sound source.
+LoadResult Sound::loadStream(const fs::path & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Prepare an audio file for streaming playback.
+void Sound::loadTestTone(float frequency = 440.0, float duration = 1.0)  // Generate a sine-wave test tone as the sound source.
+void Sound::pause()  // Pause the current voice.
+bool Sound::play()  // Start playback from the beginning.
+void Sound::resume()  // Resume the paused voice.
+void Sound::setChannelGains(const std::vector<float> & gains)  // Set a gain multiplier for each output channel.
+void Sound::setChannelMap(const std::vector<int> & map) [+1]  // Set explicit routing from source channels to output channels.
+void Sound::setLoop(bool loop)  // Enable or disable looping.
+void Sound::setMixMode(MixMode m)  // Set the channel routing preset.
+void Sound::setPan(float pan)  // Set the stereo balance.
+void Sound::setPosition(float seconds)  // Seek to a playback time.
+void Sound::setSpeed(float speed)  // Sets the playback speed.
+void Sound::setVolume(float vol)  // Sets the playback volume.
+void Sound::stop()  // Stops playback and releases the voice.
+```
+
+### SoundBuffer — Stores fully decoded audio samples in memory.
+
+```cpp
+void SoundBuffer::applyADSR(float attack, float decay, float sustainLevel, float release)  // Apply an ADSR amplitude envelope to the buffer.
+void SoundBuffer::clip()  // Hard-clip all samples to the range −1 to 1.
+void SoundBuffer::createAdtsHeader(uint8_t * header, int frameLength, int sampleRate, int channels, int profile = 2)  // Write an ADTS header for one raw AAC frame.
+void SoundBuffer::generateNoise(float duration, float volume = 0.5, int sr = 44100)  // Generate mono white noise.
+void SoundBuffer::generatePinkNoise(float duration, float volume = 0.5, int sr = 44100)  // Generate mono pink noise.
+void SoundBuffer::generateSawtoothWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Generate a mono sawtooth wave.
+void SoundBuffer::generateSilence(float duration, int sr = 44100)  // Resize the buffer for a mono silent segment.
+void SoundBuffer::generateSineWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Generate a mono sine wave.
+void SoundBuffer::generateSquareWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Generate a mono square wave.
+void SoundBuffer::generateTriangleWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Generate a mono triangle wave.
+int SoundBuffer::getAdtsSampleRateIndex(int sampleRate)  // Return the ADTS index for a sample rate.
+float SoundBuffer::getDuration() const  // Return the buffer duration in seconds.
+fs::path SoundBuffer::getPath() const  // Return the resolved path of the last successful file load.
+bool SoundBuffer::isLoading() const  // Returns whether an asynchronous audio load is pending.
+LoadResult SoundBuffer::load(const fs::path & path)  // Decode an audio file into the buffer.
+LoadResult SoundBuffer::loadAac(const fs::path & path) [macos,windows,linux,ios,web]  // Decode an AAC or M4A file into the buffer.
+LoadResult SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios]  // Decode AAC data from memory.
+void SoundBuffer::loadAsync(const fs::path & path)  // Starts asynchronous loading of decoded audio data.
+LoadResult SoundBuffer::loadFlac(const fs::path & path)  // Decode a FLAC file into the buffer.
+LoadResult SoundBuffer::loadFlacFromMemory(const void * data, size_t dataSize)  // Decode FLAC data from memory.
+LoadResult SoundBuffer::loadMp3(const fs::path & path)  // Decode an MP3 file into the buffer.
+LoadResult SoundBuffer::loadMp3FromMemory(const void * data, size_t dataSize)  // Decode MP3 data from memory.
+LoadResult SoundBuffer::loadOgg(const fs::path & path)  // Decode an OGG Vorbis file into the buffer.
+LoadResult SoundBuffer::loadOggFromMemory(const void * data, size_t dataSize)  // Decode OGG Vorbis data from memory.
+LoadResult SoundBuffer::loadPcmFromMemory(const void * data, size_t dataSize, int numChannels, int rate, int bitsPerSample = 16, bool bigEndian = false)  // Copy raw interleaved PCM from memory into the buffer.
+LoadResult SoundBuffer::loadWav(const fs::path & path)  // Decode a WAV file into the buffer.
+LoadResult SoundBuffer::loadWavFromMemory(const void * data, size_t dataSize)  // Decode WAV data from memory.
+void SoundBuffer::mixFrom(const SoundBuffer & other, size_t offsetSamples, float volume = 1.0)  // Add samples from another buffer into this buffer.
+```
+
+### SoundSource — Provides the abstract base interface for playable audio sources.
+
+```cpp
+float SoundSource::getDuration() const  // Returns the sound source's duration.
+Kind SoundSource::kind() const  // Returns the sound source's kind.
+```
+
+### SoundStream — Describes a file audio source decoded on demand during playback.
+
+```cpp
+float SoundStream::getDuration() const  // Returns the stream's recorded audio duration.
+int SoundStream::getMaxPolyphony() const  // Returns the stream's concurrent playback limit.
+fs::path SoundStream::getPath() const  // Returns the stream's recorded file path.
+LoadResult SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Prepares an audio file for streaming playback.
+```
+
+### StrokeMesh — Builds triangle geometry for variable-width polyline strokes.
+
+```cpp
+StrokeMesh & StrokeMesh::addVertex(float x, float y, float z = 0) [+2]  // Appends a vertex to the stroke path.
+StrokeMesh & StrokeMesh::addVertexWithWidth(float x, float y, float width) [+1]  // Appends a vertex and a stroke width.
+StrokeMesh & StrokeMesh::clear()  // Clears the stroke geometry and per-vertex widths.
+void StrokeMesh::draw()  // Draws the generated stroke mesh.
+Mesh & StrokeMesh::getMesh()  // Returns a reference to the generated triangle mesh.
+std::vector<Path> & StrokeMesh::getPolylines()  // Returns a reference to the source paths.
+StrokeMesh & StrokeMesh::setCapType(CapType type)  // Sets the end-cap shape of the stroke.
+StrokeMesh & StrokeMesh::setClosed(bool closed)  // Sets whether rebuilding closes the source paths.
+StrokeMesh & StrokeMesh::setColor(const Color & color)  // Sets the stroke color.
+StrokeMesh & StrokeMesh::setJoinType(JoinType type)  // Sets the corner shape of the stroke.
+StrokeMesh & StrokeMesh::setMiterLimit(float limit)  // Sets the extension limit for miter joins.
+StrokeMesh & StrokeMesh::setShape(const Path & polyline)  // Replaces the stroke shape with a copy of a Path.
+StrokeMesh & StrokeMesh::setWidth(float width)  // Sets the default stroke width.
+StrokeMesh & StrokeMesh::setWidths(const std::vector<float> & w)  // Replaces the per-vertex stroke widths.
+void StrokeMesh::update()  // Rebuilds the stroke triangle mesh after changes.
+```
+
+### TcpClient — Provides a TCP client connection.
+
+```cpp
+bool TcpClient::connect(const std::string & host, int port) [macos,windows,linux,android,ios]  // Connects to a TCP server.
+void TcpClient::connectAsync(const std::string & host, int port) [macos,windows,linux,android,ios]  // Starts a cancellable TCP connection attempt.
+void TcpClient::disconnect() [macos,windows,linux,android,ios]  // Closes the connection and cancels pending network work.
+std::string TcpClient::getRemoteHost() const [macos,windows,linux,android,ios]  // Returns the stored remote host.
+int TcpClient::getRemotePort() const [macos,windows,linux,android,ios]  // Returns the stored remote port.
+size_t TcpClient::getSendAsyncBufferSize() const [macos,windows,linux,android,ios]  // Returns the send queue high-water mark.
+size_t TcpClient::getSendAsyncPendingBytes() const [macos,windows,linux,android,ios]  // Returns the byte count of unfinished queued sends.
+bool TcpClient::isConnected() const [macos,windows,linux,android,ios]  // Returns whether the client is connected.
+bool TcpClient::isConnecting() const [macos,windows,linux,android,ios]  // Returns whether a connection attempt is in progress.
+bool TcpClient::isUsingThread() const [macos,windows,linux,android,ios]  // Returns whether threading is enabled.
+void TcpClient::notifyError(const std::string & msg, int code = 0) [macos,windows,linux,android,ios]  // Reports an error from a derived class.
+void TcpClient::processNetwork() [macos,windows,linux,android,ios]  // Processes pending TCP connection, send, and receive work.
+bool TcpClient::processNetworkStep(const AliveToken & alive) [macos,windows,linux,android,ios]  // Runs a network processing step for derived classes and receive workers.
+bool TcpClient::send(const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Sends bytes and waits for the write to finish.
+SendResult TcpClient::sendAsync(const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Queues owned bytes for asynchronous sending.
+void TcpClient::setBlocking(bool blocking) [macos,windows,linux,android,ios]  // Requests a socket blocking mode.
+void TcpClient::setConnectTimeout(float seconds) [macos,windows,linux,android,ios]  // Sets the TCP connection timeout.
+void TcpClient::setReceiveBufferSize(size_t size) [macos,windows,linux,android,ios]  // Sets the receive chunk size.
+void TcpClient::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android,ios]  // Sets the send queue high-water mark.
+void TcpClient::setSendTimeout(float seconds) [macos,windows,linux,android,ios]  // Sets the allowed idle time during a send.
+void TcpClient::setTransport(std::shared_ptr<Transport> transport) [macos,windows,linux,android,ios]  // Sets the connection transport for a subclass.
+void TcpClient::setUseThread(bool useThread) [macos,windows,linux,android,ios]  // Sets whether network processing uses worker threads.
+std::shared_ptr<State> TcpClient::state() const [macos,windows,linux,android,ios]  // Returns shared ownership of the current connection state for subclasses.
+```
+
+### TcpClientConnectEventArgs — Carries information about a client accepted by TcpServer.
 
 ```cpp
 ```
 
-### TcpErrorEventArgs — Event args for TcpClient::onError
+### TcpClientDisconnectEventArgs — Carries information about a TcpServer client's disconnection.
 
 ```cpp
 ```
 
-### TcpReceiveEventArgs — Event args for TcpClient::onReceive
+### TcpConnectEventArgs — Carries the result of a TcpClient connection attempt.
 
 ```cpp
 ```
 
-### TcpSendCompleteEventArgs — A queued send finished. Fires exactly once for every id sendAsync() handed out
+### TcpDisconnectEventArgs — Carries the reason a TcpClient connection ended.
 
 ```cpp
 ```
 
-### TcpServer — TCP server (accept clients, send/broadcast)
-
-```cpp
-void TcpServer::broadcast(const void * data, size_t size) [+2] [macos,windows,linux,android]  // Broadcast data to all clients and wait for every one of them (blocking)
-int TcpServer::broadcastAsync(const void * data, size_t size) [+2] [macos,windows,linux,android]  // Queue data for every client and return at once; returns how many accepted it
-void TcpServer::disconnectAllClients() [macos,windows,linux,android]  // Disconnect all clients
-void TcpServer::disconnectClient(int clientId) [macos,windows,linux,android]  // Disconnect a specific client
-const TcpServerClient * TcpServer::getClient(int clientId) const [macos,windows,linux,android]  // Client info (nullptr if not found)
-int TcpServer::getClientCount() const [macos,windows,linux,android]  // Number of connected clients
-std::vector<int> TcpServer::getClientIds() const [macos,windows,linux,android]  // IDs of all connected clients
-int TcpServer::getPort() const [macos,windows,linux,android]  // The port the server is bound to. After start(0) this is the port the OS picked; for a fixed port it is that port
-size_t TcpServer::getSendAsyncBufferSize() const [macos,windows,linux,android]  // The current high-water mark for one client's send queue, in bytes. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
-size_t TcpServer::getSendAsyncPendingBytes(int clientId) const [macos,windows,linux,android]  // How much a client has queued and not yet completed, in bytes (0 for an unknown client)
-bool TcpServer::isRunning() const [macos,windows,linux,android]  // Whether the server is running
-bool TcpServer::send(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Send data to a specific client (blocking)
-SendResult TcpServer::sendAsync(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Queue data for a client and return at once, without waiting for it to be written
-void TcpServer::setReceiveBufferSize(size_t size) [macos,windows,linux,android]  // Set the receive buffer size. Network reads use finite chunks to bound each receive allocation. Overflow continues in subsequent reads.
-void TcpServer::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android]  // Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB. A stalled network peer can retain queued sends; a high-water mark limits further queue growth. Above the mark, sendAsync refuses with QueueFull and send waits; a single send can exceed the mark.
-void TcpServer::setSendTimeout(float seconds) [macos,windows,linux,android]  // Set how long a send may stall without progress before giving up, in seconds (0 = wait indefinitely)
-bool TcpServer::start(int port, int maxClients = 0) [macos,windows,linux,android]  // Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default). Untrusted connection floods can retain clients; an optional cap keeps client memory finite. At the cap, newly accepted sockets are closed.
-void TcpServer::stop() [macos,windows,linux,android]  // Stop the server
-```
-
-### TcpServerClient — A client connected to a TcpServer (read-only handle)
-
-```cpp
-const std::string & TcpServerClient::getHost() const  // Client IP address
-int TcpServerClient::getId() const  // Client ID assigned by the server
-int TcpServerClient::getPort() const  // Client port
-```
-
-### TcpServerErrorEventArgs — Event args for TcpServer::onError
+### TcpErrorEventArgs — Carries diagnostic information for a TcpClient error.
 
 ```cpp
 ```
 
-### TcpServerReceiveEventArgs — Event args for TcpServer::onReceive
+### TcpReceiveEventArgs — Carries a chunk of bytes received by TcpClient.
 
 ```cpp
 ```
 
-### Texture — GPU texture for rendering
-
-```cpp
-void Texture::allocate(int width, int height, int channels = 4, TextureUsage usage = Immutable, int sampleCount = 1) [+2]  // Allocate texture
-void Texture::allocateCompressed(int width, int height, sg_pixel_format format, const void * data, size_t dataSize)  // Allocate an immutable compressed texture (BC1/BC3/BC7 etc.) from the given data.
-void Texture::allocateCubemap(int sideSize, TextureFormat format, TextureUsage usage = RenderTarget, int mipLevels = 1)  // Allocate a cubemap texture without initial data. Dynamic / Stream requires one mip level; requesting more logs an error and leaves the texture unallocated. RenderTarget supports mip chains. Immutable is refused with an error (it would need initial data).
-void Texture::bind() const  // Bind texture for rendering
-void Texture::clear()  // Release texture resources
-void Texture::draw(float x, float y) const [+1]  // Draw texture
-void Texture::drawFlippedY(float x, float y, float w, float h) const  // Draw the texture vertically flipped
-void Texture::drawSubsection(float x, float y, float w, float h, float sx, float sy, float sw, float sh) const  // Draw subsection of texture
-sg_view Texture::getAttachmentView() const  // Return the sokol-gfx color attachment view used to render into this RenderTarget (advanced interop).
-sg_view Texture::getAttachmentViewForMip(int level) const  // Return the sokol-gfx color attachment view for the given mip level (advanced interop).
-int Texture::getChannels() const  // Get number of channels
-sg_view Texture::getCubemapFaceAttachmentView(int face, int mipLevel)  // Return (lazily creating) the sokol-gfx attachment view for one (face, mip) of this cubemap (advanced interop).
-int Texture::getHeight() const  // Get height
-sg_image Texture::getImage() const  // Return the underlying sokol-gfx image handle (advanced interop).
-TextureFilter Texture::getMagFilter() const  // Get magnification filter
-TextureFilter Texture::getMinFilter() const  // Get minification filter
-int Texture::getNumMipLevels() const  // Number of mip levels
-sg_pixel_format Texture::getPixelFormat() const  // Return the texture's sokol-gfx pixel format.
-int Texture::getSampleCount() const  // Get MSAA sample count
-sg_sampler Texture::getSampler() const  // Return the underlying sokol-gfx sampler handle (advanced interop).
-TextureUsage Texture::getUsage() const  // Get texture usage mode
-sg_view Texture::getView() const  // Return the underlying sokol-gfx texture view handle (advanced interop).
-sg_view Texture::getViewForMip(int level) const  // Return the sokol-gfx texture view for sampling a single mip level (advanced interop).
-int Texture::getWidth() const  // Get width
-TextureWrap Texture::getWrapU() const  // Get horizontal wrap mode
-TextureWrap Texture::getWrapV() const  // Get vertical wrap mode
-bool Texture::isAllocated() const  // Check if allocated
-bool Texture::isCompressed() const  // Whether this texture uses a compressed pixel format
-bool Texture::isCubemap() const  // Whether this texture is a cubemap
-bool Texture::isPremultipliedAlpha() const  // Whether the texture color is premultiplied by alpha
-void Texture::loadCubemapData(const void *const * faces, size_t faceSize)  // Load all six cubemap faces (+X, -X, +Y, -Y, +Z, -Z) in one update. Requires Dynamic / Stream usage and faceSize equal to sideSize squared times bytes per pixel. Immutable / RenderTarget or a size mismatch logs a warning and returns. A second upload to the same image in the same device frame is skipped with the loadData warning. Replaces uploadCubemapFace / uploadCubemapMip in v0.8.
-void Texture::loadData(const Pixels & pixels) [+2]  // Load pixel data to texture
-void Texture::setFilter(TextureFilter filter)  // Set both min and mag filters
-void Texture::setMagFilter(TextureFilter filter)  // Set magnification filter
-void Texture::setMinFilter(TextureFilter filter)  // Set minification filter
-void Texture::setPremultipliedAlpha(bool v)  // Set whether texture color is premultiplied by alpha. Alpha blending honors this flag on both windows and Fbos.
-void Texture::setWrap(TextureWrap wrap)  // Set both wrap modes
-void Texture::setWrapU(TextureWrap wrap)  // Set horizontal wrap mode
-void Texture::setWrapV(TextureWrap wrap)  // Set vertical wrap mode
-void Texture::unbind() const  // Unbind texture
-void Texture::updateCompressed(const void * data, size_t dataSize)  // Upload compressed pixel data to an already-allocated texture
-```
-
-### Thread — Base class for background threads (ofThread compatible). Subclass it, override the protected pure-virtual threadedFunction() with a while (isThreadRunning()) { ... } loop, then control it with startThread()/stopThread()/waitForThread(). A protected mutex dataMutex_ is available for sharing data. A subclass must call waitForThread() in its own destructor: the base destructor also stops and joins, but only after the subclass members are destroyed, and logs a warning if threadedFunction() is still running. A subclass that does not wait may be destroyed before its worker has called threadedFunction() (e.g. right after startThread()), and then it depends on when the worker makes that call: while the subclass destructor runs, the real threadedFunction() runs and may use members that are already destroyed (undefined behaviour, usually without an abort); at about the moment ~Thread() starts, it can still end in "pure virtual method called"; after that, threadedFunction() is skipped and the base destructor warns and joins. Only waiting in the subclass destructor (waitForThread()) rules out all three. Hold subclasses via unique_ptr / shared_ptr (moving a Thread is deprecated: it does not move the running thread). When called on the worker itself, waitForThread() returns without joining (requesting stop by default); self-destruction detaches, and the worker must not access members afterward.
-
-```cpp
-std::thread::id Thread::getMainThreadId() [macos,windows,linux,android,ios]  // Get the main thread ID, recording the current thread's ID on the first call.
-std::thread::id Thread::getThreadId() const [macos,windows,linux,android,ios]  // Get the underlying thread's ID.
-bool Thread::isCurrentThreadTheMainThread() [macos,windows,linux,android,ios]  // Whether the current thread is the main thread. The main thread ID must be recorded first (call getMainThreadId() from the main thread).
-bool Thread::isThreadRunning() const [macos,windows,linux,android,ios]  // Whether the thread is currently running.
-void Thread::sleep(unsigned long milliseconds) [macos,windows,linux,android,ios]  // Pause the current thread for the given number of milliseconds.
-void Thread::startThread() [macos,windows,linux,android,ios]  // Start the background thread (runs threadedFunction). No-op if already running.
-void Thread::stopThread() [macos,windows,linux,android,ios]  // Send the stop signal: isThreadRunning() returns false inside threadedFunction so a while-loop can exit. Does not block.
-void Thread::threadedFunction() [macos,windows,linux,android,ios]  // Override this with the work to run on the thread; recommended pattern is while (isThreadRunning()) { ... }. (protected, pure virtual)
-void Thread::waitForThread(bool callStopThread = true) [macos,windows,linux,android,ios]  // Wait (join) for the thread to finish. If callStopThread is true (default), calls stopThread() first. A subclass must call it in its own destructor. On the worker itself, returns without joining and leaves the handle available for a later join from another thread. Self-destruction detaches in the base destructor; after destroying itself, the worker must not access members.
-void Thread::yield() [macos,windows,linux,android,ios]  // Yield execution to other threads.
-```
-
-### ThreadChannel<T> — Thread-safe FIFO queue for one-way inter-thread communication (ofThreadChannel compatible), template<typename T>. Producer-Consumer pattern: a worker thread send()s values and another thread receive()s them. Use two channels for bidirectional communication.
-
-```cpp
-void ThreadChannel::clear()  // Clear the queue, discarding all pending values.
-void ThreadChannel::close()  // Close the channel, waking all waiting threads. After closing, send/receive return false.
-bool ThreadChannel::empty() const  // Whether the queue is empty. Takes the lock, so it is safe while other threads send; they may send or receive right after it returns.
-bool ThreadChannel::isClosed() const  // Whether the channel has been closed.
-bool ThreadChannel::receive(T & value)  // Receive a value (blocking): waits until data arrives, writing it into value. Returns false if the channel is closed.
-std::vector<T> ThreadChannel::receiveAll()  // Receive everything queued right now without blocking and return it as a std::vector<T> in FIFO order, e.g. for (auto& msg : channel.receiveAll()) handle(msg);. Under the lock it only swaps the queue with an empty one; the values are moved into the vector after the lock is released, so other threads wait only for the swap. Values sent afterwards stay queued for the next receive. Returns an empty vector if the channel is empty or closed.
-bool ThreadChannel::send(const T & value) [+1]  // Send a value onto the queue (copy or move overload). Returns false if the channel is closed (with the move overload the value is invalidated even on failure).
-size_t ThreadChannel::size() const  // Number of queued values. Takes the lock, so it is safe while other threads send; they may send or receive right after it returns.
-bool ThreadChannel::tryReceive(T & value) [+1]  // Receive a value without blocking, or waiting at most timeoutMs milliseconds (timeout overload). Returns false immediately/after the timeout if no data.
-```
-
-### TouchEventArgs — Arguments for touchPressed / touchMoved / touchReleased events (multi-touch, Android/iOS)
-
-```cpp
-int TouchEventArgs::id() const  // Convenience: ID of the first touch point
-float TouchEventArgs::x() const  // Convenience: X position of the first touch point
-float TouchEventArgs::y() const  // Convenience: Y position of the first touch point
-```
-
-### TouchPoint — A single finger within a TouchEventArgs
+### TcpSendCompleteEventArgs — Reports the final outcome of a queued TCP send.
 
 ```cpp
 ```
 
-### Tween<T> — Animates a value of type T with easing. Templated over any lerp-able type (float, Vec2, Vec3, Vec4, Color, etc.). Auto-updates each frame via events().update once start() is called; chainable setters configure it
+### TcpServer — Accepts TCP clients and sends data to them.
 
 ```cpp
-Tween<T> & Tween::delay(float seconds)  // Delay before the animation starts, in seconds (chainable)
-Tween<T> & Tween::duration(float seconds)  // Set the animation duration in seconds (chainable)
-Tween<T> & Tween::ease(EaseType type, EaseMode mode = InOut) [+2]  // Set the easing curve: a built-in EaseType, an asymmetric in/out pair, or a custom EaseFunction
-Tween<T> & Tween::finish()  // Jump immediately to the end value and fire the complete event
-Tween<T> & Tween::from(T value)  // Set the start value (chainable)
-float Tween::getDuration() const  // Return the configured duration in seconds
-float Tween::getElapsed() const  // Return elapsed time in seconds within the current iteration
-T Tween::getEnd() const  // Return the end value
-int Tween::getLoopCount() const  // Return how many loop iterations have completed so far
-float Tween::getProgress() const  // Return normalized progress through the current iteration (0.0-1.0)
-T Tween::getStart() const  // Return the start value
-T Tween::getValue() const  // Return the current eased value
-bool Tween::isComplete() const  // Return true once the animation (all loops) has finished
-bool Tween::isPlaying() const  // Return true while the animation is actively playing
-Tween<T> & Tween::loop(int count)  // Repeat the animation: -1 = infinite, 0 = no loop, N = repeat N times (chainable)
-Tween<T> & Tween::pause()  // Pause the animation, keeping its current progress
-Tween<T> & Tween::reset()  // Stop the animation and reset progress to the start
-Tween<T> & Tween::resume()  // Resume a paused animation
-Tween<T> & Tween::start()  // Start (or restart) the animation and begin auto-updating each frame
-Tween<T> & Tween::to(T value)  // Set the end value (chainable)
-Tween<T> & Tween::yoyo(bool enable = true)  // Reverse direction on each loop iteration (chainable)
+void TcpServer::broadcast(const void * data, size_t size) [+2] [macos,windows,linux,android]  // Sends data to all connected clients.
+int TcpServer::broadcastAsync(const void * data, size_t size) [+2] [macos,windows,linux,android]  // Queues data for all connected clients.
+void TcpServer::disconnectAllClients() [macos,windows,linux,android]  // Disconnects all connected clients.
+void TcpServer::disconnectClient(int clientId) [macos,windows,linux,android]  // Disconnects the specified client.
+const TcpServerClient * TcpServer::getClient(int clientId) const [macos,windows,linux,android]  // Returns information about the specified client.
+int TcpServer::getClientCount() const [macos,windows,linux,android]  // Returns the number of connected clients.
+std::vector<int> TcpServer::getClientIds() const [macos,windows,linux,android]  // Returns the IDs of connected clients.
+int TcpServer::getPort() const [macos,windows,linux,android]  // Returns the server's stored listening port.
+size_t TcpServer::getSendAsyncBufferSize() const [macos,windows,linux,android]  // Returns the send queue threshold.
+size_t TcpServer::getSendAsyncPendingBytes(int clientId) const [macos,windows,linux,android]  // Returns a client's unfinished send byte count.
+bool TcpServer::isRunning() const [macos,windows,linux,android]  // Returns whether the server is running.
+bool TcpServer::send(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Sends data to a specified client.
+SendResult TcpServer::sendAsync(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Queues data for a specified client.
+void TcpServer::setReceiveBufferSize(size_t size) [macos,windows,linux,android]  // Sets the client receive buffer size.
+void TcpServer::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android]  // Sets the per-client send high-water mark.
+void TcpServer::setSendItemLimit(size_t bytes) [macos,windows,linux,android]  // Sets the maximum owned send payload capacity.
+void TcpServer::setSendTimeout(float seconds) [macos,windows,linux,android]  // Sets the send inactivity timeout.
+void TcpServer::setTotalSendBufferSize(size_t bytes) [macos,windows,linux,android]  // Sets aggregate TCP server send credits.
+bool TcpServer::start(int port, int maxClients = 64) [macos,windows,linux,android]  // Starts listening for TCP connections.
+void TcpServer::stop() [macos,windows,linux,android]  // Stops the TCP server.
 ```
 
-### TweenMod — Animation modifier (Mod) that tweens a Node's position, scale and rotation with easing; exposes a complete Event
+### TcpServerClient — Provides read-only information about a client connected to TcpServer.
 
 ```cpp
-TweenMod & TweenMod::delay(float seconds)  // Set delay before animation starts (TweenMod method) (C++ only)
-TweenMod & TweenMod::duration(float seconds)  // Set animation duration (TweenMod method) (C++ only)
-void TweenMod::earlyUpdate()  // Mod lifecycle: advance the tween each frame in the early-update phase.
-TweenMod & TweenMod::ease(EaseType type, EaseMode mode = InOut) [+1]  // Set easing (TweenMod method): a built-in EaseType + EaseMode, or a custom EaseFunction (C++ only)
-float TweenMod::getDelay() const  // Get the start delay in seconds (TweenMod method) (C++ only)
-float TweenMod::getDuration() const  // Get the animation duration in seconds (TweenMod method) (C++ only)
-EaseMode TweenMod::getEaseMode() const  // Get the current easing mode (In/Out/InOut) (TweenMod method) (C++ only)
-EaseType TweenMod::getEaseType() const  // Get the current easing type (TweenMod method) (C++ only)
-float TweenMod::getProgress() const  // Current progress in 0..1 (TweenMod method) (C++ only)
-bool TweenMod::isComplete() const  // Whether the tween has finished (TweenMod method) (C++ only)
-bool TweenMod::isPlaying() const  // Whether the tween is currently playing (TweenMod method) (C++ only)
-TweenMod & TweenMod::moveBy(float dx, float dy, float dz = 0.0) [+2]  // Animate position by relative amount (TweenMod method) (C++ only)
-TweenMod & TweenMod::moveFrom(float x, float y, float z = 0.0) [+1]  // Set an explicit start position for the position tween (TweenMod method) (C++ only)
-TweenMod & TweenMod::moveTo(float x, float y, float z = 0.0) [+2]  // Animate position to target (TweenMod method) (C++ only)
-TweenMod & TweenMod::pause()  // Pause playback, keeping the current progress (TweenMod method) (C++ only)
-TweenMod & TweenMod::reset()  // Reset progress to the start and stop playback (TweenMod method) (C++ only)
-TweenMod & TweenMod::resume()  // Resume a paused tween (TweenMod method) (C++ only)
-TweenMod & TweenMod::rotateBy(float radians)  // Animate rotation by relative angle (TweenMod method) (C++ only)
-TweenMod & TweenMod::rotateFrom(float radians) [+1]  // Set an explicit start rotation (angle or quaternion) for the rotation tween (TweenMod method) (C++ only)
-TweenMod & TweenMod::rotateTo(float radians) [+1]  // Animate rotation to target angle or quaternion (TweenMod method) (C++ only)
-TweenMod & TweenMod::rotateXBy(float radians)  // Animate X-axis rotation by a relative angle (TweenMod method) (C++ only)
-TweenMod & TweenMod::rotateXFrom(float radians)  // Set an explicit start angle for the X-axis rotation tween (TweenMod method) (C++ only)
-TweenMod & TweenMod::rotateXTo(float radians)  // Animate X-axis rotation to an absolute angle (TweenMod method) (C++ only)
-TweenMod & TweenMod::rotateYBy(float radians)  // Animate Y-axis rotation by a relative angle (TweenMod method) (C++ only)
-TweenMod & TweenMod::rotateYFrom(float radians)  // Set an explicit start angle for the Y-axis rotation tween (TweenMod method) (C++ only)
-TweenMod & TweenMod::rotateYTo(float radians)  // Animate Y-axis rotation to an absolute angle (TweenMod method) (C++ only)
-TweenMod & TweenMod::rotateZBy(float radians)  // Animate Z-axis rotation by a relative angle (same as rotateBy for 2D) (TweenMod method) (C++ only)
-TweenMod & TweenMod::rotateZTo(float radians)  // Animate Z-axis rotation to an absolute angle (same as rotateTo for 2D) (TweenMod method) (C++ only)
-TweenMod & TweenMod::scaleBy(float factor) [+1]  // Animate scale by relative multiplier (TweenMod method) (C++ only)
-TweenMod & TweenMod::scaleFrom(float uniform) [+1]  // Set an explicit start scale for the scale tween (TweenMod method) (C++ only)
-TweenMod & TweenMod::scaleTo(float uniform) [+2]  // Animate scale to target (TweenMod method) (C++ only)
-TweenMod & TweenMod::start()  // Start (or restart) the tween from its configured values (TweenMod method) (C++ only)
+const std::string & TcpServerClient::getHost() const  // Returns the client's IP address.
+int TcpServerClient::getId() const  // Returns the client ID assigned by the server.
+int TcpServerClient::getPort() const  // Returns the client's source port.
 ```
 
-### UdpErrorEventArgs — Event args for UdpSocket::onError
+### TcpServerErrorEventArgs — Carries diagnostic information for a TcpServer error.
 
 ```cpp
 ```
 
-### UdpReceiveEventArgs — Event args for UdpSocket::onReceive
+### TcpServerReceiveEventArgs — Carries bytes received from a TcpServer client.
 
 ```cpp
 ```
 
-### UdpSocket — UDP socket (send/receive datagrams, broadcast, multicast)
+### Texture — Manages a GPU texture and its sampling settings.
 
 ```cpp
-bool UdpSocket::bind(int port, bool startReceiving = true) [macos,windows,linux,android,ios]  // Bind a port for receiving (startReceiving auto-starts the receive thread)
-void UdpSocket::close() [macos,windows,linux,android,ios]  // Close the socket
-bool UdpSocket::connect(const std::string & host, int port) [macos,windows,linux,android,ios]  // Set the destination for send()
-bool UdpSocket::create() [macos,windows,linux,android,ios]  // Create the socket explicitly (usually auto-created by bind/connect)
-const std::string & UdpSocket::getConnectedHost() const [macos,windows,linux,android,ios]  // Destination host from connect()
-int UdpSocket::getConnectedPort() const [macos,windows,linux,android,ios]  // Destination port from connect()
-int UdpSocket::getLocalPort() const [macos,windows,linux,android,ios]  // The bound local port
-bool UdpSocket::isReceiving() const [macos,windows,linux,android,ios]  // Whether the receive thread is active
-bool UdpSocket::isValid() const [macos,windows,linux,android,ios]  // Whether the socket is valid
-bool UdpSocket::joinMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Join a multicast group for receiving (call after bind; "" = default route) 
-bool UdpSocket::leaveMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Leave a previously joined multicast group
-void UdpSocket::processNetwork() [macos,windows,linux,android,ios]  // Pump pending UDP I/O; normally auto-driven by the update event, but can be called manually for synchronous polling.
-int UdpSocket::receive(void * buffer, size_t bufferSize) [+1] [macos,windows,linux,android,ios]  // Blocking receive (for non-event use); returns byte count or -1
-bool UdpSocket::send(const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Send to the destination set by connect()
-bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Send data to a specific host and port
-bool UdpSocket::setBroadcast(bool enable) [macos,windows,linux,android,ios]  // Allow broadcast sending
-bool UdpSocket::setMulticastInterface(const std::string & interfaceAddr) [macos,windows,linux,android,ios]  // Pick the NIC for outgoing multicast ("" = default route) 
-bool UdpSocket::setMulticastLoopback(bool enable) [macos,windows,linux,android,ios]  // Whether outgoing multicast loops back to local listeners (default on)
-bool UdpSocket::setMulticastTTL(int ttl) [macos,windows,linux,android,ios]  // Hop limit for outgoing multicast (default 1 = local subnet)
-bool UdpSocket::setNonBlocking(bool nonBlocking) [macos,windows,linux,android,ios]  // Set non-blocking mode
-bool UdpSocket::setReceiveBufferSize(int size) [macos,windows,linux,android,ios]  // Set the receive buffer size. Untrusted datagram floods can fill the OS queue; the configured buffer keeps queued memory finite. On overflow, the OS drops datagrams.
-bool UdpSocket::setReceiveTimeout(int timeoutMs) [macos,windows,linux,android,ios]  // Set the receive timeout (0 = infinite)
-bool UdpSocket::setReuseAddress(bool enable) [macos,windows,linux,android,ios]  // Allow address reuse (set before bind)
-bool UdpSocket::setReusePort(bool enable) [macos,windows,linux,android,ios]  // Allow multiple sockets on the same port (multicast receivers; set before bind)
-bool UdpSocket::setSendBufferSize(int size) [macos,windows,linux,android,ios]  // Set the send buffer size
-void UdpSocket::setUseThread(bool useThread) [macos,windows,linux,android,ios]  // Whether to use a receive thread (must be false on Wasm)
-void UdpSocket::startReceiving() [macos,windows,linux,android,ios]  // Start the receive thread (auto-called after bind)
-void UdpSocket::stopReceiving() [macos,windows,linux,android,ios]  // Stop the receive thread
+void Texture::allocate(int width, int height, int channels = 4, TextureUsage usage = Immutable, int sampleCount = 1) [+2]  // Allocates GPU texture storage.
+void Texture::allocateCompressed(int width, int height, sg_pixel_format format, const void * data, size_t dataSize)  // Allocates an immutable texture from compressed data.
+void Texture::allocateCubemap(int sideSize, TextureFormat format, TextureUsage usage = RenderTarget, int mipLevels = 1)  // Allocates a cubemap texture.
+void Texture::bind() const  // Selects the texture for immediate-mode textured drawing.
+void Texture::clear()  // Releases the texture resources.
+void Texture::draw(float x, float y) const [+1]  // Draws the texture as a rectangle.
+void Texture::drawFlippedY(float x, float y, float w, float h) const  // Draws the texture with its vertical direction reversed.
+void Texture::drawSubsection(float x, float y, float w, float h, float sx, float sy, float sw, float sh) const  // Draws a rectangular region of the texture.
+sg_view Texture::getAttachmentView() const  // Returns the sokol view used to render into the texture.
+sg_view Texture::getAttachmentViewForMip(int level) const  // Returns a color attachment view for a mip level.
+int Texture::getChannels() const  // Returns the stored channel count.
+sg_view Texture::getCubemapFaceAttachmentView(int face, int mipLevel)  // Returns a color attachment view for one cubemap face and mip level.
+int Texture::getHeight() const  // Returns the stored texture height.
+sg_image Texture::getImage() const  // Returns the underlying sokol image handle.
+TextureFilter Texture::getMagFilter() const  // Returns the magnification filter setting.
+TextureFilter Texture::getMinFilter() const  // Returns the minification filter setting.
+int Texture::getNumMipLevels() const  // Returns the stored number of mip levels.
+sg_pixel_format Texture::getPixelFormat() const  // Returns the stored sokol pixel format.
+int Texture::getSampleCount() const  // Returns the stored sample count.
+sg_sampler Texture::getSampler() const  // Returns the underlying sokol sampler handle.
+TextureUsage Texture::getUsage() const  // Returns the stored texture usage mode.
+sg_view Texture::getView() const  // Returns the sokol view used to sample the texture.
+sg_view Texture::getViewForMip(int level) const  // Returns a sampling view for a mip level.
+int Texture::getWidth() const  // Returns the stored texture width.
+TextureWrap Texture::getWrapU() const  // Returns the horizontal wrap setting.
+TextureWrap Texture::getWrapV() const  // Returns the vertical wrap setting.
+bool Texture::isAllocated() const  // Returns the texture allocation flag.
+bool Texture::isCompressed() const  // Reports whether the stored pixel format is compressed.
+bool Texture::isCubemap() const  // Returns the stored cubemap flag.
+bool Texture::isPremultipliedAlpha() const  // Returns whether the texture is marked as using premultiplied alpha.
+void Texture::loadCubemapData(const void *const * faces, size_t faceSize)  // Uploads all six cubemap faces together.
+void Texture::loadData(const Pixels & pixels) [+2]  // Uploads pixel data to an allocated texture.
+void Texture::setFilter(TextureFilter filter)  // Sets both minification and magnification filters.
+void Texture::setMagFilter(TextureFilter filter)  // Sets the magnification filter.
+void Texture::setMinFilter(TextureFilter filter)  // Sets the minification filter.
+void Texture::setPremultipliedAlpha(bool v)  // Sets whether drawing treats the texture as using premultiplied alpha.
+void Texture::setWrap(TextureWrap wrap)  // Sets both horizontal and vertical wrap modes.
+void Texture::setWrapU(TextureWrap wrap)  // Sets the horizontal wrap mode.
+void Texture::setWrapV(TextureWrap wrap)  // Sets the vertical wrap mode.
+void Texture::unbind() const  // Disables immediate-mode texturing.
+void Texture::updateCompressed(const void * data, size_t dataSize)  // Recreates the texture from replacement compressed data.
 ```
 
-### Vec2 — 2D vector (x, y)
+### Thread — Provides a base class for background workers.
 
 ```cpp
-float Vec2::angle() const [+1]  // Angle in radians
-float Vec2::cross(const Vec2 & v) const  // Cross product (z component)
-float Vec2::distance(const Vec2 & v) const  // Distance to another vector
-float Vec2::distanceSquared(const Vec2 & v) const  // Squared distance (faster)
-float Vec2::dot(const Vec2 & v) const  // Dot product
-Vec2 Vec2::fromAngle(float radians, float length = 1.0)  // Create Vec2 from angle
-float Vec2::length() const  // Get vector length
-float Vec2::lengthSquared() const  // Get squared length (faster, no sqrt)
-Vec2 Vec2::lerp(const Vec2 & v, float t) const  // Linear interpolation
-Vec2 & Vec2::limit(float max)  // Limit length to max
-Vec2 & Vec2::normalize()  // Normalize in place
-Vec2 Vec2::normalized() const  // Get normalized copy
-Vec2 Vec2::perpendicular() const  // Get perpendicular vector
-Vec2 Vec2::reflected(const Vec2 & normal) const  // Get reflected vector
-Vec2 & Vec2::rotate(float radians)  // Rotate in place
-Vec2 Vec2::rotated(float radians) const  // Get rotated copy
-Vec2 & Vec2::set(float x, float y) [+1]  // Set vector components
+std::thread::id Thread::getMainThreadId() [macos,windows,linux,android,ios]  // Returns the recorded main thread ID.
+std::thread::id Thread::getThreadId() const [macos,windows,linux,android,ios]  // Returns the underlying worker thread ID.
+bool Thread::isCurrentThreadTheMainThread() [macos,windows,linux,android,ios]  // Returns whether the calling thread is the main thread.
+bool Thread::isThreadRunning() const [macos,windows,linux,android,ios]  // Returns the thread's running flag.
+void Thread::sleep(unsigned long milliseconds) [macos,windows,linux,android,ios]  // Pauses the calling thread for a duration in milliseconds.
+void Thread::startThread() [macos,windows,linux,android,ios]  // Starts a worker that runs threadedFunction().
+void Thread::stopThread() [macos,windows,linux,android,ios]  // Requests that the worker stop.
+void Thread::threadedFunction() [macos,windows,linux,android,ios]  // Defines the work performed by the background thread.
+void Thread::waitForThread(bool callStopThread = true) [macos,windows,linux,android,ios]  // Waits for the worker thread to finish.
+void Thread::yield() [macos,windows,linux,android,ios]  // Yields the calling thread's execution opportunity.
 ```
 
-### Vec3 — 3D vector (x, y, z)
+### ThreadChannel<T> — Provides a thread-safe FIFO queue for passing values between threads.
 
 ```cpp
-Vec3 Vec3::cross(const Vec3 & v) const  // Cross product
-float Vec3::distance(const Vec3 & v) const  // Distance to another vector
-float Vec3::distanceSquared(const Vec3 & v) const  // Squared distance
-float Vec3::dot(const Vec3 & v) const  // Dot product
-float Vec3::length() const  // Get vector length
-float Vec3::lengthSquared() const  // Get squared length
-Vec3 Vec3::lerp(const Vec3 & v, float t) const  // Linear interpolation
-Vec3 & Vec3::limit(float max)  // Limit length to max
-Vec3 & Vec3::normalize()  // Normalize in place
-Vec3 Vec3::normalized() const  // Get normalized copy
-Vec3 Vec3::reflected(const Vec3 & normal) const  // Get reflected vector
-Vec3 & Vec3::set(float x, float y, float z) [+1]  // Set vector components
-Vec2 Vec3::xy() const  // Get XY components as Vec2
+void ThreadChannel::clear()  // Discards all queued values.
+void ThreadChannel::close()  // Closes the channel and wakes waiting receivers.
+bool ThreadChannel::empty() const  // Returns whether the queue is empty.
+bool ThreadChannel::isClosed() const  // Returns whether the channel is closed.
+bool ThreadChannel::receive(T & value)  // Waits for and receives one queued value.
+std::vector<T> ThreadChannel::receiveAll()  // Receives all currently queued values as a vector.
+bool ThreadChannel::send(const T & value) [+1]  // Adds a value to the channel's queue.
+size_t ThreadChannel::size() const  // Returns the number of queued values.
+bool ThreadChannel::tryReceive(T & value) [+1]  // Attempts to receive one value, optionally with a timeout.
 ```
 
-### Vec4 — 4D vector (x, y, z, w). Used for homogeneous coordinates and RGBA-style data
+### TouchEventArgs — Carries multitouch event data.
 
 ```cpp
-float Vec4::dot(const Vec4 & v) const  // Dot product with another vector
-float Vec4::length() const  // Get the vector's magnitude
-float Vec4::lengthSquared() const  // Get the squared magnitude (cheaper than length())
-Vec4 Vec4::lerp(const Vec4 & v, float t) const  // Linearly interpolate toward v by t (0..1)
-Vec4 & Vec4::normalize()  // Normalize this vector in place (chainable)
-Vec4 Vec4::normalized() const  // Return a unit-length copy of this vector
-Vec4 & Vec4::set(float x, float y, float z, float w) [+1]  // Set all components (chainable)
-Vec2 Vec4::xy() const  // Get the (x, y) components as a Vec2
-Vec3 Vec4::xyz() const  // Get the (x, y, z) components as a Vec3
+int TouchEventArgs::id() const  // Returns the first touch point's identifier.
+float TouchEventArgs::x() const  // Returns the first touch point's X coordinate.
+float TouchEventArgs::y() const  // Returns the first touch point's Y coordinate.
 ```
 
-### VideoDeviceInfo — Information about an available camera device, returned by VideoGrabber::listDevices()
-
-```cpp
-int VideoDeviceInfo::getDeviceID() const  // Get the numeric device ID (-1 if unknown)
-const std::string & VideoDeviceInfo::getDeviceName() const  // Get the human-readable device name
-const std::string & VideoDeviceInfo::getUniqueId() const  // Get the stable unique identifier for the device
-```
-
-### VideoErrorEventArgs — Runtime video error event payload.
+### TouchPoint — Represents one touch point in a multitouch event.
 
 ```cpp
 ```
 
-### VideoGrabber — Webcam capture source. Call setup() once, then update() every frame; getTexture() (via HasTexture) gives the live frame. Move-only. Camera permission is requested automatically on macOS
+### Tween<T> — Animates a value between two endpoints with easing.
 
 ```cpp
-bool VideoGrabber::checkCameraPermission() [macos,windows,linux,ios,web]  // Return whether camera access has been granted (macOS 10.14+)
-void VideoGrabber::close() [macos,windows,linux,ios,web]  // Stop the camera and release its resources
-void VideoGrabber::copyToImage(Image & image) const [macos,windows,linux,ios,web]  // Copy the current frame into an Image (allocating/updating it as needed)
-int VideoGrabber::getDesiredFrameRate() const [macos,windows,linux,ios,web]  // Return the requested frame rate (-1 if unspecified)
-int VideoGrabber::getDeviceID() const [macos,windows,linux,ios,web]  // Return the selected device ID
-const std::string & VideoGrabber::getDeviceName() const [macos,windows,linux,ios,web]  // Return the name of the active capture device
-size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux]  // Return the frame queue capacity (0 = queueing disabled). Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame.
-int VideoGrabber::getHeight() const [macos,windows,linux,ios,web]  // Return the captured frame height in pixels
-unsigned char * VideoGrabber::getPixels() [+1] [macos,windows,linux,ios,web]  // Return a pointer to the current RGBA pixel buffer
-size_t VideoGrabber::getQueuedFrames(std::vector<GrabberFrame> & out) [macos,windows,linux]  // Drain all frames captured since the last call (appended to the given vector, oldest first; returns the count). Each GrabberFrame carries a monotonic timestamp stamped on the capture thread, so timestamps stay truthful even if the main loop stalls, and no frame is lost when the camera runs faster than the app loop. Requires setFrameQueueSize() > 0; getPixels()/isFrameNew() are unaffected
-Texture & VideoGrabber::getTexture() [+1] [macos,windows,linux,ios,web]  // Return the texture holding the live camera frame (HasTexture override)
-int VideoGrabber::getWidth() const [macos,windows,linux,ios,web]  // Return the captured frame width in pixels
-bool VideoGrabber::isFrameNew() const [macos,windows,linux,ios,web]  // Return true if a new frame arrived during the most recent update()
-bool VideoGrabber::isInitialized() const [macos,windows,linux,ios,web]  // Return true once the camera is set up and capturing
-bool VideoGrabber::isPendingPermission() const [macos,windows,linux,ios,web]  // Return true while waiting for camera permission to be granted
-bool VideoGrabber::isVerbose() const [macos,windows,linux,ios,web]  // Return whether verbose logging is enabled
-std::vector<VideoDeviceInfo> VideoGrabber::listDevices() [macos,windows,linux,ios,web]  // Return the list of available camera devices
-void VideoGrabber::requestCameraPermission() [macos,windows,linux,ios,web]  // Request camera access asynchronously (macOS)
-void VideoGrabber::setDesiredFrameRate(int fps) [macos,windows,linux,ios,web]  // Request a capture frame rate; call before setup()
-void VideoGrabber::setDeviceID(int deviceId) [macos,windows,linux,ios,web]  // Select which camera to use; call before setup()
-void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux]  // Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup(). Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame.
-bool VideoGrabber::setup(int width = 640, int height = 480) [macos,windows,linux,ios,web]  // Start the camera at the requested size. Returns false if permission is not yet granted (it is requested asynchronously); keep calling update() and capture begins once granted
-void VideoGrabber::setVerbose(bool verbose) [macos,windows,linux,ios,web]  // Enable or disable verbose logging
-void VideoGrabber::update() [macos,windows,linux,ios,web]  // Poll for a new frame and upload it to the texture. Call every frame; also completes a setup() that was waiting on permission
+Tween<T> & Tween::delay(float seconds)  // Sets the delay before playback.
+Tween<T> & Tween::duration(float seconds)  // Sets the duration of each iteration.
+Tween<T> & Tween::ease(EaseType type, EaseMode mode = InOut) [+2]  // Sets the tween's easing curve.
+Tween<T> & Tween::finish()  // Completes the tween immediately.
+Tween<T> & Tween::from(T value)  // Sets the start value.
+float Tween::getDuration() const  // Returns the configured duration.
+float Tween::getElapsed() const  // Returns elapsed animation time within the current iteration.
+T Tween::getEnd() const  // Returns the configured end value.
+int Tween::getLoopCount() const  // Returns the number of transitions into repeat iterations.
+float Tween::getProgress() const  // Returns normalized time progress through the current iteration.
+T Tween::getStart() const  // Returns the configured start value.
+T Tween::getValue() const  // Returns the current eased value.
+bool Tween::isComplete() const  // Returns whether the tween is complete.
+bool Tween::isPlaying() const  // Returns whether playback is enabled.
+Tween<T> & Tween::loop(int count)  // Sets how many times playback repeats.
+Tween<T> & Tween::pause()  // Pauses playback.
+Tween<T> & Tween::reset()  // Stops playback and resets progress.
+Tween<T> & Tween::resume()  // Resumes playback.
+Tween<T> & Tween::start()  // Starts or restarts automatic playback.
+Tween<T> & Tween::to(T value)  // Sets the end value.
+Tween<T> & Tween::yoyo(bool enable = true)  // Controls direction reversal between repeats.
 ```
 
-### VideoPlayer — Plays a video file: load/play/stop, per-frame update, and a texture you can draw each frame
+### TweenMod — A modifier that animates a node's position, scale, and rotation.
 
 ```cpp
-void VideoPlayer::close() [macos,windows,linux,ios,web]  // Close the video and release resources
-void VideoPlayer::draw(float x, float y) const [+1] [macos,windows,linux,ios,web]  // Draw the current video frame at (x, y), optionally scaled to w x h
-bool VideoPlayer::extractFrame(const fs::path & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3] [macos,windows,linux,ios,web]  // Extract the exact frame at a given time from a video file. Frame-accurate on every platform
-bool VideoPlayer::extractKeyFrame(const fs::path & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3] [macos,windows,linux,ios,web]  // Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate
-int VideoPlayer::getAudioChannels() const [macos,windows,linux,ios]  // Number of audio channels (0 if no audio)
-uint32_t VideoPlayer::getAudioCodec() const [macos,windows,linux,ios]  // FourCC of the audio codec in the loaded video (0 if none)
-std::vector<uint8_t> VideoPlayer::getAudioData() const [macos,windows,linux,ios]  // Raw decoded audio data for the loaded video
-int VideoPlayer::getAudioSampleRate() const [macos,windows,linux,ios]  // Audio sample rate in Hz (0 if no audio)
-bool VideoPlayer::getAutoPoster() const [macos,windows,linux,ios,web]  // Return whether the auto poster is enabled (default true)
-int VideoPlayer::getCurrentFrameImpl() const [macos,windows,linux,ios,web]  // Protected implementation hook: return the current frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
-float VideoPlayer::getDuration() const [macos,windows,linux,ios,web]  // Get total duration in seconds
-float VideoPlayer::getFrameRate() const [macos,windows,linux,ios,web]  // Get the file frame rate in fps, or 0 when unknown or unloaded. Web returns 0.
-float VideoPlayer::getGammaCorrection() const [macos,windows,linux,ios,web]  // Get current gamma correction value
-std::string VideoPlayer::getHwAccelName() const [macos,windows,linux,ios,web]  // Get the name of the active decode backend. Returns 'vaapi', 'v4l2m2m', 'cuda', 'videotoolbox', 'mediafoundation', 'software', or 'none'
-fs::path VideoPlayer::getPath() const [macos,windows,linux,ios,web]  // Path of the currently loaded video file (resolved via getDataPath); empty string when nothing is loaded
-unsigned char * VideoPlayer::getPixels() [+1] [macos,windows,linux,ios,web]  // Pointer to the current RGBA pixel buffer (mutable)
-unsigned char * VideoPlayer::getPixelsUV() [macos,windows,linux,ios,web]  // Pointer to the interleaved UV (chroma) plane when decoding NV12; null otherwise
-unsigned char * VideoPlayer::getPixelsY() [macos,windows,linux,ios,web]  // Pointer to the Y (luma) plane when decoding NV12/YUV; null otherwise
-float VideoPlayer::getPosition() const [macos,windows,linux,ios,web]  // Get current position (0.0 to 1.0)
-int VideoPlayer::getTotalFramesImpl() const [macos,windows,linux,ios,web]  // Protected implementation hook: return the total frame count. Called after VideoPlayerBase's public frame API accepts the frame rate.
-bool VideoPlayer::getUseHwAccel() const [macos,windows,linux,ios,web]  // Get HW accel preference (not the actual backend — use isUsingHwAccel() for that)
-bool VideoPlayer::hasAudio() const [macos,windows,linux,ios,web]  // Check if the loaded video has an audio track
-bool VideoPlayer::isAudioStreaming() const [macos,windows,linux,ios,web]  // Return the audio streaming preference (default true); on Linux it applies to the next load(). Native OS players ignore the preference.
-bool VideoPlayer::isUsingHwAccel() const [macos,windows,linux,ios,web]  // Check if hardware decoding is currently active (after load)
-LoadResult VideoPlayer::load(const fs::path & path) [macos,windows,linux,ios,web]  // Load a video file On Web, load waits for a decoded first frame instead of returning placeholder dimensions.
-void VideoPlayer::nextFrameImpl() [macos,windows,linux,ios,web]  // Protected implementation hook: advance to the next frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
-void VideoPlayer::play() [macos,windows,linux,ios,web]  // Start or resume playback. With the auto poster (default), a seek made while stopped/paused is bridged with the exact frame at the new position before playback, so it never starts on a stale picture
-void VideoPlayer::playImpl() [macos,windows,linux,ios,web]  // Backend implementation of playImpl for this platform's video player.
-void VideoPlayer::previousFrameImpl() [macos,windows,linux,ios,web]  // Protected implementation hook: step back to the previous frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
-void VideoPlayer::setAudioStreaming(bool streaming) [macos,windows,linux,ios,web]  // Choose Linux audio streaming (default true). Call before load(); false preloads the whole track for sample-accurate loops and seeks. Changes apply to the next load.
-void VideoPlayer::setAutoPoster(bool on) [macos,windows,linux,ios,web]  // Auto poster (default ON): on load/stop/play the player synchronously puts the frame at the current position on the texture, so drawing never shows black or a stale picture. Turn off to skip the one-time synchronous decode
-void VideoPlayer::setFrameImpl(int frame) [macos,windows,linux,ios,web]  // Protected implementation hook: seek to the given frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
-void VideoPlayer::setGammaCorrection(float gamma) [macos,windows,linux,ios,web]  // Set gamma correction (1.0 = none). Use ~0.45 to brighten on platforms with dark output (e.g. macOS AVFoundation)
-void VideoPlayer::setLoopImpl(bool loop) [macos,windows,linux,ios,web]  // Backend implementation of setLoopImpl for this platform's video player.
-void VideoPlayer::setPanImpl(float pan) [macos,windows,linux,ios,web]  // Backend implementation of setPanImpl for this platform's video player.
-void VideoPlayer::setPausedImpl(bool paused) [macos,windows,linux,ios,web]  // Backend implementation of setPausedImpl for this platform's video player.
-void VideoPlayer::setPositionImpl(float pct) [macos,windows,linux,ios,web]  // Backend implementation of setPositionImpl for this platform's video player.
-void VideoPlayer::setSpeedImpl(float speed) [macos,windows,linux,ios,web]  // Backend implementation of setSpeedImpl for this platform's video player.
-void VideoPlayer::setUseHwAccel(bool enable) [macos,windows,linux,ios,web]  // Enable/disable hardware decoding. Must be called before load(). Default: true. When enabled, the player probes available HW backends (VAAPI, V4L2M2M, CUDA, etc.) and falls back to software if none are available. Currently affects the Linux backend only.
-void VideoPlayer::setVolumeImpl(float vol) [macos,windows,linux,ios,web]  // Backend implementation of setVolumeImpl for this platform's video player.
-void VideoPlayer::stopImpl() [macos,windows,linux,ios,web]  // Backend implementation of stopImpl for this platform's video player.
-void VideoPlayer::update() [macos,windows,linux,ios,web]  // Update the video frame. Call once per frame in update()
+TweenMod & TweenMod::delay(float seconds)  // Sets the delay before animation playback.
+TweenMod & TweenMod::duration(float seconds)  // Sets the animation duration.
+void TweenMod::earlyUpdate()  // Advance the tween during the node's early update phase.
+TweenMod & TweenMod::ease(EaseType type, EaseMode mode = InOut) [+1]  // Sets the easing curve for the animations.
+float TweenMod::getDelay() const  // Returns the configured start delay.
+float TweenMod::getDuration() const  // Returns the configured animation duration.
+EaseMode TweenMod::getEaseMode() const  // Returns the configured easing mode.
+EaseType TweenMod::getEaseType() const  // Returns the configured easing type.
+float TweenMod::getProgress() const  // Returns the current animation progress.
+bool TweenMod::isComplete() const  // Reports whether playback has completed.
+bool TweenMod::isPlaying() const  // Reports whether playback is enabled.
+TweenMod & TweenMod::moveBy(float dx, float dy, float dz = 0.0) [+2]  // Configures a position animation by a relative offset.
+TweenMod & TweenMod::moveFrom(float x, float y, float z = 0.0) [+1]  // Sets an explicit starting position for a position animation.
+TweenMod & TweenMod::moveTo(float x, float y, float z = 0.0) [+2]  // Configures a position animation to a target.
+TweenMod & TweenMod::pause()  // Pauses animation playback.
+TweenMod & TweenMod::reset()  // Resets playback time and stops the animation.
+TweenMod & TweenMod::resume()  // Resumes animation playback.
+TweenMod & TweenMod::rotateBy(float radians)  // Configures a Z-axis rotation animation by a relative angle.
+TweenMod & TweenMod::rotateFrom(float radians) [+1]  // Sets an explicit starting rotation for a rotation animation.
+TweenMod & TweenMod::rotateTo(float radians) [+1]  // Configures a rotation animation to an angle or quaternion.
+TweenMod & TweenMod::rotateXBy(float radians)  // Configures an X-axis rotation animation by a relative angle.
+TweenMod & TweenMod::rotateXFrom(float radians)  // Sets an explicit starting X-axis rotation angle.
+TweenMod & TweenMod::rotateXTo(float radians)  // Configures an X-axis rotation animation to an absolute angle.
+TweenMod & TweenMod::rotateYBy(float radians)  // Configures a Y-axis rotation animation by a relative angle.
+TweenMod & TweenMod::rotateYFrom(float radians)  // Sets an explicit starting Y-axis rotation angle.
+TweenMod & TweenMod::rotateYTo(float radians)  // Configures a Y-axis rotation animation to an absolute angle.
+TweenMod & TweenMod::rotateZBy(float radians)  // Configures a Z-axis rotation animation by a relative angle.
+TweenMod & TweenMod::rotateZTo(float radians)  // Configures a Z-axis rotation animation to an absolute angle.
+TweenMod & TweenMod::scaleBy(float factor) [+1]  // Configure a scale tween using relative multipliers.
+TweenMod & TweenMod::scaleFrom(float uniform) [+1]  // Set an explicit starting scale for a scale tween.
+TweenMod & TweenMod::scaleTo(float uniform) [+2]  // Configure a scale tween toward an absolute target.
+TweenMod & TweenMod::start()  // Start or restart the configured tween.
 ```
 
-### VideoPlayerBase — Abstract base class for video playback. Use VideoPlayer for the concrete implementation.
+### UdpErrorEventArgs — Carries diagnostic information for a UdpSocket error.
 
 ```cpp
-void VideoPlayerBase::applyCachedStateToPlatform()  // Subclass hook: after the backend has loaded, reapply the loop, volume and pan set before load(). Speed is applied by play().
-bool VideoPlayerBase::canUseFrameApis() const  // Protected helper: reject unloaded players or nonpositive/nonfinite frame rates; warn once per loaded player instance for an unknown rate.
-void VideoPlayerBase::clearPlaybackError()  // Subclass hook: clear pending and delivered errors on successful load and close.
-void VideoPlayerBase::close()  // Close the video and release its resources.
-bool VideoPlayerBase::dispatchPlaybackError(const char * logModule = "VideoPlayer")  // Subclass hook: call from update() on the main thread outside backend locks. Pause the backend, retain the frame, set error state and notify. Return immediately when true, since a listener may close or reload the player.
-void VideoPlayerBase::firstFrame()  // Go to the first frame
-int VideoPlayerBase::getAudioChannels() const  // Return the number of audio channels, or 0 if no audio.
-uint32_t VideoPlayerBase::getAudioCodec() const  // Return the audio codec as a FourCC ('aac ', 'mp3 ', ...), or 0 if no audio.
-std::vector<uint8_t> VideoPlayerBase::getAudioData() const  // Return the raw (undecoded) audio data, or an empty vector if no audio.
-int VideoPlayerBase::getAudioSampleRate() const  // Return the audio sample rate in Hz, or 0 if no audio.
-int VideoPlayerBase::getCurrentFrame() const  // Get current frame number; 0 when the frame rate is unknown.
-int VideoPlayerBase::getCurrentFrameImpl() const  // Protected implementation hook: return the current frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
-float VideoPlayerBase::getCurrentTime() const  // Get current playback time in seconds
+```
+
+### UdpReceiveEventArgs — Carries a received UDP datagram and its sender's address.
+
+```cpp
+```
+
+### UdpSocket — Sends and receives IPv4 UDP datagrams.
+
+```cpp
+bool UdpSocket::bind(int port, bool startReceiving = true) [macos,windows,linux,android,ios]  // Binds the socket to a local UDP port.
+void UdpSocket::close() [macos,windows,linux,android,ios]  // Closes the UDP socket.
+bool UdpSocket::connect(const std::string & host, int port) [macos,windows,linux,android,ios]  // Sets the UDP destination used by `send()`.
+bool UdpSocket::create() [macos,windows,linux,android,ios]  // Creates an IPv4 UDP socket.
+const std::string & UdpSocket::getConnectedHost() const [macos,windows,linux,android,ios]  // Returns the host stored by `connect()`.
+int UdpSocket::getConnectedPort() const [macos,windows,linux,android,ios]  // Returns the destination port stored by `connect()`.
+int UdpSocket::getLocalPort() const [macos,windows,linux,android,ios]  // Returns the local port recorded by `bind()`.
+bool UdpSocket::isReceiving() const [macos,windows,linux,android,ios]  // Returns whether event reception is active.
+bool UdpSocket::isValid() const [macos,windows,linux,android,ios]  // Returns whether the socket has a valid OS handle.
+bool UdpSocket::joinMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Joins an IPv4 multicast group for reception.
+bool UdpSocket::leaveMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Leaves an IPv4 multicast group.
+void UdpSocket::processNetwork() [macos,windows,linux,android,ios]  // Processes pending UDP datagrams.
+int UdpSocket::receive(void * buffer, size_t bufferSize) [+1] [macos,windows,linux,android,ios]  // Receives one UDP datagram into a buffer.
+bool UdpSocket::send(const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to the configured destination.
+bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to a specified host and port.
+bool UdpSocket::setBroadcast(bool enable) [macos,windows,linux,android,ios]  // Enables or disables UDP broadcast sending.
+bool UdpSocket::setMulticastInterface(const std::string & interfaceAddr) [macos,windows,linux,android,ios]  // Selects the outgoing IPv4 multicast interface.
+bool UdpSocket::setMulticastLoopback(bool enable) [macos,windows,linux,android,ios]  // Controls local loopback of outgoing multicast datagrams.
+bool UdpSocket::setMulticastTTL(int ttl) [macos,windows,linux,android,ios]  // Sets the hop limit for outgoing multicast datagrams.
+bool UdpSocket::setNonBlocking(bool nonBlocking) [macos,windows,linux,android,ios]  // Sets the socket's non-blocking mode.
+bool UdpSocket::setReceiveBufferSize(int size) [macos,windows,linux,android,ios]  // Sets the OS socket receive buffer size.
+bool UdpSocket::setReceiveTimeout(int timeoutMs) [macos,windows,linux,android,ios]  // Sets the timeout for blocking reception.
+bool UdpSocket::setReuseAddress(bool enable) [macos,windows,linux,android,ios]  // Enables or disables local address reuse.
+bool UdpSocket::setReusePort(bool enable) [macos,windows,linux,android,ios]  // Enables or disables sharing a local UDP port.
+bool UdpSocket::setSendBufferSize(int size) [macos,windows,linux,android,ios]  // Sets the OS socket send buffer size.
+void UdpSocket::setUseThread(bool useThread) [macos,windows,linux,android,ios]  // Selects the execution mode for event reception.
+void UdpSocket::startReceiving() [macos,windows,linux,android,ios]  // Starts event reception on the socket.
+void UdpSocket::stopReceiving() [macos,windows,linux,android,ios]  // Stops automatic UDP receiving.
+```
+
+### Vec2 — Represents a two-dimensional vector with floating-point components.
+
+```cpp
+float Vec2::angle() const [+1]  // Returns the vector's heading or its signed angle to another vector.
+float Vec2::cross(const Vec2 & v) const  // Returns the z component of the two-dimensional cross product.
+float Vec2::distance(const Vec2 & v) const  // Returns the distance to another vector.
+float Vec2::distanceSquared(const Vec2 & v) const  // Returns the squared distance to another vector.
+float Vec2::dot(const Vec2 & v) const  // Returns the dot product with another vector.
+Vec2 Vec2::fromAngle(float radians, float length = 1.0)  // Creates a vector from an angle and a length.
+float Vec2::length() const  // Returns the vector's length.
+float Vec2::lengthSquared() const  // Returns the vector's squared length.
+Vec2 Vec2::lerp(const Vec2 & v, float t) const  // Returns a linear interpolation toward another vector.
+Vec2 & Vec2::limit(float max)  // Limits the vector's length in place.
+Vec2 & Vec2::normalize()  // Normalizes the vector in place.
+Vec2 Vec2::normalized() const  // Returns a normalized copy of the vector.
+Vec2 Vec2::perpendicular() const  // Returns a perpendicular vector.
+Vec2 Vec2::reflected(const Vec2 & normal) const  // Returns the vector reflected off a surface with the given normal.
+Vec2 & Vec2::rotate(float radians)  // Rotates the vector in place.
+Vec2 Vec2::rotated(float radians) const  // Returns a rotated copy of the vector.
+Vec2 & Vec2::set(float x, float y) [+1]  // Sets the vector's components.
+```
+
+### Vec3 — Represents a three-dimensional vector with floating-point components.
+
+```cpp
+Vec3 Vec3::cross(const Vec3 & v) const  // Returns the cross product with another vector.
+float Vec3::distance(const Vec3 & v) const  // Returns the distance to another vector.
+float Vec3::distanceSquared(const Vec3 & v) const  // Returns the squared distance to another vector.
+float Vec3::dot(const Vec3 & v) const  // Returns the dot product with another vector.
+float Vec3::length() const  // Returns the length of the vector.
+float Vec3::lengthSquared() const  // Returns the squared length of the vector.
+Vec3 Vec3::lerp(const Vec3 & v, float t) const  // Returns a linear interpolation between two vectors.
+Vec3 & Vec3::limit(float max)  // Limits the length of the vector in place.
+Vec3 & Vec3::normalize()  // Normalizes the vector in place.
+Vec3 Vec3::normalized() const  // Returns a normalized copy of the vector.
+Vec3 Vec3::reflected(const Vec3 & normal) const  // Returns the vector reflected about a surface normal.
+Vec3 & Vec3::set(float x, float y, float z) [+1]  // Sets the components of the vector.
+Vec2 Vec3::xy() const  // Returns the X and Y components as a Vec2.
+```
+
+### Vec4 — A four-dimensional floating-point vector for homogeneous coordinates or RGBA-style data.
+
+```cpp
+float Vec4::dot(const Vec4 & v) const  // Returns the dot product with another vector.
+float Vec4::length() const  // Returns the vector's length.
+float Vec4::lengthSquared() const  // Returns the vector's squared length.
+Vec4 Vec4::lerp(const Vec4 & v, float t) const  // Returns a linear interpolation toward another vector.
+Vec4 & Vec4::normalize()  // Normalizes this vector in place.
+Vec4 Vec4::normalized() const  // Returns a normalized copy of this vector.
+Vec4 & Vec4::set(float x, float y, float z, float w) [+1]  // Sets all four components.
+Vec2 Vec4::xy() const  // Returns the X and Y components as a Vec2.
+Vec3 Vec4::xyz() const  // Returns the X, Y, and Z components as a Vec3.
+```
+
+### VideoDeviceInfo — Describes a camera returned by VideoGrabber::listDevices().
+
+```cpp
+int VideoDeviceInfo::getDeviceID() const  // Returns the camera's numeric device identifier.
+const std::string & VideoDeviceInfo::getDeviceName() const  // Returns the camera's readable device name.
+const std::string & VideoDeviceInfo::getUniqueId() const  // Returns the camera's platform-provided identifier.
+```
+
+### VideoErrorEventArgs — Carries a runtime video playback error.
+
+```cpp
+```
+
+### VideoGrabber — Captures live camera frames as pixels and a texture.
+
+```cpp
+bool VideoGrabber::checkCameraPermission() [macos,windows,linux,ios,web]  // Return whether camera permission is granted.
+void VideoGrabber::close() [macos,windows,linux,ios,web]  // Stop camera capture and release its resources.
+void VideoGrabber::copyToImage(Image & image) const [macos,windows,linux,ios,web]  // Copy the current camera frame into an Image.
+int VideoGrabber::getDesiredFrameRate() const [macos,windows,linux,ios,web]  // Return the requested capture frame rate.
+int VideoGrabber::getDeviceID() const [macos,windows,linux,ios,web]  // Return the selected camera device ID.
+const std::string & VideoGrabber::getDeviceName() const [macos,windows,linux,ios,web]  // Return the stored capture device name.
+size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux]  // Return the configured frame queue capacity.
+int VideoGrabber::getHeight() const [macos,windows,linux,ios,web]  // Return the current capture frame height.
+unsigned char * VideoGrabber::getPixels() [+1] [macos,windows,linux,ios,web]  // Return a pointer to the current camera pixel buffer.
+size_t VideoGrabber::getQueuedFrames(std::vector<GrabberFrame> & out) [macos,windows,linux]  // Move queued camera frames into a vector.
+Texture & VideoGrabber::getTexture() [+1] [macos,windows,linux,ios,web]  // Return the texture used to display the camera frame.
+int VideoGrabber::getWidth() const [macos,windows,linux,ios,web]  // Return the current capture frame width.
+bool VideoGrabber::isFrameNew() const [macos,windows,linux,ios,web]  // Return the new-frame flag from the latest update.
+bool VideoGrabber::isInitialized() const [macos,windows,linux,ios,web]  // Return whether camera setup has completed.
+bool VideoGrabber::isPendingPermission() const [macos,windows,linux,ios,web]  // Return whether setup is waiting for camera permission.
+bool VideoGrabber::isVerbose() const [macos,windows,linux,ios,web]  // Return whether verbose camera logging is enabled.
+std::vector<VideoDeviceInfo> VideoGrabber::listDevices() [macos,windows,linux,ios,web]  // Return the available camera device list.
+void VideoGrabber::requestCameraPermission() [macos,windows,linux,ios,web]  // Request camera access permission.
+void VideoGrabber::setDesiredFrameRate(int fps) [macos,windows,linux,ios,web]  // Set the requested capture frame rate.
+void VideoGrabber::setDeviceID(int deviceId) [macos,windows,linux,ios,web]  // Select the camera device for setup.
+void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux]  // Set the capacity of the timestamped camera frame queue.
+bool VideoGrabber::setup(int width = 640, int height = 480) [macos,windows,linux,ios,web]  // Initialize camera capture at a requested size.
+void VideoGrabber::setVerbose(bool verbose) [macos,windows,linux,ios,web]  // Enable or disable verbose camera logging.
+void VideoGrabber::update() [macos,windows,linux,ios,web]  // Process camera updates and upload the latest frame.
+```
+
+### VideoPlayer — Play video files with playback controls and drawable frames.
+
+```cpp
+void VideoPlayer::close() [macos,windows,linux,ios,web]  // Closes the video and releases its resources.
+void VideoPlayer::draw(float x, float y) const [+1] [macos,windows,linux,ios,web]  // Draws the current video image.
+bool VideoPlayer::extractFrame(const fs::path & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3] [macos,windows,linux,ios,web]  // Extracts a video frame at a specified time.
+bool VideoPlayer::extractKeyFrame(const fs::path & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3] [macos,windows,linux,ios,web]  // Extracts an approximate frame using a backward keyframe seek.
+int VideoPlayer::getAudioChannels() const [macos,windows,linux,ios]  // Returns the audio channel count.
+uint32_t VideoPlayer::getAudioCodec() const [macos,windows,linux,ios]  // Returns the source audio codec identifier.
+std::vector<uint8_t> VideoPlayer::getAudioData() const [macos,windows,linux,ios]  // Extracts the source audio bytes.
+int VideoPlayer::getAudioSampleRate() const [macos,windows,linux,ios]  // Returns the source audio sample rate.
+bool VideoPlayer::getAutoPoster() const [macos,windows,linux,ios,web]  // Returns whether automatic poster frames are enabled.
+int VideoPlayer::getCurrentFrameImpl() const [macos,windows,linux,ios,web]  // Returns the current frame index through the playback backend.
+float VideoPlayer::getDuration() const [macos,windows,linux,ios,web]  // Returns the total video duration.
+float VideoPlayer::getFrameRate() const [macos,windows,linux,ios,web]  // Returns the video's frame rate.
+float VideoPlayer::getGammaCorrection() const [macos,windows,linux,ios,web]  // Returns the gamma correction setting.
+std::string VideoPlayer::getHwAccelName() const [macos,windows,linux,ios,web]  // Returns the reported video decoding backend name.
+fs::path VideoPlayer::getPath() const [macos,windows,linux,ios,web]  // Returns the loaded video's source path.
+unsigned char * VideoPlayer::getPixels() [+1] [macos,windows,linux,ios,web]  // Returns a pointer to the RGBA pixel buffer.
+unsigned char * VideoPlayer::getPixelsUV() [macos,windows,linux,ios,web]  // Returns a pointer to the interleaved NV12 chroma plane.
+unsigned char * VideoPlayer::getPixelsY() [macos,windows,linux,ios,web]  // Returns a pointer to the NV12 luma plane.
+float VideoPlayer::getPosition() const [macos,windows,linux,ios,web]  // Returns the normalized playback position.
+int VideoPlayer::getTotalFramesImpl() const [macos,windows,linux,ios,web]  // Returns the total frame count through the playback backend.
+bool VideoPlayer::getUseHwAccel() const [macos,windows,linux,ios,web]  // Returns the hardware decoding preference.
+bool VideoPlayer::hasAudio() const [macos,windows,linux,ios,web]  // Reports whether an audio track was detected.
+bool VideoPlayer::isAudioStreaming() const [macos,windows,linux,ios,web]  // Returns the audio streaming preference.
+bool VideoPlayer::isUsingHwAccel() const [macos,windows,linux,ios,web]  // Returns the reported hardware decoding state.
+LoadResult VideoPlayer::load(const fs::path & path) [macos,windows,linux,ios,web]  // Loads a video source for playback.
+void VideoPlayer::nextFrameImpl() [macos,windows,linux,ios,web]  // Advances one frame through the playback backend.
+void VideoPlayer::play() [macos,windows,linux,ios,web]  // Starts or resumes video playback.
+void VideoPlayer::playImpl() [macos,windows,linux,ios,web]  // Starts or resumes playback through the playback backend.
+void VideoPlayer::previousFrameImpl() [macos,windows,linux,ios,web]  // Moves back one frame through the playback backend.
+void VideoPlayer::setAudioStreaming(bool streaming) [macos,windows,linux,ios,web]  // Sets the audio streaming preference.
+void VideoPlayer::setAutoPoster(bool on) [macos,windows,linux,ios,web]  // Controls automatic still frames that bridge playback transitions.
+void VideoPlayer::setFrameImpl(int frame) [macos,windows,linux,ios,web]  // Seeks to a frame through the playback backend.
+void VideoPlayer::setGammaCorrection(float gamma) [macos,windows,linux,ios,web]  // Sets the gamma correction exponent.
+void VideoPlayer::setLoopImpl(bool loop) [macos,windows,linux,ios,web]  // Applies the loop setting to the playback backend.
+void VideoPlayer::setPanImpl(float pan) [macos,windows,linux,ios,web]  // Handles an unsupported audio pan request.
+void VideoPlayer::setPausedImpl(bool paused) [macos,windows,linux,ios,web]  // Changes the backend pause state.
+void VideoPlayer::setPositionImpl(float pct) [macos,windows,linux,ios,web]  // Seeks the backend and remembers the requested poster position.
+void VideoPlayer::setSpeedImpl(float speed) [macos,windows,linux,ios,web]  // Applies the playback speed to the backend.
+void VideoPlayer::setUseHwAccel(bool enable) [macos,windows,linux,ios,web]  // Sets the hardware decoding preference.
+void VideoPlayer::setVolumeImpl(float vol) [macos,windows,linux,ios,web]  // Applies the audio volume to the playback backend.
+void VideoPlayer::stopImpl() [macos,windows,linux,ios,web]  // Stops backend playback and prepares the beginning poster.
+void VideoPlayer::update() [macos,windows,linux,ios,web]  // Updates the current video frame and playback state.
+```
+
+### VideoPlayerBase — Provides the abstract interface and shared state for video playback.
+
+```cpp
+void VideoPlayerBase::applyCachedStateToPlatform()  // Apply cached playback settings to the backend.
+bool VideoPlayerBase::canUseFrameApis() const  // Check whether frame-based operations are available.
+void VideoPlayerBase::clearPlaybackError()  // Clear pending and delivered playback errors.
+void VideoPlayerBase::close()  // Closes the video and releases its resources.
+bool VideoPlayerBase::dispatchPlaybackError(const char * logModule = "VideoPlayer")  // Deliver a queued playback error.
+void VideoPlayerBase::firstFrame()  // Seeks to the first video frame.
+int VideoPlayerBase::getAudioChannels() const  // Return the audio channel count.
+uint32_t VideoPlayerBase::getAudioCodec() const  // Return the audio codec identifier.
+std::vector<uint8_t> VideoPlayerBase::getAudioData() const  // Return audio bytes in their original format.
+int VideoPlayerBase::getAudioSampleRate() const  // Return the audio sample rate.
+int VideoPlayerBase::getCurrentFrame() const  // Return the current frame index.
+int VideoPlayerBase::getCurrentFrameImpl() const  // Provide the backend current-frame query.
+float VideoPlayerBase::getCurrentTime() const  // Returns the current playback time.
 float VideoPlayerBase::getDuration() const  // Return the video duration in seconds.
-const std::string & VideoPlayerBase::getErrorMessage() const  // Last runtime error message, or an empty string when there is no error. Query on the main thread after update().
-float VideoPlayerBase::getFrameRate() const  // Return the file frame rate in fps, or 0 when unknown or unloaded. Implemented by each video player.
-float VideoPlayerBase::getHeight() const  // Get video height in pixels
-std::string VideoPlayerBase::getHwAccelName() const  // Return the name of the active decode backend (e.g. "videotoolbox", "software", "none").
-float VideoPlayerBase::getPan() const  // Get current stereo pan
-unsigned char * VideoPlayerBase::getPixels() [+1]  // Return raw RGBA pixel data of the current frame, or nullptr if none decoded yet.
-float VideoPlayerBase::getPosition() const  // Return the current playback position as a fraction (0-1).
-float VideoPlayerBase::getResyncThreshold() const  // Get the current resync threshold in seconds
-float VideoPlayerBase::getSpeed() const  // Get current playback speed
-Texture & VideoPlayerBase::getTexture() [+1]  // Return the texture holding the current video frame.
-int VideoPlayerBase::getTotalFrames() const  // Get total frame count; 0 when the frame rate is unknown.
-int VideoPlayerBase::getTotalFramesImpl() const  // Protected implementation hook: return the total frame count. Called after VideoPlayerBase's public frame API accepts the frame rate.
-float VideoPlayerBase::getVolume() const  // Get current volume
-float VideoPlayerBase::getWidth() const  // Get video width in pixels
-bool VideoPlayerBase::hasAudio() const  // Return true if the video has an audio track.
-bool VideoPlayerBase::hasError() const  // Whether update() has delivered a runtime playback failure. Cleared by a successful load() or close(), retained through seek and play().
-bool VideoPlayerBase::isDone() const  // Check if playback has reached the end
-bool VideoPlayerBase::isFrameNew() const  // Return true if a new frame was decoded since the last update.
-bool VideoPlayerBase::isLoaded() const  // Check if a video is loaded
-bool VideoPlayerBase::isLoop() const  // Check if looping is enabled
-bool VideoPlayerBase::isPaused() const  // Check if video is paused
-bool VideoPlayerBase::isPlaying() const  // Check if video is currently playing (not paused). False after a runtime playback error.
-bool VideoPlayerBase::isReady() const  // True while the texture holds a real picture — i.e. drawing shows actual video, not black. With the default auto poster this is true from load() on; false only if the poster failed and no frame has arrived yet
-bool VideoPlayerBase::isUsingHwAccel() const  // Return true if hardware-accelerated decoding is currently active.
-LoadResult VideoPlayerBase::load(const fs::path & path)  // Load a video from the given file path; return true on success.
-void VideoPlayerBase::markDone()  // Mark playback as done, clearing playing unless looping.
-void VideoPlayerBase::markFrameNew()  // Mark that a new frame has arrived (sets frameNew and firstFrameReceived).
-void VideoPlayerBase::movePlaybackErrorFrom(VideoPlayerBase & other)  // Subclass hook: transfer pending and delivered error state when moving a player. Event listeners stay with their original object.
-void VideoPlayerBase::nextFrame()  // Advance one frame; does nothing when the frame rate is unknown (0).
-void VideoPlayerBase::nextFrameImpl()  // Protected implementation hook: advance to the next frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
-void VideoPlayerBase::play()  // Start or resume playback
-void VideoPlayerBase::playImpl()  // Platform hook: start playback. Pure virtual, implemented per backend.
-void VideoPlayerBase::previousFrame()  // Go back one frame; does nothing when the frame rate is unknown (0).
-void VideoPlayerBase::previousFrameImpl()  // Protected implementation hook: step back to the previous frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
-void VideoPlayerBase::reportPlaybackError(const std::string & message, int64_t code = 0)  // Subclass hook: enqueue a backend failure from any thread; coalesces pending reports until update dispatches them.
-void VideoPlayerBase::setCurrentTime(float seconds)  // Seek to a specific time in seconds
-void VideoPlayerBase::setFrame(int frame)  // Seek to a frame number; does nothing when the frame rate is unknown (0).
-void VideoPlayerBase::setFrameImpl(int frame)  // Protected implementation hook: seek to the given frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
-void VideoPlayerBase::setLoop(bool loop)  // Enable/disable looping
-void VideoPlayerBase::setLoopImpl(bool loop)  // Platform hook: set looping. Pure virtual, implemented per backend.
-void VideoPlayerBase::setPan(float pan)  // Set stereo pan (-1.0 left, 0.0 center, 1.0 right)
-void VideoPlayerBase::setPanImpl(float pan)  // Platform hook: set stereo pan. Pure virtual, implemented per backend.
-void VideoPlayerBase::setPaused(bool paused)  // Pause or resume playback
-void VideoPlayerBase::setPausedImpl(bool paused)  // Platform hook: set paused state. Pure virtual, implemented per backend.
-void VideoPlayerBase::setPosition(float pct)  // Seek to a playback position given as a fraction (0-1).
-void VideoPlayerBase::setPositionImpl(float pct)  // Platform hook: seek to a normalized position. Pure virtual, implemented per backend.
-void VideoPlayerBase::setResyncThreshold(float seconds)  // Set the maximum video/audio drift before hard re-sync (video seeks to the audio position). Set to 0 or negative to disable hard re-sync. Default: 0.5s. Affects the Linux (FFmpeg) backend and tcxHap's HapPlayer. HapPlayer advances by wall-clock dt * speed and slews toward playing audio with a 0.25s time constant; slewing remains enabled when hard re-sync is disabled.
-void VideoPlayerBase::setSpeed(float speed)  // Set playback speed (1.0 = normal, 2.0 = double speed)
-void VideoPlayerBase::setSpeedImpl(float speed)  // Platform hook: set playback speed. Pure virtual, implemented per backend.
-void VideoPlayerBase::setVolume(float vol)  // Set audio volume (0.0 to 1.0)
-void VideoPlayerBase::setVolumeImpl(float vol)  // Platform hook: set volume. Pure virtual, implemented per backend.
-void VideoPlayerBase::stop()  // Stop playback and reset to beginning
-void VideoPlayerBase::stopImpl()  // Platform hook: stop playback. Pure virtual, implemented per backend.
-void VideoPlayerBase::togglePause()  // Toggle pause state
-void VideoPlayerBase::update()  // Decode the next frame and refresh internal state; call once per frame.
+const std::string & VideoPlayerBase::getErrorMessage() const  // Return the last delivered runtime playback error message.
+float VideoPlayerBase::getFrameRate() const  // Return the video frame rate.
+float VideoPlayerBase::getHeight() const  // Returns the video height.
+std::string VideoPlayerBase::getHwAccelName() const  // Return the reported decode backend name.
+float VideoPlayerBase::getPan() const  // Returns the stored stereo pan.
+unsigned char * VideoPlayerBase::getPixels() [+1]  // Return a pointer to the player's RGBA pixel buffer.
+float VideoPlayerBase::getPosition() const  // Return the normalized playback position.
+float VideoPlayerBase::getResyncThreshold() const  // Returns the hard resynchronization threshold.
+float VideoPlayerBase::getSpeed() const  // Returns the stored playback speed.
+Texture & VideoPlayerBase::getTexture() [+1]  // Return the player's video texture.
+int VideoPlayerBase::getTotalFrames() const  // Return the total frame count.
+int VideoPlayerBase::getTotalFramesImpl() const  // Provide the backend total-frame query.
+float VideoPlayerBase::getVolume() const  // Returns the stored audio volume.
+float VideoPlayerBase::getWidth() const  // Returns the video width.
+bool VideoPlayerBase::hasAudio() const  // Report whether the video has an audio track.
+bool VideoPlayerBase::hasError() const  // Return whether a runtime playback error has been delivered.
+bool VideoPlayerBase::isDone() const  // Reports whether playback completion has been recorded.
+bool VideoPlayerBase::isFrameNew() const  // Reports whether a new video frame is marked available.
+bool VideoPlayerBase::isLoaded() const  // Reports whether the player is initialized.
+bool VideoPlayerBase::isLoop() const  // Reports whether looping is enabled.
+bool VideoPlayerBase::isPaused() const  // Reports the pause flag.
+bool VideoPlayerBase::isPlaying() const  // Reports whether playback is marked active and unpaused.
+bool VideoPlayerBase::isReady() const  // Reports whether a video picture has been received.
+bool VideoPlayerBase::isUsingHwAccel() const  // Report whether the player indicates hardware decoding.
+LoadResult VideoPlayerBase::load(const fs::path & path)  // Loads a video from a path.
+void VideoPlayerBase::markDone()  // Mark playback as finished.
+void VideoPlayerBase::markFrameNew()  // Mark a new video frame as received.
+void VideoPlayerBase::movePlaybackErrorFrom(VideoPlayerBase & other)  // Transfer playback error state from another player.
+void VideoPlayerBase::nextFrame()  // Advance one video frame.
+void VideoPlayerBase::nextFrameImpl()  // Provide backend forward frame stepping.
+void VideoPlayerBase::play()  // Starts or resumes video playback.
+void VideoPlayerBase::playImpl()  // Provide backend playback startup.
+void VideoPlayerBase::previousFrame()  // Step back one video frame.
+void VideoPlayerBase::previousFrameImpl()  // Provide backend backward frame stepping.
+void VideoPlayerBase::reportPlaybackError(const std::string & message, int64_t code = 0)  // Queue a backend playback error for later delivery.
+void VideoPlayerBase::setCurrentTime(float seconds)  // Seeks to a playback time.
+void VideoPlayerBase::setFrame(int frame)  // Seek to a frame index.
+void VideoPlayerBase::setFrameImpl(int frame)  // Provide backend seeking by frame index.
+void VideoPlayerBase::setLoop(bool loop)  // Sets whether playback repeats.
+void VideoPlayerBase::setLoopImpl(bool loop)  // Apply looping to the playback backend.
+void VideoPlayerBase::setPan(float pan)  // Sets the requested stereo pan.
+void VideoPlayerBase::setPanImpl(float pan)  // Apply stereo pan to the playback backend.
+void VideoPlayerBase::setPaused(bool paused)  // Pauses or resumes playback.
+void VideoPlayerBase::setPausedImpl(bool paused)  // Provide backend pause control.
+void VideoPlayerBase::setPosition(float pct)  // Seek to a normalized playback position.
+void VideoPlayerBase::setPositionImpl(float pct)  // Provide backend seeking to a normalized position.
+void VideoPlayerBase::setResyncThreshold(float seconds)  // Sets the threshold for hard playback resynchronization.
+void VideoPlayerBase::setSpeed(float speed)  // Sets the requested playback speed.
+void VideoPlayerBase::setSpeedImpl(float speed)  // Apply playback speed to the playback backend.
+void VideoPlayerBase::setVolume(float vol)  // Sets the audio volume.
+void VideoPlayerBase::setVolumeImpl(float vol)  // Apply audio volume to the playback backend.
+void VideoPlayerBase::stop()  // Stops playback and rewinds to the beginning.
+void VideoPlayerBase::stopImpl()  // Provide backend playback stopping.
+void VideoPlayerBase::togglePause()  // Toggles the pause state.
+void VideoPlayerBase::update()  // Updates video frames and playback state.
 ```
 
-### VideoRecordSettings — Encoder settings passed to VideoWriter::open(), ScreenRecorder::start(), and startRecording()
+### VideoRecordSettings — Configures video encoding and optional audio recording.
 
 ```cpp
 ```
 
-### VideoWriter — Encodes frames to a video file: open a path, write frames, then close to finalize the file
+### VideoWriter — Encodes supplied frames into a video file.
 
 ```cpp
-SaveResult VideoWriter::addFrame(const Fbo & fbo) [+1] [macos,windows,linux,android,ios]  // Append one frame at the fixed-rate clock (frameIndex/fps). Returns SaveResult for this backend submission, not disk completion: Linux checks gst_app_src_push_buffer and polls bus errors during the take; Apple checks append and AVAssetWriter status/error; Windows checks WriteSample HRESULT. Check close()/stop() for finalization.
-SaveResult VideoWriter::addFrameAt(const Fbo & fbo, double timeSec) [+2] [macos,windows,linux,android,ios]  // Append one frame at an explicit presentation time (seconds). Returns SaveResult for this backend submission, not disk completion: Linux checks gst_app_src_push_buffer and polls bus errors during the take; Apple checks append and AVAssetWriter status/error; Windows checks WriteSample HRESULT. Check close()/stop() for finalization.
-SaveResult VideoWriter::close() [macos,windows,linux,android,ios]  // Finalize and flush the video file. Returns SaveResult for backend finalization, retaining the first backend failure. Caller errors and transient readback failures do not fail the take. Repeated calls retain the result without another Error. No temporary/rename is used.
-float VideoWriter::getFps() const [macos,windows,linux,android,ios]  // Fixed encoding frame rate
-int VideoWriter::getFrameCount() const [macos,windows,linux,android,ios]  // Number of video frames accepted by the backend; failed submissions are excluded. Finalization may still fail.
-int VideoWriter::getHeight() const [macos,windows,linux,android,ios]  // Encoder output height in pixels
-fs::path VideoWriter::getPath() const [macos,windows,linux,android,ios]  // Resolved output file path
-uint64_t VideoWriter::getRejectedFrameCount() const [macos,windows,linux,android,ios]  // Number of frames refused in this take because capture/readback failed or dimensions, pixel format, row layout or byte capacity did not match the take or native buffer. Refused frames are skipped whole and do not fail the take. Resets on VideoWriter::open() (also used by ScreenRecorder::start()).
-const VideoRecordSettings & VideoWriter::getSettings() const [macos,windows,linux,android,ios]  // Encoder settings the writer was opened with
-int VideoWriter::getWidth() const [macos,windows,linux,android,ios]  // Encoder output width in pixels
-bool VideoWriter::isOpen() const [macos,windows,linux,android,ios]  // Check if the encoder is open and accepting frames
-unsigned char * VideoWriter::lockFrame(int & strideOut) [macos]  // Lock and return the encoder's frame buffer for zero-copy fills; strideOut receives the row stride. Pair with submitFrame
-SaveResult VideoWriter::open(const fs::path & path, int width, int height, const VideoRecordSettings & settings = {}) [macos,windows,linux,android,ios]  // Open the native encoder. Returns SaveResult for path preparation and encoder opening. Success starts an in-place stream; check close()/stop() for finalization.
-SaveResult VideoWriter::submitFrame(double timeSec) [macos]  // Submit the previously locked frame at the given PTS. Returns SaveResult from the append BOOL and AVAssetWriter status/error. Accepted frames increase getFrameCount(); close() checks finalization.
-SaveResult VideoWriter::writeAudio(const float * interleaved, int frames, double timeSec) [macos,windows,linux,android,ios]  // Append float32 audio at the given PTS; an absent audio track returns a failed SaveResult. Returns SaveResult for this backend submission, not disk completion: Linux checks gst_app_src_push_buffer and polls bus errors during the take; Apple checks append and AVAssetWriter status/error; Windows checks WriteSample HRESULT. Check close()/stop() for finalization.
+SaveResult VideoWriter::addFrame(const Fbo & fbo) [+1] [macos,windows,linux,android,ios]  // Appends a frame using the fixed frame-rate clock.
+SaveResult VideoWriter::addFrameAt(const Fbo & fbo, double timeSec) [+2] [macos,windows,linux,android,ios]  // Appends a frame at a specified presentation time.
+SaveResult VideoWriter::close() [macos,windows,linux,android,ios]  // Finalizes the recording and closes the encoder.
+float VideoWriter::getFps() const [macos,windows,linux,android,ios]  // Returns the configured encoding frame rate.
+int VideoWriter::getFrameCount() const [macos,windows,linux,android,ios]  // Returns the number of accepted video frames.
+int VideoWriter::getHeight() const [macos,windows,linux,android,ios]  // Returns the configured output height.
+fs::path VideoWriter::getPath() const [macos,windows,linux,android,ios]  // Returns the resolved output path.
+uint64_t VideoWriter::getRejectedFrameCount() const [macos,windows,linux,android,ios]  // Returns the number of frames skipped by capture or buffer validation.
+const VideoRecordSettings & VideoWriter::getSettings() const [macos,windows,linux,android,ios]  // Returns the stored encoder settings.
+int VideoWriter::getWidth() const [macos,windows,linux,android,ios]  // Returns the configured output width.
+bool VideoWriter::isOpen() const [macos,windows,linux,android,ios]  // Returns whether the writer is open.
+unsigned char * VideoWriter::lockFrame(int & strideOut) [macos]  // Returns a writable native encoder frame buffer.
+SaveResult VideoWriter::open(const fs::path & path, int width, int height, const VideoRecordSettings & settings = {}) [macos,windows,linux,android,ios]  // Opens an encoder for a video output file.
+SaveResult VideoWriter::submitFrame(double timeSec) [macos]  // Submits the previously locked encoder frame.
+SaveResult VideoWriter::writeAudio(const float * interleaved, int frames, double timeSec) [macos,windows,linux,android,ios]  // Appends audio samples at a specified presentation time.
 ```
 
-### Window — A secondary application window (macOS only for now). Owns its own Node tree, events, mouse state and render context; ticks at its display's refresh rate. GPU resources are shared with every other window
+### Window — Represents a secondary application window.
 
 ```cpp
-void Window::close() [macos,windows,linux]  // Close the native window; the main window and other windows keep running. A request, like exitApp() for the main window: it returns at once and the window closes at its backend's next safe point (after the current run-loop pass on Linux / Windows, after the next main-window tick on macOS), through the same path as its close button. Until then isOpen() is true and getApp() / App::getWindow() still return the App and the window. Safe to call from the window's own App (update() / draw() / keyPressed()). Destroying the Window (its last shared_ptr) still closes it immediately
-CoreEvents & Window::events() [macos,windows,linux]  // This window's own event stream (mousePressed / keyPressed / draw / ...)
-std::shared_ptr<App> Window::getApp() const [macos,windows,linux]  // Get the App attached to this window
-float Window::getFps() const [macos,windows,linux]  // This window's target frame rate set via setFps (0 = free-run at vsync); not a measured rate
-int Window::getHeight() const [macos,windows,linux]  // Window height in logical points (matches its coordinate system)
-const std::string & Window::getTitle() const [macos,windows,linux]  // Last title set for this window (via WindowSettings or setTitle)
-int Window::getWidth() const [macos,windows,linux]  // Window width in logical points (matches its coordinate system)
-bool Window::isFullscreen() const [macos,windows,linux]  // Whether this window is currently fullscreen (macOS reads the live window state; the transition is animated)
-bool Window::isOccluded() const [macos,windows,linux]  // Whether the OS reports this window as not visible, so it renders no frames (its update/draw pause until it is visible again): macOS minimized, fully covered or on another Space; Windows minimized or DXGI-occluded; Linux (X11) minimized or fully obscured (without a compositing manager). False for a closed window
-bool Window::isOpen() const [macos,windows,linux]  // Whether the native window is still open (true until a requested close() lands)
-void Window::setApp(std::shared_ptr<App> app) [macos,windows,linux]  // Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window. An App runs once: setup() when first attached, exit() / cleanup() when it leaves its window (close(), setApp(other), or setApp(nullptr)), and leaving also detaches its audioOut() / audioIn() for good. To show it again, create a new App: setApp() refuses an App whose cleanup() already ran, and any App on a window that is not open or is closing (both log an error and leave the window as it is). setApp() is a request: it returns at once and the window applies it at its next frame boundary (before or after one of its ticks or events), wherever it is called from, including the App's own update() / draw() / keyPressed(). Until then getApp() returns the current App. The last setApp() before the boundary wins, a close() requested before it wins over it, and the checks run again when the request is applied
-void Window::setClearColor(const Color & c) [macos,windows,linux]  // Background clear color for this window
-void Window::setFps(float fps) [macos,windows,linux]  // Set this window's target frame rate; <= 0 (or >= the display rate) free-runs at vsync, otherwise update/draw run at ~fps by skipping display ticks
-void Window::setFullscreen(bool full) [macos,windows,linux]  // Enter or leave fullscreen for this window (macOS native fullscreen, Windows borderless-fullscreen, Linux EWMH _NET_WM_STATE_FULLSCREEN)
-void Window::setSize(int width, int height) [macos,windows,linux]  // Resize this window's content area to the given logical size (points)
-void Window::setTitle(const std::string & title) [macos,windows,linux]  // Set the window title
-void Window::toggleFullscreen() [macos,windows,linux]  // Toggle this window's fullscreen state
+void Window::close() [macos,windows,linux]  // Requests closure of this window.
+CoreEvents & Window::events() [macos,windows,linux]  // Returns this window's event collection.
+std::shared_ptr<App> Window::getApp() const [macos,windows,linux]  // Returns the App currently attached to this window.
+float Window::getFps() const [macos,windows,linux]  // Returns this window's target frame rate.
+int Window::getHeight() const [macos,windows,linux]  // Returns this window's content height.
+const std::string & Window::getTitle() const [macos,windows,linux]  // Returns the title stored for this window.
+int Window::getWidth() const [macos,windows,linux]  // Returns this window's content width.
+bool Window::isFullscreen() const [macos,windows,linux]  // Returns this window's fullscreen state.
+bool Window::isOccluded() const [macos,windows,linux]  // Returns whether the operating system reports this window as not visible.
+bool Window::isOpen() const [macos,windows,linux]  // Returns whether this window's native window still exists.
+void Window::setApp(std::shared_ptr<App> app) [macos,windows,linux]  // Requests an App attachment or replacement for this window.
+void Window::setClearColor(const Color & c) [macos,windows,linux]  // Sets this window's background clear color.
+void Window::setFps(float fps) [macos,windows,linux]  // Sets this window's target frame rate.
+void Window::setFullscreen(bool full) [macos,windows,linux]  // Sets this window's fullscreen mode.
+void Window::setSize(int width, int height) [macos,windows,linux]  // Resizes this window's content area.
+void Window::setTitle(const std::string & title) [macos,windows,linux]  // Sets this window's title.
+void Window::toggleFullscreen() [macos,windows,linux]  // Toggles this window's fullscreen mode.
 ```
 
-### WindowSettings — Window configuration passed to the app at startup (size, title, DPI, MSAA, fullscreen, decoration, VSync). Setters chain
+### WindowSettings — Configures the application window at startup.
 
 ```cpp
-WindowSettings & WindowSettings::reserveUniformBuffer(int bytes)  // Reserve the per-frame GPU uniform buffer in bytes, vector::reserve style; 0 = backend default 4MB ≈ 8k draw calls. Metal/WebGPU/Vulkan only — GL/D3D11 have no such cap (chainable)
-WindowSettings & WindowSettings::setClipboardSize(int size)  // Set clipboard buffer size in bytes (chainable). OS clipboard text needs finite storage in the window backend. On reads, macOS and web truncate to size - 1 bytes; Windows fails UTF-8 conversion on overflow; X11 rejects oversized or incremental selections (standalone returns empty, legacy returns null). On writes, macOS and web send the full text to the OS and truncate the local copy; Windows rejects overflowing UTF-16 conversion and truncates the local UTF-8 copy after success; standalone X11 rejects oversized writes, while legacy X11 logs and truncates. Clipboard access is unsupported on iOS and Android.
-WindowSettings & WindowSettings::setDecorated(bool enabled)  // false = borderless/chromeless window that can still take focus and be closed programmatically (chainable)
-WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Enable/disable fullscreen at startup (chainable)
-WindowSettings & WindowSettings::setHighDpi(bool enabled)  // Enable/disable high DPI support (chainable)
-WindowSettings & WindowSettings::setPixelPerfect(bool enabled)  // Set pixel-perfect mode: true = framebuffer-size coords, false = logical-size coords (chainable)
-WindowSettings & WindowSettings::setSampleCount(int count)  // Set MSAA sample count (chainable)
-WindowSettings & WindowSettings::setSize(int w, int h)  // Set window size (chainable)
-WindowSettings & WindowSettings::setSwapInterval(int interval)  // Set VSync present interval: 1 = on, 0 = off, N = every Nth refresh (chainable)
-WindowSettings & WindowSettings::setTitle(const std::string & t)  // Set window title (chainable)
+WindowSettings & WindowSettings::reserveUniformBuffer(int bytes)  // Sets the initial capacity of the per-frame GPU uniform buffer.
+WindowSettings & WindowSettings::setClipboardSize(int size)  // Sets the clipboard buffer capacity.
+WindowSettings & WindowSettings::setDecorated(bool enabled)  // Sets whether the window displays its frame and title bar.
+WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Sets whether the main window starts in fullscreen.
+WindowSettings & WindowSettings::setHighDpi(bool enabled)  // Sets whether rendering uses the display's high pixel density.
+WindowSettings & WindowSettings::setPixelPerfect(bool enabled)  // Sets whether window coordinates use framebuffer pixels.
+WindowSettings & WindowSettings::setSampleCount(int count)  // Sets the window's MSAA sample count.
+WindowSettings & WindowSettings::setSize(int w, int h)  // Sets the initial window dimensions.
+WindowSettings & WindowSettings::setSwapInterval(int interval)  // Sets the requested VSync presentation interval.
+WindowSettings & WindowSettings::setTitle(const std::string & t)  // Sets the initial window title.
 ```
 
-### Xml — XML document wrapper around pugixml. Loads, saves and queries XML; node-level access is via XmlNode returned from root() and child().
+### Xml — Wraps a pugixml document for loading, saving, and querying XML.
 
 ```cpp
-void Xml::addDeclaration(const std::string & version = std::string("1.0"), const std::string & encoding = std::string("UTF-8"))  // Prepend an XML declaration (<?xml ...?>) with the given version and encoding.
-XmlNode Xml::addRoot(const std::string & name)  // Append a new root element with the given name and return it.
-XmlNode Xml::child(const std::string & name)  // Find a direct child node of the document by name.
-XmlDocument & Xml::document() [+1]  // Access the underlying pugixml document for advanced operations.
-bool Xml::empty() const  // Return true if the document has no content.
-bool Xml::load(const fs::path & path)  // Load an XML document from a file. Relative paths are resolved via getDataPath. Returns true on success.
-bool Xml::parse(const std::string & str)  // Parse an XML document from a string. Returns true on success.
-XmlNode Xml::root() [+1]  // Get the document's root element node.
-SaveResult Xml::save(const fs::path & path, const std::string & indent = std::string("  ")) const  // Serialize and save XML. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
-std::string Xml::toString(const std::string & indent = std::string("  ")) const  // Serialize the document to an XML string. indent sets the per-level indentation string.
+void Xml::addDeclaration(const std::string & version = std::string("1.0"), const std::string & encoding = std::string("UTF-8"))  // Prepends an XML declaration to the document.
+XmlNode Xml::addRoot(const std::string & name)  // Appends a root element and returns its node handle.
+XmlNode Xml::child(const std::string & name)  // Finds a direct child of the document by name.
+XmlDocument & Xml::document() [+1]  // Provides access to the underlying pugixml document.
+bool Xml::empty() const  // Reports whether the underlying document handle is null.
+bool Xml::load(const fs::path & path)  // Loads an XML document from a file.
+bool Xml::parse(const std::string & str)  // Parses an XML document from a string.
+XmlNode Xml::root() [+1]  // Returns the document's first root element.
+SaveResult Xml::save(const fs::path & path, const std::string & indent = std::string("  ")) const  // Serializes the XML document and saves it to a file.
+std::string Xml::toString(const std::string & indent = std::string("  ")) const  // Serializes the XML document to a string.
 ```
 
-### mcp::AdmissionLimits — MCP admission settings with finite defaults; all values must be positive. Change through setAdmissionLimits() while stopped. Excess requests are rejected as whole units.
-
-```cpp
-```
-
-### mcp::Resource — URI-addressed resource metadata and content handler.
+### mcp::AdmissionLimits — Defines the limits for accepting and processing MCP requests.
 
 ```cpp
 ```
 
-### mcp::ResourceBuilder — Resource registration builder; finish with bind().
-
-```cpp
-void mcp::ResourceBuilder::bind(std::function<std::string ()> func)  // Register the resource's text producer, called on the main thread.
-ResourceBuilder & mcp::ResourceBuilder::desc(const std::string & d)  // Set the resource description.
-ResourceBuilder & mcp::ResourceBuilder::mime(const std::string & m)  // Set the resource MIME type.
-```
-
-### mcp::Tool — Tool registration data: name, description, level, arguments and handler.
-
-```cpp
-json mcp::Tool::getSchema() const  // Build the JSON input schema from the arguments.
-```
-
-### mcp::ToolArg — One argument in a tool's input schema.
+### mcp::Resource — Holds a URI-addressed MCP resource's metadata and text producer.
 
 ```cpp
 ```
 
-### mcp::ToolBuilder — Fluent tool registration builder; finish with bind(). Tools default to Public.
+### mcp::ResourceBuilder — Builds an MCP resource registration through chained calls.
 
 ```cpp
-ToolBuilder & mcp::ToolBuilder::arg(const std::string & name, const std::string & desc, bool required = true)  // Add a typed named argument and its description; required defaults to true.
-void mcp::ToolBuilder::bind(std::function<json (const json &)> func) [+4]  // Register a handler taking JSON arguments or a typed std::function. Runs on the main thread; exposure follows the current grant.
-ToolBuilder & mcp::ToolBuilder::level(ToolLevel value)  // Declare the required grant for this tool. Core and official addons specify every tool's level.
+void mcp::ResourceBuilder::bind(std::function<std::string ()> func)  // Registers the resource's text producer.
+ResourceBuilder & mcp::ResourceBuilder::desc(const std::string & d)  // Sets the resource description.
+ResourceBuilder & mcp::ResourceBuilder::mime(const std::string & m)  // Sets the resource MIME type.
+```
+
+### mcp::Tool — Holds an MCP tool's metadata and handler.
+
+```cpp
+json mcp::Tool::getSchema() const  // Builds the tool's JSON input schema.
+```
+
+### mcp::ToolArg — Describes one argument in a tool's input schema.
+
+```cpp
+```
+
+### mcp::ToolBuilder — Builds an MCP tool registration through chained calls.
+
+```cpp
+ToolBuilder & mcp::ToolBuilder::arg(const std::string & name, const std::string & desc, bool required = true)  // Adds a named argument to the tool's input schema.
+void mcp::ToolBuilder::bind(std::function<json (const json &)> func) [+4]  // Registers the tool's handler.
+ToolBuilder & mcp::ToolBuilder::level(ToolLevel value)  // Sets the access level required by the tool.
 ```
 
 ## Enums
 
 ```cpp
-enum AudioBackend { Default, Null }  // Audio backend selection: Default uses the platform backend order; Null explicitly runs the real mixer silently without a device.
-enum AudioInitFailure { None, NoBackend, DeviceOpen, DeviceStart }  // Initialization failure stage: None, NoBackend (context creation), DeviceOpen, or DeviceStart.
-enum AudioRecordSettings::SampleFormat { S16, F32 }  // WAV sample format: S16 = 16-bit PCM (default), F32 = 32-bit IEEE float (headroom survives, no clipping in the file)
-enum AxisMode { None, Fill, Content }  // Layout axis sizing: None (fixed), Fill (expand to the parent), Content (fit children).
-enum Beep { ping, success, complete, coin, error, warning, cancel, click, typing, notify, sweep }  // Built-in system beep sounds (ping, success, error, …) for beep().
-enum BlendMode { Alpha, Add, Multiply, Screen, Subtract, Disabled }  // Color blend mode: Alpha, Add, Multiply, Screen, Subtract, Disabled.
-enum ChipSoundNote::Wave { Sin, Square, Triangle, Sawtooth, Noise, PinkNoise, Silent }  // Waveform a ChipSoundNote is synthesised from. Also available unqualified as `Wave`.
-enum Codec { None, LZ4 }  // Compression codec: None (raw) or LZ4.
-enum Cursor { Default, Arrow, IBeam, Crosshair, Hand, ResizeEW, ResizeNS, ResizeNWSE, ResizeNESW, ResizeAll, NotAllowed, Custom0, Custom1, Custom2, Custom3, Custom4, Custom5, Custom6, Custom7, Custom8, Custom9, Custom10, Custom11, Custom12, Custom13, Custom14, Custom15 }  // Mouse cursor shape (Default, Arrow, IBeam, Crosshair, Hand, resize cursors, …).
-enum CurveStyle::Mode { Tolerance, Resolution }  // Curve tessellation mode: adaptive tolerance or fixed resolution
-enum Deliver { Inline, Main }  // Event delivery timing: Inline fires synchronously on the calling thread; Main queues the event to the main thread.
-enum Direction { Left, Center, Right, Top, Bottom, Baseline }  // Alignment / direction: Left, Center, Right, Top, Bottom, Baseline.
-enum EaseMode { In, Out, InOut }  // Easing direction: In, Out, or InOut.
-enum EaseType { Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce, Custom }  // Easing function family (Linear, Quad, Cubic, Sine, Expo, …) for tweens.
-enum EasyCam::Modifier { None, Shift, Ctrl, Alt, Super }  // Modifier key that must be held for EasyCam mouse input (orbit / pan / zoom), so the camera can share the mouse with scene interaction
-enum ImageType { Color, Grayscale }  // Image type: Color or Grayscale.
-enum KinsokuLevel { Off, PunctuationOnly, Standard }  // Line-breaking (kinsoku) strictness for vertical / Japanese text
-enum LayoutDirection { Vertical, Horizontal }  // Layout axis direction: Vertical or Horizontal.
-enum LightType { Directional, Point, Spot }  // Light type: Directional, Point, or Spot.
-enum LoadError { None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown, TooLarge, Cancelled }  // Load failure kind: None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown, TooLarge, Cancelled.
-enum LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }  // Log severity, from Verbose (most detailed) to Fatal. Each output (console, file, system) shows lines at its own level and above; Silent as an output's level turns that output off.
-enum mcp::ToolLevel { Public, ReadOnly, Control }  // Tool exposure level: Public < ReadOnly < Control. Tools default to Public; Control includes inspection.
-enum MixMode { Auto, DownmixMono }  // Sound channel mixing: Auto (match the output) or DownmixMono.
-enum MouseButton { Left, Right, Middle, None }  // Mouse button: Left, Right, Middle, or None.
-enum Orientation { Portrait, PortraitUpsideDown, LandscapeLeft, LandscapeRight, Landscape, All, AllButUpsideDown }  // Screen orientation mask passed to setOrientation (iOS/Android); values are bit flags and can be combined with |
-enum PixelFormat { U8, F32 }  // CPU pixel data format: U8 (8-bit) or F32 (float).
-enum PointStyle { Square, Round, Pixel }  // Shape used to draw points: Square, Round, Pixel.
-enum PrimitiveMode { Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points }  // Draw primitive mode: Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points.
-enum PrimitiveType { Points, Lines, LineStrip, Triangles, TriangleStrip, Quads }  // Geometry primitive type: Points, Lines, LineStrip, Triangles, TriangleStrip, Quads.
-enum SaveError { None, AccessDenied, NoSpace, WriteFailed, Unknown }  // Save failure kind: None, AccessDenied (including bundle refusal), NoSpace, WriteFailed, Unknown. Rename failure is always WriteFailed.
-enum SendError { None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning }  // Why a send could not be queued, or how a queued one finished: None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning.
-enum SoundSource::Kind { Eager, Stream }  // Source kind tag on SoundSource, letting the mixer dispatch without a per-frame virtual call: Eager (SoundBuffer, full PCM in RAM) vs Stream (SoundStream, decoded on demand).
-enum StrokeCap { Butt, Round, Square }  // Line cap style for strokes: Butt, Round, Square.
-enum StrokeJoin { Miter, Round, Bevel }  // Line join style for strokes: Miter, Round, Bevel.
-enum StrokeMesh::CapType { CAP_BUTT, CAP_ROUND, CAP_SQUARE }  // Line cap shape for the ends of an open stroke
-enum StrokeMesh::JoinType { JOIN_MITER, JOIN_ROUND, JOIN_BEVEL }  // Line join shape at the corners of a stroke
-enum TcyMode { Rotate, Upright, Combine }  // Tate-chu-yoko: how Latin / digit runs are laid out within vertical text
-enum TextureFilter { Nearest, Linear }  // Texture sampling filter: Nearest or Linear.
-enum TextureFormat { RGBA8, RGBA16F, RGBA32F, R8, R16F, R32F, RG8, RG16F, RG32F, BGRA8, RGBA16 }  // GPU texture format (RGBA8, RGBA16F, R8, …) — channel layout and bit depth.
-enum TextureUsage { Immutable, Dynamic, Stream, RenderTarget }  // Texture update pattern: Immutable, Dynamic, Stream, or RenderTarget.
-enum TextureWrap { Repeat, ClampToEdge, MirroredRepeat }  // Texture wrap mode: Repeat, ClampToEdge, MirroredRepeat.
-enum ThermalState { Nominal, Fair, Serious, Critical }  // Device thermal state, from Nominal to Critical.
-enum VideoCodec { H264, HEVC, ProRes422, ProRes4444 }  // Video codec: H264, HEVC, ProRes422, ProRes4444.
-enum WindowType { Rect, Hanning, Hamming, Blackman }  // FFT window function: Rect, Hanning, Hamming, Blackman.
-enum WritingMode { Horizontal, VerticalRL }  // Text writing mode: Horizontal or VerticalRL (vertical, right-to-left).
+enum AudioBackend { Default, Null }  // Selects the audio engine backend.
+enum AudioInitFailure { None, NoBackend, DeviceOpen, DeviceStart }  // Identifies the stage at which audio initialization failed.
+enum AudioRecordSettings::SampleFormat { S16, F32 }  // Selects the sample representation stored in the WAV file.
+enum AxisMode { None, Fill, Content }  // Selects how a layout axis determines sizes.
+enum Beep { ping, success, complete, coin, error, warning, cancel, click, typing, notify, sweep }  // Selects a built-in synthesized notification sound.
+enum BlendMode { Alpha, Add, Multiply, Screen, Subtract, Disabled }  // Selects how drawing colors blend with the existing image.
+enum ChipSoundNote::Wave { Sin, Square, Triangle, Sawtooth, Noise, PinkNoise, Silent }  // Defines the waveform choices for ChipSoundNote.
+enum Codec { None, LZ4 }  // Selects a byte-buffer compression codec.
+enum Cursor { Default, Arrow, IBeam, Crosshair, Hand, ResizeEW, ResizeNS, ResizeNWSE, ResizeNESW, ResizeAll, NotAllowed, Custom0, Custom1, Custom2, Custom3, Custom4, Custom5, Custom6, Custom7, Custom8, Custom9, Custom10, Custom11, Custom12, Custom13, Custom14, Custom15 }  // Selects a mouse cursor shape.
+enum CurveStyle::Mode { Tolerance, Resolution }  // Selects how curves are divided into line segments.
+enum Deliver { Inline, Main }  // Selects the delivery thread for an event listener.
+enum Direction { Left, Center, Right, Top, Bottom, Baseline }  // Represents a direction or alignment position.
+enum EaseMode { In, Out, InOut }  // Selects the direction of an easing curve.
+enum EaseType { Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce, Custom }  // Selects an easing curve family.
+enum EasyCam::Modifier { None, Shift, Ctrl, Alt, Super }  // Specifies a modifier key for camera mouse control.
+enum ImageType { Color, Grayscale }  // Defines color and grayscale image types.
+enum KinsokuLevel { Off, PunctuationOnly, Standard }  // Selects Japanese line-breaking restrictions for text wrapping.
+enum LayoutDirection { Vertical, Horizontal }  // Selects the stacking axis for child layout.
+enum LightType { Directional, Point, Spot }  // Identifies a directional, point, or spot light.
+enum LoadError { None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown, TooLarge, Cancelled }  // Identifies a resource-loading error.
+enum LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }  // Specifies log severity and output filtering thresholds.
+enum mcp::ToolLevel { Public, ReadOnly, Control }  // Defines the access level required by an MCP tool.
+enum MixMode { Auto, DownmixMono }  // Selects how source audio channels are routed to output channels.
+enum MouseButton { Left, Right, Middle, None }  // Defines typed identifiers for mouse buttons.
+enum Orientation { Portrait, PortraitUpsideDown, LandscapeLeft, LandscapeRight, Landscape, All, AllButUpsideDown }  // Defines the screen orientations allowed by `setOrientation()`.
+enum PixelFormat { U8, F32 }  // Specifies the component storage type of CPU pixel data.
+enum PointStyle { Square, Round, Pixel }  // Defines the shape used to draw point-cloud meshes.
+enum PrimitiveMode { Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points }  // Selects how a mesh connects its vertices into drawing primitives.
+enum PrimitiveType { Points, Lines, LineStrip, Triangles, TriangleStrip, Quads }  // Selects the primitive topology used by vertex writers.
+enum SaveError { None, AccessDenied, NoSpace, WriteFailed, Unknown }  // Identifies a save error.
+enum SendError { None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning }  // Describes a send queue rejection or a completed send's outcome.
+enum SoundSource::Kind { Eager, Stream }  // Identifies how a sound source supplies audio data.
+enum StrokeCap { Butt, Round, Square }  // Selects the shape of stroke endpoints.
+enum StrokeJoin { Miter, Round, Bevel }  // Selects the shape of stroke corners.
+enum StrokeMesh::CapType { CAP_BUTT, CAP_ROUND, CAP_SQUARE }  // Defines the end-cap shape of an open stroke.
+enum StrokeMesh::JoinType { JOIN_MITER, JOIN_ROUND, JOIN_BEVEL }  // Defines the corner shape of a stroke.
+enum TcyMode { Rotate, Upright, Combine }  // Selects how ASCII letters and digits are arranged in vertical text.
+enum TextureFilter { Nearest, Linear }  // Specifies how texture samples are filtered.
+enum TextureFormat { RGBA8, RGBA16F, RGBA32F, R8, R16F, R32F, RG8, RG16F, RG32F, BGRA8, RGBA16 }  // Specifies the channel layout and component precision of a GPU texture.
+enum TextureUsage { Immutable, Dynamic, Stream, RenderTarget }  // Selects how a GPU texture receives its contents.
+enum TextureWrap { Repeat, ClampToEdge, MirroredRepeat }  // Specifies how texture coordinates wrap beyond the texture edges.
+enum ThermalState { Nominal, Fair, Serious, Critical }  // Represents the device's thermal severity level.
+enum VideoCodec { H264, HEVC, ProRes422, ProRes4444 }  // Selects the video compression format used for recording.
+enum WindowType { Rect, Hanning, Hamming, Blackman }  // Selects a window function for signal processing.
+enum WritingMode { Horizontal, VerticalRL }  // Selects horizontal or vertical text layout.
 ```
 
 ## Type aliases
 
 ```cpp
-using EaseFunction  // User-defined easing curve: std::function mapping normalized time t (0-1) to progress
-using Json  // Alias for nlohmann::json (using Json = nlohmann::json). Used as the in-memory JSON value type by loadJson, saveJson, parseJson and toJsonString. See the nlohmann/json documentation for its full API.
-using NodePtr  // Shared pointer to a Node (std::shared_ptr<Node>); the standard way to hold and pass scene nodes
-using NodeWeakPtr  // Alias for weak_ptr<Node> (using NodeWeakPtr = weak_ptr<Node>). A non-owning weak reference to a Node; lock() it to obtain a NodePtr if the node still exists.
-using RenderContext ⚠️deprecated  // Deprecated alias for internal::RenderContext; use the free drawing functions instead.
-using Wave  // Alias for ChipSoundNote::Wave, the chip-synth waveform type (Sin, Square, Triangle, ...).
-using XmlAttribute  // Alias for pugi::xml_attribute. A name/value attribute on an XmlNode; see the pugixml documentation for its API.
-using XmlDocument  // Alias for pugi::xml_document. The owning XML document type underlying the Xml wrapper; see the pugixml documentation for its full API.
-using XmlNode  // Alias for pugi::xml_node. A single element/node within an XML document, returned by Xml::root() and Xml::child(); see the pugixml documentation for node query and manipulation methods.
-using XmlParseResult  // Alias for pugi::xml_parse_result. Result of an XML parse operation, carrying success status, error description and offset.
+using EaseFunction  // Represents a user-defined easing curve.
+using Json  // An alias for the nlohmann::json value type.
+using NodePtr  // Provides a shared owning pointer to a `Node`.
+using NodeWeakPtr  // Provides a non-owning weak pointer to a `Node`.
+using RenderContext ⚠️deprecated  // Provides a deprecated alias for the internal rendering context.
+using Wave  // Names the waveform type used by ChipSoundNote.
+using XmlAttribute  // Represents a named attribute on an XML node.
+using XmlDocument  // Owns an XML document and its tree.
+using XmlNode  // Represents a node within an XML document.
+using XmlParseResult  // Reports the outcome of parsing an XML document.
 ```
 
 <!-- API-INDEX-END -->

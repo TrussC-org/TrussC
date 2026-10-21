@@ -97,6 +97,26 @@ const detailsOf = (det) => {
     }
     return { details: _t(det) };
 };
+// Shared authored fields for every callable/type/constant. Keep absent fields
+// absent so entries without authored notes retain their serialized shape.
+function attachNotes(entry, ref, ym) {
+    if (ref && ref.details) Object.assign(entry, detailsOf(ref.details));
+    else if (ym && ym.details) {
+        entry.details = ym.details;
+        if (ym.details_ja) entry.details_ja = ym.details_ja;
+        if (ym.details_ko) entry.details_ko = ym.details_ko;
+    }
+    const snippet = (ref && ref.snippet) || (ym && ym.constructor && ym.constructor.snippet);
+    if (snippet) entry.snippet = snippet;
+    return entry;
+}
+function attachMemberNotes(entry, sym, ym) {
+    attachNotes(entry, sym, ym);
+    const keywords = refKeywords(sym.id, ym);
+    if (keywords.length) entry.keywords = keywords;
+    if (Array.isArray(sym.related) && sym.related.length) entry.related = sym.related;
+    return attachPlatforms(entry, sym, ym);
+}
 // Prose precedence: reference-data.json (the api-reference.toml prose, keyed by
 // symbol-id) is now the source of truth; the legacy yaml is only a transitional
 // fallback for anything not yet in reference-data. `allowRef` lets a caller veto
@@ -364,16 +384,7 @@ function build(examplesMap) {
                 if (Array.isArray(sym.related) && sym.related.length) entry.related = sym.related;
                 const dep = mergeDeprecated(refId, ym);
                 if (dep) entry.deprecated = dep;
-                // details: prefer the curated yaml sidecar (keeps ja/ko); fall back
-                // to reference-data's en-only string (trimmed).
-                const refDetails = REF[refId] && REF[refId].details;
-                if (ym && ym.details) {
-                    entry.details = ym.details;
-                    if (ym.details_ja) entry.details_ja = ym.details_ja;
-                    if (ym.details_ko) entry.details_ko = ym.details_ko;
-                } else if (refDetails) {
-                    Object.assign(entry, detailsOf(refDetails));
-                }
+                attachNotes(entry, sym, ym);
                 if (examplesMap[sym.name]) entry.examples = examplesMap[sym.name];
                 attachPlatforms(entry, sym, ym);
                 functions.push(entry);
@@ -403,7 +414,8 @@ function build(examplesMap) {
             desc, desc_ja, desc_ko,
             keywords: refKeywords(sym.id, null),
         };
-        Object.assign(c, detailsOf(ref && ref.details));
+        attachNotes(c, ref, YML_CONST.get(sym.id));
+        attachPlatforms(c, ref, YML_CONST.get(sym.id));
         if (ref && Array.isArray(ref.related) && ref.related.length) c.related = ref.related;
         constants.push(c);
     }
@@ -450,7 +462,10 @@ function build(examplesMap) {
         };
         const dep = mergeDeprecated(refId, ym);
         if (dep) out.deprecated = dep;
-        return attachPlatforms(out, sym, ym);
+        // A member copied from a public base carries the declaring type, so
+        // consumers (the MCP corpus) can point at one card instead of a copy each.
+        if (sym.declaredIn) out.inherited = sym.declaredIn;
+        return attachMemberNotes(out, sym, ym);
     };
 
     // Nested types and enums (Ray::Hit, Node::HitResult, SoundSource::Kind, …) are
@@ -472,6 +487,7 @@ function build(examplesMap) {
     const nestedEntry = (sym) => {
         const { desc, desc_ja, desc_ko } = descTrio(sym.id, null);
         const out = { name: sym.id, short: sym.name, kind: sym.kind, desc, desc_ja, desc_ko };
+        if (sym.kind === 'type') attachMemberNotes(out, sym, null);
         if (sym.kind === 'enum') {
             const vd = sym.value_desc || {};
             const memberList = (Array.isArray(sym.members) && sym.members.length)
@@ -506,6 +522,7 @@ function build(examplesMap) {
         const typeData = { name: typeName, desc, keywords: refKeywords(sym.id, ym), desc_ja, desc_ko };
         if (examplesMap['type:' + typeName]) typeData.examples = examplesMap['type:' + typeName];
         if (Array.isArray(sym.related) && sym.related.length) typeData.related = sym.related;
+        attachNotes(typeData, sym, ym);
         attachPlatforms(typeData, sym, ym);
 
         // constructor signatures: from the AST (reference-data) now; the yaml
@@ -513,7 +530,7 @@ function build(examplesMap) {
         if (sym.constructors && sym.constructors.length) {
             typeData.constructor = {
                 signatures: sym.constructors.map(c => stripU(c.params)),
-                snippet: ym && ym.constructor && ym.constructor.snippet,
+                snippet: sym.snippet || (ym && ym.constructor && ym.constructor.snippet),
             };
         }
         // properties (data members). Type comes from the C++ AST (reference-data).

@@ -401,11 +401,62 @@ This is fully automatic — no user action required. The mechanism exists becaus
 The consequence — and the source of most bugs in this area — is that **record time is not execute time**. Four invariants keep that safe. Anything added to this path must satisfy all four:
 
 1. **Commands capture their inputs by value.** A recorded command holds copies of its bindings and uniform blocks, never references to mutable state. Mutating a material, transform or light after the draw call cannot retroactively alter an already recorded draw.
-2. **GPU resources are never destroyed mid-frame.** Owners hand their handles to `internal::deferGpuDestroy()` (`tc/gpu/tcGpuDestroyQueue.h`); they are reclaimed in `present()` *after* `sg_commit()`. This covers plain destruction and reallocation alike — when a buffer grows, the old handle stays alive until the commands referencing it have been submitted. Destroying a handle immediately leaves dead handles inside recorded commands, and sokol silently drops the offending draw.
+2. **GPU resources are never destroyed mid-frame.** Owners hand their handles to `internal::deferGpuDestroy()` (`tc/gpu/tcGpuDestroyQueue.h`); they are considered for reclamation after `sg_commit()`. Unconsumed target recordings pin their typed handles and dependency closure; unrelated handles can retire immediately. This covers plain destruction and reallocation alike — when a buffer grows, the old handle stays alive until the commands referencing it have been submitted. Destroying a handle immediately leaves dead handles inside recorded commands, and sokol silently drops the offending draw.
 3. **A mutable-content resource read more than once per frame needs snapshots.** An `Fbo` keeps a *version pool*: re-`begin()`ing after the FBO has already been drawn advances to a new version (blitting forward when existing content must be preserved). So `begin/end/draw` followed by `begin/end/draw` in one frame samples the intermediate content for the first draw and the final content for the second, even though both quads execute at frame end. Contract: an Fbo must be drawn from a **single window** within a frame — the pool's frame key is per-window.
 4. **All per-frame record state is per-window.** The three swapchain queues and the FBO-pass queues, both layer cursors, the shader stack, the `beginShape` / `beginLines` / `beginStroke` accumulators and the FBO-pass format selectors live in `WindowContext`, not in process globals. Window ticks are serialized on the main thread, but nothing is shared, so one window cannot observe or clobber another's in-flight draws.
 
 Fonts sit outside this machinery: both the bitmap and TTF paths emit quads straight into the active sokol_gl context, so glyphs layer as ordinary 2D content and need no deferral.
+
+**Window execution and capture submission:** The host parks the outgoing
+window's open target pass before switching execution, including nested modal
+loops and context restoration. The target stack, scopes and attachment identity
+survive; the next draw resumes with LOAD. Device submission remains global.
+Metal drawables require final authorization from their owner before presentation;
+a capture prefix submits encoded work without authorizing presentation.
+
+Synchronous capture parks/submits the renderer prefix before native staging.
+Metal async capture stages in that prefix before later source writes. The host
+source-selection/finalization interface currently preserves each backend's
+existing source behavior. Completed-frame snapshots remain a separate integration.
+
+Each window owns its shadow maps, allocated the first time that window uses
+shadows. Its four R32F array layers and shared depth image use 20 MiB of image
+payload at the unchanged 1024 default, plus views, sampler and driver overhead.
+Windows without shadows allocate none. Deferred PBR, including PBR in an Fbo,
+pins its window's map generation and copied slot matrices. Growth creates a new
+generation; final pin release links the generation itself into host retirement
+without allocating. The GPU dependency collector destroys its fixed handles
+after their recordings are consumed and a device boundary permits retirement.
+Shutdown drains retired generations before destroying the device, and exit
+reclaims any remaining CPU retirement nodes. Partial creation and allocation
+failure use the same path. Shadow creation
+checks each resource's Sokol state; a GL-only helper also checks native names
+and errors within each creation call, draining earlier user errors immediately
+before that call and reporting each code in a separate Warning as pending before
+shadow allocation. These earlier errors do not reject the allocation. Reuse and
+invalid-size rejection do not consume GL errors. Native view failures are detected.
+Before a shadow pass rewrites a sampled slot, the target stack consumes queued
+PBR that needs its current contents, including a lazy ancestor above which an
+Fbo is active. Replay restores the target's viewport/scissor after opening its
+pass, before queued PBR runs. Unrelated Fbo production preserves lazy parent
+recordings.
+Open shadow passes can park across foreign ticks.
+
+ScreenRecorder binds the originating window or Fbo and opens at its source
+extent. A take keeps fixed encoder dimensions; mismatched frames are counted and
+skipped before copying, with one layout warning per take. Matching frames resume
+in the same take. One native capture/encode operation may be outstanding through
+staging cleanup; diagnostics are delivered after unlocking within the recorder's
+Delivery barrier.
+Busy opportunities are counted and skipped with wall/audio PTS gaps preserved.
+A replacement start is refused while the previous operation remains pending.
+MCP captures use #878's existing admission policy, screenshot credits and request
+queue. Each backend reconciles its selected source extent through #891's existing
+WorkBudget high-water reservation before allocation, charging growth once.
+Two-stage workers destroy captured image payloads before releasing working-memory
+credit, including on exceptions. Native jobs retain the same budget and optional
+save credit until cleanup, even after a synchronous timeout; an abandoned late
+consumer skips output allocation.
 
 **Node Style Isolation:**
 
@@ -634,7 +685,7 @@ void tcApp::draw() {
 
 **PBR Material Presets:** `Material::gold()`, `Material::silver()`, `Material::copper()`, `Material::iron()`, `Material::plastic(color)`, `Material::rubber(color)`
 
-**Features:** IES photometric profiles, IBL environment maps (HDR/procedural), normal maps, PBR texture maps (glTF 2.0), shadow mapping with PCF (up to 4 shadow-casting lights per frame — run one `beginShadowPass()`/`endShadowPass()` cycle per light; each renders into its own layer of a shared shadow map array)
+**Features:** IES photometric profiles, IBL environment maps (HDR/procedural), normal maps, PBR texture maps (glTF 2.0), shadow mapping with PCF (up to 4 shadow-casting lights per frame — run one `beginShadowPass()`/`endShadowPass()` cycle per light; each renders into its own layer of that window's shadow map array)
 
 > **Platform note — IBL on iOS/iPadOS Safari (wasm):** The IBL bake renders into cube-face render targets, which iOS/iPadOS Safari (both WebGPU and WebGL2) cannot do without breaking the canvas swapchain. So `loadProcedural()` / `loadFromHDR()` are **auto-skipped on iOS Safari**: PBR meshes fall back to a flat hemisphere ambient + direct lights (no environment reflections). Direct lighting, normal maps, shadows and plain FBOs all work fine. Native, desktop web, and Android web bake IBL normally. For a consistent look across iOS and other targets, don't rely on IBL reflections. See `tc/3d/tcEnvironment.h`.
 

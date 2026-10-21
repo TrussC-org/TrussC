@@ -88,11 +88,13 @@ static bool readPixelsInternal(sg_image srcImage, int width, int height,
         id<MTLCommandBuffer> command = (__bridge_transfer id<MTLCommandBuffer>)buffer;
         [command waitUntilCompleted];
     };
+    id<MTLCommandBuffer> readbackCommand = nil;
     {
         internal::TargetPassScope scope(transfer);
         if (!scope.active()) return false;
 
         id<MTLCommandBuffer> cmdBuffer = [cmdQueue commandBuffer];
+        readbackCommand = cmdBuffer;
         id<MTLBlitCommandEncoder> blitEncoder = [cmdBuffer blitCommandEncoder];
 
         [blitEncoder copyFromTexture:srcTexture
@@ -110,6 +112,7 @@ static bool readPixelsInternal(sg_image srcImage, int width, int height,
         transfer.owner = (__bridge_retained void*)cmdBuffer;
     } // waits for the blit, then resumes the previous target
 
+    if (readbackCommand.status != MTLCommandBufferStatusCompleted) return false;
     MTLRegion region = MTLRegionMake2D(0, 0, width, height);
     [dstTexture getBytes:dstBuffer
              bytesPerRow:bytesPerRow

@@ -15,6 +15,7 @@
 #include <map>
 #include <functional>
 #include <memory>
+#include <utility>
 #include <sstream>
 #include <future>
 #include <thread>
@@ -33,6 +34,7 @@ using json = nlohmann::json;
 #include "tcThreadChannel.h"
 #include "tcVersion.h"
 #include "tcMcpLimits.h"
+#include "tcCaptureAdmission.h"
 #include "../app/tcExit.h"
 
 #ifndef __EMSCRIPTEN__
@@ -255,6 +257,17 @@ inline json parseRequest(const std::string& body) {
     });
 }
 
+// Carry an existing admission credit; this never acquires or reserves one.
+// Main's WorkBudget owns the worker payload's working-memory credit.
+inline ReplyThunk carryCaptureAdmission(ReplyThunk work, std::shared_ptr<void> admission) {
+    return [work = std::move(work), admission = std::move(admission)]() mutable {
+        auto terminalLease = std::move(admission);
+        // Destroy captured Pixels before returning their credit, on normal
+        // completion and exception unwinding, even if the thunk stays alive.
+        auto terminalWork = std::exchange(work, ReplyThunk{});
+        return terminalWork();
+    };
+}
 struct DeferredResponse {
     std::shared_ptr<WorkBudget> budget;
     json id = nullptr;  // request id retained for deferred error replies
@@ -683,14 +696,14 @@ private:
                 ds.envelope = [id, formatResult, mainStage]() -> internal::ReplyThunk {
                     std::function<json()> workerStage = mainStage();
                     auto budget = currentWorkBudget();
-                    return [id, formatResult, workerStage, budget]() -> std::string {
+                    return carryCaptureAdmission([id, formatResult, workerStage = std::move(workerStage), budget]() -> std::string {
                         WorkScope workScope(budget);
                         try {
                             return formatResult(workerStage());
                         } catch (const std::exception& e) {
                             return internal::toolError(id, boundedErrorMessage("deferred worker stage failed: ", e.what()));
                         }
-                    };
+                    }, budget);
                 };
                 return std::string();  // processHttpQueue() stashes the reply
             }

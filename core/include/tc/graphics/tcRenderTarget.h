@@ -8,6 +8,7 @@
 // =============================================================================
 #include <unordered_map>
 #include <cstdint>
+#include <climits>
 #ifndef NDEBUG
 #include <cassert>
 #endif
@@ -205,6 +206,7 @@ void returnTargetResources(RenderTargetResources& lease);
 void invalidateTargetBucket(sg_pixel_format format, int samples, sg_pixel_format depth);
 bool rebuildTargetResources();
 void prepareWindowTarget();
+void refreshWindowDrawingSize();
 
 // C++17 vectors support incomplete elements; these draw snapshots are defined
 // later in TrussC.h. Targets are constructed where those definitions are complete.
@@ -233,14 +235,17 @@ struct TargetCameraScope {
     TargetCameraState camera;
     ImmediateSelection selectedPipeline;
     const void* owner;
+    bool automaticScreenProjection = false;
 };
 
+uint64_t nextTargetOwnerId();
 struct WindowContext;
 enum class TargetPassKind { Swapchain, PublicFbo, Fixed, Transfer };
 enum class TargetPassPhase { Preparing, Rendering, Finalizing };
 enum class TargetPassStart { Initial, Resume, Clear };
 
 struct RenderTarget {
+    uint64_t ownerId = nextTargetOwnerId();
     int width = 0;
     int height = 0;
     sg_pixel_format colorFormat = _SG_PIXELFORMAT_DEFAULT;
@@ -275,6 +280,9 @@ struct RenderTarget {
     void beginPass(TargetPassStart reason);
     void endPass();
     void flushLayers();
+    bool advanceLayer();
+    void failRecording(const char* reason);
+    bool recordingFailed = false;
     void restartClear(float r, float g, float b, float a);
 
     TargetCameraState camera;
@@ -283,6 +291,12 @@ struct RenderTarget {
     Mat4 currentMatrix = Mat4::identity();
     std::vector<Mat4> matrixStack;
     ScissorRect viewport = {0, 0, 0, 0, false};
+    // Only beginFrame opts into resize-following screen state. Application
+    // camera/viewport choices opt out independently until the next frame.
+    bool automaticScreenProjection = false;
+    bool automaticViewport = false;
+    bool windowDrawingSizeStale = false;
+    int automaticScreenWidth = 0, automaticScreenHeight = 0;
     ScissorRect currentScissor = {0, 0, 0, 0, false};
     std::vector<ScissorRect> scissorStack;
     BlendMode currentBlendMode = BlendMode::Alpha;
@@ -311,6 +325,26 @@ struct RenderTarget {
         depthTestEnabled = previous.depthTestEnabled;
     }
 };
+// Container max_size and allocator failure are representation/allocation
+// failures, never a separate application quota or MCP admission decision.
+template<class Queue, class Draw>
+bool appendTargetRecording(RenderTarget& target, Queue& queue, Draw&& draw) {
+    if (target.recordingFailed) return false;
+    try {
+        if (queue.size() == queue.max_size()) {
+            target.failRecording("raw recording count cannot be represented");
+            return false;
+        }
+        queue.push_back(std::forward<Draw>(draw));
+        return true;
+    } catch (const std::bad_alloc&) {
+        target.failRecording("raw recording allocation failed");
+    } catch (const std::length_error&) {
+        target.failRecording("raw recording size cannot be represented");
+    }
+    return false;
+}
+
 // Stack entries use tokens, never addresses into the growable entry vector.
 struct TargetStackEntry {
     RenderTarget* target;
@@ -324,6 +358,63 @@ uint64_t pushTarget(RenderTarget& target, bool prepareOnly = false);
 bool startPreparedTarget(RenderTarget& target, uint64_t token);
 bool popTarget(RenderTarget& target, uint64_t token);
 void ensureCurrentPass();
+void parkWindowPass();
+void submitCapturePrefix();
+// Window: a capture of the current window's pixels; even a never-opened pass
+// starts so its clear and recorded prefix reach the source.
+// Target: an Fbo readback; only an open pass is parked and resumed, as with
+// Metal's transfer target, so the caller's swapchain pass state is unchanged.
+enum class CaptureSource { Window, Target };
+class CapturePrefixScope {
+public:
+    explicit CapturePrefixScope(CaptureSource source = CaptureSource::Window);
+    ~CapturePrefixScope() noexcept;
+    // A failed native capture must not retry a stalled GPU slot just to resume.
+    void leaveParked() noexcept { resume_ = false; }
+    CapturePrefixScope(const CapturePrefixScope&) = delete;
+    CapturePrefixScope& operator=(const CapturePrefixScope&) = delete;
+private:
+    WindowContext* window_;
+    RenderTarget* target_;
+    uint64_t token_;
+    bool resume_;
+};
+// Q2 plug-in: source selection/finalization stay behind this host interface.
+// Part 1 uses the existing native swapchain source; it allocates no snapshot.
+// Bound (abi): native capture/encoder row strides must fit int and allocation byte products must fit size_t. Overflow is reported by captureLayout returning false.
+inline bool captureLayout(int width, int height, size_t bytesPerPixel,
+                          size_t& rowBytes, size_t& totalBytes) {
+    if (width <= 0 || height <= 0 || !bytesPerPixel ||
+        static_cast<size_t>(width) > static_cast<size_t>(INT_MAX) / bytesPerPixel) return false;
+    rowBytes = static_cast<size_t>(width) * bytesPerPixel;
+    if (static_cast<size_t>(height) > SIZE_MAX / rowBytes) return false;
+    totalBytes = rowBytes * static_cast<size_t>(height);
+    return true;
+}
+struct WindowCaptureSource {
+    sg_swapchain swapchain = {};
+    const void* drawable = nullptr;
+    int width = 0, height = 0;
+};
+WindowCaptureSource windowCaptureSource();
+bool finishWindowCaptureSource(RenderTarget& target);
+// One host-allocated generation per shadow-using window. Deferred PBR retains
+// its generation; final release links it into host retirement without allocating.
+struct ShadowStorage {
+    ShadowStorage() = default;
+    ShadowStorage(const ShadowStorage&) = delete;
+    ShadowStorage& operator=(const ShadowStorage&) = delete;
+    ~ShadowStorage() noexcept;
+    sg_image colorImage = {}, depthImage = {};
+    sg_view colorAttachments[4] = {}, colorTexture = {}, depthAttachment = {};
+    sg_sampler sampler = {};
+    int resolution = 0;
+    size_t imageBytes = 0;
+    ShadowStorage* retiredNext = nullptr;
+};
+bool shadowImageLayout(int resolution, size_t& colorBytes, size_t& depthBytes, size_t& totalBytes);
+bool ensureShadowStorage(WindowContext& window, int resolution);
+void consumeShadowSlot(int slot);
 bool hasPublicFboActivation();
 RenderTargetResources* leaseTargetResources(sg_pixel_format format, int samples,
     sg_pixel_format depth = SG_PIXELFORMAT_DEPTH_STENCIL);

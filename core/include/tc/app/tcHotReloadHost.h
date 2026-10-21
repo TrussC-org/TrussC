@@ -189,11 +189,10 @@ struct GuestLibrary {
         // them (#416). Dispatched on the main window's events, whichever
         // window context is current.
         if (app) {
-            internal::WindowContext*& current = internal::currentWindowCtx();
-            internal::WindowContext* prev = current;
-            current = &internal::mainWindowContext();
+            auto* prev = internal::currentWindowCtx();
+            internal::restoreWindowContext(nullptr);
             events().hotReloadUnload.notify();
-            current = prev;
+            internal::restoreWindowContext(prev);
         }
         // Drop the window contexts' weak references first (hover, grab,
         // selection, the main root; #255). Releasing the last weak reference

@@ -3,9 +3,351 @@
 // =============================================================================
 
 #include "TrussC.h"
+#include "impl/tcImageDecode.h"
+#include <atomic>
+#include <new>
+#include <string_view>
+#ifdef __EMSCRIPTEN__
+#include <emscripten/console.h>
+#endif
 #include "stb/stb_image_write.h"
 
 namespace trussc {
+
+namespace internal {
+namespace {
+std::atomic<int> imageDecodeLimit{0};
+std::atomic<uint64_t> imageDecodeRejections{0};
+thread_local ImageDecodeAllocationScope* imageDecodeAllocation = nullptr;
+thread_local int64_t imageDecodeFailAfter = -1;
+thread_local size_t imageDecodeAllocationAttempts = 0;
+thread_local size_t imageDecodeLargestAllocation = 0;
+constexpr size_t encodedImageLimit = 64 * 1024 * 1024;
+}
+void recordImageDecodeLimit(int axis) { imageDecodeLimit.store(axis > 0 ? axis : 0, std::memory_order_relaxed); }
+int imageDecodeAxisLimit() {
+    const int axis = imageDecodeLimit.load(std::memory_order_relaxed);
+    return axis > 0 ? axis : 16384;
+}
+uint64_t imageDecodeRejectionsForTests() { return imageDecodeRejections.load(std::memory_order_relaxed); }
+LoadResult rejectImageDecode(LoadError error, const char* message) {
+    if (imageDecodeRejections.fetch_add(1, std::memory_order_relaxed) == 0)
+        getLogger().log(LogLevel::Warning, std::string("[Pixels] image rejected: ") + message + "; further rejections are counted");
+    return LoadResult::fail(error, message);
+}
+LoadResult imageDecodeOutOfMemory() noexcept {
+    LoadResult result;
+    result.error = LoadError::Unknown;
+#ifdef __EMSCRIPTEN__
+    // Web disables exception catching: even Logger's timestamp can allocate.
+    emscripten_console_error("[Pixels] image allocation failed");
+#else
+    try { result.message = "image allocation failed"; } catch (...) {}
+    // Never use LogStream here: its noexcept destructor allocates.
+    try { getLogger().log(LogLevel::Error, "[Pixels] image allocation failed"); } catch (...) {}
+#endif
+    return result;
+}
+
+LoadResult admitImageEncodedSize(size_t bytes) {
+    // Bound (security): 64 MiB limits untrusted encoded input storage before decoding. Overflow rejects the whole image and is counted.
+    if (bytes > encodedImageLimit)
+        return rejectImageDecode(LoadError::TooLarge,
+            ("encoded size " + std::to_string(bytes) + " exceeds 64 MiB").c_str());
+    return LoadResult::success();
+}
+LoadResult admitImageDimensions(int64_t width, int64_t height, size_t channels, size_t elementBytes) {
+    if (width <= 0 || height <= 0 || channels == 0 || elementBytes == 0)
+        return LoadResult::fail(LoadError::DecodeFailed, "invalid image dimensions or format");
+    // Bound (gpu): decoded axes must fit the recorded GPU texture limit (16384 when unknown). Overflow rejects the whole image and is counted.
+    const int axis = imageDecodeAxisLimit();
+    if (width > axis || height > axis)
+        return rejectImageDecode(LoadError::TooLarge,
+            (std::to_string(width) + "x" + std::to_string(height) +
+             " exceeds the GPU limit of " + std::to_string(axis) + " per axis").c_str());
+    // Bound (abi): all decoded pixel/channel/element products must fit size_t. Overflow rejects the whole image and is counted.
+    const size_t available = std::numeric_limits<size_t>::max();
+    if (uint64_t(width) > available / uint64_t(height) ||
+        size_t(width) * size_t(height) > available / channels ||
+        size_t(width) * size_t(height) * channels > available / elementBytes)
+        return rejectImageDecode(LoadError::TooLarge,
+            ("pixel store " + std::to_string(width) + "x" + std::to_string(height) +
+             " x " + std::to_string(channels) + " channels x " + std::to_string(elementBytes) +
+             " bytes exceeds size_t capacity " + std::to_string(available)).c_str());
+    return LoadResult::success();
+}
+LoadResult admitImageHeader(const unsigned char* bytes, size_t length) {
+    // PIC info also checks a pixel product before returning dimensions.
+    // Validate its fixed header and bounded packet table before admission.
+    if (length >= 108 && !std::memcmp(bytes, "\x53\x80\xf6\x34", 4) &&
+        !std::memcmp(bytes + 88, "PICT", 4)) {
+        // Bound (abi): PIC metadata must fit stb's ten packet descriptors. Overflow returns DecodeFailed.
+        for (size_t packet = 0; packet < 10; ++packet) {
+            const size_t at = 104 + packet * 4;
+            if (at + 4 > length || bytes[at] > 1 || bytes[at + 1] != 8 ||
+                bytes[at + 2] > 2 || !(bytes[at + 3] & 0xf0) || (bytes[at + 3] & 0x0f))
+                return LoadResult::fail(LoadError::DecodeFailed, "invalid PIC header");
+            if (!bytes[at]) return admitImageDimensions((unsigned(bytes[92]) << 8) | bytes[93],
+                (unsigned(bytes[94]) << 8) | bytes[95], 4, 1);
+        }
+        return LoadResult::fail(LoadError::DecodeFailed, "invalid PIC packets");
+    }
+    // stb narrows HDR's original strtol fields to int. Validate the text
+    // before either its info or float decoder can accept a wrapped canvas.
+    if ((length >= 11 && !std::memcmp(bytes, "#?RADIANCE\n", 11)) ||
+        (length >= 7 && !std::memcmp(bytes, "#?RGBE\n", 7))) {
+        size_t at = 0;
+        auto line = [&](std::string_view& value) {
+            const size_t start = at;
+            while (at < length && bytes[at] != '\n') {
+                // stb's C-string tokens end at NUL, so it must not select a different header/resolution.
+                if (bytes[at] == 0) return false;
+                ++at;
+            }
+            if (at == length) return false;
+            value = std::string_view(reinterpret_cast<const char*>(bytes + start), at - start);
+            ++at;
+            return true;
+        };
+        auto invalid = [] { return LoadResult::fail(LoadError::DecodeFailed, "invalid HDR resolution"); };
+        std::string_view text;
+        bool format = false;
+        if (!line(text)) return invalid();
+        for (;;) {
+            if (!line(text)) return invalid();
+            if (text.empty()) break;
+            if (text == "FORMAT=32-bit_rle_rgbe") format = true;
+        }
+        // Bound (abi): HDR resolution must fit stb's 1024-byte token. Overflow returns DecodeFailed.
+        if (!text.empty() || !format || !line(text) || text.size() >= 1024 || text.substr(0, 3) != "-Y ")
+            return invalid();
+        text.remove_prefix(3);
+        auto spaces = [&] {
+            while (!text.empty() && (text.front() == ' ' || text.front() == '\t' || text.front() == '\r' ||
+                   text.front() == '\v' || text.front() == '\f')) text.remove_prefix(1);
+        };
+        auto number = [&](int& value) {
+            spaces();
+            if (!text.empty() && text.front() == '+') text.remove_prefix(1);
+            value = 0;
+            bool digits = false;
+            while (!text.empty() && text.front() >= '0' && text.front() <= '9') {
+                const int digit = text.front() - '0';
+                // Bound (abi): original HDR fields must fit positive int before narrowing. Overflow returns DecodeFailed.
+                if (value > (INT32_MAX - digit) / 10) return false;
+                value = value * 10 + digit;
+                digits = true;
+                text.remove_prefix(1);
+            }
+            return digits && value > 0;
+        };
+        int width = 0, height = 0;
+        if (!number(height)) return invalid();
+        // Match stb's supported -Y / +X orientation and separator.
+        while (!text.empty() && text.front() == ' ') text.remove_prefix(1);
+        if (text.substr(0, 3) != "+X ") return invalid();
+        text.remove_prefix(3);
+        if (!number(width)) return invalid();
+        spaces();
+        if (!text.empty()) return invalid();
+        return admitImageDimensions(width, height, 4, sizeof(float));
+    }
+    // PNG's info parser applies its own axis/product limits inside IHDR.
+    // Walk supported prefix chunks with checked spans before inspecting IHDR.
+    static constexpr unsigned char signature[]{137,80,78,71,13,10,26,10};
+    if (length < 8 || std::memcmp(bytes, signature, 8)) return LoadResult::success();
+    auto be32 = [&](size_t at) {
+        return (uint32_t(bytes[at]) << 24) | (uint32_t(bytes[at + 1]) << 16) |
+               (uint32_t(bytes[at + 2]) << 8) | bytes[at + 3];
+    };
+    size_t chunk = 8;
+    for (;;) {
+        if (length - chunk < 12 || be32(chunk) > length - chunk - 12)
+            return LoadResult::fail(LoadError::DecodeFailed, "invalid PNG chunk span");
+        const size_t size = be32(chunk);
+        if (!std::memcmp(bytes + chunk + 4, "IHDR", 4)) {
+            if (size != 13) return LoadResult::fail(LoadError::DecodeFailed, "invalid PNG IHDR size");
+            break;
+        }
+        if (std::memcmp(bytes + chunk + 4, "CgBI", 4))
+            return LoadResult::fail(LoadError::DecodeFailed, "invalid PNG prefix chunk");
+        uint32_t crc = 0xffffffffu;
+        for (size_t i = chunk + 4; i < chunk + 8 + size; ++i) {
+            crc ^= bytes[i];
+            for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u)));
+        }
+        if (~crc != be32(chunk + 8 + size))
+            return LoadResult::fail(LoadError::DecodeFailed, "invalid PNG prefix CRC");
+        chunk += size + 12;
+    }
+    const auto width = be32(chunk + 8), height = be32(chunk + 12);
+    const unsigned depth = bytes[chunk + 16], color = bytes[chunk + 17];
+    const bool validDepth = (color == 0 && (depth == 1 || depth == 2 || depth == 4 || depth == 8 || depth == 16)) ||
+        (color == 3 && (depth == 1 || depth == 2 || depth == 4 || depth == 8)) ||
+        ((color == 2 || color == 4 || color == 6) && (depth == 8 || depth == 16));
+    uint32_t crc = 0xffffffffu;
+    for (size_t i = chunk + 4; i < chunk + 21; ++i) {
+        crc ^= bytes[i];
+        for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u)));
+    }
+    if (!width || !height || width > INT32_MAX || height > INT32_MAX || !validDepth ||
+        bytes[chunk + 18] || bytes[chunk + 19] || bytes[chunk + 20] > 1 || ~crc != be32(chunk + 21))
+        return LoadResult::fail(LoadError::DecodeFailed, "invalid PNG IHDR");
+    return admitImageDimensions(width, height, 4, depth == 16 ? 2 : 1);
+}
+ImageDecodeAllocationScope::ImageDecodeAllocationScope() : previous_(imageDecodeAllocation) {
+    imageDecodeAllocation = this;
+}
+ImageDecodeAllocationScope::~ImageDecodeAllocationScope() { imageDecodeAllocation = previous_; }
+void failImageDecodeAllocationAfterForTests(int64_t count) {
+    imageDecodeFailAfter = count;
+    imageDecodeAllocationAttempts = 0;
+    imageDecodeLargestAllocation = 0;
+}
+size_t imageDecodeAllocationAttemptsForTests() { return imageDecodeAllocationAttempts; }
+size_t imageDecodeLargestAllocationForTests() { return imageDecodeLargestAllocation; }
+bool imageDecodeAllocationAllowed(size_t bytes) {
+    if (imageDecodeAllocation) imageDecodeLargestAllocation = std::max(imageDecodeLargestAllocation, bytes);
+    if (!imageDecodeAllocation) return true;
+    ++imageDecodeAllocationAttempts;
+    if (imageDecodeFailAfter < 0) return true;
+    if (imageDecodeFailAfter > 0) { --imageDecodeFailAfter; return true; }
+    imageDecodeAllocation->failed_ = true;
+    return false;
+}
+void imageDecodeAllocationFailed() {
+    if (imageDecodeAllocation) imageDecodeAllocation->failed_ = true;
+}
+namespace {
+template<class Allocate>
+LoadResult readEncodedImageImpl(const fs::path& path, size_t& length, Allocate allocate) {
+    LoadResult entry;
+    auto closeFile = [](FILE* handle) { std::fclose(handle); };
+    std::unique_ptr<FILE, decltype(closeFile)> file(openLoadFile(path, "Pixels", entry), closeFile);
+    if (!file) return entry;
+    std::error_code ec;
+    const auto fileLength = fs::file_size(path, ec);
+    if (ec) return LoadResult::fail(LoadError::DecodeFailed, "cannot determine encoded image size");
+    // Check the file size before reading even one byte, and recheck growth below.
+    if (fileLength > encodedImageLimit) return admitImageEncodedSize(fileLength > SIZE_MAX ? SIZE_MAX : size_t(fileLength));
+    if (!fileLength) return LoadResult::fail(LoadError::DecodeFailed, "empty encoded image");
+    length = size_t(fileLength);
+    ImageDecodeAllocationScope allocation;
+    try {
+        // One immutable, admitted snapshot also prevents a path change between
+        // metadata inspection and decoding (including the ImageIO fallback).
+        auto* bytes = imageDecodeAllocationAllowed() ? allocate(length) : nullptr;
+        if (!bytes && length) return imageDecodeOutOfMemory();
+        if (std::fread(bytes, 1, length, file.get()) != length ||
+            std::ferror(file.get()))
+            return LoadResult::fail(LoadError::DecodeFailed, "cannot read encoded image");
+        if (std::fgetc(file.get()) != EOF)
+            return LoadResult::fail(LoadError::DecodeFailed, "encoded image changed while reading");
+        return LoadResult::success();
+    } catch (const std::bad_alloc&) { return imageDecodeOutOfMemory(); }
+}
+} // namespace
+LoadResult readEncodedImage(const fs::path& path, std::unique_ptr<unsigned char[]>& bytes, size_t& length) {
+    return readEncodedImageImpl(path, length, [&](size_t count) {
+        bytes.reset(new (std::nothrow) unsigned char[count]);
+        return bytes.get();
+    });
+}
+} // namespace internal
+
+LoadResult Pixels::loadEncoded(const unsigned char* buffer, int len, bool asFloat) {
+    if (len < 0 || !buffer || len == 0)
+        return LoadResult::fail(LoadError::DecodeFailed, "invalid encoded image data");
+    auto admitted = internal::admitImageEncodedSize(size_t(len));
+    if (!admitted) return admitted;
+    admitted = internal::admitImageHeader(buffer, size_t(len));
+    if (!admitted) return admitted;
+    internal::ImageDecodeAllocationScope allocation;
+    int w = 0, h = 0, channels = 0;
+    if (!stbi_info_from_memory(buffer, len, &w, &h, &channels))
+        return allocation.failed() ? internal::imageDecodeOutOfMemory() :
+            LoadResult::fail(LoadError::DecodeFailed, stbi_failure_reason() ? stbi_failure_reason() : "decoder rejected image metadata");
+    const bool hdr = stbi_is_hdr_from_memory(buffer, len) != 0;
+    const size_t sourceElement = hdr || asFloat ? sizeof(float) :
+        stbi_is_16_bit_from_memory(buffer, len) ? 2 : 1;
+    // HDR-to-U8 also uses a float intermediate. Check source channels as well
+    // as RGBA output; GIF's first-frame/background/history buffers stay scoped
+    // to the same admitted canvas. No animation stack is loaded by Pixels.
+    admitted = internal::admitImageDimensions(w, h, size_t(channels), sourceElement);
+    if (!admitted) return admitted;
+    admitted = internal::admitImageDimensions(w, h, 4, sourceElement);
+    if (!admitted) return admitted;
+    int decodedW = 0, decodedH = 0, decodedChannels = 0;
+    using Decoded = std::unique_ptr<void, decltype(&stbi_image_free)>;
+    Decoded decoded(asFloat ? static_cast<void*>(stbi_loadf_from_memory(buffer, len, &decodedW, &decodedH, &decodedChannels, 3)) :
+                             static_cast<void*>(stbi_load_from_memory(buffer, len, &decodedW, &decodedH, &decodedChannels, 4)),
+                    &stbi_image_free);
+    if (allocation.failed()) { decoded.reset(); return internal::imageDecodeOutOfMemory(); }
+    if (!decoded) return LoadResult::fail(LoadError::DecodeFailed, stbi_failure_reason() ? stbi_failure_reason() : "decoder rejected image data");
+    if (decodedW != w || decodedH != h)
+        return LoadResult::fail(LoadError::DecodeFailed, "decoded image dimensions changed");
+    try {
+        // Allocate first; publish dimensions and storage only after a full copy.
+        const size_t count = size_t(w) * size_t(h);
+        if (asFloat) {
+            std::unique_ptr<float[]> output(internal::imageDecodeAllocationAllowed()
+                ? new (std::nothrow) float[count * 4] : nullptr);
+            if (!output) { decoded.reset(); return internal::imageDecodeOutOfMemory(); }
+            const auto* source = static_cast<const float*>(decoded.get());
+            for (size_t i = 0; i < count; ++i) {
+                for (size_t c = 0; c < 3; ++c) output[i * 4 + c] = source[i * 3 + c];
+                output[i * 4 + 3] = 1.0f;
+            }
+            data_ = output.release();
+        } else {
+            std::unique_ptr<unsigned char[]> output(internal::imageDecodeAllocationAllowed()
+                ? new (std::nothrow) unsigned char[count * 4] : nullptr);
+            if (!output) { decoded.reset(); return internal::imageDecodeOutOfMemory(); }
+            std::memcpy(output.get(), decoded.get(), count * 4);
+            data_ = output.release();
+        }
+        width_ = w;
+        height_ = h;
+        channels_ = 4;
+        format_ = asFloat ? PixelFormat::F32 : PixelFormat::U8;
+        allocated_ = true;
+        return LoadResult::success();
+    } catch (const std::bad_alloc&) { decoded.reset(); return internal::imageDecodeOutOfMemory(); }
+}
+LoadResult Pixels::loadFile(const fs::path& filePath, bool asFloat) {
+    clear();
+    try {
+        const auto path = internal::resolveLoadPath(filePath);
+        std::unique_ptr<unsigned char[]> bytes;
+        size_t length = 0;
+        // Emscripten defaults to disabled exception catching: bulk decoder I/O
+        // must also handle allocation failure through a null result.
+        auto result = internal::readEncodedImageImpl(path, length, [&](size_t count) {
+            bytes.reset(new (std::nothrow) unsigned char[count]);
+            return bytes.get();
+        });
+        if (!result) return result;
+        result = loadEncoded(bytes.get(), int(length), asFloat);
+#ifdef __APPLE__
+        if (!result && result.error == LoadError::DecodeFailed && !asFloat &&
+            internal::admitImageHeader(bytes.get(), length))
+            result = internal::decodePlatformImage(*this, bytes.get(), length);
+#endif
+        return result;
+    } catch (const std::bad_alloc&) {
+        return internal::imageDecodeOutOfMemory();
+    }
+}
+LoadResult Pixels::load(const fs::path& path) { return loadFile(path, false); }
+LoadResult Pixels::loadHDR(const fs::path& path) { return loadFile(path, true); }
+LoadResult Pixels::loadFromMemory(const unsigned char* buffer, int len) try {
+    clear();
+    auto result = loadEncoded(buffer, len, false);
+    return result;
+} catch (const std::bad_alloc&) {
+    clear();
+    return internal::imageDecodeOutOfMemory();
+}
 
 SaveResult internal::writePixelsEncoded(std::FILE* file, const Pixels& pixels,
                                         const std::string& ext, const fs::path& path) {
@@ -120,6 +462,13 @@ void Pixels::halve() {
     Pixels dst;
     dst.allocate(newW, newH, channels_, format_);
 
+    halveInto(dst);
+    *this = std::move(dst);
+}
+
+// Both normal transforms and image-load mips use the same sampling math.
+void Pixels::halveInto(Pixels& dst) const {
+    const int newW = dst.width_, newH = dst.height_;
     const bool isF32 = (format_ == PixelFormat::F32);
     const int   ch    = channels_;
     const int   sw    = width_;
@@ -161,7 +510,32 @@ void Pixels::halve() {
         }
     }
 
-    *this = std::move(dst);
+}
+
+bool internal::ImageLoadAccess::allocate(Pixels& pixels, int width, int height, bool asFloat) {
+    size_t count = 0;
+    if (!pixelBufferCount(width, height, 4, asFloat ? sizeof(float) : 1, SIZE_MAX, count)) return false;
+    void* data = nullptr;
+    if (imageDecodeAllocationAllowed(count * (asFloat ? sizeof(float) : 1))) {
+        if (asFloat) data = new (std::nothrow) float[count];
+        else data = new (std::nothrow) unsigned char[count];
+    }
+    if (!data) { imageDecodeAllocationFailed(); return false; }
+    pixels.clear();
+    pixels.data_ = data;
+    pixels.width_ = width;
+    pixels.height_ = height;
+    pixels.channels_ = 4;
+    pixels.format_ = asFloat ? PixelFormat::F32 : PixelFormat::U8;
+    pixels.allocated_ = true;
+    return true;
+}
+
+bool internal::ImageLoadAccess::mipLevel(Pixels& destination, const Pixels& source) {
+    if (!allocate(destination, std::max(source.width_ / 2, 1),
+                  std::max(source.height_ / 2, 1), source.isFloat())) return false;
+    source.halveInto(destination);
+    return true;
 }
 
 void Pixels::crop(int x, int y, int w, int h) {

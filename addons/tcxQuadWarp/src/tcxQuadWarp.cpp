@@ -1,9 +1,112 @@
 #include "tcxQuadWarp.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
 namespace tcx::quadwarp {
+
+namespace {
+bool isConvex(const tc::Vec2 (&points)[4]) {
+    double winding = 0;
+    for (int i = 0; i < 4; ++i) {
+        const auto& a = points[i];
+        const auto& b = points[(i + 1) % 4];
+        const auto& c = points[(i + 2) % 4];
+        if (!std::isfinite(a.x) || !std::isfinite(a.y)) return false;
+        const double cross = (double(b.x) - a.x) * (double(c.y) - b.y) -
+                             (double(b.y) - a.y) * (double(c.x) - b.x);
+        if (cross == 0 || (i > 0 && (cross > 0) != (winding > 0))) return false;
+        winding = cross;
+    }
+    return true;
+}
+
+// Keep projection and inversion in double precision: a small quad's translation
+// can be much larger than its extent. The public rendering matrix stays intact.
+struct Homography {
+    double m[9];
+};
+
+Homography multiply(const Homography& a, const Homography& b) {
+    Homography result{};
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 3; ++c)
+            for (int k = 0; k < 3; ++k)
+                result.m[3 * r + c] += a.m[3 * r + k] * b.m[3 * k + c];
+    return result;
+}
+
+bool project(const Homography& matrix, const tc::Vec2& point, tc::Vec2& output) {
+    const auto& h = matrix.m;
+    const double x = h[0] * point.x + h[1] * point.y + h[2];
+    const double y = h[3] * point.x + h[4] * point.y + h[5];
+    const double w = h[6] * point.x + h[7] * point.y + h[8];
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(w) || w <= 0) return false;
+    const double px = x / w, py = y / w;
+    const double limit = std::numeric_limits<float>::max();
+    if (!std::isfinite(px) || !std::isfinite(py) || std::abs(px) > limit || std::abs(py) > limit) return false;
+    output = tc::Vec2(static_cast<float>(px), static_cast<float>(py));
+    return true;
+}
+
+bool validHomography(const tc::Vec2 (&src)[4], const tc::Vec2 (&dst)[4],
+                     const tc::Mat4& matrix, Homography& homography) {
+    if (!isConvex(src) || !isConvex(dst)) return false;
+    for (float value : matrix.m) if (!std::isfinite(value)) return false;
+    homography = {{matrix.m[0], matrix.m[1], matrix.m[3],
+                   matrix.m[4], matrix.m[5], matrix.m[7],
+                   matrix.m[12], matrix.m[13], matrix.m[15]}};
+    // getHomography() falls back to identity when its solver fails. Verify
+    // corner correspondence so that fallback cannot masquerade as a valid warp.
+    const tc::Mat4 identity;
+    const bool isIdentity = std::equal(matrix.m, matrix.m + 16, identity.m);
+    float scale = 1;
+    for (const auto& point : dst) {
+        scale = std::max(scale, std::max(std::abs(point.x), std::abs(point.y)));
+    }
+    for (int i = 0; i < 4; ++i) {
+        tc::Vec2 corner;
+        if ((isIdentity && src[i] != dst[i]) || !project(homography, src[i], corner) ||
+            std::abs(corner.x - dst[i].x) > 1e-4f * scale ||
+            std::abs(corner.y - dst[i].y) > 1e-4f * scale) return false;
+    }
+    return true;
+}
+
+bool invertHomography(const Homography& matrix, const tc::Vec2 (&src)[4],
+                      const tc::Vec2 (&dst)[4], Homography& inverse) {
+    // Express both quads relative to their own first corner and extent before
+    // testing singularity. Absolute screen offsets must not affect the cutoff.
+    auto extent = [](const tc::Vec2 (&points)[4]) {
+        double scale = 0;
+        for (const auto& p : points)
+            scale = std::max(scale, std::max(std::abs(double(p.x) - points[0].x),
+                                            std::abs(double(p.y) - points[0].y)));
+        return scale;
+    };
+    const double s = extent(src), d = extent(dst);
+    if (!(s > 0) || !(d > 0)) return false;
+    const Homography sourceFrame{{s, 0, src[0].x, 0, s, src[0].y, 0, 0, 1}};
+    const Homography targetFrame{{1 / d, 0, -double(dst[0].x) / d,
+                                  0, 1 / d, -double(dst[0].y) / d, 0, 0, 1}};
+    const auto normalized = multiply(targetFrame, multiply(matrix, sourceFrame));
+    const auto& h = normalized.m;
+    Homography adjugate{{h[4]*h[8] - h[5]*h[7], h[2]*h[7] - h[1]*h[8], h[1]*h[5] - h[2]*h[4],
+                          h[5]*h[6] - h[3]*h[8], h[0]*h[8] - h[2]*h[6], h[2]*h[3] - h[0]*h[5],
+                          h[3]*h[7] - h[4]*h[6], h[1]*h[6] - h[0]*h[7], h[0]*h[4] - h[1]*h[3]}};
+    const double determinant = h[0]*adjugate.m[0] + h[1]*adjugate.m[3] + h[2]*adjugate.m[6];
+    double columnProduct = 1;
+    for (int c = 0; c < 3; ++c)
+        columnProduct *= std::hypot(h[c], h[3 + c], h[6 + c]);
+    if (!std::isfinite(determinant) || !std::isfinite(columnProduct) ||
+        std::abs(determinant) <= 64 * std::numeric_limits<double>::epsilon() * columnProduct) return false;
+    for (double& value : adjugate.m) value /= determinant;
+    inverse = multiply(sourceFrame, multiply(adjugate, targetFrame));
+    for (double value : inverse.m) if (!std::isfinite(value)) return false;
+    return true;
+}
+} // namespace
 
 QuadWarp::QuadWarp() {
     // Default points
@@ -84,6 +187,21 @@ tc::Mat4 QuadWarp::getMatrix() const {
 
     // Convert to 4x4 (row-major, multMatrix handles column-major conversion)
     return tc::Mat4::fromHomography(h);
+}
+
+bool QuadWarp::screenToSource(const tc::Vec2& screen, tc::Vec2& source) const {
+    const tc::Mat4 matrix = getMatrix();
+    Homography homography, inverse;
+    if (!validHomography(srcPoints, dstPoints, matrix, homography) ||
+        !invertHomography(homography, srcPoints, dstPoints, inverse)) return false;
+    return project(inverse, screen, source);
+}
+
+bool QuadWarp::sourceToScreen(const tc::Vec2& source, tc::Vec2& screen) const {
+    const tc::Mat4 matrix = getMatrix();
+    Homography homography;
+    if (!validHomography(srcPoints, dstPoints, matrix, homography)) return false;
+    return project(homography, source, screen);
 }
 
 void QuadWarp::setInputEnabled(bool enabled) {

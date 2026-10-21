@@ -35,6 +35,9 @@ endif()
 
 # trussc_compile_shaders() (also used by core and addons)
 include("${CMAKE_CURRENT_LIST_DIR}/trussc_shaders.cmake")
+if(CMAKE_GENERATOR MATCHES "Makefiles")
+    include("${CMAKE_CURRENT_LIST_DIR}/tc_shared_build.cmake")
+endif()
 
 macro(trussc_app)
     # Keep the binary deployment target and Info.plist minimum consistent,
@@ -111,6 +114,33 @@ macro(trussc_app)
     # Visual Studio keep the shared folder above.
     if(CMAKE_GENERATOR MATCHES "Ninja")
         set(_TC_BUILD_DIR "${CMAKE_BINARY_DIR}/trussc")
+    endif()
+    # CMake's Makefile generators (Unix, MinGW, MSYS and NMake) share rules
+    # with paths relative to the configuring app, so switching apps must
+    # regenerate them (#885). Visual Studio and Xcode keep the shared folder
+    # without this mechanism; Ninja uses the per-app folder above.
+    if(CMAKE_GENERATOR MATCHES "Makefiles")
+        # The timestamp dependency handles ordinary switches; a build-time
+        # content check also catches equal timestamps.
+        set(_TC_CONFIGURE_STAMP "${_TC_BUILD_DIR}/.tc_configure_owner")
+        tc_shared_build_read_owner("${_TC_CONFIGURE_STAMP}" _TC_CONFIGURE_OWNER)
+        # Repeated configures/builds of the same app leave this input alone.
+        if(NOT "${_TC_CONFIGURE_OWNER}" STREQUAL "${CMAKE_BINARY_DIR}")
+            file(WRITE "${_TC_CONFIGURE_STAMP}" "${CMAKE_BINARY_DIR}")
+        endif()
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+            "${_TC_CONFIGURE_STAMP}")
+        add_custom_target(_tc_shared_build_check
+            COMMAND "${CMAKE_COMMAND}"
+                "-DTC_SHARED_STAMP=${_TC_CONFIGURE_STAMP}"
+                "-DTC_SHARED_OWNER=${CMAKE_BINARY_DIR}"
+                -P "${TRUSSC_DIR}/cmake/tc_check_shared_build.cmake"
+            VERBATIM)
+        # Defer target guarding until all app/core/addon/guest targets exist.
+        # Freeze the path now: DEFER runs in the top-level directory scope.
+        cmake_language(EVAL CODE "
+            cmake_language(DEFER DIRECTORY [==[${CMAKE_SOURCE_DIR}]==]
+                CALL tc_shared_build_guard_targets [==[${CMAKE_SOURCE_DIR}]==])")
     endif()
 
     if(NOT TARGET TrussC)

@@ -33,7 +33,8 @@ struct AdapterState {
 
 // Swapchain provider handed to WindowContext::acquireSwapchain. Unlike Metal
 // there is no per-frame drawable: the flip-model backbuffer views persist and
-// are simply handed back (they are only valid during this window's tick).
+// are simply handed back until resize/destruction, including nested execution
+// by the coordinator outside this window's native tick.
 sg_swapchain acquireSecondarySwapchain(void* user) {
     auto* st = static_cast<AdapterState*>(user);
     sg_swapchain sc = {};
@@ -100,7 +101,7 @@ void windowTick(sapp_window swin, void* user) {
     }
 
     auto* prev = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &ctx;
+    internal::restoreWindowContext(&ctx);
 
     // Per-window frame count (Fix 3): advance this window's own tick counter so
     // getFrameCount()/getUpdateCount() report it while this context is active.
@@ -130,12 +131,16 @@ void windowTick(sapp_window swin, void* user) {
         win->tickTree();
     }
 
-    const Color& cc = win->clearColor_;
-    clear(cc.r, cc.g, cc.b, cc.a);
-    win->events().draw.notify();
-    win->drawTreeNow();
+    {
+        internal::refreshWindowDrawingSize();
+        internal::EntryStackGuard drawEntry(internal::AppEntry::Draw);
+        const Color& cc = win->clearColor_;
+        clear(cc.r, cc.g, cc.b, cc.a);
+        win->events().draw.notify();
+        win->drawTreeNow();
 
-    present();
+        present();
+    }
     {
         // This window's afterFrame listeners are an entry point (#349).
         internal::EntryStackGuard guard(internal::AppEntry::AfterFrame);
@@ -378,17 +383,7 @@ void Window::setTitle(const std::string& title) {
 void Window::setSize(int width, int height) {
     auto* st = static_cast<AdapterState*>(native_);
     if (!st) return;
-    HWND hwnd = (HWND)(void*)sapp_window_win32_get_hwnd(st->win);
-    if (!hwnd) return;
-    // Logical -> physical client size via this window's DPI scale, then grow to
-    // the outer window rect so the CLIENT area ends up the requested size.
-    float s = ctx_.dpiScale > 0.0f ? ctx_.dpiScale : 1.0f;
-    RECT r = {0, 0, (LONG)(width * s), (LONG)(height * s)};
-    DWORD style   = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
-    DWORD exStyle = (DWORD)GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-    AdjustWindowRectEx(&r, style, FALSE, exStyle);
-    SetWindowPos(hwnd, nullptr, 0, 0, r.right - r.left, r.bottom - r.top,
-                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    internal::setWindowSizeWin32(sapp_window_win32_get_hwnd(st->win), width, height);
 }
 
 void Window::setPosition(int x, int y) {
@@ -511,6 +506,9 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     win->ctx_.swapchainTarget.sampleCount = sapp_window_sample_count(st->win);
     win->ctx_.swapchainTarget.width = sapp_window_framebuffer_width(st->win);
     win->ctx_.swapchainTarget.height = sapp_window_framebuffer_height(st->win);
+    win->ctx_.fbWidth = win->ctx_.swapchainTarget.width;
+    win->ctx_.fbHeight = win->ctx_.swapchainTarget.height;
+    win->ctx_.dpiScale = sapp_window_dpi_scale(st->win);
     win->native_ = st;
     win->ctx_.acquireSwapchain = &acquireSecondarySwapchain;
     win->ctx_.acquireSwapchainUser = st;

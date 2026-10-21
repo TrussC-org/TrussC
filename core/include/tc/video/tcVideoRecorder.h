@@ -57,7 +57,7 @@
 #endif
 
 // macOS-only: ScreenRecorder captures the swapchain asynchronously to avoid a
-// per-frame GPU stall. Elsewhere it falls back to the synchronous grabScreen().
+// per-frame GPU stall. Elsewhere it uses the internal synchronous captureWindow().
 #if defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)
     #define TC_ASYNC_SCREEN_CAPTURE 1
 #else
@@ -176,7 +176,11 @@ public:
         if (!layout.byteSize || layout.byteSize > scratch_.max_size())
             return result_ = internal::reportSaveFailure(
                 internal::saveFailure(path_, "invalid frame byte size"), "VideoWriter");
-        scratch_.resize(layout.byteSize);
+        try { scratch_.resize(layout.byteSize); }
+        catch (const std::bad_alloc&) {
+            return result_ = internal::reportSaveFailure(
+                SaveResult::fail(SaveError::WriteFailed, "recording buffer allocation failed"), "VideoWriter");
+        }
 
         // Platform encoders take UTF-8 (converted to native inside)
         if (!openPlatform(internal::pathToUtf8(path_), width_, height_, fps_, settings_)) {
@@ -681,202 +685,15 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
         static constexpr std::chrono::seconds kDrainTimeout{2};
 
         // Stop capturing and finalize the file. Safe to call multiple times.
-        // The private polling interval also lets tests simulate coarse OS sleeps.
-        SaveResult stop(std::chrono::milliseconds drainPollInterval = std::chrono::milliseconds(1)) {
-            {
-                // An external stop may overlap a completion listener's stop.
-                // Never hold this bookkeeping lock across waits or logging.
-                std::lock_guard<std::mutex> lock(stopMutex_);
-                afterFrameListener_ = EventListener{};   // no new captures get queued
-                exitListener_ = EventListener{};
-                audioListener_ = EventListener{};
-                source_ = Source::None;
-                fbo_ = nullptr;
-            }
-            // Bounded, like AudioRecorder: a straggling tap writes into this
-            // State's ring, which outlives it.
-            if (audioActive_) {
-                Delivery delivery(*this);
-                AudioEngine::getInstance().waitForAudioCallbacks();
-            }
-            // Drain captures and inline diagnostic deliveries before closing the
-            // writer. Synchronous platforms also have diagnostic deliveries.
-            // Bound (platform): capture and diagnostic draining wait at most 2 s (steady clock). Overflow leaves close pending and is reported by stop() returning WriteFailed, with one Error per take.
-            const auto deadline = std::chrono::steady_clock::now() + kDrainTimeout;
-            while (std::chrono::steady_clock::now() < deadline) {
-                {
-                    std::lock_guard<std::mutex> completionLock(completionMutex_);
-                    if (!pendingWork()) break;
-                }
-                std::this_thread::sleep_for(drainPollInterval);
-            }
-            // The request and final decrement must be serialized. A completion
-            // either sees this request, or has already finished all writer IO.
-            bool pendingCaptures;
-            std::optional<Delivery> delivery;
-            {
-                std::unique_lock<std::mutex> completionLock(completionMutex_);
-                pendingCaptures = pendingWork();
-                if (pendingCaptures) closeWhenDone_ = true;
-                delivery.emplace(*this, completionLock);
-            }
-            // Do not acquire writerMutex_ on timeout: a completion may be
-            // stuck inside the encoder while holding it.
-            if (pendingCaptures) {
-                SaveResult result;
-                bool report;
-                {
-                    std::lock_guard<std::mutex> lock(stopMutex_);
-                    report = stopResult_.ok();
-                    if (report) stopResult_ = SaveResult::fail(SaveError::WriteFailed,
-                        "recording still has frames in flight");
-                    result = stopResult_;
-                }
-                if (report) logError("ScreenRecorder") << result.message;
-                return result;
-            }
-            VideoWriter::Diagnostics diagnostics;
-            SaveResult result;
-            {
-                std::lock_guard<std::mutex> lk(writerMutex_);
-                if (audioActive_) drainAudio(diagnostics);
-                audioActive_ = false;
-                auto closed = writer_.closeDeferred(diagnostics);
-                std::lock_guard<std::mutex> lock(stopMutex_);
-                result = stopResult_ ? closed : stopResult_;
-            }
-            diagnostics.log();
-            return result;
-        }
+        SaveResult stop(std::chrono::milliseconds drainPollInterval = std::chrono::milliseconds(1));
 
         enum class Source { None, Swapchain, Fbo };
 
         SaveResult startSource(Source src, const Fbo* fbo, int w, int h,
                          const fs::path& path,
-                         const VideoRecordSettings& settings) {
-            VideoRecordSettings s = settings;
-            if (s.audio) {
-                auto& engine = AudioEngine::getInstance();
-                if (!engine.isInitialized()) {
-                    logWarning("ScreenRecorder")
-                        << "audio requested but AudioEngine is not initialized - "
-                           "recording video only";
-                    s.audio = false;
-                } else {
-                    if (s.audioSampleRate <= 0) s.audioSampleRate = engine.getSampleRate();
-                    if (s.audioChannels   <= 0) s.audioChannels   = engine.getChannels();
-                }
-            }
-            auto opened = writer_.open(path, w, h, s);
-            if (!opened) return opened;
-            source_ = src;
-            fbo_ = fbo;
-            fboAlive_ = fbo ? fbo->lifetimeToken() : std::shared_ptr<void>{};
-            // Pace on the framework clock, which the app cannot reset (#229).
-            pacer_.start(writer_.getFps(), s.duration);
-            if (s.audio) startAudioTap(s.audioSampleRate, s.audioChannels);
-            // Per-window binding (T3): events() resolves through the window context
-            // that is CURRENT when recording starts — so calling recordScreen() from
-            // a secondary window's tick subscribes to THAT window's afterFrame/exit,
-            // and swapchain frames are captured while that window's context (and its
-            // lastSwapchainDrawable) is current. No explicit window handle is needed;
-            // the recorder follows whichever window started it.
-            //   Platform note: the swapchain readback is per-window on all three
-            //   desktop platforms — macOS reads currentWindowContext().lastSwapchainDrawable,
-            //   Windows reads the context's recorded swapchain render_view, and Linux
-            //   reads the window's framebuffer at its own size (see the captureWindow
-            //   backends). Fbo-source recording is per-window everywhere (it reads the
-            //   passed Fbo, not the swapchain).
-            afterFrameListener_ = events().afterFrame.listen([state = shared_from_this()]() { state->onAfterFrame(); });
-            exitListener_ = events().exit.listen([state = shared_from_this()]() { state->stop(); });
-            return SaveResult::success();
-        }
+                         const VideoRecordSettings& settings);
 
-        void onAfterFrame() {
-            Delivery delivery(*this);
-            if (source_ == Source::None || !writer_.isOpen()) return;
-            // Recorded Fbo was destroyed: finalize instead of reading a dangling
-            // pointer. The file stays valid up to the last captured frame.
-            if (source_ == Source::Fbo && fboAlive_.expired()) {
-                logWarning("ScreenRecorder")
-                    << "recorded Fbo was destroyed; stopping and finalizing";
-                stop();
-                return;
-            }
-            // This frame's cutoff, decimation and wall-clock PTS, on the pacer's
-            // clock, which the app cannot reset (#229).
-            const auto tick = pacer_.tick();
-
-            // Feed buffered audio to the encoder once per frame (main thread; the
-            // audio thread only ever touches the lock-free ring).
-            if (audioActive_) {
-                VideoWriter::Diagnostics diagnostics;
-                {
-                    std::lock_guard<std::mutex> lk(writerMutex_);
-                    drainAudio(diagnostics);
-                }
-                diagnostics.log();
-                // A diagnostic listener may have stopped this take.
-                if (source_ == Source::None) return;
-            }
-
-            // Fixed-duration cutoff. tick.wallPts is the wall-clock PTS this frame would
-            // carry; once it reaches the requested length we finalize and append nothing more,
-            // so the output length == duration (to within one frame slot). The cut is
-            // PTS-based, so any async capture already in flight — its PTS was sampled
-            // below when it was issued, always < duration — can't push the file past
-            // the cutoff; stop() just drains those before closing the writer.
-            //
-            // stop() clears afterFrameListener_ from inside this callback (self-removal
-            // mid-dispatch). That is safe here: Event::notify() iterates an RCU
-            // snapshot of the listener list held alive for the whole loop, so removing
-            // ourselves only swaps in a new list for the NEXT fire; the in-progress
-            // dispatch is unaffected, and removeListener() takes a recursive_mutex that
-            // notify() does not hold (no deadlock). No deferral needed.
-            if (tick.reachedDuration) {
-                stop();
-                return;
-            }
-
-            // Decimate to the target fps (see ScreenRecorderPacer::shouldCapture).
-            if (!tick.capture) {
-                return;   // this frame isn't the closest one to the next slot yet
-            }
-            // PTS: wall clock normally; the AUDIO DEVICE clock when an audio track
-            // is being recorded, so frames land exactly where they happened on the
-            // audio timeline (drift-free A/V sync however unstable the fps is).
-            double t = pacer_.commitPts(audioActive_ ? audioClockSeconds()
-                                                     : tick.wallPts);
-            if (source_ == Source::Fbo && fbo_) {
-                if (writer_.recordingSizeMatches(fbo_->getWidth(), fbo_->getHeight()))
-                    writer_.addFrameAt(*fbo_, t);
-                return;
-            }
-#if TC_ASYNC_SCREEN_CAPTURE
-            // Async + zero-intermediate: issue the GPU readback and return — no
-            // main-thread stall. When it completes (Metal background thread), read the
-            // staging straight into the encoder's pixel buffer (BGRA, no swap) and
-            // submit. PTS t is captured now so wall-clock timing is unaffected by
-            // encode latency.
-            if (!stagingPool_) stagingPool_ = internal::makeCaptureStagingPool();
-            inFlight_.fetch_add(1, std::memory_order_relaxed);
-            bool started = internal::captureWindowAsync(
-                [state = shared_from_this(), t](const internal::CaptureReadback& rb) {
-                    state->completeCapture(rb, t);
-                }, stagingPool_);
-            if (!started) {
-                finishCaptureAndLog(/*rejectedLayout=*/true);
-            }
-#else
-            Pixels px;
-            if (!grabScreen(px) || !px.isAllocated()) {
-                writer_.rejectFrameLayout();
-                return;
-            }
-            if (writer_.recordingSizeMatches(px.getWidth(), px.getHeight()))
-                writer_.addFrameAt(px, t);
-#endif
-        }
+        void onAfterFrame();
 
         // --- audio tap (settings.audio) ------------------------------------------
         // Same tap pattern as AudioRecorder: a Monitor-priority audioOut listener
@@ -1008,11 +825,13 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
         // The encoder hooks and readback are replaceable in headless tests;
         // production calls this from the Metal completion callback.
         template<class Readback>
-        void completeCapture(const Readback& rb, double t) {
+        void completeCapture(const Readback& rb, double t, bool finish = true,
+                             VideoWriter::Diagnostics* deferred = nullptr) {
             // Keep this scope around the entire operation, including any
             // diagnostics emitted after writerMutex_ is released.
             Delivery delivery(*this); // published before the encoder count can reach zero
-            VideoWriter::Diagnostics diagnostics;
+            VideoWriter::Diagnostics immediate;
+            auto& diagnostics = deferred ? *deferred : immediate;
             {
                 std::lock_guard<std::mutex> lk(writerMutex_);
                 if (writer_.isOpen()) {
@@ -1030,20 +849,30 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
                         [this, t, &diagnostics] { return writer_.submitFrameDeferred(t, diagnostics).ok(); },
                         diagnostics);
                 }
-                finishCapture(diagnostics);
+                if (finish) finishCapture(diagnostics);
             }
-            diagnostics.log();
+            if (!deferred || finish) diagnostics.log();
         }
 
-        void finishCaptureAndLog(bool rejectedLayout = false) {
+        void finishCaptureAndLog(bool rejectedLayout = false,
+                                 VideoWriter::Diagnostics* deferred = nullptr) {
             Delivery delivery(*this);
-            VideoWriter::Diagnostics diagnostics;
+            VideoWriter::Diagnostics immediate;
+            auto& diagnostics = deferred ? *deferred : immediate;
             {
                 std::lock_guard<std::mutex> lk(writerMutex_);
                 if (rejectedLayout) writer_.rejectFrameLayout(&diagnostics);
                 finishCapture(diagnostics);
             }
             diagnostics.log();
+        }
+
+        // Bound (policy): one native capture owns staging through cleanup; busy opportunities are skipped and reported at stop.
+        bool admitCapture() {
+            int idle = 0;
+            if (inFlight_.compare_exchange_strong(idle, 1, std::memory_order_acq_rel)) return true;
+            ++busySkipped_;
+            return false;
         }
 
         // writerMutex_ held. A timed-out stop leaves finalization to the last
@@ -1073,6 +902,10 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
         SaveResult stopResult_;
         VideoWriter writer_;
         Source source_ = Source::None;
+        uint64_t sourceOwner_ = 0;
+        sg_pixel_format sourceFormat_ = SG_PIXELFORMAT_NONE;
+        const void* sourceDevice_ = nullptr;
+        uint64_t busySkipped_ = 0, reportedBusySkipped_ = 0;
         const Fbo* fbo_ = nullptr;
         std::weak_ptr<void> fboAlive_;  // expires when the recorded Fbo dies
         internal::ScreenRecorderPacer pacer_;   // decimation, PTS, duration cutoff
@@ -1110,15 +943,17 @@ public:
     // Record the window (swapchain), or an offscreen Fbo that stays alive.
     // Each take has its own state; late completions keep the old take alive.
     SaveResult start(const fs::path& path, const VideoRecordSettings& settings = {}) {
-        stop();
-        state_ = std::make_shared<State>();
+        const auto stopped = stop();
+        if (state_->inFlight_.load(std::memory_order_acquire) != 0) return stopped;
+        state_ = makeState();
         return state_->startSource(State::Source::Swapchain, nullptr,
-                                   sapp_width(), sapp_height(), path, settings);
+                                   getFramebufferWidth(), getFramebufferHeight(), path, settings);
     }
     SaveResult start(const Fbo& fbo, const fs::path& path,
                      const VideoRecordSettings& settings = {}) {
-        stop();
-        state_ = std::make_shared<State>();
+        const auto stopped = stop();
+        if (state_->inFlight_.load(std::memory_order_acquire) != 0) return stopped;
+        state_ = makeState();
         return state_->startSource(State::Source::Fbo, &fbo,
                                    fbo.getWidth(), fbo.getHeight(), path, settings);
     }
@@ -1144,7 +979,8 @@ public:
     VideoWriter& writer() { return state_->writer_; }
 
 private:
-    std::shared_ptr<State> state_ = std::make_shared<State>();
+    static std::shared_ptr<State> makeState();
+    std::shared_ptr<State> state_ = makeState();
 };
 
 // ---------------------------------------------------------------------------

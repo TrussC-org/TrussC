@@ -65,7 +65,7 @@ void runNativeClipChecks() {
     internal::pixelPerfectMode() = savedPixelMode;
 }
 
-class InspectFont : public Font {
+class InspectFont : public tc::Font {
 public:
     bool fits() const { return gridFitLands(); }
 };
@@ -341,7 +341,12 @@ void runMatrixChecks() {
 
     // Unmatched pushes are discarded and LOAD begins a fresh local scope.
     first.begin(); pushMatrix(); pushScissor(1, 1, 2, 2);
-    EasyCam unmatched; unmatched.begin(); first.end();
+    EasyCam unmatched; unmatched.begin();
+    gpuWarnings.expectingUnmatched = true;
+    first.end();
+    gpuWarnings.expectingUnmatched = false;
+    check("unmatched Fbo end emits its exact warning once at this check", gpuWarnings.expected == 1);
+    check("unmatched Fbo end preserves the live window Node matrix push", screen.matrixStack.size() == screenDepth);
     first.begin();
     check("LOAD starts fresh after unmatched scopes", internal::currentTarget().matrixStack.empty() && internal::currentTarget().cameraStack.empty() &&
           internal::currentTarget().scissorStack.empty() && sameMatrix(getMatrix(), Mat4::identity()) && internal::currentTarget().camera.currentScreenFov == TAU / 8);

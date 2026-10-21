@@ -215,6 +215,11 @@ target_include_directories(TrussC SYSTEM PUBLIC
 # Platform-specific configuration
 # =============================================================================
 if(TC_PLATFORM_EMSCRIPTEN)
+    # Audio full loads grow to available memory. A vector probe cannot guarantee
+    # that its later allocation succeeds: retain bad_alloc catches in these TUs.
+    set_property(SOURCE ${TC_SOUND_SOURCES} platform/web/tcSound_web.cpp
+        APPEND PROPERTY COMPILE_OPTIONS -fexceptions)
+    target_link_options(TrussC INTERFACE -fexceptions)
     if(TC_GRAPHICS_BACKEND STREQUAL "WGPU")
         target_compile_definitions(TrussC PUBLIC SOKOL_WGPU)
         target_compile_options(TrussC PUBLIC --use-port=emdawnwebgpu)

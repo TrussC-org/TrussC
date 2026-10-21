@@ -117,7 +117,7 @@ tcx::HttpResponse callJavaRequest(const std::string& method,
                                   const std::string& url,
                                   const std::vector<std::pair<std::string,std::string>>& headers,
                                   const std::string& body,
-                                  long timeoutSeconds) {
+                                  long timeoutSeconds, bool followRedirects, size_t responseLimit) {
     tcx::HttpResponse out;
 
     JniScope jni;
@@ -136,7 +136,7 @@ tcx::HttpResponse callJavaRequest(const std::string& method,
 
     jmethodID requestMid = env->GetStaticMethodID(
         helper, "request",
-        "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;[BII)"
+        "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;[BIIZJ)"
         "Lcom/trussc/tcx/curl/AndroidHttpClient$Result;");
     if (!requestMid) {
         env->ExceptionClear();
@@ -167,7 +167,8 @@ tcx::HttpResponse callJavaRequest(const std::string& method,
 
     jobject result = env->CallStaticObjectMethod(
         helper, requestMid,
-        jMethod, jUrl, jHeaderNames, jHeaderValues, jBody, connectMs, readMs);
+        jMethod, jUrl, jHeaderNames, jHeaderValues, jBody, connectMs, readMs, static_cast<jboolean>(followRedirects),
+        static_cast<jlong>((std::min)(responseLimit, static_cast<size_t>(INT64_MAX))));
 
     env->DeleteLocalRef(jMethod);
     env->DeleteLocalRef(jUrl);
@@ -176,7 +177,6 @@ tcx::HttpResponse callJavaRequest(const std::string& method,
     if (jBody) env->DeleteLocalRef(jBody);
 
     if (env->ExceptionCheck()) {
-        env->ExceptionDescribe();
         env->ExceptionClear();
         env->DeleteLocalRef(helper);
         out.error = "tcxCurl[android]: AndroidHttpClient.request threw";
@@ -193,27 +193,76 @@ tcx::HttpResponse callJavaRequest(const std::string& method,
     jfieldID fBody   = env->GetFieldID(resultCls, "body",       "[B");
     jfieldID fError  = env->GetFieldID(resultCls, "error",      "Ljava/lang/String;");
 
+    jfieldID fLimit = env->GetFieldID(resultCls, "limitKind", "I");
+    jfieldID fLength = env->GetFieldID(resultCls, "bodyLength", "I");
+    if (!fStatus || !fBody || !fError || !fLimit || !fLength || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        env->DeleteLocalRef(resultCls);
+        env->DeleteLocalRef(result);
+        env->DeleteLocalRef(helper);
+        out.error = "tcxCurl[android]: incompatible response fields";
+        return out;
+    }
+    const jint limited = env->GetIntField(result, fLimit);
+    if (limited != 0) {
+        using tcx::curl::detail::ResponseLoss;
+        const auto kind = limited == 4 ? ResponseLoss::RedirectPolicy : limited == 3 ? ResponseLoss::Redirects :
+                          limited == 2 ? ResponseLoss::Metadata : ResponseLoss::Body;
+        // Java's single byte[] also has a representability ceiling. Report the
+        // effective bound when a caller raises the configured limit past it.
+        const size_t bodyCapacity = (std::min)(responseLimit, static_cast<size_t>(INT32_MAX - 8));
+        const size_t capacity = limited == 4 ? 0 : limited == 3 ? 5 : limited == 2 ? tcx::curl::detail::metadataByteLimit : bodyCapacity;
+        tcx::curl::detail::reportResponseLoss(kind, capacity == SIZE_MAX ? capacity : capacity + 1, capacity, limited == 4 ? "targets" : limited == 3 ? "redirects" : "bytes");
+    }
     out.statusCode = env->GetIntField(result, fStatus);
 
+    const jint used = env->GetIntField(result, fLength);
     auto bodyArr = (jbyteArray)env->GetObjectField(result, fBody);
     if (bodyArr) {
-        jsize len = env->GetArrayLength(bodyArr);
-        if (len > 0) {
-            out.body.resize((size_t)len);
-            env->GetByteArrayRegion(bodyArr, 0, len,
-                                    reinterpret_cast<jbyte*>(&out.body[0]));
+        const jsize capacity = env->GetArrayLength(bodyArr);
+        const jsize len = used;
+        if (len < 0 || len > capacity || static_cast<size_t>(capacity) > responseLimit) {
+            tcx::curl::detail::reportResponseLoss(tcx::curl::detail::ResponseLoss::Body,
+                static_cast<size_t>(len), responseLimit);
+            out.statusCode = 0;
+            out.error = "HTTP response exceeded its memory limit";
+        } else if (len > 0 && out.statusCode != 0 && limited == 0) {
+            try {
+                out.body.resize(static_cast<size_t>(len));
+                env->GetByteArrayRegion(bodyArr, 0, len,
+                                        reinterpret_cast<jbyte*>(&out.body[0]));
+            } catch (...) {
+                out.error = "HTTP response allocation failed";
+            }
         }
         env->DeleteLocalRef(bodyArr);
     }
 
     auto err = (jstring)env->GetObjectField(result, fError);
     if (err) {
-        const char* c = env->GetStringUTFChars(err, nullptr);
-        if (c) out.error = c;
-        env->ReleaseStringUTFChars(err, c);
+        // GetStringUTFChars may allocate up to 3*UTF-16 length: admit before it.
+        if (env->GetStringLength(err) > static_cast<jsize>(tcx::curl::detail::metadataByteLimit / 3)) {
+            tcx::curl::detail::reportResponseLoss(tcx::curl::detail::ResponseLoss::Metadata,
+                tcx::curl::detail::metadataByteLimit + 1, tcx::curl::detail::metadataByteLimit);
+            out.error = "HTTP response metadata exceeded its memory limit";
+        } else {
+            const char* c = env->GetStringUTFChars(err, nullptr);
+            if (c) {
+                out.error = c;
+                env->ReleaseStringUTFChars(err, c);
+            }
+        }
         env->DeleteLocalRef(err);
     }
 
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        out.error = "HTTP response JNI conversion failed";
+    }
+    if (!out.error.empty() || limited != 0) {
+        out.statusCode = 0;
+        std::string().swap(out.body);
+    }
     env->DeleteLocalRef(resultCls);
     env->DeleteLocalRef(result);
     env->DeleteLocalRef(helper);
@@ -228,6 +277,11 @@ HttpResponse HttpClient::request(const std::string& method,
                                  const std::string& path,
                                  const std::string& body,
                                  const std::string& contentType) {
+    // Validate before any JNI conversion, with the same per-client Warning
+    // lifetime as native requests/uploads (including embedded NUL values).
+    std::vector<std::pair<std::string,std::string>> hs;
+    HttpResponse invalid;
+    if (!prepareHeaders(hs, invalid, body.empty() ? nullptr : &contentType)) return invalid;
     if (!tlsCaPem_.empty()) {
         HttpResponse out;
         out.error = "tcxCurl[android]: setTlsCACertificate() is not supported on Android yet";
@@ -237,7 +291,6 @@ HttpResponse HttpClient::request(const std::string& method,
 
     // Compose effective headers: the user's own list plus Content-Type for
     // requests carrying a body. We pass by value to avoid mutating headers_.
-    std::vector<std::pair<std::string,std::string>> hs = headers_;
     if (!body.empty()) {
         bool hasCT = false;
         for (auto& h : hs) {
@@ -245,7 +298,7 @@ HttpResponse HttpClient::request(const std::string& method,
         }
         if (!hasCT) hs.push_back({"Content-Type", contentType});
     }
-    return callJavaRequest(method, url, hs, body, timeoutSeconds_);
+    return callJavaRequest(method, url, hs, body, timeoutSeconds_, followRedirects_, responseLimit_);
 }
 
 HttpResponse HttpClient::uploadFile(const std::string& path, const std::string& filePath) {

@@ -660,7 +660,7 @@ void registerStandardTools(Server& server) {
                 mcp::deferToolResultTwoStage([args,error]() -> std::function<json()> {
                     auto p=std::make_shared<Pixels>();
                     reserveWindowReadback();
-                    bool ok=grabScreen(*p);
+                    bool ok=captureWindow(*p);
                     return [p,args,ok,error]() -> json {
                         if(!ok) return error("failed to grab screen");
                         return internal::analyzeImage(*p,args,"sRGB");
@@ -711,7 +711,7 @@ void registerStandardTools(Server& server) {
             mcp::deferToolResultTwoStage([format, reqWidth, quality]() -> std::function<json()> {
                 auto px = std::make_shared<trussc::Pixels>();
                 reserveWindowReadback();
-                bool grabbed = trussc::grabScreen(*px);
+                bool grabbed = trussc::captureWindow(*px);
                 return [px, grabbed, format, reqWidth, quality]() -> json {
                     if (!grabbed) {
                         return json{{"status", "error"}, {"message", "Failed to grab screen"}};
@@ -748,6 +748,7 @@ void registerStandardTools(Server& server) {
             mcp::deferToolResultUntilAfterFrame([windowIdx, destination, credit, budget]() -> json {
                 WorkScope scope(budget);
                 reserveWindowSave(trussc::internal::currentWindowContext());
+                WindowCaptureAdmission admission(credit);
                 bool ok = trussc::internal::captureWindowToFile(destination);
                 if (ok) return json{{"status", "ok"}, {"path", trussc::internal::pathToUtf8(destination)}, {"window", windowIdx}};
                 return json{{"status", "error"}, {"message", "Failed to capture window " + std::to_string(windowIdx)}};

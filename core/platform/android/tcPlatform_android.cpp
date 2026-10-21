@@ -14,7 +14,7 @@
 // GLES3 for screen capture
 #include <GLES3/gl3.h>
 
-#include "../gl/tcPixelPack.h"
+#include "../gl/tcGLReadbackState.h"
 
 namespace trussc {
 
@@ -257,10 +257,14 @@ std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowCont
 }
 
 bool captureWindow(Pixels& outPixels) {
-    int width = sapp_width();
-    int height = sapp_height();
+    if (!sg_isvalid()) return false;
+    if (internal::hasPublicFboActivation()) return false;
+    internal::CapturePrefixScope capturePhase;
+    const auto source = internal::windowCaptureSource();
+    const int width = source.width, height = source.height;
 
-    if (width <= 0 || height <= 0) {
+    size_t rowBytes = 0, totalBytes = 0;
+    if (!internal::captureLayout(width, height, 4, rowBytes, totalBytes)) {
         logError("Screenshot") << "Invalid window dimensions";
         return false;
     }
@@ -269,13 +273,25 @@ bool captureWindow(Pixels& outPixels) {
     // Bound (abi): packed capture bytes must fit size_t. Overflow drops the recorder frame and is counted.
     if (!layout.byteSize) return false;
     mcp::internal::reconcileWindowCapture(size_t(width), size_t(height));
-    outPixels.allocate(width, height, 4);
+    internal::GLReadbackState nativeState;
+    nativeState.bindSource(source.swapchain.gl.framebuffer);
+    // Capture overwrites every byte; preserve a matching RGBA8 buffer.
+    if (!outPixels.isAllocated() || outPixels.getWidth() != width ||
+        outPixels.getHeight() != height || outPixels.getChannels() != 4 ||
+        outPixels.getFormat() != PixelFormat::U8) {
+        outPixels.allocate(width, height, 4);
+    }
     // Bound (abi): the pixel allocation must hold every captured row. Overflow drops the recorder frame and is counted.
     if (!outPixels.getData() || outPixels.getTotalBytes() < layout.byteSize) return false;
 
-    {
-        internal::ScopedTightPixelPack pack;
-        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, outPixels.getData());
+    // GLReadbackState selects the source and normalizes/restores pack state.
+    // Match Fbo readback: only this read's error determines success.
+    while (glGetError() != GL_NO_ERROR) {}
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, outPixels.getData());
+    const GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+        logError("Screenshot") << "glReadPixels failed (GL error 0x" << std::hex << error << ")";
+        return false;
     }
 
     // OpenGL reads from bottom-left, flip vertically

@@ -462,7 +462,7 @@ inline void Window::applyPendingApp() {
     if (next && !canAttach(next)) return;
     // The outgoing App is released with this window's context active.
     auto* prev = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &ctx_;
+    internal::restoreWindowContext(&ctx_);
     std::shared_ptr<App> outgoing = std::move(app_);
     auto& attached = internal::attachedApps();
     if (outgoing) attached.erase(outgoing.get());
@@ -481,7 +481,7 @@ inline void Window::applyPendingApp() {
         outgoing->cleanup();
     }
     outgoing.reset();
-    internal::currentWindowCtx() = prev;
+    internal::restoreWindowContext(prev);
 }
 
 inline void Window::endApp() {
@@ -571,8 +571,13 @@ inline void App::setSize(float w, float h) {
     }
     if (internal::pixelPerfectMode()) {
         float scale = sapp_dpi_scale();
+#if defined(_WIN32)
+        internal::setWindowSizeWin32(sapp_win32_get_hwnd(), double(width) / scale, double(height) / scale);
+        return;
+#else
         width = static_cast<int>(width / scale);
         height = static_cast<int>(height / scale);
+#endif
     }
     setWindowSizeLogical(width, height);   // main window only; never routed
 }

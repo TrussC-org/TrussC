@@ -13,9 +13,10 @@
 // draw and silently drops it.
 //
 // Instead of destroying immediately, callers hand their handles to
-// internal::deferGpuDestroy(). The queues are drained once per frame in
-// present(), after sg_commit(), when every recorded command referencing
-// the old handles has been submitted.
+// internal::deferGpuDestroy(). After sg_commit(), retirement enumerates every
+// live target's unconsumed commands and keeps their full typed SG handles and
+// dependency closure. Unrelated resources retire without waiting for an idle
+// window. Native submitted work retains the backend's normal GPU lifetime.
 //
 // This is invariant 2 of the deferred draw model. The other three (commands
 // capture inputs by value, mutable-content resources need per-frame snapshots,
@@ -29,8 +30,22 @@
 // handle guest code released went into a queue present() never drained -- a
 // GPU leak that grew each frame a guest released a temporary resource (#249).
 
+#include <vector>
+
 namespace trussc {
 namespace internal {
+
+// Texture owns this node before creating GPU handles. Cleanup transfers its
+// existing view arrays and links the node without allocating, including OOM.
+struct TextureRetirement {
+    sg_image image{};
+    sg_view view{}, attachment{};
+    sg_sampler sampler{};
+    std::vector<sg_view> cubeViews, mipAttachments, mipViews;
+    TextureRetirement* next = nullptr;
+    ~TextureRetirement() noexcept;
+};
+void retireTexture(TextureRetirement* storage) noexcept;
 
 void deferGpuDestroy(sg_buffer buf);
 void deferGpuDestroy(sg_image img);
@@ -39,7 +54,7 @@ void deferGpuDestroy(sg_sampler smp);
 void deferGpuDestroy(sg_pipeline pip);
 void deferGpuDestroy(sg_shader shd);
 
-// Destroy everything queued this frame. Called from present() after
+// Retire queued handles unreferenced by CPU recordings. Called after
 // sg_commit(). Skips the sg_destroy calls entirely when sokol_gfx has
 // already shut down (handles queued during teardown are reclaimed by
 // sg_shutdown itself).

@@ -71,7 +71,7 @@ namespace internal {
 // Entry points where TrussC calls app code (#349). Each value gives its label
 // in the unbalanced push/pop warnings (appEntryLabel) and its own rate limit,
 // so one value names the entry point everywhere. Wrapped by EntryStackGuard
-// (below), except Draw, whose frame-end reset is present()'s.
+// (below). Draw tracks the phase only; its frame-end reset is present()'s.
 enum class AppEntry {
     Setup,    // the App's (or a secondary window root's) setup(), and the App's construction
     Prelude,  // per-frame queues before update: runOnMainThread / Deliver::Main, console, MCP
@@ -104,6 +104,9 @@ public:
     // -----------------------------------------------------------------------
     RenderContext() = default;
     ~RenderContext() = default;
+
+    // Public grabScreen admission only. Internal deferred captures bypass it.
+    bool admitScreenCapture();
 
     // Copy forbidden (sharing state causes confusion)
     RenderContext(const RenderContext&) = delete;
@@ -266,11 +269,9 @@ public:
     // deprecation warning. The user-facing TrussC.h wrapper IS deprecated.)
     // -----------------------------------------------------------------------
     void setCircleResolution(int res) {
-        circleResolution_ = res;          // legacy field, still read by
-                                          // some drawers until C2 migrates them
         setCurveResolution(res);
     }
-    int getCircleResolution() const { return circleResolution_; }
+    int getCircleResolution() const { return getCurveResolution(); }
 
     // -----------------------------------------------------------------------
     // Matrix operations
@@ -1093,8 +1094,6 @@ private:
         StrokeJoin strokeJoin = StrokeJoin::Miter;
         float pointSize = 1.0f;                    // logical px, like strokeWeight
         PointStyle pointStyle = PointStyle::Square;
-        int circleResolution = 20;     // legacy, will be removed once all
-                                       // draw* migrate to curve.resolution
         CurveStyle curve;              // shared by all curved primitives
                                        // (circle, ellipse, arc, bezier, ...)
         Direction textAlignH = Direction::Left;
@@ -1123,9 +1122,6 @@ private:
     bool& strokeEnabled_ = style_.strokeEnabled;
     float& strokeWeight_ = style_.strokeWeight;
 
-    // Circle resolution (shortcut to style_)
-    int& circleResolution_ = style_.circleResolution;
-
     // Matrix stack
     RenderTarget& matrixTarget() const {
         return *currentWindowContext().currentTarget;
@@ -1142,6 +1138,9 @@ private:
     RateLimitedWarning popMatrixWarning_, popStyleWarning_, nodeDrawWarning_;
     // One per entry point (#349), so a leak in one doesn't hide another's.
     RateLimitedWarning entryWarnings_[static_cast<size_t>(AppEntry::Count)];
+    friend class EntryStackGuard;
+    AppEntry activeEntry_ = AppEntry::Count; // no app callback / outside a frame
+    bool screenCaptureWarned_ = false; // once per window, shared by hot-reload guests
 
     RateLimitedWarning& entryWarning(AppEntry e) { return entryWarnings_[static_cast<size_t>(e)]; }
 
@@ -1240,8 +1239,15 @@ class EntryStackGuard {
 public:
     explicit EntryStackGuard(AppEntry entry, const char* eventName = nullptr)
         : entry_(entry), eventName_(eventName), rc_(getDefaultContext()),
-          matrixDepth_(rc_.getMatrixStackDepth()), styleDepth_(rc_.getStyleStackDepth()), target_(&currentTarget()) {}
-    ~EntryStackGuard() { rc_.restoreStacksAtEntryEnd(entry_, matrixDepth_, styleDepth_, eventName_, target_); }
+          matrixDepth_(rc_.getMatrixStackDepth()), styleDepth_(rc_.getStyleStackDepth()), target_(&currentTarget()),
+          previousEntry_(std::exchange(rc_.activeEntry_, entry)) {}
+    ~EntryStackGuard() {
+        // present() owns Draw's stack reset. Nested update/setup/event guards
+        // temporarily override Draw, even when a native pass is already open.
+        if (entry_ != AppEntry::Draw)
+            rc_.restoreStacksAtEntryEnd(entry_, matrixDepth_, styleDepth_, eventName_, target_);
+        rc_.activeEntry_ = previousEntry_;
+    }
     EntryStackGuard(const EntryStackGuard&) = delete;
     EntryStackGuard& operator=(const EntryStackGuard&) = delete;
 
@@ -1251,6 +1257,7 @@ private:
     RenderContext& rc_;
     size_t matrixDepth_, styleDepth_;
     RenderTarget* target_;
+    AppEntry previousEntry_;
 };
 
 } // namespace internal

@@ -6,7 +6,7 @@
 //
 // Multi-window support: every piece of state that is conceptually "per window"
 // — input, hover/scene, render-target routing, per-window frame count,
-// lighting/material/environment, and the per-frame shadow-slot assignment —
+// lighting/material/environment, and mutable shadow maps and slots —
 // lives in one WindowContext instead of scattered process globals.
 // currentWindowContext() == mainWindowContext() while only the main window is
 // running; each secondary native window owns its own context and the native
@@ -60,14 +60,12 @@ struct LinesVertex;
 // ---------------------------------------------------------------------------
 inline constexpr int maxLights = 8;
 inline constexpr int maxShadowLights = 4;
+static_assert(std::extent_v<decltype(ShadowStorage::colorAttachments)> == maxShadowLights,
+    "shadow storage must match the shader's slot count");
 
 // ---------------------------------------------------------------------------
-// Per-window shadow-slot state (was in the PbrPipeline singleton). The GPU
-// shadow-map array/views/sampler/pipeline STAY shared in the singleton; only
-// the per-frame slot ASSIGNMENT moves here. Window ticks run strictly
-// serialized on the main thread and each window's shadow passes + PBR flush
-// complete within its own tick, so the shared array layers can be reused
-// serially across windows with zero extra GPU memory.
+// Per-window shadow state, including lazy host-owned GPU generations. A nested
+// foreign tick can park the pass without changing this owner's slots or maps.
 // ---------------------------------------------------------------------------
 struct ShadowSlotState {
     // Slot assignment: `frame` (the per-window updateCount at the last reset)
@@ -79,6 +77,8 @@ struct ShadowSlotState {
     int count = 0;
     int current = -1;
     bool inPass = false;
+    uint64_t allocationFailures = 0;
+    std::shared_ptr<ShadowStorage> storage;
     RenderTarget target;
     std::unique_ptr<TargetPassScope> scope;
     Mat4  viewProj[maxShadowLights]{};
@@ -142,6 +142,9 @@ struct WindowContext {
     std::vector<TargetStackEntry> targetStack;
     uint64_t nextTargetToken = 1;
     uint64_t renderEpoch = 0;
+    // A capture must start/flush an unfinished frame, but must leave the
+    // completed afterFrame source intact until the next beginFrame().
+    bool framePending = true;
     // Borrowed Metal drawable rendered into this frame. Valid only until the
     // native frame callback returns; clear after afterFrame and capture drains.
     const void* lastSwapchainDrawable = nullptr;
@@ -169,6 +172,9 @@ struct WindowContext {
     float dpiScale = 1.0f;
     sg_swapchain (*acquireSwapchain)(void* user) = nullptr;
     void* acquireSwapchainUser = nullptr;
+    // Restore the native drawable before parking/reading a window. The GL
+    // adapter supplies this; other backends have a shared device context.
+    void (*activateNative)(void*) = nullptr;
 
     // --- per-window frame count ---
     // getFrameCount()/getUpdateCount() resolve through the current context.
@@ -188,7 +194,7 @@ struct WindowContext {
     float pbrExposure = 1.0f;              // global exposure scalar (pre-ACES tonemap)
     Environment* currentEnvironment = nullptr;
 
-    // --- per-window shadow-slot assignment (GPU resources stay shared) ---
+    // --- per-window shadow maps, slot assignment and active pass ---
     ShadowSlotState shadow;
 
     // --- frame timing (per window) ---
@@ -446,6 +452,7 @@ inline void registerCameraContext(const Mat4& view, const Mat4& projection,
     ctx->viewH = viewH;
     ctx->pickable = pickable;
     currentWindowContext().currentTarget->camera.currentCameraContext = std::move(ctx);
+    currentTarget().automaticScreenProjection = false;
 }
 
 } // namespace internal

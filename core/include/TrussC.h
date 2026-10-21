@@ -431,8 +431,8 @@ inline void beginFrame() {
     if (headless::isActive()) return;
 
     // Retry the exact deferred request at each boundary. The rebuild checks
-    // every window for live work: sg_commit() rewinds all SGL contexts, so
-    // another window's present may have cleared immediate work since deferral.
+    // every window for live work: only an owner's completion releases its
+    // immediate recording, and a parked begun frame also blocks rebuilding.
     const int pendingResize = internal::sglBudget().pendingResize;
     if (pendingResize > 0) {
         const int commands = internal::sglBudget().pendingCommands;
@@ -440,9 +440,16 @@ inline void beginFrame() {
     }
 
     internal::prepareWindowTarget();
+    internal::currentWindowContext().framePending = true;
 
     // Setup screen with default FOV (60 = perspective, 0 = ortho)
     internal::setupScreenFov(internal::defaultScreenFov());
+    auto& target = internal::currentTarget();
+    target.automaticScreenProjection = true;
+    target.automaticViewport = true;
+    target.windowDrawingSizeStale = false;
+    target.automaticScreenWidth = target.width;
+    target.automaticScreenHeight = target.height;
 }
 
 // Clear screen (RGB float: 0.0 ~ 1.0)
@@ -738,101 +745,53 @@ namespace internal {
     // Minimum FOV for calculating camera distance and clip planes (even in ortho mode)
     constexpr float minFovForCalc = TAU / 36.0f;
 
-    // Core implementation with explicit width/height (for FBO support)
-    inline void setupScreenFovWithSize(float fovRadians, float viewW, float viewH, float nearDist, float farDist, bool pickable) {
-        // Skip in headless mode
+    // Recompute only the automatic camera. A mid-frame extent repair must
+    // preserve the current SGL recording state (texture, layer, pipeline, etc.).
+    inline void updateScreenCameraWithSize(float fovRadians, float viewW, float viewH,
+                                          float nearDist = 0.0f, float farDist = 0.0f,
+                                          bool pickable = true) {
         if (headless::isActive()) return;
+        const float effectiveFov = fovRadians <= 0.0f ? minFovForCalc : fovRadians;
+        const float dist = viewH / (2.0f * std::tan(effectiveFov * 0.5f));
+        auto& camera = currentTarget().camera;
+        camera.currentScreenFov = fovRadians;
+        camera.currentViewW = viewW;
+        camera.currentViewH = viewH;
+        camera.currentCameraDist = dist;
 
-        // Calculate camera distance using effective FOV (min 10° for ortho)
-        float effectiveFov = (fovRadians <= 0.0f) ? minFovForCalc : fovRadians;
-        float halfFov = effectiveFov * 0.5f;  // half FOV in radians
-        float theTan = std::tan(halfFov);
-        float dist = viewH / (2.0f * theTan);
-
-        // Save current screen state for 2D drawing
-        internal::currentWindowContext().currentTarget->camera.currentScreenFov = fovRadians;
-        internal::currentWindowContext().currentTarget->camera.currentViewW = viewW;
-        internal::currentWindowContext().currentTarget->camera.currentViewH = viewH;
-        internal::currentWindowContext().currentTarget->camera.currentCameraDist = dist;
-
-        // Apply clip overrides or auto-calculate
         const float nearOverride = nearClipOverride();
         const float farOverride = farClipOverride();
-        if (nearDist == 0.0f) nearDist = (nearOverride > 0.0f) ? nearOverride : dist / 10.0f;
-        if (farDist == 0.0f) farDist = (farOverride > 0.0f) ? farOverride : dist * 10.0f;
-
-        float eyeX = viewW / 2.0f;
-        float eyeY = viewH / 2.0f;
+        if (nearDist == 0.0f) nearDist = nearOverride > 0.0f ? nearOverride : dist / 10.0f;
+        if (farDist == 0.0f) farDist = farOverride > 0.0f ? farOverride : dist * 10.0f;
 
         if (fovRadians <= 0.0f) {
-            // Orthographic projection (2D mode)
-            sgl_defaults();
-            // 2D alpha pipeline for the active target (swapchain or FBO).
-            loadPipeline(activeFill2D());
-            // Ortho volume CENTERED on the camera: the lookat below moves the
-            // world center to the view origin, so the volume must span
-            // [-W/2, W/2] x [H/2, -H/2] (Y flipped) — a [0, W] x [H, 0] volume
-            // here double-offsets everything by half a screen.
-            // Built as a Mat4 and remapped to the backend's clip-z convention
-            // (#134); the SAME matrix is stored and fed to sgl so the sgl and
-            // mesh (PBR/points) pipelines agree on depth.
-            Mat4 proj = internal::toBackendClip(
-                Mat4::ortho(-viewW / 2.0f, viewW / 2.0f, viewH / 2.0f, -viewH / 2.0f, -farDist, farDist));
-            internal::sglLoadProjection(proj);
-            sgl_matrix_mode_modelview();
-            sgl_load_identity();
-            // Camera position (for consistent Z behavior with perspective)
-            sgl_lookat(
-                eyeX, eyeY, dist,
-                eyeX, eyeY, 0.0f,
-                0.0f, 1.0f, 0.0f
-            );
-
-            // Save matrices for worldToScreen/screenToWorld
-            internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix = proj;
-            internal::currentWindowContext().currentTarget->camera.currentViewMatrix = Mat4::lookAt(
-                Vec3(eyeX, eyeY, dist),
-                Vec3(eyeX, eyeY, 0.0f),
-                Vec3(0.0f, 1.0f, 0.0f)
-            );
+            // Centered on the camera, with Y down. Store backend-native clip Z
+            // so immediate, mesh and picking paths all use the same matrix.
+            camera.currentProjectionMatrix = toBackendClip(Mat4::ortho(
+                -viewW / 2.0f, viewW / 2.0f, viewH / 2.0f, -viewH / 2.0f, -farDist, farDist));
         } else {
-            // Perspective projection (3D mode) — format-correct 3D for the active target.
-            loadPipeline(active3D());
-
-            float aspect = viewW / viewH;
-
-            // Set perspective projection with Y-flip for screen coordinates (Y down)
-            float top = nearDist * tanf(fovRadians * 0.5f);
-            float bottom = -top;
-            float right = top * aspect;
-            float left = -right;
-            // Swap top/bottom to flip Y axis (screen coords: Y increases
-            // downward). Backend-native clip-z, same reasoning as ortho above.
-            Mat4 proj = internal::toBackendClip(
-                Mat4::frustum(left, right, top, bottom, nearDist, farDist));
-            internal::sglLoadProjection(proj);
-
-            // Set view matrix (camera at viewport center, looking at Z=0)
-            sgl_matrix_mode_modelview();
-            sgl_load_identity();
-            sgl_lookat(
-                eyeX, eyeY, dist,    // eye position
-                eyeX, eyeY, 0.0f,    // look at center
-                0.0f, 1.0f, 0.0f     // up vector
-            );
-
-            // Save matrices for worldToScreen/screenToWorld
-            internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix = proj;
-            internal::currentWindowContext().currentTarget->camera.currentViewMatrix = Mat4::lookAt(
-                Vec3(eyeX, eyeY, dist),
-                Vec3(eyeX, eyeY, 0.0f),
-                Vec3(0.0f, 1.0f, 0.0f)
-            );
+            const float top = nearDist * tanf(fovRadians * 0.5f);
+            const float right = top * (viewW / viewH);
+            camera.currentProjectionMatrix = toBackendClip(Mat4::frustum(
+                -right, right, top, -top, nearDist, farDist));
         }
+        camera.currentViewMatrix = Mat4::lookAt(
+            Vec3(viewW / 2.0f, viewH / 2.0f, dist),
+            Vec3(viewW / 2.0f, viewH / 2.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f));
+        registerCameraContext(camera.currentViewMatrix, camera.currentProjectionMatrix, viewW, viewH, pickable);
+    }
 
-        // Register this camera scope so nodes drawn from here on stamp it
-        // (draw-time stamping → per-context pick rays; see tcCameraContext.h).
-        registerCameraContext(internal::currentWindowContext().currentTarget->camera.currentViewMatrix, internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix, viewW, viewH, pickable);
+    // Explicit screen setup retains its existing defaults/pipeline behavior.
+    // Automatic extent repair calls only the camera calculation above.
+    inline void setupScreenFovWithSize(float fovRadians, float viewW, float viewH, float nearDist, float farDist, bool pickable) {
+        if (headless::isActive()) return;
+        if (fovRadians <= 0.0f) {
+            sgl_defaults();
+            loadPipeline(activeFill2D());
+        } else {
+            loadPipeline(active3D());
+        }
+        updateScreenCameraWithSize(fovRadians, viewW, viewH, nearDist, farDist, pickable);
         applyTargetDrawingState();
     }
 
@@ -840,6 +799,7 @@ namespace internal {
     inline void setupScreenFov(float fovRadians, float nearDist, float farDist) {
         auto& target = internal::currentTarget();
         if (!target.isFbo) {
+            target.automaticViewport = false;
             target.width = getFramebufferWidth();
             target.height = getFramebufferHeight();
             target.viewport = {0, 0, (float)target.width, (float)target.height, true};
@@ -1193,7 +1153,7 @@ inline void setCircleResolution(int res) {
 
 [[deprecated("Use getCurveResolution() instead. Will be removed in v1.0.0")]]
 inline int getCircleResolution() {
-    return getDefaultContext().getCircleResolution();
+    return getCurveResolution();
 }
 
 // Check fill/stroke state
@@ -1707,7 +1667,12 @@ inline void setWindowSize(int width, int height) {
     if (internal::pixelPerfectMode()) {
         // Pixel perfect mode: convert framebuffer size to logical size
         float scale = sapp_dpi_scale();
+#if defined(_WIN32)
+        // Preserve fractional logical pixels until the native DPI conversion.
+        internal::setWindowSizeWin32(sapp_win32_get_hwnd(), double(width) / scale, double(height) / scale);
+#else
         setWindowSizeLogical(static_cast<int>(width / scale), static_cast<int>(height / scale));
+#endif
     } else {
         // Logical coordinate mode: as is
         setWindowSizeLogical(width, height);
@@ -1827,7 +1792,15 @@ inline int getSokolMemoryAllocs() { return smemtrack_info().num_allocs; }
 // Buffers are automatically re-allocated on the next draw call.
 // Call between frames when you know the next frame will use fewer vertices.
 inline void releaseSglBuffers() {
-    sgl_tc_context_release_buffers(internal::currentWindowContext().swapchainTarget.resources().context);
+    auto& window = internal::currentWindowContext();
+    const auto& target = window.swapchainTarget;
+    if (window.targetStack.size() > 1 || target.inPass || target.passStartedThisFrame || target.openShaderScopes ||
+        !target.deferredShaderDraws.empty() || !target.deferredPbrDraws.empty() || !target.deferredPointDraws.empty() ||
+        sgl_tc_context_has_pending_draws(target.resources().context)) {
+        logWarning("RenderTarget") << "releaseSglBuffers deferred: target still owns recorded work";
+        return;
+    }
+    sgl_tc_context_release_buffers(target.resources().context);
 }
 
 // ---------------------------------------------------------------------------
@@ -2171,25 +2144,47 @@ namespace internal {
     std::shared_ptr<CaptureStagingPool> makeCaptureStagingPool();
     bool captureWindowAsync(
         const std::function<void(const CaptureReadback&)>& completion,
-        const std::shared_ptr<CaptureStagingPool>& pool = nullptr);
+        const std::shared_ptr<CaptureStagingPool>& pool = nullptr,
+        const std::function<void()>& finished = {});
 #endif
 }
 
-// Capture screen to Pixels.
-// NOTE: immediate readback — call this OUTSIDE draw() (e.g. at the end of
-// update() or from an events().afterFrame listener). During draw() nothing has
-// been rendered yet (drawing is deferred to present()), so on Linux you'd read
-// a blank framebuffer. If you just want a file of the current frame, prefer
-// saveScreenshot() which captures at the correct point automatically.
-// Web: not implemented (no canvas readback). Always returns false and warns
-// once; take screenshots with the browser's own tools instead.
+// Read this window's screen into Pixels. What is captured depends on when called.
+// - update(), setup(), and other phases outside a frame/afterFrame: false, with
+//   one Warning per window pointing to events().afterFrame or saveScreenshot().
+//   An open GPU pass/Fbo alone does not count as a frame (synced update runs
+//   after beginFrame). The current window's innermost AppEntry guard defines
+//   the phase: Draw spans app/tree drawing through present()/onRender; AfterFrame
+//   spans the framework's afterFrame notification. Nested other entries override it.
+// - draw(): submit/read the frame so far. ImGui, child nodes drawn later and
+//   later overlays are not included. Slow; intended for debugging. On macOS,
+//   the capture completion wait is limited to 10 s for a hung GPU.
+// - events().afterFrame listener: read the full finished frame, including ImGui.
+// Drawing to the screen inside afterFrame doesn't appear (it lands under the
+// next frame's clear()); there, only read, or render into an Fbo.
+// Use saveScreenshot() for files and Fbo::readPixels() for Fbo contents;
+// grabScreen never reads an active Fbo.
+// Keep an EventListener member alive, for example:
+//   EventListener captureListener;
+//   bool captureRequested = true;
+//   void setup() override {
+//       captureListener = events().afterFrame.listen([this] {
+//           if (captureRequested) { Pixels pixels; grabScreen(pixels); captureRequested = false; }
+//       });
+//   }
+// One call costs about 3–7 ms on desktop GPUs and about 15 ms on a Raspberry Pi
+// at 720p, mostly waiting for the GPU, so reading less doesn't make it much
+// cheaper; prefer calling on demand rather than every frame.
+// Web: synchronous readback is not implemented; returns false and warns once.
 TC_PLATFORMS("macos,windows,linux,ios,android") inline bool grabScreen(Pixels& outPixels) {
+    if (!internal::getDefaultContext().admitScreenCapture()) return false;
     return captureWindow(outPixels);
 }
 
 namespace internal {
     // Capture every path queued by saveScreenshot() on the CURRENT window's
-    // queue (WindowContext::pendingScreenshotPaths) and clear it. Called right
+    // queue (WindowContext::pendingScreenshotPaths). Requests appended during
+    // the drain remain queued for the next drain. Called right
     // after present() while that window's context — and thus its
     // lastSwapchainDrawable — is current: the main window from the afterFrame
     // listener installed in _setup_cb, each secondary window from its own
@@ -2198,45 +2193,36 @@ namespace internal {
     // (tc_get_screenshot / tc_save_screenshot with a window index): only
     // inside its own tick is its drawable the one a readback sees (#243).
     // The main window's are drained by the same afterFrame listener.
-    inline void drainPendingScreenshots() {
+    // The capture callback also permits headless drain regression tests.
+    inline void drainPendingScreenshots(
+        bool (*capture)(const std::filesystem::path&) = captureWindowToFile) {
         auto& ctx = currentWindowContext();
+        auto& queue = ctx.pendingScreenshotPaths;
+        // Snapshot before any stage that can log: saves queued from a callback
+        // during this drain wait for the next one.
+        const size_t count = queue.size();
         #ifndef __EMSCRIPTEN__
         if (!ctx.isMain) mcp::internal::drainDeferredResponses(&ctx);
         #endif
-        auto& queue = ctx.pendingScreenshotPaths;
         captureScreenshots(ctx.asyncScreenshots);
-        if (queue.empty()) return;
-        for (const auto& p : queue) {
-            captureWindowToFile(p);
+        if (count == 0) return;
+        for (size_t i = 0; i < count && i < queue.size(); ++i) {
+            // Logging callbacks may append without invalidating the local path.
+            auto path = std::move(queue[i]);
+            try { capture(path); }
+            catch (const std::exception& error) { logError("Screenshot") << error.what(); }
         }
-        queue.clear();
+        queue.erase(queue.begin(), queue.begin() + std::min(count, queue.size()));
     }
     // Keeps the afterFrame drain subscription alive for the app's lifetime.
     // Host-only, so a per-module copy is fine: installed in _setup_cb.
     inline EventListener screenshotAfterFrameListener;
 }
 
-// Save a screenshot of the current frame to a file. Safe to call from anywhere
-// (setup/update/draw/event handlers): the actual capture is deferred to just
-// after present(), so it always grabs the fully-rendered frame — no black
-// captures on Linux when called inside draw().
-//
-// Returns true if the destination was prepared and the capture was queued;
-// false if the destination is inside the app bundle (with an Error naming
-// getUserDataPath()) or the parent directory could not be created (e.g. no write
-// permission). The rare failure of the deferred write itself (permission/disk
-// after the directory check) is reported via logError("Screenshot").
-// Relative paths resolve against the data path. The format comes from the
-// extension (case-insensitive): png/jpg/jpeg/bmp; macOS also writes tiff/tif/gif,
-// Windows also tga. Unsupported or missing extensions append .png and warn
-// with the actual destination and supported formats.
-//
-// Web: queue a canvas download (PNG/JPEG). Only the filename is used; an empty
-// name gets a timestamped default. Returns true when queued; encoded output is
-// handed to the browser (disk completion is not observable). Later failures
-// (including a tainted canvas) are logged. The browser may ask for permission
-// to allow multiple downloads.
-inline bool saveScreenshot(const std::filesystem::path& path) {
+namespace internal {
+// App-authored captures use their existing queue. External requests use MCP's
+// admitted deferral path instead.
+inline bool queueScreenshot(const std::filesystem::path& path) {
     std::filesystem::path resolved;
 #ifdef __EMSCRIPTEN__
     auto name = internal::resolveScreenshotDownloadName(path);
@@ -2259,6 +2245,31 @@ inline bool saveScreenshot(const std::filesystem::path& path) {
         redraw();
     }
     return true;
+}
+} // namespace internal
+
+// Save a screenshot of the current frame to a file. Safe to call from anywhere
+// (setup/update/draw/event handlers): the actual capture is deferred to just
+// after present(), so it always grabs the fully-rendered frame — no black
+// captures on Linux when called inside draw().
+//
+// Returns true if the destination was prepared and the capture was queued;
+// false if the destination is inside the app bundle (with an Error naming
+// getUserDataPath()) or the parent directory could not be created (e.g. no write
+// permission). The rare failure of the deferred write itself (permission/disk
+// after the directory check) is reported via logError("Screenshot").
+// Relative paths resolve against the data path. The format comes from the
+// extension (case-insensitive): png/jpg/jpeg/bmp; macOS also writes tiff/tif/gif,
+// Windows also tga. Unsupported or missing extensions append .png and warn
+// with the actual destination and supported formats.
+//
+// Web: queue a canvas download (PNG/JPEG). Only the filename is used; an empty
+// name gets a timestamped default. Returns true when queued; encoded output is
+// handed to the browser (disk completion is not observable). Later failures
+// (including a tainted canvas) are logged. The browser may ask for permission
+// to allow multiple downloads.
+inline bool saveScreenshot(const std::filesystem::path& path) {
+    return internal::queueScreenshot(path);
 }
 
 // ---------------------------------------------------------------------------
@@ -2723,6 +2734,8 @@ namespace internal {
             return;
         }
         frameReentryGuard = true;
+        auto* previousWindow = currentWindowCtx();
+        restoreWindowContext(nullptr);
         crashFrame(sapp_frame_count());
         CrashPhaseScope crashPhase("frame");
 
@@ -2747,16 +2760,20 @@ namespace internal {
 
             // If Update is synced to Draw, call Update here
             runSyncedUpdate();
+            refreshWindowDrawingSize();
 
             {
-                CrashPhaseScope drawPhase("draw");
-                if (appDrawFunc) appDrawFunc();
+                EntryStackGuard drawEntry(AppEntry::Draw);
+                {
+                    CrashPhaseScope drawPhase("draw");
+                    if (appDrawFunc) appDrawFunc();
+                }
+
+                // Reset shader stack if any shaders are still pushed
+                internal::resetShaderStack();
+
+                present();
             }
-
-            // Reset shader stack if any shaders are still pushed
-            internal::resetShaderStack();
-
-            present();
 
             // After present(): swapchain committed, outside any pass. Safe point
             // for end-of-frame readback (e.g. VideoRecorder auto-capture). Its
@@ -2789,6 +2806,7 @@ namespace internal {
         internal::currentWindowContext().pmouseX = internal::currentWindowContext().mouseX;
         internal::currentWindowContext().pmouseY = internal::currentWindowContext().mouseY;
 
+        restoreWindowContext(previousWindow);
         frameReentryGuard = false;
     }
 
@@ -2799,7 +2817,7 @@ namespace internal {
         CrashPhaseScope crashPhase("cleanup");
         writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
         // Session end may arrive inside a secondary window's modal loop.
-        currentWindowCtx() = &mainWindowContext();
+        restoreWindowContext(nullptr);
         // Stop MCP HTTP server
         #ifndef __EMSCRIPTEN__
         mcp::stopHttpServer();
@@ -2901,6 +2919,12 @@ namespace internal {
     }
 
     inline void _event_cb(const sapp_event* ev) {
+        auto* previousWindow = currentWindowCtx();
+        restoreWindowContext(nullptr);
+        struct RestoreEventWindow {
+            WindowContext* previous;
+            ~RestoreEventWindow() { restoreWindowContext(previous); }
+        } restoreEventWindow{previousWindow};
         CrashPhaseScope crashPhase("event dispatch");
         if (ev->type >= SAPP_EVENTTYPE_KEY_DOWN && ev->type <= SAPP_EVENTTYPE_TOUCHES_CANCELLED) {
             crashInput(static_cast<int>(ev->type), static_cast<int>(ev->mouse_x),

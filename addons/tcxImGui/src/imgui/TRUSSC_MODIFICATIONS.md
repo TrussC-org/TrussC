@@ -26,9 +26,12 @@ addons/tcxImGui/src/
 │   ├── imstb_*.h             # Untouched
 │   └── TRUSSC_MODIFICATIONS.md
 ├── sokol_imgui.h             # From sokol util/ + TrussC multi-context patch (see below)
-├── tcImGuiHooks.h            # TrussC: implements the hooks (not an upstream file)
-├── tcImGuiTools.h            # TrussC: MCP tools (not an upstream file)
-└── tcxImGui.h                # TrussC: addon API (not an upstream file)
+├── tcImGuiHooks.h            # TrussC: hook and registry declarations
+├── tcImGuiHooksImpl.h        # TrussC: definitions included only by the platform TU
+├── tcImGuiTools.h            # TrussC: MCP tool declarations/templates
+├── tcImGuiToolsImpl.h        # TrussC: tool definitions, platform TU only
+├── tcxImGui.h                # TrussC: addon API declarations
+└── tcxImGuiImpl.h            # TrussC: addon API definitions, platform TU only
 ```
 
 Only the files listed as Modified differ from the upstream tag. Everything else
@@ -47,7 +50,7 @@ for the MCP tools (`tcx_imgui_get_widgets`, `tcx_imgui_click`, ...).
 - `#define IMGUI_ENABLE_TEST_ENGINE` (upstream ships it commented out). The
   four extern functions it requires (`ImGuiTestEngineHook_ItemAdd`,
   `ImGuiTestEngineHook_ItemInfo`, `ImGuiTestEngineHook_Log`,
-  `ImGuiTestEngine_FindItemDebugLabel`) are implemented in `tcImGuiHooks.h`.
+  `ImGuiTestEngine_FindItemDebugLabel`) are implemented in `tcImGuiHooksImpl.h`.
   They run only for contexts whose `TestEngineHookItems` is set, which
   tcxImGui does when `imguiSetup()` registers its MCP tools (independent of the grant).
 
@@ -105,7 +108,7 @@ value pointer, hence this patch.
   `IsItemDeactivatedAfterEdit()` do not fire for an injected value and it
   stays out of the touched record.
 - `ImGuiTcHook_ItemValue()` and `ImGuiTcHook_ItemEntry()` are declared here
-  and implemented in `tcImGuiHooks.h`. (`ImGuiTcHook_ItemEntry()` replaced
+  and implemented in `tcImGuiHooksImpl.h`. (`ImGuiTcHook_ItemEntry()` replaced
   `ImGuiTcHook_EditCount(ctx)` with #321; it takes the whole object, so it
   also knows the widget's ID, kind and data.)
 
@@ -201,7 +204,7 @@ included, so the rule has no exceptions. The 24 lines:
 | `ListBox` (getter form) | `if (!BeginListBox(...)) return false;`, `return value_changed;` |
 | `MenuItem` (`bool*` form) | `return true;`, `return false;` |
 
-How the hooks behave (in `tcImGuiHooks.h`):
+How the hooks behave (in `tcImGuiHooksImpl.h`):
 - Parts of a ColorEdit/ColorPicker (`##X`, `##Text`, the `##picker` popup)
   report nothing, since they edit temporaries. The whole widget reports,
   because `g.ColorEditCurrentID` is 0 again when its hook runs.
@@ -366,7 +369,7 @@ done
   (a new early return must be wrapped too).
 - The test engine hook signatures in `imgui_internal.h`
   (`IMGUI_TEST_ENGINE_ITEM_ADD` / `_ITEM_INFO` and the `extern` declarations)
-  still match `tcImGuiHooks.h`.
+  still match `tcImGuiHooksImpl.h`.
 - The internals the hooks read still exist: `ImGuiContext::ColorEditCurrentID`,
   `BeginComboDepth`, `LastItemData`, `TestEngineHookItems`,
   `ImGuiInputTextFlags_TempInput`, `ImGuiColorEditFlags_InputMask_`,
