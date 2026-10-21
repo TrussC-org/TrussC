@@ -4,6 +4,7 @@
 // tcLog.h - Logging system
 // =============================================================================
 
+#include <cstdio>
 #include <sstream>
 #include <fstream>
 #include <iostream>
@@ -469,13 +470,20 @@ public:
     LogStream(LogLevel level, const std::string& module = "")
         : level_(level), module_(module) {}
 
-    ~LogStream() {
-        if (!moved_) {
+    // The destructor never throws: building the message or delivering it can
+    // allocate, and an exception escaping a destructor calls std::terminate.
+    // On failure the message is dropped and one fixed line is written to
+    // stderr, best effort (no C++ allocation; libc may still buffer).
+    ~LogStream() noexcept {
+        if (moved_) return;
+        try {
             std::string msg = stream_.str();
             if (!module_.empty()) {
                 msg = "[" + module_ + "] " + msg;
             }
             getLogger().log(level_, msg);
+        } catch (...) {
+            std::fputs("[TrussC] log message dropped: delivery failed\n", stderr);  // log-check: allow (allocation-free fallback)
         }
     }
 
