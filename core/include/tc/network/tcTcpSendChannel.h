@@ -88,6 +88,7 @@ struct TcpSendChannel {
     // The send path gave up on this client (a timeout truncated a payload).
     // The receive thread does the removal.
     std::atomic<bool> dropped{false};
+    std::shared_ptr<std::atomic<bool>> receiveDeliveryRun = std::make_shared<std::atomic<bool>>(true);
 };
 
 } // namespace trussc::internal

@@ -142,7 +142,7 @@ class TC_PLATFORMS("macos,windows,linux,android") TcpServer {
         void acceptThreadFunc();
         void clientThreadFunc(int clientId);
         void writerThreadFunc(int clientId, std::shared_ptr<internal::TcpSendChannel> ch);
-        void notifyError(const std::string& msg, int code = 0, int clientId = -1);
+        void notifyError(const std::string& msg, int code = 0, int clientId = -1, bool external = false);
         bool removeClient(int clientId);
         void reapClientThreads();
         void joinClientThreads();

@@ -17,41 +17,68 @@ struct NetworkDelivery {
 
 // A run holds only a weak delivery target. The handle drops its targets before
 // teardown; Event::notify retains its listener snapshot across self-destruction.
+// Each external emission opts in; app results and teardown stay uncapped.
 template<class T> struct EventSnapshotDelivery {
-    using Target = std::function<void(T&)>;
+    using RunToken = std::shared_ptr<std::atomic<bool>>;
+    struct Target {
+        std::function<bool(T&, RunToken, bool)> dispatch;
+        template<class Fn> explicit Target(Fn fn) : dispatch(std::move(fn)) {}
+        bool operator()(T& args, RunToken run = {}) const {
+            return dispatch(args, std::move(run), false);
+        }
+    };
     std::weak_ptr<Target> target;
     static std::shared_ptr<Target> bind(Event<T>& event, std::shared_ptr<NetworkDelivery> gate) {
-        return std::make_shared<Target>([source = &event, gate = std::move(gate)](T& args) {
+        return std::make_shared<Target>([source = &event, gate = std::move(gate)](T& args, RunToken run, bool external) {
             typename Event<T>::ConstEntryListPtr snapshot;
+            std::shared_ptr<ExternalDeliveryStore> store;
+            std::weak_ptr<std::atomic<bool>> sourceAlive;
             {
                 std::lock_guard<std::mutex> lock(gate->mutex);
-                if (!gate->open) return;
+                if (!gate->open) return true;
                 snapshot = sharedLoad(source->entries_);
+                sourceAlive = source->alive_;
+                if (external) store = ExternalEventDelivery<T>::store(*source, snapshot);
             }
-            Event<T>::notifySnapshot(std::move(snapshot), args);
+            ExternalEventScope origin(&args, external);
+            return Event<T>::notifySnapshot(std::move(snapshot), args, std::move(store), std::move(sourceAlive), std::move(run));
         });
     }
-    void notify(T& args) const {
-        if (auto delivery = target.lock()) (*delivery)(args);
+    bool notify(T& args, RunToken run = {}) const {
+        if (auto delivery = target.lock()) return (*delivery)(args, std::move(run));
+        return true;
+    }
+    bool notifyExternal(T& args, RunToken run = {}) const {
+        if (auto delivery = target.lock()) return delivery->dispatch(args, std::move(run), true);
+        return true;
     }
 };
 
 // The same gate and snapshot rule for events without a payload.
 template<> struct EventSnapshotDelivery<void> {
-    using Target = std::function<void()>;
+    struct Target {
+        std::function<void(bool)> dispatch;
+        template<class Fn> explicit Target(Fn fn) : dispatch(std::move(fn)) {}
+        void operator()() const { dispatch(false); }
+    };
     std::weak_ptr<Target> target;
     static std::shared_ptr<Target> bind(Event<void>& event, std::shared_ptr<NetworkDelivery> gate) {
-        return std::make_shared<Target>([source = &event, gate = std::move(gate)] {
+        return std::make_shared<Target>([source = &event, gate = std::move(gate)](bool external) {
             Event<void>::ConstEntryListPtr snapshot;
+            std::shared_ptr<ExternalDeliveryStore> store;
+            std::weak_ptr<std::atomic<bool>> sourceAlive;
             {
                 std::lock_guard<std::mutex> lock(gate->mutex);
                 if (!gate->open) return;
                 snapshot = sharedLoad(source->entries_);
+                sourceAlive = source->alive_;
+                if (external) store = ExternalEventDelivery<void>::store(*source, snapshot);
             }
-            Event<void>::notifySnapshot(std::move(snapshot));
+            Event<void>::notifySnapshot(std::move(snapshot), std::move(store), std::move(sourceAlive));
         });
     }
     void notify() const { if (auto delivery = target.lock()) (*delivery)(); }
+    void notifyExternal() const { if (auto delivery = target.lock()) delivery->dispatch(true); }
 };
 
 } // namespace trussc::internal

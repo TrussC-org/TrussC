@@ -298,7 +298,7 @@ private:
                 }
                 polling->countDrops(dropped);
             }
-            if (open.load()) onMessage.notify(msg);
+            if (open.load()) onMessage.notifyExternal(msg);
         }
 
     };

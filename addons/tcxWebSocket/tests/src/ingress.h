@@ -177,6 +177,27 @@ struct WebSocketIngressTest {
             s->disconnectListener_ = s->client_->onDisconnect.listen([s](auto& args) { s->handleTcpDisconnect(args); });
             return s;
         };
+#ifndef WS_BASELINE
+        {
+            tc::getMainThreadId();
+            WebSocketClient ws;
+            int closes = 0;
+            auto close = ws.onClose.listen([&] { ++closes; }, tc::Deliver::Main);
+            std::thread worker([&] {
+                auto s = makeState(ws);
+                for (int i = 0; i < 1024; ++i) s->onClose.notifyExternal();
+                for (int i = 0; i < 1025; ++i) {
+                    s = makeState(ws);
+                    ws.disconnect();
+                }
+            });
+            worker.join();
+            auto store = tc::internal::ExternalEventDelivery<void>::diagnostics(ws.onClose);
+            check("local WebSocket closes bypass saturated external delivery", store && store->pending == 1024 && store->rejectedCopies == 0);
+            tc::internal::drainMainThreadQueue();
+            check("all local WebSocket closes reach Main", closes == 2049 && store->pending == 0);
+        }
+#endif
         {
             WebSocketClient ws;
             auto s = makeState(ws, true);

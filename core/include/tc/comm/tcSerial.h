@@ -1666,7 +1666,9 @@ private:
     // The caller must return right after this and not touch the port: it may
     // be a new one.
     void notifyDisconnect(PendingDisconnect& pending) const {
-        if (pending) onDisconnect.notify(*pending);
+        if (!pending) return;
+        if (pending->wasClean) onDisconnect.notify(*pending);
+        else internal::ExternalEventDelivery<SerialDisconnectEventArgs>::notify(onDisconnect, *pending);
     }
 
     // A device loss an I/O call found with the lock shared. The call closes
