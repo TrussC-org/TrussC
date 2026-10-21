@@ -6,7 +6,7 @@
 // An ImGui context with no renderer and no window: the font atlas is built on
 // the CPU (the backend claims RendererHasTextures and never uploads), frames
 // are run by hand, and input goes through ImGuiIO the way a backend would feed
-// it. Collection is on, so the hooks in tcImGuiHooks.h fill the frame registry
+// it. Collection is on, so the hooks in tcImGuiHooksImpl.h fill the frame registry
 // and the touched record exactly as in an app.
 //
 // A test draws its UI in a callback, runs frames with it, and clicks widgets
