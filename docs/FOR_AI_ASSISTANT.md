@@ -1112,6 +1112,8 @@ The foundation — a thin wrapper over each OS's native API + C++ — gives a **
 
 Yes. You can run `update()` only without ever calling `draw()`, or use the window-less `runHeadlessApp()`. Good for server-side, CI, and headless tests. It's similar to oF's nowindow mode, but **most graphics-focused frameworks lack such a mode** — TrussC manages update and draw independently, so this falls out naturally (see event-driven).
 
+`runHeadlessApp()` notifies `events().update` each fixed step and `events().exit` once on shutdown. The App's `update()` / `exit()` are protected listeners at priority 100, ordered between BeforeApp and AfterApp. The App and mandatory framework teardown bindings survive `clear()`. Tween, update-mode TCP/UDP receive, Box2d auto stepping and WebSocket timeouts therefore work headless. Children, mods and node timers are still not updated (#906).
+
 ### Do heavy features bloat build time / the core?
 
 Heavy dependencies are **split into addons.** Even official features that are heavy (physics, various SDK wrappers, …) live in addons rather than core, so if you don't use them they're neither linked nor built — **shorter build times and a smaller binary.** Core is built once and shared across projects. The plan is to keep moving heavy dependencies into addons.

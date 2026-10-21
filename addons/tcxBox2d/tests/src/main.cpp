@@ -4109,7 +4109,38 @@ static void testDeliveryPR2(const string& selected = "all") {
     if (selected == "all" || selected == "classic-source-deletion") testDeletedClassicSource();
 }
 
+// #947: auto stepping through the real runner, without manual notify/step.
+namespace {
+struct HeadlessPhysicsApp : App {
+    box2d::World world;
+    box2d::CircleBody ball;
+    int updates = 0;
+    float previousVelocity = 0;
+    void setup() override {
+        world.setup(0, 1024);
+        world.setSimulationRate(1024);
+        ball.setup(world, 100, 100, 10);
+    }
+    void update() override {
+        check("headless Box2d auto steps on every update before the App", ball.getVelocity().y > previousVelocity);
+        previousVelocity = ball.getVelocity().y;
+        if (++updates == 4) exitApp();
+    }
+    void exit() override {
+        check("headless Box2d body moves without manual stepping", ball.getPhysicsPosition().y > 100);
+    }
+};
+static void testHeadlessPhysics() {
+    WorldTestFrames frames;
+    check("headless Box2d runner exits", runHeadlessApp<HeadlessPhysicsApp>(HeadlessSettings().setFps(1024)) == 0);
+}
+} // namespace
+
 int main(int argc, char** argv) {
+    if (argc == 2 && string(argv[1]) == "--headless-events") {
+        testHeadlessPhysics();
+        return finishSelectedRun(argv[1]);
+    }
     if (argc == 2 && string(argv[1]) == "--contact-lifetimes") {
         testCompoundEvents();
         testCompoundHandover();
@@ -4161,6 +4192,7 @@ int main(int argc, char** argv) {
         return finishSelectedRun(argc >= 3 ? argv[2] : argv[1]);
     }
 
+    testHeadlessPhysics();
     testDeliveryPR2();
     testPolyShapeRefuses(world);
     testHullDropWarning(world);
