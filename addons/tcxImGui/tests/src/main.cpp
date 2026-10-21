@@ -5,7 +5,7 @@
 // examples/build_all.py --addon-tests-only (exit 0 = pass, non-zero = fail).
 // Drives a real Dear ImGui context through imguiHarness.h: clicks go in as
 // ImGuiIO events, and the checks read what the MCP tools read (the frame
-// registry and the touched record filled by the hooks in tcImGuiHooks.h).
+// registry and the touched record filled by the hooks in tcImGuiHooksImpl.h).
 //
 // Touched record (#322): only what a value hook reports is recorded.
 //   - a toggle MenuItem(bool*) in a dropdown is recorded with its new value,

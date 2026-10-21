@@ -1,7 +1,7 @@
 # tcxImGui tests
 
 Headless console test (no window, no GPU). It runs a real Dear ImGui context
-with the bundled, patched imgui and the hooks from `src/tcImGuiHooks.h`, and
+with the bundled, patched imgui and the hooks from `src/tcImGuiHooksImpl.h`, and
 checks what the MCP tools would report.
 
 `src/imguiHarness.h` is the driver, meant to be shared by every tcxImGui test:
@@ -99,3 +99,17 @@ trusscli run -p .          # from this directory
 # or from the repo root, run every addon test harness:
 ./examples/build_all.py --addon-tests-only --verbose
 ```
+
+For the hot-reload host header regression (#371), run
+`python3 addons/tcxImGui/tests/check_hook_header.py` from the repository root
+with GCC, `nm` and `objdump` available. It compiles include-only TUs for `tcxImGui.h`,
+`tcImGuiTools.h`, and `tcImGuiHooks.h`, both normally and with
+`-fkeep-inline-functions`. Normal inclusion must emit no undefined ImGui
+references. Forced emission must add no undefined ImGui references beyond
+an upstream-only control (TrussC, sokol_imgui, and imgui_internal), and must
+emit no hook/captureValue definitions. Relocations from addon-defined functions
+are checked too, so the upstream control cannot hide an addon call to the
+same ImGui symbol. `--include-dir` can overlay saved
+pre-fix public headers to reproduce the failure. The
+`hotReloadLifecycle` core test also includes `tcxImGui.h` from `tcApp.h`, so its
+host link covers that layout on MSVC.
