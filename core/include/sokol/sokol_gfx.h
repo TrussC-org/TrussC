@@ -5515,6 +5515,7 @@ inline int sg_append_buffer(sg_buffer buf_id, const sg_range& data) { return sg_
 #include <stdlib.h> // malloc, free, qsort
 #include <string.h> // memset
 #include <stdio.h> // snprintf ([TrussC modification] metal uniform-buffer auto-grow log)
+#include <limits.h> // INT_MAX ([TrussC] checked Metal uniform cursor growth)
 #include <float.h> // FLT_MAX
 
 #ifndef SOKOL_API_IMPL
@@ -16128,33 +16129,6 @@ _SOKOL_PRIVATE void _sg_mtl_discard_view(_sg_view_t* view) {
     }
 }
 
-_SOKOL_PRIVATE void _sg_mtl_bind_uniform_buffers(void) {
-    // In the Metal backend, uniform buffer bindings happen once in sg_begin_pass() and
-    // remain valid for the entire pass. Only binding offsets will be updated
-    // in sg_apply_uniforms()
-    if (_sg.cur_pass.is_compute) {
-        SOKOL_ASSERT(nil != _sg.mtl.compute_cmd_encoder);
-        for (size_t slot = 0; slot < SG_MAX_UNIFORMBLOCK_BINDSLOTS; slot++) {
-            [_sg.mtl.compute_cmd_encoder
-                setBuffer:_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index]
-                offset:0
-                atIndex:slot];
-        }
-    } else {
-        SOKOL_ASSERT(nil != _sg.mtl.render_cmd_encoder);
-        for (size_t slot = 0; slot < SG_MAX_UNIFORMBLOCK_BINDSLOTS; slot++) {
-            [_sg.mtl.render_cmd_encoder
-                setVertexBuffer:_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index]
-                offset:0
-                atIndex:slot];
-            [_sg.mtl.render_cmd_encoder
-                setFragmentBuffer:_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index]
-                offset:0
-                atIndex:slot];
-        }
-    }
-}
-
 _SOKOL_PRIVATE void _sg_mtl_begin_compute_pass(const sg_pass* pass) {
     SOKOL_ASSERT(pass); (void)pass;
     SOKOL_ASSERT(nil != _sg.mtl.cmd_buffer);
@@ -16379,6 +16353,35 @@ _SOKOL_PRIVATE void _sg_mtl_ensure_command_buffer(void) {
 }
 // [TrussC modification end]
 
+// [TrussC #859] Replace storage transactionally. Pending draws may still bind
+// the previous buffer: retain it through the existing submission-safe queue.
+_SOKOL_PRIVATE bool _sg_mtl_resize_uniform_buffer(int new_size) {
+    const int next_release = (_sg.mtl.idpool.release_queue_front + 1) % _sg.mtl.idpool.num_slots;
+    // Bound (gpu): Metal objects live in a fixed id table sized from the resource pools, so retiring the old buffer needs a free slot. Overflow rejects this growth and is reported by METAL_CREATE_BUFFER_FAILED.
+    if ((_sg.mtl.idpool.free_queue_top == 0) ||
+        (next_release == _sg.mtl.idpool.release_queue_back)) {
+        _SG_ERROR(METAL_CREATE_BUFFER_FAILED);
+        return false;
+    }
+    id<MTLBuffer> buffer = [_sg.mtl.device
+        newBufferWithLength:(NSUInteger)new_size
+        options:MTLResourceCPUCacheModeWriteCombined|MTLResourceStorageModeShared
+    ];
+    if (nil == buffer) {
+        _SG_ERROR(METAL_CREATE_BUFFER_FAILED);
+        return false;
+    }
+    #if defined(SOKOL_DEBUG)
+        buffer.label = [NSString stringWithFormat:@"sg-uniform-buffer.%d", _sg.mtl.cur_frame_rotate_index];
+    #endif
+    _sg_mtl_release_resource(_sg.frame_index,
+        _sg_mtl_add_resource(_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index]));
+    _SG_OBJC_RELEASE(_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index]);
+    _sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index] = buffer;
+    _sg.mtl.cur_ub_base_ptr = (uint8_t*)[buffer contents];
+    return true;
+}
+
 _SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachments_ptrs_t* atts) {
     SOKOL_ASSERT(pass && atts);
     SOKOL_ASSERT(_sg.mtl.cmd_queue);
@@ -16396,20 +16399,14 @@ _SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachment
         // frame while this rotate slot was in flight, replace its (smaller)
         // buffer now: the inflight-frame semaphore acquired above guarantees the
         // GPU is done with this slot's previous command buffer.
-        id<MTLBuffer> ub = _sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index];
-        if ((int)[ub length] < _sg.mtl.ub_size) {
-            _sg_mtl_release_resource(_sg.frame_index, _sg_mtl_add_resource(ub));
-            ub = [_sg.mtl.device
-                newBufferWithLength:(NSUInteger)_sg.mtl.ub_size
-                options:MTLResourceCPUCacheModeWriteCombined|MTLResourceStorageModeShared
-            ];
-            #if defined(SOKOL_DEBUG)
-                ub.label = [NSString stringWithFormat:@"sg-uniform-buffer.%d", _sg.mtl.cur_frame_rotate_index];
-            #endif
-            _sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index] = ub;
+        if ((int)[_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index] length] < _sg.mtl.ub_size) {
+            if (!_sg_mtl_resize_uniform_buffer(_sg.mtl.ub_size)) {
+                _sg.cur_pass.valid = false;
+                return;
+            }
         }
         // [TrussC modification end]
-        _sg.mtl.cur_ub_base_ptr = (uint8_t*)[ub contents];
+        _sg.mtl.cur_ub_base_ptr = (uint8_t*)[_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index] contents];
     }
 
     if (pass->compute) {
@@ -16418,10 +16415,8 @@ _SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachment
         _sg_mtl_begin_render_pass(pass, atts);
     }
 
-    // bind uniform buffers, those bindings remain valid for the entire pass
-    if (_sg.cur_pass.valid) {
-        _sg_mtl_bind_uniform_buffers();
-    }
+    // [TrussC #859] Each upload binds its own stage/slot. A pending draw can
+    // legitimately use blocks from several buffer generations after growth.
 }
 
 // [TrussC] Trace native scheduling without a second registry or retained log.
@@ -16820,49 +16815,55 @@ _SOKOL_PRIVATE bool _sg_mtl_apply_bindings(_sg_bindings_ptrs_t* bnd) {
 // builds and silently corrupts uniforms (flipped/black frames). Instead, when an
 // sg_apply_uniforms() call would overflow the ring, swap in a bigger MTLBuffer
 // for the CURRENT rotate slot and continue at offset 0:
-//   - draws already encoded this frame captured the old buffer binding at encode
-//     time (Metal encoders snapshot bindings per draw), so their data stays valid
+//   - each upload binds only its own stage/slot; previously applied blocks of
+//     the pending draw and already encoded draws keep their original bindings
 //   - the old buffer is retired through the normal deferred-release queue, so it
 //     outlives all in-flight command buffers that reference it
 //   - the other rotate slot(s) may still be in flight and are replaced lazily at
 //     the start of their next frame (see _sg_mtl_begin_pass), where the inflight
 //     semaphore guarantees the GPU is done with them
-_SOKOL_PRIVATE void _sg_mtl_grow_uniform_buffer(size_t data_size) {
+_SOKOL_PRIVATE bool _sg_mtl_grow_uniform_buffer(size_t data_size) {
     const int old_size = _sg.mtl.ub_size;
+    // Bound (abi): the aligned uniform cursor is an int. Overflow rejects this upload and is reported by METAL_CREATE_BUFFER_FAILED.
+    const int largest_size = INT_MAX & ~(_SG_MTL_UB_ALIGN - 1);
+    if (data_size > (size_t)largest_size || old_size >= largest_size) {
+        _SG_ERROR(METAL_CREATE_BUFFER_FAILED);
+        return false;
+    }
     int new_size = old_size;
     do {
-        new_size *= 2;
+        new_size = new_size <= largest_size / 2 ? new_size * 2 : largest_size;
     } while ((size_t)new_size < data_size);
-    id old_buf = _sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index];
-    _sg_mtl_release_resource(_sg.frame_index, _sg_mtl_add_resource(old_buf));
-    id<MTLBuffer> new_buf = [_sg.mtl.device
-        newBufferWithLength:(NSUInteger)new_size
-        options:MTLResourceCPUCacheModeWriteCombined|MTLResourceStorageModeShared
-    ];
-    #if defined(SOKOL_DEBUG)
-        new_buf.label = [NSString stringWithFormat:@"sg-uniform-buffer.%d", _sg.mtl.cur_frame_rotate_index];
-    #endif
-    _sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index] = new_buf;
+    if (!_sg_mtl_resize_uniform_buffer(new_size)) {
+        return false;
+    }
     _sg.mtl.ub_size = new_size;
     _sg.mtl.cur_ub_offset = 0;
-    _sg.mtl.cur_ub_base_ptr = (uint8_t*)[new_buf contents];
-    // rebind so subsequent setXXXBufferOffset calls resolve into the new buffer
-    if (_sg.cur_pass.valid) {
-        _sg_mtl_bind_uniform_buffers();
-    }
     char log_msg[160];
     snprintf(log_msg, sizeof(log_msg),
         "per-frame uniform buffer overflowed, auto-grown %d -> %d bytes (metal); use sg_desc.uniform_buffer_size to pre-allocate",
         old_size, new_size);
     _sg_log(SG_LOGITEM_METAL_UNIFORM_BUFFER_GROWN, 2, log_msg, __LINE__);
+    return true;
 }
 // <<[TrussC modification]
 
 _SOKOL_PRIVATE void _sg_mtl_apply_uniforms(int ub_slot, const sg_range* data) {
     SOKOL_ASSERT((ub_slot >= 0) && (ub_slot < SG_MAX_UNIFORMBLOCK_BINDSLOTS));
     // [TrussC modification] grow instead of overflowing (see _sg_mtl_grow_uniform_buffer)
-    if (((size_t)_sg.mtl.cur_ub_offset + data->size) > (size_t)_sg.mtl.ub_size) {
-        _sg_mtl_grow_uniform_buffer(data->size);
+    // Bound (abi): the uniform cursor is an int, so one aligned upload must stay below INT_MAX. Overflow invalidates this draw and is reported by METAL_CREATE_BUFFER_FAILED.
+    if (data->size > (size_t)(INT_MAX - (_SG_MTL_UB_ALIGN - 1))) {
+        _SG_ERROR(METAL_CREATE_BUFFER_FAILED);
+        _sg.next_draw_valid = false;
+        return;
+    }
+    const size_t required_size = (size_t)_sg.mtl.cur_ub_offset + data->size;
+    if ((required_size > (size_t)_sg.mtl.ub_size) ||
+        (required_size > (size_t)(INT_MAX & ~(_SG_MTL_UB_ALIGN - 1)))) {
+        if (!_sg_mtl_grow_uniform_buffer(data->size)) {
+            _sg.next_draw_valid = false;
+            return;
+        }
     }
     SOKOL_ASSERT(((size_t)_sg.mtl.cur_ub_offset + data->size) <= (size_t)_sg.mtl.ub_size);
     SOKOL_ASSERT((_sg.mtl.cur_ub_offset & (_SG_MTL_UB_ALIGN-1)) == 0);
@@ -16879,15 +16880,18 @@ _SOKOL_PRIVATE void _sg_mtl_apply_uniforms(int ub_slot, const sg_range* data) {
     memcpy(dst, data->ptr, data->size);
     if (stage == SG_SHADERSTAGE_VERTEX) {
         SOKOL_ASSERT(nil != _sg.mtl.render_cmd_encoder);
-        [_sg.mtl.render_cmd_encoder setVertexBufferOffset:(NSUInteger)_sg.mtl.cur_ub_offset atIndex:mtl_slot];
+        [_sg.mtl.render_cmd_encoder setVertexBuffer:_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index]
+            offset:(NSUInteger)_sg.mtl.cur_ub_offset atIndex:mtl_slot];
         _sg_stats_inc(metal.uniforms.num_set_vertex_buffer_offset);
     } else if (stage == SG_SHADERSTAGE_FRAGMENT) {
         SOKOL_ASSERT(nil != _sg.mtl.render_cmd_encoder);
-        [_sg.mtl.render_cmd_encoder setFragmentBufferOffset:(NSUInteger)_sg.mtl.cur_ub_offset atIndex:mtl_slot];
+        [_sg.mtl.render_cmd_encoder setFragmentBuffer:_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index]
+            offset:(NSUInteger)_sg.mtl.cur_ub_offset atIndex:mtl_slot];
         _sg_stats_inc(metal.uniforms.num_set_fragment_buffer_offset);
     } else if (stage == SG_SHADERSTAGE_COMPUTE) {
         SOKOL_ASSERT(nil != _sg.mtl.compute_cmd_encoder);
-        [_sg.mtl.compute_cmd_encoder setBufferOffset:(NSUInteger)_sg.mtl.cur_ub_offset atIndex:mtl_slot];
+        [_sg.mtl.compute_cmd_encoder setBuffer:_sg.mtl.uniform_buffers[_sg.mtl.cur_frame_rotate_index]
+            offset:(NSUInteger)_sg.mtl.cur_ub_offset atIndex:mtl_slot];
         _sg_stats_inc(metal.uniforms.num_set_compute_buffer_offset);
     } else {
         SOKOL_UNREACHABLE;

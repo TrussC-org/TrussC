@@ -1153,7 +1153,7 @@ inline void setCircleResolution(int res) {
 
 [[deprecated("Use getCurveResolution() instead. Will be removed in v1.0.0")]]
 inline int getCircleResolution() {
-    return getDefaultContext().getCircleResolution();
+    return getCurveResolution();
 }
 
 // Check fill/stroke state
@@ -1667,7 +1667,12 @@ inline void setWindowSize(int width, int height) {
     if (internal::pixelPerfectMode()) {
         // Pixel perfect mode: convert framebuffer size to logical size
         float scale = sapp_dpi_scale();
+#if defined(_WIN32)
+        // Preserve fractional logical pixels until the native DPI conversion.
+        internal::setWindowSizeWin32(sapp_win32_get_hwnd(), double(width) / scale, double(height) / scale);
+#else
         setWindowSizeLogical(static_cast<int>(width / scale), static_cast<int>(height / scale));
+#endif
     } else {
         // Logical coordinate mode: as is
         setWindowSizeLogical(width, height);

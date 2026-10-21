@@ -5,6 +5,8 @@
 #include <string>
 #include <utility>
 #include <filesystem>
+#include <cstdint>
+#include <limits>
 #include "tcMath.h"
 
 #if defined(__APPLE__)
@@ -144,6 +146,24 @@ fs::path getExecutablePath();
 fs::path getExecutableDir();
 
 namespace internal {
+// Win32 client pixels, rounded as in sokol's window creation path. Keep
+// fractional logical sizes until here for pixel-perfect resize requests.
+constexpr int windowClientExtentPixels(double logicalExtent, unsigned dpi) {
+    const double rounded = logicalExtent * (dpi ? dpi : 96) / 96.0 + 0.5;
+    // Zero signals an invalid extent; ordered comparisons also reject NaN.
+    if (!(logicalExtent > 0.0 && rounded >= 1.0 &&
+          rounded < double((std::numeric_limits<int>::max)()) + 1.0)) return 0;
+    return static_cast<int>(rounded);
+}
+constexpr int windowOuterExtentPixels(int clientExtent, std::int64_t frameExtent) {
+    if (clientExtent <= 0 || frameExtent < 1LL - clientExtent ||
+        frameExtent > (std::numeric_limits<int>::max)() - clientExtent) return 0;
+    return static_cast<int>(clientExtent + frameExtent);
+}
+// Windows only: resize at the native window's current DPI, independent of
+// highDpi rendering. The handle has the type returned by sapp_*_win32_get_hwnd.
+void setWindowSizeWin32(const void* handle, double logicalWidth, double logicalHeight);
+
 // The OS folders behind getUserDataPath() / getTempPath() (the table in
 // tcUtils.h), not created here. One definition per platform file.
 fs::path platformUserDataRoot();

@@ -147,33 +147,59 @@ void setWindowDecorated(bool decorated) {
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
 }
 
-void setWindowSizeLogical(int width, int height) {
-    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+void internal::setWindowSizeWin32(const void* handle, double logicalWidth, double logicalHeight) {
+    HWND hwnd = (HWND)handle;
     if (!hwnd) {
         logWarning() << "[Platform] Failed to get window handle";
         return;
     }
 
-    // 現在のウィンドウスタイルを取得
-    DWORD style = GetWindowLong(hwnd, GWL_STYLE);
-    DWORD exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+    // Resolve the Windows 10 APIs dynamically so older systems still load.
+    // Cache only the entry points: DPI must be read again after monitor moves.
+    using GetWindowDpi = UINT (WINAPI*)(HWND);
+    using AdjustRectForDpi = BOOL (WINAPI*)(LPRECT, DWORD, BOOL, DWORD, UINT);
+    static const HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    static const auto getWindowDpi = user32
+        ? (GetWindowDpi)GetProcAddress(user32, "GetDpiForWindow") : nullptr;
+    static const auto adjustRectForDpi = user32
+        ? (AdjustRectForDpi)GetProcAddress(user32, "AdjustWindowRectExForDpi") : nullptr;
+    // Match sokol's effective window scale when GetDpiForWindow is absent.
+    UINT dpi = getWindowDpi ? getWindowDpi(hwnd) : 96;
+    if (!dpi) dpi = 96;
 
-    // クライアント領域のサイズからウィンドウ全体のサイズを計算
-    RECT rect = { 0, 0, width, height };
-    AdjustWindowRectEx(&rect, style, FALSE, exStyle);
+    // Bound (abi): client and frame extents must fit SetWindowPos's positive int sizes. Overflow rejects the resize with one Warning and is counted.
+    const auto rejectSize = [] {
+        static std::uint64_t rejectedResizeCount = 0;
+        if (rejectedResizeCount != (std::numeric_limits<std::uint64_t>::max)()) ++rejectedResizeCount;
+        logWarning() << "[Platform] Window resize size is invalid or unrepresentable; rejected=" << rejectedResizeCount;
+    };
+    const int clientWidth = windowClientExtentPixels(logicalWidth, dpi);
+    const int clientHeight = windowClientExtentPixels(logicalHeight, dpi);
+    if (!clientWidth || !clientHeight) {
+        rejectSize();
+        return;
+    }
 
-    int windowWidth = rect.right - rect.left;
-    int windowHeight = rect.bottom - rect.top;
+    const DWORD style = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
+    const DWORD exStyle = (DWORD)GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    // Measure the frame on an empty client rect so native LONG arithmetic
+    // cannot overflow while adding it to a large requested client extent.
+    RECT rect = {0, 0, 0, 0};
+    if (!adjustRectForDpi || !adjustRectForDpi(&rect, style, FALSE, exStyle, dpi)) {
+        AdjustWindowRectEx(&rect, style, FALSE, exStyle);
+    }
+    const int windowWidth = windowOuterExtentPixels(clientWidth, std::int64_t(rect.right) - rect.left);
+    const int windowHeight = windowOuterExtentPixels(clientHeight, std::int64_t(rect.bottom) - rect.top);
+    if (!windowWidth || !windowHeight) {
+        rejectSize();
+        return;
+    }
+    SetWindowPos(hwnd, nullptr, 0, 0, windowWidth, windowHeight,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
 
-    // 現在のウィンドウ位置を取得
-    RECT currentRect;
-    GetWindowRect(hwnd, &currentRect);
-
-    // 位置を維持してサイズのみ変更
-    SetWindowPos(hwnd, nullptr,
-                 currentRect.left, currentRect.top,
-                 windowWidth, windowHeight,
-                 SWP_NOZORDER | SWP_NOACTIVATE);
+void setWindowSizeLogical(int width, int height) {
+    internal::setWindowSizeWin32(sapp_win32_get_hwnd(), width, height);
 }
 
 // ---------------------------------------------------------------------------
