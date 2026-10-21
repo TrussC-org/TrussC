@@ -317,7 +317,7 @@ void UdpSocket::State::startReceiving() {
     } else {
         // Ensure non-blocking mode for event loop
         setNonBlocking(true);
-        updateListener_ = events().update.listen([state = shared_from_this()] { state->processNetwork(); });
+        updateListener_ = events().update.listen([state = shared_from_this()] { state->processNetwork(); }, EventPriority::BeforeApp);
     }
 }
 

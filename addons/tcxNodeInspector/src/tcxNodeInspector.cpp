@@ -778,10 +778,10 @@ void NodeInspector::enableGizmoInput() {
     gizmoInputEnabled_ = true;
     ensureExitGuard();
 
-    // Slightly ahead of BeforeApp: the gizmo draws in ImGui's FOREGROUND layer
-    // (over the panels), so it also wins input over them — what you see on top
+    // Ahead of ImGui (-20) and default listeners (0): the gizmo draws in
+    // ImGui's FOREGROUND layer (over the panels), so it also wins input over them — what you see on top
     // is what you grab.
-    const int prio = tc::EventPriority::BeforeApp - 10;
+    const int prio = -30;
     gizmoPress_ = tc::events().mousePressed.listen([this](MouseEventArgs& e) {
         if (gizmoPressHandler(e)) e.consumed = true;
     }, prio);
@@ -984,7 +984,7 @@ void NodeInspector::ensureToggleKeyListener() {
         for (int k : toggleKeys_) {
             if (e.key == k) { toggle(); break; }
         }
-    });
+    }, EventPriority::BeforeApp);
 }
 
 // The singleton outlives the framework, so its listeners would otherwise be
@@ -1000,8 +1000,8 @@ void NodeInspector::ensureToggleKeyListener() {
 // and taking input (#416).
 void NodeInspector::ensureExitGuard() {
     if (exitListener_) return;
-    exitListener_ = events().exit.listen([this] { releaseListeners(); });
-    hotReloadUnloadListener_ = events().hotReloadUnload.listen([this] { releaseListeners(); });
+    exitListener_ = events().exit.listen([this] { releaseListeners(); }, EventPriority::App);
+    hotReloadUnloadListener_ = events().hotReloadUnload.listen([this] { releaseListeners(); }, EventPriority::App);
 }
 
 void NodeInspector::releaseListeners() {

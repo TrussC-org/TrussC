@@ -236,7 +236,7 @@ bool WebSocketClient::ConnectionState::connect(const std::string& url) {
 
     // The 101 deadline is checked on the main thread
     if (!timeoutListener_.isConnected()) {
-        timeoutListener_ = events().update.listen([state = shared_from_this()] { state->checkHandshakeTimeout(); });
+        timeoutListener_ = events().update.listen([state = shared_from_this()] { state->checkHandshakeTimeout(); }, EventPriority::BeforeApp);
     }
 
     client_->connectAsync(host_, port_);

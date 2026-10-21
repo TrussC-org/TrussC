@@ -3351,13 +3351,13 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     // Touch events — delivered via events() system, forwarded to App virtual methods
     internal::touchPressedListener = events().touchPressed.listen([](TouchEventArgs& args) {
         if (app) app->touchPressed(args);
-    });
+    }, EventPriority::App);
     internal::touchMovedListener = events().touchMoved.listen([](TouchEventArgs& args) {
         if (app) app->touchMoved(args);
-    });
+    }, EventPriority::App);
     internal::touchReleasedListener = events().touchReleased.listen([](TouchEventArgs& args) {
         if (app) app->touchReleased(args);
-    });
+    }, EventPriority::App);
 
     // Build sapp_desc
     sapp_desc desc = {};

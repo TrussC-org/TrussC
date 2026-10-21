@@ -2883,8 +2883,8 @@ void Environment::release()  // Releases the environment's texture resources.
 ### Event<T> — Connects listeners to notifications with a shared argument type.
 
 ```cpp
-void Event::clear()  // Removes all listeners from the event.
-EventListener Event::listen(Callback callback, int priority = App) [+5]  // Registers an event listener and returns its connection token.
+void Event::clear()  // Removes user listeners, preserving framework-owned listeners.
+EventListener Event::listen(Callback callback) [+11]  // Registers an event listener and returns its connection token.
 size_t Event::listenerCount() const  // Returns the number of registered listeners.
 void Event::notify(T & arg)  // Notifies the event's listeners.
 ```
