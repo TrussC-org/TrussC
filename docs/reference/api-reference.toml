@@ -9807,6 +9807,7 @@ description.en = "Loads a font from a file, a system font name, or a Web URL."
 description.ja = "ファイル、システムフォント名、または Web の URL からフォントを読み込む。"
 description.ko = "파일, 시스템 폰트 이름 또는 Web URL에서 폰트를 로드한다."
 details.en = '''
+- Local font files have no additional encoded-size cap beyond the backend addressing guard (below 1 GiB). The sfnt directory and glyph sections are validated against actual bytes. Per-glyph outline/raster allocations are checked against glyph counts and raster metrics, with a 256 MiB live-workspace ceiling; a failure reports an Error and publishes no partial glyph. This workspace limit does not cap app-produced atlas pages. Allocation recovery requires standard-library configurations without iterator debugging; MSVC Debug iterator-proxy allocation is outside this guarantee.
 - Call `load(nameOrPath, size, faceIndex = 0)` with an integer font size in logical pixels. Rasterization uses the display DPI scale captured at loading, while drawing and metrics use logical coordinates.
 - Relative file paths resolve against the data folder through `getDataPath()`; absolute paths are used as given. A regular file at the resolved path takes precedence over a system font with the same name.
 - `faceIndex` selects a face in a file or URL containing a font collection (`.ttc` or `.otc`); a single font has only face 0. A negative index or an index at or beyond the face count logs an error and fails.
@@ -9817,6 +9818,7 @@ details.en = '''
 - Cancels any pending `loadAsync()` operation. Matching resolved paths, faces, physical sizes, oversampling settings, and mipmap settings share an atlas; changing any of these selects a separate cache entry. Glyphs are rasterized lazily.
 '''
 details.ja = '''
+- ローカルフォントファイルには、バックエンドのアドレス範囲（1 GiB 未満）以外の符号化サイズ上限を設けません。sfnt ディレクトリとグリフの区画を実際のバイト数に対して検証します。グリフごとの輪郭・ラスタライズでは件数とラスタ寸法を検証し、同時に使う作業メモリを 256 MiB 以内に制限します。失敗時は Error を出力し、部分的なグリフを公開しません。この作業メモリ上限はアプリが生成するアトラスページ数を制限しません。メモリ確保失敗からの復旧は、イテレーターデバッグを無効にした標準ライブラリ構成が対象です。MSVC Debug のイテレータープロキシ確保は保証対象外です。
 - `load(nameOrPath, size, faceIndex = 0)` に、論理ピクセル単位の整数のフォントサイズを渡します。ラスタライズには読み込み時の画面の DPI スケールを使い、描画と寸法の取得には論理座標を使います。
 - 相対ファイルパスは `getDataPath()` を通じてデータフォルダ基準で解決し、絶対パスはそのまま使います。解決先に通常のファイルがあれば、同名のシステムフォントより優先します。
 - `faceIndex` は、ファイルまたは URL で指定したフォントコレクション（`.ttc`、`.otc`）内の書体を選びます。単一フォントは書体 0 のみです。負の値や書体数以上の値は、エラーを記録して失敗します。
@@ -9827,6 +9829,7 @@ details.ja = '''
 - 処理中の `loadAsync()` をキャンセルします。解決済みパス、書体、物理サイズ、オーバーサンプリング設定、ミップマップ設定が一致する場合はアトラスを共有し、いずれかが異なる場合は別のキャッシュ項目を使います。グリフは必要になった時点でラスタライズします。
 '''
 details.ko = '''
+- 로컬 폰트 파일에는 백엔드의 주소 범위(1 GiB 미만) 외의 인코딩 크기 제한을 두지 않습니다. sfnt 디렉터리와 글리프 구역은 실제 바이트 범위와 대조하여 검증합니다. 글리프별 윤곽선·래스터 할당은 글리프 수와 래스터 치수로 검증하며 동시에 사용하는 작업 메모리를 최대 256 MiB로 제한합니다. 실패하면 Error를 기록하고 일부 글리프를 공개하지 않습니다. 이 작업 메모리 제한은 앱이 만드는 아틀라스 페이지 수를 제한하지 않습니다. 할당 실패 복구는 반복자 디버깅이 없는 표준 라이브러리 구성을 대상으로 하며 MSVC Debug의 반복자 프록시 할당은 보장 대상이 아닙니다.
 - `load(nameOrPath, size, faceIndex = 0)`에 논리 픽셀 단위의 정수 폰트 크기를 전달합니다. 래스터화에는 로드 시점의 화면 DPI 배율을 사용하고, 그리기와 치수 측정에는 논리 좌표를 사용합니다.
 - 상대 파일 경로는 `getDataPath()`를 통해 데이터 폴더 기준으로 해석하며, 절대 경로는 그대로 사용합니다. 해석된 경로에 일반 파일이 있으면 같은 이름의 시스템 폰트보다 우선합니다.
 - `faceIndex`는 파일이나 URL로 지정한 폰트 컬렉션(`.ttc`, `.otc`) 안의 서체를 선택합니다. 단일 폰트에는 서체 0만 있습니다. 음수이거나 서체 수 이상이면 오류를 기록하고 실패합니다.
@@ -11061,7 +11064,7 @@ details.en = '''
 - Loading parses data on the calling thread and immediately creates GPU resources; load on the main rendering thread after graphics initialization.
 - Owns its GPU image, view, and sampler, supports moving, and prohibits copying. Returned GPU handles are borrowed; do not destroy them or retain them across replacement of the profile resources.
 - A light stores only a pointer to the profile. Keep the profile alive at the same address while attached; before destroying or moving it, detach it with `light.setIesProfile(nullptr)` or update the light's pointer.
-- Replacing or destroying the profile queues its GPU resources for deferred destruction so recorded draws can retain them. Numeric metadata can remain after a failed reload or move; use `isLoaded()` to check the loading state.
+- Replacing or destroying the profile queues its GPU resources for deferred destruction so recorded draws can retain them. Failed reloads preserve the previous profile, including its loading state, metadata and handles. Moving clears the source loading state but can leave numeric metadata; use `isLoaded()` to check it.
 '''
 details.ja = '''
 - ファイルまたは文字列から配光データを読み込み、`light.setIesProfile(&profile)` でライトに設定します。GPU の PBR 描画では、点光源またはスポットライトの強度をこの分布で調整します。
@@ -11069,7 +11072,7 @@ details.ja = '''
 - 読み込みは呼び出し元のスレッドでデータを解析し、その場で GPU リソースを作成します。グラフィックスの初期化後に、メインの描画スレッドで読み込んでください。
 - GPU の画像、ビュー、サンプラーを所有し、ムーブには対応しますがコピーはできません。返される GPU ハンドルの所有権は移りません。ハンドルを破棄したり、プロファイルのリソースを置き換えた後も保持したりしないでください。
 - ライトはプロファイルへのポインターだけを保持します。設定中はプロファイルを同じアドレスで生存させてください。破棄またはムーブする前に `light.setIesProfile(nullptr)` で解除するか、ライトのポインターを更新してください。
-- プロファイルの置き換えや破棄では、記録済みの描画が GPU リソースを使えるように破棄を遅延させます。再読み込みの失敗後やムーブ後も数値のメタデータが残る場合があるため、読み込み状態は `isLoaded()` で確認してください。
+- プロファイルの置き換えや破棄では、記録済みの描画が GPU リソースを使えるように破棄を遅延させます。再読み込みに失敗した場合は、読み込み状態、メタデータ、ハンドルを含む以前のプロファイルを保持します。ムーブでは移動元の読み込み状態を解除しますが、数値のメタデータが残る場合があるため、`isLoaded()` で確認してください。
 '''
 details.ko = '''
 - 파일 또는 문자열에서 배광 데이터를 로드하고 `light.setIesProfile(&profile)`로 광원에 설정합니다. GPU PBR 렌더링에서는 이 분포로 점광원 또는 스포트라이트의 강도를 조절합니다.
@@ -11077,7 +11080,7 @@ details.ko = '''
 - 로드는 호출한 스레드에서 데이터를 분석하고 즉시 GPU 리소스를 생성합니다. 그래픽 초기화 후 메인 렌더링 스레드에서 로드해야 합니다.
 - GPU 이미지, 뷰, 샘플러를 소유하며 이동은 지원하지만 복사는 허용하지 않습니다. 반환되는 GPU 핸들의 소유권은 이전되지 않습니다. 핸들을 파괴하거나 프로파일 리소스를 교체한 후에도 유지해서는 안 됩니다.
 - 광원은 프로파일의 포인터만 보관합니다. 연결된 동안 프로파일을 같은 주소에서 유지해야 합니다. 파괴하거나 이동하기 전에 `light.setIesProfile(nullptr)`로 연결을 해제하거나 광원의 포인터를 갱신해야 합니다.
-- 프로파일을 교체하거나 파괴하면 기록된 그리기가 GPU 리소스를 사용할 수 있도록 파괴를 지연합니다. 재로드 실패 후나 이동 후에도 숫자 메타데이터가 남을 수 있으므로 로드 상태는 `isLoaded()`로 확인해야 합니다.
+- 프로파일을 교체하거나 파괴하면 기록된 그리기가 GPU 리소스를 사용할 수 있도록 파괴를 지연합니다. 재로드 실패 시 로드 상태, 메타데이터 및 핸들을 포함한 이전 프로파일을 유지합니다. 이동 시 원본의 로드 상태를 해제하지만 숫자 메타데이터는 남을 수 있으므로 `isLoaded()`로 확인해야 합니다.
 '''
 of_category = "light-types"
 related = ["Light", "setMaterial"]
@@ -11138,16 +11141,16 @@ description.en = "Returns whether the profile is marked as loaded."
 description.ja = "プロファイルが読み込み済みかどうかを返す。"
 description.ko = "프로파일이 로드 완료 상태인지 반환한다."
 details.en = '''
-- Returns a flag that is initially `false` and becomes `true` after successful parsing and the texture-generation calls; it does not validate GPU resource creation.
-- `loadFromString()` clears the flag before parsing, and moving clears the source object's flag; a file-access failure in `load()` leaves the flag unchanged.
+- Initially `false`; becomes `true` only after parsed tables, pixels and valid GPU resources have been prepared and installed.
+- A failed `load()` or `loadFromString()` preserves the previous loading state and profile. Moving clears the source object's flag.
 '''
 details.ja = '''
-- 初期値が `false` のフラグを返します。解析に成功してテクスチャ生成の呼び出しを終えると `true` になりますが、GPU リソースの作成結果は検証しません。
-- `loadFromString()` は解析前にフラグを解除し、ムーブでは移動元のフラグを解除します。`load()` でファイルへのアクセスに失敗した場合、フラグは変わりません。
+- 初期値は `false` です。解析した表、ピクセル、有効な GPU リソースを準備して設定した場合にのみ `true` になります。
+- `load()` または `loadFromString()` の失敗は以前の読み込み状態とプロファイルを保持します。ムーブでは移動元のフラグを解除します。
 '''
 details.ko = '''
-- 초기값이 `false`인 플래그를 반환합니다. 분석에 성공하고 텍스처 생성 호출을 마치면 `true`가 되지만, GPU 리소스 생성 결과를 검증하지는 않습니다.
-- `loadFromString()`은 분석 전에 플래그를 해제하고, 이동은 원본 객체의 플래그를 해제합니다. `load()`에서 파일 접근에 실패하면 플래그는 변경되지 않습니다.
+- 초기값은 `false`입니다. 파싱한 표, 픽셀 및 유효한 GPU 리소스를 준비하고 설치한 경우에만 `true`가 됩니다.
+- `load()` 또는 `loadFromString()` 실패 시 이전 로드 상태와 프로파일을 유지합니다. 이동은 원본 객체의 플래그를 해제합니다.
 '''
 
 ["IesProfile::load"]
@@ -11190,22 +11193,22 @@ description.ko = "문자열 데이터에서 IES 프로파일을 로드한다."
 details.en = '''
 - Accepts IES text as a `const string&`; requires a `TILT=` line followed by the numeric header, vertical and horizontal angles in degrees, and the candela table.
 - Applies the header's candela multiplier. Embedded `TILT=INCLUDE` data is skipped without applying its factors; external tilt files are not loaded, and the photometric-type header does not change the angle interpretation.
-- Releases the existing GPU resources before parsing. On a parsing failure, logs a warning, returns `false`, and leaves the profile unloaded; previously stored numeric metadata is not cleared.
-- On successful parsing, generates the lookup texture, marks the profile loaded, and returns `true`; GPU resource creation results are not checked.
+- Prepares parsed tables, pixels and GPU resources before replacing the profile. Parsing, allocation or GPU creation failure logs an Error, returns `false`, and preserves the previous profile, including metadata and handles. Allocation recovery requires standard-library configurations without iterator debugging; MSVC Debug iterator-proxy allocations in noexcept container operations are outside this guarantee.
+- On success, installs the lookup texture, defers retirement of previous resources without allocating, marks the profile loaded, and returns `true`.
 - For texture averaging, threading, ownership, and attachment lifetime, see `IesProfile`.
 '''
 details.ja = '''
 - IES テキストを `const string&` で受け取ります。`TILT=` 行と、それに続く数値ヘッダー、度単位の垂直角と水平角、カンデラ値の表が必要です。
 - ヘッダーのカンデラ倍率を適用します。埋め込まれた `TILT=INCLUDE` データは補正係数を適用せずに読み飛ばします。外部の傾斜補正ファイルは読み込まず、ヘッダーの測光タイプによって角度の解釈を変更することもありません。
-- 解析前に既存の GPU リソースを解放します。解析に失敗すると警告を記録して `false` を返し、未読み込み状態になります。以前の数値メタデータは消去しません。
-- 解析に成功すると参照用テクスチャを生成し、読み込み済みにして `true` を返します。GPU リソースの作成結果は確認しません。
+- 解析した表、ピクセル、GPU リソースを準備してからプロファイルを置き換えます。解析・メモリ確保・GPU 作成の失敗は Error を記録して `false` を返し、メタデータとハンドルを含む以前のプロファイルを保持します。復旧保証はイテレーターデバッグを無効にした標準ライブラリ構成が対象です。MSVC Debug の noexcept なコンテナー操作でのイテレータープロキシ確保は対象外です。
+- 成功すると参照用テクスチャを設定し、メモリ確保なしで以前のリソースの破棄を遅延し、読み込み済みにして `true` を返します。
 - テクスチャの平均化、スレッドの扱い、所有権、ライトへの設定中の有効期間については `IesProfile` を参照してください。
 '''
 details.ko = '''
 - IES 텍스트를 `const string&`로 받습니다. `TILT=` 행과 그 뒤의 숫자 헤더, 도 단위의 수직각과 수평각, 칸델라 값 표가 필요합니다.
 - 헤더의 칸델라 배율을 적용합니다. 포함된 `TILT=INCLUDE` 데이터는 보정 계수를 적용하지 않고 건너뜁니다. 외부 기울기 보정 파일은 로드하지 않으며, 헤더의 측광 유형에 따라 각도 해석을 변경하지도 않습니다.
-- 분석 전에 기존 GPU 리소스를 해제합니다. 분석에 실패하면 경고를 기록하고 `false`를 반환하며 로드되지 않은 상태가 됩니다. 이전의 숫자 메타데이터는 지우지 않습니다.
-- 분석에 성공하면 조회용 텍스처를 생성하고 로드 완료 상태로 설정한 후 `true`를 반환합니다. GPU 리소스 생성 결과는 확인하지 않습니다.
+- 파싱한 표, 픽셀 및 GPU 리소스를 준비한 후 프로파일을 교체합니다. 파싱·할당·GPU 생성 실패 시 Error를 기록하고 `false`를 반환하며 메타데이터와 핸들을 포함한 이전 프로파일을 유지합니다. 복구 보장은 반복자 디버깅이 없는 표준 라이브러리 구성을 대상으로 합니다. MSVC Debug의 noexcept 컨테이너 작업에서 발생하는 반복자 프록시 할당은 보장 대상이 아닙니다.
+- 성공 시 조회용 텍스처를 설치하고 할당 없이 이전 리소스의 해제를 지연하며 로드 완료 상태로 설정한 후 `true`를 반환합니다.
 - 텍스처 평균 처리, 스레드 처리, 소유권, 광원에 연결된 동안의 유효 기간은 `IesProfile`을 참조하세요.
 '''
 
@@ -11828,14 +11831,17 @@ description.en = "An alias for the nlohmann::json value type."
 description.ja = "nlohmann::json の値型の別名を表す。"
 description.ko = "nlohmann::json 값 타입의 별칭이다."
 details.en = '''
+- v0.8: the bundled text parser rejects nesting beyond 64 levels, including direct `Json::parse` calls. Parsed values carry private provenance used by transactional settings reflection; see `JsonReadReflector`. Local documents have no byte-size cap.
 - Defined as `using Json = nlohmann::json;` and used by `loadJson`, `saveJson`, `parseJson`, and `toJsonString`. Its full API is the nlohmann/json API.
 - A default-constructed `Json()` holds JSON `null`, not an empty object or array; check it with `is_null()`.
 '''
 details.ja = '''
+- v0.8: 同梱のテキストパーサーは、直接の `Json::parse` 呼び出しも含め、64 段を超えるネストを拒否します。解析した値は設定のトランザクション適用に使う非公開の由来情報を保持します。`JsonReadReflector` を参照してください。ローカル文書のバイト数には上限を設けません。
 - `using Json = nlohmann::json;` と定義され、`loadJson`、`saveJson`、`parseJson`、`toJsonString` が使用します。利用できる API の全体は nlohmann/json の API を参照してください。
 - 既定構築した `Json()` は空のオブジェクトや配列ではなく、JSON の `null` を保持します。`is_null()` で確認できます。
 '''
 details.ko = '''
+- v0.8: 번들 텍스트 파서는 직접 `Json::parse`를 호출하는 경우에도 64단계보다 깊은 중첩을 거부합니다. 파싱한 값은 설정 트랜잭션에 사용하는 비공개 이력을 유지합니다. `JsonReadReflector`를 참조하세요. 로컬 문서에는 바이트 크기 제한을 두지 않습니다.
 - `using Json = nlohmann::json;`으로 정의되며, `loadJson`, `saveJson`, `parseJson`, `toJsonString`에서 사용합니다. 전체 API는 nlohmann/json API를 참조하세요.
 - 기본 생성한 `Json()`은 빈 객체나 배열이 아닌 JSON `null`을 보유합니다. `is_null()`로 확인할 수 있습니다.
 '''
@@ -41304,19 +41310,22 @@ description.en = "Loads an XML document from a file."
 description.ja = "ファイルから XML ドキュメントを読み込む。"
 description.ko = "파일에서 XML 문서를 읽는다."
 details.en = '''
+- Local input has no byte-size cap; documents above 16 MiB produce a Notice. Nesting is limited to 64 elements to keep DOM consumers safe. Parsing uses a temporary document; failure preserves the previous document and never publishes a parsed prefix.
 - Accepts a file path; relative paths are resolved through `getDataPath()`, and absolute paths are used directly.
 - Returns `true` on success and `false` for a missing or unreadable file or a parsing error; failures are logged, with a description and offset for parsing errors.
-- A failed file precheck leaves the existing document unchanged; once loading begins, the previous contents are cleared and failure can leave partially parsed content. See `Xml` for parsing defaults and node handle lifetime.
+- See `Xml` for parsing defaults and node handle lifetime. Node handles remain valid after failure and are invalidated by a successful replacement.
 '''
 details.ja = '''
+- ローカル入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。DOM の利用を安全にするため、要素のネストは 64 段までです。一時ドキュメントで解析し、失敗時は以前のドキュメントを保持して解析途中の内容を公開しません。
 - ファイルパスを受け取ります。相対パスは `getDataPath()` で解決し、絶対パスはそのまま使います。
 - 成功時は `true`、ファイルが存在しない場合、読み取れない場合、解析に失敗した場合は `false` を返します。失敗時はログを出力し、解析エラーには説明と位置を含めます。
-- ファイルの事前確認で失敗した場合は既存のドキュメントを保持します。読み込みが始まると以前の内容を消去し、失敗時には途中まで解析した内容が残る場合があります。解析の既定の動作とノードハンドルの有効期間は `Xml` を参照してください。
+- 解析の既定の動作とノードハンドルの有効期間は `Xml` を参照してください。失敗時は既存のノードハンドルも維持し、成功して置き換えた場合に無効になります。
 '''
 details.ko = '''
+- 로컬 입력의 바이트 크기 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다. DOM 사용을 안전하게 유지하기 위해 요소 중첩은 64단계로 제한합니다. 임시 문서에서 파싱하며 실패하면 이전 문서를 유지하고 파싱 중인 일부 내용을 공개하지 않습니다.
 - 파일 경로를 받습니다. 상대 경로는 `getDataPath()`로 해석하고 절대 경로는 그대로 사용합니다.
 - 성공하면 `true`를, 파일이 없거나 읽을 수 없거나 파싱에 실패하면 `false`를 반환합니다. 실패 시 로그를 출력하며 파싱 오류에는 설명과 위치를 포함합니다.
-- 파일 사전 확인에 실패하면 기존 문서를 유지합니다. 읽기가 시작되면 이전 내용을 지우며, 실패 시 일부 파싱된 내용이 남을 수 있습니다. 파싱의 기본 동작과 노드 핸들의 유효 기간은 `Xml`을 참조하세요.
+- 파싱의 기본 동작과 노드 핸들의 유효 기간은 `Xml`을 참조하세요. 실패 후에는 기존 노드 핸들이 유효하며 성공하여 교체하면 무효화됩니다.
 '''
 snippet = '''
 void tcApp::setup() {
@@ -41331,18 +41340,21 @@ description.en = "Parses an XML document from a string."
 description.ja = "文字列から XML ドキュメントを解析する。"
 description.ko = "문자열에서 XML 문서를 파싱한다."
 details.en = '''
-- Accepts a UTF-8 string; an embedded null character ends the input.
-- Clears the previous document contents and returns `true` on success; on failure, logs an error description and offset, returns `false`, and can leave partially parsed content.
+- Local input has no byte-size cap; documents above 16 MiB produce a Notice. Nesting is limited to 64 elements to keep DOM consumers safe. Parsing uses a temporary document; failure preserves the previous document and never publishes a parsed prefix.
+- Accepts a UTF-8 string; embedded null characters are rejected.
+- Returns `true` on success; failure logs an error description and offset and returns `false`.
 - See `Xml` for parsing defaults and node handle lifetime.
 '''
 details.ja = '''
-- UTF-8 の文字列を受け取ります。途中に null 文字がある場合は、そこまでを入力として扱います。
-- 以前のドキュメント内容を消去し、成功時は `true` を返します。失敗時はエラーの説明と位置をログに出力して `false` を返し、途中まで解析した内容が残る場合があります。
+- ローカル入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。DOM の利用を安全にするため、要素のネストは 64 段までです。一時ドキュメントで解析し、失敗時は以前のドキュメントを保持して解析途中の内容を公開しません。
+- UTF-8 の文字列を受け取ります。途中の null 文字は拒否します。
+- 成功時は `true` を返します。失敗時はエラーの説明と位置をログに出力して `false` を返します。
 - 解析の既定の動作とノードハンドルの有効期間は `Xml` を参照してください。
 '''
 details.ko = '''
-- UTF-8 문자열을 받습니다. 문자열 중간에 null 문자가 있으면 그 위치에서 입력이 끝납니다.
-- 이전 문서 내용을 지우고 성공하면 `true`를 반환합니다. 실패하면 오류 설명과 위치를 로그에 출력하고 `false`를 반환하며, 일부 파싱된 내용이 남을 수 있습니다.
+- 로컬 입력의 바이트 크기 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다. DOM 사용을 안전하게 유지하기 위해 요소 중첩은 64단계로 제한합니다. 임시 문서에서 파싱하며 실패하면 이전 문서를 유지하고 파싱 중인 일부 내용을 공개하지 않습니다.
+- UTF-8 문자열을 받습니다. 문자열 중간의 null 문자는 거부합니다.
+- 성공하면 `true`를 반환합니다. 실패하면 오류 설명과 위치를 로그에 출력하고 `false`를 반환합니다.
 - 파싱의 기본 동작과 노드 핸들의 유효 기간은 `Xml`을 참조하세요.
 '''
 snippet = '''
@@ -48432,19 +48444,22 @@ description.en = "Loads a JSON value from a file."
 description.ja = "ファイルから JSON 値を読み込む。"
 description.ko = "파일에서 JSON 값을 읽는다."
 details.en = '''
+- Local files have no byte-size cap. Nesting is limited to 64 levels; deeper input is rejected as a whole. Files above 16 MiB produce a Notice. Caught allocation exceptions log an Error and return `Json()`; recovery during JSON DOM cleanup is not guaranteed.
 - Accepts a file path and returns the parsed `Json` value. Relative paths resolve through `getDataPath()`; absolute paths are used directly.
 - A missing, unreadable, or non-regular file, or a JSON parse error, logs an Error and returns `Json()`, which holds JSON `null`.
-- A valid file containing `null` returns the same value as these failures. Only `Json::parse_error` is caught during parsing; other exceptions propagate.
+- A valid file containing `null` returns the same value as these failures. Caught parsing and allocation exceptions are reported as failures.
 '''
 details.ja = '''
+- ローカルファイルのバイト数に上限はありません。ネストは 64 段までとし、それを超える入力は全体を拒否します。16 MiB を超えるファイルは Notice を出力します。捕捉したメモリ確保の例外は Error を出力して `Json()` を返しますが、JSON DOM の破棄中の復旧は保証しません。
 - ファイルパスを受け取り、解析した `Json` 値を返します。相対パスは `getDataPath()` で解決し、絶対パスはそのまま使用します。
 - ファイルが存在しない場合、読み取れない場合、通常のファイルではない場合、JSON の解析に失敗した場合は、Error をログに出力して JSON の `null` を保持する `Json()` を返します。
-- 正常なファイルに `null` が入っている場合も、これらの失敗時と同じ値になります。解析時に捕捉するのは `Json::parse_error` だけで、ほかの例外は呼び出し元へ伝わります。
+- 正常なファイルに `null` が入っている場合も、これらの失敗時と同じ値になります。捕捉した解析とメモリ確保の例外は失敗として報告します。
 '''
 details.ko = '''
+- 로컬 파일의 바이트 크기 제한은 없습니다. 중첩을 64단계로 제한하며 더 깊은 입력은 전체를 거부합니다. 16 MiB가 넘는 파일은 Notice를 기록합니다. 처리한 메모리 할당 예외는 Error를 기록하고 `Json()`을 반환하지만 JSON DOM 소멸 중의 복구는 보장하지 않습니다.
 - 파일 경로를 받아 파싱한 `Json` 값을 반환합니다. 상대 경로는 `getDataPath()`로 해석하고 절대 경로는 그대로 사용합니다.
 - 파일이 없거나 읽을 수 없거나 일반 파일이 아닌 경우, 또는 JSON 파싱에 실패하면 Error 로그를 출력하고 JSON `null`을 보유하는 `Json()`을 반환합니다.
-- 정상적인 파일에 `null`이 들어 있어도 이러한 실패 시와 같은 값을 반환합니다. 파싱 중에는 `Json::parse_error`만 처리하며, 다른 예외는 호출한 쪽으로 전파합니다.
+- 정상적인 파일에 `null`이 들어 있어도 이러한 실패 시와 같은 값을 반환합니다. 처리한 파싱과 메모리 할당 예외는 실패로 보고합니다.
 '''
 related = ["Json", "saveJson", "parseJson", "loadTextFile"]
 snippet = '''
@@ -49050,18 +49065,21 @@ description.en = "Parses a JSON string into a Json value."
 description.ja = "JSON 文字列を解析して Json 値に変換する。"
 description.ko = "JSON 문자열을 파싱하여 Json 값으로 변환한다."
 details.en = '''
+- Input has no byte-size cap; documents above 16 MiB produce a Notice. Nesting deeper than 64 levels rejects the whole input. Parsed values retain their external-input provenance for transactional settings reflection.
 - Accepts a `const string&` and returns its parsed JSON value without accessing a file.
-- A `Json::parse_error` logs an Error and returns `Json()`, which holds JSON `null`; other exceptions propagate.
+- Syntax and nesting failures, raw NUL bytes, and caught allocation exceptions log an Error and return `Json()`, which holds JSON `null`. Recovery during JSON DOM cleanup is not guaranteed.
 - Valid input `"null"` returns the same value as a parse failure, so `is_null()` alone cannot distinguish them.
 '''
 details.ja = '''
+- 入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。64 段を超えるネストは入力全体を拒否します。解析した値は、設定のリフレクションをトランザクションとして扱うための外部入力情報を保持します。
 - `const string&` を受け取り、ファイルへアクセスせずに解析した JSON 値を返します。
-- `Json::parse_error` が発生すると Error をログに出力し、JSON の `null` を保持する `Json()` を返します。ほかの例外は呼び出し元へ伝わります。
+- 構文・ネストのエラー、生の NUL バイト、捕捉したメモリ確保の例外は Error を出力し、JSON の `null` を保持する `Json()` を返します。JSON DOM の破棄中の復旧は保証しません。
 - 正常な入力 `"null"` も解析失敗時と同じ値になるため、`is_null()` だけでは区別できません。
 '''
 details.ko = '''
+- 입력 바이트 크기에 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다. 64단계보다 깊은 중첩은 전체 입력을 거부합니다. 파싱한 값은 설정 리플렉션을 트랜잭션으로 처리하기 위한 외부 입력 이력을 유지합니다.
 - `const string&`를 받아 파일에 접근하지 않고 파싱한 JSON 값을 반환합니다.
-- `Json::parse_error`가 발생하면 Error 로그를 출력하고 JSON `null`을 보유하는 `Json()`을 반환합니다. 다른 예외는 호출한 쪽으로 전파합니다.
+- 구문·중첩 오류, 원시 NUL 바이트, 처리한 메모리 할당 예외는 Error를 기록하고 JSON `null`을 보유하는 `Json()`을 반환합니다. JSON DOM 소멸 중의 복구는 보장하지 않습니다.
 - 정상적인 입력 `"null"`도 파싱 실패 시와 같은 값을 반환하므로 `is_null()`만으로는 구분할 수 없습니다.
 '''
 related = ["Json", "toJsonString", "loadJson"]
@@ -49082,15 +49100,15 @@ description.ja = "XML 文字列を解析して Xml オブジェクトを返す�
 description.ko = "XML 문자열을 파싱하여 Xml 객체를 반환한다."
 details.en = '''
 - Accepts a UTF-8 XML string and returns an `Xml` object.
-- Returns the object even if parsing fails, potentially with partially parsed content; use `Xml::parse` when you need to check success, and refer to it for parsing behavior.
+- Returns an empty object if parsing fails; use `Xml::parse` when you need to check success, and refer to it for parsing behavior.
 '''
 details.ja = '''
 - UTF-8 の XML 文字列を受け取り、`Xml` オブジェクトを返します。
-- 解析に失敗してもオブジェクトを返し、途中まで解析した内容が残る場合があります。成否を確認する場合は `Xml::parse` を使ってください。解析時の動作もそちらを参照してください。
+- 解析に失敗した場合は空のオブジェクトを返します。成否を確認する場合は `Xml::parse` を使ってください。解析時の動作もそちらを参照してください。
 '''
 details.ko = '''
 - UTF-8 XML 문자열을 받아 `Xml` 객체를 반환합니다.
-- 파싱에 실패해도 객체를 반환하며 일부 파싱된 내용이 남을 수 있습니다. 성공 여부를 확인하려면 `Xml::parse`를 사용하고 파싱 동작도 해당 항목을 참조하세요.
+- 파싱에 실패하면 빈 객체를 반환합니다. 성공 여부를 확인하려면 `Xml::parse`를 사용하고 파싱 동작도 해당 항목을 참조하세요.
 '''
 related = ["Xml", "loadXml"]
 snippet = '''
@@ -49638,16 +49656,19 @@ description.en = "Applies JSON values to an object's reflected members."
 description.ja = "JSON の値をオブジェクトのリフレクションで公開されたメンバに適用する。"
 description.ko = "JSON 값을 객체의 리플렉션으로 공개된 멤버에 적용한다."
 details.en = '''
+- v0.8: JSON parsed from files or strings (including MCP input) is validated as a whole before application. All present fields, nested groups, unknown keys, numeric ranges, enum labels, and writable access are validated before any assignment or setter. Invalid input applies nothing and logs an Error naming the field; `applied` stays empty. Parsed provenance survives copies, moves, and child extraction. JSON constructed directly by app code keeps the permissive behavior described below. Setter exceptions during commit and JSON DOM cleanup are outside the recovery guarantee. Allocation recovery requires standard-library configurations without iterator debugging; MSVC Debug with `_ITERATOR_DEBUG_LEVEL != 0` can allocate iterator proxies in noexcept container construction/moves and is outside this guarantee.
 - Calls `obj.reflectMembers()` with a JSON reader, updating only members whose keys are present in `j`. It updates an existing object and does not create nodes or mods.
 - Returns a `JsonReadReflector` containing `applied`, `skipped`, `readOnly`, and `unknownKeys()` results.
 - See `JsonReadReflector` for accepted JSON forms, setter behavior, processing order, and result naming.
 '''
 details.ja = '''
+- v0.8: ファイルや文字列から解析した JSON（MCP 入力を含む）は、適用前に全体を検証します。存在する全フィールド、ネストしたグループ、不明なキー、数値の範囲、列挙型のラベル、書き込み可否を、代入やセッターの実行前に検証します。不正な入力は何も適用せず、フィールド名を含む Error を出力し、`applied` は空のままです。解析済みという情報はコピー、移動、子要素の取り出しでも保持します。アプリが直接構築した JSON は、以下の従来の柔軟な動作を維持します。適用中のセッター例外と JSON DOM の破棄は、復旧保証の対象外です。メモリ確保失敗からの復旧は、イテレーターデバッグを無効にした標準ライブラリ構成が対象です。MSVC Debug の `_ITERATOR_DEBUG_LEVEL != 0` では noexcept なコンテナーの構築・移動でプロキシを確保するため、保証対象外です。
 - JSON リーダーを使って `obj.reflectMembers()` を呼び出し、`j` にキーがあるメンバだけを更新します。既存のオブジェクトを更新する関数で、ノードや Mod は生成しません。
 - `applied`、`skipped`、`readOnly`、`unknownKeys()` の結果を確認できる `JsonReadReflector` を返します。
 - 受け付ける JSON の形式、セッターの扱い、処理順、結果に記録する名前は `JsonReadReflector` を参照してください。
 '''
 details.ko = '''
+- v0.8: 파일이나 문자열에서 파싱한 JSON(MCP 입력 포함)은 적용 전에 전체를 검증합니다. 대입이나 세터 호출 전에 존재하는 모든 필드, 중첩 그룹, 알 수 없는 키, 숫자 범위, 열거형 레이블, 쓰기 가능 여부를 검증합니다. 잘못된 입력은 아무것도 적용하지 않고 필드 이름을 포함한 Error를 기록하며 `applied`는 비어 있습니다. 파싱 이력은 복사, 이동, 하위 값 추출 후에도 유지됩니다. 앱 코드가 직접 만든 JSON은 아래의 기존 유연한 동작을 유지합니다. 적용 중의 세터 예외와 JSON DOM 소멸은 복구 보장 대상이 아닙니다. 할당 실패 복구는 반복자 디버깅이 없는 표준 라이브러리 구성을 대상으로 합니다. MSVC Debug의 `_ITERATOR_DEBUG_LEVEL != 0`에서는 noexcept 컨테이너 생성·이동이 프록시를 할당하므로 보장 대상이 아닙니다.
 - JSON 리더로 `obj.reflectMembers()`를 호출하여 `j`에 키가 있는 멤버만 갱신합니다. 기존 객체를 갱신하며 노드나 Mod를 생성하지 않습니다.
 - `applied`, `skipped`, `readOnly`, `unknownKeys()` 결과를 확인할 수 있는 `JsonReadReflector`를 반환합니다.
 - 허용되는 JSON 형식, 세터 처리, 처리 순서, 결과에 기록되는 이름은 `JsonReadReflector`를 참조하세요.
@@ -55425,16 +55446,19 @@ description.en = "Returns unrecognized keys from the source JSON object."
 description.ja = "元の JSON オブジェクトから認識されなかったキーを返す。"
 description.ko = "원본 JSON 객체에서 인식되지 않은 키를 반환한다."
 details.en = '''
+- For parsed external JSON, group names are recognized and invalid group shapes or unknown nested keys reject the whole transaction. The permissive group behavior below applies to app-constructed JSON.
 - Call after `reflectMembers()` to obtain a `vector<string>` of top-level source keys not encountered by a top-level `visit()`. A non-object source returns an empty vector.
 - Recognized top-level keys are excluded even when skipped or read-only; unknown keys inside nested groups are not reported.
 - `beginGroup()` does not mark its group name as recognized, so a composite member's top-level key can appear here even when its nested values were applied.
 '''
 details.ja = '''
+- 解析済みの外部 JSON ではグループ名を認識し、不正なグループ形式やグループ内の不明なキーはトランザクション全体を拒否します。以下の柔軟なグループ処理は、アプリが直接構築した JSON に適用します。
 - `reflectMembers()` の後に呼ぶと、トップレベルの `visit()` が処理しなかった元データのトップレベルキーを `vector<string>` で取得できます。元データがオブジェクトでなければ空のベクターを返します。
 - 認識したトップレベルキーは、スキップや読み取り専用の結果になっても含めません。ネストしたグループ内の不明なキーは報告しません。
 - `beginGroup()` はグループ名を認識済みとして記録しないため、内部の値を適用できた複合メンバでも、トップレベルのキーがここに含まれる場合があります。
 '''
 details.ko = '''
+- 파싱된 외부 JSON은 그룹 이름을 인식하며 잘못된 그룹 형식이나 중첩된 알 수 없는 키가 있으면 전체 트랜잭션을 거부합니다. 아래의 유연한 그룹 처리는 앱이 직접 만든 JSON에 적용합니다.
 - `reflectMembers()` 뒤에 호출하면 최상위 `visit()`이 처리하지 않은 원본의 최상위 키를 `vector<string>`로 얻습니다. 원본이 객체가 아니면 빈 벡터를 반환합니다.
 - 인식한 최상위 키는 건너뛰었거나 읽기 전용이어도 포함하지 않습니다. 중첩 그룹 안의 알 수 없는 키는 보고하지 않습니다.
 - `beginGroup()`은 그룹 이름을 인식한 것으로 기록하지 않으므로 내부 값을 적용한 복합 멤버도 최상위 키가 여기에 포함될 수 있습니다.
@@ -55465,16 +55489,19 @@ description.en = "Enters a nested source JSON object."
 description.ja = "元の JSON のネストしたオブジェクトに入る。"
 description.ko = "원본 JSON의 중첩 객체에 진입한다."
 details.en = '''
+- For parsed external JSON, group names are recognized and invalid group shapes or unknown nested keys reject the whole transaction. The permissive group behavior below applies to app-constructed JSON.
 - Selects the object under `name` in the current source; subsequent visits read that object until the matching `endGroup()`.
 - If the key is absent or its value is not an object, visits inside the group find no values and add nothing to the result lists.
 - Group names are not recorded as recognized top-level keys; see `JsonReadReflector::unknownKeys`.
 '''
 details.ja = '''
+- 解析済みの外部 JSON ではグループ名を認識し、不正なグループ形式やグループ内の不明なキーはトランザクション全体を拒否します。以下の柔軟なグループ処理は、アプリが直接構築した JSON に適用します。
 - 現在の元データから `name` のオブジェクトを選び、対応する `endGroup()` まで、そのオブジェクトから値を読み取ります。
 - キーが存在しない場合や値がオブジェクトでない場合、グループ内では値が見つからず、結果リストにも何も追加しません。
 - グループ名は認識済みのトップレベルキーとして記録しません。`JsonReadReflector::unknownKeys` を参照してください。
 '''
 details.ko = '''
+- 파싱된 외부 JSON은 그룹 이름을 인식하며 잘못된 그룹 형식이나 중첩된 알 수 없는 키가 있으면 전체 트랜잭션을 거부합니다. 아래의 유연한 그룹 처리는 앱이 직접 만든 JSON에 적용합니다.
 - 현재 원본에서 `name`의 객체를 선택하며 대응하는 `endGroup()`까지 그 객체에서 값을 읽습니다.
 - 키가 없거나 값이 객체가 아니면 그룹 안에서 값을 찾지 못하며 결과 목록에도 아무것도 추가하지 않습니다.
 - 그룹 이름은 인식한 최상위 키로 기록하지 않습니다. `JsonReadReflector::unknownKeys`를 참조하세요.
@@ -56224,6 +56251,8 @@ description.en = "Reads JSON values into reflected members."
 description.ja = "JSON の値をリフレクションで公開されたメンバに読み込む。"
 description.ko = "JSON 값을 리플렉션으로 공개된 멤버에 읽어 들인다."
 details.en = '''
+- External integer fields require representable integers; floats must be finite and representable. External vectors require exactly 2 or 3 components; colors require 3 or 4 finite components. Read-only fields and invalid group shapes reject the transaction. Setters control the final stored values; setter exceptions, including allocation failure, can leave earlier writes applied.
+- v0.8: JSON parsed from files or strings (including MCP input) is validated as a whole before application. All present fields, nested groups, unknown keys, numeric ranges, enum labels, and writable access are validated before any assignment or setter. Invalid input applies nothing and logs an Error naming the field; `applied` stays empty. Parsed provenance survives copies, moves, and child extraction. JSON constructed directly by app code keeps the permissive behavior described below. Setter exceptions during commit and JSON DOM cleanup are outside the recovery guarantee. Allocation recovery requires standard-library configurations without iterator debugging; MSVC Debug with `_ITERATOR_DEBUG_LEVEL != 0` can allocate iterator proxies in noexcept container construction/moves and is outside this guarantee.
 - Construct with a source `Json`, then pass the reader to `obj.reflectMembers(r)`. The reader owns its source value, so constructing it from a temporary is safe.
 - Only present keys are processed, in reflection order rather than JSON key order. `TC_VALUE` getter/setter members and `TC_DERIVED` members use their setters when value reflection reports an edit; directly reflected fields are assigned directly.
 - For composite properties whose type has `reflectMembers()`, the outer setter is not called and edits to the getter's temporary copy are discarded. Expose such composites as direct fields to apply nested edits.
@@ -56236,6 +56265,8 @@ details.en = '''
 - Processing is synchronous on the calling thread. For scene access and thread rules when modifying nodes, see `Node`.
 '''
 details.ja = '''
+- 外部入力の int フィールドには表現可能な整数、float には有限で表現可能な数値が必要です。外部入力のベクトルは正確に 2 または 3 成分、色は有限の 3 または 4 成分が必要です。読み取り専用フィールドや不正なグループ形式はトランザクションを拒否します。最終的な値はセッターが決定します。メモリ確保の失敗を含むセッター例外では、それ以前の変更が残る場合があります。
+- v0.8: ファイルや文字列から解析した JSON（MCP 入力を含む）は、適用前に全体を検証します。存在する全フィールド、ネストしたグループ、不明なキー、数値の範囲、列挙型のラベル、書き込み可否を、代入やセッターの実行前に検証します。不正な入力は何も適用せず、フィールド名を含む Error を出力し、`applied` は空のままです。解析済みという情報はコピー、移動、子要素の取り出しでも保持します。アプリが直接構築した JSON は、以下の従来の柔軟な動作を維持します。適用中のセッター例外と JSON DOM の破棄は、復旧保証の対象外です。メモリ確保失敗からの復旧は、イテレーターデバッグを無効にした標準ライブラリ構成が対象です。MSVC Debug の `_ITERATOR_DEBUG_LEVEL != 0` では noexcept なコンテナーの構築・移動でプロキシを確保するため、保証対象外です。
 - 元の `Json` を渡して構築し、`obj.reflectMembers(r)` にリーダーを渡します。リーダーは元データを所有するため、一時オブジェクトから構築しても安全です。
 - 存在するキーだけを、JSON のキー順ではなくリフレクションの順番で処理します。`TC_VALUE` のゲッター・セッター形式と `TC_DERIVED` のメンバは、値のリフレクションが編集を報告した場合にセッターを使い、直接公開されたフィールドには直接代入します。
 - 型に `reflectMembers()` がある複合プロパティでは、外側のセッターは呼ばれず、ゲッターから得た一時コピーへの編集は破棄されます。内部の編集を適用するには、このような複合値を直接フィールドとして公開してください。
@@ -56248,6 +56279,8 @@ details.ja = '''
 - 呼び出したスレッドで同期的に処理します。ノードを変更する際のシーンへのアクセスとスレッドの規則は `Node` を参照してください。
 '''
 details.ko = '''
+- 외부 입력의 int 필드에는 표현 가능한 정수가, float에는 유한하고 표현 가능한 숫자가 필요합니다. 외부 벡터는 정확히 2개 또는 3개 성분, 색상은 유한한 3개 또는 4개 성분이 필요합니다. 읽기 전용 필드나 잘못된 그룹 형식은 트랜잭션을 거부합니다. 최종 값은 세터가 결정합니다. 메모리 할당 실패를 포함한 세터 예외가 발생하면 이전 변경이 남을 수 있습니다.
+- v0.8: 파일이나 문자열에서 파싱한 JSON(MCP 입력 포함)은 적용 전에 전체를 검증합니다. 대입이나 세터 호출 전에 존재하는 모든 필드, 중첩 그룹, 알 수 없는 키, 숫자 범위, 열거형 레이블, 쓰기 가능 여부를 검증합니다. 잘못된 입력은 아무것도 적용하지 않고 필드 이름을 포함한 Error를 기록하며 `applied`는 비어 있습니다. 파싱 이력은 복사, 이동, 하위 값 추출 후에도 유지됩니다. 앱 코드가 직접 만든 JSON은 아래의 기존 유연한 동작을 유지합니다. 적용 중의 세터 예외와 JSON DOM 소멸은 복구 보장 대상이 아닙니다. 할당 실패 복구는 반복자 디버깅이 없는 표준 라이브러리 구성을 대상으로 합니다. MSVC Debug의 `_ITERATOR_DEBUG_LEVEL != 0`에서는 noexcept 컨테이너 생성·이동이 프록시를 할당하므로 보장 대상이 아닙니다.
 - 원본 `Json`을 전달하여 생성한 뒤 `obj.reflectMembers(r)`에 리더를 전달합니다. 리더가 원본 데이터를 소유하므로 임시 객체로 생성해도 안전합니다.
 - 존재하는 키만 JSON 키 순서가 아닌 리플렉션 순서로 처리합니다. `TC_VALUE`의 게터·세터 형식과 `TC_DERIVED` 멤버는 값의 리플렉션이 편집을 보고하면 세터를 사용하며 직접 공개된 필드에는 직접 대입합니다.
 - 타입에 `reflectMembers()`가 있는 복합 프로퍼티는 바깥쪽 세터를 호출하지 않으며 게터에서 얻은 임시 복사본의 편집을 버립니다. 내부 편집을 적용하려면 이런 복합 값을 직접 필드로 공개하세요.

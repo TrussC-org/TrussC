@@ -1,4 +1,6 @@
 #pragma once
+#include "impl/tcImportError.h"
+#include <optional>
 
 // =============================================================================
 // TrussC TrueType Font
@@ -39,6 +41,8 @@
 
 // stb_truetype
 #include "stb/stb_truetype.h"
+#include "impl/tcFontInput.h"
+#include "impl/tcFontScratch.h"
 
 #include "../utils/tcLog.h"
 #include "../utils/tcOnceGate.h"
@@ -232,6 +236,8 @@ public:
         maxAtlasSize_ = atlasLimit;
         cleanup();
 
+        try {
+        prepareReleaseStorage();
         // Load font file (fontPath is UTF-8 — convert so non-ASCII paths
         // survive on Windows)
         const auto path = internal::utf8ToPath(fontPath);
@@ -254,34 +260,53 @@ public:
         // Same size limit as checkSfntSkeleton, checked before the buffer
         // is allocated.
         if ((uint64_t)end >= kMaxFontDataSize) {
-            logWarning() << "FontAtlasManager: not a usable font (" << kTooLargeReason << ")";
+            const std::string reason = std::string("FontAtlasManager: not a usable font (") + kTooLargeReason + "): ";
+            internal::reportImportError("", reason.c_str(), fontPath.c_str());
             return false;
         }
         const size_t fileSize = (size_t)end;
         file.seekg(0, std::ios::beg);
+        if (fileSize > 256u * 1024u * 1024u)
+            logNotice("Font") << "loading a local font larger than 256 MiB";
         fontData_.resize(fileSize);
         if (!file.read(reinterpret_cast<char*>(fontData_.data()), fileSize)) {
             logError() << "FontAtlasManager: failed to read " << fontPath;
+            cleanup();
             return false;
         }
 
         fontName_ = fontPath;
-        return initFromFontData(fontSize, faceIndex);
+        if (!initFromFontData(fontSize, faceIndex, &path)) { cleanup(); return false; }
+        return true;
+        } catch (const std::exception&) {
+            return initializationFailed(fontPath.c_str());
+        }
     }
 
     bool setupFromMemory(const uint8_t* data, size_t size, int fontSize, int faceIndex = 0) {
         maxAtlasSize_ = atlasLimit();
         cleanup();
 
+        try {
+        prepareReleaseStorage();
         if (!data && size > 0) {
-            logWarning() << "FontAtlasManager: font data pointer is null";
+            logError() << "FontAtlasManager: font data pointer is null";
+            return false;
+        }
+        // Check the backend representation before copying memory input too.
+        if (size >= kMaxFontDataSize) {
+            internal::reportImportError("Font", kTooLargeReason);
             return false;
         }
         // Empty data is rejected by the sfnt check in initFromFontData.
-        fontData_.assign(data, data + size);
+        if (size) fontData_.assign(data, data + size);
 
         fontName_ = "font data in memory";
-        return initFromFontData(fontSize, faceIndex);
+        if (!initFromFontData(fontSize, faceIndex)) { cleanup(); return false; }
+        return true;
+        } catch (const std::exception&) {
+            return initializationFailed();
+        }
     }
 
     // Opt-in mipmapping. Must be set before glyphs are uploaded (the atlas
@@ -313,11 +338,29 @@ public:
     }
     int getOversample() const { return oversample_; }
 
-    // Test hook (core/tests/fontAtlasLimit), not part of the Font API:
-    // largest atlas page side in texels (the GPU limit, capped at 8192).
+    // Test hooks, not part of the Font API.
+    size_t getFontDataCapacityForTests() const { return fontData_.capacity(); }
+    // Largest atlas page side in texels (GPU limit, capped at 8192).
     int getMaxAtlasSizeForTests() const { return maxAtlasSize_; }
 
 private:
+    bool initializationFailed(const char* sourcePath = nullptr) {
+        // Preparation owns CPU-only pages; release the rejected source/atlas
+        // before reporting, even when every subsequent allocation still fails.
+        cleanup();
+        internal::reportImportError("Font", sourcePath ? "font initialization failed: " : "font initialization failed",
+                                    sourcePath ? sourcePath : "");
+        return false;
+    }
+
+    // Empty release slots are constructed while initialization is guarded,
+    // before source/name storage is acquired. Failure cleanup only swaps and
+    // destroys existing containers, including with MSVC iterator debugging.
+    void prepareReleaseStorage() {
+        if (!emptyFontData_) emptyFontData_.emplace();
+        if (!emptyFontName_) emptyFontName_.emplace();
+    }
+
     // A glyph fits the largest page when its padded box fits the region the
     // packer fills first on a page grown to maxAtlasSize_: the right half,
     // starting GLYPH_PADDING in from the top and from the middle.
@@ -348,12 +391,17 @@ private:
                            << " texels); those glyphs are drawn at a lower resolution";
     }
 
-    bool initFromFontData(int fontSize, int fontIndex) {
+    bool initFromFontData(int fontSize, int fontIndex, const fs::path* sourcePath = nullptr) {
         // The face index is checked against the number of faces in the data:
         // the font count of a collection, 1 for a single font.
         const uint64_t faces = faceCount(fontData_.data(), fontData_.size());
         if (faces > 0 && (fontIndex < 0 || (uint64_t)fontIndex >= faces)) {
-            logError() << "FontAtlasManager: face index " << fontIndex
+            if (sourcePath) {
+                char detail[160];
+                std::snprintf(detail, sizeof(detail), "FontAtlasManager: face index %d is out of range (the font has %llu %s)",
+                              fontIndex, static_cast<unsigned long long>(faces), faces == 1 ? "face" : "faces");
+                internal::reportImportError("", detail, sourcePath);
+            } else logError() << "FontAtlasManager: face index " << fontIndex
                        << " is out of range (the font has " << faces
                        << (faces == 1 ? " face)" : " faces)");
             fontData_.clear();
@@ -363,8 +411,13 @@ private:
         // The sfnt structure is checked against the data size before the data
         // is given to stb_truetype.
         std::string reason;
-        if (!checkSfntSkeleton(fontData_.data(), fontData_.size(), fontIndex, reason)) {
-            logWarning() << "FontAtlasManager: not a usable font (" << reason << ")";
+        if (!checkFontSfnt(fontData_.data(), fontData_.size(), fontIndex, reason)) {
+            if (sourcePath) {
+                // Reason formatting remains inside prepareFile's recovery guard.
+                reason.insert(0, "FontAtlasManager: not a usable font (");
+                reason += ')';
+                internal::reportImportError("", reason.c_str(), sourcePath);
+            } else logError() << "FontAtlasManager: not a usable font (" << reason << ")";
             fontData_.clear();
             return false;
         }
@@ -372,14 +425,19 @@ private:
         // Get font offset (required for .ttc files with multiple fonts)
         int offset = stbtt_GetFontOffsetForIndex(fontData_.data(), fontIndex);
         if (offset < 0) {
-            logError() << "FontAtlasManager: invalid font index " << fontIndex;
+            if (sourcePath) {
+                char detail[96];
+                std::snprintf(detail, sizeof(detail), "FontAtlasManager: invalid font index %d", fontIndex);
+                internal::reportImportError("", detail, sourcePath);
+            } else logError() << "FontAtlasManager: invalid font index " << fontIndex;
             fontData_.clear();
             return false;
         }
 
         // Initialize with stb_truetype
         if (!stbtt_InitFont(&fontInfo_, fontData_.data(), offset)) {
-            logError() << "FontAtlasManager: failed to init font";
+            if (sourcePath) internal::reportImportError("", "FontAtlasManager: failed to init font", sourcePath);
+            else logError() << "FontAtlasManager: failed to init font";
             fontData_.clear();
             return false;
         }
@@ -390,7 +448,8 @@ private:
         if (!fontInfo_.glyf) {
             const int count = cffCharStringsCount(fontInfo_.charstrings);
             if (count < 1) {
-                logWarning() << "FontAtlasManager: not a usable font "
+                if (sourcePath) internal::reportImportError("", "FontAtlasManager: not a usable font (CFF CharStrings INDEX cannot be read)", sourcePath);
+                else logError() << "FontAtlasManager: not a usable font "
                                 "(CFF CharStrings INDEX cannot be read)";
                 fontData_.clear();
                 return false;
@@ -480,195 +539,6 @@ private:
         return numFonts;
     }
 
-    static bool checkSfntSkeleton(const uint8_t* data, size_t size, int fontIndex,
-                                  std::string& reason) {
-        auto u16 = [data](uint64_t o) -> uint64_t {
-            return ((uint64_t)data[o] << 8) | data[o + 1];
-        };
-        auto u32 = [data](uint64_t o) -> uint64_t {
-            return ((uint64_t)data[o] << 24) | ((uint64_t)data[o + 1] << 16) |
-                   ((uint64_t)data[o + 2] << 8) | data[o + 3];
-        };
-        auto tag = [](const char* t) -> uint64_t {
-            return ((uint64_t)(uint8_t)t[0] << 24) | ((uint64_t)(uint8_t)t[1] << 16) |
-                   ((uint64_t)(uint8_t)t[2] << 8) | (uint8_t)t[3];
-        };
-        auto tagName = [](uint64_t t) {
-            std::string s(4, ' ');
-            for (int i = 0; i < 4; i++) {
-                const char c = (char)((t >> (24 - 8 * i)) & 0xff);
-                s[i] = (c >= 0x20 && c < 0x7f) ? c : '?';
-            }
-            return s;
-        };
-
-        const uint64_t n = size;
-        if (n < 12) {
-            reason = "data is " + std::to_string(size) + " bytes, shorter than a font header";
-            return false;
-        }
-        // The stb backend handles fonts below 1 GiB.
-        if (n >= kMaxFontDataSize) {
-            reason = kTooLargeReason;
-            return false;
-        }
-
-        // Font collection (.ttc): pick the font at fontIndex.
-        uint64_t fontStart = 0;
-        if (u32(0) == tag("ttcf")) {
-            const uint64_t version = u32(4);
-            if (version != 0x00010000u && version != 0x00020000u) {
-                reason = "unsupported font collection version";
-                return false;
-            }
-            const uint64_t numFonts = u32(8);
-            if (numFonts == 0 || 12 + 4 * numFonts > n) {
-                reason = "font collection header is truncated";
-                return false;
-            }
-            if (fontIndex < 0 || (uint64_t)fontIndex >= numFonts) {
-                reason = "font index " + std::to_string(fontIndex) + " is out of range";
-                return false;
-            }
-            fontStart = u32(12 + 4 * (uint64_t)fontIndex);
-            if (fontStart + 12 > n) {
-                reason = "font offset in the collection is outside the data";
-                return false;
-            }
-        } else if (fontIndex != 0) {
-            reason = "font index " + std::to_string(fontIndex) + " is out of range";
-            return false;
-        }
-
-        // The sfnt versions stb_truetype accepts.
-        const uint64_t sfntVersion = u32(fontStart);
-        if (sfntVersion != 0x00010000u && sfntVersion != tag("1\0\0\0") &&
-            sfntVersion != tag("true") && sfntVersion != tag("typ1") &&
-            sfntVersion != tag("OTTO")) {
-            reason = "not a TrueType / OpenType font";
-            return false;
-        }
-
-        // Table directory. As in stbtt_InitFont, the first entry with a given
-        // tag is used, and an entry at offset 0 counts as missing.
-        const uint64_t numTables = u16(fontStart + 4);
-        const uint64_t dirStart = fontStart + 12;
-        if (dirStart + 16 * numTables > n) {
-            reason = "table directory is truncated";
-            return false;
-        }
-        struct Table { uint64_t offset = 0, length = 0; bool seen = false, found = false; };
-        Table cmap, head, hhea, hmtx, maxp, glyf, loca, cff;
-        const std::pair<uint64_t, Table*> wanted[] = {
-            {tag("cmap"), &cmap}, {tag("head"), &head}, {tag("hhea"), &hhea},
-            {tag("hmtx"), &hmtx}, {tag("maxp"), &maxp}, {tag("glyf"), &glyf},
-            {tag("loca"), &loca}, {tag("CFF "), &cff},
-        };
-        for (uint64_t i = 0; i < numTables; i++) {
-            const uint64_t rec = dirStart + 16 * i;
-            const uint64_t t = u32(rec);
-            const uint64_t offset = u32(rec + 8);
-            const uint64_t length = u32(rec + 12);
-            if (offset + length > n) {
-                reason = "table '" + tagName(t) + "' is outside the data";
-                return false;
-            }
-            for (const auto& w : wanted) {
-                if (w.first == t && !w.second->seen) {
-                    *w.second = Table{offset, length, true, offset != 0};
-                }
-            }
-        }
-
-        // Required tables, and the fixed fields stb reads from them.
-        const bool trueType = glyf.found;  // same rule as stbtt_InitFont
-        const std::pair<const char*, const Table*> required[] = {
-            {"cmap", &cmap}, {"head", &head}, {"hhea", &hhea}, {"hmtx", &hmtx},
-            {"maxp", &maxp}, {trueType ? "loca" : "CFF ", trueType ? &loca : &cff},
-        };
-        for (const auto& r : required) {
-            if (!r.second->found) {
-                reason = std::string("missing required table '") + r.first + "'";
-                return false;
-            }
-        }
-        if (head.length < 54 || hhea.length < 36 || maxp.length < 6 || cmap.length < 4) {
-            reason = "head / hhea / maxp / cmap table is too short";
-            return false;
-        }
-
-        // cmap encoding records, and the offsets of the subtables stb may pick
-        // (Microsoft Unicode BMP / full, or any Unicode platform record).
-        const uint64_t numSubtables = u16(cmap.offset + 2);
-        if (4 + 8 * numSubtables > cmap.length) {
-            reason = "cmap encoding records are truncated";
-            return false;
-        }
-        bool usableCmap = false;
-        for (uint64_t i = 0; i < numSubtables; i++) {
-            const uint64_t rec = cmap.offset + 4 + 8 * i;
-            const uint64_t platform = u16(rec);
-            const uint64_t encoding = u16(rec + 2);
-            if (platform == 0 || (platform == 3 && (encoding == 1 || encoding == 10))) {
-                if (u32(rec + 4) + 2 > cmap.length) {
-                    reason = "cmap subtable offset is outside the cmap table";
-                    return false;
-                }
-                // Match the vendored stbtt_InitFont selection. Read the format
-                // only after checking this Unicode record's subtable offset.
-                const uint64_t format = u16(cmap.offset + u32(rec + 4));
-                if (format == 0 || format == 4 || format == 6 || format == 12 || format == 13)
-                    usableCmap = true;
-            }
-        }
-        if (!usableCmap) {
-            reason = "no usable Unicode character map (stb_truetype supports cmap formats 0, 4, 6, 12 and 13)";
-            return false;
-        }
-
-        // hmtx: numberOfHMetrics long entries, then one short entry per
-        // remaining glyph.
-        const uint64_t numGlyphs = u16(maxp.offset + 4);
-        const uint64_t numLong = u16(hhea.offset + 34);
-        if (numLong < 1 || numLong > numGlyphs) {
-            reason = "hhea numberOfHMetrics is out of range";
-            return false;
-        }
-        if (4 * numLong + 2 * (numGlyphs - numLong) > hmtx.length) {
-            reason = "hmtx table is too short";
-            return false;
-        }
-
-        // loca: numGlyphs + 1 entries, in non-decreasing order, each within
-        // glyf (a glyph's data runs from its entry to the next one).
-        if (trueType) {
-            const uint64_t locaFormat = u16(head.offset + 50);
-            if (locaFormat > 1) {
-                reason = "unsupported loca format";
-                return false;
-            }
-            const uint64_t entrySize = (locaFormat == 0) ? 2 : 4;
-            if ((numGlyphs + 1) * entrySize > loca.length) {
-                reason = "loca table is too short";
-                return false;
-            }
-            uint64_t previous = 0;
-            for (uint64_t i = 0; i <= numGlyphs; i++) {
-                const uint64_t at = loca.offset + i * entrySize;
-                const uint64_t glyphOffset = (locaFormat == 0) ? u16(at) * 2 : u32(at);
-                if (glyphOffset > glyf.length) {
-                    reason = "loca entry points past the end of glyf";
-                    return false;
-                }
-                if (glyphOffset < previous) {
-                    reason = "loca entries are not in increasing order";
-                    return false;
-                }
-                previous = glyphOffset;
-            }
-        }
-        return true;
-    }
 
 public:
 
@@ -700,7 +570,20 @@ public:
         pendingDestroys_.clear();
         atlases_.clear();
         glyphs_.clear();
-        fontData_.clear();
+        if (emptyFontData_) {
+            fontData_.swap(*emptyFontData_);
+            emptyFontData_.reset();
+        }
+        if (emptyFontName_) {
+            fontName_.swap(*emptyFontName_);
+            emptyFontName_.reset();
+        }
+        fontInfo_ = {};
+        fontSize_ = 0;
+        scale_ = ascent_ = descent_ = lineGap_ = spaceAdvance_ = 0;
+        mipsBuilt_ = false;
+        pageLimitWarned_.reset();
+        lastDestroyFlushFrame_ = 0;
         glyphLimit_ = 0;
         loaded_ = false;
     }
@@ -716,7 +599,7 @@ public:
 
         // Add glyph. A glyph that cannot be placed is kept with valid_ = false,
         // so it is not tried again until clearAtlas().
-        GlyphInfo info;
+        GlyphInfo info{};
         if (!addGlyphToAtlas(codepoint, info)) info.valid_ = false;
         return &(glyphs_[codepoint] = info);
     }
@@ -756,13 +639,27 @@ public:
             return result;
         }
 
+        if (!fontGlyphRangeFits(&fontInfo_, fontData_.size(), glyphIndex)) {
+            internal::reportImportError("Font", "invalid glyph structure");
+            return result;
+        }
+        FontScratchScope scratch(fontData_.size());
         stbtt_vertex* vertices = nullptr;
         const int numVerts = stbtt_GetGlyphShape(&fontInfo_, glyphIndex, &vertices);
-        if (numVerts <= 0 || !vertices) {
+        if (numVerts <= 0 || !vertices || scratch.failed()) {
+            if (scratch.failed()) internal::reportImportError("Font", "glyph outline workspace could not be allocated");
             if (vertices) stbtt_FreeShape(&fontInfo_, vertices);
             return result;  // valid but empty outline (space etc.)
         }
 
+        const auto freeShape = [&](stbtt_vertex* shape) { stbtt_FreeShape(&fontInfo_, shape); };
+        std::unique_ptr<stbtt_vertex, decltype(freeShape)> shape(vertices, freeShape);
+        // Bound (security): each outline vertex emits at most 17 path points, with vector growth and subpath bookkeeping. Overflow rejects the whole outline and is counted.
+        if (size_t(numVerts) > fontScratchRemaining() / (51 * sizeof(Vec3) + 4 * sizeof(size_t))) {
+            internal::reportImportError("Font", "glyph path exceeds outline workspace");
+            return Path();
+        }
+        try {
         // stbtt returns vertex coords in font design units, Y-up.
         // Multiply by emScale to get em units (1.0 = em); negate Y for screen Y-down.
         const float emScale = stbtt_ScaleForMappingEmToPixels(&fontInfo_, 1.0f);
@@ -803,8 +700,11 @@ public:
         }
         if (subpathOpen) result.close();
 
-        stbtt_FreeShape(&fontInfo_, vertices);
         return result;
+        } catch (const std::bad_alloc&) {
+            internal::reportImportError("Font", "cannot allocate glyph path");
+            return Path();
+        }
     }
 
     // Em-normalized horizontal advance for this codepoint (1.0 = em).
@@ -896,6 +796,8 @@ private:
 
     // Font data
     std::vector<uint8_t> fontData_;
+    std::optional<std::vector<uint8_t>> emptyFontData_;
+    std::optional<std::string> emptyFontName_;
     stbtt_fontinfo fontInfo_ = {};
     int glyphLimit_ = 0;         // glyph indices below this are usable
     int fontSize_ = 0;
@@ -1008,6 +910,11 @@ private:
         // Render glyph
         int glyphIndex = findGlyphIndex(codepoint);
 
+        if (!fontGlyphRangeFits(&fontInfo_, fontData_.size(), glyphIndex)) {
+            internal::reportImportError("Font", "invalid glyph structure");
+            return false;
+        }
+        FontScratchScope metricsScratch(fontData_.size());
         // Get glyph metrics
         int advanceWidth, leftSideBearing;
         stbtt_GetGlyphHMetrics(&fontInfo_, glyphIndex, &advanceWidth, &leftSideBearing);
@@ -1027,6 +934,11 @@ private:
         float rs      = (float)os;
         float osScale = scale_ * rs;
 
+        // Bound (abi): stb's prefilter has eight taps; larger internal oversampling cannot be represented. Overflow rejects the whole glyph and is counted.
+        if (!fontGlyphScaleFits(&fontInfo_, glyphIndex, osScale, osScale) || metricsScratch.failed() || os > 8) {
+            internal::reportImportError("Font", "glyph metrics exceed the raster backend range");
+            return false;
+        }
         int x0, y0, x1, y1;
         stbtt_GetGlyphBitmapBox(&fontInfo_, glyphIndex, osScale, osScale, &x0, &y0, &x1, &y1);
 
@@ -1143,7 +1055,18 @@ private:
         // Render glyph (8bit grayscale). Zero-filled because the prefilter runs
         // out past the rasterized box into the os-1 margin and expects to read
         // background there.
-        std::vector<uint8_t> glyphBitmap((size_t)glyphWidth * glyphHeight, 0);
+        // Bound (gpu): glyph scratch dimensions must fit the admitted atlas page. Overflow rejects the whole glyph and is counted.
+        if (glyphWidth <= 0 || glyphHeight <= 0 ||
+            size_t(glyphWidth) > SIZE_MAX / size_t(glyphHeight)) {
+            internal::reportImportError("Font", "invalid glyph raster dimensions");
+            return false;
+        }
+        const size_t bitmapBytes = size_t(glyphWidth) * size_t(glyphHeight);
+        FontScratchScope scratch(fontData_.size(), bitmapBytes);
+        if (scratch.failed()) { internal::reportImportError("Font", "glyph bitmap exceeds raster workspace"); return false; }
+        std::vector<uint8_t> glyphBitmap;
+        try { glyphBitmap.resize(bitmapBytes, 0); }
+        catch (const std::bad_alloc&) { internal::reportImportError("Font", "cannot allocate glyph bitmap"); return false; }
 
         // Box prefiltering shifts the image by (os-1)/2 oversampled texels;
         // stb reports the compensating offset in final pixels via sub*, which
@@ -1179,6 +1102,11 @@ private:
                                   glyphWidth,  // stride
                                   osScale, osScale,
                                   glyphIndex);
+        }
+
+        if (scratch.failed()) {
+            internal::reportImportError("Font", "glyph raster workspace could not be allocated");
+            return false;
         }
 
         // Copy to atlas (R8 coverage)
@@ -1737,19 +1665,33 @@ public:
             internal::completeResourceLoad(state);
             return;
         }
-        internal::startResourceLoad([state] {
-            internal::probeResourceLoad("font.decode", internal::utf8ToPath(state->input.path));
-            if (state->cancelled.load()) return;
-            auto candidate = std::make_shared<internal::FontAtlasManager>();
-            candidate->setOversample(state->key.oversample);
-            candidate->setMipmaps(state->key.mipmaps);
-            if (candidate->prepareFile(state->input.path, state->key.fontSize,
-                                       state->key.faceIndex, state->limit)) state->candidate = std::move(candidate);
-            state->result = classifyLoad(state->candidate != nullptr, state->input.name,
-                                          state->input.path, state->input.face);
-            internal::probeResourceLoad("font.ready", internal::utf8ToPath(state->input.path));
-            if (!state->cancelled.load()) internal::completeResourceLoad(state);
-            internal::probeResourceLoad("font.queued", internal::utf8ToPath(state->input.path));
+        // Prepare the mailbox node on main as well: publishing a decode
+        // failure must not allocate again on the exhausted worker.
+        auto completion = internal::prepareResourceLoad(state);
+        internal::startResourceLoad([state, completion = std::move(completion)]() mutable {
+            // Retain the path for both probes before preparation can exhaust
+            // memory. Failure classification also allocates, so guard it too.
+            fs::path path;
+            try {
+                path = internal::utf8ToPath(state->input.path);
+                internal::probeResourceLoad("font.decode", path);
+                if (state->cancelled.load()) return;
+                auto candidate = std::make_shared<internal::FontAtlasManager>();
+                candidate->setOversample(state->key.oversample);
+                candidate->setMipmaps(state->key.mipmaps);
+                if (candidate->prepareFile(state->input.path, state->key.fontSize,
+                                           state->key.faceIndex, state->limit)) state->candidate = std::move(candidate);
+                state->result = classifyLoad(state->candidate != nullptr, state->input.name,
+                                            state->input.path, state->input.face);
+            } catch (const std::exception&) {
+                state->candidate.reset();
+                state->result.error = LoadError::DecodeFailed;
+                state->result.message.clear();
+                internal::reportImportError("Font", "asynchronous font initialization failed: ", state->input.path.c_str());
+            }
+            internal::probeResourceLoad("font.ready", path);
+            if (!state->cancelled.load()) internal::publishResourceLoad(completion);
+            internal::probeResourceLoad("font.queued", path);
         });
     }
     Event<LoadResult> onLoad;

@@ -812,7 +812,7 @@ struct ImChunkStream
     bool    empty() const               { return Buf.Size == 0; }
     int     size() const                { return Buf.Size; }
     T*      alloc_chunk(size_t sz)      { size_t HDR_SZ = 4; sz = IM_MEMALIGN(HDR_SZ + sz, 4u); int off = Buf.Size; Buf.resize(off + (int)sz); ((int*)(void*)(Buf.Data + off))[0] = (int)sz; return (T*)(void*)(Buf.Data + off + (int)HDR_SZ); }
-    T*      begin()                     { size_t HDR_SZ = 4; if (!Buf.Data) return NULL; return (T*)(void*)(Buf.Data + HDR_SZ); }
+    T*      begin()                     { size_t HDR_SZ = 4; if (Buf.Size == 0) return NULL; return (T*)(void*)(Buf.Data + HDR_SZ); } // [TrussC] Reserved empty settings storage contains no chunks.
     T*      next_chunk(T* p)            { size_t HDR_SZ = 4; IM_ASSERT(p >= begin() && p < end()); p = (T*)(void*)((char*)(void*)p + chunk_size(p)); if (p == (T*)(void*)((char*)end() + HDR_SZ)) return (T*)0; IM_ASSERT(p < end()); return p; }
     int     chunk_size(const T* p)      { return ((const int*)p)[-1]; }
     T*      end()                       { return (T*)(void*)(Buf.Data + Buf.Size); }

@@ -3343,6 +3343,12 @@ PUGI_IMPL_NS_BEGIN
 				LOC_TAG:
 					if (PUGI_IMPL_IS_CHARTYPE(*s, ct_start_symbol)) // '<#...'
 					{
+						// Bound (security): nesting must keep DOM consumers' recursion finite. Overflow rejects the whole document with a parse error and is counted.
+						{
+							size_t tc_depth = 0;
+							for (xml_node_struct* ancestor = cursor; ancestor != root; ancestor = ancestor->parent)
+								if (++tc_depth >= 64) PUGI_IMPL_THROW_ERROR(status_bad_start_element, s);
+						}
 						PUGI_IMPL_PUSHNODE(node_element); // Append a new node to the tree.
 
 						cursor->name = s;
@@ -3610,6 +3616,10 @@ PUGI_IMPL_NS_BEGIN
 			// early-out for empty documents
 			if (length == 0)
 				return make_parse_result(PUGI_IMPL_OPTSET(parse_fragment) ? status_ok : status_no_document_element);
+
+			// TrussC: an internal terminator must not turn a file into a successful prefix.
+			for (size_t tc_index = 0; tc_index + 1 < length; ++tc_index)
+				if (buffer[tc_index] == 0) return make_parse_result(status_bad_pcdata, tc_index);
 
 			// get last child of the root before parsing
 			xml_node_struct* last_root_child = root->first_child ? root->first_child->prev_sibling_c + 0 : NULL;

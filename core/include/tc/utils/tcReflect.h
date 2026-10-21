@@ -88,6 +88,8 @@
 #include <array>
 #include <utility>
 #include <type_traits>
+#include <new>
+#include <memory>
 #include "../utils/tcAnnotations.h"
 
 // Value window scanned by the compile-time enum reflection below. Only valid
@@ -309,6 +311,8 @@ inline const char* enumLabel(E value) {
     }
 }
 
+namespace internal { struct ReflectionPass; }
+
 // Visitor over a type's values. One overload per supported type; each returns
 // true if the value was edited this call.
 struct Reflector {
@@ -352,9 +356,40 @@ struct Reflector {
     virtual void endGroup() {}
 
 private:
+    friend struct internal::ReflectionPass;
+    // Internal pass hooks let deserializers validate a whole update before setters run.
+    virtual void enterReflection_() {}
+    virtual bool leaveReflection_() { return false; }
+    virtual void reflectionAllocationFailure_() { throw; }
+    virtual std::shared_ptr<void>* propertyStorage_(const char*) { return nullptr; }
     int readOnlyDepth_ = 0;
     int derivedDepth_ = 0;
 };
+
+namespace internal {
+struct ReflectionPass {
+    template<class Getter, class Visit>
+    static void property(Reflector& reader, const char* name, Getter&& getter, Visit&& visit) {
+        using Value = std::decay_t<decltype(getter())>;
+        if (auto* storage = reader.propertyStorage_(name)) {
+            // Construct the snapshot before visiting any fields. Type-erased
+            // ownership also supports move-only composite getter results.
+            if (!*storage) *storage = std::shared_ptr<Value>(new Value(getter()));
+            visit(*static_cast<Value*>(storage->get()));
+        } else {
+            auto value = getter();
+            visit(value);
+        }
+    }
+    template<class F> static void run(Reflector& reader, F&& fields) {
+        try {
+            reader.enterReflection_();
+            do { fields(); } while (reader.leaveReflection_());
+        }
+        catch (const std::bad_alloc&) { reader.reflectionAllocationFailure_(); }
+    }
+};
+}
 
 // Chain the listed direct bases' reflect blocks, in order. Qualified calls ->
 // non-virtual, so each base contributes exactly its own chain (no recursion
@@ -441,8 +476,10 @@ inline bool reflectValue(Reflector& r, const char* name, T& v) {
 // touch — Reflector is an argument, so trussc is always an associated ns).
 #define TC_REFLECT_ROOT(Self) \
     virtual void reflectMembers(::trussc::Reflector& r) { \
-        bool _tc_edited = false; \
-        tcReflectFields_(r, *this, _tc_edited); \
+        ::trussc::internal::ReflectionPass::run(r, [&] { \
+            bool _tc_edited = false; \
+            tcReflectFields_(r, *this, _tc_edited); \
+        }); \
     } \
     friend void tcReflectFields_([[maybe_unused]] ::trussc::Reflector& r, \
                                  [[maybe_unused]] Self& _tc_self, \
@@ -450,9 +487,11 @@ inline bool reflectValue(Reflector& r, const char* name, T& v) {
 
 #define TC_REFLECT(Self, ...) \
     void reflectMembers(::trussc::Reflector& r) override { \
-        ::trussc::reflectBases<__VA_ARGS__>(this, r); \
-        bool _tc_edited = false; \
-        tcReflectFields_(r, *this, _tc_edited); \
+        ::trussc::internal::ReflectionPass::run(r, [&] { \
+            ::trussc::reflectBases<__VA_ARGS__>(this, r); \
+            bool _tc_edited = false; \
+            tcReflectFields_(r, *this, _tc_edited); \
+        }); \
     } \
     friend void tcReflectFields_([[maybe_unused]] ::trussc::Reflector& r, \
                                  [[maybe_unused]] Self& _tc_self, \
@@ -481,22 +520,22 @@ inline bool reflectValue(Reflector& r, const char* name, T& v) {
 #define TC_VALUE_1_(member) \
     _tc_edited |= ::trussc::reflectValue(r, #member, _tc_self.member);
 #define TC_VALUE_2_(name, getter) \
-    do { auto _tcv = _tc_self.getter(); \
+    do { ::trussc::internal::ReflectionPass::property(r, #name, [&]() -> decltype(auto) { return _tc_self.getter(); }, [&](auto& _tcv) { \
          r.pushReadOnly(); \
          ::trussc::reflectValue(r, #name, _tcv); \
-         r.popReadOnly(); } while (0);
+         r.popReadOnly(); }); } while (0);
 #define TC_VALUE_3_(name, getter, setter) \
-    do { auto _tcv = _tc_self.getter(); \
-         if (::trussc::reflectValue(r, #name, _tcv)) { _tc_self.setter(_tcv); _tc_edited = true; } } while (0);
+    do { ::trussc::internal::ReflectionPass::property(r, #name, [&]() -> decltype(auto) { return _tc_self.getter(); }, [&](auto& _tcv) { \
+         if (::trussc::reflectValue(r, #name, _tcv)) { _tc_self.setter(_tcv); _tc_edited = true; } }); } while (0);
 
 // A derived value (see the header comment): read via getter, written via
 // setter, visited inside the derived scope.
 #define TC_DERIVED(name, getter, setter) \
-    do { auto _tcv = _tc_self.getter(); \
+    do { ::trussc::internal::ReflectionPass::property(r, #name, [&]() -> decltype(auto) { return _tc_self.getter(); }, [&](auto& _tcv) { \
          r.pushDerived(); \
          const bool _tcd = ::trussc::reflectValue(r, #name, _tcv); \
          r.popDerived(); \
-         if (_tcd) { _tc_self.setter(_tcv); _tc_edited = true; } } while (0);
+         if (_tcd) { _tc_self.setter(_tcv); _tc_edited = true; } }); } while (0);
 
 // Arity dispatch (the extra expansion keeps MSVC's traditional preprocessor
 // from passing __VA_ARGS__ through as a single token).

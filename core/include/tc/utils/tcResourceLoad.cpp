@@ -71,6 +71,11 @@ void enqueueResourceLoad(std::function<void()> completion) {
     std::lock_guard<std::mutex> lock(owner.mutex);
     owner.mailbox.push_back(std::move(completion));
 }
+void publishResourceLoad(ResourceLoadBatch& prepared) {
+    auto& owner = host();
+    std::lock_guard<std::mutex> lock(owner.mutex);
+    owner.mailbox.splice(owner.mailbox.end(), prepared);
+}
 ResourceLoadBatch takeResourceLoadBatch() {
     auto& owner = host();
     std::lock_guard<std::mutex> lock(owner.mutex);
