@@ -95,6 +95,13 @@ and shrinking evict oldest whole messages and increment the counter.
 초과하거나 한도를 줄이면 오래된 메시지 전체를 버리고 카운터에 더합니다.
 
 
+Native SysEx reception has a separate fixed limit of **1,048,576 bytes including
+F0/F7**. Larger messages are discarded whole and counted internally. The first
+SysEx loss per `MidiIn` lifetime emits one **Warning on the main thread**, even
+without polling. These losses do not change `getDroppedMessageCount()`, and
+`setBufferSize()` does not raise the SysEx limit. WebMIDI does not enable SysEx.
+See [the local libremidi patch ledger](LIBREMIDI_TRUSSC_MODIFICATIONS.md).
+
 **`MidiOut`** — `listDevices()`, `openPort(index|name)`, `openVirtualPort(name)`,
 `getName()` / `getPort()` / `isVirtual()`, `sendNoteOn/Off`,
 `sendControlChange`, `sendProgramChange`, `sendAftertouch`,

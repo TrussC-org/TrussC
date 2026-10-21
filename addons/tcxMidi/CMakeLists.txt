@@ -40,8 +40,19 @@ FetchContent_Declare(
     libremidi
     URL      https://github.com/celtera/libremidi/archive/refs/tags/v5.4.3.tar.gz
     URL_HASH SHA256=a1c369c6aab01c80f1506345d1c099a167b330d1d59159aa7583f7b0b9f966b9
+    PATCH_COMMAND ${CMAKE_COMMAND} -DLIBREMIDI_SOURCE_DIR=<SOURCE_DIR>
+        -P ${CMAKE_CURRENT_LIST_DIR}/cmake/PatchLibremidi.cmake
 )
 FetchContent_MakeAvailable(libremidi)
+# PATCH_COMMAND is skipped for source overrides and may be skipped in reused
+# caches. Never silently build an unpatched (or differently patched) decoder.
+execute_process(COMMAND ${CMAKE_COMMAND}
+    -DLIBREMIDI_SOURCE_DIR=${libremidi_SOURCE_DIR} -DVERIFY_ONLY=ON
+    -P ${CMAKE_CURRENT_LIST_DIR}/cmake/PatchLibremidi.cmake
+    RESULT_VARIABLE _tcxMidi_patch_result)
+if(NOT _tcxMidi_patch_result EQUAL 0)
+    message(FATAL_ERROR "[tcxMidi] libremidi SysEx patch verification failed")
+endif()
 
 # v5.4.3's WebMIDI (Emscripten) backend calls Module._malloc / _free / HEAPU8 /
 # UTF8ToString / stringToUTF8 / lengthBytesUTF8 from JS, but its own CMake only

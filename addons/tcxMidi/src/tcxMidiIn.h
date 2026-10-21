@@ -20,9 +20,16 @@
 //      message is rejected. getDroppedMessageCount() counts these and shrink
 //      losses. The first loss warns automatically on the main thread, once
 //      per input lifetime across close/reopen, without another poll.
+//
+// Native SysEx receive limit: 1,048,576 bytes including F0/F7. Larger messages
+// are discarded whole and counted internally, separately from the polling
+// getDroppedMessageCount(). The first SysEx loss per MidiIn lifetime emits one
+// Warning on the main thread, even without polling. setBufferSize() does not
+// change this limit. WebMIDI access does not enable SysEx.
 // =============================================================================
 
 #include "tcxMidiMessage.h"
+#include "tcxMidiSysex.h"
 
 #include "tc/events/tcEvent.h"
 #include "tc/network/tcNetworkState.h"
@@ -226,6 +233,7 @@ private:
 
     libremidi::input_configuration makeConfig(const std::shared_ptr<State>& state) {
         libremidi::input_configuration cfg;
+        cfg.on_sysex_overflow = [loss = sysexLoss_](size_t needed) { loss->count(needed); };
         cfg.on_message = [state](const libremidi::message& m) { state->handleMessage(m); };
         cfg.ignore_sysex = ignoreSysex_;
         cfg.ignore_timing = ignoreTiming_;
@@ -260,6 +268,7 @@ private:
         return true;
     }
 
+    std::shared_ptr<internal::SysexLoss> sysexLoss_ = internal::SysexLoss::create();
     std::shared_ptr<Polling> polling_ = std::make_shared<Polling>();
     std::shared_ptr<State> state_;
     std::shared_ptr<Backend> backend_;
