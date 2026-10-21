@@ -6,6 +6,10 @@
 #include "../../common/tcCoreTest.h"
 #include <sstream>
 #include <cstdio>
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 #include <chrono>
 #include <thread>
 
@@ -385,6 +389,10 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         return 7;
     }
     if (argc > 1 && std::string_view(argv[1]) == "--output-child") {
+#ifdef _WIN32
+        // Binary mode: CRLF translation would change the exact byte counts below.
+        _setmode(_fileno(stdout), _O_BINARY); _setmode(_fileno(stderr), _O_BINARY);
+#endif
         const std::string block(4096, 'b');
         std::fputs("stdout head\n", stdout); std::fputs("stderr head\n", stderr);
         for (int index = 0; index < 80; ++index) {
