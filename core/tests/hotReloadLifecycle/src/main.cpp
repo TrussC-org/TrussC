@@ -918,10 +918,35 @@ static int checkRebuildPreflight() {
 // the raw sokol event first (ImGui follows the cursor through rawEvent), then
 // the press / release through the core events, whose `consumed` tells whether
 // a listener before the App took it. Returns 0 when every generation passed.
-static int g_reloadCheckResult = 1;
+static int g_reloadCheckResult = 65;
 static bool g_reloadCheckFinished = false;
+static std::string g_reloadCheckStopReason = "host stopped before completing the checks";
+
+static void reloadCheckExit() {
+    if (!g_reloadCheckFinished) {
+        std::printf("hotReloadLifecycle --reload-check: FAIL - %s\n",
+                    g_reloadCheckStopReason.c_str());
+        std::fflush(stdout);
+        std::_Exit(65);
+    }
+#ifdef __APPLE__
+    // sapp_quit() exits with 0 on macOS instead of returning to main().
+    std::_Exit(g_reloadCheckResult);
+#endif
+}
 
 static int runReloadCheck() {
+    // Register before entering the host: initialization can quit before the
+    // first frame, and macOS never returns from TC_RUN_APP, even on failure.
+    std::atexit(reloadCheckExit);
+    getMainThreadId();
+    EventListener errors = getLogger().onLog.listen([](LogEventArgs& e) {
+        // Host preflight runs on the main thread; ignore worker-thread logs.
+        if (isMainThread() && e.level == LogLevel::Error &&
+            g_reloadCheckStopReason == "host stopped before completing the checks") {
+            g_reloadCheckStopReason = e.message;
+        }
+    });
     const float kPanelX = 100, kPanelY = 100;    // inside the inspector's Hierarchy panel
     const float kAwayX = 900, kAwayY = 550;      // no panel there
     const int kGenerations = 3;
@@ -973,13 +998,6 @@ static int runReloadCheck() {
         g_reloadCheckFinished = true;
         sapp_quit();
     };
-#ifdef __APPLE__
-    // On macOS sapp_quit() ends the process through exit(0) and TC_RUN_APP
-    // never returns, so the result is set as the exit code here.
-    std::atexit([] {
-        if (g_reloadCheckFinished) std::_Exit(g_reloadCheckResult);
-    });
-#endif
     bool done = false;
     EventListener step = events().afterFrame.listen([&] {
         if (done) return;

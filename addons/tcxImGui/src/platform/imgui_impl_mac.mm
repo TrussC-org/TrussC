@@ -18,4 +18,7 @@
 #include "tcImGuiTargetImpl.h"
 
 // Test Engine hook implementations (provides ImGuiTestEngineHook_* functions)
-#include "tcImGuiHooks.h"
+#include "tcImGuiHooksImpl.h"
+
+// Public addon API implementation (after the backend on every platform).
+#include "tcxImGuiImpl.h"

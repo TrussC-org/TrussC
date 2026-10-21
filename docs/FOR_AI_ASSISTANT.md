@@ -1090,7 +1090,7 @@ trusscli addon add|remove <a>  Add / remove addons (also clone / list / search /
 trusscli info [section]        Project / framework info
 trusscli doctor                Check the dev environment
 trusscli clean                 Delete build directories (--all: every target's, incl. xcode-ios, and the generated build-web.* scripts)
-trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache)
+trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache; -j N caps parallel jobs; --dry-run prints the cmake commands)
 trusscli run                   Build and launch
 trusscli version               Show version (trusscli + current TrussC)
 ```
@@ -1152,7 +1152,7 @@ The floor target is the **Raspberry Pi Zero** (defaults like small draw buffers 
 
 App itself is the scene-graph root Node. The basic loop is `setup()` (once) → `update()` → `draw()` each frame. Nodes form a parent/child transform hierarchy; input is dispatched depth-first and stops propagating once `consumed` (children receive events in their parent's local coordinates). Drawing is sokol_gl-based — a procedural, "immediate-mode-style" API (`setColor()` → `drawRect()`), but internally deferred (vertices accumulate into buffers and are submitted later, so nothing is drawn the instant you call it). Each Node's `draw()` starts from a clean default style (white, fill, no stroke — parent style does not cascade, favoring predictability). Behavior can be added by subclassing or by attaching `Mod`s (`addMod<T>()`). The tree and GPU resources (Texture / Fbo) are main-thread-owned; hand work from other threads via `runOnMainThread()`.
 
-On the main window (also Android/iOS/Web), the hot-reload host and MCP input, App-facing events use one notify: BeforeApp (default 0) → App (100, virtual then tree where applicable) → AfterApp (200). **Consumed input skips App virtuals as well as the tree and later listeners.** The framework App binding survives clear(); explicit 100 follows registration order. Touch defaults run before App touch callbacks, and the host forwards touch to the current guest. An enabled App root no longer consumes background mouse input by default. EasyCam starts gestures after the tree, tracks moves/releases before it, and checks scroll's own position. Headless and secondary-window activation remain separate work under #947. Startup/reload resize seeds and guest-swap exit remain direct App-only calls.
+On the main window (also Android/iOS/Web), the hot-reload host and MCP input, App-facing events use one notify: BeforeApp (default 0) → App (100, virtual then tree where applicable) → AfterApp (200). **Consumed input skips App virtuals as well as the tree and later listeners.** The framework App binding survives clear(); explicit 100 follows registration order. Touch defaults run before App touch callbacks, and the host forwards touch to the current guest. An enabled App root no longer consumes background mouse input by default. EasyCam starts gestures after the tree, tracks moves/releases before it, and checks scroll's own position. Headless update/exit use the protected App slots described above; secondary-window activation remains separate work under #947. Startup/reload resize seeds and guest-swap exit remain direct App-only calls.
 
 
 ### Subclass a Node, or attach a Mod?

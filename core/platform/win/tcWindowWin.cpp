@@ -383,17 +383,7 @@ void Window::setTitle(const std::string& title) {
 void Window::setSize(int width, int height) {
     auto* st = static_cast<AdapterState*>(native_);
     if (!st) return;
-    HWND hwnd = (HWND)(void*)sapp_window_win32_get_hwnd(st->win);
-    if (!hwnd) return;
-    // Logical -> physical client size via this window's DPI scale, then grow to
-    // the outer window rect so the CLIENT area ends up the requested size.
-    float s = ctx_.dpiScale > 0.0f ? ctx_.dpiScale : 1.0f;
-    RECT r = {0, 0, (LONG)(width * s), (LONG)(height * s)};
-    DWORD style   = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
-    DWORD exStyle = (DWORD)GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-    AdjustWindowRectEx(&r, style, FALSE, exStyle);
-    SetWindowPos(hwnd, nullptr, 0, 0, r.right - r.left, r.bottom - r.top,
-                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    internal::setWindowSizeWin32(sapp_window_win32_get_hwnd(st->win), width, height);
 }
 
 void Window::setFullscreen(bool full) {

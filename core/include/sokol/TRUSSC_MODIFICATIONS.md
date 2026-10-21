@@ -311,13 +311,35 @@ optional optimization rather than a correctness requirement.
   overflow, allocate a doubled `MTLBuffer` for the CURRENT rotate slot, retire
   the old one through the normal deferred-release queue (draws already encoded
   captured the old binding, and the buffer outlives in-flight command buffers),
-  reset `cur_ub_offset` to 0, rebind via `_sg_mtl_bind_uniform_buffers()`, and
+  reset `cur_ub_offset` to 0, and
   log a warning with old/new sizes.
 - `_sg_mtl_apply_uniforms()`: overflow check + grow call before the memcpy.
 - `_sg_mtl_begin_pass()`: at first pass of a frame, if this rotate slot's
   buffer is smaller than `ub_size` (grown while the slot was in flight),
   replace it — safe because the inflight-frame semaphore was just acquired.
 - `#include <stdio.h>` next to `<string.h>` (snprintf for the log message).
+
+**Pending-draw correction (#859):** `_sg_mtl_apply_uniforms()` binds the current
+buffer AND offset only to the uploaded block's vertex, fragment or compute
+slot. Pass start and growth no longer blanket-bind all slots to offset zero.
+Already-applied blocks of the same draw keep their old buffer and offset;
+the existing deferred-release queue retains each generation through submission,
+including repeated growth within a pass/frame and prefix submissions. No copying
+or new pool policy is needed. `_sg_mtl_resize_uniform_buffer()` allocates before
+retiring/replacing storage, both on growth and rotate-slot catch-up. Allocation
+or retirement-slot failure leaves storage/cursors intact and rejects the draw
+(or catch-up pass) with the existing buffer-creation Error. Checked doubling
+and aligned int cursor arithmetic reject unrepresentable uploads without writes
+(`<limits.h>` added). Existing growth Warning and upload statistics remain.
+
+`core/tests/metalUniformGrowth` runs the real PBR replay, forces six growths
+between a draw's vertex and fragment blocks in three passes, and compares 18
+complete readbacks with large-reserve references over six frames per phase.
+Its private platform-TU wrapper also checks compute slots and allocation rollback.
+`test_backend.py` compiles these exact production functions against GNU
+Objective-C mocks on Linux; it verifies binding bytes and transactional failure,
+not native Metal pixels or GPU lifetime. Air execution with `MTL_DEBUG_LAYER=1`
+and base/head render-regression comparisons remain required.
 
 WebGPU/Vulkan backends are untouched (their uniform buffers are baked into
 bind groups / descriptor sets; growing them is much more invasive).

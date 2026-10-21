@@ -644,6 +644,9 @@ def main():
         # built and run alone, as before.
         combined = [t for t in tests if is_combined_core_test(t)]
         own = [t for t in tests if not is_combined_core_test(t)]
+        # Other projects (including the shaderScopeDummy unit harness) can
+        # relink libTrussC; build the reload host last to keep it current.
+        own.sort(key=lambda t: os.path.basename(t) == "hotReloadLifecycle")
         args.core_test_select = None
         if args.shard_count > 1:
             # Deterministic: the same names always land in the same shard.
@@ -660,11 +663,11 @@ def main():
                          f"{len(own)} own-binary, {len(unit_tests)} unit test(s)", Colors.YELLOW)
         if all_combined:
             rc |= run_combined_core_tests(combined, pg_bin, platform_info, args)
-        if own:
-            rc |= run_test_suite(own, "core own-binary", pg_bin, platform_info, args)
         if unit_tests:
             rc |= run_test_suite(unit_tests, "core unit", pg_bin, platform_info, args,
                                  builder=build_and_run_unit_test)
+        if own:
+            rc |= run_test_suite(own, "core own-binary", pg_bin, platform_info, args)
         if web_tests:
             rc |= run_test_suite(web_tests, "core web", pg_bin, platform_info, args,
                                  builder=build_and_run_web_test)
