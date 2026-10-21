@@ -24,6 +24,8 @@
 
 #include <TrussC.h>
 #include "impl/tcImageDecode.h"
+#include "internal/tcBuildOutputCapture.h"
+#include "internal/tcHotReloadScan.h"
 #if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
 #include "../../../platform/gl/tcShadowAllocation.h"
 #endif
@@ -52,6 +54,50 @@
 namespace trussc {
 
 namespace internal {
+BuildOutputLoss& buildOutputLoss() { static BuildOutputLoss loss; return loss; }
+void BuildOutputLoss::record(uint64_t omitted) {
+    if (!omitted) return;
+    omittedBytes += omitted;
+    ++truncatedBuilds;
+    if (!warned) {
+        warned = true;
+#if defined(__cpp_exceptions)
+        try {
+#endif
+            logWarning("HotReload") << "Build output capture incomplete (capacity 64 KiB head + 64 KiB tail per stream); "
+                                    << "needed " << omitted << " additional bytes; see omission markers";
+#if defined(__cpp_exceptions)
+        } catch (...) {}
+#endif
+    }
+}
+void BuildOutputLoss::recordStorageFailure() {
+    ++unavailableBuilds;
+    if (!warned) {
+        warned = true;
+#if defined(__cpp_exceptions)
+        try {
+#endif
+            logWarning("HotReload") << "Build output unavailable: diagnostic storage allocation failed; failures counted";
+#if defined(__cpp_exceptions)
+        } catch (...) {}
+#endif
+    }
+}
+void BuildOutputLoss::recordForwardingFailure() {
+    ++forwardingFailures;
+    if (!warned) {
+        warned = true;
+#if defined(__cpp_exceptions)
+        try {
+#endif
+            logWarning("HotReload") << "Build output forwarding failed; retained diagnostics and build status are available; failures counted";
+#if defined(__cpp_exceptions)
+        } catch (...) {}
+#endif
+    }
+}
+HotReloadScanLoss& hotReloadCacheLoss() { static HotReloadScanLoss loss; return loss; }
 namespace { void discardRetiredShadows() noexcept; }
 // Metal's host backend inspects native objects in its implementation TU.
 bool shadowNativeValid(sg_image);
@@ -1572,8 +1618,9 @@ std::thread::id Thread::getMainThreadId() {
 
 namespace console {
 namespace internal {
-ThreadChannel<ConsoleEventArgs>& getChannel() {
-    static ThreadChannel<ConsoleEventArgs> channel;
+CommandChannel& getChannel() {
+    // The detached reader can still drain stdin during static destruction.
+    static auto& channel = *new CommandChannel;
     return channel;
 }
 std::atomic<bool>& isRunning() {

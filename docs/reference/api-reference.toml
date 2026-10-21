@@ -60034,6 +60034,7 @@ details.en = '''
 - The first call creates the process's only detached reader, which consumes standard input until EOF or process exit. Later calls reuse it; a reader that has reached EOF is not restarted.
 - `console::stop()` disables delivery while the reader continues consuming input and discards lines read while stopped. Both runners stop delivery before the app's `exit()` and `cleanup()`.
 - Supports LF and CRLF line endings, including a final line without a newline at EOF.
+- External control text is bounded to 1 MiB per line (excluding LF, including CR), 1024 pending commands and 16 MiB of pending raw text. An oversized line is drained and rejected whole; a full queue drops the new whole command. Reading continues without waiting for app delivery. Each store emits one Warning on its first rejection and retains cumulative internal loss counts for the process lifetime; stopping/restarting delivery does not reset them.
 - On Web, logs a notice and leaves delivery disabled.
 '''
 details.ja = '''
@@ -60043,6 +60044,7 @@ details.ja = '''
 - 初回の呼び出しで、プロセス内で唯一の切り離された読み取りスレッドを作成し、EOF またはプロセス終了まで標準入力を読み取ります。以後の呼び出しは同じスレッドを使い、EOF に達した読み取りは再開しません。
 - `console::stop()` は配信を無効にしますが、読み取りスレッドは入力を読み続け、停止中に読んだ行を破棄します。どちらのランナーもアプリの `exit()` と `cleanup()` より前に配信を停止します。
 - LF と CRLF の改行に対応し、EOF 直前の改行がない最終行も扱います。
+- 外部からの制御テキストには、1 行 1 MiB（LF を除き CR を含む）、待機コマンド 1024 件、待機中の生テキスト合計 16 MiB の上限があります。長すぎる行は最後まで読み捨てて全体を拒否し、キューが満杯なら新しいコマンド全体を破棄します。アプリの配信を待たずに読み取りを続けます。各保存先は初回の拒否時に Warning を 1 回出し、プロセスの有効期間中は内部の累積損失数を保持します。配信の停止・再開ではリセットしません。
 - Web では通知ログを出力し、配信は無効のままです。
 '''
 details.ko = '''
@@ -60052,6 +60054,7 @@ details.ko = '''
 - 최초 호출에서 프로세스의 유일한 분리된 읽기 스레드를 생성하며, EOF 또는 프로세스 종료까지 표준 입력을 읽습니다. 이후 호출은 같은 스레드를 사용하며, EOF에 도달한 읽기는 다시 시작하지 않습니다.
 - `console::stop()`은 전달을 비활성화하지만 읽기 스레드는 입력을 계속 읽으며 중지 중에 읽은 줄을 버립니다. 두 러너 모두 앱의 `exit()`와 `cleanup()` 전에 전달을 중지합니다.
 - LF와 CRLF 줄바꿈을 지원하며, EOF 직전의 줄바꿈 없는 마지막 줄도 처리합니다.
+- 외부 제어 텍스트는 줄당 1 MiB(LF 제외, CR 포함), 대기 명령 1024개, 대기 원문 합계 16 MiB로 제한됩니다. 너무 긴 줄은 끝까지 읽고 전체를 거부하며, 큐가 가득 차면 새 명령 전체를 버립니다. 앱의 전달을 기다리지 않고 계속 읽습니다. 각 저장소는 첫 거부 시 Warning을 한 번 출력하고 프로세스 수명 동안 내부 누적 손실 수를 유지합니다. 전달을 중지하거나 재개해도 초기화하지 않습니다.
 - Web에서는 알림 로그를 출력하고 전달을 비활성화 상태로 유지합니다.
 '''
 snippet = '''

@@ -1626,6 +1626,8 @@ The build folder is missing or empty, e.g. after `trusscli clean` or deleting it
 
 You added or removed `TC_HOT_RELOAD(...)`. Hot reload is switched at configure time, so the build stops once to make CMake reconfigure. It prints "TC_HOT_RELOAD detected." or "TC_HOT_RELOAD removed." first. `trusscli build` reconfigures automatically; with plain CMake, just build again.
 
+Hot-reload build diagnostics retain up to the first and last 64 KiB of each child stream, trimming cuts to complete UTF-8 characters, with an explicit omitted-byte marker and a first-truncation Warning. Both pipes keep draining; retained stdout/stderr are forwarded to their original destinations after the child exits. After direct-child exit, only the bytes already readable in each pipe are drained before closing it. Source scans inspect at most 65,536 entries with depth 64 and 16 MiB of retained path names (128 KiB per path). CMake cache reads allow 16 MiB total and 1 MiB per line. Invalid or oversized scan entries/caches are skipped with a Warning and internal counters.
+
 ### Windows: "... was blocked by your organization's Device Guard policy" (Smart App Control)
 
 Windows 11's Smart App Control starts in an evaluation mode and can switch itself to enforcement days or weeks after setup. From then on, unsigned executables are blocked, including your app and tools built on the machine. SmartScreen's "Run anyway" does not help.
@@ -1748,6 +1750,8 @@ Caveats: TrussC has **no display-enumeration API** (`getScreenSize` / `getDispla
 Console input is opt-in in both windowed and headless apps. Call `console::start()` in `setup()` and retain an `events().console.listen(...)` listener. Both runners deliver queued `ConsoleEventArgs` on the main thread each loop and call `console::stop()` before app exit/cleanup.
 
 There is one detached stdin reader per process, created on the first `start()`. `stop()` disables delivery and discards queued commands; a later `start()` discards pending commands and enables delivery again. The reader keeps consuming stdin while stopped, dropping those lines, and ends at EOF. It uses raw OS reads, accepts LF/CRLF and a partial last line at EOF, and does not hold a stdio lock that could block process exit. Web has no stdin command support.
+
+External stdin control text is limited to 1 MiB per line (LF excluded, CR included), 1024 pending commands and 16 MiB of queued raw text. Oversized lines are drained and rejected whole; a full queue rejects new whole commands. Reading continues while delivery is stopped or the queue is full. First rejection emits one Warning per store; internal cumulative counters live for the process lifetime.
 
 **v0.8.0 migration (breaking): stdin commands need `console::start()`.** Existing apps that only subscribe to `events().console` must add the call in `setup()`. See [the migration note](MIGRATION_0_8.md).
 
