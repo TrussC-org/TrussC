@@ -41640,16 +41640,25 @@ description.en = "Append arc vertices to the current shape (use between beginSha
 description.ja = "現在の図形に円弧の頂点を追加する（beginShape/endShape間で使用）。"
 description.ko = "현재 도형에 호 정점을 추가한다 (beginShape/endShape 사이에서 사용)."
 details.en = '''
-- Same center/radius/angle arguments and radians convention as [`drawArc`](#drawArc) — see `drawArc` for the angle direction and [`drawRect`](#drawRect) for the coordinate convention. Called between [`beginShape`](#beginShape) and `endShape()`, it pushes the arc's rim points (both endpoints included) into the shape being built via [`vertex`](#vertex) — it never draws by itself, and unlike `drawArc` it never injects a center vertex, so you control how the arc is closed (a chord, a pie slice, or chained into a larger custom outline such as [`drawRectRounded`](#drawRectRounded)'s corners).
-- If the previous shape vertex already coincides with the arc's start point, the resulting duplicate vertex is harmless (a degenerate triangle in the fill fan).
+- Adds the points of an arc to the shape you are building between `beginShape()` and `endShape()`. It does not draw anything by itself.
+- The arguments are the same as for `drawArc`: center, radius, start angle and end angle in radians. See `drawArc` for the angle direction and `drawRect` for coordinates.
+- Both end points of the arc are added. Unlike `drawArc`, no center point is added, so you decide how to close the arc: as a chord, as a pie slice (add the center with `vertex()` yourself), or as part of a larger outline. `drawRectRounded` builds its corners this way.
+- The number of points follows `setCurveResolution` or `setCurveTolerance`. It also works inside `beginStroke()` and `beginLines()`, because it adds the points with `vertex()`.
+- If the previous point is already at the start of the arc, the repeated point does no harm.
 '''
 details.ja = '''
-- [`drawArc`](#drawArc) と同じ中心・半径・角度の引数とラジアンの規約を使います。角度の向きは `drawArc`、座標の考え方は [`drawRect`](#drawRect) を参照してください。[`beginShape`](#beginShape) と `endShape()` の間で呼び、円弧の輪郭の点（両端を含む）を [`vertex`](#vertex) 経由で構築中の図形に追加します。この関数自体は何も描画しません。また `drawArc` と異なり中心の頂点を追加しないため、弧の閉じ方（弦にする、扇形にする、[`drawRectRounded`](#drawRectRounded) の角のようなより大きな輪郭の一部につなげるなど）を自分で制御できます。
-- 直前の図形の頂点がすでに円弧の始点と一致している場合、結果として生じる重複頂点は無害です（塗りつぶしのファンの中で潰れた三角形になるだけです）。
+- `beginShape()` と `endShape()` の間で作っている図形に、円弧の点を追加します。この関数だけでは何も描画しません。
+- 引数は `drawArc` と同じで、中心、半径、ラジアンの開始角と終了角です。角度の向きは `drawArc`、座標の考え方は `drawRect` を参照してください。
+- 円弧の両端の点も追加されます。`drawArc` と違って中心の点は追加しないため、弧の閉じ方を自分で決められます。弦にする、扇形にする（中心を自分で `vertex()` で追加します）、より大きな輪郭の一部にする、といった使い方ができます。`drawRectRounded` の角もこの方法で作られています。
+- 点の数は `setCurveResolution` または `setCurveTolerance` に従います。`vertex()` で点を追加するので、`beginStroke()` や `beginLines()` の中でも使えます。
+- 直前の点がすでに弧の始点と同じ位置にあっても、重なった点は問題になりません。
 '''
 details.ko = '''
-- [`drawArc`](#drawArc)와 같은 중심·반지름·각도 인자와 라디안 규약을 사용합니다. 각도 방향은 `drawArc`, 좌표 개념은 [`drawRect`](#drawRect)를 참조하세요. [`beginShape`](#beginShape)와 `endShape()` 사이에서 호출하며, 호의 윤곽 점(양 끝점 포함)을 [`vertex`](#vertex)를 통해 구성 중인 도형에 추가합니다. 이 함수 자체는 아무것도 그리지 않으며, `drawArc`와 달리 중심 정점을 추가하지 않으므로 호를 어떻게 닫을지(현으로, 부채꼴로, 또는 [`drawRectRounded`](#drawRectRounded)의 모서리처럼 더 큰 커스텀 윤곽에 이어 붙이는 등) 직접 제어할 수 있습니다.
-- 직전 도형의 정점이 이미 호의 시작점과 일치하는 경우, 결과적으로 생기는 중복 정점은 문제가 되지 않습니다(채우기 팬에서 찌그러진 삼각형이 될 뿐입니다).
+- `beginShape()`와 `endShape()` 사이에서 만들고 있는 도형에 호의 점을 추가합니다. 이 함수만으로는 아무것도 그리지 않습니다.
+- 인자는 `drawArc`와 같으며 중심, 반지름, 라디안 단위의 시작 각도와 끝 각도입니다. 각도 방향은 `drawArc`, 좌표 개념은 `drawRect`를 참고하세요.
+- 호의 양 끝점도 추가됩니다. `drawArc`와 달리 중심 점은 추가하지 않으므로 호를 닫는 방법을 직접 정할 수 있습니다. 현으로 닫기, 부채꼴로 만들기(중심을 직접 `vertex()`로 추가합니다), 더 큰 윤곽의 일부로 잇기 등이 가능합니다. `drawRectRounded`의 모서리도 이 방법으로 만들어집니다.
+- 점의 개수는 `setCurveResolution` 또는 `setCurveTolerance`를 따릅니다. `vertex()`로 점을 추가하므로 `beginStroke()`나 `beginLines()` 안에서도 사용할 수 있습니다.
+- 직전 점이 이미 호의 시작점과 같은 위치에 있어도 겹친 점은 문제가 되지 않습니다.
 '''
 related = ["drawArc"]
 snippet = '''
@@ -41670,7 +41679,8 @@ description.ja = "現在の図形に Catmull-Rom 曲線の頂点を追加する�
 description.ko = "현재 도형에 Catmull-Rom 곡선 정점을 추가한다."
 related = ["drawCurve", "beginShape", "setCurveResolution", "setCurveTolerance"]
 details.en = '''
-- A convenience that tessellates a Catmull-Rom curve and pushes the resulting points into whichever buffer is currently open — [`beginShape`](#beginShape), [`beginStroke`](#beginStroke), or [`beginLines`](#beginLines) — exactly as if you had called [`vertex`](#vertex) in a loop. It follows the same interpolation rules and curve-quality settings as [`drawCurve`](#drawCurve).
+- Adds the points of a smooth Catmull-Rom curve to the buffer that is open: `beginShape`, `beginStroke` or `beginLines`. The result is the same as calling `vertex()` in a loop. The curve is the same kind as `drawCurve` draws.
+
 ```cpp
 beginShape();
 vertex(20, 150);
@@ -41678,11 +41688,15 @@ appendCurve({Vec3(20,150,0), Vec3(80,30,0), Vec3(200,30,0),
              Vec3(260,150,0)});
 endShape();
 ```
-- `appendCurve(points)` needs at least 4 points (fewer does nothing) and emits only the interior, visible segments — the first and last points are used as tangent influences and are not themselves pushed as vertices. `appendCurve(points, true)` is the closed variant: it needs at least 3 points and pushes a segment through every point, wrapping the tangents around the loop.
-- To bound CPU and memory from untrusted input, both overloads refuse (with a warning, no crash) point arrays larger than 100,000 points.
+
+- `appendCurve(points)` needs at least 4 points. With fewer, it does nothing. The curve passes through the inner points only. The first and last points only set the direction at the ends and are not added as vertices.
+- `appendCurve(points, true)` makes a closed curve. It needs at least 3 points and passes through all of them.
+- How smooth the curve is depends on `setCurveResolution` or `setCurveTolerance`.
+- To protect CPU and memory from very large input, arrays of more than 100,000 points are refused with a warning. The program does not crash.
 '''
 details.ja = '''
-- Catmull-Rom 曲線を分割し、その結果の点を現在開いているバッファ（[`beginShape`](#beginShape)、[`beginStroke`](#beginStroke)、[`beginLines`](#beginLines) のいずれか）に追加する便利関数です。[`vertex`](#vertex) をループで呼ぶのと同じ結果になります。補間の規則と曲線品質の設定は [`drawCurve`](#drawCurve) と同じです。
+- なめらかな Catmull-Rom 曲線の点を、開いているバッファ（`beginShape`、`beginStroke`、`beginLines` のいずれか）に追加します。`vertex()` をループで呼ぶのと同じ結果になります。曲線の種類は `drawCurve` と同じです。
+
 ```cpp
 beginShape();
 vertex(20, 150);
@@ -41690,11 +41704,15 @@ appendCurve({Vec3(20,150,0), Vec3(80,30,0), Vec3(200,30,0),
              Vec3(260,150,0)});
 endShape();
 ```
-- `appendCurve(points)` は最低 4 点が必要で（それ未満では何もしません）、内部の表示される区間のみを追加します。最初と最後の点は接線方向の影響として使われるだけで、頂点としては追加されません。`appendCurve(points, true)` は閉じたバリエーションで、最低 3 点が必要で、すべての点を通る区間を追加し、接線はループの周りを回り込みます。
-- 信頼できない入力から CPU とメモリを守るため、どちらのオーバーロードも10 万点を超える配列は警告を出して拒否し、クラッシュはしません。
+
+- `appendCurve(points)` には最低 4 点が必要で、それより少ないと何もしません。曲線は内側の点だけを通ります。最初と最後の点は両端の向きを決めるためだけに使われ、頂点としては追加されません。
+- `appendCurve(points, true)` は閉じた曲線を作ります。最低 3 点が必要で、すべての点を通ります。
+- 曲線のなめらかさは `setCurveResolution` または `setCurveTolerance` で決まります。
+- 非常に大きな入力から CPU とメモリを守るため、10 万点を超える配列は警告を出して受け付けません。クラッシュはしません。
 '''
 details.ko = '''
-- Catmull-Rom 곡선을 분할하여 그 결과 점들을 현재 열려 있는 버퍼 ([`beginShape`](#beginShape), [`beginStroke`](#beginStroke), [`beginLines`](#beginLines) 중 하나)에 추가하는 편의 함수입니다. [`vertex`](#vertex)를 반복 호출하는 것과 같은 결과를 냅니다. 보간 규칙과 곡선 품질 설정은 [`drawCurve`](#drawCurve)와 같습니다.
+- 매끄러운 Catmull-Rom 곡선의 점을 열려 있는 버퍼(`beginShape`, `beginStroke`, `beginLines` 중 하나)에 추가합니다. `vertex()`를 반복 호출하는 것과 같은 결과가 됩니다. 곡선의 종류는 `drawCurve`와 같습니다.
+
 ```cpp
 beginShape();
 vertex(20, 150);
@@ -41702,8 +41720,11 @@ appendCurve({Vec3(20,150,0), Vec3(80,30,0), Vec3(200,30,0),
              Vec3(260,150,0)});
 endShape();
 ```
-- `appendCurve(points)`는 최소 4개의 점이 필요하며(그보다 적으면 아무 일도 하지 않습니다), 내부의 보이는 구간만 추가합니다. 첫 점과 마지막 점은 접선 방향 영향으로만 쓰이고 정점으로 추가되지 않습니다. `appendCurve(points, true)`는 닫힌 버전으로, 최소 3개의 점이 필요하며 모든 점을 지나는 구간을 추가하고 접선이 루프를 따라 순환합니다.
-- 신뢰할 수 없는 입력으로부터 CPU와 메모리를 보호하기 위해, 두 오버로드 모두 10만 개를 초과하는 점 배열은 경고와 함께 거부하며 충돌하지 않습니다.
+
+- `appendCurve(points)`에는 최소 4개의 점이 필요하며, 그보다 적으면 아무것도 하지 않습니다. 곡선은 안쪽 점만 지납니다. 첫 점과 마지막 점은 양 끝의 방향을 정하는 데만 쓰이고 정점으로 추가되지 않습니다.
+- `appendCurve(points, true)`는 닫힌 곡선을 만듭니다. 최소 3개의 점이 필요하며 모든 점을 지납니다.
+- 곡선의 매끄러움은 `setCurveResolution` 또는 `setCurveTolerance`로 정해집니다.
+- 매우 큰 입력으로부터 CPU와 메모리를 보호하기 위해 10만 개를 넘는 점 배열은 경고를 내고 받지 않습니다. 프로그램이 멈추지는 않습니다.
 '''
 
 ["appendSuperellipse"]
@@ -41713,16 +41734,22 @@ description.en = "Append the closed outline of a superellipse inscribed in a rec
 description.ja = "矩形に内接するスーパー楕円の閉じた輪郭を現在の図形に追加する（beginShape/endShape間で使用）。"
 description.ko = "사각형에 내접하는 초타원의 닫힌 윤곽을 현재 도형에 추가한다 (beginShape/endShape 사이에서 사용)."
 details.en = '''
-- Same bounding-rect convention (`(x, y, w, h)`, top-left anchor — see [`drawRect`](#drawRect) for the coordinate convention) and exponent parameter `n` as [`drawSuperellipse`](#drawSuperellipse). Called between [`beginShape`](#beginShape) and `endShape()`, it pushes the outline's vertices into the shape being built via [`vertex`](#vertex) — it never draws by itself. The start point is pushed twice to close the loop; the duplicate vertex is harmless.
-- `endShape()` fills with a fan from the first vertex, which is only correct for convex outlines (`n >= 1`). For concave shapes (`n < 1`), use [`drawSuperellipse`](#drawSuperellipse) directly instead, which fills correctly via a center fan.
+- Adds the closed outline of a superellipse to the shape you are building between `beginShape()` and `endShape()`. It does not draw anything by itself.
+- The arguments are the same as for `drawSuperellipse`: a rectangle `(x, y, w, h)` with its top-left corner at `(x, y)`, and the exponent `n`. See `drawRect` for coordinates.
+- The start point is added twice to close the loop. The repeated point does no harm.
+- `endShape()` fills with triangles that start from the first point, so the fill is correct only for convex outlines (`n >= 1`). For concave shapes (`n < 1`), use `drawSuperellipse` instead, which fills them correctly.
 '''
 details.ja = '''
-- [`drawSuperellipse`](#drawSuperellipse) と同じバウンディング矩形の指定方法（`(x, y, w, h)`、左上基準。座標の考え方は [`drawRect`](#drawRect) を参照）と指数 `n` を使います。[`beginShape`](#beginShape) と `endShape()` の間で呼び、輪郭の頂点を [`vertex`](#vertex) 経由で構築中の図形に追加します。この関数自体は何も描画しません。ループを閉じるために始点を2回追加しますが、この重複頂点は無害です。
-- `endShape()` の塗りつぶしは先頭頂点からのファンで行われるため、凸形状（`n >= 1`）のときだけ正しく塗りつぶされます。凹形状（`n < 1`）の場合は、中心ファンで正しく塗りつぶされる [`drawSuperellipse`](#drawSuperellipse) を直接使ってください。
+- `beginShape()` と `endShape()` の間で作っている図形に、スーパー楕円の閉じた輪郭を追加します。この関数だけでは何も描画しません。
+- 引数は `drawSuperellipse` と同じで、左上が `(x, y)` の矩形 `(x, y, w, h)` と指数 `n` です。座標の考え方は `drawRect` を参照してください。
+- ループを閉じるため、始点は 2 回追加されます。重なった点は問題になりません。
+- `endShape()` は最初の点を共有する三角形で塗りつぶすため、正しく塗れるのは凸形（`n >= 1`）だけです。凹形（`n < 1`）には、正しく塗りつぶせる `drawSuperellipse` を使ってください。
 '''
 details.ko = '''
-- [`drawSuperellipse`](#drawSuperellipse)와 같은 바운딩 사각형 지정 방식 (`(x, y, w, h)`, 좌상단 기준. 좌표 개념은 [`drawRect`](#drawRect) 참조)과 지수 `n`을 사용합니다. [`beginShape`](#beginShape)와 `endShape()` 사이에서 호출하며, 윤곽의 정점을 [`vertex`](#vertex)를 통해 구성 중인 도형에 추가합니다. 이 함수 자체는 아무것도 그리지 않습니다. 루프를 닫기 위해 시작점을 두 번 추가하지만, 이 중복 정점은 문제가 되지 않습니다.
-- `endShape()`의 채우기는 첫 정점 기준 팬으로 이루어지므로 볼록한 윤곽 (`n >= 1`)에서만 올바르게 채워집니다. 오목한 형태(`n < 1`)에서는 중심 팬으로 올바르게 채워지는 [`drawSuperellipse`](#drawSuperellipse)를 직접 사용하세요.
+- `beginShape()`와 `endShape()` 사이에서 만들고 있는 도형에 초타원의 닫힌 윤곽을 추가합니다. 이 함수만으로는 아무것도 그리지 않습니다.
+- 인자는 `drawSuperellipse`와 같으며, 왼쪽 위가 `(x, y)`인 사각형 `(x, y, w, h)`와 지수 `n`입니다. 좌표 개념은 `drawRect`를 참고하세요.
+- 루프를 닫기 위해 시작점이 두 번 추가됩니다. 겹친 점은 문제가 되지 않습니다.
+- `endShape()`는 첫 점을 공유하는 삼각형으로 채우므로 올바르게 채워지는 것은 볼록한 윤곽(`n >= 1`)뿐입니다. 오목한 모양(`n < 1`)에는 올바르게 채울 수 있는 `drawSuperellipse`를 사용하세요.
 '''
 related = ["drawSuperellipse", "appendArc", "beginShape"]
 
@@ -41960,43 +41987,52 @@ description.ja = "独立した線分のバッチ描画を開始する。"
 description.ko = "독립적인 선분의 배치 그리기를 시작한다."
 related = ["endLines", "drawLine", "setColor", "beginStroke", "beginShape"]
 details.en = '''
-- `beginLines()` opens a buffer that draws **independent line segments**. Add points with [`vertex`](#vertex); they are consumed **in pairs** — vertices 0–1 are one segment, 2–3 the next, and so on. Nothing is drawn until [`endLines`](#endLines) is called, and a trailing odd vertex is ignored. At least two vertices are required.
-- Each vertex captures the current draw color at the moment its `vertex()` is called, so set the color **between** vertices for per-segment (even per-endpoint, gradient) colors:
+- Opens a buffer for drawing many **separate line segments** at once. Add points with `vertex()` and call `endLines()` to draw them. Nothing is drawn before `endLines()`.
+- Points are used **in pairs**. Points 0 and 1 make the first segment, points 2 and 3 make the second, and so on. A last point without a partner is ignored, and at least 2 points are needed.
+- Each point stores the color that is set when its `vertex()` is called. Set the color between points to color each segment, or each end of a segment for a gradient.
+
 ```cpp
 beginLines();
 setColor(colors::red);    vertex(20, 20);
-setColor(colors::blue);   vertex(200, 80);   // segment 1: red -> blue
+setColor(colors::blue);   vertex(200, 80);   // segment 1: red to blue
 setColor(colors::lime);   vertex(20, 120);
-setColor(colors::yellow); vertex(200, 180);  // segment 2: lime -> yellow
+setColor(colors::yellow); vertex(200, 180);  // segment 2: lime to yellow
 endLines();
 ```
-- These are thin (1px) lines, not affected by the current stroke weight. For thick lines with caps and joins use [`beginStroke`](#beginStroke); for a connected outline (line strip) use [`beginShape`](#beginShape) with [`noFill`](#noFill).
+
+- The lines are thin (1px) and do not follow the stroke weight. For thick lines with caps and joins, use `beginStroke`. For one connected line, use `beginShape` with `noFill`.
 '''
 details.ja = '''
-- `beginLines()` は**独立した線分**を描くバッファを開きます。[`vertex`](#vertex) で点を追加すると **2 つずつペア**で消費されます —頂点 0–1 が 1 本目、2–3 が 2 本目、という具合です。[`endLines`](#endLines) を呼ぶまで描画されず、余った奇数番目の頂点は無視されます。最低 2 頂点が必要です。
-- 各頂点は `vertex()` を呼んだ時点の描画色を取り込むので、頂点の**間**で色を変えると線分ごと（さらには端点ごと、つまりグラデーション）に色を付けられます。
+- たくさんの**ばらばらの線分**をまとめて描くためのバッファを開きます。`vertex()` で点を追加し、`endLines()` で描画します。`endLines()` を呼ぶまでは何も描かれません。
+- 点は **2 つずつ組**で使われます。点 0 と 1 が 1 本目、点 2 と 3 が 2 本目の線分になります。相手のいない最後の点は無視され、最低 2 点が必要です。
+- 各点には、その `vertex()` を呼んだ時点の色が記録されます。点の間で色を変えると、線分ごとに、あるいは端ごとに色を変えてグラデーションにできます。
+
 ```cpp
 beginLines();
 setColor(colors::red);    vertex(20, 20);
-setColor(colors::blue);   vertex(200, 80);   // 線分1: red -> blue
+setColor(colors::blue);   vertex(200, 80);   // segment 1: red to blue
 setColor(colors::lime);   vertex(20, 120);
-setColor(colors::yellow); vertex(200, 180);  // 線分2: lime -> yellow
+setColor(colors::yellow); vertex(200, 180);  // segment 2: lime to yellow
 endLines();
 ```
-- これらは細い（1px）線で、現在の線の太さの影響は受けません。太さ・cap・join付きの線は [`beginStroke`](#beginStroke)、連続した輪郭（line strip）は[`beginShape`](#beginShape) と [`noFill`](#noFill) の組み合わせを使います。
+
+- 線は細い 1px の線で、線の太さの設定は反映されません。太さや cap・join のある線には `beginStroke` を、つながった 1 本の線には `beginShape` と `noFill` を使ってください。
 '''
 details.ko = '''
-- `beginLines()`는 **독립적인 선분**을 그리는 버퍼를 엽니다. [`vertex`](#vertex)로 점을 추가하면 **두 개씩 쌍으로** 소비됩니다 — 정점 0–1이 첫 선분, 2–3이 다음 선분이 되는 식입니다. [`endLines`](#endLines)를 호출하기 전에는 그려지지 않으며, 남는 홀수 번째 정점은 무시됩니다. 최소 2개의 정점이 필요합니다.
-- 각 정점은 `vertex()`를 호출하는 시점의 그리기 색을 담으므로, 정점 **사이에서** 색을 바꾸면 선분마다(나아가 끝점마다, 즉 그라데이션) 색을 줄 수 있습니다.
+- 많은 **따로 떨어진 선분**을 한 번에 그리기 위한 버퍼를 엽니다. `vertex()`로 점을 추가하고 `endLines()`로 그립니다. `endLines()`를 호출하기 전에는 아무것도 그려지지 않습니다.
+- 점은 **두 개씩 짝**으로 사용됩니다. 점 0과 1이 첫 번째, 점 2와 3이 두 번째 선분이 됩니다. 짝이 없는 마지막 점은 무시되며, 최소 2개의 점이 필요합니다.
+- 각 점에는 그 `vertex()`를 호출한 시점의 색이 기록됩니다. 점 사이에서 색을 바꾸면 선분마다, 또는 양 끝마다 색을 바꿔 그라데이션으로 만들 수 있습니다.
+
 ```cpp
 beginLines();
 setColor(colors::red);    vertex(20, 20);
-setColor(colors::blue);   vertex(200, 80);   // 선분1: red -> blue
+setColor(colors::blue);   vertex(200, 80);   // segment 1: red to blue
 setColor(colors::lime);   vertex(20, 120);
-setColor(colors::yellow); vertex(200, 180);  // 선분2: lime -> yellow
+setColor(colors::yellow); vertex(200, 180);  // segment 2: lime to yellow
 endLines();
 ```
-- 이 선들은 가는(1px) 선이며, 현재 설정된 선 두께의 영향을 받지 않습니다. 두께·cap·join이 있는 선은 [`beginStroke`](#beginStroke)를, 연결된 윤곽 (line strip)은 [`beginShape`](#beginShape)와 [`noFill`](#noFill)의 조합을 사용합니다.
+
+- 선은 가는 1px 선이며 선 두께 설정이 반영되지 않습니다. 두께와 cap·join이 있는 선에는 `beginStroke`를, 이어진 한 줄의 선에는 `beginShape`와 `noFill`을 사용하세요.
 '''
 
 ["beginShadowPass"]
@@ -42053,7 +42089,10 @@ description.ja = "自作ポリゴン用の頂点バッファを開く。endShape
 description.ko = "직접 만드는 폴리곤용 정점 버퍼를 연다. endShape()로 닫는다."
 related = ["vertex", "endShape", "fill", "noFill", "beginLines", "beginStroke"]
 details.en = '''
-- Opens an empty vertex buffer. Add points with [`vertex`](#vertex) (any number, including curved runs added with `appendArc` / `appendCurve`), then call [`endShape`](#endShape) to fill and/or stroke the polygon and clear the buffer.
+- Use it to draw your own polygon. Call `beginShape()`, add points with `vertex()`, and finish with `endShape()`. `endShape()` draws the polygon and empties the buffer.
+- Coordinates and units are the same as for `drawRect`.
+- You can add any number of points. You can also add curved parts with `appendArc` and `appendCurve`.
+
 ```cpp
 beginShape();
 vertex(100, 50);
@@ -42061,29 +42100,38 @@ vertex(150, 150);
 vertex(50, 150);
 endShape(true);   // true closes the outline back to the first vertex
 ```
-- Calling `beginShape()` again before `endShape()` discards whatever vertices were already added; shapes do not nest. Coordinates and units follow the same rules as [`drawRect`](#drawRect).
+
+- Shapes cannot be nested. If you call `beginShape()` again before `endShape()`, the points added so far are discarded.
 '''
 details.ja = '''
-- 空の頂点バッファを開きます。[`vertex`](#vertex) で点を追加し（`appendArc` /`appendCurve` で曲線区間を追加することもできます）、[`endShape`](#endShape) を呼ぶとポリゴンが塗りつぶし・線描画され、バッファはクリアされます。
+- 自分で形を決めたポリゴンを描くときに使います。`beginShape()` を呼び、`vertex()` で点を追加し、`endShape()` で終わります。`endShape()` がポリゴンを描画し、バッファを空にします。
+- 座標と単位の考え方は `drawRect` と同じです。
+- 点はいくつでも追加できます。`appendArc` や `appendCurve` で曲線の部分を追加することもできます。
+
 ```cpp
 beginShape();
 vertex(100, 50);
 vertex(150, 150);
 vertex(50, 150);
-endShape(true);   // true で最初の頂点まで輪郭を閉じます
+endShape(true);   // true closes the outline back to the first vertex
 ```
-- `endShape()` を呼ぶ前にもう一度 `beginShape()` を呼ぶと、それまで追加した頂点は破棄されます。入れ子にはできません。座標と単位の考え方は[`drawRect`](#drawRect) と同じです。
+
+- 入れ子にはできません。`endShape()` の前にもう一度 `beginShape()` を呼ぶと、それまでに追加した点は破棄されます。
 '''
 details.ko = '''
-- 빈 정점 버퍼를 엽니다. [`vertex`](#vertex)로 점을 추가하고(`appendArc` / `appendCurve`로 곡선 구간을 추가할 수도 있습니다), [`endShape`](#endShape)를 호출하면 폴리곤이 채워지거나 선으로 그려지며 버퍼가 비워집니다.
+- 직접 모양을 정한 폴리곤을 그릴 때 사용합니다. `beginShape()`를 호출하고 `vertex()`로 점을 추가한 뒤 `endShape()`로 마칩니다. `endShape()`가 폴리곤을 그리고 버퍼를 비웁니다.
+- 좌표와 단위 개념은 `drawRect`와 같습니다.
+- 점은 몇 개든 추가할 수 있습니다. `appendArc`나 `appendCurve`로 곡선 부분을 추가할 수도 있습니다.
+
 ```cpp
 beginShape();
 vertex(100, 50);
 vertex(150, 150);
 vertex(50, 150);
-endShape(true);   // true면 첫 정점까지 윤곽을 닫습니다
+endShape(true);   // true closes the outline back to the first vertex
 ```
-- `endShape()`를 호출하기 전에 `beginShape()`를 다시 호출하면 이미 추가한 정점은 버려집니다. 중첩은 지원하지 않습니다. 좌표와 단위 개념은 [`drawRect`](#drawRect)와 같습니다.
+
+- 중첩할 수 없습니다. `endShape()` 전에 `beginShape()`를 다시 호출하면 그때까지 추가한 점은 버려집니다.
 '''
 
 ["beginStroke"]
@@ -42094,7 +42142,9 @@ description.ja = "ストローク描画を開始する。"
 description.ko = "stroke 그리기를 시작한다."
 related = ["endStroke", "vertex", "beginShape", "setStrokeWeight", "setStrokeCap", "setStrokeJoin"]
 details.en = '''
-- Unlike [`beginShape`](#beginShape)'s thin 1px line strip, `beginStroke()` builds a real triangle mesh with **width, end caps and corner joins** internally. Set the look with [`setStrokeWeight`](#setStrokeWeight), [`setStrokeCap`](#setStrokeCap) and [`setStrokeJoin`](#setStrokeJoin) before adding vertices, add points with [`vertex`](#vertex), then close with [`endStroke`](#endStroke).
+- Draws a connected line with **width, end caps and corner joins**. The outline of `beginShape` is always a thin 1px line, but this one follows the stroke settings.
+- Set the look with `setStrokeWeight`, `setStrokeCap` and `setStrokeJoin`, add points with `vertex()`, and finish with `endStroke()`.
+
 ```cpp
 setStrokeWeight(8);
 setStrokeCap(StrokeCap::Round);
@@ -42103,13 +42153,18 @@ beginStroke();
 vertex(50, 50);
 vertex(150, 80);
 vertex(250, 50);
-endStroke();        // open polyline; pass true to close it into a loop
+endStroke();        // open line; pass true to close it into a loop
 ```
-- Each `vertex()` captures the **current stroke weight**, so calling [`setStrokeWeight`](#setStrokeWeight) between vertices tapers the width along one path. The end cap, however, is decided once — from whichever [`setStrokeCap`](#setStrokeCap) value was active when the **first** vertex was added — and used at both ends; changing it partway through a stroke has no effect on that stroke. Color is similar: the whole stroke is drawn in a single color, taken from the **first** vertex's color, so `setColor()` between vertices does not produce a gradient here (use [`beginLines`](#beginLines) for a true per-segment color gradient).
-- Uses StrokeMesh internally.
+
+- Each `vertex()` stores the **current stroke weight**. Calling `setStrokeWeight` between points changes the width along the line.
+- The cap is the `setStrokeCap` value that is set when the **first** point is added. It is used at both ends, and changing it later has no effect on this stroke. The join is the `setStrokeJoin` value that is set when `endStroke()` is called.
+- The whole stroke is drawn in one color, the color of the **first** point. Calling `setColor()` between points does not make a gradient. Use `beginLines` for colors that change per segment.
+- Internally it builds a `StrokeMesh`.
 '''
 details.ja = '''
-- [`beginShape`](#beginShape) の細い 1px line strip と違い、`beginStroke()`は内部で**太さ・端点 cap・角 join** を持つ本物の triangle mesh を作ります。見た目は頂点を追加する前に [`setStrokeWeight`](#setStrokeWeight)、[`setStrokeCap`](#setStrokeCap)、[`setStrokeJoin`](#setStrokeJoin) で設定し、[`vertex`](#vertex) で点を追加して [`endStroke`](#endStroke) で閉じます。
+- **太さ・端の cap・角の join** を持つ、つながった線を描きます。`beginShape` の輪郭は常に細い 1px の線ですが、こちらは線の設定に従います。
+- 見た目を `setStrokeWeight`、`setStrokeCap`、`setStrokeJoin` で設定し、`vertex()` で点を追加して、`endStroke()` で終わります。
+
 ```cpp
 setStrokeWeight(8);
 setStrokeCap(StrokeCap::Round);
@@ -42118,13 +42173,18 @@ beginStroke();
 vertex(50, 50);
 vertex(150, 80);
 vertex(250, 50);
-endStroke();        // 開いた線。true を渡すとループとして閉じます
+endStroke();        // open line; pass true to close it into a loop
 ```
-- 各 `vertex()` は**その時点の線の太さ**を記録するため、頂点の間で[`setStrokeWeight`](#setStrokeWeight) を変えると、1 本の線の中で太さが変化します。一方、端点の cap は、**最初**の頂点を追加した時点で有効だった[`setStrokeCap`](#setStrokeCap) の値で 1 回だけ決まり、両端に使われます。ストロークの途中で変更しても、そのストロークには反映されません。色も同様で、ストローク全体が**最初**の頂点の色 1 色で描かれるため、頂点の間で`setColor()` を呼んでもグラデーションにはなりません（線分ごとに実際に色を変えたい場合は [`beginLines`](#beginLines) を使ってください）。
-- 内部で StrokeMesh を使用します。
+
+- 各 `vertex()` は**その時点の線の太さ**を記録します。点の間で `setStrokeWeight` を呼ぶと、線の途中で太さが変わります。
+- cap は、**最初**の点を追加した時点の `setStrokeCap` の値になり、両端に使われます。あとから変えても、そのストロークには反映されません。join は、`endStroke()` を呼んだ時点の `setStrokeJoin` の値になります。
+- ストローク全体が 1 色で、**最初**の点の色で描かれます。点の間で `setColor()` を呼んでもグラデーションにはなりません。線分ごとに色を変えたいときは `beginLines` を使ってください。
+- 内部では `StrokeMesh` を作って描画します。
 '''
 details.ko = '''
-- [`beginShape`](#beginShape)의 가는 1px line strip과 달리 `beginStroke()`는 내부적으로 **두께·끝 cap·모서리 join**을 가진 진짜 triangle mesh를 만듭니다. 모양은 정점을 추가하기 전에 [`setStrokeWeight`](#setStrokeWeight), [`setStrokeCap`](#setStrokeCap), [`setStrokeJoin`](#setStrokeJoin)로 설정하고, [`vertex`](#vertex)로 점을 추가한 뒤 [`endStroke`](#endStroke)로 마칩니다.
+- **두께, 끝의 cap, 모서리의 join**을 가진 이어진 선을 그립니다. `beginShape`의 윤곽은 항상 가는 1px 선이지만, 이 함수는 선 설정을 따릅니다.
+- 모양을 `setStrokeWeight`, `setStrokeCap`, `setStrokeJoin`으로 설정하고, `vertex()`로 점을 추가한 뒤 `endStroke()`로 마칩니다.
+
 ```cpp
 setStrokeWeight(8);
 setStrokeCap(StrokeCap::Round);
@@ -42133,10 +42193,13 @@ beginStroke();
 vertex(50, 50);
 vertex(150, 80);
 vertex(250, 50);
-endStroke();        // 열린 선; true를 전달하면 루프로 닫습니다
+endStroke();        // open line; pass true to close it into a loop
 ```
-- 각 `vertex()`는 **그 시점의 선 두께**를 기록하므로, 정점 사이에서 [`setStrokeWeight`](#setStrokeWeight)를 바꾸면 한 선 안에서 두께가 변합니다. 반면 끝 cap은 **첫** 정점을 추가한 시점에 적용되어 있던 [`setStrokeCap`](#setStrokeCap) 값으로 한 번만 정해지며 양쪽 끝에 사용됩니다. 스트로크 도중에 바꿔도 그 스트로크에는 반영되지 않습니다. 색도 마찬가지로, 스트로크 전체가 **첫** 정점의 색 하나로 그려지므로 정점 사이에서 `setColor()`를 호출해도 그라데이션이 되지 않습니다(선분마다 실제 색을 바꾸고 싶다면 [`beginLines`](#beginLines)를 사용하세요).
-- 내부적으로 StrokeMesh를 사용합니다.
+
+- 각 `vertex()`는 **그 시점의 선 두께**를 기록합니다. 점 사이에서 `setStrokeWeight`를 호출하면 선 도중에 두께가 바뀝니다.
+- cap은 **첫** 점을 추가한 시점의 `setStrokeCap` 값이 되며 양쪽 끝에 사용됩니다. 나중에 바꿔도 그 stroke에는 반영되지 않습니다. join은 `endStroke()`를 호출한 시점의 `setStrokeJoin` 값이 됩니다.
+- stroke 전체가 한 가지 색, 즉 **첫** 점의 색으로 그려집니다. 점 사이에서 `setColor()`를 호출해도 그라데이션이 되지 않습니다. 선분마다 색을 바꾸려면 `beginLines`를 사용하세요.
+- 내부적으로 `StrokeMesh`를 만들어 그립니다.
 '''
 
 ["binToFrequency"]
@@ -43238,29 +43301,41 @@ description.en = "Draw a circular arc spanning two angles."
 description.ja = "2つの角度の範囲で円弧を描画する。"
 description.ko = "두 각도 사이의 원호를 그린다."
 details.en = '''
-- Draws a circular arc centered at `(x, y)` (or `Vec3 center` for 3D) with the given `radius`, spanning `angleBegin` to `angleEnd` **radians** — use `TAU`/`HALF_TAU`/`QUARTER_TAU`, not degrees; see [`rotate`](#rotate) for the radians-vs-degrees convention used across TrussC. Angles increase in the mathematical (counter-clockwise) direction, but because `y` grows downward on screen (see [`drawRect`](#drawRect)), an increasing angle visually sweeps clockwise: `0` points right, and `QUARTER_TAU` points down. A quick semicircle is `drawArc(x, y, r, 0, HALF_TAU)`.
-- The span is `angleEnd - angleBegin`, with no automatic wrapping through `TAU`; from `5.5` to `0.5`, angles decrease over `5.0` radians.
-- **Stroke** draws just the open curve. **Fill** is the one shape in this group where fill and stroke do not share the same boundary: it closes the arc to the center as a pie slice, matching p5.js/Processing — convenient since filling a partial arc almost always means "I want a pie slice." If you need a different closure (a chord, an open fill, or a custom shape), build it yourself from [`appendArc`](#appendArc) inside [`beginShape`](#beginShape)/`endShape()`, which emits only the rim points. Segment count follows the current curve settings — see [`drawCurve`](#drawCurve).
-- Draws nothing when `radius <= 0` or `angleBegin == angleEnd`.
+- Draws part of a circle with center `(x, y)` and the given `radius`, from `angleBegin` to `angleEnd`. A `Vec3 center` version is also available for 3D.
+- Angles are in **radians**, not degrees. Use `TAU`, `HALF_TAU` and `QUARTER_TAU`. For example, `drawArc(x, y, r, 0, HALF_TAU)` draws a semicircle.
+- `0` points to the right. Because `y` grows downward on screen, a larger angle moves clockwise on screen, and `QUARTER_TAU` points down.
+- The arc covers `angleEnd - angleBegin`. It does not wrap around at `TAU`. For example, from `5.5` to `0.5` the arc goes backward by `5.0` radians.
+- With `noFill()`, only the open curve is drawn. With `fill()`, the arc is closed to the center and filled as a pie slice, like in p5.js and Processing. This is the only shape in this group where the filled area and the outline do not follow the same edge.
+- For a different closed shape, such as a chord or a custom outline, call `appendArc` between `beginShape()` and `endShape()`. `appendArc` adds only the points on the arc, not the center.
+- The number of segments follows the current curve settings. You can change them with `setCurveTolerance` or `setCurveResolution`.
+- Nothing is drawn when `radius <= 0` or when `angleBegin == angleEnd`.
 '''
 details.ja = '''
-- 中心 `(x, y)`（3Dの場合は `Vec3 center`）、半径 `radius` の円弧を、`angleBegin` から `angleEnd` まで**ラジアン**で描画します。角度には度数ではなく `TAU`/`HALF_TAU`/`QUARTER_TAU` を使ってください。ラジアンと度数の使い分けについては [`rotate`](#rotate) を参照してください。角度は数学的な（反時計回りの）方向に増加しますが、画面では `y` が下方向に増えるため（[`drawRect`](#drawRect) 参照）、角度が増えると見た目には時計回りに進みます。`0` は右方向、`QUARTER_TAU` は下方向を指します。半円を手早く描くには`drawArc(x, y, r, 0, HALF_TAU)` とします。
-- 角度の範囲は `angleEnd - angleBegin` で、`TAU` をまたぐ自動調整は行いません。`5.5` から `0.5` では、角度が減る方向に `5.0` ラジアン進みます。
-- **輪郭線**（stroke）の場合は開いた曲線だけが描かれます。**塗りつぶし**（fill）はこのグループの中で唯一、塗りと輪郭線で境界が一致しない図形です。p5.jsやProcessingと同様に、中心まで閉じた扇形として塗りつぶされます。これは意図的な仕様で、部分的な弧を塗りつぶすときはほとんどの場合「扇形にしたい」ためです。別の閉じ方（弦、開いたままの塗りつぶし、独自の形状）が必要な場合は、[`beginShape`](#beginShape) / `endShape()` の中で、輪郭の点だけを生成する [`appendArc`](#appendArc) を使って自分で組み立ててください。分割数は現在のカーブ設定に従います。詳しくは [`drawCurve`](#drawCurve) を参照してください。
-- `radius <= 0` または `angleBegin == angleEnd` の場合は何も描画しません。
+- 中心 `(x, y)`、半径 `radius` の円の一部を、`angleBegin` から `angleEnd` まで描画します。3D 用に `Vec3 center` を受け取る版もあります。
+- 角度の単位は度ではなく**ラジアン**です。`TAU`、`HALF_TAU`、`QUARTER_TAU` を使ってください。たとえば `drawArc(x, y, r, 0, HALF_TAU)` で半円になります。
+- `0` は右方向です。画面では `y` が下向きに増えるため、角度が大きくなると画面上では時計回りに進み、`QUARTER_TAU` は下方向になります。
+- 描かれる範囲は `angleEnd - angleBegin` です。`TAU` をまたいで自動的に折り返すことはありません。たとえば `5.5` から `0.5` では、逆向きに `5.0` ラジアン進みます。
+- `noFill()` のときは、開いた曲線だけが描かれます。`fill()` のときは、p5.js や Processing と同じように中心まで閉じた扇形として塗りつぶされます。塗りつぶす範囲と輪郭線の形が一致しないのは、このグループの図形ではこの関数だけです。
+- 弦で閉じた形や独自の輪郭など、別の形にしたい場合は、`beginShape()` と `endShape()` の間で `appendArc` を呼んでください。`appendArc` は弧の上の点だけを追加し、中心の点は追加しません。
+- 分割数は現在のカーブ設定に従います。設定は `setCurveTolerance` または `setCurveResolution` で変更できます。
+- `radius <= 0` のとき、または `angleBegin == angleEnd` のときは何も描画しません。
 '''
 details.ko = '''
-- 중심 `(x, y)`(3D에서는 `Vec3 center`), 반지름 `radius`인 원호를 `angleBegin`부터 `angleEnd`까지 **라디안**으로 그립니다. 각도에는 도(degree)가 아니라 `TAU`/`HALF_TAU`/`QUARTER_TAU`를 사용하세요. 라디안과 도 사용 구분에 대해서는 [`rotate`](#rotate)를 참조하세요. 각도는 수학적인(반시계 방향) 방향으로 증가하지만, 화면에서는 `y`가 아래로 증가하므로 ([`drawRect`](#drawRect) 참조) 각도가 증가하면 시각적으로는 시계 방향으로 진행합니다. `0`은 오른쪽, `QUARTER_TAU`는 아래쪽을 가리킵니다. 반원을 빠르게 그리려면 `drawArc(x, y, r, 0, HALF_TAU)`를 사용합니다.
-- 각도 범위는 `angleEnd - angleBegin`이며 `TAU`를 넘도록 자동 조정하지 않습니다. `5.5`에서 `0.5`까지는 각도가 감소하는 방향으로 `5.0`라디안 진행합니다.
-- **윤곽선**(stroke)은 열린 곡선만 그립니다. **채우기**(fill)는 이 그룹에서 유일하게 채우기와 윤곽선의 경계가 일치하지 않는 도형입니다. p5.js나 Processing과 같이 중심까지 닫힌 부채꼴로 채워집니다. 이는 의도된 동작으로, 부분적인 호를 채우는 것은 대부분 "부채꼴을 원한다"는 뜻이기 때문입니다. 다른 방식으로 닫고 싶다면(현, 열린 채우기, 커스텀 형태), 윤곽 점만 생성하는 [`appendArc`](#appendArc)를 [`beginShape`](#beginShape) / `endShape()` 안에서 직접 사용해 구성하세요. 분할 수는 현재의 커브 설정을 따릅니다. 자세한 내용은 [`drawCurve`](#drawCurve)를 참조하세요.
-- `radius <= 0` 또는 `angleBegin == angleEnd`이면 아무것도 그리지 않습니다.
+- 중심 `(x, y)`, 반지름 `radius`인 원의 일부를 `angleBegin`부터 `angleEnd`까지 그립니다. 3D용으로 `Vec3 center`를 받는 버전도 있습니다.
+- 각도의 단위는 도가 아니라 **라디안**입니다. `TAU`, `HALF_TAU`, `QUARTER_TAU`를 사용하세요. 예를 들어 `drawArc(x, y, r, 0, HALF_TAU)`는 반원을 그립니다.
+- `0`은 오른쪽 방향입니다. 화면에서는 `y`가 아래로 증가하므로, 각도가 커지면 화면에서는 시계 방향으로 진행하며 `QUARTER_TAU`는 아래쪽을 가리킵니다.
+- 그려지는 범위는 `angleEnd - angleBegin`입니다. `TAU`를 넘어 자동으로 돌아가지 않습니다. 예를 들어 `5.5`에서 `0.5`까지는 반대 방향으로 `5.0`라디안 진행합니다.
+- `noFill()`일 때는 열린 곡선만 그립니다. `fill()`일 때는 p5.js나 Processing과 같이 중심까지 닫힌 부채꼴로 채웁니다. 채우는 영역과 윤곽선의 모양이 일치하지 않는 것은 이 그룹의 도형 중 이 함수뿐입니다.
+- 현으로 닫힌 모양이나 직접 만든 윤곽 등 다른 모양이 필요하면 `beginShape()`와 `endShape()` 사이에서 `appendArc`를 호출하세요. `appendArc`는 호 위의 점만 추가하며 중심점은 추가하지 않습니다.
+- 분할 수는 현재의 커브 설정을 따릅니다. 설정은 `setCurveTolerance` 또는 `setCurveResolution`으로 바꿀 수 있습니다.
+- `radius <= 0`이거나 `angleBegin == angleEnd`이면 아무것도 그리지 않습니다.
 '''
 related = ["appendArc", "drawCircle"]
 snippet = '''
 void tcApp::draw() {
     setColor(1.0f, 0.6f, 0.1f);
     fill();
-    drawArc(200, 200, 80, 0, HALF_TAU);   // filled half-pie, right to down to left
+    drawArc(200, 200, 80, 0, HALF_TAU);   // filled half pie: from right, through bottom, to left
 }
 '''
 
@@ -43272,31 +43347,46 @@ description.ja = "ベジェ曲線を描画する。"
 description.ko = "베지어 곡선을 그린다."
 related = ["drawCurve", "Path::bezierTo", "setCurveResolution", "setCurveTolerance"]
 details.en = '''
-- Draws a Bezier curve as a polyline: `drawBezier(p0, p1, p2, p3)` is cubic (4 control points), `drawBezier(p0, p1, p2)` is quadratic (3 points), and `drawBezier(std::vector<Vec3>)` handles higher orders from the given control polygon (2 points draws a straight line, 3 or 4 points use the fast cubic / quadratic path). With the default Tolerance curve mode the vector overload accepts up to 64 control points; above that the call is refused with a warning and draws nothing — chain cubics instead.
+- `drawBezier(p0, p1, p2, p3)` draws a cubic Bezier curve with 4 control points. `drawBezier(p0, p1, p2)` draws a quadratic curve with 3 control points. The curve starts at the first point and ends at the last one.
+
 ```cpp
 drawBezier(Vec3(50, 150, 0), Vec3(100, 20, 0),
            Vec3(200, 20, 0), Vec3(250, 150, 0));
 ```
-- The curve is tessellated into line segments using the current curve quality setting — see [`drawCurve`](#drawCurve) for the Tolerance/Resolution modes and their defaults. Like [`drawLine`](#drawLine), `drawBezier` always draws a thin (1px) line strip: it ignores [`fill`](#fill)/[`noFill`](#noFill) and is not affected by the current stroke weight, because an open curve has no natural fillable interior. For a filled curved shape, or a thick stroked curve, build the points with [`Path::bezierTo`](#Path::bezierTo) or feed sampled points into [`beginStroke`](#beginStroke).
-- The vector overload draws nothing with fewer than two control points and draws a straight line with exactly two.
+
+- `drawBezier(vector<Vec3>)` takes any number of control points and draws a curve of higher order. With fewer than 2 points it draws nothing. With 2 points it draws a straight line, and with 3 or 4 points it uses the quadratic or cubic version above.
+- `drawBezier` always draws a thin 1px line, like `drawLine`. It ignores `fill()` and `noFill()` and the stroke weight, because an open curve has no inside to fill.
+- For a filled curved shape or a thick curve, build the points with `Path::bezierTo`, or pass sampled points to `beginStroke`.
+- The curve is drawn as many short line segments. Their number follows the current curve settings, which you can change with `setCurveTolerance` or `setCurveResolution`.
+- In the default Tolerance mode, the vector version accepts at most 64 control points. With more points it prints a warning and draws nothing. In that case, join several cubic curves instead.
 '''
 details.ja = '''
-- ベジェ曲線をポリラインとして描画します。`drawBezier(p0, p1, p2, p3)` は3 次（制御点 4 個）、`drawBezier(p0, p1, p2)` は 2 次（制御点 3 個）、`drawBezier(std::vector<Vec3>)` は与えた制御多角形からより高い次数を扱います（制御点が 2 個なら直線、3 個・4 個なら高速な 2 次・3 次の経路を使います）。既定の Tolerance モードでは、vector 版が受け付ける制御点は 64 個までです。それを超えると警告を出して呼び出しを拒否し、何も描画しません。その場合は3 次ベジェをつなげてください。
+- `drawBezier(p0, p1, p2, p3)` は制御点 4 個の 3 次ベジェ曲線を、`drawBezier(p0, p1, p2)` は制御点 3 個の 2 次ベジェ曲線を描画します。曲線は最初の点から始まり、最後の点で終わります。
+
 ```cpp
 drawBezier(Vec3(50, 150, 0), Vec3(100, 20, 0),
            Vec3(200, 20, 0), Vec3(250, 150, 0));
 ```
-- 曲線は現在の曲線品質設定に従って線分に分割されます。Tolerance / Resolutionの 2 つのモードとそのデフォルト値については [`drawCurve`](#drawCurve) を参照してください。[`drawLine`](#drawLine) と同様に `drawBezier` は常に細い（1px）折れ線として描かれます。開いた曲線には自然な塗りつぶし領域がないため、[`fill`](#fill)/[`noFill`](#noFill) の設定は無視され、現在の線の太さの影響も受けません。塗りつぶされた曲線形状や太い線幅の曲線が必要な場合は、[`Path::bezierTo`](#Path::bezierTo) で点を組み立てるか、サンプリングした点を[`beginStroke`](#beginStroke) に渡してください。
-- vector 版は制御点が 2 個未満なら何も描画せず、ちょうど 2 個なら直線を描画します。
+
+- `drawBezier(vector<Vec3>)` は任意の数の制御点を受け取り、より高い次数の曲線を描画します。点が 2 個未満のときは何も描画しません。2 個のときは直線を描き、3 個または 4 個のときは上の 2 次または 3 次の版を使います。
+- `drawBezier` は `drawLine` と同じく、常に 1px の細い線で描画します。開いた曲線には塗りつぶす内側がないため、`fill()` や `noFill()` の設定と線の太さは無視されます。
+- 塗りつぶした曲線の図形や太い曲線が必要な場合は、`Path::bezierTo` で点を組み立てるか、サンプリングした点を `beginStroke` に渡してください。
+- 曲線は短い線分をつなげて描画されます。線分の数は現在のカーブ設定に従い、`setCurveTolerance` または `setCurveResolution` で変更できます。
+- 既定の Tolerance モードでは、vector 版が受け付ける制御点は 64 個までです。それより多いと警告を出し、何も描画しません。その場合は 3 次ベジェ曲線をいくつかつなげてください。
 '''
 details.ko = '''
-- 베지어 곡선을 폴리라인으로 그립니다. `drawBezier(p0, p1, p2, p3)`는 3차 (제어점 4개), `drawBezier(p0, p1, p2)`는 2차(제어점 3개), `drawBezier(std::vector<Vec3>)`는 주어진 제어 다각형으로 더 높은 차수를 처리합니다(제어점이 2개면 직선, 3개·4개면 빠른 2차·3차 경로를 사용합니다). 기본 Tolerance 모드에서 vector 버전이 받는 제어점은 64개까지입니다. 이를 넘으면 경고와 함께 호출을 거부하고 아무것도 그리지 않으므로, 그럴 때는 3차 베지어를 이어 붙이세요.
+- `drawBezier(p0, p1, p2, p3)`는 제어점 4개의 3차 베지어 곡선을, `drawBezier(p0, p1, p2)`는 제어점 3개의 2차 베지어 곡선을 그립니다. 곡선은 첫 번째 점에서 시작해 마지막 점에서 끝납니다.
+
 ```cpp
 drawBezier(Vec3(50, 150, 0), Vec3(100, 20, 0),
            Vec3(200, 20, 0), Vec3(250, 150, 0));
 ```
-- 곡선은 현재 곡선 품질 설정에 따라 선분으로 분할됩니다. Tolerance / Resolution 두 모드와 기본값은 [`drawCurve`](#drawCurve)를 참고하세요. [`drawLine`](#drawLine)과 마찬가지로 `drawBezier`는 항상 가는(1px) 꺾은선으로 그려집니다. 열린 곡선에는 자연스럽게 채울 영역이 없으므로 [`fill`](#fill)/[`noFill`](#noFill) 설정은 무시되며, 현재 선 두께의 영향도 받지 않습니다. 채워진 곡선 모양이나 두꺼운 선의 곡선이 필요하면 [`Path::bezierTo`](#Path::bezierTo)로 점을 구성하거나, 샘플링한 점을 [`beginStroke`](#beginStroke)에 넘기세요.
-- vector 버전은 제어점이 두 개 미만이면 아무것도 그리지 않고, 정확히 두 개이면 직선을 그립니다.
+
+- `drawBezier(vector<Vec3>)`는 임의 개수의 제어점을 받아 더 높은 차수의 곡선을 그립니다. 점이 2개 미만이면 아무것도 그리지 않습니다. 2개이면 직선을 그리고, 3개 또는 4개이면 위의 2차 또는 3차 버전을 사용합니다.
+- `drawBezier`는 `drawLine`과 마찬가지로 항상 1px의 가는 선으로 그립니다. 열린 곡선에는 채울 안쪽이 없으므로 `fill()`과 `noFill()` 설정 및 선 두께는 무시됩니다.
+- 채워진 곡선 도형이나 두꺼운 곡선이 필요하면 `Path::bezierTo`로 점을 구성하거나, 샘플링한 점을 `beginStroke`에 전달하세요.
+- 곡선은 짧은 선분을 이어서 그립니다. 선분 수는 현재의 커브 설정을 따르며, `setCurveTolerance` 또는 `setCurveResolution`으로 바꿀 수 있습니다.
+- 기본 Tolerance 모드에서 vector 버전이 받는 제어점은 최대 64개입니다. 이보다 많으면 경고를 출력하고 아무것도 그리지 않습니다. 이 경우 3차 베지어 곡선 여러 개를 이어서 사용하세요.
 '''
 
 ["drawBitmapString"]
@@ -43430,16 +43520,25 @@ description.en = "Draw a circle."
 description.ja = "円を描画する。"
 description.ko = "원을 그린다."
 details.en = '''
-- Draws a circle at center `(cx, cy)` (or `Vec3 center` for 3D) with the given `radius`, in the same local, logical-unit coordinates as [`drawRect`](#drawRect) — but note that, unlike `drawRect`, the position here is the **center**, not a corner.
-- Filled or outlined according to the current [`fill`](#fill) / [`noFill`](#noFill) mode. The number of segments used to approximate the circle follows the current curve settings (resolution or tolerance) — see [`drawCurve`](#drawCurve) for how to control it; a larger `radius` or a tighter tolerance uses more segments, which costs more to draw. For an unfilled partial circle (a slice or arc), see [`drawArc`](#drawArc).
+- Draws a circle with center `(cx, cy)` and the given `radius`. A `Vec3 center` version is also available for 3D.
+- **The position is the center of the circle**, not a corner as in `drawRect`. Otherwise the coordinates work the same way as in `drawRect`: local coordinates in logical units.
+- After `fill()` the circle is filled, and after `noFill()` only its outline is drawn.
+- The circle is drawn as a polygon. The number of segments follows the current curve settings, which you can change with `setCurveTolerance` or `setCurveResolution`. In the default Tolerance mode, a larger `radius` or a smaller tolerance uses more segments and costs more to draw.
+- To draw only part of a circle, such as a pie slice or an arc, use `drawArc`.
 '''
 details.ja = '''
-- 中心 `(cx, cy)`（3Dの場合は `Vec3 center`）、半径 `radius` で円を描画します。座標は [`drawRect`](#drawRect) と同じローカル・論理単位ですが、`drawRect`と異なり、ここでの位置は角ではなく**中心**を指す点に注意してください。
-- 現在の [`fill`](#fill) / [`noFill`](#noFill) モードに従って塗りつぶされるか輪郭線で描かれます。円を近似する分割数は現在のカーブ設定（解像度または許容誤差）に従います。制御方法については [`drawCurve`](#drawCurve) を参照してください。`radius` が大きいほど、または許容誤差が小さいほど分割数が増え、描画コストが上がります。円の一部だけを描きたい場合（扇形や弧）は[`drawArc`](#drawArc) を参照してください。
+- 中心 `(cx, cy)`、半径 `radius` の円を描画します。3D 用に `Vec3 center` を受け取る版もあります。
+- **位置は円の中心です。** `drawRect` のような角の位置ではありません。それ以外の座標の扱いは `drawRect` と同じで、ローカル座標・論理単位です。
+- `fill()` のあとでは塗りつぶされ、`noFill()` のあとでは輪郭線だけが描かれます。
+- 円は多角形として描画されます。分割数は現在のカーブ設定に従い、`setCurveTolerance` または `setCurveResolution` で変更できます。既定の Tolerance モードでは、`radius` が大きいほど、また許容誤差が小さいほど分割数が増え、描画の負荷も上がります。
+- 扇形や弧など、円の一部だけを描きたい場合は `drawArc` を使ってください。
 '''
 details.ko = '''
-- 중심 `(cx, cy)`(3D에서는 `Vec3 center`), 반지름 `radius`로 원을 그립니다. 좌표는 [`drawRect`](#drawRect)와 같은 로컬·논리 단위이지만, `drawRect`와 달리 여기서의 위치는 모서리가 아니라 **중심**을 가리킵니다.
-- 현재의 [`fill`](#fill) / [`noFill`](#noFill) 모드에 따라 채워지거나 윤곽선으로 그려집니다. 원을 근사하는 분할 수는 현재의 커브 설정(해상도 또는 허용 오차)을 따릅니다. 제어 방법은 [`drawCurve`](#drawCurve)를 참조하세요. `radius`가 클수록, 또는 허용 오차가 작을수록 분할 수가 늘어나 그리기 비용이 증가합니다. 원의 일부만 그리고 싶다면(부채꼴이나 호) [`drawArc`](#drawArc)를 참조하세요.
+- 중심 `(cx, cy)`, 반지름 `radius`인 원을 그립니다. 3D용으로 `Vec3 center`를 받는 버전도 있습니다.
+- **위치는 원의 중심입니다.** `drawRect`처럼 모서리 위치가 아닙니다. 그 밖의 좌표 처리는 `drawRect`와 같으며, 로컬 좌표와 논리 단위를 사용합니다.
+- `fill()` 다음에는 채워지고, `noFill()` 다음에는 윤곽선만 그려집니다.
+- 원은 다각형으로 그려집니다. 분할 수는 현재의 커브 설정을 따르며, `setCurveTolerance` 또는 `setCurveResolution`으로 바꿀 수 있습니다. 기본 Tolerance 모드에서는 `radius`가 클수록, 또 허용 오차가 작을수록 분할 수가 늘어나고 그리기 부하도 커집니다.
+- 부채꼴이나 호처럼 원의 일부만 그리려면 `drawArc`를 사용하세요.
 '''
 related = ["drawEllipse", "drawArc"]
 snippet = '''
@@ -43496,49 +43595,55 @@ description.ja = "一連の点を通る Catmull-Rom 曲線をポリラインと�
 description.ko = "일련의 점을 지나는 Catmull-Rom 곡선을 폴리라인으로 그린다."
 related = ["drawBezier", "appendCurve", "setCurveResolution", "setCurveTolerance", "beginStroke"]
 details.en = '''
-- `drawCurve(p0, p1, p2, p3)` draws a Catmull-Rom curve segment that **interpolates from `p1` to `p2`** (passes exactly through both), using `p0` and `p3` only as tangent influences that are not themselves on the curve — the same semantics as openFrameworks' `ofDrawCurve` / `curveVertex`.
-- `drawCurve(std::vector<Vec3>)` chains this through every point: it needs at least 4 points and emits `N - 3` segments, each interpolating `points[i+1] -> points[i+2]`. `drawCurve(points, true)` is the closed variant: the curve passes through **all** N points and the tangents wrap around (`points[N-1] -> points[0]`), so as few as 3 points are enough.
+- `drawCurve(p0, p1, p2, p3)` draws a smooth Catmull-Rom curve from `p1` to `p2`. The curve passes exactly through `p1` and `p2`. `p0` and `p3` are not on the curve. They only set the direction of the curve at its two ends. This works the same way as `ofDrawCurve` and `curveVertex` in openFrameworks.
+- `drawCurve(vector<Vec3>)` draws one smooth curve through a list of points. It needs at least 4 points. The first and last points only set the direction, so the curve runs from the second point to the second-to-last point.
+- `drawCurve(points, true)` draws a closed loop that passes through all of the points and returns to the first one. 3 points are enough.
+
 ```cpp
 vector<Vec3> pts = {Vec3(50,200,0), Vec3(100,50,0),
                      Vec3(250,50,0), Vec3(300,200,0)};
 drawCurve(pts);         // open curve
 drawCurve(pts, true);   // closed loop through all 4 points
 ```
-- Like [`drawBezier`](#drawBezier), this always draws a thin (1px) line strip and ignores fill/stroke mode and stroke weight.
-- **Curve quality** (shared by `drawBezier`, `drawCurve`, `appendCurve`, and the circle/arc/rounded-rect drawers) has two modes, set on the current `Style`:
-- **Tolerance** (default): adaptively picks the segment count so the drawn polyline stays within `tolerance` screen pixels of the true curve, scaled by the current transform. Set it with [`setCurveTolerance(pixels)`](#setCurveTolerance); the default is 0.1 px.
-- **Resolution**: a fixed segment count regardless of size or zoom, useful for an intentionally chunky look or to bound vertex cost on many small curves. Set it with [`setCurveResolution(n)`](#setCurveResolution); the built-in fallback value is 60.
-- Switching one of these calls the other mode off; only one is active at a time.
+
+- Like `drawBezier`, `drawCurve` always draws a thin 1px line. It ignores `fill()` and `noFill()` and the stroke weight.
+- Curves are drawn as many short line segments. The curve settings below decide how many. They are shared by `drawBezier`, `drawCurve`, `appendCurve` and the circle, ellipse, arc and rounded-shape functions. They are part of the current `Style`, and only one of the two modes is active at a time. Setting one mode turns the other off.
+- Tolerance mode is the default. TrussC chooses the number of segments so that the line stays within the given distance of the true curve on screen. The current scale is taken into account. Set it with `setCurveTolerance(pixels)`. The default is 0.1 pixels.
+- Resolution mode uses a fixed number of segments, regardless of size or zoom. It is useful for an intentionally angular look, or to limit the cost of drawing many small curves. Set it with `setCurveResolution(n)`. The built-in value is 60.
 '''
 details.ja = '''
-- `drawCurve(p0, p1, p2, p3)` は `p1` から `p2` へ**補間する**（両方の点を正確に通る）Catmull-Rom 曲線セグメントを描画します。`p0` と `p3` は曲線上に乗らない接線方向の影響としてのみ使われます。これは openFrameworks の`ofDrawCurve` / `curveVertex` と同じ考え方です。
-- `drawCurve(std::vector<Vec3>)` はすべての点を通してこれを連結します。最低4 点が必要で、`N - 3` 個のセグメントが生成され、それぞれ`points[i+1] -> points[i+2]` を補間します。`drawCurve(points, true)` は閉じたバリエーションで、曲線が **N 点すべて**を通り、接線が周回します（`points[N-1] -> points[0]`）。そのため最低 3 点で足ります。
+- `drawCurve(p0, p1, p2, p3)` は、`p1` から `p2` までのなめらかな Catmull-Rom 曲線を描画します。曲線は `p1` と `p2` を正確に通ります。`p0` と `p3` は曲線の上には乗らず、両端での曲線の向きを決めるためだけに使われます。openFrameworks の `ofDrawCurve` や `curveVertex` と同じ考え方です。
+- `drawCurve(vector<Vec3>)` は、点のリストを通る 1 本のなめらかな曲線を描画します。点は 4 個以上必要です。最初と最後の点は向きを決めるだけなので、曲線は 2 番目の点から最後から 2 番目の点までになります。
+- `drawCurve(points, true)` は、すべての点を通って最初の点に戻る閉じたループを描画します。点は 3 個あれば足ります。
+
 ```cpp
 vector<Vec3> pts = {Vec3(50,200,0), Vec3(100,50,0),
                      Vec3(250,50,0), Vec3(300,200,0)};
-drawCurve(pts);         // 開いた曲線
-drawCurve(pts, true);   // 4点すべてを通る閉じたループ
+drawCurve(pts);         // open curve
+drawCurve(pts, true);   // closed loop through all 4 points
 ```
-- [`drawBezier`](#drawBezier) と同様、常に細い（1px）折れ線として描かれ、fill/stroke の設定や線の太さは無視されます。
-- **曲線の品質設定**（`drawBezier`、`drawCurve`、`appendCurve`、円・円弧・角丸長方形の描画関数で共有されます）には、現在の `Style` に保持される 2 つのモードがあります。
-- **Tolerance（既定）**: 描画されるポリラインが現在の変換を考慮した画面上の`tolerance` ピクセル以内に収まるように、セグメント数を適応的に決めます。[`setCurveTolerance(pixels)`](#setCurveTolerance) で設定でき、既定値は0.1 px です。
-- **Resolution**: サイズやズームに関係なく固定のセグメント数を使います。意図的にカクカクした見た目にしたいときや、小さな曲線を大量に描く場合の頂点コストを抑えたいときに便利です。[`setCurveResolution(n)`](#setCurveResolution) で設定でき、組み込みの既定値は 60 です。
-- どちらか一方を設定すると、もう一方のモードは解除されます。同時に有効になるのは常に片方だけです。
+
+- `drawBezier` と同じく、`drawCurve` は常に 1px の細い線で描画します。`fill()` や `noFill()` の設定と線の太さは無視されます。
+- 曲線は短い線分をつなげて描画され、その数は次のカーブ設定で決まります。この設定は `drawBezier`、`drawCurve`、`appendCurve`、および円・楕円・円弧・角丸図形を描く関数で共通です。設定は現在の `Style` に含まれ、2 つのモードのうち有効なのは常に片方だけです。一方を設定すると、もう一方は解除されます。
+- Tolerance モードが既定です。画面上で本来の曲線から指定した距離以内に収まるように、TrussC が線分の数を決めます。現在の拡大率も考慮されます。`setCurveTolerance(pixels)` で設定でき、既定値は 0.1 ピクセルです。
+- Resolution モードでは、大きさや拡大率に関係なく決まった数の線分を使います。わざと角ばった見た目にしたいときや、小さな曲線を大量に描くときの負荷を抑えたいときに便利です。`setCurveResolution(n)` で設定でき、組み込みの値は 60 です。
 '''
 details.ko = '''
-- `drawCurve(p0, p1, p2, p3)`는 `p1`에서 `p2`로 **보간하는**(두 점을 정확히 지나는) Catmull-Rom 곡선 구간을 그립니다. `p0`와 `p3`는 곡선 위에 놓이지 않는 접선 방향 영향으로만 사용됩니다. openFrameworks의 `ofDrawCurve` / `curveVertex`와 같은 방식입니다.
-- `drawCurve(std::vector<Vec3>)`는 모든 점을 통해 이를 연결합니다. 최소 4개의 점이 필요하며 `N - 3`개의 구간을 생성하고, 각 구간은 `points[i+1] -> points[i+2]`를 보간합니다. `drawCurve(points, true)`는 닫힌 버전으로, 곡선이 **N개 점 전부**를 지나고 접선이 순환합니다 (`points[N-1] -> points[0]`). 따라서 최소 3개의 점으로도 충분합니다.
+- `drawCurve(p0, p1, p2, p3)`는 `p1`에서 `p2`까지의 부드러운 Catmull-Rom 곡선을 그립니다. 곡선은 `p1`과 `p2`를 정확히 지납니다. `p0`와 `p3`는 곡선 위에 있지 않으며, 양 끝에서 곡선의 방향을 정하는 데만 사용됩니다. openFrameworks의 `ofDrawCurve`, `curveVertex`와 같은 방식입니다.
+- `drawCurve(vector<Vec3>)`는 점 목록을 지나는 하나의 부드러운 곡선을 그립니다. 점이 4개 이상 필요합니다. 첫 번째와 마지막 점은 방향만 정하므로, 곡선은 두 번째 점부터 끝에서 두 번째 점까지 그려집니다.
+- `drawCurve(points, true)`는 모든 점을 지나 첫 번째 점으로 돌아오는 닫힌 루프를 그립니다. 점은 3개면 충분합니다.
+
 ```cpp
 vector<Vec3> pts = {Vec3(50,200,0), Vec3(100,50,0),
                      Vec3(250,50,0), Vec3(300,200,0)};
-drawCurve(pts);         // 열린 곡선
-drawCurve(pts, true);   // 4개 점을 모두 지나는 닫힌 루프
+drawCurve(pts);         // open curve
+drawCurve(pts, true);   // closed loop through all 4 points
 ```
-- [`drawBezier`](#drawBezier)와 마찬가지로 항상 가는(1px) 꺾은선으로 그려지며, fill/stroke 설정과 선 두께는 무시됩니다.
-- **곡선 품질 설정**(`drawBezier`, `drawCurve`, `appendCurve`, 원·호·둥근 사각형 그리기 함수가 공유)은 현재 `Style`에 저장되는 두 가지 모드가 있습니다.
-- **Tolerance(기본값)**: 그려지는 폴리라인이 현재 변환을 반영한 화면상 `tolerance` 픽셀 이내에 머물도록 구간 수를 적응적으로 정합니다. [`setCurveTolerance(pixels)`](#setCurveTolerance)로 설정하며 기본값은 0.1 px입니다.
-- **Resolution**: 크기나 확대/축소와 관계없이 고정된 구간 수를 사용합니다. 의도적으로 각진 느낌을 내거나, 작은 곡선을 많이 그릴 때 정점 비용을 제한하는 데 유용합니다. [`setCurveResolution(n)`](#setCurveResolution)로 설정하며 내장 기본값은 60입니다.
-- 한쪽을 설정하면 다른 쪽 모드는 꺼집니다. 두 모드 중 항상 하나만 활성화됩니다.
+
+- `drawBezier`와 마찬가지로 `drawCurve`는 항상 1px의 가는 선으로 그립니다. `fill()`과 `noFill()` 설정 및 선 두께는 무시됩니다.
+- 곡선은 짧은 선분을 이어서 그리며, 선분 수는 아래의 커브 설정으로 정해집니다. 이 설정은 `drawBezier`, `drawCurve`, `appendCurve`와 원·타원·호·둥근 도형을 그리는 함수에서 공통으로 사용됩니다. 설정은 현재 `Style`에 포함되며, 두 모드 중 항상 하나만 활성화됩니다. 한쪽을 설정하면 다른 쪽은 꺼집니다.
+- Tolerance 모드가 기본입니다. 화면에서 실제 곡선과의 차이가 지정한 거리 이내가 되도록 TrussC가 선분 수를 정합니다. 현재의 확대율도 반영됩니다. `setCurveTolerance(pixels)`로 설정하며 기본값은 0.1픽셀입니다.
+- Resolution 모드는 크기나 확대율과 관계없이 정해진 수의 선분을 사용합니다. 일부러 각진 모양을 내고 싶을 때나, 작은 곡선을 많이 그릴 때 부하를 제한하고 싶을 때 유용합니다. `setCurveResolution(n)`으로 설정하며 내장 값은 60입니다.
 '''
 
 ["drawEllipse"]
@@ -43549,16 +43654,25 @@ description.en = "Draw an ellipse."
 description.ja = "楕円を描画する。"
 description.ko = "타원을 그린다."
 details.en = '''
-- Draws an ellipse at center `(cx, cy)` (or `Vec3 center` for 3D) with radii `rx` (horizontal) and `ry` (vertical), in the same coordinate convention as [`drawRect`](#drawRect). Like [`drawCircle`](#drawCircle), the position is the **center**, not a corner.
-- Filled or outlined according to the current [`fill`](#fill) / [`noFill`](#noFill) mode. The segment count used to approximate the curve is derived from the larger of `rx`/`ry` — see [`drawCurve`](#drawCurve) for resolution vs. tolerance mode. `drawCircle(center, r)` is equivalent to `drawEllipse(center, r, r)`.
+- Draws an ellipse with center `(cx, cy)`, horizontal radius `rx` and vertical radius `ry`. A `Vec3 center` version is also available for 3D.
+- Like `drawCircle`, **the position is the center**, not a corner. Otherwise the coordinates work the same way as in `drawRect`.
+- After `fill()` the ellipse is filled, and after `noFill()` only its outline is drawn.
+- `drawCircle(center, r)` gives the same result as `drawEllipse(center, r, r)`.
+- The number of segments is decided from the larger of `rx` and `ry`, using the current curve settings. You can change them with `setCurveTolerance` or `setCurveResolution`.
 '''
 details.ja = '''
-- 中心 `(cx, cy)`（3Dの場合は `Vec3 center`）、水平半径 `rx`、垂直半径 `ry`で楕円を描画します。座標の考え方は [`drawRect`](#drawRect) と同じです。[`drawCircle`](#drawCircle) と同様、ここでの位置は角ではなく**中心**です。
-- 現在の [`fill`](#fill) / [`noFill`](#noFill) モードに従って塗りつぶされるか輪郭線で描かれます。曲線を近似する分割数は `rx`/`ry` の大きいほうから決まります。解像度モードと許容誤差モードについては [`drawCurve`](#drawCurve) を参照してください。`drawCircle(center, r)` は `drawEllipse(center, r, r)` と等価です。
+- 中心 `(cx, cy)`、横の半径 `rx`、縦の半径 `ry` の楕円を描画します。3D 用に `Vec3 center` を受け取る版もあります。
+- `drawCircle` と同じく、**位置は中心です**。角の位置ではありません。それ以外の座標の扱いは `drawRect` と同じです。
+- `fill()` のあとでは塗りつぶされ、`noFill()` のあとでは輪郭線だけが描かれます。
+- `drawCircle(center, r)` は `drawEllipse(center, r, r)` と同じ結果になります。
+- 分割数は、`rx` と `ry` の大きいほうをもとに、現在のカーブ設定に従って決まります。設定は `setCurveTolerance` または `setCurveResolution` で変更できます。
 '''
 details.ko = '''
-- 중심 `(cx, cy)`(3D에서는 `Vec3 center`), 수평 반지름 `rx`, 수직 반지름 `ry`로 타원을 그립니다. 좌표 개념은 [`drawRect`](#drawRect)와 같습니다. [`drawCircle`](#drawCircle)과 마찬가지로 여기서의 위치는 모서리가 아니라 **중심**입니다.
-- 현재의 [`fill`](#fill) / [`noFill`](#noFill) 모드에 따라 채워지거나 윤곽선으로 그려집니다. 곡선을 근사하는 분할 수는 `rx`/`ry` 중 큰 값을 기준으로 결정됩니다. 해상도 모드와 허용 오차 모드는 [`drawCurve`](#drawCurve)를 참조하세요. `drawCircle(center, r)`은 `drawEllipse(center, r, r)`과 동일합니다.
+- 중심 `(cx, cy)`, 가로 반지름 `rx`, 세로 반지름 `ry`인 타원을 그립니다. 3D용으로 `Vec3 center`를 받는 버전도 있습니다.
+- `drawCircle`과 마찬가지로 **위치는 중심입니다**. 모서리 위치가 아닙니다. 그 밖의 좌표 처리는 `drawRect`와 같습니다.
+- `fill()` 다음에는 채워지고, `noFill()` 다음에는 윤곽선만 그려집니다.
+- `drawCircle(center, r)`은 `drawEllipse(center, r, r)`과 같은 결과가 됩니다.
+- 분할 수는 `rx`와 `ry` 중 큰 값을 기준으로 현재의 커브 설정에 따라 정해집니다. 설정은 `setCurveTolerance` 또는 `setCurveResolution`으로 바꿀 수 있습니다.
 '''
 related = ["drawCircle"]
 snippet = '''
@@ -43576,18 +43690,24 @@ description.en = "Draw a line (2D or 3D)."
 description.ja = "線を描画する（2Dまたは3D）。"
 description.ko = "선을 그린다 (2D 또는 3D)."
 details.en = '''
-- Draws a straight line between two points: `(x1, y1)` to `(x2, y2)` for 2D, or `Vec3 p1, Vec3 p2` (also available as six floats) for 3D. Coordinates follow the same local, logical-unit convention as [`drawRect`](#drawRect).
-- The fill/stroke mode and [`setStrokeWeight`](#setStrokeWeight) do **not** apply here: `drawLine` always draws a fixed-width 1px line regardless of color mode. For a thick line with configurable cap/join, use [`drawStroke`](#drawStroke) instead. To draw many independent segments efficiently in one batch, use [`beginLines`](#beginLines) / `endLines()`.
+- Draws a straight line from `(x1, y1)` to `(x2, y2)`. For 3D, pass two `Vec3` points or six floats. The coordinates work the same way as in `drawRect`: local coordinates in logical units.
+- **The line is always 1 pixel wide.** `fill()`, `noFill()` and `setStrokeWeight` have no effect on it.
+- For a thick line with a chosen cap and join style, use `drawStroke` instead.
+- To draw many separate line segments efficiently at once, use `beginLines()` and `endLines()`.
 - Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (the line is always 1 pixel wide; setStrokeWeight() has no effect).
 '''
 details.ja = '''
-- 2点間を結ぶ直線を描画します。2Dの場合は `(x1, y1)` から `(x2, y2)`、3Dの場合は `Vec3 p1, Vec3 p2`（6個のfloatでも指定可能）です。座標は[`drawRect`](#drawRect) と同じローカル・論理単位です。
-- 塗り/線モードや [`setStrokeWeight`](#setStrokeWeight) はこの関数には**適用されません**。`drawLine` は色のモードに関わらず常に固定幅1pxの線を描画します。太さや端点/結合スタイルを指定できる線を描きたい場合は、代わりに[`drawStroke`](#drawStroke) を使ってください。多数の独立したセグメントをまとめて効率よく描きたい場合は [`beginLines`](#beginLines) / `endLines()`を使います。
+- `(x1, y1)` から `(x2, y2)` まで直線を描画します。3D では `Vec3` を 2 つ、または float を 6 個渡します。座標の扱いは `drawRect` と同じで、ローカル座標・論理単位です。
+- **線の太さは常に 1 ピクセルです。** `fill()`、`noFill()`、`setStrokeWeight` はこの関数には効きません。
+- 太さや端・つなぎ目の形を指定できる線を描きたい場合は、代わりに `drawStroke` を使ってください。
+- 独立した線分をまとめて効率よく描きたい場合は、`beginLines()` と `endLines()` を使います。
 - 既知の問題: [#915](https://github.com/TrussC-org/TrussC/issues/915)（線は常に 1 ピクセル幅で、setStrokeWeight() は効かない）。
 '''
 details.ko = '''
-- 두 점을 잇는 직선을 그립니다. 2D에서는 `(x1, y1)`에서 `(x2, y2)`까지, 3D에서는 `Vec3 p1, Vec3 p2`(float 6개로도 지정 가능)입니다. 좌표는 [`drawRect`](#drawRect)와 같은 로컬·논리 단위입니다.
-- 채우기/선 모드와 [`setStrokeWeight`](#setStrokeWeight)는 이 함수에 **적용되지 않습니다**. `drawLine`은 색상 모드와 관계없이 항상 고정 폭 1px 선을 그립니다. 두께나 캡/조인 스타일을 지정할 수 있는 선이 필요하면 대신 [`drawStroke`](#drawStroke)를 사용하세요. 독립적인 다수의 선분을 한 번에 효율적으로 그리려면 [`beginLines`](#beginLines) / `endLines()`를 사용합니다.
+- `(x1, y1)`에서 `(x2, y2)`까지 직선을 그립니다. 3D에서는 `Vec3` 두 개 또는 float 6개를 전달합니다. 좌표 처리는 `drawRect`와 같으며, 로컬 좌표와 논리 단위를 사용합니다.
+- **선의 두께는 항상 1픽셀입니다.** `fill()`, `noFill()`, `setStrokeWeight`는 이 함수에 영향을 주지 않습니다.
+- 두께와 끝·이음매 모양을 지정할 수 있는 선이 필요하면 대신 `drawStroke`를 사용하세요.
+- 서로 떨어진 여러 선분을 한 번에 효율적으로 그리려면 `beginLines()`와 `endLines()`를 사용합니다.
 - 알려진 문제: [#915](https://github.com/TrussC-org/TrussC/issues/915)(선은 항상 1픽셀 폭이며 setStrokeWeight()는 효과가 없음).
 '''
 related = ["drawStroke", "beginLines"]
@@ -43605,16 +43725,27 @@ description.en = "Draw a single point."
 description.ja = "点を描画する。"
 description.ko = "점 하나를 그린다."
 details.en = '''
-- Draws one point at `(x, y)` (or `Vec3 pos` for 3D), in the same local, logical-unit coordinates as [`drawRect`](#drawRect). The fill/stroke mode does not apply — a point is neither filled nor stroked, it is just a single mark.
-- How the point is rasterized (a square billboard, an anti-aliased disc, or a true 1px pixel) and its size are controlled separately via `setPointStyle` / `setPointSize`, not by `drawPoint` itself.
+- Draws one point at `(x, y)`. A `Vec3 pos` version is also available for 3D. The coordinates work the same way as in `drawRect`: local coordinates in logical units.
+- `fill()` and `noFill()` have no effect, because a point is a single mark.
+- The size and the look of the point are not set by `drawPoint` itself. Use `setPointSize` for the size and `setPointStyle` for the look. The look can be a square (`PointStyle::Square`, the default), an anti-aliased round dot (`PointStyle::Round`), or a true 1-pixel point (`PointStyle::Pixel`).
 '''
 details.ja = '''
-- `(x, y)`（3Dの場合は `Vec3 pos`）に点を1つ描画します。座標は[`drawRect`](#drawRect) と同じローカル・論理単位です。塗り/線モードは適用されません。点は塗りつぶしも輪郭線もなく、単なる1つのマークです。
-- 点をどう描くか（正方形のビルボード、アンチエイリアスされた円、または真の1pxピクセル）とそのサイズは、`drawPoint` 自体ではなく `setPointStyle` /`setPointSize` で別途設定します。
+- `(x, y)` に点を 1 つ描画します。3D 用に `Vec3 pos` を受け取る版もあります。座標の扱いは `drawRect` と同じで、ローカル座標・論理単位です。
+- 点は 1 つの印なので、`fill()` や `noFill()` の設定は関係ありません。
+- 点の大きさと見た目は `drawPoint` 自体では決まりません。大きさは `setPointSize` で、見た目は `setPointStyle` で設定します。見た目は、正方形（`PointStyle::Square`、既定）、アンチエイリアスされた丸い点（`PointStyle::Round`）、本当の 1 ピクセルの点（`PointStyle::Pixel`）から選べます。
 '''
 details.ko = '''
-- `(x, y)`(3D에서는 `Vec3 pos`)에 점 하나를 그립니다. 좌표는 [`drawRect`](#drawRect)와 같은 로컬·논리 단위입니다. 채우기/선 모드는 적용되지 않습니다. 점은 채우기도 윤곽선도 없는 단순한 하나의 표시입니다.
-- 점을 어떻게 래스터화할지(정사각형 빌보드, 안티에일리어싱된 원, 혹은 진짜 1px 픽셀)와 크기는 `drawPoint` 자체가 아니라 `setPointStyle` / `setPointSize`로 따로 설정합니다.
+- `(x, y)`에 점 하나를 그립니다. 3D용으로 `Vec3 pos`를 받는 버전도 있습니다. 좌표 처리는 `drawRect`와 같으며, 로컬 좌표와 논리 단위를 사용합니다.
+- 점은 하나의 표시이므로 `fill()`과 `noFill()` 설정은 관계가 없습니다.
+- 점의 크기와 모양은 `drawPoint` 자체로 정해지지 않습니다. 크기는 `setPointSize`로, 모양은 `setPointStyle`로 설정합니다. 모양은 정사각형(`PointStyle::Square`, 기본값), 안티에일리어싱된 둥근 점(`PointStyle::Round`), 실제 1픽셀 점(`PointStyle::Pixel`) 중에서 고를 수 있습니다.
+'''
+snippet = '''
+void tcApp::draw() {
+    setColor(1.0f, 1.0f, 1.0f);
+    setPointSize(6);
+    setPointStyle(PointStyle::Round);
+    drawPoint(200, 150);
+}
 '''
 
 ["drawRect"]
@@ -43625,22 +43756,37 @@ description.en = "Draw an axis-aligned rectangle."
 description.ja = "軸に沿った矩形を描画する。"
 description.ko = "축에 정렬된 사각형을 그린다."
 details.en = '''
-- Draws a rectangle at `(x, y)` with size `(w, h)`, or the `Vec3 pos, Vec2 size` overload. `w` and `h` may be negative; the rectangle is simply drawn on the other side, so there is no need to normalize the values yourself.
-- Coordinates are local (affected by the current [`pushMatrix`](#pushMatrix) / `translate` / `rotate` / `scale` stack) and given in logical units: the same numbers as the window size you passed to `setSize`, regardless of a Retina or other high-DPI screen. The origin `(0, 0)` is the top-left corner of the window (or the current render target), `x` grows to the right, and `y` grows downward. This is the coordinate convention used by every 2D shape in this group.
-- `(x, y)` is always the top-left corner of the rectangle; TrussC has no rect-mode state to switch the anchor to the center, unlike openFrameworks' `ofRectMode`. If you want a center-anchored rectangle, subtract half the size yourself (`drawRect(cx - w / 2, cy - h / 2, w, h)`).
-- Filled or outlined according to the current [`fill`](#fill) / [`noFill`](#noFill) mode and draw color; see `fill` for the full fill/stroke model and its defaults. Passing a `Vec3` position places the rectangle at that `z` for 3D scenes. For rounded corners, see [`drawRectRounded`](#drawRectRounded) and [`drawRectSquircle`](#drawRectSquircle).
+- Draws a rectangle whose top-left corner is at `(x, y)`, with width `w` and height `h`. You can also pass `Vec3 pos, Vec2 size`.
+- The origin `(0, 0)` is the top-left corner of the window (or of the current drawing target). `x` grows to the right and `y` grows downward. All 2D shapes in this group use these coordinates.
+- Coordinates are in logical units. They are the same numbers as the window size you passed to `setSize`, also on Retina and other high-resolution screens.
+- Coordinates are local, so `translate`, `rotate` and `scale` (usually between `pushMatrix` and `popMatrix`) move, turn and resize the rectangle.
+- `(x, y)` is always the top-left corner. Unlike `ofRectMode` in openFrameworks, there is no setting to use the center instead. To place a rectangle by its center, subtract half the size yourself: `drawRect(cx - w / 2, cy - h / 2, w, h)`.
+- After `fill()` the rectangle is filled with the current color, and after `noFill()` only its outline is drawn. See `fill` for details and defaults.
+- `w` and `h` may be negative. The rectangle is then drawn on the other side of `(x, y)`, so you do not need to fix the values yourself.
+- With a `Vec3` position, the rectangle is placed at that `z` in a 3D scene.
+- For rounded corners, use `drawRectRounded` or `drawRectSquircle`.
 '''
 details.ja = '''
-- `(x, y)` の位置に `(w, h)` のサイズで矩形を描画します。`Vec3 pos, Vec2 size`のオーバーロードもあります。`w` と `h` には負の値も渡せます。その場合は反対側に描画されるため、自分で正規化する必要はありません。
-- 座標はローカル座標（現在の [`pushMatrix`](#pushMatrix) / `translate` /`rotate` / `scale` の影響を受けます）で、単位は論理単位です。これは `setSize`に渡すウィンドウサイズと同じ数値で、Retinaなどの高DPI画面でも変わりません。原点 `(0, 0)` はウィンドウ(または現在の描画先)の左上で、`x` は右方向、`y` は下方向に増加します。この座標の考え方は、このグループの2D図形すべてに共通します。
-- `(x, y)` は常に矩形の左上の角になります。openFrameworksの `ofRectMode` のような、基準点を中心に切り替えるモードはTrussCにはありません。中心基準にしたい場合は、自分でサイズの半分を引いてください（`drawRect(cx - w / 2, cy - h / 2, w, h)`）。
-- 現在の [`fill`](#fill) / [`noFill`](#noFill) モードと描画色に従って塗りつぶされるか輪郭線で描かれます。塗り/線の仕組みとデフォルトは `fill` を参照してください。`Vec3` で位置を渡すと、その `z` に3Dシーンとして配置されます。角を丸めたい場合は [`drawRectRounded`](#drawRectRounded) や[`drawRectSquircle`](#drawRectSquircle) を参照してください。
+- 左上の角が `(x, y)`、幅 `w`、高さ `h` の矩形を描画します。`Vec3 pos, Vec2 size` で渡すこともできます。
+- 原点 `(0, 0)` はウィンドウ（または現在の描画先）の左上です。`x` は右へ、`y` は下へ向かって増えます。このグループの 2D 図形はすべてこの座標を使います。
+- 座標の単位は論理単位です。`setSize` に渡したウィンドウサイズと同じ数値で、Retina などの高解像度の画面でも変わりません。
+- 座標はローカル座標です。そのため、`translate`、`rotate`、`scale`（通常は `pushMatrix` と `popMatrix` の間で使います）によって、矩形は移動・回転・拡大縮小されます。
+- `(x, y)` は常に左上の角です。openFrameworks の `ofRectMode` のように、中心を基準にする設定はありません。中心で位置を決めたい場合は、`drawRect(cx - w / 2, cy - h / 2, w, h)` のようにサイズの半分を自分で引いてください。
+- `fill()` のあとでは現在の色で塗りつぶされ、`noFill()` のあとでは輪郭線だけが描かれます。詳しい仕組みと既定値は `fill` を参照してください。
+- `w` と `h` には負の値も渡せます。その場合は `(x, y)` の反対側に描画されるため、自分で値を直す必要はありません。
+- 位置を `Vec3` で渡すと、3D シーンの中でその `z` の位置に配置されます。
+- 角を丸くしたい場合は、`drawRectRounded` または `drawRectSquircle` を使ってください。
 '''
 details.ko = '''
-- `(x, y)` 위치에 `(w, h)` 크기로 사각형을 그립니다. `Vec3 pos, Vec2 size` 오버로드도 있습니다. `w`와 `h`에는 음수도 전달할 수 있습니다. 그 경우 반대쪽으로 그려지므로 직접 정규화할 필요가 없습니다.
-- 좌표는 로컬 좌표(현재의 [`pushMatrix`](#pushMatrix) / `translate` / `rotate` / `scale`의 영향을 받습니다)이며, 단위는 논리 단위입니다. 이는 `setSize`에 전달하는 윈도우 크기와 같은 수치이며, Retina 같은 고DPI 화면에서도 달라지지 않습니다. 원점 `(0, 0)`은 윈도우(또는 현재 렌더 대상)의 좌상단이며, `x`는 오른쪽으로, `y`는 아래쪽으로 증가합니다. 이 좌표 개념은 이 그룹에 속한 모든 2D 도형에 공통으로 적용됩니다.
-- `(x, y)`는 항상 사각형의 좌상단 모서리입니다. openFrameworks의 `ofRectMode`처럼 기준점을 중앙으로 바꾸는 모드는 TrussC에 없습니다. 중앙 기준으로 그리고 싶다면 직접 크기의 절반을 빼서 전달하세요 (`drawRect(cx - w / 2, cy - h / 2, w, h)`).
-- 현재의 [`fill`](#fill) / [`noFill`](#noFill) 모드와 그리기 색에 따라 채워지거나 윤곽선으로 그려집니다. 채우기/선의 동작 방식과 기본값은 `fill`을 참조하세요. `Vec3`로 위치를 전달하면 해당 `z`에 3D 장면으로 배치됩니다. 모서리를 둥글게 하고 싶다면 [`drawRectRounded`](#drawRectRounded)나 [`drawRectSquircle`](#drawRectSquircle)을 참조하세요.
+- 왼쪽 위 모서리가 `(x, y)`이고 너비 `w`, 높이 `h`인 사각형을 그립니다. `Vec3 pos, Vec2 size`로 전달할 수도 있습니다.
+- 원점 `(0, 0)`은 윈도우(또는 현재 그리기 대상)의 왼쪽 위입니다. `x`는 오른쪽으로, `y`는 아래쪽으로 증가합니다. 이 그룹의 2D 도형은 모두 이 좌표를 사용합니다.
+- 좌표의 단위는 논리 단위입니다. `setSize`에 전달한 윈도우 크기와 같은 수치이며, Retina 같은 고해상도 화면에서도 달라지지 않습니다.
+- 좌표는 로컬 좌표입니다. 따라서 `translate`, `rotate`, `scale`(보통 `pushMatrix`와 `popMatrix` 사이에서 사용합니다)에 따라 사각형이 이동, 회전, 확대·축소됩니다.
+- `(x, y)`는 항상 왼쪽 위 모서리입니다. openFrameworks의 `ofRectMode`처럼 중심을 기준으로 하는 설정은 없습니다. 중심으로 위치를 정하려면 `drawRect(cx - w / 2, cy - h / 2, w, h)`처럼 크기의 절반을 직접 빼세요.
+- `fill()` 다음에는 현재 색으로 채워지고, `noFill()` 다음에는 윤곽선만 그려집니다. 자세한 동작과 기본값은 `fill`을 참조하세요.
+- `w`와 `h`에는 음수도 전달할 수 있습니다. 이 경우 `(x, y)`의 반대쪽으로 그려지므로 직접 값을 고칠 필요가 없습니다.
+- 위치를 `Vec3`로 전달하면 3D 장면에서 해당 `z` 위치에 배치됩니다.
+- 모서리를 둥글게 하려면 `drawRectRounded` 또는 `drawRectSquircle`을 사용하세요.
 '''
 related = ["drawRectRounded", "drawRectSquircle", "Rect"]
 snippet = '''
@@ -43662,19 +43808,31 @@ description.en = "Draw a rounded rectangle (circular arc corners)."
 description.ja = "角丸矩形を描画する（円弧コーナー）。"
 description.ko = "둥근 모서리 사각형을 그린다 (원호 모서리)."
 details.en = '''
-- Same `(x, y, w, h)` / `Vec3 pos, Vec2 size` arguments and top-left anchor as [`drawRect`](#drawRect) — see `drawRect` for the coordinate convention — plus a `radius` for the corner circles. `radius` is clamped to half of the smaller of `w`/`h`, so passing a very large value safely caps out at a stadium/pill shape instead of distorting the rectangle. A `radius` of `0` or less falls back to a plain [`drawRect`](#drawRect).
-- Rounded rectangles use local `z = 0` and ignore `pos.z`; the plain rectangle fallback preserves `pos.z`.
-- Each corner is a quarter-circle arc; the curve quality (segment count) follows the current curve settings — see [`drawCurve`](#drawCurve) for resolution vs. tolerance mode. Negative `w`/`h` are normalized internally, same as `drawRect`. Fills and strokes according to the current [`fill`](#fill) / [`noFill`](#noFill) mode.
+- Draws a rectangle with rounded corners. The arguments `(x, y, w, h)` or `Vec3 pos, Vec2 size` and the top-left corner position work the same way as in `drawRect`. `radius` is the radius of the round corners.
+- Each corner is a quarter of a circle.
+- `radius` is limited to half of the shorter side. A very large value therefore gives a pill (capsule) shape and never distorts the rectangle. A `radius` of `0` or less draws a plain `drawRect`.
+- After `fill()` the shape is filled, and after `noFill()` only its outline is drawn.
+- Negative `w` and `h` work in the same way as in `drawRect`.
+- The number of segments in each corner follows the current curve settings. You can change them with `setCurveTolerance` or `setCurveResolution`.
+- The rounded rectangle is always drawn at local `z = 0`, and `pos.z` is ignored. When it falls back to a plain rectangle, `pos.z` is used.
 '''
 details.ja = '''
-- [`drawRect`](#drawRect) と同じ `(x, y, w, h)` / `Vec3 pos, Vec2 size` の引数と左上基準を使います（座標の考え方は `drawRect` を参照してください）。加えて角の円弧の半径を `radius` で指定します。`radius` は `w`/`h` の小さいほうの半分を上限にクランプされるため、大きすぎる値を渡しても矩形が歪むことはなく、スタジアム（カプセル）形状になるだけです。`radius` が `0` 以下のときは通常の[`drawRect`](#drawRect) として描画されます。
-- 角丸長方形はローカル座標の `z = 0` に描画し、`pos.z` を無視します。通常の長方形に切り替わる場合は `pos.z` を保持します。
-- 各コーナーは四分円の円弧です。曲線の精度（分割数）は現在のカーブ設定に従います。解像度モードと許容誤差モードについては [`drawCurve`](#drawCurve) を参照してください。負の `w`/`h` は `drawRect` と同様に内部で正規化されます。現在の [`fill`](#fill) / [`noFill`](#noFill) モードに従って塗りつぶされるか輪郭線で描かれます。
+- 角の丸い矩形を描画します。引数 `(x, y, w, h)` または `Vec3 pos, Vec2 size` と、左上の角を基準にする点は `drawRect` と同じです。`radius` は角の丸みの半径です。
+- 各角は円の 4 分の 1 になります。
+- `radius` は短いほうの辺の半分までに制限されます。そのため、とても大きな値を渡してもカプセル形になるだけで、矩形がゆがむことはありません。`radius` が `0` 以下のときは、通常の `drawRect` として描画されます。
+- `fill()` のあとでは塗りつぶされ、`noFill()` のあとでは輪郭線だけが描かれます。
+- 負の `w` と `h` は `drawRect` と同じように扱われます。
+- 各角の分割数は現在のカーブ設定に従います。設定は `setCurveTolerance` または `setCurveResolution` で変更できます。
+- 角丸の矩形は常にローカル座標の `z = 0` に描画され、`pos.z` は無視されます。通常の矩形として描画される場合は `pos.z` が使われます。
 '''
 details.ko = '''
-- [`drawRect`](#drawRect)와 같은 `(x, y, w, h)` / `Vec3 pos, Vec2 size` 인자와 좌상단 기준을 사용합니다(좌표 개념은 `drawRect`를 참조하세요). 여기에 모서리 원호의 반지름을 `radius`로 지정합니다. `radius`는 `w`/`h` 중 작은 값의 절반으로 클램프되므로, 너무 큰 값을 전달해도 사각형이 일그러지지 않고 스타디움(캡슐) 형태가 됩니다. `radius`가 `0` 이하이면 일반 [`drawRect`](#drawRect)로 그려집니다.
-- 둥근 모서리 사각형은 로컬 좌표의 `z = 0`에 그리며 `pos.z`를 무시합니다. 일반 사각형으로 대체되는 경우에는 `pos.z`를 유지합니다.
-- 각 모서리는 4분원 호입니다. 곡선 품질(분할 수)은 현재의 커브 설정을 따릅니다. 해상도 모드와 허용 오차 모드에 대해서는 [`drawCurve`](#drawCurve)를 참조하세요. 음수 `w`/`h`는 `drawRect`와 동일하게 내부에서 정규화됩니다. 현재의 [`fill`](#fill) / [`noFill`](#noFill) 모드에 따라 채워지거나 윤곽선으로 그려집니다.
+- 모서리가 둥근 사각형을 그립니다. 인자 `(x, y, w, h)` 또는 `Vec3 pos, Vec2 size`와 왼쪽 위 모서리를 기준으로 하는 점은 `drawRect`와 같습니다. `radius`는 모서리 둥근 부분의 반지름입니다.
+- 각 모서리는 원의 4분의 1입니다.
+- `radius`는 짧은 변의 절반까지로 제한됩니다. 따라서 아주 큰 값을 전달해도 캡슐 모양이 될 뿐 사각형이 일그러지지 않습니다. `radius`가 `0` 이하이면 일반 `drawRect`로 그립니다.
+- `fill()` 다음에는 채워지고, `noFill()` 다음에는 윤곽선만 그려집니다.
+- 음수 `w`와 `h`는 `drawRect`와 같은 방식으로 처리됩니다.
+- 각 모서리의 분할 수는 현재의 커브 설정을 따릅니다. 설정은 `setCurveTolerance` 또는 `setCurveResolution`으로 바꿀 수 있습니다.
+- 둥근 사각형은 항상 로컬 좌표의 `z = 0`에 그려지며 `pos.z`는 무시됩니다. 일반 사각형으로 그려지는 경우에는 `pos.z`가 사용됩니다.
 '''
 related = ["drawRectSquircle", "drawSuperellipse"]
 snippet = '''
@@ -43691,16 +43849,22 @@ description.en = "Draw a squircle rectangle (curvature-continuous corners, iOS-s
 description.ja = "スクワークル矩形を描画する（曲率連続コーナー、iOS風）。"
 description.ko = "스쿼클 사각형을 그린다 (곡률 연속 모서리, iOS 스타일)."
 details.en = '''
-- Same `(x, y, w, h)` / `Vec3 pos, Vec2 size` arguments, top-left anchor and `radius` clamping as [`drawRectRounded`](#drawRectRounded) — see `drawRect` for the coordinate convention. The difference is only how each corner is shaped: instead of a circular arc, each corner follows a superellipse curve (`n = 4`), which is curvature-continuous with the straight edges — the same "squircle" look used for iOS app icons, with no visible seam where the curve meets the straight edge.
-- Because the corner math is more involved than a plain arc, this costs a bit more to generate than [`drawRectRounded`](#drawRectRounded) for the same corner radius; prefer `drawRectRounded` when the difference is not visually important. Fills and strokes according to the current [`fill`](#fill) / [`noFill`](#noFill) mode.
+- Draws a rectangle with smoothly rounded corners. The arguments, the top-left corner position and the limit on `radius` are the same as in `drawRectRounded`. See `drawRect` for how the coordinates work.
+- Only the shape of the corners is different. Each corner follows a superellipse curve (`n = 4`) instead of a circular arc. The corner joins the straight edges smoothly, with no visible seam. This is the "squircle" look known from iOS app icons.
+- After `fill()` the shape is filled, and after `noFill()` only its outline is drawn.
+- The corner calculation is a little more costly than in `drawRectRounded` with the same radius. If the difference does not matter visually, `drawRectRounded` is the better choice.
 '''
 details.ja = '''
-- [`drawRectRounded`](#drawRectRounded) と同じ `(x, y, w, h)` /`Vec3 pos, Vec2 size` の引数、左上基準、`radius` のクランプを使います（座標の考え方は `drawRect` を参照してください）。違いは角の形状だけで、円弧の代わりにスーパー楕円の曲線（`n = 4`）で各角を描きます。これは直線部分と曲率が連続してつながるため、曲線と直線の継ぎ目が見えない、iOSのアプリアイコンのような「スクワークル」の見た目になります。
-- 角の計算が通常の円弧より複雑なため、同じ角の半径でも[`drawRectRounded`](#drawRectRounded) より生成コストがやや高くなります。見た目の違いが重要でない場合は `drawRectRounded` を使うことをお勧めします。現在の[`fill`](#fill) / [`noFill`](#noFill) モードに従って塗りつぶされるか輪郭線で描かれます。
+- 角がなめらかに丸い矩形を描画します。引数、左上の角を基準にする点、`radius` の上限は `drawRectRounded` と同じです。座標の扱いは `drawRect` を参照してください。
+- 違うのは角の形だけです。各角は円弧ではなく、スーパー楕円の曲線（`n = 4`）になります。角が直線の辺になめらかにつながり、継ぎ目が見えません。iOS のアプリアイコンで知られる「スクワークル」の形です。
+- `fill()` のあとでは塗りつぶされ、`noFill()` のあとでは輪郭線だけが描かれます。
+- 角の計算は、同じ半径の `drawRectRounded` より少し負荷が高くなります。見た目の違いが重要でない場合は、`drawRectRounded` を使うことをおすすめします。
 '''
 details.ko = '''
-- [`drawRectRounded`](#drawRectRounded)와 같은 `(x, y, w, h)` / `Vec3 pos, Vec2 size` 인자, 좌상단 기준, `radius` 클램핑을 사용합니다(좌표 개념은 `drawRect`를 참조하세요). 차이는 모서리 형태뿐입니다. 원호 대신 각 모서리를 초타원 곡선(`n = 4`)으로 그리며, 이는 직선 부분과 곡률이 연속적으로 이어져 곡선과 직선의 이음매가 보이지 않는, iOS 앱 아이콘 같은 "스쿼클" 모습이 됩니다.
-- 모서리 계산이 일반 원호보다 복잡하므로, 같은 모서리 반지름이라도 [`drawRectRounded`](#drawRectRounded)보다 생성 비용이 조금 더 듭니다. 시각적 차이가 중요하지 않다면 `drawRectRounded` 사용을 권장합니다. 현재의 [`fill`](#fill) / [`noFill`](#noFill) 모드에 따라 채워지거나 윤곽선으로 그려집니다.
+- 모서리가 부드럽게 둥근 사각형을 그립니다. 인자, 왼쪽 위 모서리를 기준으로 하는 점, `radius`의 상한은 `drawRectRounded`와 같습니다. 좌표 처리는 `drawRect`를 참조하세요.
+- 다른 점은 모서리 모양뿐입니다. 각 모서리는 원호 대신 초타원 곡선(`n = 4`)을 따릅니다. 모서리가 직선 변과 부드럽게 이어져 이음매가 보이지 않습니다. iOS 앱 아이콘으로 알려진 "스쿼클" 모양입니다.
+- `fill()` 다음에는 채워지고, `noFill()` 다음에는 윤곽선만 그려집니다.
+- 모서리 계산은 같은 반지름의 `drawRectRounded`보다 부하가 조금 더 큽니다. 시각적 차이가 중요하지 않다면 `drawRectRounded`를 사용하는 것을 권장합니다.
 '''
 related = ["drawRectRounded", "drawSuperellipse"]
 snippet = '''
@@ -43757,31 +43921,40 @@ description.ja = "単一の太いストローク線分を描画する。"
 description.ko = "단일 굵은 stroke 선분을 그린다."
 related = ["setStrokeWeight", "setStrokeCap", "setStrokeJoin", "drawLine"]
 details.en = '''
-- A shorthand for the most common two-point case: internally it calls [`beginStroke`](#beginStroke), adds the two given points, and calls [`endStroke`](#endStroke). It draws one thick segment using the current [`setStrokeWeight`](#setStrokeWeight) and [`setStrokeCap`](#setStrokeCap) (a two-point stroke has no corner, so [`setStrokeJoin`](#setStrokeJoin) has no visible effect here).
+- Draws one thick line between two points. It uses the current `setStrokeWeight` and `setStrokeCap`. You can pass `Vec2` points or `(x1, y1, x2, y2)`.
+
 ```cpp
 setStrokeWeight(6);
 setStrokeCap(StrokeCap::Round);
 drawStroke(Vec2(20, 20), Vec2(220, 120));
 ```
-- For a connected multi-segment stroke with real corner joins, use [`beginStroke`](#beginStroke) / [`vertex`](#vertex) / [`endStroke`](#endStroke) directly instead of calling `drawStroke` repeatedly — calling it per segment still works, but every call rebuilds its own small mesh and corners are not shared.
+
+- It is a shorthand for `beginStroke()`, two `vertex()` calls and `endStroke()`. A two-point line has no corner, so `setStrokeJoin` has no visible effect here.
+- For a line with several connected segments, use `beginStroke`, `vertex` and `endStroke` directly. Calling `drawStroke` once per segment also works, but each call builds its own small mesh and the corners are not joined.
 '''
 details.ja = '''
-- 最も一般的な 2 点のケース用の簡易版です。内部では[`beginStroke`](#beginStroke) を呼び、与えられた 2 点を追加してから[`endStroke`](#endStroke) を呼びます。現在の[`setStrokeWeight`](#setStrokeWeight) と [`setStrokeCap`](#setStrokeCap) を使って太い線分を 1 本描画します（2 点のストロークには角がないため、[`setStrokeJoin`](#setStrokeJoin) はここでは見た目に影響しません）。
+- 2 点の間に太い線を 1 本描きます。現在の `setStrokeWeight` と `setStrokeCap` が使われます。`Vec2` の点でも `(x1, y1, x2, y2)` でも渡せます。
+
 ```cpp
 setStrokeWeight(6);
 setStrokeCap(StrokeCap::Round);
 drawStroke(Vec2(20, 20), Vec2(220, 120));
 ```
-- 角がつながった複数区間のストロークが必要な場合は、`drawStroke` を何度も呼ぶのではなく、[`beginStroke`](#beginStroke) / [`vertex`](#vertex) /[`endStroke`](#endStroke) を直接使ってください。区間ごとに呼び出すこともできますが、呼ぶたびに小さなメッシュが個別に作られ、角は共有されません。
+
+- `beginStroke()`、2 回の `vertex()`、`endStroke()` をまとめた簡易版です。2 点の線には角がないため、`setStrokeJoin` は見た目に影響しません。
+- いくつもの区間がつながった線には、`beginStroke`、`vertex`、`endStroke` を直接使ってください。区間ごとに `drawStroke` を呼んでも描けますが、呼ぶたびに小さなメッシュが別々に作られ、角はつながりません。
 '''
 details.ko = '''
-- 가장 흔한 두 점 케이스를 위한 간단한 버전입니다. 내부적으로 [`beginStroke`](#beginStroke)를 호출하고, 주어진 두 점을 추가한 뒤 [`endStroke`](#endStroke)를 호출합니다. 현재 설정된 [`setStrokeWeight`](#setStrokeWeight)와 [`setStrokeCap`](#setStrokeCap)을 사용해 굵은 선분 하나를 그립니다(두 점짜리 stroke에는 모서리가 없으므로 [`setStrokeJoin`](#setStrokeJoin)은 여기서는 눈에 보이는 영향이 없습니다).
+- 두 점 사이에 굵은 선을 하나 그립니다. 현재 설정된 `setStrokeWeight`와 `setStrokeCap`이 사용됩니다. `Vec2` 점이나 `(x1, y1, x2, y2)`로 전달할 수 있습니다.
+
 ```cpp
 setStrokeWeight(6);
 setStrokeCap(StrokeCap::Round);
 drawStroke(Vec2(20, 20), Vec2(220, 120));
 ```
-- 모서리가 이어진 여러 구간의 stroke가 필요하다면 `drawStroke`를 반복 호출하는 대신 [`beginStroke`](#beginStroke) / [`vertex`](#vertex) / [`endStroke`](#endStroke)를 직접 사용하세요. 구간마다 호출해도 동작은 하지만, 호출할 때마다 작은 메시가 각각 새로 만들어지고 모서리는 공유되지 않습니다.
+
+- `beginStroke()`, 두 번의 `vertex()`, `endStroke()`를 묶은 간단한 버전입니다. 두 점짜리 선에는 모서리가 없으므로 `setStrokeJoin`은 보이는 영향이 없습니다.
+- 여러 구간이 이어진 선에는 `beginStroke`, `vertex`, `endStroke`를 직접 사용하세요. 구간마다 `drawStroke`를 호출해도 그릴 수 있지만, 호출할 때마다 작은 메시가 따로 만들어지고 모서리가 이어지지 않습니다.
 '''
 
 ["drawSuperellipse"]
@@ -43791,19 +43964,28 @@ description.en = "Draw a superellipse (Lamé curve) inscribed in a rect — Appl
 description.ja = "矩形に内接するスーパー楕円（ラメ曲線）を描画する — デフォルト（n=5）はAppleアイコン風。"
 description.ko = "사각형에 내접하는 초타원(라메 곡선)을 그린다 — 기본값(n=5)은 Apple 아이콘 스타일."
 details.en = '''
-- Draws the Lamé curve `|x/rx|^n + |y/ry|^n = 1` inscribed in the rect `(x, y, w, h)` (same `(x, y, w, h)` / `Vec3 pos, Vec2 size` arguments and top-left anchor as [`drawRect`](#drawRect); see `drawRect` for the coordinate convention) — a drop-in alternative to [`drawRectRounded`](#drawRectRounded) for a single continuous outline instead of straight edges with rounded corners.
-- The exponent `n` morphs the whole shape: `2` draws an ellipse, `4` a squircle, and higher values approach the bounding rectangle; `1` draws a diamond, and values below `1` draw a concave, star-like shape (filled correctly via a center fan, unlike [`appendSuperellipse`](#appendSuperellipse)). The default `n = 5` approximates the Apple app-icon silhouette; the classic Piet Hein superellipse uses `n = 2.5`. `n <= 0` draws nothing. The aspect ratio comes from `w`/`h`, so a non-square rect gives an elongated shape rather than a circle clipped to the rect.
-- Unlike [`drawRectSquircle`](#drawRectSquircle), which rounds only the corners of a rect with straight edges in between, the entire outline here is one continuous superellipse. Fills and strokes according to the current [`fill`](#fill) / [`noFill`](#noFill) mode.
+- Draws a superellipse (Lamé curve, `|x/rx|^n + |y/ry|^n = 1`) that fits exactly inside the rectangle `(x, y, w, h)`. The arguments `(x, y, w, h)` or `Vec3 pos, Vec2 size` and the top-left corner position work the same way as in `drawRect`.
+- The whole outline is one continuous curve. `drawRectSquircle` rounds only the corners and keeps straight edges between them. You can use `drawSuperellipse` in place of `drawRectRounded` when you want one continuous outline.
+- The exponent `n` changes the whole shape. `2` gives an ellipse, `4` a squircle, and larger values come closer to the rectangle. `1` gives a diamond, and values below `1` give a star-like shape that curves inward.
+- The default `n = 5` is close to the shape of an Apple app icon. The classic Piet Hein superellipse uses `n = 2.5`. Nothing is drawn when `n <= 0`.
+- The proportions come from `w` and `h`. A rectangle that is not square gives a stretched shape.
+- After `fill()` the shape is filled, and after `noFill()` only its outline is drawn. Shapes with `n` below `1` are also filled correctly, because the fill is built from the center. `appendSuperellipse` does not fill these shapes correctly.
 '''
 details.ja = '''
-- 矩形 `(x, y, w, h)` に内接するラメ曲線 `|x/rx|^n + |y/ry|^n = 1` を描画します（`(x, y, w, h)` / `Vec3 pos, Vec2 size` の引数と左上基準は[`drawRect`](#drawRect) と同じです。座標の考え方は `drawRect` を参照してください）。直線の辺と丸い角の組み合わせではなく、ひとつの連続した輪郭にしたい場合に [`drawRectRounded`](#drawRectRounded) の代わりとしてそのまま使えます。
-- 指数 `n` によって形状全体が変化します。`2` で楕円、`4` でスクワークル、値が大きいほど矩形に近づきます。`1` でひし形になり、`1` 未満では凹んだ星形になります（[`appendSuperellipse`](#appendSuperellipse) と異なり、中心ファンで正しく塗りつぶされます）。デフォルトの `n = 5` はAppleのアプリアイコンに近いシルエットで、古典的なPiet Heinのスーパー楕円は `n = 2.5` です。`n` が `0` 以下のときは何も描画されません。縦横比は `w`/`h` で決まるため、正方形でない矩形では円を切り取った形ではなく、引き伸ばされた形になります。
-- [`drawRectSquircle`](#drawRectSquircle)（角だけを丸め、辺は直線のまま）と違い、こちらは輪郭全体が1本の連続したスーパー楕円になります。現在の[`fill`](#fill) / [`noFill`](#noFill) モードに従って塗りつぶされるか輪郭線で描かれます。
+- 矩形 `(x, y, w, h)` にぴったり収まるスーパー楕円（ラメ曲線、`|x/rx|^n + |y/ry|^n = 1`）を描画します。引数 `(x, y, w, h)` または `Vec3 pos, Vec2 size` と、左上の角を基準にする点は `drawRect` と同じです。
+- 輪郭全体が 1 本の連続した曲線になります。`drawRectSquircle` は角だけを丸め、角と角の間は直線のままです。ひと続きの輪郭にしたい場合は、`drawRectRounded` の代わりに `drawSuperellipse` を使えます。
+- 指数 `n` で形全体が変わります。`2` で楕円、`4` でスクワークルになり、値が大きいほど矩形に近づきます。`1` でひし形になり、`1` 未満では内側にへこんだ星のような形になります。
+- 既定の `n = 5` は Apple のアプリアイコンに近い形です。古典的な Piet Hein のスーパー楕円は `n = 2.5` です。`n <= 0` のときは何も描画しません。
+- 縦横の比率は `w` と `h` で決まります。正方形でない矩形では、引き伸ばされた形になります。
+- `fill()` のあとでは塗りつぶされ、`noFill()` のあとでは輪郭線だけが描かれます。塗りつぶしは中心から作られるため、`n` が `1` 未満の形も正しく塗りつぶされます。`appendSuperellipse` では、このような形は正しく塗りつぶされません。
 '''
 details.ko = '''
-- 사각형 `(x, y, w, h)`에 내접하는 라메 곡선 `|x/rx|^n + |y/ry|^n = 1`을 그립니다(`(x, y, w, h)` / `Vec3 pos, Vec2 size` 인자와 좌상단 기준은 [`drawRect`](#drawRect)와 동일합니다. 좌표 개념은 `drawRect`를 참조하세요). 직선 변과 둥근 모서리의 조합이 아니라 하나의 연속된 윤곽선을 원한다면 [`drawRectRounded`](#drawRectRounded) 대신 그대로 사용할 수 있습니다.
-- 지수 `n`에 따라 형태 전체가 달라집니다. `2`는 타원, `4`는 스쿼클이며, 값이 클수록 사각형에 가까워집니다. `1`은 마름모이고, `1` 미만에서는 오목한 별 모양이 됩니다([`appendSuperellipse`](#appendSuperellipse)와 달리 중심 팬으로 올바르게 채워집니다). 기본값 `n = 5`는 Apple 앱 아이콘에 가까운 실루엣이며, 고전적인 Piet Hein의 초타원은 `n = 2.5`입니다. `n`이 `0` 이하이면 아무것도 그려지지 않습니다. 종횡비는 `w`/`h`로 결정되므로, 정사각형이 아닌 사각형에서는 원을 잘라낸 모양이 아니라 늘어난 모양이 됩니다.
-- [`drawRectSquircle`](#drawRectSquircle)(모서리만 둥글고 변은 직선)과 달리, 여기서는 윤곽 전체가 하나의 연속된 초타원이 됩니다. 현재의 [`fill`](#fill) / [`noFill`](#noFill) 모드에 따라 채워지거나 윤곽선으로 그려집니다.
+- 사각형 `(x, y, w, h)` 안에 꼭 맞는 초타원(라메 곡선, `|x/rx|^n + |y/ry|^n = 1`)을 그립니다. 인자 `(x, y, w, h)` 또는 `Vec3 pos, Vec2 size`와 왼쪽 위 모서리를 기준으로 하는 점은 `drawRect`와 같습니다.
+- 윤곽 전체가 하나의 연속된 곡선입니다. `drawRectSquircle`은 모서리만 둥글게 하고 모서리 사이는 직선으로 둡니다. 하나로 이어진 윤곽을 원하면 `drawRectRounded` 대신 `drawSuperellipse`를 사용할 수 있습니다.
+- 지수 `n`에 따라 모양 전체가 바뀝니다. `2`는 타원, `4`는 스쿼클이 되며, 값이 클수록 사각형에 가까워집니다. `1`은 마름모가 되고, `1` 미만에서는 안쪽으로 오목한 별 같은 모양이 됩니다.
+- 기본값 `n = 5`는 Apple 앱 아이콘에 가까운 모양입니다. 고전적인 Piet Hein의 초타원은 `n = 2.5`입니다. `n <= 0`이면 아무것도 그리지 않습니다.
+- 가로세로 비율은 `w`와 `h`로 정해집니다. 정사각형이 아닌 사각형에서는 늘어난 모양이 됩니다.
+- `fill()` 다음에는 채워지고, `noFill()` 다음에는 윤곽선만 그려집니다. 채우기를 중심에서부터 만들기 때문에 `n`이 `1` 미만인 모양도 올바르게 채워집니다. `appendSuperellipse`로는 이런 모양이 올바르게 채워지지 않습니다.
 '''
 related = ["drawRectRounded", "drawRectSquircle", "drawEllipse", "appendSuperellipse"]
 snippet = '''
@@ -43822,16 +44004,19 @@ description.en = "Draw a triangle."
 description.ja = "三角形を描画する。"
 description.ko = "삼각형을 그린다."
 details.en = '''
-- Draws a triangle through three points: `(x1, y1), (x2, y2), (x3, y3)` for 2D, or `Vec3 p1, Vec3 p2, Vec3 p3` for 3D. Coordinates follow the same local, logical-unit convention as [`drawRect`](#drawRect); vertex order does not matter for filling.
-- Filled or outlined according to the current [`fill`](#fill) / [`noFill`](#noFill) mode. For shapes with more than three vertices, use [`beginShape`](#beginShape) / [`vertex`](#vertex) / `endShape()`.
+- Draws a triangle through three points: `(x1, y1)`, `(x2, y2)` and `(x3, y3)`. For 3D, pass three `Vec3` points. The coordinates work the same way as in `drawRect`: local coordinates in logical units.
+- After `fill()` the triangle is filled, and after `noFill()` only its outline is drawn. The order of the three points does not matter for filling.
+- For shapes with more than three corners, use `beginShape()`, `vertex` and `endShape()`.
 '''
 details.ja = '''
-- 3点を結んで三角形を描画します。2Dの場合は`(x1, y1), (x2, y2), (x3, y3)`、3Dの場合は `Vec3 p1, Vec3 p2, Vec3 p3`です。座標は [`drawRect`](#drawRect) と同じローカル・論理単位です。塗りつぶしに頂点の順序は関係しません。
-- 現在の [`fill`](#fill) / [`noFill`](#noFill) モードに従って塗りつぶされるか輪郭線で描かれます。4頂点以上の図形を描きたい場合は[`beginShape`](#beginShape) / [`vertex`](#vertex) / `endShape()` を使ってください。
+- 3 つの点 `(x1, y1)`、`(x2, y2)`、`(x3, y3)` を結ぶ三角形を描画します。3D では `Vec3` を 3 つ渡します。座標の扱いは `drawRect` と同じで、ローカル座標・論理単位です。
+- `fill()` のあとでは塗りつぶされ、`noFill()` のあとでは輪郭線だけが描かれます。塗りつぶしに 3 つの点の順番は関係ありません。
+- 角が 4 つ以上ある図形を描きたい場合は、`beginShape()`、`vertex`、`endShape()` を使ってください。
 '''
 details.ko = '''
-- 세 점을 연결하여 삼각형을 그립니다. 2D에서는 `(x1, y1), (x2, y2), (x3, y3)`, 3D에서는 `Vec3 p1, Vec3 p2, Vec3 p3`입니다. 좌표는 [`drawRect`](#drawRect)와 같은 로컬·논리 단위입니다. 채우기에 정점 순서는 영향을 주지 않습니다.
-- 현재의 [`fill`](#fill) / [`noFill`](#noFill) 모드에 따라 채워지거나 윤곽선으로 그려집니다. 정점이 4개 이상인 도형을 그리려면 [`beginShape`](#beginShape) / [`vertex`](#vertex) / `endShape()`를 사용하세요.
+- 세 점 `(x1, y1)`, `(x2, y2)`, `(x3, y3)`을 잇는 삼각형을 그립니다. 3D에서는 `Vec3` 세 개를 전달합니다. 좌표 처리는 `drawRect`와 같으며, 로컬 좌표와 논리 단위를 사용합니다.
+- `fill()` 다음에는 채워지고, `noFill()` 다음에는 윤곽선만 그려집니다. 채우기에는 세 점의 순서가 영향을 주지 않습니다.
+- 꼭짓점이 4개 이상인 도형을 그리려면 `beginShape()`, `vertex`, `endShape()`를 사용하세요.
 '''
 snippet = '''
 void tcApp::draw() {
@@ -44058,13 +44243,19 @@ description.ja = "バッチ線描画を終了し、蓄積された全線分を�
 description.ko = "배치 선 그리기를 종료하고 누적된 모든 선분을 렌더링한다."
 related = ["beginLines"]
 details.en = '''
-- Closes the buffer opened by [`beginLines`](#beginLines) and draws every accumulated pair of vertices as an independent line segment, then clears the buffer. If fewer than 2 vertices were added, nothing is drawn. See [`beginLines`](#beginLines) for the full pattern and a code example.
+- Draws the points added since `beginLines()` as separate segments, two points per segment, and then empties the buffer.
+- If fewer than 2 points were added, nothing is drawn.
+- See `beginLines` for the full pattern and a code example.
 '''
 details.ja = '''
-- [`beginLines`](#beginLines) で開いたバッファを閉じ、蓄積された頂点ペアをそれぞれ独立した線分として描画してから、バッファをクリアします。追加された頂点が 2 個未満の場合は何も描画されません。パターン全体とコード例は[`beginLines`](#beginLines) を参照してください。
+- `beginLines()` 以降に追加した点を、2 点ずつ別々の線分として描画し、バッファを空にします。
+- 追加した点が 2 個未満のときは何も描画しません。
+- 全体の書き方とコード例は `beginLines` を参照してください。
 '''
 details.ko = '''
-- [`beginLines`](#beginLines)로 연 버퍼를 닫고, 누적된 정점 쌍을 각각 독립된 선분으로 그린 뒤 버퍼를 비웁니다. 추가된 정점이 2개 미만이면 아무것도 그려지지 않습니다. 전체 패턴과 코드 예시는 [`beginLines`](#beginLines)를 참고하세요.
+- `beginLines()` 이후에 추가한 점을 두 개씩 따로 떨어진 선분으로 그리고 버퍼를 비웁니다.
+- 추가한 점이 2개 미만이면 아무것도 그리지 않습니다.
+- 전체 작성법과 코드 예시는 `beginLines`를 참고하세요.
 '''
 
 ["endShadowPass"]
@@ -44096,16 +44287,28 @@ description.ja = "現在の図形の描画を終了する。"
 description.ko = "현재 도형 그리기를 종료한다."
 related = ["beginShape", "fill", "noFill"]
 details.en = '''
-- Closes the buffer opened by [`beginShape`](#beginShape) and draws it, then clears the buffer. Pass `endShape(true)` to also close the outline (connect the last vertex back to the first); the default is `false` (open outline).
-- If [`fill`](#fill) is on and there are at least 3 vertices, the polygon is filled as a triangle fan from the first vertex, regardless of the `close` argument — this only renders correctly for **convex** shapes; a concave polygon's fill can show wrong triangles. If [the stroke](#noFill) is on and there are at least 2 vertices, the outline is drawn as a thin (1px) line strip; `close` only affects this outline. See [`beginShape`](#beginShape) for the full pattern and a code example.
+- Draws the points added since `beginShape()` and then empties the buffer. See `beginShape` for the full pattern and a code example.
+- `endShape(true)` closes the outline by connecting the last point back to the first. The default is `false`, which leaves the outline open.
+- With `fill()` (the default), the shape is filled when it has 3 or more points. The `close` argument does not affect the fill.
+- With `noFill()`, only the outline is drawn as a thin 1px line when the shape has 2 or more points. Use `beginStroke` for thick lines.
+- Both use the color that is set when `endShape()` is called.
+- The fill is made of triangles that all start from the first point. It is correct only for **convex** shapes. A concave polygon may be filled incorrectly.
 '''
 details.ja = '''
-- [`beginShape`](#beginShape) で開いたバッファを閉じて描画し、バッファをクリアします。`endShape(true)` を渡すと輪郭も閉じます（最後の頂点を最初の頂点につなげます）。省略時は `false`（輪郭は開いたまま）です。
-- [`fill`](#fill) が有効で頂点が 3 個以上あれば、`close` の値に関係なく最初の頂点を起点とした三角形ファンとして塗りつぶされます。これは**凸形**のときだけ正しく描画され、凹形のポリゴンでは塗りつぶしが崩れることがあります。線描画が有効で頂点が 2 個以上あれば、輪郭が細い（1px）線として描かれ、`close` はこの輪郭にのみ影響します。パターン全体とコード例は[`beginShape`](#beginShape) を参照してください。
+- `beginShape()` 以降に追加した点を描画し、バッファを空にします。全体の書き方とコード例は `beginShape` を参照してください。
+- `endShape(true)` にすると、最後の点を最初の点につないで輪郭を閉じます。省略時は `false` で、輪郭は開いたままです。
+- `fill()`（初期状態）のときは、点が 3 個以上あれば塗りつぶします。`close` の値は塗りつぶしには影響しません。
+- `noFill()` のときは、点が 2 個以上あれば輪郭だけを細い 1px の線で描きます。太い線には `beginStroke` を使ってください。
+- どちらも `endShape()` を呼んだ時点の色で描かれます。
+- 塗りつぶしは、最初の点を共有する三角形を並べて作ります。そのため正しく塗れるのは**凸形**だけで、凹形のポリゴンでは塗りつぶしが崩れることがあります。
 '''
 details.ko = '''
-- [`beginShape`](#beginShape)로 연 버퍼를 닫고 그린 뒤 버퍼를 비웁니다. `endShape(true)`를 전달하면 윤곽도 닫습니다(마지막 정점을 첫 정점에 연결). 기본값은 `false`(열린 윤곽)입니다.
-- [`fill`](#fill)이 켜져 있고 정점이 3개 이상이면, `close` 값과 관계없이 첫 정점을 기준으로 한 삼각형 팬으로 채워집니다. 이는 **볼록한** 모양에서만 올바르게 그려지며, 오목한 폴리곤은 채우기가 잘못 보일 수 있습니다. 선이 켜져 있고 정점이 2개 이상이면 윤곽이 가는(1px) 선으로 그려지며, `close`는 이 윤곽에만 영향을 줍니다. 전체 패턴과 코드 예시는 [`beginShape`](#beginShape)를 참고하세요.
+- `beginShape()` 이후에 추가한 점을 그리고 버퍼를 비웁니다. 전체 작성법과 코드 예시는 `beginShape`를 참고하세요.
+- `endShape(true)`로 하면 마지막 점을 첫 점에 이어 윤곽을 닫습니다. 생략하면 `false`이며 윤곽은 열린 상태로 남습니다.
+- `fill()`(초기 상태)일 때는 점이 3개 이상이면 채워서 그립니다. `close` 값은 채우기에 영향을 주지 않습니다.
+- `noFill()`일 때는 점이 2개 이상이면 윤곽만 가는 1px 선으로 그립니다. 굵은 선에는 `beginStroke`를 사용하세요.
+- 어느 쪽이든 `endShape()`를 호출한 시점의 색으로 그려집니다.
+- 채우기는 첫 점을 공유하는 삼각형들로 만듭니다. 따라서 올바르게 채워지는 것은 **볼록한** 모양뿐이며, 오목한 폴리곤은 채우기가 잘못 보일 수 있습니다.
 '''
 
 ["endStroke"]
@@ -44116,13 +44319,19 @@ description.ja = "現在のストローク描画を終了する。"
 description.ko = "현재 stroke 그리기를 종료한다."
 related = ["beginStroke"]
 details.en = '''
-- Closes the buffer opened by [`beginStroke`](#beginStroke), builds the mesh (width / caps / joins) and draws it, then clears the buffer. Pass `endStroke(true)` to close the polyline into a loop (connect the last vertex back to the first); if your last vertex is already at the same position as the first, the duplicate point is dropped automatically so the closing segment does not render as a zero-length spike. At least 2 vertices are required. See [`beginStroke`](#beginStroke) for the full pattern and a code example.
+- Draws the points added since `beginStroke()` as a thick line with the stroke width, caps and joins, and then empties the buffer. At least 2 points are needed. See `beginStroke` for the full pattern and a code example.
+- `endStroke(true)` closes the line into a loop by connecting the last point back to the first.
+- When you close the loop, a last point placed at the same position as the first point is removed automatically. This prevents a small spike at the closing corner.
 '''
 details.ja = '''
-- [`beginStroke`](#beginStroke) で開いたバッファを閉じ、メッシュ（太さ /cap / join）を構築して描画した後、バッファをクリアします。`endStroke(true)` を渡すとポリラインをループとして閉じます（最後の頂点を最初の頂点につなげます）。最後の頂点がすでに最初の頂点と同じ位置にある場合は、その重複点が自動的に取り除かれるため、閉じる区間が長さ 0 のとがった形で描画されることはありません。最低 2 頂点が必要です。パターン全体とコード例は [`beginStroke`](#beginStroke) を参照してください。
+- `beginStroke()` 以降に追加した点を、線の太さ・cap・join を使った太い線として描画し、バッファを空にします。最低 2 点が必要です。全体の書き方とコード例は `beginStroke` を参照してください。
+- `endStroke(true)` にすると、最後の点を最初の点につないでループとして閉じます。
+- ループを閉じるとき、最後の点が最初の点と同じ位置にあれば、その点は自動的に取り除かれます。これにより、閉じた角に小さなとげが出ることを防ぎます。
 '''
 details.ko = '''
-- [`beginStroke`](#beginStroke)로 연 버퍼를 닫고, 메시(두께 / cap / join)를 구성해 그린 뒤 버퍼를 비웁니다. `endStroke(true)`를 전달하면 폴리라인을 루프로 닫습니다(마지막 정점을 첫 정점에 연결). 마지막 정점이 이미 첫 정점과 같은 위치에 있다면 그 중복 점은 자동으로 제거되어, 닫는 구간이 길이 0인 뾰족한 모양으로 그려지지 않습니다. 최소 2개의 정점이 필요합니다. 전체 패턴과 코드 예시는 [`beginStroke`](#beginStroke)를 참고하세요.
+- `beginStroke()` 이후에 추가한 점을 선 두께, cap, join을 적용한 굵은 선으로 그리고 버퍼를 비웁니다. 최소 2개의 점이 필요합니다. 전체 작성법과 코드 예시는 `beginStroke`를 참고하세요.
+- `endStroke(true)`로 하면 마지막 점을 첫 점에 이어 루프로 닫습니다.
+- 루프를 닫을 때 마지막 점이 첫 점과 같은 위치에 있으면 그 점은 자동으로 제거됩니다. 이렇게 해서 닫는 모서리에 작은 가시가 생기지 않도록 합니다.
 '''
 
 ["events"]
@@ -44860,13 +45069,13 @@ description.en = "Get the current blend mode."
 description.ja = "現在のブレンドモードを取得する。"
 description.ko = "현재 블렌드 모드를 얻는다."
 details.en = '''
-- Returns the `BlendMode` set by the last [`setBlendMode`](#setBlendMode) (or [`resetBlendMode`](#resetBlendMode)) call on the current target — `Alpha` by default.
+- Returns the `BlendMode` of the current drawing target (the window, or an Fbo between `begin()` and `end()`). It is the mode set by the last `setBlendMode()` or `resetBlendMode()` call, or restored by `popStyle()` or `resetStyle()`. The default is `Alpha`.
 '''
 details.ja = '''
-- 現在のターゲットで最後に呼ばれた [`setBlendMode`](#setBlendMode)（または[`resetBlendMode`](#resetBlendMode)）が設定した `BlendMode` を返します。デフォルトは`Alpha` です。
+- 現在の描画先（ウィンドウ、または `begin()` から `end()` までの Fbo）の `BlendMode` を返します。最後に `setBlendMode()` や `resetBlendMode()` で設定したモード、または `popStyle()` や `resetStyle()` で戻されたモードです。デフォルトは `Alpha` です。
 '''
 details.ko = '''
-- 현재 타깃에서 마지막으로 호출된 [`setBlendMode`](#setBlendMode)(또는 [`resetBlendMode`](#resetBlendMode))가 설정한 `BlendMode`를 반환합니다. 기본값은 `Alpha`입니다.
+- 현재 그리기 대상(윈도우, 또는 `begin()`부터 `end()`까지의 Fbo)의 `BlendMode`를 반환합니다. 마지막으로 `setBlendMode()`나 `resetBlendMode()`로 설정한 모드, 또는 `popStyle()`이나 `resetStyle()`로 되돌려진 모드입니다. 기본값은 `Alpha`입니다.
 '''
 related = ["BlendMode", "setBlendMode"]
 
@@ -45048,13 +45257,22 @@ description.en = "Get the current curve tessellation mode."
 description.ja = "現在の曲線テッセレーションモードを取得する。"
 description.ko = "현재 곡선 tessellation 모드를 얻는다."
 details.en = '''
-- Returns `CurveStyle::Mode::Tolerance` (the default — segment count adapts to radius and scale to hit [`setCurveTolerance`](#setCurveTolerance)'s pixel budget) or `CurveStyle::Mode::Resolution` (a fixed segment count from [`setCurveResolution`](#setCurveResolution), regardless of radius). See [`drawCurve`](#drawCurve) for the full comparison.
+- Returns `CurveStyle::Mode::Tolerance` or `CurveStyle::Mode::Resolution`.
+- `Tolerance` is the default. The segment count follows the radius and the current scale, so that the curve stays within the pixel tolerance set by `setCurveTolerance()`.
+- `Resolution` uses the fixed segment count set by `setCurveResolution()`, regardless of the radius.
+- Calling `setCurveTolerance()` or `setCurveResolution()` switches to that mode.
 '''
 details.ja = '''
-- `CurveStyle::Mode::Tolerance`（デフォルト。[`setCurveTolerance`](#setCurveTolerance)で指定したピクセル単位の許容誤差に収まるよう、半径と拡大率に応じて分割数が自動調整される）か、`CurveStyle::Mode::Resolution`（半径にかかわらず[`setCurveResolution`](#setCurveResolution) で指定した固定の分割数を使う）を返します。2 つのモードの比較は [`drawCurve`](#drawCurve) を参照してください。
+- `CurveStyle::Mode::Tolerance` か `CurveStyle::Mode::Resolution` を返します。
+- `Tolerance` がデフォルトです。`setCurveTolerance()` で指定したピクセル単位の許容誤差に収まるように、半径と現在の拡大率に応じて分割数が決まります。
+- `Resolution` は、半径にかかわらず `setCurveResolution()` で指定した固定の分割数を使います。
+- `setCurveTolerance()` または `setCurveResolution()` を呼ぶと、それぞれのモードに切り替わります。
 '''
 details.ko = '''
-- `CurveStyle::Mode::Tolerance`(기본값. [`setCurveTolerance`](#setCurveTolerance)로 지정한 픽셀 단위 허용 오차에 맞도록 반지름과 배율에 따라 분할 수가 자동 조정됨) 또는 `CurveStyle::Mode::Resolution`(반지름과 무관하게 [`setCurveResolution`](#setCurveResolution)으로 지정한 고정 분할 수를 사용)을 반환합니다. 두 모드의 비교는 [`drawCurve`](#drawCurve)를 참고하세요.
+- `CurveStyle::Mode::Tolerance` 또는 `CurveStyle::Mode::Resolution`을 반환합니다.
+- `Tolerance`가 기본값입니다. `setCurveTolerance()`로 지정한 픽셀 단위 허용 오차 안에 들어가도록 반지름과 현재 배율에 따라 분할 수가 정해집니다.
+- `Resolution`은 반지름과 관계없이 `setCurveResolution()`으로 지정한 고정 분할 수를 사용합니다.
+- `setCurveTolerance()` 또는 `setCurveResolution()`을 호출하면 각각의 모드로 전환됩니다.
 '''
 
 ["getCurveResolution"]
@@ -45064,13 +45282,16 @@ description.en = "Get the segment count used in resolution mode."
 description.ja = "分割数モードで使われるセグメント数を取得する。"
 description.ko = "분할 수 모드에서 사용되는 세그먼트 수를 얻는다."
 details.en = '''
-- Returns the value last set by [`setCurveResolution`](#setCurveResolution) (60 by default), regardless of which [curve mode](#getCurveMode) is currently active — see [`drawCurve`](#drawCurve) for how the two modes differ.
+- Returns the value last set by `setCurveResolution()`. The default is 60.
+- It returns this value whichever curve mode is active (see `getCurveMode`), but the value is used only in resolution mode. See `setCurveResolution` and `setCurveTolerance` for how the two modes differ.
 '''
 details.ja = '''
-- 現在どちらの[曲線モード](#getCurveMode)が有効かにかかわらず、[`setCurveResolution`](#setCurveResolution) が最後に設定した値（デフォルトは 60）を返します。2 つのモードの違いは [`drawCurve`](#drawCurve) を参照してください。
+- `setCurveResolution()` で最後に設定した値を返します。デフォルトは 60 です。
+- どちらの曲線モードが有効でも（`getCurveMode` を参照）この値を返しますが、実際に使われるのは分割数モードのときだけです。2 つのモードの違いは `setCurveResolution` と `setCurveTolerance` を参照してください。
 '''
 details.ko = '''
-- 현재 어떤 [곡선 모드](#getCurveMode)가 활성화되어 있는지와 무관하게, [`setCurveResolution`](#setCurveResolution)이 마지막으로 설정한 값(기본값 60)을 반환합니다. 두 모드의 차이는 [`drawCurve`](#drawCurve)를 참고하세요.
+- `setCurveResolution()`으로 마지막에 설정한 값을 반환합니다. 기본값은 60입니다.
+- 어떤 곡선 모드가 활성화되어 있든(`getCurveMode` 참고) 이 값을 반환하지만, 실제로 사용되는 것은 분할 수 모드일 때뿐입니다. 두 모드의 차이는 `setCurveResolution`과 `setCurveTolerance`를 참고하세요.
 '''
 related = ["setCurveResolution"]
 
@@ -45081,13 +45302,16 @@ description.en = "Get the current curve tessellation tolerance, in pixels."
 description.ja = "現在の曲線分割の許容誤差を、ピクセル単位で取得する。"
 description.ko = "현재 곡선 분할 허용 오차를 픽셀 단위로 얻는다."
 details.en = '''
-- Returns the value last set by [`setCurveTolerance`](#setCurveTolerance) (0.1 pixels by default), regardless of which [curve mode](#getCurveMode) is currently active.
+- Returns the value last set by `setCurveTolerance()`, in pixels. The default is 0.1 pixels.
+- It returns this value whichever curve mode is active (see `getCurveMode`), but the value is used only in tolerance mode.
 '''
 details.ja = '''
-- 現在どちらの[曲線モード](#getCurveMode)が有効かにかかわらず、[`setCurveTolerance`](#setCurveTolerance) が最後に設定した値（デフォルトは0.1 ピクセル）を返します。
+- `setCurveTolerance()` で最後に設定した値を、ピクセル単位で返します。デフォルトは 0.1 ピクセルです。
+- どちらの曲線モードが有効でも（`getCurveMode` を参照）この値を返しますが、実際に使われるのは許容誤差モードのときだけです。
 '''
 details.ko = '''
-- 현재 어떤 [곡선 모드](#getCurveMode)가 활성화되어 있는지와 무관하게, [`setCurveTolerance`](#setCurveTolerance)가 마지막으로 설정한 값(기본값 0.1 픽셀)을 반환합니다.
+- `setCurveTolerance()`로 마지막에 설정한 값을 픽셀 단위로 반환합니다. 기본값은 0.1픽셀입니다.
+- 어떤 곡선 모드가 활성화되어 있든(`getCurveMode` 참고) 이 값을 반환하지만, 실제로 사용되는 것은 허용 오차 모드일 때뿐입니다.
 '''
 related = ["setCurveTolerance"]
 
@@ -49114,21 +49338,21 @@ description.en = "Restore the style saved by the matching pushStyle()."
 description.ja = "対応する pushStyle() が保存したスタイルを復元する。"
 description.ko = "대응하는 pushStyle()이 저장한 스타일을 복원한다."
 details.en = '''
-- popStyle() takes the style saved by the matching [`pushStyle`](#pushStyle) off the stack and makes it current again — color, fill/stroke, point and curve settings, text alignment, and blend mode all at once. See [`pushStyle`](#pushStyle) for exactly what is saved and for how TrussC resets style before each Node's draw().
-- Depth testing is not saved by `pushStyle()` or restored by `popStyle()`; `popStyle()` restores the blend mode using the current depth setting, so call `disableDepthTest()` explicitly to turn depth testing off.
-- Calling popStyle() with nothing left on the stack (more pops than pushes) logs a rate-limited warning and does nothing; the stack and the current style stay as they were.
+- `popStyle()` takes the style saved by the matching `pushStyle()` off the stack and makes it current again. The color, fill and stroke, point and curve settings, text alignment, and blend mode all return at once. See `pushStyle` for the full list of saved items and for how TrussC resets the style before each Node's `draw()`.
+- If nothing is left on the stack (more pops than pushes), a rate-limited warning is logged and nothing happens. The stack and the current style stay as they are. Inside a Node's `draw()`, a pop that would remove a style pushed outside that node is refused in the same way.
+- The depth test setting is not saved by `pushStyle()` and is not restored by `popStyle()`. `popStyle()` restores the blend mode with the current depth test setting, so call `disableDepthTest()` yourself when you want the depth test off.
 - Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (inside a camera scope this turns the depth test off unless enableDepthTest() is on).
 '''
 details.ja = '''
-- popStyle() は、対応する [`pushStyle`](#pushStyle) がスタックに保存したスタイル（色、塗り/ストローク、点や曲線の設定、文字の配置、ブレンドモード）を取り出し、まとめて現在の状態に戻します。何が保存され、Node の draw() の前にどのようにリセットされるかは [`pushStyle`](#pushStyle) を参照してください。
-- デプステストの有効状態は `pushStyle()` で保存されず、`popStyle()` でも復元されません。`popStyle()` は現在のデプステスト設定でブレンドモードを復元するため、無効に戻すには `disableDepthTest()` を明示的に呼んでください。
-- スタックに何も残っていない状態で popStyle() を呼ぶと（push より pop が多い場合）、頻度を抑えた警告が出力されて何も起こりません。スタックと現在のスタイルはそのまま保たれます。
+- `popStyle()` は、対応する `pushStyle()` がスタックに保存したスタイルを取り出し、現在の状態に戻します。色、塗りとストローク、点や曲線の設定、文字の配置、ブレンドモードがまとめて戻ります。保存される項目の一覧と、Node の `draw()` の前にスタイルがリセットされる仕組みは `pushStyle` を参照してください。
+- スタックに何も残っていない状態で呼ぶと（push より pop が多い場合）、頻度を抑えた警告が出力され、何も起こりません。スタックと現在のスタイルはそのまま保たれます。Node の `draw()` の中では、その Node の外で push されたスタイルを取り出そうとする pop も、同じように無視されます。
+- デプステストの設定は `pushStyle()` で保存されず、`popStyle()` でも復元されません。`popStyle()` は現在のデプステスト設定のままブレンドモードを戻すため、デプステストを無効にしたい場合は `disableDepthTest()` を明示的に呼んでください。
 - 既知の問題: [#915](https://github.com/TrussC-org/TrussC/issues/915)（カメラの範囲内では、enableDepthTest() を有効にしていないと深度テストが切れる）。
 '''
 details.ko = '''
-- popStyle()은 대응하는 [`pushStyle`](#pushStyle)이 스택에 저장한 스타일(색상, 채우기/스트로크, 포인트·곡선 설정, 텍스트 정렬, 블렌드 모드)을 꺼내어 한꺼번에 현재 상태로 되돌립니다. 무엇이 저장되는지, Node의 draw() 전에 어떻게 초기화되는지는 [`pushStyle`](#pushStyle)을 참고하세요.
-- 깊이 테스트의 활성 상태는 `pushStyle()`로 저장되거나 `popStyle()`로 복원되지 않습니다. `popStyle()`은 현재 깊이 테스트 설정으로 블렌드 모드를 복원하므로, 깊이 테스트를 끄려면 `disableDepthTest()`를 명시적으로 호출해야 합니다.
-- 스택에 아무것도 남지 않은 상태에서 popStyle()을 호출하면(push보다 pop이 많은 경우) 빈도를 제한한 경고가 출력되고 아무 일도 일어나지 않습니다. 스택과 현재 스타일은 그대로 유지됩니다.
+- `popStyle()`은 대응하는 `pushStyle()`이 스택에 저장한 스타일을 꺼내어 현재 상태로 되돌립니다. 색상, 채우기와 스트로크, 포인트·곡선 설정, 텍스트 정렬, 블렌드 모드가 한꺼번에 돌아갑니다. 저장되는 항목의 목록과 Node의 `draw()` 전에 스타일이 초기화되는 방식은 `pushStyle`을 참고하세요.
+- 스택에 아무것도 남지 않은 상태에서 호출하면(push보다 pop이 많은 경우) 빈도를 제한한 경고가 출력되고 아무 일도 일어나지 않습니다. 스택과 현재 스타일은 그대로 유지됩니다. Node의 `draw()` 안에서는 그 Node 바깥에서 push된 스타일을 꺼내려는 pop도 같은 방식으로 무시됩니다.
+- 깊이 테스트 설정은 `pushStyle()`로 저장되지 않고 `popStyle()`로 복원되지도 않습니다. `popStyle()`은 현재 깊이 테스트 설정 그대로 블렌드 모드를 되돌리므로, 깊이 테스트를 끄려면 `disableDepthTest()`를 명시적으로 호출하세요.
 - 알려진 문제: [#915](https://github.com/TrussC-org/TrussC/issues/915)(카메라 범위 안에서는 enableDepthTest()를 켜지 않으면 깊이 테스트가 꺼짐).
 '''
 related = ["pushStyle", "popMatrix"]
@@ -49319,25 +49543,25 @@ description.en = "Save the current style onto a stack."
 description.ja = "現在のスタイルをスタックに保存する。"
 description.ko = "현재 스타일을 스택에 저장한다."
 details.en = '''
-- pushStyle() saves the entire current style onto a stack: the draw color, whether fill and stroke are enabled and how wide the stroke is, the point size and shape, the curve tessellation settings, text alignment, and the blend mode. [`popStyle`](#popStyle) restores all of it back to what it was when you pushed.
-- [`resetStyle`](#resetStyle) sets the style to its defaults: white color, fill enabled, stroke disabled, stroke weight 1, point size 1 with the Square point style, curves in tolerance mode at 0.1 pixels, text aligned to the top-left, and blend mode Alpha.
-- TrussC calls resetStyle() automatically right before every Node's draw() runs. Because of that, a node never inherits the style its parent or an earlier sibling left behind; it always starts drawing from these defaults. resetStyle() runs again once that node (including its children) has finished drawing, so nothing it changed leaks into whatever draws next.
-- Call popStyle() once for every pushStyle(). An extra popStyle() logs a rate-limited warning and is ignored; an unmatched pushStyle() left open is cleaned up automatically at the end of the frame or callback, so it does not build up over time, though it is still a bug worth fixing.
-- For code with several exits or long blocks, consider [`scopedStyle`](#scopedStyle), which pops automatically when its scope ends.
+- `pushStyle()` saves the whole current style on a stack. This includes the draw color, whether fill and stroke are on, the stroke weight, cap and join, the point size and shape, the curve quality settings, the text alignment, the bitmap text line height, and the blend mode. `popStyle()` restores all of it to the state at the time of the push.
+- Call `popStyle()` once for every `pushStyle()`. For code with several exits or long blocks, `scopedStyle()` is convenient because it pops automatically when the scope ends.
+- `resetStyle()` returns the style to its defaults: white color, fill on, stroke off, stroke weight 1 with the `Butt` cap and `Miter` join, point size 1 with the `Square` point style, curves in tolerance mode at 0.1 pixels, text aligned to the top-left, and blend mode `Alpha`.
+- TrussC calls `resetStyle()` automatically right before each Node's `draw()`. For this reason, a node does not inherit the style that its parent or an earlier sibling left behind, and it always starts drawing from the defaults. `resetStyle()` runs again after the node and its children have finished drawing, so the node's changes do not carry over to what is drawn next.
+- If you call `popStyle()` more times than `pushStyle()`, a warning is logged (rate-limited) and the extra call is ignored. A `pushStyle()` left without a matching pop is removed with a warning at the end of that Node's `draw()`, or at the end of the frame or callback, so it does not pile up. It is still a bug that you should fix.
 '''
 details.ja = '''
-- pushStyle() は、描画色、塗り・ストロークの有効状態と太さ、点のサイズと形、曲線の分割設定、文字の配置、ブレンドモードなど、現在のスタイル一式をスタックに保存します。[`popStyle`](#popStyle) を呼ぶと、保存した時点の状態にまとめて復元されます。
-- [`resetStyle`](#resetStyle) は、スタイルを初期値（白色、塗り有効、ストローク無効、線幅 1、点サイズ 1・Square、曲線は許容誤差モードで 0.1px、文字配置は左上、ブレンドはAlpha）に戻します。
-- 各 Node の draw() が呼ばれる直前に、TrussC が自動で resetStyle() を実行します。そのため、どの Node も親や先に描かれた兄弟ノードのスタイルを引き継がず、常にこの初期値から描き始めます。その Node（子ノードを含む）の描画が終わったあとにもresetStyle() が実行されるため、変更したスタイルが後続の処理に残ることはありません。
-- pushStyle() した回数だけ popStyle() を呼ぶのが基本です。popStyle() が多すぎる場合は頻度を抑えた警告が出力されて無視され、逆に pushStyle() が残っている場合は、フレームやコールバックの終わりで TrussC が自動的に辻褄を合わせます。ただし、それでも書き忘れは修正すべき不具合です。
-- 出口が複数あるコードや長いブロックでは、スコープを抜けると自動的にポップされる[`scopedStyle`](#scopedStyle) の利用も検討してください。
+- `pushStyle()` は、現在のスタイル一式をスタックに保存します。保存されるのは、描画色、塗りとストロークの有効状態、ストロークの太さ・端の形・角の形、点のサイズと形、曲線の品質設定、文字の配置、ビットマップ文字の行の高さ、ブレンドモードです。`popStyle()` を呼ぶと、保存した時点の状態にまとめて戻ります。
+- `pushStyle()` を呼んだ回数だけ `popStyle()` を呼んでください。出口が複数あるコードや長いブロックでは、スコープを抜けると自動でポップされる `scopedStyle()` が便利です。
+- `resetStyle()` は、スタイルを初期値に戻します。初期値は、白色、塗り有効、ストローク無効、線幅 1（端は `Butt`、角は `Miter`）、点サイズ 1・`Square`、曲線は許容誤差モードで 0.1 ピクセル、文字配置は左上、ブレンドモードは `Alpha` です。
+- 各 Node の `draw()` が呼ばれる直前に、TrussC が自動で `resetStyle()` を実行します。そのため、Node は親や先に描かれた兄弟ノードが残したスタイルを引き継がず、常に初期値から描き始めます。その Node と子ノードの描画が終わったあとにも `resetStyle()` が実行されるため、変更したスタイルが次に描くものに残ることはありません。
+- `popStyle()` を `pushStyle()` より多く呼ぶと、頻度を抑えた警告が出力され、余分な呼び出しは無視されます。対応する pop がないまま残った `pushStyle()` は、その Node の `draw()` の終わり、またはフレームやコールバックの終わりに、警告とともに取り除かれます。そのため積み重なることはありませんが、修正すべき不具合であることに変わりはありません。
 '''
 details.ko = '''
-- pushStyle()는 그림색, 채우기·스트로크 사용 여부와 두께, 포인트 크기와 모양, 곡선 분할 설정, 텍스트 정렬, 블렌드 모드 등 현재 스타일 전체를 스택에 저장합니다. [`popStyle`](#popStyle)을 호출하면 저장했던 시점의 상태로 한꺼번에 복원됩니다.
-- [`resetStyle`](#resetStyle)은 스타일을 기본값(흰색, 채우기 활성, 스트로크 비활성, 선 두께 1, 포인트 크기 1·Square, 곡선은 허용오차 모드 0.1px, 텍스트 정렬은 좌상단, 블렌드는 Alpha)으로 되돌립니다.
-- 각 Node의 draw()가 호출되기 직전에 TrussC가 자동으로 resetStyle()을 실행합니다. 그래서 모든 Node는 부모나 먼저 그려진 형제 노드의 스타일을 물려받지 않고 항상 이 기본값에서 그리기를 시작합니다. 해당 Node(자식 포함)의 그리기가 끝난 뒤에도 resetStyle()이 다시 실행되므로, 변경한 스타일이 이후 처리에 남지 않습니다.
-- pushStyle()을 호출한 횟수만큼 popStyle()을 호출하는 것이 기본입니다. popStyle()이 더 많으면 빈도를 제한한 경고가 출력되고 무시되며, 반대로 pushStyle()이 남아 있으면 프레임이나 콜백이 끝날 때 TrussC가 자동으로 맞춰줍니다. 다만 이 역시 고쳐야 할 버그입니다.
-- 출구가 여러 개이거나 긴 블록에서는 스코프를 벗어나면 자동으로 pop되는 [`scopedStyle`](#scopedStyle) 사용도 고려하세요.
+- `pushStyle()`는 현재 스타일 전체를 스택에 저장합니다. 저장되는 것은 그리기 색, 채우기와 스트로크의 사용 여부, 스트로크의 두께·끝 모양·모서리 모양, 포인트 크기와 모양, 곡선 품질 설정, 텍스트 정렬, 비트맵 텍스트의 줄 높이, 블렌드 모드입니다. `popStyle()`을 호출하면 저장한 시점의 상태로 한꺼번에 돌아갑니다.
+- `pushStyle()`을 호출한 횟수만큼 `popStyle()`을 호출하세요. 출구가 여러 개인 코드나 긴 블록에서는 스코프를 벗어날 때 자동으로 pop되는 `scopedStyle()`이 편리합니다.
+- `resetStyle()`은 스타일을 기본값으로 되돌립니다. 기본값은 흰색, 채우기 활성, 스트로크 비활성, 선 두께 1(끝은 `Butt`, 모서리는 `Miter`), 포인트 크기 1·`Square`, 곡선은 허용 오차 모드 0.1픽셀, 텍스트 정렬은 좌상단, 블렌드 모드는 `Alpha`입니다.
+- 각 Node의 `draw()`가 호출되기 직전에 TrussC가 자동으로 `resetStyle()`을 실행합니다. 그래서 Node는 부모나 먼저 그려진 형제 노드가 남긴 스타일을 물려받지 않고, 항상 기본값에서 그리기를 시작합니다. 해당 Node와 자식 노드의 그리기가 끝난 뒤에도 `resetStyle()`이 실행되므로, 변경한 스타일이 다음에 그리는 것에 남지 않습니다.
+- `popStyle()`을 `pushStyle()`보다 많이 호출하면 빈도를 제한한 경고가 출력되고 남는 호출은 무시됩니다. 대응하는 pop 없이 남은 `pushStyle()`은 해당 Node의 `draw()`가 끝날 때, 또는 프레임이나 콜백이 끝날 때 경고와 함께 제거됩니다. 그래서 쌓이지는 않지만, 고쳐야 할 버그인 것은 변함없습니다.
 '''
 related = ["popStyle", "pushMatrix", "scopedStyle"]
 snippet = '''
@@ -49729,13 +49953,13 @@ description.en = "Reset the blend mode to Alpha (the default)."
 description.ja = "ブレンドモードを Alpha（デフォルト）にリセットする。"
 description.ko = "블렌드 모드를 Alpha(기본값)로 초기화한다."
 details.en = '''
-- Equivalent to `setBlendMode(BlendMode::Alpha)`. Call it after a temporary `Add`, `Multiply`, `Screen` or `Subtract` so later drawing is not affected — see [`setBlendMode`](#setBlendMode) for how long a mode persists.
+- This is the same as `setBlendMode(BlendMode::Alpha)`. Call it after a temporary `Add`, `Multiply`, `Screen` or `Subtract` so that later drawing is not affected. See `setBlendMode` for how long a mode stays in effect.
 '''
 details.ja = '''
-- `setBlendMode(BlendMode::Alpha)` と同じです。一時的に `Add` / `Multiply` /`Screen` / `Subtract` を使ったあとに呼び、後続の描画に影響が残らないようにしてください。モードがどこまで持続するかは [`setBlendMode`](#setBlendMode) を参照してください。
+- `setBlendMode(BlendMode::Alpha)` と同じです。一時的に `Add`、`Multiply`、`Screen`、`Subtract` を使ったあとに呼び、後の描画に影響が残らないようにしてください。モードがいつまで有効かは `setBlendMode` を参照してください。
 '''
 details.ko = '''
-- `setBlendMode(BlendMode::Alpha)`와 동일합니다. 일시적으로 `Add` / `Multiply` / `Screen` / `Subtract`를 사용한 뒤 호출하여 이후 그리기에 영향이 남지 않도록 하세요. 모드가 얼마나 유지되는지는 [`setBlendMode`](#setBlendMode)를 참고하세요.
+- `setBlendMode(BlendMode::Alpha)`와 같습니다. 일시적으로 `Add`, `Multiply`, `Screen`, `Subtract`를 사용한 뒤 호출하여 이후 그리기에 영향이 남지 않도록 하세요. 모드가 언제까지 유지되는지는 `setBlendMode`를 참고하세요.
 '''
 related = ["setBlendMode", "getBlendMode"]
 
@@ -49818,18 +50042,21 @@ description.en = "Reset the current style to its default values."
 description.ja = "現在のスタイルを初期値にリセットする。"
 description.ko = "현재 스타일을 기본값으로 초기화한다."
 details.en = '''
-- resetStyle() sets the current style back to its defaults: white color (1, 1, 1, 1), fill enabled, stroke disabled, stroke weight 1 logical pixel, point size 1 with the Square point style, curves in tolerance mode at 0.1 pixels, text aligned to the top-left, and blend mode Alpha.
-- This does not touch the [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle) stack: it only changes the current style, so a later popStyle() still restores whatever was pushed before resetStyle() was called, not these defaults. TrussC also calls resetStyle() automatically right before (and again right after) every Node's draw() — see [`pushStyle`](#pushStyle) for what that means for your own draw() code.
+- `resetStyle()` sets the current style back to its defaults: white color (1, 1, 1, 1), fill on, stroke off, stroke weight 1 logical pixel with the `Butt` cap and `Miter` join, point size 1 with the `Square` point style, curves in tolerance mode at 0.1 pixels, text aligned to the top-left, and blend mode `Alpha`.
+- It changes only the current style and does not touch the `pushStyle()` / `popStyle()` stack. A later `popStyle()` therefore restores what was pushed before `resetStyle()` was called, not these defaults.
+- TrussC also calls `resetStyle()` automatically right before and right after each Node's `draw()`. See `pushStyle` for what this means for your own `draw()` code.
 - Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (inside a camera scope this turns the depth test off unless enableDepthTest() is on).
 '''
 details.ja = '''
-- resetStyle() は、現在のスタイルを初期値（白色 (1, 1, 1, 1)、塗り有効、ストローク無効、線幅 1 論理ピクセル、点サイズ 1・Square、曲線は許容誤差モードで 0.1px、文字配置は左上、ブレンドは Alpha）に戻します。
-- これは [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle) のスタックには影響しません。変更するのは現在のスタイルだけなので、あとで popStyle() を呼んだときは resetStyle()を呼ぶ前に push した状態に戻ります（この初期値には戻りません）。また、TrussC は各Node の draw() の直前（と直後）にも自動で resetStyle() を実行します。自分の draw()コードにとっての意味は [`pushStyle`](#pushStyle) を参照してください。
+- `resetStyle()` は、現在のスタイルを初期値に戻します。初期値は、白色 (1, 1, 1, 1)、塗り有効、ストローク無効、線幅 1 論理ピクセル（端は `Butt`、角は `Miter`）、点サイズ 1・`Square`、曲線は許容誤差モードで 0.1 ピクセル、文字配置は左上、ブレンドモードは `Alpha` です。
+- 変更するのは現在のスタイルだけで、`pushStyle()` / `popStyle()` のスタックには影響しません。そのため、あとで `popStyle()` を呼ぶと、この初期値ではなく、`resetStyle()` を呼ぶ前に push した状態に戻ります。
+- TrussC は、各 Node の `draw()` の直前と直後にも自動で `resetStyle()` を実行します。自分の `draw()` のコードにどう影響するかは `pushStyle` を参照してください。
 - 既知の問題: [#915](https://github.com/TrussC-org/TrussC/issues/915)（カメラの範囲内では、enableDepthTest() を有効にしていないと深度テストが切れる）。
 '''
 details.ko = '''
-- resetStyle()은 현재 스타일을 기본값(흰색 (1, 1, 1, 1), 채우기 활성, 스트로크 비활성, 선 두께 1 논리 픽셀, 포인트 크기 1·Square, 곡선은 허용오차 모드 0.1px, 텍스트 정렬은 좌상단, 블렌드는 Alpha)으로 되돌립니다.
-- 이는 [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle) 스택에는 영향을 주지 않습니다. 바뀌는 것은 현재 스타일뿐이므로, 이후 popStyle()을 호출하면 resetStyle()을 부르기 전에 push했던 상태로 돌아갑니다(이 기본값으로 돌아가지 않습니다). 또한 TrussC는 각 Node의 draw() 바로 전(과 바로 후)에도 자동으로 resetStyle()을 실행합니다. 자신의 draw() 코드에 어떤 의미인지는 [`pushStyle`](#pushStyle)을 참고하세요.
+- `resetStyle()`은 현재 스타일을 기본값으로 되돌립니다. 기본값은 흰색 (1, 1, 1, 1), 채우기 활성, 스트로크 비활성, 선 두께 1 논리 픽셀(끝은 `Butt`, 모서리는 `Miter`), 포인트 크기 1·`Square`, 곡선은 허용 오차 모드 0.1픽셀, 텍스트 정렬은 좌상단, 블렌드 모드는 `Alpha`입니다.
+- 바뀌는 것은 현재 스타일뿐이며, `pushStyle()` / `popStyle()` 스택에는 영향을 주지 않습니다. 그래서 이후 `popStyle()`을 호출하면 이 기본값이 아니라 `resetStyle()`을 호출하기 전에 push한 상태로 돌아갑니다.
+- TrussC는 각 Node의 `draw()` 직전과 직후에도 자동으로 `resetStyle()`을 실행합니다. 자신의 `draw()` 코드에 어떤 영향이 있는지는 `pushStyle`을 참고하세요.
 - 알려진 문제: [#915](https://github.com/TrussC-org/TrussC/issues/915)(카메라 범위 안에서는 enableDepthTest()를 켜지 않으면 깊이 테스트가 꺼짐).
 '''
 
@@ -50417,19 +50644,22 @@ description.en = "Push the style now; pop it automatically when the scope ends."
 description.ja = "今スタイルをプッシュし、スコープが終わるときに自動でポップする。"
 description.ko = "지금 스타일을 push하고, 스코프가 끝날 때 자동으로 pop한다."
 details.en = '''
-- `auto s = scopedStyle();` calls [`pushStyle`](#pushStyle) immediately and returns a StyleScope guard that calls [`popStyle`](#popStyle) when it goes out of scope — on a normal fall-through, an early return, or an exception. It is meant for code with several exits or long blocks, where a plain popStyle() is easy to forget; pushStyle() / popStyle() remain the everyday form.
-- The guard is marked [[nodiscard]], so writing `scopedStyle();` alone (ignoring the return value) pops immediately and triggers a compiler warning — assign it to a named variable instead.
-- C++ only: Lua has no scope-bound guard, so Lua code uses pushStyle() / popStyle() directly.
+- `auto s = scopedStyle();` calls `pushStyle()` immediately and returns a `StyleScope` guard. The guard calls `popStyle()` when it goes out of scope, whether the block ends normally, returns early, or throws an exception.
+- It is meant for code with several exits or long blocks, where a plain `popStyle()` is easy to forget. For everyday code, `pushStyle()` and `popStyle()` remain the usual form.
+- Always assign the result to a named variable. The guard is marked `[[nodiscard]]`, so writing `scopedStyle();` alone causes a compiler warning, and the style is popped again right away.
+- This is C++ only. Lua has no scope guard, so Lua code uses `pushStyle()` and `popStyle()` directly.
 '''
 details.ja = '''
-- `auto s = scopedStyle();` は、呼んだ時点で即座に [`pushStyle`](#pushStyle) を実行し、スコープを抜けるとき（通常の終了・早期 return・例外のいずれでも）に[`popStyle`](#popStyle) を実行する StyleScope ガードを返します。出口が複数あるコードや長いブロックで、素の popStyle() の書き忘れを防ぐためのものです。基本の書き方は pushStyle() / popStyle() のままです。
-- このガードには [[nodiscard]] が付いているため、`scopedStyle();` だけを書いて戻り値を無視すると、その場で即座にポップされてしまい、コンパイラが警告を出します。必ず変数に代入してください。
-- C++ 専用です。Lua にはスコープで閉じるガードがないため、Lua のコードではpushStyle() / popStyle() を直接使用します。
+- `auto s = scopedStyle();` は、その場で `pushStyle()` を実行し、`StyleScope` ガードを返します。このガードは、スコープを抜けるときに `popStyle()` を実行します。ブロックが普通に終わった場合も、途中で return した場合も、例外が投げられた場合も同じです。
+- 出口が複数あるコードや長いブロックで、`popStyle()` の書き忘れを防ぐためのものです。普段のコードでは、これまでどおり `pushStyle()` と `popStyle()` を使います。
+- 戻り値は必ず名前の付いた変数に代入してください。ガードには `[[nodiscard]]` が付いているため、`scopedStyle();` だけを書くとコンパイラが警告を出し、スタイルもその場ですぐにポップされてしまいます。
+- C++ 専用です。Lua にはスコープで閉じるガードがないため、Lua のコードでは `pushStyle()` と `popStyle()` を直接使います。
 '''
 details.ko = '''
-- `auto s = scopedStyle();`는 호출 즉시 [`pushStyle`](#pushStyle)을 실행하고, 스코프를 벗어날 때(정상 종료·조기 return·예외 모두) [`popStyle`](#popStyle)을 실행하는 StyleScope 가드를 반환합니다. 출구가 여러 개인 코드나 긴 블록에서 일반 popStyle() 호출을 잊기 쉬운 경우를 위한 것입니다. 기본 작성 방식은 여전히 pushStyle() / popStyle()입니다.
-- 이 가드에는 [[nodiscard]]가 붙어 있어서, `scopedStyle();`만 쓰고 반환값을 무시하면 그 자리에서 즉시 pop되며 컴파일러가 경고를 출력합니다. 반드시 변수에 대입하세요.
-- C++ 전용입니다. Lua에는 스코프로 닫는 가드가 없으므로 Lua 코드에서는 pushStyle() / popStyle()을 직접 사용합니다.
+- `auto s = scopedStyle();`는 그 자리에서 `pushStyle()`을 실행하고 `StyleScope` 가드를 반환합니다. 이 가드는 스코프를 벗어날 때 `popStyle()`을 실행합니다. 블록이 정상적으로 끝나는 경우, 중간에 return하는 경우, 예외가 발생하는 경우 모두 같습니다.
+- 출구가 여러 개인 코드나 긴 블록에서 `popStyle()` 호출을 잊지 않도록 하기 위한 것입니다. 평소 코드에서는 지금처럼 `pushStyle()`과 `popStyle()`을 사용합니다.
+- 반환값은 반드시 이름이 있는 변수에 대입하세요. 가드에 `[[nodiscard]]`가 붙어 있어서 `scopedStyle();`만 쓰면 컴파일러가 경고를 출력하고, 스타일도 그 자리에서 바로 pop됩니다.
+- C++ 전용입니다. Lua에는 스코프로 닫는 가드가 없으므로 Lua 코드에서는 `pushStyle()`과 `popStyle()`을 직접 사용합니다.
 '''
 related = ["pushStyle", "popStyle", "scopedMatrix"]
 snippet = '''
@@ -50524,19 +50754,22 @@ description.en = "Set the blend mode used by drawing from now on."
 description.ja = "これ以降の描画が使うブレンドモードを設定する。"
 description.ko = "이후 그리기에 사용할 블렌드 모드를 설정한다."
 details.en = '''
-- setBlendMode() chooses how new drawing combines with what is already on the target: `BlendMode::Alpha` (the default, normal alpha blending), `Add` (additive), `Multiply`, `Screen`, `Subtract`, or `Disabled` (the new color simply overwrites the old one, with no blending at all).
-- Use `setBlendMode(BlendMode::Add)` for additive blending: the resulting RGB is `sourceRGB * sourceAlpha + destinationRGB`, with RGB factors `SRC_ALPHA` and `ONE`. Use `setBlendMode(BlendMode::Screen)` for screen blending: source RGB is premultiplied by alpha, and its RGB factors are `ONE` and `ONE_MINUS_SRC_COLOR`. `Alpha`, `Multiply`, and `Screen` use `sourceAlpha + destinationAlpha * (1 - sourceAlpha)` for output alpha, with alpha factors `ONE` and `ONE_MINUS_SRC_ALPHA`; two overlapping draws with alpha `0.5` on a transparent target produce `0.75`. `Add` and `Subtract` add the two alpha values, with alpha factors `ONE` and `ONE`; `Disabled` overwrites without blending.
-- The mode works the same way on the main window and inside an [`Fbo`](#Fbo) pass, and it persists until you change it again: it survives across frames and carries into a later [`Fbo::begin`](#Fbo::begin), so a stray Add or Multiply left on can quietly affect drawing you did not mean it to. Call [`resetBlendMode`](#resetBlendMode) (or wrap the change in [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle)) when you are done with a temporary mode.
+- `setBlendMode()` chooses how new drawing is combined with what is already on the target. The modes are `BlendMode::Alpha` (the default, normal alpha blending), `Add` (additive), `Multiply`, `Screen`, `Subtract`, and `Disabled` (no blending; the new color simply overwrites the old one).
+- The mode stays in effect until you change it. It works the same way on the main window and inside an `Fbo`, it carries over to later frames, and it is passed on to a later `Fbo::begin()`. A forgotten `Add` or `Multiply` can therefore affect drawing you did not intend. When you are done with a temporary mode, call `resetBlendMode()` or wrap the change in `pushStyle()` and `popStyle()`.
+- With `Add`, the resulting RGB is `sourceRGB * sourceAlpha + destinationRGB` (RGB factors `SRC_ALPHA` and `ONE`). With `Screen`, the source RGB is multiplied by its alpha first, and the RGB factors are `ONE` and `ONE_MINUS_SRC_COLOR`.
+- For the output alpha, `Alpha`, `Multiply` and `Screen` use `sourceAlpha + destinationAlpha * (1 - sourceAlpha)` (alpha factors `ONE` and `ONE_MINUS_SRC_ALPHA`). For example, drawing twice with alpha `0.5` on a transparent target gives `0.75`. `Add` and `Subtract` add the two alpha values (alpha factors `ONE` and `ONE`). `Disabled` overwrites without blending.
 '''
 details.ja = '''
-- setBlendMode() は、これから描くものが既に描かれている内容とどのように合成されるかを選びます。`BlendMode::Alpha`（デフォルト。通常のアルファブレンディング）、`Add`（加算）、`Multiply`（乗算）、`Screen`（スクリーン）、`Subtract`（減算）、`Disabled`（ブレンドせず新しい色でそのまま上書き）です。
-- 加算合成には `setBlendMode(BlendMode::Add)` を使います。合成後の RGB は `sourceRGB * sourceAlpha + destinationRGB` で、RGB の係数は `SRC_ALPHA` と `ONE` です。スクリーン合成には `setBlendMode(BlendMode::Screen)` を使います。描画元の RGB にはあらかじめアルファを掛け、RGB の係数は `ONE` と `ONE_MINUS_SRC_COLOR` です。`Alpha`、`Multiply`、`Screen` の出力アルファは `sourceAlpha + destinationAlpha * (1 - sourceAlpha)` で、アルファの係数は `ONE` と `ONE_MINUS_SRC_ALPHA` です。透明な描画先にアルファ `0.5` で 2 回重ねると `0.75` になります。`Add` と `Subtract` は両方のアルファを加算し、アルファの係数は `ONE` と `ONE` です。`Disabled` はブレンドせず上書きします。
-- このモードはメインウィンドウでも [`Fbo`](#Fbo) のパス内でも同じように働き、変更するまで持続します。フレームをまたいでも、その後の [`Fbo::begin`](#Fbo::begin)にも引き継がれるため、Add や Multiply を設定したままにしておくと、意図しない描画にも影響してしまいます。一時的なモードが済んだら [`resetBlendMode`](#resetBlendMode) を呼ぶか、[`pushStyle`](#pushStyle) / [`popStyle`](#popStyle) で変更を囲んでください。
+- `setBlendMode()` は、これから描くものを、すでに描かれている内容とどのように合成するかを選びます。モードは `BlendMode::Alpha`（デフォルト。通常のアルファブレンディング）、`Add`（加算）、`Multiply`（乗算）、`Screen`（スクリーン）、`Subtract`（減算）、`Disabled`（ブレンドせず、新しい色でそのまま上書き）です。
+- 設定したモードは、変更するまで有効です。メインウィンドウでも `Fbo` の中でも同じように働き、次のフレームにも、その後の `Fbo::begin()` にも引き継がれます。そのため、`Add` や `Multiply` を戻し忘れると、意図しない描画にも影響します。一時的なモードが済んだら `resetBlendMode()` を呼ぶか、変更を `pushStyle()` と `popStyle()` で囲んでください。
+- `Add` では、合成後の RGB は `sourceRGB * sourceAlpha + destinationRGB` になります（RGB の係数は `SRC_ALPHA` と `ONE`）。`Screen` では、描画元の RGB にあらかじめアルファを掛け、RGB の係数は `ONE` と `ONE_MINUS_SRC_COLOR` になります。
+- 出力のアルファは、`Alpha`、`Multiply`、`Screen` では `sourceAlpha + destinationAlpha * (1 - sourceAlpha)` です（アルファの係数は `ONE` と `ONE_MINUS_SRC_ALPHA`）。たとえば、透明な描画先にアルファ `0.5` で 2 回重ねると `0.75` になります。`Add` と `Subtract` は両方のアルファを足します（アルファの係数は `ONE` と `ONE`）。`Disabled` はブレンドせずに上書きします。
 '''
 details.ko = '''
-- setBlendMode()은 지금부터 그리는 내용이 이미 그려진 내용과 어떻게 합성될지 선택합니다. `BlendMode::Alpha`(기본값, 일반 알파 블렌딩), `Add`(가산), `Multiply`(곱셈), `Screen`(스크린), `Subtract`(감산), `Disabled`(블렌딩 없이 새 색으로 그대로 덮어쓰기)입니다.
-- 가산 합성에는 `setBlendMode(BlendMode::Add)`를 사용합니다. 합성된 RGB는 `sourceRGB * sourceAlpha + destinationRGB`이며 RGB 계수는 `SRC_ALPHA`와 `ONE`입니다. 스크린 합성에는 `setBlendMode(BlendMode::Screen)`을 사용합니다. 소스 RGB에 알파를 미리 곱하며 RGB 계수는 `ONE`과 `ONE_MINUS_SRC_COLOR`입니다. `Alpha`, `Multiply`, `Screen`의 출력 알파는 `sourceAlpha + destinationAlpha * (1 - sourceAlpha)`이며 알파 계수는 `ONE`과 `ONE_MINUS_SRC_ALPHA`입니다. 투명한 대상에 알파 `0.5`로 두 번 겹쳐 그리면 `0.75`가 됩니다. `Add`와 `Subtract`는 두 알파 값을 더하며 알파 계수는 `ONE`과 `ONE`입니다. `Disabled`는 혼합 없이 덮어씁니다.
-- 이 모드는 메인 윈도우에서나 [`Fbo`](#Fbo) 패스 안에서나 동일하게 동작하며, 다시 바꾸기 전까지 유지됩니다. 프레임을 넘어서도, 이후의 [`Fbo::begin`](#Fbo::begin)에도 이어지기 때문에, Add나 Multiply를 켜 둔 채로 두면 의도하지 않은 그리기에도 영향을 줄 수 있습니다. 임시 모드가 끝나면 [`resetBlendMode`](#resetBlendMode)를 호출하거나 [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle)로 변경을 감싸세요.
+- `setBlendMode()`는 지금부터 그리는 내용을 이미 그려진 내용과 어떻게 합성할지 선택합니다. 모드는 `BlendMode::Alpha`(기본값, 일반 알파 블렌딩), `Add`(가산), `Multiply`(곱셈), `Screen`(스크린), `Subtract`(감산), `Disabled`(블렌딩 없이 새 색으로 그대로 덮어쓰기)입니다.
+- 설정한 모드는 바꾸기 전까지 유지됩니다. 메인 윈도우에서도 `Fbo` 안에서도 똑같이 동작하며, 다음 프레임에도, 이후의 `Fbo::begin()`에도 이어집니다. 그래서 `Add`나 `Multiply`를 되돌리는 것을 잊으면 의도하지 않은 그리기에도 영향을 줍니다. 임시 모드가 끝나면 `resetBlendMode()`를 호출하거나 변경을 `pushStyle()`과 `popStyle()`로 감싸세요.
+- `Add`에서는 합성된 RGB가 `sourceRGB * sourceAlpha + destinationRGB`가 됩니다(RGB 계수는 `SRC_ALPHA`와 `ONE`). `Screen`에서는 소스 RGB에 알파를 미리 곱하며, RGB 계수는 `ONE`과 `ONE_MINUS_SRC_COLOR`입니다.
+- 출력 알파는 `Alpha`, `Multiply`, `Screen`에서는 `sourceAlpha + destinationAlpha * (1 - sourceAlpha)`입니다(알파 계수는 `ONE`과 `ONE_MINUS_SRC_ALPHA`). 예를 들어 투명한 대상에 알파 `0.5`로 두 번 겹쳐 그리면 `0.75`가 됩니다. `Add`와 `Subtract`는 두 알파 값을 더합니다(알파 계수는 `ONE`과 `ONE`). `Disabled`는 블렌딩 없이 덮어씁니다.
 '''
 related = ["BlendMode", "getBlendMode", "clear"]
 snippet = '''
@@ -50792,16 +51025,25 @@ description.en = "Use a fixed segment count for circles, arcs and curves."
 description.ja = "円・円弧・曲線の分割数を固定値にする。"
 description.ko = "원·호·곡선의 분할 수를 고정값으로 사용한다."
 details.en = '''
-- Switches curve quality to resolution mode and sets the segment count used for a full circle; see [`drawCurve`](#drawCurve) for how this interacts with [`setCurveTolerance`](#setCurveTolerance) and the default. Arcs use a proportional share of this count, and every curved primitive (circles, ellipses, arcs, beziers, rounded rects) shares the same setting. Useful for an intentionally chunky, low-poly look, or to put a hard cap on vertex count for many small shapes regardless of their radius. Saved/restored by [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle).
-- `drawCircle()` uses at least three segments in resolution mode, so `setCurveResolution(1)` produces a triangle.
+- Switches curve quality to resolution mode and sets the number of segments for a full circle. The stored value is 60 by default, but the default mode is tolerance mode (see `setCurveTolerance`). Calling `setCurveTolerance()` switches back to it.
+- Every curved shape shares this setting: circles, ellipses, arcs, Bezier curves, `drawCurve()` curves and rounded rectangles. An arc uses a share of the count in proportion to its angle, and each Bezier or `drawCurve()` piece is split into this many segments (at least 2).
+- It is useful for a deliberately low-poly look, or to put a hard limit on the vertex count when you draw many small shapes, whatever their radius.
+- In resolution mode, `drawCircle()` uses at least 3 segments, so `setCurveResolution(1)` draws a triangle.
+- `pushStyle()` and `popStyle()` save and restore it.
 '''
 details.ja = '''
-- 曲線の品質設定を「分割数」モードに切り替え、円一周分のセグメント数を設定します。[`setCurveTolerance`](#setCurveTolerance) との関係やデフォルト値は[`drawCurve`](#drawCurve) を参照してください。円弧ではこの数に比例した分割数が使われ、円・楕円・円弧・ベジエ・角丸長方形などすべての曲線系プリミティブが同じ設定を共有します。意図的にローポリな見た目にしたい場合や、半径にかかわらず多数の小さな図形の頂点数に上限を設けたい場合に有効です。[`pushStyle`](#pushStyle) /[`popStyle`](#popStyle) で保存・復元されます。
-- 分割数モードの `drawCircle()` は最低 3 分割で描画するため、`setCurveResolution(1)` を指定すると三角形になります。
+- 曲線の品質設定を分割数モードに切り替え、円一周分のセグメント数を設定します。保存される値のデフォルトは 60 ですが、デフォルトのモードは許容誤差モードです（`setCurveTolerance` を参照）。`setCurveTolerance()` を呼ぶと許容誤差モードに戻ります。
+- 円、楕円、円弧、ベジェ曲線、`drawCurve()` の曲線、角丸長方形など、すべての曲線がこの設定を共有します。円弧では角度に比例した分割数が使われ、ベジェ曲線や `drawCurve()` の 1 区間はこの数で分割されます（最低 2）。
+- 意図的にローポリな見た目にしたい場合や、半径にかかわらず多数の小さな図形の頂点数に上限を設けたい場合に便利です。
+- 分割数モードの `drawCircle()` は最低 3 分割で描くため、`setCurveResolution(1)` を指定すると三角形になります。
+- `pushStyle()` と `popStyle()` で保存・復元されます。
 '''
 details.ko = '''
-- 곡선 품질 설정을 "분할 수" 모드로 전환하고, 원 한 바퀴에 사용할 세그먼트 수를 설정합니다. [`setCurveTolerance`](#setCurveTolerance)와의 관계와 기본값은 [`drawCurve`](#drawCurve)를 참고하세요. 호(arc)는 이 수에 비례한 분할 수를 사용하며, 원·타원·호·베지어·라운드 사각형 등 모든 곡선 기반 primitive가 같은 설정을 공유합니다. 의도적으로 로우폴리한 느낌을 주고 싶을 때, 혹은 반지름과 무관하게 작은 도형 다수의 꼭짓점 수를 제한하고 싶을 때 유용합니다. [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle)로 저장·복원됩니다.
-- 분할 수 모드의 `drawCircle()`은 최소 3개 세그먼트로 그리므로 `setCurveResolution(1)`을 지정하면 삼각형이 됩니다.
+- 곡선 품질 설정을 분할 수 모드로 전환하고, 원 한 바퀴의 세그먼트 수를 설정합니다. 저장된 값의 기본값은 60이지만, 기본 모드는 허용 오차 모드입니다(`setCurveTolerance` 참고). `setCurveTolerance()`를 호출하면 허용 오차 모드로 돌아갑니다.
+- 원, 타원, 호, 베지어 곡선, `drawCurve()` 곡선, 라운드 사각형 등 모든 곡선이 이 설정을 공유합니다. 호는 각도에 비례한 분할 수를 사용하며, 베지어 곡선이나 `drawCurve()`의 한 구간은 이 수만큼 분할됩니다(최소 2).
+- 의도적으로 로우폴리한 느낌을 주고 싶을 때나, 반지름과 관계없이 작은 도형 여러 개의 꼭짓점 수에 상한을 두고 싶을 때 유용합니다.
+- 분할 수 모드의 `drawCircle()`은 최소 3개 세그먼트로 그리므로, `setCurveResolution(1)`을 지정하면 삼각형이 됩니다.
+- `pushStyle()`과 `popStyle()`로 저장·복원됩니다.
 '''
 related = ["setCurveTolerance", "getCurveResolution", "getCurveMode", "drawCurve"]
 snippet = '''
@@ -50818,13 +51060,25 @@ description.en = "Set how closely curves must follow their ideal shape, in pixel
 description.ja = "曲線を理想の形にどれだけ近づけるかを、ピクセル単位で設定する。"
 description.ko = "곡선이 이상적인 형태를 얼마나 따라야 하는지 픽셀 단위로 설정한다."
 details.en = '''
-- Switches curve quality to tolerance mode (the default) and sets the maximum on-screen gap, in pixels, allowed between the drawn polygon and the true curve; see [`drawCurve`](#drawCurve) for the full default and how segment count is derived from it. A smaller tolerance (fewer pixels) means a smoother curve with more segments; it adapts to the shape's radius and to the current scale, so a zoomed-in or large circle automatically gets more segments while a tiny one gets fewer. Saved/restored by [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle).
+- Switches curve quality to tolerance mode (the default) and sets how far, in on-screen pixels, the drawn polygon may stray from the true curve. The default is 0.1 pixels. Calling `setCurveResolution()` switches to a fixed segment count instead.
+- A smaller value gives smoother curves with more segments. The segment count follows the shape's radius and the current scale, so a large or zoomed-in circle automatically gets more segments, and a small one gets fewer.
+- In this mode a full circle uses between 6 and 1024 segments.
+- The scale comes from the current transform, such as `scale()`. Camera perspective is not taken into account.
+- `pushStyle()` and `popStyle()` save and restore it.
 '''
 details.ja = '''
-- 曲線の品質設定を「許容誤差」モード（デフォルト）に切り替え、描かれる多角形が実際の曲線からどれだけピクセル単位でずれてよいかの上限を設定します。デフォルト値や分割数の決め方は [`drawCurve`](#drawCurve) を参照してください。値を小さくする（許容誤差を減らす）ほど分割数が増えて滑らかになります。図形の半径や現在の拡大率に応じて自動で調整されるため、拡大した大きな円には多くの分割が、小さな円には少ない分割が自動的に使われます。[`pushStyle`](#pushStyle) / [`popStyle`](#popStyle) で保存・復元されます。
+- 曲線の品質設定を許容誤差モード（デフォルト）に切り替え、描かれる多角形が本来の曲線から画面上で何ピクセルまでずれてよいかを設定します。デフォルトは 0.1 ピクセルです。`setCurveResolution()` を呼ぶと、固定の分割数を使うモードに切り替わります。
+- 値を小さくするほど分割数が増え、曲線が滑らかになります。分割数は図形の半径と現在の拡大率に応じて決まるため、大きな円や拡大した円には自動で多くの分割が使われ、小さな円には少ない分割が使われます。
+- このモードでは、円一周の分割数は 6 から 1024 の範囲になります。
+- 拡大率は `scale()` などの現在の座標変換から求められます。カメラの遠近（パース）は考慮されません。
+- `pushStyle()` と `popStyle()` で保存・復元されます。
 '''
 details.ko = '''
-- 곡선 품질 설정을 "허용 오차" 모드(기본값)로 전환하고, 그려지는 다각형이 실제 곡선과 픽셀 단위로 얼마나 벗어나도 되는지의 상한을 설정합니다. 기본값과 분할 수가 결정되는 방식은 [`drawCurve`](#drawCurve)를 참고하세요. 값을 작게(허용 오차를 줄일수록) 할수록 분할 수가 늘어나 더 매끄러워집니다. 도형의 반지름과 현재 배율에 따라 자동으로 조정되므로, 확대된 큰 원에는 분할이 많이, 작은 원에는 적게 자동으로 적용됩니다. [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle)로 저장·복원됩니다.
+- 곡선 품질 설정을 허용 오차 모드(기본값)로 전환하고, 그려지는 다각형이 실제 곡선에서 화면상 몇 픽셀까지 벗어나도 되는지 설정합니다. 기본값은 0.1픽셀입니다. `setCurveResolution()`을 호출하면 고정 분할 수를 사용하는 모드로 전환됩니다.
+- 값을 작게 할수록 분할 수가 늘어나 곡선이 매끄러워집니다. 분할 수는 도형의 반지름과 현재 배율에 따라 정해지므로, 크거나 확대된 원에는 자동으로 많은 분할이, 작은 원에는 적은 분할이 사용됩니다.
+- 이 모드에서 원 한 바퀴의 분할 수는 6에서 1024 사이입니다.
+- 배율은 `scale()` 등 현재 좌표 변환에서 구합니다. 카메라의 원근(퍼스펙티브)은 고려되지 않습니다.
+- `pushStyle()`과 `popStyle()`로 저장·복원됩니다.
 '''
 related = ["setCurveResolution", "getCurveTolerance", "getCurveMode", "drawCurve"]
 snippet = '''
@@ -51612,13 +51866,28 @@ description.ja = "点のサイズを論理ピクセルで設定する。"
 description.ko = "포인트 크기를 논리 픽셀 단위로 설정한다."
 related = ["getPointSize", "setPointStyle", "PointStyle", "Mesh::drawGpuPoints", "setStrokeWeight"]
 details.en = '''
-- Draw state for [`PrimitiveMode`](#PrimitiveMode)`::Points` meshes, the point-cloud analogue of [`setStrokeWeight`](#setStrokeWeight). The unit is **logical pixels** (like `strokeWeight`), so it stays the same apparent size across DPIs. Affects the `Square` and `Round` [`PointStyle`](#PointStyle) splats; `Pixel` is a true 1px point and ignores it. Saved/restored by [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle). In an Fbo, sizes use attachment pixels independently of host DPI and pixelPerfect. Target projection/view/model move point centers; model scale does not enlarge the splats.
+- Sets the size of each point when a mesh is drawn with `PrimitiveMode::Points`. It is the point-cloud counterpart of `setStrokeWeight()`. The default is 1.
+- The unit is **logical pixels**, the same as the stroke weight, so points look the same size on any display density.
+- It applies to the `Square` and `Round` point styles (see `PointStyle`). `Pixel` always draws true 1-pixel points and ignores this size.
+- `pushStyle()` and `popStyle()` save and restore it.
+- The projection, view and model matrices of the current target move the point centers, but scaling with the model matrix does not make the points larger.
+- Inside an Fbo, the size is measured in the Fbo's own pixels, regardless of the window's display density or pixelPerfect.
 '''
 details.ja = '''
-- [`PrimitiveMode`](#PrimitiveMode)`::Points` メッシュの描画ステートで、点群版の[`setStrokeWeight`](#setStrokeWeight) です。単位は **論理ピクセル**（`strokeWeight`と同じ）なので、DPI が変わっても見た目のサイズは一定に保たれます。`Square` と`Round` の [`PointStyle`](#PointStyle) スプラットに効き、`Pixel` は本物の 1px 点なので無視されます。[`pushStyle`](#pushStyle) / [`popStyle`](#popStyle) で保存・復元されます。Fbo 内のサイズはホストの DPI や pixelPerfect に関係なく、アタッチメントのピクセルを使用します。点の中心はターゲットの射影・ビュー・モデル行列に従って動きますが、モデルの拡縮で点のサイズが大きくなることはありません。
+- `PrimitiveMode::Points` でメッシュを描くときの、点 1 つの大きさを設定します。点群用の `setStrokeWeight()` にあたります。デフォルトは 1 です。
+- 単位は線幅と同じ **論理ピクセル** なので、画面の解像度が変わっても点の見た目の大きさは変わりません。
+- 点の形が `Square` と `Round` のときに使われます（`PointStyle` を参照）。`Pixel` は常に本物の 1 ピクセルの点を描くため、このサイズは無視されます。
+- `pushStyle()` と `popStyle()` で保存・復元されます。
+- 点の中心は、現在の描画先の射影・ビュー・モデル行列に従って動きます。ただし、モデル行列で拡大しても点そのものは大きくなりません。
+- Fbo の中では、ウィンドウの解像度や pixelPerfect に関係なく、Fbo 自身のピクセルでサイズが決まります。
 '''
 details.ko = '''
-- [`PrimitiveMode`](#PrimitiveMode)`::Points` 메시의 그리기 상태로, 포인트 클라우드 버전의 [`setStrokeWeight`](#setStrokeWeight)입니다. 단위는 **논리 픽셀** (`strokeWeight`과 동일)이라 DPI가 달라져도 보이는 크기가 일정하게 유지됩니다. `Square`와 `Round` [`PointStyle`](#PointStyle) 스플랫에 적용되며, `Pixel`은 진짜 1px 포인트이므로 무시됩니다. [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle)로 저장·복원됩니다. Fbo 내부의 크기는 호스트 DPI나 pixelPerfect와 관계없이 어태치먼트 픽셀을 사용합니다. 점의 중심은 대상의 투영·뷰·모델 행렬을 따라 움직이지만, 모델 배율로는 포인트 크기가 커지지 않습니다.
+- `PrimitiveMode::Points`로 메시를 그릴 때 포인트 하나의 크기를 설정합니다. 포인트 클라우드용 `setStrokeWeight()`에 해당합니다. 기본값은 1입니다.
+- 단위는 선 두께와 같은 **논리 픽셀**이므로, 화면 해상도가 달라져도 포인트의 보이는 크기는 변하지 않습니다.
+- 포인트 모양이 `Square`와 `Round`일 때 사용됩니다(`PointStyle` 참고). `Pixel`은 항상 실제 1픽셀 포인트를 그리므로 이 크기는 무시됩니다.
+- `pushStyle()`과 `popStyle()`로 저장·복원됩니다.
+- 포인트의 중심은 현재 그리기 대상의 투영·뷰·모델 행렬에 따라 움직입니다. 다만 모델 행렬로 확대해도 포인트 자체는 커지지 않습니다.
+- Fbo 안에서는 윈도우의 해상도나 pixelPerfect와 관계없이 Fbo 자신의 픽셀 단위로 크기가 정해집니다.
 '''
 
 ["getPointSize"]
@@ -51649,13 +51918,22 @@ description.ja = "点の形を設定する：Square / Round / Pixel。"
 description.ko = "포인트 모양을 설정한다: Square / Round / Pixel."
 related = ["getPointStyle", "setPointSize", "PointStyle", "Mesh::drawGpuPoints"]
 details.en = '''
-- Draw state choosing how a [`PrimitiveMode`](#PrimitiveMode)`::Points` mesh is drawn — see [`PointStyle`](#PointStyle) for the shapes (all GPU-resident). `Square` (the default, and the lightest to draw) and `Round` are billboard splats sized by [`setPointSize`](#setPointSize); `Pixel` is a true 1px point primitive and ignores the point size entirely. Saved/restored by [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle).
+- Chooses how a mesh drawn with `PrimitiveMode::Points` looks. The shapes are listed in `PointStyle`, and all of them are drawn on the GPU.
+- `Square` is the default and the lightest to draw. `Square` and `Round` draw a small square or disc that faces the camera, and `setPointSize()` sets its size.
+- `Pixel` draws true 1-pixel points and ignores the point size entirely.
+- `pushStyle()` and `popStyle()` save and restore it.
 '''
 details.ja = '''
-- [`PrimitiveMode`](#PrimitiveMode)`::Points` メッシュの描き方を選ぶ描画ステートです。形は [`PointStyle`](#PointStyle) を参照してください（すべて GPU 常駐）。`Square`（デフォルトで、最も軽量）と `Round` は [`setPointSize`](#setPointSize)でサイズを指定するビルボードスプラットで、`Pixel` は点サイズを完全に無視する、本物の 1px 点プリミティブです。[`pushStyle`](#pushStyle) /[`popStyle`](#popStyle) で保存・復元されます。
+- `PrimitiveMode::Points` で描くメッシュの点の見た目を選びます。形の一覧は `PointStyle` を参照してください。どの形も GPU で描画されます。
+- `Square` がデフォルトで、最も軽く描けます。`Square` と `Round` は、カメラの方を向いた小さな四角形や円を描き、その大きさは `setPointSize()` で決まります。
+- `Pixel` は本物の 1 ピクセルの点を描き、点のサイズは完全に無視されます。
+- `pushStyle()` と `popStyle()` で保存・復元されます。
 '''
 details.ko = '''
-- [`PrimitiveMode`](#PrimitiveMode)`::Points` 메시를 어떻게 그릴지 고르는 그리기 상태입니다. 모양은 [`PointStyle`](#PointStyle)을 참고하세요(모두 GPU 상주). `Square`(기본값이며 가장 가벼움)와 `Round`는 [`setPointSize`](#setPointSize)로 크기를 정하는 빌보드 스플랫이고, `Pixel`은 포인트 크기를 완전히 무시하는 진짜 1px 포인트 primitive입니다. [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle)로 저장·복원됩니다.
+- `PrimitiveMode::Points`로 그리는 메시의 포인트 모양을 선택합니다. 모양 목록은 `PointStyle`을 참고하세요. 모든 모양은 GPU에서 그려집니다.
+- `Square`가 기본값이며 가장 가볍게 그려집니다. `Square`와 `Round`는 카메라를 향한 작은 사각형이나 원을 그리며, 그 크기는 `setPointSize()`로 정해집니다.
+- `Pixel`은 실제 1픽셀 포인트를 그리며, 포인트 크기는 완전히 무시됩니다.
+- `pushStyle()`과 `popStyle()`로 저장·복원됩니다.
 '''
 
 ["getPointStyle"]
@@ -53450,16 +53728,25 @@ description.ja = "現在開いている shape・lines・stroke のバッファ�
 description.ko = "현재 열려 있는 shape·lines·stroke 버퍼에 정점을 추가한다."
 related = ["beginShape", "endShape", "beginLines", "beginStroke"]
 details.en = '''
-- Appends one point to whichever buffer is open: [`beginShape`](#beginShape), [`beginLines`](#beginLines) or [`beginStroke`](#beginStroke). 2D (`vertex(x, y)`, `vertex(Vec2)`) and 3D (`vertex(x, y, z)`, `vertex(Vec3)`) overloads are provided; 2D calls use `z = 0`. Calling `vertex()` with none of those buffers open does nothing.
-- Inside `beginLines()` or `beginStroke()`, each `vertex()` call also captures the **current draw color** at that moment (and, for a stroke, the current stroke weight), so changing color between vertices tapers or recolors that one path. Inside `beginShape()` only the position is stored; the fill/stroke color used by [`endShape`](#endShape) is the color set when `endShape()` runs.
+- Adds one point to the buffer that is open: `beginShape`, `beginLines` or `beginStroke`. If none of them is open, `vertex()` does nothing.
+- You can pass 2D points (`vertex(x, y)`, `vertex(Vec2)`) or 3D points (`vertex(x, y, z)`, `vertex(Vec3)`). For a 2D point, z is 0.
+- Inside `beginShape()`, only the position is stored. `endShape()` uses the color that is set when it is called.
+- Inside `beginLines()`, each point also stores the **current color**. Changing the color between points gives each segment its own colors.
+- Inside `beginStroke()`, each point also stores the **current stroke weight**, so you can change the width along one line. The whole stroke uses the color of its first point.
 '''
 details.ja = '''
-- 開いているバッファ（[`beginShape`](#beginShape)、[`beginLines`](#beginLines)、[`beginStroke`](#beginStroke) のいずれか）に 1 点を追加します。2D 版（`vertex(x, y)`、`vertex(Vec2)`）と 3D 版（`vertex(x, y, z)`、`vertex(Vec3)`）があり、2D 版は `z = 0` として扱われます。どのバッファも開いていない状態で `vertex()` を呼んでも何も起きません。
-- `beginLines()` または `beginStroke()` の中では、`vertex()` を呼んだ時点の**現在の描画色**（stroke の場合は現在の線の太さも）が頂点ごとに記録されるため、頂点の間で色を変えると、その 1 本のパスの中で色や太さを変化させられます。`beginShape()` の中では座標だけが記録され、[`endShape`](#endShape) が使う塗り・線の色は `endShape()` を呼んだ時点の色です。
+- 開いているバッファ（`beginShape`、`beginLines`、`beginStroke` のいずれか）に点を 1 つ追加します。どれも開いていないときは何もしません。
+- 2D の点（`vertex(x, y)`、`vertex(Vec2)`）と 3D の点（`vertex(x, y, z)`、`vertex(Vec3)`）を渡せます。2D の点では z は 0 になります。
+- `beginShape()` の中では位置だけを記録します。色は `endShape()` を呼んだ時点のものが使われます。
+- `beginLines()` の中では、点ごとに**その時点の色**も記録します。点の間で色を変えると、線分ごとに色を付けられます。
+- `beginStroke()` の中では、点ごとに**その時点の線の太さ**も記録するので、1 本の線の中で太さを変えられます。色はストローク全体で最初の点の色になります。
 '''
 details.ko = '''
-- 열려 있는 버퍼([`beginShape`](#beginShape), [`beginLines`](#beginLines), [`beginStroke`](#beginStroke) 중 하나)에 점을 하나 추가합니다. 2D 버전 (`vertex(x, y)`, `vertex(Vec2)`)과 3D 버전(`vertex(x, y, z)`, `vertex(Vec3)`)이 있으며, 2D 버전은 `z = 0`으로 처리됩니다. 어떤 버퍼도 열려 있지 않은 상태에서 `vertex()`를 호출하면 아무 일도 일어나지 않습니다.
-- `beginLines()` 또는 `beginStroke()` 안에서는 `vertex()`를 호출한 시점의 **현재 그리기 색**(stroke라면 현재 선 두께도)이 정점마다 기록되므로, 정점 사이에서 색을 바꾸면 그 선 하나 안에서 색이나 두께를 변화시킬 수 있습니다. `beginShape()` 안에서는 좌표만 기록되며, [`endShape`](#endShape)가 사용하는 채우기·선 색은 `endShape()`를 호출한 시점의 색입니다.
+- 열려 있는 버퍼(`beginShape`, `beginLines`, `beginStroke` 중 하나)에 점을 하나 추가합니다. 어느 것도 열려 있지 않으면 아무 일도 하지 않습니다.
+- 2D 점(`vertex(x, y)`, `vertex(Vec2)`)과 3D 점(`vertex(x, y, z)`, `vertex(Vec3)`)을 전달할 수 있습니다. 2D 점의 z는 0이 됩니다.
+- `beginShape()` 안에서는 위치만 기록합니다. 색은 `endShape()`를 호출한 시점의 색이 사용됩니다.
+- `beginLines()` 안에서는 점마다 **그 시점의 색**도 기록합니다. 점 사이에서 색을 바꾸면 선분마다 색을 줄 수 있습니다.
+- `beginStroke()` 안에서는 점마다 **그 시점의 선 두께**도 기록하므로, 한 선 안에서 두께를 바꿀 수 있습니다. 색은 stroke 전체가 첫 점의 색이 됩니다.
 '''
 
 ["videoCodecName"]

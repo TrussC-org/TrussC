@@ -13908,8 +13908,11 @@ void tcApp::setup() {
 
 ## appendArc
 
-- Same center/radius/angle arguments and radians convention as [`drawArc`](#drawArc) — see `drawArc` for the angle direction and [`drawRect`](#drawRect) for the coordinate convention. Called between [`beginShape`](#beginShape) and `endShape()`, it pushes the arc's rim points (both endpoints included) into the shape being built via [`vertex`](#vertex) — it never draws by itself, and unlike `drawArc` it never injects a center vertex, so you control how the arc is closed (a chord, a pie slice, or chained into a larger custom outline such as [`drawRectRounded`](#drawRectRounded)'s corners).
-- If the previous shape vertex already coincides with the arc's start point, the resulting duplicate vertex is harmless (a degenerate triangle in the fill fan).
+- Adds the points of an arc to the shape you are building between `beginShape()` and `endShape()`. It does not draw anything by itself.
+- The arguments are the same as for `drawArc`: center, radius, start angle and end angle in radians. See `drawArc` for the angle direction and `drawRect` for coordinates.
+- Both end points of the arc are added. Unlike `drawArc`, no center point is added, so you decide how to close the arc: as a chord, as a pie slice (add the center with `vertex()` yourself), or as part of a larger outline. `drawRectRounded` builds its corners this way.
+- The number of points follows `setCurveResolution` or `setCurveTolerance`. It also works inside `beginStroke()` and `beginLines()`, because it adds the points with `vertex()`.
+- If the previous point is already at the start of the arc, the repeated point does no harm.
 
 ```cpp
 void tcApp::draw() {
@@ -13923,7 +13926,8 @@ void tcApp::draw() {
 
 ## appendCurve
 
-- A convenience that tessellates a Catmull-Rom curve and pushes the resulting points into whichever buffer is currently open — [`beginShape`](#beginShape), [`beginStroke`](#beginStroke), or [`beginLines`](#beginLines) — exactly as if you had called [`vertex`](#vertex) in a loop. It follows the same interpolation rules and curve-quality settings as [`drawCurve`](#drawCurve).
+- Adds the points of a smooth Catmull-Rom curve to the buffer that is open: `beginShape`, `beginStroke` or `beginLines`. The result is the same as calling `vertex()` in a loop. The curve is the same kind as `drawCurve` draws.
+
 ```cpp
 beginShape();
 vertex(20, 150);
@@ -13931,13 +13935,18 @@ appendCurve({Vec3(20,150,0), Vec3(80,30,0), Vec3(200,30,0),
              Vec3(260,150,0)});
 endShape();
 ```
-- `appendCurve(points)` needs at least 4 points (fewer does nothing) and emits only the interior, visible segments — the first and last points are used as tangent influences and are not themselves pushed as vertices. `appendCurve(points, true)` is the closed variant: it needs at least 3 points and pushes a segment through every point, wrapping the tangents around the loop.
-- To bound CPU and memory from untrusted input, both overloads refuse (with a warning, no crash) point arrays larger than 100,000 points.
+
+- `appendCurve(points)` needs at least 4 points. With fewer, it does nothing. The curve passes through the inner points only. The first and last points only set the direction at the ends and are not added as vertices.
+- `appendCurve(points, true)` makes a closed curve. It needs at least 3 points and passes through all of them.
+- How smooth the curve is depends on `setCurveResolution` or `setCurveTolerance`.
+- To protect CPU and memory from very large input, arrays of more than 100,000 points are refused with a warning. The program does not crash.
 
 ## appendSuperellipse
 
-- Same bounding-rect convention (`(x, y, w, h)`, top-left anchor — see [`drawRect`](#drawRect) for the coordinate convention) and exponent parameter `n` as [`drawSuperellipse`](#drawSuperellipse). Called between [`beginShape`](#beginShape) and `endShape()`, it pushes the outline's vertices into the shape being built via [`vertex`](#vertex) — it never draws by itself. The start point is pushed twice to close the loop; the duplicate vertex is harmless.
-- `endShape()` fills with a fan from the first vertex, which is only correct for convex outlines (`n >= 1`). For concave shapes (`n < 1`), use [`drawSuperellipse`](#drawSuperellipse) directly instead, which fills correctly via a center fan.
+- Adds the closed outline of a superellipse to the shape you are building between `beginShape()` and `endShape()`. It does not draw anything by itself.
+- The arguments are the same as for `drawSuperellipse`: a rectangle `(x, y, w, h)` with its top-left corner at `(x, y)`, and the exponent `n`. See `drawRect` for coordinates.
+- The start point is added twice to close the loop. The repeated point does no harm.
+- `endShape()` fills with triangles that start from the first point, so the fill is correct only for convex outlines (`n >= 1`). For concave shapes (`n < 1`), use `drawSuperellipse` instead, which fills them correctly.
 
 ## appendToFile
 
@@ -14023,17 +14032,20 @@ void tcApp::setup() {
 
 ## beginLines
 
-- `beginLines()` opens a buffer that draws **independent line segments**. Add points with [`vertex`](#vertex); they are consumed **in pairs** — vertices 0–1 are one segment, 2–3 the next, and so on. Nothing is drawn until [`endLines`](#endLines) is called, and a trailing odd vertex is ignored. At least two vertices are required.
-- Each vertex captures the current draw color at the moment its `vertex()` is called, so set the color **between** vertices for per-segment (even per-endpoint, gradient) colors:
+- Opens a buffer for drawing many **separate line segments** at once. Add points with `vertex()` and call `endLines()` to draw them. Nothing is drawn before `endLines()`.
+- Points are used **in pairs**. Points 0 and 1 make the first segment, points 2 and 3 make the second, and so on. A last point without a partner is ignored, and at least 2 points are needed.
+- Each point stores the color that is set when its `vertex()` is called. Set the color between points to color each segment, or each end of a segment for a gradient.
+
 ```cpp
 beginLines();
 setColor(colors::red);    vertex(20, 20);
-setColor(colors::blue);   vertex(200, 80);   // segment 1: red -> blue
+setColor(colors::blue);   vertex(200, 80);   // segment 1: red to blue
 setColor(colors::lime);   vertex(20, 120);
-setColor(colors::yellow); vertex(200, 180);  // segment 2: lime -> yellow
+setColor(colors::yellow); vertex(200, 180);  // segment 2: lime to yellow
 endLines();
 ```
-- These are thin (1px) lines, not affected by the current stroke weight. For thick lines with caps and joins use [`beginStroke`](#beginStroke); for a connected outline (line strip) use [`beginShape`](#beginShape) with [`noFill`](#noFill).
+
+- The lines are thin (1px) and do not follow the stroke weight. For thick lines with caps and joins, use `beginStroke`. For one connected line, use `beginShape` with `noFill`.
 
 ## beginShadowPass
 
@@ -14058,7 +14070,10 @@ void tcApp::draw() {
 
 ## beginShape
 
-- Opens an empty vertex buffer. Add points with [`vertex`](#vertex) (any number, including curved runs added with `appendArc` / `appendCurve`), then call [`endShape`](#endShape) to fill and/or stroke the polygon and clear the buffer.
+- Use it to draw your own polygon. Call `beginShape()`, add points with `vertex()`, and finish with `endShape()`. `endShape()` draws the polygon and empties the buffer.
+- Coordinates and units are the same as for `drawRect`.
+- You can add any number of points. You can also add curved parts with `appendArc` and `appendCurve`.
+
 ```cpp
 beginShape();
 vertex(100, 50);
@@ -14066,11 +14081,14 @@ vertex(150, 150);
 vertex(50, 150);
 endShape(true);   // true closes the outline back to the first vertex
 ```
-- Calling `beginShape()` again before `endShape()` discards whatever vertices were already added; shapes do not nest. Coordinates and units follow the same rules as [`drawRect`](#drawRect).
+
+- Shapes cannot be nested. If you call `beginShape()` again before `endShape()`, the points added so far are discarded.
 
 ## beginStroke
 
-- Unlike [`beginShape`](#beginShape)'s thin 1px line strip, `beginStroke()` builds a real triangle mesh with **width, end caps and corner joins** internally. Set the look with [`setStrokeWeight`](#setStrokeWeight), [`setStrokeCap`](#setStrokeCap) and [`setStrokeJoin`](#setStrokeJoin) before adding vertices, add points with [`vertex`](#vertex), then close with [`endStroke`](#endStroke).
+- Draws a connected line with **width, end caps and corner joins**. The outline of `beginShape` is always a thin 1px line, but this one follows the stroke settings.
+- Set the look with `setStrokeWeight`, `setStrokeCap` and `setStrokeJoin`, add points with `vertex()`, and finish with `endStroke()`.
+
 ```cpp
 setStrokeWeight(8);
 setStrokeCap(StrokeCap::Round);
@@ -14079,10 +14097,13 @@ beginStroke();
 vertex(50, 50);
 vertex(150, 80);
 vertex(250, 50);
-endStroke();        // open polyline; pass true to close it into a loop
+endStroke();        // open line; pass true to close it into a loop
 ```
-- Each `vertex()` captures the **current stroke weight**, so calling [`setStrokeWeight`](#setStrokeWeight) between vertices tapers the width along one path. The end cap, however, is decided once — from whichever [`setStrokeCap`](#setStrokeCap) value was active when the **first** vertex was added — and used at both ends; changing it partway through a stroke has no effect on that stroke. Color is similar: the whole stroke is drawn in a single color, taken from the **first** vertex's color, so `setColor()` between vertices does not produce a gradient here (use [`beginLines`](#beginLines) for a true per-segment color gradient).
-- Uses StrokeMesh internally.
+
+- Each `vertex()` stores the **current stroke weight**. Calling `setStrokeWeight` between points changes the width along the line.
+- The cap is the `setStrokeCap` value that is set when the **first** point is added. It is used at both ends, and changing it later has no effect on this stroke. The join is the `setStrokeJoin` value that is set when `endStroke()` is called.
+- The whole stroke is drawn in one color, the color of the **first** point. Calling `setColor()` between points does not make a gradient. Use `beginLines` for colors that change per segment.
+- Internally it builds a `StrokeMesh`.
 
 ## binToFrequency
 
@@ -14447,28 +14468,37 @@ void tcApp::setup() {
 
 ## drawArc
 
-- Draws a circular arc centered at `(x, y)` (or `Vec3 center` for 3D) with the given `radius`, spanning `angleBegin` to `angleEnd` **radians** — use `TAU`/`HALF_TAU`/`QUARTER_TAU`, not degrees; see [`rotate`](#rotate) for the radians-vs-degrees convention used across TrussC. Angles increase in the mathematical (counter-clockwise) direction, but because `y` grows downward on screen (see [`drawRect`](#drawRect)), an increasing angle visually sweeps clockwise: `0` points right, and `QUARTER_TAU` points down. A quick semicircle is `drawArc(x, y, r, 0, HALF_TAU)`.
-- The span is `angleEnd - angleBegin`, with no automatic wrapping through `TAU`; from `5.5` to `0.5`, angles decrease over `5.0` radians.
-- **Stroke** draws just the open curve. **Fill** is the one shape in this group where fill and stroke do not share the same boundary: it closes the arc to the center as a pie slice, matching p5.js/Processing — convenient since filling a partial arc almost always means "I want a pie slice." If you need a different closure (a chord, an open fill, or a custom shape), build it yourself from [`appendArc`](#appendArc) inside [`beginShape`](#beginShape)/`endShape()`, which emits only the rim points. Segment count follows the current curve settings — see [`drawCurve`](#drawCurve).
-- Draws nothing when `radius <= 0` or `angleBegin == angleEnd`.
+- Draws part of a circle with center `(x, y)` and the given `radius`, from `angleBegin` to `angleEnd`. A `Vec3 center` version is also available for 3D.
+- Angles are in **radians**, not degrees. Use `TAU`, `HALF_TAU` and `QUARTER_TAU`. For example, `drawArc(x, y, r, 0, HALF_TAU)` draws a semicircle.
+- `0` points to the right. Because `y` grows downward on screen, a larger angle moves clockwise on screen, and `QUARTER_TAU` points down.
+- The arc covers `angleEnd - angleBegin`. It does not wrap around at `TAU`. For example, from `5.5` to `0.5` the arc goes backward by `5.0` radians.
+- With `noFill()`, only the open curve is drawn. With `fill()`, the arc is closed to the center and filled as a pie slice, like in p5.js and Processing. This is the only shape in this group where the filled area and the outline do not follow the same edge.
+- For a different closed shape, such as a chord or a custom outline, call `appendArc` between `beginShape()` and `endShape()`. `appendArc` adds only the points on the arc, not the center.
+- The number of segments follows the current curve settings. You can change them with `setCurveTolerance` or `setCurveResolution`.
+- Nothing is drawn when `radius <= 0` or when `angleBegin == angleEnd`.
 
 ```cpp
 void tcApp::draw() {
     setColor(1.0f, 0.6f, 0.1f);
     fill();
-    drawArc(200, 200, 80, 0, HALF_TAU);   // filled half-pie, right to down to left
+    drawArc(200, 200, 80, 0, HALF_TAU);   // filled half pie: from right, through bottom, to left
 }
 ```
 
 ## drawBezier
 
-- Draws a Bezier curve as a polyline: `drawBezier(p0, p1, p2, p3)` is cubic (4 control points), `drawBezier(p0, p1, p2)` is quadratic (3 points), and `drawBezier(std::vector<Vec3>)` handles higher orders from the given control polygon (2 points draws a straight line, 3 or 4 points use the fast cubic / quadratic path). With the default Tolerance curve mode the vector overload accepts up to 64 control points; above that the call is refused with a warning and draws nothing — chain cubics instead.
+- `drawBezier(p0, p1, p2, p3)` draws a cubic Bezier curve with 4 control points. `drawBezier(p0, p1, p2)` draws a quadratic curve with 3 control points. The curve starts at the first point and ends at the last one.
+
 ```cpp
 drawBezier(Vec3(50, 150, 0), Vec3(100, 20, 0),
            Vec3(200, 20, 0), Vec3(250, 150, 0));
 ```
-- The curve is tessellated into line segments using the current curve quality setting — see [`drawCurve`](#drawCurve) for the Tolerance/Resolution modes and their defaults. Like [`drawLine`](#drawLine), `drawBezier` always draws a thin (1px) line strip: it ignores [`fill`](#fill)/[`noFill`](#noFill) and is not affected by the current stroke weight, because an open curve has no natural fillable interior. For a filled curved shape, or a thick stroked curve, build the points with [`Path::bezierTo`](#Path::bezierTo) or feed sampled points into [`beginStroke`](#beginStroke).
-- The vector overload draws nothing with fewer than two control points and draws a straight line with exactly two.
+
+- `drawBezier(vector<Vec3>)` takes any number of control points and draws a curve of higher order. With fewer than 2 points it draws nothing. With 2 points it draws a straight line, and with 3 or 4 points it uses the quadratic or cubic version above.
+- `drawBezier` always draws a thin 1px line, like `drawLine`. It ignores `fill()` and `noFill()` and the stroke weight, because an open curve has no inside to fill.
+- For a filled curved shape or a thick curve, build the points with `Path::bezierTo`, or pass sampled points to `beginStroke`.
+- The curve is drawn as many short line segments. Their number follows the current curve settings, which you can change with `setCurveTolerance` or `setCurveResolution`.
+- In the default Tolerance mode, the vector version accepts at most 64 control points. With more points it prints a warning and draws nothing. In that case, join several cubic curves instead.
 
 ## drawBitmapString
 
@@ -14524,8 +14554,11 @@ void tcApp::draw() {
 
 ## drawCircle
 
-- Draws a circle at center `(cx, cy)` (or `Vec3 center` for 3D) with the given `radius`, in the same local, logical-unit coordinates as [`drawRect`](#drawRect) — but note that, unlike `drawRect`, the position here is the **center**, not a corner.
-- Filled or outlined according to the current [`fill`](#fill) / [`noFill`](#noFill) mode. The number of segments used to approximate the circle follows the current curve settings (resolution or tolerance) — see [`drawCurve`](#drawCurve) for how to control it; a larger `radius` or a tighter tolerance uses more segments, which costs more to draw. For an unfilled partial circle (a slice or arc), see [`drawArc`](#drawArc).
+- Draws a circle with center `(cx, cy)` and the given `radius`. A `Vec3 center` version is also available for 3D.
+- **The position is the center of the circle**, not a corner as in `drawRect`. Otherwise the coordinates work the same way as in `drawRect`: local coordinates in logical units.
+- After `fill()` the circle is filled, and after `noFill()` only its outline is drawn.
+- The circle is drawn as a polygon. The number of segments follows the current curve settings, which you can change with `setCurveTolerance` or `setCurveResolution`. In the default Tolerance mode, a larger `radius` or a smaller tolerance uses more segments and costs more to draw.
+- To draw only part of a circle, such as a pie slice or an arc, use `drawArc`.
 
 ```cpp
 void tcApp::draw() {
@@ -14551,24 +14584,29 @@ void tcApp::draw() {
 
 ## drawCurve
 
-- `drawCurve(p0, p1, p2, p3)` draws a Catmull-Rom curve segment that **interpolates from `p1` to `p2`** (passes exactly through both), using `p0` and `p3` only as tangent influences that are not themselves on the curve — the same semantics as openFrameworks' `ofDrawCurve` / `curveVertex`.
-- `drawCurve(std::vector<Vec3>)` chains this through every point: it needs at least 4 points and emits `N - 3` segments, each interpolating `points[i+1] -> points[i+2]`. `drawCurve(points, true)` is the closed variant: the curve passes through **all** N points and the tangents wrap around (`points[N-1] -> points[0]`), so as few as 3 points are enough.
+- `drawCurve(p0, p1, p2, p3)` draws a smooth Catmull-Rom curve from `p1` to `p2`. The curve passes exactly through `p1` and `p2`. `p0` and `p3` are not on the curve. They only set the direction of the curve at its two ends. This works the same way as `ofDrawCurve` and `curveVertex` in openFrameworks.
+- `drawCurve(vector<Vec3>)` draws one smooth curve through a list of points. It needs at least 4 points. The first and last points only set the direction, so the curve runs from the second point to the second-to-last point.
+- `drawCurve(points, true)` draws a closed loop that passes through all of the points and returns to the first one. 3 points are enough.
+
 ```cpp
 vector<Vec3> pts = {Vec3(50,200,0), Vec3(100,50,0),
                      Vec3(250,50,0), Vec3(300,200,0)};
 drawCurve(pts);         // open curve
 drawCurve(pts, true);   // closed loop through all 4 points
 ```
-- Like [`drawBezier`](#drawBezier), this always draws a thin (1px) line strip and ignores fill/stroke mode and stroke weight.
-- **Curve quality** (shared by `drawBezier`, `drawCurve`, `appendCurve`, and the circle/arc/rounded-rect drawers) has two modes, set on the current `Style`:
-- **Tolerance** (default): adaptively picks the segment count so the drawn polyline stays within `tolerance` screen pixels of the true curve, scaled by the current transform. Set it with [`setCurveTolerance(pixels)`](#setCurveTolerance); the default is 0.1 px.
-- **Resolution**: a fixed segment count regardless of size or zoom, useful for an intentionally chunky look or to bound vertex cost on many small curves. Set it with [`setCurveResolution(n)`](#setCurveResolution); the built-in fallback value is 60.
-- Switching one of these calls the other mode off; only one is active at a time.
+
+- Like `drawBezier`, `drawCurve` always draws a thin 1px line. It ignores `fill()` and `noFill()` and the stroke weight.
+- Curves are drawn as many short line segments. The curve settings below decide how many. They are shared by `drawBezier`, `drawCurve`, `appendCurve` and the circle, ellipse, arc and rounded-shape functions. They are part of the current `Style`, and only one of the two modes is active at a time. Setting one mode turns the other off.
+- Tolerance mode is the default. TrussC chooses the number of segments so that the line stays within the given distance of the true curve on screen. The current scale is taken into account. Set it with `setCurveTolerance(pixels)`. The default is 0.1 pixels.
+- Resolution mode uses a fixed number of segments, regardless of size or zoom. It is useful for an intentionally angular look, or to limit the cost of drawing many small curves. Set it with `setCurveResolution(n)`. The built-in value is 60.
 
 ## drawEllipse
 
-- Draws an ellipse at center `(cx, cy)` (or `Vec3 center` for 3D) with radii `rx` (horizontal) and `ry` (vertical), in the same coordinate convention as [`drawRect`](#drawRect). Like [`drawCircle`](#drawCircle), the position is the **center**, not a corner.
-- Filled or outlined according to the current [`fill`](#fill) / [`noFill`](#noFill) mode. The segment count used to approximate the curve is derived from the larger of `rx`/`ry` — see [`drawCurve`](#drawCurve) for resolution vs. tolerance mode. `drawCircle(center, r)` is equivalent to `drawEllipse(center, r, r)`.
+- Draws an ellipse with center `(cx, cy)`, horizontal radius `rx` and vertical radius `ry`. A `Vec3 center` version is also available for 3D.
+- Like `drawCircle`, **the position is the center**, not a corner. Otherwise the coordinates work the same way as in `drawRect`.
+- After `fill()` the ellipse is filled, and after `noFill()` only its outline is drawn.
+- `drawCircle(center, r)` gives the same result as `drawEllipse(center, r, r)`.
+- The number of segments is decided from the larger of `rx` and `ry`, using the current curve settings. You can change them with `setCurveTolerance` or `setCurveResolution`.
 
 ```cpp
 void tcApp::draw() {
@@ -14579,8 +14617,10 @@ void tcApp::draw() {
 
 ## drawLine
 
-- Draws a straight line between two points: `(x1, y1)` to `(x2, y2)` for 2D, or `Vec3 p1, Vec3 p2` (also available as six floats) for 3D. Coordinates follow the same local, logical-unit convention as [`drawRect`](#drawRect).
-- The fill/stroke mode and [`setStrokeWeight`](#setStrokeWeight) do **not** apply here: `drawLine` always draws a fixed-width 1px line regardless of color mode. For a thick line with configurable cap/join, use [`drawStroke`](#drawStroke) instead. To draw many independent segments efficiently in one batch, use [`beginLines`](#beginLines) / `endLines()`.
+- Draws a straight line from `(x1, y1)` to `(x2, y2)`. For 3D, pass two `Vec3` points or six floats. The coordinates work the same way as in `drawRect`: local coordinates in logical units.
+- **The line is always 1 pixel wide.** `fill()`, `noFill()` and `setStrokeWeight` have no effect on it.
+- For a thick line with a chosen cap and join style, use `drawStroke` instead.
+- To draw many separate line segments efficiently at once, use `beginLines()` and `endLines()`.
 - Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (the line is always 1 pixel wide; setStrokeWeight() has no effect).
 
 ```cpp
@@ -14592,15 +14632,30 @@ void tcApp::draw() {
 
 ## drawPoint
 
-- Draws one point at `(x, y)` (or `Vec3 pos` for 3D), in the same local, logical-unit coordinates as [`drawRect`](#drawRect). The fill/stroke mode does not apply — a point is neither filled nor stroked, it is just a single mark.
-- How the point is rasterized (a square billboard, an anti-aliased disc, or a true 1px pixel) and its size are controlled separately via `setPointStyle` / `setPointSize`, not by `drawPoint` itself.
+- Draws one point at `(x, y)`. A `Vec3 pos` version is also available for 3D. The coordinates work the same way as in `drawRect`: local coordinates in logical units.
+- `fill()` and `noFill()` have no effect, because a point is a single mark.
+- The size and the look of the point are not set by `drawPoint` itself. Use `setPointSize` for the size and `setPointStyle` for the look. The look can be a square (`PointStyle::Square`, the default), an anti-aliased round dot (`PointStyle::Round`), or a true 1-pixel point (`PointStyle::Pixel`).
+
+```cpp
+void tcApp::draw() {
+    setColor(1.0f, 1.0f, 1.0f);
+    setPointSize(6);
+    setPointStyle(PointStyle::Round);
+    drawPoint(200, 150);
+}
+```
 
 ## drawRect
 
-- Draws a rectangle at `(x, y)` with size `(w, h)`, or the `Vec3 pos, Vec2 size` overload. `w` and `h` may be negative; the rectangle is simply drawn on the other side, so there is no need to normalize the values yourself.
-- Coordinates are local (affected by the current [`pushMatrix`](#pushMatrix) / `translate` / `rotate` / `scale` stack) and given in logical units: the same numbers as the window size you passed to `setSize`, regardless of a Retina or other high-DPI screen. The origin `(0, 0)` is the top-left corner of the window (or the current render target), `x` grows to the right, and `y` grows downward. This is the coordinate convention used by every 2D shape in this group.
-- `(x, y)` is always the top-left corner of the rectangle; TrussC has no rect-mode state to switch the anchor to the center, unlike openFrameworks' `ofRectMode`. If you want a center-anchored rectangle, subtract half the size yourself (`drawRect(cx - w / 2, cy - h / 2, w, h)`).
-- Filled or outlined according to the current [`fill`](#fill) / [`noFill`](#noFill) mode and draw color; see `fill` for the full fill/stroke model and its defaults. Passing a `Vec3` position places the rectangle at that `z` for 3D scenes. For rounded corners, see [`drawRectRounded`](#drawRectRounded) and [`drawRectSquircle`](#drawRectSquircle).
+- Draws a rectangle whose top-left corner is at `(x, y)`, with width `w` and height `h`. You can also pass `Vec3 pos, Vec2 size`.
+- The origin `(0, 0)` is the top-left corner of the window (or of the current drawing target). `x` grows to the right and `y` grows downward. All 2D shapes in this group use these coordinates.
+- Coordinates are in logical units. They are the same numbers as the window size you passed to `setSize`, also on Retina and other high-resolution screens.
+- Coordinates are local, so `translate`, `rotate` and `scale` (usually between `pushMatrix` and `popMatrix`) move, turn and resize the rectangle.
+- `(x, y)` is always the top-left corner. Unlike `ofRectMode` in openFrameworks, there is no setting to use the center instead. To place a rectangle by its center, subtract half the size yourself: `drawRect(cx - w / 2, cy - h / 2, w, h)`.
+- After `fill()` the rectangle is filled with the current color, and after `noFill()` only its outline is drawn. See `fill` for details and defaults.
+- `w` and `h` may be negative. The rectangle is then drawn on the other side of `(x, y)`, so you do not need to fix the values yourself.
+- With a `Vec3` position, the rectangle is placed at that `z` in a 3D scene.
+- For rounded corners, use `drawRectRounded` or `drawRectSquircle`.
 
 ```cpp
 void tcApp::draw() {
@@ -14615,9 +14670,13 @@ void tcApp::draw() {
 
 ## drawRectRounded
 
-- Same `(x, y, w, h)` / `Vec3 pos, Vec2 size` arguments and top-left anchor as [`drawRect`](#drawRect) — see `drawRect` for the coordinate convention — plus a `radius` for the corner circles. `radius` is clamped to half of the smaller of `w`/`h`, so passing a very large value safely caps out at a stadium/pill shape instead of distorting the rectangle. A `radius` of `0` or less falls back to a plain [`drawRect`](#drawRect).
-- Rounded rectangles use local `z = 0` and ignore `pos.z`; the plain rectangle fallback preserves `pos.z`.
-- Each corner is a quarter-circle arc; the curve quality (segment count) follows the current curve settings — see [`drawCurve`](#drawCurve) for resolution vs. tolerance mode. Negative `w`/`h` are normalized internally, same as `drawRect`. Fills and strokes according to the current [`fill`](#fill) / [`noFill`](#noFill) mode.
+- Draws a rectangle with rounded corners. The arguments `(x, y, w, h)` or `Vec3 pos, Vec2 size` and the top-left corner position work the same way as in `drawRect`. `radius` is the radius of the round corners.
+- Each corner is a quarter of a circle.
+- `radius` is limited to half of the shorter side. A very large value therefore gives a pill (capsule) shape and never distorts the rectangle. A `radius` of `0` or less draws a plain `drawRect`.
+- After `fill()` the shape is filled, and after `noFill()` only its outline is drawn.
+- Negative `w` and `h` work in the same way as in `drawRect`.
+- The number of segments in each corner follows the current curve settings. You can change them with `setCurveTolerance` or `setCurveResolution`.
+- The rounded rectangle is always drawn at local `z = 0`, and `pos.z` is ignored. When it falls back to a plain rectangle, `pos.z` is used.
 
 ```cpp
 void tcApp::draw() {
@@ -14628,8 +14687,10 @@ void tcApp::draw() {
 
 ## drawRectSquircle
 
-- Same `(x, y, w, h)` / `Vec3 pos, Vec2 size` arguments, top-left anchor and `radius` clamping as [`drawRectRounded`](#drawRectRounded) — see `drawRect` for the coordinate convention. The difference is only how each corner is shaped: instead of a circular arc, each corner follows a superellipse curve (`n = 4`), which is curvature-continuous with the straight edges — the same "squircle" look used for iOS app icons, with no visible seam where the curve meets the straight edge.
-- Because the corner math is more involved than a plain arc, this costs a bit more to generate than [`drawRectRounded`](#drawRectRounded) for the same corner radius; prefer `drawRectRounded` when the difference is not visually important. Fills and strokes according to the current [`fill`](#fill) / [`noFill`](#noFill) mode.
+- Draws a rectangle with smoothly rounded corners. The arguments, the top-left corner position and the limit on `radius` are the same as in `drawRectRounded`. See `drawRect` for how the coordinates work.
+- Only the shape of the corners is different. Each corner follows a superellipse curve (`n = 4`) instead of a circular arc. The corner joins the straight edges smoothly, with no visible seam. This is the "squircle" look known from iOS app icons.
+- After `fill()` the shape is filled, and after `noFill()` only its outline is drawn.
+- The corner calculation is a little more costly than in `drawRectRounded` with the same radius. If the difference does not matter visually, `drawRectRounded` is the better choice.
 
 ```cpp
 void tcApp::draw() {
@@ -14656,19 +14717,25 @@ void tcApp::draw() {
 
 ## drawStroke
 
-- A shorthand for the most common two-point case: internally it calls [`beginStroke`](#beginStroke), adds the two given points, and calls [`endStroke`](#endStroke). It draws one thick segment using the current [`setStrokeWeight`](#setStrokeWeight) and [`setStrokeCap`](#setStrokeCap) (a two-point stroke has no corner, so [`setStrokeJoin`](#setStrokeJoin) has no visible effect here).
+- Draws one thick line between two points. It uses the current `setStrokeWeight` and `setStrokeCap`. You can pass `Vec2` points or `(x1, y1, x2, y2)`.
+
 ```cpp
 setStrokeWeight(6);
 setStrokeCap(StrokeCap::Round);
 drawStroke(Vec2(20, 20), Vec2(220, 120));
 ```
-- For a connected multi-segment stroke with real corner joins, use [`beginStroke`](#beginStroke) / [`vertex`](#vertex) / [`endStroke`](#endStroke) directly instead of calling `drawStroke` repeatedly — calling it per segment still works, but every call rebuilds its own small mesh and corners are not shared.
+
+- It is a shorthand for `beginStroke()`, two `vertex()` calls and `endStroke()`. A two-point line has no corner, so `setStrokeJoin` has no visible effect here.
+- For a line with several connected segments, use `beginStroke`, `vertex` and `endStroke` directly. Calling `drawStroke` once per segment also works, but each call builds its own small mesh and the corners are not joined.
 
 ## drawSuperellipse
 
-- Draws the Lamé curve `|x/rx|^n + |y/ry|^n = 1` inscribed in the rect `(x, y, w, h)` (same `(x, y, w, h)` / `Vec3 pos, Vec2 size` arguments and top-left anchor as [`drawRect`](#drawRect); see `drawRect` for the coordinate convention) — a drop-in alternative to [`drawRectRounded`](#drawRectRounded) for a single continuous outline instead of straight edges with rounded corners.
-- The exponent `n` morphs the whole shape: `2` draws an ellipse, `4` a squircle, and higher values approach the bounding rectangle; `1` draws a diamond, and values below `1` draw a concave, star-like shape (filled correctly via a center fan, unlike [`appendSuperellipse`](#appendSuperellipse)). The default `n = 5` approximates the Apple app-icon silhouette; the classic Piet Hein superellipse uses `n = 2.5`. `n <= 0` draws nothing. The aspect ratio comes from `w`/`h`, so a non-square rect gives an elongated shape rather than a circle clipped to the rect.
-- Unlike [`drawRectSquircle`](#drawRectSquircle), which rounds only the corners of a rect with straight edges in between, the entire outline here is one continuous superellipse. Fills and strokes according to the current [`fill`](#fill) / [`noFill`](#noFill) mode.
+- Draws a superellipse (Lamé curve, `|x/rx|^n + |y/ry|^n = 1`) that fits exactly inside the rectangle `(x, y, w, h)`. The arguments `(x, y, w, h)` or `Vec3 pos, Vec2 size` and the top-left corner position work the same way as in `drawRect`.
+- The whole outline is one continuous curve. `drawRectSquircle` rounds only the corners and keeps straight edges between them. You can use `drawSuperellipse` in place of `drawRectRounded` when you want one continuous outline.
+- The exponent `n` changes the whole shape. `2` gives an ellipse, `4` a squircle, and larger values come closer to the rectangle. `1` gives a diamond, and values below `1` give a star-like shape that curves inward.
+- The default `n = 5` is close to the shape of an Apple app icon. The classic Piet Hein superellipse uses `n = 2.5`. Nothing is drawn when `n <= 0`.
+- The proportions come from `w` and `h`. A rectangle that is not square gives a stretched shape.
+- After `fill()` the shape is filled, and after `noFill()` only its outline is drawn. Shapes with `n` below `1` are also filled correctly, because the fill is built from the center. `appendSuperellipse` does not fill these shapes correctly.
 
 ```cpp
 void tcApp::draw() {
@@ -14680,8 +14747,9 @@ void tcApp::draw() {
 
 ## drawTriangle
 
-- Draws a triangle through three points: `(x1, y1), (x2, y2), (x3, y3)` for 2D, or `Vec3 p1, Vec3 p2, Vec3 p3` for 3D. Coordinates follow the same local, logical-unit convention as [`drawRect`](#drawRect); vertex order does not matter for filling.
-- Filled or outlined according to the current [`fill`](#fill) / [`noFill`](#noFill) mode. For shapes with more than three vertices, use [`beginShape`](#beginShape) / [`vertex`](#vertex) / `endShape()`.
+- Draws a triangle through three points: `(x1, y1)`, `(x2, y2)` and `(x3, y3)`. For 3D, pass three `Vec3` points. The coordinates work the same way as in `drawRect`: local coordinates in logical units.
+- After `fill()` the triangle is filled, and after `noFill()` only its outline is drawn. The order of the three points does not matter for filling.
+- For shapes with more than three corners, use `beginShape()`, `vertex` and `endShape()`.
 
 ```cpp
 void tcApp::draw() {
@@ -14765,7 +14833,9 @@ void tcApp::draw() {
 
 ## endLines
 
-- Closes the buffer opened by [`beginLines`](#beginLines) and draws every accumulated pair of vertices as an independent line segment, then clears the buffer. If fewer than 2 vertices were added, nothing is drawn. See [`beginLines`](#beginLines) for the full pattern and a code example.
+- Draws the points added since `beginLines()` as separate segments, two points per segment, and then empties the buffer.
+- If fewer than 2 points were added, nothing is drawn.
+- See `beginLines` for the full pattern and a code example.
 
 ## endShadowPass
 
@@ -14774,12 +14844,18 @@ void tcApp::draw() {
 
 ## endShape
 
-- Closes the buffer opened by [`beginShape`](#beginShape) and draws it, then clears the buffer. Pass `endShape(true)` to also close the outline (connect the last vertex back to the first); the default is `false` (open outline).
-- If [`fill`](#fill) is on and there are at least 3 vertices, the polygon is filled as a triangle fan from the first vertex, regardless of the `close` argument — this only renders correctly for **convex** shapes; a concave polygon's fill can show wrong triangles. If [the stroke](#noFill) is on and there are at least 2 vertices, the outline is drawn as a thin (1px) line strip; `close` only affects this outline. See [`beginShape`](#beginShape) for the full pattern and a code example.
+- Draws the points added since `beginShape()` and then empties the buffer. See `beginShape` for the full pattern and a code example.
+- `endShape(true)` closes the outline by connecting the last point back to the first. The default is `false`, which leaves the outline open.
+- With `fill()` (the default), the shape is filled when it has 3 or more points. The `close` argument does not affect the fill.
+- With `noFill()`, only the outline is drawn as a thin 1px line when the shape has 2 or more points. Use `beginStroke` for thick lines.
+- Both use the color that is set when `endShape()` is called.
+- The fill is made of triangles that all start from the first point. It is correct only for **convex** shapes. A concave polygon may be filled incorrectly.
 
 ## endStroke
 
-- Closes the buffer opened by [`beginStroke`](#beginStroke), builds the mesh (width / caps / joins) and draws it, then clears the buffer. Pass `endStroke(true)` to close the polyline into a loop (connect the last vertex back to the first); if your last vertex is already at the same position as the first, the duplicate point is dropped automatically so the closing segment does not render as a zero-length spike. At least 2 vertices are required. See [`beginStroke`](#beginStroke) for the full pattern and a code example.
+- Draws the points added since `beginStroke()` as a thick line with the stroke width, caps and joins, and then empties the buffer. At least 2 points are needed. See `beginStroke` for the full pattern and a code example.
+- `endStroke(true)` closes the line into a loop by connecting the last point back to the first.
+- When you close the loop, a last point placed at the same position as the first point is removed automatically. This prevents a small spike at the closing corner.
 
 ## events
 
@@ -15005,7 +15081,7 @@ void tcApp::update() {
 
 ## getBlendMode
 
-- Returns the `BlendMode` set by the last [`setBlendMode`](#setBlendMode) (or [`resetBlendMode`](#resetBlendMode)) call on the current target — `Alpha` by default.
+- Returns the `BlendMode` of the current drawing target (the window, or an Fbo between `begin()` and `end()`). It is the mode set by the last `setBlendMode()` or `resetBlendMode()` call, or restored by `popStyle()` or `resetStyle()`. The default is `Alpha`.
 
 ## getCameraPosition
 
@@ -15053,15 +15129,20 @@ Kept as a backward-compatible alias for `getScale()` (identical behavior). New c
 
 ## getCurveMode
 
-- Returns `CurveStyle::Mode::Tolerance` (the default — segment count adapts to radius and scale to hit [`setCurveTolerance`](#setCurveTolerance)'s pixel budget) or `CurveStyle::Mode::Resolution` (a fixed segment count from [`setCurveResolution`](#setCurveResolution), regardless of radius). See [`drawCurve`](#drawCurve) for the full comparison.
+- Returns `CurveStyle::Mode::Tolerance` or `CurveStyle::Mode::Resolution`.
+- `Tolerance` is the default. The segment count follows the radius and the current scale, so that the curve stays within the pixel tolerance set by `setCurveTolerance()`.
+- `Resolution` uses the fixed segment count set by `setCurveResolution()`, regardless of the radius.
+- Calling `setCurveTolerance()` or `setCurveResolution()` switches to that mode.
 
 ## getCurveResolution
 
-- Returns the value last set by [`setCurveResolution`](#setCurveResolution) (60 by default), regardless of which [curve mode](#getCurveMode) is currently active — see [`drawCurve`](#drawCurve) for how the two modes differ.
+- Returns the value last set by `setCurveResolution()`. The default is 60.
+- It returns this value whichever curve mode is active (see `getCurveMode`), but the value is used only in resolution mode. See `setCurveResolution` and `setCurveTolerance` for how the two modes differ.
 
 ## getCurveTolerance
 
-- Returns the value last set by [`setCurveTolerance`](#setCurveTolerance) (0.1 pixels by default), regardless of which [curve mode](#getCurveMode) is currently active.
+- Returns the value last set by `setCurveTolerance()`, in pixels. The default is 0.1 pixels.
+- It returns this value whichever curve mode is active (see `getCurveMode`), but the value is used only in tolerance mode.
 
 ## getDataPath
 
@@ -16259,9 +16340,9 @@ void tcApp::draw() {
 
 ## popStyle
 
-- popStyle() takes the style saved by the matching [`pushStyle`](#pushStyle) off the stack and makes it current again — color, fill/stroke, point and curve settings, text alignment, and blend mode all at once. See [`pushStyle`](#pushStyle) for exactly what is saved and for how TrussC resets style before each Node's draw().
-- Depth testing is not saved by `pushStyle()` or restored by `popStyle()`; `popStyle()` restores the blend mode using the current depth setting, so call `disableDepthTest()` explicitly to turn depth testing off.
-- Calling popStyle() with nothing left on the stack (more pops than pushes) logs a rate-limited warning and does nothing; the stack and the current style stay as they were.
+- `popStyle()` takes the style saved by the matching `pushStyle()` off the stack and makes it current again. The color, fill and stroke, point and curve settings, text alignment, and blend mode all return at once. See `pushStyle` for the full list of saved items and for how TrussC resets the style before each Node's `draw()`.
+- If nothing is left on the stack (more pops than pushes), a rate-limited warning is logged and nothing happens. The stack and the current style stay as they are. Inside a Node's `draw()`, a pop that would remove a style pushed outside that node is refused in the same way.
+- The depth test setting is not saved by `pushStyle()` and is not restored by `popStyle()`. `popStyle()` restores the blend mode with the current depth test setting, so call `disableDepthTest()` yourself when you want the depth test off.
 - Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (inside a camera scope this turns the depth test off unless enableDepthTest() is on).
 
 ## pow
@@ -16340,11 +16421,11 @@ void tcApp::draw() {
 
 ## pushStyle
 
-- pushStyle() saves the entire current style onto a stack: the draw color, whether fill and stroke are enabled and how wide the stroke is, the point size and shape, the curve tessellation settings, text alignment, and the blend mode. [`popStyle`](#popStyle) restores all of it back to what it was when you pushed.
-- [`resetStyle`](#resetStyle) sets the style to its defaults: white color, fill enabled, stroke disabled, stroke weight 1, point size 1 with the Square point style, curves in tolerance mode at 0.1 pixels, text aligned to the top-left, and blend mode Alpha.
-- TrussC calls resetStyle() automatically right before every Node's draw() runs. Because of that, a node never inherits the style its parent or an earlier sibling left behind; it always starts drawing from these defaults. resetStyle() runs again once that node (including its children) has finished drawing, so nothing it changed leaks into whatever draws next.
-- Call popStyle() once for every pushStyle(). An extra popStyle() logs a rate-limited warning and is ignored; an unmatched pushStyle() left open is cleaned up automatically at the end of the frame or callback, so it does not build up over time, though it is still a bug worth fixing.
-- For code with several exits or long blocks, consider [`scopedStyle`](#scopedStyle), which pops automatically when its scope ends.
+- `pushStyle()` saves the whole current style on a stack. This includes the draw color, whether fill and stroke are on, the stroke weight, cap and join, the point size and shape, the curve quality settings, the text alignment, the bitmap text line height, and the blend mode. `popStyle()` restores all of it to the state at the time of the push.
+- Call `popStyle()` once for every `pushStyle()`. For code with several exits or long blocks, `scopedStyle()` is convenient because it pops automatically when the scope ends.
+- `resetStyle()` returns the style to its defaults: white color, fill on, stroke off, stroke weight 1 with the `Butt` cap and `Miter` join, point size 1 with the `Square` point style, curves in tolerance mode at 0.1 pixels, text aligned to the top-left, and blend mode `Alpha`.
+- TrussC calls `resetStyle()` automatically right before each Node's `draw()`. For this reason, a node does not inherit the style that its parent or an earlier sibling left behind, and it always starts drawing from the defaults. `resetStyle()` runs again after the node and its children have finished drawing, so the node's changes do not carry over to what is drawn next.
+- If you call `popStyle()` more times than `pushStyle()`, a warning is logged (rate-limited) and the extra call is ignored. A `pushStyle()` left without a matching pop is removed with a warning at the end of that Node's `draw()`, or at the end of the frame or callback, so it does not pile up. It is still a bug that you should fix.
 
 ```cpp
 void tcApp::draw() {
@@ -16498,7 +16579,7 @@ void tcApp::update() {
 
 ## resetBlendMode
 
-- Equivalent to `setBlendMode(BlendMode::Alpha)`. Call it after a temporary `Add`, `Multiply`, `Screen` or `Subtract` so later drawing is not affected — see [`setBlendMode`](#setBlendMode) for how long a mode persists.
+- This is the same as `setBlendMode(BlendMode::Alpha)`. Call it after a temporary `Add`, `Multiply`, `Screen` or `Subtract` so that later drawing is not affected. See `setBlendMode` for how long a mode stays in effect.
 
 ## resetElapsedTimeCounter
 
@@ -16521,8 +16602,9 @@ void tcApp::update() {
 
 ## resetStyle
 
-- resetStyle() sets the current style back to its defaults: white color (1, 1, 1, 1), fill enabled, stroke disabled, stroke weight 1 logical pixel, point size 1 with the Square point style, curves in tolerance mode at 0.1 pixels, text aligned to the top-left, and blend mode Alpha.
-- This does not touch the [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle) stack: it only changes the current style, so a later popStyle() still restores whatever was pushed before resetStyle() was called, not these defaults. TrussC also calls resetStyle() automatically right before (and again right after) every Node's draw() — see [`pushStyle`](#pushStyle) for what that means for your own draw() code.
+- `resetStyle()` sets the current style back to its defaults: white color (1, 1, 1, 1), fill on, stroke off, stroke weight 1 logical pixel with the `Butt` cap and `Miter` join, point size 1 with the `Square` point style, curves in tolerance mode at 0.1 pixels, text aligned to the top-left, and blend mode `Alpha`.
+- It changes only the current style and does not touch the `pushStyle()` / `popStyle()` stack. A later `popStyle()` therefore restores what was pushed before `resetStyle()` was called, not these defaults.
+- TrussC also calls `resetStyle()` automatically right before and right after each Node's `draw()`. See `pushStyle` for what this means for your own `draw()` code.
 - Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (inside a camera scope this turns the depth test off unless enableDepthTest() is on).
 
 ## rotate
@@ -16739,9 +16821,10 @@ void tcApp::draw() {
 
 ## scopedStyle
 
-- `auto s = scopedStyle();` calls [`pushStyle`](#pushStyle) immediately and returns a StyleScope guard that calls [`popStyle`](#popStyle) when it goes out of scope — on a normal fall-through, an early return, or an exception. It is meant for code with several exits or long blocks, where a plain popStyle() is easy to forget; pushStyle() / popStyle() remain the everyday form.
-- The guard is marked [[nodiscard]], so writing `scopedStyle();` alone (ignoring the return value) pops immediately and triggers a compiler warning — assign it to a named variable instead.
-- C++ only: Lua has no scope-bound guard, so Lua code uses pushStyle() / popStyle() directly.
+- `auto s = scopedStyle();` calls `pushStyle()` immediately and returns a `StyleScope` guard. The guard calls `popStyle()` when it goes out of scope, whether the block ends normally, returns early, or throws an exception.
+- It is meant for code with several exits or long blocks, where a plain `popStyle()` is easy to forget. For everyday code, `pushStyle()` and `popStyle()` remain the usual form.
+- Always assign the result to a named variable. The guard is marked `[[nodiscard]]`, so writing `scopedStyle();` alone causes a compiler warning, and the style is popped again right away.
+- This is C++ only. Lua has no scope guard, so Lua code uses `pushStyle()` and `popStyle()` directly.
 
 ```cpp
 void tcApp::draw() {
@@ -16779,9 +16862,10 @@ void tcApp::draw() {
 
 ## setBlendMode
 
-- setBlendMode() chooses how new drawing combines with what is already on the target: `BlendMode::Alpha` (the default, normal alpha blending), `Add` (additive), `Multiply`, `Screen`, `Subtract`, or `Disabled` (the new color simply overwrites the old one, with no blending at all).
-- Use `setBlendMode(BlendMode::Add)` for additive blending: the resulting RGB is `sourceRGB * sourceAlpha + destinationRGB`, with RGB factors `SRC_ALPHA` and `ONE`. Use `setBlendMode(BlendMode::Screen)` for screen blending: source RGB is premultiplied by alpha, and its RGB factors are `ONE` and `ONE_MINUS_SRC_COLOR`. `Alpha`, `Multiply`, and `Screen` use `sourceAlpha + destinationAlpha * (1 - sourceAlpha)` for output alpha, with alpha factors `ONE` and `ONE_MINUS_SRC_ALPHA`; two overlapping draws with alpha `0.5` on a transparent target produce `0.75`. `Add` and `Subtract` add the two alpha values, with alpha factors `ONE` and `ONE`; `Disabled` overwrites without blending.
-- The mode works the same way on the main window and inside an [`Fbo`](#Fbo) pass, and it persists until you change it again: it survives across frames and carries into a later [`Fbo::begin`](#Fbo::begin), so a stray Add or Multiply left on can quietly affect drawing you did not mean it to. Call [`resetBlendMode`](#resetBlendMode) (or wrap the change in [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle)) when you are done with a temporary mode.
+- `setBlendMode()` chooses how new drawing is combined with what is already on the target. The modes are `BlendMode::Alpha` (the default, normal alpha blending), `Add` (additive), `Multiply`, `Screen`, `Subtract`, and `Disabled` (no blending; the new color simply overwrites the old one).
+- The mode stays in effect until you change it. It works the same way on the main window and inside an `Fbo`, it carries over to later frames, and it is passed on to a later `Fbo::begin()`. A forgotten `Add` or `Multiply` can therefore affect drawing you did not intend. When you are done with a temporary mode, call `resetBlendMode()` or wrap the change in `pushStyle()` and `popStyle()`.
+- With `Add`, the resulting RGB is `sourceRGB * sourceAlpha + destinationRGB` (RGB factors `SRC_ALPHA` and `ONE`). With `Screen`, the source RGB is multiplied by its alpha first, and the RGB factors are `ONE` and `ONE_MINUS_SRC_COLOR`.
+- For the output alpha, `Alpha`, `Multiply` and `Screen` use `sourceAlpha + destinationAlpha * (1 - sourceAlpha)` (alpha factors `ONE` and `ONE_MINUS_SRC_ALPHA`). For example, drawing twice with alpha `0.5` on a transparent target gives `0.75`. `Add` and `Subtract` add the two alpha values (alpha factors `ONE` and `ONE`). `Disabled` overwrites without blending.
 
 ```cpp
 void tcApp::draw() {
@@ -16883,8 +16967,11 @@ void tcApp::setup() {
 
 ## setCurveResolution
 
-- Switches curve quality to resolution mode and sets the segment count used for a full circle; see [`drawCurve`](#drawCurve) for how this interacts with [`setCurveTolerance`](#setCurveTolerance) and the default. Arcs use a proportional share of this count, and every curved primitive (circles, ellipses, arcs, beziers, rounded rects) shares the same setting. Useful for an intentionally chunky, low-poly look, or to put a hard cap on vertex count for many small shapes regardless of their radius. Saved/restored by [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle).
-- `drawCircle()` uses at least three segments in resolution mode, so `setCurveResolution(1)` produces a triangle.
+- Switches curve quality to resolution mode and sets the number of segments for a full circle. The stored value is 60 by default, but the default mode is tolerance mode (see `setCurveTolerance`). Calling `setCurveTolerance()` switches back to it.
+- Every curved shape shares this setting: circles, ellipses, arcs, Bezier curves, `drawCurve()` curves and rounded rectangles. An arc uses a share of the count in proportion to its angle, and each Bezier or `drawCurve()` piece is split into this many segments (at least 2).
+- It is useful for a deliberately low-poly look, or to put a hard limit on the vertex count when you draw many small shapes, whatever their radius.
+- In resolution mode, `drawCircle()` uses at least 3 segments, so `setCurveResolution(1)` draws a triangle.
+- `pushStyle()` and `popStyle()` save and restore it.
 
 ```cpp
 void tcApp::draw() {
@@ -16895,7 +16982,11 @@ void tcApp::draw() {
 
 ## setCurveTolerance
 
-- Switches curve quality to tolerance mode (the default) and sets the maximum on-screen gap, in pixels, allowed between the drawn polygon and the true curve; see [`drawCurve`](#drawCurve) for the full default and how segment count is derived from it. A smaller tolerance (fewer pixels) means a smoother curve with more segments; it adapts to the shape's radius and to the current scale, so a zoomed-in or large circle automatically gets more segments while a tiny one gets fewer. Saved/restored by [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle).
+- Switches curve quality to tolerance mode (the default) and sets how far, in on-screen pixels, the drawn polygon may stray from the true curve. The default is 0.1 pixels. Calling `setCurveResolution()` switches to a fixed segment count instead.
+- A smaller value gives smoother curves with more segments. The segment count follows the shape's radius and the current scale, so a large or zoomed-in circle automatically gets more segments, and a small one gets fewer.
+- In this mode a full circle uses between 6 and 1024 segments.
+- The scale comes from the current transform, such as `scale()`. Camera perspective is not taken into account.
+- `pushStyle()` and `popStyle()` save and restore it.
 
 ```cpp
 void tcApp::draw() {
@@ -17184,7 +17275,12 @@ void tcApp::draw() {
 
 ## setPointSize
 
-- Draw state for [`PrimitiveMode`](#PrimitiveMode)`::Points` meshes, the point-cloud analogue of [`setStrokeWeight`](#setStrokeWeight). The unit is **logical pixels** (like `strokeWeight`), so it stays the same apparent size across DPIs. Affects the `Square` and `Round` [`PointStyle`](#PointStyle) splats; `Pixel` is a true 1px point and ignores it. Saved/restored by [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle). In an Fbo, sizes use attachment pixels independently of host DPI and pixelPerfect. Target projection/view/model move point centers; model scale does not enlarge the splats.
+- Sets the size of each point when a mesh is drawn with `PrimitiveMode::Points`. It is the point-cloud counterpart of `setStrokeWeight()`. The default is 1.
+- The unit is **logical pixels**, the same as the stroke weight, so points look the same size on any display density.
+- It applies to the `Square` and `Round` point styles (see `PointStyle`). `Pixel` always draws true 1-pixel points and ignores this size.
+- `pushStyle()` and `popStyle()` save and restore it.
+- The projection, view and model matrices of the current target move the point centers, but scaling with the model matrix does not make the points larger.
+- Inside an Fbo, the size is measured in the Fbo's own pixels, regardless of the window's display density or pixelPerfect.
 
 ## getPointSize
 
@@ -17193,7 +17289,10 @@ void tcApp::draw() {
 
 ## setPointStyle
 
-- Draw state choosing how a [`PrimitiveMode`](#PrimitiveMode)`::Points` mesh is drawn — see [`PointStyle`](#PointStyle) for the shapes (all GPU-resident). `Square` (the default, and the lightest to draw) and `Round` are billboard splats sized by [`setPointSize`](#setPointSize); `Pixel` is a true 1px point primitive and ignores the point size entirely. Saved/restored by [`pushStyle`](#pushStyle) / [`popStyle`](#popStyle).
+- Chooses how a mesh drawn with `PrimitiveMode::Points` looks. The shapes are listed in `PointStyle`, and all of them are drawn on the GPU.
+- `Square` is the default and the lightest to draw. `Square` and `Round` draw a small square or disc that faces the camera, and `setPointSize()` sets its size.
+- `Pixel` draws true 1-pixel points and ignores the point size entirely.
+- `pushStyle()` and `popStyle()` save and restore it.
 
 ## getPointStyle
 
@@ -17758,8 +17857,11 @@ void tcApp::draw() {
 
 ## vertex
 
-- Appends one point to whichever buffer is open: [`beginShape`](#beginShape), [`beginLines`](#beginLines) or [`beginStroke`](#beginStroke). 2D (`vertex(x, y)`, `vertex(Vec2)`) and 3D (`vertex(x, y, z)`, `vertex(Vec3)`) overloads are provided; 2D calls use `z = 0`. Calling `vertex()` with none of those buffers open does nothing.
-- Inside `beginLines()` or `beginStroke()`, each `vertex()` call also captures the **current draw color** at that moment (and, for a stroke, the current stroke weight), so changing color between vertices tapers or recolors that one path. Inside `beginShape()` only the position is stored; the fill/stroke color used by [`endShape`](#endShape) is the color set when `endShape()` runs.
+- Adds one point to the buffer that is open: `beginShape`, `beginLines` or `beginStroke`. If none of them is open, `vertex()` does nothing.
+- You can pass 2D points (`vertex(x, y)`, `vertex(Vec2)`) or 3D points (`vertex(x, y, z)`, `vertex(Vec3)`). For a 2D point, z is 0.
+- Inside `beginShape()`, only the position is stored. `endShape()` uses the color that is set when it is called.
+- Inside `beginLines()`, each point also stores the **current color**. Changing the color between points gives each segment its own colors.
+- Inside `beginStroke()`, each point also stores the **current stroke weight**, so you can change the width along one line. The whole stroke uses the color of its first point.
 
 ## videoCodecName
 
