@@ -1,5 +1,8 @@
 #include <TrussC.h>
 #include <tcxImGui.h>
+#ifndef TC_IMGUI_BASE_FIXTURE
+#include <tcxNodeInspector.h>
+#endif
 #include "../../../../core/tests/common/tcDisplayTest.h"
 #include <chrono>
 #include <cstdio>
@@ -309,6 +312,58 @@ public:
         ++frame_;
     }
 };
+#ifndef TC_IMGUI_BASE_FIXTURE
+// Drive the actual addon registrations, with defaults registered before setup.
+void inputPriorityChecks() {
+    int defaultCalls = 0, afterImGuiCalls = 0;
+    std::vector<EventListener> defaults;
+    auto addDefault = [&](auto& event) {
+        defaults.push_back(event.listen([&](auto&) { ++defaultCalls; }));
+    };
+    addDefault(events().mousePressed); addDefault(events().mouseReleased);
+    addDefault(events().mouseMoved); addDefault(events().mouseDragged);
+    addDefault(events().mouseScrolled); addDefault(events().keyPressed);
+    addDefault(events().keyReleased);
+    ImGuiManager manager;
+    manager.setup(); fixedContext();
+    auto& io = ImGui::GetIO();
+    io.WantCaptureMouse = true; io.WantCaptureKeyboard = true;
+    auto capture = [&](auto& event, auto payload) {
+        event.notify(payload);
+        check("actual ImGui blocks earlier default listener", payload.consumed && defaultCalls == 0);
+    };
+    capture(events().mousePressed, MouseEventArgs{});
+    capture(events().mouseDragged, MouseDragEventArgs{});
+    capture(events().mouseReleased, MouseEventArgs{});
+    capture(events().mouseMoved, MouseMoveEventArgs{});
+    capture(events().mouseScrolled, ScrollEventArgs{});
+    capture(events().keyPressed, KeyEventArgs{});
+    capture(events().keyReleased, KeyEventArgs{});
+    // -15 lies after ImGui's -20 but before the old gizmo priority (-10).
+    // A gizmo grab must skip this observer even while ImGui wants the mouse.
+    auto observer = events().mousePressed.listen([&](auto&) { ++afterImGuiCalls; }, -15);
+    auto& inspector = tcx::NodeInspector::instance();
+    inspector.setEnabled(true);
+    inspector.enableGizmoInput();
+    auto selected = std::make_shared<Node>();
+    selected->setPos(100,100);
+    setSelectedNode(selected.get());
+    MouseEventArgs press{}; press.pos = {130,100};
+    events().mousePressed.notify(press);
+    check("actual gizmo captures before ImGui and earlier default", press.consumed && inspector.isGizmoDragging() && defaultCalls == 0 && afterImGuiCalls == 0);
+    MouseDragEventArgs drag{}; drag.pos = {140,100};
+    events().mouseDragged.notify(drag);
+    check("actual gizmo drag keeps capture", drag.consumed && defaultCalls == 0);
+    MouseEventArgs release{};
+    events().mouseReleased.notify(release);
+    check("actual gizmo release keeps capture", release.consumed && !inspector.isGizmoDragging() && defaultCalls == 0);
+    setSelectedNode(nullptr);
+    inspector.setEnabled(false);
+    io.WantCaptureMouse = false; io.WantCaptureKeyboard = false;
+    manager.shutdown();
+}
+#endif
+
 class Fixture : public App {
     int frame_=0;
     EventListener render_,after_,log_;
@@ -324,6 +379,9 @@ class Fixture : public App {
 #endif
 public:
     void setup() override {
+#ifndef TC_IMGUI_BASE_FIXTURE
+        inputPriorityChecks();
+#endif
         sg_enable_stats();
         log_=getLogger().onLog.listen([](LogEventArgs& args){
             if(args.level==LogLevel::Error) {

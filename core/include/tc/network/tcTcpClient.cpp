@@ -182,7 +182,7 @@ bool TcpClient::State::connect(const std::string& host, int port) {
             });
         } else {
             // Register update listener
-            updateListener_ = events().update.listen([state = shared_from_this()] { state->processNetwork(); });
+            updateListener_ = events().update.listen([state = shared_from_this()] { state->processNetwork(); }, EventPriority::BeforeApp);
         }
     }
 

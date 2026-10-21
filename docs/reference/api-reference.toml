@@ -977,7 +977,7 @@ const TouchPoint& t = touch.touches[i];   // t.id, t.x, t.y, t.changed
 - This function is called on the main thread, so you can work with nodes and GPU objects here.
 - By default, the first finger also acts as the mouse: right after this function, `mousePressed` is called with the left button at that finger's position, and it reaches nodes as well. Other fingers send touch events only. To turn this off, call `setTouchAsMouse(false)` in `setup()`. For how mouse events reach nodes and how `consumed` works, see `App::mousePressed`.
 - Touch events themselves are never delivered to nodes, and they have no `consumed` flag.
-- This function runs as an `events().touchPressed` listener with priority `EventPriority::App`. Listeners that you add later with the default priority (for example in `setup()`) are called after it, and `EventPriority::BeforeApp` listeners are called before it.
+- The main-window touch forwarders explicitly use `EventPriority::App` (`100`) in this PR. Explicit `BeforeApp` listeners added in `setup()` still run before the App touch callback; default listeners now also run before it. Explicit `100` listeners follow registration order.
 - Only the App started with `runApp()` receives touch events. Apps under hot reload, headless apps and `Window::setApp` windows do not.
 '''
 details.ja = '''
@@ -994,7 +994,7 @@ const TouchPoint& t = touch.touches[i];   // t.id, t.x, t.y, t.changed
 - メインスレッドで呼ばれるため、ここでノードや GPU オブジェクトを操作できます。
 - デフォルトでは、1 本目の指がマウスとしても動作します。この関数のすぐあとに、その指の位置で左ボタンの `mousePressed` が呼ばれ、ノードにも届きます。2 本目以降の指はタッチイベントだけを送ります。不要な場合は `setup()` で `setTouchAsMouse(false)` にしてください。マウスがノードに届く仕組みと `consumed` については `App::mousePressed` を参照してください。
 - タッチイベントそのものはノードには届かず、`consumed` もありません。
-- この関数は、優先度 `EventPriority::App` の `events().touchPressed` リスナーとして動作します。あとから（`setup()` などで）デフォルト優先度で追加したリスナーはこの関数のあとに、`EventPriority::BeforeApp` のリスナーはこの関数の前に呼ばれます。
+- この PR ではメインウィンドウのタッチ転送リスナーに `EventPriority::App`（`100`）を明示します。`setup()` で追加する明示的な `BeforeApp` は従来どおり App のタッチコールバックより先に呼ばれ、既定のリスナーもその前に呼ばれるようになります。明示的な `100` 同士は登録順です。
 - タッチを受け取れるのは `runApp()` で起動した App だけです。ホットリロード中の App、ヘッドレス App、`Window::setApp` のウィンドウには届きません。
 '''
 details.ko = '''
@@ -1011,7 +1011,7 @@ const TouchPoint& t = touch.touches[i];   // t.id, t.x, t.y, t.changed
 - 메인 스레드에서 호출되므로 여기서 노드나 GPU 객체를 다룰 수 있습니다.
 - 기본적으로 첫 번째 손가락은 마우스로도 동작합니다. 이 함수 바로 뒤에 그 손가락 위치에서 왼쪽 버튼의 `mousePressed`가 호출되고 노드에도 전달됩니다. 두 번째 이후의 손가락은 터치 이벤트만 보냅니다. 필요하지 않다면 `setup()`에서 `setTouchAsMouse(false)`로 설정하세요. 마우스가 노드에 전달되는 방식과 `consumed`는 `App::mousePressed`를 참고하세요.
 - 터치 이벤트 자체는 노드에 전달되지 않으며 `consumed`도 없습니다.
-- 이 함수는 우선순위 `EventPriority::App`인 `events().touchPressed` 리스너로 동작합니다. 나중에(`setup()` 등에서) 기본 우선순위로 추가한 리스너는 이 함수 뒤에, `EventPriority::BeforeApp` 리스너는 이 함수 앞에 호출됩니다.
+- 이 PR에서는 메인 윈도우의 터치 전달 리스너에 `EventPriority::App`(`100`)을 명시합니다. `setup()`에서 추가한 명시적 `BeforeApp`은 이전처럼 App 터치 콜백보다 먼저 호출되며, 기본 리스너도 이제 그 전에 호출됩니다. 명시적 `100`끼리는 등록 순서를 따릅니다.
 - 터치를 받을 수 있는 것은 `runApp()`으로 시작한 App뿐입니다. 핫 리로드 중인 App, 헤드리스 App, `Window::setApp` 윈도우에는 전달되지 않습니다.
 '''
 related = ["App::touchMoved", "App::touchReleased", "App::mousePressed", "setTouchAsMouse", "getTouchAsMouse", "TouchEventArgs", "TouchPoint", "CoreEvents::touchPressed", "EventPriority::App", "EventPriority::BeforeApp", "WindowSettings::setPixelPerfect"]
@@ -5228,16 +5228,19 @@ description.en = "Collection of framework lifecycle, rendering, and input events
 description.ja = "フレームワークのライフサイクル、描画、入力のイベントをまとめる。"
 description.ko = "프레임워크의 수명 주기, 렌더링 및 입력 이벤트를 모은다."
 details.en = '''
+- On events the App receives, listen() defaults to BeforeApp; other events keep 100. This covers update, draw, exit, key, mouse, touch, windowResized, and filesDropped; setup is unchanged.
 - Each member is an `Event<T>` or `Event<void>`; see `Event<T>` for `listen()`, listener lifetime, priorities, and delivery threads.
 - `events()` returns the current window context's hub; `Window::events()` accesses a particular secondary window's hub directly.
 - Framework notifications run on the main thread. Headless runs do not generate native window/input events or rendering events.
 '''
 details.ja = '''
+- App が受け取るイベントでは listen() の既定値は BeforeApp、それ以外のイベントでは 100 です。 対象は update、draw、exit、キー、マウス、タッチ、windowResized、filesDropped で、setup は変更しません。
 - 各メンバーは `Event<T>` または `Event<void>` です。`listen()`、リスナーの寿命、優先度、呼び出すスレッドについては `Event<T>` を参照してください。
 - `events()` は現在のウィンドウコンテキストのイベント群を返します。特定のサブウィンドウのイベント群には `Window::events()` で直接アクセスできます。
 - フレームワークからの通知はメインスレッドで行います。ヘッドレス実行では、ネイティブのウィンドウ・入力イベントと描画イベントは発生しません。
 '''
 details.ko = '''
+- App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트는 100을 유지합니다. update, draw, exit, 키, 마우스, 터치, windowResized, filesDropped가 해당하며 setup은 변경하지 않습니다.
 - 각 멤버는 `Event<T>` 또는 `Event<void>`입니다. `listen()`, 리스너 수명, 우선순위 및 호출 스레드는 `Event<T>`를 참조하세요.
 - `events()`는 현재 윈도우 컨텍스트의 이벤트 모음을 반환합니다. 특정 보조 윈도우의 이벤트 모음에는 `Window::events()`로 직접 접근합니다.
 - 프레임워크의 알림은 메인 스레드에서 전달합니다. 헤드리스 실행에서는 네이티브 윈도우 및 입력 이벤트와 렌더링 이벤트가 발생하지 않습니다.
@@ -7515,21 +7518,21 @@ details.ko = '''
 '''
 
 ["Event::clear"]
-description.en = "Removes all listeners from the event."
-description.ja = "イベントからすべてのリスナーを削除する。"
-description.ko = "이벤트에서 모든 리스너를 제거한다."
+description.en = "Removes user listeners, preserving framework-owned listeners."
+description.ja = "フレームワーク所有のリスナーを残し、ユーザーのリスナーを削除する。"
+description.ko = "프레임워크 소유 리스너를 유지하고 사용자 리스너를 제거한다."
 details.en = '''
-- Removes all registered listeners and invalidates pending `Deliver::Main` calls that have not started; returns no value.
+- Removes user listeners and invalidates their pending `Deliver::Main` calls that have not started; returns no value. Framework-owned entries keep their live tokens and queued calls until the framework disconnects their own handles. `listenerCount()` includes retained entries.
 - Existing `EventListener` tokens can still report `isConnected() == true` until they are disconnected or reassigned.
 - For removal during notification and synchronization with callbacks on other threads, see `Event<T>`.
 '''
 details.ja = '''
-- 登録中のすべてのリスナーを削除し、まだ開始していない `Deliver::Main` の呼び出しを無効にします。戻り値はありません。
+- ユーザーのリスナーを削除し、その未開始の `Deliver::Main` 呼び出しを無効にします。戻り値はありません。フレームワーク所有の登録と生存トークン、キューの呼び出しは、フレームワークがそのハンドルを切断するまで保持します。`listenerCount()` は保持した登録も数えます。
 - 既存の `EventListener` トークンは、切断または再代入するまで `isConnected() == true` を返す場合があります。
 - 通知中の削除や別スレッドのコールバックとの同期については `Event<T>` を参照してください。
 '''
 details.ko = '''
-- 등록된 모든 리스너를 제거하고 아직 시작하지 않은 `Deliver::Main` 호출을 무효화합니다. 반환값은 없습니다.
+- 사용자 리스너를 제거하고 아직 시작하지 않은 해당 `Deliver::Main` 호출을 무효화합니다. 반환값은 없습니다. 프레임워크 소유 항목은 프레임워크가 해당 핸들을 해제할 때까지 생존 토큰과 대기 중인 호출을 유지합니다. `listenerCount()`는 유지한 항목도 포함합니다.
 - 기존 `EventListener` 토큰은 연결을 해제하거나 다시 대입할 때까지 `isConnected() == true`를 반환할 수 있습니다.
 - 알림 도중의 제거와 다른 스레드의 콜백과의 동기화는 `Event<T>`를 참조하세요.
 '''
@@ -7539,20 +7542,26 @@ description.en = "Registers an event listener and returns its connection token."
 description.ja = "イベントリスナーを登録し、接続トークンを返す。"
 description.ko = "이벤트 리스너를 등록하고 연결 토큰을 반환한다."
 details.en = '''
+- On App-facing events, the default changes from `100` to `0`. An omitted priority now ties with explicit `0` in registration order: default `a` registered before explicit-0 `b` runs `ab` (previously `ba`). Defaults now precede explicit `1–99` (previously followed them) and explicit `100` (previously tied and interleaved by registration). A consuming default listener therefore pre-empts even an explicit-100 listener registered earlier.
+- On events the App receives, listen() defaults to BeforeApp; other events keep 100.
 - Use `listen(callback)` or `listen(object, &Class::method)`; callbacks receive `T&`, or no arguments for `Event<void>`.
-- The optional integer priority defaults to `EventPriority::App` (`100`); smaller values run first, and equal priorities preserve registration order.
+- Omitted priority uses the event instance’s default (generic and audio events: `100`); smaller values run first, and equal priorities preserve registration order.
 - Use `listen(callback, Deliver::Main, priority)` to request main-thread delivery. For delivery rules, the non-copyable argument fallback, and storing the returned `EventListener`, see `Event<T>`.
 - Overloads that take an `EventListener&` as the first argument are deprecated.
 '''
 details.ja = '''
+- App 向けイベントの既定値は `100` から `0` に変わります。省略時は明示的な `0` と同順位になり、登録順に呼ばれます。既定の `a` を明示的な 0 の `b` より先に登録すると `ab` です（従来は `ba`）。既定のリスナーは明示的な `1–99`（従来はその後）と `100`（従来は同順位で登録順に混在）より先に呼ばれます。このため、既定のリスナーがイベントを消費すると、先に登録された明示的な 100 のリスナーにも届きません。
+- App が受け取るイベントでは listen() の既定値は BeforeApp、それ以外のイベントでは 100 です。
 - `listen(callback)` または `listen(object, &Class::method)` で登録します。コールバックは `T&` を受け取り、`Event<void>` では引数を取りません。
-- 省略可能な整数の優先度は、既定で `EventPriority::App`（`100`）です。小さい値から呼ばれ、同じ値では登録順になります。
+- 優先度を省略すると、そのイベントの既定値（汎用イベントと音声イベントでは `100`）を使います。小さい値から呼ばれ、同じ値では登録順になります。
 - メインスレッドでの呼び出しを指定するには `listen(callback, Deliver::Main, priority)` を使います。呼び出すスレッドの規則、コピーできない引数の扱い、返された `EventListener` の保持については `Event<T>` を参照してください。
 - 第1引数に `EventListener&` を取るオーバーロードは非推奨です。
 '''
 details.ko = '''
+- App 대상 이벤트의 기본값은 `100`에서 `0`으로 바뀝니다. 우선순위를 생략하면 명시적 `0`과 같은 우선순위로 등록 순서에 따라 실행됩니다. 기본값 `a`를 명시적 0인 `b`보다 먼저 등록하면 `ab`입니다(이전에는 `ba`). 기본 리스너는 명시적 `1–99`(이전에는 그 뒤) 및 `100`(이전에는 같은 우선순위로 등록 순서에 따라 섞임)보다 먼저 실행됩니다. 따라서 기본 리스너가 이벤트를 소비하면 먼저 등록된 명시적 100 리스너도 실행되지 않습니다.
+- App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트는 100을 유지합니다.
 - `listen(callback)` 또는 `listen(object, &Class::method)`로 등록합니다. 콜백은 `T&`를 받으며, `Event<void>`에서는 인자를 받지 않습니다.
-- 생략 가능한 정수 우선순위의 기본값은 `EventPriority::App`(`100`)입니다. 작은 값부터 호출하며, 같은 값에서는 등록 순서를 유지합니다.
+- 우선순위를 생략하면 해당 이벤트의 기본값(일반 이벤트와 오디오 이벤트는 `100`)을 사용합니다. 작은 값부터 호출하며, 같은 값에서는 등록 순서를 유지합니다.
 - 메인 스레드 호출을 지정하려면 `listen(callback, Deliver::Main, priority)`를 사용합니다. 호출 스레드 규칙, 복사할 수 없는 인자의 처리, 반환된 `EventListener`의 보관은 `Event<T>`를 참조하세요.
 - 첫 번째 인자로 `EventListener&`를 받는 오버로드는 더 이상 권장하지 않습니다.
 '''
@@ -7617,45 +7626,51 @@ description.en = "Connects listeners to notifications with a shared argument typ
 description.ja = "共通の引数型を持つ通知にリスナーを登録する。"
 description.ko = "공통 인자 타입을 사용하는 알림에 리스너를 등록한다."
 details.en = '''
+- `Event()` defaults to `100`; `Event(defaultPriority)` sets an immutable per-instance integer default for all omitted-priority overloads. Every explicitly supplied integer stays explicit, including `0`, negative values and integer extremes.
+- On events the App receives, listen() defaults to BeforeApp; other events keep 100.
 - Register a callback with `listen(callback)` or a member function with `listen(object, &Class::method)`; callbacks receive `T&`. `notify(arg)` passes the same argument by reference to listeners, so they can modify it. `Event<void>` uses callbacks and `notify()` without arguments.
 - Keep the returned `EventListener` as a member, such as `EventListener listener;`, and assign the result to it. Destroying or reassigning the token disconnects its previous listener automatically; discarding the returned token disconnects immediately.
-- The optional integer priority defaults to `EventPriority::App` (`100`). Use `listen(callback, priority)` or `listen(callback, Deliver::Main, priority)`; see `EventPriority::BeforeApp` for priority values, listener order, and `consumed`.
+- Omitted priority uses the event instance’s default (generic and audio events: `100`). Use `listen(callback, priority)` or `listen(callback, Deliver::Main, priority)`; see `EventPriority::BeforeApp` for priority values, listener order, and `consumed`.
 - `Deliver::Inline` is the default and calls listeners synchronously on the thread that calls `notify()`. `Deliver::Main` also runs immediately when notification already occurs on the main thread.
 - From another thread, `Deliver::Main` copies a copy-constructible argument and queues the callback for the main thread before a subsequent frame's update and draw; the notifying thread does not wait. A non-copyable argument falls back to inline delivery on the notifying thread.
-- A queued listener receives its own argument copy, so changes do not update the original or stop other listeners through `consumed`. Disconnecting its token or calling `clear()` invalidates pending calls that have not started.
+- A queued listener receives its own argument copy, so changes do not update the original or stop other listeners through `consumed`. Disconnecting its token or removing a user listener with `clear()` invalidates pending calls that have not started.
 - Node tree changes and GPU operations belong on the main thread. Choose `Deliver::Main` for callbacks that need them, subject to the non-copyable argument fallback.
-- A listener added during `notify()` starts with the next notification. Disconnecting a listener on the notifying thread prevents later calls to it in that notification, and `clear()` skips the remaining listeners.
+- A listener added during `notify()` starts with the next notification. Disconnecting a listener on the notifying thread prevents later calls to it in that notification, and `clear()` skips the remaining user listeners, retaining framework-owned entries.
 - Disconnecting from another thread does not wait for a running callback, and a callback that has already checked its connection can still start. Before destroying captured objects, synchronize with the notifying thread; for audio, disconnect and then use `AudioEngine::waitForAudioCallbacks()` as described in that entry.
 - Listener-list operations are synchronized, but notifications from different threads can run callbacks concurrently. Synchronize shared callback state and access to the same `EventListener` token yourself.
-- `listenerCount()` returns the number of registered listeners, and `clear()` removes them all. An `Event` cannot be copied or moved.
+- `listenerCount()` returns the number of registered listeners, and `clear()` removes user listeners and retains framework-owned entries. An `Event` cannot be copied or moved.
 - For the order of input listeners, App callbacks, and node handlers, see `App::mousePressed`.
 '''
 details.ja = '''
+- `Event()` の既定優先度は `100` です。`Event(defaultPriority)` は優先度を省略する全形式に使う、インスタンスごとの不変の整数値を設定します。明示した整数は `0`、負数、整数の両端値を含め、そのまま使います。
+- App が受け取るイベントでは listen() の既定値は BeforeApp、それ以外のイベントでは 100 です。
 - `listen(callback)` でコールバックを、`listen(object, &Class::method)` でメンバー関数を登録します。コールバックは `T&` を受け取ります。`notify(arg)` は同じ引数を参照で各リスナーに渡すため、リスナーは値を変更できます。`Event<void>` ではコールバックも `notify()` も引数を取りません。
 - `EventListener listener;` のようなメンバー変数に、返された `EventListener` を代入して保持してください。トークンの破棄や再代入で、それまでのリスナーが自動的に切断されます。戻り値を保持しない場合は直ちに切断されます。
-- 省略可能な整数の優先度は、既定で `EventPriority::App`（`100`）です。`listen(callback, priority)` または `listen(callback, Deliver::Main, priority)` と書きます。優先度の値、呼ばれる順番、`consumed` については `EventPriority::BeforeApp` を参照してください。
+- 優先度を省略すると、そのイベントの既定値（汎用イベントと音声イベントでは `100`）を使います。`listen(callback, priority)` または `listen(callback, Deliver::Main, priority)` と書きます。優先度の値、呼ばれる順番、`consumed` については `EventPriority::BeforeApp` を参照してください。
 - 既定の `Deliver::Inline` は、`notify()` を呼んだスレッドで同期的にリスナーを呼び出します。`Deliver::Main` も、通知がすでにメインスレッドで行われていれば即座に呼び出します。
 - 別のスレッドからの `Deliver::Main` は、コピー可能な引数をコピーし、以降のフレームの update と draw より前にメインスレッドで実行するようキューに登録します。通知したスレッドは実行を待ちません。引数がコピーできない場合は、通知したスレッドで同期的に呼び出します。
-- キューに登録されたリスナーは専用の引数コピーを受け取るため、変更は元の引数に反映されず、`consumed` でほかのリスナーを止めることもできません。トークンの切断や `clear()` は、まだ開始していない呼び出しを無効にします。
+- キューに登録されたリスナーは専用の引数コピーを受け取るため、変更は元の引数に反映されず、`consumed` でほかのリスナーを止めることもできません。トークンの切断や `clear()` によるユーザーのリスナーの削除は、まだ開始していない呼び出しを無効にします。
 - Node ツリーの変更と GPU 操作はメインスレッドで行います。これらを行うコールバックには `Deliver::Main` を指定してください。ただし、引数がコピーできない場合の動作に注意してください。
-- `notify()` 中に追加したリスナーは、次の通知から呼ばれます。通知したスレッド上でリスナーを切断すると、その通知内で後から呼ばれることはありません。`clear()` は残りのリスナーを呼び出しません。
+- `notify()` 中に追加したリスナーは、次の通知から呼ばれます。通知したスレッド上でリスナーを切断すると、その通知内で後から呼ばれることはありません。`clear()` は残りのユーザーのリスナーを呼び出さず、フレームワーク所有の登録を保持します。
 - 別のスレッドから切断しても、実行中のコールバックの終了は待ちません。接続状態を確認済みのコールバックが、その後に開始する場合もあります。キャプチャしたオブジェクトを破棄する前に通知側のスレッドと同期してください。オーディオでは切断後に `AudioEngine::waitForAudioCallbacks()` を使います。詳しくはその項目を参照してください。
 - リスナー一覧の操作は同期されますが、異なるスレッドから通知するとコールバックが並行して実行される場合があります。コールバックが共有する状態と、同じ `EventListener` トークンへのアクセスは利用側で同期してください。
-- `listenerCount()` は登録中のリスナー数を返し、`clear()` はすべてのリスナーを削除します。`Event` はコピーもムーブもできません。
+- `listenerCount()` は登録中のリスナー数を返し、`clear()` はユーザーのリスナーを削除し、フレームワーク所有の登録を保持します。`Event` はコピーもムーブもできません。
 - 入力リスナー、App のコールバック、ノードのハンドラーの順番については `App::mousePressed` を参照してください。
 '''
 details.ko = '''
+- `Event()`의 기본 우선순위는 `100`입니다. `Event(defaultPriority)`는 우선순위를 생략하는 모든 형식에 사용할 인스턴스별 불변 정수 기본값을 설정합니다. `0`, 음수, 정수 극값을 포함한 명시적 정수는 그대로 사용합니다.
+- App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트는 100을 유지합니다.
 - `listen(callback)`으로 콜백을, `listen(object, &Class::method)`로 멤버 함수를 등록합니다. 콜백은 `T&`를 받습니다. `notify(arg)`는 같은 인자를 참조로 각 리스너에 전달하므로 리스너가 값을 변경할 수 있습니다. `Event<void>`에서는 콜백과 `notify()` 모두 인자를 받지 않습니다.
 - `EventListener listener;`와 같은 멤버 변수에 반환된 `EventListener`를 대입하여 보관하세요. 토큰을 소멸시키거나 다시 대입하면 이전 리스너의 연결이 자동으로 해제됩니다. 반환값을 보관하지 않으면 즉시 연결이 해제됩니다.
-- 생략 가능한 정수 우선순위의 기본값은 `EventPriority::App`(`100`)입니다. `listen(callback, priority)` 또는 `listen(callback, Deliver::Main, priority)`로 작성합니다. 우선순위 값, 호출 순서, `consumed`는 `EventPriority::BeforeApp`을 참조하세요.
+- 우선순위를 생략하면 해당 이벤트의 기본값(일반 이벤트와 오디오 이벤트는 `100`)을 사용합니다. `listen(callback, priority)` 또는 `listen(callback, Deliver::Main, priority)`로 작성합니다. 우선순위 값, 호출 순서, `consumed`는 `EventPriority::BeforeApp`을 참조하세요.
 - 기본값인 `Deliver::Inline`은 `notify()`를 호출한 스레드에서 리스너를 동기적으로 호출합니다. `Deliver::Main`도 알림이 이미 메인 스레드에서 발생하면 즉시 호출합니다.
 - 다른 스레드에서 사용하는 `Deliver::Main`은 복사 가능한 인자를 복사하여 이후 프레임의 update와 draw 전에 메인 스레드에서 실행하도록 큐에 등록합니다. 알림을 보낸 스레드는 실행을 기다리지 않습니다. 인자를 복사할 수 없으면 알림을 보낸 스레드에서 동기적으로 호출합니다.
-- 큐에 등록된 리스너는 자체 인자 복사본을 받으므로 변경 사항이 원본에 반영되지 않으며, `consumed`로 다른 리스너를 중단할 수도 없습니다. 토큰의 연결을 해제하거나 `clear()`를 호출하면 아직 시작하지 않은 호출을 무효화합니다.
+- 큐에 등록된 리스너는 자체 인자 복사본을 받으므로 변경 사항이 원본에 반영되지 않으며, `consumed`로 다른 리스너를 중단할 수도 없습니다. 토큰의 연결을 해제하거나 `clear()`로 사용자 리스너를 제거하면 아직 시작하지 않은 호출을 무효화합니다.
 - Node 트리 변경과 GPU 작업은 메인 스레드에서 수행합니다. 이러한 작업이 필요한 콜백에는 `Deliver::Main`을 지정하세요. 단, 인자를 복사할 수 없을 때의 동작에 주의해야 합니다.
-- `notify()` 도중 추가한 리스너는 다음 알림부터 호출됩니다. 알림을 보낸 스레드에서 리스너의 연결을 해제하면 해당 알림에서 나중에 호출되지 않습니다. `clear()`는 남은 리스너를 건너뜁니다.
+- `notify()` 도중 추가한 리스너는 다음 알림부터 호출됩니다. 알림을 보낸 스레드에서 리스너의 연결을 해제하면 해당 알림에서 나중에 호출되지 않습니다. `clear()`는 남은 사용자 리스너를 건너뛰며 프레임워크 소유 항목은 유지합니다.
 - 다른 스레드에서 연결을 해제해도 실행 중인 콜백이 끝날 때까지 기다리지 않습니다. 연결 상태를 이미 확인한 콜백이 그 후 시작할 수도 있습니다. 캡처한 객체를 소멸시키기 전에 알림 스레드와 동기화하세요. 오디오에서는 연결 해제 후 `AudioEngine::waitForAudioCallbacks()`를 사용합니다. 자세한 내용은 해당 항목을 참조하세요.
 - 리스너 목록 작업은 동기화되지만 서로 다른 스레드에서 알림을 보내면 콜백이 동시에 실행될 수 있습니다. 콜백이 공유하는 상태와 같은 `EventListener` 토큰에 대한 접근은 사용자가 동기화해야 합니다.
-- `listenerCount()`는 등록된 리스너 수를 반환하며, `clear()`는 모든 리스너를 제거합니다. `Event`는 복사하거나 이동할 수 없습니다.
+- `listenerCount()`는 등록된 리스너 수를 반환하며, `clear()`는 사용자 리스너를 제거하고 프레임워크 소유 항목은 유지합니다. `Event`는 복사하거나 이동할 수 없습니다.
 - 입력 리스너, App 콜백, 노드 핸들러의 호출 순서는 `App::mousePressed`를 참조하세요.
 '''
 related = ["AudioEngine::audioDeviceChanged", "EventListener", "CoreEvents", "Deliver"]
@@ -7750,19 +7765,25 @@ description.en = "Names the early listener priority."
 description.ja = "先に呼ばれるリスナーの優先度を表す。"
 description.ko = "먼저 호출할 리스너의 우선순위를 나타낸다."
 details.en = '''
-- The predefined integer priorities are `BeforeApp = 0`, `App = 100`, and `AfterApp = 200`; `listen()` uses `App` by default and also accepts other integer values.
+- On App-facing events, the default changes from `100` to `0`. An omitted priority now ties with explicit `0` in registration order: default `a` registered before explicit-0 `b` runs `ab` (previously `ba`). Defaults now precede explicit `1–99` (previously followed them) and explicit `100` (previously tied and interleaved by registration). A consuming default listener therefore pre-empts even an explicit-100 listener registered earlier.
+- The App dispatch paths are not activated in this PR; `AfterApp` does not yet move after the App. ImGui typed consumers use `-20`, and the NodeInspector gizmo uses `-30`.
+- The predefined integer priorities are `BeforeApp = 0`, `App = 100`, and `AfterApp = 200`. On events the App receives, listen() defaults to BeforeApp; other events keep 100. Explicit priorities accept every integer.
 - Listeners run from smaller priority values to larger ones. Listeners with the same value run in registration order.
 - For argument types with a `consumed` field, delivery stops after an inline listener returns with `e.consumed == true`, skipping subsequent listeners, including those with the same priority. Argument types without this field do not stop delivery this way.
 - For listener registration and queued delivery, see `Event<T>`; for the order relative to App callbacks and nodes, see `App::mousePressed`.
 '''
 details.ja = '''
-- 定義済みの整数の優先度は `BeforeApp = 0`、`App = 100`、`AfterApp = 200` です。`listen()` の既定値は `App` で、それ以外の整数値も指定できます。
+- App 向けイベントの既定値は `100` から `0` に変わります。省略時は明示的な `0` と同順位になり、登録順に呼ばれます。既定の `a` を明示的な 0 の `b` より先に登録すると `ab` です（従来は `ba`）。既定のリスナーは明示的な `1–99`（従来はその後）と `100`（従来は同順位で登録順に混在）より先に呼ばれます。このため、既定のリスナーがイベントを消費すると、先に登録された明示的な 100 のリスナーにも届きません。
+- この PR では App の呼び出し経路を切り替えず、`AfterApp` もまだ App の後には移りません。ImGui の型付き入力は `-20`、NodeInspector の gizmo は `-30` です。
+- 定義済みの整数の優先度は `BeforeApp = 0`、`App = 100`、`AfterApp = 200` です。App が受け取るイベントでは listen() の既定値は BeforeApp、それ以外のイベントでは 100 です。 明示する優先度には任意の整数値を指定できます。
 - 数値が小さいリスナーから順に呼ばれます。同じ値のリスナーは登録した順に呼ばれます。
 - 引数型に `consumed` フィールドがある場合、同期的に呼ばれたリスナーが `e.consumed == true` の状態で戻ると、同じ優先度も含めて後続のリスナーは呼ばれません。このフィールドがない引数型では、この方法で呼び出しを止めることはできません。
 - リスナーの登録とキューを使う呼び出しについては `Event<T>` を、App のコールバックやノードとの順番については `App::mousePressed` を参照してください。
 '''
 details.ko = '''
-- 미리 정의된 정수 우선순위는 `BeforeApp = 0`, `App = 100`, `AfterApp = 200`입니다. `listen()`의 기본값은 `App`이며 다른 정수 값도 지정할 수 있습니다.
+- App 대상 이벤트의 기본값은 `100`에서 `0`으로 바뀝니다. 우선순위를 생략하면 명시적 `0`과 같은 우선순위로 등록 순서에 따라 실행됩니다. 기본값 `a`를 명시적 0인 `b`보다 먼저 등록하면 `ab`입니다(이전에는 `ba`). 기본 리스너는 명시적 `1–99`(이전에는 그 뒤) 및 `100`(이전에는 같은 우선순위로 등록 순서에 따라 섞임)보다 먼저 실행됩니다. 따라서 기본 리스너가 이벤트를 소비하면 먼저 등록된 명시적 100 리스너도 실행되지 않습니다.
+- 이 PR에서는 App 호출 경로를 전환하지 않으며 `AfterApp`은 아직 App 뒤로 이동하지 않습니다. ImGui의 타입별 입력은 `-20`, NodeInspector gizmo는 `-30`을 사용합니다.
+- 미리 정의된 정수 우선순위는 `BeforeApp = 0`, `App = 100`, `AfterApp = 200`입니다. App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트는 100을 유지합니다. 명시적 우선순위에는 모든 정수를 사용할 수 있습니다.
 - 값이 작은 리스너부터 순서대로 호출합니다. 값이 같으면 등록한 순서대로 호출합니다.
 - 인자 타입에 `consumed` 필드가 있으면 동기적으로 호출된 리스너가 `e.consumed == true`인 상태로 반환한 뒤 전달을 중단하며, 같은 우선순위를 포함한 후속 리스너를 건너뜁니다. 이 필드가 없는 인자 타입은 이 방법으로 전달을 중단할 수 없습니다.
 - 리스너 등록과 큐를 사용하는 호출은 `Event<T>`를, App 콜백 및 노드와의 순서는 `App::mousePressed`를 참조하세요.
@@ -55975,17 +55996,17 @@ details.ko = '''
 '''
 
 ["EventPriority::App"]
-description.en = "Names the default listener priority."
-description.ja = "リスナーの既定優先度を表す。"
-description.ko = "리스너의 기본 우선순위를 나타낸다."
+description.en = "Names priority 100, the generic and audio listener default."
+description.ja = "汎用イベントと音声イベントの既定優先度 100 を表す。"
+description.ko = "일반 이벤트와 오디오 이벤트의 기본 우선순위 100을 나타낸다."
 details.en = '''
-- Its integer value is `100`, used when `listen()` omits the priority; see `EventPriority::BeforeApp` for priority values, listener order, and `consumed`.
+- Its integer value is `100`, the default for generic and audio events; see `EventPriority::BeforeApp` for priority values, listener order, and `consumed`.
 '''
 details.ja = '''
-- 整数値は `100` で、`listen()` で優先度を省略した場合に使います。優先度の値、呼ばれる順番、`consumed` については `EventPriority::BeforeApp` を参照してください。
+- 整数値は `100` で、汎用イベントと音声イベントの既定値です。優先度の値、呼ばれる順番、`consumed` については `EventPriority::BeforeApp` を参照してください。
 '''
 details.ko = '''
-- 정수 값은 `100`이며 `listen()`에서 우선순위를 생략하면 사용합니다. 우선순위 값, 호출 순서, `consumed`는 `EventPriority::BeforeApp`을 참조하세요.
+- 정수 값은 `100`이며 일반 이벤트와 오디오 이벤트의 기본값입니다. 우선순위 값, 호출 순서, `consumed`는 `EventPriority::BeforeApp`을 참조하세요.
 '''
 
 ["PlayingSound::buffer"]
