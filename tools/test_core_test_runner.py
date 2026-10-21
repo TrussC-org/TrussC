@@ -4,6 +4,7 @@
 import contextlib
 import importlib.util
 import io
+from itertools import product
 from pathlib import Path
 import subprocess
 import sys
@@ -159,15 +160,16 @@ class CoreTestRunnerTests(unittest.TestCase):
     def test_cli_daily_flag_selects_combined_own_unit_and_web_tests(self):
         daily = self.project("daily", daily=True, web=True)
         own = self.project("own", daily=True, own=True)
+        reload_host = self.project("hotReloadLifecycle", daily=True, own=True)
         unit = self.project("unit", daily=True, unit=True)
-        for include_daily in (False, True):
-            with self.subTest(include_daily=include_daily):
+        for system, include_daily in product(("linux", "macos", "windows"), (False, True)):
+            with self.subTest(system=system, include_daily=include_daily):
                 argv = ["build_all.py", "--core-tests-only", "--web"]
                 if include_daily:
                     argv.append("--include-daily")
                 with patch.object(sys, "argv", argv), \
                         patch.object(runner, "find_project_generator", return_value="pg"), \
-                        patch.object(runner, "get_platform_info", return_value=self.platform), \
+                        patch.object(runner, "get_platform_info", return_value=dict(self.platform, os=system)), \
                         patch.object(runner, "run_combined_core_tests", return_value=0) as combined, \
                         patch.object(runner, "run_test_suite", return_value=0) as suite, \
                         self.assertRaises(SystemExit) as exit_status:
@@ -175,7 +177,7 @@ class CoreTestRunnerTests(unittest.TestCase):
                 self.assertEqual(exit_status.exception.code, 0)
                 self.assertEqual(combined.call_args.args[0], [daily] if include_daily else [])
                 self.assertEqual([call.args[0] for call in suite.call_args_list],
-                                 [[own], [unit], [daily]] if include_daily else [])
+                                 [[unit], [own, reload_host], [daily]] if include_daily else [])
 
     def test_process_wall_times_include_failures_and_timeouts(self):
         for result, expected_ok in (
