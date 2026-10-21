@@ -39,7 +39,7 @@ LoadResult imageDecodeOutOfMemory() noexcept {
     LoadResult result;
     result.error = LoadError::Unknown;
 #ifdef __EMSCRIPTEN__
-    // Web disables exception catching: even Logger's timestamp can allocate.
+    // Keep reporting allocation-free on Web: Logger's timestamp can allocate.
     emscripten_console_error("[Pixels] image allocation failed");
 #else
     try { result.message = "image allocation failed"; } catch (...) {}
@@ -320,8 +320,8 @@ LoadResult Pixels::loadFile(const fs::path& filePath, bool asFloat) {
         const auto path = internal::resolveLoadPath(filePath);
         std::unique_ptr<unsigned char[]> bytes;
         size_t length = 0;
-        // Emscripten defaults to disabled exception catching: bulk decoder I/O
-        // must also handle allocation failure through a null result.
+        // Bulk decoder I/O can also report allocation failure through a null
+        // result; this host TU enables exception cleanup for validation too.
         auto result = internal::readEncodedImageImpl(path, length, [&](size_t count) {
             bytes.reset(new (std::nothrow) unsigned char[count]);
             return bytes.get();

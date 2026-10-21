@@ -30,6 +30,8 @@ class Image : public HasTexture {
         fs::path path;
         Pixels pixels;
         bool mipmaps = false;
+        size_t retainedBytes() const noexcept override { return pixels.getTotalBytes(); }
+        void discardPayload() noexcept override { pixels.clear(); }
     };
 public:
     Image() = default;
@@ -104,25 +106,11 @@ public:
     // App exit waits for loads still decoding; cancelling never waits.
     // Completions are delivered during runApp / runHeadlessApp; in a bare main()
     // without an app run, no completion event fires.
-    void loadAsync(const fs::path& path, bool mipmaps = false) {
-        auto state = async_.begin(onLoad, [this](AsyncState& ready) {
-            clearCommitted();
-            if (ready.result) {
-                pixels_ = std::move(ready.pixels);
-                ready.result = finishLoad(ready.path, ready.mipmaps);
-            }
-        });
-        state->path = internal::resolveLoadPath(path);
-        state->mipmaps = mipmaps;
-        internal::startResourceLoad([state] {
-            internal::probeResourceLoad("image.decode", state->path);
-            if (state->cancelled.load()) return;
-            state->result = state->pixels.load(state->path);
-            internal::probeResourceLoad("image.ready", state->path);
-            if (!state->cancelled.load()) internal::completeResourceLoad(state);
-            internal::probeResourceLoad("image.queued", state->path);
-        });
-    }
+    // On Web, recovery from allocation failure is guaranteed only for TrussC's
+    // out-of-line host code. Inline helpers from headers may be compiled into the
+    // application without exception support; allocation failure inside them is a
+    // known limitation.
+    void loadAsync(const fs::path& path, bool mipmaps = false);
     Event<LoadResult> onLoad;
     bool isLoading() const { return async_.loading(); }
 
@@ -300,30 +288,7 @@ private:
         mipmaps_ = false;
         usage_ = TextureUsage::Immutable;
     }
-    LoadResult finishLoad(const fs::path& path, bool mipmaps) try {
-        auto result = internal::checkImageSize(pixels_.getWidth(), pixels_.getHeight());
-        if (!result) {
-            logError("Image") << result.message << " (" << pixels_.getWidth()
-                              << "x" << pixels_.getHeight() << "): "
-                              << internal::pathToDisplayUtf8(internal::resolveLoadPath(path));
-            clearCommitted();
-            return result;
-        }
-        mipmaps_ = mipmaps;
-        usage_ = TextureUsage::Immutable;
-        if (!texture_.allocateImageLoad(pixels_, mipmaps)) {
-            clearCommitted();
-            return internal::imageDecodeOutOfMemory();
-        }
-        if (sg_isvalid() && !texture_.isAllocated()) {
-            clearCommitted();
-            return LoadResult::fail(LoadError::Unknown, "image texture upload failed");
-        }
-        return LoadResult::success();
-    } catch (const std::bad_alloc&) {
-        clear();
-        return internal::imageDecodeOutOfMemory();
-    }
+    LoadResult finishLoad(const fs::path& path, bool mipmaps);
     internal::DebugName debugName_{internal::DebugObjectKind::Image, this};
     // Re-allocate the GPU texture from the current pixels_ contents using the
     // Image's stored usage and mipmaps flag. Called by halve/resize/crop/

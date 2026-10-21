@@ -559,6 +559,30 @@ void allocationChecks(const fs::path& root) {
     internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
     check("async allocation failure completes without bound loss", events == 1 && !image.isLoading() &&
           internal::imageDecodeRejectionsForTests() == rejectedBefore);
+    Image pending;
+    pending.loadAsync(path);
+    internal::waitForResourceLoadsForTests();
+    bool escaped = false;
+    failNew = true;
+    try { internal::waitForResourceLoadsAtAppExit(); } catch (...) { escaped = true; }
+    failNew = false;
+    check("resource shutdown returns all completion credits without allocating", !escaped && !pending.isLoading() &&
+          internal::resourceLoadUsageForTests().retainedBytes == 0 && internal::resourceLoadUsageForTests().outstanding == 0);
+    Image launchFailure;
+    int launchEvents = 0;
+    LoadError launchError = LoadError::None;
+    auto launchListener = launchFailure.onLoad.listen([&](LoadResult& ready) { ++launchEvents; launchError = ready.error; });
+    internal::setResourceLoadProbeForTests([](const char* stage, const fs::path&) {
+        if (std::strcmp(stage, "image.dispatch") == 0) failNew = true;
+    });
+    escaped = false;
+    try { launchFailure.loadAsync(path); } catch (...) { escaped = true; }
+    failNew = false;
+    internal::setResourceLoadProbeForTests({});
+    internal::waitForResourceLoadsForTests();
+    internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
+    check("preparation dispatch allocation failure settles without escaping", !escaped && launchEvents == 1 &&
+          launchError == LoadError::Unknown && !launchFailure.isLoading() && internal::resourceLoadUsageForTests().outstanding == 0);
     internal::appRunToken()->store(false);
 }
 } // namespace

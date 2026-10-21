@@ -8551,16 +8551,19 @@ description.en = "Identifies a resource-loading error."
 description.ja = "リソース読み込みのエラー種別を表す。"
 description.ko = "리소스 로드 오류의 종류를 나타낸다."
 details.en = '''
+- Asynchronous Image, SoundBuffer and Font preparation or retained-result admission can also fail with `TooLarge`; see their `loadAsync` entries for the shared limits.
 - This scoped enum contains `None`, `FileNotFound`, `UnsupportedFormat`, `DecodeFailed`, `Unknown`, `TooLarge`, and `Cancelled`; `None` has value `0` and means success.
 - `FileNotFound` covers missing files or files that could not be opened; `UnsupportedFormat` identifies an unsupported extension or container, and `DecodeFailed` identifies data rejected by the decoder.
 - `TooLarge` identifies an image dimension or encoded-input size limit, including CPU-only `Pixels`. Image dimensions use the recorded GPU texture limit, or 16384 per axis when unknown; encoded inputs are limited to 64 MiB. `Cancelled` identifies cancellation, and `Unknown` covers failures without a more specific classification.
 '''
 details.ja = '''
+- Image・SoundBuffer・Font の非同期準備または完了結果の保持に対する admission 拒否も `TooLarge` を返します。共有上限は各 `loadAsync` の項を参照してください。
 - スコープ付き列挙型で、`None`、`FileNotFound`、`UnsupportedFormat`、`DecodeFailed`、`Unknown`、`TooLarge`、`Cancelled` があります。`None` の値は `0` で、成功を表します。
 - `FileNotFound` はファイルが存在しない場合や開けない場合、`UnsupportedFormat` は未対応の拡張子やコンテナー、`DecodeFailed` はデコーダーがデータを読み取れなかった場合を表します。
 - `TooLarge` は、CPU 上の `Pixels` を含め、画像の寸法または符号化済み入力サイズの上限超過を表します。寸法は記録済みの GPU テクスチャ上限、不明な場合は各軸 16384 ピクセル、符号化済み入力は 64 MiB が上限です。`Cancelled` はキャンセル、`Unknown` はより具体的に分類できない失敗を表します。
 '''
 details.ko = '''
+- Image, SoundBuffer, Font의 비동기 준비 또는 완료 결과 보관에 대한 admission 거부도 `TooLarge`를 반환합니다. 공유 한도는 각 `loadAsync` 항목을 참조하세요.
 - 범위가 지정된 열거형으로 `None`, `FileNotFound`, `UnsupportedFormat`, `DecodeFailed`, `Unknown`, `TooLarge`, `Cancelled`가 있습니다. `None`의 값은 `0`이며 성공을 나타냅니다.
 - `FileNotFound`는 파일이 없거나 열 수 없는 경우, `UnsupportedFormat`은 지원하지 않는 확장자나 컨테이너, `DecodeFailed`는 디코더가 데이터를 읽지 못한 경우를 나타냅니다.
 - `TooLarge`는 CPU 전용 `Pixels`를 포함하여 이미지 크기나 인코딩된 입력 크기 한도를 초과한 경우를 나타냅니다. 이미지 크기는 기록된 GPU 텍스처 한도, 알 수 없으면 축당 16384픽셀을 사용하며 인코딩된 입력은 64 MiB로 제한됩니다. `Cancelled`는 취소를, `Unknown`은 더 구체적으로 분류할 수 없는 실패를 나타냅니다.
@@ -61503,6 +61506,8 @@ description.en = "Loads an image asynchronously."
 description.ja = "画像を非同期に読み込む。"
 description.ko = "이미지를 비동기로 로드한다."
 details.en = '''
+- Bound (security): asynchronous Image, SoundBuffer and Font file/network loads share 4 active preparations, 64 pending requests and 1 GiB of retained decoded results awaiting main-thread application. Whole requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Active-plus-pending request credits remain held by completed results until application or cancellation, so tiny results cannot accumulate unlimited completion entries. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
+- On Web, recovery from allocation failure is guaranteed only for TrussC's out-of-line host code. Inline helpers from headers may be compiled into the application without exception support; allocation failure inside them is a known limitation.
 - Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - `loadAsync(path, mipmaps = false)` returns without a result; retain an `onLoad` listener to receive the `LoadResult`. Path resolution, formats and load errors follow `Image::load`.
 - On native platforms, a worker decodes into private CPU pixels. A later main-thread frame applies the result, uploads the Immutable texture, optionally builds mipmaps and sends `onLoad`; notification never occurs inside `loadAsync()`.
@@ -61516,6 +61521,8 @@ details.en = '''
 - On Web, VFS reading and CPU decoding are deferred to a main-loop pass and may stall that frame; application follows in a subsequent pass. This entry point does not wait through Asyncify.
 '''
 details.ja = '''
+- Bound (security): Image・SoundBuffer・Font のファイル／ネットワーク非同期読み込みは、同時準備 4 件、待機要求 64 件、メインスレッドでの反映待ちのデコード結果 1 GiB を共有します。収まらない要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。実行枠＋待機枠の要求クレジットは反映・取消しまで完了結果が保持するため、小さな結果の完了エントリーも無制限には蓄積しません。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
+- Web では、メモリ確保失敗からの回復を保証するのは TrussC のヘッダー外で定義されたホストコードのみです。ヘッダー内のインラインヘルパーは、例外サポートなしでアプリケーションにコンパイルされることがあり、その内部でのメモリ確保失敗は既知の制限です。
 - Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
 - `loadAsync(path, mipmaps = false)` は結果を返しません。`LoadResult` を受け取るには `onLoad` のリスナーを保持してください。パス解決、対応形式、読み込みエラーは `Image::load` と同じです。
 - ネイティブではワーカーが専用の CPU ピクセルにデコードします。後のメインスレッドのフレームで結果を反映し、Immutable テクスチャへの転送と任意のミップマップ生成を行ってから `onLoad` を通知します。`loadAsync()` の呼び出し中には通知しません。
@@ -61529,6 +61536,8 @@ details.ja = '''
 - Web では VFS 読み込みと CPU デコードを後のメインループ処理に回すため、そのフレームが停止することがあります。結果はさらに後の処理で反映します。この入口では Asyncify による待機を行いません。
 '''
 details.ko = '''
+- Bound (security): Image, SoundBuffer, Font의 파일/네트워크 비동기 로드는 동시 준비 4건, 대기 요청 64건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB를 공유합니다. 수용할 수 없는 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 실행 슬롯+대기 슬롯의 요청 크레딧은 완료 결과가 반영되거나 취소될 때까지 유지하므로 작은 결과의 완료 항목도 무제한으로 쌓이지 않습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
+- Web에서 메모리 할당 실패로부터의 복구는 TrussC의 헤더 밖에 정의된 호스트 코드에 대해서만 보장됩니다. 헤더의 인라인 헬퍼는 예외 지원 없이 애플리케이션에 컴파일될 수 있으며, 그 내부의 메모리 할당 실패는 알려진 제한 사항입니다.
 - Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
 - `loadAsync(path, mipmaps = false)`는 결과를 반환하지 않습니다. `LoadResult`를 받으려면 `onLoad` 리스너를 유지합니다. 경로 해석, 지원 형식과 로드 오류는 `Image::load`를 따릅니다.
 - 네이티브 플랫폼에서는 워커가 전용 CPU 픽셀로 디코딩합니다. 이후 메인 스레드 프레임에서 결과를 반영하고 Immutable 텍스처 업로드와 선택적인 밉맵 생성을 수행한 뒤 `onLoad`로 알립니다. `loadAsync()` 호출 중에는 알리지 않습니다.
@@ -61595,6 +61604,8 @@ description.en = "Starts asynchronous loading of decoded audio data."
 description.ja = "デコード済み音声データの非同期読み込みを開始する。"
 description.ko = "디코딩된 오디오 데이터의 비동기 로드를 시작한다."
 details.en = '''
+- Bound (security): asynchronous Image, SoundBuffer and Font file/network loads share 4 active preparations, 64 pending requests and 1 GiB of retained decoded results awaiting main-thread application. Whole requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Active-plus-pending request credits remain held by completed results until application or cancellation, so tiny results cannot accumulate unlimited completion entries. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
+- On Web, recovery from allocation failure is guaranteed only for TrussC's out-of-line host code. Inline helpers from headers may be compiled into the application without exception support; allocation failure inside them is a known limitation.
 - `loadAsync(path)` returns no result directly and uses the same path resolution, format selection, errors, and decoder logs as `SoundBuffer::load`. Native builds prepare private PCM and metadata on a worker; existing committed data remains readable until the result is applied.
 - Results are applied on the main thread in a later frame, never during this call. Each frame or headless loop pass takes one batch of pending completions; work queued during that pass waits for another pass. After application, `isLoading()` becomes `false` before one `onLoad` event delivers the `LoadResult`.
 - A successful replacement of PCM and metadata holds the audio mixer lock, including when the buffer is playing. On any failure, previous PCM and audio metadata are preserved and no partial sound is published; the recorded path is cleared as with synchronous loads.
@@ -61606,6 +61617,8 @@ details.en = '''
 - On Web, WAV/MP3/FLAC/OGG file reading and CPU decoding are deferred to a main-loop pass and may stall that frame; application waits for a subsequent pass. AAC/M4A use asynchronous browser decoding and poll for completion before application is queued. This entry point does not wait through Asyncify.
 '''
 details.ja = '''
+- Bound (security): Image・SoundBuffer・Font のファイル／ネットワーク非同期読み込みは、同時準備 4 件、待機要求 64 件、メインスレッドでの反映待ちのデコード結果 1 GiB を共有します。収まらない要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。実行枠＋待機枠の要求クレジットは反映・取消しまで完了結果が保持するため、小さな結果の完了エントリーも無制限には蓄積しません。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
+- Web では、メモリ確保失敗からの回復を保証するのは TrussC のヘッダー外で定義されたホストコードのみです。ヘッダー内のインラインヘルパーは、例外サポートなしでアプリケーションにコンパイルされることがあり、その内部でのメモリ確保失敗は既知の制限です。
 - `loadAsync(path)` は結果を直接返さず、パスの解決、形式の選択、エラー、デコーダーのログは `SoundBuffer::load` と同じです。ネイティブではワーカーが専用の PCM とメタデータを準備し、結果が反映されるまでは確定済みのデータを参照できます。
 - 結果は後のフレームのメインスレッドで反映され、この呼び出し中には反映されません。各フレームまたはヘッドレスのループ処理では、保留中の完了処理を一括で取り出し、その処理中に追加された分は次回に回します。反映後に `isLoading()` が `false` になり、続いて `onLoad` が `LoadResult` を一度通知します。
 - 成功時の PCM とメタデータの置き換えは、再生中のバッファでもオーディオミキサーのロックを保持して行います。どの失敗でも以前の PCM と音声メタデータを保持し、部分的な音声を公開しません。記録されたパスは同期読み込みと同様に消去します。
@@ -61617,6 +61630,8 @@ details.ja = '''
 - Web では WAV/MP3/FLAC/OGG のファイル読み込みと CPU デコードを後のメインループ処理に回すため、そのフレームが停止する場合があります。結果はさらに後の処理で反映します。AAC/M4A はブラウザーで非同期にデコードし、完了を定期的に確認してから反映をキューに追加します。この入口では Asyncify による待機を行いません。
 '''
 details.ko = '''
+- Bound (security): Image, SoundBuffer, Font의 파일/네트워크 비동기 로드는 동시 준비 4건, 대기 요청 64건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB를 공유합니다. 수용할 수 없는 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 실행 슬롯+대기 슬롯의 요청 크레딧은 완료 결과가 반영되거나 취소될 때까지 유지하므로 작은 결과의 완료 항목도 무제한으로 쌓이지 않습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
+- Web에서 메모리 할당 실패로부터의 복구는 TrussC의 헤더 밖에 정의된 호스트 코드에 대해서만 보장됩니다. 헤더의 인라인 헬퍼는 예외 지원 없이 애플리케이션에 컴파일될 수 있으며, 그 내부의 메모리 할당 실패는 알려진 제한 사항입니다.
 - `loadAsync(path)`는 결과를 직접 반환하지 않으며 경로 해석, 형식 선택, 오류, 디코더 로그는 `SoundBuffer::load`와 같습니다. 네이티브 빌드에서는 워커가 별도의 PCM과 메타데이터를 준비하며, 결과가 반영될 때까지 기존에 확정된 데이터를 읽을 수 있습니다.
 - 결과는 이후 프레임의 메인 스레드에서 반영되며 이 호출 중에는 반영되지 않습니다. 각 프레임 또는 헤드리스 루프 실행은 대기 중인 완료 처리를 한 번에 가져오며, 처리 중 추가된 작업은 다음 실행까지 기다립니다. 반영 후 `isLoading()`이 `false`가 되고 이어서 `onLoad`가 `LoadResult`를 한 번 전달합니다.
 - 성공 시 PCM과 메타데이터를 교체할 때는 재생 중인 버퍼도 오디오 믹서 잠금을 유지합니다. 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 기록된 경로는 동기 로드와 같이 비웁니다.
@@ -61680,6 +61695,8 @@ description.en = "Load a font asynchronously and report completion through an ev
 description.ja = "フォントを非同期で読み込み、イベントで完了を通知する。"
 description.ko = "폰트를 비동기로 로드하고 이벤트로 완료를 알린다."
 details.en = '''
+- Bound (security): asynchronous Image, SoundBuffer and Font file/network loads share 4 active preparations, 64 pending requests and 1 GiB of retained decoded results awaiting main-thread application. Whole requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Active-plus-pending request credits remain held by completed results until application or cancellation, so tiny results cannot accumulate unlimited completion entries. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
+- On Web, recovery from allocation failure is guaranteed only for TrussC's out-of-line host code. Inline helpers from headers may be compiled into the application without exception support; allocation failure inside them is a known limitation.
 - Call `loadAsync(nameOrPath, size, faceIndex = 0)` with a file path, system font name, or Web URL. Size is in logical pixels; path precedence and collection-face selection follow `Font::load`.
 - Returns no result directly. Success, failure, and cache hits are applied on the main thread in a later frame, never during this call; `isLoading()` becomes `false` before the single `onLoad` notification.
 - On native platforms, a worker prepares owned font bytes and CPU metrics. Shared-cache access and GPU work remain on the main thread, glyph rasterization stays lazy, and the request captures the current DPI, oversampling, and mipmap options.
@@ -61693,6 +61710,8 @@ details.en = '''
 - On Web, CPU preparation is deferred to a main-loop pass and can stall that pass, including without pthreads; application follows in a subsequent pass. This entry point does not wait through Asyncify, and URL fetching uses a 30-second timeout.
 '''
 details.ja = '''
+- Bound (security): Image・SoundBuffer・Font のファイル／ネットワーク非同期読み込みは、同時準備 4 件、待機要求 64 件、メインスレッドでの反映待ちのデコード結果 1 GiB を共有します。収まらない要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。実行枠＋待機枠の要求クレジットは反映・取消しまで完了結果が保持するため、小さな結果の完了エントリーも無制限には蓄積しません。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
+- Web では、メモリ確保失敗からの回復を保証するのは TrussC のヘッダー外で定義されたホストコードのみです。ヘッダー内のインラインヘルパーは、例外サポートなしでアプリケーションにコンパイルされることがあり、その内部でのメモリ確保失敗は既知の制限です。
 - `loadAsync(nameOrPath, size, faceIndex = 0)` にファイルパス、システムフォント名、または Web の URL を渡します。サイズの単位は論理ピクセルです。パスの優先順位とコレクション内の書体選択は `Font::load` と同じです。
 - 結果を直接返しません。成功、失敗、キャッシュへの一致はいずれも後のフレームでメインスレッドに反映し、この呼び出し中には通知しません。`isLoading()` が `false` になってから `onLoad` を一度通知します。
 - ネイティブ環境では、ワーカーが所有するフォントデータと CPU メトリクスを準備します。共有キャッシュへのアクセスと GPU 処理はメインスレッドで行い、グリフのラスタライズは遅延したままです。要求時点の DPI、オーバーサンプリング、ミップマップ設定を記録します。
@@ -61706,6 +61725,8 @@ details.ja = '''
 - Web では CPU の準備を後のメインループ処理に回すため、その処理が停止することがあります。pthreads がない場合も同様で、結果はさらに後の処理で反映します。この関数は Asyncify で待機しません。URL の取得には 30 秒のタイムアウトを使います。
 '''
 details.ko = '''
+- Bound (security): Image, SoundBuffer, Font의 파일/네트워크 비동기 로드는 동시 준비 4건, 대기 요청 64건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB를 공유합니다. 수용할 수 없는 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 실행 슬롯+대기 슬롯의 요청 크레딧은 완료 결과가 반영되거나 취소될 때까지 유지하므로 작은 결과의 완료 항목도 무제한으로 쌓이지 않습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
+- Web에서 메모리 할당 실패로부터의 복구는 TrussC의 헤더 밖에 정의된 호스트 코드에 대해서만 보장됩니다. 헤더의 인라인 헬퍼는 예외 지원 없이 애플리케이션에 컴파일될 수 있으며, 그 내부의 메모리 할당 실패는 알려진 제한 사항입니다.
 - `loadAsync(nameOrPath, size, faceIndex = 0)`에 파일 경로, 시스템 폰트 이름 또는 Web URL을 전달합니다. 크기의 단위는 논리 픽셀입니다. 경로 우선순위와 컬렉션 내 서체 선택은 `Font::load`와 같습니다.
 - 결과를 직접 반환하지 않습니다. 성공, 실패, 캐시 적중 모두 이후 프레임의 메인 스레드에서 반영하며, 이 호출 중에는 알리지 않습니다. `isLoading()`이 `false`가 된 뒤 `onLoad`를 한 번 알립니다.
 - 네이티브 환경에서는 워커가 소유한 폰트 데이터와 CPU 메트릭을 준비합니다. 공유 캐시 접근과 GPU 작업은 메인 스레드에서 수행하며 글리프 래스터화는 지연 상태를 유지합니다. 요청 시점의 DPI, 오버샘플링, 밉맵 옵션을 기록합니다.

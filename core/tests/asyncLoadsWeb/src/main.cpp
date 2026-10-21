@@ -15,9 +15,12 @@ void check(const char* name, bool ok) {
     if (!ok) ++failures;
 }
 void drain() { internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch()); }
-struct Timer { em_arg_callback_func callback; void* data; int delay; };
+struct Timer { em_arg_callback_func callback; void* data; int delay; int id = 0; };
 vector<Timer> timers;
-map<emscripten_fetch_t*, emscripten_fetch_attr_t> fetches;
+// Reply IDs model browser responses independently of the cancelled C request.
+// A late response must never dereference its already-closed backend handle.
+map<internal::BoundedFontFetch*, int> fetches;
+int nextFetch = 1, nextTimer = 1;
 double testNow = 0;
 int abortReentries = 0;
 bool failInline = false;
@@ -25,18 +28,20 @@ void runTimers() {
     auto batch = std::move(timers); timers.clear();
     for (auto& timer : batch) timer.callback(timer.data);
 }
-void reply(emscripten_fetch_t* fetch, bool success) {
-    auto attr = fetches.at(fetch);
+void reply(int id, bool success) {
+    auto found = find_if(fetches.begin(), fetches.end(), [id](const auto& entry) { return entry.second == id; });
+    if (found == fetches.end()) return; // cancelled browser response
+    auto* fetch = found->first;
     if (success) {
         auto bytes = makeFont();
         auto* data = static_cast<char*>(malloc(bytes.size()));
         memcpy(data, bytes.data(), bytes.size());
         fetch->data = data;
         fetch->numBytes = bytes.size();
-        attr.onsuccess(fetch);
+        fetch->complete(fetch, true);
     } else {
         fetch->status = 404;
-        attr.onerror(fetch);
+        fetch->complete(fetch, false);
     }
 }
 
@@ -72,22 +77,31 @@ void __wrap_emscripten_async_call(em_arg_callback_func callback, void* data, int
     timers.push_back({callback, data, delay});
 }
 double __wrap_emscripten_get_now() { return testNow; }
-emscripten_fetch_t* __wrap_emscripten_fetch(emscripten_fetch_attr_t* attr, const char*) {
-    auto* fetch = static_cast<emscripten_fetch_t*>(calloc(1, sizeof(emscripten_fetch_t)));
-    fetch->userData = attr->userData;
-    fetches.emplace(fetch, *attr);
-    if (failInline) reply(fetch, false);
+int __wrap_emscripten_set_timeout(em_arg_callback_func callback, double delay, void* data) {
+    int id = nextTimer++;
+    timers.push_back({callback, data, static_cast<int>(delay), id});
+    return id;
+}
+void __wrap_emscripten_clear_timeout(int id) {
+    erase_if(timers, [id](const auto& timer) { return timer.id == id; });
+}
+internal::BoundedFontFetch* __wrap__ZN6trussc8internal21startBoundedFontFetchEPKcPvjPFvPNS0_16BoundedFontFetchEbE(
+    const char*, void* data, unsigned, void (*complete)(internal::BoundedFontFetch*, bool)) {
+    auto* fetch = new internal::BoundedFontFetch;
+    fetch->userData = data;
+    fetch->complete = complete;
+    int id = nextFetch++;
+    fetches.emplace(fetch, id);
+    if (failInline) reply(id, false);
     return fetch;
 }
-int __wrap_emscripten_fetch_close(emscripten_fetch_t* fetch) {
-    auto attr = fetches.at(fetch);
-    // An abort can call onerror before emscripten_fetch_close returns.
+void __wrap__ZN6trussc8internal21closeBoundedFontFetchEPNS0_16BoundedFontFetchE(internal::BoundedFontFetch* fetch) {
+    // An abort can reenter completion before close returns.
     ++abortReentries;
-    attr.onerror(fetch);
+    fetch->complete(fetch, false);
     fetches.erase(fetch);
     free(const_cast<char*>(fetch->data));
-    free(fetch);
-    return 0;
+    delete fetch;
 }
 }
 #endif
@@ -140,16 +154,17 @@ TC_CORE_TEST_MAIN() {
     resolveAudio(7, .875f); resolveAudio(6, .625f); runTimers(); drain();
     check("AAC slot IDs recycle safely at the wasm i32 boundary", first.samples[0] == .625f && second.samples[0] == .875f && audioSlots() == 0);
 
-    // URL requests retain heap States even after move/destruction. Fetch
-    // close reenters onerror; each State must still complete only once.
+    // Backend close quiesces a cancelled request before retiring its State.
+    // Late browser responses are ignored; close may reenter completion.
     Font font;
     int fontEvents = 0;
     auto fontListener = font.onLoad.listen([&](LoadResult& r) { check("Font URL result succeeds", bool(r)); ++fontEvents; });
     font.loadAsync("https://test/one.ttf", 24);
     check("Font URL fetch never starts inline", fetches.empty() && fontEvents == 0);
-    drain(); auto* oldFetch = fetches.begin()->first;
+    drain(); int oldFetch = fetches.begin()->second;
     font.loadAsync("https://test/two.ttf", 24); drain();
-    auto* currentFetch = fetches.begin()->first == oldFetch ? fetches.rbegin()->first : fetches.begin()->first;
+    check("Font replacement closes the cancelled backend immediately", fetches.size() == 1);
+    int currentFetch = fetches.begin()->second;
     reply(currentFetch, true);
     check("fetch callback queues delivery", fontEvents == 0 && font.isLoading());
     drain(); reply(oldFetch, true); drain();
@@ -161,14 +176,18 @@ TC_CORE_TEST_MAIN() {
     {
         auto doomed = make_unique<Font>();
         doomed->loadAsync("https://test/destroy.ttf", 24); drain();
-        auto* fetch = fetches.begin()->first;
-        doomed.reset(); reply(fetch, true); drain();
-        check("Font callback owns state after emitter destruction", fetches.empty());
+        int fetch = fetches.begin()->second;
+        doomed.reset();
+        check("Font destruction releases backend and deadline immediately", fetches.empty() && timers.empty());
+        reply(fetch, true); drain();
+        check("Font destruction quiesces its backend before late response", fetches.empty());
     }
     Font moved;
     font.loadAsync("https://test/move.ttf", 24); drain();
-    auto* movedFetch = fetches.begin()->first;
-    moved = std::move(font); reply(movedFetch, true); drain();
+    int movedFetch = fetches.begin()->second;
+    moved = std::move(font);
+    check("Font move releases backend and deadline immediately", fetches.empty() && timers.empty());
+    reply(movedFetch, true); drain();
     check("Font move drops pending URL event", fontEvents == 2 && !moved.isLoading());
 
     Font expired;
