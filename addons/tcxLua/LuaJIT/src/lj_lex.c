@@ -48,11 +48,16 @@ static LJ_NOINLINE LexChar lex_more(LexState *ls)
   size_t sz;
   const char *p = ls->rfunc(ls->L, ls->rdata, &sz);
   if (p == NULL || sz == 0) return LEX_EOF;
-  if (sz >= LJ_MAX_BUF) {
-    if (sz != ~(size_t)0) lj_err_mem(ls->L);
+  /* A complete binary block uses pointer/size_t ranges, not the lexer's
+   * MSize scratch buffer. Each prototype still has MSize/count checks in
+   * lj_bcread. Preserve streaming-file compatibility above LJ_MAX_BUF. */
+  if (sz == ~(size_t)0) {
     sz = ~(uintptr_t)0 - (uintptr_t)p;
     if (sz >= LJ_MAX_BUF) sz = LJ_MAX_BUF-1;
     ls->endmark = 1;
+  } else if (sz >= LJ_MAX_BUF &&
+             !(ls->p == NULL && (uint8_t)p[0] == LUA_SIGNATURE[0])) {
+    lj_err_mem(ls->L);
   }
   ls->pe = p + sz;
   ls->p = p + 1;
