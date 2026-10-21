@@ -406,24 +406,16 @@ void injectKeyDown(int key) {
     KeyEventArgs args;
     args.key = key;
     fillKeyModifiers(args, key, true);
-    events().keyPressed.notify(args);
-
     ::trussc::internal::currentWindowContext().keysPressed.insert(key);
-
-    if (::trussc::internal::appKeyPressedFunc)
-        ::trussc::internal::appKeyPressedFunc(args);
+    events().keyPressed.notify(args);
 }
 
 void injectKeyUp(int key) {
     KeyEventArgs args;
     args.key = key;
     fillKeyModifiers(args, key, false);
-    events().keyReleased.notify(args);
-
     ::trussc::internal::currentWindowContext().keysPressed.erase(key);
-
-    if (::trussc::internal::appKeyReleasedFunc)
-        ::trussc::internal::appKeyReleasedFunc(args);
+    events().keyReleased.notify(args);
 }
 
 json heldKeysJson() {
@@ -1049,17 +1041,11 @@ void registerStandardTools(Server& server) {
                 args.button = button;
                 MouseDragEventArgs dragArgs = trussc::internal::toDragArgs(args);
                 events().mouseDragged.notify(dragArgs);
-
-                if (::trussc::internal::appMouseDraggedFunc)
-                    ::trussc::internal::appMouseDraggedFunc(args);
             } else {
                 trussc::internal::MouseEventRaw args;
                 args.pos = args.globalPos = Vec2(x, y);
                 MouseMoveEventArgs moveArgs = trussc::internal::toMoveArgs(args);
                 events().mouseMoved.notify(moveArgs);
-
-                if (::trussc::internal::appMouseMovedFunc)
-                    ::trussc::internal::appMouseMovedFunc(args);
             }
 
             // Update global mouse state
@@ -1088,8 +1074,7 @@ void registerStandardTools(Server& server) {
             ::trussc::internal::currentWindowContext().mouseY = args.pos.y;
 
             events().mousePressed.notify(args);
-            if (::trussc::internal::appMousePressedFunc)
-                ::trussc::internal::appMousePressedFunc(args);
+
 
             return json{{"status", "ok"}};
         });
@@ -1109,8 +1094,7 @@ void registerStandardTools(Server& server) {
             ::trussc::internal::currentWindowContext().mouseY = args.pos.y;
 
             events().mouseReleased.notify(args);
-            if (::trussc::internal::appMouseReleasedFunc)
-                ::trussc::internal::appMouseReleasedFunc(args);
+
 
             return json{{"status", "ok"}};
         });
@@ -1137,15 +1121,13 @@ void registerStandardTools(Server& server) {
 
             // Press
             events().mousePressed.notify(args);
-            if (::trussc::internal::appMousePressedFunc)
-                ::trussc::internal::appMousePressedFunc(args);
+
 
             // Release (fresh consumed flag — the press consumer may differ)
             MouseEventArgs rel = args;
             rel.consumed = false;
             events().mouseReleased.notify(rel);
-            if (::trussc::internal::appMouseReleasedFunc)
-                ::trussc::internal::appMouseReleasedFunc(rel);
+
 
             return json{{"status", "ok"}};
         });
@@ -1162,8 +1144,7 @@ void registerStandardTools(Server& server) {
             args.scroll = Vec2(dx, dy);
             args.syncLegacy();
             events().mouseScrolled.notify(args);
-            if (::trussc::internal::appMouseScrolledFunc)
-                ::trussc::internal::appMouseScrolledFunc(args);
+
             return json{{"status", "ok"}};
         });
 

@@ -185,19 +185,16 @@ private:
     EventListener pressed, moved, released;
 };
 void appTouchOrder() {
-    // Exercise the real forwarders and setup registration without a display.
+    // Exercise the real App listeners and setup registration without a display.
     (void)buildAppDescriptor<TouchApp>();
     internal::appSetupFunc();
     internal::appUpdateFunc();
     for (auto* event : {&events().touchPressed, &events().touchMoved, &events().touchReleased}) {
         touchOrder.clear();
         fire(*event);
-        check("App touch forwarder vs explicit-0 setup listener keeps base order BA", touchOrder == "BA");
+        check("App touch listener vs explicit-0 setup listener keeps base order BA", touchOrder == "BA");
     }
     internal::appCleanupFunc();
-    internal::touchPressedListener.disconnect();
-    internal::touchMovedListener.disconnect();
-    internal::touchReleasedListener.disconnect();
 }
 
 } // namespace

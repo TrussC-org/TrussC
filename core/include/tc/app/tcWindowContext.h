@@ -291,6 +291,9 @@ struct WindowContext {
     // these when constructing secondary-window contexts.
     RenderContext* render = nullptr;
     CoreEvents* coreEvents = nullptr;
+
+    // Host-owned App bindings survive guest swaps and public Event::clear().
+    std::vector<EventListener> appEventListeners;
 };
 
 // Pipeline target for swapchain draws. The main window keeps sokol's defaults.
