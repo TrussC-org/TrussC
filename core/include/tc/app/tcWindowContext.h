@@ -101,6 +101,9 @@ struct WindowContext {
     // Recover owned scopes before native/GPU resources or any members die.
     // Safe to call again from the destructor after native window teardown.
     void teardownTargets() noexcept;
+    // Terminal state for native close/destruction, distinct from recoverable
+    // target-scope cleanup. Closed owners remain selectable for events only.
+    bool targetsClosed = false;
     // currentTarget points into this object — copying/moving would dangle it.
     WindowContext(const WindowContext&) = delete;
     WindowContext& operator=(const WindowContext&) = delete;

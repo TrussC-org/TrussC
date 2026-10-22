@@ -205,7 +205,7 @@ exitListener = events().exitRequested.listen([](ExitRequestEventArgs& args) { ar
 - Only the root App receives `cleanup()`. At app exit, child nodes receive no `cleanup()`; only their destructors run.
 - Headless: it runs after the loop ends, followed by audio detach and `cleanup()`. `events().exit` delivers BeforeApp → App::exit() (100) → AfterApp shutdown hooks once; the App and mandatory teardown survive `clear()`. The audio device keeps running.
 - Hot reload: after `events().hotReloadUnload`, the old App receives `exit()` and `cleanup()`. `events().exit` fires only at the final exit.
-- A sub-window App: it runs when its window closes (after that window's `events().exit`) or when `setApp()` swaps it out. `getWindow()` is already nullptr there.
+- A sub-window App: it runs when its window closes (as an App-priority listener on that window's `events().exit`) or when `setApp()` swaps it out. `getWindow()` is already nullptr there.
 - An App added as a child node never receives `exit()`.
 - Any `pushMatrix()`/`pushStyle()` left open is popped, with a warning that names `exit()`.
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
@@ -225,7 +225,7 @@ exitListener = events().exitRequested.listen([](ExitRequestEventArgs& args) { ar
 - `cleanup()` が呼ばれるのはルートの App だけです。アプリ終了時、子ノードには `cleanup()` は呼ばれず、デストラクタだけが実行されます。
 - ヘッドレスでは、ループが終わった後に呼ばれ、続いてオーディオの切り離しと `cleanup()` が行われます。`events().exit` は BeforeApp → App::exit()（100）→ AfterApp の終了フックの順に一度通知され、App と必須の終了処理は `clear()` 後も残ります。音声デバイスは動作を続けます。
 - ホットリロードでは、`events().hotReloadUnload` の後に古い App の `exit()` と `cleanup()` が呼ばれます。`events().exit` は本当に終了するときだけ発行されます。
-- サブウィンドウの App では、ウィンドウが閉じたとき（そのウィンドウの `events().exit` の後）か、`setApp()` で入れ替えられたときに呼ばれます。その中ではすでに `getWindow()` が nullptr です。
+- サブウィンドウの App では、ウィンドウが閉じたとき（そのウィンドウの `events().exit` の App 優先度のリスナーとして）か、`setApp()` で入れ替えられたときに呼ばれます。その中ではすでに `getWindow()` が nullptr です。
 - 子ノードとして追加した App では `exit()` は呼ばれません。
 - 閉じ忘れた `pushMatrix()`/`pushStyle()` は、`exit()` の名前を含む警告とともに pop されます。
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
@@ -245,7 +245,7 @@ exitListener = events().exitRequested.listen([](ExitRequestEventArgs& args) { ar
 - `cleanup()`이 호출되는 것은 루트 App뿐입니다. 앱 종료 시 자식 노드에는 `cleanup()`이 호출되지 않고 소멸자만 실행됩니다.
 - 헤드리스에서는 루프가 끝난 뒤 호출되고, 이어서 오디오 분리와 `cleanup()`이 진행됩니다. `events().exit`는 BeforeApp → App::exit()(100) → AfterApp 종료 훅 순서로 한 번 전달되며 App과 필수 종료 처리는 `clear()` 후에도 남습니다. 오디오 장치는 계속 동작합니다.
 - 핫 리로드에서는 `events().hotReloadUnload` 뒤에 이전 App의 `exit()`와 `cleanup()`이 호출됩니다. `events().exit`는 실제로 종료할 때만 발생합니다.
-- 서브 윈도우 App에서는 윈도우가 닫힐 때(그 윈도우의 `events().exit` 뒤) 또는 `setApp()`으로 교체될 때 호출됩니다. 그 안에서는 이미 `getWindow()`가 nullptr입니다.
+- 서브 윈도우 App에서는 윈도우가 닫힐 때(그 윈도우의 `events().exit`에서 App 우선순위 리스너로) 또는 `setApp()`으로 교체될 때 호출됩니다. 그 안에서는 이미 `getWindow()`가 nullptr입니다.
 - 자식 노드로 추가한 App에서는 `exit()`가 호출되지 않습니다.
 - 닫지 않은 `pushMatrix()`/`pushStyle()`은 `exit()`를 언급하는 경고와 함께 pop됩니다.
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
@@ -40178,6 +40178,7 @@ details.en = '''
 - Updates and drawing follow the window's display timing on macOS and Windows. Desktop Linux uses timer pacing based on a measured refresh-rate estimate. `Window::setFps` can reduce the update and drawing rate.
 - Updates and drawing pause while the backend reports the window as hidden or occluded; see `Window::isOccluded` for platform differences.
 - Create, operate on, and release windows on the main thread. Window callbacks run synchronously on that thread.
+- App-facing events deliver `BeforeApp` listeners, the App and its node tree at `EventPriority::App` (100), then `AfterApp` listeners. An earlier listener or node that explicitly consumes input stops later delivery. `clear()` preserves the framework-owned App bindings. Equal-priority listeners follow registration order; App bindings are registered when an attachment is applied.
 - GPU resources such as `Texture`, `Fbo`, `Mesh`, and `Font` are shared and can be used from any window.
 - Keep a `shared_ptr<Window>` to retain the window; destroying the last owner closes it immediately. Closing the native window leaves retained handles valid, with `Window::isOpen()` returning `false`, and leaves the main window and other windows running.
 - For supported platforms and creation failures, see `createWindow`; for the attached App's lifecycle, see `Window::setApp`.
@@ -40188,6 +40189,7 @@ details.ja = '''
 - macOS と Windows では、そのウィンドウのディスプレイのタイミングに合わせて更新と描画を行います。デスクトップ Linux では、測定したリフレッシュレートの推定値に基づくタイマーで実行します。`Window::setFps` で更新と描画の頻度を下げられます。
 - バックエンドがウィンドウを非表示または隠れた状態と報告している間は、更新と描画を停止します。プラットフォームによる違いは `Window::isOccluded` を参照してください。
 - ウィンドウの作成、操作、解放はメインスレッドで行ってください。ウィンドウのコールバックも同じスレッドで同期的に呼ばれます。
+- App に届くイベントは、`BeforeApp` リスナー、`EventPriority::App`（100）の App と Node ツリー、`AfterApp` リスナーの順に配信されます。先のリスナーやノードが明示的に入力を消費すると、後続には届きません。`clear()` はフレームワーク所有の App の登録を保持します。同じ優先度では登録順に呼ばれ、App の登録は設定要求の反映時に行われます。
 - `Texture`、`Fbo`、`Mesh`、`Font` などの GPU リソースは共有され、どのウィンドウからも使用できます。
 - ウィンドウを維持するには `shared_ptr<Window>` を保持してください。最後の所有者が破棄されると、その場で閉じます。ネイティブウィンドウが閉じても保持しているハンドルは有効で、`Window::isOpen()` は `false` を返します。メインウィンドウや他のウィンドウは動き続けます。
 - 対応プラットフォームと作成失敗時の動作は `createWindow`、設定した App のライフサイクルは `Window::setApp` を参照してください。
@@ -40198,6 +40200,7 @@ details.ko = '''
 - macOS와 Windows에서는 해당 윈도우가 있는 디스플레이의 타이밍에 맞춰 업데이트하고 그립니다. 데스크톱 Linux에서는 측정한 주사율 추정값에 기반한 타이머를 사용합니다. `Window::setFps`로 업데이트와 그리기 빈도를 낮출 수 있습니다.
 - 백엔드가 윈도우를 숨겨지거나 가려진 상태로 보고하는 동안에는 업데이트와 그리기를 중지합니다. 플랫폼별 차이는 `Window::isOccluded`를 참조하세요.
 - 윈도우의 생성, 조작, 해제는 메인 스레드에서 수행하세요. 윈도우 콜백도 같은 스레드에서 동기적으로 호출됩니다.
+- App에 전달되는 이벤트는 `BeforeApp` 리스너, `EventPriority::App`(100)의 App과 Node 트리, `AfterApp` 리스너 순으로 전달됩니다. 앞선 리스너나 노드가 명시적으로 입력을 소비하면 후속 전달이 중단됩니다. `clear()`는 프레임워크 소유의 App 등록을 유지합니다. 같은 우선순위는 등록 순서를 따르며 App은 연결 요청을 반영할 때 등록됩니다.
 - `Texture`, `Fbo`, `Mesh`, `Font` 등의 GPU 리소스는 공유되며 어느 윈도우에서든 사용할 수 있습니다.
 - 윈도우를 유지하려면 `shared_ptr<Window>`를 보관하세요. 마지막 소유자가 파괴되면 즉시 닫힙니다. 네이티브 윈도우가 닫혀도 보관 중인 핸들은 유효하며 `Window::isOpen()`은 `false`를 반환합니다. 메인 윈도우와 다른 윈도우는 계속 실행됩니다.
 - 지원 플랫폼과 생성 실패 시 동작은 `createWindow`를, 연결한 App의 라이프사이클은 `Window::setApp`을 참조하세요.
@@ -40212,8 +40215,10 @@ description.ko = "이 윈도우에 App을 연결하거나 교체하도록 요청
 details.en = '''
 - Pass a `shared_ptr<App>` to give this window content, or `nullptr` to remove its App. Each window has one App, whose update, draw, input, and resize callbacks run for this window; its RectNode size follows the window size.
 - Returns immediately and applies the request at the next boundary before or after this window processes a frame or event. Calling it from the App's own `update()`, `draw()`, or input callback is supported. Until application, `getApp()` returns the current App.
+- A request during update or input keeps the outgoing App for the entire current tick or event, including the remaining tree processing and drawing in that tick. Bindings change only when the request is accepted at the boundary.
 - The last accepted request before the boundary wins. Requesting the current App cancels a pending replacement without restarting it. A pending `close()` takes precedence over attachment.
 - The App's `setup()` runs once, on its first processed frame. Replacing or removing it, or closing the window, calls its `exit()`, disconnects its audio callbacks and waits for any running audio callback, then calls its `cleanup()`.
+- Replacement and removal directly call the outgoing App's `exit()` exactly once and do not notify `events().exit`; this is an exception to event-based delivery. Closing the window delivers exit through the window event instead.
 - An App whose cleanup has begun cannot be attached again; create a new App to display it again.
 - An App already attached to another window, the running main App, an App whose cleanup has begun, or attachment to a closed or closing window is rejected with an error log. These checks run again when the request is applied; rejection leaves the current App unchanged.
 - Passing `nullptr` to a closed or closing window has no effect. When replacement is applied, `getApp()` already returns the replacement during the outgoing App's exit and cleanup callbacks.
@@ -40222,8 +40227,10 @@ details.en = '''
 details.ja = '''
 - `shared_ptr<App>` を渡すと、このウィンドウにコンテンツを設定します。`nullptr` を渡すと App を外します。各ウィンドウに設定できる App は 1 つで、update、draw、入力、リサイズのコールバックはこのウィンドウに対して実行され、RectNode のサイズもウィンドウに合わせて更新されます。
 - すぐに戻り、このウィンドウがフレームやイベントを処理する前後の次の境界で要求を反映します。App 自身の `update()`、`draw()`、入力コールバックからも呼び出せます。反映されるまで、`getApp()` は現在の App を返します。
+- update や入力中の要求でも、現在の tick やイベントが終わるまでは元の App が残り、その tick の残りのツリー処理や描画も受け取ります。登録の切り替えは境界で要求が受け付けられたときだけ行います。
 - 境界までに受け付けた最後の要求が有効です。現在の App を指定すると、App を再起動せずに差し替え待ちの要求を取り消します。`close()` が要求されている場合は、App の設定より優先されます。
 - App の `setup()` は最初に処理されるフレームで 1 回だけ実行されます。差し替え、取り外し、ウィンドウの終了では、App の `exit()` を呼び、オーディオのコールバックを切断して実行中の呼び出しを待ってから、`cleanup()` を呼びます。
+- 差し替えと取り外しは、元の App の `exit()` を直接 1 回だけ呼び、`events().exit` は通知しません。これはイベントによる配信の例外です。ウィンドウを閉じる場合は、ウィンドウのイベント経由で exit を配信します。
 - クリーンアップが始まった App は再設定できません。再び表示するには、新しい App を作成してください。
 - 別のウィンドウに設定済みの App、実行中のメイン App、クリーンアップが始まった App、閉じたウィンドウや閉じる途中のウィンドウへの設定は、エラーログを出して拒否します。反映時にも同じ検査を行い、拒否した場合は現在の App を変更しません。
 - 閉じたウィンドウや閉じる途中のウィンドウに `nullptr` を渡しても何もしません。差し替えが反映されると、元の App の exit や cleanup のコールバック内でも、`getApp()` は差し替え後の App を返します。
@@ -40232,8 +40239,10 @@ details.ja = '''
 details.ko = '''
 - `shared_ptr<App>`을 전달하여 이 윈도우에 콘텐츠를 설정하거나, `nullptr`을 전달하여 App을 분리합니다. 윈도우마다 App 하나를 연결하며, update, draw, 입력, 크기 변경 콜백은 이 윈도우에 대해 실행됩니다. App의 RectNode 크기도 윈도우 크기에 맞춰 갱신됩니다.
 - 즉시 반환하고 이 윈도우가 프레임이나 이벤트를 처리하기 전후의 다음 경계에서 요청을 반영합니다. App 자신의 `update()`, `draw()`, 입력 콜백에서도 호출할 수 있습니다. 반영되기 전까지 `getApp()`은 현재 App을 반환합니다.
+- update나 입력 중에 요청해도 현재 tick이나 이벤트가 끝날 때까지 이전 App이 남아 해당 tick의 나머지 트리 처리와 그리기를 받습니다. 등록은 경계에서 요청을 수락할 때만 바뀝니다.
 - 경계까지 수락한 마지막 요청이 적용됩니다. 현재 App을 지정하면 App을 다시 시작하지 않고 대기 중인 교체 요청을 취소합니다. 대기 중인 `close()` 요청은 App 연결보다 우선합니다.
 - App의 `setup()`은 처음 처리하는 프레임에서 한 번 실행됩니다. App을 교체하거나 분리하거나 윈도우를 닫으면 App의 `exit()`을 호출하고, 오디오 콜백의 연결을 해제하여 실행 중인 호출이 끝날 때까지 기다린 다음 `cleanup()`을 호출합니다.
+- 교체와 분리는 이전 App의 `exit()`을 직접 한 번 호출하며 `events().exit`을 알리지 않습니다. 이는 이벤트 기반 전달의 예외입니다. 윈도우를 닫을 때는 윈도우 이벤트를 통해 exit을 전달합니다.
 - 정리가 시작된 App은 다시 연결할 수 없습니다. 다시 표시하려면 새 App을 생성합니다.
 - 다른 윈도우에 이미 연결된 App, 실행 중인 메인 App, 정리가 시작된 App, 닫혔거나 닫히는 중인 윈도우에 대한 연결은 오류 로그를 남기고 거부합니다. 요청을 반영할 때도 같은 검사를 수행하며, 거부하면 현재 App을 변경하지 않습니다.
 - 닫혔거나 닫히는 중인 윈도우에 `nullptr`을 전달해도 아무 작업을 하지 않습니다. 교체가 반영되면 이전 App의 exit 및 cleanup 콜백 안에서도 `getApp()`은 교체된 App을 반환합니다.
@@ -40274,22 +40283,19 @@ description.ko = "이 윈도우 전용 이벤트 모음을 반환한다."
 details.en = '''
 - Returns a `CoreEvents&` owned by this Window, including its mouse, keyboard, update, draw, and exit events. The reference remains valid while the Window object exists.
 - Keep the `EventListener` returned by `listen()` in a member to retain the subscription; see `Event<T>` for listener lifetime rules.
-- See `App::mousePressed` for input callback order, `Window::close` for exit order, and `Window::setApp` for main-thread requirements.
-- Known issue: [#908](https://github.com/TrussC-org/TrussC/issues/908) (input listeners with AfterApp priority also run before the App callback).
+- See `Window` for input callback order, `Window::close` for exit order, and `Window::setApp` for main-thread requirements.
 '''
 details.ja = '''
 - この Window が所有する `CoreEvents&` を返します。マウス、キーボード、update、draw、exit などのイベントを含みます。参照は Window オブジェクトが存在する間有効です。
 - 購読を続けるには、`listen()` が返す `EventListener` をメンバーに保持してください。リスナーの寿命については `Event<T>` を参照してください。
-- 入力コールバックの順番は `App::mousePressed`、終了時の順番は `Window::close`、メインスレッドでの使用は `Window::setApp` を参照してください。
-- 既知の問題: [#908](https://github.com/TrussC-org/TrussC/issues/908)（優先度 AfterApp の入力リスナーも App のコールバックより先に呼ばれます）。
+- 入力コールバックの順番は `Window`、終了時の順番は `Window::close`、メインスレッドでの使用は `Window::setApp` を参照してください。
 '''
 details.ko = '''
 - 이 Window가 소유하는 `CoreEvents&`를 반환합니다. 마우스, 키보드, update, draw, exit 등의 이벤트를 포함합니다. 참조는 Window 객체가 존재하는 동안 유효합니다.
 - 구독을 유지하려면 `listen()`이 반환하는 `EventListener`를 멤버에 보관합니다. 리스너의 수명 규칙은 `Event<T>`를 참조하세요.
-- 입력 콜백 순서는 `App::mousePressed`, 종료 순서는 `Window::close`, 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
-- 알려진 문제: [#908](https://github.com/TrussC-org/TrussC/issues/908)(AfterApp 우선순위의 입력 리스너도 App 콜백보다 먼저 호출됩니다).
+- 입력 콜백 순서는 `Window`, 종료 순서는 `Window::close`, 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
 '''
-related = ["CoreEvents", "Event<T>", "App::mousePressed", "Window::close"]
+related = ["CoreEvents", "Event<T>", "Window", "Window::close"]
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
 EventListener listener;
@@ -40309,7 +40315,7 @@ details.en = '''
 - Returns immediately; the main window and other windows keep running. Calling it from this window's own App callbacks is supported. Repeated requests or calls on a closed window have no effect.
 - Closure follows the same path as the close button, outside window callbacks: after the current run-loop pass on Linux, through a close message posted at the loop tail on Windows, and after the next main-window tick on macOS.
 - Until closure is applied, `isOpen()` remains `true`, and `getApp()` and `App::getWindow()` still return the current App and window.
-- Teardown destroys the native window and makes `isOpen()` return `false`, then notifies `events().exit`, then ends the App as described in `Window::setApp`. `App::getWindow()` returns `nullptr` during these teardown callbacks.
+- Teardown destroys the native window and makes `isOpen()` return `false`, then notifies `events().exit` exactly once while retaining the outgoing App. Within that notification, `BeforeApp` runs before `App::exit()` at 100, and mandatory teardown hooks run at `AfterApp` even if the App calls `events().exit.clear()`. Audio detachment and `cleanup()` follow the notification. `getApp()` and `App::getWindow()` return `nullptr` during these teardown callbacks; the framework holds the outgoing App internally.
 - Closing leaves existing Window handles valid. Destroying the Window object when its last `shared_ptr` is released closes its native window immediately.
 - For main-thread requirements, see `Window::setApp`.
 '''
@@ -40317,7 +40323,7 @@ details.ja = '''
 - すぐに戻り、メインウィンドウや他のウィンドウは動き続けます。このウィンドウ自身の App のコールバックからも呼び出せます。繰り返し要求した場合や、閉じたウィンドウに対して呼んだ場合は何もしません。
 - 閉じるボタンと同じ経路で、ウィンドウのコールバックの外で閉じます。Linux では今回のイベントループの処理後、Windows ではループの末尾で送った終了メッセージの処理時、macOS では次のメインウィンドウのフレーム処理後に反映します。
 - 終了が反映されるまで、`isOpen()` は `true` のままで、`getApp()` と `App::getWindow()` は現在の App とウィンドウを返します。
-- 終了処理では、ネイティブウィンドウを破棄して `isOpen()` が `false` を返す状態にし、`events().exit` を通知してから、`Window::setApp` に記載した手順で App を終了します。これらの終了コールバック内では、`App::getWindow()` は `nullptr` を返します。
+- 終了処理では、ネイティブウィンドウを破棄して `isOpen()` が `false` を返す状態にし、元の App を保持したまま `events().exit` を 1 回だけ通知します。その通知では `BeforeApp`、優先度 100 の `App::exit()`、`AfterApp` の必須終了フックの順に実行します。App が `events().exit.clear()` を呼んでも必須フックは残ります。通知後にオーディオを切断し、`cleanup()` を実行します。これらの終了コールバック内では、`getApp()` と `App::getWindow()` は `nullptr` を返し、フレームワークが元の App を内部で保持します。
 - 閉じたあとも、既存の Window ハンドルは有効です。最後の `shared_ptr` を解放して Window オブジェクトを破棄した場合は、ネイティブウィンドウを直ちに閉じます。
 - メインスレッドでの使用については `Window::setApp` を参照してください。
 '''
@@ -40325,7 +40331,7 @@ details.ko = '''
 - 즉시 반환하며 메인 윈도우와 다른 윈도우는 계속 실행됩니다. 이 윈도우 자신의 App 콜백에서도 호출할 수 있습니다. 반복 요청이나 닫힌 윈도우에 대한 호출은 아무 작업도 하지 않습니다.
 - 닫기 버튼과 같은 경로로 윈도우 콜백 밖에서 닫습니다. Linux에서는 현재 이벤트 루프 처리 후, Windows에서는 루프 끝에서 보낸 닫기 메시지를 처리할 때, macOS에서는 다음 메인 윈도우 프레임 처리 후에 반영합니다.
 - 닫기가 반영되기 전까지 `isOpen()`은 `true`를 유지하며, `getApp()`과 `App::getWindow()`은 현재 App과 윈도우를 반환합니다.
-- 종료 처리에서는 네이티브 윈도우를 파괴하여 `isOpen()`이 `false`를 반환하게 하고, `events().exit`을 알린 다음 `Window::setApp`에 설명된 절차로 App을 종료합니다. 이러한 종료 콜백 안에서는 `App::getWindow()`이 `nullptr`을 반환합니다.
+- 종료 처리에서는 네이티브 윈도우를 파괴하여 `isOpen()`이 `false`를 반환하게 하고, 이전 App을 유지한 채 `events().exit`을 한 번 알립니다. 알림 안에서 `BeforeApp`, 우선순위 100의 `App::exit()`, `AfterApp`의 필수 종료 훅 순으로 실행됩니다. App이 `events().exit.clear()`를 호출해도 필수 훅은 유지됩니다. 알림 후에 오디오를 분리하고 `cleanup()`을 실행합니다. 이러한 종료 콜백 안에서는 `getApp()`과 `App::getWindow()`이 `nullptr`을 반환하며 프레임워크가 이전 App을 내부에서 유지합니다.
 - 닫은 뒤에도 기존 Window 핸들은 유효합니다. 마지막 `shared_ptr`을 해제하여 Window 객체를 소멸시키면 네이티브 윈도우를 즉시 닫습니다.
 - 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
 '''
