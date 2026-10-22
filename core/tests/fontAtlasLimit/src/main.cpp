@@ -107,7 +107,10 @@ static Bytes makeFont() {
     const uint32_t n = (uint32_t)segs.size();
     Bytes sub;
     put16(sub, 4); put16(sub, 16 + 8 * n); put16(sub, 0);
-    put16(sub, n * 2); put16(sub, 4); put16(sub, 1); put16(sub, n * 2 - 4);
+    uint32_t searchPower = 1, searchSelector = 0;
+    while (searchPower <= n / 2) { searchPower *= 2; ++searchSelector; }
+    put16(sub, n * 2); put16(sub, searchPower * 2);
+    put16(sub, searchSelector); put16(sub, n * 2 - searchPower * 2);
     for (auto& s : segs) put16(sub, s.c);
     put16(sub, 0);
     for (auto& s : segs) put16(sub, s.c);

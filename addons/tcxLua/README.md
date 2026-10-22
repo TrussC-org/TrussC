@@ -47,7 +47,7 @@ load it again to recover.
 ```cpp
 auto lua = tcxLua().getLuaState();
 
-tcxLua::runFile(*lua, getDataPath("sketch.lua"));  // loadTextFile + safe_script with sol::script_pass_on_error
+tcxLua::runFile(*lua, getDataPath("sketch.lua"));  // streamed load + protected call
 tcxLua::call(*lua, "setup");                       // calls through sol::protected_function
 tcxLua::call(*lua, "keyPressed", key);             // arguments are passed on
 ```
@@ -57,9 +57,35 @@ tcxLua::call(*lua, "keyPressed", key);             // arguments are passed on
   nothing is called and nothing is logged; it also returns `false`.
 - `tcxLua::runFile(sol::state&, const fs::path&)` returns `false` for a missing
   or unreadable file, a syntax error or an error while the file runs. Files are
-  read through `loadTextFile`, supporting Unicode paths on Windows, and Lua
-  diagnostics include the UTF-8 file name.
-- Both also work on the Web, where C++ exceptions cannot be caught.
+  streamed through a native file handle, supporting Unicode paths on Windows,
+  and Lua diagnostics include the UTF-8 file name. Local files have no size cap.
+- Both also work on the Web. The owned loading and lint translation units
+  enable exception recovery for C++ allocation failures.
+- Source and bytecode modules have no load size cap. Allocation failures use
+  Lua's own "not enough memory" error; loaders do not replace the allocator.
+  Both bundled engines check bytecode ranges and count products before reading
+  or allocating. Binary input is buffered to establish the remaining range;
+  a binary reader must supply one finite complete chunk and is read to EOF.
+  LuaJIT's native embedded `luaJIT_BC_<name>` modules retain their in-process
+  end-marker convention. Buffer allocations use the engine's own GC accounting
+  and allocation path, including PUC's emergency collection and retry.
+  LuaJIT retains its engine representation limits on individual prototypes,
+  strings and lexer scratch buffers (`MSize`/`LJ_MAX_MEM`/`LJ_MAX_BUF`); these
+  are engine limits, not local-file policy caps or a total bytecode-file limit.
+  These structure checks are not an instruction verifier; bytecode retains
+  the authority of executable Lua code.
+- PUC bytecode and lint traversal use the engine's `LUAI_MAXCCALLS` nesting
+  limit (200 by default), covering the prototypes its source parser produces.
+  Name and diagnostic storage grows with input; compilation has no allocation
+  quota. Suggestions use constant scratch storage per comparison, with at most
+  64*1024*1024 edit-distance band cells per file. Candidate visits still cost
+  O(undefined reads × candidates), including names outside the length window.
+  Exhaustion omits further suggestions while retaining every diagnostic; it
+  has no separate exhaustion signal. A structure, allocation, depth or lookup
+  failure returns one diagnostic for that file, preserving other files' results.
+  Shared global-name snapshot failures return a `[lint]` diagnostic. If the
+  diagnostic cannot be allocated, an Error goes to stderr and the result is
+  empty. LuaJIT has no undefined-global scan; its lint path compiles each file.
 
 sol2's own defaults are unchanged: on an error, `lua->safe_script(...)` and
 `safe_script_file(...)` without `sol::script_pass_on_error` throw `sol::error`,
@@ -122,6 +148,8 @@ historical context — these were on by default until 2026-05-27 (PR #97).
 - `end()` methods are replaced to `end_fbo()`, `end_shader()`, `end_cam()` etc ([Issue#11](https://github.com/ffunatsu/tcxLua/issues/11)).
 
 ## Development
+
+Local patches to both bundled Lua engines are recorded in [TRUSSC_MODIFICATIONS.md](TRUSSC_MODIFICATIONS.md).
 
 ### Bindgen
 

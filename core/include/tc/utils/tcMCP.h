@@ -247,14 +247,23 @@ inline json parseRequest(const std::string& body) {
         throw AdmissionError();
     }
     reserveWork(body.size() * 128);
-    return json::parse(body, [limits](int depth, json::parse_event_t, json&) {
-        // Bound (security): reject depth before recursive DOM copies or dumps.
-        if (depth >= 0 && size_t(depth) > limits.jsonDepth) {
-            admissionRejected(AdmissionStore::Working, limits.jsonDepth, size_t(depth), "levels");
-            throw AdmissionError();
-        }
-        return true;
-    });
+    try {
+        return json::parse(body, [limits](int depth, json::parse_event_t, json&) {
+            // Bound (security): reject depth before recursive DOM copies or dumps.
+            if (depth >= 0 && size_t(depth) > limits.jsonDepth) {
+                admissionRejected(AdmissionStore::Working, limits.jsonDepth, size_t(depth), "levels");
+                throw AdmissionError();
+            }
+            return true;
+        }, true, false, limits.jsonDepth);
+    } catch (const json::parse_error& error) {
+        if (error.id != nlohmann::detail::tc_document_depth_error) throw;
+        // Preserve MCP's admission response, warning and counter when the shared
+        // DOM guard rejects before the request-specific callback can run.
+        const auto depthLimit = (std::max)(nlohmann::detail::tc_document_depth_limit, limits.jsonDepth);
+        admissionRejected(AdmissionStore::Working, depthLimit, depthLimit + 1, "levels");
+        throw AdmissionError();
+    }
 }
 
 // Carry an existing admission credit; this never acquires or reserves one.

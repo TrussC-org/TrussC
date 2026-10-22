@@ -5,6 +5,8 @@
 // =============================================================================
 
 #include "tc/utils/tcSystemFont.h"
+#include "tc/utils/tcLog.h"
+#include "impl/tcImportError.h"
 
 #include <algorithm>
 #include <fstream>
@@ -101,6 +103,7 @@ int findFaceByPostScriptName(const uint8_t* data, size_t size,
 }
 
 int findFaceInFileByPostScriptName(const fs::path& path, const std::string& postScriptName) {
+    try {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file) return -1;
     const std::streamoff end = file.tellg();
@@ -147,7 +150,7 @@ int findFaceInFileByPostScriptName(const fs::path& path, const std::string& post
             const uint64_t offset = readU32(directory.data(), rec + 8);
             const uint64_t length = readU32(directory.data(), rec + 12);
             // Bound (abi): font name-table lengths must fit host storage and stream count widths. Overflow returns -1.
-            if (!inFile(offset, length) || length > std::numeric_limits<size_t>::max() ||
+            if (!inFile(offset, length) || length > std::vector<uint8_t>().max_size() ||
                 length > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) {
                 return -1;
             }
@@ -161,6 +164,10 @@ int findFaceInFileByPostScriptName(const fs::path& path, const std::string& post
         }
     }
     return -1;
+    } catch (const std::bad_alloc&) {
+        reportImportError("SystemFont", "cannot allocate font lookup table: ", path);
+        return -1;
+    }
 }
 
 } // namespace internal

@@ -431,20 +431,24 @@ void failResourceLoadLaunchForTests(bool fail) { host().failLaunch = fail; }
 void enqueueResourceLoad(std::function<void()> completion) {
     auto& owner = host();
     std::lock_guard<std::mutex> lock(owner.mutex);
-    owner.mailbox.push_back(std::move(completion));
+    if (!owner.mailbox.callbacks)
+        owner.mailbox.callbacks = std::make_unique<std::vector<std::function<void()>>>();
+    owner.mailbox.callbacks->push_back(std::move(completion));
 }
 ResourceLoadBatch takeResourceLoadBatch() {
     auto& owner = host();
     std::lock_guard<std::mutex> lock(owner.mutex);
     ResourceLoadBatch batch;
-    batch.swap(owner.mailbox);
+    batch.callbacks.swap(owner.mailbox.callbacks);
     batch.results = MainThreadSlotBatch(owner.completions);
     return batch;
 }
 void deliverResourceLoadBatch(ResourceLoadBatch batch) {
-    for (auto& slot : batch) {
-        auto fn = std::move(slot);
-        if (fn) fn();
+    if (batch.callbacks) {
+        for (auto& slot : *batch.callbacks) {
+            auto fn = std::move(slot);
+            if (fn) fn();
+        }
     }
     batch.results.deliver();
 }

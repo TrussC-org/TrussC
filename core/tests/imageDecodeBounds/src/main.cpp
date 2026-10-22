@@ -559,15 +559,37 @@ void allocationChecks(const fs::path& root) {
     internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
     check("async allocation failure completes without bound loss", events == 1 && !image.isLoading() &&
           internal::imageDecodeRejectionsForTests() == rejectedBefore);
+    // Both populated and empty snapshots must survive persistent OOM, including
+    // the move into delivery (MSVC list sentinels/vector proxies can allocate).
+    static_assert(std::is_nothrow_default_constructible_v<internal::ResourceLoadBatch>);
+    static_assert(std::is_nothrow_move_constructible_v<internal::ResourceLoadBatch>);
+    static_assert(std::is_nothrow_destructible_v<internal::ResourceLoadBatch>);
+    int callbacks = 0;
+    internal::enqueueResourceLoad([&] { ++callbacks; });
+    bool escaped = false, emptySnapshot = false;
+    failNew = true;
+    try {
+        auto batch = internal::takeResourceLoadBatch();
+        auto empty = internal::takeResourceLoadBatch();
+        emptySnapshot = empty.empty();
+        internal::deliverResourceLoadBatch(std::move(batch));
+        internal::deliverResourceLoadBatch(std::move(empty));
+    } catch (...) { escaped = true; }
+    failNew = false;
+    check("resource snapshots construct/move/deliver without allocating", !escaped && emptySnapshot && callbacks == 1);
     Image pending;
     pending.loadAsync(path);
     internal::waitForResourceLoadsForTests();
-    bool escaped = false;
+    auto discardedPayload = make_shared<int>(0);
+    weak_ptr<int> discardedOwner = discardedPayload;
+    internal::enqueueResourceLoad([payload = std::move(discardedPayload), &callbacks] { ++callbacks; });
+    escaped = false;
     failNew = true;
     try { internal::waitForResourceLoadsAtAppExit(); } catch (...) { escaped = true; }
     failNew = false;
     check("resource shutdown returns all completion credits without allocating", !escaped && !pending.isLoading() &&
           internal::resourceLoadUsageForTests().retainedBytes == 0 && internal::resourceLoadUsageForTests().outstanding == 0);
+    check("resource shutdown discards generic payload without callbacks or allocation", discardedOwner.expired() && callbacks == 1);
     Image launchFailure;
     int launchEvents = 0;
     LoadError launchError = LoadError::None;

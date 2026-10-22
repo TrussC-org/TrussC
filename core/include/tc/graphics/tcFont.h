@@ -1,4 +1,6 @@
 #pragma once
+#include "impl/tcImportError.h"
+#include <optional>
 
 // =============================================================================
 // TrussC TrueType Font
@@ -40,6 +42,8 @@
 
 // stb_truetype
 #include "stb/stb_truetype.h"
+#include "impl/tcFontInput.h"
+#include "impl/tcFontScratch.h"
 
 #include "../utils/tcLog.h"
 #include "../utils/tcOnceGate.h"
@@ -262,11 +266,29 @@ public:
     }
     int getOversample() const { return oversample_; }
 
-    // Test hook (core/tests/fontAtlasLimit), not part of the Font API:
-    // largest atlas page side in texels (the GPU limit, capped at 8192).
+    // Test hooks, not part of the Font API.
+    size_t getFontDataCapacityForTests() const { return fontData_.capacity(); }
+    // Largest atlas page side in texels (GPU limit, capped at 8192).
     int getMaxAtlasSizeForTests() const { return maxAtlasSize_; }
 
 private:
+    bool initializationFailed(const char* sourcePath = nullptr) {
+        // Preparation owns CPU-only pages; release the rejected source/atlas
+        // before reporting, even when every subsequent allocation still fails.
+        cleanup();
+        internal::reportImportError("Font", sourcePath ? "font initialization failed: " : "font initialization failed",
+                                    sourcePath ? sourcePath : "");
+        return false;
+    }
+
+    // Empty release slots are constructed while initialization is guarded,
+    // before source/name storage is acquired. Failure cleanup only swaps and
+    // destroys existing containers, including with MSVC iterator debugging.
+    void prepareReleaseStorage() {
+        if (!emptyFontData_) emptyFontData_.emplace();
+        if (!emptyFontName_) emptyFontName_.emplace();
+    }
+
     // A glyph fits the largest page when its padded box fits the region the
     // packer fills first on a page grown to maxAtlasSize_: the right half,
     // starting GLYPH_PADDING in from the top and from the middle.
@@ -282,7 +304,7 @@ private:
     // addGlyphToAtlas); one warning per loaded font says so.
     void warnIfGlyphsExceedPage();
 
-    bool initFromFontData(int fontSize, int fontIndex);
+    bool initFromFontData(int fontSize, int fontIndex, const fs::path* sourcePath = nullptr);
 
     // Glyph index for a codepoint. A glyph index from the cmap past numGlyphs
     // (for CFF, past the CharStrings count) maps to .notdef (0), and so does a
@@ -323,7 +345,7 @@ private:
 
     // Number of faces in font data: the font count of a collection whose
     // header and offset table fit in the data, 1 for any other data of at
-    // least 12 bytes, 0 when the header cannot be read (checkSfntSkeleton
+    // least 12 bytes, 0 when the header cannot be read (checkFontSfnt
     // gives the reason then).
     static uint64_t faceCount(const uint8_t* data, size_t size) {
         if (!data || size < 12) return 0;
@@ -337,8 +359,6 @@ private:
         return numFonts;
     }
 
-    static bool checkSfntSkeleton(const uint8_t* data, size_t size, int fontIndex,
-                                  std::string& reason);
 
 public:
 
@@ -370,7 +390,20 @@ public:
         pendingDestroys_.clear();
         atlases_.clear();
         glyphs_.clear();
-        fontData_.clear();
+        if (emptyFontData_) {
+            fontData_.swap(*emptyFontData_);
+            emptyFontData_.reset();
+        }
+        if (emptyFontName_) {
+            fontName_.swap(*emptyFontName_);
+            emptyFontName_.reset();
+        }
+        fontInfo_ = {};
+        fontSize_ = 0;
+        scale_ = ascent_ = descent_ = lineGap_ = spaceAdvance_ = 0;
+        mipsBuilt_ = false;
+        pageLimitWarned_.reset();
+        lastDestroyFlushFrame_ = 0;
         glyphLimit_ = 0;
         loaded_ = false;
     }
@@ -386,7 +419,7 @@ public:
 
         // Add glyph. A glyph that cannot be placed is kept with valid_ = false,
         // so it is not tried again until clearAtlas().
-        GlyphInfo info;
+        GlyphInfo info{};
         if (!addGlyphToAtlas(codepoint, info)) info.valid_ = false;
         return &(glyphs_[codepoint] = info);
     }
@@ -426,13 +459,27 @@ public:
             return result;
         }
 
+        if (!fontGlyphRangeFits(&fontInfo_, fontData_.size(), glyphIndex)) {
+            internal::reportImportError("Font", "invalid glyph structure");
+            return result;
+        }
+        FontScratchScope scratch(fontData_.size());
         stbtt_vertex* vertices = nullptr;
         const int numVerts = stbtt_GetGlyphShape(&fontInfo_, glyphIndex, &vertices);
-        if (numVerts <= 0 || !vertices) {
+        if (numVerts <= 0 || !vertices || scratch.failed()) {
+            if (scratch.failed()) internal::reportImportError("Font", "glyph outline workspace could not be allocated");
             if (vertices) stbtt_FreeShape(&fontInfo_, vertices);
             return result;  // valid but empty outline (space etc.)
         }
 
+        const auto freeShape = [&](stbtt_vertex* shape) { stbtt_FreeShape(&fontInfo_, shape); };
+        std::unique_ptr<stbtt_vertex, decltype(freeShape)> shape(vertices, freeShape);
+        // Bound (security): each outline vertex emits at most 17 path points, with vector growth and subpath bookkeeping. Overflow rejects the whole outline and is counted.
+        if (size_t(numVerts) > fontScratchRemaining() / (51 * sizeof(Vec3) + 4 * sizeof(size_t))) {
+            internal::reportImportError("Font", "glyph path exceeds outline workspace");
+            return Path();
+        }
+        try {
         // stbtt returns vertex coords in font design units, Y-up.
         // Multiply by emScale to get em units (1.0 = em); negate Y for screen Y-down.
         const float emScale = stbtt_ScaleForMappingEmToPixels(&fontInfo_, 1.0f);
@@ -473,8 +520,11 @@ public:
         }
         if (subpathOpen) result.close();
 
-        stbtt_FreeShape(&fontInfo_, vertices);
         return result;
+        } catch (const std::bad_alloc&) {
+            internal::reportImportError("Font", "cannot allocate glyph path");
+            return Path();
+        }
     }
 
     // Em-normalized horizontal advance for this codepoint (1.0 = em).
@@ -576,6 +626,8 @@ private:
 
     // Font data
     std::vector<uint8_t> fontData_;
+    std::optional<std::vector<uint8_t>> emptyFontData_;
+    std::optional<std::string> emptyFontName_;
     stbtt_fontinfo fontInfo_ = {};
     int glyphLimit_ = 0;         // glyph indices below this are usable
     int fontSize_ = 0;
@@ -676,6 +728,11 @@ private:
         // Render glyph
         int glyphIndex = findGlyphIndex(codepoint);
 
+        if (!fontGlyphRangeFits(&fontInfo_, fontData_.size(), glyphIndex)) {
+            internal::reportImportError("Font", "invalid glyph structure");
+            return false;
+        }
+        FontScratchScope metricsScratch(fontData_.size());
         // Get glyph metrics
         int advanceWidth, leftSideBearing;
         stbtt_GetGlyphHMetrics(&fontInfo_, glyphIndex, &advanceWidth, &leftSideBearing);
@@ -695,6 +752,11 @@ private:
         float rs      = (float)os;
         float osScale = scale_ * rs;
 
+        // Bound (abi): stb's prefilter has eight taps; larger internal oversampling cannot be represented. Overflow rejects the whole glyph and is counted.
+        if (!fontGlyphScaleFits(&fontInfo_, glyphIndex, osScale, osScale) || metricsScratch.failed() || os > 8) {
+            internal::reportImportError("Font", "glyph metrics exceed the raster backend range");
+            return false;
+        }
         int x0, y0, x1, y1;
         stbtt_GetGlyphBitmapBox(&fontInfo_, glyphIndex, osScale, osScale, &x0, &y0, &x1, &y1);
 
@@ -811,7 +873,18 @@ private:
         // Render glyph (8bit grayscale). Zero-filled because the prefilter runs
         // out past the rasterized box into the os-1 margin and expects to read
         // background there.
-        std::vector<uint8_t> glyphBitmap((size_t)glyphWidth * glyphHeight, 0);
+        // Bound (gpu): glyph scratch dimensions must fit the admitted atlas page. Overflow rejects the whole glyph and is counted.
+        if (glyphWidth <= 0 || glyphHeight <= 0 ||
+            size_t(glyphWidth) > SIZE_MAX / size_t(glyphHeight)) {
+            internal::reportImportError("Font", "invalid glyph raster dimensions");
+            return false;
+        }
+        const size_t bitmapBytes = size_t(glyphWidth) * size_t(glyphHeight);
+        FontScratchScope scratch(fontData_.size(), bitmapBytes);
+        if (scratch.failed()) { internal::reportImportError("Font", "glyph bitmap exceeds raster workspace"); return false; }
+        std::vector<uint8_t> glyphBitmap;
+        try { glyphBitmap.resize(bitmapBytes, 0); }
+        catch (const std::bad_alloc&) { internal::reportImportError("Font", "cannot allocate glyph bitmap"); return false; }
 
         // Box prefiltering shifts the image by (os-1)/2 oversampled texels;
         // stb reports the compensating offset in final pixels via sub*, which
@@ -847,6 +920,11 @@ private:
                                   glyphWidth,  // stride
                                   osScale, osScale,
                                   glyphIndex);
+        }
+
+        if (scratch.failed()) {
+            internal::reportImportError("Font", "glyph raster workspace could not be allocated");
+            return false;
         }
 
         // Copy to atlas (R8 coverage)
@@ -1365,7 +1443,8 @@ public:
     // App exit waits for loads still decoding; cancelling never waits.
     // Completions are delivered during runApp / runHeadlessApp; in a bare main()
     // without an app run, no completion event fires.
-    // On Web, recovery from allocation failure is guaranteed only for TrussC's
+    // Web CMake propagates exception support. With custom app flags disabling
+    // it, recovery from allocation failure is guaranteed only for TrussC's
     // out-of-line host code. Inline helpers from headers may be compiled into the
     // application without exception support; allocation failure inside them is a
     // known limitation.

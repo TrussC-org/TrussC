@@ -106,7 +106,8 @@ public:
     // App exit waits for loads still decoding; cancelling never waits.
     // Completions are delivered during runApp / runHeadlessApp; in a bare main()
     // without an app run, no completion event fires.
-    // On Web, recovery from allocation failure is guaranteed only for TrussC's
+    // Web CMake propagates exception support. With custom app flags disabling
+    // it, recovery from allocation failure is guaranteed only for TrussC's
     // out-of-line host code. Inline helpers from headers may be compiled into the
     // application without exception support; allocation failure inside them is a
     // known limitation.

@@ -36,7 +36,12 @@
 // =============================================================================
 
 #include <set>
+#include <optional>
+#include <cmath>
+#include <limits>
 #include <vector>
+#include <memory>
+#include "impl/tcImportError.h"
 #include "tcJson.h"
 #include "tcReflect.h"
 #include "../../tcMath.h"
@@ -111,12 +116,13 @@ private:
 // ---------------------------------------------------------------------------
 // JsonReadReflector - Json object -> reflected members (through setters)
 // ---------------------------------------------------------------------------
+namespace internal { struct JsonReadResultAccess; }
 class JsonReadReflector : public Reflector {
 public:
     // Holds a copy of the source object (member sets are small) — a reference
     // would dangle when constructed from a temporary, e.g.
     // `JsonReadReflector r(Json{{"pos", ...}});`.
-    explicit JsonReadReflector(Json src) : src_(std::move(src)) {}
+    explicit JsonReadReflector(Json src) : src_(std::move(src)), external_(nlohmann::detail::tc_input_provenance_access::parsed(src_)) {}
 
     std::vector<std::string> applied;   // keys that matched a member and were written
     std::vector<std::string> skipped;   // keys that matched a member but had the wrong JSON shape
@@ -128,7 +134,7 @@ public:
         std::vector<std::string> out;
         if (src_.is_object()) {
             for (auto it = src_.begin(); it != src_.end(); ++it) {
-                if (!seen_.count(it.key())) out.push_back(it.key());
+                if (!seen_ || !seen_->count(it.key())) out.push_back(it.key());
             }
         }
         return out;
@@ -138,7 +144,8 @@ public:
         const Json* j = find(name);
         if (!j) return false;
         if (isReadOnly()) return ro(name);
-        if (!j->is_number()) return skip(name);
+        if (!j->is_number() || (external_ && !finiteFloat(*j))) return skip(name);
+        if (validating_) return stage(name);
         v = j->get<float>();
         return apply(name);
     }
@@ -147,7 +154,8 @@ public:
         const Json* j = find(name);
         if (!j) return false;
         if (isReadOnly()) return ro(name);
-        if (!j->is_number()) return skip(name);
+        if (!j->is_number() || (external_ && !validInt(*j))) return skip(name);
+        if (validating_) return stage(name);
         v = j->get<int>();
         return apply(name);
     }
@@ -157,6 +165,7 @@ public:
         if (!j) return false;
         if (isReadOnly()) return ro(name);
         if (!j->is_boolean()) return skip(name);
+        if (validating_) return stage(name);
         v = j->get<bool>();
         return apply(name);
     }
@@ -166,7 +175,9 @@ public:
         if (!j) return false;
         if (isReadOnly()) return ro(name);
         if (!j->is_string()) return skip(name);
-        v = j->get<std::string>();
+        if (validating_) { stagedStrings_.push_back(j->get<std::string>()); return stage(name); }
+        if (external_ && reflectionDepth_ > 0) v = std::move(stagedStrings_[stringIndex_++]);
+        else v = j->get<std::string>();
         return apply(name);
     }
 
@@ -174,7 +185,8 @@ public:
         const Json* j = find(name);
         if (!j) return false;
         if (isReadOnly()) return ro(name);
-        if (!isNumberArray(*j, 2)) return skip(name);
+        if (!isNumberArray(*j, 2) || (external_ && j->size() != 2)) return skip(name);
+        if (validating_) return stage(name);
         v.x = (*j)[0].get<float>();
         v.y = (*j)[1].get<float>();
         return apply(name);
@@ -184,7 +196,8 @@ public:
         const Json* j = find(name);
         if (!j) return false;
         if (isReadOnly()) return ro(name);
-        if (!isNumberArray(*j, 3)) return skip(name);
+        if (!isNumberArray(*j, 3) || (external_ && j->size() != 3)) return skip(name);
+        if (validating_) return stage(name);
         v.x = (*j)[0].get<float>();
         v.y = (*j)[1].get<float>();
         v.z = (*j)[2].get<float>();
@@ -195,7 +208,8 @@ public:
         const Json* j = find(name);
         if (!j) return false;
         if (isReadOnly()) return ro(name);
-        if (!isNumberArray(*j, 3)) return skip(name);
+        if (!isNumberArray(*j, 3) || (external_ && (j->size() > 4 || (j->size() == 4 && !finiteFloat((*j)[3]))))) return skip(name);
+        if (validating_) return stage(name);
         v.r = (*j)[0].get<float>();
         v.g = (*j)[1].get<float>();
         v.b = (*j)[2].get<float>();
@@ -209,15 +223,15 @@ public:
         if (!j) return false;
         if (isReadOnly()) return ro(name);
         if (j->is_string()) {
-            const std::string s = j->get<std::string>();
+            const std::string& s = j->get_ref<const std::string&>();
             for (int i = 0; i < labels.count; i++) {
-                if (s == labels.labels[i]) { v = i; return apply(name); }
+                if (s == labels.labels[i]) { if (validating_) return stage(name); v = i; return apply(name); }
             }
             return skip(name);
         }
-        if (j->is_number_integer()) {
+        if (j->is_number_integer() && (!external_ || validInt(*j))) {
             int iv = j->get<int>();
-            if (iv >= 0 && iv < labels.count) { v = iv; return apply(name); }
+            if (iv >= 0 && iv < labels.count) { if (validating_) return stage(name); v = iv; return apply(name); }
         }
         return skip(name);
     }
@@ -226,20 +240,122 @@ public:
     // not an object, the child is null and its members simply find nothing.
     void beginGroup(const char* name) override {
         const Json* s = curSrc();
+        if (srcStack_.empty() && validating_) see(name);
+        if (!groupSeen_.empty() && (!external_ || validating_ || reflectionDepth_ == 0)) groupSeen_.back().insert(name);
         const Json* child = nullptr;
         if (s && s->is_object()) {
             auto it = s->find(name);
-            if (it != s->end() && it->is_object()) child = &*it;
+            if (it != s->end()) {
+                if (it->is_object()) child = &*it;
+                else if (validating_) skip(name);
+            }
         }
         srcStack_.push_back(child);
+        groupNames_.push_back(name);
+        if (!external_ || validating_ || reflectionDepth_ == 0) groupSeen_.emplace_back();
     }
     void endGroup() override {
+        if (validating_ && curSrc()) checkUnknown(*curSrc(), &groupSeen_.back());
         if (!srcStack_.empty()) srcStack_.pop_back();
+        if (!groupNames_.empty()) groupNames_.pop_back();
+        if (!groupSeen_.empty() && (!external_ || validating_ || reflectionDepth_ == 0)) groupSeen_.pop_back();
     }
 
 private:
+    friend struct internal::JsonReadResultAccess;
     Json src_;
-    std::set<std::string> seen_;          // top-level member names encountered
+    bool external_ = false;
+    bool validating_ = false;
+    bool invalid_ = false;
+    int reflectionDepth_ = 0;
+    std::vector<const char*> groupNames_;
+    std::vector<std::string> stagedApplied_;
+    std::vector<std::string> stagedStrings_;
+    const char* currentField_ = "$";
+    size_t stringIndex_ = 0;
+    // Stable addresses also cover nested getter properties during validation.
+    std::vector<std::shared_ptr<void>> stagedProperties_;
+    size_t propertyIndex_ = 0;
+    std::shared_ptr<void>* propertyStorage_(const char* name) override {
+        if (!external_ || reflectionDepth_ == 0) return nullptr;
+        currentField_ = name;
+        if (validating_) {
+            stagedProperties_.emplace_back();
+            return &stagedProperties_.back();
+        }
+        return &stagedProperties_[propertyIndex_++];
+    }
+    std::vector<std::set<std::string>> groupSeen_;
+
+    void enterReflection_() override {
+        if (reflectionDepth_++ == 0) {
+            validating_ = external_;
+            if (external_) {
+                if (seen_) seen_->clear();
+                srcStack_.clear();
+                groupNames_.clear();
+                groupSeen_.clear();
+            }
+            invalid_ = false;
+            currentField_ = "$";
+            stringIndex_ = 0;
+            stagedApplied_.clear();
+            stagedStrings_.clear();
+            stagedProperties_.clear();
+            if (validating_ && !src_.is_object()) skip("$");
+        }
+    }
+    bool leaveReflection_() override {
+        if (--reflectionDepth_ != 0 || !validating_) return false;
+        if (src_.is_object()) checkUnknown(src_, seen_ ? &*seen_ : nullptr);
+        validating_ = false;
+        if (invalid_) return false;
+        reflectionDepth_ = 1;
+        propertyIndex_ = 0;
+        applied.insert(applied.end(), std::make_move_iterator(stagedApplied_.begin()), std::make_move_iterator(stagedApplied_.end()));
+        return true;
+    }
+    void reflectionAllocationFailure_() override {
+        if (!external_ || reflectionDepth_ > 1) {
+            if (reflectionDepth_ > 1) --reflectionDepth_;
+            throw;
+        }
+        reflectionDepth_ = 0;
+        validating_ = false;
+        invalid_ = true;
+        applied.clear();
+        seen_.reset();
+        srcStack_.clear();
+        groupNames_.clear();
+        groupSeen_.clear();
+        stagedApplied_.clear();
+        stagedStrings_.clear();
+        stagedProperties_.clear();
+        internal::reportImportError("JsonReflect", "settings transaction allocation failed at field ", currentField_);
+    }
+    void checkUnknown(const Json& object, const std::set<std::string>* known) {
+        for (auto it = object.begin(); it != object.end(); ++it)
+            if (!known || !known->count(it.key())) skip(it.key().c_str());
+    }
+    static bool finiteFloat(const Json& value) {
+        if (!value.is_number()) return false;
+        const double number = value.get<double>();
+        return std::isfinite(number) && std::abs(number) <= std::numeric_limits<float>::max();
+    }
+    static bool validInt(const Json& value) {
+        if (!value.is_number_integer()) return false;
+        const long double number = value.get<long double>();
+        return number >= std::numeric_limits<int>::min() && number <= std::numeric_limits<int>::max();
+    }
+
+    // MSVC's empty set allocates its sentinel even without iterator debugging.
+    // Keep it lazy. Reader construction/return still constructs public vectors:
+    // MSVC iterator-debugging configurations are outside OOM recovery.
+    std::optional<std::set<std::string>> seen_;
+    void see(const char* name) {
+        if (!seen_) seen_.emplace();
+        seen_->insert(name);
+    }
     std::vector<const Json*> srcStack_;   // nested source objects (null = absent)
 
     const Json* curSrc() const {
@@ -247,25 +363,72 @@ private:
     }
 
     const Json* find(const char* name) {
-        if (srcStack_.empty()) seen_.insert(name);  // unknownKeys is top-level
-        const Json* s = curSrc();
-        if (!s || !s->is_object()) return nullptr;
-        auto it = s->find(name);
-        return it == s->end() ? nullptr : &*it;
+        currentField_ = "$";
+        const Json* source = curSrc();
+        const Json* value = nullptr;
+        if (source && source->is_object()) {
+            auto it = source->find(name);
+            if (it != source->end()) {
+                value = &*it;
+                // The owned JSON key survives unwinding of custom reflection code.
+                currentField_ = it.key().c_str();
+            }
+        }
+        if (srcStack_.empty() && (!external_ || validating_ || reflectionDepth_ == 0)) see(name);
+        if (!groupSeen_.empty() && (!external_ || validating_ || reflectionDepth_ == 0)) groupSeen_.back().insert(name);
+        return value;
     }
 
-    static bool isNumberArray(const Json& j, size_t minSize) {
+    bool isNumberArray(const Json& j, size_t minSize) const {
         if (!j.is_array() || j.size() < minSize) return false;
         for (size_t i = 0; i < minSize; i++) {
-            if (!j[i].is_number()) return false;
+            if (!j[i].is_number() || (external_ && !finiteFloat(j[i]))) return false;
         }
         return true;
     }
 
-    bool apply(const char* name) { applied.push_back(name); return true; }
-    bool skip(const char* name) { skipped.push_back(name); return false; }
-    bool ro(const char* name) { readOnly.push_back(name); return false; }
+    bool stage(const char* name) { stagedApplied_.push_back(name); return false; }
+    bool apply(const char* name) { if (!external_ || reflectionDepth_ == 0) applied.push_back(name); return true; }
+    bool skip(const char* name) {
+        skipped.push_back(name);
+        if (validating_) {
+            if (!invalid_) {
+                std::string path;
+                for (const auto& group : groupNames_) path += std::string(group) + ".";
+                path += name;
+                internal::reportImportError("JsonReflect", "settings transaction rejected at field ", path.c_str());
+            }
+            invalid_ = true;
+        }
+        return false;
+    }
+    bool ro(const char* name) { if (validating_) return skip(name); readOnly.push_back(name); return false; }
 };
+
+namespace internal {
+struct JsonReadResultAccess {
+    static void source(JsonReadReflector& reader, const Json& source) {
+        reader.src_ = source;
+        reader.external_ = nlohmann::detail::tc_input_provenance_access::parsed(reader.src_);
+    }
+    static void reject(JsonReadReflector& reader) {
+        reader.invalid_ = true;
+        reader.validating_ = false;
+        reader.reflectionDepth_ = 0;
+        reader.applied.clear();
+        // A moved MSVC set can allocate a sentinel, even in release builds.
+        // Disengage it before returning an allocation-failure result.
+        reader.seen_.reset();
+        reader.srcStack_.clear();
+        reader.groupNames_.clear();
+        reader.groupSeen_.clear();
+        reader.stagedApplied_.clear();
+        reader.stagedStrings_.clear();
+        reader.stagedProperties_.clear();
+    }
+    static bool rejected(const JsonReadReflector& reader) { return reader.invalid_; }
+};
+}
 
 // ---------------------------------------------------------------------------
 // Convenience wrappers
@@ -286,9 +449,20 @@ inline Json reflectToJson(T& obj, bool includeDerived = false) {
 // reflector so callers can inspect applied / skipped / unknownKeys().
 template <class T>
 inline JsonReadReflector reflectFromJson(T& obj, const Json& j) {
-    JsonReadReflector r(j);
-    obj.reflectMembers(r);
-    return r;
+    // Build result containers before the guarded copy and reuse them on failure.
+    // MSVC iterator debugging may allocate noexcept vector proxies here/on return;
+    // recovery supports standard-library configurations without those proxies.
+    JsonReadReflector r{Json()};
+    try {
+        internal::JsonReadResultAccess::source(r, j);
+        internal::ReflectionPass::run(r, [&] { obj.reflectMembers(r); });
+        return r;
+    } catch (const std::bad_alloc&) {
+        if (!nlohmann::detail::tc_input_provenance_access::parsed(j)) throw;
+        internal::reportImportError("JsonReflect", "settings transaction allocation failed at field $");
+        internal::JsonReadResultAccess::reject(r);
+        return r;
+    }
 }
 
 } // namespace trussc

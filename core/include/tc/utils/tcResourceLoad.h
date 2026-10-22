@@ -7,14 +7,22 @@
 #include "tcLoadResult.h"
 #include "tc/network/tcNetworkState.h"
 #include <filesystem>
+#include <memory>
 #include <vector>
 #include <type_traits>
 
 namespace trussc::internal {
 
-struct ResourceLoadBatch : std::vector<std::function<void()>> {
+// Allocate generic callback storage only when enqueueing. Keeping the vector
+// behind a pointer makes empty construction, move and destruction allocation-free
+// even on MSVC Debug, where constructing/moving a vector allocates an iterator
+// proxy. Resource results and the Notice retain their preallocated slots.
+struct ResourceLoadBatch {
+    std::unique_ptr<std::vector<std::function<void()>>> callbacks;
     MainThreadSlotBatch results;
-    bool empty() const { return std::vector<std::function<void()>>::empty() && results.empty(); }
+    bool empty() const noexcept { return (!callbacks || callbacks->empty()) && results.empty(); }
+    // As before, clear only generic jobs; result slots belong to the snapshot.
+    void clear() noexcept { callbacks.reset(); }
 };
 void enqueueResourceLoad(std::function<void()> completion);
 ResourceLoadBatch takeResourceLoadBatch();
@@ -67,7 +75,8 @@ struct ResourceLoadState : MainThreadSlot, std::enable_shared_from_this<Resource
 bool resourceLoadIsLocalPath(const std::filesystem::path& path,
                              const std::filesystem::path& resolvedPath = {});
 // startResourceLoad / enqueueResourceLoad remain growable for app-authored jobs.
-// On Web, recovery from allocation failure is guaranteed only for TrussC's
+// Web CMake propagates exception support. With custom app flags disabling
+// it, recovery from allocation failure is guaranteed only for TrussC's
 // out-of-line host code. Inline helpers from headers may be compiled into the
 // application without exception support; allocation failure inside them is a
 // known limitation.
