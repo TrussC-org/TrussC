@@ -16,10 +16,17 @@
 #include "imgui/imgui_widgets.cpp"
 #include "imgui/imgui_demo.cpp"
 
+// Keep ImGui's MSVC formatting aliases from renaming later std:: calls.
+#undef snprintf
+#undef vsnprintf
+
 // sokol_imgui implementation
 #include "tcImGuiTargetImpl.h"
 
 // Test Engine hook implementations (provides ImGuiTestEngineHook_* functions)
-#include "tcImGuiHooks.h"
+#include "tcImGuiHooksImpl.h"
+
+// Public addon API implementation (after the backend).
+#include "tcxImGuiImpl.h"
 
 #endif // __ANDROID__

@@ -5,7 +5,7 @@
 // examples/build_all.py --addon-tests-only (exit 0 = pass, non-zero = fail).
 // Drives a real Dear ImGui context through imguiHarness.h: clicks go in as
 // ImGuiIO events, and the checks read what the MCP tools read (the frame
-// registry and the touched record filled by the hooks in tcImGuiHooks.h).
+// registry and the touched record filled by the hooks in tcImGuiHooksImpl.h).
 //
 // Touched record (#322): only what a value hook reports is recorded.
 //   - a toggle MenuItem(bool*) in a dropdown is recorded with its new value,
@@ -63,6 +63,9 @@
 #include <thread>
 
 using namespace std;
+namespace {
+#include "../../../../core/tests/asyncLoads/src/fontFixture.h"
+}
 using harness::callTool;
 using harness::check;
 using harness::ImGuiHarness;
@@ -1312,7 +1315,117 @@ static void testToolLevels() {
     }
 }
 
+// Local imports use complete units and the shared font backend.
+static void testLocalImports() {
+    ImGuiHarness h;
+    auto& io = ImGui::GetIO();
+    string lastImportError;
+    auto importLogs = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
+        if (event.level == tc::LogLevel::Error) lastImportError = event.message;
+    });
+    const string repeatedTable = "[Table][0x12345678,511]\nRefScale=42\n";
+    string repeatedIni;
+    for (int i = 0; i < 1000; ++i) repeatedIni += repeatedTable;
+    ImGui::LoadIniSettingsFromMemory(repeatedIni.data(), repeatedIni.size());
+    auto* table = ImGui::TableSettingsFindByID(0x12345678);
+    const int retainedTableBytes = GImGui->SettingsTables.Buf.Size;
+    check("ini repeated table headers reserve only retained storage", table && table->RefScale == 42 && GImGui->SettingsTables.Buf.Capacity == retainedTableBytes);
+    ImGui::LoadIniSettingsFromMemory(repeatedIni.data(), repeatedIni.size());
+    check("ini existing table storage is recycled on reload", GImGui->SettingsTables.Buf.Size == retainedTableBytes && GImGui->SettingsTables.Buf.Capacity == retainedTableBytes);
+    const char growTable[] = "[Table][0x22345678,1]\n[Table][0x22345678,3]\n[Table][0x22345678,2]\nRefScale=17\n";
+    ImGui::LoadIniSettingsFromMemory(growTable);
+    table = ImGui::TableSettingsFindByID(0x22345678);
+    check("ini table growth retains old chunks and reuses column capacity", table && table->ColumnsCountMax == 3 && table->ColumnsCount == 2 && table->RefScale == 17 && GImGui->SettingsTables.Buf.Capacity == GImGui->SettingsTables.Buf.Size);
+    GImGui->SettingsTables.clear();
+    const char validIni[] = "[Window][Import fixture]\nPos=1,2\nSize=100,100\nCollapsed=0\n";
+    ImGui::LoadIniSettingsFromMemory(validIni);
+    size_t beforeSize = 0;
+    const std::string before(ImGui::SaveIniSettingsToMemory(&beforeSize));
+    const char invalidIni[] = "[Window][Invalid]\n\0Pos=9,9\n";
+    ImGui::LoadIniSettingsFromMemory(invalidIni, sizeof(invalidIni) - 1);
+    check("ini structural failure preserves previous settings", before == ImGui::SaveIniSettingsToMemory());
+    check("ini memory error keeps its pathless message", lastImportError == "[ImGui] ini import has an invalid text size or embedded terminator");
+    const auto iniPath = std::filesystem::current_path() / std::filesystem::path(u8".imgui-import-日本.ini");
+    const auto iniFilename = tc::pathToUtf8(iniPath);
+    { std::ofstream file(iniPath, std::ios::binary); file.write(invalidIni, sizeof(invalidIni) - 1); }
+    ImGui::LoadIniSettingsFromDisk(iniFilename.c_str());
+    check("ini file validation error names the non-ASCII file", lastImportError == "[ImGui] ini import has an invalid text size or embedded terminator: " + iniFilename);
+    std::filesystem::remove(iniPath);
+    const char empty = 0;
+    ImGui::LoadIniSettingsFromMemory(&empty, size_t(INT_MAX));
+    check("ini size check runs before buffer copy", before == ImGui::SaveIniSettingsToMemory());
+    unsigned char shortFont[128] = {};
+    ImFontConfig config;
+    config.FontDataOwnedByAtlas = false;
+    const int fontsBefore = io.Fonts->Fonts.Size;
+    check("invalid sfnt font import returns failure", io.Fonts->AddFontFromMemoryTTF(shortFont, sizeof(shortFont), 16, &config) == nullptr);
+    check("failed font import leaves the font list unchanged", io.Fonts->Fonts.Size == fontsBefore);
+    size_t aliasSize = 0;
+    const char* aliasText = ImGui::SaveIniSettingsToMemory(&aliasSize);
+    ImGui::LoadIniSettingsFromMemory(aliasText, aliasSize);
+    check("ini imports may reuse the current saved text buffer", before == ImGui::SaveIniSettingsToMemory());
+    struct ImportAllocator {
+        ImGuiMemAllocFunc allocate;
+        ImGuiMemFreeFunc release;
+        void* originalData;
+        bool failNext = false;
+        void* ownedInput = nullptr;
+        int inputFrees = 0;
+        size_t largestRequest = 0;
+    } allocator;
+    ImGui::GetAllocatorFunctions(&allocator.allocate, &allocator.release, &allocator.originalData);
+    ImGui::SetAllocatorFunctions([](size_t bytes, void* context) -> void* {
+        auto& state = *static_cast<ImportAllocator*>(context);
+        state.largestRequest = std::max(state.largestRequest, bytes);
+        if (state.failNext) { state.failNext = false; return nullptr; }
+        return state.allocate(bytes, state.originalData);
+    }, [](void* pointer, void* context) {
+        auto& state = *static_cast<ImportAllocator*>(context);
+        if (pointer == state.ownedInput) ++state.inputFrees;
+        state.release(pointer, state.originalData);
+    }, &allocator);
+    const char invalidTable[] = "[Window][Import fixture]\nPos=99,99\n[Table][0x00000001,2147483647]\n";
+    allocator.largestRequest = 0;
+    ImGui::LoadIniSettingsFromMemory(invalidTable);
+    check("ini table count rejects before handler mutation or allocation", before == ImGui::SaveIniSettingsToMemory() && allocator.largestRequest < 1024u * 1024u);
+    const char replacementIni[] = "[Window][Import fixture]\nPos=9,9\nSize=100,100\nCollapsed=0\n";
+    allocator.failNext = true;
+    ImGui::LoadIniSettingsFromMemory(replacementIni);
+    const bool iniFaultConsumed = !allocator.failNext;
+    allocator.failNext = false;
+    check("ini allocation failure preserves existing settings", iniFaultConsumed && before == ImGui::SaveIniSettingsToMemory());
+    ImGui::LoadIniSettingsFromMemory(replacementIni);
+    check("same ini replacement loads without an allocation fault", before != ImGui::SaveIniSettingsToMemory());
+    allocator.ownedInput = IM_ALLOC(128);
+    memset(allocator.ownedInput, 0, 128);
+    check("rejected owned font input is released once", io.Fonts->AddFontFromMemoryTTF(allocator.ownedInput, 128, 16) == nullptr && allocator.inputFrees == 1);
+    allocator.ownedInput = nullptr;
+    const auto font = makeFont();
+    const auto fontPath = std::filesystem::current_path() / ".imgui-font-import-test.ttf";
+    { std::ofstream file(fontPath, std::ios::binary); file.write((const char*)font.data(), font.size()); }
+    const auto fontFilename = fontPath.string();
+    allocator.failNext = true;
+    config.Flags |= ImFontFlags_NoLoadError;
+    config.FontDataOwnedByAtlas = true;
+    auto* failedFont = io.Fonts->AddFontFromFileTTF(fontFilename.c_str(), 16, &config);
+    const bool fontFaultConsumed = !allocator.failNext;
+    allocator.failNext = false;
+    check("font file allocation failure returns cleanly", failedFont == nullptr && fontFaultConsumed && io.Fonts->Fonts.Size == fontsBefore);
+    check("same font file loads without an allocation fault", io.Fonts->AddFontFromFileTTF(fontFilename.c_str(), 16, &config) != nullptr && io.Fonts->Fonts.Size == fontsBefore + 1);
+    { std::ofstream file(fontPath, std::ios::binary); file << "invalid"; }
+    check("font file validation error retains the path and parser reason",
+          io.Fonts->AddFontFromFileTTF(fontFilename.c_str(), 16, &config) == nullptr &&
+          lastImportError.rfind("[ImGui] font import rejected: " + fontFilename + " - ", 0) == 0);
+    std::filesystem::remove(fontPath);
+    config.Flags &= ~ImFontFlags_NoLoadError;
+    check("missing font file error retains its filename",
+          io.Fonts->AddFontFromFileTTF(fontFilename.c_str(), 16, &config) == nullptr &&
+          lastImportError == "[ImGui] cannot read or allocate font file: " + fontFilename);
+    ImGui::SetAllocatorFunctions(allocator.allocate, allocator.release, allocator.originalData);
+}
+
 int main() {
+    testLocalImports();
     testToolLevels();
     tc::mcp::setToolLevel(tc::mcp::ToolLevel::Control);
     testUtf8Capture();

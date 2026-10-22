@@ -918,10 +918,35 @@ static int checkRebuildPreflight() {
 // the raw sokol event first (ImGui follows the cursor through rawEvent), then
 // the press / release through the core events, whose `consumed` tells whether
 // a listener before the App took it. Returns 0 when every generation passed.
-static int g_reloadCheckResult = 1;
+static int g_reloadCheckResult = 65;
 static bool g_reloadCheckFinished = false;
+static std::string g_reloadCheckStopReason = "host stopped before completing the checks";
+
+static void reloadCheckExit() {
+    if (!g_reloadCheckFinished) {
+        std::printf("hotReloadLifecycle --reload-check: FAIL - %s\n",
+                    g_reloadCheckStopReason.c_str());
+        std::fflush(stdout);
+        std::_Exit(65);
+    }
+#ifdef __APPLE__
+    // sapp_quit() exits with 0 on macOS instead of returning to main().
+    std::_Exit(g_reloadCheckResult);
+#endif
+}
 
 static int runReloadCheck() {
+    // Register before entering the host: initialization can quit before the
+    // first frame, and macOS never returns from TC_RUN_APP, even on failure.
+    std::atexit(reloadCheckExit);
+    getMainThreadId();
+    EventListener errors = getLogger().onLog.listen([](LogEventArgs& e) {
+        // Host preflight runs on the main thread; ignore worker-thread logs.
+        if (isMainThread() && e.level == LogLevel::Error &&
+            g_reloadCheckStopReason == "host stopped before completing the checks") {
+            g_reloadCheckStopReason = e.message;
+        }
+    });
     const float kPanelX = 100, kPanelY = 100;    // inside the inspector's Hierarchy panel
     const float kAwayX = 900, kAwayY = 550;      // no panel there
     const int kGenerations = 3;
@@ -973,13 +998,6 @@ static int runReloadCheck() {
         g_reloadCheckFinished = true;
         sapp_quit();
     };
-#ifdef __APPLE__
-    // On macOS sapp_quit() ends the process through exit(0) and TC_RUN_APP
-    // never returns, so the result is set as the exit code here.
-    std::atexit([] {
-        if (g_reloadCheckFinished) std::_Exit(g_reloadCheckResult);
-    });
-#endif
     bool done = false;
     EventListener step = events().afterFrame.listen([&] {
         if (done) return;
@@ -1042,6 +1060,65 @@ static int runReloadCheck() {
         }
     });
 
+    // Registered before host startup: explicit-100 precedes the host App slot.
+    std::string frameOrder;
+    std::vector<EventListener> frameStages;
+    for (auto* event : {&events().update, &events().draw}) {
+        auto stage = [&](char marker, int priority) {
+            frameStages.push_back(event->listen([&, marker] { frameOrder += marker; }, priority));
+        };
+        stage('c', -20); stage('d', 0); stage('p', 50); stage('b', 100);
+        stage('z', EventPriority::AfterApp);
+    }
+    std::string touchOrder;
+    auto touchStage = [&](char stage, int priority) {
+        return events().touchPressed.listen([&, stage](auto&) { touchOrder += stage; }, priority);
+    };
+    auto touchConsumer = touchStage('c', -20);
+    auto touchDefault = touchStage('d', 0);
+    auto touchMiddle = touchStage('p', 50);
+    auto touchTie = touchStage('b', 100);
+    auto touchAfter = touchStage('z', EventPriority::AfterApp);
+    auto touchCheck = events().afterFrame.listen([&] {
+        if (done) return;
+        auto* app = static_cast<tcApp*>(trussc::hot_reload::g_host.getApp());
+        if (frame % kFramesPerGeneration == 4) {
+            app->frameOrder = nullptr;
+            if (frameOrder != "cdpbatlzcdpbatlz") {
+                done = true;
+                return finish(69, "host update/draw App/tree order failed: " + frameOrder);
+            }
+        }
+        if (frame % kFramesPerGeneration != 3) return;
+        frameOrder.clear(); app->frameOrder = &frameOrder;
+        app->touchOrder = &touchOrder;
+        touchOrder.clear();
+        setTouchAsMouse(false);
+        auto sendTouch = [](sapp_event_type type) {
+            sapp_event event{};
+            event.type = type; event.num_touches = 1;
+            event.touches[0].identifier = 42; event.touches[0].changed = true;
+            internal::_event_cb(&event);
+        };
+        sendTouch(SAPP_EVENTTYPE_TOUCHES_BEGAN);
+        sendTouch(SAPP_EVENTTYPE_TOUCHES_MOVED);
+        sendTouch(SAPP_EVENTTYPE_TOUCHES_ENDED);
+        app->touchOrder = nullptr;
+        setTouchAsMouse(true);
+        if (touchOrder != "cdpbalz" || app->touchPresses != 1 ||
+            app->touchMoves != 1 || app->touchReleases != 1) {
+            done = true;
+            return finish(67, "host touch order/forwarding failed: " + touchOrder);
+        }
+        // Protected host binding survives clear, without rebinding on reload.
+        events().touchMoved.clear();
+        sendTouch(SAPP_EVENTTYPE_TOUCHES_MOVED);
+        if (app->touchMoves != 2) {
+            done = true;
+            return finish(68, "host touch binding lost after clear");
+        }
+    });
+
     WindowSettings settings;
     settings.setSize(960, 600);
     // runapp-verdict: atexit-verdict -- finish sets the result in-frame; macOS atexit propagates it.
@@ -1099,7 +1176,7 @@ int main(int argc, char** argv) {
     if (port <= 0) {
         std::printf("hotReloadLifecycle: FAIL - MCP HTTP server did not start\n");
     } else {
-        internal::appKeyPressedFunc = [](const KeyEventArgs&) { g_hostKeyPresses++; };
+        auto keyListener = events().keyPressed.listen([](const KeyEventArgs&) { g_hostKeyPresses++; });
         rc = runCycles(guestPath, port);
     }
     mcp::stopHttpServer();

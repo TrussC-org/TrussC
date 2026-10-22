@@ -1090,7 +1090,7 @@ trusscli addon add|remove <a>  Add / remove addons (also clone / list / search /
 trusscli info [section]        Project / framework info
 trusscli doctor                Check the dev environment
 trusscli clean                 Delete build directories (--all: every target's, incl. xcode-ios, and the generated build-web.* scripts)
-trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache)
+trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache; -j N caps parallel jobs; --dry-run prints the cmake commands)
 trusscli run                   Build and launch
 trusscli version               Show version (trusscli + current TrussC)
 ```
@@ -1111,6 +1111,8 @@ The foundation — a thin wrapper over each OS's native API + C++ — gives a **
 ### Can I make a console / headless app (no draw)?
 
 Yes. You can run `update()` only without ever calling `draw()`, or use the window-less `runHeadlessApp()`. Good for server-side, CI, and headless tests. It's similar to oF's nowindow mode, but **most graphics-focused frameworks lack such a mode** — TrussC manages update and draw independently, so this falls out naturally (see event-driven).
+
+`runHeadlessApp()` notifies `events().update` each fixed step and `events().exit` once on shutdown. The App's `update()` / `exit()` are protected listeners at priority 100, ordered between BeforeApp and AfterApp. The App and mandatory framework teardown bindings survive `clear()`. Tween, update-mode TCP/UDP receive, Box2d auto stepping and WebSocket timeouts therefore work headless. Children, mods and node timers are still not updated (#906).
 
 ### Do heavy features bloat build time / the core?
 
@@ -1149,6 +1151,9 @@ The floor target is the **Raspberry Pi Zero** (defaults like small draw buffers 
 ### What's the overall architecture?
 
 App itself is the scene-graph root Node. The basic loop is `setup()` (once) → `update()` → `draw()` each frame. Nodes form a parent/child transform hierarchy; input is dispatched depth-first and stops propagating once `consumed` (children receive events in their parent's local coordinates). Drawing is sokol_gl-based — a procedural, "immediate-mode-style" API (`setColor()` → `drawRect()`), but internally deferred (vertices accumulate into buffers and are submitted later, so nothing is drawn the instant you call it). Each Node's `draw()` starts from a clean default style (white, fill, no stroke — parent style does not cascade, favoring predictability). Behavior can be added by subclassing or by attaching `Mod`s (`addMod<T>()`). The tree and GPU resources (Texture / Fbo) are main-thread-owned; hand work from other threads via `runOnMainThread()`.
+
+On the main window (also Android/iOS/Web), the hot-reload host and MCP input, App-facing events use one notify: BeforeApp (default 0) → App (100, virtual then tree where applicable) → AfterApp (200). **Consumed input skips App virtuals as well as the tree and later listeners.** The framework App binding survives clear(); explicit 100 follows registration order. Touch defaults run before App touch callbacks, and the host forwards touch to the current guest. An enabled App root no longer consumes background mouse input by default. EasyCam starts gestures after the tree, tracks moves/releases before it, and checks scroll's own position. Headless update/exit use the protected App slots described above; secondary-window activation remains separate work under #947. Startup/reload resize seeds and guest-swap exit remain direct App-only calls.
+
 
 ### Subclass a Node, or attach a Mod?
 
@@ -1623,6 +1628,8 @@ The build folder is missing or empty, e.g. after `trusscli clean` or deleting it
 
 You added or removed `TC_HOT_RELOAD(...)`. Hot reload is switched at configure time, so the build stops once to make CMake reconfigure. It prints "TC_HOT_RELOAD detected." or "TC_HOT_RELOAD removed." first. `trusscli build` reconfigures automatically; with plain CMake, just build again.
 
+Hot-reload build diagnostics retain up to the first and last 64 KiB of each child stream, trimming cuts to complete UTF-8 characters, with an explicit omitted-byte marker and a first-truncation Warning. Both pipes keep draining; retained stdout/stderr are forwarded to their original destinations after the child exits. After direct-child exit, only the bytes already readable in each pipe are drained before closing it. Source scans inspect at most 65,536 entries with depth 64 and 16 MiB of retained path names (128 KiB per path). CMake cache reads allow 16 MiB total and 1 MiB per line. Invalid or oversized scan entries/caches are skipped with a Warning and internal counters.
+
 ### Windows: "... was blocked by your organization's Device Guard policy" (Smart App Control)
 
 Windows 11's Smart App Control starts in an evaluation mode and can switch itself to enforcement days or weeks after setup. From then on, unsigned executables are blocked, including your app and tools built on the machine. SmartScreen's "Run anyway" does not help.
@@ -1745,6 +1752,8 @@ Caveats: TrussC has **no display-enumeration API** (`getScreenSize` / `getDispla
 Console input is opt-in in both windowed and headless apps. Call `console::start()` in `setup()` and retain an `events().console.listen(...)` listener. Both runners deliver queued `ConsoleEventArgs` on the main thread each loop and call `console::stop()` before app exit/cleanup.
 
 There is one detached stdin reader per process, created on the first `start()`. `stop()` disables delivery and discards queued commands; a later `start()` discards pending commands and enables delivery again. The reader keeps consuming stdin while stopped, dropping those lines, and ends at EOF. It uses raw OS reads, accepts LF/CRLF and a partial last line at EOF, and does not hold a stdio lock that could block process exit. Web has no stdin command support.
+
+External stdin control text is limited to 1 MiB per line (LF excluded, CR included), 1024 pending commands and 16 MiB of queued raw text. Oversized lines are drained and rejected whole; a full queue rejects new whole commands. Reading continues while delivery is stopped or the queue is full. First rejection emits one Warning per store; internal cumulative counters live for the process lifetime.
 
 **v0.8.0 migration (breaking): stdin commands need `console::start()`.** Existing apps that only subscribe to `events().console` must add the call in `setup()`. See [the migration note](MIGRATION_0_8.md).
 
@@ -2600,6 +2609,9 @@ void App::mouseMoved(const MouseMoveEventArgs & e) [+1]  // Called when the poin
 void App::mousePressed(const MouseEventArgs & e) [+1]  // Called when a mouse button is pressed.
 void App::mouseReleased(const MouseEventArgs & e) [+1]  // Called when a mouse button is released, exactly once for each press.
 void App::mouseScrolled(const ScrollEventArgs & e) [+1]  // Called when the mouse wheel or trackpad scrolls.
+bool App::onMouseDrag(const MouseDragEventArgs & e)  // Handles App-root mouse input without default consumption.
+bool App::onMousePress(const MouseEventArgs & e)  // Handles App-root mouse input without default consumption.
+bool App::onMouseRelease(const MouseEventArgs & e)  // Handles App-root mouse input without default consumption.
 void App::requestExit()  // Stops a headless app (runHeadlessApp); a windowed app ignores it.
 void App::setSize(float w, float h)  // Changes the size of the window this App runs in.
 void App::touchMoved(const TouchEventArgs & touch)  // Called when fingers move on the screen.

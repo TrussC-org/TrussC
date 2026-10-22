@@ -8,11 +8,14 @@
 #include "tc/network/tcNetworkState.h"
 #include <filesystem>
 #include <vector>
+#include <list>
 
 namespace trussc::internal {
 
-using ResourceLoadBatch = std::vector<std::function<void()>>;
+using ResourceLoadBatch = std::list<std::function<void()>>;
 void enqueueResourceLoad(std::function<void()> completion);
+// Splice nodes prepared by the caller without allocating on a decoder worker.
+void publishResourceLoad(ResourceLoadBatch& prepared);
 ResourceLoadBatch takeResourceLoadBatch();
 void deliverResourceLoadBatch(ResourceLoadBatch batch);
 void startResourceLoad(std::function<void()> preparation);
@@ -38,11 +41,18 @@ struct ResourceLoadState {
     LoadResult result;
 };
 
-template<class State> void completeResourceLoad(const std::shared_ptr<State>& state) {
-    enqueueResourceLoad([state] {
+template<class State> ResourceLoadBatch prepareResourceLoad(const std::shared_ptr<State>& state) {
+    ResourceLoadBatch prepared;
+    prepared.emplace_back([state] {
         if (state->cancelled.load() || !appRunIsAlive(state->run)) return;
         if (auto target = state->apply.lock()) (*target)(*state);
     });
+    return prepared;
+}
+
+template<class State> void completeResourceLoad(const std::shared_ptr<State>& state) {
+    auto prepared = prepareResourceLoad(state);
+    publishResourceLoad(prepared);
 }
 
 template<class State> class ResourceLoadSlot {

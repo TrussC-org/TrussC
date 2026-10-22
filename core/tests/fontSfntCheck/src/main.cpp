@@ -494,6 +494,81 @@ static Bytes makeCffFont(const vector<Bytes>& charStrings = cffCharStrings(),
                                 cmap);
 }
 
+// Repeated empty global subroutine calls exercise work that emits no vertices.
+// Six bounded levels finish in under a million operations even without the guard.
+static void checkCffWork() {
+    vector<Bytes> subrs(6);
+    subrs[0] = {11};
+    for (size_t level = 1; level < subrs.size(); ++level) {
+        for (int repeat = 0; repeat < 10; ++repeat) {
+            csNum(subrs[level], int(level) - 1 - 107);
+            subrs[level].push_back(29);
+        }
+        subrs[level].push_back(11);
+    }
+    auto cs = cffCharStrings();
+    cs[1].clear();
+    csNum(cs[1], int(subrs.size()) - 1 - 107);
+    cs[1].push_back(29); cs[1].push_back(14);
+    const auto font = makeCffFont(cs, subrs);
+    string reason;
+    check("empty-subroutine CFF passes sfnt admission",
+          internal::checkFontSfnt(font.data(), font.size(), 0, reason));
+    stbtt_fontinfo info{};
+    if (!stbtt_InitFont(&info, font.data(), 0)) { check("work-bound CFF initializes", false); return; }
+    {
+        internal::FontScratchScope scratch(font.size());
+        int x0, y0, x1, y1;
+        // Upstream GetGlyphBox returns true for CFF even when its interpreter
+        // fails; the owning scope and zero bounds carry the rejection.
+        stbtt_GetGlyphBox(&info, 1, &x0, &y0, &x1, &y1);
+        check("empty-subroutine CFF metrics reject excessive work",
+              scratch.failed() && x0 == 0 && y0 == 0 && x1 == 0 && y1 == 0);
+    }
+    {
+        internal::FontScratchScope scratch(font.size());
+        stbtt_vertex* vertices = nullptr;
+        const int count = stbtt_GetGlyphShape(&info, 1, &vertices);
+        if (vertices) stbtt_FreeShape(&info, vertices);
+        check("empty-subroutine CFF outline rejects excessive work", !count && scratch.failed());
+    }
+    // Finite review fixture: a long no-output body, with modest call count.
+    Bytes body;
+    for (int i = 0; i < 1000; ++i) {
+        csNum(body, 0); csNum(body, 0); body.push_back(1); // hstem
+    }
+    body.push_back(11);
+    cs = cffCharStrings();
+    cs[1].clear();
+    for (int i = 0; i < 1000; ++i) { csNum(cs[1], -107); cs[1].push_back(29); }
+    cs[1].push_back(14);
+    const auto longBodyFont = makeCffFont(cs, {body});
+    check("long-body CFF passes sfnt admission",
+          internal::checkFontSfnt(longBodyFont.data(), longBodyFont.size(), 0, reason));
+    if (stbtt_InitFont(&info, longBodyFont.data(), 0)) {
+        {
+            internal::FontScratchScope scratch(longBodyFont.size());
+            int x0, y0, x1, y1;
+            stbtt_GetGlyphBox(&info, 1, &x0, &y0, &x1, &y1);
+            check("long no-output CFF metrics reject excessive work", scratch.failed() &&
+                  x0 == 0 && y0 == 0 && x1 == 0 && y1 == 0);
+        }
+        {
+            internal::FontScratchScope scratch(longBodyFont.size());
+            stbtt_vertex* vertices = nullptr;
+            const int count = stbtt_GetGlyphShape(&info, 1, &vertices);
+            if (vertices) stbtt_FreeShape(&info, vertices);
+            check("long no-output CFF outline rejects excessive work", !count && scratch.failed());
+        }
+    } else check("long-body CFF initializes", false);
+    const auto normal = makeCffFont();
+    if (!stbtt_InitFont(&info, normal.data(), 0)) { check("normal CFF initializes", false); return; }
+    vector<unsigned char> bitmap(128 * 128);
+    internal::FontScratchScope scratch(normal.size(), bitmap.size());
+    stbtt_MakeGlyphBitmap(&info, bitmap.data(), 128, 128, 128, 0.128f, 0.128f, 1);
+    check("normal CFF still renders", !scratch.failed() && any_of(bitmap.begin(), bitmap.end(), [](auto pixel) { return pixel != 0; }));
+}
+
 // CharStrings offset points just past the CFF table; the next table holds a
 // well-formed CharStrings INDEX, outside the CFF table.
 static Bytes makeCffFontCharStringsOutside() {
@@ -532,12 +607,15 @@ static const int kFontSize = 100;
 struct LoadOutcome {
     bool ok = false;
     int warnings = 0;
+    int errors = 0;
 };
 static LoadOutcome tryLoad(internal::FontAtlasManager& m, const uint8_t* data, size_t size) {
     const int before = g_warnings;
+    const int errorsBefore = g_errors;
     LoadOutcome r;
     r.ok = m.setupFromMemory(data, size, kFontSize);
     r.warnings = g_warnings - before;
+    r.errors = g_errors - errorsBefore;
     return r;
 }
 static LoadOutcome tryLoad(internal::FontAtlasManager& m, const Bytes& f) {
@@ -548,12 +626,12 @@ static LoadOutcome tryLoad(internal::FontAtlasManager& m, const Bytes& f) {
 // the font); empty accepts any.
 static void expectRejected(const string& name, const Bytes& f, const string& reason = "") {
     internal::FontAtlasManager m;
-    g_lastWarning.clear();
+    g_lastError.clear();
     const LoadOutcome r = tryLoad(m, f);
     check("rejected: " + name,
-          !r.ok && r.warnings >= 1 && g_lastWarning.find(reason) != string::npos,
-          string("ok=") + (r.ok ? "true" : "false") + " warnings=" + to_string(r.warnings) +
-              " last=\"" + g_lastWarning + "\"");
+          !r.ok && r.errors >= 1 && g_lastError.find(reason) != string::npos,
+          string("ok=") + (r.ok ? "true" : "false") + " errors=" + to_string(r.errors) +
+              " last=\"" + g_lastError + "\"");
 }
 
 static bool closeTo(float a, float b) { return fabs(a - b) < 1e-4f; }
@@ -858,7 +936,7 @@ static void checkVertexCount() {
     check("vertex count: 'D' (far over the limit) is empty", pd.empty(),
           "vertices=" + to_string(pd.size()));
     const internal::GlyphInfo* gd = m.getOrLoadGlyph('D');
-    check("vertex count: 'D' draws empty", gd && gd->isValid() && gd->getWidth() == 0);
+    check("vertex count: 'D' caches an invalid whole glyph", gd && !gd->isValid());
 }
 
 // --- flattened point count ----------------------------------------------------------
@@ -908,9 +986,9 @@ static void checkPointCount() {
         internal::setStbttLimitsForTests(INT_MAX, 4, SIZE_MAX);
         const internal::GlyphInfo* ga = m.getOrLoadGlyph('A');
         internal::resetStbttLimitsForTests();
-        check("point count: 'A' over the limit gets a glyph entry (oversample " +
+        check("point count: 'A' over the limit caches an invalid whole glyph (oversample " +
                   to_string(os) + ")",
-              ga && ga->isValid() && closeTo(ga->getAdvance(), 60.0f));
+              ga && !ga->isValid());
     }
 }
 
@@ -956,14 +1034,14 @@ static void checkMalformed() {
         internal::FontAtlasManager m;
         const LoadOutcome r = tryLoad(m, nullptr, 0);
         check("rejected: 0 bytes, null pointer",
-              !r.ok && r.warnings >= 1 && g_lastWarning.find("shorter than a font header") != string::npos);
+              !r.ok && r.errors >= 1 && g_lastError.find("shorter than a font header") != string::npos);
         const uint8_t one = 0;
         const LoadOutcome r2 = tryLoad(m, &one, 0);
         check("rejected: 0 bytes, non-null pointer",
-              !r2.ok && r2.warnings >= 1 && g_lastWarning.find("shorter than a font header") != string::npos);
+              !r2.ok && r2.errors >= 1 && g_lastError.find("shorter than a font header") != string::npos);
         const LoadOutcome r3 = tryLoad(m, nullptr, 16);
         check("rejected: null pointer with a size",
-              !r3.ok && r3.warnings >= 1 && g_lastWarning.find("pointer is null") != string::npos);
+              !r3.ok && r3.errors >= 1 && g_lastError.find("pointer is null") != string::npos);
     }
     expectRejected("not a font (12 bytes of PNG signature)",
                    Bytes{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13},
@@ -1309,14 +1387,14 @@ static void checkSetupPath() {
             printf("setup(): sparse 1 GiB + 1 file could not be created, skipped\n");
         } else {
             internal::FontAtlasManager m;
-            g_lastWarning.clear();
-            const int before = g_warnings;
+            g_lastError.clear();
+            const int before = g_errors;
             const long rssBefore = maxRssKb();
             const bool ok = m.setup(big.string(), kFontSize);
             const long grownKb = maxRssKb() - rssBefore;
             check("setup(): a 1 GiB + 1 file is refused",
-                  !ok && g_warnings > before && g_lastWarning.find("1 GiB") != string::npos,
-                  string("ok=") + (ok ? "true" : "false") + " last=\"" + g_lastWarning + "\"");
+                  !ok && g_errors > before && g_lastError.find("1 GiB") != string::npos,
+                  string("ok=") + (ok ? "true" : "false") + " last=\"" + g_lastError + "\"");
             // Peak RSS would grow by about 1 GiB had the file been read.
             check("setup(): the 1 GiB + 1 file is refused before it is read",
                   grownKb < 64 * 1024, "peak RSS grew by " + to_string(grownKb) + " KiB");
@@ -1403,6 +1481,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     checkCmapSelection();
     checkCffCharStringsCount();
     checkCffMalformed();
+    checkCffWork();
     checkCodepointRange();
     checkVertexCount();
     checkPointCount();

@@ -34,6 +34,7 @@ typedef struct {
   lua_State *L;
   ZIO *Z;
   const char *name;
+  unsigned depth;
 } LoadState;
 
 
@@ -43,6 +44,12 @@ static l_noret error (LoadState *S, const char *why) {
 }
 
 
+/* TrussC's lua_load supplies binary input as one stable block. */
+static void checkRemaining(LoadState *S, size_t count, size_t stride) {
+  if (stride && count > S->Z->n / stride)
+    error(S, "count exceeds remaining chunk bytes");
+}
+
 /*
 ** All high-level loads go through loadVector; you can change it to
 ** adapt to the endianness of the input
@@ -50,6 +57,7 @@ static l_noret error (LoadState *S, const char *why) {
 #define loadVector(S,b,n)	loadBlock(S,b,(n)*sizeof((b)[0]))
 
 static void loadBlock (LoadState *S, void *b, size_t size) {
+  checkRemaining(S, size, 1);
   if (luaZ_read(S->Z, b, size) != 0)
     error(S, "truncated chunk");
 }
@@ -119,6 +127,7 @@ static TString *loadStringN (LoadState *S, Proto *p) {
     ts = luaS_newlstr(L, buff, size);  /* create string */
   }
   else {  /* long string */
+    checkRemaining(S, size, 1);
     ts = luaS_createlngstrobj(L, size);  /* create string */
     setsvalue2s(L, L->top.p, ts);  /* anchor it ('loadVector' can GC) */
     luaD_inctop(L);
@@ -143,6 +152,7 @@ static TString *loadString (LoadState *S, Proto *p) {
 
 static void loadCode (LoadState *S, Proto *f) {
   int n = loadInt(S);
+  checkRemaining(S, n, sizeof(Instruction));
   f->code = luaM_newvectorchecked(S->L, n, Instruction);
   f->sizecode = n;
   loadVector(S, f->code, n);
@@ -155,6 +165,7 @@ static void loadFunction(LoadState *S, Proto *f, TString *psource);
 static void loadConstants (LoadState *S, Proto *f) {
   int i;
   int n = loadInt(S);
+  checkRemaining(S, n, 1);
   f->k = luaM_newvectorchecked(S->L, n, TValue);
   f->sizek = n;
   for (i = 0; i < n; i++)
@@ -182,7 +193,7 @@ static void loadConstants (LoadState *S, Proto *f) {
       case LUA_VLNGSTR:
         setsvalue2n(S->L, o, loadString(S, f));
         break;
-      default: lua_assert(0);
+      default: error(S, "invalid constant type");
     }
   }
 }
@@ -191,6 +202,7 @@ static void loadConstants (LoadState *S, Proto *f) {
 static void loadProtos (LoadState *S, Proto *f) {
   int i;
   int n = loadInt(S);
+  checkRemaining(S, n, 1);
   f->p = luaM_newvectorchecked(S->L, n, Proto *);
   f->sizep = n;
   for (i = 0; i < n; i++)
@@ -212,6 +224,9 @@ static void loadProtos (LoadState *S, Proto *f) {
 static void loadUpvalues (LoadState *S, Proto *f) {
   int i, n;
   n = loadInt(S);
+  checkRemaining(S, n, 3);
+  // Bound (abi): a closure upvalue count is encoded in one byte. Overflow rejects the whole load and is counted by the Lua error result.
+  if (n > 255) error(S, "too many upvalues");
   f->upvalues = luaM_newvectorchecked(S->L, n, Upvaldesc);
   f->sizeupvalues = n;
   for (i = 0; i < n; i++)  /* make array valid for GC */
@@ -227,17 +242,43 @@ static void loadUpvalues (LoadState *S, Proto *f) {
 static void loadDebug (LoadState *S, Proto *f) {
   int i, n;
   n = loadInt(S);
+  checkRemaining(S, n, 1);
+  if (n != 0 && n != f->sizecode) error(S, "line info count mismatch");
   f->lineinfo = luaM_newvectorchecked(S->L, n, ls_byte);
   f->sizelineinfo = n;
   loadVector(S, f->lineinfo, n);
   n = loadInt(S);
+  checkRemaining(S, n, 2);
+  if (n > f->sizelineinfo) error(S, "absolute line count mismatch");
   f->abslineinfo = luaM_newvectorchecked(S->L, n, AbsLineInfo);
   f->sizeabslineinfo = n;
   for (i = 0; i < n; i++) {
     f->abslineinfo[i].pc = loadInt(S);
     f->abslineinfo[i].line = loadInt(S);
   }
+  /* Debug lookups index by instruction and estimate an absolute-line slot.
+     Validate these relationships before the prototype can reach lint/runtime. */
+  if (f->sizelineinfo) {
+    int pc, absolute = 0;
+    long long line = f->linedefined;
+    for (pc = 0; pc < f->sizecode; ++pc) {
+      if (f->lineinfo[pc] == ABSLINEINFO) {
+        if (absolute >= n || f->abslineinfo[absolute].pc != pc)
+          error(S, "absolute line position mismatch");
+        line = f->abslineinfo[absolute++].line;
+      }
+      else line += f->lineinfo[pc];
+      if (line < 0 || line > INT_MAX) error(S, "line number overflow");
+      if (absolute) {
+        int estimate = pc / MAXIWTHABS - 1;
+        if (estimate >= n || (estimate >= 0 && f->abslineinfo[estimate].pc > pc))
+          error(S, "absolute line interval mismatch");
+      }
+    }
+    if (absolute != n) error(S, "absolute line count mismatch");
+  }
   n = loadInt(S);
+  checkRemaining(S, n, 3);
   f->locvars = luaM_newvectorchecked(S->L, n, LocVar);
   f->sizelocvars = n;
   for (i = 0; i < n; i++)
@@ -246,16 +287,20 @@ static void loadDebug (LoadState *S, Proto *f) {
     f->locvars[i].varname = loadStringN(S, f);
     f->locvars[i].startpc = loadInt(S);
     f->locvars[i].endpc = loadInt(S);
+    if (f->locvars[i].startpc > f->locvars[i].endpc || f->locvars[i].endpc > f->sizecode)
+      error(S, "local variable range mismatch");
   }
   n = loadInt(S);
-  if (n != 0)  /* does it have debug information? */
-    n = f->sizeupvalues;  /* must be this many */
+  if (n != 0 && n != f->sizeupvalues) error(S, "upvalue name count mismatch");
+  checkRemaining(S, n, 1);
   for (i = 0; i < n; i++)
     f->upvalues[i].name = loadStringN(S, f);
 }
 
 
 static void loadFunction (LoadState *S, Proto *f, TString *psource) {
+  // Bound (security): native-stack undumping allows LUAI_MAXCCALLS levels, covering parser-produced prototypes. Overflow rejects the whole load and is counted by the Lua error result.
+  if (++S->depth > LUAI_MAXCCALLS) error(S, "bytecode nesting too deep");
   f->source = loadStringN(S, f);
   if (f->source == NULL)  /* no source in dump? */
     f->source = psource;  /* reuse parent's source */
@@ -269,6 +314,7 @@ static void loadFunction (LoadState *S, Proto *f, TString *psource) {
   loadUpvalues(S, f);
   loadProtos(S, f);
   loadDebug(S, f);
+  --S->depth;
 }
 
 
@@ -319,16 +365,21 @@ LClosure *luaU_undump(lua_State *L, ZIO *Z, const char *name) {
     S.name = "binary string";
   else
     S.name = name;
+  S.depth = 0;
   S.L = L;
   S.Z = Z;
   checkHeader(&S);
-  cl = luaF_newLclosure(L, loadByte(&S));
+  {
+    int upvalueCount = loadByte(&S);
+    checkRemaining(&S, upvalueCount, 3);
+    cl = luaF_newLclosure(L, upvalueCount);
+  }
   setclLvalue2s(L, L->top.p, cl);
   luaD_inctop(L);
   cl->p = luaF_newproto(L);
   luaC_objbarrier(L, cl, cl->p);
   loadFunction(&S, cl->p, NULL);
-  lua_assert(cl->nupvalues == cl->p->sizeupvalues);
+  if (cl->nupvalues != cl->p->sizeupvalues) error(&S, "closure upvalue count mismatch");
   luai_verifycode(L, cl->p);
   return cl;
 }

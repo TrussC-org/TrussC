@@ -46,6 +46,36 @@ TC_CORE_TEST_MAIN() {
     zero.bodyBytes = 0;
     bool invalid = !mcp::setAdmissionLimits(zero);
     check("zero limits leave settings unchanged", invalid && mcp::getAdmissionLimits().bodyBytes == defaults.bodyBytes);
+    {
+        // Exercise the first working-store warning: later refusals are counted
+        // without logging, so this must precede the other working-store tests.
+        auto deeper = defaults;
+        deeper.jsonDepth = 96;
+        check("MCP reentrant depth configuration", mcp::setAdmissionLimits(deeper));
+        const string local = string(70, '[') + "0" + string(70, ']');
+        const string boundary = string(64, '[') + "0" + string(64, ']');
+        check("local document rejects depth 70 before MCP", parseJson(local).is_null());
+        bool reentered = false, localRejected = false, boundaryAccepted = false;
+        auto reentrantLog = getLogger().onLog.listen([&](LogEventArgs& event) {
+            if (event.level != LogLevel::Warning || reentered ||
+                event.message.find("[MCP] working memory capacity ") != 0) return;
+            reentered = true;
+            localRejected = parseJson(local).is_null();
+            boundaryAccepted = !parseJson(boundary).is_null();
+        });
+        bool requestRejected = false;
+        try {
+            mcp::internal::WorkScope scope;
+            auto value = mcp::internal::parseRequest("{\"extra\":" +
+                string(100, '[') + "0" + string(100, ']') + "}");
+            (void)value;
+        } catch (const mcp::internal::AdmissionError&) { requestRejected = true; }
+        check("over-deep MCP request rejected during reentrant log", requestRejected && reentered);
+        check("reentrant local parse retains default depth", localRejected && boundaryAccepted);
+        check("local document rejects depth 70 after MCP", parseJson(local).is_null());
+        check("reentrant depth regression releases request credits", mcp::internal::workingMemory() == 0);
+        check("MCP reentrant depth configuration restored", mcp::setAdmissionLimits(defaults));
+    }
     Pixels pixels;
     pixels.allocate(257, 256, 4);
     auto analyze = [&](json ops) {
@@ -379,9 +409,9 @@ TC_CORE_TEST_MAIN() {
         3,
 #endif
 #ifndef _WIN32
-        socketsAvailable ? 6u : 4u
+        socketsAvailable ? 7u : 5u
 #else
-        4
+        5
 #endif
     };
     for (size_t i = 0; i < storeCount; ++i) {
@@ -389,6 +419,33 @@ TC_CORE_TEST_MAIN() {
             static_cast<unsigned long long>(mcp::internal::admissionRejections(static_cast<AdmissionStore>(i))), warnings[i].load());
         check("exact cumulative rejection counter", mcp::internal::admissionRejections(static_cast<AdmissionStore>(i)) == expected[i]);
         check("exactly one Warning per rejecting store", warnings[i] == (expected[i] ? 1 : 0));
+    }
+
+    {
+        const auto requestAtDepth = [](size_t arrays) {
+            return R"({"jsonrpc":"2.0","id":1,"method":"tools/list","extra":)" +
+                string(arrays, '[') + "0" + string(arrays, ']') + "}";
+        };
+        const auto accepts = [&](size_t arrays) {
+            try {
+                mcp::internal::WorkScope scope;
+                auto value = mcp::internal::parseRequest(requestAtDepth(arrays));
+                return value["method"] == "tools/list";
+            } catch (const mcp::internal::AdmissionError&) { return false; }
+        };
+        auto deeper = defaults;
+        deeper.jsonDepth = 96;
+        check("MCP depth override configured", mcp::setAdmissionLimits(deeper));
+        check("MCP configured depth accepts 80 nested arrays", accepts(80));
+        check("MCP configured depth still rejects excessive nesting", !accepts(97));
+        bool documentRejected = false;
+        try { auto document = json::parse(requestAtDepth(65)); (void)document; }
+        catch (const json::parse_error&) { documentRejected = true; }
+        check("MCP override restores default document depth after parsing", documentRejected);
+        check("MCP default depth restored", mcp::setAdmissionLimits(defaults));
+        check("MCP default accepts 63 nested arrays in a request", accepts(63));
+        check("MCP default rejects 65 nested arrays in a request", !accepts(65));
+        check("MCP depth regression releases request credits", mcp::internal::workingMemory() == 0);
     }
 
     const string nestedIdRequest = R"({"jsonrpc":"2.0","id":)" +

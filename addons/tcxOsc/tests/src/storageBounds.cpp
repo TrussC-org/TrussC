@@ -9,8 +9,10 @@ thread_local bool rejectAllocations = false;
 thread_local bool failReceiveAllocation = false;
 }
 // Allocation fault injection is confined to this headless test executable.
+// The receive buffer is 65536 bytes; MSVC's std::allocator pads large blocks
+// for alignment (+39 on x64), so match a small range above it.
 void* operator new(size_t bytes) {
-    if (rejectAllocations || (failReceiveAllocation && bytes == 65536)) {
+    if (rejectAllocations || (failReceiveAllocation && bytes >= 65536 && bytes < 65536 + 64)) {
         failReceiveAllocation = false;
         throw std::bad_alloc();
     }

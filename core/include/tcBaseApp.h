@@ -278,47 +278,74 @@ public:
     // Event handlers (called by TrussC.h, dispatches to scene graph)
     // -------------------------------------------------------------------------
 
-    // Each handler fires the user-facing App virtual unconditionally (so the
-    // raw App::mouseXxx/keyXxx override stays an always-on escape hatch), then
-    // dispatches to the node tree ONLY if the event was not already consumed.
-    // A higher-priority consumer (e.g. tcxImGui, a BeforeApp listener) sets
-    // `consumed` during events().xxx.notify() to claim the event before it
-    // reaches the tree. See _event_cb in TrussC.h.
-    void handleKeyPressed(const KeyEventArgs& e) {
+    // The App-priority listener calls the virtual first, then the tree, and
+    // publishes the tree's explicit consumption to later listeners.
+    bool handleKeyPressed(const KeyEventArgs& e) {
         keyPressed(e);
-        if (!e.consumed) dispatchKeyPress(e);
+        return !e.consumed && dispatchKeyPress(e);
     }
 
-    void handleKeyReleased(const KeyEventArgs& e) {
+    bool handleKeyReleased(const KeyEventArgs& e) {
         keyReleased(e);
-        if (!e.consumed) dispatchKeyRelease(e);
+        return !e.consumed && dispatchKeyRelease(e);
     }
 
-    void handleMousePressed(const MouseEventArgs& e) {
+    bool handleMousePressed(const MouseEventArgs& e) {
         mousePressed(e);
-        if (!e.consumed) dispatchMousePress(e);
+        return !e.consumed && bool(dispatchMousePress(e));
     }
 
-    void handleMouseReleased(const MouseEventArgs& e) {
+    bool handleMouseReleased(const MouseEventArgs& e) {
         mouseReleased(e);
-        if (!e.consumed) dispatchMouseRelease(e);
+        return !e.consumed && bool(dispatchMouseRelease(e));
     }
 
-    void handleMouseMoved(const internal::MouseEventRaw& e) {
-        mouseMoved(internal::toMoveArgs(e));
-        if (!e.consumed) dispatchMouseMove(e);
+    bool handleMouseMoved(const MouseMoveEventArgs& e) {
+        mouseMoved(e);
+        return !e.consumed && bool(dispatchMouseMove(internal::toRaw(e)));
     }
 
-    void handleMouseDragged(const internal::MouseEventRaw& e) {
-        mouseDragged(internal::toDragArgs(e));
-        if (!e.consumed) dispatchMouseMove(e);  // drag + hover share the node-tree move dispatch
+    bool handleMouseDragged(const MouseDragEventArgs& e) {
+        mouseDragged(e);
+        return !e.consumed && bool(dispatchMouseMove(internal::toRaw(e)));
     }
 
-    void handleMouseScrolled(const ScrollEventArgs& e) {
+    bool handleMouseMoved(const internal::MouseEventRaw& e) {
+        return handleMouseMoved(internal::toMoveArgs(e));
+    }
+
+    bool handleMouseDragged(const internal::MouseEventRaw& e) {
+        return handleMouseDragged(internal::toDragArgs(e));
+    }
+
+    bool handleMouseScrolled(const ScrollEventArgs& e) {
         mouseScrolled(e);
-        if (!e.consumed) dispatchMouseScroll(e);
+        return !e.consumed && bool(dispatchMouseScroll(e));
     }
 
+protected:
+    // An enabled App root only consumes explicitly. Keep node events and the
+    // legacy hooks, without RectNode's automatic background consumption.
+    using RectNode::onMousePress;
+    using RectNode::onMouseRelease;
+    using RectNode::onMouseDrag;
+    bool onMousePress(const MouseEventArgs& e) override {
+        MouseEventArgs args = e;
+        RectNode::mousePressed.notify(args);
+        return onMousePress(e.pos, e.button) || args.consumed;
+    }
+    bool onMouseRelease(const MouseEventArgs& e) override {
+        MouseEventArgs args = e;
+        RectNode::mouseReleased.notify(args);
+        return onMouseRelease(e.pos, e.button) || args.consumed;
+    }
+    bool onMouseDrag(const MouseDragEventArgs& e) override {
+        MouseDragEventArgs args = e;
+        RectNode::mouseDragged.notify(args);
+        return onMouseDrag(e.pos, e.button) || args.consumed;
+    }
+
+public:
     void handleWindowResized(int width, int height) {
         // Update internal size (call RectNode::setSize directly, not our override)
         RectNode::setSize(static_cast<float>(width), static_cast<float>(height));
@@ -388,3 +415,48 @@ inline bool appRanCleanup(const App& app) {
 }
 
 } // namespace trussc
+
+namespace trussc::internal {
+// Install once per main-window run, before setup/guest loading. Lookup happens
+// inside each callback; swapping a hot-reload guest never reorders the host slot.
+template<class GetApp>
+void registerAppEventListeners(GetApp getApp) {
+    auto& listeners = mainWindowContext().appEventListeners;
+    listeners.clear();
+    auto warned = std::make_shared<std::atomic<bool>>(false);
+    auto bind = [&](auto& event, auto callback) {
+        listeners.push_back(FrameworkEventAccess::listen(event,
+            [getApp, callback, warned](auto&&... args) {
+                if (!isMainThread()) {
+                    if (!warned->exchange(true))
+                        logWarning("App") << "App events must be delivered on the main thread";
+                    return;
+                }
+                if (auto app = getApp()) {
+                    // Keep an outgoing guest alive through callback-induced changes.
+                    auto owner = app->shared_from_this();
+                    callback(*app, args...);
+                }
+            }, EventPriority::App));
+    };
+    auto& source = events();
+    bind(source.update, [](auto& app) {
+        auto& ctx = currentWindowContext();
+        app.handleUpdate(ctx.mouseX, ctx.mouseY);
+    });
+    bind(source.draw, [](auto& app) { app.handleDraw(); });
+    bind(source.exit, [](auto& app) { app.exit(); });
+    bind(source.keyPressed, [](auto& app, auto& e) { e.consumed = app.handleKeyPressed(e) || e.consumed; });
+    bind(source.keyReleased, [](auto& app, auto& e) { e.consumed = app.handleKeyReleased(e) || e.consumed; });
+    bind(source.mousePressed, [](auto& app, auto& e) { e.consumed = app.handleMousePressed(e) || e.consumed; });
+    bind(source.mouseReleased, [](auto& app, auto& e) { e.consumed = app.handleMouseReleased(e) || e.consumed; });
+    bind(source.mouseMoved, [](auto& app, auto& e) { e.consumed = app.handleMouseMoved(e) || e.consumed; });
+    bind(source.mouseDragged, [](auto& app, auto& e) { e.consumed = app.handleMouseDragged(e) || e.consumed; });
+    bind(source.mouseScrolled, [](auto& app, auto& e) { e.consumed = app.handleMouseScrolled(e) || e.consumed; });
+    bind(source.touchPressed, [](auto& app, auto& e) { app.touchPressed(e); });
+    bind(source.touchMoved, [](auto& app, auto& e) { app.touchMoved(e); });
+    bind(source.touchReleased, [](auto& app, auto& e) { app.touchReleased(e); });
+    bind(source.windowResized, [](auto& app, auto& e) { app.handleWindowResized(e.width, e.height); });
+    bind(source.filesDropped, [](auto& app, auto& e) { app.filesDropped(e.files); });
+}
+} // namespace trussc::internal
