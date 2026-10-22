@@ -66,6 +66,15 @@ Enumeration follows the TrussC convention (`AudioEngine::listDevices()` etc.):
 `listDevices()` returns `std::vector<MidiDeviceInfo>`, where each
 `MidiDeviceInfo` has `getPortNumber()` / `getName()`.
 
+Port lists and `openPort(index|name)` include virtual ports exposed by the OS,
+including this application's own virtual ports. Prefer opening by name: indices
+shift when ports appear or disappear (name matching uses the first
+case-sensitive substring match, so choose a distinctive name).
+CoreMIDI and ALSA sequencer enable libremidi's virtual-port tracking. WinMM,
+WinUWP and WebMIDI ignore that flag and list whatever their OS/browser API
+exposes; on Windows use a virtual MIDI driver such as loopMIDI. WebMIDI still
+requires browser permission and `midiReady()`.
+
 **`MidiIn`** — `listDevices()`, `openPort(index|name)`, `openVirtualPort(name)`,
 `closePort()`, `isOpen()`, `getName()` (open port), `getPort()` (open port
 number, -1 if virtual), `isVirtual()`, `ignoreTypes(sysex, timing, sensing)`,

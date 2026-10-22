@@ -24,6 +24,26 @@ struct SendCase {
 }
 
 namespace {
+void virtualPortEnumeration() {
+    using tcx::midi::MidiIn;
+    libremidi::test::virtualPorts = true;
+    const auto inputs = MidiIn::listDevices();
+    const auto outputs = MidiOut::listDevices();
+    check(inputs.size() == 2 && inputs[0].getName() == "test input" &&
+          inputs[1].getName() == "virtual source", "list hardware and virtual inputs");
+    check(outputs.size() == 2 && outputs[0].getName() == "test output" &&
+          outputs[1].getName() == "virtual destination", "list hardware and virtual outputs");
+    MidiIn input;
+    MidiOut output;
+    check(input.openPort("virtual source") && input.getName() == "virtual source",
+          "open virtual input by name");
+    check(output.openPort("virtual destination") && output.getName() == "virtual destination",
+          "open virtual output by name");
+    check(input.openPort(1) && input.getName() == "virtual source", "open virtual input by index");
+    check(output.openPort(1) && output.getName() == "virtual destination", "open virtual output by index");
+    libremidi::test::virtualPorts = false;
+}
+
 void inputLifecycle() {
     using tcx::midi::MidiIn;
     tc::getMainThreadId();
@@ -89,6 +109,7 @@ void inputLifecycle() {
 void testInputStorage();
 
 int main() {
+    virtualPortEnumeration();
     testInputStorage();
     const std::vector<SendCase> cases = {
         {"note on", [](MidiOut& o) { return o.sendNoteOn(1, 60, 100); }, {0x90, 60, 100}},
