@@ -24,6 +24,8 @@ cmake -DLIBREMIDI_SOURCE_DIR=path/to/private/libremidi -P addons/tcxMidi/cmake/P
   real-time messages using existing timing/sensing filters. Process a remainder
   in the same input span without recursive stack growth. Keep partial short
   messages and channel running status across input reads through both entries.
+  Ignore EOX (F7) outside SysEx without inventing a loss or Warning; preserve
+  its existing system-common cancellation of running status.
 - `input_configuration.hpp`: internal `on_sysex_overflow(needed_bytes)` callback,
   invoked once per discarded message on the backend thread. TrussC uses it only
   to record a counter and pending flag and post a preallocated main-thread slot

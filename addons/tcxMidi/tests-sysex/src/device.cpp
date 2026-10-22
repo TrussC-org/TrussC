@@ -21,10 +21,23 @@ int deviceCheck(int argc, char** argv) {
         bytes.front() = 0xF0;
         bytes.back() = 0xF7;
         if (!output.sendSysex(bytes)) return 1;
-        bytes.insert(bytes.begin() + bytes.size() / 2, 0xF8);
+        const auto firstSize = bytes.size();
+        // CoreMIDI may insert EOX at F8. Put F8 after enough data that even
+        // that terminated prefix exceeds the cap. Exact-cap + F8 is unit-only.
+        bytes.insert(bytes.end() - 1, 0xF8);
         if (!output.sendSysex(bytes) || !output.sendSysex({0xF0, 1, 0xF7}) ||
             !output.sendNoteOn(1, 60, 100)) return 1;
-        std::puts("Sent two over-limit SysEx messages (one with F8), a valid SysEx and a note.");
+        // WinMM waits for its SysEx buffers; ALSA drains output in send_message.
+        // CoreMIDI only queues packets and has no non-destructive output drain.
+        // Bound (device check): allow total bytes / 256 KiB/s plus 2 s for
+        // virtual-port delivery before client teardown, under the 60 s receiver
+        // timeout. This harness requires virtual loopback, not a DIN MIDI cable.
+        const auto totalBytes = firstSize + bytes.size() + 3 + 3;
+        constexpr size_t bytesPerSecond = 256 * 1024;
+        const auto deliveryWait = std::chrono::milliseconds(
+            (totalBytes * 1000 + bytesPerSecond - 1) / bytesPerSecond + 2000);
+        std::this_thread::sleep_for(deliveryWait);
+        std::puts("Sent two over-limit SysEx messages (one with F8), a valid SysEx and a note; delivery wait complete.");
         return 0;
     }
     if (mode != "--receive" && mode != "--receive-virtual") return 2;

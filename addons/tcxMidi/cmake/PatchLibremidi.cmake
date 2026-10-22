@@ -7,7 +7,7 @@ endif()
 set(path0 "${LIBREMIDI_SOURCE_DIR}/include/libremidi/detail/midi_stream_decoder.hpp")
 file(SHA256 "${path0}" hash0)
 set(original0 "912892cedd53914c7bd8d936fb1d3f9ad8196c37de1697789f8254172434df99")
-set(patched0 "09610268e4978dac23a10f54f88e7540dcb03666c46c5f1f0d69759f710d0b14")
+set(patched0 "b919e33aba675e7286bde4e437831628fce9f062c7d8eec362214b2efff041c5")
 if(NOT hash0 STREQUAL patched0)
     if(VERIFY_ONLY OR NOT hash0 STREQUAL original0)
         message(FATAL_ERROR "tcxMidi requires its checked libremidi 5.4.3 SysEx patch: ${path0}. Patch a private source copy with cmake -DLIBREMIDI_SOURCE_DIR=<copy> -P ${CMAKE_CURRENT_LIST_FILE}; do not use an unpatched source override/cache.")
@@ -377,7 +377,9 @@ private:
       if (short_size == short_needed)
       {
         // Keep partial channel/running-status state across input chunks.
-        if (!(short_bytes[0] == 0xF1 && configuration.ignore_timing))
+        // EOX without an active SysEx completes no message and loses no data.
+        if (short_bytes[0] != 0xF7
+            && !(short_bytes[0] == 0xF1 && configuration.ignore_timing))
         {
           message.assign(short_bytes, short_bytes + short_size);
           message.timestamp = short_timestamp;

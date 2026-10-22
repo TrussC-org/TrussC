@@ -10,7 +10,7 @@ From the repository root (use the build resource wrapper when required):
 ```sh
 tools/bin/trusscli update -p addons/tcxMidi/tests-sysex --tc-root "$PWD" --ide cmake
 cmake -S addons/tcxMidi/tests-sysex -B addons/tcxMidi/tests-sysex/build-linux -DCMAKE_BUILD_TYPE=Release
-cmake --build addons/tcxMidi/tests-sysex/build-linux --config Release
+cmake --build addons/tcxMidi/tests-sysex/build-linux --config Release --parallel 4
 addons/tcxMidi/tests-sysex/bin/tests-sysex
 ```
 
@@ -22,7 +22,9 @@ Unpatched overrides fail configuration deliberately.
 The tests cover both stream entry points, initial and continuation admission,
 exact-limit complete/fragmented messages, bounded capacity growth, real-time
 filtering, discard/resynchronization, start timestamps, ignored SysEx, reset,
-successive messages without stack growth, ALSA scratch and safe-thread reporting.
+successive messages without stack growth, stray EOX (including orphan data tails),
+ALSA scratch and safe-thread reporting. Stray EOX neither delivers a message nor
+counts a SysEx loss or schedules a Warning.
 The reporting callback is also checked with backend allocations disabled, empty
 idle queues, one posted slot on first loss and slot lifetime through teardown.
 The wrapper's `tests/` harness additionally checks idle input creation/destruction,
@@ -52,9 +54,12 @@ receiver memory policy, not the MIDI protocol maximum. Device/driver delivery
 and representative controller or firmware dumps need separate verification.
 
 The same executable accepts `--receive-virtual NAME`, `--receive NAME`, and
-`--send NAME`. The sender sends an over-limit SysEx, an over-limit SysEx with an
-interleaved F8, then a valid small SysEx and Note On. Start the receiver first;
-it waits for that note with a 60 second failure timeout. It does not enable
+`--send NAME`. The sender sends an over-limit SysEx, an over-limit SysEx with
+F8 just before its final F7, then a valid small SysEx and Note On. The F8
+comes after enough data that CoreMIDI's inserted EOX still terminates an
+over-limit prefix; the orphan tail EOX is ignored. Exact-cap + F8 remains a unit
+test only because CoreMIDI can rewrite that shape into an under-cap SysEx.
+Start the receiver first; it waits for that note with a 60 second failure timeout. It does not enable
 polling. Expected receiver result (exit 0):
 
 ```text
@@ -62,22 +67,29 @@ oversize=0 clocks=1 valid_sysex=1 notes=1 unexpected=0 warnings=1
 ```
 
 Expect one `SysEx assembly` Warning naming limit 1048576 and needed bytes;
-neither rejected SysEx is delivered. The sender exits 0 after all sends succeed.
+neither rejected SysEx is delivered. WinMM already waits for SysEx buffer
+completion and ALSA drains output inside each backend send. CoreMIDI queues
+packets without a non-destructive drain. After successful sends the harness keeps
+the client alive with one bounded sleep: total bytes / 256 KiB/s plus two seconds
+(about 10.001 seconds for this traffic). This assumes virtual loopback throughput;
+it does not support 31.25 kbit/s DIN cables. Sender exit 0 means sends and the
+delivery wait completed; the receiver's counters establish successful delivery.
 A failed send or a driver that filters/rejects the test traffic is a failed port
 check, even if the unit tests pass.
 
-macOS CoreMIDI provides virtual ports without installing a driver. Build once:
+The macOS port check needs an IAC bus (or another virtual port) to be enabled.
+Enabling an offline IAC bus needs the owner's OK. Build once:
 
 ```sh
 tools/bin/trusscli update -p addons/tcxMidi/tests-sysex --tc-root "$PWD" --ide cmake
 cmake -S addons/tcxMidi/tests-sysex -B addons/tcxMidi/tests-sysex/build-macos -DCMAKE_BUILD_TYPE=Release
-cmake --build addons/tcxMidi/tests-sysex/build-macos --config Release
+cmake --build addons/tcxMidi/tests-sysex/build-macos --config Release --parallel 4
 ```
 
 In terminal 1:
 
 ```sh
-addons/tcxMidi/tests-sysex/bin/tests-sysex.app/Contents/MacOS/tests-sysex --receive-virtual TrussC-SysEx-Check
+addons/tcxMidi/tests-sysex/bin/tests-sysex.app/Contents/MacOS/tests-sysex --receive TrussC-SysEx-Check
 ```
 
 In terminal 2:
@@ -86,8 +98,11 @@ In terminal 2:
 addons/tcxMidi/tests-sysex/bin/tests-sysex.app/Contents/MacOS/tests-sysex --send TrussC-SysEx-Check
 ```
 
-No IAC setup is needed for this virtual input. Alternatively enable IAC Driver
-in Audio MIDI Setup and use `--receive` / `--send` with its bus name.
+Use the actual enabled bus name in both commands. `--receive-virtual NAME` is
+also available. Open-by-name needs a port the current observer can enumerate;
+virtual-port visibility (including IAC and another process's virtual input) is
+handled separately in #982. The full virtual-port check depends on that fix;
+this PR does not change `track_virtual`.
 
 Windows 10/11 WinMM has no generic built-in MIDI loopback and does not support
 libremidi virtual ports. Use an existing MIDI loopback device or install a small
@@ -101,7 +116,7 @@ In a Visual Studio developer PowerShell, build once:
 ```powershell
 .\tools\bin\trusscli.exe update -p addons/tcxMidi/tests-sysex --tc-root "$PWD" --ide cmake
 cmake -S addons/tcxMidi/tests-sysex -B addons/tcxMidi/tests-sysex/build-windows
-cmake --build addons/tcxMidi/tests-sysex/build-windows --config Release
+cmake --build addons/tcxMidi/tests-sysex/build-windows --config Release --parallel 4
 ```
 
 In terminal 1:
@@ -115,3 +130,8 @@ In terminal 2:
 ```powershell
 .\addons\tcxMidi\tests-sysex\bin\tests-sysex.exe --send TrussC-SysEx-Check
 ```
+
+On Linux, use `--receive NAME` and `--send NAME` with an existing ALSA sequencer
+loopback such as Midi Through or snd-virmidi, if accessible without sudo.
+The sequencer device (`/dev/snd/seq`) must be available. A virtual receiver plus
+open-by-name sender has the same #982 dependency; no observer change is included.

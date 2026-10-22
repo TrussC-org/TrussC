@@ -50,6 +50,37 @@ Bytes sysex(size_t size, bool complete) {
     return bytes;
 }
 void decoderCases(bool multi) {
+    for (bool fragmented : {false, true}) {
+        Decoder d(multi);
+        if (fragmented) {
+            d.feed({1, 2, 3});
+            d.feed({0xF7});
+        } else {
+            d.feed({1, 2, 3, 0xF7});
+        }
+        check(d.received.empty() && d.losses == 0,
+              "orphan data and EOX deliver nothing and report no SysEx loss");
+        d.feed({0x90, 60, 100, 0xF8, 0xF0, 1, 0xF7});
+        check(d.received == std::vector<Bytes>{{0x90, 60, 100}, {0xF8}, {0xF0, 1, 0xF7}} &&
+              d.losses == 0, "note clock and SysEx survive orphan tail");
+    }
+    {
+        Decoder d(multi);
+        d.feed({0xF7});
+        check(d.received.empty() && d.losses == 0, "lone EOX is ignored without loss");
+    }
+    for (bool fragmented : {false, true}) {
+        Decoder d(multi);
+        if (fragmented) {
+            d.feed({0x90, 60, 100});
+            d.feed({0xF7});
+            d.feed({0xF0, 1, 0xF7});
+        } else {
+            d.feed({0x90, 60, 100, 0xF7, 0xF0, 1, 0xF7});
+        }
+        check(d.received == std::vector<Bytes>{{0x90, 60, 100}, {0xF0, 1, 0xF7}} &&
+              d.losses == 0, "stray EOX between valid messages adds no delivery or loss");
+    }
     for (bool complete : {false, true}) {
         Decoder d(multi);
         auto bytes = sysex(limit + 1, complete);
@@ -327,6 +358,14 @@ void reporting() {
         }
     });
     auto loss = tcx::midi::internal::SysexLoss::create();
+    for (bool multi : {false, true}) {
+        Decoder d(multi);
+        d.config.on_sysex_overflow = [loss](size_t needed) { loss->count(needed); };
+        d.feed({1, 2, 0xF7});
+        d.feed({0xF7});
+    }
+    tc::internal::drainMainThreadQueue();
+    check(loss->discarded == 0 && warnings == 0, "stray EOX queues no loss Warning");
 #if !defined(__EMSCRIPTEN__)
     check(tc::internal::mainThreadQueue().size() == 0 &&
           tc::internal::countQueuedMainThreadSlots() == 0, "idle diagnostics queue no work");

@@ -34,6 +34,7 @@ def main():
     event_span = "{static_cast<const uint8_t*>(ev.data.ext.ptr), ev.data.ext.len}"
     variants = {
         "baseline": None,
+        "stray_eox_delivery": (decoder, "short_bytes[0] != 0xF7\n            && ", ""),
         "global_limit_loosen": (decoder, "sysex_max_bytes = 1'048'576;", "sysex_max_bytes = 1'048'577;"),
         "global_limit_stricter": (decoder, "sysex_max_bytes = 1'048'576;", "sysex_max_bytes = 1'048'575;"),
         "initial_remove": (decoder, initial, "if (false)"),
@@ -91,7 +92,7 @@ def main():
         result = subprocess.run([str(binary)], capture_output=True, text=True, encoding="utf-8")
         (directory / "result.log").write_text(result.stdout + result.stderr, encoding="utf-8")
         print(f"{name}: exit={result.returncode} {result.stdout.strip()}", flush=True)
-        if (result.returncode == 0) != (change is None):
+        if result.returncode != (0 if change is None else 1):
             raise RuntimeError(name + " failed mutation check")
 
 
