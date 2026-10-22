@@ -225,6 +225,13 @@ jobs:
           sudo apt-get install -y xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl-mesa0
           xvfb-run -a -s '-screen 0 1280x1024x24' python3 tools/run_core_display_tests.py
 
+      - name: Run example self-checks (Xvfb + Mesa)
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/50_mesa.json
+        run: python3 tools/run_example_self_checks.py
+
       - name: Compiler cache stats
         if: always()
         shell: bash
