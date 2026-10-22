@@ -1,5 +1,7 @@
 """Discovery and failure handling for Daily's built example checks."""
+from contextlib import redirect_stdout
 import importlib.util
+import io
 from pathlib import Path
 import subprocess
 import tempfile
@@ -13,6 +15,11 @@ spec.loader.exec_module(runner)
 
 
 class ExampleSelfChecksTests(unittest.TestCase):
+    def setUp(self):
+        display = patch.dict(runner.os.environ, {'DISPLAY': ':9972'})
+        display.start()
+        self.addCleanup(display.stop)
+
     def test_discovery_uses_example_sources(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -26,18 +33,19 @@ class ExampleSelfChecksTests(unittest.TestCase):
                 (source.parent / 'README.md').write_text('--self-check', encoding='utf-8')
             self.assertEqual(set(runner.discover_examples(root)), {root / p for p in included})
 
-    def test_failure_missing_binary_and_timeout_fail_but_continue(self):
+    def test_nonzero_exit_and_timeout_fail_but_continue(self):
         root = Path('/checkout')
-        examples = [root / 'examples' / name for name in ['ok', 'failed', 'missing', 'hung']]
-        outcomes = [Mock(returncode=0), Mock(returncode=7), FileNotFoundError(),
-                    subprocess.TimeoutExpired('hung', 60)]
-        with patch.object(runner, 'discover_examples', return_value=examples), \
-                patch.object(runner.subprocess, 'run', side_effect=outcomes) as run:
-            self.assertEqual(runner.run_checks(root), 1)
-            self.assertEqual(run.call_count, 4)
-            self.assertEqual(run.call_args_list[0].args[0], ['/checkout/examples/ok/bin/ok', '--self-check'])
-            self.assertTrue(all(call.kwargs['timeout'] == runner.EXAMPLE_TIMEOUT
-                                for call in run.call_args_list))
+        examples = [root / 'examples' / name for name in ['failed', 'ok']]
+        for outcome in (Mock(returncode=7), subprocess.TimeoutExpired('failed', 60)):
+            with self.subTest(outcome=outcome), \
+                    patch.object(runner, 'discover_examples', return_value=examples), \
+                    patch.object(runner.subprocess, 'run', side_effect=[outcome, Mock(returncode=0)]) as run:
+                self.assertEqual(runner.run_checks(root), 1)
+                self.assertEqual(run.call_count, 2)
+                self.assertEqual(run.call_args_list[0].args[0], ['/checkout/examples/failed/bin/failed', '--self-check'])
+                self.assertEqual(run.call_args_list[0].kwargs['cwd'], examples[0])
+                self.assertEqual(runner.EXAMPLE_TIMEOUT, 60)
+                self.assertTrue(all(call.kwargs['timeout'] == 60 for call in run.call_args_list))
 
     def test_success_and_empty_discovery(self):
         with patch.object(runner, 'discover_examples', return_value=[Path('/checkout/example')]), \
@@ -46,56 +54,29 @@ class ExampleSelfChecksTests(unittest.TestCase):
         with patch.object(runner, 'discover_examples', return_value=[]):
             self.assertEqual(runner.run_checks(Path('/checkout')), 1)
 
-    def test_display_export_readiness_and_pid_cleanup_on_failure(self):
-        server = Mock()
-        server.poll.return_value = None
-        def launch(command):
-            self.assertEqual(runner.os.environ['DISPLAY'], ':9972')
-            self.assertEqual(command[1], ':9972')
-            return server
-        with patch.dict(runner.os.environ, {'DISPLAY': ':9972'}), \
-                patch.object(runner.subprocess, 'Popen', side_effect=launch), \
-                patch.object(runner.subprocess, 'run', side_effect=[Mock(returncode=1), Mock(returncode=0)]), \
-                patch.object(runner.time, 'sleep'), \
-                patch.object(runner, 'run_checks', return_value=1) as checks:
-            self.assertEqual(runner.run_with_display(Path('/checkout')), 1)
-            checks.assert_called_once()
-            server.terminate.assert_called_once()
-            server.wait.assert_called_once()
+    def test_missing_binary_reports_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            example = root / 'missing'
+            example.mkdir()
+            output = io.StringIO()
+            with patch.object(runner, 'discover_examples', return_value=[example]), \
+                    redirect_stdout(output):
+                self.assertEqual(runner.run_checks(root), 1)
+            self.assertIn(f'binary missing: {example / "bin/missing"}', output.getvalue())
+            self.assertIn('FAIL: missing', output.getvalue())
 
-    def test_readiness_deadline_fails_and_stops_server(self):
-        server = Mock()
-        server.poll.return_value = None
-        with patch.object(runner.subprocess, 'Popen', return_value=server), \
-                patch.object(runner.subprocess, 'run', return_value=Mock(returncode=1)), \
-                patch.object(runner.time, 'monotonic', side_effect=[0, 0, 11, 11]), \
-                patch.object(runner, 'run_checks') as checks:
-            self.assertEqual(runner.run_with_display(Path('/checkout')), 1)
-            checks.assert_not_called()
-            server.terminate.assert_called_once()
-            server.wait.assert_called_once()
-
-    def test_failed_xvfb_start_does_not_run_checks(self):
-        server = Mock()
-        server.poll.return_value = 1
-        with patch.object(runner.subprocess, 'Popen', return_value=server), \
-                patch.object(runner, 'run_checks') as checks:
-            self.assertEqual(runner.run_with_display(Path('/checkout')), 1)
-            checks.assert_not_called()
-            server.terminate.assert_not_called()
-            server.wait.assert_called_once()
-
-    def test_probe_error_still_stops_xvfb(self):
-        server = Mock()
-        server.poll.return_value = None
-        with patch.object(runner.subprocess, 'Popen', return_value=server), \
-                patch.object(runner.subprocess, 'run', side_effect=FileNotFoundError()), \
-                patch.object(runner, 'run_checks') as checks:
-            with self.assertRaises(FileNotFoundError):
-                runner.run_with_display(Path('/checkout'))
-            checks.assert_not_called()
-            server.terminate.assert_called_once()
-            server.wait.assert_called_once()
+    def test_unset_or_empty_display_fails_before_discovery(self):
+        for environment in ({}, {'DISPLAY': ''}):
+            with self.subTest(environment=environment), \
+                    patch.dict(runner.os.environ, environment, clear=True), \
+                    patch.object(runner, 'discover_examples') as discover, \
+                    patch.object(runner.subprocess, 'run') as run, \
+                    redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(runner.run_checks(Path('/checkout')), 1)
+                self.assertIn('DISPLAY is unset', output.getvalue())
+                discover.assert_not_called()
+                run.assert_not_called()
 
 
 if __name__ == '__main__':
