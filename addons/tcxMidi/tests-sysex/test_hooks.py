@@ -25,19 +25,38 @@ def main():
     loss = "tcxMidiSysex.h"
     original = {p: (source / "include" / p).read_text(encoding="utf-8") for p in (decoder, alsa)}
     original[loss] = (root / "addons/tcxMidi/src" / loss).read_text(encoding="utf-8")
+    initial = "if (message.empty() && bytes.size() > sysex_max_bytes)"
+    continuation = "if (!message.empty() && bytes.size() > sysex_max_bytes - message.size())"
+    # The five event-admission/scratch mutations from the review now exercise
+    # borrowed routing: resize, reserve, truncation, omitted feed, false rejection.
+    # Initial/cumulative logical admission and reservation remain independent.
+    borrowed = "          m_processing.on_bytes("
+    event_span = "{static_cast<const uint8_t*>(ev.data.ext.ptr), ev.data.ext.len}"
     variants = {
         "baseline": None,
-        "initial_assign": (decoder, "if (message.empty() && bytes.size() > sysex_max_bytes)", "if (false)"),
-        "continuation_insert": (decoder, "if (!message.empty() && bytes.size() > sysex_max_bytes - message.size())", "if (false)"),
-        "capacity": (decoder, "if (needed > message.bytes.capacity())", "if (false)"),
-        "alsa_scratch": (alsa, "if (ev.data.ext.len > midi1::input_state_machine::sysex_max_bytes)", "if (false)"),
-        "alsa_capacity": (alsa, "decoding_buffer.reserve(ev.data.ext.len);", ""),
+        "global_limit_loosen": (decoder, "sysex_max_bytes = 1'048'576;", "sysex_max_bytes = 1'048'577;"),
+        "global_limit_stricter": (decoder, "sysex_max_bytes = 1'048'576;", "sysex_max_bytes = 1'048'575;"),
+        "initial_remove": (decoder, initial, "if (false)"),
+        "initial_loosen": (decoder, initial, initial.replace("sysex_max_bytes)", "sysex_max_bytes + 1)")),
+        "initial_stricter": (decoder, initial, initial.replace(" > ", " >= ")),
+        "continuation_remove": (decoder, continuation, "if (false)"),
+        "continuation_loosen": (decoder, continuation, continuation.replace("sysex_max_bytes -", "sysex_max_bytes + 1 -")),
+        "continuation_stricter": (decoder, continuation, continuation.replace(" > ", " >= ")),
+        "capacity_remove": (decoder, "if (needed > message.bytes.capacity())", "if (false)"),
+        "capacity_no_clamp": (decoder, "std::min(sysex_max_bytes,\n          std::max(needed, message.bytes.capacity() * 2))", "std::max(needed, message.bytes.capacity() * 2)"),
+        "capacity_loosen": (decoder, "std::min(sysex_max_bytes,", "std::min(sysex_max_bytes + 1,"),
+        "capacity_stricter": (decoder, "std::min(sysex_max_bytes,", "std::min(sysex_max_bytes - 1,"),
+        "alsa_scratch_resize": (alsa, borrowed, "          decoding_buffer.resize(ev.data.ext.len);\n" + borrowed),
+        "alsa_scratch_reserve": (alsa, borrowed, "          decoding_buffer.reserve(ev.data.ext.len);\n" + borrowed),
+        "alsa_span_truncate": (alsa, event_span, "{static_cast<const uint8_t*>(ev.data.ext.ptr), std::min<std::size_t>(ev.data.ext.len, midi1::input_state_machine::sysex_max_bytes)}"),
+        "alsa_feed_remove": (alsa, borrowed, "          if (false) m_processing.on_bytes("),
+        "alsa_event_rejection": (alsa, borrowed,
+                                 "          if (ev.data.ext.len > midi1::input_state_machine::sysex_max_bytes) {\n"
+                                 "            if (configuration.on_sysex_overflow) configuration.on_sysex_overflow(ev.data.ext.len);\n"
+                                 "            return 0;\n          }\n" + borrowed),
         "discard_resync": (decoder, "m_state = discard_sysex;", "m_state = main;"),
-        "alsa_rejection": (alsa, "m_processing.on_oversized_sysex(", "m_processing.on_bytes("),
         "partial_channel": (decoder, "    }\n  }\n\n  void reject_sysex", "    }\n    short_size = 0;\n  }\n\n  void reject_sysex"),
-        # Reintroduce scheduling in the loss callback; fault injection must detect
-        # allocation before the pending flag can be set (remove noexcept so the
-        # test can catch bad_alloc and check the lost warning).
+        # Remove noexcept only in this mutation so the allocation test can catch.
         "backend_scheduling": (loss, "        if (discarded.fetch_add", "        tc::internal::mainThreadQueue().send([self = std::shared_ptr<size_t>{}, needed] { (void)self; (void)needed; });\n        if (discarded.fetch_add"),
         "report_post": (loss, "            post(weak_from_this().lock());", ""),
         "report_once": (loss, "if (discarded.fetch_add(1, std::memory_order_relaxed) == 0)",
@@ -66,7 +85,9 @@ def main():
                                 for file in ("main.cpp", "device.cpp", "allocation.cpp")],
                    "-o", str(binary), *libraries]
         (directory / "command.txt").write_text(shlex.join(command), encoding="utf-8")
-        subprocess.run(command, cwd=build, check=True)
+        result = subprocess.run(command, cwd=build, capture_output=True, text=True, encoding="utf-8")
+        (directory / "build.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+        result.check_returncode()
         result = subprocess.run([str(binary)], capture_output=True, text=True, encoding="utf-8")
         (directory / "result.log").write_text(result.stdout + result.stderr, encoding="utf-8")
         print(f"{name}: exit={result.returncode} {result.stdout.strip()}", flush=True)

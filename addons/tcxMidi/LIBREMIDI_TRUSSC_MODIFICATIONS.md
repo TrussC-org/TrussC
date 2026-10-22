@@ -29,10 +29,10 @@ cmake -DLIBREMIDI_SOURCE_DIR=path/to/private/libremidi -P addons/tcxMidi/cmake/P
   to record a counter and pending flag and post a preallocated main-thread slot
   without allocation or logging. Only the first loss posts the slot, which keeps
   the diagnostics alive until the owner's sole Warning is delivered.
-- `backends/alsa_seq/midi_in.hpp`: check event size before scratch growth. An
-  over-limit event is rejected before decoder assignment or scratch allocation;
-  borrowed bytes are scanned for discard/resynchronization and accounting.
-  Admitted scratch growth explicitly reserves the requested size.
+- `backends/alsa_seq/midi_in.hpp`: feed borrowed SysEx event bytes directly to
+  the bounded shared decoder. Admission and overflow accounting use each parsed
+  logical message. SysEx leaves the fixed codec scratch size/capacity unchanged;
+  ordinary ALSA events continue through the byte-event codec.
 
 The cap is a TrussC external-input memory policy, not a MIDI protocol maximum.
 A legitimate single SysEx above it is discarded. CoreMIDI, WinMM, WinUWP, ALSA

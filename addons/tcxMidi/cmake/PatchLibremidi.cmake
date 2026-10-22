@@ -7,7 +7,7 @@ endif()
 set(path0 "${LIBREMIDI_SOURCE_DIR}/include/libremidi/detail/midi_stream_decoder.hpp")
 file(SHA256 "${path0}" hash0)
 set(original0 "912892cedd53914c7bd8d936fb1d3f9ad8196c37de1697789f8254172434df99")
-set(patched0 "c2fa36c171d519fb522b7831234022e61afb4c42ffb145a9d0dc5f6ccbaa2a3a")
+set(patched0 "09610268e4978dac23a10f54f88e7540dcb03666c46c5f1f0d69759f710d0b14")
 if(NOT hash0 STREQUAL patched0)
     if(VERIFY_ONLY OR NOT hash0 STREQUAL original0)
         message(FATAL_ERROR "tcxMidi requires its checked libremidi 5.4.3 SysEx patch: ${path0}. Patch a private source copy with cmake -DLIBREMIDI_SOURCE_DIR=<copy> -P ${CMAKE_CURRENT_LIST_FILE}; do not use an unpatched source override/cache.")
@@ -25,7 +25,7 @@ endif()
 set(path2 "${LIBREMIDI_SOURCE_DIR}/include/libremidi/backends/alsa_seq/midi_in.hpp")
 file(SHA256 "${path2}" hash2)
 set(original2 "9c2f511b98f13a63cbb5f797fe16142f546391d63b9cf431c79f9f9b1ec0a537")
-set(patched2 "0d3d35e95f6094df8c9e9abeae68ea569e8b9adbbc8977bcf12abd01723ba5c8")
+set(patched2 "316f03a84f76c59a2629b863d656789b0af9821500fe4ce852e038417d6e895d")
 if(NOT hash2 STREQUAL patched2)
     if(VERIFY_ONLY OR NOT hash2 STREQUAL original2)
         message(FATAL_ERROR "tcxMidi requires its checked libremidi 5.4.3 SysEx patch: ${path2}. Patch a private source copy with cmake -DLIBREMIDI_SOURCE_DIR=<copy> -P ${CMAKE_CURRENT_LIST_FILE}; do not use an unpatched source override/cache.")
@@ -322,27 +322,6 @@ private:
       this->configuration.on_raw_data(bytes, timestamp);
   }
 
-  // ALSA has already rejected the event before scratch or decoder storage growth.
-  void on_oversized_sysex(std::span<const uint8_t> bytes, int64_t timestamp)
-  {
-    if (configuration.ignore_sysex)
-      return;
-    // Leading real-time bytes and an initial F0 belong to this rejected event.
-    std::size_t start = 0;
-    while (start < bytes.size() && bytes[start] >= 0xF8)
-      ++start;
-    const bool new_sysex = start < bytes.size() && bytes[start] == 0xF0;
-    if (m_state != discard_sysex || new_sysex)
-      reject_sysex(message.size() + bytes.size());
-    if (configuration.on_message)
-      for (std::size_t i = 0; i < start; ++i)
-        emit_realtime(configuration.on_message, bytes[i], timestamp);
-    if (new_sysex)
-      ++start;
-    if (configuration.on_message)
-      on_bytes_multi_segmented(configuration.on_message, bytes.subspan(start), timestamp);
-  }
-
 private:
   void emit_realtime(const message_callback& cb, uint8_t status, int64_t timestamp)
   {
@@ -616,22 +595,12 @@ if(hash2 STREQUAL original2)
         case SND_SEQ_EVENT_SYSEX: {
           if (configuration.ignore_sysex)
             return 0;
-          // Bound (security): device event length must not grow scratch without limit. Overflow discards whole SysEx and is counted.
-          // Reject before any decoder assignment; scan borrowed bytes only to resynchronize.
-          if (ev.data.ext.len > midi1::input_state_machine::sysex_max_bytes)
-          {
-            m_processing.on_oversized_sysex(
-                {static_cast<const uint8_t*>(ev.data.ext.ptr), ev.data.ext.len},
-                m_processing.template timestamp<timestamp_info>(to_ns, 0));
-            return 0;
-          }
-          if (ev.data.ext.len > decoding_buffer.size())
-          {
-            // Explicit reserve avoids resize's geometric over-allocation.
-            decoding_buffer.reserve(ev.data.ext.len);
-            decoding_buffer.resize(ev.data.ext.len);
-          }
-          break;
+          // Bound (security): borrow SysEx bytes without growing codec scratch.
+          // The shared decoder admits each logical message before storage growth.
+          m_processing.on_bytes(
+              {static_cast<const uint8_t*>(ev.data.ext.ptr), ev.data.ext.len},
+              m_processing.template timestamp<timestamp_info>(to_ns, 0));
+          return 0;
         }
       }
 

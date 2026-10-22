@@ -203,9 +203,16 @@ void alsaScratch(bool filtered) {
     check(input.process_event(event) == 0, "ALSA event processed without a device");
     check(input.decoding_buffer.capacity() == originalCapacity &&
           input.decoding_buffer.size() <= limit,
-          "ALSA scratch guard runs before resize independently of decoder rejection");
+          "ALSA borrows SysEx without growing codec scratch");
     check(losses == 1 && delivered == 0, "ALSA over-limit event counted once");
     for (bool realtimePrefix : {false, true}) {
+        if (!realtimePrefix) {
+            // Data-led input continues an actual unfinished logical SysEx.
+            Bytes start{0xF0};
+            event.data.ext.ptr = start.data();
+            event.data.ext.len = 1;
+            input.process_event(event);
+        }
         bytes = Bytes(limit + 1, 1);
         bytes.back() = 0xF7;
         if (realtimePrefix) bytes.insert(bytes.begin(), {0xF8, 0xF0});
@@ -215,11 +222,11 @@ void alsaScratch(bool filtered) {
         const auto priorDelivered = delivered;
         input.process_event(event);
         check(losses == before + 1 && delivered == priorDelivered + (realtimePrefix && !filtered ? 1 : 0),
-              "ALSA rejects oversized event independent of initial byte and timing filter");
+              "ALSA rejects oversized logical message with either prefix and timing filter");
         check(input.m_processing.message.empty() &&
               input.m_processing.message.bytes.capacity() <= limit &&
               input.decoding_buffer.capacity() == originalCapacity,
-              "ALSA oversize never grows decoder or scratch storage");
+              "ALSA overflow leaves bounded decoder and unchanged scratch storage");
     }
     // Successive oversized chunks of one unfinished SysEx still count once.
     bytes = sysex(limit + 1, false);
@@ -237,11 +244,72 @@ void alsaScratch(bool filtered) {
         bytes = sysex(size, true);
         event.data.ext.ptr = bytes.data();
         event.data.ext.len = static_cast<unsigned int>(bytes.size());
-        check(input.process_event(event) == 0 && input.decoding_buffer.capacity() <= limit,
-              "ALSA admitted scratch growth stays bounded");
+        check(input.process_event(event) == 0 && input.decoding_buffer.capacity() == originalCapacity,
+              "ALSA admitted messages leave scratch capacity unchanged");
     }
     check(delivered == (filtered ? 3u : 4u) && losses == 4, "ALSA admitted messages delivered whole after rejection");
 }
+void alsaLogicalMessages() {
+    size_t warnings = 0;
+    auto listener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
+        if (event.level == tc::LogLevel::Warning) ++warnings;
+    });
+    // Compare one borrowed event with different fragmentations of the same bytes.
+    for (bool aggregate : {false, true}) {
+        Bytes bytes;
+        std::vector<Bytes> expected;
+        if (aggregate) {
+            // Exceed the old event threshold using only small complete messages.
+            for (size_t i = 0; i < limit / 3 + 1; ++i) {
+                Bytes msg{0xF0, static_cast<unsigned char>(i % 128), 0xF7};
+                bytes.insert(bytes.end(), msg.begin(), msg.end());
+                expected.push_back(std::move(msg));
+            }
+        } else {
+            auto msg = sysex(limit, true);
+            bytes = msg;
+            bytes.insert(bytes.begin() + limit / 2, 0xF8);
+            expected = {{0xF8}, std::move(msg)};
+        }
+        for (size_t chunk : {bytes.size(), size_t{1024}}) {
+            auto loss = tcx::midi::internal::SysexLoss::create();
+            libremidi::input_configuration config;
+            config.ignore_sysex = config.ignore_timing = false;
+            config.timestamps = libremidi::timestamp_mode::NoTimestamp;
+            std::vector<Bytes> received;
+            config.on_message = [&](libremidi::message&& msg) {
+                received.emplace_back(msg.bytes.begin(), msg.bytes.end());
+            };
+            config.on_sysex_overflow = [loss](size_t needed) { loss->count(needed); };
+            libremidi::alsa_seq::input_configuration api;
+            unsigned char contextToken{};
+            api.context = reinterpret_cast<snd_seq_t*>(&contextToken);
+            AlsaInput input(std::move(config), std::move(api));
+            const auto scratchSize = input.decoding_buffer.size();
+            const auto scratchCapacity = input.decoding_buffer.capacity();
+            snd_seq_event_t event{};
+            event.type = SND_SEQ_EVENT_SYSEX;
+            event.flags = SND_SEQ_EVENT_LENGTH_VARIABLE;
+            bool processed = true, bounded = true;
+            for (size_t offset = 0; offset < bytes.size(); offset += chunk) {
+                event.data.ext.ptr = bytes.data() + offset;
+                event.data.ext.len = static_cast<unsigned int>(std::min(chunk, bytes.size() - offset));
+                processed &= input.process_event(event) == 0;
+                bounded &= input.decoding_buffer.size() == scratchSize &&
+                           input.decoding_buffer.capacity() == scratchCapacity &&
+                           input.m_processing.message.size() <= limit &&
+                           input.m_processing.message.bytes.capacity() <= limit;
+            }
+            check(processed && bounded, "ALSA event packaging preserves bounded storage");
+            check(received == expected, aggregate ? "ALSA delivers every aggregated small SysEx" :
+                  "ALSA delivers exact-limit SysEx and interleaved clock");
+            check(loss->discarded == 0, "ALSA valid logical messages have zero losses");
+            tc::internal::drainMainThreadQueue();
+            check(warnings == 0, "ALSA valid logical messages emit no Warning");
+        }
+    }
+}
+
 #endif
 
 void reporting() {
@@ -337,6 +405,7 @@ int main(int argc, char** argv) {
 #if defined(LIBREMIDI_ALSA)
     alsaScratch(false);
     alsaScratch(true);
+    alsaLogicalMessages();
 #endif
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
