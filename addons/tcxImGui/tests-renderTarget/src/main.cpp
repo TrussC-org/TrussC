@@ -396,7 +396,8 @@ public:
             }
         });
 #ifndef __EMSCRIPTEN__
-        fbo_.allocate(32, 32); fbo_.begin(1, 0, 0, 1); fbo_.end();
+        // Media Foundation H.264 rejects frames of 32x32 or smaller (#886).
+        fbo_.allocate(64, 64); fbo_.begin(1, 0, 0, 1); fbo_.end();
         file_ = fs::temp_directory_path() / ("tc-secondary-exit-" + std::to_string(Clock::now().time_since_epoch().count()) + ".mp4");
         check("secondary recorder starts", bool(recorder_.start(fbo_, file_)));
 #endif
@@ -659,7 +660,8 @@ public:
             recovery_.setupOffscreen(); fixedContext(); recoveryFbo_.allocate(32,32);
             recoveryFbo_.begin(0,0,0,0); {auto ui=recovery_.scoped(); if(ui) marker(IM_COL32(255,0,0,255));} recoveryFbo_.end();
 #ifndef __EMSCRIPTEN__
-            recordingFbo_.allocate(32,32);
+            // Media Foundation H.264 rejects frames of 32x32 or smaller (#886).
+            recordingFbo_.allocate(64,64);
             recordingFbo_.begin(1,0,0,1); recordingFbo_.end();
             recordingFile_=fs::temp_directory_path()/("tc-imgui-exit-clear-"+
                 std::to_string(Clock::now().time_since_epoch().count())+".mp4");
