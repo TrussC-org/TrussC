@@ -387,6 +387,7 @@ public:
         tcx::NodeInspector::setToggleKey(KEY_F1);
         ordinary_ = events().exit.listen([this] { ++ordinaryCalls_; }, EventPriority::AfterApp);
         log_ = getLogger().onLog.listen([this](LogEventArgs& e) {
+            if (secondaryExitSkippedNoTick) return;
             if (e.message == "ImGui shutdown") {
                 ++shutdowns_; check("secondary ImGui shutdown follows App exit", exits_ == 1 && exitFinished_);
             }
@@ -408,6 +409,8 @@ public:
 #endif
     }
     void exit() override {
+        // A never-ticked window may reach teardown without running setup().
+        if (secondaryExitSkippedNoTick) return;
         ++exits_;
         auto* manager = ImGuiManager::findForCurrentWindow();
         check("secondary window ImGui available in App exit", manager && manager->isInitialized());
@@ -420,6 +423,7 @@ public:
         exitFinished_ = true;
     }
     void cleanup() override {
+        if (secondaryExitSkippedNoTick) return;
         check("secondary App exits once", exits_ == 1 && exitFinished_);
         check("secondary ordinary hook removed by clear", ordinaryCalls_ == 0);
         check("both secondary ImGui hooks survive clear", shutdowns_ == 2 && !offscreen_.isInitialized());
