@@ -20,6 +20,18 @@ Vec2 project(Vec2 point) {
 
 class SelfCheckApp : public tcApp {
 public:
+    void mouseMoved(Vec2 pos) override {
+        ++moveDeliveries_;
+        tcApp::mouseMoved(pos);
+    }
+    void mouseDragged(Vec2 pos, int button) override {
+        ++dragDeliveries_;
+        tcApp::mouseDragged(pos, button);
+    }
+    void mouseReleased(Vec2 pos, int button) override {
+        ++releaseDeliveries_;
+        tcApp::mouseReleased(pos, button);
+    }
     void update() override {
         // Establish the readback fixture after native window startup events.
         if (frame_ == 1) pointerInput(project(buttonCenter_), PointerAction::Hover);
@@ -110,12 +122,22 @@ public:
             checkCanceled("source cancellation clears an unforwarded press");
             rawMouse(SAPP_EVENTTYPE_MOUSE_DOWN);
             rawMouse(SAPP_EVENTTYPE_MOUSE_LEAVE);
+            int releasesBefore = releaseDeliveries_;
             rawMouse(SAPP_EVENTTYPE_UNFOCUSED);
+            int buttonAfterUnfocus = tc::internal::currentMouseButton;
+            int releasesAfterUnfocus = releaseDeliveries_;
+            // Observe before buttonless-move recovery can clear a stale button.
+            check(buttonAfterUnfocus == -1 && releasesAfterUnfocus == releasesBefore + 1,
+                  "raw focus loss clears the button and delivers one release before any move");
             rawMouse(SAPP_EVENTTYPE_FOCUSED);
-            rawMouse(SAPP_EVENTTYPE_MOUSE_MOVE); // No button modifiers, but TrussC still dispatches a drag.
+            // Cancellation clears the button; the next buttonless move is a disarmed hover.
+            int movesBefore = moveDeliveries_;
+            int dragsBefore = dragDeliveries_;
+            rawMouse(SAPP_EVENTTYPE_MOUSE_MOVE);
+            canceledMoveWasHover_ = moveDeliveries_ == movesBefore + 1 && dragDeliveries_ == dragsBefore;
         } else if (frame_ == 17) {
-            check(tc::internal::currentMouseButton == MOUSE_BUTTON_LEFT && !pointerDown_ && mappedPoint_.x >= 0,
-                  "raw buttonless move after cancellation reaches the disarmed App drag handler");
+            check(canceledMoveWasHover_ && tc::internal::currentMouseButton == -1 && !pointerDown_ && mappedPoint_.x >= 0,
+                  "raw buttonless move after cancellation reaches the disarmed App hover handler");
             checkReleasedOutside("coalesced leave/refocus/move releases outside without a click");
             rawMouse(SAPP_EVENTTYPE_MOUSE_MOVE);
         } else if (frame_ == 18) {
@@ -215,6 +237,10 @@ private:
         check(!pointerDown_ && pressedLatch_ && mappedPoint_.x >= 0 && !cancelPending_,
               "burst retains a position and one press latch, with the source released");
     }
+    int moveDeliveries_ = 0;
+    int dragDeliveries_ = 0;
+    int releaseDeliveries_ = 0;
+    bool canceledMoveWasHover_ = false;
     int frame_ = 0;
     int peakQueued_ = 0;
     int clicksAfterBurst_ = 0;
