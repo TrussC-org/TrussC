@@ -2,6 +2,7 @@
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
 #include <fstream>
+#include <condition_variable>
 
 // Owned binary: exercise real allocation failure, including on MSVC.
 namespace {
@@ -96,6 +97,76 @@ EM_JS(void, resolveAudio, (int index), {
 });
 EM_JS(int, audioSlots, (), { return Module['trusscAacSlots'] ? Module['trusscAacSlots'].size : 0; });
 #endif
+#include "../../common/resourceLoadLocalChecks.h"
+void localNoticeWithoutAllocation(bool discardSnapshot) {
+    struct NoticeState : internal::ResourceLoadState {
+        std::vector<unsigned char> payload;
+        size_t retainedBytes() const noexcept override { return payload.capacity(); }
+        void discardPayload() noexcept override { std::vector<unsigned char>().swap(payload); }
+    };
+    internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
+    auto payload = std::make_shared<NoticeState>();
+    payload->payload.resize(64);
+    payload->localFile = true;
+    payload->run = internal::appRunToken();
+    std::shared_ptr<internal::ResourceLoadState> state = payload;
+    internal::setResourceLoadLimitsForTests(4, 64, 1);
+    int notices = 0;
+    auto logger = getLogger().onLog.listen([&](LogEventArgs& message) {
+        if (message.level == LogLevel::Notice && message.message.find("[ResourceLoad]") != std::string::npos) ++notices;
+    });
+    const int faultsBefore = allocationFaults;
+    failAfter = 0;
+    internal::completeResourceLoad(state);
+    const bool noAllocation = failAfter == 0 && allocationFaults == faultsBefore;
+    failAfter = -1;
+    check("local over-budget completion and Notice posting allocate nothing", noAllocation && state->result && notices == 0);
+    auto snapshot = internal::takeResourceLoadBatch();
+    // Keep the old run's Notice in a snapshot while the next run overflows.
+    // Only the current run may log; the old pending Notice is omitted.
+    if (discardSnapshot) {
+        internal::appRunToken()->store(false);
+        internal::waitForResourceLoadsAtAppExit();
+    }
+    internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
+    auto nextPayload = std::make_shared<NoticeState>();
+    nextPayload->payload.resize(64);
+    nextPayload->localFile = true;
+    nextPayload->run = internal::appRunToken();
+    std::shared_ptr<internal::ResourceLoadState> nextState = nextPayload;
+    failAfter = 0;
+    internal::completeResourceLoad(nextState);
+    const bool nextNoAllocation = failAfter == 0 && allocationFaults == faultsBefore;
+    failAfter = -1;
+    if (discardSnapshot) {
+        failAfter = 0;
+        snapshot = {};
+        const bool discardNoAllocation = failAfter == 0 && allocationFaults == faultsBefore;
+        failAfter = -1;
+        check("discarding old snapshot reposts current Notice without allocation", discardNoAllocation && notices == 0);
+    } else {
+        internal::deliverResourceLoadBatch(std::move(snapshot));
+    }
+    drain();
+    check(discardSnapshot ? "discarded old snapshot preserves exactly one current-run Notice and retires credits" :
+        "run change replaces stale Notice without allocation and credits retire", nextNoAllocation && notices == 1 &&
+        internal::resourceLoadUsageForTests().retainedBytes == 0 && payload->payload.empty() && nextPayload->payload.empty());
+    if (discardSnapshot) {
+        auto repeated = std::make_shared<NoticeState>();
+        repeated->payload.resize(64);
+        repeated->localFile = true;
+        repeated->run = internal::appRunToken();
+        internal::completeResourceLoad(repeated);
+        drain();
+        check("repeated overage after snapshot discard does not duplicate Notice", notices == 1 &&
+            internal::resourceLoadUsageForTests().retainedBytes == 0);
+    }
+    internal::setResourceLoadLimitsForTests(4, 64, size_t(1024) * 1024 * 1024);
+}
+void localNoticeWithoutAllocation() {
+    localNoticeWithoutAllocation(false);
+    localNoticeWithoutAllocation(true);
+}
 void publicationAllocationFailure() {
     // Build the candidate first; fail a cache-publication allocation only
     // when a later pass applies it. Track both retained backing allocations.
@@ -120,13 +191,17 @@ void publicationAllocationFailure() {
     trackFontStorage = false;
     check("Font candidate owns file storage and CPU atlas before publication",
         fontStorage && fontAtlas && internal::resourceLoadUsageForTests().retainedBytes >= bytes.size() + 65536);
-    // The first allocation copies the target key; the second inserts its
-    // cache entry. The one-shot fault leaves failure reporting available.
-    failAfter = 1;
+    // Arm at cache insertion, after all key copies, independently of allocator
+    // implementation and of how many allocations preparation needed.
+    const int faultsBefore = allocationFaults;
+    internal::setResourceLoadProbeForTests([](const char* stage, const fs::path&) {
+        if (std::strcmp(stage, "font.publish") == 0) failAfter = 0;
+    });
     drain();
     failAfter = -1;
+    internal::setResourceLoadProbeForTests({});
     check("Font cache publication allocation fault fires and settles once",
-        allocationFaults == 1 && publicationEvents == 1 && publicationError == LoadError::Unknown && !publication.isLoaded());
+        allocationFaults == faultsBefore + 1 && publicationEvents == 1 && publicationError == LoadError::Unknown && !publication.isLoaded());
     check("Font failed publication releases both retained allocations",
         !fontStorage && !fontAtlas && internal::resourceLoadUsageForTests().retainedBytes == 0 && internal::resourceLoadUsageForTests().outstanding == 0);
     drain();
@@ -184,6 +259,57 @@ void imageValidationAllocationFailure() {
     fs::remove(path);
 }
 
+#ifdef __EMSCRIPTEN__
+void externalRejections() {
+    // Default/unclassified internal input stays external, including on Web.
+    struct External {
+        Event<LoadResult> event;
+        internal::ResourceLoadSlot<internal::ResourceLoadState> slot;
+        int events = 0;
+        LoadError error = LoadError::None;
+        EventListener listener = event.listen([this](LoadResult& result) { ++events; error = result.error; });
+        void start() {
+            auto state = slot.begin(event, [](auto&) {});
+            internal::startExternalResourceLoad(state, [](auto*) {});
+        }
+    };
+    internal::setResourceLoadLimitsForTests(4, 64, 1024 * 1024);
+    const auto rejected = internal::resourceLoadUsageForTests().rejected;
+    std::vector<std::unique_ptr<External>> requests;
+    for (int i = 0; i < 70; ++i) {
+        auto request = std::make_unique<External>(); request->start(); requests.push_back(std::move(request));
+    }
+    check("Web external admission keeps four active / 64 pending and rejects excess",
+        internal::resourceLoadUsageForTests().active == 4 && internal::resourceLoadUsageForTests().pending == 64 &&
+        internal::resourceLoadUsageForTests().rejected == rejected + 2);
+    for (int i = 0; i < 80; ++i) drain();
+    int successes = 0, failures = 0;
+    for (auto& request : requests) {
+        if (request->events == 1 && request->error == LoadError::None) ++successes;
+        if (request->events == 1 && request->error == LoadError::TooLarge) ++failures;
+    }
+    check("Web external requests settle with existing hard rejection policy", successes == 68 && failures == 2);
+
+    Font url;
+    int events = 0;
+    LoadError error = LoadError::None;
+    auto listener = url.onLoad.listen([&](LoadResult& result) { ++events; error = result.error; });
+    internal::setResourceLoadLimitsForTests(4, 64, 1);
+    url.loadAsync("https://test/over-budget.ttf", 16); drain();
+    auto* fetch = *fetches.begin();
+    const auto bytes = makeFont();
+    fetch->data = static_cast<char*>(std::malloc(bytes.size()));
+    std::memcpy(const_cast<char*>(fetch->data), bytes.data(), bytes.size());
+    fetch->numBytes = bytes.size();
+    fetch->complete(fetch, true);
+    check("Web URL result over byte credits is discarded before application",
+        internal::resourceLoadUsageForTests().retainedBytes == 0);
+    drain();
+    check("Web URL completion still rejects TooLarge exactly once", events == 1 && error == LoadError::TooLarge && !url.isLoaded());
+    internal::setResourceLoadLimitsForTests(4, 64, size_t(1024) * 1024 * 1024);
+}
+#endif
+
 }
 #ifdef __EMSCRIPTEN__
 extern "C" {
@@ -216,12 +342,16 @@ TC_CORE_TEST_MAIN() {
 #ifndef __EMSCRIPTEN__
     getMainThreadId();
     internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
+    localFileAdmissionChecks();
+    localNoticeWithoutAllocation();
     publicationAllocationFailure();
     imageValidationAllocationFailure();
     return failures ? 1 : 0;
 #else
     getMainThreadId();
     internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
+    externalRejections();
+    abortReentries = 0;
     installAudioMock();
     std::ofstream("/credit.m4a") << "mock";
     std::vector<std::unique_ptr<SoundBuffer>> sounds;
@@ -297,6 +427,8 @@ TC_CORE_TEST_MAIN() {
     check("Web failed preparation destroys its State", throwingWeak.expired());
     check("Web preparation failure settles once without app exception catching", thrownEvents == 1 && !throwingSlot.loading() && internal::resourceLoadUsageForTests().active == 0);
 
+    localFileAdmissionChecks();
+    localNoticeWithoutAllocation();
     publicationAllocationFailure();
     imageValidationAllocationFailure();
 

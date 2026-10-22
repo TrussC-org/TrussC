@@ -24,13 +24,13 @@ struct LoadHost {
     struct Job { std::shared_ptr<ResourceLoadState> state; std::function<void()> work; };
     std::shared_ptr<ResourceLoadState> pendingHead, pendingTail;
     size_t pendingCount = 0;
-    // Bound (security): file/network preparations must not multiply decoder workers indefinitely. Overflow waits in the bounded pending queue, then rejects whole requests and is counted.
+    // Bound (security): file/network preparations must not multiply decoder workers indefinitely. Local overflow waits; URL/network-buffer overflow waits in the bounded pending queue, then rejects whole requests and is counted.
     size_t activeLimit = 4, active = 0;
-    // Bound (security): app-requested external loads retain paths and preparation state. Overflow rejects whole new requests and is counted; app CPU jobs are unaffected.
+    // Bound (security): URL/network-buffer loads retain paths and preparation state. Overflow rejects whole new requests and is counted. Local files wait in a growable queue; app CPU jobs are unaffected.
     size_t pendingLimit = 64;
-    // Bound (security): tiny decoded results must not accumulate unlimited completion bookkeeping. The active + pending request credits stay held through application/cancellation; overflow rejects whole new loads and is counted.
+    // Bound (security): tiny URL/network-buffer results must not accumulate unlimited completion bookkeeping. Active + pending request credits stay held through application/cancellation; overflow rejects whole new URL/network-buffer loads and is counted. Local files wait without a request cap.
     size_t outstanding = 0;
-    // Bound (security): decoded external results waiting for main must not retain unlimited memory. Overflow rejects the whole result and is counted, without waiting for main or dropping its failure notification.
+    // Bound (security): decoded URL/network-buffer results waiting for main must not retain unlimited memory. Overflow rejects the whole result and is counted, without dropping its failure notification. Local files keep their results and log one Notice per run on overflow.
     size_t byteLimit = size_t(1024) * 1024 * 1024, retained = 0;
     uint64_t rejected = 0;
     bool failLaunch = false;
@@ -43,6 +43,35 @@ struct LoadHost {
             << "; further rejections are counted";
     }};
     std::shared_ptr<void> warningOwner;
+    std::weak_ptr<std::atomic<bool>> localNoticeRun;
+    bool localNoticeIssued = false;
+    bool localNoticePending = false;
+    // Posting is allocation-free. Only the current run may consume this flag;
+    // shutdown omits an undelivered Notice rather than carrying it into a run.
+    MainThreadSlot localNotice{[](MainThreadSlot&) {
+        auto& owner = host();
+        bool pending;
+        {
+            std::lock_guard<std::mutex> lock(owner.mutex);
+            const auto& run = appRunToken();
+            pending = std::exchange(owner.localNoticePending, false) &&
+                !owner.localNoticeRun.owner_before(run) && !run.owner_before(owner.localNoticeRun) &&
+                appRunIsAlive(owner.localNoticeRun);
+        }
+        if (pending)
+            logNotice("ResourceLoad") << "Local-file retained results exceeded the resource-load byte budget; "
+                << "results are kept and further local overages are silent for this run";
+    }, [](MainThreadSlot& slot) {
+        auto& owner = host();
+        std::lock_guard<std::mutex> lock(owner.mutex);
+        const auto& run = appRunToken();
+        // An old snapshot can hold this slot across shutdown and prevent the
+        // current run's post. Discard releases it before this callback runs.
+        if (owner.localNoticePending &&
+            !owner.localNoticeRun.owner_before(run) && !run.owner_before(owner.localNoticeRun) &&
+            appRunIsAlive(owner.localNoticeRun))
+            slot.post(owner.warningOwner, owner.completions);
+    }};
 #ifndef __EMSCRIPTEN__
     struct Worker { std::thread thread; bool done = false; };
     std::list<std::shared_ptr<Worker>> workers;
@@ -130,7 +159,7 @@ void runExternalJob(LoadHost::Job& job) {
     {
         auto& owner = host();
         std::lock_guard<std::mutex> lock(owner.mutex);
-        if (owner.retained >= owner.byteLimit && !job.state->cancelled.load()) {
+        if (!job.state->localFile && owner.retained >= owner.byteLimit && !job.state->cancelled.load()) {
             reject(owner, "retained result bytes", owner.byteLimit, owner.retained + 1);
             job.state->result.error = LoadError::TooLarge;
         }
@@ -170,7 +199,8 @@ void pumpExternalLoads() {
                 std::lock_guard<std::mutex> lock(owner.mutex);
                 --owner.active;
                 failedState->externalActive = false;
-                reject(owner, "preparation workers", owner.activeLimit, owner.active + 1);
+                if (!failedState->localFile)
+                    reject(owner, "preparation workers", owner.activeLimit, owner.active + 1);
             }
             failedState->result.error = LoadError::Unknown;
             completeResourceLoad(failedState);
@@ -295,8 +325,10 @@ void completeResourceLoad(const std::shared_ptr<ResourceLoadState>& state) {
         if (state->completed) return;
         state->completed = true;
         const size_t bytes = state->retainedBytes();
-        if (state->cancelled.load() || !state->result || bytes > owner.byteLimit - owner.retained) {
-            if (!state->cancelled.load() && state->result && bytes > owner.byteLimit - owner.retained) {
+        const bool overBudget = owner.retained > owner.byteLimit ||
+            bytes > owner.byteLimit - std::min(owner.retained, owner.byteLimit);
+        if (state->cancelled.load() || !state->result || (!state->localFile && overBudget)) {
+            if (!state->cancelled.load() && state->result && !state->localFile && overBudget) {
                 reject(owner, "retained result bytes", owner.byteLimit,
                        bytes > SIZE_MAX - owner.retained ? SIZE_MAX : bytes + owner.retained);
                 state->result.error = LoadError::TooLarge;
@@ -307,6 +339,18 @@ void completeResourceLoad(const std::shared_ptr<ResourceLoadState>& state) {
         } else {
             owner.retained += bytes;
             state->credits = bytes;
+            if (state->localFile && overBudget) {
+                if (owner.localNoticeRun.owner_before(state->run) || state->run.owner_before(owner.localNoticeRun)) {
+                    owner.localNoticeRun = state->run;
+                    owner.localNoticeIssued = false;
+                    owner.localNoticePending = false;
+                }
+                if (!owner.localNoticeIssued) {
+                    owner.localNoticeIssued = true;
+                    owner.localNoticePending = true;
+                    owner.localNotice.post(owner.warningOwner, owner.completions);
+                }
+            }
         }
         if (!state->cancelled.load()) state->post(state, owner.completions);
 #ifdef __EMSCRIPTEN__
@@ -321,6 +365,25 @@ void completeResourceLoad(const std::shared_ptr<ResourceLoadState>& state) {
     pumpExternalLoads();
 #endif
 }
+bool resourceLoadIsLocalPath(const std::filesystem::path& path,
+                             const std::filesystem::path& resolvedPath) {
+    // Anything passed as a file path is local, including UNC/network-share
+    // paths; URLs and buffers received from the network are network/external.
+    // Only http:// and https:// are fetched by the current network loader.
+    // Match its prefixes using native characters (also wchar_t on Windows),
+    // without allocating or inspecting the filesystem/share. Unsupported URI
+    // forms and font names follow normal file resolution and error handling.
+    auto local = [](const std::filesystem::path& value) {
+        const auto& input = value.native();
+        auto startsWith = [&](const char* prefix) {
+            for (size_t i = 0; prefix[i]; ++i)
+                if (i >= input.size() || input[i] != prefix[i]) return false;
+            return true;
+        };
+        return !startsWith("http://") && !startsWith("https://");
+    };
+    return local(path) && local(resolvedPath);
+}
 void startExternalResourceLoad(std::shared_ptr<ResourceLoadState> state, std::function<void()> preparation) {
     auto& owner = host();
     bool accepted = false;
@@ -328,7 +391,7 @@ void startExternalResourceLoad(std::shared_ptr<ResourceLoadState> state, std::fu
         std::lock_guard<std::mutex> lock(owner.mutex);
         const size_t requestLimit = owner.pendingLimit > SIZE_MAX - owner.activeLimit
             ? SIZE_MAX : owner.pendingLimit + owner.activeLimit;
-        if (owner.outstanding < requestLimit && owner.pendingCount < owner.pendingLimit && owner.retained < owner.byteLimit) {
+        if (state->localFile || (owner.outstanding < requestLimit && owner.pendingCount < owner.pendingLimit && owner.retained < owner.byteLimit)) {
             state->preparation = std::move(preparation);
             if (owner.pendingTail) owner.pendingTail->nextPending = state;
             else owner.pendingHead = state;
@@ -475,6 +538,10 @@ void finishResourceLoadsAtExit() {
     }
     owner.kept.release(owner.reaper);
 #endif
+    {
+        std::lock_guard<std::mutex> lock(owner.mutex);
+        owner.localNoticePending = false;
+    }
     // Destroy queued CPU payloads before app/GPU/logger teardown, without
     // executing application callbacks from exit.
     if (isMainThread()) {
@@ -495,6 +562,11 @@ void waitForResourceLoadsForTests() {
 void waitForResourceLoadsAtAppExit() {
     cancelResourceBackends();
     waitForResourceLoadsForTests();
+    {
+        auto& owner = host();
+        std::lock_guard<std::mutex> lock(owner.mutex);
+        owner.localNoticePending = false;
+    }
     // Cache hits can retain a committed GPU atlas. Release invalidated queue
     // entries here, on main and before the old GPU context is torn down.
     auto discarded = takeResourceLoadBatch();

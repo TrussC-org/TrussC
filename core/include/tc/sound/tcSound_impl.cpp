@@ -256,6 +256,7 @@ void SoundBuffer::loadAsync(const fs::path& path) {
     });
     state->input = path;
     state->path = internal::resolveLoadPath(path);
+    state->localFile = internal::resourceLoadIsLocalPath(path, state->path);
     internal::startExternalResourceLoad(state, [](auto* raw) {
         auto state = std::static_pointer_cast<AsyncState>(raw->shared_from_this());
         state->decoded = std::make_shared<SoundBuffer>();

@@ -59,6 +59,7 @@ struct Gate {
     }
     void open() { std::lock_guard lock(mutex); opened = true; changed.notify_all(); }
 };
+#include "../../common/resourceLoadLocalChecks.h"
 void credits() {
     internal::setResourceLoadLimitsForTests(4, 64, 64);
     Load first, second, overflow;
@@ -207,13 +208,16 @@ void callers() {
     check("committed font cache hits do not charge new decoded storage", internal::resourceLoadUsageForTests().retainedBytes == 0);
     drain();
     internal::setResourceLoadLimitsForTests(4, 64, 1);
-    int errors = 0;
-    auto onImage = image.onLoad.listen([&](LoadResult& result) { if (result.error == LoadError::TooLarge) ++errors; });
-    auto onSound = sound.onLoad.listen([&](LoadResult& result) { if (result.error == LoadError::TooLarge) ++errors; });
-    auto onFont = font.onLoad.listen([&](LoadResult& result) { if (result.error == LoadError::TooLarge) ++errors; });
+    int events = 0, errors = 0;
+    const auto rejected = internal::resourceLoadUsageForTests().rejected;
+    auto onImage = image.onLoad.listen([&](LoadResult& result) { ++events; if (!result) ++errors; });
+    auto onSound = sound.onLoad.listen([&](LoadResult& result) { ++events; if (!result) ++errors; });
+    auto onFont = font.onLoad.listen([&](LoadResult& result) { ++events; if (!result) ++errors; });
     image.loadAsync(root / "image.png"); sound.loadAsync(root / "sound.wav"); font.loadAsync(root / "font.ttf", 17);
     settle();
-    check("all callers propagate completion rejection without publishing", errors == 3 && !image.isAllocated() && !font.isLoaded() && internal::resourceLoadUsageForTests().retainedBytes == 0);
+    check("all local callers keep successful results above byte credits", events == 3 && errors == 0 &&
+        image.getPixels().getWidth() == 4 && font.isLoaded() && !sound.samples.empty() &&
+        internal::resourceLoadUsageForTests().retainedBytes == 0 && internal::resourceLoadUsageForTests().rejected == rejected);
     fs::remove_all(root);
 }
 void lifecycle() {
@@ -236,7 +240,7 @@ TC_CORE_TEST_MAIN() {
     auto log = getLogger().onLog.listen([&](LogEventArgs& message) {
         if (message.message.find("[ResourceLoad]") != std::string::npos && message.level == LogLevel::Warning) ++warnings;
     });
-    credits(); workersAndFailures(); callers(); lifecycle();
+    localFileAdmissionChecks(); credits(); workersAndFailures(); callers(); lifecycle();
     settle();
     check("one first admission warning across all repeated failures", warnings == 1);
     internal::setResourceLoadLimitsForTests(4, 64, size_t(1024) * 1024 * 1024);

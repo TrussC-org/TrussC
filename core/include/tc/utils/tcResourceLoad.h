@@ -48,6 +48,7 @@ struct ResourceLoadState : MainThreadSlot, std::enable_shared_from_this<Resource
     bool delivering = false;
     size_t credits = 0;
     bool requestCredit = false;
+    bool localFile = false; // path entry points classify explicitly; network buffers default external
     bool backendPending = false; // Web callbacks retain their active slot
     bool externalActive = false; // Web active slot, not a queued request
     bool preparing = false;
@@ -60,7 +61,11 @@ struct ResourceLoadState : MainThreadSlot, std::enable_shared_from_this<Resource
     void cancel();
 };
 
-// External loads alone use bounded preparation and retained-result admission.
+// All resource loads share worker slots. Local files queue without admission
+// caps; network/external inputs retain hard request and result limits.
+// Classification policy is defined in resourceLoadIsLocalPath().
+bool resourceLoadIsLocalPath(const std::filesystem::path& path,
+                             const std::filesystem::path& resolvedPath = {});
 // startResourceLoad / enqueueResourceLoad remain growable for app-authored jobs.
 // On Web, recovery from allocation failure is guaranteed only for TrussC's
 // out-of-line host code. Inline helpers from headers may be compiled into the

@@ -365,7 +365,10 @@ size_t FontAtlasManager::createNewAtlas() {
 std::shared_ptr<FontAtlasManager> SharedFontCache::publishPrepared(
         const FontCacheKey& key, std::shared_ptr<FontAtlasManager> candidate) {
     if (auto cached = get(key)) return cached;
-    if (candidate) cache_[key] = candidate;
+    if (candidate) {
+        probeResourceLoad("font.publish", {});
+        cache_[key] = candidate;
+    }
     return candidate;
 }
 
@@ -381,6 +384,7 @@ void Image::loadAsync(const fs::path& path, bool mipmaps) {
         }
     });
     state->path = internal::resolveLoadPath(path);
+    state->localFile = internal::resourceLoadIsLocalPath(path, state->path);
     state->mipmaps = mipmaps;
     internal::probeResourceLoad("image.dispatch", state->path);
     internal::startExternalResourceLoad(state, [](auto* raw) {
@@ -424,7 +428,10 @@ void Font::loadAsync(const fs::path& nameOrPath, int size, int faceIndex) {
     auto state = async_.begin(onLoad, [this](AsyncState& ready) { applyAsync(ready); });
     state->dpi = sapp_dpi_scale();
     state->size = size;
-    state->input = resolveInput(nameOrPath, internal::resolveLoadPath(nameOrPath), faceIndex);
+    const auto resolvedPath = internal::resolveLoadPath(nameOrPath);
+    state->input = resolveInput(nameOrPath, resolvedPath, faceIndex);
+    state->localFile = internal::resourceLoadIsLocalPath(nameOrPath,
+        internal::utf8ToPath(state->input.path));
     state->key = {state->input.path, (int)(size * state->dpi + 0.5f),
                   state->input.face, mipmaps_, oversample_};
     state->limit = internal::FontAtlasManager::atlasLimit();
