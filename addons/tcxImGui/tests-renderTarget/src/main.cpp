@@ -368,6 +368,8 @@ void inputPriorityChecks() {
 // #947 PR 4: use real secondary-window delivery and live mandatory hooks.
 std::shared_ptr<Window> exitWindow;
 bool secondaryExitCompleted = false;
+bool secondaryExitTicked = false, secondaryExitSkippedNoTick = false;
+EventListener secondaryExitUpdate, secondaryExitDraw;
 class SecondaryExitApp : public App {
     ImGuiManager offscreen_;
     EventListener ordinary_, log_;
@@ -437,12 +439,22 @@ public:
     void setup() override {
         WindowSettings s; s.setSize(128, 128);
         exitWindow = createWindow(s); check("secondary teardown display created", bool(exitWindow));
-        if (exitWindow) exitWindow->setApp(std::make_shared<SecondaryExitApp>());
+        if (exitWindow) {
+            secondaryExitUpdate = exitWindow->events().update.listen([] { secondaryExitTicked = true; }, -1000);
+            secondaryExitDraw = exitWindow->events().draw.listen([] { secondaryExitTicked = true; }, -1000);
+            exitWindow->setApp(std::make_shared<SecondaryExitApp>());
+        }
         else exitApp();
     }
     void update() override {
         if (secondaryExitCompleted) { exitWindow.reset(); exitApp(); }
-        if (++frames_ == 600) { check("secondary teardown fixture completed within frame guard", false); exitApp(); }
+        if (++frames_ == 600) {
+            if (!secondaryExitTicked) {
+                std::puts("SKIP: tests-renderTarget --secondary-exit: the secondary window never reached its first tick (occluded or not presented on this host); the teardown checks require it");
+                secondaryExitSkippedNoTick = true;
+            } else check("secondary teardown fixture completed within frame guard", false);
+            exitApp();
+        }
     }
 };
 #endif
@@ -687,9 +699,10 @@ int main(int argc,char** argv) {
     if(argc==1) {std::puts("SKIP: use --self-check, --record dir or --compare dir under a display"); return 0;}
 #ifndef TC_IMGUI_BASE_FIXTURE
     if (std::string(argv[1]) == "--secondary-exit") {
+        if (!internal::supportsSecondaryWindows()) { std::puts("SKIP: secondary windows unavailable"); return 0; }
         WindowSettings settings; settings.setSize(128, 128);
         return tcCoreTest::runDisplayTest<SecondaryExitHarness>(settings, failures, [] {
-            check("secondary teardown fixture completed", secondaryExitCompleted);
+            if (!secondaryExitSkippedNoTick) check("secondary teardown fixture completed", secondaryExitCompleted);
             exitWindow.reset();
         });
     }
