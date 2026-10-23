@@ -80,7 +80,6 @@ static void tick(Window& w) {
     {
         internal::WindowDispatchScope scope(w);
         w.events().update.notify();
-        w.tickTree();
     }
     internal::currentWindowCtx() = prev;
 }
@@ -94,8 +93,6 @@ static void pressKey(Window& w, int key) {
         KeyEventArgs e;
         e.key = key;
         w.events().keyPressed.notify(e);
-        if (w.getApp()) w.getApp()->keyPressed(e);
-        if (!e.consumed) w.dispatchKeyPressToTree(e);
     }
     internal::currentWindowCtx() = prev;
 }

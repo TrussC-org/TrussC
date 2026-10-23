@@ -1866,6 +1866,112 @@ bool activeDestructionProbe() {
     return rejected;
 }
 
+// Real coordinator and dummy SGL pool. Generations count every creation,
+// including one freed immediately; pool occupancy checks balanced destruction.
+uint64_t contextCreations() {
+    uint64_t count = 0;
+    for (int i = 1; i < _sgl.context_pool.pool.size; ++i)
+        count += _sgl.context_pool.pool.gen_ctrs[i];
+    return count;
+}
+int liveContexts() { return _sgl.context_pool.pool.size - 1 - _sgl.context_pool.pool.queue_top; }
+
+struct ClosingWindow : Window {
+    uint64_t& createdAfterClose;
+    explicit ClosingWindow(uint64_t& count) : createdAfterClose(count) {
+        native_ = this; // Native stand-in; never passed to platform APIs.
+        ctx_.fbWidth = ctx_.fbHeight = 100;
+        ctx_.swapchainTarget.width = ctx_.swapchainTarget.height = 100;
+        ctx_.swapchainTarget.colorFormat = SG_PIXELFORMAT_RGBA8;
+        ctx_.swapchainTarget.sampleCount = 1;
+        ctx_.acquireSwapchain = dummySwapchain;
+        auto* previous = internal::currentWindowCtx();
+        internal::restoreWindowContext(&ctx_);
+        internal::restoreWindowContext(previous);
+    }
+    void finish() {
+        if (!native_) return;
+        native_ = nullptr;
+        ctx_.targetsClosed = true;
+        ctx_.teardownTargets();
+        ctx_.acquireSwapchain = nullptr;
+        ctx_.acquireSwapchainUser = nullptr;
+        ctx_.activateNative = nullptr;
+        ctx_.swapchainTarget.resources().release();
+        const auto before = contextCreations();
+        internal::WindowRequestAccess::endApp(*this);
+        // Direct preparation and restoration must also respect terminal state.
+        auto* previous = internal::currentWindowCtx();
+        internal::restoreWindowContext(&ctx_);
+        internal::prepareWindowTarget();
+        internal::restoreWindowContext(previous);
+        createdAfterClose += contextCreations() - before;
+    }
+    ~ClosingWindow() { finish(); }
+};
+struct ClosingParent : App {
+    std::shared_ptr<ClosingWindow> child;
+    int phase;
+    explicit ClosingParent(int value) : phase(value) {}
+    void exit() override { if (phase == 0) child.reset(); }
+    void cleanup() override { if (phase == 1) child.reset(); }
+    ~ClosingParent() override { child.reset(); }
+};
+bool closedWindowContextProbe() {
+    getMainThreadId();
+    bool ok = true;
+    for (int phase = 0; phase < 3; ++phase) {
+        const auto before = contextCreations();
+        const auto live = liveContexts();
+        auto* previous = internal::currentWindowCtx();
+        uint64_t createdAfterClose = 0;
+        {
+            ClosingWindow parent(createdAfterClose);
+            auto app = std::make_shared<ClosingParent>(phase);
+            app->child = std::make_shared<ClosingWindow>(createdAfterClose);
+            app->child->setApp(std::make_shared<App>());
+            internal::applyPendingAppForTests(*app->child);
+            parent.setApp(app); internal::applyPendingAppForTests(parent);
+            app.reset(); // Only the window owns the outgoing App.
+            ok &= contextCreations() - before == 2 && liveContexts() == live + 2;
+            parent.finish(); parent.finish();
+            ok &= !parent.context().swapchainTarget.resources().context.id;
+        }
+        const auto creates = contextCreations() - before;
+        const auto destroys = live + int(creates) - liveContexts();
+        const bool balanced = creates == 2 && destroys == 2 && createdAfterClose == 0 &&
+            liveContexts() == live && internal::currentWindowCtx() == previous;
+        ok &= balanced;
+        std::printf("CLOSED WINDOW CONTEXT phase=%d creates=%llu destroys=%d after_close=%llu ok=%d\n",
+            phase, static_cast<unsigned long long>(creates), destroys,
+            static_cast<unsigned long long>(createdAfterClose), balanced);
+    }
+    return ok;
+}
+
+extern "C" void retireAtNoexceptBoundary(sg_buffer handle) noexcept {
+    internal::deferGpuDestroy(handle);
+}
+bool retirementFailureProbe() {
+    // First retirement in this process: fail every C++ allocation, including
+    // queue initialization/Debug proxies and failure reporting. The device
+    // must keep the handle valid for recordings until it can be reclaimed.
+    sg_buffer_desc desc = {}; desc.size = 16;
+    desc.usage.vertex_buffer = true; desc.usage.dynamic_update = true;
+    const auto handle = sg_make_buffer(&desc);
+    const int before = rejectedAllocations;
+    allocationsUntilFailure = 0;
+    retireAtNoexceptBoundary(handle);
+    allocationsUntilFailure = -1;
+    const bool failed = rejectedAllocations > before;
+    const bool ok = failed && sg_query_buffer_state(handle) == SG_RESOURCESTATE_VALID;
+    // A rejected enqueue published nothing. Explicitly reclaim this test's
+    // resource; normal use leaves it to device shutdown on this OOM fallback.
+    if (failed) sg_destroy_buffer(handle);
+    std::printf("GPU RETIREMENT allocation_failure_contained=%d resource_preserved=%d\n", failed, ok);
+    return ok;
+}
+
 }
 int main(int argc, char** argv) {
     if (argc == 2 && std::strcmp(argv[1],"--native-allocation-check") == 0) {
@@ -1882,9 +1988,13 @@ int main(int argc, char** argv) {
     desc.environment.defaults.sample_count = 1;
     sg_setup(&desc);
     sgl_desc_t gl = {}; gl.pipeline_pool_size = 256; sgl_setup(&gl);
+    const bool retirementFailure = retirementFailureProbe();
+    if (!retirementFailure) return 1;
     if (!lateShader.load(descriptor)) return 1;
     sg_trace_hooks hooks = {}; hooks.draw = drawn; hooks.begin_pass = began; hooks.commit = committed; hooks.apply_pipeline = applied;
     hooks.apply_viewport = viewportApplied; hooks.apply_scissor_rect = scissorApplied; sg_install_trace_hooks(&hooks);
+    const bool closedWindows = closedWindowContextProbe();
+    if (argc > 1 && std::strcmp(argv[1],"--closed-window") == 0) return closedWindows ? 0 : 1;
     const bool targetStacks = targetStackDispatchChecks();
     bool teardown = true;
     for (bool explicitTeardown : {false,true}) for (bool otherCurrent : {false,true})
@@ -1929,7 +2039,7 @@ int main(int argc, char** argv) {
         resizeBeforeDraw &= resizeEarlyAcquireProbe(mode, resize, selection);
     // Last: it shuts the device down and re-creates it.
     const bool shadowRestart = shadowDeviceRestartProbe();
-    const int result=targetStacks && shadowReplay && shadowNative && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowSustained && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && resizeBeforeDraw && destruction ? 0 : 1;
+    const int result=closedWindows && targetStacks && shadowReplay && shadowNative && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowSustained && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && resizeBeforeDraw && destruction ? 0 : 1;
     return result;
 }
 #else

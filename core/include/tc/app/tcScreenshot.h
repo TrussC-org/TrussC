@@ -32,7 +32,7 @@ struct ScreenshotQueue {
 };
 void submitScreenshot(ScreenshotQueue* window, const fs::path& path);
 void captureScreenshots(ScreenshotQueue& window);
-void closeScreenshots(ScreenshotQueue& window);
+void closeScreenshots(ScreenshotQueue& window) noexcept;
 using ScreenshotCapture = std::function<bool(Pixels&)>;
 using ScreenshotWriter = std::function<SaveResult(const Pixels&, const fs::path&)>;
 // Main-thread test seams, changed only when workers have quiesced.

@@ -269,6 +269,8 @@ private:
     // refuses it from then on (internal::appRanCleanup()).
     bool cleanupCalled_ = false;
 
+    friend class Window; // Close/swap ends admission before releasing user captures.
+
     friend void internal::attachAppAudio(App& app);
     friend void internal::detachAppAudio(App& app);
     friend bool internal::appRanCleanup(const App& app);
@@ -403,9 +405,9 @@ inline void attachAppAudio(App& app) {
 // the App's lifecycle ended: Window::setApp() refuses it from then on, and
 // its hooks are never subscribed again.
 inline void detachAppAudio(App& app) {
+    app.cleanupCalled_ = true;
     app.audioOutListener_.disconnect();
     app.audioInListener_.disconnect();
-    app.cleanupCalled_ = true;
     waitForAudioCallbacksNoTimeout();
 }
 
