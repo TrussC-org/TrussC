@@ -364,6 +364,106 @@ void inputPriorityChecks() {
 }
 #endif
 
+#ifndef TC_IMGUI_BASE_FIXTURE
+// #947 PR 4: use real secondary-window delivery and live mandatory hooks.
+std::shared_ptr<Window> exitWindow;
+bool secondaryExitCompleted = false;
+bool secondaryExitTicked = false, secondaryExitSkippedNoTick = false;
+EventListener secondaryExitUpdate, secondaryExitDraw;
+class SecondaryExitApp : public App {
+    ImGuiManager offscreen_;
+    EventListener ordinary_, log_;
+    int exits_ = 0, shutdowns_ = 0, finalized_ = 0, ordinaryCalls_ = 0;
+    bool exitFinished_ = false;
+#ifndef __EMSCRIPTEN__
+    ScreenRecorder recorder_;
+    Fbo fbo_;
+    fs::path file_;
+#endif
+public:
+    void setup() override {
+        inputPriorityChecks(); // actual addon consumers on this secondary stream
+        imguiSetup(); fixedContext(); offscreen_.setupOffscreen(); fixedContext();
+        tcx::NodeInspector::setToggleKey(KEY_F1);
+        ordinary_ = events().exit.listen([this] { ++ordinaryCalls_; }, EventPriority::AfterApp);
+        log_ = getLogger().onLog.listen([this](LogEventArgs& e) {
+            if (secondaryExitSkippedNoTick) return;
+            if (e.message == "ImGui shutdown") {
+                ++shutdowns_; check("secondary ImGui shutdown follows App exit", exits_ == 1 && exitFinished_);
+            }
+            if (e.message.starts_with("[VideoWriter] saved ")) {
+                ++finalized_; check("secondary recorder finalization follows App exit", exits_ == 1 && exitFinished_);
+            }
+        });
+#ifndef __EMSCRIPTEN__
+        // Media Foundation H.264 rejects frames of 32x32 or smaller (#886).
+        fbo_.allocate(64, 64); fbo_.begin(1, 0, 0, 1); fbo_.end();
+        file_ = fs::temp_directory_path() / ("tc-secondary-exit-" + std::to_string(Clock::now().time_since_epoch().count()) + ".mp4");
+        check("secondary recorder starts", bool(recorder_.start(fbo_, file_)));
+#endif
+    }
+    void update() override {
+#ifndef __EMSCRIPTEN__
+        if (recorder_.getFrameCount() > 0) exitWindow->close();
+#else
+        exitWindow->close();
+#endif
+    }
+    void exit() override {
+        // A never-ticked window may reach teardown without running setup().
+        if (secondaryExitSkippedNoTick) return;
+        ++exits_;
+        auto* manager = ImGuiManager::findForCurrentWindow();
+        check("secondary window ImGui available in App exit", manager && manager->isInitialized());
+        check("secondary offscreen ImGui available in App exit", offscreen_.isInitialized());
+        check("secondary inspector input available in App exit", events().keyPressed.listenerCount() == 3); // App, ImGui, inspector
+#ifndef __EMSCRIPTEN__
+        check("secondary recorder available in App exit", recorder_.isRecording());
+#endif
+        events().exit.clear();
+        exitFinished_ = true;
+    }
+    void cleanup() override {
+        if (secondaryExitSkippedNoTick) return;
+        check("secondary App exits once", exits_ == 1 && exitFinished_);
+        check("secondary ordinary hook removed by clear", ordinaryCalls_ == 0);
+        check("both secondary ImGui hooks survive clear", shutdowns_ == 2 && !offscreen_.isInitialized());
+        check("secondary inspector hook survives clear", events().keyPressed.listenerCount() == 0);
+        check("secondary mandatory hooks disconnect", events().exit.listenerCount() == 0);
+#ifndef __EMSCRIPTEN__
+        check("secondary recorder hook survives clear", !recorder_.isRecording() && finalized_ == 1);
+        VideoPlayer player; check("secondary recording finalized and loads", bool(player.load(file_))); player.close();
+        recorder_.stop(); std::error_code ignored; fs::remove(file_, ignored);
+#endif
+        secondaryExitCompleted = true;
+    }
+};
+class SecondaryExitHarness : public App {
+    int frames_ = 0;
+public:
+    void setup() override {
+        WindowSettings s; s.setSize(128, 128);
+        exitWindow = createWindow(s); check("secondary teardown display created", bool(exitWindow));
+        if (exitWindow) {
+            secondaryExitUpdate = exitWindow->events().update.listen([] { secondaryExitTicked = true; }, -1000);
+            secondaryExitDraw = exitWindow->events().draw.listen([] { secondaryExitTicked = true; }, -1000);
+            exitWindow->setApp(std::make_shared<SecondaryExitApp>());
+        }
+        else exitApp();
+    }
+    void update() override {
+        if (secondaryExitCompleted) { exitWindow.reset(); exitApp(); }
+        if (++frames_ == 600) {
+            if (!secondaryExitTicked) {
+                std::puts("SKIP: tests-renderTarget --secondary-exit: the secondary window never reached its first tick (occluded or not presented on this host); the teardown checks require it");
+                secondaryExitSkippedNoTick = true;
+            } else check("secondary teardown fixture completed within frame guard", false);
+            exitApp();
+        }
+    }
+};
+#endif
+
 class Fixture : public App {
     int frame_=0;
     int exitCalls_=0, imguiShutdowns_=0, recorderFinalizations_=0, userExitCalls_=0;
@@ -560,7 +660,8 @@ public:
             recovery_.setupOffscreen(); fixedContext(); recoveryFbo_.allocate(32,32);
             recoveryFbo_.begin(0,0,0,0); {auto ui=recovery_.scoped(); if(ui) marker(IM_COL32(255,0,0,255));} recoveryFbo_.end();
 #ifndef __EMSCRIPTEN__
-            recordingFbo_.allocate(32,32);
+            // Media Foundation H.264 rejects frames of 32x32 or smaller (#886).
+            recordingFbo_.allocate(64,64);
             recordingFbo_.begin(1,0,0,1); recordingFbo_.end();
             recordingFile_=fs::temp_directory_path()/("tc-imgui-exit-clear-"+
                 std::to_string(Clock::now().time_since_epoch().count())+".mp4");
@@ -602,6 +703,16 @@ public:
 }
 int main(int argc,char** argv) {
     if(argc==1) {std::puts("SKIP: use --self-check, --record dir or --compare dir under a display"); return 0;}
+#ifndef TC_IMGUI_BASE_FIXTURE
+    if (std::string(argv[1]) == "--secondary-exit") {
+        if (!internal::supportsSecondaryWindows()) { std::puts("SKIP: secondary windows unavailable"); return 0; }
+        WindowSettings settings; settings.setSize(128, 128);
+        return tcCoreTest::runDisplayTest<SecondaryExitHarness>(settings, failures, [] {
+            if (!secondaryExitSkippedNoTick) check("secondary teardown fixture completed", secondaryExitCompleted);
+            exitWindow.reset();
+        });
+    }
+#endif
     for(int i=1;i<argc;++i) {
         if(std::string(argv[i])=="--screen-only") screenOnly=true;
         if(std::string(argv[i])=="--native-dpi2") nativeDpi2=true;
