@@ -36,8 +36,22 @@ void runTimers() {
 
 // Exercise the real bounded-fetch adapter with controlled browser promises.
 // Abort/cancel are observed immediately, but promises can still settle late.
+EM_JS_DEPS(fontMockDeps, "$getWasmTableEntry");
 EM_JS(void, installFontMock, (), {
     Module['fontFetchMock'] = [];
+    Module['fontCompletionCalls'] = 0;
+    // Count calls at the real JS-to-C table boundary, before C can touch a
+    // retired request. In these controlled Font scenarios the adapter's done
+    // callback is the only table call; forward it unchanged. The successful
+    // fetch assertion below also proves this observer sees real completions.
+    const realTableEntry = getWasmTableEntry;
+    getWasmTableEntry = function(pointer) {
+        const callback = realTableEntry(pointer);
+        return function(...args) {
+            ++Module['fontCompletionCalls'];
+            return callback(...args);
+        };
+    };
     globalThis.fetch = function(url, options) {
         if (Module['fontFetchFailInline']) {
             Module['fontFetchFailInline'] = false;
@@ -56,6 +70,7 @@ EM_JS(void, installFontMock, (), {
         });
     };
 });
+EM_JS(int, fontCompletions, (), { return Module['fontCompletionCalls']; });
 EM_JS(int, fontFetches, (), { return Module['fontFetchMock'].length; });
 EM_JS(int, fontRequests, (), { return Module['tcFontStreams'] ? Module['tcFontStreams'].size : 0; });
 EM_JS(int, fontAborts, (int index), { return Module['fontFetchMock'][index].aborts; });
@@ -350,9 +365,14 @@ TC_CORE_TEST_MAIN() {
     check("replacement immediately disposes old Font request", fontRequests() == 0 && fontAborts(0) == 1);
     drain();
     check("Font replacement closes the cancelled backend immediately", fontRequests() == 1 && fontFetches() == 2 && fontAborts(0) == 1);
+    const int beforeSuccess = fontCompletions();
     reply(1, true);
+    check("successful Font fetch calls the observed C completion once", fontCompletions() == beforeSuccess + 1);
     check("fetch callback queues delivery", fontEvents == 0 && font.isLoading() && fontRequests() == 0);
-    drain(); reply(0, true); drain();
+    drain();
+    const int beforeReplacementReply = fontCompletions();
+    reply(0, true); drain();
+    check("replacement prevents late C completion", fontCompletions() == beforeReplacementReply);
     check("cancelled Font promise is safe after newer success", fontEvents == 1 && font.isLoaded() && fontRequests() == 0);
 
     font.loadAsync("https://test/two.ttf", 24);
@@ -364,19 +384,23 @@ TC_CORE_TEST_MAIN() {
         auto doomedListener = doomed->onLoad.listen([&](LoadResult&) { ++doomedEvents; });
         doomed->loadAsync("https://test/destroy.ttf", 24); drain();
         openFontStream(2); settleFontPromises();
+        const int beforeDestruction = fontCompletions();
         doomed.reset();
         check("Font destruction immediately cancels stream and request", fontRequests() == 0 && fontAborts(2) == 1 && fontCancels(2) == 1);
         check("Font destruction releases backend and deadline immediately", fontRequests() == 0 && timers.empty());
         auto bytes = makeFont();
         fontChunk(2, bytes.data(), bytes.size(), true); settleFontPromises(); drain();
+        check("Font destruction prevents late C completion", fontCompletions() == beforeDestruction);
         check("late stream read after Font destruction is safe", doomedEvents == 0 && fontRequests() == 0);
     }
     Font moved;
     font.loadAsync("https://test/move.ttf", 24); drain();
+    const int beforeMove = fontCompletions();
     moved = std::move(font);
     check("Font move immediately disposes pending request", fontRequests() == 0 && fontAborts(3) == 1);
     check("Font move releases backend and deadline immediately", fontRequests() == 0 && timers.empty());
     reply(3, true); drain();
+    check("Font move prevents late C completion", fontCompletions() == beforeMove);
     check("Font move drops pending URL event", fontEvents == 2 && !moved.isLoading());
 
     Font expired;
@@ -384,11 +408,13 @@ TC_CORE_TEST_MAIN() {
     int expiredEvents = 0;
     auto expiredListener = expired.onLoad.listen([&](LoadResult& r) { expiredResult = r; ++expiredEvents; });
     expired.loadAsync("https://test/timeout.ttf", 24); drain();
+    const int beforeTimeout = fontCompletions();
     testNow += internal::webLoadTimeoutMSecs; runTimers();
     check("Font timeout immediately disposes request before delivery", expiredEvents == 0 && fontRequests() == 0 && fontAborts(4) == 1);
     drain();
     check("Font timeout delivers one deferred error", expiredEvents == 1 && !expiredResult && !expired.isLoaded());
     reply(4, true); drain();
+    check("Font timeout prevents late C completion", fontCompletions() == beforeTimeout);
     check("late timed-out fetch cannot notify again", expiredEvents == 1 && fontRequests() == 0);
 
     expired.loadAsync("https://test/fetch-error.ttf", 24); drain();
@@ -409,9 +435,11 @@ TC_CORE_TEST_MAIN() {
     const int abortIndex = fontFetches();
     aborting->loadAsync("https://test/abort-reject.ttf", 24); drain();
     rejectOnFontAbort(abortIndex);
+    const int beforeAbort = fontCompletions();
     aborting.reset();
     check("synchronous abort rejection releases backend and deadline", fontAborts(abortIndex) == 1 && fontRequests() == 0 && timers.empty());
     settleFontPromises(); drain();
+    check("abort rejection cannot call C completion after cancellation", fontCompletions() == beforeAbort);
     check("abort rejection cannot notify after cancellation", abortEvents == 0 && fontRequests() == 0);
     int abortReentries = 0;
     for (int index = 0; index < fontFetches(); ++index) abortReentries += fontAborts(index);
