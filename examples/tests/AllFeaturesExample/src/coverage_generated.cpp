@@ -4652,60 +4652,24 @@ struct Cover_VideoWriter : af::Scope<VideoWriter> {
 
 struct Cover_Window : af::Scope<Window> {
     static void run() {
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)Window();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().close();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().events();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().getApp();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().getFps();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().getHeight();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().getTitle();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().getWidth();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().isFullscreen();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().isOccluded();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().isOpen();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setApp(af::val<std::shared_ptr<App>>());
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setClearColor(af::val<const Color>());
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setFps(af::val<float>());
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setFullscreen(af::val<bool>());
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setSize(af::val<int>(), af::val<int>());
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setTitle(af::val<const std::string>());
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().toggleFullscreen();
-#endif
     }
 };
 

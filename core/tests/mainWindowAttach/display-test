@@ -1,0 +1,4 @@
+{test} --display
+{test} --process-exit
+{test} --exit-in-callback
+python3 check_constructor_failure.py {test}

@@ -95,6 +95,8 @@ static void runAppCallbacks() {
     (void)buildAppDescriptor<WindowedApp>(settings);
     check("runApp: no root before the setup callback", getRootNode() == nullptr);
 
+    // Model the runner opening its main Window without starting sokol.
+    internal::WindowRequestAccess::openMain(*internal::mainWindow());
     internal::appSetupFunc();
     check("runApp: the setup callback made the App", g_windowedApp != nullptr);
     check("runApp: the App is getRootNode() once it is made",

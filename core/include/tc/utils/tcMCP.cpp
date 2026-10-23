@@ -254,10 +254,14 @@ void logExposure() {
 #endif
 }
 
-const std::string& mainWindowTitle(const std::string& title) {
-    // buildAppDescriptor returns before sapp_run consumes the title pointer.
-    // Keep its backing string in the host, including on hot reload builds.
+std::string& mainWindowTitleStorage() {
+    // Main Window and the native descriptor borrow this one host-owned store.
     static std::string windowTitle;
+    return windowTitle;
+}
+
+const std::string& mainWindowTitle(const std::string& title) {
+    auto& windowTitle = mainWindowTitleStorage();
     windowTitle = isDevBuild() && title.find("[MCP]") == std::string::npos
         ? title + " [MCP]" : title;
     return windowTitle;
@@ -320,6 +324,16 @@ std::atomic<ToolLevel>& grantedToolLevel() {
 const void*& registrationOwner() {
     static const void* owner = nullptr;
     return owner;
+}
+
+RefusalReport& refusalReport() {
+    static RefusalReport report;
+    return report;
+}
+
+RetiringOwner*& retiringOwners() {
+    static RetiringOwner* head = nullptr;
+    return head;
 }
 
 std::vector<std::function<void(const void*)>>& ownerCleanupHooks() {

@@ -53,6 +53,19 @@
 
 namespace trussc {
 
+// A replacement main App needs the same size seed as the initial App before
+// its first setup/input. This is a direct App-only seed, like startup/reload;
+// it does not synthesize a native resize or change main-loop scheduling.
+void Window::seedMainAppSize() {
+    auto app = app_;
+    if (!app || app->setupCalled_ || !sapp_isvalid()) return;
+    const float scale = internal::pixelPerfectMode() ? 1.0f : 1.0f / sapp_dpi_scale();
+    const int width = int(sapp_width() * scale), height = int(sapp_height() * scale);
+    if (app->getWidth() == width && app->getHeight() == height) return;
+    internal::EntryStackGuard guard(internal::AppEntry::Event, "windowResized()");
+    app->handleWindowResized(width, height);
+}
+
 namespace internal {
 BuildOutputLoss& buildOutputLoss() { static BuildOutputLoss loss; return loss; }
 void BuildOutputLoss::record(uint64_t omitted) {
@@ -992,6 +1005,105 @@ void unregisterWindow(Window* w) {
     auto& list = windowRegistryStorage();
     list.erase(std::remove(list.begin(), list.end(), w), list.end());
 }
+// All mutable window identity/ownership state lives in the framework host.
+uint64_t nextWindowId() {
+    static uint64_t lastId = 0;
+    if (lastId == UINT64_MAX) throw std::overflow_error("Window identity exhausted");
+    return ++lastId;
+}
+CoreEvents& mainCoreEvents() {
+    static CoreEvents instance;
+    return instance;
+}
+static std::unique_ptr<Window>& mainWindowOwner() {
+    // Initialize dependencies before the owner so they outlive its destructor.
+    mainWindowContext();
+    mainCoreEvents();
+    mainRenderContext();
+    mcp::internal::mainWindowTitleStorage();
+    getLogger();
+    windowRegistryStorage();
+    attachedApps();
+    // A guest App's deleter retires MCP registrations on std::exit too.
+    // These host registries must outlive the runner, like events/render/logger.
+    mcp::internal::Server::instance();
+    mcp::internal::ownerCleanupHooks();
+    mcp::internal::statusRegistry();
+    mcp::internal::statusImageRegistry();
+    mcp::internal::deferredResponsesMutex();
+    mcp::internal::deferredResponses();
+    static std::unique_ptr<Window> owner;
+    return owner;
+}
+Window* mainWindow() { return mainWindowOwner().get(); }
+void createMainWindow(const WindowSettings& settings) {
+    destroyMainWindow();
+    auto* previous = currentWindowCtx();
+    currentWindowCtx() = nullptr;
+    try {
+        auto window = WindowRequestAccess::makeMain();
+        window->title_ = mcp::internal::mainWindowTitle(settings.title);
+        mainWindowOwner() = std::move(window);
+    } catch (...) { currentWindowCtx() = previous; throw; }
+    currentWindowCtx() = previous;
+}
+MainWindowDispatchScope::MainWindowDispatchScope(bool seedSize) : window(mainWindow()) {
+    if (!window) return;
+    WindowRequestAccess::applyPendingApp(*window);
+    ++window->dispatchDepth_;
+    if (!seedSize) return;
+    try { WindowRequestAccess::seedMainAppSize(*window); }
+    catch (...) { --window->dispatchDepth_; throw; }
+}
+MainWindowDispatchScope::~MainWindowDispatchScope() {
+    if (!window) return;
+    --window->dispatchDepth_;
+    TeardownSteps steps;
+    steps.run("main App boundary", [&] { WindowRequestAccess::applyPendingApp(*window); });
+}
+bool mainWindowDispatchActive() {
+    auto* window = mainWindow();
+    return window && WindowRequestAccess::dispatchActive(*window);
+}
+void prepareMainAppBindings() {
+    if (auto* window = mainWindow()) WindowRequestAccess::prepareInitialBindings(*window);
+}
+void openMainWindow() {
+    if (auto* window = mainWindow()) {
+        window->ctx_.dpiScale = sapp_dpi_scale();
+        WindowRequestAccess::openMain(*window);
+    }
+}
+std::shared_ptr<App> mainApp() {
+    auto* window = mainWindow();
+    return window ? window->getApp() : nullptr;
+}
+void resizeMainApp(int width, int height) {
+    // App code: run inside the dispatch scope, with the receiver retained, so a
+    // setApp()/reload() requested by windowResized() waits for the boundary
+    // even if native events are pumped inside it.
+    MainWindowDispatchScope dispatch(false);
+    if (auto app = mainApp()) app->handleWindowResized(width, height);
+}
+bool attachMainApp(std::shared_ptr<App> app) {
+    auto* window = mainWindow();
+    if (!window) return false;
+    window->setApp(app);
+    WindowRequestAccess::applyPendingApp(*window);
+    return window->getApp() == app;
+}
+void detachMainApp() {
+    if (auto* window = mainWindow()) {
+        window->setApp(nullptr);
+        WindowRequestAccess::applyPendingApp(*window);
+    }
+}
+void destroyMainWindow() noexcept {
+    auto& owner = mainWindowOwner();
+    if (owner) WindowRequestAccess::endMain(*owner);
+    owner.reset();
+}
+
 WindowOccludedHook& windowOccludedHookForTests() {
     static WindowOccludedHook hook = nullptr;
     return hook;
@@ -1070,8 +1182,7 @@ CoreEvents& events() {
     // Phase 1 pre-wires the pointer when constructing secondary contexts.
     auto& ctx = internal::currentWindowContext();
     if (!ctx.coreEvents) {
-        static CoreEvents instance;   // main-window storage
-        ctx.coreEvents = &instance;
+        ctx.coreEvents = &internal::mainCoreEvents();
     }
     return *ctx.coreEvents;
 }

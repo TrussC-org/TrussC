@@ -9,7 +9,7 @@
 //   tick_cb   -> WindowContext switch + per-window dt + update/draw the tree
 //   event_cb  -> CoreEvents + App hooks + Node-tree dispatch (same keycode
 //                semantics as the main window: key == SAPP_KEYCODE_*)
-//   close_cb  -> Window::teardown() (close button, or a close() request)
+//   close_cb  -> Window::teardownSecondary() (close button, or a close() request)
 // All rendering shares the one sokol_gfx context; each window gets its own
 // sokol_gl context (same pattern as Fbo). Mirror of platform/win/tcWindowWin.cpp.
 
@@ -332,18 +332,17 @@ void dispatchSecondaryDisplayEventForTests(const sapp_event* ev, Window& win) {
 
 } // namespace internal
 
-Window::~Window() { teardown(); }
 
 // A request (see tcWindow.h): the backend calls close_cb -> teardown() at its
 // next safe point, outside this window's tick and events.
-void Window::close() {
+void Window::closeSecondary() {
     auto* st = static_cast<AdapterState*>(native_);
     if (!st || closeRequested_) return;
     closeRequested_ = true;
     sapp_window_request_close(st->win);
 }
 
-void Window::teardown() noexcept {
+void Window::teardownSecondary() noexcept {
     auto* st = static_cast<AdapterState*>(native_);
     if (!st) return;
     internal::TeardownSteps steps;
@@ -367,13 +366,13 @@ void Window::teardown() noexcept {
     endApp();
 }
 
-void Window::setTitle(const std::string& title) {
+void Window::setSecondaryTitle(const std::string& title) {
     title_ = title;
     auto* st = static_cast<AdapterState*>(native_);
     if (st) sapp_window_set_title(st->win, title.c_str());
 }
 
-void Window::setSize(int width, int height) {
+void Window::setSecondarySize(int width, int height) {
     auto* st = static_cast<AdapterState*>(native_);
     if (!st) return;
     Display* dpy = (Display*)(void*)sapp_x11_get_display();
@@ -386,7 +385,7 @@ void Window::setSize(int width, int height) {
     XFlush(dpy);
 }
 
-void Window::setFullscreen(bool full) {
+void Window::setSecondaryFullscreen(bool full) {
     auto* st = static_cast<AdapterState*>(native_);
     if (!st) return;
     Display* dpy = (Display*)(void*)sapp_x11_get_display();
@@ -419,21 +418,21 @@ void Window::setFullscreen(bool full) {
     fullscreenRequested_ = full;
 }
 
-bool Window::isFullscreen() const {
+bool Window::isSecondaryFullscreen() const {
     return fullscreenRequested_;
 }
 
-int Window::getWidth() const {
+int Window::getSecondaryWidth() const {
     auto* st = static_cast<AdapterState*>(native_);
     return st ? sapp_window_width(st->win) : 0;
 }
 
-int Window::getHeight() const {
+int Window::getSecondaryHeight() const {
     auto* st = static_cast<AdapterState*>(native_);
     return st ? sapp_window_height(st->win) : 0;
 }
 
-bool Window::isOccluded() const {
+bool Window::isSecondaryOccluded() const {
     if (auto hook = internal::windowOccludedHookForTests()) return hook(*this);
     auto* st = static_cast<AdapterState*>(native_);
     return st ? sapp_window_occluded(st->win) : false;

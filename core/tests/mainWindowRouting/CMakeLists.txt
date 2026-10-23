@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.20)
+project(mainWindowRouting LANGUAGES C CXX)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+endif()
+add_executable(mainWindowRouting main.cpp)
+target_compile_features(mainWindowRouting PRIVATE cxx_std_20)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_subdirectory(../.. "${CMAKE_CURRENT_SOURCE_DIR}/../../build-linux")
+    target_link_libraries(mainWindowRouting PRIVATE tc::TrussC)
+    # Use the real shared Window dispatcher with recording sapp/platform entry points.
+    target_link_options(mainWindowRouting PRIVATE -Wl,--allow-multiple-definition)
+endif()

@@ -1228,6 +1228,7 @@ private:
 // static instance — inline would give each module its own copy on Windows.
 // ---------------------------------------------------------------------------
 RenderContext& getDefaultContext();
+RenderContext& mainRenderContext();
 
 // Wraps one entry point where TrussC calls app code (#349), as one line at
 // the top of its scope: `EntryStackGuard guard(AppEntry::Update);`. The

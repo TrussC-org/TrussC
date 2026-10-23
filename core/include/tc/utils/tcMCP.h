@@ -8,6 +8,7 @@
 // tool handlers can safely access graphics state.
 // =============================================================================
 
+#include <algorithm>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -24,6 +25,9 @@
 #include <cctype>
 #include <chrono>
 #include <stdexcept>
+#include <optional>
+#include <type_traits>
+#include "tcTeardown.h"
 
 // JSON support
 #include "../../nlohmann/json.hpp"
@@ -70,6 +74,7 @@ bool& explicitlyOpened();
 bool environmentClosesMcp();
 void startConfiguredServer(const char* opener);
 void initializeMcp();
+std::string& mainWindowTitleStorage();
 const std::string& mainWindowTitle(const std::string& title);
 inline const char* toolLevelName(ToolLevel level) {
     switch (level) {
@@ -139,7 +144,7 @@ inline std::string dumpReply(const json& j) {
 }
 
 inline std::string makeResult(const json& id, const json& result) {
-    if (id.is_null()) return "";
+    if (id.is_discarded()) return ""; // Missing id (notification), distinct from null.
     (void)replySize(id); // Bound the ID before copying it into an envelope.
     json res = {
         {"jsonrpc", "2.0"},
@@ -151,7 +156,7 @@ inline std::string makeResult(const json& id, const json& result) {
 
 // Rvalue results transfer the completed arrays into the envelope once.
 inline std::string makeResult(const json& id, json&& result) {
-    if (id.is_null()) return "";
+    if (id.is_discarded()) return "";
     (void)replySize(id);
     json res = json::object();
     res["jsonrpc"] = "2.0";
@@ -238,6 +243,12 @@ inline void completeTerminalResponse(const std::shared_ptr<std::promise<ReplyThu
     }
 }
 
+inline bool hasInvalidRequestId(const json& request) {
+    auto id = request.find("id");
+    // MCP 2024-11-05 permits strings and integers, never null or floats.
+    return id != request.end() && !(id->is_string() || id->is_number_integer());
+}
+
 // Shared by normal dispatch and shutdown; no alternate unrestricted parser.
 inline json parseRequest(const std::string& body) {
     const auto limits = getAdmissionLimits();
@@ -291,6 +302,7 @@ struct DeferredResponse {
     // about to be deleted (a guest tool capturing `this`, a status-image
     // getter). A host tool's deferral is not affected.
     const void* owner = nullptr;
+    bool ownerRetired = false; // inert before capture destruction can reenter a drain
 };
 
 // A targeted deferral whose window renders no frame in this time (minimized,
@@ -365,6 +377,23 @@ inline void deferToolResultTwoStage(std::function<std::function<json()>()> mainS
 
 namespace internal {
 
+// A shared_ptr deleter must not build temporary JSON trees: their noexcept
+// destructors can allocate. Keep error serialization on the HTTP worker, as
+// for other reply thunks, and publish an allocation-free fallback on failure.
+inline void completeRetiredResponse(DeferredResponse& entry) noexcept {
+    try {
+        completeResponse(entry.response, [id = std::move(entry.id), budget = entry.budget] {
+            WorkScope scope(budget);
+            return toolError(id, "the app code behind this reply was unloaded by a hot reload "
+                                 "before the reply was produced");
+        });
+    } catch (...) {
+        try {
+            completeResponse(entry.response, +[]() -> std::string { throw AdmissionError(); });
+        } catch (...) {} // A dropped promise/producer releases its credits.
+    }
+}
+
 // Run the deferred main stages aimed at `targetWindow` (null = the main
 // window) and unblock their HTTP workers. Call right after that window's
 // present(): the main window from an events().afterFrame listener, a secondary
@@ -391,6 +420,10 @@ inline void drainDeferredResponses(const void* targetWindow = nullptr) {
     // stopHttpServer() takes the lock to answer what is still pending.
     for (auto& d : ready) {
         WorkScope workScope(d.budget);
+        if (d.ownerRetired) {
+            completeRetiredResponse(d);
+            continue;
+        }
         try {
             internal::completeResponse(d.response, d.makeEnvelope());
         } catch (const AdmissionError&) {
@@ -434,6 +467,9 @@ inline bool hasDeferredResponses() {
 // The hot reload host sets one per guest generation, so a reload drops what
 // the old guest registered — handlers that capture the old App — before that
 // App is deleted. Plain apps never set one (tag null = permanent).
+// The owner is a generation, not an App: releasing one App of a generation
+// (a main setApp() swap to a replacement the guest built) retires nothing;
+// only the generation's unload does.
 // Both accessors are defined in tcMCP.cpp: the host sets the owner and a guest
 // registers under it, so they must see the same one on every platform.
 namespace internal {
@@ -442,6 +478,58 @@ const void*& registrationOwner();
 // in tcMCP.cpp) hook their own cleanup in here the first time they are used.
 std::vector<std::function<void(const void*)>>& ownerCleanupHooks();
 inline void setRegistrationOwner(const void* owner) { registrationOwner() = owner; }
+// Owners whose registrations are being retired right now, innermost first
+// (stack-linked, so marking one allocates nothing). Defined in tcMCP.cpp with
+// the other registry state. Main thread only, like registration itself.
+struct RetiringOwner {
+    const void* owner;
+    RetiringOwner* prev;
+};
+RetiringOwner*& retiringOwners();
+inline bool ownerRetiring(const void* owner) {
+    if (!owner) return false;
+    for (auto* node = retiringOwners(); node; node = node->prev)
+        if (node->owner == owner) return true;
+    return false;
+}
+// Reporting state of refusals (host-owned, defined in tcMCP.cpp like the other
+// registry state). A log listener may register again (a warning counter that
+// publishes a status), and under a retiring owner that is refused and reported
+// too, which would recurse through the listener without end.
+struct RefusalReport {
+    bool reporting = false;   // a refusal Warning is being logged right now
+    size_t suppressed = 0;    // refusals made inside that logging, not logged one by one
+};
+RefusalReport& refusalReport();
+// A registration under a retiring owner is refused: a capture destroyed during
+// retirement can register again, and what it publishes would outlive the App it
+// captures. The refusal is reported with a Warning naming the entry. Logging is
+// allocation-failure safe (logAllocationFailure), so this holds on the
+// retirement path too.
+inline bool refuseRetiringRegistration(const char* kind, const std::string& name) {
+    if (!ownerRetiring(registrationOwner())) return false;
+    auto& report = refusalReport();
+    if (report.reporting) {   // refused from a log listener: counted, summarized below
+        ++report.suppressed;
+        return true;
+    }
+    // Bound (reentrancy): while `reporting` is held, a refusal made by a log
+    // listener only increments a counter, so one outer refusal causes at most two
+    // log calls (the Warning and one summary of the refusals it provoked), and
+    // the guard is dropped before returning. Refusals provoked by the summary's
+    // own listener calls are counted but not logged: the listener is their cause.
+    report.reporting = true;
+    struct Release {
+        RefusalReport& report;
+        ~Release() { report.reporting = false; report.suppressed = 0; }
+    } release{report};
+    logWarning("MCP") << kind << " '" << name << "' was not registered: its owner was unloading";
+    if (const size_t nested = report.suppressed) {
+        report.suppressed = 0;
+        logWarning("MCP") << nested << " more registrations were refused: its owner was unloading";
+    }
+    return true;
+}
 inline void removeRegistrationsOwnedBy(const void* owner);   // after Server
 } // namespace internal
 
@@ -520,6 +608,7 @@ public:
     // --- Registration API ---
 
     void registerTool(const Tool& tool) {
+        if (internal::refuseRetiringRegistration("tool", tool.name)) return;
         // Last registration wins. Warn, because silently replacing a standard
         // tool (they register before setup()) is a hard bug to spot.
         if (tools_.count(tool.name)) {
@@ -530,6 +619,7 @@ public:
     }
 
     void registerResource(const Resource& res) {
+        if (internal::refuseRetiringRegistration("resource", res.uri)) return;
         resources_[res.uri] = res;
         resources_[res.uri].owner = internal::registrationOwner();
     }
@@ -537,13 +627,25 @@ public:
     bool hasTool(const std::string& name) const { return tools_.count(name) != 0; }
 
     // Drop every tool / resource registered under `owner` (non-null).
+    // Reentrancy-safe and allocation-free: erasing an entry destroys its
+    // captures, and a capture can run arbitrary code (the last strong reference
+    // to an App, whose deleter may retire registrations again). So each match
+    // is extracted from the map first, and its captures die only after the map
+    // is consistent and no iterator is held; the scan then restarts, because a
+    // nested retirement may have erased any other entry.
     void removeOwnedBy(const void* owner) {
         if (!owner) return;
-        for (auto it = tools_.begin(); it != tools_.end();) {
-            it = (it->second.owner == owner) ? tools_.erase(it) : std::next(it);
-        }
-        for (auto it = resources_.begin(); it != resources_.end();) {
-            it = (it->second.owner == owner) ? resources_.erase(it) : std::next(it);
+        for (;;) {
+            auto it = std::find_if(tools_.begin(), tools_.end(),
+                [owner](const auto& entry) { return entry.second.owner == owner; });
+            if (it == tools_.end()) break;
+            auto retired = tools_.extract(it);
+        }   // captures destroyed here
+        for (;;) {
+            auto it = std::find_if(resources_.begin(), resources_.end(),
+                [owner](const auto& entry) { return entry.second.owner == owner; });
+            if (it == resources_.end()) break;
+            auto retired = resources_.extract(it);
         }
     }
 
@@ -553,6 +655,7 @@ public:
         WorkScope workScope;
         try {
             auto j = parseRequest(rawMessage);
+            if (hasInvalidRequestId(j)) return makeError(json(nullptr), -32600, "Invalid Request");
 
             // Validate JSON-RPC
             if (!j.contains("jsonrpc") || j["jsonrpc"] != "2.0") {
@@ -585,7 +688,7 @@ private:
 
     std::string handleRequest(const json& req) {
         std::string method = req["method"];
-        auto id = req.contains("id") ? req["id"] : json(nullptr);
+        auto id = req.contains("id") ? req["id"] : json(json::value_t::discarded);
 
         if (method == "initialize") {
             return handleInitialize(req, id);
@@ -598,7 +701,7 @@ private:
         } else if (method == "resources/read") {
             return handleResourcesRead(req, id);
         } else {
-            if (!id.is_null()) {
+            if (!id.is_discarded()) {
                 return makeError(id, -32601, "Method not found: " + method);
             }
             return "";
@@ -774,7 +877,7 @@ private:
     }
 
     std::string makeError(const json& id, int code, const std::string& message) {
-        if (id.is_null()) return "";
+        if (id.is_discarded()) return "";
         json res = {
             {"jsonrpc", "2.0"},
             {"id", id},
@@ -914,6 +1017,9 @@ inline std::string normalExitMessage() {
 inline std::string normalExitReply(const std::string& body) {
     WorkScope scope;
     auto request = parseRequest(body);
+    if (hasInvalidRequestId(request)) return dumpReply(json{{"jsonrpc", "2.0"}, {"id", nullptr},
+        {"error", {{"code", -32600}, {"message", "Invalid Request"}}}});
+    if (request.is_object() && !request.contains("id")) return "";
     json reply{{"jsonrpc", "2.0"},
         {"error", {{"code", -32000}, {"message", normalExitMessage()}}}};
     // Move the depth-bounded ID, avoiding a recursive copy before serialization.
@@ -1031,31 +1137,63 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline void enableDebugger() {}
 namespace internal {
 inline void removeRegistrationsOwnedBy(const void* owner) {
     if (!owner) return;
-    internal::Server::instance().removeOwnedBy(owner);
-    for (auto& hook : ownerCleanupHooks()) hook(owner);
-    // Deferred replies whose producers run this owner's code: answer them
-    // now, with an error, instead of running them at the next drain, after
-    // the App they may reach has been deleted (a reload runs between
-    // processHttpQueue() and drainDeferredResponses() in one frame). At exit
-    // stopHttpServer() runs before the guest is unloaded and has already
-    // answered every pending reply. Host tools' deferrals stay pending.
-    std::vector<DeferredResponse> owned;
-    {
+    // From here on registrations under `owner` are refused (see
+    // refuseRetiringRegistration), so no capture destroyed below can publish a
+    // new entry that survives the retirement.
+    RetiringOwner retiring{owner, retiringOwners()};
+    retiringOwners() = &retiring;
+    struct RetiringReset {
+        RetiringOwner& node;
+        ~RetiringReset() { retiringOwners() = node.prev; }
+    } retiringReset{retiring};
+    ::trussc::internal::TeardownSteps steps;
+    steps.run("MCP owner retirement", [&] {
         std::lock_guard<std::mutex> lock(deferredResponsesMutex());
-        auto& pending = deferredResponses();
-        std::vector<DeferredResponse> keep;
-        for (auto& d : pending) {
-            if (d.owner == owner) owned.push_back(std::move(d));
-            else keep.push_back(std::move(d));
+        for (auto& entry : deferredResponses())
+            if (entry.owner == owner) entry.ownerRetired = true;
+    });
+    steps.run("MCP owned tools", [&] { internal::Server::instance().removeOwnedBy(owner); });
+    steps.run("MCP owner hooks", [&] {
+        // Index-based: a hook's captures can run code that registers hooks.
+        for (size_t i = 0; i < ownerCleanupHooks().size(); ++i)
+            steps.run("MCP owner cleanup hook", [&] {
+                auto hook = ownerCleanupHooks()[i];
+                hook(owner);
+            });
+    });
+    // Bound (retirement): one extra sweep of every container, not a loop. The
+    // retiring-owner guard refuses new registrations for `owner`, so entries can
+    // only disappear while the passes above run and one sweep leaves none; a
+    // survivor would mean a bypass of the guard, which the tests pin.
+    steps.run("MCP owned tools (final sweep)", [&] { internal::Server::instance().removeOwnedBy(owner); });
+    steps.run("MCP owner hooks (final sweep)", [&] {
+        for (size_t i = 0; i < ownerCleanupHooks().size(); ++i)
+            steps.run("MCP owner cleanup hook", [&] {
+                auto hook = ownerCleanupHooks()[i];
+                hook(owner);
+            });
+    });
+    // An App can now end in Window's shared_ptr deleter before a reload.
+    // Remove every producer even if building an error reply fails. Moving one
+    // entry out and erasing it needs no vector growth; preserve host FIFO and
+    // release captures / complete promises outside the mutex.
+    static_assert(std::is_nothrow_move_constructible_v<DeferredResponse> &&
+                  std::is_nothrow_move_assignable_v<DeferredResponse>);
+    steps.run("MCP owned deferrals", [&] {
+        for (;;) {
+            std::optional<DeferredResponse> owned;
+            {
+                std::lock_guard<std::mutex> lock(deferredResponsesMutex());
+                auto& pending = deferredResponses();
+                auto found = std::find_if(pending.begin(), pending.end(),
+                    [owner](const auto& entry) { return entry.owner == owner; });
+                if (found == pending.end()) break;
+                owned.emplace(std::move(*found));
+                pending.erase(found);
+            }
+            completeRetiredResponse(*owned);
         }
-        pending.swap(keep);
-    }
-    for (auto& d : owned) {
-        completeTerminalResponse(d.response, d.budget, [&] {
-            return toolError(d.id, "the app code behind this reply was unloaded by a hot reload "
-                                   "before the reply was produced");
-        });
-    }
+    });
 }
 } // namespace internal
 

@@ -256,6 +256,9 @@ namespace trussc {
 // Internal state (application/window related)
 // Drawing state has been moved to RenderContext
 // ---------------------------------------------------------------------------
+class Window;
+struct WindowSettings;
+class App;
 namespace internal {
     // clipboardSize / ScissorRect / scissorStack / currentScissor moved to
     // WindowContext (tc/app/tcWindowContext.h).
@@ -341,12 +344,32 @@ namespace internal {
     // Per-window routing for the context-aware global window-control functions
     // (setWindowTitle / setWindowSize). Defined in tc/app/tcWindow.h once Window
     // is complete; forward-declared here because those globals appear earlier in
-    // this header. Return true if a secondary window consumed the call.
+    // this header. Return true if an open window consumed the call.
     bool routeSetWindowTitleToWindow(const std::string& title);
     bool routeSetWindowSizeToWindow(int width, int height);
     bool routeSetFullscreenToWindow(bool full);
     bool routeToggleFullscreenToWindow();
     bool routeIsFullscreenFromWindow(bool& out);
+    // Main Window is host-owned; these declarations precede the App/Window types.
+    class MainWindowDispatchScope {
+    public:
+        // seedSize=false: the caller delivers the size itself (resizeMainApp).
+        explicit MainWindowDispatchScope(bool seedSize = true);
+        ~MainWindowDispatchScope();
+        MainWindowDispatchScope(const MainWindowDispatchScope&) = delete;
+    private:
+        Window* window;
+    };
+    void createMainWindow(const WindowSettings& settings);
+    void openMainWindow();
+    void prepareMainAppBindings();
+    bool mainWindowDispatchActive();
+    void destroyMainWindow() noexcept;
+    void cancelMainWindowClose() noexcept;
+    bool attachMainApp(std::shared_ptr<App> app);
+    void detachMainApp();
+    std::shared_ptr<App> mainApp();
+    void resizeMainApp(int width, int height);
     // Closes the secondary windows whose close() request is still pending
     // (defined in tc/app/tcWindow.h). The app shutdown calls it after the
     // main App's exit(): the run loop has ended, so no backend safe point
@@ -1665,11 +1688,14 @@ inline void setWindowSize(int width, int height) {
         // Preserve fractional logical pixels until the native DPI conversion.
         internal::setWindowSizeWin32(sapp_win32_get_hwnd(), double(width) / scale, double(height) / scale);
 #else
-        setWindowSizeLogical(static_cast<int>(width / scale), static_cast<int>(height / scale));
+        const int logicalWidth = static_cast<int>(width / scale);
+        const int logicalHeight = static_cast<int>(height / scale);
+        if (!internal::routeSetWindowSizeToWindow(logicalWidth, logicalHeight))
+            setWindowSizeLogical(logicalWidth, logicalHeight);
 #endif
     } else {
         // Logical coordinate mode: as is
-        setWindowSizeLogical(width, height);
+        if (!internal::routeSetWindowSizeToWindow(width, height)) setWindowSizeLogical(width, height);
     }
 }
 
@@ -2477,7 +2503,7 @@ namespace internal {
     // Host launcher state; survives cleanup so runApp can report a failed start.
     bool& appSetupCalled();   // defined in tcGlobal.cpp (one copy for host and hot-reload guest)
 
-    inline void _setup_cb() {
+    inline void _setup_cb_impl() {
         CrashPhaseScope crashPhase("setup");
         installWindowExitSignals();
         // Record the main thread id while we are guaranteed to be on it.
@@ -2488,6 +2514,7 @@ namespace internal {
         // TRUSSC_LOG_FILE was opened before sapp_run() (openEnvLogFile above).
 
         setup();
+        openMainWindow();
         appSetupCalled() = true;
 
         // App's pre-setup hook resolves the data path root right before its
@@ -2535,6 +2562,13 @@ namespace internal {
             float scale = pixelPerfectMode() ? 1.0f : (1.0f / dpiScale);
             appWindowResizedFunc(static_cast<int>(w * scale), static_cast<int>(h * scale));
         }
+    }
+
+    inline void _setup_cb() noexcept {
+        TeardownSteps steps;
+        bool completed = false;
+        steps.run("main native callback", [&] { _setup_cb_impl(); completed = true; });
+        if (!completed) { appExitCode() = 1; sapp_quit(); }
     }
 
     inline bool frameReentryGuard = false;  // host-only: the frame callback's own guard
@@ -2713,7 +2747,7 @@ namespace internal {
         recordUpdateRateSample(mainWindowContext(), mainWindowContext().updateDeltaTime, 1.0);
     }
 
-    inline void _frame_cb() {
+    inline void _frame_cb_impl() {
         // Guard against reentry (e.g. macOS modal dialogs pump the event loop)
         if (frameReentryGuard) return;
         if (int sig = pendingWindowExitSignal()) {
@@ -2724,7 +2758,17 @@ namespace internal {
         }
         frameReentryGuard = true;
         auto* previousWindow = currentWindowCtx();
+        struct RestoreFrame {
+            WindowContext* previous;
+            ~RestoreFrame() {
+                TeardownSteps steps;
+                steps.run("main frame context restoration", [&] { restoreWindowContext(previous); });
+                currentWindowCtx() = previous;
+                frameReentryGuard = false;
+            }
+        } restoreFrame{previousWindow};
         restoreWindowContext(nullptr);
+        MainWindowDispatchScope dispatch;
         crashFrame(sapp_frame_count());
         CrashPhaseScope crashPhase("frame");
 
@@ -2794,12 +2838,14 @@ namespace internal {
         // Save previous frame's mouse position
         internal::currentWindowContext().pmouseX = internal::currentWindowContext().mouseX;
         internal::currentWindowContext().pmouseY = internal::currentWindowContext().mouseY;
-
-        restoreWindowContext(previousWindow);
-        frameReentryGuard = false;
     }
 
-    inline void _cleanup_cb() {
+    inline void _frame_cb() noexcept {
+        TeardownSteps steps;
+        steps.run("main native callback", [&] { _frame_cb_impl(); });
+    }
+
+    inline void _cleanup_cb_impl() {
         if (!beginExitCleanup()) return;
         if (auto token = appRunToken()) token->store(false);
         internal::cancelResourceBackends();
@@ -2837,6 +2883,11 @@ namespace internal {
         // AppKit's terminate: would exit(0) right after this.
         if (appExitCode() != 0) std::exit(appExitCode());
         #endif
+    }
+
+    inline void _cleanup_cb() noexcept {
+        TeardownSteps steps;
+        steps.run("main native callback", [&] { _cleanup_cb_impl(); });
     }
 
     // The name an event entry point (#349) gives in its warning, from the
@@ -2907,13 +2958,18 @@ namespace internal {
         return (ev->modifiers & bit) == 0;
     }
 
-    inline void _event_cb(const sapp_event* ev) {
+    inline void _event_cb_impl(const sapp_event* ev) {
         auto* previousWindow = currentWindowCtx();
         restoreWindowContext(nullptr);
         struct RestoreEventWindow {
             WindowContext* previous;
-            ~RestoreEventWindow() { restoreWindowContext(previous); }
+            ~RestoreEventWindow() {
+                TeardownSteps steps;
+                steps.run("main event context restoration", [&] { restoreWindowContext(previous); });
+                currentWindowCtx() = previous;
+            }
         } restoreEventWindow{previousWindow};
+        MainWindowDispatchScope dispatch;
         CrashPhaseScope crashPhase("event dispatch");
         if (ev->type >= SAPP_EVENTTYPE_KEY_DOWN && ev->type <= SAPP_EVENTTYPE_TOUCHES_CANCELLED) {
             crashInput(static_cast<int>(ev->type), static_cast<int>(ev->mouse_x),
@@ -3211,16 +3267,22 @@ namespace internal {
                 ExitRequestEventArgs args;
                 events().exitRequested.notify(args);
                 if (args.cancel) {
-                    setExitBlockReason(args.reason);
-                    clearExitReason();
                     sapp_cancel_quit();
+                    cancelMainWindowClose();
                     cancelWindowExitSignal();
+                    clearExitReason();
+                    setExitBlockReason(args.reason);
                 }
                 break;
             }
             default:
                 break;
         }
+    }
+
+    inline void _event_cb(const sapp_event* ev) noexcept {
+        TeardownSteps steps;
+        steps.run("main native callback", [&] { _event_cb_impl(ev); });
     }
 }
 
@@ -3246,47 +3308,23 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     // Per-frame uniform reservation for sg_setup (consumed in internal::setup()).
     internal::gpuUniformBufferReserve = settings.uniformBufferReserve;
 
-    // Create app instance (shared_ptrで管理してNodeのweak_from_thisを有効にする)
-    // Host-only, so a per-module copy is fine: a hot reload build launches
-    // through runHotReloadApp instead, which never instantiates this.
-    static std::shared_ptr<AppClass> app = nullptr;
-
-    // Set callbacks
+    internal::createMainWindow(settings);
+    internal::prepareMainAppBindings();
     internal::appSetupFunc = []() {
-        app = std::make_shared<AppClass>();
-        // The main window's scene-graph root (getRootNode()), held weakly
-        internal::mainWindowContext().rootNode = app;
-        // Note: Size is set in _setup_cb after this callback
-        // setup() is called automatically in updateTree() via setupCalled_ flag,
-        // and the App's audioOut() / audioIn() are subscribed right after it
+        if (!internal::attachMainApp(std::make_shared<AppClass>())) {
+            internal::appExitCode() = 1;
+            sapp_quit();
+        }
     };
     internal::appUpdateFunc = []() {
-        internal::updateFrameCount++;  // Update frame count
+        internal::updateFrameCount++;
         events().update.notify();
     };
-    internal::appDrawFunc = []() {
-        events().draw.notify();
-    };
-    internal::appCleanupFunc = []() {
-        if (app) {
-            events().exit.notify();
-            // close() requests made so far (e.g. from exit()) land here,
-            // before the main App's cleanup().
-            internal::closeRequestedWindowsAtShutdown();
-            // The audio device is still running (it stops in _cleanup_cb, so
-            // exit() can use audio): detach the App's audio hooks and wait
-            // for a callback in flight before cleanup() frees audio state (#698).
-            internal::detachAppAudio(*app);
-            app->cleanup();
-            app.reset();
-        }
-        internal::mainWindowContext().appEventListeners.clear();
-    };
-    // Startup resize is an App-only seed, separate from the event path.
+    internal::appDrawFunc = []() { events().draw.notify(); };
+    internal::appCleanupFunc = []() { internal::destroyMainWindow(); };
     internal::appWindowResizedFunc = [](int w, int h) {
-        if (app) app->handleWindowResized(w, h);
+        internal::resizeMainApp(w, h);
     };
-    internal::registerAppEventListeners([] { return app; });
 
     // Build sapp_desc
     sapp_desc desc = {};

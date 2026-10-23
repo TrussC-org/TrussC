@@ -68,9 +68,9 @@ public:
         // Not registered as a window's scene-graph root here: the root is
         // held weakly (getRootNode()), and weak_from_this() is empty until
         // the constructor returns. Whoever creates the App through a
-        // shared_ptr registers it: runApp(), runHeadlessApp() and the hot
-        // reload host for the main window, Window::setApp() for a secondary
-        // window.
+        // shared_ptr registers it: Window attachment for windowed Apps
+        // (runApp, hot reload and secondary windows), runHeadlessApp for
+        // the headless root.
     }
 
     // -------------------------------------------------------------------------
@@ -104,13 +104,12 @@ public:
     // Window
     // -------------------------------------------------------------------------
 
-    // The Window this App is attached to via Window::setApp(), or nullptr if
-    // it is not attached to one — which currently includes the main App
-    // started by runApp() (the main window is not a Window object yet) and an
-    // App whose window has been closed. close() only requests closure; the
+    // The Window owning this App, including the main window started by runApp
+    // or hot reload. nullptr for an unattached/headless App and after detach.
+    // close() only requests closure; the
     // window remains available until teardown begins. It is already nullptr
     // during teardown: inside this App's own exit() / cleanup() and in the window's
-    // events().exit listeners, because the native window is destroyed first.
+    // events().exit listeners, because the attachment is removed first.
     // Read what you need (title, size, fullscreen) before calling close(), or
     // keep it up to date in update(). Resolved from the App itself, not from
     // the active window context, so subApp->getWindow() called from the main

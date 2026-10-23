@@ -337,6 +337,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     getMainThreadId(); // model _setup_cb on the actual App thread
     check("descriptor creation does not claim the App thread", isMainThread());
     internal::pixelPerfectMode() = true;
+    internal::WindowRequestAccess::openMain(*internal::mainWindow());
     internal::appSetupFunc();
     internal::appWindowResizedFunc(128, 128);
     internal::appUpdateFunc(); internal::appDrawFunc();

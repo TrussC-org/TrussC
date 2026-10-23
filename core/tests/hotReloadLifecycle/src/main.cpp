@@ -317,6 +317,12 @@ static int runCycles(const std::string& guestPath, int port) {
                                    events().hotReloadUnload.listenerCount()};
     };
 
+    internal::createMainWindow(WindowSettings{});
+    internal::prepareMainAppBindings();
+    auto* mainHandle = internal::mainWindow();
+    internal::WindowRequestAccess::openMain(*mainHandle); // no native window in this mode
+    const auto mainId = internal::WindowRequestAccess::creationId(*mainHandle);
+    struct MainOwnerReset { ~MainOwnerReset() { internal::destroyMainWindow(); } } mainOwnerReset;
     const int kCycles = 5;
     uint64_t prevAppId = 0;
     for (int i = 1; i <= kCycles; ++i) {
@@ -333,6 +339,9 @@ static int runCycles(const std::string& guestPath, int port) {
         // hooks) walk the hazardous surface: first-touch of the AudioEngine
         // singleton, listener registration on host-owned Events.
         App* app = lib.create();
+        if (!app || app->getWindow() != mainHandle || internal::currentWindow() != mainHandle ||
+            internal::WindowRequestAccess::creationId(*mainHandle) != mainId || !internal::attachedApps().count(app))
+            return fail(69, "reload must use shared main Window attachment and retain identity");
         if (!app) return fail(3, "create failed");
         // Node ids are unique per process: a new generation's nodes (its App
         // first) must not count from 0 again, as a Windows guest DLL's own
@@ -341,6 +350,8 @@ static int runCycles(const std::string& guestPath, int port) {
             return fail(26, "the guest's node ids restarted instead of continuing the process-wide sequence");
         }
         prevAppId = app->getInstanceId();
+        const auto boundListenerCounts = hostListenerCounts();
+        if (!static_cast<tcApp*>(app)->seesMainWindow(mainHandle)) return fail(69, "guest sees different main Window state");
         // The host makes the guest's App the main window's root
         // (getRootNode()), held weakly (#255): the App's constructor can't
         // register itself, weak_from_this() being empty until it returns.
@@ -376,7 +387,7 @@ static int runCycles(const std::string& guestPath, int port) {
 
         // A guest singleton listening on the host's events (#416)
         static_cast<tcApp*>(app)->useInspectorToggleKey();
-        if (events().keyPressed.listenerCount() != countsBeforeLoad[0] + 1 ||
+        if (events().keyPressed.listenerCount() != boundListenerCounts[0] + 1 ||
             events().hotReloadUnload.listenerCount() <= countsBeforeLoad[2]) {
             return fail(42, "the guest's NodeInspector::setToggleKey() did not listen on the host's events");
         }
@@ -714,6 +725,32 @@ static int runCycles(const std::string& guestPath, int port) {
             return fail(37, "core tools and the host grant must survive guest unload");
         std::printf("hotReloadLifecycle: cycle %d/%d ok\n", i, kCycles);
     }
+    // Main scene swap while the guest image stays loaded: Window owns the App
+    // and releases it at the swap. Registrations belong to the generation, not
+    // to one App, so they are retired by the generation's unload (the lifetime
+    // checks below cover the replacement keeping its own).
+    {
+        GuestLibrary lib;
+        if (!lib.load(guestPath)) return 71;
+        auto* raw = static_cast<tcApp*>(lib.create());
+        if (!raw) return 71;
+        raw->cycleOnly = true;
+        raw->handleUpdate(0, 0);
+        std::weak_ptr<App> outgoing = internal::mainApp();
+        mainHandle->setApp(std::make_shared<App>());
+        internal::applyPendingAppForTests(*mainHandle);
+        if (!outgoing.expired()) {
+            std::printf("hotReloadLifecycle: FAIL - main setApp retained the outgoing guest App\n");
+            lib.unload();
+            return 71;
+        }
+        lib.unload();
+        if (mcp::hasTool("guest_probe") || hasStatus("guest_status") || hasStatusImage("guest_image")) {
+            std::printf("hotReloadLifecycle: FAIL - unload left guest registrations behind\n");
+            return 71;
+        }
+        std::printf("hotReloadLifecycle: main setApp releases the guest App; unload retires its registrations\n");
+    }
     return 0;
 }
 
@@ -851,7 +888,8 @@ static int checkRebuildPreflight() {
     expect(!initial.init(), "initialized a stale host");
     expect(errors.size() == 1 && errors[0] == staleMessage, "initial stale host logged duplicate Errors");
 
-    host.guest.app = std::make_shared<App>();
+    auto retainedPreflightApp = std::make_shared<App>();
+    host.guest.app = retainedPreflightApp;
     App* runningApp = host.getApp();
     errors.clear();
     expect(!host.reload() && host.getApp() == runningApp && host.reloadCount == 0,
@@ -1011,6 +1049,10 @@ static int runReloadCheck() {
             // Both Debug and Release guests may exist. Every generation must
             // load the host's configuration, including after a rebuild (#794).
             const auto& host = trussc::hot_reload::g_host;
+            if (host.reloadCount != generation - 1) {
+                done = true;
+                return finish(70, gen + ": deferred reload did not complete at the boundary");
+            }
             const fs::path expectedGuest = findGuestLibrary();
             if (fs::path(host.guestLibPath) != expectedGuest ||
                 fs::path(host.guest.loadedPath).parent_path() != expectedGuest.parent_path()) {
@@ -1126,6 +1168,383 @@ static int runReloadCheck() {
     return done ? g_reloadCheckResult : 65;
 }
 
+// ---------------------------------------------------------------------------
+// App lifetime / registration ownership checks (#239 PR-A review round 2).
+// Headless: in-process guest factories and the real GuestLibrary, main Window
+// and registry; no native window. Run in the default mode, standalone as
+// --lifetime-checks (CI display sweep) and under ASan by the review harness.
+// ---------------------------------------------------------------------------
+namespace lifetime {
+
+int failures = 0;
+void check(const char* label, bool ok) {
+    std::printf("hotReloadLifecycle: lifetime: %s: %s\n", label, ok ? "PASS" : "FAIL");
+    if (!ok) ++failures;
+}
+
+bool hasStatusImageNamed(const char* name) {
+    for (auto& e : mcp::internal::statusImageRegistry()) if (e.name == name) return true;
+    return false;
+}
+bool hasStatusNamed(const char* name) {
+    for (auto& e : mcp::internal::statusRegistry()) if (e.name == name) return true;
+    return false;
+}
+
+// A capture whose destruction re-enters registration retirement, the way the
+// last strong reference to an App does through the guest deleter's old path.
+struct Reenter {
+    explicit Reenter(const void* o) : owner(o) {}
+    Reenter(const Reenter&) = delete;
+    const void* owner;
+    ~Reenter() { mcp::internal::removeRegistrationsOwnedBy(owner); }
+};
+
+struct GuestApp : App {
+    bool cleaned = false;
+    void cleanup() override { cleaned = true; }
+};
+App* createGuestApp() { return new GuestApp; }
+void destroyGuestApp(App* app) { delete app; }
+
+int newToolCalls = 0, keeperCalls = 0;
+struct NextScene : App {
+    NextScene() {
+        mcp::tool("life_new_tool", "replacement tool").bind([] { ++newToolCalls; return "new"; });
+        mcp::status("life_new_status", std::function<double()>([] { return 1.0; }));
+    }
+};
+
+std::string callTool(const char* name) {
+    return mcp::internal::Server::instance().processMessage(
+        std::string(R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":")") + name +
+        R"(","arguments":{}}})");
+}
+
+// A tools/call that ran the handler: the reply parses, carries no JSON-RPC
+// "error" and no tool error, and has result content. `text` is that content.
+struct CallResult {
+    bool ok = false;
+    std::string text;
+};
+CallResult callToolResult(const char* name) {
+    CallResult out;
+    json reply = json::parse(callTool(name), nullptr, false);
+    if (reply.is_discarded() || !reply.is_object() || reply.contains("error") || !reply.contains("result")) return out;
+    const json& result = reply["result"];
+    if (result.value("isError", false)) return out;
+    if (!result.contains("content") || !result["content"].is_array() || result["content"].empty()) return out;
+    out.text = result["content"][0].value("text", "");
+    out.ok = true;
+    return out;
+}
+
+void openMain() {
+    internal::createMainWindow(WindowSettings{});
+    internal::prepareMainAppBindings();
+    internal::WindowRequestAccess::openMain(*internal::mainWindow());
+}
+
+void swapMain(std::shared_ptr<App> next) {
+    internal::mainWindow()->setApp(std::move(next));
+    internal::applyPendingAppForTests(*internal::mainWindow());
+}
+
+// #1: registration retirement is reentrancy-safe for tools and resources.
+void recursiveRetirement() {
+    openMain();
+    trussc::hot_reload::GuestLibrary lib;
+    lib.createApp = createGuestApp;
+    lib.destroyApp = destroyGuestApp;
+    lib.create();
+    const void* owner = lib.mcpOwner;
+    // One re-entering capture per registry (it dies with its only holder), and
+    // entries that sort after it, so a nested retirement erases the very
+    // entries the outer iteration would visit next.
+    mcp::tool("life_a_reenter", "capture re-enters retirement")
+        .bind([r = std::make_shared<Reenter>(owner)] { return 1; });
+    mcp::tool("life_b_sibling", "erased by the nested retirement").bind([] { return 2; });
+    mcp::tool("life_c_sibling", "erased by the nested retirement").bind([] { return 3; });
+    mcp::resource("life://a", "a").bind([r = std::make_shared<Reenter>(owner)] { return std::string("a"); });
+    mcp::resource("life://b", "b").bind([] { return std::string("b"); });
+    lib.destroy();  // must not touch a freed map node / vector slot
+    check("reentrant retirement removes every tool", !mcp::hasTool("life_a_reenter") &&
+          !mcp::hasTool("life_b_sibling") && !mcp::hasTool("life_c_sibling"));
+    check("reentrant retirement removes every resource",
+          mcp::internal::Server::instance().processMessage(
+              R"({"jsonrpc":"2.0","id":1,"method":"resources/list"})").find("life://") == std::string::npos);
+    check("reentrant retirement leaves no tool answering",
+          callTool("life_a_reenter").find("Tool not found") != std::string::npos);
+    internal::destroyMainWindow();
+}
+
+// #1: the same for the status registry (a vector). Alone, so the nested
+// retirement is the status hook's own, not one started from a tool's capture.
+void recursiveStatusRetirement() {
+    openMain();
+    trussc::hot_reload::GuestLibrary lib;
+    lib.createApp = createGuestApp;
+    lib.destroyApp = destroyGuestApp;
+    lib.create();
+    const void* owner = lib.mcpOwner;
+    // The status registry is a vector in registration order: the re-entering
+    // getter goes last, and its siblings own heap captures, so an in-place
+    // erase would destroy them twice.
+    mcp::status("life_a_status", std::function<double()>([h = std::make_shared<int>(1)] { return double(*h); }));
+    mcp::status("life_b_status", std::function<double()>([h = std::make_shared<int>(2)] { return double(*h); }));
+    mcp::status("life_z_status", std::function<double()>([r = std::make_shared<Reenter>(owner)] { return 3.0; }));
+    lib.destroy();
+    check("reentrant retirement removes every status entry", !hasStatusNamed("life_a_status") &&
+          !hasStatusNamed("life_b_status") && !hasStatusNamed("life_z_status"));
+    internal::destroyMainWindow();
+}
+
+// #1 (round 3): a capture destroyed during retirement registers again. The
+// retiring owner refuses it (with a Warning naming it), so nothing it publishes
+// outlives the App it captures; a later tools/call must not reach the freed App.
+struct GuestWithValue : App { int value = 239; };
+App* createGuestWithValue() { return new GuestWithValue; }
+struct PublishOnDrop {
+    std::function<void()> publish;
+    explicit PublishOnDrop(std::function<void()> f) : publish(std::move(f)) {}
+    ~PublishOnDrop() { publish(); }
+};
+bool resourceListed(const char* uri) {
+    return mcp::internal::Server::instance().processMessage(
+        R"({"jsonrpc":"2.0","id":1,"method":"resources/list"})").find(uri) != std::string::npos;
+}
+
+void lateRegistration() {
+    openMain();
+    std::vector<std::string> warnings;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Warning) warnings.push_back(e.message);
+    });
+    trussc::hot_reload::GuestLibrary lib;
+    lib.createApp = createGuestWithValue;
+    lib.destroyApp = destroyGuestApp;
+    auto* app = static_cast<GuestWithValue*>(lib.create());
+    // Absence is recorded inside the publishing destructor, right after the
+    // attempt and before the retirement sweeps resume: a registration that was
+    // accepted and removed later by a sweep would still be seen here.
+    std::map<std::string, bool> absentAtOnce;
+    auto lateTool = [&absentAtOnce, app](const char* name) {
+        mcp::tool(name, "published by a retiring capture").bind([app] { return app->value; });
+        absentAtOnce[name] = !mcp::hasTool(name);
+    };
+    // resource -> tool
+    mcp::resource("life://late", "late").bind([c = std::make_shared<PublishOnDrop>([=] {
+        lateTool("life_late_tool_r");
+    })] { return std::string("r"); });
+    // status -> tool, resource and status image
+    mcp::status("life_late_status_s", std::function<double()>([&absentAtOnce, c = std::make_shared<PublishOnDrop>([=, &absentAtOnce] {
+        lateTool("life_late_tool_s");
+        mcp::resource("life://late-s", "late-s").bind([app] { return std::to_string(app->value); });
+        absentAtOnce["life://late-s"] = !resourceListed("life://late-s");
+        mcp::statusImage("life_late_image_s", [app] { return Pixels(); });
+        absentAtOnce["life_late_image_s"] = !hasStatusImageNamed("life_late_image_s");
+    })] { return 1.0; }));
+    // status image -> status (its container was already processed)
+    mcp::statusImage("life_late_image", [&absentAtOnce, c = std::make_shared<PublishOnDrop>([&absentAtOnce] {
+        mcp::status("life_late_status_i", std::function<double()>([] { return 2.0; }));
+        absentAtOnce["life_late_status_i"] = !hasStatusNamed("life_late_status_i");
+    })] { return Pixels(); });
+    const void* retiringOwner = lib.mcpOwner;
+    lib.destroy();
+    auto warned = [&](const char* what) {
+        for (auto& w : warnings)
+            if (w.find(what) != std::string::npos && w.find("unloading") != std::string::npos) return true;
+        return false;
+    };
+    for (const char* name : {"life_late_tool_r", "life_late_tool_s", "life://late-s", "life_late_image_s", "life_late_status_i"}) {
+        auto it = absentAtOnce.find(name);
+        check((std::string("late registration: refused at once: ") + name).c_str(), it != absentAtOnce.end() && it->second);
+    }
+    check("late registration: nothing remains after unload", !mcp::hasTool("life_late_tool_r") &&
+          !mcp::hasTool("life_late_tool_s") && !resourceListed("life://late") &&
+          !hasStatusNamed("life_late_status_i") && !hasStatusImageNamed("life_late_image_s"));
+    check("late registration: each refusal warned and named",
+          warned("life_late_tool_r") && warned("life_late_tool_s") && warned("life://late-s") && warned("life_late_image_s") && warned("life_late_status_i"));
+    check("late registration: retirement finished and cleared the owner", lib.mcpOwner == nullptr &&
+          !mcp::internal::ownerRetiring(retiringOwner));
+    // Real GuestLibrary path: the App is gone; a call must be "Tool not found", not a callback.
+    check("late registration: tools/call after unload is Tool not found",
+          callTool("life_late_tool_r").find("Tool not found") != std::string::npos);
+    internal::destroyMainWindow();
+}
+
+// #1 (round 4): a log listener that registers (a warning counter published as a
+// status) must not turn the refusal Warning into unbounded recursion. The nested
+// registration is refused and counted, the Warning plus one summary are logged,
+// and retirement returns. The listener stops itself after kCap deliveries so a
+// broken guard fails the check instead of overflowing the stack.
+void lateFeedback() {
+    openMain();
+    constexpr int kCap = 64;
+    int deliveries = 0;
+    bool nestedPublished = false;
+    std::vector<std::string> warnings;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level != LogLevel::Warning) return;
+        warnings.push_back(e.message);
+        if (++deliveries > kCap) return;
+        mcp::status("life_feedback_counter", std::function<double()>([] { return 1.0; }));
+        nestedPublished |= hasStatusNamed("life_feedback_counter");
+    });
+    trussc::hot_reload::GuestLibrary lib;
+    lib.createApp = createGuestWithValue;
+    lib.destroyApp = destroyGuestApp;
+    auto* app = static_cast<GuestWithValue*>(lib.create());
+    mcp::resource("life://feedback", "feedback").bind([c = std::make_shared<PublishOnDrop>([app] {
+        mcp::tool("life_feedback_tool", "late").bind([app] { return app->value; });
+    })] { return std::string("f"); });
+    lib.destroy();   // must return, not recurse
+    auto has = [&](const char* a, const char* b) {
+        for (auto& w : warnings) if (w.find(a) != std::string::npos && w.find(b) != std::string::npos) return true;
+        return false;
+    };
+    check("late feedback: retirement returned within the listener cap", deliveries <= kCap);
+    check("late feedback: the listener's registration was refused", !nestedPublished && !hasStatusNamed("life_feedback_counter"));
+    check("late feedback: the late tool was refused", !mcp::hasTool("life_feedback_tool"));
+    check("late feedback: outer Warning plus one summary, no more",
+          warnings.size() == 2 && has("life_feedback_tool", "unloading") && has("1 more registrations were refused", "unloading"));
+    internal::destroyMainWindow();
+}
+
+// #1: an App kept alive past its swap by a tool capture; generation unload
+// retires the tool, which releases the App (and its deleter) with no recursion.
+void retainedAppRetirement() {
+    openMain();
+    trussc::hot_reload::GuestLibrary lib;
+    lib.createApp = createGuestApp;
+    lib.destroyApp = destroyGuestApp;
+    lib.create();
+    std::weak_ptr<App> old;
+    {
+        auto app = internal::mainApp();
+        old = app;
+        mcp::tool("life_keeper", "retains the old App").bind([app] { ++keeperCalls; return 1; });
+        mcp::status("life_keeper_status", std::function<double()>([app] { return 1.0; }));
+    }
+    swapMain(std::make_shared<App>());
+    auto* oldGuest = static_cast<GuestApp*>(old.lock().get());
+    check("swap cleaned the outgoing App once while a capture retains it", oldGuest && oldGuest->cleaned);
+    // Decision: registrations belong to the generation, so the tool stays
+    // listed until the generation unloads, and the retained App is memory-safe.
+    check("generation tool outlives its App's swap", mcp::hasTool("life_keeper") && !old.expired());
+    keeperCalls = 0;
+    check("retained App tool is callable memory-safely", callToolResult("life_keeper").ok && keeperCalls == 1);
+    lib.destroy();
+    check("unload retires the tool and releases the App", !mcp::hasTool("life_keeper") &&
+          !hasStatusNamed("life_keeper_status") && old.expired());
+    internal::destroyMainWindow();
+}
+
+// #3: the replacement keeps its registrations across the swap; unload removes them.
+void replacementKeepsRegistrations() {
+    openMain();
+    trussc::hot_reload::GuestLibrary lib;
+    lib.createApp = createGuestApp;
+    lib.destroyApp = destroyGuestApp;
+    lib.create();
+    mcp::tool("life_old_tool", "original App tool").bind([] { return "old"; });
+    auto next = std::make_shared<NextScene>();
+    check("replacement registered before the swap", mcp::hasTool("life_new_tool") && hasStatusNamed("life_new_status"));
+    std::weak_ptr<App> old = internal::mainApp();
+    swapMain(next);  // the Window releases the original guest App here
+    check("replacement attached and original App destroyed", next->getWindow() && old.expired());
+    check("replacement tool survives the original App's destruction", mcp::hasTool("life_new_tool"));
+    check("replacement status survives the original App's destruction", hasStatusNamed("life_new_status"));
+    newToolCalls = 0;
+    check("a missing tool is not a successful call", !callToolResult("life_missing_tool").ok);
+    {
+        const CallResult call = callToolResult("life_new_tool");
+        check("replacement tool answers", call.ok && newToolCalls == 1 && call.text.find("new") != std::string::npos);
+    }
+    lib.destroy();
+    check("unload removes the whole generation", !mcp::hasTool("life_new_tool") &&
+          !mcp::hasTool("life_old_tool") && !hasStatusNamed("life_new_status"));
+    internal::destroyMainWindow();
+}
+
+// #2: windowResized() requests a swap and pumps native events inside the callback.
+int callbackSwaps = 0, cleanupInCallback = 0;
+bool inResize = false, dispatchActiveInResize = false, attachedAfterPump = false;
+int marker = 0;
+struct ResizeApp : App {
+    int member = 123;
+    void windowResized(int, int) override {
+        inResize = true;
+        getWindow()->setApp(std::make_shared<App>());
+        dispatchActiveInResize = internal::mainWindowDispatchActive();  // reload() defers on exactly this
+        sapp_event ev{};
+        ev.type = SAPP_EVENTTYPE_FOCUSED;
+        internal::_event_cb(&ev);  // synchronous OS reentry (modal / native call)
+        attachedAfterPump = getWindow() != nullptr;
+        marker = member;  // reads the receiver after the nested event
+        ++callbackSwaps;
+        inResize = false;
+    }
+    void cleanup() override { if (inResize) ++cleanupInCallback; }
+};
+App* createResizeApp() { return new ResizeApp; }
+
+void resetResizeState() {
+    callbackSwaps = cleanupInCallback = marker = 0;
+    inResize = dispatchActiveInResize = attachedAfterPump = false;
+}
+
+void startupResize() {
+    resetResizeState();
+    openMain();
+    auto app = std::make_shared<ResizeApp>();
+    internal::attachMainApp(app);
+    internal::resizeMainApp(128, 96);  // startup / native resize delivery
+    check("startup resize: callback ran once with the receiver intact", callbackSwaps == 1 && marker == 123);
+    check("startup resize: dispatch active, reload defers", dispatchActiveInResize);
+    check("startup resize: App not cleaned up mid-callback", cleanupInCallback == 0 && attachedAfterPump);
+    check("startup resize: swap applied at the boundary", internal::mainApp() && internal::mainApp() != app && !app->getWindow());
+    internal::destroyMainWindow();
+}
+
+void reloadResize() {
+    resetResizeState();
+    openMain();
+    trussc::hot_reload::GuestLibrary lib;
+    lib.createApp = createResizeApp;
+    lib.destroyApp = destroyGuestApp;
+    lib.create();  // the reload attaches the new guest App, then seeds its size
+    trussc::hot_reload::seedReloadedAppSize(128, 96, 1.0f);
+    check("reload seed: callback ran once with the receiver intact", callbackSwaps == 1 && marker == 123);
+    check("reload seed: dispatch active, reload defers", dispatchActiveInResize);
+    check("reload seed: App not cleaned up mid-callback", cleanupInCallback == 0 && attachedAfterPump);
+    check("reload seed: swap applied at the boundary", internal::mainApp() && !lib.app.lock());
+    lib.destroy();
+    internal::destroyMainWindow();
+}
+
+// `only` selects one check by name (recursive, retained, replacement, startup,
+// reload); empty runs all. Lets the ASan review harness show each in isolation.
+int run(const std::string& only = "") {
+    getMainThreadId();
+    failures = 0;
+    // tools/call is health-only until the host opts in; lift that for the checks
+    // without starting a server or changing the granted level.
+    const bool previousHealthOnly = mcp::internal::healthOnlyEndpoint();
+    mcp::internal::healthOnlyEndpoint() = false;
+    if (only.empty() || only == "recursive") { recursiveRetirement(); recursiveStatusRetirement(); }
+    if (only.empty() || only == "late") { lateRegistration(); lateFeedback(); }
+    if (only.empty() || only == "retained") retainedAppRetirement();
+    if (only.empty() || only == "replacement") replacementKeepsRegistrations();
+    if (only.empty() || only == "startup") startupResize();
+    if (only.empty() || only == "reload") reloadResize();
+    mcp::internal::healthOnlyEndpoint() = previousHealthOnly;
+    std::printf("hotReloadLifecycle: lifetime checks: %s\n", failures ? "FAIL" : "PASS");
+    return failures ? 1 : 0;
+}
+
+} // namespace lifetime
+
 int main(int argc, char** argv) {
     if (argc > 2 && std::string(argv[1]) == "--build") {
         std::ofstream(fs::path(argv[2]) / "build-command-reached") << "mock cmake build\n";
@@ -1137,11 +1556,34 @@ int main(int argc, char** argv) {
         return TC_RUN_APP(tcApp, settings);
     }
     if (argc > 1 && std::string(argv[1]) == "--reload-check") return runReloadCheck();
+    if (argc > 1 && std::string(argv[1]) == "--lifetime-checks") return lifetime::run(argc > 2 ? argv[2] : "");
+    if (argc > 1 && std::string(argv[1]) == "--guest-process-exit") {
+        getMainThreadId();
+        static UnloadProbe probe;
+        std::atexit([] {
+            const bool ok = probe.exits == 1 && probe.cleanups == 1 && probe.audioDetachedInCleanup;
+            std::printf("hotReloadLifecycle: guest process teardown: %s\n", ok ? "PASS" : "FAIL");
+            std::fflush(stdout);
+            if (!ok) std::_Exit(1);
+        });
+        internal::createMainWindow(WindowSettings{});
+        internal::prepareMainAppBindings();
+        internal::WindowRequestAccess::openMain(*internal::mainWindow());
+        trussc::hot_reload::GuestLibrary lib;
+        if (!lib.load(findGuestLibrary())) return 72;
+        auto* app = static_cast<tcApp*>(lib.create());
+        if (!app) return 72;
+        app->cycleOnly = true;
+        app->unloadProbe = &probe;
+        app->handleUpdate(0, 0);
+        std::exit(0);
+    }
 
     // Record the main thread id first, as _setup_cb does: isMainThread() and
     // runOnMainThread() key off whichever thread asks first.
     getMainThreadId();
 
+    if (int rc = lifetime::run()) return rc;
     if (int rc = checkWatcherExtensions()) return rc;
     if (int rc = checkLoadFailuresLogged()) return rc;
     if (int rc = checkRebuildPreflight()) return rc;
