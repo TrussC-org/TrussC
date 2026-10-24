@@ -536,10 +536,11 @@ private:
         lastDrawFrame_ = internal::currentWindowContext().recordingCount;
     }
 
-    // Recycle after this context commits its recording, including offscreen
-    // work and rejected presentation. Foreign commits leave pending versions
-    // intact. Keep one Fbo to one context per recording: cross-window sampling
-    // and rendering of the same Fbo still has no version ownership protocol.
+    // Reset the cursor after this context commits, including offscreen work
+    // and rejected presentation. Pending CPU samplers are checked separately
+    // before choosing a writable version: a commit need not consume them.
+    // Keep one Fbo to one context per recording; cross-window sampling still
+    // has no version ownership protocol.
     void syncVersionFrame_() {
         uint64_t fc = internal::currentWindowContext().recordingCount;
         if (fc == poolFrame_) return;
@@ -583,6 +584,10 @@ private:
     bool advanceVersion_() {
         if (poolAllocFailed_) return false;
         int next = currentVersion_ + 1;
+        // A pooled image may still be bound by a deferred owner command from
+        // an earlier recording. Skip it until replay/discard releases it.
+        while (next <= (int)versionPool_.size() &&
+               internal::hasPendingImageConsumer(versionPool_[next - 1].tex.getImage())) ++next;
         if ((int)versionPool_.size() < next) {
             ColorVersion v;
             // Match the primary color texture exactly. Filters/wrap are set
@@ -848,10 +853,22 @@ private:
             sgl_tc_reset_matrix_stacks();
             sgl_tc_context_ensure_buffers(lease->context);
             sgl_defaults();
+            // A raw Texture draw may precede this Fbo's first production
+            // (the lazy-target contract). There is no produced snapshot yet.
+            // After the first begin, protect captured content even across commits.
+            const bool pending = poolFrame_ != UINT64_MAX &&
+                internal::hasPendingImageConsumer(curColorTex_().getImage());
             syncVersionFrame_();
-            if (drawnThisFrame_) {
+            if (drawnThisFrame_ || pending) {
                 const int previous = currentVersion_;
-                if (advanceVersion_() && !doClear && target_.sampleCount == 1) {
+                const bool advanced = advanceVersion_();
+                if (!advanced && pending) {
+                    // Allocation failure must not overwrite a queued sampler.
+                    target_.finalize = nullptr;
+                    internal::popTarget(target_, token);
+                    return;
+                }
+                if (advanced && !doClear && target_.sampleCount == 1) {
                     const Texture& src = previous == 0 ? colorTexture_ : versionPool_[previous - 1].tex;
                     blitColorInto_(src, curColorTex_());
                 }

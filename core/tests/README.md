@@ -1107,4 +1107,6 @@ EGL/Mesa, no X display required) and `tcbuild.sh sh core/tests/windowTick/native
 These exercise independent draws without updates, two window rates, device-shared
 atlas uploads, per-window shadow/FBO recording boundaries (including update-only
 ticks and repeated rejected admissions with resource-bearing listeners), and native
-secondary policy routing.
+secondary policy routing. Readbacks also check FBO consumers carried across idle
+commits, recycling while older versions remain pending and after consumption,
+and shadow consumer replay before a referenced slot is overwritten.

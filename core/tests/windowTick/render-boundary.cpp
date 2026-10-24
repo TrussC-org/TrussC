@@ -2,6 +2,8 @@
 #include <TrussC.h>
 #include "../common/tcCoreTest.h"
 #include <EGL/egl.h>
+#include <GL/gl.h>
+#include <array>
 #include <cstdio>
 using namespace tc;
 namespace {
@@ -101,6 +103,139 @@ struct Resources {
         internal::runWindowTick(std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(17*n), sourceDuration, force);
     }
 };
+
+std::array<uint8_t, 16*16*4> colorPixels(sg_image image) {
+    std::array<uint8_t, 16*16*4> pixels{};
+    const auto native = sg_gl_query_image_info(image);
+    glBindTexture(GL_TEXTURE_2D, native.tex[native.active_slot]);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    sg_reset_state_cache();
+    return pixels;
+}
+bool solidColor(sg_image image, uint8_t r, uint8_t g, uint8_t b) {
+    const auto pixels = colorPixels(image);
+    for (size_t i = 0; i < pixels.size(); i += 4)
+        if (pixels[i] != r || pixels[i+1] != g || pixels[i+2] != b) return false;
+    return true;
+}
+void pendingFboConsumers(Resources& owner) {
+    auto& ctx = owner.window.context();
+    internal::restoreWindowContext(&ctx);
+    owner.draw = {};
+    setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN);
+    ctx.loop.redrawCount = 0; // initial/recovery redraw has already been consumed
+    Fbo source;
+    source.allocate(16,16);
+    const auto unproduced = source.getColorImage();
+    source.getTexture().draw(0,0);
+    source.begin(0,0,1); source.end();
+    check("first FBO production fulfills an earlier raw texture draw", source.getColorImage().id == unproduced.id &&
+        solidColor(unproduced,0,0,255));
+    redraw(); owner.tick(89);
+    source.begin(1,0,0); source.end(); source.draw(0,0);
+    const auto red = source.getColorImage();
+    auto mesh = createPlane(8,8);
+    Material material;
+    auto queue = [&] {
+        material.setBaseColorTexture(&source.getTexture());
+        setMaterial(material); mesh.draw(); clearMaterial();
+    };
+    queue();
+    auto& pending = ctx.swapchainTarget.deferredPbrDraws;
+    check("FBO PBR consumer captures red image", pending.size() == 1 &&
+        sg_query_view_desc(pending.back().cmd.bind.views[VIEW_tc_pbr_baseColorTex]).texture.image.id == red.id);
+    const auto recording = ctx.recordingCount, draws = ctx.drawCount, updates = ctx.updateCount;
+    owner.tick(90);
+    check("automatic idle commit carries PBR consumer without update or draw", pending.size() == 1 &&
+        ctx.recordingCount == recording + 1 && ctx.drawCount == draws && ctx.updateCount == updates);
+    source.begin(0,1,0); source.end();
+    const auto green = source.getColorImage();
+    check("pending FBO sample stays red across idle commit", green.id != red.id && solidColor(red,255,0,0));
+    check("new FBO content is green", solidColor(green,0,255,0));
+    // This sampler deliberately uses getTexture() without Fbo::draw(). Its
+    // captured binding must protect the image just as the first consumer did.
+    queue();
+    check("raw texture sampler captures green FBO version", pending.size() == 2 &&
+        sg_query_view_desc(pending.back().cmd.bind.views[VIEW_tc_pbr_baseColorTex]).texture.image.id == green.id);
+    owner.tick(91);
+    source.begin(0,0,1); source.end();
+    const auto blue = source.getColorImage();
+    check("pooled pending FBO versions are skipped", blue.id != red.id && blue.id != green.id &&
+        solidColor(red,255,0,0) && solidColor(green,0,255,0));
+    // A frozen red/green consumer must not force growth of unrelated completed
+    // offscreen recordings. Recycle the remaining writable version each time.
+    for (int n = 92; n < 104; ++n) {
+        owner.sink.begin(0,0,0); source.draw(0,0); owner.sink.end();
+        owner.tick(n);
+        source.begin(0,0,1); source.end();
+        check("unreferenced FBO storage recycles with older consumers pending", source.getColorImage().id == blue.id);
+    }
+    check("carried FBO consumers still have original pixels", pending.size() == 2 &&
+        solidColor(red,255,0,0) && solidColor(green,0,255,0));
+    redraw(); owner.tick(104);
+    check("owner draw consumes carried FBO commands", pending.empty() && ctx.drawCount == draws + 1);
+    source.begin(0,0,1); source.end();
+    owner.sink.begin(0,0,0); source.draw(0,0); owner.sink.end();
+    source.begin(0,0,1); source.end();
+    const auto recycled = source.getColorImage();
+    check("formerly pending FBO storage recycles after consumption", recycled.id == red.id || recycled.id == green.id);
+    owner.tick(105);
+}
+
+struct ShadowReplayProbe {
+    sg_image image{};
+    std::array<float, 32*32*internal::maxShadowLights> before{}, atReplay{};
+    bool acquired = false;
+    static void read(sg_image image, float* pixels) {
+        const auto native = sg_gl_query_image_info(image);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, native.tex[native.active_slot]);
+        glGetTexImage(GL_TEXTURE_2D_ARRAY, 0, GL_RED, GL_FLOAT, pixels);
+        sg_reset_state_cache();
+    }
+    static sg_swapchain acquire(void* user) {
+        auto& probe = *static_cast<ShadowReplayProbe*>(user);
+        probe.acquired = true;
+        read(probe.image, probe.atReplay.data());
+        return swapchain(nullptr);
+    }
+};
+void pendingShadowConsumer(Resources& owner) {
+    auto& ctx = owner.window.context();
+    internal::restoreWindowContext(&ctx);
+    owner.light.setShadowArea(Vec3(0,0,0),16);
+    auto mesh = createBox(8);
+    beginShadowPass(owner.light); shadowDraw(mesh); endShadowPass();
+    ShadowReplayProbe probe;
+    probe.image = ctx.shadow.storage->colorImage;
+    ShadowReplayProbe::read(probe.image, probe.before.data());
+    check("shadow producer writes original depth pixels", *std::min_element(probe.before.begin(), probe.before.begin()+32*32) < 10000);
+    Material material; setMaterial(material); mesh.draw(); clearMaterial();
+    auto& pending = ctx.swapchainTarget.deferredPbrDraws;
+    check("shadow consumer captures original slot", pending.size() == 1 &&
+        pending.back().cmd.shadowGeneration == ctx.shadow.storage && pending.back().cmd.fsp.shadowMapParams[1] == 1);
+    const auto draws = ctx.drawCount, recording = ctx.recordingCount;
+    owner.tick(106);
+    check("idle commit preserves shadow consumer", pending.size() == 1 && ctx.recordingCount == recording + 1);
+    ctx.acquireSwapchain = ShadowReplayProbe::acquire; ctx.acquireSwapchainUser = &probe;
+    // Existing consumeShadowSlot must replay the old draw BEFORE clearing the
+    // reused layer. Acquisition reads its pixels at that consumption boundary.
+    beginShadowPass(owner.light);
+    check("shadow replay sees original pixels before overwrite", probe.acquired &&
+        std::equal(probe.before.begin(), probe.before.begin()+32*32, probe.atReplay.begin()));
+    check("shadow slot reused only after pending consumer replay", pending.empty() && ctx.shadow.inPass &&
+        ctx.shadow.count == 1 && ctx.shadow.storage->colorImage.id == probe.image.id);
+    endShadowPass();
+    std::array<float, 32*32*internal::maxShadowLights> after{};
+    ShadowReplayProbe::read(probe.image, after.data());
+    check("next shadow pass writes new content to recycled slot", std::all_of(after.begin(), after.begin()+32*32,
+        [](float value) { return value == 10000; }));
+    check("internal shadow replay does not count a window draw", ctx.drawCount == draws);
+    ctx.acquireSwapchain = swapchain; ctx.acquireSwapchainUser = nullptr;
+    owner.tick(107);
+    beginShadowPass(owner.light); endShadowPass();
+    check("consumed shadow slot continues to recycle", ctx.shadow.storage->colorImage.id == probe.image.id && ctx.shadow.count == 1);
+    owner.tick(108);
+}
 }
 TC_CORE_TEST_MAIN() {
     EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
@@ -176,8 +311,16 @@ TC_CORE_TEST_MAIN() {
         internal::restoreWindowContext(&owner.window.context());
         owner.fbo.begin(); clear(0,0,0,1); owner.fbo.end(); owner.fbo.draw(0,0);
         auto first = owner.fbo.getTexture().getImage().id;
+        Fbo completedSource;
+        completedSource.allocate(16,16);
+        completedSource.begin(1,0,0); completedSource.end();
+        owner.sink.begin(0,0,0); completedSource.draw(0,0); owner.sink.end();
+        const auto completed = completedSource.getColorImage();
         other.tick(52); other.tick(53);
         internal::restoreWindowContext(&owner.window.context());
+        completedSource.begin(0,1,0); completedSource.end();
+        check("foreign commits do not reset FBO owner recording after offscreen consumption",
+            completedSource.getColorImage().id != completed.id);
         owner.fbo.begin(); clear(0,0,0,1); owner.fbo.end(); owner.fbo.draw(0,0);
         check("other window commits do not recycle owner FBO revisions", owner.fbo.getTexture().getImage().id != first);
         internal::endGpuFrame();
@@ -225,6 +368,8 @@ TC_CORE_TEST_MAIN() {
         other.shadowPass = true; other.expectedShadowSlots = -1;
         rejectSwapchain = false; other.tick(83);
         check("first recovered draw completes normally", other.window.context().drawCount == before + 1 && afterFrames == 1);
+        pendingFboConsumers(other);
+        pendingShadowConsumer(other);
         internal::currentWindowCtx() = nullptr;
     }
     // GPU globals intentionally live until process exit, matching offscreen probes.

@@ -68,8 +68,8 @@ static_assert(std::extent_v<decltype(ShadowStorage::colorAttachments)> == maxSha
 // foreign tick can park the pass without changing this owner's slots or maps.
 // ---------------------------------------------------------------------------
 struct ShadowSlotState {
-    // Slot assignment: `frame` (the per-window updateCount at the last reset)
-    // resets the counter on the first beginShadowPass() of each window tick;
+    // Slot assignment: `frame` (the per-context recordingCount at last reset)
+    // resets the counter on the first beginShadowPass() of each recording;
     // each pass claims the next layer in call order. Slot data persists across
     // frames so draws submitted before the first shadow pass keep the previous
     // frame's shadow state.
@@ -186,6 +186,8 @@ struct WindowContext {
     // Completed recordings committed by this context, including offscreen-only
     // work and rejected presentation. Stable until endGpuFrame() commits;
     // another context's commit cannot retire this context's pending recording.
+    // Deferred CPU consumers can outlive a commit; image reuse must also check
+    // pending bindings (Fbo) or replay affected consumers first (shadow slots).
     uint64_t recordingCount = 0;
     double tickDuration = 0.0;
     bool tickActive = false;

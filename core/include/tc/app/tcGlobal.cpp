@@ -2504,6 +2504,38 @@ bool ensureShadowStorage(WindowContext& window, int resolution) {
       catch (const std::length_error&) { return fail(); }
 }
 
+bool hasPendingImageConsumer(sg_image image) {
+    struct Search {
+        sg_image image;
+        bool found = false;
+        void view(sg_view handle) {
+            if (!handle.id || found) return;
+            const auto desc = sg_query_view_desc(handle);
+            found = desc.texture.image.id == image.id || desc.storage_image.image.id == image.id;
+        }
+        void bindings(const sg_bindings& bindings) {
+            for (auto handle : bindings.views) view(handle);
+        }
+        void target(const RenderTarget& target) {
+            if (target.resources().context.id) {
+                sgl_tc_context_dependencies(target.resources().context,
+                    [](sg_pipeline, sg_view view, sg_sampler, void* user) {
+                        static_cast<Search*>(user)->view(view);
+                    }, this);
+            }
+            for (const auto& draw : target.deferredShaderDraws) bindings(draw.bindings);
+            for (const auto& draw : target.deferredPbrDraws) bindings(draw.cmd.bind);
+            for (const auto& draw : target.deferredPointDraws) bindings(draw.cmd.bind);
+        }
+    } search{image};
+    if (!image.id) return false;
+    const auto& window = currentWindowContext();
+    search.target(window.swapchainTarget);
+    for (const auto& entry : window.targetStack)
+        if (entry.target != &window.swapchainTarget) search.target(*entry.target);
+    return search.found;
+}
+
 void consumeShadowSlot(int slot) {
     auto& window = currentWindowContext();
     const auto generation = window.shadow.storage;

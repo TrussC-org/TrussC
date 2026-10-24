@@ -415,6 +415,9 @@ struct ShadowStorage {
 bool shadowImageLayout(int resolution, size_t& colorBytes, size_t& depthBytes, size_t& totalBytes);
 bool ensureShadowStorage(WindowContext& window, int resolution);
 void consumeShadowSlot(int slot);
+// CPU samplers can survive a GPU commit. Query the current owner's pending
+// target commands before overwriting an image, independently of commit age.
+bool hasPendingImageConsumer(sg_image image);
 bool hasPublicFboActivation();
 RenderTargetResources* leaseTargetResources(sg_pixel_format format, int samples,
     sg_pixel_format depth = SG_PIXELFORMAT_DEPTH_STENCIL);
