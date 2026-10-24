@@ -7,7 +7,13 @@ namespace tc = trussc;
 #include <cstdio>
 #include <thread>
 
+int alsaRoundtrip(bool requireDevice);
 int deviceCheck(int argc, char** argv) {
+    if (argc >= 2 && std::string_view(argv[1]) == "--alsa-roundtrip") {
+        if (argc == 2) return alsaRoundtrip(false);
+        if (argc == 3 && std::string_view(argv[2]) == "--require-device") return alsaRoundtrip(true);
+        return 2;
+    }
     if (argc != 3) {
         std::fprintf(stderr, "Usage: tests-sysex --receive-virtual NAME | --receive NAME | --send NAME\n");
         return 2;

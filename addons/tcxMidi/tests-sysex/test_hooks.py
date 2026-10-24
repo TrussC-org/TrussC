@@ -93,8 +93,8 @@ def main():
                    "-Wno-error=stringop-overflow", "-DLIBREMIDI_ALSA", "-DLIBREMIDI_NO_BOOST",
                    "-DSOKOL_GLCORE", "-DTC_VERSION_LINKED", "-I" + str(directory / "include"),
                    *includes, *[str(root / "addons/tcxMidi/tests-sysex/src" / file)
-                                for file in ("main.cpp", "device.cpp", "allocation.cpp", "winmm.cpp")],
-                   "-o", str(binary), *libraries]
+                                for file in ("main.cpp", "device.cpp", "alsaDevice.cpp", "allocation.cpp", "winmm.cpp")],
+                   "-o", str(binary), *libraries, "-lasound"]
         (directory / "command.txt").write_text(shlex.join(command), encoding="utf-8")
         result = subprocess.run(command, cwd=build, capture_output=True, text=True, encoding="utf-8")
         (directory / "build.log").write_text(result.stdout + result.stderr, encoding="utf-8")
