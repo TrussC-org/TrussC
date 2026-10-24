@@ -130,6 +130,28 @@ public:
     // resize entry point. No-op if the native window is gone.
     void setSize(int width, int height);
 
+    // Move this window on the desktop. Coordinates are SCREEN coordinates with
+    // the primary display's top-left at (0, 0) — the same space the global
+    // getWindowPosition()/setWindowPosition() use, and what the OS display
+    // settings show. A display placed left of or above the primary one has
+    // negative coordinates.
+    //
+    // Implemented natively per platform (macOS NSWindow, Windows HWND, X11)
+    // because sokol_app has no per-window move entry point — the global
+    // setWindowPosition() targets the MAIN window only. No-op if the native
+    // window is gone.
+    //
+    // Ordering matters for multi-display setups: setFullscreen() covers the
+    // display the window is CURRENTLY on (Windows MonitorFromWindow, macOS the
+    // window's screen, Linux the WM's choice), so move the window onto the
+    // target display FIRST, then go fullscreen. This is the same order
+    // openFrameworks uses in its GLFW backend.
+    TC_PLATFORMS("macos,windows,linux") void setPosition(int x, int y);
+
+    // Current position in the same screen-coordinate space as setPosition().
+    // Returns (-1, -1) if the native window is gone.
+    TC_PLATFORMS("macos,windows,linux") IVec2 getPosition() const;
+
     // Main fullscreen uses sapp. Secondary fullscreen is native because sapp's
     // fullscreen only targets the main window:
     //   macOS  -> NSWindow toggleFullScreen: (native, animated; isFullscreen()
@@ -246,6 +268,8 @@ private:
     void teardownSecondary() noexcept;
     void setSecondaryTitle(const std::string& title);
     void setSecondarySize(int width, int height);
+    void setSecondaryPosition(int x, int y);
+    IVec2 getSecondaryPosition() const;
     void setSecondaryFullscreen(bool full);
     bool isSecondaryFullscreen() const;
     int getSecondaryWidth() const;
@@ -811,6 +835,8 @@ inline bool Window::isSecondaryOccluded() const {
     return false;
 }
 inline void Window::setSecondarySize(int, int) {}
+inline void Window::setSecondaryPosition(int, int) {}
+inline IVec2 Window::getSecondaryPosition() const { return IVec2(-1, -1); }
 inline void Window::setSecondaryFullscreen(bool) {}
 inline bool Window::isSecondaryFullscreen() const { return false; }
 #else
@@ -838,6 +864,14 @@ inline void Window::setTitle(const std::string& title) {
 inline void Window::setSize(int width, int height) {
     if (!ctx_.isMain) { setSecondarySize(width, height); return; }
     if (isOpen() && sapp_isvalid()) setWindowSizeLogical(width, height);
+}
+inline void Window::setPosition(int x, int y) {
+    if (!ctx_.isMain) { setSecondaryPosition(x, y); return; }
+    if (isOpen() && sapp_isvalid()) setWindowPosition(x, y);
+}
+inline IVec2 Window::getPosition() const {
+    if (!ctx_.isMain) return getSecondaryPosition();
+    return isOpen() && sapp_isvalid() ? getWindowPosition() : IVec2(-1, -1);
 }
 inline void Window::setFullscreen(bool full) {
     if (!ctx_.isMain) { setSecondaryFullscreen(full); return; }

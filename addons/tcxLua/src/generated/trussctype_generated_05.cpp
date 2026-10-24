@@ -140,53 +140,45 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["update"] = &trussc::RectNodeButton::update;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::Window
-            , trussc::Window()
+        auto constructors = tcxLuaConstructors<trussc::StrokeMesh
+            , trussc::StrokeMesh()
+            , trussc::StrokeMesh(const trussc::Path &)
         >();
-        sol::usertype<trussc::Window> t = lua->new_usertype<trussc::Window>("Window", constructors, sol::call_constructor, constructors);
-        t["close"] = &trussc::Window::close;
-        t["dispatchKeyPressToTree"] = &trussc::Window::dispatchKeyPressToTree;
-        t["dispatchKeyReleaseToTree"] = &trussc::Window::dispatchKeyReleaseToTree;
-        t["dispatchMousePressToTree"] = &trussc::Window::dispatchMousePressToTree;
-        t["dispatchMouseReleaseToTree"] = &trussc::Window::dispatchMouseReleaseToTree;
-        t["dispatchMouseScrollToTree"] = &trussc::Window::dispatchMouseScrollToTree;
-        t["drawTreeNow"] = &trussc::Window::drawTreeNow;
-        t["events"] = &trussc::Window::events;
-        t["getApp"] = &trussc::Window::getApp;
-        t["getFps"] = &trussc::Window::getFps;
-        t["getHeight"] = &trussc::Window::getHeight;
-        t["getTitle"] = &trussc::Window::getTitle;
-        t["getWidth"] = &trussc::Window::getWidth;
-        t["isFullscreen"] = &trussc::Window::isFullscreen;
-        t["isOccluded"] = &trussc::Window::isOccluded;
-        t["isOpen"] = &trussc::Window::isOpen;
-        t["setApp"] = &trussc::Window::setApp;
-        t["setClearColor"] = &trussc::Window::setClearColor;
-        t["setFps"] = &trussc::Window::setFps;
-        t["setFullscreen"] = &trussc::Window::setFullscreen;
-        t["setIndependentFps"] = &trussc::Window::setIndependentFps;
-        t["setSize"] = &trussc::Window::setSize;
-        t["setTitle"] = &trussc::Window::setTitle;
-        t["syncRootSize"] = &trussc::Window::syncRootSize;
-        t["tickTree"] = &trussc::Window::tickTree;
-        t["toggleFullscreen"] = &trussc::Window::toggleFullscreen;
+        sol::usertype<trussc::StrokeMesh> t = lua->new_usertype<trussc::StrokeMesh>("StrokeMesh", constructors, sol::call_constructor, constructors);
+        t["addVertex"] = sol::overload([](trussc::StrokeMesh& self, float x, float y) -> decltype(auto) { return self.addVertex(x, y); }, [](trussc::StrokeMesh& self, float x, float y, float z) -> decltype(auto) { return self.addVertex(x, y, z); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p) -> decltype(auto) { return self.addVertex(p); }, [](trussc::StrokeMesh& self, const trussc::Vec2 & p) -> decltype(auto) { return self.addVertex(p); });
+        t["addVertexWithWidth"] = sol::overload([](trussc::StrokeMesh& self, float x, float y, float width) -> decltype(auto) { return self.addVertexWithWidth(x, y, width); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p, float width) -> decltype(auto) { return self.addVertexWithWidth(p, width); });
+        t["clear"] = &trussc::StrokeMesh::clear;
+        t["draw"] = &trussc::StrokeMesh::draw;
+        t["getMesh"] = &trussc::StrokeMesh::getMesh;
+        t["getPolylines"] = &trussc::StrokeMesh::getPolylines;
+        t["setCapType"] = &trussc::StrokeMesh::setCapType;
+        t["setClosed"] = &trussc::StrokeMesh::setClosed;
+        t["setColor"] = &trussc::StrokeMesh::setColor;
+        t["setJoinType"] = &trussc::StrokeMesh::setJoinType;
+        t["setMiterLimit"] = &trussc::StrokeMesh::setMiterLimit;
+        t["setShape"] = &trussc::StrokeMesh::setShape;
+        t["setWidth"] = &trussc::StrokeMesh::setWidth;
+        t["setWidths"] = &trussc::StrokeMesh::setWidths;
+        t["update"] = &trussc::StrokeMesh::update;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::JsonReadReflector
-            , trussc::JsonReadReflector(trussc::Json)
+        auto constructors = tcxLuaConstructors<trussc::ChipSoundNote
+            , trussc::ChipSoundNote()
+            , trussc::ChipSoundNote(trussc::Wave, float, float)
+            , trussc::ChipSoundNote(trussc::Wave, float, float, float)
         >();
-        sol::usertype<trussc::JsonReadReflector> t = lua->new_usertype<trussc::JsonReadReflector>("JsonReadReflector", constructors, sol::call_constructor, constructors);
-        t["applied"] = &trussc::JsonReadReflector::applied;
-        t["readOnly"] = &trussc::JsonReadReflector::readOnly;
-        t["skipped"] = &trussc::JsonReadReflector::skipped;
-        t["endGroup"] = &trussc::JsonReadReflector::endGroup;
-        t["isDerived"] = &trussc::JsonReadReflector::isDerived;
-        t["isReadOnly"] = &trussc::JsonReadReflector::isReadOnly;
-        t["popDerived"] = &trussc::JsonReadReflector::popDerived;
-        t["popReadOnly"] = &trussc::JsonReadReflector::popReadOnly;
-        t["pushDerived"] = &trussc::JsonReadReflector::pushDerived;
-        t["pushReadOnly"] = &trussc::JsonReadReflector::pushReadOnly;
-        t["unknownKeys"] = &trussc::JsonReadReflector::unknownKeys;
+        sol::usertype<trussc::ChipSoundNote> t = lua->new_usertype<trussc::ChipSoundNote>("ChipSoundNote", constructors, sol::call_constructor, constructors);
+        t["attack"] = &trussc::ChipSoundNote::attack;
+        t["decay"] = &trussc::ChipSoundNote::decay;
+        t["duration"] = &trussc::ChipSoundNote::duration;
+        t["hz"] = &trussc::ChipSoundNote::hz;
+        t["release"] = &trussc::ChipSoundNote::release;
+        t["sustain"] = &trussc::ChipSoundNote::sustain;
+        t["volume"] = &trussc::ChipSoundNote::volume;
+        t["wave"] = &trussc::ChipSoundNote::wave;
+        t["build"] = &trussc::ChipSoundNote::build;
+        t["generateBuffer"] = &trussc::ChipSoundNote::generateBuffer;
+        t["getTotalDuration"] = &trussc::ChipSoundNote::getTotalDuration;
     }
     {
         auto constructors = tcxLuaConstructors<trussc::IesProfile
@@ -203,14 +195,13 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["loadFromString"] = &trussc::IesProfile::loadFromString;
     }
     {
-        sol::usertype<trussc::Font::PlacedGlyph> t = lua->new_usertype<trussc::Font::PlacedGlyph>("FontPlacedGlyph");
-        t["baselineY"] = &trussc::Font::PlacedGlyph::baselineY;
-        t["codepoint"] = &trussc::Font::PlacedGlyph::codepoint;
-        t["drawX"] = &trussc::Font::PlacedGlyph::drawX;
-        t["pivotX"] = &trussc::Font::PlacedGlyph::pivotX;
-        t["pivotY"] = &trussc::Font::PlacedGlyph::pivotY;
-        t["rotationCw"] = &trussc::Font::PlacedGlyph::rotationCw;
-        t["scaleX"] = &trussc::Font::PlacedGlyph::scaleX;
+        sol::usertype<trussc::AudioDeviceChangedArgs> t = lua->new_usertype<trussc::AudioDeviceChangedArgs>("AudioDeviceChangedArgs");
+        t["bufferSize"] = &trussc::AudioDeviceChangedArgs::bufferSize;
+        t["channels"] = &trussc::AudioDeviceChangedArgs::channels;
+        t["deviceName"] = &trussc::AudioDeviceChangedArgs::deviceName;
+        t["isDefaultDevice"] = &trussc::AudioDeviceChangedArgs::isDefaultDevice;
+        t["maxPolyphony"] = &trussc::AudioDeviceChangedArgs::maxPolyphony;
+        t["sampleRate"] = &trussc::AudioDeviceChangedArgs::sampleRate;
     }
     lua->new_usertype<trussc::Direction>("Direction",
         sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
@@ -226,12 +217,11 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         "Hanning", sol::var(trussc::WindowType::Hanning),
         "Hamming", sol::var(trussc::WindowType::Hamming),
         "Blackman", sol::var(trussc::WindowType::Blackman));
-    {
-        sol::usertype<trussc::UdpReceiveEventArgs> t = lua->new_usertype<trussc::UdpReceiveEventArgs>("UdpReceiveEventArgs");
-        t["data"] = &trussc::UdpReceiveEventArgs::data;
-        t["remoteHost"] = &trussc::UdpReceiveEventArgs::remoteHost;
-        t["remotePort"] = &trussc::UdpReceiveEventArgs::remotePort;
-    }
+    lua->new_usertype<trussc::LightType>("LightType",
+        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
+        "Directional", sol::var(trussc::LightType::Directional),
+        "Point", sol::var(trussc::LightType::Point),
+        "Spot", sol::var(trussc::LightType::Spot));
     {
         sol::usertype<trussc::TcpServerClient> t = lua->new_usertype<trussc::TcpServerClient>("TcpServerClient");
         t["getHost"] = &trussc::TcpServerClient::getHost;
@@ -239,13 +229,15 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["getPort"] = &trussc::TcpServerClient::getPort;
     }
     {
-        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
-        t["message"] = &trussc::TcpConnectEventArgs::message;
-        t["success"] = &trussc::TcpConnectEventArgs::success;
+        sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
+        t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
+        t["reason"] = &trussc::ExitRequestEventArgs::reason;
     }
     {
-        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
-        t["text"] = &trussc::ClipboardPastedEventArgs::text;
+        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
+        t["hit"] = &trussc::Ray::Hit::hit;
+        t["point"] = &trussc::Ray::Hit::point;
+        t["t"] = &trussc::Ray::Hit::t;
     }
 }
 #ifdef _MSC_VER
