@@ -183,6 +183,10 @@ struct WindowContext {
     MainLoopState loop;
     uint64_t updateCount = 0;
     uint64_t drawCount = 0;
+    // Completed recordings committed by this context, including offscreen-only
+    // work and rejected presentation. Stable until endGpuFrame() commits;
+    // another context's commit cannot retire this context's pending recording.
+    uint64_t recordingCount = 0;
     double tickDuration = 0.0;
     bool tickActive = false;
     bool suspended = false;

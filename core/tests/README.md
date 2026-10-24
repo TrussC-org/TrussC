@@ -1105,4 +1105,6 @@ For #239 render-boundary regressions, after building the core archive and combin
 runner, run `tcbuild.sh sh core/tests/windowTick/render-boundary-test` (surfaceless
 EGL/Mesa, no X display required) and `tcbuild.sh sh core/tests/windowTick/native-gates-test`.
 These exercise independent draws without updates, two window rates, device-shared
-atlas uploads, per-window shadow/FBO boundaries, and native secondary policy routing.
+atlas uploads, per-window shadow/FBO recording boundaries (including update-only
+ticks and repeated rejected admissions with resource-bearing listeners), and native
+secondary policy routing.

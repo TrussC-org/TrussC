@@ -899,6 +899,7 @@ void internal::endGpuFrame() {
     }
 
     sg_commit();
+    ++internal::currentWindowContext().recordingCount;
     // Only the committing owner completes immediate CPU work. Raw draws keep
     // their pass-consumption lifetime, including on upload-only boundaries.
     auto& target = internal::currentWindowContext().swapchainTarget;

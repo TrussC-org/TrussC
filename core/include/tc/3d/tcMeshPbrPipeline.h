@@ -377,7 +377,7 @@ public:
         // entirely -- expose zero slots instead of ghost shadows from a stale
         // map (the per-frame slot reset only runs inside beginShadowPass()).
         // Shadow state belongs to this window; updates may stop while it draws.
-        int liveSlotCount = (shadowGeneration && sh.frame + 1 >= internal::currentWindowContext().drawCount) ? sh.count : 0;
+        int liveSlotCount = (shadowGeneration && sh.frame + 1 >= internal::currentWindowContext().recordingCount) ? sh.count : 0;
         fsp.shadowMapParams[0] = shadowGeneration ? static_cast<float>(shadowGeneration->resolution) : 0.0f;
         fsp.shadowMapParams[1] = static_cast<float>(liveSlotCount);
         // z flags a top-left-origin backend (Metal / D3D11 / WebGPU): the
@@ -561,12 +561,12 @@ public:
         }
 
         // Per-frame slot assignment: the slot counter resets on the first
-        // beginShadowPass() of each real draw of this window, and each
+        // beginShadowPass() of each recording of this window, and each
         // pass claims the next array layer in call order. Slot data persists
         // across frames so draws submitted before the first shadow pass of a
         // frame keep the previous frame's shadow state (same semantics as the
         // old single-map design).
-        uint64_t frame = wctx.drawCount; // completed real draws of this window
+        uint64_t frame = wctx.recordingCount; // completed recordings of this window
         if (frame != sh.frame) {
             sh.frame = frame;
             sh.count = 0;

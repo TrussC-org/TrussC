@@ -533,16 +533,15 @@ private:
     void markDrawnThisFrame_() const {
         diagnoseActiveSampling_();
         drawnThisFrame_ = true;
-        lastDrawFrame_ = internal::currentWindowContext().drawCount;
+        lastDrawFrame_ = internal::currentWindowContext().recordingCount;
     }
 
-    // Each window records and commits its FBO commands within its own draw.
-    // Recycle after a completed draw, even when that window has no updates.
-    // Failed admission retains the identity; upload-only ticks do not recycle
-    // this window's versions. Keep one Fbo to one window per frame: sharing an
-    // Fbo across windows within a frame remains unsupported.
+    // Recycle after this context commits its recording, including offscreen
+    // work and rejected presentation. Foreign commits leave pending versions
+    // intact. Keep one Fbo to one context per recording: cross-window sampling
+    // and rendering of the same Fbo still has no version ownership protocol.
     void syncVersionFrame_() {
-        uint64_t fc = internal::currentWindowContext().drawCount;
+        uint64_t fc = internal::currentWindowContext().recordingCount;
         if (fc == poolFrame_) return;
         poolFrame_ = fc;
         // Promote the latest content into the primary slot by swapping

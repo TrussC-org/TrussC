@@ -6,7 +6,7 @@ scratch=$(mktemp -d "${TMPDIR:-/tmp}/tc-render-boundary.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
 python3 - "$root" "$scratch" <<'PY'
 from pathlib import Path
-import shlex, subprocess, sys, os
+import shlex, subprocess, sys, os, re
 root, scratch = map(Path, sys.argv[1:])
 flags = []
 for line in (root/'core/build-linux/CMakeFiles/TrussC.dir/flags.make').read_text().splitlines():
@@ -16,8 +16,15 @@ libs = link[link.index('-o')+2:]
 libs = [x for x in libs if not x.endswith('.o') and x != '-Wl,--wrap=malloc']
 # An optional include root makes copied-source mutations reproducible.
 inc = os.environ.get('TC_RENDER_TEST_INCLUDE', str(root/'core/include'))
+pool_settings = re.findall(r'sgdesc\.(\w+_pool_size) = (\d+);', (root/'core/include/tc/app/tcGlobal.cpp').read_text())
+assert pool_settings, 'production GPU pool settings not found'
+(scratch/'gpu-pools.inc').write_text(''.join(f'gd.{field} = {value};\n' for field, value in pool_settings))
 objects = [os.environ['TC_RENDER_TEST_CORE_OBJECT']] if os.environ.get('TC_RENDER_TEST_CORE_OBJECT') else []
-cmd = ['c++','-std=c++20','-O0','-g0','-DNDEBUG','-I'+inc]+flags+[str(root/'core/tests/windowTick/render-boundary.cpp'),'-o',str(scratch/'probe')]+objects+libs+['-lEGL']
+cmd = ['c++','-std=c++20','-O0','-g0','-DNDEBUG','-I'+inc,'-I'+str(scratch)]+flags+[str(root/'core/tests/windowTick/render-boundary.cpp'),'-o',str(scratch/'probe')]+objects+libs+['-lEGL']
 subprocess.run(cmd, cwd=root, check=True)
-subprocess.run([str(scratch/'probe')], cwd=root, env=dict(os.environ, EGL_PLATFORM='surfaceless', LIBGL_ALWAYS_SOFTWARE='1'), check=True)
+result = subprocess.run([str(scratch/'probe')], cwd=root, env=dict(os.environ, EGL_PLATFORM='surfaceless', LIBGL_ALWAYS_SOFTWARE='1'), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+print(result.stdout, end='')
+assert 're-rendered' not in result.stdout, 'unexpected same-recording FBO revision notice'
+assert '[ERROR]' not in result.stdout, 'GPU probe reported a rendering error'
+result.check_returncode()
 PY
