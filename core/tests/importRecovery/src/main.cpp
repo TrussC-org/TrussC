@@ -116,24 +116,26 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     }
     if (mode == "all" || mode == "reflect") {
         Settings exhausted;
-        bool returned = false, rejectedFlag = false;
-        failAll = true;
-        try {
-            auto r = reflectFromJson(exhausted, source);
-            rejectedFlag = internal::JsonReadResultAccess::rejected(r);
-            returned = r.applied.empty();
-        } catch (...) {}
-        failAll = false;
-        check("reflection returns rejection under persistent exhaustion", returned && rejectedFlag && exhausted.count == 1 && exhausted.name == string(100, 'x'));
-        bool fallbackReturned = false;
-        failAll = true;
-        try {
-            JsonReadReflector empty{Json()};
-            internal::JsonReadResultAccess::reject(empty);
-            fallbackReturned = internal::JsonReadResultAccess::rejected(empty) && empty.applied.empty() && empty.unknownKeys().empty();
-        } catch (...) {}
-        failAll = false;
-        check("empty rejected reader needs no allocation without iterator debugging", fallbackReturned);
+        if (!tcTest::skipPersistentAllocationFailure("reflection result construction/return")) {
+            bool returned = false, rejectedFlag = false;
+            failAll = true;
+            try {
+                auto r = reflectFromJson(exhausted, source);
+                rejectedFlag = internal::JsonReadResultAccess::rejected(r);
+                returned = r.applied.empty();
+            } catch (...) {}
+            failAll = false;
+            check("reflection returns rejection under persistent exhaustion", returned && rejectedFlag && exhausted.count == 1 && exhausted.name == string(100, 'x'));
+            bool fallbackReturned = false;
+            failAll = true;
+            try {
+                JsonReadReflector empty{Json()};
+                internal::JsonReadResultAccess::reject(empty);
+                fallbackReturned = internal::JsonReadResultAccess::rejected(empty) && empty.applied.empty() && empty.unknownKeys().empty();
+            } catch (...) {}
+            failAll = false;
+            check("empty rejected reader needs no allocation without iterator debugging", fallbackReturned);
+        }
         JsonReadReflector reader(source);
         failAll = true;
         exhausted.reflectMembers(reader);
@@ -192,7 +194,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
               xmlReturned && !xmlLoaded && failedRequests > 0 && xml.child("previous"));
         fs::remove(path);
     }
-    if (mode == "all" || mode == "font") {
+    if ((mode == "all" || mode == "font") &&
+        !tcTest::skipPersistentAllocationFailure("font persistent initialization")) {
         auto font = makeFont();
         internal::FontAtlasManager manager;
         bool fontResult = true;
@@ -202,7 +205,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         failAll = false;
         check("font returns failure under persistent exhaustion", returned && !fontResult);
     }
-    if (mode == "all" || mode == "font-init") {
+    if ((mode == "all" || mode == "font-init") &&
+        !tcTest::skipPersistentAllocationFailure("font-init persistent initialization")) {
         auto font = makeFont();
         bool sawFailure = false, sawSuccess = false;
         // Sweep allocations after the source copy until a fault-free load.
@@ -227,7 +231,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         }
         check("font memory budgets exercise both failure and success", sawFailure && sawSuccess);
     }
-    if (mode == "all" || mode == "font-reason") {
+    if ((mode == "all" || mode == "font-reason") &&
+        !tcTest::skipPersistentAllocationFailure("font-reason persistent initialization")) {
         auto font = makeFont();
         font[0] = 0xfe;
         bool sawFailure = false, sawRejection = false;
@@ -249,7 +254,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         }
         check("font reason budgets exercise exhaustion and ordinary rejection", sawFailure && sawRejection);
     }
-    if (mode == "all" || mode == "font-file" || mode == "font-async") {
+    if ((mode == "all" || mode == "font-file" || mode == "font-async") &&
+        !tcTest::skipPersistentAllocationFailure("font file/async persistent initialization")) {
         auto font = makeFont();
         const auto path = fs::current_path() / ".font-init-exhaustion.ttf";
         { ofstream file(path, ios::binary); file.write((const char*)font.data(), font.size()); }

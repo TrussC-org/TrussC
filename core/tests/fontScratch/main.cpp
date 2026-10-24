@@ -1,4 +1,5 @@
 // Exercise actual stb outline/raster allocation failures without C++ exceptions.
+#include "../common/tcTestFailure.h"
 #include "impl/tcFontScratch.h"
 #include "stb/stb_truetype.h"
 #include <cstdio>

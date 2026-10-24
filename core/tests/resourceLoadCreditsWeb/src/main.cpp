@@ -7,6 +7,10 @@
 // Owned binary: exercise real allocation failure, including on MSVC.
 namespace {
 thread_local int failAfter = -1;
+thread_local bool failImageValidationPayload = false;
+// Derived from the dimension diagnostic: allow small iterator proxies, then
+// refuse its character-storage growth after the encoded snapshot exists.
+constexpr size_t validationPayloadFaultBytes = sizeof(" exceeds the GPU limit of ");
 int allocationFaults = 0;
 std::atomic<bool> trackFontStorage{false};
 size_t fontStorageSize = 0;
@@ -24,14 +28,23 @@ void trackAllocation(void* p, size_t n) {
     if (trackImageStorage && n == encodedImageSize) {
         imageStorage = p;
         ++imageStorageAllocations;
-        // Fail once, after encoded storage exists, during header validation.
-        // Container construction and file opening have already completed.
-        failAfter = 0;
+        // readEncodedImageImpl still returns a fresh LoadResult here. Allow
+        // its iterator proxy; target validation's diagnostic payload instead.
+        failImageValidationPayload = true;
     }
+}
+bool rejectAllocation(size_t n) {
+    if (failImageValidationPayload && n >= validationPayloadFaultBytes) {
+        failImageValidationPayload = false;
+        ++allocationFaults;
+        return true;
+    }
+    if (failAfter >= 0 && failAfter-- == 0) { ++allocationFaults; return true; }
+    return false;
 }
 }
 void* operator new(std::size_t n) {
-    if (failAfter >= 0 && failAfter-- == 0) { ++allocationFaults; throw std::bad_alloc(); }
+    if (rejectAllocation(n)) throw std::bad_alloc();
     auto* p = std::malloc(n ? n : 1);
     if (!p) throw std::bad_alloc();
     trackAllocation(p, n);
@@ -39,7 +52,7 @@ void* operator new(std::size_t n) {
 }
 void* operator new[](std::size_t n) { return ::operator new(n); }
 void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
-    if (failAfter >= 0 && failAfter-- == 0) { ++allocationFaults; return nullptr; }
+    if (rejectAllocation(n)) return nullptr;
     auto* p = std::malloc(n ? n : 1);
     if (p) trackAllocation(p, n);
     return p;
@@ -100,13 +113,13 @@ EM_JS(int, audioSlots, (), { return Module['trusscAacSlots'] ? Module['trusscAac
 #include "../../common/resourceLoadLocalChecks.h"
 void localNoticeWithoutAllocation(bool discardSnapshot) {
     struct NoticeState : internal::ResourceLoadState {
-        std::vector<unsigned char> payload;
-        size_t retainedBytes() const noexcept override { return payload.capacity(); }
-        void discardPayload() noexcept override { std::vector<unsigned char>().swap(payload); }
+        std::unique_ptr<unsigned char[]> payload;
+        size_t retainedBytes() const noexcept override { return payload ? 64 : 0; }
+        void discardPayload() noexcept override { payload.reset(); }
     };
     internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
     auto payload = std::make_shared<NoticeState>();
-    payload->payload.resize(64);
+    payload->payload = std::make_unique<unsigned char[]>(64);
     payload->localFile = true;
     payload->run = internal::appRunToken();
     std::shared_ptr<internal::ResourceLoadState> state = payload;
@@ -130,7 +143,7 @@ void localNoticeWithoutAllocation(bool discardSnapshot) {
     }
     internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
     auto nextPayload = std::make_shared<NoticeState>();
-    nextPayload->payload.resize(64);
+    nextPayload->payload = std::make_unique<unsigned char[]>(64);
     nextPayload->localFile = true;
     nextPayload->run = internal::appRunToken();
     std::shared_ptr<internal::ResourceLoadState> nextState = nextPayload;
@@ -150,10 +163,10 @@ void localNoticeWithoutAllocation(bool discardSnapshot) {
     drain();
     check(discardSnapshot ? "discarded old snapshot preserves exactly one current-run Notice and retires credits" :
         "run change replaces stale Notice without allocation and credits retire", nextNoAllocation && notices == 1 &&
-        internal::resourceLoadUsageForTests().retainedBytes == 0 && payload->payload.empty() && nextPayload->payload.empty());
+        internal::resourceLoadUsageForTests().retainedBytes == 0 && !payload->payload && !nextPayload->payload);
     if (discardSnapshot) {
         auto repeated = std::make_shared<NoticeState>();
-        repeated->payload.resize(64);
+        repeated->payload = std::make_unique<unsigned char[]>(64);
         repeated->localFile = true;
         repeated->run = internal::appRunToken();
         internal::completeResourceLoad(repeated);
@@ -243,6 +256,7 @@ void imageValidationAllocationFailure() {
         internal::waitForResourceLoadsForTests();
 #endif
         trackImageStorage = false;
+        failImageValidationPayload = false;
         failAfter = -1;
         internal::setResourceLoadProbeForTests({});
         drain();
