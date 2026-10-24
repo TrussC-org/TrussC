@@ -47,12 +47,14 @@ struct TextureRetirement {
 };
 void retireTexture(TextureRetirement* storage) noexcept;
 
-void deferGpuDestroy(sg_buffer buf);
-void deferGpuDestroy(sg_image img);
-void deferGpuDestroy(sg_view view);
-void deferGpuDestroy(sg_sampler smp);
-void deferGpuDestroy(sg_pipeline pip);
-void deferGpuDestroy(sg_shader shd);
+// Allocation failure retains the SG-owned handle until device shutdown; never
+// destroy it while recordings may still reference it or throw from a destructor.
+void deferGpuDestroy(sg_buffer buf) noexcept;
+void deferGpuDestroy(sg_image img) noexcept;
+void deferGpuDestroy(sg_view view) noexcept;
+void deferGpuDestroy(sg_sampler smp) noexcept;
+void deferGpuDestroy(sg_pipeline pip) noexcept;
+void deferGpuDestroy(sg_shader shd) noexcept;
 
 // Retire queued handles unreferenced by CPU recordings. Called after
 // sg_commit(). Skips the sg_destroy calls entirely when sokol_gfx has

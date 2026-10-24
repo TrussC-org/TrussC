@@ -37,15 +37,15 @@ template<class T> void clearAllocation(bool keepFramework) {
     std::vector<EventListener> listeners;
     for (int i = 0; i < 1024; ++i) listeners.push_back(event.listen([](auto&...) {}));
     allocationCount = largestAllocation = 0;
-    // With no survivors, even a one-byte allocation must fail. With one,
-    // allow fixed-size storage but reject storage for the discarded 1024.
-    allocationLimit = keepFramework ? 4096 : 0;
+    // Neither empty storage nor protected survivors may allocate, including
+    // MSVC Debug's allocating default-container iterator proxies.
+    allocationLimit = 0;
     bool threw = false;
     observe = true;
     try { event.clear(); } catch (const std::bad_alloc&) { threw = true; }
     observe = false;
     const bool ok = !threw && event.listenerCount() == (keepFramework ? 1u : 0u) &&
-        (keepFramework ? largestAllocation <= 4096 : allocationCount == 0);
+        allocationCount == 0;
     std::printf("Event<%s>: clear 1024 ordinary, %d framework, limit=%zu: %s (allocations=%zu, largest=%zu)\n",
                 std::is_void_v<T> ? "void" : "int", int(keepFramework), allocationLimit,
                 ok ? "PASS" : "FAIL", allocationCount, largestAllocation);

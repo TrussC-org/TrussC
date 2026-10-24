@@ -205,7 +205,7 @@ exitListener = events().exitRequested.listen([](ExitRequestEventArgs& args) { ar
 - Only the root App receives `cleanup()`. At app exit, child nodes receive no `cleanup()`; only their destructors run.
 - Headless: it runs after the loop ends, followed by audio detach and `cleanup()`. `events().exit` delivers BeforeApp → App::exit() (100) → AfterApp shutdown hooks once; the App and mandatory teardown survive `clear()`. The audio device keeps running.
 - Hot reload: after `events().hotReloadUnload`, the old App receives `exit()` and `cleanup()`. `events().exit` fires only at the final exit.
-- A sub-window App: it runs when its window closes (after that window's `events().exit`) or when `setApp()` swaps it out. `getWindow()` is already nullptr there.
+- A sub-window App: it runs when its window closes (as an App-priority listener on that window's `events().exit`) or when `setApp()` swaps it out. `getWindow()` is already nullptr there.
 - An App added as a child node never receives `exit()`.
 - Any `pushMatrix()`/`pushStyle()` left open is popped, with a warning that names `exit()`.
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
@@ -225,7 +225,7 @@ exitListener = events().exitRequested.listen([](ExitRequestEventArgs& args) { ar
 - `cleanup()` が呼ばれるのはルートの App だけです。アプリ終了時、子ノードには `cleanup()` は呼ばれず、デストラクタだけが実行されます。
 - ヘッドレスでは、ループが終わった後に呼ばれ、続いてオーディオの切り離しと `cleanup()` が行われます。`events().exit` は BeforeApp → App::exit()（100）→ AfterApp の終了フックの順に一度通知され、App と必須の終了処理は `clear()` 後も残ります。音声デバイスは動作を続けます。
 - ホットリロードでは、`events().hotReloadUnload` の後に古い App の `exit()` と `cleanup()` が呼ばれます。`events().exit` は本当に終了するときだけ発行されます。
-- サブウィンドウの App では、ウィンドウが閉じたとき（そのウィンドウの `events().exit` の後）か、`setApp()` で入れ替えられたときに呼ばれます。その中ではすでに `getWindow()` が nullptr です。
+- サブウィンドウの App では、ウィンドウが閉じたとき（そのウィンドウの `events().exit` の App 優先度のリスナーとして）か、`setApp()` で入れ替えられたときに呼ばれます。その中ではすでに `getWindow()` が nullptr です。
 - 子ノードとして追加した App では `exit()` は呼ばれません。
 - 閉じ忘れた `pushMatrix()`/`pushStyle()` は、`exit()` の名前を含む警告とともに pop されます。
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
@@ -245,7 +245,7 @@ exitListener = events().exitRequested.listen([](ExitRequestEventArgs& args) { ar
 - `cleanup()`이 호출되는 것은 루트 App뿐입니다. 앱 종료 시 자식 노드에는 `cleanup()`이 호출되지 않고 소멸자만 실행됩니다.
 - 헤드리스에서는 루프가 끝난 뒤 호출되고, 이어서 오디오 분리와 `cleanup()`이 진행됩니다. `events().exit`는 BeforeApp → App::exit()(100) → AfterApp 종료 훅 순서로 한 번 전달되며 App과 필수 종료 처리는 `clear()` 후에도 남습니다. 오디오 장치는 계속 동작합니다.
 - 핫 리로드에서는 `events().hotReloadUnload` 뒤에 이전 App의 `exit()`와 `cleanup()`이 호출됩니다. `events().exit`는 실제로 종료할 때만 발생합니다.
-- 서브 윈도우 App에서는 윈도우가 닫힐 때(그 윈도우의 `events().exit` 뒤) 또는 `setApp()`으로 교체될 때 호출됩니다. 그 안에서는 이미 `getWindow()`가 nullptr입니다.
+- 서브 윈도우 App에서는 윈도우가 닫힐 때(그 윈도우의 `events().exit`에서 App 우선순위 리스너로) 또는 `setApp()`으로 교체될 때 호출됩니다. 그 안에서는 이미 `getWindow()`가 nullptr입니다.
 - 자식 노드로 추가한 App에서는 `exit()`가 호출되지 않습니다.
 - 닫지 않은 `pushMatrix()`/`pushStyle()`은 `exit()`를 언급하는 경고와 함께 pop됩니다.
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
@@ -8450,6 +8450,7 @@ description.ja = "リソースの読み込み結果を表す。"
 description.ko = "리소스의 로드 결과를 나타낸다."
 related = ["LoadError", "loadErrorName"]
 details.en = '''
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
 - Resource loaders such as `Image`, `SoundBuffer`, `VideoPlayer`, and `Font` return this type in place of `bool`. It contains a `LoadError` in `error` and a human-readable `message` that may be empty.
 - A default-constructed result has `error == LoadError::None` and an empty message. `ok()` tests only the error value.
 - Explicit Boolean conversion supports conditions such as `if (image.load("photo.png"))`; Boolean assignments and function arguments require `.ok()` or `static_cast<bool>(result)`.
@@ -8457,6 +8458,7 @@ details.en = '''
 - `Font` first checks for a regular data file, then tries a system font name. Loading `getPath()` accessors, such as those on `SoundBuffer` and `VideoPlayer`, are empty after a failed load; memory loads also leave the source path empty.
 '''
 details.ja = '''
+- OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
 - `Image`、`SoundBuffer`、`VideoPlayer`、`Font` などの読み込み関数が、`bool` の代わりに返す型です。`error` に `LoadError`、`message` に人が読める説明を保持し、メッセージは空の場合もあります。
 - 既定で構築した結果は `error == LoadError::None` で、メッセージは空です。`ok()` はエラー値だけを確認します。
 - 明示的な bool 変換により、`if (image.load("photo.png"))` のような条件式で使えます。bool への代入や関数の引数には `.ok()` または `static_cast<bool>(result)` が必要です。
@@ -8464,6 +8466,7 @@ details.ja = '''
 - `Font` は data 内の通常ファイルを先に確認し、次にシステムフォント名を探します。`SoundBuffer` や `VideoPlayer` などの読み込み元を返す `getPath()` は、読み込み失敗後に空になります。メモリから読み込んだ場合も、読み込み元のパスは空です。
 '''
 details.ko = '''
+- OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
 - `Image`, `SoundBuffer`, `VideoPlayer`, `Font` 등의 로드 함수가 `bool` 대신 반환하는 타입입니다. `error`에 `LoadError`를, `message`에 사람이 읽을 수 있는 설명을 보관하며 메시지는 비어 있을 수도 있습니다.
 - 기본 생성한 결과는 `error == LoadError::None`이며 메시지는 비어 있습니다. `ok()`는 오류 값만 확인합니다.
 - 명시적 bool 변환을 지원하므로 `if (image.load("photo.png"))`와 같은 조건식에 사용할 수 있습니다. bool 대입이나 함수 인자에는 `.ok()` 또는 `static_cast<bool>(result)`가 필요합니다.
@@ -8551,16 +8554,19 @@ description.en = "Identifies a resource-loading error."
 description.ja = "リソース読み込みのエラー種別を表す。"
 description.ko = "리소스 로드 오류의 종류를 나타낸다."
 details.en = '''
+- Asynchronous Image, SoundBuffer and Font preparation or retained-result admission can also fail with `TooLarge`; see their `loadAsync` entries for the shared limits.
 - This scoped enum contains `None`, `FileNotFound`, `UnsupportedFormat`, `DecodeFailed`, `Unknown`, `TooLarge`, and `Cancelled`; `None` has value `0` and means success.
 - `FileNotFound` covers missing files or files that could not be opened; `UnsupportedFormat` identifies an unsupported extension or container, and `DecodeFailed` identifies data rejected by the decoder.
 - `TooLarge` identifies an image dimension or encoded-input size limit, including CPU-only `Pixels`. Image dimensions use the recorded GPU texture limit, or 16384 per axis when unknown; encoded inputs are limited to 64 MiB. `Cancelled` identifies cancellation, and `Unknown` covers failures without a more specific classification.
 '''
 details.ja = '''
+- Image・SoundBuffer・Font の非同期準備または完了結果の保持に対する admission 拒否も `TooLarge` を返します。共有上限は各 `loadAsync` の項を参照してください。
 - スコープ付き列挙型で、`None`、`FileNotFound`、`UnsupportedFormat`、`DecodeFailed`、`Unknown`、`TooLarge`、`Cancelled` があります。`None` の値は `0` で、成功を表します。
 - `FileNotFound` はファイルが存在しない場合や開けない場合、`UnsupportedFormat` は未対応の拡張子やコンテナー、`DecodeFailed` はデコーダーがデータを読み取れなかった場合を表します。
 - `TooLarge` は、CPU 上の `Pixels` を含め、画像の寸法または符号化済み入力サイズの上限超過を表します。寸法は記録済みの GPU テクスチャ上限、不明な場合は各軸 16384 ピクセル、符号化済み入力は 64 MiB が上限です。`Cancelled` はキャンセル、`Unknown` はより具体的に分類できない失敗を表します。
 '''
 details.ko = '''
+- Image, SoundBuffer, Font의 비동기 준비 또는 완료 결과 보관에 대한 admission 거부도 `TooLarge`를 반환합니다. 공유 한도는 각 `loadAsync` 항목을 참조하세요.
 - 범위가 지정된 열거형으로 `None`, `FileNotFound`, `UnsupportedFormat`, `DecodeFailed`, `Unknown`, `TooLarge`, `Cancelled`가 있습니다. `None`의 값은 `0`이며 성공을 나타냅니다.
 - `FileNotFound`는 파일이 없거나 열 수 없는 경우, `UnsupportedFormat`은 지원하지 않는 확장자나 컨테이너, `DecodeFailed`는 디코더가 데이터를 읽지 못한 경우를 나타냅니다.
 - `TooLarge`는 CPU 전용 `Pixels`를 포함하여 이미지 크기나 인코딩된 입력 크기 한도를 초과한 경우를 나타냅니다. 이미지 크기는 기록된 GPU 텍스처 한도, 알 수 없으면 축당 16384픽셀을 사용하며 인코딩된 입력은 64 MiB로 제한됩니다. `Cancelled`는 취소를, `Unknown`은 더 구체적으로 분류할 수 없는 실패를 나타냅니다.
@@ -11534,6 +11540,7 @@ description.en = "Loads an image from a file."
 description.ja = "ファイルから画像を読み込む。"
 description.ko = "파일에서 이미지를 로드한다."
 details.en = '''
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
 - Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - `load(path, mipmaps = false)` decodes the file into four-channel U8 RGBA pixels and uploads an Immutable texture. Relative paths resolve through `getDataPath()`; absolute paths are used as given.
 - The decoder supports JPEG, PNG, TGA, BMP, PSD, GIF, Radiance HDR, Softimage PIC and binary PPM/PGM, subject to each decoder's supported variants. This method produces U8 pixels even for HDR or higher-bit-depth input; use `Pixels::loadHDR()` for floating-point HDR pixels.
@@ -11544,6 +11551,7 @@ details.en = '''
 - Call on the main thread; see `Texture` for GPU resource rules. Use `loadAsync()` for deferred loading, or `Pixels::load()` for CPU decoding on a worker.
 '''
 details.ja = '''
+- OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
 - Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
 - `load(path, mipmaps = false)` はファイルを 4 チャンネルの U8 RGBA ピクセルにデコードし、Immutable テクスチャに転送します。相対パスは `getDataPath()` で解決し、絶対パスはそのまま使います。
 - デコーダーは JPEG、PNG、TGA、BMP、PSD、GIF、Radiance HDR、Softimage PIC、バイナリ PPM/PGM に対応します。各形式の対応範囲はデコーダーによります。HDR や高ビット深度の入力も、このメソッドでは U8 ピクセルになります。浮動小数点の HDR ピクセルには `Pixels::loadHDR()` を使ってください。
@@ -11554,6 +11562,7 @@ details.ja = '''
 - メインスレッドで呼び出してください。GPU リソースの扱いは `Texture` を参照してください。遅延読み込みには `loadAsync()`、ワーカーでの CPU デコードには `Pixels::load()` を使ってください。
 '''
 details.ko = '''
+- OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
 - Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
 - `load(path, mipmaps = false)`는 파일을 4채널 U8 RGBA 픽셀로 디코딩하고 Immutable 텍스처에 업로드합니다. 상대 경로는 `getDataPath()`로 해석하며 절대 경로는 그대로 사용합니다.
 - 디코더는 JPEG, PNG, TGA, BMP, PSD, GIF, Radiance HDR, Softimage PIC, 바이너리 PPM/PGM을 지원합니다. 각 형식의 세부 지원 범위는 디코더에 따릅니다. 이 메서드는 HDR이나 높은 비트 깊이의 입력도 U8 픽셀로 변환합니다. 부동소수점 HDR 픽셀에는 `Pixels::loadHDR()`를 사용합니다.
@@ -11580,6 +11589,7 @@ description.en = "Loads an encoded image from memory."
 description.ja = "メモリ上の符号化された画像を読み込む。"
 description.ko = "메모리에서 인코딩된 이미지를 로드한다."
 details.en = '''
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
 - Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - `loadFromMemory(buffer, len, mipmaps = false)` decodes `len` bytes of encoded image data into four-channel U8 RGBA pixels and uploads an Immutable texture. It copies the decoded pixels and does not retain the input buffer.
 - Uses the same primary decoder as `Image::load`, without the platform file-loading fallback. `mipmaps = true` builds a mip chain.
@@ -11587,6 +11597,7 @@ details.en = '''
 - Without an active GPU, successful decoding keeps CPU pixels and leaves the texture unallocated. Call on the main thread; see `Texture` for GPU resource rules. For worker decoding, use `Pixels::loadFromMemory()`.
 '''
 details.ja = '''
+- OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
 - Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
 - `loadFromMemory(buffer, len, mipmaps = false)` は、符号化された画像データ `len` バイトを 4 チャンネルの U8 RGBA ピクセルにデコードし、Immutable テクスチャに転送します。デコードしたピクセルをコピーし、入力バッファは保持しません。
 - `Image::load` と同じ最初のデコーダーを使いますが、プラットフォーム固有のファイル読み込みへのフォールバックは行いません。`mipmaps = true` はミップマップ連鎖を作成します。
@@ -11594,6 +11605,7 @@ details.ja = '''
 - 有効な GPU がない場合、デコード成功時は CPU ピクセルを保持し、テクスチャは未確保のままです。メインスレッドで呼び出してください。GPU リソースの扱いは `Texture` を参照してください。ワーカーでのデコードには `Pixels::loadFromMemory()` を使ってください。
 '''
 details.ko = '''
+- OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
 - Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
 - `loadFromMemory(buffer, len, mipmaps = false)`는 인코딩된 이미지 데이터 `len`바이트를 4채널 U8 RGBA 픽셀로 디코딩하고 Immutable 텍스처에 업로드합니다. 디코딩된 픽셀을 복사하며 입력 버퍼는 보관하지 않습니다.
 - `Image::load`와 같은 기본 디코더를 사용하지만 플랫폼별 파일 로드 대체 경로는 사용하지 않습니다. `mipmaps = true`는 밉맵 체인을 생성합니다.
@@ -22816,6 +22828,7 @@ description.en = "Loads an image file into CPU pixels."
 description.ja = "画像ファイルを CPU ピクセルに読み込む。"
 description.ko = "이미지 파일을 CPU 픽셀로 읽는다."
 details.en = '''
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
 - Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - Clears existing pixels, decodes with stb_image, and tries `loadPlatform()` if decoding fails; successful loading produces four-channel `PixelFormat::U8` data.
 - Returns a `LoadResult` that evaluates to `true` on success; an unavailable file reports `LoadError::FileNotFound`, and failed decoding reports `LoadError::DecodeFailed`. The buffer remains cleared on failure.
@@ -22823,6 +22836,7 @@ details.en = '''
 - See `Image::load` for supported file formats and path resolution, including relative paths through `getDataPath()` and unchanged absolute paths.
 '''
 details.ja = '''
+- OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
 - Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
 - 既存のピクセルを解放して stb_image でデコードし、デコードに失敗した場合は `loadPlatform()` を試します。成功すると 4 チャンネルの `PixelFormat::U8` データになります。
 - 成功時に `true` と評価される `LoadResult` を返します。ファイルを利用できない場合は `LoadError::FileNotFound`、デコード失敗時は `LoadError::DecodeFailed` を返し、バッファは解放状態のままです。
@@ -22830,6 +22844,7 @@ details.ja = '''
 - 対応形式とパスの解決は `Image::load` を参照してください。相対パスは `getDataPath()` を使い、絶対パスはそのまま使います。
 '''
 details.ko = '''
+- OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
 - Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
 - 기존 픽셀을 해제하고 stb_image로 디코딩하며, 디코딩에 실패하면 `loadPlatform()`을 시도합니다. 성공하면 4채널 `PixelFormat::U8` 데이터가 됩니다.
 - 성공 시 `true`로 평가되는 `LoadResult`를 반환합니다. 파일을 이용할 수 없으면 `LoadError::FileNotFound`, 디코딩에 실패하면 `LoadError::DecodeFailed`를 반환하며 버퍼는 해제 상태로 남습니다.
@@ -22854,18 +22869,21 @@ description.en = "Decodes an image from memory into CPU pixels."
 description.ja = "メモリ上の画像を CPU ピクセルにデコードする。"
 description.ko = "메모리의 이미지를 CPU 픽셀로 디코딩한다."
 details.en = '''
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
 - Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - `loadFromMemory(const unsigned char* buffer, int len)` reads encoded image bytes, with `len` in bytes, and produces four-channel `PixelFormat::U8` pixels; this is not an import of raw pixel values.
 - Clears existing pixels before decoding and returns `LoadResult`; rejected data reports `LoadError::DecodeFailed`, size limits report `TooLarge`, and allocation failure reports `Unknown`. Failure leaves the buffer cleared. It does not try the platform decoder.
 - Performs no GPU work and can run on a worker thread; see `Image::load` for stb_image formats and `Texture` for GPU upload rules.
 '''
 details.ja = '''
+- OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
 - Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
 - `loadFromMemory(const unsigned char* buffer, int len)` はエンコード済みの画像データを読み、4 チャンネルの `PixelFormat::U8` ピクセルを生成します。`len` の単位はバイトで、生のピクセル値を取り込む関数ではありません。
 - デコード前に既存のピクセルを解放し、`LoadResult` を返します。不正なデータは `LoadError::DecodeFailed`、サイズ制限は `TooLarge`、メモリ確保の失敗は `Unknown` です。失敗時のバッファは解放状態のままです。プラットフォームのデコーダは試しません。
 - GPU 処理を行わないため、ワーカースレッドで実行できます。stb_image の対応形式は `Image::load`、GPU アップロードの規則は `Texture` を参照してください。
 '''
 details.ko = '''
+- OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
 - Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
 - `loadFromMemory(const unsigned char* buffer, int len)`는 인코딩된 이미지 바이트를 읽어 4채널 `PixelFormat::U8` 픽셀을 생성합니다. `len`의 단위는 바이트이며 원시 픽셀 값을 가져오는 함수가 아닙니다.
 - 디코딩 전에 기존 픽셀을 해제하고 `LoadResult`를 반환합니다. 잘못된 데이터는 `LoadError::DecodeFailed`, 크기 제한은 `TooLarge`, 메모리 할당 실패는 `Unknown`입니다. 실패하면 버퍼는 해제 상태로 남습니다. 플랫폼 디코더는 시도하지 않습니다.
@@ -22879,18 +22897,21 @@ description.en = "Loads HDR images into floating-point CPU pixels."
 description.ja = "HDR 画像を浮動小数点の CPU ピクセルに読み込む。"
 description.ko = "HDR 이미지를 부동소수점 CPU 픽셀로 읽는다."
 details.en = '''
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
 - Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - Decodes Radiance HDR data into four-channel `PixelFormat::F32` pixels with linear RGB values and alpha set to 1; the float decoder also accepts supported non-HDR images and converts them to floats.
 - Clears existing pixels first and returns `LoadResult`; unavailable files report `LoadError::FileNotFound`, and decoding failures report `LoadError::DecodeFailed`, leaving the buffer cleared. There is no platform decoder fallback.
 - Performs no GPU work; see `Image::load` for path resolution, including relative paths through `getDataPath()` and unchanged absolute paths.
 '''
 details.ja = '''
+- OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
 - Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
 - Radiance HDR データを線形 RGB 値の 4 チャンネル `PixelFormat::F32` ピクセルにデコードし、アルファを 1 にします。float デコーダは対応する非 HDR 画像も受け付け、浮動小数点に変換します。
 - 最初に既存のピクセルを解放し、`LoadResult` を返します。ファイルを利用できない場合は `LoadError::FileNotFound`、デコード失敗時は `LoadError::DecodeFailed` を返し、バッファは解放状態のままです。プラットフォームのデコーダへの切り替えはありません。
 - GPU 処理は行いません。パスの解決は `Image::load` を参照してください。相対パスは `getDataPath()` を使い、絶対パスはそのまま使います。
 '''
 details.ko = '''
+- OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
 - Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
 - Radiance HDR 데이터를 선형 RGB 값의 4채널 `PixelFormat::F32` 픽셀로 디코딩하고 알파를 1로 설정합니다. float 디코더는 지원되는 비 HDR 이미지도 받아 부동소수점으로 변환합니다.
 - 먼저 기존 픽셀을 해제하고 `LoadResult`를 반환합니다. 파일을 이용할 수 없으면 `LoadError::FileNotFound`, 디코딩에 실패하면 `LoadError::DecodeFailed`를 반환하며 버퍼는 해제 상태로 남습니다. 플랫폼 디코더로 대체하지 않습니다.
@@ -23009,6 +23030,7 @@ description.en = "Saves CPU pixels to an image file."
 description.ja = "CPU ピクセルを画像ファイルに保存する。"
 description.ko = "CPU 픽셀을 이미지 파일로 저장한다."
 details.en = '''
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
 - Selects JPEG for `.jpg` or `.jpeg`, BMP for `.bmp`, and PNG for every other extension, ignoring extension case and preserving the requested filename. JPEG quality is 90.
 - Returns `SaveResult`; unallocated data, a null data pointer, or F32 format returns `SaveError::WriteFailed`.
 - Resolves relative paths through `getDataPath()`, leaves absolute paths unchanged, and creates missing parent directories. Paths inside the application bundle return `SaveError::AccessDenied`.
@@ -23016,6 +23038,7 @@ details.en = '''
 - Atomic replacement does not guarantee durability after power loss.
 '''
 details.ja = '''
+- OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
 - 拡張子の大文字小文字を区別せず、`.jpg`・`.jpeg` は JPEG、`.bmp` は BMP、それ以外は PNG で保存し、指定したファイル名を保持します。JPEG の品質は 90 です。
 - `SaveResult` を返します。データが未確保、データポインタが null、または F32 形式の場合は `SaveError::WriteFailed` を返します。
 - 相対パスは `getDataPath()` で解決し、絶対パスはそのまま使い、存在しない親フォルダを作成します。アプリケーションのバンドル内のパスは `SaveError::AccessDenied` を返します。
@@ -23023,6 +23046,7 @@ details.ja = '''
 - アトミックな置き換えは、電源断時のデータの永続性を保証しません。
 '''
 details.ko = '''
+- OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
 - 확장자의 대소문자를 구분하지 않고 `.jpg`와 `.jpeg`는 JPEG, `.bmp`는 BMP, 그 외는 PNG로 저장하며 요청한 파일명을 유지합니다. JPEG 품질은 90입니다.
 - `SaveResult`를 반환합니다. 데이터가 할당되지 않았거나 데이터 포인터가 null이거나 F32 형식이면 `SaveError::WriteFailed`를 반환합니다.
 - 상대 경로는 `getDataPath()`로 해석하고 절대 경로는 그대로 사용하며, 없는 상위 폴더를 생성합니다. 애플리케이션 번들 내부 경로는 `SaveError::AccessDenied`를 반환합니다.
@@ -40178,6 +40202,7 @@ details.en = '''
 - Updates and drawing follow the window's display timing on macOS and Windows. Desktop Linux uses timer pacing based on a measured refresh-rate estimate. `Window::setFps` can reduce the update and drawing rate.
 - Updates and drawing pause while the backend reports the window as hidden or occluded; see `Window::isOccluded` for platform differences.
 - Create, operate on, and release windows on the main thread. Window callbacks run synchronously on that thread.
+- App-facing events deliver `BeforeApp` listeners, the App and its node tree at `EventPriority::App` (100), then `AfterApp` listeners. An earlier listener or node that explicitly consumes input stops later delivery. `clear()` preserves the framework-owned App bindings. Equal-priority listeners follow registration order; App bindings are registered when an attachment is applied.
 - GPU resources such as `Texture`, `Fbo`, `Mesh`, and `Font` are shared and can be used from any window.
 - Keep a `shared_ptr<Window>` to retain the window; destroying the last owner closes it immediately. Closing the native window leaves retained handles valid, with `Window::isOpen()` returning `false`, and leaves the main window and other windows running.
 - For supported platforms and creation failures, see `createWindow`; for the attached App's lifecycle, see `Window::setApp`.
@@ -40188,6 +40213,7 @@ details.ja = '''
 - macOS と Windows では、そのウィンドウのディスプレイのタイミングに合わせて更新と描画を行います。デスクトップ Linux では、測定したリフレッシュレートの推定値に基づくタイマーで実行します。`Window::setFps` で更新と描画の頻度を下げられます。
 - バックエンドがウィンドウを非表示または隠れた状態と報告している間は、更新と描画を停止します。プラットフォームによる違いは `Window::isOccluded` を参照してください。
 - ウィンドウの作成、操作、解放はメインスレッドで行ってください。ウィンドウのコールバックも同じスレッドで同期的に呼ばれます。
+- App に届くイベントは、`BeforeApp` リスナー、`EventPriority::App`（100）の App と Node ツリー、`AfterApp` リスナーの順に配信されます。先のリスナーやノードが明示的に入力を消費すると、後続には届きません。`clear()` はフレームワーク所有の App の登録を保持します。同じ優先度では登録順に呼ばれ、App の登録は設定要求の反映時に行われます。
 - `Texture`、`Fbo`、`Mesh`、`Font` などの GPU リソースは共有され、どのウィンドウからも使用できます。
 - ウィンドウを維持するには `shared_ptr<Window>` を保持してください。最後の所有者が破棄されると、その場で閉じます。ネイティブウィンドウが閉じても保持しているハンドルは有効で、`Window::isOpen()` は `false` を返します。メインウィンドウや他のウィンドウは動き続けます。
 - 対応プラットフォームと作成失敗時の動作は `createWindow`、設定した App のライフサイクルは `Window::setApp` を参照してください。
@@ -40198,6 +40224,7 @@ details.ko = '''
 - macOS와 Windows에서는 해당 윈도우가 있는 디스플레이의 타이밍에 맞춰 업데이트하고 그립니다. 데스크톱 Linux에서는 측정한 주사율 추정값에 기반한 타이머를 사용합니다. `Window::setFps`로 업데이트와 그리기 빈도를 낮출 수 있습니다.
 - 백엔드가 윈도우를 숨겨지거나 가려진 상태로 보고하는 동안에는 업데이트와 그리기를 중지합니다. 플랫폼별 차이는 `Window::isOccluded`를 참조하세요.
 - 윈도우의 생성, 조작, 해제는 메인 스레드에서 수행하세요. 윈도우 콜백도 같은 스레드에서 동기적으로 호출됩니다.
+- App에 전달되는 이벤트는 `BeforeApp` 리스너, `EventPriority::App`(100)의 App과 Node 트리, `AfterApp` 리스너 순으로 전달됩니다. 앞선 리스너나 노드가 명시적으로 입력을 소비하면 후속 전달이 중단됩니다. `clear()`는 프레임워크 소유의 App 등록을 유지합니다. 같은 우선순위는 등록 순서를 따르며 App은 연결 요청을 반영할 때 등록됩니다.
 - `Texture`, `Fbo`, `Mesh`, `Font` 등의 GPU 리소스는 공유되며 어느 윈도우에서든 사용할 수 있습니다.
 - 윈도우를 유지하려면 `shared_ptr<Window>`를 보관하세요. 마지막 소유자가 파괴되면 즉시 닫힙니다. 네이티브 윈도우가 닫혀도 보관 중인 핸들은 유효하며 `Window::isOpen()`은 `false`를 반환합니다. 메인 윈도우와 다른 윈도우는 계속 실행됩니다.
 - 지원 플랫폼과 생성 실패 시 동작은 `createWindow`를, 연결한 App의 라이프사이클은 `Window::setApp`을 참조하세요.
@@ -40212,8 +40239,10 @@ description.ko = "이 윈도우에 App을 연결하거나 교체하도록 요청
 details.en = '''
 - Pass a `shared_ptr<App>` to give this window content, or `nullptr` to remove its App. Each window has one App, whose update, draw, input, and resize callbacks run for this window; its RectNode size follows the window size.
 - Returns immediately and applies the request at the next boundary before or after this window processes a frame or event. Calling it from the App's own `update()`, `draw()`, or input callback is supported. Until application, `getApp()` returns the current App.
+- A request during update or input keeps the outgoing App for the entire current tick or event, including the remaining tree processing and drawing in that tick. Bindings change only when the request is accepted at the boundary.
 - The last accepted request before the boundary wins. Requesting the current App cancels a pending replacement without restarting it. A pending `close()` takes precedence over attachment.
 - The App's `setup()` runs once, on its first processed frame. Replacing or removing it, or closing the window, calls its `exit()`, disconnects its audio callbacks and waits for any running audio callback, then calls its `cleanup()`.
+- Replacement and removal directly call the outgoing App's `exit()` exactly once and do not notify `events().exit`; this is an exception to event-based delivery. Closing the window delivers exit through the window event instead.
 - An App whose cleanup has begun cannot be attached again; create a new App to display it again.
 - An App already attached to another window, the running main App, an App whose cleanup has begun, or attachment to a closed or closing window is rejected with an error log. These checks run again when the request is applied; rejection leaves the current App unchanged.
 - Passing `nullptr` to a closed or closing window has no effect. When replacement is applied, `getApp()` already returns the replacement during the outgoing App's exit and cleanup callbacks.
@@ -40222,8 +40251,10 @@ details.en = '''
 details.ja = '''
 - `shared_ptr<App>` を渡すと、このウィンドウにコンテンツを設定します。`nullptr` を渡すと App を外します。各ウィンドウに設定できる App は 1 つで、update、draw、入力、リサイズのコールバックはこのウィンドウに対して実行され、RectNode のサイズもウィンドウに合わせて更新されます。
 - すぐに戻り、このウィンドウがフレームやイベントを処理する前後の次の境界で要求を反映します。App 自身の `update()`、`draw()`、入力コールバックからも呼び出せます。反映されるまで、`getApp()` は現在の App を返します。
+- update や入力中の要求でも、現在の tick やイベントが終わるまでは元の App が残り、その tick の残りのツリー処理や描画も受け取ります。登録の切り替えは境界で要求が受け付けられたときだけ行います。
 - 境界までに受け付けた最後の要求が有効です。現在の App を指定すると、App を再起動せずに差し替え待ちの要求を取り消します。`close()` が要求されている場合は、App の設定より優先されます。
 - App の `setup()` は最初に処理されるフレームで 1 回だけ実行されます。差し替え、取り外し、ウィンドウの終了では、App の `exit()` を呼び、オーディオのコールバックを切断して実行中の呼び出しを待ってから、`cleanup()` を呼びます。
+- 差し替えと取り外しは、元の App の `exit()` を直接 1 回だけ呼び、`events().exit` は通知しません。これはイベントによる配信の例外です。ウィンドウを閉じる場合は、ウィンドウのイベント経由で exit を配信します。
 - クリーンアップが始まった App は再設定できません。再び表示するには、新しい App を作成してください。
 - 別のウィンドウに設定済みの App、実行中のメイン App、クリーンアップが始まった App、閉じたウィンドウや閉じる途中のウィンドウへの設定は、エラーログを出して拒否します。反映時にも同じ検査を行い、拒否した場合は現在の App を変更しません。
 - 閉じたウィンドウや閉じる途中のウィンドウに `nullptr` を渡しても何もしません。差し替えが反映されると、元の App の exit や cleanup のコールバック内でも、`getApp()` は差し替え後の App を返します。
@@ -40232,8 +40263,10 @@ details.ja = '''
 details.ko = '''
 - `shared_ptr<App>`을 전달하여 이 윈도우에 콘텐츠를 설정하거나, `nullptr`을 전달하여 App을 분리합니다. 윈도우마다 App 하나를 연결하며, update, draw, 입력, 크기 변경 콜백은 이 윈도우에 대해 실행됩니다. App의 RectNode 크기도 윈도우 크기에 맞춰 갱신됩니다.
 - 즉시 반환하고 이 윈도우가 프레임이나 이벤트를 처리하기 전후의 다음 경계에서 요청을 반영합니다. App 자신의 `update()`, `draw()`, 입력 콜백에서도 호출할 수 있습니다. 반영되기 전까지 `getApp()`은 현재 App을 반환합니다.
+- update나 입력 중에 요청해도 현재 tick이나 이벤트가 끝날 때까지 이전 App이 남아 해당 tick의 나머지 트리 처리와 그리기를 받습니다. 등록은 경계에서 요청을 수락할 때만 바뀝니다.
 - 경계까지 수락한 마지막 요청이 적용됩니다. 현재 App을 지정하면 App을 다시 시작하지 않고 대기 중인 교체 요청을 취소합니다. 대기 중인 `close()` 요청은 App 연결보다 우선합니다.
 - App의 `setup()`은 처음 처리하는 프레임에서 한 번 실행됩니다. App을 교체하거나 분리하거나 윈도우를 닫으면 App의 `exit()`을 호출하고, 오디오 콜백의 연결을 해제하여 실행 중인 호출이 끝날 때까지 기다린 다음 `cleanup()`을 호출합니다.
+- 교체와 분리는 이전 App의 `exit()`을 직접 한 번 호출하며 `events().exit`을 알리지 않습니다. 이는 이벤트 기반 전달의 예외입니다. 윈도우를 닫을 때는 윈도우 이벤트를 통해 exit을 전달합니다.
 - 정리가 시작된 App은 다시 연결할 수 없습니다. 다시 표시하려면 새 App을 생성합니다.
 - 다른 윈도우에 이미 연결된 App, 실행 중인 메인 App, 정리가 시작된 App, 닫혔거나 닫히는 중인 윈도우에 대한 연결은 오류 로그를 남기고 거부합니다. 요청을 반영할 때도 같은 검사를 수행하며, 거부하면 현재 App을 변경하지 않습니다.
 - 닫혔거나 닫히는 중인 윈도우에 `nullptr`을 전달해도 아무 작업을 하지 않습니다. 교체가 반영되면 이전 App의 exit 및 cleanup 콜백 안에서도 `getApp()`은 교체된 App을 반환합니다.
@@ -40274,22 +40307,19 @@ description.ko = "이 윈도우 전용 이벤트 모음을 반환한다."
 details.en = '''
 - Returns a `CoreEvents&` owned by this Window, including its mouse, keyboard, update, draw, and exit events. The reference remains valid while the Window object exists.
 - Keep the `EventListener` returned by `listen()` in a member to retain the subscription; see `Event<T>` for listener lifetime rules.
-- See `App::mousePressed` for input callback order, `Window::close` for exit order, and `Window::setApp` for main-thread requirements.
-- Known issue: [#908](https://github.com/TrussC-org/TrussC/issues/908) (input listeners with AfterApp priority also run before the App callback).
+- See `Window` for input callback order, `Window::close` for exit order, and `Window::setApp` for main-thread requirements.
 '''
 details.ja = '''
 - この Window が所有する `CoreEvents&` を返します。マウス、キーボード、update、draw、exit などのイベントを含みます。参照は Window オブジェクトが存在する間有効です。
 - 購読を続けるには、`listen()` が返す `EventListener` をメンバーに保持してください。リスナーの寿命については `Event<T>` を参照してください。
-- 入力コールバックの順番は `App::mousePressed`、終了時の順番は `Window::close`、メインスレッドでの使用は `Window::setApp` を参照してください。
-- 既知の問題: [#908](https://github.com/TrussC-org/TrussC/issues/908)（優先度 AfterApp の入力リスナーも App のコールバックより先に呼ばれます）。
+- 入力コールバックの順番は `Window`、終了時の順番は `Window::close`、メインスレッドでの使用は `Window::setApp` を参照してください。
 '''
 details.ko = '''
 - 이 Window가 소유하는 `CoreEvents&`를 반환합니다. 마우스, 키보드, update, draw, exit 등의 이벤트를 포함합니다. 참조는 Window 객체가 존재하는 동안 유효합니다.
 - 구독을 유지하려면 `listen()`이 반환하는 `EventListener`를 멤버에 보관합니다. 리스너의 수명 규칙은 `Event<T>`를 참조하세요.
-- 입력 콜백 순서는 `App::mousePressed`, 종료 순서는 `Window::close`, 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
-- 알려진 문제: [#908](https://github.com/TrussC-org/TrussC/issues/908)(AfterApp 우선순위의 입력 리스너도 App 콜백보다 먼저 호출됩니다).
+- 입력 콜백 순서는 `Window`, 종료 순서는 `Window::close`, 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
 '''
-related = ["CoreEvents", "Event<T>", "App::mousePressed", "Window::close"]
+related = ["CoreEvents", "Event<T>", "Window", "Window::close"]
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
 EventListener listener;
@@ -40309,7 +40339,7 @@ details.en = '''
 - Returns immediately; the main window and other windows keep running. Calling it from this window's own App callbacks is supported. Repeated requests or calls on a closed window have no effect.
 - Closure follows the same path as the close button, outside window callbacks: after the current run-loop pass on Linux, through a close message posted at the loop tail on Windows, and after the next main-window tick on macOS.
 - Until closure is applied, `isOpen()` remains `true`, and `getApp()` and `App::getWindow()` still return the current App and window.
-- Teardown destroys the native window and makes `isOpen()` return `false`, then notifies `events().exit`, then ends the App as described in `Window::setApp`. `App::getWindow()` returns `nullptr` during these teardown callbacks.
+- Teardown destroys the native window and makes `isOpen()` return `false`, then notifies `events().exit` exactly once while retaining the outgoing App. Within that notification, `BeforeApp` runs before `App::exit()` at 100, and mandatory teardown hooks run at `AfterApp` even if the App calls `events().exit.clear()`. Audio detachment and `cleanup()` follow the notification. `getApp()` and `App::getWindow()` return `nullptr` during these teardown callbacks; the framework holds the outgoing App internally.
 - Closing leaves existing Window handles valid. Destroying the Window object when its last `shared_ptr` is released closes its native window immediately.
 - For main-thread requirements, see `Window::setApp`.
 '''
@@ -40317,7 +40347,7 @@ details.ja = '''
 - すぐに戻り、メインウィンドウや他のウィンドウは動き続けます。このウィンドウ自身の App のコールバックからも呼び出せます。繰り返し要求した場合や、閉じたウィンドウに対して呼んだ場合は何もしません。
 - 閉じるボタンと同じ経路で、ウィンドウのコールバックの外で閉じます。Linux では今回のイベントループの処理後、Windows ではループの末尾で送った終了メッセージの処理時、macOS では次のメインウィンドウのフレーム処理後に反映します。
 - 終了が反映されるまで、`isOpen()` は `true` のままで、`getApp()` と `App::getWindow()` は現在の App とウィンドウを返します。
-- 終了処理では、ネイティブウィンドウを破棄して `isOpen()` が `false` を返す状態にし、`events().exit` を通知してから、`Window::setApp` に記載した手順で App を終了します。これらの終了コールバック内では、`App::getWindow()` は `nullptr` を返します。
+- 終了処理では、ネイティブウィンドウを破棄して `isOpen()` が `false` を返す状態にし、元の App を保持したまま `events().exit` を 1 回だけ通知します。その通知では `BeforeApp`、優先度 100 の `App::exit()`、`AfterApp` の必須終了フックの順に実行します。App が `events().exit.clear()` を呼んでも必須フックは残ります。通知後にオーディオを切断し、`cleanup()` を実行します。これらの終了コールバック内では、`getApp()` と `App::getWindow()` は `nullptr` を返し、フレームワークが元の App を内部で保持します。
 - 閉じたあとも、既存の Window ハンドルは有効です。最後の `shared_ptr` を解放して Window オブジェクトを破棄した場合は、ネイティブウィンドウを直ちに閉じます。
 - メインスレッドでの使用については `Window::setApp` を参照してください。
 '''
@@ -40325,7 +40355,7 @@ details.ko = '''
 - 즉시 반환하며 메인 윈도우와 다른 윈도우는 계속 실행됩니다. 이 윈도우 자신의 App 콜백에서도 호출할 수 있습니다. 반복 요청이나 닫힌 윈도우에 대한 호출은 아무 작업도 하지 않습니다.
 - 닫기 버튼과 같은 경로로 윈도우 콜백 밖에서 닫습니다. Linux에서는 현재 이벤트 루프 처리 후, Windows에서는 루프 끝에서 보낸 닫기 메시지를 처리할 때, macOS에서는 다음 메인 윈도우 프레임 처리 후에 반영합니다.
 - 닫기가 반영되기 전까지 `isOpen()`은 `true`를 유지하며, `getApp()`과 `App::getWindow()`은 현재 App과 윈도우를 반환합니다.
-- 종료 처리에서는 네이티브 윈도우를 파괴하여 `isOpen()`이 `false`를 반환하게 하고, `events().exit`을 알린 다음 `Window::setApp`에 설명된 절차로 App을 종료합니다. 이러한 종료 콜백 안에서는 `App::getWindow()`이 `nullptr`을 반환합니다.
+- 종료 처리에서는 네이티브 윈도우를 파괴하여 `isOpen()`이 `false`를 반환하게 하고, 이전 App을 유지한 채 `events().exit`을 한 번 알립니다. 알림 안에서 `BeforeApp`, 우선순위 100의 `App::exit()`, `AfterApp`의 필수 종료 훅 순으로 실행됩니다. App이 `events().exit.clear()`를 호출해도 필수 훅은 유지됩니다. 알림 후에 오디오를 분리하고 `cleanup()`을 실행합니다. 이러한 종료 콜백 안에서는 `getApp()`과 `App::getWindow()`이 `nullptr`을 반환하며 프레임워크가 이전 App을 내부에서 유지합니다.
 - 닫은 뒤에도 기존 Window 핸들은 유효합니다. 마지막 `shared_ptr`을 해제하여 Window 객체를 소멸시키면 네이티브 윈도우를 즉시 닫습니다.
 - 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
 '''
@@ -61284,6 +61314,7 @@ description.ja = "保存や録画・録音の操作結果を表す。"
 description.ko = "저장이나 녹화·녹음 작업의 결과를 나타낸다."
 related = ["SaveError"]
 details.en = '''
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
 - Contains a `SaveError` in `error` and a human-readable `message`. A default-constructed result has `error == SaveError::None` and an empty message; `ok()` tests only the error value.
 - Explicit Boolean conversion supports conditions such as `if (saveTextFile(path, text))`; Boolean assignments and function arguments require `.ok()` or an explicit cast.
 - Small-file saves check writing and closing before atomically replacing the destination with the temporary file, and check that replacement succeeds. Append writers and recorders write in place.
@@ -61291,6 +61322,7 @@ details.en = '''
 - `saveScreenshot()` still returns a `bool` indicating queue acceptance. Web screenshot output is handed to the browser, so completion of the browser's disk write is not observable.
 '''
 details.ja = '''
+- OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
 - `error` に `SaveError`、`message` に人が読める説明を保持します。既定で構築した結果は `error == SaveError::None` で、メッセージは空です。`ok()` はエラー値だけを確認します。
 - 明示的な bool 変換により、`if (saveTextFile(path, text))` のような条件式で使えます。bool への代入や関数の引数には `.ok()` または明示的なキャストが必要です。
 - 小さいファイルの保存では、書き込みとクローズの成功を確認してから、一時ファイルで保存先をアトミックに置き換え、その成功を確認します。追記処理と録画・録音は対象ファイルに直接書き込みます。
@@ -61298,6 +61330,7 @@ details.ja = '''
 - `saveScreenshot()` は引き続き、キューへの登録成功を表す `bool` を返します。Web のスクリーンショット出力はブラウザーに渡すため、ブラウザーによるディスク書き込みの完了は確認できません。
 '''
 details.ko = '''
+- OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
 - `error`에 `SaveError`를, `message`에 사람이 읽을 수 있는 설명을 보관합니다. 기본 생성한 결과는 `error == SaveError::None`이며 메시지는 비어 있습니다. `ok()`는 오류 값만 확인합니다.
 - 명시적 bool 변환을 지원하므로 `if (saveTextFile(path, text))`와 같은 조건식에 사용할 수 있습니다. bool 대입이나 함수 인자에는 `.ok()` 또는 명시적 형 변환이 필요합니다.
 - 작은 파일을 저장할 때는 쓰기와 닫기의 성공을 확인한 뒤 임시 파일로 대상 파일을 원자적으로 교체하고 교체 성공을 확인합니다. 추가 쓰기와 녹화·녹음은 대상 파일에 직접 기록합니다.
@@ -61539,6 +61572,9 @@ description.en = "Loads an image asynchronously."
 description.ja = "画像を非同期に読み込む。"
 description.ko = "이미지를 비동기로 로드한다."
 details.en = '''
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
+- Asynchronous Image, SoundBuffer and Font loads share 4 active preparations. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
+- On Web, CMake propagates exception support to framework and application C++ code for document/font loaders and reflection. Resource preparation and application also retain exception-enabled out-of-line host definitions. If a custom build disables exception support in application TUs, allocation failure inside inline header helpers remains outside the recovery guarantee.
 - Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - `loadAsync(path, mipmaps = false)` returns without a result; retain an `onLoad` listener to receive the `LoadResult`. Path resolution, formats and load errors follow `Image::load`.
 - On native platforms, a worker decodes into private CPU pixels. A later main-thread frame applies the result, uploads the Immutable texture, optionally builds mipmaps and sends `onLoad`; notification never occurs inside `loadAsync()`.
@@ -61552,6 +61588,9 @@ details.en = '''
 - On Web, VFS reading and CPU decoding are deferred to a main-loop pass and may stall that frame; application follows in a subsequent pass. This entry point does not wait through Asyncify.
 '''
 details.ja = '''
+- OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
+- Image・SoundBuffer・Font の非同期読み込みは、同時準備 4 件を共有します。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（終了時に未配信なら省略します）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
+- Web では、ドキュメント・フォント読み込みとリフレクションのため、CMake がフレームワークとアプリケーションの C++ コードに例外サポートを伝播します。リソースの準備・反映も、例外を有効にしたヘッダー外のホスト定義を維持します。独自ビルドでアプリケーションの翻訳単位の例外サポートを無効にした場合、ヘッダー内のインラインヘルパーでのメモリ確保失敗は復旧保証の対象外です。
 - Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
 - `loadAsync(path, mipmaps = false)` は結果を返しません。`LoadResult` を受け取るには `onLoad` のリスナーを保持してください。パス解決、対応形式、読み込みエラーは `Image::load` と同じです。
 - ネイティブではワーカーが専用の CPU ピクセルにデコードします。後のメインスレッドのフレームで結果を反映し、Immutable テクスチャへの転送と任意のミップマップ生成を行ってから `onLoad` を通知します。`loadAsync()` の呼び出し中には通知しません。
@@ -61565,6 +61604,9 @@ details.ja = '''
 - Web では VFS 読み込みと CPU デコードを後のメインループ処理に回すため、そのフレームが停止することがあります。結果はさらに後の処理で反映します。この入口では Asyncify による待機を行いません。
 '''
 details.ko = '''
+- OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
+- Image, SoundBuffer, Font의 비동기 로드는 동시 준비 4건을 공유합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(종료 시 미전달 Notice는 생략합니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
+- Web에서는 문서·폰트 로더와 리플렉션을 위해 CMake가 프레임워크와 애플리케이션의 C++ 코드에 예외 지원을 전파합니다. 리소스 준비와 반영도 예외가 활성화된 헤더 밖의 호스트 정의를 유지합니다. 사용자 정의 빌드에서 애플리케이션 번역 단위의 예외 지원을 비활성화하면 인라인 헤더 헬퍼 내부의 할당 실패는 복구 보장 대상이 아닙니다.
 - Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
 - `loadAsync(path, mipmaps = false)`는 결과를 반환하지 않습니다. `LoadResult`를 받으려면 `onLoad` 리스너를 유지합니다. 경로 해석, 지원 형식과 로드 오류는 `Image::load`를 따릅니다.
 - 네이티브 플랫폼에서는 워커가 전용 CPU 픽셀로 디코딩합니다. 이후 메인 스레드 프레임에서 결과를 반영하고 Immutable 텍스처 업로드와 선택적인 밉맵 생성을 수행한 뒤 `onLoad`로 알립니다. `loadAsync()` 호출 중에는 알리지 않습니다.
@@ -61631,6 +61673,8 @@ description.en = "Starts asynchronous loading of decoded audio data."
 description.ja = "デコード済み音声データの非同期読み込みを開始する。"
 description.ko = "디코딩된 오디오 데이터의 비동기 로드를 시작한다."
 details.en = '''
+- Asynchronous Image, SoundBuffer and Font loads share 4 active preparations. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
+- On Web, CMake propagates exception support to framework and application C++ code for document/font loaders and reflection. Resource preparation and application also retain exception-enabled out-of-line host definitions. If a custom build disables exception support in application TUs, allocation failure inside inline header helpers remains outside the recovery guarantee.
 - `loadAsync(path)` returns no result directly and uses the same path resolution, format selection, errors, and decoder logs as `SoundBuffer::load`. Native builds prepare private PCM and metadata on a worker; existing committed data remains readable until the result is applied.
 - Results are applied on the main thread in a later frame, never during this call. Each frame or headless loop pass takes one batch of pending completions; work queued during that pass waits for another pass. After application, `isLoading()` becomes `false` before one `onLoad` event delivers the `LoadResult`.
 - A successful replacement of PCM and metadata holds the audio mixer lock, including when the buffer is playing. On any failure, previous PCM and audio metadata are preserved and no partial sound is published; the recorded path is cleared as with synchronous loads.
@@ -61642,6 +61686,8 @@ details.en = '''
 - On Web, WAV/MP3/FLAC/OGG file reading and CPU decoding are deferred to a main-loop pass and may stall that frame; application waits for a subsequent pass. AAC/M4A use asynchronous browser decoding and poll for completion before application is queued. This entry point does not wait through Asyncify.
 '''
 details.ja = '''
+- Image・SoundBuffer・Font の非同期読み込みは、同時準備 4 件を共有します。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（終了時に未配信なら省略します）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
+- Web では、ドキュメント・フォント読み込みとリフレクションのため、CMake がフレームワークとアプリケーションの C++ コードに例外サポートを伝播します。リソースの準備・反映も、例外を有効にしたヘッダー外のホスト定義を維持します。独自ビルドでアプリケーションの翻訳単位の例外サポートを無効にした場合、ヘッダー内のインラインヘルパーでのメモリ確保失敗は復旧保証の対象外です。
 - `loadAsync(path)` は結果を直接返さず、パスの解決、形式の選択、エラー、デコーダーのログは `SoundBuffer::load` と同じです。ネイティブではワーカーが専用の PCM とメタデータを準備し、結果が反映されるまでは確定済みのデータを参照できます。
 - 結果は後のフレームのメインスレッドで反映され、この呼び出し中には反映されません。各フレームまたはヘッドレスのループ処理では、保留中の完了処理を一括で取り出し、その処理中に追加された分は次回に回します。反映後に `isLoading()` が `false` になり、続いて `onLoad` が `LoadResult` を一度通知します。
 - 成功時の PCM とメタデータの置き換えは、再生中のバッファでもオーディオミキサーのロックを保持して行います。どの失敗でも以前の PCM と音声メタデータを保持し、部分的な音声を公開しません。記録されたパスは同期読み込みと同様に消去します。
@@ -61653,6 +61699,8 @@ details.ja = '''
 - Web では WAV/MP3/FLAC/OGG のファイル読み込みと CPU デコードを後のメインループ処理に回すため、そのフレームが停止する場合があります。結果はさらに後の処理で反映します。AAC/M4A はブラウザーで非同期にデコードし、完了を定期的に確認してから反映をキューに追加します。この入口では Asyncify による待機を行いません。
 '''
 details.ko = '''
+- Image, SoundBuffer, Font의 비동기 로드는 동시 준비 4건을 공유합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(종료 시 미전달 Notice는 생략합니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
+- Web에서는 문서·폰트 로더와 리플렉션을 위해 CMake가 프레임워크와 애플리케이션의 C++ 코드에 예외 지원을 전파합니다. 리소스 준비와 반영도 예외가 활성화된 헤더 밖의 호스트 정의를 유지합니다. 사용자 정의 빌드에서 애플리케이션 번역 단위의 예외 지원을 비활성화하면 인라인 헤더 헬퍼 내부의 할당 실패는 복구 보장 대상이 아닙니다.
 - `loadAsync(path)`는 결과를 직접 반환하지 않으며 경로 해석, 형식 선택, 오류, 디코더 로그는 `SoundBuffer::load`와 같습니다. 네이티브 빌드에서는 워커가 별도의 PCM과 메타데이터를 준비하며, 결과가 반영될 때까지 기존에 확정된 데이터를 읽을 수 있습니다.
 - 결과는 이후 프레임의 메인 스레드에서 반영되며 이 호출 중에는 반영되지 않습니다. 각 프레임 또는 헤드리스 루프 실행은 대기 중인 완료 처리를 한 번에 가져오며, 처리 중 추가된 작업은 다음 실행까지 기다립니다. 반영 후 `isLoading()`이 `false`가 되고 이어서 `onLoad`가 `LoadResult`를 한 번 전달합니다.
 - 성공 시 PCM과 메타데이터를 교체할 때는 재생 중인 버퍼도 오디오 믹서 잠금을 유지합니다. 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 기록된 경로는 동기 로드와 같이 비웁니다.
@@ -61716,6 +61764,8 @@ description.en = "Load a font asynchronously and report completion through an ev
 description.ja = "フォントを非同期で読み込み、イベントで完了を通知する。"
 description.ko = "폰트를 비동기로 로드하고 이벤트로 완료를 알린다."
 details.en = '''
+- Asynchronous Image, SoundBuffer and Font loads share 4 active preparations. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
+- On Web, CMake propagates exception support to framework and application C++ code for document/font loaders and reflection. Resource preparation and application also retain exception-enabled out-of-line host definitions. If a custom build disables exception support in application TUs, allocation failure inside inline header helpers remains outside the recovery guarantee.
 - Call `loadAsync(nameOrPath, size, faceIndex = 0)` with a file path, system font name, or Web URL. Size is in logical pixels; path precedence and collection-face selection follow `Font::load`.
 - Returns no result directly. Success, failure, and cache hits are applied on the main thread in a later frame, never during this call; `isLoading()` becomes `false` before the single `onLoad` notification.
 - On native platforms, a worker prepares owned font bytes and CPU metrics. Shared-cache access and GPU work remain on the main thread, glyph rasterization stays lazy, and the request captures the current DPI, oversampling, and mipmap options.
@@ -61729,6 +61779,8 @@ details.en = '''
 - On Web, CPU preparation is deferred to a main-loop pass and can stall that pass, including without pthreads; application follows in a subsequent pass. This entry point does not wait through Asyncify, and URL fetching uses a 30-second timeout.
 '''
 details.ja = '''
+- Image・SoundBuffer・Font の非同期読み込みは、同時準備 4 件を共有します。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（終了時に未配信なら省略します）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
+- Web では、ドキュメント・フォント読み込みとリフレクションのため、CMake がフレームワークとアプリケーションの C++ コードに例外サポートを伝播します。リソースの準備・反映も、例外を有効にしたヘッダー外のホスト定義を維持します。独自ビルドでアプリケーションの翻訳単位の例外サポートを無効にした場合、ヘッダー内のインラインヘルパーでのメモリ確保失敗は復旧保証の対象外です。
 - `loadAsync(nameOrPath, size, faceIndex = 0)` にファイルパス、システムフォント名、または Web の URL を渡します。サイズの単位は論理ピクセルです。パスの優先順位とコレクション内の書体選択は `Font::load` と同じです。
 - 結果を直接返しません。成功、失敗、キャッシュへの一致はいずれも後のフレームでメインスレッドに反映し、この呼び出し中には通知しません。`isLoading()` が `false` になってから `onLoad` を一度通知します。
 - ネイティブ環境では、ワーカーが所有するフォントデータと CPU メトリクスを準備します。共有キャッシュへのアクセスと GPU 処理はメインスレッドで行い、グリフのラスタライズは遅延したままです。要求時点の DPI、オーバーサンプリング、ミップマップ設定を記録します。
@@ -61742,6 +61794,8 @@ details.ja = '''
 - Web では CPU の準備を後のメインループ処理に回すため、その処理が停止することがあります。pthreads がない場合も同様で、結果はさらに後の処理で反映します。この関数は Asyncify で待機しません。URL の取得には 30 秒のタイムアウトを使います。
 '''
 details.ko = '''
+- Image, SoundBuffer, Font의 비동기 로드는 동시 준비 4건을 공유합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(종료 시 미전달 Notice는 생략합니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
+- Web에서는 문서·폰트 로더와 리플렉션을 위해 CMake가 프레임워크와 애플리케이션의 C++ 코드에 예외 지원을 전파합니다. 리소스 준비와 반영도 예외가 활성화된 헤더 밖의 호스트 정의를 유지합니다. 사용자 정의 빌드에서 애플리케이션 번역 단위의 예외 지원을 비활성화하면 인라인 헤더 헬퍼 내부의 할당 실패는 복구 보장 대상이 아닙니다.
 - `loadAsync(nameOrPath, size, faceIndex = 0)`에 파일 경로, 시스템 폰트 이름 또는 Web URL을 전달합니다. 크기의 단위는 논리 픽셀입니다. 경로 우선순위와 컬렉션 내 서체 선택은 `Font::load`와 같습니다.
 - 결과를 직접 반환하지 않습니다. 성공, 실패, 캐시 적중 모두 이후 프레임의 메인 스레드에서 반영하며, 이 호출 중에는 알리지 않습니다. `isLoading()`이 `false`가 된 뒤 `onLoad`를 한 번 알립니다.
 - 네이티브 환경에서는 워커가 소유한 폰트 데이터와 CPU 메트릭을 준비합니다. 공유 캐시 접근과 GPU 작업은 메인 스레드에서 수행하며 글리프 래스터화는 지연 상태를 유지합니다. 요청 시점의 DPI, 오버샘플링, 밉맵 옵션을 기록합니다.

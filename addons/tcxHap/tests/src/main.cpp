@@ -1,3 +1,4 @@
+#include "../../../../core/tests/common/tcTestFailure.h"
 // =============================================================================
 // tcxHap tests — PCM audio byte order (#419), sample table checks (#343),
 // PCM tables, sound descriptions and playback clock (#291)

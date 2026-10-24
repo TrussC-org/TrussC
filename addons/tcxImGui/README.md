@@ -348,6 +348,8 @@ Allocation checks cover TrussC's font-loader storage and shared stb decoder.
 ImGui's own atlas, font-object and vector storage remains outside the
 allocation-recovery guarantee.
 
+C++ OOM recovery requires Release builds, or iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even empty string/container construction and moves can allocate a proxy on an error path.
+
 ## License
 
 Dear ImGui is licensed under the MIT License. See [imgui/LICENSE.txt](https://github.com/ocornut/imgui/blob/master/LICENSE.txt).

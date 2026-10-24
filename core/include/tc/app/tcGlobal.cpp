@@ -440,7 +440,17 @@ WindowContext::WindowContext() {
     swapchainTarget.activeWindow = this;
     targetStack.push_back({&swapchainTarget, swapchainTarget.activation, TargetPassPhase::Rendering, false, nullptr});
 }
+void reportTeardownFailure(const char* step) noexcept {
+    try { logError("Teardown") << "step failed: " << step; }
+    catch (...) {
+        std::fputs("[ERROR] [Teardown] step failed: ", stderr); // log-check: allow (allocation-free fallback)
+        std::fputs(step, stderr); // log-check: allow (allocation-free fallback)
+        std::fputs("\n", stderr); // log-check: allow (allocation-free fallback)
+    }
+}
+
 WindowContext::~WindowContext() {
+    targetsClosed = true;
     teardownTargets();
     if (currentWindowCtx() == this) currentWindowCtx() = nullptr;
 }
@@ -448,20 +458,17 @@ WindowContext::~WindowContext() {
 void WindowContext::teardownTargets() noexcept {
     // popTarget resolves through the current window. Destruction may be
     // dispatched while a different window is current.
+    TeardownSteps steps;
     auto* previous = currentWindowCtx();
     if (sg_isvalid()) {
-        if (&currentWindowContext() != this) parkWindowPass();
-        if (activateNative) activateNative(acquireSwapchainUser);
+        steps.run("park outgoing window pass", [&] { if (&currentWindowContext() != this) parkWindowPass(); });
+        steps.run("activate closing window", [&] { if (activateNative) activateNative(acquireSwapchainUser); });
     }
     const auto previousSgl = sg_isvalid() ? sgl_get_context() : sgl_context{};
     currentWindowCtx() = this;
     if (sg_isvalid() && currentTarget->resources().context.id)
         sgl_set_context(currentTarget->resources().context);
-    bool failed = false;
-    auto attempt = [&](auto&& work) {
-        try { work(); }
-        catch (...) { failed = true; }
-    };
+    auto attempt = [&](auto&& work) { steps.run("window target cleanup", work); };
     while (targetStack.size() > 1) {
         const auto entry = targetStack.back();
         // Shutdown must not acquire/reopen a parked parent's drawable.
@@ -494,10 +501,11 @@ void WindowContext::teardownTargets() noexcept {
     }
     if (sg_isvalid()) {
         sg_tc_mtl_cancel_drawables(swapchainTarget.ownerId);
-        restoreWindowContext(previous);
+        steps.run("target context restoration", [&] { restoreWindowContext(previous); });
+        currentWindowCtx() = previous;
     } else currentWindowCtx() = previous;
-    if (sg_isvalid() && previous != this && previousSgl.id) sgl_set_context(previousSgl);
-    if (failed) logError("RenderTarget") << "window teardown recovered after pass cleanup failure";
+    if (sg_isvalid() && previous != this && !currentWindowContext().targetsClosed && previousSgl.id)
+        sgl_set_context(previousSgl);
 }
 
 namespace {
@@ -829,7 +837,7 @@ TargetPassScope::~TargetPassScope() noexcept {
             std::terminate();
         }
     } catch (...) {
-        logError("RenderTarget") << "scope finalization failed; parent restored";
+        reportTeardownFailure("target scope finalization (parent restored)");
     }
 }
 } // namespace internal
@@ -952,8 +960,12 @@ namespace {
 // (e.g. a sketch's global Material). Constant initialization and trivial
 // destruction keep the flag readable throughout static destruction.
 constinit bool windowStateDestroyed = false;
+constinit WindowContext* initializedMainWindowContext = nullptr;
+constinit std::vector<Window*>* initializedWindowRegistry = nullptr;
 
 struct WindowStateLifetimeMark {
+    explicit WindowStateLifetimeMark(WindowContext* ctx) { initializedMainWindowContext = ctx; }
+    explicit WindowStateLifetimeMark(std::vector<Window*>* list) { initializedWindowRegistry = list; }
     ~WindowStateLifetimeMark() { windowStateDestroyed = true; }
 };
 } // namespace
@@ -963,7 +975,7 @@ struct WindowStateLifetimeMark {
 WindowContext& mainWindowContext() {
     static WindowContext ctx;
     // Destroyed before ctx, like LoggerLifetimeMark below.
-    static WindowStateLifetimeMark lifetimeMark;
+    static WindowStateLifetimeMark lifetimeMark(&ctx);
     (void)lifetimeMark;
     return ctx;
 }
@@ -973,7 +985,7 @@ WindowContext& mainWindowContext() {
 static std::vector<Window*>& windowRegistryStorage() {
     static std::vector<Window*> list;
     // Either storage may be initialized first; stop cleanup before either dies.
-    static WindowStateLifetimeMark lifetimeMark;
+    static WindowStateLifetimeMark lifetimeMark(&list);
     (void)lifetimeMark;
     return list;
 }
@@ -996,45 +1008,41 @@ std::vector<Window*> openWindows() {
     return out;
 }
 
-// Unregister a destroyed Light from every window context's activeLights, so a
-// still-registered Light never dangles (the PBR pipeline derefs those pointers
-// every lit draw — issue: ~Light() had no cleanup). Called by ~Light()
-// (declared in tcLight.h); defined here because it needs the Window registry.
-// Non-inline keeps it host/guest-shared under hot reload, same as the registry.
-void removeLightFromAllContexts(Light* light) {
+// Main thread only. These scrubs perform only raw-pointer assignment/erasure:
+// context() is non-virtual and no user code, close, or registration is invoked.
+// Thus the registry cannot mutate during this walk. Include closed windows too:
+// their contexts can still retain lighting pointers until Window destruction.
+// Do not initialize either storage from a destructor under allocation failure.
+namespace {
+template<class Scrub> void scrubLightingContexts(Scrub scrub) noexcept {
     if (windowStateDestroyed) return;
-    auto scrub = [&](WindowContext& ctx) {
-        auto& v = ctx.activeLights;
-        v.erase(std::remove(v.begin(), v.end(), light), v.end());
-    };
-    scrub(mainWindowContext());
-    for (Window* w : openWindows()) {
-        if (w) scrub(w->context());
+    if (initializedMainWindowContext) scrub(*initializedMainWindowContext);
+    if (initializedWindowRegistry) {
+        for (Window* w : *initializedWindowRegistry) {
+            if (w) scrub(w->context());
+        }
     }
 }
+} // namespace
 
-// Detach destroyed lighting state before the next mesh draw. Like Light's
-// cleanup, these definitions are shared by the hot-reload host and guest.
+// Non-inline keeps lighting cleanup shared by the hot-reload host and guest.
+void removeLightFromAllContexts(Light* light) {
+    scrubLightingContexts([&](WindowContext& ctx) noexcept {
+        auto& v = ctx.activeLights;
+        v.erase(std::remove(v.begin(), v.end(), light), v.end());
+    });
+}
+
 void clearMaterialFromAllContexts(Material* material) {
-    if (windowStateDestroyed) return;
-    auto scrub = [&](WindowContext& ctx) {
+    scrubLightingContexts([&](WindowContext& ctx) noexcept {
         if (ctx.currentMaterial == material) ctx.currentMaterial = nullptr;
-    };
-    scrub(mainWindowContext());
-    for (Window* w : openWindows()) {
-        if (w) scrub(w->context());
-    }
+    });
 }
 
 void clearEnvironmentFromAllContexts(Environment* environment) {
-    if (windowStateDestroyed) return;
-    auto scrub = [&](WindowContext& ctx) {
+    scrubLightingContexts([&](WindowContext& ctx) noexcept {
         if (ctx.currentEnvironment == environment) ctx.currentEnvironment = nullptr;
-    };
-    scrub(mainWindowContext());
-    for (Window* w : openWindows()) {
-        if (w) scrub(w->context());
-    }
+    });
 }
 
 // Declared in tcWindowContext.h. Every registered window, not only the open
@@ -1811,23 +1819,36 @@ void retireTexture(TextureRetirement* storage) noexcept {
     retiredTextures = storage;
 }
 
-void deferGpuDestroy(sg_buffer buf) {
-    if (buf.id != 0) pendingGpuDestroys().buffers.push_back(buf);
+namespace {
+template<class Handle, class Queue>
+void enqueueGpuRetirement(Handle handle, Queue&& queue) noexcept {
+    if (!handle.id) return;
+    try { queue(pendingGpuDestroys()).push_back(handle); }
+    catch (...) {
+        // Keep the SG-owned resource valid for outstanding recordings. If its
+        // retirement cannot be stored, device shutdown reclaims it. This is
+        // also reached from shared_ptr/noexcept destructors during window close.
+        reportTeardownFailure("GPU retirement enqueue (retained until device shutdown)");
+    }
 }
-void deferGpuDestroy(sg_image img) {
-    if (img.id != 0) pendingGpuDestroys().images.push_back(img);
 }
-void deferGpuDestroy(sg_view view) {
-    if (view.id != 0) pendingGpuDestroys().views.push_back(view);
+void deferGpuDestroy(sg_buffer buf) noexcept {
+    enqueueGpuRetirement(buf, [](auto& queue) -> auto& { return queue.buffers; });
 }
-void deferGpuDestroy(sg_sampler smp) {
-    if (smp.id != 0) pendingGpuDestroys().samplers.push_back(smp);
+void deferGpuDestroy(sg_image img) noexcept {
+    enqueueGpuRetirement(img, [](auto& queue) -> auto& { return queue.images; });
 }
-void deferGpuDestroy(sg_pipeline pip) {
-    if (pip.id != 0) pendingGpuDestroys().pipelines.push_back(pip);
+void deferGpuDestroy(sg_view view) noexcept {
+    enqueueGpuRetirement(view, [](auto& queue) -> auto& { return queue.views; });
 }
-void deferGpuDestroy(sg_shader shd) {
-    if (shd.id != 0) pendingGpuDestroys().shaders.push_back(shd);
+void deferGpuDestroy(sg_sampler smp) noexcept {
+    enqueueGpuRetirement(smp, [](auto& queue) -> auto& { return queue.samplers; });
+}
+void deferGpuDestroy(sg_pipeline pip) noexcept {
+    enqueueGpuRetirement(pip, [](auto& queue) -> auto& { return queue.pipelines; });
+}
+void deferGpuDestroy(sg_shader shd) noexcept {
+    enqueueGpuRetirement(shd, [](auto& queue) -> auto& { return queue.shaders; });
 }
 
 namespace {
@@ -2418,6 +2439,7 @@ void refreshWindowDrawingSize() {
 
 void prepareWindowTarget() {
     auto& window = currentWindowContext();
+    if (window.targetsClosed) return;
     auto& target = window.swapchainTarget;
     auto& resources = target.resources();
     const auto native = window.isMain ? sglue_environment().defaults : sg_environment_defaults{};
@@ -2464,6 +2486,7 @@ void prepareWindowTarget() {
 bool rebuildTargetResources() {
     std::vector<WindowContext*> windows{&mainWindowContext()};
     for (auto* window : openWindows()) if (&window->context() != &mainWindowContext()) windows.push_back(&window->context());
+    std::erase_if(windows, [](const WindowContext* window) { return window->targetsClosed; });
     // Foreign submissions preserve CPU recordings. Re-evaluate all immediate
     // and raw queues on every retry before destroying any context.
     for (auto* window : windows) if (window->targetStack.size() > 1 || window->swapchainTarget.inPass || window->swapchainTarget.openShaderScopes || hasRecordedWork(window->swapchainTarget)) {
@@ -2873,6 +2896,7 @@ WindowContext& currentWindowContext() {
 
 void parkWindowPass() {
     auto& outgoing = currentWindowContext();
+    if (outgoing.targetsClosed) return;
     if (outgoing.activateNative) outgoing.activateNative(outgoing.acquireSwapchainUser);
     if (outgoing.currentTarget->inPass) {
         try { outgoing.currentTarget->flushLayers(); }
@@ -2914,13 +2938,16 @@ CapturePrefixScope::CapturePrefixScope(CaptureSource source)
 CapturePrefixScope::~CapturePrefixScope() noexcept {
     if (!resume_ || &currentWindowContext() != window_ || window_->currentTarget != target_ || target_->activation != token_) return;
     try { ensureCurrentPass(); }
-    catch (...) { logError("Capture") << "could not resume the parked target"; }
+    catch (...) { reportTeardownFailure("capture target resumption"); }
 }
 
 void restoreWindowContext(WindowContext* previous) {
     auto* incoming = previous ? previous : &mainWindowContext();
     if (&currentWindowContext() != incoming && sg_isvalid()) parkWindowPass();
     currentWindowCtx() = previous;
+    // A closed owner can remain selected during exit/cleanup. Restoring that
+    // state must neither activate its native handle nor recreate GPU resources.
+    if (incoming->targetsClosed) return;
     if (incoming->activateNative) incoming->activateNative(incoming->acquireSwapchainUser);
     // Events may record before the first tick. Give that owner its own context
     // before any callback can emit immediate commands.

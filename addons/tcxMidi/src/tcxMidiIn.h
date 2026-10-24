@@ -71,9 +71,11 @@ public:
     // -------------------------------------------------------------------------
 
     // Available input ports, in port-number order (see MidiDeviceInfo).
+    // Open by name for stable selection; indices shift when ports appear or disappear.
     static std::vector<MidiDeviceInfo> listDevices() {
         std::vector<MidiDeviceInfo> devices;
-        libremidi::observer obs{{}, libremidi::observer_configuration_for(platformMidiApi())};
+        libremidi::observer obs{internal::midiObserverConfiguration(),
+                               libremidi::observer_configuration_for(platformMidiApi())};
         auto ports = obs.get_input_ports();
         for (int i = 0; i < static_cast<int>(ports.size()); ++i) {
             devices.push_back({i, ports[i].display_name});
@@ -86,8 +88,10 @@ public:
     // -------------------------------------------------------------------------
 
     // Open by port index.
+    // Open by name for stable selection; indices shift when ports appear or disappear.
     bool openPort(int index) {
-        libremidi::observer obs{{}, libremidi::observer_configuration_for(platformMidiApi())};
+        libremidi::observer obs{internal::midiObserverConfiguration(),
+                               libremidi::observer_configuration_for(platformMidiApi())};
         auto ports = obs.get_input_ports();
         if (index < 0 || index >= static_cast<int>(ports.size())) {
             trussc::logError("tcxMidiIn") << "openPort: index " << index
@@ -98,8 +102,10 @@ public:
     }
 
     // Open the first port whose name contains `nameContains` (case-sensitive).
+    // Open by name for stable selection; indices shift when ports appear or disappear.
     bool openPort(const std::string& nameContains) {
-        libremidi::observer obs{{}, libremidi::observer_configuration_for(platformMidiApi())};
+        libremidi::observer obs{internal::midiObserverConfiguration(),
+                               libremidi::observer_configuration_for(platformMidiApi())};
         auto ports = obs.get_input_ports();
         for (int i = 0; i < static_cast<int>(ports.size()); ++i) {
             if (ports[i].display_name.find(nameContains) != std::string::npos) {

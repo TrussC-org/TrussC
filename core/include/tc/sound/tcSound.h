@@ -216,6 +216,10 @@ class SoundBuffer : public SoundSource {
     struct AsyncState : internal::ResourceLoadState {
         fs::path input, path;
         std::shared_ptr<SoundBuffer> decoded;
+        size_t retainedBytes() const noexcept override {
+            return decoded ? decoded->samples.capacity() * sizeof(float) : 0;
+        }
+        void discardPayload() noexcept override { decoded.reset(); }
     };
 public:
     SoundBuffer() : SoundSource(SoundSource::Eager) {}
@@ -231,6 +235,11 @@ public:
     // App exit waits for loads still decoding; cancelling never waits.
     // Completions are delivered during runApp / runHeadlessApp; in a bare main()
     // without an app run, no completion event fires.
+    // Web CMake propagates exception support. With custom app flags disabling
+    // it, recovery from allocation failure is guaranteed only for TrussC's
+    // out-of-line host code. Inline helpers from headers may be compiled into the
+    // application without exception support; allocation failure inside them is a
+    // known limitation.
     void loadAsync(const fs::path& path);
     Event<LoadResult> onLoad;
     bool isLoading() const { return async_.loading(); }
@@ -625,7 +634,8 @@ private:
     LoadResult loadResolved(const fs::path& input, const fs::path& resolved);
 #ifdef __EMSCRIPTEN__
     static void loadAacWebAsync(std::shared_ptr<SoundBuffer> decoded,
-                                std::function<void(LoadResult)> complete, const fs::path& path);
+                                std::function<void(LoadResult)> complete, const fs::path& path,
+                                const std::shared_ptr<internal::ResourceLoadState>& owner);
     LoadResult finishAacWebDecode(int slot, const fs::path& path);
 #endif
     LoadResult loadAacPlatform(const fs::path& path);

@@ -477,7 +477,11 @@ public:
     ~LogStream() noexcept {
         if (moved_) return;
         try {
-            std::string msg = stream_.str();
+            // str() can allocate an iterator proxy in a noexcept string
+            // constructor on MSVC. The pointer/count constructor can throw
+            // into this guard, including for an empty message.
+            const auto text = stream_.view();
+            std::string msg(text.empty() ? "" : text.data(), text.size());
             if (!module_.empty()) {
                 msg = "[" + module_ + "] " + msg;
             }

@@ -37,3 +37,9 @@ including when the Windows checkout uses CRLF.
 All allocator and file callbacks contain exceptions and return the library's
 failure value. Diagnostics run only after the cgltf call returns. This avoids
 unwinding through C linkage functions, including under MSVC `/EHsc`.
+
+Local parse-table allocations have no policy cap. The allocator records when
+its cumulative table bytes exceed 256 MiB without logging or allocating a
+diagnostic. After the load outcome and parser cleanup are complete, the loader logs one Notice with
+the resolved file path and the table byte count, including on a later parse
+failure. Callback failures still follow the guarded registry-only cleanup above.
