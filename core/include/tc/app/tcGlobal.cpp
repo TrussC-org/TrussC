@@ -155,6 +155,12 @@ void setup() {
     // real limit, since each sgl pipeline uses 5 sg pipelines. The sgl
     // context pool is left at the sokol_gl_tc.h default: it grows when full.
     sgldesc.pipeline_pool_size = 256;
+    // sokol_gl's default of 4 contexts runs out fast: the swapchain takes one,
+    // every secondary window takes one more, and Fbo::ensureShared() takes one
+    // per (sample count, color format) combination. An app with a second window
+    // and a couple of float FBO formats is already past four, and the overflow
+    // is a per-frame SGL_LOGITEM_CONTEXT_POOL_EXHAUSTED with nothing drawn.
+    sgldesc.context_pool_size = 64;
     sgldesc.max_vertices = internal::sglBudget().maxVertices;
     sgldesc.max_commands = internal::sglBudget().maxCommands;
     sgldesc.allocator.alloc_fn = smemtrack_alloc;
@@ -2510,6 +2516,7 @@ bool rebuildTargetResources() {
     desc.logger.func = sokolLog;
     // Bound (retain existing pool budget; growth belongs to #863's sgl lane): 256 slots; pipeline creation fails on overflow and affected draws are skipped with a log.
     desc.pipeline_pool_size = 256;
+    desc.context_pool_size = 64;   // same reason as in the setup path above
     desc.max_vertices = sglBudget().maxVertices; desc.max_commands = sglBudget().maxCommands;
     desc.allocator.alloc_fn = smemtrack_alloc; desc.allocator.free_fn = smemtrack_free;
     sgl_setup(&desc);

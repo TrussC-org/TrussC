@@ -17,6 +17,8 @@
 
 #if defined(__linux__) && defined(SOKOL_GLCORE) && !defined(__ANDROID__)
 #include <X11/Xlib.h>       // XResizeWindow (per-window setSize)
+#include <X11/Xutil.h>      // XSizeHints (win_gravity for setPosition)
+#include <X11/Xatom.h>      // XA_CARDINAL (_NET_FRAME_EXTENTS)
 #include "sokol_app_tc.h"   // declarations only (impl lives in sokol_impl.cpp)
 
 using namespace trussc;
@@ -25,7 +27,70 @@ namespace {
 
 struct AdapterState {
     sapp_window win{0};
+    // Last size asked for (createWindow / setSize), logical pixels. The WM may
+    // override the actual size (auto-maximize), so it is kept to restore from.
+    int requestedWidth = 0;
+    int requestedHeight = 0;
 };
+
+// EWMH: ask the window manager to add/remove up to two _NET_WM_STATE_* atoms
+// via a ClientMessage sent to the root window with SubstructureRedirect.
+void sendWmState(Display* dpy, ::Window xwin, bool add,
+                 const char* state1, const char* state2 = nullptr) {
+    Atom wmState = XInternAtom(dpy, "_NET_WM_STATE", False);
+    Atom atom1   = XInternAtom(dpy, state1, False);
+    Atom atom2   = state2 ? XInternAtom(dpy, state2, False) : None;
+    if (wmState == None || atom1 == None) return;
+
+    XEvent xev = {};
+    xev.type = ClientMessage;
+    xev.xclient.window = xwin;
+    xev.xclient.message_type = wmState;
+    xev.xclient.format = 32;
+    xev.xclient.data.l[0] = add ? 1 : 0;    // _NET_WM_STATE_ADD / _REMOVE
+    xev.xclient.data.l[1] = (long)atom1;
+    xev.xclient.data.l[2] = (long)atom2;
+    xev.xclient.data.l[3] = 1;               // source indication: normal app
+    xev.xclient.data.l[4] = 0;
+
+    XSendEvent(dpy, DefaultRootWindow(dpy), False,
+               SubstructureRedirectMask | SubstructureNotifyMask, &xev);
+}
+
+// The WM's decoration thickness, [left, right, top, bottom]. Zeroed when the
+// property is missing (no decorations, or a WM that does not publish it).
+void frameExtents(Display* dpy, ::Window xwin, long out[4]) {
+    out[0] = out[1] = out[2] = out[3] = 0;
+    Atom prop = XInternAtom(dpy, "_NET_FRAME_EXTENTS", False);
+    Atom type = None;
+    int format = 0;
+    unsigned long count = 0, remaining = 0;
+    unsigned char* data = nullptr;
+    if (XGetWindowProperty(dpy, xwin, prop, 0, 4, False, XA_CARDINAL, &type, &format,
+                           &count, &remaining, &data) != Success || !data) {
+        return;
+    }
+    const long* values = (const long*)data;
+    for (unsigned long i = 0; i < count && i < 4; i++) out[i] = values[i];
+    XFree(data);
+}
+
+// win_gravity decides which corner a move request names. sokol_app asks for
+// CenterGravity (it wants resizes to grow around the center), and WMs read that
+// literally for moves too: KWin then offsets by half the title bar, so the same
+// request lands differently per WM and getPosition() cannot round-trip.
+// NorthWestGravity is the one the other platforms already implement -- the
+// request names the decorated frame's top-left, like Windows SetWindowPos and
+// macOS setFrameTopLeftPoint:.
+void pinMoveGravity(Display* dpy, ::Window xwin) {
+    XSizeHints hints = {};
+    long supplied = 0;
+    if (!XGetWMNormalHints(dpy, xwin, &hints, &supplied)) hints = XSizeHints{};
+    if (hints.win_gravity == NorthWestGravity && (hints.flags & PWinGravity)) return;
+    hints.flags |= PWinGravity;
+    hints.win_gravity = NorthWestGravity;
+    XSetWMNormalHints(dpy, xwin, &hints);
+}
 
 // Swapchain provider handed to WindowContext::acquireSwapchain. On GL the
 // "swapchain" is just the default framebuffer of whatever drawable is
@@ -384,6 +449,74 @@ void Window::setSize(int width, int height) {
     float s = ctx_.dpiScale > 0.0f ? ctx_.dpiScale : 1.0f;
     XResizeWindow(dpy, xwin, (unsigned)(width * s), (unsigned)(height * s));
     XFlush(dpy);
+    st->requestedWidth = width;
+    st->requestedHeight = height;
+}
+
+void Window::setPosition(int x, int y) {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return;
+    Display* dpy = (Display*)(void*)sapp_x11_get_display();
+    ::Window xwin = (::Window)(uintptr_t)sapp_window_x11_get_window(st->win);
+    if (!dpy || !xwin) return;
+    // Root-window coordinates, unscaled (X11 screen space is device pixels and
+    // spans every display, so a monitor left of the primary one has negative x).
+    // Note this is a request: a reparenting window manager may adjust or ignore
+    // it, and some WMs apply their own placement policy on first map. Call it
+    // after the window is mapped for a predictable result.
+    //
+    // Fullscreen and maximized windows are pinned to their monitor: KWin (and
+    // other EWMH WMs) ignore move requests for them, so the move silently did
+    // nothing. Maximized is not always our doing -- KWin maximizes a new window
+    // that does not fit the monitor it is placed on (e.g. 1920x1080 plus a
+    // title bar on a 1920x1080 display, the one holding the focused window),
+    // which pinned it there before setPosition() ran. Drop both states, move,
+    // then restore fullscreen only (maximize was never requested -- Window has
+    // no maximize API). The WM processes the requests in order, so no wait is
+    // needed -- and none is possible: right after createWindow() the WM has not
+    // written _NET_WM_STATE yet, so the un-maximize is sent unconditionally
+    // rather than after checking the property. Un-maximizing restores the WM's
+    // own guess of a size (1280x676 on KWin), so the last requested size
+    // (createWindow / setSize) is re-applied with the move.
+    //
+    // x and y name the decorated frame's top-left, the corner Windows and macOS
+    // use. On X11 that is win_gravity's job, so pin it before asking (see
+    // pinMoveGravity): with sokol_app's CenterGravity the same request lands at
+    // a different pixel on KWin than on Mutter.
+    pinMoveGravity(dpy, xwin);
+    if (fullscreenRequested_) sendWmState(dpy, xwin, false, "_NET_WM_STATE_FULLSCREEN");
+    sendWmState(dpy, xwin, false, "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ");
+    if (st->requestedWidth > 0 && st->requestedHeight > 0) {
+        float s = ctx_.dpiScale > 0.0f ? ctx_.dpiScale : 1.0f;
+        XMoveResizeWindow(dpy, xwin, x, y, (unsigned)(st->requestedWidth * s),
+                          (unsigned)(st->requestedHeight * s));
+    } else {
+        XMoveWindow(dpy, xwin, x, y);
+    }
+    if (fullscreenRequested_) sendWmState(dpy, xwin, true, "_NET_WM_STATE_FULLSCREEN");
+    XFlush(dpy);
+}
+
+IVec2 Window::getPosition() const {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return IVec2(-1, -1);
+    Display* dpy = (Display*)(void*)sapp_x11_get_display();
+    ::Window xwin = (::Window)(uintptr_t)sapp_window_x11_get_window(st->win);
+    if (!dpy || !xwin) return IVec2(-1, -1);
+    // XTranslateCoordinates gives the CLIENT area's origin in root coordinates,
+    // which sits below the title bar. setPosition() names the decorated frame's
+    // top-left, so subtract the WM's frame extents to report the same corner and
+    // round-trip. A caller that reads back and re-applies -- an app nudging a
+    // window -- would otherwise walk it down the screen by one title bar per step.
+    ::Window root = DefaultRootWindow(dpy);
+    int rx = 0, ry = 0;
+    ::Window child = 0;
+    if (!XTranslateCoordinates(dpy, xwin, root, 0, 0, &rx, &ry, &child)) {
+        return IVec2(-1, -1);
+    }
+    long extents[4];
+    frameExtents(dpy, xwin, extents);
+    return IVec2(rx - (int)extents[0], ry - (int)extents[2]);
 }
 
 void Window::setFullscreen(bool full) {
@@ -393,28 +526,9 @@ void Window::setFullscreen(bool full) {
     ::Window xwin = (::Window)(uintptr_t)sapp_window_x11_get_window(st->win);
     if (!dpy || !xwin) return;
 
-    // EWMH: ask the window manager to toggle _NET_WM_STATE_FULLSCREEN via a
-    // ClientMessage sent to the root window with SubstructureRedirect. The WM
-    // resizes the window to the monitor; the per-window tick's fbWidth/fbHeight
-    // sync + syncRootSize pick up the new size on the next tick.
-    Atom wmState     = XInternAtom(dpy, "_NET_WM_STATE", False);
-    Atom wmFullscreen = XInternAtom(dpy, "_NET_WM_STATE_FULLSCREEN", False);
-    if (wmState == None || wmFullscreen == None) return;
-
-    XEvent xev = {};
-    xev.type = ClientMessage;
-    xev.xclient.window = xwin;
-    xev.xclient.message_type = wmState;
-    xev.xclient.format = 32;
-    xev.xclient.data.l[0] = full ? 1 : 0;   // _NET_WM_STATE_ADD / _REMOVE
-    xev.xclient.data.l[1] = (long)wmFullscreen;
-    xev.xclient.data.l[2] = 0;
-    xev.xclient.data.l[3] = 1;               // source indication: normal app
-    xev.xclient.data.l[4] = 0;
-
-    ::Window root = DefaultRootWindow(dpy);
-    XSendEvent(dpy, root, False,
-               SubstructureRedirectMask | SubstructureNotifyMask, &xev);
+    // The WM resizes the window to the monitor; the per-window tick's
+    // fbWidth/fbHeight sync + syncRootSize pick up the new size on the next tick.
+    sendWmState(dpy, xwin, full, "_NET_WM_STATE_FULLSCREEN");
     XFlush(dpy);
     fullscreenRequested_ = full;
 }
@@ -469,6 +583,8 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
         return nullptr;
     }
 
+    st->requestedWidth = settings.width;
+    st->requestedHeight = settings.height;
     win->ctx_.swapchainTarget.sampleCount = sapp_window_sample_count(st->win);
     win->ctx_.swapchainTarget.width = sapp_window_framebuffer_width(st->win);
     win->ctx_.swapchainTarget.height = sapp_window_framebuffer_height(st->win);
