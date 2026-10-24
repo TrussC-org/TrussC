@@ -11448,6 +11448,12 @@ bool sapp_isvalid(void) {
     return _sapp_tc.app.valid;
 }
 
+// Existing sapp API: geometry needs the requested logical size even when the
+// WM has already auto-maximized the main window.
+sapp_desc sapp_query_desc(void) {
+    return _sapp_tc.app.desc;
+}
+
 int sapp_width(void) {
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     return (w && w->fb_width > 0) ? w->fb_width : 1;
@@ -20516,7 +20522,7 @@ _SOKOL_PRIVATE void _sapp_tc_emsc_frame_main_loop(void) {
 _SOKOL_PRIVATE void _sapp_tc_emsc_run(const sapp_desc* desc) {
     _sapp_tc_init_state(desc);
     _sapp_tc.fullscreen = false; // override user provided fullscreen state: can't start in fullscreen on the web!
-    const char* document_title = desc->html5.update_document_title ? _sapp_tc.window_title : 0;
+    const char* document_title = _sapp_tc.window_title;
     _sapp_tc_js_init(_sapp_tc.html5_canvas_selector, document_title);
     double w, h;
     if (_sapp_tc.desc.html5.canvas_resize) {
@@ -20911,6 +20917,8 @@ SOKOL_API_IMPL void sapp_set_window_title(const char* title) {
         _sapp_tc_macos_update_window_title();
     #elif defined(_SAPP_WIN32)
         _sapp_tc_win32_update_window_title();
+    #elif defined(_SAPP_EMSCRIPTEN)
+        emscripten_set_window_title(_sapp_tc.window_title);
     #elif defined(_SAPP_LINUX)
         _sapp_tc_x11_update_window_title();
     #endif

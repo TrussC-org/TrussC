@@ -12,6 +12,7 @@
 #include <linux/limits.h>
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>
+#include "tcWindowGeometryX11.h"
 #include "sokol_app_tc.h"
 
 // OpenGL for screen capture. GL_GLEXT_PROTOTYPES makes glext.h declare the
@@ -78,14 +79,33 @@ void setOrientation(Orientation mask) { (void)mask; }
 void setKeepScreenOn(bool enabled) { (void)enabled; }
 bool getKeepScreenOn() { return false; }
 
-IVec2 getWindowPosition() {
-    logWarning("Platform") << "getWindowPosition() not yet implemented on Linux";
-    return IVec2(-1, -1);
+IVec2 internal::windowPositionNative(const void* handle) {
+    auto* dpy = (Display*)sapp_x11_get_display();
+    if (!dpy || !handle) {
+        logWarning("Platform") << "getWindowPosition() requires X11 (unsupported on headless KMS)";
+        return {-1, -1};
+    }
+    return x11FramePosition(dpy, (::Window)(uintptr_t)handle);
 }
-
-void setWindowPosition(int x, int y) {
-    logWarning("Platform") << "setWindowPosition() not yet implemented on Linux";
-    (void)x; (void)y;
+namespace {
+// Main-window storage belongs to the platform TU, never to an inline header.
+// Each secondary owns the same state in its AdapterState.
+internal::X11GeometryState mainGeometry;
+::Window mainGeometryWindow = 0;
+internal::X11GeometryState& mainGeometryState() {
+    const auto window = (::Window)(uintptr_t)sapp_x11_get_window();
+    if (window != mainGeometryWindow) {
+        const auto desc = sapp_query_desc();
+        mainGeometry = {desc.width, desc.height};
+        mainGeometryWindow = window;
+    }
+    return mainGeometry;
+}
+}
+IVec2 internal::mainWindowPosition() { return windowPositionNative(sapp_x11_get_window()); }
+void internal::setMainWindowPosition(int x, int y) {
+    x11Geometry((Display*)sapp_x11_get_display(), (::Window)(uintptr_t)sapp_x11_get_window(),
+        mainGeometryState(), true, x, y, 0, 0, sapp_dpi_scale(), sapp_is_fullscreen());
 }
 
 void setWindowDecorated(bool decorated) {
@@ -112,11 +132,9 @@ void setWindowDecorated(bool decorated) {
     XCloseDisplay(display);
 }
 
-void setWindowSizeLogical(int width, int height) {
-    // TODO: Implement using X11
-    // sokol_app handles window creation, so we need to access the X11 window
-    // For now, this is a no-op
-    logWarning("Platform") << "setWindowSize not yet implemented on Linux";
+void internal::setMainWindowSizeLogical(int width, int height) {
+    internal::x11Geometry((Display*)sapp_x11_get_display(), (::Window)(uintptr_t)sapp_x11_get_window(),
+        mainGeometryState(), false, 0, 0, width, height, sapp_dpi_scale());
 }
 
 fs::path getExecutablePath() {

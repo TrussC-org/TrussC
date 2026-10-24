@@ -479,7 +479,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getWeekday", []() { return trussc::getWeekday(); });
     lua->set_function("getWidth", []() { return trussc::getWidth(); });
     lua->set_function("getWindowHeight", []() { return trussc::getWindowHeight(); });
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32)
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
     lua->set_function("getWindowPosition", []() { return trussc::getWindowPosition(); });
 #endif
     lua->set_function("getWindowSize", []() { return trussc::getWindowSize(); });
@@ -772,7 +772,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("setTouchAsMouse", [](bool enabled) { return trussc::setTouchAsMouse(enabled); });
     lua->set_function("setUserDataPathRoot", [](const fs::path & path) { return trussc::setUserDataPathRoot(path); });
     lua->set_function("setWindowDecorated", [](bool decorated) { return trussc::setWindowDecorated(decorated); });
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32)
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
     lua->set_function("setWindowPosition", [](int x, int y) { return trussc::setWindowPosition(x, y); });
 #endif
     lua->set_function("setWindowSize", [](int width, int height) { return trussc::setWindowSize(width, height); });

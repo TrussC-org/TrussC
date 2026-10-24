@@ -342,32 +342,19 @@ void Window::setSecondaryTitle(const std::string& title) {
     if (st) sapp_window_set_title(st->win, title.c_str());
 }
 
+void Window::setSecondaryPosition(int x, int y) {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (st) internal::setWindowPositionNative(sapp_window_win32_get_hwnd(st->win), x, y);
+}
+IVec2 Window::getSecondaryPosition() const {
+    auto* st = static_cast<AdapterState*>(native_);
+    return st ? internal::windowPositionNative(sapp_window_win32_get_hwnd(st->win)) : IVec2(-1, -1);
+}
+
 void Window::setSecondarySize(int width, int height) {
     auto* st = static_cast<AdapterState*>(native_);
     if (!st) return;
     internal::setWindowSizeWin32(sapp_window_win32_get_hwnd(st->win), width, height);
-}
-
-void Window::setSecondaryPosition(int x, int y) {
-    auto* st = static_cast<AdapterState*>(native_);
-    if (!st) return;
-    HWND hwnd = (HWND)(void*)sapp_window_win32_get_hwnd(st->win);
-    if (!hwnd) return;
-    // Virtual-screen coordinates, unscaled — the same space GetWindowRect
-    // reports and the global setWindowPosition() writes. A display left of the
-    // primary one has negative x.
-    SetWindowPos(hwnd, nullptr, x, y, 0, 0,
-                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-}
-
-IVec2 Window::getSecondaryPosition() const {
-    auto* st = static_cast<AdapterState*>(native_);
-    if (!st) return IVec2(-1, -1);
-    HWND hwnd = (HWND)(void*)sapp_window_win32_get_hwnd(st->win);
-    if (!hwnd) return IVec2(-1, -1);
-    RECT r;
-    if (!GetWindowRect(hwnd, &r)) return IVec2(-1, -1);
-    return IVec2(r.left, r.top);
 }
 
 void Window::setSecondaryFullscreen(bool full) {

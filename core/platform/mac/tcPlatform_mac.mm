@@ -83,32 +83,24 @@ void setKeepScreenOn(bool enabled) {
 
 bool getKeepScreenOn() { return keepScreenOn_; }
 
-IVec2 getWindowPosition() {
-    NSWindow* window = (__bridge NSWindow*)sapp_macos_get_window();
+// #219: screen points relative to the primary screen's top-left. Keep the
+// same frame-top-left primitive for main and secondary windows.
+IVec2 internal::windowPositionNative(const void* handle) {
+    NSWindow* window = (__bridge NSWindow*)handle;
     if (!window) return IVec2(-1, -1);
-
-    NSRect frame = [window frame];
-    // macOS coordinate system is bottom-left origin; convert to top-left
-    NSScreen* screen = [window screen] ? [window screen] : [NSScreen mainScreen];
-    float screenHeight = (float)screen.frame.size.height;
-    int x = (int)frame.origin.x;
-    int y = (int)(screenHeight - frame.origin.y - frame.size.height);
-    return IVec2(x, y);
+    NSScreen* primary = [[NSScreen screens] firstObject];
+    const NSRect frame = [window frame];
+    return IVec2((int)frame.origin.x, (int)(primary.frame.size.height - NSMaxY(frame)));
 }
-
-void setWindowPosition(int x, int y) {
-    NSWindow* window = (__bridge NSWindow*)sapp_macos_get_window();
+void internal::setWindowPositionNative(const void* handle, int x, int y) {
+    NSWindow* window = (__bridge NSWindow*)handle;
     if (!window) return;
-
-    // Convert top-left origin to macOS bottom-left origin
-    NSScreen* screen = [window screen] ? [window screen] : [NSScreen mainScreen];
-    float screenHeight = (float)screen.frame.size.height;
-    NSRect frame = [window frame];
-    NSPoint origin;
-    origin.x = x;
-    origin.y = screenHeight - y - frame.size.height;
-    [window setFrameOrigin:origin];
+    NSScreen* primary = [[NSScreen screens] firstObject];
+    [window setFrameTopLeftPoint:NSMakePoint((CGFloat)x, primary.frame.size.height - (CGFloat)y)];
 }
+
+IVec2 internal::mainWindowPosition() { return windowPositionNative(sapp_macos_get_window()); }
+void internal::setMainWindowPosition(int x, int y) { setWindowPositionNative(sapp_macos_get_window(), x, y); }
 
 void setWindowDecorated(bool decorated) {
     NSWindow* window = (__bridge NSWindow*)sapp_macos_get_window();
@@ -154,7 +146,7 @@ void setWindowDecorated(bool decorated) {
     [window makeFirstResponder:window.contentView];
 }
 
-void setWindowSizeLogical(int width, int height) {
+void internal::setMainWindowSizeLogical(int width, int height) {
     // The TrussC main window, like the other functions in this file. NOT
     // [NSApp mainWindow]: that is AppKit's focused window, which is a
     // secondary window whenever one has focus.

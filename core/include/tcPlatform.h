@@ -118,15 +118,17 @@ void bringWindowToFront();
 // Other: 1.0
 float getDisplayScaleFactor();
 
-// Get window position in screen coordinates (logical pixels, top-left origin)
-// macOS/Windows: returns top-left corner of the window frame
-// Linux/Mobile/Web: stub, returns (-1, -1)
-TC_PLATFORMS("macos,windows") IVec2 getWindowPosition();
-
-// Set window position in screen coordinates (logical pixels, top-left origin)
-// macOS/Windows: moves the window
-// Linux/Mobile/Web: no-op (stub)
-TC_PLATFORMS("macos,windows") void setWindowPosition(int x, int y);
+// Current window's decorated frame top-left, OS screen coordinates relative
+// to the primary screen's top-left. Negative coordinates are allowed.
+TC_PLATFORMS("macos,windows,linux") IVec2 getWindowPosition();
+TC_PLATFORMS("macos,windows,linux") void setWindowPosition(int x, int y);
+namespace internal {
+IVec2 windowPositionNative(const void* handle);
+void setWindowPositionNative(const void* handle, int x, int y);
+IVec2 mainWindowPosition();
+void setMainWindowPosition(int x, int y);
+void setMainWindowSizeLogical(int width, int height);
+}
 
 // Set whether the window shows standard decorations (title bar, borders,
 // buttons). false = borderless/chromeless, but the window stays key-focusable
@@ -135,8 +137,7 @@ TC_PLATFORMS("macos,windows") void setWindowPosition(int x, int y);
 // Desktop only; no-op on mobile/web.
 void setWindowDecorated(bool decorated);
 
-// Change window size (specified in logical size)
-// macOS: Uses NSWindow
+// Change the current window content size in logical units (no pixelPerfect conversion).
 void setWindowSizeLogical(int width, int height);
 
 // Get absolute path of executable

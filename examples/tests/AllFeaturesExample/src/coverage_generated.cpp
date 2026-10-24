@@ -748,7 +748,7 @@ static void cover_window_system() {
     (void)getKeepScreenOn();
 #endif
     (void)getMaxUpdateSteps();
-#if defined(AF_MACOS) || defined(AF_WINDOWS)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
     (void)getWindowPosition();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
@@ -771,7 +771,7 @@ static void cover_window_system() {
     (void)setOrientation(af::val<Orientation>());
 #endif
     (void)setWindowDecorated(af::val<bool>());
-#if defined(AF_MACOS) || defined(AF_WINDOWS)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
     (void)setWindowPosition(af::val<int>(), af::val<int>());
 #endif
     (void)setWindowSize(af::val<int>(), af::val<int>());

@@ -1113,6 +1113,11 @@ void destroyMainWindow() noexcept {
     owner.reset();
 }
 
+WindowControlHook& windowControlHookForTests() {
+    static WindowControlHook hook = nullptr;
+    return hook;
+}
+
 WindowOccludedHook& windowOccludedHookForTests() {
     static WindowOccludedHook hook = nullptr;
     return hook;
@@ -3660,3 +3665,21 @@ void ScreenRecorder::State::onAfterFrame() {
 }
 
 } // namespace trussc
+
+namespace trussc {
+void setWindowPosition(int x, int y) {
+    if (auto* w = internal::currentWindow()) w->setPosition(x, y);
+    else internal::setMainWindowPosition(x, y);
+}
+IVec2 getWindowPosition() {
+    if (auto* w = internal::currentWindow()) return w->getPosition();
+    return internal::mainWindowPosition();
+}
+}
+
+namespace trussc {
+void setWindowSizeLogical(int width, int height) {
+    if (internal::routeSetWindowSizeToWindow(width, height)) return;
+    if (width > 0 && height > 0) internal::setMainWindowSizeLogical(width, height);
+}
+}
