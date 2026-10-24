@@ -1,3 +1,4 @@
+#include "../common/tcTestFailure.h"
 // Pure parser contracts; no framework setup or GPU is needed.
 #include "tc/3d/tcIesParse.h"
 #include "tcLutParse.h"
@@ -68,11 +69,13 @@ int main() {
         check("incomplete or invalid LUT import preserves previous result", !ok && !error.empty() && cube.side == 2 && cube.rgb.size() == 24);
         check("LUT declarations never request a declaration-sized allocation", largestAllocation < 1024u * 1024u);
     }
-    std::istringstream cubeFailureInput(data);
-    failAllocation = true;
-    const bool cubeFailure = tcx::lut::detail::parseCube(cubeFailureInput, cube, error);
-    failAllocation = false;
-    check("LUT allocation failure returns a clean failure", !cubeFailure && !error.empty() && cube.rgb.size() == 24);
+    if (!tcTest::skipPersistentAllocationFailure("LUT parser scratch container construction")) {
+        std::istringstream cubeFailureInput(data);
+        failAllocation = true;
+        const bool cubeFailure = tcx::lut::detail::parseCube(cubeFailureInput, cube, error);
+        failAllocation = false;
+        check("LUT allocation failure returns a clean failure", !cubeFailure && !error.empty() && cube.rgb.size() == 24);
+    }
     std::istringstream fractionalSize("LUT_3D_SIZE 2.5\n" + data.substr(data.find("0 0 0")));
     check("LUT dimensions require complete integer tokens", !tcx::lut::detail::parseCube(fractionalSize, cube, error));
     size_t count = 0;

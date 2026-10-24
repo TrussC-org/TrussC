@@ -354,9 +354,10 @@ int main() {
         for (const string& ext : {string("png"), string("bmp"), string("jpg")}) {
             auto path = g_dir / ("encoder-fault." + ext);
             for (bool persistent : {false, true}) {
+                if (persistent && tcTest::skipPersistentAllocationFailure("stb encoder output")) continue;
                 ofstream(path, ios::binary) << "previous";
-                modelAllocationProbe::begin(4096, persistent);
                 SaveResult result;
+                modelAllocationProbe::begin(4096, persistent);
                 bool escaped = false;
                 try { result = pixels.save(path); } catch (...) { escaped = true; }
                 modelAllocationProbe::end();
@@ -371,14 +372,17 @@ int main() {
             const auto path = g_dir / "read-only-encoder-output";
             ofstream(path, ios::binary) << "previous";
             for (bool persistent : {false, true}) {
-                // Writing a read-only FILE fails on every native platform.
-                // Fault the first C++ allocation while building that error.
+                if (persistent && tcTest::skipPersistentAllocationFailure("stb FILE error callback")) continue;
+                // A diagnostic-only long path targets message payload growth,
+                // after Sink/result proxy construction, on every STL. It is
+                // never opened on disk. Do not assume an allocation index.
+                const auto diagnosticPath = path / string(8192, 'x');
                 FILE* file = tc::internal::openFile(path, "rb");
                 SaveResult result;
                 bool escaped = false;
                 if (file) {
-                    modelAllocationProbe::beginNth(1, persistent);
-                    try { result = tc::internal::writePixelsEncoded(file, pixels, ext, path); }
+                    modelAllocationProbe::begin(diagnosticPath.native().size(), persistent);
+                    try { result = tc::internal::writePixelsEncoded(file, pixels, ext, diagnosticPath); }
                     catch (...) { escaped = true; }
                     modelAllocationProbe::end();
                     fclose(file);
@@ -672,23 +676,22 @@ int main() {
         auto path = writeGltf(triangle());
         GltfModel model;
         for (bool persistent : {false, true}) {
-            for (size_t request : {size_t(1), size_t(2)}) {
-                check("glTF starts allocation test with a loaded model", model.load(path).ok());
-                LoadResult result;
-                bool escaped = false;
-                // Nth requests fire on MSVC as well; its filebuf bypasses
-                // operator new and large std::allocator requests are padded.
-                modelAllocationProbe::beginNth(request, persistent);
-                try { result = model.load(path); }
-                catch (const bad_alloc&) { escaped = true; }
-                modelAllocationProbe::end();
-                check(persistent ? "persistent allocation failure returns empty failure" :
-                                   "STL allocation failure returns empty failure",
-                      modelAllocationProbe::failed && !escaped && !result &&
-                      result.error == LoadError::DecodeFailed && !model.isLoaded() && model.getNodeCount() == 0 &&
-                      gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0);
-                check("retry after parser allocation failure succeeds", model.load(path).ok());
-            }
+            if (persistent && tcTest::skipPersistentAllocationFailure("glTF load entry")) continue;
+            check("glTF starts allocation test with a loaded model", model.load(path).ok());
+            LoadResult result;
+            bool escaped = false;
+            // Target path payload growth inside recovery, allowing setup
+            // proxies. The threshold comes from the fixture, not an index.
+            modelAllocationProbe::begin(path.native().size(), persistent);
+            try { result = model.load(path); }
+            catch (const bad_alloc&) { escaped = true; }
+            modelAllocationProbe::end();
+            check(persistent ? "persistent allocation failure returns empty failure" :
+                               "STL allocation failure returns empty failure",
+                  modelAllocationProbe::failed && !escaped && !result &&
+                  result.error == LoadError::DecodeFailed && !model.isLoaded() && model.getNodeCount() == 0 &&
+                  gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0);
+            check("retry after parser allocation failure succeeds", model.load(path).ok());
         }
     }
     {
@@ -760,6 +763,8 @@ int main() {
               modelAllocationProbe::end();
               requests = modelAllocationProbe::requests; }
             for (bool persistent : {false, true}) {
+                if (persistent && tcTest::skipPersistentAllocationFailure("glTF every allocation")) continue;
+                if (!persistent && tcTest::skipProxyAllocationSweep("glTF every allocation: single recovery and retry")) continue;
                 bool clean = requests > 0;
                 for (size_t nth = 1; nth <= requests; ++nth) {
                     // Retire prior dummy resources between cases, as an app

@@ -1,3 +1,4 @@
+#include "../../../../core/tests/common/tcTestFailure.h"
 // =============================================================================
 // tcxImGui tests - headless behavioral test (no window, no GPU).
 //
