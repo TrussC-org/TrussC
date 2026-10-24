@@ -68,8 +68,8 @@ static_assert(std::extent_v<decltype(ShadowStorage::colorAttachments)> == maxSha
 // foreign tick can park the pass without changing this owner's slots or maps.
 // ---------------------------------------------------------------------------
 struct ShadowSlotState {
-    // Slot assignment: `frame` (the per-context recordingCount at last reset)
-    // resets the counter on the first beginShadowPass() of each recording;
+    // Slot assignment: `frame` (the base-equivalent resource key at last reset)
+    // resets the counter on the first beginShadowPass() after the key changes;
     // each pass claims the next layer in call order. Slot data persists across
     // frames so draws submitted before the first shadow pass keep the previous
     // frame's shadow state.
@@ -183,12 +183,9 @@ struct WindowContext {
     MainLoopState loop;
     uint64_t updateCount = 0;
     uint64_t drawCount = 0;
-    // Completed recordings committed by this context, including offscreen-only
-    // work and rejected presentation. Stable until endGpuFrame() commits;
-    // another context's commit cannot retire this context's pending recording.
-    // Deferred CPU consumers can outlive a commit; image reuse must also check
-    // pending bindings (Fbo) or replay affected consumers first (shadow slots).
-    uint64_t recordingCount = 0;
+    // Base secondary adapters advanced once after native admission, before update.
+    // Independent callbacks retain that key separately from public update counts.
+    uint64_t resourceTickCount = 0;
     double tickDuration = 0.0;
     bool tickActive = false;
     bool suspended = false;
@@ -350,6 +347,7 @@ WindowClock& windowClockForTests();
 std::chrono::steady_clock::time_point windowClockNow();
 int framebufferToLogical(int pixels, float dpi);
 ResizeEventArgs framebufferResizeArgs(int width, int height, float dpi);
+uint64_t resourceFrameKey(); // Base getFrameCount key for internal resource consumers.
 uint64_t deviceFrameCount(); // GPU upload guard; independent of window draw counts.
 
 // A deterministic clock / GPU seam used by the shared tick tests. Production

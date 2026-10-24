@@ -899,7 +899,6 @@ void internal::endGpuFrame() {
     }
 
     sg_commit();
-    ++internal::currentWindowContext().recordingCount;
     // Only the committing owner completes immediate CPU work. Raw draws keep
     // their pass-consumption lifetime, including on upload-only boundaries.
     auto& target = internal::currentWindowContext().swapchainTarget;
@@ -1403,6 +1402,11 @@ ResizeEventArgs framebufferResizeArgs(int width, int height, float dpi) {
     return args;
 }
 
+uint64_t resourceFrameKey() {
+    const auto& ctx = currentWindowContext();
+    return ctx.isMain ? ctx.updateCount : ctx.resourceTickCount;
+}
+
 uint64_t deviceFrameCount() { return sapp_frame_count(); }
 
 // Single occlusion policy for all windows. Desktop secondary native sources
@@ -1483,6 +1487,10 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     }
     ctx.visibilityPaused = updateHidden;
     if (paused) return nonPresentingExit();
+    // Independent callbacks pass the old free-running secondary admission
+    // point before updates. Synchronized ticks first pass the draw throttle.
+    const bool independentTick = !ctx.loop.updateSyncedToDraw;
+    if (!ctx.isMain && !nativeDrawGated && independentTick) ++ctx.resourceTickCount;
     const auto updatesBefore = ctx.updateCount;
     if (!ctx.loop.updateSyncedToDraw) runIndependentUpdates(now);
     if (nativeDrawGated) {
@@ -1495,6 +1503,9 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     // Hidden main retains HEAD's drawing at its native paced tick source;
     // EVENT_DRIVEN / fixed-rate skips still take the upload-only boundary.
     if (!shouldDraw) return nonPresentingExit();
+    // Base increment point for synchronized ticks: after throttle, before
+    // beginFrame/update, including a later failed render admission.
+    if (!ctx.isMain && !independentTick) ++ctx.resourceTickCount;
     if (presentation) presentation->begin();
     else {
         if (!ctx.isMain && ctx.swapchainTarget.resources().context.id == SG_INVALID_ID) {
@@ -2502,38 +2513,6 @@ bool ensureShadowStorage(WindowContext& window, int resolution) {
         return true;
     } catch (const std::bad_alloc&) { return fail(); }
       catch (const std::length_error&) { return fail(); }
-}
-
-bool hasPendingImageConsumer(sg_image image) {
-    struct Search {
-        sg_image image;
-        bool found = false;
-        void view(sg_view handle) {
-            if (!handle.id || found) return;
-            const auto desc = sg_query_view_desc(handle);
-            found = desc.texture.image.id == image.id || desc.storage_image.image.id == image.id;
-        }
-        void bindings(const sg_bindings& bindings) {
-            for (auto handle : bindings.views) view(handle);
-        }
-        void target(const RenderTarget& target) {
-            if (target.resources().context.id) {
-                sgl_tc_context_dependencies(target.resources().context,
-                    [](sg_pipeline, sg_view view, sg_sampler, void* user) {
-                        static_cast<Search*>(user)->view(view);
-                    }, this);
-            }
-            for (const auto& draw : target.deferredShaderDraws) bindings(draw.bindings);
-            for (const auto& draw : target.deferredPbrDraws) bindings(draw.cmd.bind);
-            for (const auto& draw : target.deferredPointDraws) bindings(draw.cmd.bind);
-        }
-    } search{image};
-    if (!image.id) return false;
-    const auto& window = currentWindowContext();
-    search.target(window.swapchainTarget);
-    for (const auto& entry : window.targetStack)
-        if (entry.target != &window.swapchainTarget) search.target(*entry.target);
-    return search.found;
 }
 
 void consumeShadowSlot(int slot) {

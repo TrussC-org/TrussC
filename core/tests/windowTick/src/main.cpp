@@ -60,6 +60,73 @@ void nativeGatedTicks(Window& window) {
     ctx.frameUptimeSampled = false; ctx.tickDuration = 0;
     internal::currentWindowCtx() = previous;
 }
+
+// The key is a compatibility rule, independent of GPU completion and draw success.
+void resourceKeyPlacement(Window& main) {
+    Secondary owner, other;
+    main.setApp(std::make_shared<Probe>());
+    owner.setApp(std::make_shared<Probe>());
+    other.setApp(std::make_shared<Probe>());
+    for (auto* window : {&main, static_cast<Window*>(&owner)}) {
+        auto& ctx = window->context();
+        internal::currentWindowCtx() = &ctx;
+        uint64_t expected = internal::resourceFrameKey();
+        bool callbackPlacement = true;
+        auto observe = [&] {
+            callbackPlacement &= internal::resourceFrameKey() ==
+                (ctx.isMain ? getUpdateCount() : expected);
+        };
+        auto update = events().update.listen(observe);
+        auto draw = events().draw.listen(observe);
+        double seconds = 9000;
+        auto attempt = [&](const char* label, bool force, bool rejected, bool gated, bool skipAdmission = false) {
+            const auto before = internal::resourceFrameKey();
+            const auto foreign = other.context().resourceTickCount;
+            expected = before + (!ctx.isMain && !gated && !skipAdmission ? 1 : 0);
+            const internal::WindowTickPresentation presentation{[] {}, [=] { return !rejected; }, [] {}};
+            fakeNow = at(seconds++);
+            internal::runWindowTick(fakeNow, .25, force, &presentation, gated);
+            check(label, internal::resourceFrameKey() == (ctx.isMain ? ctx.updateCount : expected));
+            check("resource key is placed before update/draw listeners", callbackPlacement);
+            check("owner tick leaves another secondary resource key unchanged", other.context().resourceTickCount == foreign);
+            const auto saved = internal::resourceFrameKey();
+            tick(other, seconds);
+            check("another window tick leaves selected resource key unchanged", internal::resourceFrameKey() == saved);
+        };
+        setFps(VSYNC);
+        attempt("resource key: synchronized tick", false, false, false);
+        setFps(.25f);
+        attempt("resource key: synchronized throttle admits first tick", false, false, false);
+        attempt("resource key: synchronized throttle skips before increment", false, false, false, true);
+        setIndependentFps(VSYNC, EVENT_DRIVEN); ctx.loop.redrawCount = 0;
+        const auto updates = ctx.updateCount, draws = ctx.drawCount;
+        attempt("resource key: update-only admitted tick", false, false, false);
+        check("key placement fixture updated without drawing", ctx.updateCount == updates + 1 && ctx.drawCount == draws);
+        setIndependentFps(EVENT_DRIVEN, VSYNC);
+        attempt("resource key: draw-only admitted tick", false, false, false);
+        check("key placement fixture drew without updating", ctx.updateCount == updates + 1 && ctx.drawCount == draws + 1);
+        attempt("resource key: failed render admission is still an admitted tick", false, true, false);
+        setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN); ctx.loop.redrawCount = 0;
+        attempt("resource key: idle admitted tick", false, false, false);
+        setFps(EVENT_DRIVEN); ctx.loop.redrawCount = 0;
+        attempt("resource key: synchronized idle callback has no admission", false, false, false, true);
+        setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN);
+        ctx.suspended = true;
+        attempt("resource key: hidden capture admitted tick", true, false, false);
+        attempt("resource key: paused secondary tick", false, false, false, !ctx.isMain);
+        attempt("resource key: native gate including capture never advances secondary", true, false, true);
+        ctx.suspended = false;
+        setIndependentFps(4, EVENT_DRIVEN); ctx.loop.redrawCount = 0;
+        attempt("resource key: initial fixed update tick", false, false, false);
+        const auto catchupUpdates = ctx.updateCount;
+        attempt("resource key: multiple catch-up updates use one secondary tick", false, false, false);
+        check("key placement fixture ran several catch-up updates", ctx.updateCount > catchupUpdates + 1);
+        auto switchMode = events().update.listen([] { setFps(VSYNC); });
+        attempt("resource key: update-time mode switch admits exactly once", false, false, false);
+        internal::currentWindowCtx() = nullptr;
+    }
+}
+
 void exercise(Window& window) {
     auto* previous = internal::currentWindowCtx();
     auto& ctx = window.context();
@@ -514,6 +581,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 #ifndef __EMSCRIPTEN__
     captureExpiryWithoutPresentation(main);
 #endif
+    resourceKeyPlacement(main);
     internal::destroyMainWindow();
     {
         struct LongSetup : App {

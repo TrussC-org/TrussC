@@ -63,8 +63,8 @@ class ShadowApp : public App {
         select(n);
         internal::prepareWindowTarget();
         beginFrame();
-        if (owner(n).isMain) ++internal::mainWindowContext().recordingCount;
-        else ++owner(n).recordingCount;
+        if (owner(n).isMain) ++internal::mainWindowContext().updateCount;
+        else ++owner(n).resourceTickCount;
         clear(0,0,0,1);
         clearLights();
         lights_[n].enableShadow(resolution);
@@ -334,7 +334,7 @@ class ShadowApp : public App {
         for (bool child : {false,true}) {
             start(0,256); shadow(0); queue();
             check("same-owner prior PBR starts lazy", !a_->swapchainTarget.inPass);
-            ++internal::mainWindowContext().recordingCount;
+            ++internal::mainWindowContext().updateCount;
             if (child) fbo_.begin(0,0,0,1);
             beginShadowPass(lights_[0]); cast(1); endShadowPass();
             if (child) fbo_.end();

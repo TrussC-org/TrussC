@@ -1233,9 +1233,8 @@ inline void ensureFontAtlas(int rows) {
     // stale atlas.version makes us try again on the next call.
     // (When size changes we destroy + create a brand-new image below, so the
     // guard only applies to the same-dimensions in-place path.)
-    // The atlas is device-shared. Match Sokol's GPU commit boundary, including
-    // upload-only ticks and commits from windows with independent draw rates.
-    if (sizeOk && atlas.uploadFrame == internal::shaderStreamFrame()) return;
+    // Preserve base's per-window upload key: main updates, secondary admitted ticks.
+    if (sizeOk && atlas.uploadFrame == internal::resourceFrameKey()) return;
 
     // Regenerate pixel buffer. Use the LARGER of `rows` and the currently
     // allocated rows so a same-size in-place update stays the same size.
@@ -1252,7 +1251,7 @@ inline void ensureFontAtlas(int rows) {
         data.mip_levels[0].ptr  = pixels;
         data.mip_levels[0].size = dataBytes;
         sg_update_image(atlas.texture, &data);
-        atlas.uploadFrame = internal::shaderStreamFrame();
+        atlas.uploadFrame = internal::resourceFrameKey();
     } else {
         // Size changed (or first allocation). Recreate the image. The old
         // image/view are destroyed deferred — sokol_gl commands recorded
@@ -1277,7 +1276,7 @@ inline void ensureFontAtlas(int rows) {
         data.mip_levels[0].ptr  = pixels;
         data.mip_levels[0].size = dataBytes;
         sg_update_image(atlas.texture, &data);
-        atlas.uploadFrame = internal::shaderStreamFrame();
+        atlas.uploadFrame = internal::resourceFrameKey();
 
         sg_view_desc view_desc = {};
         view_desc.texture.image = atlas.texture;

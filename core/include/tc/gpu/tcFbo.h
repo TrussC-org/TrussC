@@ -533,16 +533,23 @@ private:
     void markDrawnThisFrame_() const {
         diagnoseActiveSampling_();
         drawnThisFrame_ = true;
-        lastDrawFrame_ = internal::currentWindowContext().recordingCount;
+        lastDrawFrame_ = internal::resourceFrameKey();
     }
 
-    // Reset the cursor after this context commits, including offscreen work
-    // and rejected presentation. Pending CPU samplers are checked separately
-    // before choosing a writable version: a commit need not consume them.
-    // Keep one Fbo to one context per recording; cross-window sampling still
-    // has no version ownership protocol.
+    // Frame-boundary sync. Once the frame that recorded the versions has
+    // flushed, all pool entries are reusable again. Keyed on the per-window
+    // internal::resourceFrameKey() (Fix 3): each window records + flushes (sg_commit) its Fbo
+    // draws within its own tick, so a per-window frame boundary is correct.
+    //
+    // Supported contract / cross-window limitation: an Fbo must be drawn from a
+    // SINGLE window within a given frame. Drawing one Fbo object from multiple
+    // windows in the same frame is unsupported — internal::resourceFrameKey() is per-window
+    // (PR #200), so two windows' independent counters can coincide, making this
+    // early-return skip the version promote (stale snapshot / unbounded version
+    // growth). There is no clean fix for the key: sapp_frame_count() would break
+    // secondary-window frame boundaries. Keep one Fbo to one window per frame.
     void syncVersionFrame_() {
-        uint64_t fc = internal::currentWindowContext().recordingCount;
+        uint64_t fc = internal::resourceFrameKey();
         if (fc == poolFrame_) return;
         poolFrame_ = fc;
         // Promote the latest content into the primary slot by swapping
@@ -584,10 +591,6 @@ private:
     bool advanceVersion_() {
         if (poolAllocFailed_) return false;
         int next = currentVersion_ + 1;
-        // A pooled image may still be bound by a deferred owner command from
-        // an earlier recording. Skip it until replay/discard releases it.
-        while (next <= (int)versionPool_.size() &&
-               internal::hasPendingImageConsumer(versionPool_[next - 1].tex.getImage())) ++next;
         if ((int)versionPool_.size() < next) {
             ColorVersion v;
             // Match the primary color texture exactly. Filters/wrap are set
@@ -853,22 +856,10 @@ private:
             sgl_tc_reset_matrix_stacks();
             sgl_tc_context_ensure_buffers(lease->context);
             sgl_defaults();
-            // A raw Texture draw may precede this Fbo's first production
-            // (the lazy-target contract). There is no produced snapshot yet.
-            // After the first begin, protect captured content even across commits.
-            const bool pending = poolFrame_ != UINT64_MAX &&
-                internal::hasPendingImageConsumer(curColorTex_().getImage());
             syncVersionFrame_();
-            if (drawnThisFrame_ || pending) {
+            if (drawnThisFrame_) {
                 const int previous = currentVersion_;
-                const bool advanced = advanceVersion_();
-                if (!advanced && pending) {
-                    // Allocation failure must not overwrite a queued sampler.
-                    target_.finalize = nullptr;
-                    internal::popTarget(target_, token);
-                    return;
-                }
-                if (advanced && !doClear && target_.sampleCount == 1) {
+                if (advanceVersion_() && !doClear && target_.sampleCount == 1) {
                     const Texture& src = previous == 0 ? colorTexture_ : versionPool_[previous - 1].tex;
                     blitColorInto_(src, curColorTex_());
                 }

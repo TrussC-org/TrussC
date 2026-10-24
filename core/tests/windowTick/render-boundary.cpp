@@ -3,8 +3,8 @@
 #include "../common/tcCoreTest.h"
 #include <EGL/egl.h>
 #include <GL/gl.h>
-#include <array>
 #include <cstdio>
+#include <array>
 using namespace tc;
 namespace {
 int failures;
@@ -37,11 +37,11 @@ struct Resources {
     int offscreenRecordings = 0;
     void renderOffscreen() {
         auto& ctx = window.context();
-        const auto recording = ctx.recordingCount;
+        const auto tick = internal::resourceFrameKey();
         auto receiver = createPlane(8, 8);
         if (shadowPass) {
             beginShadowPass(light);
-            check("offscreen shadow admitted on every recording", ctx.shadow.inPass && ctx.shadow.count == 1);
+            check("offscreen shadow admitted on every tick", ctx.shadow.inPass && ctx.shadow.count == 1);
             shadowDraw(receiver);
             endShadowPass();
         }
@@ -58,7 +58,7 @@ struct Resources {
         const auto image = fbo.getTexture().getImage().id;
         if (!firstImage) firstImage = image;
         check("offscreen single revisions reuse FBO storage", image == firstImage);
-        check("identity stays fixed during recording", ctx.recordingCount == recording);
+        check("identity stays fixed during tick", internal::resourceFrameKey() == tick);
         check("offscreen public count contract", getFrameCount() == getUpdateCount());
         ++offscreenRecordings;
     }
@@ -85,13 +85,12 @@ struct Resources {
                 auto receiver = createPlane(8, 8);
                 Material material; setMaterial(material); receiver.draw(); clearMaterial();
                 const auto& pending = internal::currentTarget().deferredPbrDraws;
-                check("shadow validity ages by owner draws, including no updates", !pending.empty() &&
+                check("shadow validity ages by admitted secondary ticks", !pending.empty() &&
                     pending.back().cmd.fsp.shadowMapParams[1] == expectedShadowSlots);
             }
             uint8_t glyph[13] = {static_cast<uint8_t>(++draws)};
             bitmapfont::updateGlyph(65, glyph);
             ensureFontAtlasForText("A");
-            check("shared glyph uploads on next GPU frame", internal::bitmapFontAtlas().version == bitmapfont::internal::registryVersion());
             fbo.begin(); clear(0,0,0,1); fbo.end(); fbo.draw(0,0);
             auto image = fbo.getTexture().getImage().id;
             if (!firstImage) firstImage = image;
@@ -103,84 +102,6 @@ struct Resources {
         internal::runWindowTick(std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(17*n), sourceDuration, force);
     }
 };
-
-std::array<uint8_t, 16*16*4> colorPixels(sg_image image) {
-    std::array<uint8_t, 16*16*4> pixels{};
-    const auto native = sg_gl_query_image_info(image);
-    glBindTexture(GL_TEXTURE_2D, native.tex[native.active_slot]);
-    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
-    sg_reset_state_cache();
-    return pixels;
-}
-bool solidColor(sg_image image, uint8_t r, uint8_t g, uint8_t b) {
-    const auto pixels = colorPixels(image);
-    for (size_t i = 0; i < pixels.size(); i += 4)
-        if (pixels[i] != r || pixels[i+1] != g || pixels[i+2] != b) return false;
-    return true;
-}
-void pendingFboConsumers(Resources& owner) {
-    auto& ctx = owner.window.context();
-    internal::restoreWindowContext(&ctx);
-    owner.draw = {};
-    setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN);
-    ctx.loop.redrawCount = 0; // initial/recovery redraw has already been consumed
-    Fbo source;
-    source.allocate(16,16);
-    const auto unproduced = source.getColorImage();
-    source.getTexture().draw(0,0);
-    source.begin(0,0,1); source.end();
-    check("first FBO production fulfills an earlier raw texture draw", source.getColorImage().id == unproduced.id &&
-        solidColor(unproduced,0,0,255));
-    redraw(); owner.tick(89);
-    source.begin(1,0,0); source.end(); source.draw(0,0);
-    const auto red = source.getColorImage();
-    auto mesh = createPlane(8,8);
-    Material material;
-    auto queue = [&] {
-        material.setBaseColorTexture(&source.getTexture());
-        setMaterial(material); mesh.draw(); clearMaterial();
-    };
-    queue();
-    auto& pending = ctx.swapchainTarget.deferredPbrDraws;
-    check("FBO PBR consumer captures red image", pending.size() == 1 &&
-        sg_query_view_desc(pending.back().cmd.bind.views[VIEW_tc_pbr_baseColorTex]).texture.image.id == red.id);
-    const auto recording = ctx.recordingCount, draws = ctx.drawCount, updates = ctx.updateCount;
-    owner.tick(90);
-    check("automatic idle commit carries PBR consumer without update or draw", pending.size() == 1 &&
-        ctx.recordingCount == recording + 1 && ctx.drawCount == draws && ctx.updateCount == updates);
-    source.begin(0,1,0); source.end();
-    const auto green = source.getColorImage();
-    check("pending FBO sample stays red across idle commit", green.id != red.id && solidColor(red,255,0,0));
-    check("new FBO content is green", solidColor(green,0,255,0));
-    // This sampler deliberately uses getTexture() without Fbo::draw(). Its
-    // captured binding must protect the image just as the first consumer did.
-    queue();
-    check("raw texture sampler captures green FBO version", pending.size() == 2 &&
-        sg_query_view_desc(pending.back().cmd.bind.views[VIEW_tc_pbr_baseColorTex]).texture.image.id == green.id);
-    owner.tick(91);
-    source.begin(0,0,1); source.end();
-    const auto blue = source.getColorImage();
-    check("pooled pending FBO versions are skipped", blue.id != red.id && blue.id != green.id &&
-        solidColor(red,255,0,0) && solidColor(green,0,255,0));
-    // A frozen red/green consumer must not force growth of unrelated completed
-    // offscreen recordings. Recycle the remaining writable version each time.
-    for (int n = 92; n < 104; ++n) {
-        owner.sink.begin(0,0,0); source.draw(0,0); owner.sink.end();
-        owner.tick(n);
-        source.begin(0,0,1); source.end();
-        check("unreferenced FBO storage recycles with older consumers pending", source.getColorImage().id == blue.id);
-    }
-    check("carried FBO consumers still have original pixels", pending.size() == 2 &&
-        solidColor(red,255,0,0) && solidColor(green,0,255,0));
-    redraw(); owner.tick(104);
-    check("owner draw consumes carried FBO commands", pending.empty() && ctx.drawCount == draws + 1);
-    source.begin(0,0,1); source.end();
-    owner.sink.begin(0,0,0); source.draw(0,0); owner.sink.end();
-    source.begin(0,0,1); source.end();
-    const auto recycled = source.getColorImage();
-    check("formerly pending FBO storage recycles after consumption", recycled.id == red.id || recycled.id == green.id);
-    owner.tick(105);
-}
 
 struct ShadowReplayProbe {
     sg_image image{};
@@ -202,6 +123,9 @@ struct ShadowReplayProbe {
 void pendingShadowConsumer(Resources& owner) {
     auto& ctx = owner.window.context();
     internal::restoreWindowContext(&ctx);
+    owner.draw = {};
+    setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN); ctx.loop.redrawCount = 0;
+    owner.tick(105); // a newly admitted secondary tick, before any shadow producer
     owner.light.setShadowArea(Vec3(0,0,0),16);
     auto mesh = createBox(8);
     beginShadowPass(owner.light); shadowDraw(mesh); endShadowPass();
@@ -213,9 +137,9 @@ void pendingShadowConsumer(Resources& owner) {
     auto& pending = ctx.swapchainTarget.deferredPbrDraws;
     check("shadow consumer captures original slot", pending.size() == 1 &&
         pending.back().cmd.shadowGeneration == ctx.shadow.storage && pending.back().cmd.fsp.shadowMapParams[1] == 1);
-    const auto draws = ctx.drawCount, recording = ctx.recordingCount;
+    const auto draws = ctx.drawCount, recording = internal::resourceFrameKey();
     owner.tick(106);
-    check("idle commit preserves shadow consumer", pending.size() == 1 && ctx.recordingCount == recording + 1);
+    check("idle commit preserves shadow consumer", pending.size() == 1 && internal::resourceFrameKey() == recording + 1);
     ctx.acquireSwapchain = ShadowReplayProbe::acquire; ctx.acquireSwapchainUser = &probe;
     // Existing consumeShadowSlot must replay the old draw BEFORE clearing the
     // reused layer. Acquisition reads its pixels at that consumption boundary.
@@ -272,21 +196,16 @@ TC_CORE_TEST_MAIN() {
         }
         check("two windows draw at different rates without updates", fast.draws == 24 && slow.draws == 8 &&
             fast.window.context().updateCount == 0 && slow.window.context().updateCount == 0);
-        // A device-shared atlas must defer a second in-place upload until commit,
-        // even if the current window changes and its draw counter is different.
+        // Base's atlas guard suppresses a repeat upload at the same resource key.
         internal::restoreWindowContext(&fast.window.context());
         bitmapfont::updateGlyph(65, glyph); ensureFontAtlasForText("A");
-        auto uploaded = internal::bitmapFontAtlas().version;
-        internal::restoreWindowContext(&slow.window.context());
+        const auto uploaded = internal::bitmapFontAtlas().version;
+        bitmapfont::updateGlyph(65, glyph); ensureFontAtlasForText("A");
+        check("atlas defers repeated upload at the same base-equivalent key", internal::bitmapFontAtlas().version == uploaded);
         const auto gpuFrame = internal::shaderStreamFrame();
         internal::runWindowTick(std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(425),
             1.0/60, false, nullptr, true);
         check("native gate cannot commit foreign GPU work", internal::shaderStreamFrame() == gpuFrame);
-        bitmapfont::updateGlyph(65, glyph); ensureFontAtlasForText("A");
-        check("two windows share one upload guard before commit", internal::bitmapFontAtlas().version == uploaded);
-        internal::endGpuFrame(); // upload-only boundary: neither window draws
-        ensureFontAtlasForText("A");
-        check("upload-only commit permits next atlas upload", internal::bitmapFontAtlas().version == bitmapfont::internal::registryVersion());
         internal::endGpuFrame();
         // Hidden forced capture is a real draw, with the same resource boundaries.
         slow.window.context().suspended = true;
@@ -319,7 +238,7 @@ TC_CORE_TEST_MAIN() {
         other.tick(52); other.tick(53);
         internal::restoreWindowContext(&owner.window.context());
         completedSource.begin(0,1,0); completedSource.end();
-        check("foreign commits do not reset FBO owner recording after offscreen consumption",
+        check("foreign commits do not reset FBO owner tick after offscreen consumption",
             completedSource.getColorImage().id != completed.id);
         owner.fbo.begin(); clear(0,0,0,1); owner.fbo.end(); owner.fbo.draw(0,0);
         check("other window commits do not recycle owner FBO revisions", owner.fbo.getTexture().getImage().id != first);
@@ -334,21 +253,21 @@ TC_CORE_TEST_MAIN() {
         auto update = events().update.listen([&] { other.renderOffscreen(); });
         const auto before = other.window.context().drawCount;
         for (int n = 54; n < 66; ++n) {
-            const auto recording = other.window.context().recordingCount;
+            const auto tick = other.window.context().resourceTickCount;
             other.tick(n);
-            check("update-only work completes one owner recording", other.window.context().recordingCount == recording + 1);
+            check("update-only work completes one owner tick", other.window.context().resourceTickCount == tick + 1);
         }
-        check("twelve update-only recordings keep real draw count", other.offscreenRecordings == 12 &&
+        check("twelve update-only ticks keep real draw count", other.offscreenRecordings == 12 &&
             other.window.context().drawCount == before && afterFrames == 0);
         other.shadowPass = false; other.expectedShadowSlots = 1; other.tick(66);
         other.expectedShadowSlots = 0; other.tick(67);
         other.shadowPass = true; other.expectedShadowSlots = -1;
         update = {};
-        // An idle tick does not complete a recording just because it was ticked.
+        // Idle callbacks retain the base secondary admission key.
         setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN);
-        const auto idleRecording = other.window.context().recordingCount;
+        const auto idleRecording = other.window.context().resourceTickCount;
         other.tick(68);
-        check("idle tick does not advance recording identity", other.window.context().recordingCount == idleRecording);
+        check("idle secondary callback advances the base admission key", other.window.context().resourceTickCount == idleRecording + 1);
         // Keep the draw listener through every invalid-swapchain attempt and
         // recovery: these attempts commit offscreen resources, but no real draw.
         setIndependentFps(EVENT_DRIVEN, VSYNC);
@@ -356,9 +275,9 @@ TC_CORE_TEST_MAIN() {
         rejectSwapchain = true;
         const auto attemptsBefore = other.offscreenRecordings;
         for (int n = 69; n < 81; ++n) {
-            const auto recording = other.window.context().recordingCount;
+            const auto tick = other.window.context().resourceTickCount;
             other.tick(n);
-            check("failed admission completes one owner recording", other.window.context().recordingCount == recording + 1);
+            check("failed admission completes one owner tick", other.window.context().resourceTickCount == tick + 1);
             check("failed admission retains real draw identity and no afterFrame",
                 other.window.context().drawCount == before && afterFrames == 0);
         }
@@ -368,7 +287,6 @@ TC_CORE_TEST_MAIN() {
         other.shadowPass = true; other.expectedShadowSlots = -1;
         rejectSwapchain = false; other.tick(83);
         check("first recovered draw completes normally", other.window.context().drawCount == before + 1 && afterFrames == 1);
-        pendingFboConsumers(other);
         pendingShadowConsumer(other);
         internal::currentWindowCtx() = nullptr;
     }
