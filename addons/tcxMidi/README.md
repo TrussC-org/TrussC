@@ -109,6 +109,21 @@ F0/F7**. Larger messages are discarded whole and counted internally. The first
 SysEx loss per `MidiIn` lifetime emits one **Warning on the main thread**, even
 without polling. These losses do not change `getDroppedMessageCount()`, and
 `setBufferSize()` does not raise the SysEx limit. WebMIDI does not enable SysEx.
+ALSA output splits long SysEx into 256-byte events, drains each event with
+bounded retries, and paces partial SysEx by 1 ms. Pacing and draining run on
+**the calling thread**, at about 256 KB/s (roughly 80 times DIN MIDI). A 1 MB
+SysEx takes about 4 s; calling `sendSysex` from `update()` or `draw()` stalls
+that thread for the entire send. Drain retries and scheduling can add latency.
+Private clients are opened nonblocking; supplied contexts retain their mode.
+A blocking supplied handle can block in the kernel drain beyond the retry bound.
+Supplied contexts concern direct libremidi configuration only; TrussC's own
+MidiOut never supplies a context.
+With immediate mock drains and the real ALSA codec, the 1,048,577-byte
+host send measured **4,369 ms** (4,097 events); real-device timing can vary.
+A send reports success when the sequencer accepts it, or a clear error when the
+send itself fails; a failed send may have delivered a prefix. A receiver whose
+input pool overflows loses data on its side; send success does not acknowledge
+reception, as on the other backends. Other output backends are unchanged.
 See [the local libremidi patch ledger](LIBREMIDI_TRUSSC_MODIFICATIONS.md).
 
 **`MidiOut`** — `listDevices()`, `openPort(index|name)`, `openVirtualPort(name)`,

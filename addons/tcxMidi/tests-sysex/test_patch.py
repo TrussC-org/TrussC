@@ -23,6 +23,8 @@ PATCHED_HASHES = {
         "316f03a84f76c59a2629b863d656789b0af9821500fe4ce852e038417d6e895d",
     "include/libremidi/backends/winmm/midi_in.hpp":
         "ce432de402f161b917ca43b65c9720fde12bc5eb13bc4ccf3369b540da63106c",
+    "include/libremidi/backends/alsa_seq/midi_out.hpp":
+        "0590ffc031e6fbc2076af581542095c057bedbc6766d137bd14114eb4ec9525b",
 }
 
 
@@ -99,8 +101,10 @@ def main():
 
     run("explicit_private_patch", ["cmake", f"-DLIBREMIDI_SOURCE_DIR={override}", "-P", str(script)])
     expected = patched_bytes(override)
+    before = snapshot(override)
     run("idempotent_patch", ["cmake", f"-DLIBREMIDI_SOURCE_DIR={override}", "-P", str(script)])
     assert patched_bytes(override) == expected
+    assert snapshot(override) == before, "idempotent LF patch wrote sources"
     crlf_output = work / "crlf_script_output"
     shutil.copytree(pristine, crlf_output)
     patch("crlf_script_patch", crlf_output, script_crlf)
@@ -158,6 +162,30 @@ def main():
     if args.script_only:
         return
     configure("patched_override", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}")
+    # Every replacement is required for overrides, including the fifth (ALSA output).
+    for index, path in enumerate(PATCHED_HASHES):
+        header = override / path
+        patched = header.read_bytes()
+        header.write_bytes((pristine / path).read_bytes())
+        before = snapshot(override)
+        configure(f"replacement_{index}_missing", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}", succeeds=False)
+        assert snapshot(override) == before, "verification modified incomplete override"
+        header.write_bytes(patched + b"\n// Unknown local edit.\n")
+        before = snapshot(override)
+        configure(f"unknown_{index}_override", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}", succeeds=False)
+        assert snapshot(override) == before, "verification modified unknown override"
+        header.write_bytes(patched)
+        # Unknown input must fail before any of the other four files are written.
+        unknown = work / f"unknown_input_{index}"
+        shutil.copytree(pristine, unknown)
+        with (unknown / path).open("ab") as output:
+            output.write(b"\n// Unknown local edit.\n")
+        before = snapshot(unknown)
+        for encoding, candidate in (("lf", script), ("crlf", script_crlf)):
+            for verify in (False, True):
+                patch(f"unknown_{index}_{encoding}_verify_{verify}", unknown, candidate,
+                      verify=verify, succeeds=False)
+                assert snapshot(unknown) == before, "unknown input was modified"
     decoder = override / "include/libremidi/detail/midi_stream_decoder.hpp"
     with decoder.open("a", encoding="utf-8") as output:
         output.write("\n// Unknown local edit.\n")
