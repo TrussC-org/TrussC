@@ -15211,7 +15211,7 @@ void tcApp::setup() {
 - Returns a `double` for the current window; VSYNC and `setFps` modes use measured time between update calls, while fixed-rate updates configured with `setIndependentFps` and steps in `runHeadlessApp` use exactly `1 / updateFps`.
 - The main window measures intervals with a steady clock, unaffected by system clock changes; the value is zero before an update time step has been set, and a measured main-window update uses the backend's frame-duration estimate only when no update-time baseline has been initialized.
 - Secondary windows currently measure with `high_resolution_clock`, which uses the system clock on Linux; a forward clock change enters one time step and can fire due Node timers together, including one uncapped `callEveryCatchUp` call per missed interval. A backward change produces one negative time step, during which Node timers are not counted down.
-- With the default VSYNC setting, updates and draws follow the refresh rate of the display containing the window; `setFps()` can lower their rate. A constant step such as `x += 2` moves at half the speed on 30 Hz compared with 60 Hz, or on 60 Hz compared with 120 Hz. Multiply speed by `getDeltaTime()` as below, or calculate position from `getElapsedTime()`, for the same speed on every screen. This behavior was measured on a Mac with a 60 Hz built-in display and a 30 Hz external display (issue #997).
+- With the default VSYNC setting, updates and draws follow the refresh rate of the display containing the window; `setFps()` can lower their rate. A constant step such as `x += 2` moves at half the speed on 30 Hz compared with 60 Hz, or on 60 Hz compared with 120 Hz. Multiply speed by `getDeltaTime()` as below, or calculate position from `getElapsedTime()`, for the same speed on every screen.
 ```cpp
 void tcApp::update() {
     x += speed * getDeltaTime();   // same speed on 60 Hz and 120 Hz screens
@@ -15335,7 +15335,7 @@ void tcApp::draw() {
 
 - Returns a `uint64_t` with the same value as `getUpdateCount()`. In the main window, the counter advances before each update, so several update steps between draws increase it several times.
 - Secondary windows return their own tick counter. Use `getDrawCount()` for the device/main-window frame index.
-- With the default VSYNC setting, `update()` and `draw()` follow the refresh rate of the display containing the window; `setFps()` can lower their rate. A constant step such as `x += 2` therefore moves at half the speed on 30 Hz compared with 60 Hz, or on 60 Hz compared with 120 Hz. Use `x += speed * getDeltaTime()` or calculate position from `getElapsedTime()` for the same speed on every screen. This behavior was measured on a Mac with a 60 Hz built-in display and a 30 Hz external display (issue #997).
+- Under VSYNC the rate follows the display's refresh rate, so this count does not measure a fixed time; move things with `getDeltaTime()` instead of a fixed step per frame.
 
 ## getFrameElapsedTime
 
@@ -15682,7 +15682,7 @@ void tcApp::setup() {
 - Returns a `uint64_t` counter that starts at zero and advances before each framework update; multiple update steps between draws each advance it.
 - It returns the same value as `getFrameCount()`. Secondary windows have independent counters; outside a window-specific context, it uses the main window.
 - The `runHeadlessApp` loop does not advance this counter, even though it calls `App::update()`.
-- With the default VSYNC setting, updates and draws follow the refresh rate of the display containing the window; `setFps()` can lower their rate, so this counter does not measure a fixed amount of time. A constant step such as `x += 2` moves at half the speed on 30 Hz compared with 60 Hz, or on 60 Hz compared with 120 Hz. Use `x += speed * getDeltaTime()` or calculate position from `getElapsedTime()` for the same speed on every screen. This behavior was measured on a Mac with a 60 Hz built-in display and a 30 Hz external display (issue #997).
+- Under VSYNC the rate follows the display's refresh rate, so this count does not measure a fixed time; move things with `getDeltaTime()` instead of a fixed step per frame.
 
 ## getVersion
 
@@ -17082,7 +17082,7 @@ void tcApp::setup() {
 
 ## setFps
 
-- Takes a target rate in fps. In the main window, `VSYNC` (-1) follows the refresh rate of the display containing the window and `EVENT_DRIVEN` (0) waits for a frame request such as `redraw()`. In a secondary window's callbacks, it sets that window's throttle; values at or below zero, including `EVENT_DRIVEN`, run at the display refresh rate without additional throttling. A fixed fps at or just above the display's refresh rate draws every display frame; a lower target reduces the update and draw rate. A constant step such as `x += 2` moves at half the speed on 30 Hz compared with 60 Hz, or on 60 Hz compared with 120 Hz, when following VSYNC. Use `x += speed * getDeltaTime()` or calculate position from `getElapsedTime()` for the same speed on every screen. This behavior was measured on a Mac with a 60 Hz built-in display and a 30 Hz external display (issue #997).
+- Takes a target rate in fps. In the main window, `VSYNC` (-1) follows the refresh rate of the display containing the window and `EVENT_DRIVEN` (0) waits for a frame request such as `redraw()`. In a secondary window's callbacks, it sets that window's throttle; values at or below zero, including `EVENT_DRIVEN`, run at the display refresh rate without additional throttling. A fixed fps at or just above the display's refresh rate draws every display frame; a lower target reduces the update and draw rate. Under VSYNC the rate follows the display, so move things with `getDeltaTime()` rather than a fixed step per frame.
 - Under `setFps`, `update()` and `draw()` are called together at the same rate; to run them at independent rates (for example a fast simulation with a slower draw, or the reverse), use `setIndependentFps()` instead.
 - Switching the rate at runtime takes effect immediately from the moment of the call, with no catch-up: on a fixed fps the next frame is drawn right away, and the first `update()` after the switch has a `getDeltaTime()` that excludes time spent in the previous mode. Called between updates, the new timer starts from the call; called from inside an `update()`, it starts from that update's beginning. The time this drops is under one frame in the usual modes, and only grows larger after an idle period such as `EVENT_DRIVEN` waiting for a redraw.
 - Calling `setFps` again with the rate it is already at does nothing, so it is safe to call every frame (for example from a GUI slider). On the one frame where the value actually changes, that update's `getDeltaTime()` is shorter than a normal frame, since it is measured only from the moment of the call.

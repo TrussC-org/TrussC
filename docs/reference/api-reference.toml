@@ -45535,7 +45535,7 @@ details.en = '''
 - Returns a `double` for the current window; VSYNC and `setFps` modes use measured time between update calls, while fixed-rate updates configured with `setIndependentFps` and steps in `runHeadlessApp` use exactly `1 / updateFps`.
 - The main window measures intervals with a steady clock, unaffected by system clock changes; the value is zero before an update time step has been set, and a measured main-window update uses the backend's frame-duration estimate only when no update-time baseline has been initialized.
 - Secondary windows currently measure with `high_resolution_clock`, which uses the system clock on Linux; a forward clock change enters one time step and can fire due Node timers together, including one uncapped `callEveryCatchUp` call per missed interval. A backward change produces one negative time step, during which Node timers are not counted down.
-- With the default VSYNC setting, updates and draws follow the refresh rate of the display containing the window; `setFps()` can lower their rate. A constant step such as `x += 2` moves at half the speed on 30 Hz compared with 60 Hz, or on 60 Hz compared with 120 Hz. Multiply speed by `getDeltaTime()` as below, or calculate position from `getElapsedTime()`, for the same speed on every screen. This behavior was measured on a Mac with a 60 Hz built-in display and a 30 Hz external display (issue #997).
+- With the default VSYNC setting, updates and draws follow the refresh rate of the display containing the window; `setFps()` can lower their rate. A constant step such as `x += 2` moves at half the speed on 30 Hz compared with 60 Hz, or on 60 Hz compared with 120 Hz. Multiply speed by `getDeltaTime()` as below, or calculate position from `getElapsedTime()`, for the same speed on every screen.
 ```cpp
 void tcApp::update() {
     x += speed * getDeltaTime();   // same speed on 60 Hz and 120 Hz screens
@@ -45546,7 +45546,7 @@ details.ja = '''
 - 現在のウィンドウの時間ステップを `double` で返します。VSYNC と `setFps` モードでは更新の呼び出し間隔を実測し、`setIndependentFps` の固定レート更新と `runHeadlessApp` の各ステップでは正確に `1 / updateFps` を使います。
 - メインウィンドウは steady clock で間隔を測るため、システム時刻の変更に影響されません。時間ステップが設定される前はゼロで、メインウィンドウの実測更新では、更新時刻の基準がまだ初期化されていない場合だけ、バックエンドのフレーム時間の推定値を使います。
 - サブウィンドウは現在 `high_resolution_clock` で測り、Linux ではシステム時計を使います。時刻が先へ進むとその差が1回の時間ステップに入り、期限が来た Node タイマーがまとめて呼ばれることがあります。上限なしの `callEveryCatchUp` は過ぎた各インターバルにつき1回呼ばれます。時刻が戻ると1回の時間ステップが負になり、その更新では Node タイマーのカウントダウンは進みません。
-- 既定の VSYNC 設定では、更新と描画はウィンドウがあるディスプレイのリフレッシュレートに同期し、`setFps()` でそれより低いレートにできます。`x += 2` のような一定量の移動は、30 Hz では 60 Hz の半分、60 Hz では 120 Hz の半分の速さになります。以下のように速度に `getDeltaTime()` を掛けるか、`getElapsedTime()` から位置を求めると、どの画面でも同じ速さで移動します。この動作は、60 Hz の内蔵ディスプレイと 30 Hz の外部ディスプレイを接続した Mac で測定されています（issue #997）。
+- 既定の VSYNC 設定では、更新と描画はウィンドウがあるディスプレイのリフレッシュレートに同期し、`setFps()` でそれより低いレートにできます。`x += 2` のような一定量の移動は、30 Hz では 60 Hz の半分、60 Hz では 120 Hz の半分の速さになります。以下のように速度に `getDeltaTime()` を掛けるか、`getElapsedTime()` から位置を求めると、どの画面でも同じ速さで移動します。
 ```cpp
 void tcApp::update() {
     x += speed * getDeltaTime();   // same speed on 60 Hz and 120 Hz screens
@@ -45557,7 +45557,7 @@ details.ko = '''
 - 현재 윈도우의 시간 간격을 `double`로 반환합니다. VSYNC와 `setFps` 모드에서는 업데이트 호출 사이의 시간을 측정하며, `setIndependentFps`의 고정 레이트 업데이트와 `runHeadlessApp`의 각 스텝에서는 정확히 `1 / updateFps`를 사용합니다.
 - 메인 윈도우는 steady clock으로 간격을 측정하므로 시스템 시각 변경의 영향을 받지 않습니다. 시간 간격이 설정되기 전에는 0이며, 메인 윈도우의 측정 업데이트에서는 업데이트 시각의 기준이 아직 초기화되지 않은 경우에만 백엔드의 프레임 시간 추정값을 사용합니다.
 - 보조 윈도우는 현재 `high_resolution_clock`으로 측정하며 Linux에서는 시스템 시계를 사용합니다. 시각이 앞으로 이동하면 그 차이가 한 번의 시간 간격에 포함되어 만료된 Node 타이머가 함께 실행될 수 있습니다. 상한이 없는 `callEveryCatchUp`은 지난 각 인터벌마다 한 번 호출됩니다. 시각이 뒤로 이동하면 한 번의 시간 간격이 음수가 되며, 해당 업데이트에서는 Node 타이머의 카운트다운이 진행되지 않습니다.
-- 기본 VSYNC 설정에서는 업데이트와 그리기가 윈도우가 위치한 디스플레이의 주사율에 동기화하며, `setFps()`로 더 낮은 레이트를 설정할 수 있습니다. `x += 2`처럼 일정한 양만큼 이동하면 30 Hz에서는 60 Hz의 절반, 60 Hz에서는 120 Hz의 절반 속도로 이동합니다. 아래처럼 속도에 `getDeltaTime()`을 곱하거나 `getElapsedTime()`으로 위치를 계산하면 모든 화면에서 같은 속도로 이동합니다. 이 동작은 60 Hz 내장 디스플레이와 30 Hz 외부 디스플레이를 연결한 Mac에서 측정했습니다(issue #997).
+- 기본 VSYNC 설정에서는 업데이트와 그리기가 윈도우가 위치한 디스플레이의 주사율에 동기화하며, `setFps()`로 더 낮은 레이트를 설정할 수 있습니다. `x += 2`처럼 일정한 양만큼 이동하면 30 Hz에서는 60 Hz의 절반, 60 Hz에서는 120 Hz의 절반 속도로 이동합니다. 아래처럼 속도에 `getDeltaTime()`을 곱하거나 `getElapsedTime()`으로 위치를 계산하면 모든 화면에서 같은 속도로 이동합니다.
 ```cpp
 void tcApp::update() {
     x += speed * getDeltaTime();   // same speed on 60 Hz and 120 Hz screens
@@ -46007,17 +46007,17 @@ description.ko = "현재 윈도우의 업데이트 횟수를 반환한다."
 details.en = '''
 - Returns a `uint64_t` with the same value as `getUpdateCount()`. In the main window, the counter advances before each update, so several update steps between draws increase it several times.
 - Secondary windows return their own tick counter. Use `getDrawCount()` for the device/main-window frame index.
-- With the default VSYNC setting, `update()` and `draw()` follow the refresh rate of the display containing the window; `setFps()` can lower their rate. A constant step such as `x += 2` therefore moves at half the speed on 30 Hz compared with 60 Hz, or on 60 Hz compared with 120 Hz. Use `x += speed * getDeltaTime()` or calculate position from `getElapsedTime()` for the same speed on every screen. This behavior was measured on a Mac with a 60 Hz built-in display and a 30 Hz external display (issue #997).
+- Under VSYNC the rate follows the display's refresh rate, so this count does not measure a fixed time; move things with `getDeltaTime()` instead of a fixed step per frame.
 '''
 details.ja = '''
 - `getUpdateCount()` と同じ値を `uint64_t` で返します。メインウィンドウでは各更新の前に増えるため、描画の間に更新が複数回あれば、その回数だけ増えます。
 - サブウィンドウでは、そのウィンドウ固有の tick 回数を返します。デバイス／メインウィンドウのフレーム番号には `getDrawCount()` を使ってください。
-- 既定の VSYNC 設定では、`update()` と `draw()` はウィンドウがあるディスプレイのリフレッシュレートに同期し、`setFps()` でそれより低いレートにできます。そのため、`x += 2` のような一定量の移動は、30 Hz では 60 Hz の半分、60 Hz では 120 Hz の半分の速さになります。`x += speed * getDeltaTime()`、または `getElapsedTime()` から位置を求める方法を使うと、どの画面でも同じ速さで移動します。この動作は、60 Hz の内蔵ディスプレイと 30 Hz の外部ディスプレイを接続した Mac で測定されています（issue #997）。
+- VSYNC では画面のリフレッシュレートに従うため、このカウントは一定の時間を表しません。物を動かすときは、毎フレーム一定量ではなく `getDeltaTime()` を使ってください。
 '''
 details.ko = '''
 - `getUpdateCount()`와 같은 값을 `uint64_t`로 반환합니다. 메인 윈도우에서는 각 업데이트 전에 증가하므로, 그리기 사이에 업데이트가 여러 번 실행되면 그 횟수만큼 증가합니다.
 - 보조 윈도우에서는 해당 윈도우의 tick 횟수를 반환합니다. 장치/메인 윈도우 프레임 번호에는 `getDrawCount()`를 사용합니다.
-- 기본 VSYNC 설정에서는 `update()`와 `draw()`가 윈도우가 위치한 디스플레이의 주사율에 동기화하며, `setFps()`로 더 낮은 레이트를 설정할 수 있습니다. 따라서 `x += 2`처럼 일정한 양만큼 이동하면 30 Hz에서는 60 Hz의 절반, 60 Hz에서는 120 Hz의 절반 속도로 이동합니다. `x += speed * getDeltaTime()`을 사용하거나 `getElapsedTime()`으로 위치를 계산하면 모든 화면에서 같은 속도로 이동합니다. 이 동작은 60 Hz 내장 디스플레이와 30 Hz 외부 디스플레이를 연결한 Mac에서 측정했습니다(issue #997).
+- VSYNC에서는 화면의 주사율을 따르므로 이 카운트는 일정한 시간을 나타내지 않습니다. 물체를 움직일 때는 매 프레임 일정량이 아니라 `getDeltaTime()`을 사용하세요.
 '''
 
 ["getFrameElapsedTime"]
@@ -47312,19 +47312,19 @@ details.en = '''
 - Returns a `uint64_t` counter that starts at zero and advances before each framework update; multiple update steps between draws each advance it.
 - It returns the same value as `getFrameCount()`. Secondary windows have independent counters; outside a window-specific context, it uses the main window.
 - The `runHeadlessApp` loop does not advance this counter, even though it calls `App::update()`.
-- With the default VSYNC setting, updates and draws follow the refresh rate of the display containing the window; `setFps()` can lower their rate, so this counter does not measure a fixed amount of time. A constant step such as `x += 2` moves at half the speed on 30 Hz compared with 60 Hz, or on 60 Hz compared with 120 Hz. Use `x += speed * getDeltaTime()` or calculate position from `getElapsedTime()` for the same speed on every screen. This behavior was measured on a Mac with a 60 Hz built-in display and a 30 Hz external display (issue #997).
+- Under VSYNC the rate follows the display's refresh rate, so this count does not measure a fixed time; move things with `getDeltaTime()` instead of a fixed step per frame.
 '''
 details.ja = '''
 - ゼロから始まり、フレームワークの各更新の前に増える `uint64_t` のカウンターを返します。描画の間に複数回更新する場合も、更新ごとに増えます。
 - `getFrameCount()` と同じ値を返します。サブウィンドウは独立したカウンターを持ち、特定のウィンドウの処理中でなければメインウィンドウを使います。
 - `runHeadlessApp` のループは `App::update()` を呼びますが、このカウンターは増やしません。
-- 既定の VSYNC 設定では、更新と描画はウィンドウがあるディスプレイのリフレッシュレートに同期し、`setFps()` でそれより低いレートにできるため、このカウンターは一定の時間を表しません。`x += 2` のような一定量の移動は、30 Hz では 60 Hz の半分、60 Hz では 120 Hz の半分の速さになります。`x += speed * getDeltaTime()`、または `getElapsedTime()` から位置を求める方法を使うと、どの画面でも同じ速さで移動します。この動作は、60 Hz の内蔵ディスプレイと 30 Hz の外部ディスプレイを接続した Mac で測定されています（issue #997）。
+- VSYNC では画面のリフレッシュレートに従うため、このカウントは一定の時間を表しません。物を動かすときは、毎フレーム一定量ではなく `getDeltaTime()` を使ってください。
 '''
 details.ko = '''
 - 0에서 시작하여 프레임워크의 각 업데이트 전에 증가하는 `uint64_t` 카운터를 반환합니다. 그리기 사이에 여러 번 업데이트하면 각 업데이트마다 증가합니다.
 - `getFrameCount()`와 같은 값을 반환합니다. 보조 윈도우는 독립된 카운터를 가지며, 특정 윈도우의 처리 중이 아니면 메인 윈도우를 사용합니다.
 - `runHeadlessApp` 루프는 `App::update()`를 호출하지만 이 카운터를 증가시키지 않습니다.
-- 기본 VSYNC 설정에서는 업데이트와 그리기가 윈도우가 위치한 디스플레이의 주사율에 동기화하며, `setFps()`로 더 낮은 레이트를 설정할 수 있으므로 이 카운터는 일정한 시간을 나타내지 않습니다. `x += 2`처럼 일정한 양만큼 이동하면 30 Hz에서는 60 Hz의 절반, 60 Hz에서는 120 Hz의 절반 속도로 이동합니다. `x += speed * getDeltaTime()`을 사용하거나 `getElapsedTime()`으로 위치를 계산하면 모든 화면에서 같은 속도로 이동합니다. 이 동작은 60 Hz 내장 디스플레이와 30 Hz 외부 디스플레이를 연결한 Mac에서 측정했습니다(issue #997).
+- VSYNC에서는 화면의 주사율을 따르므로 이 카운트는 일정한 시간을 나타내지 않습니다. 물체를 움직일 때는 매 프레임 일정량이 아니라 `getDeltaTime()`을 사용하세요.
 '''
 
 ["getVersion"]
@@ -51349,19 +51349,19 @@ description.ja = "updateとdrawを同じレートで回す、目標フレーム�
 description.ko = "update와 draw를 같은 레이트로 돌리는 목표 프레임레이트를 설정한다."
 related = ["getFps", "setIndependentFps", "getFpsSettings"]
 details.en = '''
-- Takes a target rate in fps. In the main window, `VSYNC` (-1) follows the refresh rate of the display containing the window and `EVENT_DRIVEN` (0) waits for a frame request such as `redraw()`. In a secondary window's callbacks, it sets that window's throttle; values at or below zero, including `EVENT_DRIVEN`, run at the display refresh rate without additional throttling. A fixed fps at or just above the display's refresh rate draws every display frame; a lower target reduces the update and draw rate. A constant step such as `x += 2` moves at half the speed on 30 Hz compared with 60 Hz, or on 60 Hz compared with 120 Hz, when following VSYNC. Use `x += speed * getDeltaTime()` or calculate position from `getElapsedTime()` for the same speed on every screen. This behavior was measured on a Mac with a 60 Hz built-in display and a 30 Hz external display (issue #997).
+- Takes a target rate in fps. In the main window, `VSYNC` (-1) follows the refresh rate of the display containing the window and `EVENT_DRIVEN` (0) waits for a frame request such as `redraw()`. In a secondary window's callbacks, it sets that window's throttle; values at or below zero, including `EVENT_DRIVEN`, run at the display refresh rate without additional throttling. A fixed fps at or just above the display's refresh rate draws every display frame; a lower target reduces the update and draw rate. Under VSYNC the rate follows the display, so move things with `getDeltaTime()` rather than a fixed step per frame.
 - Under `setFps`, `update()` and `draw()` are called together at the same rate; to run them at independent rates (for example a fast simulation with a slower draw, or the reverse), use `setIndependentFps()` instead.
 - Switching the rate at runtime takes effect immediately from the moment of the call, with no catch-up: on a fixed fps the next frame is drawn right away, and the first `update()` after the switch has a `getDeltaTime()` that excludes time spent in the previous mode. Called between updates, the new timer starts from the call; called from inside an `update()`, it starts from that update's beginning. The time this drops is under one frame in the usual modes, and only grows larger after an idle period such as `EVENT_DRIVEN` waiting for a redraw.
 - Calling `setFps` again with the rate it is already at does nothing, so it is safe to call every frame (for example from a GUI slider). On the one frame where the value actually changes, that update's `getDeltaTime()` is shorter than a normal frame, since it is measured only from the moment of the call.
 '''
 details.ja = '''
-- 目標レートを fps 単位で指定します。メインウィンドウでは、`VSYNC` (-1) はウィンドウがあるディスプレイのリフレッシュレートに同期し、`EVENT_DRIVEN` (0) は `redraw()` などのフレーム要求を待ちます。サブウィンドウのコールバック内では、そのウィンドウの実行頻度を設定し、`EVENT_DRIVEN` を含む 0 以下の値では追加の間引きをせずにディスプレイのリフレッシュレートで動作します。ディスプレイのリフレッシュレートと同じか少し上の固定fpsを指定すると毎フレーム描画され、それより低い目標レートでは更新と描画の頻度が下がります。VSYNC に同期する場合、`x += 2` のような一定量の移動は、30 Hz では 60 Hz の半分、60 Hz では 120 Hz の半分の速さになります。`x += speed * getDeltaTime()`、または `getElapsedTime()` から位置を求める方法を使うと、どの画面でも同じ速さで移動します。この動作は、60 Hz の内蔵ディスプレイと 30 Hz の外部ディスプレイを接続した Mac で測定されています（issue #997）。
+- 目標レートを fps 単位で指定します。メインウィンドウでは、`VSYNC` (-1) はウィンドウがあるディスプレイのリフレッシュレートに同期し、`EVENT_DRIVEN` (0) は `redraw()` などのフレーム要求を待ちます。サブウィンドウのコールバック内では、そのウィンドウの実行頻度を設定し、`EVENT_DRIVEN` を含む 0 以下の値では追加の間引きをせずにディスプレイのリフレッシュレートで動作します。ディスプレイのリフレッシュレートと同じか少し上の固定fpsを指定すると毎フレーム描画され、それより低い目標レートでは更新と描画の頻度が下がります。VSYNC では画面のリフレッシュレートに従うため、物を動かすときは毎フレーム一定量ではなく `getDeltaTime()` を使ってください。
 - `setFps` のもとでは `update()` と `draw()` は同じレートでまとめて呼ばれます。それぞれを独立したレートで動かしたい場合(高速なシミュレーションに低速な描画を組み合わせる場合など)は、代わりに `setIndependentFps()` を使用してください。
 - 実行中にレートを切り替えると、呼び出した瞬間から即座に新しいレートで動き始め、遅れを取り戻す動作はしません。固定fpsの場合、次のフレームはすぐに描画され、切り替え後最初の `update()` の `getDeltaTime()` には前のモードで経過した時間は含まれません。update の外で呼び出した場合はその呼び出し時点から、update の中で呼び出した場合はその update の開始時点から数え始めます。ここで捨てられる時間は通常のモードでは1フレーム未満で、`EVENT_DRIVEN` の待機のようなアイドル期間のあとだけ大きくなります。
 - 現在と同じレートで `setFps` を呼んでも何も起きないため、GUIのスライダー操作中など、毎フレーム呼び出しても安全です。値が実際に変わったそのフレームだけは、その update の `getDeltaTime()` が呼び出し時点からの時間になるため、通常のフレームより短くなります。
 '''
 details.ko = '''
-- 목표 속도를 fps 단위로 지정합니다. 메인 윈도우에서 `VSYNC` (-1)는 윈도우가 위치한 디스플레이의 주사율에 동기화하며 `EVENT_DRIVEN` (0)은 `redraw()` 등의 프레임 요청을 기다립니다. 보조 윈도우의 콜백 안에서는 해당 윈도우의 실행 빈도를 설정하며, `EVENT_DRIVEN`을 포함한 0 이하의 값에서는 추가로 프레임을 건너뛰지 않고 디스플레이 주사율로 실행합니다. 디스플레이 리프레시 레이트와 같거나 약간 높은 고정 fps를 지정하면 매 프레임 그려지며, 더 낮은 목표 레이트에서는 업데이트와 그리기 빈도가 낮아집니다. VSYNC에 동기화할 때 `x += 2`처럼 일정한 양만큼 이동하면 30 Hz에서는 60 Hz의 절반, 60 Hz에서는 120 Hz의 절반 속도로 이동합니다. `x += speed * getDeltaTime()`을 사용하거나 `getElapsedTime()`으로 위치를 계산하면 모든 화면에서 같은 속도로 이동합니다. 이 동작은 60 Hz 내장 디스플레이와 30 Hz 외부 디스플레이를 연결한 Mac에서 측정했습니다(issue #997).
+- 목표 속도를 fps 단위로 지정합니다. 메인 윈도우에서 `VSYNC` (-1)는 윈도우가 위치한 디스플레이의 주사율에 동기화하며 `EVENT_DRIVEN` (0)은 `redraw()` 등의 프레임 요청을 기다립니다. 보조 윈도우의 콜백 안에서는 해당 윈도우의 실행 빈도를 설정하며, `EVENT_DRIVEN`을 포함한 0 이하의 값에서는 추가로 프레임을 건너뛰지 않고 디스플레이 주사율로 실행합니다. 디스플레이 리프레시 레이트와 같거나 약간 높은 고정 fps를 지정하면 매 프레임 그려지며, 더 낮은 목표 레이트에서는 업데이트와 그리기 빈도가 낮아집니다. VSYNC에서는 화면의 주사율을 따르므로, 물체를 움직일 때는 매 프레임 일정량이 아니라 `getDeltaTime()`을 사용하세요.
 - `setFps` 아래에서는 `update()`와 `draw()`가 같은 레이트로 함께 호출됩니다. 각각을 독립된 레이트로 돌리고 싶다면(예: 빠른 시뮬레이션에 느린 그리기를 조합하는 경우 등) 대신 `setIndependentFps()`를 사용하세요.
 - 실행 중에 레이트를 전환하면 호출한 순간부터 즉시 새 레이트로 동작하며, 밀린 시간을 따라잡지 않습니다. 고정 fps의 경우 다음 프레임이 바로 그려지며, 전환 후 첫 `update()`의 `getDeltaTime()`에는 이전 모드에서 경과한 시간이 포함되지 않습니다. update 밖에서 호출했다면 호출 시점부터, update 안에서 호출했다면 그 update의 시작 시점부터 셉니다. 여기서 버려지는 시간은 일반적인 모드에서는 1프레임 미만이며, `EVENT_DRIVEN`의 대기처럼 유휴 기간이 있었을 때만 커집니다.
 - 현재와 같은 레이트로 `setFps`를 호출하면 아무 일도 일어나지 않으므로, GUI 슬라이더 조작 중처럼 매 프레임 호출해도 안전합니다. 값이 실제로 바뀐 그 프레임에서만 해당 update의 `getDeltaTime()`이 호출 시점부터의 시간이 되어 일반 프레임보다 짧아집니다.
