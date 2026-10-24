@@ -35,6 +35,16 @@ if(NOT hash2 STREQUAL patched2)
         message(FATAL_ERROR "tcxMidi requires its checked libremidi 5.4.3 SysEx patch: ${path2}. Patch a private source copy with cmake -DLIBREMIDI_SOURCE_DIR=<copy> -P ${CMAKE_CURRENT_LIST_FILE}; do not use an unpatched source override/cache.")
     endif()
 endif()
+# WinMM input loss reporting (self-contained fourth replacement).
+set(path3 "${LIBREMIDI_SOURCE_DIR}/include/libremidi/backends/winmm/midi_in.hpp")
+file(SHA256 "${path3}" hash3)
+set(original3 "c57134c237f4d36bfa0a8b0dce0c7d79f07f959417b0e22bd7a422e6c4c663a5")
+set(patched3 "ce432de402f161b917ca43b65c9720fde12bc5eb13bc4ccf3369b540da63106c")
+if(NOT hash3 STREQUAL patched3)
+    if(VERIFY_ONLY OR NOT hash3 STREQUAL original3)
+        message(FATAL_ERROR "tcxMidi requires its checked libremidi 5.4.3 SysEx patch: ${path3}. Patch a private source copy with cmake -DLIBREMIDI_SOURCE_DIR=<copy> -P ${CMAKE_CURRENT_LIST_FILE}; do not use an unpatched source override/cache.")
+    endif()
+endif()
 if(VERIFY_ONLY)
     return()
 endif()
@@ -619,4 +629,28 @@ if(hash2 STREQUAL original2)
         message(FATAL_ERROR "libremidi patch result mismatch: ${path2}")
     endif()
     file(CONFIGURE OUTPUT "${path2}" CONTENT "${contents}" @ONLY NEWLINE_STYLE UNIX)
+endif()
+if(hash3 STREQUAL original3)
+    file(READ "${path3}" contents)
+    string(REPLACE [==[      if (inputStatus == MIM_LONGERROR)
+      {
+        self.m_processing.reset();
+      }]==] [==[      if (inputStatus == MIM_LONGERROR)
+      {
+        self.m_processing.reset();
+        // TrussC: zero means a backend SysEx loss with no known byte count.
+        if (self.configuration.on_sysex_overflow)
+          self.configuration.on_sysex_overflow(0);
+      }]==] contents "${contents}")
+    string(REPLACE [==[          LIBREMIDI_LOG(
+              "error sending sysex to "
+              "Midi device!!");]==] [==[          // TrussC: losing a receive buffer is a SysEx receive loss event.
+          // Reuse the preallocated reporting slot; never log on this thread.
+          if (self.configuration.on_sysex_overflow)
+            self.configuration.on_sysex_overflow(0);]==] contents "${contents}")
+    string(SHA256 result "${contents}")
+    if(NOT result STREQUAL patched3)
+        message(FATAL_ERROR "libremidi patch result mismatch: ${path3}")
+    endif()
+    file(CONFIGURE OUTPUT "${path3}" CONTENT "${contents}" @ONLY NEWLINE_STYLE UNIX)
 endif()

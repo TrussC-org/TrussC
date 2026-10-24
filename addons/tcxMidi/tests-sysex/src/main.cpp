@@ -435,12 +435,14 @@ void reporting() {
 }
 }
 int deviceCheck(int argc, char** argv);
+void testWinmmCallback(void (*check)(bool, const char*));
 int main(int argc, char** argv) {
     if (argc > 1) return deviceCheck(argc, argv);
     tc::setConsoleLogLevel(tc::LogLevel::Silent);
     decoderCases(false);
     decoderCases(true);
     reporting();
+    testWinmmCallback(check);
 #if defined(LIBREMIDI_ALSA)
     alsaScratch(false);
     alsaScratch(true);

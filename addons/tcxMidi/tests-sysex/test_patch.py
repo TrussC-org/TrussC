@@ -21,6 +21,8 @@ PATCHED_HASHES = {
         "91891013773211537e9397e4cd4ac994fe3cb400b0eea80f19dc8f5575d426ba",
     "include/libremidi/backends/alsa_seq/midi_in.hpp":
         "316f03a84f76c59a2629b863d656789b0af9821500fe4ce852e038417d6e895d",
+    "include/libremidi/backends/winmm/midi_in.hpp":
+        "ce432de402f161b917ca43b65c9720fde12bc5eb13bc4ccf3369b540da63106c",
 }
 
 
@@ -130,7 +132,7 @@ def main():
     # actual old implementation. Elsewhere emulate only its CRT write-time
     # LF -> CRLF conversion, which a POSIX text stream cannot reproduce itself.
     mutant = script_lf.decode("utf-8")
-    for index in range(3):
+    for index in range(len(PATCHED_HASHES)):
         fixed_write = (f'file(CONFIGURE OUTPUT "${{path{index}}}" CONTENT "${{contents}}" '
                        '@ONLY NEWLINE_STYLE UNIX)')
         assert mutant.count(fixed_write) == 1

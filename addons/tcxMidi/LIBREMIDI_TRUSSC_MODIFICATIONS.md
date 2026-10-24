@@ -4,7 +4,7 @@
 `CMakeLists.txt`. The upstream BSD 2-Clause / RtMidi MIT notices are unchanged.
 
 `cmake/PatchLibremidi.cmake` applies exact replacements with CMake alone (no git,
-patch utility or Python required). It checks all three original/patched SHA256
+patch utility or Python required). It checks all four original/patched SHA256
 hashes before writing. Unknown input or output fails configuration. A second,
 read-only check after FetchContent covers source overrides, previously populated
 sources and shared FetchContent caches. Output is explicitly LF on every host,
@@ -29,7 +29,8 @@ cmake -DLIBREMIDI_SOURCE_DIR=path/to/private/libremidi -P addons/tcxMidi/cmake/P
   Ignore EOX (F7) outside SysEx without inventing a loss or Warning; preserve
   its existing system-common cancellation of running status.
 - `input_configuration.hpp`: internal `on_sysex_overflow(needed_bytes)` callback,
-  invoked once per discarded message on the backend thread. TrussC uses it only
+  invoked once per cap-discarded message on the backend thread (WinMM also uses
+  zero for the receive loss events below). TrussC uses it only
   to record a counter and pending flag and post a preallocated main-thread slot
   without allocation or logging. Only the first loss posts the slot, which keeps
   the diagnostics alive until the owner's sole Warning is delivered.
@@ -37,6 +38,11 @@ cmake -DLIBREMIDI_SOURCE_DIR=path/to/private/libremidi -P addons/tcxMidi/cmake/P
   the bounded shared decoder. Admission and overflow accounting use each parsed
   logical message. SysEx leaves the fixed codec scratch size/capacity unchanged;
   ordinary ALSA events continue through the byte-event codec.
+- `backends/winmm/midi_in.hpp`: retain decoder reset on `MIM_LONGERROR` and count it and each failed `midiInAddBuffer` re-queue via `on_sysex_overflow(0)` (unknown-size receive loss), sharing the owner's preallocated, truthful Warning slot without backend allocation or logging.
+
+Finding only (send side unchanged): WinMM `send_message` waits without a bound
+in `while (midiOutUnprepareHeader(...) == MIDIERR_STILLPLAYING) Sleep(1);` and
+returns on `midiOutLongMsg` failure without unpreparing the header.
 
 The cap is a TrussC external-input memory policy, not a MIDI protocol maximum.
 A legitimate single SysEx above it is discarded. CoreMIDI, WinMM, WinUWP, ALSA

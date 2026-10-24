@@ -233,7 +233,7 @@ private:
 
     libremidi::input_configuration makeConfig(const std::shared_ptr<State>& state) {
         libremidi::input_configuration cfg;
-        cfg.on_sysex_overflow = [loss = sysexLoss_](size_t needed) { loss->count(needed); };
+        cfg.on_sysex_overflow = [loss = sysexLoss_](size_t needed) noexcept { loss->count(needed); };
         cfg.on_message = [state](const libremidi::message& m) { state->handleMessage(m); };
         cfg.ignore_sysex = ignoreSysex_;
         cfg.ignore_timing = ignoreTiming_;

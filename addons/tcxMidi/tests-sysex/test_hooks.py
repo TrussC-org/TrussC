@@ -22,8 +22,9 @@ def main():
     libraries = link[link.index("-o") + 2:]
     decoder = "libremidi/detail/midi_stream_decoder.hpp"
     alsa = "libremidi/backends/alsa_seq/midi_in.hpp"
+    winmm = "libremidi/backends/winmm/midi_in.hpp"
     loss = "tcxMidiSysex.h"
-    original = {p: (source / "include" / p).read_text(encoding="utf-8") for p in (decoder, alsa)}
+    original = {p: (source / "include" / p).read_text(encoding="utf-8") for p in (decoder, alsa, winmm)}
     original[loss] = (root / "addons/tcxMidi/src" / loss).read_text(encoding="utf-8")
     initial = "if (message.empty() && bytes.size() > sysex_max_bytes)"
     continuation = "if (!message.empty() && bytes.size() > sysex_max_bytes - message.size())"
@@ -34,6 +35,12 @@ def main():
     event_span = "{static_cast<const uint8_t*>(ev.data.ext.ptr), ev.data.ext.len}"
     variants = {
         "baseline": None,
+        "winmm_silent_longerror": (winmm,
+            "        if (self.configuration.on_sysex_overflow)\n"
+            "          self.configuration.on_sysex_overflow(0);", ""),
+        "winmm_silent_requeue": (winmm,
+            "          if (self.configuration.on_sysex_overflow)\n"
+            "            self.configuration.on_sysex_overflow(0);", ""),
         "stray_eox_delivery": (decoder, "short_bytes[0] != 0xF7\n            && ", ""),
         "global_limit_loosen": (decoder, "sysex_max_bytes = 1'048'576;", "sysex_max_bytes = 1'048'577;"),
         "global_limit_stricter": (decoder, "sysex_max_bytes = 1'048'576;", "sysex_max_bytes = 1'048'575;"),
@@ -78,12 +85,15 @@ def main():
         # Quote-includes inside tcxMidiIn.h must see the loss overlay too.
         (directory / "include/tcxMidiIn.h").write_text(
             (root / "addons/tcxMidi/src/tcxMidiIn.h").read_text(encoding="utf-8"), encoding="utf-8")
+        subprocess.run(["cmake", f"-DSOURCE_FILE={directory / 'include' / winmm}",
+                        f"-DOUTPUT_FILE={directory / 'include/winmm_callback.inc'}", "-P",
+                        str(root / "addons/tcxMidi/tests-sysex/ExtractWinmmCallback.cmake")], check=True)
         binary = directory / "test"
         command = ["/usr/bin/c++", "-std=c++20", "-O2", "-DNDEBUG", "-Wall", "-Wextra", "-Werror",
                    "-Wno-error=stringop-overflow", "-DLIBREMIDI_ALSA", "-DLIBREMIDI_NO_BOOST",
                    "-DSOKOL_GLCORE", "-DTC_VERSION_LINKED", "-I" + str(directory / "include"),
                    *includes, *[str(root / "addons/tcxMidi/tests-sysex/src" / file)
-                                for file in ("main.cpp", "device.cpp", "allocation.cpp")],
+                                for file in ("main.cpp", "device.cpp", "allocation.cpp", "winmm.cpp")],
                    "-o", str(binary), *libraries]
         (directory / "command.txt").write_text(shlex.join(command), encoding="utf-8")
         result = subprocess.run(command, cwd=build, capture_output=True, text=True, encoding="utf-8")
@@ -94,6 +104,12 @@ def main():
         print(f"{name}: exit={result.returncode} {result.stdout.strip()}", flush=True)
         if result.returncode != (0 if change is None else 1):
             raise RuntimeError(name + " failed mutation check")
+        expected_failure = {
+            "winmm_silent_longerror": "WinMM LONGERROR counts one loss per event",
+            "winmm_silent_requeue": "WinMM failed requeue counts one loss per event",
+        }.get(name)
+        if expected_failure and "FAIL: " + expected_failure not in result.stderr:
+            raise RuntimeError(name + " failed for an unrelated reason")
 
 
 if __name__ == "__main__":

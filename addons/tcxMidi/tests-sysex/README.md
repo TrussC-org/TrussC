@@ -25,6 +25,9 @@ filtering, discard/resynchronization, start timestamps, ignored SysEx, reset,
 successive messages without stack growth, stray EOX (including orphan data tails),
 ALSA scratch and safe-thread reporting. Stray EOX neither delivers a message nor
 counts a SysEx loss or schedules a Warning.
+The actual patched WinMM callback also runs with mocked driver calls: LONGERROR,
+failed/successful re-queues, combined errors, ignored SysEx and empty shutdown
+buffers check accounting, reset, allocation failure and the sole Warning slot.
 The reporting callback is also checked with backend allocations disabled, empty
 idle queues, one posted slot on first loss and slot lifetime through teardown.
 The wrapper's `tests/` harness additionally checks idle input creation/destruction,
@@ -111,11 +114,13 @@ handled separately in #982. The full virtual-port check depends on that fix;
 this PR does not change `track_virtual`.
 
 Windows 10/11 WinMM has no generic built-in MIDI loopback and does not support
-libremidi virtual ports. Use an existing MIDI loopback device or install a small
-loopback driver such as loopMIDI and create `TrussC-SysEx-Check`. The test uses two large messages, so prefer a virtual loopback over a
+libremidi virtual ports. Use a MIDI loopback device that passes the over-cap
+messages and create `TrussC-SysEx-Check`. The test uses two large messages, so prefer a virtual loopback over a
 31.25 kbit/s hardware cable, which exceeds the receiver timeout. Without an
 existing loopback device or an installed loopback driver, this WinMM check
 cannot run.
+
+loopMIDI drops SysEx larger than its SysexSize setting (KiB, maximum 512) without an error to either side, so the port check's over-cap step cannot run through loopMIDI.
 
 In a Visual Studio developer PowerShell, build once:
 
