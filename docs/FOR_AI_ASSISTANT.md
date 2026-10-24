@@ -1112,6 +1112,8 @@ The foundation — a thin wrapper over each OS's native API + C++ — gives a **
 
 Yes. You can run `update()` only without ever calling `draw()`, or use the window-less `runHeadlessApp()`. Good for server-side, CI, and headless tests. It's similar to oF's nowindow mode, but **most graphics-focused frameworks lack such a mode** — TrussC manages update and draw independently, so this falls out naturally (see event-driven).
 
+`runHeadlessApp()` notifies `events().update` each fixed step and `events().exit` once on shutdown. The App's `update()` / `exit()` are protected listeners at priority 100, ordered between BeforeApp and AfterApp. The App and mandatory framework teardown bindings survive `clear()`. Tween, update-mode TCP/UDP receive, Box2d auto stepping and WebSocket timeouts therefore work headless. Children, mods and node timers are still not updated (#906).
+
 ### Do heavy features bloat build time / the core?
 
 Heavy dependencies are **split into addons.** Even official features that are heavy (physics, various SDK wrappers, …) live in addons rather than core, so if you don't use them they're neither linked nor built — **shorter build times and a smaller binary.** Core is built once and shared across projects. The plan is to keep moving heavy dependencies into addons.
@@ -1149,6 +1151,9 @@ The floor target is the **Raspberry Pi Zero** (defaults like small draw buffers 
 ### What's the overall architecture?
 
 App itself is the scene-graph root Node. The basic loop is `setup()` (once) → `update()` → `draw()` each frame. Nodes form a parent/child transform hierarchy; input is dispatched depth-first and stops propagating once `consumed` (children receive events in their parent's local coordinates). Drawing is sokol_gl-based — a procedural, "immediate-mode-style" API (`setColor()` → `drawRect()`), but internally deferred (vertices accumulate into buffers and are submitted later, so nothing is drawn the instant you call it). Each Node's `draw()` starts from a clean default style (white, fill, no stroke — parent style does not cascade, favoring predictability). Behavior can be added by subclassing or by attaching `Mod`s (`addMod<T>()`). The tree and GPU resources (Texture / Fbo) are main-thread-owned; hand work from other threads via `runOnMainThread()`.
+
+On the main window (also Android/iOS/Web), the hot-reload host and MCP input, App-facing events use one notify: BeforeApp (default 0) → App (100, virtual then tree where applicable) → AfterApp (200). **Consumed input skips App virtuals as well as the tree and later listeners.** The framework App binding survives clear(); explicit 100 follows registration order. Touch defaults run before App touch callbacks, and the host forwards touch to the current guest. An enabled App root no longer consumes background mouse input by default. EasyCam starts gestures after the tree, tracks moves/releases before it, and checks scroll's own position. Headless update/exit use the protected App slots described above; secondary-window activation remains separate work under #947. Startup/reload resize seeds and guest-swap exit remain direct App-only calls.
+
 
 ### Subclass a Node, or attach a Mod?
 
@@ -1601,7 +1606,7 @@ Rules for callbacks that are not on the main thread:
        // runs on the main thread (next frame); dropped if listener_ is gone
    }, Deliver::Main);
    ```
-   `Deliver::Main` copies the payload and checks that the listener is still alive before calling it. Plain `runOnMainThread(fn)` also moves work to the main thread, but has no such check, so don't capture a raw `this` there.
+   `Deliver::Main` copies the payload and checks that the listener is still alive before calling it. Each external network/device Main copy reserves credit at its listener turn, after earlier Inline edits, with a lazy store per event capped at 1024 pending deliveries and 64 MiB retained payload. Overflow rejects the whole copy before copying its payload or callable, counts it, and warns once on main without receive polling. Each queued invocation owns an independent callable copy, including mutable value captures. TCP overflow closes the connection and cancels that run’s queued chunks. App-authored notifications (including clean disconnects and send rejections), overflow teardown, `runOnMainThread` work, and send completions remain growable. Plain `runOnMainThread(fn)` also moves work to the main thread, but has no such check, so don't capture a raw `this` there.
 2. **Audio callbacks stay on the audio thread.** They need low latency, so don't marshal them. Keep them short: no allocation, no file IO, no locks that the main thread may hold for a long time. Share values through atomics.
 3. **When the receiving object goes away, stop the source first, and wait for it.** `Event` does not wait for a callback that is already running on another thread, so dropping or disconnecting the listener is not enough there. It is enough only for listeners on the main thread and for `Deliver::Main` listeners, whose queued call is dropped. For an inline listener on another thread, call the source's own stop-and-wait before the members the callback uses are destroyed:
    - `TcpClient::disconnect()` and `UdpSocket::close()` join their threads.
@@ -1622,6 +1627,8 @@ The build folder is missing or empty, e.g. after `trusscli clean` or deleting it
 ### Build error: "hot reload state changed -- reconfigure required"
 
 You added or removed `TC_HOT_RELOAD(...)`. Hot reload is switched at configure time, so the build stops once to make CMake reconfigure. It prints "TC_HOT_RELOAD detected." or "TC_HOT_RELOAD removed." first. `trusscli build` reconfigures automatically; with plain CMake, just build again.
+
+Hot-reload build diagnostics retain up to the first and last 64 KiB of each child stream, trimming cuts to complete UTF-8 characters, with an explicit omitted-byte marker and a first-truncation Warning. Both pipes keep draining; retained stdout/stderr are forwarded to their original destinations after the child exits. After direct-child exit, only the bytes already readable in each pipe are drained before closing it. Source scans inspect at most 65,536 entries with depth 64 and 16 MiB of retained path names (128 KiB per path). CMake cache reads allow 16 MiB total and 1 MiB per line. Invalid or oversized scan entries/caches are skipped with a Warning and internal counters.
 
 ### Windows: "... was blocked by your organization's Device Guard policy" (Smart App Control)
 
@@ -1746,6 +1753,8 @@ Console input is opt-in in both windowed and headless apps. Call `console::start
 
 There is one detached stdin reader per process, created on the first `start()`. `stop()` disables delivery and discards queued commands; a later `start()` discards pending commands and enables delivery again. The reader keeps consuming stdin while stopped, dropping those lines, and ends at EOF. It uses raw OS reads, accepts LF/CRLF and a partial last line at EOF, and does not hold a stdio lock that could block process exit. Web has no stdin command support.
 
+External stdin control text is limited to 1 MiB per line (LF excluded, CR included), 1024 pending commands and 16 MiB of queued raw text. Oversized lines are drained and rejected whole; a full queue rejects new whole commands. Reading continues while delivery is stopped or the queue is full. First rejection emits one Warning per store; internal cumulative counters live for the process lifetime.
+
 **v0.8.0 migration (breaking): stdin commands need `console::start()`.** Existing apps that only subscribe to `events().console` must add the call in `setup()`. See [the migration note](MIGRATION_0_8.md).
 
 ### How do I make a console / CLI app (and optionally open a GUI)?
@@ -1800,6 +1809,9 @@ All file-path parameters take `fs::path` (`std::filesystem::path`) — string li
 The file writers (`saveTextFile`, `appendToFile`, `FileWriter::open`, `saveJson`, `Xml::save`, `Pixels::save` / `Image::save`, `setLogFile`) resolve a relative path against `getDataPath()`, use an absolute path as given, and create a missing parent folder (as `saveScreenshot()` and the recorders do). When the folder cannot be created or the file cannot be opened, they return false and log the reason. `saveTextFile`, `appendToFile`, `saveJson` and `Pixels::save` also check writing and closing the file, logging an error and returning false on failure. `saveJson` serializes first and writes in binary mode (LF on every platform); `Pixels::save` encodes in memory first. A serialization or encoding error leaves an existing file untouched. These saves write in place: a crash, power loss or full disk during writing can leave the file truncated. Apps needing crash-safe saves must handle them themselves, for example by writing a new file and renaming it.
 
 Non-ASCII paths (Japanese filenames, `新しいフォルダー (2)`, spaces) work on every platform. Strings are UTF-8 everywhere in TrussC; on Windows that holds for paths because apps built through TrussC's CMake (`trussc_app()`, i.e. every generated project) embed an application manifest that sets the process code page to UTF-8. This needs Windows 10 version 1903 or later. On older Windows, or in an executable built with your own CMake setup, `fs::path(std::string)` decodes in the system code page (CP932 / CP1252) instead: convert with `utf8ToPath(str)`, or build paths from `u8"..."` / `L"..."` literals, `loadDialog()` results or `directory_iterator` entries.
+
+OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, constructing or moving even an empty `LoadResult` / `SaveResult` string or STL container can allocate a container proxy, so persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging remain best effort.
+
 
 Addons must use `pathToUtf8()` / `utf8ToPath()` for IO or display instead of `path.string()`, and `log << path` for logging; third-party narrow file IO still needs the Windows UTF-8 manifest described above.
 
@@ -2600,6 +2612,9 @@ void App::mouseMoved(const MouseMoveEventArgs & e) [+1]  // Called when the poin
 void App::mousePressed(const MouseEventArgs & e) [+1]  // Called when a mouse button is pressed.
 void App::mouseReleased(const MouseEventArgs & e) [+1]  // Called when a mouse button is released, exactly once for each press.
 void App::mouseScrolled(const ScrollEventArgs & e) [+1]  // Called when the mouse wheel or trackpad scrolls.
+bool App::onMouseDrag(const MouseDragEventArgs & e)  // Handles App-root mouse input without default consumption.
+bool App::onMousePress(const MouseEventArgs & e)  // Handles App-root mouse input without default consumption.
+bool App::onMouseRelease(const MouseEventArgs & e)  // Handles App-root mouse input without default consumption.
 void App::requestExit()  // Stops a headless app (runHeadlessApp); a windowed app ignores it.
 void App::setSize(float w, float h)  // Changes the size of the window this App runs in.
 void App::touchMoved(const TouchEventArgs & touch)  // Called when fingers move on the screen.
@@ -2883,8 +2898,8 @@ void Environment::release()  // Releases the environment's texture resources.
 ### Event<T> — Connects listeners to notifications with a shared argument type.
 
 ```cpp
-void Event::clear()  // Removes all listeners from the event.
-EventListener Event::listen(Callback callback, int priority = App) [+5]  // Registers an event listener and returns its connection token.
+void Event::clear()  // Removes user listeners, preserving framework-owned listeners.
+EventListener Event::listen(Callback callback) [+11]  // Registers an event listener and returns its connection token.
 size_t Event::listenerCount() const  // Returns the number of registered listeners.
 void Event::notify(T & arg)  // Notifies the event's listeners.
 ```
@@ -3943,7 +3958,7 @@ void Serial::flushInput() [macos,windows,linux,android]  // Discards buffered in
 void Serial::flushOutput() [macos,windows,linux,android]  // Discards pending output.
 std::vector<SerialDeviceInfo> Serial::getDeviceList() ⚠️deprecated [macos,windows,linux,android]  // Provides the deprecated alias for `listDevices()`.
 std::string Serial::getDevicePath() const [macos,windows,linux,android]  // Returns the stored device path.
-size_t Serial::getDroppedByteCount() const [macos,windows,linux,android]  // Returns the number of received bytes discarded because the receive buffer overflowed.
+size_t Serial::getDroppedByteCount() const [macos,windows,linux,android]  // Returns the number of received bytes discarded because the receive buffer overflowed or allocation failed.
 bool Serial::isConnected() const [macos,windows,linux,android]  // Returns the current serial connection state.
 bool Serial::isInitialized() const [macos,windows,linux,android]  // Returns the same connection state as `isConnected()`.
 std::vector<SerialDeviceInfo> Serial::listDevices() [macos,windows,linux,android]  // Lists serial devices found on the system.

@@ -1060,6 +1060,65 @@ static int runReloadCheck() {
         }
     });
 
+    // Registered before host startup: explicit-100 precedes the host App slot.
+    std::string frameOrder;
+    std::vector<EventListener> frameStages;
+    for (auto* event : {&events().update, &events().draw}) {
+        auto stage = [&](char marker, int priority) {
+            frameStages.push_back(event->listen([&, marker] { frameOrder += marker; }, priority));
+        };
+        stage('c', -20); stage('d', 0); stage('p', 50); stage('b', 100);
+        stage('z', EventPriority::AfterApp);
+    }
+    std::string touchOrder;
+    auto touchStage = [&](char stage, int priority) {
+        return events().touchPressed.listen([&, stage](auto&) { touchOrder += stage; }, priority);
+    };
+    auto touchConsumer = touchStage('c', -20);
+    auto touchDefault = touchStage('d', 0);
+    auto touchMiddle = touchStage('p', 50);
+    auto touchTie = touchStage('b', 100);
+    auto touchAfter = touchStage('z', EventPriority::AfterApp);
+    auto touchCheck = events().afterFrame.listen([&] {
+        if (done) return;
+        auto* app = static_cast<tcApp*>(trussc::hot_reload::g_host.getApp());
+        if (frame % kFramesPerGeneration == 4) {
+            app->frameOrder = nullptr;
+            if (frameOrder != "cdpbatlzcdpbatlz") {
+                done = true;
+                return finish(69, "host update/draw App/tree order failed: " + frameOrder);
+            }
+        }
+        if (frame % kFramesPerGeneration != 3) return;
+        frameOrder.clear(); app->frameOrder = &frameOrder;
+        app->touchOrder = &touchOrder;
+        touchOrder.clear();
+        setTouchAsMouse(false);
+        auto sendTouch = [](sapp_event_type type) {
+            sapp_event event{};
+            event.type = type; event.num_touches = 1;
+            event.touches[0].identifier = 42; event.touches[0].changed = true;
+            internal::_event_cb(&event);
+        };
+        sendTouch(SAPP_EVENTTYPE_TOUCHES_BEGAN);
+        sendTouch(SAPP_EVENTTYPE_TOUCHES_MOVED);
+        sendTouch(SAPP_EVENTTYPE_TOUCHES_ENDED);
+        app->touchOrder = nullptr;
+        setTouchAsMouse(true);
+        if (touchOrder != "cdpbalz" || app->touchPresses != 1 ||
+            app->touchMoves != 1 || app->touchReleases != 1) {
+            done = true;
+            return finish(67, "host touch order/forwarding failed: " + touchOrder);
+        }
+        // Protected host binding survives clear, without rebinding on reload.
+        events().touchMoved.clear();
+        sendTouch(SAPP_EVENTTYPE_TOUCHES_MOVED);
+        if (app->touchMoves != 2) {
+            done = true;
+            return finish(68, "host touch binding lost after clear");
+        }
+    });
+
     WindowSettings settings;
     settings.setSize(960, 600);
     // runapp-verdict: atexit-verdict -- finish sets the result in-frame; macOS atexit propagates it.
@@ -1117,7 +1176,7 @@ int main(int argc, char** argv) {
     if (port <= 0) {
         std::printf("hotReloadLifecycle: FAIL - MCP HTTP server did not start\n");
     } else {
-        internal::appKeyPressedFunc = [](const KeyEventArgs&) { g_hostKeyPresses++; };
+        auto keyListener = events().keyPressed.listen([](const KeyEventArgs&) { g_hostKeyPresses++; });
         rc = runCycles(guestPath, port);
     }
     mcp::stopHttpServer();

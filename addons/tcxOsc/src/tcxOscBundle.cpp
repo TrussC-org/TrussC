@@ -1,4 +1,5 @@
 #include "tcxOscBundle.h"
+#include "tcxOscPreflight.h"
 
 namespace tcx::osc {
 
@@ -48,11 +49,13 @@ std::vector<uint8_t> OscBundle::toBytes() const {
 // =============================================================================
 OscBundle OscBundle::fromBytes(const uint8_t* data, size_t size, bool& ok) {
     bool paddingMissing = false;
-    return fromBytesAtDepth(data, size, ok, paddingMissing, 1);
+    return fromBytes(data, size, ok, paddingMissing);
 }
 
 OscBundle OscBundle::fromBytes(const uint8_t* data, size_t size, bool& ok, bool& paddingMissing) {
     paddingMissing = false;
+    PacketPreflight preflight;
+    if (!preflight.scan(data, size)) { ok = false; return OscBundle(); }
     return fromBytesAtDepth(data, size, ok, paddingMissing, 1);
 }
 
@@ -93,7 +96,7 @@ OscBundle OscBundle::fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok
         pos += 4;
 
         // An element larger than the data left is truncated
-        // Bound (security): untrusted element lengths must stay within the received packet. Overflow rejects the bundle.
+        // Bound (security): untrusted element lengths must stay within the received packet. Overflow rejects the whole packet; the receiver counts rejected datagrams.
         if (elementSize > size - pos) return OscBundle();
 
         const uint8_t* elementData = data + pos;

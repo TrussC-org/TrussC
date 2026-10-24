@@ -152,25 +152,26 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         t["loadStream"] = sol::overload([](trussc::SoundStream& self, const fs::path & path) { return self.loadStream(path); }, [](trussc::SoundStream& self, const fs::path & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
     }
     {
-        sol::usertype<trussc::VideoRecordSettings> t = lua->new_usertype<trussc::VideoRecordSettings>("VideoRecordSettings");
-        t["audio"] = &trussc::VideoRecordSettings::audio;
-        t["audioBitrate"] = &trussc::VideoRecordSettings::audioBitrate;
-        t["audioChannels"] = &trussc::VideoRecordSettings::audioChannels;
-        t["audioSampleRate"] = &trussc::VideoRecordSettings::audioSampleRate;
-        t["bitrate"] = &trussc::VideoRecordSettings::bitrate;
-        t["codec"] = &trussc::VideoRecordSettings::codec;
-        t["duration"] = &trussc::VideoRecordSettings::duration;
-        t["fps"] = &trussc::VideoRecordSettings::fps;
-        t["keyframeInterval"] = &trussc::VideoRecordSettings::keyframeInterval;
+        sol::usertype<trussc::ScrollEventArgs> t = lua->new_usertype<trussc::ScrollEventArgs>("ScrollEventArgs");
+        t["alt"] = &trussc::ScrollEventArgs::alt;
+        t["consumed"] = &trussc::ScrollEventArgs::consumed;
+        t["ctrl"] = &trussc::ScrollEventArgs::ctrl;
+        t["globalPos"] = &trussc::ScrollEventArgs::globalPos;
+        t["pos"] = &trussc::ScrollEventArgs::pos;
+        t["scroll"] = &trussc::ScrollEventArgs::scroll;
+        t["scrollX"] = &trussc::ScrollEventArgs::scrollX;
+        t["scrollY"] = &trussc::ScrollEventArgs::scrollY;
+        t["shift"] = &trussc::ScrollEventArgs::shift;
+        t["super"] = &trussc::ScrollEventArgs::super;
+        t["syncLegacy"] = &trussc::ScrollEventArgs::syncLegacy;
     }
     {
-        sol::usertype<trussc::AudioSettings> t = lua->new_usertype<trussc::AudioSettings>("AudioSettings");
-        t["backend"] = &trussc::AudioSettings::backend;
-        t["bufferSize"] = &trussc::AudioSettings::bufferSize;
-        t["channels"] = &trussc::AudioSettings::channels;
-        t["deviceName"] = &trussc::AudioSettings::deviceName;
-        t["maxPolyphony"] = &trussc::AudioSettings::maxPolyphony;
-        t["sampleRate"] = &trussc::AudioSettings::sampleRate;
+        sol::usertype<trussc::LoadResult> t = lua->new_usertype<trussc::LoadResult>("LoadResult");
+        t["error"] = &trussc::LoadResult::error;
+        t["message"] = &trussc::LoadResult::message;
+        t["ok"] = &trussc::LoadResult::ok;
+        t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
+        t["success"] = &trussc::LoadResult::success;
     }
     lua->new_usertype<trussc::TextureUsage>("TextureUsage",
         sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
@@ -178,27 +179,26 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
         "Stream", sol::var(trussc::TextureUsage::Stream),
         "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget));
-    {
-        sol::usertype<trussc::TcpServerErrorEventArgs> t = lua->new_usertype<trussc::TcpServerErrorEventArgs>("TcpServerErrorEventArgs");
-        t["clientId"] = &trussc::TcpServerErrorEventArgs::clientId;
-        t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
-        t["message"] = &trussc::TcpServerErrorEventArgs::message;
-    }
+    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
+        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
+        "Off", sol::var(trussc::KinsokuLevel::Off),
+        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
+        "Standard", sol::var(trussc::KinsokuLevel::Standard));
     lua->new_usertype<trussc::StrokeJoin>("StrokeJoin",
         sol::meta_function::equal_to, [](trussc::StrokeJoin a, trussc::StrokeJoin b){ return a == b; },
         "Miter", sol::var(trussc::StrokeJoin::Miter),
         "Round", sol::var(trussc::StrokeJoin::Round),
         "Bevel", sol::var(trussc::StrokeJoin::Bevel));
     {
-        sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
-        t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
+        sol::usertype<trussc::CurveStyle> t = lua->new_usertype<trussc::CurveStyle>("CurveStyle");
+        t["mode"] = &trussc::CurveStyle::mode;
+        t["resolution"] = &trussc::CurveStyle::resolution;
+        t["tolerance"] = &trussc::CurveStyle::tolerance;
     }
     {
-        sol::usertype<trussc::SendResult> t = lua->new_usertype<trussc::SendResult>("SendResult");
-        t["error"] = &trussc::SendResult::error;
-        t["id"] = &trussc::SendResult::id;
-        t["ok"] = &trussc::SendResult::ok;
+        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
+        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
+        t["setFps"] = &trussc::HeadlessSettings::setFps;
     }
 }
 #ifdef _MSC_VER

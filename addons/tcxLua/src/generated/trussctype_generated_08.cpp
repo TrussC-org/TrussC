@@ -118,56 +118,54 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         t["clear"] = &trussc::ChipSoundBundle::clear;
         t["getDuration"] = &trussc::ChipSoundBundle::getDuration;
     }
-    lua->new_usertype<trussc::LoadError>("LoadError",
-        sol::meta_function::equal_to, [](trussc::LoadError a, trussc::LoadError b){ return a == b; },
-        "None", sol::var(trussc::LoadError::None),
-        "FileNotFound", sol::var(trussc::LoadError::FileNotFound),
-        "UnsupportedFormat", sol::var(trussc::LoadError::UnsupportedFormat),
-        "DecodeFailed", sol::var(trussc::LoadError::DecodeFailed),
-        "Unknown", sol::var(trussc::LoadError::Unknown),
-        "TooLarge", sol::var(trussc::LoadError::TooLarge),
-        "Cancelled", sol::var(trussc::LoadError::Cancelled));
+    lua->new_usertype<trussc::Orientation>("Orientation",
+        sol::meta_function::equal_to, [](trussc::Orientation a, trussc::Orientation b){ return a == b; },
+        "Portrait", sol::var(trussc::Orientation::Portrait),
+        "PortraitUpsideDown", sol::var(trussc::Orientation::PortraitUpsideDown),
+        "LandscapeLeft", sol::var(trussc::Orientation::LandscapeLeft),
+        "LandscapeRight", sol::var(trussc::Orientation::LandscapeRight),
+        "Landscape", sol::var(trussc::Orientation::Landscape),
+        "All", sol::var(trussc::Orientation::All),
+        "AllButUpsideDown", sol::var(trussc::Orientation::AllButUpsideDown));
+    lua->new_usertype<trussc::SendError>("SendError",
+        sol::meta_function::equal_to, [](trussc::SendError a, trussc::SendError b){ return a == b; },
+        "None", sol::var(trussc::SendError::None),
+        "ClientNotFound", sol::var(trussc::SendError::ClientNotFound),
+        "Disconnected", sol::var(trussc::SendError::Disconnected),
+        "Timeout", sol::var(trussc::SendError::Timeout),
+        "QueueFull", sol::var(trussc::SendError::QueueFull),
+        "NotRunning", sol::var(trussc::SendError::NotRunning));
     {
-        sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
-        t["pickable"] = &trussc::CameraContext::pickable;
-        t["projection"] = &trussc::CameraContext::projection;
-        t["view"] = &trussc::CameraContext::view;
-        t["viewH"] = &trussc::CameraContext::viewH;
-        t["viewW"] = &trussc::CameraContext::viewW;
-        t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
-        t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
+        sol::usertype<trussc::SerialDisconnectEventArgs> t = lua->new_usertype<trussc::SerialDisconnectEventArgs>("SerialDisconnectEventArgs");
+        t["baudRate"] = &trussc::SerialDisconnectEventArgs::baudRate;
+        t["portName"] = &trussc::SerialDisconnectEventArgs::portName;
+        t["reason"] = &trussc::SerialDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::SerialDisconnectEventArgs::wasClean;
     }
     {
-        sol::usertype<trussc::KeyEventArgs> t = lua->new_usertype<trussc::KeyEventArgs>("KeyEventArgs");
-        t["alt"] = &trussc::KeyEventArgs::alt;
-        t["consumed"] = &trussc::KeyEventArgs::consumed;
-        t["ctrl"] = &trussc::KeyEventArgs::ctrl;
-        t["isRepeat"] = &trussc::KeyEventArgs::isRepeat;
-        t["key"] = &trussc::KeyEventArgs::key;
-        t["shift"] = &trussc::KeyEventArgs::shift;
-        t["super"] = &trussc::KeyEventArgs::super;
+        sol::usertype<trussc::TcpServerErrorEventArgs> t = lua->new_usertype<trussc::TcpServerErrorEventArgs>("TcpServerErrorEventArgs");
+        t["clientId"] = &trussc::TcpServerErrorEventArgs::clientId;
+        t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
+        t["message"] = &trussc::TcpServerErrorEventArgs::message;
+    }
+    lua->new_usertype<trussc::LightType>("LightType",
+        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
+        "Directional", sol::var(trussc::LightType::Directional),
+        "Point", sol::var(trussc::LightType::Point),
+        "Spot", sol::var(trussc::LightType::Spot));
+    {
+        sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
+        t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
     }
     {
-        sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
-        t["changed"] = &trussc::TouchPoint::changed;
-        t["id"] = &trussc::TouchPoint::id;
-        t["pressure"] = &trussc::TouchPoint::pressure;
-        t["x"] = &trussc::TouchPoint::x;
-        t["y"] = &trussc::TouchPoint::y;
-    }
-    lua->new_usertype<trussc::SoundStream::Kind>("SoundStreamKind",
-        sol::meta_function::equal_to, [](trussc::SoundStream::Kind a, trussc::SoundStream::Kind b){ return a == b; },
-        "Eager", sol::var(trussc::SoundStream::Kind::Eager),
-        "Stream", sol::var(trussc::SoundStream::Kind::Stream));
-    {
-        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
-        t["note"] = &trussc::ChipSoundBundle::Entry::note;
-        t["time"] = &trussc::ChipSoundBundle::Entry::time;
+        sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
+        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
+        t["name"] = &trussc::AudioDeviceInfo::name;
     }
     {
-        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
-        t["message"] = &trussc::TcpConnectEventArgs::message;
-        t["success"] = &trussc::TcpConnectEventArgs::success;
+        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
+        t["text"] = &trussc::ClipboardPastedEventArgs::text;
     }
 }
 #ifdef _MSC_VER

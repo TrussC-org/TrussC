@@ -1,0 +1,1 @@
+Windows allocation-failure checks replace global new/delete; keep them isolated.

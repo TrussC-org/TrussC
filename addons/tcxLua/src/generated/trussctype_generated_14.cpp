@@ -151,57 +151,56 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         t["stop"] = &trussc::AudioRecorder::stop;
     }
     {
-        sol::usertype<trussc::MouseEventArgs> t = lua->new_usertype<trussc::MouseEventArgs>("MouseEventArgs");
-        t["alt"] = &trussc::MouseEventArgs::alt;
-        t["button"] = &trussc::MouseEventArgs::button;
-        t["consumed"] = &trussc::MouseEventArgs::consumed;
-        t["ctrl"] = &trussc::MouseEventArgs::ctrl;
-        t["globalPos"] = &trussc::MouseEventArgs::globalPos;
-        t["pos"] = &trussc::MouseEventArgs::pos;
-        t["shift"] = &trussc::MouseEventArgs::shift;
-        t["super"] = &trussc::MouseEventArgs::super;
-        t["x"] = &trussc::MouseEventArgs::x;
-        t["y"] = &trussc::MouseEventArgs::y;
-        t["syncLegacy"] = &trussc::MouseEventArgs::syncLegacy;
+        sol::usertype<trussc::VideoRecordSettings> t = lua->new_usertype<trussc::VideoRecordSettings>("VideoRecordSettings");
+        t["audio"] = &trussc::VideoRecordSettings::audio;
+        t["audioBitrate"] = &trussc::VideoRecordSettings::audioBitrate;
+        t["audioChannels"] = &trussc::VideoRecordSettings::audioChannels;
+        t["audioSampleRate"] = &trussc::VideoRecordSettings::audioSampleRate;
+        t["bitrate"] = &trussc::VideoRecordSettings::bitrate;
+        t["codec"] = &trussc::VideoRecordSettings::codec;
+        t["duration"] = &trussc::VideoRecordSettings::duration;
+        t["fps"] = &trussc::VideoRecordSettings::fps;
+        t["keyframeInterval"] = &trussc::VideoRecordSettings::keyframeInterval;
+    }
+    lua->new_usertype<trussc::BlendMode>("BlendMode",
+        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
+        "Alpha", sol::var(trussc::BlendMode::Alpha),
+        "Add", sol::var(trussc::BlendMode::Add),
+        "Multiply", sol::var(trussc::BlendMode::Multiply),
+        "Screen", sol::var(trussc::BlendMode::Screen),
+        "Subtract", sol::var(trussc::BlendMode::Subtract),
+        "Disabled", sol::var(trussc::BlendMode::Disabled));
+    lua->new_usertype<trussc::StrokeMesh::JoinType>("StrokeMeshJoinType",
+        sol::meta_function::equal_to, [](trussc::StrokeMesh::JoinType a, trussc::StrokeMesh::JoinType b){ return a == b; },
+        "JOIN_MITER", sol::var(trussc::StrokeMesh::JoinType::JOIN_MITER),
+        "JOIN_ROUND", sol::var(trussc::StrokeMesh::JoinType::JOIN_ROUND),
+        "JOIN_BEVEL", sol::var(trussc::StrokeMesh::JoinType::JOIN_BEVEL));
+    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
+        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
+        "Repeat", sol::var(trussc::TextureWrap::Repeat),
+        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
+        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
+    {
+        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
+        t["accuracy"] = &trussc::Location::accuracy;
+        t["altitude"] = &trussc::Location::altitude;
+        t["latitude"] = &trussc::Location::latitude;
+        t["longitude"] = &trussc::Location::longitude;
     }
     {
-        sol::usertype<trussc::VideoDeviceInfo> t = lua->new_usertype<trussc::VideoDeviceInfo>("VideoDeviceInfo");
-        t["deviceId"] = &trussc::VideoDeviceInfo::deviceId;
-        t["deviceName"] = &trussc::VideoDeviceInfo::deviceName;
-        t["uniqueId"] = &trussc::VideoDeviceInfo::uniqueId;
-        t["getDeviceID"] = &trussc::VideoDeviceInfo::getDeviceID;
-        t["getDeviceName"] = &trussc::VideoDeviceInfo::getDeviceName;
-        t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
-    }
-    lua->new_usertype<trussc::AudioRecordSettings::SampleFormat>("AudioRecordSettingsSampleFormat",
-        sol::meta_function::equal_to, [](trussc::AudioRecordSettings::SampleFormat a, trussc::AudioRecordSettings::SampleFormat b){ return a == b; },
-        "S16", sol::var(trussc::AudioRecordSettings::SampleFormat::S16),
-        "F32", sol::var(trussc::AudioRecordSettings::SampleFormat::F32));
-    {
-        sol::usertype<trussc::TouchEventArgs> t = lua->new_usertype<trussc::TouchEventArgs>("TouchEventArgs");
-        t["cancelled"] = &trussc::TouchEventArgs::cancelled;
-        t["numTouches"] = &trussc::TouchEventArgs::numTouches;
-        t["id"] = &trussc::TouchEventArgs::id;
-        t["x"] = &trussc::TouchEventArgs::x;
-        t["y"] = &trussc::TouchEventArgs::y;
-    }
-    lua->new_usertype<trussc::TcyMode>("TcyMode",
-        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
-        "Rotate", sol::var(trussc::TcyMode::Rotate),
-        "Upright", sol::var(trussc::TcyMode::Upright),
-        "Combine", sol::var(trussc::TcyMode::Combine));
-    lua->new_usertype<trussc::AudioBackend>("AudioBackend",
-        sol::meta_function::equal_to, [](trussc::AudioBackend a, trussc::AudioBackend b){ return a == b; },
-        "Default", sol::var(trussc::AudioBackend::Default),
-        "Null", sol::var(trussc::AudioBackend::Null));
-    {
-        sol::usertype<trussc::MicStartResult> t = lua->new_usertype<trussc::MicStartResult>("MicStartResult");
-        t["message"] = &trussc::MicStartResult::message;
-        t["success"] = &trussc::MicStartResult::success;
+        sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
+        t["files"] = &trussc::DragDropEventArgs::files;
+        t["x"] = &trussc::DragDropEventArgs::x;
+        t["y"] = &trussc::DragDropEventArgs::y;
     }
     {
-        sol::usertype<trussc::TcpReceiveEventArgs> t = lua->new_usertype<trussc::TcpReceiveEventArgs>("TcpReceiveEventArgs");
-        t["data"] = &trussc::TcpReceiveEventArgs::data;
+        sol::usertype<trussc::ResizeEventArgs> t = lua->new_usertype<trussc::ResizeEventArgs>("ResizeEventArgs");
+        t["height"] = &trussc::ResizeEventArgs::height;
+        t["width"] = &trussc::ResizeEventArgs::width;
+    }
+    {
+        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
+        t["count"] = &trussc::EnumLabelSpan::count;
     }
 }
 #ifdef _MSC_VER

@@ -150,73 +150,70 @@ void tcxLuaGenShard_12(const std::shared_ptr<sol::state>& lua) {
         t["slerp"] = &trussc::Quaternion::slerp;
     }
     {
-        sol::usertype<trussc::MouseDragEventArgs> t = lua->new_usertype<trussc::MouseDragEventArgs>("MouseDragEventArgs");
-        t["alt"] = &trussc::MouseDragEventArgs::alt;
-        t["button"] = &trussc::MouseDragEventArgs::button;
-        t["consumed"] = &trussc::MouseDragEventArgs::consumed;
-        t["ctrl"] = &trussc::MouseDragEventArgs::ctrl;
-        t["delta"] = &trussc::MouseDragEventArgs::delta;
-        t["deltaX"] = &trussc::MouseDragEventArgs::deltaX;
-        t["deltaY"] = &trussc::MouseDragEventArgs::deltaY;
-        t["globalDelta"] = &trussc::MouseDragEventArgs::globalDelta;
-        t["globalPos"] = &trussc::MouseDragEventArgs::globalPos;
-        t["pos"] = &trussc::MouseDragEventArgs::pos;
-        t["shift"] = &trussc::MouseDragEventArgs::shift;
-        t["super"] = &trussc::MouseDragEventArgs::super;
-        t["x"] = &trussc::MouseDragEventArgs::x;
-        t["y"] = &trussc::MouseDragEventArgs::y;
-        t["syncLegacy"] = &trussc::MouseDragEventArgs::syncLegacy;
+        auto constructors = tcxLuaConstructors<trussc::ColorHSB
+            , trussc::ColorHSB()
+            , trussc::ColorHSB(float, float, float)
+            , trussc::ColorHSB(float, float, float, float)
+        >();
+        sol::usertype<trussc::ColorHSB> t = lua->new_usertype<trussc::ColorHSB>("ColorHSB", constructors, sol::call_constructor, constructors);
+        t["a"] = &trussc::ColorHSB::a;
+        t["b"] = &trussc::ColorHSB::b;
+        t["h"] = &trussc::ColorHSB::h;
+        t["s"] = &trussc::ColorHSB::s;
+        t["lerp"] = sol::overload([](trussc::ColorHSB& self, const trussc::ColorHSB & target, float t) { return self.lerp(target, t); }, [](trussc::ColorHSB& self, const trussc::ColorHSB & target, float t, bool shortestPath) { return self.lerp(target, t, shortestPath); });
+        t["toLinear"] = &trussc::ColorHSB::toLinear;
+        t["toOKLCH"] = &trussc::ColorHSB::toOKLCH;
+        t["toOKLab"] = &trussc::ColorHSB::toOKLab;
+        t["toRGB"] = &trussc::ColorHSB::toRGB;
+    }
+    lua->new_usertype<trussc::LoadError>("LoadError",
+        sol::meta_function::equal_to, [](trussc::LoadError a, trussc::LoadError b){ return a == b; },
+        "None", sol::var(trussc::LoadError::None),
+        "FileNotFound", sol::var(trussc::LoadError::FileNotFound),
+        "UnsupportedFormat", sol::var(trussc::LoadError::UnsupportedFormat),
+        "DecodeFailed", sol::var(trussc::LoadError::DecodeFailed),
+        "Unknown", sol::var(trussc::LoadError::Unknown),
+        "TooLarge", sol::var(trussc::LoadError::TooLarge),
+        "Cancelled", sol::var(trussc::LoadError::Cancelled));
+    lua->new_usertype<trussc::PrimitiveType>("PrimitiveType",
+        sol::meta_function::equal_to, [](trussc::PrimitiveType a, trussc::PrimitiveType b){ return a == b; },
+        "Points", sol::var(trussc::PrimitiveType::Points),
+        "Lines", sol::var(trussc::PrimitiveType::Lines),
+        "LineStrip", sol::var(trussc::PrimitiveType::LineStrip),
+        "Triangles", sol::var(trussc::PrimitiveType::Triangles),
+        "TriangleStrip", sol::var(trussc::PrimitiveType::TriangleStrip),
+        "Quads", sol::var(trussc::PrimitiveType::Quads));
+    {
+        sol::usertype<trussc::KeyEventArgs> t = lua->new_usertype<trussc::KeyEventArgs>("KeyEventArgs");
+        t["alt"] = &trussc::KeyEventArgs::alt;
+        t["consumed"] = &trussc::KeyEventArgs::consumed;
+        t["ctrl"] = &trussc::KeyEventArgs::ctrl;
+        t["isRepeat"] = &trussc::KeyEventArgs::isRepeat;
+        t["key"] = &trussc::KeyEventArgs::key;
+        t["shift"] = &trussc::KeyEventArgs::shift;
+        t["super"] = &trussc::KeyEventArgs::super;
     }
     {
-        sol::usertype<trussc::BuildInfo> t = lua->new_usertype<trussc::BuildInfo>("BuildInfo");
-        t["date"] = &trussc::BuildInfo::date;
-        t["dateTime"] = &trussc::BuildInfo::dateTime;
-        t["day"] = &trussc::BuildInfo::day;
-        t["hour"] = &trussc::BuildInfo::hour;
-        t["minute"] = &trussc::BuildInfo::minute;
-        t["month"] = &trussc::BuildInfo::month;
-        t["second"] = &trussc::BuildInfo::second;
-        t["time"] = &trussc::BuildInfo::time;
-        t["timestamp"] = &trussc::BuildInfo::timestamp;
-        t["year"] = &trussc::BuildInfo::year;
+        sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
+        t["changed"] = &trussc::TouchPoint::changed;
+        t["id"] = &trussc::TouchPoint::id;
+        t["pressure"] = &trussc::TouchPoint::pressure;
+        t["x"] = &trussc::TouchPoint::x;
+        t["y"] = &trussc::TouchPoint::y;
+    }
+    lua->new_usertype<trussc::SoundSource::Kind>("SoundSourceKind",
+        sol::meta_function::equal_to, [](trussc::SoundSource::Kind a, trussc::SoundSource::Kind b){ return a == b; },
+        "Eager", sol::var(trussc::SoundSource::Kind::Eager),
+        "Stream", sol::var(trussc::SoundSource::Kind::Stream));
+    {
+        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
+        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
+        t["format"] = &trussc::AudioRecordSettings::format;
     }
     {
-        sol::usertype<trussc::GraphicsBackend> t = lua->new_usertype<trussc::GraphicsBackend>("GraphicsBackend");
-        t["isD3D11"] = &trussc::GraphicsBackend::isD3D11;
-        t["isMetal"] = &trussc::GraphicsBackend::isMetal;
-        t["isOpenGL"] = &trussc::GraphicsBackend::isOpenGL;
-        t["isVulkan"] = &trussc::GraphicsBackend::isVulkan;
-        t["isWebGL2"] = &trussc::GraphicsBackend::isWebGL2;
-        t["isWebGPU"] = &trussc::GraphicsBackend::isWebGPU;
-        t["name"] = &trussc::GraphicsBackend::name;
-    }
-    lua->new_usertype<trussc::SaveError>("SaveError",
-        sol::meta_function::equal_to, [](trussc::SaveError a, trussc::SaveError b){ return a == b; },
-        "None", sol::var(trussc::SaveError::None),
-        "AccessDenied", sol::var(trussc::SaveError::AccessDenied),
-        "NoSpace", sol::var(trussc::SaveError::NoSpace),
-        "WriteFailed", sol::var(trussc::SaveError::WriteFailed),
-        "Unknown", sol::var(trussc::SaveError::Unknown));
-    {
-        sol::usertype<trussc::Node::HitResult> t = lua->new_usertype<trussc::Node::HitResult>("NodeHitResult");
-        t["distance"] = &trussc::Node::HitResult::distance;
-        t["localPoint"] = &trussc::Node::HitResult::localPoint;
-        t["node"] = &trussc::Node::HitResult::node;
-        t["hit"] = &trussc::Node::HitResult::hit;
-    }
-    lua->new_usertype<trussc::LightType>("LightType",
-        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
-        "Directional", sol::var(trussc::LightType::Directional),
-        "Point", sol::var(trussc::LightType::Point),
-        "Spot", sol::var(trussc::LightType::Spot));
-    lua->new_usertype<trussc::ImageType>("ImageType",
-        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
-        "Color", sol::var(trussc::ImageType::Color),
-        "Grayscale", sol::var(trussc::ImageType::Grayscale));
-    {
-        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
-        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
-        t["message"] = &trussc::UdpErrorEventArgs::message;
+        sol::usertype<trussc::TcpErrorEventArgs> t = lua->new_usertype<trussc::TcpErrorEventArgs>("TcpErrorEventArgs");
+        t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
+        t["message"] = &trussc::TcpErrorEventArgs::message;
     }
 }
 #ifdef _MSC_VER

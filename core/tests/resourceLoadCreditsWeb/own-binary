@@ -1,0 +1,1 @@
+Overrides global allocation operators for deterministic failure and lifetime checks.

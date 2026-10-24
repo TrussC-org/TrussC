@@ -10,7 +10,7 @@ and contributors, under the stb dual license (MIT or Public Domain, see
 | `stb_image.h` | v2.30 | [nvpro-samples/stb](https://github.com/nvpro-samples/stb), branch `nv/all-fixes` | `1cafe0e01eeaf4142f05b36218793cb46c7ce433` (2025-12-24) | 2026-09-30 | 4 |
 | `stb_image_write.h` | v1.16 | [nothings/stb](https://github.com/nothings/stb), `master` | `1ee679ca2ef753a528db5ba6801e1067b40481b8` (2021-07-11) | 2025-12-16 | 1 |
 | `stb_perlin.h` | v0.5 | [nothings/stb](https://github.com/nothings/stb), `master` | `2bb4a0accd4003c1db4c24533981e01b1adfd656` (2020-02-02) | 2025-12-16 | none |
-| `stb_truetype.h` | v1.26 | [nothings/stb](https://github.com/nothings/stb), `master` | `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (2024-07-15) | 2025-12-16 | 4 |
+| `stb_truetype.h` | v1.26 | [nothings/stb](https://github.com/nothings/stb), `master` | `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (2024-07-15) | 2025-12-16 | 5 |
 | `../stb_vorbis.c` | v1.22 | [sezero/stb](https://github.com/sezero/stb), branch `stb_vorbis-sezero` | `dd0c5eccaf092012b531d69d595fb587ece79571` (2026-07-13) | 2026-09-30 | 2 |
 
 `stb_vorbis.c` lives one level up, in `core/include/`, because
@@ -89,7 +89,7 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
 - **Source**: nothings/stb `master`, the file as of
   `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (a merge commit; the version
   history in the file ends at 1.26, 2021-08-28).
-- **TrussC patches** (marked `// TrussC patch:` in the file):
+- **TrussC patches** (marked `// TrussC patch:` or local `// Bound` comments):
   1. `stbtt_InitFont_internal`: the CFF buffer is made with the `CFF ` table
      length from the table directory, so CFF data (INDEX, DICT, Subrs,
      FDSelect, CharStrings) is read within the CFF table's length.
@@ -124,6 +124,18 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
      usable encoding record still wins; unsupported maps, including the
      variation-only format 14, do not replace it. Platform/encoding filters
      are unchanged; Windows Symbol records are not accepted.
+  5. Glyph input/workspace admission: TrueType glyph records are checked before
+     outline allocation; compound shapes check depth, combined vertex counts and
+     total glyph visits per shape, including empty components, plus cumulative
+     append copies (including previous components). CFF interpreter
+     passes (metrics, outline counting and output) each allow at most 524,288
+     interpreter dispatches, including operands and no-output operators inside
+     local/global subroutines. The separate 65,536-call expansion ceiling is
+     retained. Exhaustion rejects the glyph and marks its workspace, independently of
+     output vertices or recursion depth. Exhaustion frees
+     the in-progress outline. Raster scanline allocation failures return before
+     pointer arithmetic. The shared backend reports failures through its owning
+     workspace scope; see the v0.8 import notes below.
 - **Configuration** (in `core/include/impl/stb_impl.cpp`, not a change to the
   file): `STBTT_assert` does nothing in every build type, so Debug and
   Release builds handle font data the same way. Allocations through
@@ -141,10 +153,10 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
   `stbtt_InitFont`, and after it that the CFF CharStrings INDEX count can be
   read within the CFF table. A glyph index from the cmap past `numGlyphs`
   (for CFF, past the CharStrings count) and a codepoint above U+10FFFF map
-  to .notdef. Fonts of 1 GiB or more are refused. cmap subtable contents,
-  glyph outlines and composite glyph nesting are not checked. Unicode cmap
-  subtable format words are checked within the cmap table; a font with no
-  supported Unicode map is refused with a diagnostic.
+  to .notdef. Fonts of 1 GiB or more are refused by the existing backend addressing guard.
+  Supported cmap sections and ranges are checked before initialization. Glyph
+  records, compound depth/work and decoded workspace are checked when a shape is
+  requested. A font with no supported Unicode map is refused with a diagnostic.
 - **Covered by**: `core/tests/fontSfntCheck`.
 
 ## stb_vorbis.c (in core/include/)
@@ -215,3 +227,20 @@ of nothings/stb: `git log --all -m --format='%H %ci' --find-object=$(git
 hash-object <TrussC copy>)` and take the oldest line (`-m` is needed when the
 file last changed in a merge, as `stb_truetype.h` did). For
 `stb_image_write.h` and `stb_truetype.h`, undo the TrussC patch first.
+
+### Document/font import workspace (v0.8)
+
+`impl/tcFontInput.h` holds the shared sfnt directory checks used before core
+and ImGui font imports. Local fonts retain only the backend addressing guard.
+`impl/tcFontScratch.h` tracks live stb allocations per glyph, checks glyph counts and raster metrics
+against its live workspace, and reports allocation failure before a
+glyph is published. Atlas pages remain independent. Compound TrueType shapes
+have a depth guard, a per-shape total-visit bound (including empty components),
+a per-shape cumulative append-copy allowance of 1,048,576 vertices (including
+copies of previous components), and checked combined vertex counts. The copy
+allowance also bounds component transforms and propagates whole-shape rejection.
+CFF bounds every glyph interpreter pass to
+524,288 interpreter dispatches, including operands and no-output subroutine bodies,
+while retaining its separate 65,536-call expansion ceiling; raster scanline
+allocation failure returns before pointer arithmetic. Keep these patches when
+updating stb and run `documentImports`, `fontSfntCheck`, and ImGui addon tests.

@@ -192,13 +192,9 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
         t["getPort"] = &trussc::TcpServerClient::getPort;
     }
     {
-        sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
-        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
-        t["name"] = &trussc::AudioDeviceInfo::name;
-    }
-    {
-        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
-        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
+        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
+        t["message"] = &trussc::TcpConnectEventArgs::message;
+        t["success"] = &trussc::TcpConnectEventArgs::success;
     }
 }
 #ifdef _MSC_VER

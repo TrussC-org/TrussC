@@ -217,59 +217,57 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         t["toRGB"] = &trussc::ColorOKLab::toRGB;
     }
     {
-        sol::usertype<trussc::PlayingSoundInfo> t = lua->new_usertype<trussc::PlayingSoundInfo>("PlayingSoundInfo");
-        t["duration"] = &trussc::PlayingSoundInfo::duration;
-        t["level"] = &trussc::PlayingSoundInfo::level;
-        t["loop"] = &trussc::PlayingSoundInfo::loop;
-        t["pan"] = &trussc::PlayingSoundInfo::pan;
-        t["path"] = &trussc::PlayingSoundInfo::path;
-        t["paused"] = &trussc::PlayingSoundInfo::paused;
-        t["position"] = &trussc::PlayingSoundInfo::position;
-        t["slot"] = &trussc::PlayingSoundInfo::slot;
-        t["speed"] = &trussc::PlayingSoundInfo::speed;
-        t["streaming"] = &trussc::PlayingSoundInfo::streaming;
-        t["volume"] = &trussc::PlayingSoundInfo::volume;
-    }
-    lua->new_usertype<trussc::BlendMode>("BlendMode",
-        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
-        "Alpha", sol::var(trussc::BlendMode::Alpha),
-        "Add", sol::var(trussc::BlendMode::Add),
-        "Multiply", sol::var(trussc::BlendMode::Multiply),
-        "Screen", sol::var(trussc::BlendMode::Screen),
-        "Subtract", sol::var(trussc::BlendMode::Subtract),
-        "Disabled", sol::var(trussc::BlendMode::Disabled));
-    {
-        auto constructors = tcxLuaConstructors<trussc::EventListener
-            , trussc::EventListener()
+        auto constructors = tcxLuaConstructors<trussc::FileReader
+            , trussc::FileReader()
         >();
-        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener", constructors, sol::call_constructor, constructors);
-        t["disconnect"] = &trussc::EventListener::disconnect;
-        t["isConnected"] = &trussc::EventListener::isConnected;
-    }
-    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
-        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
-        "Off", sol::var(trussc::KinsokuLevel::Off),
-        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
-        "Standard", sol::var(trussc::KinsokuLevel::Standard));
-    lua->new_usertype<trussc::CurveStyle::Mode>("CurveStyleMode",
-        sol::meta_function::equal_to, [](trussc::CurveStyle::Mode a, trussc::CurveStyle::Mode b){ return a == b; },
-        "Tolerance", sol::var(trussc::CurveStyle::Mode::Tolerance),
-        "Resolution", sol::var(trussc::CurveStyle::Mode::Resolution));
-    {
-        sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
-        t["files"] = &trussc::DragDropEventArgs::files;
-        t["x"] = &trussc::DragDropEventArgs::x;
-        t["y"] = &trussc::DragDropEventArgs::y;
+        sol::usertype<trussc::FileReader> t = lua->new_usertype<trussc::FileReader>("FileReader", constructors, sol::call_constructor, constructors);
+        t["close"] = &trussc::FileReader::close;
+        t["eof"] = &trussc::FileReader::eof;
+        t["isOpen"] = &trussc::FileReader::isOpen;
+        t["open"] = &trussc::FileReader::open;
+        t["readChar"] = &trussc::FileReader::readChar;
+        t["readLine"] = [](trussc::FileReader& self) { return self.readLine(); };
+        t["remaining"] = &trussc::FileReader::remaining;
+        t["seek"] = &trussc::FileReader::seek;
+        t["tell"] = &trussc::FileReader::tell;
     }
     {
-        sol::usertype<trussc::ResizeEventArgs> t = lua->new_usertype<trussc::ResizeEventArgs>("ResizeEventArgs");
-        t["height"] = &trussc::ResizeEventArgs::height;
-        t["width"] = &trussc::ResizeEventArgs::width;
+        sol::usertype<trussc::ShaderVertex> t = lua->new_usertype<trussc::ShaderVertex>("ShaderVertex");
+        t["a"] = &trussc::ShaderVertex::a;
+        t["b"] = &trussc::ShaderVertex::b;
+        t["g"] = &trussc::ShaderVertex::g;
+        t["r"] = &trussc::ShaderVertex::r;
+        t["u"] = &trussc::ShaderVertex::u;
+        t["v"] = &trussc::ShaderVertex::v;
+        t["x"] = &trussc::ShaderVertex::x;
+        t["y"] = &trussc::ShaderVertex::y;
+        t["z"] = &trussc::ShaderVertex::z;
     }
+    lua->new_usertype<trussc::StrokeMesh::CapType>("StrokeMeshCapType",
+        sol::meta_function::equal_to, [](trussc::StrokeMesh::CapType a, trussc::StrokeMesh::CapType b){ return a == b; },
+        "CAP_BUTT", sol::var(trussc::StrokeMesh::CapType::CAP_BUTT),
+        "CAP_ROUND", sol::var(trussc::StrokeMesh::CapType::CAP_ROUND),
+        "CAP_SQUARE", sol::var(trussc::StrokeMesh::CapType::CAP_SQUARE));
+    lua->new_usertype<trussc::MouseButton>("MouseButton",
+        sol::meta_function::equal_to, [](trussc::MouseButton a, trussc::MouseButton b){ return a == b; },
+        "Left", sol::var(trussc::MouseButton::Left),
+        "Right", sol::var(trussc::MouseButton::Right),
+        "Middle", sol::var(trussc::MouseButton::Middle),
+        "None", sol::var(trussc::MouseButton::None));
+    lua->new_usertype<trussc::AxisMode>("AxisMode",
+        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
+        "None", sol::var(trussc::AxisMode::None),
+        "Fill", sol::var(trussc::AxisMode::Fill),
+        "Content", sol::var(trussc::AxisMode::Content));
     {
-        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
-        t["text"] = &trussc::ClipboardPastedEventArgs::text;
+        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
+        t["note"] = &trussc::ChipSoundBundle::Entry::note;
+        t["time"] = &trussc::ChipSoundBundle::Entry::time;
     }
+    lua->new_usertype<trussc::MixMode>("MixMode",
+        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
+        "Auto", sol::var(trussc::MixMode::Auto),
+        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

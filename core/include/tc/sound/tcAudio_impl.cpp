@@ -2449,11 +2449,16 @@ bool AudioEngine::waitForCallbacks(bool giveUp) {
             if (!reported) {
                 reported = true;
                 lock.unlock();
-                logError("AudioEngine") << "an audioOut / audioIn listener has not "
-                    "returned for " << kCallbackIdleTimeout.count() << " s; the "
-                    "teardown keeps waiting for it before it destroys anything the "
-                    "listener may use. The listener is most likely waiting on the "
-                    "main thread or on a lock.";
+                {
+                    internal::TeardownSteps steps;
+                    steps.run("audio barrier warning", [&] {
+                        logError("AudioEngine") << "an audioOut / audioIn listener has not "
+                            "returned for " << kCallbackIdleTimeout.count() << " s; the "
+                            "teardown keeps waiting for it before it destroys anything the "
+                            "listener may use. The listener is most likely waiting on the "
+                            "main thread or on a lock.";
+                    });
+                }
                 lock.lock();
                 // A diagnostic listener or another barrier may have advanced
                 // the epoch while unlocked. Drain both slots again under the

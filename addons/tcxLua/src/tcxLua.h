@@ -74,35 +74,7 @@ public:
     /// @brief Load and run a Lua file with sol::script_pass_on_error.
     /// @return true if the file loaded and ran. false on a missing file, a syntax
     ///         error or a runtime error (logged).
-    static bool runFile(sol::state& lua, const std::filesystem::path& path) {
-        try {
-            const auto fullPath = trussc::getDataPath(path);
-            std::error_code ec;
-            const auto size = std::filesystem::file_size(fullPath, ec);
-            // loadTextFile returns an empty string on failure as well as for an
-            // empty file. Check readability separately so empty scripts work.
-            std::ifstream readable(fullPath, std::ios::binary);
-            if (ec || !readable.is_open()) {
-                trussc::logError("tcxLua") << "Cannot read file: " << trussc::pathToUtf8(path);
-                return false;
-            }
-            const auto text = trussc::loadTextFile(path);
-            if (text.size() != size) {
-                trussc::logError("tcxLua") << "Cannot read complete file: " << trussc::pathToUtf8(path);
-                return false;
-            }
-            auto result = lua.safe_script(text, sol::script_pass_on_error, "@" + trussc::pathToUtf8(path));
-            if (!result.valid()) {
-                sol::error err = result;
-                trussc::logError("tcxLua") << err.what();
-                return false;
-            }
-            return true;
-        } catch (const std::exception& err) {
-            trussc::logError("tcxLua") << err.what();
-            return false;
-        }
-    }
+    static bool runFile(sol::state& lua, const std::filesystem::path& path);
 
 protected:
     void setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua);

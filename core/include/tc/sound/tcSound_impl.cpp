@@ -243,6 +243,7 @@ SoundBuffer& SoundBuffer::operator=(SoundBuffer&& other) noexcept {
 }
 void SoundBuffer::loadAsync(const fs::path& path) {
     auto state = async_.begin(onLoad, [this](AsyncState& ready) {
+        if (!ready.decoded) { internal::clearLoadName(path_); return; }
         auto& decoded = *ready.decoded;
         std::lock_guard<std::mutex> lock(AudioEngine::getInstance().mutex_);
         // Publish PCM and metadata only after the entire decode succeeds.
@@ -255,8 +256,10 @@ void SoundBuffer::loadAsync(const fs::path& path) {
     });
     state->input = path;
     state->path = internal::resolveLoadPath(path);
-    state->decoded = std::make_shared<SoundBuffer>();
-    internal::startResourceLoad([state] {
+    state->localFile = internal::resourceLoadIsLocalPath(path, state->path);
+    internal::startExternalResourceLoad(state, [](auto* raw) {
+        auto state = std::static_pointer_cast<AsyncState>(raw->shared_from_this());
+        state->decoded = std::make_shared<SoundBuffer>();
         internal::probeResourceLoad("sound.decode", state->path);
         if (state->cancelled.load()) return;
 #ifdef __EMSCRIPTEN__
@@ -264,11 +267,15 @@ void SoundBuffer::loadAsync(const fs::path& path) {
         if (ext == "aac" || ext == "m4a") {
             auto entry = internal::checkLoadFile(state->path, "SoundBuffer");
             if (entry) {
+                state->backendPending = true;
                 loadAacWebAsync(state->decoded, [state](LoadResult result) {
                     state->result = std::move(result);
-                    if (state->result) internal::setLoadName(state->decoded->path_, state->path);
-                    if (!state->cancelled.load()) internal::completeResourceLoad(state);
-                }, state->path);
+                    if (state->result) {
+                        try { internal::setLoadName(state->decoded->path_, state->path); }
+                        catch (...) { state->result.error = LoadError::Unknown; state->result.message.clear(); }
+                    }
+                    internal::completeResourceLoad(state);
+                }, state->path, state);
                 return;
             }
             state->result = entry;

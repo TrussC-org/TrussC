@@ -16,6 +16,10 @@
 #include "imgui/imgui_widgets.cpp"
 #include "imgui/imgui_demo.cpp"
 
+// Keep ImGui's MSVC formatting aliases from renaming later std:: calls.
+#undef snprintf
+#undef vsnprintf
+
 // sokol_imgui implementation
 #include "tcImGuiTargetImpl.h"
 

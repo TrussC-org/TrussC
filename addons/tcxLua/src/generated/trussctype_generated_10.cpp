@@ -184,53 +184,54 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
         "RG32F", sol::var(trussc::TextureFormat::RG32F),
         "BGRA8", sol::var(trussc::TextureFormat::BGRA8),
         "RGBA16", sol::var(trussc::TextureFormat::RGBA16));
+    lua->new_usertype<trussc::Beep>("Beep",
+        sol::meta_function::equal_to, [](trussc::Beep a, trussc::Beep b){ return a == b; },
+        "ping", sol::var(trussc::Beep::ping),
+        "success", sol::var(trussc::Beep::success),
+        "complete", sol::var(trussc::Beep::complete),
+        "coin", sol::var(trussc::Beep::coin),
+        "error", sol::var(trussc::Beep::error),
+        "warning", sol::var(trussc::Beep::warning),
+        "cancel", sol::var(trussc::Beep::cancel),
+        "click", sol::var(trussc::Beep::click),
+        "typing", sol::var(trussc::Beep::typing),
+        "notify", sol::var(trussc::Beep::notify),
+        "sweep", sol::var(trussc::Beep::sweep));
     {
-        sol::usertype<trussc::Platform> t = lua->new_usertype<trussc::Platform>("Platform");
-        t["isAndroid"] = &trussc::Platform::isAndroid;
-        t["isApple"] = &trussc::Platform::isApple;
-        t["isDesktop"] = &trussc::Platform::isDesktop;
-        t["isIOS"] = &trussc::Platform::isIOS;
-        t["isLinux"] = &trussc::Platform::isLinux;
-        t["isMacOS"] = &trussc::Platform::isMacOS;
-        t["isMobile"] = &trussc::Platform::isMobile;
-        t["isWeb"] = &trussc::Platform::isWeb;
-        t["isWindows"] = &trussc::Platform::isWindows;
-        t["name"] = &trussc::Platform::name;
+        sol::usertype<trussc::Reflector> t = lua->new_usertype<trussc::Reflector>("Reflector");
+        t["endGroup"] = &trussc::Reflector::endGroup;
+        t["isDerived"] = &trussc::Reflector::isDerived;
+        t["isReadOnly"] = &trussc::Reflector::isReadOnly;
+        t["popDerived"] = &trussc::Reflector::popDerived;
+        t["popReadOnly"] = &trussc::Reflector::popReadOnly;
+        t["pushDerived"] = &trussc::Reflector::pushDerived;
+        t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
     }
+    lua->new_usertype<trussc::AudioRecordSettings::SampleFormat>("AudioRecordSettingsSampleFormat",
+        sol::meta_function::equal_to, [](trussc::AudioRecordSettings::SampleFormat a, trussc::AudioRecordSettings::SampleFormat b){ return a == b; },
+        "S16", sol::var(trussc::AudioRecordSettings::SampleFormat::S16),
+        "F32", sol::var(trussc::AudioRecordSettings::SampleFormat::F32));
     {
-        sol::usertype<trussc::SerialDeviceInfo> t = lua->new_usertype<trussc::SerialDeviceInfo>("SerialDeviceInfo");
-        t["deviceId"] = &trussc::SerialDeviceInfo::deviceId;
-        t["deviceName"] = &trussc::SerialDeviceInfo::deviceName;
-        t["devicePath"] = &trussc::SerialDeviceInfo::devicePath;
-        t["getDeviceID"] = &trussc::SerialDeviceInfo::getDeviceID;
-        t["getDeviceName"] = &trussc::SerialDeviceInfo::getDeviceName;
-        t["getDevicePath"] = &trussc::SerialDeviceInfo::getDevicePath;
+        sol::usertype<trussc::TouchEventArgs> t = lua->new_usertype<trussc::TouchEventArgs>("TouchEventArgs");
+        t["cancelled"] = &trussc::TouchEventArgs::cancelled;
+        t["numTouches"] = &trussc::TouchEventArgs::numTouches;
+        t["id"] = &trussc::TouchEventArgs::id;
+        t["x"] = &trussc::TouchEventArgs::x;
+        t["y"] = &trussc::TouchEventArgs::y;
     }
-    lua->new_usertype<trussc::AudioInitFailure>("AudioInitFailure",
-        sol::meta_function::equal_to, [](trussc::AudioInitFailure a, trussc::AudioInitFailure b){ return a == b; },
-        "None", sol::var(trussc::AudioInitFailure::None),
-        "NoBackend", sol::var(trussc::AudioInitFailure::NoBackend),
-        "DeviceOpen", sol::var(trussc::AudioInitFailure::DeviceOpen),
-        "DeviceStart", sol::var(trussc::AudioInitFailure::DeviceStart));
+    lua->new_usertype<trussc::SoundStream::Kind>("SoundStreamKind",
+        sol::meta_function::equal_to, [](trussc::SoundStream::Kind a, trussc::SoundStream::Kind b){ return a == b; },
+        "Eager", sol::var(trussc::SoundStream::Kind::Eager),
+        "Stream", sol::var(trussc::SoundStream::Kind::Stream));
+    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
+        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
+        "U8", sol::var(trussc::PixelFormat::U8),
+        "F32", sol::var(trussc::PixelFormat::F32));
     {
-        sol::usertype<trussc::TcpClientConnectEventArgs> t = lua->new_usertype<trussc::TcpClientConnectEventArgs>("TcpClientConnectEventArgs");
-        t["clientId"] = &trussc::TcpClientConnectEventArgs::clientId;
-        t["host"] = &trussc::TcpClientConnectEventArgs::host;
-        t["port"] = &trussc::TcpClientConnectEventArgs::port;
+        sol::usertype<trussc::DeviceLostEventArgs> t = lua->new_usertype<trussc::DeviceLostEventArgs>("DeviceLostEventArgs");
+        t["cancel"] = &trussc::DeviceLostEventArgs::cancel;
+        t["reason"] = &trussc::DeviceLostEventArgs::reason;
     }
-    lua->new_usertype<trussc::StrokeCap>("StrokeCap",
-        sol::meta_function::equal_to, [](trussc::StrokeCap a, trussc::StrokeCap b){ return a == b; },
-        "Butt", sol::var(trussc::StrokeCap::Butt),
-        "Round", sol::var(trussc::StrokeCap::Round),
-        "Square", sol::var(trussc::StrokeCap::Square));
-    lua->new_usertype<trussc::WritingMode>("WritingMode",
-        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
-        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
-        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
-    lua->new_usertype<trussc::Codec>("Codec",
-        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
-        "None", sol::var(trussc::Codec::None),
-        "LZ4", sol::var(trussc::Codec::LZ4));
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

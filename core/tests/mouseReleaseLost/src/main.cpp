@@ -309,10 +309,8 @@ void secondaryLeaveScenario(bool focusLoss) {
 TC_CORE_TEST_MAIN() {
     internal::pixelPerfectMode() = true; // avoid querying DPI without a native window
     setTouchAsMouse(true);
-    internal::appMousePressedFunc = [](const MouseEventArgs& e) { activeApp->handleMousePressed(e); };
-    internal::appMouseReleasedFunc = [](const MouseEventArgs& e) { activeApp->handleMouseReleased(e); };
-    internal::appMouseMovedFunc = [](const internal::MouseEventRaw& e) { activeApp->handleMouseMoved(e); };
-    internal::appMouseDraggedFunc = [](const internal::MouseEventRaw& e) { activeApp->handleMouseDragged(e); };
+    getMainThreadId();
+    internal::registerAppEventListeners([] { return activeApp; });
     // One line covers all gated move-bit scenarios, in either dispatch path.
     if (!moveBitsSupported()) printMoveBitsSkip();
     const unsigned int bits[] = {SAPP_MODIFIER_LMB, SAPP_MODIFIER_RMB, SAPP_MODIFIER_MMB};
@@ -351,9 +349,6 @@ TC_CORE_TEST_MAIN() {
 #else
     std::puts("SKIP: secondary-window dispatch (no adapter for this platform/backend)");
 #endif
-    internal::appMousePressedFunc = nullptr;
-    internal::appMouseReleasedFunc = nullptr;
-    internal::appMouseMovedFunc = nullptr;
-    internal::appMouseDraggedFunc = nullptr;
+    internal::mainWindowContext().appEventListeners.clear();
     return failures ? 1 : 0;
 }

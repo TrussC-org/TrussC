@@ -182,65 +182,72 @@ void tcxLuaGenShard_09(const std::shared_ptr<sol::state>& lua) {
         t["fromScreenPoint2D"] = sol::overload([](float screenX, float screenY) { return trussc::Ray::fromScreenPoint2D(screenX, screenY); }, [](float screenX, float screenY, float startZ) { return trussc::Ray::fromScreenPoint2D(screenX, screenY, startZ); });
     }
     {
-        sol::usertype<trussc::MouseMoveEventArgs> t = lua->new_usertype<trussc::MouseMoveEventArgs>("MouseMoveEventArgs");
-        t["alt"] = &trussc::MouseMoveEventArgs::alt;
-        t["consumed"] = &trussc::MouseMoveEventArgs::consumed;
-        t["ctrl"] = &trussc::MouseMoveEventArgs::ctrl;
-        t["delta"] = &trussc::MouseMoveEventArgs::delta;
-        t["deltaX"] = &trussc::MouseMoveEventArgs::deltaX;
-        t["deltaY"] = &trussc::MouseMoveEventArgs::deltaY;
-        t["globalDelta"] = &trussc::MouseMoveEventArgs::globalDelta;
-        t["globalPos"] = &trussc::MouseMoveEventArgs::globalPos;
-        t["pos"] = &trussc::MouseMoveEventArgs::pos;
-        t["shift"] = &trussc::MouseMoveEventArgs::shift;
-        t["super"] = &trussc::MouseMoveEventArgs::super;
-        t["x"] = &trussc::MouseMoveEventArgs::x;
-        t["y"] = &trussc::MouseMoveEventArgs::y;
-        t["syncLegacy"] = &trussc::MouseMoveEventArgs::syncLegacy;
-    }
-    lua->new_usertype<trussc::PrimitiveMode>("PrimitiveMode",
-        sol::meta_function::equal_to, [](trussc::PrimitiveMode a, trussc::PrimitiveMode b){ return a == b; },
-        "Triangles", sol::var(trussc::PrimitiveMode::Triangles),
-        "TriangleStrip", sol::var(trussc::PrimitiveMode::TriangleStrip),
-        "TriangleFan", sol::var(trussc::PrimitiveMode::TriangleFan),
-        "Lines", sol::var(trussc::PrimitiveMode::Lines),
-        "LineStrip", sol::var(trussc::PrimitiveMode::LineStrip),
-        "LineLoop", sol::var(trussc::PrimitiveMode::LineLoop),
-        "Points", sol::var(trussc::PrimitiveMode::Points));
-    lua->new_usertype<trussc::SendError>("SendError",
-        sol::meta_function::equal_to, [](trussc::SendError a, trussc::SendError b){ return a == b; },
-        "None", sol::var(trussc::SendError::None),
-        "ClientNotFound", sol::var(trussc::SendError::ClientNotFound),
-        "Disconnected", sol::var(trussc::SendError::Disconnected),
-        "Timeout", sol::var(trussc::SendError::Timeout),
-        "QueueFull", sol::var(trussc::SendError::QueueFull),
-        "NotRunning", sol::var(trussc::SendError::NotRunning));
-    {
-        sol::usertype<trussc::SerialDisconnectEventArgs> t = lua->new_usertype<trussc::SerialDisconnectEventArgs>("SerialDisconnectEventArgs");
-        t["baudRate"] = &trussc::SerialDisconnectEventArgs::baudRate;
-        t["portName"] = &trussc::SerialDisconnectEventArgs::portName;
-        t["reason"] = &trussc::SerialDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::SerialDisconnectEventArgs::wasClean;
-    }
-    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
-        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
-        "Repeat", sol::var(trussc::TextureWrap::Repeat),
-        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
-        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
-    lua->new_usertype<trussc::PointStyle>("PointStyle",
-        sol::meta_function::equal_to, [](trussc::PointStyle a, trussc::PointStyle b){ return a == b; },
-        "Square", sol::var(trussc::PointStyle::Square),
-        "Round", sol::var(trussc::PointStyle::Round),
-        "Pixel", sol::var(trussc::PointStyle::Pixel));
-    {
-        sol::usertype<trussc::ScreenshotSaveEventArgs> t = lua->new_usertype<trussc::ScreenshotSaveEventArgs>("ScreenshotSaveEventArgs");
-        t["path"] = &trussc::ScreenshotSaveEventArgs::path;
-        t["result"] = &trussc::ScreenshotSaveEventArgs::result;
+        sol::usertype<trussc::NetworkInterface> t = lua->new_usertype<trussc::NetworkInterface>("NetworkInterface");
+        t["address"] = &trussc::NetworkInterface::address;
+        t["isIPv4"] = &trussc::NetworkInterface::isIPv4;
+        t["isLoopback"] = &trussc::NetworkInterface::isLoopback;
+        t["isUp"] = &trussc::NetworkInterface::isUp;
+        t["mac"] = &trussc::NetworkInterface::mac;
+        t["name"] = &trussc::NetworkInterface::name;
+        t["netmask"] = &trussc::NetworkInterface::netmask;
+        t["getAddress"] = &trussc::NetworkInterface::getAddress;
+        t["getIsIPv4"] = &trussc::NetworkInterface::getIsIPv4;
+        t["getIsLoopback"] = &trussc::NetworkInterface::getIsLoopback;
+        t["getIsUp"] = &trussc::NetworkInterface::getIsUp;
+        t["getMac"] = &trussc::NetworkInterface::getMac;
+        t["getName"] = &trussc::NetworkInterface::getName;
+        t["getNetmask"] = &trussc::NetworkInterface::getNetmask;
     }
     {
-        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
-        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
-        t["setFps"] = &trussc::HeadlessSettings::setFps;
+        sol::usertype<trussc::BuildInfo> t = lua->new_usertype<trussc::BuildInfo>("BuildInfo");
+        t["date"] = &trussc::BuildInfo::date;
+        t["dateTime"] = &trussc::BuildInfo::dateTime;
+        t["day"] = &trussc::BuildInfo::day;
+        t["hour"] = &trussc::BuildInfo::hour;
+        t["minute"] = &trussc::BuildInfo::minute;
+        t["month"] = &trussc::BuildInfo::month;
+        t["second"] = &trussc::BuildInfo::second;
+        t["time"] = &trussc::BuildInfo::time;
+        t["timestamp"] = &trussc::BuildInfo::timestamp;
+        t["year"] = &trussc::BuildInfo::year;
+    }
+    {
+        sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
+        t["pickable"] = &trussc::CameraContext::pickable;
+        t["projection"] = &trussc::CameraContext::projection;
+        t["view"] = &trussc::CameraContext::view;
+        t["viewH"] = &trussc::CameraContext::viewH;
+        t["viewW"] = &trussc::CameraContext::viewW;
+        t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
+        t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
+    }
+    lua->new_usertype<trussc::LogLevel>("LogLevel",
+        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
+        "Verbose", sol::var(trussc::LogLevel::Verbose),
+        "Notice", sol::var(trussc::LogLevel::Notice),
+        "Warning", sol::var(trussc::LogLevel::Warning),
+        "Error", sol::var(trussc::LogLevel::Error),
+        "Fatal", sol::var(trussc::LogLevel::Fatal),
+        "Silent", sol::var(trussc::LogLevel::Silent));
+    {
+        sol::usertype<trussc::FpsSettings> t = lua->new_usertype<trussc::FpsSettings>("FpsSettings");
+        t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
+        t["drawFps"] = &trussc::FpsSettings::drawFps;
+        t["synced"] = &trussc::FpsSettings::synced;
+        t["updateFps"] = &trussc::FpsSettings::updateFps;
+    }
+    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
+        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
+        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
+        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
+    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
+        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
+        "Nearest", sol::var(trussc::TextureFilter::Nearest),
+        "Linear", sol::var(trussc::TextureFilter::Linear));
+    {
+        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
+        t["pixels"] = &trussc::GrabberFrame::pixels;
+        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
     }
 }
 #ifdef _MSC_VER

@@ -49,7 +49,7 @@ This is the one list of third-party code in TrussC and the version the build use
 | **stb_image** | 2.30, commit `1cafe0e` (fork, branch `nv/all-fixes`, + 4 TrussC patches, see [stb/README.md](../core/include/stb/README.md)) | `core/include/stb/stb_image.h` | https://github.com/nvpro-samples/stb | Public Domain or MIT | Sean Barrett |
 | **stb_image_write** | 1.16, commit `1ee679c` (+ 1 TrussC patch) | `core/include/stb/stb_image_write.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
 | **stb_perlin** | 0.5, commit `2bb4a0a` | `core/include/stb/stb_perlin.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
-| **stb_truetype** | 1.26, commit `6e9f34d` (+ 3 TrussC patches) | `core/include/stb/stb_truetype.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
+| **stb_truetype** | 1.26, commit `6e9f34d` (+ TrussC patches, including per-shape compound visit/copy budgets and CFF interpreter-instruction budgets; see [stb notes](../core/include/stb/README.md)) | `core/include/stb/stb_truetype.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
 | **stb_vorbis** | 1.22, commit `dd0c5ec` (fork, branch `stb_vorbis-sezero`, + 2 TrussC patches, see [stb/README.md](../core/include/stb/README.md)) | `core/include/stb_vorbis.c` | https://github.com/sezero/stb | Public Domain or MIT | Sean Barrett |
 | **miniaudio** | 0.11.25 (+ 2 TrussC patches, see [MINIAUDIO_TRUSSC_MODIFICATIONS.md](../core/include/MINIAUDIO_TRUSSC_MODIFICATIONS.md)) | `core/include/miniaudio.h` | https://github.com/mackron/miniaudio | Public Domain or MIT-0 | David Reid |
 | **dr_wav** | 0.14.5 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
@@ -75,14 +75,14 @@ These libraries are only included if you use the corresponding addon.
 
 | Library | Version | Pinned / vendored in | Upstream | License | Author/Organization | Addon |
 |---------|---------|----------------------|----------|---------|---------------------|-------|
-| **Dear ImGui** | 1.92.9b (+ TrussC patch, see [TRUSSC_MODIFICATIONS.md](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md)) | `addons/tcxImGui/src/imgui/` | https://github.com/ocornut/imgui | MIT | Omar Cornut | tcxImGui |
+| **Dear ImGui** | 1.92.9b (+ TrussC local ini storage/reuse and font import patches, see [TRUSSC_MODIFICATIONS.md](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md)) | `addons/tcxImGui/src/imgui/` | https://github.com/ocornut/imgui | MIT | Omar Cornut | tcxImGui |
 | **sokol_imgui.h** | not recorded | `addons/tcxImGui/src/sokol_imgui.h` | https://github.com/floooh/sokol | zlib License | Andre Weissflog | tcxImGui |
 | **mbedTLS** | 3.6.7 | `addons/tcxTls/CMakeLists.txt` | https://github.com/Mbed-TLS/mbedtls | Apache-2.0 or GPL-2.0-or-later (dual-licensed) | Arm Limited | tcxTls |
 | **libcurl** | 8.22.0 (Windows; macOS/Linux use system libcurl) | `addons/tcxCurl/CMakeLists.txt` | https://github.com/curl/curl | curl License (MIT-style) | Daniel Stenberg and contributors | tcxCurl |
 | **libremidi** | 5.4.3 | `addons/tcxMidi/CMakeLists.txt` | https://github.com/celtera/libremidi | BSD 2-Clause (parts from RtMidi: MIT) | Jean-Michaël Celerier | tcxMidi |
 | **Box2D** | 2.4.1 | `addons/tcxBox2d/CMakeLists.txt` | https://github.com/erincatto/box2d | MIT | Erin Catto | tcxBox2d |
-| **cgltf** | 1.15 | `addons/tcxGltf/CMakeLists.txt` | https://github.com/jkuhlmann/cgltf | MIT | Johannes Kuhlmann | tcxGltf |
-| **tinyobjloader** | commit `45636bd` (branch `release`, + 2 TrussC patches, see [PROVENANCE.md](../addons/tcxObj/PROVENANCE.md)) | `addons/tcxObj/src/tiny_obj_loader.h` | https://github.com/tinyobjloader/tinyobjloader | MIT | Syoyo Fujita and contributors | tcxObj |
+| **cgltf** | 1.15 (+ build-copy cleanup guard, see [PROVENANCE.md](../addons/tcxGltf/PROVENANCE.md)) | `addons/tcxGltf/CMakeLists.txt` | https://github.com/jkuhlmann/cgltf | MIT | Johannes Kuhlmann | tcxGltf |
+| **tinyobjloader** | commit `45636bd` (branch `release`, + 5 TrussC patches; stream cap removed, public signatures and retained-tag clamp preserved, see [PROVENANCE.md](../addons/tcxObj/PROVENANCE.md)) | `addons/tcxObj/src/tiny_obj_loader.h` | https://github.com/tinyobjloader/tinyobjloader | MIT | Syoyo Fujita and contributors | tcxObj |
 | **Snappy** | 1.3.1 | `addons/tcxHap/CMakeLists.txt` | https://github.com/google/snappy | BSD 3-Clause | Google Inc. | tcxHap |
 | **HAP** | commit `d847f6bbd3be88575dd4ef33a877243780e3be76` (2024-07-25) | `addons/tcxHap/CMakeLists.txt` | https://github.com/Vidvox/hap | BSD 2-Clause | Tom Butterworth, Vidvox LLC | tcxHap |
 | **bcdec** | 0.985 | `addons/tcxHap/src/impl/bcdec.h` | https://github.com/iOrange/bcdec | MIT or Public Domain (dual-licensed) | Sergii "iOrange" Kudlai | tcxHap |
@@ -338,6 +338,13 @@ THIS SOFTWARE.
 ### libremidi
 
 libremidi's own code is under the BSD 2-Clause License (Copyright (c) 2017-2023, Jean-Michaël Celerier & the libremidi contributors). It is derived from RtMidi (MIT) and ModernMidi (BSD 2-Clause). Full text: [LICENSE.md](https://github.com/celtera/libremidi/blob/master/LICENSE.md).
+
+TrussC applies local patches to 5.4.3 for bounded SysEx assembly, stray-EOX
+suppression, borrowed-byte ALSA receive, WinMM receive-loss reporting, and
+256-byte ALSA output chunks with bounded drain retries and synchronous SysEx
+pacing;
+see [LIBREMIDI_TRUSSC_MODIFICATIONS.md](../addons/tcxMidi/LIBREMIDI_TRUSSC_MODIFICATIONS.md)
+for the changes and upgrade procedure.
 
 ### curl License (libcurl)
 

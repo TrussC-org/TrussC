@@ -215,10 +215,26 @@ target_include_directories(TrussC SYSTEM PUBLIC
 # Platform-specific configuration
 # =============================================================================
 if(TC_PLATFORM_EMSCRIPTEN)
-    # Audio full loads grow to available memory. A vector probe cannot guarantee
-    # that its later allocation succeeds: retain bad_alloc catches in these TUs.
+    # Owned audio/file/buffer loads contain allocation failures. A vector probe
+    # cannot guarantee its later allocation: retain bad_alloc catches in these TUs.
+    # Resource preparation/application failures must settle even when the app
+    # itself uses Emscripten's default disabled exception catching. Graphics
+    # owning helper frames, including Pixels file storage/validation and the
+    # shared missing-file/timeout reports in tcGlobal, must also run destructors
+    # before a failure reaches the resource guard.
+    # With custom app flags disabling the propagated exception support below,
+    # Web allocation-failure recovery covers only out-of-line host code.
+    # Inline header helpers may be compiled into the app without exception
+    # support; allocation failure inside them is a known limitation.
     set_property(SOURCE ${TC_SOUND_SOURCES} platform/web/tcSound_web.cpp
+        include/tc/utils/tcResourceLoad.cpp include/tc/graphics/tcResourceLoadGraphics.cpp
+        include/tc/graphics/tcPixels.cpp
+        include/tc/app/tcGlobal.cpp
+        include/tc/utils/tcFile.cpp include/tc/utils/tcCompress.cpp
         APPEND PROPERTY COMPILE_OPTIONS -fexceptions)
+    # Document/font loaders and reflection also catch allocation failures in
+    # shared headers; compile both their callers and the framework with EH.
+    target_compile_options(TrussC PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-fexceptions>)
     target_link_options(TrussC INTERFACE -fexceptions)
     if(TC_GRAPHICS_BACKEND STREQUAL "WGPU")
         target_compile_definitions(TrussC PUBLIC SOKOL_WGPU)

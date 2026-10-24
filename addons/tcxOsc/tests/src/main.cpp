@@ -1,3 +1,4 @@
+#include "../../../../core/tests/common/tcTestFailure.h"
 // =============================================================================
 // tcxOsc tests - headless behavioral test (no window).
 //
@@ -30,8 +31,7 @@
 //   - getNextMessage() alone (no hasNewMessage()) enables the queue
 //   - a full queue drops the oldest messages and counts them in
 //     getDroppedMessageCount(); the default size (1024) takes a 150-message bundle
-//   - drops are logged from the polling calls, at most once every 2 s,
-//     summed since the last report
+//   - first loss warns automatically on the main thread, once per store
 //   - shrinking a filled queue with setBufferSize() counts and reports the
 //     discarded messages as dropped
 //
@@ -517,7 +517,11 @@ static void listenerTeardown() {
     }
 }
 
+void testStorageBounds();
+
 int main() {
+    tc::getMainThreadId();
+    testStorageBounds();
     const std::string GROUP_A = "239.77.0.1";
     const std::string GROUP_B = "239.77.0.2";
     static const int UNI_PORTS[4] = { 17110, 18110, 19110, 27110 };
@@ -992,8 +996,9 @@ int main() {
         rx.close();
     }
 
-    // ----- 9. queue overflow: drop the oldest, count, rate-limited log --------
+    // ----- 9. queue overflow: drop the oldest, count, first-loss log --------
     {
+        tc::internal::drainMainThreadQueue(); // finish reports from earlier receiver lifetimes
         // Log lines from tcxOsc, and whether each came from this (the polling) thread
         std::mutex logMtx;
         std::vector<std::string> oscLogs;
@@ -1087,7 +1092,7 @@ int main() {
             check("queue: setBufferSize(100)", rx.getBufferSize() == 100);
             got = deliverBundle();
             ids = drain();
-            const auto firstReport = std::chrono::steady_clock::now();
+            tc::internal::drainMainThreadQueue();
             check("queue: 100 of 150 kept", got && ids.size() == 100);
             check("queue: dropped == 50", got && rx.getDroppedMessageCount() == 50);
             check("queue: received + dropped == 150",
@@ -1095,34 +1100,16 @@ int main() {
             check("queue: the oldest are the ones dropped",
                   got && ids.size() == 100 && ids.front() == 50 && ids.back() == COUNT - 1);
             const std::string line = lastLog();
-            check("queue: drop logged once by the polling call", logCount() == 1);
-            check("queue: log gives the count, size and setBufferSize()",
-                  has(line, " 50 messages dropped") && has(line, "queue limit 100") &&
-                  has(line, "setBufferSize()"));
-
-            // A second overflow inside 2 s is counted but not logged yet
+            check("queue: first loss logged once automatically", logCount() == 1);
+            check("queue: log names store, limit, needed and units",
+                  has(line, "OSC polling queue") && has(line, "limit 100") &&
+                  has(line, "needed 101 messages"));
             got = deliverBundle();
             ids = drain();
-            const bool within = std::chrono::steady_clock::now() - firstReport <
-                                std::chrono::milliseconds(1500);
+            tc::internal::drainMainThreadQueue();
             check("queue: second overflow counted (total 100)",
                   got && ids.size() == 100 && rx.getDroppedMessageCount() == 100);
-            if (within) {
-                check("queue: no second log line within 2 s", logCount() == 1);
-            } else {
-                std::printf("%-56s %s\n", "queue: rate-limit check SKIPPED (delivery too slow)", "SKIP");
-                std::fflush(stdout);
-            }
-
-            // After 2 s the next polling call logs the drops summed since
-            std::this_thread::sleep_until(firstReport + std::chrono::milliseconds(2100));
-            rx.hasNewMessage();
-            const auto secondReport = std::chrono::steady_clock::now();
-            check("queue: next report after 2 s", logCount() == 2);
-            check("queue: next report sums the drops since the last",
-                  has(lastLog(), " 50 messages dropped"));
-            rx.hasNewMessage();
-            check("queue: nothing new, nothing logged", logCount() == 2);
+            check("queue: no repeat warning", logCount() == 1);
 
             // Shrinking a filled queue: the discarded messages count as dropped
             rx.setBufferSize(1024);
@@ -1131,13 +1118,11 @@ int main() {
             rx.setBufferSize(40);
             check("queue: shrink to 40 counts the 110 discarded",
                   got && rx.getDroppedMessageCount() == 210);
-            std::this_thread::sleep_until(secondReport + std::chrono::milliseconds(2100));
+            tc::internal::drainMainThreadQueue();
             ids = drain();
             check("queue: shrink keeps the newest 40",
                   got && ids.size() == 40 && ids.front() == 110 && ids.back() == COUNT - 1);
-            check("queue: the next poll reports the discarded ones",
-                  logCount() == 3 && has(lastLog(), " 110 messages dropped") &&
-                  has(lastLog(), "queue limit 40"));
+            check("queue: shrinking preserves the first-loss gate", logCount() == 1);
             // 4 bundles delivered in this section
             check("queue: received + dropped == sent over the section",
                   got && received + rx.getDroppedMessageCount() == uint64_t(4 * COUNT));
@@ -1507,7 +1492,7 @@ int main() {
               parsed.getArgCount() == 6 && OscMessageTestAccess::storedArgCount(parsed) == 0);
 
         // A message of only T tags, decoded and built
-        const size_t count = 50000;
+        const size_t count = 4096;
         bytes = rawMessage("/t", std::string(count, 'T'), {});
         parsed = OscMessage::fromBytes(bytes.data(), bytes.size(), ok);
         check("args: only T tags, decoded",
@@ -1517,6 +1502,9 @@ int main() {
         OscMessage built("/t");
         for (size_t i = 0; i < count; ++i) built.addBool(true);
         check("args: only T tags, built", built.getArgCount() == count && built.toBytes() == bytes);
+        OscMessage outbound("/outbound");
+        for (size_t i = 0; i < 50000; ++i) outbound.addBool(true);
+        check("args: app-built outbound messages still grow", outbound.getArgCount() == 50000);
         check("args: only T tags store no argument object",
               OscMessageTestAccess::storedArgCount(parsed) == 0 &&
               OscMessageTestAccess::storedArgCount(built) == 0);

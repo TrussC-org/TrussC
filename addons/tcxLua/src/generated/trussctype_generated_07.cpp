@@ -197,37 +197,34 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
         t["pushReadOnly"] = &trussc::JsonWriteReflector::pushReadOnly;
     }
     {
-        sol::usertype<trussc::ScrollEventArgs> t = lua->new_usertype<trussc::ScrollEventArgs>("ScrollEventArgs");
-        t["alt"] = &trussc::ScrollEventArgs::alt;
-        t["consumed"] = &trussc::ScrollEventArgs::consumed;
-        t["ctrl"] = &trussc::ScrollEventArgs::ctrl;
-        t["globalPos"] = &trussc::ScrollEventArgs::globalPos;
-        t["pos"] = &trussc::ScrollEventArgs::pos;
-        t["scroll"] = &trussc::ScrollEventArgs::scroll;
-        t["scrollX"] = &trussc::ScrollEventArgs::scrollX;
-        t["scrollY"] = &trussc::ScrollEventArgs::scrollY;
-        t["shift"] = &trussc::ScrollEventArgs::shift;
-        t["super"] = &trussc::ScrollEventArgs::super;
-        t["syncLegacy"] = &trussc::ScrollEventArgs::syncLegacy;
+        sol::usertype<trussc::PlayingSoundInfo> t = lua->new_usertype<trussc::PlayingSoundInfo>("PlayingSoundInfo");
+        t["duration"] = &trussc::PlayingSoundInfo::duration;
+        t["level"] = &trussc::PlayingSoundInfo::level;
+        t["loop"] = &trussc::PlayingSoundInfo::loop;
+        t["pan"] = &trussc::PlayingSoundInfo::pan;
+        t["path"] = &trussc::PlayingSoundInfo::path;
+        t["paused"] = &trussc::PlayingSoundInfo::paused;
+        t["position"] = &trussc::PlayingSoundInfo::position;
+        t["slot"] = &trussc::PlayingSoundInfo::slot;
+        t["speed"] = &trussc::PlayingSoundInfo::speed;
+        t["streaming"] = &trussc::PlayingSoundInfo::streaming;
+        t["volume"] = &trussc::PlayingSoundInfo::volume;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::LogEventArgs
-            , trussc::LogEventArgs(trussc::LogLevel, const std::string &)
-        >();
-        sol::usertype<trussc::LogEventArgs> t = lua->new_usertype<trussc::LogEventArgs>("LogEventArgs", constructors, sol::call_constructor, constructors);
-        t["level"] = &trussc::LogEventArgs::level;
-        t["message"] = &trussc::LogEventArgs::message;
-        t["timestamp"] = &trussc::LogEventArgs::timestamp;
+        sol::usertype<trussc::VideoDeviceInfo> t = lua->new_usertype<trussc::VideoDeviceInfo>("VideoDeviceInfo");
+        t["deviceId"] = &trussc::VideoDeviceInfo::deviceId;
+        t["deviceName"] = &trussc::VideoDeviceInfo::deviceName;
+        t["uniqueId"] = &trussc::VideoDeviceInfo::uniqueId;
+        t["getDeviceID"] = &trussc::VideoDeviceInfo::getDeviceID;
+        t["getDeviceName"] = &trussc::VideoDeviceInfo::getDeviceName;
+        t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
     }
-    {
-        auto constructors = tcxLuaConstructors<trussc::OnceGate
-            , trussc::OnceGate()
-            , trussc::OnceGate(double)
-        >();
-        sol::usertype<trussc::OnceGate> t = lua->new_usertype<trussc::OnceGate>("OnceGate", constructors, sol::call_constructor, constructors);
-        t["isFirstTime"] = &trussc::OnceGate::isFirstTime;
-        t["reset"] = &trussc::OnceGate::reset;
-    }
+    lua->new_usertype<trussc::ThermalState>("ThermalState",
+        sol::meta_function::equal_to, [](trussc::ThermalState a, trussc::ThermalState b){ return a == b; },
+        "Nominal", sol::var(trussc::ThermalState::Nominal),
+        "Fair", sol::var(trussc::ThermalState::Fair),
+        "Serious", sol::var(trussc::ThermalState::Serious),
+        "Critical", sol::var(trussc::ThermalState::Critical));
     {
         sol::usertype<trussc::AudioInBuffer> t = lua->new_usertype<trussc::AudioInBuffer>("AudioInBuffer");
         t["channels"] = &trussc::AudioInBuffer::channels;
@@ -235,10 +232,11 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
         t["framePosition"] = &trussc::AudioInBuffer::framePosition;
         t["sampleRate"] = &trussc::AudioInBuffer::sampleRate;
     }
-    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
-        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
-        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
-        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
+    lua->new_usertype<trussc::TcyMode>("TcyMode",
+        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
+        "Rotate", sol::var(trussc::TcyMode::Rotate),
+        "Upright", sol::var(trussc::TcyMode::Upright),
+        "Combine", sol::var(trussc::TcyMode::Combine));
     {
         sol::usertype<trussc::TcpServerReceiveEventArgs> t = lua->new_usertype<trussc::TcpServerReceiveEventArgs>("TcpServerReceiveEventArgs");
         t["clientId"] = &trussc::TcpServerReceiveEventArgs::clientId;
@@ -250,8 +248,8 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
         t["raw"] = &trussc::ConsoleEventArgs::raw;
     }
     {
-        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
-        t["count"] = &trussc::EnumLabelSpan::count;
+        sol::usertype<trussc::TcpReceiveEventArgs> t = lua->new_usertype<trussc::TcpReceiveEventArgs>("TcpReceiveEventArgs");
+        t["data"] = &trussc::TcpReceiveEventArgs::data;
     }
 }
 #ifdef _MSC_VER

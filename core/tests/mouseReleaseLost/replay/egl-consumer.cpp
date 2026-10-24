@@ -28,10 +28,8 @@ int main(int argc, char** argv) {
     app->RectNode::setSize(100, 100);
     auto probe = std::make_shared<Probe>(); app->addChild(probe);
     auto& ctx = internal::currentWindowContext(); ctx.rootNode = app;
-    internal::appMousePressedFunc = [](const MouseEventArgs& e) { app->handleMousePressed(e); };
-    internal::appMouseReleasedFunc = [](const MouseEventArgs& e) { app->handleMouseReleased(e); };
-    internal::appMouseMovedFunc = [](const internal::MouseEventRaw& e) { app->handleMouseMoved(e); };
-    internal::appMouseDraggedFunc = [](const internal::MouseEventRaw& e) { app->handleMouseDragged(e); };
+    getMainThreadId();
+    internal::registerAppEventListeners([] { return app; });
     int releases = 0, drags = 0, failures = 0;
     auto lr = events().mouseReleased.listen([&](const MouseEventArgs&) { ++releases; });
     auto ld = events().mouseDragged.listen([&](const MouseDragEventArgs&) { ++drags; });
@@ -85,8 +83,7 @@ int main(int argc, char** argv) {
     }
     check("physical UP after listener unlock releases exactly once", releases == 3 && app->releases == 3 && probe->releases == 3 && drags == 2 && app->drags == 2 && probe->drags == 2 && !isMousePressed() && ctx.grabbedNode.expired());
     std::fclose(wire);
-    internal::appMousePressedFunc = nullptr; internal::appMouseReleasedFunc = nullptr;
-    internal::appMouseMovedFunc = nullptr; internal::appMouseDraggedFunc = nullptr;
+    internal::mainWindowContext().appEventListeners.clear();
     ctx.rootNode.reset();
     app.reset();
     return failures ? 1 : 0;

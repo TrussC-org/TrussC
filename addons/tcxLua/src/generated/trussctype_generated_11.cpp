@@ -184,48 +184,53 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         "Custom14", sol::var(trussc::Cursor::Custom14),
         "Custom15", sol::var(trussc::Cursor::Custom15));
     {
-        auto constructors = tcxLuaConstructors<trussc::Logger
-            , trussc::Logger()
+        auto constructors = tcxLuaConstructors<trussc::JsonReadReflector
+            , trussc::JsonReadReflector(trussc::Json)
         >();
-        sol::usertype<trussc::Logger> t = lua->new_usertype<trussc::Logger>("Logger", constructors, sol::call_constructor, constructors);
-        t["onLog"] = &trussc::Logger::onLog;
-        t["closeFile"] = &trussc::Logger::closeFile;
-        t["getConsoleLogLevel"] = &trussc::Logger::getConsoleLogLevel;
-        t["getFileLogLevel"] = &trussc::Logger::getFileLogLevel;
-        t["getLogFilePath"] = &trussc::Logger::getLogFilePath;
-        t["getSystemLogLevel"] = &trussc::Logger::getSystemLogLevel;
-        t["isFileOpen"] = &trussc::Logger::isFileOpen;
-        t["log"] = &trussc::Logger::log;
-        t["setConsoleLogLevel"] = &trussc::Logger::setConsoleLogLevel;
-        t["setFileLogLevel"] = &trussc::Logger::setFileLogLevel;
-        t["setLogFile"] = &trussc::Logger::setLogFile;
-        t["setLogLevel"] = &trussc::Logger::setLogLevel;
-        t["setSystemLogLevel"] = &trussc::Logger::setSystemLogLevel;
+        sol::usertype<trussc::JsonReadReflector> t = lua->new_usertype<trussc::JsonReadReflector>("JsonReadReflector", constructors, sol::call_constructor, constructors);
+        t["applied"] = &trussc::JsonReadReflector::applied;
+        t["readOnly"] = &trussc::JsonReadReflector::readOnly;
+        t["skipped"] = &trussc::JsonReadReflector::skipped;
+        t["endGroup"] = &trussc::JsonReadReflector::endGroup;
+        t["isDerived"] = &trussc::JsonReadReflector::isDerived;
+        t["isReadOnly"] = &trussc::JsonReadReflector::isReadOnly;
+        t["popDerived"] = &trussc::JsonReadReflector::popDerived;
+        t["popReadOnly"] = &trussc::JsonReadReflector::popReadOnly;
+        t["pushDerived"] = &trussc::JsonReadReflector::pushDerived;
+        t["pushReadOnly"] = &trussc::JsonReadReflector::pushReadOnly;
+        t["unknownKeys"] = &trussc::JsonReadReflector::unknownKeys;
     }
-    lua->new_usertype<trussc::ChipSoundNote::Wave>("ChipSoundNoteWave",
-        sol::meta_function::equal_to, [](trussc::ChipSoundNote::Wave a, trussc::ChipSoundNote::Wave b){ return a == b; },
-        "Sin", sol::var(trussc::ChipSoundNote::Wave::Sin),
-        "Square", sol::var(trussc::ChipSoundNote::Wave::Square),
-        "Triangle", sol::var(trussc::ChipSoundNote::Wave::Triangle),
-        "Sawtooth", sol::var(trussc::ChipSoundNote::Wave::Sawtooth),
-        "Noise", sol::var(trussc::ChipSoundNote::Wave::Noise),
-        "PinkNoise", sol::var(trussc::ChipSoundNote::Wave::PinkNoise),
-        "Silent", sol::var(trussc::ChipSoundNote::Wave::Silent));
     {
-        sol::usertype<trussc::Reflector> t = lua->new_usertype<trussc::Reflector>("Reflector");
-        t["endGroup"] = &trussc::Reflector::endGroup;
-        t["isDerived"] = &trussc::Reflector::isDerived;
-        t["isReadOnly"] = &trussc::Reflector::isReadOnly;
-        t["popDerived"] = &trussc::Reflector::popDerived;
-        t["popReadOnly"] = &trussc::Reflector::popReadOnly;
-        t["pushDerived"] = &trussc::Reflector::pushDerived;
-        t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
+        sol::usertype<trussc::MouseEventArgs> t = lua->new_usertype<trussc::MouseEventArgs>("MouseEventArgs");
+        t["alt"] = &trussc::MouseEventArgs::alt;
+        t["button"] = &trussc::MouseEventArgs::button;
+        t["consumed"] = &trussc::MouseEventArgs::consumed;
+        t["ctrl"] = &trussc::MouseEventArgs::ctrl;
+        t["globalPos"] = &trussc::MouseEventArgs::globalPos;
+        t["pos"] = &trussc::MouseEventArgs::pos;
+        t["shift"] = &trussc::MouseEventArgs::shift;
+        t["super"] = &trussc::MouseEventArgs::super;
+        t["x"] = &trussc::MouseEventArgs::x;
+        t["y"] = &trussc::MouseEventArgs::y;
+        t["syncLegacy"] = &trussc::MouseEventArgs::syncLegacy;
     }
-    lua->new_usertype<trussc::StrokeMesh::JoinType>("StrokeMeshJoinType",
-        sol::meta_function::equal_to, [](trussc::StrokeMesh::JoinType a, trussc::StrokeMesh::JoinType b){ return a == b; },
-        "JOIN_MITER", sol::var(trussc::StrokeMesh::JoinType::JOIN_MITER),
-        "JOIN_ROUND", sol::var(trussc::StrokeMesh::JoinType::JOIN_ROUND),
-        "JOIN_BEVEL", sol::var(trussc::StrokeMesh::JoinType::JOIN_BEVEL));
+    {
+        sol::usertype<trussc::AudioSettings> t = lua->new_usertype<trussc::AudioSettings>("AudioSettings");
+        t["backend"] = &trussc::AudioSettings::backend;
+        t["bufferSize"] = &trussc::AudioSettings::bufferSize;
+        t["channels"] = &trussc::AudioSettings::channels;
+        t["deviceName"] = &trussc::AudioSettings::deviceName;
+        t["maxPolyphony"] = &trussc::AudioSettings::maxPolyphony;
+        t["sampleRate"] = &trussc::AudioSettings::sampleRate;
+    }
+    {
+        auto constructors = tcxLuaConstructors<trussc::EventListener
+            , trussc::EventListener()
+        >();
+        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener", constructors, sol::call_constructor, constructors);
+        t["disconnect"] = &trussc::EventListener::disconnect;
+        t["isConnected"] = &trussc::EventListener::isConnected;
+    }
     {
         auto constructors = tcxLuaConstructors<trussc::LogStream
             , trussc::LogStream(trussc::LogLevel)
@@ -233,22 +238,19 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         >();
         sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream", constructors, sol::call_constructor, constructors);
     }
-    {
-        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
-        t["accuracy"] = &trussc::Location::accuracy;
-        t["altitude"] = &trussc::Location::altitude;
-        t["latitude"] = &trussc::Location::latitude;
-        t["longitude"] = &trussc::Location::longitude;
-    }
-    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
-        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
-        "Nearest", sol::var(trussc::TextureFilter::Nearest),
-        "Linear", sol::var(trussc::TextureFilter::Linear));
-    {
-        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
-        t["pixels"] = &trussc::GrabberFrame::pixels;
-        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
-    }
+    lua->new_usertype<trussc::PointStyle>("PointStyle",
+        sol::meta_function::equal_to, [](trussc::PointStyle a, trussc::PointStyle b){ return a == b; },
+        "Square", sol::var(trussc::PointStyle::Square),
+        "Round", sol::var(trussc::PointStyle::Round),
+        "Pixel", sol::var(trussc::PointStyle::Pixel));
+    lua->new_usertype<trussc::ImageType>("ImageType",
+        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
+        "Color", sol::var(trussc::ImageType::Color),
+        "Grayscale", sol::var(trussc::ImageType::Grayscale));
+    lua->new_usertype<trussc::Deliver>("Deliver",
+        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
+        "Inline", sol::var(trussc::Deliver::Inline),
+        "Main", sol::var(trussc::Deliver::Main));
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

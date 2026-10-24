@@ -53,12 +53,21 @@ And the polling queue:
 - with the default size (1024) a 150-message bundle arrives whole, 0 dropped;
 - with `setBufferSize(100)` the same bundle keeps the newest 100: 50 dropped
   and counted in `getDroppedMessageCount()`;
-- the drop is logged from the polling call (not the receive thread), a second
-  overflow within 2 s is not logged yet, and the next report after 2 s gives
-  the drops summed since the last one;
-- shrinking a filled queue with `setBufferSize(40)` keeps the newest 40, counts
-  the 110 discarded in `getDroppedMessageCount()` and reports them in the next
-  poll's warning, so received + dropped == sent over the whole section.
+- first loss logs once on the main thread automatically, even without another poll;
+- shrinking keeps the newest whole messages and preserves the lifetime counter;
+- allocation-free preflight accepts the work boundary and rejects the next unit
+  whole across nested bundles and arguments with or without data;
+- retained-storage eviction accounts for empty arguments, blobs and queue nodes;
+- parsed addresses, string arguments and type tags at lengths 15, 16, 17, 29,
+  30 and 31 poll intact with zero drops from an empty queue; charges match the
+  copies' actual retained capacities;
+- 1024 messages with 64,000-byte blobs fit; a single over-budget copy is rejected;
+- send-only UDP sockets allocate no receive buffer; both receiving modes allocate
+  their own run's buffer without changing a retained old run.
+
+`storageBounds.cpp` drives the production parser/events and queue through private
+friend seams, without UDP timing or a display. Existing loopback tests still
+exercise the socket path.
 
 > Note: it does *not* assert that a non-member socket on a *different port* gets
 > nothing while another socket on the host has joined the group — IPv4 membership

@@ -15,6 +15,8 @@
 #include <memory>
 #include <cstring>
 #include <cmath>
+#include <array>
+#include "impl/tcxMovIndex.h"
 
 namespace tcx::hap {
 
@@ -101,10 +103,11 @@ struct MovTrack {
     // LPCM_FLAG_*)
     uint32_t lpcmFlags = 0;
 
-    // Sample table. For a PCM track whose 'stsz' gives one constant size,
+    // Read-only paged sample table; references last until another page is read.
+    // For a PCM track whose 'stsz' gives one constant size,
     // each entry is a whole chunk (pcmChunked is true; an entry holds
     // size / getPcmFrameBytes() audio frames). Otherwise one entry per sample.
-    std::vector<MovSample> samples;
+    detail::MovSamples<MovSample> samples;
     bool pcmChunked = false;
     // Audio frames in samples (when pcmChunked)
     uint64_t pcmFrameCount = 0;
@@ -248,7 +251,13 @@ public:
     MovParser(MovParser&& other) noexcept
         : file_(std::move(other.file_))
         , fileSize_(other.fileSize_)
-        , info_(std::move(other.info_)) {
+        , info_(std::move(other.info_))
+        , path_(std::move(other.path_))
+        , tableSource_(std::move(other.tableSource_)) {
+        rejectedCount_ = other.rejectedCount_;
+        warned_ = other.warned_;
+        metadataBytes_ = other.metadataBytes_;
+        residentEntries_ = other.residentEntries_;
         other.fileSize_ = 0;
     }
 
@@ -258,6 +267,12 @@ public:
             file_ = std::move(other.file_);
             fileSize_ = other.fileSize_;
             info_ = std::move(other.info_);
+            path_ = std::move(other.path_);
+            tableSource_ = std::move(other.tableSource_);
+            rejectedCount_ = other.rejectedCount_;
+            warned_ = other.warned_;
+            metadataBytes_ = other.metadataBytes_;
+            residentEntries_ = other.residentEntries_;
             other.fileSize_ = 0;
         }
         return *this;
@@ -266,16 +281,22 @@ public:
     bool open(const tc::fs::path& path) {
         close();
 
-        // Create a completely fresh fstream object (not reusing old one)
-        file_ = std::ifstream(path, std::ios::binary);
-        if (!file_.is_open()) return false;
+        try {
+            path_ = path;
+            // Create a completely fresh fstream object (not reusing old one)
+            file_ = std::ifstream(path, std::ios::binary);
+            if (!file_.is_open()) return false;
 
-        // Get file size
-        file_.seekg(0, std::ios::end);
-        fileSize_ = file_.tellg();
-        file_.seekg(0, std::ios::beg);
+            // Get file size
+            file_.seekg(0, std::ios::end);
+            fileSize_ = file_.tellg();
+            file_.seekg(0, std::ios::beg);
 
-        return parse();
+            if (parse() && !rejected_ && !allocationError_) return true;
+        } catch (const std::exception&) { allocationError_ = true; }
+        if (allocationError_) tc::logError("MovParser") << "MOV allocation failed";
+        close();
+        return false;
     }
 
     void close() {
@@ -285,6 +306,10 @@ public:
         // Reset to fresh state by assigning default-constructed object
         file_ = std::ifstream();
         info_ = MovInfo();
+        tableSource_.reset();
+        metadataBytes_ = residentEntries_ = 0;
+        rejected_ = false;
+        allocationError_ = false;
     }
 
     bool isOpen() const { return file_.is_open(); }
@@ -292,41 +317,41 @@ public:
 
     // Read sample data from file
     bool readSample(const MovTrack& track, size_t sampleIndex, std::vector<uint8_t>& data) {
+        data.clear();
         if (sampleIndex >= track.samples.size()) return false;
 
-        const auto& sample = track.samples[sampleIndex];
+        const auto sample = track.samples[sampleIndex];
+        if (!track.samples.good()) return reject("sample table read failed", false);
         // The sample must lie fully inside the file; this is checked before
         // the buffer is sized
-        // Bound (security): untrusted MOV sample sizes must fit the file to keep reads and memory bounded by input. Overflow refuses the sample read.
-        if (sample.size > fileSize_ || sample.offset > fileSize_ - sample.size) {
+        // Bound (security): untrusted MOV sample sizes must fit the file to keep reads and memory bounded by input. Overflow rejects the sample via false and is counted.
+        if (!sample.size || sample.size > detail::movFrameBytes || sample.size > fileSize_ || sample.offset > fileSize_ - sample.size) {
+            return reject("sample is empty or exceeds file range or 128 MiB frame budget", false, sample.size, detail::movFrameBytes);
+        }
+        // Bound (security): encoded frames fit 128 MiB before allocation; exact growth includes old storage in the 512 MiB player set. Overflow rejects the sample and is counted.
+        if (!detail::resizeMovBuffer(data, sample.size)) { tc::logError("MovParser") << "MOV sample allocation failed"; return false; }
+
+        if (!readCapturedSample(sample, data.data(), data.size())) {
+            data.clear();
             return false;
         }
-        data.resize(sample.size);
-
-        // Each read starts from a clear stream state
-        file_.clear();
-        file_.seekg(sample.offset);
-        file_.read(reinterpret_cast<char*>(data.data()), sample.size);
-
-        return file_.good();
+        return true;
     }
 
     // Whether a sample lies fully inside the file
     bool isSampleInFile(const MovTrack& track, size_t sampleIndex) const {
         if (sampleIndex >= track.samples.size()) return false;
-        const auto& sample = track.samples[sampleIndex];
-        return sample.size <= fileSize_ && sample.offset <= fileSize_ - sample.size;
+        const auto sample = track.samples[sampleIndex];
+        return track.samples.good() && sample.size && sample.size <= fileSize_ && sample.offset <= fileSize_ - sample.size;
     }
 
     // Read a sample into dst, which must hold the sample's size. Returns
     // false for a sample that does not lie fully inside the file.
     bool readSampleTo(const MovTrack& track, size_t sampleIndex, uint8_t* dst) {
-        if (!isSampleInFile(track, sampleIndex)) return false;
-        const auto& sample = track.samples[sampleIndex];
-        file_.clear();
-        file_.seekg(sample.offset);
-        file_.read(reinterpret_cast<char*>(dst), sample.size);
-        return file_.good();
+        if (sampleIndex >= track.samples.size()) return false;
+        const auto sample = track.samples[sampleIndex];
+        if (!track.samples.good()) return reject("sample table read failed", false);
+        return readCapturedSample(sample, dst, sample.size);
     }
 
     uint64_t getFileSize() const { return fileSize_; }
@@ -349,13 +374,47 @@ public:
     }
 
 private:
+    friend class HapPlayer;
+    friend bool loadPcmTrack(MovParser&, const MovTrack&, tc::SoundBuffer&);
+    friend struct HapBudgetTestAccess;
     std::ifstream file_;
     uint64_t fileSize_ = 0;
     MovInfo info_;
+    tc::fs::path path_;
+    std::shared_ptr<detail::MovTableSource> tableSource_;
+    const std::shared_ptr<detail::MovTableSource>& tableSource() {
+        if (!tableSource_) tableSource_ = std::make_shared<detail::MovTableSource>(path_);
+        return tableSource_;
+    }
 
     // Set while a track is parsed when one of its atoms or tables fails a
     // check; parseTrak() then does not keep the track
     bool trackDamaged_ = false;
+    bool rejected_ = false, allocationError_ = false;
+    uint64_t metadataBytes_ = 0, residentEntries_ = 0;
+    uint64_t rejectedCount_ = 0;
+    bool warned_ = false;
+    bool reject(const char* why, bool wholeFile = true, uint64_t needed = 0, uint64_t capacity = 0, const char* units = "bytes") {
+        rejected_ = rejected_ || wholeFile;
+        ++rejectedCount_;
+        if (!std::exchange(warned_, true)) {
+            auto warning = tc::logWarning("MovParser");
+            warning << "MOV input rejected: " << why;
+            if (capacity) warning << " (needed " << needed << " " << units << "; capacity " << capacity << " " << units << ")";
+        }
+        return false;
+    }
+
+    // Capture a page entry by value and check the real destination capacity:
+    // a file can change between an audio size pass and its subsequent read.
+    bool readCapturedSample(const MovSample& sample, uint8_t* dst, size_t capacity) {
+        if (!sample.size || sample.size > capacity || sample.size > fileSize_ ||
+            sample.offset > fileSize_ - sample.size) return false;
+        file_.clear();
+        file_.seekg(static_cast<std::streamoff>(sample.offset));
+        file_.read(reinterpret_cast<char*>(dst), sample.size);
+        return file_.good();
+    }
 
     // Read big-endian integers. A failed read returns 0 (the stream state
     // tells the caller that it failed).
@@ -406,15 +465,15 @@ private:
         uint32_t atomSize = readU32();
         atomType = readU32();
         if (!file_.good()) { bad = true; return false; }
-        // Bound (security): untrusted MOV atom lengths must fit the enclosing atom to bound parser reads. Overflow returns false and marks the atom invalid.
+        // Bound (security): untrusted MOV atom lengths must fit the enclosing atom to bound parser reads. Overflow returns false, marks the atom invalid and is counted by the enclosing parser.
         if (atomSize < 8 || atomSize > endPos - atomStart) { bad = true; return false; }
         atomEnd = atomStart + atomSize;
         return true;
     }
 
     void markTrackDamaged(const MovTrack& track, const char* atom, const char* what) {
-        tc::logWarning("MovParser") << "'" << atom << "' in track " << track.trackId
-                                    << ": " << what << "; track skipped";
+        (void)track; (void)atom;
+        reject(what, false);
         trackDamaged_ = true;
     }
 
@@ -453,6 +512,7 @@ private:
 
             if (atomType == ATOM_MOOV) {
                 parseMoov(atomEnd);
+                if (rejected_ || allocationError_) return false;
             }
 
             // Skip to next atom
@@ -473,14 +533,13 @@ private:
                 parseMvhd();
             } else if (atomType == ATOM_TRAK) {
                 parseTrak(atomEnd);
+                if (rejected_ || allocationError_) return;
             }
 
             file_.seekg(atomEnd);
         }
         if (bad) {
-            tc::logWarning("MovParser") << "'moov' has an atom that does not fit; "
-                                        << "parsing stopped after " << info_.tracks.size()
-                                        << " track(s)";
+            reject("moov child does not fit its parent; later tracks skipped", false);
         }
     }
 
@@ -520,11 +579,29 @@ private:
 
         if (trackDamaged_) return;
 
-        // Build sample table with timestamps
-        buildSampleTimestamps(track);
+        track.samples.setTiming(track.getDurationSeconds(), track.timescale, track.sampleRate);
 
         if (track.handlerType != 0) {
-            info_.tracks.push_back(std::move(track));
+            // Bound (security): track descriptors, stream buffers and pages share 64 MiB and 1,000,000 resident entries. Overflow rejects the file and is counted.
+            const uint64_t entries = track.samples.reservedEntries();
+            const uint64_t bytes = track.samples.reservedBytes() + 3 * sizeof(MovTrack);
+            // Include the worst in-progress track/timing pages and vector
+            // replacement; even empty derived views reserve source pages. No cap is preallocated.
+            if (residentEntries_ + entries + 1280 > 1000000) {
+                reject("reserved MOV table/sample entry capacity exceeded", true,
+                       residentEntries_ + entries + 1280, 1000000, "entries");
+                return;
+            }
+            if (metadataBytes_ + bytes + 256u * 1024 > 64u * 1024 * 1024) {
+                reject("track metadata exceeds 64 MiB including vector replacement", true,
+                       metadataBytes_ + bytes + 256u * 1024, 64u * 1024 * 1024);
+                return;
+            }
+            try {
+                info_.tracks.push_back(std::move(track));
+                metadataBytes_ += bytes;
+                residentEntries_ += entries;
+            } catch (const std::exception&) { allocationError_ = true; }
         }
     }
 
@@ -613,29 +690,26 @@ private:
     struct SampleSizes {
         uint32_t constantSize = 0;  // 0: sizes are in 'sizes'
         uint32_t count = 0;
-        std::vector<uint32_t> sizes;
+        detail::MovTable<uint32_t> sizes;
 
-        uint32_t at(size_t i) const { return constantSize ? constantSize : sizes[i]; }
     };
 
     void parseStbl(MovTrack& track, uint64_t endPos) {
         // Temporary storage for sample table data
         SampleSizes sampleSizes;
-        std::vector<uint64_t> chunkOffsets;
-        std::vector<std::pair<uint32_t, uint32_t>> sampleToChunk; // firstChunk, samplesPerChunk
-        std::vector<std::pair<uint32_t, uint32_t>> timeToSample;  // count, delta
+        detail::MovTable<uint64_t> chunkOffsets;
+        detail::MovTable<std::pair<uint32_t, uint32_t>> sampleToChunk; // firstChunk, samplesPerChunk
+        detail::MovTable<std::pair<uint32_t, uint32_t>> timeToSample;  // count, delta
 
         uint32_t atomType = 0;
         uint64_t atomEnd = 0;
         bool bad = false;
         while (readChild(endPos, atomType, atomEnd, bad)) {
             if (atomType == ATOM_STSD) {
-                parseStsd(track);
+                parseStsd(track, atomEnd);
             } else if (atomType == ATOM_STTS) {
                 if (!parseStts(timeToSample, atomEnd)) {
-                    // 'stts' is not used for timing yet, so the track is kept
-                    tc::logWarning("MovParser") << "'stts' in track " << track.trackId
-                        << ": entry count does not fit in the atom; table ignored";
+                    reject("stts count does not fit the atom; timing table ignored", false);
                     timeToSample.clear();
                     file_.clear();
                 }
@@ -667,18 +741,26 @@ private:
 
         // Build sample list
         if (!buildSamples(track, sampleSizes, chunkOffsets, sampleToChunk, timeToSample)) {
-            markTrackDamaged(track, "stsz", "sample sizes add up to more than the file size");
+            markTrackDamaged(track, "stsz", "sample layout or table read failed");
         }
     }
 
-    void parseStsd(MovTrack& track) {
+    void parseStsd(MovTrack& track, uint64_t atomEnd) {
         file_.seekg(4, std::ios::cur); // version + flags
         uint32_t entryCount = readU32();
 
+        uint64_t pos = 0;
+        // Bound (security): sample-description counts and each description fit their atom before reads. Overflow rejects the track and is counted.
+        if (!position(pos) || pos > atomEnd || entryCount > (atomEnd - pos) / 8) {
+            markTrackDamaged(track, "stsd", "description count does not fit the atom"); return;
+        }
         if (entryCount > 0) {
             uint64_t entryStart = static_cast<uint64_t>(file_.tellg());
             uint32_t entrySize = readU32();
             track.codecFourCC = readU32();
+            if (entrySize < 36 || entrySize > atomEnd - entryStart) {
+                markTrackDamaged(track, "stsd", "description does not fit the atom"); return;
+            }
 
             file_.seekg(6, std::ios::cur);  // reserved
             file_.seekg(2, std::ios::cur);  // data reference index
@@ -712,6 +794,9 @@ private:
         const uint64_t rateFixed = readU32();
         track.sampleRate = static_cast<uint32_t>((rateFixed + 0x8000) >> 16);
 
+        if ((version == 1 && entrySize < 52) || (version == 2 && entrySize < 72)) {
+            markTrackDamaged(track, "stsd", "sound description is cut off"); return;
+        }
         if (version == 1) {
             const uint32_t samplesPerPacket = readU32();
             const uint32_t bytesPerPacket = readU32();  // per channel
@@ -795,245 +880,58 @@ private:
         count = readU32();
         uint64_t pos = 0;
         if (!position(pos) || pos > atomEnd) return false;
-        // Bound (security): untrusted MOV table counts must fit the atom before allocating entries. Overflow rejects the table.
+        // Bound (security): untrusted MOV table counts must fit the atom before allocating entries. Overflow rejects the table via false and is counted by the enclosing parser.
         return count <= (atomEnd - pos) / entrySize;
     }
 
-    bool parseStts(std::vector<std::pair<uint32_t, uint32_t>>& timeToSample, uint64_t atomEnd) {
-        uint32_t entryCount = 0;
-        if (!readTableCount(atomEnd, 8, entryCount)) return false;
-
-        timeToSample.reserve(entryCount);
-        for (uint32_t i = 0; i < entryCount; i++) {
-            uint32_t count = readU32();
-            uint32_t delta = readU32();
-            timeToSample.push_back({count, delta});
-        }
-        return file_.good();
+    template<class T>
+    bool table(detail::MovTable<T>& dst, uint64_t atomEnd, uint32_t stride) {
+        uint32_t count = 0;
+        if (!readTableCount(atomEnd, stride, count)) return false;
+        const auto pos = file_.tellg();
+        return dst.open(count ? tableSource() : nullptr, uint64_t(pos), count, stride);
     }
-
-    bool parseStsc(std::vector<std::pair<uint32_t, uint32_t>>& sampleToChunk, uint64_t atomEnd) {
-        uint32_t entryCount = 0;
-        if (!readTableCount(atomEnd, 12, entryCount)) return false;
-
-        sampleToChunk.reserve(entryCount);
-        for (uint32_t i = 0; i < entryCount; i++) {
-            uint32_t firstChunk = readU32();
-            uint32_t samplesPerChunk = readU32();
-            file_.seekg(4, std::ios::cur); // sample description index
-            sampleToChunk.push_back({firstChunk, samplesPerChunk});
-        }
-        return file_.good();
-    }
-
-    bool parseStsz(SampleSizes& sampleSizes, uint64_t atomEnd) {
-        file_.seekg(4, std::ios::cur); // version + flags
-        sampleSizes.constantSize = readU32();
-        sampleSizes.count = readU32();
-        sampleSizes.sizes.clear();
+    bool parseStts(detail::MovTable<std::pair<uint32_t, uint32_t>>& dst, uint64_t end) { return table(dst, end, 8); }
+    bool parseStsc(detail::MovTable<std::pair<uint32_t, uint32_t>>& dst, uint64_t end) { return table(dst, end, 12); }
+    bool parseStco(detail::MovTable<uint64_t>& dst, uint64_t end) { return table(dst, end, 4); }
+    bool parseCo64(detail::MovTable<uint64_t>& dst, uint64_t end) { return table(dst, end, 8); }
+    bool parseStsz(SampleSizes& dst, uint64_t atomEnd) {
+        file_.seekg(4, std::ios::cur);
+        dst.constantSize = readU32();
+        dst.count = readU32();
         uint64_t pos = 0;
         if (!position(pos) || pos > atomEnd) return false;
-
-        if (sampleSizes.constantSize != 0) {
-            // Constant size: nothing more to read. The number of samples is
-            // limited by what 'stsc' / 'stco' place (see buildSamples()).
-            return true;
-        }
-
-        // Variable size samples: 4 bytes per entry
-        // Bound (security): untrusted MOV sample counts must fit the size table to bound allocation by file data. Overflow rejects the table.
-        if (sampleSizes.count > (atomEnd - pos) / 4) return false;
-        sampleSizes.sizes.reserve(sampleSizes.count);
-        for (uint32_t i = 0; i < sampleSizes.count; i++) {
-            sampleSizes.sizes.push_back(readU32());
-        }
-        return file_.good();
+        // Bound (security): size counts must fit the atom before paging; resident pages stay below 1,000,000 entries and 64 MiB. Overflow rejects the track via false and is counted.
+        if (!dst.constantSize && dst.count > (atomEnd - pos) / 4) return false;
+        return dst.constantSize || dst.sizes.open(dst.count ? tableSource() : nullptr, pos, dst.count, 4);
     }
 
-    bool parseStco(std::vector<uint64_t>& chunkOffsets, uint64_t atomEnd) {
-        uint32_t entryCount = 0;
-        if (!readTableCount(atomEnd, 4, entryCount)) return false;
-
-        chunkOffsets.reserve(entryCount);
-        for (uint32_t i = 0; i < entryCount; i++) {
-            chunkOffsets.push_back(readU32());
-        }
-        return file_.good();
-    }
-
-    bool parseCo64(std::vector<uint64_t>& chunkOffsets, uint64_t atomEnd) {
-        uint32_t entryCount = 0;
-        if (!readTableCount(atomEnd, 8, entryCount)) return false;
-
-        chunkOffsets.reserve(entryCount);
-        for (uint32_t i = 0; i < entryCount; i++) {
-            chunkOffsets.push_back(readU64());
-        }
-        return file_.good();
-    }
-
-    // Returns false when the samples that lie inside the file add up to more
-    // than the file size (samples of one track do not share bytes, so the
-    // table is inconsistent). Samples that lie past the end of the file
-    // stay in the table, so the frame count and timing are kept;
-    // readSample() returns false for them.
-    bool buildSamples(MovTrack& track,
-                      const SampleSizes& sampleSizes,
-                      const std::vector<uint64_t>& chunkOffsets,
-                      const std::vector<std::pair<uint32_t, uint32_t>>& sampleToChunk,
-                      const std::vector<std::pair<uint32_t, uint32_t>>& timeToSample) {
-
-        if (sampleSizes.count == 0 || chunkOffsets.empty() || sampleToChunk.empty()) {
-            return true;
-        }
-
-        // The sample count is at most the 'stsz' count and, when 'stts' was
-        // read, the number of samples it times (its entry counts summed). In a
-        // valid file the two are equal; 'stts' entries are bounded by its atom
-        // size, which a constant-size 'stsz' count is not.
-        // Bound (security): untrusted MOV tables must agree on available samples to bound index memory and work. Overflow stops building entries at the smallest table limit.
-        uint64_t limit = sampleSizes.count;
-        if (!timeToSample.empty()) {
+    bool buildSamples(MovTrack& track, const SampleSizes& sizes,
+                      const detail::MovTable<uint64_t>& offsets,
+                      const detail::MovTable<std::pair<uint32_t, uint32_t>>& chunks,
+                      const detail::MovTable<std::pair<uint32_t, uint32_t>>& times) {
+        uint64_t limit = sizes.count;
+        if (!times.empty()) {
             uint64_t timed = 0;
-            for (const auto& entry : timeToSample) timed += entry.first;
-            if (timed < limit) limit = timed;
-        }
-
-        // Constant-size PCM: one entry per chunk, with the same frame limit
-        // as the per-sample path.
-        const uint32_t pcmFrameBytes = track.isAudio() ? track.getPcmFrameBytes() : 0;
-        if (pcmFrameBytes > 0 && sampleSizes.constantSize != 0) {
-            return buildPcmChunks(track, pcmFrameBytes, static_cast<uint32_t>(limit),
-                                  chunkOffsets, sampleToChunk);
-        }
-
-        // First pass: how many samples the 'stsc' / 'stco' layout places,
-        // capped at the limit above
-        uint64_t placed = 0;
-        {
-            size_t stscIndex = 0;
-            for (size_t chunkIndex = 0; chunkIndex < chunkOffsets.size() &&
-                                        placed < limit; chunkIndex++) {
-                while (stscIndex + 1 < sampleToChunk.size() &&
-                       chunkIndex + 1 >= sampleToChunk[stscIndex + 1].first) {
-                    stscIndex++;
-                }
-                placed += sampleToChunk[stscIndex].second;
+            for (size_t i = 0; i < times.size(); ++i) {
+                std::pair<uint32_t, uint32_t> timing;
+                if (!times.read(i, timing)) return false;
+                timed += timing.first;
             }
-            if (placed > limit) placed = limit;
+            limit = std::min(limit, timed);
         }
-        track.samples.reserve(static_cast<size_t>(placed));
-
-        size_t sampleIndex = 0;
-        size_t stscIndex = 0;
-        uint64_t bytesInFile = 0;
-
-        for (size_t chunkIndex = 0; chunkIndex < chunkOffsets.size(); chunkIndex++) {
-            // Find samples per chunk for this chunk
-            while (stscIndex + 1 < sampleToChunk.size() &&
-                   chunkIndex + 1 >= sampleToChunk[stscIndex + 1].first) {
-                stscIndex++;
-            }
-
-            uint32_t samplesInChunk = sampleToChunk[stscIndex].second;
-            uint64_t offset = chunkOffsets[chunkIndex];
-
-            for (uint32_t i = 0; i < samplesInChunk && sampleIndex < placed; i++) {
-                MovSample sample;
-                sample.offset = offset;
-                sample.size = sampleSizes.at(sampleIndex);
-                offset += sample.size;
-
-                if (sample.size <= fileSize_ && sample.offset <= fileSize_ - sample.size) {
-                    bytesInFile += sample.size;
-                    if (bytesInFile > fileSize_) {
-                        track.samples.clear();
-                        return false;
-                    }
-                }
-
-                track.samples.push_back(sample);
-                sampleIndex++;
-            }
-        }
+        const uint32_t pcmBytes = track.isAudio() && sizes.constantSize ? track.getPcmFrameBytes() : 0;
+        track.pcmChunked = pcmBytes != 0;
+        // Bound (security): checkpoint growth must fit the remaining metadata and resident-entry budgets before allocation. Overflow rejects the file and is counted.
+        constexpr uint64_t metadataLimit = 64u * 1024 * 1024, entryLimit = 1000000;
+        const uint64_t overhead = 256u * 1024 + 3 * sizeof(MovTrack);
+        if (metadataBytes_ + overhead >= metadataLimit || residentEntries_ + 1280 >= entryLimit)
+            return reject("MOV metadata budget exhausted");
+        if (!track.samples.open(sizes.sizes, sizes.constantSize, limit, offsets, chunks, pcmBytes,
+                                fileSize_, metadataLimit - metadataBytes_ - overhead,
+                                entryLimit - residentEntries_ - 1280)) return false;
+        track.pcmFrameCount = pcmBytes ? track.samples.pcmFrames() : 0;
         return true;
-    }
-
-    // Sample table of a constant-size PCM track: one entry per chunk, sized
-    // samplesInChunk * frameBytes; a chunk larger than 4 GiB is split into
-    // several entries of whole frames ('stsz' gives the size of one frame; the
-    // frame size from the sound description is used in its place, as each
-    // 'stsz' sample is one PCM frame). At most frameCount frames are placed.
-    // Returns false when the entries inside the file add up to more than the
-    // file size.
-    bool buildPcmChunks(MovTrack& track, uint32_t frameBytes, uint32_t frameCount,
-                        const std::vector<uint64_t>& chunkOffsets,
-                        const std::vector<std::pair<uint32_t, uint32_t>>& sampleToChunk) {
-        // Bound (abi): file PCM chunk byte counts must fit each 32-bit sample entry. Overflow splits the chunk into smaller entries.
-        const uint64_t maxEntryFrames = std::max<uint64_t>(1, UINT32_MAX / frameBytes);
-        uint64_t framesLeft = frameCount;
-        uint64_t bytesInFile = 0;
-        size_t stscIndex = 0;
-
-        for (size_t chunkIndex = 0; chunkIndex < chunkOffsets.size() && framesLeft > 0;
-             chunkIndex++) {
-            while (stscIndex + 1 < sampleToChunk.size() &&
-                   chunkIndex + 1 >= sampleToChunk[stscIndex + 1].first) {
-                stscIndex++;
-            }
-            uint64_t framesInChunk = std::min<uint64_t>(sampleToChunk[stscIndex].second, framesLeft);
-            framesLeft -= framesInChunk;
-            uint64_t offset = chunkOffsets[chunkIndex];
-
-            while (framesInChunk > 0) {
-                const uint64_t frames = std::min(framesInChunk, maxEntryFrames);
-                MovSample sample;
-                sample.offset = offset;
-                sample.size = static_cast<uint32_t>(frames * frameBytes);
-                offset += sample.size;
-                framesInChunk -= frames;
-
-                if (sample.size <= fileSize_ && sample.offset <= fileSize_ - sample.size) {
-                    bytesInFile += sample.size;
-                    if (bytesInFile > fileSize_) {
-                        track.samples.clear();
-                        return false;
-                    }
-                }
-                track.samples.push_back(sample);
-                track.pcmFrameCount += frames;
-            }
-        }
-        track.pcmChunked = true;
-        return true;
-    }
-
-    void buildSampleTimestamps(MovTrack& track) {
-        if (track.samples.empty() || track.timescale == 0) return;
-
-        if (track.pcmChunked) {
-            // Chunk entries: time from the frames before each entry
-            const uint32_t frameBytes = track.getPcmFrameBytes();
-            if (frameBytes == 0 || track.sampleRate == 0) return;
-            uint64_t frames = 0;
-            for (auto& sample : track.samples) {
-                const uint64_t n = sample.size / frameBytes;
-                sample.timestamp = static_cast<double>(frames) / track.sampleRate;
-                sample.duration = static_cast<uint32_t>(
-                    static_cast<double>(n) * track.timescale / track.sampleRate);
-                frames += n;
-            }
-            return;
-        }
-
-        // For now, assume constant frame rate (simplified)
-        double frameDuration = track.getDurationSeconds() / track.samples.size();
-
-        for (size_t i = 0; i < track.samples.size(); i++) {
-            track.samples[i].timestamp = i * frameDuration;
-            track.samples[i].duration = static_cast<uint32_t>(
-                frameDuration * track.timescale);
-        }
     }
 };
 

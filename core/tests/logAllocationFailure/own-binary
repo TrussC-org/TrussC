@@ -1,0 +1,1 @@
+Replaces global operator new/delete to fail every allocation while LogStream destructors run.

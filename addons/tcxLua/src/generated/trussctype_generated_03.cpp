@@ -174,70 +174,66 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["set"] = sol::overload([](trussc::Rect& self, float x_, float y_, float w_, float h_) -> decltype(auto) { return self.set(x_, y_, w_, h_); }, [](trussc::Rect& self, const trussc::Vec2 & pos, float w_, float h_) -> decltype(auto) { return self.set(pos, w_, h_); });
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::IVec2
-            , trussc::IVec2()
-            , trussc::IVec2(int, int)
-            , trussc::IVec2(int)
-        >();
-        sol::usertype<trussc::IVec2> t = lua->new_usertype<trussc::IVec2>("IVec2", constructors, sol::call_constructor, constructors);
-        t[sol::meta_function::multiplication] = [](const trussc::IVec2& a, int b){ return a * b; };
-        t[sol::meta_function::addition] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a + b; };
-        t[sol::meta_function::subtraction] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a - b; };
-        t[sol::meta_function::unary_minus] = [](const trussc::IVec2& a){ return -a; };
-        t[sol::meta_function::equal_to] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a == b; };
-        t["x"] = &trussc::IVec2::x;
-        t["y"] = &trussc::IVec2::y;
-        t["toVec2"] = &trussc::IVec2::toVec2;
+        sol::usertype<trussc::MouseDragEventArgs> t = lua->new_usertype<trussc::MouseDragEventArgs>("MouseDragEventArgs");
+        t["alt"] = &trussc::MouseDragEventArgs::alt;
+        t["button"] = &trussc::MouseDragEventArgs::button;
+        t["consumed"] = &trussc::MouseDragEventArgs::consumed;
+        t["ctrl"] = &trussc::MouseDragEventArgs::ctrl;
+        t["delta"] = &trussc::MouseDragEventArgs::delta;
+        t["deltaX"] = &trussc::MouseDragEventArgs::deltaX;
+        t["deltaY"] = &trussc::MouseDragEventArgs::deltaY;
+        t["globalDelta"] = &trussc::MouseDragEventArgs::globalDelta;
+        t["globalPos"] = &trussc::MouseDragEventArgs::globalPos;
+        t["pos"] = &trussc::MouseDragEventArgs::pos;
+        t["shift"] = &trussc::MouseDragEventArgs::shift;
+        t["super"] = &trussc::MouseDragEventArgs::super;
+        t["x"] = &trussc::MouseDragEventArgs::x;
+        t["y"] = &trussc::MouseDragEventArgs::y;
+        t["syncLegacy"] = &trussc::MouseDragEventArgs::syncLegacy;
     }
+    lua->new_usertype<trussc::PrimitiveMode>("PrimitiveMode",
+        sol::meta_function::equal_to, [](trussc::PrimitiveMode a, trussc::PrimitiveMode b){ return a == b; },
+        "Triangles", sol::var(trussc::PrimitiveMode::Triangles),
+        "TriangleStrip", sol::var(trussc::PrimitiveMode::TriangleStrip),
+        "TriangleFan", sol::var(trussc::PrimitiveMode::TriangleFan),
+        "Lines", sol::var(trussc::PrimitiveMode::Lines),
+        "LineStrip", sol::var(trussc::PrimitiveMode::LineStrip),
+        "LineLoop", sol::var(trussc::PrimitiveMode::LineLoop),
+        "Points", sol::var(trussc::PrimitiveMode::Points));
     {
-        sol::usertype<trussc::PlayingSound> t = lua->new_usertype<trussc::PlayingSound>("PlayingSound");
-        t["buffer"] = &trussc::PlayingSound::buffer;
-        t["level"] = &trussc::PlayingSound::level;
-        t["loop"] = &trussc::PlayingSound::loop;
-        t["mixMode"] = &trussc::PlayingSound::mixMode;
-        t["pan"] = &trussc::PlayingSound::pan;
-        t["paused"] = &trussc::PlayingSound::paused;
-        t["playing"] = &trussc::PlayingSound::playing;
-        t["positionF"] = &trussc::PlayingSound::positionF;
-        t["rateRatio"] = &trussc::PlayingSound::rateRatio;
-        t["speed"] = &trussc::PlayingSound::speed;
-        t["volume"] = &trussc::PlayingSound::volume;
+        sol::usertype<trussc::SerialDeviceInfo> t = lua->new_usertype<trussc::SerialDeviceInfo>("SerialDeviceInfo");
+        t["deviceId"] = &trussc::SerialDeviceInfo::deviceId;
+        t["deviceName"] = &trussc::SerialDeviceInfo::deviceName;
+        t["devicePath"] = &trussc::SerialDeviceInfo::devicePath;
+        t["getDeviceID"] = &trussc::SerialDeviceInfo::getDeviceID;
+        t["getDeviceName"] = &trussc::SerialDeviceInfo::getDeviceName;
+        t["getDevicePath"] = &trussc::SerialDeviceInfo::getDevicePath;
     }
+    lua->new_usertype<trussc::AudioInitFailure>("AudioInitFailure",
+        sol::meta_function::equal_to, [](trussc::AudioInitFailure a, trussc::AudioInitFailure b){ return a == b; },
+        "None", sol::var(trussc::AudioInitFailure::None),
+        "NoBackend", sol::var(trussc::AudioInitFailure::NoBackend),
+        "DeviceOpen", sol::var(trussc::AudioInitFailure::DeviceOpen),
+        "DeviceStart", sol::var(trussc::AudioInitFailure::DeviceStart));
     {
-        sol::usertype<trussc::LoadResult> t = lua->new_usertype<trussc::LoadResult>("LoadResult");
-        t["error"] = &trussc::LoadResult::error;
-        t["message"] = &trussc::LoadResult::message;
-        t["ok"] = &trussc::LoadResult::ok;
-        t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
-        t["success"] = &trussc::LoadResult::success;
+        sol::usertype<trussc::TcpClientConnectEventArgs> t = lua->new_usertype<trussc::TcpClientConnectEventArgs>("TcpClientConnectEventArgs");
+        t["clientId"] = &trussc::TcpClientConnectEventArgs::clientId;
+        t["host"] = &trussc::TcpClientConnectEventArgs::host;
+        t["port"] = &trussc::TcpClientConnectEventArgs::port;
     }
-    lua->new_usertype<trussc::StrokeMesh::CapType>("StrokeMeshCapType",
-        sol::meta_function::equal_to, [](trussc::StrokeMesh::CapType a, trussc::StrokeMesh::CapType b){ return a == b; },
-        "CAP_BUTT", sol::var(trussc::StrokeMesh::CapType::CAP_BUTT),
-        "CAP_ROUND", sol::var(trussc::StrokeMesh::CapType::CAP_ROUND),
-        "CAP_SQUARE", sol::var(trussc::StrokeMesh::CapType::CAP_SQUARE));
-    {
-        sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
-        t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
-        t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
-    }
-    {
-        sol::usertype<trussc::FileDialogResult> t = lua->new_usertype<trussc::FileDialogResult>("FileDialogResult");
-        t["fileName"] = &trussc::FileDialogResult::fileName;
-        t["filePath"] = &trussc::FileDialogResult::filePath;
-        t["success"] = &trussc::FileDialogResult::success;
-    }
-    {
-        sol::usertype<trussc::VideoErrorEventArgs> t = lua->new_usertype<trussc::VideoErrorEventArgs>("VideoErrorEventArgs");
-        t["errorCode"] = &trussc::VideoErrorEventArgs::errorCode;
-        t["message"] = &trussc::VideoErrorEventArgs::message;
-    }
-    {
-        sol::usertype<trussc::TcpErrorEventArgs> t = lua->new_usertype<trussc::TcpErrorEventArgs>("TcpErrorEventArgs");
-        t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
-        t["message"] = &trussc::TcpErrorEventArgs::message;
-    }
+    lua->new_usertype<trussc::StrokeCap>("StrokeCap",
+        sol::meta_function::equal_to, [](trussc::StrokeCap a, trussc::StrokeCap b){ return a == b; },
+        "Butt", sol::var(trussc::StrokeCap::Butt),
+        "Round", sol::var(trussc::StrokeCap::Round),
+        "Square", sol::var(trussc::StrokeCap::Square));
+    lua->new_usertype<trussc::WritingMode>("WritingMode",
+        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
+        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
+        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
+    lua->new_usertype<trussc::Codec>("Codec",
+        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
+        "None", sol::var(trussc::Codec::None),
+        "LZ4", sol::var(trussc::Codec::LZ4));
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

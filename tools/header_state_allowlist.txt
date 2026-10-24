@@ -51,9 +51,6 @@ core/include/TrussC.h trussc::internal::updateFrameCount       # host-only: adva
 core/include/TrussC.h trussc::internal::frameReentryGuard      # host-only: _frame_cb
 
 # --- TrussC.h: input / launcher wiring
-core/include/TrussC.h trussc::internal::touchPressedListener   # host-only: installed by the launcher
-core/include/TrussC.h trussc::internal::touchMovedListener     # host-only: installed by the launcher
-core/include/TrussC.h trussc::internal::touchReleasedListener  # host-only: installed by the launcher
 core/include/TrussC.h trussc::internal::screenshotAfterFrameListener  # host-only: installed in _setup_cb
 core/include/TrussC.h trussc::internal::appInstance            # host-only: not referenced by any code
 core/include/TrussC.h trussc::internal::currentMouseButton     # host-only: sokol event callback
@@ -61,15 +58,7 @@ core/include/TrussC.h trussc::internal::appSetupFunc           # host-only: set 
 core/include/TrussC.h trussc::internal::appUpdateFunc          # host-only: as appSetupFunc
 core/include/TrussC.h trussc::internal::appDrawFunc            # host-only: as appSetupFunc
 core/include/TrussC.h trussc::internal::appCleanupFunc         # host-only: as appSetupFunc
-core/include/TrussC.h trussc::internal::appKeyPressedFunc      # host-only: as appSetupFunc; the MCP control tools that inject through it are defined in tcStandardTools.cpp (host code) for this reason
-core/include/TrussC.h trussc::internal::appKeyReleasedFunc     # host-only: as appKeyPressedFunc
-core/include/TrussC.h trussc::internal::appMousePressedFunc    # host-only: as appKeyPressedFunc
-core/include/TrussC.h trussc::internal::appMouseReleasedFunc   # host-only: as appKeyPressedFunc
-core/include/TrussC.h trussc::internal::appMouseMovedFunc      # host-only: as appKeyPressedFunc
-core/include/TrussC.h trussc::internal::appMouseDraggedFunc    # host-only: as appKeyPressedFunc
-core/include/TrussC.h trussc::internal::appMouseScrolledFunc   # host-only: as appKeyPressedFunc
 core/include/TrussC.h trussc::internal::appWindowResizedFunc   # host-only: as appSetupFunc
-core/include/TrussC.h trussc::internal::appFilesDroppedFunc    # host-only: as appSetupFunc
 core/include/TrussC.h trussc::buildAppDescriptor::app          # host-only: runApp's App; a hot reload build launches through runHotReloadApp instead
 core/include/TrussC.h trussc::internal::g_androidDesc          # no-hot-reload: Android only
 core/include/TrussC.h trussc::internal::consoleCPBeforeRun  # host-only: saved by ConsoleCPCtrlGuard around sapp_run() in runApp / the hot reload host, read by its control and exit handlers
