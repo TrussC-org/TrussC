@@ -54,8 +54,22 @@ void windowTickImpl(sapp_window swin, void* user) {
     if (!win || !win->isOpen()) return;
     // Frame boundary: a setApp() requested before or during this tick is
     // applied when the scope is entered and left, never inside the tick.
-    internal::WindowDispatchScope scope(*win);
     auto& ctx = win->context();
+
+    // Native gates still forbid drawable acquisition/presentation. Deliver the
+    // update decision to the same policy as visible ticks before size admission.
+    if (sapp_window_occluded(swin)) {
+        auto* previous = internal::currentWindowCtx();
+        internal::currentWindowCtx() = &ctx;
+        struct Restore { internal::WindowContext* previous;
+            ~Restore() { internal::currentWindowCtx() = previous; }
+        } restore{previous};
+        internal::runWindowTick(std::chrono::steady_clock::now(),
+            sapp_window_frame_duration(swin), false, nullptr, true);
+        return;
+    }
+
+    internal::WindowDispatchScope scope(*win);
 
     const int fbw = sapp_window_framebuffer_width(swin);
     const int fbh = sapp_window_framebuffer_height(swin);

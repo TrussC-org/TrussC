@@ -1405,7 +1405,7 @@ ResizeEventArgs framebufferResizeArgs(int width, int height, float dpi) {
 uint64_t deviceFrameCount() { return sapp_frame_count(); }
 
 // Single occlusion policy for all windows. Desktop secondary native sources
-// retain their HEAD admission gates (including macOS occlusion). Main keeps
+// deliver gated callbacks here before drawable admission. Main keeps
 // updating on every supplied tick, independently of its visibility snapshot.
 static bool occlusionPausesUpdate(const WindowContext& ctx) { return !ctx.isMain; }
 
@@ -1440,7 +1440,7 @@ void observeWindowVisibility(WindowContext& ctx, sapp_event_type type) {
 }
 
 bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDuration,
-                   bool forceDraw, const WindowTickPresentation* presentation) {
+                   bool forceDraw, const WindowTickPresentation* presentation, bool nativeDrawGated) {
     auto& ctx = currentWindowContext();
     if (ctx.tickActive) return false; // modal/native callback reentry
     ctx.tickActive = true;
@@ -1450,13 +1450,17 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     ctx.frameUptime = now - clockOrigin();
     ctx.frameUptimeSampled = true;
     auto* window = currentWindow();
-    const bool hidden = ctx.suspended || (window && window->isOccluded());
+    const bool hidden = nativeDrawGated || ctx.suspended || (window && window->isOccluded());
     // Preserve the existing capture override even while main is hidden.
     const bool capturePending = forceDraw || !ctx.pendingScreenshotPaths.empty()
         || !ctx.asyncScreenshots.pending.empty();
     const auto nonPresentingExit = [&] {
         // Prelude callbacks can upload or render FBOs even without a draw.
-        if (!presentation && tc_internal_gpu_frame_has_work()) endGpuFrame();
+        // Native gates have not activated this window's GPU context. In
+        // particular, a nested gated callback must not commit foreign work.
+        if (!nativeDrawGated) {
+            if (!presentation && tc_internal_gpu_frame_has_work()) endGpuFrame();
+        }
 #ifndef __EMSCRIPTEN__
         // Expiry does not require a frame. Keep producers queued for a safe
         // readback after a later admitted frame, until their existing deadline.
@@ -1466,7 +1470,7 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
         return false;
     };
     const bool updateHidden = hidden && (occlusionPausesUpdate(ctx) || nativeSuspensionPausesUpdate());
-    const bool paused = updateHidden && !capturePending;
+    const bool paused = updateHidden && (nativeDrawGated || !capturePending);
     if (paused || (!hidden && ctx.visibilityPaused)
         || (updateHidden && (!ctx.visibilityPaused || !ctx.mainUpdateCallTimeInitialized))) {
         ctx.loop.lastUpdateTimeInitialized = false;
@@ -1480,6 +1484,12 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     if (paused) return nonPresentingExit();
     const auto updatesBefore = ctx.updateCount;
     if (!ctx.loop.updateSyncedToDraw) runIndependentUpdates(now);
+    if (nativeDrawGated) {
+        // The native gate forbids all rendering, including forced captures.
+        // A future secondary policy change can run updates on delivered ticks.
+        if (ctx.loop.updateSyncedToDraw) runSyncedUpdate();
+        return nonPresentingExit();
+    }
     const bool shouldDraw = mainLoopShouldDraw(now) || capturePending;
     // Hidden main retains HEAD's drawing at its native paced tick source;
     // EVENT_DRIVEN / fixed-rate skips still take the upload-only boundary.

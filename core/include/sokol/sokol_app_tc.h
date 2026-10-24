@@ -66,9 +66,9 @@
         occlusion gate guards drawable acquisition. The `[CAMetalLayer
         nextDrawable]` ~1s stall that killed PR #437 cannot occur, because
         the acquiring code path is only ever entered for a visible window.
-        An occluded window simply stops ticking (fps 0) and resumes on
-        un-occlusion; SAPP_EVENTTYPE_SUSPENDED / _RESUMED are sent at the
-        transitions.
+        Delivered gated callbacks defer the update decision to TrussC without
+        acquiring a drawable. The secondary display link still suspends while
+        occluded; SAPP_EVENTTYPE_SUSPENDED / _RESUMED mark the transitions.
       - Windows on displays with different refresh rates each tick at their
         own display's rate. Tick coalescing is depth-1 per window by
         construction (the run loop is the queue and a display link never
@@ -2430,7 +2430,7 @@ typedef struct sapp_window_desc {
                                    (Windows: unused; the shared D3D11 device is owned here) */
 
     /* callbacks -- all invoked on the main thread */
-    void (*tick_cb)(sapp_window win, void* user);   /* this window's vsync; only while visible */
+    void (*tick_cb)(sapp_window win, void* user);   /* native tick; occluded callbacks are update-only */
     void (*event_cb)(const sapp_event* ev, sapp_window win, void* user);
     void (*close_cb)(sapp_window win, void* user);  /* user closed the window; call sapp_destroy_window() to accept */
     void* user_data;
@@ -2452,9 +2452,9 @@ SOKOL_APP_API_DECL int sapp_window_framebuffer_width(sapp_window win);   /* pixe
 SOKOL_APP_API_DECL int sapp_window_framebuffer_height(sapp_window win);
 SOKOL_APP_API_DECL float sapp_window_dpi_scale(sapp_window win);         /* fb / logical, ONE source */
 SOKOL_APP_API_DECL int sapp_window_sample_count(sapp_window win);
-/* true while this window skips its tick_cb because the OS reports it as not
-   visible -- the same flags that gate the tick, so "true" means "renders no
-   frames right now":
+/* Native visibility flags used by drawable admission. Secondary gated
+   callbacks consult TrussC's update policy without acquiring a drawable:
+
      macOS: occlusionState is not visible (minimized, fully covered, on
             another Space), kept current by windowDidChangeOcclusionState
      Win32: minimized (WM_SIZE SIZE_MINIMIZED), or the last Present returned
@@ -3165,7 +3165,13 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
        structurally impossible: the acquiring code below only runs for a
        provably visible window. (The display link also auto-suspends for
        occluded views; this gate covers the transition race.) */
-    if (_sapp_tc_update_occluded(w)) return;
+    if (_sapp_tc_update_occluded(w)) {
+        if (w->desc.tick_cb) {
+            sapp_window handle = { w->win_id };
+            w->desc.tick_cb(handle, w->desc.user_data);
+        }
+        return;
+    }
 
     /* measured tick interval (the display's refresh period) */
     if (w->last_tick_time > 0.0) {
@@ -7298,6 +7304,10 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
     } else {
         /* secondary window */
         if (w->iconified) {
+            if (w->desc.tick_cb) {
+                sapp_window handle = { w->win_id };
+                w->desc.tick_cb(handle, w->desc.user_data);
+            }
             _sapp_tc_win32_pace(w, w->refresh_period);
             return;
         }
@@ -7307,6 +7317,10 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
             const HRESULT hr = w->swap_chain->Present(0, DXGI_PRESENT_TEST);
             if (_sapp_tc_d3d11_check_device_loss(hr)) return;
             if (hr == DXGI_STATUS_OCCLUDED) {
+                if (w->desc.tick_cb) {
+                    sapp_window handle = { w->win_id };
+                    w->desc.tick_cb(handle, w->desc.user_data);
+                }
                 _sapp_tc_win32_pace(w, w->refresh_period);
                 return;
             }
@@ -11038,6 +11052,10 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
            serialize the loop to refresh/N), timer-paced to the measured
            refresh estimate */
         if (w->iconified || w->occluded) {
+            if (w->desc.tick_cb) {
+                sapp_window handle = { w->win_id };
+                w->desc.tick_cb(handle, w->desc.user_data);
+            }
             _sapp_tc_x11_pace(w, _sapp_tc.refresh_period);
             return;
         }
@@ -15284,6 +15302,7 @@ _SOKOL_PRIVATE void _sapp_tc_linux_frame(void) {
                     const double remaining = period - (_sapp_tc_timestamp_now(&_sapp_tc.timing.timestamp) - frame_start);
                     if (remaining <= 0.0) break;
                     const double millis = ceil(remaining * 1000.0);
+                    // Bound (representation): poll accepts a signed int timeout in milliseconds.
                     const int timeout = (millis < (double)INT_MAX) ? (int)millis : INT_MAX;
                     const int result = poll(&input, 1, timeout);
                     if (result > 0 || (result < 0 && errno != EINTR)) break;

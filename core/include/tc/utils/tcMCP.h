@@ -308,6 +308,7 @@ struct DeferredResponse {
 // A deferral whose window renders no frame in this time (minimized,
 // hidden, throttled very low, closed) is answered with an error instead of
 // leaving the HTTP worker blocked.
+// Bound (liveness): expire a targeted capture after five seconds without an available frame.
 inline constexpr std::chrono::seconds kTargetedDeferralTimeout{5};
 
 struct DeferralState {

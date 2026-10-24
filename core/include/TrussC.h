@@ -1197,7 +1197,7 @@ inline void getBitmapStringBounds(const std::string& text, float& width, float& 
 //
 // The image is created with `usage.dynamic_update = true` so sg_update_image
 // is allowed.
-uint64_t getFrameCount();  // forward decl — defined in Time section below
+uint64_t getFrameCount(); // forward declaration; public update counter
 inline void ensureFontAtlas(int rows) {
     if (rows <= 0) return;
     auto& atlas = internal::bitmapFontAtlas();
@@ -1233,12 +1233,9 @@ inline void ensureFontAtlas(int rows) {
     // stale atlas.version makes us try again on the next call.
     // (When size changes we destroy + create a brand-new image below, so the
     // guard only applies to the same-dimensions in-place path.)
-    // Keyed on the per-window getFrameCount() (Fix 3): the guard only needs to
-    // block a second update WITHIN one tick, and each window's tick does its
-    // own sg_commit, so a per-window counter is sufficient (a rare coincidental
-    // counter match across windows just defers one tick — never a double
-    // update). The main window is bit-identical to before.
-    if (sizeOk && atlas.uploadFrame == getFrameCount()) return;
+    // The atlas is device-shared. Match Sokol's GPU commit boundary, including
+    // upload-only ticks and commits from windows with independent draw rates.
+    if (sizeOk && atlas.uploadFrame == internal::shaderStreamFrame()) return;
 
     // Regenerate pixel buffer. Use the LARGER of `rows` and the currently
     // allocated rows so a same-size in-place update stays the same size.
@@ -1255,7 +1252,7 @@ inline void ensureFontAtlas(int rows) {
         data.mip_levels[0].ptr  = pixels;
         data.mip_levels[0].size = dataBytes;
         sg_update_image(atlas.texture, &data);
-        atlas.uploadFrame = getFrameCount();
+        atlas.uploadFrame = internal::shaderStreamFrame();
     } else {
         // Size changed (or first allocation). Recreate the image. The old
         // image/view are destroyed deferred — sokol_gl commands recorded
@@ -1280,7 +1277,7 @@ inline void ensureFontAtlas(int rows) {
         data.mip_levels[0].ptr  = pixels;
         data.mip_levels[0].size = dataBytes;
         sg_update_image(atlas.texture, &data);
-        atlas.uploadFrame = getFrameCount();
+        atlas.uploadFrame = internal::shaderStreamFrame();
 
         sg_view_desc view_desc = {};
         view_desc.texture.image = atlas.texture;

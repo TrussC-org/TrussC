@@ -40,6 +40,26 @@ bool tick(Window& window, double seconds, bool force = false) {
     internal::currentWindowCtx() = previous;
     return result;
 }
+void nativeGatedTicks(Window& window) {
+    auto* previous = internal::currentWindowCtx();
+    auto& ctx = window.context();
+    internal::currentWindowCtx() = &ctx;
+    const auto updates = ctx.updateCount, draws = ctx.drawCount;
+    ctx.loop = {};
+    setFps(VSYNC);
+    internal::runWindowTick(at(0), .25, false, &fakePresentation, true);
+    internal::runWindowTick(at(1), .25, true, &fakePresentation, true);
+    check("native gated callback retains secondary pause including capture",
+        ctx.isMain || ctx.updateCount == updates);
+    check("native gate keeps main decision B", !ctx.isMain || ctx.updateCount == updates + 2);
+    check("native gate never completes a draw", ctx.drawCount == draws);
+    // Leave the regular fixture's counters and phase untouched.
+    ctx.updateCount = updates; ctx.drawCount = draws;
+    ctx.visibilityPaused = false; ctx.mainUpdateCallTimeInitialized = false;
+    ctx.rateIndex = ctx.rateCount = 0;
+    ctx.frameUptimeSampled = false; ctx.tickDuration = 0;
+    internal::currentWindowCtx() = previous;
+}
 void exercise(Window& window) {
     auto* previous = internal::currentWindowCtx();
     auto& ctx = window.context();
@@ -465,11 +485,13 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     auto& main = *internal::mainWindow();
     internal::WindowRequestAccess::openMain(main);
     internal::windowClockForTests() = readFakeClock;
+    nativeGatedTicks(main);
     exercise(main);
     hiddenInterval(main);
     const auto mainLoop = main.context().loop;
     {
         Secondary second;
+        nativeGatedTicks(second);
         exercise(second);
         check("secondary APIs leave main scheduler alone", main.context().loop.updateTargetFps == mainLoop.updateTargetFps && main.context().loop.redrawCount == mainLoop.redrawCount);
     }

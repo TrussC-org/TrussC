@@ -355,7 +355,7 @@ struct WindowTickPresentation {
 };
 void observeWindowVisibility(WindowContext& ctx, sapp_event_type type);
 bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDuration,
-                   bool forceDraw = false, const WindowTickPresentation* presentation = nullptr);
+                   bool forceDraw = false, const WindowTickPresentation* presentation = nullptr, bool nativeDrawGated = false);
 
 // ---------------------------------------------------------------------------
 // Active render-target pipeline helpers (moved from tcRenderTarget.h — they

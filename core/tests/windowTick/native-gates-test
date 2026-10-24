@@ -1,0 +1,58 @@
+#!/bin/sh
+# Compile the four production secondary gate bodies with native types stubbed.
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/tc-native-gates.XXXXXX")
+trap 'rm -rf "$scratch"' EXIT HUP INT TERM
+python3 - "$root" "$scratch" <<'PY'
+from pathlib import Path
+import sys, subprocess
+root, scratch = map(Path,sys.argv[1:])
+native = (root/'core/include/sokol/sokol_app_tc.h').read_text()
+common = (root/'core/include/tc/app/tcGlobal.cpp').read_text()
+def body(text, marker):
+    start = text.index(marker); opening = text.index('{',start); depth = 1; end = opening+1
+    while depth:
+        depth += (text[end]=='{') - (text[end]=='}'); end += 1
+    return text[start:end]
+policy = body(common, 'static bool occlusionPausesUpdate(')
+markers = ['if (_sapp_tc_update_occluded(w)) {',
+    'if (w->iconified) {\n            if (w->desc.tick_cb)',
+    'if (hr == DXGI_STATUS_OCCLUDED) {\n                if (w->desc.tick_cb)',
+    'if (w->iconified || w->occluded) {']
+code = '''#include <cstdio>
+struct WindowContext { bool isMain; };
+''' + policy + '''
+struct sapp_window { unsigned id; };
+int consulted=0, updates=0, acquired=0;
+void callback(sapp_window, void*) { ++consulted; if (!occlusionPausesUpdate(WindowContext{false})) ++updates; }
+struct Native { bool iconified=true, occluded=true; unsigned win_id=1;
+ struct { void (*tick_cb)(sapp_window,void*)=callback; void* user_data=nullptr; } desc;
+ double refresh_period=.017;
+};
+struct { double refresh_period=.017; } _sapp_tc;
+void _sapp_tc_win32_pace(Native*,double) {}
+void _sapp_tc_x11_pace(Native*,double) {}
+bool _sapp_tc_update_occluded(Native*) { return true; }
+const int DXGI_STATUS_OCCLUDED=1;
+'''
+for n,marker in enumerate(markers):
+    code += f'void gate{n}(Native* w) {{ int hr=1; '+body(native,marker)+' ++acquired; }\n'
+code += '''int main() { Native w;
+ gate0(&w); gate1(&w); gate2(&w); gate3(&w);
+ bool ok=consulted==4 && updates==0 && acquired==0 && !occlusionPausesUpdate(WindowContext{true});
+ printf("native-gates: all four gates consult policy, retain secondary pause and gate drawables: %s\\n",ok?"PASS":"FAIL");
+ return ok?0:1;
+}
+'''
+# Verify that the actual desktop callback adapters take the update-only branch
+# before framebuffer-size/drawable admission, then run the shared tick with it.
+for adapter in ['mac/tcWindowMac.mm','win/tcWindowWin.cpp','linux/tcWindowLinux.cpp']:
+    text=(root/'core/platform'/adapter).read_text().split('void windowTickImpl',1)[1]
+    gate=body(text, 'if (sapp_window_occluded(swin)) {')
+    assert 'false, nullptr, true)' in gate and 'internal::runWindowTick(' in gate
+    assert text.index('if (sapp_window_occluded(swin))') < text.index('if (fbw <= 0')
+source=scratch/'probe.cpp';source.write_text(code)
+subprocess.run(['c++','-std=c++20',str(source),'-o',str(scratch/'probe')],check=True)
+subprocess.run([str(scratch/'probe')],check=True)
+PY
