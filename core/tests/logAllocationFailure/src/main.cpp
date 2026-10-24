@@ -26,6 +26,11 @@ void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 
 using namespace tc;
 namespace {
+// Stand-ins need only report isOpen(); cleanup never calls platform code.
+struct OpenWindow : Window {
+    OpenWindow() { native_ = this; }
+    ~OpenWindow() { native_ = nullptr; }
+};
 int failures = 0;
 void check(bool ok, const char* what) {
     std::printf("%s: %s\n", what, ok ? "PASS" : "FAIL");
@@ -35,6 +40,33 @@ void check(bool ok, const char* what) {
 TC_CORE_TEST_MAIN() {
     // Reaching std::terminate is the failure this test guards against.
     std::set_terminate([] { std::fputs("FAIL: std::terminate reached\n", stdout); std::fflush(stdout); std::_Exit(1); });
+    {
+        OpenWindow first, second;
+        Window closed;
+        auto& main = internal::mainWindowContext();
+        auto material = std::make_unique<Material>();
+        auto environment = std::make_unique<Environment>();
+        auto light = std::make_unique<Light>();
+        Light survivor;
+        for (auto* context : {&main, &first.context(), &second.context(), &closed.context()}) {
+            context->currentMaterial = material.get();
+            context->currentEnvironment = environment.get();
+            context->activeLights = {light.get(), &survivor, light.get()};
+        }
+        failedAllocations = 0;
+        failAll = true;
+        material.reset();
+        environment.reset();
+        light.reset();
+        failAll = false;
+        bool cleared = failedAllocations == 0;
+        for (auto* context : {&main, &first.context(), &second.context(), &closed.context()}) {
+            cleared &= !context->currentMaterial && !context->currentEnvironment &&
+                context->activeLights.size() == 1 && context->activeLights.front() == &survivor;
+            context->activeLights.clear();
+        }
+        check(cleared, "lighting destructors clear main, two open and closed contexts without allocation");
+    }
     std::string seen;
     auto keep = getLogger().onLog.listen([&](LogEventArgs& e) { if (!failAll) seen = e.message; });
 

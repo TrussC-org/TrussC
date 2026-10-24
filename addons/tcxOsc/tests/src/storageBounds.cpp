@@ -218,6 +218,7 @@ struct RoundedStringStorage {
         return result;
     }
     static size_t copyStorage(const std::string& value) {
+        if (!value.empty() && value.front() == '?') throw std::bad_alloc();
         return tc::internal::copiedStringStorage(value);
     }
     static size_t retainedStorage(const std::string& value) {
@@ -235,6 +236,11 @@ void roundedCopyAdmission() {
     queue.enqueue(std::string(31, '!'));
     require(queue.messageCount() == 1 && queue.getDroppedMessageCount() == 1 &&
             queue.retainedBytes() == retained, "actual over-budget capacity rejects whole without eviction");
+    bool escaped = false;
+    try { queue.enqueue(std::string(31, '?')); }
+    catch (...) { escaped = true; }
+    require(!escaped && queue.messageCount() == 1 && queue.getDroppedMessageCount() == 2 &&
+            queue.retainedBytes() == retained, "measurement failure counts one drop without eviction");
     std::string out;
     require(queue.getNextMessage(out) && out == value &&
             retained == queue.copyCharge(std::string{}) + RoundedStringStorage::retainedStorage(out) &&
@@ -337,6 +343,15 @@ void polling() {
     require(!copied, "over-budget message rejected before allocating a queue copy");
     require(queue.messageCount() == 1024 && receiver.getDroppedMessageCount() == keep + 9,
             "single over-budget copy rejected before evicting existing messages");
+    copied = false;
+    const size_t retainedBeforeFailure = queue.retainedBytes();
+    rejectAllocations = true;
+    try { queue.enqueue(blob); }
+    catch (...) { copied = true; }
+    rejectAllocations = false;
+    require(!copied && queue.messageCount() == 1024 && queue.retainedBytes() == retainedBeforeFailure &&
+            receiver.getDroppedMessageCount() == keep + 10,
+            "polling measurement/copy exhaustion counts one drop and preserves queued messages");
     OscMessage out;
     require(receiver.getNextMessage(out) && out.getAddress() == "/blob" && out.getArgAsBlob(0).size() == 64000,
             "whole queued message remains readable");
