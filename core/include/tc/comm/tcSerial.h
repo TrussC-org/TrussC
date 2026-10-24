@@ -261,6 +261,11 @@ namespace internal {
     private:
         std::vector<std::pair<LogLevel, std::string>> lines_;
     };
+    // Internal integration-test seam, stored in tcSerial.cpp. Zero restores
+    // the production default; only subsequently created connections use it.
+    size_t serialRxCapacityForTesting();
+    void setSerialRxCapacityForTesting(size_t bytes);
+
     // Receive state of one connection, shared by its worker, its Serial and a
     // queued warning delivery. The worker appends with buffer.mutex held;
     // when that captures a warning it posts the preallocated main-thread
@@ -271,7 +276,8 @@ namespace internal {
     struct SerialRxState : MainThreadSlot, std::enable_shared_from_this<SerialRxState> {
         SerialRxBuffer buffer;
 
-        SerialRxState() : MainThreadSlot(&deliver) {}
+        SerialRxState() : MainThreadSlot(&deliver),
+                          buffer(std::malloc, serialRxCapacityForTesting()) {}
 
         // Worker, with buffer.mutex held.
         void append(const uint8_t* data, size_t length) noexcept {
@@ -291,11 +297,11 @@ namespace internal {
             }
             if (warning.backlog) {
                 logWarning() << "Serial: RX buffer exceeds 1 MiB; app is falling behind; buffered bytes: "
-                             << warning.buffered << "; capacity bytes: " << SerialRxBuffer::capacity;
+                             << warning.buffered << "; capacity bytes: " << self.buffer.capacityBytes();
             }
             if (warning.loss) {
                 logWarning() << "Serial: RX buffer overflow or allocation failure, dropping data; capacity bytes: "
-                             << SerialRxBuffer::capacity << "; needed bytes: " << warning.needed
+                             << self.buffer.capacityBytes() << "; needed bytes: " << warning.needed
                              << "; total dropped bytes: " << warning.dropped
                              << (warning.allocationFailed ? "; receive allocation failed" : "; dropping oldest bytes");
             }
