@@ -7,7 +7,9 @@
 patch utility or Python required). It checks all three original/patched SHA256
 hashes before writing. Unknown input or output fails configuration. A second,
 read-only check after FetchContent covers source overrides, previously populated
-sources and shared FetchContent caches. For an offline override, patch a private
+sources and shared FetchContent caches. Output is explicitly LF on every host,
+including CRLF script checkouts, while CRLF source files remain unknown input
+and are rejected before any write. For an offline override, patch a private
 copy explicitly before configuring:
 
 ```sh

@@ -1,5 +1,9 @@
 # Local patch for the SHA-pinned libremidi 5.4.3. No git or patch executable needed.
 # All input hashes are checked before any write; VERIFY_ONLY never modifies sources.
+# file(WRITE) uses native text mode, producing CRLF on Windows. CONFIGURE with
+# NEWLINE_STYLE UNIX writes LF in binary mode (available since CMake 3.18).
+# @ONLY preserves ${...}; these hash-pinned sources contain no @VAR@ references
+# or #cmakedefine directives that CONFIGURE could expand.
 cmake_minimum_required(VERSION 3.20)
 if(NOT DEFINED LIBREMIDI_SOURCE_DIR)
     message(FATAL_ERROR "LIBREMIDI_SOURCE_DIR is required")
@@ -499,7 +503,7 @@ private:
     if(NOT result STREQUAL patched0)
         message(FATAL_ERROR "libremidi patch result mismatch: ${path0}")
     endif()
-    file(WRITE "${path0}" "${contents}")
+    file(CONFIGURE OUTPUT "${path0}" CONTENT "${contents}" @ONLY NEWLINE_STYLE UNIX)
 endif()
 if(hash1 STREQUAL original1)
     file(READ "${path1}" contents)
@@ -549,7 +553,7 @@ if(hash1 STREQUAL original1)
     if(NOT result STREQUAL patched1)
         message(FATAL_ERROR "libremidi patch result mismatch: ${path1}")
     endif()
-    file(WRITE "${path1}" "${contents}")
+    file(CONFIGURE OUTPUT "${path1}" CONTENT "${contents}" @ONLY NEWLINE_STYLE UNIX)
 endif()
 if(hash2 STREQUAL original2)
     file(READ "${path2}" contents)
@@ -614,5 +618,5 @@ if(hash2 STREQUAL original2)
     if(NOT result STREQUAL patched2)
         message(FATAL_ERROR "libremidi patch result mismatch: ${path2}")
     endif()
-    file(WRITE "${path2}" "${contents}")
+    file(CONFIGURE OUTPUT "${path2}" CONTENT "${contents}" @ONLY NEWLINE_STYLE UNIX)
 endif()

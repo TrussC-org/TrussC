@@ -35,6 +35,12 @@ The offline configure checks use a pristine source directory and a new scratch
 directory. They reconstruct a local archive to exercise FetchContent's actual
 patch command, reconfiguration, unpatched/patched/edited source overrides and
 reused extracted caches; they do not replace the production archive hash.
+They also compare byte-exact LF output from LF/CRLF patch scripts, reject CRLF
+source inputs without writes, and check read-only verification and idempotence.
+A writer mutation reproduces the CRLF hash failure using native Windows writes
+on Windows and an explicit text-mode conversion emulation on other hosts.
+Use `--script-only` to check the patch's CMake 3.20 minimum independently of
+libremidi's build, which requires CMake 3.22.
 
 ```sh
 python3 addons/tcxMidi/tests-sysex/test_patch.py path/to/pristine/libremidi tmp/patch-checks
