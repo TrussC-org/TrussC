@@ -6,6 +6,12 @@
 // draw GPU resources from the main window directly (shared sokol_gfx context).
 // Closing the second window leaves the main window running.
 // Secondary windows: macOS / Windows / Linux; elsewhere W logs an error.
+//
+// Arrow keys move the second window with Window::setPosition(); F sends it
+// fullscreen. Both act on THAT window — the global setWindowPosition() /
+// setFullscreen() target the main one. For a projector or a video wall on a
+// second display, move the window onto that display FIRST and then go
+// fullscreen: fullscreen covers the display the window is currently on.
 
 #include "tcApp.h"
 
@@ -34,6 +40,13 @@ void tcApp::draw() {
     drawBitmapString("MAIN window  (W: toggle second window)", 20, 30);
     drawBitmapString(second && second->isOpen() ? "second window: OPEN" : "second window: closed", 20, 50);
 
+    if (second && second->isOpen()) {
+        drawBitmapString("second window asked at (" + toString(secondPos.x) + ", " + toString(secondPos.y) + ")"
+                         + (second->isFullscreen() ? "  [fullscreen]" : ""), 20, 66);
+        setColor(0.7f);
+        drawBitmapString("arrows: move it by 50px   F: fullscreen it   G: log asked vs reported", 20, 340);
+    }
+
     // The same FBO also drawn here
     setColor(1.0f);
     fbo.draw(20, 80, 320, 240);
@@ -44,6 +57,24 @@ void tcApp::draw() {
 }
 
 void tcApp::keyPressed(int key) {
+    // Drive the SECOND window from the main one. These are Window methods, so
+    // they act on that window; the global equivalents would move/fullscreen the
+    // main window instead.
+    if (second && second->isOpen()) {
+        const int step = 50;
+        if (key == KEY_LEFT)  { secondPos.x -= step; second->setPosition(secondPos.x, secondPos.y); return; }
+        if (key == KEY_RIGHT) { secondPos.x += step; second->setPosition(secondPos.x, secondPos.y); return; }
+        if (key == KEY_UP)    { secondPos.y -= step; second->setPosition(secondPos.x, secondPos.y); return; }
+        if (key == KEY_DOWN)  { secondPos.y += step; second->setPosition(secondPos.x, secondPos.y); return; }
+        if (key == 'F')       { second->toggleFullscreen(); return; }
+        if (key == 'G') {
+            const IVec2 p = second->getPosition();
+            logNotice("tcApp") << "second window: asked (" << secondPos.x << ", " << secondPos.y
+                               << ")  reported (" << p.x << ", " << p.y << ")";
+            return;
+        }
+    }
+
     if (key == 'W') {
         if (second && second->isOpen()) {
             logNotice("tcApp") << "closing second window";
@@ -59,6 +90,9 @@ void tcApp::keyPressed(int key) {
             subApp = make_shared<SubApp>();
             subApp->sharedFbo = &fbo;
             second->setApp(subApp);
+            // Place it where this app thinks it is, so the arrow keys and the
+            // window agree from the first press.
+            second->setPosition(secondPos.x, secondPos.y);
         }
     }
 }
