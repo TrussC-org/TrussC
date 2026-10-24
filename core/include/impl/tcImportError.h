@@ -49,7 +49,9 @@ template <class Field = const char*>
 inline void reportImportError(const char* module, const char* reason,
                               const Field& field = "", const char* detail = nullptr) noexcept {
     try {
-        std::string message;
+        // The pointer constructor can throw into this guard. MSVC's default
+        // constructor may allocate a proxy inside a noexcept operation.
+        std::string message("");
         if (*module) message = std::string("[") + module + "] ";
         message += reason;
         appendImportField(message, field);

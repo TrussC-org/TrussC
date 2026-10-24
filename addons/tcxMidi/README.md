@@ -66,6 +66,15 @@ Enumeration follows the TrussC convention (`AudioEngine::listDevices()` etc.):
 `listDevices()` returns `std::vector<MidiDeviceInfo>`, where each
 `MidiDeviceInfo` has `getPortNumber()` / `getName()`.
 
+Port lists and `openPort(index|name)` include virtual ports exposed by the OS,
+including this application's own virtual ports. Prefer opening by name: indices
+shift when ports appear or disappear (name matching uses the first
+case-sensitive substring match, so choose a distinctive name).
+CoreMIDI and ALSA sequencer enable libremidi's virtual-port tracking. WinMM,
+WinUWP and WebMIDI ignore that flag and list whatever their OS/browser API
+exposes; on Windows use a virtual MIDI driver such as loopMIDI. WebMIDI still
+requires browser permission and `midiReady()`.
+
 **`MidiIn`** — `listDevices()`, `openPort(index|name)`, `openVirtualPort(name)`,
 `closePort()`, `isOpen()`, `getName()` (open port), `getPort()` (open port
 number, -1 if virtual), `isVirtual()`, `ignoreTypes(sysex, timing, sensing)`,
@@ -94,6 +103,13 @@ and shrinking evict oldest whole messages and increment the counter.
 한국어: 장치 입력이나 멈춘 소비자로 인한 메모리 증가를 막기 위해 메시지 수와 저장량을 제한합니다.
 초과하거나 한도를 줄이면 오래된 메시지 전체를 버리고 카운터에 더합니다.
 
+
+Native SysEx reception has a separate fixed limit of **1,048,576 bytes including
+F0/F7**. Larger messages are discarded whole and counted internally. The first
+SysEx loss per `MidiIn` lifetime emits one **Warning on the main thread**, even
+without polling. These losses do not change `getDroppedMessageCount()`, and
+`setBufferSize()` does not raise the SysEx limit. WebMIDI does not enable SysEx.
+See [the local libremidi patch ledger](LIBREMIDI_TRUSSC_MODIFICATIONS.md).
 
 **`MidiOut`** — `listDevices()`, `openPort(index|name)`, `openVirtualPort(name)`,
 `getName()` / `getPort()` / `isVirtual()`, `sendNoteOn/Off`,
@@ -154,6 +170,8 @@ device**, and the original jack labels (e.g. "DAW" / "MIDI") are lost — so
 `openPort(name)` matching that works on macOS/Linux may need a different string
 on Windows. WinMM also truncates port names to **31 characters**. When in doubt,
 print `listDevices()` and match on what you actually see.
+
+loopMIDI drops SysEx larger than its SysexSize setting (KiB, maximum 512) without an error to either side, so the port check's over-cap step cannot run through loopMIDI.
 
 ## Web (Emscripten) note
 

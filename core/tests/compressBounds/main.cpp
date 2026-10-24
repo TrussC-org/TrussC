@@ -1,3 +1,4 @@
+#include "../common/tcTestFailure.h"
 #include "tc/utils/tcCompress.h"
 #include "tc/utils/tcLog.h"
 #include <cstdio>

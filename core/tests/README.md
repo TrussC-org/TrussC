@@ -1098,3 +1098,5 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   title/size/fullscreen dispatcher and own-window DPI conversion. Its plain
   `main()` uses recording sapp entry points; native support limits remain
   device checks.
+
+OOM recovery tests support Release builds, or iterator debugging off. Under MSVC iterator debugging, persistent cases that construct or move string/container storage while failure is armed SKIP with a reason; allocation-free recovery and targeted one-shot payload failure cases still run. Exhaustive one-shot STL sweeps also skip if they target allocating noexcept proxy construction/moves. `common/tcTestFailure.h` redirects MSVC Debug CRT reports and GUI assertions to stderr and suppresses CRT abort and OS fault dialogs at static initialization. This setup is Debug-only; default invalid-parameter termination and installed crash handlers remain in place. Core test entries include it through `tcCoreTest.h`; standalone unit tests keep their plain `main()`.

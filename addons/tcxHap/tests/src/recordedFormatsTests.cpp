@@ -331,8 +331,8 @@ int runRecordedFormatsTests() {
     write(path, movie(1, 1, 1));
     parser.open(path); track = parser.getInfo().getVideoTrack();
     (void)track->samples[0]; // Separate sample-buffer failure from lazy page creation.
-    largestRequest = 0; failAbove = 8; measuring = true;
     std::vector<uint8_t> bytes;
+    largestRequest = 0; failAbove = 8; measuring = true;
     bool threw = false;
     try { ok = parser.readSample(*track, 0, bytes); } catch (...) { threw = true; }
     measuring = false; failAbove = SIZE_MAX;
@@ -347,8 +347,8 @@ int runRecordedFormatsTests() {
     auto listener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
         if (event.level == tc::LogLevel::Warning) ++warnings;
     });
-    largestRequest = 0; failAbove = 65536; measuring = true;
     std::vector<uint8_t> extracted, again;
+    largestRequest = 0; failAbove = 65536; measuring = true;
     bool audioThrew = false;
     try {
         extracted = HapBudgetTestAccess::extract(player);

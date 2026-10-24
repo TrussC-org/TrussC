@@ -69,6 +69,8 @@ public:
 
     // Load from .cube file. Relative paths resolve via getDataPath, like
     // Image::load.
+    // OOM recovery holds in Release, or with iterator debugging off
+    // (_ITERATOR_DEBUG_LEVEL=0); see docs/ADDONS.md.
     bool load(const fs::path& filePath) {
         fs::path path;
         try {

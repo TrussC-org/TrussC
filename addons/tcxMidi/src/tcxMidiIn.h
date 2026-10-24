@@ -20,9 +20,16 @@
 //      message is rejected. getDroppedMessageCount() counts these and shrink
 //      losses. The first loss warns automatically on the main thread, once
 //      per input lifetime across close/reopen, without another poll.
+//
+// Native SysEx receive limit: 1,048,576 bytes including F0/F7. Larger messages
+// are discarded whole and counted internally, separately from the polling
+// getDroppedMessageCount(). The first SysEx loss per MidiIn lifetime emits one
+// Warning on the main thread, even without polling. setBufferSize() does not
+// change this limit. WebMIDI access does not enable SysEx.
 // =============================================================================
 
 #include "tcxMidiMessage.h"
+#include "tcxMidiSysex.h"
 
 #include "tc/events/tcEvent.h"
 #include "tc/network/tcNetworkState.h"
@@ -64,9 +71,11 @@ public:
     // -------------------------------------------------------------------------
 
     // Available input ports, in port-number order (see MidiDeviceInfo).
+    // Open by name for stable selection; indices shift when ports appear or disappear.
     static std::vector<MidiDeviceInfo> listDevices() {
         std::vector<MidiDeviceInfo> devices;
-        libremidi::observer obs{{}, libremidi::observer_configuration_for(platformMidiApi())};
+        libremidi::observer obs{internal::midiObserverConfiguration(),
+                               libremidi::observer_configuration_for(platformMidiApi())};
         auto ports = obs.get_input_ports();
         for (int i = 0; i < static_cast<int>(ports.size()); ++i) {
             devices.push_back({i, ports[i].display_name});
@@ -79,8 +88,10 @@ public:
     // -------------------------------------------------------------------------
 
     // Open by port index.
+    // Open by name for stable selection; indices shift when ports appear or disappear.
     bool openPort(int index) {
-        libremidi::observer obs{{}, libremidi::observer_configuration_for(platformMidiApi())};
+        libremidi::observer obs{internal::midiObserverConfiguration(),
+                               libremidi::observer_configuration_for(platformMidiApi())};
         auto ports = obs.get_input_ports();
         if (index < 0 || index >= static_cast<int>(ports.size())) {
             trussc::logError("tcxMidiIn") << "openPort: index " << index
@@ -91,8 +102,10 @@ public:
     }
 
     // Open the first port whose name contains `nameContains` (case-sensitive).
+    // Open by name for stable selection; indices shift when ports appear or disappear.
     bool openPort(const std::string& nameContains) {
-        libremidi::observer obs{{}, libremidi::observer_configuration_for(platformMidiApi())};
+        libremidi::observer obs{internal::midiObserverConfiguration(),
+                               libremidi::observer_configuration_for(platformMidiApi())};
         auto ports = obs.get_input_ports();
         for (int i = 0; i < static_cast<int>(ports.size()); ++i) {
             if (ports[i].display_name.find(nameContains) != std::string::npos) {
@@ -226,6 +239,7 @@ private:
 
     libremidi::input_configuration makeConfig(const std::shared_ptr<State>& state) {
         libremidi::input_configuration cfg;
+        cfg.on_sysex_overflow = [loss = sysexLoss_](size_t needed) noexcept { loss->count(needed); };
         cfg.on_message = [state](const libremidi::message& m) { state->handleMessage(m); };
         cfg.ignore_sysex = ignoreSysex_;
         cfg.ignore_timing = ignoreTiming_;
@@ -260,6 +274,7 @@ private:
         return true;
     }
 
+    std::shared_ptr<internal::SysexLoss> sysexLoss_ = internal::SysexLoss::create();
     std::shared_ptr<Polling> polling_ = std::make_shared<Polling>();
     std::shared_ptr<State> state_;
     std::shared_ptr<Backend> backend_;
