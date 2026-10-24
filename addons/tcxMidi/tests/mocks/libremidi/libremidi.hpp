@@ -22,11 +22,28 @@ inline API midi_out_configuration_for(API api) { return api; }
 inline API observer_configuration_for(API api) { return api; }
 struct output_port { std::string display_name; };
 struct input_port { std::string display_name; };
-struct observer_configuration {};
+struct observer_configuration {
+    bool track_hardware = true;
+    bool track_virtual = false;
+};
+namespace test {
+inline bool virtualPorts = false;
+}
 struct observer {
-    observer(observer_configuration, API) {}
-    std::vector<input_port> get_input_ports() const { return {{"test input"}}; }
-    std::vector<output_port> get_output_ports() const { return {{"test output"}}; }
+    observer_configuration config;
+    observer(observer_configuration cfg, API) : config(cfg) {}
+    std::vector<input_port> get_input_ports() const {
+        std::vector<input_port> ports;
+        if (config.track_hardware) ports.push_back({"test input"});
+        if (test::virtualPorts && config.track_virtual) ports.push_back({"virtual source"});
+        return ports;
+    }
+    std::vector<output_port> get_output_ports() const {
+        std::vector<output_port> ports;
+        if (config.track_hardware) ports.push_back({"test output"});
+        if (test::virtualPorts && config.track_virtual) ports.push_back({"virtual destination"});
+        return ports;
+    }
 };
 
 namespace test {

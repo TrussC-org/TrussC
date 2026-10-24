@@ -1,4 +1,4 @@
-# MIDI send result unit tests
+# MIDI unit tests
 
 Console TrussC project using the production `MidiOut` and linked logger/event
 implementation with a small libremidi output backend double. The existing
@@ -31,6 +31,12 @@ allows one more warning per reason. Closing and failed open attempts reset the
 gates too, and separate MidiOut objects have independent gates.
 Existing calls ignoring the result also compile.
 The harness uses a plain `main()` without starting the TrussC app loop.
+
+Virtual-port enumeration tests retain the hardware entries and expose software
+entries only when `track_virtual` is set. They cover all six observer paths:
+input/output listing, opening by name and opening by index. Removing the flag
+fails these checks even on a host without a MIDI subsystem. The real ALSA and
+CoreMIDI integration test is in `../tests-virtual`.
 
 The double does not verify native backend error generation or physical delivery.
 Compile the production header against the pinned libremidi as well, and check

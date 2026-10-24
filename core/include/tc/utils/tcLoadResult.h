@@ -27,7 +27,7 @@ enum class LoadError {
     UnsupportedFormat,  // extension / container not supported on this platform
     DecodeFailed,       // the decoder rejected the data (corrupt / truncated / wrong codec)
     Unknown,            // anything the loader could not classify
-    TooLarge,           // exceeds the GPU texture limit
+    TooLarge,           // exceeds a resource size or admission limit
     Cancelled,          // loading was cancelled
 };
 

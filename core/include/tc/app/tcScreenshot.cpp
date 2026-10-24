@@ -94,11 +94,20 @@ void write(const std::shared_ptr<ScreenshotState>& state) {
 }
 ScreenshotQueue::ScreenshotQueue() = default;
 ScreenshotQueue::~ScreenshotQueue() { registration.reset(); closeScreenshots(*this); }
-void closeScreenshots(ScreenshotQueue& window) {
-    auto jobs = std::move(window.pending);
-    window.pending.clear();
-    for (auto& job : jobs) complete(job, SaveResult::fail(SaveError::WriteFailed,
-                                                       "Window closed before screenshot capture"));
+void closeScreenshots(ScreenshotQueue& window) noexcept {
+    TeardownSteps steps;
+    // Pop before attempting completion. Moving a deque can allocate (including
+    // MSVC Debug proxies); moving a shared_ptr and popping cannot. If result
+    // construction/enqueue fails, dropping this job releases its admission and
+    // captures without a callback. Continue cancelling every remaining request.
+    while (!window.pending.empty()) {
+        auto job = std::move(window.pending.front());
+        window.pending.pop_front();
+        steps.run("screenshot cancellation", [&] {
+            complete(job, SaveResult::fail(SaveError::WriteFailed,
+                                         "Window closed before screenshot capture"));
+        });
+    }
 }
 void submitScreenshot(ScreenshotQueue* window, const fs::path& requested) {
     auto state = std::make_shared<ScreenshotState>();

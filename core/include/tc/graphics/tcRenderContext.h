@@ -1244,8 +1244,11 @@ public:
     ~EntryStackGuard() {
         // present() owns Draw's stack reset. Nested update/setup/event guards
         // temporarily override Draw, even when a native pass is already open.
+        TeardownSteps steps;
         if (entry_ != AppEntry::Draw)
-            rc_.restoreStacksAtEntryEnd(entry_, matrixDepth_, styleDepth_, eventName_, target_);
+            steps.run("entry stack restoration", [&] {
+                rc_.restoreStacksAtEntryEnd(entry_, matrixDepth_, styleDepth_, eventName_, target_);
+            });
         rc_.activeEntry_ = previousEntry_;
     }
     EntryStackGuard(const EntryStackGuard&) = delete;

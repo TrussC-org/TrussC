@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.20)
+project(windowAttachDummy LANGUAGES C CXX)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+endif()
+add_executable(windowAttachDummy main.cpp)
+target_compile_features(windowAttachDummy PRIVATE cxx_std_20)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Real coordinator, dummy GPU, same interposition as shaderScopeDummy.
+    add_subdirectory(../.. "${CMAKE_CURRENT_SOURCE_DIR}/../../build-linux")
+    target_link_libraries(windowAttachDummy PRIVATE tc::TrussC)
+    target_link_options(windowAttachDummy PRIVATE -Wl,--allow-multiple-definition)
+endif()
