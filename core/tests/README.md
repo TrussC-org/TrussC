@@ -1104,9 +1104,10 @@ OOM recovery tests support Release builds, or iterator debugging off. Under MSVC
 For #239 render-boundary regressions, after building the core archive and combined
 runner, run `tcbuild.sh sh core/tests/windowTick/render-boundary-test` (surfaceless
 EGL/Mesa, no X display required) and `tcbuild.sh sh core/tests/windowTick/native-gates-test`.
-These exercise independent draws without updates, two window rates, device-shared
-atlas uploads, per-window shadow/FBO recording boundaries (including update-only
-ticks and repeated rejected admissions with resource-bearing listeners), and native
-secondary policy routing. Readbacks also check FBO consumers carried across idle
-commits, recycling while older versions remain pending and after consumption,
-and shadow consumer replay before a referenced slot is overwritten.
+These exercise independent draws without updates on two secondaries at different
+rates, hidden captures, a synchronized control, foreign-window isolation of FBO
+reuse and shadow aging, update-only ticks and repeated rejected admissions with
+resource-bearing listeners, the atlas same-key upload deferral, shadow consumer
+replay before a referenced slot is overwritten, and native secondary policy
+routing. Resource lifetimes keep base's rules (see #995); these tests do not
+check FBO consumers carried across idle commits.
