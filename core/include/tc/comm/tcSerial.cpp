@@ -11,6 +11,22 @@
 // it uses <asm/termbits.h>, whose struct termios clashes with glibc's.
 // =============================================================================
 
+// Internal test seam. Each new connection snapshots this limit; existing
+// connections and standalone SerialRxBuffer policy checks are unaffected.
+#include <atomic>
+#include "tcSerialRx.h"
+
+namespace trussc::internal {
+namespace {
+std::atomic<size_t> rxCapacityForTesting{SerialRxBuffer::capacity};
+}
+size_t serialRxCapacityForTesting() { return rxCapacityForTesting.load(); }
+void setSerialRxCapacityForTesting(size_t bytes) {
+    rxCapacityForTesting = bytes ? std::min(bytes, SerialRxBuffer::capacity)
+                                 : SerialRxBuffer::capacity;
+}
+} // namespace trussc::internal
+
 #if !defined(_WIN32) && !defined(__ANDROID__)
 
 #include <cerrno>
