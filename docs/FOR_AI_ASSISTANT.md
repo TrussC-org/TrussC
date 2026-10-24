@@ -4666,6 +4666,7 @@ CoreEvents & Window::events()  // Returns this window's event collection.
 std::shared_ptr<App> Window::getApp() const  // Returns the App currently attached to this window.
 float Window::getFps() const  // Returns this window's target frame rate.
 int Window::getHeight() const  // Returns this window's content height.
+IVec2 Window::getPosition() const [macos,windows,linux]  // This window's current position in the same screen-coordinate space as setPosition; (-1, -1) if the native window is gone
 const std::string & Window::getTitle() const  // Returns the title stored for this window.
 int Window::getWidth() const  // Returns this window's content width.
 bool Window::isFullscreen() const  // Returns this window's fullscreen state.
@@ -4676,6 +4677,7 @@ void Window::setClearColor(const Color & c)  // Sets this window's background cl
 void Window::setFps(float fps)  // Sets this window's target frame rate.
 void Window::setFullscreen(bool full)  // Sets this window's fullscreen mode.
 void Window::setIndependentFps(float updateFps, float drawFps)  // Sets separate update and drawing rates for this window.
+void Window::setPosition(int x, int y) [macos,windows,linux]  // Move this window on the desktop, in screen coordinates with the primary display's top-left at (0, 0); a display left of or above the primary one has negative coordinates. To fill a second display, move the window there first and then call setFullscreen — fullscreen covers the display the window is currently on
 void Window::setSize(int width, int height)  // Resizes this window's content area.
 void Window::setTitle(const std::string & title)  // Sets this window's title.
 void Window::toggleFullscreen()  // Toggles this window's fullscreen mode.

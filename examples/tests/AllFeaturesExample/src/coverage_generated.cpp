@@ -4658,6 +4658,9 @@ struct Cover_Window : af::Scope<Window> {
         (void)af::val<const Window>().getApp();
         (void)af::val<const Window>().getFps();
         (void)af::val<const Window>().getHeight();
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<const Window>().getPosition();
+#endif
         (void)af::val<const Window>().getTitle();
         (void)af::val<const Window>().getWidth();
         (void)af::val<const Window>().isFullscreen();
@@ -4668,6 +4671,9 @@ struct Cover_Window : af::Scope<Window> {
         (void)af::val<Window>().setFps(af::val<float>());
         (void)af::val<Window>().setFullscreen(af::val<bool>());
         (void)af::val<Window>().setIndependentFps(af::val<float>(), af::val<float>());
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<Window>().setPosition(af::val<int>(), af::val<int>());
+#endif
         (void)af::val<Window>().setSize(af::val<int>(), af::val<int>());
         (void)af::val<Window>().setTitle(af::val<const std::string>());
         (void)af::val<Window>().toggleFullscreen();
