@@ -135,3 +135,52 @@ On Linux, use `--receive NAME` and `--send NAME` with an existing ALSA sequencer
 loopback such as Midi Through or snd-virmidi, if accessible without sudo.
 The sequencer device (`/dev/snd/seq`) must be available. A virtual receiver plus
 open-by-name sender has the same #982 dependency; no observer change is included.
+
+## ALSA large-output regression (#992)
+
+After building the harness on Linux, run:
+
+```sh
+addons/tcxMidi/tests-sysex/bin/tests-sysex --alsa-roundtrip
+addons/tcxMidi/tests-sysex/bin/tests-sysex --alsa-roundtrip --require-device
+```
+
+This opens two real ALSA clients and sends patterned 1,048,577-byte and
+1,048,576-byte SysEx through `MidiOut::sendSysex`. A raw sequencer receiver
+checks all 2,097,153 bytes in order, with a 200-cell input pool. Using a raw
+receiver allows the issue's original size without changing #957's input cap;
+the second message is the largest that cap admits. The raw subscription also
+avoids depending on observer virtual-port enumeration (#982). No external MIDI
+hardware, MIDI Through device, display, or root privileges are needed, but the
+user must be able to open `/dev/snd/seq`. A missing/inaccessible sequencer prints
+`SKIP: ALSA sequencer cannot be opened: ...` and exits 0. `--require-device`
+changes that result to `FAIL` / exit 1; all failures after opening fail normally.
+On a successful Pi run expect (exit 0):
+
+```text
+PASS: ALSA SysEx roundtrip sizes=1048577,1048576 sent=1 received=2097153 byte_match=1
+```
+
+Also rerun the native port check above on the Pi with #957 and this fix combined.
+
+The output host test uses the production patched ALSA backend and the real
+`snd_midi_event` encoder, replacing only the dynamic-library symbol boundary
+with fake sequencer calls. It needs ALSA development headers, a C++20 compiler
+and libasound, but no device or display. Run through the build wrapper:
+
+```sh
+python3 addons/tcxMidi/tests-sysex/test_output.py path/to/patched/libremidi /tmp/new-output-check
+```
+
+It checks byte-for-byte large-message encoding, draining every event, temporary
+EAGAIN/EINTR recovery without duplicate chunks, fatal drain failure, exact retry
+exhaustion, pending-buffer cleanup, recovery with a fresh F0, and calling-thread
+pacing. The output must make no input calls on supplied shared duplex or
+output-only contexts, including when an attempted read would return EBADF.
+The driver overlay counts both event-input and input-pending calls.
+The baseline must pass; mutations must fail at their intended assertions:
+remove the entire output replacement, enlarge the encoder chunk, ignore fatal
+drain errors, change the retry bound, remove pacing, add an event-input read,
+and add an input-pending read. Mutation sources and binaries stay in the
+supplied scratch directory. The host latency measurement uses immediate mock
+drains; it does not measure kernel delivery or prove receiver scheduling.

@@ -56,6 +56,24 @@ def main():
     run("explicit_private_patch", ["cmake", f"-DLIBREMIDI_SOURCE_DIR={override}", "-P", str(script)])
     run("idempotent_patch", ["cmake", f"-DLIBREMIDI_SOURCE_DIR={override}", "-P", str(script)])
     configure("patched_override", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}")
+    output_path = "include/libremidi/backends/alsa_seq/midi_out.hpp"
+    output_header = override / output_path
+    patched_output = output_header.read_bytes()
+    output_header.write_bytes((pristine / output_path).read_bytes())
+    configure("output_replacement_missing", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}", succeeds=False)
+    output_header.write_bytes(patched_output + b"\n// Unknown output edit.\n")
+    configure("output_unknown_override", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}", succeeds=False)
+    # Unknown fourth input must fail before any of the other three are written.
+    unknown = work / "unknown_output"
+    shutil.copytree(pristine, unknown)
+    with (unknown / output_path).open("ab") as output:
+        output.write(b"\n// Unknown output edit.\n")
+    run("output_unknown_no_write", ["cmake", f"-DLIBREMIDI_SOURCE_DIR={unknown}", "-P", str(script)], succeeds=False)
+    for path in ("include/libremidi/detail/midi_stream_decoder.hpp",
+                 "include/libremidi/input_configuration.hpp",
+                 "include/libremidi/backends/alsa_seq/midi_in.hpp"):
+        assert (unknown / path).read_bytes() == (pristine / path).read_bytes()
+    output_header.write_bytes(patched_output)
     decoder = override / "include/libremidi/detail/midi_stream_decoder.hpp"
     with decoder.open("a", encoding="utf-8") as output:
         output.write("\n// Unknown local edit.\n")
