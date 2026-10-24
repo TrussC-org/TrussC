@@ -168,7 +168,10 @@ void setScreenshotBackendForTests(ScreenshotCapture capture, ScreenshotWriter wr
 }
 void saveScreenshotAsync(const fs::path& path) {
     auto* window = !headless::active && sapp_isvalid() ? &internal::currentWindowContext() : nullptr;
-    if (window && !window->isMain && !internal::currentWindow()) window = nullptr;
+    if (window) {
+        auto* handle = internal::currentWindow();
+        if (!handle || &handle->context() != window || !handle->isOpen()) window = nullptr;
+    }
     internal::submitScreenshot(window ? &window->asyncScreenshots : nullptr, path);
     if (window && window->isMain) redraw();
 }

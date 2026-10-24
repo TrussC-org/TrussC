@@ -131,6 +131,10 @@ bool tcApp::attachApp(Window& window, std::shared_ptr<App> app) {
 }
 
 // The guard as guest code reads it: the host's release must show here.
+bool tcApp::seesMainWindow(Window* expected) {
+    return getWindow() == expected && internal::currentWindow() == expected;
+}
+
 bool tcApp::seesAttached(const App* app) {
     return trussc::internal::attachedApps().count(app) != 0;
 }

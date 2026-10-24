@@ -368,6 +368,127 @@ void retainUntilRebuild(Event<T>& event, std::function<void()> work, int& releas
     arm(0); victim.disconnect(); disarm();
     check("reentry fixture: failed disconnect retains capture", fired && releases == 0);
 }
+// Guest App destruction must retire deferred producers under every allocation
+// failure, without invoking them or reordering another owner's replies.
+void mcpOwnerRetirement() {
+    namespace mi = mcp::internal;
+    mi::Server::instance();
+    mi::ownerCleanupHooks();
+    mi::deferredResponsesMutex(); // Keep cold initialization from shifting sweep indices.
+    for (int nth = 0;; ++nth) {
+        int ownerTag = 0, drops = 0, produced = 0;
+        const void* owner = &ownerTag;
+        mi::setRegistrationOwner(owner);
+        mcp::tool("window_owner_fault_probe", "owned retirement probe").bind([] { return 1; });
+        mcp::status("window_owner_fault_status", [] { return 1; });
+        mcp::statusImage("window_owner_fault_image", [] { return Pixels(); });
+        mi::setRegistrationOwner(nullptr);
+        struct Capture {
+            int& drops;
+            explicit Capture(int& count) : drops(count) {}
+            ~Capture() { ++drops; }
+        };
+        std::vector<std::future<mi::ReplyThunk>> replies;
+        std::vector<std::shared_ptr<std::promise<mi::ReplyThunk>>> promises;
+        for (int i = 0; i < 4; ++i) {
+            mi::DeferredResponse item;
+            item.id = i;
+            item.owner = i % 2 ? owner : nullptr;
+            item.budget = std::make_shared<mi::WorkBudget>();
+            item.response = std::make_shared<std::promise<mi::ReplyThunk>>();
+            replies.push_back(item.response->get_future());
+            promises.push_back(item.response);
+            auto capture = i % 2 ? std::make_shared<Capture>(drops) : nullptr;
+            item.makeEnvelope = [capture, &produced]() -> mi::ReplyThunk {
+                ++produced;
+                return [] { return std::string("{}"); };
+            };
+            mi::deferredResponses().push_back(std::move(item));
+        }
+        arm(nth);
+        mi::removeRegistrationsOwnedBy(owner);
+        const bool injected = fired;
+        disarm();
+        auto& pending = mi::deferredResponses();
+        check("MCP owner: all producers retired, host FIFO retained", drops == 2 && produced == 0 &&
+              pending.size() == 2 && pending[0].id == 0 && pending[1].id == 2, nth);
+        check("MCP owner: tool removed", !mcp::hasTool("window_owner_fault_probe"), nth);
+        check("MCP owner: replies terminal before return",
+              replies[1].wait_for(std::chrono::seconds(0)) == std::future_status::ready &&
+              replies[3].wait_for(std::chrono::seconds(0)) == std::future_status::ready, nth);
+        pending.clear();
+        if (!injected) {
+            std::printf("MCP owner retirement: %d fired indices, terminal index passed\n", nth);
+            break;
+        }
+    }
+}
+void mcpOwnerReentry() {
+    namespace mi = mcp::internal;
+    int ownerTag = 0, ownedRuns = 0, hostRuns = 0;
+    const void* owner = &ownerTag;
+    for (int i = 0; i < 3; ++i) {
+        mi::DeferredResponse item;
+        item.id = i;
+        item.owner = i == 1 ? nullptr : owner;
+        item.budget = std::make_shared<mi::WorkBudget>();
+        item.response = std::make_shared<std::promise<mi::ReplyThunk>>();
+        item.makeEnvelope = [&, owned = i != 1]() -> mi::ReplyThunk {
+            if (owned) ++ownedRuns; else ++hostRuns;
+            return [] { return std::string("{}"); };
+        };
+        mi::deferredResponses().push_back(std::move(item));
+    }
+    const auto hooksBefore = mi::ownerCleanupHooks().size();
+    mi::ownerCleanupHooks().push_back([&](const void* retiring) {
+        if (retiring == owner) mi::drainDeferredResponses();
+    });
+    mi::removeRegistrationsOwnedBy(owner);
+    mi::ownerCleanupHooks().resize(hooksBefore);
+    check("MCP owner: reentrant drain never invokes retired producers",
+          ownedRuns == 0 && hostRuns == 1 && mi::deferredResponses().empty());
+}
+void mainBoundaryValidation() {
+    internal::createMainWindow(WindowSettings{});
+    auto* win = internal::mainWindow();
+    internal::WindowRequestAccess::openMain(*win);
+    auto current = std::make_shared<TestApp>(), candidate = std::make_shared<TestApp>();
+    check("main boundary: initial shared attach", internal::attachMainApp(current));
+    int releases = 0;
+    retainUntilRebuild(win->events().update, [] {}, releases);
+    win->setApp(candidate);
+    TestWindow other;
+    other.setApp(candidate); attachAtCallbackBoundary(&other); other.finish();
+    internal::applyPendingAppForTests(*win);
+    check("main boundary: invalid candidate rejected before preparation", win->getApp() == current && releases == 0);
+    internal::destroyMainWindow();
+}
+// The same preparation-recheck invariant with the runner-owned main Window.
+void mainReentrantAttachments() {
+    for (int action = 0; action < 2; ++action) {
+        internal::createMainWindow(WindowSettings{});
+        auto* win = internal::mainWindow();
+        internal::WindowRequestAccess::openMain(*win);
+        auto current = std::make_shared<TestApp>(), candidate = std::make_shared<TestApp>();
+        check("main recheck: initial shared attach", internal::attachMainApp(current));
+        TestWindow other;
+        int releases = 0;
+        retainUntilRebuild(win->events().update, [&] {
+            other.setApp(candidate);
+            attachAtCallbackBoundary(&other);
+            check("main recheck: competitor attached during preparation", other.getApp() == candidate);
+            if (action == 1) other.finish();
+        }, releases);
+        win->setApp(candidate);
+        internal::applyPendingAppForTests(*win);
+        check("main recheck: candidate rejected after preparation", releases == 1 && win->getApp() == current &&
+              (action == 0 ? other.getApp() == candidate : internal::appRanCleanup(*candidate)));
+        other.finish();
+        internal::destroyMainWindow();
+        check("main recheck: exactly once teardown", current->exits == 1 && current->cleanups == 1 &&
+              candidate->exits == 1 && candidate->cleanups == 1 && internal::attachedApps().empty());
+    }
+}
 void reentrantAttachments() {
     for (bool callback : {false, true}) for (int action = 0; action < 5; ++action) {
         for (int nth = 0;; ++nth) {
@@ -739,6 +860,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     swaps(); swaps(true); attachments(); reentrantAttachments(); reentrantOtherPhases();
 #else
     const std::string mode = argc > 1 ? argv[1] : "all";
+    if (mode == "all" || mode == "owner") { mcpOwnerRetirement(); mcpOwnerReentry(); }
+    if (mode == "all" || mode == "main") { mainBoundaryValidation(); mainReentrantAttachments(); }
     if (mode == "all" || mode == "typed") { removal<int>(); registration<int>(); }
     if (mode == "all" || mode == "void") { removal<void>(); registration<void>(); }
     if (mode == "all" || mode == "swap") swaps();

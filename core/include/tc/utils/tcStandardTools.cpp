@@ -306,6 +306,7 @@ json imageContentResult(json img) {
 }
 
 void addStatusEntry(StatusEntry entry) {
+    if (mcp::internal::refuseRetiringRegistration("status", entry.name)) return;
     entry.owner = mcp::internal::registrationOwner();
     auto& reg = statusRegistry();
     for (auto& e : reg) {
@@ -369,6 +370,7 @@ void statusGraph(const std::string& name, std::function<double()> getter) {
 }
 
 void statusImage(const std::string& name, std::function<trussc::Pixels()> getter) {
+    if (internal::refuseRetiringRegistration("status image", name)) return;
     auto& reg = internal::statusImageRegistry();
     const void* owner = mcp::internal::registrationOwner();
     for (auto& e : reg) {
@@ -452,6 +454,7 @@ void registerStandardTools(Server& server) {
     auto resolveWindowCtx = [](int windowIdx, json& err) -> trussc::internal::WindowContext* {
         if (windowIdx == 0) return &trussc::internal::mainWindowContext();
         auto wins = trussc::internal::openWindows();
+        wins.erase(std::remove_if(wins.begin(), wins.end(), [](auto* w) { return w->context().isMain; }), wins.end());
         if (windowIdx < 0 || (size_t)windowIdx > wins.size()) {
             err = json{{"status", "error"},
                        {"message", "window index out of range (0=main, 1.." +
@@ -484,6 +487,7 @@ void registerStandardTools(Server& server) {
                                {"width", getWindowWidth()}, {"height", getWindowHeight()}});
             int i = 1;
             for (auto* w : trussc::internal::openWindows()) {
+                if (w->context().isMain) continue;
                 arr.push_back(json{{"index", i++}, {"main", false},
                                    {"title", w->getTitle()},
                                    {"width", w->getWidth()}, {"height", w->getHeight()},

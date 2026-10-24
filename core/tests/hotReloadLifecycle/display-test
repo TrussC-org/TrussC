@@ -2,3 +2,10 @@
 {test} --reload-check
 # A .glsl edit regenerates its header and relinks on a guest-only build (#820).
 python3 test_shader_rebuild.py {test}
+
+# Runner ownership must retire guest captures before host statics disappear.
+{test} --guest-process-exit
+
+# App lifetime and registration ownership (#239 PR-A): reentrant retirement,
+# the replacement keeping its registrations, guarded startup/reload resize.
+{test} --lifetime-checks

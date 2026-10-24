@@ -59,7 +59,6 @@ core/include/TrussC.h trussc::internal::appUpdateFunc          # host-only: as a
 core/include/TrussC.h trussc::internal::appDrawFunc            # host-only: as appSetupFunc
 core/include/TrussC.h trussc::internal::appCleanupFunc         # host-only: as appSetupFunc
 core/include/TrussC.h trussc::internal::appWindowResizedFunc   # host-only: as appSetupFunc
-core/include/TrussC.h trussc::buildAppDescriptor::app          # host-only: runApp's App; a hot reload build launches through runHotReloadApp instead
 core/include/TrussC.h trussc::internal::g_androidDesc          # no-hot-reload: Android only
 core/include/TrussC.h trussc::internal::consoleCPBeforeRun  # host-only: saved by ConsoleCPCtrlGuard around sapp_run() in runApp / the hot reload host, read by its control and exit handlers
 core/include/TrussC.h trussc::internal::ConsoleCPCtrlGuard::ConsoleCPCtrlGuard::exitHook  # host-only: only the host constructs the guard; register one exit hook across repeated runs

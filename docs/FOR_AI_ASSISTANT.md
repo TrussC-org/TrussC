@@ -998,7 +998,7 @@ Being header-only gives high portability (a nice side benefit for TrussC's gener
 
 ### Can TrussC open multiple windows?
 
-Yes — since v0.7.0 (macOS / Windows / desktop Linux). `createWindow(settings)` returns a `shared_ptr<Window>`, and `Window::setApp(make_shared<SubApp>())` gives it content: the SubApp runs the familiar `setup()/update()/draw()` + input-hook lifecycle, wired to *that* window. **Everything is per-window** — mouse/keyboard state, hover/drag, camera, delta time, ImGui context — so `getMouseX()`, `getDeltaTime()`, `imguiBegin()` etc. answer for the window whose App is running; there is no new API to learn beyond `createWindow` / `setApp`. **GPU resources (Texture / Fbo / Mesh / Font) are shared** across windows, so render once into an Fbo and draw it in both. Each window ticks on its own display's vsync, and a fully occluded window skips rendering without stalling the others. On single-window platforms (web / iOS / Android / Raspberry Pi) `createWindow()` logs an error and returns nullptr. See `examples/windowing/`. (For *cross-machine* or *cross-process* setups, texture sharing still applies: **tcxSyphon**, **tcxNDI**, **tcxNozzle**, **tcxVirtualCam**.)
+Yes — since v0.7.0 (macOS / Windows / desktop Linux). `createWindow(settings)` returns a `shared_ptr<Window>`, and `Window::setApp(make_shared<SubApp>())` gives it content: the SubApp runs the familiar `setup()/update()/draw()` + input-hook lifecycle, wired to *that* window. **Everything is per-window** — mouse/keyboard state, hover/drag, camera, delta time, ImGui context — so `getMouseX()`, `getDeltaTime()`, `imguiBegin()` etc. answer for the window whose App is running; there is no new API to learn beyond `createWindow` / `setApp`. **GPU resources (Texture / Fbo / Mesh / Font) are shared** across windows, so render once into an Fbo and draw it in both. Each window ticks on its own display's vsync, and a fully occluded window skips rendering without stalling the others. On single-window platforms (web / iOS / Android / Raspberry Pi) `createWindow()` logs an error and returns nullptr. `App::getWindow()` also returns the runner-owned main `Window` on every windowed platform. Main `setApp()` requests a swap at the next frame/event boundary; main `close()` quits the app. An unattached or headless App returns nullptr. See `examples/windowing/`. (For *cross-machine* or *cross-process* setups, texture sharing still applies: **tcxSyphon**, **tcxNDI**, **tcxNozzle**, **tcxVirtualCam**.)
 
 ### How does one C++ codebase run on every platform?
 
@@ -2600,7 +2600,7 @@ void App::audioIn(const AudioInBuffer & buf)  // Meant for reading incoming audi
 void App::audioOut(AudioOutBuffer & buf)  // Called on the audio thread once per device buffer, so you can add your own sound to the output.
 void App::exit()  // Called once when the App ends, right before cleanup().
 void App::filesDropped(const std::vector<std::string> & files)  // Called when files are dropped onto the main window, with their paths.
-Window * App::getWindow() const  // Returns the Window this App was put into with Window::setApp(), or nullptr.
+Window * App::getWindow() const  // Returns this App’s Window, including the main window, or nullptr when unattached.
 bool App::isExitRequested() const  // Returns whether requestExit() has been called on this App.
 void App::keyPressed(const KeyEventArgs & e) [+1]  // Called when a key is pressed, and again on each auto-repeat while it is held.
 void App::keyReleased(const KeyEventArgs & e) [+1]  // Called when a key is released.
@@ -4654,26 +4654,26 @@ SaveResult VideoWriter::submitFrame(double timeSec) [macos]  // Submits the prev
 SaveResult VideoWriter::writeAudio(const float * interleaved, int frames, double timeSec) [macos,windows,linux,android,ios]  // Appends audio samples at a specified presentation time.
 ```
 
-### Window — Represents a secondary application window.
+### Window — Represents an application window, including the main window owned by the runner.
 
 ```cpp
-void Window::close() [macos,windows,linux]  // Requests closure of this window.
-CoreEvents & Window::events() [macos,windows,linux]  // Returns this window's event collection.
-std::shared_ptr<App> Window::getApp() const [macos,windows,linux]  // Returns the App currently attached to this window.
-float Window::getFps() const [macos,windows,linux]  // Returns this window's target frame rate.
-int Window::getHeight() const [macos,windows,linux]  // Returns this window's content height.
-const std::string & Window::getTitle() const [macos,windows,linux]  // Returns the title stored for this window.
-int Window::getWidth() const [macos,windows,linux]  // Returns this window's content width.
-bool Window::isFullscreen() const [macos,windows,linux]  // Returns this window's fullscreen state.
-bool Window::isOccluded() const [macos,windows,linux]  // Returns whether the operating system reports this window as not visible.
-bool Window::isOpen() const [macos,windows,linux]  // Returns whether this window's native window still exists.
-void Window::setApp(std::shared_ptr<App> app) [macos,windows,linux]  // Requests an App attachment or replacement for this window.
-void Window::setClearColor(const Color & c) [macos,windows,linux]  // Sets this window's background clear color.
-void Window::setFps(float fps) [macos,windows,linux]  // Sets this window's target frame rate.
-void Window::setFullscreen(bool full) [macos,windows,linux]  // Sets this window's fullscreen mode.
-void Window::setSize(int width, int height) [macos,windows,linux]  // Resizes this window's content area.
-void Window::setTitle(const std::string & title) [macos,windows,linux]  // Sets this window's title.
-void Window::toggleFullscreen() [macos,windows,linux]  // Toggles this window's fullscreen mode.
+void Window::close()  // Requests closure of this window.
+CoreEvents & Window::events()  // Returns this window's event collection.
+std::shared_ptr<App> Window::getApp() const  // Returns the App currently attached to this window.
+float Window::getFps() const  // Returns this window's target frame rate.
+int Window::getHeight() const  // Returns this window's content height.
+const std::string & Window::getTitle() const  // Returns the title stored for this window.
+int Window::getWidth() const  // Returns this window's content width.
+bool Window::isFullscreen() const  // Returns this window's fullscreen state.
+bool Window::isOccluded() const  // Returns whether the operating system reports this window as not visible.
+bool Window::isOpen() const  // Returns whether this window is open.
+void Window::setApp(std::shared_ptr<App> app)  // Requests an App attachment or replacement for this window.
+void Window::setClearColor(const Color & c)  // Sets this window's background clear color.
+void Window::setFps(float fps)  // Sets this window's target frame rate.
+void Window::setFullscreen(bool full)  // Sets this window's fullscreen mode.
+void Window::setSize(int width, int height)  // Resizes this window's content area.
+void Window::setTitle(const std::string & title)  // Sets this window's title.
+void Window::toggleFullscreen()  // Toggles this window's fullscreen mode.
 ```
 
 ### WindowSettings — Configures the application window at startup.

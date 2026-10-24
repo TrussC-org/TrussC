@@ -160,6 +160,7 @@ public:
     virtual bool attachApp(Window& window, std::shared_ptr<App> app);
     // Whether guest code sees `app` in the secondary windows' double-attach
     // guard (internal::attachedApps()).
+    virtual bool seesMainWindow(Window* expected);
     virtual bool seesAttached(const App* app);
     // A node made with make_shared in guest code, added as this App's child.
     virtual std::shared_ptr<Node> addGuestChild();

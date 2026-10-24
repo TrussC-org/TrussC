@@ -34,6 +34,7 @@ int windowIdFor(ImGuiContext* ctx) {
     if (owner == &tc::internal::mainWindowContext()) return 0;
     int i = 1;
     for (tc::Window* w : tc::internal::openWindows()) {
+        if (w->context().isMain) continue;
         if (owner == static_cast<const void*>(&w->context())) return i;
         ++i;
     }

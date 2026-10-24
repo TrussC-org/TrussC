@@ -641,14 +641,18 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
 // Default context accessor (non-inline — see tcRenderContext.h comment)
 // ---------------------------------------------------------------------------
 namespace internal {
+RenderContext& mainRenderContext() {
+    static RenderContext instance;
+    return instance;
+}
+
 RenderContext& getDefaultContext() {
     // The RenderContext is owned per window context. The main window's is
     // wired lazily here (preserving the pre-context construction timing);
     // Phase 1 pre-wires the pointer when constructing secondary contexts.
     auto& ctx = currentWindowContext();
     if (!ctx.render) {
-        static RenderContext instance;   // main-window storage
-        ctx.render = &instance;
+        ctx.render = &mainRenderContext();
     }
     return *ctx.render;
 }

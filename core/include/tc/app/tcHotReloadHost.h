@@ -77,7 +77,7 @@ struct GuestLibrary {
 #endif
     CreateAppFn createApp = nullptr;
     DestroyAppFn destroyApp = nullptr;
-    std::shared_ptr<App> app;
+    std::weak_ptr<App> app; // Window owns the App; the guest keeps only generation metadata.
     string loadedPath;  // actual path loaded (may be a temp copy on Windows)
     const void* mcpOwner = nullptr;  // this generation's MCP registrations (create/destroy)
 
@@ -156,11 +156,23 @@ struct GuestLibrary {
             internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
             App* raw = createApp();
             auto deleter = destroyApp;
-            app = std::shared_ptr<App>(raw, [deleter](App* p) {
-                if (deleter) deleter(p);
+            // Destroying an App is not retiring its generation: a guest can
+            // self-swap, and the replacement (built while this generation's
+            // owner was current) keeps its registrations, as do the
+            // generation's still-running secondary Apps. destroy() retires
+            // the whole generation, before the last App of it is released.
+            auto candidate = std::shared_ptr<App>(raw, [deleter](App* p) {
+                internal::TeardownSteps steps;
+                steps.run("guest App destruction", [&] { if (deleter) deleter(p); });
             });
-            // The main window's scene-graph root (getRootNode()), held weakly
-            internal::mainWindowContext().rootNode = app;
+            if (!internal::attachMainApp(candidate)) {
+                // Constructor registrations must not outlive a refused candidate.
+                mcp::internal::removeRegistrationsOwnedBy(mcpOwner);
+                mcp::internal::setRegistrationOwner(nullptr);
+                mcpOwner = nullptr;
+                return nullptr;
+            }
+            app = candidate;
             return raw;
         }
         return nullptr;
@@ -174,13 +186,8 @@ struct GuestLibrary {
             mcp::internal::setRegistrationOwner(nullptr);
             mcpOwner = nullptr;
         }
-        // Audio keeps running across a reload. End this generation before
-        // destroying it; normal host exit has already run this sequence.
-        if (app && !internal::appRanCleanup(*app)) {
-            app->exit();
-            internal::detachAppAudio(*app);
-            app->cleanup();
-        }
+        // Same transactional detach as setApp(nullptr), before unloading code.
+        internal::detachMainApp();
         app.reset();
         // Cleanup/destructors can have submitted another old-run operation.
         internal::cancelResourceBackends();
@@ -192,7 +199,7 @@ struct GuestLibrary {
         // App and keep their listeners on the host's events until they drop
         // them (#416). Dispatched on the main window's events, whichever
         // window context is current.
-        if (app) {
+        if (handle || !app.expired()) {
             auto* prev = internal::currentWindowCtx();
             internal::restoreWindowContext(nullptr);
             events().hotReloadUnload.notify();
@@ -341,6 +348,18 @@ inline int runBuildCommand(const vector<string>& argv, string& output) {
 // ---------------------------------------------------------------------------
 // Hot reload host — manages the Guest lifecycle
 // ---------------------------------------------------------------------------
+
+// Delivers the window size to the App a reload just attached (no native resize
+// follows a reload). Framework call into App code: it goes through the main
+// dispatch scope with the receiver retained, so a setApp()/reload() requested
+// from windowResized() waits for the boundary instead of freeing or cleaning
+// up the App mid-callback.
+inline void seedReloadedAppSize(int framebufferWidth, int framebufferHeight, float dpiScale) {
+    const float scale = internal::pixelPerfectMode() ? 1.0f : (1.0f / dpiScale);
+    internal::EntryStackGuard guard(internal::AppEntry::Event, "windowResized()");
+    internal::resizeMainApp(static_cast<int>(framebufferWidth * scale),
+                            static_cast<int>(framebufferHeight * scale));
+}
 
 struct Host {
     GuestLibrary guest;
@@ -517,7 +536,16 @@ struct Host {
         return true;
     }
 
+    bool reloadRequested = false;
     bool reload() {
+        if (internal::mainWindowDispatchActive()) {
+            reloadRequested = true;
+            return true; // accepted; the next host boundary performs the reload
+        }
+        return reloadNow();
+    }
+
+    bool reloadNow() {
         // IMPORTANT: rebuild BEFORE unloading the old Guest. On macOS/Linux,
         // overwriting a loaded dylib is safe (the old inode stays in memory).
         // If the build fails, the old App keeps running undisturbed.
@@ -551,14 +579,7 @@ struct Host {
         // event during reload because the actual window dimensions haven't
         // changed — without this, App::setup() runs while getWidth()==0 and
         // every child gets squished into a zero-sized rect.
-        {
-            int w = sapp_width();
-            int h = sapp_height();
-            float dpiScale = sapp_dpi_scale();
-            float scale = internal::pixelPerfectMode() ? 1.0f : (1.0f / dpiScale);
-            newApp->handleWindowResized(static_cast<int>(w * scale),
-                                        static_cast<int>(h * scale));
-        }
+        seedReloadedAppSize(sapp_width(), sapp_height(), sapp_dpi_scale());
 
         reloadCount++;
         watcher.markBuilt();
@@ -580,6 +601,11 @@ struct Host {
     // Called from the update loop — checks for file changes periodically
     void poll() {
         if (!initialized) return;
+        if (reloadRequested) {
+            reloadRequested = false;
+            reloadNow();
+            return;
+        }
 
         auto now = Clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastCheck);
@@ -591,7 +617,7 @@ struct Host {
         }
     }
 
-    App* getApp() { return guest.app.get(); }
+    App* getApp() { return guest.app.lock().get(); }
 };
 
 // ---------------------------------------------------------------------------
@@ -627,9 +653,6 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     };
 
     internal::appUpdateFunc = []() {
-        // Poll for file changes
-        g_host.poll();
-
         internal::updateFrameCount++;
         events().update.notify();
     };
@@ -639,22 +662,16 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     };
 
     internal::appCleanupFunc = []() {
-        auto app = g_host.guest.app;
-        if (app) {
-            events().exit.notify();
-            // close() requests made so far land before the App's cleanup().
-            internal::closeRequestedWindowsAtShutdown();
-            internal::detachAppAudio(*app);
-            app->cleanup();
-        }
+        // Retain the generation through hotReloadUnload, as on the old runner.
+        auto app = internal::mainApp();
+        internal::destroyMainWindow();
         g_host.guest.unload();
-        internal::mainWindowContext().appEventListeners.clear();
     };
-
     internal::appWindowResizedFunc = [](int w, int h) {
-        if (auto* app = g_host.getApp()) app->handleWindowResized(w, h);
+        internal::resizeMainApp(w, h);
     };
-    internal::registerAppEventListeners([] { return g_host.getApp(); });
+    internal::createMainWindow(settings);
+    internal::prepareMainAppBindings();
 
     // Build the sokol descriptor (without template — we handle App* manually)
     internal::pixelPerfectMode() = settings.pixelPerfect;
@@ -675,7 +692,24 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     desc.fullscreen = settings.fullscreen;
     desc.swap_interval = settings.swapInterval;
     desc.init_cb = internal::_setup_cb;
-    desc.frame_cb = internal::_frame_cb;
+    desc.frame_cb = []() noexcept {
+        if (frameReentryGuard) return;
+        TeardownSteps steps;
+        if (!mainWindowDispatchActive()) {
+            // Hold the native reentry guard across guest code (constructors,
+            // unload listeners and diagnostics can pump a modal event loop).
+            frameReentryGuard = true;
+            auto* previous = currentWindowCtx();
+            steps.run("hot reload boundary", [] {
+                restoreWindowContext(nullptr);
+                g_host.poll();
+            });
+            steps.run("hot reload context restoration", [&] { restoreWindowContext(previous); });
+            currentWindowCtx() = previous;
+            frameReentryGuard = false;
+        }
+        internal::_frame_cb();
+    };
     desc.cleanup_cb = internal::_cleanup_cb;
     desc.event_cb = internal::_event_cb;
     desc.logger.func = internal::sokolLog;

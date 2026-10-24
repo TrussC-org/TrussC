@@ -559,7 +559,16 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   display and cmake, not run in CI) reloads the windowed host twice with
   tcxNodeInspector attached: the host's listener counts stay those of the
   first generation (the Hierarchy is drawn once), and a press away from the
-  panels is not taken by a previous generation's tcxImGui.
+  panels is not taken by a previous generation's tcxImGui. The default run
+  and `--lifetime-checks [recursive|late|retained|replacement|startup|reload]`
+  (headless, in-process guest factories) pin the App lifetime / registration
+  ownership rules of the main Window (#239): registration retirement survives
+  captures that re-enter it (tools, resources, status) or register again during it (refused with a Warning, so nothing outlives the App); registrations belong
+  to the generation, so a guest's replacement App keeps its own across the
+  swap and unload removes them all; startup and reload resize delivery runs
+  inside the dispatch scope with the receiver retained, so a `setApp()` /
+  `reload()` requested from `windowResized()` waits for the boundary. Run it
+  under `-fsanitize=address` to catch the memory errors these cases guard.
 - `hotReloadScan/` — *(standalone, plain CMake)* the configure step and the
   pre-build check decide "does this project use hot reload" the same way:
   `tc_hot_reload_scan()` finds `TC_HOT_RELOAD` in any `.cpp` under `src/` and
@@ -1072,3 +1081,17 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   `--gpu-check` on Linux also resizes a recording window taller and wider,
   returns it to its take size, and checks Fbo/screen readback with a padded
   pixel pack layout and a bound pack buffer (caller GL state is restored).
+
+- `appSetSize/` — pins #344 S6 only: an unattached App's `setSize()` updates
+  its own RectNode size. S5 and the cross-window cases (R1/R2, S1-S5, S7/S8)
+  remain manual in `repro/appSetSizeTest` on `test/app-setsize-own-window`
+  (see its `repro/README.md`). Headless S6 does not prove that another window
+  is not resized.
+- `mainWindowAttach/` — main Window ownership, identity, shared admission,
+  deferred swap, replacement size and main-close quit. Display modes also
+  cover callback exit, process teardown with a pending swap, and constructor
+  failure contained at the C callback boundary.
+- `mainWindowRouting/` — standalone recording unit for the common main-window
+  title/size/fullscreen dispatcher and own-window DPI conversion. Its plain
+  `main()` uses recording sapp entry points; native support limits remain
+  device checks.
