@@ -47,7 +47,6 @@ core/include/TrussC.h trussc::internal::windowDecorated        # host-only: set 
 core/include/TrussC.h trussc::internal::gpuUniformBufferReserve  # host-only: launcher -> setup() (tcGlobal.cpp)
 
 # --- TrussC.h: loop timing
-core/include/TrussC.h trussc::internal::updateFrameCount       # host-only: advanced by the host's loop, read through getFrameCount() / getUpdateCount() (tcGlobal.cpp)
 core/include/TrussC.h trussc::internal::frameReentryGuard      # host-only: _frame_cb
 
 # --- TrussC.h: input / launcher wiring

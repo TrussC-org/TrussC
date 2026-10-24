@@ -224,8 +224,7 @@ namespace internal {
 // RenderTarget: per-drawable state and borrowed GPU resources (swapchain/Fbo).
 #include "tc/graphics/tcRenderTarget.h"
 
-// Fixed-step / frame-skip decisions shared by the loops (used by
-// tcWindowContext.h's throttle, _frame_cb and runHeadlessApp).
+// Fixed-step / frame-skip decisions shared by window ticks and runHeadlessApp.
 #include "tc/app/tcFrameTiming.h"
 
 // Per-window state container (input/hover/window state) + the active*()
@@ -291,30 +290,7 @@ namespace internal {
     // Loop Architecture (Decoupled Update/Draw)
     // ---------------------------------------------------------------------------
 
-    // Special FPS values
-    constexpr float VSYNC = -1.0f;        // Sync to monitor refresh rate
-    constexpr float EVENT_DRIVEN = 0.0f;  // Only on redraw() call
-
-    // Main loop state: driven by the frame loop (_frame_cb, in the host),
-    // steered by setFps() / setIndependentFps() / redraw() from app code.
-    // Defined in tcGlobal.cpp so both reach the same instance.
-    struct MainLoopState {
-        // FPS settings
-        float updateTargetFps = VSYNC;   // VSYNC, EVENT_DRIVEN, or fixed fps
-        float drawTargetFps = VSYNC;     // VSYNC, EVENT_DRIVEN, or fixed fps
-        bool updateSyncedToDraw = true;  // true = update/draw in sync (1:1)
-        int redrawCount = 1;             // redraw() counter (remaining draw count)
-
-        // Update timing (steady clock: a wall-clock step must not skew the loop)
-        std::chrono::steady_clock::time_point lastUpdateTime;
-        bool lastUpdateTimeInitialized = false;
-        double updateAccumulator = 0.0;  // Accumulated time for independent Update
-
-        // Draw timing (frame skip)
-        std::chrono::steady_clock::time_point lastDrawTime;
-        bool lastDrawTimeInitialized = false;
-        double drawAccumulator = 0.0;
-    };
+    // The current window's host-owned scheduler (tcWindowContext.h).
     MainLoopState& mainLoop();
 
     // Mouse position/button state + keyboard state moved to WindowContext
@@ -329,11 +305,6 @@ namespace internal {
     bool& touchAsMouse();
 
     // Delta time / frame-rate state lives in WindowContext (per window).
-
-    // Frame count (number of update calls). Host-only, so a per-module copy is
-    // fine: advanced by the launcher's update callback, read through the
-    // non-inline getFrameCount() / getUpdateCount() (tcGlobal.cpp).
-    inline uint64_t updateFrameCount = 0;
 
     // Elapsed time: one steady clock with its origin at program start, in
     // tcGlobal.cpp (see tcTime.h).
@@ -1763,7 +1734,7 @@ inline int getWindowWidth() {
     if (internal::pixelPerfectMode()) {
         return getFramebufferWidth();  // Framebuffer size
     }
-    return static_cast<int>(getFramebufferWidth() / getDpiScale());  // Logical size
+    return internal::framebufferToLogical(getFramebufferWidth(), getDpiScale());  // Logical size
 }
 
 // Get window height (size corresponding to coordinate system)
@@ -1771,7 +1742,7 @@ inline int getWindowHeight() {
     if (internal::pixelPerfectMode()) {
         return getFramebufferHeight();  // Framebuffer size
     }
-    return static_cast<int>(getFramebufferHeight() / getDpiScale());  // Logical size
+    return internal::framebufferToLogical(getFramebufferHeight(), getDpiScale());  // Logical size
 }
 
 // Get window size as Vec2
@@ -1946,10 +1917,10 @@ struct FpsSettings {
     bool synced;           // true = update/draw in sync (1:1)
 };
 
-// --- Main FPS API ---
+// --- Current-window FPS API ---
 
 namespace internal {
-// Restart the main loop's update and/or draw timing after a real mode change
+// Restart the current window's update and/or draw timing after a real mode change
 // (#228), so the new mode does not replay the time spent in the previous one.
 // The timestamps re-base at the next frame, and each accumulator is seeded
 // with one interval: that frame runs one fixed update step / draws (the switch
@@ -1978,11 +1949,11 @@ inline void restartLoopTiming(bool update, bool draw) {
     auto& loop = mainLoop();
     if (update) {
         loop.lastUpdateTimeInitialized = false;
-        auto& wctx = mainWindowContext();
+        auto& wctx = currentWindowContext();
         const bool fixedStep = !loop.updateSyncedToDraw && loop.updateTargetFps > 0.0f;
-        if (!wctx.inUpdate &&
+        if ((!wctx.inUpdate || wctx.inCallbackClock) &&
             (wctx.mainUpdateCallTimeInitialized || wctx.frameUptimeSampled)) {
-            wctx.mainUpdateCallTime = std::chrono::steady_clock::now();
+            wctx.mainUpdateCallTime = windowClockNow();
             wctx.mainUpdateCallTimeInitialized = true;
         }
         if (!fixedStep) wctx.fixedStepUpdate = false;
@@ -2000,15 +1971,6 @@ inline void restartLoopTiming(bool update, bool draw) {
 // EVENT_DRIVEN: only on redraw() call
 // > 0: fixed fps
 inline void setFps(float fps) {
-    // Context-aware: called during a secondary window's tick it retargets THAT
-    // window's throttle (Window::setFps); on the main context it steers the main
-    // loop exactly as before. This removes the pre-Phase-2 trap where setFps()
-    // from secondary app code silently retuned the main loop.
-    auto& wctx = internal::currentWindowContext();
-    if (!wctx.isMain) {
-        wctx.throttleFps = fps;
-        return;
-    }
     // Only a real change restarts the timing: re-applying the current rate
     // (setFps(guiValue) every frame) must not skip frames.
     auto& loop = internal::mainLoop();
@@ -2023,18 +1985,8 @@ inline void setFps(float fps) {
 
 // Set independent FPS for update and draw (not synchronized)
 // Each loop runs at its own rate, may cause timing variations.
-// MAIN-WINDOW ONLY: a secondary window has a single synced throttle rate
-// (Window::setFps); calling this from a secondary tick logs once and no-ops.
+// Acts on the current window, including setup and event callbacks.
 inline void setIndependentFps(float updateFps, float drawFps) {
-    if (!internal::currentWindowContext().isMain) {
-        static OnceGate warned;
-        if (warned.isFirstTime()) {
-            logWarning("Window") << "setIndependentFps() is main-window only; a "
-                "secondary window runs a single synced rate. Use Window::setFps() "
-                "(or the context-aware setFps()). Ignored.";
-        }
-        return;
-    }
     // Only a real change restarts the timing (per loop): re-applying the
     // current rates every frame must not starve update or skip draws, and
     // changing only the draw rate leaves the update's phase alone.
@@ -2072,7 +2024,8 @@ inline FpsSettings getFpsSettings() {
     // Get actual VSync frequency (approximate from frame duration when VSYNC)
     if (loop.updateTargetFps == internal::VSYNC ||
         loop.drawTargetFps == internal::VSYNC) {
-        double dt = sapp_frame_duration();
+        double dt = internal::currentWindowContext().tickDuration;
+        if (!(dt > 0.0) && internal::currentWindowContext().isMain) dt = sapp_frame_duration();
         settings.actualVsyncFps = (dt > 0.0) ? static_cast<float>(1.0 / dt) : 0.0f;
     } else {
         settings.actualVsyncFps = 0.0f;
@@ -2090,18 +2043,8 @@ inline float getFps() {
 
 // Request redraw (used when auto-draw is stopped)
 // count: number of draws (max value is used when called multiple times)
-// MAIN-WINDOW ONLY: the event-driven / redraw() loop drives the main window's
-// _frame_cb. Secondary windows are paced by their own display link (Window::
-// setFps throttles them); redraw() from a secondary tick logs once and no-ops.
+// Acts on the current window.
 inline void redraw(int count = 1) {
-    if (!internal::currentWindowContext().isMain) {
-        static OnceGate warned;
-        if (warned.isFirstTime()) {
-            logWarning("Window") << "redraw() / event-driven loop is main-window "
-                "only; secondary windows are paced by their display link. Ignored.";
-        }
-        return;
-    }
     auto& loop = internal::mainLoop();
     if (count > loop.redrawCount) {
         loop.redrawCount = count;
@@ -2559,8 +2502,7 @@ namespace internal {
             int w = sapp_width();
             int h = sapp_height();
             float dpiScale = sapp_dpi_scale();
-            float scale = pixelPerfectMode() ? 1.0f : (1.0f / dpiScale);
-            appWindowResizedFunc(static_cast<int>(w * scale), static_cast<int>(h * scale));
+            appWindowResizedFunc(framebufferToLogical(w, pixelPerfectMode() ? 1.0f : dpiScale), framebufferToLogical(h, pixelPerfectMode() ? 1.0f : dpiScale));
         }
     }
 
@@ -2573,137 +2515,17 @@ namespace internal {
 
     inline bool frameReentryGuard = false;  // host-only: the frame callback's own guard
 
-    // Set the main window's delta time and update time for one update call.
-    // VSYNC and draw-synced updates report the measured wall time since the
-    // previous update call (#15). Fixed-Hz steps pass their nominal interval
-    // (fixedDelta > 0), so every step of a frame reports the same dt instead
-    // of the first one taking the whole gap (#228), and their nominal time on
-    // the loop's timeline (stepTime) as the update time Node timers count
-    // from, and whether this update is such a step. mainUpdateCallTime is
-    // kept current either way; a mode switch between updates moves it to the
-    // switch (restartLoopTiming).
-    inline void beginMainUpdateCall(double fixedDelta = 0.0,
-                                    std::chrono::steady_clock::time_point stepTime = {}) {
-        auto& wctx = mainWindowContext();
-        auto callNow = std::chrono::steady_clock::now();
-        if (fixedDelta > 0.0) {
-            wctx.updateDeltaTime = fixedDelta;
-        } else if (!wctx.mainUpdateCallTimeInitialized) {
-            wctx.updateDeltaTime = sapp_frame_duration(); // first frame: sokol's estimate
-        } else {
-            wctx.updateDeltaTime = std::chrono::duration<double>(callNow - wctx.mainUpdateCallTime).count();
-        }
-        wctx.mainUpdateCallTimeInitialized = true;
-        wctx.mainUpdateCallTime = callNow;
-        wctx.updateTime = (fixedDelta > 0.0) ? stepTime : callNow;
-        wctx.fixedStepUpdate = (fixedDelta > 0.0);
-    }
+    void beginMainUpdateCall(double fixedDelta = 0.0,
+                             std::chrono::steady_clock::time_point stepTime = {});
+    void runMainUpdate(double fixedDelta = 0.0,
+                       std::chrono::steady_clock::time_point stepTime = {});
+    void runIndependentUpdates(std::chrono::steady_clock::time_point now);
+    bool mainLoopShouldDraw(std::chrono::steady_clock::time_point now);
 
-    // One main-window update: timing (beginMainUpdateCall), then the app's
-    // update with the context marked as inside an update, so a Node timer
-    // created during it starts counting with the next update (tcNode.h).
-    // Each call is an entry point (#349): the stacks go back to their depth
-    // before it, in both modes (synced: mid-frame; independent: every VSYNC
-    // update and every fixed-Hz step, so an idle EVENT_DRIVEN draw can't let
-    // leaks pile up until the next frame).
-    inline void runMainUpdate(double fixedDelta = 0.0,
-                              std::chrono::steady_clock::time_point stepTime = {}) {
-        beginMainUpdateCall(fixedDelta, stepTime);
-        auto& wctx = mainWindowContext();
-        wctx.inUpdate = true;
-        if (appUpdateFunc) {
-            CrashPhaseScope crashPhase("update");
-            EntryStackGuard guard(AppEntry::Update);
-            appUpdateFunc();
-        }
-        wctx.inUpdate = false;
-    }
-
-    // Update processing of one main-loop frame when update is NOT synced to
-    // draw (setIndependentFps). Split out of _frame_cb so the stepping can be
-    // driven headless (core/tests/frameTiming).
-    //   VSYNC:        one update per frame, measured dt.
-    //   fixed Hz:     accumulator steps at the nominal 1/updateFps, at most
-    //                 getMaxUpdateSteps() per frame; time beyond the cap is
-    //                 dropped with a one-time warning (#228).
-    //   EVENT_DRIVEN: no update.
-    inline void runIndependentUpdates(std::chrono::steady_clock::time_point now) {
-        auto& wctx = mainWindowContext();
-        auto& loop = mainLoop();
-        if (loop.updateTargetFps == VSYNC) {
-            runMainUpdate();
-            recordUpdateRateSample(wctx, wctx.updateDeltaTime, 1.0);
-        } else if (loop.updateTargetFps > 0) {
-            if (!loop.lastUpdateTimeInitialized) {   // first frame, or just after a mode switch
-                loop.lastUpdateTime = now;
-                loop.lastUpdateTimeInitialized = true;
-            }
-            double updateInterval = 1.0 / loop.updateTargetFps;
-            double elapsed = std::chrono::duration<double>(now - loop.lastUpdateTime).count();
-            loop.lastUpdateTime = now;
-
-            FixedStepAdvance adv = advanceFixedStep(loop.updateAccumulator, elapsed, updateInterval,
-                                                    getMaxUpdateSteps());
-            if (adv.droppedTime > 0.0) {
-                warnUpdateStepsDropped(FixedStepLoop::Main, adv.droppedTime, updateInterval, adv.steps);
-            }
-            // The frame's steps are the latest adv.steps intervals on the
-            // loop's timeline, ending one leftover accumulator before `now`.
-            const double leftover = loop.updateAccumulator;
-            int ran = 0;
-            for (; ran < adv.steps; ++ran) {
-                // setFps()/setIndependentFps() from inside update(): the new
-                // mode starts next frame; don't finish this frame's old steps.
-                if (!loop.lastUpdateTimeInitialized) break;
-                double behind = leftover + (adv.steps - 1 - ran) * updateInterval;
-                auto stepTime = now - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                                          std::chrono::duration<double>(behind));
-                runMainUpdate(updateInterval, stepTime);
-            }
-            // Measured rate (#228): the time the steps consumed, in steps
-            // (fractional: whole steps plus the accumulator's progress), over
-            // the wall time. Dropped time and steps cut short don't count.
-            double consumed = (elapsed - adv.droppedTime) / updateInterval - (adv.steps - ran);
-            recordUpdateRateSample(wctx, elapsed, consumed);
-        }
-    }
-
-    // Draw decision of one main-loop frame (before _frame_cb's capture
-    // override). Split out of _frame_cb so it can be driven headless.
-    //   VSYNC:        every frame.
-    //   fixed fps:    frame skipping; at most one draw per tick, with a
-    //                 half-tick tolerance so a target at or just above the
-    //                 display rate (setFps(60) on a 59.94 Hz display) draws
-    //                 every tick instead of skipping frames at irregular
-    //                 intervals (#228).
-    //   EVENT_DRIVEN: only on redraw().
-    inline bool mainLoopShouldDraw(std::chrono::steady_clock::time_point now) {
-        auto& loop = mainLoop();
-        if (!loop.lastDrawTimeInitialized) {   // first frame, or just after a mode switch
-            loop.lastDrawTime = now;
-            loop.lastDrawTimeInitialized = true;
-        }
-        if (loop.drawTargetFps == VSYNC) return true;
-        if (loop.drawTargetFps > 0) {
-            double drawInterval = 1.0 / loop.drawTargetFps;
-            double elapsed = std::chrono::duration<double>(now - loop.lastDrawTime).count();
-            loop.lastDrawTime = now;
-            return frameSkipShouldTick(loop.drawAccumulator, elapsed, drawInterval);
-        }
-        return loop.redrawCount > 0;
-    }
-
-    // One main-loop frame up to the draw decision (before _frame_cb's capture
-    // override): the frame's time sample, so getFrameElapsedTime() reads the
-    // same value in every update step and the draw of this frame; work queued
-    // for the main thread; the updates when update runs independently of draw
-    // (a draw-synced update runs with the draw, runSyncedUpdate). Returns
-    // whether this frame draws. Split out of _frame_cb so the whole sequence
-    // can be driven headless (core/tests/frameTiming).
-    inline bool beginMainLoopFrame(std::chrono::steady_clock::time_point now) {
+    // Process-wide services run once on the main native tick, independently
+    // of whether that window's scheduler chooses to update or draw.
+    inline void runMainLoopPrelude() {
         auto resourceLoads = takeResourceLoadBatch();
-        sampleFrameTime(mainWindowContext());
-
         {
             // The queued work below runs app code: one entry point (#349).
             EntryStackGuard guard(AppEntry::Prelude);
@@ -2727,25 +2549,18 @@ namespace internal {
             #endif
         }
 
-        // Delta time is written into the main window's context; secondary
-        // windows measure their own delta in their tick (windowTick,
-        // core/platform).
-        if (!mainLoop().updateSyncedToDraw) {
-            runIndependentUpdates(now);
-        }
+    }
 
+    // Headless test seam for the original main-loop scheduling sequence.
+    // Native windows use runWindowTick for the complete shared sequence.
+    inline bool beginMainLoopFrame(std::chrono::steady_clock::time_point now) {
+        sampleFrameTime(currentWindowContext());
+        runMainLoopPrelude();
+        if (!mainLoop().updateSyncedToDraw) runIndependentUpdates(now);
         return mainLoopShouldDraw(now);
     }
 
-    // The update of a drawn frame when update is synced to draw (setFps:
-    // VSYNC, a fixed rate or EVENT_DRIVEN): one update per drawn frame with
-    // the measured dt, and its getFrameRate() sample. _frame_cb runs it after
-    // beginFrame(). Split out so it can be driven headless.
-    inline void runSyncedUpdate() {
-        if (!mainLoop().updateSyncedToDraw || !appUpdateFunc) return;
-        runMainUpdate();
-        recordUpdateRateSample(mainWindowContext(), mainWindowContext().updateDeltaTime, 1.0);
-    }
+    void runSyncedUpdate();
 
     inline void _frame_cb_impl() {
         // Guard against reentry (e.g. macOS modal dialogs pump the event loop)
@@ -2772,68 +2587,16 @@ namespace internal {
         crashFrame(sapp_frame_count());
         CrashPhaseScope crashPhase("frame");
 
-        // Frame time, queued work, independent updates and the draw decision.
-        bool shouldDraw = beginMainLoopFrame(std::chrono::steady_clock::now());
-
-        // Force a frame when a capture is pending so present()/afterFrame runs
-        // and the deferred screenshot (or MCP tc_get_screenshot) actually fires —
-        // otherwise a request arriving in a paused/event-driven app would never
-        // be served and a blocked MCP HTTP worker would hang.
-        if (!mainWindowContext().asyncScreenshots.pending.empty()
+        // Process-wide services run once, on the main tick only.
+        runMainLoopPrelude();
+        const bool forceDraw = !mainWindowContext().asyncScreenshots.pending.empty()
             || !mainWindowContext().pendingScreenshotPaths.empty()
-            #ifndef __EMSCRIPTEN__
+#ifndef __EMSCRIPTEN__
             || mcp::internal::hasDeferredResponses()
-            #endif
-        ) {
-            shouldDraw = true;
-        }
-
-        if (shouldDraw) {
-            beginFrame();
-
-            // If Update is synced to Draw, call Update here
-            runSyncedUpdate();
-            refreshWindowDrawingSize();
-
-            {
-                EntryStackGuard drawEntry(AppEntry::Draw);
-                {
-                    CrashPhaseScope drawPhase("draw");
-                    if (appDrawFunc) appDrawFunc();
-                }
-
-                // Reset shader stack if any shaders are still pushed
-                internal::resetShaderStack();
-
-                present();
-            }
-
-            // After present(): swapchain committed, outside any pass. Safe point
-            // for end-of-frame readback (e.g. VideoRecorder auto-capture). Its
-            // listeners are app code: an entry point (#349).
-            {
-                EntryStackGuard guard(AppEntry::AfterFrame);
-                events().afterFrame.notify();
-            }
-
-            // Decrement redrawCount (don't go below 0)
-            auto& loop = mainLoop();
-            if (loop.redrawCount > 0) {
-                loop.redrawCount--;
-            }
-        } else {
-            // Offscreen passes/uploads also need a frame boundary, including
-            // work recorded by event handlers before this tick (#332).
-            if (tc_internal_gpu_frame_has_work()) {
-                internal::endGpuFrame();
-            }
-            // Skip Present when not drawing (prevent double-buffer flickering)
+#endif
+            ;
+        if (!runWindowTick(std::chrono::steady_clock::now(), sapp_frame_duration(), forceDraw))
             sapp_skip_present();
-        }
-
-        // afterFrame listeners and capture drains have finished. The native
-        // callback owns the Metal drawable and may release it on return.
-        mainWindowContext().clearFrameDrawable();
 
         // Save previous frame's mouse position
         internal::currentWindowContext().pmouseX = internal::currentWindowContext().mouseX;
@@ -2959,6 +2722,7 @@ namespace internal {
     }
 
     inline void _event_cb_impl(const sapp_event* ev) {
+        observeWindowVisibility(mainWindowContext(), ev->type);
         auto* previousWindow = currentWindowCtx();
         restoreWindowContext(nullptr);
         struct RestoreEventWindow {
@@ -2970,6 +2734,7 @@ namespace internal {
             }
         } restoreEventWindow{previousWindow};
         MainWindowDispatchScope dispatch;
+        WindowCallbackTimeScope callbackTime;
         CrashPhaseScope crashPhase("event dispatch");
         if (ev->type >= SAPP_EVENTTYPE_KEY_DOWN && ev->type <= SAPP_EVENTTYPE_TOUCHES_CANCELLED) {
             crashInput(static_cast<int>(ev->type), static_cast<int>(ev->mouse_x),
@@ -3221,12 +2986,7 @@ namespace internal {
                 int fbW = sapp_width();
                 int fbH = sapp_height();
                 
-                int w = static_cast<int>(fbW * scale);
-                int h = static_cast<int>(fbH * scale);
-
-                ResizeEventArgs args;
-                args.width = w;
-                args.height = h;
+                auto args = framebufferResizeArgs(fbW, fbH, pixelPerfectMode() ? 1.0f : getDpiScale());
                 events().windowResized.notify(args);
                 break;
             }
@@ -3317,7 +3077,6 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
         }
     };
     internal::appUpdateFunc = []() {
-        internal::updateFrameCount++;
         events().update.notify();
     };
     internal::appDrawFunc = []() { events().draw.notify(); };

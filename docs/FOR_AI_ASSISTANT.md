@@ -2029,9 +2029,9 @@ void unbindCursorImage(Cursor cursor)  // Removes a custom cursor image.
 
 ```cpp
 double getDeltaTime()  // Returns the current update's time step in seconds.
-uint64_t getDrawCount()  // Returns the main window's frame counter.
+uint64_t getDrawCount()  // Returns the current window's real draw count.
 float getFps()  // Returns the measured update rate.
-FpsSettings getFpsSettings()  // Returns the main loop's frame-rate configuration.
+FpsSettings getFpsSettings()  // Returns the current window's frame-rate configuration.
 uint64_t getFrameCount()  // Returns the current window's update counter.
 double getFrameRate()  // Returns the measured number of updates per second.
 uint64_t getUpdateCount()  // Return the current window's update counter.
@@ -3045,7 +3045,7 @@ std::string Font::wrapTextIfEnabled(const std::string & text) const  // Apply wr
 std::string Font::wrapTextVertical(const std::string & text) const  // Insert newlines to wrap vertical text into columns.
 ```
 
-### FpsSettings — Reports the main loop’s frame-rate configuration.
+### FpsSettings — Reports the current window’s frame-rate configuration.
 
 ```cpp
 ```

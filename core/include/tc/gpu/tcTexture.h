@@ -252,7 +252,7 @@ public:
             return;
         }
 
-        const uint64_t currentFrame = sapp_frame_count();
+        const uint64_t currentFrame = internal::deviceFrameCount();
         if (lastUpload_.image == image_.id && lastUpload_.frame == currentFrame) {
             logWarning() << "[Texture] loadCubemapData() called twice in same frame, skipped";
             return;
@@ -437,8 +437,8 @@ public:
 
             // DEVICE frame counter (Fix 3): sokol's one-update-per-image-per-
             // frame limit is a device constraint, so this must stay on
-            // sapp_frame_count(), NOT the per-window getFrameCount().
-            uint64_t currentFrame = sapp_frame_count();
+            // internal::deviceFrameCount(), NOT the per-window getFrameCount().
+            uint64_t currentFrame = internal::deviceFrameCount();
             if (lastUpload_.image == image_.id && lastUpload_.frame == currentFrame) {
                 logWarning() << "[Texture] loadData() called twice in same frame, skipped";
                 return;
@@ -498,7 +498,7 @@ public:
         if (width != width_ || height != height_ || channels != channels_) return;
 
         // Can only update each image once per device frame (sokol limitation)
-        uint64_t currentFrame = sapp_frame_count();
+        uint64_t currentFrame = internal::deviceFrameCount();
         if (lastUpload_.image == image_.id && lastUpload_.frame == currentFrame) {
             logWarning() << "[Texture] loadData() called twice in same frame, skipped";
             return;

@@ -211,7 +211,7 @@ public:
             } else {
                 if (pixels_ && width_ > 0 && height_ > 0) {
                     texture_.loadData(pixels_, width_, height_, 4);
-                    texUploadFrame_ = sapp_frame_count();
+                    texUploadFrame_ = internal::deviceFrameCount();
                     markFrameNew();
                 }
             }
@@ -244,9 +244,9 @@ public:
                 posterUploadPending_ = false;
                 posterPx_.clear(); posterCredit_.reset();
             } else if (posterPx_.isAllocated() && texture_.isAllocated()
-                       && texUploadFrame_ != sapp_frame_count()) {
+                       && texUploadFrame_ != internal::deviceFrameCount()) {
                 texture_.loadData(posterPx_.getData(), width_, height_, 4);
-                texUploadFrame_ = sapp_frame_count();
+                texUploadFrame_ = internal::deviceFrameCount();
                 posterUploadPending_ = false;
                 posterPx_.clear(); posterCredit_.reset();
             }
@@ -588,9 +588,9 @@ private:
         // now would be silently dropped and the screen would keep the stale
         // frame. Defer to the next update() in that case (the slot is free
         // there - or a new live frame supersedes the poster anyway).
-        if (freshTexture || texUploadFrame_ != sapp_frame_count()) {
+        if (freshTexture || texUploadFrame_ != internal::deviceFrameCount()) {
             texture_.loadData(px.getData(), width_, height_, 4);
-            texUploadFrame_ = sapp_frame_count();
+            texUploadFrame_ = internal::deviceFrameCount();
             posterUploadPending_ = false;
             posterPx_.clear(); posterCredit_.reset();
         } else {
@@ -609,7 +609,7 @@ private:
             std::lock_guard<std::mutex> lock(mutex_);
             std::memset(pixels_, 0, width_ * height_ * 4);
             texture_.loadData(pixels_, width_, height_, 4);
-            texUploadFrame_ = sapp_frame_count();
+            texUploadFrame_ = internal::deviceFrameCount();
         }
     }
 

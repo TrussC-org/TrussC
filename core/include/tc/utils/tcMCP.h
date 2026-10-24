@@ -294,7 +294,7 @@ struct DeferredResponse {
     std::shared_ptr<std::promise<ReplyThunk>> response;  // unblocks the HTTP worker
     std::function<ReplyThunk()> makeEnvelope;            // main stage → worker thunk
     const void* target = nullptr;                        // window to run in (null = main)
-    std::chrono::steady_clock::time_point deadline;      // targeted: give up after this
+    std::chrono::steady_clock::time_point deadline;      // give up without a frame after this
     // Registration owner of the code the producer runs (DeferralState::owner):
     // a hot reload guest generation, or null for host code. When that owner
     // is removed, removeRegistrationsOwnedBy() answers the entry with
@@ -305,7 +305,7 @@ struct DeferredResponse {
     bool ownerRetired = false; // inert before capture destruction can reenter a drain
 };
 
-// A targeted deferral whose window renders no frame in this time (minimized,
+// A deferral whose window renders no frame in this time (minimized,
 // hidden, throttled very low, closed) is answered with an error instead of
 // leaving the HTTP worker blocked.
 inline constexpr std::chrono::seconds kTargetedDeferralTimeout{5};
@@ -399,9 +399,12 @@ inline void completeRetiredResponse(DeferredResponse& entry) noexcept {
 // present(): the main window from an events().afterFrame listener, a secondary
 // window from its tick. Only the main part of each envelope runs here; the
 // returned thunk executes on the HTTP worker. The main window's call also
-// answers targeted entries that ran past their deadline.
-inline void drainDeferredResponses(const void* targetWindow = nullptr) {
-    const auto now = std::chrono::steady_clock::now();
+// answers entries that ran past their deadline. Non-presenting ticks use
+// frameAvailable=false: retry producers later, but still answer expired
+// requests (including main captures) without attempting a GPU readback.
+inline void drainDeferredResponses(const void* targetWindow = nullptr,
+                                   bool frameAvailable = true,
+                                   std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()) {
     std::vector<internal::DeferredResponse> ready;
     std::vector<internal::DeferredResponse> expired;
     {
@@ -410,8 +413,8 @@ inline void drainDeferredResponses(const void* targetWindow = nullptr) {
         if (list.empty()) return;
         std::vector<internal::DeferredResponse> keep;
         for (auto& d : list) {
-            if (d.target == targetWindow) ready.push_back(std::move(d));
-            else if (!targetWindow && d.target && now >= d.deadline) expired.push_back(std::move(d));
+            if (frameAvailable && d.target == targetWindow) ready.push_back(std::move(d));
+            else if ((!targetWindow || d.target == targetWindow) && now >= d.deadline) expired.push_back(std::move(d));
             else keep.push_back(std::move(d));
         }
         list.swap(keep);

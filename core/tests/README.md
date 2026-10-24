@@ -724,6 +724,9 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   exits, cleanup and exit codes, main-thread dispatch, signal reasons, clean
   consecutive runs, and deterministic 100-step catch-up passes that stop only
   for uncancellable exits. No display or timing-dependent assertions.
+- `secondaryTimerCreation/`: native #307 pre-creation delta regression with deterministic timestamps; the same source runs on the pre-Q2 base. Use `--display`.
+- `windowTick`: #239 Q2 / #307 / #984 common-tick scheduling, listener timers, frame samples, read-only FPS, real draw counts, headless zero draws and fractional DPI conversion. `--display` checks native presentation and main clear color/visibility, hidden-main updates while a visible secondary draws, upload-only GPU boundaries, and non-throwing invalid-swapchain retry. Hidden main drawing is skipped in idle EVENT_DRIVEN mode or retains configured/native pacing.
+  Its deterministic tests also cover capture retry/expiry during persistent admission failure without afterFrame. `sh core/tests/windowTick/egl-wait-test` extracts the production EGL frame function and checks readable-fd wake-up, Xlib-buffered input, work/deadline accounting, EINTR and no catch-up without sleep-duration assertions.
 - `frameTiming/` — time handling (#228, #229): one steady elapsed clock with its
   origin at program start, `resetElapsedTimeCounter()` as a display offset only,
   `getFrameElapsedTime()` constant within a frame (through the main loop's frame

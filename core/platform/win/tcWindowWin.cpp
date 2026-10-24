@@ -75,81 +75,21 @@ void windowTickImpl(sapp_window swin, void* user) {
     ctx.swapchainTarget.viewport = {0, 0, (float)fbw, (float)fbh, true};
     ctx.dpiScale = sapp_window_dpi_scale(swin);
 
-    // Per-window frame-rate throttle (Window::setFps): the DXGI waitable keeps
-    // pacing at the display's vsync; skip the tick cheaply (before beginFrame,
-    // before advancing the per-window delta/frame count) when throttled down.
-    if (!internal::windowThrottleShouldTick(ctx)) return;
-
-    auto* prev = internal::currentWindowCtx();
+    auto* previous = internal::currentWindowCtx();
     internal::restoreWindowContext(&ctx);
-
-    // Keep a RectNode root in sync with the window's logical size (same
-    // contract as the main App on SAPP_EVENTTYPE_RESIZED).
-    win->syncRootSize((float)sapp_window_width(swin), (float)sapp_window_height(swin));
-
-    // Per-window delta time: wall-clock between THIS window's processed
-    // ticks, so getDeltaTime() inside this window's update/draw is correct
-    // even when its display runs at a different refresh rate than the main
-    // window's. A long gap (occlusion) yields one large delta, exactly like
-    // an event-driven main window.
-    {
-        auto callNow = std::chrono::high_resolution_clock::now();
-        if (!ctx.lastUpdateCallTimeInitialized) {
-            ctx.lastUpdateCallTimeInitialized = true;
-            ctx.updateDeltaTime = sapp_window_frame_duration(swin);
-        } else {
-            ctx.updateDeltaTime = std::chrono::duration<double>(callNow - ctx.lastUpdateCallTime).count();
+    struct RestoreContext {
+        internal::WindowContext* previous;
+        ~RestoreContext() {
+            internal::TeardownSteps steps;
+            steps.run("window tick context restoration", [&] { internal::restoreWindowContext(previous); });
+            internal::currentWindowCtx() = previous;
         }
-        ctx.lastUpdateCallTime = callNow;
-    }
+    } restore{previous};
+    const auto size = internal::framebufferResizeArgs(fbw, fbh, ctx.dpiScale);
+    win->syncRootSize((float)size.width, (float)size.height);
+    if (!internal::runWindowTick(std::chrono::steady_clock::now(), sapp_window_frame_duration(swin)))
+        sapp_tc_window_skip_present(swin);
 
-
-    // Per-window frame count (Fix 3): advance this window's own tick counter so
-    // getFrameCount()/getUpdateCount() report it while this context is active.
-    ctx.updateCount++;
-
-    // Own sokol_gl context, created lazily on the first tick (sgl is set up
-    // by then). New windows use the current shared budget after any resize.
-    if (ctx.swapchainTarget.resources().context.id == SG_INVALID_ID) {
-        sgl_context_desc_t cdesc = {};
-        cdesc.max_vertices = internal::sglBudget().maxVertices;
-        cdesc.max_commands = internal::sglBudget().maxCommands;
-        cdesc.color_format = SG_PIXELFORMAT_BGRA8;
-        cdesc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-        cdesc.sample_count = sapp_window_sample_count(swin);
-        ctx.swapchainTarget.resources().makeContext(cdesc, "a window");
-    }
-    sgl_set_context(ctx.swapchainTarget.resources().context);
-    sgl_defaults();
-
-    beginFrame();
-
-    {
-        // This window's update() is an entry point (#349); its draw is
-        // contained at present().
-        internal::EntryStackGuard guard(internal::AppEntry::Update);
-        win->events().update.notify();
-    }
-
-    {
-        internal::refreshWindowDrawingSize();
-        internal::EntryStackGuard drawEntry(internal::AppEntry::Draw);
-        const Color& cc = win->clearColor_;
-        clear(cc.r, cc.g, cc.b, cc.a);
-        win->events().draw.notify();
-
-        present();
-    }
-    {
-        // This window's afterFrame listeners are an entry point (#349).
-        internal::EntryStackGuard guard(internal::AppEntry::AfterFrame);
-        win->events().afterFrame.notify();
-    }
-    // Drain this window's saveScreenshot() queue while ITS context (and its
-    // lastSwapchainDrawable) is current — must run before we restore prev.
-    internal::drainPendingScreenshots();
-
-    internal::restoreWindowContext(prev);
 }
 
 void windowTick(sapp_window swin, void* user) noexcept {
@@ -163,6 +103,8 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
                          internal::WindowContext& ctx) {
     internal::EntryStackGuard guard(internal::AppEntry::Event,
         internal::eventEntryName(ev, ctx.mousePressed && ctx.mouseButton >= 0));
+
+    internal::WindowCallbackTimeScope callbackTime;
 
     // Raw listeners can change pointer lock; snapshot this move's reliability.
     const bool recoverButtonsOnMove = internal::mouseMoveHasReliableButtonBits(ev);
@@ -296,13 +238,21 @@ void windowEventImpl(const sapp_event* ev, sapp_window swin, void* user) {
     // or lazily recreate GPU resources after teardown.
     if (!win || !win->isOpen()) return;
     auto& ctx = win->context();
+    internal::observeWindowVisibility(ctx, ev->type);
     auto* prev = internal::currentWindowCtx();
     internal::restoreWindowContext(&ctx);
+    struct RestoreEventContext {
+        internal::WindowContext* previous;
+        ~RestoreEventContext() {
+            internal::TeardownSteps steps;
+            steps.run("window event context restoration", [&] { internal::restoreWindowContext(previous); });
+            internal::currentWindowCtx() = previous;
+        }
+    } restore{prev};
     {
         internal::WindowDispatchScope scope(*win);   // frame boundary, as in windowTick
         dispatchWindowEvent(ev, swin, win, ctx);
     }
-    internal::restoreWindowContext(prev);
 }
 
 void windowEvent(const sapp_event* ev, sapp_window swin, void* user) noexcept {
@@ -328,6 +278,7 @@ namespace trussc {
 // invalid native handle uses the backend's unit DPI without creating a window.
 namespace internal {
 void dispatchSecondaryWindowEventForTests(const sapp_event* ev, Window& win) {
+    observeWindowVisibility(win.context(), ev->type);
     dispatchWindowEvent(ev, sapp_window{0}, &win, win.context());
 }
 // Display-test seam: use the native handle, DPI conversion and frame boundary.
@@ -433,12 +384,12 @@ bool Window::isSecondaryFullscreen() const {
 
 int Window::getSecondaryWidth() const {
     auto* st = static_cast<AdapterState*>(native_);
-    return st ? sapp_window_width(st->win) : 0;
+    return st ? internal::framebufferToLogical(sapp_window_framebuffer_width(st->win), sapp_window_dpi_scale(st->win)) : 0;
 }
 
 int Window::getSecondaryHeight() const {
     auto* st = static_cast<AdapterState*>(native_);
-    return st ? sapp_window_height(st->win) : 0;
+    return st ? internal::framebufferToLogical(sapp_window_framebuffer_height(st->win), sapp_window_dpi_scale(st->win)) : 0;
 }
 
 bool Window::isSecondaryOccluded() const {

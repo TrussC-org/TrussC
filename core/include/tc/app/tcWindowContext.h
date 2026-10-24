@@ -179,12 +179,15 @@ struct WindowContext {
     // adapter supplies this; other backends have a shared device context.
     void (*activateNative)(void*) = nullptr;
 
-    // --- per-window frame count ---
-    // getFrameCount()/getUpdateCount() resolve through the current context.
-    // The MAIN window keeps using internal::updateFrameCount (bit-identical to
-    // the old global, and the value the hot-reload host mirrors); secondary
-    // windows advance THIS counter once per tick. See tcGlobal.cpp.
+    // Scheduler and counters live with the host-owned window, across App swaps.
+    MainLoopState loop;
     uint64_t updateCount = 0;
+    uint64_t drawCount = 0;
+    double tickDuration = 0.0;
+    bool tickActive = false;
+    bool suspended = false;
+    bool visibilityPaused = false;
+    std::chrono::steady_clock::time_point tickTime{};
 
     // --- lighting / material / environment (per window) ---
     // Moved out of the tcLightingState.h process globals so each window has its
@@ -204,17 +207,9 @@ struct WindowContext {
     // getDeltaTime()/getFrameRate()/getFrameElapsedTime() resolve through the
     // current context, so a window ticking at 60 Hz next to a 120 Hz main
     // window sees its own real per-tick delta (measured wall-clock between THIS
-    // window's update calls; the nominal 1/updateFps in the main window's
+    // window's update calls; the nominal 1/updateFps in its
     // fixed-Hz update mode).
     double updateDeltaTime = 0.0;
-    // Secondary windows: their platform tick (windowTick) measures the delta
-    // with these, and records none of the frame time, update time or rate
-    // samples below. Left as is until the multi-window work that follows #219.
-    std::chrono::high_resolution_clock::time_point lastUpdateCallTime;
-    bool lastUpdateCallTimeInitialized = false;
-    // Main window: the main loop (beginMainUpdateCall in TrussC.h) measures
-    // the delta on the steady clock instead, so a wall-clock step can't skew
-    // the dt that Node timers count down with.
     std::chrono::steady_clock::time_point mainUpdateCallTime;
     bool mainUpdateCallTimeInitialized = false;
     // Uptime sampled once at the start of this window's frame (getFrameElapsedTime).
@@ -229,6 +224,8 @@ struct WindowContext {
     std::chrono::steady_clock::time_point updateTime{};
     bool inUpdate = false;
     bool fixedStepUpdate = false;
+    // Draw/event timing scopes are measured callbacks, not update calls.
+    bool inCallbackClock = false;
     // Measured update rate (getFrameRate): per frame, the wall time it covered
     // and the update steps it ran. Recorded by the loops, read-only in the getter.
     // Fixed-step loops record fractional steps (the time they consumed divided
@@ -239,27 +236,6 @@ struct WindowContext {
     double rateSteps[rateSampleCount] = {};
     int rateIndex = 0;
     int rateCount = 0;
-    // Frame rate measurement of a secondary window, which records no rate
-    // samples: getFrameRate() averages the last 10 deltas it read (10-frame
-    // moving average), as before.
-    double frameTimeBuffer[10] = {};
-    int frameTimeIndex = 0;
-    bool frameTimeBufferFilled = false;
-
-    // --- per-window frame-rate throttle (Window::setFps / global setFps) ---
-    // A secondary window's native display link always fires at the display's
-    // vsync; we cannot portably retune it, so a lower target rate is realised
-    // by SKIPPING display ticks via a time accumulator (windowThrottleShouldTick
-    // in the native windowTick, before beginFrame). throttleFps <= 0 = free-run
-    // at vsync, the default and the pre-Phase-2 behavior; a target at or above
-    // the display rate also runs every tick (half-tick tolerance). The MAIN
-    // window ignores this field entirely (its loop is driven by
-    // updateTargetFps/drawTargetFps in _frame_cb).
-    float throttleFps = 0.0f;
-    double throttleAccumulator = 0.0;
-    std::chrono::steady_clock::time_point throttleLastTime;
-    bool throttleLastTimeInitialized = false;
-
     // --- misc per-window ---
     // Bound (security): OS clipboard text needs finite storage in the window backend. Overflow truncates or rejects oversized text, depending on the backend.
     int clipboardSize = 65536;   // Clipboard buffer size (for overflow check)
@@ -349,29 +325,37 @@ void sampleFrameTime(WindowContext& ctx);
 // fractional).
 void recordUpdateRateSample(WindowContext& ctx, double duration, double steps);
 
-// ---------------------------------------------------------------------------
-// Per-window frame-rate throttle (T1). Shared by every platform's windowTick.
-// Called once per native display tick BEFORE beginFrame: returns true to run
-// this window's update/draw, false to skip it cheaply (the display link keeps
-// firing at vsync — this only decides whether we do the frame's work).
-// Free-run (throttleFps <= 0) always ticks. Otherwise accumulate real elapsed
-// time and let one tick through per 1/fps interval, with a half-tick
-// tolerance so a target at or above the display rate runs every tick. Same
-// decision as the main loop's fixed-FPS draw skip (frameSkipShouldTick,
-// tcFrameTiming.h).
-// ---------------------------------------------------------------------------
-inline bool windowThrottleShouldTick(WindowContext& ctx) {
-    if (ctx.throttleFps <= 0.0f) return true;
-    auto now = std::chrono::steady_clock::now();
-    if (!ctx.throttleLastTimeInitialized) {
-        ctx.throttleLastTimeInitialized = true;
-        ctx.throttleLastTime = now;
-        return true;  // always run the first tick
-    }
-    double elapsed = std::chrono::duration<double>(now - ctx.throttleLastTime).count();
-    ctx.throttleLastTime = now;
-    return frameSkipShouldTick(ctx.throttleAccumulator, elapsed, 1.0 / ctx.throttleFps);
-}
+// Timers created from event/draw listeners use this window's measured clock,
+// never a stale fixed-step mark. Nested dispatch restores its caller's scope.
+class WindowCallbackTimeScope {
+    WindowContext& ctx_;
+    bool inUpdate_;
+    bool fixed_;
+    bool callback_;
+    std::chrono::steady_clock::time_point time_;
+public:
+    WindowCallbackTimeScope();
+    ~WindowCallbackTimeScope();
+};
+
+// One conversion for resize notifications and getters, preserving main's truncation.
+using WindowClock = std::chrono::steady_clock::time_point (*)();
+WindowClock& windowClockForTests();
+std::chrono::steady_clock::time_point windowClockNow();
+int framebufferToLogical(int pixels, float dpi);
+ResizeEventArgs framebufferResizeArgs(int width, int height, float dpi);
+uint64_t deviceFrameCount(); // GPU upload guard; independent of window draw counts.
+
+// A deterministic clock / GPU seam used by the shared tick tests. Production
+// callers omit it and use the real frame and presentation path.
+struct WindowTickPresentation {
+    std::function<void()> begin;
+    std::function<bool()> present; // false: rendering/presentation was not admitted
+    std::function<void()> finish;
+};
+void observeWindowVisibility(WindowContext& ctx, sapp_event_type type);
+bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDuration,
+                   bool forceDraw = false, const WindowTickPresentation* presentation = nullptr);
 
 // ---------------------------------------------------------------------------
 // Active render-target pipeline helpers (moved from tcRenderTarget.h — they

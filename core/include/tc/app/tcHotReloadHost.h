@@ -355,10 +355,10 @@ inline int runBuildCommand(const vector<string>& argv, string& output) {
 // from windowResized() waits for the boundary instead of freeing or cleaning
 // up the App mid-callback.
 inline void seedReloadedAppSize(int framebufferWidth, int framebufferHeight, float dpiScale) {
-    const float scale = internal::pixelPerfectMode() ? 1.0f : (1.0f / dpiScale);
+    const auto size = internal::framebufferResizeArgs(framebufferWidth, framebufferHeight,
+        internal::pixelPerfectMode() ? 1.0f : dpiScale);
     internal::EntryStackGuard guard(internal::AppEntry::Event, "windowResized()");
-    internal::resizeMainApp(static_cast<int>(framebufferWidth * scale),
-                            static_cast<int>(framebufferHeight * scale));
+    internal::resizeMainApp(size.width, size.height);
 }
 
 struct Host {
@@ -653,7 +653,6 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     };
 
     internal::appUpdateFunc = []() {
-        internal::updateFrameCount++;
         events().update.notify();
     };
 
