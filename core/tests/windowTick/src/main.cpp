@@ -30,6 +30,36 @@ struct Probe : App {
     void update() override { ++updates; }
     void draw() override { ++draws; }
 };
+void independentTargets(Window& main) {
+    auto* previous = internal::currentWindowCtx();
+    Secondary secondary;
+    secondary.setFps(12);
+    internal::currentWindowCtx() = &secondary.context();
+    main.setIndependentFps(30, VSYNC);
+    check("Window::setIndependentFps targets main from secondary context",
+        main.context().loop.updateTargetFps == 30 && main.context().loop.drawTargetFps == VSYNC &&
+        !main.context().loop.updateSyncedToDraw);
+    check("main independent setter leaves secondary untouched",
+        secondary.context().loop.updateTargetFps == 12 && secondary.context().loop.drawTargetFps == 12 &&
+        secondary.context().loop.updateSyncedToDraw);
+    check("main independent setter restores secondary context", internal::currentWindowCtx() == &secondary.context());
+    internal::currentWindowCtx() = &main.context();
+    secondary.setIndependentFps(24, 8);
+    check("Window::setIndependentFps targets secondary from main context",
+        secondary.context().loop.updateTargetFps == 24 && secondary.context().loop.drawTargetFps == 8 &&
+        !secondary.context().loop.updateSyncedToDraw);
+    check("secondary independent setter leaves main untouched",
+        main.context().loop.updateTargetFps == 30 && main.context().loop.drawTargetFps == VSYNC &&
+        !main.context().loop.updateSyncedToDraw);
+    check("secondary independent setter restores main context", internal::currentWindowCtx() == &main.context());
+    internal::currentWindowCtx() = nullptr;
+    secondary.setIndependentFps(15, EVENT_DRIVEN);
+    check("independent setter restores null context", internal::currentWindowCtx() == nullptr);
+    check("independent setter targets secondary outside callbacks",
+        secondary.context().loop.updateTargetFps == 15 && secondary.context().loop.drawTargetFps == EVENT_DRIVEN &&
+        main.context().loop.updateTargetFps == 30 && main.context().loop.drawTargetFps == VSYNC);
+    internal::currentWindowCtx() = previous;
+}
 void setUnitApp(Window& window, std::shared_ptr<App> app) {
     window.setApp(std::move(app));
     internal::applyPendingAppForTests(window);
@@ -569,6 +599,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     auto& main = *internal::mainWindow();
     internal::WindowRequestAccess::openMain(main);
     internal::windowClockForTests() = readFakeClock;
+    independentTargets(main);
     nativeGatedTicks(main);
     exercise(main);
     hiddenInterval(main);

@@ -150,6 +150,9 @@ public:
     // Target update/draw rate of this window: VSYNC (-1), EVENT_DRIVEN (0),
     // or positive fps. OS tick sources cap the achievable draw rate.
     void setFps(float fps);
+    // Set separate update/draw rates for this window from anywhere, including
+    // another window's callbacks. Rate values follow trussc::setIndependentFps.
+    void setIndependentFps(float updateFps, float drawFps);
     float getFps() const { return ctx_.loop.drawTargetFps; }
 
     internal::WindowContext& context() { return ctx_; }
@@ -855,6 +858,13 @@ inline void Window::setFps(float fps) {
     internal::currentWindowCtx() = &ctx_;
     struct Restore { internal::WindowContext* previous; ~Restore() { internal::currentWindowCtx() = previous; } } restore{previous};
     trussc::setFps(fps);
+}
+inline void Window::setIndependentFps(float updateFps, float drawFps) {
+    // Select only the API context; changing a target needs no GPU switch.
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &ctx_;
+    struct Restore { internal::WindowContext* previous; ~Restore() { internal::currentWindowCtx() = previous; } } restore{previous};
+    trussc::setIndependentFps(updateFps, drawFps);
 }
 inline bool Window::isOccluded() const {
     if (!isOpen()) return false;

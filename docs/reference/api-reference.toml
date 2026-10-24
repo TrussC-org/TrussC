@@ -40543,6 +40543,31 @@ details.ko = '''
 '''
 related = ["Window::getFps"]
 
+["Window::setIndependentFps"]
+keywords = ["frame rate", "framerate", "update rate", "draw rate"]
+description.en = "Sets separate update and drawing rates for this window."
+description.ja = "このウィンドウの更新と描画のレートを個別に設定する。"
+description.ko = "이 윈도우의 업데이트와 그리기 빈도를 개별적으로 설정한다."
+details.en = '''
+- Targets this window from anywhere, including another window's callbacks. The global `setIndependentFps()` targets the current window instead.
+- Both rates accept `VSYNC` (-1), `EVENT_DRIVEN` (0), or positive fps. See `setIndependentFps` for timing and update-step limits, and `Window::setFps` for synchronized updates and drawing.
+- For main-thread use, see `Window::setApp`.
+'''
+details.ja = '''
+- 別のウィンドウのコールバック内を含め、どこから呼んでもこのウィンドウを対象にします。グローバルの `setIndependentFps()` は現在のウィンドウを対象にします。
+- 両レートに `VSYNC`（-1）、`EVENT_DRIVEN`（0）、または正の fps を指定できます。計時と更新ステップの上限は `setIndependentFps`、更新と描画を同期させる場合は `Window::setFps` を参照してください。
+- メインスレッドでの使用は `Window::setApp` を参照してください。
+'''
+details.ko = '''
+- 다른 윈도우의 콜백을 포함해 어디서 호출해도 이 윈도우를 대상으로 합니다. 전역 `setIndependentFps()`는 현재 윈도우를 대상으로 합니다.
+- 두 빈도 모두 `VSYNC`(-1), `EVENT_DRIVEN`(0), 또는 양수 fps를 받습니다. 시간 측정과 업데이트 스텝 제한은 `setIndependentFps`를, 업데이트와 그리기를 동기화하려면 `Window::setFps`를 참조하세요.
+- 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
+'''
+related = ["Window::setFps", "setIndependentFps"]
+snippet = '''
+win->setIndependentFps(30, VSYNC);  // this window: update 30 Hz, draw at its display rate
+'''
+
 ["Window::getFps"]
 keywords = ["frame rate", "framerate", "throttle", "target"]
 description.en = "Returns this window's target frame rate."
@@ -45874,7 +45899,7 @@ details.ja = '''
 '''
 details.ko = '''
 - 보조 윈도우의 setup/event/update/draw 콜백을 포함해 현재 윈도우에 적용됩니다. 각 윈도우는 자체 스케줄러를 가지며 틱 빈도와 가시성은 OS를 따릅니다.
-- 목표값 `updateFps`와 `drawFps`, `synced` 플래그, `actualVsyncFps`를 담은 `FpsSettings` 복사본을 반환합니다. 보조 윈도우에서 호출해도 메인 루프 설정을 반환합니다.
+- 목표값 `updateFps`와 `drawFps`, `synced` 플래그, `actualVsyncFps`를 담은 `FpsSettings` 복사본을 반환합니다. 보조 윈도우의 콜백에서 호출하면 해당 윈도우의 설정을 반환합니다.
 - 목표값은 `VSYNC`(`-1`), `EVENT_DRIVEN`(`0`), 또는 양의 레이트입니다. `synced`는 업데이트와 그리기가 일대일로 동작하도록 함께 설정되었음을 나타냅니다.
 - 두 목표값 중 하나가 `VSYNC`이면 `actualVsyncFps`를 이 윈도우의 네이티브 틱 간격의 역수으로 추정합니다. 그 외의 경우나 시간이 양수가 아니면 0입니다.
 '''

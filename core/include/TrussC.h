@@ -1963,6 +1963,7 @@ inline void restartLoopTiming(bool update, bool draw) {
 } // namespace internal
 
 // Set FPS (update and draw synchronized, 1:1)
+// Acts on the current window (inside a window's callbacks, that window).
 // VSYNC: sync to monitor refresh rate
 // EVENT_DRIVEN: only on redraw() call
 // > 0: fixed fps
@@ -1981,7 +1982,8 @@ inline void setFps(float fps) {
 
 // Set independent FPS for update and draw (not synchronized)
 // Each loop runs at its own rate, may cause timing variations.
-// Acts on the current window, including setup and event callbacks.
+// Acts on the current window (inside a window's callbacks, that window).
+// Use Window::setIndependentFps to target a particular window from anywhere.
 inline void setIndependentFps(float updateFps, float drawFps) {
     // Only a real change restarts the timing (per loop): re-applying the
     // current rates every frame must not starve update or skip draws, and
@@ -2197,9 +2199,9 @@ inline bool queueScreenshot(const std::filesystem::path& path) {
 
     internal::currentWindowContext().pendingScreenshotPaths.push_back(std::move(resolved));
     // Guarantee a present() (and thus the afterFrame drain) even when paused.
-    // redraw() only pokes the MAIN loop's redrawCount, so it applies to the main
-    // window only. A secondary window free-runs at vsync while visible and drains
-    // this queue on its next tick, so no redraw is needed (nor available) there.
+    // Main keeps its explicit redraw request. For every window, the pending
+    // capture itself forces draw admission on the next renderable tick,
+    // including a secondary using EVENT_DRIVEN drawing.
     if (internal::currentWindowContext().isMain) {
         redraw();
     }

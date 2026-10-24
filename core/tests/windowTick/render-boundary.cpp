@@ -290,6 +290,18 @@ TC_CORE_TEST_MAIN() {
         pendingShadowConsumer(other);
         internal::currentWindowCtx() = nullptr;
     }
-    // GPU globals intentionally live until process exit, matching offscreen probes.
+    // All probe FBOs, meshes, listeners and window targets have now released
+    // their resources. Drain the same retirement queue used at frame boundaries
+    // while EGL is current, then use the framework shutdown (font, sgl, sg).
+    // Device-owned shader/pipeline caches are reclaimed by sg_shutdown there.
+    internal::drainPendingGpuDestroys();
+    check("resource release leaves no GL error", glGetError() == GL_NO_ERROR);
+    trussc::cleanup();
+    check("framework shuts down sokol", !sg_isvalid());
+    check("shutdown leaves no GL error", glGetError() == GL_NO_ERROR);
+    check("EGL releases current context", eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT));
+    check("EGL destroys context", eglDestroyContext(display, context));
+    check("EGL destroys surface", eglDestroySurface(display, surface));
+    check("EGL terminates", eglTerminate(display));
     return failures ? 1 : 0;
 }
