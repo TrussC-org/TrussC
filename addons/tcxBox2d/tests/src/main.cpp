@@ -766,7 +766,7 @@ static void step(box2d::World& world, int n) {
     for (int i = 0; i < n; ++i) {
         auto& ctx = internal::currentWindowContext();
         double savedDelta = ctx.updateDeltaTime;
-        ++internal::updateFrameCount; ++ctx.updateCount;
+        ++ctx.updateCount;
         ctx.updateDeltaTime = 1.0 / 60;
         world.update();
         ctx.updateDeltaTime = savedDelta;
@@ -2575,15 +2575,15 @@ static void testDeprecatedEventAliases(box2d::World& world) {
 struct WorldTestFrames {
     decltype(internal::currentWindowContext()) ctx = internal::currentWindowContext();
     double savedDelta = ctx.updateDeltaTime;
-    uint64_t savedMainFrame = internal::updateFrameCount;
+    uint64_t savedMainFrame = internal::mainWindowContext().updateCount;
     uint64_t savedWindowFrame = ctx.updateCount;
     ~WorldTestFrames() {
         ctx.updateDeltaTime = savedDelta;
-        internal::updateFrameCount = savedMainFrame;
+        internal::mainWindowContext().updateCount = savedMainFrame;
         ctx.updateCount = savedWindowFrame;
     }
     void update(box2d::World& world, double dt = 1.0 / 60.0) {
-        ++internal::updateFrameCount;
+        ++internal::mainWindowContext().updateCount;
         ++ctx.updateCount;
         ctx.updateDeltaTime = dt;
         world.update();
@@ -2976,7 +2976,7 @@ static void testClearReuse() {
               mod->getBody()->GetType() == b2_dynamicBody && !mod->getBody()->GetFixtureList()->IsSensor());
         for (int i = 0; i < 4; ++i) {
             if (automatic) {
-                ++internal::updateFrameCount;
+                ++internal::mainWindowContext().updateCount;
                 ++frames.ctx.updateCount;
                 frames.ctx.updateDeltaTime = 1.0 / 60.0;
                 tc::events().update.notify();

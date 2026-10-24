@@ -4667,6 +4667,7 @@ struct Cover_Window : af::Scope<Window> {
         (void)af::val<Window>().setClearColor(af::val<const Color>());
         (void)af::val<Window>().setFps(af::val<float>());
         (void)af::val<Window>().setFullscreen(af::val<bool>());
+        (void)af::val<Window>().setIndependentFps(af::val<float>(), af::val<float>());
         (void)af::val<Window>().setSize(af::val<int>(), af::val<int>());
         (void)af::val<Window>().setTitle(af::val<const std::string>());
         (void)af::val<Window>().toggleFullscreen();

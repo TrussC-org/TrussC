@@ -193,7 +193,7 @@ inline void runHeadlessUpdatePass(App& app, WindowContext& ctx,
         CrashPhaseScope updatePhase("update");
         // Services such as Box2d guard against stepping twice in one update.
         // Match the windowed loop's counter before delivering this step.
-        ++updateFrameCount;
+        ++ctx.updateCount;
         events().update.notify();
         headless::frameCount++;
     }
@@ -279,6 +279,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     // Headless apps run in the main window's (GPU-less) context: that is
     // where getDeltaTime() / getFrameRate() / getFrameElapsedTime() read.
     auto& ctx = internal::mainWindowContext();
+    ctx.drawCount = 0;
     internal::sampleFrameTime(ctx);
 
     // Create app instance. Owned by a shared_ptr, as runApp() owns the

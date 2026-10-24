@@ -6,7 +6,7 @@
 //
 // Each Window owns its App attachment. The runner owns the main Window;
 // secondary windows are kept alive by the handles returned by createWindow().
-// Native ticks and scheduling retain their platform-specific paths.
+// Native tick sources follow the OS; every window uses the shared scheduler.
 //
 // GPU resources (Texture / Fbo / Mesh / Font) live in the single shared
 // sokol_gfx context and can be used freely from any window.
@@ -119,15 +119,8 @@ public:
     int getWidth() const;    // logical size (matches the window's coordinates)
     int getHeight() const;
 
-    // Main currently returns false and retains the runner's pacing. For a
-    // secondary window, true while the OS reports it as not visible, so it renders no
-    // frames (its update/draw are paused until it is visible again). The
-    // signals are the ones that pause the window's tick: macOS: minimized,
-    // fully covered or on another Space (NSWindow occlusionState); Windows:
-    // minimized, or DXGI reports the window occluded; Linux (X11): minimized,
-    // or fully obscured (without a compositing manager). False for a closed
-    // window. A window can turn hidden or visible at any time, so this is a
-    // snapshot. The MCP screenshot tools use it to fail fast (#347).
+    // OS visibility snapshot used by the scheduler. Desktop backends expose
+    // occlusion/minimization; unsupported visibility queries return false.
     bool isOccluded() const;
 
     // Resize this window's content area to the given LOGICAL size (points),
@@ -152,23 +145,15 @@ public:
     bool isFullscreen() const;
     void toggleFullscreen() { setFullscreen(!isFullscreen()); }
 
-    void setClearColor(const Color& c) { clearColor_ = c; }
+    void setClearColor(const Color& c) { clearColor_ = c; clearColorSet_ = true; }
 
-    // Secondary-window target frame rate (throttle). The main Window still
-    // uses the runner's existing pacing; scheduler unification is separate.
-    //   fps <= 0            -> free-run at the display's vsync (default)
-    //   0 < fps < display   -> update/draw run at ~fps
-    //   fps >= display rate -> effectively free-run (nothing is skipped)
-    // The native display link always fires at vsync and cannot be portably
-    // retuned, so a lower rate is realised by skipping display ticks with a
-    // time accumulator (the skip bails before the frame's work, so it is cheap).
-    // Unlike the main loop this is a SINGLE rate: independent update/draw rates
-    // (setIndependentFps) and the event-driven redraw() loop are main-window
-    // only. getFps() returns the last target set here (0 = free-run), not a
-    // measured rate — use getFrameRate() from inside this window's tick for the
-    // measured value.
-    void setFps(float fps) { ctx_.throttleFps = fps; }
-    float getFps() const { return ctx_.throttleFps; }
+    // Target update/draw rate of this window: VSYNC (-1), EVENT_DRIVEN (0),
+    // or positive fps. OS tick sources cap the achievable draw rate.
+    void setFps(float fps);
+    // Set separate update/draw rates for this window from anywhere, including
+    // another window's callbacks. Rate values follow trussc::setIndependentFps.
+    void setIndependentFps(float updateFps, float drawFps);
+    float getFps() const { return ctx_.loop.drawTargetFps; }
 
     internal::WindowContext& context() { return ctx_; }
 
@@ -217,6 +202,7 @@ public:
         // the same path the main window uses on SAPP_EVENTTYPE_RESIZED.
         if (app_->getWidth() != wPts || app_->getHeight() != hPts) {
             ResizeEventArgs args; args.width = (int)wPts; args.height = (int)hPts;
+            internal::WindowCallbackTimeScope callbackTime;
             events_.windowResized.notify(args);
         }
     }
@@ -239,6 +225,7 @@ public:
     internal::WindowContext& ctx_;
     CoreEvents& events_;
     internal::RenderContext& render_;
+    bool clearColorSet_ = false; // main keeps the existing clear() default until explicitly set
     Color clearColor_ = Color(0.05f, 0.05f, 0.08f, 1.0f);
     // Fullscreen intent. Windows/Linux report isFullscreen() from this flag
     // (there is no cheap live query); macOS ignores it and reads the live
@@ -860,13 +847,29 @@ inline bool Window::isFullscreen() const {
     return ctx_.isMain ? isOpen() && sapp_is_fullscreen() : isSecondaryFullscreen();
 }
 inline int Window::getWidth() const {
-    return ctx_.isMain ? (isOpen() ? int(sapp_width() / sapp_dpi_scale()) : 0) : getSecondaryWidth();
+    return ctx_.isMain ? (isOpen() ? internal::framebufferToLogical(sapp_width(), sapp_dpi_scale()) : 0) : getSecondaryWidth();
 }
 inline int Window::getHeight() const {
-    return ctx_.isMain ? (isOpen() ? int(sapp_height() / sapp_dpi_scale()) : 0) : getSecondaryHeight();
+    return ctx_.isMain ? (isOpen() ? internal::framebufferToLogical(sapp_height(), sapp_dpi_scale()) : 0) : getSecondaryHeight();
+}
+inline void Window::setFps(float fps) {
+    // Select only the API context; changing a target needs no GPU switch.
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &ctx_;
+    struct Restore { internal::WindowContext* previous; ~Restore() { internal::currentWindowCtx() = previous; } } restore{previous};
+    trussc::setFps(fps);
+}
+inline void Window::setIndependentFps(float updateFps, float drawFps) {
+    // Select only the API context; changing a target needs no GPU switch.
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &ctx_;
+    struct Restore { internal::WindowContext* previous; ~Restore() { internal::currentWindowCtx() = previous; } } restore{previous};
+    trussc::setIndependentFps(updateFps, drawFps);
 }
 inline bool Window::isOccluded() const {
-    return ctx_.isMain ? false : isSecondaryOccluded(); // Main pacing is unchanged.
+    if (!isOpen()) return false;
+    if (auto hook = internal::windowOccludedHookForTests()) return hook(*this);
+    return ctx_.isMain ? sapp_window_occluded({0}) : isSecondaryOccluded();
 }
 
 inline std::shared_ptr<Window> createWindow(const WindowSettings& settings) {

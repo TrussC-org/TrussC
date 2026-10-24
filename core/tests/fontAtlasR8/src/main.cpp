@@ -271,7 +271,7 @@ public:
 
     void draw() override {
         clear(0.0f);
-        if (getFrameCount() < 3) return;
+        if (getDrawCount() < 3) return;
 
         // One frame: 150 glyphs never drawn before, one drawString() each.
         fbo_.begin(0.0f, 0.0f, 0.0f, 0.0f);

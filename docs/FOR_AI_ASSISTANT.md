@@ -1126,6 +1126,7 @@ Heavy compute lives in addons and leans on C++ speed. For example **tcxPhysics**
 
 TrussC keeps resource use small, so power draw is low — lightness helps battery, not just frame rate. Lowering draw frequency helps most:
 - `setFps(60)` for a fixed rate; `setFps(EVENT_DRIVEN)` for "draw only when `redraw()` is called."
+- `setFps()`, `setIndependentFps()` and `redraw()` target the current window (inside a window’s callbacks, that window). `win->setFps()` and `win->setIndependentFps()` target that window from anywhere on the main thread.
 - `setIndependentFps(updateFps, drawFps)` separates update and draw rates. e.g. `setIndependentFps(60, EVENT_DRIVEN)` runs logic/timers steadily at 60fps but draws only when the screen changes via `redraw()` — an idle UI barely touches the GPU.
 - Sentinels: `VSYNC` (-1, monitor sync = default) and `EVENT_DRIVEN` (0). `redraw(count = 1)` requests a draw; `getFpsSettings()` reads the current rate.
 A barely-redrawing UI can run for many hours on mobile.
@@ -2032,9 +2033,9 @@ void unbindCursorImage(Cursor cursor)  // Removes a custom cursor image.
 
 ```cpp
 double getDeltaTime()  // Returns the current update's time step in seconds.
-uint64_t getDrawCount()  // Returns the main window's frame counter.
+uint64_t getDrawCount()  // Returns the current window's real draw count.
 float getFps()  // Returns the measured update rate.
-FpsSettings getFpsSettings()  // Returns the main loop's frame-rate configuration.
+FpsSettings getFpsSettings()  // Returns the current window's frame-rate configuration.
 uint64_t getFrameCount()  // Returns the current window's update counter.
 double getFrameRate()  // Returns the measured number of updates per second.
 uint64_t getUpdateCount()  // Return the current window's update counter.
@@ -3048,7 +3049,7 @@ std::string Font::wrapTextIfEnabled(const std::string & text) const  // Apply wr
 std::string Font::wrapTextVertical(const std::string & text) const  // Insert newlines to wrap vertical text into columns.
 ```
 
-### FpsSettings — Reports the main loop’s frame-rate configuration.
+### FpsSettings — Reports the current window’s frame-rate configuration.
 
 ```cpp
 ```
@@ -4674,6 +4675,7 @@ void Window::setApp(std::shared_ptr<App> app)  // Requests an App attachment or 
 void Window::setClearColor(const Color & c)  // Sets this window's background clear color.
 void Window::setFps(float fps)  // Sets this window's target frame rate.
 void Window::setFullscreen(bool full)  // Sets this window's fullscreen mode.
+void Window::setIndependentFps(float updateFps, float drawFps)  // Sets separate update and drawing rates for this window.
 void Window::setSize(int width, int height)  // Resizes this window's content area.
 void Window::setTitle(const std::string & title)  // Sets this window's title.
 void Window::toggleFullscreen()  // Toggles this window's fullscreen mode.

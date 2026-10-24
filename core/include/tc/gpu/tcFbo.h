@@ -533,23 +533,23 @@ private:
     void markDrawnThisFrame_() const {
         diagnoseActiveSampling_();
         drawnThisFrame_ = true;
-        lastDrawFrame_ = getFrameCount();
+        lastDrawFrame_ = internal::resourceFrameKey();
     }
 
     // Frame-boundary sync. Once the frame that recorded the versions has
     // flushed, all pool entries are reusable again. Keyed on the per-window
-    // getFrameCount() (Fix 3): each window records + flushes (sg_commit) its Fbo
+    // internal::resourceFrameKey() (Fix 3): each window records + flushes (sg_commit) its Fbo
     // draws within its own tick, so a per-window frame boundary is correct.
     //
     // Supported contract / cross-window limitation: an Fbo must be drawn from a
     // SINGLE window within a given frame. Drawing one Fbo object from multiple
-    // windows in the same frame is unsupported — getFrameCount() is per-window
+    // windows in the same frame is unsupported — internal::resourceFrameKey() is per-window
     // (PR #200), so two windows' independent counters can coincide, making this
     // early-return skip the version promote (stale snapshot / unbounded version
     // growth). There is no clean fix for the key: sapp_frame_count() would break
     // secondary-window frame boundaries. Keep one Fbo to one window per frame.
     void syncVersionFrame_() {
-        uint64_t fc = getFrameCount();
+        uint64_t fc = internal::resourceFrameKey();
         if (fc == poolFrame_) return;
         poolFrame_ = fc;
         // Promote the latest content into the primary slot by swapping

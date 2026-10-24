@@ -991,7 +991,7 @@ private:
     // Destroy old GPU resources that are safe to release (previous frame's sgl
     // commands have already been consumed by _sgl_draw)
     void flushPendingDestroys() {
-        uint64_t currentFrame = sapp_frame_count();
+        uint64_t currentFrame = internal::deviceFrameCount();
         if (lastDestroyFlushFrame_ == currentFrame) return;
         lastDestroyFlushFrame_ = currentFrame;
 

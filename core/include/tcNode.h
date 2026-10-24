@@ -77,6 +77,7 @@ namespace internal {
     // and whether that update is a fixed-Hz step (WindowContext::updateTime /
     // inUpdate / fixedStepUpdate, tcGlobal.cpp).
     std::chrono::steady_clock::time_point getUpdateTime();
+    std::chrono::steady_clock::time_point windowClockNow();
     bool isInUpdate();
     bool isFixedStepUpdate();
 }
@@ -1389,17 +1390,15 @@ public:
     // fixed-Hz mode), so they follow the loop, pause while the node is
     // inactive, and are not affected by resetElapsedTimeCounter(). A timer
     // starts counting with the next update after the one it was created in.
-    // In the main window it counts only the time after its creation, so time
+    // In every window it counts only the time after its creation, so time
     // spent before the call (earlier in a long update or setup(), an idle gap,
     // a stall) can't make it fire early; one created during a fixed-Hz step
     // counts whole steps (step time). With a fixed update rate timers count
     // steps, so when a frame runs several steps (after a stall, or when the
     // update rate is above the display rate and the timer was made in an
     // earlier step of the frame) a timer can fire within that frame, before
-    // its delay has passed in wall time. (A secondary window's tick doesn't
-    // record its update time or in-update mark yet, so there a timer created
-    // in or between its ticks counts the window's whole next delta, until
-    // #307.)
+    // its delay has passed in wall time.
+
 
     // Execute callback once after specified delay in seconds
     uint64_t callAfter(double delay, std::function<void()> callback) {
@@ -1597,7 +1596,7 @@ private:
                       bool catchUp = false, int maxCatchUp = 0) {
         uint64_t id = internal::nextNodeTimerId();
         const bool inUpdate = internal::isInUpdate();
-        auto created = std::chrono::steady_clock::now();
+        auto created = internal::windowClockNow();
         // Created during an update: never before that update's time, so the
         // update it was created in isn't charged for it (a nominal or simulated
         // update time can be ahead of the clock).
@@ -1648,8 +1647,8 @@ protected:
         const bool chargedAlready = (timersChargedUpdate_ == thisUpdate);
         timersChargedUpdate_ = thisUpdate;
         const auto updateTime = internal::getUpdateTime();
-        // No update time (a loop that doesn't set one, e.g. a secondary
-        // window's tick): pending timers count whole deltas from the update
+        // No update time (a manually driven tree): pending timers count
+        // whole deltas from the update
         // after the one they were created in.
         const bool haveUpdateTime = updateTime != std::chrono::steady_clock::time_point{};
         const bool measuredUpdate = haveUpdateTime && !internal::isFixedStepUpdate();

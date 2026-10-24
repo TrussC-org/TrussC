@@ -571,7 +571,7 @@ struct TimerNode : Node {
 static Clk::time_point g_simNow;
 static void simUpdate(TimerNode& n, double dt, double advance = -1.0,
                       const function<void()>& during = nullptr) {
-    internal::updateFrameCount++;
+    internal::mainWindowContext().updateCount++;
     auto& ctx = internal::mainWindowContext();
     ctx.updateDeltaTime = dt;
     g_simNow += secs(advance >= 0.0 ? advance : dt);
@@ -739,7 +739,7 @@ static void testNodeTimers() {
 static TimerNode* g_loopNode = nullptr;
 static function<void()> g_loopDuring;
 static void timerLoopUpdate() {
-    internal::updateFrameCount++;           // as the app's update does
+    internal::mainWindowContext().updateCount++;           // as the app's update does
     ++g_updates;
     if (g_loopDuring) g_loopDuring();
     g_loopNode->step();
@@ -864,7 +864,7 @@ static void testNodeTimersInLoop() {
 // runner can't fail it.
 static shared_ptr<App> g_treeRoot;
 static void treeUpdate() {
-    internal::updateFrameCount++;           // as the app's update does
+    internal::mainWindowContext().updateCount++;           // as the app's update does
     ++g_updates;
     g_treeRoot->handleUpdate(0, 0);
 }
@@ -1272,7 +1272,7 @@ static void testReparentChargesOnce() {
     const double dt = 1.0 / 60.0;
     // One simulated measured-dt update of the whole tree (as simUpdate does).
     auto update = [&] {
-        internal::updateFrameCount++;
+        internal::mainWindowContext().updateCount++;
         ctx.updateDeltaTime = dt;
         g_simNow += secs(dt);
         ctx.updateTime = g_simNow;

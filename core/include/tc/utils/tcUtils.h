@@ -24,11 +24,6 @@ namespace trussc {
 
 namespace trussc {
 
-// Forward declaration for frame count access
-namespace internal {
-    extern uint64_t updateFrameCount;
-}
-
 // ---------------------------------------------------------------------------
 // Data Path (similar to oF's ofToDataPath)
 // ---------------------------------------------------------------------------
