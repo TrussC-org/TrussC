@@ -15,3 +15,5 @@ if (result) {
 Pass a native `fs::path`, or use `utf8ToPath(text)` for UTF-8 text on Windows. The bundled tinyobjloader opens OBJ and MTL files through its wide-path Windows support, and textures use the core image loader's filesystem path support.
 
 The [headless tests](tests/README.md) cover the load contract, Japanese model/material/texture paths and geometry handling. `ObjExporter` retains its existing save API.
+
+OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, constructing or moving even an empty `LoadResult` / `SaveResult` string or STL container can allocate a container proxy, so persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging remain best effort.

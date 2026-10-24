@@ -129,7 +129,14 @@ bool decompress(const void* src, std::size_t nbytes,
                 std::vector<std::uint8_t>& out, std::size_t decompressedSize,
                 Codec codec) {
     auto failure = [&]() {
-        std::vector<std::uint8_t>().swap(out);
+        // The count constructor can throw on an MSVC iterator-proxy failure;
+        // the default constructor is noexcept. If even an empty replacement
+        // cannot be made, clear the existing value without allocating.
+        try {
+            std::vector<std::uint8_t>(size_t(0)).swap(out);
+        } catch (...) {
+            out.clear();
+        }
         try {
             getLogger().log(LogLevel::Error, "[Compress] Cannot decompress complete buffer (size, format or allocation failure)");
         } catch (...) {
@@ -160,7 +167,7 @@ bool decompress(const void* src, std::size_t nbytes,
         // Failure already clears its value, so release old storage first and
         // grow from empty: no simultaneous old output or unchecked slack.
         if (out.capacity() < decompressedSize)
-            std::vector<std::uint8_t>().swap(out);
+            std::vector<std::uint8_t>(size_t(0)).swap(out);
         out.resize(decompressedSize);
     } catch (const std::exception&) {
         return failure();

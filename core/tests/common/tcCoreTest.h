@@ -1,5 +1,7 @@
 #pragma once
 
+#include "tcTestFailure.h"
+
 // =============================================================================
 // tcCoreTest.h — entry point of a core test (core/tests/<name>/src/main.cpp)
 //

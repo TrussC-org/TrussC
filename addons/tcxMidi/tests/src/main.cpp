@@ -24,10 +24,46 @@ struct SendCase {
 }
 
 namespace {
+void virtualPortEnumeration() {
+    using tcx::midi::MidiIn;
+    libremidi::test::virtualPorts = true;
+    const auto inputs = MidiIn::listDevices();
+    const auto outputs = MidiOut::listDevices();
+    check(inputs.size() == 2 && inputs[0].getName() == "test input" &&
+          inputs[1].getName() == "virtual source", "list hardware and virtual inputs");
+    check(outputs.size() == 2 && outputs[0].getName() == "test output" &&
+          outputs[1].getName() == "virtual destination", "list hardware and virtual outputs");
+    MidiIn input;
+    MidiOut output;
+    check(input.openPort("virtual source") && input.getName() == "virtual source",
+          "open virtual input by name");
+    check(output.openPort("virtual destination") && output.getName() == "virtual destination",
+          "open virtual output by name");
+    check(input.openPort(1) && input.getName() == "virtual source", "open virtual input by index");
+    check(output.openPort(1) && output.getName() == "virtual destination", "open virtual output by index");
+    libremidi::test::virtualPorts = false;
+}
+
 void inputLifecycle() {
     using tcx::midi::MidiIn;
     tc::getMainThreadId();
     const auto mainThread = std::this_thread::get_id();
+#if !defined(__EMSCRIPTEN__)
+    tc::internal::drainMainThreadQueue();
+    {
+        MidiIn idle;
+        check(tc::internal::mainThreadQueue().size() == 0 &&
+              tc::internal::countQueuedMainThreadSlots() == 0,
+              "creating an idle input queues no work");
+        tc::internal::drainMainThreadQueue();
+        check(tc::internal::mainThreadQueue().size() == 0 &&
+              tc::internal::countQueuedMainThreadSlots() == 0,
+              "idle input leaves subsequent frames empty");
+    }
+    check(tc::internal::mainThreadQueue().size() == 0 &&
+          tc::internal::countQueuedMainThreadSlots() == 0,
+          "destroying an idle input leaves no stale work");
+#endif
     const libremidi::message packet{{0x90, 60, 100}, 5000000};
     MidiIn input;
     input.setBufferSize(1);
@@ -83,12 +119,62 @@ void inputLifecycle() {
         check(calls == 1, "late callback after teardown drops safely");
     }
     libremidi::test::inputCallback = {};
+    int sysexWarnings = 0;
+    bool safeThread = true;
+    auto diagnosticListener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
+        if (event.level == tc::LogLevel::Warning &&
+            event.message.find("SysEx assembly") != std::string::npos) {
+            ++sysexWarnings;
+            safeThread &= std::this_thread::get_id() == mainThread;
+        }
+    });
+    MidiIn diagnostics;
+    check(diagnostics.openVirtualPort("diagnostics"), "open for SysEx diagnostics");
+    std::thread overflow([&] {
+        for (int i = 0; i < 10; ++i) libremidi::test::sysexOverflow(1048577);
+    });
+    overflow.join();
+    check(sysexWarnings == 0, "SysEx reporting never logs on the backend thread");
+#if !defined(__EMSCRIPTEN__)
+    check(tc::internal::mainThreadQueue().size() == 0 &&
+          tc::internal::countQueuedMainThreadSlots() == 1,
+          "first SysEx loss posts one slot without a queued closure");
+#endif
+    diagnostics.closePort();
+    check(diagnostics.openVirtualPort("replacement diagnostics"), "reopen for SysEx diagnostics");
+    std::thread moreOverflow([&] { libremidi::test::sysexOverflow(1048577); });
+    moreOverflow.join();
+    tc::internal::drainMainThreadQueue();
+    check(sysexWarnings == 1 && safeThread, "SysEx store warns once without polling across close/reopen");
+    check(diagnostics.getDroppedMessageCount() == 0, "SysEx losses do not change polling message count");
+    std::thread laterOverflow([&] { libremidi::test::sysexOverflow(1048578); });
+    laterOverflow.join();
+    tc::internal::drainMainThreadQueue();
+    check(sysexWarnings == 1, "later SysEx losses do not repeat the Warning");
+    {
+        MidiIn retired;
+        check(retired.openVirtualPort("retired diagnostics"), "open for pending SysEx teardown");
+        std::thread worker([&] { libremidi::test::sysexOverflow(1048577); });
+        worker.join();
+    }
+    // The mock retains configuration callbacks independently of its backend.
+    libremidi::test::sysexOverflow = {};
+    libremidi::test::inputCallback = {};
+    tc::internal::drainMainThreadQueue();
+    check(sysexWarnings == 2 && safeThread, "pending SysEx Warning survives input destruction without polling");
+#if !defined(__EMSCRIPTEN__)
+    check(tc::internal::mainThreadQueue().size() == 0 &&
+          tc::internal::countQueuedMainThreadSlots() == 0,
+          "SysEx reporting leaves no work after delivery");
+#endif
+
 }
 }
 
 void testInputStorage();
 
 int main() {
+    virtualPortEnumeration();
     testInputStorage();
     const std::vector<SendCase> cases = {
         {"note on", [](MidiOut& o) { return o.sendNoteOn(1, 60, 100); }, {0x90, 60, 100}},

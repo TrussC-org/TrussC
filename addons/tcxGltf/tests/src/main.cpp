@@ -50,7 +50,7 @@ bool jsonSkipFits(size_t tokens, size_t members);
 size_t liveParserAllocationsForTests();
 void setParserAllocatorForTests(void* (*allocate)(size_t), void (*release)(void*) noexcept);
 size_t parserTableBytesForTests();
-size_t parserMemoryLimitForTests(size_t inputBytes);
+void setLargeParseTableNoticeBytesForTests(size_t bytes);
 void setJsonPaddingForTests(size_t bytes);
 void setJsonObjectMembersForTests(size_t members);
 bool jsonTokenFits(size_t count, size_t length, bool stringToken);
@@ -354,9 +354,10 @@ int main() {
         for (const string& ext : {string("png"), string("bmp"), string("jpg")}) {
             auto path = g_dir / ("encoder-fault." + ext);
             for (bool persistent : {false, true}) {
+                if (persistent && tcTest::skipPersistentAllocationFailure("stb encoder output")) continue;
                 ofstream(path, ios::binary) << "previous";
-                modelAllocationProbe::begin(4096, persistent);
                 SaveResult result;
+                modelAllocationProbe::begin(4096, persistent);
                 bool escaped = false;
                 try { result = pixels.save(path); } catch (...) { escaped = true; }
                 modelAllocationProbe::end();
@@ -371,14 +372,17 @@ int main() {
             const auto path = g_dir / "read-only-encoder-output";
             ofstream(path, ios::binary) << "previous";
             for (bool persistent : {false, true}) {
-                // Writing a read-only FILE fails on every native platform.
-                // Fault the first C++ allocation while building that error.
+                if (persistent && tcTest::skipPersistentAllocationFailure("stb FILE error callback")) continue;
+                // A diagnostic-only long path targets message payload growth,
+                // after Sink/result proxy construction, on every STL. It is
+                // never opened on disk. Do not assume an allocation index.
+                const auto diagnosticPath = path / string(8192, 'x');
                 FILE* file = tc::internal::openFile(path, "rb");
                 SaveResult result;
                 bool escaped = false;
                 if (file) {
-                    modelAllocationProbe::beginNth(1, persistent);
-                    try { result = tc::internal::writePixelsEncoded(file, pixels, ext, path); }
+                    modelAllocationProbe::begin(diagnosticPath.native().size(), persistent);
+                    try { result = tc::internal::writePixelsEncoded(file, pixels, ext, diagnosticPath); }
                     catch (...) { escaped = true; }
                     modelAllocationProbe::end();
                     fclose(file);
@@ -524,69 +528,87 @@ int main() {
         }
     }
     {
+        const auto valid = g_dir / "reentrant-valid.gltf";
+        const auto invalid = g_dir / "reentrant-invalid.gltf";
+        ofstream(valid) << R"({"asset":{"version":"2.0"},"nodes":[{}],"scenes":[{"nodes":[0]}],"scene":0})";
+        ofstream(invalid) << R"({"asset":{"version":"2.0"},"nodes":[{}],"scenes":[{"nodes":[0]}],"scene":2147483648})";
+        // Exercise the production Notice with tiny fixtures. This seam is
+        // implementation-only; each context captures its own threshold.
+        gltf_internal::setLargeParseTableNoticeBytesForTests(0);
+        for (bool malformedOuter : {true, false}) {
+            GltfModel outer;
+            GltfModel inner;
+            bool entered = false;
+            bool innerOk = false;
+            size_t outerNotices = 0;
+            auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
+                if (event.message.find("large local parse tables") == string::npos || entered) return;
+                entered = true;
+                ++outerNotices;
+                innerOk = inner.load(malformedOuter ? valid : invalid).ok();
+            });
+            const auto result = outer.load(malformedOuter ? invalid : valid);
+            check(malformedOuter ? "reentrant valid inner preserves outer rejection" :
+                                   "reentrant invalid inner preserves outer success",
+                  entered && outerNotices == 1 && innerOk == malformedOuter &&
+                  inner.isLoaded() == malformedOuter && result.ok() == !malformedOuter &&
+                  outer.isLoaded() == !malformedOuter &&
+                  (malformedOuter ? result.error == LoadError::DecodeFailed : result.ok()));
+        }
+        gltf_internal::setLargeParseTableNoticeBytesForTests(size_t(256) * 1024 * 1024);
+    }
+    {
         constexpr size_t MiB = 1024 * 1024;
-        check("parse memory floor and factor use overflow-safe arithmetic",
-              gltf_internal::parserMemoryLimitForTests(300000) == 256 * MiB &&
-              gltf_internal::parserMemoryLimitForTests(12 * MiB) == 768 * MiB &&
-              gltf_internal::parserMemoryLimitForTests(SIZE_MAX) == SIZE_MAX);
-        auto materialJson = [](size_t count, bool padded) {
+        auto materialJson = [](size_t count, size_t padding) {
             string json = R"({"asset":{"version":"2.0"},"nodes":[{}],"materials":[)";
-            string material = padded ? "{}" + string(197, ' ') : "{}";
+            string material = "{}" + string(padding, ' ');
             json.reserve(count * (material.size() + 1) + 100);
             for (size_t i = 0; i < count; ++i) { if (i) json += ','; json += material; }
             return json + "]}";
         };
-        auto path = g_dir / "parse-memory.gltf";
-        // ~5.25 MB JSON requests ~2.42 GB of tables. The real 64x limit
-        // rejects the material array before malloc, keeping physical use small.
-        string json = materialJson(1750000, false);
+        auto path = g_dir / utf8ToPath("parse-memory-大.gltf");
+        // Over 5 MB JSON, with enough real parse tables to exceed both the
+        // Notice threshold and the former input-scaled rejection threshold.
+        string json = materialJson(400000, 10);
         ofstream(path, ios::binary) << json;
         GltfModel model;
-        const size_t limit = (std::max)(256 * MiB, 64 * json.size());
-        gltf_internal::setParserAllocatorForTests(trackParserMalloc, trackParserFree);
-        actualParserAllocations = grantedParserBytes = peakParserBytes = largestParserBlock = 0;
         WarningCounter logs;
-        string warning;
+        size_t notices = 0;
+        string notice;
+        const string prefix = "[GltfModel] large local parse tables for " + pathToUtf8(path) + ": ";
         auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
-            if (e.level == LogLevel::Warning) warning = e.message;
+            if (e.level == LogLevel::Notice && e.message.find("large local parse tables") != string::npos) {
+                ++notices;
+                notice = e.message;
+            }
         });
-        auto start = chrono::steady_clock::now();
-        auto result = model.load(path);
-        double seconds = chrono::duration<double>(chrono::steady_clock::now() - start).count();
-        size_t reached = gltf_internal::parserTableBytesForTests();
-        printf("parse memory rejection: input=%zu tables-requested=%zu limit=%zu "
-               "malloc-granted=%zu malloc-peak=%zu malloc-largest=%zu seconds=%.6f\n",
-               json.size(), reached, limit, grantedParserBytes, peakParserBytes, largestParserBlock, seconds);
-        check("real parse memory limit rejects the entire file with Warning and Error",
-              !result && !model.isLoaded() && model.getNodeCount() == 0 &&
-              result.error == LoadError::DecodeFailed && logs.errors == 1 && logs.count == 2 &&
-              warning == "[GltfModel] parser table allocations would reach " +
-                         to_string(reached) + " bytes (limit " + to_string(limit) + " bytes)" &&
-              json.size() >= 5000000 && limit > 256 * MiB && reached > limit);
-        // Count only successful calls to the real malloc. Including source
-        // bytes and ownership headers makes this stricter than the table cap.
-        check("over-limit parser request is refused before obtaining memory",
-              actualParserAllocations > 1 && grantedParserBytes <= limit &&
-              largestParserBlock < reached && peakParserBytes <= limit &&
-              outstandingParserBytes == 0 && gltf_internal::liveParserAllocationsForTests() == 0);
-        actualParserAllocations = grantedParserBytes = peakParserBytes = largestParserBlock = 0;
-        json = materialJson(60000, true); // ~12 MB JSON, ~83 MB tables (~7x).
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            notices = 0;
+            notice.clear();
+            actualParserAllocations = grantedParserBytes = peakParserBytes = largestParserBlock = 0;
+            auto result = model.load(path);
+            size_t tables = gltf_internal::parserTableBytesForTests();
+            printf("large local parse tables: input=%zu tables=%zu malloc-peak=%zu\n",
+                   json.size(), tables, peakParserBytes);
+            check("large local parse tables load with one Notice per load " + to_string(attempt),
+                  result.ok() && model.isLoaded() &&
+                  logs.count == 0 && notices == 1 &&
+                  notice == prefix + to_string(tables) + " bytes" && tables > 256 * MiB &&
+                  json.size() >= 5000000 && tables > 64 * json.size());
+            check("large parse tables obtain real memory and release every block",
+                  actualParserAllocations > 1 && grantedParserBytes > tables &&
+                  peakParserBytes > 256 * MiB && outstandingParserBytes == 0 &&
+                  gltf_internal::liveParserAllocationsForTests() == 0);
+        }
+        json = materialJson(60000, 197); // ~12 MB JSON, ~83 MB tables.
         ofstream(path, ios::binary) << json;
-        logs.errors = logs.count = 0;
-        start = chrono::steady_clock::now();
-        result = model.load(path);
-        seconds = chrono::duration<double>(chrono::steady_clock::now() - start).count();
+        notices = 0;
+        auto result = model.load(path);
         size_t tables = gltf_internal::parserTableBytesForTests();
-        printf("parse memory ordinary: input=%zu tables=%zu ratio=%.3f limit=%zu "
-               "malloc-granted=%zu malloc-peak=%zu seconds=%.6f\n",
-               json.size(), tables, double(tables) / json.size(), 64 * json.size(),
-               grantedParserBytes, peakParserBytes, seconds);
-        check("NodePerformance-sized ordinary parse loads under real budget",
-              result.ok() && model.isLoaded() && logs.count == 0 && json.size() >= 12000000 &&
-              // Table sizes depend on pointer width: ~7.0x on 64-bit, ~6.1x on wasm32.
-              tables > 60 * MiB && tables < 90 * MiB && tables < 64 * json.size() &&
-              double(tables) / json.size() > 5 && double(tables) / json.size() < 8);
-        check("parse memory rejection permits retry and frees parser storage",
+        check("ordinary parse loads without a large-table Notice",
+              result.ok() && model.isLoaded() && logs.count == 0 && notices == 0 &&
+              json.size() >= 12000000 && tables > 60 * MiB && tables < 90 * MiB);
+        check("parse table loads free parser storage",
               gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0);
     }
     gltf_internal::setAllocationHookForTests(&observeParserAllocation);
@@ -654,23 +676,22 @@ int main() {
         auto path = writeGltf(triangle());
         GltfModel model;
         for (bool persistent : {false, true}) {
-            for (size_t request : {size_t(1), size_t(2)}) {
-                check("glTF starts allocation test with a loaded model", model.load(path).ok());
-                LoadResult result;
-                bool escaped = false;
-                // Nth requests fire on MSVC as well; its filebuf bypasses
-                // operator new and large std::allocator requests are padded.
-                modelAllocationProbe::beginNth(request, persistent);
-                try { result = model.load(path); }
-                catch (const bad_alloc&) { escaped = true; }
-                modelAllocationProbe::end();
-                check(persistent ? "persistent allocation failure returns empty failure" :
-                                   "STL allocation failure returns empty failure",
-                      modelAllocationProbe::failed && !escaped && !result &&
-                      result.error == LoadError::DecodeFailed && !model.isLoaded() && model.getNodeCount() == 0 &&
-                      gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0);
-                check("retry after parser allocation failure succeeds", model.load(path).ok());
-            }
+            if (persistent && tcTest::skipPersistentAllocationFailure("glTF load entry")) continue;
+            check("glTF starts allocation test with a loaded model", model.load(path).ok());
+            LoadResult result;
+            bool escaped = false;
+            // Target path payload growth inside recovery, allowing setup
+            // proxies. The threshold comes from the fixture, not an index.
+            modelAllocationProbe::begin(path.native().size(), persistent);
+            try { result = model.load(path); }
+            catch (const bad_alloc&) { escaped = true; }
+            modelAllocationProbe::end();
+            check(persistent ? "persistent allocation failure returns empty failure" :
+                               "STL allocation failure returns empty failure",
+                  modelAllocationProbe::failed && !escaped && !result &&
+                  result.error == LoadError::DecodeFailed && !model.isLoaded() && model.getNodeCount() == 0 &&
+                  gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0);
+            check("retry after parser allocation failure succeeds", model.load(path).ok());
         }
     }
     {
@@ -742,6 +763,8 @@ int main() {
               modelAllocationProbe::end();
               requests = modelAllocationProbe::requests; }
             for (bool persistent : {false, true}) {
+                if (persistent && tcTest::skipPersistentAllocationFailure("glTF every allocation")) continue;
+                if (!persistent && tcTest::skipProxyAllocationSweep("glTF every allocation: single recovery and retry")) continue;
                 bool clean = requests > 0;
                 for (size_t nth = 1; nth <= requests; ++nth) {
                     // Retire prior dummy resources between cases, as an app

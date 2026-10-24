@@ -73,6 +73,7 @@ template<class T> void notify(Event<T>& event) {
 
 template<class T> void removal() {
     // Include every snapshot/proxy allocation, with framework ownership and without.
+    if (!tcTest::skipProxyAllocationSweep("event removal snapshot sweep"))
     for (bool framework : {false, true}) {
         for (int nth = 0;; ++nth) {
             Event<T> event;
@@ -111,6 +112,7 @@ template<class T> void removal() {
 }
 
 template<class T> void registration() {
+    if (tcTest::skipProxyAllocationSweep("event registration snapshot sweep")) return;
     // Include the allocation of the disconnect callable, after snapshot creation.
     int total = 0;
     {
@@ -196,6 +198,7 @@ extern "C" void swapAtCallbackBoundary(Window* win, const std::shared_ptr<App>* 
     arm(nth);
 }
 void swaps(bool callbackBoundary = false) {
+    if (tcTest::skipProxyAllocationSweep("window App swap sweep")) return;
     int errors = 0;
     auto logger = getLogger().onLog.listen([&](LogEventArgs& e) {
         if (e.level == LogLevel::Error) ++errors;
@@ -322,6 +325,7 @@ bool attachment(int scenario, bool callback, int nth) {
     return injected;
 }
 void attachments() {
+    if (!tcTest::skipProxyAllocationSweep("window App attachment sweep"))
     for (bool callback : {false, true}) for (int scenario = 0; scenario < 5; ++scenario) {
         int nth = 0;
         while (attachment(scenario, callback, nth)) ++nth;
@@ -490,6 +494,7 @@ void mainReentrantAttachments() {
     }
 }
 void reentrantAttachments() {
+    if (tcTest::skipProxyAllocationSweep("reentrant window App attachment sweep")) return;
     for (bool callback : {false, true}) for (int action = 0; action < 5; ++action) {
         for (int nth = 0;; ++nth) {
             AttachmentDevice device;
@@ -697,6 +702,7 @@ int closeWithClear(int boundary, int nth, bool faultInsideExit = false) {
     return total;
 }
 void closes() {
+    if (tcTest::skipProxyAllocationSweep("window exit.clear teardown sweep")) return;
     // Every measured allocation through clear-from-exit, including disconnect
     // snapshot/proxy allocations on MSVC Debug. Also test the exact exit arm
     // independently of allocations earlier in native teardown.
@@ -806,6 +812,7 @@ bool sweepClose(int boundary, int queued, bool clearExit, int throwing, int nth)
     return injected;
 }
 void closeSweep() {
+    if (tcTest::skipProxyAllocationSweep("window close and screenshot queue destruction sweeps")) return;
     auto savedRun = internal::appRunToken();
     internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
     // Warm lazy framework state before the repeatable exhaustive matrices.

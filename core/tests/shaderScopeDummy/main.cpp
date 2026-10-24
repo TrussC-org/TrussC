@@ -1,3 +1,4 @@
+#include "../common/tcTestFailure.h"
 // Regression from #821 PR 3 Review round 1. No window, real Shader/Fbo APIs.
 #if defined(__linux__) && !defined(__ANDROID__)
 #undef SOKOL_GLCORE

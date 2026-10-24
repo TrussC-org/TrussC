@@ -1,3 +1,4 @@
+#include "../../../../core/tests/common/tcTestFailure.h"
 #include <TrussC.h>
 #include <tcLut.h>
 #include <cstdio>
@@ -30,13 +31,24 @@ int main() {
     }
     tcx::lut::Lut3D lut;
     tc::getLogger();
-    bool returned = false, loaded = true;
+    bool hookRejected = false;
     failAll = true;
-    try { loaded = lut.load(path); returned = true; } catch (...) {}
+    try {
+        void* block = ::operator new(sizeof(tcx::lut::Lut3D));
+        ::operator delete(block);
+    } catch (const std::bad_alloc&) { hookRejected = true; }
     failAll = false;
-    check("LUT file entry recovers from the first persistent allocation failure",
-          returned && !loaded && failedRequests > 0 && !lut.isAllocated() &&
-          lut.getSize() == 0 && lut.getTitle().empty());
+    check("global allocation-failure hook is active", hookRejected);
+    failedRequests = 0;
+    if (!tcTest::skipPersistentAllocationFailure("LUT file-entry path construction")) {
+        bool returned = false, loaded = true;
+        failAll = true;
+        try { loaded = lut.load(path); returned = true; } catch (...) {}
+        failAll = false;
+        check("LUT file entry recovers from the first persistent allocation failure",
+              returned && !loaded && failedRequests > 0 && !lut.isAllocated() &&
+              lut.getSize() == 0 && lut.getTitle().empty());
+    }
     std::string lastError;
     auto logs = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
         if (event.level == tc::LogLevel::Error) lastError = event.message;

@@ -558,7 +558,9 @@ inline void Window::applyPendingApp() {
             state = std::move(appEventState_);
             initialAppBindings_ = false;
         } else {
-            prepared.emplace();
+            // The count constructor lets a refused Debug iterator proxy reach
+            // this guard; vector's default constructor is noexcept on MSVC.
+            prepared.emplace(size_t(0));
             if (next) {
                 state = std::make_shared<AppEventState>();
                 prepareAppEvents(*prepared, state);
