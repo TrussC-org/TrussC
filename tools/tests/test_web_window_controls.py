@@ -35,6 +35,14 @@ def main():
     platform = (ROOT / 'core/platform/web/tcPlatform_web.cpp').read_text(encoding='utf-8')
     title = body(sokol, 'SOKOL_API_IMPL void sapp_set_window_title(')
     size = body(platform, 'void internal::setMainWindowSizeLogical(')
+    window = (ROOT / 'core/include/tc/app/tcWindow.h').read_text(encoding='utf-8')
+    public = (ROOT / 'core/include/TrussC.h').read_text(encoding='utf-8')
+    global_cpp = (ROOT / 'core/include/tc/app/tcGlobal.cpp').read_text(encoding='utf-8')
+    wrappers = '\n'.join([body(public, 'inline void setWindowSize('),
+                          body(global_cpp, 'void setWindowSizeLogical('),
+                          body(window, 'inline IVec2 Window::control('),
+                          body(window, 'inline void Window::setSize('),
+                          body(window, 'inline void App::setSize(')])
     initial = re.search(r'const char\* document_title = .*?;', sokol).group()
     init_start = sokol.index('    if (c_str_document_title !== 0)')
     init_end = sokol.index('    const target_selector_str', init_start)
@@ -44,6 +52,10 @@ def main():
 #include <emscripten/html5.h>
 #include <cstring>
 #include <cassert>
+#include <cmath>
+#include <limits>
+#include <memory>
+#include <string>
 #define SOKOL_API_IMPL
 #define SOKOL_ASSERT assert
 #define _SAPP_EMSCRIPTEN
@@ -52,10 +64,58 @@ void _sapp_tc_strcpy(const char* src, char* dst, size_t n) { std::strncpy(dst, s
 struct Log { template<class T> Log& operator<<(const T&) { return *this; } };
 int notices = 0;
 Log logNotice(const char*) { ++notices; return {}; }
-namespace internal { void setMainWindowSizeLogical(int, int); }
+// Stand-ins supply only native/ownership dependencies. All four public size
+// entry points, their validation/conversion and Window::control below are the
+// production bodies, compiled with __EMSCRIPTEN__ by em++.
+struct IVec2 { int x, y; };
+bool valid = true, pixelPerfect = true;
+float sapp_dpi_scale() { return 2; }
+bool sapp_isvalid() { return valid; }
+bool sapp_is_fullscreen() { return false; }
+void sapp_toggle_fullscreen() {}
+Log logWarning(const char*) { return {}; }
+namespace internal {
+void setMainWindowSizeLogical(int, int);
+enum class WindowControl { Title, PixelSize, Size, Position, PositionQuery, Fullscreen };
+bool& pixelPerfectMode() { return pixelPerfect; }
+void setMainWindowPosition(int, int) {}
+IVec2 mainWindowPosition() { return {-1, -1}; }
+}
+namespace mcp::internal { void mainWindowTitle(const std::string&) {} }
+struct RectNode { void setSize(float, float) { assert(false); } };
+struct Window {
+    struct { bool isMain = true; float dpiScale = 2; } ctx_;
+    std::string title_;
+    bool isOpen() const { return true; }
+    void setSecondaryTitle(const std::string&) { assert(false); }
+    void setSecondarySize(int, int) { assert(false); }
+    void setSecondaryPosition(int, int) { assert(false); }
+    IVec2 getSecondaryPosition() { assert(false); return {}; }
+    void setSecondaryFullscreen(bool) { assert(false); }
+    IVec2 control(internal::WindowControl, int = 0, int = 0, const std::string* = nullptr);
+    void setSize(int, int);
+};
+struct App : RectNode, std::enable_shared_from_this<App> {
+    Window* attached = nullptr;
+    bool unownedSetSizeWarned_ = false;
+    Window* getWindow() { return attached; }
+    void setSize(float, float);
+};
+Window* current = nullptr;
+namespace internal {
+using Hook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
+Hook windowControlHookForTests() { return nullptr; }
+bool routeSetWindowSizeToWindow(int w, int h) { current->setSize(w, h); return true; }
+struct WindowRequestAccess {
+    static void setPixelSize(Window& win, int w, int h) { win.control(WindowControl::PixelSize, w, h); }
+};
+bool routeSetWindowPixelSizeToWindow(int w, int h) { WindowRequestAccess::setPixelSize(*current, w, h); return true; }
+}
+void setWindowSizeLogical(int, int);
 EM_JS(void, init_title, (const char* c_str_document_title), { INITIAL_JS });
 TITLE_BODY
 SIZE_BODY
+PUBLIC_BODIES
 int main() {
     EM_ASM({ globalThis.document = {title: '{{{ TITLE }}}'}; });
     std::strcpy(_sapp_tc.window_title, "Initial title");
@@ -70,15 +130,40 @@ int main() {
     internal::setMainWindowSizeLogical(800, 600);
     assert(EM_ASM_INT({ return canvas.width === 2000 && canvas.height === 1314 && canvas.style.width === '100%' && canvas.style.height === '100%'; }));
     assert(notices == 1);
+    Window window;
+    current = &window;
+    auto app = std::make_shared<App>();
+    app->attached = &window;
+    int expectedNotices = notices;
+    auto verify = [&] {
+        assert(notices == ++expectedNotices); // exactly one Notice per public call
+        assert(EM_ASM_INT({ return canvas.width === 2000 && canvas.height === 1314 && canvas.style.width === '100%' && canvas.style.height === '100%'; }));
+    };
+    // Repeat every API, including positive framebuffer extents which truncate
+    // to logical zero at DPR 2, and invalid extents which used to return early.
+    const int sizes[][2] = {{800, 600}, {1, 1}, {0, 100}, {100, 0}, {-1, 100}, {100, -1}};
+    for (bool perfect : {true, false}) {
+        pixelPerfect = perfect;
+        for (int repeat = 0; repeat < 2; ++repeat) {
+            for (auto& extent : sizes) {
+                setWindowSize(extent[0], extent[1]); verify();
+                setWindowSizeLogical(extent[0], extent[1]); verify();
+                window.setSize(extent[0], extent[1]); verify();
+                app->setSize(extent[0], extent[1]); verify();
+            }
+        }
+    }
+    app->setSize(std::numeric_limits<float>::quiet_NaN(), 100); verify();
+    app->setSize(std::numeric_limits<float>::infinity(), 100); verify();
     return 0;
 }
-'''.replace('INITIAL_JS', initial_js).replace('TITLE_BODY', title).replace('SIZE_BODY', size).replace('INITIAL_CPP', initial)
+'''.replace('INITIAL_JS', initial_js).replace('TITLE_BODY', title).replace('SIZE_BODY', size).replace('INITIAL_CPP', initial).replace('PUBLIC_BODIES', wrappers)
     with tempfile.TemporaryDirectory(prefix='web-window-controls-') as temp:
         path = Path(temp)
         (path / 'main.cpp').write_text(source, encoding='utf-8')
         subprocess.run([compiler, '-std=c++20', str(path / 'main.cpp'), '-o', str(path / 'test.js'), '-sENVIRONMENT=node', '-sSINGLE_FILE=1', '-sASSERTIONS=1'], check=True)
         subprocess.run(['node', str(path / 'test.js')], check=True)
-    print('PASS: production Web title bodies and no-op size (Node)')
+    print('PASS: production Web title and four public size APIs, every-call Notice and unchanged CSS/drawable (Node)')
 
 
 if __name__ == '__main__':

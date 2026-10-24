@@ -13,8 +13,9 @@ void check(const char* label, bool ok) {
 struct Call { Window* window; internal::WindowControl op; int x, y; };
 std::vector<Call> calls;
 bool throws = false;
+internal::WindowContext* callerContext = nullptr;
 bool record(Window& window, internal::WindowControl op, int x, int y, const std::string*, IVec2& result) {
-    check("adapter selects target context", internal::currentWindowCtx() == &window.context());
+    check("adapter preserves caller context", internal::currentWindowCtx() == callerContext);
     calls.push_back({&window, op, x, y});
     result = {-1730, 41}; // a WM's actual (possibly clamped) frame position
     if (throws) throw std::runtime_error("control fault");
@@ -71,7 +72,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     secondary.setApp(app);
     internal::applyPendingAppForTests(secondary);
     internal::windowControlHookForTests() = record;
-    internal::currentWindowCtx() = &secondary.context();
+    internal::currentWindowCtx() = callerContext = &secondary.context();
     secondary.tickTree(); // real App setup/update binding without GPU drawing
     check("setup moves current secondary before fullscreen", calls.size() >= 3 &&
         calls[0].window == &secondary && calls[0].op == internal::WindowControl::Position && calls[0].x == -1920 &&
@@ -92,7 +93,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     check("explicit main restores secondary context", internal::currentWindowCtx() == &secondary.context());
     mainWindow->setTitle("Main");
     expect(*mainWindow, internal::WindowControl::Title, "title uses same adapter");
-    internal::currentWindowCtx() = &mainWindow->context();
+    internal::currentWindowCtx() = callerContext = &mainWindow->context();
     auto fromMainUpdate = mainWindow->events().update.listen([&] { app->setSize(640, 480); });
     mainWindow->events().update.notify();
     expect(secondary, internal::WindowControl::Size, "App::setSize targets own window from main");
@@ -105,7 +106,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     try { secondary.setSize(12, 13); check("fault injected", false); } catch (const std::runtime_error&) {}
     check("throw restores context", internal::currentWindowCtx() == &mainWindow->context());
     throws = false;
-    internal::currentWindowCtx() = nullptr;
+    internal::currentWindowCtx() = callerContext = nullptr;
     secondary.setFullscreen(false);
     check("explicit handle restores null context", internal::currentWindowCtx() == nullptr);
     const auto before = calls.size();
