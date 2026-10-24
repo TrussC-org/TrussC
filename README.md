@@ -139,6 +139,10 @@ src/                  # Platform-specific implementations
 - [BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md) - CMake build system details
 - [ROADMAP.md](docs/ROADMAP.md) - Development roadmap
 
+## Support
+
+TrussC is free and open source, and is developed mostly without pay. If you'd like to support it, you can sponsor via GitHub Sponsors: https://github.com/sponsors/TrussC-org
+
 ## License
 
 MIT License - See [LICENSE.md](docs/LICENSE.md) for details.
