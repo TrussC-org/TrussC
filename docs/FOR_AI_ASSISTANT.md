@@ -5181,6 +5181,7 @@ Sound sfx = bundle.build();
 20. **`setBlendMode()` inside a 3D scene kills depth — restore it with `enableDepthTest()`.** Every blend pipeline (Alpha, Add, even Disabled) has depth write/test OFF by default; only the 3D pipeline (screen setup / `EasyCam::begin()`) writes depth. Geometry then renders in submission order (e.g. a box's unlit bottom face overwrites its lit front face). Call `tc::enableDepthTest()` after the blend-mode change to restore depth (LESS_EQUAL + depth write, same as the 3D pipeline) for all subsequent draws; it persists like the blend mode (across frames and Fbo passes) until `disableDepthTest()` — call that before 2D overlays (HUD, text) so they draw on top. Query with `isDepthTestEnabled()`.
 21. **IBL no-ops on iOS Safari (wasm).** `Environment::loadProcedural()`/`loadFromHDR()` return false on iOS web (the cube-face bake breaks the canvas swapchain there); PBR falls back to flat hemisphere ambient + direct lights. Don't rely on IBL reflections for cross-platform looks if you target iOS web. Native, desktop web, and Android web are unaffected.
 22. **Don't hand-parse JSON/XML.** `tc::Json` (nlohmann) and `tc::Xml` (pugixml) are bundled and included via `<TrussC.h>` — use `loadJson`/`parseJson`/`loadXml`/`parseXml`.
+23. **Move things with `getDeltaTime()` / `getElapsedTime()`, not a fixed step per frame.** The frame rate follows the monitor (60/120/144 Hz, or 30 on some external displays), so `x += 2` runs at different speeds on different screens; `x += speed * getDeltaTime()` does not.
 
 ## Code Examples
 
