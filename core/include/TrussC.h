@@ -1643,9 +1643,12 @@ inline void setWindowSize(int width, int height) {
     if (internal::pixelPerfectMode()) {
         if (internal::routeSetWindowPixelSizeToWindow(width, height)) return;
         const float scale = sapp_dpi_scale();
-        const double factor = std::isfinite(scale) && scale > 0 ? scale : 1.0;
-        const double logicalWidth = width / factor, logicalHeight = height / factor;
-        if (logicalWidth > (std::numeric_limits<int>::max)() || logicalHeight > (std::numeric_limits<int>::max)()) return;
+        const float factor = std::isfinite(scale) && scale > 0 ? scale : 1.0f;
+        // Same float division as Window::control's PixelSize path.
+        const float logicalWidth = width / factor, logicalHeight = height / factor;
+        // Bound: float(INT_MAX) rounds up to 2^31, outside int range.
+        if (!std::isfinite(logicalWidth) || !std::isfinite(logicalHeight) ||
+            logicalWidth >= 0x1p31f || logicalHeight >= 0x1p31f) return;
         setWindowSizeLogical(int(logicalWidth), int(logicalHeight));
     } else setWindowSizeLogical(width, height);
 }

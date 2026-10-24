@@ -793,11 +793,6 @@ inline void App::setSize(float w, float h) {
     // Log before validation/casts, including non-finite or subpixel extents.
     if (getWindow()) { internal::setMainWindowSizeLogical(0, 0); return; }
 #endif
-    if (!std::isfinite(w) || !std::isfinite(h) || w <= 0 || h <= 0 ||
-        double(w) > (std::numeric_limits<int>::max)() || double(h) > (std::numeric_limits<int>::max)()) {
-        logWarning("App") << "setSize(): invalid size";
-        return;
-    }
     // Not owned by a shared_ptr (yet): inside the App's constructor, or an
     // App made on the stack or in a unique_ptr. No window runs such an App
     // (it becomes getRootNode() / a window's App only through a shared_ptr),
@@ -814,6 +809,12 @@ inline void App::setSize(float w, float h) {
         return;
     }
     if (Window* win = getWindow()) {
+        // Only the window path converts to int; unattached Apps keep any float size.
+        if (!std::isfinite(w) || !std::isfinite(h) || w <= 0 || h <= 0 ||
+            double(w) > (std::numeric_limits<int>::max)() || double(h) > (std::numeric_limits<int>::max)()) {
+            logWarning("App") << "setSize(): invalid size";
+            return;
+        }
         if (internal::pixelPerfectMode()) internal::WindowRequestAccess::setPixelSize(*win, int(w), int(h));
         else win->setSize(int(w), int(h));
         return;
