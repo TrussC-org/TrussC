@@ -104,6 +104,13 @@ and shrinking evict oldest whole messages and increment the counter.
 초과하거나 한도를 줄이면 오래된 메시지 전체를 버리고 카운터에 더합니다.
 
 
+Native SysEx reception has a separate fixed limit of **1,048,576 bytes including
+F0/F7**. Larger messages are discarded whole and counted internally. The first
+SysEx loss per `MidiIn` lifetime emits one **Warning on the main thread**, even
+without polling. These losses do not change `getDroppedMessageCount()`, and
+`setBufferSize()` does not raise the SysEx limit. WebMIDI does not enable SysEx.
+See [the local libremidi patch ledger](LIBREMIDI_TRUSSC_MODIFICATIONS.md).
+
 **`MidiOut`** — `listDevices()`, `openPort(index|name)`, `openVirtualPort(name)`,
 `getName()` / `getPort()` / `isVirtual()`, `sendNoteOn/Off`,
 `sendControlChange`, `sendProgramChange`, `sendAftertouch`,
@@ -163,6 +170,8 @@ device**, and the original jack labels (e.g. "DAW" / "MIDI") are lost — so
 `openPort(name)` matching that works on macOS/Linux may need a different string
 on Windows. WinMM also truncates port names to **31 characters**. When in doubt,
 print `listDevices()` and match on what you actually see.
+
+loopMIDI drops SysEx larger than its SysexSize setting (KiB, maximum 512) without an error to either side, so the port check's over-cap step cannot run through loopMIDI.
 
 ## Web (Emscripten) note
 
