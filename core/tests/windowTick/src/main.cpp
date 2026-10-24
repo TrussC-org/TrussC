@@ -1,5 +1,6 @@
 // #239 Q2 / #307 / #984: real shared tick, deterministic native times and
-// presentation, with the production App-priority notify path. No sleeps.
+// presentation and App-priority callbacks. Unit draws omit Node transforms;
+// display mode exercises the production App draw binding. No sleeps.
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
@@ -29,6 +30,22 @@ struct Probe : App {
     void update() override { ++updates; }
     void draw() override { ++draws; }
 };
+void setUnitApp(Window& window, std::shared_ptr<App> app) {
+    window.setApp(std::move(app));
+    internal::applyPendingAppForTests(window);
+    // Window::prepareAppEvents installs update, draw, then the other App
+    // bindings. Keep its update/timer path, but replace the draw slot: even
+    // an empty App::draw() goes through Node::drawTree() and touches sgl,
+    // which this deterministic fixture deliberately does not initialize.
+    // Resolve the current App at delivery so swaps retain the same slot.
+    window.context().appEventListeners.at(1) = internal::FrameworkEventAccess::listen(
+        window.events().draw, [&window] {
+            if (auto app = window.getApp()) {
+                internal::setupNodeOnce(*app);
+                app->draw();
+            }
+        }, EventPriority::App);
+}
 const internal::WindowTickPresentation fakePresentation{[] {}, [] { return true; }, [] {}};
 bool tick(Window& window, double seconds, bool force = false) {
     fakeNow = at(seconds);
@@ -64,9 +81,9 @@ void nativeGatedTicks(Window& window) {
 // The key is a compatibility rule, independent of GPU completion and draw success.
 void resourceKeyPlacement(Window& main) {
     Secondary owner, other;
-    main.setApp(std::make_shared<Probe>());
-    owner.setApp(std::make_shared<Probe>());
-    other.setApp(std::make_shared<Probe>());
+    setUnitApp(main, std::make_shared<Probe>());
+    setUnitApp(owner, std::make_shared<Probe>());
+    setUnitApp(other, std::make_shared<Probe>());
     for (auto* window : {&main, static_cast<Window*>(&owner)}) {
         auto& ctx = window->context();
         internal::currentWindowCtx() = &ctx;
@@ -133,7 +150,7 @@ void exercise(Window& window) {
     internal::currentWindowCtx() = &ctx;
     ctx.loop = {};
     auto app = std::make_shared<Probe>();
-    window.setApp(app);
+    setUnitApp(window, app);
     setIndependentFps(4, EVENT_DRIVEN);
     check("independent rates target current window", ctx.loop.updateTargetFps == 4 && ctx.loop.drawTargetFps == 0 && !ctx.loop.updateSyncedToDraw);
     check("getFpsSettings reads current window", getFpsSettings().updateFps == 4 && !getFpsSettings().synced);
@@ -263,8 +280,8 @@ bool displayDone = false, hideMain = false;
 bool visibilityHook(const Window& window) { return &window == internal::mainWindow() && hideMain; }
 void hiddenInterval(Window& main) {
     Secondary visible;
-    main.setApp(std::make_shared<Probe>());
-    visible.setApp(std::make_shared<Probe>());
+    setUnitApp(main, std::make_shared<Probe>());
+    setUnitApp(visible, std::make_shared<Probe>());
     internal::currentWindowCtx() = &main.context();
     setIndependentFps(4, EVENT_DRIVEN); tick(main, 8000);
     visible.setFps(4); tick(visible, 8000);
@@ -589,7 +606,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             void setup() override { fakeNow += std::chrono::seconds(3); callAfter(2, [this] { ++fired; }); }
         };
         Secondary window;
-        auto app = std::make_shared<LongSetup>(); window.setApp(app);
+        auto app = std::make_shared<LongSetup>(); setUnitApp(window, app);
         window.setFps(VSYNC);
         tick(window, 100);
         tick(window, 103.25);
@@ -601,7 +618,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     }
     {
         Secondary window;
-        auto app = std::make_shared<Probe>(); window.setApp(app);
+        auto app = std::make_shared<Probe>(); setUnitApp(window, app);
         internal::currentWindowCtx() = &window.context();
         setIndependentFps(4, EVENT_DRIVEN);
         bool fired = false;
