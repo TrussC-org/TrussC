@@ -1,19 +1,53 @@
 #!/usr/bin/env python3
-"""Offline configure checks. Usage: test_patch.py PRISTINE_LIBREMIDI WORK_DIR.
+"""Offline checks. Usage: test_patch.py PRISTINE_LIBREMIDI WORK_DIR [--script-only].
 
 Run through the build resource wrapper. WORK_DIR must be a new scratch directory.
 The tarball is reconstructed from local source, not a replacement upstream pin.
+--script-only tests the patch with CMake 3.20 (libremidi's build needs 3.22).
 """
+import argparse
 import hashlib
+import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 import tarfile
 
 
+PATCHED_HASHES = {
+    "include/libremidi/detail/midi_stream_decoder.hpp":
+        "b919e33aba675e7286bde4e437831628fce9f062c7d8eec362214b2efff041c5",
+    "include/libremidi/input_configuration.hpp":
+        "91891013773211537e9397e4cd4ac994fe3cb400b0eea80f19dc8f5575d426ba",
+    "include/libremidi/backends/alsa_seq/midi_in.hpp":
+        "316f03a84f76c59a2629b863d656789b0af9821500fe4ce852e038417d6e895d",
+    "include/libremidi/backends/winmm/midi_in.hpp":
+        "ce432de402f161b917ca43b65c9720fde12bc5eb13bc4ccf3369b540da63106c",
+    "include/libremidi/backends/alsa_seq/midi_out.hpp":
+        "0590ffc031e6fbc2076af581542095c057bedbc6766d137bd14114eb4ec9525b",
+}
+
+
+def snapshot(root):
+    return {str(path.relative_to(root)): (path.read_bytes(), path.stat().st_mtime_ns)
+            for path in root.rglob("*") if path.is_file()}
+
+
+def patched_bytes(root):
+    result = {path: (root / path).read_bytes() for path in PATCHED_HASHES}
+    for path, data in result.items():
+        assert b"\r" not in data, path
+        assert hashlib.sha256(data).hexdigest() == PATCHED_HASHES[path], path
+    return result
+
+
 def main():
-    pristine, work = (Path(arg).resolve() for arg in sys.argv[1:])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("pristine", type=Path)
+    parser.add_argument("work", type=Path)
+    parser.add_argument("--script-only", action="store_true")
+    args = parser.parse_args()
+    pristine, work = args.pristine.resolve(), args.work.resolve()
     work.mkdir()
     addon = Path(__file__).resolve().parents[1]
     private_addon = work / "addon"
@@ -47,33 +81,111 @@ def main():
         run(label, ["cmake", "-S", str(work), "-B", str(work / label),
                     "-DFETCHCONTENT_UPDATES_DISCONNECTED=ON", *options], succeeds)
 
-    configure("archive_patch_command")
-    run("archive_reconfigure", ["cmake", "-S", str(work), "-B", str(work / "archive_patch_command")])
+    if not args.script_only:
+        configure("archive_patch_command")
+        run("archive_reconfigure", ["cmake", "-S", str(work), "-B", str(work / "archive_patch_command")])
     override = work / "override"
     shutil.copytree(pristine, override)
-    configure("unpatched_override", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}", succeeds=False)
+    if not args.script_only:
+        configure("unpatched_override", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}", succeeds=False)
     script = private_addon / "cmake/PatchLibremidi.cmake"
+    # Bytes APIs avoid Python's native newline conversion on Windows.
+    script_lf = script.read_bytes().replace(b"\r\n", b"\n")
+    script.write_bytes(script_lf)
+    script_crlf = work / "PatchLibremidi-crlf.cmake"
+    script_crlf.write_bytes(script_lf.replace(b"\n", b"\r\n"))
+
+    def patch(label, root, patch_script=script, verify=False, succeeds=True):
+        run(label, ["cmake", f"-DLIBREMIDI_SOURCE_DIR={root}",
+                    f"-DVERIFY_ONLY={'ON' if verify else 'OFF'}", "-P", str(patch_script)], succeeds)
+
     run("explicit_private_patch", ["cmake", f"-DLIBREMIDI_SOURCE_DIR={override}", "-P", str(script)])
+    expected = patched_bytes(override)
+    before = snapshot(override)
     run("idempotent_patch", ["cmake", f"-DLIBREMIDI_SOURCE_DIR={override}", "-P", str(script)])
+    assert patched_bytes(override) == expected
+    assert snapshot(override) == before, "idempotent LF patch wrote sources"
+    crlf_output = work / "crlf_script_output"
+    shutil.copytree(pristine, crlf_output)
+    patch("crlf_script_patch", crlf_output, script_crlf)
+    assert patched_bytes(crlf_output) == expected
+    before = snapshot(crlf_output)
+    patch("crlf_script_verify_only", crlf_output, script_crlf, verify=True)
+    assert snapshot(crlf_output) == before, "VERIFY_ONLY wrote patched sources"
+    patch("crlf_script_idempotent", crlf_output, script_crlf)
+    assert snapshot(crlf_output) == before, "idempotent patch wrote sources"
+
+    # Reject CRLF as unknown bytes, even if only the last checked file differs.
+    # Test both entry points and both script encodings, including pristine input.
+    for index, changed_path in enumerate([None, *PATCHED_HASHES]):
+        rejected = work / f"rejected_input_{index}"
+        shutil.copytree(pristine, rejected)
+        if changed_path:
+            path = rejected / changed_path
+            data = path.read_bytes()
+            assert b"\r" not in data and b"\n" in data, changed_path
+            path.write_bytes(data.replace(b"\n", b"\r\n"))
+        before = snapshot(rejected)
+        for encoding, candidate in (("lf", script), ("crlf", script_crlf)):
+            for verify in ((True,) if changed_path is None else (False, True)):
+                patch(f"reject_{index}_{encoding}_verify_{verify}", rejected, candidate,
+                      verify=verify, succeeds=False)
+                assert snapshot(rejected) == before, "rejected input was modified"
+
+    # Remove the LF writer in a scratch CRLF script. On Windows this is the
+    # actual old implementation. Elsewhere emulate only its CRT write-time
+    # LF -> CRLF conversion, which a POSIX text stream cannot reproduce itself.
+    mutant = script_lf.decode("utf-8")
+    for index in range(len(PATCHED_HASHES)):
+        fixed_write = (f'file(CONFIGURE OUTPUT "${{path{index}}}" CONTENT "${{contents}}" '
+                       '@ONLY NEWLINE_STYLE UNIX)')
+        assert mutant.count(fixed_write) == 1
+        old_write = f'file(WRITE "${{path{index}}}" "${{contents}}")'
+        if os.name != "nt":
+            old_write = 'string(REPLACE "\\n" "\\r\\n" contents "${contents}")\n    ' + old_write
+        mutant = mutant.replace(fixed_write, old_write)
+    mutant_script = work / "PatchLibremidi-mutant-crlf.cmake"
+    mutant_script.write_bytes(mutant.encode("utf-8").replace(b"\n", b"\r\n"))
+    mutant_output = work / "mutant_output"
+    shutil.copytree(pristine, mutant_output)
+    patch("mutant_crlf_script_patch", mutant_output, mutant_script)
+    for path, data in expected.items():
+        actual = (mutant_output / path).read_bytes()
+        assert actual == data.replace(b"\n", b"\r\n"), path
+        assert hashlib.sha256(actual).hexdigest() != PATCHED_HASHES[path], path
+    before = snapshot(mutant_output)
+    patch("mutant_crlf_script_verify_rejected", mutant_output, verify=True, succeeds=False)
+    assert snapshot(mutant_output) == before
+    print("PASS: writer mutation detected (" +
+          ("native Windows" if os.name == "nt" else "Windows text-mode emulation") + ")", flush=True)
+
+    if args.script_only:
+        return
     configure("patched_override", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}")
-    output_path = "include/libremidi/backends/alsa_seq/midi_out.hpp"
-    output_header = override / output_path
-    patched_output = output_header.read_bytes()
-    output_header.write_bytes((pristine / output_path).read_bytes())
-    configure("output_replacement_missing", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}", succeeds=False)
-    output_header.write_bytes(patched_output + b"\n// Unknown output edit.\n")
-    configure("output_unknown_override", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}", succeeds=False)
-    # Unknown fourth input must fail before any of the other three are written.
-    unknown = work / "unknown_output"
-    shutil.copytree(pristine, unknown)
-    with (unknown / output_path).open("ab") as output:
-        output.write(b"\n// Unknown output edit.\n")
-    run("output_unknown_no_write", ["cmake", f"-DLIBREMIDI_SOURCE_DIR={unknown}", "-P", str(script)], succeeds=False)
-    for path in ("include/libremidi/detail/midi_stream_decoder.hpp",
-                 "include/libremidi/input_configuration.hpp",
-                 "include/libremidi/backends/alsa_seq/midi_in.hpp"):
-        assert (unknown / path).read_bytes() == (pristine / path).read_bytes()
-    output_header.write_bytes(patched_output)
+    # Every replacement is required for overrides, including the fifth (ALSA output).
+    for index, path in enumerate(PATCHED_HASHES):
+        header = override / path
+        patched = header.read_bytes()
+        header.write_bytes((pristine / path).read_bytes())
+        before = snapshot(override)
+        configure(f"replacement_{index}_missing", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}", succeeds=False)
+        assert snapshot(override) == before, "verification modified incomplete override"
+        header.write_bytes(patched + b"\n// Unknown local edit.\n")
+        before = snapshot(override)
+        configure(f"unknown_{index}_override", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}", succeeds=False)
+        assert snapshot(override) == before, "verification modified unknown override"
+        header.write_bytes(patched)
+        # Unknown input must fail before any of the other four files are written.
+        unknown = work / f"unknown_input_{index}"
+        shutil.copytree(pristine, unknown)
+        with (unknown / path).open("ab") as output:
+            output.write(b"\n// Unknown local edit.\n")
+        before = snapshot(unknown)
+        for encoding, candidate in (("lf", script), ("crlf", script_crlf)):
+            for verify in (False, True):
+                patch(f"unknown_{index}_{encoding}_verify_{verify}", unknown, candidate,
+                      verify=verify, succeeds=False)
+                assert snapshot(unknown) == before, "unknown input was modified"
     decoder = override / "include/libremidi/detail/midi_stream_decoder.hpp"
     with decoder.open("a", encoding="utf-8") as output:
         output.write("\n// Unknown local edit.\n")

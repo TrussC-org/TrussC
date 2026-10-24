@@ -1,5 +1,9 @@
 # Local patch for the SHA-pinned libremidi 5.4.3. No git or patch executable needed.
 # All input hashes are checked before any write; VERIFY_ONLY never modifies sources.
+# file(WRITE) uses native text mode, producing CRLF on Windows. CONFIGURE with
+# NEWLINE_STYLE UNIX writes LF in binary mode (available since CMake 3.18).
+# @ONLY preserves ${...}; these hash-pinned sources contain no @VAR@ references
+# or #cmakedefine directives that CONFIGURE could expand.
 cmake_minimum_required(VERSION 3.20)
 if(NOT DEFINED LIBREMIDI_SOURCE_DIR)
     message(FATAL_ERROR "LIBREMIDI_SOURCE_DIR is required")
@@ -31,13 +35,23 @@ if(NOT hash2 STREQUAL patched2)
         message(FATAL_ERROR "tcxMidi requires its checked libremidi 5.4.3 SysEx patch: ${path2}. Patch a private source copy with cmake -DLIBREMIDI_SOURCE_DIR=<copy> -P ${CMAKE_CURRENT_LIST_FILE}; do not use an unpatched source override/cache.")
     endif()
 endif()
-set(path3 "${LIBREMIDI_SOURCE_DIR}/include/libremidi/backends/alsa_seq/midi_out.hpp")
+# WinMM input loss reporting (self-contained fourth replacement).
+set(path3 "${LIBREMIDI_SOURCE_DIR}/include/libremidi/backends/winmm/midi_in.hpp")
 file(SHA256 "${path3}" hash3)
-set(original3 "c636311563779e5fe9e566be9d56ed0d2052d97d06286de7f8456791ea0cc269")
-set(patched3 "0590ffc031e6fbc2076af581542095c057bedbc6766d137bd14114eb4ec9525b")
+set(original3 "c57134c237f4d36bfa0a8b0dce0c7d79f07f959417b0e22bd7a422e6c4c663a5")
+set(patched3 "ce432de402f161b917ca43b65c9720fde12bc5eb13bc4ccf3369b540da63106c")
 if(NOT hash3 STREQUAL patched3)
     if(VERIFY_ONLY OR NOT hash3 STREQUAL original3)
         message(FATAL_ERROR "tcxMidi requires its checked libremidi 5.4.3 SysEx patch: ${path3}. Patch a private source copy with cmake -DLIBREMIDI_SOURCE_DIR=<copy> -P ${CMAKE_CURRENT_LIST_FILE}; do not use an unpatched source override/cache.")
+    endif()
+endif()
+set(path4 "${LIBREMIDI_SOURCE_DIR}/include/libremidi/backends/alsa_seq/midi_out.hpp")
+file(SHA256 "${path4}" hash4)
+set(original4 "c636311563779e5fe9e566be9d56ed0d2052d97d06286de7f8456791ea0cc269")
+set(patched4 "0590ffc031e6fbc2076af581542095c057bedbc6766d137bd14114eb4ec9525b")
+if(NOT hash4 STREQUAL patched4)
+    if(VERIFY_ONLY OR NOT hash4 STREQUAL original4)
+        message(FATAL_ERROR "tcxMidi requires its checked libremidi 5.4.3 SysEx patch: ${path4}. Patch a private source copy with cmake -DLIBREMIDI_SOURCE_DIR=<copy> -P ${CMAKE_CURRENT_LIST_FILE}; do not use an unpatched source override/cache.")
     endif()
 endif()
 if(VERIFY_ONLY)
@@ -508,7 +522,7 @@ private:
     if(NOT result STREQUAL patched0)
         message(FATAL_ERROR "libremidi patch result mismatch: ${path0}")
     endif()
-    file(WRITE "${path0}" "${contents}")
+    file(CONFIGURE OUTPUT "${path0}" CONTENT "${contents}" @ONLY NEWLINE_STYLE UNIX)
 endif()
 if(hash1 STREQUAL original1)
     file(READ "${path1}" contents)
@@ -558,7 +572,7 @@ if(hash1 STREQUAL original1)
     if(NOT result STREQUAL patched1)
         message(FATAL_ERROR "libremidi patch result mismatch: ${path1}")
     endif()
-    file(WRITE "${path1}" "${contents}")
+    file(CONFIGURE OUTPUT "${path1}" CONTENT "${contents}" @ONLY NEWLINE_STYLE UNIX)
 endif()
 if(hash2 STREQUAL original2)
     file(READ "${path2}" contents)
@@ -623,10 +637,34 @@ if(hash2 STREQUAL original2)
     if(NOT result STREQUAL patched2)
         message(FATAL_ERROR "libremidi patch result mismatch: ${path2}")
     endif()
-    file(WRITE "${path2}" "${contents}")
+    file(CONFIGURE OUTPUT "${path2}" CONTENT "${contents}" @ONLY NEWLINE_STYLE UNIX)
 endif()
 if(hash3 STREQUAL original3)
     file(READ "${path3}" contents)
+    string(REPLACE [==[      if (inputStatus == MIM_LONGERROR)
+      {
+        self.m_processing.reset();
+      }]==] [==[      if (inputStatus == MIM_LONGERROR)
+      {
+        self.m_processing.reset();
+        // TrussC: zero means a backend SysEx loss with no known byte count.
+        if (self.configuration.on_sysex_overflow)
+          self.configuration.on_sysex_overflow(0);
+      }]==] contents "${contents}")
+    string(REPLACE [==[          LIBREMIDI_LOG(
+              "error sending sysex to "
+              "Midi device!!");]==] [==[          // TrussC: losing a receive buffer is a SysEx receive loss event.
+          // Reuse the preallocated reporting slot; never log on this thread.
+          if (self.configuration.on_sysex_overflow)
+            self.configuration.on_sysex_overflow(0);]==] contents "${contents}")
+    string(SHA256 result "${contents}")
+    if(NOT result STREQUAL patched3)
+        message(FATAL_ERROR "libremidi patch result mismatch: ${path3}")
+    endif()
+    file(CONFIGURE OUTPUT "${path3}" CONTENT "${contents}" @ONLY NEWLINE_STYLE UNIX)
+endif()
+if(hash4 STREQUAL original4)
+    file(READ "${path4}" contents)
     string(REPLACE [==[#pragma once
 #include <libremidi/backends/alsa_seq/config.hpp>
 #include <libremidi/backends/alsa_seq/helpers.hpp>
@@ -1005,8 +1043,8 @@ private:
 }
 ]==] contents "${contents}")
     string(SHA256 result "${contents}")
-    if(NOT result STREQUAL patched3)
-        message(FATAL_ERROR "libremidi patch result mismatch: ${path3}")
+    if(NOT result STREQUAL patched4)
+        message(FATAL_ERROR "libremidi patch result mismatch: ${path4}")
     endif()
-    file(WRITE "${path3}" "${contents}")
+    file(CONFIGURE OUTPUT "${path4}" CONTENT "${contents}" @ONLY NEWLINE_STYLE UNIX)
 endif()

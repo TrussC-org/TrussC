@@ -4,10 +4,12 @@
 `CMakeLists.txt`. The upstream BSD 2-Clause / RtMidi MIT notices are unchanged.
 
 `cmake/PatchLibremidi.cmake` applies exact replacements with CMake alone (no git,
-patch utility or Python required). It checks all four original/patched SHA256
+patch utility or Python required). It checks all five original/patched SHA256
 hashes before writing. Unknown input or output fails configuration. A second,
 read-only check after FetchContent covers source overrides, previously populated
-sources and shared FetchContent caches. For an offline override, patch a private
+sources and shared FetchContent caches. Output is explicitly LF on every host,
+including CRLF script checkouts, while CRLF source files remain unknown input
+and are rejected before any write. For an offline override, patch a private
 copy explicitly before configuring:
 
 ```sh
@@ -27,7 +29,8 @@ cmake -DLIBREMIDI_SOURCE_DIR=path/to/private/libremidi -P addons/tcxMidi/cmake/P
   Ignore EOX (F7) outside SysEx without inventing a loss or Warning; preserve
   its existing system-common cancellation of running status.
 - `input_configuration.hpp`: internal `on_sysex_overflow(needed_bytes)` callback,
-  invoked once per discarded message on the backend thread. TrussC uses it only
+  invoked once per cap-discarded message on the backend thread (WinMM also uses
+  zero for the receive loss events below). TrussC uses it only
   to record a counter and pending flag and post a preallocated main-thread slot
   without allocation or logging. Only the first loss posts the slot, which keeps
   the diagnostics alive until the owner's sole Warning is delivered.
@@ -35,6 +38,10 @@ cmake -DLIBREMIDI_SOURCE_DIR=path/to/private/libremidi -P addons/tcxMidi/cmake/P
   the bounded shared decoder. Admission and overflow accounting use each parsed
   logical message. SysEx leaves the fixed codec scratch size/capacity unchanged;
   ordinary ALSA events continue through the byte-event codec.
+- `backends/winmm/midi_in.hpp`: retain decoder reset on `MIM_LONGERROR` and
+  count it and each failed `midiInAddBuffer` re-queue via `on_sysex_overflow(0)`
+  (unknown-size receive loss), sharing the owner's preallocated, truthful Warning
+  slot without backend allocation or logging.
 - `backends/alsa_seq/midi_out.hpp` (#992): keep the encoder at 256 bytes and
   send consecutive partial SysEx events without a logical output size limit.
   Drain each event before encoding the next. Nonblocking drain retries are
@@ -58,6 +65,10 @@ cmake -DLIBREMIDI_SOURCE_DIR=path/to/private/libremidi -P addons/tcxMidi/cmake/P
   own MidiOut never supplies a context.
   Other native/Web output backends and the input bounds are unchanged.
 
+Finding only (send side unchanged): WinMM `send_message` waits without a bound
+in `while (midiOutUnprepareHeader(...) == MIDIERR_STILLPLAYING) Sleep(1);` and
+returns on `midiOutLongMsg` failure without unpreparing the header.
+
 The cap is a TrussC external-input memory policy, not a MIDI protocol maximum.
 A legitimate single SysEx above it is discarded. CoreMIDI, WinMM, WinUWP, ALSA
 seq/raw and Android use the shared decoder. JACK is disabled by the addon;
@@ -68,11 +79,13 @@ callbacks; the receive policy does not add bounds to application raw-data storag
 
 1. Check whether the new upstream release provides equivalent bounded assembly,
    bounded ALSA scratch, discard/resynchronization behavior and chunked ALSA
-   output with bounded drain retries and pacing. If so, remove
-   the patch and verification calls, and adapt the internal overflow callback.
+   output with bounded drain retries and pacing, plus WinMM receive-loss
+   reporting. If so, remove the patch and verification calls, and adapt the
+   internal overflow callback.
 2. Otherwise rebase the replacements on the new pinned release, update all
    original/patched hashes, and keep failure for unknown source content.
-3. Run `tests-sysex`, `tests`, patch integration checks, `test_output.py` and the core sweep.
+3. Run `tests-sysex`, `tests`, patch integration checks, `test_output.py`,
+   `test_hooks.py` and the core sweep.
    Independently remove each admission/capacity/scratch/discard hook in a private
    source copy and confirm its corresponding test fails. Run CoreMIDI and WinMM
    port checks described in `tests-sysex/README.md`.

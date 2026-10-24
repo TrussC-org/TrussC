@@ -25,6 +25,9 @@ filtering, discard/resynchronization, start timestamps, ignored SysEx, reset,
 successive messages without stack growth, stray EOX (including orphan data tails),
 ALSA scratch and safe-thread reporting. Stray EOX neither delivers a message nor
 counts a SysEx loss or schedules a Warning.
+The actual patched WinMM callback also runs with mocked driver calls: LONGERROR,
+failed/successful re-queues, combined errors, ignored SysEx and empty shutdown
+buffers check accounting, reset, allocation failure and the sole Warning slot.
 The reporting callback is also checked with backend allocations disabled, empty
 idle queues, one posted slot on first loss and slot lifetime through teardown.
 The wrapper's `tests/` harness additionally checks idle input creation/destruction,
@@ -35,6 +38,12 @@ The offline configure checks use a pristine source directory and a new scratch
 directory. They reconstruct a local archive to exercise FetchContent's actual
 patch command, reconfiguration, unpatched/patched/edited source overrides and
 reused extracted caches; they do not replace the production archive hash.
+They also compare byte-exact LF output from LF/CRLF patch scripts, reject CRLF
+source inputs without writes, and check read-only verification and idempotence.
+A writer mutation reproduces the CRLF hash failure using native Windows writes
+on Windows and an explicit text-mode conversion emulation on other hosts.
+Use `--script-only` to check the patch's CMake 3.20 minimum independently of
+libremidi's build, which requires CMake 3.22.
 
 ```sh
 python3 addons/tcxMidi/tests-sysex/test_patch.py path/to/pristine/libremidi tmp/patch-checks
@@ -105,11 +114,13 @@ handled separately in #982. The full virtual-port check depends on that fix;
 this PR does not change `track_virtual`.
 
 Windows 10/11 WinMM has no generic built-in MIDI loopback and does not support
-libremidi virtual ports. Use an existing MIDI loopback device or install a small
-loopback driver such as loopMIDI and create `TrussC-SysEx-Check`. The test uses two large messages, so prefer a virtual loopback over a
+libremidi virtual ports. Use a MIDI loopback device that passes the over-cap
+messages and create `TrussC-SysEx-Check`. The test uses two large messages, so prefer a virtual loopback over a
 31.25 kbit/s hardware cable, which exceeds the receiver timeout. Without an
 existing loopback device or an installed loopback driver, this WinMM check
 cannot run.
+
+loopMIDI drops SysEx larger than its SysexSize setting (KiB, maximum 512) without an error to either side, so the port check's over-cap step cannot run through loopMIDI.
 
 In a Visual Studio developer PowerShell, build once:
 

@@ -186,6 +186,8 @@ device**, and the original jack labels (e.g. "DAW" / "MIDI") are lost — so
 on Windows. WinMM also truncates port names to **31 characters**. When in doubt,
 print `listDevices()` and match on what you actually see.
 
+loopMIDI drops SysEx larger than its SysexSize setting (KiB, maximum 512) without an error to either side, so the port check's over-cap step cannot run through loopMIDI.
+
 ## Web (Emscripten) note
 
 Web MIDI works in **Chromium-based browsers over https** (Safari/Firefox have

@@ -42,7 +42,7 @@ def main():
     output = source / "include/libremidi/backends/alsa_seq/midi_out.hpp"
     patched = output.read_text(encoding="utf-8")
     patch = (Path(__file__).parents[1] / "cmake/PatchLibremidi.cmake").read_text(encoding="utf-8")
-    original = patch.split('if(hash3 STREQUAL original3)', 1)[1].split('string(REPLACE [==[', 1)[1].split(']==]', 1)[0]
+    original = patch.split('if(hash4 STREQUAL original4)', 1)[1].split('string(REPLACE [==[', 1)[1].split(']==]', 1)[0]
     target = work / "include/libremidi/backends/alsa_seq/midi_out.hpp"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(original, encoding="utf-8")
