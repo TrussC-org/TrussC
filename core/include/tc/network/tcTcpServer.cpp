@@ -1240,7 +1240,11 @@ void TcpServer::State::reportSendRejections(SendRejections& reports) noexcept {
                 << "; whole send rejected; further rejections counted";
             // LogStream's destructor is noexcept, so invoke Logger directly
             // here to catch listener exceptions during producer unwinding.
-            getLogger().log(LogLevel::Warning, message.str());
+            // Avoid str()'s noexcept allocator-only string construction on
+            // MSVC: a refused iterator proxy must reach this catch.
+            const auto text = message.view();
+            getLogger().log(LogLevel::Warning,
+                           std::string(text.empty() ? "" : text.data(), text.size()));
         } catch (...) {
             // Reporting must preserve the producer's exception and continue
             // delivering any other first Warnings in this batch.

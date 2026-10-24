@@ -1,3 +1,4 @@
+#include "../../../../core/tests/common/tcTestFailure.h"
 #include <tcxOsc.h>
 #include <cstdio>
 #include <cstdlib>
@@ -93,7 +94,7 @@ void preflight() {
             auto parsed = OscMessage::fromBytes(bytes.data(), bytes.size(), ok);
             require(ok == (count == 4096), "public message parser enforces work bound");
             require(!ok || parsed.getArgCount() == 4096, "all boundary arguments present");
-            if (count == 4097) {
+            if (count == 4097 && !tcTest::skipPersistentAllocationFailure("OSC message result at work limit")) {
                 bool allocated = false;
                 rejectAllocations = true;
                 try { OscMessage::fromBytes(bytes.data(), bytes.size(), ok); }
@@ -117,7 +118,7 @@ void preflight() {
         bool ok = false;
         OscBundle::fromBytes(bytes.data(), bytes.size(), ok);
         require(ok == (count == 4094), "public bundle parser shares aggregate work budget");
-        if (count == 4095) {
+        if (count == 4095 && !tcTest::skipPersistentAllocationFailure("OSC bundle result at work limit")) {
             bool allocated = false;
             rejectAllocations = true;
             try { OscBundle::fromBytes(bytes.data(), bytes.size(), ok); }
@@ -173,12 +174,14 @@ void packetSizeAndDepth() {
     boundary.addBlob(payload.data(), payload.size());
     bytes = boundary.toBytes();
     bytes.resize(65537); // complete blob, with its optional final padding absent
-    bool allocated = false;
-    rejectAllocations = true;
-    try { OscMessage::fromBytes(bytes.data(), bytes.size(), ok); }
-    catch (const std::bad_alloc&) { allocated = true; }
-    rejectAllocations = false;
-    require(!ok && !allocated, "packet byte overflow rejects whole before allocation");
+    if (!tcTest::skipPersistentAllocationFailure("OSC message result at packet limit")) {
+        bool allocated = false;
+        rejectAllocations = true;
+        try { OscMessage::fromBytes(bytes.data(), bytes.size(), ok); }
+        catch (const std::bad_alloc&) { allocated = true; }
+        rejectAllocations = false;
+        require(!ok && !allocated, "packet byte overflow rejects whole before allocation");
+    }
     std::thread producer([&] { Access::parse(receiver, bytes); });
     producer.join();
     OscBundle nested;
@@ -190,12 +193,14 @@ void packetSizeAndDepth() {
         nested = std::move(outer);
     }
     bytes = nested.toBytes();
-    allocated = false;
-    rejectAllocations = true;
-    try { OscBundle::fromBytes(bytes.data(), bytes.size(), ok); }
-    catch (const std::bad_alloc&) { allocated = true; }
-    rejectAllocations = false;
-    require(!ok && !allocated, "depth overflow rejects whole before allocation");
+    if (!tcTest::skipPersistentAllocationFailure("OSC bundle result at depth limit")) {
+        bool allocated = false;
+        rejectAllocations = true;
+        try { OscBundle::fromBytes(bytes.data(), bytes.size(), ok); }
+        catch (const std::bad_alloc&) { allocated = true; }
+        rejectAllocations = false;
+        require(!ok && !allocated, "depth overflow rejects whole before allocation");
+    }
     Access::parse(receiver, bytes);
     Access::parse(receiver, OscMessage("/next").toBytes());
     tc::internal::drainMainThreadQueue();

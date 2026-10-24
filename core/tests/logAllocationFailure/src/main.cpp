@@ -1,4 +1,5 @@
 #include <TrussC.h>
+#include "impl/tcImportError.h"
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
 #include <cstdlib>
@@ -49,6 +50,12 @@ TC_CORE_TEST_MAIN() {
     }  // destructor runs here
     failAll = false;
     check(failedAllocations > 0, "destructor attempted allocation and survived its failure");
+
+    failedAllocations = 0;
+    failAll = true;
+    internal::reportImportError("LogTest", "import allocation failure");
+    failAll = false;
+    check(failedAllocations > 0, "import diagnostics survive persistent allocation failure");
 
     // A listener that throws must not escape the destructor either.
     {

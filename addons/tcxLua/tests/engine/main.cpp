@@ -1,3 +1,4 @@
+#include "../../../../core/tests/common/tcTestFailure.h"
 #include "tcxLuaLint.h"
 #ifndef TCXLUA_USE_LUAJIT
 #include "lintGlobalLifetime.h"

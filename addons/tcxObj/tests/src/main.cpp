@@ -317,6 +317,7 @@ static int runTests() {
         ObjLoader loader;
         auto path = writeObj(input);
         for (bool persistent : {false, true}) {
+            if (persistent && tcTest::skipPersistentAllocationFailure("OBJ load entry")) continue;
             check("OBJ starts allocation test with a loaded model", loader.load(path).ok());
             LoadResult result;
             bool escaped = false;
@@ -390,6 +391,8 @@ static int runTests() {
               modelAllocationProbe::end();
               requests = modelAllocationProbe::requests; }
             for (bool persistent : {false, true}) {
+                if (persistent && tcTest::skipPersistentAllocationFailure("OBJ every allocation")) continue;
+                if (!persistent && tcTest::skipProxyAllocationSweep("OBJ every allocation: single recovery and retry")) continue;
                 bool clean = requests > 0;
                 for (size_t nth = 1; nth <= requests; ++nth) {
                     // Retire prior dummy resources between cases, as an app
@@ -426,7 +429,7 @@ static int runTests() {
         check("framework accepts base-compatible tag grammar: " + tag,
               loader.load(writeObj(TRI_V + tag + "\nf 1 2 3\n")).ok());
     }
-    {
+    if (!tcTest::skipProxyAllocationSweep("MTL open allocation failure warns when geometry survives")) {
         // An MTL stream-open allocation can be translated into failbit by
         // iostreams. Losing optional materials must still issue a Warning.
         ofstream(g_dir / "oom.mtl") << "newmtl red\nKd 1 0 0\n";

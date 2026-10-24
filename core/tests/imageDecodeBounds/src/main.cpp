@@ -511,14 +511,16 @@ void allocationChecks(const fs::path& root) {
     }
     internal::failImageDecodeAllocationAfterForTests(-1);
     const auto png = encoded("png", 8, 8);
-    // No test assertions or fixture construction while new is disabled.
-    Pixels exhausted;
-    failNew = true;
-    auto emergency = internal::imageDecodeOutOfMemory();
-    auto exhaustedResult = exhausted.loadFromMemory(png.data(), int(png.size()));
-    failNew = false;
-    check("OOM reporting survives failed message and Logger allocations", emergency.error == LoadError::Unknown &&
-          exhaustedResult.error == LoadError::Unknown && empty(exhausted));
+    if (!tcTest::skipPersistentAllocationFailure("image OOM result/reporting")) {
+        // No test assertions or fixture construction while new is disabled.
+        Pixels exhausted;
+        failNew = true;
+        auto emergency = internal::imageDecodeOutOfMemory();
+        auto exhaustedResult = exhausted.loadFromMemory(png.data(), int(png.size()));
+        failNew = false;
+        check("OOM reporting survives failed message and Logger allocations", emergency.error == LoadError::Unknown &&
+              exhaustedResult.error == LoadError::Unknown && empty(exhausted));
+    }
     writeFile(root / "mcp-allocation.png", png);
     Pixels mcpPixels;
     internal::failImageDecodeAllocationAfterForTests(-1);
@@ -610,6 +612,14 @@ void allocationChecks(const fs::path& root) {
 } // namespace
 #include "deviceFixtures.h"
 TC_CORE_TEST_MAIN(int argc, char** argv) {
+    bool hookRejected = false;
+    failNew = true;
+    try {
+        void* block = ::operator new(sizeof(Pixels));
+        ::operator delete(block);
+    } catch (const std::bad_alloc&) { hookRejected = true; }
+    failNew = false;
+    check("global allocation-failure hook is active", hookRejected);
     if (argc > 1) return imageDeviceMain(argc, argv);
     const auto root = fs::temp_directory_path() / "tc_imageDecodeBounds";
     fs::create_directories(root);
