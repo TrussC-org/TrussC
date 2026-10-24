@@ -9,11 +9,14 @@
 #define SOKOL_GL_IMPL
 #include "sokol/util/sokol_gl_tc.h"
 #undef SOKOL_GL_IMPL
+// Keep real desktop Window dispatch while SG/SGL above use the dummy backend.
+#define SOKOL_GLCORE
 #include <TrussC.h>
 #include <cstdio>
 using namespace tc;
 namespace {
 int failures = 0;
+int nativeWidth = 0, nativeHeight = 0, nativeSizes = 0;
 void check(const char* label, bool ok) {
     std::printf("windowControlReentry: %s: %s\n", label, ok ? "PASS" : "FAIL");
     if (!ok) ++failures;
@@ -56,6 +59,13 @@ bool reenter(Window& target, internal::WindowControl op, int, int, const std::st
 int vertices(Window& window) {
     sgl_set_context(window.context().swapchainTarget.resources().context);
     return sgl_num_vertices();
+}
+}
+// Replace only the native secondary endpoint: public dispatch, App ownership
+// and PixelSize conversion above it remain production code (no control hook).
+namespace trussc {
+void Window::setSecondarySize(int width, int height) {
+    nativeWidth = width; nativeHeight = height; ++nativeSizes;
 }
 }
 extern "C" bool sapp_mouse_locked() { return false; }
@@ -105,6 +115,50 @@ int main() {
         check("secondary received no main vertices", vertices(secondary) == 0);
 
         internal::windowControlHookForTests() = nullptr;
+        internal::restoreWindowContext(&secondary.context());
+        internal::pixelPerfectMode() = true;
+        secondary.context().dpiScale = 1.1f;
+        int calls = nativeSizes;
+        setWindowSize(550, 330);
+        check("public fractional DPI size reaches native logical 500,300",
+              nativeSizes == ++calls && nativeWidth == 500 && nativeHeight == 300);
+        // An attached App targets its own secondary even from the main caller.
+        internal::restoreWindowContext(&main->context());
+        secondaryApp->setSize(550, 330);
+        check("attached App fractional DPI size reaches native logical 500,300",
+              nativeSizes == ++calls && nativeWidth == 500 && nativeHeight == 300);
+        bool publicSweep = true, appSweep = true;
+        for (float scale : {1.0f, 1.1f, 1.25f, 1.5f, 1.75f, 2.0f, 2.25f, 3.0f}) {
+            secondary.context().dpiScale = scale;
+            for (int pixels = 1; pixels <= 4096; ++pixels) {
+                // Exact next/window public formula; zero logical sizes are
+                // rejected before the native endpoint, as in the base.
+                const int expected = static_cast<int>(pixels / scale);
+                const int expectedCalls = expected > 0 ? 1 : 0;
+                internal::restoreWindowContext(&secondary.context());
+                calls = nativeSizes;
+                setWindowSize(pixels, pixels);
+                publicSweep &= nativeSizes == calls + expectedCalls &&
+                    (!expectedCalls || (nativeWidth == expected && nativeHeight == expected));
+                internal::restoreWindowContext(&main->context());
+                calls = nativeSizes;
+                // The base App first casts its float extents to int, then
+                // performs the same pixel-to-logical float division.
+                secondaryApp->setSize(float(pixels) + 0.5f, float(pixels) + 0.5f);
+                appSweep &= nativeSizes == calls + expectedCalls &&
+                    (!expectedCalls || (nativeWidth == expected && nativeHeight == expected));
+            }
+        }
+        check("public size sweep matches base float division", publicSweep);
+        check("attached App size sweep matches base casts and float division", appSweep);
+        internal::restoreWindowContext(&secondary.context());
+        calls = nativeSizes;
+        secondary.context().dpiScale = 1.0f;
+        setWindowSize((std::numeric_limits<int>::max)(), 330); // rounds to 2^31
+        secondary.context().dpiScale = std::numeric_limits<float>::min();
+        setWindowSize(550, 330); // non-finite quotient
+        check("out-of-range float quotients never reach native size", nativeSizes == calls);
+        internal::pixelPerfectMode() = false;
         internal::restoreWindowContext(nullptr);
         secondary.native_ = nullptr;
         internal::WindowRequestAccess::endApp(secondary);

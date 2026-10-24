@@ -894,12 +894,15 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
         case internal::WindowControl::PixelSize: {
             if (x <= 0 || y <= 0) return result;
             const float scale = ctx_.isMain ? sapp_dpi_scale() : ctx_.dpiScale;
-            const double factor = std::isfinite(scale) && scale > 0 ? scale : 1.0;
+            const float factor = std::isfinite(scale) && scale > 0 ? scale : 1.0f;
 #if defined(_WIN32)
             if (ctx_.isMain) { internal::setWindowSizeWin32(sapp_win32_get_hwnd(), double(x) / factor, double(y) / factor); break; }
 #endif
-            const double width = x / factor, height = y / factor;
-            if (width > (std::numeric_limits<int>::max)() || height > (std::numeric_limits<int>::max)()) return result;
+            // Preserve the public API's float division before truncation.
+            const float width = x / factor, height = y / factor;
+            // Bound: float(INT_MAX) rounds up to 2^31, outside int range.
+            if (!std::isfinite(width) || !std::isfinite(height) ||
+                width >= 0x1p31f || height >= 0x1p31f) return result;
             x = int(width); y = int(height);
             [[fallthrough]];
         }
