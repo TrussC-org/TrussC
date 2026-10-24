@@ -294,3 +294,5 @@ example prints in its title bar.
 
 MIT (author: tettou771). No third-party dependencies — the OSC codec is implemented
 here directly on top of the core `UdpSocket`.
+
+OOM guarantees for public parser results apply to Release builds, or iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). Preflight itself allocates no storage, but constructing or returning an empty `OscMessage` or `OscBundle` can allocate STL iterator proxies in MSVC Debug. Persistent failure tests for those result constructions SKIP with a reason when iterator debugging is enabled.

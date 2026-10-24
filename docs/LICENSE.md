@@ -339,6 +339,10 @@ THIS SOFTWARE.
 
 libremidi's own code is under the BSD 2-Clause License (Copyright (c) 2017-2023, Jean-Michaël Celerier & the libremidi contributors). It is derived from RtMidi (MIT) and ModernMidi (BSD 2-Clause). Full text: [LICENSE.md](https://github.com/celtera/libremidi/blob/master/LICENSE.md).
 
+TrussC applies a local bounded SysEx assembly, stray-EOX suppression and borrowed-byte ALSA receive patch to 5.4.3;
+see [LIBREMIDI_TRUSSC_MODIFICATIONS.md](../addons/tcxMidi/LIBREMIDI_TRUSSC_MODIFICATIONS.md)
+for the changes and upgrade procedure.
+
 ### curl License (libcurl)
 
 libcurl is under the curl License, an MIT-style license (Copyright (c) 1996-2026 Daniel Stenberg, and many contributors). Full text: [COPYING](https://github.com/curl/curl/blob/curl-8_22_0/COPYING).

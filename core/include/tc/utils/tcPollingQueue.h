@@ -46,7 +46,7 @@ inline size_t storageMultiply(size_t a, size_t b) {
 // Measure the constructed copy for admission: STL heap rounding and inline
 // capacities differ. Inline storage is included in sizeof(message/argument).
 inline size_t copiedStringStorage(const std::string& value) {
-    return value.size() <= std::string().capacity() ? 0 : storageAdd(value.size(), 1);
+    return value.size() <= std::string("").capacity() ? 0 : storageAdd(value.size(), 1);
 }
 inline std::string pollingStringCopy(const std::string& value) {
     return std::string(value);
@@ -99,7 +99,8 @@ public:
         return bufferMax_;
     }
     uint64_t getDroppedMessageCount() const { return dropped_.load(); }
-    // Allocation-free lower bound; admission charges the constructed node.
+    // Minimum copy charge; measuring inline capacity can allocate an iterator proxy.
+    // enqueue guards measurement together with construction of the copy.
     static size_t copyCharge(const T& message) {
         return storageAdd(sizeof(Node), Traits::copyStorage(message));
     }
@@ -113,46 +114,46 @@ public:
     }
     void enqueue(const T& message) {
         if (!enabled.load()) return;
-        const size_t charge = copyCharge(message);
+        size_t charge = sizeof(Node);
         StoreLoss loss;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (charge > storageLimit || bufferMax_ == 0) {
+            std::unique_ptr<Node> node;
+            try {
+                charge = copyCharge(message);
+                if (charge <= storageLimit && bufferMax_ != 0)
+                    node = std::make_unique<Node>(message);
+            } catch (const std::bad_alloc&) {
+                ++dropped_;
+                loss = {storageLimit, charge, "bytes (allocation failed)"};
+            }
+            if (!loss.units && (charge > storageLimit || bufferMax_ == 0)) {
                 ++dropped_;
                 loss = charge > storageLimit ? StoreLoss{storageLimit, charge, "bytes"}
                                              : StoreLoss{0, 1, "messages"};
-            } else {
-                std::unique_ptr<Node> node;
-                try {
-                    node = std::make_unique<Node>(message);
-                } catch (const std::bad_alloc&) {
+            } else if (node) {
+                const size_t actual = storageAdd(sizeof(Node), Traits::retainedStorage(node->message));
+                // Bound (security): actual retained capacity must fit the storage budget. Overflow rejects the whole copy before eviction and is counted.
+                if (actual > storageLimit) {
                     ++dropped_;
-                    loss = {storageLimit, charge, "bytes (allocation failed)"};
-                }
-                if (node) {
-                    const size_t actual = storageAdd(sizeof(Node), Traits::retainedStorage(node->message));
-                    // Bound (security): actual retained capacity must fit the storage budget. Overflow rejects the whole copy before eviction and is counted.
-                    if (actual > storageLimit) {
+                    loss = {storageLimit, actual, "bytes"};
+                } else {
+                    if (count_ >= bufferMax_) loss = {bufferMax_, storageAdd(count_, 1), "messages"};
+                    else if (actual > storageLimit - bytes_)
+                        loss = {storageLimit, storageAdd(bytes_, actual), "bytes"};
+                    // Charge the measured copy, evicting oldest whole messages
+                    // before publication; never assume a library's growth rule.
+                    while (head_ && (count_ >= bufferMax_ || actual > storageLimit - bytes_)) {
+                        pop();
                         ++dropped_;
-                        loss = {storageLimit, actual, "bytes"};
-                    } else {
-                        if (count_ >= bufferMax_) loss = {bufferMax_, storageAdd(count_, 1), "messages"};
-                        else if (actual > storageLimit - bytes_)
-                            loss = {storageLimit, storageAdd(bytes_, actual), "bytes"};
-                        // Charge the measured copy, evicting oldest whole messages
-                        // before publication; never assume a library's growth rule.
-                        while (head_ && (count_ >= bufferMax_ || actual > storageLimit - bytes_)) {
-                            pop();
-                            ++dropped_;
-                        }
-                        node->charge = actual;
-                        bytes_ += actual;
-                        auto* nextTail = node.get();
-                        if (tail_) tail_->next = std::move(node);
-                        else head_ = std::move(node);
-                        tail_ = nextTail;
-                        ++count_;
                     }
+                    node->charge = actual;
+                    bytes_ += actual;
+                    auto* nextTail = node.get();
+                    if (tail_) tail_->next = std::move(node);
+                    else head_ = std::move(node);
+                    tail_ = nextTail;
+                    ++count_;
                 }
             }
         }

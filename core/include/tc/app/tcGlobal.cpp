@@ -973,8 +973,12 @@ namespace {
 // (e.g. a sketch's global Material). Constant initialization and trivial
 // destruction keep the flag readable throughout static destruction.
 constinit bool windowStateDestroyed = false;
+constinit WindowContext* initializedMainWindowContext = nullptr;
+constinit std::vector<Window*>* initializedWindowRegistry = nullptr;
 
 struct WindowStateLifetimeMark {
+    explicit WindowStateLifetimeMark(WindowContext* ctx) { initializedMainWindowContext = ctx; }
+    explicit WindowStateLifetimeMark(std::vector<Window*>* list) { initializedWindowRegistry = list; }
     ~WindowStateLifetimeMark() { windowStateDestroyed = true; }
 };
 } // namespace
@@ -984,7 +988,7 @@ struct WindowStateLifetimeMark {
 WindowContext& mainWindowContext() {
     static WindowContext ctx;
     // Destroyed before ctx, like LoggerLifetimeMark below.
-    static WindowStateLifetimeMark lifetimeMark;
+    static WindowStateLifetimeMark lifetimeMark(&ctx);
     (void)lifetimeMark;
     return ctx;
 }
@@ -994,7 +998,7 @@ WindowContext& mainWindowContext() {
 static std::vector<Window*>& windowRegistryStorage() {
     static std::vector<Window*> list;
     // Either storage may be initialized first; stop cleanup before either dies.
-    static WindowStateLifetimeMark lifetimeMark;
+    static WindowStateLifetimeMark lifetimeMark(&list);
     (void)lifetimeMark;
     return list;
 }
@@ -1116,45 +1120,41 @@ std::vector<Window*> openWindows() {
     return out;
 }
 
-// Unregister a destroyed Light from every window context's activeLights, so a
-// still-registered Light never dangles (the PBR pipeline derefs those pointers
-// every lit draw — issue: ~Light() had no cleanup). Called by ~Light()
-// (declared in tcLight.h); defined here because it needs the Window registry.
-// Non-inline keeps it host/guest-shared under hot reload, same as the registry.
-void removeLightFromAllContexts(Light* light) {
+// Main thread only. These scrubs perform only raw-pointer assignment/erasure:
+// context() is non-virtual and no user code, close, or registration is invoked.
+// Thus the registry cannot mutate during this walk. Include closed windows too:
+// their contexts can still retain lighting pointers until Window destruction.
+// Do not initialize either storage from a destructor under allocation failure.
+namespace {
+template<class Scrub> void scrubLightingContexts(Scrub scrub) noexcept {
     if (windowStateDestroyed) return;
-    auto scrub = [&](WindowContext& ctx) {
-        auto& v = ctx.activeLights;
-        v.erase(std::remove(v.begin(), v.end(), light), v.end());
-    };
-    scrub(mainWindowContext());
-    for (Window* w : openWindows()) {
-        if (w) scrub(w->context());
+    if (initializedMainWindowContext) scrub(*initializedMainWindowContext);
+    if (initializedWindowRegistry) {
+        for (Window* w : *initializedWindowRegistry) {
+            if (w) scrub(w->context());
+        }
     }
 }
+} // namespace
 
-// Detach destroyed lighting state before the next mesh draw. Like Light's
-// cleanup, these definitions are shared by the hot-reload host and guest.
+// Non-inline keeps lighting cleanup shared by the hot-reload host and guest.
+void removeLightFromAllContexts(Light* light) {
+    scrubLightingContexts([&](WindowContext& ctx) noexcept {
+        auto& v = ctx.activeLights;
+        v.erase(std::remove(v.begin(), v.end(), light), v.end());
+    });
+}
+
 void clearMaterialFromAllContexts(Material* material) {
-    if (windowStateDestroyed) return;
-    auto scrub = [&](WindowContext& ctx) {
+    scrubLightingContexts([&](WindowContext& ctx) noexcept {
         if (ctx.currentMaterial == material) ctx.currentMaterial = nullptr;
-    };
-    scrub(mainWindowContext());
-    for (Window* w : openWindows()) {
-        if (w) scrub(w->context());
-    }
+    });
 }
 
 void clearEnvironmentFromAllContexts(Environment* environment) {
-    if (windowStateDestroyed) return;
-    auto scrub = [&](WindowContext& ctx) {
+    scrubLightingContexts([&](WindowContext& ctx) noexcept {
         if (ctx.currentEnvironment == environment) ctx.currentEnvironment = nullptr;
-    };
-    scrub(mainWindowContext());
-    for (Window* w : openWindows()) {
-        if (w) scrub(w->context());
-    }
+    });
 }
 
 // Declared in tcWindowContext.h. Every registered window, not only the open

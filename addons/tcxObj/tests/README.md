@@ -80,3 +80,7 @@ GPU-uploaded model reload can still terminate if deferred GPU-buffer retirement
 cannot allocate. Cold-start Material destruction can initialize core context and
 allocate (code trace only). These core paths are outside addon recovery.
 LogStream delivery failures are guarded in core.
+
+OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, constructing or moving even an empty `LoadResult` / `SaveResult` string or STL container can allocate a container proxy, so persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging remain best effort.
+
+STL-wide persistent allocation-failure cases SKIP when `_ITERATOR_DEBUG_LEVEL != 0`, with the reason printed. Targeted one-shot payload failures still run. Exhaustive one-shot STL sweeps, including the optional-MTL open regression, SKIP too: they deliberately target noexcept container proxy construction and moves, which can terminate even after a single refused proxy allocation. MSVC Debug CRT reports go to stderr and abort dialogs are disabled by the shared test support header.

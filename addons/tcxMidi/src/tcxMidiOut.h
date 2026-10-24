@@ -38,9 +38,11 @@ public:
     // -------------------------------------------------------------------------
     // Enumeration
     // -------------------------------------------------------------------------
+    // Open by name for stable selection; indices shift when ports appear or disappear.
     static std::vector<MidiDeviceInfo> listDevices() {
         std::vector<MidiDeviceInfo> devices;
-        libremidi::observer obs{{}, libremidi::observer_configuration_for(platformMidiApi())};
+        libremidi::observer obs{internal::midiObserverConfiguration(),
+                               libremidi::observer_configuration_for(platformMidiApi())};
         auto ports = obs.get_output_ports();
         for (int i = 0; i < static_cast<int>(ports.size()); ++i) {
             devices.push_back({i, ports[i].display_name});
@@ -51,9 +53,11 @@ public:
     // -------------------------------------------------------------------------
     // Open / close
     // -------------------------------------------------------------------------
+    // Open by name for stable selection; indices shift when ports appear or disappear.
     bool openPort(int index) {
         sendWarnings_.emplace();
-        libremidi::observer obs{{}, libremidi::observer_configuration_for(platformMidiApi())};
+        libremidi::observer obs{internal::midiObserverConfiguration(),
+                               libremidi::observer_configuration_for(platformMidiApi())};
         auto ports = obs.get_output_ports();
         if (index < 0 || index >= static_cast<int>(ports.size())) {
             trussc::logError("tcxMidiOut") << "openPort: index " << index
@@ -63,9 +67,11 @@ public:
         return openOutputPort(ports[index], index);
     }
 
+    // Open by name for stable selection; indices shift when ports appear or disappear.
     bool openPort(const std::string& nameContains) {
         sendWarnings_.emplace();
-        libremidi::observer obs{{}, libremidi::observer_configuration_for(platformMidiApi())};
+        libremidi::observer obs{internal::midiObserverConfiguration(),
+                               libremidi::observer_configuration_for(platformMidiApi())};
         auto ports = obs.get_output_ports();
         for (int i = 0; i < static_cast<int>(ports.size()); ++i) {
             if (ports[i].display_name.find(nameContains) != std::string::npos) {

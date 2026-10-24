@@ -28,4 +28,12 @@ inline libremidi::API platformMidiApi() {
 #endif
 }
 
+namespace internal {
+inline libremidi::observer_configuration midiObserverConfiguration() {
+    libremidi::observer_configuration config;
+    config.track_virtual = true;
+    return config;
+}
+}  // namespace internal
+
 }  // namespace tcx::midi

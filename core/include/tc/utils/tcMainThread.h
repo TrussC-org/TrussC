@@ -68,18 +68,23 @@ namespace internal {
     class MainThreadSlot {
     public:
         using Run = void (*)(MainThreadSlot&);
-        explicit MainThreadSlot(Run run) noexcept : run_(run) {}
+        explicit MainThreadSlot(Run run, Run discard = nullptr) noexcept : run_(run), discard_(discard) {}
         MainThreadSlot(const MainThreadSlot&) = delete;
         MainThreadSlot& operator=(const MainThreadSlot&) = delete;
 
         // Any thread. Never allocates or throws. Returns whether it queued.
         bool post(std::shared_ptr<void> keepAlive) noexcept;
+        // Host-owned mailboxes can use the same allocation-free slots while
+        // taking their snapshot independently of the ordinary main queue.
+        bool post(std::shared_ptr<void> keepAlive, std::atomic<MainThreadSlot*>& head) noexcept;
         bool isQueued() const noexcept { return queued_.load(std::memory_order_acquire); }
 
     private:
         friend void drainMainThreadSlots();
         friend size_t countQueuedMainThreadSlots() noexcept;
+        friend class MainThreadSlotBatch;
         Run run_;
+        Run discard_;
         MainThreadSlot* next_ = nullptr;     // list link while queued
         std::shared_ptr<void> keepAlive_;    // set by post, taken by the drain
         std::atomic<bool> queued_{false};
@@ -90,10 +95,13 @@ namespace internal {
     std::atomic<MainThreadSlot*>& mainThreadSlots() noexcept;
 
     inline bool MainThreadSlot::post(std::shared_ptr<void> keepAlive) noexcept {
+        return post(std::move(keepAlive), mainThreadSlots());
+    }
+    inline bool MainThreadSlot::post(std::shared_ptr<void> keepAlive,
+                                     std::atomic<MainThreadSlot*>& head) noexcept {
         if (!keepAlive || queued_.exchange(true, std::memory_order_acq_rel)) return false;
         // Only the winner of `queued_` writes these until the drain takes them.
         keepAlive_ = std::move(keepAlive);
-        auto& head = mainThreadSlots();
         MainThreadSlot* top = head.load(std::memory_order_relaxed);
         do {
             next_ = top;
@@ -102,26 +110,48 @@ namespace internal {
         return true;
     }
 
+    class MainThreadSlotBatch {
+    public:
+        MainThreadSlotBatch() = default;
+        explicit MainThreadSlotBatch(std::atomic<MainThreadSlot*>& head) noexcept {
+            auto* posted = head.exchange(nullptr, std::memory_order_acquire);
+            while (posted) {
+                auto* next = posted->next_;
+                posted->next_ = first_;
+                first_ = posted;
+                posted = next;
+            }
+        }
+        MainThreadSlotBatch(MainThreadSlotBatch&& other) noexcept
+            : first_(std::exchange(other.first_, nullptr)) {}
+        MainThreadSlotBatch& operator=(MainThreadSlotBatch&& other) noexcept {
+            consume(false);
+            first_ = std::exchange(other.first_, nullptr);
+            return *this;
+        }
+        ~MainThreadSlotBatch() { consume(false); }
+        bool empty() const noexcept { return first_ == nullptr; }
+        void deliver() { consume(true); }
+    private:
+        MainThreadSlot* first_ = nullptr;
+        void consume(bool deliver) {
+            while (first_) {
+                auto* slot = first_;
+                first_ = slot->next_;
+                auto keepAlive = std::move(slot->keepAlive_);
+                slot->queued_.store(false, std::memory_order_release);
+                if (deliver) slot->run_(*slot);
+                else if (slot->discard_) slot->discard_(*slot);
+            }
+        }
+    };
+
     // Main thread: run the slots posted so far, oldest first. Each slot is
     // unqueued before its run, so a post during the run queues it again for
     // the next drain. keepAlive is released only after run returns, so run
     // may destroy the owner (for example from a Logger listener).
     inline void drainMainThreadSlots() {
-        MainThreadSlot* posted = mainThreadSlots().exchange(nullptr, std::memory_order_acquire);
-        MainThreadSlot* fifo = nullptr;
-        while (posted) {
-            MainThreadSlot* next = posted->next_;
-            posted->next_ = fifo;
-            fifo = posted;
-            posted = next;
-        }
-        while (fifo) {
-            MainThreadSlot* slot = fifo;
-            fifo = slot->next_;
-            std::shared_ptr<void> keepAlive = std::move(slot->keepAlive_);
-            slot->queued_.store(false, std::memory_order_release);
-            slot->run_(*slot);
-        }
+        MainThreadSlotBatch(mainThreadSlots()).deliver();
     }
 
     // Main thread only (the drain runs there): slots currently queued.

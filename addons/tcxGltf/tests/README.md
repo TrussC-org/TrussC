@@ -83,13 +83,14 @@ containers for untrusted input; cgltf skips iteratively. Synthetic tests check
 cumulative skip-end arithmetic as well as per-object products.
 Node hierarchies use the existing iterative walk with cycle and duplicate
 protection. Local model and referenced files have no policy size or per-table
-count caps. Parser-table working memory is bounded by max(256 MiB, 64 times
-input bytes); exceeding it warns with the requested total and limit and rejects
-the file with an Error. A roughly 5.25 MB file of empty materials rejects under
-the production limit; actual malloc/free tracking checks that the oversized
-request never obtains memory and cleanup leaves no outstanding blocks. A
-roughly 12 MB JSON document with roughly 83 MB of parse tables loads under the
-same production policy. Both unpadded base64 tails load; a one-character tail fails.
+count caps, including no parse-table cap. When parse tables first exceed
+256 MiB, one Notice per load reports the resolved path and the byte count,
+after the load outcome and parser cleanup are complete. A roughly 5.2 MB JSON file with real parse
+tables above the former input-scaled threshold loads successfully twice,
+with exactly one such Notice each time. Actual malloc/free tracking checks
+that the tables obtain memory and cleanup leaves no outstanding blocks. A
+roughly 12 MB JSON document with roughly 83 MB of parse tables loads without
+a large-table Notice. Both unpadded base64 tails load; a one-character tail fails.
 
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
 push/PR across macOS / Windows / Linux; a non-zero exit fails the job. Run it
@@ -106,3 +107,11 @@ Error, `DecodeFailed` with exactly one Error for rejected data, relative paths
 through `getDataPath()`, Japanese model/buffer/texture filenames, escaped spaces
 and UTF-8 in buffer/image URIs, and `%25` decoded exactly once. All fixtures
 are generated at runtime.
+
+Small fixtures also check independent load results during log delivery using
+an implementation-only Notice threshold seam. The production threshold remains
+256 MiB.
+
+OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, constructing or moving even an empty `LoadResult` / `SaveResult` string or STL container can allocate a container proxy, so persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging remain best effort.
+
+STL-wide persistent allocation-failure cases SKIP when `_ITERATOR_DEBUG_LEVEL != 0`, with the reason printed. Targeted one-shot payload failures and the glTF C-parser-only persistent sweep still run. Exhaustive one-shot STL sweeps SKIP too: they deliberately target noexcept container proxy construction and moves, which can terminate even after a single refused proxy allocation. MSVC Debug CRT reports go to stderr and abort dialogs are disabled by the shared test support header.

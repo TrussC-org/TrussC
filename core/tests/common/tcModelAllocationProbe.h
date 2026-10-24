@@ -1,5 +1,7 @@
 #pragma once
 
+#include "tcTestFailure.h"
+
 #include <cstdlib>
 #include <new>
 #include <cstddef>
