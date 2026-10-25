@@ -277,6 +277,7 @@ static void* runSmallStackJob(void* arg) {
 }
 
 static size_t smallStackBytes() {
+    // Bound (catches recursive GIF decoding): 64 KiB, raised only to the platform's minimum thread stack.
     size_t bytes = 64 * 1024;
 #if defined(TC_TEST_SMALL_STACK_THREAD)
     bytes = max(bytes, static_cast<size_t>(PTHREAD_STACK_MIN));
