@@ -2,9 +2,16 @@
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
 #include <cstdio>
+#include <chrono>
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+#include <X11/Xlib.h>
+#include <X11/Xatom.h>
+#include <climits>
+#endif
 
 namespace {
 using namespace tc;
+using tc::Window; // Avoid the global Xlib Window typedef on Linux.
 int failures = 0;
 void check(const char* label, bool ok) {
     std::printf("windowGeometry: %s: %s\n", label, ok ? "PASS" : "FAIL");
@@ -35,23 +42,125 @@ void expect(Window& target, internal::WindowControl op, const char* label) {
     check(label, !calls.empty() && calls.back().window == &target && calls.back().op == op);
 }
 bool displayCompleted = false;
+// Store the last live poll: cleanup may run after native handles are detached.
+struct GeometryObservation {
+    std::chrono::steady_clock::time_point started;
+    double elapsed = 0;
+    int polls = 0, expectedWidth = 320, expectedHeight = 240;
+    IVec2 position{}, handlePosition{};
+    int width = 0, height = 0, handleWidth = 0, handleHeight = 0;
+    Vec2 size{};
+    bool hasHandle = false, pixelPerfect = false, printed = false;
+    float dpi = 0;
+    int framebufferWidth = 0, framebufferHeight = 0;
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+    bool clientValid = false, extentsValid = false;
+    int clientX = 0, clientY = 0, clientWidth = 0, clientHeight = 0;
+    unsigned long extents[4]{};
+#endif
+    void capture(Window* window, int phase, int pollCount) {
+        elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        polls = pollCount;
+        expectedWidth = phase ? 480 : 320;
+        expectedHeight = phase ? 300 : 240;
+        position = getWindowPosition();
+        width = getWindowWidth(); height = getWindowHeight();
+        size = getWindowSize();
+        hasHandle = window != nullptr;
+        if (window) {
+            handlePosition = window->getPosition();
+            handleWidth = window->getWidth(); handleHeight = window->getHeight();
+        }
+        pixelPerfect = internal::pixelPerfectMode();
+        dpi = sapp_dpi_scale();
+        framebufferWidth = sapp_width(); framebufferHeight = sapp_height();
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+        clientValid = extentsValid = false;
+        auto* display = (Display*)sapp_x11_get_display();
+        const auto native = (::Window)(uintptr_t)sapp_x11_get_window();
+        if (!display || !native) return; // Also supports the headless KMS lane.
+        XWindowAttributes attributes{};
+        ::Window child = 0;
+        clientValid = XGetWindowAttributes(display, native, &attributes) &&
+            XTranslateCoordinates(display, native, DefaultRootWindow(display),
+                                  0, 0, &clientX, &clientY, &child);
+        if (clientValid) { clientWidth = attributes.width; clientHeight = attributes.height; }
+        const Atom property = XInternAtom(display, "_NET_FRAME_EXTENTS", True);
+        if (property == None) return;
+        Atom type = None;
+        int format = 0;
+        unsigned long count = 0, remaining = 0;
+        unsigned char* data = nullptr;
+        if (XGetWindowProperty(display, native, property, 0, 4, False, XA_CARDINAL,
+                              &type, &format, &count, &remaining, &data) == Success &&
+            type == XA_CARDINAL && format == 32 && count == 4 && remaining == 0 && data) {
+            const auto* values = reinterpret_cast<const unsigned long*>(data);
+            // Match the geometry helper's defensive decoration-offset bound,
+            // applied to all four sides so frame size arithmetic is safe too.
+            extentsValid = true;
+            for (int i = 0; i < 4; ++i) {
+                extents[i] = values[i];
+                if (values[i] > SHRT_MAX) extentsValid = false;
+            }
+        }
+        if (data) XFree(data);
+#endif
+    }
+    void print() {
+        if (printed) return;
+        printed = true;
+        std::printf("windowGeometry: observed geometry (elapsed=%.3fs, polls=%d)\n", elapsed, polls);
+        std::printf("  expected: getWindowPosition=(80,70) size=(%d,%d) via getWindowWidth/Height (%s); requested size is logical\n",
+                    expectedWidth, expectedHeight, pixelPerfect ? "pixels" : "logical");
+        std::printf("  public: getWindowPosition=(%d,%d) getWindowWidth/Height=(%d,%d) getWindowSize=(%.0f,%.0f) pixelPerfect=%s\n",
+                    position.x, position.y, width, height, double(size.x), double(size.y), pixelPerfect ? "true" : "false");
+        if (hasHandle)
+            std::printf("  Window: getPosition=(%d,%d) getWidth/Height=(%d,%d) logical\n",
+                        handlePosition.x, handlePosition.y, handleWidth, handleHeight);
+        else std::printf("  Window: unavailable\n");
+        std::printf("  sapp: dpi_scale=%.3f framebuffer=(%d,%d) pixels\n", double(dpi), framebufferWidth, framebufferHeight);
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+        if (clientValid) {
+            std::printf("  X11: client root position=(%d,%d) size=(%d,%d) pixels\n", clientX, clientY, clientWidth, clientHeight);
+            if (extentsValid)
+                std::printf("  X11: frame root position=(%d,%d) size=(%d,%d) pixels; extents L/R/T/B=(%lu,%lu,%lu,%lu)\n",
+                            clientX - int(extents[0]), clientY - int(extents[2]),
+                            clientWidth + int(extents[0] + extents[1]), clientHeight + int(extents[2] + extents[3]),
+                            extents[0], extents[1], extents[2], extents[3]);
+            else std::printf("  X11: frame unavailable (_NET_FRAME_EXTENTS absent, invalid or out of bounds)\n");
+        } else std::printf("  X11: native geometry unavailable\n");
+#endif
+        std::fflush(stdout);
+    }
+};
 struct GeometryDisplayApp : App {
     int phase = 0, frames = 0;
+    GeometryObservation observation;
     void setup() override {
+        observation.started = std::chrono::steady_clock::now();
         setWindowSizeLogical(320, 240);
         setWindowPosition(80, 70);
+        observation.capture(getWindow(), phase, 0);
     }
     void update() override {
         const auto position = getWindowPosition();
-        if (getWindowWidth() == (phase ? 480 : 320) &&
-            getWindowHeight() == (phase ? 300 : 240) && position == IVec2(80, 70)) {
+        const bool observable = getWindowWidth() == (phase ? 480 : 320) &&
+            getWindowHeight() == (phase ? 300 : 240) && position == IVec2(80, 70);
+        observation.capture(getWindow(), phase, frames + 1);
+        if (observable) {
+            if (phase) observation.print();
             check("X11 main geometry round trip", true);
             if (phase++) { displayCompleted = true; requestExitApp(); }
             else setWindowSizeLogical(480, 300);
         }
         // Bound (test hang guard): stop a broken backend; success depends on
         // observed geometry, never on completing within a measured duration.
-        if (++frames == 600) { check("main geometry became observable", false); requestExitApp(); }
+        if (++frames == 600) { observation.print(); check("main geometry became observable", false); requestExitApp(); }
+    }
+    void cleanup() override {
+        // Covers early close as well, before the final completion assertion.
+        observation.print();
+        App::cleanup();
     }
 };
 
