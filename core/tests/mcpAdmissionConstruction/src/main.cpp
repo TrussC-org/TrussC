@@ -185,6 +185,9 @@ class ResizeDisplayApp : public App {
         largeFrames = 0;
     }
     void skipResize(int requestedWidth, int requestedHeight) {
+#if defined(__linux__) && !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
+        check("X11 main and secondary resizing must work (#889)", !sapp_x11_get_display());
+#endif
         const auto [w, h] = internal::captureWindowSize(context());
         printf("SKIP: window resize not supported here (requested %dx%d, measured %zux%zu)\n",
             requestedWidth, requestedHeight, w, h);

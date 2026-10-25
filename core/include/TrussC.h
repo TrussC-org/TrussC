@@ -318,6 +318,7 @@ namespace internal {
     // this header. Return true if an open window consumed the call.
     bool routeSetWindowTitleToWindow(const std::string& title);
     bool routeSetWindowSizeToWindow(int width, int height);
+    bool routeSetWindowPixelSizeToWindow(int width, int height);
     bool routeSetFullscreenToWindow(bool full);
     bool routeToggleFullscreenToWindow();
     bool routeIsFullscreenFromWindow(bool& out);
@@ -1634,36 +1635,22 @@ inline std::string getClipboardString() {
 // pixelPerfect=true: specify in framebuffer size
 // pixelPerfect=false: specify in logical size
 inline void setWindowSize(int width, int height) {
-    auto& ctx = internal::currentWindowContext();
-    if (!ctx.isMain) {
-        // Secondary window: route to Window::setSize (logical size). Convert
-        // framebuffer -> logical using THIS window's dpi scale in pixel-perfect
-        // mode, mirroring the main path's sapp_dpi_scale() conversion.
-        int lw = width, lh = height;
-        if (internal::pixelPerfectMode()) {
-            float s = ctx.dpiScale > 0.0f ? ctx.dpiScale : 1.0f;
-            lw = static_cast<int>(width / s);
-            lh = static_cast<int>(height / s);
-        }
-        internal::routeSetWindowSizeToWindow(lw, lh);
+    if constexpr (internal::windowSizeIsScreenControlled()) {
+        internal::setMainWindowSizeLogical(width, height);
         return;
     }
+    if (width <= 0 || height <= 0) return;
     if (internal::pixelPerfectMode()) {
-        // Pixel perfect mode: convert framebuffer size to logical size
-        float scale = sapp_dpi_scale();
-#if defined(_WIN32)
-        // Preserve fractional logical pixels until the native DPI conversion.
-        internal::setWindowSizeWin32(sapp_win32_get_hwnd(), double(width) / scale, double(height) / scale);
-#else
-        const int logicalWidth = static_cast<int>(width / scale);
-        const int logicalHeight = static_cast<int>(height / scale);
-        if (!internal::routeSetWindowSizeToWindow(logicalWidth, logicalHeight))
-            setWindowSizeLogical(logicalWidth, logicalHeight);
-#endif
-    } else {
-        // Logical coordinate mode: as is
-        if (!internal::routeSetWindowSizeToWindow(width, height)) setWindowSizeLogical(width, height);
-    }
+        if (internal::routeSetWindowPixelSizeToWindow(width, height)) return;
+        const float scale = sapp_dpi_scale();
+        const float factor = std::isfinite(scale) && scale > 0 ? scale : 1.0f;
+        // Same float division as Window::control's PixelSize path.
+        const float logicalWidth = width / factor, logicalHeight = height / factor;
+        // Bound: float(INT_MAX) rounds up to 2^31, outside int range.
+        if (!std::isfinite(logicalWidth) || !std::isfinite(logicalHeight) ||
+            logicalWidth >= 0x1p31f || logicalHeight >= 0x1p31f) return;
+        setWindowSizeLogical(int(logicalWidth), int(logicalHeight));
+    } else setWindowSizeLogical(width, height);
 }
 
 // Fullscreen. Context-aware: sapp_toggle_fullscreen()/sapp_is_fullscreen() only

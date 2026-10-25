@@ -22,6 +22,10 @@ class Window;
 
 namespace internal {
 class WindowRequestAccess;   // friend of Window, defined after it
+// One control entry for explicit handles and context-aware globals.
+enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, PositionQuery };
+using WindowControlHook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
+WindowControlHook& windowControlHookForTests();
 
 // Native implementation, reached through createWindow's platform check.
 std::shared_ptr<Window> createSecondaryWindow(const WindowSettings& settings);
@@ -66,8 +70,7 @@ public:
     // window is an error.
     // App::setSize() resizes this window from anywhere. The global
     // window-control functions do not: they act on the window being processed
-    // (setWindowTitle/setWindowSize, fullscreen) or on the main window only
-    // (position, decoration). To control this window from elsewhere, use this
+    // (title, size, position and fullscreen). To control it from elsewhere, use this
     // Window handle (from inside the App, App::getWindow() returns it).
     // Note: the App's setup() runs once on the window's first tree update
     // (standard Node lifecycle), i.e. on the window's first tick; its
@@ -137,9 +140,9 @@ public:
     // negative coordinates.
     //
     // Implemented natively per platform (macOS NSWindow, Windows HWND, X11)
-    // because sokol_app has no per-window move entry point — the global
-    // setWindowPosition() targets the MAIN window only. No-op if the native
-    // window is gone.
+    // because sokol_app has no per-window move entry point. The global
+    // setWindowPosition() targets the current window; this handle always targets
+    // this window. No-op if the native window is gone.
     //
     // Ordering matters for multi-display setups: setFullscreen() covers the
     // display the window is CURRENTLY on (Windows MonitorFromWindow, macOS the
@@ -264,6 +267,8 @@ public:
     internal::WindowRegistryEntry registryEntry_{this};
 
 private:
+    IVec2 control(internal::WindowControl op, int x = 0, int y = 0,
+                  const std::string* title = nullptr);
     void closeSecondary();
     void teardownSecondary() noexcept;
     void setSecondaryTitle(const std::string& title);
@@ -324,6 +329,7 @@ namespace internal {
 // VideoPlayer to its platform code.
 class WindowRequestAccess {
 public:
+    static void setPixelSize(Window& w, int width, int height) { w.control(WindowControl::PixelSize, width, height); }
     // Creation identity stays internal; main and secondary IDs are never reused.
     static uint64_t creationId(const Window& w) { return w.id_; }
     static std::unique_ptr<Window> makeMain() { return std::unique_ptr<Window>(new Window(true)); }
@@ -383,6 +389,12 @@ inline bool routeSetWindowSizeToWindow(int width, int height) {
     Window* w = currentWindow();
     if (!w) return false;
     w->setSize(width, height);
+    return true;
+}
+inline bool routeSetWindowPixelSizeToWindow(int width, int height) {
+    Window* w = currentWindow();
+    if (!w) return false;
+    WindowRequestAccess::setPixelSize(*w, width, height);
     return true;
 }
 // Fullscreen routing follows the active Window; each backend keeps its
@@ -776,6 +788,10 @@ inline Window* App::getWindow() const {
 // resized THAT window instead. Width/height get the same framebuffer ->
 // logical conversion as setWindowSize(), with the target window's own scale.
 inline void App::setSize(float w, float h) {
+    if constexpr (internal::windowSizeIsScreenControlled()) {
+        // Reach the Notice endpoint before validation or float-to-int conversion.
+        if (getWindow()) { internal::setMainWindowSizeLogical(0, 0); return; }
+    }
     // Not owned by a shared_ptr (yet): inside the App's constructor, or an
     // App made on the stack or in a unique_ptr. No window runs such an App
     // (it becomes getRootNode() / a window's App only through a shared_ptr),
@@ -791,21 +807,15 @@ inline void App::setSize(float w, float h) {
         RectNode::setSize(w, h);
         return;
     }
-    int width = static_cast<int>(w), height = static_cast<int>(h);
     if (Window* win = getWindow()) {
-        if (internal::pixelPerfectMode()) {
-            const float windowScale = win->context().isMain ? sapp_dpi_scale() : win->context().dpiScale;
-            const float s = windowScale > 0.0f ? windowScale : 1.0f;
-#if defined(_WIN32)
-            if (win->context().isMain) {
-                internal::setWindowSizeWin32(sapp_win32_get_hwnd(), double(width) / s, double(height) / s);
-                return;
-            }
-#endif
-            width = static_cast<int>(width / s);
-            height = static_cast<int>(height / s);
+        // Only the window path converts to int; unattached Apps keep any float size.
+        if (!std::isfinite(w) || !std::isfinite(h) || w <= 0 || h <= 0 ||
+            double(w) > (std::numeric_limits<int>::max)() || double(h) > (std::numeric_limits<int>::max)()) {
+            logWarning("App") << "setSize(): invalid size";
+            return;
         }
-        win->setSize(width, height);
+        if (internal::pixelPerfectMode()) internal::WindowRequestAccess::setPixelSize(*win, int(w), int(h));
+        else win->setSize(int(w), int(h));
         return;
     }
     RectNode::setSize(w, h);   // unattached: only this App's own Node size
@@ -856,26 +866,79 @@ inline void Window::teardown() noexcept {
     if (!ctx_.isMain) { teardownSecondary(); return; }
     if (mainOpen_) internal::WindowRequestAccess::endMain(*this);
 }
+inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std::string* title) {
+    // Native controls take an explicit target (the main endpoint or this
+    // Window's native handle). Keep the rendering owner current: a synchronous
+    // resize/fullscreen event must park, switch and restore the real caller.
+    if constexpr (internal::windowSizeIsScreenControlled()) {
+        if (op == internal::WindowControl::Size || op == internal::WindowControl::PixelSize) {
+            internal::setMainWindowSizeLogical(x, y);
+            return {-1, -1};
+        }
+    }
+    IVec2 result{-1, -1};
+    if (auto hook = internal::windowControlHookForTests()) {
+        if (hook(*this, op, x, y, title, result)) return result;
+    }
+    if (op == internal::WindowControl::Title) {
+        if (ctx_.isMain) mcp::internal::mainWindowTitle(*title);
+        else title_ = *title;
+    }
+    if (!isOpen()) return result;
+    switch (op) {
+        case internal::WindowControl::Title:
+            if (ctx_.isMain) {
+                if (sapp_isvalid()) sapp_set_window_title(title_.c_str());
+            } else { title_ = *title; setSecondaryTitle(*title); }
+            break;
+        case internal::WindowControl::PixelSize: {
+            if (x <= 0 || y <= 0) return result;
+            const float scale = ctx_.isMain ? sapp_dpi_scale() : ctx_.dpiScale;
+            const float factor = std::isfinite(scale) && scale > 0 ? scale : 1.0f;
+#if defined(_WIN32)
+            if (ctx_.isMain) { internal::setWindowSizeWin32(sapp_win32_get_hwnd(), double(x) / factor, double(y) / factor); break; }
+#endif
+            // Preserve the public API's float division before truncation.
+            const float width = x / factor, height = y / factor;
+            // Bound: float(INT_MAX) rounds up to 2^31, outside int range.
+            if (!std::isfinite(width) || !std::isfinite(height) ||
+                width >= 0x1p31f || height >= 0x1p31f) return result;
+            x = int(width); y = int(height);
+            [[fallthrough]];
+        }
+        case internal::WindowControl::Size:
+            if (x <= 0 || y <= 0) return result;
+            if (ctx_.isMain) { if (sapp_isvalid()) internal::setMainWindowSizeLogical(x, y); }
+            else setSecondarySize(x, y);
+            break;
+        case internal::WindowControl::Position:
+            if (ctx_.isMain) internal::setMainWindowPosition(x, y);
+            else setSecondaryPosition(x, y);
+            break;
+        case internal::WindowControl::PositionQuery:
+            result = ctx_.isMain ? internal::mainWindowPosition() : getSecondaryPosition();
+            break;
+        case internal::WindowControl::Fullscreen:
+            if (ctx_.isMain) { if (bool(x) != sapp_is_fullscreen()) sapp_toggle_fullscreen(); }
+            else setSecondaryFullscreen(bool(x));
+            break;
+    }
+    return result;
+}
 inline void Window::setTitle(const std::string& title) {
-    if (!ctx_.isMain) { title_ = title; setSecondaryTitle(title); return; }
-    mcp::internal::mainWindowTitle(title);
-    if (isOpen() && sapp_isvalid()) sapp_set_window_title(title_.c_str());
+    control(internal::WindowControl::Title, 0, 0, &title);
 }
 inline void Window::setSize(int width, int height) {
-    if (!ctx_.isMain) { setSecondarySize(width, height); return; }
-    if (isOpen() && sapp_isvalid()) setWindowSizeLogical(width, height);
+    control(internal::WindowControl::Size, width, height);
 }
 inline void Window::setPosition(int x, int y) {
-    if (!ctx_.isMain) { setSecondaryPosition(x, y); return; }
-    if (isOpen() && sapp_isvalid()) setWindowPosition(x, y);
+    control(internal::WindowControl::Position, x, y);
 }
 inline IVec2 Window::getPosition() const {
-    if (!ctx_.isMain) return getSecondaryPosition();
-    return isOpen() && sapp_isvalid() ? getWindowPosition() : IVec2(-1, -1);
+    return const_cast<Window*>(this)->control(internal::WindowControl::PositionQuery);
 }
 inline void Window::setFullscreen(bool full) {
-    if (!ctx_.isMain) { setSecondaryFullscreen(full); return; }
-    if (isOpen() && full != sapp_is_fullscreen()) sapp_toggle_fullscreen();
+    control(internal::WindowControl::Fullscreen, int(full));
 }
 inline bool Window::isFullscreen() const {
     return ctx_.isMain ? isOpen() && sapp_is_fullscreen() : isSecondaryFullscreen();

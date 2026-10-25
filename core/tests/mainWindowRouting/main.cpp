@@ -15,8 +15,8 @@ extern "C" bool sapp_isvalid() { return true; }
 extern "C" void sapp_set_window_title(const char* title) { ++titleCalls; titleSeen = title; }
 extern "C" bool sapp_is_fullscreen() { return fullscreen; }
 extern "C" void sapp_toggle_fullscreen() { ++fullscreenCalls; fullscreen = !fullscreen; }
-namespace trussc {
-void setWindowSizeLogical(int width, int height) { ++sizeCalls; widthSeen = width; heightSeen = height; }
+namespace trussc::internal {
+void setMainWindowSizeLogical(int width, int height) { ++sizeCalls; widthSeen = width; heightSeen = height; }
 }
 int main() {
     using namespace tc;

@@ -874,53 +874,50 @@ description.en = "Changes the size of the window this App runs in."
 description.ja = "この App が動いているウィンドウのサイズを変える。"
 description.ko = "이 App이 실행 중인 윈도우의 크기를 바꾼다."
 details.en = '''
+- Non-finite, non-positive or int-unrepresentable dimensions are rejected with a Warning before conversion.
 - `w`/`h` are the size of the content area, without the title bar. They are logical points by default, and real framebuffer pixels when `WindowSettings` is set to pixelPerfect. Values are truncated to int.
 - Call it from `setup()` or later. In the constructor (or for an App on the stack) no `shared_ptr` owns the App yet, so no window is resized: only the App's own size changes, and a warning is logged once per App. For the lifecycle, see `App`.
 - **The resize is asynchronous.** Right after the call, `getWidth()`/`getHeight()` still return the old size. They change, and `windowResized()` is called, once the window has actually been resized.
-- The window that is resized is determined by the App, not by the currently active window. It is the Window returned by `getWindow()`. If there is none and this App is the main root, it is the main window. Otherwise no window is resized and only the App's size changes.
+- The resized window is always the App's own `getWindow()`, regardless of the current callback. Without an attached Window, only the App's own Node size changes.
 - For this reason, calling `subApp->setSize(800, 600)` from the main window's `update()` resizes the sub window.
 - Inside a sub-window App's own `exit()`/`cleanup()`, `getWindow()` is already nullptr, so the call only changes the App's size.
 - It returns nothing and does not report failure. `setWidth()`/`setHeight()` never resize the window.
 '''
 details.ja = '''
+- 非有限値・正でない値・int で表せない寸法は、変換前に Warning を出して拒否します。
 - `w`/`h` はコンテンツ領域（タイトルバーを除いた部分）のサイズです。単位は通常は論理ポイントで、`WindowSettings` で pixelPerfect にしたときだけ実際のピクセルになります。小数は int に切り捨てられます。
 - `setup()` 以降で呼んでください。コンストラクタの中（およびスタック上に置いた App）ではまだ `shared_ptr` が App を保持していないため、ウィンドウはリサイズされません。App 自身のサイズだけが変わり、App ごとに 1 回警告が出ます。ライフサイクルについては `App` を参照してください。
 - **リサイズは非同期で行われます。** 呼んだ直後の `getWidth()`/`getHeight()` はまだ古いサイズを返します。実際にウィンドウのサイズが変わった時点で値が更新され、`windowResized()` が呼ばれます。
-- どのウィンドウがリサイズされるかは、現在アクティブなウィンドウではなく App によって決まります。`getWindow()` が返す Window があればそれが対象です。ない場合、この App がメインのルートであればメインウィンドウが対象になります。どちらでもなければウィンドウは変わらず、App のサイズだけが変わります。
+- 現在のコールバックに関係なく、この App 自身の `getWindow()` が返す窓をリサイズします。所属する Window がなければ、この App の Node サイズだけを変更します。
 - そのため、メインウィンドウの `update()` から `subApp->setSize(800, 600)` を呼ぶと、サブウィンドウがリサイズされます。
 - サブウィンドウの App 自身の `exit()`/`cleanup()` の中では `getWindow()` がすでに nullptr のため、App のサイズが変わるだけになります。
 - 戻り値はなく、失敗しても通知されません。`setWidth()`/`setHeight()` ではウィンドウはリサイズされません。
 '''
 details.ko = '''
+- 유한하지 않거나 양수가 아니거나 int로 표현할 수 없는 크기는 변환 전에 Warning을 출력하고 거부합니다.
 - `w`/`h`는 콘텐츠 영역(타이틀 바를 제외한 부분)의 크기입니다. 기본 단위는 논리 포인트이며, `WindowSettings`에서 pixelPerfect로 설정했을 때만 실제 픽셀이 됩니다. 소수는 int로 잘립니다.
 - `setup()` 이후에 호출하세요. 생성자 안(또는 스택에 둔 App)에서는 아직 `shared_ptr`가 App을 보유하지 않으므로 윈도우가 리사이즈되지 않습니다. App 자신의 크기만 바뀌고 App마다 한 번 경고가 출력됩니다. 라이프사이클은 `App`을 참조하세요.
 - **리사이즈는 비동기로 이루어집니다.** 호출 직후의 `getWidth()`/`getHeight()`는 아직 이전 크기를 반환합니다. 실제로 윈도우 크기가 바뀐 시점에 값이 갱신되고 `windowResized()`가 호출됩니다.
-- 어느 윈도우가 리사이즈되는지는 현재 활성화된 윈도우가 아니라 App에 의해 정해집니다. `getWindow()`가 반환하는 Window가 있으면 그것이 대상입니다. 없는 경우 이 App이 메인 루트라면 메인 윈도우가 대상이 됩니다. 둘 다 아니면 윈도우는 그대로이고 App 크기만 바뀝니다.
+- 현재 콜백과 관계없이 이 App 자신의 `getWindow()`가 반환하는 윈도우를 리사이즈합니다. 연결된 Window가 없으면 이 App의 Node 크기만 변경합니다.
 - 그래서 메인 윈도우의 `update()`에서 `subApp->setSize(800, 600)`을 호출하면 서브 윈도우가 리사이즈됩니다.
 - 서브 윈도우 App 자신의 `exit()`/`cleanup()` 안에서는 `getWindow()`가 이미 nullptr이므로 App 크기만 바뀝니다.
 - 반환값이 없으며 실패해도 알려 주지 않습니다. `setWidth()`/`setHeight()`로는 윈도우가 리사이즈되지 않습니다.
 '''
 related = ["getWindowSize", "setWindowSize", "App::getWindow", "App::windowResized", "App", "Window::setSize", "Window::setApp", "WindowSettings"]
 platform_note.en = '''
-- Main window on macOS: the top-left corner stays in place. On Windows: the window position stays in place.
-- Web: the element with id "canvas" is resized.
-- iOS/Android: it does nothing, because the app is always fullscreen.
-- Linux: not supported yet. A warning is logged on every call, and the App's size does not change either.
-- Windows created with createWindow() can be resized on macOS, Windows and desktop Linux.
+- macOS, Windows and desktop Linux GLX support main and secondary resizing. Pi X11/EGL supports main resizing; headless KMS logs a Warning.
+- Web: attached Apps are a no-op with one Notice on every call, including invalid sizes, like `setWindowSize()`. Page CSS controls the canvas; its drawable and attachments stay synchronized by sokol.
+- iOS/Android keep their screen-filling window size; attached Apps log one Notice on every call, including invalid sizes and pixel sizes that truncate to zero.
 '''
 platform_note.ja = '''
-- メインウィンドウは、macOS では左上の位置を保ったまま、Windows ではウィンドウの位置を保ったままリサイズされます。
-- Web では id が "canvas" の要素がリサイズされます。
-- iOS/Android では常に全画面のため、何も行いません。
-- Linux はまだ対応していません。呼ぶたびに警告が出て、App のサイズも変わりません。
-- createWindow() で作成したウィンドウは、macOS / Windows / デスクトップ Linux でリサイズできます。
+- macOS・Windows・desktop Linux GLX は主副窓でリサイズできます。Pi X11/EGL はメインのリサイズに対応し、headless KMS は Warning を出します。
+- Web の接続済み App は `setWindowSize()` と同じく、無効なサイズも含め呼び出しごとに Notice を 1 回出す no-op です。canvas のサイズはページの CSS が決め、sokol が drawable と attachment の整合を保ちます。
+- iOS・Android は画面全体のウィンドウサイズを維持します。接続済み App は無効なサイズや変換でゼロになるピクセルサイズも含め、呼び出しごとに Notice を 1 回出します。
 '''
 platform_note.ko = '''
-- 메인 윈도우는 macOS에서는 왼쪽 위 위치를 유지한 채, Windows에서는 윈도우 위치를 유지한 채 리사이즈됩니다.
-- Web에서는 id가 "canvas"인 요소가 리사이즈됩니다.
-- iOS/Android에서는 항상 전체 화면이므로 아무것도 하지 않습니다.
-- Linux는 아직 지원하지 않습니다. 호출할 때마다 경고가 출력되며 App 크기도 바뀌지 않습니다.
-- createWindow()로 만든 윈도우는 macOS / Windows / 데스크톱 Linux에서 리사이즈할 수 있습니다.
+- macOS, Windows, desktop Linux GLX는 메인과 보조 윈도우 리사이즈를 지원합니다. Pi X11/EGL은 메인 리사이즈를 지원하고 headless KMS는 Warning을 출력합니다.
+- Web의 연결된 App은 `setWindowSize()`와 같이 잘못된 크기도 포함하여 호출할 때마다 Notice를 한 번 출력하는 no-op입니다. 페이지 CSS가 canvas 크기를 결정하고 sokol이 drawable과 attachment의 크기를 동기화합니다.
+- iOS와 Android는 화면 전체의 윈도우 크기를 유지합니다. 연결된 App은 잘못된 크기나 변환 후 0이 되는 픽셀 크기도 포함하여 호출할 때마다 Notice를 한 번 출력합니다.
 '''
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
@@ -40495,19 +40492,16 @@ description.en = "Resizes this window's content area."
 description.ja = "このウィンドウのコンテンツ領域をリサイズする。"
 description.ko = "이 윈도우의 콘텐츠 영역 크기를 변경한다."
 details.en = '''
-- Main uses the existing sapp main-window size path, including platform limitations. Linux/Pi main resizing still warns and does nothing; Web/mobile support is unchanged.
 - `width` and `height` specify the content area in logical points, excluding window decorations. These units match `Window::getWidth()`, `Window::getHeight()`, and this window's input coordinates.
 - Secondary windows use logical coordinates even when pixelPerfect mode is enabled. DPI scaling is handled when converting the requested size to native dimensions.
 - Does nothing after the native window closes. For main-thread requirements, see `Window::setApp`.
 '''
 details.ja = '''
-- メインは既存の sapp のメイン用サイズ変更経路を使い、プラットフォームの制限も維持します。Linux/Pi のメインでは引き続き警告のみで変更せず、Web・モバイルの対応範囲も変わりません。
 - `width` と `height` は、ウィンドウの装飾を除いたコンテンツ領域のサイズを論理ポイントで指定します。単位は `Window::getWidth()`、`Window::getHeight()`、このウィンドウの入力座標と同じです。
 - セカンダリウィンドウは pixelPerfect モードが有効でも論理座標を使用します。要求したサイズをネイティブの寸法へ変換するときに DPI スケールを反映します。
 - ネイティブウィンドウを閉じたあとは何もしません。メインスレッドでの使用については `Window::setApp` を参照してください。
 '''
 details.ko = '''
-- 메인은 기존 sapp 메인 크기 변경 경로와 플랫폼 제한을 유지합니다. Linux/Pi 메인 크기 변경은 계속 경고만 표시하고 변경하지 않으며 Web/모바일 지원 범위도 그대로입니다.
 - `width`와 `height`는 윈도우 장식을 제외한 콘텐츠 영역 크기를 논리 포인트로 지정합니다. 단위는 `Window::getWidth()`, `Window::getHeight()`, 이 윈도우의 입력 좌표와 같습니다.
 - 보조 윈도우는 pixelPerfect 모드가 활성화되어 있어도 논리 좌표를 사용합니다. 요청한 크기를 네이티브 크기로 변환할 때 DPI 배율을 반영합니다.
 - 네이티브 윈도우를 닫은 뒤에는 아무 작업도 하지 않습니다. 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
@@ -40517,6 +40511,22 @@ void tcApp::setup() {
     if (auto window = getWindow()) window->setSize(800, 600);
 }
 '''
+
+platform_note.en = '''
+- Linux X11 main and secondary windows share DPI-scaled logical sizing. Headless KMS logs a Warning. iOS and Android keep their fullscreen size and log one Notice on every call, including invalid sizes and pixel sizes that truncate to zero.
+- Web: `setWindowSize()`, `setWindowSizeLogical()` and `Window::setSize()` are no-ops with one Notice on every call, including invalid sizes and pixel sizes that truncate to zero after DPI conversion. Page CSS owns the canvas size; sokol updates the drawable and WGPU attachments together, including devicePixelRatio and fullscreen round trips.
+'''
+
+platform_note.ja = '''
+- Linux X11 の主副窓は DPI を反映した論理サイズ変更を共有します。headless KMS は Warning を出します。iOS・Android は画面全体のサイズを維持し、無効なサイズや変換でゼロになるピクセルサイズも含め、呼び出しごとに Notice を 1 回出します。
+- Web の `setWindowSize()`・`setWindowSizeLogical()`・`Window::setSize()` は無効なサイズや DPI 変換でゼロになるピクセルサイズも含め、呼び出しごとに Notice を 1 回出す no-op です。canvas のサイズはページの CSS が決め、devicePixelRatio と fullscreen の往復も含め sokol が drawable と WGPU attachment をまとめて更新します。
+'''
+
+platform_note.ko = '''
+- Linux X11의 메인과 보조 윈도우는 DPI를 반영한 논리 크기 변경을 공유합니다. headless KMS는 Warning을 출력합니다. iOS와 Android는 전체 화면 크기를 유지하며, 잘못된 크기나 변환 후 0이 되는 픽셀 크기도 포함하여 호출할 때마다 Notice를 한 번 출력합니다.
+- Web의 `setWindowSize()`, `setWindowSizeLogical()`, `Window::setSize()`는 잘못된 크기나 DPI 변환 후 0이 되는 픽셀 크기도 포함하여 호출할 때마다 Notice를 한 번 출력하는 no-op입니다. 페이지 CSS가 canvas 크기를 결정하고 sokol이 devicePixelRatio 및 fullscreen 왕복을 포함해 drawable과 WGPU attachment를 함께 갱신합니다.
+'''
+
 
 ["Window::setPosition"]
 keywords = ["move", "position", "screen", "monitor", "display", "multi-monitor", "projector"]
@@ -47316,29 +47326,29 @@ description.en = "Returns the window position on the screen."
 description.ja = "画面上のウィンドウ位置を返す。"
 description.ko = "화면에서 윈도우의 위치를 반환한다."
 details.en = '''
-- Returns the outer window frame's top-left position as an `IVec2`, with X increasing rightward and Y increasing downward.
-- macOS uses screen points and converts Y using the height of the window's screen, without adding its screen origin. Windows returns the native `GetWindowRect` coordinates without an additional DPI conversion.
-- Returns `IVec2(-1, -1)` when no native window is available or the Windows position query fails.
+- Acts on the current window, including a secondary window inside its setup, event or update. This changes the former main-only global position behavior. Use an explicit `Window` handle to control another window; `App::setSize()` always targets its own window.
+- Position is the decorated frame top-left in OS screen coordinates relative to the primary screen top-left; negative coordinates are allowed. macOS uses screen points, Windows native screen coordinates, and X11 device coordinates. These are separate from logical content sizes and framebuffer pixels.
+- Move first, then enter fullscreen on that screen. The getter reports the real WM position, including clamping.
 '''
 details.ja = '''
-- ウィンドウ外枠の左上位置を `IVec2` で返し、X は右向き、Y は下向きに増加します。
-- macOS は画面のポイント単位を使用し、ウィンドウが属する画面の高さで Y 座標を変換します。画面の原点は加算しません。Windows は `GetWindowRect` の座標を追加の DPI 変換なしで返します。
-- ネイティブウィンドウを取得できない場合や、Windows の位置取得に失敗した場合は `IVec2(-1, -1)` を返します。
+- 現在のウィンドウを操作します。サブウィンドウの setup・イベント・update 内ではその窓が対象です。位置のグローバル関数が常にメインを対象にしていた動作からの変更です。別の窓には明示的な `Window` ハンドルを使います。`App::setSize()` は常に自分の窓を対象にします。
+- 位置はプライマリ画面左上を原点とする OS 画面座標で、装飾込み外枠の左上です。負座標も指定できます。macOS は画面のポイント、Windows はネイティブ画面座標、X11 はデバイス座標です。内容の論理サイズやフレームバッファのピクセルとは別です。
+- 移動してから fullscreen にすると移動先の画面を使います。取得値は WM の丸めも含む実位置です。
 '''
 details.ko = '''
-- 윈도우 바깥 테두리의 왼쪽 위 위치를 `IVec2`로 반환하며 X는 오른쪽, Y는 아래쪽으로 증가합니다.
-- macOS는 화면 포인트 단위를 사용하고 윈도우가 속한 화면의 높이로 Y 좌표를 변환하며 화면 원점은 더하지 않습니다. Windows는 추가 DPI 변환 없이 `GetWindowRect` 좌표를 반환합니다.
-- 네이티브 윈도우를 사용할 수 없거나 Windows 위치 조회에 실패하면 `IVec2(-1, -1)`을 반환합니다.
+- 현재 윈도우를 대상으로 합니다. 보조 윈도우의 setup, 이벤트, update 안에서는 해당 윈도우를 조작합니다. 위치 전역 함수가 항상 메인을 대상으로 하던 동작에서 변경되었습니다. 다른 윈도우는 명시적 `Window` 핸들로 조작하며 `App::setSize()`는 항상 자신의 윈도우를 대상으로 합니다.
+- 위치는 기본 화면 왼쪽 위를 원점으로 하는 OS 화면 좌표이며 장식을 포함한 외곽 프레임의 왼쪽 위입니다. 음수 좌표도 허용합니다. macOS는 화면 포인트, Windows는 네이티브 화면 좌표, X11은 장치 좌표를 사용합니다. 논리 콘텐츠 크기 및 프레임버퍼 픽셀과 별개입니다.
+- 먼저 이동한 뒤 fullscreen을 켜면 이동한 화면을 사용합니다. 조회는 WM의 위치 제한을 포함한 실제 위치를 반환합니다.
 '''
 related = ["setWindowPosition", "getDisplayScaleFactor"]
 platform_note.en = '''
-- Implemented on macOS and Windows. Linux, iOS, Android and Web log a warning and return `IVec2(-1, -1)`.
+- Position and size work on macOS, Windows and Linux X11 (desktop GLX and Pi X11/EGL). Headless KMS, Web, iOS and Android do not support position and log a Warning; the getter returns `IVec2(-1, -1)`.
 '''
 platform_note.ja = '''
-- macOS と Windows に実装されています。Linux、iOS、Android、Web は警告をログに記録し、`IVec2(-1, -1)` を返します。
+- 位置とサイズは macOS・Windows・Linux X11（desktop GLX、Pi X11/EGL）で対応します。headless KMS・Web・iOS・Android は位置操作に非対応で Warning を出し、取得は `IVec2(-1, -1)` を返します。
 '''
 platform_note.ko = '''
-- macOS와 Windows에서 구현되어 있습니다. Linux, iOS, Android, Web에서는 경고를 로그에 기록하고 `IVec2(-1, -1)`을 반환합니다.
+- 위치와 크기는 macOS, Windows, Linux X11(desktop GLX, Pi X11/EGL)에서 지원합니다. headless KMS, Web, iOS, Android는 위치를 지원하지 않아 Warning을 출력하고 조회는 `IVec2(-1, -1)`을 반환합니다.
 '''
 
 ["getWindowSize"]
@@ -52021,30 +52031,34 @@ description.en = "Moves the window to a screen position."
 description.ja = "画面上の指定位置にウィンドウを移動する。"
 description.ko = "윈도우를 지정한 화면 위치로 이동한다."
 details.en = '''
-- Sets the outer window frame's top-left position to `(x, y)`. For coordinate units and the macOS screen conversion, see `getWindowPosition`.
-- Does nothing when no native window is available. On Windows, moving the window does not resize it, activate it or change its stacking order.
+- Acts on the current window, including a secondary window inside its setup, event or update. This changes the former main-only global position behavior. Use an explicit `Window` handle to control another window; `App::setSize()` always targets its own window.
+- Position is the decorated frame top-left in OS screen coordinates relative to the primary screen top-left; negative coordinates are allowed. macOS uses screen points, Windows native screen coordinates, and X11 device coordinates. These are separate from logical content sizes and framebuffer pixels.
+- Move first, then enter fullscreen on that screen. The getter reports the real WM position, including clamping.
 '''
 details.ja = '''
-- ウィンドウ外枠の左上位置を `(x, y)` に設定します。座標の単位と macOS の画面座標の変換については `getWindowPosition` を参照してください。
-- ネイティブウィンドウを取得できない場合は何も行いません。Windows ではサイズ、アクティブ状態、前後の重なり順を変更せずに移動します。
+- 現在のウィンドウを操作します。サブウィンドウの setup・イベント・update 内ではその窓が対象です。位置のグローバル関数が常にメインを対象にしていた動作からの変更です。別の窓には明示的な `Window` ハンドルを使います。`App::setSize()` は常に自分の窓を対象にします。
+- 位置はプライマリ画面左上を原点とする OS 画面座標で、装飾込み外枠の左上です。負座標も指定できます。macOS は画面のポイント、Windows はネイティブ画面座標、X11 はデバイス座標です。内容の論理サイズやフレームバッファのピクセルとは別です。
+- 移動してから fullscreen にすると移動先の画面を使います。取得値は WM の丸めも含む実位置です。
 '''
 details.ko = '''
-- 윈도우 바깥 테두리의 왼쪽 위 위치를 `(x, y)`로 설정합니다. 좌표 단위와 macOS 화면 좌표 변환은 `getWindowPosition`을 참조하세요.
-- 네이티브 윈도우를 사용할 수 없으면 아무 작업도 하지 않습니다. Windows에서는 크기, 활성 상태, 겹침 순서를 변경하지 않고 이동합니다.
+- 현재 윈도우를 대상으로 합니다. 보조 윈도우의 setup, 이벤트, update 안에서는 해당 윈도우를 조작합니다. 위치 전역 함수가 항상 메인을 대상으로 하던 동작에서 변경되었습니다. 다른 윈도우는 명시적 `Window` 핸들로 조작하며 `App::setSize()`는 항상 자신의 윈도우를 대상으로 합니다.
+- 위치는 기본 화면 왼쪽 위를 원점으로 하는 OS 화면 좌표이며 장식을 포함한 외곽 프레임의 왼쪽 위입니다. 음수 좌표도 허용합니다. macOS는 화면 포인트, Windows는 네이티브 화면 좌표, X11은 장치 좌표를 사용합니다. 논리 콘텐츠 크기 및 프레임버퍼 픽셀과 별개입니다.
+- 먼저 이동한 뒤 fullscreen을 켜면 이동한 화면을 사용합니다. 조회는 WM의 위치 제한을 포함한 실제 위치를 반환합니다.
 '''
 related = ["getWindowPosition", "bringWindowToFront"]
 platform_note.en = '''
-- Implemented on macOS and Windows. Linux, iOS, Android and Web log a warning without moving the window.
+- Position and size work on macOS, Windows and Linux X11 (desktop GLX and Pi X11/EGL). Headless KMS, Web, iOS and Android do not support position and log a Warning; the getter returns `IVec2(-1, -1)`.
 '''
 platform_note.ja = '''
-- macOS と Windows に実装されています。Linux、iOS、Android、Web は警告をログに記録し、ウィンドウを移動しません。
+- 位置とサイズは macOS・Windows・Linux X11（desktop GLX、Pi X11/EGL）で対応します。headless KMS・Web・iOS・Android は位置操作に非対応で Warning を出し、取得は `IVec2(-1, -1)` を返します。
 '''
 platform_note.ko = '''
-- macOS와 Windows에서 구현되어 있습니다. Linux, iOS, Android, Web에서는 경고를 로그에 기록하며 윈도우를 이동하지 않습니다.
+- 위치와 크기는 macOS, Windows, Linux X11(desktop GLX, Pi X11/EGL)에서 지원합니다. headless KMS, Web, iOS, Android는 위치를 지원하지 않아 Warning을 출력하고 조회는 `IVec2(-1, -1)`을 반환합니다.
 '''
 snippet = '''
 void tcApp::setup() {
-    setWindowPosition(100, 100);
+    setWindowPosition(-1920, 0);
+    setFullscreen(true); // move first, then fullscreen on that screen
 }
 '''
 
@@ -52056,31 +52070,31 @@ description.ja = "現在の座標単位でウィンドウのサイズを変更�
 description.ko = "현재 좌표 단위로 윈도우 크기를 변경한다."
 details.en = '''
 - `width` and `height` specify the content size in logical pixels, or framebuffer pixels when `pixelPerfect` is enabled.
-- In pixel-perfect mode, dimensions are divided by the target window's DPI scale and truncated to integers before resizing.
-- Targets the main window in its context and the corresponding secondary window inside that window's callbacks; `setWindowSizeLogical()` always targets the main window.
+- In pixel-perfect mode, dimensions are divided by the target window's DPI scale. Windows main-window requests retain fractional logical pixels until native DPI rounding; other paths truncate logical dimensions to integers.
+- Acts on the current window, including a secondary window inside its setup, event or update. This changes the former main-only global position behavior. Use an explicit `Window` handle to control another window; `App::setSize()` always targets its own window.
 '''
 details.ja = '''
 - `width` と `height` は内容領域のサイズです。単位は論理ピクセルですが、`pixelPerfect` が有効な場合はフレームバッファのピクセルです。
-- pixelPerfect モードでは、対象ウィンドウの DPI スケールで各寸法を割り、小数部を切り捨ててからサイズを変更します。
-- メインウィンドウのコンテキストではメインウィンドウを、サブウィンドウのコールバック内ではそのウィンドウを操作します。`setWindowSizeLogical()` は常にメインウィンドウを操作します。
+- pixelPerfect モードでは、対象ウィンドウの DPI スケールで各寸法を割ります。Windows のメインウィンドウはネイティブ DPI で丸めるまで論理座標の小数を保持し、その他の経路は論理寸法の小数部を切り捨てます。
+- 現在のウィンドウを操作します。サブウィンドウの setup・イベント・update 内ではその窓が対象です。位置のグローバル関数が常にメインを対象にしていた動作からの変更です。別の窓には明示的な `Window` ハンドルを使います。`App::setSize()` は常に自分の窓を対象にします。
 '''
 details.ko = '''
 - `width`와 `height`는 콘텐츠 영역의 크기입니다. 단위는 논리 픽셀이며, `pixelPerfect`가 활성화된 경우에는 프레임버퍼 픽셀입니다.
-- pixelPerfect 모드에서는 대상 윈도우의 DPI 배율로 각 크기를 나눈 뒤 소수 부분을 버리고 크기를 변경합니다.
-- 메인 윈도우의 컨텍스트에서는 메인 윈도우를, 보조 윈도우의 콜백 안에서는 해당 윈도우를 조작합니다. `setWindowSizeLogical()`은 항상 메인 윈도우를 조작합니다.
+- pixelPerfect 모드에서는 대상 윈도우의 DPI 배율로 각 크기를 나눕니다. Windows 메인 윈도우는 네이티브 DPI 반올림까지 논리 픽셀의 소수를 유지하고 다른 경로는 논리 크기의 소수 부분을 버립니다.
+- 현재 윈도우를 대상으로 합니다. 보조 윈도우의 setup, 이벤트, update 안에서는 해당 윈도우를 조작합니다. 위치 전역 함수가 항상 메인을 대상으로 하던 동작에서 변경되었습니다. 다른 윈도우는 명시적 `Window` 핸들로 조작하며 `App::setSize()`는 항상 자신의 윈도우를 대상으로 합니다.
 '''
 related = ["getWindowSize", "setWindowSizeLogical", "setWindowPosition"]
 platform_note.en = '''
-- Main-window resizing is unimplemented on Linux and logs a warning; it does nothing on iOS and Android, where the window fills the screen.
-- Web changes the canvas size. Windows created with `createWindow()` can also be resized on Linux.
+- Linux X11 main and secondary windows share DPI-scaled logical sizing. Headless KMS logs a Warning. iOS and Android keep their fullscreen size and log one Notice on every call, including invalid sizes and pixel sizes that truncate to zero.
+- Web: `setWindowSize()`, `setWindowSizeLogical()` and `Window::setSize()` are no-ops with one Notice on every call, including invalid sizes and pixel sizes that truncate to zero after DPI conversion. Page CSS owns the canvas size; sokol updates the drawable and WGPU attachments together, including devicePixelRatio and fullscreen round trips.
 '''
 platform_note.ja = '''
-- Linux のメインウィンドウのサイズ変更は未実装で、警告を出します。画面全体を使う iOS と Android では何もしません。
-- Web では canvas のサイズを変更します。`createWindow()` で作成したウィンドウは Linux でもサイズを変更できます。
+- Linux X11 の主副窓は DPI を反映した論理サイズ変更を共有します。headless KMS は Warning を出します。iOS・Android は画面全体のサイズを維持し、無効なサイズや変換でゼロになるピクセルサイズも含め、呼び出しごとに Notice を 1 回出します。
+- Web の `setWindowSize()`・`setWindowSizeLogical()`・`Window::setSize()` は無効なサイズや DPI 変換でゼロになるピクセルサイズも含め、呼び出しごとに Notice を 1 回出す no-op です。canvas のサイズはページの CSS が決め、devicePixelRatio と fullscreen の往復も含め sokol が drawable と WGPU attachment をまとめて更新します。
 '''
 platform_note.ko = '''
-- Linux의 메인 윈도우 크기 변경은 미구현 상태이며 경고를 출력합니다. 화면 전체를 사용하는 iOS와 Android에서는 아무 작업도 하지 않습니다.
-- Web에서는 canvas 크기를 변경합니다. `createWindow()`로 생성한 윈도우는 Linux에서도 크기를 변경할 수 있습니다.
+- Linux X11의 메인과 보조 윈도우는 DPI를 반영한 논리 크기 변경을 공유합니다. headless KMS는 Warning을 출력합니다. iOS와 Android는 전체 화면 크기를 유지하며, 잘못된 크기나 변환 후 0이 되는 픽셀 크기도 포함하여 호출할 때마다 Notice를 한 번 출력합니다.
+- Web의 `setWindowSize()`, `setWindowSizeLogical()`, `Window::setSize()`는 잘못된 크기나 DPI 변환 후 0이 되는 픽셀 크기도 포함하여 호출할 때마다 Notice를 한 번 출력하는 no-op입니다. 페이지 CSS가 canvas 크기를 결정하고 sokol이 devicePixelRatio 및 fullscreen 왕복을 포함해 drawable과 WGPU attachment를 함께 갱신합니다.
 '''
 snippet = '''
 void tcApp::setup() {
@@ -52091,33 +52105,33 @@ void tcApp::setup() {
 ["setWindowSizeLogical"]
 category = "window_system"
 keywords = ["resize", "logical pixels", "points", "dimensions"]
-description.en = "Resizes the main window using logical dimensions."
-description.ja = "論理サイズでメインウィンドウのサイズを変更する。"
-description.ko = "논리 크기로 메인 윈도우 크기를 변경한다."
+description.en = "Resizes the current window using logical dimensions."
+description.ja = "論理サイズで現在のウィンドウのサイズを変更する。"
+description.ko = "논리 크기로 현재 윈도우 크기를 변경한다."
 details.en = '''
 - `width` and `height` specify the content size in logical pixels without the `pixelPerfect` conversion performed by `setWindowSize()`.
-- Always targets the main window, including calls from a secondary window's callbacks.
+- Acts on the current window, including a secondary window inside its setup, event or update. This changes the former main-only global position behavior. Use an explicit `Window` handle to control another window; `App::setSize()` always targets its own window.
 '''
 details.ja = '''
 - `width` と `height` は論理ピクセルでの内容領域のサイズです。`setWindowSize()` が行う `pixelPerfect` による変換は行いません。
-- サブウィンドウのコールバックから呼んだ場合も、常にメインウィンドウを操作します。
+- 現在のウィンドウを操作します。サブウィンドウの setup・イベント・update 内ではその窓が対象です。位置のグローバル関数が常にメインを対象にしていた動作からの変更です。別の窓には明示的な `Window` ハンドルを使います。`App::setSize()` は常に自分の窓を対象にします。
 '''
 details.ko = '''
 - `width`와 `height`는 논리 픽셀 단위의 콘텐츠 영역 크기입니다. `setWindowSize()`가 수행하는 `pixelPerfect` 변환은 하지 않습니다.
-- 보조 윈도우의 콜백에서 호출해도 항상 메인 윈도우를 조작합니다.
+- 현재 윈도우를 대상으로 합니다. 보조 윈도우의 setup, 이벤트, update 안에서는 해당 윈도우를 조작합니다. 위치 전역 함수가 항상 메인을 대상으로 하던 동작에서 변경되었습니다. 다른 윈도우는 명시적 `Window` 핸들로 조작하며 `App::setSize()`는 항상 자신의 윈도우를 대상으로 합니다.
 '''
 related = ["setWindowSize", "getDpiScale"]
 platform_note.en = '''
-- Unimplemented on Linux, where it logs a warning; does nothing on iOS and Android, where the window fills the screen.
-- Web passes the dimensions directly to the canvas element size API.
+- Linux X11 main and secondary windows share DPI-scaled logical sizing. Headless KMS logs a Warning. iOS and Android keep their fullscreen size and log one Notice on every call, including invalid sizes and pixel sizes that truncate to zero.
+- Web: `setWindowSize()`, `setWindowSizeLogical()` and `Window::setSize()` are no-ops with one Notice on every call, including invalid sizes and pixel sizes that truncate to zero after DPI conversion. Page CSS owns the canvas size; sokol updates the drawable and WGPU attachments together, including devicePixelRatio and fullscreen round trips.
 '''
 platform_note.ja = '''
-- Linux では未実装で警告を出します。画面全体を使う iOS と Android では何もしません。
-- Web では指定寸法を canvas 要素のサイズ設定 API にそのまま渡します。
+- Linux X11 の主副窓は DPI を反映した論理サイズ変更を共有します。headless KMS は Warning を出します。iOS・Android は画面全体のサイズを維持し、無効なサイズや変換でゼロになるピクセルサイズも含め、呼び出しごとに Notice を 1 回出します。
+- Web の `setWindowSize()`・`setWindowSizeLogical()`・`Window::setSize()` は無効なサイズや DPI 変換でゼロになるピクセルサイズも含め、呼び出しごとに Notice を 1 回出す no-op です。canvas のサイズはページの CSS が決め、devicePixelRatio と fullscreen の往復も含め sokol が drawable と WGPU attachment をまとめて更新します。
 '''
 platform_note.ko = '''
-- Linux에서는 미구현 상태이며 경고를 출력합니다. 화면 전체를 사용하는 iOS와 Android에서는 아무 작업도 하지 않습니다.
-- Web에서는 지정한 크기를 canvas 요소의 크기 설정 API에 그대로 전달합니다.
+- Linux X11의 메인과 보조 윈도우는 DPI를 반영한 논리 크기 변경을 공유합니다. headless KMS는 Warning을 출력합니다. iOS와 Android는 전체 화면 크기를 유지하며, 잘못된 크기나 변환 후 0이 되는 픽셀 크기도 포함하여 호출할 때마다 Notice를 한 번 출력합니다.
+- Web의 `setWindowSize()`, `setWindowSizeLogical()`, `Window::setSize()`는 잘못된 크기나 DPI 변환 후 0이 되는 픽셀 크기도 포함하여 호출할 때마다 Notice를 한 번 출력하는 no-op입니다. 페이지 CSS가 canvas 크기를 결정하고 sokol이 devicePixelRatio 및 fullscreen 왕복을 포함해 drawable과 WGPU attachment를 함께 갱신합니다.
 '''
 snippet = '''
 void tcApp::setup() {
@@ -52132,14 +52146,17 @@ description.en = "Sets the window title."
 description.ja = "ウィンドウのタイトルを設定する。"
 description.ko = "윈도우 제목을 설정한다."
 details.en = '''
+- Web updates `document.title`; the initial WindowSettings title is also applied, even when the HTML5 update-title flag is false.
 - Pass the title as a string; calls inside a secondary window's callbacks change that window's title, while the main context changes the main window's title.
 - In development builds, the main window title receives an ` [MCP]` suffix unless it already contains `[MCP]`.
 '''
 details.ja = '''
+- Web では `document.title` を更新します。HTML5 のタイトル更新フラグが false でも、起動時の WindowSettings のタイトルを適用します。
 - タイトルを文字列で渡します。サブウィンドウのコールバック内ではそのウィンドウを、メインのコンテキストではメインウィンドウのタイトルを変更します。
 - 開発ビルドでは、メインウィンドウのタイトルに `[MCP]` が含まれていない場合、末尾に ` [MCP]` を付けます。
 '''
 details.ko = '''
+- Web에서는 `document.title`을 갱신합니다. HTML5 제목 갱신 플래그가 false여도 초기 WindowSettings 제목을 적용합니다.
 - 제목을 문자열로 전달합니다. 보조 윈도우의 콜백 안에서는 해당 윈도우의 제목을, 메인 컨텍스트에서는 메인 윈도우의 제목을 변경합니다.
 - 개발 빌드에서는 메인 윈도우 제목에 `[MCP]`가 포함되어 있지 않으면 끝에 ` [MCP]`를 붙입니다.
 '''

@@ -2205,7 +2205,7 @@ int getFramebufferHeight()  // Returns the current window framebuffer's height.
 int getFramebufferWidth()  // Returns the current window framebuffer's width.
 bool getKeepScreenOn() [macos,windows,android,ios]  // Returns the keep-screen-on setting.
 int getMaxUpdateSteps()  // Returns the limit on fixed-rate update steps.
-IVec2 getWindowPosition() [macos,windows]  // Returns the window position on the screen.
+IVec2 getWindowPosition() [macos,windows,linux]  // Returns the window position on the screen.
 bool grabScreen(Pixels & outPixels) [macos,windows,linux,ios,android]  // Read this window's screen into Pixels. What is captured depends on when you call it
 bool isFullscreen()  // Returns whether the current window is fullscreen.
 bool isRecording()  // Returns whether the global screen recorder is capturing.
@@ -2221,9 +2221,9 @@ void setKeepScreenOn(bool enabled) [macos,windows,android,ios]  // Controls whet
 void setMaxUpdateSteps(int steps)  // Sets the maximum number of fixed update steps per loop pass.
 void setOrientation(Orientation mask) [android,ios]  // Sets the allowed screen orientations.
 void setWindowDecorated(bool decorated)  // Controls the main window's standard decorations.
-void setWindowPosition(int x, int y) [macos,windows]  // Moves the window to a screen position.
+void setWindowPosition(int x, int y) [macos,windows,linux]  // Moves the window to a screen position.
 void setWindowSize(int width, int height)  // Resizes the window in the current coordinate units.
-void setWindowSizeLogical(int width, int height)  // Resizes the main window using logical dimensions.
+void setWindowSizeLogical(int width, int height)  // Resizes the current window using logical dimensions.
 void setWindowTitle(const std::string & title)  // Sets the window title.
 SaveResult startRecording(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Starts recording a window or Fbo to a video file.
 SaveResult stopRecording()  // Stops the global recording and finalizes its file.

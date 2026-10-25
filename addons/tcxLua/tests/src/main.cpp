@@ -331,8 +331,10 @@ int main(int argc, char** argv) {
     check("Node().cancelTimer ~= nil", luaBool("Node().cancelTimer ~= nil"));
 
 #if defined(__linux__) && !defined(__ANDROID__)
-    check("window position funcs absent on Linux",
-        luaBool("getWindowPosition == nil and setWindowPosition == nil"));
+    check("window position funcs available on Linux",
+        luaBool("type(getWindowPosition) == 'function' and type(setWindowPosition) == 'function'"));
+    check("Window position methods available on Linux",
+        luaBool("Window.getPosition ~= nil and Window.setPosition ~= nil"));
 #endif
 
     // A nested result uses its declaration's registration, including inherited returns.

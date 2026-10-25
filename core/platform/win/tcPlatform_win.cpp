@@ -112,8 +112,8 @@ bool getKeepScreenOn() { return keepScreenOn_; }
 // ---------------------------------------------------------------------------
 // setWindowSize - ウィンドウサイズを変更
 // ---------------------------------------------------------------------------
-IVec2 getWindowPosition() {
-    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+IVec2 internal::windowPositionNative(const void* handle) {
+    HWND hwnd = (HWND)handle;
     if (!hwnd) return IVec2(-1, -1);
 
     RECT rect;
@@ -123,11 +123,14 @@ IVec2 getWindowPosition() {
     return IVec2(-1, -1);
 }
 
-void setWindowPosition(int x, int y) {
-    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+void internal::setWindowPositionNative(const void* handle, int x, int y) {
+    HWND hwnd = (HWND)handle;
     if (!hwnd) return;
     SetWindowPos(hwnd, nullptr, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
 }
+
+IVec2 internal::mainWindowPosition() { return windowPositionNative(sapp_win32_get_hwnd()); }
+void internal::setMainWindowPosition(int x, int y) { setWindowPositionNative(sapp_win32_get_hwnd(), x, y); }
 
 void setWindowDecorated(bool decorated) {
     HWND hwnd = (HWND)sapp_win32_get_hwnd();
@@ -198,7 +201,7 @@ void internal::setWindowSizeWin32(const void* handle, double logicalWidth, doubl
                  SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-void setWindowSizeLogical(int width, int height) {
+void internal::setMainWindowSizeLogical(int width, int height) {
     internal::setWindowSizeWin32(sapp_win32_get_hwnd(), width, height);
 }
 
