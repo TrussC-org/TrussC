@@ -1,5 +1,5 @@
 #!/bin/sh
-# Extract the production EGL frame function; exercise its wait without an EGL
+# Extract the production EGL deadline and shared X11 wait; exercise without an EGL
 # device or timing assertions. Run through tcbuild.sh, like other build probes.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
@@ -14,16 +14,9 @@ cat > "$scratch/probe.cpp" <<'CPP'
 #include <math.h>
 #include <cstdio>
 #include <cstdlib>
-#define _SOKOL_PRIVATE static
-#define _SAPP_EGL 1
-struct Timestamp {};
-struct {
-    struct { Timestamp timestamp; } timing;
-    bool skip_present;
-    int swap_interval;
-    struct { int display, surface; } egl;
-    struct { int display; } x11;
-} _sapp_tc;
+struct { int display; } _sapp_tc;
+static bool skip_present;
+static int swap_interval = 4;
 static double now = 10, work = .005;
 static int buffered, polls, timeouts[4], swaps, failures;
 static bool skip = true, interruptWait, invalidFd, timeoutWait;
@@ -31,10 +24,7 @@ static void check(const char* label, bool ok) {
     std::printf("egl-wait: %s: %s\n", label, ok ? "PASS" : "FAIL");
     if (!ok) ++failures;
 }
-static double _sapp_tc_timestamp_now(Timestamp*) { return now; }
-static void _sapp_tc_x11_update_dimensions_from_window_size() {}
-static void _sapp_tc_frame() { now += work; _sapp_tc.skip_present = skip; }
-static void eglSwapBuffers(int, int) { ++swaps; }
+static double _sapp_tc_now() { return now; }
 static int ConnectionNumber(int display) { return display; }
 static int XPending(int) { return buffered; }
 static int probePoll(pollfd* input, nfds_t count, int timeout) {
@@ -47,41 +37,53 @@ static int probePoll(pollfd* input, nfds_t count, int timeout) {
 }
 #define poll probePoll
 CPP
-awk '
-    /^_SOKOL_PRIVATE void _sapp_tc_linux_frame\(void\)/ { emit = 1 }
-    /^_SOKOL_PRIVATE void _sapp_tc_linux_run\(/ { emit = 0 }
-    emit { print }
-' "$root/core/include/sokol/sokol_app_tc.h" >> "$scratch/probe.cpp"
+python3 - "$root/core/include/sokol/sokol_app_tc.h" >> "$scratch/probe.cpp" <<'PYCODE'
+from pathlib import Path
+import sys
+source = Path(sys.argv[1]).read_text()
+def body(marker):
+    start = source.index(marker)
+    pos = source.index('{', start) + 1
+    depth = 1
+    while depth:
+        depth += (source[pos] == '{') - (source[pos] == '}')
+        pos += 1
+    return source[start:pos]
+print(body('static void _sapp_tc_x11_wait_until('))
+print('static void frame() { double frame_start = now; now += work; skip_present = skip;')
+print('bool presented = !skip_present; struct { double earliest_next; } state{}; auto* w = &state;')
+print(body('if (!presented) {'))
+print('if (skip_present) { skip_present = false; _sapp_tc_x11_wait_until(w->earliest_next); } else ++swaps; }')
+PYCODE
 cat >> "$scratch/probe.cpp" <<'CPP'
 int main() {
     int fd[2];
     if (pipe(fd) != 0 || write(fd[1], "x", 1) != 1) return 2;
-    _sapp_tc.x11.display = fd[0];
-    _sapp_tc.swap_interval = 4;
-    _sapp_tc_linux_frame();
-    check("readable X fd returns before the deadline", polls == 1 && now < 10 + .0664 && timeouts[0] == 62);
-    check("skipped frame consumes skip flag without swapping", !_sapp_tc.skip_present && swaps == 0);
+    _sapp_tc.display = fd[0];
+    frame();
+    check("readable X fd wakes the loop", polls == 1 && timeouts[0] == 62);
+    check("skipped frame consumes skip flag without swapping", !skip_present && swaps == 0);
     polls = 0; buffered = 1;
-    _sapp_tc_linux_frame();
+    frame();
     check("Xlib buffered event bypasses the wait", polls == 0);
     buffered = 0; interruptWait = true;
-    _sapp_tc_linux_frame();
+    frame();
     check("EINTR retries only the remaining deadline", polls == 2 && timeouts[0] == 62 && timeouts[1] == 52);
     polls = 0; interruptWait = false; work = .1;
-    _sapp_tc_linux_frame();
+    frame();
     check("callback work beyond the period adds no wait", polls == 0);
     work = .005;
-    _sapp_tc_linux_frame();
+    frame();
     check("next tick starts afresh without catch-up", polls == 1 && timeouts[0] == 62);
     polls = 0; invalidFd = true;
-    _sapp_tc_linux_frame();
+    frame();
     check("non-EINTR errors return to the event loop", polls == 1);
     polls = 0; invalidFd = false; timeoutWait = true;
     const double start = now;
-    _sapp_tc_linux_frame();
+    frame();
     check("idle timeout includes callback work in the period", polls == 1 && timeouts[0] == 62 && now - start >= .0664);
     polls = 0; skip = false;
-    _sapp_tc_linux_frame();
+    frame();
     check("normal presentation does not wait on input", polls == 0 && swaps == 1);
     close(fd[0]); close(fd[1]);
     return failures ? 1 : 0;

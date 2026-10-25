@@ -1,0 +1,1 @@
+target_compile_definitions(TrussC PRIVATE SOKOL_TC_TEST_HOOKS)

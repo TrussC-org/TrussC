@@ -5,7 +5,7 @@
 #include <map>
 #include <thread>
 
-#if (defined(__APPLE__) && TARGET_OS_OSX) || defined(_WIN32) || (defined(__linux__) && defined(SOKOL_GLCORE) && !defined(__ANDROID__))
+#if (defined(__APPLE__) && TARGET_OS_OSX) || defined(_WIN32) || (defined(__linux__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__ANDROID__))
 namespace trussc::internal {
 void dispatchSecondaryDisplayEventForTests(const sapp_event*, Window&);
 }

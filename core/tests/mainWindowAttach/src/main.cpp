@@ -3,7 +3,7 @@
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
 using namespace tc;
-#if defined(__EMSCRIPTEN__) || defined(__ANDROID__) || (defined(__APPLE__) && !TARGET_OS_OSX) || (defined(__linux__) && !defined(SOKOL_GLCORE))
+#if defined(__EMSCRIPTEN__) || defined(__ANDROID__) || (defined(__APPLE__) && !TARGET_OS_OSX) || (defined(__linux__) && !defined(SOKOL_GLCORE) && !defined(SOKOL_GLES3))
 static_assert(!internal::supportsSecondaryWindows(), "single-window platforms must reject secondary creation");
 #endif
 namespace {
