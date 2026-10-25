@@ -25,6 +25,9 @@ static int uriIndex;
 static unsigned long offeredCount;
 static std::string noticeMessage;
 static XEvent sentEvent;
+static sapp_event lastEvent, lastKeyDown;
+static int callbacks, keyCallbacks, charCallbacks, dropCallbacks;
+static KeySym lookupKeysym = XK_a;
 static EGLContext currentContext;
 static EGLSurface currentDraw, currentRead;
 static std::string property;
@@ -88,7 +91,7 @@ extern "C" int __wrap_XDeleteProperty(Display*, Window, Atom) { ++propertyDelete
 extern "C" Bool __wrap_XCheckTypedWindowEvent(Display*, Window window, int, XEvent* ev) {
     *ev = {}; ev->xselection.requestor = window; ev->xselection.property = 3; return True;
 }
-extern "C" int __wrap_XLookupString(XKeyEvent*, char*, int, KeySym* sym, XComposeStatus*) { *sym = XK_a; return 0; }
+extern "C" int __wrap_XLookupString(XKeyEvent*, char*, int, KeySym* sym, XComposeStatus*) { *sym = lookupKeysym; return 0; }
 extern "C" Bool __wrap_XFilterEvent(XEvent*, Window) { return False; }
 extern "C" int __wrap_XSendEvent(Display*, Window, Bool, long, XEvent* ev) { sentEvent = *ev; return 1; }
 extern "C" char* __wrap_XGetAtomName(Display*, Atom) { ++atomNames; return nullptr; }
@@ -108,7 +111,7 @@ extern "C" int __wrap_XGetWindowProperty(Display*, Window, Atom, long offset, lo
     } else if (movingProperty) {
         if (propertyCalls > 8) { *data = nullptr; return BadValue; }
         *count = 8;
-        *after = propertyCalls == 1 || movingProperty == 1 ? 8 : 0;
+        *after = propertyCalls == 1 || movingProperty == 1 ? 9 : 0;
         if (movingProperty == 3 && propertyCalls == 1) *after = ULONG_MAX;
         if (movingProperty == 2 && propertyCalls > 1) *count = 4;
         *data = (unsigned char*)std::calloc(9, 1);
@@ -130,9 +133,14 @@ extern "C" int __wrap_XGetWindowProperty(Display*, Window, Atom, long offset, lo
 }
 static void logger(const char*, uint32_t level, uint32_t item, const char* message, uint32_t, const char*, void*) {
     if (item == SAPP_LOGITEM_CLIPBOARD_STRING_TOO_BIG) ++logs;
-    if (level == 3) { ++notices; noticeMessage = message; }
+    if (level == 3 && item == SAPP_LOGITEM_LINUX_X11_DROP_TYPES_TRUNCATED) { ++notices; noticeMessage = message; }
 }
 static void event(const sapp_event* ev) {
+    lastEvent = *ev; ++callbacks;
+    if (ev->type == SAPP_EVENTTYPE_KEY_DOWN) lastKeyDown = *ev;
+    if (ev->type == SAPP_EVENTTYPE_KEY_DOWN || ev->type == SAPP_EVENTTYPE_KEY_UP) ++keyCallbacks;
+    if (ev->type == SAPP_EVENTTYPE_CHAR) ++charCallbacks;
+    if (ev->type == SAPP_EVENTTYPE_FILES_DROPPED) ++dropCallbacks;
     if (ev->type == SAPP_EVENTTYPE_QUIT_REQUESTED && cancelQuit) { ++quitEvents; sapp_cancel_quit(); }
     if (ev->type == SAPP_EVENTTYPE_FOCUSED || ev->type == SAPP_EVENTTYPE_KEY_DOWN ||
         ev->type == SAPP_EVENTTYPE_MOUSE_DOWN) inputAt = now;
@@ -164,6 +172,8 @@ static void reset(_sapp_tc_window_t& main, _sapp_tc_window_t** windows, Display*
     _sapp_tc.app.desc.event_cb = event; _sapp_tc.app.desc.frame_cb = frame;
     _sapp_tc.app.desc.swap_interval = 4; _sapp_tc.app.desc.logger.func = logger;
     _sapp_tc.refresh_period = .0166;
+    _sapp_tc.keycodes[24] = SAPP_KEYCODE_A;
+    lookupKeysym = XK_a; callbacks = keyCallbacks = charCallbacks = dropCallbacks = 0;
     polls = pending = frames = swaps = 0;
     firstFrame = nextFrame = inputAt = 0; now = 10; work = .005;
     inject = buffered = interrupted = badFd = cancelQuit = false; skip = true;
@@ -179,10 +189,10 @@ static bool parseDrop(const std::string& text) {
     if (reader.data) XFree(reader.data);
     return ok;
 }
-static void offerTypes(Window window) {
+static void offerTypes(Window window, Window source = 2) {
     XEvent ev{}; ev.type = ClientMessage; ev.xclient.window = window; ev.xclient.format = 32;
     ev.xclient.message_type = _sapp_tc.xdnd.XdndEnter;
-    ev.xclient.data.l[0] = 2; ev.xclient.data.l[1] = (5L << 24) | 1;
+    ev.xclient.data.l[0] = (long)source; ev.xclient.data.l[1] = (5L << 24) | 1;
     _sapp_tc_x11_process_event(&ev);
     ev.xclient.message_type = _sapp_tc.xdnd.XdndPosition;
     _sapp_tc_x11_process_event(&ev);
@@ -241,6 +251,48 @@ int main() {
     check("absolute events leave raw deltas alone", main.mouse_dx == 2 && main.mouse_dy == -3 && mouseEvents == 4);
     sapp_lock_mouse(false);
     check("unlock warps to saved anchor", warpX == 10 && warpY == 20);
+
+    reset(main, windows, display);
+    main.mouse_x = 30; main.mouse_y = 40; main.mouse_dx = 2; main.mouse_dy = 3;
+    main.mouse_pos_valid = true;
+    for (int type : { FocusIn, FocusOut, KeyPress, KeyRelease }) {
+        XEvent ev{}; ev.type = type; ev.xany.window = 1;
+        if (type == KeyPress || type == KeyRelease) ev.xkey.keycode = 24;
+        _sapp_tc_x11_process_event(&ev);
+        check("focus/key dispatch retains current pointer and deltas", lastEvent.mouse_x == 30 &&
+            lastEvent.mouse_y == 40 && lastEvent.mouse_dx == 2 && lastEvent.mouse_dy == 3);
+    }
+    check("KEY_DOWN retains pointer independently of following CHAR", lastKeyDown.key_code == SAPP_KEYCODE_A &&
+        lastKeyDown.mouse_x == 30 && lastKeyDown.mouse_y == 40 && lastKeyDown.mouse_dx == 2 && lastKeyDown.mouse_dy == 3);
+    check("positive key has a real mapping and CHAR retains pointer", keyCallbacks == 2 && charCallbacks == 1 && lastEvent.key_code == SAPP_KEYCODE_A);
+    _sapp_tc.app.clipboard_enabled = true;
+    _sapp_tc.keycodes[24] = SAPP_KEYCODE_V;
+    XEvent paste{}; paste.type = KeyPress; paste.xkey.window = 1; paste.xkey.keycode = 24;
+    paste.xkey.state = ControlMask; lookupKeysym = NoSymbol;
+    _sapp_tc_x11_process_event(&paste);
+    check("clipboard notification retains pointer metadata", lastEvent.type == SAPP_EVENTTYPE_CLIPBOARD_PASTED &&
+        lastEvent.mouse_x == 30 && lastEvent.mouse_y == 40 && lastEvent.mouse_dx == 2 && lastEvent.mouse_dy == 3);
+    for (int type : { KeyPress, KeyRelease }) {
+        XEvent ev{}; ev.type = type; ev.xkey.window = 1; ev.xkey.keycode = 200;
+        lookupKeysym = 0x1008ff12; callbacks = 0; _sapp_tc.main_input_delivered = false;
+        _sapp_tc_x11_process_event(&ev);
+        check("unmapped non-text key has no callback or main admission", callbacks == 0 && !_sapp_tc.main_input_delivered);
+    }
+    XEvent text{}; text.type = KeyPress; text.xkey.window = 1; text.xkey.keycode = 200;
+    lookupKeysym = XK_a; callbacks = 0; _sapp_tc.main_input_delivered = false;
+    _sapp_tc_x11_process_event(&text);
+    check("unmapped text key retains CHAR and main admission", callbacks == 1 &&
+        lastEvent.type == SAPP_EVENTTYPE_CHAR && _sapp_tc.main_input_delivered);
+    for (bool locked : { false, true }) {
+        main.mouse_x = 30; main.mouse_y = 40; main.mouse_dx = 2; main.mouse_dy = 3;
+        _sapp_tc.mouse_locked = locked;
+        XEvent ev{}; ev.type = LeaveNotify; ev.xcrossing.window = 1; ev.xcrossing.x = 101; ev.xcrossing.y = 42;
+        _sapp_tc_x11_process_event(&ev);
+        check("leave uses crossing position and clears deltas unless locked", lastEvent.type == SAPP_EVENTTYPE_MOUSE_LEAVE &&
+            lastEvent.mouse_x == (locked ? 30 : 101) && lastEvent.mouse_y == (locked ? 40 : 42) &&
+            lastEvent.mouse_dx == (locked ? 2 : 0) && lastEvent.mouse_dy == (locked ? 3 : 0));
+    }
+    _sapp_tc.mouse_locked = false;
 
     for (sapp_event_type type : { SAPP_EVENTTYPE_KEY_DOWN, SAPP_EVENTTYPE_KEY_UP, SAPP_EVENTTYPE_CHAR,
             SAPP_EVENTTYPE_MOUSE_DOWN, SAPP_EVENTTYPE_MOUSE_UP, SAPP_EVENTTYPE_MOUSE_SCROLL,
@@ -309,6 +361,26 @@ int main() {
 
     _sapp_tc.app.drop_enabled = true;
     _sapp_tc.xdnd.XdndEnter = 11; _sapp_tc.xdnd.XdndPosition = 12;
+    _sapp_tc.xdnd.XdndLeave = 16; _sapp_tc.xdnd.XdndDrop = 17;
+    _sapp_tc.xdnd.XdndFinished = 18; _sapp_tc.xdnd.XdndSelection = 19; _sapp_tc.xdnd.XdndActionCopy = 20;
+    _sapp_tc.xdnd.version = 5; _sapp_tc.xdnd.source = 2;
+    for (int mode : { 1, 2, 0, 4 }) {
+        movingProperty = mode == 4 ? 0 : mode;
+        wrongFormat = mode == 0; property = "file:///a\n";
+        propertyCalls = dropCallbacks = 0;
+        _sapp_tc.main_input_delivered = false;
+        XEvent ev{}; ev.type = SelectionNotify; ev.xselection.requestor = 1;
+        ev.xselection.property = 19; ev.xselection.target = 15;
+        _sapp_tc_x11_process_event(&ev);
+        const bool good = mode == 4;
+        check("SelectionNotify reports final outcome in Finished flags and action", sentEvent.xclient.message_type == 18 &&
+            sentEvent.xclient.data.l[1] == (good ? 1 : 0) && sentEvent.xclient.data.l[2] == (good ? 20 : None));
+        check("drop delivery and retained paths match final outcome", good ?
+            (dropCallbacks == 1 && _sapp_tc.main_input_delivered && lastEvent.mouse_x == 30 && lastEvent.mouse_y == 40 &&
+                lastEvent.mouse_dx == 2 && lastEvent.mouse_dy == 3) :
+            (propertyCalls <= 2 && dropCallbacks == 0 && !_sapp_tc.main_input_delivered && _sapp_tc.app.drop_num_files == 0 && paths[0] == 0));
+    }
+    movingProperty = 0; wrongFormat = false;
     _sapp_tc.xdnd.XdndStatus = 13; _sapp_tc.xdnd.XdndTypeList = 14; _sapp_tc.xdnd.text_uri_list = 15;
     typeList = true; offeredCount = _sapp_tc.app.drop_max_types + 1;
     uriIndex = _sapp_tc.app.drop_max_types - 1;
@@ -319,22 +391,43 @@ int main() {
     check("one Notice per drag with counts only and no atom names",
         notices == 1 && noticeMessage == "XDND type counts: 1024 retained limit, 4 bytes remaining" && atomNames == 0);
     check("type-list success reply freed", propertyCalls == 1 && propertyFrees == 1);
-    uriIndex = _sapp_tc.app.drop_max_types;
+    XEvent lifecycle{}; lifecycle.type = ClientMessage; lifecycle.xclient.window = 1; lifecycle.xclient.format = 32;
+    lifecycle.xclient.data.l[0] = 2; lifecycle.xclient.message_type = _sapp_tc.xdnd.XdndLeave;
+    _sapp_tc_x11_process_event(&lifecycle);
     offerTypes(1);
-    check("URI atom beyond prefix is unsupported", _sapp_tc.xdnd.format == None && sentEvent.xclient.data.l[1] == 0 && notices == 2);
+    check("same drag Leave and re-entry logs once", notices == 1);
+    _sapp_tc.windows = pair; _sapp_tc.window_slots = 2;
+    lifecycle.xclient.message_type = _sapp_tc.xdnd.XdndLeave;
+    _sapp_tc_x11_process_event(&lifecycle);
+    offerTypes(2);
+    check("same drag across main and secondary logs once", notices == 1);
+    lifecycle.xclient.message_type = _sapp_tc.xdnd.XdndDrop; lifecycle.xclient.window = 2;
+    _sapp_tc_x11_process_event(&lifecycle);
+    typeList = false; property = "file:///a\n"; propertyCalls = 0;
+    XEvent done{}; done.type = SelectionNotify; done.xselection.requestor = 2;
+    done.xselection.property = 19; done.xselection.target = 15;
+    _sapp_tc_x11_process_event(&done);
+    typeList = true;
+    offerTypes(1);
+    check("completed drop permits a new drag Notice", notices == 2);
+    offerTypes(1, 3);
+    check("different source permits a new Notice", notices == 3);
+    uriIndex = _sapp_tc.app.drop_max_types;
+    offerTypes(1, 3);
+    check("URI atom beyond prefix is unsupported", _sapp_tc.xdnd.format == None && sentEvent.xclient.data.l[1] == 0 && notices == 3);
     for (int mode = 0; mode < 5; ++mode) {
         wrongType = mode == 0; wrongFormat = mode == 1; excessItems = mode == 2;
         propertyError = mode == 3; nullReply = mode == 4;
         uriIndex = 0; const int freesBefore = propertyFrees;
-        offerTypes(1);
+        offerTypes(1, 3);
         check("invalid type-list gives no types and frees reply",
             _sapp_tc.xdnd.format == None && sentEvent.xclient.data.l[1] == 0 &&
-            propertyFrees - freesBefore == (nullReply ? 0 : 1) && notices == 2);
+            propertyFrees - freesBefore == (nullReply ? 0 : 1) && notices == 3);
     }
     wrongType = wrongFormat = excessItems = propertyError = nullReply = false;
     offeredCount = _sapp_tc.app.drop_max_types;
-    offerTypes(1);
-    check("complete type list accepts without excess Notice", _sapp_tc.xdnd.format == 15 && notices == 2 && atomNames == 0);
+    offerTypes(1, 3);
+    check("complete type list accepts without excess Notice", _sapp_tc.xdnd.format == 15 && notices == 3 && atomNames == 0);
     std::free(display);
     return failures ? 1 : 0;
 }

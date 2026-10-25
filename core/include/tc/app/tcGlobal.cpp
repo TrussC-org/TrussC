@@ -1940,7 +1940,7 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
                 getLogger().log(LogLevel::Fatal,
                                 sokolLogMessage(tag, logItem, message, lineNr));
             } else {
-                const bool appNotice = logLevel == 3 && logItem == SAPP_LOGITEM_OK &&
+                const bool appNotice = logLevel == 3 && logItem == SAPP_LOGITEM_LINUX_X11_DROP_TYPES_TRUNCATED &&
                     tag && std::strcmp(tag, "sapp") == 0;
                 getLogger().log(appNotice ? LogLevel::Notice : sokolLogLevel(logLevel),
                                 sokolLogMessage(tag, logItem, message, lineNr));

@@ -1909,6 +1909,7 @@ typedef struct sapp_allocator {
     _SAPP_LOGITEM_XMACRO(LINUX_X11_OPEN_DISPLAY_FAILED, "XOpenDisplay() failed") \
     _SAPP_LOGITEM_XMACRO(LINUX_X11_QUERY_SYSTEM_DPI_FAILED, "failed to query system dpi value, assuming default 96.0") \
     _SAPP_LOGITEM_XMACRO(LINUX_X11_DROPPED_FILE_URI_WRONG_SCHEME, "dropped file URL doesn't start with 'file://'") \
+    _SAPP_LOGITEM_XMACRO(LINUX_X11_DROP_TYPES_TRUNCATED, "X11 drop type list prefix retained") \
     _SAPP_LOGITEM_XMACRO(LINUX_X11_FAILED_TO_BECOME_OWNER_OF_CLIPBOARD, "X11: Failed to become owner of clipboard selection") \
     _SAPP_LOGITEM_XMACRO(ANDROID_UNSUPPORTED_INPUT_EVENT_INPUT_CB, "unsupported input event encountered in _sapp_android_input_cb()") \
     _SAPP_LOGITEM_XMACRO(ANDROID_UNSUPPORTED_INPUT_EVENT_MAIN_CB, "unsupported input event encountered in _sapp_android_main_cb()") \
@@ -8574,10 +8575,11 @@ static struct {
     struct {
         int version;
         Window source;
+        bool types_truncated_noticed;
         Atom format;
         _sapp_tc_window_t* over;    /* which of OUR windows the drag targets */
         Atom XdndAware, XdndEnter, XdndPosition, XdndStatus, XdndActionCopy,
-             XdndDrop, XdndFinished, XdndSelection, XdndTypeList, text_uri_list;
+             XdndLeave, XdndDrop, XdndFinished, XdndSelection, XdndTypeList, text_uri_list;
     } xdnd;
     Cursor hidden_cursor;
     Cursor standard_cursors[_SAPP_MOUSECURSOR_NUM];
@@ -8756,6 +8758,14 @@ static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
     ev->window_height = w->win_height;
     ev->framebuffer_width = w->fb_width;
     ev->framebuffer_height = w->fb_height;
+#if defined(SOKOL_GLES3)
+    if (w->is_main) {
+        ev->mouse_x = w->mouse_x;
+        ev->mouse_y = w->mouse_y;
+        ev->mouse_dx = w->mouse_dx;
+        ev->mouse_dy = w->mouse_dy;
+    }
+#endif
     sapp_window handle = { w->win_id };
     w->desc.event_cb(ev, handle, w->desc.user_data);
 }
@@ -10119,6 +10129,7 @@ static void _sapp_tc_x11_init_extensions(void) {
     if (_sapp_tc.app.drop_enabled) {
         _sapp_tc.xdnd.XdndAware      = XInternAtom(d, "XdndAware", False);
         _sapp_tc.xdnd.XdndEnter      = XInternAtom(d, "XdndEnter", False);
+        _sapp_tc.xdnd.XdndLeave      = XInternAtom(d, "XdndLeave", False);
         _sapp_tc.xdnd.XdndPosition   = XInternAtom(d, "XdndPosition", False);
         _sapp_tc.xdnd.XdndStatus     = XInternAtom(d, "XdndStatus", False);
         _sapp_tc.xdnd.XdndActionCopy = XInternAtom(d, "XdndActionCopy", False);
@@ -10565,6 +10576,9 @@ static void _sapp_tc_x11_scroll_event(_sapp_tc_window_t* w, float x, float y, ui
 }
 
 static void _sapp_tc_x11_key_event(_sapp_tc_window_t* w, sapp_event_type type, sapp_keycode key, bool repeat, uint32_t mods) {
+#if defined(SOKOL_GLES3)
+    if (w->is_main && key == SAPP_KEYCODE_INVALID) return;
+#endif
     sapp_event e;
     memset(&e, 0, sizeof(e));
     e.type = type;
@@ -10612,17 +10626,14 @@ static void _sapp_tc_x11_on_selectionnotify(XEvent* event) {
     data.window = event->xselection.requestor;
     data.property = event->xselection.property;
     data.type = event->xselection.target;
-    _sapp_tc_x11_uri_peek(&data, 0);
-    const uint32_t result = data.failed ? 0 : (uint32_t)data.count + (uint32_t)data.bytes_after;
-    if (result) {
-        if (_sapp_tc_x11_parse_dropped_files_list(&data)) {
-            _sapp_tc_window_t* w = _sapp_tc_lookup_xwin(event->xselection.requestor);
-            if (!w) w = _sapp_tc.xdnd.over;
-            if (!w) w = _sapp_tc.app.main;
-            if (w) {
-                /* FIXME (upstream parity): no modifier state available here */
-                _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_FILES_DROPPED);
-            }
+    const bool success = _sapp_tc_x11_parse_dropped_files_list(&data) && data.extent > 0;
+    if (success) {
+        _sapp_tc_window_t* w = _sapp_tc_lookup_xwin(event->xselection.requestor);
+        if (!w) w = _sapp_tc.xdnd.over;
+        if (!w) w = _sapp_tc.app.main;
+        if (w) {
+            /* FIXME (upstream parity): no modifier state available here */
+            _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_FILES_DROPPED);
         }
     }
     if (_sapp_tc.xdnd.version >= 2) {
@@ -10633,14 +10644,15 @@ static void _sapp_tc_x11_on_selectionnotify(XEvent* event) {
         reply.xclient.message_type = _sapp_tc.xdnd.XdndFinished;
         reply.xclient.format = 32;
         reply.xclient.data.l[0] = (long)event->xselection.requestor;
-        reply.xclient.data.l[1] = (long)result;
-        reply.xclient.data.l[2] = (long)_sapp_tc.xdnd.XdndActionCopy;
+        reply.xclient.data.l[1] = success ? 1 : 0;
+        reply.xclient.data.l[2] = success ? (long)_sapp_tc.xdnd.XdndActionCopy : None;
         XSendEvent(_sapp_tc.display, _sapp_tc.xdnd.source, False, NoEventMask, &reply);
         XFlush(_sapp_tc.display);
     }
     if (data.data) {
         XFree(data.data);
     }
+    _sapp_tc.xdnd.types_truncated_noticed = false;
 }
 
 static void _sapp_tc_x11_on_clientmessage(XEvent* event) {
@@ -10669,7 +10681,9 @@ static void _sapp_tc_x11_on_clientmessage(XEvent* event) {
         return;
     } else if (event->xclient.message_type == _sapp_tc.xdnd.XdndEnter) {
         const bool is_list = 0 != (event->xclient.data.l[1] & 1);
-        _sapp_tc.xdnd.source = (Window)event->xclient.data.l[0];
+        const Window source = (Window)event->xclient.data.l[0];
+        if (_sapp_tc.xdnd.source != source) _sapp_tc.xdnd.types_truncated_noticed = false;
+        _sapp_tc.xdnd.source = source;
         _sapp_tc.xdnd.version = (int)(event->xclient.data.l[1] >> 24);
         _sapp_tc.xdnd.format = None;
         _sapp_tc.xdnd.over = w;
@@ -10688,8 +10702,9 @@ static void _sapp_tc_x11_on_clientmessage(XEvent* event) {
             if (status == Success && actual_type == XA_ATOM && actual_format == 32 &&
                 nitems <= _sapp_tc.app.drop_max_types && formats) {
                 count = (uint32_t)nitems;
-                if (bytes_after > 0) {
-                    _sapp_tc_log(&_sapp_tc.app.desc.logger, 3, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                if (bytes_after > 0 && !_sapp_tc.xdnd.types_truncated_noticed) {
+                    _sapp_tc.xdnd.types_truncated_noticed = true;
+                    _sapp_tc_log(&_sapp_tc.app.desc.logger, 3, (uint32_t)SAPP_LOGITEM_LINUX_X11_DROP_TYPES_TRUNCATED, __LINE__,
                         "", "XDND type counts: %u retained limit, %lu bytes remaining",
                         (unsigned)_sapp_tc.app.drop_max_types, bytes_after);
                 }
@@ -10707,7 +10722,10 @@ static void _sapp_tc_x11_on_clientmessage(XEvent* event) {
         if (is_list && formats) {
             XFree(formats);
         }
+    } else if (event->xclient.message_type == _sapp_tc.xdnd.XdndLeave) {
+        if ((Window)event->xclient.data.l[0] == _sapp_tc.xdnd.source) _sapp_tc.xdnd.over = NULL;
     } else if (event->xclient.message_type == _sapp_tc.xdnd.XdndDrop) {
+        _sapp_tc.xdnd.types_truncated_noticed = false;
         if (_sapp_tc.xdnd.version > _SAPP_TC_XDND_VERSION) {
             return;
         }
@@ -11305,6 +11323,9 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
             break;
         case LeaveNotify:
             if (w && (w->mouse_buttons == 0)) {
+#if defined(SOKOL_GLES3)
+                if (w->is_main) _sapp_tc_x11_mouse_update(w, ev->xcrossing.x, ev->xcrossing.y, true);
+#endif
                 _sapp_tc_x11_mouse_event(w, SAPP_EVENTTYPE_MOUSE_LEAVE,
                     SAPP_MOUSEBUTTON_INVALID, _sapp_tc_x11_mods(ev->xcrossing.state));
             }
