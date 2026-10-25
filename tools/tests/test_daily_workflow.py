@@ -90,6 +90,20 @@ class DailyWebWorkflowTests(unittest.TestCase):
 
 
 class DailyDisplayWorkflowTests(unittest.TestCase):
+    def test_example_checks_use_same_xvfb_wrapper_and_mesa_environment(self):
+        daily = yaml.load((ROOT / '.github/workflows/daily.yml').read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+        steps = daily['jobs']['sweep']['steps']
+        display_step = next(s for s in steps if 'tools/run_core_display_tests.py' in s.get('run', ''))
+        example_step = next(s for s in steps if 'tools/run_example_self_checks.py' in s.get('run', ''))
+        self.assertEqual(example_step['if'], "runner.os == 'Linux'")
+        self.assertEqual(example_step['env'], display_step['env'])
+        command = "xvfb-run -a -s '-screen 0 1280x1024x24' python3 tools/run_example_self_checks.py"
+        self.assertEqual(example_step['run'], command)
+        self.assertIn(command.replace('run_example_self_checks.py', 'run_core_display_tests.py'),
+                      display_step['run'])
+        self.assertLess(steps.index(display_step), steps.index(example_step))
+        self.assertNotIn('continue-on-error', example_step)
+
     def test_display_step_is_linux_daily_only(self):
         daily = yaml.load((ROOT / '.github/workflows/daily.yml').read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         steps = daily['jobs']['sweep']['steps']
