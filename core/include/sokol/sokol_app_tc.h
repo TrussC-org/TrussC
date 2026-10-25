@@ -10626,7 +10626,7 @@ static void _sapp_tc_x11_on_selectionnotify(XEvent* event) {
     data.window = event->xselection.requestor;
     data.property = event->xselection.property;
     data.type = event->xselection.target;
-    const bool success = _sapp_tc_x11_parse_dropped_files_list(&data) && data.extent > 0;
+    const bool success = _sapp_tc_x11_parse_dropped_files_list(&data) && _sapp_tc.app.drop_num_files > 0;
     if (success) {
         _sapp_tc_window_t* w = _sapp_tc_lookup_xwin(event->xselection.requestor);
         if (!w) w = _sapp_tc.xdnd.over;

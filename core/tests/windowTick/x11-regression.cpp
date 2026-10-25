@@ -381,6 +381,34 @@ int main() {
             (propertyCalls <= 2 && dropCallbacks == 0 && !_sapp_tc.main_input_delivered && _sapp_tc.app.drop_num_files == 0 && paths[0] == 0));
     }
     movingProperty = 0; wrongFormat = false;
+    struct DropCase {
+        const char* payload;
+        int retainedFiles;
+        const char* retainedPath;
+    };
+    for (const DropCase& test : {
+        DropCase{ "file", 0, "" },
+        DropCase{ "file://", 0, "" },
+        DropCase{ "file:///a", 0, "" },
+        DropCase{ "file://\r\n", 1, "" },
+        DropCase{ "file:///a\r\n", 1, "/a" },
+    }) {
+        property = test.payload;
+        propertyCalls = callbacks = dropCallbacks = 0;
+        sentEvent = {};
+        _sapp_tc.main_input_delivered = false;
+        XEvent ev{}; ev.type = SelectionNotify; ev.xselection.requestor = 1;
+        ev.xselection.property = 19; ev.xselection.target = 15;
+        _sapp_tc_x11_process_event(&ev);
+        const bool good = test.retainedFiles > 0;
+        check("URI content SelectionNotify callback count and main admission", callbacks == (good ? 1 : 0) &&
+            dropCallbacks == (good ? 1 : 0) && _sapp_tc.main_input_delivered == good);
+        check("URI content SelectionNotify retains the parser's completed-entry policy",
+            _sapp_tc.app.drop_num_files == test.retainedFiles &&
+            (test.retainedFiles == 0 || std::strcmp(paths, test.retainedPath) == 0));
+        check("URI content SelectionNotify Finished flags and action", sentEvent.xclient.message_type == 18 &&
+            sentEvent.xclient.data.l[1] == (good ? 1 : 0) && sentEvent.xclient.data.l[2] == (good ? 20 : None));
+    }
     _sapp_tc.xdnd.XdndStatus = 13; _sapp_tc.xdnd.XdndTypeList = 14; _sapp_tc.xdnd.text_uri_list = 15;
     typeList = true; offeredCount = _sapp_tc.app.drop_max_types + 1;
     uriIndex = _sapp_tc.app.drop_max_types - 1;
