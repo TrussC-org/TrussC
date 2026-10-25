@@ -788,11 +788,10 @@ inline Window* App::getWindow() const {
 // resized THAT window instead. Width/height get the same framebuffer ->
 // logical conversion as setWindowSize(), with the target window's own scale.
 inline void App::setSize(float w, float h) {
-#if defined(__EMSCRIPTEN__)
-    // Attached Web Apps never resize their Node or the CSS-owned canvas.
-    // Log before validation/casts, including non-finite or subpixel extents.
-    if (getWindow()) { internal::setMainWindowSizeLogical(0, 0); return; }
-#endif
+    if constexpr (internal::windowSizeIsScreenControlled()) {
+        // Reach the Notice endpoint before validation or float-to-int conversion.
+        if (getWindow()) { internal::setMainWindowSizeLogical(0, 0); return; }
+    }
     // Not owned by a shared_ptr (yet): inside the App's constructor, or an
     // App made on the stack or in a unique_ptr. No window runs such an App
     // (it becomes getRootNode() / a window's App only through a shared_ptr),
@@ -871,12 +870,12 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
     // Native controls take an explicit target (the main endpoint or this
     // Window's native handle). Keep the rendering owner current: a synchronous
     // resize/fullscreen event must park, switch and restore the real caller.
-#if defined(__EMSCRIPTEN__)
-    if (op == internal::WindowControl::Size || op == internal::WindowControl::PixelSize) {
-        internal::setMainWindowSizeLogical(x, y);
-        return {-1, -1};
+    if constexpr (internal::windowSizeIsScreenControlled()) {
+        if (op == internal::WindowControl::Size || op == internal::WindowControl::PixelSize) {
+            internal::setMainWindowSizeLogical(x, y);
+            return {-1, -1};
+        }
     }
-#endif
     IVec2 result{-1, -1};
     if (auto hook = internal::windowControlHookForTests()) {
         if (hook(*this, op, x, y, title, result)) return result;

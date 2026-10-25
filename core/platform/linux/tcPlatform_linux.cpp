@@ -134,7 +134,7 @@ void setWindowDecorated(bool decorated) {
 
 void internal::setMainWindowSizeLogical(int width, int height) {
     internal::x11Geometry((Display*)sapp_x11_get_display(), (::Window)(uintptr_t)sapp_x11_get_window(),
-        mainGeometryState(), false, 0, 0, width, height, sapp_dpi_scale());
+        mainGeometryState(), false, 0, 0, width, height, sapp_dpi_scale(), sapp_is_fullscreen());
 }
 
 fs::path getExecutablePath() {

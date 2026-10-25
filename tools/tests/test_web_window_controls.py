@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile the fork's Web title and TrussC size bodies, run under Node.
+"""Compile Web title and Web/iOS/Android size bodies, run under Node.
 
 Run through tcbuild.sh; this is a browser-free seam, not a WGPU device test.
 """
@@ -43,6 +43,9 @@ def main():
                           body(window, 'inline IVec2 Window::control('),
                           body(window, 'inline void Window::setSize('),
                           body(window, 'inline void App::setSize(')])
+    platform_header = (ROOT / 'core/include/tcPlatform.h').read_text(encoding='utf-8')
+    detection = body(platform_header, 'struct Platform {') + ';'
+    predicate = body(platform_header, 'constexpr bool windowSizeIsScreenControlled(')
     initial = re.search(r'const char\* document_title = .*?;', sokol).group()
     init_start = sokol.index('    if (c_str_document_title !== 0)')
     init_end = sokol.index('    const target_selector_str', init_start)
@@ -63,10 +66,16 @@ struct { char window_title[128]; } _sapp_tc;
 void _sapp_tc_strcpy(const char* src, char* dst, size_t n) { std::strncpy(dst, src, n); }
 struct Log { template<class T> Log& operator<<(const T&) { return *this; } };
 int notices = 0;
-Log logNotice(const char*) { ++notices; return {}; }
+std::string noticeText;
+struct NoticeLog { NoticeLog& operator<<(const char* message) { noticeText = message; return *this; } };
+NoticeLog logNotice(const char* tag) { assert(std::string(tag) == "Platform"); ++notices; return {}; }
+PLATFORM_DETECTION
+namespace internal { SIZE_PREDICATE }
+
 // Stand-ins supply only native/ownership dependencies. All four public size
 // entry points, their validation/conversion and Window::control below are the
-// production bodies, compiled with __EMSCRIPTEN__ by em++.
+// production bodies. Platform detection is separately preprocessed as Web,
+// iOS or Android, without importing unavailable mobile SDK headers.
 struct IVec2 { int x, y; };
 bool valid = true, pixelPerfect = true;
 float sapp_dpi_scale() { return 2; }
@@ -86,7 +95,7 @@ struct RectNode { void setSize(float, float) { assert(false); } };
 struct Window {
     struct { bool isMain = true; float dpiScale = 2; } ctx_;
     std::string title_;
-    bool isOpen() const { return true; }
+    bool isOpen() const { return valid; }
     void setSecondaryTitle(const std::string&) { assert(false); }
     void setSecondarySize(int, int) { assert(false); }
     void setSecondaryPosition(int, int) { assert(false); }
@@ -105,11 +114,11 @@ Window* current = nullptr;
 namespace internal {
 using Hook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
 Hook windowControlHookForTests() { return nullptr; }
-bool routeSetWindowSizeToWindow(int w, int h) { current->setSize(w, h); return true; }
+bool routeSetWindowSizeToWindow(int w, int h) { if (!current) return false; current->setSize(w, h); return true; }
 struct WindowRequestAccess {
     static void setPixelSize(Window& win, int w, int h) { win.control(WindowControl::PixelSize, w, h); }
 };
-bool routeSetWindowPixelSizeToWindow(int w, int h) { WindowRequestAccess::setPixelSize(*current, w, h); return true; }
+bool routeSetWindowPixelSizeToWindow(int w, int h) { if (!current) return false; WindowRequestAccess::setPixelSize(*current, w, h); return true; }
 }
 void setWindowSizeLogical(int, int);
 EM_JS(void, init_title, (const char* c_str_document_title), { INITIAL_JS });
@@ -130,6 +139,7 @@ int main() {
     internal::setMainWindowSizeLogical(800, 600);
     assert(EM_ASM_INT({ return canvas.width === 2000 && canvas.height === 1314 && canvas.style.width === '100%' && canvas.style.height === '100%'; }));
     assert(notices == 1);
+    assert(noticeText.find("ENDPOINT_PLATFORM") != std::string::npos);
     Window window;
     current = &window;
     auto app = std::make_shared<App>();
@@ -142,6 +152,14 @@ int main() {
     // Repeat every API, including positive framebuffer extents which truncate
     // to logical zero at DPR 2, and invalid extents which used to return early.
     const int sizes[][2] = {{800, 600}, {1, 1}, {0, 100}, {100, 0}, {-1, 100}, {100, -1}};
+    // Include pre-window globals and closed Window handles: Notice comes first.
+    current = nullptr;
+    setWindowSize(0, 0); verify();
+    setWindowSizeLogical(0, 0); verify();
+    current = &window;
+    valid = false;
+    window.setSize(0, 0); verify();
+    valid = true;
     for (bool perfect : {true, false}) {
         pixelPerfect = perfect;
         for (int repeat = 0; repeat < 2; ++repeat) {
@@ -160,10 +178,27 @@ int main() {
 '''.replace('INITIAL_JS', initial_js).replace('TITLE_BODY', title).replace('SIZE_BODY', size).replace('INITIAL_CPP', initial).replace('PUBLIC_BODIES', wrappers)
     with tempfile.TemporaryDirectory(prefix='web-window-controls-') as temp:
         path = Path(temp)
-        (path / 'main.cpp').write_text(source, encoding='utf-8')
-        subprocess.run([compiler, '-std=c++20', str(path / 'main.cpp'), '-o', str(path / 'test.js'), '-sENVIRONMENT=node', '-sSINGLE_FILE=1', '-sASSERTIONS=1'], check=True)
-        subprocess.run(['node', str(path / 'test.js')], check=True)
-    print('PASS: production Web title and four public size APIs, every-call Notice and unchanged CSS/drawable (Node)')
+        for target in ('Web', 'iOS', 'Android'):
+            # Compile the actual Platform and predicate with only their platform
+            # macros changed. em++ remains the runner for the Node dependencies.
+            if target == 'Web':
+                target_detection = detection
+                endpoint = size
+            else:
+                macros = ('#define __APPLE__ 1\n#define TARGET_OS_IOS 1\n'
+                          '#define TARGET_OS_IPHONE 1\n' if target == 'iOS' else '#define __ANDROID__ 1\n')
+                target_detection = '#undef __EMSCRIPTEN__\n' + macros + detection
+                target_detection += f'\nstatic_assert(Platform::{"isIOS" if target == "iOS" else "isAndroid"}() && !Platform::isWeb());\n'
+                target_detection += '\n#undef __APPLE__\n#undef __ANDROID__\n#define __EMSCRIPTEN__ 1\n'
+                folder, extension = ('ios', 'mm') if target == 'iOS' else ('android', 'cpp')
+                native = (ROOT / f'core/platform/{folder}/tcPlatform_{folder}.{extension}').read_text(encoding='utf-8')
+                endpoint = body(native, 'void internal::setMainWindowSizeLogical(')
+            fixture = source.replace(size, endpoint).replace('PLATFORM_DETECTION', target_detection).replace('SIZE_PREDICATE', predicate).replace('ENDPOINT_PLATFORM', target)
+            (path / 'main.cpp').write_text(fixture, encoding='utf-8')
+            subprocess.run([compiler, '-std=c++20', str(path / 'main.cpp'), '-o', str(path / 'test.js'), '-sENVIRONMENT=node', '-sSINGLE_FILE=1', '-sASSERTIONS=1'], check=True)
+            subprocess.run(['node', str(path / 'test.js')], check=True)
+            print(f'PASS: {target} production predicate, endpoint and four public size APIs: every-call Notice (Node)', flush=True)
+    print('PASS: production Web title and unchanged CSS/drawable; mobile macro simulation does not syntax-check SDK-dependent translation units')
 
 
 if __name__ == '__main__':

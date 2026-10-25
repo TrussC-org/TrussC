@@ -1,4 +1,5 @@
-// Deterministic AppKit setFrame / Win32 SetWindowPos synchronous reentry.
+// Linux dummy SG/SGL fixture modeling the synchronous RESIZED events
+// produced by AppKit setFrame / Win32 SetWindowPos.
 #if defined(__linux__) && !defined(__ANDROID__)
 #undef SOKOL_GLCORE
 #undef SOKOL_GLES3
@@ -169,5 +170,5 @@ int main() {
 }
 #else
 #include <cstdio>
-int main() { std::puts("SKIP: Linux dummy SG/SGL reentry fixture"); }
+int main() { std::puts("SKIP: Linux dummy SG/SGL reentry fixture; macOS/Windows are covered by the device probe"); }
 #endif

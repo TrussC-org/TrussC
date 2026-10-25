@@ -116,6 +116,7 @@ void internal::setMainWindowSizeLogical(int width, int height) {
     // no-op on iOS (window size is fixed to screen size)
     (void)width;
     (void)height;
+    logNotice("Platform") << "setWindowSize() is not supported on iOS; the window fills the screen";
 }
 
 fs::path getExecutablePath() {

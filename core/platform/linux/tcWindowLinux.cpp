@@ -343,7 +343,7 @@ void Window::setSecondarySize(int width, int height) {
     if (!st) return;
     internal::x11Geometry((Display*)sapp_x11_get_display(),
         (::Window)(uintptr_t)sapp_window_x11_get_window(st->win), st->geometry,
-        false, 0, 0, width, height, ctx_.dpiScale);
+        false, 0, 0, width, height, ctx_.dpiScale, fullscreenRequested_);
 }
 
 void Window::setSecondaryPosition(int x, int y) {

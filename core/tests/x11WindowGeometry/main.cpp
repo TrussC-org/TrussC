@@ -76,25 +76,35 @@ int main() {
     auto* display = reinterpret_cast<Display*>(dpy);
     using namespace trussc::internal;
     X11GeometryState main{640, 480}, secondary{321, 241};
-    for (float scale : {1.f, 1.5f, 2.f}) {
-        requests.clear();
-        x11Geometry(display, 2, main, false, 0, 0, 641, 481, scale, true);
-        check("resize only, truncating logical times DPI (#219)", requests.size() == 1 && requests[0].kind == "resize" && requests[0].width == long(641 * scale) && requests[0].height == long(481 * scale));
-        check("last requested size is logical", main.requestedWidth == 641 && main.requestedHeight == 481);
-    }
-    requests.clear();
-    x11Geometry(display, 2, main, true, -1920, 0, 0, 0, 2, true);
     const Atom full = atom(display, "_NET_WM_STATE_FULLSCREEN", False);
     const Atom vert = atom(display, "_NET_WM_STATE_MAXIMIZED_VERT", False);
     const Atom horz = atom(display, "_NET_WM_STATE_MAXIMIZED_HORZ", False);
-    check("NorthWestGravity pinned before state/move", normalHints.win_gravity == NorthWestGravity && (normalHints.flags & PWinGravity) && requests[0].kind == "gravity");
-    check("leave fullscreen before move", requests[1].event.xclient.data.l[0] == 0 && requests[1].event.xclient.data.l[1] == long(full));
-    check("one unconditional combined unmaximize (#219)", requests[2].event.xclient.data.l[0] == 0 && requests[2].event.xclient.data.l[1] == long(vert) && requests[2].event.xclient.data.l[2] == long(horz));
-    check("move retains requested size, restores fullscreen last", requests.size() == 5 && requests[3].kind == "moveResize" && requests[3].x == -1920 && requests[3].width == 1282 && requests[3].height == 962 && requests[4].event.xclient.data.l[0] == 1 && requests[4].event.xclient.data.l[1] == long(full));
+    auto unmaximize = [&](const Request& r) {
+        return r.kind == "state" && r.event.xclient.data.l[0] == 0 &&
+            r.event.xclient.data.l[1] == long(vert) && r.event.xclient.data.l[2] == long(horz);
+    };
+    for (float scale : {1.f, 1.5f, 2.f}) {
+        requests.clear();
+        normalHints = {}; normalHints.flags = PWinGravity | PMinSize;
+        normalHints.win_gravity = CenterGravity; normalHints.min_width = 123;
+        x11Geometry(display, 2, main, false, 0, 0, 777, 333, scale);
+        check("first odd resize pins NorthWest before any WM request",
+            requests.size() == 3 && requests.front().kind == "gravity" &&
+            normalHints.win_gravity == NorthWestGravity && normalHints.min_width == 123 && (normalHints.flags & PMinSize));
+        check("resize-only clears both maximize states before resize",
+            requests.size() == 3 && unmaximize(requests[1]) && requests.back().kind == "resize");
+        check("resize content size truncates logical times DPI without frame subtraction",
+            requests.back().kind == "resize" && requests.back().width == long(777 * scale) && requests.back().height == long(333 * scale));
+        check("last requested size is logical", main.requestedWidth == 777 && main.requestedHeight == 333);
+    }
+    requests.clear();
+    x11Geometry(display, 2, main, true, -1920, 0, 0, 0, 2);
+    check("one unconditional combined unmaximize (#219)", requests.size() == 2 && unmaximize(requests[0]));
+    check("windowed move retains requested content size", requests.back().kind == "moveResize" && requests.back().x == -1920 && requests.back().width == 1554 && requests.back().height == 666);
     requests.clear();
     x11Geometry(display, 3, secondary, true, -100, 20, 0, 0, 1.5f);
     check("secondary requested size is independent, fractional DPI truncates", requests.size() == 2 && requests[1].kind == "moveResize" && requests[1].window == 3 && requests[1].width == 481 && requests[1].height == 361);
-    check("gravity already pinned does not overwrite other hints", normalHints.flags == PWinGravity);
+    check("gravity already pinned does not overwrite other hints", normalHints.flags == (PWinGravity | PMinSize) && normalHints.min_width == 123);
     const auto actual = x11FramePosition(display, 2);
     check("query returns WM-clamped decorated frame", actual.x == 150 && actual.y == 40);
     malformedExtents = true;
@@ -105,16 +115,33 @@ int main() {
     x11Geometry(display, 2, main, false, 0, 0, INT_MAX, 1, 2);
     x11Geometry(display, 2, main, false, 0, 0, -1, 10, 1);
     x11Geometry(display, 2, main, true, 0, 0, 0, 0, 1000);
-    check("invalid protocol requests send nothing or change intent", requests.size() == before && main.requestedWidth == 641);
+    check("invalid protocol requests send nothing or change intent", requests.size() == before && main.requestedWidth == 777);
     X11GeometryState unknown;
     requests.clear();
     x11Geometry(display, 4, unknown, true, -500, 30, 0, 0, 1);
     check("unknown requested size uses move alone (#219)", requests.size() == 2 && requests.back().kind == "move" && requests.back().x == -500);
-    // #219 sends based on intent without waiting for _NET_WM_STATE; no property
-    // round trip or _NET_SUPPORTED/_NET_MOVERESIZE_WINDOW policy is involved.
+    // Keep the existing fullscreen move/reenter policy while leaving the WM's
+    // restore content size intact. Model Mutter's 37px title bar regression:
+    // a fullscreen-time MoveResize would save height minus the new frame top.
+    X11GeometryState restored{800, 600};
     requests.clear();
-    x11Geometry(display, 3, secondary, true, 10, 20, 0, 0, 1, true);
-    check("creation-time fullscreen intent is preserved", requests.front().event.xclient.data.l[1] == long(full) && requests.back().event.xclient.data.l[0] == 1);
+    x11Geometry(display, 3, restored, true, 100, 100, 0, 0, 1, true);
+    check("fullscreen move leaves/reenters fullscreen around move only",
+        requests.size() == 4 && requests[0].event.xclient.data.l[0] == 0 && requests[0].event.xclient.data.l[1] == long(full) &&
+        unmaximize(requests[1]) && requests[2].kind == "move" && requests[2].x == 100 && requests[2].y == 100 &&
+        requests[3].event.xclient.data.l[0] == 1 && requests[3].event.xclient.data.l[1] == long(full));
+    int restoredContentHeight = 600;
+    for (const auto& r : requests) if (r.kind == "moveResize") restoredContentHeight = int(r.height) - 37;
+    check("fullscreen move never rewrites restore size as content minus title bar", restoredContentHeight == 600);
+    requests.clear();
+    x11Geometry(display, 3, restored, false, 0, 0, 640, 480, 1, true);
+    check("fullscreen size keeps existing live attempt without unmaximize",
+        requests.size() == 1 && requests.back().kind == "resize" && requests.back().width == 640 && requests.back().height == 480);
+    check("fullscreen size does not replace windowed requested size", restored.requestedWidth == 800 && restored.requestedHeight == 600);
+    requests.clear();
+    // After leaving fullscreen, an unrelated move must retain 800x600.
+    x11Geometry(display, 3, restored, true, 200, 150, 0, 0, 1);
+    check("fullscreen size never leaks into a later unrelated move", requests.back().kind == "moveResize" && requests.back().width == 800 && requests.back().height == 600);
     std::free(dpy);
     return failures ? 1 : 0;
 }

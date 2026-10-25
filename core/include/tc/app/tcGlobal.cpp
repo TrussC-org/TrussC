@@ -3679,10 +3679,10 @@ IVec2 getWindowPosition() {
 
 namespace trussc {
 void setWindowSizeLogical(int width, int height) {
-#if defined(__EMSCRIPTEN__)
-    internal::setMainWindowSizeLogical(width, height);
-    return;
-#endif
+    if constexpr (internal::windowSizeIsScreenControlled()) {
+        internal::setMainWindowSizeLogical(width, height);
+        return;
+    }
     if (internal::routeSetWindowSizeToWindow(width, height)) return;
     if (width > 0 && height > 0) internal::setMainWindowSizeLogical(width, height);
 }

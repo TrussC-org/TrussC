@@ -123,6 +123,11 @@ float getDisplayScaleFactor();
 TC_PLATFORMS("macos,windows,linux") IVec2 getWindowPosition();
 TC_PLATFORMS("macos,windows,linux") void setWindowPosition(int x, int y);
 namespace internal {
+// Screen/page layout owns size on these platforms. Public size calls must
+// reach the no-op endpoint before validation so each call emits one Notice.
+constexpr bool windowSizeIsScreenControlled() {
+    return Platform::isWeb() || Platform::isIOS() || Platform::isAndroid();
+}
 IVec2 windowPositionNative(const void* handle);
 void setWindowPositionNative(const void* handle, int x, int y);
 IVec2 mainWindowPosition();

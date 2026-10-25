@@ -209,6 +209,7 @@ void internal::setMainWindowSizeLogical(int width, int height) {
     // Android apps are fullscreen — window size is determined by the device
     (void)width;
     (void)height;
+    logNotice("Platform") << "setWindowSize() is not supported on Android; the window fills the screen";
 }
 
 fs::path getExecutablePath() {

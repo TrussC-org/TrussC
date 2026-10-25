@@ -1635,10 +1635,10 @@ inline std::string getClipboardString() {
 // pixelPerfect=true: specify in framebuffer size
 // pixelPerfect=false: specify in logical size
 inline void setWindowSize(int width, int height) {
-#if defined(__EMSCRIPTEN__)
-    internal::setMainWindowSizeLogical(width, height);
-    return;
-#endif
+    if constexpr (internal::windowSizeIsScreenControlled()) {
+        internal::setMainWindowSizeLogical(width, height);
+        return;
+    }
     if (width <= 0 || height <= 0) return;
     if (internal::pixelPerfectMode()) {
         if (internal::routeSetWindowPixelSizeToWindow(width, height)) return;
