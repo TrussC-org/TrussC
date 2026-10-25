@@ -121,8 +121,9 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
     // Raw event pass-through (same hook addons use on the main window)
     win->events().rawEvent.notify(*ev);
 
-    // sapp pointer coordinates arrive in framebuffer pixels; secondary pointer
-    // events follow main: pixels in pixelPerfect mode, logical points otherwise.
+    // sapp pointer coordinates arrive in framebuffer pixels. Secondary coordinates
+    // use main's unit scale: pixels in pixelPerfect mode, logical points otherwise.
+    // Delta derivation and enter/leave handling retain their existing differences.
     const float dpi = sapp_window_dpi_scale(swin);
     const float scale = internal::appPointerScale(dpi);
     const bool hasShift = (ev->modifiers & SAPP_MODIFIER_SHIFT) != 0;

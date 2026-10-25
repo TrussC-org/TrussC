@@ -2746,7 +2746,7 @@ namespace internal {
         // ev->mouse_x/y arrive in framebuffer coordinates
         // pixelPerfectMode() == true: use as-is (coords = framebuffer size)
         // pixelPerfectMode() == false: divide by DPI scale to get logical coords
-        float scale = pixelPerfectMode() ? 1.0f : (1.0f / sapp_dpi_scale());
+        const float scale = appPointerScale(sapp_dpi_scale());
         bool hasModShift = (ev->modifiers & SAPP_MODIFIER_SHIFT) != 0;
         bool hasModCtrl = (ev->modifiers & SAPP_MODIFIER_CTRL) != 0;
         bool hasModAlt = (ev->modifiers & SAPP_MODIFIER_ALT) != 0;

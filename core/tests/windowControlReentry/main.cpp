@@ -167,59 +167,67 @@ int main() {
             }
         }
         // Real Linux secondary decoder with a recording native DPI endpoint;
-        // compare against main's unchanged production dispatcher at 2x.
-        nativeDpi = 2.0f;
+        // replay identical native events through main and secondary at each DPI.
+        for (bool enabled : {false, true}) {
+            for (float dpi : {1.0f, 1.5f, 2.0f}) {
+                nativeDpi = secondary.context().dpiScale = dpi;
+                const float scale = enabled ? 1.0f : 1.0f / dpi;
+                internal::pixelPerfectMode() = enabled;
+                auto deliver = [&](Window& window, const sapp_event& event) {
+                    internal::restoreWindowContext(&window.context());
+                    if (window.context().isMain) internal::_event_cb(&event);
+                    else internal::dispatchSecondaryWindowEventForTests(&event, window);
+                };
+                sapp_event ev{};
+                ev.type = SAPP_EVENTTYPE_MOUSE_MOVE;
+                ev.mouse_x = 200; ev.mouse_y = 100;
+                // Initial native deltas can be cleared independently of position.
+                ev.mouse_dx = 0; ev.mouse_dy = 0;
+                main->context().mouseX = main->context().mouseY = 0;
+                secondary.context().mouseX = secondary.context().mouseY = 0;
+                deliver(*main, ev); deliver(secondary, ev);
+                const Vec2 expected = Vec2(200 * scale, 100 * scale);
+                auto same = [](Vec2 a, Vec2 b) { return a.x == b.x && a.y == b.y; };
+                check("pointer positions match main at valid DPI in both modes",
+                    mainApp->moves > 0 && secondaryApp->moves > 0 &&
+                    same(mainApp->pointer, expected) && same(secondaryApp->pointer, expected) &&
+                    same(mainApp->delta, expected) && same(secondaryApp->delta, Vec2(0, 0)));
+                check("secondary cursor getters use App pointer units", same(getMousePos(), expected) &&
+                    same(Vec2(secondaryApp->getMouseX(), secondaryApp->getMouseY()), expected));
+                ev.type = SAPP_EVENTTYPE_MOUSE_DOWN; ev.mouse_button = SAPP_MOUSEBUTTON_LEFT;
+                deliver(*main, ev); deliver(secondary, ev);
+                ev.type = SAPP_EVENTTYPE_MOUSE_MOVE; ev.modifiers = SAPP_MODIFIER_LMB;
+                ev.mouse_x = 220; ev.mouse_y = 110; ev.mouse_dx = 12; ev.mouse_dy = 6;
+                deliver(*main, ev); deliver(secondary, ev);
+                check("drag positions match and deltas use the same unit scale",
+                    mainApp->drags > 0 && secondaryApp->drags > 0 &&
+                    same(mainApp->pointer, Vec2(220 * scale, 110 * scale)) && same(secondaryApp->pointer, mainApp->pointer) &&
+                    same(mainApp->delta, Vec2(220 * scale - expected.x, 110 * scale - expected.y)) &&
+                    same(secondaryApp->delta, Vec2(12 * scale, 6 * scale)));
+                ev.type = SAPP_EVENTTYPE_MOUSE_SCROLL; ev.scroll_x = 3; ev.scroll_y = -4;
+                // Main uses the last pointer position, not the scroll event's x/y.
+                ev.mouse_x = 999; ev.mouse_y = 999;
+                deliver(*main, ev); deliver(secondary, ev);
+                check("scroll position after equivalent moves matches and wheel amounts stay unscaled",
+                    mainApp->scrolls > 0 && secondaryApp->scrolls > 0 &&
+                    same(mainApp->pointer, Vec2(220 * scale, 110 * scale)) && same(secondaryApp->pointer, mainApp->pointer) &&
+                    same(mainApp->scroll, Vec2(3, -4)) && same(secondaryApp->scroll, mainApp->scroll));
+                ev.type = SAPP_EVENTTYPE_MOUSE_UP; ev.mouse_x = 220; ev.mouse_y = 110;
+                deliver(*main, ev); deliver(secondary, ev);
+                ev.type = SAPP_EVENTTYPE_MOUSE_ENTER; ev.mouse_x = 200; ev.mouse_y = 100;
+                deliver(secondary, ev);
+                check("secondary entry updates hover coordinates in App units", same(getMousePos(), expected));
+                ev.type = SAPP_EVENTTYPE_MOUSE_LEAVE; deliver(secondary, ev);
+                check("secondary leave retains offscreen hover sentinel", same(getMousePos(), Vec2(-1, -1)));
+            }
+        }
         for (bool enabled : {false, true}) {
             internal::pixelPerfectMode() = enabled;
-            auto deliver = [&](Window& window, const sapp_event& event) {
-                internal::restoreWindowContext(&window.context());
-                if (window.context().isMain) internal::_event_cb(&event);
-                else internal::dispatchSecondaryWindowEventForTests(&event, window);
-            };
-            sapp_event ev{};
-            ev.type = SAPP_EVENTTYPE_MOUSE_MOVE;
-            ev.mouse_x = 200; ev.mouse_y = 100;
-            ev.mouse_dx = 200; ev.mouse_dy = 100;
-            main->context().mouseX = main->context().mouseY = 0;
-            secondary.context().mouseX = secondary.context().mouseY = 0;
-            deliver(*main, ev); deliver(secondary, ev);
-            const Vec2 expected = enabled ? Vec2(200, 100) : Vec2(100, 50);
-            auto same = [](Vec2 a, Vec2 b) { return a.x == b.x && a.y == b.y; };
-            check("2x pointer position and delta match main in both modes",
-                mainApp->moves > 0 && secondaryApp->moves > 0 &&
-                same(mainApp->pointer, expected) && same(secondaryApp->pointer, expected) &&
-                same(mainApp->delta, expected) && same(secondaryApp->delta, expected));
-            check("secondary cursor getters use App pointer units", same(getMousePos(), expected) &&
-                same(Vec2(secondaryApp->getMouseX(), secondaryApp->getMouseY()), expected));
-            ev.type = SAPP_EVENTTYPE_MOUSE_DOWN; ev.mouse_button = SAPP_MOUSEBUTTON_LEFT;
-            deliver(*main, ev); deliver(secondary, ev);
-            ev.type = SAPP_EVENTTYPE_MOUSE_MOVE; ev.modifiers = SAPP_MODIFIER_LMB;
-            ev.mouse_x = 220; ev.mouse_y = 110; ev.mouse_dx = 20; ev.mouse_dy = 10;
-            deliver(*main, ev); deliver(secondary, ev);
-            check("2x drag position and delta match main in both modes",
-                mainApp->drags > 0 && secondaryApp->drags > 0 &&
-                same(mainApp->pointer, expected * 1.1f) && same(secondaryApp->pointer, mainApp->pointer) &&
-                same(mainApp->delta, enabled ? Vec2(20, 10) : Vec2(10, 5)) && same(secondaryApp->delta, mainApp->delta));
-            ev.type = SAPP_EVENTTYPE_MOUSE_SCROLL; ev.scroll_x = 3; ev.scroll_y = -4;
-            // Main uses the last pointer position, not the scroll event's x/y.
-            ev.mouse_x = 999; ev.mouse_y = 999;
-            deliver(*main, ev); deliver(secondary, ev);
-            check("2x scroll position matches main and wheel amounts stay unscaled",
-                mainApp->scrolls > 0 && secondaryApp->scrolls > 0 &&
-                same(mainApp->pointer, expected * 1.1f) && same(secondaryApp->pointer, mainApp->pointer) &&
-                same(mainApp->scroll, Vec2(3, -4)) && same(secondaryApp->scroll, mainApp->scroll));
-            ev.type = SAPP_EVENTTYPE_MOUSE_UP; ev.mouse_x = 220; ev.mouse_y = 110;
-            deliver(*main, ev); deliver(secondary, ev);
-            ev.type = SAPP_EVENTTYPE_MOUSE_ENTER; ev.mouse_x = 200; ev.mouse_y = 100;
-            deliver(secondary, ev);
-            check("2x secondary entry updates hover coordinates in App units", same(getMousePos(), expected));
-            ev.type = SAPP_EVENTTYPE_MOUSE_LEAVE; deliver(secondary, ev);
-            check("secondary leave retains offscreen hover sentinel", same(getMousePos(), Vec2(-1, -1)));
+            for (float invalid : {0.0f, -1.0f, std::numeric_limits<float>::infinity(),
+                                  std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::denorm_min()})
+                check(invalid == 0.0f ? "zero native pointer DPI has unit fallback" :
+                      "invalid native pointer DPI has finite unit fallback", internal::appPointerScale(invalid) == 1.0f);
         }
-        internal::pixelPerfectMode() = false;
-        for (float invalid : {0.0f, -1.0f, std::numeric_limits<float>::infinity(),
-                              std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::denorm_min()})
-            check("invalid native pointer DPI has finite unit fallback", internal::appPointerScale(invalid) == 1.0f);
         nativeDpi = 1;
         internal::restoreWindowContext(&secondary.context());
         internal::pixelPerfectMode() = true;

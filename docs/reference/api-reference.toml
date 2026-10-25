@@ -40498,17 +40498,17 @@ description.en = "Resizes this window's content area."
 description.ja = "このウィンドウのコンテンツ領域をリサイズする。"
 description.ko = "이 윈도우의 콘텐츠 영역 크기를 변경한다."
 details.en = '''
-- `width` and `height` specify the content area in logical points, excluding window decorations. These units match `Window::getWidth()`, `Window::getHeight()`, and this window's input coordinates.
+- `width` and `height` specify the content area in logical points, excluding window decorations. These units match `Window::getWidth()` and `Window::getHeight()`. Input coordinates use framebuffer pixels when pixelPerfect is enabled and logical points otherwise.
 - `Window::setSize()` uses logical points for main and secondary windows even with pixelPerfect enabled. DPI conversion keeps the existing logical-size rounding; for pixel requests use `App::setSize()` or `setWindowSize()`.
 - Does nothing after the native window closes. For main-thread requirements, see `Window::setApp`.
 '''
 details.ja = '''
-- `width` と `height` は、ウィンドウの装飾を除いたコンテンツ領域のサイズを論理ポイントで指定します。単位は `Window::getWidth()`、`Window::getHeight()`、このウィンドウの入力座標と同じです。
+- `width` と `height` は、ウィンドウの装飾を除いたコンテンツ領域のサイズを論理ポイントで指定します。単位は `Window::getWidth()`、`Window::getHeight()` と同じです。入力座標は pixelPerfect が有効ならフレームバッファのピクセル、無効なら論理ポイントです。
 - `Window::setSize()` は主副窓とも pixelPerfect が有効でも論理ポイントを使います。DPI 変換では論理サイズの既存の丸めを維持します。ピクセル指定には `App::setSize()` または `setWindowSize()` を使います。
 - ネイティブウィンドウを閉じたあとは何もしません。メインスレッドでの使用については `Window::setApp` を参照してください。
 '''
 details.ko = '''
-- `width`와 `height`는 윈도우 장식을 제외한 콘텐츠 영역 크기를 논리 포인트로 지정합니다. 단위는 `Window::getWidth()`, `Window::getHeight()`, 이 윈도우의 입력 좌표와 같습니다.
+- `width`와 `height`는 윈도우 장식을 제외한 콘텐츠 영역 크기를 논리 포인트로 지정합니다. 단위는 `Window::getWidth()`, `Window::getHeight()`와 같습니다. 입력 좌표는 pixelPerfect가 활성화되면 프레임버퍼 픽셀, 아니면 논리 포인트입니다.
 - `Window::setSize()`는 메인과 보조 윈도우 모두 pixelPerfect가 활성화되어도 논리 포인트를 사용합니다. DPI 변환은 논리 크기의 기존 변환 방식을 유지합니다. 픽셀 요청에는 `App::setSize()` 또는 `setWindowSize()`를 사용하세요.
 - 네이티브 윈도우를 닫은 뒤에는 아무 작업도 하지 않습니다. 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
 '''
@@ -40913,17 +40913,17 @@ description.ko = "윈도우 좌표에 프레임버퍼 픽셀을 사용할지 지
 details.en = '''
 - The default is `false`, which uses logical pixels for the main window's drawing and mouse coordinates. With `true`, these coordinates use framebuffer pixels.
 - Startup size conversion is described in `WindowSettings::setSize`; high-DPI framebuffer allocation is controlled separately by `WindowSettings::highDpi`.
-- The coordinate mode is shared across the app. Secondary-window creation ignores its own `pixelPerfect` value, and secondary-window drawing and mouse coordinates follow the global mode exactly like main.
+- The coordinate mode is shared across the app. Secondary-window creation ignores its own `pixelPerfect` value, and secondary-window drawing and mouse coordinates use the same unit scale as main: framebuffer pixels when enabled, logical points otherwise. Delta derivation and enter/leave handling retain their existing differences.
 '''
 details.ja = '''
 - デフォルトは `false` で、メインウィンドウの描画座標とマウス座標に論理ピクセルを使います。`true` にすると、これらの座標にフレームバッファのピクセルを使います。
 - 起動時のサイズ変換は `WindowSettings::setSize` を参照してください。高 DPI のフレームバッファを確保するかどうかは `WindowSettings::highDpi` で別に指定します。
-- 座標モードはアプリ全体で共有します。サブウィンドウの作成では、その設定の `pixelPerfect` 値を無視し、サブウィンドウの描画とマウス座標もメインと同じグローバル設定に従います。
+- 座標モードはアプリ全体で共有します。サブウィンドウの作成では、その設定の `pixelPerfect` 値を無視し、サブウィンドウの描画とマウス座標の単位もメインと同じで、有効ならフレームバッファのピクセル、無効なら論理ポイントです。差分の計算と入退場イベントの処理には既存の違いがあります。
 '''
 details.ko = '''
 - 기본값은 `false`이며, 메인 윈도우의 그리기 좌표와 마우스 좌표에 논리 픽셀을 사용합니다. `true`로 설정하면 이 좌표에 프레임버퍼 픽셀을 사용합니다.
 - 시작 시 크기 변환은 `WindowSettings::setSize`에 설명되어 있습니다. 고 DPI 프레임버퍼 할당 여부는 `WindowSettings::highDpi`에서 별도로 지정합니다.
-- 좌표 모드는 앱 전체에서 공유합니다. 보조 윈도우를 만들 때는 해당 설정의 `pixelPerfect` 값을 무시하며, 보조 윈도우의 그리기와 마우스 좌표도 메인과 동일한 전역 설정을 따릅니다.
+- 좌표 모드는 앱 전체에서 공유합니다. 보조 윈도우를 만들 때는 해당 설정의 `pixelPerfect` 값을 무시하며, 보조 윈도우의 그리기와 마우스 좌표도 메인과 같은 단위를 사용합니다. 활성화되면 프레임버퍼 픽셀, 아니면 논리 포인트입니다. 델타 계산과 진입/이탈 처리는 기존 차이를 유지합니다.
 '''
 
 ["WindowSettings::reserveUniformBuffer"]
