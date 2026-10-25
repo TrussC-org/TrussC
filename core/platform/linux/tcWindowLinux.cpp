@@ -94,8 +94,7 @@ void windowTickImpl(sapp_window swin, void* user) {
             internal::currentWindowCtx() = previous;
         }
     } restore{previous};
-    const auto size = internal::framebufferResizeArgs(fbw, fbh, ctx.dpiScale);
-    win->syncRootSize((float)size.width, (float)size.height);
+    internal::syncSecondaryAppSize(*win, fbw, fbh);
     if (!internal::runWindowTick(std::chrono::steady_clock::now(), sapp_window_frame_duration(swin)))
         sapp_tc_window_skip_present(swin);
 
@@ -121,8 +120,8 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
     // Raw event pass-through (same hook addons use on the main window)
     win->events().rawEvent.notify(*ev);
 
-    // sapp coords arrive in framebuffer pixels; TrussC windows use logical
-    // points (secondary windows have no pixelPerfect mode for now)
+    // sapp pointer coordinates arrive in framebuffer pixels; secondary pointer
+    // events retain their existing logical-point units.
     const float dpi = sapp_window_dpi_scale(swin);
     const float scale = (dpi > 0.0f) ? (1.0f / dpi) : 1.0f;
     const bool hasShift = (ev->modifiers & SAPP_MODIFIER_SHIFT) != 0;
@@ -338,12 +337,12 @@ void Window::setSecondaryTitle(const std::string& title) {
     if (st) sapp_window_set_title(st->win, title.c_str());
 }
 
-void Window::setSecondarySize(int width, int height) {
+void Window::setSecondarySize(double width, double height, bool pixelSize) {
     auto* st = static_cast<AdapterState*>(native_);
     if (!st) return;
     internal::x11Geometry((Display*)sapp_x11_get_display(),
         (::Window)(uintptr_t)sapp_window_x11_get_window(st->win), st->geometry,
-        false, 0, 0, width, height, ctx_.dpiScale, fullscreenRequested_);
+        false, 0, 0, width, height, ctx_.dpiScale, fullscreenRequested_, pixelSize);
 }
 
 void Window::setSecondaryPosition(int x, int y) {
@@ -424,7 +423,7 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
         return nullptr;
     }
 
-    st->geometry = {settings.width, settings.height};
+    st->geometry = {double(settings.width), double(settings.height)};
     win->ctx_.swapchainTarget.sampleCount = sapp_window_sample_count(st->win);
     win->ctx_.swapchainTarget.width = sapp_window_framebuffer_width(st->win);
     win->ctx_.swapchainTarget.height = sapp_window_framebuffer_height(st->win);

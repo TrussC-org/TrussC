@@ -97,7 +97,7 @@ struct Window {
     std::string title_;
     bool isOpen() const { return valid; }
     void setSecondaryTitle(const std::string&) { assert(false); }
-    void setSecondarySize(int, int) { assert(false); }
+    void setSecondarySize(double, double, bool = false) { assert(false); }
     void setSecondaryPosition(int, int) { assert(false); }
     IVec2 getSecondaryPosition() { assert(false); return {}; }
     void setSecondaryFullscreen(bool) { assert(false); }

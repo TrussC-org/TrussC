@@ -142,6 +142,25 @@ int main() {
     // After leaving fullscreen, an unrelated move must retain 800x600.
     x11Geometry(display, 3, restored, true, 200, 150, 0, 0, 1);
     check("fullscreen size never leaks into a later unrelated move", requests.back().kind == "moveResize" && requests.back().width == 800 && requests.back().height == 600);
+    for (float dpi : {1.25f, 1.5f, 1.75f, 2.0f}) {
+        for (::Window window : {2UL, 3UL}) {
+            auto& state = window == 2 ? main : secondary;
+            requests.clear();
+            x11Geometry(display, window, state, false, 0, 0, 1001.0 / dpi, 667.0 / dpi, dpi, false, true);
+            check("odd pixel resize keeps fractional logical size for main and secondary",
+                requests.back().kind == "resize" && requests.back().window == window &&
+                requests.back().width == 1001 && requests.back().height == 667);
+            requests.clear();
+            x11Geometry(display, window, state, true, 30, 40, 0, 0, dpi);
+            check("subsequent move retains exact odd pixel size",
+                requests.back().kind == "moveResize" && requests.back().width == 1001 && requests.back().height == 667);
+        }
+    }
+    requests.clear();
+    const auto saved = main;
+    for (double value : {double(NAN), double(INFINITY), -1.0, 0.0, double(INT_MAX) + 1, 65536.0})
+        x11Geometry(display, 2, main, false, 0, 0, value, 10, 1, false, true);
+    check("invalid fractional sizes preserve requests and state", requests.empty() && main.requestedWidth == saved.requestedWidth);
     std::free(dpy);
     return failures ? 1 : 0;
 }

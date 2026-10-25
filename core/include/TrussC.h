@@ -1644,7 +1644,11 @@ inline void setWindowSize(int width, int height) {
         if (internal::routeSetWindowPixelSizeToWindow(width, height)) return;
         const float scale = sapp_dpi_scale();
         const float factor = std::isfinite(scale) && scale > 0 ? scale : 1.0f;
-        // Same float division as Window::control's PixelSize path.
+#if defined(__linux__) && !defined(__ANDROID__)
+        internal::setMainWindowSizeFractionalX11(double(width) / factor, double(height) / factor);
+        return;
+#endif
+        // Same float division as the single-window PixelSize path.
         const float logicalWidth = width / factor, logicalHeight = height / factor;
         // Bound: float(INT_MAX) rounds up to 2^31, outside int range.
         if (!std::isfinite(logicalWidth) || !std::isfinite(logicalHeight) ||
@@ -2487,7 +2491,7 @@ namespace internal {
             int w = sapp_width();
             int h = sapp_height();
             float dpiScale = sapp_dpi_scale();
-            appWindowResizedFunc(framebufferToLogical(w, pixelPerfectMode() ? 1.0f : dpiScale), framebufferToLogical(h, pixelPerfectMode() ? 1.0f : dpiScale));
+            appWindowResizedFunc(framebufferToLogical(w, appSizeDpi(dpiScale)), framebufferToLogical(h, appSizeDpi(dpiScale)));
         }
     }
 
@@ -2971,7 +2975,7 @@ namespace internal {
                 int fbW = sapp_width();
                 int fbH = sapp_height();
                 
-                auto args = framebufferResizeArgs(fbW, fbH, pixelPerfectMode() ? 1.0f : getDpiScale());
+                auto args = framebufferResizeArgs(fbW, fbH, appSizeDpi(getDpiScale()));
                 events().windowResized.notify(args);
                 break;
             }

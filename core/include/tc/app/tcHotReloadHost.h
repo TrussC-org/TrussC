@@ -356,7 +356,7 @@ inline int runBuildCommand(const vector<string>& argv, string& output) {
 // up the App mid-callback.
 inline void seedReloadedAppSize(int framebufferWidth, int framebufferHeight, float dpiScale) {
     const auto size = internal::framebufferResizeArgs(framebufferWidth, framebufferHeight,
-        internal::pixelPerfectMode() ? 1.0f : dpiScale);
+        internal::appSizeDpi(dpiScale));
     internal::EntryStackGuard guard(internal::AppEntry::Event, "windowResized()");
     internal::resizeMainApp(size.width, size.height);
 }

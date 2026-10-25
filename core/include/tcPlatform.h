@@ -133,6 +133,9 @@ void setWindowPositionNative(const void* handle, int x, int y);
 IVec2 mainWindowPosition();
 void setMainWindowPosition(int x, int y);
 void setMainWindowSizeLogical(int width, int height);
+#if defined(__linux__) && !defined(__ANDROID__)
+void setMainWindowSizeFractionalX11(double width, double height);
+#endif
 }
 
 // Set whether the window shows standard decorations (title bar, borders,
