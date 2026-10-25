@@ -423,12 +423,13 @@ static void testSokolBridge() {
         internal::sokolLog("sapp", 2, 7, "warned", 10, "sokol_app.h", nullptr);
         internal::sokolLog("sgl", 3, 3, "info message", 11, nullptr, nullptr);
         internal::sokolLog("simgui", 1, 5, "imgui error", 12, nullptr, nullptr);
+        internal::sokolLog("sapp", 3, SAPP_LOGITEM_OK, "1024 4", 13, nullptr, nullptr);
     }
     lg.closeFile();
     lg.setConsoleLogLevel(oldConsole);
 
-    check("bridge: every call reaches onLog", seen.size() == 4);
-    if (seen.size() == 4) {
+    check("bridge: every call reaches onLog", seen.size() == 5);
+    if (seen.size() == 5) {
         check("bridge: sg error, no message",
               seen[0].level == LogLevel::Error && seen[0].message == "[sg] id:12 line:345");
         check("bridge: sapp warning",
@@ -437,13 +438,15 @@ static void testSokolBridge() {
               seen[2].level == LogLevel::Verbose && seen[2].message == "[sgl] info message");
         check("bridge: simgui error",
               seen[3].level == LogLevel::Error && seen[3].message == "[simgui] imgui error");
+        check("bridge: application notice", seen[4].level == LogLevel::Notice && seen[4].message == "[sapp] 1024 4");
     }
     const vector<string> lines = readLines(f);
-    check("bridge: the file gets errors and warnings, not info",
-          lines.size() == 3 &&
+    check("bridge: the file gets errors, warnings and application notices",
+          lines.size() == 4 &&
           contains(lines, "] [ERROR] [sg] id:12 line:345") &&
           contains(lines, "] [WARNING] [sapp] warned") &&
           contains(lines, "] [ERROR] [simgui] imgui error") &&
+          contains(lines, "] [NOTICE] [sapp] 1024 4") &&
           !contains(lines, "info message"));
     error_code ec;
     fs::remove(f, ec);

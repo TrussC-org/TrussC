@@ -8589,6 +8589,7 @@ static struct {
     EGLContext ctx;
     struct { bool available; int major_opcode; } xi;
     bool mouse_locked;
+    bool main_input_delivered;
     int xi_event_base, xi_error_base;
 #else
     /* ---- GLX (one shared context; per-window GLXWindow drawables) -------- */
@@ -8631,6 +8632,8 @@ static struct {
         /* drag & drop */
         bool drop_enabled;
         int drop_max_files;
+        // Bound (record): inspect the first 1024 offered types; excess types are ignored.
+        enum { drop_max_types = 1024 };
         int drop_max_path_length;
         int drop_num_files;
         char* drop_buffer;
@@ -8767,6 +8770,28 @@ static bool _sapp_tc_app_events_enabled(void) {
 static void _sapp_tc_main_event_tramp(const sapp_event* ev, sapp_window win, void* user) {
     (void)win; (void)user;
     if (!_sapp_tc_app_events_enabled()) return;
+#if defined(SOKOL_GLES3)
+    switch (ev->type) {
+        case SAPP_EVENTTYPE_KEY_DOWN:
+        case SAPP_EVENTTYPE_KEY_UP:
+        case SAPP_EVENTTYPE_CHAR:
+        case SAPP_EVENTTYPE_MOUSE_DOWN:
+        case SAPP_EVENTTYPE_MOUSE_UP:
+        case SAPP_EVENTTYPE_MOUSE_SCROLL:
+        case SAPP_EVENTTYPE_MOUSE_MOVE:
+        case SAPP_EVENTTYPE_MOUSE_ENTER:
+        case SAPP_EVENTTYPE_MOUSE_LEAVE:
+        case SAPP_EVENTTYPE_FOCUSED:
+        case SAPP_EVENTTYPE_UNFOCUSED:
+        case SAPP_EVENTTYPE_ICONIFIED:
+        case SAPP_EVENTTYPE_RESTORED:
+        case SAPP_EVENTTYPE_FILES_DROPPED:
+        case SAPP_EVENTTYPE_CLIPBOARD_PASTED:
+            _sapp_tc.main_input_delivered = true;
+            break;
+        default: break;
+    }
+#endif
     _sapp_tc.app.event_consumed = false;
     if (_sapp_tc.app.desc.event_cb) {
         _sapp_tc.app.desc.event_cb(ev);
@@ -10318,7 +10343,7 @@ struct _sapp_tc_x11_uri_reader {
     Window window;
     Atom property, type;
     unsigned char* data;
-    unsigned long count, pos, bytes_after;
+    unsigned long count, pos, bytes_after, extent, consumed;
     long offset;
     bool started, failed;
     // Bound (record): a percent escape needs at most two following bytes of lookahead.
@@ -10337,7 +10362,6 @@ static unsigned char _sapp_tc_x11_uri_read(_sapp_tc_x11_uri_reader* r) {
         const long length = _sapp_tc.app.drop_max_path_length / 4 + (_sapp_tc.app.drop_max_path_length % 4 != 0);
         const int status = XGetWindowProperty(_sapp_tc.display, r->window, r->property,
             r->offset, length, False, r->type, &actual_type, &format, &r->count, &r->bytes_after, &r->data);
-        r->started = true;
         r->pos = 0;
         if (status != Success || actual_type != r->type || format != 8 || !r->data ||
             r->count > (unsigned long)length * 4 ||
@@ -10345,6 +10369,18 @@ static unsigned char _sapp_tc_x11_uri_read(_sapp_tc_x11_uri_reader* r) {
             r->failed = true;
             return 0;
         }
+        if (!r->started) {
+            if (r->bytes_after > ULONG_MAX - r->count) { r->failed = true; return 0; }
+            r->extent = r->count + r->bytes_after;
+            r->started = true;
+        }
+        // Bound (transfer): every reply must fit the initial property extent exactly.
+        if (r->consumed > r->extent || r->count > r->extent - r->consumed ||
+            r->bytes_after != r->extent - r->consumed - r->count) {
+            r->failed = true;
+            return 0;
+        }
+        r->consumed += r->count;
         if (r->bytes_after) r->offset += (long)(r->count / 4);
         if (!r->count) return 0;
     }
@@ -10643,8 +10679,21 @@ static void _sapp_tc_x11_on_clientmessage(XEvent* event) {
         uint32_t count = 0;
         Atom* formats = 0;
         if (is_list) {
-            count = (uint32_t)_sapp_tc_x11_get_window_property(_sapp_tc.xdnd.source,
-                _sapp_tc.xdnd.XdndTypeList, XA_ATOM, (unsigned char**)&formats);
+            Atom actual_type = None;
+            int actual_format = 0;
+            unsigned long nitems = 0, bytes_after = 0;
+            const int status = XGetWindowProperty(_sapp_tc.display, _sapp_tc.xdnd.source,
+                _sapp_tc.xdnd.XdndTypeList, 0, _sapp_tc.app.drop_max_types, False, XA_ATOM,
+                &actual_type, &actual_format, &nitems, &bytes_after, (unsigned char**)&formats);
+            if (status == Success && actual_type == XA_ATOM && actual_format == 32 &&
+                nitems <= _sapp_tc.app.drop_max_types && formats) {
+                count = (uint32_t)nitems;
+                if (bytes_after > 0) {
+                    _sapp_tc_log(&_sapp_tc.app.desc.logger, 3, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                        "", "XDND type counts: %u retained limit, %lu bytes remaining",
+                        (unsigned)_sapp_tc.app.drop_max_types, bytes_after);
+                }
+            }
         } else {
             count = 3;
             formats = (Atom*)event->xclient.data.l + 2;
@@ -11512,7 +11561,7 @@ static void _sapp_tc_x11_run_loop(void) {
         /* drain exactly the already-queued events (can't block: count bounded) */
         int count = XPending(_sapp_tc.display);
 #if defined(SOKOL_GLES3)
-        const bool dispatched_input = count > 0;
+        _sapp_tc.main_input_delivered = false;
 #endif
         while (count--) {
             XEvent event;
@@ -11520,8 +11569,8 @@ static void _sapp_tc_x11_run_loop(void) {
             _sapp_tc_x11_process_event(&event);
         }
 #if defined(SOKOL_GLES3)
-        // As in the original EGL loop, dispatched input ends main's skipped-present delay.
-        if (dispatched_input && _sapp_tc.app.main) _sapp_tc.app.main->earliest_next = 0.0;
+        // Delivered main input ends main's skipped-present delay.
+        if (_sapp_tc.main_input_delivered && _sapp_tc.app.main) _sapp_tc.app.main->earliest_next = 0.0;
 #endif
         /* tick every due window (re-fetch each slot: a tick or a processed
            event may have destroyed windows) */

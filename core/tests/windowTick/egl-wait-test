@@ -4,7 +4,7 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/tc-egl-wait.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
-wraps='clock_gettime XPending XFlush XNextEvent XGetWindowAttributes poll eglMakeCurrent eglGetCurrentContext eglGetCurrentSurface eglGetCurrentDisplay eglSwapBuffers XGrabPointer XUngrabPointer XWarpPointer XSetSelectionOwner XGetSelectionOwner XInternAtom XConvertSelection XDeleteProperty XCheckTypedWindowEvent XGetWindowProperty'
+wraps='clock_gettime XPending XFlush XNextEvent XGetWindowAttributes poll eglMakeCurrent eglGetCurrentContext eglGetCurrentSurface eglGetCurrentDisplay eglSwapBuffers XGrabPointer XUngrabPointer XWarpPointer XSetSelectionOwner XGetSelectionOwner XInternAtom XConvertSelection XDeleteProperty XCheckTypedWindowEvent XGetWindowProperty XLookupString XFilterEvent XSendEvent XGetAtomName XFree'
 set --
 for name in $wraps; do set -- "$@" "-Wl,--wrap=$name"; done
 "${CXX:-c++}" -std=c++20 -O1 -DSOKOL_GLES3 -I"${TC_X11_TEST_INCLUDE:-$root/core/include/sokol}" \
