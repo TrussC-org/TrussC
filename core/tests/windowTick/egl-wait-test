@@ -1,93 +1,12 @@
 #!/bin/sh
-# Extract the production EGL deadline and shared X11 wait; exercise without an EGL
-# device or timing assertions. Run through tcbuild.sh, like other build probes.
+# Compile the complete production loop with deterministic native boundaries.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/tc-egl-wait.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
-cat > "$scratch/probe.cpp" <<'CPP'
-#include <poll.h>
-#include <unistd.h>
-#include <time.h>
-#include <errno.h>
-#include <limits.h>
-#include <math.h>
-#include <cstdio>
-#include <cstdlib>
-struct { int display; } _sapp_tc;
-static bool skip_present;
-static int swap_interval = 4;
-static double now = 10, work = .005;
-static int buffered, polls, timeouts[4], swaps, failures;
-static bool skip = true, interruptWait, invalidFd, timeoutWait;
-static void check(const char* label, bool ok) {
-    std::printf("egl-wait: %s: %s\n", label, ok ? "PASS" : "FAIL");
-    if (!ok) ++failures;
-}
-static double _sapp_tc_now() { return now; }
-static int ConnectionNumber(int display) { return display; }
-static int XPending(int) { return buffered; }
-static int probePoll(pollfd* input, nfds_t count, int timeout) {
-    if (polls >= 4) std::abort(); // fail a broken retry loop without hanging
-    timeouts[polls++] = timeout;
-    if (interruptWait && polls == 1) { now += .010; errno = EINTR; return -1; }
-    if (invalidFd) { errno = EINVAL; return -1; }
-    if (timeoutWait) { now += timeout / 1000.0; return 0; }
-    return ::poll(input, count, timeout); // real, already-readable pipe
-}
-#define poll probePoll
-CPP
-python3 - "$root/core/include/sokol/sokol_app_tc.h" >> "$scratch/probe.cpp" <<'PYCODE'
-from pathlib import Path
-import sys
-source = Path(sys.argv[1]).read_text()
-def body(marker):
-    start = source.index(marker)
-    pos = source.index('{', start) + 1
-    depth = 1
-    while depth:
-        depth += (source[pos] == '{') - (source[pos] == '}')
-        pos += 1
-    return source[start:pos]
-print(body('static void _sapp_tc_x11_wait_until('))
-print('static void frame() { double frame_start = now; now += work; skip_present = skip;')
-print('bool presented = !skip_present; struct { double earliest_next; } state{}; auto* w = &state;')
-print(body('if (!presented) {'))
-print('if (skip_present) { skip_present = false; _sapp_tc_x11_wait_until(w->earliest_next); } else ++swaps; }')
-PYCODE
-cat >> "$scratch/probe.cpp" <<'CPP'
-int main() {
-    int fd[2];
-    if (pipe(fd) != 0 || write(fd[1], "x", 1) != 1) return 2;
-    _sapp_tc.display = fd[0];
-    frame();
-    check("readable X fd wakes the loop", polls == 1 && timeouts[0] == 62);
-    check("skipped frame consumes skip flag without swapping", !skip_present && swaps == 0);
-    polls = 0; buffered = 1;
-    frame();
-    check("Xlib buffered event bypasses the wait", polls == 0);
-    buffered = 0; interruptWait = true;
-    frame();
-    check("EINTR retries only the remaining deadline", polls == 2 && timeouts[0] == 62 && timeouts[1] == 52);
-    polls = 0; interruptWait = false; work = .1;
-    frame();
-    check("callback work beyond the period adds no wait", polls == 0);
-    work = .005;
-    frame();
-    check("next tick starts afresh without catch-up", polls == 1 && timeouts[0] == 62);
-    polls = 0; invalidFd = true;
-    frame();
-    check("non-EINTR errors return to the event loop", polls == 1);
-    polls = 0; invalidFd = false; timeoutWait = true;
-    const double start = now;
-    frame();
-    check("idle timeout includes callback work in the period", polls == 1 && timeouts[0] == 62 && now - start >= .0664);
-    polls = 0; skip = false;
-    frame();
-    check("normal presentation does not wait on input", polls == 0 && swaps == 1);
-    close(fd[0]); close(fd[1]);
-    return failures ? 1 : 0;
-}
-CPP
-"${CXX:-c++}" -std=c++20 "$scratch/probe.cpp" -o "$scratch/probe"
+wraps='clock_gettime XPending XFlush XNextEvent XGetWindowAttributes poll eglMakeCurrent eglGetCurrentContext eglGetCurrentSurface eglGetCurrentDisplay eglSwapBuffers XGrabPointer XUngrabPointer XWarpPointer XSetSelectionOwner XGetSelectionOwner XInternAtom XConvertSelection XDeleteProperty XCheckTypedWindowEvent XGetWindowProperty'
+set --
+for name in $wraps; do set -- "$@" "-Wl,--wrap=$name"; done
+"${CXX:-c++}" -std=c++20 -O1 -DSOKOL_GLES3 -I"${TC_X11_TEST_INCLUDE:-$root/core/include/sokol}" \
+    "$root/core/tests/windowTick/x11-regression.cpp" "$@" -lX11 -lXcursor -lXi -lEGL -lGLESv2 -o "$scratch/probe"
 "$scratch/probe"

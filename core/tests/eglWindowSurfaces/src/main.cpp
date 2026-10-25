@@ -12,8 +12,15 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
+#include <time.h>
 // Private native test entry, compiled only into the combined test backend.
 namespace trussc::internal { void tickX11WindowForTests(sapp_window window); }
+static unsigned makeCurrentCalls;
+extern "C" EGLBoolean __real_eglMakeCurrent(EGLDisplay, EGLSurface, EGLSurface, EGLContext);
+extern "C" EGLBoolean __wrap_eglMakeCurrent(EGLDisplay display, EGLSurface draw, EGLSurface read, EGLContext context) {
+    ++makeCurrentCalls;
+    return __real_eglMakeCurrent(display, draw, read, context);
+}
 #endif
 
 namespace {
@@ -253,6 +260,18 @@ void frame() noexcept {
         check("X11 keys route independently", redKeys == 1 && greenKeys == 1);
         check("X11 resize routes to its window", redResizes == 1);
         check("X11 close routes to its window", greenCloses == 1);
+        sapp_window_desc spareDesc{};
+        spareDesc.width = spareDesc.height = 32;
+        spareDesc.title = "non-current destroy";
+        const sapp_window spare = sapp_create_window(&spareDesc);
+        check("non-current destroy fixture created", sapp_window_valid(spare));
+        const EGLDisplay display = eglGetCurrentDisplay();
+        eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        const unsigned beforeDestroy = makeCurrentCalls;
+        sapp_destroy_window(spare);
+        check("destroying non-current secondary preserves unbound caller without make-current",
+            makeCurrentCalls == beforeDestroy && eglGetCurrentContext() == EGL_NO_CONTEXT);
+        eglMakeCurrent(display, mainSurface, mainSurface, sharedContext);
         captureFront(sapp_x11_get_window(), capturePaths[0].c_str(), 2);
         sapp_tc_gl_make_current(greenWindow);
         closeCaller = true;
@@ -273,11 +292,103 @@ void frame() noexcept {
         sapp_quit();
     }
 }
+
+// Single-window device exercise, also suitable for the Pi 4 regression pass.
+bool mainIdle, mainDirty = true;
+double inputTime;
+double monotonicTime() noexcept {
+    timespec value{};
+    clock_gettime(CLOCK_MONOTONIC, &value);
+    return (double)value.tv_sec + (double)value.tv_nsec * 1e-9;
+}
+void mainProbeInit() noexcept {
+    const char* version = (const char*)glGetString(GL_VERSION);
+    check("main probe uses GLES", version && std::strstr(version, "OpenGL ES"));
+    EGLint id = 0, count = 0;
+    EGLConfig config{};
+    const EGLDisplay display = eglGetCurrentDisplay();
+    eglQuerySurface(display, eglGetCurrentSurface(EGL_DRAW), EGL_CONFIG_ID, &id);
+    const EGLint attrs[] = { EGL_CONFIG_ID, id, EGL_NONE };
+    check("main probe config available", eglChooseConfig(display, attrs, &config, 1, &count) && count == 1);
+    for (EGLint attr : { EGL_RED_SIZE, EGL_GREEN_SIZE, EGL_BLUE_SIZE, EGL_ALPHA_SIZE,
+                        EGL_DEPTH_SIZE, EGL_STENCIL_SIZE, EGL_SAMPLES }) {
+        EGLint value = 0;
+        eglGetConfigAttrib(display, config, attr, &value);
+        std::printf("main config attribute 0x%x = %d\n", attr, value);
+    }
+    std::printf("main GLES=%s dpi=%g size=%dx%d samples=%d interval=%d\n", version ? version : "?",
+        sapp_dpi_scale(), sapp_width(), sapp_height(), sapp_sample_count(), sapp_query_desc().swap_interval);
+    std::puts("main probe: E idle | R redraw | L lock | H cursor hide | 1/2/3 cursor shapes\n"
+        "C copy oversize | O copy old | P paste | T title | F fullscreen | Q quit\n"
+        "Drag files here; type text; click/wheel while locked; verify anchor and raw deltas in log.");
+}
+void mainProbeFrame() noexcept {
+    if (mainIdle && !mainDirty) { sapp_skip_present(); return; }
+    mainDirty = false;
+    clearColor(0, .25f, .5f);
+    if (inputTime != 0) {
+        std::printf("main input-to-next-frame %.3f ms\n", (monotonicTime() - inputTime) * 1000);
+        inputTime = 0;
+    }
+}
+void mainProbeEvent(const sapp_event* e) noexcept {
+    inputTime = monotonicTime();
+    mainDirty = true;
+    if (e->type == SAPP_EVENTTYPE_KEY_DOWN) {
+        switch (e->key_code) {
+            case SAPP_KEYCODE_E: mainIdle = !mainIdle; break;
+            case SAPP_KEYCODE_R: break;
+            case SAPP_KEYCODE_L: sapp_lock_mouse(!sapp_mouse_locked()); break;
+            case SAPP_KEYCODE_H: sapp_show_mouse(!sapp_mouse_shown()); break;
+            case SAPP_KEYCODE_1: sapp_set_mouse_cursor(SAPP_MOUSECURSOR_ARROW); break;
+            case SAPP_KEYCODE_2: sapp_set_mouse_cursor(SAPP_MOUSECURSOR_IBEAM); break;
+            case SAPP_KEYCODE_3: sapp_set_mouse_cursor(SAPP_MOUSECURSOR_CROSSHAIR); break;
+            case SAPP_KEYCODE_C: sapp_set_clipboard_string("123456789"); break;
+            case SAPP_KEYCODE_O: sapp_set_clipboard_string("old"); break;
+            case SAPP_KEYCODE_P: {
+                const char* text = sapp_get_clipboard_string();
+                std::printf("main clipboard: %s\n", text ? text : "<failed transfer>");
+                break;
+            }
+            case SAPP_KEYCODE_T: sapp_set_window_title("EGL main title updated"); break;
+            case SAPP_KEYCODE_F: sapp_toggle_fullscreen(); break;
+            case SAPP_KEYCODE_Q: sapp_request_quit(); break;
+            default: break;
+        }
+    }
+    std::printf("main event=%d pos=(%g,%g) delta=(%g,%g) locked=%d char=U+%04x size=%dx%d\n",
+        e->type, e->mouse_x, e->mouse_y, e->mouse_dx, e->mouse_dy, sapp_mouse_locked(),
+        e->char_code, e->window_width, e->window_height);
+    if (e->type == SAPP_EVENTTYPE_FILES_DROPPED) {
+        for (int i = 0; i < sapp_get_num_dropped_files(); ++i)
+            std::printf("main dropped: %s\n", sapp_get_dropped_file_path(i));
+    }
+}
 #endif
 } // namespace
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
 #if defined(__linux__) && !defined(__ANDROID__) && defined(SOKOL_GLES3)
+    if (argc > 1 && std::strcmp(argv[1], "--main-regression") == 0) {
+        sapp_desc desc{};
+        desc.width = 333; desc.height = 257; desc.high_dpi = true;
+        desc.window_title = "EGL main regression"; desc.swap_interval = 4;
+        desc.enable_clipboard = desc.enable_dragndrop = true;
+        desc.clipboard_size = 8;
+        desc.init_cb = mainProbeInit; desc.frame_cb = mainProbeFrame; desc.event_cb = mainProbeEvent;
+        desc.allocator.alloc_fn = allocate; desc.allocator.free_fn = release;
+        const uint32_t pixels[] = { 0xff0000ff, 0xff00ff00, 0xffff0000, 0xffffffff };
+        desc.icon.images[0].width = desc.icon.images[0].height = 2;
+        desc.icon.images[0].pixels.ptr = pixels; desc.icon.images[0].pixels.size = sizeof(pixels);
+        for (int i = 2; i < argc; ++i) {
+            if (std::strcmp(argv[i], "--msaa4") == 0) desc.sample_count = 4;
+            if (std::strcmp(argv[i], "--fullscreen") == 0) desc.fullscreen = true;
+            if (std::strcmp(argv[i], "--no-high-dpi") == 0) desc.high_dpi = false;
+        }
+        sapp_run(&desc);
+        check("main probe allocator balanced", liveAllocations == 0);
+        return failures ? 1 : 0;
+    }
     if (argc > 1 && std::strcmp(argv[1], "--interactive") == 0) {
         tc::WindowSettings settings;
         settings.setSize(280, 220).setTitle("EGL Pi main");

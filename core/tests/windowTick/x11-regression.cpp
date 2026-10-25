@@ -1,0 +1,207 @@
+// Deterministic native boundaries around the complete production header/loop.
+// Derived from the round-1 review's wake/state probes. No display is required.
+#define SOKOL_NO_ENTRY
+#define SOKOL_APP_TC_IMPL
+#include "sokol_app_tc.h"
+#include <string>
+#include <cstring>
+#include <cstdio>
+#include <cstdlib>
+#include <algorithm>
+namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} }
+
+static int failures, polls, pending, frames, swaps, owners, logs, mouseEvents, warpX, warpY;
+static double now, firstFrame, nextFrame, inputAt, work;
+static bool inject, buffered, interrupted, badFd, skip, cancelQuit;
+static int quitEvents;
+static int timeouts[4];
+static EGLContext currentContext;
+static EGLSurface currentDraw, currentRead;
+static std::string property;
+static long requestedLength;
+static int propertyCalls, propertyDeletes;
+static bool stateProperty, wrongType, wrongFormat;
+static Window owner;
+static void check(const char* label, bool ok) {
+    std::printf("x11-regression: %s: %s\n", label, ok ? "PASS" : "FAIL");
+    if (!ok) ++failures;
+}
+extern "C" int __wrap_clock_gettime(clockid_t, timespec* ts) {
+    now += .000001; // terminates a mutated busy loop without a real-time dependency
+    ts->tv_sec = (time_t)now;
+    ts->tv_nsec = (long)((now - ts->tv_sec) * 1e9);
+    return 0;
+}
+extern "C" int __wrap_XPending(Display*) { return pending; }
+extern "C" int __wrap_XFlush(Display*) { return 0; }
+extern "C" int __wrap_XNextEvent(Display*, XEvent* ev) {
+    --pending; *ev = {}; ev->type = FocusIn;
+    ev->xfocus.window = 1; ev->xfocus.mode = NotifyNormal; return 0;
+}
+extern "C" int __wrap_XGetWindowAttributes(Display*, Window, XWindowAttributes* a) {
+    a->width = a->height = 64; return 1;
+}
+extern "C" int __wrap_poll(pollfd*, nfds_t, int timeout) {
+    if (polls >= 4) std::abort();
+    timeouts[polls++] = timeout;
+    if (interrupted && polls == 1) { now += .010; errno = EINTR; return -1; }
+    if (badFd) { errno = EINVAL; return -1; }
+    if (inject) { now = 10.010; pending = 1; inject = false; return 1; }
+    now += timeout * .001; return 0;
+}
+extern "C" EGLBoolean __wrap_eglMakeCurrent(EGLDisplay, EGLSurface draw, EGLSurface read, EGLContext context) {
+    currentDraw = draw; currentRead = read; currentContext = context; return EGL_TRUE;
+}
+extern "C" EGLContext __wrap_eglGetCurrentContext() { return currentContext; }
+extern "C" EGLSurface __wrap_eglGetCurrentSurface(EGLint which) { return which == EGL_DRAW ? currentDraw : currentRead; }
+extern "C" EGLDisplay __wrap_eglGetCurrentDisplay() { return currentContext ? (EGLDisplay)1 : EGL_NO_DISPLAY; }
+extern "C" EGLBoolean __wrap_eglSwapBuffers(EGLDisplay, EGLSurface) { ++swaps; now += .0664; return EGL_TRUE; }
+extern "C" int __wrap_XGrabPointer(Display*, Window, Bool, unsigned int, int, int, Window, Cursor, Time) { return GrabSuccess; }
+extern "C" int __wrap_XUngrabPointer(Display*, Time) { return 1; }
+extern "C" int __wrap_XWarpPointer(Display*, Window, Window, int, int, unsigned int, unsigned int, int x, int y) {
+    warpX = x; warpY = y; return 1;
+}
+extern "C" int __wrap_XSetSelectionOwner(Display*, Atom, Window window, Time) { owner = window; ++owners; return 1; }
+extern "C" Window __wrap_XGetSelectionOwner(Display*, Atom) { return owner; }
+extern "C" Atom __wrap_XInternAtom(Display*, const char*, Bool) { return 99; }
+extern "C" int __wrap_XConvertSelection(Display*, Atom, Atom, Atom, Window, Time) { return 1; }
+extern "C" int __wrap_XDeleteProperty(Display*, Window, Atom) { ++propertyDeletes; return 1; }
+extern "C" Bool __wrap_XCheckTypedWindowEvent(Display*, Window window, int, XEvent* ev) {
+    *ev = {}; ev->xselection.requestor = window; ev->xselection.property = 3; return True;
+}
+extern "C" int __wrap_XGetWindowProperty(Display*, Window, Atom, long offset, long length, Bool,
+    Atom type, Atom* actual, int* format, unsigned long* count, unsigned long* after, unsigned char** data) {
+    ++propertyCalls; requestedLength = length;
+    *actual = wrongType ? type + 1 : type;
+    *format = wrongFormat ? 16 : (stateProperty ? 32 : 8);
+    if (stateProperty) {
+        *count = 2; *after = property.empty() ? 0 : 4;
+        auto* record = (unsigned long*)std::calloc(2, sizeof(unsigned long));
+        record[0] = NormalState; *data = (unsigned char*)record;
+    } else {
+        const size_t begin = (size_t)offset * 4;
+        if (begin > property.size()) std::abort();
+        const size_t bytes = std::min(property.size() - begin, (size_t)length * 4);
+        *count = bytes; *after = property.size() - begin - bytes;
+        *data = (unsigned char*)std::calloc(bytes + 1, 1);
+        std::memcpy(*data, property.data() + begin, bytes);
+    }
+    return Success;
+}
+static void logger(const char*, uint32_t, uint32_t item, const char*, uint32_t, const char*, void*) {
+    if (item == SAPP_LOGITEM_CLIPBOARD_STRING_TOO_BIG) ++logs;
+}
+static void event(const sapp_event* ev) {
+    if (ev->type == SAPP_EVENTTYPE_QUIT_REQUESTED && cancelQuit) { ++quitEvents; sapp_cancel_quit(); }
+    if (ev->type == SAPP_EVENTTYPE_FOCUSED) inputAt = now;
+    if (ev->type == SAPP_EVENTTYPE_MOUSE_DOWN || ev->type == SAPP_EVENTTYPE_MOUSE_UP ||
+        ev->type == SAPP_EVENTTYPE_MOUSE_ENTER || ev->type == SAPP_EVENTTYPE_MOUSE_SCROLL) {
+        ++mouseEvents;
+        check("locked button/wheel/enter reports anchor", ev->mouse_x == 10 && ev->mouse_y == 20);
+    }
+}
+static void frame() {
+    if (++frames == 1) {
+        firstFrame = now; now += work;
+        if (cancelQuit) sapp_request_quit();
+        if (buffered) pending = 1;
+        if (skip) sapp_skip_present();
+    } else {
+        nextFrame = now; sapp_skip_present(); sapp_quit();
+    }
+}
+static void reset(_sapp_tc_window_t& main, _sapp_tc_window_t** windows, Display* display) {
+    _sapp_tc = {}; main = {};
+    main.is_main = main.ready = true; main.xwin = 1; main.drawable = (EGLSurface)1;
+    main.dpi_scale = 1; main.fb_width = main.fb_height = 64;
+    main.desc.event_cb = _sapp_tc_main_event_tramp;
+    _sapp_tc.display = display; _sapp_tc.windows = windows; _sapp_tc.window_slots = 1;
+    _sapp_tc.ctx = (EGLContext)1; _sapp_tc.egl_display = (EGLDisplay)1;
+    _sapp_tc.app.main = &main; _sapp_tc.app.init_called = true;
+    _sapp_tc.app.desc.event_cb = event; _sapp_tc.app.desc.frame_cb = frame;
+    _sapp_tc.app.desc.swap_interval = 4; _sapp_tc.app.desc.logger.func = logger;
+    _sapp_tc.refresh_period = .0166;
+    polls = pending = frames = swaps = 0;
+    firstFrame = nextFrame = inputAt = 0; now = 10; work = .005;
+    inject = buffered = interrupted = badFd = cancelQuit = false; skip = true;
+    currentContext = (EGLContext)1; currentDraw = currentRead = (EGLSurface)1;
+}
+static bool parseDrop(const std::string& text) {
+    property = text; propertyCalls = 0;
+    _sapp_tc_x11_uri_reader reader{};
+    reader.window = 1; reader.property = 3; reader.type = 4;
+    const bool ok = _sapp_tc_x11_parse_dropped_files_list(&reader);
+    if (reader.data) XFree(reader.data);
+    return ok;
+}
+int main() {
+    auto* display = (Display*)std::calloc(1, sizeof(*(_XPrivDisplay)nullptr));
+    _sapp_tc_window_t main{}; _sapp_tc_window_t* windows[] = { &main };
+    reset(main, windows, display); inject = true; _sapp_tc_x11_run_loop();
+    check("production loop waits on X11 fd", polls == 1 && timeouts[0] >= 61 && timeouts[0] <= 62);
+    check("dispatched input admits next main frame within 2ms", inputAt > 0 && nextFrame >= inputAt && nextFrame - inputAt < .002);
+    std::printf("input-to-frame latency: %.3f ms\n", (nextFrame - inputAt) * 1000);
+    reset(main, windows, display); buffered = true; _sapp_tc_x11_run_loop();
+    check("buffered input bypasses poll and admits main", polls == 0 && inputAt > 0 && nextFrame - inputAt < .002);
+    reset(main, windows, display); interrupted = true; _sapp_tc_x11_run_loop();
+    check("EINTR recomputes remaining production deadline", polls == 2 && timeouts[0] == 62 && timeouts[1] == 52);
+    check("idle wait accounts for callback work", nextFrame - firstFrame >= .0664 && nextFrame - firstFrame < .068);
+    reset(main, windows, display); work = .1; _sapp_tc_x11_run_loop();
+    check("work beyond period adds no wait", polls == 0 && nextFrame - firstFrame >= .1);
+    reset(main, windows, display); skip = false; _sapp_tc_x11_run_loop();
+    check("blocking presentation supplies pacing", swaps == 1 && polls == 0);
+    reset(main, windows, display); cancelQuit = true; _sapp_tc_x11_run_loop();
+    check("quit request can be cancelled before a later ordered quit", quitEvents == 1 && frames == 2 && !_sapp_tc.app.quit_requested);
+    reset(main, windows, display); pending = 1; _sapp_tc_x11_wait_until(now + .1);
+    check("wait helper respects Xlib buffered input", polls == 0);
+    pending = 0; badFd = true; _sapp_tc_x11_wait_until(now + .1);
+    check("non-EINTR error returns to loop", polls == 1);
+
+    reset(main, windows, display);
+    main.mouse_x = 10; main.mouse_y = 20; main.mouse_pos_valid = true; sapp_lock_mouse(true);
+    main.mouse_dx = 2; main.mouse_dy = -3; // most recent raw XI2 deltas
+    for (int type : { ButtonPress, ButtonRelease, EnterNotify, ButtonPress }) {
+        XEvent ev{}; ev.type = type; ev.xbutton.window = 1; ev.xbutton.x = 40; ev.xbutton.y = 50;
+        ev.xbutton.button = mouseEvents == 3 ? Button4 : Button1;
+        _sapp_tc_x11_process_event(&ev);
+    }
+    check("absolute events leave raw deltas alone", main.mouse_dx == 2 && main.mouse_dy == -3 && mouseEvents == 4);
+    sapp_lock_mouse(false);
+    check("unlock warps to saved anchor", warpX == 10 && warpY == 20);
+
+    char clipboard[8]{};
+    _sapp_tc.app.clipboard_enabled = true; _sapp_tc.app.clipboard = clipboard; _sapp_tc.app.clipboard_size = sizeof clipboard;
+    _sapp_tc.UTF8_STRING = 4;
+    sapp_set_clipboard_string("old"); owners = logs = 0;
+    sapp_set_clipboard_string("123456789");
+    check("oversize set truncates prefix, logs and takes ownership", std::strcmp(clipboard, "1234567") == 0 && owners == 1 && logs == 1 && owner == 1);
+    sapp_set_clipboard_string("123456\xc3\xa9");
+    check("truncation matches old byte-prefix contract", std::memcmp(clipboard, "123456\xc3", 8) == 0);
+    owner = 2; property = "123456789"; propertyCalls = 0;
+    const char* result = sapp_get_clipboard_string();
+    check("clipboard acquisition bounded and excess rejects/logs/deletes", requestedLength == 2 && propertyCalls == 1 && result == nullptr && logs == 3 && propertyDeletes == 1);
+    property = "paste";
+    check("bounded clipboard accepts fitting value", std::strcmp(sapp_get_clipboard_string(), "paste") == 0);
+    wrongType = true; check("clipboard rejects wrong type", sapp_get_clipboard_string() == nullptr); wrongType = false;
+    wrongFormat = true; check("clipboard rejects wrong format", sapp_get_clipboard_string() == nullptr); wrongFormat = false;
+    stateProperty = true; property.clear();
+    check("WM_STATE requests two elements", _sapp_tc_x11_get_window_state(&main) == NormalState && requestedLength == 2);
+    property = "extra";
+    check("WM_STATE retains two-element prefix of longer record", _sapp_tc_x11_get_window_state(&main) == NormalState && requestedLength == 2);
+    stateProperty = false;
+    char paths[2 * 8]{};
+    _sapp_tc.app.drop_buffer = paths; _sapp_tc.app.drop_max_files = 2; _sapp_tc.app.drop_max_path_length = 8;
+    check("URI reads bounded chunks and preserves percent decoding across replies",
+        parseDrop("file:///a%20b\r\nfile:///c\r\nfile:///ignored\r\n") && requestedLength == 2 &&
+        propertyCalls == 4 && _sapp_tc.app.drop_num_files == 2 && std::strcmp(paths, "/a b") == 0 && std::strcmp(paths + 8, "/c") == 0);
+    check("oversize URI path rejects and clears retained paths",
+        !parseDrop("file:///123456789\r\n") && _sapp_tc.app.drop_num_files == 0 && paths[0] == 0);
+    check("URI percent escape can straddle acquisition boundary",
+        parseDrop("file://%2Fa\r\n") && _sapp_tc.app.drop_num_files == 1 && std::strcmp(paths, "/a") == 0);
+    check("URI continuation preserves ignored CR without a new size limit",
+        parseDrop("file:///a" + std::string(64, '\r') + "\n") && _sapp_tc.app.drop_num_files == 1 && std::strcmp(paths, "/a") == 0);
+    wrongFormat = true;
+    check("URI malformed reply rejects and clears", !parseDrop("file:///a\n") && paths[0] == 0);
+    std::free(display);
+    return failures ? 1 : 0;
+}

@@ -10029,16 +10029,17 @@ static void _sapp_tc_x11_release_error_handler(void) {
 }
 
 /*-- window properties -------------------------------------------------------*/
-static unsigned long _sapp_tc_x11_get_window_property(Window xwin, Atom property, Atom type, unsigned char** value) {
+static unsigned long _sapp_tc_x11_get_window_property(Window xwin, Atom property, Atom type, unsigned char** value, long length = LONG_MAX) {
     Atom actual_type;
     int actual_format;
     unsigned long item_count, bytes_after;
     *value = NULL;
     const int status = XGetWindowProperty(_sapp_tc.display, xwin, property,
-                       0, LONG_MAX, False, type,
+                       0, length, False, type,
                        &actual_type, &actual_format, &item_count, &bytes_after, value);
     const int expected_format = (type == XA_ATOM || type == _sapp_tc.WM_STATE) ? 32 : 8;
-    if (status != Success || actual_type != type || actual_format != expected_format || bytes_after != 0 || !*value) {
+    if (status != Success || actual_type != type || actual_format != expected_format ||
+        (bytes_after != 0 && type != _sapp_tc.WM_STATE) || !*value) {
         if (*value) XFree(*value);
         *value = NULL;
         return 0;
@@ -10049,7 +10050,8 @@ static unsigned long _sapp_tc_x11_get_window_property(Window xwin, Atom property
 static int _sapp_tc_x11_get_window_state(_sapp_tc_window_t* w) {
     int result = WithdrawnState;
     unsigned long* state = NULL;
-    if (_sapp_tc_x11_get_window_property(w->xwin, _sapp_tc.WM_STATE, _sapp_tc.WM_STATE, (unsigned char**)&state) >= 2) {
+    // Bound (record): WM_STATE consumes two format-32 elements; retain that prefix and ignore extra elements.
+    if (_sapp_tc_x11_get_window_property(w->xwin, _sapp_tc.WM_STATE, _sapp_tc.WM_STATE, (unsigned char**)&state, 2) >= 2) {
         result = (int)state[0];
     }
     if (state) {
@@ -10312,8 +10314,56 @@ static void _sapp_tc_x11_serve_selection_request(XEvent* event) {
 }
 
 /*-- drag & drop (XDND v5, text/uri-list) -------------------------------------*/
-static bool _sapp_tc_x11_parse_dropped_files_list(const char* src) {
-    SOKOL_ASSERT(src);
+struct _sapp_tc_x11_uri_reader {
+    Window window;
+    Atom property, type;
+    unsigned char* data;
+    unsigned long count, pos, bytes_after;
+    long offset;
+    bool started, failed;
+    // Bound (record): a percent escape needs at most two following bytes of lookahead.
+    unsigned char ahead[2];
+    int ahead_count;
+};
+
+static unsigned char _sapp_tc_x11_uri_read(_sapp_tc_x11_uri_reader* r) {
+    if (r->failed) return 0;
+    if (r->pos == r->count) {
+        if (r->started && !r->bytes_after) return 0;
+        if (r->data) { XFree(r->data); r->data = NULL; }
+        Atom actual_type;
+        int format;
+        // Bound (storage): stream URI data in per-path-sized replies; parsing retains only the configured paths.
+        const long length = _sapp_tc.app.drop_max_path_length / 4 + (_sapp_tc.app.drop_max_path_length % 4 != 0);
+        const int status = XGetWindowProperty(_sapp_tc.display, r->window, r->property,
+            r->offset, length, False, r->type, &actual_type, &format, &r->count, &r->bytes_after, &r->data);
+        r->started = true;
+        r->pos = 0;
+        if (status != Success || actual_type != r->type || format != 8 || !r->data ||
+            r->count > (unsigned long)length * 4 ||
+            (r->bytes_after && (!r->count || r->count % 4 != 0 || r->count / 4 > (unsigned long)(LONG_MAX - r->offset)))) {
+            r->failed = true;
+            return 0;
+        }
+        if (r->bytes_after) r->offset += (long)(r->count / 4);
+        if (!r->count) return 0;
+    }
+    return r->data[r->pos++];
+}
+
+static unsigned char _sapp_tc_x11_uri_peek(_sapp_tc_x11_uri_reader* r, int index) {
+    while (r->ahead_count <= index) r->ahead[r->ahead_count++] = _sapp_tc_x11_uri_read(r);
+    return r->ahead[index];
+}
+
+static unsigned char _sapp_tc_x11_uri_take(_sapp_tc_x11_uri_reader* r) {
+    if (!r->ahead_count) return _sapp_tc_x11_uri_read(r);
+    const unsigned char c = r->ahead[0];
+    if (--r->ahead_count) r->ahead[0] = r->ahead[1];
+    return c;
+}
+
+static bool _sapp_tc_x11_parse_dropped_files_list(_sapp_tc_x11_uri_reader* src) {
     SOKOL_ASSERT(_sapp_tc.app.drop_buffer);
 
     memset(_sapp_tc.app.drop_buffer, 0, (size_t)_sapp_tc.app.drop_max_files * (size_t)_sapp_tc.app.drop_max_path_length);
@@ -10328,8 +10378,8 @@ static bool _sapp_tc_x11_parse_dropped_files_list(const char* src) {
     char src_chr = 0;
     char* dst_ptr = _sapp_tc.app.drop_buffer;
     const char* dst_end_ptr = dst_ptr + (_sapp_tc.app.drop_max_path_length - 1); // room for terminating 0
-    while (0 != (src_chr = *src++)) {
-        src_count++;
+    while (0 != (src_chr = (char)_sapp_tc_x11_uri_take(src))) {
+        if (src_count < 8) src_count++;
         char dst_chr = 0;
         /* check leading 'file://' */
         if (src_count <= 7) {
@@ -10357,10 +10407,11 @@ static bool _sapp_tc_x11_parse_dropped_files_list(const char* src) {
             }
             dst_ptr = _sapp_tc.app.drop_buffer + _sapp_tc.app.drop_num_files * _sapp_tc.app.drop_max_path_length;
             dst_end_ptr = dst_ptr + (_sapp_tc.app.drop_max_path_length - 1);
-        } else if ((src_chr == '%') && src[0] && src[1]) {
+        } else if ((src_chr == '%') && _sapp_tc_x11_uri_peek(src, 0) && _sapp_tc_x11_uri_peek(src, 1)) {
             // a percent-encoded byte (most likely UTF-8 multibyte sequence)
-            const char digits[3] = { src[0], src[1], 0 };
-            src += 2;
+            const char first = (char)_sapp_tc_x11_uri_take(src);
+            const char second = (char)_sapp_tc_x11_uri_take(src);
+            const char digits[3] = { first, second, 0 };
             dst_chr = (char) strtol(digits, 0, 16);
         } else {
             dst_chr = src_chr;
@@ -10377,7 +10428,7 @@ static bool _sapp_tc_x11_parse_dropped_files_list(const char* src) {
             }
         }
     }
-    if (err) {
+    if (err || src->failed) {
         memset(_sapp_tc.app.drop_buffer, 0, (size_t)_sapp_tc.app.drop_max_files * (size_t)_sapp_tc.app.drop_max_path_length);
         _sapp_tc.app.drop_num_files = 0;
         return false;
@@ -10434,6 +10485,9 @@ static sapp_mousebutton _sapp_tc_x11_translate_button(unsigned int button) {
 }
 
 static void _sapp_tc_x11_mouse_update(_sapp_tc_window_t* w, int x, int y, bool clear_dxdy) {
+#if defined(SOKOL_GLES3)
+    if (_sapp_tc.mouse_locked) return;
+#endif
     /* event coordinates are raw window pixels == framebuffer pixels on X11 */
     const float fx = (float)x;
     const float fy = (float)y;
@@ -10518,14 +10572,14 @@ static void _sapp_tc_x11_on_selectionnotify(XEvent* event) {
        _sapp_tc_x11_wait_for_event inside sapp_get_clipboard_string) */
     if (!_sapp_tc.app.drop_enabled) return;
     if (event->xselection.property != _sapp_tc.xdnd.XdndSelection) return;
-    char* data = 0;
-    const uint32_t result = (uint32_t)_sapp_tc_x11_get_window_property(
-        event->xselection.requestor,
-        event->xselection.property,
-        event->xselection.target,
-        (unsigned char**)&data);
-    if (result && data) {
-        if (_sapp_tc_x11_parse_dropped_files_list(data)) {
+    _sapp_tc_x11_uri_reader data = {};
+    data.window = event->xselection.requestor;
+    data.property = event->xselection.property;
+    data.type = event->xselection.target;
+    _sapp_tc_x11_uri_peek(&data, 0);
+    const uint32_t result = data.failed ? 0 : (uint32_t)data.count + (uint32_t)data.bytes_after;
+    if (result) {
+        if (_sapp_tc_x11_parse_dropped_files_list(&data)) {
             _sapp_tc_window_t* w = _sapp_tc_lookup_xwin(event->xselection.requestor);
             if (!w) w = _sapp_tc.xdnd.over;
             if (!w) w = _sapp_tc.app.main;
@@ -10548,8 +10602,8 @@ static void _sapp_tc_x11_on_selectionnotify(XEvent* event) {
         XSendEvent(_sapp_tc.display, _sapp_tc.xdnd.source, False, NoEventMask, &reply);
         XFlush(_sapp_tc.display);
     }
-    if (data) {
-        XFree(data);
+    if (data.data) {
+        XFree(data.data);
     }
 }
 
@@ -11457,11 +11511,18 @@ static void _sapp_tc_x11_run_loop(void) {
         }
         /* drain exactly the already-queued events (can't block: count bounded) */
         int count = XPending(_sapp_tc.display);
+#if defined(SOKOL_GLES3)
+        const bool dispatched_input = count > 0;
+#endif
         while (count--) {
             XEvent event;
             XNextEvent(_sapp_tc.display, &event);
             _sapp_tc_x11_process_event(&event);
         }
+#if defined(SOKOL_GLES3)
+        // As in the original EGL loop, dispatched input ends main's skipped-present delay.
+        if (dispatched_input && _sapp_tc.app.main) _sapp_tc.app.main->earliest_next = 0.0;
+#endif
         /* tick every due window (re-fetch each slot: a tick or a processed
            event may have destroyed windows) */
         now = _sapp_tc_now();
@@ -11617,6 +11678,12 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
 void sapp_destroy_window(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w || w->is_main) return;   /* the main window is owned by sapp_run */
+#if defined(SOKOL_GLES3)
+    const bool was_current = w->drawable &&
+        (eglGetCurrentSurface(EGL_DRAW) == w->drawable || eglGetCurrentSurface(EGL_READ) == w->drawable);
+#else
+    const bool was_current = w->drawable && glXGetCurrentDrawable() == w->drawable;
+#endif
     for (size_t i = 0; i < _sapp_tc.window_slots; i++) {
         if (_sapp_tc.windows[i] == w) { _sapp_tc.windows[i] = 0; break; }
     }
@@ -11625,12 +11692,7 @@ void sapp_destroy_window(sapp_window win) {
     _sapp_tc_x11_destroy_window_resources(w);
     _sapp_tc_x11_free_window(w);
     /* restore the main window's drawable if the destroy released it */
-#if defined(SOKOL_GLES3)
-    const bool needs_current = eglGetCurrentContext() == EGL_NO_CONTEXT;
-#else
-    const bool needs_current = !glXGetCurrentContext();
-#endif
-    if (needs_current && _sapp_tc.app.main && _sapp_tc.app.main->drawable) {
+    if (was_current && _sapp_tc.app.main && _sapp_tc.app.main->drawable) {
         _sapp_tc_x11_make_current(_sapp_tc.app.main);
     }
 }
@@ -12019,8 +12081,10 @@ void sapp_set_clipboard_string(const char* str) {
     if (!_sapp_tc.app.clipboard_enabled || !_sapp_tc.app.clipboard || !str) return;
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     if (!w) return;
+    // Bound (storage): keep clipboard_size - 1 bytes and a terminator; oversize copies still take ownership.
     if (strlen(str) >= (size_t)_sapp_tc.app.clipboard_size) {
-        return;     /* string too big for the clipboard buffer */
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_CLIPBOARD_STRING_TOO_BIG,
+            __LINE__, "", "clipboard string exceeds the clipboard buffer");
     }
     strncpy(_sapp_tc.app.clipboard, str, (size_t)_sapp_tc.app.clipboard_size - 1);
     _sapp_tc.app.clipboard[_sapp_tc.app.clipboard_size - 1] = 0;
@@ -12060,12 +12124,16 @@ const char* sapp_get_clipboard_string(void) {
     unsigned long item_count, bytes_after;
     const int ret = XGetWindowProperty(_sapp_tc.display,
         event.xselection.requestor, event.xselection.property,
-        0, LONG_MAX, True, _sapp_tc.UTF8_STRING,
+        // Bound (storage): request only clipboard storage, rounded up to X11's four-byte units; overflow rejects the selection.
+        0, _sapp_tc.app.clipboard_size / 4 + (_sapp_tc.app.clipboard_size % 4 != 0), True, _sapp_tc.UTF8_STRING,
         &actual_type, &actual_format, &item_count, &bytes_after,
         (unsigned char**)&data);
     if ((ret != Success) || (data == NULL)) {
         if (data) XFree(data);
         return failure;
+    }
+    if (bytes_after > 0 && actual_type == _sapp_tc.UTF8_STRING) {
+        XDeleteProperty(_sapp_tc.display, event.xselection.requestor, event.xselection.property);
     }
     /* INCR (incremental transfer) is rejected: pastes beyond the buffer fail */
     // Bound (security): X11 selection data must fit fixed clipboard storage to keep retained memory finite. Overflow rejects the selection.
@@ -12075,7 +12143,7 @@ const char* sapp_get_clipboard_string(void) {
         _sapp_tc.app.clipboard[_sapp_tc.app.clipboard_size - 1] = 0;
     } else {
 #if defined(SOKOL_GLES3)
-        if (actual_type == incremental || item_count >= (unsigned long)_sapp_tc.app.clipboard_size)
+        if (actual_type == incremental || bytes_after > 0 || item_count >= (unsigned long)_sapp_tc.app.clipboard_size)
             _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_CLIPBOARD_STRING_TOO_BIG,
                 __LINE__, "", "clipboard selection exceeds the clipboard buffer");
 #endif
