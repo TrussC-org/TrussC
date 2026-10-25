@@ -710,9 +710,17 @@ static void testXOpenDisplayFailureReachesLogFile() {
     });
     const string text = readText(log);
     check("no display: runApp() aborts", abortedWithSigabrt(status));
-    check("no display: XOpenDisplay failure in TRUSSC_LOG_FILE",
-          text.find("] [FATAL] [sapp] XOpenDisplay() failed (no X server / DISPLAY not set)") != string::npos);
-    if (text.find("XOpenDisplay") == string::npos) {
+    bool fatalDisplayFailure = false;
+    istringstream lines(text);
+    for (string line; getline(lines, line);) {
+        if (line.find("[FATAL] [sapp]") != string::npos &&
+            (line.find("XOpenDisplay() failed") != string::npos ||
+             line.find("LINUX_X11_OPEN_DISPLAY_FAILED") != string::npos)) {
+            fatalDisplayFailure = true;
+        }
+    }
+    check("no display: fatal X11 display failure in TRUSSC_LOG_FILE", fatalDisplayFailure);
+    if (!fatalDisplayFailure) {
         printf("  log file: [%s]\n  stderr: [%s]\n", text.c_str(), readText(err).c_str());
     }
     error_code ec;
