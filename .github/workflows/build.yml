@@ -902,6 +902,10 @@ jobs:
         if: always()
         run: python3 tools/tests/test_daily_workflow.py -v
 
+      - name: window pixel size regression checks
+        if: always()
+        run: python3 tools/tests/test_window_pixel_size.py -v
+
       - name: build workflow cache regression checks
         if: always()
         run: python3 tools/tests/test_build_workflow_caches.py -v

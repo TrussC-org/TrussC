@@ -900,13 +900,20 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
             const float scale = ctx_.isMain ? sapp_dpi_scale() : ctx_.dpiScale;
             const float factor = std::isfinite(scale) && scale > 0 ? scale : 1.0f;
 #if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
-            if constexpr (internal::supportsSecondaryWindows()) {
+            bool useFractionalSize = internal::supportsSecondaryWindows();
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+            // Main Win32/X11 sizing is independent of secondary-window support.
+            useFractionalSize = useFractionalSize || ctx_.isMain;
+#endif
+            if (useFractionalSize) {
                 const double width = double(x) / factor, height = double(y) / factor;
                 // Bound (size API): logical extents must fit the int logical-size getters.
                 if (!std::isfinite(width) || !std::isfinite(height) ||
                     width <= 0 || height <= 0 || width > double((std::numeric_limits<int>::max)()) ||
                     height > double((std::numeric_limits<int>::max)())) return result;
-                if (!ctx_.isMain) { setSecondarySize(width, height, true); break; }
+                if constexpr (internal::supportsSecondaryWindows()) {
+                    if (!ctx_.isMain) { setSecondarySize(width, height, true); break; }
+                }
 #if defined(_WIN32)
                 internal::setWindowSizeWin32(sapp_win32_get_hwnd(), width, height); break;
 #elif defined(__linux__) && !defined(__ANDROID__)

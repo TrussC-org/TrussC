@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Host-check production Win32 PixelSize dispatch and native forwarding.
+"""Host-check production Win32 forwarding and X11 main pixel sizing.
 
-Run through tcbuild.sh. Only OS handles and the final Win32 endpoint are mocks;
-Window::control and Window::setSecondarySize are compiled from production.
+Run through tcbuild.sh. Native calls are recorded without a display or GPU;
+Window::control, Win32 forwarding, global sizing and X11 geometry use production code.
 """
 from pathlib import Path
 import os
 import subprocess
 import tempfile
+import unittest
 from test_web_window_controls import body
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -105,5 +106,31 @@ int main() {
     print('PASS: main/secondary Win32 fractional dispatch and forwarding, 125/150/175/200%')
 
 
+class WindowPixelSizeTests(unittest.TestCase):
+    def test_win32_fractional_forwarding(self):
+        main()
+
+    def test_x11_main_independent_of_secondary_support(self):
+        source = (ROOT / 'tools/tests/window_pixel_size_x11.cpp').read_text(encoding='utf-8')
+        source = source.replace('CONTROL_BODY', body(
+            (ROOT / 'core/include/tc/app/tcWindow.h').read_text(encoding='utf-8'),
+            'inline IVec2 Window::control('))
+        source = source.replace('GLOBAL_BODY', body(
+            (ROOT / 'core/include/TrussC.h').read_text(encoding='utf-8'),
+            'inline void setWindowSize('))
+        with tempfile.TemporaryDirectory(prefix='window-pixel-x11-') as scratch:
+            cpp = Path(scratch) / 'probe.cpp'
+            cpp.write_text(source, encoding='utf-8')
+            binary = Path(scratch) / 'probe'
+            for backend in ('SOKOL_GLCORE', 'SOKOL_GLES3'):
+                for secondary in (0, 1):
+                    with self.subTest(backend=backend, secondary=secondary):
+                        subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20',
+                                        '-Wall', '-Wextra', '-Werror', '-I', str(ROOT),
+                                        '-D' + backend, '-DTEST_SECONDARY=' + str(secondary),
+                                        str(cpp), '-o', str(binary)], check=True)
+                        subprocess.run([str(binary)], check=True)
+
+
 if __name__ == '__main__':
-    main()
+    unittest.main()
