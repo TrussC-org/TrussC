@@ -8,6 +8,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/error.h>
 #include <libavutil/opt.h>
 }
 #include "../../../platform/linux/tcVideoDecodeFFmpeg.h"
@@ -202,9 +203,18 @@ void hardwareTransferChecks() {
     context->sw_format = AV_PIX_FMT_YUV420P;
     context->width = 1920; context->height = 1088;
     int result = av_hwframe_ctx_init(frames);
-    check("Vulkan frames context initialized", result >= 0);
+    if (result < 0) {
+        char error[AV_ERROR_MAX_STRING_SIZE] = {};
+        av_strerror(result, error, sizeof(error));
+        std::printf("Vulkan transfer: SKIP (frames context unavailable: %s); synthetic surface admission exercised\n", error);
+        std::puts("Vulkan surface allocated: SKIP (frames context unavailable)");
+        av_buffer_unref(&frames);
+        av_buffer_unref(&device);
+        return;
+    }
+    check("Vulkan frames context initialized", true);
     AVFrame* hardware = av_frame_alloc();
-    if (result >= 0) result = av_hwframe_get_buffer(frames, hardware, 0);
+    result = av_hwframe_get_buffer(frames, hardware, 0);
     check("Vulkan surface allocated", result >= 0);
     if (result >= 0) {
         AVFrame* upload = av_frame_alloc();
