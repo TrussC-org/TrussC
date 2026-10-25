@@ -1,5 +1,6 @@
 #pragma once
 #include "tc/utils/tcOnceGate.h"
+#include "tc/sound/internal/tcAudioDecodeBudget.h"
 
 // Linux-only miniaudio backend for audio inside video containers. Included by
 // tcAudio_impl.cpp after miniaudio; never decoded on the audio callback thread.
@@ -13,6 +14,11 @@ namespace trussc::internal {
 namespace {
 struct FFmpegAudio {
     ma_data_source_base base; // miniaudio requires this first
+    AudioDecodeBudget localBudget{16384 * 2 * sizeof(float) + 65536, true};
+    AudioDecodeBudget& budget;
+    explicit FFmpegAudio(AudioDecodeBudget* owner = nullptr) : budget(owner ? *owner : localBudget) {}
+    int sourceChannels = 0, sourceRate = 0;
+    AVSampleFormat sourceFormat = AV_SAMPLE_FMT_NONE;
     AVFormatContext* format = nullptr;
     AVCodecContext* codec = nullptr;
     SwrContext* resampler = nullptr;
@@ -46,22 +52,92 @@ struct FFmpegAudio {
         avformat_close_input(&format);
     }
 
+    struct FrameAllocation { size_t bytes; };
+    // Keep the payload aligned as av_malloc returned it; the prefix is also charged.
+    static constexpr size_t framePrefixBytes = AV_INPUT_BUFFER_PADDING_SIZE;
+    static void freeFrame(void* opaque, uint8_t* data) {
+        auto& owner = *static_cast<AudioDecodeBudget*>(opaque);
+        auto* base = data - framePrefixBytes;
+        owner.live -= reinterpret_cast<FrameAllocation*>(base)->bytes;
+        av_free(base);
+    }
+    static int getFrameBuffer(AVCodecContext* ctx, AVFrame* frame, int) {
+        auto& self = *static_cast<FFmpegAudio*>(ctx->opaque);
+        if (frame->nb_samples < 0 || !self.budget.format(frame->ch_layout.nb_channels, frame->sample_rate) ||
+            (self.sourceChannels && frame->ch_layout.nb_channels != self.sourceChannels) ||
+            (self.sourceRate && frame->sample_rate != self.sourceRate)) {
+            self.budget.reject("stream format change", frame->ch_layout.nb_channels, self.sourceChannels);
+            return AVERROR(EINVAL);
+        }
+        int lineBytes = 0;
+        const int bytes = av_samples_get_buffer_size(&lineBytes, frame->ch_layout.nb_channels,
+            frame->nb_samples, AVSampleFormat(frame->format), 32);
+        if (bytes < 0 || !self.budget.admit(size_t(bytes) + framePrefixBytes, self.samples.capacity() * sizeof(float)))
+            return AVERROR(ENOMEM);
+        auto* base = static_cast<uint8_t*>(av_mallocz(size_t(bytes) + framePrefixBytes));
+        if (!base) return AVERROR(ENOMEM);
+        reinterpret_cast<FrameAllocation*>(base)->bytes = size_t(bytes) + framePrefixBytes;
+        self.budget.live += size_t(bytes) + framePrefixBytes;
+        auto* data = base + framePrefixBytes;
+        frame->buf[0] = av_buffer_create(data, bytes, freeFrame, &self.budget, 0);
+        if (!frame->buf[0]) { freeFrame(&self.budget, data); return AVERROR(ENOMEM); }
+        const int planes = av_sample_fmt_is_planar(AVSampleFormat(frame->format)) ? frame->ch_layout.nb_channels : 1;
+        if (planes > AV_NUM_DATA_POINTERS) {
+            // At most 32 pointers; accounted by the fixed decoder overhead.
+            frame->extended_data = static_cast<uint8_t**>(av_calloc(planes, sizeof(uint8_t*)));
+            if (!frame->extended_data) return AVERROR(ENOMEM);
+        } else frame->extended_data = frame->data;
+        frame->linesize[0] = lineBytes;
+        for (int i = 0; i < planes; ++i) {
+            frame->extended_data[i] = data + size_t(i) * lineBytes;
+            if (i < AV_NUM_DATA_POINTERS) frame->data[i] = frame->extended_data[i];
+        }
+        return 0;
+    }
+
     ma_result open(const char* path) {
-        if (avformat_open_input(&format, path, nullptr, nullptr) < 0 ||
-            avformat_find_stream_info(format, nullptr) < 0) return MA_INVALID_FILE;
+        format = avformat_alloc_context();
+        if (!format) return MA_OUT_OF_MEMORY;
+        // Bound (security): probing uses a resident window independent of track duration. Overflow returns a decoder error; working-budget rejection is counted.
+        format->probesize = std::min<int64_t>(format->probesize, int64_t(budget.limit() / 4));
+        // Bound (cache): seek indexes use a resident window independent of track duration. Overflow evicts or replaces.
+        format->max_index_size = std::min<unsigned>(format->max_index_size, unsigned(budget.limit() / 4));
+        if (avformat_open_input(&format, path, nullptr, nullptr) < 0) return MA_INVALID_FILE;
+        const int candidate = av_find_best_stream(format, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+        if (candidate >= 0) {
+            const auto* parameters = format->streams[candidate]->codecpar;
+            if (!budget.format(parameters->ch_layout.nb_channels ? parameters->ch_layout.nb_channels : 1,
+                               parameters->sample_rate ? parameters->sample_rate : 1)) return MA_INVALID_DATA;
+        }
+        if (avformat_find_stream_info(format, nullptr) < 0) return MA_INVALID_FILE;
         stream = av_find_best_stream(format, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
         if (stream < 0) return MA_INVALID_FILE;
         AVStream* st = format->streams[stream];
+        // Zero in container metadata means unknown; the bounded codec open
+        // can resolve it. Validate every known field before asking the codec.
+        if (!budget.format(st->codecpar->ch_layout.nb_channels ? st->codecpar->ch_layout.nb_channels : 1,
+                           st->codecpar->sample_rate ? st->codecpar->sample_rate : 1)) return MA_INVALID_DATA;
         const AVCodec* decoder = avcodec_find_decoder(st->codecpar->codec_id);
         if (!decoder) return MA_NOT_IMPLEMENTED;
         codec = avcodec_alloc_context3(decoder);
         frame = av_frame_alloc();
         packet = av_packet_alloc();
         if (!codec || !frame || !packet) return MA_OUT_OF_MEMORY;
-        if (avcodec_parameters_to_context(codec, st->codecpar) < 0 ||
-            avcodec_open2(codec, decoder, nullptr) < 0) return MA_INVALID_FILE;
+        if (avcodec_parameters_to_context(codec, st->codecpar) < 0) return MA_INVALID_FILE;
+        codec->opaque = this;
+        codec->get_buffer2 = getFrameBuffer;
+        // Bound (security): codec frame size and worker count must stay within a per-stream working set. Overflow returns a decoder error; frame-budget rejection is counted.
+        codec->thread_count = 1;
+        codec->max_samples = int64_t(budget.limit() / sizeof(double) /
+            std::max(1, codec->ch_layout.nb_channels));
+        if (avcodec_open2(codec, decoder, nullptr) < 0) return MA_INVALID_FILE;
+        sourceFormat = codec->sample_fmt;
         rate = codec->sample_rate;
-        if (rate <= 0) return MA_INVALID_FILE;
+        if (!budget.format(codec->ch_layout.nb_channels, rate)) return MA_INVALID_FILE;
+        // The codec may refine container metadata (e.g. AAC output rate).
+        // Changes after this negotiated format are rejected during reads.
+        sourceChannels = codec->ch_layout.nb_channels;
+        sourceRate = rate;
         AVChannelLayout stereo = AV_CHANNEL_LAYOUT_STEREO;
         if (swr_alloc_set_opts2(&resampler, &stereo, AV_SAMPLE_FMT_FLT, rate,
                 &codec->ch_layout, codec->sample_fmt, rate, 0, nullptr) < 0 ||
@@ -77,6 +153,51 @@ struct FFmpegAudio {
         return MA_SUCCESS;
     }
 
+    // A decoder can reference its input packet instead of using get_buffer2.
+    // Charge those observable SDK buffers too, once per backing buffer/span.
+    bool frameWorkingBytes(size_t& bytes) {
+        bytes = 0;
+        if (frame->nb_extended_buf < 0 || frame->nb_extended_buf > int(audioChannelLimit) ||
+            (frame->nb_extended_buf && !frame->extended_buf))
+            return budget.reject("stream audio frame buffers", frame->nb_extended_buf, audioChannelLimit);
+        struct Span { const AVBuffer* buffer; uintptr_t first, last; };
+        Span spans[AV_NUM_DATA_POINTERS + audioChannelLimit]{};
+        size_t spanCount = 0;
+        auto add = [&](AVBufferRef* ref) {
+            if (!ref || av_buffer_get_opaque(ref) == &budget) return true;
+            const uintptr_t first = reinterpret_cast<uintptr_t>(ref->data);
+            const size_t size = size_t(ref->size);
+            if (size > budget.limit() || size > UINTPTR_MAX - first)
+                return budget.reject("stream audio buffer bytes", size, budget.limit());
+            size_t index = 0;
+            while (index < spanCount && spans[index].buffer != ref->buffer) ++index;
+            if (index == spanCount) spans[spanCount++] = {ref->buffer, first, first};
+            auto& span = spans[index];
+            span.first = std::min(span.first, first);
+            span.last = std::max(span.last, first + size);
+            return true;
+        };
+        for (auto* ref : frame->buf) if (!add(ref)) return false;
+        for (int i = 0; i < frame->nb_extended_buf; ++i) if (!add(frame->extended_buf[i])) return false;
+        for (size_t i = 0; i < spanCount; ++i) {
+            const uintptr_t span = spans[i].last - spans[i].first;
+            if (span > budget.limit() - bytes) return budget.reject("stream audio buffer bytes", span, budget.limit());
+            bytes += size_t(span);
+        }
+        return true;
+    }
+
+    bool prepareSamples(int capacity, bool withFrame = true) {
+        if (capacity < 0 || uint64_t(capacity) > budget.limit() / (2 * sizeof(float)))
+            return budget.reject("stream resampler frames", capacity, budget.limit() / (2 * sizeof(float)));
+        size_t sourceBytes = 0;
+        if (withFrame && !frameWorkingBytes(sourceBytes)) return false;
+        const size_t resampleBytes = size_t(capacity) * 2 * sizeof(float);
+        if (!growAudioVector(samples, size_t(capacity) * 2, budget, resampleBytes + sourceBytes)) return false;
+        samples.resize(size_t(capacity) * 2);
+        return true;
+    }
+
     // Return one bounded decoded frame, draining both codec and resampler at EOF.
     ma_result fill() {
         samples.clear();
@@ -86,10 +207,16 @@ struct FFmpegAudio {
             int r = avcodec_receive_frame(codec, frame);
             if (r == 0 || r == AVERROR_EOF) {
                 const bool flush = r == AVERROR_EOF;
+                if (!flush && sourceFormat == AV_SAMPLE_FMT_NONE) sourceFormat = AVSampleFormat(frame->format);
+                if (!flush && (!budget.format(frame->ch_layout.nb_channels, frame->sample_rate) ||
+                        frame->ch_layout.nb_channels != sourceChannels || frame->sample_rate != sourceRate ||
+                        frame->format != sourceFormat || frame->nb_samples < 0)) {
+                    budget.reject("stream format change", frame->ch_layout.nb_channels, sourceChannels);
+                    return MA_INVALID_DATA;
+                }
                 int count = flush ? 0 : frame->nb_samples;
                 int capacity = swr_get_out_samples(resampler, count);
-                if (capacity < 0) return MA_ERROR;
-                samples.resize(static_cast<size_t>(capacity) * 2);
+                if (!prepareSamples(capacity, !flush)) return MA_OUT_OF_MEMORY;
                 uint8_t* out[] = {reinterpret_cast<uint8_t*>(samples.data())};
                 int n = swr_convert(resampler, out, capacity,
                     flush ? nullptr : const_cast<const uint8_t**>(frame->extended_data), count);
@@ -128,6 +255,10 @@ struct FFmpegAudio {
                         if (r != AVERROR_EOF) return MA_IO_ERROR;
                         demuxEnd = true;
                         break;
+                    }
+                    if (packet->size < 0 || !budget.admit(size_t(packet->size), samples.capacity() * sizeof(float))) {
+                        av_packet_unref(packet);
+                        return MA_OUT_OF_MEMORY;
                     }
                     if (packet->stream_index == stream) { pending = true; break; }
                     av_packet_unref(packet);
@@ -221,10 +352,12 @@ ma_result ffCursor(ma_data_source* s, ma_uint64* value) { *value = static_cast<F
 ma_result ffLength(ma_data_source* s, ma_uint64* value) { *value = static_cast<FFmpegAudio*>(s)->length; return MA_SUCCESS; }
 const ma_data_source_vtable ffSourceVTable = {ffRead, ffSeek, ffFormat, ffCursor, ffLength, nullptr, 0};
 ma_result ffInitFile(void*, const char* path, const ma_decoding_backend_config*,
-                     const ma_allocation_callbacks*, ma_data_source** out) {
+                     const ma_allocation_callbacks* callbacks, ma_data_source** out) {
     *out = nullptr;
     try {
-        auto s = std::make_unique<FFmpegAudio>();
+        auto* budget = callbacks && callbacks->onMalloc == AudioDecodeBudget::allocate
+            ? static_cast<AudioDecodeBudget*>(callbacks->pUserData) : nullptr;
+        auto s = std::make_unique<FFmpegAudio>(budget);
         ma_result r = s->open(path);
         if (r != MA_SUCCESS) return r;
         ma_data_source_config config = ma_data_source_config_init();

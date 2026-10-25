@@ -1,4 +1,5 @@
 #include "tcxOscMessage.h"
+#include "tcxOscPreflight.h"
 #include <sstream>
 
 namespace tcx::osc {
@@ -129,7 +130,8 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok, boo
     paddingMissing = false;
     OscMessage msg;
 
-    if (!data || size < 4) return msg;
+    PacketPreflight preflight;
+    if (!preflight.scan(data, size)) return msg;
 
     // pos <= size holds throughout, and each size check subtracts from size
     // instead of adding to pos, so none of them can wrap when size_t is 32
@@ -171,50 +173,50 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok, boo
     for (size_t index = 0; index < msg.typeTags_.size(); ++index) {
         switch (msg.typeTags_[index]) {
             case 'i':
-                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the message.
+                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the whole packet; the receiver counts rejected datagrams.
                 if (4 > size - pos) return msg;
                 msg.storeArg<int32_t>(index, static_cast<int32_t>(readBe32(data + pos)));
                 pos += 4;
                 break;
             case 'f':
-                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the message.
+                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the whole packet; the receiver counts rejected datagrams.
                 if (4 > size - pos) return msg;
                 msg.storeArg<float>(index, uint32ToFloat(readBe32(data + pos)));
                 pos += 4;
                 break;
             case 'c':
-                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the message.
+                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the whole packet; the receiver counts rejected datagrams.
                 if (4 > size - pos) return msg;
                 // ASCII character in the low byte of 32 bits
                 msg.storeArg<char>(index, static_cast<char>(readBe32(data + pos) & 0xFF));
                 pos += 4;
                 break;
             case 'r':
-                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the message.
+                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the whole packet; the receiver counts rejected datagrams.
                 if (4 > size - pos) return msg;
                 msg.storeArg<OscRgba>(index, OscRgba{ data[pos], data[pos + 1], data[pos + 2], data[pos + 3] });
                 pos += 4;
                 break;
             case 'm':
-                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the message.
+                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the whole packet; the receiver counts rejected datagrams.
                 if (4 > size - pos) return msg;
                 msg.storeArg<OscMidi>(index, OscMidi{ data[pos], data[pos + 1], data[pos + 2], data[pos + 3] });
                 pos += 4;
                 break;
             case 'h':
-                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the message.
+                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the whole packet; the receiver counts rejected datagrams.
                 if (8 > size - pos) return msg;
                 msg.storeArg<int64_t>(index, static_cast<int64_t>(readBe64(data + pos)));
                 pos += 8;
                 break;
             case 'd':
-                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the message.
+                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the whole packet; the receiver counts rejected datagrams.
                 if (8 > size - pos) return msg;
                 msg.storeArg<double>(index, uint64ToDouble(readBe64(data + pos)));
                 pos += 8;
                 break;
             case 't':
-                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the message.
+                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the whole packet; the receiver counts rejected datagrams.
                 if (8 > size - pos) return msg;
                 msg.storeArg<OscTimetag>(index, OscTimetag{ readBe64(data + pos) });
                 pos += 8;
@@ -228,12 +230,12 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok, boo
                 break;
             }
             case 'b': {
-                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the message.
+                // Bound (security): untrusted argument data must stay within the received packet. Overflow rejects the whole packet; the receiver counts rejected datagrams.
                 if (4 > size - pos) return msg;
                 uint32_t blobSize = readBe32(data + pos);
                 pos += 4;
                 // The blob must fit in the data left
-                // Bound (security): untrusted blob lengths must stay within the packet to bound allocation by received data. Overflow rejects the message.
+                // Bound (security): untrusted blob lengths must stay within the packet to bound allocation by received data. Overflow rejects the whole packet; the receiver counts rejected datagrams.
                 if (blobSize > size - pos) return msg;
                 msg.storeArg<std::vector<uint8_t>>(index, data + pos, data + pos + blobSize);
                 pos = skipPadding(pos + blobSize, size, paddingMissing);

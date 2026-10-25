@@ -21,6 +21,10 @@ If you only need plain **HTTP**, you can use `httplib::Client` directly from `<i
 | **Linux** | `sudo apt install libcurl4-openssl-dev` | |
 | **Windows** | **自動ダウンロード** | CMake の FetchContent で curl をソースからビルド（Schannel 使用） |
 
+On Windows the bundled libcurl is built HTTP(S)-only; other platforms use the system libcurl with its own protocol set.
+
+Windows同梱のlibcurlはHTTP(S)専用で、他のプラットフォームはシステムのlibcurlが対応するプロトコルを使用します。
+
 ### Windows での動作
 
 Windows では `find_package(CURL)` が失敗した場合、CMake が自動的に libcurl（バージョンは [docs/LICENSE.md](../../docs/LICENSE.md#third-party-libraries)）をダウンロードしてスタティックライブラリとしてビルドします。TLS には Windows ネイティブの **Schannel** を使用するため、OpenSSL のインストールは不要です。
@@ -106,6 +110,8 @@ auto res = http.get("/api/status");
 | `postRaw(path, body, contentType)` | POST with raw body |
 | `del(path)` | DELETE request |
 | `uploadFile(path, filePath)` | Multipart file upload |
+| `setResponseLimit(bytes)` | Set per-client response limit (default 64 MiB) |
+| `setFollowRedirects(follow)` | Follow redirects by default; `false` returns the 3xx response |
 | `setBearerToken(token)` | Set Bearer authentication |
 | `addHeader(key, value)` | Add custom header |
 | `clearHeaders()` | Remove all custom headers |
@@ -121,3 +127,60 @@ auto res = http.get("/api/status");
 | `error` | Error message (empty on success) |
 | `ok()` | `true` if status is 2xx |
 | `json()` | Parse body as JSON |
+
+### Response limits
+
+`setResponseLimit(size_t bytes)` sets a per-client limit, default **64 MiB
+(67,108,864 bytes)**. It covers the whole request, including intermediate
+redirect bodies and upload replies, and counts decoded bytes. Wire bytes are
+independently limited to the same value. The bound exists because a server
+controls the response size. Exceeding it fails the whole response:
+`statusCode` is 0, `body` is empty and `error` is set. The first body-limit loss
+logs one Warning shared across clients; subsequent losses still fail.
+Passing 0 preserves the previous limit and logs a once-only Warning shared
+across clients.
+
+Storage grows only with what arrives. Peak initialized payload is about the
+response size on desktop and about twice on Android. Desktop allocated/reserved
+capacity can temporarily approach twice the response size during final copying;
+these figures exclude backend networking allocations and allocator retention.
+There is no stream-to-file API yet. The setter has no effect on the Web stub;
+Android multipart upload remains unsupported.
+
+レスポンス上限はクライアントごとに既定64 MiBです。超過時は全体が失敗し、Webのスタブには影響しません。
+
+### Redirects
+
+Redirects are followed by default on every backend (**v0.8 change**).
+Call `setFollowRedirects(false)` to receive the 3xx itself. The Web backend
+remains a stub. At most **5 redirects** are followed, with targets limited to
+`http` and `https` and no `https` to `http` downgrade.
+
+When the origin changes (scheme, host, port or IPv6 zone), these credential
+headers are omitted for the remaining hops of that request: `Authorization`,
+`Proxy-Authorization`, `X-Api-Key`, `Api-Key`, `X-Auth-Token`, `Cookie`.
+
+v0.8からリダイレクトを既定で追跡します。`setFollowRedirects(false)`で3xxを受け取れます。
+
+### Request headers
+
+Header names are trimmed of surrounding ASCII whitespace and must be valid
+HTTP field names. Values must not contain CR, LF or NUL. An invalid header
+fails the request with `response.error` set, `statusCode` 0 and an empty body;
+nothing is sent. Names and values share one Warning per client, logged on its
+first invalid-header request. This also applies to `setBearerToken()` and the
+Content-Type argument sent with a request body. The Web client remains a stub.
+
+ヘッダー名は前後の空白を除去して検証します。不正な名前やCR・LF・NULを含む値は送信前に失敗します。
+
+### JSON responses
+
+`response.json()` parses within **16 MiB input, depth 64 and 1,000,000 nodes
+(including keys)**, plus an internal **128 MiB working budget** that can reject
+input below those individual limits. Budget rejection returns an empty object
+and logs a Warning only on the first JSON-budget loss, shared across clients.
+Empty or invalid JSON also returns an empty object; it does not log a budget
+Warning unless a budget was exceeded. Parsing does not change the response's
+status, body or error.
+
+JSON解析の上限超過時は空のオブジェクトを返し、最初の超過時のみWarningを記録します。

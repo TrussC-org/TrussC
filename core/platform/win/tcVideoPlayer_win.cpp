@@ -103,6 +103,8 @@ private:
 };
 
 struct VideoPlayerState {
+    std::shared_ptr<internal::VideoDecodeBudget> budget_ = std::make_shared<internal::VideoDecodeBudget>();
+    size_t fixedBytes_ = 0;
     internal::VideoNotifyQueue notifications;
     internal::VideoErrorQueue playbackErrors_;
     bool mfInitialized = false;
@@ -180,6 +182,7 @@ public:
     // Event handler (called by the main-thread queue drain)
     void onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2);
 
+    std::shared_ptr<internal::VideoDecodeBudget> budget() const { return state_->budget_; }
     int getWidth() const { return state_->width_; }
     int getHeight() const { return state_->height_; }
 
@@ -375,7 +378,20 @@ bool TCVideoPlayerImpl::createMediaEngine(const std::string& path) {
 }
 
 bool TCVideoPlayerImpl::createRenderTexture() {
-    if (state_->width_ <= 0 || state_->height_ <= 0) return false;
+    size_t bytes = 0;
+    if (!internal::VideoDecodeLimits::rgba(state_->width_, state_->height_, bytes)) {
+        state_->budget_->reject(bytes, internal::VideoDecodeLimits::frameBytes);
+        state_->budget_->warn(); return false;
+    }
+    if (state_->fixedBytes_) { state_->budget_->release(state_->fixedBytes_); state_->fixedBytes_ = 0; }
+    const size_t fixedBytes = bytes * 2; // backend mirror and public mirror
+    if (!state_->budget_->acquire(fixedBytes)) {
+        state_->budget_->reject(fixedBytes, internal::VideoDecodeLimits::workingBytes); return false;
+    }
+    state_->fixedBytes_ = fixedBytes;
+    state_->renderTexture_.Reset();
+    state_->stagingTexture_.Reset();
+    std::vector<unsigned char>().swap(state_->pixels_);
 
     // Create render target texture
     D3D11_TEXTURE2D_DESC desc = {};
@@ -407,7 +423,10 @@ bool TCVideoPlayerImpl::createRenderTexture() {
     }
 
     // Allocate pixel buffer
-    state_->pixels_.assign((size_t)state_->width_ * state_->height_ * 4, 0);
+    try { state_->pixels_.assign(bytes, 0); }
+    catch (const std::bad_alloc&) {
+        state_->budget_->reject(bytes, internal::VideoDecodeLimits::workingBytes); return false;
+    }
 
     return true;
 }
@@ -421,6 +440,14 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
         return false;
     }
 
+    DWORD actualWidth = 0, actualHeight = 0;
+    size_t actualBytes = 0;
+    if (FAILED(state_->mediaEngine_->GetNativeVideoSize(&actualWidth, &actualHeight)) ||
+        !internal::VideoDecodeLimits::rgba(actualWidth, actualHeight, actualBytes)) {
+        state_->budget_->reject(actualBytes, internal::VideoDecodeLimits::frameBytes);
+        state_->playbackErrors_.report("Video frame dimensions exceed decode limits", E_INVALIDARG);
+        return false;
+    }
     // Transfer frame to our texture
     MFARGB bgColor = {0, 0, 0, 0};
     MFVideoNormalizedRect srcRect = {0.0f, 0.0f, 1.0f, 1.0f};
@@ -446,6 +473,13 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
     D3D11_MAPPED_SUBRESOURCE mapped;
     hr = state_->d3dContext_->Map(state_->stagingTexture_.Get(), 0, D3D11_MAP_READ, 0, &mapped);
     if (SUCCEEDED(hr)) {
+        if (!mapped.pData || !internal::VideoDecodeLimits::rows(size_t(state_->width_), size_t(state_->height_),
+                mapped.RowPitch, internal::VideoDecodeLimits::frameBytes)) {
+            state_->budget_->reject(mapped.RowPitch, internal::VideoDecodeLimits::frameBytes);
+            state_->d3dContext_->Unmap(state_->stagingTexture_.Get(), 0);
+            state_->playbackErrors_.report("Video frame stride exceeds decode limits", E_INVALIDARG);
+            return false;
+        }
         // Copy row by row (handle pitch/stride)
         unsigned char* src = static_cast<unsigned char*>(mapped.pData);
         unsigned char* dst = state_->pixels_.data();
@@ -494,12 +528,20 @@ bool TCVideoPlayerImpl::loadMediaInfo(const std::string& path) {
     // half the real rate in MF_MT_FRAME_RATE, while IMFSample::GetSampleDuration
     // is correct there. Only the frame-index APIs (getFrameRate, frame
     // stepping) are affected; playback is paced by MediaEngine.
-    if (SUCCEEDED(reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-                                            0, &videoType)) &&
-        SUCCEEDED(MFGetAttributeRatio(videoType.Get(), MF_MT_FRAME_RATE,
-                                      &numerator, &denominator)) &&
-        numerator > 0 && denominator > 0) {
-        state_->frameRate_ = static_cast<float>(numerator) / denominator;
+    UINT32 metadataWidth = 0, metadataHeight = 0;
+    size_t metadataBytes = 0;
+    // Some MediaEngine sources expose metadata only after loading. Admit
+    // known dimensions here; the engine's output boundary checks them again.
+    if (SUCCEEDED(reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &videoType))) {
+        if (SUCCEEDED(MFGetAttributeSize(videoType.Get(), MF_MT_FRAME_SIZE, &metadataWidth, &metadataHeight)) &&
+            (metadataWidth > internal::VideoDecodeLimits::axis || metadataHeight > internal::VideoDecodeLimits::axis ||
+             (metadataWidth && metadataHeight && !internal::VideoDecodeLimits::rgba(metadataWidth, metadataHeight, metadataBytes)))) {
+            state_->budget_->reject(metadataBytes, internal::VideoDecodeLimits::frameBytes);
+            return false;
+        }
+        if (SUCCEEDED(MFGetAttributeRatio(videoType.Get(), MF_MT_FRAME_RATE, &numerator, &denominator)) &&
+            numerator > 0 && denominator > 0)
+            state_->frameRate_ = static_cast<float>(numerator) / denominator;
     }
 
     // Get native audio media type
@@ -537,14 +579,15 @@ bool TCVideoPlayerImpl::loadMediaInfo(const std::string& path) {
 }
 
 std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
-    if (!state_->hasAudio_ || state_->mediaPath_.empty()) {
+    const auto state = state_;
+    if (!state->hasAudio_ || state->mediaPath_.empty()) {
         return {};
     }
 
     // Use IMFSourceReader to read raw audio data (passthrough, no decoding)
-    int wideLen = MultiByteToWideChar(CP_UTF8, 0, state_->mediaPath_.c_str(), -1, nullptr, 0);
+    int wideLen = MultiByteToWideChar(CP_UTF8, 0, state->mediaPath_.c_str(), -1, nullptr, 0);
     std::wstring widePath(wideLen, 0);
-    MultiByteToWideChar(CP_UTF8, 0, state_->mediaPath_.c_str(), -1, &widePath[0], wideLen);
+    MultiByteToWideChar(CP_UTF8, 0, state->mediaPath_.c_str(), -1, &widePath[0], wideLen);
 
     // Create attributes to disable format conversion (passthrough mode)
     ComPtr<IMFAttributes> attrs;
@@ -563,46 +606,60 @@ std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
 
     // Check if AAC (MFAudioFormat_AAC Data1 = 0x1610)
     // Also check for 'mp4a' FourCC which we store
-    bool isAAC = (state_->audioCodec_ == 0x1610 ||      // WAVE_FORMAT_MPEG_HEAAC
-                  state_->audioCodec_ == 0x6D703461 ||  // 'mp4a'
-                  state_->audioCodec_ == 0x61616320);   // 'aac '
+    bool isAAC = (state->audioCodec_ == 0x1610 ||      // WAVE_FORMAT_MPEG_HEAAC
+                  state->audioCodec_ == 0x6D703461 ||  // 'mp4a'
+                  state->audioCodec_ == 0x61616320);   // 'aac '
 
-    logNotice("VideoPlayer") << "Extracting audio: codec=0x" << std::hex << state_->audioCodec_
+    logNotice("VideoPlayer") << "Extracting audio: codec=0x" << std::hex << state->audioCodec_
                              << " isAAC=" << isAAC << std::dec;
 
     // Read all audio samples
     std::vector<uint8_t> audioData;
-    audioData.reserve(state_->audioSampleRate_ * state_->audioChannels_ * 2 * 10); // Reserve for ~10 sec
+    internal::VideoAudioStorage storage(audioData, *state->budget_);
+    struct Warning { internal::VideoDecodeBudget& budget; ~Warning() { budget.warn(); } } warning{*state->budget_};
 
     while (true) {
         ComPtr<IMFSample> sample;
         DWORD flags = 0;
 
         hr = reader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, nullptr, &flags, nullptr, &sample);
-        if (FAILED(hr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) {
-            break;
-        }
+        if (FAILED(hr)) return {};
+        if (flags & MF_SOURCE_READERF_ENDOFSTREAM) break;
 
         if (!sample) continue;
 
+        DWORD sampleBytes = 0;
+        const size_t headerBytes = isAAC ? 7 : 0;
+        if (FAILED(sample->GetTotalLength(&sampleBytes)) ||
+            sampleBytes > internal::VideoDecodeLimits::inputBytes - audioData.size() ||
+            headerBytes > internal::VideoDecodeLimits::inputBytes - audioData.size() - sampleBytes ||
+            (isAAC && sampleBytes > internal::VideoDecodeLimits::adtsPayloadBytes)) {
+            state->budget_->reject(sampleBytes, internal::VideoDecodeLimits::inputBytes);
+            return {};
+        }
         ComPtr<IMFMediaBuffer> buffer;
         hr = sample->ConvertToContiguousBuffer(&buffer);
-        if (FAILED(hr)) continue;
+        if (FAILED(hr)) return {};
 
         BYTE* data = nullptr;
         DWORD length = 0;
         hr = buffer->Lock(&data, nullptr, &length);
         if (SUCCEEDED(hr)) {
+            if (length != sampleBytes) { buffer->Unlock(); return {}; }
             if (isAAC) {
                 // AAC: add ADTS header for each frame
                 uint8_t adtsHeader[7];
                 SoundBuffer::createAdtsHeader(adtsHeader, static_cast<int>(length),
-                                               state_->audioSampleRate_, state_->audioChannels_);
-                audioData.insert(audioData.end(), adtsHeader, adtsHeader + 7);
+                                               state->audioSampleRate_, state->audioChannels_);
+                if (!storage.append(adtsHeader, 7)) {
+                    buffer->Unlock(); return {};
+                }
             }
-            audioData.insert(audioData.end(), data, data + length);
+            if (length != sampleBytes || !storage.append(data, length)) {
+                buffer->Unlock(); return {};
+            }
             buffer->Unlock();
-        }
+        } else { return {}; }
     }
 
     logNotice("VideoPlayer") << "Extracted " << audioData.size() << " bytes of audio data";
@@ -622,6 +679,9 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
         return false;
     }
 
+    loadMediaInfo(path);
+    if (state_->budget_->rejected() != 0) return false;
+
     if (!createMediaEngine(path)) {
         return false;
     }
@@ -630,7 +690,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     // In production, this should be async with callbacks
     // Bound (platform): metadata readiness waits at most 5 s (steady clock). Overflow fails load() and logs one Error.
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (!state_->isReady_ && std::chrono::steady_clock::now() < deadline) {
+    while (!state_->isReady_ && state_->budget_->rejected() == 0 && std::chrono::steady_clock::now() < deadline) {
         Sleep(10);
 
         drainNotifications();
@@ -643,13 +703,11 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
         }
     }
 
-    if (!state_->isReady_) {
+    if (!state_->isReady_ || state_->pixels_.empty()) {
         logError("VideoPlayer") << "Timeout waiting for video to load";
         return false;
     }
 
-    // Load video frame rate and audio track info
-    loadMediaInfo(path);
 
     state_->isLoaded_ = true;
     return true;
@@ -657,6 +715,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
 
 void TCVideoPlayerImpl::close() {
     if (!state_) return;
+    if (state_->fixedBytes_) { state_->budget_->release(state_->fixedBytes_); state_->fixedBytes_ = 0; }
     state_->notifications.close();
 
     if (state_->mediaEngine_) {
@@ -838,18 +897,28 @@ void TCVideoPlayerImpl::onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2
         case MF_MEDIA_ENGINE_EVENT_LOADEDMETADATA: {
             // Get video dimensions
             DWORD w, h;
-            if (SUCCEEDED(state_->mediaEngine_->GetNativeVideoSize(&w, &h))) {
-                state_->width_ = static_cast<int>(w);
-                state_->height_ = static_cast<int>(h);
+            size_t bytes = 0;
+            if (SUCCEEDED(state_->mediaEngine_->GetNativeVideoSize(&w, &h)) &&
+                internal::VideoDecodeLimits::rgba(w, h, bytes)) {
+                if (state_->pixels_.empty()) {
+                    state_->width_ = static_cast<int>(w);
+                    state_->height_ = static_cast<int>(h);
+                }
                 logNotice("VideoPlayer") << "Video size: " << state_->width_ << "x" << state_->height_;
             }
 
+            else {
+                state_->budget_->reject(bytes, internal::VideoDecodeLimits::frameBytes);
+                state_->budget_->warn();
+                state_->playbackErrors_.report("Video metadata exceeds decode limits", E_INVALIDARG);
+                break;
+            }
             // Get duration
             state_->duration_ = static_cast<float>(state_->mediaEngine_->GetDuration());
             logNotice("VideoPlayer") << "Duration: " << state_->duration_ << " sec";
 
             // Create render texture
-            createRenderTexture();
+            if (state_->pixels_.empty()) createRenderTexture();
             break;
         }
 
@@ -886,6 +955,7 @@ namespace trussc {
 
 bool VideoPlayer::loadPlatform(const fs::path& path) {
     auto impl = new TCVideoPlayerImpl();
+    decodeBudget_ = impl->budget();
 
     // Impl-side strings are UTF-8 (converted to wide via CP_UTF8 internally)
     if (!impl->load(internal::pathToUtf8(path), this)) {
@@ -899,8 +969,9 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
 
     // Allocate pixel buffer
     if (width_ > 0 && height_ > 0) {
-        pixels_ = new unsigned char[width_ * height_ * 4];
-        std::memset(pixels_, 0, width_ * height_ * 4);
+        pixels_ = new (std::nothrow) unsigned char[size_t(width_) * height_ * 4];
+        if (!pixels_) { closePlatform(); return false; }
+        std::memset(pixels_, 0, size_t(width_) * height_ * 4);
     }
 
     return true;
@@ -1088,12 +1159,16 @@ std::string VideoPlayer::getHwAccelNamePlatform() const {
 // that time. When false we return the first sample after the seek — the nearest
 // keyframe at or before timeSec — which is faster but time-approximate.
 static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
-                                  float timeSec, float* outDuration, bool exact) {
+                                  float timeSec, float* outDuration, bool exact,
+                                  std::shared_ptr<internal::VideoDecodeBudget> budget) {
+    if (!budget) budget = std::make_shared<internal::VideoDecodeBudget>();
+    struct Warning { internal::VideoDecodeBudget& budget; ~Warning() { budget.warn(); } } warning{*budget};
     if (!InitMediaFoundation()) {
         return false;
     }
 
     bool ok = false;
+    Pixels decoded;
     {
         int wideLen = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
         std::wstring widePath(wideLen, 0);
@@ -1116,6 +1191,18 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
         if (SUCCEEDED(hr)) {
             reader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE);
             hr = reader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE);
+        }
+
+        if (SUCCEEDED(hr)) {
+            ComPtr<IMFMediaType> nativeType;
+            UINT32 nativeWidth = 0, nativeHeight = 0;
+            size_t bytes = 0;
+            if (SUCCEEDED(reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &nativeType)) &&
+                SUCCEEDED(MFGetAttributeSize(nativeType.Get(), MF_MT_FRAME_SIZE, &nativeWidth, &nativeHeight)) &&
+                (nativeWidth > internal::VideoDecodeLimits::axis || nativeHeight > internal::VideoDecodeLimits::axis ||
+                 (nativeWidth && nativeHeight && !internal::VideoDecodeLimits::rgba(nativeWidth, nativeHeight, bytes)))) {
+                budget->reject(bytes, internal::VideoDecodeLimits::frameBytes); hr = E_INVALIDARG;
+            }
         }
 
         // Ask for uncompressed RGB32 (BGRA in memory).
@@ -1165,6 +1252,15 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
         const LONGLONG targetTicks = (LONGLONG)(timeSec * 10000000.0);
         ComPtr<IMFSample> sample;
         while (SUCCEEDED(hr)) {
+            ComPtr<IMFMediaType> frameType;
+            UINT32 frameWidth = 0, frameHeight = 0;
+            size_t frameBytes = 0;
+            if (SUCCEEDED(reader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &frameType)) &&
+                SUCCEEDED(MFGetAttributeSize(frameType.Get(), MF_MT_FRAME_SIZE, &frameWidth, &frameHeight)) &&
+                (frameWidth > internal::VideoDecodeLimits::axis || frameHeight > internal::VideoDecodeLimits::axis ||
+                 (frameWidth && frameHeight && !internal::VideoDecodeLimits::rgba(frameWidth, frameHeight, frameBytes)))) {
+                budget->reject(frameBytes, internal::VideoDecodeLimits::frameBytes); hr = E_INVALIDARG; break;
+            }
             DWORD flags = 0;
             LONGLONG llTimestamp = 0;
             ComPtr<IMFSample> s;
@@ -1196,67 +1292,91 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
                 if (SUCCEEDED(curType->GetUINT32(MF_MT_DEFAULT_STRIDE, &mfStride))) {
                     stride = (LONG)(INT32)mfStride;  // negative => bottom-up
                 } else {
-                    stride = (LONG)width * 4;
+                    if (width <= internal::VideoDecodeLimits::axis) stride = LONG(width * 4);
+                    else { budget->reject(width, internal::VideoDecodeLimits::axis); hr = E_INVALIDARG; }
                 }
             }
         }
 
+        size_t outputBytes = 0;
+        if (SUCCEEDED(hr) && sample && !internal::VideoDecodeLimits::rgba(width, height, outputBytes)) {
+            budget->reject(outputBytes, internal::VideoDecodeLimits::frameBytes); hr = E_INVALIDARG;
+        }
         if (SUCCEEDED(hr) && sample && width > 0 && height > 0) {
+            DWORD sampleBytes = 0;
+            if (FAILED(sample->GetTotalLength(&sampleBytes)) || sampleBytes > internal::VideoDecodeLimits::frameBytes) {
+                budget->reject(sampleBytes, internal::VideoDecodeLimits::frameBytes); hr = E_INVALIDARG;
+            }
             ComPtr<IMFMediaBuffer> buffer;
-            hr = sample->ConvertToContiguousBuffer(&buffer);
+            if (SUCCEEDED(hr)) hr = sample->ConvertToContiguousBuffer(&buffer);
             if (SUCCEEDED(hr)) {
                 BYTE* data = nullptr;
                 DWORD length = 0;
                 hr = buffer->Lock(&data, nullptr, &length);
                 if (SUCCEEDED(hr)) {
-                    LONG absStride = stride < 0 ? -stride : stride;
-                    outPixels.allocate((int)width, (int)height, 4);
-                    unsigned char* dst = outPixels.getData();
-                    int rowBytes = (int)width * 4;
-
-                    for (UINT32 y = 0; y < height; y++) {
-                        // Negative stride means the image is stored bottom-up.
-                        UINT32 srcRow = stride < 0 ? (height - 1 - y) : y;
-                        const BYTE* src = data + (size_t)srcRow * absStride;
-                        // BGRA to RGBA conversion
-                        for (UINT32 x = 0; x < width; x++) {
-                            int srcIdx = x * 4;
-                            int dstIdx = x * 4;
-                            dst[dstIdx + 0] = src[srcIdx + 2]; // R <- B
-                            dst[dstIdx + 1] = src[srcIdx + 1]; // G <- G
-                            dst[dstIdx + 2] = src[srcIdx + 0]; // B <- R
-                            // RGB32 from the source reader is BGRX: the 4th byte
-                            // is undefined padding, not alpha. Force opaque so the
-                            // extracted frame isn't fully transparent.
-                            dst[dstIdx + 3] = 255;             // A = opaque
+                    const size_t absStride = size_t(stride < 0 ? -int64_t(stride) : int64_t(stride));
+                    if (!data || length > internal::VideoDecodeLimits::frameBytes || !internal::VideoDecodeLimits::rows(width, height, absStride, length)) {
+                        budget->reject(length, internal::VideoDecodeLimits::frameBytes);
+                        buffer->Unlock();
+                    } else {
+                        try { decoded.allocate((int)width, (int)height, 4); }
+                        catch (const std::bad_alloc&) {
+                            budget->reject(outputBytes, internal::VideoDecodeLimits::workingBytes);
+                            decoded.clear();
                         }
-                        dst += rowBytes;
-                    }
+                        if (decoded.getData()) {
+                        unsigned char* dst = decoded.getData();
+                        int rowBytes = (int)width * 4;
 
-                    buffer->Unlock();
-                    ok = true;
+                        for (UINT32 y = 0; y < height; y++) {
+                            // Negative stride means the image is stored bottom-up.
+                            UINT32 srcRow = stride < 0 ? (height - 1 - y) : y;
+                            const BYTE* src = data + (size_t)srcRow * absStride;
+                            // BGRA to RGBA conversion
+                            for (UINT32 x = 0; x < width; x++) {
+                                int srcIdx = x * 4;
+                                int dstIdx = x * 4;
+                                dst[dstIdx + 0] = src[srcIdx + 2]; // R <- B
+                                dst[dstIdx + 1] = src[srcIdx + 1]; // G <- G
+                                dst[dstIdx + 2] = src[srcIdx + 0]; // B <- R
+                                // RGB32 from the source reader is BGRX: the 4th byte
+                                // is undefined padding, not alpha. Force opaque so the
+                                // extracted frame isn't fully transparent.
+                                dst[dstIdx + 3] = 255;             // A = opaque
+                            }
+                            dst += rowBytes;
+                        }
+
+                        buffer->Unlock();
+                        ok = true;
+                        } else { buffer->Unlock(); }
+                    }
                 }
             }
         }
     }
 
     CloseMediaFoundation();
+    if (ok) outPixels = std::move(decoded);
     return ok;
 }
 
 bool VideoPlayer::extractFramePlatform(const fs::path& path, Pixels& outPixels,
-                                       float timeSec, float* outDuration) {
-    return tcv_extract_frame_win(internal::pathToUtf8(path), outPixels, timeSec, outDuration, /*exact=*/true);
+                                       float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeBudget> budget) {
+    return tcv_extract_frame_win(internal::pathToUtf8(path), outPixels, timeSec, outDuration, /*exact=*/true, budget);
 }
 
 bool VideoPlayer::extractKeyFramePlatform(const fs::path& path, Pixels& outPixels,
-                                          float timeSec, float* outDuration) {
+                                          float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeBudget> budget) {
+    if (!budget) budget = std::make_shared<internal::VideoDecodeBudget>();
+    const uint64_t previousRejections = budget->rejected();
     std::string p = internal::pathToUtf8(path);
-    if (tcv_extract_frame_win(p, outPixels, timeSec, outDuration, /*exact=*/false)) {
+    if (tcv_extract_frame_win(p, outPixels, timeSec, outDuration, /*exact=*/false, budget)) {
         return true;
     }
     // No keyframe reachable — fall back to an exact decode.
-    return tcv_extract_frame_win(p, outPixels, timeSec, outDuration, /*exact=*/true);
+    if (budget->rejected() != previousRejections) return false;
+    return tcv_extract_frame_win(p, outPixels, timeSec, outDuration, /*exact=*/true, budget);
 }
 
 } // namespace trussc

@@ -120,55 +120,67 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["setUniform"] = sol::overload([](trussc::FullscreenShader& self, int slot, float value) { return self.setUniform(slot, value); }, [](trussc::FullscreenShader& self, int slot, const trussc::Vec2 & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const trussc::Vec3 & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const trussc::Vec4 & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const trussc::Color & c) { return self.setUniform(slot, c); }, [](trussc::FullscreenShader& self, int slot, const std::vector<float> & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const std::vector<trussc::Vec2> & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const std::vector<trussc::Vec3> & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const std::vector<trussc::Vec4> & v) { return self.setUniform(slot, v); });
     }
     {
-        sol::usertype<trussc::HasTexture> t = lua->new_usertype<trussc::HasTexture>("HasTexture");
-        t["draw"] = sol::overload([](trussc::HasTexture& self, float x, float y) { return self.draw(x, y); }, [](trussc::HasTexture& self, float x, float y, float w, float h) { return self.draw(x, y, w, h); });
-        t["getMagFilter"] = &trussc::HasTexture::getMagFilter;
-        t["getMinFilter"] = &trussc::HasTexture::getMinFilter;
-        t["getTexture"] = [](trussc::HasTexture& self) -> decltype(auto) { return self.getTexture(); };
-        t["getWrapU"] = &trussc::HasTexture::getWrapU;
-        t["getWrapV"] = &trussc::HasTexture::getWrapV;
-        t["hasTexture"] = &trussc::HasTexture::hasTexture;
-        t["save"] = &trussc::HasTexture::save;
-        t["setFilter"] = &trussc::HasTexture::setFilter;
-        t["setMagFilter"] = &trussc::HasTexture::setMagFilter;
-        t["setMinFilter"] = &trussc::HasTexture::setMinFilter;
-        t["setWrap"] = &trussc::HasTexture::setWrap;
-        t["setWrapU"] = &trussc::HasTexture::setWrapU;
-        t["setWrapV"] = &trussc::HasTexture::setWrapV;
+        auto constructors = tcxLuaConstructors<trussc::IVec3
+            , trussc::IVec3()
+            , trussc::IVec3(int, int, int)
+            , trussc::IVec3(int)
+            , trussc::IVec3(const trussc::IVec2 &)
+            , trussc::IVec3(const trussc::IVec2 &, int)
+        >();
+        sol::usertype<trussc::IVec3> t = lua->new_usertype<trussc::IVec3>("IVec3", constructors, sol::call_constructor, constructors);
+        t[sol::meta_function::multiplication] = [](const trussc::IVec3& a, int b){ return a * b; };
+        t[sol::meta_function::addition] = [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a + b; };
+        t[sol::meta_function::subtraction] = [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a - b; };
+        t[sol::meta_function::unary_minus] = [](const trussc::IVec3& a){ return -a; };
+        t[sol::meta_function::equal_to] = [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a == b; };
+        t["x"] = &trussc::IVec3::x;
+        t["y"] = &trussc::IVec3::y;
+        t["z"] = &trussc::IVec3::z;
+        t["toVec3"] = &trussc::IVec3::toVec3;
+        t["xy"] = &trussc::IVec3::xy;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::IVec2
-            , trussc::IVec2()
-            , trussc::IVec2(int, int)
-            , trussc::IVec2(int)
+        auto constructors = tcxLuaConstructors<trussc::Logger
+            , trussc::Logger()
         >();
-        sol::usertype<trussc::IVec2> t = lua->new_usertype<trussc::IVec2>("IVec2", constructors, sol::call_constructor, constructors);
-        t[sol::meta_function::multiplication] = [](const trussc::IVec2& a, int b){ return a * b; };
-        t[sol::meta_function::addition] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a + b; };
-        t[sol::meta_function::subtraction] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a - b; };
-        t[sol::meta_function::unary_minus] = [](const trussc::IVec2& a){ return -a; };
-        t[sol::meta_function::equal_to] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a == b; };
-        t["x"] = &trussc::IVec2::x;
-        t["y"] = &trussc::IVec2::y;
-        t["toVec2"] = &trussc::IVec2::toVec2;
+        sol::usertype<trussc::Logger> t = lua->new_usertype<trussc::Logger>("Logger", constructors, sol::call_constructor, constructors);
+        t["onLog"] = &trussc::Logger::onLog;
+        t["closeFile"] = &trussc::Logger::closeFile;
+        t["getConsoleLogLevel"] = &trussc::Logger::getConsoleLogLevel;
+        t["getFileLogLevel"] = &trussc::Logger::getFileLogLevel;
+        t["getLogFilePath"] = &trussc::Logger::getLogFilePath;
+        t["getSystemLogLevel"] = &trussc::Logger::getSystemLogLevel;
+        t["isFileOpen"] = &trussc::Logger::isFileOpen;
+        t["log"] = &trussc::Logger::log;
+        t["setConsoleLogLevel"] = &trussc::Logger::setConsoleLogLevel;
+        t["setFileLogLevel"] = &trussc::Logger::setFileLogLevel;
+        t["setLogFile"] = &trussc::Logger::setLogFile;
+        t["setLogLevel"] = &trussc::Logger::setLogLevel;
+        t["setSystemLogLevel"] = &trussc::Logger::setSystemLogLevel;
     }
-    lua->new_usertype<trussc::Orientation>("Orientation",
-        sol::meta_function::equal_to, [](trussc::Orientation a, trussc::Orientation b){ return a == b; },
-        "Portrait", sol::var(trussc::Orientation::Portrait),
-        "PortraitUpsideDown", sol::var(trussc::Orientation::PortraitUpsideDown),
-        "LandscapeLeft", sol::var(trussc::Orientation::LandscapeLeft),
-        "LandscapeRight", sol::var(trussc::Orientation::LandscapeRight),
-        "Landscape", sol::var(trussc::Orientation::Landscape),
-        "All", sol::var(trussc::Orientation::All),
-        "AllButUpsideDown", sol::var(trussc::Orientation::AllButUpsideDown));
-    lua->new_usertype<trussc::SendError>("SendError",
-        sol::meta_function::equal_to, [](trussc::SendError a, trussc::SendError b){ return a == b; },
-        "None", sol::var(trussc::SendError::None),
-        "ClientNotFound", sol::var(trussc::SendError::ClientNotFound),
-        "Disconnected", sol::var(trussc::SendError::Disconnected),
-        "Timeout", sol::var(trussc::SendError::Timeout),
-        "QueueFull", sol::var(trussc::SendError::QueueFull),
-        "NotRunning", sol::var(trussc::SendError::NotRunning));
+    {
+        sol::usertype<trussc::Platform> t = lua->new_usertype<trussc::Platform>("Platform");
+        t["isAndroid"] = &trussc::Platform::isAndroid;
+        t["isApple"] = &trussc::Platform::isApple;
+        t["isDesktop"] = &trussc::Platform::isDesktop;
+        t["isIOS"] = &trussc::Platform::isIOS;
+        t["isLinux"] = &trussc::Platform::isLinux;
+        t["isMacOS"] = &trussc::Platform::isMacOS;
+        t["isMobile"] = &trussc::Platform::isMobile;
+        t["isWeb"] = &trussc::Platform::isWeb;
+        t["isWindows"] = &trussc::Platform::isWindows;
+        t["name"] = &trussc::Platform::name;
+    }
+    {
+        sol::usertype<trussc::GraphicsBackend> t = lua->new_usertype<trussc::GraphicsBackend>("GraphicsBackend");
+        t["isD3D11"] = &trussc::GraphicsBackend::isD3D11;
+        t["isMetal"] = &trussc::GraphicsBackend::isMetal;
+        t["isOpenGL"] = &trussc::GraphicsBackend::isOpenGL;
+        t["isVulkan"] = &trussc::GraphicsBackend::isVulkan;
+        t["isWebGL2"] = &trussc::GraphicsBackend::isWebGL2;
+        t["isWebGPU"] = &trussc::GraphicsBackend::isWebGPU;
+        t["name"] = &trussc::GraphicsBackend::name;
+    }
     lua->new_usertype<trussc::SaveError>("SaveError",
         sol::meta_function::equal_to, [](trussc::SaveError a, trussc::SaveError b){ return a == b; },
         "None", sol::var(trussc::SaveError::None),
@@ -187,16 +199,14 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         sol::meta_function::equal_to, [](trussc::CurveStyle::Mode a, trussc::CurveStyle::Mode b){ return a == b; },
         "Tolerance", sol::var(trussc::CurveStyle::Mode::Tolerance),
         "Resolution", sol::var(trussc::CurveStyle::Mode::Resolution));
+    lua->new_usertype<trussc::AudioBackend>("AudioBackend",
+        sol::meta_function::equal_to, [](trussc::AudioBackend a, trussc::AudioBackend b){ return a == b; },
+        "Default", sol::var(trussc::AudioBackend::Default),
+        "Null", sol::var(trussc::AudioBackend::Null));
     {
-        sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
-        t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
-    }
-    {
-        sol::usertype<trussc::SendResult> t = lua->new_usertype<trussc::SendResult>("SendResult");
-        t["error"] = &trussc::SendResult::error;
-        t["id"] = &trussc::SendResult::id;
-        t["ok"] = &trussc::SendResult::ok;
+        sol::usertype<trussc::MicStartResult> t = lua->new_usertype<trussc::MicStartResult>("MicStartResult");
+        t["message"] = &trussc::MicStartResult::message;
+        t["success"] = &trussc::MicStartResult::success;
     }
     {
         sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");

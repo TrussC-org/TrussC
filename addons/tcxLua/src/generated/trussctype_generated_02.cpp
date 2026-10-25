@@ -121,29 +121,35 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
     }
 #endif
     {
-        auto constructors = tcxLuaConstructors<trussc::FileWriter
-            , trussc::FileWriter()
-        >();
-        sol::usertype<trussc::FileWriter> t = lua->new_usertype<trussc::FileWriter>("FileWriter", constructors, sol::call_constructor, constructors);
-        t["close"] = &trussc::FileWriter::close;
-        t["flush"] = &trussc::FileWriter::flush;
-        t["isOpen"] = &trussc::FileWriter::isOpen;
-        t["open"] = sol::overload([](trussc::FileWriter& self, const fs::path & path) { return self.open(path); }, [](trussc::FileWriter& self, const fs::path & path, bool append) { return self.open(path, append); });
-        t["write"] = sol::overload([](trussc::FileWriter& self, const std::string & text) -> decltype(auto) { return self.write(text); }, [](trussc::FileWriter& self, char c) -> decltype(auto) { return self.write(c); });
-        t["writeLine"] = sol::overload([](trussc::FileWriter& self) -> decltype(auto) { return self.writeLine(); }, [](trussc::FileWriter& self, const std::string & text) -> decltype(auto) { return self.writeLine(text); });
+        sol::usertype<trussc::AudioStats> t = lua->new_usertype<trussc::AudioStats>("AudioStats");
+        t["clippedSamples"] = &trussc::AudioStats::clippedSamples;
+        t["cpuUsage"] = &trussc::AudioStats::cpuUsage;
+        t["cpuUsagePeak"] = &trussc::AudioStats::cpuUsagePeak;
+        t["droppedDecoderError"] = &trussc::AudioStats::droppedDecoderError;
+        t["droppedNotRunning"] = &trussc::AudioStats::droppedNotRunning;
+        t["droppedPlays"] = &trussc::AudioStats::droppedPlays;
+        t["droppedPolyphonyLimit"] = &trussc::AudioStats::droppedPolyphonyLimit;
+        t["droppedStreamLimit"] = &trussc::AudioStats::droppedStreamLimit;
+        t["initFailure"] = &trussc::AudioStats::initFailure;
+        t["initFailureResult"] = &trussc::AudioStats::initFailureResult;
+        t["peak"] = &trussc::AudioStats::peak;
+        t["rms"] = &trussc::AudioStats::rms;
+        t["stalled"] = &trussc::AudioStats::stalled;
+        t["underrunFrames"] = &trussc::AudioStats::underrunFrames;
+        t["voicesStoppedByReinit"] = &trussc::AudioStats::voicesStoppedByReinit;
     }
     {
-        sol::usertype<trussc::JsonWriteReflector> t = lua->new_usertype<trussc::JsonWriteReflector>("JsonWriteReflector");
-        t["derived"] = &trussc::JsonWriteReflector::derived;
-        t["includeDerived"] = &trussc::JsonWriteReflector::includeDerived;
-        t["members"] = &trussc::JsonWriteReflector::members;
-        t["endGroup"] = &trussc::JsonWriteReflector::endGroup;
-        t["isDerived"] = &trussc::JsonWriteReflector::isDerived;
-        t["isReadOnly"] = &trussc::JsonWriteReflector::isReadOnly;
-        t["popDerived"] = &trussc::JsonWriteReflector::popDerived;
-        t["popReadOnly"] = &trussc::JsonWriteReflector::popReadOnly;
-        t["pushDerived"] = &trussc::JsonWriteReflector::pushDerived;
-        t["pushReadOnly"] = &trussc::JsonWriteReflector::pushReadOnly;
+        auto constructors = tcxLuaConstructors<trussc::SoundStream
+            , trussc::SoundStream()
+        >();
+        sol::usertype<trussc::SoundStream> t = lua->new_usertype<trussc::SoundStream>("SoundStream", constructors, sol::call_constructor, constructors);
+        t["channels"] = &trussc::SoundStream::channels;
+        t["sampleRate"] = &trussc::SoundStream::sampleRate;
+        t["getDuration"] = &trussc::SoundStream::getDuration;
+        t["getMaxPolyphony"] = &trussc::SoundStream::getMaxPolyphony;
+        t["getPath"] = &trussc::SoundStream::getPath;
+        t["kind"] = &trussc::SoundStream::kind;
+        t["loadStream"] = sol::overload([](trussc::SoundStream& self, const fs::path & path) { return self.loadStream(path); }, [](trussc::SoundStream& self, const fs::path & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
     }
     {
         sol::usertype<trussc::ScrollEventArgs> t = lua->new_usertype<trussc::ScrollEventArgs>("ScrollEventArgs");
@@ -160,37 +166,39 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         t["syncLegacy"] = &trussc::ScrollEventArgs::syncLegacy;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::LogEventArgs
-            , trussc::LogEventArgs(trussc::LogLevel, const std::string &)
-        >();
-        sol::usertype<trussc::LogEventArgs> t = lua->new_usertype<trussc::LogEventArgs>("LogEventArgs", constructors, sol::call_constructor, constructors);
-        t["level"] = &trussc::LogEventArgs::level;
-        t["message"] = &trussc::LogEventArgs::message;
-        t["timestamp"] = &trussc::LogEventArgs::timestamp;
+        sol::usertype<trussc::LoadResult> t = lua->new_usertype<trussc::LoadResult>("LoadResult");
+        t["error"] = &trussc::LoadResult::error;
+        t["message"] = &trussc::LoadResult::message;
+        t["ok"] = &trussc::LoadResult::ok;
+        t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
+        t["success"] = &trussc::LoadResult::success;
     }
-    lua->new_usertype<trussc::StrokeMesh::JoinType>("StrokeMeshJoinType",
-        sol::meta_function::equal_to, [](trussc::StrokeMesh::JoinType a, trussc::StrokeMesh::JoinType b){ return a == b; },
-        "JOIN_MITER", sol::var(trussc::StrokeMesh::JoinType::JOIN_MITER),
-        "JOIN_ROUND", sol::var(trussc::StrokeMesh::JoinType::JOIN_ROUND),
-        "JOIN_BEVEL", sol::var(trussc::StrokeMesh::JoinType::JOIN_BEVEL));
+    lua->new_usertype<trussc::TextureUsage>("TextureUsage",
+        sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
+        "Immutable", sol::var(trussc::TextureUsage::Immutable),
+        "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
+        "Stream", sol::var(trussc::TextureUsage::Stream),
+        "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget));
     lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
         sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
         "Off", sol::var(trussc::KinsokuLevel::Off),
         "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
         "Standard", sol::var(trussc::KinsokuLevel::Standard));
-    lua->new_usertype<trussc::LightType>("LightType",
-        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
-        "Directional", sol::var(trussc::LightType::Directional),
-        "Point", sol::var(trussc::LightType::Point),
-        "Spot", sol::var(trussc::LightType::Spot));
-    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
-        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
-        "U8", sol::var(trussc::PixelFormat::U8),
-        "F32", sol::var(trussc::PixelFormat::F32));
+    lua->new_usertype<trussc::StrokeJoin>("StrokeJoin",
+        sol::meta_function::equal_to, [](trussc::StrokeJoin a, trussc::StrokeJoin b){ return a == b; },
+        "Miter", sol::var(trussc::StrokeJoin::Miter),
+        "Round", sol::var(trussc::StrokeJoin::Round),
+        "Bevel", sol::var(trussc::StrokeJoin::Bevel));
     {
-        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
-        t["message"] = &trussc::TcpConnectEventArgs::message;
-        t["success"] = &trussc::TcpConnectEventArgs::success;
+        sol::usertype<trussc::CurveStyle> t = lua->new_usertype<trussc::CurveStyle>("CurveStyle");
+        t["mode"] = &trussc::CurveStyle::mode;
+        t["resolution"] = &trussc::CurveStyle::resolution;
+        t["tolerance"] = &trussc::CurveStyle::tolerance;
+    }
+    {
+        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
+        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
+        t["setFps"] = &trussc::HeadlessSettings::setFps;
     }
 }
 #ifdef _MSC_VER

@@ -325,12 +325,6 @@ namespace internal {
     // Defined in tcGlobal.cpp: app code sets it, the host's event callback reads it.
     bool& touchAsMouse();
 
-    // Touch event listeners (must persist to keep subscriptions alive).
-    // Host-only, so a per-module copy is fine: installed by the launcher.
-    inline EventListener touchPressedListener;
-    inline EventListener touchMovedListener;
-    inline EventListener touchReleasedListener;
-
     // Delta time / frame-rate state lives in WindowContext (per window).
 
     // Frame count (number of update calls). Host-only, so a per-module copy is
@@ -1153,7 +1147,7 @@ inline void setCircleResolution(int res) {
 
 [[deprecated("Use getCurveResolution() instead. Will be removed in v1.0.0")]]
 inline int getCircleResolution() {
-    return getDefaultContext().getCircleResolution();
+    return getCurveResolution();
 }
 
 // Check fill/stroke state
@@ -1667,7 +1661,12 @@ inline void setWindowSize(int width, int height) {
     if (internal::pixelPerfectMode()) {
         // Pixel perfect mode: convert framebuffer size to logical size
         float scale = sapp_dpi_scale();
+#if defined(_WIN32)
+        // Preserve fractional logical pixels until the native DPI conversion.
+        internal::setWindowSizeWin32(sapp_win32_get_hwnd(), double(width) / scale, double(height) / scale);
+#else
         setWindowSizeLogical(static_cast<int>(width / scale), static_cast<int>(height / scale));
+#endif
     } else {
         // Logical coordinate mode: as is
         setWindowSizeLogical(width, height);
@@ -2441,15 +2440,7 @@ namespace internal {
     inline void (*appUpdateFunc)() = nullptr;
     inline void (*appDrawFunc)() = nullptr;
     inline void (*appCleanupFunc)() = nullptr;
-    inline void (*appKeyPressedFunc)(const KeyEventArgs&) = nullptr;
-    inline void (*appKeyReleasedFunc)(const KeyEventArgs&) = nullptr;
-    inline void (*appMousePressedFunc)(const MouseEventArgs&) = nullptr;
-    inline void (*appMouseReleasedFunc)(const MouseEventArgs&) = nullptr;
-    inline void (*appMouseMovedFunc)(const internal::MouseEventRaw&) = nullptr;
-    inline void (*appMouseDraggedFunc)(const internal::MouseEventRaw&) = nullptr;
-    inline void (*appMouseScrolledFunc)(const ScrollEventArgs&) = nullptr;
     inline void (*appWindowResizedFunc)(int, int) = nullptr;
-    inline void (*appFilesDroppedFunc)(const std::vector<std::string>&) = nullptr;
 } // namespace internal
 
 // Defined in tc/sound/tcSound.h (included later in this header); declared here
@@ -2460,7 +2451,10 @@ namespace internal { void pumpAudioDiagnostics(); }
 // Defined in tcBaseApp.h (included later in this header); declared here so
 // the launcher's cleanup below can detach the App's audio hooks (#256).
 class App;
-namespace internal { inline void detachAppAudio(App& app); }
+namespace internal {
+inline void detachAppAudio(App& app);
+template<class GetApp> void registerAppEventListeners(GetApp getApp);
+}
 
 namespace internal {
 
@@ -2967,7 +2961,6 @@ namespace internal {
             args.super = hasModSuper;
             args.syncLegacy();
             events().mouseReleased.notify(args);
-            if (appMouseReleasedFunc) appMouseReleasedFunc(args);
         };
 
         for (int button = SAPP_MOUSEBUTTON_LEFT; button <= SAPP_MOUSEBUTTON_MIDDLE; ++button) {
@@ -2992,16 +2985,13 @@ namespace internal {
                 args.ctrl = hasModCtrl;
                 args.alt = hasModAlt;
                 args.super = hasModSuper;
-                events().keyPressed.notify(args);
-
                 // Track key state (only on first press, not auto-repeat)
                 if (!ev->key_repeat) {
                     internal::currentWindowContext().keysPressed.insert(ev->key_code);
                 }
 
-                // Forward to App / Node tree. Fire on auto-repeat too
-                // (args.isRepeat lets handlers filter if they don't want it).
-                if (appKeyPressedFunc) appKeyPressedFunc(args);
+                events().keyPressed.notify(args); // auto-repeat is delivered too
+
                 break;
             }
             case SAPP_EVENTTYPE_KEY_UP: {
@@ -3012,12 +3002,9 @@ namespace internal {
                 args.ctrl = hasModCtrl;
                 args.alt = hasModAlt;
                 args.super = hasModSuper;
-                events().keyReleased.notify(args);
-
                 // Track key state
                 internal::currentWindowContext().keysPressed.erase(ev->key_code);
-
-                if (appKeyReleasedFunc) appKeyReleasedFunc(args);
+                events().keyReleased.notify(args);
                 break;
             }
             case SAPP_EVENTTYPE_MOUSE_DOWN: {
@@ -3038,8 +3025,6 @@ namespace internal {
                 args.super = hasModSuper;
                 args.syncLegacy();
                 events().mousePressed.notify(args);
-
-                if (appMousePressedFunc) appMousePressedFunc(args);
                 break;
             }
             case SAPP_EVENTTYPE_MOUSE_UP: {
@@ -3068,15 +3053,9 @@ namespace internal {
                     args.button = currentMouseButton;
                     MouseDragEventArgs dragArgs = internal::toDragArgs(args);
                     events().mouseDragged.notify(dragArgs);
-                    // The public typed arg carries `consumed`; copy it back to the
-                    // raw carrier so handleMouseDragged can gate the tree dispatch.
-                    args.consumed = dragArgs.consumed;
-                    if (appMouseDraggedFunc) appMouseDraggedFunc(args);
                 } else {
                     MouseMoveEventArgs moveArgs = internal::toMoveArgs(args);
                     events().mouseMoved.notify(moveArgs);
-                    args.consumed = moveArgs.consumed;
-                    if (appMouseMovedFunc) appMouseMovedFunc(args);
                 }
                 break;
             }
@@ -3090,8 +3069,6 @@ namespace internal {
                 args.super = hasModSuper;
                 args.syncLegacy();
                 events().mouseScrolled.notify(args);
-
-                if (appMouseScrolledFunc) appMouseScrolledFunc(args);
                 break;
             }
             // Touch events (Android/iOS)
@@ -3157,7 +3134,6 @@ namespace internal {
                     margs.button = MOUSE_BUTTON_LEFT;
                     margs.syncLegacy();
                     events().mousePressed.notify(margs);
-                    if (appMousePressedFunc) appMousePressedFunc(margs);
                 } else if (action.kind == internal::TouchMouseAction::Kind::Drag) {
                     float prevX = internal::currentWindowContext().mouseX, prevY = internal::currentWindowContext().mouseY;
                     ctx.mouseX = ctx.lastPointerX = tx; ctx.mouseY = ctx.lastPointerY = ty;
@@ -3168,8 +3144,6 @@ namespace internal {
                     margs.button = MOUSE_BUTTON_LEFT;
                     MouseDragEventArgs dragArgs = internal::toDragArgs(margs);
                     events().mouseDragged.notify(dragArgs);
-                    margs.consumed = dragArgs.consumed;
-                    if (appMouseDraggedFunc) appMouseDraggedFunc(margs);
                 } else if (action.kind == internal::TouchMouseAction::Kind::Release) {
                     ctx.pressedMouseButtons &= ~mouseButtonBit(SAPP_MOUSEBUTTON_LEFT);
                     currentMouseButton = -1;
@@ -3182,7 +3156,6 @@ namespace internal {
                     margs.button = MOUSE_BUTTON_LEFT;
                     margs.syncLegacy();
                     events().mouseReleased.notify(margs);
-                    if (appMouseReleasedFunc) appMouseReleasedFunc(margs);
                 }
                 break;
             }
@@ -3199,8 +3172,6 @@ namespace internal {
                 args.width = w;
                 args.height = h;
                 events().windowResized.notify(args);
-
-                if (appWindowResizedFunc) appWindowResizedFunc(w, h);
                 break;
             }
             case SAPP_EVENTTYPE_FILES_DROPPED: {
@@ -3212,8 +3183,6 @@ namespace internal {
                     args.files.push_back(sapp_get_dropped_file_path(i));
                 }
                 events().filesDropped.notify(args);
-
-                if (appFilesDroppedFunc) appFilesDroppedFunc(args.files);
                 break;
             }
             case SAPP_EVENTTYPE_CLIPBOARD_PASTED: {
@@ -3294,18 +3263,13 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     internal::appUpdateFunc = []() {
         internal::updateFrameCount++;  // Update frame count
         events().update.notify();
-        if (app) {
-            app->handleUpdate(internal::currentWindowContext().mouseX, internal::currentWindowContext().mouseY);
-        }
     };
     internal::appDrawFunc = []() {
         events().draw.notify();
-        if (app) app->handleDraw();
     };
     internal::appCleanupFunc = []() {
         if (app) {
             events().exit.notify();
-            app->exit();
             // close() requests made so far (e.g. from exit()) land here,
             // before the main App's cleanup().
             internal::closeRequestedWindowsAtShutdown();
@@ -3316,48 +3280,13 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
             app->cleanup();
             app.reset();
         }
+        internal::mainWindowContext().appEventListeners.clear();
     };
-    // NOTE: events().xxx.notify() is already called in the sokol event handler
-    // above (with full modifier info). These legacy callbacks only forward to
-    // the App subclass methods — do NOT re-notify events here.
-    internal::appKeyPressedFunc = [](const KeyEventArgs& e) {
-        if (app) app->handleKeyPressed(e);
-    };
-    internal::appKeyReleasedFunc = [](const KeyEventArgs& e) {
-        if (app) app->handleKeyReleased(e);
-    };
-    internal::appMousePressedFunc = [](const MouseEventArgs& e) {
-        if (app) app->handleMousePressed(e);
-    };
-    internal::appMouseReleasedFunc = [](const MouseEventArgs& e) {
-        if (app) app->handleMouseReleased(e);
-    };
-    internal::appMouseMovedFunc = [](const internal::MouseEventRaw& e) {
-        if (app) app->handleMouseMoved(e);
-    };
-    internal::appMouseDraggedFunc = [](const internal::MouseEventRaw& e) {
-        if (app) app->handleMouseDragged(e);
-    };
-    internal::appMouseScrolledFunc = [](const ScrollEventArgs& e) {
-        if (app) app->handleMouseScrolled(e);
-    };
+    // Startup resize is an App-only seed, separate from the event path.
     internal::appWindowResizedFunc = [](int w, int h) {
         if (app) app->handleWindowResized(w, h);
     };
-    internal::appFilesDroppedFunc = [](const std::vector<std::string>& files) {
-        if (app) app->filesDropped(files);
-    };
-
-    // Touch events — delivered via events() system, forwarded to App virtual methods
-    internal::touchPressedListener = events().touchPressed.listen([](TouchEventArgs& args) {
-        if (app) app->touchPressed(args);
-    });
-    internal::touchMovedListener = events().touchMoved.listen([](TouchEventArgs& args) {
-        if (app) app->touchMoved(args);
-    });
-    internal::touchReleasedListener = events().touchReleased.listen([](TouchEventArgs& args) {
-        if (app) app->touchReleased(args);
-    });
+    internal::registerAppEventListeners([] { return app; });
 
     // Build sapp_desc
     sapp_desc desc = {};

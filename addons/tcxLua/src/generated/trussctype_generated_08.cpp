@@ -93,82 +93,79 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         t["xyz"] = &trussc::Vec4::xyz;
     }
     {
-        sol::usertype<trussc::AudioStats> t = lua->new_usertype<trussc::AudioStats>("AudioStats");
-        t["clippedSamples"] = &trussc::AudioStats::clippedSamples;
-        t["cpuUsage"] = &trussc::AudioStats::cpuUsage;
-        t["cpuUsagePeak"] = &trussc::AudioStats::cpuUsagePeak;
-        t["droppedDecoderError"] = &trussc::AudioStats::droppedDecoderError;
-        t["droppedNotRunning"] = &trussc::AudioStats::droppedNotRunning;
-        t["droppedPlays"] = &trussc::AudioStats::droppedPlays;
-        t["droppedPolyphonyLimit"] = &trussc::AudioStats::droppedPolyphonyLimit;
-        t["droppedStreamLimit"] = &trussc::AudioStats::droppedStreamLimit;
-        t["initFailure"] = &trussc::AudioStats::initFailure;
-        t["initFailureResult"] = &trussc::AudioStats::initFailureResult;
-        t["peak"] = &trussc::AudioStats::peak;
-        t["rms"] = &trussc::AudioStats::rms;
-        t["stalled"] = &trussc::AudioStats::stalled;
-        t["underrunFrames"] = &trussc::AudioStats::underrunFrames;
-        t["voicesStoppedByReinit"] = &trussc::AudioStats::voicesStoppedByReinit;
+        sol::usertype<trussc::HasTexture> t = lua->new_usertype<trussc::HasTexture>("HasTexture");
+        t["draw"] = sol::overload([](trussc::HasTexture& self, float x, float y) { return self.draw(x, y); }, [](trussc::HasTexture& self, float x, float y, float w, float h) { return self.draw(x, y, w, h); });
+        t["getMagFilter"] = &trussc::HasTexture::getMagFilter;
+        t["getMinFilter"] = &trussc::HasTexture::getMinFilter;
+        t["getTexture"] = [](trussc::HasTexture& self) -> decltype(auto) { return self.getTexture(); };
+        t["getWrapU"] = &trussc::HasTexture::getWrapU;
+        t["getWrapV"] = &trussc::HasTexture::getWrapV;
+        t["hasTexture"] = &trussc::HasTexture::hasTexture;
+        t["save"] = &trussc::HasTexture::save;
+        t["setFilter"] = &trussc::HasTexture::setFilter;
+        t["setMagFilter"] = &trussc::HasTexture::setMagFilter;
+        t["setMinFilter"] = &trussc::HasTexture::setMinFilter;
+        t["setWrap"] = &trussc::HasTexture::setWrap;
+        t["setWrapU"] = &trussc::HasTexture::setWrapU;
+        t["setWrapV"] = &trussc::HasTexture::setWrapV;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::AudioRecorder
-            , trussc::AudioRecorder()
-        >();
-        sol::usertype<trussc::AudioRecorder> t = lua->new_usertype<trussc::AudioRecorder>("AudioRecorder", constructors, sol::call_constructor, constructors);
-        t["getDroppedFrames"] = &trussc::AudioRecorder::getDroppedFrames;
-        t["getPath"] = &trussc::AudioRecorder::getPath;
-        t["getRecordedSeconds"] = &trussc::AudioRecorder::getRecordedSeconds;
-        t["isRecording"] = &trussc::AudioRecorder::isRecording;
-        t["start"] = sol::overload([](trussc::AudioRecorder& self, const fs::path & path) { return self.start(path); }, [](trussc::AudioRecorder& self, const fs::path & path, const trussc::AudioRecordSettings & settings) { return self.start(path, settings); });
-        t["stop"] = &trussc::AudioRecorder::stop;
+        sol::usertype<trussc::ChipSoundBundle> t = lua->new_usertype<trussc::ChipSoundBundle>("ChipSoundBundle");
+        t["entries"] = &trussc::ChipSoundBundle::entries;
+        t["volume"] = &trussc::ChipSoundBundle::volume;
+        t["add"] = sol::overload([](trussc::ChipSoundBundle& self, const trussc::ChipSoundNote & note, float time) -> decltype(auto) { return self.add(note, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time) -> decltype(auto) { return self.add(wave, hz, duration, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time, float vol) -> decltype(auto) { return self.add(wave, hz, duration, time, vol); });
+        t["build"] = &trussc::ChipSoundBundle::build;
+        t["clear"] = &trussc::ChipSoundBundle::clear;
+        t["getDuration"] = &trussc::ChipSoundBundle::getDuration;
     }
-    lua->new_usertype<trussc::PrimitiveMode>("PrimitiveMode",
-        sol::meta_function::equal_to, [](trussc::PrimitiveMode a, trussc::PrimitiveMode b){ return a == b; },
-        "Triangles", sol::var(trussc::PrimitiveMode::Triangles),
-        "TriangleStrip", sol::var(trussc::PrimitiveMode::TriangleStrip),
-        "TriangleFan", sol::var(trussc::PrimitiveMode::TriangleFan),
-        "Lines", sol::var(trussc::PrimitiveMode::Lines),
-        "LineStrip", sol::var(trussc::PrimitiveMode::LineStrip),
-        "LineLoop", sol::var(trussc::PrimitiveMode::LineLoop),
-        "Points", sol::var(trussc::PrimitiveMode::Points));
+    lua->new_usertype<trussc::Orientation>("Orientation",
+        sol::meta_function::equal_to, [](trussc::Orientation a, trussc::Orientation b){ return a == b; },
+        "Portrait", sol::var(trussc::Orientation::Portrait),
+        "PortraitUpsideDown", sol::var(trussc::Orientation::PortraitUpsideDown),
+        "LandscapeLeft", sol::var(trussc::Orientation::LandscapeLeft),
+        "LandscapeRight", sol::var(trussc::Orientation::LandscapeRight),
+        "Landscape", sol::var(trussc::Orientation::Landscape),
+        "All", sol::var(trussc::Orientation::All),
+        "AllButUpsideDown", sol::var(trussc::Orientation::AllButUpsideDown));
+    lua->new_usertype<trussc::SendError>("SendError",
+        sol::meta_function::equal_to, [](trussc::SendError a, trussc::SendError b){ return a == b; },
+        "None", sol::var(trussc::SendError::None),
+        "ClientNotFound", sol::var(trussc::SendError::ClientNotFound),
+        "Disconnected", sol::var(trussc::SendError::Disconnected),
+        "Timeout", sol::var(trussc::SendError::Timeout),
+        "QueueFull", sol::var(trussc::SendError::QueueFull),
+        "NotRunning", sol::var(trussc::SendError::NotRunning));
     {
-        sol::usertype<trussc::GraphicsBackend> t = lua->new_usertype<trussc::GraphicsBackend>("GraphicsBackend");
-        t["isD3D11"] = &trussc::GraphicsBackend::isD3D11;
-        t["isMetal"] = &trussc::GraphicsBackend::isMetal;
-        t["isOpenGL"] = &trussc::GraphicsBackend::isOpenGL;
-        t["isVulkan"] = &trussc::GraphicsBackend::isVulkan;
-        t["isWebGL2"] = &trussc::GraphicsBackend::isWebGL2;
-        t["isWebGPU"] = &trussc::GraphicsBackend::isWebGPU;
-        t["name"] = &trussc::GraphicsBackend::name;
+        sol::usertype<trussc::SerialDisconnectEventArgs> t = lua->new_usertype<trussc::SerialDisconnectEventArgs>("SerialDisconnectEventArgs");
+        t["baudRate"] = &trussc::SerialDisconnectEventArgs::baudRate;
+        t["portName"] = &trussc::SerialDisconnectEventArgs::portName;
+        t["reason"] = &trussc::SerialDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::SerialDisconnectEventArgs::wasClean;
     }
-    lua->new_usertype<trussc::AudioInitFailure>("AudioInitFailure",
-        sol::meta_function::equal_to, [](trussc::AudioInitFailure a, trussc::AudioInitFailure b){ return a == b; },
-        "None", sol::var(trussc::AudioInitFailure::None),
-        "NoBackend", sol::var(trussc::AudioInitFailure::NoBackend),
-        "DeviceOpen", sol::var(trussc::AudioInitFailure::DeviceOpen),
-        "DeviceStart", sol::var(trussc::AudioInitFailure::DeviceStart));
     {
         sol::usertype<trussc::TcpServerErrorEventArgs> t = lua->new_usertype<trussc::TcpServerErrorEventArgs>("TcpServerErrorEventArgs");
         t["clientId"] = &trussc::TcpServerErrorEventArgs::clientId;
         t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
         t["message"] = &trussc::TcpServerErrorEventArgs::message;
     }
+    lua->new_usertype<trussc::LightType>("LightType",
+        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
+        "Directional", sol::var(trussc::LightType::Directional),
+        "Point", sol::var(trussc::LightType::Point),
+        "Spot", sol::var(trussc::LightType::Spot));
     {
-        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
-        t["accuracy"] = &trussc::Location::accuracy;
-        t["altitude"] = &trussc::Location::altitude;
-        t["latitude"] = &trussc::Location::latitude;
-        t["longitude"] = &trussc::Location::longitude;
+        sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
+        t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
     }
     {
-        sol::usertype<trussc::ScreenshotSaveEventArgs> t = lua->new_usertype<trussc::ScreenshotSaveEventArgs>("ScreenshotSaveEventArgs");
-        t["path"] = &trussc::ScreenshotSaveEventArgs::path;
-        t["result"] = &trussc::ScreenshotSaveEventArgs::result;
+        sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
+        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
+        t["name"] = &trussc::AudioDeviceInfo::name;
     }
     {
-        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
-        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
-        t["setFps"] = &trussc::HeadlessSettings::setFps;
+        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
+        t["text"] = &trussc::ClipboardPastedEventArgs::text;
     }
 }
 #ifdef _MSC_VER

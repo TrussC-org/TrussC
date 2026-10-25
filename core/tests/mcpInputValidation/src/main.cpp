@@ -61,6 +61,15 @@ std::set<int> keyDomain() {
         for (int key = range.first; key <= range.second; ++key) keys.insert(key);
     return keys;
 }
+struct InputApp : App {
+    void keyPressed(const KeyEventArgs&) override { ++appCalls; }
+    void keyReleased(const KeyEventArgs&) override { ++appCalls; }
+    void mousePressed(const MouseEventArgs&) override { ++appCalls; }
+    void mouseReleased(const MouseEventArgs&) override { ++appCalls; }
+    void mouseMoved(const MouseMoveEventArgs&) override { ++appCalls; }
+    void mouseDragged(const MouseDragEventArgs&) override { ++appCalls; }
+    void mouseScrolled(const ScrollEventArgs&) override { ++appCalls; }
+};
 } // namespace
 
 TC_CORE_TEST_MAIN() {
@@ -82,13 +91,9 @@ TC_CORE_TEST_MAIN() {
     listeners.push_back(events().mouseMoved.listen([](const MouseMoveEventArgs&) { ++eventCalls; }));
     listeners.push_back(events().mouseDragged.listen([](const MouseDragEventArgs&) { ++eventCalls; }));
     listeners.push_back(events().mouseScrolled.listen([](const ScrollEventArgs&) { ++eventCalls; }));
-    internal::appKeyPressedFunc = [](const KeyEventArgs&) { ++appCalls; };
-    internal::appKeyReleasedFunc = [](const KeyEventArgs&) { ++appCalls; };
-    internal::appMousePressedFunc = [](const MouseEventArgs&) { ++appCalls; };
-    internal::appMouseReleasedFunc = [](const MouseEventArgs&) { ++appCalls; };
-    internal::appMouseMovedFunc = [](const internal::MouseEventRaw&) { ++appCalls; };
-    internal::appMouseDraggedFunc = [](const internal::MouseEventRaw&) { ++appCalls; };
-    internal::appMouseScrolledFunc = [](const ScrollEventArgs&) { ++appCalls; };
+    getMainThreadId();
+    auto app = std::make_shared<InputApp>();
+    internal::registerAppEventListeners([app] { return app; });
 
     const auto domain = keyDomain();
     check("key domain contains 120 codes", domain.size() == 120);
@@ -201,5 +206,6 @@ TC_CORE_TEST_MAIN() {
     }
     check("invalid scroll input leaves callbacks and state unchanged", scrollInvalid);
     std::printf("checks=%d failures=%d\n", checks, failures);
+    internal::mainWindowContext().appEventListeners.clear();
     return failures ? 1 : 0;
 }

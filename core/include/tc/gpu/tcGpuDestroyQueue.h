@@ -30,15 +30,31 @@
 // handle guest code released went into a queue present() never drained -- a
 // GPU leak that grew each frame a guest released a temporary resource (#249).
 
+#include <vector>
+
 namespace trussc {
 namespace internal {
 
-void deferGpuDestroy(sg_buffer buf);
-void deferGpuDestroy(sg_image img);
-void deferGpuDestroy(sg_view view);
-void deferGpuDestroy(sg_sampler smp);
-void deferGpuDestroy(sg_pipeline pip);
-void deferGpuDestroy(sg_shader shd);
+// Texture owns this node before creating GPU handles. Cleanup transfers its
+// existing view arrays and links the node without allocating, including OOM.
+struct TextureRetirement {
+    sg_image image{};
+    sg_view view{}, attachment{};
+    sg_sampler sampler{};
+    std::vector<sg_view> cubeViews, mipAttachments, mipViews;
+    TextureRetirement* next = nullptr;
+    ~TextureRetirement() noexcept;
+};
+void retireTexture(TextureRetirement* storage) noexcept;
+
+// Allocation failure retains the SG-owned handle until device shutdown; never
+// destroy it while recordings may still reference it or throw from a destructor.
+void deferGpuDestroy(sg_buffer buf) noexcept;
+void deferGpuDestroy(sg_image img) noexcept;
+void deferGpuDestroy(sg_view view) noexcept;
+void deferGpuDestroy(sg_sampler smp) noexcept;
+void deferGpuDestroy(sg_pipeline pip) noexcept;
+void deferGpuDestroy(sg_shader shd) noexcept;
 
 // Retire queued handles unreferenced by CPU recordings. Called after
 // sg_commit(). Skips the sg_destroy calls entirely when sokol_gfx has

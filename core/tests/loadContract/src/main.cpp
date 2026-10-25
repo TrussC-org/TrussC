@@ -1,4 +1,5 @@
 #include <TrussC.h>
+#include "impl/tcImageDecode.h"
 #include "stb/stb_image_write.h"
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
@@ -64,21 +65,24 @@ void missingFont(Font& font) {
 }
 void imageSizeChecks() {
     const int limit = sg_query_limits().max_image_size_2d;
+    check("image decoder recorded the GPU axis limit", internal::imageDecodeAxisLimit() == limit);
     Pixels pixels;
     pixels.allocate(limit + 1, 1, 4);
     check("oversize PNG fixture", pixels.save(dataRoot / "large.png").ok());
     Pixels decoded;
-    check("Pixels accepts size above GPU limit", decoded.load("large.png").ok() && decoded.getWidth() == limit + 1);
+    check("Pixels rejects size above GPU limit before decoding", decoded.load("large.png").error == LoadError::TooLarge && !decoded.isAllocated());
     Image image;
     auto tooLarge = [&](const char* label, int width, int height, const fs::path& name, auto load) {
         ErrorCapture logs;
+        (void)width;
+        (void)height;
+        (void)name;
+        const auto before = internal::imageDecodeRejectionsForTests();
         const auto result = load();
-        const string message = "image exceeds GPU texture limit: " + to_string(limit);
-        string logged = "[Image] " + message + " (" + to_string(width) + "x" + to_string(height) + ")";
-        if (!name.empty()) logged += ": " + internal::pathToDisplayUtf8(dataRoot / name);
-        check(label, result.error == LoadError::TooLarge && result.message == message &&
+        check(label, result.error == LoadError::TooLarge &&
               !image.isAllocated() && !image.getTexture().isAllocated());
-        check(string(label) + " logs exactly one Error", logs.messages.size() == 1 && logs.messages[0] == logged);
+        check(string(label) + " counts one rejection", internal::imageDecodeRejectionsForTests() == before + 1);
+        check(string(label) + " uses first-loss reporting without repeated Errors", logs.messages.empty());
     };
     tooLarge("Image rejects width above GPU limit", limit + 1, 1, "large.png", [&] { return image.load("large.png"); });
     auto bytes = readBytes(dataRoot / "large.png");
@@ -89,6 +93,49 @@ void imageSizeChecks() {
     pixels.allocate(limit, 1, 4);
     check("boundary PNG fixture", pixels.save(dataRoot / "boundary.png").ok());
     check("Image accepts GPU boundary", image.load("boundary.png").ok() && image.getTexture().isAllocated());
+}
+void imageMipAllocationChecks() {
+    Pixels pixels;
+    pixels.allocate(8, 8, 4);
+    for (int y = 0; y < 8; ++y) for (int x = 0; x < 8; ++x)
+        pixels.setColor(x, y, Color(0.5f, 0.25f, 1.0f, 1.0f));
+    check("mip allocation PNG fixture", pixels.save(dataRoot / "mips.png").ok());
+    const auto bytes = readBytes(dataRoot / "mips.png");
+    for (bool file : {false, true}) {
+        internal::failImageDecodeAllocationAfterForTests(-1);
+        Pixels decoded;
+        if (file) decoded.load(dataRoot / "mips.png");
+        else decoded.loadFromMemory(bytes.data(), int(bytes.size()));
+        const auto decodingAllocations = internal::imageDecodeAllocationAttemptsForTests();
+        for (int level = 0; level < 3; ++level) {
+            Image image;
+            internal::failImageDecodeAllocationAfterForTests(int64_t(decodingAllocations) + level);
+            const auto before = internal::imageDecodeRejectionsForTests();
+            const auto result = file ? image.load(dataRoot / "mips.png", true) :
+                image.loadFromMemory(bytes.data(), int(bytes.size()), true);
+            check("file/memory mip OOM returns whole empty image", result.error == LoadError::Unknown &&
+                  !image.isAllocated() && !image.getPixels().isAllocated() && !image.getTexture().isAllocated() &&
+                  internal::imageDecodeRejectionsForTests() == before);
+        }
+    }
+    internal::failImageDecodeAllocationAfterForTests(-1);
+    for (int level = 0; level < 3; ++level) {
+        Image image;
+        int completions = 0;
+        auto listener = image.onLoad.listen([&](LoadResult& r) {
+            check("async main-thread mip OOM completes with empty image", r.error == LoadError::Unknown &&
+                  !image.isAllocated() && !image.getPixels().isAllocated() && !image.getTexture().isAllocated());
+            ++completions;
+        });
+        image.loadAsync(dataRoot / "mips.png", true);
+        internal::waitForResourceLoadsForTests();
+        internal::failImageDecodeAllocationAfterForTests(level);
+        internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
+        internal::failImageDecodeAllocationAfterForTests(-1);
+        check("async mip failure settles exactly once", completions == 1 && !image.isLoading());
+    }
+    Image image;
+    check("mip upload recovers after allocation failures", image.load(dataRoot / "mips.png", true).ok() && image.getTexture().isAllocated());
 }
 void cpuChecks() {
     const auto wav = makeWav();
@@ -212,6 +259,7 @@ class BrowserAacApp : public App {
         Font missing;
         missingFont(missing);
         imageSizeChecks();
+        imageMipAllocationChecks();
         writeBytes(path, toneAac, sizeof(toneAac));
         SoundBuffer sound;
         check("setup AAC load waits for PCM", sound.loadAac("setup.m4a").ok() &&
@@ -318,6 +366,7 @@ class LoadApp : public App {
         IesProfile ies;
         check("IES relative data path", ies.load("light.ies") && ies.isLoaded());
         imageSizeChecks();
+        imageMipAllocationChecks();
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
         const auto movie = fs::path(__FILE__).parent_path() /
             "../../../../addons/tcxHap/tests/bin/data/sine_twos.mov";

@@ -12,16 +12,17 @@ namespace trussc {
 
 // ---------------------------------------------------------------------------
 // CoreEvents - Framework core events
+// On events the App receives, listen() defaults to BeforeApp; other events keep 100.
 // ---------------------------------------------------------------------------
 class CoreEvents {
 public:
     // App lifecycle
     Event<void> setup;            // After setup completes
-    Event<void> update;           // Before update each frame
-    Event<void> draw;             // Before draw each frame
+    Event<void> update{EventPriority::BeforeApp};           // Before update each frame
+    Event<void> draw{EventPriority::BeforeApp};             // Before draw each frame
     Event<void> onRender;          // After sokol_gl flush, render pass still active
     Event<void> afterFrame;        // After present() (swapchain committed, outside any pass)
-    Event<void> exit;             // On app exit
+    Event<void> exit{EventPriority::BeforeApp};             // On app exit
     // Hot reload only: the host is about to unload the current guest
     // generation (its App is still alive). Fired on each reload, and when the
     // host unloads the last generation at exit (after `exit`). Code in the
@@ -38,21 +39,21 @@ public:
     Event<DeviceLostEventArgs> deviceLost;
 
     // Keyboard
-    Event<KeyEventArgs> keyPressed;
-    Event<KeyEventArgs> keyReleased;
+    Event<KeyEventArgs> keyPressed{EventPriority::BeforeApp};
+    Event<KeyEventArgs> keyReleased{EventPriority::BeforeApp};
 
     // Mouse (one struct per kind so no field is ever meaningless)
-    Event<MouseEventArgs> mousePressed;
-    Event<MouseEventArgs> mouseReleased;
-    Event<MouseMoveEventArgs> mouseMoved;
-    Event<MouseDragEventArgs> mouseDragged;
-    Event<ScrollEventArgs> mouseScrolled;
+    Event<MouseEventArgs> mousePressed{EventPriority::BeforeApp};
+    Event<MouseEventArgs> mouseReleased{EventPriority::BeforeApp};
+    Event<MouseMoveEventArgs> mouseMoved{EventPriority::BeforeApp};
+    Event<MouseDragEventArgs> mouseDragged{EventPriority::BeforeApp};
+    Event<ScrollEventArgs> mouseScrolled{EventPriority::BeforeApp};
 
     // Window
-    Event<ResizeEventArgs> windowResized;
+    Event<ResizeEventArgs> windowResized{EventPriority::BeforeApp};
 
     // Drag & drop
-    Event<DragDropEventArgs> filesDropped;
+    Event<DragDropEventArgs> filesDropped{EventPriority::BeforeApp};
 
     // Clipboard paste (Cmd+V / Ctrl+V / browser paste); args.text holds the content
     Event<ClipboardPastedEventArgs> clipboardPasted;
@@ -61,9 +62,9 @@ public:
     Event<ConsoleEventArgs> console;
 
     // Touch (multi-touch, used on Android/iOS)
-    Event<TouchEventArgs> touchPressed;
-    Event<TouchEventArgs> touchMoved;
-    Event<TouchEventArgs> touchReleased;   // Also fired on cancellation — check args.cancelled
+    Event<TouchEventArgs> touchPressed{EventPriority::BeforeApp};
+    Event<TouchEventArgs> touchMoved{EventPriority::BeforeApp};
+    Event<TouchEventArgs> touchReleased{EventPriority::BeforeApp};   // Also fired on cancellation — check args.cancelled
 
     // Raw sokol event (for addons that need the full sapp_event)
     Event<const sapp_event> rawEvent;

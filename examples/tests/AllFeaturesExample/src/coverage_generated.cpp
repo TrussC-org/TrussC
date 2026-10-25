@@ -3685,7 +3685,13 @@ struct Cover_TcpServer : af::Scope<TcpServer> {
         (void)af::val<TcpServer>().setSendAsyncBufferSize(af::val<size_t>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+        (void)af::val<TcpServer>().setSendItemLimit(af::val<size_t>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().setSendTimeout(af::val<float>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+        (void)af::val<TcpServer>().setTotalSendBufferSize(af::val<size_t>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().start(af::val<int>(), af::val<int>());
@@ -4665,6 +4671,9 @@ struct Cover_Window : af::Scope<Window> {
         (void)af::val<const Window>().getHeight();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<const Window>().getPosition();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().getTitle();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
@@ -4690,6 +4699,9 @@ struct Cover_Window : af::Scope<Window> {
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setFullscreen(af::val<bool>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<Window>().setPosition(af::val<int>(), af::val<int>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setSize(af::val<int>(), af::val<int>());

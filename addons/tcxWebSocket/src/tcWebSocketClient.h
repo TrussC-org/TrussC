@@ -171,7 +171,9 @@ private:
     struct ConnectionState : std::enable_shared_from_this<ConnectionState> {
     void setupClient(bool useTls);
     bool connect(const std::string& url);
-    void disconnect();
+    void disconnect(bool external = false);
+    // Origin of this run's close: local disconnect opts out before joining TCP.
+    std::atomic<bool> externalClose_{true};
     bool send(const std::string& message);
     bool send(const std::vector<char>& data);
     bool sendPing(const std::string& payload);

@@ -40,6 +40,8 @@ struct TcpSendWaiter {
 struct TcpSendItem {
     std::shared_ptr<const std::vector<char>> owned;   // sendAsync / broadcastAsync
     const void* borrowed = nullptr;                   // send(), whose caller is blocked
+    // Server admission lease; retained through owned payload aliases and completion.
+    std::shared_ptr<void> credits;
     size_t size = 0;
     uint64_t id = 0;
     std::shared_ptr<TcpSendWaiter> waiter;            // set by send(), null otherwise
@@ -78,6 +80,7 @@ struct TcpSendChannel {
     std::condition_variable queued;   // writer waits here for work, or for the channel to close
     std::condition_variable room;     // send() waits here when the queue is at its mark
     std::deque<TcpSendItem> queue;
+    size_t pendingEntries = 0;        // server: includes the executing item, even if empty
     size_t pendingBytes = 0;          // accepted and not yet completed
     std::thread::id writerId;         // set once by the writer; send() must not wait on itself
     std::atomic<bool> open{true};
@@ -85,6 +88,7 @@ struct TcpSendChannel {
     // The send path gave up on this client (a timeout truncated a payload).
     // The receive thread does the removal.
     std::atomic<bool> dropped{false};
+    std::shared_ptr<std::atomic<bool>> receiveDeliveryRun = std::make_shared<std::atomic<bool>>(true);
 };
 
 } // namespace trussc::internal

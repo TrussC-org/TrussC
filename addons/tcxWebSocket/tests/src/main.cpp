@@ -771,12 +771,72 @@ static void runLoopbackTests() {
 
 #include "ingress.h"
 
+// #947: a local silent peer, with timeout delivery owned by runHeadlessApp.
+#ifndef __EMSCRIPTEN__
+namespace {
+struct HeadlessTimeoutApp : App {
+    TcpServer silent;
+    WebSocketClient client;
+    EventListener received, error, closed;
+    atomic<bool> gotRequest{false};
+    vector<string> delivered;
+    string errorMessage;
+    mutex deliveryMutex;
+    bool callbacksOnMain = true;
+    chrono::steady_clock::time_point deadline;
+    void setup() override {
+        received = silent.onReceive.listen([this](TcpServerReceiveEventArgs&) { gotRequest = true; });
+        error = client.onError.listen([this](TcpErrorEventArgs& e) {
+            lock_guard<mutex> lock(deliveryMutex);
+            errorMessage = e.message;
+            callbacksOnMain = callbacksOnMain && isMainThread();
+            delivered.push_back("error");
+        });
+        closed = client.onClose.listen([this] {
+            lock_guard<mutex> lock(deliveryMutex);
+            callbacksOnMain = callbacksOnMain && isMainThread();
+            delivered.push_back("close");
+        });
+        check("headless silent listener starts", silent.start(0));
+        client.setHandshakeTimeout(1.0f);
+        check("headless WebSocket connect starts", client.connect("ws://127.0.0.1:" + to_string(silent.getPort()) + "/"));
+        deadline = chrono::steady_clock::now() + chrono::seconds(10);
+    }
+    void update() override {
+        lock_guard<mutex> lock(deliveryMutex);
+        if (!delivered.empty() || chrono::steady_clock::now() >= deadline) exitApp();
+    }
+    void exit() override {
+        client.disconnect();
+        silent.stop();
+        lock_guard<mutex> lock(deliveryMutex);
+        check("headless WebSocket reports handshake timeout", errorMessage.find("WebSocket handshake timeout:") != string::npos);
+        check("headless silent peer received upgrade request", gotRequest);
+        check("headless timeout delivers error then close on main thread",
+              callbacksOnMain && delivered == vector<string>{"error", "close"});
+    }
+};
+static void checkHeadlessTimeout() {
+    check("headless WebSocket runner exits", runHeadlessApp<HeadlessTimeoutApp>(HeadlessSettings().setFps(1024)) == 0);
+}
+} // namespace
+#endif
+
 int main(int argc, char** argv) {
+#ifndef __EMSCRIPTEN__
+    if (argc == 2 && string(argv[1]) == "--headless-events") {
+        checkHeadlessTimeout();
+        return g_fail ? 1 : 0;
+    }
+#endif
     if (argc > 1 && string(argv[1]) == "--ingress-only") {
         runIngressTests();
         printf("\n%d passed, %d failed\n", g_pass, g_fail);
         return g_fail ? 1 : 0;
     }
+#ifndef __EMSCRIPTEN__
+    checkHeadlessTimeout();
+#endif
     runIngressTests();
     {
         auto bytes = emscriptenText("hello");

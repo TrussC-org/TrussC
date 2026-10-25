@@ -73,4 +73,8 @@ private:
     float t = 0.0f;
     shared_ptr<Window> second;
     shared_ptr<SubApp> subApp;
+    // The position WE asked for. Arrow keys add to this instead of reading the
+    // window back: a read-back reports where the WM actually put the window,
+    // and feeding that into the next move accumulates whatever the WM adjusted.
+    IVec2 secondPos{120, 120};
 };

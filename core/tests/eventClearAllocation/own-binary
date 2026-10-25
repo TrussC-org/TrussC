@@ -1,0 +1,1 @@
+Replaces global operator new/delete to measure and limit Event::clear allocations.

@@ -21,6 +21,10 @@
 
 #define MA_NO_ENCODING
 #define MA_NO_GENERATION
+static bool tcValidateAudioDecoderFormat(void*, unsigned, unsigned);
+static bool tcValidateAudioFrame(const void*, unsigned, unsigned, unsigned, unsigned);
+#define MA_TRUSSC_VALIDATE_AUDIO_FRAME(callbacks, ch, rate, originalCh, originalRate) tcValidateAudioFrame(callbacks, ch, rate, originalCh, originalRate)
+#define MA_TRUSSC_VALIDATE_AUDIO_FORMAT(dec, ch, rate) tcValidateAudioDecoderFormat(dec, ch, rate)
 #define MINIAUDIO_IMPLEMENTATION
 #include "tc/sound/tcAudioDeviceInternal.h"
 #ifdef _WIN32
@@ -28,6 +32,27 @@
 #endif
 
 #include "tc/sound/tcSound.h"
+#include "tc/sound/internal/tcAudioDecodeBudget.h"
+
+static bool tcValidateAudioDecoderFormat(void* ptr, unsigned channels, unsigned rate) {
+    auto* decoder = static_cast<ma_decoder*>(ptr);
+    if (decoder->allocationCallbacks.onMalloc != trussc::internal::AudioDecodeBudget::allocate) return true;
+    auto& budget = *static_cast<trussc::internal::AudioDecodeBudget*>(decoder->allocationCallbacks.pUserData);
+    return budget.format(channels, rate);
+}
+static bool tcValidateAudioFrame(const void* ptr, unsigned channels, unsigned rate, unsigned originalChannels, unsigned originalRate) {
+    if (!ptr) return true;
+    const auto& callbacks = *static_cast<const ma_allocation_callbacks*>(ptr);
+    if (callbacks.onMalloc != trussc::internal::AudioDecodeBudget::allocate) return true;
+    auto& budget = *static_cast<trussc::internal::AudioDecodeBudget*>(callbacks.pUserData);
+    if (!budget.format(channels, rate)) return false;
+    if ((originalChannels && channels != originalChannels) || (originalRate && rate != originalRate))
+        return budget.reject("audio format change", channels, originalChannels);
+    return !budget.rejected;
+}
+#undef MA_TRUSSC_VALIDATE_AUDIO_FRAME
+#undef MA_TRUSSC_VALIDATE_AUDIO_FORMAT
+
 #include "tc/sound/tcMicInputInternal.h"
 #include "tc/utils/tcFile.h"
 
@@ -664,7 +689,9 @@ struct StreamInstance {
     static constexpr int    CHANNELS    = 2;              // stereo, hard-coded
                                                           // because that's what
                                                           // the mixer consumes
+    internal::AudioDecodeBudget decodeBudget{RING_FRAMES * CHANNELS * sizeof(float) + 65536, true};
     ma_decoder decoder;
+    ma_uint32 nativeChannels = 0, nativeRate = 0;
     bool decoderInitialized = false;
     std::shared_ptr<const Mp3StreamData> mp3Data;
 
@@ -733,6 +760,9 @@ struct StreamInstance {
     // them here does not scan the file, including during a rate migration.
     ma_result openDecoder(const SoundStream& src, ma_uint32 rate) {
         ma_decoder_config cfg = ma_decoder_config_init(ma_format_f32, CHANNELS, rate);
+        if (!decodeBudget.format(CHANNELS, rate)) return MA_INVALID_DATA;
+        cfg.allocationCallbacks = {&decodeBudget, internal::AudioDecodeBudget::allocate,
+            internal::AudioDecodeBudget::reallocate, internal::AudioDecodeBudget::release};
         cfg.encodingFormat = (ma_encoding_format)src.encodingFormatHint_;
         auto* backend = static_cast<ma_decoding_backend_vtable*>(src.customBackend_);
         if (backend) { cfg.ppCustomBackendVTables = &backend; cfg.customBackendCount = 1; }
@@ -740,6 +770,7 @@ struct StreamInstance {
         const ma_result r = maDecoderInitPathA(src.path_, &cfg, &decoder);
         if (r != MA_SUCCESS) return r;
         decoderInitialized = true;
+        ma_data_source_get_data_format(decoder.pBackend, nullptr, &nativeChannels, &nativeRate, nullptr, 0);
         uint32_t seekPoints = 0;
         if (decoder.pBackendVTable == &g_ma_decoding_backend_vtable_mp3 && decoder.pBackend) {
             mp3Data = src.mp3Data_;
@@ -1004,7 +1035,20 @@ private:
             *read = 0;
             return MA_IO_ERROR;
         }
+        ma_uint32 channels = 0, rate = 0;
+        ma_data_source_get_data_format(s.decoder.pBackend, nullptr, &channels, &rate, nullptr, 0);
+        if (channels != s.nativeChannels || rate != s.nativeRate || !s.decodeBudget.format(channels, rate)) {
+            s.decodeBudget.reject("stream format change", channels, s.nativeChannels);
+            *read = 0;
+            return MA_INVALID_DATA;
+        }
         const ma_result r = ma_decoder_read_pcm_frames(&s.decoder, out, frames, read);
+        ma_data_source_get_data_format(s.decoder.pBackend, nullptr, &channels, &rate, nullptr, 0);
+        if (s.decodeBudget.rejected || channels != s.nativeChannels || rate != s.nativeRate) {
+            s.decodeBudget.reject("stream format change", channels, s.nativeChannels);
+            *read = 0;
+            return MA_INVALID_DATA;
+        }
         if (fault == (int)internal::StreamFaultForTests::ReadFailsWithFrames && *read > 0) {
             return MA_IO_ERROR;
         }
@@ -1022,7 +1066,7 @@ private:
 
     // Decoding goes in chunks of this many frames; a stream is due a refill
     // once its ring has room for one.
-    // Bound (security/latency): streamed file audio uses 1024-frame reads to bound scratch storage. Overflow continues in subsequent decode steps.
+    // Bound (security): streamed file audio uses fixed reads to bound scratch storage. Overflow continues in later steps; working-budget rejection rejects the stream and is counted.
     static constexpr size_t kChunkFrames = 1024;
 
     // refillOne() and hasWork() share these checks, so that hasWork() is
@@ -1344,6 +1388,9 @@ LoadResult SoundStream::openStream(const fs::path& filePath, int maxPolyphony, i
     ma_decoder_config cfg = ma_decoder_config_init(ma_format_f32,
                                                     StreamInstance::CHANNELS,
                                                     AudioEngine::getInstance().getSampleRate());
+    internal::AudioDecodeBudget probeBudget(StreamInstance::RING_FRAMES * StreamInstance::CHANNELS * sizeof(float) + 65536, true);
+    cfg.allocationCallbacks = {&probeBudget, internal::AudioDecodeBudget::allocate,
+        internal::AudioDecodeBudget::reallocate, internal::AudioDecodeBudget::release};
     cfg.encodingFormat = (ma_encoding_format)format;
     auto* backend = static_cast<ma_decoding_backend_vtable*>(customBackend);
     if (backend) { cfg.ppCustomBackendVTables = &backend; cfg.customBackendCount = 1; }
@@ -1395,6 +1442,10 @@ LoadResult SoundStream::openStream(const fs::path& filePath, int maxPolyphony, i
         }
     } else {
         totalFrames = streamDecoderLength(probe);
+    }
+    if (probeBudget.rejected) {
+        ma_decoder_uninit(&probe);
+        return LoadResult::fail(LoadError::DecodeFailed, "stream format or working budget rejected");
     }
     ma_uint64 probed = totalFrames;
     if (totalFrames == 0) {
@@ -2398,11 +2449,16 @@ bool AudioEngine::waitForCallbacks(bool giveUp) {
             if (!reported) {
                 reported = true;
                 lock.unlock();
-                logError("AudioEngine") << "an audioOut / audioIn listener has not "
-                    "returned for " << kCallbackIdleTimeout.count() << " s; the "
-                    "teardown keeps waiting for it before it destroys anything the "
-                    "listener may use. The listener is most likely waiting on the "
-                    "main thread or on a lock.";
+                {
+                    internal::TeardownSteps steps;
+                    steps.run("audio barrier warning", [&] {
+                        logError("AudioEngine") << "an audioOut / audioIn listener has not "
+                            "returned for " << kCallbackIdleTimeout.count() << " s; the "
+                            "teardown keeps waiting for it before it destroys anything the "
+                            "listener may use. The listener is most likely waiting on the "
+                            "main thread or on a lock.";
+                    });
+                }
                 lock.lock();
                 // A diagnostic listener or another barrier may have advanced
                 // the epoch while unlocked. Drain both slots again under the

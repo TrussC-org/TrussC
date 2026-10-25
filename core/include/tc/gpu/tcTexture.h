@@ -9,6 +9,7 @@
 
 #include "../utils/tcAnnotations.h"
 #include <memory>
+#include <array>
 #include <type_traits>
 
 namespace trussc {
@@ -346,37 +347,21 @@ public:
     // dominate any sampling benefit.
     void allocate(const Pixels& pixels, TextureUsage usage = TextureUsage::Immutable,
                   bool mipmaps = false) {
-        clear();
-
-        width_ = pixels.getWidth();
-        height_ = pixels.getHeight();
-        channels_ = pixels.getChannels();
-        usage_ = usage;
-        const bool mipmapSupported = (usage == TextureUsage::Immutable ||
-                                      usage == TextureUsage::Dynamic);
-        mipmapped_ = mipmaps && mipmapSupported;
-        if (mipmapped_) {
-            numMipLevels_ = 1 + (int)std::floor(std::log2((float)std::max(width_, height_)));
-            // Bound (gpu): image-derived mip counts must fit the GPU API descriptor array. Overflow clamps the mip count.
-            if (numMipLevels_ > SG_MAX_MIPMAPS) numMipLevels_ = SG_MAX_MIPMAPS;
-            if (numMipLevels_ < 1) numMipLevels_ = 1;
-        } else {
-            numMipLevels_ = 1;
-        }
-
-        if (pixels.isFloat()) {
-            pixelFormat_ = SG_PIXELFORMAT_RGBA32F;
-        }
-
-        if (usage == TextureUsage::Immutable) {
-            createResources(pixels.getDataVoid());
-        } else {
-            createResources(nullptr);
-        }
+        allocatePixels(pixels, usage, mipmaps, nullptr);
     }
 
+private:
+    friend class Image;
+    // Only file/memory image loads use this non-throwing mip path. Fixed
+    // descriptors and owned levels unwind before a failed load is reported.
+    bool allocateImageLoad(const Pixels& pixels, bool mipmaps);
+
+    void allocatePixels(const Pixels& pixels, TextureUsage usage, bool mipmaps,
+                        const sg_image_data* imageLoadMips);
+
+public:
     // Release resources
-    void clear() { clearResources_(true); }
+    void clear() noexcept { clearResources_(true); }
 
     // === State ===
 
@@ -623,38 +608,22 @@ private:
     friend class Fbo;
 
     // Only Fbo may immediately discard textures it has never published.
-    void clearResources_(bool deferred) {
-        auto destroy = [deferred](auto handle) {
-            if (deferred) internal::deferGpuDestroy(handle);
-            else if (handle.id) {
-                if constexpr (std::is_same_v<decltype(handle), sg_image>) sg_destroy_image(handle);
-                else if constexpr (std::is_same_v<decltype(handle), sg_view>) sg_destroy_view(handle);
-                else sg_destroy_sampler(handle);
-            }
-        };
+    void clearResources_(bool deferred) noexcept {
         cubemapStaging_.reset();
         cubemapStagingSize_ = 0;
-        if (allocated_) {
-            // Deferred destroy: draws recorded this frame (sokol_gl quads,
-            // deferred PBR bindings) may still reference these handles.
-            destroy(sampler_);
-            destroy(view_);
-            destroy(attachmentView_);
-            for (sg_view v : cubeFaceAttachmentViews_) {
-                destroy(v);
-            }
-            cubeFaceAttachmentViews_.clear();
-            for (sg_view v : mipAttachmentViews_) {
-                destroy(v);
-            }
-            mipAttachmentViews_.clear();
-            for (sg_view v : mipSamplingViews_) {
-                destroy(v);
-            }
-            mipSamplingViews_.clear();
-            destroy(image_);
-            allocated_ = false;
+        if (retirement_) {
+            retirement_->sampler = sampler_;
+            retirement_->view = view_;
+            retirement_->attachment = attachmentView_;
+            retirement_->image = image_;
+            retirement_->cubeViews = std::move(cubeFaceAttachmentViews_);
+            retirement_->mipAttachments = std::move(mipAttachmentViews_);
+            retirement_->mipViews = std::move(mipSamplingViews_);
+            // Recorded draws keep their handles until reference collection.
+            if (deferred) internal::retireTexture(retirement_.release());
+            else retirement_.reset();
         }
+        allocated_ = false;
         width_ = 0;
         height_ = 0;
         channels_ = 0;
@@ -668,6 +637,12 @@ private:
         sampler_ = {};
     }
 
+    // Allocation belongs to creation, never to clear/destruction.
+    std::unique_ptr<internal::TextureRetirement> retirement_;
+    bool prepareRetirement_() {
+        if (!retirement_) retirement_.reset(new (std::nothrow) internal::TextureRetirement);
+        return bool(retirement_);
+    }
     sg_image image_ = {};
     sg_view view_ = {};              // Texture view (for sampling)
     sg_view attachmentView_ = {};    // Attachment view (for RenderTarget)
@@ -733,6 +708,7 @@ private:
 
     void createCompressedResources(const void* data, size_t dataSize) {
         if (!sg_isvalid()) return;
+        if (!prepareRetirement_()) return;
         sg_image_desc img_desc = {};
         img_desc.width = width_;
         img_desc.height = height_;
@@ -753,148 +729,11 @@ private:
         allocated_ = true;
     }
 
-    void createResources(const void* initialData) {
-        // CPU-only Images are valid in headless apps and before graphics setup.
-        // Leave the texture unallocated so their updates and draws are no-ops.
-        if (!sg_isvalid()) return;
-
-        auto sizeResult = internal::checkImageSize(width_, height_);
-        if (!sizeResult) {
-            logError("Texture") << sizeResult.message;
-            return;
-        }
-
-        // Create image
-        sg_image_desc img_desc = {};
-        img_desc.width = width_;
-        img_desc.height = height_;
-
-        // Determine pixel format
-        if (pixelFormat_ != SG_PIXELFORMAT_NONE) {
-            img_desc.pixel_format = pixelFormat_;
-        } else {
-            img_desc.pixel_format = (channels_ == 4) ? SG_PIXELFORMAT_RGBA8 : SG_PIXELFORMAT_R8;
-        }
-
-        // Compute data size based on pixel format
-        size_t bpp = computeBytesPerPixel();
-        bool isFloat = (pixelFormat_ == SG_PIXELFORMAT_RGBA32F);
-        size_t dataSize = (size_t)width_ * height_ * bpp;
-
-        // Storage for mip chain Pixels (kept alive until sg_make_image
-        // copies them). Used by the Immutable + auto-mipmap path below.
-        std::vector<Pixels> mipChain;
-
-        switch (usage_) {
-            case TextureUsage::Immutable:
-                if (initialData) {
-                    img_desc.data.mip_levels[0].ptr = initialData;
-                    img_desc.data.mip_levels[0].size = dataSize;
-
-                    // Generate mip chain via chained Pixels::halve().
-                    // Pixels::halve is gamma-correct for U8 (matches the FBO
-                    // mipmap downsample) and direct-average for F32 (assumed
-                    // already linear). Restricted to channels_ == 4 same as
-                    // before, since Pixels currently only handles 4-channel
-                    // RGBA / RGBAF32 here.
-                    if (mipmapped_ && channels_ == 4) {
-                        int numLevels = 1 + (int)std::floor(std::log2((float)std::max(width_, height_)));
-                        // Bound (gpu): image-derived mip counts must fit the GPU API descriptor array. Overflow clamps the mip count.
-                        if (numLevels > SG_MAX_MIPMAPS) numLevels = SG_MAX_MIPMAPS;
-                        img_desc.num_mipmaps = numLevels;
-
-                        Pixels current;
-                        if (isFloat) {
-                            current.setFromFloats(static_cast<const float*>(initialData),
-                                                  width_, height_, channels_);
-                        } else {
-                            current.setFromPixels(static_cast<const unsigned char*>(initialData),
-                                                  width_, height_, channels_);
-                        }
-                        mipChain.reserve(numLevels - 1);
-                        for (int level = 1; level < numLevels; level++) {
-                            current.halve();
-                            mipChain.emplace_back(current.clone());
-                            img_desc.data.mip_levels[level].ptr  = mipChain.back().getDataVoid();
-                            img_desc.data.mip_levels[level].size = mipChain.back().getTotalBytes();
-                        }
-                    }
-                }
-                break;
-            case TextureUsage::Dynamic:
-                // D3D11's DYNAMIC usage only supports a single mip level.
-                // When mipmaps are requested we still allocate the base
-                // image as a plain dynamic texture (1 mip); the full mip
-                // chain is built on each loadData() call by recreating the
-                // image as immutable with all levels baked in.
-                img_desc.usage.dynamic_update = true;
-                break;
-            case TextureUsage::Stream:
-                img_desc.usage.stream_update = true;
-                break;
-            case TextureUsage::RenderTarget:
-                img_desc.usage.color_attachment = true;
-                img_desc.usage.resolve_attachment = true;  // Can also be used as MSAA resolve target
-                img_desc.sample_count = sampleCount_;
-                img_desc.num_mipmaps = numMipLevels_;
-                break;
-        }
-
-        image_ = sg_make_image(&img_desc);
-        if (sg_query_image_state(image_) != SG_RESOURCESTATE_VALID) {
-            logError("Texture") << "GPU texture allocation failed ("
-                << width_ << "x" << height_ << ", format "
-                << (int)img_desc.pixel_format << ")";
-            sg_destroy_image(image_);
-            image_ = {};
-            return;
-        }
-
-        // Create texture view (for sampling)
-        sg_view_desc view_desc = {};
-        view_desc.texture.image = image_;
-        view_ = sg_make_view(&view_desc);
-
-        // Create attachment view for RenderTarget. `attachmentView_` always
-        // targets mip 0 (preserves the existing single-attachment API).
-        // For mipLevels > 1, also build a per-mip attachment view list so
-        // callers can render into each level individually (see
-        // `getAttachmentViewForMip()`), used by Fbo to generate mipmaps.
-        if (usage_ == TextureUsage::RenderTarget) {
-            sg_view_desc att_desc = {};
-            att_desc.color_attachment.image = image_;
-            attachmentView_ = sg_make_view(&att_desc);
-            if (numMipLevels_ > 1) {
-                // Independent views per mip level (mip 0 is also a fresh view,
-                // not aliased to `attachmentView_`, so clear() can destroy
-                // both without a double-free).
-                mipAttachmentViews_.resize(numMipLevels_);
-                for (int level = 0; level < numMipLevels_; level++) {
-                    sg_view_desc mip_att_desc = {};
-                    mip_att_desc.color_attachment.image = image_;
-                    mip_att_desc.color_attachment.mip_level = level;
-                    mipAttachmentViews_[level] = sg_make_view(&mip_att_desc);
-                }
-                // Single-level sampling views for mipmap generation passes
-                mipSamplingViews_.resize(numMipLevels_);
-                for (int level = 0; level < numMipLevels_; level++) {
-                    sg_view_desc mip_tex_desc = {};
-                    mip_tex_desc.texture.image = image_;
-                    mip_tex_desc.texture.mip_levels.base = level;
-                    mip_tex_desc.texture.mip_levels.count = 1;
-                    mipSamplingViews_[level] = sg_make_view(&mip_tex_desc);
-                }
-            }
-        }
-
-        // Create sampler
-        createSampler();
-
-        allocated_ = true;
-    }
+    void createResources(const void* initialData, const sg_image_data* imageLoadMips = nullptr);
 
     void createCubemapResources() {
         if (!sg_isvalid()) return;
+        if (!prepareRetirement_()) return;
         sg_image_desc img_desc = {};
         img_desc.type = SG_IMAGETYPE_CUBE;
         img_desc.width = width_;
@@ -1007,6 +846,7 @@ private:
     // used to live here has been folded into that single implementation.
 
     void moveFrom(Texture&& other) {
+        retirement_ = std::move(other.retirement_);
         image_ = other.image_;
         view_ = other.view_;
         attachmentView_ = other.attachmentView_;

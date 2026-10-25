@@ -1,6 +1,7 @@
 #pragma once
 #include "tc/utils/tcDebugName.h"
 #include "tc/utils/tcResourceLoad.h"
+#include "impl/tcImageDecode.h"
 
 // =============================================================================
 // tcImage.h - Image loading, drawing, and saving
@@ -29,6 +30,8 @@ class Image : public HasTexture {
         fs::path path;
         Pixels pixels;
         bool mipmaps = false;
+        size_t retainedBytes() const noexcept override { return pixels.getTotalBytes(); }
+        void discardPayload() noexcept override { pixels.clear(); }
     };
 public:
     Image() = default;
@@ -83,7 +86,7 @@ public:
     // onto a 3D surface that moves toward/away from the camera) — without
     // mipmaps, small projected sizes shimmer/moiré. Costs about +33% GPU
     // memory and a one-time CPU box-average to build the chain.
-    LoadResult load(const fs::path& path, bool mipmaps = false) {
+    LoadResult load(const fs::path& path, bool mipmaps = false) try {
         clear();
 
         LoadResult r = pixels_.load(path);
@@ -92,6 +95,9 @@ public:
         }
 
         return finishLoad(path, mipmaps);
+    } catch (const std::bad_alloc&) {
+        clear();
+        return internal::imageDecodeOutOfMemory();
     }
 
     // Prepare pixels on a worker; apply and notify on main at a later frame.
@@ -100,30 +106,17 @@ public:
     // App exit waits for loads still decoding; cancelling never waits.
     // Completions are delivered during runApp / runHeadlessApp; in a bare main()
     // without an app run, no completion event fires.
-    void loadAsync(const fs::path& path, bool mipmaps = false) {
-        auto state = async_.begin(onLoad, [this](AsyncState& ready) {
-            clearCommitted();
-            if (ready.result) {
-                pixels_ = std::move(ready.pixels);
-                ready.result = finishLoad(ready.path, ready.mipmaps);
-            }
-        });
-        state->path = internal::resolveLoadPath(path);
-        state->mipmaps = mipmaps;
-        internal::startResourceLoad([state] {
-            internal::probeResourceLoad("image.decode", state->path);
-            if (state->cancelled.load()) return;
-            state->result = state->pixels.load(state->path);
-            internal::probeResourceLoad("image.ready", state->path);
-            if (!state->cancelled.load()) internal::completeResourceLoad(state);
-            internal::probeResourceLoad("image.queued", state->path);
-        });
-    }
+    // Web CMake propagates exception support. With custom app flags disabling
+    // it, recovery from allocation failure is guaranteed only for TrussC's
+    // out-of-line host code. Inline helpers from headers may be compiled into the
+    // application without exception support; allocation failure inside them is a
+    // known limitation.
+    void loadAsync(const fs::path& path, bool mipmaps = false);
     Event<LoadResult> onLoad;
     bool isLoading() const { return async_.loading(); }
 
     // Load image from memory
-    LoadResult loadFromMemory(const unsigned char* buffer, int len, bool mipmaps = false) {
+    LoadResult loadFromMemory(const unsigned char* buffer, int len, bool mipmaps = false) try {
         clear();
 
         LoadResult r = pixels_.loadFromMemory(buffer, len);
@@ -140,12 +133,18 @@ public:
         }
         mipmaps_ = mipmaps;
         usage_ = TextureUsage::Immutable;
-        texture_.allocate(pixels_, TextureUsage::Immutable, mipmaps);
+        if (!texture_.allocateImageLoad(pixels_, mipmaps)) {
+            clearCommitted();
+            return internal::imageDecodeOutOfMemory();
+        }
         if (sg_isvalid() && !texture_.isAllocated()) {
             clear();
             return LoadResult::fail(LoadError::Unknown, "image texture upload failed");
         }
         return LoadResult::success();
+    } catch (const std::bad_alloc&) {
+        clear();
+        return internal::imageDecodeOutOfMemory();
     }
 
     // Save image (override of HasTexture::save())
@@ -283,31 +282,14 @@ public:
 
 private:
     internal::ResourceLoadSlot<AsyncState> async_;
-    void clearCommitted() {
+    void clearCommitted() noexcept {
         pixels_.clear();
         texture_.clear();
         dirty_ = false;
         mipmaps_ = false;
         usage_ = TextureUsage::Immutable;
     }
-    LoadResult finishLoad(const fs::path& path, bool mipmaps) {
-        auto result = internal::checkImageSize(pixels_.getWidth(), pixels_.getHeight());
-        if (!result) {
-            logError("Image") << result.message << " (" << pixels_.getWidth()
-                              << "x" << pixels_.getHeight() << "): "
-                              << internal::pathToDisplayUtf8(internal::resolveLoadPath(path));
-            clearCommitted();
-            return result;
-        }
-        mipmaps_ = mipmaps;
-        usage_ = TextureUsage::Immutable;
-        texture_.allocate(pixels_, TextureUsage::Immutable, mipmaps);
-        if (sg_isvalid() && !texture_.isAllocated()) {
-            clearCommitted();
-            return LoadResult::fail(LoadError::Unknown, "image texture upload failed");
-        }
-        return LoadResult::success();
-    }
+    LoadResult finishLoad(const fs::path& path, bool mipmaps);
     internal::DebugName debugName_{internal::DebugObjectKind::Image, this};
     // Re-allocate the GPU texture from the current pixels_ contents using the
     // Image's stored usage and mipmaps flag. Called by halve/resize/crop/

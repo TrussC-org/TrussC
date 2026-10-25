@@ -1087,14 +1087,15 @@ private:
             Ptr grabbed = ctx.grabbedNode.lock();
             if (grabbed) {
                 MouseEventArgs local = grabbed->localizeMouse(e);
-                grabbed->fireMouseRelease(local);
+                const bool handled = grabbed->fireMouseRelease(local);
+                ctx.grabbedNode.reset();
+                ctx.grabbedButton = -1;
+                return handled ? grabbed : nullptr;
             }
 
             // Clear grabbed state
             ctx.grabbedNode.reset();
             ctx.grabbedButton = -1;
-
-            if (grabbed) return grabbed;
         }
 
         // Fallback (no grab): bubble from the hit node like press
@@ -1113,12 +1114,13 @@ private:
     Ptr dispatchMouseMove(const internal::MouseEventRaw& e) {
         auto& ctx = internal::currentWindowContext();
 
+        Ptr dragConsumer;
         // Send drag event to grabbed node
         Ptr grabbed = ctx.grabbedNode.lock();
         if (grabbed) {
             internal::MouseEventRaw local = grabbed->localizeMouse(e);
             local.button = ctx.grabbedButton;
-            grabbed->fireMouseDrag(internal::toDragArgs(local));
+            if (grabbed->fireMouseDrag(internal::toDragArgs(local))) dragConsumer = grabbed;
         }
 
         // Also send move event, bubbling from the hit node (hover itself is
@@ -1132,7 +1134,7 @@ private:
             }
         }
 
-        return nullptr;
+        return dragConsumer;
     }
 
     Ptr dispatchMouseScroll(const ScrollEventArgs& e) {

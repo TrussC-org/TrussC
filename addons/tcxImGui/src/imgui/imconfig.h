@@ -72,7 +72,7 @@
 // declaration returns true (IMGUI_TC_RETURN), so code that applies a copy only
 // when the widget returns true takes the value; Edited is not set.
 // Active only while TestEngineHookItems is set.
-// Implemented by tcxImGui (tcImGuiHooks.h). See TRUSSC_MODIFICATIONS.md; every
+// Implemented by tcxImGui (tcImGuiHooksImpl.h). See TRUSSC_MODIFICATIONS.md; every
 // patched line in imgui_widgets.cpp carries a "[TrussC]" comment.
 struct ImGuiContext;
 enum ImGuiTcValueKind_

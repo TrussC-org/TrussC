@@ -5213,6 +5213,10 @@ static int stbi__parse_png_file(stbi__png *z, int scan, int req_comp)
                   s->img_n = pal_img_n;
                return 1;
             }
+            // TrussC patch: validate memory chunk spans before reserving IDAT storage.
+            // Bound (abi): an IDAT copy must fit the remaining encoded input. Overflow rejects the image through the decoder result.
+            if (!s->io.read && c.length > (stbi__uint32)(s->img_buffer_end - s->img_buffer))
+               return stbi__err("outofdata", "Corrupt PNG");
             if (c.length > (1u << 30)) return stbi__err("IDAT size limit", "IDAT section larger than 2^30 bytes");
             if ((int)(ioff + c.length) < (int)ioff) return 0;
             if (ioff + c.length > idata_limit) {
@@ -5235,11 +5239,40 @@ static int stbi__parse_png_file(stbi__png *z, int scan, int req_comp)
             if (first) return stbi__err("first not IHDR", "Corrupt PNG");
             if (scan != STBI__SCAN_load) return 1;
             if (z->idata == NULL) return stbi__err("no IDAT","Corrupt PNG");
-            // initial guess for decoded data size to avoid unnecessary reallocs
-            bpl = (s->img_x * z->depth + 7) / 8; // bytes per line, per component
-            raw_len = bpl * s->img_y * s->img_n /* pixels */ + s->img_y /* filter mode per row */;
-            z->expanded = (stbi_uc *) stbi_zlib_decode_malloc_guesssize_headerflag((char *) z->idata, ioff, raw_len, (int *) &raw_len, !is_iphone);
-            if (z->expanded == NULL) return 0; // zlib should set error
+            // TrussC patch: reserve only the scanlines described by IHDR,
+            // including the seven Adam7 passes, and disable inflate growth.
+            // Bound (abi): PNG expansion must fit its declared scanlines and int offsets. Overflow rejects the image through the decoder result.
+            if (!stbi__mad3sizes_valid(s->img_x, s->img_n, z->depth, 7))
+               return stbi__err("too large", "PNG scanline too large");
+            bpl = (s->img_x * s->img_n * z->depth + 7) / 8 + 1;
+            if (!stbi__mul2sizes_valid(bpl, s->img_y))
+               return stbi__err("too large", "PNG scanlines too large");
+            raw_len = bpl * s->img_y;
+            if (interlace) {
+               int p;
+               int xorig[] = { 0,4,0,2,0,1,0 }, yorig[] = { 0,0,4,0,2,0,1 };
+               int xspc[] = { 8,8,4,4,2,2,1 }, yspc[] = { 8,8,8,4,4,2,2 };
+               raw_len = 0;
+               for (p = 0; p < 7; ++p) {
+                  int pw = ((int)s->img_x - xorig[p] + xspc[p] - 1) / xspc[p];
+                  int ph = ((int)s->img_y - yorig[p] + yspc[p] - 1) / yspc[p];
+                  if (pw > 0 && ph > 0) {
+                     bpl = (pw * s->img_n * z->depth + 7) / 8 + 1;
+                     if (!stbi__mad2sizes_valid(bpl, ph, raw_len))
+                        return stbi__err("too large", "PNG scanlines too large");
+                     raw_len += bpl * ph;
+                  }
+               }
+            }
+            z->expanded = (stbi_uc *) stbi__malloc(raw_len);
+            if (z->expanded == NULL) return stbi__err("outofmem", "Out of memory");
+            {
+               int expanded_len = is_iphone ?
+                  stbi_zlib_decode_noheader_buffer((char *)z->expanded, raw_len, (char *)z->idata, ioff) :
+                  stbi_zlib_decode_buffer((char *)z->expanded, raw_len, (char *)z->idata, ioff);
+               if (expanded_len < 0) return 0;
+               raw_len = (stbi__uint32)expanded_len;
+            }
             STBI_FREE(z->idata); z->idata = NULL;
             if ((req_comp == s->img_n+1 && req_comp != 3 && !pal_img_n) || has_trans)
                s->img_out_n = s->img_n+1;
@@ -5505,6 +5538,9 @@ static void *stbi__bmp_parse_header(stbi__context *s, stbi__bmp_data *info)
       s->img_x = stbi__get32le(s);
       s->img_y = stbi__get32le(s);
    }
+   // TrussC patch: reject an unrepresentable absolute height before decoding.
+   // Bound (abi): BMP row counts must have a representable positive height. Overflow rejects the image through the decoder result.
+   if (s->img_y == 0x80000000u) return stbi__errpuc("bad BMP height", "Corrupt BMP");
    if (stbi__get16le(s) != 1) return stbi__errpuc("bad BMP", "bad BMP");
    info->bpp = stbi__get16le(s);
    if (hsz != 12) {
@@ -7412,7 +7448,8 @@ static int stbi__bmp_info(stbi__context *s, int *x, int *y, int *comp)
       return 0;
    }
    if (x) *x = s->img_x;
-   if (y) *y = s->img_y;
+   // TrussC patch: metadata describes the decoded canvas, including top-down BMP.
+   if (y) *y = abs((int)s->img_y);
    if (comp) {
       if (info.bpp == 24 && info.ma == 0xff000000)
          *comp = 3;

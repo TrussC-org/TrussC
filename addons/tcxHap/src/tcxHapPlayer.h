@@ -22,6 +22,7 @@
 #include "impl/bcdec.h"
 #include "impl/tcxHapRgba.h"
 #include "impl/tcxHapDrawData.h"
+#include <tc/sound/internal/tcAudioDecodeBudget.h>
 
 namespace tcx::hap {
 
@@ -44,41 +45,48 @@ inline bool loadPcmTrack(MovParser& parser, const MovTrack& track, tc::SoundBuff
         return false;
     }
 
-    // Only entries that lie inside the file are read (their total is at most
-    // the file size, see MovParser::buildSamples())
+    // Every entry must lie inside the file; no incomplete audio track is
+    // published (their total is checked by MovParser::buildSamples()).
     uint64_t totalSize = 0;
     for (size_t i = 0; i < track.samples.size(); i++) {
-        if (parser.isSampleInFile(track, i)) totalSize += track.samples[i].size;
+        if (!parser.isSampleInFile(track, i)) return parser.reject("PCM sample is outside the file", false);
+        totalSize += track.samples[i].size;
     }
-    // Bound (abi): file audio sample sizes must fit the file and host buffer index width. Overflow fails audio loading.
-    if (totalSize > parser.getFileSize() || totalSize > SIZE_MAX) {
-        tc::logWarning("HapPlayer") << "Failed to read PCM audio data";
+    // Bound (abi): file audio sample sizes must fit the file and host buffer index width. Overflow fails audio loading via false and is counted by the parser.
+    if (totalSize > parser.getFileSize() || totalSize > SIZE_MAX)
+        return parser.reject("PCM size exceeds file or host index width", false, totalSize,
+                             std::min<uint64_t>(parser.getFileSize(), SIZE_MAX));
+
+    std::vector<uint8_t> audioData;
+    if (!detail::resizeMovBuffer(audioData, static_cast<size_t>(totalSize))) {
+        tc::logError("HapPlayer") << "PCM input allocation failed";
         return false;
     }
-
-    std::vector<uint8_t> audioData(static_cast<size_t>(totalSize));
     size_t used = 0;
     for (size_t i = 0; i < track.samples.size(); i++) {
-        if (!parser.isSampleInFile(track, i)) continue;
-        if (parser.readSampleTo(track, i, audioData.data() + used)) {
-            used += track.samples[i].size;
-        }
+        const auto sample = track.samples[i];
+        if (!parser.readCapturedSample(sample, audioData.data() + used, audioData.size() - used))
+            return parser.reject("PCM sample read failed or table changed during loading", false);
+        used += sample.size;
     }
 
-    // Whole frames only
-    const uint32_t frameBytes = track.getPcmFrameBytes();
-    if (frameBytes > 0) used -= used % frameBytes;
-    audioData.resize(used);
+    if (used != totalSize) return parser.reject("PCM table changed during loading", false);
+    // Pass complete admitted bytes to SoundBuffer; partial PCM frames fail.
 
     if (audioData.empty()) {
         tc::logWarning("HapPlayer") << "Failed to read PCM audio data";
         return false;
     }
 
-    if (!buffer.loadPcmFromMemory(audioData.data(), audioData.size(),
-                                  track.channels, static_cast<int>(track.sampleRate),
-                                  track.getPcmBits(), track.isBigEndianPcm())) {
-        tc::logWarning("HapPlayer") << "Failed to load PCM audio";
+    try {
+        tc::SoundBuffer decoded;
+        if (!decoded.loadPcmFromMemory(audioData.data(), audioData.size(),
+                                      track.channels, static_cast<int>(track.sampleRate),
+                                      track.getPcmBits(), track.isBigEndianPcm())) return false;
+        tc::internal::noticeAudioDecodedBytes(decoded.samples.size() * sizeof(float));
+        buffer = std::move(decoded);
+    } catch (const std::exception&) {
+        tc::logError("HapPlayer") << "PCM output allocation failed";
         return false;
     }
     return true;
@@ -224,9 +232,7 @@ public:
     tc::LoadResult load(const tc::fs::path& filePath) override {
         ycocgShaderFailed_ = false;
         const auto previousError = errorMessage_;
-        if (initialized_) {
-            close();
-        }
+        close();
         errorMessage_ = previousError;
         resetStats();
 
@@ -265,6 +271,12 @@ public:
                 MovParser::fourccToString(videoTrack->codecFourCC) + ")");
         }
 
+        // Bound (security): dimension checks precede first-sample allocation; one encoded frame, BC output, RGBA output and exact replacements fit the 512 MiB decoder set. Overflow fails loading with LoadError.
+        // Bound (abi): VideoPlayerBase indexes frames with int. Overflow rejects the file with LoadError.
+        if (!detail::movDimensions(videoTrack->width, videoTrack->height) || videoTrack->samples.size() > INT_MAX) {
+            movParser_.close();
+            return tc::LoadResult::fail(tc::LoadError::DecodeFailed, "HAP frame dimensions or count exceed playback bounds");
+        }
         // Store video info
         width_ = videoTrack->width;
         height_ = videoTrack->height;
@@ -289,7 +301,11 @@ public:
 
         // Allocate frame buffer for decoded DXT data
         size_t bufferSize = calculateTextureSize(width_, height_, hapFormat_);
-        frameBuffer_.resize(bufferSize);
+        if (!detail::resizeMovBuffer(frameBuffer_, bufferSize)) {
+            movParser_.close();
+            tc::logError("HapPlayer") << "HAP frame allocation failed";
+            return tc::LoadResult::fail(tc::LoadError::DecodeFailed, "HAP frame allocation failed");
+        }
 
         // Create compressed texture
         if (!createCompressedTexture()) {
@@ -319,18 +335,17 @@ public:
 
     void close() override {
         clearPlaybackError();
-        if (!initialized_) return;
-
         // Stop audio
         if (hasAudio_) {
             audioPlayer_.stop();
         }
+        audioPlayer_ = tc::Sound{};
 
         movParser_.close();
         texture_.clear();
-        frameBuffer_.clear();
-        sampleBuffer_.clear();
-        pixels_.clear();
+        std::vector<uint8_t>().swap(frameBuffer_);
+        std::vector<uint8_t>().swap(sampleBuffer_);
+        std::vector<uint8_t>().swap(pixels_);
         pixelsValid_ = false;
         videoTrack_ = nullptr;
         audioTrack_ = nullptr;
@@ -643,6 +658,7 @@ protected:
     }
 
 private:
+    friend struct HapBudgetTestAccess;
     MovParser movParser_;
     HapDecoder hapDecoder_;
     const MovTrack* videoTrack_ = nullptr;
@@ -697,6 +713,8 @@ private:
 
         // Move HapPlayer-specific state
         hapDecoder_ = std::move(other.hapDecoder_);
+        rejectedAudio_ = other.rejectedAudio_;
+        warnedAudio_ = other.warnedAudio_;
         movParser_ = std::move(other.movParser_);
         videoTrack_ = other.videoTrack_;
         audioTrack_ = other.audioTrack_;
@@ -738,7 +756,7 @@ private:
         audioPlayer_.setPosition(static_cast<float>(seconds));
     }
 
-    bool loadAudio() {
+    bool loadAudio() try {
         if (!audioTrack_) return false;
 
         // Check codec type
@@ -761,6 +779,11 @@ private:
                 << MovParser::fourccToString(codec);
             return false;
         }
+    } catch (const std::exception&) {
+        tc::logError("HapPlayer") << "Audio loading allocation failed";
+        audioPlayer_ = tc::Sound{};
+        hasAudio_ = false;
+        return false;
     }
 
     bool loadPcmAudio() {
@@ -771,7 +794,11 @@ private:
             return false;
         }
 
-        audioPlayer_.loadFromBuffer(buffer);
+        // Default construction may allocate; let loadAudio's catch handle it.
+        // SoundBuffer's noexcept move constructor also default-constructs.
+        auto sharedBuffer = std::make_shared<tc::SoundBuffer>();
+        *sharedBuffer = std::move(buffer);
+        audioPlayer_.loadFromBuffer(std::move(sharedBuffer));
         hasAudio_ = true;
 
         tc::logNotice("HapPlayer") << "Loaded PCM audio: "
@@ -784,19 +811,9 @@ private:
     bool loadMp3Audio() {
         if (!audioTrack_) return false;
 
-        // Read all MP3 data
-        std::vector<uint8_t> mp3Data;
-        for (size_t i = 0; i < audioTrack_->samples.size(); i++) {
-            std::vector<uint8_t> sampleData;
-            if (movParser_.readSample(*audioTrack_, i, sampleData)) {
-                mp3Data.insert(mp3Data.end(), sampleData.begin(), sampleData.end());
-            }
-        }
+        auto mp3Data = getRawAudioData();
 
-        if (mp3Data.empty()) {
-            tc::logWarning("HapPlayer") << "Failed to read MP3 audio data";
-            return false;
-        }
+        if (mp3Data.empty()) return false;
 
         // Decode MP3 from memory
         tc::SoundBuffer buffer;
@@ -805,12 +822,17 @@ private:
             return false;
         }
 
-        audioPlayer_.loadFromBuffer(buffer);
+        const int decodedChannels = buffer.channels, decodedRate = buffer.sampleRate;
+        // Default construction may allocate; let loadAudio's catch handle it.
+        // SoundBuffer's noexcept move constructor also default-constructs.
+        auto sharedBuffer = std::make_shared<tc::SoundBuffer>();
+        *sharedBuffer = std::move(buffer);
+        audioPlayer_.loadFromBuffer(std::move(sharedBuffer));
         hasAudio_ = true;
 
         tc::logNotice("HapPlayer") << "Loaded MP3 audio: "
-            << buffer.channels << " ch, "
-            << buffer.sampleRate << " Hz";
+            << decodedChannels << " ch, "
+            << decodedRate << " Hz";
 
         return true;
     }
@@ -818,27 +840,9 @@ private:
     bool loadAacAudio() {
         if (!audioTrack_) return false;
 
-        // Read all AAC data with ADTS headers
-        std::vector<uint8_t> aacData;
-        int sampleRate = audioTrack_->sampleRate;
-        int channels = audioTrack_->channels;
+        auto aacData = getAacDataWithAdts();
 
-        for (size_t i = 0; i < audioTrack_->samples.size(); i++) {
-            std::vector<uint8_t> sampleData;
-            if (movParser_.readSample(*audioTrack_, i, sampleData)) {
-                // Add ADTS header for this frame
-                uint8_t adtsHeader[7];
-                tc::SoundBuffer::createAdtsHeader(adtsHeader, static_cast<int>(sampleData.size()),
-                                                   sampleRate, channels);
-                aacData.insert(aacData.end(), adtsHeader, adtsHeader + 7);
-                aacData.insert(aacData.end(), sampleData.begin(), sampleData.end());
-            }
-        }
-
-        if (aacData.empty()) {
-            tc::logWarning("HapPlayer") << "Failed to read AAC audio data";
-            return false;
-        }
+        if (aacData.empty()) return false;
 
         tc::logNotice("HapPlayer") << "AAC data with ADTS: " << aacData.size() << " bytes, "
             << audioTrack_->samples.size() << " frames";
@@ -850,12 +854,17 @@ private:
             return false;
         }
 
-        audioPlayer_.loadFromBuffer(buffer);
+        const int decodedChannels = buffer.channels, decodedRate = buffer.sampleRate;
+        // Default construction may allocate; let loadAudio's catch handle it.
+        // SoundBuffer's noexcept move constructor also default-constructs.
+        auto sharedBuffer = std::make_shared<tc::SoundBuffer>();
+        *sharedBuffer = std::move(buffer);
+        audioPlayer_.loadFromBuffer(std::move(sharedBuffer));
         hasAudio_ = true;
 
         tc::logNotice("HapPlayer") << "Loaded AAC audio: "
-            << buffer.channels << " ch, "
-            << buffer.sampleRate << " Hz";
+            << decodedChannels << " ch, "
+            << decodedRate << " Hz";
 
         return true;
     }
@@ -913,7 +922,10 @@ private:
         // Allocate pixel buffer if needed (RGBA = 4 bytes per pixel)
         size_t pixelCount = static_cast<size_t>(width_) * height_ * 4;
         if (pixels_.size() != pixelCount) {
-            pixels_.resize(pixelCount);
+            if (!detail::resizeMovBuffer(pixels_, pixelCount)) {
+                tc::logError("HapPlayer") << "HAP RGBA allocation failed";
+                return;
+            }
         }
 
         // Decode based on format
@@ -1095,41 +1107,62 @@ private:
     // Audio data extraction helpers (for getAudioData())
     // -------------------------------------------------------------------------
 
-    std::vector<uint8_t> getRawAudioData() const {
-        if (!audioTrack_) return {};
-
-        std::vector<uint8_t> audioData;
-        for (size_t i = 0; i < audioTrack_->samples.size(); i++) {
-            std::vector<uint8_t> sampleData;
-            if (const_cast<MovParser&>(movParser_).readSample(*audioTrack_, i, sampleData)) {
-                audioData.insert(audioData.end(), sampleData.begin(), sampleData.end());
-            }
-        }
-
-        return audioData;
+    // Mutable diagnostics belong to this player and survive close/load; moves
+    // carry them with the player, as the existing invalid-frame counter does.
+    mutable uint64_t rejectedAudio_ = 0;
+    mutable bool warnedAudio_ = false;
+    std::vector<uint8_t> rejectAudio(const char* why, uint64_t needed, uint64_t capacity) const {
+        ++rejectedAudio_;
+        if (!std::exchange(warnedAudio_, true)) tc::logWarning("HapPlayer")
+            << "Audio extraction rejected: " << why << "; needed " << needed
+            << " bytes, capacity " << capacity << " bytes (ADTS frame limit 8184 bytes)";
+        return {};
     }
-
-    std::vector<uint8_t> getAacDataWithAdts() const {
+    std::vector<uint8_t> extractAudio(bool adts) const {
         if (!audioTrack_) return {};
-
-        std::vector<uint8_t> aacData;
-        int sampleRate = audioTrack_->sampleRate;
-        int channels = audioTrack_->channels;
-
-        for (size_t i = 0; i < audioTrack_->samples.size(); i++) {
-            std::vector<uint8_t> sampleData;
-            if (const_cast<MovParser&>(movParser_).readSample(*audioTrack_, i, sampleData)) {
-                // Add ADTS header for this frame
-                uint8_t adtsHeader[7];
-                tc::SoundBuffer::createAdtsHeader(adtsHeader, static_cast<int>(sampleData.size()),
-                                                   sampleRate, channels);
-                aacData.insert(aacData.end(), adtsHeader, adtsHeader + 7);
-                aacData.insert(aacData.end(), sampleData.begin(), sampleData.end());
+        const uint64_t cap = audioTrack_->isPcm() ? uint64_t(SIZE_MAX) : 64u * 1024 * 1024;
+        uint64_t total = 0;
+        for (size_t i = 0; i < audioTrack_->samples.size(); ++i) {
+            const auto sample = audioTrack_->samples[i];
+            // Bound (security): encoded audio extraction, including ADTS headers, fits 64 MiB before any read/copy; full PCM grows to available memory. Overflow rejects the whole track and is counted.
+            // Bound (abi): ADTS has a 13-bit packet length including its seven-byte header. Overflow rejects the whole extraction and is counted.
+            if (!movParser_.isSampleInFile(*audioTrack_, i) ||
+                sample.size > cap - total ||
+                (adts && (sample.size > 8184 || total + sample.size > cap - 7))) {
+                return rejectAudio("file range or extraction bound", total + sample.size, cap);
             }
+            total += sample.size + (adts ? 7 : 0);
         }
-
-        return aacData;
+        std::vector<uint8_t> bytes;
+        if (!detail::resizeMovBuffer(bytes, size_t(total))) {
+            tc::logError("HapPlayer") << "Audio extraction allocation failed";
+            return {};
+        }
+        size_t cursor = 0;
+        for (size_t i = 0; i < audioTrack_->samples.size(); ++i) {
+            const auto sample = audioTrack_->samples[i];
+            const size_t headerBytes = adts ? 7 : 0;
+            const size_t room = cursor <= bytes.size() ? bytes.size() - cursor : 0;
+            // Bound (security): paged metadata may change between passes; every copy must fit the admitted destination. Overflow rejects the whole extraction and is counted.
+            if (cursor > bytes.size() || headerBytes > room ||
+                sample.size > room - headerBytes || (adts && sample.size > 8184))
+                return rejectAudio("sample table changed during extraction", uint64_t(sample.size) + headerBytes, room);
+            if (adts) {
+                tc::SoundBuffer::createAdtsHeader(bytes.data() + cursor, int(sample.size), audioTrack_->sampleRate, audioTrack_->channels);
+                cursor += 7;
+            }
+            if (!const_cast<MovParser&>(movParser_).readCapturedSample(sample, bytes.data() + cursor, bytes.size() - cursor)) {
+                tc::logError("HapPlayer") << "Audio sample read failed; extraction rejected";
+                return {};
+            }
+            cursor += sample.size;
+        }
+        if (cursor != bytes.size()) return rejectAudio("sample table changed during extraction", cursor, bytes.size());
+        if (audioTrack_->isPcm()) tc::internal::noticeAudioDecodedBytes(bytes.size());
+        return bytes;
     }
+    std::vector<uint8_t> getRawAudioData() const { return extractAudio(false); }
+    std::vector<uint8_t> getAacDataWithAdts() const { return extractAudio(true); }
 };
 
 } // namespace tcx::hap

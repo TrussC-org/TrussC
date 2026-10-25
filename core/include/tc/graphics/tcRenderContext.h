@@ -269,11 +269,9 @@ public:
     // deprecation warning. The user-facing TrussC.h wrapper IS deprecated.)
     // -----------------------------------------------------------------------
     void setCircleResolution(int res) {
-        circleResolution_ = res;          // legacy field, still read by
-                                          // some drawers until C2 migrates them
         setCurveResolution(res);
     }
-    int getCircleResolution() const { return circleResolution_; }
+    int getCircleResolution() const { return getCurveResolution(); }
 
     // -----------------------------------------------------------------------
     // Matrix operations
@@ -1096,8 +1094,6 @@ private:
         StrokeJoin strokeJoin = StrokeJoin::Miter;
         float pointSize = 1.0f;                    // logical px, like strokeWeight
         PointStyle pointStyle = PointStyle::Square;
-        int circleResolution = 20;     // legacy, will be removed once all
-                                       // draw* migrate to curve.resolution
         CurveStyle curve;              // shared by all curved primitives
                                        // (circle, ellipse, arc, bezier, ...)
         Direction textAlignH = Direction::Left;
@@ -1125,9 +1121,6 @@ private:
     bool& fillEnabled_ = style_.fillEnabled;
     bool& strokeEnabled_ = style_.strokeEnabled;
     float& strokeWeight_ = style_.strokeWeight;
-
-    // Circle resolution (shortcut to style_)
-    int& circleResolution_ = style_.circleResolution;
 
     // Matrix stack
     RenderTarget& matrixTarget() const {
@@ -1251,8 +1244,11 @@ public:
     ~EntryStackGuard() {
         // present() owns Draw's stack reset. Nested update/setup/event guards
         // temporarily override Draw, even when a native pass is already open.
+        TeardownSteps steps;
         if (entry_ != AppEntry::Draw)
-            rc_.restoreStacksAtEntryEnd(entry_, matrixDepth_, styleDepth_, eventName_, target_);
+            steps.run("entry stack restoration", [&] {
+                rc_.restoreStacksAtEntryEnd(entry_, matrixDepth_, styleDepth_, eventName_, target_);
+            });
         rc_.activeEntry_ = previousEntry_;
     }
     EntryStackGuard(const EntryStackGuard&) = delete;

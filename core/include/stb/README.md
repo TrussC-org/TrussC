@@ -7,11 +7,11 @@ and contributors, under the stb dual license (MIT or Public Domain, see
 
 | File | Version string | Source | Commit | Imported | TrussC patches |
 |---|---|---|---|---|---|
-| `stb_image.h` | v2.30 | [nvpro-samples/stb](https://github.com/nvpro-samples/stb), branch `nv/all-fixes` | `1cafe0e01eeaf4142f05b36218793cb46c7ce433` (2025-12-24) | 2026-09-30 | 2 |
+| `stb_image.h` | v2.30 | [nvpro-samples/stb](https://github.com/nvpro-samples/stb), branch `nv/all-fixes` | `1cafe0e01eeaf4142f05b36218793cb46c7ce433` (2025-12-24) | 2026-09-30 | 4 |
 | `stb_image_write.h` | v1.16 | [nothings/stb](https://github.com/nothings/stb), `master` | `1ee679ca2ef753a528db5ba6801e1067b40481b8` (2021-07-11) | 2025-12-16 | 1 |
 | `stb_perlin.h` | v0.5 | [nothings/stb](https://github.com/nothings/stb), `master` | `2bb4a0accd4003c1db4c24533981e01b1adfd656` (2020-02-02) | 2025-12-16 | none |
-| `stb_truetype.h` | v1.26 | [nothings/stb](https://github.com/nothings/stb), `master` | `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (2024-07-15) | 2025-12-16 | 4 |
-| `../stb_vorbis.c` | v1.22 | [sezero/stb](https://github.com/sezero/stb), branch `stb_vorbis-sezero` | `dd0c5eccaf092012b531d69d595fb587ece79571` (2026-07-13) | 2026-09-30 | none |
+| `stb_truetype.h` | v1.26 | [nothings/stb](https://github.com/nothings/stb), `master` | `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (2024-07-15) | 2025-12-16 | 5 |
+| `../stb_vorbis.c` | v1.22 | [sezero/stb](https://github.com/sezero/stb), branch `stb_vorbis-sezero` | `dd0c5eccaf092012b531d69d595fb587ece79571` (2026-07-13) | 2026-09-30 | 2 |
 
 `stb_vorbis.c` lives one level up, in `core/include/`, because
 `core/include/tc/sound/tcSound_impl.cpp` includes it as `"stb_vorbis.c"`.
@@ -28,6 +28,11 @@ workspace reserved by the MCP owner. All scoped buffers are freed before the
 scope ends; outside a scope these hooks use ordinary malloc/realloc/free with
 unchanged pointer layout. Keep these hooks when updating stb_image and run
 `httpAdmission`, `mcpAdmission` and `mcpAnalyzeImage` after changes.
+
+Ordinary Pixels decoding also observes allocation failures through an internal
+thread-local scope; it imposes no separate working-memory budget. File and
+memory entry points inspect metadata against the recorded GPU axis limit
+(16384 before GPU setup or in headless use) and admit at most 64 MiB encoded.
 
 No other configuration macro is set: every stb_image format is enabled.
 
@@ -55,7 +60,13 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
      4096-entry buffer and written out with a loop, instead of one recursive
      call per link. The per-pixel body moved into a new helper,
      `stbi__out_gif_pixel`. Output is unchanged.
-- **Covered by**: `core/tests/mediaDecode` (every format, plus one check per
+  3. `stbi__parse_png_file`: validate memory IDAT spans before allocation,
+     calculate the scanline storage from IHDR (including Adam7), and decode
+     into that fixed destination. Decoder failure leaves no partial pixels.
+  4. BMP metadata reports positive row counts for top-down images, matching
+     decoded dimensions. The shared header reader rejects a height whose
+     absolute value cannot fit the decoder's integer indices.
+- **Covered by**: `core/tests/imageDecodeBounds`, `core/tests/mediaDecode` (every format, plus one check per
   patch).
 
 ## stb_image_write.h
@@ -78,7 +89,7 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
 - **Source**: nothings/stb `master`, the file as of
   `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (a merge commit; the version
   history in the file ends at 1.26, 2021-08-28).
-- **TrussC patches** (marked `// TrussC patch:` in the file):
+- **TrussC patches** (marked `// TrussC patch:` or local `// Bound` comments):
   1. `stbtt_InitFont_internal`: the CFF buffer is made with the `CFF ` table
      length from the table directory, so CFF data (INDEX, DICT, Subrs,
      FDSelect, CharStrings) is read within the CFF table's length.
@@ -113,6 +124,18 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
      usable encoding record still wins; unsupported maps, including the
      variation-only format 14, do not replace it. Platform/encoding filters
      are unchanged; Windows Symbol records are not accepted.
+  5. Glyph input/workspace admission: TrueType glyph records are checked before
+     outline allocation; compound shapes check depth, combined vertex counts and
+     total glyph visits per shape, including empty components, plus cumulative
+     append copies (including previous components). CFF interpreter
+     passes (metrics, outline counting and output) each allow at most 524,288
+     interpreter dispatches, including operands and no-output operators inside
+     local/global subroutines. The separate 65,536-call expansion ceiling is
+     retained. Exhaustion rejects the glyph and marks its workspace, independently of
+     output vertices or recursion depth. Exhaustion frees
+     the in-progress outline. Raster scanline allocation failures return before
+     pointer arithmetic. The shared backend reports failures through its owning
+     workspace scope; see the v0.8 import notes below.
 - **Configuration** (in `core/include/impl/stb_impl.cpp`, not a change to the
   file): `STBTT_assert` does nothing in every build type, so Debug and
   Release builds handle font data the same way. Allocations through
@@ -130,10 +153,10 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
   `stbtt_InitFont`, and after it that the CFF CharStrings INDEX count can be
   read within the CFF table. A glyph index from the cmap past `numGlyphs`
   (for CFF, past the CharStrings count) and a codepoint above U+10FFFF map
-  to .notdef. Fonts of 1 GiB or more are refused. cmap subtable contents,
-  glyph outlines and composite glyph nesting are not checked. Unicode cmap
-  subtable format words are checked within the cmap table; a font with no
-  supported Unicode map is refused with a diagnostic.
+  to .notdef. Fonts of 1 GiB or more are refused by the existing backend addressing guard.
+  Supported cmap sections and ranges are checked before initialization. Glyph
+  records, compound depth/work and decoded workspace are checked when a shape is
+  requested. A font with no supported Unicode map is refused with a diagnostic.
 - **Covered by**: `core/tests/fontSfntCheck`.
 
 ## stb_vorbis.c (in core/include/)
@@ -148,11 +171,33 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
   as upstream.
 - **Before 2026-09-30**: unmodified upstream nothings/stb v1.22,
   `1ee679ca2ef753a528db5ba6801e1067b40481b8` (2021-07-11).
-- **TrussC patches**: none.
-- **Covered by**: `core/tests/mediaDecode` (file and memory decode) and
-  `core/tests/audioDiagnostics` (a failed `stb_vorbis_open_file` with
-  `close_on_free` closes the `FILE` once; `SoundBuffer::loadOgg` relies on
-  that).
+- **TrussC patches** (2; search for `STB_VORBIS_VALIDATE_FORMAT` and
+  `TrussC patch` in
+  `../stb_vorbis.c`): opt-in `STB_VORBIS_VALIDATE_FORMAT(channels, rate)`
+  checks the identification header before setup/codebook work. Rejection takes
+  the existing invalid-header error path. `tcSound_impl.cpp` supplies the hook
+  in a scoped per-load format checker, then undefines it. Without the macro,
+  format handling retains its upstream default.
+  The second patch makes `STB_VORBIS_NO_COMMENTS` consume vendor/user strings
+  without allocating them, checking each length byte and string byte against
+  packet/input end. TrussC defines this existing opt-out macro because it does
+  not use comment metadata. The normal comments-enabled configuration is
+  unchanged. Truncated comments fail through the existing invalid-setup path.
+  The earlier setup allocator hooks were removed with the full-load PCM quota;
+  upstream malloc/free still handles codec setup and decoded PCM.
+  SoundBuffer file loads use the bounded encoded-memory reader.
+- **Re-apply on update**: restore identification-header validation before any
+  format-driven setup, and keep the hook definition/scope in `tcSound_impl.cpp`.
+  Restore the checked no-comments parsing path and its macro in the wrapper.
+  Run `audioDecodeBounds`: `Vorbis source format is checked before setup` fails
+  if the format hook is lost. `Vorbis comment length cannot request large raw
+  malloc` observes raw malloc on Linux (standalone and combined harnesses use
+  `--wrap=malloc`); 1 GiB vendor/user claims must fail with small requests and
+  unchanged PCM/metadata. A generated valid comment packet still loads through
+  file and memory entry points. Also run full-load growth, direct PCM malloc/free and
+  file ownership checks in the harnesses below.
+- **Covered by**: `core/tests/mediaDecode`, `core/tests/audioDiagnostics`
+  (file ownership and decoder growth), and `core/tests/audioDecodeBounds`.
 
 ## Updating
 
@@ -182,3 +227,20 @@ of nothings/stb: `git log --all -m --format='%H %ci' --find-object=$(git
 hash-object <TrussC copy>)` and take the oldest line (`-m` is needed when the
 file last changed in a merge, as `stb_truetype.h` did). For
 `stb_image_write.h` and `stb_truetype.h`, undo the TrussC patch first.
+
+### Document/font import workspace (v0.8)
+
+`impl/tcFontInput.h` holds the shared sfnt directory checks used before core
+and ImGui font imports. Local fonts retain only the backend addressing guard.
+`impl/tcFontScratch.h` tracks live stb allocations per glyph, checks glyph counts and raster metrics
+against its live workspace, and reports allocation failure before a
+glyph is published. Atlas pages remain independent. Compound TrueType shapes
+have a depth guard, a per-shape total-visit bound (including empty components),
+a per-shape cumulative append-copy allowance of 1,048,576 vertices (including
+copies of previous components), and checked combined vertex counts. The copy
+allowance also bounds component transforms and propagates whole-shape rejection.
+CFF bounds every glyph interpreter pass to
+524,288 interpreter dispatches, including operands and no-output subroutine bodies,
+while retaining its separate 65,536-call expansion ceiling; raster scanline
+allocation failure returns before pointer arithmetic. Keep these patches when
+updating stb and run `documentImports`, `fontSfntCheck`, and ImGui addon tests.
