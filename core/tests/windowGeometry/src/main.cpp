@@ -18,6 +18,12 @@ void check(const char* label, bool ok) {
     if (!ok) ++failures;
 }
 struct Call { Window* window; internal::WindowControl op; int x, y; };
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+// The window can vanish between diagnostic queries; record X errors instead of
+// letting Xlib's default handler exit the test.
+bool x11QueryFailed = false;
+int recordX11Error(Display*, XErrorEvent*) { x11QueryFailed = true; return 0; }
+#endif
 std::vector<Call> calls;
 bool throws = false;
 internal::WindowContext* callerContext = nullptr;
@@ -79,6 +85,9 @@ struct GeometryObservation {
         auto* display = (Display*)sapp_x11_get_display();
         const auto native = (::Window)(uintptr_t)sapp_x11_get_window();
         if (!display || !native) return; // Also supports the headless KMS lane.
+        XSync(display, False);
+        const auto previousHandler = XSetErrorHandler(recordX11Error);
+        x11QueryFailed = false;
         XWindowAttributes attributes{};
         ::Window child = 0;
         clientValid = XGetWindowAttributes(display, native, &attributes) &&
@@ -86,24 +95,26 @@ struct GeometryObservation {
                                   0, 0, &clientX, &clientY, &child);
         if (clientValid) { clientWidth = attributes.width; clientHeight = attributes.height; }
         const Atom property = XInternAtom(display, "_NET_FRAME_EXTENTS", True);
-        if (property == None) return;
         Atom type = None;
         int format = 0;
         unsigned long count = 0, remaining = 0;
         unsigned char* data = nullptr;
-        if (XGetWindowProperty(display, native, property, 0, 4, False, XA_CARDINAL,
-                              &type, &format, &count, &remaining, &data) == Success &&
+        if (property != None &&
+            XGetWindowProperty(display, native, property, 0, 4, False, XA_CARDINAL,
+                               &type, &format, &count, &remaining, &data) == Success &&
             type == XA_CARDINAL && format == 32 && count == 4 && remaining == 0 && data) {
             const auto* values = reinterpret_cast<const unsigned long*>(data);
-            // Match the geometry helper's defensive decoration-offset bound,
-            // applied to all four sides so frame size arithmetic is safe too.
             extentsValid = true;
             for (int i = 0; i < 4; ++i) {
                 extents[i] = values[i];
+                // Bound (frame arithmetic stays in int, as the geometry helper's cap): reject decorations above SHRT_MAX.
                 if (values[i] > SHRT_MAX) extentsValid = false;
             }
         }
         if (data) XFree(data);
+        XSync(display, False);
+        XSetErrorHandler(previousHandler);
+        if (x11QueryFailed) clientValid = extentsValid = false;
 #endif
     }
     void print() {
