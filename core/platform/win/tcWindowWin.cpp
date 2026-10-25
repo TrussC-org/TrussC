@@ -126,9 +126,9 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
     win->events().rawEvent.notify(*ev);
 
     // sapp pointer coordinates arrive in framebuffer pixels; secondary pointer
-    // events retain their existing logical-point units.
+    // events follow main: pixels in pixelPerfect mode, logical points otherwise.
     const float dpi = sapp_window_dpi_scale(swin);
-    const float scale = (dpi > 0.0f) ? (1.0f / dpi) : 1.0f;
+    const float scale = internal::appPointerScale(dpi);
     const bool hasShift = (ev->modifiers & SAPP_MODIFIER_SHIFT) != 0;
     const bool hasCtrl  = (ev->modifiers & SAPP_MODIFIER_CTRL) != 0;
     const bool hasAlt   = (ev->modifiers & SAPP_MODIFIER_ALT) != 0;

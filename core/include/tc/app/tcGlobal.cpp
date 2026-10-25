@@ -1405,6 +1405,14 @@ int framebufferToLogical(int pixels, float dpi) {
 
 float appSizeDpi(float dpi) { return pixelPerfectMode() ? 1.0f : dpi; }
 
+float appPointerScale(float dpi) {
+    // Native positions/deltas are framebuffer pixels. Invalid native DPI falls
+    // back to unit scale rather than introducing non-finite App coordinates.
+    if (pixelPerfectMode() || !std::isfinite(dpi) || dpi <= 0.0f) return 1.0f;
+    const float scale = 1.0f / dpi;
+    return std::isfinite(scale) ? scale : 1.0f;
+}
+
 void syncSecondaryAppSize(Window& window, int width, int height) {
     const auto size = framebufferResizeArgs(width, height, appSizeDpi(window.context().dpiScale));
     window.syncRootSize(float(size.width), float(size.height));
