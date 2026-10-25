@@ -239,6 +239,47 @@ int main() {
     pending = 0; badFd = true; _sapp_tc_x11_wait_until(now + .1);
     check("non-EINTR error returns to loop", polls == 1);
 
+    // Exercise the shared production dispatcher for main and secondary focus.
+    for (Window window : { Window(1), Window(2) }) {
+        for (int type : { FocusIn, FocusOut }) {
+            for (int mode : { NotifyNormal, NotifyWhileGrabbed }) {
+                reset(main, pair, display); _sapp_tc.window_slots = 2;
+                secondary.desc.event_cb = [](const sapp_event* ev, sapp_window, void*) { event(ev); };
+                const sapp_event_type expected = type == FocusIn ? SAPP_EVENTTYPE_FOCUSED : SAPP_EVENTTYPE_UNFOCUSED;
+                XEvent ev{}; ev.type = type; ev.xfocus.window = window; ev.xfocus.mode = mode;
+                ev.xfocus.detail = NotifyNonlinear;
+                _sapp_tc_x11_process_event(&ev);
+                check("Nonlinear focus delivers once to the addressed window", callbacks == 1 && lastEvent.type == expected);
+                check("real focus re-admits only EGL main", _sapp_tc.main_input_delivered == (window == 1));
+                _sapp_tc.main_input_delivered = false;
+                for (int pointerType : { type == FocusIn ? FocusOut : FocusIn, type }) {
+                    ev.type = pointerType; ev.xfocus.detail = NotifyPointer;
+                    _sapp_tc_x11_process_event(&ev);
+                    check("pointer focus adds no callback or main admission", callbacks == 1 &&
+                        lastEvent.type == expected && !_sapp_tc.main_input_delivered);
+                }
+                ev.type = type; ev.xfocus.detail = NotifyAncestor;
+                _sapp_tc_x11_process_event(&ev);
+                check("Ancestor focus still delivers and admits only main", callbacks == 2 &&
+                    lastEvent.type == expected && _sapp_tc.main_input_delivered == (window == 1));
+            }
+            for (int mode : { NotifyGrab, NotifyUngrab }) {
+                reset(main, pair, display); _sapp_tc.window_slots = 2;
+                XEvent ev{}; ev.type = type; ev.xfocus.window = window;
+                ev.xfocus.mode = mode; ev.xfocus.detail = NotifyNonlinear;
+                _sapp_tc_x11_process_event(&ev);
+                check("grab-cycle focus remains ignored", callbacks == 0 && !_sapp_tc.main_input_delivered);
+            }
+        }
+    }
+    reset(main, windows, display);
+    main.mouse_x = 10; main.mouse_y = 20; sapp_lock_mouse(true);
+    XEvent pointerOut{}; pointerOut.type = FocusOut; pointerOut.xfocus.window = 1;
+    pointerOut.xfocus.mode = NotifyNormal; pointerOut.xfocus.detail = NotifyPointer;
+    _sapp_tc_x11_process_event(&pointerOut);
+    check("pointer FocusOut retains EGL main mouse unlock without admission", !_sapp_tc.mouse_locked &&
+        warpX == 10 && warpY == 20 && callbacks == 0 && !_sapp_tc.main_input_delivered);
+
     reset(main, windows, display);
     mouseEvents = 0;
     main.mouse_x = 10; main.mouse_y = 20; main.mouse_pos_valid = true; sapp_lock_mouse(true);

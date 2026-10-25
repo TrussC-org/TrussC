@@ -11243,8 +11243,8 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
     _sapp_tc_window_t* w = _sapp_tc_lookup_xwin(ev->xany.window);
     switch (ev->type) {
         case FocusIn:
-            /* ignore grab-cycle focus notifications (GLFW parity) */
-            if (w && (ev->xfocus.mode == NotifyNormal || ev->xfocus.mode == NotifyWhileGrabbed)) {
+            /* ignore grab-cycle and pointer-only focus notifications (GLFW parity) */
+            if (w && ev->xfocus.detail != NotifyPointer && (ev->xfocus.mode == NotifyNormal || ev->xfocus.mode == NotifyWhileGrabbed)) {
                 _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_FOCUSED);
             }
             break;
@@ -11252,7 +11252,7 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
 #if defined(SOKOL_GLES3)
             if (w && w->is_main && _sapp_tc.mouse_locked) _sapp_tc_x11_lock_mouse(false);
 #endif
-            if (w && (ev->xfocus.mode == NotifyNormal || ev->xfocus.mode == NotifyWhileGrabbed)) {
+            if (w && ev->xfocus.detail != NotifyPointer && (ev->xfocus.mode == NotifyNormal || ev->xfocus.mode == NotifyWhileGrabbed)) {
                 _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_UNFOCUSED);
             }
             break;
