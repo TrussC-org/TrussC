@@ -334,6 +334,13 @@ jobs:
         shell: bash
         run: python3 -m unittest discover -s tools/tests -p test_upstream_check.py -v
 
+      # Window pixel-size dispatch probes compile against the X11 headers that
+      # the Linux dependencies above install (#1007).
+      - name: window pixel size regression checks
+        if: runner.os == 'Linux' && matrix.shard == 1
+        shell: bash
+        run: python3 tools/tests/test_window_pixel_size.py -v
+
       # Compile-and-link canary: every documented core API + the repo-contained
       # addons (see examples/tests/AllFeaturesExample/src/coverage.h). Every
       # other example is built daily (daily.yml).
@@ -901,10 +908,6 @@ jobs:
       - name: daily web sequencing regression checks
         if: always()
         run: python3 tools/tests/test_daily_workflow.py -v
-
-      - name: window pixel size regression checks
-        if: always()
-        run: python3 tools/tests/test_window_pixel_size.py -v
 
       - name: build workflow cache regression checks
         if: always()
