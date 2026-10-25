@@ -10446,6 +10446,10 @@ static bool _sapp_tc_x11_parse_dropped_files_list(_sapp_tc_x11_uri_reader* src) 
             // skip
         } else if (src_chr == '\n') {
             src_count = 0;
+            // Empty decoded paths do not retain a file or consume a slot.
+            if (dst_ptr == _sapp_tc.app.drop_buffer + _sapp_tc.app.drop_num_files * _sapp_tc.app.drop_max_path_length) {
+                continue;
+            }
             _sapp_tc.app.drop_num_files++;
             // too many files is not an error
             // Bound (security): X11 drop lists can flood delivery; a fixed cap keeps path storage finite. Overflow stops parsing further files.

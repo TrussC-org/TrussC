@@ -385,12 +385,17 @@ int main() {
         const char* payload;
         int retainedFiles;
         const char* retainedPath;
+        const char* secondPath = "";
     };
     for (const DropCase& test : {
         DropCase{ "file", 0, "" },
         DropCase{ "file://", 0, "" },
         DropCase{ "file:///a", 0, "" },
-        DropCase{ "file://\r\n", 1, "" },
+        DropCase{ "file://\r\n", 0, "" },
+        DropCase{ "file://\r\nfile://\r\n", 0, "" },
+        DropCase{ "file://\r\nfile:///a\r\n", 1, "/a" },
+        DropCase{ "file:///a\r\nfile://\r\nfile:///b\r\n", 2, "/a", "/b" },
+        DropCase{ "file://\r\nfile:///a\r\nfile://\r\nfile:///b\r\nfile://\r\nfile:///ignored\r\n", 2, "/a", "/b" },
         DropCase{ "file:///a\r\n", 1, "/a" },
     }) {
         property = test.payload;
@@ -405,7 +410,8 @@ int main() {
             dropCallbacks == (good ? 1 : 0) && _sapp_tc.main_input_delivered == good);
         check("URI content SelectionNotify retains the parser's completed-entry policy",
             _sapp_tc.app.drop_num_files == test.retainedFiles &&
-            (test.retainedFiles == 0 || std::strcmp(paths, test.retainedPath) == 0));
+            (test.retainedFiles == 0 || std::strcmp(paths, test.retainedPath) == 0) &&
+            (test.retainedFiles < 2 || std::strcmp(paths + _sapp_tc.app.drop_max_path_length, test.secondPath) == 0));
         check("URI content SelectionNotify Finished flags and action", sentEvent.xclient.message_type == 18 &&
             sentEvent.xclient.data.l[1] == (good ? 1 : 0) && sentEvent.xclient.data.l[2] == (good ? 20 : None));
     }
