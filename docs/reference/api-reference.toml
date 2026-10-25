@@ -40754,7 +40754,7 @@ details.en = '''
 - `sampleCount` requests MSAA and defaults to `4`. `fullscreen` defaults to `false`, and `decorated` defaults to `true`; disabling decorations requests a borderless window on desktop platforms.
 - `swapInterval` defaults to `1` for display synchronization; `0` disables it. Use `setSwapInterval()` to configure presentation separately from the update and draw rates.
 - `clipboardSize` defaults to 65536 bytes. `setClipboardSize()` sets the backend's text buffer limit; oversized clipboard text can be truncated or rejected depending on the platform.
-- `uniformBufferReserve` defaults to `0` for the backend default; `reserveUniformBuffer(bytes)` sets a per-frame GPU uniform buffer reservation. Metal can grow the buffer, WebGPU and Vulkan require sufficient capacity, and GL and D3D11 ignore this reservation.
+- `uniformBufferReserve` defaults to `0` for the backend default; `reserveUniformBuffer(bytes)` sets a per-frame GPU uniform buffer reservation. Metal and WebGPU grow the buffer as needed; Vulkan requires sufficient capacity, and GL and D3D11 ignore this reservation.
 '''
 details.ja = '''
 - `WindowSettings` を `runApp<AppClass>()` に渡します。セッターは同じ設定オブジェクトを返すためチェインできます。デフォルトのサイズは 1280 × 720、タイトルは `"TrussC App"` です。
@@ -40762,7 +40762,7 @@ details.ja = '''
 - `sampleCount` は MSAA の指定で、デフォルトは `4` です。`fullscreen` は `false`、`decorated` は `true` がデフォルトです。装飾を無効にすると、デスクトップでは枠なしウィンドウを要求します。
 - `swapInterval` のデフォルトはディスプレイに同期する `1` で、`0` は同期を無効にします。`setSwapInterval()` で更新や描画のレートとは別に表示間隔を設定します。
 - `clipboardSize` のデフォルトは 65536 バイトです。`setClipboardSize()` はバックエンドのテキストバッファーの上限を設定します。上限を超えるクリップボードのテキストは、プラットフォームによって切り詰められたり拒否されたりします。
-- `uniformBufferReserve` のデフォルトはバックエンドの既定値を使う `0` です。`reserveUniformBuffer(bytes)` はフレームごとの GPU ユニフォームバッファーの予約量を設定します。Metal はバッファーを拡張できますが、WebGPU と Vulkan では十分な容量が必要です。GL と D3D11 ではこの予約量を使いません。
+- `uniformBufferReserve` のデフォルトはバックエンドの既定値を使う `0` です。`reserveUniformBuffer(bytes)` はフレームごとの GPU ユニフォームバッファーの予約量を設定します。Metal と WebGPU は必要に応じてバッファーを拡張し、Vulkan では十分な容量が必要です。GL と D3D11 ではこの予約量を使いません。
 '''
 details.ko = '''
 - `WindowSettings`를 `runApp<AppClass>()`에 전달합니다. setter는 같은 설정 객체를 반환하므로 체이닝할 수 있습니다. 기본 크기는 1280 × 720이고 제목은 `"TrussC App"`입니다.
@@ -40770,7 +40770,7 @@ details.ko = '''
 - `sampleCount`는 MSAA 요청이며 기본값은 `4`입니다. `fullscreen`의 기본값은 `false`, `decorated`는 `true`입니다. 장식을 끄면 데스크톱에서 테두리 없는 윈도우를 요청합니다.
 - `swapInterval`의 기본값은 디스플레이에 동기화하는 `1`이며, `0`은 동기화를 끕니다. `setSwapInterval()`로 갱신 및 그리기 실행률과 별도로 표시 간격을 설정합니다.
 - `clipboardSize`의 기본값은 65536바이트입니다. `setClipboardSize()`는 백엔드 텍스트 버퍼의 한도를 설정합니다. 한도를 넘는 클립보드 텍스트는 플랫폼에 따라 잘리거나 거부될 수 있습니다.
-- `uniformBufferReserve`의 기본값은 백엔드 기본값을 사용하는 `0`입니다. `reserveUniformBuffer(bytes)`는 프레임별 GPU 유니폼 버퍼 예약량을 설정합니다. Metal은 버퍼를 확장할 수 있지만 WebGPU와 Vulkan에서는 충분한 용량이 필요합니다. GL과 D3D11은 이 예약량을 사용하지 않습니다.
+- `uniformBufferReserve`의 기본값은 백엔드 기본값을 사용하는 `0`입니다. `reserveUniformBuffer(bytes)`는 프레임별 GPU 유니폼 버퍼 예약량을 설정합니다. Metal과 WebGPU는 필요에 따라 버퍼를 확장하며 Vulkan에서는 충분한 용량이 필요합니다. GL과 D3D11은 이 예약량을 사용하지 않습니다.
 '''
 related = ["runApp", "setWindowSize", "setWindowTitle", "HeadlessSettings"]
 snippet = '''
@@ -40904,31 +40904,31 @@ description.ja = "フレームごとの GPU ユニフォームバッファの初
 description.ko = "프레임별 GPU 유니폼 버퍼의 초기 용량을 설정한다."
 details.en = '''
 - `bytes` sets `uniformBufferReserve` in bytes and returns the same `WindowSettings&` for chaining. Set it before launching the app; graphics initialization reads the reservation once.
-- A nonpositive value uses 1 MiB on Metal and 4 MiB on WebGPU or Vulkan. GL and D3D11 ignore this reservation because they do not use this per-frame uniform buffer limit.
+- A nonpositive value uses 1 MiB on Metal or WebGPU and 4 MiB on Vulkan. GL and D3D11 ignore this reservation because they do not use this per-frame uniform buffer limit.
 - Budget the aligned size of every uniform upload. At 512 bytes per draw, 4 MiB holds about 8,000 draws and `reserveUniformBuffer(32 * 1024 * 1024)` holds about 65,000; leave headroom for larger shader blocks and other drawing.
 - Alignment is 256 bytes on macOS Metal and the iOS simulator, 16 bytes on physical iOS devices, and device-dependent on WebGPU and Vulkan.
 - Metal doubles the buffer capacity when it overflows and logs a warning; already encoded draws remain valid. Reserving enough capacity avoids these growth allocations.
-- WebGPU does not grow the buffer: overflow triggers an assertion when assertions are enabled and can write beyond the CPU staging buffer when they are disabled. Vulkan logs an overflow error and skips affected draws.
+- WebGPU grows CPU staging and GPU storage before writing, preserves recorded draws and logs one growth warning per graphics initialization. Allocation failure logs one Error and skips further uploads and draws until the next commit. On a GPU out-of-memory the affected frame may be dropped; the next frame returns to the previous buffer with one Error. Every WebGPU error raised in a frame that uses a not yet confirmed buffer is logged through sokol with its message rather than as an uncaptured error, so after a GPU out-of-memory a validation message for the dropped frame may also be logged. Vulkan logs an overflow error and skips affected draws.
 - Larger reservations increase memory use without adding an allocation every frame. Metal and Vulkan allocate two buffers for frames in flight; WebGPU allocates a GPU buffer and CPU staging storage, each with an additional 64 KiB.
 - The hot-reload launcher and secondary-window creation do not forward this reservation.
 '''
 details.ja = '''
 - `bytes` で `uniformBufferReserve` をバイト単位で設定し、チェイン用に同じ `WindowSettings&` を返します。アプリの起動前に設定してください。予約量は描画系の初期化時に一度だけ読み取ります。
-- 0 以下の場合、Metal では 1 MiB、WebGPU と Vulkan では 4 MiB を使います。GL と D3D11 にはこのフレームごとのユニフォームバッファによる上限がないため、この予約量を無視します。
+- 0 以下の場合、Metal と WebGPU では 1 MiB、Vulkan では 4 MiB を使います。GL と D3D11 にはこのフレームごとのユニフォームバッファによる上限がないため、この予約量を無視します。
 - 各ユニフォーム転送のサイズをアラインメントに合わせて切り上げ、合計量を見積もってください。1 ドローあたり 512 バイトなら、4 MiB で約 8,000 ドロー、`reserveUniformBuffer(32 * 1024 * 1024)` で約 65,000 ドローが目安です。大きなシェーダーブロックやほかの描画の分も余裕を持たせてください。
 - アラインメントは macOS の Metal と iOS シミュレーターでは 256 バイト、iOS 実機では 16 バイトです。WebGPU と Vulkan ではデバイスに依存します。
 - Metal は容量を超えるとバッファ容量を倍増し、警告をログに出します。記録済みの描画は有効なままです。十分な容量を予約すると、この拡張時の確保を避けられます。
-- WebGPU はバッファを拡張しません。容量を超えると、アサートが有効な場合はアサートが発生し、無効な場合は CPU の転送用バッファの範囲外に書き込む可能性があります。Vulkan は容量超過のエラーをログに出し、該当する描画をスキップします。
+- WebGPU は書き込み前に CPU 転送領域と GPU バッファを拡張し、記録済みの描画を維持します。拡張の警告は描画系の初期化ごとに一度だけ出ます。確保に失敗すると Error を一度出し、次の commit まで後続の転送と描画をスキップします。GPU のメモリ不足では該当フレームが描画されないことがあり、次のフレームで以前のバッファに戻って Error を一度出します。確認前のバッファを使うフレームで起きた WebGPU エラーは、捕捉されないエラーとしてではなく、すべてメッセージ付きで sokol のログに出ます。そのため GPU のメモリ不足の後には、描画されなかったフレームの検証メッセージも出ることがあります。Vulkan は容量超過のエラーをログに出し、該当する描画をスキップします。
 - 予約量を増やすとメモリ使用量は増えますが、毎フレームの確保は追加されません。Metal と Vulkan は処理中のフレーム用に 2 個のバッファを確保します。WebGPU は GPU バッファと CPU の転送用領域を確保し、それぞれに 64 KiB を追加します。
 - ホットリロード用ランチャーとサブウィンドウの作成では、この予約量を反映しません。
 '''
 details.ko = '''
 - `bytes`로 `uniformBufferReserve`를 바이트 단위로 설정하고, 호출을 연결할 수 있도록 같은 `WindowSettings&`를 반환합니다. 앱을 실행하기 전에 설정해야 합니다. 그래픽 초기화 시 예약량을 한 번만 읽습니다.
-- 0 이하이면 Metal은 1 MiB, WebGPU와 Vulkan은 4 MiB를 사용합니다. GL과 D3D11에는 이 프레임별 유니폼 버퍼에 따른 제한이 없으므로 예약량을 무시합니다.
+- 0 이하이면 Metal과 WebGPU는 1 MiB, Vulkan은 4 MiB를 사용합니다. GL과 D3D11에는 이 프레임별 유니폼 버퍼에 따른 제한이 없으므로 예약량을 무시합니다.
 - 각 유니폼 전송 크기를 정렬 단위에 맞게 올림하여 합계를 계산해야 합니다. 드로우당 512바이트라면 4 MiB는 약 8,000회, `reserveUniformBuffer(32 * 1024 * 1024)`는 약 65,000회의 드로우를 수용합니다. 더 큰 셰이더 블록과 다른 그리기를 위한 여유도 확보해야 합니다.
 - 정렬 단위는 macOS Metal과 iOS 시뮬레이터에서 256바이트, iOS 실제 기기에서 16바이트입니다. WebGPU와 Vulkan에서는 기기에 따라 달라집니다.
 - Metal은 용량을 초과하면 버퍼 용량을 두 배로 늘리고 경고를 로그에 기록합니다. 이미 기록한 드로우는 유효하게 유지됩니다. 충분한 용량을 예약하면 확장 시 할당을 피할 수 있습니다.
-- WebGPU는 버퍼를 확장하지 않습니다. 용량을 초과하면 어설션이 활성화된 경우 어설션이 발생하며, 비활성화된 경우 CPU 스테이징 버퍼 범위를 벗어나 쓸 수 있습니다. Vulkan은 용량 초과 오류를 로그에 기록하고 해당 드로우를 건너뜁니다.
+- WebGPU는 쓰기 전에 CPU 스테이징 공간과 GPU 버퍼를 확장하고 기록된 드로우를 유지합니다. 확장 경고는 그래픽 초기화마다 한 번 기록합니다. 할당에 실패하면 Error를 한 번 기록하고 다음 commit까지 이후 업로드와 드로우를 건너뜁니다. GPU 메모리가 부족하면 해당 프레임이 누락될 수 있으며 다음 프레임에서 이전 버퍼로 돌아가고 Error를 한 번 기록합니다. 아직 확인되지 않은 버퍼를 사용하는 프레임에서 발생한 WebGPU 오류는 처리되지 않은 오류가 아니라 모두 메시지와 함께 sokol 로그에 기록됩니다. 따라서 GPU 메모리 부족 후에는 누락된 프레임의 검증 메시지도 기록될 수 있습니다. Vulkan은 용량 초과 오류를 로그에 기록하고 해당 드로우를 건너뜁니다.
 - 예약량을 늘리면 메모리 사용량이 증가하지만 매 프레임 할당이 추가되지는 않습니다. Metal과 Vulkan은 처리 중인 프레임을 위해 버퍼 2개를 할당합니다. WebGPU는 GPU 버퍼와 CPU 스테이징 공간을 할당하며 각각 64 KiB를 추가합니다.
 - 핫 리로드 실행기와 보조 윈도우 생성에서는 이 예약량을 반영하지 않습니다.
 '''
