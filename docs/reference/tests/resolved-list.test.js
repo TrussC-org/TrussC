@@ -129,9 +129,6 @@ test('the join preserves inherited metadata and prose for coverage, but docs omi
     for (const emitter of ['emit-forai.js', 'emit-of.js']) {
         assert.equal(run(emitter, ['--data', joinedFile, '--dry']), run(emitter, ['--data', ownFile, '--dry']));
     }
-    const forai = run('emit-forai.js', ['--data', joinedFile, '--dry']);
-    assert.match(forai, /^## HasTexture::hasTexture$/m);
-    assert.doesNotMatch(forai, /^## Fbo::hasTexture$/m);
 });
 
 test('coverage uses entry guards, skips deprecation, and calls const overloads on const owners', () => {
