@@ -228,7 +228,7 @@ TC_CORE_TEST_MAIN() {
 
     // --- Lut3D (tcxLut), up to the .cube parse --------------------------------
     {
-        // TITLE is read first; LUT_3D_SIZE 1 is then refused before any GPU work
+        // An invalid dimension rejects the entire import before any GPU work.
         check("Lut3D: test files written",
               writeText(data / "x.cube", "TITLE \"fromData\"\nLUT_3D_SIZE 1\n") &&
               writeText(cwd / "cwdOnly.cube", "TITLE \"fromCwd\"\nLUT_3D_SIZE 1\n"));
@@ -236,8 +236,8 @@ TC_CORE_TEST_MAIN() {
         tcx::lut::Lut3D lut;
         ErrorCapture cap;
         check("Lut3D::load(\"x.cube\") opens the data-folder file",
-              !lut.load("x.cube") && lut.getTitle() == "fromData" &&
-              cap.has("invalid LUT size") && !cap.has("failed to open"));
+              !lut.load("x.cube") && lut.getTitle().empty() &&
+              cap.has("invalid LUT dimensions") && !cap.has("failed to open"));
 
         tcx::lut::Lut3D c;
         ErrorCapture capC;

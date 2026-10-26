@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.20)
+project(fontScratch LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+add_executable(fontScratch main.cpp ../../include/impl/stb_impl.cpp)
+target_include_directories(fontScratch PRIVATE ../../include)
+# The codec workspace must also fail cleanly in builds with no C++ exceptions.
+if(MSVC)
+    target_compile_options(fontScratch PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(fontScratch PRIVATE -Wall -Wextra -Wpedantic -fno-exceptions)
+endif()

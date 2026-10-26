@@ -2,6 +2,7 @@
 #include "tc/utils/tcAnnotations.h"
 #include <mutex>
 #include "tc/utils/tcOnceGate.h"
+#include "internal/tcVideoDecodeLimits.h"
 
 // =============================================================================
 // tcVideoPlayer.h - Video playback
@@ -92,6 +93,8 @@ public:
 
         // Platform-specific load
         if (!loadPlatform(resolvedPath)) {
+            auto warningBudget = decodeBudget_;
+            if (warningBudget) warningBudget->warn();
 #ifdef __EMSCRIPTEN__
             if (!webLoadResult_) return webLoadResult_;
 #endif
@@ -168,7 +171,7 @@ public:
         firstFrameReceived_ = false;
         posterActive_ = false;
         posterUploadPending_ = false;
-        posterPx_.clear();
+        posterPx_.clear(); posterCredit_.reset();
         texUploadFrame_ = ~0ull;
         lastShownTime_ = -1.0f;
         pendingSeekSec_ = -1.0f;
@@ -176,6 +179,8 @@ public:
         width_ = 0;
         height_ = 0;
         sourcePath_.clear();
+        auto warningBudget = decodeBudget_;
+        if (warningBudget) warningBudget->warn();
     }
 
     // =========================================================================
@@ -183,6 +188,8 @@ public:
     // =========================================================================
 
     void update() override {
+        auto warningBudget = decodeBudget_;
+        if (warningBudget) warningBudget->warn();
         if (!initialized_) return;
 
         frameNew_ = false;
@@ -235,13 +242,13 @@ public:
         if (posterUploadPending_) {
             if (frameNew_) {
                 posterUploadPending_ = false;
-                posterPx_.clear();
+                posterPx_.clear(); posterCredit_.reset();
             } else if (posterPx_.isAllocated() && texture_.isAllocated()
                        && texUploadFrame_ != sapp_frame_count()) {
                 texture_.loadData(posterPx_.getData(), width_, height_, 4);
                 texUploadFrame_ = sapp_frame_count();
                 posterUploadPending_ = false;
-                posterPx_.clear();
+                posterPx_.clear(); posterCredit_.reset();
             }
         }
     }
@@ -469,6 +476,7 @@ private:
     bool  nv12Mode_       = false;
     bool  autoPoster_     = true;   // extract-and-show a poster on load/play
     bool  posterActive_   = false;  // poster currently on texture_ (until live)
+    std::shared_ptr<internal::VideoDecodeLease> posterCredit_;
     Pixels posterPx_;               // poster awaiting upload (deferred one frame)
     bool  posterUploadPending_ = false;  // upload posterPx_ on the next update()
     uint64_t texUploadFrame_ = ~0ull;    // sapp frame of the last texture_ upload
@@ -485,6 +493,7 @@ private:
 
     // Platform-specific handle
     void* platformHandle_ = nullptr;
+    std::shared_ptr<internal::VideoDecodeBudget> decodeBudget_;
 
     // Resolved path of the currently loaded video (empty when not loaded).
     // Used by getPath() and the instance-level frame-extraction overloads.
@@ -517,6 +526,7 @@ private:
         autoPoster_      = other.autoPoster_;
         posterActive_    = other.posterActive_;
         posterPx_        = std::move(other.posterPx_);
+        posterCredit_ = std::move(other.posterCredit_);
         posterUploadPending_ = other.posterUploadPending_;
         texUploadFrame_  = other.texUploadFrame_;
         lastShownTime_   = other.lastShownTime_;
@@ -524,6 +534,11 @@ private:
         nv12ShaderHandle_ = other.nv12ShaderHandle_;
         audioStreaming_ = other.audioStreaming_;
         platformHandle_  = other.platformHandle_;
+        decodeBudget_ = std::move(other.decodeBudget_);
+#ifdef __EMSCRIPTEN__
+        webDecodeBytes_ = other.webDecodeBytes_;
+        other.webDecodeBytes_ = 0;
+#endif
         sourcePath_      = std::move(other.sourcePath_);
 
         other.pixels_    = nullptr;
@@ -546,11 +561,17 @@ private:
     // Returns false when extraction is unavailable/failed (caller clears).
     bool loadPosterFrame(float timeSec) {
         if (sourcePath_.empty() || width_ <= 0 || height_ <= 0) return false;
+        posterPx_.clear(); posterCredit_.reset();
+        posterUploadPending_ = false;
+        auto credit = decodeBudget_ ? std::make_shared<internal::VideoDecodeLease>(
+            decodeBudget_, internal::VideoDecodeLimits::frameBytes) : nullptr;
+        if (credit && !credit->acquired()) { decodeBudget_->warn(); return false; }
         Pixels px;
         bool ok = (timeSec <= 0.001f)
-                      ? extractKeyFramePlatform(sourcePath_, px, 0.0f, nullptr)
-                      : extractFramePlatform(sourcePath_, px, timeSec, nullptr);
+                      ? extractKeyFramePlatform(sourcePath_, px, 0.0f, nullptr, decodeBudget_)
+                      : extractFramePlatform(sourcePath_, px, timeSec, nullptr, decodeBudget_);
         if (!ok || px.getWidth() != width_ || px.getHeight() != height_) return false;
+        if (credit) credit->shrink(size_t(width_) * height_ * 4);
         bool freshTexture = !texture_.isAllocated();
         if (freshTexture) {
             texture_.allocate(width_, height_, 4, TextureUsage::Stream);
@@ -571,9 +592,10 @@ private:
             texture_.loadData(px.getData(), width_, height_, 4);
             texUploadFrame_ = sapp_frame_count();
             posterUploadPending_ = false;
-            posterPx_.clear();
+            posterPx_.clear(); posterCredit_.reset();
         } else {
             posterPx_ = std::move(px);
+            posterCredit_ = std::move(credit);
             posterUploadPending_ = true;
         }
         posterActive_ = true;
@@ -597,6 +619,7 @@ private:
     bool loadPlatform(const fs::path& path);
 #ifdef __EMSCRIPTEN__
     LoadResult webLoadResult_;
+    size_t webDecodeBytes_ = 0;
 #endif
     void closePlatform();
     void playPlatform();
@@ -740,9 +763,11 @@ private:
     }
 
     static bool extractFramePlatform(const fs::path& path, Pixels& outPixels,
-                                     float timeSec, float* outDuration);
+                                     float timeSec, float* outDuration,
+                                     std::shared_ptr<internal::VideoDecodeBudget> budget = {});
     static bool extractKeyFramePlatform(const fs::path& path, Pixels& outPixels,
-                                        float timeSec, float* outDuration);
+                                        float timeSec, float* outDuration,
+                                     std::shared_ptr<internal::VideoDecodeBudget> budget = {});
 
     // Allow platform implementations to access internals
     friend class internal::VideoPlayerPlatformAccess;
@@ -764,12 +789,22 @@ public:
     // without creating textures or uploading frames to a GPU.
     static bool loadHeadlessForTests(VideoPlayer& player, const fs::path& path) {
         player.setUseHwAccel(false);
-        if (!player.loadPlatform(path)) return false;
+        if (!player.loadPlatform(path)) {
+            if (player.decodeBudget_) player.decodeBudget_->warn();
+            return false;
+        }
         player.initialized_ = true;
         return true;
     }
     static void playHeadlessForTests(VideoPlayer& player) { player.playPlatform(); }
-    static void updateHeadlessForTests(VideoPlayer& player) { player.updatePlatform(); }
+    static void updateHeadlessForTests(VideoPlayer& player) {
+        auto warningBudget = player.decodeBudget_;
+        if (warningBudget) warningBudget->warn();
+        if (!player.initialized_) return;
+        player.updatePlatform();
+        player.dispatchPlaybackError();
+        player.done_ = !player.hasError() && player.isFinishedPlatform();
+    }
     static void stopAudioForTests(VideoPlayer& player);
     // Synthetic planes exercise VideoPlayer::draw -> drawNV12Platform without a
     // decoder/device. The supplied shader is borrowed only for this draw.
@@ -782,6 +817,12 @@ public:
         player.nv12ShaderHandle_ = nullptr; player.nv12Mode_ = false;
     }
 #endif
+    static uint64_t decodeRejectionsForTests(const VideoPlayer& player) {
+        return player.decodeBudget_ ? player.decodeBudget_->rejected() : 0;
+    }
+    static size_t decodePeakBytesForTests(const VideoPlayer& player) {
+        return player.decodeBudget_ ? player.decodeBudget_->peak() : 0;
+    }
     static void setDimensions(VideoPlayer& player, int w, int h) {
         player.width_ = w;
         player.height_ = h;

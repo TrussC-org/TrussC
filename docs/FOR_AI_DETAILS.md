@@ -16,18 +16,17 @@ Each section below is one entry of the API index in FOR_AI_ASSISTANT.md, headed 
 
 ## App
 
+- Main/host event delivery is BeforeApp → App (100, including its tree) → AfterApp. **Consumed input skips App virtuals too.** Equal priority uses registration order, and clear() keeps the App binding. See App::mousePressed for the v0.8 changes and the deferred secondary-window scope and headless update/exit.
 - Your tcApp inherits `App` and overrides the functions it needs. `main()` returns `TC_RUN_APP(tcApp, settings)` (see `runApp`).
 - `App` is a `RectNode` and the root of the scene graph, so you can call `addChild()` on it directly. Its size always follows the logical size of the window.
 - Keep the constructor to plain member setup, and do tree building, `setSize()` and file loading in `setup()`. In the constructor no `shared_ptr` owns the App yet, so `addChild()` asserts, `setSize()` does not resize the window, and `getRootNode()` is not this App. The same rule for nodes is described in `Node::setup`.
 - Startup order: the App is created after graphics are ready, `windowResized(w, h)` is then called once, and `setup()` runs once on the first update or draw. Therefore `getWidth()`/`getHeight()` already return the window size inside `setup()`.
-- Every frame, the order is `events().update` listeners → `update()` → `events().draw` listeners → `draw()`. `update()` also covers mods, timers and child nodes.
-- As a result, `events()` listeners run before the App's own callbacks. On the first frame they run even before `setup()`.
+- Each frame notifies update, then draw. On the main/host window each notify runs BeforeApp, the App tree at 100, and AfterApp. The update tree includes mods, timers and children.
 - When a frame is skipped (for example while idle in EVENT_DRIVEN mode), neither update nor draw runs.
-- Input goes to `events()` listeners first, then to the App's virtual function (which is always called), and then to the node tree unless a listener has set `e.consumed`. See `App::mousePressed`.
 - `audioOut()`/`audioIn()` run on the audio thread (see `App::audioOut`). Every other callback runs on the main thread.
 - Shutdown is described in `App::exit`. An App runs only once: after it has shut down, `Window::setApp()` refuses it, so create a new App.
 - Hot reload (`TC_HOT_RELOAD`) creates a fresh App on every reload, so the App's state is reset.
-- With `runHeadlessApp`, `setup()` runs before the loop, and after that only `App::update()` is called at a fixed step. Child nodes, mods and timers are not updated, and there is no draw, no input and no `windowResized()`.
+- With `runHeadlessApp`, `setup()` runs before the loop, and each fixed step notifies `events().update` with App::update() at 100, followed on shutdown by `events().exit` with App::exit() at 100. Child nodes, mods and timers are not updated, and there is no draw, no input and no `windowResized()`.
 - Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (runHeadlessApp runs only App::update(), not the node tree).
 
 ```cpp
@@ -112,13 +111,14 @@ void tcApp::audioOut(AudioOutBuffer& buf) {
 exitListener = events().exitRequested.listen([](ExitRequestEventArgs& args) { args.cancel = true; });
 ```
 
-- For the main App in a window, shutdown proceeds in the following order. First the `events().exit` listeners run, and then `exit()` is called. Next, any pending `close()` on other windows is processed, including closes requested inside `exit()`. Audio callbacks are then detached (a callback that is already running is allowed to finish), and `cleanup()` is called. Finally, the App is destroyed, pending resource loads are waited out, the audio device is stopped, and graphics are cleaned up.
 - Only the root App receives `cleanup()`. At app exit, child nodes receive no `cleanup()`; only their destructors run.
-- Headless: it runs after the loop ends, followed by audio detach and `cleanup()`. `events().exit` is not fired, and the audio device keeps running.
+- Headless: it runs after the loop ends, followed by audio detach and `cleanup()`. `events().exit` delivers BeforeApp → App::exit() (100) → AfterApp shutdown hooks once; the App and mandatory teardown survive `clear()`. The audio device keeps running.
 - Hot reload: after `events().hotReloadUnload`, the old App receives `exit()` and `cleanup()`. `events().exit` fires only at the final exit.
-- A sub-window App: it runs when its window closes (after that window's `events().exit`) or when `setApp()` swaps it out. `getWindow()` is already nullptr there.
+- A sub-window App: it runs when its window closes (as an App-priority listener on that window's `events().exit`) or when `setApp()` swaps it out. `getWindow()` is already nullptr there.
 - An App added as a child node never receives `exit()`.
 - Any `pushMatrix()`/`pushStyle()` left open is popped, with a warning that names `exit()`.
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- Main/host: App::exit runs inside exit notify at 100; AfterApp shutdown hooks follow, then pending window closes, audio detach, cleanup and destruction. Hot-reload guest swaps retain the direct exit exception.
 
 ```cpp
 // tcApp.h (inside class tcApp : public App)
@@ -136,12 +136,12 @@ void tcApp::cleanup() {
 
 ## App::filesDropped
 
+- Main/host event path: BeforeApp listeners → this App callback at 100 → AfterApp listeners. Earlier payload edits reach the App; there is no node-tree stage. Secondary-window delivery is unchanged in this part.
 - Override `filesDropped(const vector<string>& files)` in your tcApp.
 - On desktop, each entry is a full (absolute) path in UTF-8 that you can load as is. On Linux, TrussC has already removed the `file://` prefix and decoded `%20` and similar escapes.
 - It is called on the main thread, so you can load images and other GPU objects right here. To check the file type, compare the extension, for example `toLower(getFileExtension(path)) == "png"`.
 - One drop can carry at most 16 files. Any further files are silently ignored. If any path is 2048 bytes or longer, the whole drop is ignored and this function is not called.
 - The drop position is not passed. `events().filesDropped` listeners receive `DragDropEventArgs` with x/y, but that is the last known mouse position, not the exact drop point.
-- The call order is: all `events().filesDropped` listeners → this function.
 - Only the App started with `runApp()` receives it (also under hot reload). Headless apps never receive it.
 
 ```cpp
@@ -200,23 +200,22 @@ void tcApp::exit() {
 
 ## App::keyPressed
 
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - When you write a function with this name in tcApp (your class derived from App), TrussC calls it when a key is pressed (this is called an override). There are two forms: the simple `keyPressed(int key)`, and `keyPressed(const KeyEventArgs& e)`, which also tells you the modifier keys (`e.shift`, `e.ctrl`, `e.alt`, `e.super`) and whether the call is an auto-repeat (`e.isRepeat`). Override only one of them (if you write both, only the KeyEventArgs version is called).
 - `key` is a key code, not the typed character. Letters always arrive as uppercase ASCII, with or without Shift, so write `key == 'A'` (`key == 'a'` never matches). Digits are `'0'` to `'9'` and the space bar is 32. For other keys, use the `KEY_*` constants such as `KEY_ESCAPE`, `KEY_ENTER`, `KEY_LEFT`, `KEY_F1` and `KEY_LEFT_SHIFT`.
 - While a key is held, the OS auto-repeat calls this function again with `e.isRepeat == true`. The int version cannot tell repeats apart, so if you only want the first press, use the KeyEventArgs version and write `if (e.isRepeat) return;` at the top.
 - There is no `KEY_SHIFT` or `KEY_CONTROL` that covers both the left and right keys. Use `isShiftPressed()` and the related functions, or `e.shift`.
 - Inside this function, `isKeyPressed(e.key)` is already true.
 - Typed text (character input) does not reach any App callback. It can only be received through `events().rawEvent`.
-- The call order is: `events().keyPressed` listeners → this function → the nodes (`Node::onKeyPress`).
-- If a listener sets `e.consumed = true`, the key no longer reaches the nodes. However, this function is **always** called. tcxImGui does this while ImGui is using the keyboard, so check `isOverlayFocused()` when necessary.
 - The argument of this function is const, so you cannot stop the key from reaching the nodes here. To stop it, register a listener with `EventPriority::BeforeApp` and mark the event as handled there.
 
 ```cpp
 keyListener = events().keyPressed.listen([](KeyEventArgs& e) { e.consumed = true; }, EventPriority::BeforeApp);
 ```
 
-- Listeners with `AfterApp` priority are also called before this function (Known issue: [#908](https://github.com/TrussC-org/TrussC/issues/908)).
 - Every node gets a turn, starting from the deepest, front-most node, and each parent comes after its children. Delivery stops at the first `onKeyPress` that returns true. Inactive nodes and their children are skipped.
-- This function is called on the main thread. It is not called under `runHeadlessApp` or after `cleanup()`. Secondary windows (`Window::setApp`) use the same order with that window's `events()`.
 
 ```cpp
 // tcApp.h (inside class tcApp : public App)
@@ -233,12 +232,14 @@ void tcApp::keyPressed(int key) {
 
 ## App::keyReleased
 
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - When you write a function with this name in tcApp, TrussC calls it when a key is released. There are two forms: the simple `keyReleased(int key)`, and `keyReleased(const KeyEventArgs& e)`. Override only one of them.
 - Key codes work the same as in `App::keyPressed`: letters are uppercase, and other keys use the `KEY_*` constants.
 - `e.isRepeat` is always false. The modifier fields show the state at the moment the key was released.
 - Inside this function, `isKeyPressed(e.key)` is already false.
-- The call order and the handling of `consumed` are the same as in `App::mousePressed`: listeners first, then this function (always called), then the nodes unless a listener has marked the event as handled. Secondary windows use the same order.
-- This function is called only when the OS reports that the key went up. TrussC does not send a release on your behalf when the window loses focus (it does so only for mouse buttons), so if the OS never reports the key-up, `isKeyPressed()` stays true (Known issue: [#908](https://github.com/TrussC-org/TrussC/issues/908)).
+- This function is called only when the OS reports that the key went up. TrussC does not send a release on your behalf when the window loses focus (it does so only for mouse buttons), so if the OS never reports the key-up, `isKeyPressed()` stays true.
 
 ```cpp
 // tcApp.h (inside class tcApp : public App)
@@ -252,11 +253,13 @@ void tcApp::keyReleased(int key) {
 
 ## App::mouseDragged
 
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - When you write a function with this name in tcApp, TrussC calls it when the pointer moves with a button held. Use the `mouseDragged(const MouseDragEventArgs& e)` form: `e` gives you the position (`e.pos`), the movement since the last event (`e.delta`), the button (`e.button`) and modifier keys such as `e.shift`. The shorter form `mouseDragged(Vec2 pos, int button)` is also available. Override only one of them.
 - `e.button` is the button that was pressed most recently.
 - `e.delta` is how far the pointer has moved since the last recorded position, in the same units as `e.pos`. Here `e.globalDelta` has the same value.
 - While a button is held, moves come here instead of `mouseMoved`. Any release, whether real or sent by TrussC, ends the drag, even if another button is still held.
-- Coordinates, button numbers, the call order and `consumed` work the same as in `App::mousePressed`.
 - If a move shows that a release was lost, `mouseReleased` is called first and that move goes to `mouseMoved` instead.
 - Nodes: the node that received the press receives `onMouseDrag` with that button. The move is also delivered as `onMouseMove`, starting from the node under the pointer and passed up to the parents in turn.
 - On touch devices, moving the first finger produces a left-button drag.
@@ -277,10 +280,12 @@ void tcApp::mouseDragged(const MouseDragEventArgs& e) {
 
 ## App::mouseMoved
 
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - When you write a function with this name in tcApp, TrussC calls it when the pointer moves. Use the `mouseMoved(const MouseMoveEventArgs& e)` form: `e` gives you the position (`e.pos`), the movement since the last event (`e.delta`) and modifier keys such as `e.shift`. The shorter form `mouseMoved(Vec2 pos)` is also available. Override only one of them.
 - While a button is held, moves go to `mouseDragged` instead. If you hold two buttons and release one, moves come back here.
 - There is no button field. `e.delta` is how far the pointer has moved since the last recorded position, in the same units as `e.pos`. Here `e.globalDelta` has the same value.
-- Coordinates, the call order and `consumed` work the same as in `App::mousePressed`.
 - Nodes: `onMouseMove` starts from the node under the pointer and is passed up to the parents in turn until one returns true. Hover enter/leave is a separate mechanism, checked once per frame for the front-most node.
 - In the main window, the pointer entering or leaving the window does not call this function. In secondary windows, entering counts as a move, and leaving sets the position to (-1, -1) without calling this function.
 
@@ -297,22 +302,21 @@ void tcApp::mouseMoved(const MouseMoveEventArgs& e) {
 
 ## App::mousePressed
 
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - When you write a function with this name in tcApp (your class derived from App), TrussC calls it when a button is pressed (this is called an override). Use the `mousePressed(const MouseEventArgs& e)` form: `e` gives you the position (`e.pos`), the button (`e.button`) and modifier keys such as `e.shift`. The shorter form `mousePressed(Vec2 pos, int button)` is also available. Override only one of them (if you write both, only the MouseEventArgs version is called).
 - `button` is 0 for left, 1 for right and 2 for middle. You can also compare it with constants, as in `if (e.button == MOUSE_BUTTON_LEFT)`.
 - Coordinates start at (0, 0) in the top-left corner of the window. They are in logical pixels, the same units as the window size, and do not change on high-resolution screens such as Retina. Only when you enable pixelPerfect in `WindowSettings` are they real pixels.
 - Inside this function, `getMousePos()` returns the same value as `e.pos`, and `isMousePressed()` is true.
 - On phones and tablets, a touch with the first finger also arrives here as a left click. If you do not want this, call `setTouchAsMouse(false)`.
-- The call order is: `events().mousePressed` listeners → this function → scene graph nodes (`Node::onMousePress`).
-- If a listener sets `e.consumed = true`, the press no longer reaches the nodes. However, this function is **always** called. It is also called when you click on ImGui, so check `isOverlayHovered()` when necessary.
 - The argument of this function is const, so you cannot stop the press from reaching the nodes here. To stop it, register a listener with `EventPriority::BeforeApp` and mark the event as handled there.
 
 ```cpp
 clickListener = events().mousePressed.listen([](MouseEventArgs& e) { e.consumed = true; }, EventPriority::BeforeApp);
 ```
 
-- Listeners with `AfterApp` priority are also called before this function (Known issue: [#908](https://github.com/TrussC-org/TrussC/issues/908)).
 - Nodes receive the press in local coordinates, starting with the front-most node under the pointer. It is passed up to the parents in turn until a node returns `true`. The node that received the press also receives the drags and the release until the button is let go.
-- This function is called on the main thread. It is not called under `runHeadlessApp` or after `cleanup()`. Secondary windows (`Window::setApp`) use the same order, and their coordinates are always logical pixels.
 
 ```cpp
 // tcApp.h (inside class tcApp : public App)
@@ -328,9 +332,11 @@ void tcApp::mousePressed(const MouseEventArgs& e) {
 
 ## App::mouseReleased
 
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - When you write a function with this name in tcApp, TrussC calls it when a button is released. Use the `mouseReleased(const MouseEventArgs& e)` form: `e` gives you the position (`e.pos`), the button (`e.button`) and modifier keys such as `e.shift`. The shorter form `mouseReleased(Vec2 pos, int button)` is also available. Override only one of them.
 - **You receive exactly one release for each press**, so this is a safe place to end a drag. TrussC records which of the left, right and middle buttons are held in each window, and ignores an OS release for a button it never saw pressed.
-- Coordinates, button numbers, the call order and `consumed` work the same as in `App::mousePressed`.
 - Inside this function the press has already been cleared: `isMousePressed()` is false and `getMouseButton()` is -1. `e.pos` is the position where the button was released.
 - Any release ends the drag. If you hold two buttons and release one, later moves go to `mouseMoved`. The other button still receives its own release later.
 - If the real release is lost, TrussC sends one on your behalf. When the window loses focus, every held button receives a release (on all platforms). On Windows, Web and Linux desktop, TrussC also sends one when a mouse move shows that a held button is no longer down (except while the pointer is locked on Web or on Linux without GLCORE). On macOS, only the focus-loss case applies.
@@ -351,12 +357,14 @@ void tcApp::mouseReleased(const MouseEventArgs& e) {
 
 ## App::mouseScrolled
 
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - When you write a function with this name in tcApp, TrussC calls it when the user scrolls. Use the `mouseScrolled(const ScrollEventArgs& e)` form: `e` gives you the scroll amount (`e.scroll`), the cursor position (`e.pos`) and modifier keys such as `e.shift`. The shorter form `mouseScrolled(Vec2 delta)`, which receives `e.scroll`, is also available. Override only one of them.
 - `e.scroll.x` is the horizontal amount and `e.scroll.y` is the vertical amount. TrussC passes the value from sokol through unchanged, with no DPI scaling or unit conversion.
 - On Windows and X11, rolling the wheel forward gives a positive `scroll.y`.
 - **The size of one scroll step differs by platform.** Windows gives 1.0 per wheel notch (the horizontal sign is flipped), X11 gives 1.0 per wheel click, macOS gives the NSEvent value (multiplied by 0.1 for precise trackpads), and Web gives the DOM value multiplied by -0.01 (pixel mode) or -1.33 (line mode). If you need the same speed everywhere, normalize the value yourself.
 - `e.pos` is the last known cursor position; it is not read from the scroll event. The modifier keys are filled in, so you can detect Shift+wheel with `e.shift`.
-- Coordinates, the call order and `consumed` work the same as in `App::mousePressed`. tcxImGui and `EasyCam::enableMouseInput` may mark the scroll as handled in a listener, but this function is still called.
 - Nodes: `onMouseScroll` starts from the node under the pointer and is passed up to the parents in turn until one returns true. `ScrollContainer` returns true when it can scroll.
 - Touch input never produces a scroll.
 
@@ -420,11 +428,11 @@ void tcApp::windowResized(int width, int height) {
 
 ## App::touchMoved
 
+- **v0.8 touch order:** default (0) touch listeners run before App touch callbacks at 100; they formerly followed the App forwarder. Explicit 100 follows registration order. Touch now also reaches the current hot-reload guest. Headless and secondary-window Apps still receive no touch callbacks.
 - Override `touchMoved(const TouchEventArgs& touch)` in your tcApp. This is the only form.
 - `touches` holds every finger that is currently down. The fingers with `changed == true` are the ones that moved.
 - By default, the first finger also acts as the mouse: if it is in `touches`, `mouseDragged` is called right after this function with the left button at its position, and it reaches nodes as well. The movement is measured from the previous mouse position. Other fingers send touch events only.
 - Touch events are never delivered to nodes, and they have no `consumed` flag. Nodes only see the mouse drag that TrussC sends on behalf of the first finger.
-- For the contents of the arguments, `id`, coordinates, the thread, the listener call order, supported platforms and the `runApp()`-only rule, see `App::touchPressed`.
 
 ```cpp
 // tcApp.h (inside class tcApp : public App)
@@ -442,6 +450,7 @@ void tcApp::touchMoved(const TouchEventArgs& touch) {
 
 ## App::touchPressed
 
+- **v0.8 touch order:** default (0) touch listeners run before App touch callbacks at 100; they formerly followed the App forwarder. Explicit 100 follows registration order. Touch now also reaches the current hot-reload guest. Headless and secondary-window Apps still receive no touch callbacks.
 - Override `touchPressed(const TouchEventArgs& touch)` in your tcApp. This is the only form; there is no `(x, y, id)` version.
 - `touch.touches[0]` to `touch.touches[numTouches - 1]` hold every finger that is currently down (up to 32). The fingers with `changed == true` are the ones that have just touched down.
 
@@ -455,8 +464,6 @@ const TouchPoint& t = touch.touches[i];   // t.id, t.x, t.y, t.changed
 - This function is called on the main thread, so you can work with nodes and GPU objects here.
 - By default, the first finger also acts as the mouse: right after this function, `mousePressed` is called with the left button at that finger's position, and it reaches nodes as well. Other fingers send touch events only. To turn this off, call `setTouchAsMouse(false)` in `setup()`. For how mouse events reach nodes and how `consumed` works, see `App::mousePressed`.
 - Touch events themselves are never delivered to nodes, and they have no `consumed` flag.
-- This function runs as an `events().touchPressed` listener with priority `EventPriority::App`. Listeners that you add later with the default priority (for example in `setup()`) are called after it, and `EventPriority::BeforeApp` listeners are called before it.
-- Only the App started with `runApp()` receives touch events. Apps under hot reload, headless apps and `Window::setApp` windows do not.
 
 ```cpp
 // tcApp.h (inside class tcApp : public App)
@@ -474,6 +481,7 @@ void tcApp::touchPressed(const TouchEventArgs& touch) {
 
 ## App::touchReleased
 
+- **v0.8 touch order:** default (0) touch listeners run before App touch callbacks at 100; they formerly followed the App forwarder. Explicit 100 follows registration order. Touch now also reaches the current hot-reload guest. Headless and secondary-window Apps still receive no touch callbacks.
 - Override `touchReleased(const TouchEventArgs& touch)` in your tcApp. This is the only form.
 - The fingers with `changed == true` are the ones that lifted or were cancelled in this event.
 - The OS can cancel touches, for example on an incoming call or a system gesture. A cancel is also delivered here, with `touch.cancelled` set to true. There is no separate touchCancelled function, so check this flag when you need to tell the two cases apart.
@@ -484,7 +492,6 @@ if (touch.cancelled) fingers.clear();   // the OS took the touches
 
 - By default, the first finger also acts as the mouse: if it is among the changed fingers (lifted or cancelled), `mouseReleased` is called once right after this function with the left button at its position, and touch-as-mouse stops. A finger that is still touching does not take over; it starts again with the next new touch. The mouse event has no cancel flag.
 - If an end event is lost, the first finger's mouse state does not get stuck in the pressed state. The next touch starts fresh, and when the window loses focus TrussC resets it and releases any mouse button that is still held.
-- For the contents of the arguments, `id`, coordinates, the thread, the listener call order, supported platforms and the `runApp()`-only rule, see `App::touchPressed`.
 
 ```cpp
 // tcApp.h (inside class tcApp : public App)
@@ -502,13 +509,13 @@ void tcApp::touchReleased(const TouchEventArgs& touch) {
 
 ## App::windowResized
 
+- Main/host event path: BeforeApp listeners → this App callback at 100 → AfterApp listeners. Earlier payload edits reach the App; there is no node-tree stage. Resize startup/reload seeds remain App-only. Secondary-window delivery is unchanged in this part.
 - Override `windowResized(int width, int height)` in your tcApp. App has no version that takes an args struct (`events().windowResized` listeners receive `ResizeEventArgs`).
 - The size is in logical pixels: the framebuffer size divided by the DPI scale, truncated to an int. Only with `WindowSettings::setPixelPerfect` is it in actual framebuffer pixels.
 - When this function is called, `getWidth()` and `getHeight()` already return the new size. This is true even if you override this function.
 - It is called whenever the OS window changes size. Moving the window to a display with a different scale (DPI) also calls it, sometimes with the same logical size as before.
 - At startup it is called once with the initial size, right after the App's constructor and before `setup()`. This first call is not sent to `events().windowResized` listeners. For the whole startup order, see `App`.
 - Calling `App::setSize()` or `setWindowSize()` does not call it immediately. It is called once the OS window has actually changed size.
-- The call order on a resize is: all `events().windowResized` listeners → this function.
 - On a `Window::setApp` window, it is called before that window's update, only when the logical size has changed, and before that window's resize listeners.
 - It is still called under hot reload, and a freshly reloaded App receives its size before its `setup()`. Headless apps never receive it.
 - It is called on the main thread.
@@ -1829,6 +1836,10 @@ void tcApp::draw() {
 
 ## CoreEvents
 
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
+- On events the App receives, listen() defaults to BeforeApp; other events keep 100. This covers update, draw, exit, key, mouse, touch, windowResized, and filesDropped; setup is unchanged.
 - Each member is an `Event<T>` or `Event<void>`; see `Event<T>` for `listen()`, listener lifetime, priorities, and delivery threads.
 - `events()` returns the current window context's hub; `Window::events()` accesses a particular secondary window's hub directly.
 - Framework notifications run on the main thread. Headless runs do not generate native window/input events or rendering events.
@@ -1876,19 +1887,15 @@ void tcApp::draw() {
 
 ## CoreEvents::draw
 
-- The App draws after this event, so whatever a listener draws is covered by the App. To draw on top, draw in the App's `draw()`.
-- It fires only on frames that draw, after that frame's update. After it, the App's `setup()` (if it has not run yet) and draw tree run.
-- Each window has its own event: a secondary Window clears with its clear color, fires its own `events().draw`, and then draws its tree.
-- `runHeadlessApp` never fires it.
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
+- Each update step or rendered frame has one notify. The App listener runs setup once, then the corresponding tree; BeforeApp listeners on the first step may run before setup. Headless emits update with App::update() at 100, without tree traversal or draw; secondary windows still notify before directly ticking/drawing their tree.
 
 ## CoreEvents::exit
 
-- Keep the returned `EventListener` as a member, such as `EventListener exitListener;` in tcApp.h.
-- On the main window it fires only if an App exists. After it, the App's `exit()`, the audio disconnect and the App's `cleanup()` run. For the whole order, see `App::exit`.
-- When it fires, the audio device is still running, but the MCP server and console input have already stopped.
-- A secondary Window fires its own `events().exit` after its native window is closed (`App::getWindow()` is already `nullptr`) and before that App's `exit()` / `cleanup()`.
-- With hot reload, the host fires it before the guest App's `exit()`.
-- `runHeadlessApp` calls `exit()` / `cleanup()` without firing it (Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906)).
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
+- Main/host shutdown: exit notify calls App::exit at 100, then AfterApp shutdown hooks (ImGui including offscreen manager, NodeInspector, ScreenRecorder), then audio detach and cleanup. Guest swaps still call exit directly after hotReloadUnload; they do not emit events().exit. Startup and reload resize seeds remain App-only.
 
 ```cpp
 // tcApp.h (inside class tcApp : public App)
@@ -1897,7 +1904,7 @@ AudioRecorder recorder;
 
 // tcApp.cpp
 void tcApp::setup() {
-    exitListener = events().exit.listen([this]() { recorder.stop(); });
+    exitListener = events().exit.listen([this]() { recorder.stop(); }, EventPriority::AfterApp);
 }
 ```
 
@@ -1910,6 +1917,7 @@ void tcApp::setup() {
 
 ## CoreEvents::filesDropped
 
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - Delivers `DragDropEventArgs&` on the main thread before `App::filesDropped`.
 - `args.files` contains dropped file paths; on the Web, these are file names rather than local filesystem paths. `args.x` and `args.y` contain the last recorded mouse position, rather than a separately sampled drop position.
 - The arguments have neither `cancel` nor `consumed`, so listeners cannot cancel the drop or prevent the App callback.
@@ -1924,20 +1932,23 @@ void tcApp::setup() {
 
 ## CoreEvents::keyPressed
 
+- Held-key state is updated before notify, including MCP; both listeners and the App see the new state.
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
 - Delivers `KeyEventArgs&` on the main thread through the receiving window's hub, including auto-repeat presses.
 - `args.key` is the key code, `args.isRepeat` identifies auto-repeat, and the modifier fields report Shift, Control, Alt, and Super/Command.
 - See `App::mousePressed` for listener/App/node order and `EventPriority::BeforeApp` for priorities and `args.consumed`.
-- The main window updates its pressed-key state after listeners run; secondary windows update it before listeners run.
 
 ## CoreEvents::keyReleased
 
+- Held-key state is updated before notify, including MCP; both listeners and the App see the new state.
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
 - Delivers `KeyEventArgs&` on the main thread through the receiving window's hub. `args.key` identifies the released key, the modifier fields report modifier state, and `args.isRepeat` is false.
 - See `App::mousePressed` for listener/App/node order and `EventPriority::BeforeApp` for priorities and `args.consumed`.
-- The main window removes the key from its pressed-key state after listeners run; secondary windows remove it before listeners run.
 - Known issue: [#908](https://github.com/TrussC-org/TrussC/issues/908) (No key release is sent when the window loses focus).
 
 ## CoreEvents::mouseDragged
 
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
 - Delivers `MouseDragEventArgs&` on the main thread through the receiving window's hub. `args.button` identifies the tracked button, and the modifier fields report modifier state.
 - See `MouseEventArgs::pos` for position coordinates and `MouseMoveEventArgs::delta` for movement coordinates and units.
 - The primary touch can also generate a left-button drag by default; `setTouchAsMouse(false)` disables this conversion.
@@ -1945,12 +1956,14 @@ void tcApp::setup() {
 
 ## CoreEvents::mouseMoved
 
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
 - Delivers `MouseMoveEventArgs&` on the main thread through the receiving window's hub when no mouse button is tracked as held. Secondary windows also generate it on mouse entry under the same condition.
 - See `MouseEventArgs::pos` for position coordinates and `MouseMoveEventArgs::delta` for movement coordinates and units; the arguments have no button field.
 - See `App::mousePressed` for listener/App/node order and `EventPriority::BeforeApp` for priorities and `args.consumed`.
 
 ## CoreEvents::mousePressed
 
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
 - Delivers `MouseEventArgs&` on the main thread through the receiving window's hub after updating its mouse position and pressed state.
 - `args.button` is 0 for left, 1 for right, and 2 for middle; modifier fields report modifier state. See `MouseEventArgs::pos` for coordinates and units.
 - The primary touch also generates a left-button press by default; `setTouchAsMouse(false)` disables this conversion.
@@ -1958,6 +1971,7 @@ void tcApp::setup() {
 
 ## CoreEvents::mouseReleased
 
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
 - Delivers `MouseEventArgs&` on the main thread through the receiving window's hub after updating its mouse position and clearing its pressed state.
 - `args.button` identifies the released button, and modifier fields report modifier state. See `MouseEventArgs::pos` for coordinates and units.
 - The primary touch can also generate a left-button release on ending or cancellation; `setTouchAsMouse(false)` disables this conversion.
@@ -1965,6 +1979,7 @@ void tcApp::setup() {
 
 ## CoreEvents::mouseScrolled
 
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
 - Delivers `ScrollEventArgs&` on the main thread through the receiving window's hub. `args.scroll.x` is horizontal scroll and `args.scroll.y` is vertical scroll, using the values supplied by the platform.
 - `args.pos` and `args.globalPos` use the last recorded mouse position, and modifier fields report modifier state. See `MouseEventArgs::pos` for coordinates and units.
 - See `App::mousePressed` for listener/App/node order and `EventPriority::BeforeApp` for priorities and `args.consumed`.
@@ -1990,33 +2005,30 @@ void tcApp::setup() {
 
 ## CoreEvents::touchMoved
 
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - Delivers `TouchEventArgs&` on the main thread for multi-touch input on Android, iOS, and the Web. Inspect `touches[0..numTouches)` and each point's `changed` flag; at most 32 points are delivered.
 - Touch positions are window coordinates without node transforms; see `MouseEventArgs::pos` for coordinate units.
 - Runs before any primary-touch mouse drag generated by touch-as-mouse, which is enabled by default. `setTouchAsMouse(false)` disables that conversion; the arguments have neither `cancel` nor `consumed`.
-- In normal windowed builds, `App::touchMoved` receives the event through a default-priority listener. See `Event<T>` for listening and priority rules.
 
 ## CoreEvents::touchPressed
 
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - Delivers `TouchEventArgs&` on the main thread for multi-touch input on Android, iOS, and the Web. Inspect `touches[0..numTouches)` and each point's `changed` flag; at most 32 points are delivered.
 - Touch positions are window coordinates without node transforms; see `MouseEventArgs::pos` for coordinate units.
 - Runs before any primary-touch left-button press generated by touch-as-mouse, which is enabled by default. `setTouchAsMouse(false)` disables that conversion; the arguments have neither `cancel` nor `consumed`.
-- In normal windowed builds, `App::touchPressed` receives the event through a default-priority listener. See `Event<T>` for listening and priority rules.
 
 ## CoreEvents::touchReleased
 
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - Delivers `TouchEventArgs&` on the main thread for multi-touch input on Android, iOS, and the Web. `args.cancelled` is true for system cancellation and false for a normal end.
 - Inspect `touches[0..numTouches)` and each point's `changed` flag; at most 32 points are delivered. Positions are window coordinates without node transforms; see `MouseEventArgs::pos` for units.
 - Runs before any primary-touch left-button release generated by touch-as-mouse, which is enabled by default. `setTouchAsMouse(false)` disables that conversion; the arguments have neither `cancel` nor `consumed`.
-- In normal windowed builds, `App::touchReleased` receives the event through a default-priority listener. See `Event<T>` for listening and priority rules.
 
 ## CoreEvents::update
 
-- Keep the returned `EventListener` as a member, such as `EventListener updateListener;` in tcApp.h. When it is destroyed, the listener is disconnected.
-- It fires once per update, not once per drawn frame. With independent or fixed-Hz update, it can fire zero or several times per drawn frame.
-- The order in each step is: the frame count goes up, `events().update` fires, and then the App's `setup()` (first step only) and update tree run.
-- On the very first step it fires before the App's `setup()`, so your listener must not assume that the App is already set up.
-- Each window has its own `events()`. A secondary Window fires its own `events().update` before updating its tree.
-- `runHeadlessApp` never fires it (Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906)).
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
+- Each update step or rendered frame has one notify. The App listener runs setup once, then the corresponding tree; BeforeApp listeners on the first step may run before setup. Headless emits update with App::update() at 100, without tree traversal or draw; secondary windows still notify before directly ticking/drawing their tree.
 
 ```cpp
 // tcApp.h (inside class tcApp : public App)
@@ -2030,8 +2042,9 @@ void tcApp::setup() {
 
 ## CoreEvents::windowResized
 
+- Main/host event path: BeforeApp listeners → this App callback at 100 → AfterApp listeners. Earlier payload edits reach the App; there is no node-tree stage. Resize startup/reload seeds remain App-only. Secondary-window delivery is unchanged in this part.
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - Delivers `ResizeEventArgs&` on the main thread. `args.width` and `args.height` are logical dimensions, except that the main window uses framebuffer pixels when `pixelPerfect` is enabled.
-- The main window notifies listeners before `App::windowResized`. Secondary windows notify their own hub during size synchronization after the App callback, only when an attached App's size changes.
 - The arguments have neither `cancel` nor `consumed`; listeners cannot cancel resizing or prevent the App callback. Headless runs do not generate this event.
 
 ## Cursor
@@ -2517,14 +2530,16 @@ void tcApp::setup() {
 
 ## Event::clear
 
-- Removes all registered listeners and invalidates pending `Deliver::Main` calls that have not started; returns no value.
+- Removes user listeners and invalidates their pending `Deliver::Main` calls that have not started; returns no value. Framework-owned entries keep their live tokens and queued calls until the framework disconnects their own handles. `listenerCount()` includes retained entries.
 - Existing `EventListener` tokens can still report `isConnected() == true` until they are disconnected or reassigned.
 - For removal during notification and synchronization with callbacks on other threads, see `Event<T>`.
 
 ## Event::listen
 
+- On App-facing events, the default changes from `100` to `0`. An omitted priority now ties with explicit `0` in registration order: default `a` registered before explicit-0 `b` runs `ab` (previously `ba`). Defaults now precede explicit `1–99` (previously followed them) and explicit `100` (previously tied and interleaved by registration). A consuming default listener therefore pre-empts even an explicit-100 listener registered earlier.
+- On events the App receives, listen() defaults to BeforeApp; other events keep 100.
 - Use `listen(callback)` or `listen(object, &Class::method)`; callbacks receive `T&`, or no arguments for `Event<void>`.
-- The optional integer priority defaults to `EventPriority::App` (`100`); smaller values run first, and equal priorities preserve registration order.
+- Omitted priority uses the event instance’s default (generic and audio events: `100`); smaller values run first, and equal priorities preserve registration order.
 - Use `listen(callback, Deliver::Main, priority)` to request main-thread delivery. For delivery rules, the non-copyable argument fallback, and storing the returned `EventListener`, see `Event<T>`.
 - Overloads that take an `EventListener&` as the first argument are deprecated.
 
@@ -2560,17 +2575,19 @@ void tcApp::setup() {
 
 ## Event<T>
 
+- `Event()` defaults to `100`; `Event(defaultPriority)` sets an immutable per-instance integer default for all omitted-priority overloads. Every explicitly supplied integer stays explicit, including `0`, negative values and integer extremes.
+- On events the App receives, listen() defaults to BeforeApp; other events keep 100.
 - Register a callback with `listen(callback)` or a member function with `listen(object, &Class::method)`; callbacks receive `T&`. `notify(arg)` passes the same argument by reference to listeners, so they can modify it. `Event<void>` uses callbacks and `notify()` without arguments.
 - Keep the returned `EventListener` as a member, such as `EventListener listener;`, and assign the result to it. Destroying or reassigning the token disconnects its previous listener automatically; discarding the returned token disconnects immediately.
-- The optional integer priority defaults to `EventPriority::App` (`100`). Use `listen(callback, priority)` or `listen(callback, Deliver::Main, priority)`; see `EventPriority::BeforeApp` for priority values, listener order, and `consumed`.
+- Omitted priority uses the event instance’s default (generic and audio events: `100`). Use `listen(callback, priority)` or `listen(callback, Deliver::Main, priority)`; see `EventPriority::BeforeApp` for priority values, listener order, and `consumed`.
 - `Deliver::Inline` is the default and calls listeners synchronously on the thread that calls `notify()`. `Deliver::Main` also runs immediately when notification already occurs on the main thread.
 - From another thread, `Deliver::Main` copies a copy-constructible argument and queues the callback for the main thread before a subsequent frame's update and draw; the notifying thread does not wait. A non-copyable argument falls back to inline delivery on the notifying thread.
-- A queued listener receives its own argument copy, so changes do not update the original or stop other listeners through `consumed`. Disconnecting its token or calling `clear()` invalidates pending calls that have not started.
+- A queued listener receives its own argument copy, so changes do not update the original or stop other listeners through `consumed`. Disconnecting its token or removing a user listener with `clear()` invalidates pending calls that have not started.
 - Node tree changes and GPU operations belong on the main thread. Choose `Deliver::Main` for callbacks that need them, subject to the non-copyable argument fallback.
-- A listener added during `notify()` starts with the next notification. Disconnecting a listener on the notifying thread prevents later calls to it in that notification, and `clear()` skips the remaining listeners.
+- A listener added during `notify()` starts with the next notification. Disconnecting a listener on the notifying thread prevents later calls to it in that notification, and `clear()` skips the remaining user listeners, retaining framework-owned entries.
 - Disconnecting from another thread does not wait for a running callback, and a callback that has already checked its connection can still start. Before destroying captured objects, synchronize with the notifying thread; for audio, disconnect and then use `AudioEngine::waitForAudioCallbacks()` as described in that entry.
 - Listener-list operations are synchronized, but notifications from different threads can run callbacks concurrently. Synchronize shared callback state and access to the same `EventListener` token yourself.
-- `listenerCount()` returns the number of registered listeners, and `clear()` removes them all. An `Event` cannot be copied or moved.
+- `listenerCount()` returns the number of registered listeners, and `clear()` removes user listeners and retains framework-owned entries. An `Event` cannot be copied or moved.
 - For the order of input listeners, App callbacks, and node handlers, see `App::mousePressed`.
 
 ```cpp
@@ -2602,12 +2619,18 @@ void tcApp::setup() {
 
 ## EventPriority::AfterApp
 
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
 - Its integer value is `200`; see `EventPriority::BeforeApp` for listener order and `consumed`, and `App::mousePressed` for the order relative to App callbacks and nodes.
-- Known issue: [#908](https://github.com/TrussC-org/TrussC/issues/908) (AfterApp listeners on key and mouse events still run before the App's own callback).
 
 ## EventPriority::BeforeApp
 
-- The predefined integer priorities are `BeforeApp = 0`, `App = 100`, and `AfterApp = 200`; `listen()` uses `App` by default and also accepts other integer values.
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
+- On App-facing events, the default changes from `100` to `0`. An omitted priority now ties with explicit `0` in registration order: default `a` registered before explicit-0 `b` runs `ab` (previously `ba`). Defaults now precede explicit `1–99` (previously followed them) and explicit `100` (previously tied and interleaved by registration). A consuming default listener therefore pre-empts even an explicit-100 listener registered earlier.
+- The predefined integer priorities are `BeforeApp = 0`, `App = 100`, and `AfterApp = 200`. On events the App receives, listen() defaults to BeforeApp; other events keep 100. Explicit priorities accept every integer.
 - Listeners run from smaller priority values to larger ones. Listeners with the same value run in registration order.
 - For argument types with a `consumed` field, delivery stops after an inline listener returns with `e.consumed == true`, skipping subsequent listeners, including those with the same priority. Argument types without this field do not stop delivery this way.
 - For listener registration and queued delivery, see `Event<T>`; for the order relative to App callbacks and nodes, see `App::mousePressed`.
@@ -2864,6 +2887,7 @@ void tcApp::draw() {
 
 ## LoadResult
 
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
 - Resource loaders such as `Image`, `SoundBuffer`, `VideoPlayer`, and `Font` return this type in place of `bool`. It contains a `LoadError` in `error` and a human-readable `message` that may be empty.
 - A default-constructed result has `error == LoadError::None` and an empty message. `ok()` tests only the error value.
 - Explicit Boolean conversion supports conditions such as `if (image.load("photo.png"))`; Boolean assignments and function arguments require `.ok()` or `static_cast<bool>(result)`.
@@ -2893,9 +2917,10 @@ void tcApp::draw() {
 
 ## LoadError
 
+- Asynchronous Image, SoundBuffer and Font preparation or retained-result admission can also fail with `TooLarge`; see their `loadAsync` entries for the shared limits.
 - This scoped enum contains `None`, `FileNotFound`, `UnsupportedFormat`, `DecodeFailed`, `Unknown`, `TooLarge`, and `Cancelled`; `None` has value `0` and means success.
 - `FileNotFound` covers missing files or files that could not be opened; `UnsupportedFormat` identifies an unsupported extension or container, and `DecodeFailed` identifies data rejected by the decoder.
-- `TooLarge` identifies image dimensions exceeding the GPU texture limit; CPU-only `Pixels` are not subject to that limit. `Cancelled` identifies cancellation, and `Unknown` covers failures without a more specific classification.
+- `TooLarge` identifies an image dimension or encoded-input size limit, including CPU-only `Pixels`. Image dimensions use the recorded GPU texture limit, or 16384 per axis when unknown; encoded inputs are limited to 64 MiB. `Cancelled` identifies cancellation, and `Unknown` covers failures without a more specific classification.
 
 ## loadErrorName
 
@@ -2992,6 +3017,7 @@ void tcApp::setup() {
 
 ## FileReader::readLine
 
+- Local lines have no size cap and use amortized linear growth. Failure clears the output; Detected I/O or allocation failure logs an Error. Some standard libraries report read errors as EOF (libc++ and MSVC filebuf), so a partial final line can be returned there. Lines of at least 256 MiB emit a Notice.
 - `readLine()` returns a string; `readLine(string& line)` stores the line in the supplied string and returns whether reading succeeded. A final nonempty line without a newline is still a successful read.
 - Removes the separating `'\n'` and one trailing `'\r'`, if present. Other bytes are preserved without text decoding.
 - The no-argument form returns an empty string for a blank line, a closed file, or EOF with no more characters. The output-argument form distinguishes a successful blank line from failure by returning `true`; it returns `false` for a closed file, EOF with no more characters, or a read failure.
@@ -3324,6 +3350,7 @@ void tcApp::draw() {
 
 ## Font::load
 
+- Local font files have no additional encoded-size cap beyond the backend addressing guard (below 1 GiB). The sfnt directory and glyph sections are validated against actual bytes. Per-glyph outline/raster allocations are checked against glyph counts and raster metrics, with a 256 MiB live-workspace ceiling; a failure reports an Error and publishes no partial glyph. This workspace limit does not cap app-produced atlas pages. Allocation recovery requires standard-library configurations without iterator debugging; MSVC Debug iterator-proxy allocation is outside this guarantee.
 - Call `load(nameOrPath, size, faceIndex = 0)` with an integer font size in logical pixels. Rasterization uses the display DPI scale captured at loading, while drawing and metrics use logical coordinates.
 - Relative file paths resolve against the data folder through `getDataPath()`; absolute paths are used as given. A regular file at the resolved path takes precedence over a system font with the same name.
 - `faceIndex` selects a face in a file or URL containing a font collection (`.ttc` or `.otc`); a single font has only face 0. A negative index or an index at or beyond the face count logs an error and fails.
@@ -3699,7 +3726,7 @@ settings.setFps(120.0f);
 - Loading parses data on the calling thread and immediately creates GPU resources; load on the main rendering thread after graphics initialization.
 - Owns its GPU image, view, and sampler, supports moving, and prohibits copying. Returned GPU handles are borrowed; do not destroy them or retain them across replacement of the profile resources.
 - A light stores only a pointer to the profile. Keep the profile alive at the same address while attached; before destroying or moving it, detach it with `light.setIesProfile(nullptr)` or update the light's pointer.
-- Replacing or destroying the profile queues its GPU resources for deferred destruction so recorded draws can retain them. Numeric metadata can remain after a failed reload or move; use `isLoaded()` to check the loading state.
+- Replacing or destroying the profile queues its GPU resources for deferred destruction so recorded draws can retain them. Failed reloads preserve the previous profile, including its loading state, metadata and handles. Moving clears the source loading state but can leave numeric metadata; use `isLoaded()` to check it.
 
 ## IesProfile::getMaxCandela
 
@@ -3718,8 +3745,8 @@ settings.setFps(120.0f);
 
 ## IesProfile::isLoaded
 
-- Returns a flag that is initially `false` and becomes `true` after successful parsing and the texture-generation calls; it does not validate GPU resource creation.
-- `loadFromString()` clears the flag before parsing, and moving clears the source object's flag; a file-access failure in `load()` leaves the flag unchanged.
+- Initially `false`; becomes `true` only after parsed tables, pixels and valid GPU resources have been prepared and installed.
+- A failed `load()` or `loadFromString()` preserves the previous loading state and profile. Moving clears the source object's flag.
 
 ## IesProfile::load
 
@@ -3743,8 +3770,8 @@ void tcApp::setup() {
 
 - Accepts IES text as a `const string&`; requires a `TILT=` line followed by the numeric header, vertical and horizontal angles in degrees, and the candela table.
 - Applies the header's candela multiplier. Embedded `TILT=INCLUDE` data is skipped without applying its factors; external tilt files are not loaded, and the photometric-type header does not change the angle interpretation.
-- Releases the existing GPU resources before parsing. On a parsing failure, logs a warning, returns `false`, and leaves the profile unloaded; previously stored numeric metadata is not cleared.
-- On successful parsing, generates the lookup texture, marks the profile loaded, and returns `true`; GPU resource creation results are not checked.
+- Prepares parsed tables, pixels and GPU resources before replacing the profile. Parsing, allocation or GPU creation failure logs an Error, returns `false`, and preserves the previous profile, including metadata and handles. Allocation recovery requires standard-library configurations without iterator debugging; MSVC Debug iterator-proxy allocations in noexcept container operations are outside this guarantee.
+- On success, installs the lookup texture, defers retirement of previous resources without allocating, marks the profile loaded, and returns `true`.
 - For texture averaging, threading, ownership, and attachment lifetime, see `IesProfile`.
 
 ## Image
@@ -3883,6 +3910,8 @@ void tcApp::draw() { image.draw(0, 0); }
 
 ## Image::load
 
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
+- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - `load(path, mipmaps = false)` decodes the file into four-channel U8 RGBA pixels and uploads an Immutable texture. Relative paths resolve through `getDataPath()`; absolute paths are used as given.
 - The decoder supports JPEG, PNG, TGA, BMP, PSD, GIF, Radiance HDR, Softimage PIC and binary PPM/PGM, subject to each decoder's supported variants. This method produces U8 pixels even for HDR or higher-bit-depth input; use `Pixels::loadHDR()` for floating-point HDR pixels.
 - On macOS and iOS, files rejected by the first decoder are tried with ImageIO, including HEIC/HEIF, TIFF and JPEG 2000 where supported by the OS. This fallback sets alpha to 1.
@@ -3904,6 +3933,8 @@ void tcApp::draw() {
 
 ## Image::loadFromMemory
 
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
+- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - `loadFromMemory(buffer, len, mipmaps = false)` decodes `len` bytes of encoded image data into four-channel U8 RGBA pixels and uploads an Immutable texture. It copies the decoded pixels and does not retain the input buffer.
 - Uses the same primary decoder as `Image::load`, without the platform file-loading fallback. `mipmaps = true` builds a mip chain.
 - Returns `LoadResult`: `DecodeFailed` for rejected data, `TooLarge` for dimensions above the active GPU texture limit, or `Unknown` for texture upload failure. Clears the previous image and cancels asynchronous loading before decoding; failure leaves the image empty.
@@ -4002,6 +4033,7 @@ void tcApp::draw() {
 
 ## Json
 
+- v0.8: the bundled text parser rejects nesting beyond 64 levels, including direct `Json::parse` calls. Parsed values carry private provenance used by transactional settings reflection; see `JsonReadReflector`. Local documents have no byte-size cap.
 - Defined as `using Json = nlohmann::json;` and used by `loadJson`, `saveJson`, `parseJson`, and `toJsonString`. Its full API is the nlohmann/json API.
 - A default-constructed `Json()` holds JSON `null`, not an empty object or array; check it with `is_null()`.
 
@@ -6622,7 +6654,7 @@ void Ball::cleanup() {
 - The parent's transform and the node's own transform are already applied, so draw in local coordinates, for example `drawRect(0, 0, getWidth(), getHeight())`.
 - `resetStyle()` runs before every node's `draw()`. The style starts from the default and does not carry over from the parent.
 - Children draw after this node, in list order, so later children end up on top.
-- The order is `beginDraw()` → `draw()` → mods' `draw()` → children → style reset → `endDraw()`. `events().draw` listeners run before the App's draw tree.
+- The order is `beginDraw()` → `draw()` → mods' `draw()` → children → style reset → `endDraw()`. `BeforeApp` `events().draw` listeners run before the App's draw tree.
 - Pair every `pushMatrix` / `pushStyle` with a pop inside the same `draw()`. An extra pop beyond what the node pushed is refused, and a missing pop is restored after the node draws. Both cases print a warning with the node's name.
 
 ```cpp
@@ -7231,7 +7263,7 @@ ball->setActive(false);    // update() stops for ball and all its children
 
 - Updates and draws are not 1:1. With independent or fixed-Hz update (see `setIndependentFps`), there can be zero or several updates per drawn frame.
 - Changes to the tree made inside `update()` take effect from the next frame, because children are walked from a copy of the list.
-- In a windowed app, `events().update` listeners run before the App's update tree. After each main update, the matrix and style stack depth is restored.
+- In a windowed app, `BeforeApp` `events().update` listeners run before the App's update tree. After each main update, the matrix and style stack depth is restored.
 - `runHeadlessApp` calls only the App's own `update()`, not the tree, so child nodes' `update()`, timers and the removal of destroyed children do not run there (Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906)).
 
 ```cpp
@@ -7665,6 +7697,8 @@ void tcApp::setup() {
 
 ## Pixels::load
 
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
+- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - Clears existing pixels, decodes with stb_image, and tries `loadPlatform()` if decoding fails; successful loading produces four-channel `PixelFormat::U8` data.
 - Returns a `LoadResult` that evaluates to `true` on success; an unavailable file reports `LoadError::FileNotFound`, and failed decoding reports `LoadError::DecodeFailed`. The buffer remains cleared on failure.
 - Performs no GPU work and can run on a worker thread; upload the result with `Texture::allocate(pixels)` on the main thread. See `Texture` for GPU resource rules.
@@ -7684,12 +7718,16 @@ void tcApp::draw() {
 
 ## Pixels::loadFromMemory
 
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
+- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - `loadFromMemory(const unsigned char* buffer, int len)` reads encoded image bytes, with `len` in bytes, and produces four-channel `PixelFormat::U8` pixels; this is not an import of raw pixel values.
-- Clears existing pixels before decoding and returns `LoadResult`; failure reports `LoadError::DecodeFailed` and leaves the buffer cleared. It does not try the platform decoder.
+- Clears existing pixels before decoding and returns `LoadResult`; rejected data reports `LoadError::DecodeFailed`, size limits report `TooLarge`, and allocation failure reports `Unknown`. Failure leaves the buffer cleared. It does not try the platform decoder.
 - Performs no GPU work and can run on a worker thread; see `Image::load` for stb_image formats and `Texture` for GPU upload rules.
 
 ## Pixels::loadHDR
 
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
+- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - Decodes Radiance HDR data into four-channel `PixelFormat::F32` pixels with linear RGB values and alpha set to 1; the float decoder also accepts supported non-HDR images and converts them to floats.
 - Clears existing pixels first and returns `LoadResult`; unavailable files report `LoadError::FileNotFound`, and decoding failures report `LoadError::DecodeFailed`, leaving the buffer cleared. There is no platform decoder fallback.
 - Performs no GPU work; see `Image::load` for path resolution, including relative paths through `getDataPath()` and unchanged absolute paths.
@@ -7704,6 +7742,7 @@ void tcApp::setup() {
 
 ## Pixels::loadPlatform
 
+- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding. Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - On macOS and iOS, uses ImageIO to decode the first image into four-channel U8 pixels and forces every alpha value to 255; see `Image::load` for supported formats and path resolution.
 - Returns `true` after replacing the buffer on success; returns `false` without changing existing pixels on failure.
 - On non-Apple platforms, checks file availability and always returns `false` without changing the buffer.
@@ -7731,6 +7770,7 @@ void tcApp::setup() {
 
 ## Pixels::save
 
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
 - Selects JPEG for `.jpg` or `.jpeg`, BMP for `.bmp`, and PNG for every other extension, ignoring extension case and preserving the requested filename. JPEG quality is 90.
 - Returns `SaveResult`; unallocated data, a null data pointer, or F32 format returns `SaveError::WriteFailed`.
 - Resolves relative paths through `getDataPath()`, leaves absolute paths unchanged, and creates missing parent directories. Paths inside the application bundle return `SaveError::AccessDenied`.
@@ -8915,8 +8955,8 @@ void tcApp::setup() {
 
 - Use `Serial::listDevices()` to enumerate devices, then `setup(devicePath, baudRate)` or `setup(deviceIndex, baudRate)` to connect. Both arguments are required; the rate is in baud. Desktop ports use 8 data bits, no parity, one stop bit, and no hardware or software flow control.
 - `available()` reports buffered bytes, and reads consume bytes already received without waiting for new input. Writes can return a partial count or an error and can wait on Windows and Android; see `Serial::readBytes` and `Serial::writeBytes` for return values and timeouts.
-- Each open port has a receive worker and a 1 MiB buffer on desktop and Android. Overflow discards the oldest bytes; `getDroppedByteCount()` reports the discarded total. Overflow warnings include this total and occur at most once every 5 seconds.
-- Desktop receive workers record device loss and overflow or driver warnings for delivery by the next `available()`, `readBytes()`, `readByte()`, or `writeBytes()` call. Windows uses overlapped reads and writes.
+- Each open port has a receive worker and storage allocated on demand up to 64 MiB on desktop and Android. Overflow discards the oldest bytes; allocation failure discards unadmitted bytes. `getDroppedByteCount()` reports the exact discarded total. One Warning when buffering first exceeds 1 MiB and one on first loss are delivered automatically on the main thread by the frame or headless run loop, without another Serial call. Both OnceGates reset on a new connection and do not repeat per burst. Delivery runs from the main-thread queue, which the frame loop drains every frame (also EVENT_DRIVEN frames that skip update) and the headless loop drains between passes. A Warning captured before closing is still delivered, and receive workers never allocate or log for it.
+- Desktop receive workers record device loss and driver warnings for delivery by the next `available()`, `readBytes()`, `readByte()`, or `writeBytes()` call. Windows uses overlapped reads and writes.
 - `isConnected()` and `isInitialized()` report stored connection state without probing the device. On desktop, an I/O call that finds device loss closes the port and fires `onDisconnect` after releasing the lock. On Android, this happens when I/O observes loss recorded by the receive worker; a write error alone does not trigger immediate disconnection. By default, listeners run on the calling thread; retain the listener returned by `listen(callback, Deliver::Main)` when main-thread delivery is needed.
 - I/O calls share a per-object lock, while setup, close, destruction, and moves require exclusive access and wait for active I/O. I/O calls can run concurrently, but new I/O waits once setup, close, destruction, or a move requests exclusive access. The application must coordinate which thread reads or writes which data. `isConnected()` and `getDevicePath()` do not wait for port I/O.
 - The object owns its connection, cannot be copied, and can be moved. Destruction closes the port without firing `onDisconnect`; move assignment also closes the destination's previous port without that event. Event listeners stay with their original object.
@@ -8975,7 +9015,7 @@ class tcApp : public App {
 
 ## Serial::getDroppedByteCount
 
-- On desktop and Android, the receive buffer is limited to 1 MiB to bound memory use when input outpaces reading. Overflow discards the oldest bytes, and this `size_t` count includes only those discards; reading and intentional flushing do not increase it.
+- On desktop and Android, the receive buffer is limited to 64 MiB to bound memory use when input outpaces reading. Overflow discards the oldest bytes, and this `size_t` count includes those discards and unadmitted bytes on allocation failure; reading and intentional flushing do not increase it.
 - Closing and flushing preserve the count, and moving a `Serial` transfers it. A successful desktop connection starts a new count; Android resets it when starting a new setup attempt, including one that fails, but preserves it when keeping the same USB permission request pending.
 - Windows driver overrun and RX overflow flags are logged separately because they provide no exact lost-byte count; framing and parity errors are also log-only. See `Serial::setup` for threading rules.
 
@@ -9070,11 +9110,11 @@ void tcApp::update() {
 - Linux reads back the applied rate when available, for standard and custom rates. A difference greater than 2% fails; a different rate within that tolerance succeeds with a warning naming the applied rate. If the driver retains its old rate even after an additional standard-rate probe, setup succeeds with a warning that baud rates have no effect, as with `/dev/ttyGS*`, `usb_serial_generic`, or xHCI DbC drivers.
 - Android supports USB Host CDC-ACM devices. Without USB permission, setup requests permission, starts asynchronous connection work, and returns false; check `isConnected()` afterward. Repeating setup for the same pending device preserves the request and its original baud rate without restarting the dialog. An unanswered request times out after 60 seconds.
 - On Android, rejection of the CDC line-coding request logs a warning but does not prevent connection; the backend also requests DTR and RTS.
-- On desktop and Android, each open connection has a receive worker and a 1 MiB buffer. See `Serial::getDroppedByteCount` for overflow and counter resets, and `Serial::writeBytes` for platform-specific write waits.
+- On desktop and Android, each open connection has a receive worker and storage allocated on demand up to 64 MiB. See `Serial::getDroppedByteCount` for overflow and counter resets, and `Serial::writeBytes` for platform-specific write waits.
 - A `Serial` can be used from several threads. I/O calls and `getDroppedByteCount()` share its port lock, and receive-buffer access also uses a buffer mutex. `setup()`, `close()`, loss cleanup, destruction, and moves take exclusive access, wait for active I/O, and hold new I/O behind them; the app still controls which thread reads or writes which data and in what order.
 - A long write or `drain()` delays opening and closing on another thread, while receive calls can proceed. Closing also stops and waits for the receive worker; macOS and Linux use a 50 ms receive poll timeout, Windows sleeps 5 ms when idle and waits up to 50 ms for a pending read, and Android bulk reads use a 250 ms timeout. Desktop moves transfer the worker with its connection, and Windows uses overlapped reads and writes.
 - `isConnected()` and `getDevicePath()` do not wait for port operations. Ordinary Serial log callbacks run after its port lock is released, so an inline `Logger` listener may call the same `Serial`.
-- Android USB workers also log permission timeouts, connections, losses, receive overflow, and open errors. An inline logger listener on such a worker must not perform Serial I/O, opening, closing, or destruction; use `Deliver::Main`. `isConnected()` and `getDevicePath()` are safe there.
+- Android USB workers also log permission timeouts, connections, losses, and open errors. An inline logger listener on such a worker must not perform Serial I/O, opening, closing, or destruction; use `Deliver::Main`. `isConnected()` and `getDevicePath()` are safe there.
 - On any Serial USB worker thread, `setup()` and `close()` are refused before acquiring the port lock, do nothing, and log one refusal error per thread; setup returns false. An I/O call that finds loss there returns its error value without closing or firing `onDisconnect`, leaving `isConnected()` true until a call on another thread reports it.
 - Android destruction and moves cannot refuse worker-thread calls. Destruction on the object's own worker leaves connection cleanup to that worker when it stops. Worker-thread destruction or movement is safe only while no other thread uses that `Serial`, because another thread can hold its port lock while waiting for the worker.
 - On another Serial's USB worker, destruction waits for the destroyed object's worker, and move assignment waits for the destination's previous worker; move construction waits for no worker. A worker being waited for must not also wait for the calling thread, such as through simultaneous destruction or move assignment. I/O on a USB worker can deadlock for the same reason.
@@ -9685,7 +9725,7 @@ void tcApp::setup() {
 - File loaders resolve relative paths with `getDataPath()` and use absolute paths unchanged; successful loads record the resolved path in `getPath()`.
 - Returns `LoadResult`, which converts to true on success; inspect `error` and `message` for failure details. Missing or unreadable files report `LoadError::FileNotFound`; an existing file with an unsupported extension reports `LoadError::UnsupportedFormat`.
 - All synchronous file, encoded-memory, and PCM loaders cancel a pending `loadAsync` and clear `getPath()` before loading, including requests that fail.
-- WAV, MP3, FLAC, and OGG loaders preserve existing samples and audio metadata on failure; AAC failure behavior depends on the platform, as described in `SoundBuffer::loadAac`.
+- All encoded audio loaders preserve previous PCM and audio metadata on any failure and never publish a partial sound. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Encoded inputs above 64 MiB are not loaded fully; allocation failure is a clean Error.
 - Serialize handle operations and direct sample access on the main thread. Synchronous loading, generation, and editing do not lock the audio mixer, so do not modify a buffer while any playing `Sound` reads it.
 
 ```cpp
@@ -9700,14 +9740,13 @@ void tcApp::setup() {
 
 - Returns `LoadResult`; see `SoundBuffer::load` for path resolution, cancellation, and threading rules.
 - On Web, waits for `OfflineAudioContext` decoding to finish even inside `setup()`, with a 30-second timeout, and stores PCM at 44100 Hz.
-- Failure does not uniformly preserve audio data: on macOS/iOS, a read failure after allocation clears `samples` but leaves the assigned channel count, sample rate, and frame count.
-- On Windows, a sample-reading error after successful format setup can still return success with the samples collected so far.
+- On any failure, previous PCM and audio metadata are preserved; no partial sound is published. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Encoded inputs above 64 MiB are not loaded fully; allocation failure is a clean Error.
 
 ## SoundBuffer::loadAacFromMemory
 
 - `data` points to encoded data and `dataSize` is its size in bytes; decoding completes before returning a `LoadResult`.
 - See `SoundBuffer::loadWavFromMemory` for input lifetime and `SoundBuffer::load` for cancellation and threading rules.
-- AAC failure and partial-read behavior follow the platform differences described in `SoundBuffer::loadAac`.
+- On any failure, previous PCM and audio metadata are preserved; no partial sound is published. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Encoded inputs above 64 MiB are not loaded fully; allocation failure is a clean Error.
 
 ## SoundBuffer::loadFlac
 
@@ -10386,9 +10425,9 @@ void tcApp::setup() {
 
 ## TcpServer
 
-- `start(port, maxClients)` listens on all IPv4 interfaces and returns whether startup succeeded. Port `0` lets the OS choose a port, available through `getPort()`; the default client limit is `0`, meaning unlimited.
+- `start(port, maxClients)` listens on all IPv4 interfaces and returns whether startup succeeded. Port `0` lets the OS choose a port, available through `getPort()`; the default client limit is 64; explicit nonpositive limits are configuration errors.
 - A connection accepted while the client limit is reached is closed immediately. Connected clients have IDs for `send()`, `sendAsync()`, and disconnection; `broadcast()` and `broadcastAsync()` target the connected clients.
-- `send()` and `broadcast()` wait for writes; use their asynchronous counterparts from frame callbacks. Queued sends report completion through `onSendComplete`. The TCP byte-stream and `Deliver::Main` rules are explained under `TcpClient`.
+- `send()` and `broadcast()` wait for writes; use their asynchronous counterparts from frame callbacks. Queued sends report completion through `onSendComplete`. The TCP byte-stream and `Deliver::Main` rules are explained under `TcpClient`. Inside a callback running on a server send thread (for example `onSendComplete` or `onError`), a synchronous send or broadcast does not wait for the server-wide send buffer (`setTotalSendBufferSize`) and fails at once when it is full; it still waits for room in the destination client's own queue.
 - The server always uses workers: `onClientConnect` normally runs on the accept thread, `onReceive` on a client's receive thread, and `onSendComplete` on its writer thread. Error and disconnect callbacks can also run on the thread performing the operation.
 - `stop()` clears the running state, disconnects clients, and joins workers when called from another thread. Destruction also stops the server; workers retain their state until they return.
 - Inline worker listeners may call `stop()`, `disconnectClient()`, or `disconnectAllClients()` without waiting for server threads. On the accept thread, `stop()` closes the listening socket immediately and disconnects clients after the listener returns; other worker calls disconnect the relevant clients before returning.
@@ -10398,7 +10437,7 @@ void tcApp::setup() {
 ## TcpServer::broadcast
 
 - Accepts a pointer and byte count, `vector<char>`, or `string`. The payload is borrowed until this call returns; see `TcpServer::send` for the byte format.
-- Takes a snapshot of the clients, queues the payload for each client, and then waits for all accepted sends to finish or fail. A full client queue can block the queuing pass before later clients are reached.
+- Takes a snapshot of the clients, queues the payload for each client, and then waits for all accepted sends to finish or fail. A full client queue can block the queuing pass before later clients are reached. Inside a callback running on a server send thread (for example `onSendComplete` or `onError`), a synchronous send or broadcast does not wait for the server-wide send buffer (`setTotalSendBufferSize`) and fails at once when it is full; it still waits for room in the destination client's own queue.
 - Returns no result. Calling it from a client's own writer thread silently skips that client.
 - See `TcpServer::setSendTimeout` for timeout behavior. Use `TcpServer::broadcastAsync` in frame callbacks to avoid waiting for network writes.
 
@@ -10456,7 +10495,7 @@ void tcApp::update() {
 
 ## TcpServer::getSendAsyncBufferSize
 
-- Returns the current per-client threshold in bytes as a `size_t`; 0 means unlimited.
+- Returns the current per-client threshold in bytes as a `size_t`.
 - The default is `16 * 1024 * 1024` bytes. See `TcpServer::setSendAsyncBufferSize` for admission rules and overshoot behavior.
 
 ## TcpServer::getSendAsyncPendingBytes
@@ -10518,7 +10557,7 @@ class tcApp : public App {
 ## TcpServer::send
 
 - Accepts `clientId` followed by a pointer and byte count, `vector<char>`, or `string`. Sends the supplied bytes without adding a terminator or message framing; a string sends `message.size()` bytes.
-- Borrows the payload without copying it and waits until the write completes or fails. Keep the data unchanged until return. Returns `true` when the whole payload reaches the kernel, or `false` on failure; success does not confirm processing by the peer application.
+- Borrows the payload without copying it and waits until the write completes or fails. Keep the data unchanged until return. Returns `true` when the whole payload reaches the kernel, or `false` on failure; success does not confirm processing by the peer application. Inside a callback running on a server send thread (for example `onSendComplete` or `onError`), a synchronous send or broadcast does not wait for the server-wide send buffer (`setTotalSendBufferSize`) and fails at once when it is full; it still waits for room in the destination client's own queue.
 - Shares the client's queue and send ordering with `sendAsync()`. A slow peer blocks this call without blocking other clients' writers or the accept loop; use `sendAsync()` in frame callbacks.
 - An unknown client, a closed connection, or a call from that client's own writer-thread listener returns `false` and reports `onError`. Use `sendAsync()` from that writer thread.
 - See `TcpServer::setSendAsyncBufferSize` for waiting on a full queue and `TcpServer::setSendTimeout` for write timeouts.
@@ -10560,11 +10599,25 @@ void tcApp::update() {
 
 ## TcpServer::setSendAsyncBufferSize
 
-- Sets the per-client threshold in bytes. The default is `16 * 1024 * 1024` bytes; 0 allows unlimited pending bytes. Pending bytes include synchronous and asynchronous payloads and the payload currently being written.
-- If the pending count is already at or above the threshold, `sendAsync()` returns `QueueFull`, `broadcastAsync()` skips that client, and synchronous sends wait for room. A full queue does not itself disconnect the client.
-- The new payload size is not included in the admission check. A single payload of any size can enter an empty queue, and one accepted payload can take the queue above the threshold.
-- Raising the threshold lets more data accumulate before queue pressure is reported. Lowering it does not discard existing sends; waiting synchronous sends recheck the current threshold when a completion or shutdown wakes them.
-- See `TcpServer::setSendTimeout` for inactivity timeouts and their connection behavior.
+- Default: 16 MiB. Zero logs a configuration Error and leaves the setting unchanged (v0.8 change).
+- Bound (security): slow peers retain sends; a finite item bounds one-item overshoot. Overflow rejects whole async sends (sync sends wait) and is counted. Inside a callback running on a server send thread (for example `onSendComplete` or `onError`), a synchronous send or broadcast does not wait for the server-wide send buffer (`setTotalSendBufferSize`) and fails at once when it is full; it still waits for room in the destination client's own queue.
+- Pending bytes include queued and executing sync/async sends. An item may cross the mark; later async sends return `QueueFull` and broadcast skips that client. Owned items also obey `setSendItemLimit()` and `setTotalSendBufferSize()`.
+- Each channel admits at most 4096 pending entries, including empty sends. Each bound warns once and counts rejections for the server object's lifetime. A rejection does not disconnect the client.
+- Changes preserve existing sends and wake waiting sync senders. Borrowed sync sends do not copy payloads; large transfers use finite write windows. See `setSendTimeout()` for idle timeouts.
+
+## TcpServer::setSendItemLimit
+
+- Default: 16 MiB. Zero logs a configuration Error and keeps the previous value. Changes apply to subsequent admissions without discarding pending sends.
+- Bound (security): bulk owned sends need a finite pre-copy budget. Overflow rejects the whole send with `QueueFull` and is counted.
+- Checked before copying or moving data, including a moved vector's capacity. Broadcast checks each recipient before fanout and copies its payload only after the first admission. The high-water mark and aggregate credits also apply.
+- One Warning per bound and cumulative internal rejection totals last for the server object's lifetime, across stop/start. No public statistics API is added. Borrowed synchronous sends use finite credit windows instead of owning the whole payload.
+
+## TcpServer::setTotalSendBufferSize
+
+- Default: 64 MiB. Zero logs a configuration Error and preserves the setting. Lowering the limit preserves existing sends; admissions wait or fail until credits fit again.
+- Bound (security): slow peers must not multiply retained sends across clients. Overflow rejects whole async sends (sync sends wait except in send-thread callbacks) and is counted. Inside a callback running on a server send thread (for example `onSendComplete` or `onError`), a synchronous send or broadcast does not wait for the server-wide send buffer (`setTotalSendBufferSize`) and fails at once when it is full; it still waits for room in the destination client's own queue.
+- Reserve before copying/moving data or broadcast fanout. Every recipient consumes credits, even when sharing one payload. Shared storage retains its original credit until its last reference is released. Borrowed sync sends charge a finite window bounded by the item and aggregate limits.
+- Completion, failure, cancellation and disconnect release credits. Each bound warns once with cumulative internal rejection totals for the server object's lifetime. Changes wake waiting synchronous senders.
 
 ## TcpServer::setReceiveBufferSize
 
@@ -10574,9 +10627,9 @@ void tcApp::update() {
 
 ## TcpServer::start
 
-- `start(port, maxClients = 0)` listens on all local IPv4 interfaces. Pass 0 for `port` to let the operating system select one, then read it with `getPort()`.
+- `start(port, maxClients = 64)` listens on all local IPv4 interfaces. Pass 0 for `port` to let the operating system select one, then read it with `getPort()`.
 - Returns `true` when listening and the accept thread have started. Socket, bind, listen, bound-port lookup, or accept-thread startup failures return `false` and notify `onError`.
-- `maxClients` limits registered clients; 0 is unlimited, and negative values are treated as 0. At the limit, new sockets are immediately closed and warnings are limited to once every 5 seconds, with suppressed counts logged. A slot becomes available when a client is removed.
+- Bound (security): finite connection slots bound per-client channels and workers, including closed workers still in callbacks. Overflow closes new sockets before channel/thread creation and is counted. One Warning and cumulative internal totals last for the server object's lifetime. The default is 64; nonpositive values log an Error, notify `onError`, and return `false` without stopping a running server (v0.8 change). Slots free when workers return.
 - The listen backlog is 128, subject to operating-system limits, and is independent of `maxClients`. Finished client threads are joined while running, and persistent accept failures use short delays before retrying.
 - Calls `stop()` first and waits for any concurrent stop teardown to finish before starting a new session. See `TcpServer::stop` for shutdown and lifetime rules.
 - Cannot restart from an inline listener on this server's accept, receive, or writer thread: logs an error and returns `false` without stopping the server. Use main-thread delivery when restarting from a listener.
@@ -11369,7 +11422,7 @@ void tcApp::draw() {
 - Subsequent `events().update` notifications advance time using `getDeltaTime()` before the app's update callback in the normal windowed loop. Read the animated result with `getValue()`; no manual tween update call is needed.
 - Automatic updates run on the main thread in the normal app loop. Tween state has no synchronization, so access the tween on that thread while automatic playback is active.
 - Keep the tween alive for the desired playback duration, for example as a member. Destruction disconnects automatic updates; moving a tween transfers its state and completion event and reconnects updates if it is playing. Copying is disabled.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (`runHeadlessApp` does not emit update events, so automatic tween playback does not advance).
+- Automatic playback also advances in `runHeadlessApp`, through `events().update` before App::update().
 
 ```cpp
 Tween<float> tween;
@@ -13387,6 +13440,7 @@ void tcApp::setup() {
 - Updates and drawing follow the window's display timing on macOS and Windows. Desktop Linux uses timer pacing based on a measured refresh-rate estimate. `Window::setFps` can reduce the update and drawing rate.
 - Updates and drawing pause while the backend reports the window as hidden or occluded; see `Window::isOccluded` for platform differences.
 - Create, operate on, and release windows on the main thread. Window callbacks run synchronously on that thread.
+- App-facing events deliver `BeforeApp` listeners, the App and its node tree at `EventPriority::App` (100), then `AfterApp` listeners. An earlier listener or node that explicitly consumes input stops later delivery. `clear()` preserves the framework-owned App bindings. Equal-priority listeners follow registration order; App bindings are registered when an attachment is applied.
 - GPU resources such as `Texture`, `Fbo`, `Mesh`, and `Font` are shared and can be used from any window.
 - Keep a `shared_ptr<Window>` to retain the window; destroying the last owner closes it immediately. Closing the native window leaves retained handles valid, with `Window::isOpen()` returning `false`, and leaves the main window and other windows running.
 - For supported platforms and creation failures, see `createWindow`; for the attached App's lifecycle, see `Window::setApp`.
@@ -13395,8 +13449,10 @@ void tcApp::setup() {
 
 - Pass a `shared_ptr<App>` to give this window content, or `nullptr` to remove its App. Each window has one App, whose update, draw, input, and resize callbacks run for this window; its RectNode size follows the window size.
 - Returns immediately and applies the request at the next boundary before or after this window processes a frame or event. Calling it from the App's own `update()`, `draw()`, or input callback is supported. Until application, `getApp()` returns the current App.
+- A request during update or input keeps the outgoing App for the entire current tick or event, including the remaining tree processing and drawing in that tick. Bindings change only when the request is accepted at the boundary.
 - The last accepted request before the boundary wins. Requesting the current App cancels a pending replacement without restarting it. A pending `close()` takes precedence over attachment.
 - The App's `setup()` runs once, on its first processed frame. Replacing or removing it, or closing the window, calls its `exit()`, disconnects its audio callbacks and waits for any running audio callback, then calls its `cleanup()`.
+- Replacement and removal directly call the outgoing App's `exit()` exactly once and do not notify `events().exit`; this is an exception to event-based delivery. Closing the window delivers exit through the window event instead.
 - An App whose cleanup has begun cannot be attached again; create a new App to display it again.
 - An App already attached to another window, the running main App, an App whose cleanup has begun, or attachment to a closed or closing window is rejected with an error log. These checks run again when the request is applied; rejection leaves the current App unchanged.
 - Passing `nullptr` to a closed or closing window has no effect. When replacement is applied, `getApp()` already returns the replacement during the outgoing App's exit and cleanup callbacks.
@@ -13421,8 +13477,7 @@ void tcApp::setup() {
 
 - Returns a `CoreEvents&` owned by this Window, including its mouse, keyboard, update, draw, and exit events. The reference remains valid while the Window object exists.
 - Keep the `EventListener` returned by `listen()` in a member to retain the subscription; see `Event<T>` for listener lifetime rules.
-- See `App::mousePressed` for input callback order, `Window::close` for exit order, and `Window::setApp` for main-thread requirements.
-- Known issue: [#908](https://github.com/TrussC-org/TrussC/issues/908) (input listeners with AfterApp priority also run before the App callback).
+- See `Window` for input callback order, `Window::close` for exit order, and `Window::setApp` for main-thread requirements.
 
 ```cpp
 // tcApp.h (inside class tcApp : public App)
@@ -13439,7 +13494,7 @@ void tcApp::setup() {
 - Returns immediately; the main window and other windows keep running. Calling it from this window's own App callbacks is supported. Repeated requests or calls on a closed window have no effect.
 - Closure follows the same path as the close button, outside window callbacks: after the current run-loop pass on Linux, through a close message posted at the loop tail on Windows, and after the next main-window tick on macOS.
 - Until closure is applied, `isOpen()` remains `true`, and `getApp()` and `App::getWindow()` still return the current App and window.
-- Teardown destroys the native window and makes `isOpen()` return `false`, then notifies `events().exit`, then ends the App as described in `Window::setApp`. `App::getWindow()` returns `nullptr` during these teardown callbacks.
+- Teardown destroys the native window and makes `isOpen()` return `false`, then notifies `events().exit` exactly once while retaining the outgoing App. Within that notification, `BeforeApp` runs before `App::exit()` at 100, and mandatory teardown hooks run at `AfterApp` even if the App calls `events().exit.clear()`. Audio detachment and `cleanup()` follow the notification. `getApp()` and `App::getWindow()` return `nullptr` during these teardown callbacks; the framework holds the outgoing App internally.
 - Closing leaves existing Window handles valid. Destroying the Window object when its last `shared_ptr` is released closes its native window immediately.
 - For main-thread requirements, see `Window::setApp`.
 
@@ -13756,9 +13811,10 @@ int main() {
 
 ## Xml::load
 
+- Local input has no byte-size cap; documents above 16 MiB produce a Notice. Nesting is limited to 64 elements to keep DOM consumers safe. Parsing uses a temporary document; failure preserves the previous document and never publishes a parsed prefix.
 - Accepts a file path; relative paths are resolved through `getDataPath()`, and absolute paths are used directly.
 - Returns `true` on success and `false` for a missing or unreadable file or a parsing error; failures are logged, with a description and offset for parsing errors.
-- A failed file precheck leaves the existing document unchanged; once loading begins, the previous contents are cleared and failure can leave partially parsed content. See `Xml` for parsing defaults and node handle lifetime.
+- See `Xml` for parsing defaults and node handle lifetime. Node handles remain valid after failure and are invalidated by a successful replacement.
 
 ```cpp
 void tcApp::setup() {
@@ -13770,8 +13826,9 @@ void tcApp::setup() {
 
 ## Xml::parse
 
-- Accepts a UTF-8 string; an embedded null character ends the input.
-- Clears the previous document contents and returns `true` on success; on failure, logs an error description and offset, returns `false`, and can leave partially parsed content.
+- Local input has no byte-size cap; documents above 16 MiB produce a Notice. Nesting is limited to 64 elements to keep DOM consumers safe. Parsing uses a temporary document; failure preserves the previous document and never publishes a parsed prefix.
+- Accepts a UTF-8 string; embedded null characters are rejected.
+- Returns `true` on success; failure logs an error description and offset and returns `false`.
 - See `Xml` for parsing defaults and node handle lifetime.
 
 ```cpp
@@ -14395,8 +14452,8 @@ void tcApp::setup() {
 
 - Pass the compressed buffer `src`, its byte count `nbytes`, and the codec used by `compress()`; `Codec::None` copies the input unchanged.
 - The vector overload `decompress(src, nbytes, out, decompressedSize, codec)` requires the known original byte count, resizes `out` to that size, and returns `true` only when exactly that many bytes are produced. Failure or a size mismatch clears `out` and returns `false`.
-- The raw overload `decompress(src, nbytes, dst, dstCapacity, codec)` writes into caller-owned storage and returns the number of bytes written as `int`, or `-1` on failure. A result smaller than `dstCapacity` is allowed; this overload does not check the expected original size. For `Codec::None`, keep `nbytes` representable as `int`; larger copies do not reliably return their byte count or `-1`.
-- LZ4 casts both `nbytes` and `dstCapacity` to `int` without checking their ranges; keep both representable as `int`.
+- The raw overload `decompress(src, nbytes, dst, dstCapacity, codec)` writes into caller-owned storage and returns the number of bytes written as `int`, or `-1` on failure. A result smaller than `dstCapacity` is allowed; this overload does not check the expected original size. Inputs whose byte count cannot be represented as `int` return `-1`.
+- The vector overload checks encoded lengths and proves the exact LZ4 output size before allocation. Output has no policy cap; LZ4 output over 256 MiB emits one Notice. It logs an Error on failure. The raw overload has no output policy cap; it checks that `nbytes` fits `int` and clamps LZ4 `dstCapacity` to `INT_MAX` before decoding.
 - For source and destination storage rules, see `compress`.
 
 ```cpp
@@ -15681,7 +15738,7 @@ void tcApp::setup() {
 
 - Returns a `uint64_t` counter that starts at zero and advances before each framework update; multiple update steps between draws each advance it.
 - It returns the same value as `getFrameCount()`. Secondary windows have independent counters; outside a window-specific context, it uses the main window.
-- The `runHeadlessApp` loop does not advance this counter, even though it calls `App::update()`.
+- The `runHeadlessApp` loop also advances this counter before each `events().update` notification, so per-update services such as Box2d can distinguish successive steps.
 - Under VSYNC the rate follows the display's refresh rate, so this count does not measure a fixed time; move things with `getDeltaTime()` instead of a fixed step per frame.
 
 ## getVersion
@@ -15992,8 +16049,8 @@ void tcApp::setup() {
 ## listDirectory
 
 - Resolves `path` through `getDataPath()` and returns a `vector<string>` of entry names without parent paths. Includes files and directories, does not recurse, and does not sort the result.
-- Returns an empty vector if the path is missing or is not a directory. Errors in these initial filesystem queries can throw exceptions.
-- An error while opening or advancing the directory iterator is logged as Error, and the entries collected so far are returned. A filename-conversion exception is logged as Warning, and that entry is skipped.
+- Returns an empty vector if the path is missing or is not a directory. Local listings have no entry or name-size policy cap; entries are streamed and only result names are retained.
+- I/O or allocation failure logs an Error and returns an empty vector. A filename-conversion error logs a Warning and skips that entry.
 - Names are converted through `pathToUtf8()`; see `pathToUtf8` for encoding rules.
 
 ```cpp
@@ -16061,9 +16118,10 @@ void tcApp::setup() {
 
 ## loadJson
 
+- Local files have no byte-size cap. Nesting is limited to 64 levels; deeper input is rejected as a whole. Files above 16 MiB produce a Notice. Caught allocation exceptions log an Error and return `Json()`; recovery during JSON DOM cleanup is not guaranteed.
 - Accepts a file path and returns the parsed `Json` value. Relative paths resolve through `getDataPath()`; absolute paths are used directly.
 - A missing, unreadable, or non-regular file, or a JSON parse error, logs an Error and returns `Json()`, which holds JSON `null`.
-- A valid file containing `null` returns the same value as these failures. Only `Json::parse_error` is caught during parsing; other exceptions propagate.
+- A valid file containing `null` returns the same value as these failures. Caught parsing and allocation exceptions are reported as failures.
 
 ```cpp
 void tcApp::setup() {
@@ -16082,8 +16140,8 @@ Kept as a backward-compatible alias for `setMatrix()` (identical behavior — it
 
 - `loadTextFile(path)` returns the file's bytes as a string. Binary mode preserves line endings, including Windows `"\r\n"`, and embedded null bytes without decoding the text.
 - Relative paths are resolved through `getDataPath()`; absolute paths are used unchanged. The target must be an openable regular file.
-- A missing, non-regular, or unopenable file logs an Error with a file-not-found message and returns an empty string. An empty file also returns an empty string; no explicit read-error check is made after opening.
-- The whole file is read synchronously into memory. Use `FileReader` for incremental reading.
+- A missing, non-regular, or unopenable file logs an Error with a file-not-found message and returns an empty string. An empty file also returns an empty string. Detected I/O or allocation failure logs an Error and returns an empty string. libc++ and MSVC filebuf can report read errors as EOF; a partial result is possible there.
+- The whole file is read synchronously, appending only bytes actually read in chunks, without a local size cap. Reads of at least 256 MiB emit a Notice. Use `FileReader` to retain only part of the file.
 
 ```cpp
 void tcApp::setup() {
@@ -16286,8 +16344,9 @@ void tcApp::draw() {
 
 ## parseJson
 
+- Input has no byte-size cap; documents above 16 MiB produce a Notice. Nesting deeper than 64 levels rejects the whole input. Parsed values retain their external-input provenance for transactional settings reflection.
 - Accepts a `const string&` and returns its parsed JSON value without accessing a file.
-- A `Json::parse_error` logs an Error and returns `Json()`, which holds JSON `null`; other exceptions propagate.
+- Syntax and nesting failures, raw NUL bytes, and caught allocation exceptions log an Error and return `Json()`, which holds JSON `null`. Recovery during JSON DOM cleanup is not guaranteed.
 - Valid input `"null"` returns the same value as a parse failure, so `is_null()` alone cannot distinguish them.
 
 ```cpp
@@ -16302,7 +16361,7 @@ void tcApp::setup() {
 ## parseXml
 
 - Accepts a UTF-8 XML string and returns an `Xml` object.
-- Returns the object even if parsing fails, potentially with partially parsed content; use `Xml::parse` when you need to check success, and refer to it for parsing behavior.
+- Returns an empty object if parsing fails; use `Xml::parse` when you need to check success, and refer to it for parsing behavior.
 
 ```cpp
 void tcApp::setup() {
@@ -16517,6 +16576,7 @@ void tcApp::setup() {
 
 ## reflectFromJson
 
+- v0.8: JSON parsed from files or strings (including MCP input) is validated as a whole before application. All present fields, nested groups, unknown keys, numeric ranges, enum labels, and writable access are validated before any assignment or setter. Invalid input applies nothing and logs an Error naming the field; `applied` stays empty. Parsed provenance survives copies, moves, and child extraction. JSON constructed directly by app code keeps the permissive behavior described below. Setter exceptions during commit and JSON DOM cleanup are outside the recovery guarantee. Allocation recovery requires standard-library configurations without iterator debugging; MSVC Debug with `_ITERATOR_DEBUG_LEVEL != 0` can allocate iterator proxies in noexcept container construction/moves and is outside this guarantee.
 - Calls `obj.reflectMembers()` with a JSON reader, updating only members whose keys are present in `j`. It updates an existing object and does not create nodes or mods.
 - Returns a `JsonReadReflector` containing `applied`, `skipped`, `readOnly`, and `unknownKeys()` results.
 - See `JsonReadReflector` for accepted JSON forms, setter behavior, processing order, and result naming.
@@ -16687,11 +16747,12 @@ int main() {
 ## runHeadlessApp
 
 - Pass the app class as the template argument, as in `runHeadlessApp<tcApp>()`. Optional `HeadlessSettings` sets the target update rate, which defaults to 60 updates per second; the function returns the process exit code.
-- Constructs the app as the scene root and calls `setup()` once. The loop calls only the app's `update()`; it does not call `draw()` or traverse child nodes, mods, and node timers for updates.
+- Constructs the app as the scene root, registers its `update()` and `exit()` at `EventPriority::App` (100), then calls `setup()` once. Each fixed step notifies `events().update`: BeforeApp → App::update() → AfterApp. Equal priorities use registration order; explicit 100 listeners registered before the runner precede the App, and those registered in setup follow it. The App registration survives `clear()`. There is no draw or traversal of child nodes, mods, or node timers.
 - Updates use a fixed step, so `getDeltaTime()` is `1 / settings.targetFps`. Each loop pass runs at most `setMaxUpdateSteps()` steps, with a default limit of 10; a nonpositive limit removes the cap.
 - Excess whole steps after a stall or slow update are discarded with a one-time warning. Between passes, the loop sleeps until the next step is due, requesting at most 1 ms of sleep.
 - The runner's thread is used as the main thread, and queued `runOnMainThread` callbacks are processed between update passes.
-- On exit, calls `exit()`, detaches the app's audio callbacks and waits for any running callback, then calls `cleanup()`. The audio device itself remains running.
+- On exit, notifies `events().exit` once: BeforeApp → App::exit() → AfterApp shutdown hooks. Mandatory framework teardown survives `events().exit.clear()` in App::exit(). Then it detaches the app's audio callbacks, waits for running callbacks, and calls `cleanup()`. The audio device remains running.
+- Update-event services now work headless: Tween, update-mode TcpClient/UdpSocket receive, tcxBox2d auto stepping, and WebSocket timeouts.
 - Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (headless updates call only the app's `update()`, leaving child, mod, and timer updates unprocessed).
 
 ```cpp
@@ -18493,6 +18554,7 @@ public:
 
 ## JsonReadReflector::unknownKeys
 
+- For parsed external JSON, group names are recognized and invalid group shapes or unknown nested keys reject the whole transaction. The permissive group behavior below applies to app-constructed JSON.
 - Call after `reflectMembers()` to obtain a `vector<string>` of top-level source keys not encountered by a top-level `visit()`. A non-object source returns an empty vector.
 - Recognized top-level keys are excluded even when skipped or read-only; unknown keys inside nested groups are not reported.
 - `beginGroup()` does not mark its group name as recognized, so a composite member's top-level key can appear here even when its nested values were applied.
@@ -18505,6 +18567,7 @@ public:
 
 ## JsonReadReflector::beginGroup
 
+- For parsed external JSON, group names are recognized and invalid group shapes or unknown nested keys reject the whole transaction. The permissive group behavior below applies to app-constructed JSON.
 - Selects the object under `name` in the current source; subsequent visits read that object until the matching `endGroup()`.
 - If the key is absent or its value is not an object, visits inside the group find no values and add nothing to the result lists.
 - Group names are not recorded as recognized top-level keys; see `JsonReadReflector::unknownKeys`.
@@ -18537,7 +18600,7 @@ public:
 - In polling mode, selected with `setUseThread(false)` before starting reception, the update event calls this function automatically. It can also be called manually for synchronous polling; it does nothing when automatic receiving is stopped.
 - For each nonempty datagram, fires `onReceive` with its bytes, source IPv4 address, and source port. See `UdpSocket` for listener threading and lifetime.
 - Continues receiving until no data is available, the receive call is interrupted, an empty datagram is received, an error occurs, or receiving is stopped. An empty datagram does not fire `onReceive`; other receive errors fire `onError` without disabling receiving.
-- There is no datagram limit per call, so continuous incoming traffic can delay the return.
+- Receives at most 256 datagrams per call. Remaining datagrams stay queued for a later call or update; reaching this limit does not drop them or count them as loss. Listener work can still delay the call.
 
 ## TcpClient::processNetwork
 
@@ -18658,7 +18721,10 @@ public:
 
 ## EventPriority::App
 
-- Its integer value is `100`, used when `listen()` omits the priority; see `EventPriority::BeforeApp` for priority values, listener order, and `consumed`.
+- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- **v0.8: consumed input no longer reaches App virtuals.** On the main window, host and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
+- This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
+- Its integer value is `100`, the default for generic and audio events; see `EventPriority::BeforeApp` for priority values, listener order, and `consumed`.
 
 ## PlayingSound::buffer
 
@@ -18706,6 +18772,8 @@ void tcApp::setup() {
 
 ## JsonReadReflector
 
+- External integer fields require representable integers; floats must be finite and representable. External vectors require exactly 2 or 3 components; colors require 3 or 4 finite components. Read-only fields and invalid group shapes reject the transaction. Setters control the final stored values; setter exceptions, including allocation failure, can leave earlier writes applied.
+- v0.8: JSON parsed from files or strings (including MCP input) is validated as a whole before application. All present fields, nested groups, unknown keys, numeric ranges, enum labels, and writable access are validated before any assignment or setter. Invalid input applies nothing and logs an Error naming the field; `applied` stays empty. Parsed provenance survives copies, moves, and child extraction. JSON constructed directly by app code keeps the permissive behavior described below. Setter exceptions during commit and JSON DOM cleanup are outside the recovery guarantee. Allocation recovery requires standard-library configurations without iterator debugging; MSVC Debug with `_ITERATOR_DEBUG_LEVEL != 0` can allocate iterator proxies in noexcept container construction/moves and is outside this guarantee.
 - Construct with a source `Json`, then pass the reader to `obj.reflectMembers(r)`. The reader owns its source value, so constructing it from a temporary is safe.
 - Only present keys are processed, in reflection order rather than JSON key order. `TC_VALUE` getter/setter members and `TC_DERIVED` members use their setters when value reflection reports an edit; directly reflected fields are assigned directly.
 - For composite properties whose type has `reflectMembers()`, the outer setter is not called and edits to the getter's temporary copy are discarded. Expose such composites as direct fields to apply nested edits.
@@ -19567,7 +19635,7 @@ protected:
 
 ## RectNode::onMouseScroll
 
-- The protected `bool onMouseScroll(const ScrollEventArgs& e)` first notifies `mouseScrolled` with a copy, then returns the result of `onMouseScroll(e.pos, e.scroll)`.
+- The protected `bool onMouseScroll(const ScrollEventArgs& e)` first notifies `mouseScrolled` with a copy, then returns the legacy hook result OR the copied arguments' `consumed`.
 - The inherited simple overload returns `false`, allowing scrolling to continue to parents such as `ScrollContainer`; override either form to return `true` when the node handles the scroll.
 - Call the RectNode argument-object implementation to retain the notification. See `RectNode::onMousePress` for argument-copy behavior and `Node::onMousePress` for shared input rules.
 
@@ -20132,6 +20200,7 @@ void tcApp::setup() {
 - The first call creates the process's only detached reader, which consumes standard input until EOF or process exit. Later calls reuse it; a reader that has reached EOF is not restarted.
 - `console::stop()` disables delivery while the reader continues consuming input and discards lines read while stopped. Both runners stop delivery before the app's `exit()` and `cleanup()`.
 - Supports LF and CRLF line endings, including a final line without a newline at EOF.
+- External control text is bounded to 1 MiB per line (excluding LF, including CR), 1024 pending commands and 16 MiB of pending raw text. An oversized line is drained and rejected whole; a full queue drops the new whole command. Reading continues without waiting for app delivery. Each store emits one Warning on its first rejection and retains cumulative internal loss counts for the process lifetime; stopping/restarting delivery does not reset them.
 - On Web, logs a notice and leaves delivery disabled.
 
 ```cpp
@@ -20503,6 +20572,7 @@ void tcApp::setup() {
 
 ## SaveResult
 
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
 - Contains a `SaveError` in `error` and a human-readable `message`. A default-constructed result has `error == SaveError::None` and an empty message; `ok()` tests only the error value.
 - Explicit Boolean conversion supports conditions such as `if (saveTextFile(path, text))`; Boolean assignments and function arguments require `.ok()` or an explicit cast.
 - Small-file saves check writing and closing before atomically replacing the destination with the temporary file, and check that replacement succeeds. Append writers and recorders write in place.
@@ -20595,6 +20665,10 @@ void tcApp::draw() {
 
 ## Image::loadAsync
 
+- OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
+- Asynchronous Image, SoundBuffer and Font loads share 4 active preparations. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
+- On Web, CMake propagates exception support to framework and application C++ code for document/font loaders and reflection. Resource preparation and application also retain exception-enabled out-of-line host definitions. If a custom build disables exception support in application TUs, allocation failure inside inline header helpers remains outside the recovery guarantee.
+- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - `loadAsync(path, mipmaps = false)` returns without a result; retain an `onLoad` listener to receive the `LoadResult`. Path resolution, formats and load errors follow `Image::load`.
 - On native platforms, a worker decodes into private CPU pixels. A later main-thread frame applies the result, uploads the Immutable texture, optionally builds mipmaps and sends `onLoad`; notification never occurs inside `loadAsync()`.
 - The committed image remains readable until application. A surviving failure clears it, as with synchronous loading. Headless loading retains CPU pixels without allocating a texture.
@@ -20630,9 +20704,11 @@ void tcApp::draw() { image.draw(0, 0); }
 
 ## SoundBuffer::loadAsync
 
+- Asynchronous Image, SoundBuffer and Font loads share 4 active preparations. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
+- On Web, CMake propagates exception support to framework and application C++ code for document/font loaders and reflection. Resource preparation and application also retain exception-enabled out-of-line host definitions. If a custom build disables exception support in application TUs, allocation failure inside inline header helpers remains outside the recovery guarantee.
 - `loadAsync(path)` returns no result directly and uses the same path resolution, format selection, errors, and decoder logs as `SoundBuffer::load`. Native builds prepare private PCM and metadata on a worker; existing committed data remains readable until the result is applied.
 - Results are applied on the main thread in a later frame, never during this call. Each frame or headless loop pass takes one batch of pending completions; work queued during that pass waits for another pass. After application, `isLoading()` becomes `false` before one `onLoad` event delivers the `LoadResult`.
-- A successful replacement of PCM and metadata holds the audio mixer lock, including when the buffer is playing. Failure reproduces the synchronous loader's field changes, including clearing the recorded path; ordinary failures preserve existing PCM and metadata.
+- A successful replacement of PCM and metadata holds the audio mixer lock, including when the buffer is playing. On any failure, previous PCM and audio metadata are preserved and no partial sound is published; the recorded path is cleared as with synchronous loads.
 - A new request, even for the same path, cancels pending delivery. Synchronous loading, waveform generation, `applyADSR`, `mixFrom`, and `clip` also cancel it. Cancellation does not wait, emit an event, or log a diagnostic; decoding already underway may finish privately, retain its ordinary logs, and temporarily overlap a replacement.
 - Serialize handle operations, access, copying, moving, and destruction on the main thread. Direct sample access and copy/move operations still require synchronization with audio playback.
 - Copy construction copies committed data into an idle buffer with no listeners and leaves the source request running. Assignment between different buffers cancels the destination request and retains its listeners; move construction and move assignment also cancel the source request and transfer committed data while listeners remain with their original handles.
@@ -20662,6 +20738,8 @@ void tcApp::setup() {
 
 ## Font::loadAsync
 
+- Asynchronous Image, SoundBuffer and Font loads share 4 active preparations. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
+- On Web, CMake propagates exception support to framework and application C++ code for document/font loaders and reflection. Resource preparation and application also retain exception-enabled out-of-line host definitions. If a custom build disables exception support in application TUs, allocation failure inside inline header helpers remains outside the recovery guarantee.
 - Call `loadAsync(nameOrPath, size, faceIndex = 0)` with a file path, system font name, or Web URL. Size is in logical pixels; path precedence and collection-face selection follow `Font::load`.
 - Returns no result directly. Success, failure, and cache hits are applied on the main thread in a later frame, never during this call; `isLoading()` becomes `false` before the single `onLoad` notification.
 - On native platforms, a worker prepares owned font bytes and CPU metrics. Shared-cache access and GPU work remain on the main thread, glyph rasterization stays lazy, and the request captures the current DPI, oversampling, and mipmap options.
@@ -20900,3 +20978,21 @@ class tcApp : public App {
 - The default maximum parser depth is 64, with the root at depth 0.
 - A parser depth greater than this value rejects the entire request before dispatch. HTTP returns 503 with `X-MCP-Reason: MCP admission limit exceeded`.
 - For configuration requirements, see `mcp::setAdmissionLimits`.
+
+## App::onMousePress
+
+- This protected rich handler notifies `RectNode::mousePressed` with a copy, then calls the legacy simple hook. It returns the legacy result OR the copied arguments' `consumed`; unlike RectNode it does not consume automatically.
+- Return true from a rich or legacy override, or set consumed in a node-event listener, to consume explicitly. For press, the consumer owns subsequent drag/release; an unconsumed background press creates no grab.
+- See App::mousePressed for main/host listener order and the v0.8 migration.
+
+## App::onMouseRelease
+
+- This protected rich handler notifies `RectNode::mouseReleased` with a copy, then calls the legacy simple hook. It returns the legacy result OR the copied arguments' `consumed`; unlike RectNode it does not consume automatically.
+- Return true from a rich or legacy override, or set consumed in a node-event listener, to consume explicitly. For press, the consumer owns subsequent drag/release; an unconsumed background press creates no grab.
+- See App::mousePressed for main/host listener order and the v0.8 migration.
+
+## App::onMouseDrag
+
+- This protected rich handler notifies `RectNode::mouseDragged` with a copy, then calls the legacy simple hook. It returns the legacy result OR the copied arguments' `consumed`; unlike RectNode it does not consume automatically.
+- Return true from a rich or legacy override, or set consumed in a node-event listener, to consume explicitly. For press, the consumer owns subsequent drag/release; an unconsumed background press creates no grab.
+- See App::mousePressed for main/host listener order and the v0.8 migration.

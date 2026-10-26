@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <new>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -121,7 +122,7 @@ bool UdpSocket::State::bind(int port, bool startReceiving) {
     logNotice() << "UDP socket bound to port " << port;
 
     if (startReceiving) {
-        this->startReceiving();
+        return this->startReceiving();
     }
 
     return true;
@@ -296,10 +297,10 @@ int UdpSocket::State::receive(void* buffer, size_t bufferSize, std::string& remo
 // ---------------------------------------------------------------------------
 // Receive thread
 // ---------------------------------------------------------------------------
-void UdpSocket::State::startReceiving() {
-    if (socket_->handle == INVALID_SOCKET_HANDLE) return;
+bool UdpSocket::State::startReceiving() {
+    if (socket_->handle == INVALID_SOCKET_HANDLE) return false;
     if (receiving_.load()) {
-        return;  // Already receiving
+        return true;  // Already receiving
     }
 
     // A receive thread that a listener's stopReceiving() or close() let go
@@ -307,6 +308,13 @@ void UdpSocket::State::startReceiving() {
     // the new one. The calling thread itself, if kept, stays.
     keptThreads_.joinOthers();
 
+    // Every run has its own State; never resize a retired run's live buffer.
+    try {
+        if (receiveBuffer_.empty()) receiveBuffer_.resize(RECEIVE_BUFFER_SIZE);
+    } catch (const std::bad_alloc&) {
+        notifyError("Failed to allocate UDP receive buffer");
+        return false;
+    }
     shouldStop_ = false;
     receiving_ = true;
 
@@ -317,8 +325,9 @@ void UdpSocket::State::startReceiving() {
     } else {
         // Ensure non-blocking mode for event loop
         setNonBlocking(true);
-        updateListener_ = events().update.listen([state = shared_from_this()] { state->processNetwork(); });
+        updateListener_ = events().update.listen([state = shared_from_this()] { state->processNetwork(); }, EventPriority::BeforeApp);
     }
+    return true;
 }
 
 void UdpSocket::State::stopReceiving() {
@@ -342,11 +351,9 @@ void UdpSocket::State::processNetwork() {
 
     auto& buffer = receiveBuffer_;
 
-    // In event loop mode, we poll first or just try recvfrom in non-blocking mode.
-    // Since we set non-blocking in startReceiving, we can just try recvfrom.
-    // Loop until WouldBlock
-    
-    while (receiving_.load()) {
+    // Bound (security): cap receive work at 256 datagrams per call so update delivery can progress. Overflow stays queued for later calls, rather than being dropped or counted as loss.
+    constexpr int maxDatagramsPerStep = 256;
+    for (int datagrams = 0; datagrams < maxDatagramsPerStep && receiving_.load(); ++datagrams) {
         sockaddr_in fromAddr{};
         socklen_t fromLen = sizeof(fromAddr);
 
@@ -371,12 +378,8 @@ void UdpSocket::State::processNetwork() {
             args.remoteHost = hostStr;
             args.remotePort = ntohs(fromAddr.sin_port);
 
-            onReceive.notify(args);
-            
-            // If not threaded, we process one packet per update to avoid stalling?
-            // Or process all pending? All pending is better for latency.
-            // But limit loop count to prevent infinite loop if data comes faster than process.
-            // For now, process all available.
+            onReceive.notifyExternal(args);
+
         } else {
             int err = SOCKET_ERROR_CODE;
 #ifdef _WIN32
@@ -475,7 +478,7 @@ void UdpSocket::State::receiveThreadFunc() {
                 args.remoteHost = hostStr;
                 args.remotePort = ntohs(fromAddr.sin_port);
 
-                onReceive.notify(args);
+                onReceive.notifyExternal(args);
             } else if (received < 0) {
                 int err = SOCKET_ERROR_CODE;
                 // Ignore wouldblock in case of spurious wakeup
@@ -701,7 +704,8 @@ void UdpSocket::State::notifyError(ErrorKind kind, const std::string& message, i
     UdpErrorEventArgs args;
     args.message = message;
     args.errorCode = code;
-    onError.notify(args);
+    if (kind == ErrorKind::Receive) onError.notifyExternal(args);
+    else onError.notify(args);
 }
 
 void UdpSocket::State::notifyRecovery(ErrorKind kind) {

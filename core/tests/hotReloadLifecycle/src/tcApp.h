@@ -1,6 +1,7 @@
 #pragma once
 
 #include <TrussC.h>
+#include <tcxImGui.h>   // host sees addon declarations too (#371)
 #include "reloadHeaderProbe.h"
 // Both host and guest must wait for app and INTERFACE-addon shader headers.
 #include "shaders/reloadProbe.glsl.h"
@@ -46,7 +47,8 @@ using namespace tc;
 // tcxImGui): two addon singletons that live in the guest image and listen on
 // the host's events, so a reload must not leave the previous generation's
 // copies listening (#416). This also checks the guest target for addon include
-// directories and for linking the addon archives.
+// directories and for linking the addon archives. The host includes tcxImGui
+// above too: its header must not emit guest-only ImGui hooks (#371).
 // =============================================================================
 
 // What guest code sees of state the host set (readSharedState).
@@ -94,6 +96,14 @@ struct UnloadProbe {
 class tcApp : public App {
 public:
     tcApp() {
+        for (auto* event : {&events().update, &events().draw}) {
+            frameTieListeners_.push_back(event->listen([this] {
+                if (frameOrder) *frameOrder += 'l';
+            }, EventPriority::App));
+        }
+        touchTieListener_ = events().touchPressed.listen([this](auto&) {
+            if (touchOrder) *touchOrder += 'l';
+        }, EventPriority::App);
         updateListener_ = events().update.listen([this]() { ticks_++; });
         // App code using hotReloadUnload, as the reference shows
         unloadListener_ = events().hotReloadUnload.listen([this]() {
@@ -124,6 +134,16 @@ public:
         mcp::setToolLevel(mcp::ToolLevel::Control);
     }
 
+    std::string* frameOrder = nullptr;
+    void update() override { if (frameOrder) *frameOrder += 'a'; }
+    std::string* touchOrder = nullptr;
+    int touchPresses = 0, touchMoves = 0, touchReleases = 0;
+    void touchPressed(const TouchEventArgs&) override {
+        ++touchPresses;
+        if (touchOrder) *touchOrder += 'a';
+    }
+    void touchMoved(const TouchEventArgs&) override { ++touchMoves; }
+    void touchReleased(const TouchEventArgs&) override { ++touchReleases; }
     void setup() override;
     void draw() override;
     void exit() override;
@@ -156,6 +176,8 @@ public:
     UnloadProbe* unloadProbe = nullptr;   // set by the cycles (host-owned)
 
 private:
+    std::vector<EventListener> frameTieListeners_;
+    EventListener touchTieListener_;
     EventListener updateListener_;
     EventListener unloadListener_;
     int ticks_ = 0;

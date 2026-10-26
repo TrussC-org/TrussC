@@ -1,0 +1,1 @@
+Replaces global operator new/delete to inject one Nth-allocation failure during listener removal, registration, secondary App swaps and exhaustive close-sequence sweeps.

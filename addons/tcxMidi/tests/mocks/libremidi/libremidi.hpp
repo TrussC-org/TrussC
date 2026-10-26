@@ -15,18 +15,35 @@ struct error {
 }
 
 namespace libremidi {
-enum class API { DUMMY };
+enum class API { DUMMY, WEBMIDI };
 namespace midi1 { inline API default_api() { return API::DUMMY; } }
 struct output_configuration {};
 inline API midi_out_configuration_for(API api) { return api; }
 inline API observer_configuration_for(API api) { return api; }
 struct output_port { std::string display_name; };
 struct input_port { std::string display_name; };
-struct observer_configuration {};
+struct observer_configuration {
+    bool track_hardware = true;
+    bool track_virtual = false;
+};
+namespace test {
+inline bool virtualPorts = false;
+}
 struct observer {
-    observer(observer_configuration, API) {}
-    std::vector<input_port> get_input_ports() const { return {{"test input"}}; }
-    std::vector<output_port> get_output_ports() const { return {{"test output"}}; }
+    observer_configuration config;
+    observer(observer_configuration cfg, API) : config(cfg) {}
+    std::vector<input_port> get_input_ports() const {
+        std::vector<input_port> ports;
+        if (config.track_hardware) ports.push_back({"test input"});
+        if (test::virtualPorts && config.track_virtual) ports.push_back({"virtual source"});
+        return ports;
+    }
+    std::vector<output_port> get_output_ports() const {
+        std::vector<output_port> ports;
+        if (config.track_hardware) ports.push_back({"test output"});
+        if (test::virtualPorts && config.track_virtual) ports.push_back({"virtual destination"});
+        return ports;
+    }
 };
 
 namespace test {
@@ -62,6 +79,7 @@ enum class timestamp_mode { Relative };
 struct message { std::vector<unsigned char> bytes; std::int64_t timestamp = 0; };
 struct input_configuration {
     std::function<void(const message&)> on_message;
+    std::function<void(size_t)> on_sysex_overflow;
     bool ignore_sysex = false, ignore_timing = false, ignore_sensing = false;
     timestamp_mode timestamps = timestamp_mode::Relative;
 };
@@ -69,6 +87,7 @@ inline API midi_in_configuration_for(API api) { return api; }
 namespace test {
 inline std::function<void(const message&)> inputCallback;
 inline std::function<void()> duringClose;
+inline std::function<void(size_t)> sysexOverflow;
 inline int inputCloses = 0, inputDestructs = 0;
 inline std::thread::id closeThread, destructThread;
 }
@@ -76,6 +95,7 @@ class midi_in {
 public:
     midi_in(input_configuration cfg, API) : callback_(std::move(cfg.on_message)) {
         test::inputCallback = callback_;
+        test::sysexOverflow = std::move(cfg.on_sysex_overflow);
     }
     ~midi_in() { ++test::inputDestructs; test::destructThread = std::this_thread::get_id(); }
     stdx::error open_port(const input_port&) { open_ = true; return {}; }

@@ -1,5 +1,6 @@
 #pragma once
 #include "tc/utils/tcLoadResult.h"
+#include "impl/tcImageDecode.h"
 
 // =============================================================================
 // tcPixels.h - CPU pixel buffer management
@@ -270,106 +271,19 @@ public:
     // Load from file (stb_image first, then platform-specific fallback for HEIC etc.)
     // Relative paths resolve via getDataPath, like Image::load. Safe to call
     // from a worker thread.
-    LoadResult load(const fs::path& filePath) {
-        clear();
-
-        const fs::path path = internal::resolveLoadPath(filePath);
-        LoadResult entry;
-        std::unique_ptr<FILE, decltype(&std::fclose)> file(
-            internal::openLoadFile(path, "Pixels", entry), &std::fclose);
-        if (!file) return entry;
-        int w, h, channels;
-        unsigned char* loaded = stbi_load_from_file(file.get(), &w, &h, &channels, 4);
-        if (!loaded) {
-            const char* stbReason = stbi_failure_reason();
-            // Fallback to platform-specific loader (ImageIO on macOS)
-            if (loadPlatform(path)) return LoadResult::success();
-            return LoadResult::fail(LoadError::DecodeFailed,
-                                    stbReason ? stbReason : "decoder rejected the file");
-        }
-
-        width_ = w;
-        height_ = h;
-        channels_ = 4;  // Always load as RGBA
-        format_ = PixelFormat::U8;
-
-        size_t size = (size_t)width_ * height_ * channels_;
-        data_ = new unsigned char[size];
-        memcpy(data_, loaded, size);
-        stbi_image_free(loaded);
-
-        allocated_ = true;
-        return LoadResult::success();
-    }
+    LoadResult load(const fs::path& filePath);
 
     // Load an HDR (Radiance .hdr / .pic) image as float pixels. stb_image
     // decodes radiance RGBE into linear float32 RGB. The alpha channel is
     // synthesized as 1.0 to keep downstream code RGBA-friendly. Relative
     // paths resolve via getDataPath, like load().
-    LoadResult loadHDR(const fs::path& filePath) {
-        clear();
-
-        const fs::path path = internal::resolveLoadPath(filePath);
-        LoadResult entry;
-        std::unique_ptr<FILE, decltype(&std::fclose)> file(
-            internal::openLoadFile(path, "Pixels", entry), &std::fclose);
-        if (!file) return entry;
-        int w, h, channels;
-        float* loaded = stbi_loadf_from_file(file.get(), &w, &h, &channels, 3);
-        if (!loaded) {
-            const char* stbReason = stbi_failure_reason();
-            return LoadResult::fail(LoadError::DecodeFailed,
-                                    stbReason ? stbReason : "decoder rejected the file");
-        }
-
-        width_ = w;
-        height_ = h;
-        channels_ = 4;
-        format_ = PixelFormat::F32;
-
-        size_t count = (size_t)width_ * height_;
-        float* rgba = new float[count * 4];
-        for (size_t i = 0; i < count; ++i) {
-            rgba[i * 4 + 0] = loaded[i * 3 + 0];
-            rgba[i * 4 + 1] = loaded[i * 3 + 1];
-            rgba[i * 4 + 2] = loaded[i * 3 + 2];
-            rgba[i * 4 + 3] = 1.0f;
-        }
-        data_ = rgba;
-        stbi_image_free(loaded);
-
-        allocated_ = true;
-        return LoadResult::success();
-    }
+    LoadResult loadHDR(const fs::path& filePath);
 
     // Platform-specific image loader (implemented per platform)
     bool loadPlatform(const fs::path& path);
 
     // Load from memory
-    LoadResult loadFromMemory(const unsigned char* buffer, int len) {
-        clear();
-
-        int w, h, channels;
-        unsigned char* loaded = stbi_load_from_memory(buffer, len, &w, &h, &channels, 4);
-        if (!loaded) {
-            const char* stbReason = stbi_failure_reason();
-            return LoadResult::fail(LoadError::DecodeFailed,
-                                    stbReason ? stbReason : "decoder rejected the data");
-        }
-
-        width_ = w;
-        height_ = h;
-        channels_ = 4;
-        format_ = PixelFormat::U8;
-
-        size_t size = (size_t)width_ * height_ * channels_;
-        data_ = new unsigned char[size];
-        memcpy(data_, loaded, size);
-        stbi_image_free(loaded);
-
-        allocated_ = true;
-        return LoadResult::success();
-    }
+    LoadResult loadFromMemory(const unsigned char* buffer, int len);
 
     // Save to file (implemented in tcPixels.cpp for dataPath support).
     // Relative paths resolve via getDataPath, and a missing parent folder is
@@ -420,6 +334,11 @@ public:
     void mirrorV() { mirror(false, true); }
 
 private:
+    friend struct internal::ImageLoadAccess;
+    void halveInto(Pixels& destination) const;
+    LoadResult loadEncoded(const unsigned char* buffer, int len, bool asFloat);
+    LoadResult loadFile(const fs::path& path, bool asFloat);
+
     void* data_ = nullptr;
     int width_ = 0;
     int height_ = 0;

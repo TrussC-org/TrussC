@@ -15,28 +15,36 @@
 //        while (midiIn.getNextMessage(m)) { ... }
 //      The internal queue is enabled on the first hasNewMessage()/
 //      getNextMessage() call. It holds up to getBufferSize() messages
-//      (default 1024); when full, the oldest is dropped, counted in
-//      getDroppedMessageCount() and logged as a warning from those two calls
-//      (at most once every 2 s).
+//      (default 1024), plus 64 MiB of retained objects, capacities, metadata
+//      and queue nodes. Overflow evicts oldest whole messages; one over-budget
+//      message is rejected. getDroppedMessageCount() counts these and shrink
+//      losses. The first loss warns automatically on the main thread, once
+//      per input lifetime across close/reopen, without another poll.
+//
+// Native SysEx receive limit: 1,048,576 bytes including F0/F7. Larger messages
+// are discarded whole and counted internally, separately from the polling
+// getDroppedMessageCount(). The first SysEx loss per MidiIn lifetime emits one
+// Warning on the main thread, even without polling. setBufferSize() does not
+// change this limit. WebMIDI access does not enable SysEx.
 // =============================================================================
 
 #include "tcxMidiMessage.h"
+#include "tcxMidiSysex.h"
 
 #include "tc/events/tcEvent.h"
 #include "tc/network/tcNetworkState.h"
 #include "tc/utils/tcMainThread.h"
 #include "tc/events/tcEventListener.h"
 #include "tc/utils/tcLog.h"
+#include "tc/utils/tcPollingQueue.h"
 
 #include <libremidi/libremidi.hpp>
 #include "tcxMidiApi.h"
 
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <queue>
 #include <string>
 #include <vector>
 
@@ -63,9 +71,11 @@ public:
     // -------------------------------------------------------------------------
 
     // Available input ports, in port-number order (see MidiDeviceInfo).
+    // Open by name for stable selection; indices shift when ports appear or disappear.
     static std::vector<MidiDeviceInfo> listDevices() {
         std::vector<MidiDeviceInfo> devices;
-        libremidi::observer obs{{}, libremidi::observer_configuration_for(platformMidiApi())};
+        libremidi::observer obs{internal::midiObserverConfiguration(),
+                               libremidi::observer_configuration_for(platformMidiApi())};
         auto ports = obs.get_input_ports();
         for (int i = 0; i < static_cast<int>(ports.size()); ++i) {
             devices.push_back({i, ports[i].display_name});
@@ -78,8 +88,10 @@ public:
     // -------------------------------------------------------------------------
 
     // Open by port index.
+    // Open by name for stable selection; indices shift when ports appear or disappear.
     bool openPort(int index) {
-        libremidi::observer obs{{}, libremidi::observer_configuration_for(platformMidiApi())};
+        libremidi::observer obs{internal::midiObserverConfiguration(),
+                               libremidi::observer_configuration_for(platformMidiApi())};
         auto ports = obs.get_input_ports();
         if (index < 0 || index >= static_cast<int>(ports.size())) {
             trussc::logError("tcxMidiIn") << "openPort: index " << index
@@ -90,8 +102,10 @@ public:
     }
 
     // Open the first port whose name contains `nameContains` (case-sensitive).
+    // Open by name for stable selection; indices shift when ports appear or disappear.
     bool openPort(const std::string& nameContains) {
-        libremidi::observer obs{{}, libremidi::observer_configuration_for(platformMidiApi())};
+        libremidi::observer obs{internal::midiObserverConfiguration(),
+                               libremidi::observer_configuration_for(platformMidiApi())};
         auto ports = obs.get_input_ports();
         for (int i = 0; i < static_cast<int>(ports.size()); ++i) {
             if (ports[i].display_name.find(nameContains) != std::string::npos) {
@@ -161,110 +175,35 @@ public:
     // -------------------------------------------------------------------------
 
     // Enable polling on first call; closing/reopening preserves queued messages.
-    bool hasNewMessage() { return polling_->hasNewMessage(name_); }
-    bool getNextMessage(MidiMessage& msg) { return polling_->getNextMessage(msg, name_); }
+    bool hasNewMessage() { return polling_->hasNewMessage(); }
+    bool getNextMessage(MidiMessage& msg) { return polling_->getNextMessage(msg); }
     // Queue limit (default 1024); overflow and shrinking drop the oldest first.
-    // Device input or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow and shrinking drop the oldest messages and increment the drop count.
+    // Device input or a stalled reader can fill this queue; count and 64 MiB retained-storage caps keep memory finite. Overflow and shrinking drop the oldest messages and increment the drop count.
     void setBufferSize(size_t size) { polling_->setBufferSize(size); }
-    // Device input or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow and shrinking drop the oldest messages and increment the drop count.
+    // Device input or a stalled reader can fill this queue; count and 64 MiB retained-storage caps keep memory finite. Overflow and shrinking drop the oldest messages and increment the drop count.
     size_t getBufferSize() const { return polling_->getBufferSize(); }
     // Running total since construction, including drops caused by shrinking.
     uint64_t getDroppedMessageCount() const { return polling_->getDroppedMessageCount(); }
 
 private:
-    struct Polling {
-        // Enables the internal queue on first call. Returns true if unread.
-        bool hasNewMessage(const std::string& name) {
-            bufferEnabled_ = true;
-            reportDrops(name);
-            std::lock_guard<std::mutex> lock(queueMutex_);
-            return !queue_.empty();
+    friend struct MidiInTestAccess;
+    struct PollingStorage {
+        static constexpr const char* module = "tcxMidiIn";
+        static constexpr const char* store = "MIDI polling queue";
+        static MidiMessage copy(const MidiMessage& msg) {
+            MidiMessage result(msg.bytes, msg.deltatime);
+            result.portName = tc::internal::pollingStringCopy(msg.portName);
+            result.portNum = msg.portNum;
+            return result;
         }
-
-        // Pop the next queued message. Returns false when the queue is empty.
-        bool getNextMessage(MidiMessage& msg, const std::string& name) {
-            bufferEnabled_ = true;
-            reportDrops(name);
-            std::lock_guard<std::mutex> lock(queueMutex_);
-            if (queue_.empty()) return false;
-            msg = std::move(queue_.front());
-            queue_.pop();
-            return true;
+        static size_t copyStorage(const MidiMessage& msg) {
+            return tc::internal::storageAdd(msg.bytes.size(), tc::internal::copiedStringStorage(msg.portName));
         }
-
-        // Queue limit (default 1024). Past it, the oldest message is dropped.
-        // Shrinking the limit discards the oldest queued messages now; they
-        // count as dropped too.
-        // Device input or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow and shrinking drop the oldest messages and increment the drop count.
-        void setBufferSize(size_t size) {
-            uint64_t dropped = 0;
-            {
-                std::lock_guard<std::mutex> lock(queueMutex_);
-                bufferMax_ = size;
-                while (queue_.size() > bufferMax_) {
-                    queue_.pop();
-                    ++dropped;
-                }
-            }
-            countDrops(dropped);
+        static size_t retainedStorage(const MidiMessage& msg) {
+            return tc::internal::storageAdd(msg.bytes.capacity(), tc::internal::retainedStringStorage(msg.portName));
         }
-        // Device input or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow and shrinking drop the oldest messages and increment the drop count.
-        size_t getBufferSize() const { return bufferMax_; }
-
-        // Messages received but never handed to the app, since this MidiIn was
-        // created: dropped from the full polling queue, or discarded when
-        // setBufferSize() shrank it (a running total, never reset). Cheap to
-        // call from any thread.
-        uint64_t getDroppedMessageCount() const {
-            return droppedMessages_.load(std::memory_order_relaxed);
-        }
-        // Any thread: add drops to the total and to the next report. Only
-        // touches atomics (no lock, no log), so the input thread can call it.
-        void countDrops(uint64_t dropped) {
-            if (dropped == 0) return;
-            droppedMessages_.fetch_add(dropped, std::memory_order_relaxed);
-            unreportedDrops_.fetch_add(dropped, std::memory_order_relaxed);
-        }
-
-        // Polling side: log the drops counted since the last report, at most
-        // once every kDropReportInterval. Drops in between are summed into the
-        // next line, so a queue that overflows every frame cannot flood the log.
-        void reportDrops(const std::string& name) {
-            if (unreportedDrops_.load(std::memory_order_relaxed) == 0) return;
-            const int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count();
-            int64_t last = lastDropReportNs_.load(std::memory_order_relaxed);
-            if (last != kNeverReported &&
-                now - last < std::chrono::nanoseconds(kDropReportInterval).count()) return;
-            // Only one polling thread reports a given interval
-            if (!lastDropReportNs_.compare_exchange_strong(last, now, std::memory_order_relaxed)) return;
-            const uint64_t n = unreportedDrops_.exchange(0, std::memory_order_relaxed);
-            if (n == 0) return;
-            size_t limit;
-            {
-                std::lock_guard<std::mutex> lock(queueMutex_);
-                limit = bufferMax_;
-            }
-            trussc::logWarning("tcxMidiIn") << "MidiIn \"" << name << "\": " << n
-                                            << (n == 1 ? " message" : " messages")
-                                            << " dropped since the last report (queue limit "
-                                            << limit << ", oldest dropped first); raise setBufferSize()";
-        }
-
-        std::queue<MidiMessage> queue_;
-        std::mutex queueMutex_;
-        std::atomic<bool> bufferEnabled_{false};
-        // Bound (security): device input or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow drops the oldest and is counted.
-        size_t bufferMax_ = 1024;
-
-        // Drop accounting: the input thread and setBufferSize() only add to the
-        // counters (countDrops()); the polling calls read and log them.
-        static constexpr std::chrono::seconds kDropReportInterval{2};
-        static constexpr int64_t kNeverReported = INT64_MIN;
-        std::atomic<uint64_t> droppedMessages_{0};   // running total
-        std::atomic<uint64_t> unreportedDrops_{0};   // counted, not logged yet
-        std::atomic<int64_t> lastDropReportNs_{kNeverReported};  // steady_clock
     };
+    using Polling = tc::internal::PollingQueue<MidiMessage, PollingStorage>;
     struct State {
         std::shared_ptr<Polling> polling;
         std::string name_;
@@ -284,21 +223,8 @@ private:
             msg.portName = name_;
             msg.portNum = portNumber_;
 
-            if (polling->bufferEnabled_) {
-                // The input thread only counts drops; the polling calls log
-                // them (reportDrops()).
-                uint64_t dropped = 0;
-                {
-                    std::lock_guard<std::mutex> lock(polling->queueMutex_);
-                    polling->queue_.push(msg);
-                    while (polling->queue_.size() > polling->bufferMax_) {
-                        polling->queue_.pop();
-                        ++dropped;
-                    }
-                }
-                polling->countDrops(dropped);
-            }
-            if (open.load()) onMessage.notify(msg);
+            polling->enqueue(msg);
+            if (open.load()) onMessage.notifyExternal(msg);
         }
 
     };
@@ -313,6 +239,7 @@ private:
 
     libremidi::input_configuration makeConfig(const std::shared_ptr<State>& state) {
         libremidi::input_configuration cfg;
+        cfg.on_sysex_overflow = [loss = sysexLoss_](size_t needed) noexcept { loss->count(needed); };
         cfg.on_message = [state](const libremidi::message& m) { state->handleMessage(m); };
         cfg.ignore_sysex = ignoreSysex_;
         cfg.ignore_timing = ignoreTiming_;
@@ -347,6 +274,7 @@ private:
         return true;
     }
 
+    std::shared_ptr<internal::SysexLoss> sysexLoss_ = internal::SysexLoss::create();
     std::shared_ptr<Polling> polling_ = std::make_shared<Polling>();
     std::shared_ptr<State> state_;
     std::shared_ptr<Backend> backend_;

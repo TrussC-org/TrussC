@@ -35,7 +35,11 @@
 #include <cerrno>
 #include <unistd.h>
 #endif
-#include "tcThreadChannel.h"
+#include "internal/tcBoundedInput.h"
+#include <mutex>
+#include <vector>
+#include <cstdint>
+#include <limits>
 #include "tcLog.h"
 #include "../events/tcEventArgs.h"
 #include "../events/tcCoreEvents.h"
@@ -50,7 +54,8 @@ namespace internal {
 
 // Shared state, defined in tcGlobal.cpp, including across hot-reload guests
 // (#249). Apps opt in; both runners drain the channel on the main thread.
-ThreadChannel<ConsoleEventArgs>& getChannel();
+class CommandChannel;
+CommandChannel& getChannel();
 std::atomic<bool>& isRunning();
 std::atomic<bool>& spawned();
 
@@ -75,6 +80,114 @@ inline ConsoleEventArgs parseLine(const std::string& line) {
     return args;
 }
 
+// This channel owns raw lines, so a queue of whitespace-heavy commands does
+// not retain a token-vector expansion. Parsing happens only on consumption.
+class CommandChannel {
+public:
+    // Bound (security): stdin commands are control text, not assets. Overflow rejects the whole 1 MiB line and is counted.
+    static constexpr size_t lineBytes = 1024 * 1024;
+    // Bound (security): stalled app delivery retains at most 1024 commands / 16 MiB of raw text plus nodes. Overflow drops new whole commands and is counted.
+    static constexpr size_t commandCount = 1024, queuedBytes = 16 * 1024 * 1024;
+    std::atomic<uint64_t> rejectedLines{0}, droppedCommands{0};
+
+    void rejectLine() { rejectedLines.fetch_add(1); }
+    // Called by the runners even when delivery is disabled. The reader never
+    // logs or waits for app delivery, including on an unterminated flood.
+    void reportLoss() {
+        if (rejectedLines.load() && !lineWarned_.exchange(true)) {
+#if defined(__cpp_exceptions)
+            try {
+#endif
+                logWarning("Console") << "Rejected whole stdin line(s): capacity 1 MiB; line too long or storage unavailable; total "
+                                      << rejectedLines.load();
+#if defined(__cpp_exceptions)
+            } catch (...) {}
+#endif
+        }
+        if (droppedCommands.load() && !queueWarned_.exchange(true)) {
+#if defined(__cpp_exceptions)
+            try {
+#endif
+                logWarning("Console") << "Dropped whole stdin command(s): pending capacity 1024 commands / 16 MiB or storage unavailable; total "
+                                      << droppedCommands.load();
+#if defined(__cpp_exceptions)
+            } catch (...) {}
+#endif
+        }
+    }
+    bool sendRaw(std::string_view line, trussc::internal::InputStorage::Reallocate allocate = std::realloc) {
+        if (line.size() > lineBytes) { rejectLine(); return false; }
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (count_ == commandCount || line.size() > queuedBytes - bytes_) { lock.unlock(); return drop(); }
+        auto* node = static_cast<Node*>(allocate(nullptr, sizeof(Node) + line.size()));
+        if (!node) { lock.unlock(); return drop(); }
+        node->next = nullptr;
+        node->length = line.size();
+        if (!line.empty()) std::memcpy(node + 1, line.data(), line.size());
+        if (tail_) tail_->next = node;
+        else head_ = node;
+        tail_ = node;
+        ++count_;
+        bytes_ += line.size();
+        return true;
+    }
+    bool send(const ConsoleEventArgs& args) { return sendRaw(args.raw); }
+    bool tryReceive(ConsoleEventArgs& args) {
+        for (;;) {
+            std::unique_lock<std::mutex> lock(mutex_);
+            if (!head_) return false;
+            Node* node = head_;
+            head_ = node->next;
+            if (!head_) tail_ = nullptr;
+            --count_;
+            bytes_ -= node->length;
+            lock.unlock();
+#if defined(__cpp_exceptions)
+            try {
+#endif
+                args = parseLine(std::string(reinterpret_cast<char*>(node + 1), node->length));
+#if defined(__cpp_exceptions)
+            } catch (const std::bad_alloc&) {
+                std::free(node);
+                drop();
+                continue;
+            }
+#endif
+            std::free(node);
+            if (!args.args.empty()) return true;
+        }
+        return false;
+    }
+    std::vector<ConsoleEventArgs> receiveAll() {
+        std::vector<ConsoleEventArgs> result;
+        ConsoleEventArgs args;
+        while (tryReceive(args)) result.push_back(std::move(args));
+        return result;
+    }
+    void clear() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        while (head_) { Node* node = head_; head_ = head_->next; std::free(node); }
+        tail_ = nullptr;
+        bytes_ = count_ = 0;
+    }
+    ~CommandChannel() { clear(); }
+    size_t size() const { std::lock_guard<std::mutex> lock(mutex_); return count_; }
+    size_t bytes() const { std::lock_guard<std::mutex> lock(mutex_); return bytes_; }
+    bool empty() const { return size() == 0; }
+    bool isClosed() const { return false; }
+private:
+    struct Node { Node* next; size_t length; };
+    bool drop() {
+        droppedCommands.fetch_add(1);
+        return false;
+    }
+    std::atomic<bool> lineWarned_{false}, queueWarned_{false};
+    mutable std::mutex mutex_;
+    Node* head_ = nullptr;
+    Node* tail_ = nullptr;
+    size_t count_ = 0, bytes_ = 0;
+};
+
 // Read stdin without holding a C stdio lock across a blocking read. Reading
 // std::cin (synchronized with stdin by default) can hold that lock forever,
 // preventing normal process exit when libc flushes its streams. This buffer
@@ -97,22 +210,22 @@ protected:
         return traits_type::to_int_type(*gptr());
     }
 private:
-    // Bound (security/latency): external stdin uses finite per-read storage. Overflow continues in the next read.
+    // Read chunk only; the line/queue bounds above reject and count whole commands.
     char buffer_[4096];
 };
 
 // Consume until EOF even while delivery is stopped. Kept separate from the
 // raw stream so the delivery boundaries can also be tested deterministically.
 inline void readLines(std::istream& input) {
-    std::string line;
-    while (std::getline(input, line)) {
-        if (!isRunning().load()) continue;
-        // Raw reads bypass text-mode CRLF translation on every platform.
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        auto args = parseLine(line);
-        if (args.args.empty()) continue;
-        getChannel().send(std::move(args));
-    }
+    trussc::internal::readBoundedLines(input, CommandChannel::lineBytes,
+        (std::numeric_limits<size_t>::max)(), [](std::string_view line) {
+            if (!isRunning().load()) return;
+            // Raw reads bypass text-mode CRLF translation on every platform.
+            if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+            const auto first = line.find_first_not_of(" \t\r\v\f");
+            if (first == std::string_view::npos || line[first] == '#') return;
+            getChannel().sendRaw(line);
+        }, [](bool) { getChannel().rejectLine(); });
 }
 
 inline void readThread() {
@@ -138,10 +251,10 @@ inline void start() {
     if (internal::isRunning().load()) return;
 
     // Discard anything queued after stop() drained, before enabling delivery.
-    internal::getChannel().receiveAll();
+    internal::getChannel().clear();
 
     internal::isRunning().store(true);
-    // getline may block indefinitely; detach now so std::exit() cannot
+    // A raw read may block indefinitely; detach now so std::exit() cannot
     // destroy a joinable thread even if stop() was never called.
     if (!internal::spawned().exchange(true)) {
         std::thread(internal::readThread).detach();
@@ -157,7 +270,7 @@ inline void stop() {
     return;
 #else
     internal::isRunning().store(false);
-    internal::getChannel().receiveAll();
+    internal::getChannel().clear();
 #endif
 }
 
@@ -171,6 +284,9 @@ inline void processQueue() {
     // No-op on web
     return;
 #else
+    // Preserve lazy allocation for apps that never opt into stdin delivery.
+    if (internal::spawned().load() || internal::isRunning().load())
+        internal::getChannel().reportLoss();
     if (!internal::isRunning().load()) {
         return;
     }

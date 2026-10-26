@@ -1,6 +1,7 @@
 #include <TrussC.h>
 #include "tcAnalyzeImage.h"
 #include "../../impl/tcMcpImageAdmission.h"
+#include "../../impl/tcImageDecode.h"
 #include <array>
 #include <climits>
 #include <stdexcept>
@@ -228,13 +229,18 @@ size_t reserveImageDecode(int width, int height, size_t sourceBytesPerPixel) {
     reserveWork(bytes);
     return bytes;
 }
-bool loadMcpImage(Pixels& pixels, const fs::path& source) {
+bool loadMcpImage(Pixels& pixels, const fs::path& source) try {
     WorkScope workScope;
+    trussc::internal::ImageDecodeAllocationScope failure;
     reserveWork(1024 * 1024); // Fixed metadata, palette and codec-table allowance.
     const auto path = trussc::internal::resolveLoadPath(source);
     std::error_code ec;
     const auto length = fs::file_size(path, ec);
     if (ec || !length) return false;
+    const auto imageSize = trussc::internal::admitImageEncodedSize(length > SIZE_MAX ? SIZE_MAX : size_t(length));
+    if (!imageSize) {
+        return false;
+    }
     const auto limits = getAdmissionLimits();
     // Bound (abi): stb's immutable input view uses an int byte length. Overflow rejects the image and is counted.
     checkAdmission(length > SIZE_MAX ? SIZE_MAX : size_t(length), size_t(INT_MAX), AdmissionStore::Working);
@@ -245,30 +251,43 @@ bool loadMcpImage(Pixels& pixels, const fs::path& source) {
     }
     reserveWork(size_t(length) * 4);
     LoadResult entry;
-    std::unique_ptr<FILE, decltype(&std::fclose)> file(
-        trussc::internal::openLoadFile(path, "MCP", entry), &std::fclose);
+    auto closeFile = [](FILE* handle) { std::fclose(handle); };
+    std::unique_ptr<FILE, decltype(closeFile)> file(
+        trussc::internal::openLoadFile(path, "MCP", entry), closeFile);
     if (!file) return false;
-    std::vector<unsigned char> encoded(size_t(length), 0);
-    if (std::fread(encoded.data(), 1, encoded.size(), file.get()) != encoded.size() ||
+    std::unique_ptr<unsigned char[]> encoded(trussc::internal::imageDecodeAllocationAllowed(size_t(length))
+        ? new (std::nothrow) unsigned char[size_t(length)] : nullptr);
+    if (!encoded) { trussc::internal::imageDecodeOutOfMemory(); return false; }
+    if (std::fread(encoded.get(), 1, size_t(length), file.get()) != size_t(length) ||
         std::fgetc(file.get()) != EOF || std::ferror(file.get())) return false;
+    if (!trussc::internal::admitImageHeader(encoded.get(), size_t(length))) return false;
     int width = 0, height = 0, channels = 0;
     size_t denied = 0;
     bool metadata = false;
     {
         ImageAllocationScope allocation(1024 * 1024);
-        metadata = stbi_info_from_memory(encoded.data(), int(encoded.size()), &width, &height, &channels) != 0;
+        metadata = stbi_info_from_memory(encoded.get(), int(size_t(length)), &width, &height, &channels) != 0;
         if (allocation.exceeded()) denied = allocation.needed();
     }
     if (denied) { admissionRejected(AdmissionStore::Working, 1024 * 1024, denied); throw AdmissionError(); }
+    if (failure.failed()) {
+        trussc::internal::imageDecodeOutOfMemory();
+        return false;
+    }
     auto platformDecode = [&] {
 #ifdef __APPLE__
-        return loadMcpPlatformImage(pixels, encoded.data(), encoded.size());
+        return loadMcpPlatformImage(pixels, encoded.get(), size_t(length));
 #else
         // Pixels::loadPlatform is a stub here (including Windows and Android).
         return false;
 #endif
     };
     if (!metadata || width <= 0 || height <= 0) return platformDecode();
+    const auto imageDimensions = trussc::internal::admitImageDimensions(width, height, 4,
+        stbi_is_hdr_from_memory(encoded.get(), int(size_t(length))) ? sizeof(float) : 2);
+    if (!imageDimensions) {
+        return false;
+    }
     const uint64_t count = uint64_t(width) * height;
     const size_t workspace = reserveImageDecode(width, height);
     const size_t decoderAllowance = 1024 * 1024 + size_t(length) * 3 + workspace - size_t(count) * 4;
@@ -277,17 +296,28 @@ bool loadMcpImage(Pixels& pixels, const fs::path& source) {
         ImageAllocationScope allocation(decoderAllowance);
         int decodedWidth = 0, decodedHeight = 0;
         std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> decoded(
-            stbi_load_from_memory(encoded.data(), int(encoded.size()), &decodedWidth, &decodedHeight, &channels, 4),
+            stbi_load_from_memory(encoded.get(), int(size_t(length)), &decodedWidth, &decodedHeight, &channels, 4),
             &stbi_image_free);
         if (decoded && decodedWidth == width && decodedHeight == height && !allocation.exceeded()) {
-            pixels.allocate(width, height, 4);
+            if (!trussc::internal::ImageLoadAccess::allocate(pixels, width, height)) {
+                trussc::internal::imageDecodeOutOfMemory();
+                return false;
+            }
             std::memcpy(pixels.getData(), decoded.get(), size_t(count) * 4);
             loaded = true;
         }
         if (allocation.exceeded()) denied = allocation.needed();
     }
     if (denied) { admissionRejected(AdmissionStore::Working, decoderAllowance, denied); throw AdmissionError(); }
+    if (failure.failed()) {
+        trussc::internal::imageDecodeOutOfMemory();
+        return false;
+    }
     return loaded || platformDecode();
+} catch (const std::bad_alloc&) {
+    pixels.clear();
+    trussc::internal::imageDecodeOutOfMemory();
+    return false;
 }
 void validateAnalyzeArguments(const json& args) {
     const auto& ops = args.at("ops");

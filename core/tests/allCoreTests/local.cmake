@@ -88,3 +88,12 @@ if("captureSubmission" IN_LIST _TC_CORE_TEST_NAMES)
     # Match the fixture's test-only declarations in the Sokol implementation.
     target_compile_definitions(TrussC PRIVATE SOKOL_TC_TEST_HOOKS)
 endif()
+
+if("audioDecodeBounds" IN_LIST _TC_CORE_TEST_NAMES AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(${PROJECT_NAME} PRIVATE "-Wl,--wrap=malloc")
+endif()
+
+if("externalMainDelivery" IN_LIST _TC_CORE_TEST_NAMES)
+    set_property(SOURCE "${_TC_CORE_TESTS_DIR}/externalMainDelivery/src/main.cpp"
+        APPEND PROPERTY INCLUDE_DIRECTORIES "${_TC_CORE_TESTS_DIR}/../../addons/tcxMidi/tests/mocks" "${_TC_CORE_TESTS_DIR}/../../addons/tcxTls/src")
+endif()

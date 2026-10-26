@@ -21,9 +21,8 @@ static Bytes boxGlyph(int x0, int y0, int x1, int y1) {
     return b;
 }
 
-static Bytes makeFont() {
-    const vector<Bytes> glyphs = {Bytes{}, boxGlyph(0, -200, 1000, 800),
-                                  boxGlyph(0, -200, 2000, 800), boxGlyph(0, 0, 100, 100)};
+static Bytes makeFont(const vector<Bytes>& glyphs = {Bytes{}, boxGlyph(0, -200, 1000, 800),
+                                  boxGlyph(0, -200, 2000, 800), boxGlyph(0, 0, 100, 100)}) {
     Bytes glyf, loca;
     for (auto& g : glyphs) { put32(loca, (uint32_t)glyf.size()); glyf.insert(glyf.end(), g.begin(), g.end()); }
     put32(loca, (uint32_t)glyf.size());
@@ -44,11 +43,13 @@ static Bytes makeFont() {
     put16(hhea, 4);  // numberOfHMetrics
 
     Bytes maxp;
-    put32(maxp, 0x00005000); put16(maxp, 4);
+    put32(maxp, 0x00005000); put16(maxp, (uint32_t)glyphs.size());
 
     Bytes hmtx;
     const int adv[4] = {500, 1000, 2000, 100};
     for (int a : adv) { put16(hmtx, (uint32_t)a); put16(hmtx, 0); }
+
+    for (size_t i = 4; i < glyphs.size(); ++i) put16(hmtx, 0);
 
     // cmap format 4: 'A' -> 1, 'W' -> 2, 'a' -> 3.
     struct Seg { uint16_t c, g; };
@@ -56,7 +57,10 @@ static Bytes makeFont() {
     const uint32_t n = (uint32_t)segs.size();
     Bytes sub;
     put16(sub, 4); put16(sub, 16 + 8 * n); put16(sub, 0);
-    put16(sub, n * 2); put16(sub, 4); put16(sub, 1); put16(sub, n * 2 - 4);
+    uint32_t searchPower = 1, searchSelector = 0;
+    while (searchPower <= n / 2) { searchPower *= 2; ++searchSelector; }
+    put16(sub, n * 2); put16(sub, searchPower * 2);
+    put16(sub, searchSelector); put16(sub, n * 2 - searchPower * 2);
     for (auto& s : segs) put16(sub, s.c);
     put16(sub, 0);
     for (auto& s : segs) put16(sub, s.c);

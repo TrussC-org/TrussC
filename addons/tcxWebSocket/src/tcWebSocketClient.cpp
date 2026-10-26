@@ -185,6 +185,7 @@ bool WebSocketClient::setMaxHandshakeSize(size_t bytes) {
 
 bool WebSocketClient::ConnectionState::connect(const std::string& url) {
     disconnect();
+    externalClose_ = true;
 
 #ifdef __EMSCRIPTEN__
     EmscriptenWebSocketCreateAttributes attr;
@@ -236,7 +237,7 @@ bool WebSocketClient::ConnectionState::connect(const std::string& url) {
 
     // The 101 deadline is checked on the main thread
     if (!timeoutListener_.isConnected()) {
-        timeoutListener_ = events().update.listen([state = shared_from_this()] { state->checkHandshakeTimeout(); });
+        timeoutListener_ = events().update.listen([state = shared_from_this()] { state->checkHandshakeTimeout(); }, EventPriority::BeforeApp);
     }
 
     client_->connectAsync(host_, port_);
@@ -244,7 +245,8 @@ bool WebSocketClient::ConnectionState::connect(const std::string& url) {
 #endif
 }
 
-void WebSocketClient::ConnectionState::disconnect() {
+void WebSocketClient::ConnectionState::disconnect(bool external) {
+    externalClose_ = external;
 #ifdef __EMSCRIPTEN__
     if (wsHandle_ > 0) {
         if (state_ != State::Closing && state_ != State::Disconnected)
@@ -345,7 +347,10 @@ void WebSocketClient::ConnectionState::handleTcpDisconnect(TcpDisconnectEventArg
     // disconnect() after this onClose.
     awaitingUpgrade_ = false;
     state_ = State::Disconnected;
-    onClose.notify();
+    if (externalClose_)
+        onClose.notifyExternal();
+    else
+        onClose.notify();
 #endif
 }
 
@@ -452,7 +457,7 @@ void WebSocketClient::ConnectionState::processHandshake(const std::string& heade
         state_ = State::Open;
         std::shared_ptr<std::atomic<bool>> alive = alive_;
         unsigned connection = connection_;
-        onOpen.notify();
+        onOpen.notifyExternal();
         // An onOpen listener may have disconnected, reconnected or
         // destroyed the client
         if (!*alive || connection_ != connection) return;
@@ -463,7 +468,7 @@ void WebSocketClient::ConnectionState::processHandshake(const std::string& heade
         }
     } else {
         logError() << "WebSocket handshake failed:\n" << header;
-        disconnect();
+        disconnect(true);
     }
 #endif
 }
@@ -578,7 +583,7 @@ void WebSocketClient::ConnectionState::processFrame() {
         } else if (opcode == 0x8) { // Close
             // disconnect() fires onClose, whose listener may reconnect or
             // destroy the client: nothing is read after it
-            disconnect();
+            disconnect(true);
             return;
         } else if (opcode == 0x9) { // Ping
             sendPong(payload);       // RFC 6455 5.5.2/5.5.3: reply, echoing the payload
@@ -593,7 +598,7 @@ void WebSocketClient::ConnectionState::processFrame() {
             args.data = std::move(payload);
             std::shared_ptr<std::atomic<bool>> alive = alive_;
             unsigned connection = connection_;
-            onMessage.notify(args);
+            onMessage.notifyExternal(args);
             // An onMessage listener may have disconnected, reconnected or
             // destroyed the client
             if (!*alive || connection_ != connection) return;
@@ -726,9 +731,9 @@ void WebSocketClient::ConnectionState::failConnection(uint16_t statusCode, const
     unsigned connection = connection_;
     TcpErrorEventArgs err;
     err.message = reason;
-    onError.notify(err);
+    onError.notifyExternal(err);
     if (!*alive || connection_ != connection) return;
-    disconnect();
+    disconnect(true);
 #else
     // Browser close() permits 1000 or application codes 3000-4999. Use
     // application code 4009 for the same message-size rejection as native 1009.
@@ -738,7 +743,7 @@ void WebSocketClient::ConnectionState::failConnection(uint16_t statusCode, const
     unsigned connection = connection_;
     TcpErrorEventArgs err;
     err.message = reason;
-    onError.notify(err);
+    onError.notifyExternal(err);
     if (!*alive || connection_ != connection) return;
     // Keep the browser's close callback: it reports onClose once.
 #endif
@@ -775,7 +780,7 @@ EM_BOOL WebSocketClient::ConnectionState::onEmscriptenOpen(int eventType, const 
     auto* self = keepAlive.get();
     if (!*self->alive_) return EM_TRUE;
     self->state_ = State::Open;
-    self->onOpen.notify();
+    self->onOpen.notifyExternal();
     return EM_TRUE;
 }
 
@@ -797,7 +802,7 @@ EM_BOOL WebSocketClient::ConnectionState::onEmscriptenMessage(int eventType, con
     detail::fillMessageArgs(args, websocketEvent->data, websocketEvent->numBytes,
                             websocketEvent->isText);
 
-    self->onMessage.notify(args);
+    self->onMessage.notifyExternal(args);
     return EM_TRUE;
 }
 
@@ -806,7 +811,8 @@ EM_BOOL WebSocketClient::ConnectionState::onEmscriptenClose(int eventType, const
     auto* self = keepAlive.get();
     if (!*self->alive_) return EM_TRUE;
     self->state_ = State::Disconnected;
-    self->onClose.notify();
+    if (self->externalClose_) self->onClose.notifyExternal();
+    else self->onClose.notify();
     return EM_TRUE;
 }
 
@@ -816,7 +822,7 @@ EM_BOOL WebSocketClient::ConnectionState::onEmscriptenError(int eventType, const
     if (!*self->alive_) return EM_TRUE;
     TcpErrorEventArgs args;
     args.message = "WebSocket Error";
-    self->onError.notify(args);
+    self->onError.notifyExternal(args);
     return EM_TRUE;
 }
 #endif

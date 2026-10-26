@@ -81,7 +81,6 @@ protected:
 
 
 namespace internal {
-struct SoundBufferLoadAccess;
 
 // Interleaved sample count of `frames` frames of `channels` channels, for
 // sizing SoundBuffer::samples. False when channels < 1 or when the count
@@ -139,12 +138,11 @@ inline size_t decodeReserveSamples(uint64_t headerFrames, int channels, uint64_t
 void setAllocationLimitForTests(size_t bytes);
 size_t allocationLimitForTests();
 
-// Whether one allocation of `bytes` can be made right now. Web (wasm) builds
-// have exception catching off, so there a failed operator new aborts the page
-// instead of throwing std::bad_alloc; malloc, which returns null on failure
-// under ALLOW_MEMORY_GROWTH, is tried and released first. Elsewhere a failed
-// allocation throws and the callers catch it, so this is true unless a test
-// set a limit (setAllocationLimitForTests).
+// Best-effort allocation preflight. On Web, non-throwing malloc is tried and
+// released first under ALLOW_MEMORY_GROWTH. This does not guarantee a later
+// allocation: full-load audio TUs retain exception catching for vector reserves.
+// Other Web callers may have catching disabled. Native callers catch bad_alloc;
+// here only a test limit can refuse their preflight (setAllocationLimitForTests).
 inline bool allocationFits(size_t bytes) {
     const size_t limit = allocationLimitForTests();
     if (limit != 0 && bytes > limit) return false;
@@ -218,6 +216,10 @@ class SoundBuffer : public SoundSource {
     struct AsyncState : internal::ResourceLoadState {
         fs::path input, path;
         std::shared_ptr<SoundBuffer> decoded;
+        size_t retainedBytes() const noexcept override {
+            return decoded ? decoded->samples.capacity() * sizeof(float) : 0;
+        }
+        void discardPayload() noexcept override { decoded.reset(); }
     };
 public:
     SoundBuffer() : SoundSource(SoundSource::Eager) {}
@@ -233,6 +235,11 @@ public:
     // App exit waits for loads still decoding; cancelling never waits.
     // Completions are delivered during runApp / runHeadlessApp; in a bare main()
     // without an app run, no completion event fires.
+    // Web CMake propagates exception support. With custom app flags disabling
+    // it, recovery from allocation failure is guaranteed only for TrussC's
+    // out-of-line host code. Inline helpers from headers may be compiled into the
+    // application without exception support; allocation failure inside them is a
+    // known limitation.
     void loadAsync(const fs::path& path);
     Event<LoadResult> onLoad;
     bool isLoading() const { return async_.loading(); }
@@ -623,24 +630,17 @@ public:
     }
 
 private:
-    friend struct internal::SoundBufferLoadAccess;
     internal::ResourceLoadSlot<AsyncState> async_;
-    unsigned loadWrites_ = 0; // branch-specific AAC changes, including failures
     LoadResult loadResolved(const fs::path& input, const fs::path& resolved);
 #ifdef __EMSCRIPTEN__
     static void loadAacWebAsync(std::shared_ptr<SoundBuffer> decoded,
-                                std::function<void(LoadResult)> complete, const fs::path& path);
+                                std::function<void(LoadResult)> complete, const fs::path& path,
+                                const std::shared_ptr<internal::ResourceLoadState>& owner);
     LoadResult finishAacWebDecode(int slot, const fs::path& path);
 #endif
     LoadResult loadAacPlatform(const fs::path& path);
     fs::path path_;  // see getPath(); cleared by the memory / generator paths
 };
-
-namespace internal {
-struct SoundBufferLoadAccess {
-    static void wrote(SoundBuffer& buffer, unsigned fields) { buffer.loadWrites_ |= fields; }
-};
-} // namespace internal
 
 // ---------------------------------------------------------------------------
 // SoundStream — streaming source. File stays open; samples are decoded on

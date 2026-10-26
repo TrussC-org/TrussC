@@ -17,18 +17,21 @@ addons/tcxImGui/src/
 ├── imgui/
 │   ├── imconfig.h            # Modified (test engine hooks on + value hook)
 │   ├── imgui_widgets.cpp     # Modified (19 value-hook call sites + 24 wrapped returns, one line each)
-│   ├── imgui.cpp             # Untouched
+│   ├── imgui.cpp             # Modified (local import checks)
 │   ├── imgui.h               # Untouched
-│   ├── imgui_internal.h      # Untouched
-│   ├── imgui_draw.cpp        # Untouched
-│   ├── imgui_tables.cpp      # Untouched
+│   ├── imgui_internal.h      # Modified (empty reserved chunk stream)
+│   ├── imgui_draw.cpp        # Modified (font import checks/shared backend)
+│   ├── imgui_tables.cpp      # Modified (ini column bound comment)
 │   ├── imgui_demo.cpp        # Untouched
 │   ├── imstb_*.h             # Untouched
 │   └── TRUSSC_MODIFICATIONS.md
 ├── sokol_imgui.h             # From sokol util/ + TrussC multi-context patch (see below)
-├── tcImGuiHooks.h            # TrussC: implements the hooks (not an upstream file)
-├── tcImGuiTools.h            # TrussC: MCP tools (not an upstream file)
-└── tcxImGui.h                # TrussC: addon API (not an upstream file)
+├── tcImGuiHooks.h            # TrussC: hook and registry declarations
+├── tcImGuiHooksImpl.h        # TrussC: definitions included only by the platform TU
+├── tcImGuiTools.h            # TrussC: MCP tool declarations/templates
+├── tcImGuiToolsImpl.h        # TrussC: tool definitions, platform TU only
+├── tcxImGui.h                # TrussC: addon API declarations
+└── tcxImGuiImpl.h            # TrussC: addon API definitions, platform TU only
 ```
 
 Only the files listed as Modified differ from the upstream tag. Everything else
@@ -47,7 +50,7 @@ for the MCP tools (`tcx_imgui_get_widgets`, `tcx_imgui_click`, ...).
 - `#define IMGUI_ENABLE_TEST_ENGINE` (upstream ships it commented out). The
   four extern functions it requires (`ImGuiTestEngineHook_ItemAdd`,
   `ImGuiTestEngineHook_ItemInfo`, `ImGuiTestEngineHook_Log`,
-  `ImGuiTestEngine_FindItemDebugLabel`) are implemented in `tcImGuiHooks.h`.
+  `ImGuiTestEngine_FindItemDebugLabel`) are implemented in `tcImGuiHooksImpl.h`.
   They run only for contexts whose `TestEngineHookItems` is set, which
   tcxImGui does when `imguiSetup()` registers its MCP tools (independent of the grant).
 
@@ -105,7 +108,7 @@ value pointer, hence this patch.
   `IsItemDeactivatedAfterEdit()` do not fire for an injected value and it
   stays out of the touched record.
 - `ImGuiTcHook_ItemValue()` and `ImGuiTcHook_ItemEntry()` are declared here
-  and implemented in `tcImGuiHooks.h`. (`ImGuiTcHook_ItemEntry()` replaced
+  and implemented in `tcImGuiHooksImpl.h`. (`ImGuiTcHook_ItemEntry()` replaced
   `ImGuiTcHook_EditCount(ctx)` with #321; it takes the whole object, so it
   also knows the widget's ID, kind and data.)
 
@@ -201,7 +204,7 @@ included, so the rule has no exceptions. The 24 lines:
 | `ListBox` (getter form) | `if (!BeginListBox(...)) return false;`, `return value_changed;` |
 | `MenuItem` (`bool*` form) | `return true;`, `return false;` |
 
-How the hooks behave (in `tcImGuiHooks.h`):
+How the hooks behave (in `tcImGuiHooksImpl.h`):
 - Parts of a ColorEdit/ColorPicker (`##X`, `##Text`, the `##picker` popup)
   report nothing, since they edit temporaries. The whole widget reports,
   because `g.ColorEditCurrentID` is 0 again when its hook runs.
@@ -320,7 +323,8 @@ Expected counts (lines containing the marker; this file excluded):
 
 ## How to Update Dear ImGui
 
-Patched files (`imconfig.h`, `imgui_widgets.cpp`) are updated with a 3-way
+Patched files (`imconfig.h`, `imgui_widgets.cpp`, `imgui.cpp`,
+`imgui_draw.cpp`, `imgui_tables.cpp`, `imgui_internal.h`) are updated with a 3-way
 merge, not by overwriting and hand-copying the patches. That avoids slips when
 copying patches by hand. Every other file is overwritten from the new tag.
 
@@ -330,7 +334,7 @@ copying patches by hand. Every other file is overwritten from the new tag.
 git clone https://github.com/ocornut/imgui.git /tmp/imgui
 OLD=v1.92.9b                 # the upstream base recorded above
 NEW=<new stable tag>
-for f in imconfig.h imgui_widgets.cpp; do
+for f in imconfig.h imgui_widgets.cpp imgui.cpp imgui_draw.cpp imgui_tables.cpp imgui_internal.h; do
   git -C /tmp/imgui show $OLD:$f > /tmp/BASE_$f      # upstream, pre-patch
   git -C /tmp/imgui show $NEW:$f > /tmp/THEIRS_$f    # upstream, target
   cp addons/tcxImGui/src/imgui/$f /tmp/OURS_$f       # current TrussC copy
@@ -346,8 +350,7 @@ there.)
 ### 2. Overwrite the untouched files
 
 ```bash
-for f in imgui.cpp imgui.h imgui_internal.h imgui_draw.cpp imgui_tables.cpp \
-         imgui_demo.cpp imstb_rectpack.h imstb_textedit.h imstb_truetype.h; do
+for f in imgui.h imgui_demo.cpp imstb_rectpack.h imstb_textedit.h imstb_truetype.h; do
   git -C /tmp/imgui show $NEW:$f > addons/tcxImGui/src/imgui/$f
 done
 ```
@@ -366,7 +369,7 @@ done
   (a new early return must be wrapped too).
 - The test engine hook signatures in `imgui_internal.h`
   (`IMGUI_TEST_ENGINE_ITEM_ADD` / `_ITEM_INFO` and the `extern` declarations)
-  still match `tcImGuiHooks.h`.
+  still match `tcImGuiHooksImpl.h`.
 - The internals the hooks read still exist: `ImGuiContext::ColorEditCurrentID`,
   `BeginComboDepth`, `LastItemData`, `TestEngineHookItems`,
   `ImGuiInputTextFlags_TempInput`, `ImGuiColorEditFlags_InputMask_`,
@@ -401,3 +404,26 @@ commit above, THEIRS = the new upstream version, OURS = this copy. Only
 update it together with the core sokol headers (the `sokol_gfx.h` API it
 calls must match), and record the new base commit in both TRUSSC_MODIFICATIONS
 files.
+
+## Local ini and font imports (v0.8)
+
+`imgui.cpp` checks file-size conversion and padding arithmetic before reading,
+and ini imports preflight the actual int-sized text/chunk storage, builtin table counts, retained decoded
+window/table chunks (existing and repeated IDs reuse storage; only table capacity
+increases append another retained chunk) and embedded terminators before replacing settings text or
+calling handlers. `ImChunkStream::begin()` checks used size so reserved empty storage is not
+visited as a chunk. Text/decoded buffers are allocated first and an aliased old
+source buffer stays alive through parsing. Large local ini imports produce a Notice.
+`imgui_draw.cpp` validates sfnt structure before importing a font, checks compressed
+font token spans and decoded workspace before allocation, and shares core's
+patched stb_truetype backend and glyph workspace. Raster dimensions are checked
+before packing or allocating scratch; failure does not publish a glyph. Local
+files have no additional byte-size cap. Checked font allocation recovery covers
+TrussC's font-loader storage and decoder workspace only. ImGui's upstream atlas,
+font-object and vector allocations in `AddFont`/`ImFontAtlasBuildInit` remain
+unchecked and are outside the allocation-recovery guarantee. Keep these `[TrussC]`
+patches on update. Import recovery diagnostics use a guarded direct logger with
+a C stdio fallback so persistent C++ allocation exhaustion cannot terminate in
+`LogStream` destruction. File imports pass their filename explicitly through the
+shared ini/font implementations into those diagnostics; memory imports keep
+their pathless messages. No ambient filename state or public API is added.

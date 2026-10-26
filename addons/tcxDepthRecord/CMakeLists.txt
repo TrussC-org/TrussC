@@ -20,3 +20,9 @@ target_include_directories(${ADDON_NAME} INTERFACE
 )
 
 target_link_libraries(${ADDON_NAME} INTERFACE TrussC)
+
+# Inline playback paths catch allocation failure too. Keep these catches in Web
+# consumers; a malloc preflight cannot guarantee a subsequent vector allocation.
+if(EMSCRIPTEN)
+    target_compile_options(tcxDepthRecord INTERFACE -fexceptions)
+endif()

@@ -49,7 +49,7 @@ sg_swapchain acquireSecondarySwapchain(void* user) {
 }
 
 // --- tick: drive this window's update/draw with its context active ---------
-void windowTick(sapp_window swin, void* user) {
+void windowTickImpl(sapp_window swin, void* user) {
     Window* win = static_cast<Window*>(user);
     // A closed Window may outlive its native side. Never dispatch callbacks
     // or lazily recreate GPU resources after teardown.
@@ -76,6 +76,9 @@ void windowTick(sapp_window swin, void* user) {
     // before advancing the per-window delta/frame count) when throttled down.
     if (!internal::windowThrottleShouldTick(ctx)) return;
 
+    auto* prev = internal::currentWindowCtx();
+    internal::restoreWindowContext(&ctx);
+
     // Keep a RectNode root in sync with the window's logical size (same
     // contract as the main App on SAPP_EVENTTYPE_RESIZED).
     win->syncRootSize((float)sapp_window_width(swin), (float)sapp_window_height(swin));
@@ -96,8 +99,6 @@ void windowTick(sapp_window swin, void* user) {
         ctx.lastUpdateCallTime = callNow;
     }
 
-    auto* prev = internal::currentWindowCtx();
-    internal::restoreWindowContext(&ctx);
 
     // Per-window frame count (Fix 3): the main window advances
     // internal::updateFrameCount in appUpdateFunc; a secondary window advances
@@ -126,7 +127,6 @@ void windowTick(sapp_window swin, void* user) {
         // contained at present().
         internal::EntryStackGuard guard(internal::AppEntry::Update);
         win->events().update.notify();
-        win->tickTree();
     }
 
     {
@@ -135,7 +135,6 @@ void windowTick(sapp_window swin, void* user) {
         const Color& cc = win->clearColor_;
         clear(cc.r, cc.g, cc.b, cc.a);
         win->events().draw.notify();
-        win->drawTreeNow();
 
         present();
     }
@@ -150,6 +149,10 @@ void windowTick(sapp_window swin, void* user) {
     ctx.clearFrameDrawable();
 
     internal::restoreWindowContext(prev);
+}
+
+void windowTick(sapp_window swin, void* user) noexcept {
+    internal::windowCallback([&] { windowTickImpl(swin, user); });
 }
 
 // --- events: map sapp_event onto CoreEvents / App hooks / tree dispatch ----
@@ -188,8 +191,6 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
         e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
         e.syncLegacy();
         win->events().mouseReleased.notify(e);
-        if (win->getApp()) win->getApp()->mouseReleased(e);
-        if (!e.consumed) win->dispatchMouseReleaseToTree(e);
     };
 
     for (int button = SAPP_MOUSEBUTTON_LEFT; button <= SAPP_MOUSEBUTTON_MIDDLE; ++button) {
@@ -214,8 +215,6 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
             e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
             e.syncLegacy();
             win->events().mousePressed.notify(e);
-            if (win->getApp()) win->getApp()->mousePressed(e);
-            if (!e.consumed) win->dispatchMousePressToTree(e);
             break;
         }
         case SAPP_EVENTTYPE_MOUSE_UP: {
@@ -237,17 +236,10 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
                 raw.button = ctx.mouseButton;
                 MouseDragEventArgs e = internal::toDragArgs(raw);
                 win->events().mouseDragged.notify(e);
-                if (win->getApp()) win->getApp()->mouseDragged(e);
-                raw.consumed = e.consumed;
             } else {
                 MouseMoveEventArgs e = internal::toMoveArgs(raw);
                 win->events().mouseMoved.notify(e);
-                if (win->getApp()) win->getApp()->mouseMoved(e);
-                raw.consumed = e.consumed;
             }
-            // Node tree: drag goes to the grabbed node, move bubbles from the
-            // hit node (same dispatchMouseMove path as the main window).
-            if (!raw.consumed) win->dispatchMouseMoveToTree(raw);
             break;
         }
         case SAPP_EVENTTYPE_MOUSE_LEAVE: {
@@ -264,8 +256,6 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
             e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
             e.syncLegacy();
             win->events().mouseScrolled.notify(e);
-            if (win->getApp()) win->getApp()->mouseScrolled(e);
-            if (!e.consumed) win->dispatchMouseScrollToTree(e);
             break;
         }
         case SAPP_EVENTTYPE_KEY_DOWN: {
@@ -275,8 +265,6 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
             e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
             if (!ev->key_repeat) ctx.keysPressed.insert(e.key);
             win->events().keyPressed.notify(e);
-            if (win->getApp()) win->getApp()->keyPressed(e);
-            if (!e.consumed) win->dispatchKeyPressToTree(e);
             break;
         }
         case SAPP_EVENTTYPE_KEY_UP: {
@@ -286,8 +274,6 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
             e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
             ctx.keysPressed.erase(e.key);
             win->events().keyReleased.notify(e);
-            if (win->getApp()) win->getApp()->keyReleased(e);
-            if (!e.consumed) win->dispatchKeyReleaseToTree(e);
             break;
         }
         case SAPP_EVENTTYPE_SUSPENDED:
@@ -303,7 +289,7 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
     }
 }
 
-void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
+void windowEventImpl(const sapp_event* ev, sapp_window swin, void* user) {
     Window* win = static_cast<Window*>(user);
     // A closed Window may outlive its native side. Never dispatch callbacks
     // or lazily recreate GPU resources after teardown.
@@ -318,7 +304,11 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
     internal::restoreWindowContext(prev);
 }
 
-void windowClosed(sapp_window swin, void* user) {
+void windowEvent(const sapp_event* ev, sapp_window swin, void* user) noexcept {
+    internal::windowCallback([&] { windowEventImpl(ev, swin, user); });
+}
+
+void windowClosed(sapp_window swin, void* user) noexcept {
     (void)swin;
     Window* win = static_cast<Window*>(user);
     // The backend's safe point (close button, or a close() request landing):
@@ -339,6 +329,12 @@ namespace internal {
 void dispatchSecondaryWindowEventForTests(const sapp_event* ev, Window& win) {
     dispatchWindowEvent(ev, sapp_window{0}, &win, win.context());
 }
+// Display-test seam: use the native handle, DPI conversion and frame boundary.
+void dispatchSecondaryDisplayEventForTests(const sapp_event* ev, Window& win) {
+    auto* st = static_cast<AdapterState*>(win.native_);
+    if (st) windowEvent(ev, st->win, &win);
+}
+
 } // namespace internal
 
 Window::~Window() { teardown(); }
@@ -352,24 +348,26 @@ void Window::close() {
     sapp_window_request_close(st->win);
 }
 
-void Window::teardown() {
-    // The window's exit() is an entry point (#349).
-    internal::EntryStackGuard guard(internal::AppEntry::Exit);
+void Window::teardown() noexcept {
     auto* st = static_cast<AdapterState*>(native_);
     if (!st) return;
-    native_ = nullptr;             // re-entrancy guard (close_cb)
+    internal::TeardownSteps steps;
+    native_ = nullptr;             // guard before entry diagnostics can reenter
     closeRequested_ = false;
-    ctx_.teardownTargets();
+    ctx_.targetsClosed = true;
+    // Stack restoration must not prevent any native/App teardown step.
+    std::optional<internal::EntryStackGuard> guard;
+    steps.run("exit entry guard", [&] { guard.emplace(internal::AppEntry::Exit); });
+    steps.run("native target cleanup", [&] { ctx_.teardownTargets(); });
     ctx_.acquireSwapchain = nullptr;
     ctx_.acquireSwapchainUser = nullptr;
-    sapp_destroy_window(st->win);
+    steps.run("native window destruction", [&] { sapp_destroy_window(st->win); });
     // Frees this window's sgl pipelines and its sgl context (#317).
-    ctx_.swapchainTarget.resources().release();
+    steps.run("native GPU resource release", [&] { ctx_.swapchainTarget.resources().release(); });
     delete st;
     // The window's own exit event: per-window resource holders (e.g. the
     // tcxImGui per-window manager) tear down here, while this window's
     // CoreEvents is still alive.
-    events_.exit.notify();
     endApp();
 }
 
@@ -387,6 +385,39 @@ void Window::setSize(int width, int height) {
         // Logical (point) content size — matches getWidth()/getHeight() units.
         [nsWindow setContentSize:NSMakeSize((CGFloat)width, (CGFloat)height)];
     }
+}
+
+// Cocoa's screen space has its origin at the BOTTOM-left of the primary display
+// with y growing upward, while setPosition()/getPosition() are specified
+// top-left with y growing downward (matching Windows and X11). Flip against the
+// primary screen's height; NSScreen.screens[0] is the primary one by definition.
+static CGFloat _tcPrimaryScreenHeight() {
+    NSArray<NSScreen*>* screens = [NSScreen screens];
+    if (screens.count == 0) return 0.0;
+    return screens[0].frame.size.height;
+}
+
+void Window::setPosition(int x, int y) {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return;
+    NSWindow* nsWindow = (__bridge NSWindow*)(void*)sapp_window_macos_get_window(st->win);
+    if (!nsWindow) return;
+    // setFrameTopLeftPoint: takes the top-left of the FRAME (title bar included),
+    // which is exactly the corner these coordinates describe — so only the y
+    // axis has to be flipped, not the window height.
+    const CGFloat flippedY = _tcPrimaryScreenHeight() - (CGFloat)y;
+    [nsWindow setFrameTopLeftPoint:NSMakePoint((CGFloat)x, flippedY)];
+}
+
+IVec2 Window::getPosition() const {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st) return IVec2(-1, -1);
+    NSWindow* nsWindow = (__bridge NSWindow*)(void*)sapp_window_macos_get_window(st->win);
+    if (!nsWindow) return IVec2(-1, -1);
+    const NSRect f = [nsWindow frame];
+    // frame.origin is the bottom-left; NSMaxY is the top edge in Cocoa space.
+    const CGFloat topDown = _tcPrimaryScreenHeight() - NSMaxY(f);
+    return IVec2((int)f.origin.x, (int)topDown);
 }
 
 void Window::setFullscreen(bool full) {

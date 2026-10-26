@@ -15,6 +15,7 @@
 #include <limits>
 #include <tc/utils/tcLog.h>
 #include <utility>
+#include "impl/tcxMovIndex.h"
 
 // HAP reference decoder (BSD-2-Clause)
 extern "C" {
@@ -70,6 +71,7 @@ inline size_t getBytesPerBlock(HapFormat format) {
 
 // Calculate texture data size
 inline size_t calculateTextureSize(uint32_t width, uint32_t height, HapFormat format) {
+    if (!detail::movDimensions(width, height)) return 0;
     // DXT textures are 4x4 block compressed
     const size_t blockSize = getBytesPerBlock(format);
     const uint64_t blocksX = (uint64_t(width) + 3) / 4;
@@ -122,9 +124,10 @@ public:
         result = {};
         lastChunkCount_ = -1;
         lastErrorCode_ = HapResult_Bad_Frame;
-        if (!detail::validateHapFrame(frameData, frameSize, width, height, result.format)) {
+        if (frameSize > detail::movFrameBytes || !detail::movDimensions(width, height) ||
+            !detail::validateHapFrame(frameData, frameSize, width, height, result.format)) {
             result = {};
-            return invalidFrame();
+            return invalidFrame(width, height, frameSize);
         }
 
         result.width = width;
@@ -132,7 +135,11 @@ public:
 
         // Calculate output buffer size
         size_t outputSize = calculateTextureSize(width, height, result.format);
-        result.data.resize(outputSize);
+        if (!detail::resizeMovBuffer(result.data, outputSize)) {
+            trussc::logError("HapDecoder") << "HAP output allocation failed";
+            result = {};
+            return false;
+        }
 
         // Decode
         unsigned long bytesUsed = 0;
@@ -150,7 +157,7 @@ public:
                          HapResult_Bad_Frame : hapResult;
         if (hapResult != HapResult_No_Error || bytesUsed != outputSize) {
             result = {};
-            return lastErrorCode_ == HapResult_Bad_Frame ? invalidFrame() : false;
+            return lastErrorCode_ == HapResult_Bad_Frame ? invalidFrame(width, height, frameSize) : false;
         }
 
         // HAP decodes simple single-chunk frames without invoking the callback.
@@ -168,9 +175,10 @@ public:
         lastErrorCode_ = HapResult_Bad_Arguments;
         outFormat = HapFormat::Unknown;
         if (!outputBuffer) return false;
-        if (!detail::validateHapFrame(frameData, frameSize, width, height, outFormat)) {
+        if (frameSize > detail::movFrameBytes || !detail::movDimensions(width, height) ||
+            !detail::validateHapFrame(frameData, frameSize, width, height, outFormat)) {
             outFormat = HapFormat::Unknown;
-            return invalidFrame();
+            return invalidFrame(width, height, frameSize);
         }
 
         // Verify buffer size
@@ -196,7 +204,7 @@ public:
                          HapResult_Bad_Frame : hapResult;
         if (lastErrorCode_ != HapResult_No_Error) {
             outFormat = HapFormat::Unknown;
-            return lastErrorCode_ == HapResult_Bad_Frame ? invalidFrame() : false;
+            return lastErrorCode_ == HapResult_Bad_Frame ? invalidFrame(width, height, frameSize) : false;
         }
         // HAP decodes simple single-chunk frames without invoking the callback.
         if (lastChunkCount_ < 0) lastChunkCount_ = 1;
@@ -211,11 +219,12 @@ private:
     bool invalidFrameWarned_ = false;
     uint64_t invalidFrameCount_ = 0;
 
-    bool invalidFrame() {
+    bool invalidFrame(uint32_t width, uint32_t height, size_t frameSize) {
         lastErrorCode_ = HapResult_Bad_Frame;
         ++invalidFrameCount_;
         if (!std::exchange(invalidFrameWarned_, true)) {
-            trussc::logWarning("HapDecoder") << "Skipping invalid HAP frame; invalid frames will be skipped";
+            trussc::logWarning("HapDecoder") << "Skipping invalid HAP frame (needed " << width << "x" << height << ", " << frameSize
+                << " encoded bytes; capacity 8192 per axis and 128 MiB per frame); invalid frames will be skipped";
         }
         return false;
     }
@@ -236,7 +245,7 @@ private:
             return;
         }
 
-        // Bound (resource): File-controlled chunk counts must not determine OS thread usage.
+        // Bound (security): file chunk counts cannot determine OS thread usage. Overflow uses bounded workers without losing chunks.
         constexpr unsigned int maxWorkers = 8;
         std::array<std::thread, maxWorkers> threads;
         std::atomic<unsigned int> nextChunk{0};

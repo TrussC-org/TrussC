@@ -95,7 +95,7 @@ struct TlsClient::TlsTransport : TcpClient::Transport {
     enum class HandshakeStep { Done, InProgress, Stopped };
     bool setupHandshake(State&, const AliveToken&);
     HandshakeStep performHandshake(State&, const AliveToken&);
-    bool failHandshake(State&, const std::string&, const std::string&, int, const AliveToken&);
+    bool failHandshake(State&, const std::string&, const std::string&, int, const AliveToken&, bool external = false);
     bool connectSocket(State&, const std::string&, int) override;
     int writeSendStep(State&, const void*, size_t, bool&, int&) override;
     bool isConnecting(const State& st) const override {
@@ -392,13 +392,13 @@ TlsClient::TlsTransport::HandshakeStep TlsClient::TlsTransport::performHandshake
         char errBuf[256];
         mbedtls_strerror(ret, errBuf, sizeof(errBuf));
         failHandshake(st, std::string("TLS handshake failed: ") + errBuf,
-                      std::string("TLS Handshake failed: ") + errBuf, ret, alive);
+                      std::string("TLS Handshake failed: ") + errBuf, ret, alive, true);
         return HandshakeStep::Stopped;
     }
 }
 
 bool TlsClient::TlsTransport::failHandshake(State& st, const std::string& error, const std::string& connectMessage,
-                              int code, const AliveToken& alive) {
+                              int code, const AliveToken& alive, bool external) {
     // A local disconnect() on another thread shut the socket down under
     // the handshake. It cleared running_ first and tears the connection
     // down itself: only a failure this thread ran into is handled here.
@@ -410,7 +410,7 @@ bool TlsClient::TlsTransport::failHandshake(State& st, const std::string& error,
     // teardown() leaves this run's thread owned by the State, so teardown
     // from another thread can still wait for its listener to return.
     teardown(st);
-    st.notifyError(error, code);
+    st.notifyError(error, code, external);
 
     // An onError listener may have destroyed the client (an owner that
     // replaces it, as WebSocketClient::connect() does)
@@ -513,7 +513,7 @@ bool TlsClient::TlsTransport::processNetworkStep(State& st, const AliveToken& al
         }
 
         if (ret > 0) {
-            st.onReceive.notify(args);
+            if (!st.deliverReceive(args)) return false;
             // An onReceive listener may have destroyed the client (an owner
             // that replaces it from a close it handles inline, say)
             if (!*alive) return false;
@@ -534,7 +534,7 @@ bool TlsClient::TlsTransport::processNetworkStep(State& st, const AliveToken& al
                 // This thread stops here, decided before notifying: a
                 // listener may destroy, disconnect or reconnect the client,
                 // so nothing of it is read after the notification (#262).
-                st.onDisconnect.notify(args);
+                st.onDisconnect.notifyExternal(args);
                 return false;
             }
             break;
@@ -551,7 +551,7 @@ bool TlsClient::TlsTransport::processNetworkStep(State& st, const AliveToken& al
                 args.reason = std::string("TLS error: ") + errBuf;
                 args.wasClean = false;
                 // As above: stop without reading the client again
-                st.onDisconnect.notify(args);
+                st.onDisconnect.notifyExternal(args);
                 return false;
             }
             break;

@@ -299,28 +299,27 @@ public:
         listenerMoved_ = events().mouseMoved.listen([this](MouseMoveEventArgs& e) {
             lastMouseX_ = e.pos.x;
             lastMouseY_ = e.pos.y;
-        });
-        // The camera CONSUMES the gestures it claims (same consume + capture
-        // contract as other overlay consumers): a press that starts an orbit /
-        // pan owns the whole gesture, so the node tree never sees a click,
-        // drag or release that was camera input.
+        }, EventPriority::BeforeApp);
+        // Start gestures only after the App/tree had a chance to consume.
+        // Track moves and end owned gestures before the tree, so a release
+        // over a UI node cannot leave an orbit/pan active.
         listenerPressed_ = events().mousePressed.listen([this](MouseEventArgs& e) {
             // Gestures are claimed at press time: no modifier, no camera.
             if (!modifierHeld(e.shift, e.ctrl, e.alt, e.super)) return;
             if (onMousePressed(e.pos.x, e.pos.y, e.button)) e.consumed = true;
-        });
+        }, EventPriority::AfterApp);
         listenerReleased_ = events().mouseReleased.listen([this](MouseEventArgs& e) {
             // Never gated on the modifier — a release must always be able to
             // end an in-flight gesture (even if the modifier was let go).
             if (onMouseReleased(e.pos.x, e.pos.y, e.button)) e.consumed = true;
-        });
+        }, EventPriority::BeforeApp);
         listenerDragged_ = events().mouseDragged.listen([this](MouseDragEventArgs& e) {
             if (onMouseDragged(e.pos.x, e.pos.y, e.button)) e.consumed = true;
-        });
+        }, EventPriority::AfterApp);
         listenerScrolled_ = events().mouseScrolled.listen([this](ScrollEventArgs& e) {
             if (!modifierHeld(e.shift, e.ctrl, e.alt, e.super)) return;
-            if (onMouseScrolled(e.scroll.x, e.scroll.y)) e.consumed = true;
-        });
+            if (isInsideControlArea(e.pos.x, e.pos.y) && applyScroll(e.scroll.y)) e.consumed = true;
+        }, EventPriority::AfterApp);
     }
 
     void disableMouseInput() {
@@ -487,6 +486,11 @@ private:
         float my = lastMouseY_;
         if (!isInsideControlArea(mx, my)) return false;
 
+        return applyScroll(dy);
+    }
+
+    bool applyScroll(float dy) {
+        if (dy == 0.0f) return false;
         // Wheel changes distance to the target in both modes; ortho derives its
         // extent from distance_, so the zoom feel stays consistent across toggle.
         distance_ -= dy * zoomSensitivity_;

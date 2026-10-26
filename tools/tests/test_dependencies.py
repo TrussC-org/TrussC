@@ -273,7 +273,10 @@ fetchcontent_declare(real
             self.assertEqual(good.returncode, 0, good.stdout + good.stderr)
             self.assertIn("31 third-party entries", good.stdout)
             license_path = root / deps.LIST_FILE
-            inventory = license_path.read_text(encoding="utf-8").replace("| 0.11.25 |", "| 0.11.21 |")
+            inventory = license_path.read_text(encoding="utf-8")
+            version_prefix = "| **miniaudio** | 0.11.25"
+            self.assertIn(version_prefix, inventory)
+            inventory = inventory.replace(version_prefix, "| **miniaudio** | 0.11.21")
             shader_row = next(r for r in self.rows if r["name"] == deps.SHADER_COMPILER)
             inventory = inventory.replace(shader_row["commit"], "0" * 40)
             inventory = inventory.replace(shader_row["hashes"]["linux"], "0" * 64)

@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/events/tcExternalDelivery.h"
 
 #include "tcxOscMessage.h"
 #include <variant>
@@ -19,7 +20,7 @@ public:
 
     // Deepest bundle nesting fromBytes() accepts, counting the outermost
     // bundle as level 1. Data nested deeper fails to parse as a whole.
-    // Bound (security): untrusted bundles can nest recursively; a depth cap bounds stack memory. Overflow rejects the bundle.
+    // Bound (security): untrusted bundles can nest recursively; a depth cap bounds stack memory. Overflow rejects the whole packet; the receiver counts rejected datagrams.
     static constexpr int MAX_NESTING_DEPTH = 16;
 
     OscBundle() : timetag_(TIMETAG_IMMEDIATELY) {}
@@ -90,6 +91,8 @@ public:
     // truncated (its size runs past the end of the data), or any nested
     // message or bundle fails to parse (see OscMessage::fromBytes()): the
     // whole bundle is rejected, not a part of it.
+    // Allocation-free preflight also limits the whole outer packet to
+    // 65,536 bytes and 4096 bundle elements/argument tags combined.
     static OscBundle fromBytes(const uint8_t* data, size_t size, bool& ok);
     // Same, and paddingMissing tells whether any message in the bundle ends
     // before its zero padding to 4 bytes (it still parses, as in
@@ -115,6 +118,7 @@ public:
     }
 
 private:
+    friend struct trussc::internal::ExternalPayload<OscBundle>;
     // fromBytes() for a bundle at nesting level `depth` (1 = outermost)
     static OscBundle fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok,
                                       bool& paddingMissing, int depth);
@@ -130,3 +134,18 @@ private:
 // -----------------------------------------------------------------------------
 namespace tcx    { using osc::OscBundle; } // deprecated: remove at v1.0.0
 namespace trussc { using tcx::osc::OscBundle; } // deprecated: remove at v1.0.0
+
+namespace trussc::internal {
+template<> struct ExternalPayload<tcx::osc::OscBundle> {
+    static size_t bytes(const tcx::osc::OscBundle& bundle) {
+        size_t result = externalSizeAdd(sizeof(bundle), externalSizeMultiply(bundle.elements_.capacity(), sizeof(tcx::osc::OscBundle::Element)));
+        for (const auto& element : bundle.elements_) {
+            std::visit([&](const auto& child) {
+                // Element storage already includes the child object itself.
+                result = externalSizeAdd(result, ExternalPayload<std::decay_t<decltype(child)>>::bytes(child) - sizeof(child));
+            }, element);
+        }
+        return result;
+    }
+};
+} // namespace trussc::internal

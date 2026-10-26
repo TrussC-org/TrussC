@@ -147,6 +147,31 @@ namespace headless {
 }
 
 namespace internal {
+// Headless deliberately dispatches only the App virtuals, not the node tree
+// (children, mods and timers have a separate lifecycle decision).
+inline std::vector<EventListener> registerHeadlessAppEventListeners(
+        const std::shared_ptr<App>& app) {
+    std::vector<EventListener> listeners;
+    auto warned = std::make_shared<std::atomic<bool>>(false);
+    // A worker may retain a notify snapshot through shutdown. It must not
+    // retain the App and eventually run its destructor on that worker.
+    std::weak_ptr<App> target = app;
+    auto bind = [&](auto& event, auto callback) {
+        listeners.push_back(FrameworkEventAccess::listen(event,
+            [target, callback, warned] {
+                if (!isMainThread()) {
+                    if (!warned->exchange(true))
+                        logWarning("App") << "App events must be delivered on the main thread";
+                    return;
+                }
+                if (auto owner = target.lock()) callback(*owner);
+            }, EventPriority::App));
+    };
+    bind(events().update, [](App& target) { target.update(); });
+    bind(events().exit, [](App& target) { target.exit(); });
+    return listeners;
+}
+
 // One pass, with elapsed time supplied by the runner (or a deterministic
 // test). A cancellable request is dispatched only after all owed steps.
 inline void runHeadlessUpdatePass(App& app, WindowContext& ctx,
@@ -166,7 +191,10 @@ inline void runHeadlessUpdatePass(App& app, WindowContext& ctx,
         EntryStackGuard guard(AppEntry::Update);
         crashFrame(headless::frameCount);
         CrashPhaseScope updatePhase("update");
-        app.update();
+        // Services such as Box2d guard against stepping twice in one update.
+        // Match the windowed loop's counter before delivering this step.
+        ++updateFrameCount;
+        events().update.notify();
         headless::frameCount++;
     }
     // As in the windowed loop, steps cut short do not count toward the rate.
@@ -259,6 +287,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     // addChild().
     auto app = std::make_shared<AppClass>();
     ctx.rootNode = app;
+    auto appListeners = internal::registerHeadlessAppEventListeners(app);
 
     // setup() once, then the framework's post-setup hook, as the windowed
     // App gets them on its first tree update: the App's audioOut() /
@@ -323,16 +352,17 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
 #endif
     console::stop();
 
-    // Call exit and cleanup
+    // App exit at 100, then protected framework teardown at AfterApp.
     {
         internal::EntryStackGuard guard(internal::AppEntry::Exit);
-        app->exit();
+        events().exit.notify();
         // The device keeps running; finish any callback before cleanup().
         internal::detachAppAudio(*app);
         app->cleanup();
     }
 
     internal::waitForResourceLoadsAtAppExit();
+    appListeners.clear();
     ctx.rootNode.reset();   // no longer the running App
 
     // Headless apps leave the audio device running (no shutdownAudio() on

@@ -26,6 +26,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <thread>
 
 using namespace std;
 using namespace tc;
@@ -287,9 +288,118 @@ static void guardedBorrowedDelivery() {
     check("guarded delivery: source deletion unwinds with owned snapshot", !source && seen.empty());
 }
 
+template<class T> void frameworkClear() {
+    // clear before, inside, and after the framework callback during a pass.
+    for (int position : {-1, 0, 1}) {
+        Event<T> event;
+        int frameworkCalls = 0, ordinaryCalls = 0, addedCalls = 0;
+        EventListener added;
+        auto clearAndAdd = [&] {
+            event.clear(); event.clear();
+            check("clear keeps one framework entry", event.listenerCount() == 1);
+            added = event.listen([&](auto&...) { ++addedCalls; });
+        };
+        auto framework = internal::FrameworkEventAccess::listen(event,
+            [&](auto&...) { ++frameworkCalls; if (position == 0) clearAndAdd(); }, 100);
+        auto clearer = event.listen([&](auto&...) { clearAndAdd(); }, position < 0 ? 0 : 200);
+        auto ordinary = event.listen([&](auto&...) { ++ordinaryCalls; }, 300);
+        // For position==0 the framework clears the later clearer as well.
+        auto notify = [&] {
+            if constexpr (std::is_void_v<T>) event.notify();
+            else { T payload{}; event.notify(payload); }
+        };
+        notify();
+        check("clear during notify preserves framework live token", frameworkCalls == 1 && ordinaryCalls == 0 && addedCalls == 0);
+        check("added during clear starts next pass", event.listenerCount() == 2);
+        event.clear(); event.clear();
+        check("repeated clear outside notify preserves framework", event.listenerCount() == 1);
+        // Stop the framework callback from clearing on the second pass.
+        position = 1;
+        notify();
+        check("preserved framework runs on next pass", frameworkCalls == 2 && addedCalls == 0);
+        framework.disconnect();
+        notify();
+        check("framework disconnect after clear removes entry", event.listenerCount() == 0 && frameworkCalls == 2);
+    }
+    Event<T> event;
+    int calls = 0;
+    EventListener framework;
+    auto killer = event.listen([&](auto&...) { event.clear(); framework.disconnect(); }, 0);
+    framework = internal::FrameworkEventAccess::listen(event, [&](auto&...) { ++calls; }, 100);
+    if constexpr (std::is_void_v<T>) event.notify();
+    else { T payload{}; event.notify(payload); }
+    check("disconnect during pass invalidates preserved framework", calls == 0 && event.listenerCount() == 0);
+
+    framework = internal::FrameworkEventAccess::listen(event, [&](auto&...) { ++calls; event.clear(); framework.disconnect(); }, 100);
+    if constexpr (std::is_void_v<T>) event.notify();
+    else { T payload{}; event.notify(payload); }
+    check("framework can disconnect itself after clear", calls == 1 && event.listenerCount() == 0);
+
+    // A newly published framework entry still obeys the snapshot boundary.
+    auto adder = event.listen([&](auto&...) {
+        framework = internal::FrameworkEventAccess::listen(event, [&](auto&...) { ++calls; }, 100);
+        event.clear();
+    }, 0);
+    auto notify = [&] {
+        if constexpr (std::is_void_v<T>) event.notify();
+        else { T payload{}; event.notify(payload); }
+    };
+    notify();
+    check("framework added during pass survives clear but waits", calls == 1 && event.listenerCount() == 1);
+    notify();
+    check("framework added during pass runs next pass", calls == 2);
+    framework.disconnect();
+
+}
+
+// A real borrowed pointer is rebuilt before each listener. clear() must retain
+// the framework entry's original liveness even in the active guarded snapshot.
+static void guardedFrameworkClear() {
+    struct Borrowed { int* value; };
+    Event<Borrowed> event;
+    auto owner = std::make_unique<int>(42);
+    Borrowed args{owner.get()};
+    int seen = 0, ordinaryCalls = 0;
+    auto clearer = event.listen([&](Borrowed&) { event.clear(); owner = std::make_unique<int>(73); }, 0);
+    auto framework = internal::FrameworkEventAccess::listen(event, [&](Borrowed& payload) { seen = *payload.value; }, 100);
+    auto ordinary = event.listen([&](Borrowed&) { ++ordinaryCalls; }, 200);
+    internal::GuardedEventDelivery<Borrowed>::notify(event, args, [&] { args.value = owner.get(); return true; });
+    check("guarded borrowed payload: clear preserves framework and rebuilds pointer", seen == 73 && ordinaryCalls == 0 && event.listenerCount() == 1);
+    framework.disconnect();
+    check("guarded framework handle disconnects after clear", event.listenerCount() == 0);
+}
+
+#if !defined(__EMSCRIPTEN__)
+template<class T> void queuedFrameworkClear() {
+    Event<T> event;
+    int frameworkCalls = 0, ordinaryCalls = 0;
+    auto framework = internal::FrameworkEventAccess::listen(event, [&](auto&...) { ++frameworkCalls; }, 100, Deliver::Main);
+    auto ordinary = event.listen([&](auto&...) { ++ordinaryCalls; }, Deliver::Main);
+    auto enqueue = [&] {
+        std::thread worker([&] {
+            if constexpr (std::is_void_v<T>) event.notify();
+            else { T payload{}; event.notify(payload); }
+        });
+        worker.join();
+    };
+    enqueue(); event.clear(); event.clear();
+    internal::drainMainThreadQueue();
+    check("queued Main: clear preserves framework token only", frameworkCalls == 1 && ordinaryCalls == 0);
+    enqueue(); event.clear(); framework.disconnect();
+    internal::drainMainThreadQueue();
+    check("queued Main: framework disconnect cancels retained call", frameworkCalls == 1 && event.listenerCount() == 0);
+}
+#endif
+
 } // namespace
 
 TC_CORE_TEST_MAIN() {
+    getMainThreadId();
+    frameworkClear<int>(); frameworkClear<void>();
+    guardedFrameworkClear();
+#if !defined(__EMSCRIPTEN__)
+    queuedFrameworkClear<int>(); queuedFrameworkClear<void>();
+#endif
     removedByEarlierListener();
     clearDuringNotify();
     selfRemoval();

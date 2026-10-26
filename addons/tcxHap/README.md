@@ -13,3 +13,5 @@ On iOS, TrussC's Metal backend enables BC texture formats when the GPU
 reports BC support. Hap1 and Hap Q playback with correct colours was checked
 on an iPhone 16 in the #645 experiment. Where BC is not supported, for example
 on the Simulator, loading fails cleanly with the message above, without a crash.
+
+C++ OOM recovery requires Release builds, or iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even empty string/container construction and moves can allocate a proxy on an error path.

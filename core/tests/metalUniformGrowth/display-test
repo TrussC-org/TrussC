@@ -1,0 +1,1 @@
+skip "Metal-only; run --gpu-check on macOS with MTL_DEBUG_LAYER=1" {test} --gpu-check

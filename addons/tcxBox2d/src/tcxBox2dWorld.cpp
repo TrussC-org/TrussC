@@ -161,7 +161,7 @@ void World::setAutoUpdate(bool on) {
 void World::refreshAutoUpdate() {
     if (autoUpdate_ && world_) {
         // listen() replaces any prior listener (RAII), so this is idempotent.
-        updateListener_ = tc::events().update.listen([this]() { update(); });
+        updateListener_ = tc::events().update.listen([this]() { update(); }, tc::EventPriority::BeforeApp);
     } else {
         updateListener_ = tc::EventListener();  // unregister
     }
