@@ -93,7 +93,7 @@ WindowFullscreenPhase mainWindowFullscreenPhase() { return WindowFullscreenPhase
 bool ignoreFullscreenGeometry(WindowFullscreenPhase, WindowGeometryCall) { assert(false); return true; }
 void setMainFullscreen(bool) {}
 void setMainWindowSizeLogical(int, int);
-enum class WindowControl { Title, PixelSize, Size, Position, PositionQuery, Fullscreen };
+enum class WindowControl { Title, PixelSize, Size, Position, PositionQuery, Fullscreen, ToggleFullscreen };
 bool& pixelPerfectMode() { return pixelPerfect; }
 void setMainWindowPosition(int, int) {}
 IVec2 mainWindowPosition() { return {-1, -1}; }
@@ -108,6 +108,7 @@ struct Window {
     void setSecondarySize(double, double, bool = false) { assert(false); }
     void setSecondaryPosition(int, int) { assert(false); }
     IVec2 getSecondaryPosition() { assert(false); return {}; }
+    bool isSecondaryFullscreen() const { return false; }
     void setSecondaryFullscreen(bool) { assert(false); }
     IVec2 control(internal::WindowControl, int = 0, int = 0, const std::string* = nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);
     void setSize(int, int);

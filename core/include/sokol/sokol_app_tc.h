@@ -4284,6 +4284,10 @@ WindowFullscreenPhase macWindowFullscreenPhase(uint32_t id) noexcept {
 void setMacWindowFullscreen(uint32_t id, bool full) noexcept {
     _sapp_tc_request_fullscreen(id ? _sapp_tc_lookup({id}) : _sapp_tc.app.main, full);
 }
+void toggleMacWindowFullscreen(uint32_t id) noexcept {
+    _sapp_tc_window_t* w = id ? _sapp_tc_lookup({id}) : _sapp_tc.app.main;
+    if (w) _sapp_tc_request_fullscreen(w, !_sapp_tc_fullscreen_state(w).desired);
+}
 }
 
 #elif defined(__APPLE__) && TARGET_OS_IPHONE

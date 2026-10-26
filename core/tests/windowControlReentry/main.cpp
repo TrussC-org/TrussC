@@ -34,6 +34,78 @@ bool recordControl(Window&, internal::WindowControl, int, int, const std::string
     ++appliedControls;
     return true;
 }
+int mainNativeToggles = 0, secondaryNativeToggles = 0;
+bool recordFullscreenControl(Window& window, internal::WindowControl op, int full, int,
+                             const std::string*, IVec2&) {
+    auto& state = window.ctx_.isMain ? mainFullscreen : secondaryFullscreen;
+    auto& toggles = window.ctx_.isMain ? mainNativeToggles : secondaryNativeToggles;
+    // Stand in only for the native endpoint. Invoke the real public wrapper,
+    // context routing and control adapter, including explicit set requests.
+    if (op == internal::WindowControl::ToggleFullscreen) toggles += state.request(!state.desired);
+    else if (op == internal::WindowControl::Fullscreen) toggles += state.request(bool(full));
+    else return false;
+    return true;
+}
+void testPublicFullscreenToggles(Window& main, Window& secondary) {
+    using Phase = internal::WindowFullscreenPhase;
+    internal::windowFullscreenHookForTests() = recordedPhase;
+    internal::windowControlHookForTests() = recordFullscreenControl;
+    for (Window* target : {&main, &secondary}) {
+        auto& state = target == &main ? mainFullscreen : secondaryFullscreen;
+        auto& other = target == &main ? secondaryFullscreen : mainFullscreen;
+        auto& toggles = target == &main ? mainNativeToggles : secondaryNativeToggles;
+        auto& otherToggles = target == &main ? secondaryNativeToggles : mainNativeToggles;
+        for (bool global : {false, true}) {
+            auto toggle = [&] {
+                if (global) {
+                    internal::currentWindowCtx() = &target->context();
+                    toggleFullscreen();
+                } else {
+                    // A handle must act on its target even in another context.
+                    internal::currentWindowCtx() = &(target == &main ? secondary : main).context();
+                    target->toggleFullscreen();
+                }
+            };
+            for (bool initial : {false, true}) {
+                for (int presses : {0, 1, 2}) {
+                    state = {}; other = {};
+                    state.phase = initial ? Phase::Fullscreen : Phase::Windowed;
+                    state.desired = initial;
+                    toggles = otherToggles = 0;
+                    // Start through the production explicit-set path, then
+                    // press during Entering or Exiting (including cancellation).
+                    target->setFullscreen(!initial);
+                    state.will(!initial);
+                    for (int i = 0; i < presses; ++i) toggle();
+                    check("public toggles defer native work during either animation",
+                        toggles == 1 && state.transitioning() && target->isFullscreen());
+                    const bool reverse = presses == 1;
+                    check("public toggle flips or cancels the last requested state",
+                        state.desired == (reverse ? initial : !initial));
+                    state.terminal(!initial); // DidEnter / DidExit
+                    check("public reversal queues exactly the required reconciliation",
+                        state.reconcilePending == reverse);
+                    toggles += state.reconcile();
+                    check("terminal tick reconciles once with no second mid-animation toggle",
+                        toggles == (reverse ? 2 : 1) && !state.reconcile());
+                    if (reverse) state.terminal(initial);
+                    check("public toggles finish in the last requested state",
+                        !state.transitioning() && target->isFullscreen() == (reverse ? initial : !initial));
+                    // Settled toggles continue to issue exactly one native call.
+                    const int before = toggles;
+                    toggle();
+                    check("settled public toggle issues one native toggle", toggles == before + 1);
+                    check("public toggle never changes the other target",
+                        other.phase == Phase::Windowed && !other.desired && otherToggles == 0);
+                }
+            }
+        }
+    }
+    mainFullscreen = {}; secondaryFullscreen = {};
+    internal::windowFullscreenHookForTests() = nullptr;
+    internal::windowControlHookForTests() = nullptr;
+    internal::currentWindowCtx() = nullptr;
+}
 void testFullscreenTransitions() {
     using Phase = internal::WindowFullscreenPhase;
     // Every public request direction, notification origin (program/menu),
@@ -254,6 +326,7 @@ int main() {
         internal::WindowRequestAccess::applyPendingApp(secondary);
         check("secondary App attached", secondary.getApp() == secondaryApp);
         testFullscreenCalls(*main, secondary);
+        testPublicFullscreenToggles(*main, secondary);
         sgl_context_desc_t cd{};
         main->context().swapchainTarget.resources().context = sgl_make_context(&cd);
         secondary.context().swapchainTarget.resources().context = sgl_make_context(&cd);

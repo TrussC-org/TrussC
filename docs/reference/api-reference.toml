@@ -40699,15 +40699,15 @@ description.en = "Toggles this window's fullscreen mode."
 description.ja = "このウィンドウのフルスクリーンモードを切り替える。"
 description.ko = "이 윈도우의 전체화면 모드를 전환한다."
 details.en = '''
-- Calls `setFullscreen(!isFullscreen())`. See `Window::setFullscreen` and `Window::isFullscreen` for platform behavior and asynchronous transitions.
+- Flips the most recently requested fullscreen state. On macOS, pressing it again during the animation reverses the transition after the current animation completes; toggling twice during the same animation cancels that reversal. See `Window::setFullscreen` and `Window::isFullscreen` for platform behavior.
 - Does nothing after the native window closes. For main-thread requirements, see `Window::setApp`.
 '''
 details.ja = '''
-- `setFullscreen(!isFullscreen())` を呼びます。プラットフォームごとの動作と非同期の遷移は、`Window::setFullscreen` と `Window::isFullscreen` を参照してください。
+- 最後に要求したフルスクリーン状態を反転します。macOS ではアニメーション中にもう一度呼ぶと、現在のアニメーション完了後に逆方向へ遷移します。同じアニメーション中に 2 回呼ぶとその反転を取り消します。プラットフォームごとの動作は `Window::setFullscreen` と `Window::isFullscreen` を参照してください。
 - ネイティブウィンドウを閉じたあとは何もしません。メインスレッドでの使用については `Window::setApp` を参照してください。
 '''
 details.ko = '''
-- `setFullscreen(!isFullscreen())`을 호출합니다. 플랫폼별 동작과 비동기 전환은 `Window::setFullscreen` 및 `Window::isFullscreen`을 참조하세요.
+- 가장 최근에 요청한 전체화면 상태를 반전합니다. macOS에서는 애니메이션 중 다시 호출하면 현재 애니메이션이 끝난 뒤 반대 방향으로 전환하고, 같은 애니메이션 중 두 번 호출하면 그 반전을 취소합니다. 플랫폼별 동작은 `Window::setFullscreen` 및 `Window::isFullscreen`을 참조하세요.
 - 네이티브 윈도우를 닫은 뒤에는 아무 작업도 하지 않습니다. 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
 '''
 related = ["Window::setFullscreen", "Window::isFullscreen"]
@@ -53490,15 +53490,15 @@ description.en = "Toggles the window fullscreen state."
 description.ja = "ウィンドウのフルスクリーン状態を切り替える。"
 description.ko = "윈도우의 전체 화면 상태를 전환한다."
 details.en = '''
-- Enters fullscreen when windowed and leaves fullscreen when already fullscreen.
+- Flips the most recently requested fullscreen state. On macOS, pressing it again during the animation reverses the transition after the current animation completes; toggling twice during the same animation cancels that reversal.
 - Follows the current window's context; see `setFullscreen` for main and secondary window targeting.
 '''
 details.ja = '''
-- ウィンドウ表示中はフルスクリーンに入り、フルスクリーン中は解除します。
+- 最後に要求したフルスクリーン状態を反転します。macOS ではアニメーション中にもう一度呼ぶと、現在のアニメーション完了後に逆方向へ遷移します。同じアニメーション中に 2 回呼ぶとその反転を取り消します。
 - 現在のウィンドウのコンテキストに従います。メインウィンドウとサブウィンドウの選び方は `setFullscreen` を参照してください。
 '''
 details.ko = '''
-- 윈도우 모드에서는 전체 화면으로 전환하고, 전체 화면에서는 해제합니다.
+- 가장 최근에 요청한 전체화면 상태를 반전합니다. macOS에서는 애니메이션 중 다시 호출하면 현재 애니메이션이 끝난 뒤 반대 방향으로 전환하고, 같은 애니메이션 중 두 번 호출하면 그 반전을 취소합니다.
 - 현재 윈도우의 컨텍스트를 따릅니다. 메인 윈도우와 보조 윈도우의 대상 선택은 `setFullscreen`을 참조하세요.
 '''
 related = ["setFullscreen", "isFullscreen", "setImmersiveMode"]

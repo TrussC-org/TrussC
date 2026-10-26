@@ -41,7 +41,7 @@ bool sapp_is_fullscreen() { return false; }
 void sapp_toggle_fullscreen() {}
 void sapp_set_window_title(const char*) {}
 namespace internal {
-enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, PositionQuery };
+enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, PositionQuery, ToggleFullscreen };
 constexpr bool windowSizeIsScreenControlled() { return false; }
 constexpr bool supportsSecondaryWindows() { return true; }
 using Hook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
@@ -67,6 +67,7 @@ struct Window {
     void setSecondaryTitle(const std::string&) {}
     void setSecondaryPosition(int, int) {}
     IVec2 getSecondaryPosition() { return {}; }
+    bool isSecondaryFullscreen() const { return false; }
     void setSecondaryFullscreen(bool) {}
     void setSecondarySize(double, double, bool = false);
     IVec2 control(internal::WindowControl, int, int, const std::string* = nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);

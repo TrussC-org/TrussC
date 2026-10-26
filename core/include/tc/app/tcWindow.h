@@ -24,7 +24,7 @@ namespace internal {
 class WindowRequestAccess;   // friend of Window, defined after it
 void syncSecondaryAppSize(Window& window, int width, int height);
 // One control entry for explicit handles and context-aware globals.
-enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, PositionQuery };
+enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, ToggleFullscreen, PositionQuery };
 using WindowControlHook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
 WindowControlHook& windowControlHookForTests();
 using WindowFullscreenHook = WindowFullscreenPhase (*)(const Window&);
@@ -175,7 +175,8 @@ public:
     // windowResized). No-op if the native window is gone.
     void setFullscreen(bool full);
     bool isFullscreen() const;
-    void toggleFullscreen() { setFullscreen(!isFullscreen()); }
+    // Flip the most recently requested state, including during macOS animation.
+    void toggleFullscreen() { control(internal::WindowControl::ToggleFullscreen); }
 
     void setClearColor(const Color& c) { clearColor_ = c; clearColorSet_ = true; }
 
@@ -287,6 +288,7 @@ private:
     bool isSecondaryFullscreen() const;
 #if defined(__APPLE__) && TARGET_OS_OSX
     internal::WindowFullscreenPhase secondaryFullscreenPhase() const;
+    void toggleSecondaryFullscreen();
 #endif
     internal::WindowFullscreenPhase fullscreenPhase() const;
     int getSecondaryWidth() const;
@@ -963,6 +965,14 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
         case internal::WindowControl::Fullscreen:
             if (ctx_.isMain) internal::setMainFullscreen(bool(x));
             else setSecondaryFullscreen(bool(x));
+            break;
+        case internal::WindowControl::ToggleFullscreen:
+            if (ctx_.isMain) sapp_toggle_fullscreen();
+#if defined(__APPLE__) && TARGET_OS_OSX
+            else toggleSecondaryFullscreen();
+#else
+            else setSecondaryFullscreen(!isSecondaryFullscreen());
+#endif
             break;
     }
     return result;

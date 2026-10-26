@@ -363,6 +363,12 @@ void Window::setSecondaryFullscreen(bool full) {
     internal::setMacWindowFullscreen(st->win.id, full);
 }
 
+void Window::toggleSecondaryFullscreen() {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st || !st->win.id) return;
+    internal::toggleMacWindowFullscreen(st->win.id);
+}
+
 internal::WindowFullscreenPhase Window::secondaryFullscreenPhase() const {
     auto* st = static_cast<AdapterState*>(native_);
     return st && st->win.id ? internal::macWindowFullscreenPhase(st->win.id) : internal::WindowFullscreenPhase::Windowed;
