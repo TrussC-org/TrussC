@@ -11,8 +11,9 @@
 namespace trussc::internal {
 struct X11GeometryState {
     // Last requested logical content size, independent of WM auto-maximization.
-    int requestedWidth = 0;
-    int requestedHeight = 0;
+    double requestedWidth = 0;
+    double requestedHeight = 0;
+    bool pixelSize = false; // pixel requests retain fractions until native conversion
 };
 
 inline void x11State(Display* dpy, ::Window window, bool add,
@@ -69,25 +70,32 @@ inline void x11PinMoveGravity(Display* dpy, ::Window window) {
 }
 
 inline void x11Geometry(Display* dpy, ::Window window, X11GeometryState& requested,
-                        bool move, int x, int y, int width, int height, float scale,
-                        bool fullscreenIntent = false) {
+                        bool move, int x, int y, double width, double height, float scale,
+                        bool fullscreenIntent = false, bool pixelSize = false) {
     if (!dpy || !window) {
         logWarning("Platform") << "window geometry requires X11 (unsupported on headless KMS)";
         return;
     }
-    // While fullscreen, leave the WM's saved windowed content size alone.
-    // Reapplying it to the undecorated live window can subtract the title bar
-    // from Mutter's restore size. A position request still moves/reenters as
-    // before, but uses XMoveWindow without a size override.
-    const bool resize = !move || (!fullscreenIntent && requested.requestedWidth > 0 && requested.requestedHeight > 0);
-    // Keep #219's truncating logical-to-device conversion, including fractional
-    // DPI. Bound (X11 protocol): positions are INT16 and extents are CARD16.
-    // Check the truncated result's range before converting to an unsigned int.
+    // The common adapter emits the Notice. Keep native/state effects blocked
+    // here too for main GLX/EGL and secondary callers of this shared helper.
+    if (fullscreenIntent) return;
+    const bool resize = !move || (requested.requestedWidth > 0 && requested.requestedHeight > 0);
     const float factor = std::isfinite(scale) && scale > 0 ? scale : 1.0f;
-    const double pixelWidth = std::trunc((move ? requested.requestedWidth : width) * factor);
-    const double pixelHeight = std::trunc((move ? requested.requestedHeight : height) * factor);
+    const double logicalWidth = move ? requested.requestedWidth : width;
+    const double logicalHeight = move ? requested.requestedHeight : height;
+    // Preserve #219's float multiplication/truncation for logical requests.
+    // Pixel requests retain double fractions and round only at the X11 boundary,
+    // including later moves that reapply the requested logical content size.
+    const bool roundPixels = move ? requested.pixelSize : pixelSize;
+    const double pixelWidth = roundPixels ? std::round(logicalWidth * factor) : std::trunc(float(logicalWidth) * factor);
+    const double pixelHeight = roundPixels ? std::round(logicalHeight * factor) : std::trunc(float(logicalHeight) * factor);
+    // Bound (X11 protocol): positions are INT16 and extents are CARD16.
+    // Bound (size API): logical extents must fit the int logical-size getters.
+    const bool validSize = std::isfinite(logicalWidth) && std::isfinite(logicalHeight) &&
+        logicalWidth > 0 && logicalHeight > 0 && logicalWidth <= INT_MAX && logicalHeight <= INT_MAX &&
+        std::isfinite(pixelWidth) && std::isfinite(pixelHeight);
     if ((move && (x < SHRT_MIN || x > SHRT_MAX || y < SHRT_MIN || y > SHRT_MAX)) ||
-        (resize && (pixelWidth < 1 || pixelWidth > USHRT_MAX || pixelHeight < 1 || pixelHeight > USHRT_MAX))) {
+        (resize && (!validSize || pixelWidth < 1 || pixelWidth > USHRT_MAX || pixelHeight < 1 || pixelHeight > USHRT_MAX))) {
         logWarning("Platform") << "window geometry exceeds X11 coordinate range";
         return;
     }
@@ -95,27 +103,22 @@ inline void x11Geometry(Display* dpy, ::Window window, X11GeometryState& request
     // deltas and can leave Mutter's content size one pixel off indefinitely.
     x11PinMoveGravity(dpy, window);
     if (!move) {
-        // Clear auto-maximize even before the WM publishes its state. Keep
-        // fullscreen's existing live resize attempt, without changing restore
-        // intent: an ignored fullscreen size must never leak into a later move.
-        if (!fullscreenIntent) x11State(dpy, window, false, "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ");
+        // Clear auto-maximize even before the WM publishes its state.
+        x11State(dpy, window, false, "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ");
         XResizeWindow(dpy, window, unsigned(pixelWidth), unsigned(pixelHeight));
         XFlush(dpy);
-        if (!fullscreenIntent) requested = {width, height};
+        requested = {width, height, pixelSize};
         return;
     }
     // #219: CenterGravity causes KWin/Mutter round-trip offsets. Pin the
-    // decorated frame's top-left, drop fullscreen/maximize before the move,
-    // and restore fullscreen only. Send unmaximize even before the WM has
+    // decorated frame's top-left. Send unmaximize even before the WM has
     // published _NET_WM_STATE (creation-time auto-maximize on KWin).
-    if (fullscreenIntent) x11State(dpy, window, false, "_NET_WM_STATE_FULLSCREEN");
     x11State(dpy, window, false, "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ");
     if (resize) {
         XMoveResizeWindow(dpy, window, x, y, unsigned(pixelWidth), unsigned(pixelHeight));
     } else {
         XMoveWindow(dpy, window, x, y);
     }
-    if (fullscreenIntent) x11State(dpy, window, true, "_NET_WM_STATE_FULLSCREEN");
     XFlush(dpy);
 }
 }

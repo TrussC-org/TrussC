@@ -99,8 +99,7 @@ void windowTickImpl(sapp_window swin, void* user) {
             internal::currentWindowCtx() = previous;
         }
     } restore{previous};
-    const auto size = internal::framebufferResizeArgs(fbw, fbh, ctx.dpiScale);
-    win->syncRootSize((float)size.width, (float)size.height);
+    internal::syncSecondaryAppSize(*win, fbw, fbh);
     if (!internal::runWindowTick(std::chrono::steady_clock::now(), sapp_window_frame_duration(swin)))
         sapp_tc_window_skip_present(swin);
 
@@ -126,10 +125,11 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
     // Raw event pass-through (same hook addons use on the main window)
     win->events().rawEvent.notify(*ev);
 
-    // sapp coords arrive in framebuffer pixels; TrussC windows use logical
-    // points (secondary windows have no pixelPerfect mode for now)
+    // sapp pointer coordinates arrive in framebuffer pixels. Secondary coordinates
+    // use main's unit scale: pixels in pixelPerfect mode, logical points otherwise.
+    // Delta derivation and enter/leave handling retain their existing differences.
     const float dpi = sapp_window_dpi_scale(swin);
-    const float scale = (dpi > 0.0f) ? (1.0f / dpi) : 1.0f;
+    const float scale = internal::appPointerScale(dpi);
     const bool hasShift = (ev->modifiers & SAPP_MODIFIER_SHIFT) != 0;
     const bool hasCtrl  = (ev->modifiers & SAPP_MODIFIER_CTRL) != 0;
     const bool hasAlt   = (ev->modifiers & SAPP_MODIFIER_ALT) != 0;
@@ -351,7 +351,7 @@ IVec2 Window::getSecondaryPosition() const {
     return st ? internal::windowPositionNative(sapp_window_win32_get_hwnd(st->win)) : IVec2(-1, -1);
 }
 
-void Window::setSecondarySize(int width, int height) {
+void Window::setSecondarySize(double width, double height, bool /*pixelSize*/) {
     auto* st = static_cast<AdapterState*>(native_);
     if (!st) return;
     internal::setWindowSizeWin32(sapp_window_win32_get_hwnd(st->win), width, height);
@@ -436,6 +436,10 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     d.y = -1;
     d.width = settings.width;
     d.height = settings.height;
+    if (pixelPerfectMode()) {
+        d._tc_pixel_width = settings.width > 0 ? settings.width : 0;
+        d._tc_pixel_height = settings.height > 0 ? settings.height : 0;
+    }
     d.title = settings.title.c_str();
     d.borderless = !settings.decorated;
     d.no_high_dpi = !settings.highDpi;

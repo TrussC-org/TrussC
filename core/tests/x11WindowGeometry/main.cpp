@@ -76,7 +76,6 @@ int main() {
     auto* display = reinterpret_cast<Display*>(dpy);
     using namespace trussc::internal;
     X11GeometryState main{640, 480}, secondary{321, 241};
-    const Atom full = atom(display, "_NET_WM_STATE_FULLSCREEN", False);
     const Atom vert = atom(display, "_NET_WM_STATE_MAXIMIZED_VERT", False);
     const Atom horz = atom(display, "_NET_WM_STATE_MAXIMIZED_HORZ", False);
     auto unmaximize = [&](const Request& r) {
@@ -120,28 +119,47 @@ int main() {
     requests.clear();
     x11Geometry(display, 4, unknown, true, -500, 30, 0, 0, 1);
     check("unknown requested size uses move alone (#219)", requests.size() == 2 && requests.back().kind == "move" && requests.back().x == -500);
-    // Keep the existing fullscreen move/reenter policy while leaving the WM's
-    // restore content size intact. Model Mutter's 37px title bar regression:
-    // a fullscreen-time MoveResize would save height minus the new frame top.
-    X11GeometryState restored{800, 600};
+    // Fullscreen leaves the WM's saved entry geometry and requested size
+    // untouched. Exercise both main and secondary native handles.
+    for (::Window window : {2UL, 3UL}) {
+        X11GeometryState restored{800, 600};
+        requests.clear();
+        x11Geometry(display, window, restored, true, 100, 100, 0, 0, 1, true);
+        x11Geometry(display, window, restored, false, 0, 0, 640, 480, 1, true);
+        check("fullscreen geometry sends no native request for either target", requests.empty());
+        check("fullscreen geometry preserves pre-entry requested state",
+            restored.requestedWidth == 800 && restored.requestedHeight == 600 && !restored.pixelSize);
+        // The WM restores entry geometry on fullscreen removal: no intervening
+        // move/resize/state request can replace its saved geometry.
+        x11State(display, window, false, "_NET_WM_STATE_FULLSCREEN");
+        check("exit only removes fullscreen, leaving WM entry geometry intact",
+            requests.size() == 1 && requests[0].kind == "state" && requests[0].event.xclient.data.l[0] == 0);
+        requests.clear();
+        x11Geometry(display, window, restored, true, 200, 150, 0, 0, 1);
+        check("ignored geometry never leaks into a later unrelated move",
+            requests.size() == 2 && requests.back().kind == "moveResize" &&
+            requests.back().x == 200 && requests.back().y == 150 &&
+            requests.back().width == 800 && requests.back().height == 600);
+    }
+    for (float dpi : {1.25f, 1.5f, 1.75f, 2.0f}) {
+        for (::Window window : {2UL, 3UL}) {
+            auto& state = window == 2 ? main : secondary;
+            requests.clear();
+            x11Geometry(display, window, state, false, 0, 0, 1001.0 / dpi, 667.0 / dpi, dpi, false, true);
+            check("odd pixel resize keeps fractional logical size for main and secondary",
+                requests.back().kind == "resize" && requests.back().window == window &&
+                requests.back().width == 1001 && requests.back().height == 667);
+            requests.clear();
+            x11Geometry(display, window, state, true, 30, 40, 0, 0, dpi);
+            check("subsequent move retains exact odd pixel size",
+                requests.back().kind == "moveResize" && requests.back().width == 1001 && requests.back().height == 667);
+        }
+    }
     requests.clear();
-    x11Geometry(display, 3, restored, true, 100, 100, 0, 0, 1, true);
-    check("fullscreen move leaves/reenters fullscreen around move only",
-        requests.size() == 4 && requests[0].event.xclient.data.l[0] == 0 && requests[0].event.xclient.data.l[1] == long(full) &&
-        unmaximize(requests[1]) && requests[2].kind == "move" && requests[2].x == 100 && requests[2].y == 100 &&
-        requests[3].event.xclient.data.l[0] == 1 && requests[3].event.xclient.data.l[1] == long(full));
-    int restoredContentHeight = 600;
-    for (const auto& r : requests) if (r.kind == "moveResize") restoredContentHeight = int(r.height) - 37;
-    check("fullscreen move never rewrites restore size as content minus title bar", restoredContentHeight == 600);
-    requests.clear();
-    x11Geometry(display, 3, restored, false, 0, 0, 640, 480, 1, true);
-    check("fullscreen size keeps existing live attempt without unmaximize",
-        requests.size() == 1 && requests.back().kind == "resize" && requests.back().width == 640 && requests.back().height == 480);
-    check("fullscreen size does not replace windowed requested size", restored.requestedWidth == 800 && restored.requestedHeight == 600);
-    requests.clear();
-    // After leaving fullscreen, an unrelated move must retain 800x600.
-    x11Geometry(display, 3, restored, true, 200, 150, 0, 0, 1);
-    check("fullscreen size never leaks into a later unrelated move", requests.back().kind == "moveResize" && requests.back().width == 800 && requests.back().height == 600);
+    const auto saved = main;
+    for (double value : {double(NAN), double(INFINITY), -1.0, 0.0, double(INT_MAX) + 1, 65536.0})
+        x11Geometry(display, 2, main, false, 0, 0, value, 10, 1, false, true);
+    check("invalid fractional sizes preserve requests and state", requests.empty() && main.requestedWidth == saved.requestedWidth);
     std::free(dpy);
     return failures ? 1 : 0;
 }

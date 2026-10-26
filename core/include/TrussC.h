@@ -23,6 +23,7 @@
 #include "sokol/sokol_log.h"
 #define SOKOL_NO_ENTRY  // We define our own main()
 #include "sokol/sokol_app_tc.h"
+#include "tc/app/internal/tcWindowFullscreen.h"
 #include "sokol/sokol_gfx.h"
 #include "sokol/sokol_glue.h"
 #include "sokol/util/sokol_gl_tc.h"
@@ -317,8 +318,11 @@ namespace internal {
     // is complete; forward-declared here because those globals appear earlier in
     // this header. Return true if an open window consumed the call.
     bool routeSetWindowTitleToWindow(const std::string& title);
-    bool routeSetWindowSizeToWindow(int width, int height);
-    bool routeSetWindowPixelSizeToWindow(int width, int height);
+    bool routeSetWindowSizeToWindow(int width, int height, WindowGeometryCall call = WindowGeometryCall::GlobalLogicalSize);
+    bool routeSetWindowPixelSizeToWindow(int width, int height, WindowGeometryCall call = WindowGeometryCall::GlobalSize);
+    WindowFullscreenPhase mainWindowFullscreenPhase();
+    void setMainFullscreen(bool full);
+    bool ignoreFullscreenGeometry(WindowFullscreenPhase phase, WindowGeometryCall call, const std::string* title = nullptr);
     bool routeSetFullscreenToWindow(bool full);
     bool routeToggleFullscreenToWindow();
     bool routeIsFullscreenFromWindow(bool& out);
@@ -1634,44 +1638,55 @@ inline std::string getClipboardString() {
 // Change window size (specify in size corresponding to coordinate system)
 // pixelPerfect=true: specify in framebuffer size
 // pixelPerfect=false: specify in logical size
+// Desktop geometry requests are ignored with one Notice until isFullscreen()
+// returns false, including macOS fullscreen transitions.
 inline void setWindowSize(int width, int height) {
     if constexpr (internal::windowSizeIsScreenControlled()) {
         internal::setMainWindowSizeLogical(width, height);
         return;
     }
-    if (width <= 0 || height <= 0) return;
     if (internal::pixelPerfectMode()) {
         if (internal::routeSetWindowPixelSizeToWindow(width, height)) return;
+        if (internal::ignoreFullscreenGeometry(internal::mainWindowFullscreenPhase(), internal::WindowGeometryCall::GlobalSize)) return;
+        if (width <= 0 || height <= 0) return;
         const float scale = sapp_dpi_scale();
         const float factor = std::isfinite(scale) && scale > 0 ? scale : 1.0f;
-        // Same float division as Window::control's PixelSize path.
+#if defined(__linux__) && !defined(__ANDROID__)
+        internal::setMainWindowSizeFractionalX11(double(width) / factor, double(height) / factor);
+        return;
+#endif
+        // Same float division as the single-window PixelSize path.
         const float logicalWidth = width / factor, logicalHeight = height / factor;
         // Bound: float(INT_MAX) rounds up to 2^31, outside int range.
         if (!std::isfinite(logicalWidth) || !std::isfinite(logicalHeight) ||
             logicalWidth >= 0x1p31f || logicalHeight >= 0x1p31f) return;
-        setWindowSizeLogical(int(logicalWidth), int(logicalHeight));
-    } else setWindowSizeLogical(width, height);
+        if (logicalWidth < 1 || logicalHeight < 1) return;
+        internal::setMainWindowSizeLogical(int(logicalWidth), int(logicalHeight));
+    } else {
+        if (internal::routeSetWindowSizeToWindow(width, height, internal::WindowGeometryCall::GlobalSize)) return;
+        if (internal::ignoreFullscreenGeometry(internal::mainWindowFullscreenPhase(), internal::WindowGeometryCall::GlobalSize)) return;
+        if (width > 0 && height > 0) internal::setMainWindowSizeLogical(width, height);
+    }
 }
 
 // Fullscreen. Context-aware: sapp_toggle_fullscreen()/sapp_is_fullscreen() only
 // act on the main window, so from a secondary window's tick/event these route to
 // THAT window's native per-window fullscreen (macOS NSWindow toggleFullScreen:,
 // Win32 borderless-fullscreen style swap, X11 EWMH _NET_WM_STATE_FULLSCREEN —
-// see Window::setFullscreen). On the main context they behave exactly as before.
+// see Window::setFullscreen). isFullscreen() remains true while fullscreen
+// blocks geometry controls, including macOS entering/exiting animations.
 
 // Enter / leave fullscreen.
 inline void setFullscreen(bool full) {
     if (internal::routeSetFullscreenToWindow(full)) return;
-    if (full != sapp_is_fullscreen()) {
-        sapp_toggle_fullscreen();
-    }
+    internal::setMainFullscreen(full);
 }
 
 // Get fullscreen state (of the current window's context).
 inline bool isFullscreen() {
     bool out = false;
     if (internal::routeIsFullscreenFromWindow(out)) return out;
-    return sapp_is_fullscreen();
+    return internal::mainWindowFullscreenPhase() != internal::WindowFullscreenPhase::Windowed;
 }
 
 // Toggle fullscreen.
@@ -2487,7 +2502,7 @@ namespace internal {
             int w = sapp_width();
             int h = sapp_height();
             float dpiScale = sapp_dpi_scale();
-            appWindowResizedFunc(framebufferToLogical(w, pixelPerfectMode() ? 1.0f : dpiScale), framebufferToLogical(h, pixelPerfectMode() ? 1.0f : dpiScale));
+            appWindowResizedFunc(framebufferToLogical(w, appSizeDpi(dpiScale)), framebufferToLogical(h, appSizeDpi(dpiScale)));
         }
     }
 
@@ -2742,7 +2757,7 @@ namespace internal {
         // ev->mouse_x/y arrive in framebuffer coordinates
         // pixelPerfectMode() == true: use as-is (coords = framebuffer size)
         // pixelPerfectMode() == false: divide by DPI scale to get logical coords
-        float scale = pixelPerfectMode() ? 1.0f : (1.0f / sapp_dpi_scale());
+        const float scale = appPointerScale(sapp_dpi_scale());
         bool hasModShift = (ev->modifiers & SAPP_MODIFIER_SHIFT) != 0;
         bool hasModCtrl = (ev->modifiers & SAPP_MODIFIER_CTRL) != 0;
         bool hasModAlt = (ev->modifiers & SAPP_MODIFIER_ALT) != 0;
@@ -2971,7 +2986,7 @@ namespace internal {
                 int fbW = sapp_width();
                 int fbH = sapp_height();
                 
-                auto args = framebufferResizeArgs(fbW, fbH, pixelPerfectMode() ? 1.0f : getDpiScale());
+                auto args = framebufferResizeArgs(fbW, fbH, appSizeDpi(getDpiScale()));
                 events().windowResized.notify(args);
                 break;
             }
@@ -3035,44 +3050,25 @@ namespace internal {
 // Application execution
 // ---------------------------------------------------------------------------
 
-// Build sapp_desc without starting the event loop.
-// Used by runApp() on desktop and by sokol_main() on Android.
-template<typename AppClass>
-sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) {
-    internal::appExitCode() = 0;
-    if (auto token = internal::appRunToken()) token->store(false);
-    internal::cancelResourceBackends();
-    internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
-
-    // Set pixel perfect mode
-    internal::pixelPerfectMode() = settings.pixelPerfect;
-
-    // Remember the requested decoration; applied after the window is created.
-    internal::windowDecorated = settings.decorated;
-
-    // Per-frame uniform reservation for sg_setup (consumed in internal::setup()).
-    internal::gpuUniformBufferReserve = settings.uniformBufferReserve;
-
-    internal::createMainWindow(settings);
-    internal::prepareMainAppBindings();
-    internal::appSetupFunc = []() {
-        if (!internal::attachMainApp(std::make_shared<AppClass>())) {
-            internal::appExitCode() = 1;
-            sapp_quit();
-        }
-    };
-    internal::appUpdateFunc = []() {
-        events().update.notify();
-    };
-    internal::appDrawFunc = []() { events().draw.notify(); };
-    internal::appCleanupFunc = []() { internal::destroyMainWindow(); };
-    internal::appWindowResizedFunc = [](int w, int h) {
-        internal::resizeMainApp(w, h);
-    };
-
-    // Build sapp_desc
+namespace internal {
+// Shared by normal startup and the hot-reload host; callbacks may be overridden.
+inline sapp_desc buildWindowDescriptor(const WindowSettings& settings) {
     sapp_desc desc = {};
-    if (settings.pixelPerfect) {
+    if constexpr (Platform::isDesktop()) {
+        // Native creation knows the target window's DPI; preserve pixels until then.
+        desc.width = settings.width;
+        desc.height = settings.height;
+        // Preserve the launcher's old per-dimension native validation/default inputs.
+        if (settings.pixelPerfect && (settings.width <= 0 || settings.height <= 0)) {
+            const float displayScale = getDisplayScaleFactor();
+            if (settings.width <= 0) desc.width = static_cast<int>(settings.width / displayScale);
+            if (settings.height <= 0) desc.height = static_cast<int>(settings.height / displayScale);
+        }
+        if (settings.pixelPerfect) {
+            desc._tc_pixel_width = settings.width > 0 ? settings.width : 0;
+            desc._tc_pixel_height = settings.height > 0 ? settings.height : 0;
+        }
+    } else if (settings.pixelPerfect) {
         // For pixel perfect, treat specified size as framebuffer size
         // and convert to logical window size
         float displayScale = getDisplayScaleFactor();
@@ -3118,6 +3114,46 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     desc.win32.console_utf8 = true;
 
     return desc;
+}
+
+} // namespace internal
+
+// Build sapp_desc without starting the event loop.
+// Used by runApp() on desktop and by sokol_main() on Android.
+template<typename AppClass>
+sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) {
+    internal::appExitCode() = 0;
+    if (auto token = internal::appRunToken()) token->store(false);
+    internal::cancelResourceBackends();
+    internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
+
+    // Set pixel perfect mode
+    internal::pixelPerfectMode() = settings.pixelPerfect;
+
+    // Remember the requested decoration; applied after the window is created.
+    internal::windowDecorated = settings.decorated;
+
+    // Per-frame uniform reservation for sg_setup (consumed in internal::setup()).
+    internal::gpuUniformBufferReserve = settings.uniformBufferReserve;
+
+    internal::createMainWindow(settings);
+    internal::prepareMainAppBindings();
+    internal::appSetupFunc = []() {
+        if (!internal::attachMainApp(std::make_shared<AppClass>())) {
+            internal::appExitCode() = 1;
+            sapp_quit();
+        }
+    };
+    internal::appUpdateFunc = []() {
+        events().update.notify();
+    };
+    internal::appDrawFunc = []() { events().draw.notify(); };
+    internal::appCleanupFunc = []() { internal::destroyMainWindow(); };
+    internal::appWindowResizedFunc = [](int w, int h) {
+        internal::resizeMainApp(w, h);
+    };
+
+    return internal::buildWindowDescriptor(settings);
 }
 
 #ifdef _WIN32

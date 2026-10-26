@@ -59,7 +59,7 @@ namespace trussc {
 void Window::seedMainAppSize() {
     auto app = app_;
     if (!app || app->setupCalled_ || !sapp_isvalid()) return;
-    const float dpi = internal::pixelPerfectMode() ? 1.0f : sapp_dpi_scale();
+    const float dpi = internal::appSizeDpi(sapp_dpi_scale());
     const int width = internal::framebufferToLogical(sapp_width(), dpi), height = internal::framebufferToLogical(sapp_height(), dpi);
     if (app->getWidth() == width && app->getHeight() == height) return;
     internal::EntryStackGuard guard(internal::AppEntry::Event, "windowResized()");
@@ -1113,6 +1113,10 @@ void destroyMainWindow() noexcept {
     owner.reset();
 }
 
+WindowFullscreenHook& windowFullscreenHookForTests() {
+    static WindowFullscreenHook hook = nullptr;
+    return hook;
+}
 WindowControlHook& windowControlHookForTests() {
     static WindowControlHook hook = nullptr;
     return hook;
@@ -1401,6 +1405,21 @@ WindowCallbackTimeScope::~WindowCallbackTimeScope() {
 
 int framebufferToLogical(int pixels, float dpi) {
     return static_cast<int>(pixels / (dpi > 0.0f ? dpi : 1.0f));
+}
+
+float appSizeDpi(float dpi) { return pixelPerfectMode() ? 1.0f : dpi; }
+
+float appPointerScale(float dpi) {
+    // Native positions/deltas are framebuffer pixels. Invalid native DPI falls
+    // back to unit scale rather than introducing non-finite App coordinates.
+    if (pixelPerfectMode() || !std::isfinite(dpi) || dpi <= 0.0f) return 1.0f;
+    const float scale = 1.0f / dpi;
+    return std::isfinite(scale) ? scale : 1.0f;
+}
+
+void syncSecondaryAppSize(Window& window, int width, int height) {
+    const auto size = framebufferResizeArgs(width, height, appSizeDpi(window.context().dpiScale));
+    window.syncRootSize(float(size.width), float(size.height));
 }
 
 ResizeEventArgs framebufferResizeArgs(int width, int height, float dpi) {
@@ -3670,8 +3689,13 @@ void ScreenRecorder::State::onAfterFrame() {
 
 namespace trussc {
 void setWindowPosition(int x, int y) {
-    if (auto* w = internal::currentWindow()) w->setPosition(x, y);
-    else internal::setMainWindowPosition(x, y);
+    if (auto* w = internal::currentWindow()) internal::WindowRequestAccess::setPosition(*w, x, y, internal::WindowGeometryCall::GlobalPosition);
+    else {
+        if constexpr (!internal::windowSizeIsScreenControlled()) {
+            if (internal::ignoreFullscreenGeometry(internal::mainWindowFullscreenPhase(), internal::WindowGeometryCall::GlobalPosition)) return;
+        }
+        internal::setMainWindowPosition(x, y);
+    }
 }
 IVec2 getWindowPosition() {
     if (auto* w = internal::currentWindow()) return w->getPosition();
@@ -3686,6 +3710,33 @@ void setWindowSizeLogical(int width, int height) {
         return;
     }
     if (internal::routeSetWindowSizeToWindow(width, height)) return;
+    if (internal::ignoreFullscreenGeometry(internal::mainWindowFullscreenPhase(), internal::WindowGeometryCall::GlobalLogicalSize)) return;
     if (width > 0 && height > 0) internal::setMainWindowSizeLogical(width, height);
+}
+}
+
+namespace trussc::internal {
+WindowFullscreenPhase mainWindowFullscreenPhase() {
+#if defined(__APPLE__) && TARGET_OS_OSX
+    return macWindowFullscreenPhase();
+#else
+    return sapp_is_fullscreen() ? WindowFullscreenPhase::Fullscreen : WindowFullscreenPhase::Windowed;
+#endif
+}
+void setMainFullscreen(bool full) {
+#if defined(__APPLE__) && TARGET_OS_OSX
+    setMacWindowFullscreen(0, full);
+#else
+    if (full != sapp_is_fullscreen()) sapp_toggle_fullscreen();
+#endif
+}
+bool ignoreFullscreenGeometry(WindowFullscreenPhase phase, WindowGeometryCall call, const std::string* title) {
+    const char* reason = windowGeometryIgnoredReason(phase);
+    if (!reason) return false;
+    auto notice = logNotice("Window");
+    notice << windowGeometryCallName(call);
+    if (title) notice << " on \"" << *title << "\"";
+    notice << reason;
+    return true;
 }
 }

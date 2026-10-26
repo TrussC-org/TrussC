@@ -2190,6 +2190,8 @@ typedef struct sapp_desc {
 
     int width;                          // the preferred width of the window / canvas
     int height;                         // the preferred height of the window / canvas
+    // TrussC internal: positive framebuffer requests, converted at native DPI.
+    int _tc_pixel_width, _tc_pixel_height;
     int sample_count;                   // MSAA sample count
     int swap_interval;                  // the preferred swap interval (ignored on some platforms)
     bool high_dpi;                      // whether the rendering canvas is full-resolution on HighDPI displays
@@ -2421,10 +2423,12 @@ extern "C" {
 /* an opaque window handle (0 is the invalid handle; the sokol_app.h main
    window is NOT addressable through this API while both coexist) */
 typedef struct sapp_window { uint32_t id; } sapp_window;
+#include "util/sokol_window_size.h"
 
 typedef struct sapp_window_desc {
     int x, y;                   /* top-left position in screen points (-1 = default) */
     int width, height;          /* content size in logical points (0 = 640x480) */
+    int _tc_pixel_width, _tc_pixel_height; /* TrussC internal framebuffer overrides */
     const char* title;
     bool borderless;            /* no title bar / decorations */
     bool no_high_dpi;           /* true: framebuffer = logical size (dpi_scale 1) */
@@ -2580,6 +2584,7 @@ uint64_t sapp_html5_get_dropped_file_size64(int index) {
 #if !defined(__OBJC__)
 #error "sokol_app_tc.h macOS implementation must be compiled as Objective-C++ (.mm)"
 #endif
+#include "tc/app/internal/tcWindowFullscreen.h"
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
@@ -2595,6 +2600,7 @@ uint64_t sapp_html5_get_dropped_file_size64(int index) {
 
 typedef struct _sapp_tc_window_t {
     uint32_t win_id;
+    trussc::internal::WindowFullscreenState fullscreen_state;
     sapp_window_desc desc;
     bool is_main;                       /* window #0: created by sapp_run, drives the app callbacks */
     NSWindow* window;
@@ -2643,7 +2649,8 @@ static struct {
         bool cleanup_called;
         bool quit_requested;
         bool quit_ordered;
-        bool fullscreen;
+        bool fullscreen;              /* raw sokol state; TrussC uses fullscreen_state */
+        trussc::internal::WindowFullscreenState fullscreen_state;
         bool event_consumed;
         bool skip_present;              /* stored for API parity; ignored on Metal (as upstream) */
         uint64_t frame_count;
@@ -2701,6 +2708,21 @@ static void _sapp_tc_timing_update(_sapp_tc_timing_t* t) {
         }
     }
     t->last = now;
+}
+
+static trussc::internal::WindowFullscreenState& _sapp_tc_fullscreen_state(_sapp_tc_window_t* w) {
+    return w->is_main ? _sapp_tc.app.fullscreen_state : w->fullscreen_state;
+}
+static void _sapp_tc_request_fullscreen(_sapp_tc_window_t* w, bool full) {
+    if (!w || !w->window) return;
+    if (!_sapp_tc_fullscreen_state(w).request(full)) return;
+    if (w->is_main) _sapp_tc.app.fullscreen = full;
+    [w->window toggleFullScreen:nil];
+}
+static void _sapp_tc_reconcile_fullscreen(_sapp_tc_window_t* w) {
+    if (!w || !w->window || !_sapp_tc_fullscreen_state(w).reconcile()) return;
+    if (w->is_main) _sapp_tc.app.fullscreen = _sapp_tc_fullscreen_state(w).desired;
+    [w->window toggleFullScreen:nil];
 }
 
 /* keycode table lifted verbatim from sokol_app.h's _sapp_macos_init_keytable()
@@ -3342,15 +3364,41 @@ static BOOL _sapp_tc_request_exit(void) {
     e.type = SAPP_EVENTTYPE_RESTORED;
     _sapp_tc_send(w, &e);
 }
+- (void)windowWillEnterFullScreen:(NSNotification*)n {
+    (void)n;
+    if (self.w) _sapp_tc_fullscreen_state(self.w).will(true);
+}
+- (void)windowWillExitFullScreen:(NSNotification*)n {
+    (void)n;
+    if (self.w) _sapp_tc_fullscreen_state(self.w).will(false);
+}
 - (void)windowDidEnterFullScreen:(NSNotification*)n {
     (void)n;
     _sapp_tc_window_t* w = self.w;
-    if (w && w->is_main) _sapp_tc.app.fullscreen = true;
+    if (!w) return;
+    _sapp_tc_fullscreen_state(w).terminal(true);
+    if (w->is_main) _sapp_tc.app.fullscreen = true;
 }
 - (void)windowDidExitFullScreen:(NSNotification*)n {
     (void)n;
     _sapp_tc_window_t* w = self.w;
-    if (w && w->is_main) _sapp_tc.app.fullscreen = false;
+    if (!w) return;
+    _sapp_tc_fullscreen_state(w).terminal(false);
+    if (w->is_main) _sapp_tc.app.fullscreen = false;
+}
+- (void)windowDidFailToEnterFullScreen:(NSWindow*)window {
+    _sapp_tc_window_t* w = self.w;
+    if (!w) return;
+    const bool observed = (window.styleMask & NSWindowStyleMaskFullScreen) != 0;
+    _sapp_tc_fullscreen_state(w).terminal(observed);
+    if (w->is_main) _sapp_tc.app.fullscreen = observed;
+}
+- (void)windowDidFailToExitFullScreen:(NSWindow*)window {
+    _sapp_tc_window_t* w = self.w;
+    if (!w) return;
+    const bool observed = (window.styleMask & NSWindowStyleMaskFullScreen) != 0;
+    _sapp_tc_fullscreen_state(w).terminal(observed);
+    if (w->is_main) _sapp_tc.app.fullscreen = observed;
 }
 - (void)windowDidBecomeKey:(NSNotification*)n {
     _sapp_tc_window_t* w = self.w;
@@ -3443,6 +3491,13 @@ static void _sapp_tc_update_main_dimensions(bool allow_event) {
 static void _sapp_tc_main_tick(CADisplayLink* link) {
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     if (!w || w->in_tick) return;
+    // Reconcile once after terminal notifications, outside native delegates.
+    // Re-fetch slots: toggling AppKit can synchronously deliver native events.
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i) {
+        _sapp_tc_reconcile_fullscreen(_sapp_tc.windows[i]);
+    }
+    w = _sapp_tc.app.main;
+    if (!w) return;
     _sapp_tc_timing_update(&_sapp_tc.app.timing);      /* feeds the fallback estimate */
     if (link) {
         if (w->last_tick_time > 0.0) {
@@ -3520,10 +3575,10 @@ static bool _sapp_tc_create_main_window(void) {
     _sapp_tc_window_t* w = new _sapp_tc_window_t();
     w->win_id = ++_sapp_tc.next_id;
     w->is_main = true;
-    auto fail = [w, slot](const char* operation) {
+    auto fail = [w, slot](const char* operation, const char* reason = "returned nil (no NSError available)") {
         // These creation APIs have no NSError output parameter.
         _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
-                     "error: ", "%s returned nil (no NSError available)", operation);
+                     "error: ", "%s %s", operation, reason);
         w->view.w = 0;
         w->delegate.w = 0;
         w->window.delegate = nil;
@@ -3548,6 +3603,8 @@ static bool _sapp_tc_create_main_window(void) {
     /* per-window desc: the app callbacks are reached via the trampoline */
     w->desc.width = width;
     w->desc.height = height;
+    w->desc._tc_pixel_width = d->_tc_pixel_width;
+    w->desc._tc_pixel_height = d->_tc_pixel_height;
     w->desc.sample_count = d->sample_count;
     w->desc.no_high_dpi = !d->high_dpi;
     w->desc.event_cb = _sapp_tc_main_event_tramp;
@@ -3556,12 +3613,22 @@ static bool _sapp_tc_create_main_window(void) {
     if (dev == nil) return fail("MTLCreateSystemDefaultDevice");
     _sapp_tc.app.device = dev;
 
-    const NSRect rect = NSMakeRect(0, 0, width, height);
+    NSRect rect = NSMakeRect(0, 0, width, height);
     const NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                                     NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
     w->window = [[NSWindow alloc] initWithContentRect:rect styleMask:style
                                   backing:NSBackingStoreBuffered defer:NO];
     if (w->window == nil) return fail("NSWindow initWithContentRect");
+    if (d->_tc_pixel_width > 0 || d->_tc_pixel_height > 0) {
+        const float scale = d->high_dpi ? (float)w->window.backingScaleFactor : 1.0f;
+        if (!_sapp_tc_window_pixels_representable(d->_tc_pixel_width, d->_tc_pixel_height, scale)) {
+            return fail("Pixel size", "exceeds logical-size getters");
+        }
+        [w->window setContentSize:NSMakeSize(
+            _sapp_tc_window_points(width, d->_tc_pixel_width, scale),
+            _sapp_tc_window_points(height, d->_tc_pixel_height, scale))];
+        rect.size = [w->window contentRectForFrameRect:w->window.frame].size;
+    }
     w->window.title = [NSString stringWithUTF8String:_sapp_tc.app.window_title];
     w->window.releasedWhenClosed = NO;  /* the object must outlive performClose */
     w->window.acceptsMouseMovedEvents = YES;
@@ -3595,8 +3662,7 @@ static bool _sapp_tc_create_main_window(void) {
     _sapp_tc.app.main = w;
 
     if (d->fullscreen) {
-        _sapp_tc.app.fullscreen = true;
-        [w->window toggleFullScreen:nil];
+        _sapp_tc_request_fullscreen(w, true);
     }
     [w->window makeKeyAndOrderFront:nil];
     _sapp_tc_update_main_dimensions(false);     /* silent startup sizing */
@@ -3746,6 +3812,17 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     if (w->desc.borderless) style = NSWindowStyleMaskBorderless;
     w->window = [[NSWindow alloc] initWithContentRect:rect styleMask:style
                                   backing:NSBackingStoreBuffered defer:NO];
+    if (w->desc._tc_pixel_width > 0 || w->desc._tc_pixel_height > 0) {
+        const float scale = w->desc.no_high_dpi ? 1.0f : (float)w->window.backingScaleFactor;
+        if (!_sapp_tc_window_pixels_representable(w->desc._tc_pixel_width, w->desc._tc_pixel_height, scale)) {
+            delete w;
+            return invalid;
+        }
+        [w->window setContentSize:NSMakeSize(
+            _sapp_tc_window_points(w->desc.width, w->desc._tc_pixel_width, scale),
+            _sapp_tc_window_points(w->desc.height, w->desc._tc_pixel_height, scale))];
+        rect.size = [w->window contentRectForFrameRect:w->window.frame].size;
+    }
     if (w->desc.title) w->window.title = [NSString stringWithUTF8String:w->desc.title];
     w->window.releasedWhenClosed = NO;
     w->window.acceptsMouseMovedEvents = YES;
@@ -4139,10 +4216,7 @@ bool sapp_is_fullscreen(void) {
 
 void sapp_toggle_fullscreen(void) {
     _sapp_tc_window_t* w = _sapp_tc.app.main;
-    if (!w || !w->window) return;
-    /* optimistic flip; the delegate notifications are the authority */
-    _sapp_tc.app.fullscreen = !_sapp_tc.app.fullscreen;
-    [w->window toggleFullScreen:nil];
+    if (w) _sapp_tc_request_fullscreen(w, !_sapp_tc_fullscreen_state(w).desired);
 }
 
 int sapp_get_num_dropped_files(void) {
@@ -4231,6 +4305,20 @@ sapp_swapchain sapp_get_swapchain(void) {
 }
 
 } /* extern "C" */
+
+namespace trussc::internal {
+WindowFullscreenPhase macWindowFullscreenPhase(uint32_t id) noexcept {
+    _sapp_tc_window_t* w = id ? _sapp_tc_lookup({id}) : _sapp_tc.app.main;
+    return w ? _sapp_tc_fullscreen_state(w).phase : WindowFullscreenPhase::Windowed;
+}
+void setMacWindowFullscreen(uint32_t id, bool full) noexcept {
+    _sapp_tc_request_fullscreen(id ? _sapp_tc_lookup({id}) : _sapp_tc.app.main, full);
+}
+void toggleMacWindowFullscreen(uint32_t id) noexcept {
+    _sapp_tc_window_t* w = id ? _sapp_tc_lookup({id}) : _sapp_tc.app.main;
+    if (w) _sapp_tc_request_fullscreen(w, !_sapp_tc_fullscreen_state(w).desired);
+}
+}
 
 #elif defined(__APPLE__) && TARGET_OS_IPHONE
 /*== iOS (Metal) ============================================================
@@ -7662,9 +7750,9 @@ static bool _sapp_tc_win32_ensure_wndclass(void) {
     return true;
 }
 
-/* create the HWND at the desc's logical size: first against 96 DPI, then --
-   per-monitor-v2 -- resize the CLIENT area for the real DPI of the monitor
-   the window actually landed on (the standard create-then-resize dance) */
+/* Create against 96 DPI, then apply the actual target monitor's DPI with
+   one client resize. Pixel overrides use render DPI for pixels -> points,
+   just like setSize (render DPI can be 1 with high_dpi disabled). */
 static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wchar_t* title,
         DWORD style, DWORD ex_style, int x, int y, bool use_default_size) {
     if (!_sapp_tc_win32_ensure_wndclass()) return false;
@@ -7691,9 +7779,18 @@ static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wcha
     w->hmonitor = MonitorFromWindow(w->hwnd, MONITOR_DEFAULTTONEAREST);
     _sapp_tc_win32_update_refresh(w);
     _sapp_tc_win32_update_scale(w);
+    if (!_sapp_tc_window_pixels_representable(w->desc._tc_pixel_width, w->desc._tc_pixel_height, w->dpi_scale)) {
+        DestroyWindow(w->hwnd);
+        w->hwnd = NULL;
+        return false;
+    }
     if (!use_default_size && (w->window_scale != 1.0f)) {
-        const LONG pw = (LONG)((float)w->desc.width * w->window_scale + 0.5f);
-        const LONG ph = (LONG)((float)w->desc.height * w->window_scale + 0.5f);
+        const double width = _sapp_tc_window_points(w->desc.width, w->desc._tc_pixel_width, w->dpi_scale);
+        const double height = _sapp_tc_window_points(w->desc.height, w->desc._tc_pixel_height, w->dpi_scale);
+        const LONG pw = w->desc._tc_pixel_width > 0 ? (LONG)(width * w->window_scale + 0.5) :
+            (LONG)((float)w->desc.width * w->window_scale + 0.5f);
+        const LONG ph = w->desc._tc_pixel_height > 0 ? (LONG)(height * w->window_scale + 0.5) :
+            (LONG)((float)w->desc.height * w->window_scale + 0.5f);
         RECT rect = { 0, 0, pw, ph };
         if (_sapp_tc.GetDpiForWindow && _sapp_tc.AdjustWindowRectExForDpi) {
             _sapp_tc.AdjustWindowRectExForDpi(&rect, style, FALSE, ex_style,
@@ -7746,6 +7843,8 @@ static bool _sapp_tc_win32_create_main_window(void) {
     /* per-window desc: the app callbacks are reached via the trampoline */
     w->desc.width = d->width;
     w->desc.height = d->height;
+    w->desc._tc_pixel_width = d->_tc_pixel_width;
+    w->desc._tc_pixel_height = d->_tc_pixel_height;
     w->desc.sample_count = d->sample_count;
     w->desc.no_high_dpi = !d->high_dpi;
     w->desc.event_cb = _sapp_tc_main_event_tramp;
@@ -11047,6 +11146,9 @@ static void _sapp_tc_x11_set_swapinterval(_sapp_tc_window_t* w, int interval) {
 /*-- window creation / destruction ---------------------------------------------*/
 static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* title,
         int width_pt, int height_pt, bool borderless) {
+    if (!_sapp_tc_window_pixels_representable(w->desc._tc_pixel_width, w->desc._tc_pixel_height, w->dpi_scale)) {
+        return false;
+    }
 #if defined(SOKOL_GLES3)
     EGLint visual_id = 0;
     if (!eglGetConfigAttrib(_sapp_tc.egl_display, _sapp_tc.fbconfig, EGL_NATIVE_VISUAL_ID, &visual_id)) return false;
@@ -11074,8 +11176,10 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* 
                     EnterWindowMask | LeaveWindowMask | PropertyChangeMask;
     /* NOTE: sizing uses the same scale that dimension reporting divides by */
     const float scale = (w->dpi_scale > 0.0f) ? w->dpi_scale : 1.0f;
-    int px_w = (int)((float)width_pt * scale + 0.5f);
-    int px_h = (int)((float)height_pt * scale + 0.5f);
+    const double width = _sapp_tc_window_points(width_pt, w->desc._tc_pixel_width, scale);
+    const double height = _sapp_tc_window_points(height_pt, w->desc._tc_pixel_height, scale);
+    int px_w = w->desc._tc_pixel_width > 0 ? (int)(width * scale + 0.5) : (int)((float)width_pt * scale + 0.5f);
+    int px_h = w->desc._tc_pixel_height > 0 ? (int)(height * scale + 0.5) : (int)((float)height_pt * scale + 0.5f);
     if (width_pt <= 0) {
         px_w = (DisplayWidth(_sapp_tc.display, _sapp_tc.screen) * 4) / 5;
     }
@@ -11656,6 +11760,8 @@ static bool _sapp_tc_x11_create_main_window(void) {
     /* per-window desc: the app callbacks are reached via the trampoline */
     w->desc.width = d->width;
     w->desc.height = d->height;
+    w->desc._tc_pixel_width = d->_tc_pixel_width;
+    w->desc._tc_pixel_height = d->_tc_pixel_height;
     w->desc.sample_count = d->sample_count;
     w->desc.no_high_dpi = !d->high_dpi;
     w->desc.event_cb = _sapp_tc_main_event_tramp;

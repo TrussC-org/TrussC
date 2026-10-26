@@ -59,6 +59,9 @@ def main():
 #include <limits>
 #include <memory>
 #include <string>
+#include "tc/app/internal/tcWindowFullscreen.h"
+using trussc::internal::WindowGeometryCall;
+using trussc::internal::WindowFullscreenPhase;
 #define SOKOL_API_IMPL
 #define SOKOL_ASSERT assert
 #define _SAPP_EMSCRIPTEN
@@ -84,8 +87,13 @@ bool sapp_is_fullscreen() { return false; }
 void sapp_toggle_fullscreen() {}
 Log logWarning(const char*) { return {}; }
 namespace internal {
+using trussc::internal::WindowGeometryCall;
+using trussc::internal::WindowFullscreenPhase;
+WindowFullscreenPhase mainWindowFullscreenPhase() { return WindowFullscreenPhase::Fullscreen; }
+bool ignoreFullscreenGeometry(WindowFullscreenPhase, WindowGeometryCall) { assert(false); return true; }
+void setMainFullscreen(bool) {}
 void setMainWindowSizeLogical(int, int);
-enum class WindowControl { Title, PixelSize, Size, Position, PositionQuery, Fullscreen };
+enum class WindowControl { Title, PixelSize, Size, Position, PositionQuery, Fullscreen, ToggleFullscreen };
 bool& pixelPerfectMode() { return pixelPerfect; }
 void setMainWindowPosition(int, int) {}
 IVec2 mainWindowPosition() { return {-1, -1}; }
@@ -97,11 +105,12 @@ struct Window {
     std::string title_;
     bool isOpen() const { return valid; }
     void setSecondaryTitle(const std::string&) { assert(false); }
-    void setSecondarySize(int, int) { assert(false); }
+    void setSecondarySize(double, double, bool = false) { assert(false); }
     void setSecondaryPosition(int, int) { assert(false); }
     IVec2 getSecondaryPosition() { assert(false); return {}; }
+    bool isSecondaryFullscreen() const { return false; }
     void setSecondaryFullscreen(bool) { assert(false); }
-    IVec2 control(internal::WindowControl, int = 0, int = 0, const std::string* = nullptr);
+    IVec2 control(internal::WindowControl, int = 0, int = 0, const std::string* = nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);
     void setSize(int, int);
 };
 struct App : RectNode, std::enable_shared_from_this<App> {
@@ -114,11 +123,13 @@ Window* current = nullptr;
 namespace internal {
 using Hook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
 Hook windowControlHookForTests() { return nullptr; }
-bool routeSetWindowSizeToWindow(int w, int h) { if (!current) return false; current->setSize(w, h); return true; }
+bool routeSetWindowSizeToWindow(int w, int h, WindowGeometryCall = WindowGeometryCall::GlobalLogicalSize) { if (!current) return false; current->setSize(w, h); return true; }
 struct WindowRequestAccess {
-    static void setPixelSize(Window& win, int w, int h) { win.control(WindowControl::PixelSize, w, h); }
+    static bool ignoreGeometry(Window&, WindowGeometryCall) { assert(false); return true; }
+    static void setSize(Window& win, int w, int h, WindowGeometryCall call) { win.control(WindowControl::Size, w, h, nullptr, call); }
+    static void setPixelSize(Window& win, int w, int h, WindowGeometryCall = WindowGeometryCall::GlobalSize) { win.control(WindowControl::PixelSize, w, h); }
 };
-bool routeSetWindowPixelSizeToWindow(int w, int h) { if (!current) return false; WindowRequestAccess::setPixelSize(*current, w, h); return true; }
+bool routeSetWindowPixelSizeToWindow(int w, int h, WindowGeometryCall = WindowGeometryCall::GlobalSize) { if (!current) return false; WindowRequestAccess::setPixelSize(*current, w, h); return true; }
 }
 void setWindowSizeLogical(int, int);
 EM_JS(void, init_title, (const char* c_str_document_title), { INITIAL_JS });
@@ -195,7 +206,7 @@ int main() {
                 endpoint = body(native, 'void internal::setMainWindowSizeLogical(')
             fixture = source.replace(size, endpoint).replace('PLATFORM_DETECTION', target_detection).replace('SIZE_PREDICATE', predicate).replace('ENDPOINT_PLATFORM', target)
             (path / 'main.cpp').write_text(fixture, encoding='utf-8')
-            subprocess.run([compiler, '-std=c++20', str(path / 'main.cpp'), '-o', str(path / 'test.js'), '-sENVIRONMENT=node', '-sSINGLE_FILE=1', '-sASSERTIONS=1'], check=True)
+            subprocess.run([compiler, '-std=c++20', '-I' + str(ROOT / 'core/include'), str(path / 'main.cpp'), '-o', str(path / 'test.js'), '-sENVIRONMENT=node', '-sSINGLE_FILE=1', '-sASSERTIONS=1'], check=True)
             subprocess.run(['node', str(path / 'test.js')], check=True)
             print(f'PASS: {target} production predicate, endpoint and four public size APIs: every-call Notice (Node)', flush=True)
     print('PASS: production Web title and unchanged CSS/drawable; mobile macro simulation does not syntax-check SDK-dependent translation units')

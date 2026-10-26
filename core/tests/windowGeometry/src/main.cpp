@@ -191,6 +191,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     auto app = std::make_shared<Probe>();
     secondary.setApp(app);
     internal::applyPendingAppForTests(secondary);
+    // The stand-in has no native fullscreen state (especially on AppKit).
+    internal::windowFullscreenHookForTests() = [](const tc::Window&) { return internal::WindowFullscreenPhase::Windowed; };
     internal::windowControlHookForTests() = record;
     internal::currentWindowCtx() = callerContext = &secondary.context();
     secondary.tickTree(); // real App setup/update binding without GPU drawing
@@ -235,6 +237,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     app->setSize(-1, 10);
     check("invalid App sizes never reach adapter", calls.size() == before);
     internal::windowControlHookForTests() = nullptr;
+    internal::windowFullscreenHookForTests() = nullptr;
     internal::currentWindowCtx() = previous;
     return failures ? 1 : 0;
 }

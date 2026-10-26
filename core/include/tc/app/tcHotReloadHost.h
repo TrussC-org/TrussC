@@ -356,7 +356,7 @@ inline int runBuildCommand(const vector<string>& argv, string& output) {
 // up the App mid-callback.
 inline void seedReloadedAppSize(int framebufferWidth, int framebufferHeight, float dpiScale) {
     const auto size = internal::framebufferResizeArgs(framebufferWidth, framebufferHeight,
-        internal::pixelPerfectMode() ? 1.0f : dpiScale);
+        internal::appSizeDpi(dpiScale));
     internal::EntryStackGuard guard(internal::AppEntry::Event, "windowResized()");
     internal::resizeMainApp(size.width, size.height);
 }
@@ -675,22 +675,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     // Build the sokol descriptor (without template — we handle App* manually)
     internal::pixelPerfectMode() = settings.pixelPerfect;
 
-    sapp_desc desc = {};
-    if (settings.pixelPerfect) {
-        float displayScale = getDisplayScaleFactor();
-        desc.width = static_cast<int>(settings.width / displayScale);
-        desc.height = static_cast<int>(settings.height / displayScale);
-    } else {
-        desc.width = settings.width;
-        desc.height = settings.height;
-    }
-    const auto& windowTitle = mcp::internal::mainWindowTitle(settings.title);
-    desc.window_title = windowTitle.c_str();
-    desc.high_dpi = settings.highDpi;
-    desc.sample_count = settings.sampleCount;
-    desc.fullscreen = settings.fullscreen;
-    desc.swap_interval = settings.swapInterval;
-    desc.init_cb = internal::_setup_cb;
+    sapp_desc desc = buildWindowDescriptor(settings);
     desc.frame_cb = []() noexcept {
         if (frameReentryGuard) return;
         TeardownSteps steps;
@@ -709,19 +694,6 @@ inline int runHotReloadApp(const WindowSettings& settings) {
         }
         internal::_frame_cb();
     };
-    desc.cleanup_cb = internal::_cleanup_cb;
-    desc.event_cb = internal::_event_cb;
-    desc.logger.func = internal::sokolLog;
-    desc.enable_dragndrop = true;
-    // Bound (security): OS file drops can flood delivery; a fixed cap keeps path storage finite. Overflow omits excess files.
-    desc.max_dropped_files = 16;
-    // Bound (security): OS drop paths need finite per-path storage. Overflow rejects the drop if a path does not fit.
-    desc.max_dropped_file_path_length = 2048;
-    desc.enable_clipboard = true;
-    desc.clipboard_size = settings.clipboardSize;
-    internal::currentWindowContext().clipboardSize = settings.clipboardSize;
-    desc.win32.console_utf8 = true;   // UTF-8 console input/output (see buildAppDescriptor)
-
     openEnvLogFile();   // TRUSSC_LOG_FILE before sapp_run(): init-time failures too
 #ifdef _WIN32
     ConsoleCPCtrlGuard consoleCtrl;   // restore both console code pages on exit
