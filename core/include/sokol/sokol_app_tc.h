@@ -3521,10 +3521,10 @@ static bool _sapp_tc_create_main_window(void) {
     _sapp_tc_window_t* w = new _sapp_tc_window_t();
     w->win_id = ++_sapp_tc.next_id;
     w->is_main = true;
-    auto fail = [w, slot](const char* operation) {
+    auto fail = [w, slot](const char* operation, const char* reason = "returned nil (no NSError available)") {
         // These creation APIs have no NSError output parameter.
         _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
-                     "error: ", "%s returned nil (no NSError available)", operation);
+                     "error: ", "%s %s", operation, reason);
         w->view.w = 0;
         w->delegate.w = 0;
         w->window.delegate = nil;
@@ -3567,6 +3567,9 @@ static bool _sapp_tc_create_main_window(void) {
     if (w->window == nil) return fail("NSWindow initWithContentRect");
     if (d->_tc_pixel_width > 0 || d->_tc_pixel_height > 0) {
         const float scale = d->high_dpi ? (float)w->window.backingScaleFactor : 1.0f;
+        if (!_sapp_tc_window_pixels_representable(d->_tc_pixel_width, d->_tc_pixel_height, scale)) {
+            return fail("Pixel size", "exceeds logical-size getters");
+        }
         [w->window setContentSize:NSMakeSize(
             _sapp_tc_window_points(width, d->_tc_pixel_width, scale),
             _sapp_tc_window_points(height, d->_tc_pixel_height, scale))];
@@ -3758,6 +3761,10 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
                                   backing:NSBackingStoreBuffered defer:NO];
     if (w->desc._tc_pixel_width > 0 || w->desc._tc_pixel_height > 0) {
         const float scale = w->desc.no_high_dpi ? 1.0f : (float)w->window.backingScaleFactor;
+        if (!_sapp_tc_window_pixels_representable(w->desc._tc_pixel_width, w->desc._tc_pixel_height, scale)) {
+            delete w;
+            return invalid;
+        }
         [w->window setContentSize:NSMakeSize(
             _sapp_tc_window_points(w->desc.width, w->desc._tc_pixel_width, scale),
             _sapp_tc_window_points(w->desc.height, w->desc._tc_pixel_height, scale))];
@@ -7708,6 +7715,11 @@ static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wcha
     w->hmonitor = MonitorFromWindow(w->hwnd, MONITOR_DEFAULTTONEAREST);
     _sapp_tc_win32_update_refresh(w);
     _sapp_tc_win32_update_scale(w);
+    if (!_sapp_tc_window_pixels_representable(w->desc._tc_pixel_width, w->desc._tc_pixel_height, w->dpi_scale)) {
+        DestroyWindow(w->hwnd);
+        w->hwnd = NULL;
+        return false;
+    }
     if (!use_default_size && (w->window_scale != 1.0f)) {
         const double width = _sapp_tc_window_points(w->desc.width, w->desc._tc_pixel_width, w->dpi_scale);
         const double height = _sapp_tc_window_points(w->desc.height, w->desc._tc_pixel_height, w->dpi_scale);
@@ -10744,6 +10756,9 @@ static void _sapp_tc_glx_set_swapinterval(_sapp_tc_window_t* w, int interval) {
 /*-- window creation / destruction ---------------------------------------------*/
 static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* title,
         int width_pt, int height_pt, bool borderless) {
+    if (!_sapp_tc_window_pixels_representable(w->desc._tc_pixel_width, w->desc._tc_pixel_height, w->dpi_scale)) {
+        return false;
+    }
     XVisualInfo* vi = glXGetVisualFromFBConfig(_sapp_tc.display, _sapp_tc.fbconfig);
     if (!vi) {
         _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_GET_VISUAL_FROM_FBCONFIG_FAILED, __LINE__,
@@ -14431,6 +14446,9 @@ _SOKOL_PRIVATE void _sapp_tc_x11_set_icon(const sapp_icon_desc* icon_desc, int n
 }
 
 _SOKOL_PRIVATE void _sapp_tc_x11_create_window(Visual* visual_or_null, int depth) {
+    if (!_sapp_tc_window_pixels_representable(_sapp_tc.desc._tc_pixel_width, _sapp_tc.desc._tc_pixel_height, _sapp_tc.dpi_scale)) {
+        _SAPP_PANIC(LINUX_X11_CREATE_WINDOW_FAILED);
+    }
     Visual* visual = visual_or_null;
     if (0 == visual_or_null) {
         visual = DefaultVisual(_sapp_tc.x11.display, _sapp_tc.x11.screen);

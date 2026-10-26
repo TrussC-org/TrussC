@@ -70,7 +70,10 @@ Zero keeps the existing logical/default path. Win32 folds conversion into its
 existing single DPI resize; X11 GLX and GLES3/EGL convert before XCreateWindow;
 macOS uses one setContentSize before showing the window. The pure C/C++ helper
 in `util/sokol_window_size.h` is also used by TrussC's resize dispatcher, so
-macOS main and secondary retain the same double point sizes.
+macOS main and secondary retain the same double point sizes. Normal and
+hot-reload launchers share descriptor construction; creation keeps the existing
+handling of invalid sizes. Native pixel conversion checks the same logical-size
+representability limit as the resize dispatcher before applying the request.
 
 ### Windows console UTF-8 input and output (#754)
 

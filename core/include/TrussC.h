@@ -3039,47 +3039,20 @@ namespace internal {
 // Application execution
 // ---------------------------------------------------------------------------
 
-// Build sapp_desc without starting the event loop.
-// Used by runApp() on desktop and by sokol_main() on Android.
-template<typename AppClass>
-sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) {
-    internal::appExitCode() = 0;
-    if (auto token = internal::appRunToken()) token->store(false);
-    internal::cancelResourceBackends();
-    internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
-
-    // Set pixel perfect mode
-    internal::pixelPerfectMode() = settings.pixelPerfect;
-
-    // Remember the requested decoration; applied after the window is created.
-    internal::windowDecorated = settings.decorated;
-
-    // Per-frame uniform reservation for sg_setup (consumed in internal::setup()).
-    internal::gpuUniformBufferReserve = settings.uniformBufferReserve;
-
-    internal::createMainWindow(settings);
-    internal::prepareMainAppBindings();
-    internal::appSetupFunc = []() {
-        if (!internal::attachMainApp(std::make_shared<AppClass>())) {
-            internal::appExitCode() = 1;
-            sapp_quit();
-        }
-    };
-    internal::appUpdateFunc = []() {
-        events().update.notify();
-    };
-    internal::appDrawFunc = []() { events().draw.notify(); };
-    internal::appCleanupFunc = []() { internal::destroyMainWindow(); };
-    internal::appWindowResizedFunc = [](int w, int h) {
-        internal::resizeMainApp(w, h);
-    };
-
-    // Build sapp_desc
+namespace internal {
+// Shared by normal startup and the hot-reload host; callbacks may be overridden.
+inline sapp_desc buildWindowDescriptor(const WindowSettings& settings) {
     sapp_desc desc = {};
     if constexpr (Platform::isDesktop()) {
         // Native creation knows the target window's DPI; preserve pixels until then.
         desc.width = settings.width;
         desc.height = settings.height;
+        // Preserve the launcher's old per-dimension native validation/default inputs.
+        if (settings.pixelPerfect && (settings.width <= 0 || settings.height <= 0)) {
+            const float displayScale = getDisplayScaleFactor();
+            if (settings.width <= 0) desc.width = static_cast<int>(settings.width / displayScale);
+            if (settings.height <= 0) desc.height = static_cast<int>(settings.height / displayScale);
+        }
         if (settings.pixelPerfect) {
             desc._tc_pixel_width = settings.width > 0 ? settings.width : 0;
             desc._tc_pixel_height = settings.height > 0 ? settings.height : 0;
@@ -3130,6 +3103,46 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     desc.win32.console_utf8 = true;
 
     return desc;
+}
+
+} // namespace internal
+
+// Build sapp_desc without starting the event loop.
+// Used by runApp() on desktop and by sokol_main() on Android.
+template<typename AppClass>
+sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) {
+    internal::appExitCode() = 0;
+    if (auto token = internal::appRunToken()) token->store(false);
+    internal::cancelResourceBackends();
+    internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
+
+    // Set pixel perfect mode
+    internal::pixelPerfectMode() = settings.pixelPerfect;
+
+    // Remember the requested decoration; applied after the window is created.
+    internal::windowDecorated = settings.decorated;
+
+    // Per-frame uniform reservation for sg_setup (consumed in internal::setup()).
+    internal::gpuUniformBufferReserve = settings.uniformBufferReserve;
+
+    internal::createMainWindow(settings);
+    internal::prepareMainAppBindings();
+    internal::appSetupFunc = []() {
+        if (!internal::attachMainApp(std::make_shared<AppClass>())) {
+            internal::appExitCode() = 1;
+            sapp_quit();
+        }
+    };
+    internal::appUpdateFunc = []() {
+        events().update.notify();
+    };
+    internal::appDrawFunc = []() { events().draw.notify(); };
+    internal::appCleanupFunc = []() { internal::destroyMainWindow(); };
+    internal::appWindowResizedFunc = [](int w, int h) {
+        internal::resizeMainApp(w, h);
+    };
+
+    return internal::buildWindowDescriptor(settings);
 }
 
 #ifdef _WIN32

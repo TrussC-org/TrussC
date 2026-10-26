@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Host-check native creation, Win32/X11 pixel sizing and macOS point forwarding.
 
-Run through tcbuild.sh. Native calls are recorded without a display or GPU;
+Run through tcbuild.sh. Host fixtures record native calls; the native validation fixture uses Mesa/Xvfb.
 Window::control, Win32 forwarding, global sizing and X11 geometry use production code.
 """
 from pathlib import Path
@@ -115,7 +115,12 @@ def creation_source(backend):
     """
     header = (ROOT / 'core/include/TrussC.h').read_text(encoding='utf-8')
     native = (ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
-    launcher = header.split('    // Build sapp_desc\n', 1)[1].split('    const auto& windowTitle', 1)[0]
+    launcher = body(header, 'inline sapp_desc buildWindowDescriptor(').split('{', 1)[1].split('    const auto& windowTitle', 1)[0]
+    normal = body(header, 'sapp_desc buildAppDescriptor(').rsplit('    return ', 1)[1].split(';', 1)[0]
+    normal = 'return ' + normal + ';'
+    hot_header = (ROOT / 'core/include/tc/app/tcHotReloadHost.h').read_text(encoding='utf-8')
+    hot = body(hot_header, 'inline int runHotReloadApp(').split('    sapp_desc desc = ', 1)[1].split('    desc.frame_cb', 1)[0]
+    hot = 'sapp_desc desc = ' + hot
     adapter_path = {'win': 'win/tcWindowWin.cpp', 'x11': 'linux/tcWindowLinux.cpp',
                     'mac': 'mac/tcWindowMac.mm', 'egl': 'linux/tcWindowLinux.cpp'}[backend]
     adapter = (ROOT / 'core/platform' / adapter_path).read_text(encoding='utf-8')
@@ -130,28 +135,40 @@ def creation_source(backend):
     if backend == 'mac':
         # Main's descriptor has already chosen the non-positive native defaults.
         transfer = transfer.replace('= width;', '= d->width;').replace('= height;', '= d->height;')
+    def guard(creator):
+        call = '_sapp_tc_window_pixels_representable('
+        return call + creator.split(call, 1)[1].split(')', 1)[0] + ')'
+
+    validation = ''
     if backend == 'win':
         creator = body(native, 'static bool _sapp_tc_win32_create_native_window(')
         arithmetic = creator.split('        const double width = ', 1)[1].split('        RECT rect', 1)[0]
         arithmetic = 'const double width = ' + arithmetic + '\nreturn {pw, ph};'
+        validation = 'if (!' + guard(creator) + ') return false;'
     elif backend == 'x11':
         creator = body(native, 'static bool _sapp_tc_x11_create_native_window(')
         arithmetic = creator.split('    const float scale = ', 1)[1].split('    if (width_pt <= 0)', 1)[0]
-        arithmetic = 'const float scale = ' + arithmetic + '\nreturn {px_w, px_h};'
+        native_validation = creator.split('{', 1)[1].split('    XVisualInfo*', 1)[0]
+        arithmetic = native_validation + 'const float scale = ' + arithmetic + '\nreturn {px_w, px_h};'
     elif backend == 'egl':
         creator = body(native, '_SOKOL_PRIVATE void _sapp_tc_x11_create_window(')
         arithmetic = creator.split('    const float window_scale = ', 1)[1].split('    if (0 == _sapp_tc.window_width)', 1)[0]
         arithmetic = 'const float window_scale = ' + arithmetic + '\nreturn {x11_window_width, x11_window_height};'
+        validation = 'if (!' + guard(creator) + ') return false;'
     else:
         creator = body(native, main_signature)
         call = creator.split('[w->window setContentSize:NSMakeSize(', 1)[1].split(')];', 1)[0]
         secondary_creator = native[native.index('sapp_window sapp_create_window(const sapp_window_desc* desc) {'):]
         secondary_call = secondary_creator.split('[w->window setContentSize:NSMakeSize(', 1)[1].split(')];', 1)[0]
+        validation = ('if (!(mainWindow ? ' + guard(creator) + ' : ' +
+                      guard(secondary_creator) + ')) return false;')
         arithmetic = 'if (mainWindow) return roundMac(' + call + ');\nreturn roundMac(' + secondary_call + ');'
     template = (ROOT / 'tools/tests/window_creation_size.cpp').read_text(encoding='utf-8')
     return (template.replace('EGL_DIMENSIONS', body(native, '_SOKOL_PRIVATE void _sapp_tc_x11_update_dimensions('))
+            .replace('NORMAL_LAUNCHER', normal).replace('HOT_LAUNCHER', hot)
             .replace('LAUNCHER', launcher).replace('SECONDARY', secondary)
-            .replace('TRANSFER', transfer).replace('ARITHMETIC', arithmetic))
+            .replace('TRANSFER', transfer).replace('CREATION_GUARD', validation).replace('ARITHMETIC', arithmetic)
+            .replace('GLX_DIMENSIONS', body(native, 'static bool _sapp_tc_x11_update_dimensions(')))
 
 
 class WindowPixelSizeTests(unittest.TestCase):
@@ -163,9 +180,65 @@ class WindowPixelSizeTests(unittest.TestCase):
                 with self.subTest(backend=backend):
                     cpp.write_text(creation_source(backend), encoding='utf-8')
                     subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-Wall',
-                                    '-Wextra', '-Werror', '-I', str(ROOT),
+                                    '-Wextra', '-Werror', '-fsanitize=undefined,float-cast-overflow',
+                                    '-fno-sanitize-recover=all', '-I', str(ROOT),
                                     '-DTEST_' + backend.upper(), str(cpp), '-o', str(binary)], check=True)
                     subprocess.run([str(binary)], check=True)
+
+    def test_native_invalid_sizes_match_base(self):
+        # Isolate expected assertion failures in child processes and compare real
+        # native creation/default selection to the target branch, per dimension.
+        header = (ROOT / 'core/include/TrussC.h').read_text(encoding='utf-8')
+        launcher = body(header, 'inline sapp_desc buildWindowDescriptor(').split('{', 1)[1].split('    const auto& windowTitle', 1)[0]
+        normal = 'return ' + body(header, 'sapp_desc buildAppDescriptor(').rsplit('    return ', 1)[1].split(';', 1)[0] + ';'
+        source = (ROOT / 'tools/tests/window_creation_native.cpp').read_text(encoding='utf-8')
+        adapter = (ROOT / 'core/platform/linux/tcWindowLinux.cpp').read_text(encoding='utf-8')
+        secondary = adapter.split('    sapp_window_desc d = {};', 1)[1].split('    d.title', 1)[0]
+        source = source.replace('NORMAL_LAUNCHER', normal).replace('LAUNCHER', launcher).replace('SECONDARY', secondary)
+        runner = r'''import re, subprocess, sys
+for binary in sys.argv[1:-1]:
+    for pixels in (False, True):
+        for width, height in ((-1,667),(0,667),(667,-1),(0,0)):
+            results = [subprocess.run([binary, mode, str(width), str(height), str(int(pixels))],
+                capture_output=True, text=True) for mode in ('base','current')]
+            base, current = results
+            assert base.returncode == current.returncode, (binary,pixels,width,height,base,current)
+            for dimension, extent in enumerate((width,height)):
+                if extent > 0: continue
+                for label in ('descriptor','native'):
+                    values = [re.search(label+r'=(\d+|-\d+)x(\d+|-\d+)', r.stdout) for r in results]
+                    assert bool(values[0]) == bool(values[1]), (label,results)
+                    if values[0]:
+                        assert values[0].group(dimension+1) == values[1].group(dimension+1), (label,results)
+            if base.returncode:
+                assert 'Assertion' in base.stderr and 'Assertion' in current.stderr, results
+            else:
+                assert 'native=' in current.stdout, results
+            print('PASS native invalid input:',binary.rsplit('/',1)[-1],pixels,width,height,base.returncode)
+subprocess.run(['xrdb','-merge'], input='Xft.dpi: 9.6e-7\n', text=True, check=True)
+subprocess.run([sys.argv[-1],'tiny','640','400','1'], check=True)
+'''
+        with tempfile.TemporaryDirectory(prefix='window-native-') as scratch:
+            cpp = Path(scratch) / 'probe.cpp'; cpp.write_text(source, encoding='utf-8')
+            binaries = []
+            for backend, libraries in (('SOKOL_GLES3', ['-lEGL','-lGLESv2']),
+                                       ('SOKOL_GLCORE', ['-lGL'])):
+                for release in (False, True):
+                    binary = Path(scratch) / (backend + ('-release' if release else ''))
+                    flags = ['-DNDEBUG'] if release else []
+                    subprocess.run([os.environ.get('CXX','c++'), '-std=c++20', '-D'+backend,
+                        *flags, '-fsanitize=undefined,float-cast-overflow', '-fno-sanitize-recover=all',
+                        '-I', str(ROOT / 'core/include/sokol'), str(cpp), *libraries,
+                        '-lX11','-lXi','-lXcursor','-lpthread','-ldl','-o',str(binary)], check=True)
+                    binaries.append(str(binary))
+            # Keep the debug GLX binary last so the native rejection assertion is active.
+            binaries.append(binaries[2])
+            subprocess.run(['xvfb-run','-a','-s','-screen 0 1280x720x24 -noreset',
+                'bash','-c', 'ulimit -c 0; printf "Xft.dpi: 192\\n" | xrdb -merge; exec "$@"',
+                'native-validation', 'python3','-c',runner,*binaries], check=True,
+                env=dict(os.environ, LIBGL_ALWAYS_SOFTWARE='1',
+                    __EGL_VENDOR_LIBRARY_FILENAMES='/usr/share/glvnd/egl_vendor.d/50_mesa.json',
+                    __GLX_VENDOR_LIBRARY_NAME='mesa', GALLIUM_DRIVER='llvmpipe'))
 
     def test_mac_main_secondary_points(self):
         window = (ROOT / 'core/include/tc/app/tcWindow.h').read_text(encoding='utf-8')

@@ -3,9 +3,14 @@
 #include <cassert>
 #include <cmath>
 #include <initializer_list>
+#include <cstring>
 #include <limits>
 using LONG = int;
-struct Size { int x, y; };
+struct Size {
+    int x, y;
+    Size(int width = 0, int height = 0) : x(width), y(height) {}
+    Size(bool accepted) : x(0), y(0) { assert(!accepted); }
+};
 struct Descriptor {
     int width = 0, height = 0, x = 0, y = 0, sample_count = 1;
     int _tc_pixel_width = 0, _tc_pixel_height = 0;
@@ -21,8 +26,8 @@ bool pixelPerfectMode() { return enabled; }
 // A pre-window/main-display query can differ from the target window.
 float getDisplayScaleFactor() { return preWindowScale; }
 int _sapp_tc_roundf_gzero(float value) { return int(value + 0.5f); }
-struct State { Descriptor desc; float window_scale = 1, dpi_scale = 1; };
-struct EglState { Descriptor desc; int window_width = 0, window_height = 0; float dpi_scale = 1; int framebuffer_width = 0, framebuffer_height = 0; bool first_frame = true; struct { float dpi = 96; } x11; } _sapp_tc;
+struct State { Descriptor desc; float window_scale = 1, dpi_scale = 1; int xwin = 1, fb_width = 0, fb_height = 0, win_width = 0, win_height = 0; };
+struct EglState { void* display = nullptr; Descriptor desc; int window_width = 0, window_height = 0; float dpi_scale = 1; int framebuffer_width = 0, framebuffer_height = 0; bool first_frame = true; struct { float dpi = 96; } x11; } _sapp_tc;
 #ifdef TEST_EGL
 #define _SOKOL_PRIVATE
 constexpr int SAPP_EVENTTYPE_RESIZED = 1;
@@ -30,10 +35,15 @@ void _sapp_tc_x11_app_event(int) {}
 EGL_DIMENSIONS
 #endif
 Size roundMac(double width, double height) { return {int(std::ceil(width) * renderScale), int(std::ceil(height) * renderScale)}; }
-Descriptor mainDescriptor(const Settings& settings) {
+namespace internal {
+Descriptor buildWindowDescriptor(const Settings& settings) {
     LAUNCHER
     return desc;
 }
+}
+using internal::buildWindowDescriptor;
+Descriptor mainDescriptor(const Settings& settings) { NORMAL_LAUNCHER }
+Descriptor hotDescriptor(const Settings& settings) { HOT_LAUNCHER return desc; }
 Descriptor secondaryDescriptor(const Settings& settings) {
     sapp_window_desc d{};
     SECONDARY
@@ -56,8 +66,18 @@ Size create(Descriptor descriptor, bool mainWindow) {
     (void)mainWindow; (void)w;
     _sapp_tc.desc = descriptor; _sapp_tc.window_width = descriptor.width; _sapp_tc.window_height = descriptor.height;
     _sapp_tc.dpi_scale = renderScale; _sapp_tc.x11.dpi = displayScale * 96;
+    CREATION_GUARD
     ARITHMETIC
 }
+#ifdef TEST_X11
+using _sapp_tc_window_t = State;
+struct XWindowAttributes { int width, height; };
+Size nativeSize;
+void XGetWindowAttributes(void*, int, XWindowAttributes* attributes) {
+    attributes->width = nativeSize.x; attributes->height = nativeSize.y;
+}
+GLX_DIMENSIONS
+#endif
 int main() {
     for (bool pixels : {false, true}) for (bool highDpi : {true, false})
     for (float dpi : {1.5f, 2.0f}) for (Size requested : {Size{640,400}, Size{480,320}, Size{1001,667}, Size{1,3}})
@@ -75,6 +95,9 @@ int main() {
 #endif
         enabled = pixels;
         const Settings settings{requested.x, requested.y, pixels, highDpi};
+        const auto normal = mainDescriptor(settings), hot = hotDescriptor(settings);
+        assert(normal.width == hot.width && normal.height == hot.height &&
+               normal._tc_pixel_width == hot._tc_pixel_width && normal._tc_pixel_height == hot._tc_pixel_height);
         Descriptor d = mainWindow ? mainTransfer(mainDescriptor(settings)) : secondaryDescriptor(settings);
         const Size actual = create(d, mainWindow);
 #ifdef TEST_EGL
@@ -109,8 +132,48 @@ int main() {
             assert(d._tc_pixel_width == 0 && d._tc_pixel_height == 0);
         }
     }
+#ifdef TEST_X11
+    // The real dimension reporter must never see the rejected secondary's pixels.
+    // A high-DPI-disabled main can coexist with this secondary at the same Xft.dpi.
+    enabled = true; displayScale = preWindowScale = 1e-8f; renderScale = 1;
+    const Settings mainSettings{640,400,true,false}, secondarySettings{640,400,true,true};
+    const auto main = mainTransfer(mainDescriptor(mainSettings));
+    nativeSize = create(main, true);
+    State mainState{main,displayScale,renderScale};
+    _sapp_tc_x11_update_dimensions(&mainState);
+    assert(mainState.win_width == 640 && mainState.win_height == 400);
+    renderScale = displayScale;
+    const auto secondary = secondaryDescriptor(secondarySettings);
+    nativeSize = create(secondary, false);
+    if (nativeSize.x > 0 && nativeSize.y > 0) {
+        State secondaryState{secondary,displayScale,renderScale};
+        _sapp_tc_x11_update_dimensions(&secondaryState);
+    }
+    assert(nativeSize.x == 0 && nativeSize.y == 0);
+#endif
+    enabled = true; renderScale = displayScale = 1e-8f;
+    const Settings tiny{640,400,true,true};
+    for (bool mainWindow : {false, true}) {
+#ifdef TEST_EGL
+        if (!mainWindow) continue;
+#endif
+        const auto d = mainWindow ? mainTransfer(mainDescriptor(tiny)) : secondaryDescriptor(tiny);
+        const Size result = create(d, mainWindow);
+        assert(result.x == 0 && result.y == 0);
+    }
+    // Match the resize logical-getter limit, per dimension, on all native backends.
+    assert(!_sapp_tc_window_pixels_representable(640,400,1e-8f));
+    assert(!_sapp_tc_window_pixels_representable(640,400,1e-30f));
+    assert(!_sapp_tc_window_pixels_representable(640,1,1e-8f));
+    assert(!_sapp_tc_window_pixels_representable(1,400,1e-8f));
+    assert(_sapp_tc_window_pixels_representable(0,-1,1e-8f));
+    assert(_sapp_tc_window_pixels_representable(640,400,1));
     for (float invalid : {0.f, -1.f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
         assert(_sapp_tc_window_points(0, 1001, invalid) == 1001);
+    for (double extent : {0., -1., std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+        const double actual = _sapp_tc_window_points(extent, 0, 2);
+        assert(actual == extent || (std::isnan(actual) && std::isnan(extent)));
+    }
     // Non-positive requests retain native default selection; no pixel override.
     enabled = true;
     for (int extent : {0, -1}) {
