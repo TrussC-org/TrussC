@@ -24,9 +24,11 @@ namespace internal {
 class WindowRequestAccess;   // friend of Window, defined after it
 void syncSecondaryAppSize(Window& window, int width, int height);
 // One control entry for explicit handles and context-aware globals.
-enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, PositionQuery };
+enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, ToggleFullscreen, PositionQuery };
 using WindowControlHook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
 WindowControlHook& windowControlHookForTests();
+using WindowFullscreenHook = WindowFullscreenPhase (*)(const Window&);
+WindowFullscreenHook& windowFullscreenHookForTests();
 
 // Native implementation, reached through createWindow's platform check.
 std::shared_ptr<Window> createSecondaryWindow(const WindowSettings& settings);
@@ -134,6 +136,8 @@ public:
     // and its platform limitations. Secondary sizing is implemented natively
     // (macOS NSWindow, Windows HWND, X11) because sokol_app has no per-window
     // resize entry point. No-op if the native window is gone.
+    // Ignored with one Notice until isFullscreen() returns false (including
+    // macOS entering/exiting). No geometry is queued; exit restores entry geometry.
     void setSize(int width, int height);
 
     // Move this window on the desktop. Coordinates are SCREEN coordinates with
@@ -152,6 +156,7 @@ public:
     // window's screen, Linux the WM's choice), so move the window onto the
     // target display FIRST, then go fullscreen. This is the same order
     // openFrameworks uses in its GLFW backend.
+    // Ignored with one Notice until isFullscreen() returns false.
     TC_PLATFORMS("macos,windows,linux") void setPosition(int x, int y);
 
     // Current position in the same screen-coordinate space as setPosition().
@@ -161,8 +166,7 @@ public:
     // Main fullscreen uses sapp. Secondary fullscreen is native because sapp's
     // fullscreen only targets the main window:
     //   macOS  -> NSWindow toggleFullScreen: (native, animated; isFullscreen()
-    //             reads the live styleMask, so it reflects the true state once
-    //             the async transition finishes).
+    //             stays true through entering/fullscreen/exiting).
     //   Windows-> borderless-fullscreen: save style + rect, switch to a popup
     //             sized to the window's monitor, restore on exit.
     //   Linux  -> EWMH _NET_WM_STATE_FULLSCREEN ClientMessage to the root window.
@@ -171,7 +175,8 @@ public:
     // windowResized). No-op if the native window is gone.
     void setFullscreen(bool full);
     bool isFullscreen() const;
-    void toggleFullscreen() { setFullscreen(!isFullscreen()); }
+    // Flip the most recently requested state, including during macOS animation.
+    void toggleFullscreen() { control(internal::WindowControl::ToggleFullscreen); }
 
     void setClearColor(const Color& c) { clearColor_ = c; clearColorSet_ = true; }
 
@@ -257,8 +262,7 @@ public:
     bool clearColorSet_ = false; // main keeps the existing clear() default until explicitly set
     Color clearColor_ = Color(0.05f, 0.05f, 0.08f, 1.0f);
     // Fullscreen intent. Windows/Linux report isFullscreen() from this flag
-    // (there is no cheap live query); macOS ignores it and reads the live
-    // NSWindow styleMask instead (the transition is async).
+    // (there is no cheap live query); macOS uses implementation-owned phases.
     bool fullscreenRequested_ = false;
     std::string& title_;
     // Request state (setApp() / close()). The pending App is owned here until
@@ -272,7 +276,8 @@ public:
 
 private:
     IVec2 control(internal::WindowControl op, int x = 0, int y = 0,
-                  const std::string* title = nullptr);
+                  const std::string* title = nullptr,
+                  internal::WindowGeometryCall call = internal::WindowGeometryCall::WindowSize);
     void closeSecondary();
     void teardownSecondary() noexcept;
     void setSecondaryTitle(const std::string& title);
@@ -281,6 +286,11 @@ private:
     IVec2 getSecondaryPosition() const;
     void setSecondaryFullscreen(bool full);
     bool isSecondaryFullscreen() const;
+#if defined(__APPLE__) && TARGET_OS_OSX
+    internal::WindowFullscreenPhase secondaryFullscreenPhase() const;
+    void toggleSecondaryFullscreen();
+#endif
+    internal::WindowFullscreenPhase fullscreenPhase() const;
     int getSecondaryWidth() const;
     int getSecondaryHeight() const;
     bool isSecondaryOccluded() const;
@@ -333,7 +343,12 @@ namespace internal {
 // VideoPlayer to its platform code.
 class WindowRequestAccess {
 public:
-    static void setPixelSize(Window& w, int width, int height) { w.control(WindowControl::PixelSize, width, height); }
+    static void setPixelSize(Window& w, int width, int height, WindowGeometryCall call = WindowGeometryCall::GlobalSize) { w.control(WindowControl::PixelSize, width, height, nullptr, call); }
+    static void setSize(Window& w, int width, int height, WindowGeometryCall call) { w.control(WindowControl::Size, width, height, nullptr, call); }
+    static void setPosition(Window& w, int x, int y, WindowGeometryCall call) { w.control(WindowControl::Position, x, y, nullptr, call); }
+    static bool ignoreGeometry(Window& w, WindowGeometryCall call) {
+        return ignoreFullscreenGeometry(w.fullscreenPhase(), call, w.ctx_.isMain ? nullptr : &w.title_);
+    }
     // Creation identity stays internal; main and secondary IDs are never reused.
     static uint64_t creationId(const Window& w) { return w.id_; }
     static std::unique_ptr<Window> makeMain() { return std::unique_ptr<Window>(new Window(true)); }
@@ -389,16 +404,16 @@ inline bool routeSetWindowTitleToWindow(const std::string& title) {
     w->setTitle(title);
     return true;
 }
-inline bool routeSetWindowSizeToWindow(int width, int height) {
+inline bool routeSetWindowSizeToWindow(int width, int height, WindowGeometryCall call) {
     Window* w = currentWindow();
     if (!w) return false;
-    w->setSize(width, height);
+    WindowRequestAccess::setSize(*w, width, height, call);
     return true;
 }
-inline bool routeSetWindowPixelSizeToWindow(int width, int height) {
+inline bool routeSetWindowPixelSizeToWindow(int width, int height, WindowGeometryCall call) {
     Window* w = currentWindow();
     if (!w) return false;
-    WindowRequestAccess::setPixelSize(*w, width, height);
+    WindowRequestAccess::setPixelSize(*w, width, height, call);
     return true;
 }
 // Fullscreen routing follows the active Window; each backend keeps its
@@ -812,14 +827,15 @@ inline void App::setSize(float w, float h) {
         return;
     }
     if (Window* win = getWindow()) {
+        if (internal::WindowRequestAccess::ignoreGeometry(*win, internal::WindowGeometryCall::AppSize)) return;
         // Only the window path converts to int; unattached Apps keep any float size.
         if (!std::isfinite(w) || !std::isfinite(h) || w <= 0 || h <= 0 ||
             double(w) > (std::numeric_limits<int>::max)() || double(h) > (std::numeric_limits<int>::max)()) {
             logWarning("App") << "setSize(): invalid size";
             return;
         }
-        if (internal::pixelPerfectMode()) internal::WindowRequestAccess::setPixelSize(*win, int(w), int(h));
-        else win->setSize(int(w), int(h));
+        if (internal::pixelPerfectMode()) internal::WindowRequestAccess::setPixelSize(*win, int(w), int(h), internal::WindowGeometryCall::AppSize);
+        else internal::WindowRequestAccess::setSize(*win, int(w), int(h), internal::WindowGeometryCall::AppSize);
         return;
     }
     RectNode::setSize(w, h);   // unattached: only this App's own Node size
@@ -870,7 +886,7 @@ inline void Window::teardown() noexcept {
     if (!ctx_.isMain) { teardownSecondary(); return; }
     if (mainOpen_) internal::WindowRequestAccess::endMain(*this);
 }
-inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std::string* title) {
+inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std::string* title, internal::WindowGeometryCall call) {
     // Native controls take an explicit target (the main endpoint or this
     // Window's native handle). Keep the rendering owner current: a synchronous
     // resize/fullscreen event must park, switch and restore the real caller.
@@ -881,6 +897,10 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
         }
     }
     IVec2 result{-1, -1};
+    if constexpr (!internal::windowSizeIsScreenControlled()) {
+        if ((op == internal::WindowControl::Size || op == internal::WindowControl::PixelSize ||
+             op == internal::WindowControl::Position) && internal::WindowRequestAccess::ignoreGeometry(*this, call)) return result;
+    }
     if (auto hook = internal::windowControlHookForTests()) {
         if (hook(*this, op, x, y, title, result)) return result;
     }
@@ -943,8 +963,16 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
             result = ctx_.isMain ? internal::mainWindowPosition() : getSecondaryPosition();
             break;
         case internal::WindowControl::Fullscreen:
-            if (ctx_.isMain) { if (bool(x) != sapp_is_fullscreen()) sapp_toggle_fullscreen(); }
+            if (ctx_.isMain) internal::setMainFullscreen(bool(x));
             else setSecondaryFullscreen(bool(x));
+            break;
+        case internal::WindowControl::ToggleFullscreen:
+            if (ctx_.isMain) sapp_toggle_fullscreen();
+#if defined(__APPLE__) && TARGET_OS_OSX
+            else toggleSecondaryFullscreen();
+#else
+            else setSecondaryFullscreen(!isSecondaryFullscreen());
+#endif
             break;
     }
     return result;
@@ -956,7 +984,7 @@ inline void Window::setSize(int width, int height) {
     control(internal::WindowControl::Size, width, height);
 }
 inline void Window::setPosition(int x, int y) {
-    control(internal::WindowControl::Position, x, y);
+    control(internal::WindowControl::Position, x, y, nullptr, internal::WindowGeometryCall::WindowPosition);
 }
 inline IVec2 Window::getPosition() const {
     return const_cast<Window*>(this)->control(internal::WindowControl::PositionQuery);
@@ -964,8 +992,17 @@ inline IVec2 Window::getPosition() const {
 inline void Window::setFullscreen(bool full) {
     control(internal::WindowControl::Fullscreen, int(full));
 }
+inline internal::WindowFullscreenPhase Window::fullscreenPhase() const {
+    if (auto hook = internal::windowFullscreenHookForTests()) return hook(*this);
+    if (ctx_.isMain) return isOpen() ? internal::mainWindowFullscreenPhase() : internal::WindowFullscreenPhase::Windowed;
+#if defined(__APPLE__) && TARGET_OS_OSX
+    return secondaryFullscreenPhase();
+#else
+    return isSecondaryFullscreen() ? internal::WindowFullscreenPhase::Fullscreen : internal::WindowFullscreenPhase::Windowed;
+#endif
+}
 inline bool Window::isFullscreen() const {
-    return ctx_.isMain ? isOpen() && sapp_is_fullscreen() : isSecondaryFullscreen();
+    return fullscreenPhase() != internal::WindowFullscreenPhase::Windowed;
 }
 inline int Window::getWidth() const {
     return ctx_.isMain ? (isOpen() ? internal::framebufferToLogical(sapp_width(), sapp_dpi_scale()) : 0) : getSecondaryWidth();

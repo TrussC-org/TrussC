@@ -23,6 +23,7 @@
 #include "sokol/sokol_log.h"
 #define SOKOL_NO_ENTRY  // We define our own main()
 #include "sokol/sokol_app_tc.h"
+#include "tc/app/internal/tcWindowFullscreen.h"
 #include "sokol/sokol_gfx.h"
 #include "sokol/sokol_glue.h"
 #include "sokol/util/sokol_gl_tc.h"
@@ -317,8 +318,11 @@ namespace internal {
     // is complete; forward-declared here because those globals appear earlier in
     // this header. Return true if an open window consumed the call.
     bool routeSetWindowTitleToWindow(const std::string& title);
-    bool routeSetWindowSizeToWindow(int width, int height);
-    bool routeSetWindowPixelSizeToWindow(int width, int height);
+    bool routeSetWindowSizeToWindow(int width, int height, WindowGeometryCall call = WindowGeometryCall::GlobalLogicalSize);
+    bool routeSetWindowPixelSizeToWindow(int width, int height, WindowGeometryCall call = WindowGeometryCall::GlobalSize);
+    WindowFullscreenPhase mainWindowFullscreenPhase();
+    void setMainFullscreen(bool full);
+    bool ignoreFullscreenGeometry(WindowFullscreenPhase phase, WindowGeometryCall call, const std::string* title = nullptr);
     bool routeSetFullscreenToWindow(bool full);
     bool routeToggleFullscreenToWindow();
     bool routeIsFullscreenFromWindow(bool& out);
@@ -1634,14 +1638,17 @@ inline std::string getClipboardString() {
 // Change window size (specify in size corresponding to coordinate system)
 // pixelPerfect=true: specify in framebuffer size
 // pixelPerfect=false: specify in logical size
+// Desktop geometry requests are ignored with one Notice until isFullscreen()
+// returns false, including macOS fullscreen transitions.
 inline void setWindowSize(int width, int height) {
     if constexpr (internal::windowSizeIsScreenControlled()) {
         internal::setMainWindowSizeLogical(width, height);
         return;
     }
-    if (width <= 0 || height <= 0) return;
     if (internal::pixelPerfectMode()) {
         if (internal::routeSetWindowPixelSizeToWindow(width, height)) return;
+        if (internal::ignoreFullscreenGeometry(internal::mainWindowFullscreenPhase(), internal::WindowGeometryCall::GlobalSize)) return;
+        if (width <= 0 || height <= 0) return;
         const float scale = sapp_dpi_scale();
         const float factor = std::isfinite(scale) && scale > 0 ? scale : 1.0f;
 #if defined(__linux__) && !defined(__ANDROID__)
@@ -1653,29 +1660,33 @@ inline void setWindowSize(int width, int height) {
         // Bound: float(INT_MAX) rounds up to 2^31, outside int range.
         if (!std::isfinite(logicalWidth) || !std::isfinite(logicalHeight) ||
             logicalWidth >= 0x1p31f || logicalHeight >= 0x1p31f) return;
-        setWindowSizeLogical(int(logicalWidth), int(logicalHeight));
-    } else setWindowSizeLogical(width, height);
+        if (logicalWidth < 1 || logicalHeight < 1) return;
+        internal::setMainWindowSizeLogical(int(logicalWidth), int(logicalHeight));
+    } else {
+        if (internal::routeSetWindowSizeToWindow(width, height, internal::WindowGeometryCall::GlobalSize)) return;
+        if (internal::ignoreFullscreenGeometry(internal::mainWindowFullscreenPhase(), internal::WindowGeometryCall::GlobalSize)) return;
+        if (width > 0 && height > 0) internal::setMainWindowSizeLogical(width, height);
+    }
 }
 
 // Fullscreen. Context-aware: sapp_toggle_fullscreen()/sapp_is_fullscreen() only
 // act on the main window, so from a secondary window's tick/event these route to
 // THAT window's native per-window fullscreen (macOS NSWindow toggleFullScreen:,
 // Win32 borderless-fullscreen style swap, X11 EWMH _NET_WM_STATE_FULLSCREEN —
-// see Window::setFullscreen). On the main context they behave exactly as before.
+// see Window::setFullscreen). isFullscreen() remains true while fullscreen
+// blocks geometry controls, including macOS entering/exiting animations.
 
 // Enter / leave fullscreen.
 inline void setFullscreen(bool full) {
     if (internal::routeSetFullscreenToWindow(full)) return;
-    if (full != sapp_is_fullscreen()) {
-        sapp_toggle_fullscreen();
-    }
+    internal::setMainFullscreen(full);
 }
 
 // Get fullscreen state (of the current window's context).
 inline bool isFullscreen() {
     bool out = false;
     if (internal::routeIsFullscreenFromWindow(out)) return out;
-    return sapp_is_fullscreen();
+    return internal::mainWindowFullscreenPhase() != internal::WindowFullscreenPhase::Windowed;
 }
 
 // Toggle fullscreen.
