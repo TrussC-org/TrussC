@@ -15148,10 +15148,8 @@ void tcApp::update() {
 
 ## getCircleResolution
 
-Kept for backward compatibility; new code should call
-[`getCurveResolution`](#getCurveResolution). Returns the current curve resolution,
-including values set with [`setCircleResolution`](#setCircleResolution) or
-[`setCurveResolution`](#setCurveResolution). Scheduled for removal in v1.0.0.
+- This is an old name kept so that existing code still builds. Using it shows a deprecation warning at compile time, and it is scheduled for removal in v1.0.0. Use `getCurveResolution()` in new code.
+- It returns the current curve resolution, including a value set with `setCircleResolution()` or `setCurveResolution()`.
 
 ## getClipboardString
 
