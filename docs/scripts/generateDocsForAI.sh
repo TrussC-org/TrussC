@@ -5,6 +5,7 @@
 #   - trussc_docs.md     : Documentation (markdown files)
 #   - trussc_examples.md : Example source code
 #   - trussc_api.md      : API headers
+#   - trussc_api_details.txt : details + examples of each API entry (from api-reference.toml)
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -18,6 +19,7 @@ DATE_STR=$(LANG=C date +"%Y-%m-%d %H:%M:%S")
 DOCS_FILE="$SCRIPT_DIR/${TIMESTAMP}_trussc_docs.txt"
 EXAMPLES_FILE="$SCRIPT_DIR/${TIMESTAMP}_trussc_examples.txt"
 API_FILE="$SCRIPT_DIR/${TIMESTAMP}_trussc_api.txt"
+DETAILS_FILE="$SCRIPT_DIR/${TIMESTAMP}_trussc_api_details.txt"
 
 # Function to add a file with path and code block
 add_file() {
@@ -55,7 +57,7 @@ echo "# TrussC Documentation" > "$DOCS_FILE"
 echo "" >> "$DOCS_FILE"
 echo "Generated: $DATE_STR" >> "$DOCS_FILE"
 
-echo "  [1/3] Collecting documentation..."
+echo "  [1/4] Collecting documentation..."
 
 find "$ROOT_DIR" -name "*.md" -type f \
     ! -path "*/build/*" \
@@ -73,7 +75,7 @@ echo "# TrussC Examples" > "$EXAMPLES_FILE"
 echo "" >> "$EXAMPLES_FILE"
 echo "Generated: $DATE_STR" >> "$EXAMPLES_FILE"
 
-echo "  [2/3] Collecting examples..."
+echo "  [2/4] Collecting examples..."
 
 find "$ROOT_DIR/examples" \( -name "*.h" -o -name "*.cpp" \) -type f \
     ! -path "*/build/*" | sort | while read f; do
@@ -87,7 +89,7 @@ echo "# TrussC API" > "$API_FILE"
 echo "" >> "$API_FILE"
 echo "Generated: $DATE_STR" >> "$API_FILE"
 
-echo "  [3/3] Collecting API headers..."
+echo "  [3/4] Collecting API headers..."
 
 # TrussC's own headers in tc/ directory (headers only, no .cpp)
 find "$ROOT_DIR/core/include/tc" -name "*.h" -type f | sort | while read f; do
@@ -101,11 +103,19 @@ done
 add_file "$ROOT_DIR/core/include/TrussC.h" "$API_FILE"
 
 # =============================================================================
+# 4. API details (trussc_api_details.txt)
+# =============================================================================
+echo "  [4/4] Collecting API details..."
+
+# Needs docs/node_modules (cd docs && npm ci)
+node "$SCRIPT_DIR/emit-api-details.js" "$DETAILS_FILE" > /dev/null || exit 1
+
+# =============================================================================
 # Summary
 # =============================================================================
 echo ""
 echo "Generated files:"
-for f in "$DOCS_FILE" "$EXAMPLES_FILE" "$API_FILE"; do
+for f in "$DOCS_FILE" "$EXAMPLES_FILE" "$API_FILE" "$DETAILS_FILE"; do
     SIZE=$(du -h "$f" | cut -f1)
     LINES=$(wc -l < "$f")
     echo "  $(basename "$f"): $SIZE ($LINES lines)"
