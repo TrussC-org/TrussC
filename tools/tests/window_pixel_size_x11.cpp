@@ -1,6 +1,7 @@
 // Template for test_window_pixel_size.py: inject production control and global
 // size bodies, and compile the production helper against recording Xlib calls.
 
+#include "core/include/sokol/util/sokol_window_size.h"
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
@@ -91,6 +92,8 @@ void setMainFullscreen(bool) {}
 WindowFullscreenPhase mainWindowFullscreenPhase() { return WindowFullscreenPhase::Windowed; }
 bool ignoreFullscreenGeometry(WindowFullscreenPhase, WindowGeometryCall) { return false; }
 bool routeSetWindowSizeToWindow(int, int, WindowGeometryCall) { return false; }
+struct StartupDesc { int width, height, _tc_pixel_width, _tc_pixel_height; };
+void seedCreationGeometry(const StartupDesc& desc) { CREATION_GEOMETRY_SEED }
 void setMainWindowSizeLogical(int w, int h) { x11Geometry(dpy, 2, geometry, false, 0,0,w,h,dpi); }
 void setMainWindowSizeFractionalX11(double w, double h) { x11Geometry(dpy, 2, geometry, false, 0,0,w,h,dpi,false,true); }
 void setMainWindowPosition(int, int) {}
@@ -138,6 +141,20 @@ int main() {
             const auto& r=requests.back();
             assert(r.kind == "resize" && r.width == 1001 && r.height == 667);
             assert(trussc::internal::geometry.pixelSize);
+        }
+        // The first move must retain the converted creation size. In logical
+        // mode it keeps the existing truncation on moves, including odd sizes.
+        for (bool pixelStartup : {false, true}) for (int extent : {480, 640, 1001}) {
+            trussc::internal::seedCreationGeometry(
+                {extent, 667, pixelStartup ? extent : 0, pixelStartup ? 667 : 0});
+            requests.clear();
+            trussc::internal::x11Geometry(trussc::internal::dpy, 2,
+                trussc::internal::geometry, true, 20, 30, 0, 0, scale);
+            const auto& r = requests.back();
+            const int expectedWidth = pixelStartup ? extent : int(float(extent) * scale);
+            const int expectedHeight = pixelStartup ? 667 : int(667.0f * scale);
+            assert(r.kind == "moveResize" && r.width == expectedWidth && r.height == expectedHeight);
+            assert(trussc::internal::geometry.pixelSize == pixelStartup);
         }
     }
     // A main window without X11 (KMS) keeps the existing Warning/no-request behavior.

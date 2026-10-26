@@ -96,7 +96,10 @@ internal::X11GeometryState& mainGeometryState() {
     const auto window = (::Window)(uintptr_t)sapp_x11_get_window();
     if (window != mainGeometryWindow) {
         const auto desc = sapp_query_desc();
-        mainGeometry = {double(desc.width), double(desc.height)};
+        mainGeometry = {
+            _sapp_tc_window_points(desc.width, desc._tc_pixel_width, sapp_dpi_scale()),
+            _sapp_tc_window_points(desc.height, desc._tc_pixel_height, sapp_dpi_scale()),
+            desc._tc_pixel_width > 0 || desc._tc_pixel_height > 0};
         mainGeometryWindow = window;
     }
     return mainGeometry;

@@ -146,6 +146,11 @@ void setWindowDecorated(bool decorated) {
     [window makeFirstResponder:window.contentView];
 }
 
+void internal::setMainWindowSizeFractionalMac(double width, double height) {
+    NSWindow* window = (__bridge NSWindow*)sapp_macos_get_window();
+    if (window) [window setContentSize:NSMakeSize((CGFloat)width, (CGFloat)height)];
+}
+
 void internal::setMainWindowSizeLogical(int width, int height) {
     // The TrussC main window, like the other functions in this file. NOT
     // [NSApp mainWindow]: that is AppKit's focused window, which is a

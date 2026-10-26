@@ -409,6 +409,10 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     d.y = -1;
     d.width = settings.width;
     d.height = settings.height;
+    if (pixelPerfectMode()) {
+        d._tc_pixel_width = settings.width > 0 ? settings.width : 0;
+        d._tc_pixel_height = settings.height > 0 ? settings.height : 0;
+    }
     d.title = settings.title.c_str();
     d.borderless = !settings.decorated;
     d.no_high_dpi = !settings.highDpi;
