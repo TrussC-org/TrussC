@@ -1,6 +1,9 @@
 // Linux dummy SG/SGL fixture modeling the synchronous RESIZED events
 // produced by AppKit setFrame / Win32 SetWindowPos.
 #if defined(__linux__) && !defined(__ANDROID__)
+#if defined(SOKOL_GLES3)
+#define TC_REENTRY_GLES3
+#endif
 #undef SOKOL_GLCORE
 #undef SOKOL_GLES3
 #define SOKOL_DUMMY_BACKEND
@@ -11,7 +14,11 @@
 #include "sokol/util/sokol_gl_tc.h"
 #undef SOKOL_GL_IMPL
 // Keep real desktop Window dispatch while SG/SGL above use the dummy backend.
+#if defined(TC_REENTRY_GLES3)
+#define SOKOL_GLES3
+#else
 #define SOKOL_GLCORE
+#endif
 #include <TrussC.h>
 #include <cstdio>
 using namespace tc;
