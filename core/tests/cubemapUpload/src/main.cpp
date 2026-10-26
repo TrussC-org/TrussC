@@ -43,6 +43,7 @@ void expectFaces(Texture& texture, const Faces& expected) {
     desc.width = sideSize;
     desc.height = sideSize;
     desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    desc.sample_count = 1; // The injected cube texture is single-sampled.
     desc.usage.color_attachment = true;
     desc.gl_textures[0] = info.tex[info.active_slot];
     const sg_image alias = sg_make_image(&desc);
