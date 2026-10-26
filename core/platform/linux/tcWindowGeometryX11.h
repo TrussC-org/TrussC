@@ -76,11 +76,10 @@ inline void x11Geometry(Display* dpy, ::Window window, X11GeometryState& request
         logWarning("Platform") << "window geometry requires X11 (unsupported on headless KMS)";
         return;
     }
-    // While fullscreen, leave the WM's saved windowed content size alone.
-    // Reapplying it to the undecorated live window can subtract the title bar
-    // from Mutter's restore size. A position request still moves/reenters as
-    // before, but uses XMoveWindow without a size override.
-    const bool resize = !move || (!fullscreenIntent && requested.requestedWidth > 0 && requested.requestedHeight > 0);
+    // The common adapter emits the Notice. Keep native/state effects blocked
+    // here too for main GLX/EGL and secondary callers of this shared helper.
+    if (fullscreenIntent) return;
+    const bool resize = !move || (requested.requestedWidth > 0 && requested.requestedHeight > 0);
     const float factor = std::isfinite(scale) && scale > 0 ? scale : 1.0f;
     const double logicalWidth = move ? requested.requestedWidth : width;
     const double logicalHeight = move ? requested.requestedHeight : height;
@@ -104,27 +103,22 @@ inline void x11Geometry(Display* dpy, ::Window window, X11GeometryState& request
     // deltas and can leave Mutter's content size one pixel off indefinitely.
     x11PinMoveGravity(dpy, window);
     if (!move) {
-        // Clear auto-maximize even before the WM publishes its state. Keep
-        // fullscreen's existing live resize attempt, without changing restore
-        // intent: an ignored fullscreen size must never leak into a later move.
-        if (!fullscreenIntent) x11State(dpy, window, false, "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ");
+        // Clear auto-maximize even before the WM publishes its state.
+        x11State(dpy, window, false, "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ");
         XResizeWindow(dpy, window, unsigned(pixelWidth), unsigned(pixelHeight));
         XFlush(dpy);
-        if (!fullscreenIntent) requested = {width, height, pixelSize};
+        requested = {width, height, pixelSize};
         return;
     }
     // #219: CenterGravity causes KWin/Mutter round-trip offsets. Pin the
-    // decorated frame's top-left, drop fullscreen/maximize before the move,
-    // and restore fullscreen only. Send unmaximize even before the WM has
+    // decorated frame's top-left. Send unmaximize even before the WM has
     // published _NET_WM_STATE (creation-time auto-maximize on KWin).
-    if (fullscreenIntent) x11State(dpy, window, false, "_NET_WM_STATE_FULLSCREEN");
     x11State(dpy, window, false, "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ");
     if (resize) {
         XMoveResizeWindow(dpy, window, x, y, unsigned(pixelWidth), unsigned(pixelHeight));
     } else {
         XMoveWindow(dpy, window, x, y);
     }
-    if (fullscreenIntent) x11State(dpy, window, true, "_NET_WM_STATE_FULLSCREEN");
     XFlush(dpy);
 }
 }

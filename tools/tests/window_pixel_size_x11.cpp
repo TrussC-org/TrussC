@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 #include <climits>
+#include "core/include/tc/app/internal/tcWindowFullscreen.h"
 namespace trussc {
 struct IVec2 { int x, y; };
 struct Log { template<class T> Log& operator<<(const T&) { return *this; } };
@@ -83,6 +84,13 @@ using Hook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec
 Hook windowControlHookForTests() { return nullptr; }
 Display* dpy=nullptr;
 X11GeometryState geometry{640,480};
+struct WindowRequestAccess {
+    static bool ignoreGeometry(Window&, WindowGeometryCall) { return false; }
+};
+void setMainFullscreen(bool) {}
+WindowFullscreenPhase mainWindowFullscreenPhase() { return WindowFullscreenPhase::Windowed; }
+bool ignoreFullscreenGeometry(WindowFullscreenPhase, WindowGeometryCall) { return false; }
+bool routeSetWindowSizeToWindow(int, int, WindowGeometryCall) { return false; }
 void setMainWindowSizeLogical(int w, int h) { x11Geometry(dpy, 2, geometry, false, 0,0,w,h,dpi); }
 void setMainWindowSizeFractionalX11(double w, double h) { x11Geometry(dpy, 2, geometry, false, 0,0,w,h,dpi,false,true); }
 void setMainWindowPosition(int, int) {}
@@ -100,7 +108,7 @@ struct Window {
     void setSecondaryPosition(int,int) {}
     IVec2 getSecondaryPosition() { return {}; }
     void setSecondaryFullscreen(bool) {}
-    IVec2 control(internal::WindowControl, int, int, const std::string* =nullptr);
+    IVec2 control(internal::WindowControl, int, int, const std::string* =nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);
 };
 CONTROL_BODY
 Window mainWindow;

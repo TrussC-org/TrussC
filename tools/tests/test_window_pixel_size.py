@@ -23,6 +23,7 @@ def main():
 #include <cmath>
 #include <limits>
 #include <string>
+#include "tc/app/internal/tcWindowFullscreen.h"
 #define _WIN32
 namespace trussc {
 struct IVec2 { int x, y; };
@@ -45,6 +46,10 @@ constexpr bool windowSizeIsScreenControlled() { return false; }
 constexpr bool supportsSecondaryWindows() { return true; }
 using Hook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
 Hook windowControlHookForTests() { return nullptr; }
+struct WindowRequestAccess {
+    static bool ignoreGeometry(Window&, WindowGeometryCall) { return false; }
+};
+void setMainFullscreen(bool) {}
 void setMainWindowSizeLogical(int, int) { assert(false); }
 void setMainWindowPosition(int, int) {}
 IVec2 mainWindowPosition() { return {}; }
@@ -64,7 +69,7 @@ struct Window {
     IVec2 getSecondaryPosition() { return {}; }
     void setSecondaryFullscreen(bool) {}
     void setSecondarySize(double, double, bool = false);
-    IVec2 control(internal::WindowControl, int, int, const std::string* = nullptr);
+    IVec2 control(internal::WindowControl, int, int, const std::string* = nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);
 };
 CONTROL_BODY
 SECONDARY_BODY
@@ -101,7 +106,7 @@ int main() {
         cpp = Path(scratch) / 'probe.cpp'
         cpp.write_text(source, encoding='utf-8')
         binary = Path(scratch) / 'probe'
-        subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-Wall', '-Wextra', '-Werror', str(cpp), '-o', str(binary)], check=True)
+        subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'core/include'), str(cpp), '-o', str(binary)], check=True)
         subprocess.run([str(binary)], check=True)
     print('PASS: main/secondary Win32 fractional dispatch and forwarding, 125/150/175/200%')
 
