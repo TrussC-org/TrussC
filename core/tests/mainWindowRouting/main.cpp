@@ -34,6 +34,19 @@ int main() {
     main->setSize(321, 123);
     setFullscreen(true);
     const bool entered = isFullscreen();
+    int ignoredNotices = 0;
+    bool exactNotices = true;
+    auto notices = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.message.starts_with("[Window] ")) {
+            ++ignoredNotices;
+            exactNotices &= e.level == LogLevel::Notice && e.message ==
+                "[Window] setWindowSize() ignored while fullscreen; call it once isFullscreen() returns false";
+        }
+    });
+    const int sizesBefore = sizeCalls;
+    setWindowSize(99, 77);
+    setWindowSize(-1, 77);
+    const bool ignored = sizeCalls == sizesBefore && ignoredNotices == 2 && exactNotices;
     toggleFullscreen();
     const bool left = !isFullscreen();
     internal::pixelPerfectMode() = true;
@@ -46,7 +59,7 @@ int main() {
     const bool ownWindowSize = sizeCalls == 3 && fractionalCalls == 1 && widthSeen == 321 && heightSeen == 123;
     const bool ok = attached && internal::currentWindow() == main && titleCalls == 1 &&
         titleSeen == (mcp::internal::isDevBuild() ? "sapp main [MCP]" : "sapp main") && main->getTitle() == titleSeen && ownWindowSize &&
-        widthSeen == 321 && heightSeen == 123 && fullscreenCalls == 2 && entered && left;
+        widthSeen == 321 && heightSeen == 123 && fullscreenCalls == 2 && entered && left && ignored;
     bool oddPixels = true;
     for (float dpi : {1.25f, 1.5f, 1.75f, 2.0f}) {
         liveScale = dpi;

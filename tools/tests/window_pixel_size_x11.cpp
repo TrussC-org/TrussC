@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 #include <climits>
+#include "core/include/tc/app/internal/tcWindowFullscreen.h"
 namespace trussc {
 struct IVec2 { int x, y; };
 struct Log { template<class T> Log& operator<<(const T&) { return *this; } };
@@ -77,13 +78,20 @@ bool sapp_is_fullscreen() { return false; }
 void sapp_toggle_fullscreen() {}
 void sapp_set_window_title(const char*) {}
 namespace internal {
-enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, PositionQuery };
+enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, PositionQuery, ToggleFullscreen };
 constexpr bool windowSizeIsScreenControlled() { return false; }
 constexpr bool supportsSecondaryWindows() { return TEST_SECONDARY; }
 using Hook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
 Hook windowControlHookForTests() { return nullptr; }
 Display* dpy=nullptr;
 X11GeometryState geometry{640,480};
+struct WindowRequestAccess {
+    static bool ignoreGeometry(Window&, WindowGeometryCall) { return false; }
+};
+void setMainFullscreen(bool) {}
+WindowFullscreenPhase mainWindowFullscreenPhase() { return WindowFullscreenPhase::Windowed; }
+bool ignoreFullscreenGeometry(WindowFullscreenPhase, WindowGeometryCall) { return false; }
+bool routeSetWindowSizeToWindow(int, int, WindowGeometryCall) { return false; }
 struct StartupDesc { int width, height, _tc_pixel_width, _tc_pixel_height; };
 void seedCreationGeometry(const StartupDesc& desc) { CREATION_GEOMETRY_SEED }
 void setMainWindowSizeLogical(int w, int h) { x11Geometry(dpy, 2, geometry, false, 0,0,w,h,dpi); }
@@ -102,8 +110,9 @@ struct Window {
     void setSecondarySize(double,double,bool=false) {}
     void setSecondaryPosition(int,int) {}
     IVec2 getSecondaryPosition() { return {}; }
+    bool isSecondaryFullscreen() const { return false; }
     void setSecondaryFullscreen(bool) {}
-    IVec2 control(internal::WindowControl, int, int, const std::string* =nullptr);
+    IVec2 control(internal::WindowControl, int, int, const std::string* =nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);
 };
 CONTROL_BODY
 Window mainWindow;

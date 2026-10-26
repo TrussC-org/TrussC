@@ -2581,6 +2581,7 @@ uint64_t sapp_html5_get_dropped_file_size64(int index) {
 #if !defined(__OBJC__)
 #error "sokol_app_tc.h macOS implementation must be compiled as Objective-C++ (.mm)"
 #endif
+#include "tc/app/internal/tcWindowFullscreen.h"
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
@@ -2596,6 +2597,7 @@ uint64_t sapp_html5_get_dropped_file_size64(int index) {
 
 typedef struct _sapp_tc_window_t {
     uint32_t win_id;
+    trussc::internal::WindowFullscreenState fullscreen_state;
     sapp_window_desc desc;
     bool is_main;                       /* window #0: created by sapp_run, drives the app callbacks */
     NSWindow* window;
@@ -2644,7 +2646,8 @@ static struct {
         bool cleanup_called;
         bool quit_requested;
         bool quit_ordered;
-        bool fullscreen;
+        bool fullscreen;              /* raw sokol state; TrussC uses fullscreen_state */
+        trussc::internal::WindowFullscreenState fullscreen_state;
         bool event_consumed;
         bool skip_present;              /* stored for API parity; ignored on Metal (as upstream) */
         uint64_t frame_count;
@@ -2702,6 +2705,21 @@ static void _sapp_tc_timing_update(_sapp_tc_timing_t* t) {
         }
     }
     t->last = now;
+}
+
+static trussc::internal::WindowFullscreenState& _sapp_tc_fullscreen_state(_sapp_tc_window_t* w) {
+    return w->is_main ? _sapp_tc.app.fullscreen_state : w->fullscreen_state;
+}
+static void _sapp_tc_request_fullscreen(_sapp_tc_window_t* w, bool full) {
+    if (!w || !w->window) return;
+    if (!_sapp_tc_fullscreen_state(w).request(full)) return;
+    if (w->is_main) _sapp_tc.app.fullscreen = full;
+    [w->window toggleFullScreen:nil];
+}
+static void _sapp_tc_reconcile_fullscreen(_sapp_tc_window_t* w) {
+    if (!w || !w->window || !_sapp_tc_fullscreen_state(w).reconcile()) return;
+    if (w->is_main) _sapp_tc.app.fullscreen = _sapp_tc_fullscreen_state(w).desired;
+    [w->window toggleFullScreen:nil];
 }
 
 /* keycode table lifted verbatim from sokol_app.h's _sapp_macos_init_keytable()
@@ -3343,15 +3361,41 @@ static BOOL _sapp_tc_request_exit(void) {
     e.type = SAPP_EVENTTYPE_RESTORED;
     _sapp_tc_send(w, &e);
 }
+- (void)windowWillEnterFullScreen:(NSNotification*)n {
+    (void)n;
+    if (self.w) _sapp_tc_fullscreen_state(self.w).will(true);
+}
+- (void)windowWillExitFullScreen:(NSNotification*)n {
+    (void)n;
+    if (self.w) _sapp_tc_fullscreen_state(self.w).will(false);
+}
 - (void)windowDidEnterFullScreen:(NSNotification*)n {
     (void)n;
     _sapp_tc_window_t* w = self.w;
-    if (w && w->is_main) _sapp_tc.app.fullscreen = true;
+    if (!w) return;
+    _sapp_tc_fullscreen_state(w).terminal(true);
+    if (w->is_main) _sapp_tc.app.fullscreen = true;
 }
 - (void)windowDidExitFullScreen:(NSNotification*)n {
     (void)n;
     _sapp_tc_window_t* w = self.w;
-    if (w && w->is_main) _sapp_tc.app.fullscreen = false;
+    if (!w) return;
+    _sapp_tc_fullscreen_state(w).terminal(false);
+    if (w->is_main) _sapp_tc.app.fullscreen = false;
+}
+- (void)windowDidFailToEnterFullScreen:(NSWindow*)window {
+    _sapp_tc_window_t* w = self.w;
+    if (!w) return;
+    const bool observed = (window.styleMask & NSWindowStyleMaskFullScreen) != 0;
+    _sapp_tc_fullscreen_state(w).terminal(observed);
+    if (w->is_main) _sapp_tc.app.fullscreen = observed;
+}
+- (void)windowDidFailToExitFullScreen:(NSWindow*)window {
+    _sapp_tc_window_t* w = self.w;
+    if (!w) return;
+    const bool observed = (window.styleMask & NSWindowStyleMaskFullScreen) != 0;
+    _sapp_tc_fullscreen_state(w).terminal(observed);
+    if (w->is_main) _sapp_tc.app.fullscreen = observed;
 }
 - (void)windowDidBecomeKey:(NSNotification*)n {
     _sapp_tc_window_t* w = self.w;
@@ -3444,6 +3488,13 @@ static void _sapp_tc_update_main_dimensions(bool allow_event) {
 static void _sapp_tc_main_tick(CADisplayLink* link) {
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     if (!w || w->in_tick) return;
+    // Reconcile once after terminal notifications, outside native delegates.
+    // Re-fetch slots: toggling AppKit can synchronously deliver native events.
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i) {
+        _sapp_tc_reconcile_fullscreen(_sapp_tc.windows[i]);
+    }
+    w = _sapp_tc.app.main;
+    if (!w) return;
     _sapp_tc_timing_update(&_sapp_tc.app.timing);      /* feeds the fallback estimate */
     if (link) {
         if (w->last_tick_time > 0.0) {
@@ -3608,8 +3659,7 @@ static bool _sapp_tc_create_main_window(void) {
     _sapp_tc.app.main = w;
 
     if (d->fullscreen) {
-        _sapp_tc.app.fullscreen = true;
-        [w->window toggleFullScreen:nil];
+        _sapp_tc_request_fullscreen(w, true);
     }
     [w->window makeKeyAndOrderFront:nil];
     _sapp_tc_update_main_dimensions(false);     /* silent startup sizing */
@@ -4163,10 +4213,7 @@ bool sapp_is_fullscreen(void) {
 
 void sapp_toggle_fullscreen(void) {
     _sapp_tc_window_t* w = _sapp_tc.app.main;
-    if (!w || !w->window) return;
-    /* optimistic flip; the delegate notifications are the authority */
-    _sapp_tc.app.fullscreen = !_sapp_tc.app.fullscreen;
-    [w->window toggleFullScreen:nil];
+    if (w) _sapp_tc_request_fullscreen(w, !_sapp_tc_fullscreen_state(w).desired);
 }
 
 int sapp_get_num_dropped_files(void) {
@@ -4255,6 +4302,20 @@ sapp_swapchain sapp_get_swapchain(void) {
 }
 
 } /* extern "C" */
+
+namespace trussc::internal {
+WindowFullscreenPhase macWindowFullscreenPhase(uint32_t id) noexcept {
+    _sapp_tc_window_t* w = id ? _sapp_tc_lookup({id}) : _sapp_tc.app.main;
+    return w ? _sapp_tc_fullscreen_state(w).phase : WindowFullscreenPhase::Windowed;
+}
+void setMacWindowFullscreen(uint32_t id, bool full) noexcept {
+    _sapp_tc_request_fullscreen(id ? _sapp_tc_lookup({id}) : _sapp_tc.app.main, full);
+}
+void toggleMacWindowFullscreen(uint32_t id) noexcept {
+    _sapp_tc_window_t* w = id ? _sapp_tc_lookup({id}) : _sapp_tc.app.main;
+    if (w) _sapp_tc_request_fullscreen(w, !_sapp_tc_fullscreen_state(w).desired);
+}
+}
 
 #elif defined(__APPLE__) && TARGET_OS_IPHONE
 /*== iOS (Metal) ============================================================

@@ -1,5 +1,6 @@
 // Actual shared Window dispatcher; native calls only record their point sizes.
 #include "core/include/sokol/util/sokol_window_size.h"
+#include "core/include/tc/app/internal/tcWindowFullscreen.h"
 #include <string>
 #include <limits>
 #include <cmath>
@@ -20,7 +21,11 @@ using CGFloat = double;
 double pointWidth = 0, pointHeight = 0;
 void recordMac(double width, double height) { pointWidth=width; pointHeight=height; }
 namespace internal {
-enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, PositionQuery };
+enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, PositionQuery, ToggleFullscreen };
+struct WindowRequestAccess {
+    static bool ignoreGeometry(Window&, WindowGeometryCall) { return false; }
+};
+void setMainFullscreen(bool) {}
 constexpr bool windowSizeIsScreenControlled() { return false; }
 constexpr bool supportsSecondaryWindows() { return TEST_SECONDARY; }
 using Hook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
@@ -37,10 +42,11 @@ struct Window {
     bool isOpen() const { return true; }
     void setSecondaryTitle(const std::string&) {}
     void setSecondaryPosition(int,int) {}
+    bool isSecondaryFullscreen() const { return false; }
     void setSecondaryFullscreen(bool) {}
     IVec2 getSecondaryPosition() { return {}; }
     void setSecondarySize(double width,double height,bool=false) { recordMac(MAC_SECONDARY_CALL); }
-    IVec2 control(internal::WindowControl,int,int,const std::string* =nullptr);
+    IVec2 control(internal::WindowControl,int,int,const std::string* =nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);
 };
 CONTROL_BODY
 }

@@ -25,6 +25,230 @@ void check(const char* label, bool ok) {
     std::printf("windowControlReentry: %s: %s\n", label, ok ? "PASS" : "FAIL");
     if (!ok) ++failures;
 }
+internal::WindowFullscreenState mainFullscreen, secondaryFullscreen;
+internal::WindowFullscreenPhase recordedPhase(const Window& window) {
+    return (window.ctx_.isMain ? mainFullscreen : secondaryFullscreen).phase;
+}
+int appliedControls = 0;
+bool recordControl(Window&, internal::WindowControl, int, int, const std::string*, IVec2&) {
+    ++appliedControls;
+    return true;
+}
+int mainNativeToggles = 0, secondaryNativeToggles = 0;
+bool recordFullscreenControl(Window& window, internal::WindowControl op, int full, int,
+                             const std::string*, IVec2&) {
+    auto& state = window.ctx_.isMain ? mainFullscreen : secondaryFullscreen;
+    auto& toggles = window.ctx_.isMain ? mainNativeToggles : secondaryNativeToggles;
+    // Stand in only for the native endpoint. Invoke the real public wrapper,
+    // context routing and control adapter, including explicit set requests.
+    if (op == internal::WindowControl::ToggleFullscreen) toggles += state.request(!state.desired);
+    else if (op == internal::WindowControl::Fullscreen) toggles += state.request(bool(full));
+    else return false;
+    return true;
+}
+void testPublicFullscreenToggles(Window& main, Window& secondary) {
+    using Phase = internal::WindowFullscreenPhase;
+    internal::windowFullscreenHookForTests() = recordedPhase;
+    internal::windowControlHookForTests() = recordFullscreenControl;
+    for (Window* target : {&main, &secondary}) {
+        auto& state = target == &main ? mainFullscreen : secondaryFullscreen;
+        auto& other = target == &main ? secondaryFullscreen : mainFullscreen;
+        auto& toggles = target == &main ? mainNativeToggles : secondaryNativeToggles;
+        auto& otherToggles = target == &main ? secondaryNativeToggles : mainNativeToggles;
+        for (bool global : {false, true}) {
+            auto toggle = [&] {
+                if (global) {
+                    internal::currentWindowCtx() = &target->context();
+                    toggleFullscreen();
+                } else {
+                    // A handle must act on its target even in another context.
+                    internal::currentWindowCtx() = &(target == &main ? secondary : main).context();
+                    target->toggleFullscreen();
+                }
+            };
+            for (bool initial : {false, true}) {
+                for (int presses : {0, 1, 2}) {
+                    state = {}; other = {};
+                    state.phase = initial ? Phase::Fullscreen : Phase::Windowed;
+                    state.desired = initial;
+                    toggles = otherToggles = 0;
+                    // Start through the production explicit-set path, then
+                    // press during Entering or Exiting (including cancellation).
+                    target->setFullscreen(!initial);
+                    state.will(!initial);
+                    for (int i = 0; i < presses; ++i) toggle();
+                    check("public toggles defer native work during either animation",
+                        toggles == 1 && state.transitioning() && target->isFullscreen());
+                    const bool reverse = presses == 1;
+                    check("public toggle flips or cancels the last requested state",
+                        state.desired == (reverse ? initial : !initial));
+                    state.terminal(!initial); // DidEnter / DidExit
+                    check("public reversal queues exactly the required reconciliation",
+                        state.reconcilePending == reverse);
+                    toggles += state.reconcile();
+                    check("terminal tick reconciles once with no second mid-animation toggle",
+                        toggles == (reverse ? 2 : 1) && !state.reconcile());
+                    if (reverse) state.terminal(initial);
+                    check("public toggles finish in the last requested state",
+                        !state.transitioning() && target->isFullscreen() == (reverse ? initial : !initial));
+                    // Settled toggles continue to issue exactly one native call.
+                    const int before = toggles;
+                    toggle();
+                    check("settled public toggle issues one native toggle", toggles == before + 1);
+                    check("public toggle never changes the other target",
+                        other.phase == Phase::Windowed && !other.desired && otherToggles == 0);
+                }
+            }
+        }
+    }
+    mainFullscreen = {}; secondaryFullscreen = {};
+    internal::windowFullscreenHookForTests() = nullptr;
+    internal::windowControlHookForTests() = nullptr;
+    internal::currentWindowCtx() = nullptr;
+}
+void testFullscreenTransitions() {
+    using Phase = internal::WindowFullscreenPhase;
+    // Every public request direction, notification origin (program/menu),
+    // terminal result (Did or observed DidFail), and reversal direction.
+    for (bool initial : {false, true}) {
+        for (bool menu : {false, true}) {
+            for (bool reverse : {false, true}) {
+                for (bool observed : {false, true}) {
+                  for (int willCount : {0, 1, 2}) {
+                    internal::WindowFullscreenState state;
+                    state.phase = initial ? Phase::Fullscreen : Phase::Windowed;
+                    state.desired = initial;
+                    const bool destination = !initial;
+                    if (!menu) check("pre-toggle phase blocks geometry", state.request(destination) && state.blocksGeometry());
+                    for (int i = 0; i < willCount; ++i) state.will(destination);
+                    if (!menu || willCount) check("Will blocks geometry for menu and program transitions", state.blocksGeometry() && state.transitioning());
+                    if (reverse && (!menu || willCount)) {
+                        check("reversal never issues a second toggle mid-animation", !state.request(initial));
+                        // A repeated Will must not erase the reversal.
+                        state.will(destination);
+                    }
+                    state.terminal(observed);
+                    check("Did/DidFail settles to observed state without a stuck guard",
+                        state.phase == (observed ? Phase::Fullscreen : Phase::Windowed) &&
+                        state.blocksGeometry() == observed && !state.transitioning());
+                    const bool reconcile = reverse && (!menu || willCount) && initial != observed;
+                    check("only a reversal reconciles after terminal notification", state.reconcilePending == reconcile);
+                    check("next tick reconciles exactly once", state.reconcile() == reconcile && !state.reconcile());
+                    if (reconcile) {
+                        state.will(initial);
+                        state.terminal(initial);
+                        check("reversal completes in requested state", state.blocksGeometry() == initial && !state.reconcile());
+                    }
+                  }
+                }
+            }
+        }
+    }
+    for (bool initial : {false, true}) {
+        internal::WindowFullscreenState repeated;
+        repeated.phase = initial ? Phase::Fullscreen : Phase::Windowed;
+        repeated.desired = initial;
+        check("initial reversal sequence issues one toggle", repeated.request(!initial));
+        check("first reversal is deferred", !repeated.request(initial));
+        check("reversing back remains deferred", !repeated.request(!initial));
+        repeated.terminal(!initial);
+        check("last desired state cancels an obsolete reversal", !repeated.reconcile());
+        check("begin opposite transition", repeated.request(initial));
+        check("reverse opposite transition", !repeated.request(!initial));
+        repeated.terminal(initial);
+        check("terminal records reconciliation", repeated.reconcilePending);
+        check("new settled-state request cancels pending reconciliation", !repeated.request(initial) && !repeated.reconcile());
+    }
+    internal::WindowFullscreenState state;
+    check("windowed accepts geometry", !state.blocksGeometry());
+    check("entry changes phase before native toggle", state.request(true) && state.phase == Phase::Entering);
+    state.will(true); state.terminal(true);
+    check("fullscreen blocks geometry", state.blocksGeometry());
+    check("exit changes phase before native toggle", state.request(false) && state.phase == Phase::Exiting);
+    state.will(false);
+    check("exit keeps isFullscreen guard until DidExit", state.blocksGeometry());
+    state.terminal(false);
+    check("DidExit accepts geometry again", !state.blocksGeometry());
+}
+void testFullscreenCalls(Window& main, Window& secondary) {
+    using Phase = internal::WindowFullscreenPhase;
+    internal::windowFullscreenHookForTests() = recordedPhase;
+    internal::windowControlHookForTests() = recordControl;
+    int messages = 0;
+    std::string message;
+    LogLevel level = LogLevel::Silent;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        ++messages; message = e.message; level = e.level;
+    });
+    const char* names[] = {"setWindowSize()", "setWindowSizeLogical()", "setWindowPosition()",
+        "Window::setSize()", "Window::setPosition()", "App::setSize()"};
+    const char* reasons[] = {"", " ignored: the window is entering fullscreen",
+        " ignored while fullscreen; call it once isFullscreen() returns false",
+        " ignored: the window is still leaving fullscreen; call it once isFullscreen() returns false"};
+    secondary.title_ = "Preview";
+    for (Window* target : {&main, &secondary}) {
+        auto& state = target->ctx_.isMain ? mainFullscreen : secondaryFullscreen;
+        auto& other = target->ctx_.isMain ? secondaryFullscreen : mainFullscreen;
+        for (Phase phase : {Phase::Windowed, Phase::Entering, Phase::Fullscreen, Phase::Exiting}) {
+            state.phase = phase;
+            other.phase = phase == Phase::Windowed ? Phase::Fullscreen : Phase::Windowed;
+            check("handle isFullscreen follows target guard even mid-exit", target->isFullscreen() == (phase != Phase::Windowed));
+            for (bool pixels : {false, true}) {
+                internal::pixelPerfectMode() = pixels;
+                for (int value : {320, -1}) {
+                    for (int call = 0; call != 6; ++call) {
+                        internal::currentWindowCtx() = &target->context();
+                        check("global isFullscreen follows target guard", isFullscreen() == (phase != Phase::Windowed));
+                        const int beforeMessages = messages, beforeApplied = appliedControls;
+                        switch (call) {
+                            case 0: setWindowSize(value, 240); break;
+                            case 1: setWindowSizeLogical(value, 240); break;
+                            case 2: setWindowPosition(value < 0 ? (std::numeric_limits<int>::max)() : value, 20); break;
+                            case 3: internal::currentWindowCtx() = &((target == &main) ? secondary : main).context();
+                                target->setSize(value, 240); break;
+                            case 4: internal::currentWindowCtx() = &((target == &main) ? secondary : main).context();
+                                target->setPosition(value < 0 ? (std::numeric_limits<int>::max)() : value, 20); break;
+                            case 5: internal::currentWindowCtx() = &((target == &main) ? secondary : main).context();
+                                target->getApp()->setSize(value > 0 ? float(value) : NAN, 240); break;
+                        }
+                        if (phase != Phase::Windowed) {
+                            const std::string expected = std::string("[Window] ") + names[call] +
+                                (target == &main ? "" : " on \"Preview\"") + reasons[int(phase)];
+                            check("ignored public call logs exactly one exact Notice before validation",
+                                messages == beforeMessages + 1 && level == LogLevel::Notice && message == expected);
+                            check("ignored public call never reaches native control", appliedControls == beforeApplied);
+                        } else if (value > 0 || call != 5) {
+                            check("windowed public call has no fullscreen Notice", messages == beforeMessages);
+                            check("windowed public call reaches adapter", appliedControls == beforeApplied + 1);
+                        } else {
+                            check("invalid windowed App keeps its validation Warning and no Notice",
+                                messages == beforeMessages + 1 && level == LogLevel::Warning);
+                            check("invalid windowed App never reaches native control", appliedControls == beforeApplied);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // The Linux/Win32 secondary query uses its own backend intent, even
+    // when another window is current. The dummy endpoint records admission.
+    internal::windowFullscreenHookForTests() = nullptr;
+    internal::currentWindowCtx() = &main.context();
+    secondary.fullscreenRequested_ = true;
+    const int beforeMessages = messages, beforeApplied = appliedControls;
+    secondary.setSize(320, 240);
+    check("secondary backend intent blocks a cross-window request",
+        secondary.isFullscreen() && messages == beforeMessages + 1 && appliedControls == beforeApplied);
+    secondary.fullscreenRequested_ = false;
+    secondary.setSize(320, 240);
+    check("cleared backend intent immediately accepts a request",
+        !secondary.isFullscreen() && messages == beforeMessages + 1 && appliedControls == beforeApplied + 1);
+    mainFullscreen = {}; secondaryFullscreen = {};
+    internal::windowFullscreenHookForTests() = nullptr;
+    internal::windowControlHookForTests() = nullptr;
+    internal::currentWindowCtx() = nullptr;
+    internal::pixelPerfectMode() = false;
+}
 struct DrawApp : App {
     Window* target = nullptr;
     int resized = 0, resizedWidth = 0, resizedHeight = 0;
@@ -86,6 +310,7 @@ extern "C" float sapp_window_dpi_scale(sapp_window) { return nativeDpi; }
 extern "C" bool sapp_isvalid() { return true; }
 int main() {
     getMainThreadId();
+    testFullscreenTransitions();
     sg_desc gd{}; sg_setup(&gd);
     sgl_desc_t sd{}; sgl_setup(&sd);
     {
@@ -100,6 +325,8 @@ int main() {
         secondary.setApp(secondaryApp);
         internal::WindowRequestAccess::applyPendingApp(secondary);
         check("secondary App attached", secondary.getApp() == secondaryApp);
+        testFullscreenCalls(*main, secondary);
+        testPublicFullscreenToggles(*main, secondary);
         sgl_context_desc_t cd{};
         main->context().swapchainTarget.resources().context = sgl_make_context(&cd);
         secondary.context().swapchainTarget.resources().context = sgl_make_context(&cd);
