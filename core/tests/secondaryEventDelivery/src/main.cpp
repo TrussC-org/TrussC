@@ -68,8 +68,16 @@ struct Probe : RectNode {
 struct DeliveryApp : App {
     std::shared_ptr<Probe> probe;
     MouseMoveEventArgs lastMove;
+    bool hoverPhase = false;
     void setup() override { enableEvents(); probe = std::make_shared<Probe>(); addChild(probe); }
-    void update() override { order["update"] += 'a'; }
+    void update() override {
+        order["update"] += 'a';
+        if (hoverPhase) {
+            // Seed after native input, in the same tick as the hover traversal.
+            auto& ctx = getWindow()->context();
+            ctx.mouseX = ctx.mouseY = 20.5f;
+        }
+    }
     void draw() override { order["draw"] += 'a'; }
     void exit() override { ++exits; order["exit"] += 'a'; }
     void keyPressed(const KeyEventArgs& e) override { order["keyPressed"] += 'a'; check("App sees held key", isKeyPressed(e.key)); }
@@ -174,7 +182,7 @@ void inputChecks() {
     check("worker does not enter App", order["touchPressed"].empty());
     // Hover uses logical floats even at fractional framebuffer-to-point scales.
     app->probe->setPos(20.25f, 10); app->probe->setSize(0.5f, 60);
-    secondary->context().mouseX = 20.5f; secondary->context().mouseY = 20.5f;
+    app->hoverPhase = true;
     order.clear();
 }
 struct Counts { int updates = 0, draws = 0, exits = 0, cleanups = 0; } counts[4];
@@ -261,7 +269,10 @@ struct Harness : App {
                 expect("update", "at"); expect("draw", "at");
                 auto app = std::static_pointer_cast<DeliveryApp>(secondary->getApp());
                 check("tick hover retains fractional point", secondary->context().hoveredNode.lock() == app->probe);
-                if (++framesAfterClear == 2) { secondary->setApp(std::make_shared<SwapApp>(0)); phase = 1; }
+                if (++framesAfterClear == 2) {
+                    app->hoverPhase = false;
+                    secondary->setApp(std::make_shared<SwapApp>(0)); phase = 1;
+                }
             } else if (phase == 1 && counts[1].updates) {
                 check("A keeps update and draw until boundary", counts[0].updates == 2 && counts[0].draws == 2 && counts[0].exits == 1 && counts[0].cleanups == 1);
                 check("setApp direct exit survives exit clear exactly once", exits == 1);

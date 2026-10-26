@@ -92,6 +92,7 @@ EGLContext sharedContext = EGL_NO_CONTEXT;
 EGLSurface mainSurface = EGL_NO_SURFACE;
 int redDraws = 0, greenDraws = 0;
 int redKeys = 0, greenKeys = 0, greenCloses = 0, redResizes = 0;
+int greenResizes = 0, lastRedWidth = 0, lastRedHeight = 0;
 size_t liveAllocations = 0;
 std::string capturePaths[3];
 void* allocate(size_t bytes, void*) noexcept {
@@ -107,6 +108,48 @@ void release(void* memory, void*) noexcept {
 void check(const char* label, bool ok) noexcept {
     std::printf("eglWindowSurfaces %s: %s\n", label, ok ? "PASS" : "FAIL");
     if (!ok) ++failures;
+}
+
+double monotonicTime() noexcept {
+    timespec value{};
+    clock_gettime(CLOCK_MONOTONIC, &value);
+    return (double)value.tv_sec + (double)value.tv_nsec * 1e-9;
+}
+
+template<class Ready>
+bool waitForGeometry(Ready ready) noexcept {
+    // Bound (asynchronous WM geometry): XSync cannot wait for the WM; cap the wait at two seconds, never assert latency.
+    const double deadline = monotonicTime() + 2.0;
+    do {
+        if (ready()) return true;
+        const timespec pause{0, 5000000};
+        nanosleep(&pause, nullptr);
+    } while (monotonicTime() < deadline);
+    return false;
+}
+
+bool captureWindowsReady() noexcept {
+    auto* display = (Display*)sapp_x11_get_display();
+    const ::Window windows[] = {
+        (::Window)(uintptr_t)sapp_x11_get_window(),
+        (::Window)(uintptr_t)sapp_window_x11_get_window(redWindow),
+        (::Window)(uintptr_t)sapp_window_x11_get_window(greenWindow)
+    };
+    int x[3]{}, y[3]{};
+    XWindowAttributes attributes[3]{};
+    for (int i = 0; i < 3; ++i) {
+        ::Window child{};
+        if (!XGetWindowAttributes(display, windows[i], &attributes[i]) ||
+            attributes[i].map_state != IsViewable || attributes[i].width < 64 || attributes[i].height < 64 ||
+            !XTranslateCoordinates(display, windows[i], DefaultRootWindow(display), 0, 0, &x[i], &y[i], &child))
+            return false;
+        for (int j = 0; j < i; ++j) {
+            if (x[i] < x[j] + attributes[j].width && x[j] < x[i] + attributes[i].width &&
+                y[i] < y[j] + attributes[j].height && y[j] < y[i] + attributes[i].height)
+                return false;
+        }
+    }
+    return true;
 }
 
 void clearColor(float r, float g, float b) noexcept {
@@ -167,8 +210,14 @@ void event(const sapp_event* ev, sapp_window window, void*) noexcept {
         if (window.id == redWindow.id && ev->key_code == SAPP_KEYCODE_A) ++redKeys;
         if (window.id == greenWindow.id && ev->key_code == SAPP_KEYCODE_B) ++greenKeys;
     }
-    if (ev->type == SAPP_EVENTTYPE_RESIZED && window.id == redWindow.id &&
-        ev->framebuffer_width == 83 && ev->framebuffer_height == 71) ++redResizes;
+    if (ev->type == SAPP_EVENTTYPE_RESIZED) {
+        const bool finalSize = ev->framebuffer_width == 83 && ev->framebuffer_height == 71;
+        if (window.id == redWindow.id) {
+            lastRedWidth = ev->framebuffer_width;
+            lastRedHeight = ev->framebuffer_height;
+            if (finalSize) ++redResizes;
+        } else if (window.id == greenWindow.id && finalSize) ++greenResizes;
+    }
 }
 
 void closeRequested(sapp_window window, void*) noexcept {
@@ -220,6 +269,11 @@ void init() noexcept {
 void frame() noexcept {
     if (!redWindow.id || !greenWindow.id) { sapp_quit(); return; }
     if (phase++ == 0) {
+        // A real WM can apply the initial moves asynchronously, too. Captures
+        // need viewable, separated windows, not exact WM decoration offsets.
+        const bool placed = waitForGeometry(captureWindowsReady);
+        check("initial capture geometry applied (timeout if not viewable and separated)", placed);
+        if (!placed) { sapp_quit(); return; }
         clearColor(0, 0, 1);
         trussc::internal::tickX11WindowForTests(redWindow);
         check("red tick restores caller draw/read surfaces and context",
@@ -245,7 +299,13 @@ void frame() noexcept {
         auto* xdisplay = (Display*)sapp_x11_get_display();
         XResizeWindow(xdisplay, (::Window)(uintptr_t)sapp_window_x11_get_window(redWindow), 83, 71);
         XSync(xdisplay, False);
-        trussc::internal::tickX11WindowForTests(redWindow);
+        const bool resized = waitForGeometry([] {
+            trussc::internal::tickX11WindowForTests(redWindow);
+            return redResizes > 0;
+        });
+        if (!resized) std::printf("resize timeout: wanted 83x71 on red, last resize=%dx%d, red=%d green=%d\n",
+            lastRedWidth, lastRedHeight, redResizes, greenResizes);
+        check("WM applied red 83x71 resize before timeout", resized);
         sendKey(xdisplay, redWindow, XK_a);
         sendKey(xdisplay, greenWindow, XK_b);
         XEvent close{};
@@ -258,7 +318,13 @@ void frame() noexcept {
         XSync(xdisplay, False);
     } else {
         check("X11 keys route independently", redKeys == 1 && greenKeys == 1);
-        check("X11 resize routes to its window", redResizes == 1);
+        // Intermediate WM sizes are valid. The requested final size must be
+        // delivered exactly once to red, never green, and remain the last size.
+        trussc::internal::tickX11WindowForTests(redWindow);
+        trussc::internal::tickX11WindowForTests(greenWindow);
+        check("X11 resize routes to its window", redResizes == 1 && greenResizes == 0 &&
+            lastRedWidth == 83 && lastRedHeight == 71 &&
+            sapp_window_framebuffer_width(redWindow) == 83 && sapp_window_framebuffer_height(redWindow) == 71);
         check("X11 close routes to its window", greenCloses == 1);
         sapp_window_desc spareDesc{};
         spareDesc.width = spareDesc.height = 32;
@@ -296,11 +362,6 @@ void frame() noexcept {
 // Single-window device exercise, also suitable for the Pi 4 regression pass.
 bool mainIdle, mainDirty = true;
 double inputTime;
-double monotonicTime() noexcept {
-    timespec value{};
-    clock_gettime(CLOCK_MONOTONIC, &value);
-    return (double)value.tv_sec + (double)value.tv_nsec * 1e-9;
-}
 void mainProbeInit() noexcept {
     const char* version = (const char*)glGetString(GL_VERSION);
     check("main probe uses GLES", version && std::strstr(version, "OpenGL ES"));
@@ -407,6 +468,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         uint32_t previousId = 0;
         for (int cycle = 0; cycle < 2; ++cycle) {
             phase = redDraws = greenDraws = redKeys = greenKeys = greenCloses = redResizes = 0;
+            greenResizes = lastRedWidth = lastRedHeight = 0;
             closeCaller = false;
             sapp_desc desc{};
             desc.width = desc.height = 64;
