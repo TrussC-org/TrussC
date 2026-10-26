@@ -70,7 +70,7 @@ Source code is available in the `examples/` directory.
 
 Comprehensive API reference is available at **[trussc.org/reference](https://trussc.org/reference/)**.
 
-For AI coding assistants, [docs/FOR_AI_ASSISTANT.md](docs/FOR_AI_ASSISTANT.md) carries an auto-generated C++ API index, and [docs/FOR_AI_DETAILS.md](docs/FOR_AI_DETAILS.md) the details and code examples of each entry.
+For AI coding assistants, [docs/FOR_AI_ASSISTANT.md](docs/FOR_AI_ASSISTANT.md) carries an auto-generated C++ API index.
 
 ## Why TAU?
 
