@@ -769,6 +769,9 @@ inline bool Window::isOccluded() const {
 inline void Window::setSize(int, int) {}
 inline void Window::setFullscreen(bool) {}
 inline bool Window::isFullscreen() const { return false; }
+// Only the main window exists here; the platform functions report "not supported".
+inline void Window::setPosition(int x, int y) { setWindowPosition(x, y); }
+inline IVec2 Window::getPosition() const { return getWindowPosition(); }
 #else
 namespace internal {
 inline constexpr bool supportsSecondaryWindows() { return true; }
