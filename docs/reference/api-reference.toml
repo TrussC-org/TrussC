@@ -9,7 +9,7 @@ description.ko = "앱이 상속하는 기반 클래스로, setup(), update(), dr
 details.en = '''
 - Main/host event delivery is BeforeApp → App (100, including its tree) → AfterApp. **Consumed input skips App virtuals too.** Equal priority uses registration order, and clear() keeps the App binding. See App::mousePressed for the v0.8 changes and the deferred secondary-window scope and headless update/exit.
 - Your tcApp inherits `App` and overrides the functions it needs. `main()` returns `TC_RUN_APP(tcApp, settings)` (see `runApp`).
-- `App` is a `RectNode` and the root of the scene graph, so you can call `addChild()` on it directly. Its size always follows the logical size of the window.
+- `App` is a `RectNode` and the root of the scene graph, so you can call `addChild()` on it directly. Its size uses logical points, or framebuffer pixels with global `pixelPerfect` enabled, for both main and secondary windows.
 - Keep the constructor to plain member setup, and do tree building, `setSize()` and file loading in `setup()`. In the constructor no `shared_ptr` owns the App yet, so `addChild()` asserts, `setSize()` does not resize the window, and `getRootNode()` is not this App. The same rule for nodes is described in `Node::setup`.
 - Startup order: the App is created after graphics are ready, `windowResized(w, h)` is then called once, and `setup()` runs once on the first update or draw. Therefore `getWidth()`/`getHeight()` already return the window size inside `setup()`.
 - Each frame notifies update, then draw. On the main/host window each notify runs BeforeApp, the App tree at 100, and AfterApp. The update tree includes mods, timers and children.
@@ -23,7 +23,7 @@ details.en = '''
 details.ja = '''
 - メインとホストでは BeforeApp → App（100、ツリーを含む）→ AfterApp の順です。**消費済み入力は App 仮想関数にも届きません。** 同順位は登録順で、clear() 後も App 登録は残ります。v0.8 の変更と、副ウィンドウの未移行範囲とヘッドレスの update/exitは App::mousePressed を参照してください。
 - 自分の tcApp を `App` から継承して作り、必要な関数をオーバーライドします。`main()` は `TC_RUN_APP(tcApp, settings)` を返します（`runApp` を参照してください）。
-- `App` は `RectNode` であり、シーングラフのルートです。そのため `addChild()` をそのまま使えます。サイズは常にウィンドウの論理サイズに合わせて変わります。
+- `App` は `RectNode` であり、シーングラフのルートです。そのため `addChild()` をそのまま使えます。サイズは主副窓とも論理ポイントを使い、グローバルな `pixelPerfect` が有効ならフレームバッファのピクセルを使います。
 - コンストラクタではメンバーの初期化だけを行い、ツリーの組み立て、`setSize()`、ファイルの読み込みは `setup()` に書いてください。コンストラクタの時点ではまだ `shared_ptr` が App を保持していないため、`addChild()` は assert になり、`setSize()` はウィンドウをリサイズせず、`getRootNode()` もこの App になりません。ノード側の同じルールは `Node::setup` で説明しています。
 - 起動の順番は次のとおりです。グラフィックスの準備ができてから App が作られ、続いて `windowResized(w, h)` が 1 回呼ばれ、最初の update または draw のときに `setup()` が 1 回呼ばれます。そのため、`setup()` の中ではすでに `getWidth()`/`getHeight()` がウィンドウサイズを返します。
 - 毎フレーム update、draw の順に通知します。メインとホストでは、それぞれの通知で BeforeApp → App とツリー（100）→ AfterApp の順に実行します。update のツリーには Mod、タイマー、子ノードの更新も含まれます。
@@ -37,7 +37,7 @@ details.ja = '''
 details.ko = '''
 - 메인/호스트에서는 BeforeApp → App(100, 트리 포함) → AfterApp 순서입니다. **소비된 입력은 App 가상 함수에도 전달되지 않습니다.** 같은 우선순위는 등록 순서이며 clear() 후에도 App 등록은 남습니다. v0.8 변경과 보조 윈도우 미전환 범위와 헤드리스 update/exit는 App::mousePressed를 참조하세요.
 - 자신의 tcApp을 `App`에서 상속해 만들고 필요한 함수를 오버라이드합니다. `main()`은 `TC_RUN_APP(tcApp, settings)`를 반환합니다(`runApp` 참조).
-- `App`은 `RectNode`이며 씬 그래프의 루트입니다. 그래서 `addChild()`를 그대로 사용할 수 있습니다. 크기는 항상 윈도우의 논리 크기를 따라갑니다.
+- `App`은 `RectNode`이며 씬 그래프의 루트입니다. 그래서 `addChild()`를 그대로 사용할 수 있습니다. 크기는 메인과 보조 윈도우 모두 논리 포인트를 사용하며 전역 `pixelPerfect`가 활성화되면 프레임버퍼 픽셀을 사용합니다.
 - 생성자에서는 멤버 초기화만 하고, 트리 구성, `setSize()`, 파일 로드는 `setup()`에 작성하세요. 생성자 시점에는 아직 `shared_ptr`가 App을 보유하지 않으므로 `addChild()`는 assert가 되고, `setSize()`는 윈도우를 리사이즈하지 않으며, `getRootNode()`도 이 App이 아닙니다. 노드 쪽의 같은 규칙은 `Node::setup`에서 설명합니다.
 - 시작 순서는 다음과 같습니다. 그래픽 준비가 끝난 뒤 App이 만들어지고, 이어서 `windowResized(w, h)`가 한 번 호출되며, 첫 update 또는 draw 때 `setup()`이 한 번 호출됩니다. 따라서 `setup()` 안에서는 이미 `getWidth()`/`getHeight()`가 윈도우 크기를 반환합니다.
 - 매 프레임 update, draw 순서로 알립니다. 메인/호스트에서는 각 알림이 BeforeApp → App과 트리(100) → AfterApp 순서로 실행됩니다. update 트리에는 Mod, 타이머, 자식 노드의 업데이트도 포함됩니다.
@@ -273,7 +273,7 @@ description.en = "Called when files are dropped onto the main window, with their
 description.ja = "メインウィンドウにファイルがドロップされたときに、そのパスを受け取って呼ばれる。"
 description.ko = "메인 윈도우에 파일이 드롭되었을 때 그 경로를 받아 호출된다."
 details.en = '''
-- Main/host event path: BeforeApp listeners → this App callback at 100 → AfterApp listeners. Earlier payload edits reach the App; there is no node-tree stage. Secondary-window delivery is unchanged in this part.
+- Main/host event path: BeforeApp listeners → this App callback at 100 → AfterApp listeners. Earlier payload edits reach the App; there is no node-tree stage.
 - Override `filesDropped(const vector<string>& files)` in your tcApp.
 - On desktop, each entry is a full (absolute) path in UTF-8 that you can load as is. On Linux, TrussC has already removed the `file://` prefix and decoded `%20` and similar escapes.
 - It is called on the main thread, so you can load images and other GPU objects right here. To check the file type, compare the extension, for example `toLower(getFileExtension(path)) == "png"`.
@@ -547,7 +547,7 @@ details.en = '''
 - If a move shows that a release was lost, `mouseReleased` is called first and that move goes to `mouseMoved` instead.
 - Nodes: the node that received the press receives `onMouseDrag` with that button. The move is also delivered as `onMouseMove`, starting from the node under the pointer and passed up to the parents in turn.
 - On touch devices, moving the first finger produces a left-button drag.
-- In secondary windows, `e.delta` is the relative motion reported by the OS, converted to logical pixels.
+- In secondary windows, `e.delta` is the relative motion reported by the OS, converted to framebuffer pixels with global `pixelPerfect` enabled, logical points otherwise.
 '''
 details.ja = '''
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
@@ -560,7 +560,7 @@ details.ja = '''
 - 移動によってリリースが届いていなかったと分かった場合は、先に `mouseReleased` が呼ばれ、その移動は `mouseMoved` に届きます。
 - ノード: 押されたノードが、そのボタンで `onMouseDrag` を受け取ります。さらに、その移動は `onMouseMove` として、ポインタの下のノードから親へ順に渡っていきます。
 - タッチ端末では、1 本目の指を動かすと左ボタンのドラッグになります。
-- サブウィンドウでは、`e.delta` は OS が報告する相対移動量を論理ピクセルに換算した値です。
+- サブウィンドウでは、`e.delta` は OS が報告する相対移動量を、グローバルな `pixelPerfect` が有効なら framebuffer ピクセル、無効なら論理ポイントに換算した値です。
 '''
 details.ko = '''
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
@@ -573,7 +573,7 @@ details.ko = '''
 - 이동으로 릴리스가 오지 않았던 것이 드러나면 `mouseReleased`가 먼저 호출되고, 그 이동은 `mouseMoved`로 전달됩니다.
 - 노드: 눌린 노드가 그 버튼으로 `onMouseDrag`를 받습니다. 또한 그 이동은 `onMouseMove`로서 포인터 아래 노드부터 부모로 차례차례 넘어갑니다.
 - 터치 기기에서는 첫 번째 손가락을 움직이면 왼쪽 버튼 드래그가 됩니다.
-- 보조 창에서는 `e.delta`가 OS가 알려 주는 상대 이동량을 논리 픽셀로 환산한 값입니다.
+- 보조 창에서는 `e.delta`가 OS가 알려 주는 상대 이동량을 전역 `pixelPerfect`가 활성화되면 framebuffer 픽셀, 아니면 논리 포인트로 환산한 값입니다.
 '''
 related = ["isMousePressed", "App::mousePressed", "App::mouseReleased", "App::mouseMoved", "CoreEvents::mouseDragged", "MouseDragEventArgs", "MouseDragEventArgs::delta", "Node::onMouseDrag"]
 snippet = '''
@@ -875,7 +875,7 @@ description.ja = "この App が動いているウィンドウのサイズを変
 description.ko = "이 App이 실행 중인 윈도우의 크기를 바꾼다."
 details.en = '''
 - Non-finite, non-positive or int-unrepresentable dimensions are rejected with a Warning before conversion.
-- `w`/`h` are the size of the content area, without the title bar. They are logical points by default, and real framebuffer pixels when `WindowSettings` is set to pixelPerfect. Values are truncated to int.
+- `w`/`h` are the size of the content area, without the title bar. They are logical points by default, and real framebuffer pixels when `WindowSettings` is set to pixelPerfect. Input values are truncated to int before DPI conversion; subsequent pixel-size conversion follows `setWindowSize()` for main and secondary windows.
 - Call it from `setup()` or later. In the constructor (or for an App on the stack) no `shared_ptr` owns the App yet, so no window is resized: only the App's own size changes, and a warning is logged once per App. For the lifecycle, see `App`.
 - **The resize is asynchronous.** Right after the call, `getWidth()`/`getHeight()` still return the old size. They change, and `windowResized()` is called, once the window has actually been resized.
 - The resized window is always the App's own `getWindow()`, regardless of the current callback. Without an attached Window, only the App's own Node size changes.
@@ -885,7 +885,7 @@ details.en = '''
 '''
 details.ja = '''
 - 非有限値・正でない値・int で表せない寸法は、変換前に Warning を出して拒否します。
-- `w`/`h` はコンテンツ領域（タイトルバーを除いた部分）のサイズです。単位は通常は論理ポイントで、`WindowSettings` で pixelPerfect にしたときだけ実際のピクセルになります。小数は int に切り捨てられます。
+- `w`/`h` はコンテンツ領域（タイトルバーを除いた部分）のサイズです。単位は通常は論理ポイントで、`WindowSettings` で pixelPerfect にしたときだけ実際のピクセルになります。入力値は DPI 変換前に int に切り捨てられ、その後のピクセル指定の変換は主副窓とも `setWindowSize()` に従います。
 - `setup()` 以降で呼んでください。コンストラクタの中（およびスタック上に置いた App）ではまだ `shared_ptr` が App を保持していないため、ウィンドウはリサイズされません。App 自身のサイズだけが変わり、App ごとに 1 回警告が出ます。ライフサイクルについては `App` を参照してください。
 - **リサイズは非同期で行われます。** 呼んだ直後の `getWidth()`/`getHeight()` はまだ古いサイズを返します。実際にウィンドウのサイズが変わった時点で値が更新され、`windowResized()` が呼ばれます。
 - 現在のコールバックに関係なく、この App 自身の `getWindow()` が返す窓をリサイズします。所属する Window がなければ、この App の Node サイズだけを変更します。
@@ -895,7 +895,7 @@ details.ja = '''
 '''
 details.ko = '''
 - 유한하지 않거나 양수가 아니거나 int로 표현할 수 없는 크기는 변환 전에 Warning을 출력하고 거부합니다.
-- `w`/`h`는 콘텐츠 영역(타이틀 바를 제외한 부분)의 크기입니다. 기본 단위는 논리 포인트이며, `WindowSettings`에서 pixelPerfect로 설정했을 때만 실제 픽셀이 됩니다. 소수는 int로 잘립니다.
+- `w`/`h`는 콘텐츠 영역(타이틀 바를 제외한 부분)의 크기입니다. 기본 단위는 논리 포인트이며, `WindowSettings`에서 pixelPerfect로 설정했을 때만 실제 픽셀이 됩니다. 입력값은 DPI 변환 전에 int로 잘리며 이후 픽셀 크기 변환은 메인과 보조 모두 `setWindowSize()`를 따릅니다.
 - `setup()` 이후에 호출하세요. 생성자 안(또는 스택에 둔 App)에서는 아직 `shared_ptr`가 App을 보유하지 않으므로 윈도우가 리사이즈되지 않습니다. App 자신의 크기만 바뀌고 App마다 한 번 경고가 출력됩니다. 라이프사이클은 `App`을 참조하세요.
 - **리사이즈는 비동기로 이루어집니다.** 호출 직후의 `getWidth()`/`getHeight()`는 아직 이전 크기를 반환합니다. 실제로 윈도우 크기가 바뀐 시점에 값이 갱신되고 `windowResized()`가 호출됩니다.
 - 현재 콜백과 관계없이 이 App 자신의 `getWindow()`가 반환하는 윈도우를 리사이즈합니다. 연결된 Window가 없으면 이 App의 Node 크기만 변경합니다.
@@ -1125,38 +1125,38 @@ description.en = "Called when the window size changes, and once at startup befor
 description.ja = "ウィンドウのサイズが変わったときと、起動時の setup() の前に 1 回呼ばれる。"
 description.ko = "윈도우 크기가 바뀔 때와 시작할 때 setup() 전에 한 번 호출된다."
 details.en = '''
-- Main/host event path: BeforeApp listeners → this App callback at 100 → AfterApp listeners. Earlier payload edits reach the App; there is no node-tree stage. Resize startup/reload seeds remain App-only. Secondary-window delivery is unchanged in this part.
+- Main/host event path: BeforeApp listeners → this App callback at 100 → AfterApp listeners. Earlier payload edits reach the App; there is no node-tree stage. Resize startup/reload seeds remain App-only.
 - Override `windowResized(int width, int height)` in your tcApp. App has no version that takes an args struct (`events().windowResized` listeners receive `ResizeEventArgs`).
 - The size is in logical pixels: the framebuffer size divided by the DPI scale, truncated to an int. Only with `WindowSettings::setPixelPerfect` is it in actual framebuffer pixels.
 - When this function is called, `getWidth()` and `getHeight()` already return the new size. This is true even if you override this function.
 - It is called whenever the OS window changes size. Moving the window to a display with a different scale (DPI) also calls it, sometimes with the same logical size as before.
 - At startup it is called once with the initial size, right after the App's constructor and before `setup()`. This first call is not sent to `events().windowResized` listeners. For the whole startup order, see `App`.
 - Calling `App::setSize()` or `setWindowSize()` does not call it immediately. It is called once the OS window has actually changed size.
-- On a `Window::setApp` window, it is called before that window's update, only when the logical size has changed, and before that window's resize listeners.
+- On a `Window::setApp` window, it is called before that window's update, only when its size in App coordinates has changed, and before that window's resize listeners.
 - It is still called under hot reload, and a freshly reloaded App receives its size before its `setup()`. Headless apps never receive it.
 - It is called on the main thread.
 '''
 details.ja = '''
-- メインとホストのイベント経路は BeforeApp リスナー → この App コールバック (100) → AfterApp リスナーの順です。先行リスナーの引数編集は App に届き、ノードツリーの段階はありません。起動・リロード時のサイズ初期化は App のみで、副ウィンドウの配送は今回変更しません。
+- メインとホストのイベント経路は BeforeApp リスナー → この App コールバック (100) → AfterApp リスナーの順です。先行リスナーの引数編集は App に届き、ノードツリーの段階はありません。起動・リロード時のサイズ初期化は App のみです。
 - tcApp で `windowResized(int width, int height)` をオーバーライドします。App には引数が XxxArgs の版はありません（`events().windowResized` のリスナーは `ResizeEventArgs` を受け取ります）。
 - サイズは論理ピクセルです。フレームバッファのサイズを DPI スケールで割り、int に切り捨てた値になります。`WindowSettings::setPixelPerfect` にしたときだけ、実際のフレームバッファのピクセルになります。
 - この関数が呼ばれた時点で、`getWidth()` と `getHeight()` はすでに新しいサイズを返します。この関数をオーバーライドしている場合も同じです。
 - OS のウィンドウのサイズが変わるたびに呼ばれます。スケールの違うディスプレイ（DPI が違う画面）にウィンドウを移したときも呼ばれ、その際は論理サイズが前と同じこともあります。
 - 起動時は、App のコンストラクタのすぐあと、`setup()` の前に、最初のサイズで 1 回呼ばれます。この最初の 1 回は `events().windowResized` のリスナーには届きません。起動の流れ全体については `App` を参照してください。
 - `App::setSize()` や `setWindowSize()` を呼んでも、その場では呼ばれません。OS のウィンドウが実際にサイズを変えたときに呼ばれます。
-- `Window::setApp` のウィンドウでは、そのウィンドウの update の前に、論理サイズが変わったときだけ呼ばれます。そのウィンドウのリサイズのリスナーよりも先に呼ばれます。
+- `Window::setApp` のウィンドウでは、そのウィンドウの update の前に、App の座標単位でのサイズが変わったときだけ呼ばれます。そのウィンドウのリサイズのリスナーよりも先に呼ばれます。
 - ホットリロード中も呼ばれ、リロードされた新しい App には `setup()` の前にサイズが渡されます。ヘッドレス App では呼ばれません。
 - メインスレッドで呼ばれます。
 '''
 details.ko = '''
-- 메인/호스트 이벤트 경로는 BeforeApp 리스너 → 이 App 콜백(100) → AfterApp 리스너 순서입니다. 앞선 페이로드 수정은 App에 전달되며 노드 트리 단계는 없습니다. 시작/리로드 크기 초기화는 App 전용이고 보조 윈도우 전달은 이번에 변경하지 않습니다.
+- 메인/호스트 이벤트 경로는 BeforeApp 리스너 → 이 App 콜백(100) → AfterApp 리스너 순서입니다. 앞선 페이로드 수정은 App에 전달되며 노드 트리 단계는 없습니다. 시작/리로드 크기 초기화는 App 전용입니다.
 - tcApp에서 `windowResized(int width, int height)`를 오버라이드합니다. App에는 인자가 XxxArgs인 버전이 없습니다(`events().windowResized` 리스너는 `ResizeEventArgs`를 받습니다).
 - 크기는 논리 픽셀입니다. 프레임버퍼 크기를 DPI 스케일로 나누고 int로 버린 값입니다. `WindowSettings::setPixelPerfect`로 설정했을 때만 실제 프레임버퍼 픽셀이 됩니다.
 - 이 함수가 호출된 시점에 `getWidth()`와 `getHeight()`는 이미 새 크기를 반환합니다. 이 함수를 오버라이드한 경우에도 마찬가지입니다.
 - OS 윈도우 크기가 바뀔 때마다 호출됩니다. 스케일이 다른 디스플레이(DPI가 다른 화면)로 윈도우를 옮겼을 때도 호출되며, 이때 논리 크기는 이전과 같을 수도 있습니다.
 - 시작할 때는 App 생성자 바로 뒤, `setup()` 전에 처음 크기로 한 번 호출됩니다. 이 첫 호출은 `events().windowResized` 리스너에게 전달되지 않습니다. 시작 흐름 전체는 `App`을 참고하세요.
 - `App::setSize()`나 `setWindowSize()`를 호출해도 그 자리에서는 호출되지 않습니다. OS 윈도우가 실제로 크기를 바꿨을 때 호출됩니다.
-- `Window::setApp` 윈도우에서는 그 윈도우의 update 전에, 논리 크기가 바뀌었을 때만 호출됩니다. 그 윈도우의 리사이즈 리스너보다 먼저 호출됩니다.
+- `Window::setApp` 윈도우에서는 그 윈도우의 update 전에, App 좌표 단위의 크기가 바뀌었을 때만 호출됩니다. 그 윈도우의 리사이즈 리스너보다 먼저 호출됩니다.
 - 핫 리로드 중에도 호출되며, 리로드된 새 App에는 `setup()` 전에 크기가 전달됩니다. 헤드리스 App에서는 호출되지 않습니다.
 - 메인 스레드에서 호출됩니다.
 '''
@@ -5908,21 +5908,21 @@ description.en = "Fired when the window size changes."
 description.ja = "ウィンドウのサイズが変わったときに発生する。"
 description.ko = "윈도우 크기가 바뀌면 발생한다."
 details.en = '''
-- Main/host event path: BeforeApp listeners → this App callback at 100 → AfterApp listeners. Earlier payload edits reach the App; there is no node-tree stage. Resize startup/reload seeds remain App-only. Secondary-window delivery is unchanged in this part.
+- Main/host event path: BeforeApp listeners → this App callback at 100 → AfterApp listeners. Earlier payload edits reach the App; there is no node-tree stage. Resize startup/reload seeds remain App-only.
 - Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
-- Delivers `ResizeEventArgs&` on the main thread. `args.width` and `args.height` are logical dimensions, except that the main window uses framebuffer pixels when `pixelPerfect` is enabled.
+- Delivers `ResizeEventArgs&` on the main thread. `args.width` and `args.height` use logical dimensions by default, or framebuffer pixels when the global `pixelPerfect` mode is enabled, for both main and secondary windows.
 - The arguments have neither `cancel` nor `consumed`; listeners cannot cancel resizing or prevent the App callback. Headless runs do not generate this event.
 '''
 details.ja = '''
-- メインとホストのイベント経路は BeforeApp リスナー → この App コールバック (100) → AfterApp リスナーの順です。先行リスナーの引数編集は App に届き、ノードツリーの段階はありません。起動・リロード時のサイズ初期化は App のみで、副ウィンドウの配送は今回変更しません。
+- メインとホストのイベント経路は BeforeApp リスナー → この App コールバック (100) → AfterApp リスナーの順です。先行リスナーの引数編集は App に届き、ノードツリーの段階はありません。起動・リロード時のサイズ初期化は App のみです。
 - メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
-- メインスレッドで `ResizeEventArgs&` を渡します。`args.width` と `args.height` は論理サイズですが、メインウィンドウで `pixelPerfect` が有効な場合はフレームバッファのピクセル数になります。
+- メインスレッドで `ResizeEventArgs&` を渡します。`args.width` と `args.height` は主副窓とも通常は論理サイズで、グローバルな `pixelPerfect` が有効な場合はフレームバッファのピクセル数になります。
 - 引数に `cancel` と `consumed` はないため、リスナーからリサイズや App のコールバックを止めることはできません。ヘッドレス実行では発生しません。
 '''
 details.ko = '''
-- 메인/호스트 이벤트 경로는 BeforeApp 리스너 → 이 App 콜백(100) → AfterApp 리스너 순서입니다. 앞선 페이로드 수정은 App에 전달되며 노드 트리 단계는 없습니다. 시작/리로드 크기 초기화는 App 전용이고 보조 윈도우 전달은 이번에 변경하지 않습니다.
+- 메인/호스트 이벤트 경로는 BeforeApp 리스너 → 이 App 콜백(100) → AfterApp 리스너 순서입니다. 앞선 페이로드 수정은 App에 전달되며 노드 트리 단계는 없습니다. 시작/리로드 크기 초기화는 App 전용입니다.
 - 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
-- 메인 스레드에서 `ResizeEventArgs&`를 전달합니다. `args.width`와 `args.height`는 논리 크기이지만 메인 윈도우에서 `pixelPerfect`가 활성화되면 프레임버퍼 픽셀 수를 사용합니다.
+- 메인 스레드에서 `ResizeEventArgs&`를 전달합니다. `args.width`와 `args.height`는 메인과 보조 윈도우 모두 기본적으로 논리 크기를 사용하며, 전역 `pixelPerfect` 모드가 활성화되면 프레임버퍼 픽셀 수를 사용합니다.
 - 메인 윈도우는 `App::windowResized`보다 먼저 리스너를 호출합니다. 보조 윈도우는 크기 동기화 중 연결된 App의 크기가 바뀐 경우에만 App 콜백 이후 자신의 이벤트 모음으로 알립니다.
 - 인수에 `cancel`과 `consumed`가 없으므로 리스너에서 크기 변경이나 App 콜백을 막을 수 없습니다. 헤드리스 실행에서는 발생하지 않습니다.
 '''
@@ -6476,7 +6476,7 @@ details.en = '''
 - Subscribes to mouse movement, presses, releases, drags, and scrolling. By default, the left button (`0`) orbits and the middle button (`2`) pans; change them with `setOrbitButton()` and `setPanButton()`. If both bindings use the same button, orbit takes precedence.
 - `setDragModifier()` selects a required key, initially `Modifier::None`. The key is checked on press and scroll; a started drag continues until release even after the key is released.
 - Orbit uses horizontal and vertical movement at `0.01 * sensitivity` radians per coordinate unit, with sensitivity initially `1`. It rotates around the world up axis and camera right axis without an elevation clamp.
-- Pan moves the target in the camera right/up plane by `0.5 * panSensitivity` world units per coordinate unit, with pan sensitivity initially `1`. Coordinates use window logical pixels; pixel-perfect mode changes them to actual pixels only in the main window. Secondary windows always use logical pixels.
+- Pan moves the target in the camera right/up plane by `0.5 * panSensitivity` world units per coordinate unit, with pan sensitivity initially `1`. Coordinates use logical points, or framebuffer pixels with global `pixelPerfect` enabled, in both main and secondary windows.
 - Scrolling changes distance by `-dy * zoomSensitivity`, with zoom sensitivity initially `10` and a minimum distance of `0.1`; horizontal scrolling is ignored. See `EasyCam::enableOrtho` for zoom in orthographic mode.
 - `setControlArea()` restricts presses and scrolling to a rectangle, including its edges. Drags that start inside continue outside it. Scrolling checks the last position recorded by a mouse move, press, or drag; a rectangle with nonpositive width or height removes the restriction.
 - Accepted camera presses, drags, releases, and scrolls set `e.consumed = true`, stopping later listeners and delivery to scene nodes. The App callbacks still run. Mouse movement only records the position and is not consumed.
@@ -6487,7 +6487,7 @@ details.ja = '''
 - マウスの移動、押下、解放、ドラッグ、スクロールを受け取ります。標準では左ボタン（`0`）で周回し、中ボタン（`2`）でパンします。`setOrbitButton()` と `setPanButton()` で変更できます。同じボタンを両方に割り当てた場合は周回が優先されます。
 - `setDragModifier()` で必要なキーを指定し、初期値は `Modifier::None` です。キーは押下時とスクロール時に確認します。開始したドラッグは、途中でキーを離してもボタンを離すまで続きます。
 - 周回では、横と縦の移動に対して座標1単位あたり `0.01 * sensitivity` ラジアン回転します。感度の初期値は `1` です。ワールドの上方向の軸とカメラの右方向の軸を中心に回転し、仰角は制限しません。
-- パンでは、カメラの右方向と上方向の平面内で、座標1単位あたり `0.5 * panSensitivity` ワールド単位だけ注視点を移動します。パン感度の初期値は `1` です。座標にはウィンドウの論理ピクセルを使い、メインウィンドウで pixelPerfect モードが有効な場合だけ実ピクセルを使います。サブウィンドウでは常に論理ピクセルを使います。
+- パンでは、カメラの右方向と上方向の平面内で、座標1単位あたり `0.5 * panSensitivity` ワールド単位だけ注視点を移動します。パン感度の初期値は `1` です。座標は主副窓とも論理ポイントを使い、グローバルな `pixelPerfect` が有効なら framebuffer ピクセルを使います。
 - スクロールは距離を `-dy * zoomSensitivity` だけ変更します。ズーム感度の初期値は `10`、距離の下限は `0.1` で、横スクロールは無視します。正射影でのズームは `EasyCam::enableOrtho` を参照してください。
 - `setControlArea()` は押下とスクロールを矩形内に制限し、境界も含みます。内側で開始したドラッグは外側でも続きます。スクロールの判定には、移動、押下、ドラッグで最後に記録した位置を使います。幅または高さがゼロ以下の矩形を指定すると制限を解除します。
 - カメラが受け付けた押下、ドラッグ、解放、スクロールは `e.consumed = true` にし、後続のリスナーとシーンのノードには届かなくなります。App のコールバックは引き続き呼ばれます。マウス移動は位置を記録するだけで、処理済みにはしません。
@@ -6498,7 +6498,7 @@ details.ko = '''
 - 마우스 이동, 누름, 놓음, 드래그, 스크롤을 수신합니다. 기본적으로 왼쪽 버튼(`0`)으로 궤도 회전하고 가운데 버튼(`2`)으로 패닝합니다. `setOrbitButton()`과 `setPanButton()`으로 변경할 수 있습니다. 같은 버튼을 둘 다에 할당하면 궤도 회전이 우선합니다.
 - `setDragModifier()`로 필요한 키를 지정하며 초기값은 `Modifier::None`입니다. 키는 누름과 스크롤 시점에 확인합니다. 시작한 드래그는 도중에 키를 놓아도 버튼을 놓을 때까지 계속됩니다.
 - 궤도 회전은 가로와 세로 이동에 대해 좌표 1단위당 `0.01 * sensitivity` 라디안을 적용합니다. 감도의 초기값은 `1`입니다. 월드 위쪽 축과 카메라 오른쪽 축을 중심으로 회전하며 고도각을 제한하지 않습니다.
-- 패닝은 카메라의 오른쪽과 위쪽 평면에서 좌표 1단위당 `0.5 * panSensitivity` 월드 단위만큼 주시점을 이동합니다. 패닝 감도의 초기값은 `1`입니다. 좌표에는 윈도의 논리 픽셀을 사용하며 메인 윈도에서 pixelPerfect 모드가 활성화된 경우에만 실제 픽셀을 사용합니다. 보조 윈도에서는 항상 논리 픽셀을 사용합니다.
+- 패닝은 카메라의 오른쪽과 위쪽 평면에서 좌표 1단위당 `0.5 * panSensitivity` 월드 단위만큼 주시점을 이동합니다. 패닝 감도의 초기값은 `1`입니다. 메인과 보조 윈도우 모두 좌표에 논리 포인트를 사용하며 전역 `pixelPerfect`가 활성화되면 framebuffer 픽셀을 사용합니다.
 - 스크롤은 거리를 `-dy * zoomSensitivity`만큼 변경합니다. 줌 감도의 초기값은 `10`, 거리의 최솟값은 `0.1`이며 가로 스크롤은 무시합니다. 정사영에서의 줌은 `EasyCam::enableOrtho`를 참조하세요.
 - `setControlArea()`는 누름과 스크롤을 경계를 포함한 사각형 안으로 제한합니다. 안에서 시작한 드래그는 밖에서도 계속됩니다. 스크롤 검사는 이동, 누름, 드래그에서 마지막으로 기록한 위치를 사용합니다. 너비나 높이가 0 이하인 사각형을 지정하면 제한을 해제합니다.
 - 카메라가 받아들인 누름, 드래그, 놓음, 스크롤은 `e.consumed = true`로 설정하여 이후 리스너와 씬 노드에 전달되지 않게 합니다. App 콜백은 계속 호출됩니다. 마우스 이동은 위치만 기록하며 처리됨으로 표시하지 않습니다.
@@ -18637,17 +18637,17 @@ description.ko = "수신 측 좌표계의 커서 위치를 나타낸다."
 details.en = '''
 - For `events().mouseXxx` listeners and App mouse callbacks, `pos == globalPos`. Screen coordinates are relative to the window's content area, with (0, 0) at the upper left, x increasing rightward, and y increasing downward.
 - In a node callback, `pos` is converted through the inverse of that node's global transform into local coordinates; `globalPos` retains the screen position. The same convention applies to mouse move, drag, and scroll arguments.
-- The main window uses logical pixels by default, including on high-DPI displays. Setting `WindowSettings::pixelPerfect` to `true` uses framebuffer pixels for the main window instead; node transforms then determine the local coordinates.
+- Main and secondary windows use logical points by default, including on high-DPI displays. Enabling global `WindowSettings::pixelPerfect` uses framebuffer pixels instead; node transforms then determine the local coordinates.
 '''
 details.ja = '''
 - `events().mouseXxx` のリスナーと App のマウスコールバックでは `pos == globalPos` です。スクリーン座標はウィンドウの内容領域を基準とし、左上が (0, 0)、右方向が x の正方向、下方向が y の正方向です。
 - ノードのコールバックでは、そのノードのグローバル変換の逆変換を使って `pos` をローカル座標に変換します。`globalPos` はスクリーン座標を保持します。マウス移動、ドラッグ、スクロールの引数にも同じ規則が適用されます。
-- メインウィンドウでは、高 DPI の画面でも既定で論理ピクセルを使います。`WindowSettings::pixelPerfect` を `true` にすると、メインウィンドウではフレームバッファのピクセルを使います。ローカル座標は、そこからノードの変換によって決まります。
+- 主副窓とも、高 DPI の画面でも既定で論理ポイントを使います。グローバルな `WindowSettings::pixelPerfect` を有効にすると、フレームバッファのピクセルを使います。ローカル座標は、そこからノードの変換によって決まります。
 '''
 details.ko = '''
 - `events().mouseXxx` 리스너와 App 마우스 콜백에서는 `pos == globalPos`입니다. 스크린 좌표는 창의 내용 영역을 기준으로 하며, 왼쪽 위가 (0, 0)이고 x는 오른쪽으로, y는 아래쪽으로 증가합니다.
 - 노드 콜백에서는 해당 노드의 전역 변환에 대한 역변환으로 `pos`를 로컬 좌표로 변환합니다. `globalPos`는 스크린 위치를 유지합니다. 마우스 이동, 드래그, 스크롤 인자에도 같은 규칙을 적용합니다.
-- 기본적으로 주 창은 고 DPI 화면에서도 논리 픽셀을 사용합니다. `WindowSettings::pixelPerfect`를 `true`로 설정하면 주 창은 프레임버퍼 픽셀을 사용하며, 로컬 좌표는 여기에 노드 변환을 적용하여 결정합니다.
+- 메인과 보조 윈도우 모두 기본적으로 고 DPI 화면에서도 논리 포인트를 사용합니다. 전역 `WindowSettings::pixelPerfect`를 활성화하면 프레임버퍼 픽셀을 사용하며, 로컬 좌표는 여기에 노드 변환을 적용하여 결정합니다.
 '''
 
 ["MouseEventArgs::shift"]
@@ -25533,17 +25533,17 @@ description.ja = "変更後のウィンドウサイズを保持する。"
 description.ko = "변경된 창 크기를 담는다."
 details.en = '''
 - Passed to `events().windowResized` with integer `width` and `height`, both defaulting to `0`.
-- Dimensions use logical pixels by default. The main window uses framebuffer pixels when `WindowSettings::pixelPerfect` is enabled; secondary-window resize events use logical pixels.
+- Dimensions use logical pixels by default. Main and secondary windows both use framebuffer pixels when the global `pixelPerfect` mode is enabled.
 - For listener registration, lifetime, and delivery threads, see `Event<T>`.
 '''
 details.ja = '''
 - 整数の `width` と `height` を持ち、`events().windowResized` に渡されます。どちらの既定値も `0` です。
-- サイズの単位は既定で論理ピクセルです。メインウィンドウでは `WindowSettings::pixelPerfect` が有効な場合にフレームバッファのピクセルを使います。サブウィンドウのサイズ変更イベントでは論理ピクセルを使います。
+- サイズの単位は既定で論理ピクセルです。グローバルな `pixelPerfect` が有効な場合は、主副窓ともフレームバッファのピクセルを使います。
 - リスナーの登録、寿命、呼び出されるスレッドについては `Event<T>` を参照してください。
 '''
 details.ko = '''
 - 정수 `width`와 `height`를 담아 `events().windowResized`에 전달됩니다. 두 값의 기본값은 모두 `0`입니다.
-- 크기의 단위는 기본적으로 논리 픽셀입니다. 메인 창은 `WindowSettings::pixelPerfect`가 활성화되면 프레임버퍼 픽셀을 사용합니다. 보조 창의 크기 변경 이벤트는 논리 픽셀을 사용합니다.
+- 크기의 단위는 기본적으로 논리 픽셀입니다. 전역 `pixelPerfect` 모드가 활성화되면 메인과 보조 윈도우 모두 프레임버퍼 픽셀을 사용합니다.
 - 리스너 등록, 수명, 호출 스레드는 `Event<T>`를 참조하세요.
 '''
 
@@ -40181,7 +40181,7 @@ description.ko = "runner가 소유하는 메인을 포함한 애플리케이션 
 details.en = '''
 - The runner owns main; obtain its borrowed handle from `App::getWindow()`. Closing main quits. Main retains its existing timing, input coordinate mode and draw counts; the display pacing, throttling and shared_ptr ownership described below apply to secondary windows.
 - Create a secondary window with `createWindow` and give it content with `Window::setApp`. Each window has its own App and Node tree, events, mouse state, and rendering context.
-- `Window::getWidth`, `Window::getHeight`, `Window::setSize`, and mouse coordinates use logical pixels. Secondary windows do not apply `WindowSettings::pixelPerfect`.
+- `Window::getWidth`, `Window::getHeight`, and `Window::setSize` use logical points. Mouse coordinates, the attached App size and its `windowResized` arguments follow the global `WindowSettings::pixelPerfect` setting, just like main: framebuffer pixels when enabled, logical points otherwise.
 - Updates and drawing follow the window's display timing on macOS and Windows. Desktop Linux uses timer pacing based on a measured refresh-rate estimate. `Window::setFps` can reduce the update and drawing rate.
 - Main updates continue under occlusion, minimization and Web document hiding on callbacks the OS supplies; drawing is skipped or paced. Secondary windows retain native visibility admission; see `Window::isOccluded`.
 - Create, operate on, and release windows on the main thread. Window callbacks run synchronously on that thread.
@@ -40193,7 +40193,7 @@ details.en = '''
 details.ja = '''
 - メインは runner が所有し、`App::getWindow()` で借用ハンドルを取得します。メインを閉じると終了します。メインの時刻・入力座標モード・描画回数は従来どおりです。以下の表示タイミング、間引き、shared_ptr による所有は副窓に適用されます。
 - `createWindow` でサブウィンドウを作成し、`Window::setApp` で内容を設定します。各ウィンドウは独自の App と Node ツリー、イベント、マウス状態、描画コンテキストを持ちます。
-- `Window::getWidth`、`Window::getHeight`、`Window::setSize` とマウス座標の単位は論理ピクセルです。サブウィンドウでは `WindowSettings::pixelPerfect` は適用されません。
+- `Window::getWidth`、`Window::getHeight`、`Window::setSize` の単位は論理ポイントです。マウス座標、取り付けた App のサイズと `windowResized` の引数は、メインと同じグローバルな `WindowSettings::pixelPerfect` に従い、有効時は framebuffer ピクセル、無効時は論理ポイントです。
 - macOS と Windows では、そのウィンドウのディスプレイのタイミングに合わせて更新と描画を行います。デスクトップ Linux では、測定したリフレッシュレートの推定値に基づくタイマーで実行します。`Window::setFps` で更新と描画の頻度を下げられます。
 - メインは隠れ・最小化・Web の非表示中も OS から届く tick で更新を続け、描画のみ省略またはペース制御します。副窓は既存の native 可視状態による tick 制御を保ちます。`Window::isOccluded` を参照してください。
 - ウィンドウの作成、操作、解放はメインスレッドで行ってください。ウィンドウのコールバックも同じスレッドで同期的に呼ばれます。
@@ -40205,7 +40205,7 @@ details.ja = '''
 details.ko = '''
 - 메인은 runner가 소유하며 `App::getWindow()`으로 빌린 핸들을 얻습니다. 메인을 닫으면 종료합니다. 메인의 시간, 입력 좌표 모드와 그리기 횟수는 기존 동작을 유지합니다. 아래 표시 타이밍, 틱 생략 및 shared_ptr 소유 설명은 보조 윈도우에 적용됩니다.
 - `createWindow`로 보조 윈도우를 만들고 `Window::setApp`으로 콘텐츠를 설정합니다. 각 윈도우는 자체 App과 Node 트리, 이벤트, 마우스 상태, 렌더링 컨텍스트를 갖습니다.
-- `Window::getWidth`, `Window::getHeight`, `Window::setSize`와 마우스 좌표는 논리 픽셀을 사용합니다. 보조 윈도우에는 `WindowSettings::pixelPerfect`가 적용되지 않습니다.
+- `Window::getWidth`, `Window::getHeight`, `Window::setSize`는 논리 포인트를 사용합니다. 마우스 좌표, 연결된 App 크기와 `windowResized` 인자는 메인과 동일한 전역 `WindowSettings::pixelPerfect` 설정을 따르며 활성화 시 framebuffer 픽셀, 비활성화 시 논리 포인트입니다.
 - macOS와 Windows에서는 해당 윈도우가 있는 디스플레이의 타이밍에 맞춰 업데이트하고 그립니다. 데스크톱 Linux에서는 측정한 주사율 추정값에 기반한 타이머를 사용합니다. `Window::setFps`로 업데이트와 그리기 빈도를 낮출 수 있습니다.
 - 메인은 가림, 최소화, Web 문서 숨김 중에도 OS가 전달하는 틱에서 업데이트를 계속하며 그리기만 생략하거나 속도를 조절합니다. 보조 창은 기존 네이티브 가시성에 따른 틱 제어를 유지합니다. `Window::isOccluded`를 참조하세요.
 - 윈도우의 생성, 조작, 해제는 메인 스레드에서 수행하세요. 윈도우 콜백도 같은 스레드에서 동기적으로 호출됩니다.
@@ -40412,18 +40412,21 @@ description.en = "Returns this window's content width."
 description.ja = "このウィンドウのコンテンツ領域の幅を返す。"
 description.ko = "이 윈도우의 콘텐츠 영역 너비를 반환한다."
 details.en = '''
-- Logical sizes truncate framebuffer pixels divided by DPI, using the same conversion as resize events (for example 1286×967 at 200% becomes 643×483).
-- Returns an integer width in logical points, matching this window's coordinates, or `0` after the native window closes.
+- Logical sizes truncate framebuffer pixels divided by DPI (for example 1286×967 at 200% becomes 643×483).
+- Returns an integer width in logical points, for main and secondary regardless of `pixelPerfect`, or `0` after the native window closes.
+- Unlike these handle getters, `getWindowWidth()`/`getWindowHeight()` and the attached App size and resize arguments follow `pixelPerfect`.
 - For size units, see `Window::setSize`; for main-thread requirements, see `Window::setApp`.
 '''
 details.ja = '''
-- 論理サイズは framebuffer px ÷ DPI の小数部を切り捨て、resize イベントと同じ変換を使います。例：1286×967、200% は 643×483 です。
-- このウィンドウの座標系と同じ論理ポイント単位の幅を整数で返します。ネイティブウィンドウを閉じたあとは `0` を返します。
+- 論理サイズは framebuffer px ÷ DPI の小数部を切り捨てます。例：1286×967、200% は 643×483 です。
+- メイン・サブとも `pixelPerfect` にかかわらず論理ポイント単位の幅を整数で返します。ネイティブウィンドウを閉じたあとは `0` を返します。
+- ハンドルの getter と異なり、`getWindowWidth()`/`getWindowHeight()` と App のサイズ・resize 引数は `pixelPerfect` に従います。
 - サイズの単位は `Window::setSize`、メインスレッドでの使用は `Window::setApp` を参照してください。
 '''
 details.ko = '''
-- 논리 크기는 framebuffer 픽셀 ÷ DPI의 소수 부분을 버리며 resize 이벤트와 같은 변환을 씁니다. 예: 1286×967, 200%는 643×483입니다.
-- 이 윈도우의 좌표계와 같은 논리 포인트 단위의 너비를 정수로 반환합니다. 네이티브 윈도우를 닫은 뒤에는 `0`을 반환합니다.
+- 논리 크기는 framebuffer 픽셀 ÷ DPI의 소수 부분을 버립니다. 예: 1286×967, 200%는 643×483입니다.
+- 메인과 보조 윈도우 모두 `pixelPerfect`와 관계없이 논리 포인트 단위의 너비를 정수로 반환합니다. 네이티브 윈도우를 닫은 뒤에는 `0`을 반환합니다.
+- 이 핸들 getter와 달리 `getWindowWidth()`/`getWindowHeight()` 및 App 크기와 resize 인자는 `pixelPerfect`를 따릅니다.
 - 크기 단위는 `Window::setSize`, 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
 '''
 
@@ -40432,18 +40435,21 @@ description.en = "Returns this window's content height."
 description.ja = "このウィンドウのコンテンツ領域の高さを返す。"
 description.ko = "이 윈도우의 콘텐츠 영역 높이를 반환한다."
 details.en = '''
-- Logical sizes truncate framebuffer pixels divided by DPI, using the same conversion as resize events (for example 1286×967 at 200% becomes 643×483).
-- Returns an integer height in logical points, matching this window's coordinates, or `0` after the native window closes.
+- Logical sizes truncate framebuffer pixels divided by DPI (for example 1286×967 at 200% becomes 643×483).
+- Returns an integer height in logical points, for main and secondary regardless of `pixelPerfect`, or `0` after the native window closes.
+- Unlike these handle getters, `getWindowWidth()`/`getWindowHeight()` and the attached App size and resize arguments follow `pixelPerfect`.
 - For size units, see `Window::setSize`; for main-thread requirements, see `Window::setApp`.
 '''
 details.ja = '''
-- 論理サイズは framebuffer px ÷ DPI の小数部を切り捨て、resize イベントと同じ変換を使います。例：1286×967、200% は 643×483 です。
-- このウィンドウの座標系と同じ論理ポイント単位の高さを整数で返します。ネイティブウィンドウを閉じたあとは `0` を返します。
+- 論理サイズは framebuffer px ÷ DPI の小数部を切り捨てます。例：1286×967、200% は 643×483 です。
+- メイン・サブとも `pixelPerfect` にかかわらず論理ポイント単位の高さを整数で返します。ネイティブウィンドウを閉じたあとは `0` を返します。
+- ハンドルの getter と異なり、`getWindowWidth()`/`getWindowHeight()` と App のサイズ・resize 引数は `pixelPerfect` に従います。
 - サイズの単位は `Window::setSize`、メインスレッドでの使用は `Window::setApp` を参照してください。
 '''
 details.ko = '''
-- 논리 크기는 framebuffer 픽셀 ÷ DPI의 소수 부분을 버리며 resize 이벤트와 같은 변환을 씁니다. 예: 1286×967, 200%는 643×483입니다.
-- 이 윈도우의 좌표계와 같은 논리 포인트 단위의 높이를 정수로 반환합니다. 네이티브 윈도우를 닫은 뒤에는 `0`을 반환합니다.
+- 논리 크기는 framebuffer 픽셀 ÷ DPI의 소수 부분을 버립니다. 예: 1286×967, 200%는 643×483입니다.
+- 메인과 보조 윈도우 모두 `pixelPerfect`와 관계없이 논리 포인트 단위의 높이를 정수로 반환합니다. 네이티브 윈도우를 닫은 뒤에는 `0`을 반환합니다.
+- 이 핸들 getter와 달리 `getWindowWidth()`/`getWindowHeight()` 및 App 크기와 resize 인자는 `pixelPerfect`를 따릅니다.
 - 크기 단위는 `Window::setSize`, 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
 '''
 
@@ -40492,18 +40498,18 @@ description.en = "Resizes this window's content area."
 description.ja = "このウィンドウのコンテンツ領域をリサイズする。"
 description.ko = "이 윈도우의 콘텐츠 영역 크기를 변경한다."
 details.en = '''
-- `width` and `height` specify the content area in logical points, excluding window decorations. These units match `Window::getWidth()`, `Window::getHeight()`, and this window's input coordinates.
-- Secondary windows use logical coordinates even when pixelPerfect mode is enabled. DPI scaling is handled when converting the requested size to native dimensions.
+- `width` and `height` specify the content area in logical points, excluding window decorations. These units match `Window::getWidth()` and `Window::getHeight()`. Input coordinates use framebuffer pixels when pixelPerfect is enabled and logical points otherwise.
+- `Window::setSize()` uses logical points for main and secondary windows even with pixelPerfect enabled. DPI conversion keeps the existing logical-size rounding; for pixel requests use `App::setSize()` or `setWindowSize()`.
 - Does nothing after the native window closes. For main-thread requirements, see `Window::setApp`.
 '''
 details.ja = '''
-- `width` と `height` は、ウィンドウの装飾を除いたコンテンツ領域のサイズを論理ポイントで指定します。単位は `Window::getWidth()`、`Window::getHeight()`、このウィンドウの入力座標と同じです。
-- セカンダリウィンドウは pixelPerfect モードが有効でも論理座標を使用します。要求したサイズをネイティブの寸法へ変換するときに DPI スケールを反映します。
+- `width` と `height` は、ウィンドウの装飾を除いたコンテンツ領域のサイズを論理ポイントで指定します。単位は `Window::getWidth()`、`Window::getHeight()` と同じです。入力座標は pixelPerfect が有効ならフレームバッファのピクセル、無効なら論理ポイントです。
+- `Window::setSize()` は主副窓とも pixelPerfect が有効でも論理ポイントを使います。DPI 変換では論理サイズの既存の丸めを維持します。ピクセル指定には `App::setSize()` または `setWindowSize()` を使います。
 - ネイティブウィンドウを閉じたあとは何もしません。メインスレッドでの使用については `Window::setApp` を参照してください。
 '''
 details.ko = '''
-- `width`와 `height`는 윈도우 장식을 제외한 콘텐츠 영역 크기를 논리 포인트로 지정합니다. 단위는 `Window::getWidth()`, `Window::getHeight()`, 이 윈도우의 입력 좌표와 같습니다.
-- 보조 윈도우는 pixelPerfect 모드가 활성화되어 있어도 논리 좌표를 사용합니다. 요청한 크기를 네이티브 크기로 변환할 때 DPI 배율을 반영합니다.
+- `width`와 `height`는 윈도우 장식을 제외한 콘텐츠 영역 크기를 논리 포인트로 지정합니다. 단위는 `Window::getWidth()`, `Window::getHeight()`와 같습니다. 입력 좌표는 pixelPerfect가 활성화되면 프레임버퍼 픽셀, 아니면 논리 포인트입니다.
+- `Window::setSize()`는 메인과 보조 윈도우 모두 pixelPerfect가 활성화되어도 논리 포인트를 사용합니다. DPI 변환은 논리 크기의 기존 변환 방식을 유지합니다. 픽셀 요청에는 `App::setSize()` 또는 `setWindowSize()`를 사용하세요.
 - 네이티브 윈도우를 닫은 뒤에는 아무 작업도 하지 않습니다. 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
 '''
 snippet = '''
@@ -40907,17 +40913,17 @@ description.ko = "윈도우 좌표에 프레임버퍼 픽셀을 사용할지 지
 details.en = '''
 - The default is `false`, which uses logical pixels for the main window's drawing and mouse coordinates. With `true`, these coordinates use framebuffer pixels.
 - Startup size conversion is described in `WindowSettings::setSize`; high-DPI framebuffer allocation is controlled separately by `WindowSettings::highDpi`.
-- The coordinate mode is shared across the app. Secondary-window creation ignores its own `pixelPerfect` value, and secondary-window mouse input always uses logical pixels.
+- The coordinate mode is shared across the app. Secondary-window creation ignores its own `pixelPerfect` value, and secondary-window drawing and mouse coordinates use the same unit scale as main: framebuffer pixels when enabled, logical points otherwise. Delta derivation and enter/leave handling retain their existing differences.
 '''
 details.ja = '''
 - デフォルトは `false` で、メインウィンドウの描画座標とマウス座標に論理ピクセルを使います。`true` にすると、これらの座標にフレームバッファのピクセルを使います。
 - 起動時のサイズ変換は `WindowSettings::setSize` を参照してください。高 DPI のフレームバッファを確保するかどうかは `WindowSettings::highDpi` で別に指定します。
-- 座標モードはアプリ全体で共有します。サブウィンドウの作成では、その設定の `pixelPerfect` 値を無視し、サブウィンドウのマウス入力は常に論理ピクセルになります。
+- 座標モードはアプリ全体で共有します。サブウィンドウの作成では、その設定の `pixelPerfect` 値を無視し、サブウィンドウの描画とマウス座標の単位もメインと同じで、有効ならフレームバッファのピクセル、無効なら論理ポイントです。差分の計算と入退場イベントの処理には既存の違いがあります。
 '''
 details.ko = '''
 - 기본값은 `false`이며, 메인 윈도우의 그리기 좌표와 마우스 좌표에 논리 픽셀을 사용합니다. `true`로 설정하면 이 좌표에 프레임버퍼 픽셀을 사용합니다.
 - 시작 시 크기 변환은 `WindowSettings::setSize`에 설명되어 있습니다. 고 DPI 프레임버퍼 할당 여부는 `WindowSettings::highDpi`에서 별도로 지정합니다.
-- 좌표 모드는 앱 전체에서 공유합니다. 보조 윈도우를 만들 때는 해당 설정의 `pixelPerfect` 값을 무시하며, 보조 윈도우의 마우스 입력은 항상 논리 픽셀을 사용합니다.
+- 좌표 모드는 앱 전체에서 공유합니다. 보조 윈도우를 만들 때는 해당 설정의 `pixelPerfect` 값을 무시하며, 보조 윈도우의 그리기와 마우스 좌표도 메인과 같은 단위를 사용합니다. 활성화되면 프레임버퍼 픽셀, 아니면 논리 포인트입니다. 델타 계산과 진입/이탈 처리는 기존 차이를 유지합니다.
 '''
 
 ["WindowSettings::reserveUniformBuffer"]
@@ -46058,17 +46064,17 @@ description.ja = "現在のウィンドウ内のマウス X 座標を返す。"
 description.ko = "현재 윈도우 안의 마우스 X 좌표를 반환한다."
 details.en = '''
 - Returns a float measured from the window's left edge, with the top-left corner at `(0, 0)`. These are window coordinates, not desktop screen coordinates or node-local coordinates; `getMouseX()` returns the same value.
-- Coordinates use logical pixels by default. The main window uses framebuffer pixels when `WindowSettings::pixelPerfect` is enabled; secondary windows always use logical pixels.
+- Coordinates use logical pixels by default. Main and secondary windows use framebuffer pixels when global `WindowSettings::pixelPerfect` is enabled.
 - Reads the active window's stored input position, initially 0. Mouse movement and button events update it; the first touch also updates it when touch-as-mouse is enabled. During a secondary window's callbacks, it reads that window's position.
 '''
 details.ja = '''
 - ウィンドウの左端から測った X 座標を float で返し、左上が `(0, 0)` です。デスクトップのスクリーン座標やノードのローカル座標ではなく、ウィンドウ内の座標です。`getMouseX()` も同じ値を返します。
-- 座標の単位は通常、論理ピクセルです。メインウィンドウは `WindowSettings::pixelPerfect` が有効な場合にフレームバッファのピクセルを使用し、サブウィンドウは常に論理ピクセルを使用します。
+- 座標の単位は通常、論理ピクセルです。主副窓ともグローバルな `WindowSettings::pixelPerfect` が有効ならフレームバッファのピクセルを使用します。
 - 現在のウィンドウに保存された入力位置を読み取り、初期値は 0 です。マウスの移動とボタンのイベントで更新され、タッチをマウスとして扱う設定が有効な場合は 1 本目の指でも更新されます。サブウィンドウのコールバック中は、そのウィンドウの位置を読み取ります。
 '''
 details.ko = '''
 - 윈도우 왼쪽 가장자리에서 측정한 X 좌표를 float로 반환하며 왼쪽 위가 `(0, 0)`입니다. 데스크톱 화면 좌표나 노드 로컬 좌표가 아닌 윈도우 내부 좌표입니다. `getMouseX()`도 같은 값을 반환합니다.
-- 좌표 단위는 기본적으로 논리 픽셀입니다. 주 윈도우는 `WindowSettings::pixelPerfect`가 활성화되면 프레임버퍼 픽셀을 사용하며 보조 윈도우는 항상 논리 픽셀을 사용합니다.
+- 좌표 단위는 기본적으로 논리 픽셀입니다. 메인과 보조 윈도우 모두 전역 `WindowSettings::pixelPerfect`가 활성화되면 프레임버퍼 픽셀을 사용합니다.
 - 현재 윈도우에 저장된 입력 위치를 읽으며 초기값은 0입니다. 마우스 이동과 버튼 이벤트로 갱신되며, 터치를 마우스로 처리하는 설정이 활성화되면 첫 번째 손가락으로도 갱신됩니다. 보조 윈도우 콜백 안에서는 해당 윈도우의 위치를 읽습니다.
 '''
 related = ["getGlobalMouseY", "getGlobalPMouseX", "getMouseX"]
@@ -46560,17 +46566,17 @@ description.ja = "現在のウィンドウ内のマウス座標を返す。"
 description.ko = "현재 윈도우 내 마우스 좌표를 반환한다."
 details.en = '''
 - Returns a `Vec2` containing the current window's stored mouse position, initially `(0, 0)`. It reads the state updated by input events rather than polling the operating system.
-- The origin is the window's upper-left corner, with X increasing rightward and Y downward. Main-window coordinates use logical pixels unless `WindowSettings::pixelPerfect` is enabled; secondary-window mouse coordinates always use logical pixels. Drawing transforms and node transforms do not change this result.
+- The origin is the window's upper-left corner, with X increasing rightward and Y downward. Main and secondary coordinates use logical points, or framebuffer pixels when global `WindowSettings::pixelPerfect` is enabled. Drawing transforms and node transforms do not change this result.
 - Read this state on the main thread. During a window callback, it refers to that window; outside a secondary window's callback or drawing scope, the main window is current.
 '''
 details.ja = '''
 - 現在のウィンドウが保持するマウス座標を `Vec2` で返し、初期値は `(0, 0)` です。OS に問い合わせるのではなく、入力イベントで更新された状態を読み取ります。
-- 原点はウィンドウの左上で、X は右向き、Y は下向きに増えます。メインウィンドウは `WindowSettings::pixelPerfect` が有効な場合を除き論理ピクセルを使い、サブウィンドウのマウス座標は常に論理ピクセルです。描画やノードの座標変換は、この戻り値に影響しません。
+- 原点はウィンドウの左上で、X は右向き、Y は下向きに増えます。主副窓とも論理ポイントを使い、グローバルな `WindowSettings::pixelPerfect` が有効ならフレームバッファのピクセルを使います。描画やノードの座標変換は、この戻り値に影響しません。
 - この状態はメインスレッドで読み取ってください。ウィンドウのコールバック内ではそのウィンドウを参照し、サブウィンドウのコールバックや描画スコープの外ではメインウィンドウが現在のウィンドウになります。
 '''
 details.ko = '''
 - 현재 윈도우에 저장된 마우스 좌표를 `Vec2`로 반환하며, 초기값은 `(0, 0)`입니다. 운영체제에 직접 조회하지 않고 입력 이벤트로 갱신된 상태를 읽습니다.
-- 원점은 윈도우 왼쪽 위이며, X는 오른쪽으로, Y는 아래쪽으로 증가합니다. 메인 윈도우는 `WindowSettings::pixelPerfect`가 활성화된 경우를 제외하고 논리 픽셀을 사용하며, 보조 윈도우의 마우스 좌표는 항상 논리 픽셀입니다. 그리기 변환과 노드 변환은 이 반환값에 영향을 주지 않습니다.
+- 원점은 윈도우 왼쪽 위이며, X는 오른쪽으로, Y는 아래쪽으로 증가합니다. 메인과 보조 윈도우 모두 논리 포인트를 사용하며 전역 `WindowSettings::pixelPerfect`가 활성화되면 프레임버퍼 픽셀을 사용합니다. 그리기 변환과 노드 변환은 이 반환값에 영향을 주지 않습니다.
 - 이 상태는 메인 스레드에서 읽어야 합니다. 윈도우 콜백 안에서는 해당 윈도우를 참조하며, 보조 윈도우의 콜백이나 그리기 범위 밖에서는 메인 윈도우가 현재 윈도우가 됩니다.
 '''
 related = ["getGlobalMousePos", "getMouseButton", "isMousePressed"]
@@ -47298,18 +47304,21 @@ description.en = "Returns the current window height."
 description.ja = "現在のウィンドウの高さを返す。"
 description.ko = "현재 윈도우의 높이를 반환한다."
 details.en = '''
-- Logical sizes truncate framebuffer pixels divided by DPI, using the same conversion as resize events (for example 1286×967 at 200% becomes 643×483).
+- Logical sizes truncate framebuffer pixels divided by DPI (for example 1286×967 at 200% becomes 643×483).
 - Returns an `int` height for the current window, even while drawing into an Fbo.
+- `Window::getHeight()` always returns logical points, regardless of `pixelPerfect`.
 - See `getWindowWidth` for coordinate units and DPI conversion.
 '''
 details.ja = '''
-- 論理サイズは framebuffer px ÷ DPI の小数部を切り捨て、resize イベントと同じ変換を使います。例：1286×967、200% は 643×483 です。
+- 論理サイズは framebuffer px ÷ DPI の小数部を切り捨てます。例：1286×967、200% は 643×483 です。
 - 現在のウィンドウの高さを `int` 型で返します。Fbo に描画している間もウィンドウの高さを返します。
+- `Window::getHeight()` は `pixelPerfect` にかかわらず常に論理ポイントを返します。
 - 座標の単位と DPI による換算は `getWindowWidth` を参照してください。
 '''
 details.ko = '''
-- 논리 크기는 framebuffer 픽셀 ÷ DPI의 소수 부분을 버리며 resize 이벤트와 같은 변환을 씁니다. 예: 1286×967, 200%는 643×483입니다.
+- 논리 크기는 framebuffer 픽셀 ÷ DPI의 소수 부분을 버립니다. 예: 1286×967, 200%는 643×483입니다.
 - 현재 윈도우의 높이를 `int`형으로 반환합니다. Fbo에 그리는 동안에도 윈도우 높이를 반환합니다.
+- `Window::getHeight()`는 `pixelPerfect`와 관계없이 항상 논리 포인트를 반환합니다.
 - 좌표 단위와 DPI에 따른 변환은 `getWindowWidth`를 참조하세요.
 '''
 related = ["getFramebufferHeight", "getAspectRatio", "getWindowWidth"]
@@ -47389,18 +47398,21 @@ description.en = "Returns the current window width."
 description.ja = "現在のウィンドウの幅を返す。"
 description.ko = "현재 윈도우의 너비를 반환한다."
 details.en = '''
-- Logical sizes truncate framebuffer pixels divided by DPI, using the same conversion as resize events (for example 1286×967 at 200% becomes 643×483).
+- Logical sizes truncate framebuffer pixels divided by DPI (for example 1286×967 at 200% becomes 643×483).
 - Returns an `int` width for the current window, even while drawing into an Fbo; secondary-window callbacks use that window.
+- `Window::getWidth()`/`getHeight()` always return logical points for main and secondary, regardless of this setting.
 - By default, divides framebuffer pixels by the window's DPI scale and truncates to an integer, giving logical pixels. With `WindowSettings::pixelPerfect` enabled, returns framebuffer pixels directly. The same rule applies to `getWindowHeight`.
 '''
 details.ja = '''
-- 論理サイズは framebuffer px ÷ DPI の小数部を切り捨て、resize イベントと同じ変換を使います。例：1286×967、200% は 643×483 です。
+- 論理サイズは framebuffer px ÷ DPI の小数部を切り捨てます。例：1286×967、200% は 643×483 です。
 - 現在のウィンドウの幅を `int` 型で返します。Fbo に描画している間もウィンドウの幅を返し、サブウィンドウのコールバック内ではそのウィンドウを対象にします。
+- `Window::getWidth()`/`getHeight()` はメイン・サブとも、この設定にかかわらず常に論理ポイントを返します。
 - 既定では、フレームバッファのピクセル数をウィンドウの DPI 倍率で割り、小数部分を切り捨てて論理ピクセル数を返します。`WindowSettings::pixelPerfect` が有効な場合は、フレームバッファのピクセル数をそのまま返します。`getWindowHeight` も同じ規則です。
 '''
 details.ko = '''
-- 논리 크기는 framebuffer 픽셀 ÷ DPI의 소수 부분을 버리며 resize 이벤트와 같은 변환을 씁니다. 예: 1286×967, 200%는 643×483입니다.
+- 논리 크기는 framebuffer 픽셀 ÷ DPI의 소수 부분을 버립니다. 예: 1286×967, 200%는 643×483입니다.
 - 현재 윈도우의 너비를 `int`형으로 반환합니다. Fbo에 그리는 동안에도 윈도우 너비를 반환하며 보조 윈도우의 콜백에서는 해당 윈도우를 대상으로 합니다.
+- `Window::getWidth()`/`getHeight()`는 메인과 보조 윈도우 모두 이 설정과 관계없이 항상 논리 포인트를 반환합니다.
 - 기본적으로 프레임버퍼 픽셀 수를 윈도우의 DPI 배율로 나누고 소수 부분을 버려 논리 픽셀 수를 반환합니다. `WindowSettings::pixelPerfect`가 활성화되면 프레임버퍼 픽셀 수를 그대로 반환합니다. `getWindowHeight`에도 같은 규칙을 적용합니다.
 '''
 related = ["getFramebufferWidth", "getAspectRatio", "getWindowHeight"]
@@ -52070,17 +52082,17 @@ description.ja = "現在の座標単位でウィンドウのサイズを変更�
 description.ko = "현재 좌표 단위로 윈도우 크기를 변경한다."
 details.en = '''
 - `width` and `height` specify the content size in logical pixels, or framebuffer pixels when `pixelPerfect` is enabled.
-- In pixel-perfect mode, dimensions are divided by the target window's DPI scale. Windows main-window requests retain fractional logical pixels until native DPI rounding; other paths truncate logical dimensions to integers.
+- In pixel-perfect mode, dimensions are divided by the target window's DPI scale. Win32 main and secondary windows retain fractional logical sizes until native DPI rounding. X11 main (GLX and GLES3/EGL) and secondary windows round pixel requests once at the final pixel conversion; logical requests keep their existing rounding. macOS secondary windows retain fractional points; macOS main sizing is unchanged.
 - Acts on the current window, including a secondary window inside its setup, event or update. This changes the former main-only global position behavior. Use an explicit `Window` handle to control another window; `App::setSize()` always targets its own window.
 '''
 details.ja = '''
 - `width` と `height` は内容領域のサイズです。単位は論理ピクセルですが、`pixelPerfect` が有効な場合はフレームバッファのピクセルです。
-- pixelPerfect モードでは、対象ウィンドウの DPI スケールで各寸法を割ります。Windows のメインウィンドウはネイティブ DPI で丸めるまで論理座標の小数を保持し、その他の経路は論理寸法の小数部を切り捨てます。
+- pixelPerfect モードでは、対象ウィンドウの DPI スケールで各寸法を割ります。Win32 の主副窓はネイティブ DPI で丸めるまで論理サイズの小数を保持します。X11 の主窓（GLX・GLES3/EGL）と副窓はピクセル指定を最後のピクセル変換で一度だけ丸め、論理指定の既存の丸めは維持します。macOS の副窓は小数のポイントを保持し、主窓のサイズ処理は変更しません。
 - 現在のウィンドウを操作します。サブウィンドウの setup・イベント・update 内ではその窓が対象です。位置のグローバル関数が常にメインを対象にしていた動作からの変更です。別の窓には明示的な `Window` ハンドルを使います。`App::setSize()` は常に自分の窓を対象にします。
 '''
 details.ko = '''
 - `width`와 `height`는 콘텐츠 영역의 크기입니다. 단위는 논리 픽셀이며, `pixelPerfect`가 활성화된 경우에는 프레임버퍼 픽셀입니다.
-- pixelPerfect 모드에서는 대상 윈도우의 DPI 배율로 각 크기를 나눕니다. Windows 메인 윈도우는 네이티브 DPI 반올림까지 논리 픽셀의 소수를 유지하고 다른 경로는 논리 크기의 소수 부분을 버립니다.
+- pixelPerfect 모드에서는 대상 윈도우의 DPI 배율로 각 크기를 나눕니다. Win32 메인 및 보조 윈도우는 네이티브 DPI 반올림까지 논리 크기의 소수를 유지합니다. X11 메인(GLX 및 GLES3/EGL)과 보조 윈도우는 픽셀 요청을 최종 픽셀 변환에서 한 번 반올림하며 논리 요청의 기존 소수부 절삭은 유지합니다. macOS 보조 윈도우는 소수 포인트를 유지하며 메인 크기 처리는 변경되지 않습니다.
 - 현재 윈도우를 대상으로 합니다. 보조 윈도우의 setup, 이벤트, update 안에서는 해당 윈도우를 조작합니다. 위치 전역 함수가 항상 메인을 대상으로 하던 동작에서 변경되었습니다. 다른 윈도우는 명시적 `Window` 핸들로 조작하며 `App::setSize()`는 항상 자신의 윈도우를 대상으로 합니다.
 '''
 related = ["getWindowSize", "setWindowSizeLogical", "setWindowPosition"]

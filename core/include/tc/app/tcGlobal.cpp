@@ -59,7 +59,7 @@ namespace trussc {
 void Window::seedMainAppSize() {
     auto app = app_;
     if (!app || app->setupCalled_ || !sapp_isvalid()) return;
-    const float dpi = internal::pixelPerfectMode() ? 1.0f : sapp_dpi_scale();
+    const float dpi = internal::appSizeDpi(sapp_dpi_scale());
     const int width = internal::framebufferToLogical(sapp_width(), dpi), height = internal::framebufferToLogical(sapp_height(), dpi);
     if (app->getWidth() == width && app->getHeight() == height) return;
     internal::EntryStackGuard guard(internal::AppEntry::Event, "windowResized()");
@@ -1401,6 +1401,21 @@ WindowCallbackTimeScope::~WindowCallbackTimeScope() {
 
 int framebufferToLogical(int pixels, float dpi) {
     return static_cast<int>(pixels / (dpi > 0.0f ? dpi : 1.0f));
+}
+
+float appSizeDpi(float dpi) { return pixelPerfectMode() ? 1.0f : dpi; }
+
+float appPointerScale(float dpi) {
+    // Native positions/deltas are framebuffer pixels. Invalid native DPI falls
+    // back to unit scale rather than introducing non-finite App coordinates.
+    if (pixelPerfectMode() || !std::isfinite(dpi) || dpi <= 0.0f) return 1.0f;
+    const float scale = 1.0f / dpi;
+    return std::isfinite(scale) ? scale : 1.0f;
+}
+
+void syncSecondaryAppSize(Window& window, int width, int height) {
+    const auto size = framebufferResizeArgs(width, height, appSizeDpi(window.context().dpiScale));
+    window.syncRootSize(float(size.width), float(size.height));
 }
 
 ResizeEventArgs framebufferResizeArgs(int width, int height, float dpi) {

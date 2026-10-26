@@ -96,7 +96,7 @@ internal::X11GeometryState& mainGeometryState() {
     const auto window = (::Window)(uintptr_t)sapp_x11_get_window();
     if (window != mainGeometryWindow) {
         const auto desc = sapp_query_desc();
-        mainGeometry = {desc.width, desc.height};
+        mainGeometry = {double(desc.width), double(desc.height)};
         mainGeometryWindow = window;
     }
     return mainGeometry;
@@ -130,6 +130,11 @@ void setWindowDecorated(bool decorated) {
         XFlush(display);
     }
     XCloseDisplay(display);
+}
+
+void internal::setMainWindowSizeFractionalX11(double width, double height) {
+    x11Geometry((Display*)sapp_x11_get_display(), (::Window)(uintptr_t)sapp_x11_get_window(),
+        mainGeometryState(), false, 0, 0, width, height, sapp_dpi_scale(), sapp_is_fullscreen(), true);
 }
 
 void internal::setMainWindowSizeLogical(int width, int height) {

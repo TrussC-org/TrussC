@@ -347,6 +347,9 @@ WindowClock& windowClockForTests();
 std::chrono::steady_clock::time_point windowClockNow();
 int framebufferToLogical(int pixels, float dpi);
 ResizeEventArgs framebufferResizeArgs(int width, int height, float dpi);
+float appSizeDpi(float dpi);
+// Framebuffer pointer position/motion to App units, following the global mode.
+float appPointerScale(float dpi);
 uint64_t resourceFrameKey(); // Base getFrameCount key for internal resource consumers.
 uint64_t deviceFrameCount(); // GPU upload guard; independent of window draw counts.
 

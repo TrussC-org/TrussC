@@ -22,6 +22,7 @@ class Window;
 
 namespace internal {
 class WindowRequestAccess;   // friend of Window, defined after it
+void syncSecondaryAppSize(Window& window, int width, int height);
 // One control entry for explicit handles and context-aware globals.
 enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, PositionQuery };
 using WindowControlHook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
@@ -119,7 +120,9 @@ public:
     void setTitle(const std::string& title);
     // Last title set via WindowSettings/setTitle (for window listing/tooling).
     const std::string& getTitle() const { return title_; }
-    int getWidth() const;    // logical size (matches the window's coordinates)
+    // Always logical points for main and secondary, regardless of pixelPerfect.
+    // getWindowWidth()/getWindowHeight() and the attached App follow pixelPerfect.
+    int getWidth() const;
     int getHeight() const;
 
     // OS visibility snapshot used by the scheduler. Desktop backends expose
@@ -218,7 +221,8 @@ public:
     }
     // Size-sync convention (mirrors the main App, which is a RectNode kept in
     // sync with the window): if the root IS a RectNode it is resized to the
-    // window's logical size at attach time and on every resize/display change.
+    // App's coordinate size (pixels in pixelPerfect mode, otherwise logical)
+    // before its first setup and on every resize/display change.
     // A plain Node root is left untouched.
     void syncRootSize(float wPts, float hPts) {
         if (!app_) return;
@@ -272,7 +276,7 @@ private:
     void closeSecondary();
     void teardownSecondary() noexcept;
     void setSecondaryTitle(const std::string& title);
-    void setSecondarySize(int width, int height);
+    void setSecondarySize(double width, double height, bool pixelSize = false);
     void setSecondaryPosition(int x, int y);
     IVec2 getSecondaryPosition() const;
     void setSecondaryFullscreen(bool full);
@@ -844,7 +848,7 @@ inline bool Window::isSecondaryOccluded() const {
     if (auto hook = internal::windowOccludedHookForTests()) return hook(*this);
     return false;
 }
-inline void Window::setSecondarySize(int, int) {}
+inline void Window::setSecondarySize(double, double, bool) {}
 inline void Window::setSecondaryPosition(int, int) {}
 inline IVec2 Window::getSecondaryPosition() const { return IVec2(-1, -1); }
 inline void Window::setSecondaryFullscreen(bool) {}
@@ -895,8 +899,28 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
             if (x <= 0 || y <= 0) return result;
             const float scale = ctx_.isMain ? sapp_dpi_scale() : ctx_.dpiScale;
             const float factor = std::isfinite(scale) && scale > 0 ? scale : 1.0f;
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
+            bool useFractionalSize = internal::supportsSecondaryWindows();
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+            // Main Win32/X11 sizing is independent of secondary-window support.
+            useFractionalSize = useFractionalSize || ctx_.isMain;
+#endif
+            if (useFractionalSize) {
+                const double width = double(x) / factor, height = double(y) / factor;
+                // Bound (size API): logical extents must fit the int logical-size getters.
+                if (!std::isfinite(width) || !std::isfinite(height) ||
+                    width <= 0 || height <= 0 || width > double((std::numeric_limits<int>::max)()) ||
+                    height > double((std::numeric_limits<int>::max)())) return result;
+                if constexpr (internal::supportsSecondaryWindows()) {
+                    if (!ctx_.isMain) { setSecondarySize(width, height, true); break; }
+                }
 #if defined(_WIN32)
-            if (ctx_.isMain) { internal::setWindowSizeWin32(sapp_win32_get_hwnd(), double(x) / factor, double(y) / factor); break; }
+                internal::setWindowSizeWin32(sapp_win32_get_hwnd(), width, height); break;
+#elif defined(__linux__) && !defined(__ANDROID__)
+                if (sapp_isvalid()) internal::setMainWindowSizeFractionalX11(width, height);
+                break;
+#endif
+            }
 #endif
             // Preserve the public API's float division before truncation.
             const float width = x / factor, height = y / factor;

@@ -8,7 +8,8 @@ int titleCalls = 0, sizeCalls = 0, fullscreenCalls = 0;
 bool fullscreen = false;
 float liveScale = 1.0f;
 std::string titleSeen;
-int widthSeen = 0, heightSeen = 0;
+double widthSeen = 0, heightSeen = 0;
+int fractionalCalls = 0;
 }
 extern "C" float sapp_dpi_scale() { return liveScale; }
 extern "C" bool sapp_isvalid() { return true; }
@@ -17,6 +18,9 @@ extern "C" bool sapp_is_fullscreen() { return fullscreen; }
 extern "C" void sapp_toggle_fullscreen() { ++fullscreenCalls; fullscreen = !fullscreen; }
 namespace trussc::internal {
 void setMainWindowSizeLogical(int width, int height) { ++sizeCalls; widthSeen = width; heightSeen = height; }
+void setMainWindowSizeFractionalX11(double width, double height) {
+    ++sizeCalls; ++fractionalCalls; widthSeen = width; heightSeen = height;
+}
 }
 int main() {
     using namespace tc;
@@ -39,13 +43,23 @@ int main() {
     internal::currentWindowCtx() = &alternate;
     main->getApp()->setSize(642, 246);
     internal::currentWindowCtx() = nullptr;
-    const bool ownWindowSize = sizeCalls == 3 && widthSeen == 321 && heightSeen == 123;
+    const bool ownWindowSize = sizeCalls == 3 && fractionalCalls == 1 && widthSeen == 321 && heightSeen == 123;
     const bool ok = attached && internal::currentWindow() == main && titleCalls == 1 &&
         titleSeen == (mcp::internal::isDevBuild() ? "sapp main [MCP]" : "sapp main") && main->getTitle() == titleSeen && ownWindowSize &&
         widthSeen == 321 && heightSeen == 123 && fullscreenCalls == 2 && entered && left;
+    bool oddPixels = true;
+    for (float dpi : {1.25f, 1.5f, 1.75f, 2.0f}) {
+        liveScale = dpi;
+        internal::currentWindowCtx() = &alternate;
+        const int before = fractionalCalls;
+        main->getApp()->setSize(1001, 667);
+        oddPixels &= fractionalCalls == before + 1 && widthSeen == 1001.0 / dpi &&
+            heightSeen == 667.0 / dpi && internal::currentWindowCtx() == &alternate;
+    }
+    internal::currentWindowCtx() = nullptr;
     internal::destroyMainWindow();
-    std::printf("mainWindowRouting: sapp main title/size/fullscreen: %s\n", ok ? "PASS" : "FAIL");
-    return ok ? 0 : 1;
+    std::printf("mainWindowRouting: sapp main title/size/fullscreen: %s\n", ok && oddPixels ? "PASS" : "FAIL");
+    return ok && oddPixels ? 0 : 1;
 }
 #else
 #include <cstdio>
