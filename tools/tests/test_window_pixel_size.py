@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host-check production Win32 forwarding and X11 main pixel sizing.
+"""Host-check native creation, Win32/X11 pixel sizing and macOS point forwarding.
 
 Run through tcbuild.sh. Native calls are recorded without a display or GPU;
 Window::control, Win32 forwarding, global sizing and X11 geometry use production code.
@@ -19,6 +19,7 @@ def main():
     win = (ROOT / 'core/platform/win/tcWindowWin.cpp').read_text(encoding='utf-8')
     platform = (ROOT / 'core/include/tcPlatform.h').read_text(encoding='utf-8')
     source = r'''
+#include "core/include/sokol/util/sokol_window_size.h"
 #include <cassert>
 #include <cmath>
 #include <limits>
@@ -101,12 +102,92 @@ int main() {
         cpp = Path(scratch) / 'probe.cpp'
         cpp.write_text(source, encoding='utf-8')
         binary = Path(scratch) / 'probe'
-        subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-Wall', '-Wextra', '-Werror', str(cpp), '-o', str(binary)], check=True)
+        subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-Wall', '-Wextra', '-Werror', '-I', str(ROOT), str(cpp), '-o', str(binary)], check=True)
         subprocess.run([str(binary)], check=True)
     print('PASS: main/secondary Win32 fractional dispatch and forwarding, 125/150/175/200%')
 
 
+def creation_source(backend):
+    """Replay production descriptor/creation arithmetic with native size recording.
+
+    Only OS calls/types are replaced. Statements come from the actual launcher,
+    adapters and native creators, so an old conversion compiles but fails at run time.
+    """
+    header = (ROOT / 'core/include/TrussC.h').read_text(encoding='utf-8')
+    native = (ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
+    launcher = header.split('    // Build sapp_desc\n', 1)[1].split('    const auto& windowTitle', 1)[0]
+    adapter_path = {'win': 'win/tcWindowWin.cpp', 'x11': 'linux/tcWindowLinux.cpp',
+                    'mac': 'mac/tcWindowMac.mm', 'egl': 'linux/tcWindowLinux.cpp'}[backend]
+    adapter = (ROOT / 'core/platform' / adapter_path).read_text(encoding='utf-8')
+    secondary = adapter.split('    sapp_window_desc d = {};', 1)[1].split('    d.title', 1)[0]
+    main_signature = {'win': 'static bool _sapp_tc_win32_create_main_window(',
+                      'x11': 'static bool _sapp_tc_x11_create_main_window(',
+                      'mac': 'static bool _sapp_tc_create_main_window(',
+                      'egl': 'static bool _sapp_tc_x11_create_main_window('}[backend]
+    main = body(native, main_signature)
+    transfer = main.split('    w->desc.width = ', 1)[1].split('    w->desc.event_cb', 1)[0]
+    transfer = '    w->desc.width = ' + transfer
+    if backend == 'mac':
+        # Main's descriptor has already chosen the non-positive native defaults.
+        transfer = transfer.replace('= width;', '= d->width;').replace('= height;', '= d->height;')
+    if backend == 'win':
+        creator = body(native, 'static bool _sapp_tc_win32_create_native_window(')
+        arithmetic = creator.split('        const double width = ', 1)[1].split('        RECT rect', 1)[0]
+        arithmetic = 'const double width = ' + arithmetic + '\nreturn {pw, ph};'
+    elif backend == 'x11':
+        creator = body(native, 'static bool _sapp_tc_x11_create_native_window(')
+        arithmetic = creator.split('    const float scale = ', 1)[1].split('    if (width_pt <= 0)', 1)[0]
+        arithmetic = 'const float scale = ' + arithmetic + '\nreturn {px_w, px_h};'
+    elif backend == 'egl':
+        creator = body(native, '_SOKOL_PRIVATE void _sapp_tc_x11_create_window(')
+        arithmetic = creator.split('    const float window_scale = ', 1)[1].split('    if (0 == _sapp_tc.window_width)', 1)[0]
+        arithmetic = 'const float window_scale = ' + arithmetic + '\nreturn {x11_window_width, x11_window_height};'
+    else:
+        creator = body(native, main_signature)
+        call = creator.split('[w->window setContentSize:NSMakeSize(', 1)[1].split(')];', 1)[0]
+        secondary_creator = native[native.index('sapp_window sapp_create_window(const sapp_window_desc* desc) {'):]
+        secondary_call = secondary_creator.split('[w->window setContentSize:NSMakeSize(', 1)[1].split(')];', 1)[0]
+        arithmetic = 'if (mainWindow) return roundMac(' + call + ');\nreturn roundMac(' + secondary_call + ');'
+    template = (ROOT / 'tools/tests/window_creation_size.cpp').read_text(encoding='utf-8')
+    return (template.replace('EGL_DIMENSIONS', body(native, '_SOKOL_PRIVATE void _sapp_tc_x11_update_dimensions('))
+            .replace('LAUNCHER', launcher).replace('SECONDARY', secondary)
+            .replace('TRANSFER', transfer).replace('ARITHMETIC', arithmetic))
+
+
 class WindowPixelSizeTests(unittest.TestCase):
+    def test_creation_matches_resize(self):
+        with tempfile.TemporaryDirectory(prefix='window-create-') as scratch:
+            cpp = Path(scratch) / 'probe.cpp'
+            binary = Path(scratch) / 'probe'
+            for backend in ('win', 'x11', 'egl', 'mac'):
+                with self.subTest(backend=backend):
+                    cpp.write_text(creation_source(backend), encoding='utf-8')
+                    subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-Wall',
+                                    '-Wextra', '-Werror', '-I', str(ROOT),
+                                    '-DTEST_' + backend.upper(), str(cpp), '-o', str(binary)], check=True)
+                    subprocess.run([str(binary)], check=True)
+
+    def test_mac_main_secondary_points(self):
+        window = (ROOT / 'core/include/tc/app/tcWindow.h').read_text(encoding='utf-8')
+        # Reuse the actual dispatcher with recording AppKit endpoints, including
+        # a main build with secondary support disabled.
+        template = (ROOT / 'tools/tests/window_mac_size.cpp').read_text(encoding='utf-8')
+        source = template.replace('CONTROL_BODY', body(window, 'inline IVec2 Window::control('))
+        for token, path, signature in (
+                ('MAC_MAIN_CALL', 'core/platform/mac/tcPlatform_mac.mm', 'void internal::setMainWindowSizeFractionalMac('),
+                ('MAC_SECONDARY_CALL', 'core/platform/mac/tcWindowMac.mm', 'void Window::setSecondarySize(')):
+            endpoint = body((ROOT / path).read_text(encoding='utf-8'), signature)
+            arguments = endpoint.split('NSMakeSize(', 1)[1].split(')];', 1)[0]
+            source = source.replace(token, arguments)
+        with tempfile.TemporaryDirectory(prefix='window-mac-size-') as scratch:
+            cpp = Path(scratch) / 'probe.cpp'; cpp.write_text(source, encoding='utf-8')
+            binary = Path(scratch) / 'probe'
+            for secondary in (0, 1):
+                subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-Wall',
+                                '-Wextra', '-Werror', '-I', str(ROOT),
+                                '-DTEST_SECONDARY=' + str(secondary), str(cpp), '-o', str(binary)], check=True)
+                subprocess.run([str(binary)], check=True)
+
     def test_win32_fractional_forwarding(self):
         main()
 
@@ -118,6 +199,10 @@ class WindowPixelSizeTests(unittest.TestCase):
         source = source.replace('GLOBAL_BODY', body(
             (ROOT / 'core/include/TrussC.h').read_text(encoding='utf-8'),
             'inline void setWindowSize('))
+        seed = body((ROOT / 'core/platform/linux/tcPlatform_linux.cpp').read_text(encoding='utf-8'),
+                    'internal::X11GeometryState& mainGeometryState(')
+        seed = 'geometry =' + seed.split('mainGeometry =', 1)[1].split(';', 1)[0] + ';'
+        source = source.replace('CREATION_GEOMETRY_SEED', seed)
         with tempfile.TemporaryDirectory(prefix='window-pixel-x11-') as scratch:
             cpp = Path(scratch) / 'probe.cpp'
             cpp.write_text(source, encoding='utf-8')

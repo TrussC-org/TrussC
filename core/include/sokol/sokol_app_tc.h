@@ -2187,6 +2187,8 @@ typedef struct sapp_desc {
 
     int width;                          // the preferred width of the window / canvas
     int height;                         // the preferred height of the window / canvas
+    // TrussC internal: positive framebuffer requests, converted at native DPI.
+    int _tc_pixel_width, _tc_pixel_height;
     int sample_count;                   // MSAA sample count
     int swap_interval;                  // the preferred swap interval (ignored on some platforms)
     bool high_dpi;                      // whether the rendering canvas is full-resolution on HighDPI displays
@@ -2418,10 +2420,12 @@ extern "C" {
 /* an opaque window handle (0 is the invalid handle; the sokol_app.h main
    window is NOT addressable through this API while both coexist) */
 typedef struct sapp_window { uint32_t id; } sapp_window;
+#include "util/sokol_window_size.h"
 
 typedef struct sapp_window_desc {
     int x, y;                   /* top-left position in screen points (-1 = default) */
     int width, height;          /* content size in logical points (0 = 640x480) */
+    int _tc_pixel_width, _tc_pixel_height; /* TrussC internal framebuffer overrides */
     const char* title;
     bool borderless;            /* no title bar / decorations */
     bool no_high_dpi;           /* true: framebuffer = logical size (dpi_scale 1) */
@@ -3545,6 +3549,8 @@ static bool _sapp_tc_create_main_window(void) {
     /* per-window desc: the app callbacks are reached via the trampoline */
     w->desc.width = width;
     w->desc.height = height;
+    w->desc._tc_pixel_width = d->_tc_pixel_width;
+    w->desc._tc_pixel_height = d->_tc_pixel_height;
     w->desc.sample_count = d->sample_count;
     w->desc.no_high_dpi = !d->high_dpi;
     w->desc.event_cb = _sapp_tc_main_event_tramp;
@@ -3553,12 +3559,19 @@ static bool _sapp_tc_create_main_window(void) {
     if (dev == nil) return fail("MTLCreateSystemDefaultDevice");
     _sapp_tc.app.device = dev;
 
-    const NSRect rect = NSMakeRect(0, 0, width, height);
+    NSRect rect = NSMakeRect(0, 0, width, height);
     const NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                                     NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
     w->window = [[NSWindow alloc] initWithContentRect:rect styleMask:style
                                   backing:NSBackingStoreBuffered defer:NO];
     if (w->window == nil) return fail("NSWindow initWithContentRect");
+    if (d->_tc_pixel_width > 0 || d->_tc_pixel_height > 0) {
+        const float scale = d->high_dpi ? (float)w->window.backingScaleFactor : 1.0f;
+        [w->window setContentSize:NSMakeSize(
+            _sapp_tc_window_points(width, d->_tc_pixel_width, scale),
+            _sapp_tc_window_points(height, d->_tc_pixel_height, scale))];
+        rect.size = [w->window contentRectForFrameRect:w->window.frame].size;
+    }
     w->window.title = [NSString stringWithUTF8String:_sapp_tc.app.window_title];
     w->window.releasedWhenClosed = NO;  /* the object must outlive performClose */
     w->window.acceptsMouseMovedEvents = YES;
@@ -3743,6 +3756,13 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     if (w->desc.borderless) style = NSWindowStyleMaskBorderless;
     w->window = [[NSWindow alloc] initWithContentRect:rect styleMask:style
                                   backing:NSBackingStoreBuffered defer:NO];
+    if (w->desc._tc_pixel_width > 0 || w->desc._tc_pixel_height > 0) {
+        const float scale = w->desc.no_high_dpi ? 1.0f : (float)w->window.backingScaleFactor;
+        [w->window setContentSize:NSMakeSize(
+            _sapp_tc_window_points(w->desc.width, w->desc._tc_pixel_width, scale),
+            _sapp_tc_window_points(w->desc.height, w->desc._tc_pixel_height, scale))];
+        rect.size = [w->window contentRectForFrameRect:w->window.frame].size;
+    }
     if (w->desc.title) w->window.title = [NSString stringWithUTF8String:w->desc.title];
     w->window.releasedWhenClosed = NO;
     w->window.acceptsMouseMovedEvents = YES;
@@ -7659,9 +7679,9 @@ static bool _sapp_tc_win32_ensure_wndclass(void) {
     return true;
 }
 
-/* create the HWND at the desc's logical size: first against 96 DPI, then --
-   per-monitor-v2 -- resize the CLIENT area for the real DPI of the monitor
-   the window actually landed on (the standard create-then-resize dance) */
+/* Create against 96 DPI, then apply the actual target monitor's DPI with
+   one client resize. Pixel overrides use render DPI for pixels -> points,
+   just like setSize (render DPI can be 1 with high_dpi disabled). */
 static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wchar_t* title,
         DWORD style, DWORD ex_style, int x, int y, bool use_default_size) {
     if (!_sapp_tc_win32_ensure_wndclass()) return false;
@@ -7689,8 +7709,12 @@ static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wcha
     _sapp_tc_win32_update_refresh(w);
     _sapp_tc_win32_update_scale(w);
     if (!use_default_size && (w->window_scale != 1.0f)) {
-        const LONG pw = (LONG)((float)w->desc.width * w->window_scale + 0.5f);
-        const LONG ph = (LONG)((float)w->desc.height * w->window_scale + 0.5f);
+        const double width = _sapp_tc_window_points(w->desc.width, w->desc._tc_pixel_width, w->dpi_scale);
+        const double height = _sapp_tc_window_points(w->desc.height, w->desc._tc_pixel_height, w->dpi_scale);
+        const LONG pw = w->desc._tc_pixel_width > 0 ? (LONG)(width * w->window_scale + 0.5) :
+            (LONG)((float)w->desc.width * w->window_scale + 0.5f);
+        const LONG ph = w->desc._tc_pixel_height > 0 ? (LONG)(height * w->window_scale + 0.5) :
+            (LONG)((float)w->desc.height * w->window_scale + 0.5f);
         RECT rect = { 0, 0, pw, ph };
         if (_sapp_tc.GetDpiForWindow && _sapp_tc.AdjustWindowRectExForDpi) {
             _sapp_tc.AdjustWindowRectExForDpi(&rect, style, FALSE, ex_style,
@@ -7743,6 +7767,8 @@ static bool _sapp_tc_win32_create_main_window(void) {
     /* per-window desc: the app callbacks are reached via the trampoline */
     w->desc.width = d->width;
     w->desc.height = d->height;
+    w->desc._tc_pixel_width = d->_tc_pixel_width;
+    w->desc._tc_pixel_height = d->_tc_pixel_height;
     w->desc.sample_count = d->sample_count;
     w->desc.no_high_dpi = !d->high_dpi;
     w->desc.event_cb = _sapp_tc_main_event_tramp;
@@ -10736,8 +10762,10 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* 
                     EnterWindowMask | LeaveWindowMask | PropertyChangeMask;
     /* NOTE: sizing uses the same scale that dimension reporting divides by */
     const float scale = (w->dpi_scale > 0.0f) ? w->dpi_scale : 1.0f;
-    int px_w = (int)((float)width_pt * scale + 0.5f);
-    int px_h = (int)((float)height_pt * scale + 0.5f);
+    const double width = _sapp_tc_window_points(width_pt, w->desc._tc_pixel_width, scale);
+    const double height = _sapp_tc_window_points(height_pt, w->desc._tc_pixel_height, scale);
+    int px_w = w->desc._tc_pixel_width > 0 ? (int)(width * scale + 0.5) : (int)((float)width_pt * scale + 0.5f);
+    int px_h = w->desc._tc_pixel_height > 0 ? (int)(height * scale + 0.5) : (int)((float)height_pt * scale + 0.5f);
     if (width_pt <= 0) {
         px_w = (DisplayWidth(_sapp_tc.display, _sapp_tc.screen) * 4) / 5;
     }
@@ -11164,6 +11192,8 @@ static bool _sapp_tc_x11_create_main_window(void) {
     /* per-window desc: the app callbacks are reached via the trampoline */
     w->desc.width = d->width;
     w->desc.height = d->height;
+    w->desc._tc_pixel_width = d->_tc_pixel_width;
+    w->desc._tc_pixel_height = d->_tc_pixel_height;
     w->desc.sample_count = d->sample_count;
     w->desc.no_high_dpi = !d->high_dpi;
     w->desc.event_cb = _sapp_tc_main_event_tramp;
@@ -14085,8 +14115,12 @@ _SOKOL_PRIVATE void _sapp_tc_x11_update_dimensions(int x11_window_width, int x11
     #if !defined(SOKOL_VULKAN)
         int cur_fb_width = _sapp_tc.framebuffer_width;
         int cur_fb_height = _sapp_tc.framebuffer_height;
-        _sapp_tc.framebuffer_width = _sapp_tc_roundf_gzero(_sapp_tc.window_width * _sapp_tc.dpi_scale);
-        _sapp_tc.framebuffer_height = _sapp_tc_roundf_gzero(_sapp_tc.window_height * _sapp_tc.dpi_scale);
+        // Preserve framebuffer requests through integer logical bookkeeping.
+        // Keep the existing reporting for logical/default startup dimensions.
+        _sapp_tc.framebuffer_width = _sapp_tc.desc._tc_pixel_width > 0 ? x11_window_width :
+            _sapp_tc_roundf_gzero(_sapp_tc.window_width * _sapp_tc.dpi_scale);
+        _sapp_tc.framebuffer_height = _sapp_tc.desc._tc_pixel_height > 0 ? x11_window_height :
+            _sapp_tc_roundf_gzero(_sapp_tc.window_height * _sapp_tc.dpi_scale);
         bool dim_changed = (_sapp_tc.framebuffer_width != cur_fb_width) || (_sapp_tc.framebuffer_height != cur_fb_height);
         if (dim_changed) {
             #if defined(SOKOL_WGPU)
@@ -14416,8 +14450,12 @@ _SOKOL_PRIVATE void _sapp_tc_x11_create_window(Visual* visual_or_null, int depth
     int display_height = DisplayHeight(_sapp_tc.x11.display, _sapp_tc.x11.screen);
     // NOTE: do *NOT* use _sapp_tc.dpi_scale for the size multiplicator!
     const float window_scale = _sapp_tc.x11.dpi / 96.0f;
-    int x11_window_width = _sapp_tc_roundf_gzero(_sapp_tc.window_width * window_scale);
-    int x11_window_height = _sapp_tc_roundf_gzero(_sapp_tc.window_height * window_scale);
+    const double width = _sapp_tc_window_points(_sapp_tc.window_width, _sapp_tc.desc._tc_pixel_width, _sapp_tc.dpi_scale);
+    const double height = _sapp_tc_window_points(_sapp_tc.window_height, _sapp_tc.desc._tc_pixel_height, _sapp_tc.dpi_scale);
+    int x11_window_width = _sapp_tc.desc._tc_pixel_width > 0 ? (int)(width * window_scale + 0.5) :
+        _sapp_tc_roundf_gzero(_sapp_tc.window_width * window_scale);
+    int x11_window_height = _sapp_tc.desc._tc_pixel_height > 0 ? (int)(height * window_scale + 0.5) :
+        _sapp_tc_roundf_gzero(_sapp_tc.window_height * window_scale);
     if (0 == _sapp_tc.window_width) {
         x11_window_width = (display_width * 4) / 5;
     }

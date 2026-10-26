@@ -62,6 +62,16 @@ The former sokol_app.h patches below are **native behavior** of
 sokol_app_tc.h now (kept here as historical record of what differs from
 upstream semantics):
 
+### Creation sizes in pixelPerfect mode (#1018)
+
+The internal `_tc_pixel_width` / `_tc_pixel_height` descriptor fields preserve
+positive framebuffer requests until the native target's render DPI is known.
+Zero keeps the existing logical/default path. Win32 folds conversion into its
+existing single DPI resize; X11 GLX and GLES3/EGL convert before XCreateWindow;
+macOS uses one setContentSize before showing the window. The pure C/C++ helper
+in `util/sokol_window_size.h` is also used by TrussC's resize dispatcher, so
+macOS main and secondary retain the same double point sizes.
+
 ### Windows console UTF-8 input and output (#754)
 
 `console_utf8` saves `orig_output_codepage` and `orig_input_codepage`, then

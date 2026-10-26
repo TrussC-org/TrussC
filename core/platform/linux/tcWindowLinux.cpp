@@ -409,6 +409,10 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     d.y = -1;
     d.width = settings.width;
     d.height = settings.height;
+    if (pixelPerfectMode()) {
+        d._tc_pixel_width = settings.width > 0 ? settings.width : 0;
+        d._tc_pixel_height = settings.height > 0 ? settings.height : 0;
+    }
     d.title = settings.title.c_str();
     d.borderless = !settings.decorated;
     d.no_high_dpi = !settings.highDpi;
@@ -424,7 +428,10 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
         return nullptr;
     }
 
-    st->geometry = {double(settings.width), double(settings.height)};
+    st->geometry = {
+        _sapp_tc_window_points(settings.width, d._tc_pixel_width, sapp_window_dpi_scale(st->win)),
+        _sapp_tc_window_points(settings.height, d._tc_pixel_height, sapp_window_dpi_scale(st->win)),
+        pixelPerfectMode()};
     win->ctx_.swapchainTarget.sampleCount = sapp_window_sample_count(st->win);
     win->ctx_.swapchainTarget.width = sapp_window_framebuffer_width(st->win);
     win->ctx_.swapchainTarget.height = sapp_window_framebuffer_height(st->win);

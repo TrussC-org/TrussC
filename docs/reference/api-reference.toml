@@ -40735,7 +40735,7 @@ description.ja = "アプリケーションのサブウィンドウを作成す�
 description.ko = "애플리케이션의 보조 윈도우를 생성한다."
 details.en = '''
 - Accepts an optional `WindowSettings` and returns a `shared_ptr<Window>` on success. Attach content with `Window::setApp`.
-- Reads `width`, `height`, `title`, `decorated`, `highDpi`, and `sampleCount`. With no argument, these default to 1280 × 720 logical pixels, `"TrussC App"`, decorations enabled, high DPI enabled, and 4× MSAA.
+- Reads `width`, `height`, `title`, `decorated`, `highDpi`, and `sampleCount`. Size units follow the main window's `pixelPerfect` mode: framebuffer pixels when enabled, logical pixels otherwise. With no argument, these default to 1280 × 720 in those units, `"TrussC App"`, decorations enabled, high DPI enabled, and 4× MSAA.
 - Other `WindowSettings` fields are not applied, including `fullscreen`, `pixelPerfect`, and `swapInterval`. To enter fullscreen after creation, use `Window::setFullscreen`.
 - Supports macOS, Windows, and desktop Linux with X11 and OpenGL. On Web, iOS, Android, and GLES3 Linux builds, logs an error and returns `nullptr`.
 - Also logs an error and returns `nullptr` in headless mode or when native window creation fails.
@@ -40744,7 +40744,7 @@ details.en = '''
 '''
 details.ja = '''
 - 省略可能な `WindowSettings` を受け取り、成功すると `shared_ptr<Window>` を返します。内容は `Window::setApp` で設定してください。
-- `width`、`height`、`title`、`decorated`、`highDpi`、`sampleCount` を読み取ります。引数を省略した場合、それぞれ 1280 × 720 論理ピクセル、`"TrussC App"`、装飾あり、高 DPI 有効、4 倍 MSAA になります。
+- `width`、`height`、`title`、`decorated`、`highDpi`、`sampleCount` を読み取ります。サイズの単位はメインウィンドウの `pixelPerfect` モードに従い、有効ならフレームバッファのピクセル、無効なら論理ピクセルです。引数を省略した場合、それぞれその単位で 1280 × 720、`"TrussC App"`、装飾あり、高 DPI 有効、4 倍 MSAA になります。
 - `fullscreen`、`pixelPerfect`、`swapInterval` を含む、それ以外の `WindowSettings` のフィールドは適用されません。作成後にフルスクリーンにするには `Window::setFullscreen` を使用してください。
 - macOS、Windows、X11 と OpenGL を使用するデスクトップ Linux に対応します。Web、iOS、Android、GLES3 を使用する Linux 向けのビルドでは、エラーログを出して `nullptr` を返します。
 - ヘッドレスモードの場合やネイティブウィンドウの作成に失敗した場合も、エラーログを出して `nullptr` を返します。
@@ -40753,7 +40753,7 @@ details.ja = '''
 '''
 details.ko = '''
 - 생략 가능한 `WindowSettings`를 받아 성공하면 `shared_ptr<Window>`를 반환합니다. 콘텐츠는 `Window::setApp`으로 설정하세요.
-- `width`, `height`, `title`, `decorated`, `highDpi`, `sampleCount`를 읽습니다. 인수를 생략하면 각각 1280 × 720 논리 픽셀, `"TrussC App"`, 창 장식 활성화, 고해상도 DPI 활성화, 4배 MSAA가 기본값입니다.
+- `width`, `height`, `title`, `decorated`, `highDpi`, `sampleCount`를 읽습니다. 크기 단위는 메인 윈도우의 `pixelPerfect` 모드를 따라 활성화되면 프레임버퍼 픽셀, 아니면 논리 픽셀입니다. 인수를 생략하면 각각 해당 단위로 1280 × 720, `"TrussC App"`, 창 장식 활성화, 고해상도 DPI 활성화, 4배 MSAA가 기본값입니다.
 - `fullscreen`, `pixelPerfect`, `swapInterval`을 포함한 나머지 `WindowSettings` 필드는 적용되지 않습니다. 생성 후 전체 화면으로 전환하려면 `Window::setFullscreen`을 사용하세요.
 - macOS, Windows, X11과 OpenGL을 사용하는 데스크톱 Linux를 지원합니다. Web, iOS, Android, GLES3를 사용하는 Linux 대상 빌드에서는 오류를 기록하고 `nullptr`를 반환합니다.
 - 헤드리스 모드이거나 네이티브 윈도우 생성에 실패한 경우에도 오류를 기록하고 `nullptr`를 반환합니다.
@@ -41085,17 +41085,17 @@ description.en = "Sets the initial window dimensions."
 description.ja = "ウィンドウの初期サイズを設定する。"
 description.ko = "윈도우의 초기 크기를 설정한다."
 details.en = '''
-- Stores `w` and `h` in `width` and `height`. Main-window startup uses logical pixels when `pixelPerfect` is `false`; when it is `true`, startup divides each requested framebuffer dimension by `getDisplayScaleFactor()` and truncates to an integer before creating the window. This conversion also occurs when `highDpi` is `false`. Secondary-window creation always treats these dimensions as logical pixels.
+- Stores `w` and `h` in `width` and `height`. On desktop, main and secondary creation use framebuffer pixels when the app's `pixelPerfect` mode is enabled, and logical pixels otherwise. Pixel requests use the target window's rendering DPI and retain fractional logical sizes, as `setWindowSize()` does. macOS rounds content sizes to whole points; odd pixel sizes may be unreachable. Mobile and Web startup conversion is unchanged.
 - All `WindowSettings` setters assign values without validation and return a reference to the same settings object, so calls can be chained.
 - Setters only change the settings object. Pass it to the launcher or window creation before the window is created; changing it afterward does not reconfigure that window. Use `setWindowSize()` to resize a running window.
 '''
 details.ja = '''
-- `w` と `h` を `width` と `height` に設定します。メインウィンドウの起動時、`pixelPerfect` が `false` なら論理ピクセルを使います。`true` なら、指定されたフレームバッファの各寸法を `getDisplayScaleFactor()` で割り、整数に切り捨ててからウィンドウを作成します。この変換は `highDpi` が `false` の場合も行います。サブウィンドウの作成では、常に論理ピクセルとして扱います。
+- `w` と `h` を `width` と `height` に設定します。デスクトップでは、主副窓の作成サイズはアプリの `pixelPerfect` モードが有効ならフレームバッファのピクセル、無効なら論理ピクセルです。ピクセル指定は `setWindowSize()` と同様に、対象ウィンドウの描画用 DPI で割り、論理サイズの小数を保持します。macOS の内容サイズは整数ポイントになるため、奇数ピクセルのサイズにはできない場合があります。モバイルと Web の起動時の変換は従来どおりです。
 - `WindowSettings` のすべてのセッターは、値を検証せずに代入し、同じ設定オブジェクトへの参照を返すため、呼び出しをチェインできます。
 - セッターは設定オブジェクトだけを変更します。ウィンドウの作成前に、ランチャーまたはウィンドウ作成処理に渡してください。作成後に変更しても、そのウィンドウには反映しません。実行中のウィンドウのサイズ変更には `setWindowSize()` を使ってください。
 '''
 details.ko = '''
-- `w`와 `h`를 `width`와 `height`에 설정합니다. 메인 윈도우 시작 시 `pixelPerfect`가 `false`이면 논리 픽셀을 사용합니다. `true`이면 요청한 프레임버퍼의 각 치수를 `getDisplayScaleFactor()`로 나눈 뒤 정수로 버림하여 윈도우를 만듭니다. 이 변환은 `highDpi`가 `false`인 경우에도 수행합니다. 보조 윈도우를 만들 때는 항상 논리 픽셀로 처리합니다.
+- `w`와 `h`를 `width`와 `height`에 저장합니다. 데스크톱의 메인 및 보조 윈도우 생성 크기는 앱의 `pixelPerfect` 모드가 활성화되면 프레임버퍼 픽셀, 아니면 논리 픽셀입니다. 픽셀 요청은 `setWindowSize()`처럼 대상 윈도우의 렌더링 DPI로 나누고 논리 크기의 소수를 유지합니다. macOS 콘텐츠 크기는 정수 포인트이므로 홀수 픽셀 크기는 불가능할 수 있습니다. 모바일과 Web의 시작 시 변환은 기존과 같습니다.
 - 모든 `WindowSettings` 설정 함수는 검증 없이 값을 대입하고 같은 설정 객체의 참조를 반환하므로 호출을 연결할 수 있습니다.
 - 설정 함수는 설정 객체만 변경합니다. 윈도우를 만들기 전에 실행기 또는 윈도우 생성 함수에 전달해야 합니다. 생성 후 변경해도 해당 윈도우에 반영하지 않습니다. 실행 중인 윈도우의 크기를 바꾸려면 `setWindowSize()`를 사용합니다.
 '''
@@ -52082,17 +52082,17 @@ description.ja = "現在の座標単位でウィンドウのサイズを変更�
 description.ko = "현재 좌표 단위로 윈도우 크기를 변경한다."
 details.en = '''
 - `width` and `height` specify the content size in logical pixels, or framebuffer pixels when `pixelPerfect` is enabled.
-- In pixel-perfect mode, dimensions are divided by the target window's DPI scale. Win32 main and secondary windows retain fractional logical sizes until native DPI rounding. X11 main (GLX and GLES3/EGL) and secondary windows round pixel requests once at the final pixel conversion; logical requests keep their existing rounding. macOS secondary windows retain fractional points; macOS main sizing is unchanged.
+- In pixel-perfect mode, dimensions are divided by the target window's DPI scale. Win32 main and secondary windows retain fractional logical sizes until native DPI rounding. X11 main (GLX and GLES3/EGL) and secondary windows round pixel requests once at the final pixel conversion; logical requests keep their existing rounding. macOS main and secondary windows pass fractional points to AppKit; whole-point content sizes can round odd pixel requests up (1001 × 667 at 2× becomes 1002 × 668).
 - Acts on the current window, including a secondary window inside its setup, event or update. This changes the former main-only global position behavior. Use an explicit `Window` handle to control another window; `App::setSize()` always targets its own window.
 '''
 details.ja = '''
 - `width` と `height` は内容領域のサイズです。単位は論理ピクセルですが、`pixelPerfect` が有効な場合はフレームバッファのピクセルです。
-- pixelPerfect モードでは、対象ウィンドウの DPI スケールで各寸法を割ります。Win32 の主副窓はネイティブ DPI で丸めるまで論理サイズの小数を保持します。X11 の主窓（GLX・GLES3/EGL）と副窓はピクセル指定を最後のピクセル変換で一度だけ丸め、論理指定の既存の丸めは維持します。macOS の副窓は小数のポイントを保持し、主窓のサイズ処理は変更しません。
+- pixelPerfect モードでは、対象ウィンドウの DPI スケールで各寸法を割ります。Win32 の主副窓はネイティブ DPI で丸めるまで論理サイズの小数を保持します。X11 の主窓（GLX・GLES3/EGL）と副窓はピクセル指定を最後のピクセル変換で一度だけ丸め、論理指定の既存の丸めは維持します。macOS の主副窓は小数のポイントを AppKit に渡します。内容サイズは整数ポイントになるため、奇数ピクセルの要求は切り上がることがあります（2 倍で 1001 × 667 を指定すると 1002 × 668）。
 - 現在のウィンドウを操作します。サブウィンドウの setup・イベント・update 内ではその窓が対象です。位置のグローバル関数が常にメインを対象にしていた動作からの変更です。別の窓には明示的な `Window` ハンドルを使います。`App::setSize()` は常に自分の窓を対象にします。
 '''
 details.ko = '''
 - `width`와 `height`는 콘텐츠 영역의 크기입니다. 단위는 논리 픽셀이며, `pixelPerfect`가 활성화된 경우에는 프레임버퍼 픽셀입니다.
-- pixelPerfect 모드에서는 대상 윈도우의 DPI 배율로 각 크기를 나눕니다. Win32 메인 및 보조 윈도우는 네이티브 DPI 반올림까지 논리 크기의 소수를 유지합니다. X11 메인(GLX 및 GLES3/EGL)과 보조 윈도우는 픽셀 요청을 최종 픽셀 변환에서 한 번 반올림하며 논리 요청의 기존 소수부 절삭은 유지합니다. macOS 보조 윈도우는 소수 포인트를 유지하며 메인 크기 처리는 변경되지 않습니다.
+- pixelPerfect 모드에서는 대상 윈도우의 DPI 배율로 각 크기를 나눕니다. Win32 메인 및 보조 윈도우는 네이티브 DPI 반올림까지 논리 크기의 소수를 유지합니다. X11 메인(GLX 및 GLES3/EGL)과 보조 윈도우는 픽셀 요청을 최종 픽셀 변환에서 한 번 반올림하며 논리 요청의 기존 소수부 절삭은 유지합니다. macOS 메인 및 보조 윈도우는 소수 포인트를 AppKit에 전달합니다. 콘텐츠 크기는 정수 포인트이므로 홀수 픽셀 요청은 올림될 수 있습니다(2배에서 1001 × 667 요청은 1002 × 668).
 - 현재 윈도우를 대상으로 합니다. 보조 윈도우의 setup, 이벤트, update 안에서는 해당 윈도우를 조작합니다. 위치 전역 함수가 항상 메인을 대상으로 하던 동작에서 변경되었습니다. 다른 윈도우는 명시적 `Window` 핸들로 조작하며 `App::setSize()`는 항상 자신의 윈도우를 대상으로 합니다.
 '''
 related = ["getWindowSize", "setWindowSizeLogical", "setWindowPosition"]

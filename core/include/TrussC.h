@@ -3076,7 +3076,15 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
 
     // Build sapp_desc
     sapp_desc desc = {};
-    if (settings.pixelPerfect) {
+    if constexpr (Platform::isDesktop()) {
+        // Native creation knows the target window's DPI; preserve pixels until then.
+        desc.width = settings.width;
+        desc.height = settings.height;
+        if (settings.pixelPerfect) {
+            desc._tc_pixel_width = settings.width > 0 ? settings.width : 0;
+            desc._tc_pixel_height = settings.height > 0 ? settings.height : 0;
+        }
+    } else if (settings.pixelPerfect) {
         // For pixel perfect, treat specified size as framebuffer size
         // and convert to logical window size
         float displayScale = getDisplayScaleFactor();
