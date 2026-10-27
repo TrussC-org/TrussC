@@ -79,10 +79,6 @@ int main() {
         // other requests also detect using a different pre-window display DPI.
         preWindowScale = requested.x == 640 ? dpi : 1.25f;
         renderScale = highDpi ? dpi : 1;
-#ifdef TEST_EGL
-        // Main retains EGL's high_dpi-independent reporting; secondaries use their descriptor.
-        if (mainWindow) renderScale = dpi;
-#endif
         enabled = pixels;
         const Settings settings{requested.x, requested.y, pixels, highDpi};
         const auto normal = mainDescriptor(settings), hot = hotDescriptor(settings);

@@ -1,0 +1,5 @@
+{test} --display
+{test} --display --no-high-dpi
+{test} --display --covered-default
+{test} --display --covered-draw
+{test} --display --covered-pause

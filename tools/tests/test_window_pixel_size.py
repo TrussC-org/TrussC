@@ -136,8 +136,14 @@ def creation_source(backend):
                       'mac': 'static bool _sapp_tc_create_main_window(',
                       'egl': 'static bool _sapp_tc_x11_create_main_window('}[backend]
     main = body(native, main_signature)
-    transfer = main.split('    w->desc.width = ', 1)[1].split('    w->desc.event_cb', 1)[0]
-    transfer = '    w->desc.width = ' + transfer
+    if backend in ('x11', 'egl'):
+        shared = (ROOT / 'core/include/sokol/util/sokol_window_native.h').read_text(encoding='utf-8')
+        transfer = body(shared, 'static inline sapp_window_desc _sapp_tc_normalize_main_window(')
+        transfer = transfer.split('    window.width = ', 1)[1].split('    window.title', 1)[0]
+        transfer = ('    window.width = ' + transfer).replace('window.', 'w->desc.')
+    else:
+        transfer = main.split('    w->desc.width = ', 1)[1].split('    w->desc.event_cb', 1)[0]
+        transfer = '    w->desc.width = ' + transfer
     if backend == 'mac':
         # Main's descriptor has already chosen the non-positive native defaults.
         transfer = transfer.replace('= width;', '= d->width;').replace('= height;', '= d->height;')

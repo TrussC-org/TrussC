@@ -51,6 +51,8 @@ struct CreationApp : App {
                     secondWidth == mainWidth && secondHeight == mainHeight);
             }
             check("main and secondary creation agree", mainWidth == secondWidth && mainHeight == secondHeight);
+            // App sizes use framebufferToLogical's integer truncation. A
+            // 1502-pixel extent at 1.5 scale is 1001 logical App units.
             check("main App receives creation size", getWidth() == int(mainWidth / scale) && getHeight() == int(mainHeight / scale));
             check("secondary App receives creation size", app->getWidth() == int(secondWidth / scale) && app->getHeight() == int(secondHeight / scale));
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)

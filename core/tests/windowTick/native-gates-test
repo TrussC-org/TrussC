@@ -1,5 +1,5 @@
 #!/bin/sh
-# Compile the four production secondary gate bodies with native types stubbed.
+# Compile the four production gate bodies with native types stubbed.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/tc-native-gates.XXXXXX")
@@ -16,23 +16,29 @@ def body(text, marker):
         depth += (text[end]=='{') - (text[end]=='}'); end += 1
     return text[start:end]
 policy = body(common, 'static bool occlusionPausesUpdate(')
+shared = (root/'core/include/sokol/util/sokol_window_native.h').read_text()
+visibility_helpers = ''.join(
+    body(shared, 'static inline bool '+name+'(').replace('_sapp_tc_native_window_t', 'Native')
+    for name in ['_sapp_tc_native_iconified', '_sapp_tc_native_occluded', '_sapp_tc_native_hidden'])
 markers = ['if (_sapp_tc_update_occluded(w)) {',
     'if (w->iconified) {\n            if (w->desc.tick_cb)',
     'if (hr == DXGI_STATUS_OCCLUDED) {\n                if (w->desc.tick_cb)',
-    'if (w->iconified || w->occluded) {']
+    'if (!w->draw_while_hidden && _sapp_tc_native_hidden(w)) {']
 code = '''#include <cstdio>
+#include <initializer_list>
 struct WindowContext { bool isMain; };
 ''' + policy + '''
 struct sapp_window { unsigned id; };
 int consulted=0, updates=0, acquired=0;
 void callback(sapp_window, void*) { ++consulted; if (!occlusionPausesUpdate(WindowContext{false})) ++updates; }
-struct Native { bool iconified=true, occluded=true; unsigned win_id=1;
+struct Native { bool iconified=true, occluded=true, draw_while_hidden=false, trust_hidden_signals=true, is_main=false; unsigned win_id=1, frame_count=0;
  struct { void (*tick_cb)(sapp_window,void*)=callback; void* user_data=nullptr; } desc;
  double refresh_period=.017;
 };
 struct { double refresh_period=.017; } _sapp_tc;
 void _sapp_tc_win32_pace(Native*,double) {}
 void _sapp_tc_x11_pace(Native*,double) {}
+''' + visibility_helpers + '''
 bool _sapp_tc_update_occluded(Native*) { return true; }
 const int DXGI_STATUS_OCCLUDED=1;
 '''
@@ -41,6 +47,11 @@ for n,marker in enumerate(markers):
 code += '''int main() { Native w;
  gate0(&w); gate1(&w); gate2(&w); gate3(&w);
  bool ok=consulted==4 && updates==0 && acquired==0 && !occlusionPausesUpdate(WindowContext{true});
+ for (bool role : {false,true}) for (bool allow : {false,true}) for (bool trust : {false,true}) {
+     w.is_main=role; w.draw_while_hidden=allow; w.trust_hidden_signals=trust;
+     consulted=acquired=0; gate3(&w);
+     ok &= consulted == int(trust && !allow) && acquired == int(!trust || allow);
+ }
  printf("native-gates: all four gates consult policy, retain secondary pause and gate drawables: %s\\n",ok?"PASS":"FAIL");
  return ok?0:1;
 }

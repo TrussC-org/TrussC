@@ -2595,6 +2595,9 @@ namespace internal {
             || mcp::internal::hasDeferredResponses()
 #endif
             ;
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+        sapp_tc_window_draw_while_hidden({0}, true);
+#endif
         if (!runWindowTick(std::chrono::steady_clock::now(), sapp_frame_duration(), forceDraw))
             sapp_skip_present();
 
@@ -3084,6 +3087,8 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings) {
     desc.sample_count = settings.sampleCount;
     desc.fullscreen = settings.fullscreen;
     desc.swap_interval = settings.swapInterval;
+    // Admit setup and the first draw even when covered before the first tick.
+    desc._tc_draw_while_hidden = 1;
     desc.init_cb = internal::_setup_cb;
     desc.frame_cb = internal::_frame_cb;
     desc.cleanup_cb = internal::_cleanup_cb;

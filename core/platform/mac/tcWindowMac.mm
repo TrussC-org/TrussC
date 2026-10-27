@@ -445,3 +445,17 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
 } // namespace trussc
 
 #endif // __APPLE__
+
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+namespace trussc::internal {
+WindowFullscreenPhase macWindowFullscreenPhase(uint32_t id) noexcept {
+    return static_cast<WindowFullscreenPhase>(sapp_tc_window_fullscreen_phase({id}));
+}
+void setMacWindowFullscreen(uint32_t id, bool full) noexcept {
+    sapp_tc_window_set_fullscreen({id}, full);
+}
+void toggleMacWindowFullscreen(uint32_t id) noexcept {
+    sapp_tc_window_toggle_fullscreen({id});
+}
+}
+#endif

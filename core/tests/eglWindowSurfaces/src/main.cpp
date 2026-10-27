@@ -211,7 +211,7 @@ void event(const sapp_event* ev, sapp_window window, void*) noexcept {
         if (window.id == greenWindow.id && ev->key_code == SAPP_KEYCODE_B) ++greenKeys;
     }
     if (ev->type == SAPP_EVENTTYPE_RESIZED) {
-        const bool finalSize = ev->framebuffer_width == 83 && ev->framebuffer_height == 71;
+        const bool finalSize = ev->framebuffer_width == 183 && ev->framebuffer_height == 71;
         if (window.id == redWindow.id) {
             lastRedWidth = ev->framebuffer_width;
             lastRedHeight = ev->framebuffer_height;
@@ -297,15 +297,15 @@ void frame() noexcept {
             eglGetCurrentSurface(EGL_DRAW) == EGL_NO_SURFACE && eglGetCurrentSurface(EGL_READ) == EGL_NO_SURFACE);
         eglMakeCurrent(display, mainSurface, mainSurface, sharedContext);
         auto* xdisplay = (Display*)sapp_x11_get_display();
-        XResizeWindow(xdisplay, (::Window)(uintptr_t)sapp_window_x11_get_window(redWindow), 83, 71);
+        XResizeWindow(xdisplay, (::Window)(uintptr_t)sapp_window_x11_get_window(redWindow), 183, 71);
         XSync(xdisplay, False);
         const bool resized = waitForGeometry([] {
             trussc::internal::tickX11WindowForTests(redWindow);
             return redResizes > 0;
         });
-        if (!resized) std::printf("resize timeout: wanted 83x71 on red, last resize=%dx%d, red=%d green=%d\n",
+        if (!resized) std::printf("resize timeout: wanted 183x71 on red, last resize=%dx%d, red=%d green=%d\n",
             lastRedWidth, lastRedHeight, redResizes, greenResizes);
-        check("WM applied red 83x71 resize before timeout", resized);
+        check("WM applied red 183x71 resize before timeout", resized);
         sendKey(xdisplay, redWindow, XK_a);
         sendKey(xdisplay, greenWindow, XK_b);
         XEvent close{};
@@ -323,8 +323,8 @@ void frame() noexcept {
         trussc::internal::tickX11WindowForTests(redWindow);
         trussc::internal::tickX11WindowForTests(greenWindow);
         check("X11 resize routes to its window", redResizes == 1 && greenResizes == 0 &&
-            lastRedWidth == 83 && lastRedHeight == 71 &&
-            sapp_window_framebuffer_width(redWindow) == 83 && sapp_window_framebuffer_height(redWindow) == 71);
+            lastRedWidth == 183 && lastRedHeight == 71 &&
+            sapp_window_framebuffer_width(redWindow) == 183 && sapp_window_framebuffer_height(redWindow) == 71);
         check("X11 close routes to its window", greenCloses == 1);
         sapp_window_desc spareDesc{};
         spareDesc.width = spareDesc.height = 32;

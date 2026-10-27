@@ -40919,14 +40919,17 @@ description.ja = "ディスプレイの高い画素密度を使って描画す�
 description.ko = "디스플레이의 높은 픽셀 밀도를 사용하여 렌더링할지 지정한다."
 details.en = '''
 - The default is `true`, which requests a full-resolution framebuffer on high-DPI displays such as Retina.
+- Linux X11 applies this setting to main and secondary windows on GLX and EGL. At `Xft.dpi: 192`, disabling it reports a DPI scale of 1 instead of 2.
 - Disabling this setting requests a framebuffer at logical resolution. Coordinate units are controlled separately by `WindowSettings::pixelPerfect`.
 '''
 details.ja = '''
 - デフォルトは `true` で、Retina などの高 DPI ディスプレイでは画面の解像度に合わせたフレームバッファを要求します。
+- Linux X11 では GLX・EGL ともに主窓・副窓へ適用します。`Xft.dpi: 192` でも無効時の DPI スケールは 2 ではなく 1 です。
 - 無効にすると、論理解像度のフレームバッファを要求します。座標の単位は `WindowSettings::pixelPerfect` で別に指定します。
 '''
 details.ko = '''
 - 기본값은 `true`이며, Retina 같은 고 DPI 디스플레이에서 디스플레이 해상도에 맞는 프레임버퍼를 요청합니다.
+- Linux X11에서는 GLX와 EGL 모두 메인 및 보조 윈도우에 적용합니다. `Xft.dpi: 192`에서도 비활성화하면 DPI 배율은 2가 아닌 1입니다.
 - 비활성화하면 논리 해상도의 프레임버퍼를 요청합니다. 좌표 단위는 `WindowSettings::pixelPerfect`에서 별도로 지정합니다.
 '''
 
