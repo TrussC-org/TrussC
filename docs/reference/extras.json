@@ -3,12 +3,12 @@
     {
       "name": "TC_RUN_APP",
       "signature": "TC_RUN_APP(AppClass, settings)",
-      "description": "Application entry point. Generates main(), runs your App subclass, and enables hot reload.",
-      "description_ja": "アプリのエントリポイント。main() を生成し App サブクラスを実行、ホットリロードも有効化する。",
-      "description_ko": "앱 진입점. main()을 생성하고 App 서브클래스를 실행하며 핫 리로드도 활성화한다.",
-      "details": "The single line that boots a TrussC app. `TC_RUN_APP(MyApp, settings)` generates a `main()` that constructs your `App` subclass, applies the given `WindowSettings`, and runs the loop. It is also the hook that enables hot reload (with `TC_HOT_RELOAD`): the generated entry point knows how to reload your app's translation unit. Put it once, in your app's main `.cpp`, after the `App` subclass is defined.",
-      "details_ja": "TrussC アプリを起動する 1 行。`TC_RUN_APP(MyApp, settings)` は `main()` を生成し、`App` サブクラスを構築して指定の `WindowSettings` を適用、ループを回す。`TC_HOT_RELOAD` と組むとホットリロードの起点にもなる（生成された main がアプリの翻訳単位を再読込できる）。アプリの主 `.cpp` に、`App` サブクラス定義の後で 1 回だけ置く。",
-      "details_ko": "TrussC 앱을 부팅하는 한 줄. `TC_RUN_APP(MyApp, settings)`는 `main()`을 생성해 `App` 서브클래스를 만들고 주어진 `WindowSettings`를 적용한 뒤 루프를 돌린다. `TC_HOT_RELOAD`와 함께 쓰면 핫 리로드의 시작점이 된다. 앱의 메인 `.cpp`에, `App` 서브클래스 정의 뒤에 한 번만 둔다."
+      "description": "Runs your App subclass with the given window settings; use it in main().",
+      "description_ja": "App のサブクラスを指定のウィンドウ設定で実行する。main() の中で使う。",
+      "description_ko": "App 서브클래스를 지정한 윈도우 설정으로 실행한다. main() 안에서 사용한다.",
+      "details": "- Write it in `main()` as `return TC_RUN_APP(tcApp, settings);`. It does not create `main()` itself: it starts your `App` subclass with the `WindowSettings` you pass and returns the exit code when the app ends.\n- In a normal build it is the same as `runApp<tcApp>(settings)`.\n- When one of your source files contains `TC_HOT_RELOAD(tcApp)`, the build system (CMake) defines `TC_HOT_RELOAD_BUILD`, and `TC_RUN_APP` starts the hot-reload host instead, which rebuilds and reloads your app code when you save it. You never define `TC_HOT_RELOAD_BUILD` yourself.",
+      "details_ja": "- `main()` の中で `return TC_RUN_APP(tcApp, settings);` のように書きます。`main()` そのものを作るわけではなく、渡した `WindowSettings` で `App` のサブクラスを起動し、アプリが終わると終了コードを返します。\n- 通常のビルドでは `runApp<tcApp>(settings)` と同じです。\n- ソースファイルのどこかに `TC_HOT_RELOAD(tcApp)` があると、ビルドシステム（CMake）が `TC_HOT_RELOAD_BUILD` を定義し、`TC_RUN_APP` は代わりにホットリロードのホストを起動します。ホストは、保存したコードを再ビルドして読み込み直します。`TC_HOT_RELOAD_BUILD` を自分で定義する必要はありません。",
+      "details_ko": "- `main()` 안에서 `return TC_RUN_APP(tcApp, settings);`처럼 씁니다. `main()` 자체를 만들지는 않으며, 넘긴 `WindowSettings`로 `App` 서브클래스를 시작하고 앱이 끝나면 종료 코드를 반환합니다.\n- 일반 빌드에서는 `runApp<tcApp>(settings)`와 같습니다.\n- 소스 파일 어딘가에 `TC_HOT_RELOAD(tcApp)`가 있으면 빌드 시스템(CMake)이 `TC_HOT_RELOAD_BUILD`를 정의하고, `TC_RUN_APP`은 대신 핫 리로드 호스트를 시작합니다. 호스트는 저장한 코드를 다시 빌드해 불러옵니다. `TC_HOT_RELOAD_BUILD`를 직접 정의할 필요는 없습니다."
     },
     {
       "name": "TC_HOT_RELOAD",
@@ -16,9 +16,9 @@
       "description": "Opt the app into hot reload — edit and recompile the running app without restarting.",
       "description_ja": "アプリをホットリロードに対応させる。再起動せず編集・再コンパイルを反映。",
       "description_ko": "앱을 핫 리로드에 적용. 재시작 없이 편집·재컴파일을 반영.",
-      "details": "Opts the app into hot reload: edit your app's `.cpp` while it runs and the change is recompiled and swapped in without a restart. Place it in the app's `.cpp`; it triggers a CMake reconfigure on the next build so the reload harness is wired up. Requires `TC_RUN_APP`. State stored in your `App` subclass survives a reload; global/static state does not.",
-      "details_ja": "アプリをホットリロードに対応させる：実行中に `.cpp` を編集すると、再起動せず再コンパイルして差し替わる。アプリの `.cpp` に置くと、次のビルドで CMake 再構成が走りリロード機構が組み込まれる。`TC_RUN_APP` が前提。`App` サブクラスが持つ状態はリロードを跨いで残るが、グローバル/static 状態は残らない。",
-      "details_ko": "앱을 핫 리로드에 적용한다: 실행 중에 `.cpp`를 편집하면 재시작 없이 재컴파일되어 교체된다. 앱의 `.cpp`에 두면 다음 빌드에서 CMake 재구성이 일어나 리로드 장치가 연결된다. `TC_RUN_APP`가 필요하다. `App` 서브클래스가 가진 상태는 리로드를 넘어 유지되지만 전역/정적 상태는 유지되지 않는다."
+      "details": "- While the app runs, saving your source files rebuilds your app code and swaps it in without restarting the window. Put `TC_HOT_RELOAD(tcApp)` in `tcApp.cpp`, not in `main.cpp`, and keep `TC_RUN_APP` in `main()`. The next build reconfigures CMake and turns hot reload on.\n- Each reload creates a new `App`, so its member values start over and `setup()` runs again. Save anything you want to keep yourself.\n- Hot reload is not available on Android, iOS and the web; there the macro does nothing.",
+      "details_ja": "- アプリの実行中にソースファイルを保存すると、アプリのコードが再ビルドされ、ウィンドウを閉じずに差し替わります。`TC_HOT_RELOAD(tcApp)` は `main.cpp` ではなく `tcApp.cpp` に書き、`main()` には `TC_RUN_APP` を置いたままにしてください。次のビルドで CMake が再構成され、ホットリロードが有効になります。\n- リロードのたびに新しい `App` が作られるため、メンバーの値は最初からになり、`setup()` ももう一度呼ばれます。残したい値は自分で保存してください。\n- Android、iOS、web ではホットリロードを使えず、このマクロは何もしません。",
+      "details_ko": "- 앱 실행 중에 소스 파일을 저장하면 앱 코드가 다시 빌드되어 윈도우를 닫지 않고 교체됩니다. `TC_HOT_RELOAD(tcApp)`는 `main.cpp`가 아니라 `tcApp.cpp`에 쓰고, `main()`에는 `TC_RUN_APP`을 그대로 두세요. 다음 빌드에서 CMake가 재구성되어 핫 리로드가 켜집니다.\n- 리로드할 때마다 새 `App`이 만들어지므로 멤버 값은 처음부터 시작하고 `setup()`도 다시 호출됩니다. 남기고 싶은 값은 직접 저장하세요.\n- Android, iOS, web에서는 핫 리로드를 쓸 수 없으며, 이 매크로는 아무 일도 하지 않습니다."
     },
     {
       "name": "TC_REFLECT",
