@@ -54,15 +54,20 @@ void topologyChecks() {
     check("secondary target preserves BGRA8 and 1x", target.colorFormat == SG_PIXELFORMAT_BGRA8 && target.sampleCount == 1);
 }
 
-#if defined(SOKOL_GLCORE)
+#if defined(SOKOL_GLCORE) || (defined(__linux__) && defined(SOKOL_GLES3) && !defined(__ANDROID__))
 bool completed = false;
+#if defined(SOKOL_GLES3)
+#define TC_PBR_TEST_GLSL_VERSION "#version 300 es\nprecision highp float;\n"
+#else
+#define TC_PBR_TEST_GLSL_VERSION "#version 330\n"
+#endif
 const sg_shader_desc* testShader(sg_backend) {
     static const sg_shader_desc desc = [] {
         sg_shader_desc d = {};
-        d.vertex_func.source = "#version 330\nlayout(location=0) in vec3 position;"
+        d.vertex_func.source = TC_PBR_TEST_GLSL_VERSION "layout(location=0) in vec3 position;"
             "layout(location=1) in vec2 uv; layout(location=2) in vec4 color;"
             "out vec4 c; void main(){gl_Position=vec4(position,1); c=color+vec4(uv,0,0)*0.01;}";
-        d.fragment_func.source = "#version 330\nin vec4 c; out vec4 frag; void main(){frag=c;}";
+        d.fragment_func.source = TC_PBR_TEST_GLSL_VERSION "in vec4 c; out vec4 frag; void main(){frag=c;}";
         d.attrs[0].glsl_name = "position";
         d.attrs[1].glsl_name = "uv";
         d.attrs[2].glsl_name = "color";
@@ -70,6 +75,7 @@ const sg_shader_desc* testShader(sg_backend) {
     }();
     return &desc;
 }
+#undef TC_PBR_TEST_GLSL_VERSION
 struct InspectShader : Shader {
     sg_pipeline targetPipeline() { return pipelineForCurrentTarget(); }
 };
@@ -308,7 +314,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             std::printf("SKIP: pbrMeshTargets GPU mode, single-window platform\n");
             return failures ? 1 : 0;
         }
-#if defined(SOKOL_GLCORE)
+#if defined(SOKOL_GLCORE) || (defined(__linux__) && defined(SOKOL_GLES3) && !defined(__ANDROID__))
         WindowSettings settings;
         settings.setSize(64, 64);
         settings.setHighDpi(false);

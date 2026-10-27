@@ -1,8 +1,8 @@
 // =============================================================================
 // tcWindowLinux.cpp - TrussC adapter for secondary windows (Linux / X11)
 // =============================================================================
-// The native windowing layer (X11 window + shared GLX context with one
-// GLXWindow drawable per window, timer-paced ticks at the measured refresh
+// The native windowing layer (X11 window + shared GL context with one
+// GLXWindow or EGLSurface per window, timer-paced ticks at the measured refresh
 // rate, sapp_event conversion with the full sokol_app XKB keytable) lives in
 // sokol/sokol_app_tc.h and knows nothing about TrussC. This file maps its C
 // API onto TrussC:
@@ -15,7 +15,7 @@
 
 #include "TrussC.h"
 
-#if defined(__linux__) && defined(SOKOL_GLCORE) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
 #include "tcWindowGeometryX11.h"
 #include "sokol_app_tc.h"   // declarations only (impl lives in sokol_impl.cpp)
 
@@ -395,8 +395,18 @@ bool Window::isSecondaryOccluded() const {
 }
 
 std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {
-    if (headless::isActive()) {
+    const bool noX11 = !sapp_x11_get_display();
+#if defined(SOKOL_GLES3)
+    const bool rejectHeadless = headless::isActive() && !noX11;
+#else
+    const bool rejectHeadless = headless::isActive();
+#endif
+    if (rejectHeadless) {
         logError("Window") << "createWindow(): not available in headless mode";
+        return nullptr;
+    }
+    if (noX11) {
+        logWarning("Window") << "createWindow(): secondary windows require X11 (unsupported on KMS or without an X11 display)";
         return nullptr;
     }
     auto win = std::shared_ptr<Window>(new Window());
@@ -416,7 +426,7 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     d.title = settings.title.c_str();
     d.borderless = !settings.decorated;
     d.no_high_dpi = !settings.highDpi;
-    d.sample_count = settings.sampleCount;  // NOTE: forced to the shared fbconfig's count on GLX
+    d.sample_count = settings.sampleCount;  // NOTE: forced to the shared configuration's count
     d.tick_cb = &windowTick;
     d.event_cb = &windowEvent;
     d.close_cb = &windowClosed;
@@ -449,4 +459,4 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
 
 } // namespace trussc
 
-#endif // __linux__ && SOKOL_GLCORE && !__ANDROID__
+#endif // Linux X11 (GLCORE or GLES3), excluding Android

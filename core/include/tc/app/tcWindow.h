@@ -844,17 +844,15 @@ inline void App::setSize(float w, float h) {
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
-#if !(defined(__APPLE__) && TARGET_OS_OSX) && !defined(_WIN32) && !(defined(__linux__) && defined(SOKOL_GLCORE))
+#if !(defined(__APPLE__) && TARGET_OS_OSX) && !defined(_WIN32) && !(defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)))
 namespace internal {
 // Keep the capability check and the single-window stubs under one platform rule.
 inline constexpr bool supportsSecondaryWindows() { return false; }
 inline std::shared_ptr<Window> createSecondaryWindow(const WindowSettings&) { return nullptr; }
 }
-// Stubs for platforms without window glue (web / iOS / Android / Raspberry
-// Pi). The real implementations live in platform/mac/tcWindowMac.mm,
+// Stubs for platforms without window glue (web / iOS / Android). The real implementations live in platform/mac/tcWindowMac.mm,
 // platform/win/tcWindowWin.cpp and platform/linux/tcWindowLinux.cpp (desktop
-// Linux is SOKOL_GLCORE; Raspberry Pi builds the same sources with GLES3/EGL
-// and keeps these stubs).
+// Linux uses the same adapter for GLX and GLES3/EGL).
 inline void Window::closeSecondary() {}
 inline void Window::teardownSecondary() noexcept {}
 inline void Window::setSecondaryTitle(const std::string&) {}
@@ -1037,7 +1035,7 @@ inline bool Window::isOccluded() const {
 inline std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
     if constexpr (!internal::supportsSecondaryWindows()) {
         logError("Window") << "createWindow(): secondary windows are supported on "
-            "macOS, Windows and desktop Linux (OpenGL); this platform is "
+            "macOS, Windows and Linux X11 (GLX or GLES3/EGL); this platform is "
             "single-window";
         return nullptr;
     }

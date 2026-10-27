@@ -182,7 +182,7 @@ void setup() {
     // swapchain color/depth format + sample count). Pipelines build lazily on first use.
     internal::currentWindowContext().swapchainTarget.resources().context = sgl_default_context();
     sgl_tc_context_target_owned(sgl_default_context());
-#if defined(__linux__) && !defined(__ANDROID__) && defined(SOKOL_GLCORE)
+#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
     internal::mainWindowContext().activateNative = [](void*) { sapp_tc_gl_make_current({0}); };
 #endif
     internal::currentWindowContext().swapchainTarget.isFbo = false;
@@ -1959,7 +1959,9 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
                 getLogger().log(LogLevel::Fatal,
                                 sokolLogMessage(tag, logItem, message, lineNr));
             } else {
-                getLogger().log(sokolLogLevel(logLevel),
+                const bool appNotice = logLevel == 3 && logItem == SAPP_LOGITEM_LINUX_X11_DROP_TYPES_TRUNCATED &&
+                    tag && std::strcmp(tag, "sapp") == 0;
+                getLogger().log(appNotice ? LogLevel::Notice : sokolLogLevel(logLevel),
                                 sokolLogMessage(tag, logItem, message, lineNr));
             }
         } catch (...) {

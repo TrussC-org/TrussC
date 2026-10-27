@@ -96,7 +96,7 @@ class ShadowApp : public App {
             fbo_.end();
             pixels.allocate(128,96,4);
             check("Fbo readback", fbo_.readPixels(pixels.getData()));
-#if defined(SOKOL_METAL) || (defined(SOKOL_GLES3) && defined(__linux__) && !defined(__ANDROID__))
+#if defined(SOKOL_METAL)
             // Submit/retire Fbo work without presenting the main drawable
             // repeatedly inside its one native tick.
             internal::endGpuFrame();
@@ -191,16 +191,11 @@ class ShadowApp : public App {
         queue(true);
         matches("Fbo PBR after foreign shadow writes uses its owner maps",finish(true),reference);
     }
-#if defined(SOKOL_METAL) || (defined(SOKOL_GLES3) && defined(__linux__) && !defined(__ANDROID__))
+#if defined(SOKOL_METAL)
     void runMainCases() {
         if (ran_) return;
         ran_ = true;
-#if defined(SOKOL_GLES3)
-        check("Linux GLES has no secondary-window support", !internal::supportsSecondaryWindows());
-        std::puts("SKIP: perWindowShadows secondary-window cases on Linux GLES: supportsSecondaryWindows() is false; the EGL/GLES path has single-window stubs, so interleaving, foreign commits, parked foreign shadow passes and native secondary close require unsupported secondary windows");
-#else
         std::puts("SKIP: perWindowShadows secondary-window cases on Metal: the Air's second window is occluded / not reliably presented in the lab; interleaving, foreign commits, parked foreign shadow passes and native secondary close require it");
-#endif
 
         // No second native window/drawable is needed for lazy allocation.
         internal::WindowContext unused;
@@ -355,7 +350,7 @@ public:
         log_ = getLogger().onLog.listen([this](LogEventArgs& e) {
             if (e.level >= LogLevel::Error) ++unexpectedErrors_;
         });
-#if defined(SOKOL_METAL) || (defined(SOKOL_GLES3) && defined(__linux__) && !defined(__ANDROID__))
+#if defined(SOKOL_METAL)
         check("main window starts without shadow maps", !a_->shadow.storage);
 #else
         WindowSettings settings; settings.setSize(128,96); settings.setHighDpi(false); settings.sampleCount = 1;
@@ -386,7 +381,7 @@ public:
         receiver_ = createPlane(112,80);
         material_.setBaseColor(0.5f,0.5f,0.5f).setRoughness(1);
         fbo_.allocate(128,96);
-#if defined(SOKOL_METAL) || (defined(SOKOL_GLES3) && defined(__linux__) && !defined(__ANDROID__))
+#if defined(SOKOL_METAL)
         draw_ = events().draw.listen([this] { runMainCases(); });
 #else
         draw_ = events().draw.listen([this] { if (b_ && unused_) runCases(); else exitApp(); });
@@ -401,7 +396,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (argc == 1) return failures ? 1 : 0;
     if (argc != 2 || std::strcmp(argv[1],"--gpu-check")) return 2;
 #if (defined(SOKOL_GLCORE) && defined(__linux__)) || (defined(SOKOL_GLES3) && defined(__linux__) && !defined(__ANDROID__)) || (defined(SOKOL_D3D11) && defined(_WIN32)) || defined(SOKOL_METAL)
-#if !defined(SOKOL_METAL) && !defined(SOKOL_GLES3)
+#if !defined(SOKOL_METAL)
     if (!internal::supportsSecondaryWindows()) { std::puts("SKIP: secondary windows unavailable"); return failures ? 1 : 0; }
 #endif
     WindowSettings settings; settings.setSize(128,96); settings.setHighDpi(false); settings.sampleCount = 1;

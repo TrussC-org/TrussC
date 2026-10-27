@@ -13,16 +13,16 @@ void check(const char* label, bool passed) {
     std::printf("%s: %s\n", label, passed ? "PASS" : "FAIL");
     if (!passed) ++failures;
 }
-struct Secondary : App { bool ready = false; void setup() override { ready = true; } };
+struct Secondary : App { bool ready = false; int updates = 0; void setup() override { ready = true; } void update() override { ++updates; } };
 struct CreationApp : App {
     std::shared_ptr<Window> secondary;
     int mainWidth = 0, mainHeight = 0, secondWidth = 0, secondHeight = 0;
-    int phase = 0, frames = 0;
+    int phase = 0, frames = 0, fullscreenUpdate = 0;
     bool complete = false;
     void setup() override {
         // Public mode comes from the main WindowSettings, also for secondaries.
         WindowSettings settings;
-        settings.setSize(requestWidth, requestHeight).setPixelPerfect(!pixels);
+        settings.setSize(requestWidth, requestHeight).setPixelPerfect(!pixels).setTitle("Creation secondary");
         secondary = createWindow(settings);
         check("secondary created", bool(secondary));
         if (!secondary) { exitApp(1); return; }
@@ -53,13 +53,49 @@ struct CreationApp : App {
             check("main and secondary creation agree", mainWidth == secondWidth && mainHeight == secondHeight);
             check("main App receives creation size", getWidth() == int(mainWidth / scale) && getHeight() == int(mainHeight / scale));
             check("secondary App receives creation size", app->getWidth() == int(secondWidth / scale) && app->getHeight() == int(secondHeight / scale));
-            // Change away first, so the final comparison observes a real native resize.
-            setSize(300, 200); app->setSize(300, 200); phase = 1;
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+            // Exercise real backend intent and public admission on both windows.
+            auto main = getWindow();
+            for (auto* target : {main, secondary.get()}) {
+                const auto* other = target == main ? secondary.get() : main;
+                target->toggleFullscreen();
+                check("target fullscreen intent is independent", target->isFullscreen() && !other->isFullscreen());
+                int notices = 0;
+                bool exact = true;
+                auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+                    ++notices;
+                    const std::string suffix = target == main ? "" : " on \"Creation secondary\"";
+                    const std::string prefix = "[Window] ";
+                    const std::string reason = " ignored while fullscreen; call it once isFullscreen() returns false";
+                    exact &= e.level == LogLevel::Notice &&
+                        (e.message == prefix + "Window::setSize()" + suffix + reason ||
+                         e.message == prefix + "Window::setPosition()" + suffix + reason ||
+                         e.message == prefix + "App::setSize()" + suffix + reason);
+                });
+                target->setSize(213, 157);
+                target->setPosition(27, 39);
+                target->getApp()->setSize(215, 159);
+                check("fullscreen geometry emits exact Notices", notices == 3 && exact && target->isFullscreen());
+                target->toggleFullscreen();
+                check("toggle reverses backend requested state", !target->isFullscreen());
+            }
+            fullscreenUpdate = app->updates;
+            phase = 1;
+#else
+            setSize(300, 200); app->setSize(300, 200); phase = 2;
+#endif
         } else if (phase == 1) {
+            if (app->updates == fullscreenUpdate) return;
+            check("ignored fullscreen requests preserve both native sizes",
+                sapp_width() == mainWidth && sapp_height() == mainHeight &&
+                secondary->context().fbWidth == secondWidth && secondary->context().fbHeight == secondHeight);
+            // Change away first, so the final comparison observes a real native resize.
+            setSize(300, 200); app->setSize(300, 200); phase = 2;
+        } else if (phase == 2) {
             if (getWidth() != 300 || app->getWidth() != 300) return;
             setSize(float(requestWidth), float(requestHeight));
             app->setSize(float(requestWidth), float(requestHeight));
-            phase = 2;
+            phase = 3;
         } else {
             // For logical odd requests, preserve the existing creation/resize
             // rounding difference on X11; exact equality is the pixel contract.

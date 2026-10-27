@@ -27,13 +27,7 @@ bool pixelPerfectMode() { return enabled; }
 float getDisplayScaleFactor() { return preWindowScale; }
 int _sapp_tc_roundf_gzero(float value) { return int(value + 0.5f); }
 struct State { Descriptor desc; float window_scale = 1, dpi_scale = 1; int xwin = 1, fb_width = 0, fb_height = 0, win_width = 0, win_height = 0; };
-struct EglState { void* display = nullptr; Descriptor desc; int window_width = 0, window_height = 0; float dpi_scale = 1; int framebuffer_width = 0, framebuffer_height = 0; bool first_frame = true; struct { float dpi = 96; } x11; } _sapp_tc;
-#ifdef TEST_EGL
-#define _SOKOL_PRIVATE
-constexpr int SAPP_EVENTTYPE_RESIZED = 1;
-void _sapp_tc_x11_app_event(int) {}
-EGL_DIMENSIONS
-#endif
+struct { void* display = nullptr; } _sapp_tc;
 Size roundMac(double width, double height) { return {int(std::ceil(width) * renderScale), int(std::ceil(height) * renderScale)}; }
 namespace internal {
 Descriptor buildWindowDescriptor(const Settings& settings) {
@@ -64,34 +58,30 @@ Size create(Descriptor descriptor, bool mainWindow) {
     const float scale = renderScale;
 #endif
     (void)mainWindow; (void)w;
-    _sapp_tc.desc = descriptor; _sapp_tc.window_width = descriptor.width; _sapp_tc.window_height = descriptor.height;
-    _sapp_tc.dpi_scale = renderScale; _sapp_tc.x11.dpi = displayScale * 96;
     CREATION_GUARD
     ARITHMETIC
 }
-#ifdef TEST_X11
+#if defined(TEST_X11) || defined(TEST_EGL)
 using _sapp_tc_window_t = State;
 struct XWindowAttributes { int width, height; };
 Size nativeSize;
 void XGetWindowAttributes(void*, int, XWindowAttributes* attributes) {
     attributes->width = nativeSize.x; attributes->height = nativeSize.y;
 }
-GLX_DIMENSIONS
+X11_DIMENSIONS
 #endif
 int main() {
     for (bool pixels : {false, true}) for (bool highDpi : {true, false})
     for (float dpi : {1.5f, 2.0f}) for (Size requested : {Size{640,400}, Size{480,320}, Size{1001,667}, Size{1,3}})
     for (bool mainWindow : {false, true}) {
-#ifdef TEST_EGL
-        if (!mainWindow) continue; // secondary windows are unsupported on EGL
-#endif
         displayScale = dpi;
         // 640x400 isolates the old integer truncation at the correct scale;
         // other requests also detect using a different pre-window display DPI.
         preWindowScale = requested.x == 640 ? dpi : 1.25f;
         renderScale = highDpi ? dpi : 1;
 #ifdef TEST_EGL
-        renderScale = dpi; // EGL's existing native scale reporting ignores high_dpi.
+        // Main retains EGL's high_dpi-independent reporting; secondaries use their descriptor.
+        if (mainWindow) renderScale = dpi;
 #endif
         enabled = pixels;
         const Settings settings{requested.x, requested.y, pixels, highDpi};
@@ -100,9 +90,11 @@ int main() {
                normal._tc_pixel_width == hot._tc_pixel_width && normal._tc_pixel_height == hot._tc_pixel_height);
         Descriptor d = mainWindow ? mainTransfer(mainDescriptor(settings)) : secondaryDescriptor(settings);
         const Size actual = create(d, mainWindow);
-#ifdef TEST_EGL
-        _sapp_tc_x11_update_dimensions(actual.x, actual.y);
-        assert(_sapp_tc.framebuffer_width == actual.x && _sapp_tc.framebuffer_height == actual.y);
+#if defined(TEST_X11) || defined(TEST_EGL)
+        nativeSize = actual;
+        State reported{d, displayScale, renderScale};
+        assert(_sapp_tc_x11_update_dimensions(&reported));
+        assert(reported.fb_width == actual.x && reported.fb_height == actual.y);
 #endif
         // Pixel requests match setSize's fractional rule. With pixels disabled,
         // preserve creation's native rounding (X11 logical setSize truncates).
@@ -112,7 +104,7 @@ int main() {
         const Size expectedNative = roundMac(pointsX, pointsY);
 #else
         const float nativeScale =
-#ifdef TEST_X11
+#if defined(TEST_X11) || defined(TEST_EGL)
             renderScale;
 #else
             displayScale;
@@ -154,9 +146,6 @@ int main() {
     enabled = true; renderScale = displayScale = 1e-8f;
     const Settings tiny{640,400,true,true};
     for (bool mainWindow : {false, true}) {
-#ifdef TEST_EGL
-        if (!mainWindow) continue;
-#endif
         const auto d = mainWindow ? mainTransfer(mainDescriptor(tiny)) : secondaryDescriptor(tiny);
         const Size result = create(d, mainWindow);
         assert(result.x == 0 && result.y == 0);

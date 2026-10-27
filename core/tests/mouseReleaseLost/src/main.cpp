@@ -8,7 +8,7 @@
 
 // Private adapter seam, declared only here: no native window or OS input.
 #if (defined(__APPLE__) && TARGET_OS_OSX) || defined(_WIN32) || \
-    (defined(__linux__) && defined(SOKOL_GLCORE) && !defined(__ANDROID__))
+    (defined(__linux__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__ANDROID__))
 #define TC_TEST_SECONDARY_DISPATCH
 namespace trussc::internal {
 void dispatchSecondaryWindowEventForTests(const sapp_event* ev, Window& win);

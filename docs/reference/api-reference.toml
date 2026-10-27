@@ -353,13 +353,13 @@ details.ko = '''
 '''
 related = ["Window::setApp", "Window::getApp", "createWindow", "Window::close", "Window::isOpen", "App::setSize", "App::exit", "App"]
 platform_note.en = '''
-- Web, iOS, Android and Raspberry Pi provide the main Window. Secondary creation still fails explicitly on these platforms; title, size and fullscreen retain the existing sapp main-window support and limitations.
+- Web, iOS and Android provide the main Window. Secondary creation still fails explicitly on these platforms; title, size and fullscreen retain the existing sapp main-window support and limitations.
 '''
 platform_note.ja = '''
-- Web / iOS / Android / Raspberry Pi でもメイン Window を返します。副窓の作成は引き続き明示的に失敗します。タイトル・サイズ・全画面は既存の sapp 主窓経路と各 OS の対応範囲に従います。
+- Web / iOS / Android でもメイン Window を返します。副窓の作成は引き続き明示的に失敗します。タイトル・サイズ・全画面は既存の sapp 主窓経路と各 OS の対応範囲に従います。
 '''
 platform_note.ko = '''
-- Web / iOS / Android / Raspberry Pi에서도 메인 Window를 반환합니다. 보조 윈도우 생성은 계속 명시적으로 실패합니다. 제목·크기·전체 화면은 기존 sapp 메인 경로와 OS 지원 범위를 따릅니다.
+- Web / iOS / Android에서도 메인 Window를 반환합니다. 보조 윈도우 생성은 계속 명시적으로 실패합니다. 제목·크기·전체 화면은 기존 sapp 메인 경로와 OS 지원 범위를 따릅니다.
 '''
 snippet = '''
 // tcApp.cpp
@@ -911,17 +911,17 @@ details.ko = '''
 '''
 related = ["getWindowSize", "setWindowSize", "App::getWindow", "App::windowResized", "App", "Window::setSize", "Window::setApp", "WindowSettings"]
 platform_note.en = '''
-- macOS, Windows and desktop Linux GLX support main and secondary resizing. Pi X11/EGL supports main resizing; headless KMS logs a Warning.
+- macOS, Windows and Linux X11 (GLX and Pi GLES3/EGL) support main and secondary resizing; headless KMS logs a Warning.
 - Web: attached Apps are a no-op with one Notice on every call, including invalid sizes, like `setWindowSize()`. Page CSS controls the canvas; its drawable and attachments stay synchronized by sokol.
 - iOS/Android keep their screen-filling window size; attached Apps log one Notice on every call, including invalid sizes and pixel sizes that truncate to zero.
 '''
 platform_note.ja = '''
-- macOS・Windows・desktop Linux GLX は主副窓でリサイズできます。Pi X11/EGL はメインのリサイズに対応し、headless KMS は Warning を出します。
+- macOS・Windows・Linux X11（GLX と Pi GLES3/EGL）は主副窓でリサイズできます。headless KMS は Warning を出します。
 - Web の接続済み App は `setWindowSize()` と同じく、無効なサイズも含め呼び出しごとに Notice を 1 回出す no-op です。canvas のサイズはページの CSS が決め、sokol が drawable と attachment の整合を保ちます。
 - iOS・Android は画面全体のウィンドウサイズを維持します。接続済み App は無効なサイズや変換でゼロになるピクセルサイズも含め、呼び出しごとに Notice を 1 回出します。
 '''
 platform_note.ko = '''
-- macOS, Windows, desktop Linux GLX는 메인과 보조 윈도우 리사이즈를 지원합니다. Pi X11/EGL은 메인 리사이즈를 지원하고 headless KMS는 Warning을 출력합니다.
+- macOS, Windows, Linux X11(GLX 및 Pi GLES3/EGL)은 메인과 보조 윈도우 리사이즈를 지원합니다. headless KMS는 Warning을 출력합니다.
 - Web의 연결된 App은 `setWindowSize()`와 같이 잘못된 크기도 포함하여 호출할 때마다 Notice를 한 번 출력하는 no-op입니다. 페이지 CSS가 canvas 크기를 결정하고 sokol이 drawable과 attachment의 크기를 동기화합니다.
 - iOS와 Android는 화면 전체의 윈도우 크기를 유지합니다. 연결된 App은 잘못된 크기나 변환 후 0이 되는 픽셀 크기도 포함하여 호출할 때마다 Notice를 한 번 출력합니다.
 '''
@@ -40761,27 +40761,27 @@ details.en = '''
 - Accepts an optional `WindowSettings` and returns a `shared_ptr<Window>` on success. Attach content with `Window::setApp`.
 - Reads `width`, `height`, `title`, `decorated`, `highDpi`, and `sampleCount`. Size units follow the main window's `pixelPerfect` mode: framebuffer pixels when enabled, logical pixels otherwise. With no argument, these default to 1280 × 720 in those units, `"TrussC App"`, decorations enabled, high DPI enabled, and 4× MSAA.
 - Other `WindowSettings` fields are not applied, including `fullscreen`, `pixelPerfect`, and `swapInterval`. To enter fullscreen after creation, use `Window::setFullscreen`.
-- Supports macOS, Windows, and desktop Linux with X11 and OpenGL. On Web, iOS, Android, and GLES3 Linux builds, logs an error and returns `nullptr`.
-- Also logs an error and returns `nullptr` in headless mode or when native window creation fails.
-- On desktop Linux, the MSAA sample count comes from the shared configuration negotiated at startup; this call's `sampleCount` does not change it.
+- Supports macOS, Windows and Linux X11. Linux X11 supports both GLX and GLES3/EGL (including Raspberry Pi), sharing one GL context across per-window surfaces. On Web, iOS and Android, logs an error and returns `nullptr`. Linux GLES3/EGL without an X11 display (including KMS/headless) logs a Warning and returns `nullptr`.
+- Other headless configurations, and native window creation failures, log an error and return `nullptr`.
+- On Linux X11, the MSAA sample count comes from the shared configuration negotiated at startup; this call's `sampleCount` does not change it.
 - For ownership, main-thread requirements, frame timing, and behavior when closing, see `Window`.
 '''
 details.ja = '''
 - 省略可能な `WindowSettings` を受け取り、成功すると `shared_ptr<Window>` を返します。内容は `Window::setApp` で設定してください。
 - `width`、`height`、`title`、`decorated`、`highDpi`、`sampleCount` を読み取ります。サイズの単位はメインウィンドウの `pixelPerfect` モードに従い、有効ならフレームバッファのピクセル、無効なら論理ピクセルです。引数を省略した場合、それぞれその単位で 1280 × 720、`"TrussC App"`、装飾あり、高 DPI 有効、4 倍 MSAA になります。
 - `fullscreen`、`pixelPerfect`、`swapInterval` を含む、それ以外の `WindowSettings` のフィールドは適用されません。作成後にフルスクリーンにするには `Window::setFullscreen` を使用してください。
-- macOS、Windows、X11 と OpenGL を使用するデスクトップ Linux に対応します。Web、iOS、Android、GLES3 を使用する Linux 向けのビルドでは、エラーログを出して `nullptr` を返します。
-- ヘッドレスモードの場合やネイティブウィンドウの作成に失敗した場合も、エラーログを出して `nullptr` を返します。
-- デスクトップ Linux の MSAA サンプル数には、起動時に決定された共有設定を使用します。この呼び出しの `sampleCount` では変更できません。
+- macOS、Windows、Linux X11（GLX と GLES3/EGL、Raspberry Pi を含む）に対応します。Linux X11 では 1 つの GL context と窓ごとの surface を使用します。Web、iOS、Android ではエラーログを出して `nullptr` を返します。Linux GLES3/EGL で X11 display がない環境（KMS・ヘッドレスを含む）では Warning を出して `nullptr` を返します。
+- それ以外のヘッドレス構成やネイティブウィンドウの作成失敗では、エラーログを出して `nullptr` を返します。
+- Linux X11 の MSAA サンプル数には、起動時に決定された共有設定を使用します。この呼び出しの `sampleCount` では変更できません。
 - 所有権、メインスレッドでの扱い、フレームのタイミング、閉じたときの動作は `Window` を参照してください。
 '''
 details.ko = '''
 - 생략 가능한 `WindowSettings`를 받아 성공하면 `shared_ptr<Window>`를 반환합니다. 콘텐츠는 `Window::setApp`으로 설정하세요.
 - `width`, `height`, `title`, `decorated`, `highDpi`, `sampleCount`를 읽습니다. 크기 단위는 메인 윈도우의 `pixelPerfect` 모드를 따라 활성화되면 프레임버퍼 픽셀, 아니면 논리 픽셀입니다. 인수를 생략하면 각각 해당 단위로 1280 × 720, `"TrussC App"`, 창 장식 활성화, 고해상도 DPI 활성화, 4배 MSAA가 기본값입니다.
 - `fullscreen`, `pixelPerfect`, `swapInterval`을 포함한 나머지 `WindowSettings` 필드는 적용되지 않습니다. 생성 후 전체 화면으로 전환하려면 `Window::setFullscreen`을 사용하세요.
-- macOS, Windows, X11과 OpenGL을 사용하는 데스크톱 Linux를 지원합니다. Web, iOS, Android, GLES3를 사용하는 Linux 대상 빌드에서는 오류를 기록하고 `nullptr`를 반환합니다.
-- 헤드리스 모드이거나 네이티브 윈도우 생성에 실패한 경우에도 오류를 기록하고 `nullptr`를 반환합니다.
-- 데스크톱 Linux의 MSAA 샘플 수는 시작 시 결정된 공유 설정을 사용합니다. 이 호출의 `sampleCount`로는 변경할 수 없습니다.
+- macOS, Windows, Linux X11(GLX 및 GLES3/EGL, Raspberry Pi 포함)을 지원합니다. Linux X11은 하나의 GL context와 윈도우별 surface를 사용합니다. Web, iOS, Android에서는 오류를 기록하고 `nullptr`를 반환합니다. Linux GLES3/EGL에서 X11 display가 없는 환경(KMS 및 헤드리스 포함)에서는 Warning을 출력하고 `nullptr`를 반환합니다.
+- 그 밖의 헤드리스 구성이나 네이티브 윈도우 생성 실패 시에는 오류를 기록하고 `nullptr`를 반환합니다.
+- Linux X11의 MSAA 샘플 수는 시작 시 결정된 공유 설정을 사용합니다. 이 호출의 `sampleCount`로는 변경할 수 없습니다.
 - 소유권, 메인 스레드 요구 사항, 프레임 타이밍, 닫을 때의 동작은 `Window`를 참조하세요.
 '''
 related = ["Window", "WindowSettings", "Window::setApp", "Window::setFullscreen"]

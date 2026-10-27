@@ -151,16 +151,12 @@ def creation_source(backend):
         arithmetic = creator.split('        const double width = ', 1)[1].split('        RECT rect', 1)[0]
         arithmetic = 'const double width = ' + arithmetic + '\nreturn {pw, ph};'
         validation = 'if (!' + guard(creator) + ') return false;'
-    elif backend == 'x11':
+    elif backend in ('x11', 'egl'):
         creator = body(native, 'static bool _sapp_tc_x11_create_native_window(')
         arithmetic = creator.split('    const float scale = ', 1)[1].split('    if (width_pt <= 0)', 1)[0]
-        native_validation = creator.split('{', 1)[1].split('    XVisualInfo*', 1)[0]
-        arithmetic = native_validation + 'const float scale = ' + arithmetic + '\nreturn {px_w, px_h};'
-    elif backend == 'egl':
-        creator = body(native, '_SOKOL_PRIVATE void _sapp_tc_x11_create_window(')
-        arithmetic = creator.split('    const float window_scale = ', 1)[1].split('    if (0 == _sapp_tc.window_width)', 1)[0]
-        arithmetic = 'const float window_scale = ' + arithmetic + '\nreturn {x11_window_width, x11_window_height};'
-        validation = 'if (!' + guard(creator) + ') return false;'
+        # Keep the actual early rejection, before either EGL or GLX visual lookup.
+        validation = creator.split('{', 1)[1].split('\n#if', 1)[0]
+        arithmetic = 'const float scale = ' + arithmetic + '\nreturn {px_w, px_h};'
     else:
         creator = body(native, main_signature)
         call = creator.split('[w->window setContentSize:NSMakeSize(', 1)[1].split(')];', 1)[0]
@@ -170,11 +166,10 @@ def creation_source(backend):
                       guard(secondary_creator) + ')) return false;')
         arithmetic = 'if (mainWindow) return roundMac(' + call + ');\nreturn roundMac(' + secondary_call + ');'
     template = (ROOT / 'tools/tests/window_creation_size.cpp').read_text(encoding='utf-8')
-    return (template.replace('EGL_DIMENSIONS', body(native, '_SOKOL_PRIVATE void _sapp_tc_x11_update_dimensions('))
-            .replace('NORMAL_LAUNCHER', normal).replace('HOT_LAUNCHER', hot)
+    return (template.replace('NORMAL_LAUNCHER', normal).replace('HOT_LAUNCHER', hot)
             .replace('LAUNCHER', launcher).replace('SECONDARY', secondary)
             .replace('TRANSFER', transfer).replace('CREATION_GUARD', validation).replace('ARITHMETIC', arithmetic)
-            .replace('GLX_DIMENSIONS', body(native, 'static bool _sapp_tc_x11_update_dimensions(')))
+            .replace('X11_DIMENSIONS', body(native, 'static bool _sapp_tc_x11_update_dimensions(')))
 
 
 class WindowPixelSizeTests(unittest.TestCase):
@@ -211,7 +206,7 @@ for binary in sys.argv[1:-1]:
             assert base.returncode == current.returncode, (binary,pixels,width,height,base,current)
             for dimension, extent in enumerate((width,height)):
                 if extent > 0: continue
-                for label in ('descriptor','native'):
+                for label in ('descriptor','native','secondary'):
                     values = [re.search(label+r'=(\d+|-\d+)x(\d+|-\d+)', r.stdout) for r in results]
                     assert bool(values[0]) == bool(values[1]), (label,results)
                     if values[0]:
@@ -219,10 +214,12 @@ for binary in sys.argv[1:-1]:
             if base.returncode:
                 assert 'Assertion' in base.stderr and 'Assertion' in current.stderr, results
             else:
-                assert 'native=' in current.stdout, results
+                assert 'native=' in current.stdout and 'secondary=' in current.stdout, results
             print('PASS native invalid input:',binary.rsplit('/',1)[-1],pixels,width,height,base.returncode)
+egl, glx = sys.argv[-1].split(',')
+subprocess.run([egl,'tiny-secondary','640','400','1'], check=True)
 subprocess.run(['xrdb','-merge'], input='Xft.dpi: 9.6e-7\n', text=True, check=True)
-subprocess.run([sys.argv[-1],'tiny','640','400','1'], check=True)
+subprocess.run([glx,'tiny','640','400','1'], check=True)
 '''
         with tempfile.TemporaryDirectory(prefix='window-native-') as scratch:
             cpp = Path(scratch) / 'probe.cpp'; cpp.write_text(source, encoding='utf-8')
@@ -237,11 +234,11 @@ subprocess.run([sys.argv[-1],'tiny','640','400','1'], check=True)
                         '-I', str(ROOT / 'core/include/sokol'), str(cpp), *libraries,
                         '-lX11','-lXi','-lXcursor','-lpthread','-ldl','-o',str(binary)], check=True)
                     binaries.append(str(binary))
-            # Keep the debug GLX binary last so the native rejection assertion is active.
-            binaries.append(binaries[2])
+            # Both shared-path backends reject before native creation.
+            tiny_binaries = [binaries[0], binaries[2]]
             subprocess.run(['xvfb-run','-a','-s','-screen 0 1280x720x24 -noreset',
                 'bash','-c', 'ulimit -c 0; printf "Xft.dpi: 192\\n" | xrdb -merge; exec "$@"',
-                'native-validation', 'python3','-c',runner,*binaries], check=True,
+                'native-validation', 'python3','-c',runner,*binaries,','.join(tiny_binaries)], check=True,
                 env=dict(os.environ, LIBGL_ALWAYS_SOFTWARE='1',
                     __EGL_VENDOR_LIBRARY_FILENAMES='/usr/share/glvnd/egl_vendor.d/50_mesa.json',
                     __GLX_VENDOR_LIBRARY_NAME='mesa', GALLIUM_DRIVER='llvmpipe'))
