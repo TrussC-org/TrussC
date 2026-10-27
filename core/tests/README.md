@@ -188,6 +188,18 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   python3 tools/run_core_display_tests.py
 ```
 
+`windowCreationSize --display [pixels|logical] [width height]` defaults to
+pixels and 1001×667. Device runners should choose a size whose native pixels
+fit the usable desktop area (logical sizes are multiplied by the DPI scale).
+On Linux X11, fit is decided from the requested native size, independently of
+creation snapshots. Oversized requests skip the App creation-size and fullscreen
+size-preservation checks because a window manager may constrain the first map.
+Main's request-to-creation and agreement checks also skip a positive, non-growing
+shrink already present before App setup; secondary's pre-tick creation check stays
+strict. Growth fails. Later explicit-resize checks still run, with resize-back
+compared against the requested size rather than a constrained main snapshot.
+Fitting requests run every check strictly, without SKIPs.
+
 ## Keep it curated (avoid rot)
 
 - Default workflow: **when you fix a bug, add the regression test that would have
