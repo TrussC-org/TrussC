@@ -1,0 +1,13 @@
+#!/bin/sh
+# Exercise the shared GLES3 selection on any Linux host, without a Pi device tree.
+set -eu
+source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/tc-native-backend.XXXXXX")
+trap 'rm -rf "$scratch"' EXIT HUP INT TERM
+# ANDROID selects GLES3 in the shared policy; leave the host toolchain intact.
+cmake -S "$source_dir" -B "$scratch/default" -DCMAKE_TOOLCHAIN_FILE= -DANDROID=ON
+grep -qx 'TC_NATIVE_EGL:BOOL=ON' "$scratch/default/CMakeCache.txt"
+echo 'nativeWindow: shared GLES3 selection defaults to EGL: PASS'
+cmake -S "$source_dir" -B "$scratch/override" -DCMAKE_TOOLCHAIN_FILE= -DANDROID=ON -DTC_NATIVE_EGL=OFF
+grep -qx 'TC_NATIVE_EGL:BOOL=OFF' "$scratch/override/CMakeCache.txt"
+echo 'nativeWindow: explicit backend override is retained: PASS'

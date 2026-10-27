@@ -13,8 +13,28 @@ void check(const char* label, bool passed) {
     std::printf("%s: %s\n", label, passed ? "PASS" : "FAIL");
     if (!passed) ++failures;
 }
-struct Secondary : App { bool ready = false; int updates = 0; void setup() override { ready = true; } void update() override { ++updates; } };
-struct CreationApp : App {
+struct SizeEvidence : App {
+    int receivedWidth = 0, receivedHeight = 0, resizeCount = 0;
+    float receivedDpi = 0, receivedScale = 0;
+    void windowResized(int w, int h) override {
+        receivedWidth = w; receivedHeight = h; ++resizeCount;
+        receivedDpi = tc::getDpiScale();
+        receivedScale = internal::appSizeDpi(receivedDpi);
+        std::printf("resize role=%s frame=%llu received=%dx%d dpi=%.6g App-scale=%.6g\n",
+            getWindow()->context().isMain ? "main" : "secondary", (unsigned long long)sapp_frame_count(),
+            w, h, receivedDpi, receivedScale);
+    }
+    void printSizeEvidence(const char* role) {
+        const auto& ctx = getWindow()->context();
+        std::printf("%s App=%gx%g received=%dx%d received-dpi=%.6g received-scale=%.6g resizes=%d "
+            "context-dpi=%.6g context-fb=%dx%d target-fb=%dx%d\n",
+            role, double(getWidth()), double(getHeight()), receivedWidth, receivedHeight,
+            receivedDpi, receivedScale, resizeCount, ctx.dpiScale, ctx.fbWidth, ctx.fbHeight,
+            ctx.swapchainTarget.width, ctx.swapchainTarget.height);
+    }
+};
+struct Secondary : SizeEvidence { bool ready = false; int updates = 0; void setup() override { ready = true; } void update() override { ++updates; } };
+struct CreationApp : SizeEvidence {
     std::shared_ptr<Window> secondary;
     int mainWidth = 0, mainHeight = 0, secondWidth = 0, secondHeight = 0;
     int phase = 0, frames = 0, fullscreenUpdate = 0;
@@ -51,9 +71,14 @@ struct CreationApp : App {
                     secondWidth == mainWidth && secondHeight == mainHeight);
             }
             check("main and secondary creation agree", mainWidth == secondWidth && mainHeight == secondHeight);
-            // App sizes use framebufferToLogical's integer truncation. A
-            // 1502-pixel extent at 1.5 scale is 1001 logical App units.
+            printSizeEvidence("main"); app->printSizeEvidence("secondary");
+            std::printf("live sapp dpi=%.6g framebuffer=%dx%d creation-snapshot=%dx%d\n",
+                sapp_dpi_scale(), sapp_width(), sapp_height(), mainWidth, mainHeight);
             check("main App receives creation size", getWidth() == int(mainWidth / scale) && getHeight() == int(mainHeight / scale));
+            if (getWidth() != int(mainWidth / scale) || getHeight() != int(mainHeight / scale))
+                std::printf("main App mismatch: actual=%gx%g expected=%dx%d snapshot=%dx%d scale=%.6g live=%dx%d\n",
+                    double(getWidth()), double(getHeight()), int(mainWidth / scale), int(mainHeight / scale),
+                    mainWidth, mainHeight, scale, sapp_width(), sapp_height());
             check("secondary App receives creation size", app->getWidth() == int(secondWidth / scale) && app->getHeight() == int(secondHeight / scale));
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
             // Exercise real backend intent and public admission on both windows.
@@ -91,6 +116,13 @@ struct CreationApp : App {
             check("ignored fullscreen requests preserve both native sizes",
                 sapp_width() == mainWidth && sapp_height() == mainHeight &&
                 secondary->context().fbWidth == secondWidth && secondary->context().fbHeight == secondHeight);
+            if (sapp_width() != mainWidth || sapp_height() != mainHeight ||
+                secondary->context().fbWidth != secondWidth || secondary->context().fbHeight != secondHeight) {
+                std::printf("fullscreen size mismatch: main actual=%dx%d expected=%dx%d secondary actual=%dx%d expected=%dx%d\n",
+                    sapp_width(), sapp_height(), mainWidth, mainHeight,
+                    secondary->context().fbWidth, secondary->context().fbHeight, secondWidth, secondHeight);
+                printSizeEvidence("main"); app->printSizeEvidence("secondary");
+            }
             // Change away first, so the final comparison observes a real native resize.
             setSize(300, 200); app->setSize(300, 200); phase = 2;
         } else if (phase == 2) {
