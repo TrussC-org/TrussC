@@ -1,7 +1,9 @@
 // A macOS session end (logout) handled while a client callback is paused must
-// end the app at once with a minimal ending: App::exit and audio stop, but no
-// GPU, window or App teardown and no atexit/static destructors (process exit
-// via _exit with the app code). Outside callbacks the normal full cleanup runs.
+// end the app at once with a minimal ending: every window's App::exit (main
+// first, each in its own window context, BeforeApp/App exit listeners only)
+// and audio stop, but no AfterApp hooks, no GPU, window or App teardown and no
+// atexit/static destructors (process exit via _exit with the app code).
+// Outside callbacks the normal full cleanup runs, AfterApp hooks included.
 //
 // Run without arguments (as build_all does) it launches itself once per
 // scenario and checks each child's output and exit status. A child scenario is
@@ -51,15 +53,34 @@ struct StaticDestructorMarker {
     ~StaticDestructorMarker() { say("static destructor marker"); }
 };
 
+// One line per App::exit: which window context is selected (its logical
+// width, whether events() is the App's own window's) and whether the App is
+// still attached (normal teardown detaches it before exit).
+void reportExit(const char* who, CoreEvents* ownEvents, bool attached) {
+    std::printf("sessionEndBusy child: %s App::exit width=%d own-events=%d attached=%d\n", who,
+                getWindowWidth(), &events() == ownEvents, attached);
+    std::fflush(stdout);
+}
+
 struct SecondaryApp : App {
-    void exit() override { say("secondary App::exit"); }
+    CoreEvents* ownEvents = nullptr;
+    void setup() override { ownEvents = &events(); }
+    void exit() override { reportExit("secondary", ownEvents, getWindow() != nullptr); }
+    void cleanup() override { say("secondary App::cleanup"); }
 };
 
 struct ChildApp : App {
     int frames = 0;
     std::shared_ptr<Window> secondary;
     EventListener logListener;
+    EventListener afterAppHook;
+    CoreEvents* ownEvents = nullptr;
     void setup() override {
+        ownEvents = &events();
+        // A protected framework hook (like an addon's shutdown): runs on the
+        // normal exit, skipped by the session end under a paused callback.
+        afterAppHook = trussc::internal::FrameworkEventAccess::listen(events().exit,
+            [] { say("AfterApp exit hook"); }, EventPriority::AfterApp);
         trussc::internal::appExitCode() = childExitCode;
         std::atexit(atexitMarker);
         static StaticDestructorMarker marker;   // destructor registered after main's statics
@@ -86,7 +107,8 @@ struct ChildApp : App {
         sessionEndSpin(0.15);
         say("returned into update");
     }
-    void exit() override { say("App::exit"); }
+    void exit() override { reportExit("main", ownEvents, getWindow() != nullptr); }
+    void cleanup() override { say("main App::cleanup"); }
 };
 
 int runChild(const std::string& scenario) {
@@ -160,11 +182,21 @@ void checkBusy(const char* scenario, int expectedStatus) {
     std::printf("%s", out.c_str());
     const std::string label = std::string("busy session end, code ") + std::to_string(expectedStatus);
     check(label + ": exit status is the app code", status == expectedStatus);
-    check(label + ": App::exit exactly once", countOf(out, "child: App::exit") == 1);
+    check(label + ": main App::exit exactly once", countOf(out, "child: main App::exit") == 1);
+    check(label + ": secondary App::exit exactly once", countOf(out, "child: secondary App::exit") == 1);
+    const size_t mainAt = out.find("child: main App::exit");
+    const size_t secondaryAt = out.find("child: secondary App::exit");
+    check(label + ": main App::exit before secondary App::exit",
+          mainAt != std::string::npos && secondaryAt != std::string::npos && mainAt < secondaryAt);
+    check(label + ": main App::exit runs in main's context (width 200, own events())",
+          out.find("main App::exit width=200 own-events=1 attached=1") != std::string::npos);
+    check(label + ": secondary App::exit runs in its own context (width 160, own events())",
+          out.find("secondary App::exit width=160 own-events=1 attached=1") != std::string::npos);
+    check(label + ": protected AfterApp exit hook skipped", out.find("AfterApp exit hook") == std::string::npos);
     check(label + ": GPU not torn down, audio stopped at the final exit line",
           out.find("final exit line gpu valid=1 audio initialized=0") != std::string::npos);
-    check(label + ": no window or App teardown",
-          out.find("secondary App::exit") == std::string::npos);
+    check(label + ": no window or App teardown (Apps stay attached, no App::cleanup)",
+          out.find("App::cleanup") == std::string::npos && out.find("attached=0") == std::string::npos);
     check(label + ": no atexit handler or static destructor ran",
           out.find("atexit marker") == std::string::npos && out.find("static destructor marker") == std::string::npos);
     check(label + ": control never returned into the paused callback",
@@ -177,7 +209,10 @@ void checkNotBusy() {
     std::printf("%s", out.c_str());
     const std::string label = "not-busy session end, code 7";
     check(label + ": exit status is the app code", status == 7);
-    check(label + ": full cleanup tears down the secondary window's App", out.find("secondary App::exit") != std::string::npos);
+    check(label + ": full cleanup tears down both Apps (exit once each, then cleanup)",
+          countOf(out, "child: main App::exit") == 1 && countOf(out, "child: secondary App::exit") == 1 &&
+          out.find("main App::cleanup") != std::string::npos && out.find("secondary App::cleanup") != std::string::npos);
+    check(label + ": protected AfterApp exit hook runs", countOf(out, "AfterApp exit hook") == 1);
     check(label + ": full cleanup tears down the GPU (atexit sees it gone)",
           out.find("atexit marker (gpu valid=0)") != std::string::npos);
     check(label + ": process exit handlers run (std::exit)",

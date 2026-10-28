@@ -32,6 +32,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <mutex>
@@ -1113,13 +1114,33 @@ void destroyMainWindow() noexcept {
     owner.reset();
 }
 // Session end under a paused callback (the native backend _exits right after):
-// deliver the main window's events().exit (App::exit and its exit listeners)
-// once, without detaching the App, closing windows or running App::cleanup().
-void notifyMainAppExitAtSessionEnd() noexcept {
-    auto& owner = mainWindowOwner();
-    if (!owner) return;
+// deliver every open window's events().exit (App::exit and its BeforeApp/App
+// listeners) once, main first and then the others in registry order, as the
+// normal shutdown does. Each window's own event/state context is selected for
+// its delivery; there is no GPU work, no detach, close or App::cleanup().
+void notifyAppExitsAtSessionEnd() noexcept {
     TeardownSteps steps;
-    FrameworkEventAccess::notifyShutdown(owner->events().exit, steps);
+    auto* previous = currentWindowCtx();
+    auto deliver = [&](Window& w) noexcept {
+        currentWindowCtx() = &w.context();
+        FrameworkEventAccess::notifySessionEnd(w.events().exit, steps);
+        currentWindowCtx() = previous;
+    };
+    std::vector<Window*> delivered;
+    steps.run("session-end exit delivery", [&] {
+        if (auto* main = mainWindow()) { delivered.push_back(main); deliver(*main); }
+        // Re-read the registry after each delivery: an exit hook can close or
+        // create a window. Each window is delivered at most once.
+        for (;;) {
+            Window* next = nullptr;
+            for (Window* w : openWindows()) {
+                if (std::find(delivered.begin(), delivered.end(), w) == delivered.end()) { next = w; break; }
+            }
+            if (!next) break;
+            delivered.push_back(next);
+            deliver(*next);
+        }
+    });
 }
 
 WindowFullscreenHook& windowFullscreenHookForTests() {

@@ -2621,7 +2621,7 @@ namespace internal {
             if (auto token = appRunToken()) token->store(false);
             CrashPhaseScope crashPhase("cleanup");
             writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
-            notifyMainAppExitAtSessionEnd();
+            notifyAppExitsAtSessionEnd();
             trussc::shutdownAudio();
             writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(true));
             return;
