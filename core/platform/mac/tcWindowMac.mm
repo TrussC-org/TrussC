@@ -399,7 +399,22 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
         logError("Window") << "createWindow(): not available in headless mode";
         return nullptr;
     }
-    auto win = std::shared_ptr<Window>(new Window());
+    if (sessionEndExit()) {
+        // Busy session end (frozen until _exit): no native window is created.
+        static bool reported = false;
+        if (!reported) {
+            reported = true;
+            logError("Window") << "createWindow(): refused, the session is ending";
+        }
+        return nullptr;
+    }
+    // While a busy session end is frozen, the last release of a Window does not
+    // tear it down: it stays alive (and its context valid) until the process
+    // _exits. Otherwise the release destroys it as usual.
+    auto win = std::shared_ptr<Window>(new Window(), [](Window* w) {
+        if (sessionEndExit()) return;
+        delete w;
+    });
     win->title_ = settings.title;
     win->ctx_.swapchainTarget.colorFormat = SG_PIXELFORMAT_BGRA8;
     auto* st = new AdapterState();
