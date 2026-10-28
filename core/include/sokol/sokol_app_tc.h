@@ -6656,6 +6656,16 @@ static uint32_t _sapp_tc_win32_mods(void) {
 
 static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
     if (!w->ready || !w->desc.event_cb || (w->events_enabled && !w->events_enabled())) return;
+    const bool was_in_tick = w->in_tick;
+    w->in_tick = true;
+    struct EventScope {
+        uint32_t id;
+        bool was_in_tick;
+        ~EventScope() {
+            // A client may explicitly destroy a secondary during delivery.
+            if (auto* live = _sapp_tc_lookup(sapp_window{id})) live->in_tick = was_in_tick;
+        }
+    } scope{w->win_id, was_in_tick};
     ev->frame_count = _sapp_tc.app.main ? _sapp_tc.app.main->frame_count : 0;
     ev->window_width = w->win_width;
     ev->window_height = w->win_height;
@@ -7342,11 +7352,11 @@ static void _sapp_tc_main_tick_tramp(sapp_window, void*) {
 }
 
 static void _sapp_tc_win32_observe_occlusion(_sapp_tc_window_t* w, bool occluded) {
-    const bool was_occluded = _sapp_tc_native_occluded(w);
+    const bool was_hidden = _sapp_tc_native_hidden(w);
     w->occluded = occluded;
-    const bool now_occluded = _sapp_tc_native_occluded(w);
-    if (was_occluded != now_occluded)
-        _sapp_tc_win32_app_event(w, now_occluded ? SAPP_EVENTTYPE_SUSPENDED : SAPP_EVENTTYPE_RESUMED);
+    const bool now_hidden = _sapp_tc_native_hidden(w);
+    if (was_hidden != now_hidden)
+        _sapp_tc_win32_app_event(w, now_hidden ? SAPP_EVENTTYPE_SUSPENDED : SAPP_EVENTTYPE_RESUMED);
 }
 
 static void _sapp_tc_win32_swap(_sapp_tc_window_t* w) {
@@ -7544,14 +7554,20 @@ static LRESULT _sapp_tc_wndproc_impl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                coalesced into the tick (upstream parity) */
             const bool iconified = (wParam == SIZE_MINIMIZED);
             const bool was_iconified = _sapp_tc_native_iconified(w);
+            const bool was_hidden = _sapp_tc_native_hidden(w);
             w->iconified = iconified;
+            const bool now_hidden = _sapp_tc_native_hidden(w);
             if (_sapp_tc_native_iconified(w) != was_iconified) {
+                const sapp_window handle = { w->win_id };
                 _sapp_tc_win32_app_event(w, iconified ? SAPP_EVENTTYPE_ICONIFIED
                                                       : SAPP_EVENTTYPE_RESTORED);
+                if (_sapp_tc_lookup(handle) != w) return 0;
                 if (!iconified) {
                     w->earliest_next = 0.0;     /* resume promptly */
                 }
             }
+            if (was_hidden != now_hidden)
+                _sapp_tc_win32_app_event(w, now_hidden ? SAPP_EVENTTYPE_SUSPENDED : SAPP_EVENTTYPE_RESUMED);
             break;
         }
         case WM_SETFOCUS:
@@ -8005,7 +8021,7 @@ static void _sapp_tc_win32_run_loop(void) {
            on its close button, outside every tick */
         for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
-            if (!w || !w->close_requested) continue;
+            if (!w || w->in_tick || !w->close_requested) continue;
             w->close_requested = false;
             if (w->hwnd) PostMessageW(w->hwnd, WM_CLOSE, 0, 0);
         }
