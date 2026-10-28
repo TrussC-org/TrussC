@@ -732,6 +732,18 @@ struct FrameworkEventAccess {
             steps.run("exit listener", [&] { (*entry.callback)(); });
         }
     }
+    // Session-end delivery (the native backend ends the process right after):
+    // the BeforeApp and App bands only. Protected AfterApp hooks, which may
+    // wait on or tear down resources, do not run.
+    static void notifySessionEnd(Event<void>& event, TeardownSteps& steps) noexcept {
+        auto snapshot = sharedLoad(event.entries_);
+        if (!snapshot) return;
+        for (const auto& entry : *snapshot) {
+            if (entry.priority >= EventPriority::AfterApp) continue;
+            if (!entry.callback || (entry.alive && !entry.alive->load(std::memory_order_acquire))) continue;
+            steps.run("exit listener", [&] { (*entry.callback)(); });
+        }
+    }
     template<class T>
     static EventListener listen(Event<T>& event, typename Event<T>::Callback callback,
                                 int priority, Deliver deliver = Deliver::Inline) {
