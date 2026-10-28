@@ -79,6 +79,10 @@ public:
         fs::path path;
         try {
             path = getDataPath(filePath); // absolute paths pass through
+            if (!internal::isLoadFile(path)) {
+                internal::reportImportError("Lut3D", "failed to open LUT document: ", path);
+                return false;
+            }
             std::ifstream file(path, std::ios::binary);
             if (!file) {
                 internal::reportImportError("Lut3D", "failed to open LUT document: ", path);
@@ -90,8 +94,9 @@ public:
             detail::CubeData parsed;
             std::string error;
             std::string bytes;
-            if (!internal::readDocumentBytes(file, bytes)) {
-                internal::reportImportError("Lut3D", "failed to read the complete LUT document: ", path);
+            const char* readError = nullptr;
+            if (!internal::readDocumentBytes(file, bytes, &readError)) {
+                internal::reportImportError("Lut3D", "failed to read the complete LUT document: ", path, readError);
                 return false;
             }
             std::istringstream input(std::move(bytes));
