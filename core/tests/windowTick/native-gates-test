@@ -1,14 +1,17 @@
 #!/bin/sh
 # Compile production desktop gates/policy with native API seams; no display needed.
 # TC_NATIVE_GATES_INCLUDE may name a private sokol header directory for mutations.
+# Pass --mutations to check private-header regressions and missing markers too.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/tc-native-gates.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
-python3 - "$root" "$scratch" <<'PY'
+python3 - "$root" "$scratch" "$@" <<'PY'
 from pathlib import Path
 import os, subprocess, sys
-root, scratch = map(Path, sys.argv[1:])
+root, scratch = map(Path, sys.argv[1:3])
+if sys.argv[3:] not in ([], ['--mutations']):
+    sys.exit('Usage: native-gates-test [--mutations]')
 include = Path(os.environ.get('TC_NATIVE_GATES_INCLUDE', root/'core/include/sokol'))
 
 def fail(message):
@@ -42,7 +45,9 @@ def body(text, marker, origin):
 native = read(include/'sokol_app_tc.h')
 shared = read(include/'util/sokol_window_native.h')
 common = read(root/'core/include/tc/app/tcGlobal.cpp')
+extraction_markers = []
 def extract(marker):
+    extraction_markers.append(marker)
     return body(native, marker, 'sokol_app_tc.h') + '\n'
 
 def mac_extract(marker, seams=()):
@@ -50,6 +55,7 @@ def mac_extract(marker, seams=()):
     # Every seam is required, so upstream changes cannot silently empty a probe.
     text = extract(marker)
     for old, new in seams:
+        extraction_markers.append(old)
         position(text, old, 'sokol_app_tc.h: ' + marker)
         text = text.replace(old, new)
     return text
@@ -70,9 +76,22 @@ mac_drawable = mac_extract('static id<CAMetalDrawable> _sapp_tc_mac_drawable(', 
     ('id<CAMetalDrawable>', 'int'), ('[w->layer nextDrawable]', 'next_drawable(w->layer)'),
     ('return nil;', 'return 0;'), ('== nil', '== 0'),))
 mac_swap = mac_extract('static void _sapp_tc_mac_swap(', (('= nil', '= 0'),))
-mac_tick = mac_extract('static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {', (
+mac_tick_body = mac_extract('static void _sapp_tc_mac_tick_body(_sapp_tc_window_t* w, CADisplayLink* link) {', (
     ('@autoreleasepool', ''), ('link.timestamp', 'link->timestamp'),
     ('link.targetTimestamp', 'link->targetTimestamp'),))
+mac_tick_scope = mac_extract('struct _sapp_tc_mac_tick_scope {', (('= nil', '= 0'),)) + ';\n'
+mac_closed = mac_extract('static void _sapp_tc_mac_closed(', (
+    ('[NSApp terminate:nil]', 'terminate()'), ('[w->link invalidate]', 'invalidate_link(w->link)'),))
+mac_deferred = mac_extract('static void _sapp_tc_mac_process_deferred(void) {', (
+    ('[nsw close]', 'close_window(nsw)'), ('[first->window performClose:nil]', 'perform_close(first->window)'),))
+# Replay the production constructor from its publication boundary through return.
+# Allocation, AppKit setup and dimension initialization precede this probe.
+mac_constructor = mac_extract('static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(', (
+    ('[window orderOut:nil]', 'order_out(window)'),
+    ('[window makeKeyAndOrderFront:nil]', 'show_window(window)'),))
+constructor_marker = '    struct constructing_scope {'
+extraction_markers.append(constructor_marker)
+mac_constructor = mac_constructor[position(mac_constructor, constructor_marker, 'sokol_app_tc.h: constructor publication tail'):]
 
 def mac_method(marker, signature, keep_type):
     return mac_extract(marker, ((marker, signature),
@@ -104,11 +123,17 @@ print('native-gates: desktop adapters dispatch gated policy before size admissio
 code = r'''
 #include <cstdio>
 #include <cstdint>
+#include <cstring>
 #include <initializer_list>
 #include <vector>
 struct WindowContext { bool isMain; };
 ''' + policy + r'''
 struct sapp_window { unsigned id; };
+struct sapp_event {
+    unsigned frame_count=0;
+    int type=0, window_width=0, window_height=0, framebuffer_width=0, framebuffer_height=0;
+};
+using sapp_event_type = int;
 struct _sapp_tc_timing_t { double smooth_dt=.017; };
 using HRESULT = int;
 using UINT = unsigned;
@@ -126,7 +151,12 @@ struct _sapp_tc_window_t {
     double earliest_next=0, last_present=0, frame_duration=0, refresh_period=.017;
     _sapp_tc_timing_t timing;
     SwapChain* swap_chain=nullptr;
-    struct { void (*tick_cb)(sapp_window,void*)=nullptr; void* user_data=nullptr; } desc;
+    struct Descriptor {
+        void (*tick_cb)(sapp_window,void*)=nullptr;
+        void* user_data=nullptr;
+        void (*event_cb)(const sapp_event*,sapp_window,void*)=nullptr;
+        void (*close_cb)(sapp_window,void*)=nullptr;
+    } desc;
 };
 using Native = _sapp_tc_window_t;
 using _sapp_tc_native_window_t = Native;
@@ -164,14 +194,32 @@ struct Native : ::Native {
     View* view=nullptr;
     void* layer=nullptr;
     NSTimer* fallback_timer=nullptr;
+    CADisplayLink* link=nullptr;
     int frame_drawable=0;
     bool fallback_active=false, link_suspended=false, suspended_sent=false, draw_admitted=false;
     double last_tick_time=0;
+    int callback_depth=0, win_width=640, win_height=480, fb_width=640, fb_height=480;
+    bool close_requested=false;
+    bool (*events_enabled)()=nullptr;
 };
 using _sapp_tc_window_t = Native;
+constexpr int _SAPP_TC_MAX_WINDOWS=4;
+struct {
+    Native* windows[_SAPP_TC_MAX_WINDOWS]{};
+    int callbacks_active=0, constructing=0;
+    const char* create_error=nullptr;
+    struct { Native* main=nullptr; bool quit_requested=false, quit_ordered=false; } app;
+} _sapp_tc;
 Native* target;
-int consulted, updates, dimensions, acquired, timing, deferred, reconciled, timers, installs, stops;
+int consulted, updates, dimensions, acquired, timing, reconciled, timers, installs, stops;
+int closed, quit, errors, shown, ordered_out;
 bool changed, skip_in_callback, reenter, dispose_in_callback;
+bool probe_callbacks=false, probing=false, nest_event=false, request_deferred=false;
+int throw_kind=-1, destroy_at=0, creation_stage=0, probe_kind=-1;
+bool constructor_probe=false, notify_reconcile=false, expect_tick_guard=false;
+Native* callback_target=nullptr;
+Native* other=nullptr;
+Native* creation_record=nullptr;
 std::vector<int> events;
 NSTimer timer;
 NSTimer* make_timer(double period, View* view) {
@@ -181,14 +229,95 @@ NSTimer* make_timer(double period, View* view) {
 void install_timer(NSTimer*) { ++installs; }
 void invalidate(NSTimer*) { ++stops; }
 int next_drawable(void*) { ++acquired; return 1; }
-Native* _sapp_tc_lookup(sapp_window h) { return target && h.id==target->win_id?target:nullptr; }
+Native* _sapp_tc_lookup(sapp_window h) {
+    for (auto* w : _sapp_tc.windows) if (w && h.id==w->win_id) return w;
+    return nullptr;
+}
+void dispose(Native* w) {
+    for (auto& slot : _sapp_tc.windows) if (slot==w) slot=nullptr;
+    if (target==w) target=nullptr;
+}
 ''' + extract('static _sapp_tc_window_t* _sapp_tc_mac_live(') + r'''
-void _sapp_tc_send_type(Native*,int type) { events.push_back(type); }
+void _sapp_tc_mac_contained(const char*) noexcept { ++errors; }
+''' + extract('struct _sapp_tc_mac_callback_scope {') + ';\n' + extract('static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {') + extract('static void _sapp_tc_send_type(') + r'''
 void _sapp_tc_timing_update(_sapp_tc_timing_t* t) { ++timing; t->smooth_dt+=.001; }
-void _sapp_tc_reconcile_fullscreen(Native*) { ++reconciled; }
+static void _sapp_tc_mac_process_deferred();
+void _sapp_tc_reconcile_fullscreen(Native* w) {
+    ++reconciled;
+    if (notify_reconcile && !probing && w==callback_target) {
+        check("macOS reconciliation starts inside tick guard", w->in_tick);
+        if (request_deferred) {
+            other->close_requested=true; _sapp_tc.app.quit_requested=true;
+            _sapp_tc_mac_process_deferred();
+            check("macOS deferred close waits between tick callbacks", closed==0 && quit==0 && other->close_requested);
+        }
+        _sapp_tc_send_type(w,SAPP_EVENTTYPE_RESIZED);
+    }
+}
 bool _sapp_tc_mac_update_dimensions(Native*) { ++dimensions; return changed; }
-void _sapp_tc_mac_process_deferred() { ++deferred; }
-''' + mac_stop + mac_source + extract('static void _sapp_tc_mac_update_suspension(') + mac_observe + mac_drawable + mac_swap + mac_tick + mac_link + mac_fallback + mac_minimize + mac_restore + r'''
+static void _sapp_tc_mac_tick(Native*,CADisplayLink*);
+static void _sapp_tc_mac_source_tick(Native*,CADisplayLink*,bool);
+void link_tick(View*,CADisplayLink*);
+void fallback_tick(View*,NSTimer*);
+void terminate() { ++quit; }
+void invalidate_link(CADisplayLink*) {}
+''' + mac_stop + mac_closed + r'''
+bool _sapp_tc_mac_close(Native*) { return true; }
+void close_window(NSWindow* window) {
+    ++closed;
+    for (auto* w : _sapp_tc.windows) if (w && w->window==window) { _sapp_tc_mac_closed(w); break; }
+}
+void perform_close(NSWindow*) { ++quit; _sapp_tc.app.quit_requested=_sapp_tc.app.quit_ordered=false; }
+''' + mac_deferred + mac_source + extract('static void _sapp_tc_mac_update_suspension(') + mac_observe + mac_drawable + mac_swap + mac_tick_scope + mac_tick_body + extract('static bool _sapp_tc_mac_tick_blocked(') + extract('static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {') + extract('static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {') + mac_link + mac_fallback + mac_minimize + mac_restore + r'''
+// A modal-loop seam: use the real tick/source/callback/deferred bodies while
+// the native event loop would dispatch another event or window's frame.
+void exercise_callback(Native* w,int kind) {
+    check("macOS callback scope marks target and process", w->callback_depth>0 && _sapp_tc.callbacks_active>0);
+    check("macOS own callback blocks tick admission", _sapp_tc_mac_tick_blocked(w));
+    if (expect_tick_guard && w==callback_target)
+        check("macOS observe/reconcile/resize callbacks run inside tick guard", w->in_tick);
+    if (probe_callbacks && kind==probe_kind && w==callback_target && !probing) {
+        probing=true;
+        const auto frame=w->frame_count;
+        const int prior=consulted, samples=timing, reconciles=reconciled;
+        _sapp_tc_mac_tick(w,nil);
+        link_tick(w->view,nil);
+        fallback_tick(w->view,&timer);
+        check("macOS any own callback blocks direct and source ticks", consulted==prior && timing==samples && reconciled==reconciles && w->frame_count==frame);
+        if (request_deferred) { other->close_requested=true; _sapp_tc.app.quit_requested=true; }
+        if (nest_event) {
+            const int depth=w->callback_depth;
+            _sapp_tc_send_type(w,SAPP_EVENTTYPE_RESIZED);
+            check("macOS nested event restores outer callback depth", w->callback_depth==depth);
+            _sapp_tc_mac_process_deferred();
+            check("macOS deferred close waits for outermost callback", closed==0 && quit==0 && other->close_requested);
+        }
+        const auto peer_frame=other->frame_count;
+        _sapp_tc_mac_tick(other,nil);
+        check("macOS other window ticks during own callback", other->frame_count==peer_frame+1);
+        _sapp_tc_mac_process_deferred();
+        if (request_deferred)
+            check("macOS deferred close and quit wait through peer tick", closed==0 && quit==0 && other->close_requested && _sapp_tc.app.quit_requested);
+        probing=false;
+    }
+    if (request_deferred && probing && w==callback_target) _sapp_tc_mac_process_deferred();
+    if (throw_kind==kind) throw kind;
+}
+void event_callback(const sapp_event* ev,sapp_window h,void* user) {
+    auto* w=static_cast<Native*>(user);
+    check("macOS event callback identity", h.id==w->win_id);
+    events.push_back(ev->type); exercise_callback(w,0);
+    if (constructor_probe) {
+        other->close_requested=true; _sapp_tc.app.quit_requested=true;
+        _sapp_tc_mac_process_deferred();
+        if (destroy_at==creation_stage) dispose(w);
+    }
+}
+void close_callback(sapp_window h,void* user) {
+    auto* w=static_cast<Native*>(user);
+    check("macOS close callback identity", h.id==w->win_id);
+    exercise_callback(w,2);
+}
 void callback(sapp_window h,void* user) {
     auto* w=static_cast<Native*>(user); ++consulted;
     check("macOS callback target and reentry guard", h.id==w->win_id && w->in_tick);
@@ -200,16 +329,49 @@ void callback(sapp_window h,void* user) {
     int drawable=_sapp_tc_mac_drawable(w);
     check("macOS lazy drawable follows tick admission", bool(drawable)==w->draw_admitted);
     _sapp_tc_mac_drawable(w); // one acquisition per admitted frame
+    exercise_callback(w,1); // A throwing callback has already acquired its drawable.
     if (skip_in_callback) w->skip_present=true;
-    if (dispose_in_callback) target=nullptr;
+    if (dispose_in_callback) dispose(w);
 }
 void reset(Native& w,NSWindow& window,View& view,bool role) {
     w=Native{}; window=NSWindow{}; view.w=&w; target=&w;
+    _sapp_tc={}; _sapp_tc.windows[0]=&w;
     w.is_main=role; w.win_id=role?1:2; w.window=&window; w.view=&view; w.layer=&view;
     w.desc={callback,&w};
-    consulted=updates=dimensions=acquired=timing=deferred=reconciled=timers=installs=stops=0;
+    w.desc.event_cb=event_callback; w.desc.close_cb=close_callback;
+    consulted=updates=dimensions=acquired=timing=reconciled=timers=installs=stops=0;
+    closed=quit=errors=shown=ordered_out=0;
     changed=skip_in_callback=reenter=dispose_in_callback=false; events.clear();
+    probe_callbacks=probing=nest_event=request_deferred=false;
+    throw_kind=probe_kind=-1; destroy_at=creation_stage=0;
+    constructor_probe=notify_reconcile=expect_tick_guard=false; callback_target=other=creation_record=nullptr;
 }
+void peer_setup(Native& peer,NSWindow& window,View& view) {
+    peer=Native{}; view.w=&peer; peer.win_id=3; peer.window=&window; peer.view=&view; peer.layer=&view;
+    peer.desc={callback,&peer}; peer.desc.event_cb=event_callback; peer.desc.close_cb=close_callback;
+    _sapp_tc.windows[1]=&peer; other=&peer;
+}
+using sapp_window_desc = ::Native::Descriptor;
+struct _sapp_tc_native_desc { sapp_window_desc window; bool fullscreen=false; int color_format=0, depth_format=0; };
+struct _sapp_tc_mac_window_attrs {};
+constexpr int SAPP_PIXELFORMAT_BGRA8=1, SAPP_PIXELFORMAT_DEPTH_STENCIL=2;
+void _sapp_tc_init_keytable() {}
+sapp_window_desc _sapp_tc_normalize_window(const sapp_window_desc* d) { return *d; }
+void order_out(NSWindow*) { ++ordered_out; }
+void creation_notification(Native* w,int stage) {
+    creation_stage=stage;
+    check("macOS startup notification runs during constructor", _sapp_tc.constructing==1);
+    _sapp_tc_send_type(w,SAPP_EVENTTYPE_RESIZED);
+    // The callback has returned, but the constructor is still on the stack.
+    _sapp_tc_mac_process_deferred();
+    check("macOS constructor defers close after notification returns", closed==0 && quit==0 && other->close_requested);
+}
+void _sapp_tc_request_fullscreen(Native* w,bool) { creation_notification(w,1); }
+void show_window(NSWindow*) { ++shown; creation_notification(creation_record,2); }
+static Native* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_desc* d,const _sapp_tc_mac_window_attrs*) {
+    Native* w=target; // Fixture has completed allocation, initialization and publication.
+    creation_record=w;
+''' + mac_constructor + '\n' + extract('static _sapp_tc_window_t* _sapp_tc_mac_create_window(const _sapp_tc_native_desc* d) {') + extract('sapp_window sapp_create_window(const sapp_window_desc* desc) {') + r'''
 void run() {
     int before=failures, count=checks;
     Native w; NSWindow window; View view; CADisplayLink link;
@@ -222,7 +384,7 @@ void run() {
         check("macOS common hidden admission / policy for either role", consulted==1 && updates==int(!hidden || role) && dimensions==int(admitted) && acquired==int(admitted));
         check("macOS completed tick releases guard/admission and advances frame", !w.in_tick && !w.draw_admitted && w.frame_count==1 && w.frame_drawable==0);
         check("macOS per-window timing sampled even when hidden", timing==1 && w.timing.smooth_dt>.017 && w.last_tick_time==10 && w.frame_duration>.016 && w.frame_duration<.018);
-        check("macOS fullscreen reconciliation and deferred work", reconciled==1 && deferred==1);
+        check("macOS fullscreen reconciliation", reconciled==1);
     }
     for (bool role : {false,true}) {
         for (bool hidden : {false,true}) for (bool from_callback : {false,true}) {
@@ -240,10 +402,11 @@ void run() {
         reset(w,window,view,role); changed=true; _sapp_tc_mac_tick(&w,nil);
         check("macOS admitted resize event", events==std::vector<int>{SAPP_EVENTTYPE_RESIZED} && consulted==1);
         reset(w,window,view,role); dispose_in_callback=true; _sapp_tc_mac_tick(&w,nil);
-        check("macOS callback disposal rechecks identity", target==nullptr && w.frame_count==0 && deferred==1);
+        check("macOS callback disposal rechecks identity", target==nullptr && w.frame_count==0 && _sapp_tc.callbacks_active==0);
         reset(w,window,view,role);
         Native peer; NSWindow peer_window; View peer_view;
         reset(peer,peer_window,peer_view,!role); peer.win_id=3; peer.skip_present=true;
+        _sapp_tc.windows[1]=&w;
         target=&w; _sapp_tc_mac_tick(&w,&link);
         check("macOS skip/timing isolated between windows", peer.skip_present && peer.frame_count==0 && peer.last_tick_time==0 && peer.timing.smooth_dt==.017);
         target=&peer; link.timestamp=10.02; link.targetTimestamp=10.037; _sapp_tc_mac_tick(&peer,&link);
@@ -285,6 +448,67 @@ void run() {
         }
     }
     summary("macOS common tick / admission / visibility / sources", before, count);
+    before=failures; count=checks;
+    Native peer; NSWindow peer_window; View peer_view;
+    // Event callbacks outside a tick, from observe, from reconciliation and
+    // from RESIZED, plus tick and close callbacks. The other window is live.
+    for (int context=0; context<6; ++context) for (bool role : {false,true}) {
+        if (context==5 && role) continue; // Main close has process authority.
+        if (context==1 && role) continue; // Main SUSPENDED/RESUMED belongs to (b).
+        reset(w,window,view,role); peer_setup(peer,peer_window,peer_view);
+        _sapp_tc.app.main=&w; callback_target=&w;
+        probe_callbacks=nest_event=request_deferred=true;
+        probe_kind=context<4?0:context==4?1:2; notify_reconcile=context==2;
+        expect_tick_guard=context>=1 && context<=3;
+        if (context==0) _sapp_tc_send_type(&w,SAPP_EVENTTYPE_RESIZED);
+        if (context==1) { window.occlusionState=0; link_tick(&view,&link); }
+        if (context==2) _sapp_tc_mac_tick(&w,nil); // reconciliation event
+        if (context==3) { changed=true; _sapp_tc_mac_tick(&w,nil); }
+        if (context==4) _sapp_tc_mac_tick(&w,nil);
+        if (context==5) _sapp_tc_mac_closed(&w);
+        check("macOS outer callback restores all callback/tick state", w.callback_depth==0 && peer.callback_depth==0 && _sapp_tc.callbacks_active==0 && !w.in_tick && !peer.in_tick);
+        probe_callbacks=nest_event=request_deferred=false;
+        _sapp_tc_mac_process_deferred();
+        check("macOS deferred close runs once after outermost callback", closed==1 && quit==1 && !peer.close_requested && !peer.ready);
+        _sapp_tc_mac_process_deferred();
+        check("macOS deferred close is consumed", closed==1 && quit==1);
+    }
+    for (int kind=0; kind<3; ++kind) {
+        reset(w,window,view,false); throw_kind=kind;
+        bool escaped=false;
+        try {
+            if (kind==0) _sapp_tc_send_type(&w,SAPP_EVENTTYPE_RESIZED);
+            if (kind==1) _sapp_tc_mac_tick(&w,nil);
+            if (kind==2) _sapp_tc_mac_closed(&w);
+        } catch (...) { escaped=true; }
+        check("macOS no exception escapes event/tick/close boundary", !escaped);
+        check("macOS throwing event/tick/close callback is contained", errors==1);
+        check("macOS throwing callback restores callback and tick state", w.callback_depth==0 && _sapp_tc.callbacks_active==0 && !w.in_tick && !w.draw_admitted && w.frame_drawable==0);
+        throw_kind=-1; w.ready=true;
+        auto frame=w.frame_count; _sapp_tc_mac_tick(&w,nil);
+        check("macOS tick resumes after throwing callback", w.frame_count==frame+1 && !w.in_tick && w.callback_depth==0);
+    }
+    // Both startup notification sites must re-resolve the identity. Replay
+    // the public API as well, so a lost record must become an invalid handle.
+    for (int stage=0; stage<3; ++stage) {
+        reset(w,window,view,false); peer_setup(peer,peer_window,peer_view);
+        _sapp_tc.app.main=&peer; constructor_probe=true; destroy_at=stage;
+        _sapp_tc_native_desc d; d.fullscreen=true;
+        const _sapp_tc_mac_window_attrs attrs{};
+        Native* result=_sapp_tc_mac_create_window_ex(&d,&attrs);
+        check("macOS constructor returns live record or null after destruction", result==(stage?nullptr:&w));
+        check("macOS constructor skips show after fullscreen destruction", shown==(stage==1?0:1));
+        check("macOS constructor hides window destroyed during startup", ordered_out==int(stage!=0));
+        check("macOS constructor restores counts before return", _sapp_tc.constructing==0 && _sapp_tc.callbacks_active==0);
+        check("macOS constructor preserves pending close", closed==0 && quit==0 && peer.close_requested);
+        constructor_probe=false; _sapp_tc_mac_process_deferred();
+        check("macOS deferred work resumes after constructor", closed==1 && quit==1);
+    }
+    reset(w,window,view,false); peer_setup(peer,peer_window,peer_view);
+    constructor_probe=true; destroy_at=2;
+    sapp_window handle=sapp_create_window(&w.desc);
+    check("macOS public constructor returns invalid handle if destroyed", handle.id==0 && !_sapp_tc_lookup({w.win_id}) && _sapp_tc.constructing==0);
+    summary("macOS round 2 callbacks / deferred close / construction / exceptions", before, count);
 }
 }
 namespace win {
@@ -505,5 +729,110 @@ for backend in ('SOKOL_GLCORE', 'SOKOL_GLES3'):
     if result.returncode:
         fail(f'{backend}: probe compilation failed (exit {result.returncode})')
     failed |= subprocess.run([str(binary)]).returncode != 0
-sys.exit(int(failed))
+if failed:
+    sys.exit(1)
+
+if '--mutations' in sys.argv[3:]:
+    def replace_once(text, old, new, count=1):
+        actual = text.count(old)
+        if actual != count:
+            fail(f'mutation marker {old!r}: expected {count} matches, found {actual}')
+        return text.replace(old, new)
+
+    def change(marker, old, new, count=1, text=native):
+        part = body(text, marker, 'mutation source')
+        return replace_once(text, part, replace_once(part, old, new, count))
+
+    tick = 'static void _sapp_tc_mac_tick_body(_sapp_tc_window_t* w, CADisplayLink* link) {'
+    blocked = 'static bool _sapp_tc_mac_tick_blocked('
+    pending = 'static void _sapp_tc_mac_process_deferred(void) {'
+    ctor = 'static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex('
+    win = 'static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {'
+    admission = 'const bool admitted = w->draw_while_hidden || !_sapp_tc_native_hidden(w);'
+    scope = '_sapp_tc_mac_callback_scope scope(w);'
+    mutants = {
+        'mac-ignore-own-callback': change(blocked, 'w->in_tick || w->callback_depth > 0', 'w->in_tick'),
+        'mac-pause-all-windows': change(blocked, 'return w->in_tick', 'return _sapp_tc.callbacks_active > 0 || w->in_tick'),
+        'mac-event-without-scope': change('static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {', scope, ''),
+        'mac-tick-without-scope': change(tick, scope, ''),
+        'mac-close-without-scope': change('static void _sapp_tc_mac_closed(', scope, ''),
+        'mac-close-inside-callback': change(pending, '_sapp_tc.callbacks_active > 0 || ', ''),
+        'mac-close-inside-tick': change(pending, 'cw->in_tick || ', ''),
+        'mac-close-inside-constructor': change(pending, '_sapp_tc.constructing > 0', 'false'),
+        'mac-stale-after-show': change(ctor,
+            '[window makeKeyAndOrderFront:nil];\n    if (!(w = _sapp_tc_mac_live(win_id))) {',
+            '[window makeKeyAndOrderFront:nil];\n    if (false) {'),
+        'mac-invalid-public-handle': change('sapp_window sapp_create_window(const sapp_window_desc* desc) {',
+            'return { w ? w->win_id : 0 };', 'return { w ? w->win_id : 99 };'),
+        'mac-retain-tick-state': change('struct _sapp_tc_mac_tick_scope {', 'w->in_tick = false;', ''),
+        'mac-retain-callback-state': change('struct _sapp_tc_mac_callback_scope {', '--w->callback_depth;', '(void)w;'),
+        'mac-retain-process-callback-state': change('struct _sapp_tc_mac_callback_scope {', '--_sapp_tc.callbacks_active;', ''),
+        'mac-no-hidden-admission': change(tick, admission, 'const bool admitted = true;'),
+        'mac-ignore-trust': change('static void _sapp_tc_mac_observe(_sapp_tc_window_t* w) {', 'if (w->trust_hidden_signals)', 'if (true)'),
+        'mac-retain-skip': change('static void _sapp_tc_mac_swap(', 'w->skip_present = false;', ''),
+        'mac-late-tick-guard': change(tick, 'if (w->desc.tick_cb)', 'w->in_tick = false;\n        if (w->desc.tick_cb)'),
+        'mac-observe-outside-guard': change('static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {',
+            '_sapp_tc_mac_observe(w);', 'w->in_tick = false; _sapp_tc_mac_observe(w); w->in_tick = true;'),
+        'mac-double-source': change('static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {',
+            'w->fallback_active == from_fallback', 'true'),
+        'win-no-hidden-admission': change(win, admission, 'const bool admitted = true;'),
+        'win-retain-skip': change(win, 'w->skip_present = false;', ''),
+        'win-late-tick-guard': change(win, 'if (w->desc.tick_cb) {', 'w->in_tick = false;\n    if (w->desc.tick_cb) {'),
+        'win-occlusion-only-events': change('static void _sapp_tc_win32_observe_occlusion(', '_sapp_tc_native_hidden(w)', '_sapp_tc_native_occluded(w)', count=2),
+        'x11-no-hidden-admission': replace_once(native, 'if (!w->draw_while_hidden && _sapp_tc_native_hidden(w)) {', 'if (false) {'),
+        'x11-occlusion-only-events': change('if (w && w->trust_hidden_signals && ev->xvisibility.state >= VisibilityUnobscured',
+            '_sapp_tc_native_hidden(w)', '_sapp_tc_native_occluded(w)', count=2),
+    }
+    # Remove both redundant callback checks to expose close during an event
+    # outside a tick. The tick and constructor checks remain in this mutant.
+    mutants['mac-close-inside-callback'] = change(pending, ' || cw->callback_depth > 0', '',
+        text=mutants['mac-close-inside-callback'])
+    # Isolate the fullscreen recheck; keep the separate post-show recheck.
+    part = body(native, ctor, 'mutation source')
+    mutants['mac-stale-after-fullscreen'] = native.replace(part, part.replace(
+        'if (!(w = _sapp_tc_mac_live(win_id))) {', 'if (false) {', 1), 1)
+    for name, marker, call in (
+        ('event', 'static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {', 'event_cb(ev, handle, user);'),
+        ('tick', tick, 'tick_cb(handle, user);'),
+        ('close', 'static void _sapp_tc_mac_closed(', 'close_cb(handle, user);'),
+    ):
+        mutants['mac-uncaught-'+name] = change(marker,
+            'try { '+call+' } catch (...) { _sapp_tc_mac_contained("sapp_window_desc.'+name+'_cb"); }', call)
+
+    private = scratch/'include'
+    (private/'util').mkdir(parents=True)
+    def run_fixture(contents, utility=shared):
+        (private/'sokol_app_tc.h').write_text(contents, encoding='utf-8')
+        (private/'util/sokol_window_native.h').write_text(utility, encoding='utf-8')
+        result = subprocess.run(['sh', str(root/'core/tests/windowTick/native-gates-test')],
+            env=dict(os.environ, TC_NATIVE_GATES_INCLUDE=str(private)),
+            text=True, encoding='utf-8', capture_output=True)
+        return result.returncode, result.stdout + result.stderr
+
+    for name, contents, utility in [(name, value, shared) for name, value in mutants.items()] + [
+            ('shared-ignore-trust', native, shared.replace('w->trust_hidden_signals && ', ''))]:
+        rc, output = run_fixture(contents, utility)
+        if rc != 1 or output.count('native-gates: total ') != 2 or ': FAIL' not in output or 'compilation failed' in output:
+            fail(f'{name}: expected compiled runtime failures for both backends; exit={rc}\n{output}')
+        totals = '; '.join(line for line in output.splitlines() if 'native-gates: total ' in line)
+        label = next(line for line in output.splitlines() if ': FAIL' in line)
+        print(f'native-gates: mutation {name}: detected; {totals}; {label}', flush=True)
+
+    # Every extracted function and Objective-C translation seam is mandatory.
+    # Preserve braces when hiding a marker so the diagnostic is about that
+    # missing marker rather than an artificial unbalanced outer function.
+    for marker in dict.fromkeys(extraction_markers):
+        contents = native.replace(marker, 'removed_marker' + ''.join(c for c in marker if c in '{}'))
+        rc, output = run_fixture(contents)
+        if rc != 1 or 'missing extraction marker' not in output or repr(marker)[1:-1] not in output or 'Traceback' in output:
+            fail(f'missing-marker fixture {marker!r}: expected clear diagnostic; exit={rc}\n{output}')
+    shared_markers = ['static inline bool '+name+'(' for name in (
+        '_sapp_tc_native_iconified', '_sapp_tc_native_occluded', '_sapp_tc_native_hidden')]
+    for marker in shared_markers:
+        rc, output = run_fixture(native, shared.replace(marker, 'removed_marker('))
+        if rc != 1 or 'sokol_window_native.h: missing extraction marker' not in output or marker not in output or 'Traceback' in output:
+            fail(f'missing shared marker {marker!r}: exit={rc}\n{output}')
+    print(f'native-gates: {len(mutants)+1} behavioral mutations and '
+          f'{len(set(extraction_markers))+len(shared_markers)} missing-marker fixtures: PASS', flush=True)
+sys.exit(0)
 PY
