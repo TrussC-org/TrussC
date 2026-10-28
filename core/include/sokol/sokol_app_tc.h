@@ -2503,12 +2503,15 @@ SOKOL_APP_API_DECL uint32_t sapp_window_gl_framebuffer(sapp_window win);
 SOKOL_APP_API_DECL void sapp_tc_gl_make_current(sapp_window win);
 // [TrussC] Desktop adapter seam: suppress this secondary window's present.
 SOKOL_APP_API_DECL void sapp_tc_window_skip_present(sapp_window win);
-#if defined(__APPLE__) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
+#if defined(__APPLE__)
+#include <TargetConditionals.h> /* TARGET_OS_OSX for the desktop-only seams below */
+#endif
+#if (defined(__APPLE__) && TARGET_OS_OSX) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
 SOKOL_APP_API_DECL uint32_t sapp_tc_window_fullscreen_phase(sapp_window win);
 SOKOL_APP_API_DECL void sapp_tc_window_set_fullscreen(sapp_window win, bool full);
 SOKOL_APP_API_DECL void sapp_tc_window_toggle_fullscreen(sapp_window win);
 #endif
-#if defined(_WIN32) || defined(__APPLE__) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
+#if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
 SOKOL_APP_API_DECL void sapp_tc_window_draw_while_hidden(sapp_window win, bool allow);
 #endif
 
