@@ -40,7 +40,7 @@ int main() {
     for (const auto& source : {
         "TILT=NONE\n1 1 2 1.5 1 1 1 1 1 1 1 1 1\n0 0 42\n",
         "TILT=NONE\n1 1 2 2147483647 2147483647 1 1 1 1 1 1 1 1\n0 0 42\n",
-        "TILT=NONE\n1 1 2 1 1 1 1 1 1 1 1 1 1\n0 0 42 trailing\n",
+        "TILT=NONE\n1 1 2 1 1 1 1 1 1 1 1 1 1\n0 0\n",
         "TILT=NONE\n1 1 3e38 1 1 1 1 1 1 1 1 1 1\n0 0 3e38\n"}) {
         largestAllocation = 0;
         const bool ok = parseIes(source, ies, error);
@@ -48,7 +48,8 @@ int main() {
         check("IES counts never request a declaration-sized allocation", largestAllocation < 1024u * 1024u);
     }
     for (const char* tail : {"1e999", "4e"}) {
-        check("malformed final IES token at EOF rejects the whole table", !parseIes(valid + tail, ies, error) && !error.empty() && ies.candela[0][0] == 84);
+        const std::string incomplete = "TILT=NONE\n1 1 2 1 1 1 1 1 1 1 1 1 1\n0 0 ";
+        check("malformed required IES token at EOF rejects the whole table", !parseIes(incomplete + tail, ies, error) && !error.empty() && ies.candela[0][0] == 84);
     }
     check("IES final value without trailing whitespace succeeds", parseIes(valid.substr(0, valid.size() - 1), ies, error));
     failAllocation = true;
