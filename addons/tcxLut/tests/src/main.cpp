@@ -53,6 +53,10 @@ int main() {
     auto logs = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
         if (event.level == tc::LogLevel::Error) lastError = event.message;
     });
+    const auto directory = path.parent_path();
+    check("LUT requires a regular file",
+          !lut.load(directory) && !lut.isAllocated() &&
+          lastError.find("failed to open LUT document: ") != std::string::npos);
     check("load reports failure when no GPU can create the texture", !lut.load(path) && !lut.isAllocated());
     check("LUT resource error names the non-ASCII file", lastError.find(tc::pathToUtf8(path)) != std::string::npos);
     { std::ofstream file(path); file << "LUT_3D_SIZE invalid\n"; }

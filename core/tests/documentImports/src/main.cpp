@@ -3,6 +3,14 @@
 #include "impl/tcFontScratch.h"
 #include <cstdio>
 #include <limits>
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <cerrno>
+#include <cstring>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+#endif
 
 using namespace std;
 using namespace tc;
@@ -118,6 +126,46 @@ TC_CORE_TEST_MAIN() {
 
     const fs::path folder = fs::current_path() / ".document-import-test";
     fs::create_directories(folder);
+    const fs::path emptyJsonPath = folder / "empty.json";
+    { ofstream file(emptyJsonPath, ios::binary); }
+    lastError.clear();
+    check("empty JSON file retains its parse error and null result",
+          loadJson(emptyJsonPath).is_null() && lastError.rfind("JSON parse error: ", 0) == 0);
+#if defined(__linux__) && !defined(__ANDROID__)
+    check("JSON rejects directories", loadJson(folder).is_null());
+    check("JSON rejects devices", loadJson("/dev/null").is_null());
+    const fs::path fifoPath = folder / "input.fifo";
+    const bool fifoCreated = ::mkfifo(fifoPath.c_str(), 0600) == 0;
+    check("FIFO fixture created", fifoCreated);
+    if (fifoCreated) check("JSON rejects FIFOs", loadJson(fifoPath).is_null());
+    const fs::path socketPath = folder / "input.sock";
+    const int socketFd = ::socket(AF_UNIX, SOCK_STREAM, 0);
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    // AF_UNIX resolves relative names from cwd; checkout depth must not matter.
+    const string socketName = ".document-import-test/input.sock";
+    const bool socketNameFits = socketName.size() < sizeof(address.sun_path);
+    if (socketNameFits) std::copy(socketName.begin(), socketName.end(), address.sun_path);
+    if (socketFd < 0) {
+        printf("SKIP: socket fixture: socket(AF_UNIX): %s\n", std::strerror(errno));
+    } else if (!socketNameFits) {
+        printf("SKIP: socket fixture: relative pathname exceeds sun_path\n");
+    } else if (::bind(socketFd, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0) {
+        printf("SKIP: socket fixture: bind(%s): %s\n", socketName.c_str(), std::strerror(errno));
+    } else {
+        check("JSON rejects sockets", loadJson(socketPath).is_null());
+    }
+    if (socketFd >= 0) ::close(socketFd);
+    const fs::path procJsonPath = "/proc/sys/kernel/pid_max";
+    if (fs::is_regular_file(procJsonPath)) {
+        check("procfs JSON fixture reports size zero", fs::file_size(procJsonPath) == 0);
+        const Json pidLimit = loadJson(procJsonPath);
+        check("loadJson reads the number from a real zero-size procfs file",
+              pidLimit.is_number_integer() && pidLimit.get<int64_t>() > 0);
+    } else printf("SKIP: procfs pid_max is unavailable\n");
+#else
+    printf("SKIP: procfs JSON check requires Linux\n");
+#endif
     // Portable counterpart of filePath's Windows surrogate-name error check.
     // Keep the caller's spelling and legacy prefix, with no filesystem quoting.
     const fs::path brokenJson = folder / fs::path(u8"壊れた Café.json");
