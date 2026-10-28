@@ -78,11 +78,13 @@ void activate(sapp_window handle, void*) {
 #endif
 }
 sg_swapchain acquireBoundSwapchain(void* user) {
+    if (!user) return {};  // the adapter cleared its user during teardown
     auto& b = WindowRequestAccess::binding(*static_cast<Window*>(user));
     if (!b.bound || !b.operations || !b.operations->acquireSwapchain) return {};
     return b.operations->acquireSwapchain(b.handle, b.user);
 }
 void activateBinding(void* user) {
+    if (!user) return;  // the adapter cleared its user during teardown
     auto& b = WindowRequestAccess::binding(*static_cast<Window*>(user));
     if (b.bound && b.operations && b.operations->activate)
         b.operations->activate(b.handle, b.user);

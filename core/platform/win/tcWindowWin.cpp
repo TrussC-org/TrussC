@@ -224,6 +224,7 @@ void Window::teardownSecondary() noexcept {
     steps.run("native target cleanup", [&] { ctx_.teardownTargets(); });
     ctx_.acquireSwapchain = nullptr;
     ctx_.acquireSwapchainUser = nullptr;
+    ctx_.activateNative = nullptr;
     steps.run("native window destruction", [&] { sapp_destroy_window(st->win); });
     // Frees this window's sgl pipelines and its sgl context (#317).
     steps.run("native GPU resource release", [&] { ctx_.swapchainTarget.resources().release(); });
