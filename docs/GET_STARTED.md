@@ -15,6 +15,18 @@ Built on C++20 + sokol, it's simple to write and runs cross-platform.
 
 **[TrussC Assistant](https://gemini.google.com/gem/16aq3ccVPl33j6xSMyE7MWXDjaZvauL0I)** - A Gemini-based AI that knows TrussC. Ask questions about APIs, get code examples, or troubleshoot issues.
 
+### Docs search for your own AI (MCP, beta)
+
+Connect the TrussC docs search server to your AI tool.
+Your AI can then find the right docs from a rough question, even when you don't know the API name.
+
+- URL: `https://api.trussc.org/mcp` (Streamable HTTP)
+- Claude Code: `claude mcp add --transport http --scope user trussc-docs https://api.trussc.org/mcp`
+- claude.ai: add the URL above as a custom connector.
+- Other AI tools: any MCP client that supports Streamable HTTP can use the URL.
+
+This is a beta service, so it can be slow or unavailable at busy times. Queries are logged to improve search and kept for about six months. Don't include secrets, credentials or private code.
+
 ---
 
 ## 1. Set Up Your Environment
