@@ -1113,34 +1113,30 @@ void destroyMainWindow() noexcept {
     if (owner) WindowRequestAccess::endMain(*owner);
     owner.reset();
 }
-// Session end under a paused callback (the native backend _exits right after):
-// deliver every open window's events().exit (App::exit and its BeforeApp/App
-// listeners) once, main first and then the others in registry order, as the
-// normal shutdown does. Each window's own event/state context is selected for
-// its delivery; there is no GPU work, no detach, close or App::cleanup().
+// Session end under a paused callback (the native backend _exits right after).
+// The framework is frozen (sessionEndExit()): no tick, event, App attachment,
+// deferred close or window creation runs, and a released Window is not torn
+// down. Deliver events().exit (App::exit and its BeforeApp/App listeners) to
+// the windows open before the first notification: main first, then the others
+// newest first. Each delivery selects only that window's event/state context;
+// no detach, close, App::cleanup() or GPU work.
 void notifyAppExitsAtSessionEnd() noexcept {
     TeardownSteps steps;
     auto* previous = currentWindowCtx();
-    auto deliver = [&](Window& w) noexcept {
-        currentWindowCtx() = &w.context();
-        FrameworkEventAccess::notifySessionEnd(w.events().exit, steps);
-        currentWindowCtx() = previous;
-    };
-    std::vector<Window*> delivered;
-    steps.run("session-end exit delivery", [&] {
-        if (auto* main = mainWindow()) { delivered.push_back(main); deliver(*main); }
-        // Re-read the registry after each delivery: an exit hook can close or
-        // create a window. Each window is delivered at most once.
-        for (;;) {
-            Window* next = nullptr;
-            for (Window* w : openWindows()) {
-                if (std::find(delivered.begin(), delivered.end(), w) == delivered.end()) { next = w; break; }
-            }
-            if (!next) break;
-            delivered.push_back(next);
-            deliver(*next);
+    std::vector<Window*> order;
+    steps.run("session-end window snapshot", [&] {
+        Window* main = mainWindow();
+        if (main) order.push_back(main);
+        auto open = openWindows();
+        for (auto it = open.rbegin(); it != open.rend(); ++it) {
+            if (*it != main) order.push_back(*it);
         }
     });
+    for (Window* w : order) {
+        currentWindowCtx() = &w->context();
+        FrameworkEventAccess::notifySessionEnd(w->events().exit, steps);
+        currentWindowCtx() = previous;
+    }
 }
 
 WindowFullscreenHook& windowFullscreenHookForTests() {

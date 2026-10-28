@@ -2865,6 +2865,13 @@ static _sapp_tc_window_t* _sapp_tc_resolve(sapp_window win) {
     return win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
 }
 
+/* Busy session end: from the moment _sapp_tc_mac_session_end starts until its
+   _exit, the backend is frozen. Only the exit notifications run: no tick, event,
+   deferred close/quit, terminate or window creation is admitted. */
+static bool _sapp_tc_mac_frozen(void) {
+    return trussc::internal::sessionEndExit();
+}
+
 static uint32_t _sapp_tc_mods(NSEvent* ev) {
     const NSEventModifierFlags f = ev.modifierFlags;
     uint32_t m = 0;
@@ -2905,6 +2912,7 @@ static void _sapp_tc_mac_contained(const char* where) noexcept {
 }
 
 static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
+    if (_sapp_tc_mac_frozen()) return;
     if (!w->ready || w->closed_pending || !w->desc.event_cb || (w->events_enabled && !w->events_enabled())) return;
     // Event metadata keeps the process (first-window) frame count, as before.
     ev->frame_count = _sapp_tc.app.main ? _sapp_tc.app.main->frame_count : 0;
@@ -3592,6 +3600,7 @@ static bool _sapp_tc_mac_deferred_pending(void) {
 }
 
 static void _sapp_tc_mac_process_deferred(void) {
+    if (_sapp_tc_mac_frozen()) return;   // the process ends; nothing deferred runs
     // Only when no tick, client callback or constructor is on the stack.
     if (_sapp_tc_mac_busy()) {
         if (_sapp_tc_mac_deferred_pending()) _sapp_tc.deferred_blocked = true;
@@ -3710,7 +3719,7 @@ static void _sapp_tc_mac_tick_body(_sapp_tc_window_t* w, CADisplayLink* link) {
    its next tick after the callback returns runs normally and processes
    deferred close/quit. */
 static bool _sapp_tc_mac_tick_blocked(const _sapp_tc_window_t* w) {
-    return w->in_tick || w->callback_depth > 0 || w->closed_pending;
+    return _sapp_tc_mac_frozen() || w->in_tick || w->callback_depth > 0 || w->closed_pending;
 }
 
 static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {
@@ -3802,6 +3811,7 @@ struct _sapp_tc_mac_window_attrs {
 static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_desc* d,
                                                         const _sapp_tc_mac_window_attrs* attrs) {
     _sapp_tc.create_error = 0;
+    if (_sapp_tc_mac_frozen()) { _sapp_tc.create_error = "Window creation refused: the session is ending"; return 0; }
     int slot = -1;
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         if (_sapp_tc.windows[i] == 0) { slot = i; break; }
@@ -4027,7 +4037,8 @@ static bool _sapp_tc_mac_is_session_end(AEEventID reason) {
 
 /* Session end while a tick, callback or constructor is active, as Win32
    WM_ENDSESSION: the App is not asked (no QUIT_REQUESTED) and the session is
-   not cancelled. Run the App's exit and cleanup once, in place, then end the
+   not cancelled. From here until _exit the backend is frozen (see
+   _sapp_tc_mac_frozen): run the cleanup callback once, in place, then end the
    process at once so control never returns to the interrupted callback.
    Native windows and GPU resources are left to the OS. */
 static void _sapp_tc_mac_session_end(AEEventID reason) {
@@ -4092,6 +4103,8 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
 }
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender {
     (void)sender;
+    // A quit (or a second session end) while frozen: the process is already ending.
+    if (_sapp_tc_mac_frozen()) return NSTerminateCancel;
     const AEEventID quit_reason = _sapp_tc_mac_quit_reason();
     if (!_sapp_tc.app.quit_ordered) {
         // Cocoa forwards the quit Apple event's reason for OS session exits.
