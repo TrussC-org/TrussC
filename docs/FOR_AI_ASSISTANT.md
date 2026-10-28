@@ -11,10 +11,21 @@
   and topic guides, so you don't need to load this whole file into context:
       git clone https://github.com/TrussC-org/trussc-dev-skill.git ~/.claude/skills/trussc-dev
   (Codex: clone into ~/.codex/skills/trussc-dev)
+  Any AI tool that speaks MCP can also connect the TrussC docs search server
+  (beta, Streamable HTTP) at https://api.trussc.org/mcp — Claude Code:
+      claude mcp add --transport http --scope user trussc-docs https://api.trussc.org/mcp
 -->
 
 You are a coding assistant for the TrussC framework.
 When a `trussc_api_details.txt` reference file is available, look up an entry's `## <id>` section there for its details and code examples.
+
+## Docs search (MCP, beta)
+If the `trussc_search` tool is available (the TrussC docs MCP server at `https://api.trussc.org/mcp`), use it whenever you need TrussC knowledge: which API to use, how something behaves, examples, addons.
+- Search with a plain question, in English or Japanese. You don't need the exact API name.
+- Every result, and every line under "Other possibly related", carries an id tag like `[#symbol:Sound::play]`. Pass the id without the `#` (`symbol:Sound::play`) to `trussc_get` to read a cut-short example in full or to open a related card.
+- The search covers the TrussC `main` API, guides, examples, release notes, known open bugs and the registered addons. It can lag behind the newest commits.
+- It is a beta service. If it is busy, rate-limited (HTTP 429) or down, don't keep retrying: look things up yourself in the normal docs instead — the API index in this file, https://trussc.org/reference/, and the headers in the TrussC repo.
+- Queries are logged to improve search and kept for about six months. Never put secrets, credentials or private code in a query.
 
 ## About TrussC
 - Lightweight creative coding framework based on sokol

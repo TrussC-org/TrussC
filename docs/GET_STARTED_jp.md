@@ -15,6 +15,18 @@ C++20 + sokol で構築されており、シンプルに書けてクロスプラ
 
 **[TrussC Assistant](https://gemini.google.com/gem/16aq3ccVPl33j6xSMyE7MWXDjaZvauL0I)** - TrussC を熟知した Gemini ベースの AI。API の質問、コード例の取得、トラブルシューティングに対応します。
 
+### 自分の AI でドキュメント検索（MCP、ベータ版）
+
+TrussC のドキュメント検索サーバーを、お使いの AI ツールにつなげます。
+つなぐと、API の名前がわからなくても、ざっくりした質問から AI が該当するドキュメントを探せます。
+
+- URL：`https://api.trussc.org/mcp`（Streamable HTTP）
+- Claude Code：`claude mcp add --transport http --scope user trussc-docs https://api.trussc.org/mcp`
+- claude.ai：上の URL をカスタムコネクタとして追加します。
+- その他の AI ツール：Streamable HTTP に対応した MCP クライアントなら、この URL で使えます。
+
+ベータ版のため、混雑時は遅くなったり使えなかったりすることがあります。検索の改善のため質問を記録し、半年ほど保存します。秘密の情報、認証情報、非公開のコードは含めないでください。
+
 ---
 
 ## 1. 開発環境のセットアップ
