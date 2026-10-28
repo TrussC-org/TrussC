@@ -83,6 +83,9 @@ std::string exitBlockReason() {
 namespace {
 int failures, ticks, events[64], closed, quitRequests, cleanupCalls;
 int eventSerial, resumedAt, resizedAt;
+bool recordVisibility;
+sapp_event_type visibilityOrder[16];
+int visibilityCount;
 bool sessionEnd;
 bool noHighDpi, pixelSizes, launchCovered, runLaunch, initQuit;
 int legacyFrames;
@@ -100,8 +103,15 @@ void check(const char* label, bool passed) {
     std::fflush(stdout);
     if (!passed) ++failures;
 }
-void event(const sapp_event* ev, sapp_window, void*) {
+void event(const sapp_event* ev, sapp_window win, void*) {
+    const auto* w = _sapp_tc_lookup(win);
+    check("event callback holds the native reentry guard", w && w->in_tick);
     if (ev->type < 64) ++events[ev->type];
+    if (recordVisibility && (ev->type == SAPP_EVENTTYPE_ICONIFIED || ev->type == SAPP_EVENTTYPE_RESTORED ||
+            ev->type == SAPP_EVENTTYPE_SUSPENDED || ev->type == SAPP_EVENTTYPE_RESUMED)) {
+        if (visibilityCount < 16) visibilityOrder[visibilityCount] = ev->type;
+        ++visibilityCount;
+    }
     ++eventSerial;
     if (ev->type == SAPP_EVENTTYPE_RESUMED) resumedAt = eventSerial;
     if (ev->type == SAPP_EVENTTYPE_RESIZED) resizedAt = eventSerial;
@@ -111,7 +121,7 @@ void event(const sapp_event* ev, sapp_window, void*) {
         if (vetoQuit) sapp_cancel_quit();
     }
 }
-void legacyEvent(const sapp_event* ev) { event(ev, {}, nullptr); }
+void legacyEvent(const sapp_event* ev) { event(ev, {_sapp_tc.app.main->win_id}, nullptr); }
 void tick(sapp_window win, void*) {
     ++ticks;
     auto* w = _sapp_tc_lookup(win);
@@ -287,6 +297,137 @@ void titles() {
     sapp_set_window_title("Win32 native first");
 }
 
+void visibilityTransitions(_sapp_tc_window_t* w, SwapProbe& spy) {
+    for (bool trust : {true,false}) {
+        w->trust_hidden_signals = trust;
+        w->draw_while_hidden = false;
+        auto begin = [&] {
+            w->iconified = w->occluded = false;
+            visibilityCount = 0;
+            recordVisibility = true;
+        };
+        auto expect = [&](const char* label, std::initializer_list<sapp_event_type> order) {
+            bool matches = visibilityCount == (trust ? int(order.size()) : 0);
+            int i = 0;
+            if (trust) for (auto type : order) matches &= i < 16 && visibilityOrder[i++] == type;
+            check(label, matches);
+        };
+        begin();
+        SendMessageW(w->hwnd, WM_SIZE, SIZE_MINIMIZED, 0);
+        expect("minimize emits ICONIFIED then SUSPENDED only when trusted",
+            {SAPP_EVENTTYPE_ICONIFIED, SAPP_EVENTTYPE_SUSPENDED});
+        // Keep every observation and notification across the DXGI probe.
+        _sapp_tc_win32_observe_occlusion(w, true);
+        spy.result = S_OK;
+        _sapp_tc_win32_tick(w);
+        expect("DXGI clearing occlusion while minimized never emits RESUMED",
+            {SAPP_EVENTTYPE_ICONIFIED, SAPP_EVENTTYPE_SUSPENDED});
+        check("cleared DXGI observation retains effective minimized visibility",
+            !w->occluded && sapp_window_occluded({w->win_id}) == trust);
+        SendMessageW(w->hwnd, WM_SIZE, SIZE_RESTORED, 0);
+        expect("restore emits RESTORED then one RESUMED only when trusted",
+            {SAPP_EVENTTYPE_ICONIFIED, SAPP_EVENTTYPE_SUSPENDED, SAPP_EVENTTYPE_RESTORED, SAPP_EVENTTYPE_RESUMED});
+
+        // Exercise both orders of clearing overlapping observations. Reset only
+        // before each complete sequence, never between minimize and occlusion.
+        for (bool clearCoverFirst : {true,false}) {
+            begin();
+            _sapp_tc_win32_observe_occlusion(w, true);
+            SendMessageW(w->hwnd, WM_SIZE, SIZE_MINIMIZED, 0);
+            if (clearCoverFirst) _sapp_tc_win32_observe_occlusion(w, false);
+            else SendMessageW(w->hwnd, WM_SIZE, SIZE_RESTORED, 0);
+            if (clearCoverFirst)
+                expect("overlap stays suspended after only occlusion clears",
+                    {SAPP_EVENTTYPE_SUSPENDED, SAPP_EVENTTYPE_ICONIFIED});
+            else
+                expect("overlap stays suspended after only minimize clears",
+                    {SAPP_EVENTTYPE_SUSPENDED, SAPP_EVENTTYPE_ICONIFIED, SAPP_EVENTTYPE_RESTORED});
+            if (clearCoverFirst) SendMessageW(w->hwnd, WM_SIZE, SIZE_RESTORED, 0);
+            else _sapp_tc_win32_observe_occlusion(w, false);
+            expect("overlap resumes exactly once after both observations clear",
+                {SAPP_EVENTTYPE_SUSPENDED, SAPP_EVENTTYPE_ICONIFIED, SAPP_EVENTTYPE_RESTORED, SAPP_EVENTTYPE_RESUMED});
+        }
+        recordVisibility = false;
+    }
+}
+
+bool inFocusHandler, exerciseFocus;
+int focusTicks, focusCloseCalls, focusTimers;
+void callbackReentry() {
+    auto d = nativeDesc();
+    d.window.tick_cb = [](sapp_window, void*) {
+        if (inFocusHandler) ++focusTicks;
+        if (_sapp_tc_now() - started > 2) {
+            check("event deferred-close native boundary completed before timeout", false);
+            PostQuitMessage(0);
+        }
+    };
+    d.window.close_cb = [](sapp_window, void*) {
+        ++focusCloseCalls;
+        check("nested event close runs only after the handler returns", !inFocusHandler);
+        if (!inFocusHandler) PostQuitMessage(0);
+    };
+    d.window.event_cb = [](const sapp_event* ev, sapp_window win, void*) {
+        event(ev, win, nullptr);
+        if (ev->type != SAPP_EVENTTYPE_FOCUSED || !exerciseFocus) return;
+        exerciseFocus = false;
+        auto* w = _sapp_tc_lookup(win);
+        inFocusHandler = true;
+        PostMessageW(w->hwnd, WM_CLOSE, 0, 0);
+        const ULONGLONG deadline = GetTickCount64() + 120;
+        do {
+            MsgWaitForMultipleObjectsEx(0, nullptr, 10, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            MSG msg;
+            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                if (msg.message == WM_TIMER && msg.hwnd == w->hwnd && msg.wParam == _SAPP_TC_MODAL_TIMER) {
+                    ++focusTimers;
+                    w->credit_held = true;
+                    w->earliest_next = 0;
+                }
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        } while (GetTickCount64() < deadline);
+        check("FOCUSED modal loop dispatches active size/move timer", focusTimers >= 2);
+        check("FOCUSED modal loop permits zero same-window ticks", focusTicks == 0);
+        check("FOCUSED nested WM_CLOSE is deferred", w->close_requested && focusCloseCalls == 0);
+        inFocusHandler = false;
+    };
+    auto* w = _sapp_tc_win32_create_window(&d);
+    check("event reentry test window constructed", w != nullptr);
+    if (!w) return;
+    SendMessageW(w->hwnd, WM_ENTERSIZEMOVE, 0, 0);
+    exerciseFocus = true;
+    SendMessageW(w->hwnd, WM_SETFOCUS, 0, 0);
+    SendMessageW(w->hwnd, WM_EXITSIZEMOVE, 0, 0);
+    check("event guard restores the outer native state", !w->in_tick);
+    // The real native loop, rather than a copied deferred-close implementation,
+    // must deliver the pending close outside the callback.
+    started = _sapp_tc_now();
+    _sapp_tc_win32_run_loop();
+    check("native boundary processes the event's deferred close exactly once", focusCloseCalls == 1);
+    _sapp_tc_win32_unwind(w);
+    // Detailed WM_SIZE clients may explicitly revoke their secondary before
+    // the aggregate event. Neither event-scope restoration nor WM_SIZE may use it.
+    for (bool restore : {false,true}) {
+        d = nativeDesc();
+        d.window.event_cb = [](const sapp_event* ev, sapp_window win, void*) {
+            event(ev, win, nullptr);
+            if (ev->type == SAPP_EVENTTYPE_ICONIFIED || ev->type == SAPP_EVENTTYPE_RESTORED)
+                sapp_destroy_window(win);
+        };
+        w = _sapp_tc_win32_create_window(&d);
+        check("WM_SIZE callback lifetime test window constructed", w != nullptr);
+        if (!w) continue;
+        const sapp_window win = {w->win_id};
+        w->iconified = restore;
+        const int aggregates = events[SAPP_EVENTTYPE_SUSPENDED] + events[SAPP_EVENTTYPE_RESUMED];
+        SendMessageW(w->hwnd, WM_SIZE, restore ? SIZE_RESTORED : SIZE_MINIMIZED, 0);
+        check("detailed WM_SIZE callback may destroy its window before aggregate delivery",
+            !sapp_window_valid(win) && events[SAPP_EVENTTYPE_SUSPENDED] + events[SAPP_EVENTTYPE_RESUMED] == aggregates);
+    }
+}
+
 void policies(_sapp_tc_window_t* w) {
     auto savedTick = w->desc.tick_cb;
     auto savedEvent = w->desc.event_cb;
@@ -294,6 +435,7 @@ void policies(_sapp_tc_window_t* w) {
     w->desc.tick_cb = tick; w->desc.event_cb = event; w->events_enabled = nullptr;
     SwapProbe spy(w->swap_chain); w->swap_chain = &spy;
     spy.inject = true;
+    visibilityTransitions(w, spy);
     for (bool trust : {true,false}) for (bool draw : {false,true}) for (bool minimized : {false,true}) {
         w->trust_hidden_signals = trust;
         w->draw_while_hidden = draw;
@@ -431,6 +573,7 @@ void nativeChecks() {
     _sapp_tc.app.desc.win32 = consoleDesc;
     if (allocatedConsole) FreeConsole();
     policies(first); policies(other);
+    callbackReentry();
     // Zero is an alias only for the explicitly shared seams.
     SwapProbe a(first->swap_chain), b(other->swap_chain);
     a.inject = b.inject = true;
@@ -528,7 +671,14 @@ int main(int argc, char** argv) {
         if (!std::strcmp(argv[i],"--session-end")) sessionEnd = true;
         if (!std::strcmp(argv[i],"--pixels")) pixelSizes = true;
         if (!std::strcmp(argv[i],"--no-high-dpi")) noHighDpi = true;
-        if (!std::strcmp(argv[i],"--covered")) { launchCovered = true; launchPolicy = std::atoi(argv[++i]); }
+        if (!std::strcmp(argv[i],"--covered")) {
+            if (i + 1 >= argc || (std::strcmp(argv[i+1],"-1") && std::strcmp(argv[i+1],"0") && std::strcmp(argv[i+1],"1"))) {
+                std::fputs("nativeWindow/Win32: --covered requires a value of -1, 0, or 1\n", stderr);
+                return 1;
+            }
+            launchCovered = true;
+            launchPolicy = std::atoi(argv[++i]);
+        }
     }
     sapp_desc d{};
     d.width = 1001; d.height = 667; d.high_dpi = !noHighDpi;
@@ -578,6 +728,8 @@ int main(int argc, char** argv) {
         if (elapsed > 12) { check("scripted native loop completed",false); sapp_quit(); return; }
         auto* other = _sapp_tc_lookup(second);
         if (loopStage == 0 && elapsed > .5) {
+            std::printf("nativeWindow/Win32: real cover observations: suspended=%d ticks=%u,%u,%u elapsed=%.3f\n",
+                events[SAPP_EVENTTYPE_SUSPENDED], loopTicks[0], loopTicks[1], loopTicks[2], elapsed);
             check("partly covered first and secondary keep drawing without SUSPENDED", events[SAPP_EVENTTYPE_SUSPENDED] == 0 && loopTicks[0]>2 && loopTicks[1]>2);
             check("three real waitable surfaces keep ticking", loopTicks[1]>2 && loopTicks[2]>2);
             ShowWindow(other->hwnd,SW_MINIMIZE); loopStage=1;
