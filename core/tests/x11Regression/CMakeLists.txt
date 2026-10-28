@@ -1,4 +1,4 @@
-# Standalone production X11/EGL boundary regression, discovered by build_all.py.
+# Production X11/EGL boundary regression plus shared GLX visibility coverage.
 cmake_minimum_required(VERSION 3.16)
 project(x11Regression CXX)
 
@@ -20,9 +20,29 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(TC_X11_EGL_DEPS)
         set(TC_X11_AVAILABLE TRUE)
     endif()
+    set(CMAKE_REQUIRED_LIBRARIES X11 GL)
+    check_cxx_source_compiles("
+        #include <GL/glx.h>
+        int main() { glXGetCurrentContext(); }
+    " TC_X11_GL_DEPS)
+    unset(CMAKE_REQUIRED_LIBRARIES)
 endif()
 
 if(TC_X11_AVAILABLE)
+    # The continuous visibility histories must also exercise the GLX dispatcher.
+    include(CTest)
+    if(TC_X11_GL_DEPS)
+        add_executable(x11VisibilityGLX ../windowTick/x11-regression.cpp)
+        target_compile_features(x11VisibilityGLX PRIVATE cxx_std_20)
+        target_compile_definitions(x11VisibilityGLX PRIVATE SOKOL_GLCORE)
+        target_include_directories(x11VisibilityGLX PRIVATE ../../include/sokol)
+        target_link_libraries(x11VisibilityGLX PRIVATE X11 Xcursor Xi GL)
+        target_link_options(x11VisibilityGLX PRIVATE -Wl,--wrap=XGetWindowProperty)
+        add_test(NAME x11VisibilityGLX COMMAND x11VisibilityGLX)
+    else()
+        message(STATUS "SKIP: x11VisibilityGLX requires GLX development libraries")
+    endif()
+    add_test(NAME x11Regression COMMAND x11Regression)
     add_executable(x11Regression ../windowTick/x11-regression.cpp)
     target_compile_features(x11Regression PRIVATE cxx_std_20)
     target_compile_definitions(x11Regression PRIVATE SOKOL_GLES3)

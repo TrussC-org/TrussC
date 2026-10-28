@@ -96,7 +96,7 @@ void initialized() {
                 XChangeProperty(_sapp_tc.display, target->xwin, _sapp_tc.WM_STATE, _sapp_tc.WM_STATE,
                     32, PropModeReplace, (unsigned char*)values, 2);
                 callbacks = 0; _sapp_tc_x11_process_event(&event);
-                check("minimize input respects trust for either window", callbacks == int(trust) &&
+                check("minimize detail and effective visibility events respect trust for either window", callbacks == 2 * int(trust) &&
                     sapp_window_occluded({target->win_id}) == (trust && state == IconicState));
             }
         }

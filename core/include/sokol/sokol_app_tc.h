@@ -11429,26 +11429,35 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
             /* iconify/restore detection (there is no map/unmap handling) */
             if (w && w->trust_hidden_signals && (ev->xproperty.state == PropertyNewValue) &&
                 (ev->xproperty.atom == _sapp_tc.WM_STATE)) {
+                const bool was_hidden = _sapp_tc_native_hidden(w);
                 const int state = _sapp_tc_x11_get_window_state(w);
                 if ((state == IconicState) && !_sapp_tc_native_iconified(w)) {
                     w->iconified = true;
                     _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_ICONIFIED);
                 } else if ((state == NormalState) && _sapp_tc_native_iconified(w)) {
                     w->iconified = false;
-                    w->earliest_next = 0.0;     /* resume promptly */
                     _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_RESTORED);
+                }
+                const bool hidden = _sapp_tc_native_hidden(w);
+                if (hidden != was_hidden) {
+                    _sapp_tc_x11_app_event(w, hidden ? SAPP_EVENTTYPE_SUSPENDED
+                                                     : SAPP_EVENTTYPE_RESUMED);
+                    if (!hidden) {
+                        w->earliest_next = 0.0;     /* resume promptly */
+                    }
                 }
             }
             break;
         case VisibilityNotify:
             /* Visibility is the same scheduler input for every supported window. */
             if (w && w->trust_hidden_signals && ev->xvisibility.state >= VisibilityUnobscured && ev->xvisibility.state <= VisibilityFullyObscured) {
-                const bool obscured = (ev->xvisibility.state == VisibilityFullyObscured);
-                if (obscured != _sapp_tc_native_occluded(w)) {
-                    w->occluded = obscured;
-                    _sapp_tc_x11_app_event(w, obscured ? SAPP_EVENTTYPE_SUSPENDED
-                                                       : SAPP_EVENTTYPE_RESUMED);
-                    if (!obscured) {
+                const bool was_hidden = _sapp_tc_native_hidden(w);
+                w->occluded = (ev->xvisibility.state == VisibilityFullyObscured);
+                const bool hidden = _sapp_tc_native_hidden(w);
+                if (hidden != was_hidden) {
+                    _sapp_tc_x11_app_event(w, hidden ? SAPP_EVENTTYPE_SUSPENDED
+                                                     : SAPP_EVENTTYPE_RESUMED);
+                    if (!hidden) {
                         w->earliest_next = 0.0;
                     }
                 }

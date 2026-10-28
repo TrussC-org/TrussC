@@ -229,7 +229,7 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
             break;
         }
         case SAPP_EVENTTYPE_SUSPENDED:
-            logNotice("Window") << "second window occluded - skipping frames (no stall)";
+            logNotice("Window") << "second window hidden - skipping frames (no stall)";
             break;
         case SAPP_EVENTTYPE_RESUMED:
             logNotice("Window") << "second window visible again - resuming ticks";

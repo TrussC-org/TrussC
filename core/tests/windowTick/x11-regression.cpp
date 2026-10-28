@@ -8,7 +8,108 @@
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
+#include <initializer_list>
 namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} }
+
+
+static long observedState = NormalState;
+static bool visibilityProbe;
+static int visibilityFailures, visibilityChecks, visibilitySteps;
+static sapp_event_type visibilityEvents[16];
+static int visibilityEventCount;
+static uint32_t visibilityWindow;
+static void visibilityCheck(const char* label, bool ok) {
+    ++visibilityChecks;
+    std::printf("effective-visibility: %s: %s\n", label, ok ? "PASS" : "FAIL");
+    if (!ok) ++visibilityFailures;
+}
+static void visibilityEvent(const sapp_event* ev, sapp_window window, void*) {
+    // Bound (test trace): retain at most 16 events; count overflow so exact-sequence checks fail.
+    if (visibilityEventCount < 16) visibilityEvents[visibilityEventCount] = ev->type;
+    ++visibilityEventCount;
+    visibilityCheck("callback targets the observed window", window.id == visibilityWindow);
+}
+static void effectiveVisibility(Display* display) {
+    for (bool mainRole : {true, false}) for (bool trust : {true, false}) {
+        _sapp_tc = {};
+        _sapp_tc_window_t first{}, second{};
+        first.win_id = first.xwin = 1; first.is_main = true;
+        second.win_id = second.xwin = 2;
+        first.ready = second.ready = true;
+        first.trust_hidden_signals = second.trust_hidden_signals = true;
+        first.desc.event_cb = second.desc.event_cb = visibilityEvent;
+#if defined(SOKOL_GLES3)
+        _sapp_tc_window_t* windows[2];
+        _sapp_tc.windows = windows;
+#endif
+        _sapp_tc.windows[0] = &first; _sapp_tc.windows[1] = &second;
+        _sapp_tc.display = display; _sapp_tc.window_slots = 2;
+        _sapp_tc.app.main = &first; _sapp_tc.WM_STATE = 99;
+        auto* target = mainRole ? &first : &second;
+        auto* peer = mainRole ? &second : &first;
+        target->trust_hidden_signals = trust;
+        visibilityWindow = target->win_id; visibilityEventCount = 0;
+        visibilityProbe = true;
+        std::printf("effective-visibility: window=%u trust=%d\n", visibilityWindow, trust);
+        auto observe = [&](const char* label, int type, int value,
+                           std::initializer_list<sapp_event_type> expected) {
+            ++visibilitySteps;
+            const int before = visibilityEventCount;
+            target->earliest_next = peer->earliest_next = 37.0;
+            XEvent ev{}; ev.type = type;
+            if (type == PropertyNotify) {
+                observedState = value; ev.xproperty.window = target->xwin;
+                ev.xproperty.atom = _sapp_tc.WM_STATE; ev.xproperty.state = PropertyNewValue;
+            } else {
+                ev.xvisibility.window = target->xwin; ev.xvisibility.state = value;
+            }
+            _sapp_tc_x11_process_event(&ev);
+            bool exact = visibilityEventCount == before + (trust ? int(expected.size()) : 0);
+            bool resumed = false;
+            int index = before;
+            if (trust) for (auto event : expected) {
+                exact &= index < 16 && index < visibilityEventCount && visibilityEvents[index] == event;
+                ++index; resumed |= event == SAPP_EVENTTYPE_RESUMED;
+            }
+            visibilityCheck(label, exact);
+            visibilityCheck("only effective visibility return clears deadline",
+                target->earliest_next == (resumed ? 0.0 : 37.0));
+            visibilityCheck("peer observations and deadline remain unchanged",
+                !peer->iconified && !peer->occluded && peer->earliest_next == 37.0);
+            if (!trust) visibilityCheck("untrusted observations remain ignored",
+                !target->iconified && !target->occluded && !_sapp_tc_native_hidden(target));
+        };
+        // One continuous native observation history per role/trust setting.
+        observe("visible minimize: ICONIFIED then SUSPENDED", PropertyNotify, IconicState,
+            {SAPP_EVENTTYPE_ICONIFIED, SAPP_EVENTTYPE_SUSPENDED});
+        observe("duplicate minimize", PropertyNotify, IconicState, {});
+        observe("unobscure while minimized: no RESUMED", VisibilityNotify, VisibilityUnobscured, {});
+        observe("duplicate unobscure while minimized", VisibilityNotify, VisibilityUnobscured, {});
+        observe("fully obscure while minimized: no second SUSPENDED", VisibilityNotify, VisibilityFullyObscured, {});
+        observe("duplicate fully obscure while minimized", VisibilityNotify, VisibilityFullyObscured, {});
+        observe("restore while obscured: RESTORED only", PropertyNotify, NormalState, {SAPP_EVENTTYPE_RESTORED});
+        observe("duplicate restore while obscured", PropertyNotify, NormalState, {});
+        observe("unobscure after restore: RESUMED once", VisibilityNotify, VisibilityUnobscured, {SAPP_EVENTTYPE_RESUMED});
+        observe("duplicate visible notification", VisibilityNotify, VisibilityUnobscured, {});
+        observe("visible obscure: SUSPENDED once", VisibilityNotify, VisibilityFullyObscured, {SAPP_EVENTTYPE_SUSPENDED});
+        observe("duplicate obscured notification", VisibilityNotify, VisibilityFullyObscured, {});
+        observe("obscured minimize: ICONIFIED only", PropertyNotify, IconicState, {SAPP_EVENTTYPE_ICONIFIED});
+        observe("duplicate obscured minimize", PropertyNotify, IconicState, {});
+        observe("unobscure iconic window: no RESUMED", VisibilityNotify, VisibilityUnobscured, {});
+        observe("duplicate iconic unobscure", VisibilityNotify, VisibilityUnobscured, {});
+        observe("restore while unobscured: RESTORED then RESUMED", PropertyNotify, NormalState,
+            {SAPP_EVENTTYPE_RESTORED, SAPP_EVENTTYPE_RESUMED});
+        observe("duplicate visible restore", PropertyNotify, NormalState, {});
+        observe("partial visibility stays visible", VisibilityNotify, VisibilityPartiallyObscured, {});
+        observe("duplicate partial visibility", VisibilityNotify, VisibilityPartiallyObscured, {});
+        visibilityCheck("continuous trace has exactly eight trusted events", visibilityEventCount == (trust ? 8 : 0));
+        visibilityProbe = false;
+    }
+    std::printf("effective-visibility summary: %d observations, %d checks, %d failures\n",
+        visibilitySteps, visibilityChecks, visibilityFailures);
+}
+
+#if defined(SOKOL_GLES3)
 
 static int failures, polls, pending, frames, swaps, owners, logs, mouseEvents, warpX, warpY;
 static double now, firstFrame, nextFrame, inputAt, work;
@@ -100,7 +201,7 @@ extern "C" int __wrap_XGetWindowProperty(Display*, Window, Atom, long offset, lo
     Atom type, Atom* actual, int* format, unsigned long* count, unsigned long* after, unsigned char** data) {
     ++propertyCalls; requestedLength = length;
     *actual = wrongType ? type + 1 : type;
-    *format = wrongFormat ? 16 : ((stateProperty || typeList) ? 32 : 8);
+    *format = wrongFormat ? 16 : ((stateProperty || visibilityProbe || typeList) ? 32 : 8);
     if (typeList) {
         const unsigned long n = std::min(offeredCount, (unsigned long)length);
         *count = excessItems ? _sapp_tc.app.drop_max_types + 1 : n;
@@ -116,10 +217,10 @@ extern "C" int __wrap_XGetWindowProperty(Display*, Window, Atom, long offset, lo
         if (movingProperty == 2 && propertyCalls > 1) *count = 4;
         *data = (unsigned char*)std::calloc(9, 1);
         std::memcpy(*data, propertyCalls == 1 ? "file:///" : "\r\r\r\r\r\r\r\r", 8);
-    } else if (stateProperty) {
+    } else if (stateProperty || visibilityProbe) {
         *count = 2; *after = property.empty() ? 0 : 4;
         auto* record = (unsigned long*)std::calloc(2, sizeof(unsigned long));
-        record[0] = NormalState; *data = (unsigned char*)record;
+        record[0] = observedState; *data = (unsigned char*)record;
     } else {
         const size_t begin = (size_t)offset * 4;
         if (begin > property.size()) std::abort();
@@ -208,6 +309,8 @@ static void offerTypes(Window window, Window source = 2) {
 int main() {
     auto* display = (Display*)std::calloc(1, sizeof(*(_XPrivDisplay)nullptr));
     _sapp_tc_window_t main{}; _sapp_tc_window_t* windows[] = { &main };
+    effectiveVisibility(display);
+    observedState = NormalState;
     uint32_t counter = UINT32_MAX - 1, identity = 0;
     check("last native identity is issued once", _sapp_tc_next_window_id(&counter, &identity) && identity == UINT32_MAX);
     check("native identity exhaustion never wraps", !_sapp_tc_next_window_id(&counter, &identity) && counter == UINT32_MAX);
@@ -544,5 +647,22 @@ int main() {
     offerTypes(1, 3);
     check("complete type list accepts without excess Notice", _sapp_tc.xdnd.format == 15 && notices == 3 && atomNames == 0);
     std::free(display);
-    return failures ? 1 : 0;
+    return failures || visibilityFailures ? 1 : 0;
 }
+
+#else
+// GLX runs the same production dispatcher and continuous visibility sequences.
+extern "C" int __wrap_XGetWindowProperty(Display*, Window, Atom, long, long, Bool,
+    Atom type, Atom* actual, int* format, unsigned long* count, unsigned long* after, unsigned char** data) {
+    *actual = type; *format = 32; *count = 2; *after = 0;
+    auto* record = (unsigned long*)std::calloc(2, sizeof(unsigned long));
+    record[0] = observedState; *data = (unsigned char*)record;
+    return Success;
+}
+int main() {
+    auto* display = (Display*)std::calloc(1, sizeof(*(_XPrivDisplay)nullptr));
+    effectiveVisibility(display);
+    std::free(display);
+    return visibilityFailures ? 1 : 0;
+}
+#endif
