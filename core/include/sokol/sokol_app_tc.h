@@ -2507,7 +2507,7 @@ SOKOL_APP_API_DECL uint32_t sapp_tc_window_fullscreen_phase(sapp_window win);
 SOKOL_APP_API_DECL void sapp_tc_window_set_fullscreen(sapp_window win, bool full);
 SOKOL_APP_API_DECL void sapp_tc_window_toggle_fullscreen(sapp_window win);
 #endif
-#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
 SOKOL_APP_API_DECL void sapp_tc_window_draw_while_hidden(sapp_window win, bool allow);
 #endif
 
@@ -6322,6 +6322,8 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); retur
 #include <d3d11.h>
 #include <dxgi1_3.h>    /* IDXGIFactory2 / IDXGISwapChain2 (frame latency waitable) */
 #include "util/sokol_d3d11_device_loss.h"
+#include "./util/sokol_window_native.h"
+#include <new>
 
 #if defined(_MSC_VER)
 #pragma comment (lib, "kernel32")
@@ -6349,21 +6351,7 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); retur
 #define _SAPP_TC_MODAL_TIMER (1)
 #define _SAPP_TC_RELEASE(obj) do { if (obj) { (obj)->Release(); (obj) = 0; } } while (0)
 
-/* EMA-filtered frame timer, port of sokol_app.h's _sapp_timing_* (QPC-based;
-   Windows has no display-link timestamps, so this is the only dt source) */
-typedef struct {
-    double last;        /* previous sample time, 0 = none yet */
-    double ema;
-    double smooth_dt;
-    double dt;          /* last raw (clamped) delta */
-} _sapp_tc_timing_t;
-
-typedef struct _sapp_tc_window_t {
-    bool skip_present; /* one-shot, per-window EVENT_DRIVEN presentation */
-    uint32_t win_id;
-    sapp_window_desc desc;
-    bool is_main;               /* window #0: created by sapp_run, drives the app callbacks */
-    bool ready;                 /* creation finished; wndproc may deliver events */
+typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     HWND hwnd;
     HMONITOR hmonitor;
     DXGI_FORMAT color_fmt;
@@ -6381,25 +6369,17 @@ typedef struct _sapp_tc_window_t {
     ID3D11RenderTargetView* msaa_rtv;
     ID3D11Texture2D* ds;        /* depth-stencil */
     ID3D11DepthStencilView* dsv;
-    int fb_width, fb_height;    /* framebuffer pixels */
-    int win_width, win_height;  /* logical points */
     float window_scale;         /* OS DPI / 96 (physical px per point) */
-    float dpi_scale;            /* framebuffer px per point (content scale) */
     float mouse_scale;          /* client px -> event coordinate (framebuffer px) */
-    double refresh_period;      /* this window's display refresh period (pacing fallback) */
-    double earliest_next;       /* QPC seconds; window is not due before this */
-    double frame_duration;
-    _sapp_tc_timing_t timing;
-    bool occluded;
-    bool iconified;
-    bool in_tick;
-    bool close_requested;       /* sapp_window_request_close(): WM_CLOSE posted at the loop tail */
     bool mouse_tracked;         /* TrackMouseEvent enter/leave state */
     bool mouse_pos_valid;
     float mouse_x, mouse_y;     /* last position in event coordinates */
     float mouse_dx, mouse_dy;
     uint8_t capture_mask;       /* SetCapture refcount by button bit */
     WCHAR surrogate;            /* WM_CHAR high-surrogate accumulator */
+    bool from_modal;           /* source shim data, never a window role */
+    bool cancel_tick;          /* client aborted init before its first frame */
+    LONG_PTR stored_style, stored_ex_style;
     RECT stored_window_rect;    /* windowed rect for fullscreen restore */
 } _sapp_tc_window_t;
 
@@ -6417,19 +6397,14 @@ static struct {
 
     /* ---- app / main-window state (this header owns sapp_run on Windows) -- */
     struct {
-        sapp_desc desc;             /* sanitized copy; window_title points at the buffer below */
-        char window_title[256];
-        WCHAR window_title_wide[256];
+        sapp_desc desc;             /* normalized launch data; title borrows the first record */
         bool valid;
         bool init_called;
         bool cleanup_called;
         bool quit_requested;
         bool quit_ordered;
-        bool fullscreen;
         bool event_consumed;
-        bool skip_present;          /* one-shot; honored on D3D11 (TrussC flicker patch) */
         bool dpi_aware;
-        uint64_t frame_count;
         _sapp_tc_window_t* main;
         bool device_lost_notified;  /* one notification across every swapchain */
         bool device_lost_event_pending; /* deliver after app initialization */
@@ -6460,7 +6435,9 @@ static struct {
     } app;
 } _sapp_tc;
 
-static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal);
+static void _sapp_tc_win32_tick(_sapp_tc_window_t* w);
+static void _sapp_tc_win32_modal_tick(_sapp_tc_window_t* w);
+static void _sapp_tc_win32_close(_sapp_tc_window_t* w);
 static bool _sapp_tc_win32_update_dimensions(_sapp_tc_window_t* w);
 static bool _sapp_tc_d3d11_resize(_sapp_tc_window_t* w);
 static void _sapp_tc_win32_apply_cursor(sapp_mouse_cursor cursor, bool shown, bool skip_area_test);
@@ -6644,6 +6621,7 @@ static _sapp_tc_window_t* _sapp_tc_lookup(sapp_window win) {
 
 /*-- UTF-8 <-> UTF-16 -------------------------------------------------------*/
 static bool _sapp_tc_win32_utf8_to_wide(const char* src, wchar_t* dst, int dst_num) {
+    // Bound (conversion): native UTF-16 storage is caller-sized; overflow fails with NUL termination.
     dst[0] = 0;
     if (0 == MultiByteToWideChar(CP_UTF8, 0, src, -1, dst, dst_num)) {
         dst[dst_num - 1] = 0;
@@ -6653,6 +6631,7 @@ static bool _sapp_tc_win32_utf8_to_wide(const char* src, wchar_t* dst, int dst_n
 }
 
 static bool _sapp_tc_win32_wide_to_utf8(const wchar_t* src, char* dst, int dst_size) {
+    // Bound (conversion): native UTF-8 storage is caller-sized; overflow fails with NUL termination.
     dst[0] = 0;
     if (0 == WideCharToMultiByte(CP_UTF8, 0, src, -1, dst, dst_size, NULL, NULL)) {
         dst[dst_size - 1] = 0;
@@ -6676,8 +6655,8 @@ static uint32_t _sapp_tc_win32_mods(void) {
 }
 
 static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
-    if (!w->desc.event_cb) return;
-    ev->frame_count = _sapp_tc.app.frame_count;
+    if (!w->ready || !w->desc.event_cb || (w->events_enabled && !w->events_enabled())) return;
+    ev->frame_count = _sapp_tc.app.main ? _sapp_tc.app.main->frame_count : 0;
     ev->window_width = w->win_width;
     ev->window_height = w->win_height;
     ev->framebuffer_width = w->fb_width;
@@ -7277,31 +7256,45 @@ static void _sapp_tc_win32_files_dropped(_sapp_tc_window_t* w, HDROP hdrop) {
     _sapp_tc_send(w, &e);
 }
 
-/*-- fullscreen (main window; borderless style-swap, upstream parity) -------*/
-static void _sapp_tc_win32_set_fullscreen(bool fullscreen, UINT swp_flags) {
-    _sapp_tc_window_t* w = _sapp_tc.app.main;
-    if (!w) return;
-    HMONITOR monitor = MonitorFromWindow(w->hwnd, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO minfo;
-    memset(&minfo, 0, sizeof(minfo));
+/*-- fullscreen (one native target; legacy wrappers resolve the first) -----*/
+static void _sapp_tc_win32_set_fullscreen(_sapp_tc_window_t* w, bool fullscreen, UINT swp_flags) {
+    if (!w || w->fullscreen == fullscreen) return;
+    MONITORINFO minfo = {};
     minfo.cbSize = sizeof(minfo);
-    if (!GetMonitorInfoW(monitor, &minfo)) return;
-    _sapp_tc.app.fullscreen = fullscreen;
+    if (!GetMonitorInfoW(MonitorFromWindow(w->hwnd, MONITOR_DEFAULTTONEAREST), &minfo)) return;
     RECT rect;
-    DWORD style;
     if (fullscreen) {
         GetWindowRect(w->hwnd, &w->stored_window_rect);
-        style = WS_POPUP | WS_SYSMENU | WS_VISIBLE;
+        w->stored_style = GetWindowLongPtrW(w->hwnd, GWL_STYLE);
+        w->stored_ex_style = GetWindowLongPtrW(w->hwnd, GWL_EXSTYLE);
+        w->restore_valid = true;
         rect = minfo.rcMonitor;
+        SetWindowLongPtrW(w->hwnd, GWL_STYLE, WS_POPUP | WS_SYSMENU | WS_VISIBLE);
     } else {
-        style = WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU |
-                WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SIZEBOX;
+        if (!w->restore_valid) return;
         rect = w->stored_window_rect;
+        SetWindowLongPtrW(w->hwnd, GWL_STYLE, w->stored_style);
+        SetWindowLongPtrW(w->hwnd, GWL_EXSTYLE, w->stored_ex_style);
     }
-    SetWindowLongPtrW(w->hwnd, GWL_STYLE, (LONG_PTR)style);
+    w->fullscreen = fullscreen;
+    w->fullscreen_state.terminal(fullscreen);
     SetWindowPos(w->hwnd, HWND_TOP, rect.left, rect.top,
-                 rect.right - rect.left, rect.bottom - rect.top,
-                 swp_flags | SWP_FRAMECHANGED);
+                 rect.right - rect.left, rect.bottom - rect.top, swp_flags | SWP_FRAMECHANGED);
+}
+
+static bool _sapp_tc_win32_any_fullscreen(void) {
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i) {
+        const _sapp_tc_window_t* w = _sapp_tc.windows[i];
+        if (!w) continue;
+        if (w->fullscreen) return true;
+        // The outgoing secondary adapter still performs its own style swap in
+        // step (a). Its fullscreen style clears WINDOWEDGE; constructors retain
+        // that bit for ordinary borderless windows. The marker survives minimize.
+        if (!(GetWindowLongPtrW(w->hwnd, GWL_STYLE) & WS_POPUP)) continue;
+        if (GetWindowLongPtrW(w->hwnd, GWL_EXSTYLE) & WS_EX_WINDOWEDGE) continue;
+        return true;
+    }
+    return false;
 }
 
 /*-- per-window tick + pacing ------------------------------------------------
@@ -7331,146 +7324,112 @@ static bool _sapp_tc_win32_window_due(_sapp_tc_window_t* w) {
     return true;
 }
 
-static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
-    if (_sapp_tc.app.quit_ordered || w->in_tick || !w->swap_chain) return;
-    /* the due-check just consumed a waitable credit (unless one was already
-       held); hold it until a real Present returns it through the swapchain.
-       Clear waitable_ready: this signal is now spent (the next one comes from
-       the run-loop's MsgWait after this frame is presented). */
+static void _sapp_tc_main_tick_tramp(sapp_window, void*) {
+    if (!_sapp_tc.app.init_called) {
+        _sapp_tc.app.init_called = true;
+        if (_sapp_tc.app.desc.init_cb) _sapp_tc.app.desc.init_cb();
+        else if (_sapp_tc.app.desc.init_userdata_cb)
+            _sapp_tc.app.desc.init_userdata_cb(_sapp_tc.app.desc.user_data);
+        _sapp_tc_d3d11_dispatch_pending_device_loss();
+        if (_sapp_tc.app.quit_ordered) {
+            _sapp_tc.app.main->cancel_tick = true;
+            return;
+        }
+    }
+    if (_sapp_tc.app.desc.frame_cb) _sapp_tc.app.desc.frame_cb();
+    else if (_sapp_tc.app.desc.frame_userdata_cb)
+        _sapp_tc.app.desc.frame_userdata_cb(_sapp_tc.app.desc.user_data);
+}
+
+static void _sapp_tc_win32_observe_occlusion(_sapp_tc_window_t* w, bool occluded) {
+    const bool was_occluded = _sapp_tc_native_occluded(w);
+    w->occluded = occluded;
+    const bool now_occluded = _sapp_tc_native_occluded(w);
+    if (was_occluded != now_occluded)
+        _sapp_tc_win32_app_event(w, now_occluded ? SAPP_EVENTTYPE_SUSPENDED : SAPP_EVENTTYPE_RESUMED);
+}
+
+static void _sapp_tc_win32_swap(_sapp_tc_window_t* w) {
+    const UINT flags = w->from_modal ? DXGI_PRESENT_DO_NOT_WAIT : 0;
+    const HRESULT hr = w->swap_chain->Present((UINT)w->swap_interval, flags);
+    if (_sapp_tc_d3d11_check_device_loss(hr)) return;
+    _sapp_tc_win32_observe_occlusion(w, hr == DXGI_STATUS_OCCLUDED);
+    const bool presented = SUCCEEDED(hr) && hr != DXGI_STATUS_OCCLUDED;
+    if (presented) {
+        w->credit_held = false;
+        w->last_present = _sapp_tc_now();
+    }
+    if (presented && w->frame_wait) w->earliest_next = 0.0;
+    else _sapp_tc_win32_pace(w, w->refresh_period * (double)w->swap_interval);
+}
+
+static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
+    if (!w || !w->ready || _sapp_tc.app.quit_ordered || w->in_tick || !w->swap_chain) return;
+    w->in_tick = true;
+    w->cancel_tick = false;
+    struct TickScope {
+        _sapp_tc_window_t* w;
+        ~TickScope() { w->in_tick = false; }
+    } scope{w};
+    // MsgWait (or the modal shim) already consumed this auto-reset signal.
     if (w->frame_wait) { w->credit_held = true; w->waitable_ready = false; }
     _sapp_tc_timing_update(&w->timing);
     w->frame_duration = w->timing.smooth_dt;
-    const int swap_interval = (_sapp_tc.app.desc.swap_interval > 0) ? _sapp_tc.app.desc.swap_interval : 1;
+    _sapp_tc_win32_pace(w, w->refresh_period * (double)w->swap_interval);
 
-    if (w->is_main) {
-        /* resize is deliberately coalesced here, NOT in WM_SIZE (upstream:
-           per-WM_SIZE ResizeBuffers blows up memory on some drivers). During
-           a modal size-move loop the swapchain keeps its size (DXGI stretch)
-           and one resize lands on the first normal tick after the drag. */
-        if (!_sapp_tc.app.device_lost_notified &&
-            !from_modal && _sapp_tc_win32_update_dimensions(w)) {
-            if (!_sapp_tc_d3d11_resize(w)) return;
-            _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESIZED);
-        }
-        w->in_tick = true;
-        if (!_sapp_tc.app.init_called) {
-            _sapp_tc.app.init_called = true;
-            if (_sapp_tc.app.desc.init_cb) {
-                _sapp_tc.app.desc.init_cb();
-            } else if (_sapp_tc.app.desc.init_userdata_cb) {
-                _sapp_tc.app.desc.init_userdata_cb(_sapp_tc.app.desc.user_data);
-            }
-            _sapp_tc_d3d11_dispatch_pending_device_loss();
-            if (_sapp_tc.app.quit_ordered) {
-                w->in_tick = false;
-                return;
-            }
-        }
-        if (w->occluded && !_sapp_tc.app.device_lost_notified) {
-            const HRESULT hr = w->swap_chain->Present(0, DXGI_PRESENT_TEST);
-            if (_sapp_tc_d3d11_check_device_loss(hr)) { w->in_tick = false; return; }
-            w->occluded = (hr == DXGI_STATUS_OCCLUDED);
-        }
-        if (_sapp_tc.app.desc.frame_cb) {
-            _sapp_tc.app.desc.frame_cb();
-        } else if (_sapp_tc.app.desc.frame_userdata_cb) {
-            _sapp_tc.app.desc.frame_userdata_cb(_sapp_tc.app.desc.user_data);
-        }
-        _sapp_tc.app.frame_count++;
-        w->in_tick = false;
-        bool presented = false;
-        if (_sapp_tc.app.skip_present || _sapp_tc.app.device_lost_notified) {
-            /* one-shot event-driven present suppression (TrussC patch: keeps
-               the last image on screen when a frame decides not to draw) */
-            _sapp_tc.app.skip_present = false;
-        } else {
-            const UINT flags = from_modal ? DXGI_PRESENT_DO_NOT_WAIT : 0;
-            const HRESULT hr = w->swap_chain->Present((UINT)swap_interval, flags);
-            if (_sapp_tc_d3d11_check_device_loss(hr)) return;
-            w->occluded = (hr == DXGI_STATUS_OCCLUDED);
-            presented = SUCCEEDED(hr) && (hr != DXGI_STATUS_OCCLUDED);
-        }
-        if (presented) {
-            w->credit_held = false;
-        }
-        if (w->iconified) {
-            /* minimized: frame_cb keeps running, throttled (upstream Sleep(16)
-               / mac fallback-timer parity) */
-            _sapp_tc_win32_pace(w, 0.0166 * (double)swap_interval);
-        } else if (presented && w->frame_wait) {
-            w->earliest_next = 0.0;     /* vsync pacing via the waitable */
-        } else {
-            _sapp_tc_win32_pace(w, w->refresh_period * (double)swap_interval);
-        }
-    } else {
-        /* secondary window */
-        if (w->iconified) {
-            if (w->desc.tick_cb) {
-                sapp_window handle = { w->win_id };
-                w->desc.tick_cb(handle, w->desc.user_data);
-            }
-            _sapp_tc_win32_pace(w, w->refresh_period);
-            return;
-        }
-        if (w->occluded && !_sapp_tc.app.device_lost_notified) {
-            /* cheap visibility poll: a fully covered window costs one
-               present-test per pace period and never renders or stalls */
-            const HRESULT hr = w->swap_chain->Present(0, DXGI_PRESENT_TEST);
-            if (_sapp_tc_d3d11_check_device_loss(hr)) return;
-            if (hr == DXGI_STATUS_OCCLUDED) {
-                if (w->desc.tick_cb) {
-                    sapp_window handle = { w->win_id };
-                    w->desc.tick_cb(handle, w->desc.user_data);
-                }
-                _sapp_tc_win32_pace(w, w->refresh_period);
-                return;
-            }
-            w->occluded = false;
-            _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESUMED);
-        }
-        if (!_sapp_tc.app.device_lost_notified && !from_modal && _sapp_tc_win32_update_dimensions(w)) {
-            if (!_sapp_tc_d3d11_resize(w)) return;
-            _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESIZED);
-        }
-        w->in_tick = true;
-        if (w->desc.tick_cb) {
-            sapp_window handle = { w->win_id };
-            w->desc.tick_cb(handle, w->desc.user_data);
-        }
-        w->in_tick = false;
-        if (_sapp_tc.app.device_lost_notified) {
-            _sapp_tc_win32_pace(w, w->refresh_period);
-            return;
-        }
-        if (w->skip_present) {
-            w->skip_present = false;
-            _sapp_tc_win32_pace(w, w->refresh_period);
-            return;
-        }
-        const UINT flags = from_modal ? DXGI_PRESENT_DO_NOT_WAIT : 0;
-        const HRESULT hr = w->swap_chain->Present(1, flags);
+    // Probe, hidden admission, dimensions: RESUMED precedes RESIZED.
+    if (_sapp_tc_native_occluded(w) && !_sapp_tc.app.device_lost_notified) {
+        const HRESULT hr = w->swap_chain->Present(0, DXGI_PRESENT_TEST);
         if (_sapp_tc_d3d11_check_device_loss(hr)) return;
-        if (hr == DXGI_STATUS_OCCLUDED) {
-            w->occluded = true;
-            _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_SUSPENDED);
-            _sapp_tc_win32_pace(w, w->refresh_period);
-        } else if (SUCCEEDED(hr)) {
-            w->credit_held = false;
-            if (w->frame_wait) {
-                w->earliest_next = 0.0;
-            } else {
-                _sapp_tc_win32_pace(w, w->refresh_period);
-            }
-        } else {
-            _sapp_tc_win32_pace(w, w->refresh_period);
-        }
+        _sapp_tc_win32_observe_occlusion(w, hr == DXGI_STATUS_OCCLUDED);
     }
+    const bool admitted = w->draw_while_hidden || !_sapp_tc_native_hidden(w);
+    if (admitted && !_sapp_tc.app.device_lost_notified && !w->from_modal &&
+        _sapp_tc_win32_update_dimensions(w)) {
+        if (!_sapp_tc_d3d11_resize(w)) return;
+        _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESIZED);
+    }
+    // Hidden ticks retain the existing client's update policy, under the same
+    // reentry guard as visible ticks. Native drawing/presentation is admitted above.
+    if (w->desc.tick_cb) {
+        sapp_window handle = { w->win_id };
+        w->desc.tick_cb(handle, w->desc.user_data);
+    }
+    if (w->cancel_tick) return;
+    ++w->frame_count;
+    const bool skip = w->skip_present;
+    w->skip_present = false; // one-shot is consumed at the completed tick boundary, even on loss
+    if (admitted && !skip && !_sapp_tc.app.device_lost_notified) {
+        _sapp_tc_win32_swap(w);
+        if (_sapp_tc.app.device_lost_notified) return;
+    } else {
+        // Win32 fallback deadlines follow completed callback/presentation work.
+        _sapp_tc_win32_pace(w, w->refresh_period * (double)w->swap_interval);
+    }
+    if (_sapp_tc_native_iconified(w) && w->draw_while_hidden) {
+        // Preserve the legacy drawing-while-minimized fallback interval.
+        _sapp_tc_win32_pace(w, 0.0166 * (double)w->swap_interval);
+    }
+}
+
+static void _sapp_tc_win32_modal_tick(_sapp_tc_window_t* w) {
+    if (w->in_tick) return;
+    w->from_modal = true;
+    struct SourceScope {
+        _sapp_tc_window_t* w;
+        ~SourceScope() { w->from_modal = false; }
+    } source{w};
+    _sapp_tc_win32_tick(w);
 }
 
 static bool _sapp_tc_win32_request_exit(_sapp_tc_window_t* w) {
     if (!_sapp_tc.app.quit_ordered) {
         _sapp_tc.app.quit_requested = true;
-        _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_QUIT_REQUESTED);
+        try {
+            _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_QUIT_REQUESTED);
+        } catch (...) {
+            _sapp_tc.app.quit_requested = false;
+        }
     }
     return _sapp_tc.app.quit_ordered || _sapp_tc.app.quit_requested;
 }
@@ -7486,8 +7445,28 @@ static void _sapp_tc_win32_cleanup(void) {
     }
 }
 
+static void _sapp_tc_win32_close(_sapp_tc_window_t* w) {
+    if (w->is_main) {
+        trussc::internal::setExitReasonIfEmpty("window-close");
+        if (_sapp_tc_win32_request_exit(w)) {
+            _sapp_tc.app.quit_ordered = true;
+            ShutdownBlockReasonDestroy(w->hwnd);
+        }
+        if (_sapp_tc.app.quit_ordered) {
+            PostQuitMessage(0);
+        }
+    } else {
+        /* user closed a secondary window: notify; the app accepts by
+           calling sapp_destroy_window() (w may be freed after this) */
+        if (w->desc.close_cb) {
+            sapp_window handle = { w->win_id };
+            w->desc.close_cb(handle, w->desc.user_data);
+        }
+    }
+}
+
 /*-- window procedure --------------------------------------------------------*/
-static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+static LRESULT _sapp_tc_wndproc_impl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_NCCREATE) {
         /* stash the window struct passed via CreateWindowExW lpCreateParams */
         const CREATESTRUCTW* cs = (const CREATESTRUCTW*)lParam;
@@ -7541,29 +7520,14 @@ static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             }
             return 0;
         case WM_CLOSE:
-            if (w->is_main) {
-                trussc::internal::setExitReasonIfEmpty("window-close");
-                if (_sapp_tc_win32_request_exit(w)) {
-                    _sapp_tc.app.quit_ordered = true;
-                    ShutdownBlockReasonDestroy(hwnd);
-                }
-                if (_sapp_tc.app.quit_ordered) {
-                    PostQuitMessage(0);
-                }
-            } else {
-                /* user closed a secondary window: notify; the app accepts by
-                   calling sapp_destroy_window() (w may be freed after this) */
-                if (w->desc.close_cb) {
-                    sapp_window handle = { w->win_id };
-                    w->desc.close_cb(handle, w->desc.user_data);
-                }
-            }
-            return 0;   /* never let DefWindowProc destroy the window here */
+            if (w->in_tick) w->close_requested = true;
+            else _sapp_tc_win32_close(w);
+            return 0;   /* disposal only follows the common close decision */
         case WM_SYSCOMMAND:
             switch (wParam & 0xFFF0) {
                 case SC_SCREENSAVE:
                 case SC_MONITORPOWER:
-                    if (_sapp_tc.app.fullscreen) {
+                    if (_sapp_tc_win32_any_fullscreen()) {
                         return 0;   /* no screensaver/monitor-off in fullscreen */
                     }
                     break;
@@ -7579,8 +7543,9 @@ static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             /* only iconify tracking here; RESIZED + ResizeBuffers are
                coalesced into the tick (upstream parity) */
             const bool iconified = (wParam == SIZE_MINIMIZED);
-            if (iconified != w->iconified) {
-                w->iconified = iconified;
+            const bool was_iconified = _sapp_tc_native_iconified(w);
+            w->iconified = iconified;
+            if (_sapp_tc_native_iconified(w) != was_iconified) {
                 _sapp_tc_win32_app_event(w, iconified ? SAPP_EVENTTYPE_ICONIFIED
                                                       : SAPP_EVENTTYPE_RESTORED);
                 if (!iconified) {
@@ -7710,7 +7675,7 @@ static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
                         tw->waitable_ready = true;
                     }
                     if (_sapp_tc_win32_window_due(tw)) {
-                        _sapp_tc_win32_tick(tw, true);
+                        _sapp_tc_win32_modal_tick(tw);
                     }
                 }
             }
@@ -7734,6 +7699,27 @@ static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             break;
     }
     return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    try {
+        return _sapp_tc_wndproc_impl(hwnd, msg, wParam, lParam);
+    } catch (...) {
+        if (msg == WM_ENDSESSION && wParam) {
+            _sapp_tc.app.quit_ordered = true;
+            try { _sapp_tc_win32_cleanup(); } catch (...) { }
+            TerminateProcess(GetCurrentProcess(),
+                trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1);
+            return 0;
+        }
+        if (msg == WM_QUERYENDSESSION) {
+            _sapp_tc.app.quit_requested = false;
+            ShutdownBlockReasonCreate(hwnd, L"The app is still busy.");
+            return FALSE;
+        }
+        if (msg == WM_CLOSE) return 0; // a throwing close client must not let DefWindowProc destroy the HWND
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
 }
 
 /*-- window creation / destruction ------------------------------------------*/
@@ -7764,11 +7750,11 @@ static bool _sapp_tc_win32_ensure_wndclass(void) {
    one client resize. Pixel overrides use render DPI for pixels -> points,
    just like setSize (render DPI can be 1 with high_dpi disabled). */
 static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wchar_t* title,
-        DWORD style, DWORD ex_style, int x, int y, bool use_default_size) {
+        DWORD style, DWORD ex_style, int x, int y) {
     if (!_sapp_tc_win32_ensure_wndclass()) return false;
     int outer_w = CW_USEDEFAULT;
     int outer_h = CW_USEDEFAULT;
-    if (!use_default_size) {
+    if (w->desc.width > 0 && w->desc.height > 0) {
         RECT rect = { 0, 0, (LONG)w->desc.width, (LONG)w->desc.height };
         AdjustWindowRectEx(&rect, style, FALSE, ex_style);
         outer_w = (int)(rect.right - rect.left);
@@ -7790,17 +7776,23 @@ static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wcha
     _sapp_tc_win32_update_refresh(w);
     _sapp_tc_win32_update_scale(w);
     if (!_sapp_tc_window_pixels_representable(w->desc._tc_pixel_width, w->desc._tc_pixel_height, w->dpi_scale)) {
-        DestroyWindow(w->hwnd);
-        w->hwnd = NULL;
         return false;
     }
-    if (!use_default_size && (w->window_scale != 1.0f)) {
+    const bool correct_size = w->window_scale != 1.0f ||
+        w->desc.width <= 0 || w->desc.height <= 0 ||
+        (w->desc._tc_pixel_width > 0 && w->desc._tc_pixel_width != w->desc.width) ||
+        (w->desc._tc_pixel_height > 0 && w->desc._tc_pixel_height != w->desc.height);
+    if (correct_size) {
+        RECT client;
+        if (!GetClientRect(w->hwnd, &client)) return false;
         const double width = _sapp_tc_window_points(w->desc.width, w->desc._tc_pixel_width, w->dpi_scale);
         const double height = _sapp_tc_window_points(w->desc.height, w->desc._tc_pixel_height, w->dpi_scale);
-        const LONG pw = w->desc._tc_pixel_width > 0 ? (LONG)(width * w->window_scale + 0.5) :
-            (LONG)((float)w->desc.width * w->window_scale + 0.5f);
-        const LONG ph = w->desc._tc_pixel_height > 0 ? (LONG)(height * w->window_scale + 0.5) :
-            (LONG)((float)w->desc.height * w->window_scale + 0.5f);
+        const LONG pw = (w->desc.width <= 0 && w->desc._tc_pixel_width <= 0) ? client.right :
+            (w->desc._tc_pixel_width > 0 ? (LONG)(width * w->window_scale + 0.5) :
+                (LONG)((float)w->desc.width * w->window_scale + 0.5f));
+        const LONG ph = (w->desc.height <= 0 && w->desc._tc_pixel_height <= 0) ? client.bottom :
+            (w->desc._tc_pixel_height > 0 ? (LONG)(height * w->window_scale + 0.5) :
+                (LONG)((float)w->desc.height * w->window_scale + 0.5f));
         RECT rect = { 0, 0, pw, ph };
         if (_sapp_tc.GetDpiForWindow && _sapp_tc.AdjustWindowRectExForDpi) {
             _sapp_tc.AdjustWindowRectExForDpi(&rect, style, FALSE, ex_style,
@@ -7816,73 +7808,108 @@ static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wcha
     return true;
 }
 
-static void _sapp_tc_win32_destroy_window_resources(_sapp_tc_window_t* w) {
-    _sapp_tc_d3d11_destroy_render_targets(w);
-    if (w->frame_wait) {
-        CloseHandle(w->frame_wait);
-        w->frame_wait = NULL;
-    }
-    _SAPP_TC_RELEASE(w->swap_chain);
+static void _sapp_tc_win32_unwind(_sapp_tc_window_t* w) {
+    if (!w) return;
+    w->ready = false;
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i)
+        if (_sapp_tc.windows[i] == w) _sapp_tc.windows[i] = 0;
+    if (_sapp_tc.app.main == w) _sapp_tc.app.main = 0;
     if (w->hwnd) {
         KillTimer(w->hwnd, _SAPP_TC_MODAL_TIMER);
-        SetWindowLongPtrW(w->hwnd, GWLP_USERDATA, 0);   /* wndproc goes inert */
-        DestroyWindow(w->hwnd);
-        w->hwnd = NULL;
+        SetWindowLongPtrW(w->hwnd, GWLP_USERDATA, 0);
     }
+    _sapp_tc_d3d11_destroy_render_targets(w);
+    if (w->frame_wait) CloseHandle(w->frame_wait);
+    _SAPP_TC_RELEASE(w->swap_chain);
+    if (w->hwnd) DestroyWindow(w->hwnd);
+    free(w->title);
+    delete w;
+}
+
+static bool _sapp_tc_win32_initialize_dimensions(_sapp_tc_window_t* w) {
+    _sapp_tc_win32_update_dimensions(w);
+    return w->fb_width > 0 && w->fb_height > 0 && w->win_width > 0 && w->win_height > 0;
+}
+
+static bool _sapp_tc_win32_trust_hidden_signals(void) {
+    return true;
+}
+
+static _sapp_tc_window_t* _sapp_tc_win32_create_window(const _sapp_tc_native_desc* d) {
+    int slot = -1;
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i)
+        if (!_sapp_tc.windows[i]) { slot = i; break; }
+    // Bound (compatibility): retain the 32-window registry; exhaustion rejects creation.
+    if (slot < 0) return 0;
+    uint32_t id;
+    if (!_sapp_tc_next_window_id(&_sapp_tc.next_id, &id)) return 0;
+    _sapp_tc_window_t* w = new (std::nothrow) _sapp_tc_window_t();
+    if (!w) return 0;
+    w->win_id = id;
+    w->desc = d->window;
+    w->draw_while_hidden = d->draw_while_hidden;
+    w->trust_hidden_signals = _sapp_tc_win32_trust_hidden_signals();
+    w->swap_interval = d->swap_interval;
+    w->title_limit = d->title_limit;
+    w->color_format = d->color_format;
+    w->depth_format = d->depth_format;
+    w->color_fmt = d->color_format == SAPP_PIXELFORMAT_RGB10A2 ?
+        DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_B8G8R8A8_UNORM;
+    w->window_scale = w->dpi_scale = w->mouse_scale = 1.0f;
+    w->refresh_period = 1.0 / 60.0;
+    const char* title = d->window.title ? d->window.title : "TrussC";
+    const size_t capacity = w->title_limit ? w->title_limit : strlen(title) + 1;
+    w->title = (char*)calloc(capacity, 1);
+    if (!w->title) { _sapp_tc_win32_unwind(w); return 0; }
+    // Bound (compatibility): launch title storage retains the legacy 255-byte prefix and terminator.
+    strncpy(w->title, title, capacity - 1);
+    w->desc.title = w->title;
+    // Bound (conversion): native titles retain the 256-wide-character conversion buffer; overflow fails conversion.
+    WCHAR wide[256];
+    _sapp_tc_win32_utf8_to_wide(w->title, wide, 256);
+    const DWORD style = w->desc.borderless ? WS_POPUP | WS_SYSMENU :
+        WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU |
+        WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SIZEBOX;
+    const DWORD ex_style = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
+    if (!_sapp_tc_win32_create_native_window(w, wide, style, ex_style, w->desc.x, w->desc.y)) {
+        _sapp_tc_win32_unwind(w);
+        return 0;
+    }
+    // Stage startup geometry while unpublished, retaining the covered first
+    // launch and sizing the initial drawable before any event can escape.
+    if (d->fullscreen) _sapp_tc_win32_set_fullscreen(w, true, SWP_HIDEWINDOW);
+    if (!_sapp_tc_win32_initialize_dimensions(w) || !_sapp_tc_d3d11_create_swapchain(w)) {
+        _sapp_tc_win32_unwind(w);
+        return 0;
+    }
+    if (d->clear_on_create) _sapp_tc.app.device_context->ClearRenderTargetView(w->rtv, d->clear_color);
+    _sapp_tc.windows[slot] = w;
+    w->ready = true;
+    ShowWindow(w->hwnd, SW_SHOW);
+    // Showing may synchronously deliver a client event that destroys this creation.
+    if (_sapp_tc_lookup(sapp_window{ id }) != w) return 0;
+    DragAcceptFiles(w->hwnd, TRUE);
+    return w;
 }
 
 static bool _sapp_tc_win32_create_main_window(void) {
     const sapp_desc* d = &_sapp_tc.app.desc;
-    int slot = -1;
-    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
-        if (_sapp_tc.windows[i] == 0) { slot = i; break; }
-    }
-    if (slot < 0) {
-        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
-                     "error: ", "Main window creation failed: no free window slot");
-        return false;
-    }
-
-    _sapp_tc_window_t* w = new _sapp_tc_window_t();
-    w->win_id = ++_sapp_tc.next_id;
+    _sapp_tc_native_desc native = {};
+    native.window = _sapp_tc_normalize_main_window(d);
+    native.window.event_cb = _sapp_tc_main_event_tramp;
+    native.window.tick_cb = _sapp_tc_main_tick_tramp;
+    native.swap_interval = d->swap_interval;
+    native.fullscreen = d->fullscreen;
+    native.draw_while_hidden = d->_tc_draw_while_hidden > 0;
+    native.title_limit = 256;
+    native.color_format = SAPP_PIXELFORMAT_RGB10A2;
+    native.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL;
+    _sapp_tc_window_t* w = _sapp_tc_win32_create_window(&native);
+    if (!w) return false;
     w->is_main = true;
-    w->color_fmt = DXGI_FORMAT_R10G10B10A2_UNORM;   /* TrussC 10-bit output */
-    w->window_scale = w->dpi_scale = w->mouse_scale = 1.0f;
-    w->refresh_period = 1.0 / 60.0;
-
-    /* per-window desc: the app callbacks are reached via the trampoline */
-    w->desc.width = d->width;
-    w->desc.height = d->height;
-    w->desc._tc_pixel_width = d->_tc_pixel_width;
-    w->desc._tc_pixel_height = d->_tc_pixel_height;
-    w->desc.sample_count = d->sample_count;
-    w->desc.no_high_dpi = !d->high_dpi;
-    w->desc.event_cb = _sapp_tc_main_event_tramp;
-
-    const DWORD style = WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU |
-                        WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SIZEBOX;
-    const DWORD ex_style = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
-    /* width/height 0: let the OS pick (CW_USEDEFAULT, upstream parity) */
-    const bool use_default_size = (d->width <= 0) || (d->height <= 0);
-    if (!_sapp_tc_win32_create_native_window(w, _sapp_tc.app.window_title_wide,
-            style, ex_style, -1, -1, use_default_size)) {
-        delete w;
-        return false;
-    }
-    _sapp_tc.windows[slot] = w;
+    w->events_enabled = _sapp_tc_app_events_enabled;
     _sapp_tc.app.main = w;
-    w->ready = true;
-    _sapp_tc_win32_update_dimensions(w);    /* silent startup sizing (no RESIZED) */
-    if (d->fullscreen) {
-        _sapp_tc_win32_set_fullscreen(true, SWP_HIDEWINDOW);
-        _sapp_tc_win32_update_dimensions(w);
-    }
-    ShowWindow(w->hwnd, SW_SHOW);
-    /* drop target is always registered; the handler gates on enable_dragndrop */
-    DragAcceptFiles(w->hwnd, TRUE);
-    if (!_sapp_tc_d3d11_create_swapchain(w)) {
-        return false;
-    }
+    _sapp_tc.app.desc.window_title = w->title;
     _sapp_tc.app.valid = true;
     return true;
 }
@@ -7970,7 +7997,7 @@ static void _sapp_tc_win32_run_loop(void) {
         for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
             if (_sapp_tc_win32_window_due(w)) {
-                _sapp_tc_win32_tick(w, false);
+                _sapp_tc_win32_tick(w);
             }
         }
         /* sapp_window_request_close(): post WM_CLOSE to that window, so the
@@ -7978,7 +8005,7 @@ static void _sapp_tc_win32_run_loop(void) {
            on its close button, outside every tick */
         for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
-            if (!w || w->is_main || !w->close_requested) continue;
+            if (!w || !w->close_requested) continue;
             w->close_requested = false;
             if (w->hwnd) PostMessageW(w->hwnd, WM_CLOSE, 0, 0);
         }
@@ -7996,71 +8023,28 @@ extern "C" {
 
 sapp_window sapp_create_window(const sapp_window_desc* desc) {
     sapp_window invalid = { 0 };
-    if (!desc) return invalid;
-    if (!_sapp_tc.app.valid || !_sapp_tc.app.device) return invalid;
-    _sapp_tc_init_keytable();
-
-    int slot = -1;
-    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
-        if (_sapp_tc.windows[i] == 0) { slot = i; break; }
-    }
-    if (slot < 0) return invalid;
-
-    _sapp_tc_window_t* w = new _sapp_tc_window_t();
-    w->win_id = ++_sapp_tc.next_id;
-    w->desc = *desc;
-    if (w->desc.width <= 0) w->desc.width = 640;
-    if (w->desc.height <= 0) w->desc.height = 480;
-    if (w->desc.sample_count <= 0) w->desc.sample_count = 1;
-    w->color_fmt = DXGI_FORMAT_B8G8R8A8_UNORM;  /* secondary windows are BGRA8 (mac parity) */
-    w->window_scale = w->dpi_scale = w->mouse_scale = 1.0f;
-    w->refresh_period = 1.0 / 60.0;
-
-    DWORD style;
-    if (w->desc.borderless) {
-        style = WS_POPUP | WS_SYSMENU;
-    } else {
-        style = WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU |
-                WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SIZEBOX;
-    }
-    const DWORD ex_style = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
-    WCHAR title[256];
-    _sapp_tc_win32_utf8_to_wide(w->desc.title ? w->desc.title : "TrussC", title, 256);
-    const int px = (desc->x >= 0) ? desc->x : 120;
-    const int py = (desc->y >= 0) ? desc->y : 120;
-    if (!_sapp_tc_win32_create_native_window(w, title, style, ex_style, px, py, false)) {
-        delete w;
-        return invalid;
-    }
-    w->ready = true;
-    _sapp_tc_win32_update_dimensions(w);
-    ShowWindow(w->hwnd, SW_SHOW);
-    DragAcceptFiles(w->hwnd, TRUE);
-    if (!_sapp_tc_d3d11_create_swapchain(w)) {
-        _sapp_tc_win32_destroy_window_resources(w);
-        delete w;
-        return invalid;
-    }
-    _sapp_tc.windows[slot] = w;
-    sapp_window handle = { w->win_id };
-    return handle;
+    if (!desc || !_sapp_tc.app.valid || !_sapp_tc.app.device) return invalid;
+    _sapp_tc_native_desc native = {};
+    native.window = _sapp_tc_normalize_window(desc);
+    native.window.x = desc->x >= 0 ? desc->x : 120;
+    native.window.y = desc->y >= 0 ? desc->y : 120;
+    native.swap_interval = 1;
+    native.color_format = SAPP_PIXELFORMAT_BGRA8;
+    native.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL;
+    _sapp_tc_window_t* w = _sapp_tc_win32_create_window(&native);
+    return w ? sapp_window{w->win_id} : invalid;
 }
 
 void sapp_destroy_window(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    if (!w || w->is_main) return;   /* the main window is owned by sapp_run */
-    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
-        if (_sapp_tc.windows[i] == w) { _sapp_tc.windows[i] = 0; break; }
-    }
-    w->desc.close_cb = 0;
-    _sapp_tc_win32_destroy_window_resources(w);
-    delete w;
+    if (!w) return;
+    if (w->is_main) { w->close_requested = true; return; }
+    _sapp_tc_win32_unwind(w);
 }
 
 void sapp_window_request_close(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    if (!w || w->is_main) return;   /* the main window: sapp_request_quit() */
-    w->close_requested = true;
+    if (w) w->close_requested = true;
 }
 
 bool sapp_window_valid(sapp_window win) {
@@ -8098,14 +8082,33 @@ int sapp_window_sample_count(sapp_window win) {
 }
 
 void sapp_tc_window_skip_present(sapp_window win) {
-    _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    if (w && !w->is_main) w->skip_present = true;
+    _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+    if (w) w->skip_present = true;
+}
+
+void sapp_tc_window_draw_while_hidden(sapp_window win, bool allow) {
+    _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+    if (w) w->draw_while_hidden = allow;
+}
+
+uint32_t sapp_tc_window_fullscreen_phase(sapp_window win) {
+    _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+    return (uint32_t)(w ? w->fullscreen_state.phase : _sapp_tc_fullscreen_phase::Windowed);
+}
+
+void sapp_tc_window_set_fullscreen(sapp_window win, bool full) {
+    _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+    _sapp_tc_win32_set_fullscreen(w, full, SWP_SHOWWINDOW);
+}
+
+void sapp_tc_window_toggle_fullscreen(sapp_window win) {
+    _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+    if (w) _sapp_tc_win32_set_fullscreen(w, !w->fullscreen, SWP_SHOWWINDOW);
 }
 
 bool sapp_window_occluded(sapp_window win) {
-    /* both flags gate the secondary tick (see the declaration) */
     _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
-    return w ? (w->occluded || w->iconified) : false;
+    return w ? _sapp_tc_native_hidden(w) : false;
 }
 
 void sapp_window_set_title(sapp_window win, const char* title) {
@@ -8160,6 +8163,8 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { (void)win; return 0; }
 
 void sapp_run(const sapp_desc* desc) {
     if (!desc) return;
+    // Keep creation identities across repeated runs; reset only process services.
+    memset(&_sapp_tc.app, 0, sizeof(_sapp_tc.app));
     _sapp_tc.app.desc = *desc;
     sapp_desc* d = &_sapp_tc.app.desc;
     if (d->sample_count <= 0) d->sample_count = 1;
@@ -8167,12 +8172,8 @@ void sapp_run(const sapp_desc* desc) {
     if (d->clipboard_size <= 0) d->clipboard_size = 8192;
     if (d->max_dropped_files <= 0) d->max_dropped_files = 1;
     if (d->max_dropped_file_path_length <= 0) d->max_dropped_file_path_length = 2048;
-    strncpy(_sapp_tc.app.window_title, d->window_title ? d->window_title : "sokol",
-            sizeof(_sapp_tc.app.window_title) - 1);
-    d->window_title = _sapp_tc.app.window_title;
-    _sapp_tc_win32_utf8_to_wide(_sapp_tc.app.window_title,
-        _sapp_tc.app.window_title_wide,
-        (int)(sizeof(_sapp_tc.app.window_title_wide) / sizeof(WCHAR)));
+    if (d->_tc_draw_while_hidden == 0) d->_tc_draw_while_hidden = 1;
+
     if (d->enable_clipboard) {
         _sapp_tc.app.clipboard_enabled = true;
         _sapp_tc.app.clipboard_size = d->clipboard_size;
@@ -8204,23 +8205,10 @@ void sapp_run(const sapp_desc* desc) {
     /* user cleanup runs BEFORE any GPU/window teardown (the app shuts down
        sokol_gfx here, which still needs the device) */
     _sapp_tc_win32_cleanup();
-    /* destroy any windows the app left open (secondary first, then main) */
-    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
-        _sapp_tc_window_t* w = _sapp_tc.windows[i];
-        if (!w || w->is_main) continue;
-        _sapp_tc.windows[i] = 0;
-        _sapp_tc_win32_destroy_window_resources(w);
-        delete w;
-    }
-    if (_sapp_tc.app.main) {
-        _sapp_tc_window_t* w = _sapp_tc.app.main;
-        for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
-            if (_sapp_tc.windows[i] == w) { _sapp_tc.windows[i] = 0; break; }
-        }
-        _sapp_tc.app.main = 0;
-        _sapp_tc_win32_destroy_window_resources(w);
-        delete w;
-    }
+    for (int i = _SAPP_TC_MAX_WINDOWS - 1; i >= 0; --i)
+        _sapp_tc_win32_unwind(_sapp_tc.windows[i]);
+    _sapp_tc.app.desc.window_title = 0;
+
     _SAPP_TC_RELEASE(_sapp_tc.app.device_context);
     _SAPP_TC_RELEASE(_sapp_tc.app.device);
     if (_sapp_tc.wndclass_registered) {
@@ -8263,12 +8251,13 @@ float sapp_heightf(void) {
 }
 
 int sapp_sample_count(void) {
-    return _sapp_tc.app.desc.sample_count > 0 ? _sapp_tc.app.desc.sample_count : 1;
+    const _sapp_tc_window_t* w = _sapp_tc.app.main;
+    return w ? w->desc.sample_count : (_sapp_tc.app.desc.sample_count > 0 ? _sapp_tc.app.desc.sample_count : 1);
 }
 
 bool sapp_high_dpi(void) {
     _sapp_tc_window_t* w = _sapp_tc.app.main;
-    return _sapp_tc.app.desc.high_dpi && w && (w->dpi_scale >= 1.5f);
+    return w && !w->desc.no_high_dpi && (w->dpi_scale >= 1.5f);
 }
 
 float sapp_dpi_scale(void) {
@@ -8277,7 +8266,7 @@ float sapp_dpi_scale(void) {
 }
 
 uint64_t sapp_frame_count(void) {
-    return _sapp_tc.app.frame_count;
+    return _sapp_tc.app.main ? _sapp_tc.app.main->frame_count : 0;
 }
 
 double sapp_frame_duration(void) {
@@ -8305,7 +8294,7 @@ void sapp_consume_event(void) {
 void sapp_skip_present(void) {
     /* one-shot; HONORED on D3D11 (TrussC patch: event-driven present
        suppression -- keeps the last image on screen, prevents flicker) */
-    _sapp_tc.app.skip_present = true;
+    sapp_tc_window_skip_present(sapp_window{0});
 }
 
 void sapp_show_keyboard(bool show) {
@@ -8420,25 +8409,26 @@ const char* sapp_get_clipboard_string(void) {
 }
 
 void sapp_set_window_title(const char* str) {
-    if (!str) return;
-    strncpy(_sapp_tc.app.window_title, str, sizeof(_sapp_tc.app.window_title) - 1);
-    _sapp_tc_win32_utf8_to_wide(_sapp_tc.app.window_title,
-        _sapp_tc.app.window_title_wide,
-        (int)(sizeof(_sapp_tc.app.window_title_wide) / sizeof(WCHAR)));
     _sapp_tc_window_t* w = _sapp_tc.app.main;
-    if (w && w->hwnd) {
-        SetWindowTextW(w->hwnd, _sapp_tc.app.window_title_wide);
-    }
+    if (!str || !w || !w->title) return;
+    // Bound (compatibility): legacy updates keep the 255-byte prefix in stable borrowed storage.
+    strncpy(w->title, str, w->title_limit - 1);
+    w->title[w->title_limit - 1] = 0;
+    WCHAR wide[256];
+    _sapp_tc_win32_utf8_to_wide(w->title, wide, 256);
+    if (w->hwnd) SetWindowTextW(w->hwnd, wide);
 }
 
 bool sapp_is_fullscreen(void) {
-    return _sapp_tc.app.fullscreen;
+    return _sapp_tc.app.main && _sapp_tc.app.main->fullscreen;
 }
 
 void sapp_toggle_fullscreen(void) {
-    if (!_sapp_tc.app.main) return;
-    _sapp_tc_win32_set_fullscreen(!_sapp_tc.app.fullscreen, SWP_SHOWWINDOW);
+    sapp_tc_window_toggle_fullscreen(sapp_window{0});
 }
+
+sapp_desc sapp_query_desc(void) { return _sapp_tc.app.desc; }
+void* sapp_userdata(void) { return _sapp_tc.app.desc.user_data; }
 
 int sapp_get_num_dropped_files(void) {
     return _sapp_tc.app.drop_enabled ? _sapp_tc.app.drop_num_files : 0;
@@ -8451,11 +8441,11 @@ const char* sapp_get_dropped_file_path(int index) {
 }
 
 sapp_pixel_format sapp_color_format(void) {
-    return SAPP_PIXELFORMAT_RGB10A2;    /* TrussC 10-bit output on D3D11 */
+    return _sapp_tc.app.main ? _sapp_tc.app.main->color_format : SAPP_PIXELFORMAT_RGB10A2;
 }
 
 sapp_pixel_format sapp_depth_format(void) {
-    return SAPP_PIXELFORMAT_DEPTH_STENCIL;
+    return _sapp_tc.app.main ? _sapp_tc.app.main->depth_format : SAPP_PIXELFORMAT_DEPTH_STENCIL;
 }
 
 const void* sapp_win32_get_hwnd(void) {

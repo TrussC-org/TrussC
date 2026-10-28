@@ -170,7 +170,7 @@ struct CreationApp : SizeEvidence {
             } else {
                 check("secondary App receives creation size", app->getWidth() == int(secondWidth / scale) && app->getHeight() == int(secondHeight / scale));
             }
-#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
             // Exercise real backend intent and public admission on both windows.
             auto main = getWindow();
             for (auto* target : {main, secondary.get()}) {
