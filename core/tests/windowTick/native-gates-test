@@ -7,7 +7,7 @@
 # Pass --mutations to check private-header regressions and missing markers too.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
-scratch=$(mktemp -d "${TMPDIR:-/tmp}/tc-an2a-4e-native-gates.XXXXXX")
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/tc-an2a-4f-native-gates.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
 python3 - "$root" "$scratch" "$@" <<'PY'
 from pathlib import Path
@@ -120,6 +120,18 @@ mac_observe = mac_extract('static void _sapp_tc_mac_observe(_sapp_tc_window_t* w
 mac_drawable = mac_extract('static id<CAMetalDrawable> _sapp_tc_mac_drawable(', (
     ('id<CAMetalDrawable>', 'int'), ('[w->layer nextDrawable]', 'next_drawable(w->layer)'),
     ('return nil;', 'return 0;'), ('== nil', '== 0'),))
+mac_main_drawable = mac_extract('static id<CAMetalDrawable> _sapp_tc_main_next_drawable(void) {', (
+    ('id<CAMetalDrawable>', 'int'), ('[w->layer nextDrawable]', 'next_drawable(w->layer)'),
+    ('return nil;', 'return 0;'),))
+mac_dimensions = mac_extract('static bool _sapp_tc_mac_update_dimensions(_sapp_tc_window_t* w) {', (
+    ('w->view.bounds.size', 'w->view->bounds.size'),
+    ('w->layer.', 'w->layer->'),))
+mac_resize = mac_extract('- (void)windowDidResize:(NSNotification*)n', (
+    ('- (void)windowDidResize:(NSNotification*)n', 'void window_did_resize(View* self, void* n)'),
+    ('self.w', 'self->w'),))
+mac_screen_change = mac_extract('- (void)windowDidChangeScreen:(NSNotification*)n', (
+    ('- (void)windowDidChangeScreen:(NSNotification*)n', 'void window_did_change_screen(View* self, void* n)'),
+    ('self.w', 'self->w'),))
 mac_swap = mac_extract('static void _sapp_tc_mac_swap(', (('= nil', '= 0'),))
 mac_tick_body = mac_extract('static void _sapp_tc_mac_tick_body(_sapp_tc_window_t* w, CADisplayLink* link) {', (
     ('@autoreleasepool', ''), ('link.timestamp', 'link->timestamp'),
@@ -291,15 +303,30 @@ int& appExitCode() { return app_code; }
 ''' + session_flag + r'''
 }
 constexpr unsigned NSWindowOcclusionStateVisible=1;
-struct NSWindow { unsigned occlusionState=1; bool miniaturized=false; };
+struct NSWindow { unsigned occlusionState=1; bool miniaturized=false; double backingScaleFactor=1; };
 struct CADisplayLink { double timestamp=10, targetTimestamp=10.017; };
 struct NSTimer {};
 struct Native;
-struct View { Native* w=nullptr; };
+using CGFloat = double;
+struct NSSize { CGFloat width=640, height=480; };
+NSSize CGSizeMake(CGFloat width, CGFloat height) { return {width,height}; }
+// Count property assignments even when the assigned value is unchanged.
+struct LayerScale {
+    CGFloat value=1;
+    int writes=0;
+    void operator=(CGFloat scale) { value=scale; ++writes; }
+};
+struct LayerSize : NSSize {
+    int writes=0;
+    void operator=(NSSize size) { width=size.width; height=size.height; ++writes; }
+};
+struct Layer { LayerScale contentsScale; LayerSize drawableSize; };
+struct View { Native* w=nullptr; struct { NSSize size; } bounds; Layer layer; };
 struct Native : ::Native {
     NSWindow* window=nullptr;
     View* view=nullptr;
-    void* layer=nullptr;
+    Layer* layer=nullptr;
+    float dpi_scale=1;
     NSTimer* fallback_timer=nullptr;
     CADisplayLink* link=nullptr;
     int frame_drawable=0;
@@ -329,6 +356,7 @@ struct {
 } _sapp_tc;
 Native* target;
 int consulted, updates, dimensions, acquired, timing, reconciled, timers, installs, stops;
+int ensure_textures=0, texture_allocations=0;
 int closed, quit, errors, shown, ordered_out;
 int native_closes=0, close_callbacks=0, exit_requests=0, enqueued=0, passes=0, wakes=0;
 bool logger_allocation_fails=false, native_probe=false, terminate_probe=false;
@@ -369,7 +397,7 @@ void _sapp_tc_log(int*, int, uint32_t, int, const char*, const char*, const char
     if (logger_allocation_fails) throw std::bad_alloc();
 }
 static void _sapp_tc_mac_schedule_deferred();
-bool changed, skip_in_callback, reenter, dispose_in_callback;
+bool skip_in_callback, reenter, dispose_in_callback;
 bool probe_callbacks=false, probing=false, nest_event=false, request_deferred=false;
 int throw_kind=-1, destroy_at=0, creation_stage=0, probe_kind=-1;
 bool constructor_probe=false, notify_reconcile=false, expect_tick_guard=false;
@@ -408,7 +436,10 @@ void _sapp_tc_reconcile_fullscreen(Native* w) {
         _sapp_tc_send_type(w,SAPP_EVENTTYPE_RESIZED);
     }
 }
-bool _sapp_tc_mac_update_dimensions(Native*) { ++dimensions; return changed; }
+CGFloat _sapp_tc_mac_scale(Native* w) { ++dimensions; return w->window->backingScaleFactor; }
+// The Metal allocator is a seam; retain its production caller and count work.
+void _sapp_tc_ensure_swapchain_textures(Native*) { ++ensure_textures; ++texture_allocations; }
+''' + mac_dimensions + mac_resize + mac_screen_change + r'''
 static void _sapp_tc_mac_tick(Native*,CADisplayLink*);
 static void _sapp_tc_mac_source_tick(Native*,CADisplayLink*,bool);
 void link_tick(View*,CADisplayLink*);
@@ -442,7 +473,7 @@ BOOL native_perform_close(View* delegate) {
 // Legacy process-quit seam used by the round-2 tests; round-3 native requests
 // enter the real translated window/application delegates above.
 void perform_close(NSWindow*) { ++quit; _sapp_tc.app.quit_requested=_sapp_tc.app.quit_ordered=false; }
-''' + extract('static bool _sapp_tc_mac_deferred_pending(void) {') + mac_deferred + mac_schedule + mac_source + extract('static void _sapp_tc_mac_update_suspension(') + mac_observe + mac_drawable + mac_swap + mac_tick_scope + mac_tick_body + extract('static bool _sapp_tc_mac_tick_blocked(') + extract('static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {') + extract('static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {') + mac_link + mac_fallback + mac_minimize + mac_restore + r'''
+''' + extract('static bool _sapp_tc_mac_deferred_pending(void) {') + mac_deferred + mac_schedule + mac_source + extract('static void _sapp_tc_mac_update_suspension(') + mac_observe + mac_drawable + mac_main_drawable + mac_swap + mac_tick_scope + mac_tick_body + extract('static bool _sapp_tc_mac_tick_blocked(') + extract('static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {') + extract('static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {') + mac_link + mac_fallback + mac_minimize + mac_restore + r'''
 void probe_closed_window(Native* w) {
     const int ticks=consulted, samples=timing, sizes=dimensions, draws=acquired, reconciles=reconciled;
     const int event_count=events.size(), timer_count=timers, installed=installs;
@@ -582,12 +613,13 @@ void callback(sapp_window h,void* user) {
     if (dispose_in_callback) dispose(w);
 }
 void reset(Native& w,NSWindow& window,View& view,bool role) {
-    w=Native{}; window=NSWindow{}; view.w=&w; target=&w;
+    w=Native{}; window=NSWindow{}; view=View{}; view.w=&w; target=&w;
     _sapp_tc={}; _sapp_tc.windows[0]=&w;
-    w.is_main=role; w.win_id=role?1:2; w.window=&window; w.view=&view; w.layer=&view;
+    w.is_main=role; w.win_id=role?1:2; w.window=&window; w.view=&view; w.layer=&view.layer;
     w.desc={callback,&w};
     w.desc.event_cb=event_callback; w.desc.close_cb=close_callback;
     consulted=updates=dimensions=acquired=timing=reconciled=timers=installs=stops=0;
+    ensure_textures=texture_allocations=0;
     closed=quit=errors=shown=ordered_out=0;
     native_closes=close_callbacks=exit_requests=enqueued=passes=wakes=0; run_loop.clear();
     logger_allocation_fails=native_probe=terminate_probe=native_probing=terminate_replayed_busy=false;
@@ -597,13 +629,13 @@ void reset(Native& w,NSWindow& window,View& view,bool role) {
     direct_target=nullptr; session_pipe=-1;
     close_on_event=-1; request_before_direct=request_after_direct=false;
     trussc::internal::sessionEndExit()=false;
-    changed=skip_in_callback=reenter=dispose_in_callback=false; events.clear();
+    skip_in_callback=reenter=dispose_in_callback=false; events.clear();
     probe_callbacks=probing=nest_event=request_deferred=false;
     throw_kind=probe_kind=-1; destroy_at=creation_stage=0;
     constructor_probe=notify_reconcile=expect_tick_guard=false; callback_target=other=creation_record=nullptr;
 }
 void peer_setup(Native& peer,NSWindow& window,View& view) {
-    peer=Native{}; view.w=&peer; peer.win_id=3; peer.window=&window; peer.view=&view; peer.layer=&view;
+    peer=Native{}; view=View{}; view.w=&peer; peer.win_id=3; peer.window=&window; peer.view=&view; peer.layer=&view.layer;
     peer.desc={callback,&peer}; peer.desc.event_cb=event_callback; peer.desc.close_cb=close_callback;
     _sapp_tc.windows[1]=&peer; other=&peer;
 }
@@ -877,7 +909,7 @@ void run() {
             _sapp_tc_mac_tick(&w,&link);
             check("macOS incomplete tick preserves skip/timing", w.skip_present && w.frame_count==0 && consulted==0 && timing==0 && reconciled==0);
         }
-        reset(w,window,view,role); changed=true; _sapp_tc_mac_tick(&w,nil);
+        reset(w,window,view,role); ++view.bounds.size.width; _sapp_tc_mac_tick(&w,nil);
         check("macOS admitted resize event", events==std::vector<int>{SAPP_EVENTTYPE_RESIZED} && consulted==1);
         reset(w,window,view,role); dispose_in_callback=true; _sapp_tc_mac_tick(&w,nil);
         check("macOS callback disposal rechecks identity", target==nullptr && w.frame_count==0 && _sapp_tc.callbacks_active==0);
@@ -941,7 +973,7 @@ void run() {
         if (context==0) _sapp_tc_send_type(&w,SAPP_EVENTTYPE_RESIZED);
         if (context==1) { window.occlusionState=0; link_tick(&view,&link); }
         if (context==2) _sapp_tc_mac_tick(&w,nil); // reconciliation event
-        if (context==3) { changed=true; _sapp_tc_mac_tick(&w,nil); }
+        if (context==3) { ++view.bounds.size.width; _sapp_tc_mac_tick(&w,nil); }
         if (context==4) _sapp_tc_mac_tick(&w,nil);
         if (context==5) _sapp_tc_mac_closed(&w);
         check("macOS outer callback restores all callback/tick state", w.callback_depth==0 && peer.callback_depth==0 && _sapp_tc.callbacks_active==0 && !w.in_tick && !peer.in_tick);
@@ -1127,7 +1159,7 @@ void run() {
     for (int boundary : {0,1,2}) {
         reset(w,window,view,false);
         close_on_event=boundary==1?SAPP_EVENTTYPE_RESUMED:SAPP_EVENTTYPE_RESIZED;
-        changed=boundary==0;
+        if (boundary==0) ++view.bounds.size.width;
         if (boundary==1) {
             w.occluded=w.suspended_sent=w.link_suspended=true;
             link_tick(&view,&link);
@@ -1147,7 +1179,7 @@ void run() {
             native_closes==1 && close_callbacks==1 && !w.ready && !w.closed_pending && !w.in_tick);
     }
     for (bool later_request : {false,true}) {
-        reset(w,window,view,false); changed=true; close_on_event=SAPP_EVENTTYPE_RESIZED;
+        reset(w,window,view,false); ++view.bounds.size.width; close_on_event=SAPP_EVENTTYPE_RESIZED;
         request_before_direct=true; request_after_direct=later_request;
         _sapp_tc_mac_tick(&w,nil);
         drain_run_loop(); _sapp_tc_mac_process_deferred(); drain_run_loop();
@@ -1217,6 +1249,69 @@ void run() {
         change_exit_registry=false; sessionEndExit()=false;
     }
     summary("macOS round 4e freeze / single snapshot", before, count);
+    before=failures; count=checks;
+    // Exercise the sole layer/texture writer directly and through both real
+    // delegates. Nonzero, changed sizes make a removed guard perform GPU work.
+    for (bool role : {false,true}) for (int path : {0,1,2}) {
+        reset(w,window,view,role);
+        window.backingScaleFactor=2; view.bounds.size={800,600};
+        auto update=[&] {
+            if (path==0) return _sapp_tc_mac_update_dimensions(&w);
+            if (path==1) window_did_resize(&view,nullptr);
+            else window_did_change_screen(&view,nullptr);
+            return false; // Delegates return void; only the direct call reports change.
+        };
+        trussc::internal::sessionEndExit()=true;
+        const bool frozen_result=update();
+        check(path==0?"macOS frozen dimensions return false without layer or texture work":
+              path==1?"macOS frozen resize delegate does no layer or texture work":
+                      "macOS frozen screen delegate does no layer or texture work",
+            !frozen_result && dimensions==0 && ensure_textures==0 && texture_allocations==0 &&
+            w.layer->contentsScale.writes==0 && w.layer->drawableSize.writes==0 &&
+            w.layer->contentsScale.value==1 && w.layer->drawableSize.width==640 &&
+            w.layer->drawableSize.height==480 && w.dpi_scale==1 &&
+            w.fb_width==640 && w.fb_height==480 && w.win_width==640 && w.win_height==480 && events.empty());
+        trussc::internal::sessionEndExit()=false;
+        const bool thawed_result=update();
+        check(path==0?"macOS thawed dimensions publish and allocate":
+              path==1?"macOS thawed resize delegate publishes and allocates":
+                      "macOS thawed screen delegate publishes and allocates",
+            thawed_result==(path==0) && dimensions==1 && ensure_textures==1 && texture_allocations==1 &&
+            w.layer->contentsScale.writes==1 && w.layer->drawableSize.writes==1 &&
+            w.layer->contentsScale.value==2 && w.layer->drawableSize.width==1600 &&
+            w.layer->drawableSize.height==1200 && w.dpi_scale==2 &&
+            w.fb_width==1600 && w.fb_height==1200 && w.win_width==800 && w.win_height==600 &&
+            events==(path==0?std::vector<int>{}:std::vector<int>{SAPP_EVENTTYPE_RESIZED}));
+    }
+    // A session end interrupts an already admitted main or secondary tick.
+    // Test both an empty drawable cache and a drawable acquired before freeze.
+    for (bool role : {false,true}) for (int cached : {0,7}) {
+        reset(w,window,view,role); w.in_tick=w.draw_admitted=true; w.frame_drawable=cached;
+        if (role) _sapp_tc.app.main=&w;
+        trussc::internal::sessionEndExit()=true;
+        check("macOS frozen admitted tick rejects drawable for either role",
+            _sapp_tc_mac_drawable(&w)==0 && acquired==0 && w.frame_drawable==cached);
+        trussc::internal::sessionEndExit()=false;
+        const int expected=cached?cached:1;
+        check("macOS thawed admitted tick acquires or reuses drawable for either role",
+            _sapp_tc_mac_drawable(&w)==expected && acquired==int(!cached) &&
+            _sapp_tc_mac_drawable(&w)==expected && acquired==int(!cached));
+    }
+    // Outside a tick the legacy main API bypasses the per-window accessor;
+    // its own frozen gate must prevent nextDrawable independently.
+    for (bool in_tick : {false,true}) {
+        reset(w,window,view,true); _sapp_tc.app.main=&w;
+        w.in_tick=in_tick; w.draw_admitted=true;
+        trussc::internal::sessionEndExit()=true;
+        check("macOS frozen main drawable does not acquire",
+            _sapp_tc_main_next_drawable()==0 && acquired==0 && w.frame_drawable==0);
+        trussc::internal::sessionEndExit()=false;
+        check("macOS thawed main drawable acquires",
+            _sapp_tc_main_next_drawable()==1 && acquired==1);
+        check("macOS thawed main drawable follows tick cache policy",
+            _sapp_tc_main_next_drawable()==1 && acquired==(in_tick?1:2));
+    }
+    summary("macOS round 4f frozen GPU / delegates / admitted drawable", before, count);
 }
 }
 namespace win {
@@ -1695,6 +1790,15 @@ if '--mutations' in sys.argv[3:]:
         'terminate': (should_terminate, 'if (_sapp_tc_mac_frozen()) return NSTerminateCancel;', '',
             'macOS frozen applicationShouldTerminate is blocked'),
         'creation': (ctor, 'if (_sapp_tc_mac_frozen())', 'if (false)', 'macOS frozen native creation refuses before allocation'),
+        'dimensions': ('static bool _sapp_tc_mac_update_dimensions(_sapp_tc_window_t* w) {',
+            'if (_sapp_tc_mac_frozen()) return false;', '',
+            'macOS frozen dimensions return false without layer or texture work'),
+        'drawable': ('static id<CAMetalDrawable> _sapp_tc_mac_drawable(',
+            'if (_sapp_tc_mac_frozen()) return nil;', '',
+            'macOS frozen admitted tick rejects drawable for either role'),
+        'main-drawable': ('static id<CAMetalDrawable> _sapp_tc_main_next_drawable(void) {',
+            'if (_sapp_tc_mac_frozen()) return nil;', '',
+            'macOS frozen main drawable does not acquire'),
     }
     freeze_mutants = {'mac-frozen-'+name: (change(marker, old, new), label)
                       for name, (marker, old, new, label) in freeze_mutants.items()}
