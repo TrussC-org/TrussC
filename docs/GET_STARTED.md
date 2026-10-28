@@ -29,7 +29,7 @@ You can ask in plain words, including what you want to make, not only API names.
 
 This is a beta service, so it can be slow or unavailable at busy times.
 
-To improve search, queries are logged, kept for about six months and then deleted. IP addresses are stored only as salted hashes, never as they are. Search queries are sent to Jev (typesafe.ai) to pick the relevant docs; IP addresses are not sent. For the chat assistant on trussc.org, the answers are logged too, and the conversation is also processed by Anthropic (Claude). Don't include personal information, passwords or other secrets, or private code.
+To improve search, queries are logged, kept for about six months and then deleted. IP addresses are stored only as salted hashes, never as they are. Requests reach the server through Cloudflare, which sees IP addresses to deliver the connection. Search queries are sent to Jev (typesafe.ai) to pick the relevant docs; IP addresses are not sent. For the chat assistant on trussc.org, the answers are logged too, and the conversation is also processed by Anthropic (Claude). Don't include personal information, passwords or other secrets, or private code.
 
 ---
 
