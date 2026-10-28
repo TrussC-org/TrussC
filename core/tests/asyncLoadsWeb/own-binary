@@ -1,0 +1,2 @@
+Web link-time mocks replace fetch, timers and the clock without forwarding.
+Keep them in this executable: one entry per process cannot isolate --wrap.
