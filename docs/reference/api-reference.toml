@@ -41719,14 +41719,17 @@ description.ko = "알림 대화상자를 표시한다."
 details.en = '''
 - `alertDialog(title, message)` displays a heading or title and body text with an OK button on supported platforms, returning after dismissal.
 - Synchronous dialogs run on the calling thread and do not dispatch to the main thread. Call them from a main-thread app callback; the caller waits while the dialog is open.
+- While the dialog is open, the window whose code opened it does not update or draw. On Windows and macOS, other windows keep running. On Linux, the whole app waits. To keep drawing, use [`alertDialogAsync`](#alertDialogAsync).
 '''
 details.ja = '''
 - `alertDialog(title, message)` は、対応するプラットフォームで見出しまたはタイトルと本文を OK ボタン付きで表示し、閉じると戻ります。
 - 同期ダイアログは呼び出したスレッドで実行し、メインスレッドへの切り替えは行いません。メインスレッドのアプリコールバックから呼び出してください。ダイアログが開いている間、呼び出し元は待機します。
+- ダイアログが開いている間、呼び出したコードのウィンドウは更新も描画も行いません。Windows と macOS では、ほかのウィンドウは動き続けます。Linux では、アプリ全体が待機します。描画を続けるには、[`alertDialogAsync`](#alertDialogAsync) を使用してください。
 '''
 details.ko = '''
 - `alertDialog(title, message)`는 지원하는 플랫폼에서 제목과 본문을 OK 버튼과 함께 표시하며, 대화상자를 닫으면 반환합니다.
 - 동기 대화상자는 호출한 스레드에서 실행하며 메인 스레드로 전환하지 않습니다. 메인 스레드의 앱 콜백에서 호출해야 합니다. 대화상자가 열려 있는 동안 호출자는 대기합니다.
+- 대화상자가 열려 있는 동안 이를 연 코드의 윈도우는 갱신하거나 그리지 않습니다. Windows와 macOS에서는 다른 윈도우가 계속 실행됩니다. Linux에서는 앱 전체가 대기합니다. 계속 그리려면 [`alertDialogAsync`](#alertDialogAsync)를 사용합니다.
 '''
 related = ["alertDialogAsync", "confirmDialog"]
 platform_note.en = '''
@@ -42902,14 +42905,17 @@ description.ko = "확인 대화상자를 표시한다."
 details.en = '''
 - `confirmDialog(title, message)` displays a title and body text. Returns `true` for an affirmative choice and `false` for rejection or failure.
 - Threading and blocking behavior follow `alertDialog`.
+- While the dialog is open, the window whose code opened it does not update or draw. On Windows and macOS, other windows keep running. On Linux, the whole app waits. To keep drawing, use [`confirmDialogAsync`](#confirmDialogAsync).
 '''
 details.ja = '''
 - `confirmDialog(title, message)` はタイトルと本文を表示します。肯定の選択で `true`、否定の選択や失敗で `false` を返します。
 - スレッドと呼び出し元の待機の扱いは `alertDialog` を参照してください。
+- ダイアログが開いている間、呼び出したコードのウィンドウは更新も描画も行いません。Windows と macOS では、ほかのウィンドウは動き続けます。Linux では、アプリ全体が待機します。描画を続けるには、[`confirmDialogAsync`](#confirmDialogAsync) を使用してください。
 '''
 details.ko = '''
 - `confirmDialog(title, message)`는 제목과 본문을 표시합니다. 긍정 선택에는 `true`를, 부정 선택이나 실패에는 `false`를 반환합니다.
 - 스레드와 호출자의 대기 동작은 `alertDialog`에 설명되어 있습니다.
+- 대화상자가 열려 있는 동안 이를 연 코드의 윈도우는 갱신하거나 그리지 않습니다. Windows와 macOS에서는 다른 윈도우가 계속 실행됩니다. Linux에서는 앱 전체가 대기합니다. 계속 그리려면 [`confirmDialogAsync`](#confirmDialogAsync)를 사용합니다.
 '''
 related = ["confirmDialogAsync", "alertDialog"]
 platform_note.en = '''
@@ -48448,18 +48454,21 @@ details.en = '''
 - Selects one file, or one folder when `folderSelection` is `true`; this function does not read the selected file.
 - Returns `FileDialogResult` with `success = true`, the full `filePath`, and the final path component in `fileName` after selection. Cancellation or failure returns `success = false` with empty paths.
 - Threading and blocking behavior follow `alertDialog`.
+- While the dialog is open, the window whose code opened it does not update or draw. On Windows and macOS, other windows keep running. On Linux, the whole app waits. To keep drawing, use [`loadDialogAsync`](#loadDialogAsync).
 '''
 details.ja = '''
 - 引数は `title`、`message`、初期フォルダーを指定する `defaultPath`、`folderSelection` です。文字列とパスのデフォルトは空で、`folderSelection` のデフォルトは `false` です。
 - ファイルを 1 個選択します。`folderSelection` が `true` ならフォルダーを 1 個選択します。この関数自体は選択したファイルを読み込みません。
 - 選択後は、`success = true`、フルパスの `filePath`、パスの最後の要素を格納した `fileName` を持つ `FileDialogResult` を返します。キャンセルや失敗では `success = false` となり、パスは空になります。
 - スレッドと呼び出し元の待機の扱いは `alertDialog` を参照してください。
+- ダイアログが開いている間、呼び出したコードのウィンドウは更新も描画も行いません。Windows と macOS では、ほかのウィンドウは動き続けます。Linux では、アプリ全体が待機します。描画を続けるには、[`loadDialogAsync`](#loadDialogAsync) を使用してください。
 '''
 details.ko = '''
 - 인수는 `title`, `message`, 초기 폴더를 지정하는 `defaultPath`, `folderSelection`입니다. 문자열과 경로의 기본값은 비어 있으며, `folderSelection`의 기본값은 `false`입니다.
 - 파일 하나를 선택합니다. `folderSelection`이 `true`이면 폴더 하나를 선택합니다. 이 함수 자체는 선택한 파일을 읽지 않습니다.
 - 선택 후에는 `success = true`, 전체 경로인 `filePath`, 경로의 마지막 요소를 담은 `fileName`을 가진 `FileDialogResult`를 반환합니다. 취소하거나 실패하면 `success = false`이며 경로는 비어 있습니다.
 - 스레드와 호출자의 대기 동작은 `alertDialog`에 설명되어 있습니다.
+- 대화상자가 열려 있는 동안 이를 연 코드의 윈도우는 갱신하거나 그리지 않습니다. Windows와 macOS에서는 다른 윈도우가 계속 실행됩니다. Linux에서는 앱 전체가 대기합니다. 계속 그리려면 [`loadDialogAsync`](#loadDialogAsync)를 사용합니다.
 '''
 related = ["FileDialogResult", "loadDialogAsync", "saveDialog", "loadTextFile"]
 platform_note.en = '''
@@ -50353,18 +50362,21 @@ details.en = '''
 - Returns `FileDialogResult` with `success = true`, the full `filePath`, and `fileName` after selection. Cancellation or failure returns `success = false` with empty paths.
 - Selects a destination without writing the file. Check `success`, then save data to `filePath` with a file-writing API.
 - Threading and blocking behavior follow `alertDialog`.
+- While the dialog is open, the window whose code opened it does not update or draw. On Windows and macOS, other windows keep running. On Linux, the whole app waits. To keep drawing, use [`saveDialogAsync`](#saveDialogAsync).
 '''
 details.ja = '''
 - 引数は `title`、`message`、初期フォルダーを指定する `defaultPath`、初期ファイル名を指定する `defaultName` です。デフォルトはすべて空です。
 - 選択後は、`success = true`、フルパスの `filePath`、`fileName` を持つ `FileDialogResult` を返します。キャンセルや失敗では `success = false` となり、パスは空になります。
 - 保存先を選ぶだけで、ファイルには書き込みません。`success` を確認してから、ファイル書き込み API で `filePath` にデータを保存してください。
 - スレッドと呼び出し元の待機の扱いは `alertDialog` を参照してください。
+- ダイアログが開いている間、呼び出したコードのウィンドウは更新も描画も行いません。Windows と macOS では、ほかのウィンドウは動き続けます。Linux では、アプリ全体が待機します。描画を続けるには、[`saveDialogAsync`](#saveDialogAsync) を使用してください。
 '''
 details.ko = '''
 - 인수는 `title`, `message`, 초기 폴더를 지정하는 `defaultPath`, 초기 파일명을 지정하는 `defaultName`입니다. 기본값은 모두 비어 있습니다.
 - 선택 후에는 `success = true`, 전체 경로인 `filePath`, `fileName`을 가진 `FileDialogResult`를 반환합니다. 취소하거나 실패하면 `success = false`이며 경로는 비어 있습니다.
 - 저장할 위치만 선택하며 파일을 쓰지는 않습니다. `success`를 확인한 뒤 파일 쓰기 API로 `filePath`에 데이터를 저장해야 합니다.
 - 스레드와 호출자의 대기 동작은 `alertDialog`에 설명되어 있습니다.
+- 대화상자가 열려 있는 동안 이를 연 코드의 윈도우는 갱신하거나 그리지 않습니다. Windows와 macOS에서는 다른 윈도우가 계속 실행됩니다. Linux에서는 앱 전체가 대기합니다. 계속 그리려면 [`saveDialogAsync`](#saveDialogAsync)를 사용합니다.
 '''
 related = ["FileDialogResult", "saveDialogAsync", "loadDialog", "saveTextFile"]
 platform_note.en = '''
