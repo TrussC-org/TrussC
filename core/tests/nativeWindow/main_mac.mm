@@ -1,0 +1,576 @@
+// Complete macOS native constructor, tick, visibility and close paths with real
+// AppKit windows and Metal drawables. Only AppKit observations are injected.
+#define SOKOL_NO_ENTRY
+#define SOKOL_APP_TC_IMPL
+#include "sokol_app_tc.h"
+#include <objc/runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <unistd.h>
+#include <initializer_list>
+#include <string>
+namespace trussc::internal {
+void setExitReasonIfEmpty(const char*) {}
+void setExitReason(const char*) {}
+}
+namespace {
+int failures, callbacks, acquired, mainFrames, mainDrawables, showsChecked;
+int iconifiedEvents, restoredEvents, suspendedEvents, quitRequests;
+bool noHighDpi, coveredFirst, coveredReleased, didInitialize, mainDraws, allowQuit;
+bool forceTinyScale, failLayer, secondClosed;
+int launchHidden;
+uint32_t lastAcquired;
+sapp_window second;
+id<MTLCommandQueue> queue;
+NSTimer* driver;
+
+void check(const char* name, bool passed) {
+    std::printf("nativeWindow: %s: %s\n", name, passed ? "PASS" : "FAIL");
+    std::fflush(stdout);
+    if (!passed) ++failures;
+}
+
+void present(id<CAMetalDrawable> drawable) {
+    if (!drawable) return;
+    if (!queue) queue = [_sapp_tc.app.device newCommandQueue];
+    MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
+    pass.colorAttachments[0].texture = drawable.texture;
+    pass.colorAttachments[0].loadAction = MTLLoadActionClear;
+    pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+    id<MTLCommandBuffer> buffer = [queue commandBuffer];
+    [[buffer renderCommandEncoderWithDescriptor:pass] endEncoding];
+    [buffer presentDrawable:drawable];
+    [buffer commit];
+}
+
+// Probe client: count ticks and draw only when the native tick admits it.
+void probeTick(sapp_window win, void*) {
+    ++callbacks;
+    id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)sapp_window_metal_current_drawable(win);
+    if (drawable) { ++acquired; lastAcquired = win.id; present(drawable); }
+}
+
+void secondaryEvent(const sapp_event* event, sapp_window win, void*) {
+    _sapp_tc_window_t* w = _sapp_tc_lookup(win);
+    static bool first = true;
+    if (first) {
+        first = false;
+        check("secondary first event sees published dimensions", w && w->ready &&
+            event->framebuffer_width > 0 && event->window_width > 0);
+    }
+    if (event->type == SAPP_EVENTTYPE_ICONIFIED) ++iconifiedEvents;
+    if (event->type == SAPP_EVENTTYPE_RESTORED) ++restoredEvents;
+    if (event->type == SAPP_EVENTTYPE_SUSPENDED) ++suspendedEvents;
+}
+
+void secondaryClosed(sapp_window win, void*) {
+    secondClosed = true;
+    sapp_destroy_window(win);
+}
+
+float expectedScale(NSWindow* window) {
+    return noHighDpi ? 1.0f : (float)window.backingScaleFactor;
+}
+
+// AppKit seams: record show-time publication; inject scale, layer and occlusion.
+void (*realShow)(id, SEL, id);
+void recordShow(id self, SEL cmd, id sender) {
+    _sapp_tc_window_t* found = nullptr;
+    for (auto* w : _sapp_tc.windows) if (w && w->window == self) found = w;
+    if (!found) std::printf("nativeWindow: show of unregistered window \"%s\"\n", ((NSWindow*)self).title.UTF8String);
+    check("published window has initial scale and dimensions before it is shown", found && found->ready &&
+        found->fb_width > 0 && found->fb_height > 0 && found->win_width > 0 && found->win_height > 0 &&
+        found->dpi_scale == (found->desc.no_high_dpi ? 1.0f : (float)((NSWindow*)self).backingScaleFactor) &&
+        found->fb_width == (int)(found->win_width * found->dpi_scale) &&
+        found->fb_height == (int)(found->win_height * found->dpi_scale));
+    ++showsChecked;
+    realShow(self, cmd, sender);
+}
+CGFloat (*realScale)(id, SEL);
+CGFloat injectScale(id self, SEL cmd) { return forceTinyScale ? 1e-8 : realScale(self, cmd); }
+CAMetalLayer* (*realLayer)(id, SEL);
+CAMetalLayer* injectLayer(id self, SEL cmd) { return failLayer ? nil : realLayer(self, cmd); }
+NSWindowOcclusionState (*realOcclusion)(id, SEL);
+NSWindow* forceHidden;      // one window AppKit reports as not visible
+NSWindow* forceVisible;     // one window AppKit reports as visible
+NSWindowOcclusionState injectOcclusion(id self, SEL cmd) {
+    if (forceHidden && self == forceHidden) return 0;
+    if (forceVisible && self == forceVisible) return NSWindowOcclusionStateVisible;
+    return (coveredFirst && !coveredReleased) ? 0 : realOcclusion(self, cmd);
+}
+template<class F> void swap(Class cls, SEL sel, F replacement, F* original) {
+    Method m = class_getInstanceMethod(cls, sel);
+    *original = (F)method_getImplementation(m);
+    method_setImplementation(m, (IMP)replacement);
+}
+
+int liveNativeWindows() {
+    int count = 0;
+    for (NSWindow* window in NSApp.windows) if ([window.contentView isKindOfClass:[_sapp_tc_view class]]) ++count;
+    return count;
+}
+
+double now() { return CACurrentMediaTime(); }
+
+// Synchronous checks on the common constructor and tick, outside every tick.
+void synchronousChecks() {
+    _sapp_tc_window_t* first = _sapp_tc.app.main;
+    _sapp_tc_window_t* other = _sapp_tc_lookup(second);
+    // Hidden admission x trust x observation, both windows, on the common tick.
+    for (auto* target : {first, other}) {
+        auto saved = target->desc.tick_cb;
+        const bool savedAllow = target->draw_while_hidden;
+        target->desc.tick_cb = probeTick;
+        for (bool trust : {true, false}) for (bool iconified : {false, true}) for (bool allow : {false, true}) {
+            target->trust_hidden_signals = trust;
+            target->iconified = iconified; target->occluded = !iconified;
+            sapp_tc_window_draw_while_hidden({target->win_id}, allow);
+            callbacks = acquired = 0;
+            _sapp_tc_mac_tick(target, nil);
+            const bool shouldDraw = !trust || allow;
+            check("hidden drawing and trust are independent for either window", callbacks == 1 &&
+                acquired == int(shouldDraw) && (!acquired || lastAcquired == target->win_id));
+            check("all visibility readers use effective state", sapp_window_occluded({target->win_id}) == trust &&
+                _sapp_tc_native_iconified(target) == (trust && iconified) &&
+                _sapp_tc_native_occluded(target) == (trust && !iconified) &&
+                (target != first || sapp_window_occluded({0}) == trust));
+            auto* peer = target == first ? other : first;
+            check("hidden signal switch is per window", peer->trust_hidden_signals);
+        }
+        target->trust_hidden_signals = true;
+        target->desc.tick_cb = saved;
+        sapp_tc_window_draw_while_hidden({target->win_id}, savedAllow);
+        _sapp_tc_mac_observe(target);
+    }
+    check("drawable is not acquirable outside its tick", sapp_window_metal_current_drawable(second) == nullptr &&
+        sapp_window_metal_depth_stencil_texture(second) == nullptr);
+    // One-shot skip requests belong to the addressed window.
+    sapp_skip_present();
+    check("first skip is isolated", first->skip_present && !other->skip_present);
+    _sapp_tc_mac_tick(other, nil);
+    check("other window's tick keeps first skip", first->skip_present);
+    _sapp_tc_mac_tick(first, nil);
+    check("first tick consumes its skip", !first->skip_present);
+    sapp_tc_window_skip_present(second);
+    check("secondary skip is isolated", other->skip_present && !first->skip_present);
+    _sapp_tc_mac_tick(first, nil);
+    check("first tick keeps secondary skip", other->skip_present);
+    _sapp_tc_mac_tick(other, nil);
+    sapp_tc_window_skip_present({0});
+    check("zero skip addresses only the first window", first->skip_present && !other->skip_present);
+    _sapp_tc_mac_tick(first, nil);
+    // Representability is checked against the target window's backing scale.
+    sapp_window_desc desc = other->desc;
+    desc.title = "rejected"; desc.close_cb = nullptr; desc.event_cb = nullptr; desc.tick_cb = nullptr;
+    desc.no_high_dpi = false; desc._tc_pixel_width = 640; desc._tc_pixel_height = 400;
+    const int before = liveNativeWindows();
+    @autoreleasepool {
+        forceTinyScale = true;
+        const sapp_window rejected = sapp_create_window(&desc);
+        forceTinyScale = false;
+        check("unrepresentable logical size rejected", rejected.id == 0);
+        if (rejected.id) sapp_destroy_window(rejected);
+        desc._tc_pixel_width = desc._tc_pixel_height = 0;
+        failLayer = true;
+        check("failed drawable layer rejects creation", sapp_create_window(&desc).id == 0);
+        failLayer = false;
+    }
+    check("failure unwinds native window", liveNativeWindows() == before && sapp_window_valid(second));
+    const uint32_t savedNextId = _sapp_tc.next_id;
+    _sapp_tc.next_id = UINT32_MAX - 1;
+    @autoreleasepool {
+        const sapp_window last = sapp_create_window(&desc);
+        check("last identity is valid", last.id == UINT32_MAX);
+        if (last.id) sapp_destroy_window(last);
+        check("identity exhaustion rejects cleanly", sapp_create_window(&desc).id == 0 &&
+            _sapp_tc.next_id == UINT32_MAX);
+    }
+    int records = 0;
+    for (auto* w : _sapp_tc.windows) records += w != nullptr;
+    check("exhaustion leaves no native record", records == 2);
+    // Later probes need identities; values between these were never issued.
+    _sapp_tc.next_id = savedNextId;
+}
+
+// A client may destroy its window from any event it receives. Every native
+// path that sends an event and then continues must re-resolve the window.
+sapp_event_type destroyOn;
+bool destroyedInCallback;
+void victimEvent(const sapp_event* event, sapp_window win, void*) {
+    if (event->type == destroyOn && sapp_window_valid(win)) { destroyedInCallback = true; sapp_destroy_window(win); }
+}
+sapp_window makeVictim() {
+    sapp_window_desc d = {};
+    d.x = d.y = -1; d.width = 120; d.height = 90; d.title = "victim"; d.no_high_dpi = noHighDpi;
+    d.mtl_device = (__bridge const void*)_sapp_tc.app.device;
+    d.event_cb = victimEvent;
+    return sapp_create_window(&d);
+}
+void destroyInCallbackChecks() {
+    enum Path { LinkTick, FallbackTick, Miniaturize, Deminiaturize, TickResize, KeyDown };
+    struct Case { const char* name; Path path; sapp_event_type type; };
+    const Case cases[] = {
+        {"SUSPENDED from the display-link shim", LinkTick, SAPP_EVENTTYPE_SUSPENDED},
+        {"SUSPENDED from the fallback-timer shim", FallbackTick, SAPP_EVENTTYPE_SUSPENDED},
+        {"SUSPENDED from windowDidMiniaturize", Miniaturize, SAPP_EVENTTYPE_SUSPENDED},
+        {"ICONIFIED from windowDidMiniaturize", Miniaturize, SAPP_EVENTTYPE_ICONIFIED},
+        {"RESUMED from windowDidDeminiaturize", Deminiaturize, SAPP_EVENTTYPE_RESUMED},
+        {"RESIZED from the tick", TickResize, SAPP_EVENTTYPE_RESIZED},
+        {"KEY_DOWN before its CHAR events", KeyDown, SAPP_EVENTTYPE_KEY_DOWN},
+    };
+    for (const Case& c : cases) {
+        @autoreleasepool {
+            const sapp_window victim = makeVictim();
+            _sapp_tc_window_t* w = _sapp_tc_lookup(victim);
+            if (!w) { check("victim created", false); continue; }
+            // Strong locals keep the AppKit objects alive across their own method.
+            _sapp_tc_view* view = w->view;
+            _sapp_tc_win_delegate* delegate = w->delegate;
+            NSWindow* window = w->window;
+            destroyOn = c.type; destroyedInCallback = false;
+            switch (c.path) {
+            case LinkTick: forceHidden = window; [view tick:nil]; break;
+            case FallbackTick: forceHidden = window; [view fallbackTick:nil]; break;
+            case Miniaturize: forceHidden = window; [delegate windowDidMiniaturize:nil]; break;
+            case Deminiaturize:
+                forceHidden = window; _sapp_tc_mac_observe(w);   // suspended: RESUMED follows
+                forceHidden = nil; forceVisible = window; [delegate windowDidDeminiaturize:nil]; break;
+            case TickResize: w->fb_width = 1; _sapp_tc_mac_tick(w, nil); break;
+            case KeyDown: {
+                NSEvent* key = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
+                    timestamp:0 windowNumber:window.windowNumber context:nil characters:@"ab"
+                    charactersIgnoringModifiers:@"ab" isARepeat:NO keyCode:0];
+                [view keyDown:key];
+                break;
+            }
+            }
+            forceHidden = nil; forceVisible = nil;
+            check((std::string("destroying the window from ") + c.name + " is safe").c_str(),
+                destroyedInCallback && !sapp_window_valid(victim));
+            if (sapp_window_valid(victim)) sapp_destroy_window(victim);
+        }
+    }
+}
+
+// A secondary closed natively whose close_cb keeps it registered must stop ticking.
+int closedTicks[2];
+void closedTick(sapp_window, void* user) { ++closedTicks[(intptr_t)user]; }
+void keepOnClose(sapp_window, void*) {}
+sapp_window closedWindows[2];
+int closedTicksAt[2];
+
+enum Stage { Sync, MinimizeTrusted, RestoreTrusted, MinimizeUntrusted, RestoreUntrusted,
+             MinimizeMain, RestoreMain, Reverse, ReverseWait, NativeClose, NativeClosed,
+             CloseSecondary, VetoQuit, Done };
+Stage stage = Sync;
+double stageStart, sampleStart;
+int ticksAt, acquiredAt, mainFramesAt, mainDrawablesAt, reverseTarget;
+bool reverseSawFullscreen;
+
+void enter(Stage next) { stage = next; stageStart = now(); }
+bool waited(double seconds) { return now() - stageStart > seconds; }
+
+void step() {
+    _sapp_tc_window_t* first = _sapp_tc.app.main;
+    _sapp_tc_window_t* other = _sapp_tc_lookup(second);
+    switch (stage) {
+    case Sync:
+        synchronousChecks();
+        destroyInCallbackChecks();
+        other->desc.tick_cb = probeTick;
+        callbacks = acquired = 0;
+        [other->window miniaturize:nil];
+        enter(MinimizeTrusted);
+        break;
+    case MinimizeTrusted:
+        if (!other->iconified && !waited(5)) break;
+        if (sampleStart == 0) { sampleStart = now(); ticksAt = callbacks; acquiredAt = acquired; break; }
+        if (now() - sampleStart < 0.5) break;
+        check("trusted minimize is reported for the secondary", other->iconified && sapp_window_occluded(second) &&
+            iconifiedEvents == 1);
+        check("minimized secondary ticks from its own fallback source", other->fallback_active &&
+            callbacks - ticksAt >= 5);
+        check("minimized secondary draws nothing (draw_while_hidden false)", acquired == acquiredAt);
+        sampleStart = 0;
+        [other->window deminiaturize:nil];
+        enter(RestoreTrusted);
+        break;
+    case RestoreTrusted:
+        if (other->window.miniaturized && !waited(5)) break;
+        if (!waited(0.5)) break;
+        check("restore is reported", !other->iconified && restoredEvents == 1);
+        other->trust_hidden_signals = false;
+        _sapp_tc_mac_observe(other);
+        iconifiedEvents = restoredEvents = suspendedEvents = 0;
+        [other->window miniaturize:nil];
+        enter(MinimizeUntrusted);
+        break;
+    case MinimizeUntrusted:
+        if (!other->window.miniaturized && !waited(5)) break;
+        if (sampleStart == 0) { sampleStart = now(); ticksAt = callbacks; acquiredAt = acquired; break; }
+        if (now() - sampleStart < 1.5) break;
+        std::printf("nativeWindow: untrusted minimized secondary: %d ticks, %d drawables in %.1fs\n",
+            callbacks - ticksAt, acquired - acquiredAt, now() - sampleStart);
+        check("untrusted minimize reports visible and sends no hidden events", other->window.miniaturized &&
+            !sapp_window_occluded(second) && !other->iconified && iconifiedEvents == 0 && suspendedEvents == 0);
+        check("untrusted minimized secondary keeps ticking and drawing", other->fallback_active &&
+            callbacks > ticksAt && acquired > acquiredAt);
+        sampleStart = 0;
+        [other->window deminiaturize:nil];
+        enter(RestoreUntrusted);
+        break;
+    case RestoreUntrusted:
+        if (other->window.miniaturized && !waited(5)) break;
+        if (!waited(0.5)) break;
+        check("untrusted restore sends no event", restoredEvents == 0);
+        other->trust_hidden_signals = true;
+        _sapp_tc_mac_observe(other);
+        mainDraws = true;
+        [first->window miniaturize:nil];
+        enter(MinimizeMain);
+        break;
+    case MinimizeMain:
+        if (!first->iconified && !waited(5)) break;
+        if (sampleStart == 0) { sampleStart = now(); mainFramesAt = mainFrames; mainDrawablesAt = mainDrawables; break; }
+        if (now() - sampleStart < 1.5) break;
+        std::printf("nativeWindow: minimized first window: %d frames, %d drawables in %.1fs\n",
+            mainFrames - mainFramesAt, mainDrawables - mainDrawablesAt, now() - sampleStart);
+        check("minimized first window keeps its frame callback on its fallback source",
+            first->iconified && sapp_window_occluded({0}) && first->fallback_active && mainFrames - mainFramesAt >= 5);
+        check("minimized first window keeps drawing (launch draw_while_hidden)", mainDrawables > mainDrawablesAt);
+        sampleStart = 0;
+        [first->window deminiaturize:nil];
+        enter(RestoreMain);
+        break;
+    case RestoreMain:
+        if (first->window.miniaturized && !waited(5)) break;
+        if (!waited(0.5)) break;
+        mainDraws = false;
+        reverseTarget = 0;
+        enter(Reverse);
+        break;
+    case Reverse: {
+        // Reverse an entering transition, then stop the OTHER window's ticks:
+        // only the target's own tick may reconcile it.
+        _sapp_tc_window_t* target = reverseTarget == 0 ? first : other;
+        _sapp_tc_window_t* peer = target == first ? other : first;
+        if (reverseTarget == 0) check("disposed windows have left AppKit", liveNativeWindows() == 2);
+        reverseSawFullscreen = false;
+        sapp_tc_window_set_fullscreen({target->win_id}, true);
+        sapp_tc_window_toggle_fullscreen({target->win_id});
+        check("toggle during entry records the reversal on the addressed window only",
+            target->fullscreen_state.desired == false && peer->fullscreen_state.phase == _sapp_tc_fullscreen_phase::Windowed);
+        peer->ready = false;
+        enter(ReverseWait);
+        break;
+    }
+    case ReverseWait: {
+        _sapp_tc_window_t* target = reverseTarget == 0 ? first : other;
+        _sapp_tc_window_t* peer = target == first ? other : first;
+        if (target->fullscreen_state.phase == _sapp_tc_fullscreen_phase::Fullscreen ||
+            (target->window.styleMask & NSWindowStyleMaskFullScreen)) reverseSawFullscreen = true;
+        const bool settled = target->fullscreen_state.phase == _sapp_tc_fullscreen_phase::Windowed &&
+            !target->fullscreen_state.reconcilePending && !(target->window.styleMask & NSWindowStyleMaskFullScreen);
+        if (!(settled && reverseSawFullscreen) && !waited(20)) break;
+        std::printf("nativeWindow: reversal on %s window: saw fullscreen=%d settled=%d after %.1fs (source %s)\n",
+            target == first ? "first" : "secondary", reverseSawFullscreen, settled, now() - stageStart,
+            target->fallback_active ? "fallback" : "display link");
+        check("reversal mid-entry settles windowed from the window's own tick", settled && reverseSawFullscreen &&
+            !sapp_is_fullscreen() && peer->fullscreen_state.phase == _sapp_tc_fullscreen_phase::Windowed);
+        peer->ready = true;
+        _sapp_tc_mac_observe(peer);
+        if (++reverseTarget < 2) { enter(Reverse); break; }
+        enter(NativeClose);
+        break;
+    }
+    case NativeClose:
+        // Close two secondaries natively (trusted / untrusted); close_cb keeps them.
+        for (int i = 0; i < 2; ++i) {
+            sapp_window_desc d = {};
+            d.x = d.y = -1; d.width = 120; d.height = 90; d.title = "closed"; d.no_high_dpi = noHighDpi;
+            d.mtl_device = (__bridge const void*)_sapp_tc.app.device;
+            d.tick_cb = closedTick; d.close_cb = keepOnClose; d.user_data = (void*)(intptr_t)i;
+            closedWindows[i] = sapp_create_window(&d);
+            _sapp_tc_window_t* w = _sapp_tc_lookup(closedWindows[i]);
+            if (!w) { check("closed-window probe created", false); continue; }
+            w->trust_hidden_signals = i == 0;
+            NSWindow* window = w->window;
+            [window performClose:nil];
+            // AppKit reports the closed window as no longer visible.
+            forceHidden = window;
+            [[NSNotificationCenter defaultCenter] postNotificationName:NSWindowDidChangeOcclusionStateNotification object:window];
+            forceHidden = nil;
+        }
+        other->desc.tick_cb = probeTick;
+        mainDraws = true;
+        sampleStart = 0;
+        enter(NativeClosed);
+        break;
+    case NativeClosed:
+        if (!waited(0.5)) break;
+        if (sampleStart == 0) {
+            sampleStart = now(); closedTicksAt[0] = closedTicks[0]; closedTicksAt[1] = closedTicks[1];
+            mainDrawablesAt = mainDrawables; acquiredAt = acquired; break;
+        }
+        if (now() - sampleStart < 1.0) break;
+        std::printf("nativeWindow: natively closed secondaries ticked %d (trusted) and %d (untrusted) times in %.1fs after close\n",
+            closedTicks[0] - closedTicksAt[0], closedTicks[1] - closedTicksAt[1], now() - sampleStart);
+        {
+            const double seconds = now() - sampleStart;
+            const double mainRate = (mainDrawables - mainDrawablesAt) / seconds, otherRate = (acquired - acquiredAt) / seconds;
+            std::printf("nativeWindow: meanwhile first window drew %.1f/s, open secondary drew %.1f/s\n", mainRate, otherRate);
+            check("other windows keep drawing at the display rate", mainRate >= 20 && otherRate >= 20);
+            mainDraws = false;
+        }
+        for (int i = 0; i < 2; ++i) {
+            check(i == 0 ? "natively closed secondary stops ticking (trusted)" : "natively closed secondary stops ticking (untrusted)",
+                sapp_window_valid(closedWindows[i]) && closedTicks[i] == closedTicksAt[i]);
+            sapp_destroy_window(closedWindows[i]);
+            check("a natively closed secondary is destroyed once", !sapp_window_valid(closedWindows[i]));
+        }
+        sampleStart = 0;
+        sapp_window_request_close(second);
+        enter(CloseSecondary);
+        break;
+    case CloseSecondary:
+        if (!secondClosed && !waited(3)) break;
+        check("deferred secondary close reaches its close callback and disposes it",
+            secondClosed && !sapp_window_valid(second));
+        sapp_window_request_close({first->win_id});
+        enter(VetoQuit);
+        break;
+    case VetoQuit:
+        if (quitRequests == 0 && !waited(3)) break;
+        if (!waited(0.3)) break;
+        check("first-window close request is a vetoable process quit", quitRequests == 1 &&
+            _sapp_tc.app.main == first && first->window.visible);
+        allowQuit = true;
+        sapp_destroy_window({first->win_id});   // redirects to the same quit request
+        enter(Done);
+        break;
+    case Done:
+        if (waited(5)) { check("quit completes", false); std::_Exit(1); }
+        break;
+    }
+}
+
+void mainEvent(const sapp_event* event) {
+    if (event->type == SAPP_EVENTTYPE_QUIT_REQUESTED) {
+        ++quitRequests;
+        if (!allowQuit) sapp_cancel_quit();
+    }
+}
+
+void mainFrame() {
+    ++mainFrames;
+    if (coveredFirst) {
+        const void* drawable = sapp_metal_get_current_drawable();
+        std::printf("nativeWindow: covered first frame: occluded=%d source=%s drawable=%d\n",
+            sapp_window_occluded({0}), _sapp_tc.app.main->fallback_active ? "fallback" : "display link", drawable != nullptr);
+        check("covered first frame follows init on the fallback source", didInitialize && sapp_window_occluded({0}) &&
+            _sapp_tc.app.main->fallback_active && sapp_frame_count() == 0);
+        check("covered first frame draws according to launch data", (drawable != nullptr) == (launchHidden >= 0));
+        present((__bridge id<CAMetalDrawable>)drawable);
+        coveredReleased = true;
+        sapp_quit();
+        return;
+    }
+    if (mainDraws) {
+        id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)sapp_metal_get_current_drawable();
+        if (drawable) { ++mainDrawables; present(drawable); }
+    }
+}
+
+void initialized() {
+    didInitialize = true;
+    _sapp_tc_window_t* first = _sapp_tc.app.main;
+    check("first window is window #1 of the common constructor", first && first->is_main &&
+        _sapp_tc.windows[0] == first && first->ready);
+    check("initial hidden admission is descriptor data", first->draw_while_hidden == (launchHidden >= 0));
+    check("hidden signals trusted by default", first->trust_hidden_signals);
+    if (coveredFirst) {
+        check("covered launch initializes before first frame", sapp_frame_count() == 0 && first->occluded);
+        return;
+    }
+    const float scale = expectedScale(first->window);
+    std::printf("nativeWindow: backingScaleFactor=%.2f high_dpi=%d main=%.2f/%dx%d (%dx%d pt)\n",
+        first->window.backingScaleFactor, !noHighDpi, first->dpi_scale, first->fb_width, first->fb_height,
+        first->win_width, first->win_height);
+    check("initial dimensions precede first frame", sapp_frame_count() == 0 &&
+        first->dpi_scale == scale && sapp_dpi_scale() == scale &&
+        first->fb_width == int(101 * scale) && first->fb_height == int(77 * scale) &&
+        sapp_width() == first->fb_width && sapp_height() == first->fb_height);
+    check("first window keeps its 10-bit output", sapp_color_format() == SAPP_PIXELFORMAT_RGB10A2 &&
+        first->color_fmt == MTLPixelFormatRGB10A2Unorm);
+    sapp_window_desc desc = {};
+    desc.x = desc.y = -1;
+    desc.width = 101; desc.height = 77; desc.no_high_dpi = noHighDpi; desc.title = "nativeWindow secondary";
+    desc.mtl_device = (__bridge const void*)_sapp_tc.app.device;
+    desc.event_cb = secondaryEvent; desc.close_cb = secondaryClosed;
+    second = sapp_create_window(&desc);
+    _sapp_tc_window_t* other = _sapp_tc_lookup(second);
+    check("secondary created", other != nullptr);
+    if (!other) { sapp_quit(); return; }
+    std::printf("nativeWindow: secondary=%.2f/%dx%d (%dx%d pt)\n", other->dpi_scale, other->fb_width,
+        other->fb_height, other->win_width, other->win_height);
+    check("secondary dimensions are published by its constructor", other->ready &&
+        sapp_window_framebuffer_width(second) == other->fb_width && other->fb_width > 0 &&
+        sapp_window_dpi_scale(second) == expectedScale(other->window));
+    check("initial scales and dimensions agree", first->dpi_scale == other->dpi_scale &&
+        first->fb_width == other->fb_width && first->fb_height == other->fb_height &&
+        first->win_width == other->win_width && first->win_height == other->win_height);
+    check("secondary trusts hidden signals and does not draw while hidden", other->trust_hidden_signals &&
+        !other->draw_while_hidden && !other->is_main && other->color_fmt == MTLPixelFormatBGRA8Unorm);
+    check("each window has its own display link", first->link && other->link && first->link != other->link);
+    // macOS creation attributes are data: the launch path passes all three.
+    check("first window has its launch attributes (restorable, nearest filter, key focus)",
+        first->window.restorable && [first->layer.magnificationFilter isEqualToString:kCAFilterNearest] &&
+        first->window.firstResponder == first->view);
+    std::printf("nativeWindow: secondary restorable=%d filter=%s firstResponder=%s\n", other->window.restorable,
+        other->layer.magnificationFilter.UTF8String, NSStringFromClass([other->window.firstResponder class]).UTF8String);
+    // AppKit itself defaults restorable to YES and focuses the content view of a
+    // key window, so only the filter is observably different for a secondary.
+    check("secondary keeps the default linear filter", [other->layer.magnificationFilter isEqualToString:kCAFilterLinear]);
+    check("both windows were checked at show time", showsChecked >= 2);
+    driver = [NSTimer timerWithTimeInterval:0.02 repeats:YES block:^(NSTimer*) { step(); }];
+    [[NSRunLoop mainRunLoop] addTimer:driver forMode:NSRunLoopCommonModes];
+}
+
+void finish() {
+    // AppKit termination: cleanup ran, then the common unwinder disposed every window.
+    bool empty = _sapp_tc.app.main == nullptr;
+    for (auto* w : _sapp_tc.windows) empty = empty && w == nullptr;
+    check("process cleanup releases every window", empty && didInitialize);
+    if (coveredFirst) check("quit requested by the first frame ends without another frame", mainFrames == 1);
+    if (!coveredFirst) check("scenario completed", stage == Done && quitRequests == 2);
+    std::fflush(stdout);
+    _exit(failures ? 1 : 0);
+}
+}
+
+int main(int argc, char** argv) {
+    if (argc < 2 || std::strcmp(argv[1], "--display")) {
+        std::puts("SKIP: nativeWindow --display [--no-high-dpi|--covered-*] needs a window server session"); return 0;
+    }
+    noHighDpi = argc > 2 && !std::strcmp(argv[2], "--no-high-dpi");
+    coveredFirst = argc > 2 && !std::strncmp(argv[2], "--covered-", 10);
+    if (coveredFirst) {
+        if (!std::strcmp(argv[2], "--covered-draw")) launchHidden = 1;
+        if (!std::strcmp(argv[2], "--covered-pause")) launchHidden = -1;
+    }
+    swap([NSWindow class], @selector(makeKeyAndOrderFront:), recordShow, &realShow);
+    swap([NSWindow class], @selector(backingScaleFactor), injectScale, &realScale);
+    swap([NSWindow class], @selector(occlusionState), injectOcclusion, &realOcclusion);
+    // Override +layer for CAMetalLayer only; AppKit's own view layers keep CALayer's.
+    realLayer = (CAMetalLayer* (*)(id, SEL))method_getImplementation(class_getClassMethod([CAMetalLayer class], @selector(layer)));
+    class_addMethod(object_getClass([CAMetalLayer class]), @selector(layer), (IMP)injectLayer, "@@:");
+    std::atexit(finish);
+    sapp_desc desc{};
+    desc._tc_draw_while_hidden = launchHidden; desc.width = 101; desc.height = 77;
+    desc.high_dpi = !noHighDpi; desc.init_cb = initialized; desc.frame_cb = mainFrame;
+    desc.event_cb = mainEvent; desc.window_title = "nativeWindow";
+    sapp_run(&desc);
+    check("sapp_run returns only after a failed launch", false);
+    return 1;
+}

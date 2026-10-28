@@ -26,9 +26,9 @@ struct AdapterState {
     sapp_window win{0};
 };
 
-// Swapchain provider handed to WindowContext::acquireSwapchain. The drawable
-// was acquired by the native layer at the top of the current tick (it is only
-// ever acquired for a visible window; never blocks here).
+// Swapchain provider handed to WindowContext::acquireSwapchain. The native
+// layer acquires the drawable lazily on this first query, and only in a tick
+// whose draw it admitted (a hidden, non-admitted window gets none).
 sg_swapchain acquireSecondarySwapchain(void* user) {
     auto* st = static_cast<AdapterState*>(user);
     sg_swapchain sc = {};
