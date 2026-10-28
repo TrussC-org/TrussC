@@ -518,6 +518,8 @@ int main() {
     sgl_shutdown(); sg_shutdown();
     return failures ? 1 : 0;
 }
+#elif defined(_WIN32)
+#include "../nativeWindow/win32.cpp"
 #else
 #include <cstdio>
 int main() { std::puts("SKIP: Linux dummy SG/SGL reentry fixture; macOS/Windows are covered by the device probe"); }

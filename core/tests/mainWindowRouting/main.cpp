@@ -74,6 +74,8 @@ int main() {
     std::printf("mainWindowRouting: sapp main title/size/fullscreen: %s\n", ok && oddPixels ? "PASS" : "FAIL");
     return ok && oddPixels ? 0 : 1;
 }
+#elif defined(_WIN32)
+#include "../nativeWindow/win32.cpp"
 #else
 #include <cstdio>
 int main() { std::puts("SKIP: Linux entry-point recording fixture"); }
