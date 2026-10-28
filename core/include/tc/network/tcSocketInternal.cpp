@@ -5,6 +5,7 @@
 #include "tc/network/tcSocketInternal.h"
 #include "tc/utils/tcLog.h"
 
+#include <cstdint>
 #include <mutex>
 #include <utility>
 #ifndef _WIN32
@@ -51,9 +52,29 @@ std::string parseBindAddress(const std::string& address, in_addr& parsed) {
         return invalidBindAddress(address);
     if (address.find(':') != std::string::npos)
         return invalidBindAddress(address, "IPv6 is not supported for bind addresses");
-    // An IPv4 dotted-quad literal has at most 15 characters.
-    if (address.size() > 15 || inet_pton(AF_INET, address.c_str(), &parsed) != 1)
-        return invalidBindAddress(address);
+    // Validate decimal dotted quads ourselves: BSD inet_pton accepts leading
+    // zeros that other platforms reject. Assemble only validated octets.
+    if (address.size() > 15) return invalidBindAddress(address);
+    std::uint32_t value = 0;
+    size_t position = 0;
+    for (int octet = 0; octet < 4; ++octet) {
+        const size_t start = position;
+        unsigned int part = 0;
+        while (position < address.size() && address[position] >= '0' && address[position] <= '9') {
+            part = part * 10 + static_cast<unsigned int>(address[position++] - '0');
+            if (position - start > 3 || part > 255) return invalidBindAddress(address);
+        }
+        if (position == start || (position - start > 1 && address[start] == '0'))
+            return invalidBindAddress(address);
+        value = (value << 8) | part;
+        if (octet < 3) {
+            if (position == address.size() || address[position++] != '.')
+                return invalidBindAddress(address);
+        } else if (position != address.size()) {
+            return invalidBindAddress(address);
+        }
+    }
+    parsed.s_addr = htonl(value);
     return {};
 }
 

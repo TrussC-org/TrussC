@@ -2,6 +2,7 @@
 #include "../../common/tcCoreTest.h"
 #include "tc/network/tcTcpServer.h"
 #include "tc/network/tcUdpSocket.h"
+#include "tc/network/tcSocketInternal.h"
 #include "tc/utils/tcLog.h"
 #include <cerrno>
 #include <barrier>
@@ -27,6 +28,32 @@ struct UdpSocketBindAddressTestAccess {
 namespace {
 using TcpAccess = internal::TcpServerBindAddressTestAccess;
 using UdpAccess = internal::UdpSocketBindAddressTestAccess;
+
+// Parser acceptance must not depend on whether an address can bind locally,
+// or on the platform's inet_pton/InetPtonA interpretation.
+struct AddressCase { const char* address; bool accepted; uint32_t value; };
+constexpr AddressCase addressCases[] = {
+    {"127.0.0.1", true, 0x7f000001},
+    {"0.0.0.0", true, 0},
+    {"255.255.255.255", true, 0xffffffff},
+    {"127.00.0.1", false, 0}, {"127.0.0.01", false, 0},
+    {"0127.0.0.1", false, 0}, {"127.1", false, 0},
+    {"127.0.0", false, 0}, {"127.0.0.1.", false, 0},
+    {".127.0.0.1", false, 0}, {"127..0.1", false, 0},
+    {"256.0.0.1", false, 0}, {"1.2.3.4.5", false, 0},
+    {"0x7f.0.0.1", false, 0}, {"+1.2.3.4", false, 0},
+    {" 127.0.0.1", false, 0}, {"127.0.0.1 ", false, 0},
+};
+
+void strictAddressTable() {
+    for (const auto& test : addressCases) {
+        in_addr parsed{};
+        const auto error = internal::parseBindAddress(test.address, parsed);
+        check((string("Strict dotted-quad parser: ") + test.address).c_str(),
+              test.accepted ? error.empty() && parsed.s_addr == htonl(test.value) :
+              error.find(string("Invalid bind address \"") + test.address + "\":") == 0);
+    }
+}
 
 bool boundTo(TestSocket descriptor, uint32_t address) {
     sockaddr_in actual{};
@@ -55,8 +82,10 @@ void checkInvalidDiagnostic(const string& address, const string& error) {
           error.size() <= 256 && all_of(error.begin(), error.end(), [](unsigned char c) {
               return c >= 0x20 && c < 0x7f;
           }));
-    if (address == "localhost" || address == "machine.example") {
-        check("Hostname diagnostic names the rejected value",
+    if (address.size() <= 32 && all_of(address.begin(), address.end(), [](unsigned char c) {
+            return c >= 0x20 && c < 0x7f && c != '"' && c != '\\';
+        })) {
+        check("Invalid address diagnostic names the rejected value",
               error == "Invalid bind address \"" + address +
                        "\": use a numeric IPv4 address such as 127.0.0.1 (names are not resolved)");
     }
@@ -137,17 +166,17 @@ void tcpAddresses() {
               boundTo(TcpAccess::descriptor(server), address == "127.0.0.1" ? INADDR_LOOPBACK : INADDR_ANY));
         server.stop();
     }
-    const vector<pair<string, string>> rejected{
+    vector<pair<string, string>> rejected{
         {"bad", "Invalid bind address"}, {"localhost", "Invalid bind address"},
         {"machine.example", "Invalid bind address"}, {"bad\n\r\t\x1b\x7f\"\\", "Invalid bind address"},
-        {" 127.0.0.1", "Invalid bind address"}, {"127.0.0.1 ", "Invalid bind address"},
-        {"256.0.0.1", "Invalid bind address"}, {"127.1", "Invalid bind address"},
-        {"127.00.0.1", "Invalid bind address"}, {"2130706433", "Invalid bind address"},
+        {"2130706433", "Invalid bind address"},
         {string("127.0.0.1\0junk", 14), "Invalid bind address"},
         {string(1024, '1'), "Invalid bind address"},
         {"::1", "IPv6 is not supported"}, {"2001:db8:1234:5678::1", "IPv6 is not supported"},
         {"192.0.2.1", "Bind address is not available on this machine"}
     };
+    for (const auto& test : addressCases)
+        if (!test.accepted) rejected.emplace_back(test.address, "Invalid bind address");
     for (const auto& [address, diagnostic] : rejected) {
         error.clear(); logs.clear();
         server.setBindAddress(address);
@@ -200,17 +229,17 @@ void udpAddresses() {
               boundTo(UdpAccess::descriptor(socket), address == "127.0.0.1" ? INADDR_LOOPBACK : INADDR_ANY));
         socket.close();
     }
-    const vector<pair<string, string>> rejected{
+    vector<pair<string, string>> rejected{
         {"bad", "Invalid bind address"}, {"localhost", "Invalid bind address"},
         {"machine.example", "Invalid bind address"}, {"bad\n\r\t\x1b\x7f\"\\", "Invalid bind address"},
-        {" 127.0.0.1", "Invalid bind address"}, {"127.0.0.1 ", "Invalid bind address"},
-        {"256.0.0.1", "Invalid bind address"}, {"127.1", "Invalid bind address"},
-        {"127.00.0.1", "Invalid bind address"}, {"2130706433", "Invalid bind address"},
+        {"2130706433", "Invalid bind address"},
         {string("127.0.0.1\0junk", 14), "Invalid bind address"},
         {string(1024, '1'), "Invalid bind address"},
         {"::1", "IPv6 is not supported"}, {"2001:db8:1234:5678::1", "IPv6 is not supported"},
         {"192.0.2.1", "Bind address is not available on this machine"}
     };
+    for (const auto& test : addressCases)
+        if (!test.accepted) rejected.emplace_back(test.address, "Invalid bind address");
     for (const auto& [address, diagnostic] : rejected) {
         error.clear(); logs.clear();
         socket.setBindAddress(address);
@@ -262,6 +291,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     Watchdog watchdog;
     udpReplacementRace();
     if (argc > 1 && string(argv[1]) == "--race-only") return failures ? 1 : 0;
+    strictAddressTable();
     tcpAddresses();
     udpAddresses();
     return failures ? 1 : 0;

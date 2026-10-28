@@ -14,7 +14,7 @@ void* operator new(size_t bytes) {
     if (measuring) {
         largestAllocation = std::max(largestAllocation, bytes);
         totalAllocation += bytes;
-        if (bytes >= 1024 * 1024) throw std::bad_alloc();
+        if (bytes > 16 * 1024) throw std::bad_alloc();
     }
     if (void* result = std::malloc(bytes ? bytes : 1)) return result;
     throw std::bad_alloc();
@@ -39,19 +39,25 @@ struct UdpSocketBindAddressTestAccess {
 };
 }
 
-TC_CORE_TEST_MAIN() {
-    Watchdog watchdog;
+namespace {
+struct Measurement {
+    size_t largest, total;
+    bool completed, namedFailure, boundedStorage;
+};
+
+Measurement probe(size_t inputBytes, bool instrument = true) {
     TcpServer tcp;
     UdpSocket udp;
     string tcpError, udpError;
     auto tcpListener = tcp.onError.listen([&](TcpServerErrorEventArgs& event) { tcpError = event.message; });
     auto udpListener = udp.onError.listen([&](UdpErrorEventArgs& event) { udpError = event.message; });
-    string input(8 * 1024 * 1024, '\xff');
+    string input(inputBytes, '\xff');
     // Length must reject before examining NUL/colon far beyond the bounded preview.
     input.back() = ':';
     input[input.size() - 2] = '\0';
     bool threw = false, tcpFailed = false, udpFailed = false;
-    measuring = true;
+    largestAllocation = totalAllocation = 0;
+    measuring = instrument;
     try {
         tcp.setBindAddress(input);
         udp.setBindAddress(input);
@@ -62,16 +68,43 @@ TC_CORE_TEST_MAIN() {
         udp.close();
     } catch (const std::bad_alloc&) { threw = true; }
     measuring = false;
-    check("Multi-megabyte invalid settings and lifecycle use bounded allocations",
-          !threw && largestAllocation < 4096 && totalAllocation < 64 * 1024);
-    check("Multi-megabyte settings fail the next start/bind with the named error",
-          tcpFailed && udpFailed && tcpError.find("Invalid bind address") == 0 &&
-          udpError == tcpError && tcpError.size() <= 256 && tcpError.find("...") != string::npos &&
-          tcpError.find("\\xff") != string::npos && all_of(tcpError.begin(), tcpError.end(),
-              [](unsigned char byte) { return byte >= 0x20 && byte < 0x7f; }));
-    check("No input-sized storage survives rejection or lifecycle replacement",
-          internal::TcpServerBindAddressTestAccess::retained(tcp) < 512 &&
-          internal::UdpSocketBindAddressTestAccess::retained(udp) < 512);
-    std::printf("Address storage probe: largest=%zu bytes, total=%zu bytes\n", largestAllocation, totalAllocation);
+    return {largestAllocation, totalAllocation, !threw,
+            tcpFailed && udpFailed && tcpError.find("Invalid bind address") == 0 &&
+            udpError == tcpError && tcpError.size() <= 256 && tcpError.find("...") != string::npos &&
+            tcpError.find("\\xff") != string::npos && all_of(tcpError.begin(), tcpError.end(),
+                [](unsigned char byte) { return byte >= 0x20 && byte < 0x7f; }),
+            internal::TcpServerBindAddressTestAccess::retained(tcp) < 512 &&
+            internal::UdpSocketBindAddressTestAccess::retained(udp) < 512};
+}
+} // namespace
+
+TC_CORE_TEST_MAIN() {
+    Watchdog watchdog;
+    // Initialize one-time logging/platform buffers before comparing fresh sockets.
+    probe(64 * 1024, false);
+    size_t minLargest = SIZE_MAX, maxLargest = 0, minTotal = SIZE_MAX, maxTotal = 0;
+    bool completed = true, namedFailure = true, boundedStorage = true;
+    // Repeat in reverse order too, so reuse cannot hide input-dependent growth.
+    for (const size_t bytes : {64u * 1024, 1024u * 1024, 8u * 1024 * 1024,
+                              8u * 1024 * 1024, 1024u * 1024, 64u * 1024}) {
+        const auto result = probe(bytes);
+        minLargest = std::min(minLargest, result.largest);
+        maxLargest = std::max(maxLargest, result.largest);
+        minTotal = std::min(minTotal, result.total);
+        maxTotal = std::max(maxTotal, result.total);
+        completed &= result.completed;
+        namedFailure &= result.namedFailure;
+        boundedStorage &= result.boundedStorage;
+        std::printf("Address storage probe: input=%zu bytes, largest=%zu bytes, total=%zu bytes\n",
+                    bytes, result.largest, result.total);
+    }
+    // The security property is independence from input size. macOS logging may
+    // allocate a fixed 4 KiB buffer; allow platform buffers with fixed caps and
+    // at most 1 KiB variation across inputs, rather than requiring <4 KiB.
+    check("Invalid settings and lifecycle allocations are independent of input size",
+          completed && maxLargest <= 16 * 1024 && maxTotal <= 64 * 1024 &&
+          maxLargest - minLargest <= 1024 && maxTotal - minTotal <= 1024);
+    check("All input sizes fail the next start/bind with the named error", namedFailure);
+    check("No input-sized storage survives rejection or lifecycle replacement", boundedStorage);
     return failures ? 1 : 0;
 }
