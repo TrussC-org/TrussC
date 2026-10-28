@@ -14,6 +14,8 @@
 namespace trussc::internal {
 void setExitReasonIfEmpty(const char*) {}
 void setExitReason(const char*) {}
+int& appExitCode() { static int code = 0; return code; }
+bool& appSetupCalled() { static bool called = true; return called; }
 }
 namespace {
 int failures, callbacks, acquired, mainFrames, mainDrawables, showsChecked;
@@ -321,8 +323,10 @@ _sapp_tc_window_t* fsCreated;
 
 // A native close (performClose:) or terminate fired from a timer while a client
 // callback spins the run loop must wait until that callback returns.
-int ccCloses, ccKind;
-bool ccArmed, ccInCallback, ccClosedInCallback, ccSpinDone;
+// Kinds 0/1: performClose: (goes through windowShouldClose:). Kinds 2/3: a direct
+// -[NSWindow close], which AppKit delivers without windowShouldClose:.
+int ccCloses, ccKind, ccTicksAfterNativeClose;
+bool ccArmed, ccInCallback, ccClosedInCallback, ccSpinDone, ccNativeClosed;
 sapp_window ccWindow;
 void spinFor(double seconds) {
     const double until = CACurrentMediaTime() + seconds;
@@ -332,17 +336,22 @@ void ccSpinWithClose(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     NSWindow* window = w ? w->window : nil;
     ccInCallback = true;
-    NSTimer* t = [NSTimer timerWithTimeInterval:0.02 repeats:NO block:^(NSTimer*) { [window performClose:nil]; }];
+    const bool direct = ccKind >= 2;
+    NSTimer* t = [NSTimer timerWithTimeInterval:0.02 repeats:NO block:^(NSTimer*) {
+        if (direct) [window close]; else [window performClose:nil];
+        ccNativeClosed = true;
+    }];
     [[NSRunLoop mainRunLoop] addTimer:t forMode:NSRunLoopCommonModes];
     spinFor(0.15);
     ccInCallback = false;
     ccSpinDone = true;
 }
 void ccEvent(const sapp_event* event, sapp_window win, void*) {
-    if (ccArmed && ccKind == 0 && event->type == SAPP_EVENTTYPE_KEY_DOWN) { ccArmed = false; ccSpinWithClose(win); }
+    if (ccArmed && ccKind % 2 == 0 && event->type == SAPP_EVENTTYPE_KEY_DOWN) { ccArmed = false; ccSpinWithClose(win); }
 }
 void ccTick(sapp_window win, void*) {
-    if (ccArmed && ccKind == 1) { ccArmed = false; ccSpinWithClose(win); }
+    if (ccNativeClosed && ccCloses == 0) ++ccTicksAfterNativeClose;   // closed but not yet torn down
+    if (ccArmed && ccKind % 2 == 1) { ccArmed = false; ccSpinWithClose(win); }
 }
 void ccClose(sapp_window win, void*) {
     ++ccCloses;
@@ -350,9 +359,58 @@ void ccClose(sapp_window win, void*) {
     sapp_destroy_window(win);
 }
 
+// Cross-window cases, from window X's key callback while it spins the run loop:
+// kind 4: performClose: of the FIRST window (its vetoable QUIT_REQUESTED must come
+// after the callback); kind 5: a direct close of another window Y, which must not
+// tick between its native close and its deferred close handling.
+int xKind, xQuitBefore, yTicksAfterClose, yCloses;
+bool xArmed, xSpinDone, xQuitInside, yNativeClosed, yClosedInside;
+sapp_window xWindow, yWindow;
+void yTick(sapp_window, void*) { if (yNativeClosed && yCloses == 0) ++yTicksAfterClose; }
+void yClose(sapp_window win, void*) {
+    ++yCloses;
+    if (ccInCallback) yClosedInside = true;
+    sapp_destroy_window(win);
+}
+void xEvent(const sapp_event* event, sapp_window, void*) {
+    if (!xArmed || event->type != SAPP_EVENTTYPE_KEY_DOWN) return;
+    xArmed = false;
+    _sapp_tc_window_t* y = _sapp_tc_lookup(yWindow);
+    NSWindow* target = xKind == 4 ? _sapp_tc.app.main->window : (y ? y->window : nil);
+    const bool direct = xKind == 5;
+    ccInCallback = true;
+    NSTimer* t = [NSTimer timerWithTimeInterval:0.02 repeats:NO block:^(NSTimer*) {
+        if (direct) { [target close]; yNativeClosed = true; } else [target performClose:nil];
+    }];
+    [[NSRunLoop mainRunLoop] addTimer:t forMode:NSRunLoopCommonModes];
+    spinFor(0.3);
+    ccInCallback = false;
+    xSpinDone = true;
+}
+
 // --terminate-in-callback (run as a child process): [NSApp terminate:] fired
 // inside the first window's frame callback, vetoed once, then allowed.
 bool terminateMode, termInCallback, termSpinReturned, quitInsideCallback, cleanupInsideCallback;
+// --session-end-in-callback / --plain-quit-in-callback (children): a quit Apple
+// event dispatched in-process while the first window's frame callback spins,
+// with keyAEQuitReason = kAELogOut, or with no reason (a plain quit).
+bool sessionEndMode, plainQuitMode;
+void dispatchQuitEvent(OSType why) {
+    NSAppleEventDescriptor* event = [NSAppleEventDescriptor appleEventWithEventClass:kCoreEventClass
+        eventID:kAEQuitApplication targetDescriptor:[NSAppleEventDescriptor currentProcessDescriptor]
+        returnID:kAutoGenerateReturnID transactionID:kAnyTransactionID];
+    if (why) [event setParamDescriptor:[NSAppleEventDescriptor descriptorWithEnumCode:why] forKeyword:kAEQuitReason];
+    AppleEvent reply = {typeNull, nullptr};
+    [[NSAppleEventManager sharedAppleEventManager] dispatchRawAppleEvent:event.aeDesc withRawReply:&reply handlerRefCon:0];
+    AEDisposeDesc(&reply);
+}
+void spinWithQuitEvent(OSType why) {
+    termInCallback = true;
+    NSTimer* t = [NSTimer timerWithTimeInterval:0.02 repeats:NO block:^(NSTimer*) { dispatchQuitEvent(why); }];
+    [[NSRunLoop mainRunLoop] addTimer:t forMode:NSRunLoopCommonModes];
+    spinFor(0.15);
+    termInCallback = false;
+}
 int termRound, cleanups;
 void spinWithTerminate() {
     termInCallback = true;
@@ -364,6 +422,10 @@ void spinWithTerminate() {
 void mainCleanup() {
     ++cleanups;
     if (termInCallback) cleanupInsideCallback = true;
+    if (sessionEndMode) {
+        std::printf("nativeWindow: session-end cleanup ran (inside callback=%d, quit requests=%d)\n", cleanupInsideCallback, quitRequests);
+        std::fflush(stdout);
+    }
 }
 // A real synchronous modal (NSAlert runModal) opened from a key handler.
 int modalRound, modalOwnerTicks, modalOtherAt, modalOwnerAt, modalOwnerAfterAt;
@@ -412,7 +474,7 @@ enum Stage { Sync, SettleAfterSync, MinimizeTrusted, RestoreTrusted, MinimizeUnt
              MinimizeMain, RestoreMain, Reverse, ReverseWait, NativeClose, NativeClosed,
              NestSetup, NestWarm, NestWait, FsCreate, FsSettle, ThrowTickStart, ThrowTickWait,
              ThrowEventStart, ThrowEventWait, ThrowLegacy, ThrowLegacyWait, ModalSetup, ModalWarm, ModalAfter,
-             CcSetup, CcWarm, CcWait, TerminateChild,
+             CcSetup, CcWarm, CcWait, XSetup, XWarm, XWait, TerminateChild,
              CloseSecondary, VetoQuit, Done };
 Stage stage = Sync;
 double stageStart, sampleStart;
@@ -777,7 +839,8 @@ void step() {
         enter(CcSetup);
         break;
     case CcSetup:
-        ccCloses = 0; ccArmed = ccInCallback = ccClosedInCallback = ccSpinDone = false;
+        ccCloses = ccTicksAfterNativeClose = 0;
+        ccArmed = ccInCallback = ccClosedInCallback = ccSpinDone = ccNativeClosed = false;
         ccWindow = makeProbe(ccTick, ccEvent, ccClose, "native close");
         enter(CcWarm);
         break;
@@ -787,7 +850,7 @@ void step() {
         if (!w) { check("native-close probe created", false); enter(TerminateChild); break; }
         ccArmed = true;
         enter(CcWait);
-        if (ccKind == 0) {
+        if (ccKind % 2 == 0) {
             _sapp_tc_view* view = w->view;
             NSEvent* key = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
                 timestamp:0 windowNumber:w->window.windowNumber context:nil characters:@"c"
@@ -798,31 +861,93 @@ void step() {
     }
     case CcWait:
         if (!waited(1.5)) break;
-        std::printf("nativeWindow: performClose: inside %s callback: close_cb ran %d time(s), inside callback=%d\n",
-            ccKind == 0 ? "an event" : "a tick", ccCloses, ccClosedInCallback);
-        check(ccKind == 0 ? "native close inside an event callback runs close_cb once, after it returns" :
-                            "native close inside a tick callback runs close_cb once, after it returns",
-            ccSpinDone && ccCloses == 1 && !ccClosedInCallback && !sapp_window_valid(ccWindow));
+        std::printf("nativeWindow: %s inside %s callback: close_cb ran %d time(s), inside callback=%d, ticks between close and teardown=%d\n",
+            ccKind >= 2 ? "[NSWindow close]" : "performClose:", ccKind % 2 == 0 ? "an event" : "a tick",
+            ccCloses, ccClosedInCallback, ccTicksAfterNativeClose);
+        {
+            static const char* names[] = {
+                "native close inside an event callback runs close_cb once, after it returns",
+                "native close inside a tick callback runs close_cb once, after it returns",
+                "direct NSWindow close inside an event callback runs close_cb once, after it returns, no tick between",
+                "direct NSWindow close inside a tick callback runs close_cb once, after it returns, no tick between"};
+            check(names[ccKind], ccSpinDone && ccCloses == 1 && !ccClosedInCallback && !sapp_window_valid(ccWindow) &&
+                (ccKind < 2 || ccTicksAfterNativeClose == 0));
+        }
         if (sapp_window_valid(ccWindow)) sapp_destroy_window(ccWindow);
-        if (++ccKind < 2) { enter(CcSetup); break; }
+        if (++ccKind < 4) { enter(CcSetup); break; }
+        xKind = 4;
+        enter(XSetup);
+        break;
+    case XSetup:
+        xArmed = xSpinDone = xQuitInside = yNativeClosed = yClosedInside = false;
+        yTicksAfterClose = yCloses = 0;
+        xQuitBefore = quitRequests;
+        xWindow = makeProbe(nullptr, xEvent, nullptr, "x");
+        yWindow = xKind == 5 ? makeProbe(yTick, nullptr, yClose, "y") : sapp_window{0};
+        enter(XWarm);
+        break;
+    case XWarm: {
+        if (!waited(0.5)) break;
+        _sapp_tc_window_t* x = _sapp_tc_lookup(xWindow);
+        if (!x) { check("cross-window probe created", false); enter(TerminateChild); break; }
+        xArmed = true;
+        enter(XWait);
+        _sapp_tc_view* view = x->view;
+        NSEvent* key = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
+            timestamp:0 windowNumber:x->window.windowNumber context:nil characters:@"x"
+            charactersIgnoringModifiers:@"x" isARepeat:NO keyCode:0];
+        [view keyDown:key];
+        break;
+    }
+    case XWait:
+        if (!waited(1.0)) break;
+        if (xKind == 4) {
+            std::printf("nativeWindow: performClose: of the first window inside another window's callback: quit requests %d, inside callback=%d\n",
+                quitRequests - xQuitBefore, xQuitInside);
+            check("first-window performClose: inside a callback asks to quit once, after it returns (vetoed)",
+                xSpinDone && quitRequests - xQuitBefore == 1 && !xQuitInside && _sapp_tc.app.main && first->window.visible);
+            quitRequests = xQuitBefore;   // keep the scenario's own quit count
+        } else {
+            std::printf("nativeWindow: [NSWindow close] of Y inside X's callback: close_cb ran %d time(s), inside=%d, Y ticks between close and teardown=%d\n",
+                yCloses, yClosedInside, yTicksAfterClose);
+            check("direct close of another window inside a callback: close_cb once, after it returns, no tick between",
+                xSpinDone && yCloses == 1 && !yClosedInside && yTicksAfterClose == 0 && !sapp_window_valid(yWindow));
+            if (sapp_window_valid(yWindow)) sapp_destroy_window(yWindow);
+        }
+        if (sapp_window_valid(xWindow)) sapp_destroy_window(xWindow);
+        if (++xKind <= 5) { enter(XSetup); break; }
         enter(TerminateChild);
         break;
     case TerminateChild: {
-        // Terminate ends the process, so that scenario runs in a child.
-        NSTask* task = [NSTask new];
-        task.executableURL = [NSURL fileURLWithPath:NSProcessInfo.processInfo.arguments[0]];
-        task.arguments = @[@"--display", @"--terminate-in-callback"];
-        NSPipe* pipe = [NSPipe pipe];
-        task.standardOutput = pipe;
-        NSError* error = nil;
-        const bool launched = [task launchAndReturnError:&error];
-        NSData* output = launched ? [pipe.fileHandleForReading readDataToEndOfFile] : nil;
-        if (launched) [task waitUntilExit];
-        NSString* text = output ? [[NSString alloc] initWithData:output encoding:NSUTF8StringEncoding] : @"";
-        std::printf("%s", text.UTF8String);
+        // Terminate ends the process, so these scenarios run in children.
+        auto runChild = [](NSString* mode, int* status) -> NSString* {
+            NSTask* task = [NSTask new];
+            task.executableURL = [NSURL fileURLWithPath:NSProcessInfo.processInfo.arguments[0]];
+            task.arguments = @[@"--display", mode];
+            NSPipe* pipe = [NSPipe pipe];
+            task.standardOutput = pipe;
+            NSError* error = nil;
+            if (![task launchAndReturnError:&error]) { *status = -1; return @""; }
+            NSData* output = [pipe.fileHandleForReading readDataToEndOfFile];
+            [task waitUntilExit];
+            *status = task.terminationStatus;
+            NSString* text = [[NSString alloc] initWithData:output encoding:NSUTF8StringEncoding];
+            std::printf("%s", text.UTF8String);
+            return text ? text : @"";
+        };
+        int status = 0;
+        NSString* text = runChild(@"--terminate-in-callback", &status);
         check("terminate inside a callback (child): veto works, cleanup and exit once after the callback",
-            launched && task.terminationStatus == 0 && [text containsString:@"terminate scenario complete"] &&
+            status == 0 && [text containsString:@"terminate scenario complete"] && ![text containsString:@": FAIL"]);
+        text = runChild(@"--session-end-in-callback", &status);
+        std::printf("nativeWindow: session-end child exited with %d\n", status);
+        check("session end inside a callback (child): not asked, cleanup once, _exit(app code), never back in the callback",
+            status == 7 && [text componentsSeparatedByString:@"session-end cleanup ran"].count == 2 &&
+            ![text containsString:@"QUIT_REQUESTED delivered"] && ![text containsString:@"returned into the callback"] &&
             ![text containsString:@": FAIL"]);
+        text = runChild(@"--plain-quit-in-callback", &status);
+        check("plain quit Apple event inside a callback (child) still defers until it returns",
+            status == 0 && [text containsString:@"plain quit scenario complete"] && ![text containsString:@": FAIL"]);
         sapp_window_request_close(second);
         enter(CloseSecondary);
         break;
@@ -852,13 +977,23 @@ void step() {
 void mainEvent(const sapp_event* event) {
     if (event->type == SAPP_EVENTTYPE_QUIT_REQUESTED) {
         ++quitRequests;
+        if (sessionEndMode) { std::printf("nativeWindow: QUIT_REQUESTED delivered\n"); std::fflush(stdout); }
         if (termInCallback) quitInsideCallback = true;
+        if (ccInCallback) xQuitInside = true;
         if (!allowQuit) sapp_cancel_quit();
     }
 }
 
 void mainFrame() {
     ++mainFrames;
+    if ((sessionEndMode || plainQuitMode) && mainFrames == 10) {
+        allowQuit = true;
+        spinWithQuitEvent(sessionEndMode ? kAELogOut : 0);
+        termSpinReturned = true;
+        if (sessionEndMode) { std::printf("nativeWindow: session end returned into the callback\n"); std::fflush(stdout); }
+        return;
+    }
+    if (sessionEndMode || plainQuitMode) return;
     if (terminateMode) {
         if (mainFrames == 10) {             // round 1: vetoed
             spinWithTerminate();
@@ -903,7 +1038,8 @@ void initialized() {
         check("covered launch initializes before first frame", sapp_frame_count() == 0 && first->occluded);
         return;
     }
-    if (terminateMode) return;
+    if (terminateMode || sessionEndMode || plainQuitMode) return;
+    trussc::internal::appExitCode() = 0;
     const float scale = expectedScale(first->window);
     std::printf("nativeWindow: backingScaleFactor=%.2f high_dpi=%d main=%.2f/%dx%d (%dx%d pt)\n",
         first->window.backingScaleFactor, !noHighDpi, first->dpi_scale, first->fb_width, first->fb_height,
@@ -961,7 +1097,16 @@ void finish() {
             termRound == 2 && quitRequests == 2 && cleanups == 1 && !cleanupInsideCallback && !quitInsideCallback && termSpinReturned);
         if (!failures) std::puts("nativeWindow: terminate scenario complete");
     }
-    if (!coveredFirst && !terminateMode) check("scenario completed", stage == Done && quitRequests == 2);
+    if (sessionEndMode) check("session end while busy must not defer to a normal exit", false);
+    if (plainQuitMode) {
+        std::printf("nativeWindow: plain quit child: quit requests=%d cleanups=%d inside callback: quit=%d cleanup=%d, spin returned=%d\n",
+            quitRequests, cleanups, quitInsideCallback, cleanupInsideCallback, termSpinReturned);
+        check("plain quit Apple event inside a callback defers: asked and cleaned up once, after the callback",
+            quitRequests == 1 && cleanups == 1 && !quitInsideCallback && !cleanupInsideCallback && termSpinReturned);
+        if (!failures) std::puts("nativeWindow: plain quit scenario complete");
+    }
+    if (!coveredFirst && !terminateMode && !sessionEndMode && !plainQuitMode)
+        check("scenario completed", stage == Done && quitRequests == 2);
     std::fflush(stdout);
     _exit(failures ? 1 : 0);
 }
@@ -974,6 +1119,9 @@ int main(int argc, char** argv) {
     noHighDpi = argc > 2 && !std::strcmp(argv[2], "--no-high-dpi");
     coveredFirst = argc > 2 && !std::strncmp(argv[2], "--covered-", 10);
     terminateMode = argc > 2 && !std::strcmp(argv[2], "--terminate-in-callback");
+    sessionEndMode = argc > 2 && !std::strcmp(argv[2], "--session-end-in-callback");
+    plainQuitMode = argc > 2 && !std::strcmp(argv[2], "--plain-quit-in-callback");
+    if (sessionEndMode) trussc::internal::appExitCode() = 7;   // must reach _exit
     if (coveredFirst) {
         if (!std::strcmp(argv[2], "--covered-draw")) launchHidden = 1;
         if (!std::strcmp(argv[2], "--covered-pause")) launchHidden = -1;

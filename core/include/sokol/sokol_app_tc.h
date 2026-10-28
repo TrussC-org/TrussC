@@ -2631,6 +2631,7 @@ struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     bool link_suspended;                /* AppKit stops the view's display link while not visible */
     bool suspended_sent;                /* SUSPENDED delivered: draw admission paused while hidden */
     int callback_depth;                 /* client callbacks of this window on the stack */
+    bool closed_pending;                /* closed natively while busy; close handling deferred */
 };
 
 #define _SAPP_TC_MAX_WINDOWS (32)
@@ -2906,7 +2907,7 @@ static void _sapp_tc_mac_contained(const char* where) noexcept {
 }
 
 static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
-    if (!w->ready || !w->desc.event_cb || (w->events_enabled && !w->events_enabled())) return;
+    if (!w->ready || w->closed_pending || !w->desc.event_cb || (w->events_enabled && !w->events_enabled())) return;
     // Event metadata keeps the process (first-window) frame count, as before.
     ev->frame_count = _sapp_tc.app.main ? _sapp_tc.app.main->frame_count : 0;
     ev->window_width = w->win_width;
@@ -2950,7 +2951,7 @@ static void _sapp_tc_mac_stop_fallback(_sapp_tc_window_t* w) {
    tick may draw is decided by effective visibility (trust_hidden_signals)
    and draw_while_hidden in the tick. */
 static void _sapp_tc_mac_select_source(_sapp_tc_window_t* w) {
-    const bool fallback = w->ready && w->link_suspended && w->view;
+    const bool fallback = w->ready && !w->closed_pending && w->link_suspended && w->view;
     if (fallback == w->fallback_active) return;
     if (!fallback) { _sapp_tc_mac_stop_fallback(w); return; }
     NSTimer* t = [NSTimer timerWithTimeInterval:w->refresh_period
@@ -3332,7 +3333,7 @@ static BOOL _sapp_tc_mac_close(_sapp_tc_window_t* w) {
 /* The native window has closed: the first window terminates the AppKit
    application (cleanup runs in applicationWillTerminate, never returns);
    any other window reports to its close callback, which may destroy it. */
-static void _sapp_tc_mac_closed(_sapp_tc_window_t* w) {
+static void _sapp_tc_mac_closed_now(_sapp_tc_window_t* w) {
     if (w->is_main) {
         [NSApp terminate:nil];
         return;
@@ -3349,6 +3350,21 @@ static void _sapp_tc_mac_closed(_sapp_tc_window_t* w) {
     void* user = w->desc.user_data;
     _sapp_tc_mac_callback_scope scope(w);
     try { close_cb(handle, user); } catch (...) { _sapp_tc_mac_contained("sapp_window_desc.close_cb"); }
+}
+
+/* windowWillClose: cannot refuse, and -[NSWindow close] reaches it without
+   windowShouldClose:. While any tick, callback or constructor is active, only
+   record the close: the window stops ticking (no drawable, no present) and
+   receiving events, and the record and NSWindow stay alive. The deferred pass
+   after the outermost callback runs the close handling above, unchanged and
+   not vetoable (the native window is already closed). */
+static void _sapp_tc_mac_closed(_sapp_tc_window_t* w) {
+    if (_sapp_tc_mac_busy()) {
+        w->closed_pending = true;
+        _sapp_tc.deferred_blocked = true;
+        return;
+    }
+    _sapp_tc_mac_closed_now(w);
 }
 
 static void _sapp_tc_mac_fullscreen_terminal(_sapp_tc_window_t* w, bool observed) {
@@ -3568,7 +3584,8 @@ static bool _sapp_tc_mac_busy(void) {
 static bool _sapp_tc_mac_deferred_pending(void) {
     if (_sapp_tc.terminate_pending || _sapp_tc.app.quit_requested || _sapp_tc.app.quit_ordered) return true;
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
-        if (_sapp_tc.windows[i] && _sapp_tc.windows[i]->close_requested) return true;
+        const _sapp_tc_window_t* cw = _sapp_tc.windows[i];
+        if (cw && (cw->close_requested || cw->closed_pending)) return true;
     }
     return false;
 }
@@ -3580,6 +3597,14 @@ static void _sapp_tc_mac_process_deferred(void) {
         return;
     }
     _sapp_tc.deferred_blocked = false;
+    // Native closes that happened while busy: run their close handling now.
+    // Re-fetch each slot: a close callback destroys windows.
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+        _sapp_tc_window_t* cw = _sapp_tc.windows[i];
+        if (!cw || !cw->closed_pending) continue;
+        cw->closed_pending = false;
+        _sapp_tc_mac_closed_now(cw);
+    }
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         _sapp_tc_window_t* cw = _sapp_tc.windows[i];
         if (!cw || !cw->close_requested) continue;
@@ -3682,7 +3707,7 @@ static void _sapp_tc_mac_tick_body(_sapp_tc_window_t* w, CADisplayLink* link) {
    its next tick after the callback returns runs normally and processes
    deferred close/quit. */
 static bool _sapp_tc_mac_tick_blocked(const _sapp_tc_window_t* w) {
-    return w->in_tick || w->callback_depth > 0;
+    return w->in_tick || w->callback_depth > 0 || w->closed_pending;
 }
 
 static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {
@@ -3972,6 +3997,57 @@ static bool _sapp_tc_mac_create_main_window(void) {
     return true;
 }
 
+/* keyAEQuitReason ('why?') of the quit Apple event being handled: Cocoa
+   forwards it for OS session exits. A real logout sends it as an event
+   attribute, not a parameter (seen on macOS), so read the attribute first.
+   Zero when absent or unreadable: a plain quit. */
+static AEEventID _sapp_tc_mac_quit_reason(void) {
+    NSAppleEventDescriptor* event = [[NSAppleEventManager sharedAppleEventManager] currentAppleEvent];
+    NSAppleEventDescriptor* reason = [event attributeDescriptorForKeyword:0x7768793f];
+    if (!reason) reason = [event paramDescriptorForKeyword:0x7768793f];
+    return reason ? [reason enumCodeValue] : 0;
+}
+
+static bool _sapp_tc_mac_is_session_end(AEEventID reason) {
+    switch (reason) {
+        case 0x6c6f676f: // kAELogOut ('logo')
+        case 0x726c676f: // kAEReallyLogOut ('rlgo')
+        case 0x72727374: // kAEShowRestartDialog ('rrst')
+        case 0x72657374: // kAERestart ('rest')
+        case 0x7273646e: // kAEShowShutdownDialog ('rsdn')
+        case 0x73687574: // kAEShutDown ('shut')
+            return true;
+        default:
+            return false;
+    }
+}
+
+/* Session end while a tick, callback or constructor is active, as Win32
+   WM_ENDSESSION: the App is not asked (no QUIT_REQUESTED) and the session is
+   not cancelled. Run the App's exit and cleanup once, in place, then end the
+   process at once so control never returns to the interrupted callback.
+   Native windows and GPU resources are left to the OS. */
+static void _sapp_tc_mac_session_end(AEEventID reason) {
+    switch (reason) {
+        case 0x72727374: case 0x72657374: trussc::internal::setExitReason("os-restart"); break;
+        case 0x7273646e: case 0x73687574: trussc::internal::setExitReason("os-shutdown"); break;
+        default: trussc::internal::setExitReason("os-logoff"); break;
+    }
+    _sapp_tc.app.quit_ordered = true;
+    if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
+        _sapp_tc.app.cleanup_called = true;
+        try {
+            if (_sapp_tc.app.desc.cleanup_cb) {
+                _sapp_tc.app.desc.cleanup_cb();
+            } else if (_sapp_tc.app.desc.cleanup_userdata_cb) {
+                _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
+            }
+        } catch (...) { _sapp_tc_mac_contained("sapp_desc.cleanup_cb"); }
+    }
+    fflush(NULL);
+    _exit(trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1);
+}
+
 @interface _sapp_tc_app_delegate : NSObject <NSApplicationDelegate>
 @end
 
@@ -4011,6 +4087,7 @@ static bool _sapp_tc_mac_create_main_window(void) {
 }
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender {
     (void)sender;
+    const AEEventID quit_reason = _sapp_tc_mac_quit_reason();
     if (!_sapp_tc.app.quit_ordered) {
         // Cocoa forwards the quit Apple event's reason for OS session exits.
         // keyAEQuitReason ('why?'). [TrussC] Any other quit (Cmd+Q, the Dock's
@@ -4019,11 +4096,7 @@ static bool _sapp_tc_mac_create_main_window(void) {
         // IfEmpty keeps a reason an earlier exit request already recorded.
         // A real logout sends the reason as an event attribute, not a
         // parameter (seen on macOS); read the attribute first.
-        NSAppleEventDescriptor* event = [[NSAppleEventManager sharedAppleEventManager] currentAppleEvent];
-        NSAppleEventDescriptor* reason = [event attributeDescriptorForKeyword:0x7768793f];
-        if (!reason) reason = [event paramDescriptorForKeyword:0x7768793f];
-        const AEEventID why = [reason enumCodeValue];
-        switch (why) {
+        switch (quit_reason) {
             case 0x6c6f676f: // kAELogOut ('logo')
             case 0x726c676f: // kAEReallyLogOut ('rlgo')
                 trussc::internal::setExitReason("os-logoff"); break;
@@ -4036,8 +4109,10 @@ static bool _sapp_tc_mac_create_main_window(void) {
         }
     }
     if (_sapp_tc_mac_busy()) {
-        /* Inside a callback, tick or constructor (e.g. a run loop spun by a
-           client callback): cancel this request and replay it after they return.
+        // A session end is not asked and not cancelled (as Win32 WM_ENDSESSION).
+        if (_sapp_tc_mac_is_session_end(quit_reason)) _sapp_tc_mac_session_end(quit_reason);
+        /* Any other quit inside a callback, tick or constructor (e.g. a run loop
+           spun by a client callback): cancel this request and replay it after they return.
            NSTerminateLater would wait in a nested modal loop above that
            callback, which can then never return. */
         _sapp_tc.terminate_pending = true;
