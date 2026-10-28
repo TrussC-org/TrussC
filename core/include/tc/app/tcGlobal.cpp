@@ -1013,6 +1013,7 @@ void createMainWindow(const WindowSettings& settings) {
     auto& window = *mainWindow();
     WindowRequestAccess::resetForLaunch(window);
     WindowRequestAccess::binding(window) = {};
+    WindowRequestAccess::binding(window).geometry = {double(settings.width), double(settings.height), settings.pixelPerfect};
     window.ctx_.fbWidth = window.ctx_.fbHeight = 0;
     window.ctx_.dpiScale = 1;
     window.ctx_.suspended = false;
@@ -1020,21 +1021,6 @@ void createMainWindow(const WindowSettings& settings) {
     window.ctx_.acquireSwapchainUser = nullptr;
     window.ctx_.activateNative = nullptr;
     mcp::internal::mainWindowTitle(settings.title);
-}
-MainWindowDispatchScope::MainWindowDispatchScope() : window(mainWindow()) {
-    if (!window) return;
-    // Single-window ports can change native focus without emitting an event.
-    refreshMainWindowMetadata();
-    WindowRequestAccess::applyPendingApp(*window);
-    ++window->dispatchDepth_;
-    try { syncWindowAppSize(*window, true); }
-    catch (...) { --window->dispatchDepth_; throw; }
-}
-MainWindowDispatchScope::~MainWindowDispatchScope() {
-    if (!window) return;
-    --window->dispatchDepth_;
-    TeardownSteps steps;
-    steps.run("main App boundary", [&] { WindowRequestAccess::applyPendingApp(*window); });
 }
 bool mainWindowDispatchActive() {
     auto* window = mainWindow();
@@ -1238,12 +1224,11 @@ void runMainUpdate(double fixedDelta,
     ++wctx.updateCount;
     CrashPhaseScope crashPhase("update");
     EntryStackGuard guard(AppEntry::Update);
-    if (wctx.isMain && appUpdateFunc) appUpdateFunc();
-    else events().update.notify();
+    events().update.notify();
 }
 
 // Update processing of one window-loop frame when update is NOT synced to
-// draw (setIndependentFps). Split out of _frame_cb so the stepping can be
+// draw (setIndependentFps). The common scheduler uses this stepping; it can be
 // driven headless (core/tests/frameTiming).
 //   VSYNC:        one update per frame, measured dt.
 //   fixed Hz:     accumulator steps at the nominal 1/updateFps, at most
@@ -1291,8 +1276,8 @@ void runIndependentUpdates(std::chrono::steady_clock::time_point now) {
     }
 }
 
-// Draw decision of one window-loop frame (before _frame_cb's capture
-// override). Split out of _frame_cb so it can be driven headless.
+// Draw decision of one window-loop frame (before the capture override).
+// The common scheduler uses this decision; it can also be driven headless.
 //   VSYNC:        every frame.
 //   fixed fps:    frame skipping; at most one draw per tick, with a
 //                 half-tick tolerance so a target at or just above the
@@ -1319,7 +1304,7 @@ bool mainLoopShouldDraw(std::chrono::steady_clock::time_point now) {
 
 // The update of a drawn frame when update is synced to draw (setFps:
 // VSYNC, a fixed rate or EVENT_DRIVEN): one update per drawn frame with
-// the measured dt, and its getFrameRate() sample. _frame_cb runs it after
+// the measured dt, and its getFrameRate() sample. The scheduler runs it after
 // beginFrame(). Split out so it can be driven headless.
 void runSyncedUpdate() {
     if (!mainLoop().updateSyncedToDraw) return;
@@ -1371,15 +1356,20 @@ ResizeEventArgs framebufferResizeArgs(int width, int height, float dpi) {
 
 uint64_t resourceFrameKey() {
     const auto& ctx = currentWindowContext();
-    return ctx.isMain ? ctx.updateCount : ctx.resourceTickCount;
+    // The explicit non-window headless loop has updates, without native Window admissions.
+    if (&ctx == nonWindowContextIfInitialized()) return ctx.updateCount;
+    return ctx.resourceTickCount;
 }
 
-uint64_t deviceFrameCount() { return sapp_frame_count(); }
+uint64_t deviceFrameCount() {
+    // Upload admission follows shared GPU commits, including no-window-draw turns.
+    return sg_isvalid() ? sg_query_stats().prev_frame.frame_index : 0;
+}
 
 // Single occlusion policy for all windows. Desktop secondary native sources
 // deliver gated callbacks here before drawable admission. Main keeps
 // updating on every supplied tick, independently of its visibility snapshot.
-static bool occlusionPausesUpdate(const WindowContext& ctx) { return !ctx.isMain; }
+static bool occlusionPausesUpdate(const WindowContext& ctx) { return ctx.pauseUpdatesWhenHidden; }
 
 static bool nativeSuspensionPausesUpdate() {
 #if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
@@ -1450,7 +1440,7 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
         // Expiry does not require a frame. Keep producers queued for a safe
         // readback after a later admitted frame, until their existing deadline.
         // Admission itself may block, so expiry uses a fresh clock sample.
-        mcp::internal::drainDeferredResponses(ctx.isMain ? nullptr : &ctx, false, windowClockNow());
+        mcp::internal::drainDeferredResponses(ctx.deferredResponseTarget, false, windowClockNow(), false);
 #endif
         return false;
     };
@@ -1470,7 +1460,7 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     // Independent callbacks pass the old free-running secondary admission
     // point before updates. Synchronized ticks first pass the draw throttle.
     const bool independentTick = !ctx.loop.updateSyncedToDraw;
-    if (!ctx.isMain && !nativeDrawGated && independentTick) ++ctx.resourceTickCount;
+    if (!nativeDrawGated && independentTick) ++ctx.resourceTickCount;
     const auto updatesBefore = ctx.updateCount;
     if (!ctx.loop.updateSyncedToDraw) runIndependentUpdates(now);
     if (nativeDrawGated) {
@@ -1485,19 +1475,9 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     if (!shouldDraw) return nonPresentingExit();
     // Base increment point for synchronized ticks: after throttle, before
     // beginFrame/update, including a later failed render admission.
-    if (!ctx.isMain && !independentTick) ++ctx.resourceTickCount;
+    if (!independentTick) ++ctx.resourceTickCount;
     if (presentation) presentation->begin();
     else {
-        if (!ctx.isMain && ctx.swapchainTarget.resources().context.id == SG_INVALID_ID) {
-            sgl_context_desc_t desc = {};
-            desc.max_vertices = sglBudget().maxVertices;
-            desc.max_commands = sglBudget().maxCommands;
-            desc.color_format = ctx.swapchainTarget.colorFormat;
-            desc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-            desc.sample_count = ctx.swapchainTarget.sampleCount;
-            ctx.swapchainTarget.resources().makeContext(desc, "a window");
-        }
-        if (!ctx.isMain) { sgl_set_context(ctx.swapchainTarget.resources().context); sgl_defaults(); }
         beginFrame();
     }
     // A mode switch from an independent update applies on the next tick;
@@ -1519,7 +1499,7 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
         EntryStackGuard guard(AppEntry::Draw);
         if (!presentation) {
             refreshWindowDrawingSize();
-            if (window && (!ctx.isMain || window->clearColorSet_)) { const auto& c = window->clearColor_; clear(c.r, c.g, c.b, c.a); }
+            if (window && window->clearColorSet_) { const auto& c = window->clearColor_; clear(c.r, c.g, c.b, c.a); }
         }
         WindowCallbackTimeScope callbackTime;
         events().draw.notify();
@@ -1536,7 +1516,7 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     ++ctx.drawCount;
     { EntryStackGuard guard(AppEntry::AfterFrame); events().afterFrame.notify(); }
     if (presentation) presentation->finish();
-    else if (!ctx.isMain) drainPendingScreenshots();
+    else drainPendingScreenshots();
     return true;
 }
 

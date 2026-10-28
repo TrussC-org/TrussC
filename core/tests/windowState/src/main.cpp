@@ -1,3 +1,4 @@
+#include "../../common/tcWindowTest.h"
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
@@ -120,8 +121,8 @@ void exercise(Window& w, uint32_t id) {
     check("colliding extent is still deduplicated after observation", notifications == 2);
     collision.disconnect();
     auto sizeEntry = [&] {
-        internal::windowCallback([&] {
-            internal::WindowDispatchScope scope(w);
+        tcCoreTest::nativeBoundary([&] {
+            internal::WindowEntryScope scope(w);
             internal::syncWindowAppSize(w, true);
             internal::syncWindowAppSize(w);
         });

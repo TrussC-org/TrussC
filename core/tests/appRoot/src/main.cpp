@@ -106,7 +106,7 @@ static void runAppCallbacks() {
     check("runApp: ...and resizes no window, only the App's own size",
           g_widthAfterCtor == 320 && g_heightAfterCtor == 240);
 
-    internal::appUpdateFunc();   // first update: setup()
+    events().update.notify();   // first update: setup()
     check("runApp: setup() ran in the first update", g_setupRan);
     check("runApp: setSize() in setup() does not warn", g_warningsFromSetup == 0);
     check("runApp: ...and goes to the main window (the App's size is left to windowResized)",

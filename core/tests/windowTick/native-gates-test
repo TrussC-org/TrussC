@@ -71,6 +71,7 @@ mac_drawable = mac_extract('static id<CAMetalDrawable> _sapp_tc_mac_drawable(', 
     ('return nil;', 'return 0;'), ('== nil', '== 0'),))
 mac_swap = mac_extract('static void _sapp_tc_mac_swap(', (('= nil', '= 0'),))
 mac_tick = mac_extract('static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {', (
+    ('_sapp_tc_mac_init_client();', '(void)0; /* admission is covered by host-entry-test */'),
     ('@autoreleasepool', ''), ('link.timestamp', 'link->timestamp'),
     ('link.targetTimestamp', 'link->targetTimestamp'),))
 
@@ -90,23 +91,12 @@ policy = body(common, 'static bool occlusionPausesUpdate(', 'tcGlobal.cpp')
 helpers = '\n'.join(body(shared, 'static inline bool '+name+'(', 'sokol_window_native.h')
                   for name in ('_sapp_tc_native_iconified', '_sapp_tc_native_occluded', '_sapp_tc_native_hidden'))
 
-# Keep the adapter contract: update-only policy dispatch precedes size/drawable
-# admission on each desktop OS. These are source checks, not native adapter runs.
-for adapter in ('mac/tcWindowMac.mm', 'win/tcWindowWin.cpp', 'linux/tcWindowLinux.cpp'):
-    text = body(read(root/'core/platform'/adapter), 'void windowTickImpl(', adapter)
-    marker = 'if (win->isOccluded()) {'
-    gate = body(text, marker, adapter)
-    if not ('false, nullptr, true)' in gate and 'internal::runWindowTick(' in gate
-            and position(text, marker, adapter) < position(text, 'if (ctx.fbWidth <= 0', adapter)):
-        fail(f'{adapter}: update-only policy must precede framebuffer admission')
-print('native-gates: desktop adapters dispatch gated policy before size admission: PASS', flush=True)
-
 code = r'''
 #include <cstdio>
 #include <cstdint>
 #include <initializer_list>
 #include <vector>
-struct WindowContext { bool isMain; };
+struct WindowContext { bool pauseUpdatesWhenHidden; };
 ''' + policy + r'''
 struct sapp_window { unsigned id; };
 struct _sapp_tc_timing_t { double smooth_dt=.017; };
@@ -148,7 +138,7 @@ void shared_checks() {
         check("shared iconified query", _sapp_tc_native_iconified(&w)==(trust && iconic));
         check("shared occluded query", _sapp_tc_native_occluded(&w)==(trust && obscured));
         check("shared effective hidden query", _sapp_tc_native_hidden(&w)==(trust && (iconic || obscured)));
-        check("tcGlobal policy: main updates, secondary pauses", occlusionPausesUpdate({role})==!role);
+        check("tcGlobal policy: main updates, secondary pauses", occlusionPausesUpdate({!role})==!role);
     }
     summary("shared visibility helpers / tcGlobal policy", before, count);
 }
@@ -193,7 +183,7 @@ void _sapp_tc_mac_process_deferred() { ++deferred; }
 void callback(sapp_window h,void* user) {
     auto* w=static_cast<Native*>(user); ++consulted;
     check("macOS callback target and reentry guard", h.id==w->win_id && w->in_tick);
-    if (!(_sapp_tc_native_hidden(w) && occlusionPausesUpdate({w->is_main}))) ++updates;
+    if (!(_sapp_tc_native_hidden(w) && occlusionPausesUpdate({!w->is_main}))) ++updates;
     if (reenter) {
         int prior=consulted; reenter=false; _sapp_tc_mac_tick(w,nil); reenter=true;
         check("macOS tick callback cannot reenter tick", consulted==prior);
@@ -295,6 +285,7 @@ int probe_result, present_result;
 bool changed, resize_ok, skip_in_callback, cancel_in_callback, loss_in_callback, reenter;
 Native* target;
 std::vector<int> events, callback_events;
+void _sapp_tc_win32_init_client() {} // admission covered by host-entry-test
 static void _sapp_tc_win32_tick(Native* w);
 double _sapp_tc_now() { return 10; }
 void _sapp_tc_timing_update(_sapp_tc_timing_t*) {}
@@ -317,7 +308,7 @@ Native* _sapp_tc_lookup(sapp_window h) { return h.id==target->win_id?target:null
 void callback(sapp_window h,void* user) {
     Native* w=static_cast<Native*>(user); ++consulted; callback_events=events;
     check("Win32 callback target and reentry guard", h.id==w->win_id && w->in_tick);
-    if (!(_sapp_tc_native_hidden(w) && occlusionPausesUpdate({w->is_main}))) ++updates;
+    if (!(_sapp_tc_native_hidden(w) && occlusionPausesUpdate({!w->is_main}))) ++updates;
     if (reenter) {
         int prior=consulted; reenter=false; _sapp_tc_win32_tick(w); reenter=true;
         check("Win32 tick callback cannot reenter tick", consulted==prior);
@@ -441,6 +432,7 @@ Native* _sapp_tc_lookup(sapp_window h) { return live && live->win_id == h.id ? l
 struct { double refresh_period=.017; int WM_STATE=1; } _sapp_tc;
 int consulted, updates, acquired, presents, state, polls;
 bool changed=false, closeOnResize=false, closeOnTick=false, reenter=false;
+void _sapp_tc_x11_init_client() {} // admission covered by host-entry-test
 static void _sapp_tc_x11_tick(Native*);
 std::vector<int> events;
 double _sapp_tc_now() { return 10; }
@@ -458,7 +450,7 @@ void callback(sapp_window,void* user) {
     check("X11 callback runs inside native tick guard", w->in_tick);
     if (reenter) { reenter=false; _sapp_tc_x11_tick(w); }
     if (closeOnTick) live=nullptr;
-    if (!(_sapp_tc_native_hidden(w) && occlusionPausesUpdate({w->is_main}))) ++updates;
+    if (!(_sapp_tc_native_hidden(w) && occlusionPausesUpdate({!w->is_main}))) ++updates;
 }
 ''' + extract('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {') + r'''
 enum { PropertyNewValue=1, IconicState=1, NormalState=2,

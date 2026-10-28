@@ -117,6 +117,7 @@
 // =============================================================================
 
 #include "tcApp.h"
+#include "../../common/tcWindowTest.h"
 #include "impl/httplib.h"
 
 #ifndef TC_HOT_RELOAD_BUILD
@@ -1140,7 +1141,7 @@ static int runReloadCheck() {
             sapp_event event{};
             event.type = type; event.num_touches = 1;
             event.touches[0].identifier = 42; event.touches[0].changed = true;
-            internal::_event_cb(&event);
+            tcCoreTest::dispatchMainEvent(&event);
         };
         sendTouch(SAPP_EVENTTYPE_TOUCHES_BEGAN);
         sendTouch(SAPP_EVENTTYPE_TOUCHES_MOVED);
@@ -1479,7 +1480,7 @@ struct ResizeApp : App {
         dispatchActiveInResize = internal::mainWindowDispatchActive();  // reload() defers on exactly this
         sapp_event ev{};
         ev.type = SAPP_EVENTTYPE_FOCUSED;
-        internal::_event_cb(&ev);  // synchronous OS reentry (modal / native call)
+        tcCoreTest::dispatchMainEvent(&ev);  // synchronous OS reentry (modal / native call)
         attachedAfterPump = getWindow() != nullptr;
         marker = member;  // reads the receiver after the nested event
         ++callbackSwaps;
@@ -1500,7 +1501,7 @@ void startupResize() {
     internal::mainWindowContext().fbWidth = 128; internal::mainWindowContext().fbHeight = 96;
     auto app = std::make_shared<ResizeApp>();
     internal::attachMainApp(app);
-    { internal::MainWindowDispatchScope boundary; }
+    { internal::WindowEntryScope boundary(*internal::mainWindow()); }
     check("startup resize: callback ran once with the receiver intact", callbackSwaps == 1 && marker == 123);
     check("startup resize: dispatch active, reload defers", dispatchActiveInResize);
     check("startup resize: App not cleaned up mid-callback", cleanupInCallback == 0 && attachedAfterPump);
@@ -1516,7 +1517,7 @@ void reloadResize() {
     lib.createApp = createResizeApp;
     lib.destroyApp = destroyGuestApp;
     lib.create();  // the reload attaches the new guest App, then seeds its size
-    { internal::MainWindowDispatchScope boundary; }
+    { internal::WindowEntryScope boundary(*internal::mainWindow()); }
     check("reload seed: callback ran once with the receiver intact", callbackSwaps == 1 && marker == 123);
     check("reload seed: dispatch active, reload defers", dispatchActiveInResize);
     check("reload seed: App not cleaned up mid-callback", cleanupInCallback == 0 && attachedAfterPump);

@@ -6,7 +6,7 @@
 // Headless, console, exit code = pass/fail (build_all.py runs it in CI).
 // A Window made in a headless test has no native side. OpenWindow stands in
 // for an open one, and tick() / pressKey() drive it the way the platform glue
-// does (window context active, internal::WindowDispatchScope around the tick
+// does (window context active, internal::WindowEntryScope around the tick
 // or the event). Build with -fsanitize=address to check the memory side.
 //
 // Guards the invariants:
@@ -78,7 +78,7 @@ static void tick(Window& w) {
     internal::WindowContext* prev = internal::currentWindowCtx();
     internal::currentWindowCtx() = &w.context();
     {
-        internal::WindowDispatchScope scope(w);
+        internal::WindowEntryScope scope(w);
         w.events().update.notify();
     }
     internal::currentWindowCtx() = prev;
@@ -89,7 +89,7 @@ static void pressKey(Window& w, int key) {
     internal::WindowContext* prev = internal::currentWindowCtx();
     internal::currentWindowCtx() = &w.context();
     {
-        internal::WindowDispatchScope scope(w);
+        internal::WindowEntryScope scope(w);
         KeyEventArgs e;
         e.key = key;
         w.events().keyPressed.notify(e);
@@ -274,7 +274,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         win.setApp(old);
         tick(win);
         {
-            internal::WindowDispatchScope outer(win);
+            internal::WindowEntryScope outer(win);
             win.setApp(next);
             pressKey(win, 'Q');
             check("nested event: pending swap stays pending inside the outer tick",

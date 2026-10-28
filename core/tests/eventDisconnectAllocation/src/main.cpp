@@ -1,3 +1,4 @@
+#include "../../common/tcWindowTest.h"
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
@@ -193,7 +194,7 @@ void prepareReleasedTarget(Window& win) {
 // A native C callback and the dispatch scope's noexcept destructor must both
 // contain registration failure. Run the same allocation matrix through them.
 extern "C" void swapAtCallbackBoundary(Window* win, const std::shared_ptr<App>* next, int nth) noexcept {
-    internal::WindowDispatchScope scope(*win);
+    internal::WindowEntryScope scope(*win);
     win->setApp(*next);
     arm(nth);
 }
@@ -249,7 +250,7 @@ void swaps(bool callbackBoundary = false) {
 }
 
 extern "C" void attachAtCallbackBoundary(Window* win) noexcept {
-    internal::windowCallback([&] { internal::applyPendingAppForTests(*win); });
+    tcCoreTest::nativeBoundary([&] { internal::applyPendingAppForTests(*win); });
 }
 bool attachment(int scenario, bool callback, int nth) {
     AttachmentDevice device;
@@ -361,7 +362,7 @@ struct ReenterOnRelease {
         : work(std::move(f)), releases(r) {}
     ~ReenterOnRelease() noexcept {
         ++releases;
-        internal::windowCallback(work);
+        tcCoreTest::nativeBoundary(work);
     }
 };
 template<class T>
@@ -617,7 +618,7 @@ void reentrantOtherPhases() {
             std::shared_ptr<App> next;
             PendingReentry(TestWindow& w, std::shared_ptr<App> n) : win(w), next(std::move(n)) {}
             ~PendingReentry() noexcept override {
-                internal::windowCallback([&] { win.setApp(next); attachAtCallbackBoundary(&win); });
+                tcCoreTest::nativeBoundary([&] { win.setApp(next); attachAtCallbackBoundary(&win); });
             }
         };
         win.setApp(a); internal::applyPendingAppForTests(win);
@@ -756,7 +757,7 @@ struct SweepApp : App {
     }
 };
 extern "C" void sweepCloseCallback(TestWindow* win) noexcept {
-    internal::windowCallback([&] { win->finish(); });
+    tcCoreTest::nativeBoundary([&] { win->finish(); });
 }
 bool sweepClose(int boundary, int queued, bool clearExit, int throwing, int nth) {
     CloseState state;
@@ -852,9 +853,8 @@ void closeSweep() {
 void callbackFailure() {
     TestWindow win;
     auto* previous = internal::currentWindowCtx();
-    internal::windowCallback([&] {
-        internal::currentWindowCtx() = &win.context();
-        internal::WindowDispatchScope dispatch(win);
+    tcCoreTest::nativeBoundary([&] {
+        internal::WindowEntryScope dispatch(win);
         throw 1;
     });
     check("native callback: thrown dispatch restores context and depth",

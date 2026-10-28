@@ -633,14 +633,6 @@ inline int runHotReloadApp(const WindowSettings& settings) {
         // TrussC's internal setup (screen size etc.) is already done by _setup_cb.
     };
 
-    internal::appUpdateFunc = []() {
-        events().update.notify();
-    };
-
-    internal::appDrawFunc = []() {
-        events().draw.notify();
-    };
-
     internal::appCleanupFunc = []() {
         // Retain the generation through hotReloadUnload, as on the old runner.
         auto app = internal::mainApp();
@@ -654,24 +646,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     internal::pixelPerfectMode() = settings.pixelPerfect;
 
     sapp_desc desc = buildWindowDescriptor(settings);
-    desc.frame_cb = []() noexcept {
-        if (frameReentryGuard) return;
-        TeardownSteps steps;
-        if (!mainWindowDispatchActive()) {
-            // Hold the native reentry guard across guest code (constructors,
-            // unload listeners and diagnostics can pump a modal event loop).
-            frameReentryGuard = true;
-            auto* previous = currentWindowCtx();
-            steps.run("hot reload boundary", [] {
-                restoreWindowContext(nullptr);
-                g_host.poll();
-            });
-            steps.run("hot reload context restoration", [&] { restoreWindowContext(previous); });
-            currentWindowCtx() = previous;
-            frameReentryGuard = false;
-        }
-        internal::_frame_cb();
-    };
+    setHostReloadPoll([] { g_host.poll(); });
     openEnvLogFile();   // TRUSSC_LOG_FILE before sapp_run(): init-time failures too
 #ifdef _WIN32
     ConsoleCPCtrlGuard consoleCtrl;   // restore both console code pages on exit
@@ -679,6 +654,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     appExitCode() = 0;
     appSetupCalled() = false;
     sapp_run(&desc);
+    setHostReloadPoll(nullptr);
     return appSetupCalled() ? appExitCode() : 1;
 }
 

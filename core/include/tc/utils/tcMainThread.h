@@ -10,12 +10,12 @@
 // race on Node::children_ and friends (it crashes, see SECURITY/threading docs).
 //
 // runOnMainThread() is the safe path: it queues `fn` and the framework runs it
-// at the start of the next frame (drained in _frame_cb, before update/draw),
+// at the next safe outer host turn, including turns with no window draw,
 // when no traversal is in flight. If you are already on the main thread it runs
 // immediately.
 //
-// Each frame runs what was queued when its drain started, in order; work queued
-// while the drain runs waits for the next frame, so the frame always starts.
+// Each turn runs what was queued when its drain started, in order; work queued
+// while the drain runs waits for the next turn, so the host always makes progress.
 // Calls without a token are never dropped and there is no limit: a queued
 // closure may edit the tree or free something. The count taken at drain start
 // is reported by the tc_get_health MCP tool (mainQueuePending). Code that may queue faster than the
@@ -193,7 +193,7 @@ namespace internal {
 }
 
 // Run `fn` on the main thread. Immediately if already on it; otherwise queued
-// to run at the start of the next frame. Safe to call from any thread.
+// to run at the next safe outer host turn. Safe to call from any thread.
 inline void runOnMainThread(std::function<void()> fn) {
     if (!fn) return;
     if (isMainThread()) { fn(); return; }
@@ -201,7 +201,7 @@ inline void runOnMainThread(std::function<void()> fn) {
 }
 
 // Run the main-thread work queued so far. Called by the framework once per
-// frame (in _frame_cb, before update/draw). Headless loops call it via the
+// outer host turn, before window traversal. Headless loops call it via the
 // framework's run loop; exposed under internal:: for those paths.
 // Takes everything queued at its start under one lock and runs it in order.
 // A runOnMainThread() called from a closure inside the drain is on the main

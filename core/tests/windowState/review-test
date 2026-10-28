@@ -49,11 +49,9 @@ def main():
     probe = '#include <TrussC.h>\n#include <cstdio>\n#include <stdexcept>\nusing namespace trussc;\n'
     probe += '#include "' + str(ROOT / 'core/tests/windowState/src/resizeDeliveryChecks.h') + '"\n'
     probe += 'namespace bridge {\n'
-    for marker in ('void dispatchWindowEvent(', 'void windowEventImpl(', 'void windowEvent('):
+    for marker in ('void dispatchWindowEvent(', 'void windowEvent('):
         probe += body(linux, marker) + '\n'
     probe += '}\n'
-    for name, path in (('linux', 'linux/tcWindowLinux.cpp'), ('win', 'win/tcWindowWin.cpp'), ('mac', 'mac/tcWindowMac.mm')):
-        probe += 'namespace adapter_' + name + ' {\n' + body(source('core/platform/' + path).read_text(), 'void windowTickImpl(') + '\n}\n'
     probe += r'''
 int checks=0, failures=0;
 void check(const char* name, bool ok) {
@@ -125,12 +123,11 @@ void resizeDelivery(bool main, bool pixels) {
     window.setIndependentFps(4,EVENT_DRIVEN); window.context().loop.redrawCount=0;
     auto event=[&] {
         sapp_event e{}; e.type=SAPP_EVENTTYPE_RESIZED;
-        if (main) internal::_event_cb(&e);
+        if (main) internal::mainWindowEvent(&e,handle,&window);
         else bridge::windowEvent(&e,handle,&window);
     };
     auto tick=[&] {
-        if (main) internal::_frame_cb();
-        else internal::windowCallback([&] { adapter_linux::windowTickImpl(handle,&window); });
+        internal::windowTick(handle, &window);
     };
     checkResizeDelivery(window,m,app,event,tick,check);
     check("resize probe does not acquire a drawable", native.acquisitions==0);
@@ -139,9 +136,7 @@ void resizeDelivery(bool main, bool pixels) {
 }
 int main() {
     getMainThreadId();
-    exercise(adapter_linux::windowTickImpl,"Linux");
-    exercise(adapter_win::windowTickImpl,"Win32 extraction");
-    exercise(adapter_mac::windowTickImpl,"macOS extraction");
+    exercise(internal::windowTick,"common host tick");
     for (bool pixels : {false,true}) {
         resizeDelivery(true,pixels); resizeDelivery(false,pixels);
     }

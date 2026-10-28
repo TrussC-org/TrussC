@@ -59,7 +59,16 @@ def main():
 namespace trussc {
 struct IVec2 { int x, y; };
 struct Window;
-struct AdapterState { int win = 2; };
+struct RecordingOperations {
+    void (*setTitle)(Window&, const char*) = nullptr;
+    void (*setSize)(Window&, double, double, bool) = nullptr;
+    void (*setPosition)(Window&, int, int) = nullptr;
+    IVec2 (*position)(const Window&) = nullptr;
+    void (*setFullscreen)(Window&, bool) = nullptr;
+    void (*toggleFullscreen)(Window&) = nullptr;
+};
+extern const RecordingOperations recordingOperations;
+
 float dpi = 1;
 double seenWidth = 0, seenHeight = 0;
 int calls = 0;
@@ -95,23 +104,21 @@ struct Window {
     void* native_ = nullptr;
     std::string title_;
     bool isOpen() const { return true; }
-    void setSecondaryTitle(const std::string&) {}
-    void setSecondaryPosition(int, int) {}
-    IVec2 getSecondaryPosition() { return {}; }
-    bool isSecondaryFullscreen() const { return false; }
-    void setSecondaryFullscreen(bool) {}
-    void setSecondarySize(double, double, bool = false);
+    struct { const RecordingOperations* operations = &recordingOperations; int handle = 2; } binding_;
+    auto& context() { return ctx_; }
     IVec2 control(internal::WindowControl, int, int, const std::string* = nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);
 };
-CONTROL_BODY
+namespace internal { int handle(const Window& w) { return w.binding_.handle; }
 SECONDARY_BODY
+}
+const RecordingOperations recordingOperations{nullptr, internal::nativeWindowSetSize};
+CONTROL_BODY
 }
 int main() {
     using namespace trussc;
-    AdapterState state;
-    Window window; window.native_ = &state;
+    Window window;
     for (bool mainWindow : {false, true}) {
-        window.ctx_.isMain = mainWindow;
+        window.ctx_.isMain = mainWindow; window.binding_.handle = mainWindow ? 1 : 2;
         for (float scale : {1.25f, 1.5f, 1.75f, 2.0f}) {
             dpi = window.ctx_.dpiScale = scale;
             const int previousCalls = calls;
@@ -132,7 +139,7 @@ int main() {
 }
 '''
     source = source.replace('CONTROL_BODY', body(window, 'inline IVec2 Window::control('))
-    source = source.replace('SECONDARY_BODY', body(win, 'void Window::setSecondarySize('))
+    source = source.replace('SECONDARY_BODY', body(win, 'void nativeWindowSetSize('))
     source = source.replace('CLIENT_CONVERSION', body(platform, 'constexpr int windowClientExtentPixels('))
     with tempfile.TemporaryDirectory(prefix='window-pixel-size-') as scratch:
         cpp = Path(scratch) / 'probe.cpp'
@@ -156,7 +163,7 @@ def creation_source(backend, *, native_path=None):
     normal = before(split_marker(body(header, 'sapp_desc buildAppDescriptor('), '    return ', last=True)[1], ';')
     normal = 'return ' + normal + ';'
     hot_header = (ROOT / 'core/include/tc/app/tcHotReloadHost.h').read_text(encoding='utf-8')
-    hot = between(body(hot_header, 'inline int runHotReloadApp('), '    sapp_desc desc = ', '    desc.frame_cb')
+    hot = between(body(hot_header, 'inline int runHotReloadApp('), '    sapp_desc desc = ', '    setHostReloadPoll')
     hot = 'sapp_desc desc = ' + hot
     adapter_path = {'win': 'win/tcWindowWin.cpp', 'x11': 'linux/tcWindowLinux.cpp',
                     'mac': 'mac/tcWindowMac.mm', 'egl': 'linux/tcWindowLinux.cpp'}[backend]
@@ -449,7 +456,7 @@ subprocess.run([glx,'tiny','640','400','1'], check=True)
         source = template.replace('CONTROL_BODY', body(window, 'inline IVec2 Window::control('))
         for token, path, signature in (
                 ('MAC_MAIN_CALL', 'core/platform/mac/tcPlatform_mac.mm', 'void internal::setMainWindowSizeFractionalMac('),
-                ('MAC_SECONDARY_CALL', 'core/platform/mac/tcWindowMac.mm', 'void Window::setSecondarySize(')):
+                ('MAC_SECONDARY_CALL', 'core/platform/mac/tcWindowMac.mm', 'void nativeWindowSetSize(')):
             endpoint = body((ROOT / path).read_text(encoding='utf-8'), signature)
             arguments = between(endpoint, 'NSMakeSize(', ')];')
             source = source.replace(token, arguments)

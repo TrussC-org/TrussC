@@ -19,6 +19,8 @@ struct Descriptor {
     bool (*_tc_bind_cb)(uint32_t, void*) = nullptr;
     void* user_data = nullptr;
     void* _tc_bind_user = nullptr;
+    int _tc_tick_cb = 0;
+    int _tc_event_cb = 0;
     int width = 0, height = 0, x = 0, y = 0, sample_count = 1;
     int _tc_pixel_width = 0, _tc_pixel_height = 0;
     bool high_dpi = true, no_high_dpi = false;
@@ -43,6 +45,7 @@ struct State {
     Descriptor desc;
     float window_scale = 1, dpi_scale = 1;
     int xwin = 1, fb_width = 0, fb_height = 0, win_width = 0, win_height = 0;
+    bool (*events_enabled)() = nullptr;
 #ifdef TEST_WIN
     State* hwnd = nullptr;
     void* hmonitor = nullptr;
@@ -95,6 +98,7 @@ struct { void* display = nullptr; struct { void* device = nullptr; } app; } _sap
 #if defined(TEST_WIN) || defined(TEST_MAC)
 struct _sapp_tc_native_desc {
     Descriptor window;
+    bool (*events_enabled)() = nullptr;
     int swap_interval = 0, title_limit = 0, color_format = 0, depth_format = 0;
     bool fullscreen = false, draw_while_hidden = false, center_on_create = false;
 };
@@ -108,6 +112,7 @@ Descriptor commonTransfer(const _sapp_tc_native_desc* d) {
 }
 #endif
 #ifdef TEST_MAC
+bool _sapp_tc_app_events_enabled() { return true; }
 struct _sapp_tc_mac_window_attrs {
     bool restorable = false, nearest_magnification = false, take_key_focus_on_create = false;
 };

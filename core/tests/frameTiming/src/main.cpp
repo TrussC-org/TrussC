@@ -1,3 +1,4 @@
+#include "../../common/tcWindowTest.h"
 // =============================================================================
 // core/tests/frameTiming — regression test for the time-handling cleanup
 // (#229 elapsed clock, #228 fixed-Hz loop, ScreenRecorder pacing).
@@ -8,7 +9,7 @@
 //   1. One elapsed clock: steady, origin at program start (not first call),
 //      monotonic; resetElapsedTimeCounter() is a display offset only.
 //   2. getFrameElapsedTime() is constant within a frame (also through the
-//      main loop's frame start, beginMainLoopFrame).
+//      main loop's frame start, beginScheduledFrame).
 //   3. Fixed-Hz update: every step reports the nominal 1/updateFps as dt, at
 //      most 10 steps run per frame by default (excess dropped, warned once;
 //      setMaxUpdateSteps() sets the cap, <= 0 runs every step), and
@@ -65,6 +66,7 @@ using namespace std;
 using namespace tc;
 
 namespace {
+trussc::EventListener schedulerUpdate;
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -220,7 +222,7 @@ using Clk = chrono::steady_clock;
 // a hair below one interval.
 static Clk::duration secs(double s) { return chrono::round<Clk::duration>(chrono::duration<double>(s)); }
 
-// appUpdateFunc is a plain function pointer: state lives at file scope.
+// The test update subscription uses fixture state at file scope.
 static vector<double> g_dts;
 static int g_updates = 0;
 static function<void()> g_onUpdate;
@@ -232,8 +234,8 @@ static void countingUpdate() {
     if (g_onUpdate) g_onUpdate();
 }
 
-// Run `frames` main-loop frames `step` seconds apart, as _frame_cb does
-// (beginMainLoopFrame, then the draw-synced update of a drawn frame); returns
+// Run `frames` main-loop frames `step` seconds apart, as the common scheduler does
+// (beginScheduledFrame, then the draw-synced update of a drawn frame); returns
 // the updates they ran. `between` runs between frames (e.g. what draw() or an
 // event handler does).
 static int runFrames(Clk::time_point& t, int frames, double step,
@@ -242,13 +244,13 @@ static int runFrames(Clk::time_point& t, int frames, double step,
     for (int f = 0; f < frames; ++f) {
         if (between) between();
         t += secs(step);
-        if (internal::beginMainLoopFrame(t)) internal::runSyncedUpdate();
+        if (tcCoreTest::beginScheduledFrame(t)) internal::runSyncedUpdate();
     }
     return g_updates - before;
 }
 
 static void testMainLoopUpdates() {
-    internal::appUpdateFunc = countingUpdate;
+    schedulerUpdate = events().update.listen(countingUpdate);
     auto& ctx = internal::mainWindowContext();
 
     // --- dt per step: setIndependentFps(120, VSYNC) on a 60 Hz display ---
@@ -410,7 +412,7 @@ static void testMainLoopUpdates() {
            getFrameRate() > 0.0 && getFrameRate() <= 101.0, getFrameRate());
 
     // --- the default mode: update synced to draw (setFps(VSYNC)), driven the
-    // way _frame_cb drives it: beginMainLoopFrame, then runSyncedUpdate ---
+    // way the common scheduler drives it: beginScheduledFrame, then runSyncedUpdate ---
     setFps(VSYNC);
     ctx.rateCount = 0;
     ctx.rateIndex = 0;
@@ -424,7 +426,7 @@ static void testMainLoopUpdates() {
         for (int i = 0; i < 6; ++i) {
             sleepMs(10);
             ++frames;
-            if (internal::beginMainLoopFrame(Clk::now())) {
+            if (tcCoreTest::beginScheduledFrame(Clk::now())) {
                 ++drawn;
                 internal::runSyncedUpdate();
                 sleepMs(2);                     // the frame's draw, later on
@@ -455,7 +457,7 @@ static void testMainLoopUpdates() {
     n = runFrames(t, 60, 1.0 / 60.0);
     checkf("synced 30 fps: 60 display frames run 30 updates", n == 30, n);
 
-    internal::appUpdateFunc = nullptr;
+    schedulerUpdate.disconnect();
     setFps(VSYNC);
 }
 
@@ -748,7 +750,7 @@ static void timerLoopUpdate() {
 static void testNodeTimersInLoop() {
     auto node = make_shared<TimerNode>();
     g_loopNode = node.get();
-    internal::appUpdateFunc = timerLoopUpdate;
+    schedulerUpdate = events().update.listen(timerLoopUpdate);
     setIndependentFps(120, VSYNC);
     auto t = Clk::now();
     internal::runIndependentUpdates(t);
@@ -846,7 +848,7 @@ static void testNodeTimersInLoop() {
         checkf(name, g_updates - before == 10 && firedOn == k + 1, firedOn);
         node->cancelAllTimers();
     }
-    internal::appUpdateFunc = nullptr;
+    schedulerUpdate.disconnect();
     g_loopNode = nullptr;
     setFps(VSYNC);
     internal::mainWindowContext().updateDeltaTime = 0.0;
@@ -888,7 +890,7 @@ static void testTimersCountFromCreation() {
     setFps(VSYNC);                          // measured dt, update synced to draw
     auto node = make_shared<TimerNode>();
     g_loopNode = node.get();
-    internal::appUpdateFunc = timerLoopUpdate;
+    schedulerUpdate = events().update.listen(timerLoopUpdate);
 
     // An update that runs 300 ms before it creates callAfter(0.1) and
     // callEveryCatchUp(0.05).
@@ -934,7 +936,7 @@ static void testTimersCountFromCreation() {
         g_treeRoot = make_shared<App>();
         auto n = make_shared<LongSetupNode>();
         g_treeRoot->addChild(n);
-        internal::appUpdateFunc = treeUpdate;
+        schedulerUpdate = events().update.listen(treeUpdate);
         internal::runSyncedUpdate();        // setup(): 300 ms, then callAfter(0.2)
         internal::runSyncedUpdate();
         const double dt = getDeltaTime();
@@ -956,7 +958,7 @@ static void testTimersCountFromCreation() {
         g_treeRoot.reset();
     }
 
-    internal::appUpdateFunc = nullptr;
+    schedulerUpdate.disconnect();
     g_loopNode = nullptr;
 }
 
@@ -1007,7 +1009,7 @@ static void testModeSwitchMeasuredDelta() {
     setFps(VSYNC);
     auto node = make_shared<TimerNode>();
     g_loopNode = node.get();
-    internal::appUpdateFunc = timerLoopUpdate;
+    schedulerUpdate = events().update.listen(timerLoopUpdate);
     int fired = 0;
     bool created = false;
     g_loopDuring = [&] {
@@ -1041,7 +1043,7 @@ static void testModeSwitchMeasuredDelta() {
         g_treeRoot = make_shared<App>();
         auto n = make_shared<SwitchingSetupNode>();
         g_treeRoot->addChild(n);
-        internal::appUpdateFunc = treeUpdate;
+        schedulerUpdate = events().update.listen(treeUpdate);
         internal::runSyncedUpdate();        // setup(): setFps(60), callAfter(0.2), 300 ms
         internal::runSyncedUpdate();
         const double dt2 = getDeltaTime();
@@ -1049,7 +1051,7 @@ static void testModeSwitchMeasuredDelta() {
                dt2 >= 0.299, dt2);
         check("mode switch: ...and callAfter(0.2) made after setFps() fires on that update", n->fired == 1);
         g_treeRoot.reset();
-        internal::appUpdateFunc = timerLoopUpdate;
+        schedulerUpdate = events().update.listen(timerLoopUpdate);
         setFps(VSYNC);
     }
 
@@ -1063,7 +1065,7 @@ static void testModeSwitchMeasuredDelta() {
            getDeltaTime() >= 0.0499, getDeltaTime());
 
     // setFps() from inside an independent VSYNC update: the synced update of
-    // the same frame (runSyncedUpdate, as _frame_cb runs it) counts from that
+    // the same frame (runSyncedUpdate, as the common scheduler runs it) counts from that
     // update's start, not a whole frame (sokol's estimate).
     {
         setIndependentFps(VSYNC, VSYNC);
@@ -1094,14 +1096,14 @@ static void testModeSwitchMeasuredDelta() {
         g_treeRoot = make_shared<App>();
         auto n = make_shared<LoadThenSwitchSetupNode>();
         g_treeRoot->addChild(n);
-        internal::appUpdateFunc = treeUpdate;
+        schedulerUpdate = events().update.listen(treeUpdate);
         internal::runSyncedUpdate();        // setup(): callAfter(0.2), 300 ms, setFps(60)
         internal::runSyncedUpdate();
         checkf("mode switch: callAfter, a 300 ms load, then setFps() in setup(): the next dt covers the load",
                getDeltaTime() >= 0.299, getDeltaTime());
         check("mode switch: ...and the timer fires on it", n->fired == 1);
         g_treeRoot.reset();
-        internal::appUpdateFunc = timerLoopUpdate;
+        schedulerUpdate = events().update.listen(timerLoopUpdate);
     }
 
     // update() { rebuild 150 ms; setFps(30); }: a timer with 0.1 s left is
@@ -1212,14 +1214,14 @@ static void testModeSwitchMeasuredDelta() {
         g_treeRoot = make_shared<App>();
         auto n = make_shared<StepSetupNode>();
         g_treeRoot->addChild(n);
-        internal::appUpdateFunc = treeUpdate;
+        schedulerUpdate = events().update.listen(treeUpdate);
         internal::runIndependentUpdates(Clk::now());   // the first step runs setup()
         internal::runSyncedUpdate();                    // same frame, now synced
         const double since = secsBetween(n->createdFrom, internal::getUpdateTime());
         checkf("mode switch: setup() in a fixed step: load, callAfter(0.2), setFps(60): not fired right after",
                n->fired == 0 || since >= 0.2 - 1e-6, since);
         g_treeRoot.reset();
-        internal::appUpdateFunc = timerLoopUpdate;
+        schedulerUpdate = events().update.listen(timerLoopUpdate);
         setFps(VSYNC);
     }
 
@@ -1238,7 +1240,7 @@ static void testModeSwitchMeasuredDelta() {
         setFps(VSYNC);
     }
 
-    internal::appUpdateFunc = nullptr;
+    schedulerUpdate.disconnect();
     g_loopNode = nullptr;
 }
 

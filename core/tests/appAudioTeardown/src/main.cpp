@@ -104,7 +104,7 @@ void tick(Window& window) {
     auto* previous = internal::currentWindowCtx();
     internal::currentWindowCtx() = &window.context();
     {
-        internal::WindowDispatchScope scope(window);
+        internal::WindowEntryScope scope(window);
         window.tickTree();
     }
     internal::currentWindowCtx() = previous;

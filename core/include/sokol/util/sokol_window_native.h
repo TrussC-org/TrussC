@@ -54,6 +54,8 @@ static inline bool _sapp_tc_native_hidden(const _sapp_tc_native_window_t* w) {
 
 struct _sapp_tc_native_desc {
     sapp_window_desc window;
+    // Install client readiness before publication/show can synchronously deliver events.
+    bool (*events_enabled)();
     int swap_interval;
     bool fullscreen;
     bool draw_while_hidden;

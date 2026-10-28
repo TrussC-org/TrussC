@@ -190,7 +190,7 @@ void appTouchOrder() {
     // Model the runner opening its main Window without starting sokol.
     internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 101);
     internal::appSetupFunc();
-    internal::appUpdateFunc();
+    events().update.notify();
     for (auto* event : {&events().touchPressed, &events().touchMoved, &events().touchReleased}) {
         touchOrder.clear();
         fire(*event);

@@ -321,25 +321,11 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         double elapsed = std::chrono::duration<double>(now - lastTime).count();
         lastTime = now;
 
-        auto resourceLoads = internal::takeResourceLoadBatch();
         internal::sampleFrameTime(ctx);
-
-        // Run work marshalled from worker threads (runOnMainThread, Event
-        // Deliver::Main) on the main thread, mirroring the windowed _frame_cb.
-        // Each app-code call here is an entry point, as in the windowed loop
-        // (#349): the stacks go back to their depth before it.
         {
-            internal::EntryStackGuard guard(internal::AppEntry::Prelude);
-            internal::deliverResourceLoadBatch(std::move(resourceLoads));
-            internal::drainMainThreadQueue();
-            internal::pumpAudioDiagnostics();
-#ifndef __EMSCRIPTEN__
-            console::internal::processQueue();
-            mcp::processHttpQueue();
-#endif
+            internal::HostTurnScope turn;
+            internal::runHeadlessUpdatePass(*app, ctx, accumulator, elapsed, targetDelta);
         }
-
-        internal::runHeadlessUpdatePass(*app, ctx, accumulator, elapsed, targetDelta);
         if (!headless::running || app->isExitRequested()) break;
 
         // Sleep until the next step is due (at most 1 ms), counted from the

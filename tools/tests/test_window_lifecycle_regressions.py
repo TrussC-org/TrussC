@@ -80,10 +80,11 @@ struct sapp_window { unsigned id; };
 struct sapp_tc_window_metadata {
     int fb_width=0, fb_height=0, sample_count=0, color_format=0, depth_format=0;
     float dpi_scale=1;
+    double source_interval=0;
     bool trust_hidden_signals=false, iconified=false, occluded=false, drawable_available=false;
 };
 struct WindowContext {
-    bool isMain=true, suspended=false, visibilityPaused=false, mainUpdateCallTimeInitialized=true;
+    bool isMain=true, pauseUpdatesWhenHidden=false, suspended=false, visibilityPaused=false, mainUpdateCallTimeInitialized=true;
 };
 struct Window {
     struct { sapp_tc_window_metadata metadata; } binding_;
@@ -104,7 +105,7 @@ struct WindowRequestAccess {
     static auto& binding(Window& w) { return w.binding_; }
     static void applyPendingApp(Window&) {}
 };
-void refreshWindowMetadata(Window&) {} // single-window binding has no operations
+bool refreshWindowMetadata(Window&) { return true; } // single-window binding has no operations
 void syncWindowAppSize(Window&, bool) {}
 int queries=0;
 struct { struct { bool has_resumed=false, has_focus=false; } android; } _sapp_tc;
@@ -113,17 +114,13 @@ bool sapp_isvalid() { return true; }
 int sapp_width() { return 100; } int sapp_height() { return 100; }
 int sapp_sample_count() { return 1; } float sapp_dpi_scale() { return 1; }
 int sapp_color_format() { return 1; } int sapp_depth_format() { return 2; }
+double sapp_frame_duration() { return 1.0/120.0; }
 void publishWindowMetadata(Window& w, const sapp_tc_window_metadata& m) {
     ++queries; w.binding_.metadata=m;
     w.ctx.suspended=m.trust_hidden_signals && (m.iconified || m.occluded);
 }
 ''' + body(runtime, 'void refreshMainWindowMetadata()') + r'''
-struct MainWindowDispatchScope {
-    Window* window;
-    MainWindowDispatchScope();
-    ~MainWindowDispatchScope() { --window->dispatchDepth_; }
-};
-''' + body(global_source, 'MainWindowDispatchScope::MainWindowDispatchScope()') + '\n' + body(global_source, 'static bool occlusionPausesUpdate(') + '\n' + body(global_source, 'static bool nativeSuspensionPausesUpdate(') + '\n' + body(global_source, 'void observeWindowVisibility(').replace('openWindows()', 'windows()') + r'''
+''' + body(runtime, 'bool refreshWindowEntryMetadata(') + '\n' + body(global_source, 'static bool occlusionPausesUpdate(') + '\n' + body(global_source, 'static bool nativeSuspensionPausesUpdate(') + '\n' + body(global_source, 'void observeWindowVisibility(').replace('openWindows()', 'windows()') + r'''
 void _sapp_tc_android_app_event(sapp_event_type type) {
     refreshMainWindowMetadata(); observeWindowVisibility(owner.ctx,type);
 }
@@ -137,7 +134,7 @@ void message(int msg) {
 }
 void frame(bool hidden) {
     const int before=queries;
-    MainWindowDispatchScope dispatch;
+    refreshWindowEntryMetadata(owner);
     check("single-window frame refreshes native observation", queries==before+1);
     check("frame getter and suspension follow current native lifecycle/focus", owner.isOccluded()==hidden && owner.ctx.suspended==hidden);
     check("mobile hidden state still pauses native updates", nativeSuspensionPausesUpdate());

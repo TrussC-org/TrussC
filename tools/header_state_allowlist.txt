@@ -47,15 +47,11 @@ core/include/TrussC.h trussc::internal::windowDecorated        # host-only: set 
 core/include/TrussC.h trussc::internal::gpuUniformBufferReserve  # host-only: launcher -> setup() (tcGlobal.cpp)
 
 # --- TrussC.h: loop timing
-core/include/TrussC.h trussc::internal::frameReentryGuard      # host-only: _frame_cb
 
 # --- TrussC.h: input / launcher wiring
-core/include/TrussC.h trussc::internal::screenshotAfterFrameListener  # host-only: installed in _setup_cb
 core/include/TrussC.h trussc::internal::appInstance            # host-only: not referenced by any code
 core/include/TrussC.h trussc::internal::currentMouseButton     # host-only: sokol event callback
 core/include/TrussC.h trussc::internal::appSetupFunc           # host-only: set by the launcher (runApp / runHotReloadApp), called by the sokol callbacks
-core/include/TrussC.h trussc::internal::appUpdateFunc          # host-only: as appSetupFunc
-core/include/TrussC.h trussc::internal::appDrawFunc            # host-only: as appSetupFunc
 core/include/TrussC.h trussc::internal::appCleanupFunc         # host-only: as appSetupFunc
 core/include/TrussC.h trussc::internal::g_androidDesc          # no-hot-reload: Android only
 core/include/TrussC.h trussc::internal::consoleCPBeforeRun  # host-only: saved by ConsoleCPCtrlGuard around sapp_run() in runApp / the hot reload host, read by its control and exit handlers

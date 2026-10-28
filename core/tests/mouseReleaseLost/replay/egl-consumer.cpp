@@ -1,5 +1,6 @@
 // Compile with GLES3 so the actual callback uses the EGL lock-state gate.
 #include <TrussC.h>
+#include "../../common/tcWindowTest.h"
 #include <cstdio>
 using namespace tc;
 static bool replayLocked;
@@ -44,7 +45,7 @@ int main(int argc, char** argv) {
         if (std::fread(&locked, 1, 1, wire) != 1 || std::fread(&e, sizeof(e), 1, wire) != 1) return 1;
         replayLocked = locked != 0;
         check("production event type and lock state", e.type == type && replayLocked);
-        internal::_event_cb(&e);
+        tcCoreTest::dispatchMainEvent(&e);
         if (type == SAPP_EVENTTYPE_MOUSE_MOVE) {
             check("raw motion has no button bits", (e.modifiers & SAPP_MODIFIER_LMB) == 0);
             check("locked move gives one drag through events, App and node", drags == 1 && app->drags == 1 && probe->drags == 1);
@@ -55,9 +56,9 @@ int main(int argc, char** argv) {
     check("UP preserves the single drag", drags == 1 && app->drags == 1 && probe->drags == 1);
     // Focus recovery must remain active even if the lock query is still true.
     e.type = SAPP_EVENTTYPE_MOUSE_DOWN; e.mouse_button = SAPP_MOUSEBUTTON_LEFT;
-    internal::_event_cb(&e);
-    e.type = SAPP_EVENTTYPE_UNFOCUSED; internal::_event_cb(&e); internal::_event_cb(&e);
-    e.type = SAPP_EVENTTYPE_MOUSE_UP; internal::_event_cb(&e);
+    tcCoreTest::dispatchMainEvent(&e);
+    e.type = SAPP_EVENTTYPE_UNFOCUSED; tcCoreTest::dispatchMainEvent(&e); tcCoreTest::dispatchMainEvent(&e);
+    e.type = SAPP_EVENTTYPE_MOUSE_UP; tcCoreTest::dispatchMainEvent(&e);
     check("locked focus recovery releases once and ignores late UP", releases == 2 && app->releases == 2 && probe->releases == 2 && !isMousePressed() && ctx.grabbedNode.expired());
     // Replay the same production motion, but unlock from inside raw notify.
     // Like the real EGL API, the substituted setter changes the query immediately.
@@ -74,7 +75,7 @@ int main(int argc, char** argv) {
         unsigned char locked = 0;
         if (std::fread(&locked, 1, 1, wire) != 1 || std::fread(&e, sizeof(e), 1, wire) != 1) return 1;
         if (type == SAPP_EVENTTYPE_MOUSE_DOWN) replayLocked = locked != 0;
-        internal::_event_cb(&e);
+        tcCoreTest::dispatchMainEvent(&e);
         if (type == SAPP_EVENTTYPE_MOUSE_MOVE) {
             check("raw listener unlocks during locked motion", listenerSawLockedRawMove && !sapp_mouse_locked());
             check("listener unlock keeps one new drag through events, App and node", drags == 2 && app->drags == 2 && probe->drags == 2);

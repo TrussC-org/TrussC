@@ -133,7 +133,7 @@ static void tickWindow(Window& w) {
     internal::WindowContext* prev = internal::currentWindowCtx();
     internal::currentWindowCtx() = &w.context();
     {
-        internal::WindowDispatchScope scope(w);
+        internal::WindowEntryScope scope(w);
         w.tickTree();
     }
     internal::currentWindowCtx() = prev;

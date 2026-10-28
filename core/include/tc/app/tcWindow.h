@@ -125,10 +125,9 @@ public:
     bool isOccluded() const;
 
     // Resize this window's content area to the given LOGICAL size (points),
-    // matching getWidth()/getHeight() units. Main uses the existing sapp path
-    // and its platform limitations. Secondary sizing is implemented natively
-    // (macOS NSWindow, Windows HWND, X11) because sokol_app has no per-window
-    // resize entry point. No-op if the native window is gone.
+    // matching getWidth()/getHeight() units. Desktop controls address this
+    // Window's native binding (macOS NSWindow, Windows HWND or X11).
+    // No-op if the native window is gone.
     // Ignored with one Notice until isFullscreen() returns false (including
     // macOS entering/exiting). No geometry is queued; exit restores entry geometry.
     void setSize(int width, int height);
@@ -156,16 +155,10 @@ public:
     // Returns (-1, -1) if the native window is gone.
     TC_PLATFORMS("macos,windows,linux") IVec2 getPosition() const;
 
-    // Main fullscreen uses sapp. Secondary fullscreen is native because sapp's
-    // fullscreen only targets the main window:
-    //   macOS  -> NSWindow toggleFullScreen: (native, animated; isFullscreen()
-    //             stays true through entering/fullscreen/exiting).
-    //   Windows-> borderless-fullscreen: save style + rect, switch to a popup
-    //             sized to the window's monitor, restore on exit.
-    //   Linux  -> EWMH _NET_WM_STATE_FULLSCREEN ClientMessage to the root window.
-    // The framebuffer-size change is picked up by the normal per-window resize
-    // path (windowTick keeps fbWidth/fbHeight in sync and syncRootSize fires
-    // windowResized). No-op if the native window is gone.
+    // Desktop fullscreen uses this Window's native state: animated phases on
+    // macOS, borderless fullscreen on Windows, and EWMH requests on X11.
+    // Framebuffer changes follow the common size-publication path. No-op if
+    // the native window is gone.
     void setFullscreen(bool full);
     bool isFullscreen() const;
     // Flip the most recently requested state, including during macOS animation.
@@ -247,6 +240,8 @@ private:
         std::string title;
     };
     std::unique_ptr<OwnedState> owned_;
+    std::weak_ptr<Window> hostOwner_;
+    int entryDepth_ = 0;
     internal::WindowBinding binding_;
 public:
     internal::WindowContext& ctx_;
@@ -254,9 +249,6 @@ public:
     internal::RenderContext& render_;
     bool clearColorSet_ = false; // main keeps the existing clear() default until explicitly set
     Color clearColor_ = Color(0.05f, 0.05f, 0.08f, 1.0f);
-    // Fullscreen intent. Windows/Linux report isFullscreen() from this flag
-    // (there is no cheap live query); macOS uses implementation-owned phases.
-    bool fullscreenRequested_ = false;
     std::string& title_;
     // Request state (setApp() / close()). The pending App is owned here until
     // the boundary, so a request never refers to a freed App, and it goes
@@ -273,16 +265,6 @@ private:
                   internal::WindowGeometryCall call = internal::WindowGeometryCall::WindowSize);
     void closeSecondary();
     void teardownSecondary() noexcept;
-    void setSecondaryTitle(const std::string& title);
-    void setSecondarySize(double width, double height, bool pixelSize = false);
-    void setSecondaryPosition(int x, int y);
-    IVec2 getSecondaryPosition() const;
-    void setSecondaryFullscreen(bool full);
-    bool isSecondaryFullscreen() const;
-#if defined(__APPLE__) && TARGET_OS_OSX
-    internal::WindowFullscreenPhase secondaryFullscreenPhase() const;
-    void toggleSecondaryFullscreen();
-#endif
     internal::WindowFullscreenPhase fullscreenPhase() const;
     explicit Window(bool mainWindow);
     // Rebuilt only at a successful setApp boundary. Exit resolves the held
@@ -312,7 +294,7 @@ private:
     // Reached through internal::WindowRequestAccess, so they stay out of the
     // public API (and the script bindings generated from it).
     // Applies a pending setApp() at a frame boundary: the platform glue calls
-    // it through internal::WindowDispatchScope, at the start and end of each
+    // it through internal::WindowEntryScope, at the start and end of each
     // of this window's ticks and events. Does nothing while one of them is
     // running.
     void applyPendingApp();
@@ -328,6 +310,8 @@ private:
     bool closeRequested() const { return closeRequested_; }
 
     friend class internal::WindowRequestAccess;
+    friend class internal::WindowEntryScope;
+    friend class internal::WindowLifecycleScope;
     friend void internal::syncWindowAppSize(Window&, bool);
 };
 
@@ -353,11 +337,14 @@ public:
     static const WindowBinding& binding(const Window& w) { return w.binding_; }
     static void unbind(Window& w) noexcept { w.binding_.bound = false; w.binding_.handle = {}; w.ctx_.suspended = false; }
     static void resetForLaunch(Window& w) {
+        w.binding_.lastDeliveredHidden = false;
         w.exitDelivered_ = false; w.closeRequested_ = false; w.ctx_.targetsClosed = false;
         w.appEventState_.reset(); w.initialAppBindings_ = false; w.appSizeSeeded_ = false;
     }
     static std::unique_ptr<Window> makeMain() { return std::unique_ptr<Window>(new Window(true)); }
-    static bool dispatchActive(const Window& w) { return w.dispatchDepth_ > 0 || w.applyingApp_; }
+    static bool dispatchActive(const Window& w) { return w.entryDepth_ > 0 || w.dispatchDepth_ > 0 || w.applyingApp_; }
+    static void setHostOwner(Window& w, const std::shared_ptr<Window>& owner) { w.hostOwner_ = owner; }
+    static std::shared_ptr<Window> retainHostOwner(Window& w) noexcept { return w.hostOwner_.lock(); }
     static void prepareInitialBindings(Window& w) {
         auto state = std::make_shared<Window::AppEventState>();
         std::vector<EventListener> listeners;
@@ -679,14 +666,8 @@ inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
             }, EventPriority::App));
     };
     // Keep the float hover coordinates: App::handleUpdate takes integers.
-    bind(events_.update, [this](App& app) {
-        if (ctx_.isMain) app.handleUpdate(ctx_.mouseX, ctx_.mouseY);
-        else tickTree();
-    });
-    bind(events_.draw, [this](App& app) {
-        if (ctx_.isMain) app.handleDraw();
-        else drawTreeNow();
-    });
+    bind(events_.update, [this](App&) { tickTree(); });
+    bind(events_.draw, [this](App&) { drawTreeNow(); });
     bind(events_.exit, [](App& app) { app.exit(); }, true);
     bind(events_.keyPressed, [](App& app, auto& e) { e.consumed = app.handleKeyPressed(e) || e.consumed; });
     bind(events_.keyReleased, [](App& app, auto& e) { e.consumed = app.handleKeyReleased(e) || e.consumed; });
@@ -705,6 +686,7 @@ inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
 inline void Window::endApp() noexcept {
     if (exitDelivered_) return;
     exitDelivered_ = true;
+    internal::WindowLifecycleScope lifecycle(*this);
     if (!ctx_.isMain) ctx_.targetsClosed = true;
     internal::TeardownSteps steps;
     std::shared_ptr<App> dropped = std::move(pendingApp_);
@@ -756,36 +738,7 @@ inline void Window::endApp() noexcept {
 }
 
 namespace internal {
-// Platform glue: brackets one tick or one event of a window. Pending
-// requests are applied when the outermost scope is entered and left, so a
-// setApp() made inside it lands right after it (frame boundary).
-struct WindowDispatchScope {
-    Window& w;
-    explicit WindowDispatchScope(Window& win) : w(win) {
-        refreshWindowMetadata(w);
-        WindowRequestAccess::applyPendingApp(w);
-        ++w.dispatchDepth_;
-    }
-    ~WindowDispatchScope() {
-        --w.dispatchDepth_;
-        TeardownSteps steps;
-        steps.run("pending App at dispatch end", [&] { WindowRequestAccess::applyPendingApp(w); });
-    }
-    WindowDispatchScope(const WindowDispatchScope&) = delete;
-    WindowDispatchScope& operator=(const WindowDispatchScope&) = delete;
-};
 
-// Every secondary native tick/input callback uses this boundary. Restoration
-// is a separate mandatory step even when dispatch or target preparation fails.
-template<class F> void windowCallback(F&& work) noexcept {
-    auto* previous = currentWindowCtx();
-    TeardownSteps steps;
-    steps.run("native window callback", std::forward<F>(work));
-    if (currentWindowCtx() != previous) {
-        steps.run("native callback context restoration", [&] { restoreWindowContext(previous); });
-        currentWindowCtx() = previous;
-    }
-}
 }
 
 // Looked up in the open-window registry rather than cached on the App: every
@@ -851,26 +804,22 @@ inline std::shared_ptr<Window> createSecondaryWindow(const WindowSettings&) { re
 // Linux uses the same adapter for GLX and GLES3/EGL).
 inline void Window::closeSecondary() {}
 inline void Window::teardownSecondary() noexcept {}
-inline void Window::setSecondaryTitle(const std::string&) {}
-inline void Window::setSecondarySize(double, double, bool) {}
-inline void Window::setSecondaryPosition(int, int) {}
-inline IVec2 Window::getSecondaryPosition() const { return IVec2(-1, -1); }
-inline void Window::setSecondaryFullscreen(bool) {}
-inline bool Window::isSecondaryFullscreen() const { return false; }
+
 #else
 namespace internal {
 inline constexpr bool supportsSecondaryWindows() { return true; }
 }
 #endif
 
-// Main routing is compiled identically on desktop and single-window platforms.
-// Only the secondary branch reaches the native adapters (or unsupported stubs).
+// Desktop controls use the addressed binding. Single-window platforms retain
+// their canvas/surface control endpoints.
 inline Window::~Window() { teardown(); }
 inline void Window::close() {
     if (!ctx_.isMain) { closeSecondary(); return; }
     if (isOpen() && !closeRequested_) { closeRequested_ = true; requestExitApp(); }
 }
 inline void Window::teardown() noexcept {
+    internal::WindowLifecycleScope lifecycle(*this);
     if (!ctx_.isMain) { teardownSecondary(); return; }
     if (isOpen()) internal::WindowRequestAccess::endMain(*this);
 }
@@ -897,11 +846,46 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
         else title_ = *title;
     }
     if (!isOpen()) return result;
+    if (binding_.operations) {
+        const auto& ops = *binding_.operations;
+        switch (op) {
+            case internal::WindowControl::Title:
+                if (ops.setTitle) ops.setTitle(*this, title_.c_str());
+                break;
+            case internal::WindowControl::PixelSize: {
+                if (x <= 0 || y <= 0) break;
+                const float dpi = std::isfinite(ctx_.dpiScale) && ctx_.dpiScale > 0 ? ctx_.dpiScale : 1.0f;
+                const double width = _sapp_tc_window_points(0, x, dpi);
+                const double height = _sapp_tc_window_points(0, y, dpi);
+                // Bound (size representation): reject logical extents outside the int getter range.
+                if (!std::isfinite(width) || !std::isfinite(height) || width <= 0 || height <= 0 ||
+                    width > double((std::numeric_limits<int>::max)()) || height > double((std::numeric_limits<int>::max)())) break;
+                if (ops.setSize) ops.setSize(*this, width, height, true);
+                break;
+            }
+            case internal::WindowControl::Size:
+                if (x > 0 && y > 0 && ops.setSize) ops.setSize(*this, x, y, false);
+                break;
+            case internal::WindowControl::Position:
+                if (ops.setPosition) ops.setPosition(*this, x, y);
+                break;
+            case internal::WindowControl::PositionQuery:
+                if (ops.position) result = ops.position(*this);
+                break;
+            case internal::WindowControl::Fullscreen:
+                if (ops.setFullscreen) ops.setFullscreen(*this, bool(x));
+                break;
+            case internal::WindowControl::ToggleFullscreen:
+                if (ops.toggleFullscreen) ops.toggleFullscreen(*this);
+                break;
+        }
+        return result;
+    }
     switch (op) {
         case internal::WindowControl::Title:
             if (ctx_.isMain) {
                 if (sapp_isvalid()) sapp_set_window_title(title_.c_str());
-            } else { title_ = *title; setSecondaryTitle(*title); }
+            }
             break;
         case internal::WindowControl::PixelSize: {
             if (x <= 0 || y <= 0) return result;
@@ -920,9 +904,6 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
                 if (!std::isfinite(width) || !std::isfinite(height) ||
                     width <= 0 || height <= 0 || width > double((std::numeric_limits<int>::max)()) ||
                     height > double((std::numeric_limits<int>::max)())) return result;
-                if constexpr (internal::supportsSecondaryWindows()) {
-                    if (!ctx_.isMain) { setSecondarySize(width, height, true); break; }
-                }
 #if defined(_WIN32)
                 internal::setWindowSizeWin32(sapp_win32_get_hwnd(), width, height); break;
 #elif defined(__linux__) && !defined(__ANDROID__)
@@ -945,26 +926,18 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
         case internal::WindowControl::Size:
             if (x <= 0 || y <= 0) return result;
             if (ctx_.isMain) { if (sapp_isvalid()) internal::setMainWindowSizeLogical(x, y); }
-            else setSecondarySize(x, y);
             break;
         case internal::WindowControl::Position:
             if (ctx_.isMain) internal::setMainWindowPosition(x, y);
-            else setSecondaryPosition(x, y);
             break;
         case internal::WindowControl::PositionQuery:
-            result = ctx_.isMain ? internal::mainWindowPosition() : getSecondaryPosition();
+            result = internal::mainWindowPosition();
             break;
         case internal::WindowControl::Fullscreen:
             if (ctx_.isMain) internal::setMainFullscreen(bool(x));
-            else setSecondaryFullscreen(bool(x));
             break;
         case internal::WindowControl::ToggleFullscreen:
             if (ctx_.isMain) sapp_toggle_fullscreen();
-#if defined(__APPLE__) && TARGET_OS_OSX
-            else toggleSecondaryFullscreen();
-#else
-            else setSecondaryFullscreen(!isSecondaryFullscreen());
-#endif
             break;
     }
     return result;
@@ -986,12 +959,10 @@ inline void Window::setFullscreen(bool full) {
 }
 inline internal::WindowFullscreenPhase Window::fullscreenPhase() const {
     if (auto hook = internal::windowFullscreenHookForTests()) return hook(*this);
+    if (binding_.operations && binding_.operations->fullscreenPhase)
+        return static_cast<internal::WindowFullscreenPhase>(binding_.operations->fullscreenPhase(*this));
     if (ctx_.isMain) return isOpen() ? internal::mainWindowFullscreenPhase() : internal::WindowFullscreenPhase::Windowed;
-#if defined(__APPLE__) && TARGET_OS_OSX
-    return secondaryFullscreenPhase();
-#else
-    return isSecondaryFullscreen() ? internal::WindowFullscreenPhase::Fullscreen : internal::WindowFullscreenPhase::Windowed;
-#endif
+    return internal::WindowFullscreenPhase::Windowed;
 }
 inline bool Window::isFullscreen() const {
     return fullscreenPhase() != internal::WindowFullscreenPhase::Windowed;

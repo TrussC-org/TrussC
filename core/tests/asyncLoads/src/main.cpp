@@ -1,3 +1,4 @@
+#include "../../common/tcWindowTest.h"
 #include <TrussC.h>
 #include "impl/tcImageDecode.h"
 #include "../../common/tcCoreTest.h"
@@ -135,9 +136,9 @@ void successAndDelivery() {
     // queued by another prelude callback wait for a later frame.
     thread submit([&] { runOnMainThread([&] { cached.loadAsync(font, 24); }); });
     submit.join();
-    internal::beginMainLoopFrame(chrono::steady_clock::now());
+    tcCoreTest::beginScheduledFrame(chrono::steady_clock::now());
     check("frame snapshot precedes runOnMainThread callbacks", cachedEvents == 1 && cached.isLoading());
-    internal::beginMainLoopFrame(chrono::steady_clock::now());
+    tcCoreTest::beginScheduledFrame(chrono::steady_clock::now());
     check("next actual frame delivers the cache hit", cachedEvents == 2);
 }
 

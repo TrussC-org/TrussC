@@ -1,6 +1,7 @@
 // #258: headless policy tests by default; optional --window-* smoke tests
 // exercise runApp/cleanup under a real display or Xvfb. No forced GPU reset.
 #include <TrussC.h>
+#include "../../common/tcWindowTest.h"
 #include "sokol/util/sokol_d3d11_device_loss.h"
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
@@ -22,7 +23,7 @@ void notifyLoss() {
     sapp_event ev{};
     ev.type = SAPP_EVENTTYPE_TC_DEVICE_LOST;
     ev.device_lost_reason = hung; // reason differs from the triggering HRESULT
-    internal::_event_cb(&ev);
+    tcCoreTest::dispatchMainEvent(&ev);
 }
 
 string mode;
@@ -68,6 +69,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
                         mode.c_str(), code, updates, cleanedUp);
         });
     }
+
+    getMainThreadId();
+    internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 239);
 
     for (uint32_t hr : {0u, 0x087A0001u, 0x087A0007u, 0x887A000Au, hung, 0x80004005u}) {
         bool notified = false;
@@ -144,6 +148,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
           "explicit exit code reaches clean log");
     exitApp();
     check(internal::appExitCode() == 0, "no-argument exit remains success");
+    internal::destroyMainWindow();
     std::printf("deviceLost headless: %d failures\n", failures);
     return failures ? 1 : 0;
 }

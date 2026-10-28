@@ -10,6 +10,10 @@ Window::Window(bool mainWindow)
     : owned_(std::make_unique<OwnedState>()), ctx_(owned_->context),
       events_(owned_->events), render_(owned_->render), title_(owned_->title) {
     ctx_.isMain = mainWindow;
+    ctx_.pauseUpdatesWhenHidden = !mainWindow;
+    ctx_.drawWhileHidden = mainWindow;
+    ctx_.deferredResponseTarget = mainWindow ? nullptr : &ctx_;
+    clearColorSet_ = !mainWindow;
 }
 
 namespace internal {
@@ -84,10 +88,21 @@ void activateBinding(void* user) {
         b.operations->activate(b.handle, b.user);
 }
 }
+#if !defined(_WIN32) && !(defined(__APPLE__) && TARGET_OS_OSX) && !(defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
+void nativeWindowSetTitle(Window&, const char*) {}
+void nativeWindowSetSize(Window&, double, double, bool) {}
+void nativeWindowSetPosition(Window&, int, int) {}
+IVec2 nativeWindowPosition(const Window&) { return {-1, -1}; }
+void nativeWindowSetFullscreen(Window&, bool) {}
+uint32_t nativeWindowFullscreenPhase(const Window&) { return 0; }
+void nativeWindowToggleFullscreen(Window&) {}
+#endif
 WindowContext& nonWindowContext() { return nonWindowState().context; }
 WindowContext* nonWindowContextIfInitialized() noexcept { return initializedNonWindow; }
 const WindowNativeOperations& productionWindowOperations() {
-    static const WindowNativeOperations operations{readMetadata, acquireSwapchain, activate};
+    static const WindowNativeOperations operations{readMetadata, acquireSwapchain, activate,
+        nativeWindowSetTitle, nativeWindowSetSize, nativeWindowSetPosition, nativeWindowPosition,
+        nativeWindowSetFullscreen, nativeWindowFullscreenPhase, nativeWindowToggleFullscreen};
     return operations;
 }
 void publishWindowMetadata(Window& window, const sapp_tc_window_metadata& metadata) {
@@ -108,11 +123,14 @@ void publishWindowMetadata(Window& window, const sapp_tc_window_metadata& metada
     }
     ctx.suspended = b.bound && metadata.trust_hidden_signals && (metadata.iconified || metadata.occluded);
 }
-void refreshWindowMetadata(Window& window) {
+bool refreshWindowMetadata(Window& window) {
     auto& b = WindowRequestAccess::binding(window);
-    if (!b.bound || !b.operations || !b.operations->readMetadata) return;
+    if (!b.bound) return false;
+    if (!b.operations || !b.operations->readMetadata) return true;
     sapp_tc_window_metadata metadata{};
-    if (b.operations->readMetadata(b.handle, b.user, metadata)) publishWindowMetadata(window, metadata);
+    if (!b.operations->readMetadata(b.handle, b.user, metadata)) return false;
+    publishWindowMetadata(window, metadata);
+    return true;
 }
 bool bindWindow(Window& window, sapp_window handle, const WindowNativeOperations& operations, void* user) {
     if (!handle.id || !operations.readMetadata) return false;
@@ -122,6 +140,13 @@ bool bindWindow(Window& window, sapp_window handle, const WindowNativeOperations
     auto& b = WindowRequestAccess::binding(window);
     b.handle = handle; b.operations = &operations; b.user = user; b.bound = true;
     publishWindowMetadata(window, metadata);
+    if (!b.geometryInitialized) {
+        auto& geometry = b.geometry;
+        const double scale = geometry.pixelSize ? metadata.dpi_scale : 1.0;
+        geometry.requestedWidth = geometry.requestedWidth > 0 ? geometry.requestedWidth / scale : metadata.width;
+        geometry.requestedHeight = geometry.requestedHeight > 0 ? geometry.requestedHeight / scale : metadata.height;
+        b.geometryInitialized = true;
+    }
     window.context().acquireSwapchain = acquireBoundSwapchain;
     window.context().acquireSwapchainUser = &window;
     window.context().activateNative = activateBinding;
@@ -184,8 +209,13 @@ void refreshMainWindowMetadata() {
         metadata.color_format = sapp_color_format(); metadata.depth_format = sapp_depth_format();
         metadata.trust_hidden_signals = true; metadata.occluded = sapp_window_occluded({0});
         metadata.drawable_available = metadata.fb_width > 0 && metadata.fb_height > 0;
+        metadata.source_interval = sapp_frame_duration();
         publishWindowMetadata(*window, metadata);
     }
+}
+bool refreshWindowEntryMetadata(Window& window) {
+    if constexpr (supportsSecondaryWindows()) return refreshWindowMetadata(window);
+    else { refreshMainWindowMetadata(); return true; }
 }
 void bindSingleWindowMain() {
     if constexpr (!supportsSecondaryWindows()) {
@@ -194,6 +224,227 @@ void bindSingleWindowMain() {
             WindowRequestAccess::binding(*mainWindow()).bound = true;
         }
     }
+}
+
+namespace {
+struct Coordinator {
+    unsigned entries = 0, turns = 0;
+    bool servicing = false;
+    bool bootstrapping = false;
+    void (*reload)() = nullptr;
+};
+Coordinator& coordinator() { static Coordinator state; return state; }
+void processQueues() {
+    auto loads = takeResourceLoadBatch();
+    EntryStackGuard guard(AppEntry::Prelude);
+    deliverResourceLoadBatch(std::move(loads));
+    drainMainThreadQueue();
+    pumpAudioDiagnostics();
+    console::internal::processQueue();
+#ifndef __EMSCRIPTEN__
+    mcp::processHttpQueue();
+#endif
+}
+void processMaintenance() {
+#ifndef __EMSCRIPTEN__
+    mcp::internal::drainDeferredResponses(nullptr, false, windowClockNow());
+#endif
+    if (int sig = pendingWindowExitSignal()) {
+        setExitReason(sig == SIGTERM ? "sigterm" : "sigint");
+        sapp_request_quit();
+    }
+}
+}
+WindowLifecycleScope::WindowLifecycleScope(Window& window) noexcept : window_(window) {
+    ++window_.entryDepth_;
+    ++coordinator().entries;
+}
+WindowLifecycleScope::~WindowLifecycleScope() noexcept {
+    --coordinator().entries;
+    --window_.entryDepth_;
+}
+HostServiceOperations& hostServiceOperationsForTests() {
+    static HostServiceOperations operations{processQueues, processMaintenance};
+    return operations;
+}
+void setHostReloadPoll(void (*poll)()) noexcept { coordinator().reload = poll; }
+HostTurnScope::HostTurnScope() noexcept { beforeHostTurn(); }
+HostTurnScope::~HostTurnScope() noexcept { afterHostTurn(); }
+bool hostCallbacksActive() noexcept { return coordinator().entries || coordinator().servicing; }
+void beforeHostTurn() noexcept {
+    auto& state = coordinator();
+    if (state.turns++ || state.entries || state.servicing) return;
+    state.servicing = true;
+    auto* previous = currentWindowCtx();
+    const auto native = sapp_tc_gl_save();
+    const auto sgl = sg_isvalid() ? sgl_get_context() : sgl_context{};
+    TeardownSteps steps;
+    steps.run("host turn services", [&] {
+        // Headless services keep the explicit non-window root selected.
+        if (!headless::isActive()) restoreWindowContext(nullptr);
+        if (state.reload) state.reload();
+        if (auto queues = hostServiceOperationsForTests().queues) queues();
+        // Queue callbacks may upload/Fbo-render during a no-draw turn.
+        if (sg_isvalid() && tc_internal_gpu_frame_has_work()) endGpuFrame();
+    });
+    steps.run("host turn caller restoration", [&] { restoreWindowContext(previous); });
+    currentWindowCtx() = previous;
+    if (sg_isvalid() && sgl.id) sgl_set_context(sgl);
+    sapp_tc_gl_restore(native);
+    state.servicing = false;
+}
+void afterHostTurn() noexcept {
+    auto& state = coordinator();
+    if (!state.turns || --state.turns || state.entries || state.servicing) return;
+    state.servicing = true;
+    TeardownSteps steps;
+    steps.run("host turn maintenance", [&] {
+        if (auto maintenance = hostServiceOperationsForTests().maintenance) maintenance();
+    });
+    state.servicing = false;
+}
+void deliverPendingWindowVisibilityAtReadyEntry(Window&) noexcept {
+    // Checkpoint 3 hook: compare the authoritative snapshot to the binding's
+    // lastDeliveredHidden (initially visible), then deliver raw aggregate before
+    // typed occludedChanged once. Snapshot publication never consumes delivery;
+    // listener subscription never replays it. No ready delivery in checkpoint 2.
+}
+WindowEntryScope::WindowEntryScope(Window& window, bool tick, bool bootstrap)
+    : window_(window), keepAlive_(window.hostOwner_.lock()), previous_(currentWindowCtx()),
+      previousSgl_(sg_isvalid() ? sgl_get_context() : sgl_context{}), native_(sapp_tc_gl_save()) {
+    if (!window.isOpen() || (tick && (window.entryDepth_ || window.context().inCallbackClock ||
+        window.context().inUpdate || coordinator().servicing || WindowRequestAccess::dispatchActive(window)))) return;
+    ++coordinator().entries;
+    ++window.entryDepth_;
+    entered_ = true;
+    try {
+        // Park the actual caller before installing the receiver. No drawable is acquired here.
+        if (&currentWindowContext() != &window.context() && sg_isvalid()) parkWindowPass();
+        currentWindowCtx() = &window.context();
+        if (!refreshWindowEntryMetadata(window)) return;
+        requestsReady_ = true;
+        restoreWindowContext(&window.context());
+        if (window.entryDepth_ == 1) WindowRequestAccess::applyPendingApp(window);
+        if (!window.isOpen() || (tick && WindowRequestAccess::closeRequested(window))) return;
+        if (bootstrap) { admitted_ = true; return; }
+        if (!coordinator().bootstrapping) deliverPendingWindowVisibilityAtReadyEntry(window);
+        ++window.dispatchDepth_;
+        dispatch_ = true;
+        syncWindowAppSize(window, true);
+        admitted_ = window.isOpen() && (!tick || !WindowRequestAccess::closeRequested(window));
+    } catch (...) { leave(); throw; }
+}
+void WindowEntryScope::leave() noexcept {
+    if (!entered_) return;
+    admitted_ = false;
+    TeardownSteps steps;
+    if (dispatch_) { --window_.dispatchDepth_; dispatch_ = false; }
+    if (requestsReady_ && window_.entryDepth_ == 1)
+        steps.run("pending App at window entry exit", [&] { WindowRequestAccess::applyPendingApp(window_); });
+    // Restoration is mandatory even if request callbacks or diagnostics failed.
+    steps.run("window entry caller restoration", [&] { restoreWindowContext(previous_); });
+    currentWindowCtx() = previous_;
+    if (sg_isvalid() && !currentWindowContext().targetsClosed && previousSgl_.id) sgl_set_context(previousSgl_);
+    sapp_tc_gl_restore(native_);
+    --window_.entryDepth_;
+    --coordinator().entries;
+    entered_ = false;
+}
+WindowEntryScope::~WindowEntryScope() noexcept { leave(); }
+void singleWindowEvent(const sapp_event* event) noexcept {
+    if (!event) return;
+    TeardownSteps steps;
+    steps.run("main native event binding", [&] {
+        auto* window = mainWindow();
+        mainWindowEvent(event, WindowRequestAccess::binding(*window).handle, window);
+    });
+}
+void mainWindowEvent(const sapp_event* event, sapp_window handle, void* user) noexcept {
+    enterWindowEvent(event, handle, user,
+        [](const sapp_event* ev, sapp_window, Window*, WindowContext&) { _event_cb_impl(ev); });
+}
+void enterWindowEvent(const sapp_event* event, sapp_window handle, void* user, WindowEventDispatch dispatch) noexcept {
+    // Admission belongs to the native init predicate. Desktop init callbacks
+    // may synchronously deliver events, as they did through the legacy client.
+    TeardownSteps steps;
+    steps.run("native window event", [&] {
+        auto* window = static_cast<Window*>(user);
+        if (!event || !window || WindowRequestAccess::binding(*window).handle.id != handle.id) return;
+        WindowEntryScope entry(*window);
+        if (!entry) return;
+        observeWindowVisibility(window->context(), event->type);
+        restoreWindowContext(&window->context());
+        dispatch(event, handle, window, window->context());
+        if (event->type == SAPP_EVENTTYPE_SUSPENDED || event->type == SAPP_EVENTTYPE_RESUMED)
+            WindowRequestAccess::binding(*window).lastDeliveredHidden = window->isOccluded();
+    });
+}
+bool enterWindowTick(Window& window, sapp_window handle, std::chrono::steady_clock::time_point now,
+                     double duration, const WindowTickPresentation* presentation) {
+    if (WindowRequestAccess::binding(window).handle.id != handle.id) return false;
+    WindowEntryScope entry(window, true);
+    if (!entry) return false;
+    auto& ctx = window.context();
+    syncWindowAppSize(window);
+    const auto& metadata = WindowRequestAccess::binding(window).metadata;
+    const bool gated = (window.isOccluded() && !ctx.drawWhileHidden) || ctx.fbWidth <= 0 || ctx.fbHeight <= 0;
+    crashFrame(sapp_frame_count());
+    CrashPhaseScope crashPhase("frame");
+    bool forceDraw = !ctx.asyncScreenshots.pending.empty() || !ctx.pendingScreenshotPaths.empty();
+#ifndef __EMSCRIPTEN__
+    forceDraw = forceDraw || mcp::internal::hasDeferredResponsesForTarget(ctx.deferredResponseTarget);
+#endif
+    // Binding metadata supplies source timing without asking another window.
+    const double source = metadata.source_interval > 0 ? metadata.source_interval : duration;
+    const bool drawn = runWindowTick(now, source, forceDraw, presentation, gated);
+    ctx.pmouseX = ctx.mouseX; ctx.pmouseY = ctx.mouseY;
+    return drawn;
+}
+void windowTick(sapp_window handle, void* user) noexcept {
+    TeardownSteps steps;
+    bool drawn = false;
+    steps.run("native window tick", [&] {
+        if (auto* window = static_cast<Window*>(user)) {
+            const double duration = supportsSecondaryWindows() ? sapp_window_frame_duration(handle) : sapp_frame_duration();
+            drawn = enterWindowTick(*window, handle, windowClockNow(), duration);
+        }
+    });
+    if (!drawn) {
+        if constexpr (supportsSecondaryWindows()) sapp_tc_window_skip_present(handle);
+        else sapp_skip_present();
+    }
+}
+void mainWindowBootstrap(void (*bootstrap)()) {
+    auto& state = coordinator();
+    state.bootstrapping = true;
+    try {
+        bindSingleWindowMain();
+        WindowEntryScope entry(*mainWindow(), false, true);
+        if (entry) bootstrap();
+    } catch (...) {
+        state.bootstrapping = false;
+        throw;
+    }
+    state.bootstrapping = false;
+}
+void windowClosed(sapp_window handle, void* user) noexcept {
+    TeardownSteps steps;
+    steps.run("native window close", [&] {
+        auto* window = static_cast<Window*>(user);
+        if (!window || !window->isOpen() || WindowRequestAccess::binding(*window).handle.id != handle.id) return;
+        auto keepAlive = WindowRequestAccess::retainHostOwner(*window);
+        WindowLifecycleScope callback(*window);
+        WindowRequestAccess::teardown(*window);
+    });
+}
+void singleWindowFrame() noexcept {
+    beforeHostTurn();
+    TeardownSteps steps;
+    steps.run("single-window native tick binding", [&] {
+        auto* window = mainWindow();
+        windowTick(WindowRequestAccess::binding(*window).handle, window);
+    });
+    afterHostTurn();
 }
 }
 }

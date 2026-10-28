@@ -1,3 +1,4 @@
+#include "../../common/tcWindowTest.h"
 // #364: receive data survives app stalls; overflow keeps the newest bytes.
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
@@ -18,6 +19,7 @@ using namespace std;
 using namespace tc;
 
 namespace {
+trussc::EventListener schedulerUpdate;
 int failures = 0;
 void check(const char* name, bool ok) {
     printf("%s: %s\n", name, ok ? "PASS" : "FAIL");
@@ -264,15 +266,15 @@ TC_CORE_TEST_MAIN() {
               until([&] { return internal::countQueuedMainThreadSlots() == 1; }));
         int updateEvents = 0;
         EventListener updateCounter = events().update.listen([&] { ++updateEvents; });
-        auto* previousUpdate = internal::appUpdateFunc;
-        internal::appUpdateFunc = countAppUpdate;
+        auto previousUpdate = std::move(schedulerUpdate);
+        schedulerUpdate = events().update.listen(countAppUpdate);
         setFps(EVENT_DRIVEN);
         internal::mainLoop().redrawCount = 0;
-        const bool drew = internal::beginMainLoopFrame(chrono::steady_clock::now());
+        const bool drew = tcCoreTest::beginScheduledFrame(chrono::steady_clock::now());
         if (drew) internal::runSyncedUpdate();
         check("idle EVENT_DRIVEN frame delivers the warning without update",
               !drew && backlogWarnings == 2 && appUpdates == 0 && updateEvents == 0);
-        internal::appUpdateFunc = previousUpdate;
+        schedulerUpdate = std::move(previousUpdate);
         setFps(VSYNC);
     }
     // A connection closed and reopened before the drain: the old delivery

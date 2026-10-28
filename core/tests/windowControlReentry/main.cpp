@@ -20,6 +20,7 @@
 #define SOKOL_GLCORE
 #endif
 #include <TrussC.h>
+#include "../common/tcWindowTest.h"
 #include <cstdio>
 using namespace tc;
 namespace {
@@ -27,6 +28,11 @@ int failures = 0;
 double nativeWidth = 0, nativeHeight = 0;
 int nativeSizes = 0;
 float nativeDpi = 1;
+void recordNativeSize(Window&, double width, double height, bool) {
+    nativeWidth = width; nativeHeight = height; ++nativeSizes;
+}
+uint32_t recordNativePhase(const Window& window);
+const internal::WindowNativeOperations recordingOperations{nullptr, nullptr, nullptr, nullptr, recordNativeSize, nullptr, nullptr, nullptr, recordNativePhase};
 int framebufferWidth = 320, framebufferHeight = 240;
 void publishSize(Window& window, int width, int height, float dpi) {
     sapp_tc_window_metadata metadata{};
@@ -43,6 +49,7 @@ internal::WindowFullscreenState mainFullscreen, secondaryFullscreen;
 internal::WindowFullscreenPhase recordedPhase(const Window& window) {
     return (window.ctx_.isMain ? mainFullscreen : secondaryFullscreen).phase;
 }
+uint32_t recordNativePhase(const Window& window) { return static_cast<uint32_t>(recordedPhase(window)); }
 int appliedControls = 0;
 bool recordControl(Window&, internal::WindowControl, int, int, const std::string*, IVec2&) {
     ++appliedControls;
@@ -244,8 +251,8 @@ void testFullscreenCalls(Window& main, Window& secondary) {
             }
         }
     }
-    // The Linux secondary query reads native fullscreen intent, even when
-    // another window is current. The recording sapp endpoint supplies it.
+    // The binding query reads native fullscreen intent, even when another
+    // window is current. The recording binding operation supplies it.
     internal::windowFullscreenHookForTests() = nullptr;
     internal::currentWindowCtx() = &main.context();
     secondaryFullscreen.phase = Phase::Fullscreen;
@@ -288,13 +295,10 @@ bool reenter(Window& target, internal::WindowControl op, int, int, const std::st
     if (!target.context().isMain) {
         // The production secondary callback boundary and resize delivery. Its
         // platform-specific event decoder only supplies the dimensions here.
-        internal::windowCallback([&] {
-            auto* previous = internal::currentWindowCtx();
-            internal::restoreWindowContext(&target.context());
+        tcCoreTest::nativeBoundary([&] {
             publishSize(target, 320, 240, target.context().dpiScale);
-            internal::WindowDispatchScope dispatch(target);
+            internal::WindowEntryScope dispatch(target);
             internal::syncWindowAppSize(target);
-            internal::restoreWindowContext(previous);
         });
     }
     // Always exercise the real main dispatcher too: native controls can pump
@@ -303,7 +307,7 @@ bool reenter(Window& target, internal::WindowControl op, int, int, const std::st
     publishSize(*internal::mainWindow(), ++framebufferWidth, framebufferHeight, nativeDpi);
     sapp_event ev{};
     ev.type = SAPP_EVENTTYPE_RESIZED;
-    internal::_event_cb(&ev);
+    tcCoreTest::dispatchMainEvent(&ev);
     return true;
 }
 int vertices(Window& window) {
@@ -311,22 +315,16 @@ int vertices(Window& window) {
     return sgl_num_vertices();
 }
 }
-// Replace only the native secondary endpoint: public dispatch, App ownership
-// and PixelSize conversion above it remain production code (no control hook).
+// Record native size operations through the same binding for both roots.
+// Public dispatch, App ownership and PixelSize conversion remain production code.
 namespace trussc {
 namespace internal { void dispatchSecondaryWindowEventForTests(const sapp_event*, Window&); }
-void Window::setSecondarySize(double width, double height, bool) {
-    nativeWidth = width; nativeHeight = height; ++nativeSizes;
-}
 }
 extern "C" bool sapp_mouse_locked() { return false; }
 extern "C" int sapp_width() { return framebufferWidth; }
 extern "C" int sapp_height() { return framebufferHeight; }
 extern "C" float sapp_dpi_scale() { return nativeDpi; }
 extern "C" float sapp_window_dpi_scale(sapp_window) { return nativeDpi; }
-extern "C" uint32_t sapp_tc_window_fullscreen_phase(sapp_window) {
-    return static_cast<uint32_t>(secondaryFullscreen.phase);
-}
 extern "C" bool sapp_isvalid() { return true; }
 int main() {
     getMainThreadId();
@@ -338,7 +336,9 @@ int main() {
         Window* main = internal::mainWindow();
         internal::WindowRequestAccess::bindForTests(*main, 101);
         Window secondary;
-        secondary.native_ = &secondary; internal::WindowRequestAccess::bindForTests(secondary, 202); // open handle; hook replaces only native control
+        secondary.native_ = &secondary; internal::WindowRequestAccess::bindForTests(secondary, 202);
+        internal::WindowRequestAccess::binding(*main).operations = &recordingOperations;
+        internal::WindowRequestAccess::binding(secondary).operations = &recordingOperations;
         auto mainApp = std::make_shared<DrawApp>();
         auto secondaryApp = std::make_shared<DrawApp>();
         check("main App attached", internal::attachMainApp(mainApp));
@@ -389,7 +389,7 @@ int main() {
                 internal::syncWindowAppSize(secondary);
                 internal::restoreWindowContext(&main->context());
                 sapp_event resize{}; resize.type = SAPP_EVENTTYPE_RESIZED;
-                internal::_event_cb(&resize);
+                tcCoreTest::dispatchMainEvent(&resize);
                 check("secondary App size and resize arguments match main at non-1 DPI",
                     secondaryApp->getWidth() == expectedWidth && secondaryApp->getHeight() == expectedHeight &&
                     secondaryApp->resizedWidth == expectedWidth && secondaryApp->resizedHeight == expectedHeight &&
@@ -424,7 +424,7 @@ int main() {
                 internal::pixelPerfectMode() = enabled;
                 auto deliver = [&](Window& window, const sapp_event& event) {
                     internal::restoreWindowContext(&window.context());
-                    if (window.context().isMain) internal::_event_cb(&event);
+                    if (window.context().isMain) tcCoreTest::dispatchMainEvent(&event);
                     else internal::dispatchSecondaryWindowEventForTests(&event, window);
                 };
                 sapp_event ev{};

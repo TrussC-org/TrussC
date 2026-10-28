@@ -1,4 +1,5 @@
 #include <TrussC.h>
+#include "../../common/tcWindowTest.h"
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
 #include <cstdio>
@@ -71,7 +72,7 @@ void feed(sapp_event_type type, float x = 20, float y = 20, unsigned int modifie
         e.num_touches = 1; e.touches[0].identifier = 42;
         e.touches[0].pos_x = x; e.touches[0].pos_y = y; e.touches[0].changed = true;
     }
-    internal::_event_cb(&e);
+    tcCoreTest::dispatchMainEvent(&e);
     binding.operations = originalOperations; binding.user = originalUser;
 }
 void expect(const char* name, const char* expected) {
@@ -269,7 +270,7 @@ void cameraChecks() {
         sapp_event e{}; e.type = type; e.mouse_button = button;
         e.mouse_x = 90; e.mouse_y = 20;
         e.modifiers = SAPP_MODIFIER_LMB | SAPP_MODIFIER_MMB;
-        internal::_event_cb(&e);
+        tcCoreTest::dispatchMainEvent(&e);
     };
     buttonEvent(SAPP_EVENTTYPE_MOUSE_DOWN, SAPP_MOUSEBUTTON_LEFT);
     buttonEvent(SAPP_EVENTTYPE_MOUSE_DOWN, SAPP_MOUSEBUTTON_MIDDLE);
@@ -363,10 +364,10 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     internal::mainWindowContext().fbWidth = internal::mainWindowContext().fbHeight = 128;
     internal::appSetupFunc();
     internal::mainWindowContext().fbWidth = internal::mainWindowContext().fbHeight = 128; internal::syncWindowAppSize(*internal::mainWindow());
-    internal::appUpdateFunc(); internal::appDrawFunc();
+    events().update.notify(); events().draw.notify();
     events().afterFrame.notify();
     for (int pass = 0; pass < 2; ++pass) {
-        internal::appUpdateFunc(); internal::appDrawFunc();
+        events().update.notify(); events().draw.notify();
         events().afterFrame.notify();
     }
     internal::appCleanupFunc(); finalChecks();

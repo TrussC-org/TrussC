@@ -1,5 +1,6 @@
 // Main/secondary shared admission, deferred boundaries and runner ownership.
 #include <TrussC.h>
+#include "../../common/tcWindowTest.h"
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
 using namespace tc;
@@ -131,7 +132,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     check("explicit native identities are retained", id == 101 && internal::WindowRequestAccess::creationId(other) == 202);
     auto next = std::make_shared<Probe>();
     {
-        internal::MainWindowDispatchScope dispatch;
+        internal::WindowEntryScope dispatch(*internal::mainWindow());
         check("main dispatch is active", internal::mainWindowDispatchActive());
         window->setApp(next);
         check("main setApp deferred", window->getApp() == first && first->getWindow() == window && !next->getWindow());
@@ -172,17 +173,17 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         if (source == 3) {
             auto callback = events().rawEvent.listen([&](const sapp_event&) { window->close(); });
             sapp_event focus{}; focus.type = SAPP_EVENTTYPE_FOCUSED;
-            internal::_event_cb(&focus);
+            tcCoreTest::dispatchMainEvent(&focus);
         }
         if (source != 1)
             check("main close uses cancellable quit", headless::running && headless::quitRequested);
         sapp_event quit{}; quit.type = SAPP_EVENTTYPE_QUIT_REQUESTED;
-        internal::_event_cb(&quit);
+        tcCoreTest::dispatchMainEvent(&quit);
         check("cancelled quit restores open main", window->isOpen() && !internal::WindowRequestAccess::closeRequested(*window));
         check("cancelled quit clears exit reason", internal::exitReason().empty());
         auto replacement = std::make_shared<Probe>();
         {
-            internal::MainWindowDispatchScope dispatch;
+            internal::WindowEntryScope dispatch(*internal::mainWindow());
             window->setApp(replacement);
             check("swap accepted after cancelled quit", window->appRequested_ && window->getApp() == next);
         }

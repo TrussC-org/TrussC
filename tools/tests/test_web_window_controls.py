@@ -60,6 +60,7 @@ def main():
 #include <memory>
 #include <string>
 #include "tc/app/internal/tcWindowFullscreen.h"
+#include "sokol/util/sokol_window_size.h"
 using trussc::internal::WindowGeometryCall;
 using trussc::internal::WindowFullscreenPhase;
 #define SOKOL_API_IMPL
@@ -100,16 +101,20 @@ IVec2 mainWindowPosition() { return {-1, -1}; }
 }
 namespace mcp::internal { void mainWindowTitle(const std::string&) {} }
 struct RectNode { void setSize(float, float) { assert(false); } };
+struct Window;
+struct RecordingOperations {
+    void (*setTitle)(Window&, const char*) = nullptr;
+    void (*setSize)(Window&, double, double, bool) = nullptr;
+    void (*setPosition)(Window&, int, int) = nullptr;
+    IVec2 (*position)(const Window&) = nullptr;
+    void (*setFullscreen)(Window&, bool) = nullptr;
+    void (*toggleFullscreen)(Window&) = nullptr;
+};
 struct Window {
+    struct { const RecordingOperations* operations = nullptr; } binding_;
     struct { bool isMain = true; float dpiScale = 2; } ctx_;
     std::string title_;
     bool isOpen() const { return valid; }
-    void setSecondaryTitle(const std::string&) { assert(false); }
-    void setSecondarySize(double, double, bool = false) { assert(false); }
-    void setSecondaryPosition(int, int) { assert(false); }
-    IVec2 getSecondaryPosition() { assert(false); return {}; }
-    bool isSecondaryFullscreen() const { return false; }
-    void setSecondaryFullscreen(bool) { assert(false); }
     IVec2 control(internal::WindowControl, int = 0, int = 0, const std::string* = nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);
     void setSize(int, int);
 };

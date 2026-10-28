@@ -1,6 +1,7 @@
 // Each fatal case execs a fresh copy; the parent checks both the OS status
 // and diagnostics. No window or graphics context is needed.
 #include <TrussC.h>
+#include "../../common/tcWindowTest.h"
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
 #include <fstream>
@@ -142,6 +143,7 @@ int child(const std::string& selected, const fs::path& directory) {
     if (mode == "overflow") return overflow(1000000);
     if (mode == "worker") { std::thread worker(fault); worker.join(); return 94; }
     if (mode == "event") {
+        internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 239);
         auto listener = events().rawEvent.listen([](const sapp_event&) { fault(); });
         sapp_event event{};
         event.type = SAPP_EVENTTYPE_KEY_DOWN;
@@ -149,7 +151,7 @@ int child(const std::string& selected, const fs::path& directory) {
         // Sokol advances this counter after _frame_cb; the crash context
         // still names the current main-loop frame (812).
         event.frame_count = 813;
-        internal::_event_cb(&event);
+        tcCoreTest::dispatchMainEvent(&event);
         return 95;
     }
     if (mode == "abort") std::abort();

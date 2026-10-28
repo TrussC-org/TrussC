@@ -328,14 +328,6 @@ namespace internal {
     bool routeToggleFullscreenToWindow();
     bool routeIsFullscreenFromWindow(bool& out);
     // Main Window is host-owned; these declarations precede the App/Window types.
-    class MainWindowDispatchScope {
-    public:
-        explicit MainWindowDispatchScope();
-        ~MainWindowDispatchScope();
-        MainWindowDispatchScope(const MainWindowDispatchScope&) = delete;
-    private:
-        Window* window;
-    };
     void createMainWindow(const WindowSettings& settings);
     void openMainWindow();
     void prepareMainAppBindings();
@@ -2164,7 +2156,7 @@ namespace internal {
         // during this drain wait for the next one.
         const size_t count = queue.size();
         #ifndef __EMSCRIPTEN__
-        if (!ctx.isMain) mcp::internal::drainDeferredResponses(&ctx);
+        mcp::internal::drainDeferredResponses(ctx.deferredResponseTarget, true, windowClockNow(), false);
         #endif
         captureScreenshots(ctx.asyncScreenshots);
         if (count == 0) return;
@@ -2178,7 +2170,6 @@ namespace internal {
     }
     // Keeps the afterFrame drain subscription alive for the app's lifetime.
     // Host-only, so a per-module copy is fine: installed in _setup_cb.
-    inline EventListener screenshotAfterFrameListener;
 }
 
 namespace internal {
@@ -2405,8 +2396,6 @@ namespace internal {
 
     // Callback function pointers
     inline void (*appSetupFunc)() = nullptr;
-    inline void (*appUpdateFunc)() = nullptr;
-    inline void (*appDrawFunc)() = nullptr;
     inline void (*appCleanupFunc)() = nullptr;
 } // namespace internal
 
@@ -2462,19 +2451,6 @@ namespace internal {
         // setup() runs. getDataPath() also probes on an earlier call; probing
         // here is too early to see a valid executable path on iOS.
 
-        // Drain deferred screenshot/MCP captures right after present(), where the
-        // swapchain is committed and we are outside any pass — the only safe
-        // readback point (see grabScreen()/saveScreenshot()).
-        internal::screenshotAfterFrameListener = events().afterFrame.listen([]() {
-            // Main window: currentWindowContext() resolves to the main context
-            // here, so this drains the main window's queue (secondary windows
-            // drain their own in windowTick).
-            internal::drainPendingScreenshots();
-            #ifndef __EMSCRIPTEN__
-            mcp::internal::drainDeferredResponses();
-            #endif
-        });
-
         // Install the standard application menu on macOS so Cmd+Q etc. work
         // out of the box. No-op on other platforms.
         internal::installAppMenu();
@@ -2500,11 +2476,9 @@ namespace internal {
     inline void _setup_cb() noexcept {
         TeardownSteps steps;
         bool completed = false;
-        steps.run("main native callback", [&] { _setup_cb_impl(); completed = true; });
+        steps.run("main native callback", [&] { mainWindowBootstrap(_setup_cb_impl); completed = true; });
         if (!completed) { appExitCode() = 1; sapp_quit(); }
     }
-
-    inline bool frameReentryGuard = false;  // host-only: the frame callback's own guard
 
     void beginMainUpdateCall(double fixedDelta = 0.0,
                              std::chrono::steady_clock::time_point stepTime = {});
@@ -2512,96 +2486,7 @@ namespace internal {
                        std::chrono::steady_clock::time_point stepTime = {});
     void runIndependentUpdates(std::chrono::steady_clock::time_point now);
     bool mainLoopShouldDraw(std::chrono::steady_clock::time_point now);
-
-    // Process-wide services run once on the main native tick, independently
-    // of whether that window's scheduler chooses to update or draw.
-    inline void runMainLoopPrelude() {
-        auto resourceLoads = takeResourceLoadBatch();
-        {
-            // The queued work below runs app code: one entry point (#349).
-            EntryStackGuard guard(AppEntry::Prelude);
-
-            // Run work marshalled from worker threads (runOnMainThread, Event
-            // Deliver::Main). Done before update/draw so queued tree edits land
-            // while no traversal is in flight.
-            internal::deliverResourceLoadBatch(std::move(resourceLoads));
-            internal::drainMainThreadQueue();
-
-            // Log the dropped plays that could only be counted (off the main
-            // thread, or repeats inside the rate limit). Rate limited.
-            internal::pumpAudioDiagnostics();
-
-            // Process console input (fire events)
-            console::internal::processQueue();
-
-            // Process MCP HTTP requests on main thread
-            #ifndef __EMSCRIPTEN__
-            mcp::processHttpQueue();
-            #endif
-        }
-
-    }
-
-    // Headless test seam for the original main-loop scheduling sequence.
-    // Native windows use runWindowTick for the complete shared sequence.
-    inline bool beginMainLoopFrame(std::chrono::steady_clock::time_point now) {
-        sampleFrameTime(currentWindowContext());
-        runMainLoopPrelude();
-        if (!mainLoop().updateSyncedToDraw) runIndependentUpdates(now);
-        return mainLoopShouldDraw(now);
-    }
-
     void runSyncedUpdate();
-
-    inline void _frame_cb_impl() {
-        // Guard against reentry (e.g. macOS modal dialogs pump the event loop)
-        if (frameReentryGuard) return;
-        if (int sig = pendingWindowExitSignal()) {
-            setExitReason(sig == SIGTERM ? "sigterm" : "sigint");
-            sapp_request_quit();
-            sapp_skip_present();
-            return;
-        }
-        frameReentryGuard = true;
-        auto* previousWindow = currentWindowCtx();
-        struct RestoreFrame {
-            WindowContext* previous;
-            ~RestoreFrame() {
-                TeardownSteps steps;
-                steps.run("main frame context restoration", [&] { restoreWindowContext(previous); });
-                currentWindowCtx() = previous;
-                frameReentryGuard = false;
-            }
-        } restoreFrame{previousWindow};
-        restoreWindowContext(nullptr);
-        MainWindowDispatchScope dispatch;
-        if (auto* window = mainWindow()) syncWindowAppSize(*window);
-        crashFrame(sapp_frame_count());
-        CrashPhaseScope crashPhase("frame");
-
-        // Process-wide services run once, on the main tick only.
-        runMainLoopPrelude();
-        const bool forceDraw = !mainWindowContext().asyncScreenshots.pending.empty()
-            || !mainWindowContext().pendingScreenshotPaths.empty()
-#ifndef __EMSCRIPTEN__
-            || mcp::internal::hasDeferredResponses()
-#endif
-            ;
-#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
-        sapp_tc_window_draw_while_hidden({0}, true);
-#endif
-        if (!runWindowTick(windowClockNow(), sapp_frame_duration(), forceDraw))
-            sapp_skip_present();
-
-        // Save previous frame's mouse position
-        internal::currentWindowContext().pmouseX = internal::currentWindowContext().mouseX;
-        internal::currentWindowContext().pmouseY = internal::currentWindowContext().mouseY;
-    }
-
-    inline void _frame_cb() noexcept {
-        TeardownSteps steps;
-        steps.run("main native callback", [&] { _frame_cb_impl(); });
-    }
 
     inline void _cleanup_cb_impl() {
         if (!beginExitCleanup()) return;
@@ -2717,19 +2602,6 @@ namespace internal {
     }
 
     inline void _event_cb_impl(const sapp_event* ev) {
-        refreshMainWindowMetadata();
-        observeWindowVisibility(mainWindowContext(), ev->type);
-        auto* previousWindow = currentWindowCtx();
-        restoreWindowContext(nullptr);
-        struct RestoreEventWindow {
-            WindowContext* previous;
-            ~RestoreEventWindow() {
-                TeardownSteps steps;
-                steps.run("main event context restoration", [&] { restoreWindowContext(previous); });
-                currentWindowCtx() = previous;
-            }
-        } restoreEventWindow{previousWindow};
-        MainWindowDispatchScope dispatch;
         WindowCallbackTimeScope callbackTime;
         CrashPhaseScope crashPhase("event dispatch");
         if (ev->type >= SAPP_EVENTTYPE_KEY_DOWN && ev->type <= SAPP_EVENTTYPE_TOUCHES_CANCELLED) {
@@ -3032,10 +2904,7 @@ namespace internal {
         }
     }
 
-    inline void _event_cb(const sapp_event* ev) noexcept {
-        TeardownSteps steps;
-        steps.run("main native callback", [&] { _event_cb_impl(ev); });
-    }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -3081,9 +2950,14 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings) {
     desc._tc_bind_cb = bindNativeWindow;
     desc._tc_bind_user = mainWindow();
     desc.init_cb = internal::_setup_cb;
-    desc.frame_cb = internal::_frame_cb;
+    desc.frame_cb = internal::singleWindowFrame;
+    desc._tc_tick_cb = internal::windowTick;
+    desc._tc_event_cb = internal::mainWindowEvent;
+    desc._tc_before_turn = internal::beforeHostTurn;
+    desc._tc_after_turn = internal::afterHostTurn;
+    desc._tc_callbacks_active = internal::hostCallbacksActive;
     desc.cleanup_cb = internal::_cleanup_cb;
-    desc.event_cb = internal::_event_cb;
+    desc.event_cb = internal::singleWindowEvent;
     desc.logger.func = internal::sokolLog;
 
     // Enable drag and drop
@@ -3140,10 +3014,6 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
             sapp_quit();
         }
     };
-    internal::appUpdateFunc = []() {
-        events().update.notify();
-    };
-    internal::appDrawFunc = []() { events().draw.notify(); };
     internal::appCleanupFunc = []() { internal::destroyMainWindow(); };
 
     return internal::buildWindowDescriptor(settings);

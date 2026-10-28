@@ -11,6 +11,16 @@
 namespace trussc {
 struct IVec2 { int x,y; };
 struct Window;
+struct RecordingOperations {
+    void (*setTitle)(Window&, const char*) = nullptr;
+    void (*setSize)(Window&, double, double, bool) = nullptr;
+    void (*setPosition)(Window&, int, int) = nullptr;
+    IVec2 (*position)(const Window&) = nullptr;
+    void (*setFullscreen)(Window&, bool) = nullptr;
+    void (*toggleFullscreen)(Window&) = nullptr;
+};
+extern const RecordingOperations recordingOperations;
+
 float dpi = 2;
 float sapp_dpi_scale() { return dpi; }
 bool sapp_isvalid() { return true; }
@@ -40,14 +50,11 @@ struct Window {
     struct { bool isMain = false; float dpiScale = 2; } ctx_;
     std::string title_;
     bool isOpen() const { return true; }
-    void setSecondaryTitle(const std::string&) {}
-    void setSecondaryPosition(int,int) {}
-    bool isSecondaryFullscreen() const { return false; }
-    void setSecondaryFullscreen(bool) {}
-    IVec2 getSecondaryPosition() { return {}; }
-    void setSecondarySize(double width,double height,bool=false) { recordMac(MAC_SECONDARY_CALL); }
+    struct { const RecordingOperations* operations = &recordingOperations; } binding_;
     IVec2 control(internal::WindowControl,int,int,const std::string* =nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);
 };
+const RecordingOperations recordingOperations{nullptr,
+    [](Window&, double width, double height, bool) { recordMac(MAC_SECONDARY_CALL); }};
 CONTROL_BODY
 }
 int main() {

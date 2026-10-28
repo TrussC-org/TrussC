@@ -1,6 +1,7 @@
 // Lost OS releases must end the press through the normal App / node path.
 // Headless: inject sapp events into the existing main-window callback.
 #include <TrussC.h>
+#include "../../common/tcWindowTest.h"
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
 #include <string>
@@ -44,7 +45,6 @@ struct TestApp : App {
     void mouseMoved(const MouseMoveEventArgs&) override { ++moves; }
     void mouseDragged(const MouseDragEventArgs& e) override { ++drags; dragButtons.push_back(e.button); }
 };
-TestApp* activeApp = nullptr;
 
 void feed(sapp_event_type type, int button = SAPP_MOUSEBUTTON_LEFT,
           unsigned int modifiers = 0, float x = 10, float y = 20) {
@@ -53,7 +53,7 @@ void feed(sapp_event_type type, int button = SAPP_MOUSEBUTTON_LEFT,
     e.mouse_button = static_cast<sapp_mousebutton>(button);
     e.modifiers = modifiers;
     e.mouse_x = x; e.mouse_y = y;
-    internal::_event_cb(&e);
+    tcCoreTest::dispatchMainEvent(&e);
 }
 
 bool moveBitsSupported() {
@@ -83,7 +83,7 @@ void feedTouch(sapp_event_type type) {
     e.touches[0].identifier = 42;
     e.touches[0].pos_x = 10; e.touches[0].pos_y = 20;
     e.touches[0].changed = true;
-    internal::_event_cb(&e);
+    tcCoreTest::dispatchMainEvent(&e);
 }
 
 #ifdef TC_TEST_SECONDARY_DISPATCH
@@ -103,6 +103,13 @@ struct Fixture {
 #ifdef TC_TEST_SECONDARY_DISPATCH
     std::unique_ptr<HeadlessWindow> window;
 #endif
+    bool windowForFixture() const {
+#ifdef TC_TEST_SECONDARY_DISPATCH
+        return bool(window);
+#else
+        return false;
+#endif
+    }
     explicit Fixture(bool secondary) {
         app->RectNode::setSize(100, 100);
         app->addChild(probe);
@@ -116,7 +123,10 @@ struct Fixture {
 #else
         (void)secondary;
 #endif
-        activeApp = app.get();
+        if (!secondary) {
+            internal::currentWindowCtx() = &internal::mainWindow()->context();
+            internal::attachMainApp(app);
+        }
         auto& ctx = internal::currentWindowContext();
         ctx.rootNode = app;
         ctx.pressedMouseButtons = 0;
@@ -127,8 +137,8 @@ struct Fixture {
 #ifdef TC_TEST_SECONDARY_DISPATCH
         if (window) internal::WindowRequestAccess::endApp(*window);
 #endif
+        if (!windowForFixture()) internal::detachMainApp();
         internal::currentWindowCtx() = previous;
-        activeApp = nullptr;
     }
     void send(sapp_event_type type, int button = SAPP_MOUSEBUTTON_LEFT,
               unsigned int modifiers = 0, float x = 10, float y = 20) {
@@ -310,7 +320,9 @@ TC_CORE_TEST_MAIN() {
     internal::pixelPerfectMode() = true; // avoid querying DPI without a native window
     setTouchAsMouse(true);
     getMainThreadId();
-    internal::registerAppEventListeners([] { return activeApp; });
+    internal::createMainWindow(WindowSettings{});
+    internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 101);
+    internal::mainWindowContext().fbWidth = internal::mainWindowContext().fbHeight = 100;
     // One line covers all gated move-bit scenarios, in either dispatch path.
     if (!moveBitsSupported()) printMoveBitsSkip();
     const unsigned int bits[] = {SAPP_MODIFIER_LMB, SAPP_MODIFIER_RMB, SAPP_MODIFIER_MMB};
@@ -349,6 +361,6 @@ TC_CORE_TEST_MAIN() {
 #else
     std::puts("SKIP: secondary-window dispatch (no adapter for this platform/backend)");
 #endif
-    internal::mainWindowContext().appEventListeners.clear();
+    internal::destroyMainWindow();
     return failures ? 1 : 0;
 }

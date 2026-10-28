@@ -165,6 +165,10 @@ struct WindowContext {
     // Host metadata is initialized before callbacks for every bound Window.
     // Headless uses a separate non-window context. Drawable acquisition is lazy.
     bool isMain = true;
+    // Existing hidden-update behavior is constructor configuration until #997.
+    bool pauseUpdatesWhenHidden = false;
+    bool drawWhileHidden = true;
+    const void* deferredResponseTarget = nullptr;
     int fbWidth = 0;
     int fbHeight = 0;
     float dpiScale = 1.0f;

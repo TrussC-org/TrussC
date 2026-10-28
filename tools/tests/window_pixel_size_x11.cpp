@@ -71,6 +71,16 @@ int release(void* data) { std::free(data); return 1; }
 #include <cassert>
 namespace trussc {
 struct Window;
+struct RecordingOperations {
+    void (*setTitle)(Window&, const char*) = nullptr;
+    void (*setSize)(Window&, double, double, bool) = nullptr;
+    void (*setPosition)(Window&, int, int) = nullptr;
+    IVec2 (*position)(const Window&) = nullptr;
+    void (*setFullscreen)(Window&, bool) = nullptr;
+    void (*toggleFullscreen)(Window&) = nullptr;
+};
+extern const RecordingOperations recordingOperations;
+
 float dpi=1;
 float sapp_dpi_scale() { return dpi; }
 bool sapp_isvalid() { return true; }
@@ -105,15 +115,15 @@ namespace mcp::internal { void mainWindowTitle(const std::string&) {} }
 struct Window {
     struct { bool isMain=true; float dpiScale=1; } ctx_;
     std::string title_;
+    struct { const RecordingOperations* operations = &recordingOperations; } binding_;
     bool isOpen() const { return true; }
-    void setSecondaryTitle(const std::string&) {}
-    void setSecondarySize(double,double,bool=false) {}
-    void setSecondaryPosition(int,int) {}
-    IVec2 getSecondaryPosition() { return {}; }
-    bool isSecondaryFullscreen() const { return false; }
-    void setSecondaryFullscreen(bool) {}
     IVec2 control(internal::WindowControl, int, int, const std::string* =nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);
 };
+const RecordingOperations recordingOperations{nullptr,
+    [](Window&, double width, double height, bool pixels) {
+        internal::x11Geometry(internal::dpy, 2, internal::geometry, false, 0, 0,
+                              width, height, dpi, false, pixels);
+    }};
 CONTROL_BODY
 Window mainWindow;
 bool routeToMain=true;

@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""Production-linked common entry/coordinator checks and optional runtime mutations.
+Run through tcbuild.sh after building allCoreTests. No SDK/display is claimed.
+"""
+from pathlib import Path
+import json, os, shlex, subprocess, tempfile
+ROOT = Path(__file__).resolve().parents[3]
+BUILD = Path(os.environ.get('TC_HOST_ENTRY_BUILD', ROOT/'core/tests/allCoreTests/build-linux'))
+OUT = Path(os.environ.get('TC_HOST_ENTRY_OUTPUT', ROOT/'.verification/cp2-host-entry'))
+OUT.mkdir(parents=True, exist_ok=True)
+import importlib.util
+spec = importlib.util.spec_from_file_location('native_admission', ROOT/'core/tests/windowTick/native-admission.py')
+admission = importlib.util.module_from_spec(spec); spec.loader.exec_module(admission)
+native = (ROOT/'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
+(OUT/'native-admission.h').write_text(admission.generate(native), encoding='utf-8')
+entries = json.loads((BUILD/'compile_commands.json').read_text(encoding="utf-8"))
+entry = next(x for x in entries if x['file'].endswith('tcWindowRuntime.cpp'))
+flags = shlex.split(entry['command']); compiler, flags = flags[0], flags[1:]
+include_root = Path(entry['file']).parents[2]
+flags = [x.replace(str(include_root), str(ROOT/'core/include')) for x in flags]
+clean=[]; skip=False
+for x in flags:
+    if skip: skip=False; continue
+    if x == '-o': skip=True; continue
+    if x == '-c' or x.endswith('tcWindowRuntime.cpp') or x.startswith(('-O','-g')): continue
+    clean.append(x)
+flags = ['-I'+str(OUT), '-I'+str(ROOT/'core/include'), '-I'+str(ROOT/'core/include/tc/app'), *clean, '-O0', '-g0']
+def compile(path, output, include=None):
+    subprocess.run([compiler,*(["-I"+str(include)] if include else []),*flags,'-c',str(path),'-o',str(output)],check=True)
+objects=[]
+for name,path in [('probe',ROOT/'core/tests/windowTick/host-entry.cpp'),('global',ROOT/'core/include/tc/app/tcGlobal.cpp')]:
+    output=OUT/(name+'.o'); compile(path,output); objects.append(str(output))
+link=shlex.split((BUILD/'CMakeFiles/allCoreTests.dir/link.txt').read_text(encoding="utf-8"))
+libs=link[next(i for i,x in enumerate(link) if x.endswith('libTrussC.a')):]
+source=Path(os.environ.get('TC_HOST_ENTRY_RUNTIME', ROOT/'core/include/tc/app/tcWindowRuntime.cpp')).read_text(encoding="utf-8")
+variants=[('baseline',source)]
+if os.environ.get('TC_HOST_ENTRY_MUTATIONS'):
+    changes=[
+      ('drop_during_init','    TeardownSteps steps;\n    steps.run("native window event",', '    if (coordinator().bootstrapping) return;\n    TeardownSteps steps;\n    steps.run("native window event",'),
+      ('turn_unwind_skips_maintenance','HostTurnScope::~HostTurnScope() noexcept { afterHostTurn(); }', 'HostTurnScope::~HostTurnScope() noexcept {}'),
+      ('native_deferral_misses_callbacks','return coordinator().entries || coordinator().servicing;', 'return false;'),
+      ('unguarded_lifecycle_callbacks','    ++window_.entryDepth_;\n    ++coordinator().entries;','    /* mutation: no lifecycle admission barrier */'),
+      ('allow_callback_tick','window.entryDepth_ || window.context().inCallbackClock ||\n        window.context().inUpdate || coordinator().servicing || WindowRequestAccess::dispatchActive(window)','false'),
+      ('launch_event_ignores_delivered_identity','enterWindowEvent(event, handle, user,','enterWindowEvent(event, WindowRequestAccess::binding(*static_cast<Window*>(user)).handle, user,'),
+      ('wrong_tick_identity','if (WindowRequestAccess::binding(window).handle.id != handle.id) return false;','if (false) return false;'),
+      ('ignore_metadata_rejection','if (!refreshWindowEntryMetadata(window)) return;', '(void)refreshWindowEntryMetadata(window);'),
+      ('drop_receiver_retention','keepAlive_(window.hostOwner_.lock())', 'keepAlive_()'),
+      ('close_receiver_not_retained','auto keepAlive = WindowRequestAccess::retainHostOwner(*window);', '/* mutation: close receiver not retained */'),
+      ('exit_requests_drained_twice','WindowRequestAccess::applyPendingApp(window_);', 'WindowRequestAccess::applyPendingApp(window_); WindowRequestAccess::applyPendingApp(window_);'),
+      ('skip_metadata_refresh','if (!refreshWindowEntryMetadata(window)) return;', '/* mutation: omit metadata refresh */'),
+      ('omit_input_entry','        WindowEntryScope entry(*window);\n        if (!entry) return;','        /* mutation: no input scope */'),
+      ('omit_exit_requests','if (requestsReady_ && window_.entryDepth_ == 1)','if (false)'),
+      ('close_loses_admission','if (!window.isOpen() || (tick && WindowRequestAccess::closeRequested(window))) return;','if (!window.isOpen()) return;'),
+      ('wrong_source_interval','metadata.source_interval > 0 ? metadata.source_interval : duration','duration'),
+      ('hidden_gate_removed','(window.isOccluded() && !ctx.drawWhileHidden)','false'),
+      ('queues_skipped','if (auto queues = hostServiceOperationsForTests().queues) queues();','/* mutation: omit queues */'),
+      ('reload_skipped','if (state.reload) state.reload();','/* mutation: omit reload */'),
+      ('maintenance_skipped','if (auto maintenance = hostServiceOperationsForTests().maintenance) maintenance();','/* mutation: omit maintenance */'),
+      ('services_inside_callbacks','state.turns++ || state.entries || state.servicing','state.turns++ || state.servicing'),
+      ('caller_not_restored','    currentWindowCtx() = previous_;','    currentWindowCtx() = &window_.context();'),
+    ]
+    for name,old,new in changes:
+        if source.count(old)!=1: raise SystemExit(f'{name}: mutation marker count {source.count(old)}')
+        mutant=source.replace(old,new)
+        if name=='unguarded_lifecycle_callbacks': mutant=mutant.replace('    --coordinator().entries;\n    --window_.entryDepth_;', '    /* mutation: no lifecycle admission unwind */')
+        if name=='close_loses_admission': mutant=mutant.replace('admitted_ = window.isOpen() && (!tick || !WindowRequestAccess::closeRequested(window));','admitted_ = window.isOpen();')
+        variants.append((name,mutant))
+results=[]
+for name,text in variants:
+    path=OUT/(name+'.cpp'); path.write_text(text,encoding="utf-8")
+    obj=OUT/(name+'.o'); compile(path,obj)
+    binary=OUT/name
+    subprocess.run([compiler,*objects,str(obj),*libs,'-Wl,--wrap=_Znwm,--wrap=_Znam,--wrap=sg_isvalid,--wrap=sg_query_stats,--wrap=sapp_cancel_quit,--wrap=sapp_get_num_dropped_files,--wrap=sapp_get_dropped_file_path','-o',str(binary)],cwd=BUILD,check=True)
+    with (OUT/(name+'.log')).open('w', encoding='utf-8') as log:
+        result=subprocess.run([str(binary)],stdout=log,stderr=subprocess.STDOUT,timeout=30)
+    output=(OUT/(name+'.log')).read_text(encoding="utf-8")
+    count=output.count('host-entry: FAIL:')
+    valid=(result.returncode==0 and count==0) if name=='baseline' else (result.returncode==1 and count>0)
+    results.append({'name':name,'returncode':result.returncode,'failed_assertions':count,'valid':valid})
+    print(results[-1],flush=True)
+    (OUT/'results.json').write_text(json.dumps(results,indent=2),encoding="utf-8")
+    if name=='baseline' and not valid: break
+if os.environ.get('TC_HOST_ENTRY_MUTATIONS') and results[0]['valid']:
+    for platform in ('mac', 'win32', 'x11_glx', 'x11_egl'):
+        name='initialize_before_first_drain_'+platform
+        include=OUT/name; include.mkdir(exist_ok=True)
+        (include/'native-admission.h').write_text(admission.generate(native, early=platform), encoding='utf-8')
+        obj=OUT/(name+'.o'); compile(ROOT/'core/tests/windowTick/host-entry.cpp',obj,include)
+        binary=OUT/(name+'-test')
+        subprocess.run([compiler,str(obj),objects[1],str(OUT/'baseline.o'),*libs,'-Wl,--wrap=_Znwm,--wrap=_Znam,--wrap=sg_isvalid,--wrap=sg_query_stats,--wrap=sapp_cancel_quit,--wrap=sapp_get_num_dropped_files,--wrap=sapp_get_dropped_file_path','-o',str(binary)],cwd=BUILD,check=True)
+        with (OUT/(name+'.log')).open('w',encoding='utf-8') as log:
+            result=subprocess.run([str(binary)],stdout=log,stderr=subprocess.STDOUT,timeout=30)
+        failed=(OUT/(name+'.log')).read_text(encoding='utf-8').count('host-entry: FAIL:')
+        results.append(dict(name=name,returncode=result.returncode,failed_assertions=failed,valid=result.returncode==1 and failed>0))
+        print(results[-1],flush=True)
+        (OUT/'results.json').write_text(json.dumps(results,indent=2),encoding='utf-8')
+if os.environ.get('TC_HOST_ENTRY_EXTRA_MUTATIONS') and results[0]['valid']:
+    # Header clients and common scheduler sources are mutated in private copies.
+    header=(ROOT/'core/include/TrussC.h').read_text(encoding="utf-8")
+    global_source=(ROOT/'core/include/tc/app/tcGlobal.cpp').read_text(encoding="utf-8")
+    cases=[
+      ('launch_legacy_tick','header','desc._tc_tick_cb = internal::windowTick;','desc._tc_tick_cb = nullptr;'),
+      ('launch_no_process_hooks','header','desc._tc_before_turn = internal::beforeHostTurn;','desc._tc_before_turn = nullptr;'),
+      ('main_scheduler_skipped','global','if (!ctx.loop.updateSyncedToDraw) runIndependentUpdates(now);','if (!ctx.isMain && !ctx.loop.updateSyncedToDraw) runIndependentUpdates(now);'),
+      ('device_key_uses_launch_tick','global','return sg_isvalid() ? sg_query_stats().prev_frame.frame_index : 0;', 'return sapp_frame_count();'),
+      ('headless_uses_window_key','global','if (&ctx == nonWindowContextIfInitialized()) return ctx.updateCount;', 'if (false) return ctx.updateCount;'),
+      ('main_resource_role_branch','global','return ctx.resourceTickCount;','return ctx.isMain ? ctx.updateCount : ctx.resourceTickCount;'),
+    ]
+    for name,kind,old,new in cases:
+        original=header if kind=='header' else global_source
+        if original.count(old)!=1: raise SystemExit(name+': missing mutation marker')
+        mutated=original.replace(old,new)
+        if kind=='header':
+            include=OUT/(name+'-include'); include.mkdir(exist_ok=True)
+            (include/'TrussC.h').write_text(mutated,encoding="utf-8")
+            obj=OUT/(name+'.o'); compile(ROOT/'core/tests/windowTick/host-entry.cpp',obj,include)
+            selected=[str(obj),objects[1]]
+        else:
+            path=OUT/(name+'.cpp'); path.write_text(mutated,encoding="utf-8")
+            obj=OUT/(name+'.o'); compile(path,obj)
+            selected=[objects[0],str(obj)]
+        binary=OUT/name
+        subprocess.run([compiler,*selected,str(OUT/'baseline.o'),*libs,'-Wl,--wrap=_Znwm,--wrap=_Znam,--wrap=sg_isvalid,--wrap=sg_query_stats,--wrap=sapp_cancel_quit,--wrap=sapp_get_num_dropped_files,--wrap=sapp_get_dropped_file_path','-o',str(binary)],cwd=BUILD,check=True)
+        with (OUT/(name+'.log')).open('w', encoding='utf-8') as log:
+            result=subprocess.run([str(binary)],stdout=log,stderr=subprocess.STDOUT,timeout=30)
+        failed=(OUT/(name+'.log')).read_text(encoding="utf-8").count('host-entry: FAIL:')
+        results.append({'name':name,'returncode':result.returncode,'failed_assertions':failed,'valid':result.returncode==1 and failed>0})
+        print(results[-1],flush=True)
+        (OUT/'results.json').write_text(json.dumps(results,indent=2),encoding="utf-8")
+raise SystemExit(any(not x['valid'] for x in results))

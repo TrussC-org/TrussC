@@ -405,7 +405,8 @@ inline void completeRetiredResponse(DeferredResponse& entry) noexcept {
 // requests (including main captures) without attempting a GPU readback.
 inline void drainDeferredResponses(const void* targetWindow = nullptr,
                                    bool frameAvailable = true,
-                                   std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()) {
+                                   std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now(),
+                                   bool expireAllTargets = true) {
     std::vector<internal::DeferredResponse> ready;
     std::vector<internal::DeferredResponse> expired;
     {
@@ -415,7 +416,7 @@ inline void drainDeferredResponses(const void* targetWindow = nullptr,
         std::vector<internal::DeferredResponse> keep;
         for (auto& d : list) {
             if (frameAvailable && d.target == targetWindow) ready.push_back(std::move(d));
-            else if ((!targetWindow || d.target == targetWindow) && now >= d.deadline) expired.push_back(std::move(d));
+            else if (((expireAllTargets && !targetWindow) || d.target == targetWindow) && now >= d.deadline) expired.push_back(std::move(d));
             else keep.push_back(std::move(d));
         }
         list.swap(keep);
@@ -455,6 +456,12 @@ inline void drainDeferredResponses(const void* targetWindow = nullptr,
 inline bool hasDeferredResponses() {
     std::lock_guard<std::mutex> lock(internal::deferredResponsesMutex());
     return !internal::deferredResponses().empty();
+}
+
+inline bool hasDeferredResponsesForTarget(const void* target) {
+    std::lock_guard<std::mutex> lock(internal::deferredResponsesMutex());
+    for (const auto& response : internal::deferredResponses()) if (response.target == target) return true;
+    return false;
 }
 
 } // namespace internal

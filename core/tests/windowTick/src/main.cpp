@@ -2,6 +2,7 @@
 // presentation and App-priority callbacks. Unit draws omit Node transforms;
 // display mode exercises the production App draw binding. No sleeps.
 #include <TrussC.h>
+#include "../../common/tcWindowTest.h"
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
 #include <cstdio>
@@ -22,8 +23,8 @@ Clock::time_point fakeNow;
 Clock::time_point readFakeClock() { return fakeNow; }
 uint64_t nativeStandIn = 0;
 struct Secondary : Window {
-    Secondary() { native_ = &nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
-    ~Secondary() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); internal::WindowRequestAccess::endApp(*this); }
+    Secondary() { context().fbWidth = context().fbHeight = 100; native_ = &nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
+    ~Secondary() { context().fbWidth = context().fbHeight = 100; native_ = nullptr; internal::WindowRequestAccess::unbind(*this); internal::WindowRequestAccess::endApp(*this); }
 };
 struct Probe : App {
     int updates = 0, draws = 0;
@@ -79,13 +80,9 @@ void setUnitApp(Window& window, std::shared_ptr<App> app) {
 const internal::WindowTickPresentation fakePresentation{[] {}, [] { return true; }, [] {}};
 bool tick(Window& window, double seconds, bool force = false) {
     fakeNow = at(seconds);
-    auto* previous = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &window.context();
-    bool result;
-    { internal::WindowDispatchScope scope(window);
-      result = internal::runWindowTick(at(seconds), 0.25, force, &fakePresentation); }
-    internal::currentWindowCtx() = previous;
-    return result;
+    internal::WindowEntryScope entry(window, true);
+    if (!entry) return false;
+    return internal::runWindowTick(at(seconds), .25, force, &fakePresentation);
 }
 void nativeGatedTicks(Window& window) {
     auto* previous = internal::currentWindowCtx();
@@ -97,8 +94,8 @@ void nativeGatedTicks(Window& window) {
     internal::runWindowTick(at(0), .25, false, &fakePresentation, true);
     internal::runWindowTick(at(1), .25, true, &fakePresentation, true);
     check("native gated callback retains secondary pause including capture",
-        ctx.isMain || ctx.updateCount == updates);
-    check("native gate keeps main decision B", !ctx.isMain || ctx.updateCount == updates + 2);
+        !ctx.pauseUpdatesWhenHidden || ctx.updateCount == updates);
+    check("native gate keeps main decision B", !!ctx.pauseUpdatesWhenHidden || ctx.updateCount == updates + 2);
     check("native gate never completes a draw", ctx.drawCount == draws);
     // Leave the regular fixture's counters and phase untouched.
     ctx.updateCount = updates; ctx.drawCount = draws;
@@ -126,7 +123,7 @@ void resourceKeyPlacement(Window& main) {
         bool callbackPlacement = true;
         auto observe = [&] {
             callbackPlacement &= internal::resourceFrameKey() ==
-                (ctx.isMain ? getUpdateCount() : expected);
+                expected;
         };
         auto update = events().update.listen(observe);
         auto draw = events().draw.listen(observe);
@@ -134,11 +131,11 @@ void resourceKeyPlacement(Window& main) {
         auto attempt = [&](const char* label, bool force, bool rejected, bool gated, bool skipAdmission = false) {
             const auto before = internal::resourceFrameKey();
             const auto foreign = other.context().resourceTickCount;
-            expected = before + (!ctx.isMain && !gated && !skipAdmission ? 1 : 0);
+            expected = before + (!gated && !skipAdmission ? 1 : 0);
             const internal::WindowTickPresentation presentation{[] {}, [=] { return !rejected; }, [] {}};
             fakeNow = at(seconds++);
             internal::runWindowTick(fakeNow, .25, force, &presentation, gated);
-            check(label, internal::resourceFrameKey() == (ctx.isMain ? ctx.updateCount : expected));
+            check(label, internal::resourceFrameKey() == expected);
             check("resource key is placed before update/draw listeners", callbackPlacement);
             check("owner tick leaves another secondary resource key unchanged", other.context().resourceTickCount == foreign);
             const auto saved = internal::resourceFrameKey();
@@ -165,7 +162,7 @@ void resourceKeyPlacement(Window& main) {
         setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN);
         publishHidden(*window, true);
         attempt("resource key: hidden capture admitted tick", true, false, false);
-        attempt("resource key: paused secondary tick", false, false, false, !ctx.isMain);
+        attempt("resource key: paused secondary tick", false, false, false, ctx.pauseUpdatesWhenHidden);
         attempt("resource key: native gate including capture never advances secondary", true, false, true);
         publishHidden(*window, false);
         setIndependentFps(4, EVENT_DRIVEN); ctx.loop.redrawCount = 0;
@@ -304,14 +301,16 @@ void exercise(Window& window) {
     {
         internal::WindowCallbackTimeScope eventScope;
         const auto eventTime = internal::getUpdateTime();
-        setIndependentFps(4, VSYNC); tick(window, 7211);
+        setIndependentFps(4, VSYNC);
+        const auto updates = ctx.updateCount;
+        check("common entry refuses a tick during its callback", !tick(window, 7211) && ctx.updateCount == updates);
         check("nested tick restores the event timing scope", ctx.inUpdate && ctx.inCallbackClock && !ctx.fixedStepUpdate && internal::getUpdateTime() == eventTime);
     }
     check("event timing scope restores its caller", !ctx.inUpdate && !ctx.inCallbackClock);
     internal::currentWindowCtx() = previous;
 }
 std::shared_ptr<Window> displaySecondary;
-bool displayDone = false, hideMain = false;
+bool displayDone = false, hideMain = false, secondaryExited = false, secondaryCleaned = false;
 bool readVisibility(sapp_window handle, void* user, sapp_tc_window_metadata& metadata) {
     auto& w = *static_cast<Window*>(user);
     if (!sapp_tc_window_read_metadata(handle, &metadata)) metadata = internal::WindowRequestAccess::binding(w).metadata;
@@ -373,7 +372,10 @@ void captureExpiryWithoutPresentation(Window& main) {
     auto attempt = [](Clock::time_point now, double duration, bool force,
                       const internal::WindowTickPresentation* presentation) {
         fakeNow = now;
-        return internal::runWindowTick(now, duration, force, presentation);
+        internal::beforeHostTurn();
+        const bool drawn = internal::runWindowTick(now, duration, force, presentation);
+        internal::afterHostTurn();
+        return drawn;
     };
     Secondary target;
     auto enqueue = [&](const void* window, Clock::time_point deadline, int id) {
@@ -468,6 +470,12 @@ sg_swapchain unavailableSwapchain(void*) {
 }
 struct SecondaryDisplayApp : App {
     int draws = 0;
+    void exit() override {
+        check("secondary close detaches App before exit", getWindow() == nullptr);
+        displaySecondary.reset();
+        secondaryExited = true;
+    }
+    void cleanup() override { secondaryCleaned = true; }
     void setup() override { setIndependentFps(VSYNC, EVENT_DRIVEN); redraw(3); }
     void draw() override {
         ++draws;
@@ -493,6 +501,7 @@ struct MainDisplayApp : App {
     uint32_t uploadFrame = 0;
     int hiddenUploads = 0, uploadRejections = 0;
     EventListener uploadLog;
+    sg_swapchain (*savedAcquire)(void*) = nullptr;
     void queueHiddenUpload() {
         onNextPrelude([this] {
             check("prelude upload runs while main hidden", hideMain);
@@ -579,14 +588,18 @@ struct MainDisplayApp : App {
             setMainHidden(false);
             check("main visible again", !getWindow()->isOccluded());
             // Exercise Sokol's actual non-throwing invalid-swapchain path.
+            savedAcquire = internal::mainWindowContext().acquireSwapchain;
             internal::mainWindowContext().acquireSwapchain = unavailableSwapchain;
             redraw(); phase = 3;
         } else if (phase == 3) {
             check("invalid native swapchain does not count a completed draw", getDrawCount() == 2 && internal::mainLoop().redrawCount == 1);
-            internal::mainWindowContext().acquireSwapchain = nullptr;
+            internal::mainWindowContext().acquireSwapchain = savedAcquire;
             phase = 4;
         } else if (phase == 4 && getDrawCount() == 3) {
             check("valid native swapchain retries pending redraw", internal::mainLoop().redrawCount == 0);
+            displaySecondary->close(); phase = 5;
+        } else if (phase == 5 && !displaySecondary) {
+            check("common native close retains Window through exit and cleanup", secondaryExited && secondaryCleaned);
             displayDone = true;
             exitApp();
         }
@@ -620,6 +633,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     internal::createMainWindow(WindowSettings{});
     auto& main = *internal::mainWindow();
     internal::WindowRequestAccess::bindForTests(main, 101);
+    main.context().fbWidth = main.context().fbHeight = 100;
     internal::windowClockForTests() = readFakeClock;
     independentTargets(main);
     nativeGatedTicks(main);
@@ -643,10 +657,10 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         });
         sapp_event event{}; event.type = SAPP_EVENTTYPE_SUSPENDED;
         setMainHidden(true);
-        internal::_event_cb(&event);
+        tcCoreTest::dispatchMainEvent(&event);
         check("suspension survives a throwing raw listener", main.context().suspended && !main.context().inUpdate && !main.context().inCallbackClock);
         throwing.disconnect(); event.type = SAPP_EVENTTYPE_RESUMED; setMainHidden(false);
-        internal::_event_cb(&event);
+        tcCoreTest::dispatchMainEvent(&event);
         check("resume clears suspension after listener exception", !main.context().suspended);
     }
 #ifndef __EMSCRIPTEN__

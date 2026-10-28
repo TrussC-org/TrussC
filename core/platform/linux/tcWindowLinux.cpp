@@ -34,55 +34,6 @@ bool bindAdapter(uint32_t id, void* user) noexcept {
     return internal::bindNativeWindow(id, window);
 }
 
-// --- tick: drive this window's update/draw with its context active ---------
-void windowTickImpl(sapp_window swin, void* user) {
-    trussc::Window* win = static_cast<trussc::Window*>(user);
-    // A closed Window may outlive its native side. Never dispatch callbacks
-    // or lazily recreate GPU resources after teardown.
-    if (!win || !win->isOpen()) return;
-    // Frame boundary: a setApp() requested before or during this tick is
-    // applied when the scope is entered and left, never inside the tick.
-    auto& ctx = win->context();
-    internal::refreshWindowMetadata(*win);
-
-    // Native gates still forbid drawable acquisition/presentation. Deliver the
-    // update decision to the same policy as visible ticks before size admission.
-    if (win->isOccluded()) {
-        auto* previous = internal::currentWindowCtx();
-        internal::currentWindowCtx() = &ctx;
-        struct Restore { internal::WindowContext* previous;
-            ~Restore() { internal::currentWindowCtx() = previous; }
-        } restore{previous};
-        internal::WindowDispatchScope scope(*win);
-        internal::syncWindowAppSize(*win);
-        internal::runWindowTick(internal::windowClockNow(),
-            sapp_window_frame_duration(swin), false, nullptr, true);
-        return;
-    }
-
-    internal::WindowDispatchScope scope(*win);
-
-    if (ctx.fbWidth <= 0 || ctx.fbHeight <= 0) return;
-    auto* previous = internal::currentWindowCtx();
-    internal::restoreWindowContext(&ctx);
-    struct RestoreContext {
-        internal::WindowContext* previous;
-        ~RestoreContext() {
-            internal::TeardownSteps steps;
-            steps.run("window tick context restoration", [&] { internal::restoreWindowContext(previous); });
-            internal::currentWindowCtx() = previous;
-        }
-    } restore{previous};
-    internal::syncWindowAppSize(*win);
-    if (!internal::runWindowTick(internal::windowClockNow(), sapp_window_frame_duration(swin)))
-        sapp_tc_window_skip_present(swin);
-
-}
-
-void windowTick(sapp_window swin, void* user) noexcept {
-    internal::windowCallback([&] { windowTickImpl(swin, user); });
-}
-
 // --- events: map sapp_event onto CoreEvents / App hooks / tree dispatch ----
 // One event is an entry point (#349): the guard restores the stacks while
 // this window's context is still current.
@@ -223,42 +174,10 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
     }
 }
 
-void windowEventImpl(const sapp_event* ev, sapp_window swin, void* user) {
-    trussc::Window* win = static_cast<trussc::Window*>(user);
-    // A closed Window may outlive its native side. Never dispatch callbacks
-    // or lazily recreate GPU resources after teardown.
-    if (!win || !win->isOpen()) return;
-    auto& ctx = win->context();
-    internal::refreshWindowMetadata(*win);
-
-    auto* prev = internal::currentWindowCtx();
-    internal::restoreWindowContext(&ctx);
-    struct RestoreEventContext {
-        internal::WindowContext* previous;
-        ~RestoreEventContext() {
-            internal::TeardownSteps steps;
-            steps.run("window event context restoration", [&] { internal::restoreWindowContext(previous); });
-            internal::currentWindowCtx() = previous;
-        }
-    } restore{prev};
-    {
-        internal::WindowDispatchScope scope(*win);   // frame boundary, as in windowTick
-        internal::syncWindowAppSize(*win, true);
-        dispatchWindowEvent(ev, swin, win, ctx);
-    }
+void windowEvent(const sapp_event* ev, sapp_window handle, void* user) noexcept {
+    internal::enterWindowEvent(ev, handle, user, dispatchWindowEvent);
 }
 
-void windowEvent(const sapp_event* ev, sapp_window swin, void* user) noexcept {
-    internal::windowCallback([&] { windowEventImpl(ev, swin, user); });
-}
-
-void windowClosed(sapp_window swin, void* user) noexcept {
-    (void)swin;
-    trussc::Window* win = static_cast<trussc::Window*>(user);
-    // The backend's safe point (close button, or a close() request landing):
-    // never inside this window's tick or events.
-    if (win) trussc::internal::WindowRequestAccess::teardown(*win);   // native + app state
-}
 
 } // namespace
 
@@ -271,8 +190,7 @@ namespace trussc {
 // invalid native handle uses the backend's unit DPI without creating a window.
 namespace internal {
 void dispatchSecondaryWindowEventForTests(const sapp_event* ev, Window& win) {
-    observeWindowVisibility(win.context(), ev->type);
-    dispatchWindowEvent(ev, sapp_window{0}, &win, win.context());
+    enterWindowEvent(ev, WindowRequestAccess::binding(win).handle, &win, dispatchWindowEvent);
 }
 // Display-test seam: use the native handle, DPI conversion and frame boundary.
 void dispatchSecondaryDisplayEventForTests(const sapp_event* ev, Window& win) {
@@ -317,42 +235,27 @@ void Window::teardownSecondary() noexcept {
     endApp();
 }
 
-void Window::setSecondaryTitle(const std::string& title) {
-    title_ = title;
-    auto* st = static_cast<AdapterState*>(native_);
-    if (st) sapp_window_set_title(st->win, title.c_str());
+namespace internal {
+namespace {
+sapp_window handle(const Window& w) { return WindowRequestAccess::binding(w).handle; }
 }
-
-void Window::setSecondarySize(double width, double height, bool pixelSize) {
-    auto* st = static_cast<AdapterState*>(native_);
-    if (!st) return;
-    internal::x11Geometry((Display*)sapp_x11_get_display(),
-        (::Window)(uintptr_t)sapp_window_x11_get_window(st->win), internal::WindowRequestAccess::binding(*this).geometry,
-        false, 0, 0, width, height, ctx_.dpiScale, isSecondaryFullscreen(), pixelSize);
+void nativeWindowSetTitle(Window& w, const char* title) { sapp_window_set_title(handle(w), title); }
+void nativeWindowSetFullscreen(Window& w, bool full) { sapp_tc_window_set_fullscreen(handle(w), full); }
+uint32_t nativeWindowFullscreenPhase(const Window& w) { return sapp_tc_window_fullscreen_phase(handle(w)); }
+void nativeWindowToggleFullscreen(Window& w) { sapp_tc_window_toggle_fullscreen(handle(w)); }
+void nativeWindowSetSize(Window& w, double width, double height, bool pixelSize) {
+    x11Geometry((Display*)sapp_x11_get_display(),
+        (::Window)(uintptr_t)sapp_window_x11_get_window(handle(w)), WindowRequestAccess::binding(w).geometry,
+        false, 0, 0, width, height, w.context().dpiScale, w.isFullscreen(), pixelSize);
 }
-
-void Window::setSecondaryPosition(int x, int y) {
-    auto* st = static_cast<AdapterState*>(native_);
-    if (!st) return;
-    internal::x11Geometry((Display*)sapp_x11_get_display(),
-        (::Window)(uintptr_t)sapp_window_x11_get_window(st->win), internal::WindowRequestAccess::binding(*this).geometry,
-        true, x, y, 0, 0, ctx_.dpiScale, isSecondaryFullscreen());
+void nativeWindowSetPosition(Window& w, int x, int y) {
+    x11Geometry((Display*)sapp_x11_get_display(),
+        (::Window)(uintptr_t)sapp_window_x11_get_window(handle(w)), WindowRequestAccess::binding(w).geometry,
+        true, x, y, 0, 0, w.context().dpiScale, w.isFullscreen());
 }
-
-IVec2 Window::getSecondaryPosition() const {
-    auto* st = static_cast<AdapterState*>(native_);
-    return st ? internal::x11FramePosition((Display*)sapp_x11_get_display(),
-        (::Window)(uintptr_t)sapp_window_x11_get_window(st->win)) : IVec2(-1, -1);
+IVec2 nativeWindowPosition(const Window& w) {
+    return x11FramePosition((Display*)sapp_x11_get_display(), (::Window)(uintptr_t)sapp_window_x11_get_window(handle(w)));
 }
-
-void Window::setSecondaryFullscreen(bool full) {
-    auto* st = static_cast<AdapterState*>(native_);
-    if (st) sapp_tc_window_set_fullscreen(st->win, full);
-}
-
-bool Window::isSecondaryFullscreen() const {
-    auto* st = static_cast<AdapterState*>(native_);
-    return st && sapp_tc_window_fullscreen_phase(st->win) != 0;
 }
 
 std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {
@@ -371,8 +274,9 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
         return nullptr;
     }
     auto win = std::shared_ptr<Window>(new Window());
+    internal::WindowRequestAccess::setHostOwner(*win, win);
     win->title_ = settings.title;
-    win->ctx_.swapchainTarget.colorFormat = SG_PIXELFORMAT_RGBA8;
+    internal::WindowRequestAccess::binding(*win).geometry = {double(settings.width), double(settings.height), pixelPerfectMode()};
     auto* st = new AdapterState();
 
     sapp_window_desc d = {};
@@ -388,9 +292,9 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     d.borderless = !settings.decorated;
     d.no_high_dpi = !settings.highDpi;
     d.sample_count = settings.sampleCount;  // NOTE: forced to the shared configuration's count
-    d.tick_cb = &windowTick;
+    d.tick_cb = &internal::windowTick;
     d.event_cb = &windowEvent;
-    d.close_cb = &windowClosed;
+    d.close_cb = &internal::windowClosed;
     d.user_data = win.get();
     d.bind_cb = bindAdapter;
     win->native_ = st;
@@ -403,11 +307,6 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
         return nullptr;
     }
 
-    internal::WindowRequestAccess::binding(*win).geometry = {
-        _sapp_tc_window_points(settings.width, d._tc_pixel_width, sapp_window_dpi_scale(st->win)),
-        _sapp_tc_window_points(settings.height, d._tc_pixel_height, sapp_window_dpi_scale(st->win)),
-        pixelPerfectMode()};
-    internal::WindowRequestAccess::binding(*win).geometryInitialized = true;
     internal::refreshWindowMetadata(*win);
     return win;
 }

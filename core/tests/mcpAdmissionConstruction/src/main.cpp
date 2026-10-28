@@ -1,3 +1,4 @@
+#include "../../common/tcWindowTest.h"
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
@@ -219,7 +220,7 @@ class ResizeDisplayApp : public App {
         getHttpChannel().send(mcp::McpRequest{request("tc_save_screenshot",
             {{"path", internal::pathToUtf8(output)}, {"window", windowIndex}}),
             promise, std::make_shared<WorkBudget>(true)});
-        // Same queue dispatcher as beginMainLoopFrame, while still in its
+        // Same queue dispatcher as beginScheduledFrame, while still in its
         // main-thread prelude, before beginFrame/update/draw on the main window.
         mcp::processHttpQueue();
         ++resizeSaves;
@@ -747,7 +748,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         getHttpChannel().send(mcp::McpRequest{request("tc_save_screenshot",
             {{"path", "admission.png"}, {"window", window}}), promise, std::make_shared<WorkBudget>(true)});
         const auto before = admissionRejections(AdmissionStore::Working);
-        internal::beginMainLoopFrame(std::chrono::steady_clock::now());
+        tcCoreTest::beginScheduledFrame(std::chrono::steady_clock::now());
         check("next-frame prelude admits resized 320x240 save after 4K frame",
             deferredResponses().size() == 1 && future.wait_for(std::chrono::seconds(0)) != std::future_status::ready);
         check("next-frame enqueue charges current size without stale-size rejection",
