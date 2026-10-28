@@ -318,6 +318,53 @@ sapp_window makeProbe(void (*tick)(sapp_window, void*), void (*event)(const sapp
     return sapp_create_window(&d);
 }
 _sapp_tc_window_t* fsCreated;
+
+// A native close (performClose:) or terminate fired from a timer while a client
+// callback spins the run loop must wait until that callback returns.
+int ccCloses, ccKind;
+bool ccArmed, ccInCallback, ccClosedInCallback, ccSpinDone;
+sapp_window ccWindow;
+void spinFor(double seconds) {
+    const double until = CACurrentMediaTime() + seconds;
+    while (CACurrentMediaTime() < until) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
+}
+void ccSpinWithClose(sapp_window win) {
+    _sapp_tc_window_t* w = _sapp_tc_lookup(win);
+    NSWindow* window = w ? w->window : nil;
+    ccInCallback = true;
+    NSTimer* t = [NSTimer timerWithTimeInterval:0.02 repeats:NO block:^(NSTimer*) { [window performClose:nil]; }];
+    [[NSRunLoop mainRunLoop] addTimer:t forMode:NSRunLoopCommonModes];
+    spinFor(0.15);
+    ccInCallback = false;
+    ccSpinDone = true;
+}
+void ccEvent(const sapp_event* event, sapp_window win, void*) {
+    if (ccArmed && ccKind == 0 && event->type == SAPP_EVENTTYPE_KEY_DOWN) { ccArmed = false; ccSpinWithClose(win); }
+}
+void ccTick(sapp_window win, void*) {
+    if (ccArmed && ccKind == 1) { ccArmed = false; ccSpinWithClose(win); }
+}
+void ccClose(sapp_window win, void*) {
+    ++ccCloses;
+    if (ccInCallback) ccClosedInCallback = true;
+    sapp_destroy_window(win);
+}
+
+// --terminate-in-callback (run as a child process): [NSApp terminate:] fired
+// inside the first window's frame callback, vetoed once, then allowed.
+bool terminateMode, termInCallback, termSpinReturned, quitInsideCallback, cleanupInsideCallback;
+int termRound, cleanups;
+void spinWithTerminate() {
+    termInCallback = true;
+    NSTimer* t = [NSTimer timerWithTimeInterval:0.02 repeats:NO block:^(NSTimer*) { [NSApp terminate:nil]; }];
+    [[NSRunLoop mainRunLoop] addTimer:t forMode:NSRunLoopCommonModes];
+    spinFor(0.15);
+    termInCallback = false;
+}
+void mainCleanup() {
+    ++cleanups;
+    if (termInCallback) cleanupInsideCallback = true;
+}
 // A real synchronous modal (NSAlert runModal) opened from a key handler.
 int modalRound, modalOwnerTicks, modalOtherAt, modalOwnerAt, modalOwnerAfterAt;
 bool modalActive, modalRequestClose, modalClosed, modalClosedInHandler, modalHandlerDone;
@@ -365,6 +412,7 @@ enum Stage { Sync, SettleAfterSync, MinimizeTrusted, RestoreTrusted, MinimizeUnt
              MinimizeMain, RestoreMain, Reverse, ReverseWait, NativeClose, NativeClosed,
              NestSetup, NestWarm, NestWait, FsCreate, FsSettle, ThrowTickStart, ThrowTickWait,
              ThrowEventStart, ThrowEventWait, ThrowLegacy, ThrowLegacyWait, ModalSetup, ModalWarm, ModalAfter,
+             CcSetup, CcWarm, CcWait, TerminateChild,
              CloseSecondary, VetoQuit, Done };
 Stage stage = Sync;
 double stageStart, sampleStart;
@@ -725,9 +773,60 @@ void step() {
         check("a close requested before the modal is processed after the handler returns",
             modalHandlerDone && modalClosed && !modalClosedInHandler && !sapp_window_valid(modalOwner));
         if (sapp_window_valid(modalOwner)) sapp_destroy_window(modalOwner);
+        ccKind = 0;
+        enter(CcSetup);
+        break;
+    case CcSetup:
+        ccCloses = 0; ccArmed = ccInCallback = ccClosedInCallback = ccSpinDone = false;
+        ccWindow = makeProbe(ccTick, ccEvent, ccClose, "native close");
+        enter(CcWarm);
+        break;
+    case CcWarm: {
+        if (!waited(0.5)) break;
+        _sapp_tc_window_t* w = _sapp_tc_lookup(ccWindow);
+        if (!w) { check("native-close probe created", false); enter(TerminateChild); break; }
+        ccArmed = true;
+        enter(CcWait);
+        if (ccKind == 0) {
+            _sapp_tc_view* view = w->view;
+            NSEvent* key = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
+                timestamp:0 windowNumber:w->window.windowNumber context:nil characters:@"c"
+                charactersIgnoringModifiers:@"c" isARepeat:NO keyCode:0];
+            [view keyDown:key];
+        }
+        break;
+    }
+    case CcWait:
+        if (!waited(1.5)) break;
+        std::printf("nativeWindow: performClose: inside %s callback: close_cb ran %d time(s), inside callback=%d\n",
+            ccKind == 0 ? "an event" : "a tick", ccCloses, ccClosedInCallback);
+        check(ccKind == 0 ? "native close inside an event callback runs close_cb once, after it returns" :
+                            "native close inside a tick callback runs close_cb once, after it returns",
+            ccSpinDone && ccCloses == 1 && !ccClosedInCallback && !sapp_window_valid(ccWindow));
+        if (sapp_window_valid(ccWindow)) sapp_destroy_window(ccWindow);
+        if (++ccKind < 2) { enter(CcSetup); break; }
+        enter(TerminateChild);
+        break;
+    case TerminateChild: {
+        // Terminate ends the process, so that scenario runs in a child.
+        NSTask* task = [NSTask new];
+        task.executableURL = [NSURL fileURLWithPath:NSProcessInfo.processInfo.arguments[0]];
+        task.arguments = @[@"--display", @"--terminate-in-callback"];
+        NSPipe* pipe = [NSPipe pipe];
+        task.standardOutput = pipe;
+        NSError* error = nil;
+        const bool launched = [task launchAndReturnError:&error];
+        NSData* output = launched ? [pipe.fileHandleForReading readDataToEndOfFile] : nil;
+        if (launched) [task waitUntilExit];
+        NSString* text = output ? [[NSString alloc] initWithData:output encoding:NSUTF8StringEncoding] : @"";
+        std::printf("%s", text.UTF8String);
+        check("terminate inside a callback (child): veto works, cleanup and exit once after the callback",
+            launched && task.terminationStatus == 0 && [text containsString:@"terminate scenario complete"] &&
+            ![text containsString:@": FAIL"]);
         sapp_window_request_close(second);
         enter(CloseSecondary);
         break;
+    }
     case CloseSecondary:
         if (!secondClosed && !waited(3)) break;
         check("deferred secondary close reaches its close callback and disposes it",
@@ -753,12 +852,27 @@ void step() {
 void mainEvent(const sapp_event* event) {
     if (event->type == SAPP_EVENTTYPE_QUIT_REQUESTED) {
         ++quitRequests;
+        if (termInCallback) quitInsideCallback = true;
         if (!allowQuit) sapp_cancel_quit();
     }
 }
 
 void mainFrame() {
     ++mainFrames;
+    if (terminateMode) {
+        if (mainFrames == 10) {             // round 1: vetoed
+            spinWithTerminate();
+            termRound = 1;
+        } else if (termRound == 1 && mainFrames == 40) {
+            check("terminate child: vetoed quit keeps the app running; QUIT_REQUESTED came after the callback",
+                quitRequests == 1 && !quitInsideCallback && cleanups == 0);
+            allowQuit = true;                 // round 2: allowed
+            termRound = 2;
+            spinWithTerminate();
+            termSpinReturned = true;
+        }
+        return;
+    }
     if (mainThrowOnce) { mainThrowOnce = false; mainThrew = true; throw std::runtime_error("legacy frame_cb test throw"); }
     if (coveredFirst) {
         const void* drawable = sapp_metal_get_current_drawable();
@@ -789,6 +903,7 @@ void initialized() {
         check("covered launch initializes before first frame", sapp_frame_count() == 0 && first->occluded);
         return;
     }
+    if (terminateMode) return;
     const float scale = expectedScale(first->window);
     std::printf("nativeWindow: backingScaleFactor=%.2f high_dpi=%d main=%.2f/%dx%d (%dx%d pt)\n",
         first->window.backingScaleFactor, !noHighDpi, first->dpi_scale, first->fb_width, first->fb_height,
@@ -839,7 +954,14 @@ void finish() {
     for (auto* w : _sapp_tc.windows) empty = empty && w == nullptr;
     check("process cleanup releases every window", empty && didInitialize);
     if (coveredFirst) check("quit requested by the first frame ends without another frame", mainFrames == 1);
-    if (!coveredFirst) check("scenario completed", stage == Done && quitRequests == 2);
+    if (terminateMode) {
+        std::printf("nativeWindow: terminate child: quit requests=%d cleanups=%d inside callback: quit=%d cleanup=%d, spin returned=%d\n",
+            quitRequests, cleanups, quitInsideCallback, cleanupInsideCallback, termSpinReturned);
+        check("terminate child: cleanup runs exactly once, after the callback returned",
+            termRound == 2 && quitRequests == 2 && cleanups == 1 && !cleanupInsideCallback && !quitInsideCallback && termSpinReturned);
+        if (!failures) std::puts("nativeWindow: terminate scenario complete");
+    }
+    if (!coveredFirst && !terminateMode) check("scenario completed", stage == Done && quitRequests == 2);
     std::fflush(stdout);
     _exit(failures ? 1 : 0);
 }
@@ -851,6 +973,7 @@ int main(int argc, char** argv) {
     }
     noHighDpi = argc > 2 && !std::strcmp(argv[2], "--no-high-dpi");
     coveredFirst = argc > 2 && !std::strncmp(argv[2], "--covered-", 10);
+    terminateMode = argc > 2 && !std::strcmp(argv[2], "--terminate-in-callback");
     if (coveredFirst) {
         if (!std::strcmp(argv[2], "--covered-draw")) launchHidden = 1;
         if (!std::strcmp(argv[2], "--covered-pause")) launchHidden = -1;
@@ -866,6 +989,7 @@ int main(int argc, char** argv) {
     desc._tc_draw_while_hidden = launchHidden; desc.width = 101; desc.height = 77;
     desc.high_dpi = !noHighDpi; desc.init_cb = initialized; desc.frame_cb = mainFrame;
     desc.event_cb = mainEvent; desc.window_title = "nativeWindow";
+    desc.cleanup_cb = mainCleanup;
     sapp_run(&desc);
     check("sapp_run returns only after a failed launch", false);
     return 1;

@@ -2640,6 +2640,9 @@ static struct {
     const char* create_error;           /* last native constructor failure, for the launch log */
     int callbacks_active;               /* client callbacks on the stack, any window */
     int constructing;                   /* native constructors between publication and return */
+    bool terminate_pending;             /* an AppKit terminate arrived while busy; replayed later */
+    bool deferred_blocked;              /* deferred work waited for a callback, tick or constructor */
+    bool deferred_scheduled;            /* a deferred pass is queued on the main run loop */
 
     /* ---- process state (this header owns sapp_run on macOS) ---- */
     struct {
@@ -2674,6 +2677,8 @@ static struct {
 } _sapp_tc;
 
 static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link);
+static void _sapp_tc_mac_schedule_deferred(void);
+static bool _sapp_tc_mac_busy(void);
 static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback);
 static bool _sapp_tc_mac_update_dimensions(_sapp_tc_window_t* w);
 static void _sapp_tc_mac_observe(_sapp_tc_window_t* w);
@@ -2881,6 +2886,8 @@ struct _sapp_tc_mac_callback_scope {
     ~_sapp_tc_mac_callback_scope() {
         --_sapp_tc.callbacks_active;
         if (_sapp_tc_window_t* w = _sapp_tc_lookup({win_id})) --w->callback_depth;
+        // The outermost callback returned: run work it held back, from the run loop.
+        if (_sapp_tc.callbacks_active == 0 && _sapp_tc.deferred_blocked) _sapp_tc_mac_schedule_deferred();
     }
 };
 
@@ -2889,7 +2896,10 @@ static void _sapp_tc_mac_contained(const char* where) noexcept {
     try {
         _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__, "error: ",
                      "%s threw; the exception was contained at the native boundary", where);
-    } catch (...) {}
+    } catch (...) {
+        // The installed logger may allocate (and so throw); keep a fixed line.
+        fputs("sokol_app_tc.h: error: a native callback threw; the exception was contained\n", stderr);
+    }
 }
 
 static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
@@ -3347,7 +3357,15 @@ static void _sapp_tc_mac_fullscreen_terminal(_sapp_tc_window_t* w, bool observed
 - (BOOL)windowShouldClose:(id)sender {
     (void)sender;
     _sapp_tc_window_t* w = self.w;
-    return w ? _sapp_tc_mac_close(w) : YES;
+    if (!w) return YES;
+    if (_sapp_tc_mac_busy()) {
+        // A close button or performClose: inside a callback, tick or constructor:
+        // refuse now and let the deferred path close it after they return.
+        w->close_requested = true;
+        _sapp_tc.deferred_blocked = true;
+        return NO;
+    }
+    return _sapp_tc_mac_close(w);
 }
 - (void)windowWillClose:(NSNotification*)n {
     (void)n;
@@ -3531,13 +3549,34 @@ static void _sapp_tc_mac_swap(_sapp_tc_window_t* w) {
    performClose:, which only plays the alert sound on a borderless window)
    sends windowWillClose: once the common close path agrees. Re-fetch each
    slot: a close destroys windows. */
-static void _sapp_tc_mac_process_deferred(void) {
-    // Only when no tick, client callback or constructor is on the stack.
-    if (_sapp_tc.callbacks_active > 0 || _sapp_tc.constructing > 0) return;
+/* Any tick, client callback or constructor on the stack, of any window. Native
+   close and terminate requests arriving then are deferred, like
+   sapp_window_request_close(): a client callback must never see its own window
+   (or the App) torn down underneath it. */
+static bool _sapp_tc_mac_busy(void) {
+    if (_sapp_tc.callbacks_active > 0 || _sapp_tc.constructing > 0) return true;
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         const _sapp_tc_window_t* cw = _sapp_tc.windows[i];
-        if (cw && (cw->in_tick || cw->callback_depth > 0)) return;
+        if (cw && (cw->in_tick || cw->callback_depth > 0)) return true;
     }
+    return false;
+}
+
+static bool _sapp_tc_mac_deferred_pending(void) {
+    if (_sapp_tc.terminate_pending || _sapp_tc.app.quit_requested || _sapp_tc.app.quit_ordered) return true;
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+        if (_sapp_tc.windows[i] && _sapp_tc.windows[i]->close_requested) return true;
+    }
+    return false;
+}
+
+static void _sapp_tc_mac_process_deferred(void) {
+    // Only when no tick, client callback or constructor is on the stack.
+    if (_sapp_tc_mac_busy()) {
+        if (_sapp_tc_mac_deferred_pending()) _sapp_tc.deferred_blocked = true;
+        return;
+    }
+    _sapp_tc.deferred_blocked = false;
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         _sapp_tc_window_t* cw = _sapp_tc.windows[i];
         if (!cw || !cw->close_requested) continue;
@@ -3545,10 +3584,32 @@ static void _sapp_tc_mac_process_deferred(void) {
         NSWindow* nsw = cw->window;   /* strong: outlives the destroy in close_cb */
         if (nsw && _sapp_tc_mac_close(cw)) [nsw close];
     }
+    if (_sapp_tc.terminate_pending) {
+        // Replay the terminate AppKit asked for while busy: vetoable as usual.
+        _sapp_tc.terminate_pending = false;
+        [NSApp terminate:nil];
+        return;
+    }
     _sapp_tc_window_t* first = _sapp_tc.app.main;
     if (first && first->window && (_sapp_tc.app.quit_requested || _sapp_tc.app.quit_ordered)) {
         [first->window performClose:nil];
     }
+}
+
+/* Deferred work held back by a callback or constructor runs once the outermost
+   one has returned, from the main run loop rather than inside the AppKit
+   notification or modal frame that ended it. A window whose ticks were blocked
+   therefore does not need a tick of its own for its close to proceed. */
+static void _sapp_tc_mac_schedule_deferred(void) {
+    if (_sapp_tc.deferred_scheduled) return;
+    _sapp_tc.deferred_scheduled = true;
+    CFRunLoopRef loop = CFRunLoopGetMain();
+    CFRunLoopPerformBlock(loop, kCFRunLoopCommonModes, ^{
+        _sapp_tc.deferred_scheduled = false;
+        try { _sapp_tc_mac_process_deferred(); }
+        catch (...) { _sapp_tc_mac_contained("deferred close/quit"); }
+    });
+    CFRunLoopWakeUp(loop);
 }
 
 /* One native tick for every window: reconcile this window's own fullscreen
@@ -3830,7 +3891,11 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
        close or quit runs until the constructor returns. */
     struct constructing_scope {
         constructing_scope() { ++_sapp_tc.constructing; }
-        ~constructing_scope() { --_sapp_tc.constructing; }
+        ~constructing_scope() {
+            --_sapp_tc.constructing;
+            if (_sapp_tc.constructing == 0 && _sapp_tc.callbacks_active == 0 && _sapp_tc.deferred_blocked)
+                _sapp_tc_mac_schedule_deferred();
+        }
     } constructing;
     const uint32_t win_id = w->win_id;
     NSWindow* window = w->window;
@@ -3966,6 +4031,15 @@ static bool _sapp_tc_mac_create_main_window(void) {
             default:
                 trussc::internal::setExitReasonIfEmpty("app-quit"); break;
         }
+    }
+    if (_sapp_tc_mac_busy()) {
+        /* Inside a callback, tick or constructor (e.g. a run loop spun by a
+           client callback): cancel this request and replay it after they return.
+           NSTerminateLater would wait in a nested modal loop above that
+           callback, which can then never return. */
+        _sapp_tc.terminate_pending = true;
+        _sapp_tc.deferred_blocked = true;
+        return NSTerminateCancel;
     }
     return _sapp_tc_request_exit() ? NSTerminateNow : NSTerminateCancel;
 }
