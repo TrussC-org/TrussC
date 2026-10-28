@@ -196,6 +196,7 @@ details.en = '''
 - It runs once per App however the App ends (program exit, hot reload, removal from its window), always on the main thread, and `cleanup()` always follows it.
 - The audio device and the GPU are still alive inside `exit()`, and `audioOut()`/`audioIn()` may still be running at the same time. Free audio state in `cleanup()` instead.
 - **Never make the audio callback wait for the main thread**, or shutdown will hang.
+- When the operating system logs out, restarts or shuts down, the app ends even while one of its handlers is running. `exit()` may then run while that handler is paused.
 - It cannot cancel the exit. To cancel, set `args.cancel = true` earlier, in `events().exitRequested`. That event is fired for an OS quit, `requestExitApp()`, and SIGINT/SIGTERM on Linux/macOS, but `exitApp()` skips it.
 
 ```cpp
@@ -216,6 +217,7 @@ details.ja = '''
 - どのような終わり方（プログラムの終了、ホットリロード、ウィンドウから外されたとき）でも App ごとに 1 回、メインスレッドで呼ばれ、その後に必ず `cleanup()` が続きます。
 - `exit()` の中ではオーディオデバイスも GPU もまだ動作しており、`audioOut()`/`audioIn()` が同時に実行されていることもあります。オーディオ関係の後片付けは `cleanup()` で行ってください。
 - **オーディオコールバックの中でメインスレッドを待たないでください。** 終了処理が止まってしまいます。
+- オペレーティングシステムがログアウト、再起動、シャットダウンするときは、アプリの処理が実行中でもアプリは終了します。その処理が一時停止している間に `exit()` が呼ばれることがあります。
 - ここから終了を取り消すことはできません。取り消したい場合は、それより前の `events().exitRequested` で `args.cancel = true` にします。このイベントは OS からの終了、`requestExitApp()`、Linux/macOS の SIGINT/SIGTERM で発行されますが、`exitApp()` では発行されません。
 
 ```cpp
@@ -236,6 +238,7 @@ details.ko = '''
 - 어떤 방식으로 끝나든(프로그램 종료, 핫 리로드, 윈도우에서 빠질 때) App마다 한 번 메인 스레드에서 호출되며, 그 뒤에 반드시 `cleanup()`이 이어집니다.
 - `exit()` 안에서는 오디오 장치와 GPU가 아직 동작 중이며, `audioOut()`/`audioIn()`이 동시에 실행되고 있을 수도 있습니다. 오디오 관련 정리는 `cleanup()`에서 하세요.
 - **오디오 콜백 안에서 메인 스레드를 기다리지 마세요.** 종료 처리가 멈춰 버립니다.
+- 운영 체제가 로그아웃, 다시 시작 또는 종료할 때는 앱의 처리 함수가 실행 중이어도 앱이 종료됩니다. 해당 함수가 일시 정지된 동안 `exit()`가 호출될 수 있습니다.
 - 여기서는 종료를 취소할 수 없습니다. 취소하려면 그보다 앞의 `events().exitRequested`에서 `args.cancel = true`로 설정합니다. 이 이벤트는 OS 종료, `requestExitApp()`, Linux/macOS의 SIGINT/SIGTERM에서 발생하지만 `exitApp()`에서는 발생하지 않습니다.
 
 ```cpp
