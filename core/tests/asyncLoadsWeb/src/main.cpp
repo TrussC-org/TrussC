@@ -3,6 +3,9 @@
 #include <cstdio>
 #include <fstream>
 #include <map>
+#ifdef __EMSCRIPTEN__
+#include "tc/graphics/tcBoundedFontFetch.h"
+#endif
 
 using namespace std;
 using namespace tc;
@@ -17,7 +20,9 @@ void check(const char* name, bool ok) {
 void drain() { internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch()); }
 struct Timer { em_arg_callback_func callback; void* data; int delay; };
 vector<Timer> timers;
-map<emscripten_fetch_t*, emscripten_fetch_attr_t> fetches;
+using FontFetch = internal::BoundedFontFetch;
+using FontDone = void (*)(FontFetch*, char*, size_t, int);
+map<FontFetch*, FontDone> fetches;
 double testNow = 0;
 int abortReentries = 0;
 bool failInline = false;
@@ -25,18 +30,15 @@ void runTimers() {
     auto batch = std::move(timers); timers.clear();
     for (auto& timer : batch) timer.callback(timer.data);
 }
-void reply(emscripten_fetch_t* fetch, bool success) {
-    auto attr = fetches.at(fetch);
+void reply(FontFetch* fetch, bool success) {
+    auto done = fetches.at(fetch);
     if (success) {
         auto bytes = makeFont();
         auto* data = static_cast<char*>(malloc(bytes.size()));
         memcpy(data, bytes.data(), bytes.size());
-        fetch->data = data;
-        fetch->numBytes = bytes.size();
-        attr.onsuccess(fetch);
+        done(fetch, data, bytes.size(), 200);
     } else {
-        fetch->status = 404;
-        attr.onerror(fetch);
+        done(fetch, nullptr, 0, 404);
     }
 }
 
@@ -72,22 +74,20 @@ void __wrap_emscripten_async_call(em_arg_callback_func callback, void* data, int
     timers.push_back({callback, data, delay});
 }
 double __wrap_emscripten_get_now() { return testNow; }
-emscripten_fetch_t* __wrap_emscripten_fetch(emscripten_fetch_attr_t* attr, const char*) {
-    auto* fetch = static_cast<emscripten_fetch_t*>(calloc(1, sizeof(emscripten_fetch_t)));
-    fetch->userData = attr->userData;
-    fetches.emplace(fetch, *attr);
+void __wrap_startFontStream(const char*, void* request, unsigned, size_t, void* done) {
+    auto* fetch = static_cast<FontFetch*>(request);
+    fetches.emplace(fetch, reinterpret_cast<FontDone>(done));
     if (failInline) reply(fetch, false);
-    return fetch;
 }
-int __wrap_emscripten_fetch_close(emscripten_fetch_t* fetch) {
-    auto attr = fetches.at(fetch);
-    // An abort can call onerror before emscripten_fetch_close returns.
-    ++abortReentries;
-    attr.onerror(fetch);
+void __wrap_cancelFontStream(void* request) {
+    auto* fetch = static_cast<FontFetch*>(request);
+    // Abort can reenter before close returns. A completed stream has already
+    // cleared complete; the real C++ backend still owns data/request cleanup.
+    if (fetch->complete) {
+        ++abortReentries;
+        fetch->complete(fetch, false);
+    }
     fetches.erase(fetch);
-    free(const_cast<char*>(fetch->data));
-    free(fetch);
-    return 0;
 }
 }
 #endif
@@ -140,20 +140,22 @@ TC_CORE_TEST_MAIN() {
     resolveAudio(7, .875f); resolveAudio(6, .625f); runTimers(); drain();
     check("AAC slot IDs recycle safely at the wasm i32 boundary", first.samples[0] == .625f && second.samples[0] == .875f && audioSlots() == 0);
 
-    // URL requests retain heap States even after move/destruction. Fetch
-    // close reenters onerror; each State must still complete only once.
+    // URL cancellation closes the bounded stream immediately. Close can
+    // reenter completion; each State must still complete only once.
     Font font;
     int fontEvents = 0;
     auto fontListener = font.onLoad.listen([&](LoadResult& r) { check("Font URL result succeeds", bool(r)); ++fontEvents; });
     font.loadAsync("https://test/one.ttf", 24);
     check("Font URL fetch never starts inline", fetches.empty() && fontEvents == 0);
-    drain(); auto* oldFetch = fetches.begin()->first;
-    font.loadAsync("https://test/two.ttf", 24); drain();
-    auto* currentFetch = fetches.begin()->first == oldFetch ? fetches.rbegin()->first : fetches.begin()->first;
+    drain();
+    font.loadAsync("https://test/two.ttf", 24);
+    check("replacement closes cancelled Font stream before starting another", fetches.empty() && fontEvents == 0);
+    drain();
+    auto* currentFetch = fetches.begin()->first;
     reply(currentFetch, true);
     check("fetch callback queues delivery", fontEvents == 0 && font.isLoading());
-    drain(); reply(oldFetch, true); drain();
-    check("cancelled Font callback is safe after newer success", fontEvents == 1 && font.isLoaded() && fetches.empty());
+    drain();
+    check("cancelled Font completion cannot replace newer success", fontEvents == 1 && font.isLoaded() && fetches.empty());
 
     font.loadAsync("https://test/two.ttf", 24);
     check("URL cache hit never notifies inline", fontEvents == 1);
@@ -161,15 +163,13 @@ TC_CORE_TEST_MAIN() {
     {
         auto doomed = make_unique<Font>();
         doomed->loadAsync("https://test/destroy.ttf", 24); drain();
-        auto* fetch = fetches.begin()->first;
-        doomed.reset(); reply(fetch, true); drain();
-        check("Font callback owns state after emitter destruction", fetches.empty());
+        doomed.reset(); drain();
+        check("Font destruction closes pending stream without an event", fetches.empty() && fontEvents == 2);
     }
     Font moved;
     font.loadAsync("https://test/move.ttf", 24); drain();
-    auto* movedFetch = fetches.begin()->first;
-    moved = std::move(font); reply(movedFetch, true); drain();
-    check("Font move drops pending URL event", fontEvents == 2 && !moved.isLoading());
+    moved = std::move(font); drain();
+    check("Font move closes pending stream and drops URL event", fontEvents == 2 && !moved.isLoading() && fetches.empty());
 
     Font expired;
     int expiredEvents = 0;
@@ -182,7 +182,7 @@ TC_CORE_TEST_MAIN() {
     check("reentrant fetch failure still waits another pass", expiredEvents == 1);
     drain(); check("reentrant fetch failure delivered once", expiredEvents == 2 && fetches.empty());
     testNow += internal::webLoadTimeoutMSecs; runTimers(); drain();
-    check("all fetch close abort reentries were handled", abortReentries >= 6 && fetches.empty());
+    check("Font cancellation and timeout abort reentries were handled", abortReentries >= 4 && fetches.empty());
     return failures ? 1 : 0;
 #endif
 }
