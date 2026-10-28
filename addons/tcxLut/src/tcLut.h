@@ -9,6 +9,8 @@
 // Addon for TrussC. Add "tcxLut" to addons.make to use.
 //
 // Supports .cube file format (industry standard for color LUTs)
+// Only the 0..1 input domain and full-range LUTs are supported;
+// other declared ranges fail to load with a keyword-specific error.
 // Uses 3D texture for GPU-accelerated color transformation
 //
 // Usage example:
@@ -69,6 +71,8 @@ public:
 
     // Load from .cube file. Relative paths resolve via getDataPath, like
     // Image::load.
+    // Range metadata must declare the default 0..1 input domain. Resolve's
+    // LUT_IN_VIDEO_RANGE / LUT_OUT_VIDEO_RANGE flags are unsupported.
     // OOM recovery holds in Release, or with iterator debugging off
     // (_ITERATOR_DEBUG_LEVEL=0); see docs/ADDONS.md.
     bool load(const fs::path& filePath) {
