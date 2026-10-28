@@ -1112,6 +1112,15 @@ void destroyMainWindow() noexcept {
     if (owner) WindowRequestAccess::endMain(*owner);
     owner.reset();
 }
+// Session end under a paused callback (the native backend _exits right after):
+// deliver the main window's events().exit (App::exit and its exit listeners)
+// once, without detaching the App, closing windows or running App::cleanup().
+void notifyMainAppExitAtSessionEnd() noexcept {
+    auto& owner = mainWindowOwner();
+    if (!owner) return;
+    TeardownSteps steps;
+    FrameworkEventAccess::notifyShutdown(owner->events().exit, steps);
+}
 
 WindowFullscreenHook& windowFullscreenHookForTests() {
     static WindowFullscreenHook hook = nullptr;
@@ -3095,6 +3104,14 @@ TouchMouseMapper& touchMouseMapper() {
 bool& appSetupCalled() {
     static bool called = false;
     return called;
+}
+
+// Set by a native backend that ends the process itself (_exit) right after
+// cleanup, e.g. a macOS session end while a callback is paused: cleanup must
+// then not leave through std::exit (atexit handlers, static destructors).
+bool& sessionEndExit() {
+    static bool active = false;
+    return active;
 }
 
 DataPathState& dataPathState() {

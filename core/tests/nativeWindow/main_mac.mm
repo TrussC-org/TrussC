@@ -16,6 +16,7 @@ void setExitReasonIfEmpty(const char*) {}
 void setExitReason(const char*) {}
 int& appExitCode() { static int code = 0; return code; }
 bool& appSetupCalled() { static bool called = true; return called; }
+bool& sessionEndExit() { static bool active = false; return active; }
 }
 namespace {
 int failures, callbacks, acquired, mainFrames, mainDrawables, showsChecked;
@@ -388,13 +389,52 @@ void xEvent(const sapp_event* event, sapp_window, void*) {
     xSpinDone = true;
 }
 
+// Round 4c: a direct close from a notification inside a running tick must stop
+// that tick (kinds 0/1); a close request already pending when a direct close is
+// handled must not close or report the window a second time (kind 2).
+int dcKind, dcTicksAfterClose, dcAcquiresAfterClose, dcCloses, dcNativeCloses;
+bool dcArmed, dcClosed;
+sapp_window dcWindow;
+NSWindow* dcNSWindow;
+sapp_event_type dcOn;
+void (*realClose)(id, SEL);
+void countClose(id self, SEL cmd) {
+    if (dcNSWindow && self == dcNSWindow) ++dcNativeCloses;
+    realClose(self, cmd);
+}
+void dcTick(sapp_window win, void*) {
+    if (!dcClosed) return;
+    ++dcTicksAfterClose;
+    if (sapp_window_metal_current_drawable(win)) ++dcAcquiresAfterClose;
+}
+void dcEvent(const sapp_event* event, sapp_window win, void*) {
+    if (!dcArmed || event->type != dcOn) return;
+    dcArmed = false;
+    _sapp_tc_window_t* w = _sapp_tc_lookup(win);
+    if (!w) return;
+    NSWindow* window = w->window;
+    if (dcKind == 2) sapp_window_request_close(win);
+    [window close];
+    dcClosed = true;
+}
+void dcKeep(sapp_window, void*) { ++dcCloses; }   // keeps the record registered
+
 // --terminate-in-callback (run as a child process): [NSApp terminate:] fired
 // inside the first window's frame callback, vetoed once, then allowed.
 bool terminateMode, termInCallback, termSpinReturned, quitInsideCallback, cleanupInsideCallback;
 // --session-end-in-callback / --plain-quit-in-callback (children): a quit Apple
 // event dispatched in-process while the first window's frame callback spins,
 // with keyAEQuitReason = kAELogOut, or with no reason (a plain quit).
-bool sessionEndMode, plainQuitMode;
+bool sessionEndMode, plainQuitMode, sessionEndNotBusyMode;
+// Process-exit marker: an atexit handler and a static destructor both print it.
+// A busy session end must leave through _exit only, so neither may run.
+void exitMarker() { std::fputs("nativeWindow: atexit marker ran\n", stdout); std::fflush(stdout); }
+struct ExitMarkerObject {
+    bool armed = false;
+    ~ExitMarkerObject() { if (armed) { std::fputs("nativeWindow: static destructor marker ran\n", stdout); std::fflush(stdout); } }
+};
+// Constructed after atexit(finish), so its destructor runs before finish's _exit.
+ExitMarkerObject& exitMarkerObject() { static ExitMarkerObject object; return object; }
 void dispatchQuitEvent(OSType why) {
     NSAppleEventDescriptor* event = [NSAppleEventDescriptor appleEventWithEventClass:kCoreEventClass
         eventID:kAEQuitApplication targetDescriptor:[NSAppleEventDescriptor currentProcessDescriptor]
@@ -422,10 +462,15 @@ void spinWithTerminate() {
 void mainCleanup() {
     ++cleanups;
     if (termInCallback) cleanupInsideCallback = true;
-    if (sessionEndMode) {
+    if (sessionEndMode || sessionEndNotBusyMode) {
         std::printf("nativeWindow: session-end cleanup ran (inside callback=%d, quit requests=%d)\n", cleanupInsideCallback, quitRequests);
         std::fflush(stdout);
     }
+    // Mirrors TrussC's _cleanup_cb_impl on macOS (TrussC.h): during the busy
+    // session end it runs only the minimal ending and returns; otherwise a
+    // non-zero app code leaves through std::exit at the end of cleanup.
+    if (trussc::internal::sessionEndExit()) return;
+    if (trussc::internal::appExitCode() != 0) std::exit(trussc::internal::appExitCode());
 }
 // A real synchronous modal (NSAlert runModal) opened from a key handler.
 int modalRound, modalOwnerTicks, modalOtherAt, modalOwnerAt, modalOwnerAfterAt;
@@ -474,7 +519,7 @@ enum Stage { Sync, SettleAfterSync, MinimizeTrusted, RestoreTrusted, MinimizeUnt
              MinimizeMain, RestoreMain, Reverse, ReverseWait, NativeClose, NativeClosed,
              NestSetup, NestWarm, NestWait, FsCreate, FsSettle, ThrowTickStart, ThrowTickWait,
              ThrowEventStart, ThrowEventWait, ThrowLegacy, ThrowLegacyWait, ModalSetup, ModalWarm, ModalAfter,
-             CcSetup, CcWarm, CcWait, XSetup, XWarm, XWait, TerminateChild,
+             CcSetup, CcWarm, CcWait, XSetup, XWarm, XWait, DcSetup, DcWarm, DcWait, TerminateChild,
              CloseSecondary, VetoQuit, Done };
 Stage stage = Sync;
 double stageStart, sampleStart;
@@ -916,6 +961,59 @@ void step() {
         }
         if (sapp_window_valid(xWindow)) sapp_destroy_window(xWindow);
         if (++xKind <= 5) { enter(XSetup); break; }
+        dcKind = 0;
+        enter(DcSetup);
+        break;
+    case DcSetup:
+        dcTicksAfterClose = dcAcquiresAfterClose = dcCloses = dcNativeCloses = 0;
+        dcArmed = dcClosed = false;
+        dcWindow = makeProbe(dcTick, dcEvent, dcKeep, "direct close in tick");
+        dcNSWindow = _sapp_tc_lookup(dcWindow) ? _sapp_tc_lookup(dcWindow)->window : nil;
+        enter(DcWarm);
+        break;
+    case DcWarm: {
+        _sapp_tc_window_t* w = _sapp_tc_lookup(dcWindow);
+        if (!w) { check("direct-close probe created", false); enter(TerminateChild); break; }
+        if (dcKind == 1 && !waited(0.3)) {        // make it hidden first: SUSPENDED, fallback source
+            forceHidden = w->window;
+            break;
+        }
+        if (!waited(0.6)) break;
+        if (dcKind == 0) { dcOn = SAPP_EVENTTYPE_RESIZED; w->fb_width = 1; dcArmed = true; }   // next tick: RESIZED
+        else if (dcKind == 1) {                   // visible again, observed by a display-link tick
+            dcOn = SAPP_EVENTTYPE_RESUMED; dcArmed = true; forceHidden = nil; forceVisible = w->window;
+            _sapp_tc_view* view = w->view;
+            [view tick:nil];
+        }
+        else {                                    // kind 2: request + direct close inside a key callback
+            dcOn = SAPP_EVENTTYPE_KEY_DOWN; dcArmed = true;
+            _sapp_tc_view* view = w->view;
+            NSEvent* key = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
+                timestamp:0 windowNumber:w->window.windowNumber context:nil characters:@"d"
+                charactersIgnoringModifiers:@"d" isARepeat:NO keyCode:0];
+            [view keyDown:key];
+        }
+        enter(DcWait);
+        break;
+    }
+    case DcWait:
+        if (!waited(1.0)) break;
+        forceVisible = nil;
+        if (dcKind < 2) {
+            std::printf("nativeWindow: direct close from %s inside a tick: closed=%d, tick_cb after close=%d, drawables after close=%d, close_cb=%d\n",
+                dcKind == 0 ? "RESIZED" : "RESUMED", dcClosed, dcTicksAfterClose, dcAcquiresAfterClose, dcCloses);
+            check(dcKind == 0 ? "direct close from an in-tick RESIZED: no tick_cb or drawable after it, close_cb once" :
+                                "direct close from an in-tick RESUMED: no tick_cb or drawable after it, close_cb once",
+                dcClosed && dcTicksAfterClose == 0 && dcAcquiresAfterClose == 0 && dcCloses == 1);
+        } else {
+            std::printf("nativeWindow: request + direct close inside a callback: native closes=%d, close_cb=%d\n",
+                dcNativeCloses, dcCloses);
+            check("a close request pending at a handled direct close: one native close, one close_cb",
+                dcClosed && dcNativeCloses == 1 && dcCloses == 1);
+        }
+        dcNSWindow = nil;
+        if (sapp_window_valid(dcWindow)) sapp_destroy_window(dcWindow);
+        if (++dcKind <= 2) { enter(DcSetup); break; }
         enter(TerminateChild);
         break;
     case TerminateChild: {
@@ -945,6 +1043,13 @@ void step() {
             status == 7 && [text componentsSeparatedByString:@"session-end cleanup ran"].count == 2 &&
             ![text containsString:@"QUIT_REQUESTED delivered"] && ![text containsString:@"returned into the callback"] &&
             ![text containsString:@": FAIL"]);
+        check("busy session end leaves through _exit only: no atexit or static destructor ran",
+            ![text containsString:@"marker ran"]);
+        text = runChild(@"--session-end-not-busy", &status);
+        std::printf("nativeWindow: not-busy session-end child exited with %d\n", status);
+        check("not-busy session end keeps the normal std::exit path with the app code (markers ran)",
+            status == 7 && [text containsString:@"atexit marker ran"] && [text containsString:@"static destructor marker ran"] &&
+            [text containsString:@"session-end cleanup ran (inside callback=0"] && ![text containsString:@": FAIL"]);
         text = runChild(@"--plain-quit-in-callback", &status);
         check("plain quit Apple event inside a callback (child) still defers until it returns",
             status == 0 && [text containsString:@"plain quit scenario complete"] && ![text containsString:@": FAIL"]);
@@ -1038,6 +1143,13 @@ void initialized() {
         check("covered launch initializes before first frame", sapp_frame_count() == 0 && first->occluded);
         return;
     }
+    if (sessionEndNotBusyMode) {
+        // A session end delivered from a timer, outside every tick and callback.
+        allowQuit = true;
+        NSTimer* t = [NSTimer timerWithTimeInterval:0.5 repeats:NO block:^(NSTimer*) { dispatchQuitEvent(kAELogOut); }];
+        [[NSRunLoop mainRunLoop] addTimer:t forMode:NSRunLoopCommonModes];
+        return;
+    }
     if (terminateMode || sessionEndMode || plainQuitMode) return;
     trussc::internal::appExitCode() = 0;
     const float scale = expectedScale(first->window);
@@ -1088,7 +1200,8 @@ void finish() {
     // AppKit termination: cleanup ran, then the common unwinder disposed every window.
     bool empty = _sapp_tc.app.main == nullptr;
     for (auto* w : _sapp_tc.windows) empty = empty && w == nullptr;
-    check("process cleanup releases every window", empty && didInitialize);
+    // TrussC's cleanup tail std::exits a non-zero app code before window disposal.
+    if (!sessionEndNotBusyMode && !sessionEndMode) check("process cleanup releases every window", empty && didInitialize);
     if (coveredFirst) check("quit requested by the first frame ends without another frame", mainFrames == 1);
     if (terminateMode) {
         std::printf("nativeWindow: terminate child: quit requests=%d cleanups=%d inside callback: quit=%d cleanup=%d, spin returned=%d\n",
@@ -1105,9 +1218,14 @@ void finish() {
             quitRequests == 1 && cleanups == 1 && !quitInsideCallback && !cleanupInsideCallback && termSpinReturned);
         if (!failures) std::puts("nativeWindow: plain quit scenario complete");
     }
-    if (!coveredFirst && !terminateMode && !sessionEndMode && !plainQuitMode)
+    if (!coveredFirst && !terminateMode && !sessionEndMode && !plainQuitMode && !sessionEndNotBusyMode)
         check("scenario completed", stage == Done && quitRequests == 2);
     std::fflush(stdout);
+    if (sessionEndNotBusyMode) {
+        check("not-busy session end asks the App once and cleans up once", quitRequests == 1 && cleanups == 1);
+        std::fflush(stdout);
+        _exit(failures ? 1 : trussc::internal::appExitCode());   // keep the app code
+    }
     _exit(failures ? 1 : 0);
 }
 }
@@ -1121,7 +1239,10 @@ int main(int argc, char** argv) {
     terminateMode = argc > 2 && !std::strcmp(argv[2], "--terminate-in-callback");
     sessionEndMode = argc > 2 && !std::strcmp(argv[2], "--session-end-in-callback");
     plainQuitMode = argc > 2 && !std::strcmp(argv[2], "--plain-quit-in-callback");
-    if (sessionEndMode) trussc::internal::appExitCode() = 7;   // must reach _exit
+    sessionEndNotBusyMode = argc > 2 && !std::strcmp(argv[2], "--session-end-not-busy");
+    if (sessionEndMode || sessionEndNotBusyMode) {
+        trussc::internal::appExitCode() = 7;   // non-zero: TrussC's cleanup tail would std::exit
+    }
     if (coveredFirst) {
         if (!std::strcmp(argv[2], "--covered-draw")) launchHidden = 1;
         if (!std::strcmp(argv[2], "--covered-pause")) launchHidden = -1;
@@ -1129,10 +1250,15 @@ int main(int argc, char** argv) {
     swap([NSWindow class], @selector(makeKeyAndOrderFront:), recordShow, &realShow);
     swap([NSWindow class], @selector(backingScaleFactor), injectScale, &realScale);
     swap([NSWindow class], @selector(occlusionState), injectOcclusion, &realOcclusion);
+    swap([NSWindow class], @selector(close), countClose, &realClose);
     // Override +layer for CAMetalLayer only; AppKit's own view layers keep CALayer's.
     realLayer = (CAMetalLayer* (*)(id, SEL))method_getImplementation(class_getClassMethod([CAMetalLayer class], @selector(layer)));
     class_addMethod(object_getClass([CAMetalLayer class]), @selector(layer), (IMP)injectLayer, "@@:");
     std::atexit(finish);
+    if (sessionEndMode || sessionEndNotBusyMode) {
+        std::atexit(exitMarker);              // runs before finish
+        exitMarkerObject().armed = true;      // destructor registered after finish
+    }
     sapp_desc desc{};
     desc._tc_draw_while_hidden = launchHidden; desc.width = 101; desc.height = 77;
     desc.high_dpi = !noHighDpi; desc.init_cb = initialized; desc.frame_cb = mainFrame;

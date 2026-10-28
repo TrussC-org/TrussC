@@ -2629,6 +2629,7 @@ struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     bool suspended_sent;                /* SUSPENDED delivered: draw admission paused while hidden */
     int callback_depth;                 /* client callbacks of this window on the stack */
     bool closed_pending;                /* closed natively while busy; close handling deferred */
+    bool native_closed;                 /* the NSWindow closed; its close was handled (or is pending) */
 };
 
 #define _SAPP_TC_MAX_WINDOWS (32)
@@ -3356,6 +3357,9 @@ static void _sapp_tc_mac_closed_now(_sapp_tc_window_t* w) {
    after the outermost callback runs the close handling above, unchanged and
    not vetoable (the native window is already closed). */
 static void _sapp_tc_mac_closed(_sapp_tc_window_t* w) {
+    // Closed natively: any close request still pending is satisfied by it.
+    w->native_closed = true;
+    w->close_requested = false;
     if (_sapp_tc_mac_busy()) {
         w->closed_pending = true;
         _sapp_tc.deferred_blocked = true;
@@ -3545,7 +3549,7 @@ static bool _sapp_tc_mac_initialize_dimensions(_sapp_tc_window_t* w) {
    that tick admitted a draw (a hidden, non-admitted window must never reach
    nextDrawable, which can stall). Repeated queries reuse the drawable. */
 static id<CAMetalDrawable> _sapp_tc_mac_drawable(_sapp_tc_window_t* w) {
-    if (!w || !w->in_tick || !w->draw_admitted || !w->layer) return nil;
+    if (!w || !w->in_tick || !w->draw_admitted || w->closed_pending || !w->layer) return nil;
     if (w->frame_drawable == nil) w->frame_drawable = [w->layer nextDrawable];
     return w->frame_drawable;
 }
@@ -3606,6 +3610,7 @@ static void _sapp_tc_mac_process_deferred(void) {
         _sapp_tc_window_t* cw = _sapp_tc.windows[i];
         if (!cw || !cw->close_requested) continue;
         cw->close_requested = false;
+        if (cw->native_closed) continue;    // already closed natively: never close it again
         NSWindow* nsw = cw->window;   /* strong: outlives the destroy in close_cb */
         if (nsw && _sapp_tc_mac_close(cw)) [nsw close];
     }
@@ -3664,8 +3669,9 @@ static void _sapp_tc_mac_tick_body(_sapp_tc_window_t* w, CADisplayLink* link) {
     // Reconcile once after terminal notifications, outside native delegates.
     // Re-fetch: toggling AppKit can synchronously deliver native events.
     _sapp_tc_reconcile_fullscreen(w);
+    // A notification or callback may have closed the window natively: no draw.
     w = _sapp_tc_lookup(handle);
-    if (!w) return;
+    if (!w || w->closed_pending) return;
     @autoreleasepool {
         _sapp_tc_timing_update(&w->timing);
         if (link) {
@@ -3679,7 +3685,7 @@ static void _sapp_tc_mac_tick_body(_sapp_tc_window_t* w, CADisplayLink* link) {
         const bool admitted = w->draw_while_hidden || !_sapp_tc_native_hidden(w);
         if (admitted && _sapp_tc_mac_update_dimensions(w)) {
             _sapp_tc_send_type(w, SAPP_EVENTTYPE_RESIZED);
-            if (!(w = _sapp_tc_lookup(handle))) return;
+            if (!(w = _sapp_tc_lookup(handle)) || w->closed_pending) return;
         }
         w->draw_admitted = admitted;
         if (w->desc.tick_cb) {
@@ -3725,7 +3731,7 @@ static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, 
         _sapp_tc_mac_tick_scope guard(w);
         _sapp_tc_mac_observe(w);
         w = _sapp_tc_mac_live(win_id);
-        if (w && w->ready && w->fallback_active == from_fallback) _sapp_tc_mac_tick_body(w, link);
+        if (w && w->ready && !w->closed_pending && w->fallback_active == from_fallback) _sapp_tc_mac_tick_body(w, link);
     }
     _sapp_tc_mac_process_deferred();
 }
@@ -4031,6 +4037,8 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
         default: trussc::internal::setExitReason("os-logoff"); break;
     }
     _sapp_tc.app.quit_ordered = true;
+    // Only the _exit below ends the process: cleanup must not std::exit.
+    trussc::internal::sessionEndExit() = true;
     if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
         _sapp_tc.app.cleanup_called = true;
         try {
