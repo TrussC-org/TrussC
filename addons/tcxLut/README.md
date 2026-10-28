@@ -10,6 +10,7 @@ bool loaded = lut.load("luts/grade.cube"); // relative to bin/data
 
 Only the **0..1 input domain** and **full-range LUTs** are supported.
 Resolve's usual exports with `LUT_3D_INPUT_RANGE 0.0 1.0` load, as do
+3D-only files with `LUT_1D_INPUT_RANGE 0.0 1.0`,
 `DOMAIN_MIN 0 0 0` and `DOMAIN_MAX 1 1 1`. The parser compares the parsed
 double values exactly with 0 and 1, without an epsilon.
 

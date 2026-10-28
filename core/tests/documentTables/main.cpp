@@ -57,6 +57,13 @@ void testCubeRanges() {
     }
 
     const std::string table = "LUT_3D_SIZE 2\n" + fixture.substr(fixture.find("0 0 0\n0 1 0"));
+    for (const char* values : {"0.0 1.0", "0 1 # full range", "0 1# full range"}) {
+        std::istringstream input(std::string("LUT_1D_INPUT_RANGE ") + values + "\n" + table);
+        tcx::lut::detail::CubeData inputRangeCube;
+        check("3D-only fixture with default LUT_1D_INPUT_RANGE loads",
+              tcx::lut::detail::parseCube(input, inputRangeCube, error) && error.empty() &&
+              inputRangeCube.side == 2 && inputRangeCube.rgb == cube.rgb);
+    }
     const auto rejects = [&](const std::string& line, const std::string& expectedError) {
         std::istringstream input(line + "\n" + table);
         const auto previous = cube.rgb;
@@ -64,9 +71,11 @@ void testCubeRanges() {
         check(line.c_str(), !tcx::lut::detail::parseCube(input, cube, error) &&
               error == expectedError && cube.side == 2 && cube.rgb == previous && cube.title == previousTitle);
     };
-    for (const char* values : {"-0.1 1", "0 1.1", "1 0", "0 0", "0 1.00000001"}) {
-        rejects(std::string("LUT_3D_INPUT_RANGE ") + values,
-                "unsupported LUT range (LUT_3D_INPUT_RANGE): only 0..1 is supported");
+    for (const char* keyword : {"LUT_1D_INPUT_RANGE", "LUT_3D_INPUT_RANGE"}) {
+        for (const char* values : {"-1 3", "-0.1 1", "0 1.1", "1 0", "0 0", "0 1.00000001"}) {
+            rejects(std::string(keyword) + " " + values,
+                    std::string("unsupported LUT range (") + keyword + "): only 0..1 is supported");
+        }
     }
     for (const char* values : {"-0.1 0 0", "0 0.1 0", "0 0 -0.1"}) {
         rejects(std::string("DOMAIN_MIN ") + values,
@@ -84,8 +93,8 @@ void testCubeRanges() {
         for (const char* values : {"0", "1", "0 1", "nan", "garbage"})
             rejects(std::string(keyword) + " " + values, std::string("invalid LUT range (") + keyword + ")");
     }
-    for (const char* keyword : {"LUT_3D_INPUT_RANGE", "DOMAIN_MIN", "DOMAIN_MAX"}) {
-        const bool inputRange = std::string(keyword) == "LUT_3D_INPUT_RANGE";
+    for (const char* keyword : {"LUT_1D_INPUT_RANGE", "LUT_3D_INPUT_RANGE", "DOMAIN_MIN", "DOMAIN_MAX"}) {
+        const bool inputRange = std::string(keyword) == "LUT_1D_INPUT_RANGE" || std::string(keyword) == "LUT_3D_INPUT_RANGE";
         const std::string invalid = std::string("invalid LUT range (") + keyword + ")";
         for (const char* values : {"", "0", "nan 1 1", "0 inf 1", "0 1 1e999", "0 1 junk", "0 1 1 extra", "0+1", "0 0+0"}) {
             rejects(std::string(keyword) + " " + values, invalid);
@@ -97,6 +106,7 @@ void testCubeRanges() {
         rejects(std::string(keyword) + (inputRange ? " 0 1e" : " 0 0 1e"), invalid);
     }
     rejects("LUT_1D_SIZE 2", "1D LUT not supported");
+    rejects("LUT_1D_INPUT_RANGE 0 1\nLUT_1D_SIZE 2", "1D LUT not supported");
     rejects("LUT_3D_SIZE", "invalid LUT dimensions");
     rejects("UNKNOWN_KEYWORD 0 1", "invalid LUT row");
     for (const auto& source : {table + "0 0 0\n", std::string("LUT_3D_SIZE 2\n0 0 0 extra\n"),
