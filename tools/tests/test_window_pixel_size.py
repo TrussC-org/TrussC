@@ -133,10 +133,10 @@ def creation_source(backend):
     secondary = adapter.split('    sapp_window_desc d = {};', 1)[1].split('    d.title', 1)[0]
     main_signature = {'win': 'static bool _sapp_tc_win32_create_main_window(',
                       'x11': 'static bool _sapp_tc_x11_create_main_window(',
-                      'mac': 'static bool _sapp_tc_create_main_window(',
+                      'mac': 'static bool _sapp_tc_mac_create_main_window(',
                       'egl': 'static bool _sapp_tc_x11_create_main_window('}[backend]
     main = body(native, main_signature)
-    if backend in ('x11', 'egl'):
+    if backend in ('x11', 'egl', 'mac'):
         shared = (ROOT / 'core/include/sokol/util/sokol_window_native.h').read_text(encoding='utf-8')
         transfer = body(shared, 'static inline sapp_window_desc _sapp_tc_normalize_main_window(')
         transfer = transfer.split('    window.width = ', 1)[1].split('    window.title', 1)[0]
@@ -144,9 +144,6 @@ def creation_source(backend):
     else:
         transfer = main.split('    w->desc.width = ', 1)[1].split('    w->desc.event_cb', 1)[0]
         transfer = '    w->desc.width = ' + transfer
-    if backend == 'mac':
-        # Main's descriptor has already chosen the non-positive native defaults.
-        transfer = transfer.replace('= width;', '= d->width;').replace('= height;', '= d->height;')
     def guard(creator):
         call = '_sapp_tc_window_pixels_representable('
         return call + creator.split(call, 1)[1].split(')', 1)[0] + ')'
@@ -164,13 +161,11 @@ def creation_source(backend):
         validation = creator.split('{', 1)[1].split('\n#if', 1)[0]
         arithmetic = 'const float scale = ' + arithmetic + '\nreturn {px_w, px_h};'
     else:
-        creator = body(native, main_signature)
+        # One native constructor serves the first window and every other window.
+        creator = body(native, 'static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(')
         call = creator.split('[w->window setContentSize:NSMakeSize(', 1)[1].split(')];', 1)[0]
-        secondary_creator = native[native.index('sapp_window sapp_create_window(const sapp_window_desc* desc) {'):]
-        secondary_call = secondary_creator.split('[w->window setContentSize:NSMakeSize(', 1)[1].split(')];', 1)[0]
-        validation = ('if (!(mainWindow ? ' + guard(creator) + ' : ' +
-                      guard(secondary_creator) + ')) return false;')
-        arithmetic = 'if (mainWindow) return roundMac(' + call + ');\nreturn roundMac(' + secondary_call + ');'
+        validation = 'if (!' + guard(creator) + ') return false;'
+        arithmetic = 'return roundMac(' + call + ');'
     template = (ROOT / 'tools/tests/window_creation_size.cpp').read_text(encoding='utf-8')
     return (template.replace('NORMAL_LAUNCHER', normal).replace('HOT_LAUNCHER', hot)
             .replace('LAUNCHER', launcher).replace('SECONDARY', secondary)
