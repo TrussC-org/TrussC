@@ -14,6 +14,8 @@
 namespace trussc::internal {
 void setExitReasonIfEmpty(const char*) {}
 void setExitReason(const char*) {}
+int& appExitCode() { static int code = 0; return code; }
+bool& appSetupCalled() { static bool called = true; return called; }
 }
 namespace {
 int failures, callbacks, acquired, mainFrames, mainDrawables, showsChecked;
@@ -389,6 +391,26 @@ void xEvent(const sapp_event* event, sapp_window, void*) {
 // --terminate-in-callback (run as a child process): [NSApp terminate:] fired
 // inside the first window's frame callback, vetoed once, then allowed.
 bool terminateMode, termInCallback, termSpinReturned, quitInsideCallback, cleanupInsideCallback;
+// --session-end-in-callback / --plain-quit-in-callback (children): a quit Apple
+// event dispatched in-process while the first window's frame callback spins,
+// with keyAEQuitReason = kAELogOut, or with no reason (a plain quit).
+bool sessionEndMode, plainQuitMode;
+void dispatchQuitEvent(OSType why) {
+    NSAppleEventDescriptor* event = [NSAppleEventDescriptor appleEventWithEventClass:kCoreEventClass
+        eventID:kAEQuitApplication targetDescriptor:[NSAppleEventDescriptor currentProcessDescriptor]
+        returnID:kAutoGenerateReturnID transactionID:kAnyTransactionID];
+    if (why) [event setParamDescriptor:[NSAppleEventDescriptor descriptorWithEnumCode:why] forKeyword:kAEQuitReason];
+    AppleEvent reply = {typeNull, nullptr};
+    [[NSAppleEventManager sharedAppleEventManager] dispatchRawAppleEvent:event.aeDesc withRawReply:&reply handlerRefCon:0];
+    AEDisposeDesc(&reply);
+}
+void spinWithQuitEvent(OSType why) {
+    termInCallback = true;
+    NSTimer* t = [NSTimer timerWithTimeInterval:0.02 repeats:NO block:^(NSTimer*) { dispatchQuitEvent(why); }];
+    [[NSRunLoop mainRunLoop] addTimer:t forMode:NSRunLoopCommonModes];
+    spinFor(0.15);
+    termInCallback = false;
+}
 int termRound, cleanups;
 void spinWithTerminate() {
     termInCallback = true;
@@ -400,6 +422,10 @@ void spinWithTerminate() {
 void mainCleanup() {
     ++cleanups;
     if (termInCallback) cleanupInsideCallback = true;
+    if (sessionEndMode) {
+        std::printf("nativeWindow: session-end cleanup ran (inside callback=%d, quit requests=%d)\n", cleanupInsideCallback, quitRequests);
+        std::fflush(stdout);
+    }
 }
 // A real synchronous modal (NSAlert runModal) opened from a key handler.
 int modalRound, modalOwnerTicks, modalOtherAt, modalOwnerAt, modalOwnerAfterAt;
@@ -893,21 +919,35 @@ void step() {
         enter(TerminateChild);
         break;
     case TerminateChild: {
-        // Terminate ends the process, so that scenario runs in a child.
-        NSTask* task = [NSTask new];
-        task.executableURL = [NSURL fileURLWithPath:NSProcessInfo.processInfo.arguments[0]];
-        task.arguments = @[@"--display", @"--terminate-in-callback"];
-        NSPipe* pipe = [NSPipe pipe];
-        task.standardOutput = pipe;
-        NSError* error = nil;
-        const bool launched = [task launchAndReturnError:&error];
-        NSData* output = launched ? [pipe.fileHandleForReading readDataToEndOfFile] : nil;
-        if (launched) [task waitUntilExit];
-        NSString* text = output ? [[NSString alloc] initWithData:output encoding:NSUTF8StringEncoding] : @"";
-        std::printf("%s", text.UTF8String);
+        // Terminate ends the process, so these scenarios run in children.
+        auto runChild = [](NSString* mode, int* status) -> NSString* {
+            NSTask* task = [NSTask new];
+            task.executableURL = [NSURL fileURLWithPath:NSProcessInfo.processInfo.arguments[0]];
+            task.arguments = @[@"--display", mode];
+            NSPipe* pipe = [NSPipe pipe];
+            task.standardOutput = pipe;
+            NSError* error = nil;
+            if (![task launchAndReturnError:&error]) { *status = -1; return @""; }
+            NSData* output = [pipe.fileHandleForReading readDataToEndOfFile];
+            [task waitUntilExit];
+            *status = task.terminationStatus;
+            NSString* text = [[NSString alloc] initWithData:output encoding:NSUTF8StringEncoding];
+            std::printf("%s", text.UTF8String);
+            return text ? text : @"";
+        };
+        int status = 0;
+        NSString* text = runChild(@"--terminate-in-callback", &status);
         check("terminate inside a callback (child): veto works, cleanup and exit once after the callback",
-            launched && task.terminationStatus == 0 && [text containsString:@"terminate scenario complete"] &&
+            status == 0 && [text containsString:@"terminate scenario complete"] && ![text containsString:@": FAIL"]);
+        text = runChild(@"--session-end-in-callback", &status);
+        std::printf("nativeWindow: session-end child exited with %d\n", status);
+        check("session end inside a callback (child): not asked, cleanup once, _exit(app code), never back in the callback",
+            status == 7 && [text componentsSeparatedByString:@"session-end cleanup ran"].count == 2 &&
+            ![text containsString:@"QUIT_REQUESTED delivered"] && ![text containsString:@"returned into the callback"] &&
             ![text containsString:@": FAIL"]);
+        text = runChild(@"--plain-quit-in-callback", &status);
+        check("plain quit Apple event inside a callback (child) still defers until it returns",
+            status == 0 && [text containsString:@"plain quit scenario complete"] && ![text containsString:@": FAIL"]);
         sapp_window_request_close(second);
         enter(CloseSecondary);
         break;
@@ -937,6 +977,7 @@ void step() {
 void mainEvent(const sapp_event* event) {
     if (event->type == SAPP_EVENTTYPE_QUIT_REQUESTED) {
         ++quitRequests;
+        if (sessionEndMode) { std::printf("nativeWindow: QUIT_REQUESTED delivered\n"); std::fflush(stdout); }
         if (termInCallback) quitInsideCallback = true;
         if (ccInCallback) xQuitInside = true;
         if (!allowQuit) sapp_cancel_quit();
@@ -945,6 +986,14 @@ void mainEvent(const sapp_event* event) {
 
 void mainFrame() {
     ++mainFrames;
+    if ((sessionEndMode || plainQuitMode) && mainFrames == 10) {
+        allowQuit = true;
+        spinWithQuitEvent(sessionEndMode ? kAELogOut : 0);
+        termSpinReturned = true;
+        if (sessionEndMode) { std::printf("nativeWindow: session end returned into the callback\n"); std::fflush(stdout); }
+        return;
+    }
+    if (sessionEndMode || plainQuitMode) return;
     if (terminateMode) {
         if (mainFrames == 10) {             // round 1: vetoed
             spinWithTerminate();
@@ -989,7 +1038,8 @@ void initialized() {
         check("covered launch initializes before first frame", sapp_frame_count() == 0 && first->occluded);
         return;
     }
-    if (terminateMode) return;
+    if (terminateMode || sessionEndMode || plainQuitMode) return;
+    trussc::internal::appExitCode() = 0;
     const float scale = expectedScale(first->window);
     std::printf("nativeWindow: backingScaleFactor=%.2f high_dpi=%d main=%.2f/%dx%d (%dx%d pt)\n",
         first->window.backingScaleFactor, !noHighDpi, first->dpi_scale, first->fb_width, first->fb_height,
@@ -1047,7 +1097,16 @@ void finish() {
             termRound == 2 && quitRequests == 2 && cleanups == 1 && !cleanupInsideCallback && !quitInsideCallback && termSpinReturned);
         if (!failures) std::puts("nativeWindow: terminate scenario complete");
     }
-    if (!coveredFirst && !terminateMode) check("scenario completed", stage == Done && quitRequests == 2);
+    if (sessionEndMode) check("session end while busy must not defer to a normal exit", false);
+    if (plainQuitMode) {
+        std::printf("nativeWindow: plain quit child: quit requests=%d cleanups=%d inside callback: quit=%d cleanup=%d, spin returned=%d\n",
+            quitRequests, cleanups, quitInsideCallback, cleanupInsideCallback, termSpinReturned);
+        check("plain quit Apple event inside a callback defers: asked and cleaned up once, after the callback",
+            quitRequests == 1 && cleanups == 1 && !quitInsideCallback && !cleanupInsideCallback && termSpinReturned);
+        if (!failures) std::puts("nativeWindow: plain quit scenario complete");
+    }
+    if (!coveredFirst && !terminateMode && !sessionEndMode && !plainQuitMode)
+        check("scenario completed", stage == Done && quitRequests == 2);
     std::fflush(stdout);
     _exit(failures ? 1 : 0);
 }
@@ -1060,6 +1119,9 @@ int main(int argc, char** argv) {
     noHighDpi = argc > 2 && !std::strcmp(argv[2], "--no-high-dpi");
     coveredFirst = argc > 2 && !std::strncmp(argv[2], "--covered-", 10);
     terminateMode = argc > 2 && !std::strcmp(argv[2], "--terminate-in-callback");
+    sessionEndMode = argc > 2 && !std::strcmp(argv[2], "--session-end-in-callback");
+    plainQuitMode = argc > 2 && !std::strcmp(argv[2], "--plain-quit-in-callback");
+    if (sessionEndMode) trussc::internal::appExitCode() = 7;   // must reach _exit
     if (coveredFirst) {
         if (!std::strcmp(argv[2], "--covered-draw")) launchHidden = 1;
         if (!std::strcmp(argv[2], "--covered-pause")) launchHidden = -1;

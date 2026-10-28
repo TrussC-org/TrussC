@@ -3994,6 +3994,57 @@ static bool _sapp_tc_mac_create_main_window(void) {
     return true;
 }
 
+/* keyAEQuitReason ('why?') of the quit Apple event being handled: Cocoa
+   forwards it for OS session exits. A real logout sends it as an event
+   attribute, not a parameter (seen on macOS), so read the attribute first.
+   Zero when absent or unreadable: a plain quit. */
+static AEEventID _sapp_tc_mac_quit_reason(void) {
+    NSAppleEventDescriptor* event = [[NSAppleEventManager sharedAppleEventManager] currentAppleEvent];
+    NSAppleEventDescriptor* reason = [event attributeDescriptorForKeyword:0x7768793f];
+    if (!reason) reason = [event paramDescriptorForKeyword:0x7768793f];
+    return reason ? [reason enumCodeValue] : 0;
+}
+
+static bool _sapp_tc_mac_is_session_end(AEEventID reason) {
+    switch (reason) {
+        case 0x6c6f676f: // kAELogOut ('logo')
+        case 0x726c676f: // kAEReallyLogOut ('rlgo')
+        case 0x72727374: // kAEShowRestartDialog ('rrst')
+        case 0x72657374: // kAERestart ('rest')
+        case 0x7273646e: // kAEShowShutdownDialog ('rsdn')
+        case 0x73687574: // kAEShutDown ('shut')
+            return true;
+        default:
+            return false;
+    }
+}
+
+/* Session end while a tick, callback or constructor is active, as Win32
+   WM_ENDSESSION: the App is not asked (no QUIT_REQUESTED) and the session is
+   not cancelled. Run the App's exit and cleanup once, in place, then end the
+   process at once so control never returns to the interrupted callback.
+   Native windows and GPU resources are left to the OS. */
+static void _sapp_tc_mac_session_end(AEEventID reason) {
+    switch (reason) {
+        case 0x72727374: case 0x72657374: trussc::internal::setExitReason("os-restart"); break;
+        case 0x7273646e: case 0x73687574: trussc::internal::setExitReason("os-shutdown"); break;
+        default: trussc::internal::setExitReason("os-logoff"); break;
+    }
+    _sapp_tc.app.quit_ordered = true;
+    if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
+        _sapp_tc.app.cleanup_called = true;
+        try {
+            if (_sapp_tc.app.desc.cleanup_cb) {
+                _sapp_tc.app.desc.cleanup_cb();
+            } else if (_sapp_tc.app.desc.cleanup_userdata_cb) {
+                _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
+            }
+        } catch (...) { _sapp_tc_mac_contained("sapp_desc.cleanup_cb"); }
+    }
+    fflush(NULL);
+    _exit(trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1);
+}
+
 @interface _sapp_tc_app_delegate : NSObject <NSApplicationDelegate>
 @end
 
@@ -4033,6 +4084,7 @@ static bool _sapp_tc_mac_create_main_window(void) {
 }
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender {
     (void)sender;
+    const AEEventID quit_reason = _sapp_tc_mac_quit_reason();
     if (!_sapp_tc.app.quit_ordered) {
         // Cocoa forwards the quit Apple event's reason for OS session exits.
         // keyAEQuitReason ('why?'). [TrussC] Any other quit (Cmd+Q, the Dock's
@@ -4041,11 +4093,7 @@ static bool _sapp_tc_mac_create_main_window(void) {
         // IfEmpty keeps a reason an earlier exit request already recorded.
         // A real logout sends the reason as an event attribute, not a
         // parameter (seen on macOS); read the attribute first.
-        NSAppleEventDescriptor* event = [[NSAppleEventManager sharedAppleEventManager] currentAppleEvent];
-        NSAppleEventDescriptor* reason = [event attributeDescriptorForKeyword:0x7768793f];
-        if (!reason) reason = [event paramDescriptorForKeyword:0x7768793f];
-        const AEEventID why = [reason enumCodeValue];
-        switch (why) {
+        switch (quit_reason) {
             case 0x6c6f676f: // kAELogOut ('logo')
             case 0x726c676f: // kAEReallyLogOut ('rlgo')
                 trussc::internal::setExitReason("os-logoff"); break;
@@ -4058,8 +4106,10 @@ static bool _sapp_tc_mac_create_main_window(void) {
         }
     }
     if (_sapp_tc_mac_busy()) {
-        /* Inside a callback, tick or constructor (e.g. a run loop spun by a
-           client callback): cancel this request and replay it after they return.
+        // A session end is not asked and not cancelled (as Win32 WM_ENDSESSION).
+        if (_sapp_tc_mac_is_session_end(quit_reason)) _sapp_tc_mac_session_end(quit_reason);
+        /* Any other quit inside a callback, tick or constructor (e.g. a run loop
+           spun by a client callback): cancel this request and replay it after they return.
            NSTerminateLater would wait in a nested modal loop above that
            callback, which can then never return. */
         _sapp_tc.terminate_pending = true;
