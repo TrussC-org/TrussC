@@ -1,69 +1,354 @@
 #!/bin/sh
-# Compile the four production gate bodies with native types stubbed.
+# Compile production desktop gates/policy with native API seams; no display needed.
+# TC_NATIVE_GATES_INCLUDE may name a private sokol header directory for mutations.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/tc-native-gates.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
 python3 - "$root" "$scratch" <<'PY'
 from pathlib import Path
-import sys, subprocess
-root, scratch = map(Path,sys.argv[1:])
-native = (root/'core/include/sokol/sokol_app_tc.h').read_text()
-common = (root/'core/include/tc/app/tcGlobal.cpp').read_text()
-def body(text, marker):
-    start = text.index(marker); opening = text.index('{',start); depth = 1; end = opening+1
-    while depth:
-        depth += (text[end]=='{') - (text[end]=='}'); end += 1
+import os, subprocess, sys
+root, scratch = map(Path, sys.argv[1:])
+include = Path(os.environ.get('TC_NATIVE_GATES_INCLUDE', root/'core/include/sokol'))
+
+def fail(message):
+    sys.exit('native-gates: ' + message)
+
+def read(path):
+    try:
+        return path.read_text()
+    except OSError as error:
+        fail(str(error))
+
+def position(text, marker, origin):
+    start = text.find(marker)
+    if start < 0:
+        fail(f'{origin}: missing extraction marker {marker!r}')
+    return start
+
+def body(text, marker, origin):
+    start = position(text, marker, origin)
+    opening = text.find('{', start)
+    if opening < 0:
+        fail(f'{origin}: no opening brace for marker {marker!r}')
+    depth, end = 1, opening + 1
+    while depth and end < len(text):
+        depth += (text[end] == '{') - (text[end] == '}')
+        end += 1
+    if depth:
+        fail(f'{origin}: unbalanced braces for marker {marker!r}')
     return text[start:end]
-policy = body(common, 'static bool occlusionPausesUpdate(')
-shared = (root/'core/include/sokol/util/sokol_window_native.h').read_text()
-visibility_helpers = ''.join(
-    body(shared, 'static inline bool '+name+'(').replace('_sapp_tc_native_window_t', 'Native')
-    for name in ['_sapp_tc_native_iconified', '_sapp_tc_native_occluded', '_sapp_tc_native_hidden'])
-markers = ['if (_sapp_tc_update_occluded(w)) {',
-    'if (w->iconified) {\n            if (w->desc.tick_cb)',
-    'if (hr == DXGI_STATUS_OCCLUDED) {\n                if (w->desc.tick_cb)',
-    'if (!w->draw_while_hidden && _sapp_tc_native_hidden(w)) {']
-code = '''#include <cstdio>
+
+native = read(include/'sokol_app_tc.h')
+shared = read(include/'util/sokol_window_native.h')
+common = read(root/'core/include/tc/app/tcGlobal.cpp')
+def extract(marker):
+    return body(native, marker, 'sokol_app_tc.h') + '\n'
+policy = body(common, 'static bool occlusionPausesUpdate(', 'tcGlobal.cpp')
+helpers = '\n'.join(body(shared, 'static inline bool '+name+'(', 'sokol_window_native.h')
+                  for name in ('_sapp_tc_native_iconified', '_sapp_tc_native_occluded', '_sapp_tc_native_hidden'))
+
+# Keep the adapter contract: update-only policy dispatch precedes size/drawable
+# admission on each desktop OS. These are source checks, not native adapter runs.
+for adapter in ('mac/tcWindowMac.mm', 'win/tcWindowWin.cpp', 'linux/tcWindowLinux.cpp'):
+    text = body(read(root/'core/platform'/adapter), 'void windowTickImpl(', adapter)
+    marker = 'if (sapp_window_occluded(swin)) {'
+    gate = body(text, marker, adapter)
+    if not ('false, nullptr, true)' in gate and 'internal::runWindowTick(' in gate
+            and position(text, marker, adapter) < position(text, 'if (fbw <= 0', adapter)):
+        fail(f'{adapter}: update-only policy must precede framebuffer admission')
+print('native-gates: desktop adapters dispatch gated policy before size admission: PASS', flush=True)
+
+code = r'''
+#include <cstdio>
 #include <initializer_list>
+#include <vector>
 struct WindowContext { bool isMain; };
-''' + policy + '''
+''' + policy + r'''
 struct sapp_window { unsigned id; };
-int consulted=0, updates=0, acquired=0;
-void callback(sapp_window, void*) { ++consulted; if (!occlusionPausesUpdate(WindowContext{false})) ++updates; }
-struct Native { bool iconified=true, occluded=true, draw_while_hidden=false, trust_hidden_signals=true, is_main=false; unsigned win_id=1, frame_count=0;
- struct { void (*tick_cb)(sapp_window,void*)=callback; void* user_data=nullptr; } desc;
- double refresh_period=.017;
+struct _sapp_tc_timing_t { double smooth_dt=.017; };
+using HRESULT = int;
+using UINT = unsigned;
+constexpr int DXGI_STATUS_OCCLUDED=1, DXGI_PRESENT_TEST=2, DXGI_PRESENT_DO_NOT_WAIT=4;
+bool SUCCEEDED(HRESULT hr) { return hr >= 0; }
+enum { SAPP_EVENTTYPE_SUSPENDED, SAPP_EVENTTYPE_RESUMED, SAPP_EVENTTYPE_ICONIFIED,
+       SAPP_EVENTTYPE_RESTORED, SAPP_EVENTTYPE_RESIZED };
+struct SwapChain { HRESULT Present(UINT, UINT); };
+struct _sapp_tc_window_t {
+    bool iconified=false, occluded=false, draw_while_hidden=false, trust_hidden_signals=true, is_main=false;
+    bool ready=true, in_tick=false, skip_present=false, cancel_tick=false;
+    bool from_modal=false, frame_wait=false, credit_held=false, waitable_ready=true;
+    unsigned win_id=1, frame_count=0;
+    int drawable=1, swap_interval=1;
+    double earliest_next=0, last_present=0, frame_duration=0, refresh_period=.017;
+    _sapp_tc_timing_t timing;
+    SwapChain* swap_chain=nullptr;
+    struct { void (*tick_cb)(sapp_window,void*)=nullptr; void* user_data=nullptr; } desc;
 };
-struct { double refresh_period=.017; } _sapp_tc;
-void _sapp_tc_win32_pace(Native*,double) {}
-void _sapp_tc_x11_pace(Native*,double) {}
-''' + visibility_helpers + '''
-bool _sapp_tc_update_occluded(Native*) { return true; }
-const int DXGI_STATUS_OCCLUDED=1;
-'''
-for n,marker in enumerate(markers):
-    code += f'void gate{n}(Native* w) {{ int hr=1; '+body(native,marker)+' ++acquired; }\n'
-code += '''int main() { Native w;
- gate0(&w); gate1(&w); gate2(&w); gate3(&w);
- bool ok=consulted==4 && updates==0 && acquired==0 && !occlusionPausesUpdate(WindowContext{true});
- for (bool role : {false,true}) for (bool allow : {false,true}) for (bool trust : {false,true}) {
-     w.is_main=role; w.draw_while_hidden=allow; w.trust_hidden_signals=trust;
-     consulted=acquired=0; gate3(&w);
-     ok &= consulted == int(trust && !allow) && acquired == int(!trust || allow);
- }
- printf("native-gates: all four gates consult policy, retain secondary pause and gate drawables: %s\\n",ok?"PASS":"FAIL");
- return ok?0:1;
+using Native = _sapp_tc_window_t;
+using _sapp_tc_native_window_t = Native;
+''' + helpers + r'''
+int failures=0, checks=0;
+void check(const char* label, bool ok) {
+    ++checks;
+    if (!ok) { ++failures; printf("native-gates: %s: FAIL\n", label); }
+}
+void summary(const char* label, int before, int count) {
+    printf("native-gates: %s: %d checks, %s\n", label, checks-count, failures==before?"PASS":"FAIL");
+}
+void shared_checks() {
+    int before=failures, count=checks;
+    for (bool role : {false,true}) for (bool trust : {false,true})
+    for (bool iconic : {false,true}) for (bool obscured : {false,true}) {
+        Native w; w.is_main=role; w.win_id=role?1:2; w.trust_hidden_signals=trust; w.iconified=iconic; w.occluded=obscured;
+        check("shared iconified query", _sapp_tc_native_iconified(&w)==(trust && iconic));
+        check("shared occluded query", _sapp_tc_native_occluded(&w)==(trust && obscured));
+        check("shared effective hidden query", _sapp_tc_native_hidden(&w)==(trust && (iconic || obscured)));
+        check("tcGlobal policy: main updates, secondary pauses", occlusionPausesUpdate({role})==!role);
+    }
+    summary("shared visibility helpers / tcGlobal policy", before, count);
+}
+namespace mac {
+int consulted, updates, acquired;
+bool hidden;
+bool _sapp_tc_update_occluded(Native*) { return hidden; }
+void callback(sapp_window, void* user) {
+    ++consulted;
+    if (!occlusionPausesUpdate({static_cast<Native*>(user)->is_main})) ++updates;
+}
+// macOS still has this secondary-only gate; main bypasses it in the native
+// method. Compile the production block, stopping before Objective-C drawables.
+void gate(Native* w) {
+''' + extract('if (_sapp_tc_update_occluded(w)) {') + r'''
+    ++acquired;
+}
+void run() {
+    int before=failures, count=checks;
+    Native w; w.desc={callback,&w};
+    for (bool obscured : {false,true}) {
+        hidden=obscured; consulted=updates=acquired=0; gate(&w);
+        check("macOS secondary gate consults pause policy before drawable", consulted==int(hidden) && updates==0 && acquired==int(!hidden));
+    }
+    summary("macOS secondary occlusion gate", before, count);
+}
+}
+namespace win {
+struct { struct { bool quit_ordered=false, device_lost_notified=false; } app; } _sapp_tc;
+int consulted, updates, dimensions, tests, presents;
+int probe_result, present_result;
+bool changed, resize_ok, skip_in_callback, cancel_in_callback, loss_in_callback, reenter;
+Native* target;
+std::vector<int> events, callback_events;
+static void _sapp_tc_win32_tick(Native* w);
+double _sapp_tc_now() { return 10; }
+void _sapp_tc_timing_update(_sapp_tc_timing_t*) {}
+void _sapp_tc_win32_pace(Native* w,double seconds) { w->earliest_next=10+seconds; }
+bool _sapp_tc_d3d11_check_device_loss(HRESULT hr) {
+    if (hr<0) _sapp_tc.app.device_lost_notified=true;
+    return hr<0;
+}
+bool _sapp_tc_win32_update_dimensions(Native*) { ++dimensions; return changed; }
+bool _sapp_tc_d3d11_resize(Native*) { return resize_ok; }
+void _sapp_tc_win32_app_event(Native* w,int type) {
+    events.push_back(type);
+    if (reenter) {
+        check("Win32 visibility/resize callbacks inside tick guard", w->in_tick);
+        int prior=consulted; reenter=false; _sapp_tc_win32_tick(w); reenter=true;
+        check("Win32 event callback cannot reenter tick", consulted==prior);
+    }
+}
+Native* _sapp_tc_lookup(sapp_window h) { return h.id==target->win_id?target:nullptr; }
+void callback(sapp_window h,void* user) {
+    Native* w=static_cast<Native*>(user); ++consulted; callback_events=events;
+    check("Win32 callback target and reentry guard", h.id==w->win_id && w->in_tick);
+    if (!(_sapp_tc_native_hidden(w) && occlusionPausesUpdate({w->is_main}))) ++updates;
+    if (reenter) {
+        int prior=consulted; reenter=false; _sapp_tc_win32_tick(w); reenter=true;
+        check("Win32 tick callback cannot reenter tick", consulted==prior);
+    }
+    if (skip_in_callback) w->skip_present=true;
+    if (cancel_in_callback) w->cancel_tick=true;
+    if (loss_in_callback) _sapp_tc.app.device_lost_notified=true;
+}
+''' + extract('static bool _sapp_tc_win32_window_due(') + extract('static void _sapp_tc_win32_observe_occlusion(') + extract('static void _sapp_tc_win32_swap(') + extract('static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {') + r'''
+constexpr int WM_SIZE=1, SIZE_MINIMIZED=1;
+int size(Native* w,bool minimized) {
+    int wParam=minimized?SIZE_MINIMIZED:0;
+    switch (WM_SIZE) {
+''' + extract('case WM_SIZE: {') + r'''
+    }
+    return 0;
+}
+void reset(Native& w) {
+    static SwapChain swap;
+    w=Native{}; target=&w; w.swap_chain=&swap; w.desc={callback,&w};
+    _sapp_tc.app={}; consulted=updates=dimensions=tests=presents=0;
+    probe_result=present_result=0; changed=false; resize_ok=true;
+    skip_in_callback=cancel_in_callback=loss_in_callback=reenter=false; events.clear(); callback_events.clear();
+}
+void run() {
+    int before=failures, count=checks;
+    Native w;
+    for (bool role : {false,true}) for (bool trust : {false,true})
+    for (bool allow : {false,true}) for (bool iconic : {false,true}) for (bool obscured : {false,true}) {
+        reset(w); w.is_main=role; w.win_id=role?1:2; w.trust_hidden_signals=trust; w.draw_while_hidden=allow;
+        w.iconified=iconic; w.occluded=obscured; probe_result=present_result=obscured?DXGI_STATUS_OCCLUDED:0;
+        w.frame_wait=true; reenter=true;
+        const bool hidden=trust && (iconic || obscured), admitted=allow || !hidden;
+        _sapp_tc_win32_tick(&w);
+        check("Win32 common hidden admission / policy for either role", consulted==1 && updates==int(!hidden || role) && dimensions==int(admitted) && presents==int(admitted));
+        check("Win32 trust gates occlusion probe", tests==int(trust && obscured));
+        check("Win32 completed tick releases guard, consumes skip, advances frame", !w.in_tick && !w.skip_present && w.frame_count==1);
+    }
+    for (bool role : {false,true}) for (bool trust : {false,true}) {
+        reset(w); w.is_main=role; w.win_id=role?1:2; w.trust_hidden_signals=trust;
+        // One continuous history: duplicates and overlapping hidden reasons.
+        auto expect=[&](std::initializer_list<int> expected) {
+            check("Win32 effective visibility event sequence", events==(trust?std::vector<int>(expected):std::vector<int>{})); events.clear();
+        };
+        _sapp_tc_win32_observe_occlusion(&w,true); expect({SAPP_EVENTTYPE_SUSPENDED});
+        _sapp_tc_win32_observe_occlusion(&w,true); expect({});
+        size(&w,true); expect({SAPP_EVENTTYPE_ICONIFIED});
+        _sapp_tc_win32_observe_occlusion(&w,false); expect({});
+        size(&w,false); expect({SAPP_EVENTTYPE_RESTORED,SAPP_EVENTTYPE_RESUMED});
+        size(&w,true); expect({SAPP_EVENTTYPE_ICONIFIED,SAPP_EVENTTYPE_SUSPENDED});
+        _sapp_tc_win32_observe_occlusion(&w,true); expect({});
+        size(&w,false); expect({SAPP_EVENTTYPE_RESTORED});
+        _sapp_tc_win32_observe_occlusion(&w,false); expect({SAPP_EVENTTYPE_RESUMED});
+        size(&w,false); expect({});
+    }
+    for (bool role : {false,true}) {
+        // Skip is per-window and consumed by a completed hidden tick as well.
+        for (bool hidden : {false,true}) for (bool from_callback : {false,true}) {
+            reset(w); w.is_main=role; w.win_id=role?1:2; w.iconified=hidden;
+            w.skip_present=!from_callback; skip_in_callback=from_callback;
+            _sapp_tc_win32_tick(&w);
+            check("Win32 completed visible/hidden tick consumes pending/callback skip", !w.skip_present && w.frame_count==1 && presents==0);
+            skip_in_callback=false; w.iconified=false; _sapp_tc_win32_tick(&w);
+            check("Win32 skip is one shot", presents==1 && w.frame_count==2);
+        }
+        for (int early=0; early<4; ++early) {
+            reset(w); w.is_main=role; w.win_id=role?1:2; w.skip_present=true;
+            if (early==0) w.ready=false;
+            if (early==1) { w.occluded=true; probe_result=-1; }
+            if (early==2) { changed=true; resize_ok=false; }
+            if (early==3) cancel_in_callback=true;
+            _sapp_tc_win32_tick(&w);
+            check("Win32 incomplete tick preserves skip and releases guard", w.skip_present && w.frame_count==0 && !w.in_tick && presents==0);
+        }
+        reset(w); w.is_main=role; w.win_id=role?1:2; w.skip_present=true; loss_in_callback=true;
+        _sapp_tc_win32_tick(&w);
+        check("Win32 completed callback consumes skip even on device loss", !w.skip_present && w.frame_count==1 && !w.in_tick && presents==0);
+        reset(w); w.is_main=role; w.win_id=role?1:2; changed=true; reenter=true; w.occluded=true;
+        _sapp_tc_win32_tick(&w);
+        check("Win32 RESUMED precedes RESIZED before callback", events==std::vector<int>{SAPP_EVENTTYPE_RESUMED,SAPP_EVENTTYPE_RESIZED} && callback_events==events && consulted==1);
+        reset(w); w.is_main=role; w.win_id=role?1:2; Native peer; reset(peer); target=&w; peer.win_id=3; peer.skip_present=true;
+        _sapp_tc_win32_tick(&w);
+        check("Win32 skip state isolated between windows", presents==1 && peer.skip_present);
+        target=&peer; _sapp_tc_win32_tick(&peer);
+        check("Win32 peer consumes only its own skip", presents==1 && !peer.skip_present && peer.frame_count==1 && w.frame_count==1);
+        reset(w); w.is_main=role; w.win_id=role?1:2;
+        check("Win32 due admits visible window", _sapp_tc_win32_window_due(&w));
+        w.in_tick=true; check("Win32 due rejects reentry", !_sapp_tc_win32_window_due(&w)); w.in_tick=false;
+        w.earliest_next=11; check("Win32 due honors deadline", !_sapp_tc_win32_window_due(&w)); w.earliest_next=0;
+        w.frame_wait=true; w.waitable_ready=false;
+        check("Win32 due needs waitable credit", !_sapp_tc_win32_window_due(&w));
+        w.credit_held=true; check("Win32 due retains unspent credit", _sapp_tc_win32_window_due(&w));
+    }
+    summary("Win32 common tick / admission / visibility", before, count);
+}
+}
+HRESULT SwapChain::Present(UINT,UINT flags) {
+    if (flags==DXGI_PRESENT_TEST) { ++win::tests; return win::probe_result; }
+    ++win::presents; return win::present_result;
+}
+namespace x11 {
+struct { double refresh_period=.017; int WM_STATE=1; } _sapp_tc;
+int consulted, updates, acquired, presents, state;
+std::vector<int> events;
+double _sapp_tc_now() { return 10; }
+void _sapp_tc_timing_update(_sapp_tc_timing_t*) {}
+struct _sapp_tc_x11_surface_scope {};
+void _sapp_tc_x11_pace(Native* w,double seconds) { w->earliest_next=10+seconds; }
+void _sapp_tc_x11_pace_periodic(Native* w,double seconds) { w->earliest_next=10+seconds; }
+bool _sapp_tc_x11_update_dimensions(Native*) { return false; }
+bool _sapp_tc_x11_make_current(Native*) { ++acquired; return true; }
+void _sapp_tc_x11_swap(Native*) { ++presents; }
+void _sapp_tc_x11_app_event(Native*,int type) { events.push_back(type); }
+int _sapp_tc_x11_get_window_state(Native*) { return state; }
+void callback(sapp_window,void* user) {
+    ++consulted; auto* w=static_cast<Native*>(user);
+    if (!(_sapp_tc_native_hidden(w) && occlusionPausesUpdate({w->is_main}))) ++updates;
+}
+''' + extract('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {') + r'''
+enum { PropertyNewValue=1, IconicState=1, NormalState=2,
+       VisibilityUnobscured=0, VisibilityPartiallyObscured=1, VisibilityFullyObscured=2 };
+struct Event { struct { int state=PropertyNewValue, atom=1; } xproperty; struct { int state; } xvisibility; };
+void property(Native* w,int observed) {
+    state=observed; Event event{}; auto* ev=&event;
+''' + extract('if (w && w->trust_hidden_signals && (ev->xproperty.state == PropertyNewValue) &&') + r'''
+}
+void visibility(Native* w,int observed) {
+    Event event{}; event.xvisibility.state=observed; auto* ev=&event;
+''' + extract('if (w && w->trust_hidden_signals && ev->xvisibility.state >= VisibilityUnobscured') + r'''
+}
+void run() {
+    int before=failures, count=checks;
+    for (bool role : {false,true}) for (bool trust : {false,true})
+    for (bool allow : {false,true}) for (bool iconic : {false,true}) for (bool obscured : {false,true}) {
+        Native w; w.is_main=role; w.win_id=role?1:2; w.trust_hidden_signals=trust; w.draw_while_hidden=allow;
+        w.iconified=iconic; w.occluded=obscured; w.desc={callback,&w};
+        consulted=updates=acquired=presents=0;
+        bool hidden=trust && (iconic || obscured), admitted=allow || !hidden;
+        _sapp_tc_x11_tick(&w);
+        bool present=admitted;
+#if defined(SOKOL_GLCORE)
+        present &= !(trust && iconic); // GLX keeps its minimized swap veto.
+#endif
+        check("X11 common hidden admission / policy for either role", consulted==1 && updates==int(!hidden || role) && acquired==int(admitted) && presents==int(present) && w.frame_count==1);
+    }
+    for (bool role : {false,true}) for (bool trust : {false,true}) {
+        Native w; w.is_main=role; w.win_id=role?1:2; w.trust_hidden_signals=trust; events.clear();
+        auto expect=[&](std::initializer_list<int> expected,bool resumed=false) {
+            check("X11 effective visibility event sequence", events==(trust?std::vector<int>(expected):std::vector<int>{}));
+            check("X11 deadline clears only on effective resume", w.earliest_next==(trust && resumed?0:42));
+            events.clear(); w.earliest_next=42;
+        };
+        w.earliest_next=42;
+        visibility(&w,VisibilityFullyObscured); expect({SAPP_EVENTTYPE_SUSPENDED});
+        visibility(&w,VisibilityFullyObscured); expect({});
+        property(&w,IconicState); expect({SAPP_EVENTTYPE_ICONIFIED});
+        visibility(&w,VisibilityUnobscured); expect({});
+        property(&w,NormalState); expect({SAPP_EVENTTYPE_RESTORED,SAPP_EVENTTYPE_RESUMED},true);
+        property(&w,IconicState); expect({SAPP_EVENTTYPE_ICONIFIED,SAPP_EVENTTYPE_SUSPENDED});
+        visibility(&w,VisibilityFullyObscured); expect({});
+        property(&w,NormalState); expect({SAPP_EVENTTYPE_RESTORED});
+        visibility(&w,VisibilityPartiallyObscured); expect({SAPP_EVENTTYPE_RESUMED},true);
+        property(&w,NormalState); expect({});
+        visibility(&w,VisibilityUnobscured); expect({});
+    }
+#if defined(SOKOL_GLCORE)
+    summary("X11 GLX tick / effective visibility", before, count);
+#else
+    summary("X11 EGL tick / effective visibility", before, count);
+#endif
+}
+}
+int main() {
+    shared_checks(); mac::run(); win::run(); x11::run();
+    printf("native-gates: total %d checks, %d failures\n", checks, failures);
+    return failures?1:0;
 }
 '''
-# Verify that the actual desktop callback adapters take the update-only branch
-# before framebuffer-size/drawable admission, then run the shared tick with it.
-for adapter in ['mac/tcWindowMac.mm','win/tcWindowWin.cpp','linux/tcWindowLinux.cpp']:
-    text=(root/'core/platform'/adapter).read_text().split('void windowTickImpl',1)[1]
-    gate=body(text, 'if (sapp_window_occluded(swin)) {')
-    assert 'false, nullptr, true)' in gate and 'internal::runWindowTick(' in gate
-    assert text.index('if (sapp_window_occluded(swin))') < text.index('if (fbw <= 0')
-source=scratch/'probe.cpp';source.write_text(code)
-subprocess.run(['c++','-std=c++20',str(source),'-o',str(scratch/'probe')],check=True)
-subprocess.run([str(scratch/'probe')],check=True)
+source = scratch/'probe.cpp'
+source.write_text(code)
+failed = False
+for backend in ('SOKOL_GLCORE', 'SOKOL_GLES3'):
+    binary = scratch/backend
+    result = subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-D'+backend,
+                             str(source), '-o', str(binary)])
+    if result.returncode:
+        fail(f'{backend}: probe compilation failed (exit {result.returncode})')
+    failed |= subprocess.run([str(binary)]).returncode != 0
+sys.exit(int(failed))
 PY
