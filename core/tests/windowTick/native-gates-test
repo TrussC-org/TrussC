@@ -1,7 +1,8 @@
 #!/bin/sh
 # Compile production desktop gates/policy with native API seams; no display needed.
 # TC_NATIVE_GATES_INCLUDE may name a private sokol header directory for mutations.
-# TC_NATIVE_GATES_TRUSSC / TC_NATIVE_GATES_GLOBAL override cleanup sources privately.
+# TC_NATIVE_GATES_TRUSSC / TC_NATIVE_GATES_GLOBAL / TC_NATIVE_GATES_EVENT
+# override cleanup and event sources privately.
 # Pass --mutations to check private-header regressions and missing markers too.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
@@ -47,6 +48,14 @@ native = read(include/'sokol_app_tc.h')
 shared = read(include/'util/sokol_window_native.h')
 common = read(Path(os.environ.get('TC_NATIVE_GATES_GLOBAL', root/'core/include/tc/app/tcGlobal.cpp')))
 trussc_header = read(Path(os.environ.get('TC_NATIVE_GATES_TRUSSC', root/'core/include/TrussC.h')))
+event_header = read(Path(os.environ.get('TC_NATIVE_GATES_EVENT', root/'core/include/tc/events/tcEvent.h')))
+event_markers = []
+def event_extract(marker):
+    event_markers.append(marker)
+    return body(event_header, marker, 'tcEvent.h') + '\n'
+
+session_delivery = event_extract('static void notifySessionEnd(Event<void>& event, TeardownSteps& steps) noexcept {')
+shutdown_delivery = event_extract('static void notifyShutdown(Event<void>& event, TeardownSteps& steps) noexcept {')
 extraction_markers = []
 cleanup_markers = []
 common_markers = []
@@ -59,7 +68,7 @@ def common_extract(marker):
     return body(common, marker, 'tcGlobal.cpp') + '\n'
 
 session_flag = common_extract('bool& sessionEndExit() {')
-main_exit_notification = common_extract('void notifyMainAppExitAtSessionEnd() noexcept {')
+app_exit_notifications = common_extract('void notifyAppExitsAtSessionEnd() noexcept {')
 # Compile the complete production cleanup body with the macOS branch enabled.
 # Record its service calls, leaving both its early return and std::exit intact.
 mac_cleanup = cleanup_extract('inline void _cleanup_cb_impl() {')
@@ -165,6 +174,9 @@ code = r'''
 #include <vector>
 #include <functional>
 #include <new>
+#include <algorithm>
+#include <atomic>
+#include <memory>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
@@ -622,19 +634,78 @@ std::string exitLogMessage(bool complete) { return complete?"end":"begin"; }
 void writeProtocolLine(LogLevel, const std::string& line) {
     session_record(line=="[System] begin"?'<':line=="[System] end"?'>':'!');
 }
-struct ExitEvent {};
-struct MainOwner { struct Events { ExitEvent exit; } notifications; Events& events() { return notifications; } };
-MainOwner*& mainWindowOwner() { static MainOwner owner; static MainOwner* ptr=&owner; return ptr; }
-struct TeardownSteps {};
+// Native services are seams; both production delivery bodies are compiled.
+namespace EventPriority { constexpr int BeforeApp=0, App=100, AfterApp=200; }
+struct ExitEntry {
+    int priority;
+    std::shared_ptr<std::function<void()>> callback;
+    std::shared_ptr<std::atomic<bool>> alive;
+};
+template<class T> struct Event { std::shared_ptr<std::vector<ExitEntry>> entries_; };
+template<class T> auto sharedLoad(const std::shared_ptr<T>& entries) { return entries; }
+struct TeardownSteps {
+    template<class F> void run(const char*, F&& fn) noexcept { try { fn(); } catch (...) {} }
+};
 struct FrameworkEventAccess {
-    static void notifyShutdown(ExitEvent& event, TeardownSteps&) {
-        session_record(&event==&mainWindowOwner()->events().exit?'E':'!');
-        appExitCode()=79; // The exit handler may set the final app status.
+''' + session_delivery + shutdown_delivery + r'''
+};
+struct ExitContext { int width; };
+ExitContext*& currentWindowCtx() { static ExitContext prior{999}; static auto* selected=&prior; return selected; }
+std::vector<int> exit_apps, before_apps, app_listeners, after_apps;
+bool exit_contexts_ok=true;
+int gpu_restores=0;
+void restoreWindowContext(void*);
+struct Window {
+    int id;
+    ExitContext state;
+    struct Events { Event<void> exit; } notifications;
+    struct App {
+        Window* owner;
+        void exit() {
+            exit_apps.push_back(owner->id);
+            exit_contexts_ok &= currentWindowCtx()==&owner->context();
+            // The exit handler may set the final app status.
+            if (owner->id==1) { session_record('E'); appExitCode()=79; }
+        }
+    } app{this};
+    ExitContext& context() { return state; }
+    Events& events() { return notifications; }
+    void prepare() {
+        auto entries=std::make_shared<std::vector<ExitEntry>>();
+        auto add=[&](int priority, std::function<void()> fn, bool alive=true) {
+            entries->push_back({priority,std::make_shared<std::function<void()>>(std::move(fn)),
+                                std::make_shared<std::atomic<bool>>(alive)});
+        };
+        add(EventPriority::BeforeApp, [this] {
+            before_apps.push_back(id); exit_contexts_ok &= currentWindowCtx()==&context();
+        });
+        add(EventPriority::App, [this] { app.exit(); });
+        add(EventPriority::App, [this] {
+            app_listeners.push_back(id); exit_contexts_ok &= currentWindowCtx()==&context();
+        });
+        // Model protected ImGui/recording/GPU shutdown hooks, including a
+        // priority above the AfterApp boundary to catch equality-only guards.
+        for (int priority : {EventPriority::AfterApp, EventPriority::AfterApp+1})
+            add(priority, [this] { after_apps.push_back(id); session_record('!'); });
+        add(EventPriority::BeforeApp, [] { session_record('!'); }, false);
+        entries->push_back({EventPriority::App, nullptr, nullptr});
+        notifications.exit.entries_=entries;
     }
 };
-''' + main_exit_notification + r'''
+Window main_owner{1,{200}}, first_peer{2,{160}}, last_peer{3,{120}};
+std::vector<Window*> exit_registry;
+Window* mainWindow() { return &main_owner; }
+std::vector<Window*> openWindows() { return exit_registry; }
+void prepare_session_apps() {
+    for (auto* w : {&main_owner,&first_peer,&last_peer}) w->prepare();
+    // Main deliberately is not first; two peers distinguish registry order.
+    exit_registry={&first_peer,&main_owner,&last_peer};
+    exit_apps.clear(); before_apps.clear(); app_listeners.clear(); after_apps.clear();
+    exit_contexts_ok=true; gpu_restores=0;
+}
+''' + app_exit_notifications + r'''
 void cancelResourceBackends() { session_record('R'); }
-void restoreWindowContext(void*) { session_record('W'); }
+void restoreWindowContext(void*) { ++gpu_restores; session_record('W'); }
 namespace mcp { void stopHttpServer() { session_record('H'); } }
 namespace console { void stop() { session_record('O'); } }
 enum class AppEntry { Exit };
@@ -670,6 +741,9 @@ void session_trussc_cleanup() {
     session_cleanup();
     trussc::internal::_cleanup_cb_impl();
     trussc::internal::_cleanup_cb_impl(); // The minimal path is idempotent too.
+    using namespace trussc::internal;
+    if (exit_apps!=std::vector<int>{1,2,3} || before_apps!=exit_apps || app_listeners!=exit_apps ||
+        !after_apps.empty() || !exit_contexts_ok || gpu_restores) session_record('!');
 }
 void session_atexit() { session_record('X'); }
 void session_child(Native& w,AEEventID reason,bool parameter,int context,int cleanup_mode,bool setup,bool allowed=false) {
@@ -683,6 +757,7 @@ void session_child(Native& w,AEEventID reason,bool parameter,int context,int cle
         setup_called=setup; app_code=73; terminate_allowed=allowed;
         std::atexit(session_atexit); // Production std::exit must be observable.
         trussc::internal::cleanup_started=false;
+        trussc::internal::prepare_session_apps();
         _sapp_tc.app.init_called=cleanup_mode!=4;
         _sapp_tc.app.cleanup_called=cleanup_mode==5;
         _sapp_tc.app.desc.cleanup_cb=cleanup_mode==6?session_trussc_cleanup:cleanup_mode==1?nullptr:session_cleanup_cb;
@@ -1043,6 +1118,20 @@ void run() {
     }
     reset(w,window,view,false); session_child(w,0x73687574,false,1,6,false);
     summary("macOS round 4c tick boundaries / close coalescing / minimal cleanup", before, count);
+    before=failures; count=checks;
+    {
+        using namespace trussc::internal;
+        prepare_session_apps();
+        auto* previous=currentWindowCtx();
+        notifyAppExitsAtSessionEnd();
+        check("macOS session every App exits once main first then registry order", exit_apps==std::vector<int>{1,2,3});
+        check("macOS session selects each window context for all listeners", exit_contexts_ok);
+        check("macOS session restores previous context without GPU restore", currentWindowCtx()==previous && gpu_restores==0);
+        check("macOS session delivers BeforeApp listeners for every App", before_apps==std::vector<int>{1,2,3});
+        check("macOS session delivers App listeners for every App", app_listeners==std::vector<int>{1,2,3});
+        check("macOS session skips AfterApp framework hooks", after_apps.empty());
+    }
+    summary("macOS round 4d every App / window context / listener bands", before, count);
 }
 }
 namespace win {
@@ -1473,25 +1562,57 @@ if '--mutations' in sys.argv[3:]:
             'if (sessionEndExit())', 'if (false)', text=trussc_header), minimal_label),
     }
     for name, old, new in (
-        ('no-exit-event', 'notifyMainAppExitAtSessionEnd();', ''),
+        ('no-exit-event', 'notifyAppExitsAtSessionEnd();', ''),
         ('no-audio-stop', 'trussc::shutdownAudio();', ''),
         ('no-start-log', 'writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));', ''),
         ('no-end-log', 'writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(true));', ''),
         ('repeats-cleanup', 'if (!beginExitCleanup()) return;', ''),
-        ('uses-std-exit', 'notifyMainAppExitAtSessionEnd();', 'notifyMainAppExitAtSessionEnd(); std::exit(appExitCode());'),
-        ('tears-down-gpu', 'notifyMainAppExitAtSessionEnd();', 'cleanup(); notifyMainAppExitAtSessionEnd();'),
-        ('tears-down-window', 'notifyMainAppExitAtSessionEnd();', 'restoreWindowContext(nullptr); notifyMainAppExitAtSessionEnd();'),
-        ('cancels-resource-workers', 'notifyMainAppExitAtSessionEnd();', 'internal::cancelResourceBackends(); notifyMainAppExitAtSessionEnd();'),
-        ('waits-resource-workers', 'notifyMainAppExitAtSessionEnd();', 'waitForResourceLoadsAtAppExit(); notifyMainAppExitAtSessionEnd();'),
-        ('runs-app-cleanup', 'notifyMainAppExitAtSessionEnd();', 'appCleanupFunc(); notifyMainAppExitAtSessionEnd();'),
+        ('uses-std-exit', 'notifyAppExitsAtSessionEnd();', 'notifyAppExitsAtSessionEnd(); std::exit(appExitCode());'),
+        ('tears-down-gpu', 'notifyAppExitsAtSessionEnd();', 'cleanup(); notifyAppExitsAtSessionEnd();'),
+        ('tears-down-window', 'notifyAppExitsAtSessionEnd();', 'restoreWindowContext(nullptr); notifyAppExitsAtSessionEnd();'),
+        ('cancels-resource-workers', 'notifyAppExitsAtSessionEnd();', 'internal::cancelResourceBackends(); notifyAppExitsAtSessionEnd();'),
+        ('waits-resource-workers', 'notifyAppExitsAtSessionEnd();', 'waitForResourceLoadsAtAppExit(); notifyAppExitsAtSessionEnd();'),
+        ('runs-app-cleanup', 'notifyAppExitsAtSessionEnd();', 'appCleanupFunc(); notifyAppExitsAtSessionEnd();'),
     ):
         cleanup_mutants['mac-minimal-'+name] = (change(minimal, old, new, text=trussc_header), minimal_label)
+    notifications = 'void notifyAppExitsAtSessionEnd() noexcept {'
+    every_app = 'macOS session every App exits once main first then registry order'
+    own_context = 'macOS session selects each window context for all listeners'
+    no_restore = 'macOS session restores previous context without GPU restore'
+    no_after = 'macOS session skips AfterApp framework hooks'
     common_mutants = {
-        'mac-session-main-exit-notification-lost': (change(
-            'void notifyMainAppExitAtSessionEnd() noexcept {',
-            'FrameworkEventAccess::notifyShutdown(owner->events().exit, steps);', '', text=common), minimal_label),
+        'mac-session-main-exit-notification-lost': (change(notifications,
+            'FrameworkEventAccess::notifySessionEnd(w.events().exit, steps);', '', text=common), minimal_label),
     }
-    targeted_mutants = dict(round3_mutants, **round4_mutants, **round4c_mutants, **cleanup_mutants, **common_mutants)
+    for name, old, new, label in (
+        ('skips-main-first', 'deliver(*main);', '', every_app),
+        ('skips-peers', 'deliver(*next);', '', every_app),
+        ('duplicates-main', 'delivered.push_back(main);', '', every_app),
+        ('duplicates-peers', 'deliver(*next);', 'deliver(*next); deliver(*next);', every_app),
+        ('reverses-registry', 'next = w; break;', 'next = w;', every_app),
+        ('loses-own-context', 'currentWindowCtx() = &w.context();', '', own_context),
+        ('uses-main-context', 'currentWindowCtx() = &w.context();',
+            'currentWindowCtx() = &mainWindow()->context();', own_context),
+        ('loses-context-restore', 'currentWindowCtx() = previous;', '', no_restore),
+        ('restores-gpu', 'currentWindowCtx() = previous;', 'restoreWindowContext(previous); currentWindowCtx() = previous;', no_restore),
+        ('uses-full-shutdown', 'FrameworkEventAccess::notifySessionEnd(w.events().exit, steps);',
+            'FrameworkEventAccess::notifyShutdown(w.events().exit, steps);', no_after),
+    ):
+        common_mutants['mac-session-'+name] = (change(notifications, old, new, text=common), label)
+    event_mutants = {}
+    for name, replacement, label in (
+        ('skips-before-app', 'if (entry.priority != EventPriority::App) continue;',
+            'macOS session delivers BeforeApp listeners for every App'),
+        ('skips-app', 'if (entry.priority >= EventPriority::App) continue;',
+            'macOS session delivers App listeners for every App'),
+        ('runs-after-app', '', no_after),
+        ('runs-after-app-boundary', 'if (entry.priority > EventPriority::AfterApp) continue;', no_after),
+        ('runs-above-after-app', 'if (entry.priority == EventPriority::AfterApp) continue;', no_after),
+    ):
+        event_mutants['mac-session-'+name] = (change(event_markers[0],
+            'if (entry.priority >= EventPriority::AfterApp) continue;', replacement, text=event_header), label)
+    targeted_mutants = dict(round3_mutants, **round4_mutants, **round4c_mutants,
+                            **cleanup_mutants, **common_mutants, **event_mutants)
     # Remove both redundant callback checks to expose close during an event
     # outside a tick. The tick and constructor checks remain in this mutant.
     mutants['mac-close-inside-callback'] = change(busy, ' || cw->callback_depth > 0', '',
@@ -1510,14 +1631,16 @@ if '--mutations' in sys.argv[3:]:
 
     private = scratch/'include'
     (private/'util').mkdir(parents=True)
-    def run_fixture(contents=native, utility=shared, cleanup_source=trussc_header, global_source=common):
+    def run_fixture(contents=native, utility=shared, cleanup_source=trussc_header, global_source=common, event_source=event_header):
         (private/'sokol_app_tc.h').write_text(contents, encoding='utf-8')
         (private/'util/sokol_window_native.h').write_text(utility, encoding='utf-8')
         (private/'TrussC.h').write_text(cleanup_source, encoding='utf-8')
         (private/'tcGlobal.cpp').write_text(global_source, encoding='utf-8')
+        (private/'tcEvent.h').write_text(event_source, encoding='utf-8')
         result = subprocess.run(['sh', str(root/'core/tests/windowTick/native-gates-test')],
             env=dict(os.environ, TC_NATIVE_GATES_INCLUDE=str(private),
-                TC_NATIVE_GATES_TRUSSC=str(private/'TrussC.h'), TC_NATIVE_GATES_GLOBAL=str(private/'tcGlobal.cpp')),
+                TC_NATIVE_GATES_TRUSSC=str(private/'TrussC.h'), TC_NATIVE_GATES_GLOBAL=str(private/'tcGlobal.cpp'),
+                TC_NATIVE_GATES_EVENT=str(private/'tcEvent.h')),
             text=True, encoding='utf-8', capture_output=True)
         return result.returncode, result.stdout + result.stderr
 
@@ -1525,8 +1648,10 @@ if '--mutations' in sys.argv[3:]:
         ('shared-ignore-trust', native, shared.replace('w->trust_hidden_signals && ', ''), trussc_header, common)]
     fixtures += [(name, native, shared, value, common) for name, (value, label) in cleanup_mutants.items()]
     fixtures += [(name, native, shared, trussc_header, value) for name, (value, label) in common_mutants.items()]
-    for name, contents, utility, cleanup_source, global_source in fixtures:
-        rc, output = run_fixture(contents, utility, cleanup_source, global_source)
+    fixtures = [(*fixture, event_header) for fixture in fixtures]
+    fixtures += [(name, native, shared, trussc_header, common, value) for name, (value, label) in event_mutants.items()]
+    for name, contents, utility, cleanup_source, global_source, event_source in fixtures:
+        rc, output = run_fixture(contents, utility, cleanup_source, global_source, event_source)
         totals = [line for line in output.splitlines() if 'native-gates: total ' in line]
         if rc != 1 or len(totals) != 2 or any(line.endswith(' 0 failures') for line in totals) or ': FAIL' not in output or 'compilation failed' in output:
             fail(f'{name}: expected compiled runtime failures for both backends; exit={rc}\n{output}')
@@ -1555,6 +1680,7 @@ if '--mutations' in sys.argv[3:]:
     for origin, source_text, markers, argument in (
         ('TrussC.h', trussc_header, cleanup_markers, 'cleanup_source'),
         ('tcGlobal.cpp', common, common_markers, 'global_source'),
+        ('tcEvent.h', event_header, event_markers, 'event_source'),
     ):
         for marker in dict.fromkeys(markers):
             contents = source_text.replace(marker, 'removed_marker' + ''.join(c for c in marker if c in '{}'))
@@ -1562,6 +1688,6 @@ if '--mutations' in sys.argv[3:]:
             if rc != 1 or origin+': missing extraction marker' not in output or repr(marker)[1:-1] not in output or 'Traceback' in output:
                 fail(f'missing {origin} marker {marker!r}: expected clear diagnostic; exit={rc}\n{output}')
     print(f'native-gates: {len(fixtures)} behavioral mutations and '
-          f'{len(set(extraction_markers))+len(shared_markers)+len(set(cleanup_markers))+len(set(common_markers))} missing-marker fixtures: PASS', flush=True)
+          f'{len(set(extraction_markers))+len(shared_markers)+len(set(cleanup_markers))+len(set(common_markers))+len(set(event_markers))} missing-marker fixtures: PASS', flush=True)
 sys.exit(0)
 PY
