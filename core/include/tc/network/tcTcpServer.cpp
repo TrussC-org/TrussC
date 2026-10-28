@@ -269,6 +269,14 @@ void setTcpServerStartHookForTests(std::function<void()> fn) {
 // =============================================================================
 // Server management
 // =============================================================================
+void TcpServer::State::setBindAddress(const std::string& address) {
+    {
+        std::lock_guard<std::mutex> lock(bindAddressMutex_);
+        internal::saveBindAddress(address, bindAddress_, bindAddressError_);
+    }
+    if (running_) logWarning() << "TcpServer: bind address change ignored while running; applies on next start().";
+}
+
 bool TcpServer::State::start(int port, int maxClients) {
     // A listener on one of the server's own threads cannot restart the server
     // from there. On the accept thread, the old accept thread would have to be
@@ -306,6 +314,20 @@ bool TcpServer::State::start(int port, int maxClients) {
     port_ = port;
     maxClients_ = maxClients;
 
+    in_addr bindAddress{};
+    std::string addressError;
+    {
+        std::lock_guard<std::mutex> lock(bindAddressMutex_);
+        addressError = bindAddressError_;
+        if (addressError.empty()) addressError = internal::parseBindAddress(bindAddress_, bindAddress);
+    }
+    if (!addressError.empty()) {
+        startLock.unlock();
+        logError("TcpServer") << addressError;
+        notifyError(addressError);
+        return false;
+    }
+
     // Create socket
     serverSocket_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 #ifdef _WIN32
@@ -333,7 +355,7 @@ bool TcpServer::State::start(int port, int maxClients) {
     struct sockaddr_in serverAddr;
     memset(&serverAddr, 0, sizeof(serverAddr));
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_addr.s_addr = INADDR_ANY;
+    serverAddr.sin_addr = bindAddress;
     serverAddr.sin_port = htons(port);
 
     if (::bind(serverSocket_, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
@@ -345,7 +367,11 @@ bool TcpServer::State::start(int port, int maxClients) {
         serverSocket_ = -1;
 #endif
         startLock.unlock();
-        notifyError("Failed to bind server socket to port " + std::to_string(port), error);
+        const std::string message = internal::isBindAddressUnavailable(error)
+            ? "Bind address is not available on this machine"
+            : "Failed to bind server socket to port " + std::to_string(port);
+        logError("TcpServer") << message << " (code: " << error << ")";
+        notifyError(message, error);
         return false;
     }
 
@@ -1762,6 +1788,10 @@ TcpServer::~TcpServer() {
     onSendCompleteTarget_.reset();
     auto state = state_;
     state->stop();
+}
+void TcpServer::setBindAddress(const std::string& address) {
+    auto state = state_;
+    state->setBindAddress(address);
 }
 bool TcpServer::start(int port, int maxClients) {
     auto state = state_;
