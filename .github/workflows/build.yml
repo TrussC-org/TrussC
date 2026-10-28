@@ -932,6 +932,10 @@ jobs:
         if: always()
         run: python3 tools/tests/test_core_test_symbols.py -v
 
+      - name: test binary discovery regression checks
+        if: always()
+        run: python3 tools/tests/test_build_all_test_binary.py -v
+
   # ---------------------------------------------------------------------------
   # Keep one compiler-cache save per platform (#776). Every ccache-action save
   # gets a new timestamped key, and the old ones stay until the repository's

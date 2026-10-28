@@ -6,7 +6,6 @@ import subprocess
 import shutil
 import argparse
 import re
-import glob
 from pathlib import Path
 import time
 
@@ -238,16 +237,52 @@ def find_core_unit_tests(root_dir, include_daily=False):
     return test_paths
 
 def find_test_binary(test_dir, platform_info):
-    # trusscli names the binary after the project dir. addons/*/tests -> "tests"
-    # (addons/*/tests-<name> -> "tests-<name>");
-    # core/tests/<name> -> "<name>". On macOS a TrussC app is
-    # <name>.app/Contents/MacOS/<name>; on Windows <name>.exe. Search the tree.
+    # trusscli projects (allCoreTests, own-binary core tests, addon tests and
+    # examples) emit into bin/, as set by trussc_app.cmake. Standalone CMake
+    # unit tests emit into the platform build dir, or its Release/ subdir for
+    # multi-config generators. Never search sibling/manual build trees.
     base = os.path.basename(os.path.normpath(test_dir))
-    names = [base + ".exe"] if platform_info["os"] == "windows" else [base, base + "_debug"]
+    system = platform_info["os"]
+    project = os.path.isdir(os.path.join(test_dir, "src"))
+    if project:
+        output_dir = os.path.join(test_dir, "bin")
+    else:
+        build_dir = os.path.join(test_dir, platform_info.get("build_dir", f"build-{system}"))
+        # CMake can select a generator via the environment or reuse one from
+        # an existing build tree even when configure did not pass -G.
+        generator = ""
+        multi_config = False
+        try:
+            with open(os.path.join(build_dir, "CMakeCache.txt"), encoding="utf-8", errors="replace") as cache:
+                for line in cache:
+                    if line.startswith("CMAKE_GENERATOR:INTERNAL="):
+                        generator = line.partition("=")[2].strip()
+                    elif line.startswith("CMAKE_CONFIGURATION_TYPES:"):
+                        multi_config = True
+        except OSError:
+            pass
+        generator = (generator or platform_info.get("cmake_generator")
+                     or os.environ.get("CMAKE_GENERATOR", ""))
+        multi_config = multi_config or any(g in generator for g in ("Visual Studio", "Xcode", "Multi-Config"))
+        # This standalone shader-ordering fixture defines its executable in
+        # consumer/CMakeLists.txt to test cross-directory shader dependencies.
+        if base == "shaderTargetOrdering":
+            build_dir = os.path.join(build_dir, "consumer")
+        output_dir = os.path.join(build_dir, "Release") if multi_config else build_dir
+
+    names = [base + ".exe"] if system == "windows" else [base, base + "_debug"]
+    candidates = []
     for name in names:
-        for p in glob.glob(os.path.join(test_dir, "**", name), recursive=True):
-            if os.path.isfile(p) and (platform_info["os"] == "windows" or os.access(p, os.X_OK)):
-                return p
+        if system == "macos" and project:
+            candidates.append(os.path.join(output_dir, name + ".app", "Contents", "MacOS", name))
+        else:
+            candidates.append(os.path.join(output_dir, name))
+    for candidate in candidates:
+        if os.path.isfile(candidate) and (system == "windows" or os.access(candidate, os.X_OK)):
+            return candidate
+    Colors.print("  Test binary not found. Expected executable at:", Colors.RED)
+    for candidate in candidates:
+        print(f"   - {candidate}")
     return None
 
 def run_test_binary(binary, cwd, launcher=None, args=(), timings=None, timing_name=None):
