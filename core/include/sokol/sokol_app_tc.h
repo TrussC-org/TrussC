@@ -2870,7 +2870,8 @@ static _sapp_tc_window_t* _sapp_tc_resolve(sapp_window win) {
 
 /* Busy session end: from the moment _sapp_tc_mac_session_end starts until its
    _exit, the backend is frozen. Only the exit notifications run: no tick, event,
-   deferred close/quit, terminate or window creation is admitted. */
+   deferred close/quit, terminate, window creation, dimension/texture update or
+   drawable acquisition is admitted. */
 static bool _sapp_tc_mac_frozen(void) {
     return trussc::internal::sessionEndExit();
 }
@@ -3513,8 +3514,11 @@ static CGFloat _sapp_tc_mac_scale(_sapp_tc_window_t* w) {
 /* Re-sample scale + sizes and keep the layer drawable and the swapchain
    textures in sync. Called by the common initializer, every admitted tick
    and windowDidResize / windowDidChangeScreen. Returns whether published
-   dimensions changed; a zero-area view keeps the last published sizes. */
+   dimensions changed; a zero-area view keeps the last published sizes.
+   The one path to drawableSize, contentsScale and the swapchain textures:
+   while frozen (busy session end) nothing here changes. */
 static bool _sapp_tc_mac_update_dimensions(_sapp_tc_window_t* w) {
+    if (_sapp_tc_mac_frozen()) return false;
     if (!w->view || !w->layer) return false;
     const CGFloat scale = _sapp_tc_mac_scale(w);
     w->dpi_scale = (float)scale;
@@ -3560,6 +3564,7 @@ static bool _sapp_tc_mac_initialize_dimensions(_sapp_tc_window_t* w) {
    that tick admitted a draw (a hidden, non-admitted window must never reach
    nextDrawable, which can stall). Repeated queries reuse the drawable. */
 static id<CAMetalDrawable> _sapp_tc_mac_drawable(_sapp_tc_window_t* w) {
+    if (_sapp_tc_mac_frozen()) return nil;   // no drawable while frozen, even inside the interrupted tick
     if (!w || !w->in_tick || !w->draw_admitted || w->closed_pending || !w->layer) return nil;
     if (w->frame_drawable == nil) w->frame_drawable = [w->layer nextDrawable];
     return w->frame_drawable;
@@ -4595,6 +4600,7 @@ const void* sapp_metal_get_device(void) {
    via sglue_swapchain()); outside a tick each call acquires a fresh
    drawable, exactly like sokol_app.h. */
 static id<CAMetalDrawable> _sapp_tc_main_next_drawable(void) {
+    if (_sapp_tc_mac_frozen()) return nil;
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     if (!w || !w->layer) return nil;
     if (w->in_tick) return _sapp_tc_mac_drawable(w);

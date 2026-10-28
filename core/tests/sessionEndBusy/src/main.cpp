@@ -38,6 +38,13 @@ extern "C" void sessionEndAfter(double seconds, void (*fn)());
 extern "C" void sessionEndSpin(double seconds);
 extern "C" bool sessionEndSendKey(const char* title);
 extern "C" int sessionEndWindowCount();
+extern "C" void sessionEndDrawableSize(const char* title, int* width, int* height);
+extern "C" void sessionEndNativeResize(const char* title, double width, double height);
+extern "C" void sessionEndViewResizeAndScreenChange(const char* title, double width, double height);
+// sokol_app's Metal accessors (declared there only for Objective-C/Metal builds).
+extern "C" const void* sapp_metal_get_current_drawable(void);
+extern "C" const void* sapp_metal_get_depth_stencil_texture(void);
+extern "C" const void* sapp_metal_get_msaa_color_texture(void);
 
 namespace {
 
@@ -75,6 +82,48 @@ EventListener afterAppHook(const std::string& who) {
     return trussc::internal::FrameworkEventAccess::listen(events().exit,
         [who] { std::printf("sessionEndBusy child: %s AfterApp exit hook\n", who.c_str()); std::fflush(stdout); },
         EventPriority::AfterApp);
+}
+
+// Main's GPU-facing native state: the layer's drawable size and the
+// swapchain depth/MSAA texture identities.
+struct GpuState {
+    int width = -1, height = -1;
+    const void* depth = nullptr;
+    const void* msaa = nullptr;
+    bool operator==(const GpuState& o) const {
+        return width == o.width && height == o.height && depth == o.depth && msaa == o.msaa;
+    }
+};
+
+GpuState sampleMainGpu() {
+    GpuState g;
+    sessionEndDrawableSize("sessionEndBusy", &g.width, &g.height);
+    g.depth = sapp_metal_get_depth_stencil_texture();
+    g.msaa = sapp_metal_get_msaa_color_texture();
+    return g;
+}
+
+// "gpu": a frozen exit hook asks for main's drawable and swapchain, resizes the
+// window (TrussC and native) and changes the view size behind a screen change.
+void gpuHook() {
+    const GpuState before = sampleMainGpu();
+    const void* drawable = sapp_metal_get_current_drawable();
+    const sapp_swapchain sc = sapp_get_swapchain();
+    std::printf("sessionEndBusy child: gpu main drawable=%d swapchain drawable=%d\n",
+                drawable != nullptr, sc.metal.current_drawable != nullptr);
+    setWindowSize(320, 200);
+    sessionEndSpin(0.2);
+    sessionEndNativeResize("sessionEndBusy", 340, 210);
+    sessionEndSpin(0.2);
+    const GpuState resized = sampleMainGpu();
+    sessionEndViewResizeAndScreenChange("sessionEndBusy", 360, 220);
+    sessionEndSpin(0.1);
+    const GpuState screen = sampleMainGpu();
+    std::printf("sessionEndBusy child: gpu layer %dx%d -> %dx%d -> %dx%d\n",
+                before.width, before.height, resized.width, resized.height, screen.width, screen.height);
+    std::printf("sessionEndBusy child: gpu valid=%d resize unchanged=%d screen change unchanged=%d\n",
+                before.width > 0 && before.depth != nullptr, resized == before, screen == before);
+    std::fflush(stdout);
 }
 
 struct ChildApp;
@@ -157,7 +206,7 @@ struct ChildApp : App {
         if (scenario == "notbusy") sessionEndAfter(0.8, [] { sessionEndDispatchLogout(); });
     }
     void update() override {
-        const bool busyHere = scenario == "busy" || scenario == "busy0" || scenario == "hooks";
+        const bool busyHere = scenario == "busy" || scenario == "busy0" || scenario == "hooks" || scenario == "gpu";
         if (!busyHere || ++frames != 20) return;
         // Paused callback: the logout arrives while update() spins the run loop.
         sessionEndAfter(0.02, [] { sessionEndDispatchLogout(); });
@@ -167,9 +216,16 @@ struct ChildApp : App {
     void exit() override {
         frozen = true;
         reportExit("main", ownEvents, getWindow() != nullptr);
+        if (scenario == "gpu") gpuHook();
         if (scenario == "busyA") {
-            // The paused callback is A's: dropping A here must not free the
-            // context the session end later restores.
+            // The paused callback is A's tick: no drawable for A (TrussC's own
+            // swapchain acquisition) nor for main (outside its tick).
+            auto& actx = a->context();
+            const sg_swapchain asc = actx.acquireSwapchain ? actx.acquireSwapchain(actx.acquireSwapchainUser) : sg_swapchain{};
+            const void* mainDrawable = sapp_metal_get_current_drawable();
+            std::printf("sessionEndBusy child: busyA drawable A=%d\n", asc.metal.current_drawable != nullptr);
+            std::printf("sessionEndBusy child: busyA drawable main=%d\n", mainDrawable != nullptr);
+            // Dropping A here must not free the context the session end later restores.
             a.reset();
             say("main exit dropped A");
         }
@@ -398,7 +454,22 @@ void checkBusyA() {
     check(label + ": main's exit dropped A", has(out, "main exit dropped A"));
     check(label + ": the interrupted context (A's) is still valid at the final exit line",
           has(out, "audio initialized=0 context width=160"));
+    check(label + ": no drawable acquired for the interrupted secondary", has(out, "busyA drawable A=0\n"));
+    check(label + ": no drawable acquired for main outside its tick", has(out, "busyA drawable main=0\n"));
     checkFrozenExits(label, out);
+}
+
+void checkGpu() {
+    const std::string out = run("gpu");
+    const std::string label = "busy session end, exit hook touches the GPU";
+    check(label + ": exit status is the app code", has(out, "[parent] status=7\n"));
+    checkFrozenExits(label, out);
+    check(label + ": main's state was readable", has(out, "gpu valid=1"));
+    check(label + ": no drawable acquired for main inside the interrupted tick",
+          has(out, "gpu main drawable=0 swapchain drawable=0"));
+    check(label + ": resize leaves the layer drawable size and swapchain textures unchanged",
+          has(out, "resize unchanged=1"));
+    check(label + ": a screen change leaves them unchanged", has(out, "screen change unchanged=1"));
 }
 
 void checkNotBusy() {
@@ -442,6 +513,7 @@ int main(int argc, char** argv) {
     checkBusy("busy0", 0);
     checkHooks();
     checkBusyA();
+    checkGpu();
     checkNotBusy();
     std::printf("sessionEndBusy: %s\n", failures ? "FAILED" : "all checks passed");
     return failures ? 1 : 0;
