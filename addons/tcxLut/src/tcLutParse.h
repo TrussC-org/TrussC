@@ -50,9 +50,11 @@ inline bool parseCube(std::istream& input, CubeData& result, std::string& error)
                     error = "invalid LUT dimensions"; return false;
                 }
                 // No reserve from the declaration: storage grows only with actual complete rows.
-            } else if (keyword == "LUT_3D_INPUT_RANGE" || keyword == "DOMAIN_MIN" || keyword == "DOMAIN_MAX") {
+            } else if (keyword == "LUT_1D_INPUT_RANGE" || keyword == "LUT_3D_INPUT_RANGE" ||
+                       keyword == "DOMAIN_MIN" || keyword == "DOMAIN_MAX") {
                 // Bound (format): input range requires two finite values; per-channel domain requires three.
-                const int components = keyword == "LUT_3D_INPUT_RANGE" ? 2 : 3;
+                const bool inputRange = keyword == "LUT_1D_INPUT_RANGE" || keyword == "LUT_3D_INPUT_RANGE";
+                const int components = inputRange ? 2 : 3;
                 bool defaultRange = true;
                 for (int component = 0; component < components; ++component) {
                     double value;
@@ -65,7 +67,7 @@ inline bool parseCube(std::istream& input, CubeData& result, std::string& error)
                         error = "invalid LUT range (" + keyword + ")"; return false;
                     }
                     const double expectedValue = keyword == "DOMAIN_MAX" ||
-                        (keyword == "LUT_3D_INPUT_RANGE" && component == 1) ? 1.0 : 0.0;
+                        (inputRange && component == 1) ? 1.0 : 0.0;
                     // Bound (implementation): sampling supports only the default 0..1 domain.
                     // Compare parsed doubles exactly; no epsilon admits semantics we cannot apply.
                     defaultRange = defaultRange && value == expectedValue;
