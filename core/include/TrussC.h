@@ -2612,6 +2612,21 @@ namespace internal {
     }
 
     inline void _cleanup_cb_impl() {
+        #if defined(__APPLE__) && TARGET_OS_OSX
+        // A macOS session end under a paused callback; the backend _exits right
+        // after. Only the App exit notification, audio stop and the exit log
+        // lines: no GPU, window or resource-worker teardown on top of it.
+        if (sessionEndExit()) {
+            if (!beginExitCleanup()) return;
+            if (auto token = appRunToken()) token->store(false);
+            CrashPhaseScope crashPhase("cleanup");
+            writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
+            notifyMainAppExitAtSessionEnd();
+            trussc::shutdownAudio();
+            writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(true));
+            return;
+        }
+        #endif
         if (!beginExitCleanup()) return;
         if (auto token = appRunToken()) token->store(false);
         internal::cancelResourceBackends();
