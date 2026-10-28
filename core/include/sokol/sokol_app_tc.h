@@ -2630,6 +2630,7 @@ struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     bool draw_admitted;                 /* this tick may acquire a drawable */
     bool link_suspended;                /* AppKit stops the view's display link while not visible */
     bool suspended_sent;                /* SUSPENDED delivered: draw admission paused while hidden */
+    int callback_depth;                 /* client callbacks of this window on the stack */
 };
 
 #define _SAPP_TC_MAX_WINDOWS (32)
@@ -2640,6 +2641,8 @@ static struct {
     uint32_t next_id;
     _sapp_tc_window_t* windows[_SAPP_TC_MAX_WINDOWS];
     const char* create_error;           /* last native constructor failure, for the launch log */
+    int callbacks_active;               /* client callbacks on the stack, any window */
+    int constructing;                   /* native constructors between publication and return */
 
     /* ---- process state (this header owns sapp_run on macOS) ---- */
     struct {
@@ -2674,6 +2677,7 @@ static struct {
 } _sapp_tc;
 
 static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link);
+static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback);
 static bool _sapp_tc_mac_update_dimensions(_sapp_tc_window_t* w);
 static void _sapp_tc_mac_observe(_sapp_tc_window_t* w);
 static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown);
@@ -2867,6 +2871,30 @@ static uint32_t _sapp_tc_mods(NSEvent* ev) {
     return m;
 }
 
+/* Client callback boundary. While a callback runs it is marked active (deferred
+   close and quit wait until none is), the mark is cleared through the window's
+   identity even if the callback disposed it, and no exception crosses into
+   AppKit, CADisplayLink or NSTimer frames. */
+struct _sapp_tc_mac_callback_scope {
+    uint32_t win_id;
+    explicit _sapp_tc_mac_callback_scope(_sapp_tc_window_t* w) : win_id(w->win_id) {
+        ++_sapp_tc.callbacks_active;
+        ++w->callback_depth;
+    }
+    ~_sapp_tc_mac_callback_scope() {
+        --_sapp_tc.callbacks_active;
+        if (_sapp_tc_window_t* w = _sapp_tc_lookup({win_id})) --w->callback_depth;
+    }
+};
+
+// Contained-exception report: fixed text, no allocation of its own.
+static void _sapp_tc_mac_contained(const char* where) noexcept {
+    try {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__, "error: ",
+                     "%s threw; the exception was contained at the native boundary", where);
+    } catch (...) {}
+}
+
 static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
     if (!w->ready || !w->desc.event_cb || (w->events_enabled && !w->events_enabled())) return;
     // Event metadata keeps the process (first-window) frame count, as before.
@@ -2875,8 +2903,11 @@ static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
     ev->window_height = w->win_height;
     ev->framebuffer_width = w->fb_width;
     ev->framebuffer_height = w->fb_height;
-    sapp_window handle = { w->win_id };
-    w->desc.event_cb(ev, handle, w->desc.user_data);
+    const sapp_window handle = { w->win_id };
+    void (*event_cb)(const sapp_event*, sapp_window, void*) = w->desc.event_cb;
+    void* user = w->desc.user_data;
+    _sapp_tc_mac_callback_scope scope(w);
+    try { event_cb(ev, handle, user); } catch (...) { _sapp_tc_mac_contained("sapp_window_desc.event_cb"); }
 }
 
 /* Event and window callbacks may destroy their window (sapp_destroy_window
@@ -3231,18 +3262,17 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
 }
 
 /*-- tick sources: this view's display link, or its fallback timer --------*/
-/* Both shims sample visibility first, so exactly one source ticks: a link
-   tick that arrives while the window still selects its fallback (or a
-   fallback tick after the link resumed) is dropped. The strong local keeps
-   this view alive if the tick's deferred close disposes its window. */
+/* Both shims enter _sapp_tc_mac_source_tick, which samples visibility under the
+   tick guard, so exactly one source ticks: a link tick that arrives while the
+   window still selects its fallback (or a fallback tick after the link
+   resumed) is dropped. The strong local keeps this view alive if the tick's
+   deferred close disposes its window; nothing thrown leaves the shim. */
 - (void)tick:(CADisplayLink*)link {
     _sapp_tc_view* keep = self;
     _sapp_tc_window_t* w = keep.w;
     if (!w) return;
-    const uint32_t win_id = w->win_id;
-    _sapp_tc_mac_observe(w);
-    if (!(w = _sapp_tc_mac_live(win_id)) || w->fallback_active) return;
-    _sapp_tc_mac_tick(w, link);
+    try { _sapp_tc_mac_source_tick(w, link, false); }
+    catch (...) { _sapp_tc_mac_contained("display-link tick"); }
 }
 
 - (void)fallbackTick:(NSTimer*)timer {
@@ -3250,10 +3280,8 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
     _sapp_tc_view* keep = self;
     _sapp_tc_window_t* w = keep.w;
     if (!w) return;
-    const uint32_t win_id = w->win_id;
-    _sapp_tc_mac_observe(w);
-    if (!(w = _sapp_tc_mac_live(win_id)) || !w->fallback_active) return;
-    _sapp_tc_mac_tick(w, nil);
+    try { _sapp_tc_mac_source_tick(w, nil, true); }
+    catch (...) { _sapp_tc_mac_contained("fallback-timer tick"); }
 }
 
 @end
@@ -3305,7 +3333,12 @@ static void _sapp_tc_mac_closed(_sapp_tc_window_t* w) {
     w->ready = false;
     _sapp_tc_mac_stop_fallback(w);
     if (w->link) { [w->link invalidate]; w->link = nil; }
-    if (w->desc.close_cb) w->desc.close_cb({w->win_id}, w->desc.user_data);
+    if (!w->desc.close_cb) return;
+    void (*close_cb)(sapp_window, void*) = w->desc.close_cb;
+    const sapp_window handle = { w->win_id };
+    void* user = w->desc.user_data;
+    _sapp_tc_mac_callback_scope scope(w);
+    try { close_cb(handle, user); } catch (...) { _sapp_tc_mac_contained("sapp_window_desc.close_cb"); }
 }
 
 static void _sapp_tc_mac_fullscreen_terminal(_sapp_tc_window_t* w, bool observed) {
@@ -3502,8 +3535,11 @@ static void _sapp_tc_mac_swap(_sapp_tc_window_t* w) {
    sends windowWillClose: once the common close path agrees. Re-fetch each
    slot: a close destroys windows. */
 static void _sapp_tc_mac_process_deferred(void) {
+    // Only when no tick, client callback or constructor is on the stack.
+    if (_sapp_tc.callbacks_active > 0 || _sapp_tc.constructing > 0) return;
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
-        if (_sapp_tc.windows[i] && _sapp_tc.windows[i]->in_tick) return;
+        const _sapp_tc_window_t* cw = _sapp_tc.windows[i];
+        if (cw && (cw->in_tick || cw->callback_depth > 0)) return;
     }
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         _sapp_tc_window_t* cw = _sapp_tc.windows[i];
@@ -3523,8 +3559,24 @@ static void _sapp_tc_mac_process_deferred(void) {
    (dimensions; the drawable is acquired lazily by the callback) or a hidden
    tick that still reaches the callback's update policy without a drawable.
    `link` is nil when the window's fallback timer is the source. */
-static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {
-    if (!w->ready || w->in_tick) return;
+/* The tick guard is set at tick entry, before any notification or callback
+   (visibility sampling, fullscreen reconciliation, RESIZED, tick_cb), so a run
+   loop spun inside any of them cannot start a nested tick of this window. It is
+   cleared through the window's identity, also when the window was disposed. */
+struct _sapp_tc_mac_tick_scope {
+    uint32_t win_id;
+    explicit _sapp_tc_mac_tick_scope(_sapp_tc_window_t* w) : win_id(w->win_id) { w->in_tick = true; }
+    ~_sapp_tc_mac_tick_scope() {
+        if (_sapp_tc_window_t* w = _sapp_tc_lookup({win_id})) {
+            w->in_tick = false;
+            w->draw_admitted = false;
+            w->frame_drawable = nil;
+        }
+    }
+};
+
+/* Tick body; the caller holds the tick guard. */
+static void _sapp_tc_mac_tick_body(_sapp_tc_window_t* w, CADisplayLink* link) {
     const sapp_window handle = { w->win_id };
     // Reconcile once after terminal notifications, outside native delegates.
     // Re-fetch: toggling AppKit can synchronously deliver native events.
@@ -3546,16 +3598,51 @@ static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {
             _sapp_tc_send_type(w, SAPP_EVENTTYPE_RESIZED);
             if (!(w = _sapp_tc_lookup(handle))) return;
         }
-        w->in_tick = true;
         w->draw_admitted = admitted;
-        if (w->desc.tick_cb) w->desc.tick_cb(handle, w->desc.user_data);
+        if (w->desc.tick_cb) {
+            void (*tick_cb)(sapp_window, void*) = w->desc.tick_cb;
+            void* user = w->desc.user_data;
+            _sapp_tc_mac_callback_scope scope(w);
+            try { tick_cb(handle, user); } catch (...) { _sapp_tc_mac_contained("sapp_window_desc.tick_cb"); }
+        }
         w = _sapp_tc_lookup(handle);    /* the callback may have disposed it */
         if (w) {
-            w->in_tick = false;
             w->draw_admitted = false;
             ++w->frame_count;
             _sapp_tc_mac_swap(w);
         }
+    }
+}
+
+/* A window does not tick while one of its own client callbacks is on the
+   stack, inside or outside a tick (D5, as on Win32): a run loop spun by that
+   callback, e.g. a synchronous modal dialog, pauses only this window. Other
+   windows keep ticking. Notifications keep its source selection current, and
+   its next tick after the callback returns runs normally and processes
+   deferred close/quit. */
+static bool _sapp_tc_mac_tick_blocked(const _sapp_tc_window_t* w) {
+    return w->in_tick || w->callback_depth > 0;
+}
+
+static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {
+    if (!w->ready || _sapp_tc_mac_tick_blocked(w)) return;
+    {
+        _sapp_tc_mac_tick_scope guard(w);
+        _sapp_tc_mac_tick_body(w, link);
+    }
+    _sapp_tc_mac_process_deferred();
+}
+
+/* A tick from one of the window's sources. Visibility sampling may notify, so
+   it runs under the tick guard; the inactive source's ticks are dropped. */
+static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {
+    if (_sapp_tc_mac_tick_blocked(w)) return;
+    {
+        const uint32_t win_id = w->win_id;
+        _sapp_tc_mac_tick_scope guard(w);
+        _sapp_tc_mac_observe(w);
+        w = _sapp_tc_mac_live(win_id);
+        if (w && w->ready && w->fallback_active == from_fallback) _sapp_tc_mac_tick_body(w, link);
     }
     _sapp_tc_mac_process_deferred();
 }
@@ -3739,8 +3826,33 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
     _sapp_tc.windows[slot] = w;
     w->ready = true;
     [w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-    if (d->fullscreen) _sapp_tc_request_fullscreen(w, true);
-    [w->window makeKeyAndOrderFront:nil];
+    /* Startup fullscreen and showing can notify synchronously (resize, key
+       focus), and a client may destroy the window from those callbacks: keep
+       the NSWindow alive across the calls, re-resolve the record by identity
+       after each, and report an invalid window if it is gone. No deferred
+       close or quit runs until the constructor returns. */
+    struct constructing_scope {
+        constructing_scope() { ++_sapp_tc.constructing; }
+        ~constructing_scope() { --_sapp_tc.constructing; }
+    } constructing;
+    const uint32_t win_id = w->win_id;
+    NSWindow* window = w->window;
+    if (d->fullscreen) {
+        _sapp_tc_request_fullscreen(w, true);
+        if (!(w = _sapp_tc_mac_live(win_id))) {
+            [window orderOut:nil];
+            _sapp_tc.create_error = "Window was destroyed during creation";
+            return 0;
+        }
+    }
+    [window makeKeyAndOrderFront:nil];
+    if (!(w = _sapp_tc_mac_live(win_id))) {
+        /* disposed from a notification inside the call, which then still
+           ordered the window in: take it off screen again */
+        [window orderOut:nil];
+        _sapp_tc.create_error = "Window was destroyed during creation";
+        return 0;
+    }
     /* silent startup re-sample (sokol parity: the startup update never fires
        RESIZED). The display link is the first source; occlusion notifications
        and link ticks select the fallback once AppKit reports the window hidden. */
@@ -3873,11 +3985,13 @@ static bool _sapp_tc_mac_create_main_window(void) {
        sokol_gfx here; we only hold the device/layer references) */
     if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
         _sapp_tc.app.cleanup_called = true;
-        if (_sapp_tc.app.desc.cleanup_cb) {
-            _sapp_tc.app.desc.cleanup_cb();
-        } else if (_sapp_tc.app.desc.cleanup_userdata_cb) {
-            _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
-        }
+        try {
+            if (_sapp_tc.app.desc.cleanup_cb) {
+                _sapp_tc.app.desc.cleanup_cb();
+            } else if (_sapp_tc.app.desc.cleanup_userdata_cb) {
+                _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
+            }
+        } catch (...) { _sapp_tc_mac_contained("sapp_desc.cleanup_cb"); }
     }
     /* native disposal follows App cleanup; reverse slot order keeps the
        first window until last */
