@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <initializer_list>
 #include <string>
+#include <stdexcept>
 namespace trussc::internal {
 void setExitReasonIfEmpty(const char*) {}
 void setExitReason(const char*) {}
@@ -76,6 +77,8 @@ float expectedScale(NSWindow* window) {
 // AppKit seams: record show-time publication; inject scale, layer and occlusion.
 void (*realShow)(id, SEL, id);
 void recordShow(id self, SEL cmd, id sender) {
+    // Judge the constructor's own show only; AppKit also re-shows windows later.
+    if (_sapp_tc.constructing == 0) { realShow(self, cmd, sender); return; }
     _sapp_tc_window_t* found = nullptr;
     for (auto* w : _sapp_tc.windows) if (w && w->window == self) found = w;
     if (!found) std::printf("nativeWindow: show of unregistered window \"%s\"\n", ((NSWindow*)self).title.UTF8String);
@@ -251,7 +254,105 @@ void destroyInCallbackChecks() {
             if (sapp_window_valid(victim)) sapp_destroy_window(victim);
         }
     }
+    // The constructor's own startup steps notify: showing a window makes it key.
+    @autoreleasepool {
+        destroyOn = SAPP_EVENTTYPE_FOCUSED; destroyedInCallback = false;
+        int before = 0;
+        for (auto* r : _sapp_tc.windows) before += r != nullptr;
+        const sapp_window victim = makeVictim();
+        int after = 0;
+        for (auto* r : _sapp_tc.windows) after += r != nullptr;
+        std::printf("nativeWindow: destroy on first FOCUSED during creation: destroyed=%d returned id=%u\n",
+            destroyedInCallback, victim.id);
+        check("destroying the window from its first FOCUSED during creation is safe and returns invalid",
+            destroyedInCallback && victim.id == 0 && after == before);
+        if (victim.id && sapp_window_valid(victim)) sapp_destroy_window(victim);
+    }
 }
+
+// Nested run loop inside an in-tick event callback: the window must not run a
+// nested frame, and a close requested inside stays deferred until it returns.
+int nestTicks, nestNested = -1, nestKind;
+bool nestArmed, nestInCallback, nestCloseDuringCallback, nestClosed;
+sapp_event_type nestOn;
+sapp_window nestWindow;
+void nestTick(sapp_window, void*) { ++nestTicks; }
+void nestEvent(const sapp_event* event, sapp_window win, void*) {
+    if (!nestArmed || event->type != nestOn) return;
+    nestArmed = false; nestInCallback = true;
+    const int before = nestTicks;
+    sapp_window_request_close(win);
+    const double until = CACurrentMediaTime() + 0.1;
+    while (CACurrentMediaTime() < until) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
+    nestNested = nestTicks - before;
+    nestInCallback = false;
+}
+void nestClose(sapp_window win, void*) {
+    nestClosed = true;
+    if (nestInCallback) nestCloseDuringCallback = true;
+    sapp_destroy_window(win);
+}
+
+// Throwing clients: the native boundary contains the exception and recovers.
+int throwTicks, throwEventTicks;
+bool throwClosed, eventThrown, mainThrowOnce, mainThrew;
+sapp_window throwWindow;
+void throwTick(sapp_window, void*) { if (++throwTicks == 3) throw std::runtime_error("tick_cb test throw"); }
+void countTick(sapp_window, void*) { ++throwEventTicks; }
+bool keyThrown;
+void throwEvent(const sapp_event* event, sapp_window, void*) {
+    if (event->type == SAPP_EVENTTYPE_RESIZED && !eventThrown) { eventThrown = true; throw 7; }
+    if (event->type == SAPP_EVENTTYPE_KEY_DOWN && !keyThrown) { keyThrown = true; throw std::runtime_error("key event test throw"); }
+}
+void throwClose(sapp_window win, void*) {
+    throwClosed = true;
+    sapp_destroy_window(win);
+    throw std::runtime_error("close_cb test throw");
+}
+sapp_window makeProbe(void (*tick)(sapp_window, void*), void (*event)(const sapp_event*, sapp_window, void*),
+                      void (*close)(sapp_window, void*), const char* title) {
+    sapp_window_desc d = {};
+    d.x = d.y = -1; d.width = 120; d.height = 90; d.title = title; d.no_high_dpi = noHighDpi;
+    d.mtl_device = (__bridge const void*)_sapp_tc.app.device;
+    d.tick_cb = tick; d.event_cb = event; d.close_cb = close;
+    return sapp_create_window(&d);
+}
+_sapp_tc_window_t* fsCreated;
+// A real synchronous modal (NSAlert runModal) opened from a key handler.
+int modalRound, modalOwnerTicks, modalOtherAt, modalOwnerAt, modalOwnerAfterAt;
+bool modalActive, modalRequestClose, modalClosed, modalClosedInHandler, modalHandlerDone;
+double modalStart, modalEnd, modalResumedAt;
+sapp_window modalOwner;
+void modalTick(sapp_window, void*) {
+    ++modalOwnerTicks;
+    if (modalHandlerDone && modalResumedAt == 0) modalResumedAt = CACurrentMediaTime();
+}
+void modalClose(sapp_window win, void*) {
+    modalClosed = true;
+    if (modalActive) modalClosedInHandler = true;
+    sapp_destroy_window(win);
+}
+void modalEvent(const sapp_event* event, sapp_window win, void*) {
+    if (event->type != SAPP_EVENTTYPE_KEY_DOWN || modalActive) return;
+    modalActive = true;
+    if (modalRequestClose) sapp_window_request_close(win);
+    modalOwnerAt = modalOwnerTicks; modalOtherAt = callbacks; modalStart = CACurrentMediaTime();
+    NSAlert* alert = [NSAlert new];
+    alert.messageText = @"nativeWindow modal";
+    NSTimer* dismiss = [NSTimer timerWithTimeInterval:1.0 repeats:NO block:^(NSTimer*) { [NSApp abortModal]; }];
+    [[NSRunLoop mainRunLoop] addTimer:dismiss forMode:NSRunLoopCommonModes];
+    [alert runModal];
+    modalEnd = CACurrentMediaTime();
+    const double seconds = modalEnd - modalStart;
+    std::printf("nativeWindow: modal round %d: %.2fs, owner ticked %d, other window ticked %.1f/s\n", modalRound,
+        seconds, modalOwnerTicks - modalOwnerAt, (callbacks - modalOtherAt) / seconds);
+    check("owner window gets no tick while its key handler is in a modal", modalOwnerTicks == modalOwnerAt);
+    check("other windows keep ticking during the modal", (callbacks - modalOtherAt) / seconds > 20);
+    modalOwnerAfterAt = modalOwnerTicks;
+    modalActive = false;
+    modalHandlerDone = true;
+}
+uint32_t fsCreatedId;
 
 // A secondary closed natively whose close_cb keeps it registered must stop ticking.
 int closedTicks[2];
@@ -260,8 +361,10 @@ void keepOnClose(sapp_window, void*) {}
 sapp_window closedWindows[2];
 int closedTicksAt[2];
 
-enum Stage { Sync, MinimizeTrusted, RestoreTrusted, MinimizeUntrusted, RestoreUntrusted,
+enum Stage { Sync, SettleAfterSync, MinimizeTrusted, RestoreTrusted, MinimizeUntrusted, RestoreUntrusted,
              MinimizeMain, RestoreMain, Reverse, ReverseWait, NativeClose, NativeClosed,
+             NestSetup, NestWarm, NestWait, FsCreate, FsSettle, ThrowTickStart, ThrowTickWait,
+             ThrowEventStart, ThrowEventWait, ThrowLegacy, ThrowLegacyWait, ModalSetup, ModalWarm, ModalAfter,
              CloseSecondary, VetoQuit, Done };
 Stage stage = Sync;
 double stageStart, sampleStart;
@@ -272,12 +375,19 @@ void enter(Stage next) { stage = next; stageStart = now(); }
 bool waited(double seconds) { return now() - stageStart > seconds; }
 
 void step() {
+    if (modalActive) return;   // the driver timer also fires inside the modal
     _sapp_tc_window_t* first = _sapp_tc.app.main;
     _sapp_tc_window_t* other = _sapp_tc_lookup(second);
     switch (stage) {
     case Sync:
         synchronousChecks();
         destroyInCallbackChecks();
+        // AppKit drops a miniaturize: issued in the same turn as the key-window
+        // change of a window destroyed during creation; let focus settle first.
+        enter(SettleAfterSync);
+        break;
+    case SettleAfterSync:
+        if (!waited(0.5)) break;
         other->desc.tick_cb = probeTick;
         callbacks = acquired = 0;
         [other->window miniaturize:nil];
@@ -355,7 +465,12 @@ void step() {
         // only the target's own tick may reconcile it.
         _sapp_tc_window_t* target = reverseTarget == 0 ? first : other;
         _sapp_tc_window_t* peer = target == first ? other : first;
-        if (reverseTarget == 0) check("disposed windows have left AppKit", liveNativeWindows() == 2);
+        if (reverseTarget == 0) {
+            for (NSWindow* win in NSApp.windows)
+                if ([win.contentView isKindOfClass:[_sapp_tc_view class]])
+                    std::printf("nativeWindow: AppKit window \"%s\" visible=%d key=%d\n", win.title.UTF8String, win.visible, win.keyWindow);
+            check("disposed windows have left AppKit", liveNativeWindows() == 2);
+        }
         reverseSawFullscreen = false;
         sapp_tc_window_set_fullscreen({target->win_id}, true);
         sapp_tc_window_toggle_fullscreen({target->win_id});
@@ -430,6 +545,186 @@ void step() {
             check("a natively closed secondary is destroyed once", !sapp_window_valid(closedWindows[i]));
         }
         sampleStart = 0;
+        nestKind = 0;
+        enter(NestSetup);
+        break;
+    case NestSetup:
+        nestTicks = 0; nestNested = -1; nestArmed = nestInCallback = nestCloseDuringCallback = nestClosed = false;
+        nestWindow = makeProbe(nestTick, nestEvent, nestClose, "nested");
+        enter(NestWarm);
+        break;
+    case NestWarm: {
+        if (!waited(0.5)) break;
+        _sapp_tc_window_t* w = _sapp_tc_lookup(nestWindow);
+        if (!w) { check("nested-loop probe created", false); enter(FsCreate); break; }
+        if (nestKind == 0) { nestOn = SAPP_EVENTTYPE_RESIZED; w->fb_width = 1; }   // next tick re-publishes size
+        else if (nestKind == 1) { nestOn = SAPP_EVENTTYPE_SUSPENDED; forceHidden = w->window; }   // next tick observes hidden
+        else nestOn = SAPP_EVENTTYPE_KEY_DOWN;                                    // delivered below, outside any tick
+        nestArmed = true;
+        enter(NestWait);
+        if (nestKind == 2) {
+            _sapp_tc_view* view = w->view;
+            NSEvent* key = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
+                timestamp:0 windowNumber:w->window.windowNumber context:nil characters:@"a"
+                charactersIgnoringModifiers:@"a" isARepeat:NO keyCode:0];
+            [view keyDown:key];
+        }
+        break;
+    }
+    case NestWait:
+        if (!nestClosed && !waited(3)) break;
+        forceHidden = nil;
+        std::printf("nativeWindow: nested run loop inside %s: %d nested frames of that window, close during callback=%d, closed after=%d\n",
+            nestKind == 0 ? "in-tick RESIZED" : nestKind == 1 ? "in-tick SUSPENDED" : "out-of-tick KEY_DOWN",
+            nestNested, nestCloseDuringCallback, nestClosed);
+        // A window never ticks while one of its own callbacks is on the stack (D5).
+        check(nestKind == 0 ? "no nested frame inside an in-tick RESIZED callback" :
+              nestKind == 1 ? "no nested frame inside an in-tick SUSPENDED callback" :
+                              "no nested frame inside an out-of-tick KEY_DOWN callback", nestNested == 0);
+        check("close requested inside the callback is deferred until it returns, then processed",
+            !nestCloseDuringCallback && nestClosed && !sapp_window_valid(nestWindow));
+        if (sapp_window_valid(nestWindow)) sapp_destroy_window(nestWindow);
+        if (++nestKind < 3) { enter(NestSetup); break; }
+        enter(FsCreate);
+        break;
+    case FsCreate: {
+        // Startup fullscreen on the common constructor; the client destroys the
+        // window from the resize that fullscreen entry notifies.
+        sapp_window_desc d = {};
+        d.x = d.y = -1; d.width = 120; d.height = 90; d.title = "fullscreen victim"; d.no_high_dpi = noHighDpi;
+        d.mtl_device = (__bridge const void*)_sapp_tc.app.device; d.event_cb = victimEvent;
+        _sapp_tc_native_desc native = {};
+        native.window = _sapp_tc_normalize_window(&d);
+        native.color_format = SAPP_PIXELFORMAT_BGRA8; native.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL;
+        native.fullscreen = true;
+        destroyOn = SAPP_EVENTTYPE_RESIZED; destroyedInCallback = false;
+        fsCreated = _sapp_tc_mac_create_window(&native);
+        fsCreatedId = fsCreated ? fsCreated->win_id : 0;
+        std::printf("nativeWindow: startup fullscreen creation: destroyed during creation=%d returned=%d\n",
+            destroyedInCallback, fsCreated != nullptr);
+        check("destroy during startup-fullscreen creation returns invalid", !destroyedInCallback || fsCreated == nullptr);
+        enter(FsSettle);
+        break;
+    }
+    case FsSettle: {
+        // Destroy from the later asynchronous resize is fine too; wait for settle.
+        _sapp_tc_window_t* w = fsCreatedId ? _sapp_tc_lookup({fsCreatedId}) : nullptr;
+        if (w && !waited(6)) {
+            if (w->fullscreen_state.phase == _sapp_tc_fullscreen_phase::Fullscreen) sapp_tc_window_set_fullscreen({fsCreatedId}, false);
+            break;
+        }
+        std::printf("nativeWindow: startup fullscreen window destroyed by its RESIZED: %d (after creation returned)\n",
+            destroyedInCallback);
+        if (w && w->fullscreen_state.phase == _sapp_tc_fullscreen_phase::Windowed) sapp_destroy_window({fsCreatedId});
+        destroyOn = (sapp_event_type)0;
+        if (_sapp_tc_lookup({fsCreatedId})) { if (!waited(15)) break; sapp_destroy_window({fsCreatedId}); }
+        enter(ThrowTickStart);
+        break;
+    }
+    case ThrowTickStart:
+        throwTicks = 0; throwClosed = false;
+        throwWindow = makeProbe(throwTick, nullptr, throwClose, "throwing tick");
+        enter(ThrowTickWait);
+        break;
+    case ThrowTickWait: {
+        _sapp_tc_window_t* w = _sapp_tc_lookup(throwWindow);
+        if (w && !waited(1.0)) break;
+        if (w && !w->close_requested && !throwClosed) {
+            std::printf("nativeWindow: throwing tick_cb: %d ticks in 1s (threw on tick 3)\n", throwTicks);
+            check("ticks continue after tick_cb throws", throwTicks >= 10 && !w->in_tick && !w->draw_admitted);
+            sapp_window_request_close(throwWindow);
+            break;
+        }
+        if (!throwClosed && !waited(4)) break;
+        check("a close request is still processed after tick_cb threw (close_cb throw contained too)",
+            throwClosed && !sapp_window_valid(throwWindow));
+        enter(ThrowEventStart);
+        break;
+    }
+    case ThrowEventStart:
+        throwEventTicks = 0; throwClosed = eventThrown = false;
+        throwWindow = makeProbe(countTick, throwEvent, throwClose, "throwing event");
+        enter(ThrowEventWait);
+        break;
+    case ThrowEventWait: {
+        _sapp_tc_window_t* w = _sapp_tc_lookup(throwWindow);
+        if (w && !waited(0.3)) break;
+        if (w && !eventThrown && sampleStart == 0) {
+            w->fb_width = 1; sampleStart = now();                    // RESIZED next tick (in-tick throw)
+            _sapp_tc_view* view = w->view;                           // and an out-of-tick throw from AppKit input
+            NSEvent* key = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
+                timestamp:0 windowNumber:w->window.windowNumber context:nil characters:@"a"
+                charactersIgnoringModifiers:@"a" isARepeat:NO keyCode:0];
+            [view keyDown:key];
+            check("an out-of-tick event_cb throw is contained at the input boundary", keyThrown);
+            break;
+        }
+        if (w && now() - sampleStart < 1.0) break;
+        if (w && !w->close_requested && !throwClosed) {
+            std::printf("nativeWindow: throwing event_cb: threw=%d, %d ticks\n", eventThrown, throwEventTicks);
+            check("ticks continue after event_cb throws", eventThrown && throwEventTicks >= 10 && !w->in_tick);
+            sapp_window_request_close(throwWindow);
+            break;
+        }
+        if (!throwClosed && !waited(5)) break;
+        sampleStart = 0;
+        check("a close request is still processed after event_cb threw", throwClosed && !sapp_window_valid(throwWindow));
+        enter(ThrowLegacy);
+        break;
+    }
+    case ThrowLegacy:
+        mainThrowOnce = true;
+        sampleStart = 0;
+        enter(ThrowLegacyWait);
+        break;
+    case ThrowLegacyWait:
+        if (!mainThrew && !waited(2)) break;
+        if (sampleStart == 0) { sampleStart = now(); mainFramesAt = mainFrames; break; }
+        if (now() - sampleStart < 0.5) break;
+        check("first-window frames continue after the legacy frame_cb throws", mainThrew &&
+            mainFrames - mainFramesAt >= 5 && !first->in_tick && !first->draw_admitted);
+        sampleStart = 0;
+        modalRound = 0;
+        enter(ModalSetup);
+        break;
+    case ModalSetup:
+        modalOwnerTicks = 0; modalResumedAt = 0;
+        modalClosed = modalClosedInHandler = modalHandlerDone = false;
+        modalRequestClose = modalRound == 1;
+        modalOwner = makeProbe(modalTick, modalEvent, modalClose, "modal owner");
+        _sapp_tc_lookup(second)->desc.tick_cb = probeTick;
+        enter(ModalWarm);
+        break;
+    case ModalWarm: {
+        if (!waited(0.5)) break;
+        _sapp_tc_window_t* w = _sapp_tc_lookup(modalOwner);
+        if (!w) { check("modal owner created", false); enter(ModalAfter); break; }
+        _sapp_tc_view* view = w->view;
+        NSEvent* key = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
+            timestamp:0 windowNumber:w->window.windowNumber context:nil characters:@"m"
+            charactersIgnoringModifiers:@"m" isARepeat:NO keyCode:0];
+        [view keyDown:key];   // returns after the modal is dismissed
+        enter(ModalAfter);
+        break;
+    }
+    case ModalAfter:
+        if (!waited(1.0)) break;
+        if (modalRound == 0) {
+            const double resume = modalResumedAt > 0 ? modalResumedAt - modalEnd : -1;
+            std::printf("nativeWindow: owner resumed %.3fs after the modal, %d ticks in the following second\n",
+                resume, modalOwnerTicks - modalOwnerAfterAt);
+            check("owner resumes within a few frames after the modal", modalHandlerDone && resume >= 0 && resume < 0.2 &&
+                modalOwnerTicks - modalOwnerAfterAt >= 20);
+            sapp_destroy_window(modalOwner);
+            ++modalRound;
+            enter(ModalSetup);
+            break;
+        }
+        std::printf("nativeWindow: close requested before the modal: closed=%d, inside handler=%d\n",
+            modalClosed, modalClosedInHandler);
+        check("a close requested before the modal is processed after the handler returns",
+            modalHandlerDone && modalClosed && !modalClosedInHandler && !sapp_window_valid(modalOwner));
+        if (sapp_window_valid(modalOwner)) sapp_destroy_window(modalOwner);
         sapp_window_request_close(second);
         enter(CloseSecondary);
         break;
@@ -464,6 +759,7 @@ void mainEvent(const sapp_event* event) {
 
 void mainFrame() {
     ++mainFrames;
+    if (mainThrowOnce) { mainThrowOnce = false; mainThrew = true; throw std::runtime_error("legacy frame_cb test throw"); }
     if (coveredFirst) {
         const void* drawable = sapp_metal_get_current_drawable();
         std::printf("nativeWindow: covered first frame: occluded=%d source=%s drawable=%d\n",
