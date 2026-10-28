@@ -1,5 +1,10 @@
 // macOS helpers for the session-end test: a logout quit Apple event dispatched
 // in-process (kAEQuitReason = kAELogOut), one-shot timers and run-loop spinning.
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+#if defined(__APPLE__) && TARGET_OS_OSX
 #import <Cocoa/Cocoa.h>
 #import <CoreServices/CoreServices.h>
 
@@ -23,3 +28,5 @@ extern "C" void sessionEndSpin(double seconds) {
     const double until = CACurrentMediaTime() + seconds;
     while (CACurrentMediaTime() < until) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
 }
+
+#endif
