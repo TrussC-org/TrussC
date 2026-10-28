@@ -131,6 +131,7 @@ class DailyDisplayWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as scratch:
             root = Path(scratch)
             tests = root / 'core/tests'
+            (tests / 'allCoreTests/src').mkdir(parents=True)
             for name in ('fixture', 'own', 'unmarked'):
                 test = tests / name
                 (test / 'src').mkdir(parents=True)
