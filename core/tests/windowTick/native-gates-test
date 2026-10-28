@@ -80,7 +80,7 @@ mac_tick_body = mac_extract('static void _sapp_tc_mac_tick_body(_sapp_tc_window_
     ('@autoreleasepool', ''), ('link.timestamp', 'link->timestamp'),
     ('link.targetTimestamp', 'link->targetTimestamp'),))
 mac_tick_scope = mac_extract('struct _sapp_tc_mac_tick_scope {', (('= nil', '= 0'),)) + ';\n'
-mac_closed = mac_extract('static void _sapp_tc_mac_closed(', (
+mac_closed_now = mac_extract('static void _sapp_tc_mac_closed_now(', (
     ('[NSApp terminate:nil]', 'terminate()'), ('[w->link invalidate]', 'invalidate_link(w->link)'),))
 mac_deferred = mac_extract('static void _sapp_tc_mac_process_deferred(void) {', (
     ('[nsw close]', 'close_window(nsw)'), ('[first->window performClose:nil]', 'perform_close(first->window)'),
@@ -93,10 +93,15 @@ mac_should_close = mac_extract('- (BOOL)windowShouldClose:(id)sender', (
 mac_should_terminate = mac_extract('- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender', (
     ('- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender',
      'NSApplicationTerminateReply application_should_terminate(NSApplication* sender)'),
+))
+mac_quit_reason = mac_extract('static AEEventID _sapp_tc_mac_quit_reason(void) {', (
     ('[[NSAppleEventManager sharedAppleEventManager] currentAppleEvent]', 'current_apple_event()'),
     ('[event attributeDescriptorForKeyword:0x7768793f]', 'event->attribute(0x7768793f)'),
     ('[event paramDescriptorForKeyword:0x7768793f]', 'event->parameter(0x7768793f)'),
     ('[reason enumCodeValue]', 'enum_code(reason)'),))
+mac_will_close = mac_extract('- (void)windowWillClose:(NSNotification*)n', (
+    ('- (void)windowWillClose:(NSNotification*)n', 'void window_will_close(View* self, void* n)'),
+    ('self.w', 'self->w'),))
 # Replay the production constructor from its publication boundary through return.
 # Allocation, AppKit setup and dimension initialization precede this probe.
 mac_constructor = mac_extract('static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(', (
@@ -142,6 +147,8 @@ code = r'''
 #include <functional>
 #include <new>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <signal.h>
 struct WindowContext { bool isMain; };
 ''' + policy + r'''
 struct sapp_window { unsigned id; };
@@ -205,15 +212,30 @@ using NSApplicationTerminateReply = int;
 constexpr int NSTerminateCancel=0, NSTerminateNow=1;
 struct NSApplication {};
 using AEEventID = unsigned;
+AEEventID attribute_reason=0, parameter_reason=0;
 struct NSAppleEventDescriptor {
-    NSAppleEventDescriptor* attribute(unsigned) { return this; }
-    NSAppleEventDescriptor* parameter(unsigned) { return this; }
+    AEEventID code=0;
+    NSAppleEventDescriptor* attribute(unsigned key) {
+        check("macOS quit reason reads why attribute", key==0x7768793f);
+        static NSAppleEventDescriptor reason; reason.code=attribute_reason;
+        return attribute_reason?&reason:nullptr;
+    }
+    NSAppleEventDescriptor* parameter(unsigned key) {
+        check("macOS quit reason reads why parameter", key==0x7768793f);
+        static NSAppleEventDescriptor reason; reason.code=parameter_reason;
+        return parameter_reason?&reason:nullptr;
+    }
 };
 NSAppleEventDescriptor* current_apple_event() { static NSAppleEventDescriptor e; return &e; }
-AEEventID enum_code(NSAppleEventDescriptor*) { return 0; }
+AEEventID enum_code(NSAppleEventDescriptor* reason) { return reason->code; }
+bool setup_called=true;
+int app_code=37;
+const char* exit_reason="";
 namespace trussc::internal {
-void setExitReason(const char*) {}
-void setExitReasonIfEmpty(const char*) {}
+void setExitReason(const char* reason) { exit_reason=reason; }
+void setExitReasonIfEmpty(const char* reason) { if (!*exit_reason) exit_reason=reason; }
+bool appSetupCalled() { return setup_called; }
+int appExitCode() { return app_code; }
 }
 constexpr unsigned NSWindowOcclusionStateVisible=1;
 struct NSWindow { unsigned occlusionState=1; bool miniaturized=false; };
@@ -231,7 +253,7 @@ struct Native : ::Native {
     bool fallback_active=false, link_suspended=false, suspended_sent=false, draw_admitted=false;
     double last_tick_time=0;
     int callback_depth=0, win_width=640, win_height=480, fb_width=640, fb_height=480;
-    bool close_requested=false;
+    bool close_requested=false, closed_pending=false;
     bool (*events_enabled)()=nullptr;
 };
 using _sapp_tc_window_t = Native;
@@ -243,7 +265,13 @@ struct {
     const char* create_error=nullptr;
     struct {
         Native* main=nullptr; bool quit_requested=false, quit_ordered=false;
-        struct { int logger=0; } desc;
+        bool init_called=false, cleanup_called=false;
+        struct {
+            int logger=0;
+            void (*cleanup_cb)()=nullptr;
+            void (*cleanup_userdata_cb)(void*)=nullptr;
+            void* user_data=nullptr;
+        } desc;
     } app;
 } _sapp_tc;
 Native* target;
@@ -254,6 +282,9 @@ bool logger_allocation_fails=false, native_probe=false, terminate_probe=false;
 bool native_probing=false, terminate_replayed_busy=false, terminate_allowed=true;
 bool constructor_native_probe=false;
 int native_kind=0;
+int close_queries=0, session_pipe=-1;
+bool close_allowed=true, direct_probe=false, direct_probing=false, session_probe=false;
+Native* direct_target=nullptr;
 std::vector<std::function<void()>> run_loop;
 using CFRunLoopRef = int;
 constexpr int kCFRunLoopCommonModes=1;
@@ -272,7 +303,11 @@ void drain_run_loop() {
     check("macOS deferred run loop has no scheduling storm", run_loop.empty());
     run_loop.clear();
 }
-bool _sapp_tc_request_exit() { ++exit_requests; return terminate_allowed; }
+bool _sapp_tc_request_exit() {
+    ++exit_requests;
+    if (session_pipe>=0) (void)write(session_pipe,"A",1);
+    return terminate_allowed;
+}
 constexpr int SAPP_LOGITEM_OK=0;
 void _sapp_tc_log(int*, int, uint32_t, int, const char*, const char*, const char*) {
     ++errors;
@@ -331,9 +366,13 @@ void terminate() {
     application_should_terminate(nullptr);
 }
 void invalidate_link(CADisplayLink*) {}
-''' + mac_stop + mac_closed + r'''
-bool _sapp_tc_mac_close(Native*) { return true; }
-''' + extract('static bool _sapp_tc_mac_busy(void) {') + mac_should_close + mac_should_terminate + r'''
+''' + mac_stop + mac_closed_now + extract('static void _sapp_tc_mac_closed(') + mac_will_close + r'''
+bool _sapp_tc_mac_close(Native*) { ++close_queries; return close_allowed; }
+''' + extract('static bool _sapp_tc_mac_busy(void) {') + mac_should_close + mac_quit_reason + extract('static bool _sapp_tc_mac_is_session_end(') + extract('static void _sapp_tc_mac_session_end(') + mac_should_terminate + r'''
+void direct_close(Native* w) {
+    ++native_closes;
+    window_will_close(w->view,nullptr);
+}
 void close_window(NSWindow* window) {
     check("macOS native close delivered only when nothing active", !_sapp_tc_mac_busy());
     ++closed; ++native_closes;
@@ -349,6 +388,18 @@ BOOL native_perform_close(View* delegate) {
 // enter the real translated window/application delegates above.
 void perform_close(NSWindow*) { ++quit; _sapp_tc.app.quit_requested=_sapp_tc.app.quit_ordered=false; }
 ''' + extract('static bool _sapp_tc_mac_deferred_pending(void) {') + mac_deferred + mac_schedule + mac_source + extract('static void _sapp_tc_mac_update_suspension(') + mac_observe + mac_drawable + mac_swap + mac_tick_scope + mac_tick_body + extract('static bool _sapp_tc_mac_tick_blocked(') + extract('static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {') + extract('static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {') + mac_link + mac_fallback + mac_minimize + mac_restore + r'''
+void probe_closed_window(Native* w) {
+    const int ticks=consulted, samples=timing, sizes=dimensions, draws=acquired;
+    const int event_count=events.size(), timer_count=timers, installed=installs;
+    const auto frame=w->frame_count;
+    _sapp_tc_mac_tick(w,nil); link_tick(w->view,nil); fallback_tick(w->view,&timer);
+    _sapp_tc_send_type(w,SAPP_EVENTTYPE_RESIZED);
+    w->link_suspended=true; _sapp_tc_mac_select_source(w);
+    check("macOS pending direct close suppresses tick event and fallback",
+          consulted==ticks && timing==samples && dimensions==sizes && acquired==draws &&
+          events.size()==event_count && w->frame_count==frame && timers==timer_count &&
+          installs==installed && !w->fallback_active);
+}
 // A modal-loop seam: use the real tick/source/callback/deferred bodies while
 // the native event loop would dispatch another event or window's frame.
 void exercise_callback(Native* w,int kind) {
@@ -356,6 +407,23 @@ void exercise_callback(Native* w,int kind) {
     check("macOS own callback blocks tick admission", _sapp_tc_mac_tick_blocked(w));
     if (expect_tick_guard && w==callback_target)
         check("macOS observe/reconcile/resize callbacks run inside tick guard", w->in_tick);
+    if (session_probe && kind==native_kind && w==callback_target) {
+        application_should_terminate(nullptr);
+        (void)write(session_pipe,"R",1); // A session end must never resume this handler.
+    }
+    if (direct_probe && !direct_probing && kind==native_kind && w==callback_target) {
+        direct_probing=true;
+        direct_close(direct_target);
+        check("macOS direct close records pending without handling while busy",
+              direct_target->closed_pending && _sapp_tc.deferred_blocked && close_callbacks==0 && quit==0);
+        probe_closed_window(direct_target);
+        // Pump a nested callback and the queued pass while the outer one lives.
+        Native* nested=w==direct_target?other:w;
+        _sapp_tc_send_type(nested,SAPP_EVENTTYPE_RESIZED);
+        _sapp_tc_mac_process_deferred(); drain_run_loop();
+        check("macOS direct close waits for outermost callback", close_callbacks==0 && quit==0 && direct_target->closed_pending);
+        direct_probing=false;
+    }
     if ((native_probe || terminate_probe) && kind==native_kind && w==callback_target) {
         for (int repeat=0; repeat<2; ++repeat) {
             if (native_probe) {
@@ -419,7 +487,11 @@ void event_callback(const sapp_event* ev,sapp_window h,void* user) {
 void close_callback(sapp_window h,void* user) {
     auto* w=static_cast<Native*>(user);
     check("macOS close callback identity", h.id==w->win_id);
-    ++close_callbacks; exercise_callback(w,2);
+    ++close_callbacks;
+    if (direct_probe) check("macOS direct close handling follows outermost callback and tick",
+        _sapp_tc.callbacks_active==1 && !callback_target->in_tick &&
+        callback_target->callback_depth==int(callback_target==w) && !w->in_tick);
+    exercise_callback(w,2);
 }
 void callback(sapp_window h,void* user) {
     auto* w=static_cast<Native*>(user); ++consulted;
@@ -447,6 +519,9 @@ void reset(Native& w,NSWindow& window,View& view,bool role) {
     native_closes=close_callbacks=exit_requests=enqueued=passes=wakes=0; run_loop.clear();
     logger_allocation_fails=native_probe=terminate_probe=native_probing=terminate_replayed_busy=false;
     terminate_allowed=true; constructor_native_probe=false; native_kind=0;
+    attribute_reason=parameter_reason=0; setup_called=true; app_code=37; exit_reason="";
+    close_queries=0; close_allowed=true; direct_probe=direct_probing=session_probe=false;
+    direct_target=nullptr; session_pipe=-1;
     changed=skip_in_callback=reenter=dispose_in_callback=false; events.clear();
     probe_callbacks=probing=nest_event=request_deferred=false;
     throw_kind=probe_kind=-1; destroy_at=creation_stage=0;
@@ -488,6 +563,71 @@ static Native* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_desc* d,const
     Native* w=target; // Fixture has completed allocation, initialization and publication.
     creation_record=w;
 ''' + mac_constructor + '\n' + extract('static _sapp_tc_window_t* _sapp_tc_mac_create_window(const _sapp_tc_native_desc* d) {') + extract('sapp_window sapp_create_window(const sapp_window_desc* desc) {') + r'''
+void session_cleanup() {
+    const bool correct=_sapp_tc.app.cleanup_called && _sapp_tc.app.quit_ordered &&
+        _sapp_tc_mac_busy() && exit_requests==0 && !_sapp_tc.terminate_pending;
+    (void)write(session_pipe,correct?"C":"B",1);
+}
+bool cleanup_throws=false, cleanup_reenters=false;
+void session_cleanup_cb() {
+    session_cleanup();
+    if (cleanup_reenters) { cleanup_reenters=false; application_should_terminate(nullptr); }
+    if (cleanup_throws) throw 42;
+}
+void session_cleanup_userdata(void* user) {
+    if (user!=&_sapp_tc) (void)write(session_pipe,"B",1);
+    session_cleanup_cb();
+}
+void session_child(Native& w,AEEventID reason,bool parameter,int context,int cleanup_mode,bool setup,bool allowed=false) {
+    int channel[2];
+    if (pipe(channel)!=0) { check("macOS session pipe available",false); return; }
+    fflush(nullptr);
+    pid_t child=fork();
+    if (child==0) {
+        close(channel[0]); session_pipe=channel[1]; alarm(3);
+        attribute_reason=parameter?0:reason; parameter_reason=parameter?reason:0;
+        setup_called=setup; app_code=73; terminate_allowed=allowed;
+        _sapp_tc.app.init_called=cleanup_mode!=4;
+        _sapp_tc.app.cleanup_called=cleanup_mode==5;
+        _sapp_tc.app.desc.cleanup_cb=cleanup_mode==1?nullptr:session_cleanup_cb;
+        _sapp_tc.app.desc.cleanup_userdata_cb=session_cleanup_userdata;
+        _sapp_tc.app.desc.user_data=&_sapp_tc;
+        cleanup_throws=cleanup_mode==2; cleanup_reenters=cleanup_mode==3;
+        session_probe=true; callback_target=&w; native_kind=context;
+        if (context==0) _sapp_tc_send_type(&w,SAPP_EVENTTYPE_RESIZED);
+        if (context==1) _sapp_tc_mac_tick(&w,nil);
+        if (context==2 || context==3) {
+            if (context==2) _sapp_tc.constructing=1;
+            else w.in_tick=true;
+            application_should_terminate(nullptr);
+        }
+        if (context==4) {
+            const auto reply=application_should_terminate(nullptr);
+            (void)write(session_pipe,reply==NSTerminateNow?"N":"V",1);
+            _exit(91);
+        }
+        (void)write(session_pipe,"R",1);
+        _exit(99);
+    }
+    close(channel[1]);
+    check("macOS session child starts", child>0);
+    int status=0;
+    if (child>0) {
+        check("macOS session child finishes", waitpid(child,&status,0)==child);
+        char report[32]{};
+        ssize_t size=read(channel[0],report,sizeof(report));
+        if (context==4) {
+            check("macOS idle session end takes normal App veto path",
+                size==2 && report[0]=='A' && report[1]==(allowed?'N':'V') &&
+                WIFEXITED(status) && WEXITSTATUS(status)==91);
+        } else {
+            check("macOS busy session cleanup runs once without asking or resuming App",
+                cleanup_mode<4?(size==1 && report[0]=='C'):size==0);
+            check("macOS busy session exits with app code", WIFEXITED(status) && WEXITSTATUS(status)==(setup?73:1));
+        }
+    }
+    close(channel[0]);
+}
 void run() {
     int before=failures, count=checks;
     Native w; NSWindow window; View view; CADisplayLink link;
@@ -695,6 +835,67 @@ void run() {
         fclose(capture);
     }
     summary("macOS round 3 native close / terminate / run loop / stderr", before, count);
+    before=failures; count=checks;
+    // An irreversible native close bypasses windowShouldClose:. Cover the
+    // window's own event/tick and a peer's event/tick as the outer callback.
+    for (bool from_peer : {false,true}) for (int kind : {0,1}) {
+        reset(w,window,view,from_peer); peer_setup(peer,peer_window,peer_view);
+        callback_target=&w; direct_target=from_peer?&peer:&w;
+        native_kind=kind; direct_probe=true; close_allowed=false;
+        if (kind==0) _sapp_tc_send_type(&w,SAPP_EVENTTYPE_RESIZED);
+        else _sapp_tc_mac_tick(&w,nil);
+        check("macOS direct close outer callback returns with restored state",
+            w.callback_depth==0 && peer.callback_depth==0 && _sapp_tc.callbacks_active==0 && !w.in_tick);
+        if (kind==0) {
+            check("macOS direct event close waits for deferred run loop", close_callbacks==0 && direct_target->closed_pending);
+            // No callback is active here: pending alone must reject all sources.
+            probe_closed_window(direct_target);
+        }
+        drain_run_loop();
+        check("macOS direct close handled exactly once without second close or veto",
+            close_callbacks==1 && native_closes==1 && close_queries==0 &&
+            !direct_target->closed_pending && !direct_target->ready);
+        probe_closed_window(direct_target);
+        _sapp_tc_mac_process_deferred(); drain_run_loop();
+        check("macOS direct close is consumed after deferred handling",
+            close_callbacks==1 && native_closes==1 && close_queries==0 && !_sapp_tc.deferred_blocked);
+    }
+    // All OS session reasons, attribute first and parameter fallback. Real
+    // child processes keep production _exit intact and expose wrong status,
+    // App veto calls, duplicate cleanup and any return to the interrupted App.
+    for (AEEventID reason : {0x6c6f676fu,0x726c676fu,0x72727374u,0x72657374u,0x7273646eu,0x73687574u}) {
+        for (bool parameter : {false,true}) for (int context : {0,1}) {
+            reset(w,window,view,false);
+            session_child(w,reason,parameter,context,0,true);
+        }
+        // Outside a callback/tick/constructor, a session end stays vetoable.
+        for (bool allowed : {false,true}) {
+            reset(w,window,view,false);
+            session_child(w,reason,false,4,0,true,allowed);
+        }
+    }
+    for (int mode : {1,2,3,4,5}) {
+        reset(w,window,view,false); session_child(w,0x73687574,false,0,mode,true);
+    }
+    for (int context : {2,3}) {
+        reset(w,window,view,false); session_child(w,0x72657374,false,context,0,true);
+    }
+    reset(w,window,view,false); session_child(w,0x6c6f676f,false,1,0,false);
+    // A plain quit and an unknown reason retain cancel-and-replay behavior,
+    // even when the App vetoes the eventual replay.
+    for (AEEventID reason : {0u,0x12345678u}) for (bool allowed : {false,true}) {
+        reset(w,window,view,false); attribute_reason=reason; terminate_allowed=allowed;
+        callback_target=&w; terminate_probe=true;
+        _sapp_tc_send_type(&w,SAPP_EVENTTYPE_RESIZED);
+        check("macOS busy plain quit cancels before replay", exit_requests==0 && quit==0 && _sapp_tc.terminate_pending);
+        drain_run_loop(); _sapp_tc_mac_process_deferred(); drain_run_loop();
+        check("macOS busy plain quit replays once with normal veto",
+            quit==1 && exit_requests==1 && !_sapp_tc.terminate_pending && !terminate_replayed_busy);
+    }
+    // An attribute takes precedence over a conflicting session parameter.
+    reset(w,window,view,false); attribute_reason=0x12345678; parameter_reason=0x73687574;
+    check("macOS quit reason prefers attribute", _sapp_tc_mac_quit_reason()==attribute_reason);
+    summary("macOS round 4 direct close / session end / plain quit", before, count);
 }
 }
 namespace win {
@@ -942,7 +1143,7 @@ if '--mutations' in sys.argv[3:]:
         'mac-pause-all-windows': change(blocked, 'return w->in_tick', 'return _sapp_tc.callbacks_active > 0 || w->in_tick'),
         'mac-event-without-scope': change('static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {', scope, ''),
         'mac-tick-without-scope': change(tick, scope, ''),
-        'mac-close-without-scope': change('static void _sapp_tc_mac_closed(', scope, ''),
+        'mac-close-without-scope': change('static void _sapp_tc_mac_closed_now(', scope, ''),
         'mac-close-inside-callback': change(busy, '_sapp_tc.callbacks_active > 0 || ', ''),
         'mac-close-inside-tick': change(busy, 'cw->in_tick || ', ''),
         'mac-close-inside-constructor': change(busy, '_sapp_tc.constructing > 0', 'false'),
@@ -1012,6 +1213,75 @@ if '--mutations' in sys.argv[3:]:
             'macOS contained report reaches stderr when logging allocation fails'),
     }
     mutants.update({name: contents for name, (contents, label) in round3_mutants.items()})
+    closed = 'static void _sapp_tc_mac_closed('
+    session = 'static void _sapp_tc_mac_session_end('
+    round4_mutants = {
+        'mac-direct-close-inside-own-event': (change(closed, 'if (_sapp_tc_mac_busy())',
+            'if (_sapp_tc_mac_busy() && !(w->callback_depth > 0 && !w->in_tick))'),
+            'macOS direct close records pending without handling while busy'),
+        'mac-direct-close-inside-own-tick': (change(closed, 'if (_sapp_tc_mac_busy())',
+            'if (_sapp_tc_mac_busy() && !w->in_tick)'),
+            'macOS direct close records pending without handling while busy'),
+        'mac-direct-close-inside-peer-callback': (change(closed, 'if (_sapp_tc_mac_busy())',
+            'if (_sapp_tc_mac_busy() && w->callback_depth > 0)'),
+            'macOS direct close records pending without handling while busy'),
+        'mac-direct-close-loses-pending': (change(closed, 'w->closed_pending = true;', ''),
+            'macOS direct close records pending without handling while busy'),
+        'mac-direct-close-keeps-ticking': (change(blocked, ' || w->closed_pending', ''),
+            'macOS pending direct close suppresses tick event and fallback'),
+        'mac-direct-close-keeps-events': (change('static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {',
+            ' || w->closed_pending', ''),
+            'macOS pending direct close suppresses tick event and fallback'),
+        'mac-direct-close-restarts-fallback': (change('static void _sapp_tc_mac_select_source(',
+            ' && !w->closed_pending', ''),
+            'macOS pending direct close suppresses tick event and fallback'),
+        'mac-direct-close-skips-handling': (change(pending, '_sapp_tc_mac_closed_now(cw);', ''),
+            'macOS direct close handled exactly once without second close or veto'),
+        'mac-direct-close-retains-pending': (change(pending, 'cw->closed_pending = false;', ''),
+            'macOS direct close handled exactly once without second close or veto'),
+        'mac-direct-close-closes-again': (change(pending, '_sapp_tc_mac_closed_now(cw);',
+            'NSWindow* nsw = cw->window; [nsw close]; _sapp_tc_mac_closed_now(cw);'),
+            'macOS direct close handled exactly once without second close or veto'),
+        'mac-direct-close-asks-veto': (change(pending, '_sapp_tc_mac_closed_now(cw);',
+            'if (_sapp_tc_mac_close(cw)) _sapp_tc_mac_closed_now(cw);'),
+            'macOS direct close handled exactly once without second close or veto'),
+        'mac-session-end-cancels-busy': (change(should_terminate,
+            'if (_sapp_tc_mac_is_session_end(quit_reason)) _sapp_tc_mac_session_end(quit_reason);', ''),
+            'macOS busy session cleanup runs once without asking or resuming App'),
+        'mac-session-end-asks-App': (change(session, '_sapp_tc.app.quit_ordered = true;',
+            '_sapp_tc_request_exit(); _sapp_tc.app.quit_ordered = true;'),
+            'macOS busy session cleanup runs once without asking or resuming App'),
+        'mac-session-end-skips-cleanup': (change(session, '_sapp_tc.app.desc.cleanup_cb();', '(void)0;'),
+            'macOS busy session cleanup runs once without asking or resuming App'),
+        'mac-session-end-skips-userdata-cleanup': (change(session,
+            '_sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);', '(void)0;'),
+            'macOS busy session cleanup runs once without asking or resuming App'),
+        'mac-session-end-repeats-cleanup': (change(session, '&& !_sapp_tc.app.cleanup_called', ''),
+            'macOS busy session cleanup runs once without asking or resuming App'),
+        'mac-session-end-wrong-code': (change(session,
+            'trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1', '1'),
+            'macOS busy session exits with app code'),
+        'mac-session-end-resumes-handler': (change(session,
+            '_exit(trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1);', 'return;'),
+            'macOS busy session exits with app code'),
+        'mac-session-end-skips-idle-veto': (change(should_terminate,
+            'if (_sapp_tc_mac_busy())', 'if (_sapp_tc_mac_busy() || _sapp_tc_mac_is_session_end(quit_reason))'),
+            'macOS idle session end takes normal App veto path'),
+    }
+    # Mutate each session reason independently; each must reach the busy path.
+    for reason in ('6c6f676f','726c676f','72727374','72657374','7273646e','73687574'):
+        round4_mutants['mac-session-end-misses-'+reason] = (change(
+            'static bool _sapp_tc_mac_is_session_end(', 'case 0x'+reason+':', 'case 0xdeadbeef:'),
+            'macOS busy session cleanup runs once without asking or resuming App')
+    # Reuse the plain-quit mutations with explicit round-4 assertions too.
+    round4_mutants['mac-plain-quit-loses-replay'] = (change(should_terminate,
+        '_sapp_tc.terminate_pending = true;', ''), 'macOS busy plain quit replays once with normal veto')
+    round4_mutants['mac-plain-quit-allows-busy'] = (change(should_terminate,
+        'return NSTerminateCancel;', 'return NSTerminateNow;'), 'macOS busy applicationShouldTerminate cancels')
+    round4_mutants['mac-plain-quit-repeats-replay'] = (change(pending,
+        '_sapp_tc.terminate_pending = false;', ''), 'macOS busy plain quit replays once with normal veto')
+    mutants.update({name: contents for name, (contents, label) in round4_mutants.items()})
+    targeted_mutants = dict(round3_mutants, **round4_mutants)
     # Remove both redundant callback checks to expose close during an event
     # outside a tick. The tick and constructor checks remain in this mutant.
     mutants['mac-close-inside-callback'] = change(busy, ' || cw->callback_depth > 0', '',
@@ -1023,7 +1293,7 @@ if '--mutations' in sys.argv[3:]:
     for name, marker, call in (
         ('event', 'static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {', 'event_cb(ev, handle, user);'),
         ('tick', tick, 'tick_cb(handle, user);'),
-        ('close', 'static void _sapp_tc_mac_closed(', 'close_cb(handle, user);'),
+        ('close', 'static void _sapp_tc_mac_closed_now(', 'close_cb(handle, user);'),
     ):
         mutants['mac-uncaught-'+name] = change(marker,
             'try { '+call+' } catch (...) { _sapp_tc_mac_contained("sapp_window_desc.'+name+'_cb"); }', call)
@@ -1044,12 +1314,12 @@ if '--mutations' in sys.argv[3:]:
         totals = [line for line in output.splitlines() if 'native-gates: total ' in line]
         if rc != 1 or len(totals) != 2 or any(line.endswith(' 0 failures') for line in totals) or ': FAIL' not in output or 'compilation failed' in output:
             fail(f'{name}: expected compiled runtime failures for both backends; exit={rc}\n{output}')
-        if name in round3_mutants:
-            expected = 'native-gates: ' + round3_mutants[name][1] + ': FAIL'
+        if name in targeted_mutants:
+            expected = 'native-gates: ' + targeted_mutants[name][1] + ': FAIL'
             if any(expected not in run for run in output.split('native-gates: total ')[:2]):
                 fail(f'{name}: both backends must fail the intended assertion {expected!r}\n{output}')
         totals = '; '.join(totals)
-        label = expected if name in round3_mutants else next(line for line in output.splitlines() if ': FAIL' in line)
+        label = expected if name in targeted_mutants else next(line for line in output.splitlines() if ': FAIL' in line)
         print(f'native-gates: mutation {name}: detected; {totals}; {label}', flush=True)
 
     # Every extracted function and Objective-C translation seam is mandatory.
