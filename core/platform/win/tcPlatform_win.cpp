@@ -303,26 +303,7 @@ void internal::setD3D11CaptureTraceForTests(D3D11CaptureTraceHook hook) {
 }
 
 std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
-    // Acquisition-free estimate, also before B's first pass or after resize.
-    // lastSwapchain may still refer to the previous native resource generation.
-    if (!ctx.isMain) return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
-    const void* view = sapp_get_swapchain().d3d11.render_view;
-    if (view) {
-        ID3D11Resource* resource = nullptr;
-        ((ID3D11RenderTargetView*)view)->GetResource(&resource);
-        if (resource) {
-            ID3D11Texture2D* texture = nullptr;
-            const HRESULT hr = resource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&texture);
-            resource->Release();
-            if (SUCCEEDED(hr) && texture) {
-                D3D11_TEXTURE2D_DESC desc;
-                texture->GetDesc(&desc);
-                texture->Release();
-                return {size_t(desc.Width), size_t(desc.Height)};
-            }
-        }
-    }
-    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+    return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
 }
 
 bool captureWindow(Pixels& outPixels) {

@@ -271,7 +271,7 @@ void misuseAndScopes() {
     a.allocate(2,2); a.clear();
     Fbo moved(std::move(a));
     check("active reallocate, release and move are rejected", a.getWidth() == 32 && a.isActive() && !moved.isAllocated());
-    internal::WindowContext foreign;
+    internal::WindowRequestAccess::HostState foreignState; internal::WindowContext& foreign = foreignState.context;
     auto* previous = internal::currentWindowCtx();
     internal::currentWindowCtx() = &foreign; b.end();
     internal::currentWindowCtx() = previous;

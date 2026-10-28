@@ -34,9 +34,9 @@ struct Probe : App {
 };
 uint64_t standIn = 0;
 struct OtherWindow : Window {
-    OtherWindow() { native_ = &standIn; }
+    OtherWindow() { native_ = &standIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
     ~OtherWindow() { finish(); }
-    void finish() { native_ = nullptr; internal::WindowRequestAccess::endApp(*this); }
+    void finish() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); internal::WindowRequestAccess::endApp(*this); }
 };
 struct ThrowConstructor : App { ThrowConstructor() { throw std::runtime_error("constructor test"); } };
 bool displayFinished = false;
@@ -61,6 +61,13 @@ struct DisplayNext : App {
     }
 };
 struct DisplayFirst : App {
+    DisplayFirst() {
+        auto* w = internal::mainWindow();
+        sapp_tc_window_metadata metadata{};
+        const auto id = uint32_t(internal::WindowRequestAccess::creationId(*w));
+        check("native ID bound before App construction", id && sapp_tc_window_read_metadata({id}, &metadata));
+        check("main framebuffer and DPI ready before App construction", w->context().fbWidth == metadata.fb_width && w->context().fbHeight == metadata.fb_height && w->context().dpiScale == metadata.dpi_scale && metadata.fb_width > 0);
+    }
     int updates = 0;
     EventListener cancelClose;
     void setup() override {
@@ -96,7 +103,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (argc > 1 && std::string(argv[1]) == "--process-exit") {
         std::atexit(processVerdict);
         internal::createMainWindow(WindowSettings{});
-        internal::WindowRequestAccess::openMain(*internal::mainWindow());
+        internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 101);
         internal::attachMainApp(std::make_shared<ProcessExitApp>());
         internal::mainWindow()->setApp(std::make_shared<App>());
         std::exit(0);
@@ -112,7 +119,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     auto* window = internal::mainWindow();
     window->setApp(std::make_shared<Probe>());
     check("unopened main rejects attachment", !window->appRequested_ && !window->getApp());
-    internal::WindowRequestAccess::openMain(*window); // no sapp in headless contract mode
+    internal::WindowRequestAccess::bindForTests(*window, 101); // no sapp in headless contract mode
     auto first = std::make_shared<Probe>();
     check("runner uses shared attachment", internal::attachMainApp(first));
     check("main currentWindow equals App handle", internal::currentWindow() == window && first->getWindow() == window);
@@ -121,7 +128,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     setWindowTitle("Main title");
     check("main title stored by global routing", window->getTitle() == (mcp::internal::isDevBuild() ? "Main title [MCP]" : "Main title") && &window->getTitle() == &mcp::internal::mainWindowTitleStorage());
     OtherWindow other;
-    check("one non-reused identity sequence", id > 0 && internal::WindowRequestAccess::creationId(other) > id);
+    check("explicit native identities are retained", id == 101 && internal::WindowRequestAccess::creationId(other) == 202);
     auto next = std::make_shared<Probe>();
     {
         internal::MainWindowDispatchScope dispatch;
@@ -150,6 +157,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     OtherWindow disposer; disposer.setApp(stale); internal::applyPendingAppForTests(disposer); disposer.finish();
     internal::applyPendingAppForTests(*window);
     check("boundary repeats lifecycle check", window->getApp() == next);
+    internal::currentWindowCtx() = &window->context();
     headless::active = true; headless::running = true;
     auto cancelClose = events().exitRequested.listen([](ExitRequestEventArgs& args) {
         args.cancel = true;
@@ -196,7 +204,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     internal::destroyMainWindow();
     check("main shutdown releases App once", !next->getWindow() && next->exits == 1 && next->cleanups == 1 && internal::attachedApps().empty());
     internal::createMainWindow(WindowSettings{});
-    check("new creation never reuses main ID", internal::WindowRequestAccess::creationId(*internal::mainWindow()) > id);
+    check("unbound canonical main has no native ID", internal::mainWindow() == window && internal::WindowRequestAccess::creationId(*window) == 0);
     internal::destroyMainWindow();
     return failures ? 1 : 0;
 }

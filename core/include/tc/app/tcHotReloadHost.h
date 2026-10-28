@@ -349,18 +349,6 @@ inline int runBuildCommand(const vector<string>& argv, string& output) {
 // Hot reload host — manages the Guest lifecycle
 // ---------------------------------------------------------------------------
 
-// Delivers the window size to the App a reload just attached (no native resize
-// follows a reload). Framework call into App code: it goes through the main
-// dispatch scope with the receiver retained, so a setApp()/reload() requested
-// from windowResized() waits for the boundary instead of freeing or cleaning
-// up the App mid-callback.
-inline void seedReloadedAppSize(int framebufferWidth, int framebufferHeight, float dpiScale) {
-    const auto size = internal::framebufferResizeArgs(framebufferWidth, framebufferHeight,
-        internal::appSizeDpi(dpiScale));
-    internal::EntryStackGuard guard(internal::AppEntry::Event, "windowResized()");
-    internal::resizeMainApp(size.width, size.height);
-}
-
 struct Host {
     GuestLibrary guest;
     FileWatcher watcher;
@@ -573,13 +561,6 @@ struct Host {
             return false;
         }
 
-        // Seed the new App's size from the current window. The normal launch
-        // path does this once after appSetupFunc (see runApp / runHotReloadApp
-        // bootstrapping in TrussC.h), but sokol won't fire a windowResized
-        // event during reload because the actual window dimensions haven't
-        // changed — without this, App::setup() runs while getWidth()==0 and
-        // every child gets squished into a zero-sized rect.
-        seedReloadedAppSize(sapp_width(), sapp_height(), sapp_dpi_scale());
 
         reloadCount++;
         watcher.markBuilt();
@@ -665,9 +646,6 @@ inline int runHotReloadApp(const WindowSettings& settings) {
         auto app = internal::mainApp();
         internal::destroyMainWindow();
         g_host.guest.unload();
-    };
-    internal::appWindowResizedFunc = [](int w, int h) {
-        internal::resizeMainApp(w, h);
     };
     internal::createMainWindow(settings);
     internal::prepareMainAppBindings();

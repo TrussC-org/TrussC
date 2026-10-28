@@ -268,6 +268,7 @@ static void frame() {
 }
 static void reset(_sapp_tc_window_t& main, _sapp_tc_window_t** windows, Display* display) {
     _sapp_tc = {}; main = {};
+    main.win_id = 1;
     main.is_main = main.ready = main.trust_hidden_signals = true; main.xwin = 1; main.drawable = (EGLSurface)1;
     main.dpi_scale = 1; main.fb_width = main.fb_height = 64;
     main.desc.event_cb = _sapp_tc_main_event_tramp;

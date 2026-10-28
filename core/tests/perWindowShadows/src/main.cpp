@@ -25,7 +25,7 @@ void layoutChecks() {
     check("invalid extents rejected", !internal::shadowImageLayout(0,color,depth,total) &&
         !internal::shadowImageLayout(-1,color,depth,total));
     check("byte product overflow rejected without allocation", !internal::shadowImageLayout(INT_MAX,color,depth,total));
-    internal::WindowContext unused;
+    internal::WindowRequestAccess::HostState unusedState; internal::WindowContext& unused = unusedState.context;
     check("unused window has no shadow generation", !unused.shadow.storage);
 }
 #if (defined(SOKOL_GLCORE) && defined(__linux__)) || (defined(SOKOL_GLES3) && defined(__linux__) && !defined(__ANDROID__)) || (defined(SOKOL_D3D11) && defined(_WIN32)) || defined(SOKOL_METAL)
@@ -198,7 +198,7 @@ class ShadowApp : public App {
         std::puts("SKIP: perWindowShadows secondary-window cases on Metal: the Air's second window is occluded / not reliably presented in the lab; interleaving, foreign commits, parked foreign shadow passes and native secondary close require it");
 
         // No second native window/drawable is needed for lazy allocation.
-        internal::WindowContext unused;
+        internal::WindowRequestAccess::HostState unusedState; internal::WindowContext& unused = unusedState.context;
         check("unused window context allocates zero shadow bytes", !unused.shadow.storage);
         start(0,1024);
         queue(true);

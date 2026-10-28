@@ -188,7 +188,7 @@ void appTouchOrder() {
     // Exercise the real App listeners and setup registration without a display.
     (void)buildAppDescriptor<TouchApp>();
     // Model the runner opening its main Window without starting sokol.
-    internal::WindowRequestAccess::openMain(*internal::mainWindow());
+    internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 101);
     internal::appSetupFunc();
     internal::appUpdateFunc();
     for (auto* event : {&events().touchPressed, &events().touchMoved, &events().touchReleased}) {

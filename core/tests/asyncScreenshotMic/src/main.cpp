@@ -81,7 +81,7 @@ void screenshotTemporaryTests() {
 
 void screenshotWindowOrderTests() {
     newRun();
-    internal::WindowContext contextA, contextB;
+    internal::WindowRequestAccess::HostState contextAState; internal::WindowContext& contextA = contextAState.context; internal::WindowRequestAccess::HostState contextBState; internal::WindowContext& contextB = contextBState.context;
     contextA.isMain = true; contextB.isMain = false;
     const auto path = sandbox / "two-windows.png";
     vector<ScreenshotSaveEventArgs> events;
@@ -221,7 +221,7 @@ void screenshotTests() {
         check("writer preserves detailed SaveError", events.back().result.error == error);
     }
     // Drain two real WindowContexts independently, after changing current.
-    internal::WindowContext contextA, contextB;
+    internal::WindowRequestAccess::HostState contextAState; internal::WindowContext& contextA = contextAState.context; internal::WindowRequestAccess::HostState contextBState; internal::WindowContext& contextB = contextBState.context;
     contextA.isMain = true; contextB.isMain = false;
     map<fs::path, int> contextPixels;
     mutex contextRecords;

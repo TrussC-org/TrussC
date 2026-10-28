@@ -123,8 +123,8 @@ struct CountApp : App {
 // ~Window() would close() it.
 static int g_nativeStandIn = 0;
 struct OpenWindow : Window {
-    OpenWindow() { native_ = &g_nativeStandIn; }
-    ~OpenWindow() { native_ = nullptr; }
+    OpenWindow() { native_ = &g_nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
+    ~OpenWindow() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); }
 };
 
 // One tick of a secondary window, in its own context (as the platform glue

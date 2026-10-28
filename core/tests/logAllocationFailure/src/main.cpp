@@ -28,8 +28,8 @@ using namespace tc;
 namespace {
 // Stand-ins need only report isOpen(); cleanup never calls platform code.
 struct OpenWindow : Window {
-    OpenWindow() { native_ = this; }
-    ~OpenWindow() { native_ = nullptr; }
+    OpenWindow() { native_ = this; internal::WindowRequestAccess::bindForTests(*this, 202); }
+    ~OpenWindow() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); }
 };
 int failures = 0;
 void check(bool ok, const char* what) {

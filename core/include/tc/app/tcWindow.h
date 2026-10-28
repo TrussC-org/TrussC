@@ -16,13 +16,14 @@
 //
 // This file is included from TrussC.h (after Node / CoreEvents / WindowSettings).
 
+#include "internal/tcWindowRuntime.h"
+
 namespace trussc {
 
 class Window;
 
 namespace internal {
 class WindowRequestAccess;   // friend of Window, defined after it
-void syncSecondaryAppSize(Window& window, int width, int height);
 // One control entry for explicit handles and context-aware globals.
 enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, ToggleFullscreen, PositionQuery };
 using WindowControlHook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
@@ -39,14 +40,6 @@ std::shared_ptr<Window> createSecondaryWindow(const WindowSettings& settings);
 void registerWindow(Window* w);
 void unregisterWindow(Window* w);
 std::vector<Window*> openWindows();   // only windows whose native side is alive
-
-// Test hook, not a user setting: a headless test has no native window the OS
-// could cover or minimize. While a hook is set, Window::isOccluded() returns
-// hook(window) instead of the native flag (core/tests/mcpOccludedWindow).
-// nullptr, the default, turns it off. Defined in tcGlobal.cpp (one per
-// process), next to the window registry.
-using WindowOccludedHook = bool (*)(const Window&);
-WindowOccludedHook& windowOccludedHookForTests();
 
 // RAII registrar: every Window destruction unregisters, including main.
 struct WindowRegistryEntry {
@@ -117,7 +110,7 @@ public:
     // App::getWindow() returns nullptr during those teardown callbacks.
     // The borrowed main Window pointer expires when the runner shuts down.
     void close();
-    bool isOpen() const { return ctx_.isMain ? mainOpen_ : native_ != nullptr; }
+    bool isOpen() const { return binding_.bound; }
 
     void setTitle(const std::string& title);
     // Last title set via WindowSettings/setTitle (for window listing/tooling).
@@ -234,11 +227,11 @@ public:
         // handleWindowResized() = RectNode::setSize (non-virtual; App::setSize
         // is overridden to resize the OS window) + the windowResized() hook —
         // the same path the main window uses on SAPP_EVENTTYPE_RESIZED.
-        if (app_->getWidth() != wPts || app_->getHeight() != hPts) {
-            ResizeEventArgs args; args.width = (int)wPts; args.height = (int)hPts;
-            internal::WindowCallbackTimeScope callbackTime;
-            events_.windowResized.notify(args);
-        }
+        // The attachment's observed dimensions own deduplication. A listener
+        // may have edited the App to this size on an earlier native revision.
+        ResizeEventArgs args; args.width = (int)wPts; args.height = (int)hPts;
+        internal::WindowCallbackTimeScope callbackTime;
+        events_.windowResized.notify(args);
     }
 
     // --- internal (used by the platform glue; not user API) ---
@@ -247,14 +240,14 @@ public:
     void* native_ = nullptr;                 // platform-side state
 private:
     struct OwnedState {
+        OwnedState();
         internal::WindowContext context;
         CoreEvents events;
         internal::RenderContext render;
         std::string title;
     };
-    // Main borrows the existing host state. Do not construct a spare context:
-    // its destructor would introduce target teardown into main shutdown.
     std::unique_ptr<OwnedState> owned_;
+    internal::WindowBinding binding_;
 public:
     internal::WindowContext& ctx_;
     CoreEvents& events_;
@@ -291,13 +284,7 @@ private:
     void toggleSecondaryFullscreen();
 #endif
     internal::WindowFullscreenPhase fullscreenPhase() const;
-    int getSecondaryWidth() const;
-    int getSecondaryHeight() const;
-    bool isSecondaryOccluded() const;
-    void seedMainAppSize();
     explicit Window(bool mainWindow);
-    bool mainOpen_ = false;
-    uint64_t id_;
     // Rebuilt only at a successful setApp boundary. Exit resolves the held
     // outgoing App after getApp() has been cleared for window teardown.
     struct AppEventState {
@@ -307,6 +294,12 @@ private:
     void prepareAppEvents(std::vector<EventListener>& listeners,
                           const std::shared_ptr<AppEventState>& state);
     std::shared_ptr<AppEventState> appEventState_;
+    // Only successful size deliveries participate in deduplication. Reentrant
+    // observations are drained by the outer delivery from the current context.
+    bool appSizeDelivering_ = false;
+    bool appSizeSeeded_ = false;
+    int appSizeWidth_ = 0, appSizeHeight_ = 0;
+    bool appStarted() const { return app_ && app_->setupCalled_; }
     bool initialAppBindings_ = false; // runner reserves the initial App slot before its constructor
     bool applyingApp_ = false; // Nested boundaries leave later requests pending.
     std::weak_ptr<App> exitingApp_;
@@ -335,6 +328,7 @@ private:
     bool closeRequested() const { return closeRequested_; }
 
     friend class internal::WindowRequestAccess;
+    friend void internal::syncWindowAppSize(Window&, bool);
 };
 
 namespace internal {
@@ -343,6 +337,10 @@ namespace internal {
 // VideoPlayer to its platform code.
 class WindowRequestAccess {
 public:
+    using HostState = Window::OwnedState;
+    static bool appStarted(const Window& w) { return w.appStarted(); }
+    // Explicit virtual binding for deterministic host tests; no native operation is called.
+    static void bindForTests(Window& w, uint32_t id) { w.binding_ = {}; w.binding_.handle = {id}; w.binding_.bound = id != 0; w.exitDelivered_ = false; w.closeRequested_ = false; w.ctx_.targetsClosed = false; }
     static void setPixelSize(Window& w, int width, int height, WindowGeometryCall call = WindowGeometryCall::GlobalSize) { w.control(WindowControl::PixelSize, width, height, nullptr, call); }
     static void setSize(Window& w, int width, int height, WindowGeometryCall call) { w.control(WindowControl::Size, width, height, nullptr, call); }
     static void setPosition(Window& w, int x, int y, WindowGeometryCall call) { w.control(WindowControl::Position, x, y, nullptr, call); }
@@ -350,9 +348,15 @@ public:
         return ignoreFullscreenGeometry(w.fullscreenPhase(), call, w.ctx_.isMain ? nullptr : &w.title_);
     }
     // Creation identity stays internal; main and secondary IDs are never reused.
-    static uint64_t creationId(const Window& w) { return w.id_; }
+    static uint64_t creationId(const Window& w) { return w.binding_.handle.id; }
+    static WindowBinding& binding(Window& w) { return w.binding_; }
+    static const WindowBinding& binding(const Window& w) { return w.binding_; }
+    static void unbind(Window& w) noexcept { w.binding_.bound = false; w.binding_.handle = {}; w.ctx_.suspended = false; }
+    static void resetForLaunch(Window& w) {
+        w.exitDelivered_ = false; w.closeRequested_ = false; w.ctx_.targetsClosed = false;
+        w.appEventState_.reset(); w.initialAppBindings_ = false; w.appSizeSeeded_ = false;
+    }
     static std::unique_ptr<Window> makeMain() { return std::unique_ptr<Window>(new Window(true)); }
-    static void seedMainAppSize(Window& w) { w.seedMainAppSize(); }
     static bool dispatchActive(const Window& w) { return w.dispatchDepth_ > 0 || w.applyingApp_; }
     static void prepareInitialBindings(Window& w) {
         auto state = std::make_shared<Window::AppEventState>();
@@ -362,11 +366,10 @@ public:
         w.appEventState_ = std::move(state);
         w.initialAppBindings_ = true;
     }
-    static void openMain(Window& w) { w.mainOpen_ = true; }
     static void cancelMainClose(Window& w) noexcept { w.closeRequested_ = false; }
     static void endMain(Window& w) noexcept {
-        if (!w.mainOpen_) { w.ctx_.appEventListeners.clear(); return; }
-        w.mainOpen_ = false;
+        if (!w.isOpen()) { w.ctx_.appEventListeners.clear(); return; }
+        unbind(w);
         w.closeRequested_ = false;
         w.endApp();
     }
@@ -460,7 +463,6 @@ inline bool routeIsFullscreenFromWindow(bool& out) {
 TC_PLATFORMS("macos,windows,linux") std::shared_ptr<Window> createWindow(const WindowSettings& settings = {});
 
 namespace internal {
-uint64_t nextWindowId(); // host-owned, no header-inline mutable state
 CoreEvents& mainCoreEvents();
 Window* mainWindow();
 inline void cancelMainWindowClose() noexcept {
@@ -473,18 +475,7 @@ bool attachMainApp(std::shared_ptr<App> app);
 void detachMainApp();
 }
 
-inline Window::Window() : Window(false) {}
-inline Window::Window(bool mainWindow)
-    : owned_(mainWindow ? nullptr : std::make_unique<OwnedState>()),
-      ctx_(mainWindow ? internal::mainWindowContext() : owned_->context),
-      events_(mainWindow ? internal::mainCoreEvents() : owned_->events),
-      render_(mainWindow ? internal::mainRenderContext() : owned_->render),
-      title_(mainWindow ? mcp::internal::mainWindowTitleStorage() : owned_->title),
-      id_(internal::nextWindowId()) {
-    ctx_.isMain = mainWindow;
-    ctx_.render = &render_;
-    ctx_.coreEvents = &events_;
-}
+// Construction is host compiled, including canonical main and fallback wiring.
 
 namespace internal {
 // Apps currently driving a window (double-attach guard). One set per process,
@@ -591,6 +582,8 @@ inline void Window::applyPendingApp() {
         internal::currentWindowCtx() = prev;
     };
     try {
+        // Refresh before selecting the target or seeding a newly attached App.
+        internal::refreshWindowMetadata(*this);
         // Target restoration can allocate when rebuilding a resized target.
         internal::restoreWindowContext(&ctx_);
         if (initialAppBindings_) {
@@ -638,6 +631,7 @@ inline void Window::applyPendingApp() {
     const bool endOutgoing = outgoing && !internal::appRanCleanup(*outgoing);
     if (outgoing) outgoing->cleanupCalled_ = true;
     app_ = std::move(next);
+    appSizeSeeded_ = false;
     ctx_.rootNode = app_;
     if (!keepMainBindings) {
         ctx_.appEventListeners.swap(*prepared);
@@ -661,6 +655,7 @@ inline void Window::applyPendingApp() {
         steps.run("outgoing App cleanup", [&] { outgoing->cleanup(); });
     }
     outgoing.reset();
+    steps.run("initial App size", [&] { internal::syncWindowAppSize(*this, true); });
     steps.run("swap context restoration", [&] { internal::restoreWindowContext(prev); });
     internal::currentWindowCtx() = prev;
 }
@@ -767,6 +762,7 @@ namespace internal {
 struct WindowDispatchScope {
     Window& w;
     explicit WindowDispatchScope(Window& win) : w(win) {
+        refreshWindowMetadata(w);
         WindowRequestAccess::applyPendingApp(w);
         ++w.dispatchDepth_;
     }
@@ -856,12 +852,6 @@ inline std::shared_ptr<Window> createSecondaryWindow(const WindowSettings&) { re
 inline void Window::closeSecondary() {}
 inline void Window::teardownSecondary() noexcept {}
 inline void Window::setSecondaryTitle(const std::string&) {}
-inline int Window::getSecondaryWidth() const { return 0; }
-inline int Window::getSecondaryHeight() const { return 0; }
-inline bool Window::isSecondaryOccluded() const {
-    if (auto hook = internal::windowOccludedHookForTests()) return hook(*this);
-    return false;
-}
 inline void Window::setSecondarySize(double, double, bool) {}
 inline void Window::setSecondaryPosition(int, int) {}
 inline IVec2 Window::getSecondaryPosition() const { return IVec2(-1, -1); }
@@ -882,7 +872,7 @@ inline void Window::close() {
 }
 inline void Window::teardown() noexcept {
     if (!ctx_.isMain) { teardownSecondary(); return; }
-    if (mainOpen_) internal::WindowRequestAccess::endMain(*this);
+    if (isOpen()) internal::WindowRequestAccess::endMain(*this);
 }
 inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std::string* title, internal::WindowGeometryCall call) {
     // Native controls take an explicit target (the main endpoint or this
@@ -915,7 +905,7 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
             break;
         case internal::WindowControl::PixelSize: {
             if (x <= 0 || y <= 0) return result;
-            const float scale = ctx_.isMain ? sapp_dpi_scale() : ctx_.dpiScale;
+            const float scale = ctx_.dpiScale;
             const float factor = std::isfinite(scale) && scale > 0 ? scale : 1.0f;
 #if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
             bool useFractionalSize = internal::supportsSecondaryWindows();
@@ -1007,10 +997,10 @@ inline bool Window::isFullscreen() const {
     return fullscreenPhase() != internal::WindowFullscreenPhase::Windowed;
 }
 inline int Window::getWidth() const {
-    return ctx_.isMain ? (isOpen() ? internal::framebufferToLogical(sapp_width(), sapp_dpi_scale()) : 0) : getSecondaryWidth();
+    return isOpen() ? internal::framebufferToLogical(ctx_.fbWidth, ctx_.dpiScale) : 0;
 }
 inline int Window::getHeight() const {
-    return ctx_.isMain ? (isOpen() ? internal::framebufferToLogical(sapp_height(), sapp_dpi_scale()) : 0) : getSecondaryHeight();
+    return isOpen() ? internal::framebufferToLogical(ctx_.fbHeight, ctx_.dpiScale) : 0;
 }
 inline void Window::setFps(float fps) {
     // Select only the API context; changing a target needs no GPU switch.
@@ -1027,9 +1017,8 @@ inline void Window::setIndependentFps(float updateFps, float drawFps) {
     trussc::setIndependentFps(updateFps, drawFps);
 }
 inline bool Window::isOccluded() const {
-    if (!isOpen()) return false;
-    if (auto hook = internal::windowOccludedHookForTests()) return hook(*this);
-    return ctx_.isMain ? sapp_window_occluded({0}) : isSecondaryOccluded();
+    const auto& m = binding_.metadata;
+    return isOpen() && m.trust_hidden_signals && (m.iconified || m.occluded);
 }
 
 inline std::shared_ptr<Window> createWindow(const WindowSettings& settings) {

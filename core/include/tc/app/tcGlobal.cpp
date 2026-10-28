@@ -53,20 +53,6 @@
 
 namespace trussc {
 
-// A replacement main App needs the same size seed as the initial App before
-// its first setup/input. This is a direct App-only seed, like startup/reload;
-// it does not synthesize a native resize or change main-loop scheduling.
-void Window::seedMainAppSize() {
-    auto app = app_;
-    if (!app || app->setupCalled_ || !sapp_isvalid()) return;
-    const float dpi = internal::appSizeDpi(sapp_dpi_scale());
-    const int width = internal::framebufferToLogical(sapp_width(), dpi), height = internal::framebufferToLogical(sapp_height(), dpi);
-    if (app->getWidth() == width && app->getHeight() == height) return;
-    internal::EntryStackGuard guard(internal::AppEntry::Event, "windowResized()");
-    internal::WindowCallbackTimeScope callbackTime;
-    app->handleWindowResized(width, height);
-}
-
 namespace internal {
 BuildOutputLoss& buildOutputLoss() { static BuildOutputLoss loss; return loss; }
 void BuildOutputLoss::record(uint64_t omitted) {
@@ -182,15 +168,12 @@ void setup() {
     // swapchain color/depth format + sample count). Pipelines build lazily on first use.
     internal::currentWindowContext().swapchainTarget.resources().context = sgl_default_context();
     sgl_tc_context_target_owned(sgl_default_context());
-#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
-    internal::mainWindowContext().activateNative = [](void*) { sapp_tc_gl_make_current({0}); };
-#endif
     internal::currentWindowContext().swapchainTarget.isFbo = false;
     auto& target = internal::currentWindowContext().swapchainTarget;
     target.colorFormat = sgdesc.environment.defaults.color_format;
     target.sampleCount = sgdesc.environment.defaults.sample_count;
-    target.width = sapp_width();
-    target.height = sapp_height();
+    target.width = internal::currentWindowContext().fbWidth;
+    target.height = internal::currentWindowContext().fbHeight;
 
     // Initialize bitmap font sampler + pipeline. The atlas TEXTURE itself is
     // allocated lazily on first drawBitmapString call (see ensureFontAtlas in
@@ -438,13 +421,9 @@ WindowCaptureSource windowCaptureSource() {
     // A cleared frame source must fail rather than acquire another window's
     // or the next frame's drawable. Also scrub the copied swapchain alias.
     source.swapchain.metal.current_drawable = source.drawable;
-#elif defined(SOKOL_D3D11)
-    // A missing secondary source must fail capture, never read the main window.
-    if (window.isMain)
-        source.swapchain = sglue_swapchain();
 #endif
-    source.width = window.isMain ? sapp_width() : window.fbWidth;
-    source.height = window.isMain ? sapp_height() : window.fbHeight;
+    source.width = window.fbWidth;
+    source.height = window.fbHeight;
     return source;
 }
 bool finishWindowCaptureSource(RenderTarget&) {
@@ -990,13 +969,8 @@ struct WindowStateLifetimeMark {
 // The main window's state container. Non-inline so a hot-reload guest binds
 // to the host's instance (same pattern as events()/getDefaultContext()).
 WindowContext& mainWindowContext() {
-    static WindowContext ctx;
-    // Destroyed before ctx, like LoggerLifetimeMark below.
-    static WindowStateLifetimeMark lifetimeMark(&ctx);
-    (void)lifetimeMark;
-    return ctx;
+    return mainWindow()->context();
 }
-
 // Open-window registry (see tcWindow.h). Non-inline for the same host/guest
 // reason as mainWindowContext(). Main thread only.
 static std::vector<Window*>& windowRegistryStorage() {
@@ -1013,22 +987,10 @@ void unregisterWindow(Window* w) {
     auto& list = windowRegistryStorage();
     list.erase(std::remove(list.begin(), list.end(), w), list.end());
 }
-// All mutable window identity/ownership state lives in the framework host.
-uint64_t nextWindowId() {
-    static uint64_t lastId = 0;
-    if (lastId == UINT64_MAX) throw std::overflow_error("Window identity exhausted");
-    return ++lastId;
-}
-CoreEvents& mainCoreEvents() {
-    static CoreEvents instance;
-    return instance;
-}
+CoreEvents& mainCoreEvents() { return mainWindow()->events(); }
+RenderContext& mainRenderContext() { return mainWindow()->render_; }
 static std::unique_ptr<Window>& mainWindowOwner() {
     // Initialize dependencies before the owner so they outlive its destructor.
-    mainWindowContext();
-    mainCoreEvents();
-    mainRenderContext();
-    mcp::internal::mainWindowTitleStorage();
     getLogger();
     windowRegistryStorage();
     attachedApps();
@@ -1040,27 +1002,32 @@ static std::unique_ptr<Window>& mainWindowOwner() {
     mcp::internal::statusImageRegistry();
     mcp::internal::deferredResponsesMutex();
     mcp::internal::deferredResponses();
-    static std::unique_ptr<Window> owner;
+    static std::unique_ptr<Window> owner = WindowRequestAccess::makeMain();
+    static WindowStateLifetimeMark lifetimeMark(&owner->context());
+    (void)lifetimeMark;
     return owner;
 }
 Window* mainWindow() { return mainWindowOwner().get(); }
 void createMainWindow(const WindowSettings& settings) {
     destroyMainWindow();
-    auto* previous = currentWindowCtx();
-    currentWindowCtx() = nullptr;
-    try {
-        auto window = WindowRequestAccess::makeMain();
-        window->title_ = mcp::internal::mainWindowTitle(settings.title);
-        mainWindowOwner() = std::move(window);
-    } catch (...) { currentWindowCtx() = previous; throw; }
-    currentWindowCtx() = previous;
+    auto& window = *mainWindow();
+    WindowRequestAccess::resetForLaunch(window);
+    WindowRequestAccess::binding(window) = {};
+    window.ctx_.fbWidth = window.ctx_.fbHeight = 0;
+    window.ctx_.dpiScale = 1;
+    window.ctx_.suspended = false;
+    window.ctx_.acquireSwapchain = nullptr;
+    window.ctx_.acquireSwapchainUser = nullptr;
+    window.ctx_.activateNative = nullptr;
+    mcp::internal::mainWindowTitle(settings.title);
 }
-MainWindowDispatchScope::MainWindowDispatchScope(bool seedSize) : window(mainWindow()) {
+MainWindowDispatchScope::MainWindowDispatchScope() : window(mainWindow()) {
     if (!window) return;
+    // Single-window ports can change native focus without emitting an event.
+    refreshMainWindowMetadata();
     WindowRequestAccess::applyPendingApp(*window);
     ++window->dispatchDepth_;
-    if (!seedSize) return;
-    try { WindowRequestAccess::seedMainAppSize(*window); }
+    try { syncWindowAppSize(*window, true); }
     catch (...) { --window->dispatchDepth_; throw; }
 }
 MainWindowDispatchScope::~MainWindowDispatchScope() {
@@ -1077,22 +1044,12 @@ void prepareMainAppBindings() {
     if (auto* window = mainWindow()) WindowRequestAccess::prepareInitialBindings(*window);
 }
 void openMainWindow() {
-    if (auto* window = mainWindow()) {
-        window->ctx_.dpiScale = sapp_dpi_scale();
-        WindowRequestAccess::openMain(*window);
-    }
+    bindSingleWindowMain();
+    refreshMainWindowMetadata();
 }
 std::shared_ptr<App> mainApp() {
     auto* window = mainWindow();
     return window ? window->getApp() : nullptr;
-}
-void resizeMainApp(int width, int height) {
-    // App code: run inside the dispatch scope, with the receiver retained, so a
-    // setApp()/reload() requested by windowResized() waits for the boundary
-    // even if native events are pumped inside it.
-    MainWindowDispatchScope dispatch(false);
-    WindowCallbackTimeScope callbackTime;
-    if (auto app = mainApp()) app->handleWindowResized(width, height);
 }
 bool attachMainApp(std::shared_ptr<App> app) {
     auto* window = mainWindow();
@@ -1110,7 +1067,7 @@ void detachMainApp() {
 void destroyMainWindow() noexcept {
     auto& owner = mainWindowOwner();
     if (owner) WindowRequestAccess::endMain(*owner);
-    owner.reset();
+    if (owner) WindowRequestAccess::unbind(*owner);
 }
 
 WindowFullscreenHook& windowFullscreenHookForTests() {
@@ -1122,10 +1079,6 @@ WindowControlHook& windowControlHookForTests() {
     return hook;
 }
 
-WindowOccludedHook& windowOccludedHookForTests() {
-    static WindowOccludedHook hook = nullptr;
-    return hook;
-}
 std::vector<Window*> openWindows() {
     std::vector<Window*> out;
     for (Window* w : windowRegistryStorage()) {
@@ -1141,6 +1094,7 @@ std::vector<Window*> openWindows() {
 // Do not initialize either storage from a destructor under allocation failure.
 namespace {
 template<class Scrub> void scrubLightingContexts(Scrub scrub) noexcept {
+    if (auto* ctx = nonWindowContextIfInitialized()) scrub(*ctx);
     if (windowStateDestroyed) return;
     if (initializedMainWindowContext) scrub(*initializedMainWindowContext);
     if (initializedWindowRegistry) {
@@ -1190,16 +1144,7 @@ void resetNodeRefsForUnload() {
 }
 } // namespace internal
 
-CoreEvents& events() {
-    // The CoreEvents instance is owned per window context. The main window's
-    // is wired lazily here (preserving the pre-context construction timing);
-    // Phase 1 pre-wires the pointer when constructing secondary contexts.
-    auto& ctx = internal::currentWindowContext();
-    if (!ctx.coreEvents) {
-        ctx.coreEvents = &internal::mainCoreEvents();
-    }
-    return *ctx.coreEvents;
-}
+CoreEvents& events() { return *internal::currentWindowContext().coreEvents; }
 
 // ---------------------------------------------------------------------------
 // Elapsed-time clock (#229) — see tcTime.h for the design.
@@ -1417,11 +1362,6 @@ float appPointerScale(float dpi) {
     return std::isfinite(scale) ? scale : 1.0f;
 }
 
-void syncSecondaryAppSize(Window& window, int width, int height) {
-    const auto size = framebufferResizeArgs(width, height, appSizeDpi(window.context().dpiScale));
-    window.syncRootSize(float(size.width), float(size.height));
-}
-
 ResizeEventArgs framebufferResizeArgs(int width, int height, float dpi) {
     ResizeEventArgs args;
     args.width = framebufferToLogical(width, dpi);
@@ -1455,6 +1395,18 @@ void observeWindowVisibility(WindowContext& ctx, sapp_event_type type) {
 #if defined(__ANDROID__)
     if (type == SAPP_EVENTTYPE_UNFOCUSED) ctx.visibilityPaused = true;
 #endif
+    if constexpr (supportsSecondaryWindows()) {
+        for (auto* w : openWindows()) if (&w->context() == &ctx) {
+            refreshWindowMetadata(*w);
+            const auto& m = WindowRequestAccess::binding(*w).metadata;
+            ctx.suspended = m.trust_hidden_signals && (m.iconified || m.occluded);
+            if (ctx.suspended && occlusionPausesUpdate(ctx)) {
+                ctx.visibilityPaused = true;
+                ctx.mainUpdateCallTimeInitialized = false;
+            }
+            return;
+        }
+    }
     if (type == SAPP_EVENTTYPE_SUSPENDED || type == SAPP_EVENTTYPE_ICONIFIED) {
         ctx.suspended = true;
         if (occlusionPausesUpdate(ctx) || nativeSuspensionPausesUpdate()) {
@@ -1482,7 +1434,8 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     ctx.frameUptime = now - clockOrigin();
     ctx.frameUptimeSampled = true;
     auto* window = currentWindow();
-    const bool hidden = nativeDrawGated || ctx.suspended || (window && window->isOccluded());
+    if (window) ctx.suspended = window->isOccluded();
+    const bool hidden = nativeDrawGated || ctx.suspended;
     // Preserve the existing capture override even while main is hidden.
     const bool capturePending = forceDraw || !ctx.pendingScreenshotPaths.empty()
         || !ctx.asyncScreenshots.pending.empty();
@@ -2877,13 +2830,10 @@ void prepareWindowTarget() {
     if (window.targetsClosed) return;
     auto& target = window.swapchainTarget;
     auto& resources = target.resources();
-    const auto native = window.isMain ? sglue_environment().defaults : sg_environment_defaults{};
-    const auto format = window.isMain
-        ? SwapchainTargetFormat{native.color_format, native.sample_count}
-        : swapchainTargetFormat(window);
-    const int width = window.isMain ? sapp_width() : window.fbWidth;
-    const int height = window.isMain ? sapp_height() : window.fbHeight;
-    const auto depth = window.isMain ? native.depth_format : target.depthFormat;
+    const auto format = swapchainTargetFormat(window);
+    const int width = window.fbWidth;
+    const int height = window.fbHeight;
+    const auto depth = target.depthFormat;
     const bool changed = resources.width && (resources.width != width || resources.height != height ||
         resources.color != format.colorFormat || resources.samples != format.sampleCount || resources.depth != depth);
     if (changed && hasRecordedWork(target)) {

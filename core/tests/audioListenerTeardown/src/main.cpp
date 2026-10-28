@@ -233,8 +233,8 @@ struct WindowApp : App {
 // don't), and is cleared before ~Window() would close() it.
 static int g_nativeStandIn = 0;
 struct OpenWindow : Window {
-    OpenWindow() { native_ = &g_nativeStandIn; }
-    ~OpenWindow() { native_ = nullptr; }
+    OpenWindow() { native_ = &g_nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
+    ~OpenWindow() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); }
 };
 
 // One tick of a secondary window, in its own context (as the platform glue
@@ -494,7 +494,7 @@ TC_CORE_TEST_MAIN() {
         sub->cleanup();
         first.setApp(nullptr);
         internal::applyPendingAppForTests(first);   // the frame boundary
-        first.native_ = nullptr;
+        first.native_ = nullptr; internal::WindowRequestAccess::unbind(first);
         const int callsAtClose = sub->audioCalls.load();
         this_thread::sleep_for(chrono::milliseconds(50));
         check("after the close, its audioOut() is no longer called",

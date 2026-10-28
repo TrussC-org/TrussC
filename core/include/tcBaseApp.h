@@ -246,7 +246,8 @@ private:
         // The main App's setup() has now made its code grant (windowed or
         // headless: both runners register this root before setup). Secondary apps
         // and hot reload guests must not repeat process startup.
-        if (internal::mainWindowContext().rootNode.lock().get() == this)
+        const auto& context = internal::currentWindowContext();
+        if (context.isMain && context.rootNode.lock().get() == this)
             mcp::internal::initializeMcp();
     }
 

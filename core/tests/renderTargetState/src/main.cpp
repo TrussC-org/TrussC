@@ -52,8 +52,8 @@ struct GpuWarningChecks {
 EventListener gpuWarningLog, resizeWarningLog;
 
 void checkTargetOwnership() {
-    internal::WindowContext firstWindow;
-    internal::WindowContext secondWindow;
+    internal::WindowRequestAccess::HostState firstWindowState; internal::WindowContext& firstWindow = firstWindowState.context;
+    internal::WindowRequestAccess::HostState secondWindowState; internal::WindowContext& secondWindow = secondWindowState.context;
     internal::RenderTarget firstFbo;
     internal::RenderTarget secondFbo;
     internal::RenderTargetResources pooled;
@@ -126,7 +126,7 @@ void checkLogicalHandoff() {
 
 }
 void checkCpuCoordinates() {
-    internal::WindowContext window;
+    internal::WindowRequestAccess::HostState windowState; internal::WindowContext& window = windowState.context;
     window.isMain = false; window.fbWidth = 512; window.fbHeight = 384;
     auto* previous = internal::currentWindowCtx();
     internal::currentWindowCtx() = &window;

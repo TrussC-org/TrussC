@@ -36,8 +36,8 @@ bool record(Window& window, internal::WindowControl op, int x, int y, const std:
 }
 struct Secondary : Window {
     int standIn = 0;
-    Secondary() { native_ = &standIn; }
-    ~Secondary() { native_ = nullptr; internal::WindowRequestAccess::endApp(*this); }
+    Secondary() { native_ = &standIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
+    ~Secondary() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); internal::WindowRequestAccess::endApp(*this); }
 };
 struct Probe : App {
     void setup() override { setWindowPosition(-1920, 0); setFullscreen(true); setWindowTitle("Secondary"); }
@@ -186,7 +186,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     }
     auto* previous = internal::currentWindowCtx();
     auto mainWindow = internal::WindowRequestAccess::makeMain();
-    internal::WindowRequestAccess::openMain(*mainWindow);
+    internal::WindowRequestAccess::bindForTests(*mainWindow, 101);
     Secondary secondary;
     auto app = std::make_shared<Probe>();
     secondary.setApp(app);

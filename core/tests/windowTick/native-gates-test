@@ -94,10 +94,10 @@ helpers = '\n'.join(body(shared, 'static inline bool '+name+'(', 'sokol_window_n
 # admission on each desktop OS. These are source checks, not native adapter runs.
 for adapter in ('mac/tcWindowMac.mm', 'win/tcWindowWin.cpp', 'linux/tcWindowLinux.cpp'):
     text = body(read(root/'core/platform'/adapter), 'void windowTickImpl(', adapter)
-    marker = 'if (sapp_window_occluded(swin)) {'
+    marker = 'if (win->isOccluded()) {'
     gate = body(text, marker, adapter)
     if not ('false, nullptr, true)' in gate and 'internal::runWindowTick(' in gate
-            and position(text, marker, adapter) < position(text, 'if (fbw <= 0', adapter)):
+            and position(text, marker, adapter) < position(text, 'if (ctx.fbWidth <= 0', adapter)):
         fail(f'{adapter}: update-only policy must precede framebuffer admission')
 print('native-gates: desktop adapters dispatch gated policy before size admission: PASS', flush=True)
 
@@ -121,6 +121,7 @@ struct _sapp_tc_window_t {
     bool iconified=false, occluded=false, draw_while_hidden=false, trust_hidden_signals=true, is_main=false;
     bool ready=true, in_tick=false, skip_present=false, cancel_tick=false;
     bool from_modal=false, frame_wait=false, credit_held=false, waitable_ready=true;
+    bool resize_pending=false;
     unsigned win_id=1, frame_count=0;
     int drawable=1, swap_interval=1;
     double earliest_next=0, last_present=0, frame_duration=0, refresh_period=.017;
@@ -289,7 +290,7 @@ void run() {
 }
 namespace win {
 struct { struct { bool quit_ordered=false, device_lost_notified=false; } app; } _sapp_tc;
-int consulted, updates, dimensions, tests, presents;
+int consulted, updates, dimensions, tests, presents, resizes;
 int probe_result, present_result;
 bool changed, resize_ok, skip_in_callback, cancel_in_callback, loss_in_callback, reenter;
 Native* target;
@@ -303,7 +304,7 @@ bool _sapp_tc_d3d11_check_device_loss(HRESULT hr) {
     return hr<0;
 }
 bool _sapp_tc_win32_update_dimensions(Native*) { ++dimensions; return changed; }
-bool _sapp_tc_d3d11_resize(Native*) { return resize_ok; }
+bool _sapp_tc_d3d11_resize(Native*) { ++resizes; return resize_ok; }
 void _sapp_tc_win32_app_event(Native* w,int type) {
     events.push_back(type);
     if (reenter) {
@@ -337,7 +338,7 @@ int size(Native* w,bool minimized) {
 void reset(Native& w) {
     static SwapChain swap;
     w=Native{}; target=&w; w.swap_chain=&swap; w.desc={callback,&w};
-    _sapp_tc.app={}; consulted=updates=dimensions=tests=presents=0;
+    _sapp_tc.app={}; consulted=updates=dimensions=tests=presents=resizes=0;
     probe_result=present_result=0; changed=false; resize_ok=true;
     skip_in_callback=cancel_in_callback=loss_in_callback=reenter=false; events.clear(); callback_events.clear();
 }
@@ -351,7 +352,7 @@ void run() {
         w.frame_wait=true; reenter=true;
         const bool hidden=trust && (iconic || obscured), admitted=allow || !hidden;
         _sapp_tc_win32_tick(&w);
-        check("Win32 common hidden admission / policy for either role", consulted==1 && updates==int(!hidden || role) && dimensions==int(admitted) && presents==int(admitted));
+        check("Win32 common hidden admission / policy for either role", consulted==1 && updates==int(!hidden || role) && dimensions==1 && presents==int(admitted));
         check("Win32 trust gates occlusion probe", tests==int(trust && obscured));
         check("Win32 completed tick releases guard, consumes skip, advances frame", !w.in_tick && !w.skip_present && w.frame_count==1);
     }
@@ -373,6 +374,23 @@ void run() {
         size(&w,false); expect({});
     }
     for (bool role : {false,true}) {
+        reset(w); w.is_main=role; w.win_id=role?1:2;
+        w.occluded=true; probe_result=DXGI_STATUS_OCCLUDED; changed=true;
+        _sapp_tc_win32_tick(&w);
+        check("Win32 covered size samples and notifies without resizing drawable", dimensions==1 && consulted==1 && events==std::vector<int>{SAPP_EVENTTYPE_RESIZED} && w.resize_pending && resizes==0 && presents==0);
+        changed=false; events.clear(); _sapp_tc_win32_tick(&w);
+        check("Win32 unchanged hidden poll retains pending drawable resize", dimensions==2 && w.resize_pending && resizes==0 && events.empty());
+        changed=true; _sapp_tc_win32_tick(&w);
+        check("Win32 second covered revision still notifies without GPU resize", dimensions==3 && w.resize_pending && resizes==0 && events==std::vector<int>{SAPP_EVENTTYPE_RESIZED});
+        changed=false; probe_result=0; events.clear(); _sapp_tc_win32_tick(&w);
+        check("Win32 uncover resizes drawable despite unchanged latest sample", resizes==1 && !w.resize_pending && presents==1 && events==std::vector<int>{SAPP_EVENTTYPE_RESUMED});
+        _sapp_tc_win32_tick(&w);
+        check("Win32 deferred drawable resize consumed once", resizes==1 && presents==2);
+        reset(w); w.resize_pending=true; w.from_modal=true; changed=true;
+        _sapp_tc_win32_tick(&w);
+        check("Win32 modal tick retains existing dimension/resize deferral", dimensions==0 && resizes==0 && w.resize_pending && events.empty());
+        w.from_modal=false; _sapp_tc_win32_tick(&w);
+        check("Win32 ordinary tick samples and consumes deferred drawable resize", dimensions==1 && resizes==1 && !w.resize_pending && events==std::vector<int>{SAPP_EVENTTYPE_RESIZED});
         // Skip is per-window and consumed by a completed hidden tick as well.
         for (bool hidden : {false,true}) for (bool from_callback : {false,true}) {
             reset(w); w.is_main=role; w.win_id=role?1:2; w.iconified=hidden;
@@ -418,21 +436,28 @@ HRESULT SwapChain::Present(UINT,UINT flags) {
     ++win::presents; return win::present_result;
 }
 namespace x11 {
+Native* live = nullptr;
+Native* _sapp_tc_lookup(sapp_window h) { return live && live->win_id == h.id ? live : nullptr; }
 struct { double refresh_period=.017; int WM_STATE=1; } _sapp_tc;
-int consulted, updates, acquired, presents, state;
+int consulted, updates, acquired, presents, state, polls;
+bool changed=false, closeOnResize=false, closeOnTick=false, reenter=false;
+static void _sapp_tc_x11_tick(Native*);
 std::vector<int> events;
 double _sapp_tc_now() { return 10; }
 void _sapp_tc_timing_update(_sapp_tc_timing_t*) {}
 struct _sapp_tc_x11_surface_scope {};
 void _sapp_tc_x11_pace(Native* w,double seconds) { w->earliest_next=10+seconds; }
 void _sapp_tc_x11_pace_periodic(Native* w,double seconds) { w->earliest_next=10+seconds; }
-bool _sapp_tc_x11_update_dimensions(Native*) { return false; }
+bool _sapp_tc_x11_update_dimensions(Native*) { ++polls; return changed; }
 bool _sapp_tc_x11_make_current(Native*) { ++acquired; return true; }
 void _sapp_tc_x11_swap(Native*) { ++presents; }
-void _sapp_tc_x11_app_event(Native*,int type) { events.push_back(type); }
+void _sapp_tc_x11_app_event(Native*,int type) { events.push_back(type); if (closeOnResize) live=nullptr; }
 int _sapp_tc_x11_get_window_state(Native*) { return state; }
 void callback(sapp_window,void* user) {
     ++consulted; auto* w=static_cast<Native*>(user);
+    check("X11 callback runs inside native tick guard", w->in_tick);
+    if (reenter) { reenter=false; _sapp_tc_x11_tick(w); }
+    if (closeOnTick) live=nullptr;
     if (!(_sapp_tc_native_hidden(w) && occlusionPausesUpdate({w->is_main}))) ++updates;
 }
 ''' + extract('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {') + r'''
@@ -451,19 +476,36 @@ void run() {
     int before=failures, count=checks;
     for (bool role : {false,true}) for (bool trust : {false,true})
     for (bool allow : {false,true}) for (bool iconic : {false,true}) for (bool obscured : {false,true}) {
-        Native w; w.is_main=role; w.win_id=role?1:2; w.trust_hidden_signals=trust; w.draw_while_hidden=allow;
+        Native w; live=&w; w.is_main=role; w.win_id=role?1:2; w.trust_hidden_signals=trust; w.draw_while_hidden=allow;
         w.iconified=iconic; w.occluded=obscured; w.desc={callback,&w};
-        consulted=updates=acquired=presents=0;
+        consulted=updates=acquired=presents=polls=0;
         bool hidden=trust && (iconic || obscured), admitted=allow || !hidden;
         _sapp_tc_x11_tick(&w);
         bool present=admitted;
 #if defined(SOKOL_GLCORE)
         present &= !(trust && iconic); // GLX keeps its minimized swap veto.
 #endif
+        check("X11 hidden and visible ticks poll metadata once and release guard", polls==1 && !w.in_tick);
         check("X11 common hidden admission / policy for either role", consulted==1 && updates==int(!hidden || role) && acquired==int(admitted) && presents==int(present) && w.frame_count==1);
     }
+    for (bool role : {false,true}) for (bool hidden : {false,true}) {
+        Native w; live=&w; w.is_main=role; w.occluded=hidden; w.desc={callback,&w};
+        consulted=updates=acquired=presents=polls=0; reenter=true;
+        _sapp_tc_x11_tick(&w);
+        check("X11 metadata/tick reentry is rejected for both visibility states", consulted==1 && polls==1 && !w.in_tick);
+        w.frame_count=0; consulted=updates=acquired=presents=polls=0;
+        changed=true; closeOnResize=true;
+        _sapp_tc_x11_tick(&w);
+        check("X11 closed metadata receiver admits no tick or drawable", consulted==0 && acquired==0 && presents==0 && polls==1);
+        changed=closeOnResize=false;
+        Native closing; live=&closing; closing.is_main=role; closing.occluded=hidden; closing.desc={callback,&closing};
+        consulted=updates=acquired=presents=polls=0; closeOnTick=true;
+        _sapp_tc_x11_tick(&closing);
+        check("X11 closed callback receiver is not presented or counted", consulted==1 && presents==0 && closing.frame_count==0);
+        closeOnTick=false;
+    }
     for (bool role : {false,true}) for (bool trust : {false,true}) {
-        Native w; w.is_main=role; w.win_id=role?1:2; w.trust_hidden_signals=trust; events.clear();
+        Native w; live=&w; w.is_main=role; w.win_id=role?1:2; w.trust_hidden_signals=trust; events.clear();
         auto expect=[&](std::initializer_list<int> expected,bool resumed=false) {
             check("X11 effective visibility event sequence", events==(trust?std::vector<int>(expected):std::vector<int>{}));
             check("X11 deadline clears only on effective resume", w.earliest_next==(trust && resumed?0:42));

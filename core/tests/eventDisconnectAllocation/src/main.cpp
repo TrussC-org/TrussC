@@ -141,13 +141,13 @@ template<class T> void registration() {
 
 static std::uint64_t nativeStandIn = 0;
 struct TestWindow : Window {
-    TestWindow() { native_ = &nativeStandIn; }
+    TestWindow() { native_ = &nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
     void finish() noexcept {
         if (!native_) return;
         internal::TeardownSteps steps;
         std::optional<internal::EntryStackGuard> guard;
         steps.run("exit entry guard", [&] { guard.emplace(internal::AppEntry::Exit); });
-        native_ = nullptr;
+        native_ = nullptr; internal::WindowRequestAccess::unbind(*this);
         ctx_.targetsClosed = true;
         ctx_.teardownTargets();
         steps.run("stand-in GPU release", [&] { ctx_.swapchainTarget.resources().release(); });
@@ -455,7 +455,7 @@ void mcpOwnerReentry() {
 void mainBoundaryValidation() {
     internal::createMainWindow(WindowSettings{});
     auto* win = internal::mainWindow();
-    internal::WindowRequestAccess::openMain(*win);
+    internal::WindowRequestAccess::bindForTests(*win, 101);
     auto current = std::make_shared<TestApp>(), candidate = std::make_shared<TestApp>();
     check("main boundary: initial shared attach", internal::attachMainApp(current));
     int releases = 0;
@@ -472,7 +472,7 @@ void mainReentrantAttachments() {
     for (int action = 0; action < 2; ++action) {
         internal::createMainWindow(WindowSettings{});
         auto* win = internal::mainWindow();
-        internal::WindowRequestAccess::openMain(*win);
+        internal::WindowRequestAccess::bindForTests(*win, 101);
         auto current = std::make_shared<TestApp>(), candidate = std::make_shared<TestApp>();
         check("main recheck: initial shared attach", internal::attachMainApp(current));
         TestWindow other;

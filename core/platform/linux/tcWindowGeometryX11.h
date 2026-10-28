@@ -1,4 +1,5 @@
 #pragma once
+#include "../../include/tc/app/internal/tcWindowGeometryState.h"
 
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
@@ -9,12 +10,7 @@
 // #219 geometry, shared by main GLX, main X11/EGL and secondary windows.
 // Explicit native handles and per-window state; no GLX or EGL ownership.
 namespace trussc::internal {
-struct X11GeometryState {
-    // Last requested logical content size, independent of WM auto-maximization.
-    double requestedWidth = 0;
-    double requestedHeight = 0;
-    bool pixelSize = false; // pixel requests retain fractions until native conversion
-};
+using X11GeometryState = WindowGeometryState;
 
 inline void x11State(Display* dpy, ::Window window, bool add,
                      const char* state1, const char* state2 = nullptr) {

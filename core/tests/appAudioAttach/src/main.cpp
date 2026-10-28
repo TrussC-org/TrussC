@@ -161,8 +161,8 @@ struct HeadlessApp : SetupAllocApp {
 // don't), and is cleared before ~Window() would close() it.
 static int g_nativeStandIn = 0;
 struct OpenWindow : Window {
-    OpenWindow() { native_ = &g_nativeStandIn; }
-    ~OpenWindow() { native_ = nullptr; }
+    OpenWindow() { native_ = &g_nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
+    ~OpenWindow() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); }
 };
 
 // One tick of a secondary window, in its own context (as the platform glue
@@ -285,7 +285,7 @@ TC_CORE_TEST_MAIN() {
         // and another window refuses it (an App runs once).
         win.setApp(nullptr);
         internal::applyPendingAppForTests(win);   // the frame boundary
-        win.native_ = nullptr;
+        win.native_ = nullptr; internal::WindowRequestAccess::unbind(win);
         check("window App: setApp(nullptr) removes both hooks",
               engine.audioOut.listenerCount() == outBase && engine.audioIn.listenerCount() == inBase,
               hooks(engine.audioOut.listenerCount()));
@@ -295,7 +295,7 @@ TC_CORE_TEST_MAIN() {
         check("window App: another window refuses it, no hook, no second setup()",
               other.getApp() == nullptr && engine.audioOut.listenerCount() == outBase &&
               p.setups.load() == 1, hooks(engine.audioOut.listenerCount()));
-        other.native_ = nullptr;
+        other.native_ = nullptr; internal::WindowRequestAccess::unbind(other);
     }
 
     // --- order: the App's hooks before default listeners setup() subscribed -----------

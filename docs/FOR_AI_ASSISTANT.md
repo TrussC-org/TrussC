@@ -4670,7 +4670,7 @@ IVec2 Window::getPosition() const [macos,windows,linux]  // This window's curren
 const std::string & Window::getTitle() const  // Returns the title stored for this window.
 int Window::getWidth() const  // Returns this window's content width.
 bool Window::isFullscreen() const  // Returns whether fullscreen currently blocks this window's size and position requests.
-bool Window::isOccluded() const  // Returns whether the operating system reports this window as not visible.
+bool Window::isOccluded() const  // Returns whether this window is minimized or fully hidden according to trusted operating system observations.
 bool Window::isOpen() const  // Returns whether this window is open.
 void Window::setApp(std::shared_ptr<App> app)  // Requests an App attachment or replacement for this window.
 void Window::setClearColor(const Color & c)  // Sets this window's background clear color.

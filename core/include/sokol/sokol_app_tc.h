@@ -2215,6 +2215,9 @@ typedef struct sapp_desc {
     // TrussC internal launch data: +1 draws while hidden, -1 pauses drawing.
     // Zero preserves legacy sapp launch behavior (draw while hidden).
     int _tc_draw_while_hidden;
+    // Host binding runs after native metadata initialization, before callback readiness.
+    bool (*_tc_bind_cb)(uint32_t id, void* user);
+    void* _tc_bind_user;
 } sapp_desc;
 
 /* HTML5 specific: request and response structs for
@@ -2444,8 +2447,19 @@ typedef struct sapp_window_desc {
     void (*event_cb)(const sapp_event* ev, sapp_window win, void* user);
     void (*close_cb)(sapp_window win, void* user);  /* user closed the window; call sapp_destroy_window() to accept */
     void* user_data;
+    bool (*bind_cb)(uint32_t id, void* user);
 } sapp_window_desc;
 
+// Private host metadata boundary. Reading it never acquires a drawable.
+typedef struct sapp_tc_window_metadata {
+    int fb_width, fb_height, width, height, sample_count;
+    float dpi_scale;
+    sapp_pixel_format color_format, depth_format;
+    bool trust_hidden_signals, iconified, occluded, drawable_available;
+    double source_interval;
+    bool reliable_button_bits;
+} sapp_tc_window_metadata;
+SOKOL_APP_API_DECL bool sapp_tc_window_read_metadata(sapp_window win, sapp_tc_window_metadata* out);
 SOKOL_APP_API_DECL sapp_window sapp_create_window(const sapp_window_desc* desc);
 SOKOL_APP_API_DECL void sapp_destroy_window(sapp_window win);
 /* ask for the window to be closed, like a click on its close button: sets a
@@ -3737,6 +3751,10 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
     w->delegate = del;
     w->window.delegate = del;
     _sapp_tc.windows[slot] = w;
+    if (w->desc.bind_cb && !w->desc.bind_cb(w->win_id, w->desc.user_data)) {
+        _sapp_tc.windows[slot] = 0;
+        return _sapp_tc_mac_fail(w, "Host window binding failed");
+    }
     w->ready = true;
     [w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
     if (d->fullscreen) _sapp_tc_request_fullscreen(w, true);
@@ -6422,6 +6440,7 @@ typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     WCHAR surrogate;            /* WM_CHAR high-surrogate accumulator */
     bool from_modal;           /* source shim data, never a window role */
     bool cancel_tick;          /* client aborted init before its first frame */
+    bool resize_pending;       /* sampled extent awaits admitted drawable resizing */
     LONG_PTR stored_style, stored_ex_style;
     RECT stored_window_rect;    /* windowed rect for fullscreen restore */
 } _sapp_tc_window_t;
@@ -7430,18 +7449,23 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
     w->frame_duration = w->timing.smooth_dt;
     _sapp_tc_win32_pace(w, w->refresh_period * (double)w->swap_interval);
 
-    // Probe, hidden admission, dimensions: RESUMED precedes RESIZED.
+    // Probe, dimensions, drawable admission: RESUMED precedes RESIZED.
     if (_sapp_tc_native_occluded(w) && !_sapp_tc.app.device_lost_notified) {
         const HRESULT hr = w->swap_chain->Present(0, DXGI_PRESENT_TEST);
         if (_sapp_tc_d3d11_check_device_loss(hr)) return;
         _sapp_tc_win32_observe_occlusion(w, hr == DXGI_STATUS_OCCLUDED);
     }
     const bool admitted = w->draw_while_hidden || !_sapp_tc_native_hidden(w);
-    if (admitted && !_sapp_tc.app.device_lost_notified && !w->from_modal &&
-        _sapp_tc_win32_update_dimensions(w)) {
+    // Sampling must progress while covered, without touching GPU resources.
+    // Retain the resize until drawing is admitted, even if later polls agree.
+    const bool dimensions_changed = !_sapp_tc.app.device_lost_notified && !w->from_modal &&
+        _sapp_tc_win32_update_dimensions(w);
+    if (dimensions_changed) w->resize_pending = true;
+    if (admitted && !_sapp_tc.app.device_lost_notified && !w->from_modal && w->resize_pending) {
         if (!_sapp_tc_d3d11_resize(w)) return;
-        _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESIZED);
+        w->resize_pending = false;
     }
+    if (dimensions_changed) _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESIZED);
     // Hidden ticks retain the existing client's update policy, under the same
     // reentry guard as visible ticks. Native drawing/presentation is admitted above.
     if (w->desc.tick_cb) {
@@ -7943,6 +7967,9 @@ static _sapp_tc_window_t* _sapp_tc_win32_create_window(const _sapp_tc_native_des
     }
     if (d->clear_on_create) _sapp_tc.app.device_context->ClearRenderTargetView(w->rtv, d->clear_color);
     _sapp_tc.windows[slot] = w;
+    if (w->desc.bind_cb && !w->desc.bind_cb(w->win_id, w->desc.user_data)) {
+        _sapp_tc_win32_unwind(w); return 0;
+    }
     w->ready = true;
     ShowWindow(w->hwnd, SW_SHOW);
     // Showing may synchronously deliver a client event that destroys this creation.
@@ -11576,25 +11603,32 @@ static void _sapp_tc_main_tick_tramp(sapp_window, void*) {
 
 static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
     if (w->in_tick || !w->drawable) return;
+    const sapp_window handle = {w->win_id};
+    w->in_tick = true;
+    struct TickGuard {
+        sapp_window handle;
+        ~TickGuard() { if (auto* live = _sapp_tc_lookup(handle)) live->in_tick = false; }
+    } guard{handle};
     _sapp_tc_x11_surface_scope restore_surface;
     const double frame_start = _sapp_tc_now();
     _sapp_tc_timing_update(&w->timing);
     w->frame_duration = w->timing.smooth_dt;
+    if (_sapp_tc_x11_update_dimensions(w))
+        _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_RESIZED);
+    if (_sapp_tc_lookup(handle) != w) return;
     if (!w->draw_while_hidden && _sapp_tc_native_hidden(w)) {
-        if (w->desc.tick_cb) w->desc.tick_cb({w->win_id}, w->desc.user_data);
+        if (w->desc.tick_cb) w->desc.tick_cb(handle, w->desc.user_data);
+        if (_sapp_tc_lookup(handle) != w) return;
         ++w->frame_count;
         _sapp_tc_x11_pace(w, _sapp_tc.refresh_period);
         return;
     }
-    if (_sapp_tc_x11_update_dimensions(w))
-        _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_RESIZED);
     if (!_sapp_tc_x11_make_current(w)) {
         _sapp_tc_x11_pace(w, _sapp_tc.refresh_period);
         return;
     }
-    w->in_tick = true;
-    if (w->desc.tick_cb) w->desc.tick_cb({w->win_id}, w->desc.user_data);
-    w->in_tick = false;
+    if (w->desc.tick_cb) w->desc.tick_cb(handle, w->desc.user_data);
+    if (_sapp_tc_lookup(handle) != w) return;
     ++w->frame_count;
     bool presented = false;
     if (!w->skip_present
@@ -11806,6 +11840,10 @@ static _sapp_tc_window_t* _sapp_tc_x11_create_window(const _sapp_tc_native_desc*
     }
     _sapp_tc_x11_set_swapinterval(w, w->swap_interval);
     _sapp_tc.windows[slot] = w;
+    if (w->desc.bind_cb && !w->desc.bind_cb(w->win_id, w->desc.user_data)) {
+        _sapp_tc.windows[slot] = NULL;
+        _sapp_tc_x11_unwind(w); return NULL;
+    }
     w->ready = true;
     _sapp_tc_x11_show_window(w);
     if (d->fullscreen) {
@@ -17696,6 +17734,30 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { (void)win; return 0; }
 } /* extern "C" */
 #endif
 #endif /* platform select */
+
+extern "C" bool sapp_tc_window_read_metadata(sapp_window win, sapp_tc_window_metadata* out) {
+    if (!out || !win.id) return false;
+#if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
+    const auto* w = _sapp_tc_lookup(win);
+    if (!w) return false;
+    *out = {};
+    out->fb_width = w->fb_width; out->fb_height = w->fb_height;
+    out->width = w->win_width; out->height = w->win_height;
+    out->dpi_scale = w->dpi_scale; out->sample_count = w->desc.sample_count;
+    out->color_format = w->color_format; out->depth_format = w->depth_format;
+    out->trust_hidden_signals = w->trust_hidden_signals;
+    out->iconified = w->iconified; out->occluded = w->occluded;
+    out->drawable_available = w->fb_width > 0 && w->fb_height > 0 && !_sapp_tc_native_hidden(w);
+    out->source_interval = w->frame_duration > 0 ? w->frame_duration : w->refresh_period;
+    out->reliable_button_bits = true;
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__) && defined(SOKOL_GLES3)
+    out->reliable_button_bits = !(_sapp_tc.mouse_locked && _sapp_tc.lock_owner == w);
+#endif
+    return true;
+#else
+    return false;
+#endif
+}
 
 #endif /* SOKOL_APP_TC_IMPL_INCLUDED */
 

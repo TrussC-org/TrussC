@@ -37,10 +37,9 @@ void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 #ifdef TC_ADMISSION_CAPTURE_PROBE
 #include <GL/gl.h>
 namespace {
-int mainCaptureWidth = 32, mainCaptureHeight = 32;
 bool realCapture = false, modeledCapture = false;
 int capturePrefixes = 0;
-int reservationReads = -1, dimensionReads = 0, sourceWidth = 0, sourceHeight = 0, pixelReads = 0;
+int sourceWidth = 0, sourceHeight = 0, pixelReads = 0;
 size_t readbackWorking = 0;
 }
 // Headless capture models a valid renderer and its submit boundary. Display
@@ -54,15 +53,13 @@ extern "C" void __wrap_sg_tc_submit_prefix() {
     if (realCapture) __real_sg_tc_submit_prefix();
     else ++capturePrefixes;
 }
-extern "C" int __real_sapp_width();
-extern "C" int __real_sapp_height();
-extern "C" int __wrap_sapp_width() {
-    if (realCapture) return __real_sapp_width();
-    return reservationReads >= 0 && ++dimensionReads > reservationReads ? sourceWidth : mainCaptureWidth;
-}
-extern "C" int __wrap_sapp_height() {
-    if (realCapture) return __real_sapp_height();
-    return reservationReads >= 0 && dimensionReads > reservationReads ? sourceHeight : mainCaptureHeight;
+// The admission estimate uses context metadata; the actual source can change
+// before readback. Interpose the common source boundary, not native size wrappers.
+extern "C" trussc::internal::WindowCaptureSource __real__ZN6trussc8internal19windowCaptureSourceEv();
+extern "C" trussc::internal::WindowCaptureSource __wrap__ZN6trussc8internal19windowCaptureSourceEv() {
+    auto source = __real__ZN6trussc8internal19windowCaptureSourceEv();
+    if (modeledCapture) { source.width = sourceWidth; source.height = sourceHeight; }
+    return source;
 }
 extern "C" void __real_glReadPixels(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void*);
 extern "C" void __wrap_glReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum format, GLenum type, void* data) {
@@ -77,8 +74,8 @@ using namespace trussc;
 namespace {
 alignas(16) unsigned char nativeStandIn[256]{};
 struct OpenWindow : Window {
-    OpenWindow() { native_ = nativeStandIn; }
-    ~OpenWindow() { native_ = nullptr; }
+    OpenWindow() { native_ = nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
+    ~OpenWindow() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); }
 };
 std::string request(const char* name, json args = json::object()) {
     return json{{"jsonrpc", "2.0"}, {"id", 19}, {"method", "tools/call"},
@@ -425,7 +422,7 @@ public:
             check("real framebuffer has requested DPI ratio",
                 logicalWidth > 0 && logicalHeight > 0 &&
                 pixels.getWidth() == logicalWidth * expectedDpi && pixels.getHeight() == logicalHeight * expectedDpi);
-            check("real main secondary-only dimensions remain zero", ctx.isMain && ctx.fbWidth == 0 && ctx.fbHeight == 0);
+            check("main context dimensions agree before readback", ctx.isMain && ctx.fbWidth == pixels.getWidth() && ctx.fbHeight == pixels.getHeight());
             printf("real screenshot DPI=%d: logical=%dx%d framebuffer=%zux%zu readback=%dx%d scale=%.2f\n",
                 expectedDpi, logicalWidth, logicalHeight, width, height,
                 pixels.getWidth(), pixels.getHeight(), double(getDpiScale()));
@@ -701,13 +698,12 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 #ifdef TC_ADMISSION_CAPTURE_PROBE
     OpenWindow secondary;
     auto& main = internal::mainWindowContext();
-    check("main window keeps secondary-only dimensions empty", main.isMain && main.fbWidth == 0 && main.fbHeight == 0);
+    check("unbound main context starts without native dimensions", main.isMain && main.fbWidth == 0 && main.fbHeight == 0);
     const std::initializer_list<int> windows{0, 1};
     auto dimensions = [&](int width, int height) {
         secondary.context().fbWidth = width;
         secondary.context().fbHeight = height;
-        mainCaptureWidth = width;
-        mainCaptureHeight = height;
+        main.fbWidth = width; main.fbHeight = height;
     };
     small = defaults;
     small.outstanding = 1;
@@ -827,7 +823,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     }
     check("capture overflow emits one connections Warning", connectionWarnings == 1);
     // Keep reservation queries small while the capture observes its own extent.
-    // The existing native dimension wrappers isolate this transition without GL.
+    // The common capture-source boundary isolates this transition without GL.
     const auto extentPath = fs::temp_directory_path() / "tc-admission-source-extent.png";
     {
         std::error_code ec;
@@ -838,9 +834,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         const bool save = std::string(name) == "tc_save_screenshot";
         for (int extent : {2048, 32, 64}) {
             dimensions(32, 32);
-            dimensionReads = pixelReads = capturePrefixes = 0;
+            pixelReads = capturePrefixes = 0;
             readbackWorking = 0;
-            reservationReads = save ? 2 : 1; // enqueue + drain for save; drain for get/analyze
             sourceWidth = sourceHeight = extent;
             resetHttpChannel();
             auto promise = std::make_shared<std::promise<ReplyThunk>>();
@@ -875,11 +870,11 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
                 std::error_code ec;
                 fs::remove(extentPath, ec);
             }
-            reservationReads = -1;
         }
     }
     // Application capture has no WorkBudget and keeps its normal behavior.
     dimensions(32, 32);
+    sourceWidth = sourceHeight = 32;
     {
         Pixels pixels;
         const auto before = admissionRejections(AdmissionStore::Working);

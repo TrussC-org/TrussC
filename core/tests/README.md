@@ -12,6 +12,21 @@ the API still compiles/links/instantiates but do not assert runtime behaviour.
 
 ## What belongs here
 
+`windowState` also has a production-linked hidden-resize reentry probe. After
+building `allCoreTests`, run `tcbuild.sh python3 core/tests/windowState/review-test`
+from the repository root. It uses the build's compilation database and library;
+`TC_WINDOW_REVIEW_BUILD` can select a private EGL build directory. The Linux
+event bridge and all three desktop tick bodies are extracted without changing
+their control flow. The same probe calls the actual main event/frame entries
+and Linux event/tick entries for nested newer sizes, interrupted typed delivery,
+one retry per tick under persistent failure, argument-edit collisions and
+deduplication in both coordinate modes. Shared assertions also run in the
+aggregate `windowState` test. `tcbuild.sh python3 core/tests/windowState/size-mutations`
+requires runtime assertion failures when premature claiming or reentrant outer
+claim overwrite is restored. Win32/macOS extraction does not imply an SDK/device run.
+`tools/tests/test_window_lifecycle_regressions.py` separately exercises the
+macOS rejected-binding interval and Android resume/focus frame-entry ordering.
+
 - A test guards **one invariant or one fixed bug** — a contract a future refactor
   could silently break while still compiling. Not "exercise the API for coverage"
   (that's what `AllFeaturesExample` is for).
@@ -681,7 +696,7 @@ Fitting requests run every check strictly, without SKIPs.
   it will not render. A window whose flag is not set is unchanged: the
   request is deferred to its tick and, with no tick, answered by the 5 s
   timeout. Headless: the flag is driven through the test seam
-  `internal::windowOccludedHookForTests()`; the native flags (macOS
+  `internal::publishWindowMetadata()`; the native flags (macOS
   occlusionState, Win32 `WM_SIZE` / `DXGI_STATUS_OCCLUDED`, X11 `WM_STATE` /
   `VisibilityNotify`) are checked by hand.
 - `serialHangup/` — a lost serial device is reported (#260): when the device
@@ -1102,6 +1117,10 @@ Fitting requests run every check strictly, without SKIPs.
   remain manual in `repro/appSetSizeTest` on `test/app-setsize-own-window`
   (see its `repro/README.md`). Headless S6 does not prove that another window
   is not resized.
+- `windowState/` — deterministic main/secondary ownership, positive native
+  binding IDs, per-window native operations, framebuffer/DPI before initial
+  App sizing, trusted effective-hidden snapshots, size deduplication and
+  headless fallback/reference lifetime through the common production path.
 - `mainWindowAttach/` — main Window ownership, identity, shared admission,
   deferred swap, replacement size and main-close quit. Display modes also
   cover callback exit, process teardown with a pending swap, and constructor

@@ -46,7 +46,7 @@ void topologyChecks() {
     }
     check("two vertices make no triangle", meshListIndices(P::TriangleStrip, 2, {}).empty() &&
           meshListIndices(P::TriangleFan, 2, {}).empty());
-    internal::WindowContext secondary;
+    internal::WindowRequestAccess::HostState secondaryState; internal::WindowContext& secondary = secondaryState.context;
     secondary.isMain = false;
     secondary.swapchainTarget.colorFormat = SG_PIXELFORMAT_BGRA8;
     secondary.swapchainTarget.sampleCount = 1;

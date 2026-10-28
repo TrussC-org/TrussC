@@ -68,6 +68,8 @@ struct _sapp_tc_native_desc {
 // passed to the OS; secondary descriptors keep the existing 640 x 480 fallback.
 static inline sapp_window_desc _sapp_tc_normalize_main_window(const sapp_desc* d) {
     sapp_window_desc window = {};
+    window.bind_cb = d->_tc_bind_cb;
+    window.user_data = d->_tc_bind_user;
     window.x = window.y = -1;
     window.width = d->width;
     window.height = d->height;

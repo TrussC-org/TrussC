@@ -18,6 +18,7 @@ bool treeConsumes = false, releaseConsumes = false, rootConsumes = false, dragCo
 int updates = 0, draws = 0, exits = 0, touches = 0;
 bool tested = false;
 int postClearFrames = 0;
+int resizeExtent = 100;
 
 // Stages are installed on both sides of the actual launcher binding.
 void stages(bool before) {
@@ -40,17 +41,38 @@ void stages(bool before) {
     STAGE(windowResized); STAGE(filesDropped);
 #undef STAGE
 }
+bool readResizeMetadata(sapp_window, void* user, sapp_tc_window_metadata& out) {
+    out = *static_cast<sapp_tc_window_metadata*>(user); return true;
+}
 void feed(sapp_event_type type, float x = 20, float y = 20, unsigned int modifiers = 0) {
     sapp_event e{};
     e.type = type; e.key_code = SAPP_KEYCODE_A;
     e.mouse_button = SAPP_MOUSEBUTTON_LEFT;
     e.mouse_x = x; e.mouse_y = y; e.modifiers = modifiers;
     e.scroll_y = 1;
+    auto& binding = internal::WindowRequestAccess::binding(*internal::mainWindow());
+    const auto* originalOperations = binding.operations;
+    void* originalUser = binding.user;
+    auto operations = originalOperations ? *originalOperations : internal::WindowNativeOperations{};
+    auto metadata = binding.metadata;
+    if (type == SAPP_EVENTTYPE_RESIZED) {
+        // Real input refreshes the actual native extent between these injected
+        // events. Alternate explicit revisions, independent of that refresh.
+        resizeExtent = resizeExtent == 96 ? 100 : 96;
+        metadata.fb_width = metadata.fb_height = resizeExtent;
+        metadata.dpi_scale = internal::mainWindowContext().dpiScale;
+        if (metadata.sample_count <= 0) metadata.sample_count = internal::mainWindowContext().swapchainTarget.sampleCount;
+        if (metadata.color_format == SAPP_PIXELFORMAT_NONE) metadata.color_format = SAPP_PIXELFORMAT_RGBA8;
+        if (metadata.depth_format == SAPP_PIXELFORMAT_NONE) metadata.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL;
+        operations.readMetadata = readResizeMetadata;
+        binding.operations = &operations; binding.user = &metadata;
+    }
     if (type >= SAPP_EVENTTYPE_TOUCHES_BEGAN && type <= SAPP_EVENTTYPE_TOUCHES_CANCELLED) {
         e.num_touches = 1; e.touches[0].identifier = 42;
         e.touches[0].pos_x = x; e.touches[0].pos_y = y; e.touches[0].changed = true;
     }
     internal::_event_cb(&e);
+    binding.operations = originalOperations; binding.user = originalUser;
 }
 void expect(const char* name, const char* expected) {
     if (order[name] != expected)
@@ -117,7 +139,7 @@ void inputChecks() {
     order["windowResized"].clear();
     feed(SAPP_EVENTTYPE_RESIZED); expect("windowResized", "cdpbalz");
     feed(SAPP_EVENTTYPE_FILES_DROPPED); expect("filesDropped", "cdpbalz");
-    internal::appWindowResizedFunc(128, 128); order.clear();
+    internal::mainWindowContext().fbWidth = internal::mainWindowContext().fbHeight = 128; internal::syncWindowAppSize(*internal::mainWindow()); order.clear();
     for (int priority : {-20, 0, 50}) {
         auto consumer = events().mousePressed.listen([](auto& e) { e.consumed = true; }, priority);
         feed(SAPP_EVENTTYPE_MOUSE_DOWN);
@@ -161,7 +183,7 @@ void inputChecks() {
     auto resizeEdit = events().windowResized.listen([](auto& e) { e.width = 123; e.height = 124; });
     feed(SAPP_EVENTTYPE_RESIZED);
     check("resize listener edits reach App event path", app->getWidth() == 123 && app->getHeight() == 124);
-    resizeEdit.disconnect(); internal::appWindowResizedFunc(128, 128); order.clear();
+    resizeEdit.disconnect(); internal::mainWindowContext().fbWidth = internal::mainWindowContext().fbHeight = 128; internal::syncWindowAppSize(*internal::mainWindow()); order.clear();
     auto scrollConsumer = app->RectNode::mouseScrolled.listen([](auto& e) { e.consumed = true; });
     feed(SAPP_EVENTTYPE_MOUSE_MOVE, 90, 90); order.clear();
     feed(SAPP_EVENTTYPE_MOUSE_SCROLL); expect("mouseScrolled", "cdpba");
@@ -337,9 +359,10 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     getMainThreadId(); // model _setup_cb on the actual App thread
     check("descriptor creation does not claim the App thread", isMainThread());
     internal::pixelPerfectMode() = true;
-    internal::WindowRequestAccess::openMain(*internal::mainWindow());
+    internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 101);
+    internal::mainWindowContext().fbWidth = internal::mainWindowContext().fbHeight = 128;
     internal::appSetupFunc();
-    internal::appWindowResizedFunc(128, 128);
+    internal::mainWindowContext().fbWidth = internal::mainWindowContext().fbHeight = 128; internal::syncWindowAppSize(*internal::mainWindow());
     internal::appUpdateFunc(); internal::appDrawFunc();
     events().afterFrame.notify();
     for (int pass = 0; pass < 2; ++pass) {

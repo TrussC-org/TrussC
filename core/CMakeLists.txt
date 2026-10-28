@@ -183,7 +183,7 @@ if(TC_PLATFORM_EMSCRIPTEN)
     set_property(SOURCE ${TC_SOUND_SOURCES} platform/web/tcSound_web.cpp
         include/tc/utils/tcResourceLoad.cpp include/tc/graphics/tcResourceLoadGraphics.cpp
         include/tc/graphics/tcPixels.cpp
-        include/tc/app/tcGlobal.cpp
+        include/tc/app/tcGlobal.cpp include/tc/app/tcWindowRuntime.cpp
         include/tc/utils/tcFile.cpp include/tc/utils/tcCompress.cpp
         APPEND PROPERTY COMPILE_OPTIONS -fexceptions)
     # Document/font loaders and reflection also catch allocation failures in

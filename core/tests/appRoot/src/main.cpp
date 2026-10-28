@@ -46,7 +46,7 @@ static void check(const string& name, bool ok) {
 // Empty, not merely expired: an expired reference would still name the
 // freed App's control block.
 static bool rootIsEmpty() {
-    const weak_ptr<Node>& root = internal::mainWindowContext().rootNode;
+    const weak_ptr<Node>& root = internal::nonWindowContext().rootNode;
     const weak_ptr<Node> none;
     return !root.owner_before(none) && !none.owner_before(root);
 }
@@ -96,7 +96,7 @@ static void runAppCallbacks() {
     check("runApp: no root before the setup callback", getRootNode() == nullptr);
 
     // Model the runner opening its main Window without starting sokol.
-    internal::WindowRequestAccess::openMain(*internal::mainWindow());
+    internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 101);
     internal::appSetupFunc();
     check("runApp: the setup callback made the App", g_windowedApp != nullptr);
     check("runApp: the App is getRootNode() once it is made",

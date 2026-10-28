@@ -16,12 +16,7 @@
 //   the window's own tick and, when no tick comes, answered by the 5 s
 //   timeout
 //
-// A headless test has no native window the OS could cover or minimize, so
-// the flag is driven through the test seam
-// internal::windowOccludedHookForTests(), which Window::isOccluded() consults
-// before the native flag. The native flags themselves (NSWindow
-// occlusionState, WM_SIZE / DXGI_STATUS_OCCLUDED, X11 WM_STATE /
-// VisibilityNotify) are checked by hand on each platform.
+// The test publishes native metadata through the common host snapshot seam.
 //
 // The main thread pumps mcp::processHttpQueue() and the main window's
 // mcp::internal::drainDeferredResponses() the way the frame loop does; the requests run
@@ -54,25 +49,14 @@ static void check(const string& name, bool ok, const string& detail = "") {
     if (!ok) ++g_fail;
 }
 
-// A Window made in a headless test has no native side: it is a closed window
-// (isOpen() is false) and openWindows() skips it. OpenWindow stands in for an
-// open one. Its native_ points at zeroed memory: the platform adapter reads
-// it as its state, whose sapp_window handle is then 0, the invalid handle, so
-// getWidth() / getHeight() report 0 and the native occluded flag is false.
-// native_ is cleared before ~Window() would close() it.
-alignas(16) static unsigned char g_nativeStandIn[256] = {};
+// Explicit fake bindings use the same stored metadata as live Windows.
 struct OpenWindow : Window {
     explicit OpenWindow(const string& title) {
         title_ = title;
-        native_ = g_nativeStandIn;
+        internal::WindowRequestAccess::bindForTests(*this, title == "hidden" ? 303 : 202);
     }
-    ~OpenWindow() { native_ = nullptr; }
+    ~OpenWindow() { internal::WindowRequestAccess::unbind(*this); }
 };
-
-static OpenWindow* g_hidden = nullptr;    // window 2 (window 1 stays visible)
-
-// Called on the main thread (tool handlers run in processHttpQueue()).
-static bool occludedHook(const Window& w) { return &w == g_hidden; }
 
 static string toolCall(const string& name, const string& args) {
     return R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":")" + name +
@@ -111,8 +95,9 @@ static bool contains(const string& s, const string& part) { return s.find(part) 
 
 TC_CORE_TEST_MAIN() {
     OpenWindow visible("visible"), hidden("hidden");
-    g_hidden = &hidden;
-    internal::windowOccludedHookForTests() = &occludedHook;
+    sapp_tc_window_metadata hiddenMetadata{};
+    hiddenMetadata.trust_hidden_signals = true; hiddenMetadata.occluded = true;
+    internal::publishWindowMetadata(hidden, hiddenMetadata);
 
     mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     mcp::startHttpServer();
@@ -203,13 +188,13 @@ TC_CORE_TEST_MAIN() {
               saveReply.value("isError", false) && contains(messageOf(saveReply), timeoutMsg), saveReply.dump());
         check("  waited for the window's tick (>= 4.5 s)", saveSec >= 4.5, to_string(saveSec) + " s");
 
-        // --- no hook: the native flag of a window the OS never hid --------
-        // Main reads the hook only while it handles a request; the request
+        // --- a fresh visible native observation clears the common snapshot ---
+        // Main reads the snapshot while handling a request; the request
         // channel orders this write before the next read.
-        internal::windowOccludedHookForTests() = nullptr;
+        internal::publishWindowMetadata(hidden, {});
         list = call(*cli, "tc_list_windows", "{}");
         const json wins2 = list.is_object() ? list.value("windows", json::array()) : json::array();
-        check("without the hook: both windows occluded false",
+        check("after visible observation: both windows occluded false",
               wins2.size() == 3 && wins2[1].value("occluded", true) == false &&
               wins2[2].value("occluded", true) == false, list.dump());
 
@@ -232,7 +217,7 @@ TC_CORE_TEST_MAIN() {
     }
     worker.join();
     mcp::stopHttpServer();
-    internal::windowOccludedHookForTests() = nullptr;
+    internal::publishWindowMetadata(hidden, {});
     error_code ec;
     filesystem::remove(savePath, ec);
 

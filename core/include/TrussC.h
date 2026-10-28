@@ -237,6 +237,7 @@ namespace internal {
 
 // RenderContext class (holds drawing state)
 #include "tc/graphics/tcRenderContext.h"
+#include "tc/app/internal/tcWindowRuntime.h"
 
 // Global mouse state + window-space getters (mouseX/Y, getGlobalMouseX, ...)
 #include "tc/app/tcMouseGlobal.h"
@@ -329,8 +330,7 @@ namespace internal {
     // Main Window is host-owned; these declarations precede the App/Window types.
     class MainWindowDispatchScope {
     public:
-        // seedSize=false: the caller delivers the size itself (resizeMainApp).
-        explicit MainWindowDispatchScope(bool seedSize = true);
+        explicit MainWindowDispatchScope();
         ~MainWindowDispatchScope();
         MainWindowDispatchScope(const MainWindowDispatchScope&) = delete;
     private:
@@ -345,7 +345,6 @@ namespace internal {
     bool attachMainApp(std::shared_ptr<App> app);
     void detachMainApp();
     std::shared_ptr<App> mainApp();
-    void resizeMainApp(int width, int height);
     // Closes the secondary windows whose close() request is still pending
     // (defined in tc/app/tcWindow.h). The app shutdown calls it after the
     // main App's exit(): the run loop has ended, so no backend safe point
@@ -373,18 +372,18 @@ void cleanup();
 // Routed through the active window context (secondary windows keep their own).
 inline float getDpiScale() {
     auto& ctx = internal::currentWindowContext();
-    return ctx.isMain ? sapp_dpi_scale() : ctx.dpiScale;
+    return ctx.dpiScale;
 }
 
 // Get actual framebuffer size (in pixels)
 inline int getFramebufferWidth() {
     auto& ctx = internal::currentWindowContext();
-    return ctx.isMain ? sapp_width() : ctx.fbWidth;
+    return ctx.fbWidth;
 }
 
 inline int getFramebufferHeight() {
     auto& ctx = internal::currentWindowContext();
-    return ctx.isMain ? sapp_height() : ctx.fbHeight;
+    return ctx.fbHeight;
 }
 
 // Active drawing extent in coordinate units; explicitly window-named getters
@@ -2409,7 +2408,6 @@ namespace internal {
     inline void (*appUpdateFunc)() = nullptr;
     inline void (*appDrawFunc)() = nullptr;
     inline void (*appCleanupFunc)() = nullptr;
-    inline void (*appWindowResizedFunc)(int, int) = nullptr;
 } // namespace internal
 
 // Defined in tc/sound/tcSound.h (included later in this header); declared here
@@ -2456,8 +2454,8 @@ namespace internal {
 
         // TRUSSC_LOG_FILE was opened before sapp_run() (openEnvLogFile above).
 
-        setup();
         openMainWindow();
+        setup();
         appSetupCalled() = true;
 
         // App's pre-setup hook resolves the data path root right before its
@@ -2496,14 +2494,7 @@ namespace internal {
             appSetupFunc();
         }
 
-        // Set initial app size (must be after appSetupFunc creates the app)
-        if (appWindowResizedFunc) {
-            EntryStackGuard guard(AppEntry::Event, "windowResized()");
-            int w = sapp_width();
-            int h = sapp_height();
-            float dpiScale = sapp_dpi_scale();
-            appWindowResizedFunc(framebufferToLogical(w, appSizeDpi(dpiScale)), framebufferToLogical(h, appSizeDpi(dpiScale)));
-        }
+        if (auto* window = mainWindow()) syncWindowAppSize(*window, true);
     }
 
     inline void _setup_cb() noexcept {
@@ -2584,6 +2575,7 @@ namespace internal {
         } restoreFrame{previousWindow};
         restoreWindowContext(nullptr);
         MainWindowDispatchScope dispatch;
+        if (auto* window = mainWindow()) syncWindowAppSize(*window);
         crashFrame(sapp_frame_count());
         CrashPhaseScope crashPhase("frame");
 
@@ -2598,7 +2590,7 @@ namespace internal {
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
         sapp_tc_window_draw_while_hidden({0}, true);
 #endif
-        if (!runWindowTick(std::chrono::steady_clock::now(), sapp_frame_duration(), forceDraw))
+        if (!runWindowTick(windowClockNow(), sapp_frame_duration(), forceDraw))
             sapp_skip_present();
 
         // Save previous frame's mouse position
@@ -2725,6 +2717,7 @@ namespace internal {
     }
 
     inline void _event_cb_impl(const sapp_event* ev) {
+        refreshMainWindowMetadata();
         observeWindowVisibility(mainWindowContext(), ev->type);
         auto* previousWindow = currentWindowCtx();
         restoreWindowContext(nullptr);
@@ -2754,13 +2747,14 @@ namespace internal {
         // button-bit reliability for the entire dispatch.
         const bool recoverButtonsOnMove = mouseMoveHasReliableButtonBits(ev);
 
+        // Keep this event's coordinate basis through raw-listener reentry.
+        const float scale = appPointerScale(mainWindowContext().dpiScale);
         // Notify raw event listeners (used by addons like tcxImGui)
         events().rawEvent.notify(*ev);
 
         // ev->mouse_x/y arrive in framebuffer coordinates
         // pixelPerfectMode() == true: use as-is (coords = framebuffer size)
         // pixelPerfectMode() == false: divide by DPI scale to get logical coords
-        const float scale = appPointerScale(sapp_dpi_scale());
         bool hasModShift = (ev->modifiers & SAPP_MODIFIER_SHIFT) != 0;
         bool hasModCtrl = (ev->modifiers & SAPP_MODIFIER_CTRL) != 0;
         bool hasModAlt = (ev->modifiers & SAPP_MODIFIER_ALT) != 0;
@@ -2984,13 +2978,8 @@ namespace internal {
                 break;
             }
             case SAPP_EVENTTYPE_RESIZED: {
-                // Use sapp_width() (framebuffer size) instead of ev->window_width
-                // because event data might be logical size on some platforms, causing double scaling.
-                int fbW = sapp_width();
-                int fbH = sapp_height();
-                
-                auto args = framebufferResizeArgs(fbW, fbH, appSizeDpi(getDpiScale()));
-                events().windowResized.notify(args);
+                // Publish the coherent native snapshot once through the common size routine.
+                if (auto* window = mainWindow()) syncWindowAppSize(*window);
                 break;
             }
             case SAPP_EVENTTYPE_FILES_DROPPED: {
@@ -3089,6 +3078,8 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings) {
     desc.swap_interval = settings.swapInterval;
     // Admit setup and the first draw even when covered before the first tick.
     desc._tc_draw_while_hidden = 1;
+    desc._tc_bind_cb = bindNativeWindow;
+    desc._tc_bind_user = mainWindow();
     desc.init_cb = internal::_setup_cb;
     desc.frame_cb = internal::_frame_cb;
     desc.cleanup_cb = internal::_cleanup_cb;
@@ -3154,9 +3145,6 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     };
     internal::appDrawFunc = []() { events().draw.notify(); };
     internal::appCleanupFunc = []() { internal::destroyMainWindow(); };
-    internal::appWindowResizedFunc = [](int w, int h) {
-        internal::resizeMainApp(w, h);
-    };
 
     return internal::buildWindowDescriptor(settings);
 }

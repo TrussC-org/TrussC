@@ -28,7 +28,7 @@ int main() {
     internal::pixelPerfectMode() = false;
     internal::createMainWindow(WindowSettings{});
     auto* main = internal::mainWindow();
-    internal::WindowRequestAccess::openMain(*main);
+    internal::WindowRequestAccess::bindForTests(*main, 101);
     const bool attached = internal::attachMainApp(std::make_shared<App>());
     setWindowTitle("sapp main"); setWindowSize(321, 123);
     main->setSize(321, 123);
@@ -50,8 +50,8 @@ int main() {
     toggleFullscreen();
     const bool left = !isFullscreen();
     internal::pixelPerfectMode() = true;
-    liveScale = 2.0f;
-    internal::WindowContext alternate;
+    liveScale = 2.0f; main->context().dpiScale = liveScale;
+    internal::WindowRequestAccess::HostState alternateState; internal::WindowContext& alternate = alternateState.context;
     alternate.isMain = false; alternate.dpiScale = 7.0f;
     internal::currentWindowCtx() = &alternate;
     main->getApp()->setSize(642, 246);
@@ -62,7 +62,7 @@ int main() {
         widthSeen == 321 && heightSeen == 123 && fullscreenCalls == 2 && entered && left && ignored;
     bool oddPixels = true;
     for (float dpi : {1.25f, 1.5f, 1.75f, 2.0f}) {
-        liveScale = dpi;
+        liveScale = dpi; main->context().dpiScale = dpi;
         internal::currentWindowCtx() = &alternate;
         const int before = fractionalCalls;
         main->getApp()->setSize(1001, 667);

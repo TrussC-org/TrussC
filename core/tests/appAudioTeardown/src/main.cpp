@@ -91,13 +91,13 @@ void armCallback(Probe& p) {
 // endApp boundary after close() has recorded its request.
 uint64_t nativeStandIn = 0;
 struct OpenWindow : Window {
-    OpenWindow() { native_ = &nativeStandIn; }
+    OpenWindow() { native_ = &nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
     void landClose() {
-        native_ = nullptr;
+        native_ = nullptr; internal::WindowRequestAccess::unbind(*this);
         closeRequested_ = false;
         internal::WindowRequestAccess::endApp(*this);
     }
-    ~OpenWindow() { native_ = nullptr; }
+    ~OpenWindow() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); }
 };
 
 void tick(Window& window) {

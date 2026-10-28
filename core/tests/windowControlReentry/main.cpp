@@ -28,6 +28,13 @@ double nativeWidth = 0, nativeHeight = 0;
 int nativeSizes = 0;
 float nativeDpi = 1;
 int framebufferWidth = 320, framebufferHeight = 240;
+void publishSize(Window& window, int width, int height, float dpi) {
+    sapp_tc_window_metadata metadata{};
+    metadata.fb_width = width; metadata.fb_height = height; metadata.dpi_scale = dpi;
+    metadata.sample_count = 1; metadata.color_format = SAPP_PIXELFORMAT_RGBA8;
+    metadata.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL; metadata.trust_hidden_signals = true;
+    internal::publishWindowMetadata(window, metadata);
+}
 void check(const char* label, bool ok) {
     std::printf("windowControlReentry: %s: %s\n", label, ok ? "PASS" : "FAIL");
     if (!ok) ++failures;
@@ -284,13 +291,16 @@ bool reenter(Window& target, internal::WindowControl op, int, int, const std::st
         internal::windowCallback([&] {
             auto* previous = internal::currentWindowCtx();
             internal::restoreWindowContext(&target.context());
-            target.syncRootSize(320, 240);
+            publishSize(target, 320, 240, target.context().dpiScale);
+            internal::WindowDispatchScope dispatch(target);
+            internal::syncWindowAppSize(target);
             internal::restoreWindowContext(previous);
         });
     }
     // Always exercise the real main dispatcher too: native controls can pump
     // events for other windows. In the main-target case this is precisely the
     // windowDidResize -> RESIZED path from the reviewer's nested-dummy probe.
+    publishSize(*internal::mainWindow(), ++framebufferWidth, framebufferHeight, nativeDpi);
     sapp_event ev{};
     ev.type = SAPP_EVENTTYPE_RESIZED;
     internal::_event_cb(&ev);
@@ -326,9 +336,9 @@ int main() {
     {
         internal::createMainWindow(WindowSettings{});
         Window* main = internal::mainWindow();
-        internal::WindowRequestAccess::openMain(*main);
+        internal::WindowRequestAccess::bindForTests(*main, 101);
         Window secondary;
-        secondary.native_ = &secondary; // open handle; hook replaces only native control
+        secondary.native_ = &secondary; internal::WindowRequestAccess::bindForTests(secondary, 202); // open handle; hook replaces only native control
         auto mainApp = std::make_shared<DrawApp>();
         auto secondaryApp = std::make_shared<DrawApp>();
         check("main App attached", internal::attachMainApp(mainApp));
@@ -370,11 +380,13 @@ int main() {
         for (bool enabled : {false, true}) {
             internal::pixelPerfectMode() = enabled;
             for (float dpi : {1.5f, 2.0f}) {
-                nativeDpi = secondary.context().dpiScale = dpi;
+                nativeDpi = dpi;
+                publishSize(*main, framebufferWidth, framebufferHeight, dpi);
+                publishSize(secondary, framebufferWidth, framebufferHeight, dpi);
                 const int expectedWidth = enabled ? 1001 : int(1001 / dpi);
                 const int expectedHeight = enabled ? 667 : int(667 / dpi);
                 internal::restoreWindowContext(&secondary.context());
-                internal::syncSecondaryAppSize(secondary, framebufferWidth, framebufferHeight);
+                internal::syncWindowAppSize(secondary);
                 internal::restoreWindowContext(&main->context());
                 sapp_event resize{}; resize.type = SAPP_EVENTTYPE_RESIZED;
                 internal::_event_cb(&resize);
@@ -388,7 +400,7 @@ int main() {
                 secondary.setApp(replacement);
                 internal::WindowRequestAccess::applyPendingApp(secondary);
                 internal::restoreWindowContext(&secondary.context());
-                internal::syncSecondaryAppSize(secondary, framebufferWidth, framebufferHeight);
+                internal::syncWindowAppSize(secondary);
                 check("secondary replacement seeded before first setup",
                     replacement->getWidth() == expectedWidth && replacement->getHeight() == expectedHeight &&
                     replacement->resizedWidth == expectedWidth && replacement->resizedHeight == expectedHeight);
@@ -396,7 +408,7 @@ int main() {
                 auto mainReplacement = std::make_shared<DrawApp>();
                 main->setApp(mainReplacement);
                 internal::WindowRequestAccess::applyPendingApp(*main);
-                internal::WindowRequestAccess::seedMainAppSize(*main);
+                internal::syncWindowAppSize(*main, true);
                 check("main replacement seed matches secondary",
                     mainReplacement->getWidth() == replacement->getWidth() && mainReplacement->getHeight() == replacement->getHeight() &&
                     mainReplacement->resizedWidth == replacement->resizedWidth && mainReplacement->resizedHeight == replacement->resizedHeight);
@@ -407,7 +419,7 @@ int main() {
         // replay identical native events through main and secondary at each DPI.
         for (bool enabled : {false, true}) {
             for (float dpi : {1.0f, 1.5f, 2.0f}) {
-                nativeDpi = secondary.context().dpiScale = dpi;
+                nativeDpi = main->context().dpiScale = secondary.context().dpiScale = dpi;
                 const float scale = enabled ? 1.0f : 1.0f / dpi;
                 internal::pixelPerfectMode() = enabled;
                 auto deliver = [&](Window& window, const sapp_event& event) {
@@ -456,6 +468,18 @@ int main() {
                 check("secondary entry updates hover coordinates in App units", same(getMousePos(), expected));
                 ev.type = SAPP_EVENTTYPE_MOUSE_LEAVE; deliver(secondary, ev);
                 check("secondary leave retains offscreen hover sentinel", same(getMousePos(), Vec2(-1, -1)));
+                for (auto* target : {main, &secondary}) {
+                    target->context().dpiScale = dpi;
+                    auto rawDpiChange = target->events().rawEvent.listen([&](const sapp_event&) {
+                        target->context().dpiScale = dpi * 2;
+                    });
+                    ev.type = SAPP_EVENTTYPE_MOUSE_MOVE; ev.modifiers = 0;
+                    ev.mouse_x = 200; ev.mouse_y = 100;
+                    deliver(*target, ev);
+                    const auto probe = target == main ? mainApp : secondaryApp;
+                    check("raw reentry cannot change the current event DPI basis", same(probe->pointer, expected));
+                    target->context().dpiScale = dpi;
+                }
             }
         }
         for (bool enabled : {false, true}) {
@@ -511,7 +535,7 @@ int main() {
         check("out-of-range logical quotients never reach native size", nativeSizes == calls);
         internal::pixelPerfectMode() = false;
         internal::restoreWindowContext(nullptr);
-        secondary.native_ = nullptr;
+        secondary.native_ = nullptr; internal::WindowRequestAccess::unbind(secondary);
         internal::WindowRequestAccess::endApp(secondary);
         internal::destroyMainWindow();
     }

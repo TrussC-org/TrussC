@@ -154,11 +154,7 @@ fs::path internal::platformAppBundlePath() {
 // ---------------------------------------------------------------------------
 
 std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
-    // Admission also runs in the next frame's prelude, before any drawable
-    // exists. Query native framebuffer dimensions without acquiring or messaging
-    // the borrowed drawable from a swapchain pass.
-    if (!ctx.isMain) return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
-    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+    return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
 }
 
 bool captureWindow(Pixels& outPixels) {

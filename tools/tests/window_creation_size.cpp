@@ -15,6 +15,10 @@ struct Size {
     Size(bool accepted) : x(0), y(0) { assert(!accepted); }
 };
 struct Descriptor {
+    bool (*bind_cb)(uint32_t, void*) = nullptr;
+    bool (*_tc_bind_cb)(uint32_t, void*) = nullptr;
+    void* user_data = nullptr;
+    void* _tc_bind_user = nullptr;
     int width = 0, height = 0, x = 0, y = 0, sample_count = 1;
     int _tc_pixel_width = 0, _tc_pixel_height = 0;
     bool high_dpi = true, no_high_dpi = false;

@@ -320,7 +320,7 @@ static int runCycles(const std::string& guestPath, int port) {
     internal::createMainWindow(WindowSettings{});
     internal::prepareMainAppBindings();
     auto* mainHandle = internal::mainWindow();
-    internal::WindowRequestAccess::openMain(*mainHandle); // no native window in this mode
+    internal::WindowRequestAccess::bindForTests(*mainHandle, 101); // no native window in this mode
     const auto mainId = internal::WindowRequestAccess::creationId(*mainHandle);
     struct MainOwnerReset { ~MainOwnerReset() { internal::destroyMainWindow(); } } mainOwnerReset;
     const int kCycles = 5;
@@ -492,7 +492,7 @@ static int runCycles(const std::string& guestPath, int port) {
         bitmapfont::internal::registry().clear();   // it points into the guest's image
 
         // And the other way: what guest code sees of state the host sets.
-        internal::WindowContext secondary;
+        internal::WindowRequestAccess::HostState secondaryState; internal::WindowContext& secondary = secondaryState.context;
         secondary.isMain = false;
         const int grownBudget = internal::sglBudget().maxVertices * 2;
         const int savedBudget = internal::sglBudget().maxVertices;
@@ -585,8 +585,8 @@ static int runCycles(const std::string& guestPath, int port) {
             auto reopened = std::make_shared<App>();
             static int nativeStandIn = 0;
             Window first, second;
-            first.native_ = &nativeStandIn;
-            second.native_ = &nativeStandIn;
+            first.native_ = &nativeStandIn; internal::WindowRequestAccess::bindForTests(first, 202);
+            second.native_ = &nativeStandIn; internal::WindowRequestAccess::bindForTests(second, 202);
             const bool attached = guest->attachApp(first, sub);
             const bool guestSawAttach = attached && guest->seesAttached(sub.get());
             first.setApp(nullptr);
@@ -595,8 +595,8 @@ static int runCycles(const std::string& guestPath, int port) {
             const bool attachedNew = guest->attachApp(second, reopened);
             second.setApp(nullptr);
             internal::applyPendingAppForTests(second);   // the frame boundary
-            first.native_ = nullptr;
-            second.native_ = nullptr;
+            first.native_ = nullptr; internal::WindowRequestAccess::unbind(first);
+            second.native_ = nullptr; internal::WindowRequestAccess::unbind(second);
             if (!attached || !guestSawAttach) {
                 return fail(33, "guest code could not attach an App to a window, or does not see it attached");
             }
@@ -1242,7 +1242,7 @@ CallResult callToolResult(const char* name) {
 void openMain() {
     internal::createMainWindow(WindowSettings{});
     internal::prepareMainAppBindings();
-    internal::WindowRequestAccess::openMain(*internal::mainWindow());
+    internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 101);
 }
 
 void swapMain(std::shared_ptr<App> next) {
@@ -1497,9 +1497,10 @@ void resetResizeState() {
 void startupResize() {
     resetResizeState();
     openMain();
+    internal::mainWindowContext().fbWidth = 128; internal::mainWindowContext().fbHeight = 96;
     auto app = std::make_shared<ResizeApp>();
     internal::attachMainApp(app);
-    internal::resizeMainApp(128, 96);  // startup / native resize delivery
+    { internal::MainWindowDispatchScope boundary; }
     check("startup resize: callback ran once with the receiver intact", callbackSwaps == 1 && marker == 123);
     check("startup resize: dispatch active, reload defers", dispatchActiveInResize);
     check("startup resize: App not cleaned up mid-callback", cleanupInCallback == 0 && attachedAfterPump);
@@ -1511,10 +1512,11 @@ void reloadResize() {
     resetResizeState();
     openMain();
     trussc::hot_reload::GuestLibrary lib;
+    internal::mainWindowContext().fbWidth = 128; internal::mainWindowContext().fbHeight = 96;
     lib.createApp = createResizeApp;
     lib.destroyApp = destroyGuestApp;
     lib.create();  // the reload attaches the new guest App, then seeds its size
-    trussc::hot_reload::seedReloadedAppSize(128, 96, 1.0f);
+    { internal::MainWindowDispatchScope boundary; }
     check("reload seed: callback ran once with the receiver intact", callbackSwaps == 1 && marker == 123);
     check("reload seed: dispatch active, reload defers", dispatchActiveInResize);
     check("reload seed: App not cleaned up mid-callback", cleanupInCallback == 0 && attachedAfterPump);
@@ -1568,7 +1570,7 @@ int main(int argc, char** argv) {
         });
         internal::createMainWindow(WindowSettings{});
         internal::prepareMainAppBindings();
-        internal::WindowRequestAccess::openMain(*internal::mainWindow());
+        internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 101);
         trussc::hot_reload::GuestLibrary lib;
         if (!lib.load(findGuestLibrary())) return 72;
         auto* app = static_cast<tcApp*>(lib.create());

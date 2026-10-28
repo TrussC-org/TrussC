@@ -14,8 +14,8 @@ void check(const char* name, bool ok) {
 }
 struct WindowProbe : Window {
     int nativeStandIn = 0;
-    WindowProbe() { native_ = &nativeStandIn; }
-    ~WindowProbe() { native_ = nullptr; internal::WindowRequestAccess::endApp(*this); }
+    WindowProbe() { native_ = &nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
+    ~WindowProbe() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); internal::WindowRequestAccess::endApp(*this); }
 };
 bool rejectSwapchain = false;
 sg_swapchain swapchain(void*) {
@@ -208,7 +208,9 @@ TC_CORE_TEST_MAIN() {
         check("native gate cannot commit foreign GPU work", internal::shaderStreamFrame() == gpuFrame);
         internal::endGpuFrame();
         // Hidden forced capture is a real draw, with the same resource boundaries.
-        slow.window.context().suspended = true;
+        auto hiddenMetadata = internal::WindowRequestAccess::binding(slow.window).metadata;
+        hiddenMetadata.trust_hidden_signals = true; hiddenMetadata.occluded = true;
+        internal::publishWindowMetadata(slow.window, hiddenMetadata);
         slow.tick(30, true); slow.tick(31, true);
         check("hidden capture counts real draws", slow.draws == 10);
         for (int n = 32; n < 36; ++n) fast.tick(n);
@@ -223,7 +225,7 @@ TC_CORE_TEST_MAIN() {
         for (int n = 40; n < 52; ++n) fast.tick(n);
         check("synchronized control updates and draws", fast.draws == synchronizedDraws + 12 && fast.window.context().updateCount == 12);
         auto& owner = slow; auto& other = fast;
-        owner.window.context().suspended = false;
+        hiddenMetadata.occluded = false; internal::publishWindowMetadata(owner.window, hiddenMetadata);
         owner.tick(40);
         // Prelude FBO revisions belong to the next draw of their owner. A GPU
         // commit from another window cannot retire the first sampled revision.

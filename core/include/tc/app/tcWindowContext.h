@@ -20,8 +20,8 @@
 //
 // Hot-reload note: mainWindowContext() is NON-inline (defined in tcGlobal.cpp)
 // so Host and Guest share one instance — same pattern as events() and
-// getDefaultContext(). The RenderContext / CoreEvents pointers below are wired
-// lazily by those accessors, preserving their existing construction timing.
+// getDefaultContext(). Each Window prewires the RenderContext / CoreEvents
+// pointers below to its owned state before exposing those references.
 
 namespace trussc {
 
@@ -162,13 +162,8 @@ struct WindowContext {
         lastSwapchainDrawable = nullptr;
         lastSwapchain.metal.current_drawable = nullptr;
     }
-    // --- window identity / swapchain source (Phase 1 seam) ---
-    // Main window: isMain=true, swapchain comes from sglue_swapchain() and
-    // dimensions from sapp. Secondary windows: the native layer sets isMain
-    // false, keeps fbWidth/fbHeight/dpiScale up to date, and provides the
-    // frame's swapchain through acquireSwapchain (called by
-    // the target coordinator; must return the SAME drawable
-    // for the duration of one window frame).
+    // Host metadata is initialized before callbacks for every bound Window.
+    // Headless uses a separate non-window context. Drawable acquisition is lazy.
     bool isMain = true;
     int fbWidth = 0;
     int fbHeight = 0;
@@ -268,9 +263,8 @@ struct WindowContext {
     bool                      strokeStarted = false;
     StrokeCap                 strokeStartCap{};   // Butt; real enum in tcRenderContext.h
 
-    // Wired lazily by getDefaultContext() / events() for the main window
-    // (preserves their pre-context construction timing); Phase 1 pre-wires
-    // these when constructing secondary-window contexts.
+    // Prewired by Window construction; the non-window fallback wires them
+    // explicitly before exposing its context.
     RenderContext* render = nullptr;
     CoreEvents* coreEvents = nullptr;
 

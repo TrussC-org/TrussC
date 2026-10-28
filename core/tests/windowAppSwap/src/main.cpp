@@ -63,10 +63,10 @@ static void check(const string& name, bool ok, const string& detail = "") {
 static uint64_t g_nativeStandIn = 0;
 
 struct OpenWindow : Window {
-    OpenWindow() { native_ = &g_nativeStandIn; }
+    OpenWindow() { native_ = &g_nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
     // What the platform teardown does with the App, without the native part.
     void landClose() {
-        native_ = nullptr;
+        native_ = nullptr; internal::WindowRequestAccess::unbind(*this);
         closeRequested_ = false;
         internal::WindowRequestAccess::endApp(*this);
     }

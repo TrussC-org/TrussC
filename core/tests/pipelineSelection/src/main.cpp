@@ -322,7 +322,7 @@ void lazyResizeChecks() {
     {
         // A secondary-window coordinator using this native drawable. Alter its
         // reported dimensions exactly as the reviewer's windowless probe did.
-        internal::WindowContext secondary;
+        internal::WindowRequestAccess::HostState secondaryState; internal::WindowContext& secondary = secondaryState.context;
         secondary.isMain=false; secondary.fbWidth=256; secondary.fbHeight=192;
         secondary.swapchainTarget.colorFormat=main.swapchainTarget.colorFormat;
         secondary.swapchainTarget.depthFormat=main.swapchainTarget.depthFormat;

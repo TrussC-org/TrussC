@@ -276,9 +276,14 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     headless::active = true;
     headless::frameCount = 0;
 
-    // Headless apps run in the main window's (GPU-less) context: that is
-    // where getDeltaTime() / getFrameRate() / getFrameElapsedTime() read.
-    auto& ctx = internal::mainWindowContext();
+    // Headless callbacks use the non-window context without registering a Window.
+    auto& ctx = internal::nonWindowContext();
+    auto* previousContext = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &ctx;
+    struct RestoreContext {
+        internal::WindowContext* previous;
+        ~RestoreContext() { internal::currentWindowCtx() = previous; }
+    } restoreContext{previousContext};
     ctx.drawCount = 0;
     internal::sampleFrameTime(ctx);
 

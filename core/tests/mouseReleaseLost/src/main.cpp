@@ -91,8 +91,8 @@ void feedTouch(sapp_event_type type) {
 // window, and remove the stand-in before the platform destructor runs.
 struct HeadlessWindow : tc::Window {
     int standIn = 0; // setApp() needs an open Window; dispatch never reads native_
-    HeadlessWindow() { native_ = &standIn; }
-    ~HeadlessWindow() { native_ = nullptr; }
+    HeadlessWindow() { native_ = &standIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
+    ~HeadlessWindow() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); }
 };
 #endif
 

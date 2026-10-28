@@ -216,7 +216,7 @@ TC_CORE_TEST_MAIN() {
     // A different window gets its own warning, without inheriting A's Draw.
     {
         internal::EntryStackGuard draw(internal::AppEntry::Draw);
-        internal::WindowContext otherWindow;
+        internal::WindowRequestAccess::HostState otherWindowState; internal::WindowContext& otherWindow = otherWindowState.context;
         internal::RenderContext otherRender;
         otherWindow.render = &otherRender;
         auto* previous = internal::currentWindowCtx();

@@ -255,9 +255,7 @@ void logExposure() {
 }
 
 std::string& mainWindowTitleStorage() {
-    // Main Window and the native descriptor borrow this one host-owned store.
-    static std::string windowTitle;
-    return windowTitle;
+    return trussc::internal::mainWindow()->title_;
 }
 
 const std::string& mainWindowTitle(const std::string& title) {

@@ -132,7 +132,7 @@ int main() {
     Screen screen{}; screen.root=1; dpy->screens=&screen;
     trussc::internal::dpy=reinterpret_cast<Display*>(dpy);
     for (float scale : {1.25f,1.5f,1.75f,2.f}) {
-        trussc::dpi=scale;
+        trussc::dpi=scale; trussc::mainWindow.ctx_.dpiScale=scale;
         for (int path : {0,1,2}) {
             trussc::routeToMain=path == 1; requests.clear();
             if (path == 0) trussc::mainWindow.control(trussc::internal::WindowControl::PixelSize,1001,667);

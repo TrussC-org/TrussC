@@ -71,7 +71,7 @@ class AllocationApp : public App {
 public:
     void setup() override {
         auto& a = internal::currentWindowContext();
-        internal::WindowContext b;
+        internal::WindowRequestAccess::HostState bState; internal::WindowContext& b = bState.context;
         int pendingWarnings = 0;
         auto pendingListener = getLogger().onLog.listen([&](LogEventArgs& e) {
             if (e.level == LogLevel::Warning &&

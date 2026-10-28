@@ -78,7 +78,7 @@ void transparent(int samples, TextureFormat format, bool unfilterable) {
     fbo.begin(0,0,0,0);
     const bool savedMode=internal::pixelPerfectMode(); auto& window=internal::currentWindowContext();
     const auto savedDpi=window.dpiScale; const bool savedMain=window.isMain;
-    window.isMain=false; window.dpiScale=2; internal::pixelPerfectMode()=true;
+    window.dpiScale=2; internal::pixelPerfectMode()=true;
     {
         auto scope=ui.scoped(); fixedContext(); check("offscreen scope accepted",bool(scope));
         check("offscreen takes Fbo extent and density",ImGui::GetIO().DisplaySize.x==128 &&
@@ -245,8 +245,8 @@ void targetAssociation() {
 void screenUi(bool pixelMode) {
     auto& window=internal::currentWindowContext();
     if(!nativeDpi2) {
-        if(window.isMain) {window.fbWidth=sapp_width(); window.fbHeight=sapp_height();}
-        window.isMain=false; window.dpiScale=2;
+        check("main framebuffer metadata initialized", !window.isMain || (window.fbWidth==sapp_width() && window.fbHeight==sapp_height()));
+        window.dpiScale=2;
     }
     internal::pixelPerfectMode()=pixelMode;
     imguiBegin();

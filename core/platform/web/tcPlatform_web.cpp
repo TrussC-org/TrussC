@@ -124,7 +124,7 @@ static void screenshotDownloadError(int reason) {
 }
 
 std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
-    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+    return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
 }
 
 bool captureWindow(Pixels& outPixels) {

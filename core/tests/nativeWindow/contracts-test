@@ -14,7 +14,11 @@ header = (include/'sokol_app_tc.h').read_text()
 comments_ok = all('always valid' not in re.search(r'float mouse_' + axis + r';[^\n]*', header)[0]
                   for axis in ('dx', 'dy'))
 print('native-contracts: mouse delta comments avoid universal validity: ' + ('PASS' if comments_ok else 'FAIL'), flush=True)
-header = header[header.index('#include "util/sokol_window_native.h"'):]
+# Scope generic public function extraction to X11 after all three a2 ports.
+x11 = '#elif defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)'
+if x11 not in header:
+    sys.exit('native-contracts: missing X11 implementation marker: ' + x11)
+header = header[header.index(x11):]
 header = header[:header.index('#elif defined(__ANDROID__)')]
 def body(marker):
     start = header.index(marker)
@@ -61,7 +65,8 @@ static struct {
     GLXContext ctx = (GLXContext)4;
 #endif
 } _sapp_tc;
-static int failures, failAt, titleBytes, titleCalls, presents;
+static int failures, failAt, titleBytes, titleCalls, presents, bindingCalls, shows;
+static bool rejectBinding;
 static uintptr_t presented;
 static Window titleWindow;
 static sapp_event received;
@@ -122,7 +127,8 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char*,
     if (failAt == 3) glXMakeCurrent(_sapp_tc.display, 100, (GLXContext)_sapp_tc.ctx);
     return failAt != 3;
 }
-static bool _sapp_tc_x11_initialize_dimensions(_sapp_tc_window_t*) {
+static bool _sapp_tc_x11_initialize_dimensions(_sapp_tc_window_t* w) {
+    w->fb_width = w->desc.width; w->fb_height = w->desc.height;
     if (failAt == 4) glXMakeCurrent(_sapp_tc.display, 100, (GLXContext)_sapp_tc.ctx);
     return failAt != 4;
 }
@@ -134,7 +140,13 @@ static bool _sapp_tc_x11_make_current(_sapp_tc_window_t* w) {
 }
 static bool _sapp_tc_x11_trust_hidden_signals() { return true; }
 static void _sapp_tc_x11_set_swapinterval(_sapp_tc_window_t*, int) {}
-static void _sapp_tc_x11_show_window(_sapp_tc_window_t*) {}
+static void _sapp_tc_x11_show_window(_sapp_tc_window_t*) { ++shows; }
+static bool bindHost(uint32_t id, void* user) {
+    ++bindingCalls;
+    auto* w = _sapp_tc_lookup({id});
+    check("host binds actual ID and initialized metadata before ready/show", w && id > 2 && !w->ready && w->fb_width == 640 && w->fb_height == 480 && w->dpi_scale == 1 && shows == 0 && user == &bindingCalls);
+    return !rejectBinding;
+}
 static void _sapp_tc_x11_set_fullscreen(_sapp_tc_window_t*, bool) {}
 static bool _sapp_tc_x11_update_dimensions(_sapp_tc_window_t*) { return false; }
 static double _sapp_tc_now() { return 1; }
@@ -171,6 +183,15 @@ int main() {
     _sapp_tc.windows[0] = &first; _sapp_tc.windows[1] = &second; _sapp_tc.app.main = &first;
     _sapp_tc.next_id = 2;
     sapp_window_desc desc{};
+    desc.bind_cb = bindHost; desc.user_data = &bindingCalls;
+    for (bool reject : {false, true}) {
+        rejectBinding = reject; bindingCalls = shows = 0;
+        const auto created = sapp_create_window(&desc);
+        check("host binding runs once and rejection unwinds before publication", bindingCalls == 1 && bool(created.id) == !reject && shows == int(!reject));
+        if (created.id) { auto* w = _sapp_tc_lookup(created); _sapp_tc.windows[2] = nullptr; _sapp_tc_x11_unwind(w); }
+        else check("failed host binding leaves no native registry slot", _sapp_tc.windows[2] == nullptr);
+    }
+    desc.bind_cb = nullptr; desc.user_data = nullptr;
     for (bool bound : {true, false}) for (int failure = 0; failure <= 6; ++failure) {
         failAt = failure;
         _sapp_tc.next_id = failure == 6 ? UINT32_MAX : 2;

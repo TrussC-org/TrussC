@@ -31,25 +31,11 @@ struct AdapterState {
     RECT    savedRect{0, 0, 0, 0};   // window rect (screen coords) before fullscreen
 };
 
-// Swapchain provider handed to WindowContext::acquireSwapchain. Unlike Metal
-// there is no per-frame drawable: the flip-model backbuffer views persist and
-// are simply handed back until resize/destruction, including nested execution
-// by the coordinator outside this window's native tick.
-sg_swapchain acquireSecondarySwapchain(void* user) {
-    auto* st = static_cast<AdapterState*>(user);
-    sg_swapchain sc = {};
-    if (!st) return sc;
-    const void* renderView = sapp_window_d3d11_render_view(st->win);
-    if (!renderView) return sc;
-    sc.width = sapp_window_framebuffer_width(st->win);
-    sc.height = sapp_window_framebuffer_height(st->win);
-    sc.sample_count = sapp_window_sample_count(st->win);
-    sc.color_format = SG_PIXELFORMAT_BGRA8;
-    sc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-    sc.d3d11.render_view = renderView;
-    sc.d3d11.resolve_view = sapp_window_d3d11_resolve_view(st->win);
-    sc.d3d11.depth_stencil_view = sapp_window_d3d11_depth_stencil_view(st->win);
-    return sc;
+bool bindAdapter(uint32_t id, void* user) noexcept {
+    auto* window = static_cast<trussc::Window*>(user);
+    if (!window || !window->native_) return false;
+    static_cast<AdapterState*>(window->native_)->win = {id};
+    return internal::bindNativeWindow(id, window);
 }
 
 // --- tick: drive this window's update/draw with its context active ---------
@@ -61,34 +47,26 @@ void windowTickImpl(sapp_window swin, void* user) {
     // Frame boundary: a setApp() requested before or during this tick is
     // applied when the scope is entered and left, never inside the tick.
     auto& ctx = win->context();
+    internal::refreshWindowMetadata(*win);
 
     // Native gates still forbid drawable acquisition/presentation. Deliver the
     // update decision to the same policy as visible ticks before size admission.
-    if (sapp_window_occluded(swin)) {
+    if (win->isOccluded()) {
         auto* previous = internal::currentWindowCtx();
         internal::currentWindowCtx() = &ctx;
         struct Restore { internal::WindowContext* previous;
             ~Restore() { internal::currentWindowCtx() = previous; }
         } restore{previous};
-        internal::runWindowTick(std::chrono::steady_clock::now(),
+        internal::WindowDispatchScope scope(*win);
+        internal::syncWindowAppSize(*win);
+        internal::runWindowTick(internal::windowClockNow(),
             sapp_window_frame_duration(swin), false, nullptr, true);
         return;
     }
 
     internal::WindowDispatchScope scope(*win);
 
-    const int fbw = sapp_window_framebuffer_width(swin);
-    const int fbh = sapp_window_framebuffer_height(swin);
-    if (fbw <= 0 || fbh <= 0) return;
-    ctx.fbWidth = fbw;
-    ctx.fbHeight = fbh;
-    // Keep target metadata current before update/draw, including resize ticks.
-    ctx.swapchainTarget.width = fbw;
-    ctx.swapchainTarget.height = fbh;
-    ctx.swapchainTarget.sampleCount = sapp_window_sample_count(swin);
-    ctx.swapchainTarget.viewport = {0, 0, (float)fbw, (float)fbh, true};
-    ctx.dpiScale = sapp_window_dpi_scale(swin);
-
+    if (ctx.fbWidth <= 0 || ctx.fbHeight <= 0) return;
     auto* previous = internal::currentWindowCtx();
     internal::restoreWindowContext(&ctx);
     struct RestoreContext {
@@ -99,8 +77,8 @@ void windowTickImpl(sapp_window swin, void* user) {
             internal::currentWindowCtx() = previous;
         }
     } restore{previous};
-    internal::syncSecondaryAppSize(*win, fbw, fbh);
-    if (!internal::runWindowTick(std::chrono::steady_clock::now(), sapp_window_frame_duration(swin)))
+    internal::syncWindowAppSize(*win);
+    if (!internal::runWindowTick(internal::windowClockNow(), sapp_window_frame_duration(swin)))
         sapp_tc_window_skip_present(swin);
 
 }
@@ -122,14 +100,14 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
     // Raw listeners can change pointer lock; snapshot this move's reliability.
     const bool recoverButtonsOnMove = internal::mouseMoveHasReliableButtonBits(ev);
 
+    // Keep this event's metadata revision through raw-listener reentry.
+    const float scale = internal::appPointerScale(ctx.dpiScale);
     // Raw event pass-through (same hook addons use on the main window)
     win->events().rawEvent.notify(*ev);
 
     // sapp pointer coordinates arrive in framebuffer pixels. Secondary coordinates
     // use main's unit scale: pixels in pixelPerfect mode, logical points otherwise.
     // Delta derivation and enter/leave handling retain their existing differences.
-    const float dpi = sapp_window_dpi_scale(swin);
-    const float scale = internal::appPointerScale(dpi);
     const bool hasShift = (ev->modifiers & SAPP_MODIFIER_SHIFT) != 0;
     const bool hasCtrl  = (ev->modifiers & SAPP_MODIFIER_CTRL) != 0;
     const bool hasAlt   = (ev->modifiers & SAPP_MODIFIER_ALT) != 0;
@@ -233,6 +211,9 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
             win->events().keyReleased.notify(e);
             break;
         }
+        case SAPP_EVENTTYPE_RESIZED:
+            internal::syncWindowAppSize(*win);
+            break;
         case SAPP_EVENTTYPE_SUSPENDED:
             logNotice("Window") << "second window occluded - skipping frames (no stall)";
             break;
@@ -252,7 +233,8 @@ void windowEventImpl(const sapp_event* ev, sapp_window swin, void* user) {
     // or lazily recreate GPU resources after teardown.
     if (!win || !win->isOpen()) return;
     auto& ctx = win->context();
-    internal::observeWindowVisibility(ctx, ev->type);
+    internal::refreshWindowMetadata(*win);
+
     auto* prev = internal::currentWindowCtx();
     internal::restoreWindowContext(&ctx);
     struct RestoreEventContext {
@@ -265,6 +247,7 @@ void windowEventImpl(const sapp_event* ev, sapp_window swin, void* user) {
     } restore{prev};
     {
         internal::WindowDispatchScope scope(*win);   // frame boundary, as in windowTick
+        internal::syncWindowAppSize(*win, true);
         dispatchWindowEvent(ev, swin, win, ctx);
     }
 }
@@ -317,6 +300,7 @@ void Window::teardownSecondary() noexcept {
     auto* st = static_cast<AdapterState*>(native_);
     if (!st) return;
     internal::TeardownSteps steps;
+    internal::WindowRequestAccess::unbind(*this);
     native_ = nullptr;             // guard before entry diagnostics can reenter
     closeRequested_ = false;
     ctx_.targetsClosed = true;
@@ -405,22 +389,6 @@ bool Window::isSecondaryFullscreen() const {
     return fullscreenRequested_;
 }
 
-int Window::getSecondaryWidth() const {
-    auto* st = static_cast<AdapterState*>(native_);
-    return st ? internal::framebufferToLogical(sapp_window_framebuffer_width(st->win), sapp_window_dpi_scale(st->win)) : 0;
-}
-
-int Window::getSecondaryHeight() const {
-    auto* st = static_cast<AdapterState*>(native_);
-    return st ? internal::framebufferToLogical(sapp_window_framebuffer_height(st->win), sapp_window_dpi_scale(st->win)) : 0;
-}
-
-bool Window::isSecondaryOccluded() const {
-    if (auto hook = internal::windowOccludedHookForTests()) return hook(*this);
-    auto* st = static_cast<AdapterState*>(native_);
-    return st ? sapp_window_occluded(st->win) : false;
-}
-
 std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {
     if (headless::isActive()) {
         logError("Window") << "createWindow(): not available in headless mode";
@@ -449,22 +417,18 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     d.event_cb = &windowEvent;
     d.close_cb = &windowClosed;
     d.user_data = win.get();
+    d.bind_cb = bindAdapter;
+    win->native_ = st;
     st->win = sapp_create_window(&d);
     if (st->win.id == 0) {
+        win->native_ = nullptr;
+        internal::WindowRequestAccess::unbind(*win);
         delete st;
         logError("Window") << "createWindow(): native window creation failed";
         return nullptr;
     }
 
-    win->ctx_.swapchainTarget.sampleCount = sapp_window_sample_count(st->win);
-    win->ctx_.swapchainTarget.width = sapp_window_framebuffer_width(st->win);
-    win->ctx_.swapchainTarget.height = sapp_window_framebuffer_height(st->win);
-    win->ctx_.fbWidth = win->ctx_.swapchainTarget.width;
-    win->ctx_.fbHeight = win->ctx_.swapchainTarget.height;
-    win->ctx_.dpiScale = sapp_window_dpi_scale(st->win);
-    win->native_ = st;
-    win->ctx_.acquireSwapchain = &acquireSecondarySwapchain;
-    win->ctx_.acquireSwapchainUser = st;
+    internal::refreshWindowMetadata(*win);
     return win;
 }
 

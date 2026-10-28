@@ -40461,25 +40461,28 @@ details.ko = '''
 
 ["Window::isOccluded"]
 keywords = ["visible", "visibility", "hidden", "minimized", "covered", "occlusion"]
-description.en = "Returns whether the operating system reports this window as not visible."
-description.ja = "OS がこのウィンドウを非表示と報告しているかを返す。"
-description.ko = "운영체제가 이 윈도우를 보이지 않는 상태로 보고하는지 반환한다."
+description.en = "Returns whether this window is minimized or fully hidden according to trusted operating system observations."
+description.ja = "信頼できる OS の情報に基づき、このウィンドウが最小化または完全に隠れているかを返します。"
+description.ko = "신뢰할 수 있는 운영체제 정보에 따라 이 윈도우가 최소화되었거나 완전히 가려졌는지 반환합니다."
 details.en = '''
-- Returns the OS visibility snapshot, including main. A closed window returns false. Main updates continue while occluded or minimized, including hidden Web callbacks actually delivered by the browser; only drawing is skipped or paced by the native source. Idle EVENT_DRIVEN main can keep updating while a visible secondary draws. Secondary windows retain their native tick admission, including macOS pausing when occluded. Pending captures may force a frame on supplied ticks.
-- macOS reports occlusion/minimization/other Spaces; Windows reports minimization or DXGI occlusion; Linux GLX reports minimization or X11 full obscuration (full coverage is detectable without a compositor).
-- iOS reports suspension, Android reports activity resume/focus state, and Web reports document visibility. Pi/EGL cannot report coverage: its query falls back to false. Native iOS/Android suspension still stops frames; resume rebases without replaying paused time. Pi/EGL minimization keeps updates running.
+- Main and secondary windows use the same stored visibility snapshot. The result is true when trusted observations report minimization or complete occlusion. Reading it does not emit an event.
+- Returns false before native creation, after closing, or when the visibility signal is unsupported or disabled because it is unreliable. Disabling that signal also ignores previously recorded hidden observations.
+- macOS reports minimization and occlusion, including other Spaces. Windows reports minimization or DXGI occlusion. Linux X11 reports minimization or full obscuration with both GLX and EGL, including Pi X11 configurations.
+- iOS, Android and Web retain their existing suspension, activity resume/focus and document-visibility observations. This getter describes visibility; update and draw admission follow the platform and frame settings.
 '''
 details.ja = '''
-- メインを含む OS の可視状態を返します。閉じた窓では false です。メインは隠れ・最小化中も更新を続け、Web でもブラウザから届く tick は更新します。描画のみ native のペースで実行または省略します。EVENT_DRIVEN のメインが描画せず更新する間も可視の副窓は描画できます。副窓は macOS の隠れによる停止を含む既存の tick 制御を保ちます。tick が届けば保留キャプチャはフレームを要求できます。
-- macOS は隠れた状態・最小化・別 Space、Windows は最小化または DXGI の非表示、Linux GLX は最小化または X11 の完全な隠れ（コンポジタなしで検出可能）を報告します。
-- iOS は休止、Android は activity の resume/focus 状態、Web は document の可視状態を報告します。Pi/EGL は完全な隠れを判定できず false にフォールバックします。iOS/Android の native 休止はフレームを停止し、復帰時は休止時間を再実行しません。Pi/EGL の最小化では更新を続けます。
+- メインとサブは同じ形式の可視状態を保持します。信頼できる情報が最小化または完全な隠れを示すと true を返します。呼び出してもイベントは発生しません。
+- ネイティブウィンドウの作成前、閉じた後、可視状態の検出が未対応の場合、または信頼できないため検出が無効な場合は false を返します。検出が無効な場合は以前記録した非表示の情報も無視します。
+- macOS は最小化と別 Space を含む隠れ、Windows は最小化または DXGI の非表示、Linux X11 は最小化または完全な隠れを報告します。X11 の GLX と EGL の両方に対応し、Pi の X11 構成も含みます。
+- iOS、Android、Web は既存の休止、activity の resume/focus、document の可視状態を使います。この getter は可視状態を表します。更新と描画の実行条件はプラットフォームとフレーム設定に従います。
 '''
 details.ko = '''
-- 메인을 포함한 OS 가시성 상태를 반환합니다. 닫힌 창은 false입니다. 메인은 가림이나 최소화 중에도 업데이트하며 Web에서도 브라우저가 전달하는 틱은 업데이트합니다. 그리기만 네이티브 속도로 실행하거나 생략합니다. EVENT_DRIVEN 메인이 그리지 않고 업데이트하는 동안에도 보이는 보조 창은 그릴 수 있습니다. 보조 창은 macOS의 가림 시 중지를 포함한 기존 틱 제어를 유지합니다. 틱이 전달되면 대기 캡처가 프레임을 요청할 수 있습니다.
-- macOS는 가림/최소화/다른 Space, Windows는 최소화 또는 DXGI 가림, Linux GLX는 최소화 또는 X11 완전 가림(컴포지터 없이 감지 가능)을 보고합니다.
-- iOS는 일시 중지, Android는 activity의 resume/focus 상태, Web은 document 가시성을 보고합니다. Pi/EGL은 가림을 판단할 수 없어 false로 대체합니다. iOS/Android의 네이티브 중지는 프레임을 멈추며 재개 시 중지 시간을 재실행하지 않습니다. Pi/EGL 최소화 중에는 업데이트를 계속합니다.
+- 메인과 보조 윈도우는 같은 형식으로 저장된 가시성 상태를 사용합니다. 신뢰할 수 있는 정보가 최소화 또는 완전한 가림을 나타내면 true를 반환합니다. 조회해도 이벤트는 발생하지 않습니다.
+- 네이티브 윈도우 생성 전, 닫힌 후, 가시성 감지가 지원되지 않거나 신뢰할 수 없어 비활성화된 경우 false를 반환합니다. 감지가 비활성화되면 이전에 기록한 숨김 정보도 무시합니다.
+- macOS는 최소화와 다른 Space를 포함한 가림을, Windows는 최소화 또는 DXGI 가림을 보고합니다. Linux X11은 GLX와 EGL 모두에서 최소화 또는 완전한 가림을 보고하며 Pi의 X11 구성도 포함합니다.
+- iOS, Android 및 Web은 기존의 일시 중지, activity resume/focus 및 document 가시성 정보를 사용합니다. 이 getter는 가시성을 나타냅니다. 업데이트와 그리기 실행 조건은 플랫폼과 프레임 설정을 따릅니다.
 '''
-related = ["Window::isOpen", "Window::setFps"]
+related = ["Window::isOpen", "Window::setFps", "CoreEvents::rawEvent"]
 
 ["Window::setClearColor"]
 description.en = "Sets this window's background clear color."

@@ -268,7 +268,7 @@ public:
     WindowDriver() {
         prev_ = internal::currentWindowCtx();
         internal::currentWindowCtx() = &win_.context();
-        win_.native_ = &nativeStandIn_;
+        win_.native_ = &nativeStandIn_; internal::WindowRequestAccess::bindForTests(win_, 202);
         app_ = make_shared<App>();
         win_.setApp(app_);
         internal::applyPendingAppForTests(win_);   // the frame boundary
@@ -276,7 +276,7 @@ public:
     ~WindowDriver() override {
         win_.setApp(nullptr);
         internal::applyPendingAppForTests(win_);   // the frame boundary
-        win_.native_ = nullptr;
+        win_.native_ = nullptr; internal::WindowRequestAccess::unbind(win_);
         app_.reset();
         internal::currentWindowCtx() = prev_;
     }

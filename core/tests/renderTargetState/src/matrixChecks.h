@@ -219,13 +219,12 @@ void runMatrixChecks() {
     }
     popScissor(); popMatrix(); screen.viewport = savedViewport;
 
-    // Force host DPI through the same context fields used by secondary windows.
+    // Force host DPI through the context fields shared by all windows.
     // GPU resources remain this window's actual context; Fbo pixels are DPI 1.
-    const bool mainWindow = window.isMain;
     const auto hostDpi = window.dpiScale;
     const int hostW = window.fbWidth, hostH = window.fbHeight;
     const bool pixelMode = internal::pixelPerfectMode();
-    window.isMain = false; window.fbWidth = 192; window.fbHeight = 128;
+    window.fbWidth = 192; window.fbHeight = 128;
     for (float dpi : {1.0f, 2.0f}) for (bool pixelPerfect : {false, true}) {
         window.dpiScale = dpi; internal::pixelPerfectMode() = pixelPerfect;
         std::printf("RECTNODE simulated hostDpi=%g framebuffer=%dx%d fbo=%dx%d pixelPerfect=%d\n",
@@ -290,7 +289,7 @@ void runMatrixChecks() {
         check("point target extent and model transform at host DPI 2", lastX - firstX + 1 == extent && lastY - firstY + 1 == extent &&
               count == extent * extent && firstX + lastX == 119 && firstY + lastY == 99);
     }
-    window.isMain = mainWindow; window.dpiScale = hostDpi; window.fbWidth = hostW; window.fbHeight = hostH;
+    window.dpiScale = hostDpi; window.fbWidth = hostW; window.fbHeight = hostH;
     internal::pixelPerfectMode() = pixelMode;
     // Direct fullscreen drawing retains a custom target camera, model and clip.
     first.begin(0, 0, 0); setupScreenFovWithSize(0, 160, 96, 0.25f, 600);
