@@ -49,7 +49,7 @@
 //   - only the tags with data store an argument object (T F N I [ ] none)
 // =============================================================================
 
-#include <tcxOsc.h>
+#include "oscTestAccess.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -122,9 +122,13 @@ static Recv sendAndExpectNone(OscReceiver& rx, OscSender& tx,
 // They avoid 9000/9001 as well: the tcxOsc examples bind those, and 9000 is
 // about the most common OSC port in the wild, so it is the LEAST safe choice
 // on a machine that does OSC work.
-static int bindFirstFree(OscReceiver& rx, const int (&candidates)[4]) {
+static int bindFirstFree(OscReceiver& rx, const int (&candidates)[4], bool unicast = true) {
+    if (unicast) tcx::osc::OscReceiverTestAccess::socket(rx).setBindAddress("127.0.0.1");
     for (int port : candidates) {
-        if (rx.setup(port)) return port;
+        if (rx.setup(port)) {
+            if (unicast) check("unicast fixture binds loopback", oscBoundToLoopback(rx));
+            return port;
+        }
         // setup() creates the socket and registers its listeners even when the
         // bind fails; close() undoes both so the next attempt starts clean.
         rx.close();
@@ -571,14 +575,17 @@ int main() {
                 check("setup failure: exactly one Error log", logs == 1);
                 check("setup failure: receiver is not listening", !second.isListening());
             };
+            tcx::osc::OscReceiverTestAccess::socket(second).setBindAddress("127.0.0.1");
             expectSetupFailure("exclusive: second setup fails",
                 [&] { return second.setup(occupied); }, std::to_string(occupied));
+            tcx::osc::OscReceiverTestAccess::socket(second).setBindAddress("");
             expectSetupFailure("exclusive: shared setup cannot take owned port",
                 [&] { return second.setupMulticast(occupied, GROUP_A, MIF); }, std::to_string(occupied));
 
             // Covers Windows SO_EXCLUSIVEADDRUSE: even a later raw socket with
             // reuse enabled must not be able to bind over the exclusive receiver.
             tc::UdpSocket sharing;
+            sharing.setBindAddress("127.0.0.1");
             check("exclusive: competing socket enables reuse", sharing.setReuseAddress(true));
             check("exclusive: reuse socket cannot take owned port", !sharing.bind(occupied, false));
             sharing.close();
@@ -588,12 +595,14 @@ int main() {
             check("exclusive: bindFirstFree skips occupied port", freePort != 0 && freePort != occupied);
             second.close();
 
+            tcx::osc::OscReceiverTestAccess::socket(second).setBindAddress("");
             expectSetupFailure("multicast setup: invalid group fails",
                 [&] { return second.setupMulticast(freePort, "invalid-group", MIF); }, "Invalid multicast/interface");
             expectSetupFailure("multicast setup: invalid interface fails",
                 [&] { return second.setupMulticast(freePort, GROUP_A, "invalid-interface"); }, "Invalid multicast/interface");
             if (freePort) {
                 tc::UdpSocket reclaimed;
+                reclaimed.setBindAddress("127.0.0.1");
                 check("multicast setup: failed join releases port", reclaimed.bind(freePort, false));
             }
         }
@@ -602,7 +611,7 @@ int main() {
     // Both receivers must receive the same multicast datagram on a shared port.
     {
         OscReceiver first, second;
-        const int port = bindFirstFree(first, MC_PORTS);
+        const int port = bindFirstFree(first, MC_PORTS, false);
         check("shared multicast: candidate port found", port != 0);
         first.close();
         OscMessage message("/shared");
@@ -636,7 +645,8 @@ int main() {
             }
             second.close();
             // Reusing a receiver for setup() must clear its old sharing options.
-            check("exclusive: switch from multicast to unicast", first.setup(port));
+            tcx::osc::OscReceiverTestAccess::socket(first).setBindAddress("127.0.0.1");
+            check("exclusive: switch from multicast to unicast", first.setup(port) && oscBoundToLoopback(first));
             check("exclusive: switched receiver rejects sharing socket",
                   !second.setupMulticast(port, GROUP_A, MIF));
         }
@@ -665,7 +675,7 @@ int main() {
     // IS routable (Linux/Windows CI, local macOS), which is the real coverage.
     {
         OscReceiver rx;
-        const int portMc = bindFirstFree(rx, MC_PORTS);
+        const int portMc = bindFirstFree(rx, MC_PORTS, false);
         check("multicast: receiver bound", portMc != 0);
         if (portMc) std::printf("  (multicast port %d)\n", portMc);
         check("multicast: joinMulticast(A)", rx.joinMulticast(GROUP_A, MIF));

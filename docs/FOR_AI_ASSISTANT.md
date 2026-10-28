@@ -4207,6 +4207,7 @@ size_t TcpServer::getSendAsyncPendingBytes(int clientId) const [macos,windows,li
 bool TcpServer::isRunning() const [macos,windows,linux,android]  // Returns whether the server is running.
 bool TcpServer::send(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Sends data to a specified client.
 SendResult TcpServer::sendAsync(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Queues data for a specified client.
+void TcpServer::setBindAddress(const std::string & address) [macos,windows,linux,android]  // Chooses the local IPv4 address for TCP connections.
 void TcpServer::setReceiveBufferSize(size_t size) [macos,windows,linux,android]  // Sets the client receive buffer size.
 void TcpServer::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android]  // Sets the per-client send high-water mark.
 void TcpServer::setSendItemLimit(size_t bytes) [macos,windows,linux,android]  // Sets the maximum owned send payload capacity.
@@ -4413,6 +4414,7 @@ void UdpSocket::processNetwork() [macos,windows,linux,android,ios]  // Processes
 int UdpSocket::receive(void * buffer, size_t bufferSize) [+1] [macos,windows,linux,android,ios]  // Receives one UDP datagram into a buffer.
 bool UdpSocket::send(const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to the configured destination.
 bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to a specified host and port.
+void UdpSocket::setBindAddress(const std::string & address) [macos,windows,linux,android,ios]  // Chooses the local IPv4 address for receiving UDP datagrams.
 bool UdpSocket::setBroadcast(bool enable) [macos,windows,linux,android,ios]  // Enables or disables UDP broadcast sending.
 bool UdpSocket::setMulticastInterface(const std::string & interfaceAddr) [macos,windows,linux,android,ios]  // Selects the outgoing IPv4 multicast interface.
 bool UdpSocket::setMulticastLoopback(bool enable) [macos,windows,linux,android,ios]  // Controls local loopback of outgoing multicast datagrams.

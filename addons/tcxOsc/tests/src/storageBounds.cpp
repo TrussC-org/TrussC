@@ -1,5 +1,5 @@
 #include "../../../../core/tests/common/tcTestFailure.h"
-#include <tcxOsc.h>
+#include "oscTestAccess.h"
 #include <cstdio>
 #include <cstdlib>
 #include <new>
@@ -26,29 +26,6 @@ void* operator new[](size_t bytes) { return ::operator new(bytes); }
 void operator delete[](void* ptr) noexcept { ::operator delete(ptr); }
 void operator delete[](void* ptr, size_t) noexcept { ::operator delete(ptr); }
 
-namespace tcx::osc {
-struct OscReceiverTestAccess {
-    static auto& socket(OscReceiver& receiver) { return receiver.socket_; }
-    static auto& queue(OscReceiver& receiver) { return receiver.state_->polling_; }
-    static void parse(OscReceiver& receiver, const std::vector<uint8_t>& bytes) {
-        receiver.state_->parsePacket(bytes.data(), bytes.size(), receiver.state_->generation_);
-    }
-    static void receive(OscReceiver& receiver, const std::vector<uint8_t>& bytes) {
-        tc::UdpReceiveEventArgs packet;
-        packet.data.assign(bytes.begin(), bytes.end());
-        receiver.state_->handleReceive(packet, receiver.state_->generation_);
-    }
-    static uint64_t rejected(OscReceiver& receiver) { return receiver.state_->rejectedDatagrams_; }
-};
-}
-namespace trussc::internal {
-struct UdpSocketTestAccess {
-    static size_t bufferBytes(UdpSocket& socket) {
-        return internal::sharedLoad(socket.state_)->receiveBuffer_.capacity();
-    }
-    static auto run(UdpSocket& socket) { return internal::sharedLoad(socket.state_); }
-};
-}
 namespace {
 using namespace tcx::osc;
 using Access = OscReceiverTestAccess;
@@ -142,6 +119,7 @@ void preflight() {
     require(Access::rejected(receiver) == 6 && errors == 6 && receiver.getDroppedMessageCount() == 0,
             "datagram losses have separate exact counter");
     receiver.close();
+    Access::socket(receiver).setBindAddress("127.0.0.1");
     require(receiver.setup(0), "reopen receiver after datagram rejection");
     Access::parse(receiver, arguments(4097, 'T').toBytes());
     const int beforeNext = messages;
@@ -319,6 +297,7 @@ void polling() {
             "storage pressure evicts oldest whole OSC messages");
     queue.enqueue(heavy); // restore the count without a loss
     receiver.close();
+    Access::socket(receiver).setBindAddress("127.0.0.1");
     require(receiver.setup(0) && receiver.getDroppedMessageCount() == 7 && queue.messageCount() == keep,
             "reopen preserves queued storage and counter");
     receiver.setBufferSize(0);
@@ -408,6 +387,7 @@ void udpStorage() {
     require(UdpAccess::bufferBytes(sender) == 0, "send-only socket allocates no receive buffer");
     for (bool worker : {false, true}) {
         tc::UdpSocket binding;
+        binding.setBindAddress("127.0.0.1");
         binding.setUseThread(worker);
         failReceiveAllocation = true;
         const bool bound = binding.bind(0);
@@ -420,6 +400,7 @@ void udpStorage() {
             OscReceiver osc;
             auto& socket = Access::socket(osc);
             socket.setUseThread(worker);
+            if (!multicast) socket.setBindAddress("127.0.0.1");
             int errors = 0;
             auto error = osc.onParseError.listen([&](std::string&) { ++errors; });
             const auto setup = [&] {
@@ -434,10 +415,12 @@ void udpStorage() {
             require(setup() && osc.isListening() && socket.isValid() &&
                     UdpAccess::bufferBytes(socket) == 65536 && errors == 1,
                     "OSC setup retries successfully after receive allocation failure");
+            require(multicast || oscBoundToLoopback(osc), "OSC unicast storage fixture binds loopback");
             osc.close();
         }
 
         tc::UdpSocket receiver;
+        receiver.setBindAddress("127.0.0.1");
         receiver.setUseThread(worker);
         require(receiver.bind(0, false) && UdpAccess::bufferBytes(receiver) == 0, "bound stopped socket has no receive buffer");
         failReceiveAllocation = true;
