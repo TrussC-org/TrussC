@@ -130,8 +130,9 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
      append copies (including previous components). CFF interpreter
      passes (metrics, outline counting and output) each allow at most 524,288
      interpreter dispatches, including operands and no-output operators inside
-     local/global subroutines. The separate 65,536-call expansion ceiling is
-     retained. Exhaustion rejects the glyph and marks its workspace, independently of
+     local/global subroutines. TrussC also added a cumulative 65,536-call expansion
+     ceiling per pass, separate from upstream's recursion-depth check.
+     Exhaustion rejects the glyph and marks its workspace, independently of
      output vertices or recursion depth. Exhaustion frees
      the in-progress outline. Raster scanline allocation failures return before
      pointer arithmetic. The shared backend reports failures through its owning
@@ -241,6 +242,7 @@ copies of previous components), and checked combined vertex counts. The copy
 allowance also bounds component transforms and propagates whole-shape rejection.
 CFF bounds every glyph interpreter pass to
 524,288 interpreter dispatches, including operands and no-output subroutine bodies,
-while retaining its separate 65,536-call expansion ceiling; raster scanline
+with a separate cumulative 65,536-call expansion ceiling per pass added by TrussC,
+in addition to upstream's recursion-depth check; raster scanline
 allocation failure returns before pointer arithmetic. Keep these patches when
 updating stb and run `documentImports`, `fontSfntCheck`, and ImGui addon tests.
