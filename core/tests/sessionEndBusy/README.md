@@ -7,6 +7,8 @@ not cancelled. From the moment the session-end path starts until the process
 ends, the framework is frozen: only the exit notifications, audio stop and the
 exit log run. No tick, event, App attach/detach, deferred close or window
 creation is admitted, and a Window released by an exit hook is not torn down.
+A window released during the session-end notification is still notified, but
+weak_ptrs to it expire as usual.
 
 The notification reaches the windows open when it starts: main first, then the
 others newest first, each in its own window context, and only the BeforeApp

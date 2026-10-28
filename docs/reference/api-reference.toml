@@ -106,7 +106,7 @@ size_t n = getMicAnalysisBuffer(samples, 1024);
 ```
 
 - 인자는 읽기 전용 `const AudioInBuffer&` 입니다. `data` 는 `const float*` 로, 샘플이 `frameCount * channels` 개 채널이 번갈아 들어 있습니다. 그 밖에 `sampleRate` 와 `framePosition` 도 가집니다.
-- 일반적으로는 나머지는 `App::audioOut` 과 같습니다. 오디오 스레드 규칙, 호출이 시작되는 시점 (첫 `setup()` 이 끝난 뒤. 한 번도 실행되지 않는 App 에는 호출되지 않음), 우선순위, 종료 순서 (`cleanup()` 전에 호출이 멈추고, 실행 중인 호출을 시간 제한 없이 기다림) 도 공통입니다.
+- 그 밖의 동작은 일반적으로 `App::audioOut` 과 같습니다. 오디오 스레드 규칙, 호출이 시작되는 시점 (첫 `setup()` 이 끝난 뒤. 한 번도 실행되지 않는 App 에는 호출되지 않음), 우선순위, 종료 순서 (`cleanup()` 전에 호출이 멈추고, 실행 중인 호출을 시간 제한 없이 기다림) 도 공통입니다.
 - 알려진 문제: [#907](https://github.com/TrussC-org/TrussC/issues/907)(호출되지 않음).
 - macOS에서 앱의 처리 함수가 실행 중일 때 운영 체제가 로그아웃, 다시 시작 또는 종료하면 해당 함수가 일시 정지된 동안 `exit()`가 호출될 수 있습니다. `cleanup()`과 프레임워크 종료 훅은 실행되지 않으며 프로세스가 끝날 때까지 App은 윈도우에 연결된 상태를 유지합니다. `App::exit`을 참고하십시오.
 '''
@@ -5507,20 +5507,23 @@ details.en = '''
 - Set `args.cancel = true` to keep the application running. `args.reason` can supply an explanation when blocking Windows shutdown.
 - The arguments have no `consumed` field, so cancellation does not stop subsequent listeners. The final `cancel` value determines whether the request is accepted.
 - Headless runs also notify this event for `requestExitApp()`, after update processing. `exitApp()` bypasses this event and cannot be cancelled.
+- On macOS, when the operating system logs out, restarts or shuts down while one of the app's handlers is running, this event is not sent and the app ends without asking. See `App::exit`.
 '''
 details.ja = '''
 - ネイティブの終了要求または `requestExitApp()` による要求を受け入れる前に、メインウィンドウのイベント群を通じて、メインスレッドで `ExitRequestEventArgs&` を渡します。サブウィンドウを閉じても発生しません。
 - `args.cancel = true` にすると、アプリケーションを実行し続けられます。`args.reason` には Windows のシャットダウンを妨げる理由を指定できます。
 - 引数に `consumed` はないため、キャンセルしても後続のリスナーは呼ばれます。最後の `cancel` の値で要求を受け入れるかどうかを決めます。
 - ヘッドレス実行でも、`requestExitApp()` による要求を update の処理後に通知します。`exitApp()` はこのイベントを経由せず、キャンセルできません。
+- macOS でアプリの処理が実行中に OS がログアウト、再起動、シャットダウンすると、このイベントは通知されず、アプリは確認なしで終了します。`App::exit` を参照してください。
 '''
 details.ko = '''
 - 네이티브 종료 요청이나 `requestExitApp()`의 요청을 받아들이기 전에 메인 윈도우의 이벤트 모음을 통해 메인 스레드에서 `ExitRequestEventArgs&`를 전달합니다. 보조 윈도우를 닫을 때는 발생하지 않습니다.
 - `args.cancel = true`로 설정하면 애플리케이션을 계속 실행합니다. `args.reason`에는 Windows 종료를 막는 이유를 지정할 수 있습니다.
 - 인수에 `consumed`가 없으므로 취소해도 이후 리스너는 호출됩니다. 마지막 `cancel` 값으로 요청을 받아들일지 결정합니다.
 - 헤드리스 실행에서도 `requestExitApp()`의 요청을 update 처리 후에 알립니다. `exitApp()`은 이 이벤트를 거치지 않으며 취소할 수 없습니다.
+- macOS에서 앱의 처리 함수가 실행 중일 때 운영 체제가 로그아웃, 다시 시작 또는 종료하면 이 이벤트는 발생하지 않으며 앱은 확인 없이 종료됩니다. `App::exit`을 참고하십시오.
 '''
-related = ["ExitRequestEventArgs", "requestExitApp", "exitApp"]
+related = ["ExitRequestEventArgs", "requestExitApp", "exitApp", "App::exit"]
 
 ["CoreEvents::filesDropped"]
 description.en = "Fired when files are dropped onto the window."
