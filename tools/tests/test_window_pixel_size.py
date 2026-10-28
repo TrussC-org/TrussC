@@ -171,6 +171,7 @@ def creation_source(backend, *, native_path=None):
     normalizers = ''
     secondary_transfer = ''
     common_transfer = ''
+    mac_transfers = ''
     win_creator = ''
     if backend == 'win':
         launcher += 'desc.high_dpi = ' + between(header, '    desc.high_dpi = ', ';') + ';'
@@ -190,6 +191,38 @@ def creation_source(backend, *, native_path=None):
         normalizers = '\n'.join(body(shared, 'static inline sapp_window_desc ' + name + '(')
                                 for name in ('_sapp_tc_normalize_main_window', '_sapp_tc_normalize_window'))
         win_creator = body(native, 'static bool _sapp_tc_win32_create_native_window(')
+    elif backend == 'mac':
+        common = body(native, 'static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(')
+        wrapper = body(native, 'static _sapp_tc_window_t* _sapp_tc_mac_create_window(')
+        secondary_entry = body(before(after(native, main), '\nvoid sapp_destroy_window('),
+                               'sapp_window sapp_create_window(')
+        # Replay every statement from descriptor initialization to the actual
+        # constructor call, including any overwrite after normalization. Only
+        # native API types/services are stubbed, and the ObjC bridge is erased.
+        after(main, 'native.window = _sapp_tc_normalize_main_window(d);')
+        after(secondary_entry, 'native.window = _sapp_tc_normalize_window(desc);')
+
+        def entry_transfer(entry, call):
+            block = between(entry, '    _sapp_tc_native_desc native = {};',
+                            '    _sapp_tc_window_t* w = ' + call + ';')
+            return '_sapp_tc_native_desc native = {};' + block + 'return ' + call + ';'
+
+        transfer = entry_transfer(main, '_sapp_tc_mac_create_window_ex(&native, &attrs)')
+        bridge = '(__bridge const void*)'
+        after(transfer, bridge)
+        transfer = transfer.replace(bridge, '(const void*)')
+        secondary_transfer = entry_transfer(secondary_entry, '_sapp_tc_mac_create_window(&native)')
+        common_transfer = 'w->desc = ' + between(common, '    w->desc = ', '    w->swap_interval = ')
+        # Preserve the real secondary wrapper's forwarding, too. A changed
+        # argument or a descriptor overwrite cannot disappear from the probe.
+        after(wrapper, '_sapp_tc_mac_create_window_ex(d, &none)')
+        wrapper = wrapper.replace('static _sapp_tc_window_t*', 'static Descriptor', 1)
+        mac_transfers = ('Descriptor _sapp_tc_mac_create_window_ex(const _sapp_tc_native_desc* d, '
+                         '[[maybe_unused]] const _sapp_tc_mac_window_attrs* attrs) {\n'
+                         'State state; State* w = &state;\n' + common_transfer +
+                         '\nreturn w->desc;\n}\n' + wrapper)
+        normalizers = '\n'.join(body(shared, 'static inline sapp_window_desc ' + name + '(')
+                                for name in ('_sapp_tc_normalize_main_window', '_sapp_tc_normalize_window'))
     else:
         transfer = body(shared, 'static inline sapp_window_desc _sapp_tc_normalize_main_window(')
         transfer = between(transfer, '    window.width = ', '    window.title')
@@ -217,6 +250,7 @@ def creation_source(backend, *, native_path=None):
     return (template.replace('NORMAL_LAUNCHER', normal).replace('HOT_LAUNCHER', hot)
             .replace('WIN32_NORMALIZERS', normalizers).replace('WIN32_NATIVE_CREATOR', win_creator)
             .replace('WIN32_SECONDARY_TRANSFER', secondary_transfer).replace('WIN32_COMMON_TRANSFER', common_transfer)
+            .replace('MAC_TRANSFERS', mac_transfers)
             .replace('LAUNCHER', launcher).replace('SECONDARY', secondary)
             .replace('TRANSFER', transfer).replace('CREATION_GUARD', validation).replace('ARITHMETIC', arithmetic)
             .replace('X11_DIMENSIONS', body(native, 'static bool _sapp_tc_x11_update_dimensions(')))
@@ -240,6 +274,46 @@ class WindowPixelSizeTests(unittest.TestCase):
                 with self.subTest(backend=backend):
                     binary = build_creation_probe(backend, scratch)
                     subprocess.run([str(binary)], check=True)
+
+    def test_mac_detects_dropped_pixel_transfers(self):
+        native = (ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
+        cases = (
+            ('main', 'static bool _sapp_tc_mac_create_main_window(',
+             'native.window = _sapp_tc_normalize_main_window(d);',
+             '\n    native.window._tc_pixel_width = native.window._tc_pixel_height = 0;', ('main',)),
+            ('secondary', 'sapp_window sapp_create_window(',
+             'native.window = _sapp_tc_normalize_window(desc);',
+             '\n    native.window._tc_pixel_width = native.window._tc_pixel_height = 0;', ('secondary',)),
+            ('common', 'static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(',
+             'w->desc = d->window;',
+             '\n    w->desc._tc_pixel_width = w->desc._tc_pixel_height = 0;', ('main', 'secondary')),
+            ('wrapper', 'static _sapp_tc_window_t* _sapp_tc_mac_create_window(',
+             'const _sapp_tc_mac_window_attrs none = {};',
+             '\n    auto copy = *d; copy.window._tc_pixel_width = copy.window._tc_pixel_height = 0; d = &copy;',
+             ('secondary',)),
+        )
+        baseline = creation_source('mac')
+        for name, signature, marker, overwrite, roles in cases:
+            with self.subTest(transfer=name), tempfile.TemporaryDirectory(prefix='window-mac-mutation-') as scratch:
+                # Limit the public entry lookup to macOS, rather than the last
+                # backend's same-named function selected by body().
+                region = before(native, '\nvoid sapp_destroy_window(') if name == 'secondary' else native
+                entry = body(region, signature)
+                self.assertEqual(entry.count(marker), 1)
+                private_header = Path(scratch) / 'sokol_app_tc.h'
+                private_header.write_text(native.replace(entry, entry.replace(marker, marker + overwrite), 1),
+                                          encoding='utf-8')
+                self.assertNotEqual(baseline, creation_source('mac', native_path=private_header))
+                binary = build_creation_probe('mac', scratch, native_path=private_header)
+                for role in roles:
+                    result = subprocess.run([str(binary), role, 'pixels', '1.25'],
+                                            capture_output=True, text=True, encoding='utf-8')
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(f'{role} pixels=1 highDpi=1 dpi=1.25 request=640x400: '
+                                  'creation=800x500 resize=640x400', result.stderr)
+                    self.assertIn('actual.x == expectedNative.x && actual.y == expectedNative.y', result.stderr)
+                    print(f'PASS: macOS {name}/{role} dropped-pixel mutation detected: '
+                          'creation=800x500 resize=640x400')
 
     def test_win32_detects_missing_target_dpi_correction(self):
         native = (ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
@@ -267,7 +341,7 @@ class WindowPixelSizeTests(unittest.TestCase):
     def test_missing_creation_markers_are_named(self):
         read_text = Path.read_text
         # Remove each function/statement marker from a private source view,
-        # including shared normalization, adapters and both Win32 entry points.
+        # including shared normalization, adapters and desktop entry points.
         cases = (
             ('win', 'inline sapp_desc buildWindowDescriptor('),
             ('win', '    const auto& windowTitle'),
@@ -284,6 +358,20 @@ class WindowPixelSizeTests(unittest.TestCase):
             ('win', 'static bool _sapp_tc_win32_create_native_window('),
             ('x11', '    const float scale = '),
             ('mac', 'static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex('),
+            ('mac', 'static bool _sapp_tc_mac_create_main_window('),
+            ('mac', 'static _sapp_tc_window_t* _sapp_tc_mac_create_window('),
+            ('mac', 'sapp_window sapp_create_window('),
+            ('mac', '    _sapp_tc_native_desc native = {};'),
+            ('mac', 'native.window = _sapp_tc_normalize_main_window(d);'),
+            ('mac', 'native.window = _sapp_tc_normalize_window(desc);'),
+            ('mac', '    _sapp_tc_window_t* w = _sapp_tc_mac_create_window_ex(&native, &attrs);'),
+            ('mac', '    _sapp_tc_window_t* w = _sapp_tc_mac_create_window(&native);'),
+            ('mac', '_sapp_tc_mac_create_window_ex(d, &none)'),
+            ('mac', '(__bridge const void*)'),
+            ('mac', '    w->desc = '),
+            ('mac', '    w->swap_interval = '),
+            ('mac', 'static inline sapp_window_desc _sapp_tc_normalize_main_window('),
+            ('mac', 'static inline sapp_window_desc _sapp_tc_normalize_window('),
             ('mac', '[w->window setContentSize:NSMakeSize('),
         )
         for backend, marker in cases:

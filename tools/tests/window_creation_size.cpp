@@ -6,6 +6,7 @@
 #include <cstring>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <limits>
 using LONG = int;
 struct Size {
@@ -17,6 +18,10 @@ struct Descriptor {
     int width = 0, height = 0, x = 0, y = 0, sample_count = 1;
     int _tc_pixel_width = 0, _tc_pixel_height = 0;
     bool high_dpi = true, no_high_dpi = false;
+    int swap_interval = 1, _tc_draw_while_hidden = 0;
+    bool fullscreen = false;
+    int event_cb = 0, tick_cb = 0;
+    const void* mtl_device = nullptr;
     const char* title = nullptr;
     const char* window_title = nullptr;
 };
@@ -52,8 +57,6 @@ struct {
     unsigned (*GetDpiForWindow)(State*) = nullptr;
     bool (*AdjustWindowRectExForDpi)(RECT*, DWORD, bool, DWORD, unsigned) = nullptr;
 } _sapp_tc;
-struct _sapp_tc_native_desc { Descriptor window; };
-WIN32_NORMALIZERS
 bool _sapp_tc_win32_ensure_wndclass() { return true; }
 // Native stubs record client extents. Non-client frame adjustment is identity.
 bool AdjustWindowRectEx(RECT*, DWORD, bool, DWORD) { return true; }
@@ -82,13 +85,34 @@ bool SetWindowPos(State* w, void*, int, int, int width, int height, unsigned) {
 }
 void _sapp_tc_timing_reset(int*) {}
 WIN32_NATIVE_CREATOR
+#else
+struct { void* display = nullptr; struct { void* device = nullptr; } app; } _sapp_tc;
+#endif
+#if defined(TEST_WIN) || defined(TEST_MAC)
+struct _sapp_tc_native_desc {
+    Descriptor window;
+    int swap_interval = 0, title_limit = 0, color_format = 0, depth_format = 0;
+    bool fullscreen = false, draw_while_hidden = false, center_on_create = false;
+};
+WIN32_NORMALIZERS
+#endif
+#ifdef TEST_WIN
 Descriptor commonTransfer(const _sapp_tc_native_desc* d) {
     State state; State* w = &state;
     WIN32_COMMON_TRANSFER
     return w->desc;
 }
-#else
-struct { void* display = nullptr; } _sapp_tc;
+#endif
+#ifdef TEST_MAC
+struct _sapp_tc_mac_window_attrs {
+    bool restorable = false, nearest_magnification = false, take_key_focus_on_create = false;
+};
+constexpr int _sapp_tc_main_event_tramp = 1, _sapp_tc_main_tick_tramp = 2;
+constexpr int SAPP_PIXELFORMAT_RGB10A2 = 1, SAPP_PIXELFORMAT_BGRA8 = 2, SAPP_PIXELFORMAT_DEPTH_STENCIL = 3;
+MAC_TRANSFERS
+Descriptor macSecondaryTransfer(const Descriptor* desc) {
+    WIN32_SECONDARY_TRANSFER
+}
 #endif
 Size roundMac(double width, double height) { return {int(std::ceil(width) * renderScale), int(std::ceil(height) * renderScale)}; }
 namespace internal {
@@ -111,6 +135,8 @@ Descriptor mainTransfer(Descriptor descriptor) {
     _sapp_tc_native_desc native{};
     TRANSFER
     return native.window;
+#elif defined(TEST_MAC)
+    TRANSFER
 #else
     State state; State* w = &state;
     TRANSFER
@@ -129,6 +155,9 @@ Size create(Descriptor descriptor, bool mainWindow) {
     if (!_sapp_tc_win32_create_native_window(&state, L"probe", 0, 0, 0, 0)) return false;
     return state.client;
 #else
+#ifdef TEST_MAC
+    if (!mainWindow) descriptor = macSecondaryTransfer(&descriptor);
+#endif
     State state{descriptor, displayScale, renderScale}; State* w = &state;
     [[maybe_unused]] const Descriptor* d = &descriptor;
     [[maybe_unused]] const int width_pt = descriptor.width, height_pt = descriptor.height;
@@ -156,6 +185,7 @@ int main(int argc, char** argv) {
     for (bool mainWindow : {false, true}) {
         if (argc > 1 && mainWindow != (std::strcmp(argv[1], "main") == 0)) continue;
         if (argc > 2 && pixels != (std::strcmp(argv[2], "pixels") == 0)) continue;
+        if (argc > 3 && dpi != std::strtof(argv[3], nullptr)) continue;
         displayScale = dpi;
         // 640x400 isolates the old integer truncation at the correct scale;
         // other requests also detect using a different pre-window display DPI.
