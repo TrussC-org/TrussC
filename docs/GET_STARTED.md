@@ -25,7 +25,11 @@ Your AI can then find the right docs from a rough question, even when you don't 
 - claude.ai: add the URL above as a custom connector.
 - Other AI tools: any MCP client that supports Streamable HTTP can use the URL.
 
-This is a beta service, so it can be slow or unavailable at busy times. Queries are logged to improve search and kept for about six months. Don't include secrets, credentials or private code.
+You can ask in plain words, including what you want to make, not only API names.
+
+This is a beta service, so it can be slow or unavailable at busy times.
+
+To improve search, queries are logged, kept for about six months and then deleted. IP addresses are stored only as salted hashes, never as they are. Search queries are sent to Jev (typesafe.ai) to pick the relevant docs; IP addresses are not sent. Questions to the chat assistant on trussc.org are also processed by Anthropic (Claude). Don't include personal information, passwords or other secrets, or private code.
 
 ---
 
