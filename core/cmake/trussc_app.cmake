@@ -298,7 +298,10 @@ endif()
         endif()
 
         # Guest: shared library with user code
-        add_library(guest SHARED ${_TC_GUEST_SOURCES})
+        # A separate directory keeps guest-only configuration flags out of the
+        # host and shared core, including on multi-config generators.
+        add_subdirectory("${TRUSSC_DIR}/cmake/hot_reload_guest"
+            "${CMAKE_CURRENT_BINARY_DIR}/tc_hot_reload_guest")
         target_include_directories(guest PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/src"
         )
@@ -327,27 +330,6 @@ endif()
         if(_TC_PUB_LINK_DIRS)
             target_link_directories(guest PRIVATE ${_TC_PUB_LINK_DIRS})
         endif()
-        # Windows: embed debug info into the .obj (/Z7), don't generate a PDB.
-        # If the debugger locks guest.pdb, the rebuild on hot reload fails.
-        # Replace CMake's default /Zi with /Z7 to avoid a D9025 warning.
-        if(MSVC)
-            foreach(_cfg DEBUG RELWITHDEBINFO)
-                string(REGEX REPLACE "/Z[iI]" "/Z7" CMAKE_CXX_FLAGS_${_cfg} "${CMAKE_CXX_FLAGS_${_cfg}}")
-            endforeach()
-            target_compile_options(guest PRIVATE /Z7)
-            set_target_properties(guest PROPERTIES LINK_FLAGS "/DEBUG /PDBALTPATH:none")
-        endif()
-        # Guest: disable codegen optimization to speed up reload iterations.
-        # Host and TrussC keep the project's configured optimization level;
-        # only the hot-reload Guest trades runtime speed for compile speed.
-        # Trailing position ensures these flags override the earlier -O2/-O3
-        # inherited from CMAKE_CXX_FLAGS_<CONFIG>.
-        if(MSVC)
-            target_compile_options(guest PRIVATE /Od)
-        else()
-            target_compile_options(guest PRIVATE -O0)
-        endif()
-
         # Guest: precompile TrussC.h. The header is the dominant cost when
         # parsing each guest .cpp (~2s for ~2700 lines), so caching it once
         # per build dramatically shortens reload turnaround.
