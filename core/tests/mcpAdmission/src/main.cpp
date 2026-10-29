@@ -54,13 +54,15 @@ TC_CORE_TEST_MAIN() {
         check("MCP reentrant depth configuration", mcp::setAdmissionLimits(deeper));
         const string local = string(70, '[') + "0" + string(70, ']');
         const string boundary = string(64, '[') + "0" + string(64, ']');
-        check("local document rejects depth 70 before MCP", parseJson(local).is_null());
-        bool reentered = false, localRejected = false, boundaryAccepted = false;
+        check("local document accepts depth 70 before MCP", !parseJson(local).is_null());
+        bool reentered = false, localAccepted = false, boundaryAccepted = false;
+        string depthWarning;
         auto reentrantLog = getLogger().onLog.listen([&](LogEventArgs& event) {
             if (event.level != LogLevel::Warning || reentered ||
                 event.message.find("[MCP] working memory capacity ") != 0) return;
             reentered = true;
-            localRejected = parseJson(local).is_null();
+            depthWarning = event.message;
+            localAccepted = !parseJson(local).is_null();
             boundaryAccepted = !parseJson(boundary).is_null();
         });
         bool requestRejected = false;
@@ -71,8 +73,10 @@ TC_CORE_TEST_MAIN() {
             (void)value;
         } catch (const mcp::internal::AdmissionError&) { requestRejected = true; }
         check("over-deep MCP request rejected during reentrant log", requestRejected && reentered);
-        check("reentrant local parse retains default depth", localRejected && boundaryAccepted);
-        check("local document rejects depth 70 after MCP", parseJson(local).is_null());
+        check("depth Warning retains the previous exact text", depthWarning ==
+              "[MCP] working memory capacity 96, needed 97 levels; request rejected");
+        check("reentrant local parse uses upstream behavior", localAccepted && boundaryAccepted);
+        check("local document accepts depth 70 after MCP", !parseJson(local).is_null());
         check("reentrant depth regression releases request credits", mcp::internal::workingMemory() == 0);
         check("MCP reentrant depth configuration restored", mcp::setAdmissionLimits(defaults));
     }
@@ -134,7 +138,9 @@ TC_CORE_TEST_MAIN() {
     check("admission limits configuration succeeds", mcp::setAdmissionLimits(defaults));
     const string deepRequest = R"({"jsonrpc":"2.0","id":1,"method":"tools/list","extra":)" +
         string(65, '[') + "0" + string(65, ']') + "}";
-    check("JSON nesting is limited before dispatch", json::parse(mcp::internal::Server::instance().processMessage(deepRequest)).contains("error") &&
+    check("JSON nesting preserves the previous exact admission response",
+        mcp::internal::Server::instance().processMessage(deepRequest) ==
+        R"({"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"MCP admission limit exceeded"}})" &&
         mcp::internal::workingMemory() == 0);
     {
         const auto path = fs::temp_directory_path() / ("mcp-admission-image-" + to_string(getSystemTimeMicros()) + ".tga");
@@ -438,10 +444,13 @@ TC_CORE_TEST_MAIN() {
         check("MCP depth override configured", mcp::setAdmissionLimits(deeper));
         check("MCP configured depth accepts 80 nested arrays", accepts(80));
         check("MCP configured depth still rejects excessive nesting", !accepts(97));
-        bool documentRejected = false;
-        try { auto document = json::parse(requestAtDepth(65)); (void)document; }
-        catch (const json::parse_error&) { documentRejected = true; }
-        check("MCP override restores default document depth after parsing", documentRejected);
+        bool emptyRejected = false;
+        try {
+            mcp::internal::WorkScope scope;
+            (void)mcp::internal::parseRequest(string(97, '[') + string(97, ']'));
+        } catch (const mcp::internal::AdmissionError&) { emptyRejected = true; }
+        check("empty containers retain the structural depth boundary", emptyRejected);
+        check("MCP depth configuration does not affect ordinary parsing", json::parse(requestAtDepth(65)).is_object());
         check("MCP default depth restored", mcp::setAdmissionLimits(defaults));
         check("MCP default accepts 63 nested arrays in a request", accepts(63));
         check("MCP default rejects 65 nested arrays in a request", !accepts(65));
