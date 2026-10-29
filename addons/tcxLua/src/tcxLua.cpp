@@ -1,4 +1,5 @@
 #include "tcxLua.h"
+#include "tcxLuaTextOnly.h"
 #include "TrussC.h"
 
 #include "sol/sol.hpp"
@@ -84,6 +85,13 @@ std::shared_ptr<sol::state> tcxLua::getLuaState(tcxLua::LuaModulePreferences mod
         lua->open_libraries(sol::lib::utf8);
     }
 
+    lua_pushcfunction(lua->lua_state(), tcxLuaInternal::installTextOnlyLoaders);
+    if (lua_pcall(lua->lua_state(), 0, 0, 0) != 0) {
+        sol::error error(sol::stack::get<std::string>(lua->lua_state(), -1));
+        lua_pop(lua->lua_state(), 1);
+        throw error;
+    }
+
     setBindings(lua);
 
     return lua;
@@ -102,7 +110,7 @@ std::string tcxLua::getLuaVersionEstimated(const std::shared_ptr<sol::state>& lu
         end
     )LUA";
     
-    lua->safe_script(luaSource);
+    lua->safe_script(luaSource, "version", sol::load_mode::text);
 
     sol::protected_function_result result = ((*lua)["___internal_estimated_lua_version"])();
 

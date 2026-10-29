@@ -9,7 +9,7 @@ void tcApp::setup() {
     lua = tcx_lua.getLuaState();
 
     const std::string scriptPath = getDataPath("bindcheck.lua");
-    sol::optional<sol::error> result = lua->safe_script_file(scriptPath);
+    sol::optional<sol::error> result = lua->safe_script_file(scriptPath, sol::load_mode::text);
     if (result.has_value()) {
         tcLogError("bindcheck") << "Lua execution failed: " << result.value().what();
     }

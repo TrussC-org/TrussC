@@ -71,7 +71,7 @@ public:
         return true;
     }
 
-    /// @brief Load and run a Lua file with sol::script_pass_on_error.
+    /// @brief Load and run a text Lua file; binary chunks are rejected.
     /// @return true if the file loaded and ran. false on a missing file, a syntax
     ///         error or a runtime error (logged).
     static bool runFile(sol::state& lua, const std::filesystem::path& path);

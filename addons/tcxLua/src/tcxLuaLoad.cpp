@@ -1,4 +1,5 @@
 #include "tcxLua.h"
+#include "tcxLuaTextOnly.h"
 
 namespace {
 int luaLoadTraceback(lua_State* state) {
@@ -43,8 +44,12 @@ int luaLoadFileProtected(lua_State* state) {
         if (r.total < 256u * 1024u * 1024u) r.total += *size;
         return *size ? r.bytes : nullptr;
     };
-    // sol supplies the five-argument spelling for LuaJIT as well.
-    int status = lua_load(state, read, &load, load.name, nullptr);
+#ifdef TCXLUA_USE_LUAJIT
+    // Use the engine's mode-aware API directly, bypassing sol2's Lua 5.1 shim.
+    int status = lua_loadx(state, read, &load, load.name, "t");
+#else
+    int status = lua_load(state, read, &load, load.name, "t");
+#endif
     if (load.total >= 256u * 1024u * 1024u)
         luaLoadLog(trussc::LogLevel::Notice, "Loading a large local script (at least 256 MiB)");
     load.readError = std::ferror(load.file) != 0;
@@ -87,7 +92,7 @@ bool tcxLua::runFile(sol::state& lua, const std::filesystem::path& path) {
             // Converting a numeric error with lua_tostring can itself allocate.
             const char* detail = lua_type(state, -1) == LUA_TSTRING
                 ? lua_tostring(state, -1) : "Lua execution failed (non-string error)";
-            luaLoadLog(trussc::LogLevel::Error, detail);
+            luaLoadLog(trussc::LogLevel::Error, tcxLuaInternal::textOnlyError(detail));
         } else if (load.readError) {
             luaLoadLog(trussc::LogLevel::Error, "Cannot read complete Lua file");
         }

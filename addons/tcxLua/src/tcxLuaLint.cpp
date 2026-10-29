@@ -27,6 +27,8 @@ extern "C" {
 #endif
 }
 
+#include "tcxLuaTextOnly.h"
+
 namespace {
 using View = std::string_view;
 
@@ -39,7 +41,7 @@ struct LintWork {
         if (!lua_checkstack(lua, 4)) throw std::runtime_error("lint stack allocation failed");
     }
     int compile(lua_State* lua, const std::pair<std::string, std::string>& file) {
-        return luaL_loadbuffer(lua, file.second.data(), file.second.size(), file.first.c_str());
+        return luaL_loadbufferx(lua, file.second.data(), file.second.size(), file.first.c_str(), "t");
     }
 };
 
@@ -194,7 +196,7 @@ std::vector<LuaLintIssue> tcxLuaLintUndefinedGlobals(
                         lua_pop(lua, 1);
                         continue; // source syntax errors are reported by the host load path
                     }
-                    const char* detail = lua_tostring(lua, -1);
+                    const char* detail = tcxLuaInternal::textOnlyError(lua_tostring(lua, -1));
                     throw std::runtime_error(detail ? detail : "lint compilation failed");
                 }
 #ifndef TCXLUA_USE_LUAJIT

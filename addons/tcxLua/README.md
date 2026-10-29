@@ -61,21 +61,19 @@ tcxLua::call(*lua, "keyPressed", key);             // arguments are passed on
   and Lua diagnostics include the UTF-8 file name. Local files have no size cap.
 - Both also work on the Web. The owned loading and lint translation units
   enable exception recovery for C++ allocation failures.
-- Source and bytecode modules have no load size cap. Allocation failures use
+- Text source modules have no load size cap. Allocation failures use
   Lua's own "not enough memory" error; loaders do not replace the allocator.
-  Both bundled engines check bytecode ranges and count products before reading
-  or allocating. Binary input is buffered to establish the remaining range;
-  a binary reader must supply one finite complete chunk and is read to EOF.
-  LuaJIT's native embedded `luaJIT_BC_<name>` modules retain their in-process
-  end-marker convention. Buffer allocations use the engine's own GC accounting
-  and allocation path, including PUC's emergency collection and retry.
-  LuaJIT retains its engine representation limits on individual prototypes,
-  strings and lexer scratch buffers (`MSize`/`LJ_MAX_MEM`/`LJ_MAX_BUF`); these
-  are engine limits, not local-file policy caps or a total bytecode-file limit.
-  These structure checks are not an instruction verifier; bytecode retains
-  the authority of executable Lua code.
-- PUC bytecode and lint traversal use the engine's `LUAI_MAXCCALLS` nesting
-  limit (200 by default), covering the prototypes its source parser produces.
+  `runFile` and lint compile in text-only mode (`"t"`). Binary chunks are
+  rejected with the engine's error naming binary input and text mode.
+  For libraries enabled in `LuaModulePreferences`, states from `getLuaState`
+  also restrict `load`, `loadstring` (LuaJIT),
+  `loadfile`, `dofile`, and the Lua-file `require` searcher to text, even when
+  a script requests mode `"b"` or `"bt"`. There is no binary opt-in in these
+  helpers. Hot reload uses `runFile`; the live editor compiles text only.
+  Direct C++ sol2/native engine APIs retain their upstream behavior and are
+  intended for trusted input; they are not subject to this helper policy.
+- Lint traversal uses the engine's `LUAI_MAXCCALLS` nesting limit (200 by
+  default), covering the prototypes its source parser produces.
   Name and diagnostic storage grows with input; compilation has no allocation
   quota. Suggestions use constant scratch storage per comparison, with at most
   64*1024*1024 edit-distance band cells per file. Candidate visits still cost
