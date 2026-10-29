@@ -88,13 +88,17 @@ def main():
                                ("small.wav", ["-c:a", "pcm_s16le"], {}),
                                ("small.ogg", vorbis_args, {"encoder": vorbis})]:
         record(encode(name, codec), "load", **extra)
-    # Preserve a valid M4A prefix, extending locally without another encode.
-    oversized = args.output / "over-encoded.m4a"
-    shutil.copyfile(args.output / "small.m4a", oversized)
-    with oversized.open("r+b") as output:
-        output.truncate(64 * MIB + 1)
-    record(oversized, "reject-encoded")
-    # A complete PCM WAV with a declared rate just above the admitted range.
+    # A complete local WAV above the old encoded-input cap. Sparse zero PCM
+    # keeps fixture creation cheap; the file route must decode every frame.
+    oversized = args.output / "over-encoded.wav"
+    large_bytes = 64 * MIB + 4
+    with oversized.open("wb") as output:
+        output.write(struct.pack("<4sI4s4sIHHIIHH4sI", b"RIFF", 36 + large_bytes,
+                                 b"WAVE", b"fmt ", 16, 1, 2, 48000, 192000, 4, 16,
+                                 b"data", large_bytes))
+        output.truncate(44 + large_bytes)
+    record(oversized, "load-file", frames=large_bytes // 4)
+    # A complete PCM WAV with a unusual declared rate.
     rate, channels, frames = 384001, 2, 32
     data = bytes(frames * channels * 2)
     invalid = args.output / "over-format.wav"
@@ -102,7 +106,7 @@ def main():
                                    b"WAVE", b"fmt ", 16, 1, channels, rate,
                                    rate * channels * 2, channels * 2, 16,
                                    b"data", len(data)) + data)
-    record(invalid, "reject-format", sample_rate=rate, frames=frames)
+    record(invalid, "load", sample_rate=rate, frames=frames)
     # Float PCM is 900 * 48000 * 2 * 4 = 345,600,000 bytes (>256 MiB).
     long = encode("long-notice.m4a", ["-c:a", "aac", "-b:a", "32k"], 900)
     record(long, "notice", duration=900, decoded_pcm_bytes=900 * 48000 * 2 * 4)

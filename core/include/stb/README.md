@@ -174,31 +174,19 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
   as upstream.
 - **Before 2026-09-30**: unmodified upstream nothings/stb v1.22,
   `1ee679ca2ef753a528db5ba6801e1067b40481b8` (2021-07-11).
-- **TrussC patches** (2; search for `STB_VORBIS_VALIDATE_FORMAT` and
-  `TrussC patch` in
-  `../stb_vorbis.c`): opt-in `STB_VORBIS_VALIDATE_FORMAT(channels, rate)`
-  checks the identification header before setup/codebook work. Rejection takes
-  the existing invalid-header error path. `tcSound_impl.cpp` supplies the hook
-  in a scoped per-load format checker, then undefines it. Without the macro,
-  format handling retains its upstream default.
-  The second patch makes `STB_VORBIS_NO_COMMENTS` consume vendor/user strings
-  without allocating them, checking each length byte and string byte against
-  packet/input end. TrussC defines this existing opt-out macro because it does
-  not use comment metadata. The normal comments-enabled configuration is
-  unchanged. Truncated comments fail through the existing invalid-setup path.
-  The earlier setup allocator hooks were removed with the full-load PCM quota;
-  upstream malloc/free still handles codec setup and decoded PCM.
-  SoundBuffer file loads use the bounded encoded-memory reader.
-- **Re-apply on update**: restore identification-header validation before any
-  format-driven setup, and keep the hook definition/scope in `tcSound_impl.cpp`.
-  Restore the checked no-comments parsing path and its macro in the wrapper.
-  Run `audioDecodeBounds`: `Vorbis source format is checked before setup` fails
-  if the format hook is lost. `Vorbis comment length cannot request large raw
-  malloc` observes raw malloc on Linux (standalone and combined harnesses use
-  `--wrap=malloc`); 1 GiB vendor/user claims must fail with small requests and
-  unchanged PCM/metadata. A generated valid comment packet still loads through
-  file and memory entry points. Also run full-load growth, direct PCM malloc/free and
-  file ownership checks in the harnesses below.
+- **Kept patches**: V1 is the pinned sezero fork above, retained for its
+  malformed-input fixes. V3 is the checked `STB_VORBIS_NO_COMMENTS` path:
+  vendor/user strings are consumed without allocation, checking packet/input
+  end. TrussC does not use comments. Comments-enabled behavior is unchanged.
+  Reapply V3 on updates and retain the wrapper's no-comments macro.
+- **Removed patch**: V2 (`STB_VORBIS_VALIDATE_FORMAT`) and its wrapper hook.
+  The fork's own `start_decoder` rejects channels above
+  `STB_VORBIS_MAX_CHANNELS` with `VORBIS_too_many_channels` before setup;
+  no additional TrussC channel check is needed. File loads use the decoder's
+  file API, without the encoded-memory input cap.
+- **Verification**: run the comment-length, direct PCM malloc/free and file
+  ownership checks in `audioDecodeBounds` / `audioDiagnostics`, plus the core
+  sweep after updates.
 - **Covered by**: `core/tests/mediaDecode`, `core/tests/audioDiagnostics`
   (file ownership and decoder growth), and `core/tests/audioDecodeBounds`.
 

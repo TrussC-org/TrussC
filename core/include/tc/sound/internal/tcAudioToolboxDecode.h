@@ -1,35 +1,22 @@
 #pragma once
-#include "tc/sound/internal/tcAudioDecodeBudget.h"
+#include "tc/sound/internal/tcAudioDecode.h"
 
 namespace trussc::internal {
-// AudioFile metadata is inspected before requesting PCM conversion. The OS
-// decoder's private allocations are not controlled by our working allocator.
-inline LoadResult decodeAudioToolbox(AudioFileID file, SoundBuffer& out, AudioDecodeBudget& budget) {
+// AudioToolbox owns its codec allocations; PCM grows as frames are read.
+inline LoadResult decodeAudioToolbox(AudioFileID file, SoundBuffer& out, AudioDecodeStatus& status,
+                                     const std::string& input) {
     AudioStreamBasicDescription source{};
     UInt32 bytes = sizeof(source);
     if (AudioFileGetProperty(file, kAudioFilePropertyDataFormat, &bytes, &source) != noErr ||
-        !budget.format(source.mChannelsPerFrame, source.mSampleRate))
+        (source.mChannelsPerFrame < 1 || !std::isfinite(source.mSampleRate) || source.mSampleRate < 1 ||
+         source.mChannelsPerFrame > UINT32_MAX / sizeof(float)))
         return LoadResult::fail(LoadError::DecodeFailed, "invalid AAC format");
-    UInt64 packets = 0;
-    bytes = sizeof(packets);
-    if (source.mFramesPerPacket &&
-        AudioFileGetProperty(file, kAudioFilePropertyAudioDataPacketCount, &bytes, &packets) == noErr) {
-        if (packets > UINT64_MAX / source.mFramesPerPacket) {
-            budget.reject("AAC packet frames", packets, UINT64_MAX / source.mFramesPerPacket);
-            return LoadResult::fail(LoadError::DecodeFailed, "AAC length rejected; use SoundStream::loadStream()");
-        }
-        if (!budget.pcm(packets * source.mFramesPerPacket, source.mChannelsPerFrame))
-            return LoadResult::fail(LoadError::DecodeFailed, "AAC length rejected; use SoundStream::loadStream()");
-    }
+    if (!status.sampleRateFits(source.mSampleRate, input))
+        return LoadResult::fail(LoadError::DecodeFailed, "AAC sample rate does not fit SoundBuffer's int sample rate");
     ExtAudioFileRef ext = nullptr;
     if (ExtAudioFileWrapAudioFileID(file, false, &ext) != noErr || !ext)
         return LoadResult::fail(LoadError::DecodeFailed, "failed to open AAC converter");
     struct Close { ExtAudioFileRef file; ~Close() { ExtAudioFileDispose(file); } } close{ext};
-    SInt64 stated = 0;
-    bytes = sizeof(stated);
-    if (ExtAudioFileGetProperty(ext, kExtAudioFileProperty_FileLengthFrames, &bytes, &stated) != noErr || stated < 0 ||
-        !budget.pcm(uint64_t(stated), source.mChannelsPerFrame))
-        return LoadResult::fail(LoadError::DecodeFailed, "AAC length rejected; use SoundStream::loadStream()");
     AudioStreamBasicDescription dest{};
     dest.mSampleRate = source.mSampleRate;
     dest.mFormatID = kAudioFormatLinearPCM;
@@ -40,19 +27,20 @@ inline LoadResult decodeAudioToolbox(AudioFileID file, SoundBuffer& out, AudioDe
     dest.mBytesPerFrame = dest.mBytesPerPacket = source.mChannelsPerFrame * sizeof(float);
     if (ExtAudioFileSetProperty(ext, kExtAudioFileProperty_ClientDataFormat, sizeof(dest), &dest) != noErr)
         return LoadResult::fail(LoadError::DecodeFailed, "failed to configure AAC converter");
-    // Bound (security): scratch holds one 4096-frame read. Overflow continues in later reads; encoded-input/format rejection rejects the whole sound and is counted.
+    // Each SDK read uses a UInt32 byte count. Reduce the chunk if needed.
+    const UInt32 chunkFrames = std::min<UInt32>(4096, UINT32_MAX / dest.mBytesPerFrame);
     std::vector<float> pcm, chunk;
-    if (!growAudioVector(chunk, 4096 * source.mChannelsPerFrame, budget))
+    if (!growAudioVector(chunk, size_t(chunkFrames) * source.mChannelsPerFrame, status))
         return LoadResult::fail(LoadError::DecodeFailed, "AAC allocation failed");
-    chunk.resize(4096 * source.mChannelsPerFrame);
+    chunk.resize(size_t(chunkFrames) * source.mChannelsPerFrame);
     for (;;) {
-        UInt32 frames = 4096;
+        UInt32 frames = chunkFrames;
         AudioBufferList buffers{};
         buffers.mNumberBuffers = 1;
         buffers.mBuffers[0].mNumberChannels = source.mChannelsPerFrame;
         buffers.mBuffers[0].mDataByteSize = UInt32(chunk.size() * sizeof(float));
         buffers.mBuffers[0].mData = chunk.data();
-        if (ExtAudioFileRead(ext, &frames, &buffers) != noErr || frames > 4096)
+        if (ExtAudioFileRead(ext, &frames, &buffers) != noErr || frames > chunkFrames)
             return LoadResult::fail(LoadError::DecodeFailed, "AAC read failed");
         if (!frames) break;
         // Re-query source format so a changed stream cannot be published with
@@ -60,14 +48,12 @@ inline LoadResult decodeAudioToolbox(AudioFileID file, SoundBuffer& out, AudioDe
         AudioStreamBasicDescription current{};
         bytes = sizeof(current);
         if (ExtAudioFileGetProperty(ext, kExtAudioFileProperty_FileDataFormat, &bytes, &current) != noErr ||
-            !budget.format(current.mChannelsPerFrame, current.mSampleRate) ||
             current.mChannelsPerFrame != source.mChannelsPerFrame || current.mSampleRate != source.mSampleRate) {
-            budget.reject("AAC format change", current.mChannelsPerFrame, source.mChannelsPerFrame);
+            status.reject("AAC format change", current.mChannelsPerFrame, source.mChannelsPerFrame);
             return LoadResult::fail(LoadError::DecodeFailed, "AAC format changed");
         }
-        if (!appendAudio(pcm, chunk.data(), size_t(frames) * source.mChannelsPerFrame, budget,
-                         chunk.capacity() * sizeof(float)))
-            return LoadResult::fail(LoadError::DecodeFailed, "AAC allocation failed; use SoundStream::loadStream()");
+        if (!appendAudio(pcm, chunk.data(), size_t(frames) * source.mChannelsPerFrame, status))
+            return LoadResult::fail(LoadError::DecodeFailed, "AAC allocation failed");
     }
     if (pcm.empty()) return LoadResult::fail(LoadError::DecodeFailed, "no AAC samples");
     out.channels = int(source.mChannelsPerFrame);

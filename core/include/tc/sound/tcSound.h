@@ -130,81 +130,16 @@ inline size_t decodeReserveSamples(uint64_t headerFrames, int channels, uint64_t
     return (size_t)n;
 }
 
-// Test hook, not a user setting: while nonzero, allocationFits() also
-// refuses any single allocation larger than this many bytes, so a headless
-// test can run the growth policy below against a memory limit on any
-// platform (core/tests/audioDiagnostics). 0, the default, turns it off.
-// State lives in tcSound_impl.cpp.
-void setAllocationLimitForTests(size_t bytes);
-size_t allocationLimitForTests();
-
-// Best-effort allocation preflight. On Web, non-throwing malloc is tried and
-// released first under ALLOW_MEMORY_GROWTH. This does not guarantee a later
-// allocation: full-load audio TUs retain exception catching for vector reserves.
-// Other Web callers may have catching disabled. Native callers catch bad_alloc;
-// here only a test limit can refuse their preflight (setAllocationLimitForTests).
-inline bool allocationFits(size_t bytes) {
-    const size_t limit = allocationLimitForTests();
-    if (limit != 0 && bytes > limit) return false;
-#ifdef __EMSCRIPTEN__
-    // Held in a volatile: the compiler may otherwise drop an unused
-    // malloc / free pair and assume the allocation succeeded.
-    void* volatile p = std::malloc(bytes);
-    if (!p) return false;
-    std::free(p);
-#endif
-    return true;
-}
-
-// Grow the capacity of `buf` to hold at least `needed` samples. The new
-// capacity is twice the current one (geometric growth), or `preferred` when
-// it lies between `needed` and that (a decoder's stated length, so a stream
-// whose length is stated correctly ends without spare capacity). Never more
-// than twice the current capacity, so the growth follows what was actually
-// written.
-//
-// When that size cannot be allocated, smaller steps are tried, the current
-// capacity plus a half, a quarter, an eighth, ... of it, down to the
-// smallest one that still holds `needed`, and last `needed` itself; the
-// first that can be allocated is taken. On the web a size is checked before
-// it is allocated (allocationFits); elsewhere the std::bad_alloc of a failed
-// reserve is caught and the next size tried. A smaller step is only taken
-// after one at most twice its growth failed, so under a fixed memory limit
-// every such step leaves less than half of the room that was left before
-// it: near the limit the buffer is reallocated a logarithmic number of
-// times, not once per decode step, and a load that cannot finish fails as
-// soon as a step no longer fits. (`needed` itself needs no special rule: it
-// is only reached when a step at most twice its growth failed, too.)
-//
-// False, with `buf` unchanged, when even `needed` cannot be allocated.
+// Grow once geometrically. A failed reserve leaves the existing PCM intact.
 inline bool growSampleBuffer(std::vector<float>& buf, size_t needed, size_t preferred = 0) {
-    const size_t capacity = buf.capacity();
-    if (needed <= capacity) return true;
+    if (needed <= buf.capacity()) return true;
     if (needed > buf.max_size()) return false;
-    size_t target = capacity > buf.max_size() / 2 ? buf.max_size() : capacity * 2;
+    size_t target = buf.capacity() > buf.max_size() / 2 ? buf.max_size() : buf.capacity() * 2;
     if (preferred >= needed && preferred < target) target = preferred;
-    if (target < needed) target = needed;
-    // Reserve `n` samples if that can be allocated. target <= max_size(), and
-    // every size tried is at most target, so the byte count cannot wrap. (Web
-    // builds do not catch exceptions; there allocationFits decides.)
-    auto tryReserve = [&buf](size_t n) {
-        if (!allocationFits(n * sizeof(float))) return false;
-        try {
-            buf.reserve(n);
-        } catch (const std::bad_alloc&) {
-            return false;
-        }
-        return true;
-    };
-    if (tryReserve(target)) return true;
-    size_t smallestTried = target;
-    for (size_t step = capacity / 2; step > 0 && capacity + step >= needed; step /= 2) {
-        // Only sizes below what failed
-        if (capacity + step >= target) continue;
-        if (tryReserve(capacity + step)) return true;
-        smallestTried = capacity + step;
-    }
-    return smallestTried != needed && tryReserve(needed);
+    try { buf.reserve(std::max(target, needed)); }
+    catch (const std::bad_alloc&) { return false; }
+    catch (const std::length_error&) { return false; }
+    return true;
 }
 
 } // namespace internal
@@ -594,8 +529,7 @@ public:
         }
         const size_t endFrame = offsetSamples + otherFrames;
         if (samples.size() < needed) {
-            // growSampleBuffer checks the allocation first on the web, where
-            // a failed one aborts instead of throwing
+            // A failed reserve leaves the current samples intact.
             bool grown = false;
             try {
                 grown = internal::growSampleBuffer(samples, needed);
