@@ -38,10 +38,11 @@ if(NOT CGLTF_COPY_SHA256 STREQUAL "ad63ae638f790df8346a2fc7abc56c1a03b46a27e1c1f
     message(FATAL_ERROR "cgltf C1 generated-copy SHA-256 mismatch; review the two insertions in PROVENANCE.md")
 endif()
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/cgltf-safe")
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/cgltf-safe/source.tmp" "${CGLTF_SOURCE}")
-configure_file("${CMAKE_CURRENT_BINARY_DIR}/cgltf-safe/source.tmp"
-    "${CMAKE_CURRENT_BINARY_DIR}/cgltf-safe/tcxGltfCgltf.h" COPYONLY)
-file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/cgltf-safe/source.tmp")
+# file(WRITE) uses native text mode (CRLF on Windows); CONFIGURE with UNIX
+# newlines keeps the on-disk bytes equal to the pinned SHA-256 on every OS.
+# cgltf.h has no @VAR@ or #cmakedefine text for CONFIGURE to expand.
+file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/cgltf-safe/tcxGltfCgltf.h"
+    CONTENT "${CGLTF_SOURCE}" @ONLY NEWLINE_STYLE UNIX)
 
 # Source files
 file(GLOB ADDON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
