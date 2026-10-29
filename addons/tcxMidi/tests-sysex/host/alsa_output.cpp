@@ -1,7 +1,9 @@
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
-// Production ALSA output with only its dlopen boundary replaced by test symbols.
+// Production ALSA output with test symbols for dlopen and counted sleep requests.
 // The encoder is the real libasound codec; no sequencer device is opened.
 #include <cstring>
+#include <chrono>
+void alsaTestSleep(std::chrono::milliseconds duration);
 void* alsaTestSymbol(const char* name);
 #include <libremidi/backends/alsa_seq/midi_out.hpp>
 #include <cstdio>
@@ -14,7 +16,7 @@ int drains = 0, drops = 0, encoded = 0, transient = 0, reads = 0;
 int permanentError = 0;
 bool fatal = false, rejectedLarge = false, outputOnly = false;
 struct Context { bool nonblocking = false; } privateContext;
-int opens = 0, closes = 0;
+int opens = 0, closes = 0, waits = 0;
 int fakeNonblock(snd_seq_t* seq, int value) {
     reinterpret_cast<Context*>(seq)->nonblocking = value == 1;
     return 0;
@@ -68,9 +70,13 @@ void check(bool ok, const char* label) {
 }
 void reset() {
     delivered.clear(); pending.clear(); drains = drops = encoded = transient = 0;
-    permanentError = 0;
+    permanentError = waits = 0;
     fatal = rejectedLarge = false;
 }
+}
+void alsaTestSleep(std::chrono::milliseconds duration) {
+    ++waits;
+    check(duration == std::chrono::milliseconds(1), "each output wait requests one millisecond");
 }
 void* alsaTestSymbol(const char* name) {
 #define MOCK_SYMBOL(symbol, function) if (std::strcmp(name, #symbol) == 0) return reinterpret_cast<void*>(&function)
@@ -97,15 +103,11 @@ int main() {
         Bytes bytes(1048577);
         for (size_t i = 0; i < bytes.size(); ++i) bytes[i] = static_cast<unsigned char>((i * 37 + i / 128) % 128);
         bytes.front() = 0xF0; bytes.back() = 0xF7;
-        const auto start = std::chrono::steady_clock::now();
         auto result = output.send_message(bytes.data(), bytes.size());
-        const auto elapsed = std::chrono::steady_clock::now() - start;
         check(result == stdx::error{} && delivered == bytes && !rejectedLarge && encoded == 4097,
               "real encoder splits reported-size SysEx; all bytes arrive in order");
         check(drains == encoded && pending.empty(), "every chunk drained before success");
-        check(elapsed >= std::chrono::milliseconds(4096), "partial SysEx events are paced on the calling thread");
-        std::printf("1048577-byte send: %lld ms, %d events, immediate mock drains\n",
-            static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()), encoded);
+        check(waits == 4096, "partial SysEx events are paced on the calling thread");
         check(reads == 0, "shared duplex output never reads unrelated input");
         bytes.resize(513); bytes.back() = 0xF7;
         reset(); transient = 2;
