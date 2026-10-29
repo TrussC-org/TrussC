@@ -246,7 +246,7 @@ protected:
         mouseScrolled.notify(args);
         // Return false to allow bubbling to parent (e.g., ScrollContainer).
         // The legacy hook may return true to consume.
-        return onMouseScroll(e.pos, e.scroll);
+        return onMouseScroll(e.pos, e.scroll) || args.consumed;
     }
 
     // Bring the simple-form overloads into scope so the same-named rich

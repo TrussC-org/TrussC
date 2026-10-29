@@ -769,6 +769,11 @@ Dear ImGui integration.
 `getDataPath()`, like `Image::load()`. Absolute paths pass through;
 there is no working-directory fallback.
 
+OOM recovery in `Lut3D::load()` is supported in Release builds, or with
+iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). In MSVC Debug,
+empty strings and `fs::path` storage can allocate iterator proxies before
+the load's recovery guard.
+
 **Features:**
 - Load .cube LUT files
 - Apply color grading to Texture/Fbo

@@ -54,7 +54,7 @@ void ImGuiManager::setup() {
         return ImGui::GetIO().WantCaptureKeyboard;
     };
 
-    // Consume input before it reaches the node tree (BeforeApp). Pointer
+    // Consume input before default listeners and the node tree. Pointer
     // capture follows the press: a gesture imgui claims on press stays
     // imgui's until release, so a drag begun on the canvas is never stolen
     // mid-way, and a press over a panel owns the whole gesture. Move/scroll
@@ -62,34 +62,36 @@ void ImGuiManager::setup() {
     mousePressConsume_ = tc::events().mousePressed.listen([this](tc::MouseEventArgs& e) {
         simgui_tc_set_context(simguiCtx_);
         if (ImGui::GetIO().WantCaptureMouse) { pointerCaptured_ = true; e.consumed = true; }
-    }, tc::EventPriority::BeforeApp);
+    }, -20);
     mouseReleaseConsume_ = tc::events().mouseReleased.listen([this](tc::MouseEventArgs& e) {
         if (pointerCaptured_) { e.consumed = true; pointerCaptured_ = false; }
-    }, tc::EventPriority::BeforeApp);
+    }, -20);
     mouseDragConsume_ = tc::events().mouseDragged.listen([this](tc::MouseDragEventArgs& e) {
         if (pointerCaptured_) e.consumed = true;
-    }, tc::EventPriority::BeforeApp);
+    }, -20);
     mouseMoveConsume_ = tc::events().mouseMoved.listen([this](tc::MouseMoveEventArgs& e) {
         simgui_tc_set_context(simguiCtx_);
         if (ImGui::GetIO().WantCaptureMouse) e.consumed = true;
-    }, tc::EventPriority::BeforeApp);
+    }, -20);
     mouseScrollConsume_ = tc::events().mouseScrolled.listen([this](tc::ScrollEventArgs& e) {
         simgui_tc_set_context(simguiCtx_);
         if (ImGui::GetIO().WantCaptureMouse) e.consumed = true;
-    }, tc::EventPriority::BeforeApp);
+    }, -20);
     keyPressConsume_ = tc::events().keyPressed.listen([this](tc::KeyEventArgs& e) {
         simgui_tc_set_context(simguiCtx_);
         if (ImGui::GetIO().WantCaptureKeyboard) e.consumed = true;
-    }, tc::EventPriority::BeforeApp);
+    }, -20);
     keyReleaseConsume_ = tc::events().keyReleased.listen([this](tc::KeyEventArgs& e) {
         simgui_tc_set_context(simguiCtx_);
         if (ImGui::GetIO().WantCaptureKeyboard) e.consumed = true;
-    }, tc::EventPriority::BeforeApp);
+    }, -20);
 
     // Auto-teardown at the framework's exit event, while sokol_gfx and the
     // event system are still alive. Apps don't need to call imguiShutdown()
     // themselves (calling it stays harmless — shutdown() is idempotent).
-    exitListener_ = tc::events().exit.listen([this]() { shutdown(); });
+    // Mandatory teardown survives clear() from App::exit().
+    exitListener_ = tc::internal::FrameworkEventAccess::listen(tc::events().exit,
+        [this]() { shutdown(); }, tc::EventPriority::AfterApp);
 
     tc::logVerbose() << "ImGui initialized";
 }
@@ -144,7 +146,8 @@ void ImGuiManager::setupOffscreen() {
         if (!offscreenFrameCompleted_) detail::settleWithoutImGuiFrame(imguiCtx_);
         offscreenFrameCompleted_ = false;
     }, 1000);
-    exitListener_ = tc::events().exit.listen([this]() { shutdown(); });
+    exitListener_ = tc::internal::FrameworkEventAccess::listen(tc::events().exit,
+        [this]() { shutdown(); }, tc::EventPriority::AfterApp);
 }
 
 bool ImGuiManager::begin() {
@@ -221,7 +224,7 @@ void ImGuiManager::installDeadlineListeners_() {
             // manager (the same cleanup as at exit) before the host
             // unloads it, so no stale listener stays on the host's events
             // (#416). The host fires it on the main window's events.
-            hotReloadUnloadListener_ = mainEvents->hotReloadUnload.listen([this]() { shutdown(); });
+            hotReloadUnloadListener_ = mainEvents->hotReloadUnload.listen([this]() { shutdown(); }, tc::EventPriority::App);
         }
     }
 }

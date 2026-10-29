@@ -66,16 +66,65 @@ Enumeration follows the TrussC convention (`AudioEngine::listDevices()` etc.):
 `listDevices()` returns `std::vector<MidiDeviceInfo>`, where each
 `MidiDeviceInfo` has `getPortNumber()` / `getName()`.
 
+Port lists and `openPort(index|name)` include virtual ports exposed by the OS,
+including this application's own virtual ports. Prefer opening by name: indices
+shift when ports appear or disappear (name matching uses the first
+case-sensitive substring match, so choose a distinctive name).
+CoreMIDI and ALSA sequencer enable libremidi's virtual-port tracking. WinMM,
+WinUWP and WebMIDI ignore that flag and list whatever their OS/browser API
+exposes; on Windows use a virtual MIDI driver such as loopMIDI. WebMIDI still
+requires browser permission and `midiReady()`.
+
 **`MidiIn`** — `listDevices()`, `openPort(index|name)`, `openVirtualPort(name)`,
 `closePort()`, `isOpen()`, `getName()` (open port), `getPort()` (open port
 number, -1 if virtual), `isVirtual()`, `ignoreTypes(sysex, timing, sensing)`,
 `onMessage` event, and the polling API `hasNewMessage()` / `getNextMessage()` /
 `setBufferSize()` / `getDroppedMessageCount()`. The polling queue holds up to 1024
-messages by default; when it is full the oldest message is dropped (shrinking it
-with `setBufferSize()` also discards the oldest queued ones). Dropped messages are
-counted in `getDroppedMessageCount()` and logged as a warning (at most once every 2 s).
-Raise `setBufferSize()` if you see it.
-Device input or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow drops the oldest messages and is counted.
+messages by default and has a fixed **64 MiB retained-storage budget**, allocated
+on demand. The charge includes message objects, byte-vector capacity, copied
+port-name storage, and queue nodes. Oldest whole messages are evicted before
+admission, using the copy's measured capacity; a single over-budget message is
+rejected whole. `setBufferSize(0)` keeps zero messages; shrinking discards the
+oldest whole messages. These losses count in `getDroppedMessageCount()` since
+construction; querying and close/reopen do not reset the total. Inline events
+are independent of queue eviction.
+
+The first queue loss automatically logs one Warning on the main thread, naming
+the store, limit, needed amount and units, even without another poll. Its once
+gate survives close/reopen. Drain more often, or raise `setBufferSize()` for
+message-count pressure; the storage budget remains fixed. Backend assembly and
+main-thread event delivery are separate stores from this polling queue.
+
+`setBufferSize()` / `getBufferSize()` reason: device input or a stalled reader can
+fill this queue; finite count and storage bounds keep memory finite. Overflow
+and shrinking evict oldest whole messages and increment the counter.
+日本語: デバイス入力や停止した読み手によるメモリ増加を抑えるため、件数と保存量を制限します。
+上限超過時と縮小時は古いメッセージを丸ごと破棄し、カウンターに加算します。
+한국어: 장치 입력이나 멈춘 소비자로 인한 메모리 증가를 막기 위해 메시지 수와 저장량을 제한합니다.
+초과하거나 한도를 줄이면 오래된 메시지 전체를 버리고 카운터에 더합니다.
+
+
+Native SysEx reception has a separate fixed limit of **1,048,576 bytes including
+F0/F7**. Larger messages are discarded whole and counted internally. The first
+SysEx loss per `MidiIn` lifetime emits one **Warning on the main thread**, even
+without polling. These losses do not change `getDroppedMessageCount()`, and
+`setBufferSize()` does not raise the SysEx limit. WebMIDI does not enable SysEx.
+ALSA output splits long SysEx into 256-byte events, drains each event with
+bounded retries, and paces partial SysEx by 1 ms. Pacing and draining run on
+**the calling thread**, at about 256 KB/s (roughly 80 times DIN MIDI). A 1 MB
+SysEx takes about 4 s; calling `sendSysex` from `update()` or `draw()` stalls
+that thread for the entire send. Drain retries and scheduling can add latency.
+Private clients are opened nonblocking; supplied contexts retain their mode.
+A blocking supplied handle can block in the kernel drain beyond the retry bound.
+Supplied contexts concern direct libremidi configuration only; TrussC's own
+MidiOut never supplies a context.
+With immediate mock drains and the real ALSA codec, the 1,048,577-byte
+host send measured **4,369 ms** (4,097 events); real-device timing can vary.
+A send reports success when the sequencer accepts it, or a clear error when the
+send itself fails; a failed send may have delivered a prefix. A receiver whose
+input pool overflows loses data on its side; send success does not acknowledge
+reception, as on the other backends. Other output backends are unchanged.
+See [the local libremidi patch ledger](LIBREMIDI_TRUSSC_MODIFICATIONS.md).
 
 **`MidiOut`** — `listDevices()`, `openPort(index|name)`, `openVirtualPort(name)`,
 `getName()` / `getPort()` / `isVirtual()`, `sendNoteOn/Off`,
@@ -136,6 +185,8 @@ device**, and the original jack labels (e.g. "DAW" / "MIDI") are lost — so
 `openPort(name)` matching that works on macOS/Linux may need a different string
 on Windows. WinMM also truncates port names to **31 characters**. When in doubt,
 print `listDevices()` and match on what you actually see.
+
+loopMIDI drops SysEx larger than its SysexSize setting (KiB, maximum 512) without an error to either side, so the port check's over-cap step cannot run through loopMIDI.
 
 ## Web (Emscripten) note
 

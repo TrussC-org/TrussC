@@ -1,3 +1,4 @@
+#include "../../../../core/tests/common/tcTestFailure.h"
 // =============================================================================
 // tcxOsc tests - headless behavioral test (no window).
 //
@@ -30,8 +31,7 @@
 //   - getNextMessage() alone (no hasNewMessage()) enables the queue
 //   - a full queue drops the oldest messages and counts them in
 //     getDroppedMessageCount(); the default size (1024) takes a 150-message bundle
-//   - drops are logged from the polling calls, at most once every 2 s,
-//     summed since the last report
+//   - first loss warns automatically on the main thread, once per store
 //   - shrinking a filled queue with setBufferSize() counts and reports the
 //     discarded messages as dropped
 //
@@ -49,7 +49,7 @@
 //   - only the tags with data store an argument object (T F N I [ ] none)
 // =============================================================================
 
-#include <tcxOsc.h>
+#include "oscTestAccess.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -122,9 +122,13 @@ static Recv sendAndExpectNone(OscReceiver& rx, OscSender& tx,
 // They avoid 9000/9001 as well: the tcxOsc examples bind those, and 9000 is
 // about the most common OSC port in the wild, so it is the LEAST safe choice
 // on a machine that does OSC work.
-static int bindFirstFree(OscReceiver& rx, const int (&candidates)[4]) {
+static int bindFirstFree(OscReceiver& rx, const int (&candidates)[4], bool unicast = true) {
+    if (unicast) tcx::osc::OscReceiverTestAccess::socket(rx).setBindAddress("127.0.0.1");
     for (int port : candidates) {
-        if (rx.setup(port)) return port;
+        if (rx.setup(port)) {
+            if (unicast) check("unicast fixture binds loopback", oscBoundToLoopback(rx));
+            return port;
+        }
         // setup() creates the socket and registers its listeners even when the
         // bind fails; close() undoes both so the next attempt starts clean.
         rx.close();
@@ -517,7 +521,11 @@ static void listenerTeardown() {
     }
 }
 
+void testStorageBounds();
+
 int main() {
+    tc::getMainThreadId();
+    testStorageBounds();
     const std::string GROUP_A = "239.77.0.1";
     const std::string GROUP_B = "239.77.0.2";
     static const int UNI_PORTS[4] = { 17110, 18110, 19110, 27110 };
@@ -567,14 +575,17 @@ int main() {
                 check("setup failure: exactly one Error log", logs == 1);
                 check("setup failure: receiver is not listening", !second.isListening());
             };
+            tcx::osc::OscReceiverTestAccess::socket(second).setBindAddress("127.0.0.1");
             expectSetupFailure("exclusive: second setup fails",
                 [&] { return second.setup(occupied); }, std::to_string(occupied));
+            tcx::osc::OscReceiverTestAccess::socket(second).setBindAddress("");
             expectSetupFailure("exclusive: shared setup cannot take owned port",
                 [&] { return second.setupMulticast(occupied, GROUP_A, MIF); }, std::to_string(occupied));
 
             // Covers Windows SO_EXCLUSIVEADDRUSE: even a later raw socket with
             // reuse enabled must not be able to bind over the exclusive receiver.
             tc::UdpSocket sharing;
+            sharing.setBindAddress("127.0.0.1");
             check("exclusive: competing socket enables reuse", sharing.setReuseAddress(true));
             check("exclusive: reuse socket cannot take owned port", !sharing.bind(occupied, false));
             sharing.close();
@@ -584,12 +595,14 @@ int main() {
             check("exclusive: bindFirstFree skips occupied port", freePort != 0 && freePort != occupied);
             second.close();
 
+            tcx::osc::OscReceiverTestAccess::socket(second).setBindAddress("");
             expectSetupFailure("multicast setup: invalid group fails",
                 [&] { return second.setupMulticast(freePort, "invalid-group", MIF); }, "Invalid multicast/interface");
             expectSetupFailure("multicast setup: invalid interface fails",
                 [&] { return second.setupMulticast(freePort, GROUP_A, "invalid-interface"); }, "Invalid multicast/interface");
             if (freePort) {
                 tc::UdpSocket reclaimed;
+                reclaimed.setBindAddress("127.0.0.1");
                 check("multicast setup: failed join releases port", reclaimed.bind(freePort, false));
             }
         }
@@ -598,7 +611,7 @@ int main() {
     // Both receivers must receive the same multicast datagram on a shared port.
     {
         OscReceiver first, second;
-        const int port = bindFirstFree(first, MC_PORTS);
+        const int port = bindFirstFree(first, MC_PORTS, false);
         check("shared multicast: candidate port found", port != 0);
         first.close();
         OscMessage message("/shared");
@@ -632,7 +645,8 @@ int main() {
             }
             second.close();
             // Reusing a receiver for setup() must clear its old sharing options.
-            check("exclusive: switch from multicast to unicast", first.setup(port));
+            tcx::osc::OscReceiverTestAccess::socket(first).setBindAddress("127.0.0.1");
+            check("exclusive: switch from multicast to unicast", first.setup(port) && oscBoundToLoopback(first));
             check("exclusive: switched receiver rejects sharing socket",
                   !second.setupMulticast(port, GROUP_A, MIF));
         }
@@ -661,7 +675,7 @@ int main() {
     // IS routable (Linux/Windows CI, local macOS), which is the real coverage.
     {
         OscReceiver rx;
-        const int portMc = bindFirstFree(rx, MC_PORTS);
+        const int portMc = bindFirstFree(rx, MC_PORTS, false);
         check("multicast: receiver bound", portMc != 0);
         if (portMc) std::printf("  (multicast port %d)\n", portMc);
         check("multicast: joinMulticast(A)", rx.joinMulticast(GROUP_A, MIF));
@@ -992,8 +1006,9 @@ int main() {
         rx.close();
     }
 
-    // ----- 9. queue overflow: drop the oldest, count, rate-limited log --------
+    // ----- 9. queue overflow: drop the oldest, count, first-loss log --------
     {
+        tc::internal::drainMainThreadQueue(); // finish reports from earlier receiver lifetimes
         // Log lines from tcxOsc, and whether each came from this (the polling) thread
         std::mutex logMtx;
         std::vector<std::string> oscLogs;
@@ -1087,7 +1102,7 @@ int main() {
             check("queue: setBufferSize(100)", rx.getBufferSize() == 100);
             got = deliverBundle();
             ids = drain();
-            const auto firstReport = std::chrono::steady_clock::now();
+            tc::internal::drainMainThreadQueue();
             check("queue: 100 of 150 kept", got && ids.size() == 100);
             check("queue: dropped == 50", got && rx.getDroppedMessageCount() == 50);
             check("queue: received + dropped == 150",
@@ -1095,34 +1110,16 @@ int main() {
             check("queue: the oldest are the ones dropped",
                   got && ids.size() == 100 && ids.front() == 50 && ids.back() == COUNT - 1);
             const std::string line = lastLog();
-            check("queue: drop logged once by the polling call", logCount() == 1);
-            check("queue: log gives the count, size and setBufferSize()",
-                  has(line, " 50 messages dropped") && has(line, "queue limit 100") &&
-                  has(line, "setBufferSize()"));
-
-            // A second overflow inside 2 s is counted but not logged yet
+            check("queue: first loss logged once automatically", logCount() == 1);
+            check("queue: log names store, limit, needed and units",
+                  has(line, "OSC polling queue") && has(line, "limit 100") &&
+                  has(line, "needed 101 messages"));
             got = deliverBundle();
             ids = drain();
-            const bool within = std::chrono::steady_clock::now() - firstReport <
-                                std::chrono::milliseconds(1500);
+            tc::internal::drainMainThreadQueue();
             check("queue: second overflow counted (total 100)",
                   got && ids.size() == 100 && rx.getDroppedMessageCount() == 100);
-            if (within) {
-                check("queue: no second log line within 2 s", logCount() == 1);
-            } else {
-                std::printf("%-56s %s\n", "queue: rate-limit check SKIPPED (delivery too slow)", "SKIP");
-                std::fflush(stdout);
-            }
-
-            // After 2 s the next polling call logs the drops summed since
-            std::this_thread::sleep_until(firstReport + std::chrono::milliseconds(2100));
-            rx.hasNewMessage();
-            const auto secondReport = std::chrono::steady_clock::now();
-            check("queue: next report after 2 s", logCount() == 2);
-            check("queue: next report sums the drops since the last",
-                  has(lastLog(), " 50 messages dropped"));
-            rx.hasNewMessage();
-            check("queue: nothing new, nothing logged", logCount() == 2);
+            check("queue: no repeat warning", logCount() == 1);
 
             // Shrinking a filled queue: the discarded messages count as dropped
             rx.setBufferSize(1024);
@@ -1131,13 +1128,11 @@ int main() {
             rx.setBufferSize(40);
             check("queue: shrink to 40 counts the 110 discarded",
                   got && rx.getDroppedMessageCount() == 210);
-            std::this_thread::sleep_until(secondReport + std::chrono::milliseconds(2100));
+            tc::internal::drainMainThreadQueue();
             ids = drain();
             check("queue: shrink keeps the newest 40",
                   got && ids.size() == 40 && ids.front() == 110 && ids.back() == COUNT - 1);
-            check("queue: the next poll reports the discarded ones",
-                  logCount() == 3 && has(lastLog(), " 110 messages dropped") &&
-                  has(lastLog(), "queue limit 40"));
+            check("queue: shrinking preserves the first-loss gate", logCount() == 1);
             // 4 bundles delivered in this section
             check("queue: received + dropped == sent over the section",
                   got && received + rx.getDroppedMessageCount() == uint64_t(4 * COUNT));
@@ -1507,7 +1502,7 @@ int main() {
               parsed.getArgCount() == 6 && OscMessageTestAccess::storedArgCount(parsed) == 0);
 
         // A message of only T tags, decoded and built
-        const size_t count = 50000;
+        const size_t count = 4096;
         bytes = rawMessage("/t", std::string(count, 'T'), {});
         parsed = OscMessage::fromBytes(bytes.data(), bytes.size(), ok);
         check("args: only T tags, decoded",
@@ -1517,6 +1512,9 @@ int main() {
         OscMessage built("/t");
         for (size_t i = 0; i < count; ++i) built.addBool(true);
         check("args: only T tags, built", built.getArgCount() == count && built.toBytes() == bytes);
+        OscMessage outbound("/outbound");
+        for (size_t i = 0; i < 50000; ++i) outbound.addBool(true);
+        check("args: app-built outbound messages still grow", outbound.getArgCount() == 50000);
         check("args: only T tags store no argument object",
               OscMessageTestAccess::storedArgCount(parsed) == 0 &&
               OscMessageTestAccess::storedArgCount(built) == 0);

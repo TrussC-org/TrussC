@@ -1,3 +1,4 @@
+#include "impl/tcImportError.h"
 // dear imgui, v1.92.9b
 // (drawing and font code)
 
@@ -137,30 +138,15 @@ namespace IMGUI_STB_NAMESPACE
 #endif
 #endif
 
-#ifdef  IMGUI_ENABLE_STB_TRUETYPE
-#ifndef STB_TRUETYPE_IMPLEMENTATION                         // in case the user already have an implementation in the _same_ compilation unit (e.g. unity builds)
-#ifndef IMGUI_DISABLE_STB_TRUETYPE_IMPLEMENTATION           // in case the user already have an implementation in another compilation unit
-#define STBTT_malloc(x,u)   ((void)(u), IM_ALLOC(x))
-#define STBTT_free(x,u)     ((void)(u), IM_FREE(x))
-#define STBTT_assert(x)     do { IM_ASSERT(x); } while(0)
-#define STBTT_fmod(x,y)     ImFmod(x,y)
-#define STBTT_sqrt(x)       ImSqrt(x)
-#define STBTT_pow(x,y)      ImPow(x,y)
-#define STBTT_fabs(x)       ImFabs(x)
-#define STBTT_ifloor(x)     ((int)ImFloor(x))
-#define STBTT_iceil(x)      ((int)ImCeil(x))
-#define STBTT_strlen(x)     ImStrlen(x)
-#define STBTT_STATIC
-#define STB_TRUETYPE_IMPLEMENTATION
-#else
-#define STBTT_DEF extern
-#endif
-#ifdef IMGUI_STB_TRUETYPE_FILENAME
-#include IMGUI_STB_TRUETYPE_FILENAME
-#else
-#include "imstb_truetype.h"
-#endif
-#endif
+// [TrussC] Import checks also compile when a custom font loader is selected.
+#include "impl/tcFontInput.h"
+#include "impl/tcFontScratch.h"
+#include "tc/utils/tcLog.h"
+#include <memory>
+#include <cstdlib>
+#ifdef IMGUI_ENABLE_STB_TRUETYPE
+// [TrussC] Share the checked framework backend and per-glyph workspace.
+#include "stb/stb_truetype.h"
 #endif // IMGUI_ENABLE_STB_TRUETYPE
 
 #if defined(__GNUC__)
@@ -3238,9 +3224,25 @@ ImFont* ImFontAtlas::AddFontDefaultVector(const ImFontConfig* font_cfg_template)
 #endif
 }
 
+static ImFont* TcAddFontFromMemoryTTF(ImFontAtlas* atlas, void* font_data, int font_data_size, float size_pixels,
+                                      const ImFontConfig* font_cfg_template, const ImWchar* glyph_ranges, const char* filename);
+
 ImFont* ImFontAtlas::AddFontFromFileTTF(const char* filename, float size_pixels, const ImFontConfig* font_cfg_template, const ImWchar* glyph_ranges)
 {
     IM_ASSERT(!Locked && "Cannot modify a locked ImFontAtlas!");
+    // [TrussC] Check the backend addressing range before reading a file font.
+    ImFileHandle tc_font_file = ImFileOpen(filename, "rb");
+    if (!tc_font_file) {
+        if (font_cfg_template == NULL || (font_cfg_template->Flags & ImFontFlags_NoLoadError) == 0)
+            trussc::internal::reportImportError("ImGui", "cannot read or allocate font file: ", filename);
+        return NULL;
+    }
+    const ImU64 tc_font_bytes = ImFileGetSize(tc_font_file);
+    ImFileClose(tc_font_file);
+    if (tc_font_bytes >= trussc::internal::kFontBackendSize) {
+        trussc::internal::reportImportError("ImGui", "font exceeds the backend addressing range: ", filename);
+        return NULL;
+    }
     size_t data_size = 0;
     void* data = ImFileLoadToMemory(filename, "rb", &data_size, 0);
     if (!data)
@@ -3248,7 +3250,7 @@ ImFont* ImFontAtlas::AddFontFromFileTTF(const char* filename, float size_pixels,
         if (font_cfg_template == NULL || (font_cfg_template->Flags & ImFontFlags_NoLoadError) == 0)
         {
             IMGUI_DEBUG_LOG("While loading '%s'\n", filename);
-            IM_ASSERT_USER_ERROR(0, "Could not load font file!");
+            trussc::internal::reportImportError("ImGui", "cannot read or allocate font file: ", filename);
         }
         return NULL;
     }
@@ -3260,40 +3262,143 @@ ImFont* ImFontAtlas::AddFontFromFileTTF(const char* filename, float size_pixels,
         for (p = filename + ImStrlen(filename); p > filename && p[-1] != '/' && p[-1] != '\\'; p--) {}
         ImFormatString(font_cfg.Name, IM_COUNTOF(font_cfg.Name), "%s", p);
     }
-    return AddFontFromMemoryTTF(data, (int)data_size, size_pixels, &font_cfg, glyph_ranges);
+    if (data_size >= trussc::internal::kFontBackendSize) {
+        IM_FREE(data);
+        trussc::internal::reportImportError("ImGui", "font size changed beyond the backend addressing range: ", filename);
+        return NULL;
+    }
+    ImFont* tc_font = TcAddFontFromMemoryTTF(this, data, (int)data_size, size_pixels, &font_cfg, glyph_ranges, filename);
+    if (!tc_font && !font_cfg.FontDataOwnedByAtlas) IM_FREE(data);
+    return tc_font;
 }
 
 // NB: Transfer ownership of 'font_data' to ImFontAtlas, unless font_cfg_template->FontDataOwnedByAtlas == false. Owned TTF buffer will be deleted after Build().
 ImFont* ImFontAtlas::AddFontFromMemoryTTF(void* font_data, int font_data_size, float size_pixels, const ImFontConfig* font_cfg_template, const ImWchar* glyph_ranges)
 {
-    IM_ASSERT(!Locked && "Cannot modify a locked ImFontAtlas!");
+    return TcAddFontFromMemoryTTF(this, font_data, font_data_size, size_pixels, font_cfg_template, glyph_ranges, NULL);
+}
+
+static ImFont* TcAddFontFromMemoryTTF(ImFontAtlas* atlas, void* font_data, int font_data_size, float size_pixels,
+                                      const ImFontConfig* font_cfg_template, const ImWchar* glyph_ranges, const char* filename)
+{
+    IM_ASSERT(!atlas->Locked && "Cannot modify a locked ImFontAtlas!");
     ImFontConfig font_cfg = font_cfg_template ? *font_cfg_template : ImFontConfig();
     IM_ASSERT(font_cfg.FontData == NULL);
-    IM_ASSERT(font_data_size > 100 && "Incorrect value for font_data_size!"); // Heuristic to prevent accidentally passing a wrong value to font_data_size.
+    // [TrussC] Validate the entire sfnt directory before any font importer or copy.
+    std::string tc_reason;
+    bool tc_valid = false;
+    try {
+        tc_valid = font_data && font_data_size >= 0 &&
+            trussc::internal::checkFontSfnt((const unsigned char*)font_data, (size_t)font_data_size, font_cfg.FontNo, tc_reason);
+    } catch (const std::exception&) { tc_reason = "out of memory"; }
+    if (!tc_valid) {
+        if (filename) trussc::internal::reportImportError("ImGui", "font import rejected: ", filename, tc_reason.c_str());
+        else trussc::internal::reportImportError("ImGui", "font import rejected: ", tc_reason.c_str());
+        if (font_cfg.FontDataOwnedByAtlas) IM_FREE(font_data);
+        return NULL;
+    }
     font_cfg.FontData = font_data;
     font_cfg.FontDataSize = font_data_size;
     font_cfg.SizePixels = size_pixels > 0.0f ? size_pixels : font_cfg.SizePixels;
     if (glyph_ranges)
         font_cfg.GlyphRanges = glyph_ranges;
-    return AddFont(&font_cfg);
+    return atlas->AddFont(&font_cfg);
+}
+
+// [TrussC] Validate token spans and decoded counts before the decompressor allocates.
+static bool tcCheckCompressedFont(const unsigned char* bytes, size_t size, size_t& decoded)
+{
+    if (!bytes || size < 22) return false;
+    const auto be = [&](size_t at, size_t width) {
+        size_t value = 0;
+        for (size_t index = 0; index < width; ++index) value = (value << 8) | bytes[at + index];
+        return value;
+    };
+    if (be(0, 4) != 0x57bc0000u || be(4, 4) != 0) return false;
+    decoded = be(8, 4);
+    if (decoded == 0 || decoded >= trussc::internal::kFontBackendSize) return false;
+    size_t produced = 0, at = 16;
+    while (at < size) {
+        const unsigned char token = bytes[at];
+        if (token == 5) return size - at >= 6 && bytes[at + 1] == 0xfa && produced == decoded;
+        size_t header = 0, count = 0, distance = 0;
+        bool literal = false;
+        if (token >= 0x80) header = 2;
+        else if (token >= 0x40) header = 3;
+        else if (token >= 0x20) { header = 1; literal = true; }
+        else if (token >= 0x18) header = 4;
+        else if (token >= 0x10) header = 5;
+        else if (token >= 0x08) { header = 2; literal = true; }
+        else if (token == 7) { header = 3; literal = true; }
+        else if (token == 6) header = 5;
+        else if (token == 4) header = 6;
+        else return false;
+        // Bound (security): compressed token headers, literals and back-references must fit their actual sections. Overflow rejects the whole font and is counted.
+        if (header > size - at) return false;
+        if (token >= 0x80) { count = token - 0x80 + 1; distance = bytes[at + 1] + 1; }
+        else if (token >= 0x40) { count = bytes[at + 2] + 1; distance = be(at, 2) - 0x4000 + 1; }
+        else if (token >= 0x20) count = token - 0x20 + 1;
+        else if (token >= 0x18) { count = bytes[at + 3] + 1; distance = be(at, 3) - 0x180000 + 1; }
+        else if (token >= 0x10) { count = be(at + 3, 2) + 1; distance = be(at, 3) - 0x100000 + 1; }
+        else if (token >= 0x08) count = be(at, 2) - 0x0800 + 1;
+        else if (token == 7) count = be(at + 1, 2) + 1;
+        else if (token == 6) { count = bytes[at + 4] + 1; distance = be(at + 1, 3) + 1; }
+        else { count = be(at + 4, 2) + 1; distance = be(at + 1, 3) + 1; }
+        at += header;
+        if (count > decoded - produced || (literal && count > size - at) || (!literal && distance > produced)) return false;
+        produced += count;
+        if (literal) at += count;
+    }
+    return false;
 }
 
 ImFont* ImFontAtlas::AddFontFromMemoryCompressedTTF(const void* compressed_ttf_data, int compressed_ttf_size, float size_pixels, const ImFontConfig* font_cfg_template, const ImWchar* glyph_ranges)
 {
-    const unsigned int buf_decompressed_size = stb_decompress_length((const unsigned char*)compressed_ttf_data);
+    size_t tc_decoded = 0;
+    if (compressed_ttf_size < 0 || !tcCheckCompressedFont((const unsigned char*)compressed_ttf_data, (size_t)compressed_ttf_size, tc_decoded)) {
+        trussc::internal::reportImportError("ImGui", "invalid compressed font structure");
+        return NULL;
+    }
+    trussc::internal::FontScratchScope tc_workspace((size_t)compressed_ttf_size);
+    // Bound (security): decoded font expansion must fit the per-operation workspace before allocation. Overflow rejects the whole font and is counted.
+    if (tc_decoded > trussc::internal::fontScratchRemaining()) {
+        trussc::internal::reportImportError("ImGui", "compressed font exceeds decoder workspace");
+        return NULL;
+    }
+    const unsigned int buf_decompressed_size = (unsigned int)tc_decoded;
     unsigned char* buf_decompressed_data = (unsigned char*)IM_ALLOC(buf_decompressed_size);
-    stb_decompress(buf_decompressed_data, (const unsigned char*)compressed_ttf_data, (unsigned int)compressed_ttf_size);
+    if (!buf_decompressed_data) { trussc::internal::reportImportError("ImGui", "cannot allocate decoded font"); return NULL; }
+    if (stb_decompress(buf_decompressed_data, (const unsigned char*)compressed_ttf_data, (unsigned int)compressed_ttf_size) != buf_decompressed_size) {
+        IM_FREE(buf_decompressed_data);
+        trussc::internal::reportImportError("ImGui", "compressed font decode failed");
+        return NULL;
+    }
 
     ImFontConfig font_cfg = font_cfg_template ? *font_cfg_template : ImFontConfig();
     IM_ASSERT(font_cfg.FontData == NULL);
     font_cfg.FontDataOwnedByAtlas = true;
-    return AddFontFromMemoryTTF(buf_decompressed_data, (int)buf_decompressed_size, size_pixels, &font_cfg, glyph_ranges);
+    ImFont* tc_font = AddFontFromMemoryTTF(buf_decompressed_data, (int)buf_decompressed_size, size_pixels, &font_cfg, glyph_ranges);
+    return tc_font;
 }
 
 ImFont* ImFontAtlas::AddFontFromMemoryCompressedBase85TTF(const char* compressed_ttf_data_base85, float size_pixels, const ImFontConfig* font_cfg, const ImWchar* glyph_ranges)
 {
-    int compressed_ttf_size = (((int)ImStrlen(compressed_ttf_data_base85) + 4) / 5) * 4;
+    const size_t tc_encoded_size = strlen(compressed_ttf_data_base85);
+    // Bound (abi): base85 groups must be complete and their decoded count must fit int. Overflow rejects the whole font and is counted.
+    if (tc_encoded_size % 5 != 0 || tc_encoded_size / 5 > size_t(INT_MAX) / 4) {
+        trussc::internal::reportImportError("ImGui", "invalid base85 font structure");
+        return NULL;
+    }
+    for (size_t tc_index = 0; tc_index < tc_encoded_size; ++tc_index) {
+        const unsigned char tc_char = (unsigned char)compressed_ttf_data_base85[tc_index];
+        if (tc_char < 35 || tc_char > 120 || tc_char == 92) {
+            trussc::internal::reportImportError("ImGui", "invalid base85 font character");
+            return NULL;
+        }
+    }
+    int compressed_ttf_size = (int)(tc_encoded_size / 5 * 4);
     void* compressed_ttf = IM_ALLOC((size_t)compressed_ttf_size);
+    if (!compressed_ttf) { trussc::internal::reportImportError("ImGui", "cannot allocate base85 font"); return NULL; }
     Decode85((const unsigned char*)compressed_ttf_data_base85, (unsigned char*)compressed_ttf);
     ImFont* font = AddFontFromMemoryCompressedTTF(compressed_ttf, compressed_ttf_size, size_pixels, font_cfg, glyph_ranges);
     IM_FREE(compressed_ttf);
@@ -4699,7 +4804,9 @@ static bool ImGui_ImplStbTrueType_FontSrcInit(ImFontAtlas* atlas, ImFontConfig* 
 {
     IM_UNUSED(atlas);
 
-    ImGui_ImplStbTrueType_FontSrcData* bd_font_data = IM_NEW(ImGui_ImplStbTrueType_FontSrcData);
+    auto* bd_font_data = (ImGui_ImplStbTrueType_FontSrcData*)IM_ALLOC(sizeof(ImGui_ImplStbTrueType_FontSrcData));
+    if (!bd_font_data) { trussc::internal::reportImportError("ImGui", "cannot allocate font importer"); return false; }
+    IM_PLACEMENT_NEW(bd_font_data) ImGui_ImplStbTrueType_FontSrcData();
     IM_ASSERT(src->FontLoaderData == NULL);
 
     // Initialize helper structure for font loading and verify that the TTF/OTF data is correct
@@ -4707,13 +4814,13 @@ static bool ImGui_ImplStbTrueType_FontSrcInit(ImFontAtlas* atlas, ImFontConfig* 
     if (font_offset < 0)
     {
         IM_DELETE(bd_font_data);
-        IM_ASSERT_USER_ERROR(0, "stbtt_GetFontOffsetForIndex(): FontData is incorrect, or FontNo cannot be found.");
+        trussc::internal::reportImportError("ImGui", "invalid font face offset");
         return false;
     }
     if (!stbtt_InitFont(&bd_font_data->FontInfo, (const unsigned char*)src->FontData, font_offset))
     {
         IM_DELETE(bd_font_data);
-        IM_ASSERT_USER_ERROR(0, "stbtt_InitFont(): failed to parse FontData. It is correct and complete? Check FontDataSize.");
+        trussc::internal::reportImportError("ImGui", "invalid font source data");
         return false;
     }
     src->FontLoaderData = bd_font_data;
@@ -4784,6 +4891,12 @@ static bool ImGui_ImplStbTrueType_FontBakedLoadGlyph(ImFontAtlas* atlas, ImFontC
     const float scale_for_raster_x = bd_font_data->ScaleFactor * baked->Size * rasterizer_density * oversample_h;
     const float scale_for_raster_y = bd_font_data->ScaleFactor * baked->Size * rasterizer_density * oversample_v;
 
+    trussc::internal::FontScratchScope tc_metrics((size_t)src->FontDataSize);
+    if (!trussc::internal::fontGlyphRangeFits(&bd_font_data->FontInfo, (size_t)src->FontDataSize, glyph_index) ||
+        !trussc::internal::fontGlyphScaleFits(&bd_font_data->FontInfo, glyph_index, scale_for_raster_x, scale_for_raster_y) || tc_metrics.failed()) {
+        trussc::internal::reportImportError("ImGui", "glyph metrics exceed the raster backend range");
+        return false;
+    }
     // Obtain size and advance
     int x0, y0, x1, y1;
     int advance, lsb;
@@ -4807,8 +4920,18 @@ static bool ImGui_ImplStbTrueType_FontBakedLoadGlyph(ImFontAtlas* atlas, ImFontC
     const bool is_visible = (x0 != x1 && y0 != y1);
     if (is_visible)
     {
-        const int w = (x1 - x0 + oversample_h - 1);
-        const int h = (y1 - y0 + oversample_v - 1);
+        const int64_t tc_width = int64_t(x1) - x0 + oversample_h - 1;
+        const int64_t tc_height = int64_t(y1) - y0 + oversample_v - 1;
+        // Bound (gpu): glyph scratch must fit the atlas axes and int-indexed bitmap storage. Overflow rejects the whole glyph and is counted.
+        if (tc_width <= 0 || tc_height <= 0 || tc_width > atlas->TexMaxWidth || tc_height > atlas->TexMaxHeight ||
+            tc_width > INT_MAX / tc_height) {
+            trussc::internal::reportImportError("ImGui", "glyph raster dimensions exceed the atlas range");
+            return false;
+        }
+        const int w = (int)tc_width;
+        const int h = (int)tc_height;
+        trussc::internal::FontScratchScope tc_scratch((size_t)src->FontDataSize, size_t(w) * size_t(h));
+        if (tc_scratch.failed()) { trussc::internal::reportImportError("ImGui", "glyph bitmap exceeds raster workspace"); return false; }
         ImFontAtlasRectId pack_id = ImFontAtlasPackAddRect(atlas, w, h);
         if (pack_id == ImFontAtlasRectId_Invalid)
         {
@@ -4820,10 +4943,14 @@ static bool ImGui_ImplStbTrueType_FontBakedLoadGlyph(ImFontAtlas* atlas, ImFontC
 
         // Render
         stbtt_GetGlyphBitmapBox(&bd_font_data->FontInfo, glyph_index, scale_for_raster_x, scale_for_raster_y, &x0, &y0, &x1, &y1);
-        ImFontAtlasBuilder* builder = atlas->Builder;
-        builder->TempBuffer.resize(w * h * 1);
-        unsigned char* bitmap_pixels = builder->TempBuffer.Data;
-        memset(bitmap_pixels, 0, w * h * 1);
+        std::unique_ptr<unsigned char, decltype(&std::free)> tc_bitmap(
+            (unsigned char*)std::calloc(size_t(w), size_t(h)), &std::free);
+        if (!tc_bitmap) {
+            ImFontAtlasPackDiscardRect(atlas, pack_id);
+            trussc::internal::reportImportError("ImGui", "cannot allocate glyph bitmap");
+            return false;
+        }
+        unsigned char* bitmap_pixels = tc_bitmap.get();
 
         // Render with oversampling
         // (those functions conveniently assert if pixels are not cleared, which is another safety layer)
@@ -4831,6 +4958,11 @@ static bool ImGui_ImplStbTrueType_FontBakedLoadGlyph(ImFontAtlas* atlas, ImFontC
         stbtt_MakeGlyphBitmapSubpixelPrefilter(&bd_font_data->FontInfo, bitmap_pixels, w, h, w,
             scale_for_raster_x, scale_for_raster_y, 0, 0, oversample_h, oversample_v, &sub_x, &sub_y, glyph_index);
 
+        if (tc_scratch.failed()) {
+            ImFontAtlasPackDiscardRect(atlas, pack_id);
+            trussc::internal::reportImportError("ImGui", "glyph workspace could not be allocated");
+            return false;
+        }
         const float ref_size = baked->OwnerFont->Sources[0]->SizePixels;
         const float offsets_scale = (ref_size != 0.0f) ? (baked->Size / ref_size) : 1.0f;
         float font_off_x = ImFloor(src->GlyphOffset.x * offsets_scale + 0.5f); // Snap scaled offset.

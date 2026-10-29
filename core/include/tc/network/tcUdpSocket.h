@@ -26,7 +26,7 @@
     #define INVALID_SOCKET_HANDLE (-1)
 #endif
 namespace trussc {
-namespace internal { struct UdpSocketTestAccess; struct UdpSocketLifecycleTestAccess; }
+namespace internal { struct UdpSocketBindAddressTestAccess; struct UdpSocketTestAccess; struct UdpSocketLifecycleTestAccess; struct ExternalUdpDeliveryTestAccess; }
 // ---------------------------------------------------------------------------
 // UDP receive event arguments
 // ---------------------------------------------------------------------------
@@ -53,12 +53,19 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
         std::atomic<bool> closed{false};   // shut down by close(); never reused
         std::mutex mutex;
     };
+    struct BindConfiguration {
+        std::mutex mutex;
+        std::string address;
+        std::string error;
+    };
     struct State : std::enable_shared_from_this<State> {
-        explicit State(std::shared_ptr<Socket> socket = std::make_shared<Socket>())
-            : socket_(std::move(socket)) {}
+        explicit State(std::shared_ptr<Socket> socket = std::make_shared<Socket>(),
+                       std::shared_ptr<BindConfiguration> bindConfiguration = std::make_shared<BindConfiguration>())
+            : socket_(std::move(socket)), bindConfiguration_(std::move(bindConfiguration)) {}
         internal::EventSnapshotDelivery<UdpReceiveEventArgs> onReceive;
         internal::EventSnapshotDelivery<UdpErrorEventArgs> onError;
         bool create();
+        void setBindAddress(const std::string& address);
         bool bind(int port, bool startReceiving = true);
         bool connect(const std::string& host, int port);
         void close();
@@ -68,7 +75,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
         bool send(const std::string& message);
         int receive(void* buffer, size_t bufferSize);
         int receive(void* buffer, size_t bufferSize, std::string& remoteHost, int& remotePort);
-        void startReceiving();
+        bool startReceiving();
         void stopReceiving();
         bool isReceiving() const { return receiving_.load(); }
         bool setNonBlocking(bool nonBlocking);
@@ -104,8 +111,10 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
         ErrorLogState errorLogs_[3];
         std::mutex errorLogMutex_;
         std::shared_ptr<Socket> socket_;
+        // Shared across receive runs so a setter on a retired State remains effective.
+        std::shared_ptr<BindConfiguration> bindConfiguration_;
         int localPort_ = 0;
-        bool bound_ = false;
+        std::atomic<bool> bound_{false};
         bool reuseAddress_ = false;
         bool reusePort_ = false;
         std::string connectedHost_;
@@ -122,7 +131,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
         EventListener updateListener_;
         // Bound (platform): a UDP datagram fits within the IP length limit; a fixed receive buffer avoids per-packet growth. Overflow truncates an oversized datagram on POSIX or fails the receive on Windows.
         static constexpr size_t RECEIVE_BUFFER_SIZE = 65536;
-        std::vector<char> receiveBuffer_ = std::vector<char>(RECEIVE_BUFFER_SIZE);
+        std::vector<char> receiveBuffer_; // allocated only before publishing a receive run
     };
     std::shared_ptr<Socket> socketOwner_ = std::make_shared<Socket>();
     internal::AtomicSharedPtr<State> state_{std::make_shared<State>(socketOwner_)};
@@ -166,6 +175,13 @@ public:
     // -------------------------------------------------------------------------
     // Create socket (usually not needed as bind/connect auto-create)
     bool create();
+    // Choose a numeric IPv4 listen address. Empty or "0.0.0.0" selects every
+    // interface (default); "127.0.0.1" accepts traffic from this machine only.
+    // Invalid input, IPv6 and nonlocal addresses make bind() return false
+    // and report onError. Configure before bind().
+    // A change while bound (including stopped reception) logs a Warning,
+    // leaves the active socket unchanged, and applies after close() and bind().
+    void setBindAddress(const std::string& address);
     // Bind port for receiving
     // startReceiving=true automatically starts receive thread
     // Without setReuseAddress(true) / setReusePort(true) the port is exclusive
@@ -271,6 +287,8 @@ private:
     std::shared_ptr<internal::EventSnapshotDelivery<UdpErrorEventArgs>::Target> onErrorTarget_;
     void attachTargets();
     friend struct internal::UdpSocketTestAccess;
+    friend struct internal::UdpSocketBindAddressTestAccess;
+    friend struct internal::ExternalUdpDeliveryTestAccess;
     friend struct internal::UdpSocketLifecycleTestAccess;
     using ErrorKind = State::ErrorKind;
     void notifyError(const std::string& message, int code = 0);

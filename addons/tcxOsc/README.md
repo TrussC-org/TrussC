@@ -115,15 +115,41 @@ Polling enables an internal buffer on the first `hasNewMessage()` or `getNextMes
 call. Pick polling unless you specifically need lowest latency — it's the simpler,
 footgun-free path.
 
-Untrusted senders or a stalled reader can fill this queue; a fixed cap keeps memory finite. Overflow drops the oldest messages and is counted.
+Untrusted senders or a stalled reader can fill this queue; the message cap and the retained-storage budget below keep memory finite. Overflow drops the oldest whole messages and is counted.
 
-The buffer holds up to 1024 messages by default (each message of a bundle counts as
-one). If more arrive before `update()` drains them, the oldest are dropped; shrinking
-the limit with `setBufferSize()` also discards the oldest queued messages. Either way
-the messages count as dropped: `getDroppedMessageCount()` is the number received but never
-handed to your code. Drops are logged as a warning from the polling calls, at most once
-every 2 s with the count since the last report. If you see that warning, raise the
-limit with `setBufferSize()` (or drain more often).
+The queue defaults to 1024 messages and also has a fixed **64 MiB retained-storage
+budget**, including message/argument objects, string and blob capacities, and
+queue nodes. Storage is allocated on demand. Both limits evict the oldest whole
+messages before admission, using the copy's measured capacity; a single message
+over the storage budget is rejected whole. `setBufferSize(0)` keeps zero messages.
+Shrinking also drops the oldest whole messages. `getDroppedMessageCount()` counts queue losses since
+construction and never resets on query or close/reopen. Queue loss does not
+suppress inline events.
+
+The first queue loss automatically logs one Warning on the main thread, even
+without another poll. It names the store, limit, needed amount and units; its
+once gate survives close/reopen. Drain more often, or raise `setBufferSize()` if
+the message-count limit is the constraint; the storage budget stays fixed.
+
+`setBufferSize()` / `getBufferSize()` reason: untrusted senders or a stalled
+reader can fill the queue; finite count and storage bounds keep memory finite.
+Overflow evicts oldest whole messages and increments the counter.
+日本語: 外部の送信者や停止した読み手によるメモリ増加を抑えるため、件数と保存量を制限します。
+上限超過時と縮小時は古いメッセージを丸ごと破棄し、カウンターに加算します。
+한국어: 외부 송신자나 멈춘 소비자로 인한 메모리 증가를 막기 위해 메시지 수와 저장량을 제한합니다.
+초과하거나 한도를 줄이면 오래된 메시지 전체를 버리고 카운터에 더합니다.
+
+Incoming packets (including the public `fromBytes()` parsers) are preflighted
+without allocation before decoding: at most **65,536 bytes**, **16 bundle levels**,
+and **4096 work units** across the entire outer packet. Each bundle element and
+each argument type tag counts once, including nested elements and tags without
+data. Over-limit packets are rejected whole; the next valid packet can proceed.
+The receiver reports the first limit loss for its datagram preflight store with
+a separate lifetime Warning. Rejected datagrams are not queue-message losses.
+The parsing workspace is separate from the queue budget: admitted wire bytes,
+bounded argument/element objects and their vector growth slack, plus the decoded
+tree and the currently dispatched message copy. Main-thread event delivery is a
+separate store from the polling queue.
 
 ```cpp
 // Polling style — all on the main thread, no locks:
@@ -232,7 +258,7 @@ bool     hasNewMessage();
 bool     getNextMessage(OscMessage& out);
 void     setBufferSize(size_t);        // default 1024; oldest dropped when full
 size_t   getBufferSize() const;
-uint64_t getDroppedMessageCount() const;  // received but never handed out (also logged)
+uint64_t getDroppedMessageCount() const;  // cumulative queue losses; first loss warns automatically
 ```
 
 > **`onBundleReceived`** hands each listener the parsed bundle itself, not a copy,
@@ -268,3 +294,5 @@ example prints in its title bar.
 
 MIT (author: tettou771). No third-party dependencies — the OSC codec is implemented
 here directly on top of the core `UdpSocket`.
+
+OOM guarantees for public parser results apply to Release builds, or iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). Preflight itself allocates no storage, but constructing or returning an empty `OscMessage` or `OscBundle` can allocate STL iterator proxies in MSVC Debug. Persistent failure tests for those result constructions SKIP with a reason when iterator debugging is enabled.

@@ -285,7 +285,7 @@ private:
     void registerListener() {
         updateListener_ = events().update.listen([this]() {
             this->update(static_cast<float>(getDeltaTime()));
-        });
+        }, EventPriority::BeforeApp);
     }
 
     void update(float deltaTime) {

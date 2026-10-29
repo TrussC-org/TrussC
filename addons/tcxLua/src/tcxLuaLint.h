@@ -13,7 +13,7 @@
 //
 // Notes:
 //  * Plain Lua 5.4 only. With LuaJIT (TCXLUA_USE_LUAJIT) the bytecode format
-//    differs, so the lint is a no-op that reports no issues.
+//    differs, so only compilation/bytecode structure checks run on that engine.
 //  * Dynamic global access (_G["x"], rawset) is invisible to the scan; a read
 //    of such a name is a false positive. Escape hatch: assign the name once
 //    (even `name = nil` counts as a definition).
@@ -32,8 +32,13 @@ struct LuaLintIssue {
 };
 
 // Lint the given (chunkName, code) list against lua's current globals
-// (bind everything BEFORE calling). Chunks that fail to compile are skipped —
+// (bind everything BEFORE calling). Source chunks with syntax errors are skipped —
 // the host's normal load path reports syntax errors with better context.
+// A binary-structure/depth/allocation/lookup failure rejects that file's lint
+// results and returns one diagnostic with its chunk name and line 0. Other
+// files retain their results. Failure while building the shared global-name
+// snapshot returns a "[lint]" diagnostic. If a failure diagnostic cannot be
+// allocated, reports Error to stderr and returns an empty vector without throwing.
 std::vector<LuaLintIssue> tcxLuaLintUndefinedGlobals(
     lua_State* lua,
     const std::vector<std::pair<std::string, std::string>>& files);

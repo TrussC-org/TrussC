@@ -174,6 +174,7 @@ inline MouseMoveEventArgs toMoveArgs(const MouseEventRaw& m) {
     a.pos = m.pos; a.globalPos = m.globalPos;
     a.delta = m.delta; a.globalDelta = m.globalDelta;
     a.shift = m.shift; a.ctrl = m.ctrl; a.alt = m.alt; a.super = m.super;
+    a.consumed = m.consumed;
     a.syncLegacy();
     return a;
 }
@@ -184,8 +185,21 @@ inline MouseDragEventArgs toDragArgs(const MouseEventRaw& m) {
     a.delta = m.delta; a.globalDelta = m.globalDelta;
     a.button = m.button;
     a.shift = m.shift; a.ctrl = m.ctrl; a.alt = m.alt; a.super = m.super;
+    a.consumed = m.consumed;
     a.syncLegacy();
     return a;
+}
+
+// Typed input reaches the App unchanged; only the tree uses the raw carrier.
+template<class T>
+inline MouseEventRaw toRaw(const T& a) {
+    MouseEventRaw m;
+    m.pos = a.pos; m.globalPos = a.globalPos;
+    m.delta = a.delta; m.globalDelta = a.globalDelta;
+    if constexpr (requires { a.button; }) m.button = a.button;
+    m.shift = a.shift; m.ctrl = a.ctrl; m.alt = a.alt; m.super = a.super;
+    m.consumed = a.consumed;
+    return m;
 }
 
 } // namespace internal

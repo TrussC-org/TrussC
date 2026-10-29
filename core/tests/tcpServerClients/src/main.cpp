@@ -198,7 +198,7 @@ static int freePort() {
     if (s == kBadSocket) return 0;
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = 0;
     int port = 0;
     if (::bind(s, (sockaddr*)&addr, sizeof(addr)) == 0) {
@@ -437,6 +437,7 @@ struct WarningCounter {
 // -----------------------------------------------------------------------------
 static void testReclaim() {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     const int port = startOnFreePort(server, -1);
     check("reclaim: server started", port != 0);
     if (!port) return;
@@ -537,6 +538,7 @@ static void testReclaim() {
 static void testLimit() {
     WarningCounter warnings;
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     const int kLimit = 4;
     const int port = startOnFreePort(server, kLimit);
     check("limit: server started with maxClients = 4", port != 0);
@@ -590,6 +592,7 @@ static void testLimit() {
 static void testDefaultLimit() {
     WarningCounter warnings;
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     const int port = startOnFreePort(server, -1);
     check("default: server started with the default limit", port != 0);
     if (!port) return;
@@ -616,11 +619,13 @@ static void testDefaultLimit() {
 // -----------------------------------------------------------------------------
 static void testPortInUse() {
     TcpServer first;
+    first.setBindAddress("127.0.0.1");
     const int port = startOnFreePort(first, -1);
     check("port in use: first server started", port != 0);
     if (!port) return;
 
     TcpServer second;
+    second.setBindAddress("127.0.0.1");
     check("port in use: a second server on that port fails to start", !second.start(port));
     check("port in use: the second server is not running", !second.isRunning());
     check("port in use: the first server is still running", first.isRunning());
@@ -672,6 +677,7 @@ static void testRestartSamePort(bool serverClosesFirst) {
     auto name = [&](const char* what) { return prefix + what; };
 
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     EventListener echo = server.onReceive.listen([&](TcpServerReceiveEventArgs& e) {
         server.sendAsync(e.clientId, string(e.data.begin(), e.data.end()));
     });
@@ -721,6 +727,7 @@ static void testListenerTeardown() {
     // touches the server on its way out, so the destruction has to wait for it.
     {
         auto server = make_unique<TcpServer>();
+        server->setBindAddress("127.0.0.1");
         TcpServer* srv = server.get();
         atomic<bool> listenerDone{false};
         EventListener sub = server->onReceive.listen([&, srv](TcpServerReceiveEventArgs& e) {
@@ -747,6 +754,7 @@ static void testListenerTeardown() {
     // though it joins none of the server's threads
     {
         TcpServer server;
+        server.setBindAddress("127.0.0.1");
         atomic<bool> stopped{false};
         EventListener sub = server.onReceive.listen([&](TcpServerReceiveEventArgs&) {
             server.stop();
@@ -774,6 +782,7 @@ static void testListenerTeardown() {
     // there is refused rather than attempted.
     {
         TcpServer server;
+        server.setBindAddress("127.0.0.1");
         atomic<int> connects{0};
         atomic<int> oldPort{0};
         atomic<bool> restartRefused{false};
@@ -847,6 +856,7 @@ static void stopFromOnErrorAfterSendTimeout() {
     Watchdog dog(prefix, 20000);
 
     auto server = make_unique<TcpServer>();
+    server->setBindAddress("127.0.0.1");
     TcpServer* srv = server.get();
     srv->setSendTimeout(0.3f);
     // This teardown scenario deliberately sends one larger finite payload.
@@ -924,6 +934,7 @@ static void destroyWhileWriterListenerRuns(bool viaStop) {
     Watchdog dog(prefix.c_str(), 20000);
 
     auto server = make_unique<TcpServer>();
+    server->setBindAddress("127.0.0.1");
     TcpServer* srv = server.get();
     atomic<bool> listenerIn{false}, callReturned{false}, listenerDone{false};
     EventListener onSent = srv->onSendComplete.listen([&, srv](TcpSendCompleteEventArgs& e) {
@@ -967,6 +978,7 @@ static void crossDisconnectFromTwoListeners() {
     Watchdog dog(prefix, 20000);
 
     auto server = make_unique<TcpServer>();
+    server->setBindAddress("127.0.0.1");
     TcpServer* srv = server.get();
     atomic<int> inside{0}, returned{0};
     mutex seenMutex;
@@ -1026,6 +1038,7 @@ static void disconnectAllFromTwoListeners(bool fromWriter) {
     Watchdog dog(prefix.c_str(), 20000);
 
     auto server = make_unique<TcpServer>();
+    server->setBindAddress("127.0.0.1");
     TcpServer* srv = server.get();
     atomic<int> inside{0}, returned{0};
     mutex seenMutex;
@@ -1092,6 +1105,7 @@ static void disconnectAllWhileAClientConnects() {
     Watchdog dog(prefix, 20000);
 
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     atomic<int> firstId{-1}, secondId{-1};
     atomic<bool> listenerIn{false}, secondJoined{false};
     atomic<rawsocket_t> second{kBadSocket};
@@ -1166,6 +1180,7 @@ static void concurrentStopWithAcceptThread(bool fromWriter, bool acceptLast) {
     Watchdog dog(prefix.c_str(), 20000);
 
     auto server = make_unique<TcpServer>();
+    server->setBindAddress("127.0.0.1");
     TcpServer* srv = server.get();
     atomic<int> firstId{-1};
     atomic<bool> connectIn{false}, otherIn{false};
@@ -1257,6 +1272,7 @@ static void stopOnAcceptThreadAfterAnotherTookIt() {
     Watchdog dog(prefix, 20000);
 
     auto server = make_unique<TcpServer>();
+    server->setBindAddress("127.0.0.1");
     TcpServer* srv = server.get();
     atomic<int> connects{0}, oldPort{0};
     atomic<bool> plainIn{false}, listenerStopped{false}, refusedAfterStop{false};
@@ -1349,6 +1365,7 @@ static void concurrentStopOnTwoClientThreads(bool fromWriter) {
     Watchdog dog(prefix.c_str(), 20000);
 
     auto server = make_unique<TcpServer>();
+    server->setBindAddress("127.0.0.1");
     TcpServer* srv = server.get();
     atomic<int> inside{0}, stopped{0};
     mutex seenMutex;
@@ -1422,6 +1439,7 @@ static void concurrentStopOnPlainAndWriterThread() {
     Watchdog dog(prefix, 20000);
 
     auto server = make_unique<TcpServer>();
+    server->setBindAddress("127.0.0.1");
     TcpServer* srv = server.get();
     atomic<int> firstId{-1};
     atomic<bool> hookArmed{false}, plainTook{false}, tookFirst{false};
@@ -1495,6 +1513,7 @@ static void concurrentStopFromTwoThreads() {
     Watchdog dog("concurrent stop: two threads", 20000);
 
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     atomic<bool> inListener{false}, release{false};
     EventListener onCon = server.onClientConnect.listen([&](TcpClientConnectEventArgs&) {
         inListener = true;
@@ -1538,6 +1557,7 @@ static void startWhileAnotherThreadStops() {
     Watchdog dog(prefix, 20000);
 
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     atomic<bool> holdNext{true}, held{false}, release{false};
     EventListener onCon = server.onClientConnect.listen([&](TcpClientConnectEventArgs&) {
         if (!holdNext.exchange(false)) return;
@@ -1591,6 +1611,7 @@ static void startWhileAnotherStopCleansUp() {
     Watchdog dog(prefix, 20000);
 
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     atomic<bool> holdNext{false}, held{false}, release{false};
     internal::setTcpServerStopHookForTests([&] {
         if (!holdNext.exchange(false)) return;
@@ -1660,6 +1681,7 @@ static void startFromClientThreadRefused() {
     Watchdog dog(prefix, 20000);
 
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     atomic<bool> listenerDone{false}, refused{false};
     EventListener onRecv = server.onReceive.listen([&](TcpServerReceiveEventArgs&) {
         refused = !server.start(freePort());
@@ -1706,6 +1728,7 @@ static void acceptBackoffChild() {
     WarningCounter warnings;
     atomic<int> errors{0};
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     EventListener onErr = server.onError.listen([&](TcpServerErrorEventArgs&) { ++errors; });
     const int port = startOnFreePort(server, -1);
     check("accept errors: server started", port != 0);
@@ -1766,6 +1789,7 @@ static void threadStartFailureChild() {
     WarningCounter warnings;
     atomic<int> errors{0};
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     EventListener onErr = server.onError.listen([&](TcpServerErrorEventArgs&) { ++errors; });
     const int port = startOnFreePort(server, -1);
     check("thread start: server started", port != 0);
@@ -1806,6 +1830,7 @@ static void threadStartFailureChild() {
 static void receiveThreadFailureChild() {
     WarningCounter warnings;
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     atomic<int> connects{0}, disconnects{0}, connectId{-1}, disconnectId{-1};
     atomic<int> errors{0}, lastErrorClientId{-2};
     // The client whose receive thread fails gets an empty payload queued as
@@ -1879,6 +1904,7 @@ static void receiveThreadFailureChild() {
 // -----------------------------------------------------------------------------
 static void acceptThreadFailureChild() {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     atomic<int> errors{0};
     EventListener onErr = server.onError.listen([&](TcpServerErrorEventArgs&) { ++errors; });
     const int port = freePort();

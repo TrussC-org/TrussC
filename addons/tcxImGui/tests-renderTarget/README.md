@@ -95,3 +95,10 @@ with a real recorded checkbox interaction, followed by `std::exit(0)` without
 the framework exit event. Registry-owned lifetime guards prevent access after
 static registry destruction; ordinary owned-manager RAII cleanup is tested by
 the main probe. Run both modes with ASan+UBSan as well as the normal build.
+
+For #947 part 4, run `bin/tests-renderTarget --secondary-exit` on a desktop
+with a display. It creates a real secondary window with window/offscreen ImGui,
+NodeInspector input and an Fbo recorder. Closing it checks that App exit runs
+once while those services remain available, and that clearing exit subscriptions
+from App exit preserves mandatory AfterApp teardown and a readable recording.
+On Linux, use Xvfb with the software Mesa environment used by the display suite.

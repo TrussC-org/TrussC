@@ -5,16 +5,32 @@
 #include <algorithm>
 #include <fstream>
 #include <unordered_map>
+#include <climits>
+#include <stdexcept>
 
 using namespace std;
 
 namespace tcx::obj {
 
+// Recovery must also work when every subsequent allocation fails. Use the
+// logger directly inside a best-effort diagnostic boundary.
+static LoadResult recoveryFailure(const char* reason, const char* detail = nullptr) noexcept {
+    LoadResult result{LoadError::DecodeFailed, {}};
+    try {
+        result.message = reason;
+        if (detail) result.message += detail;
+        getLogger().log(LogLevel::Error, "[ObjLoader] " + result.message);
+    } catch (...) {
+        // The error code and cleared model remain usable without diagnostics.
+    }
+    return result;
+}
+
 // =============================================================================
 // Load
 // =============================================================================
 
-LoadResult ObjLoader::load(const fs::path& path) {
+LoadResult ObjLoader::load(const fs::path& path) try {
     clear();
 
     fs::path objPath = tc::internal::resolveLoadPath(path);
@@ -31,23 +47,29 @@ LoadResult ObjLoader::load(const fs::path& path) {
 
     // This bundled tinyobjloader converts UTF-8 to wide paths for both
     // LoadObj and MaterialFileReader on Windows (including long paths).
-    bool ok = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err,
+    bool ok = tinyobj::detail::LoadObjWithoutTags(&attrib, &shapes, &materials, &warn, &err,
                                pathToUtf8(objPath).c_str(),
                                (pathToUtf8(baseDir) + "/").c_str());
 
+    // Preserve pending parser Warnings even when a later OBJ statement fails.
     if (!warn.empty()) {
-        logWarning() << "ObjLoader: " << warn;
+        getLogger().log(LogLevel::Warning, "ObjLoader: " + warn);
     }
     if (!ok) {
         string message = (err.empty() ? "failed to parse OBJ" : err) +
                          ": " + tc::internal::pathToDisplayUtf8(objPath);
-        logError("ObjLoader") << message;
+        getLogger().log(LogLevel::Error, "[ObjLoader] " + message);
         return LoadResult::fail(LoadError::DecodeFailed, message);
     }
-    // LoadObj can succeed with text in err: it appends the material reader's
-    // errors (an unreadable .mtl) and keeps going. The model still loads.
-    if (!err.empty()) {
-        logWarning("ObjLoader") << err;
+    // MTL diagnostics are optional-material failures, matching a missing MTL.
+    // An iostream open failure (including swallowed bad_alloc) follows this
+    // Warning path; failure to allocate the diagnostic reaches recovery below.
+    warn = err;
+    if (any_of(materials.begin(), materials.end(), [](const tinyobj::material_t& material) {
+            return !material.unknown_parameter.empty();
+        })) warn += "Unsupported MTL statements; using available material properties.\n";
+    if (!warn.empty()) {
+        getLogger().log(LogLevel::Warning, "ObjLoader: " + warn);
     }
 
     // Load material textures
@@ -60,9 +82,23 @@ LoadResult ObjLoader::load(const fs::path& path) {
 
     size_t skippedFaces = 0;
 
+    // Image's noexcept move can allocate. Reserve before constructing any
+    // group, then fill in place so neither insertion nor growth moves Images.
+    groups_.reserve(shapes.empty() ? 1 : shapes.size());
     // Process each shape
     for (auto& shape : shapes) {
-        ObjGroup group;
+        // Bound (abi): Mesh exposes signed int vertex counts. Overflow rejects the model and is reported by the load result.
+        if (shape.mesh.indices.size() > static_cast<size_t>(INT_MAX))
+            throw length_error("mesh indices exceed the Mesh index width");
+        // Bound (security): face counts must fit the parsed index table before reads. Overflow rejects the model and is reported by the load result.
+        size_t remainingIndices = shape.mesh.indices.size();
+        for (auto count : shape.mesh.num_face_vertices) {
+            if (count > remainingIndices)
+                throw runtime_error("face count exceeds its index table");
+            remainingIndices -= count;
+        }
+        groups_.emplace_back();
+        auto& group = groups_.back();
         group.name = shape.name;
 
         // Key: (vertex_index, normal_index, texcoord_index) -> unified index
@@ -196,7 +232,8 @@ LoadResult ObjLoader::load(const fs::path& path) {
                     if (group.texture.load(texturePaths[matId])) {
                         group.hasTexture = true;
                     } else {
-                        logWarning() << "ObjLoader: failed to load texture: " << texturePaths[matId];
+                        getLogger().log(LogLevel::Warning, "ObjLoader: failed to load texture: " +
+                                        tc::internal::pathToDisplayUtf8(texturePaths[matId]));
                     }
                 }
             }
@@ -209,27 +246,39 @@ LoadResult ObjLoader::load(const fs::path& path) {
             computeNormals(group.mesh, missingNormals);
         }
 
-        groups_.push_back(std::move(group));
     }
 
     if (skippedFaces > 0) {
-        logWarning() << "ObjLoader: skipped " << skippedFaces
-                     << " face(s) with an index past the end of the vertex, normal or texcoord list: "
-                     << objPath;
+        getLogger().log(LogLevel::Warning, "ObjLoader: skipped " + to_string(skippedFaces) +
+                        " face(s) with an index past the end of the vertex, normal or texcoord list: " +
+                        tc::internal::pathToDisplayUtf8(objPath));
     }
 
     // If no shapes but there are vertices, create a single group
     if (shapes.empty() && !attrib.vertices.empty()) {
-        ObjGroup group;
+        // Bound (abi): Mesh exposes signed int vertex counts. Overflow rejects the model and is reported by the load result.
+        if (attrib.vertices.size() / 3 > static_cast<size_t>(INT_MAX))
+            throw length_error("point count exceeds the Mesh index width");
+        groups_.emplace_back();
+        auto& group = groups_.back();
         group.name = "default";
         for (size_t i = 0; i + 2 < attrib.vertices.size(); i += 3) {
             group.mesh.addVertex(attrib.vertices[i], attrib.vertices[i+1], attrib.vertices[i+2]);
         }
-        groups_.push_back(std::move(group));
     }
 
-    logNotice() << "ObjLoader: loaded " << objPath << " (" << groups_.size() << " groups)";
+    getLogger().log(LogLevel::Notice, "ObjLoader: loaded " + tc::internal::pathToDisplayUtf8(objPath) +
+                    " (" + to_string(groups_.size()) + " groups)");
     return LoadResult::success();
+} catch (const bad_alloc&) {
+    clear();
+    return recoveryFailure("not enough memory for the model data");
+} catch (const exception& e) {
+    clear();
+    return recoveryFailure("failed to read model: ", e.what());
+} catch (...) {
+    clear();
+    return recoveryFailure("failed to read model");
 }
 
 // =============================================================================

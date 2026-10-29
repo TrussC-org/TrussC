@@ -1,3 +1,4 @@
+#include "../../../../core/tests/common/tcTestFailure.h"
 // =============================================================================
 // tcxDepthRecord tests - headless behavioral test (no window).
 //
@@ -21,8 +22,8 @@
 //      message, and the other frames still play.
 //      Depth / color blocks with trailing extension bytes still allow the
 //      following blocks to play, even when the known payload is skipped.
-//   3. Header frame size: 0x0 and sizes up to width x height x 4 = INT_MAX
-//      open; negative sizes and larger ones are refused.
+//   3. Header frame size: 0x0 and sizes within 8192 per axis and 128 MiB
+//      RGBA open; negative sizes and larger ones are refused.
 //   4. The parsers refuse a byte size above INT_MAX before allocating.
 //   5. Reopening one object warns about a skipped block again, and a failed
 //      reopen leaves the manifest empty. A refused open (wrong magic, manifest
@@ -730,16 +731,15 @@ static vector<Mutation> mutations() {
          [](auto& b, auto& L) { const auto& k = blockOf(L, 1, CUSTOM_TYPE);
                                 put32(b, k.at + 1, 0xFFFFFFFFu); }},
 
-        // The index sends frame 1 up to far past the end of the file: its
-        // blocks are still bounded by the file.
-        {"indexPastFile", hilo, lz4, R, R, X, "runs past the end of its frame",
+        // An index entry outside the frame-data range refuses the whole file.
+        {"indexPastFile", hilo, lz4, R, R, X, "invalid frame index",
          [](auto& b, auto& L) { TcdcHeader h;
                                 memcpy(&h, b.data(), sizeof(h));
                                 const uint64_t pastEnd = uint64_t(1) << 40;
                                 memcpy(b.data() + h.indexOffset + 2 * 16 + 8, &pastEnd, 8);
                                 const auto& k = blockOf(L, 1, CUSTOM_TYPE);
                                 put32(b, k.at + 1, 0xFFFFFFFFu); },
-         false, true},
+         true, false},
 
         // --- header ---
         {"manifestCountOverLimit", hilo, lz4, A, A, A, "stream manifest",
@@ -760,8 +760,8 @@ static void runHeaderSize(const filesystem::path& dir) {
     const Case cases[] = {
         {"recorded", 64, 48, true},
         {"zero", 0, 0, true},
-        {"atLimit", 536870911, 1, true},             // x 4 = INT_MAX - 3
-        {"pastLimit", 536870912, 1, false},          // x 4 = INT_MAX + 1
+        {"atLimit", 8192, 4096, true},              // RGBA = 128 MiB
+        {"pastLimit", 8192, 4097, false},           // RGBA > 128 MiB
         {"productWrapsTo0", 65536, 65536, false},    // x 4 = 2^34, 0 in 32 bits
         {"widthNegative", -64, 48, false},
         {"bothNegative", -64, -48, false},           // positive product
@@ -841,7 +841,7 @@ static void runByteSizeAboveIntMax() {
         const bool ok = tcd_detail::parseDepthPayload(in, h, 12 + comp, 12 + comp, dst,
                                                       scratch, used, why);
         check(base + "/depth: refused before allocating",
-              !ok && why && string(why).find("too large to decode") != string::npos &&
+              !ok && why && (string(why).find("too large to decode") != string::npos || string(why).find("dimensions exceed") != string::npos) &&
               scratch.capacity() == 0 && dst.depth.capacity() == 0);
     }
     if (selected(base + "/color")) {
@@ -1104,7 +1104,11 @@ static void runImageConverters() {
 
 // -----------------------------------------------------------------------------
 
+int runPlaybackBudgetTests();
+
 int main(int argc, char** argv) {
+    if (argc > 1 && string(argv[1]) == "--playback-budget") return runPlaybackBudgetTests();
+    g_fail += runPlaybackBudgetTests();
     if (argc > 1) g_only = argv[1];
 
     const auto stamp = chrono::steady_clock::now().time_since_epoch().count();

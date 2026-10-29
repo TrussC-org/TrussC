@@ -87,6 +87,37 @@ struct TcdcHeader {
 
 namespace tcd_detail {
 
+// Bound (security): external frame planes share 128 MiB, dimensions stay within 8192, and three playback frames plus scratch/planes stay within 512 MiB. Overflow rejects the whole block via false and is counted by playback.
+constexpr std::uint64_t playbackFrameBytes = 128u * 1024 * 1024;
+// Reserve space for the stream buffer, index entries, slot descriptors and path
+// metadata; this is accounting only, never a preallocation.
+constexpr std::uint64_t playbackWorkingBytes = 512u * 1024 * 1024;
+constexpr std::uint64_t playbackOverheadBytes = 256u * 1024;
+
+inline bool playbackWorkingFits(std::uint64_t otherSlots, std::uint64_t frame,
+                                std::uint64_t compressed, std::uint64_t planes = 0) {
+    std::uint64_t room = playbackWorkingBytes - playbackOverheadBytes;
+    for (const auto bytes : {otherSlots, frame, compressed, planes}) {
+        if (bytes > room) return false;
+        room -= bytes;
+    }
+    return true;
+}
+// Bound (security): custom blocks and index metadata cannot dictate unbounded resident storage. Overflow rejects whole blocks via false and is counted by playback; longer indexes stream.
+constexpr std::uint64_t playbackMetadataBytes = 64u * 1024 * 1024;
+
+template<class T> bool playbackResize(std::vector<T>& dst, std::size_t count) {
+    try {
+        // Free replacement storage first; failed blocks never publish a prefix.
+        if (count > dst.capacity()) { std::vector<T>().swap(dst); dst.resize(count); }
+        else dst.resize(count);
+        return true;
+    } catch (const std::exception&) {
+        logError("tcxDepthRecord") << "Playback block allocation failed";
+        return false;
+    }
+}
+
 template <class T> void wr(std::ostream& o, const T& v) {
     o.write(reinterpret_cast<const char*>(&v), sizeof(T));
 }
@@ -217,7 +248,7 @@ inline void writeColorBlock(std::ostream& o, const DepthFrame& f, ColorCodecId c
 // above it: compress() fails past LZ4_MAX_INPUT_SIZE bytes (LZ4) or INT_MAX
 // bytes (plain copy).
 inline bool decodableSize(std::uint32_t rawBytes) {
-    // Bound (abi): the decompressor accepts and returns int-sized decoded byte counts. Overflow makes the block parser skip the block.
+    // Bound (abi): the decompressor accepts and returns int-sized decoded byte counts. Overflow rejects the block via false and is counted by playback.
     return rawBytes <= static_cast<std::uint32_t>(INT_MAX);
 }
 
@@ -225,7 +256,7 @@ inline bool decodableSize(std::uint32_t rawBytes) {
 // copy, and LZ4 turns each input byte into at most 255 output bytes. This caps
 // what a block's sizes can make the reader allocate.
 inline bool decodedSizeFits(std::uint64_t rawBytes, std::uint64_t compSize, Codec codec) {
-    // Bound (security): untrusted block sizes must obey the codec expansion ratio to bound allocated memory by input. Overflow makes the block parser skip the block.
+    // Bound (security): untrusted block sizes must obey the codec expansion ratio to bound allocated memory by input. Overflow rejects the block via false and is counted by playback.
     return codec == Codec::None ? rawBytes == compSize : rawBytes <= compSize * 255;
 }
 
@@ -237,15 +268,19 @@ inline bool decodedExactly(int got, std::uint64_t expected) {
 inline bool parseDepthPayload(std::istream& in, const TcdcHeader& h, std::uint32_t len,
                               std::uint64_t room, DepthFrame& dst,
                               std::vector<std::uint8_t>& scratch,
-                              std::uint64_t& used, const char*& why) {
-    auto fail = [&](const char* reason) { dst.depth.clear(); why = reason; return false; };
+                              std::uint64_t& used, const char*& why, std::uint64_t otherSlotsBytes = 0) {
+    auto fail = [&](const char* reason) {
+        std::vector<std::uint16_t>().swap(dst.depth);
+        std::vector<std::uint8_t>().swap(scratch);
+        why = reason; return false;
+    };
     used = 0;
     std::uint32_t n=0, rawBytes=0, compSize=0;
     if (len < DEPTH_BLOCK_FIELDS || room < DEPTH_BLOCK_FIELDS)
         return fail("block is shorter than its size fields");
     if (!rd(in,n) || !rd(in,rawBytes) || !rd(in,compSize)) return fail("block is cut off");
     const std::uint64_t payloadBytes = DEPTH_BLOCK_FIELDS + static_cast<std::uint64_t>(compSize);
-    // Bound (security): untrusted depth payload sizes must fit both block and frame before allocation. Overflow skips the block.
+    // Bound (security): untrusted depth payload sizes must fit both block and frame before allocation. Overflow rejects the block via false and is counted by playback.
     if (payloadBytes > len || payloadBytes > room)
         return fail("compressed size runs past the block");
     used = payloadBytes;
@@ -255,24 +290,41 @@ inline bool parseDepthPayload(std::istream& in, const TcdcHeader& h, std::uint32
     // One uint16 sample per pixel of the frame (header width x height).
     const std::uint64_t pixels = (h.width > 0 && h.height > 0)
         ? static_cast<std::uint64_t>(h.width) * static_cast<std::uint64_t>(h.height) : 0;
+    if (h.width > 8192 || h.height > 8192 || pixels * 4 > playbackFrameBytes) return fail("frame dimensions exceed the playback budget");
     if (pixels == 0 || n != pixels) return fail("sample count doesn't match the frame size");
     if (rawBytes != static_cast<std::uint64_t>(n) * 2)
         return fail("byte size doesn't match the sample count");
     if (!decodableSize(rawBytes)) return fail("byte size is too large to decode");
     if (!decodedSizeFits(rawBytes, compSize, codec))
         return fail("compressed size doesn't fit the byte size");
-    scratch.resize(compSize);
+    // Discard obsolete capacity before allocating any replacement or scratch.
+    if (dst.depth.capacity() != n) std::vector<std::uint16_t>().swap(dst.depth);
+    if (scratch.capacity() != compSize || codec == Codec::None) std::vector<std::uint8_t>().swap(scratch);
+    const std::uint64_t frameBytes = std::uint64_t(rawBytes) + dst.color.getTotalBytes();
+    // Bound (security): actual decoded planes, compressed input, Hilo planes and live other slots share 512 MiB; frame output stays within 128 MiB. Overflow rejects the block via false and is counted by playback.
+    if (frameBytes > playbackFrameBytes ||
+        !playbackWorkingFits(otherSlotsBytes, frameBytes, codec == Codec::None ? 0 : compSize, hilo ? rawBytes : 0))
+        return fail("block exceeds the 128 MiB frame or 512 MiB playback working budget");
+    if (codec == Codec::None) {
+        // Raw blocks can read straight into their final plane.
+        std::vector<std::uint8_t>().swap(scratch);
+        if (!playbackResize(dst.depth, n)) return fail("allocation failed");
+        return in.read(reinterpret_cast<char*>(dst.depth.data()), rawBytes)
+            ? true : fail("block is cut off");
+    }
+    if (!playbackResize(scratch, compSize)) return fail("allocation failed");
     if (!in.read(reinterpret_cast<char*>(scratch.data()), compSize)) return fail("block is cut off");
     if (hilo) {
-        std::vector<std::uint8_t> planes(rawBytes);
+        std::vector<std::uint8_t> planes;
+        if (!playbackResize(planes, rawBytes)) return fail("allocation failed");
         if (!decodedExactly(decompress(scratch.data(), compSize, planes.data(), planes.size(),
                                        Codec::LZ4), rawBytes))
             return fail("data didn't decode to the byte size");
-        dst.depth.resize(n);
+        if (!playbackResize(dst.depth, n)) return fail("allocation failed");
         for (std::uint32_t i=0;i<n;++i)
             dst.depth[i]=static_cast<std::uint16_t>((static_cast<std::uint16_t>(planes[i])<<8)|planes[n+i]);
     } else {
-        dst.depth.resize(n);
+        if (!playbackResize(dst.depth, n)) return fail("allocation failed");
         if (!decodedExactly(decompress(scratch.data(), compSize, dst.depth.data(),
                                        dst.depth.size() * sizeof(std::uint16_t), codec), rawBytes))
             return fail("data didn't decode to the byte size");
@@ -283,9 +335,10 @@ inline bool parseDepthPayload(std::istream& in, const TcdcHeader& h, std::uint32
 inline bool parseColorPayload(std::istream& in, const TcdcHeader& h, std::uint32_t len,
                               std::uint64_t room, DepthFrame& dst,
                               std::vector<std::uint8_t>& scratch,
-                              std::uint64_t& used, const char*& why) {
+                              std::uint64_t& used, const char*& why, std::uint64_t otherSlotsBytes = 0) {
     auto fail = [&](const char* reason) {
         if (dst.color.isAllocated()) dst.color = Pixels{};
+        std::vector<std::uint8_t>().swap(scratch);
         why = reason;
         return false;
     };
@@ -299,7 +352,7 @@ inline bool parseColorPayload(std::istream& in, const TcdcHeader& h, std::uint32
     // in a file written before the color length was fixed.
     const std::uint64_t payloadBytes = COLOR_BLOCK_FIELDS + static_cast<std::uint64_t>(compSize);
     const bool legacyLen = len == LEGACY_COLOR_BLOCK_FIELDS + static_cast<std::uint64_t>(compSize);
-    // Bound (security): untrusted color payload sizes must fit the block and frame before allocation. Overflow skips the block.
+    // Bound (security): untrusted color payload sizes must fit the block and frame before allocation. Overflow rejects the block via false and is counted by playback.
     if ((!legacyLen && payloadBytes > len) || payloadBytes > room)
         return fail("compressed size runs past the block");
     used = payloadBytes;
@@ -312,12 +365,33 @@ inline bool parseColorPayload(std::istream& in, const TcdcHeader& h, std::uint32
     if (!decodableSize(rawBytes)) return fail("byte size is too large to decode");
     if (!decodedSizeFits(rawBytes, compSize, codec))
         return fail("compressed size doesn't fit the byte size");
-    scratch.resize(compSize);
-    if (!in.read(reinterpret_cast<char*>(scratch.data()), compSize)) return fail("block is cut off");
+    // An empty depth plane belongs to an earlier use of this frame slot.
+    // Release it before admission so absent planes consume no frame budget.
+    if (dst.depth.empty()) std::vector<std::uint16_t>().swap(dst.depth);
+    const std::uint64_t frameBytes = std::uint64_t(rawBytes) + dst.depth.capacity() * sizeof(std::uint16_t);
+    // Bound (security): decoded color/depth share 128 MiB; actual output, compressed input and live other slots share 512 MiB. Overflow rejects the block via false and is counted by playback.
+    if (cw > 8192 || ch > 8192 || frameBytes > playbackFrameBytes ||
+        !playbackWorkingFits(otherSlotsBytes, frameBytes, codec == Codec::None ? 0 : compSize))
+        return fail("block exceeds the 128 MiB frame or 512 MiB playback working budget");
+    // An old color allocation must not overlap its replacement or input scratch.
+    if (dst.color.isAllocated() && (dst.color.getWidth()!=cw || dst.color.getHeight()!=ch || dst.color.getChannels()!=chn))
+        dst.color = Pixels{};
+    if (scratch.capacity() != compSize) std::vector<std::uint8_t>().swap(scratch);
+    if (codec == Codec::None) std::vector<std::uint8_t>().swap(scratch);
+    else {
+        if (!playbackResize(scratch, compSize)) return fail("allocation failed");
+        if (!in.read(reinterpret_cast<char*>(scratch.data()), compSize)) return fail("block is cut off");
+    }
     if (!dst.color.isAllocated() || dst.color.getWidth()!=cw ||
         dst.color.getHeight()!=ch || dst.color.getChannels()!=chn) {
-        dst.color.allocate(cw, ch, chn);
+        dst.color = Pixels{};
+        try { dst.color.allocate(cw, ch, chn); }
+        catch (const std::exception&) { logError("tcxDepthRecord") << "Color allocation failed"; return fail("allocation failed"); }
+        if (!dst.color.isAllocated()) return fail("allocation failed");
     }
+    if (codec == Codec::None)
+        return in.read(reinterpret_cast<char*>(dst.color.getData()), rawBytes)
+            ? true : fail("block is cut off");
     if (!decodedExactly(decompress(scratch.data(), compSize, dst.color.getData(),
                                    dst.color.getTotalBytes(), codec), rawBytes))
         return fail("data didn't decode to the byte size");
