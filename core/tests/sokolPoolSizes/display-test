@@ -2,3 +2,5 @@
 {test} --large-check
 {test} --zero-check
 {test} --negative-check
+{test} --overflow-check
+{test} --ceiling-check

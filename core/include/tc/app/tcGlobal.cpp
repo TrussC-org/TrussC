@@ -116,9 +116,16 @@ GraphicsPoolSizes activeGraphicsPools;
 // Process lifetime: graphics restarts and hot reload must not repeat errors.
 std::atomic<bool> poolExhaustionReported[7]{};
 
+// Bound (representation): 16-bit sokol pool indices would alias handles above 65535; log Error and use 65535.
+constexpr int maxGraphicsPoolSize = 65535;
+
 int graphicsPoolSize(int count, int defaultCount, const char* setter) {
+    if (count > maxGraphicsPoolSize) {
+        logError("WindowSettings") << setter << "(" << count << "): sokol handles index pools with 16 bits; using " << maxGraphicsPoolSize;
+        return maxGraphicsPoolSize;
+    }
     if (count < 0) {
-        logNotice("WindowSettings") << setter << " received a negative count; using default " << defaultCount;
+        logNotice("WindowSettings") << setter << "() received a negative count; using default " << defaultCount;
     }
     return count > 0 ? count : defaultCount;
 }
@@ -161,9 +168,9 @@ void setup() {
     // Fixed at sg_setup: slots hold CPU tables (~3.4 KB/shader, ~1.2 KB/pipeline).
     // Resolve the requested counts once; later sgl rebuilds retain these values.
     activeGraphicsPools = {
-        graphicsPoolSize(requestedGraphicsPools.resources, 10000, "setResourcePoolSize()"),
-        graphicsPoolSize(requestedGraphicsPools.shaders, 1024, "setShaderPoolSize()"),
-        graphicsPoolSize(requestedGraphicsPools.pipelines, 1024, "setPipelinePoolSize()")
+        graphicsPoolSize(requestedGraphicsPools.resources, 10000, "setResourcePoolSize"),
+        graphicsPoolSize(requestedGraphicsPools.shaders, 1024, "setShaderPoolSize"),
+        graphicsPoolSize(requestedGraphicsPools.pipelines, 1024, "setPipelinePoolSize")
     };
     sgdesc.shader_pool_size = activeGraphicsPools.shaders;
     sgdesc.pipeline_pool_size = activeGraphicsPools.pipelines;

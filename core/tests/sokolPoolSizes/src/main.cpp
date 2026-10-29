@@ -9,6 +9,7 @@ namespace {
 static_assert(std::is_aggregate_v<WindowSettings>, "Preserve aggregate initialization of existing settings");
 int failures = 0;
 bool completed = false;
+bool boundary = false;
 int resourceCount = 64, shaderCount = 64, pipelineCount = 256;
 std::vector<LogEventArgs> messages;
 void check(const char* label, bool ok) {
@@ -59,6 +60,10 @@ public:
         later.setResourcePoolSize(8).setShaderPoolSize(8).setPipelinePoolSize(8);
         internal::configureGraphicsPools(later);
         check("sgl rebuild retains startup pipeline count", internal::sglSetupDescriptor().pipeline_pool_size == pipelineCount);
+        if (boundary) {
+            completed = true;
+            return;
+        }
         // Only allocated slots: no native GPU objects or shader compilation needed.
         exhaust(sg_alloc_buffer, sg_dealloc_buffer, resourceCount, "buffer", "setResourcePoolSize");
         exhaust(sg_alloc_image, sg_dealloc_image, resourceCount, "image", "setResourcePoolSize");
@@ -84,21 +89,25 @@ public:
 }
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (argc != 2) {
-        std::printf("SKIP: sokolPoolSizes needs --gpu-check, --large-check, --zero-check or --negative-check\n");
+        std::printf("SKIP: sokolPoolSizes needs --gpu-check, --large-check, --zero-check, --negative-check, --overflow-check or --ceiling-check\n");
         return 0;
     }
     bool zero = std::strcmp(argv[1], "--zero-check") == 0;
     bool negative = std::strcmp(argv[1], "--negative-check") == 0;
     bool large = std::strcmp(argv[1], "--large-check") == 0;
-    if (!zero && !negative && !large && std::strcmp(argv[1], "--gpu-check") != 0) return 1;
+    bool overflow = std::strcmp(argv[1], "--overflow-check") == 0;
+    boundary = overflow || std::strcmp(argv[1], "--ceiling-check") == 0;
+    if (!zero && !negative && !large && !boundary && std::strcmp(argv[1], "--gpu-check") != 0) return 1;
     if (large) { resourceCount = 50000; shaderCount = pipelineCount = 4096; }
     if (zero || negative) { resourceCount = 10000; shaderCount = pipelineCount = 1024; }
+    if (boundary) resourceCount = shaderCount = pipelineCount = 65535;
     auto listener = getLogger().onLog.listen([](LogEventArgs& event) { messages.push_back(event); });
     WindowSettings settings;
     check("setters return same object", &settings.setResourcePoolSize(resourceCount).setShaderPoolSize(shaderCount).setPipelinePoolSize(pipelineCount) == &settings);
     if (zero || negative) settings.setResourcePoolSize(negative ? -1 : 0).setShaderPoolSize(negative ? -2 : 0).setPipelinePoolSize(negative ? -3 : 0);
+    if (overflow) settings.setResourcePoolSize(70000).setShaderPoolSize(70000).setPipelinePoolSize(70000);
     settings.setSize(64, 64).setHighDpi(false).setSampleCount(1).setSwapInterval(0);
-    return tcCoreTest::runDisplayTest<PoolApp>(settings, failures, [negative] {
+    return tcCoreTest::runDisplayTest<PoolApp>(settings, failures, [negative, overflow] {
         check("test completed", completed);
         int notices = 0, errors = 0;
         for (const auto& event : messages) {
@@ -106,6 +115,17 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             if (event.level == LogLevel::Error) ++errors;
         }
         check("one Notice per negative setting, none for zero/positive", notices == (negative ? 3 : 0));
-        check("exactly one Error per pool", errors == 7);
+        if (boundary) {
+            for (const char* setter : {"setResourcePoolSize", "setShaderPoolSize", "setPipelinePoolSize"}) {
+                const std::string expected = std::string("[WindowSettings] ") + setter + "(70000): sokol handles index pools with 16 bits; using 65535";
+                int matches = 0;
+                for (const auto& event : messages)
+                    if (event.level == LogLevel::Error && event.message == expected) ++matches;
+                check(expected.c_str(), matches == (overflow ? 1 : 0));
+            }
+            check("exactly one Error per oversized setting, none at ceiling", errors == (overflow ? 3 : 0));
+        } else {
+            check("exactly one Error per pool", errors == 7);
+        }
     });
 }
