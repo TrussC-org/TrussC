@@ -2768,12 +2768,14 @@ static void _sapp_tc_timing_update(_sapp_tc_timing_t* t) {
 // Fullscreen state is the target window's own native record.
 static void _sapp_tc_request_fullscreen(_sapp_tc_window_t* w, bool full) {
     if (!w || !w->window) return;
-    if (!w->fullscreen_state.request(full)) return;
+    // Creation uses the runtime request entry, but lets a normal tick start
+    // AppKit's animation after the constructor has shown and keyed the window.
+    if (!w->fullscreen_state.request(full, _sapp_tc.constructing > 0)) return;
     w->fullscreen = full;
     [w->window toggleFullScreen:nil];
 }
 static void _sapp_tc_reconcile_fullscreen(_sapp_tc_window_t* w) {
-    if (!w || !w->window || !w->fullscreen_state.reconcile()) return;
+    if (!w || !w->window || _sapp_tc.constructing > 0 || !w->fullscreen_state.reconcile()) return;
     w->fullscreen = w->fullscreen_state.desired;
     [w->window toggleFullScreen:nil];
 }
@@ -3996,21 +3998,13 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
     }
     w->ready = true;
     [w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-    /* Startup fullscreen and showing can notify synchronously (resize, key
+    /* Showing and fullscreen can notify synchronously (resize, key
        focus), and a client may destroy the window from those callbacks: keep
        the NSWindow alive across the calls, re-resolve the record by identity
        after each, and report an invalid window if it is gone. No deferred
        close or quit runs until the constructor returns. */
     const uint32_t win_id = w->win_id;
     NSWindow* window = w->window;
-    if (d->fullscreen) {
-        _sapp_tc_request_fullscreen(w, true);
-        if (!(w = _sapp_tc_mac_live(win_id))) {
-            [window orderOut:nil];
-            _sapp_tc.create_error = "Window was destroyed during creation";
-            return 0;
-        }
-    }
     [window makeKeyAndOrderFront:nil];
     if (!(w = _sapp_tc_mac_live(win_id))) {
         /* disposed from a notification inside the call, which then still
@@ -4018,6 +4012,14 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
         [window orderOut:nil];
         _sapp_tc.create_error = "Window was destroyed during creation";
         return 0;
+    }
+    if (d->fullscreen) {
+        _sapp_tc_request_fullscreen(w, true);
+        if (!(w = _sapp_tc_mac_live(win_id))) {
+            [window orderOut:nil];
+            _sapp_tc.create_error = "Window was destroyed during creation";
+            return 0;
+        }
     }
     /* silent startup re-sample (sokol parity: the startup update never fires
        RESIZED). The display link is the first source; occlusion notifications

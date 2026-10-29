@@ -8,6 +8,7 @@ class AfterFrameScreenshotApp : public App {
     struct Capture {
         fs::path path;
         std::array<unsigned char, 3> rgb;
+        int width, height;
     };
     struct FrameState {
         int frame = 0;
@@ -38,7 +39,7 @@ class AfterFrameScreenshotApp : public App {
                     for (const auto& capture : state.pending) {
                         Pixels pixels;
                         const bool loaded = pixels.load(capture.path).ok();
-                        const bool valid = loaded && pixels.getWidth() == 40 && pixels.getHeight() == 30
+                        const bool valid = loaded && pixels.getWidth() == capture.width && pixels.getHeight() == capture.height
                             && pixels.getChannels() >= 3;
                         check("afterFrame PNG decodes at rendered dimensions", valid);
                         bool matches = valid;
@@ -47,7 +48,7 @@ class AfterFrameScreenshotApp : public App {
                             std::printf("TRACE readback %s expected=%u,%u,%u actual=%u,%u,%u\n",
                                 capture.path.filename().string().c_str(),
                                 capture.rgb[0], capture.rgb[1], capture.rgb[2], data[0], data[1], data[2]);
-                            for (size_t i = 0; i < static_cast<size_t>(40 * 30 * pixels.getChannels()); i += pixels.getChannels())
+                            for (size_t i = 0; i < static_cast<size_t>(capture.width * capture.height * pixels.getChannels()); i += pixels.getChannels())
                                 for (int channel = 0; channel < 3; ++channel)
                                     matches &= data[i + channel] == capture.rgb[channel];
                         }
@@ -63,7 +64,10 @@ class AfterFrameScreenshotApp : public App {
                     std::to_string(state.frame) + "-" + std::to_string(priority) + ".png");
                 check("afterFrame destination does not exist before queueing", !fs::exists(path));
                 check("saveScreenshot queued from afterFrame", saveScreenshot(path));
-                state.pending.push_back({path, colour(state.frame, main)});
+                // Native WMs may clamp the requested size when positioning.
+                // Record this frame's actual framebuffer, before the drain.
+                const auto& context = internal::currentWindowContext();
+                state.pending.push_back({path, colour(state.frame, main), context.fbWidth, context.fbHeight});
                 std::printf("TRACE afterFrame %s frame=%d priority=%d owner=%llu\n",
                     main ? "main" : "secondary", state.frame, priority,
                     static_cast<unsigned long long>(internal::currentWindowContext().swapchainTarget.ownerId));

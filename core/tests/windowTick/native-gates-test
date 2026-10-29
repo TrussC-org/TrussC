@@ -1020,7 +1020,7 @@ void run() {
         const _sapp_tc_mac_window_attrs attrs{};
         Native* result=_sapp_tc_mac_create_window_ex(&d,&attrs);
         check("macOS constructor returns live record or null after destruction", result==(stage?nullptr:&w));
-        check("macOS constructor skips show after fullscreen destruction", shown==(stage==1?0:1));
+        check("macOS constructor shows before fullscreen request", shown==1);
         check("macOS constructor hides window destroyed during startup", ordered_out==int(stage!=0));
         check("macOS constructor restores counts before return", _sapp_tc.constructing==0 && _sapp_tc.callbacks_active==0);
         check("macOS constructor preserves pending close", closed==0 && quit==0 && peer.close_requested);
@@ -1912,9 +1912,10 @@ if '--mutations' in sys.argv[3:]:
     # outside a tick. The tick and constructor checks remain in this mutant.
     mutants['mac-close-inside-callback'] = change(busy, ' || cw->callback_depth > 0', '',
         text=mutants['mac-close-inside-callback'])
-    # Isolate the fullscreen recheck; keep the separate post-show recheck.
+    # Isolate the fullscreen recheck; keep the preceding post-show recheck.
     part = body(native, ctor, 'mutation source')
-    mutants['mac-stale-after-fullscreen'] = native.replace(part, part.replace(
+    fullscreen = part.index('    if (d->fullscreen) {')
+    mutants['mac-stale-after-fullscreen'] = native.replace(part, part[:fullscreen] + part[fullscreen:].replace(
         'if (!(w = _sapp_tc_mac_live(win_id))) {', 'if (false) {', 1), 1)
     for name, marker, call in (
         ('event', 'static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {', 'event_cb(ev, handle, user);'),

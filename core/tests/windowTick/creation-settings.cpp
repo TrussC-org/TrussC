@@ -55,7 +55,7 @@ struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     Rect stored_window_rect; LONG stored_style=0,stored_ex_style=0;
     float window_scale=1,mouse_scale=1;
     View* view=nullptr; Layer* layer=nullptr; Link* link=nullptr; Delegate* delegate=nullptr;
-    bool initialized=false,bound=false,source=false,shown=false;
+    bool initialized=false,bound=false,source=false,shown=false,key=false,nativeFullscreen=false;
     int applied_interval=-1;
     SwapChain chain; SwapChain* swap_chain=&chain;
     bool from_modal=false,credit_held=false;
@@ -74,6 +74,7 @@ _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) {
     for (auto* w:_sapp_tc.windows) if (w && w->win_id==h.id) return w;
     return nullptr;
 }
+_sapp_tc_window_t* _sapp_tc_resolve(sapp_window h) { return _sapp_tc_lookup(h); }
 namespace trussc::internal { bool sessionEndExit() { return false; } bool frameworkShutdown() { return false; } }
 static bool _sapp_tc_mac_frozen() { return trussc::internal::sessionEndExit(); }
 static void _sapp_tc_mac_schedule_deferred() {}
@@ -157,10 +158,17 @@ void mac_show(_sapp_tc_window_t* w) {
     if (_sapp_tc.constructing == 0) return;
     check("mac constructor show has initialized published dimensions", w->initialized && w->ready &&
           _sapp_tc_lookup({w->win_id})==w && w->fb_width>0 && w->fb_height>0);
+    check("mac no fullscreen request before show", !w->fullscreen_state.desired &&
+          !w->fullscreen_state.reconcilePending && !w->fullscreen_state.transitioning());
     shown(w);
+    w->key=true;
 }
 void native_toggle(_sapp_tc_window_t* w) {
-    check("mac native fullscreen ordering",w->initialized&&w->bound&&w->delegate&&w->delegate->w==w&&w->ready&&w->source&&!w->shown);
+    check("mac native fullscreen ordering",w->initialized&&w->bound&&w->delegate&&w->delegate->w==w&&w->ready&&w->source&&w->shown&&w->key&&_sapp_tc.constructing==0);
+    const bool destination = !w->nativeFullscreen;
+    check("mac desired matches native transition", w->fullscreen_state.desired == destination);
+    w->fullscreen_state.will(destination);
+    w->nativeFullscreen=destination;
     calls.push_back("fullscreen");
 }
 void _sapp_tc_init_keytable() {}
@@ -244,14 +252,43 @@ int main() {
         auto* w=_sapp_tc_lookup(firstState->win);
         check("descriptor fullscreen forwarded",w->desc.fullscreen==full);
         check("descriptor interval forwarded",w->desc.swap_interval==interval);
+#if !defined(TEST_MAC)
         check("native fullscreen applied",w->fullscreen==full);
+#endif
         check("restore geometry retains request",w->desc.width==640&&w->desc.height==480);
 #if defined(TEST_MAC)
         int effective=interval>0?interval:1;
         check("mac per-window interval",w->swap_interval==effective);
         check("mac display link rate applied",w->link->preferredFrameRateRange.preferred==(interval>1?120.0f/interval:0));
-        // AppKit owns restore geometry; the production state tracks native completion.
-        if(full) { w->fullscreen_state.terminal(true); check("mac terminal state",w->fullscreen_state.phase==_sapp_tc_fullscreen_phase::Fullscreen); }
+        check("mac deferred desired matches creation", w->fullscreen_state.desired==full);
+        check("mac creation defers until normal tick", !w->nativeFullscreen && !w->fullscreen &&
+              w->fullscreen_state.phase==_sapp_tc_fullscreen_phase::Windowed &&
+              w->fullscreen_state.reconcilePending==full);
+        _sapp_tc.constructing=1;
+        _sapp_tc_reconcile_fullscreen(w);
+        _sapp_tc.constructing=0;
+        check("mac nested constructor tick keeps request deferred", !w->nativeFullscreen &&
+              w->fullscreen_state.reconcilePending==full);
+        _sapp_tc_reconcile_fullscreen(w);
+        check("mac deferred native fullscreen applied", w->nativeFullscreen==full && w->fullscreen==full);
+        if(full) {
+            _sapp_tc_mac_fullscreen_terminal(w,true);
+            check("mac terminal state and desired agree",w->fullscreen_state.phase==_sapp_tc_fullscreen_phase::Fullscreen &&
+                  w->fullscreen_state.desired && !w->fullscreen_state.reconcilePending);
+            const auto count=calls.size();
+            _sapp_tc_reconcile_fullscreen(w);
+            check("mac successful entry does not retry or flicker", calls.size()==count && w->fullscreen);
+            sapp_tc_window_set_fullscreen(firstState->win,false);
+            check("mac later runtime exit starts native transition", !w->nativeFullscreen && !w->fullscreen &&
+                  !w->fullscreen_state.desired && w->fullscreen_state.phase==_sapp_tc_fullscreen_phase::Exiting);
+            _sapp_tc_mac_fullscreen_terminal(w,false);
+            _sapp_tc_reconcile_fullscreen(w);
+            check("mac later runtime exit stays windowed", !w->fullscreen && !w->nativeFullscreen &&
+                  !w->fullscreen_state.desired && !w->fullscreen_state.reconcilePending &&
+                  w->fullscreen_state.phase==_sapp_tc_fullscreen_phase::Windowed);
+            sapp_tc_window_set_fullscreen(firstState->win,true);
+            _sapp_tc_mac_fullscreen_terminal(w,true);
+        }
 #elif defined(TEST_WIN)
         check("Win32 per-window interval",w->swap_interval==(interval>0?interval:1));
         _sapp_tc_win32_swap(w);
@@ -272,6 +309,9 @@ int main() {
         auto second=internal::createSecondaryWindow(peer);
         check("independent peer creation",bool(second));
         auto* p=second?_sapp_tc_lookup(static_cast<AdapterState*>(second->native_)->win):nullptr;
+#if defined(TEST_MAC)
+        if(p) { _sapp_tc_reconcile_fullscreen(p); _sapp_tc_mac_fullscreen_terminal(p,!full); }
+#endif
         check("peer fullscreen independent",p&&p!=w&&p->fullscreen!=w->fullscreen);
 #if defined(TEST_MAC) || defined(TEST_WIN)
         check("peer interval independent",p&&p->swap_interval==4&&w->swap_interval==(interval>0?interval:1));

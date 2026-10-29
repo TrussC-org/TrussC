@@ -96,13 +96,13 @@ def generate(backend, variant):
             request = '    _sapp_tc_x11_show_window(w);\n'
             show = '    if (d->fullscreen) {'
         constructor = replace_once(constructor, request, '')
-        constructor = replace_once(constructor, show, show + request)
+        constructor = replace_once(constructor, show, request + show if backend == 'mac' else show + request)
     elif variant == 'mac_show_before_init':
         constructor = replace_once(constructor, '    if (!_sapp_tc_mac_initialize_dimensions(w))',
                                    '    [w->window makeKeyAndOrderFront:nil];\n    if (!_sapp_tc_mac_initialize_dimensions(w))')
     elif variant == 'mac_rate':
         constructor = replace_once(constructor, 'if (w->swap_interval > 1)', 'if (false && w->swap_interval > 1)')
-    elif variant not in ('baseline', 'win_present'):
+    elif variant not in ('baseline', 'win_present', 'mac_pre_show_toggle', 'mac_desired'):
         raise AssertionError(variant)
     if port == 'x11' and variant == 'fullscreen_order':
         # In this mutant mapping happens inside the fullscreen block, after
@@ -112,12 +112,27 @@ def generate(backend, variant):
                                    '        _sapp_tc_x11_show_window(w);\n        _sapp_tc_x11_update_dimensions(w);')
         constructor = replace_once(constructor, '    return w;', '    if (!d->fullscreen) _sapp_tc_x11_show_window(w);\n    return w;')
     if backend == 'mac':
+        if variant == 'mac_pre_show_toggle':
+            request_block = body(constructor, '    if (d->fullscreen) {')
+            constructor = replace_once(constructor, request_block, '')
+            constructor = replace_once(constructor, '    [window makeKeyAndOrderFront:nil];',
+                                       request_block + '    [window makeKeyAndOrderFront:nil];')
         constructor = mac_api(constructor)
         request = body(NATIVE, 'static void _sapp_tc_request_fullscreen(')
         request = replace_once(request, '[w->window toggleFullScreen:nil]', 'native_toggle(w)')
+        if variant == 'mac_pre_show_toggle':
+            request = replace_once(request, 'request(full, _sapp_tc.constructing > 0)', 'request(full)')
+        elif variant == 'mac_desired':
+            request = replace_once(request, 'if (!w->fullscreen_state.request(full, _sapp_tc.constructing > 0)) return;',
+                'const bool start = w->fullscreen_state.request(full, _sapp_tc.constructing > 0);\n'
+                '    w->fullscreen_state.desired = false;\n    if (!start) return;')
+        reconcile = body(NATIVE, 'static void _sapp_tc_reconcile_fullscreen(')
+        reconcile = replace_once(reconcile, '[w->window toggleFullScreen:nil]', 'native_toggle(w)')
+        terminal = body(NATIVE, 'static void _sapp_tc_mac_fullscreen_terminal(')
+        runtime = body(NATIVE, 'extern "C" void sapp_tc_window_set_fullscreen(')
         prefix = body(NATIVE, 'struct _sapp_tc_mac_window_attrs') + ';\n'
         wrapper = body(NATIVE, 'static _sapp_tc_window_t* _sapp_tc_mac_create_window(')
-        production = prefix + request + constructor + wrapper + entry
+        production = prefix + request + reconcile + terminal + runtime + constructor + wrapper + entry
     else:
         extra = (body(NATIVE, 'static void _sapp_tc_win32_set_fullscreen(') if backend == 'win' else
                  body(NATIVE, 'static void _sapp_tc_x11_pace_periodic(') +
@@ -148,7 +163,7 @@ def main():
             variants = ['baseline', 'adapter_fullscreen', 'adapter_interval', 'entry_fullscreen',
                         'entry_interval', 'record_interval', 'constructor_fullscreen', 'fullscreen_order']
             if backend == 'mac':
-                variants.extend(('mac_rate', 'mac_show_before_init'))
+                variants.extend(('mac_rate', 'mac_show_before_init', 'mac_pre_show_toggle', 'mac_desired'))
             if backend == 'win':
                 variants.append('win_present')
             for variant in variants:
@@ -169,6 +184,10 @@ def main():
                 count, failed = map(int, summary.groups())
                 valid = (run.returncode == 0 and failed == 0) if variant == 'baseline' else (
                     run.returncode == 1 and failed > 0 and 'creation-settings: FAIL:' in run.stdout)
+                expected = {'mac_pre_show_toggle': 'mac native fullscreen ordering',
+                            'mac_desired': 'mac deferred desired matches creation'}.get(variant)
+                if expected:
+                    valid &= 'creation-settings: FAIL: ' + expected in run.stdout
                 row = dict(backend=backend, variant=variant, compiled=True, returncode=run.returncode,
                            checks=count, failures=failed, valid=valid)
                 rows.append(row)
