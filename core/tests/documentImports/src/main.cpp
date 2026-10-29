@@ -7,6 +7,10 @@
 using namespace std;
 using namespace tc;
 
+#if INTPTR_MAX == INT64_MAX
+static_assert(sizeof(nlohmann::json) == 16, "upstream JSON footprint on 64-bit ABIs");
+#endif
+
 namespace {
 #include "../../asyncLoads/src/fontFixture.h"
 int failures = 0;
@@ -22,10 +26,6 @@ struct NestedSettings {
 };
 enum class Selection { First, Second };
 TC_ENUM_LABELS(Selection, "First", "Second")
-struct CountOnlySettings {
-    int count = 1;
-    TC_REFLECT_ROOT(CountOnlySettings) { TC_VALUE(count) }
-};
 struct Settings {
     int count = 1;
     bool active = false;
@@ -60,9 +60,7 @@ TC_CORE_TEST_MAIN() {
         if (event.level == LogLevel::Warning) ++warnings;
         if (event.level == LogLevel::Error) lastError = event.message;
     });
-    check("JSON nesting at 64 succeeds", !Json::parse(jsonNesting(64), nullptr, false).is_discarded());
-    check("JSON nesting beyond 64 fails as a whole", Json::parse(jsonNesting(65), nullptr, false).is_discarded());
-    check("JSON callback path enforces nesting", Json::parse(jsonNesting(65), [](int, Json::parse_event_t, Json&) { return true; }, false).is_discarded());
+    check("upstream JSON accepts nesting beyond 64", !Json::parse(jsonNesting(65)).is_discarded());
     const string nulJson = string("{\"count\":42}") + char(0) + "not-json";
     check("JSON raw NUL rejects the whole string", parseJson(nulJson).is_null());
     check("JSON trailing raw NUL rejects the document", parseJson(string("{}") + char(0)).is_null());
@@ -87,34 +85,26 @@ TC_CORE_TEST_MAIN() {
     string directValue;
     check("direct string visitor reads parsed JSON safely", directString.visit("name", directValue) && directValue == "new" && directString.applied.size() == 1 && directString.unknownKeys().empty());
 
-    Settings settings;
-    auto failed = reflectFromJson(settings, parseJson(R"({"count":7,"active":"bad","gain":2})"));
-    check("external update validates before changing any field or setter", settings.count == 1 && settings.setterCalls == 0 && failed.applied.empty());
-    check("external failure names the invalid field", lastError.find("active") != string::npos && !failed.skipped.empty());
-    auto applied = reflectFromJson(settings, parseJson(R"({"count":7,"active":true,"gain":2,"nested":{"gain":3},"choice":"Second"})"));
-    check("valid external settings commit through setters once", settings.count == 7 && settings.active && settings.gain == 2 && settings.setterCalls == 1 && settings.nested.gain == 3 && settings.choice == Selection::Second && !applied.applied.empty());
-    reflectFromJson(settings, parseJson(R"({"count":8,"nested":{"gain":"bad"}})"));
-    check("nested validation rejects entire external update", settings.count == 7 && settings.nested.gain == 3 && lastError.find("nested.gain") != string::npos);
-    for (const char* source : {R"({"count":8,"nested":4})", R"({"count":8,"typo":1})", R"({"count":8,"nested":{"typo":1}})", R"({"count":2147483648})", R"({"count":1.5})", R"({"count":8,"position":[1,2,3]})", R"({"count":8,"color":[1,2,3,"bad"]})", R"({"count":8,"gain":1e100})", R"({"count":8,"choice":"Unknown"})"}) {
-        auto rejected = reflectFromJson(settings, parseJson(source));
-        check("invalid external field leaves all settings unchanged", settings.count == 7 && settings.setterCalls == 1 && rejected.applied.empty());
+    for (bool parsed : {false, true}) {
+        Settings settings;
+        const Json input = {{"count", 7}, {"active", "bad"}, {"gain", 2}, {"typo", 1}};
+        auto result = reflectFromJson(settings, parsed ? Json::parse(input.dump()) : input);
+        check("all JSON applies matching fields and setters despite mismatches",
+              settings.count == 7 && !settings.active && settings.gain == 2 && settings.setterCalls == 1 &&
+              result.applied == vector<string>({"count", "gain"}) && result.skipped == vector<string>({"active"}) &&
+              result.unknownKeys() == vector<string>({"typo"}));
+        auto nested = reflectFromJson(settings, Json::parse(R"({"count":8,"nested":{"gain":"bad"}})"));
+        check("nested mismatch preserves matching top-level writes", settings.count == 8 && settings.nested.gain == 1 &&
+              nested.skipped == vector<string>({"gain"}));
+        reflectFromJson(settings, Json::parse(R"({"count":1.5,"position":[3,4,5],"color":[1,2,3,"bad"]})"));
+        check("parsed numbers and arrays retain permissive conversions", settings.count == 1 &&
+              settings.position.x == 3 && settings.position.y == 4 && settings.color.a == 1);
+        JsonReadReflector readOnly(Json::parse(R"({"count":"bad"})"));
+        readOnly.pushReadOnly();
+        settings.reflectMembers(readOnly);
+        check("parsed read-only member reports readOnly before shape", readOnly.readOnly == vector<string>({"count"}) &&
+              readOnly.skipped.empty() && settings.count == 1);
     }
-    Json parsed = Json::parse(R"({"settings":{"count":8,"active":"bad"}})");
-    Json copied = parsed["settings"];
-    Json moved = std::move(copied);
-    Json swapped;
-    swapped.swap(moved);
-    JsonReadReflector direct(swapped);
-    settings.reflectMembers(direct);
-    check("parsed child provenance survives copy move and swap", settings.count == 7 && direct.applied.empty());
-    JsonReadReflector reusable(parseJson(R"({"count":11,"active":true})"));
-    Settings firstTarget;
-    firstTarget.reflectMembers(reusable);
-    CountOnlySettings secondTarget;
-    secondTarget.reflectMembers(reusable);
-    check("reused external reader validates the current object's schema", firstTarget.count == 11 && secondTarget.count == 1 && internal::JsonReadResultAccess::rejected(reusable));
-    auto permissive = reflectFromJson(settings, Json{{"count", 9}, {"active", "bad"}});
-    check("app-constructed JSON retains partial-apply behavior", settings.count == 9 && !permissive.applied.empty() && !permissive.skipped.empty());
 
     const fs::path folder = fs::current_path() / ".document-import-test";
     fs::create_directories(folder);
@@ -162,8 +152,9 @@ TC_CORE_TEST_MAIN() {
     const int noticeBefore = notices, warningBefore = warnings;
     Json largeJson = loadJson(jsonPath);
     check("local JSON above 16 MiB loads completely", largeJson.is_object() && largeJson["name"].get_ref<const string&>() == payload);
-    reflectFromJson(settings, largeJson);
-    check("settings loaded from local JSON commit completely", settings.name == payload);
+    Settings largeSettings;
+    reflectFromJson(largeSettings, largeJson);
+    check("settings loaded from local JSON apply completely", largeSettings.name == payload);
     check("local XML above 16 MiB loads completely", xml.load(xmlPath) && string(xml.root().text().get()) == payload);
     check("large local inputs issue Notices without Warnings", notices >= noticeBefore + 2 && warnings == warningBefore);
     const fs::path utf16Path = folder / "utf16.xml";

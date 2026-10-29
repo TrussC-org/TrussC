@@ -288,12 +288,12 @@ public:
         callTool("tc_set_node_members", Json{{"id", id}, {"members", {
             {"rotation", {0.1f, 0.2f, 0.3f}}, {"rotationDeg", {40, 50, 60}}}}});
         check("MCP set: canonical rotation wins", nearlyEqual(child->getEuler(), Vec3(0.1f, 0.2f, 0.3f)));
-        const Vec3 beforeFailure = child->getPos();
         const Json failedSet = callTool("tc_set_node_members", Json{{"id", id}, {"members", {
             {"pos", {9, 8, 7}}, {"visible", "invalid"}}}});
-        check("MCP invalid settings report the field and apply nothing",
-              failedSet.value("status", "") == "error" && failedSet["applied"].empty() &&
-              failedSet.value("message", "").find("visible") != string::npos && exact(child->getPos(), beforeFailure));
+        check("MCP mismatched settings report skipped fields and retain matching writes",
+              failedSet.value("status", "") == "ok" &&
+              failedSet["applied"] == Json::array({"pos"}) &&
+              failedSet["skipped"] == Json::array({"visible"}) && exact(child->getPos(), Vec3(9, 8, 7)));
         requestExit();
     }
 };
