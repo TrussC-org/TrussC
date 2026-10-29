@@ -1,5 +1,5 @@
 #include "tcxLua.h"
-#include "tcxLuaTextOnly.h"
+#include <cstring>
 
 namespace {
 int luaLoadTraceback(lua_State* state) {
@@ -92,7 +92,10 @@ bool tcxLua::runFile(sol::state& lua, const std::filesystem::path& path) {
             // Converting a numeric error with lua_tostring can itself allocate.
             const char* detail = lua_type(state, -1) == LUA_TSTRING
                 ? lua_tostring(state, -1) : "Lua execution failed (non-string error)";
-            luaLoadLog(trussc::LogLevel::Error, tcxLuaInternal::textOnlyError(detail));
+            // LuaJIT's upstream diagnostic only says "wrong mode".
+            if (std::strstr(detail, "attempt to load chunk with wrong mode"))
+                detail = "binary chunks are rejected; only text Lua scripts are accepted (mode 't')";
+            luaLoadLog(trussc::LogLevel::Error, detail);
         } else if (load.readError) {
             luaLoadLog(trussc::LogLevel::Error, "Cannot read complete Lua file");
         }

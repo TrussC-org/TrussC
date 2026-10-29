@@ -38,13 +38,14 @@ existing vendor changes were reverted or rewritten.
 
 ## Text loading policy (addon code, not vendor source)
 
-`runFile` and lint compile with mode `"t"`. `getLuaState` installs text-only
-`load`, `loadstring` (when present), `loadfile`, `dofile` and the Lua-file
-`require` searcher. Explicit script mode `"b"`/`"bt"` cannot opt into binary
-loading. LuaJIT's generic wrong-mode message is clarified to name binary input
-and text-only loading. Native engine and sol2 C++ APIs retain upstream behavior;
-callers using those directly are responsible for trusted input. Native C module
-loading, when package support is enabled, retains its existing behavior.
+TrussC's `runFile`, initial sketch/file loads, reload and lint use mode `"t"`;
+initial file loads and reload share `runFile`. The live editor compiles source
+as text. Binary chunks are rejected at these entry points. LuaJIT's generic
+wrong-mode diagnostic is clarified in the owned file/lint paths to name binary
+input and text mode. The script-visible standard `load`, `loadstring`
+(when present), `loadfile`, `dofile` and `require` remain upstream, including
+binary loading. Scripts choose and are responsible for inputs they load
+through those functions. Native engine and sol2 C++ APIs are also unchanged.
 
 Run `tests/engine` for both engines and the full addon tests when updating.
 Tests for the removed reader guards were removed; text-loading and independent

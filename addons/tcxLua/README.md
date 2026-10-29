@@ -65,13 +65,12 @@ tcxLua::call(*lua, "keyPressed", key);             // arguments are passed on
   Lua's own "not enough memory" error; loaders do not replace the allocator.
   `runFile` and lint compile in text-only mode (`"t"`). Binary chunks are
   rejected with the engine's error naming binary input and text mode.
-  For libraries enabled in `LuaModulePreferences`, states from `getLuaState`
-  also restrict `load`, `loadstring` (LuaJIT),
-  `loadfile`, `dofile`, and the Lua-file `require` searcher to text, even when
-  a script requests mode `"b"` or `"bt"`. There is no binary opt-in in these
-  helpers. Hot reload uses `runFile`; the live editor compiles text only.
-  Direct C++ sol2/native engine APIs retain their upstream behavior and are
-  intended for trusted input; they are not subject to this helper policy.
+  Initial sketch/file loads and hot reload use `runFile`; the live editor
+  compiles text only. Scripts calling the standard `load`, `loadstring`
+  (LuaJIT), `loadfile`, `dofile`, or `require` get standard Lua behavior,
+  including binary loading where the engine supports it. These functions are
+  left upstream. Direct C++ sol2/native engine APIs also retain their standard
+  behavior. Script authors are responsible for inputs they load themselves.
 - Lint traversal uses the engine's `LUAI_MAXCCALLS` nesting limit (200 by
   default), covering the prototypes its source parser produces.
   Name and diagnostic storage grows with input; compilation has no allocation
@@ -84,6 +83,18 @@ tcxLua::call(*lua, "keyPressed", key);             // arguments are passed on
   Shared global-name snapshot failures return a `[lint]` diagnostic. If the
   diagnostic cannot be allocated, an Error goes to stderr and the result is
   empty. LuaJIT has no undefined-global scan; its lint path compiles each file.
+
+日本語: TrussC はスクリプトファイルとソースをテキストとして読み込みます。
+`runFile`、初回のスケッチ読み込み、リロード、lint ではモード `"t"` を使い、
+バイナリチャンクを明確なエラーで拒否します。スクリプト自身が標準の
+`load`、`loadstring`（LuaJIT）、`loadfile`、`dofile`、`require` を呼ぶ場合は、
+バイナリ読み込みを含め、各 Lua エンジンの標準動作になります。
+
+한국어: TrussC는 스크립트 파일과 소스를 텍스트로 읽습니다.
+`runFile`, 최초 스케치 로드, 다시 로드, lint는 `"t"` 모드를 사용하며
+바이너리 청크를 명확한 오류와 함께 거부합니다. 스크립트가 직접 표준
+`load`, `loadstring`(LuaJIT), `loadfile`, `dofile`, `require`를 호출하면
+바이너리 로드를 포함한 각 Lua 엔진의 표준 동작이 적용됩니다.
 
 sol2's own defaults are unchanged: on an error, `lua->safe_script(...)` and
 `safe_script_file(...)` without `sol::script_pass_on_error` throw `sol::error`,

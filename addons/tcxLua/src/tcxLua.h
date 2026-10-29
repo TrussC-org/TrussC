@@ -72,6 +72,8 @@ public:
     }
 
     /// @brief Load and run a text Lua file; binary chunks are rejected.
+    /// Initial sketch loads and reloads use this entry point. Script-visible
+    /// standard loaders retain the Lua engine's standard behavior.
     /// @return true if the file loaded and ran. false on a missing file, a syntax
     ///         error or a runtime error (logged).
     static bool runFile(sol::state& lua, const std::filesystem::path& path);

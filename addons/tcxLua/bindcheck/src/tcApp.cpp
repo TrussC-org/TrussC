@@ -8,11 +8,7 @@
 void tcApp::setup() {
     lua = tcx_lua.getLuaState();
 
-    const std::string scriptPath = getDataPath("bindcheck.lua");
-    sol::optional<sol::error> result = lua->safe_script_file(scriptPath, sol::load_mode::text);
-    if (result.has_value()) {
-        tcLogError("bindcheck") << "Lua execution failed: " << result.value().what();
-    }
+    tcxLua::runFile(*lua, getDataPath("bindcheck.lua"));
 
     // No need to keep a window open; exit as soon as the check has run.
     requestExitApp();

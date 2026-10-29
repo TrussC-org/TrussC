@@ -1,5 +1,4 @@
 #include "tcxLua.h"
-#include "tcxLuaTextOnly.h"
 #include "TrussC.h"
 
 #include "sol/sol.hpp"
@@ -83,13 +82,6 @@ std::shared_ptr<sol::state> tcxLua::getLuaState(tcxLua::LuaModulePreferences mod
     }
     if(mp.utf8){
         lua->open_libraries(sol::lib::utf8);
-    }
-
-    lua_pushcfunction(lua->lua_state(), tcxLuaInternal::installTextOnlyLoaders);
-    if (lua_pcall(lua->lua_state(), 0, 0, 0) != 0) {
-        sol::error error(sol::stack::get<std::string>(lua->lua_state(), -1));
-        lua_pop(lua->lua_state(), 1);
-        throw error;
     }
 
     setBindings(lua);

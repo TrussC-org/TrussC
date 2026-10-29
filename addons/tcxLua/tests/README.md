@@ -40,17 +40,17 @@ trusscli run -p .          # from this directory
 The harness also runs the engine-only regressions in `engine/`.
 They generate their inputs locally and need no display. `luaLoadBounds`
 checks large streamed text, finalizers and lint diagnostics, suggestion,
-depth and failure handling. `luaTextOnly` checks binary rejection with clear
-errors for each installed loader, including reader functions and requested
-binary modes, and successful text loading. With debug open, it attempts loader
-recovery through `debug.getupvalue` and audits globals, package tables, registry
-and closure upvalues for the original loaders. Reader callbacks, explicit
-(including nil) environments and PUC dofile continuations are also covered.
-LuaJIT coverage includes non-consuming string.buffer sources for both `load`
-and `loadstring`, explicit environments and binary rejection in every mode.
-The full addon harness enables `LuaModulePreferences.debug` and `package`.
-Both bundled engines are supported
-(`-DUSE_LUAJIT=ON` selects LuaJIT).
+depth and failure handling. It also generates a valid dumped chunk and checks
+that lint rejects it with an error naming binary input and text mode, while
+accepting text. Both bundled engines are supported (`-DUSE_LUAJIT=ON` selects
+LuaJIT).
+
+The full addon harness checks `runFile` binary rejection, clear diagnostics,
+stack restoration and text execution. Startup and reload share this entry
+point: a same-path text → binary → text replacement must reject the binary and
+recover when text is restored. It also checks that standard `load`, `loadstring`
+(where present), `loadfile`, `dofile` and `require` still accept engine-produced
+binary chunks in a state from `getLuaState`.
 
 The PUC targets `lintGlobalLifetime` and `lintScanLifetime` retain the lookup/GC
 and throwing-container-move regressions. Configure with ASan flags to check

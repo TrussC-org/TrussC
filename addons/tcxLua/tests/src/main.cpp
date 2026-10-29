@@ -20,8 +20,6 @@
 #include <tcxLua.h>
 #define TCXLUA_ENGINE_TEST_ENTRY runLuaEngineTests
 #include "../engine/main.cpp"
-#define TCXLUA_TEXT_TEST_ENTRY runLuaTextOnlyTests
-#include "../engine/textOnly.cpp"
 
 #include <chrono>
 #include <cstdio>
@@ -176,11 +174,9 @@ int main(int argc, char** argv) {
         return g_fail ? 1 : 0;
     }
     check("engine load/lint regressions", runLuaEngineTests() == 0);
-    check("text-only loaders", runLuaTextOnlyTests() == 0);
 
     tcxLua tcx;
     tcxLua::LuaModulePreferences preferences;
-    preferences.debug = true;
     preferences.package = true;
     auto lua = tcx.getLuaState(preferences);
     sol::state& L = *lua;
@@ -252,20 +248,32 @@ int main(int argc, char** argv) {
     check("binary rejection restores stack", lua_gettop(raw) == beforeFailedLoad);
     L["binaryChunk"] = string(bytecode.begin(), bytecode.end());
     L["binaryPath"] = tc::pathToUtf8(binaryFile);
-    auto installedPolicy = L.safe_script(
-        "local f,e = load(binaryChunk); assert(f == nil and e:find('binary')); "
-        "f,e = loadfile(binaryPath); assert(f == nil and e:find('binary')); "
-        "for _,loader in ipairs({load,loadfile,dofile,loadstring}) do "
-        "local _,original = debug.getupvalue(loader,1); "
-        "if type(original) == 'function' then "
-        "local ok,chunk = pcall(original,binaryChunk,'dump','b'); "
-        "assert(not (ok and type(chunk) == 'function')) end; "
-        "assert(original == nil) end; "
-        "local searcher = (package.searchers or package.loaders)[2]; "
-        "local _,up = debug.getupvalue(searcher,1); assert(up == package); "
-        "assert(debug.getupvalue(searcher,2) == nil)",
-        sol::script_pass_on_error, "installed-text-policy", sol::load_mode::text);
-    check("debug-enabled getLuaState installs text-only loaders", installedPolicy.valid());
+    auto standardLoaders = L.safe_script(
+        "assert(load(binaryChunk, 'dump', 'b'))(); "
+        "assert(binaryLoaded == 7); binaryLoaded = nil; "
+        "assert(loadfile(binaryPath, 'b'))(); "
+        "assert(binaryLoaded == 7); binaryLoaded = nil; "
+        "dofile(binaryPath); assert(binaryLoaded == 7); binaryLoaded = nil; "
+        "local previousPath = package.path; package.path = binaryPath; "
+        "require('generated'); assert(binaryLoaded == 7); binaryLoaded = nil; "
+        "package.path = previousPath; "
+        "if loadstring then assert(loadstring(binaryChunk))(); binaryLoaded = nil end",
+        sol::script_pass_on_error, "standard-loaders", sol::load_mode::text);
+    check("getLuaState preserves standard binary loaders", standardLoaders.valid());
+
+    // Startup and hot reload use the same runFile entry point and path.
+    const auto sketchFile = writeFile(dir, "reload.lua", "reloadValue = 1");
+    checkNoThrow("initial sketch text loads", true, [&] { return tcxLua::runFile(L, sketchFile); });
+    check("initial sketch ran", L["reloadValue"].get_or(0) == 1);
+    { ofstream file(sketchFile, ios::binary); file.write(bytecode.data(), bytecode.size()); }
+    errors.clear();
+    checkNoThrow("reload rejects binary replacement", false, [&] { return tcxLua::runFile(L, sketchFile); });
+    check("reload rejection names binary and text mode", errors.size() == 1 &&
+        errors.back().find("binary") != string::npos &&
+        (errors.back().find("text") != string::npos || errors.back().find("'t'") != string::npos));
+    { ofstream file(sketchFile); file << "reloadValue = 2"; }
+    checkNoThrow("reload accepts restored text", true, [&] { return tcxLua::runFile(L, sketchFile); });
+    check("restored sketch ran", L["reloadValue"].get_or(0) == 2);
     // ---- runFile -------------------------------------------------------------
     fs::path okFile = writeFile(dir, "ok.lua",
         "loaded = 1\n"

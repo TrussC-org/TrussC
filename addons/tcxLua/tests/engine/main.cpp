@@ -98,6 +98,27 @@ int TCXLUA_ENGINE_TEST_ENTRY() {
     check("text mode rejects binary on first reader call", status == LUA_ERRSYNTAX && textMode.count == 7);
     lua_pop(state, 1);
 
+    status = luaL_loadstring(state, "return 42");
+    std::string binary;
+    auto writer = [](lua_State*, const void* bytes, size_t size, void* data) -> int {
+        try { static_cast<std::string*>(data)->append(static_cast<const char*>(bytes), size); }
+        catch (...) { return 1; }
+        return 0;
+    };
+#if LUA_VERSION_NUM < 503 && !defined(lua_dump)
+    if (!status) status = lua_dump(state, writer, &binary);
+#else
+    if (!status) status = lua_dump(state, writer, &binary, 0);
+#endif
+    check("generate valid binary lint input", status == 0 && !binary.empty());
+    lua_pop(state, 1);
+    auto textIssues = tcxLuaLintUndefinedGlobals(state, {{"text", "return 42"}});
+    check("lint accepts text", textIssues.empty());
+    auto binaryIssues = tcxLuaLintUndefinedGlobals(state, {{"dumped", binary}});
+    check("lint rejects valid binary with clear error", binaryIssues.size() == 1 &&
+        binaryIssues[0].chunk == "dumped" && binaryIssues[0].name.find("binary") != std::string::npos &&
+        (binaryIssues[0].name.find("text") != std::string::npos || binaryIssues[0].name.find("'t'") != std::string::npos));
+
     // Review's 8 MiB chunked data and 11 MiB code modules, generated locally.
     for (int kind = 0; kind < 2; ++kind) {
         std::string module = "local d = {}\n";
