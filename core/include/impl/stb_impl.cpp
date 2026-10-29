@@ -191,8 +191,7 @@ void fontScratchFree(void* pointer) {
 }
 #define STBTT_malloc(x,u)  ((void)(u), trussc::internal::fontScratchMalloc(x))
 #define STBTT_free(x,u)    ((void)(u), trussc::internal::fontScratchFree(x))
-#define STBTT_VALIDATE_GLYPH(info, glyph) (!trussc::internal::fontScratchFailed() && trussc::internal::fontGlyphRangeFits(info, trussc::internal::fontScratchSourceBytes(), glyph))
-#define STBTT_REPORT_FAILURE() trussc::internal::fontScratchFailure()
+#define STBTT_VALIDATE_GLYPH(info, glyph, rejected) ((!(rejected) && !trussc::internal::fontScratchFailed() && trussc::internal::fontGlyphRangeFits(info, trussc::internal::fontScratchSourceBytes(), glyph)) ? true : (trussc::internal::fontScratchFailure(), false))
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb/stb_truetype.h"

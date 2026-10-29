@@ -495,8 +495,8 @@ static Bytes makeCffFont(const vector<Bytes>& charStrings = cffCharStrings(),
 }
 
 // Repeated empty global subroutine calls exercise work that emits no vertices.
-// Six bounded levels finish in under a million operations even without the guard.
-static void checkCffWork() {
+// Finite expansions above the former work ceilings must retain their outline.
+static void checkCffExpandedOutline() {
     vector<Bytes> subrs(6);
     subrs[0] = {11};
     for (size_t level = 1; level < subrs.size(); ++level) {
@@ -509,28 +509,28 @@ static void checkCffWork() {
     auto cs = cffCharStrings();
     cs[1].clear();
     csNum(cs[1], int(subrs.size()) - 1 - 107);
-    cs[1].push_back(29); cs[1].push_back(14);
+    cs[1].push_back(29);
+    const auto outline = cffCharStrings()[1];
+    cs[1].insert(cs[1].end(), outline.begin(), outline.end());
     const auto font = makeCffFont(cs, subrs);
     string reason;
     check("empty-subroutine CFF passes sfnt admission",
           internal::checkFontSfnt(font.data(), font.size(), 0, reason));
     stbtt_fontinfo info{};
-    if (!stbtt_InitFont(&info, font.data(), 0)) { check("work-bound CFF initializes", false); return; }
+    if (!stbtt_InitFont(&info, font.data(), 0)) { check("expanded CFF initializes", false); return; }
     {
         internal::FontScratchScope scratch(font.size());
         int x0, y0, x1, y1;
-        // Upstream GetGlyphBox returns true for CFF even when its interpreter
-        // fails; the owning scope and zero bounds carry the rejection.
         stbtt_GetGlyphBox(&info, 1, &x0, &y0, &x1, &y1);
-        check("empty-subroutine CFF metrics reject excessive work",
-              scratch.failed() && x0 == 0 && y0 == 0 && x1 == 0 && y1 == 0);
+        check("empty-subroutine CFF metrics retain expanded outline",
+              !scratch.failed() && x1 > x0 && y1 > y0);
     }
     {
         internal::FontScratchScope scratch(font.size());
         stbtt_vertex* vertices = nullptr;
         const int count = stbtt_GetGlyphShape(&info, 1, &vertices);
         if (vertices) stbtt_FreeShape(&info, vertices);
-        check("empty-subroutine CFF outline rejects excessive work", !count && scratch.failed());
+        check("empty-subroutine CFF outline retains expanded outline", count > 0 && !scratch.failed());
     }
     // Finite review fixture: a long no-output body, with modest call count.
     Bytes body;
@@ -541,7 +541,7 @@ static void checkCffWork() {
     cs = cffCharStrings();
     cs[1].clear();
     for (int i = 0; i < 1000; ++i) { csNum(cs[1], -107); cs[1].push_back(29); }
-    cs[1].push_back(14);
+    cs[1].insert(cs[1].end(), outline.begin(), outline.end());
     const auto longBodyFont = makeCffFont(cs, {body});
     check("long-body CFF passes sfnt admission",
           internal::checkFontSfnt(longBodyFont.data(), longBodyFont.size(), 0, reason));
@@ -550,15 +550,14 @@ static void checkCffWork() {
             internal::FontScratchScope scratch(longBodyFont.size());
             int x0, y0, x1, y1;
             stbtt_GetGlyphBox(&info, 1, &x0, &y0, &x1, &y1);
-            check("long no-output CFF metrics reject excessive work", scratch.failed() &&
-                  x0 == 0 && y0 == 0 && x1 == 0 && y1 == 0);
+            check("long no-output CFF metrics retain expanded outline", !scratch.failed() && x1 > x0 && y1 > y0);
         }
         {
             internal::FontScratchScope scratch(longBodyFont.size());
             stbtt_vertex* vertices = nullptr;
             const int count = stbtt_GetGlyphShape(&info, 1, &vertices);
             if (vertices) stbtt_FreeShape(&info, vertices);
-            check("long no-output CFF outline rejects excessive work", !count && scratch.failed());
+            check("long no-output CFF outline retains expanded outline", count > 0 && !scratch.failed());
         }
     } else check("long-body CFF initializes", false);
     const auto normal = makeCffFont();
@@ -936,7 +935,7 @@ static void checkVertexCount() {
     check("vertex count: 'D' (far over the limit) is empty", pd.empty(),
           "vertices=" + to_string(pd.size()));
     const internal::GlyphInfo* gd = m.getOrLoadGlyph('D');
-    check("vertex count: 'D' caches an invalid whole glyph", gd && !gd->isValid());
+    check("vertex count: 'D' draws empty", gd && gd->isValid() && gd->getWidth() == 0);
 }
 
 // --- flattened point count ----------------------------------------------------------
@@ -986,9 +985,9 @@ static void checkPointCount() {
         internal::setStbttLimitsForTests(INT_MAX, 4, SIZE_MAX);
         const internal::GlyphInfo* ga = m.getOrLoadGlyph('A');
         internal::resetStbttLimitsForTests();
-        check("point count: 'A' over the limit caches an invalid whole glyph (oversample " +
+        check("point count: 'A' over the limit gets a glyph entry (oversample " +
                   to_string(os) + ")",
-              ga && !ga->isValid());
+              ga && ga->isValid() && closeTo(ga->getAdvance(), 60.0f));
     }
 }
 
@@ -1481,7 +1480,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     checkCmapSelection();
     checkCffCharStringsCount();
     checkCffMalformed();
-    checkCffWork();
+    checkCffExpandedOutline();
     checkCodepointRange();
     checkVertexCount();
     checkPointCount();
