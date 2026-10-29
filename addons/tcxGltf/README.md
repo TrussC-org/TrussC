@@ -14,6 +14,17 @@ if (result) {
 
 Pass a native `fs::path`, or use `utf8ToPath(text)` for UTF-8 text on Windows. Model files and external buffers open through filesystem-aware cgltf callbacks; external images use the core pixel loader. Buffer and image URI escapes are decoded once before joining the model's directory, so `a%20b.png` selects `a b.png`. Data URI buffers remain handled by cgltf; inline data URI images remain unsupported. Unavailable optional textures are still skipped, with diagnostics.
 
+glTF sampler wrap modes (`REPEAT`, `MIRRORED_REPEAT`, `CLAMP_TO_EDGE`) are applied
+independently to U/S and V/T. Missing samplers and omitted wrap fields use
+`REPEAT`. Magnification supports `NEAREST` and `LINEAR`; minification supports
+`NEAREST`, `LINEAR` (without mipmaps), `NEAREST_MIPMAP_LINEAR` and
+`LINEAR_MIPMAP_LINEAR`. Texture has no nearest-mipmap interpolation setting, so
+`NEAREST_MIPMAP_NEAREST` and `LINEAR_MIPMAP_NEAREST` retain the existing Linear
+filter with linear mipmap interpolation. Unspecified filters keep that default.
+Each material texture load owns a separate Texture, even when the image or glTF
+texture is shared; different samplers do not overwrite each other. Repeated
+references still duplicate image decoding and GPU storage.
+
 C1 keeps two small insertions fixing an upstream allocation-failure path during
 parsing in a hash-verified build copy; see [PROVENANCE.md](PROVENANCE.md).
 

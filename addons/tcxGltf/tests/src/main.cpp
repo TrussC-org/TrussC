@@ -278,10 +278,51 @@ static bool vecNear(const Vec3& v, float x, float y, float z) {
 
 int main() {
     sg_desc graphics = {};
+    graphics.sampler_pool_size = 64;
     sg_setup(&graphics);
     g_dir = fs::temp_directory_path() /
             utf8ToPath("tcxGltf-テスト-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(g_dir);
+
+    {
+        // Run before other texture cases, with all 64 sampler slots available.
+        // The whole model loads synchronously, without collecting retired handles.
+        constexpr int primitiveCount = 22;
+        Pixels pixels;
+        pixels.allocate(2, 2, 4);
+        for (int y = 0; y < 2; ++y)
+            for (int x = 0; x < 2; ++x) pixels.setColor(x, y, Color(1, 0, 0, 1));
+        check("many textures: fixture PNG saved", bool(pixels.save(g_dir / "many-textures.png")));
+        auto b = texturedTriangle(R"({"uri":"many-textures.png"})");
+        b.extra = R"("images":[{"uri":"many-textures.png"}],
+            "samplers":[{"wrapS":33648,"wrapT":10497,"minFilter":9986,"magFilter":9728}],
+            "textures":[{"source":0},{"source":0,"sampler":0}],
+            "materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0}}},
+                         {"pbrMetallicRoughness":{"baseColorTexture":{"index":1}}}],)";
+        b.primitive.clear();
+        for (int i = 0; i < primitiveCount; ++i) {
+            if (i) b.primitive += ',';
+            b.primitive += R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1,"material":)" +
+                           to_string(i % 2) + "}";
+        }
+        GltfModel model;
+        if (loadCase("many textures", b, true, model)) {
+            check("many textures: all primitives loaded", model.getNodeCount() == primitiveCount);
+            for (int i = 0; i < primitiveCount && i < model.getNodeCount(); ++i) {
+                const auto* texture = model.getNode(i).material.getBaseColorTexture();
+                const string label = "many textures: primitive " + to_string(i);
+                check(label + ": valid sampler", texture &&
+                      sg_query_sampler_state(texture->getSampler()) == SG_RESOURCESTATE_VALID);
+                const auto desc = texture ? sg_query_sampler_desc(texture->getSampler()) : sg_sampler_desc{};
+                check(label + ": backend descriptor",
+                      desc.wrap_u == (i % 2 ? SG_WRAP_MIRRORED_REPEAT : SG_WRAP_REPEAT) &&
+                      desc.wrap_v == SG_WRAP_REPEAT &&
+                      desc.min_filter == (i % 2 ? SG_FILTER_NEAREST : SG_FILTER_LINEAR) &&
+                      desc.mag_filter == (i % 2 ? SG_FILTER_NEAREST : SG_FILTER_LINEAR) &&
+                      desc.mipmap_filter == SG_FILTER_LINEAR);
+            }
+        }
+    }
 
 
     {
@@ -1043,6 +1084,99 @@ int main() {
     }
 
     // ----- textures -------------------------------------------------------------
+    {
+        Pixels pixels;
+        pixels.allocate(2, 2, 4);
+        for (int y = 0; y < 2; ++y)
+            for (int x = 0; x < 2; ++x) pixels.setColor(x, y, Color(1, 0, 0, 1));
+        check("sampler: fixture PNG saved", bool(pixels.save(g_dir / "sampler.png")));
+        struct SamplerCase {
+            const char* name;
+            const char* json;  // nullptr means no sampler
+            TextureWrap wrapU;
+            TextureWrap wrapV;
+            TextureFilter minFilter;
+            TextureFilter magFilter;
+            int mipLevels;
+        };
+        const SamplerCase cases[] = {
+            {"missing sampler", nullptr, TextureWrap::Repeat, TextureWrap::Repeat,
+             TextureFilter::Linear, TextureFilter::Linear, 2},
+            {"empty sampler", "{}", TextureWrap::Repeat, TextureWrap::Repeat,
+             TextureFilter::Linear, TextureFilter::Linear, 2},
+            {"explicit repeat", R"({"wrapS":10497,"wrapT":10497})",
+             TextureWrap::Repeat, TextureWrap::Repeat, TextureFilter::Linear, TextureFilter::Linear, 2},
+            {"mixed axes", R"({"wrapS":33071,"wrapT":33648})",
+             TextureWrap::ClampToEdge, TextureWrap::MirroredRepeat,
+             TextureFilter::Linear, TextureFilter::Linear, 2},
+            {"reversed axes", R"({"wrapS":33648,"wrapT":33071})",
+             TextureWrap::MirroredRepeat, TextureWrap::ClampToEdge,
+             TextureFilter::Linear, TextureFilter::Linear, 2},
+            {"nearest", R"({"minFilter":9728,"magFilter":9728})",
+             TextureWrap::Repeat, TextureWrap::Repeat, TextureFilter::Nearest, TextureFilter::Nearest, 1},
+            {"linear", R"({"minFilter":9729,"magFilter":9729})",
+             TextureWrap::Repeat, TextureWrap::Repeat, TextureFilter::Linear, TextureFilter::Linear, 1},
+            {"nearest mipmap linear", R"({"minFilter":9986,"magFilter":9729})",
+             TextureWrap::Repeat, TextureWrap::Repeat, TextureFilter::Nearest, TextureFilter::Linear, 2},
+            {"linear mipmap linear", R"({"minFilter":9987,"magFilter":9728})",
+             TextureWrap::Repeat, TextureWrap::Repeat, TextureFilter::Linear, TextureFilter::Nearest, 2},
+            {"unsupported nearest mipmap nearest", R"({"minFilter":9984})",
+             TextureWrap::Repeat, TextureWrap::Repeat, TextureFilter::Linear, TextureFilter::Linear, 2},
+            {"unsupported linear mipmap nearest", R"({"minFilter":9985})",
+             TextureWrap::Repeat, TextureWrap::Repeat, TextureFilter::Linear, TextureFilter::Linear, 2},
+        };
+        for (const auto& c : cases) {
+            auto b = texturedTriangle(R"({"uri":"sampler.png"})");
+            if (c.json) {
+                b.extra = R"("samplers":[)" + string(c.json) + "]," + b.extra;
+                const auto pos = b.extra.find(R"("source":0)");
+                b.extra.insert(pos, R"("sampler":0,)");
+            }
+            GltfModel model;
+            const string label = string("sampler: ") + c.name;
+            if (!loadCase(label, b, true, model)) continue;
+            const Texture* texture = model.getNode(0).material.getBaseColorTexture();
+            check(label + ": wrap axes", texture && texture->getWrapU() == c.wrapU &&
+                  texture->getWrapV() == c.wrapV);
+            check(label + ": filters", texture && texture->getMinFilter() == c.minFilter &&
+                  texture->getMagFilter() == c.magFilter);
+            check(label + ": mip levels", texture &&
+                  sg_query_image_desc(texture->getImage()).num_mipmaps == c.mipLevels);
+            if (texture) {
+                const auto desc = sg_query_sampler_desc(texture->getSampler());
+                auto sgWrap = [](TextureWrap wrap) {
+                    if (wrap == TextureWrap::Repeat) return SG_WRAP_REPEAT;
+                    if (wrap == TextureWrap::MirroredRepeat) return SG_WRAP_MIRRORED_REPEAT;
+                    return SG_WRAP_CLAMP_TO_EDGE;
+                };
+                check(label + ": backend sampler", desc.wrap_u == sgWrap(c.wrapU) &&
+                      desc.wrap_v == sgWrap(c.wrapV) &&
+                      desc.min_filter == (c.minFilter == TextureFilter::Nearest ? SG_FILTER_NEAREST : SG_FILTER_LINEAR) &&
+                      desc.mag_filter == (c.magFilter == TextureFilter::Nearest ? SG_FILTER_NEAREST : SG_FILTER_LINEAR) &&
+                      desc.mipmap_filter == (c.mipLevels > 1 ? SG_FILTER_LINEAR : SG_FILTER_NEAREST));
+            }
+        }
+        // Two material textures share image 0, but use different samplers.
+        auto b = triangle();
+        b.extra = R"("images":[{"uri":"sampler.png"}],
+            "samplers":[{"wrapS":33071,"wrapT":33648},{}],
+            "textures":[{"source":0,"sampler":0},{"source":0,"sampler":1}],
+            "materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0}}},
+                         {"pbrMetallicRoughness":{"baseColorTexture":{"index":1}}}],)";
+        b.primitive = R"({"attributes":{"POSITION":0},"material":0},
+                         {"attributes":{"POSITION":0},"material":1})";
+        GltfModel model;
+        if (loadCase("shared image with different samplers", b, true, model)) {
+            const auto* first = model.getNode(0).material.getBaseColorTexture();
+            const auto* second = model.getNode(1).material.getBaseColorTexture();
+            check("shared image: independent textures and wrap modes",
+                  first && second && first != second &&
+                  first->getWrapU() == TextureWrap::ClampToEdge &&
+                  first->getWrapV() == TextureWrap::MirroredRepeat &&
+                  second->getWrapU() == TextureWrap::Repeat &&
+                  second->getWrapV() == TextureWrap::Repeat);
+        }
+    }
     {
         // Put a valid image outside the model folder and a different-sized
         // image at the appended path, so selecting the outside file is visible.

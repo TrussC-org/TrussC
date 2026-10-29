@@ -45,6 +45,15 @@ model data is validated before it is read:
 - Japanese-named glTF files in a Japanese-named folder load an external
   PNG, with either a data URI buffer or a Japanese-named external `.bin`.
 
+Sampler fixtures check explicit REPEAT, MIRRORED_REPEAT and CLAMP_TO_EDGE,
+independent U/V axes, empty/missing samplers, supported min/mag filters and
+mipmap counts, plus independent textures when two samplers share an image.
+They inspect both Texture state and dummy-backend sampler descriptors. Unsupported
+nearest-mipmap interpolation modes retain the existing default.
+A 22-primitive model also checks every texture with `sg_query_sampler_state`
+and verifies wrap/filter descriptors in a 64-slot sampler pool, covering both
+missing samplers and explicit wraps with nearest filters.
+
 Texture cases use sokol's dummy graphics backend (no window or GPU). On
 Windows, the test executable uses the UTF-8 manifest from `trussc_app()`.
 
