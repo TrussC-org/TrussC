@@ -2,6 +2,7 @@
 # A cross-platform creative coding framework
 
 cmake_minimum_required(VERSION 3.20)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/tc_fetch_quiet.cmake")
 
 # Start with C/CXX only — OBJC/OBJCXX enabled after project() if on macOS
 project(TrussC LANGUAGES C CXX)

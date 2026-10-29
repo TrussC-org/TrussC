@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fail normal CI builds on compiler, linker and CMake warnings.
 
---capture keeps stdout/stderr visible and saves them, preserving command status.
+--capture keeps stdout/stderr visible and saves them, preserving command failures.
 Inherited output pipes get a bounded grace period after command exit.
 Scan that log in a following step, even when the build command failed.
 For mixed build/test drivers, --capture-builds collects only run_build calls
@@ -27,6 +27,7 @@ WARNING = re.compile(
     r'(?:^\s*|:\s*)warning\s*:'
     r'|\bwarning\s+[A-Z]+\d+\b'
     r'|\bCMake (?:Deprecation )?Warning\b'
+    r'|build output capture incomplete:'
     r'|\b(?:emcc|em\+\+):\s*warning\b'
     r'|\b(?:ld(?:64)?(?:\.lld)?|lld(?:-link)?|link(?:\.exe)?)\s*:\s*'
     r'(?:warning\b|fatal warning\(s\))'
@@ -40,6 +41,7 @@ BUILD_LOG_ENV = 'TC_BUILD_WARNING_LOG'
 
 # Bound (memory): 8 queued lines + 2 reader lines, tail and warning sample; each <= 64K Unicode characters (256 KiB).
 OUTPUT_LIMIT = 64 * 1024
+# Bound (inherited pipes): one second after command exit, after draining the child's buffered bytes.
 CAPTURE_EXIT_GRACE = 1.0
 
 
@@ -187,6 +189,7 @@ def capture(path, command):
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         pending = queue.Queue(maxsize=8)
         stopped = threading.Event()
+        incomplete = threading.Event()
 
         def enqueue(item):
             while not stopped.is_set():
@@ -197,24 +200,85 @@ def capture(path, command):
                     pass
 
         def read_output():
-            # A descendant can retain the pipe after the command exits. This
-            # daemon owns/ultimately closes it; closing a blocked reader from
-            # the main thread can itself hang on Windows/Python's stream lock.
             try:
                 with process.stdout as pipe:
+                    if os.name == 'nt':
+                        # Windows select() only accepts sockets. Peek before
+                        # reading so an inherited, idle pipe cannot block us.
+                        import ctypes
+                        import msvcrt
+                        from ctypes import wintypes
+                        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+                        peek = kernel.PeekNamedPipe
+                        peek.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
+                                         wintypes.LPVOID, ctypes.POINTER(wintypes.DWORD),
+                                         wintypes.LPVOID]
+                        peek.restype = wintypes.BOOL
+                        handle = msvcrt.get_osfhandle(pipe.fileno())
+
+                        def available_bytes():
+                            available = wintypes.DWORD()
+                            if not peek(handle, None, 0, None, ctypes.byref(available), None):
+                                if ctypes.get_last_error() == 109:  # ERROR_BROKEN_PIPE: EOF
+                                    return -1
+                                raise ctypes.WinError(ctypes.get_last_error())
+                            return available.value
+
+                        def read_ready():
+                            available = available_bytes()
+                            if available < 0:
+                                return b''
+                            if available:
+                                return os.read(pipe.fileno(), min(available, OUTPUT_LIMIT))
+                            return None
+                    else:
+                        import array
+                        import fcntl
+                        import select
+                        import termios
+
+                        def available_bytes():
+                            available = array.array('i', [0])
+                            fcntl.ioctl(pipe.fileno(), termios.FIONREAD, available, True)
+                            return available[0]
+
+                        def read_ready():
+                            if select.select([pipe], [], [], 0)[0]:
+                                return os.read(pipe.fileno(), OUTPUT_LIMIT)
+                            return None
+
+                    deadline = None
+                    remaining = 0
                     while not stopped.is_set():
-                        chunk = os.read(pipe.fileno(), OUTPUT_LIMIT)
-                        if not chunk:
+                        if deadline is None and process.poll() is not None:
+                            # The child cannot write again. All its remaining
+                            # bytes are now in the pipe; drain this snapshot even
+                            # if a read or queue handoff outlasts the grace period.
+                            remaining = max(0, available_bytes())
+                            deadline = time.monotonic() + CAPTURE_EXIT_GRACE
+                        closing = (deadline is not None and remaining == 0 and
+                                   time.monotonic() >= deadline)
+                        chunk = read_ready()
+                        if chunk == b'':
                             break
-                        enqueue(chunk)
-            except OSError as error:
+                        if chunk is not None:
+                            # Every read is handed over before any deadline
+                            # decision; the following iteration can observe EOF.
+                            enqueue(chunk)
+                            remaining = max(0, remaining - len(chunk))
+                        if closing:
+                            incomplete.set()
+                            break
+                        if chunk is None:
+                            # Bound (polling cost): check idle pipes at most 20 times/second.
+                            stopped.wait(.05)
+            except Exception as error:
                 enqueue(error)
             finally:
                 enqueue(None)
 
-        reader = threading.Thread(target=read_output, daemon=True)
+        reader = threading.Thread(target=read_output)
         reader.start()
-        deadline = None
 
         def write_chunk(chunk):
             if isinstance(chunk, Exception):
@@ -226,40 +290,30 @@ def capture(path, command):
 
         try:
             while True:
-                if process.poll() is not None and deadline is None:
-                    deadline = time.monotonic() + CAPTURE_EXIT_GRACE
-                if deadline is not None and time.monotonic() >= deadline:
-                    stopped.set()
-                    # Preserve bytes already read. The queue plus a racing
-                    # producer put contains at most nine bounded chunks.
-                    for _ in range(9):
-                        try:
-                            chunk = pending.get_nowait()
-                        except queue.Empty:
-                            break
-                        if chunk is not None:
-                            write_chunk(chunk)
-                    notice = (b'\nBuild capture: output may be incomplete; inherited output pipe '
-                              b'remained open after command exit.\n')
-                    output.write(notice)
-                    sys.stderr.buffer.write(notice)
-                    sys.stderr.buffer.flush()
-                    break
-                try:
-                    chunk = pending.get(timeout=.05)
-                except queue.Empty:
-                    continue
+                chunk = pending.get()
                 if chunk is None:
                     break
                 write_chunk(chunk)
+            # None follows every chunk in FIFO order; no read can still be in
+            # flight. Join the reader rather than abandoning a daemon thread.
+            reader.join()
             status = process.wait()
+            if incomplete.is_set():
+                notice = (b'\nbuild output capture incomplete: a background process '
+                          b'kept the output open\n')
+                output.write(notice)
+                sys.stderr.buffer.write(notice)
+                sys.stderr.buffer.flush()
+                if status == 0:
+                    status = 1
         except BaseException:
-            process.kill()
+            if process.poll() is None:
+                process.kill()
             process.wait()
             raise
         finally:
             stopped.set()
-            reader.join(timeout=.1)
+            reader.join()
             output.flush()
     return status if status >= 0 else 128 - status
 

@@ -47,6 +47,7 @@
 #include "tc/gpu/shaders/sglCoverage.glsl.h"
 
 #ifdef __APPLE__
+#include <pthread.h>
 #include <os/log.h>   // the Logger's platform sink (internal::writeSystemLog)
 #include <unistd.h>
 #endif
@@ -1549,10 +1550,16 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
 #if defined(__APPLE__)
 namespace {
 // libtrace/libdispatch state inherited across fork is not usable until exec.
-// Capture the original process before main, including when the child's first
-// log is the forwarding-loss warning. Console/file sinks and onLog listeners
-// still receive that warning; entering os_log here can terminate the child.
-const pid_t systemLogProcess = getpid();
+// Constant initialization also permits logging from user global constructors.
+constinit std::atomic<bool> systemLogForked{false};
+static_assert(std::atomic<bool>::is_always_lock_free);
+constinit pthread_once_t systemLogForkRegistration = PTHREAD_ONCE_INIT;
+void systemLogForkChild() {
+    systemLogForked.store(true, std::memory_order_relaxed);
+}
+void registerSystemLogForkGuard() {
+    pthread_atfork(nullptr, nullptr, systemLogForkChild);
+}
 }
 #endif
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
@@ -1577,7 +1584,8 @@ namespace internal {
 
 void writeSystemLog(const LogEventArgs& e) {
 #if defined(__APPLE__)
-    if (getpid() != systemLogProcess) return;
+    pthread_once(&systemLogForkRegistration, registerSystemLogForkGuard);
+    if (systemLogForked.load(std::memory_order_relaxed)) return;
 #if !TARGET_OS_IPHONE
     if (osLogMirroredToConsole()) return;
 #endif

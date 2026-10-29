@@ -201,7 +201,7 @@ jobs:
             sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
             ./tools/build_linux.sh
           elif [ "$RUNNER_OS" == "Windows" ]; then
-            ./tools/build_win.bat
+            TC_NO_LAUNCH=1 ./tools/build_win.bat
           fi
           TC_BUILD
 

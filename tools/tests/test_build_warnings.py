@@ -119,7 +119,8 @@ class WarningTests(unittest.TestCase):
                     capture_output=True, timeout=10)
                 self.assertLess(time.monotonic() - started, 8)
                 self.assertEqual(result.returncode, 7)
-                self.assertIn(b'output may be incomplete', result.stderr)
+                self.assertIn(b'build output capture incomplete: a background process kept the output open',
+                              result.stderr)
                 self.assertIn(b'partial output', log.read_bytes())
                 self.assertIn(b'warning: before exit', result.stdout)
                 self.assertIn(b'warning: inherited pipe', result.stdout)
@@ -136,13 +137,126 @@ class WarningTests(unittest.TestCase):
                         import signal
                         os.kill(pid, signal.SIGTERM)
 
-    def test_windows_ci_disables_gui_launch(self):
-        workflow = yaml.safe_load((ROOT / '.github/workflows/build.yml').read_text(encoding='utf-8'))
-        step = next(s for s in workflow['jobs']['build']['steps']
-                    if s.get('name') == 'Build trusscli')
-        windows = step['run'].split('elif [ "$RUNNER_OS" == "Windows" ]; then')[1]
-        self.assertLess(windows.index("sed -i 's/^start /REM &/' tools/build_win.bat"),
-                        windows.index('./tools/build_win.bat'))
+    def test_capture_incomplete_log_fails_without_any_warning(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / 'build.log'
+            pidfile = Path(directory) / 'grandchild.pid'
+            grandchild = ('import time; time.sleep(1.5); '
+                          'print("late.cpp:1: warning: hidden", flush=True); time.sleep(60)')
+            child = ('import subprocess,sys; from pathlib import Path; '
+                     f'p=subprocess.Popen([sys.executable,"-c",{grandchild!r}]); '
+                     'Path(sys.argv[1]).write_text(str(p.pid), encoding="utf-8")')
+            try:
+                result = subprocess.run([sys.executable, str(SCRIPT), '--capture', str(log), '--',
+                                         sys.executable, '-c', child, str(pidfile)],
+                                        capture_output=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                notice = b'build output capture incomplete: a background process kept the output open'
+                self.assertIn(notice, result.stderr)
+                self.assertIn(notice, log.read_bytes())
+                self.assertNotIn(b'warning:', log.read_bytes())
+                checked = subprocess.run([sys.executable, str(SCRIPT), str(log)], capture_output=True)
+                self.assertEqual(checked.returncode, 1)
+                self.assertIn(notice, checked.stdout)
+            finally:
+                if pidfile.exists():
+                    pid = int(pidfile.read_text(encoding='utf-8'))
+                    if os.name == 'nt':
+                        subprocess.run(['taskkill', '/PID', str(pid), '/F'], capture_output=True)
+                    else:
+                        import signal
+                        os.kill(pid, signal.SIGTERM)
+
+    def test_capture_bounds_continuously_writing_descendant(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / 'build.log'
+            pidfile = Path(directory) / 'grandchild.pid'
+            grandchild = ('import time; '
+                          '\nwhile True: print("background output", flush=True); time.sleep(.01)')
+            child = ('import subprocess,sys; from pathlib import Path; '
+                     f'p=subprocess.Popen([sys.executable,"-c",{grandchild!r}]); '
+                     'Path(sys.argv[1]).write_text(str(p.pid), encoding="utf-8"); '
+                     'print("direct child final output", flush=True)')
+            started = time.monotonic()
+            try:
+                result = subprocess.run([sys.executable, str(SCRIPT), '--capture', str(log), '--',
+                                         sys.executable, '-c', child, str(pidfile)],
+                                        capture_output=True, timeout=10)
+                self.assertLess(time.monotonic() - started, 8)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(b'direct child final output', log.read_bytes())
+                self.assertIn(b'build output capture incomplete:', log.read_bytes())
+                checked = subprocess.run([sys.executable, str(SCRIPT), str(log)], capture_output=True)
+                self.assertEqual(checked.returncode, 1)
+            finally:
+                if pidfile.exists():
+                    pid = int(pidfile.read_text(encoding='utf-8'))
+                    if os.name == 'nt':
+                        subprocess.run(['taskkill', '/PID', str(pid), '/F'], capture_output=True)
+                    else:
+                        import signal
+                        try:
+                            os.kill(pid, signal.SIGTERM)
+                        except ProcessLookupError:
+                            pass
+
+    def test_capture_delayed_read_and_exit_burst_are_complete(self):
+        # Delay a chunk after the kernel read, reproducing reader descheduling.
+        # The capture must hand it over and drain the rest through EOF.
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / 'build.log'
+            original = os.read
+            for blocks, diagnostic in ((1, 'Built target app'),
+                                       (1, 'burst.cpp:1: warning: at exit'),
+                                       (256, 'Built target app'),
+                                       (256, 'burst.cpp:1: warning: at exit')):
+                delayed = False
+
+                def read(fd, size):
+                    nonlocal delayed
+                    in_reader = gate.threading.current_thread() is not gate.threading.main_thread()
+                    chunk = original(fd, min(size, 512) if in_reader else size)
+                    if (chunk and not delayed and
+                            gate.threading.current_thread() is not gate.threading.main_thread()):
+                        delayed = True
+                        time.sleep(1.5)
+                    return chunk
+
+                expected = (('x' * 1024 + '\n') * blocks + diagnostic + '\n').encode()
+                command = [sys.executable, '-c',
+                           f'import sys; sys.stdout.write(("x" * 1024 + "\\n") * {blocks} + '
+                           f'{diagnostic!r} + "\\n"); sys.stdout.flush()']
+                # Redirect the echo to a file to keep the test's own log small.
+                with (Path(directory) / 'echo.log').open('wb') as echo:
+                    with patch.object(gate.os, 'read', read), patch.object(gate.sys, 'stdout',
+                                                                          SimpleNamespace(buffer=echo)):
+                        self.assertEqual(gate.capture(log, command), 0)
+                self.assertTrue(delayed)
+                self.assertEqual(log.read_bytes(), expected)
+                checked = subprocess.run([sys.executable, str(SCRIPT), str(log)], capture_output=True)
+                self.assertEqual(checked.returncode, int('warning:' in diagnostic))
+
+    def test_windows_ci_disables_gui_launch_without_rewriting_batch(self):
+        for name in ('build', 'daily'):
+            workflow = yaml.safe_load((ROOT / f'.github/workflows/{name}.yml').read_text(encoding='utf-8'))
+            invocations = 0
+            for job in workflow['jobs'].values():
+                for step in job.get('steps', []):
+                    script = step.get('run', '')
+                    for line in script.splitlines():
+                        if 'build_win.bat' in line:
+                            # The only allowed reference is an invocation of
+                            # the original script with the supported switch.
+                            self.assertEqual(line.strip(), 'TC_NO_LAUNCH=1 ./tools/build_win.bat')
+                            invocations += 1
+            self.assertEqual(invocations, 1, name)
+        batch = (ROOT / 'tools/build_win.bat').read_bytes()
+        self.assertEqual(batch.count(b'\n'), batch.count(b'\r\n'))
+        self.assertIn(b'if not defined TC_NO_LAUNCH (\r\n', batch)
+        self.assertIn(b'    start "" "%SCRIPT_DIR%\\trusscli.exe"\r\n)', batch)
+        self.assertIn(b') else (\r\n    REM The unattended PATH prompt may have reached EOF after a successful build.\r\n    exit /b 0\r\n)', batch)
+        attributes = subprocess.check_output(['git', 'check-attr', 'eol', '--', 'tools/build_win.bat'])
+        self.assertIn(b'eol: crlf', attributes)
 
     def test_runtime_output_never_enters_build_log(self):
         # Exercise the actual mixed build/run boundary. Even marker-like text
@@ -488,7 +602,7 @@ int main() {
         # libtrace cannot be safely entered in a pre-exec fork child; such a
         # failure cannot be recovered by the build capture's C++ catch blocks.
         source = (ROOT / 'core/include/tc/app/tcGlobal.cpp').read_text(encoding='utf-8')
-        owner = source[source.index('const pid_t systemLogProcess ='):].split(';', 1)[0] + ';'
+        owner = source[source.index('constinit std::atomic<bool> systemLogForked'):].split('\n}\n#endif', 1)[0]
         start = source.index('void writeSystemLog(const LogEventArgs& e) {')
         end = source.index('\n}', start) + 2
         function = source[start:end]
@@ -498,6 +612,8 @@ int main() {
             cpp.write_text(r'''#include <string>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <atomic>
+#include <pthread.h>
 #define __APPLE__ 1
 #define TARGET_OS_IPHONE 0
 #define OS_LOG_TYPE_DEBUG 0
@@ -511,16 +627,21 @@ struct LogEventArgs { LogLevel level; std::string message; };
 const char* logLevelToString(LogLevel) { return "WARNING"; }
 bool osLogMirroredToConsole() { return false; }
 int calls = 0;
-''' + owner + r'''
+pid_t parentProcess() { static const pid_t parent = getpid(); return parent; }
+void writeSystemLog(const LogEventArgs&);
+// Deliberately before the production guard declarations/initializers.
+struct EarlyLog {
+    EarlyLog() { writeSystemLog({LogLevel::Warning, "before owner initialization"}); }
+} earlyLog;
 os_log_t os_log_create(const char*, const char*) {
-    if (getpid() != systemLogProcess) _exit(90);
+    if (getpid() != parentProcess()) _exit(90);
     return 1;
 }
 void os_log_with_type(os_log_t, os_log_type_t, const char*, const char*, const char*) {
-    if (getpid() != systemLogProcess) _exit(91);
+    if (getpid() != parentProcess()) _exit(91);
     ++calls;
 }
-''' + function + r'''
+''' + owner + '\n' + function + r'''
 int main() {
     LogEventArgs warning{LogLevel::Warning, "forwarding failed"};
     writeSystemLog(warning);
@@ -530,16 +651,28 @@ int main() {
     if (child < 0 || waitpid(child, &status, 0) != child ||
         !WIFEXITED(status) || WEXITSTATUS(status)) return 1;
     writeSystemLog(warning);
-    return calls == 2 ? 0 : 2;
+    return calls == 3 ? 0 : 2;
 }
 ''', encoding='utf-8')
             gate.run_build(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
                             str(cpp), '-o', str(directory / 'sink')], echo=False, check=True)
             result = subprocess.run([str(directory / 'sink')], capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+            # The former dynamically initialized PID guard drops the early
+            # parent call while still protecting the post-initialization fork.
+            fixed = cpp.read_text(encoding='utf-8')
+            legacy = fixed.replace(owner, 'const pid_t systemLogProcess = getpid();').replace(
+                '    pthread_once(&systemLogForkRegistration, registerSystemLogForkGuard);\n'
+                '    if (systemLogForked.load(std::memory_order_relaxed)) return;\n',
+                '    if (getpid() != systemLogProcess) return;\n')
+            cpp.write_text(legacy, encoding='utf-8')
+            gate.run_build(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
+                            str(cpp), '-o', str(directory / 'legacy')], echo=False, check=True)
+            result = subprocess.run([str(directory / 'legacy')], capture_output=True)
+            self.assertEqual(result.returncode, 2, result.stderr)
             # The same OS fault kills the child with the former unguarded sink.
-            cpp.write_text(cpp.read_text(encoding='utf-8').replace(
-                '    if (getpid() != systemLogProcess) return;\n', ''), encoding='utf-8')
+            cpp.write_text(fixed.replace(
+                '    if (systemLogForked.load(std::memory_order_relaxed)) return;\n', ''), encoding='utf-8')
             gate.run_build(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
                             str(cpp), '-o', str(directory / 'unguarded')], echo=False, check=True)
             result = subprocess.run([str(directory / 'unguarded')], capture_output=True)

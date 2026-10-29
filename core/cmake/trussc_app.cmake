@@ -21,6 +21,8 @@
 #
 # =============================================================================
 
+include("${CMAKE_CURRENT_LIST_DIR}/tc_fetch_quiet.cmake")
+
 # CI can share dependency sources across otherwise independent app builds.
 # Explicit CMake settings (including -D overrides) always take precedence.
 if(DEFINED ENV{TRUSSC_FETCHCONTENT_DIR} AND NOT DEFINED FETCHCONTENT_BASE_DIR)
