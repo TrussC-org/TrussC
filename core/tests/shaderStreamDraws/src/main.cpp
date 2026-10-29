@@ -1,6 +1,7 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
+#include "stream.glsl.h"
 
 #include <cstdio>
 #include <cstring>
@@ -23,21 +24,10 @@ struct InspectFullscreen : FullscreenShader {
     sg_pipeline_desc description() { return createPipelineDesc(); }
 };
 
-#if defined(SOKOL_GLCORE)
+// WebGPU has no Fbo pixel readback (tcFbo_web.cpp), so its GPU check stays a SKIP.
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3) || defined(SOKOL_D3D11) \
+    || defined(SOKOL_METAL)
 bool completed = false;
-
-const sg_shader_desc* testShader(sg_backend backend) {
-    if (backend != SG_BACKEND_GLCORE) return nullptr;
-    static const sg_shader_desc desc = [] {
-        sg_shader_desc d = {};
-        d.vertex_func.source = "#version 330\nlayout(location=0) in vec3 position;"
-            "layout(location=1) in vec2 uv; layout(location=2) in vec4 color;"
-            "out vec4 c; void main(){gl_Position=vec4(position,1); c=color;}";
-        d.fragment_func.source = "#version 330\nin vec4 c; out vec4 frag; void main(){frag=c;}";
-        return d;
-    }();
-    return &desc;
-}
 
 ShaderVertex vertex(float x, float y, float r, float g) {
     return {x, y, 0, 0, 0, r, g, 0, 1};
@@ -46,7 +36,7 @@ ShaderVertex vertex(float x, float y, float r, float g) {
 class GpuApp : public App {
 public:
     void setup() override {
-        check("gpu shader loads", shader_.load(testShader));
+        check("gpu shader loads", shader_.load(stream_color_shader_desc));
         fbo_.allocate(32, 32);
         // The final triangle is the visible one and uses indices above 65536.
         large_.resize(70002, vertex(-2, -2, 1, 0));
@@ -115,7 +105,7 @@ public:
 private:
     void checkAllocationFailure() {
         InspectShader failing, another;
-        check("failure-test shaders load", failing.load(testShader) && another.load(testShader));
+        check("failure-test shaders load", failing.load(stream_color_shader_desc) && another.load(stream_color_shader_desc));
         std::vector<sg_buffer> held;
         // query_stats publishes actual pool occupancy even with stats disabled.
         while (sg_query_stats().total.buffers.free) held.push_back(sg_alloc_buffer());
@@ -163,7 +153,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     check("custom Shader pipelines use uint32 stream indices", shader.description().index_type == SG_INDEXTYPE_UINT32);
     check("fullscreen immutable indices remain uint16", fullscreen.description().index_type == SG_INDEXTYPE_UINT16);
     if (argc > 1 && std::strcmp(argv[1], "--gpu-check") == 0) {
-#if defined(SOKOL_GLCORE)
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3) || defined(SOKOL_D3D11) \
+    || defined(SOKOL_METAL)
         WindowSettings settings;
         settings.setSize(32, 32);
         settings.setHighDpi(false);
@@ -171,7 +162,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             check("GPU checks completed", completed);
         });
 #else
-        std::printf("SKIP: GPU check uses OpenGL Core test shader\n");
+        std::printf("SKIP: GPU check needs Fbo pixel readback, which this backend lacks\n");
 #endif
     }
     return failures ? 1 : 0;
