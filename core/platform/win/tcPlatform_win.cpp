@@ -97,17 +97,15 @@ bool getImmersiveMode() { return false; }
 // Orientation (no-op on desktop)
 void setOrientation(Orientation mask) { (void)mask; }
 
-// Keep screen on (SetThreadExecutionState)
-static bool keepScreenOn_ = false;
-void setKeepScreenOn(bool enabled) {
-    keepScreenOn_ = enabled;
-    if (enabled) {
-        SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_CONTINUOUS);
-    } else {
-        SetThreadExecutionState(ES_CONTINUOUS);
-    }
+// SetThreadExecutionState belongs to the host main thread, including release.
+namespace internal {
+void applyKeepScreenOn(bool enabled, bool headless) {
+    (void)headless;
+    SetThreadExecutionState(enabled
+        ? ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_CONTINUOUS
+        : ES_CONTINUOUS);
 }
-bool getKeepScreenOn() { return keepScreenOn_; }
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // setWindowSize - ウィンドウサイズを変更

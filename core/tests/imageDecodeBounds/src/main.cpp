@@ -366,19 +366,39 @@ void gpuReplacementChecks(const fs::path& root) {
 #define EGL_FUNCTION(name) auto name = reinterpret_cast<decltype(&::name)>(dlsym(library, #name))
     EGL_FUNCTION(eglGetPlatformDisplay); EGL_FUNCTION(eglInitialize); EGL_FUNCTION(eglBindAPI);
     EGL_FUNCTION(eglChooseConfig); EGL_FUNCTION(eglCreateContext); EGL_FUNCTION(eglMakeCurrent);
-    EGL_FUNCTION(eglDestroyContext); EGL_FUNCTION(eglTerminate);
+    EGL_FUNCTION(eglDestroyContext); EGL_FUNCTION(eglTerminate); EGL_FUNCTION(eglGetError);
 #undef EGL_FUNCTION
+    auto stage = [&](const char* name, bool ok) {
+        if (!ok) printf("surfaceless EGL %s failed: eglGetError=0x%04x\n", name, eglGetError());
+        return ok;
+    };
     auto display = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
+    const bool haveDisplay = stage("eglGetPlatformDisplay", display != EGL_NO_DISPLAY);
     EGLint major = 0, minor = 0, count = 0;
+#if defined(SOKOL_GLES3)
+    constexpr EGLenum api = EGL_OPENGL_ES_API;
+    const EGLint attributes[]{EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT, EGL_NONE};
+    const EGLint contextAttributes[]{EGL_CONTEXT_MAJOR_VERSION, 3, EGL_NONE};
+#else // SOKOL_GLCORE and the existing desktop EGL fallback for other backends.
+    constexpr EGLenum api = EGL_OPENGL_API;
     const EGLint attributes[]{EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT, EGL_NONE};
-    EGLConfig config{};
     const EGLint contextAttributes[]{EGL_CONTEXT_MAJOR_VERSION, 4, EGL_CONTEXT_MINOR_VERSION, 3, EGL_NONE};
-    const bool initialized = eglInitialize(display, &major, &minor) && eglBindAPI(EGL_OPENGL_API) &&
-        eglChooseConfig(display, attributes, &config, 1, &count) && count;
+#endif
+    EGLConfig config{};
+    const bool initialized = haveDisplay && stage("eglInitialize", eglInitialize(display, &major, &minor)) &&
+        stage("eglBindAPI", eglBindAPI(api)) &&
+        stage("eglChooseConfig", eglChooseConfig(display, attributes, &config, 1, &count)) &&
+        stage("eglChooseConfig (no matching config)", count != 0);
     auto context = initialized ? eglCreateContext(display, config, EGL_NO_CONTEXT, contextAttributes) : EGL_NO_CONTEXT;
-    const bool current = context != EGL_NO_CONTEXT && eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, context);
+    const bool created = initialized && stage("eglCreateContext", context != EGL_NO_CONTEXT);
+    const bool current = created && stage("eglMakeCurrent",
+        eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, context));
     check("surfaceless EGL context is available", current);
-    if (!current) { eglTerminate(display); dlclose(library); return; }
+    if (!current) {
+        if (context != EGL_NO_CONTEXT) eglDestroyContext(display, context);
+        if (haveDisplay) eglTerminate(display);
+        dlclose(library); return;
+    }
     sg_desc descriptor{}; sg_setup(&descriptor);
     internal::recordImageDecodeLimit(sg_query_limits().max_image_size_2d);
     const auto bytes = encoded("png", 8, 8);

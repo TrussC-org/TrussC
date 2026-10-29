@@ -8813,21 +8813,6 @@ constructor contains the parsed value.
 
 @tparam BasicJsonType  the JSON type
 */
-// TrussC structural error identity lets owning ingress preserve its existing error contract.
-inline constexpr int tc_document_depth_error = 1001;
-inline constexpr std::size_t tc_document_depth_limit = 64;
-
-// TrussC internal provenance. This is not part of the JSON public API.
-struct tc_input_provenance {
-  private:
-    bool parsed_ = false;
-    friend struct tc_input_provenance_access;
-};
-struct tc_input_provenance_access {
-    static bool parsed(const tc_input_provenance& value) { return value.parsed_; }
-    static void mark(tc_input_provenance& value) { value.parsed_ = true; }
-};
-
 template<typename BasicJsonType, typename InputAdapterType>
 class json_sax_dom_parser
 {
@@ -9093,7 +9078,6 @@ class json_sax_dom_parser
             handle_diagnostic_positions_for_json_value(root);
 #endif
 
-            if constexpr (std::is_base_of<tc_input_provenance, BasicJsonType>::value) tc_input_provenance_access::mark(root);
             return &root;
         }
 
@@ -9107,7 +9091,6 @@ class json_sax_dom_parser
             handle_diagnostic_positions_for_json_value(ref_stack.back()->m_data.m_value.array->back());
 #endif
 
-            if constexpr (std::is_base_of<tc_input_provenance, BasicJsonType>::value) tc_input_provenance_access::mark(ref_stack.back()->m_data.m_value.array->back());
             return &(ref_stack.back()->m_data.m_value.array->back());
         }
 
@@ -9119,8 +9102,7 @@ class json_sax_dom_parser
         handle_diagnostic_positions_for_json_value(*object_element);
 #endif
 
-        if constexpr (std::is_base_of<tc_input_provenance, BasicJsonType>::value) tc_input_provenance_access::mark(*object_element);
-            return object_element;
+        return object_element;
     }
 
     /// the parsed JSON value
@@ -12947,12 +12929,10 @@ class parser
     explicit parser(InputAdapterType&& adapter,
                     parser_callback_t<BasicJsonType> cb = nullptr,
                     const bool allow_exceptions_ = true,
-                    const bool skip_comments = false,
-                    const std::size_t depth_limit = tc_document_depth_limit)
+                    const bool skip_comments = false)
         : callback(std::move(cb))
         , m_lexer(std::move(adapter), skip_comments)
         , allow_exceptions(allow_exceptions_)
-        , tc_depth_limit((std::max)(tc_document_depth_limit, depth_limit))
     {
         // read first token
         get_token();
@@ -13019,14 +12999,6 @@ class parser
             }
         }
 
-        if constexpr (std::is_base_of<tc_input_provenance, BasicJsonType>::value)
-        {
-            const auto mark = [](auto&& self, BasicJsonType& value) -> void {
-                tc_input_provenance_access::mark(value);
-                if (value.is_structured()) for (auto& child : value) self(self, child);
-            };
-            if (callback) mark(mark, result);
-        }
         result.assert_invariant();
     }
 
@@ -13075,10 +13047,6 @@ class parser
         {
             if (!skip_to_state_evaluation)
             {
-                // Bound (security): parsed DOM depth must fit the caller's structural limit (64 by default), keeping destruction and consumers' recursion finite. Overflow rejects the whole document with a parse error and is counted.
-                if ((last_token == token_type::begin_object || last_token == token_type::begin_array) && states.size() >= tc_depth_limit)
-                    return sax->parse_error(m_lexer.get_position(), m_lexer.get_token_string(),
-                        parse_error::create(tc_document_depth_error, m_lexer.get_position(), "document nesting exceeds configured limit", nullptr));
                 // invariant: get_token() was called before each iteration
                 switch (last_token)
                 {
@@ -13403,8 +13371,6 @@ class parser
     lexer_t m_lexer;
     /// whether to throw exceptions in case of errors
     const bool allow_exceptions = true;
-    // TrussC: policy belongs to this parser, including during callbacks.
-    const std::size_t tc_depth_limit;
 };
 
 }  // namespace detail
@@ -14518,9 +14484,7 @@ of @ref basic_json do not require complex case distinctions
 By default, this class is used because it is empty and thus has no effect
 on the behavior of @ref basic_json.
 */
-// TrussC: provenance follows JSON copies/moves without a process-global registry.
-// Only parsed values use transactional reflection; app-authored JSON stays permissive.
-struct json_default_base : tc_input_provenance {};
+struct json_default_base {};
 
 template<class T>
 using json_base_class = typename std::conditional <
@@ -23544,8 +23508,6 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
         std::is_nothrow_move_assignable<json_value>::value
     )
     {
-        if constexpr (std::is_same<json_base_class_t, detail::json_default_base>::value)
-            std::swap(static_cast<json_base_class_t&>(*this), static_cast<json_base_class_t&>(other));
         std::swap(m_data.m_type, other.m_data.m_type);
         std::swap(m_data.m_value, other.m_data.m_value);
 
@@ -24099,21 +24061,6 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
     {
         basic_json result;
         parser(detail::input_adapter(std::forward<InputType>(i)), std::move(cb), allow_exceptions, ignore_comments).parse(true, result); // cppcheck-suppress[accessMoved,accessForwarded]
-        return result;
-    }
-
-    // TrussC internal overload: explicit policy for a single ingress parser.
-    // Ordinary parse/accept/SAX calls retain the default structural bound.
-    template<typename InputType>
-    JSON_HEDLEY_WARN_UNUSED_RESULT
-    static basic_json parse(InputType&& i, parser_callback_t cb,
-                            const bool allow_exceptions, const bool ignore_comments,
-                            const std::size_t depth_limit)
-    {
-        auto adapter = detail::input_adapter(std::forward<InputType>(i));
-        basic_json result;
-        ::nlohmann::detail::parser<basic_json, decltype(adapter)>(
-            std::move(adapter), std::move(cb), allow_exceptions, ignore_comments, depth_limit).parse(true, result);
         return result;
     }
 

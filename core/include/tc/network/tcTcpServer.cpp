@@ -340,9 +340,10 @@ bool TcpServer::State::start(int port, int maxClients) {
         return false;
     }
 
-    // POSIX: SO_REUSEADDR, so a restart can bind the port again right away.
-    // Windows: SO_EXCLUSIVEADDRUSE only, so a port another socket holds fails
-    // to bind.
+    // POSIX: request SO_REUSEADDR so a restart can reuse the local address;
+    // this does not enable sharing the same address and port between listeners.
+    // Windows: request SO_EXCLUSIVEADDRUSE instead of SO_REUSEADDR.
+    // Specific-address versus wildcard overlap on Windows needs confirmation.
 #ifdef _WIN32
     BOOL opt = TRUE;
     setsockopt(serverSocket_, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char*)&opt, sizeof(opt));

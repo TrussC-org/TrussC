@@ -404,9 +404,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
 #if defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getImmersiveMode", []() { return trussc::getImmersiveMode(); });
 #endif
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getKeepScreenOn", []() { return trussc::getKeepScreenOn(); });
-#endif
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getLocalIp", []() { return trussc::getLocalIp(); });
 #endif
@@ -742,9 +740,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("setImmersiveMode", [](bool enabled) { return trussc::setImmersiveMode(enabled); });
 #endif
     lua->set_function("setIndependentFps", [](float updateFps, float drawFps) { return trussc::setIndependentFps(updateFps, drawFps); });
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("setKeepScreenOn", [](bool enabled) { return trussc::setKeepScreenOn(enabled); });
-#endif
     lua->set_function("setLogFile", [](const fs::path & path) { return trussc::setLogFile(path); });
     lua->set_function("setLogLevel", [](trussc::LogLevel level) { return trussc::setLogLevel(level); });
     lua->set_function("setMaterial", [](trussc::Material & material) { return trussc::setMaterial(material); });

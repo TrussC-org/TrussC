@@ -74,10 +74,6 @@ bool getImmersiveMode() { return false; }
 // Orientation (no-op on desktop)
 void setOrientation(Orientation mask) { (void)mask; }
 
-// Keep screen on (TODO: xdg-screensaver or systemd-inhibit — no-op for now)
-void setKeepScreenOn(bool enabled) { (void)enabled; }
-bool getKeepScreenOn() { return false; }
-
 IVec2 getWindowPosition() {
     logWarning("Platform") << "getWindowPosition() not yet implemented on Linux";
     return IVec2(-1, -1);

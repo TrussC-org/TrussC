@@ -247,23 +247,23 @@ inline json parseRequest(const std::string& body) {
         throw AdmissionError();
     }
     reserveWork(body.size() * 128);
-    try {
-        return json::parse(body, [limits](int depth, json::parse_event_t, json&) {
-            // Bound (security): reject depth before recursive DOM copies or dumps.
-            if (depth >= 0 && size_t(depth) > limits.jsonDepth) {
-                admissionRejected(AdmissionStore::Working, limits.jsonDepth, size_t(depth), "levels");
-                throw AdmissionError();
-            }
-            return true;
-        }, true, false, limits.jsonDepth);
-    } catch (const json::parse_error& error) {
-        if (error.id != nlohmann::detail::tc_document_depth_error) throw;
-        // Preserve MCP's admission response, warning and counter when the shared
-        // DOM guard rejects before the request-specific callback can run.
-        const auto depthLimit = (std::max)(nlohmann::detail::tc_document_depth_limit, limits.jsonDepth);
-        admissionRejected(AdmissionStore::Working, depthLimit, depthLimit + 1, "levels");
-        throw AdmissionError();
-    }
+    const json::parser_callback_t callback = [limits](int depth, json::parse_event_t event, json&) {
+        // Bound (security): reject at the configured callback depth and the legacy structural boundary before recursive DOM consumers.
+        const bool opensContainer = event == json::parse_event_t::object_start || event == json::parse_event_t::array_start;
+        // The former parser guard had a 64-level floor; retain its boundary
+        // (including empty containers) and the callback's lower-limit behavior.
+        const auto structuralLimit = (std::max)(size_t{64}, limits.jsonDepth);
+        if (opensContainer && size_t(depth) >= structuralLimit) {
+            admissionRejected(AdmissionStore::Working, structuralLimit, size_t(depth) + 1, "levels");
+            throw AdmissionError();
+        }
+        if (depth >= 0 && size_t(depth) > limits.jsonDepth) {
+            admissionRejected(AdmissionStore::Working, limits.jsonDepth, size_t(depth), "levels");
+            throw AdmissionError();
+        }
+        return true;
+    };
+    return json::parse(body, callback);
 }
 
 // Carry an existing admission credit; this never acquires or reserves one.
