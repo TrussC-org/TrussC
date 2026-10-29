@@ -318,7 +318,7 @@ int vertices(Window& window) {
 // Record native size operations through the same binding for both roots.
 // Public dispatch, App ownership and PixelSize conversion remain production code.
 namespace trussc {
-namespace internal { void dispatchSecondaryWindowEventForTests(const sapp_event*, Window&); }
+namespace internal { void dispatchWindowEventForTests(const sapp_event*, Window&); }
 }
 extern "C" bool sapp_mouse_locked() { return false; }
 extern "C" int sapp_width() { return framebufferWidth; }
@@ -420,12 +420,15 @@ int main() {
         for (bool enabled : {false, true}) {
             for (float dpi : {1.0f, 1.5f, 2.0f}) {
                 nativeDpi = main->context().dpiScale = secondary.context().dpiScale = dpi;
-                const float scale = enabled ? 1.0f : 1.0f / dpi;
+                auto appPoint = [&](float x, float y) {
+                    return Vec2(enabled ? double(x) : double(x) / dpi,
+                                enabled ? double(y) : double(y) / dpi);
+                };
                 internal::pixelPerfectMode() = enabled;
                 auto deliver = [&](Window& window, const sapp_event& event) {
                     internal::restoreWindowContext(&window.context());
                     if (window.context().isMain) tcCoreTest::dispatchMainEvent(&event);
-                    else internal::dispatchSecondaryWindowEventForTests(&event, window);
+                    else internal::dispatchWindowEventForTests(&event, window);
                 };
                 sapp_event ev{};
                 ev.type = SAPP_EVENTTYPE_MOUSE_MOVE;
@@ -434,13 +437,15 @@ int main() {
                 ev.mouse_dx = 0; ev.mouse_dy = 0;
                 main->context().mouseX = main->context().mouseY = 0;
                 secondary.context().mouseX = secondary.context().mouseY = 0;
+                main->context().pointerValid = secondary.context().pointerValid = false;
                 deliver(*main, ev); deliver(secondary, ev);
-                const Vec2 expected = Vec2(200 * scale, 100 * scale);
+                const Vec2 expected = appPoint(200, 100);
+                const Vec2 moved = appPoint(220, 110);
                 auto same = [](Vec2 a, Vec2 b) { return a.x == b.x && a.y == b.y; };
                 check("pointer positions match main at valid DPI in both modes",
                     mainApp->moves > 0 && secondaryApp->moves > 0 &&
                     same(mainApp->pointer, expected) && same(secondaryApp->pointer, expected) &&
-                    same(mainApp->delta, expected) && same(secondaryApp->delta, Vec2(0, 0)));
+                    same(mainApp->delta, Vec2(0, 0)) && same(secondaryApp->delta, Vec2(0, 0)));
                 check("secondary cursor getters use App pointer units", same(getMousePos(), expected) &&
                     same(Vec2(secondaryApp->getMouseX(), secondaryApp->getMouseY()), expected));
                 ev.type = SAPP_EVENTTYPE_MOUSE_DOWN; ev.mouse_button = SAPP_MOUSEBUTTON_LEFT;
@@ -450,16 +455,16 @@ int main() {
                 deliver(*main, ev); deliver(secondary, ev);
                 check("drag positions match and deltas use the same unit scale",
                     mainApp->drags > 0 && secondaryApp->drags > 0 &&
-                    same(mainApp->pointer, Vec2(220 * scale, 110 * scale)) && same(secondaryApp->pointer, mainApp->pointer) &&
-                    same(mainApp->delta, Vec2(220 * scale - expected.x, 110 * scale - expected.y)) &&
-                    same(secondaryApp->delta, Vec2(12 * scale, 6 * scale)));
+                    same(mainApp->pointer, moved) && same(secondaryApp->pointer, mainApp->pointer) &&
+                    same(mainApp->delta, moved - expected) &&
+                    same(secondaryApp->delta, mainApp->delta));
                 ev.type = SAPP_EVENTTYPE_MOUSE_SCROLL; ev.scroll_x = 3; ev.scroll_y = -4;
                 // Main uses the last pointer position, not the scroll event's x/y.
                 ev.mouse_x = 999; ev.mouse_y = 999;
                 deliver(*main, ev); deliver(secondary, ev);
                 check("scroll position after equivalent moves matches and wheel amounts stay unscaled",
                     mainApp->scrolls > 0 && secondaryApp->scrolls > 0 &&
-                    same(mainApp->pointer, Vec2(220 * scale, 110 * scale)) && same(secondaryApp->pointer, mainApp->pointer) &&
+                    same(mainApp->pointer, moved) && same(secondaryApp->pointer, mainApp->pointer) &&
                     same(mainApp->scroll, Vec2(3, -4)) && same(secondaryApp->scroll, mainApp->scroll));
                 ev.type = SAPP_EVENTTYPE_MOUSE_UP; ev.mouse_x = 220; ev.mouse_y = 110;
                 deliver(*main, ev); deliver(secondary, ev);

@@ -11,8 +11,8 @@
 //     Inside the App's constructor getRootNode() is not the App yet, and
 //     App::setSize() resizes no window and warns once however often it is
 //     called; from setup() it goes to the main window as before (the App's
-//     own size then follows through windowResized, which never comes without
-//     a window).
+//     own size then follows through windowResized, including the simulated
+//     main context's initial native dimensions).
 //   - An App no shared_ptr owns (here one on the stack) is run by no window:
 //     repeated setSize() calls only set its own size and warn once.
 //   - runHeadlessApp(): the App is owned by a shared_ptr, registered while it
@@ -97,6 +97,9 @@ static void runAppCallbacks() {
 
     // Model the runner opening its main Window without starting sokol.
     internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 101);
+    sapp_tc_window_metadata metadata{};
+    metadata.fb_width = 901; metadata.fb_height = 601; metadata.dpi_scale = 1.5f;
+    internal::publishWindowMetadata(*internal::mainWindow(), metadata);
     internal::appSetupFunc();
     check("runApp: the setup callback made the App", g_windowedApp != nullptr);
     check("runApp: the App is getRootNode() once it is made",
@@ -105,12 +108,15 @@ static void runAppCallbacks() {
     check("runApp: setSize() called 3 times in the constructor warns once", g_warningsFromCtor == 1);
     check("runApp: ...and resizes no window, only the App's own size",
           g_widthAfterCtor == 320 && g_heightAfterCtor == 240);
+    const float widthBeforeSetup = g_windowedApp ? g_windowedApp->getWidth() : -1;
+    check("runApp: initial size follows the context framebuffer",
+          widthBeforeSetup == internal::framebufferToLogical(getFramebufferWidth(), internal::appSizeDpi(getDpiScale())));
 
     events().update.notify();   // first update: setup()
     check("runApp: setup() ran in the first update", g_setupRan);
     check("runApp: setSize() in setup() does not warn", g_warningsFromSetup == 0);
     check("runApp: ...and goes to the main window (the App's size is left to windowResized)",
-          g_widthAfterSetup == 320);
+          g_widthAfterSetup == widthBeforeSetup);
 
     internal::appCleanupFunc();
     check("runApp: getRootNode() is null once the cleanup callback freed the App",

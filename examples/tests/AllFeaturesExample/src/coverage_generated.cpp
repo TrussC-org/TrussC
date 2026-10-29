@@ -1257,6 +1257,7 @@ struct Cover_CoreEvents : af::Scope<CoreEvents> {
         (void)af::val<CoreEvents>().mousePressed;
         (void)af::val<CoreEvents>().mouseReleased;
         (void)af::val<CoreEvents>().mouseScrolled;
+        (void)af::val<CoreEvents>().occludedChanged;
         (void)af::val<CoreEvents>().onRender;
         (void)af::val<CoreEvents>().rawEvent;
         (void)af::val<CoreEvents>().setup;
@@ -2340,6 +2341,12 @@ struct Cover_Node__HitResult : af::Scope<Node::HitResult> {
         (void)af::val<const Node::HitResult>().hit();
         (void)af::val<Node::HitResult>().localPoint;
         (void)af::val<Node::HitResult>().node;
+    }
+};
+
+struct Cover_OccludedEventArgs : af::Scope<OccludedEventArgs> {
+    static void run() {
+        (void)af::val<OccludedEventArgs>().occluded;
     }
 };
 
@@ -4901,6 +4908,7 @@ void af::coverGenerated() {
     af_generated::Cover_NetworkInterface::run();
     af_generated::Cover_Node::run();
     af_generated::Cover_Node__HitResult::run();
+    af_generated::Cover_OccludedEventArgs::run();
     af_generated::Cover_OnceGate::run();
     af_generated::Cover_Path::run();
     af_generated::Cover_Pixels::run();

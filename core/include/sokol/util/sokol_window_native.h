@@ -16,6 +16,8 @@ struct _sapp_tc_native_window_t {
     uint64_t frame_count;
     bool is_main; // process quit/session authority only
     bool ready, in_tick, close_requested;
+    bool close_recorded; // physical close observation, separate from a queued request
+    uint64_t close_recorded_frame;
     bool skip_present, draw_while_hidden;
     bool trust_hidden_signals;
     bool iconified, occluded;

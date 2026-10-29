@@ -1,5 +1,6 @@
 // Synthetic input is validated before event delivery or state changes.
 #include <TrussC.h>
+#include "../../common/tcInjectedWindowTest.h"
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
 #include <limits>
@@ -78,6 +79,8 @@ TC_CORE_TEST_MAIN() {
 #else
     setenv("TRUSSC_MCP", "0", 1);
 #endif
+    tcCoreTest::InjectedWindow native(*internal::mainWindow());
+    internal::currentWindowCtx() = &internal::mainWindow()->context();
     mcp::setToolLevel(mcp::ToolLevel::Control);
     auto& ctx = internal::currentWindowContext();
     ctx.keysPressed.clear();

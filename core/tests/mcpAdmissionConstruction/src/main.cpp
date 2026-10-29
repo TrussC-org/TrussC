@@ -699,7 +699,10 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 #ifdef TC_ADMISSION_CAPTURE_PROBE
     OpenWindow secondary;
     auto& main = internal::mainWindowContext();
-    check("unbound main context starts without native dimensions", main.isMain && main.fbWidth == 0 && main.fbHeight == 0);
+    check("unbound main getters read native dimensions", main.isMain &&
+          getFramebufferWidth() == sapp_width() && getFramebufferHeight() == sapp_height() && getDpiScale() == sapp_dpi_scale());
+    // Model a bound Window before assigning its published dimensions.
+    internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 101);
     const std::initializer_list<int> windows{0, 1};
     auto dimensions = [&](int width, int height) {
         secondary.context().fbWidth = width;
@@ -890,6 +893,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     mcp::stopHttpServer();
     check("shutdown answers admitted save and releases all credits", cancelled.wait_for(std::chrono::seconds(0)) == std::future_status::ready &&
         toolError(json::parse(cancelled.get()())) && workingMemory() == 0 && !hasDeferredResponses());
+    internal::WindowRequestAccess::unbind(*internal::mainWindow());
 
 #endif
     check("admission limits configuration succeeds", mcp::setAdmissionLimits(defaults));

@@ -44,15 +44,13 @@ for index, platform in enumerate(('mac', 'win32', 'x11')):
     ctor_name = f'_sapp_tc_{platform}_create_window' + ('_ex' if platform == 'mac' else '')
     args = 'const _sapp_tc_native_desc* d' + (', const _sapp_tc_mac_window_attrs*' if platform == 'mac' else '')
     parts.append(f'namespace {platform} {{\n' + r'''
-struct sapp_window { uint32_t id; };
-struct sapp_event { int type=0; uint64_t frame_count=0; int window_width=0,window_height=0,framebuffer_width=0,framebuffer_height=0; };
 using Client=void(*)(const sapp_event*,sapp_window,void*);
 using Tick=void(*)(sapp_window,void*);
 struct sapp_window_desc { Client event_cb=nullptr; Tick tick_cb=nullptr; void* user_data=nullptr; bool(*bind_cb)(uint32_t,void*)=nullptr; const void* mtl_device=nullptr; };
 struct sapp_desc { int logger=0; Client _tc_event_cb=nullptr; Tick _tc_tick_cb=nullptr; void(*event_cb)(const sapp_event*)=nullptr; void(*event_userdata_cb)(const sapp_event*,void*)=nullptr; int swap_interval=1; bool fullscreen=false; int _tc_draw_while_hidden=1; const char* window_title=nullptr; };
 struct _sapp_tc_native_desc { sapp_window_desc window; bool(*events_enabled)()=nullptr; int swap_interval=0; bool fullscreen=false,draw_while_hidden=false,center_on_create=false; int title_limit=0,color_format=0,depth_format=0; };
 struct _sapp_tc_mac_window_attrs { bool restorable=false,nearest_magnification=false,take_key_focus_on_create=false; };
-struct _sapp_tc_window_t { unsigned win_id=23; sapp_window_desc desc; bool ready=false,in_tick=false,is_main=false,draw_while_hidden=false,trust_hidden_signals=true; int swap_interval=0; bool(*events_enabled)()=nullptr; uint64_t frame_count=7; int win_width=80,win_height=40,fb_width=160,fb_height=80; void* hwnd=nullptr; const char* title="test"; };
+struct _sapp_tc_window_t { unsigned win_id=23; float dpi_scale=2; bool input_delivered=false,wake_on_input=true; sapp_window_desc desc; bool ready=false,in_tick=false,is_main=false,draw_while_hidden=false,trust_hidden_signals=true; int swap_interval=0; bool(*events_enabled)()=nullptr; uint64_t frame_count=7; int win_width=80,win_height=40,fb_width=160,fb_height=80; void* hwnd=nullptr; const char* title="test"; };
 struct { _sapp_tc_window_t* windows[1]{}; uint32_t gl_framebuffer=0; struct { sapp_desc desc; bool init_called=false,valid=false; _sapp_tc_window_t* main=nullptr; void* device=nullptr; int logger=0; } app; const char* create_error=nullptr; } _sapp_tc;
 _sapp_tc_window_t record;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { auto* w=_sapp_tc.windows[0]; return w && w->win_id==h.id ? w : nullptr; }
@@ -90,7 +88,7 @@ void sapp_set_icon(...) {}
 void show() {
     check("native dimensions and host binding ready at synchronous show",record.ready && bound==1);
     for (int type : {SAPP_EVENTTYPE_FOCUSED,SAPP_EVENTTYPE_RESIZED,SAPP_EVENTTYPE_KEY_DOWN,SAPP_EVENTTYPE_FILES_DROPPED}) {
-        sapp_event e{}; e.type=type; _sapp_tc_send(&record,&e);
+        sapp_event e{}; e.type=static_cast<sapp_event_type>(type); _sapp_tc_send(&record,&e);
     }
 }
 void ShowWindow(void*,int) { show(); }
@@ -152,8 +150,9 @@ prefix = r'''
 int checks=0,failures=0;
 void check(const char* label,bool ok) { ++checks; if (!ok) { ++failures; printf("bootstrap: FAIL: %s\n",label); } }
 '''
-enums = sorted(set(re.findall(r'SAPP_EVENTTYPE_[A-Z_]+', ''.join(parts))))
-source = prefix + 'enum { ' + ','.join(enums) + ' };\n' + ''.join(parts) + r'''
+prefix+='#include "sokol_app_tc.h"\n'
+prefix+=(ROOT/'core/include/sokol/util/sokol_window_event.h').read_text(encoding='utf-8').replace('#pragma once','')+'\n'
+source = prefix + ''.join(parts) + r'''
 int main() { mac::run();win32::run();x11::run();single_web::run();single_ios::run();single_android::run(); printf("bootstrap: %d checks, %d failures\n",checks,failures); return failures?1:0; }
 '''
 variants = [('baseline', source)]
@@ -166,7 +165,7 @@ results = []
 with tempfile.TemporaryDirectory(prefix='tc-bootstrap-') as folder:
     for name, code in variants:
         cpp=Path(folder)/'probe.cpp'; binary=Path(folder)/'probe'; cpp.write_text(code,encoding='utf-8')
-        subprocess.run([os.environ.get('CXX','c++'),'-std=c++20',str(cpp),'-o',str(binary)],check=True)
+        subprocess.run([os.environ.get('CXX','c++'),'-std=c++20','-I'+str(ROOT/'core/include/sokol'),str(cpp),'-o',str(binary)],check=True)
         result=subprocess.run([str(binary)],text=True,encoding='utf-8',stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=15)
         failed=result.stdout.count('bootstrap: FAIL:')
         print(name,result.stdout,flush=True)

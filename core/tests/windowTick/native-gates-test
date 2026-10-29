@@ -3,11 +3,11 @@
 # TC_NATIVE_GATES_INCLUDE may name a private sokol header directory for mutations.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
-scratch=$(mktemp -d "${TMPDIR:-/tmp}/tc-native-gates.XXXXXX")
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/tc-an2b-cp3fu2-native-gates.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
 python3 - "$root" "$scratch" <<'PY'
 from pathlib import Path
-import os, subprocess, sys
+import os, subprocess, sys, re
 root, scratch = map(Path, sys.argv[1:])
 include = Path(os.environ.get('TC_NATIVE_GATES_INCLUDE', root/'core/include/sokol'))
 
@@ -63,7 +63,7 @@ mac_source = mac_extract('static void _sapp_tc_mac_select_source(', (
                                        userInfo:nil
                                         repeats:YES]''', 'make_timer(w->refresh_period, w->view)'),
     ('[[NSRunLoop mainRunLoop] addTimer:t forMode:NSRunLoopCommonModes]', 'install_timer(t)'),))
-mac_observe = mac_extract('static void _sapp_tc_mac_observe(_sapp_tc_window_t* w) {', (
+mac_observe = mac_extract(re.search(r'^static [^;{}\n]*\b_sapp_tc_mac_observe\([^;{}]*\)\s*\{', native, re.M).group(0), (
     ('w->window.occlusionState', 'w->window->occlusionState'),
     ('w->window.miniaturized', 'w->window->miniaturized'),))
 mac_drawable = mac_extract('static id<CAMetalDrawable> _sapp_tc_mac_drawable(', (
@@ -104,7 +104,8 @@ using HRESULT = int;
 using UINT = unsigned;
 constexpr int DXGI_STATUS_OCCLUDED=1, DXGI_PRESENT_TEST=2, DXGI_PRESENT_DO_NOT_WAIT=4;
 bool SUCCEEDED(HRESULT hr) { return hr >= 0; }
-enum { SAPP_EVENTTYPE_SUSPENDED, SAPP_EVENTTYPE_RESUMED, SAPP_EVENTTYPE_ICONIFIED,
+using sapp_event_type = int;
+enum { SAPP_EVENTTYPE_INVALID=-1, SAPP_EVENTTYPE_SUSPENDED, SAPP_EVENTTYPE_RESUMED, SAPP_EVENTTYPE_ICONIFIED,
        SAPP_EVENTTYPE_RESTORED, SAPP_EVENTTYPE_RESIZED };
 struct SwapChain { HRESULT Present(UINT, UINT); };
 struct _sapp_tc_window_t {
@@ -177,9 +178,9 @@ Native* _sapp_tc_lookup(sapp_window h) { return target && h.id==target->win_id?t
 void _sapp_tc_send_type(Native*,int type) { events.push_back(type); }
 void _sapp_tc_timing_update(_sapp_tc_timing_t* t) { ++timing; t->smooth_dt+=.001; }
 void _sapp_tc_reconcile_fullscreen(Native*) { ++reconciled; }
-bool _sapp_tc_mac_update_dimensions(Native*) { ++dimensions; return changed; }
+static bool _sapp_tc_mac_update_dimensions(Native*) { ++dimensions; return changed; }
 void _sapp_tc_mac_process_deferred() { ++deferred; }
-''' + mac_stop + mac_source + extract('static void _sapp_tc_mac_update_suspension(') + mac_observe + mac_drawable + mac_swap + mac_tick + mac_link + mac_fallback + mac_minimize + mac_restore + r'''
+''' + ''.join(re.search(r'^static [^;{}\n]*\b' + name + r'\([^;{}]*\);', native, re.M).group(0) + '\n' for name in ('_sapp_tc_mac_tick', '_sapp_tc_mac_update_dimensions', '_sapp_tc_mac_observe')) + mac_stop + mac_source + extract('static void _sapp_tc_mac_update_suspension(') + mac_observe + mac_drawable + mac_swap + mac_tick + mac_link + mac_fallback + mac_minimize + mac_restore + r'''
 void callback(sapp_window h,void* user) {
     auto* w=static_cast<Native*>(user); ++consulted;
     check("macOS callback target and reentry guard", h.id==w->win_id && w->in_tick);
@@ -248,8 +249,6 @@ void run() {
     }
     // Exercise the same visibility and source shims for both roles. AppKit's
     // physical link suspension still needs a fallback when trust is disabled.
-    // Do not assert macOS effective-hidden SUSPENDED/RESUMED delivery: main's
-    // legacy event alignment belongs to (b). Only trust suppression is checked.
     for (bool role : {false,true}) for (bool trust : {false,true})
     for (bool allow : {false,true}) {
         reset(w,window,view,role); w.trust_hidden_signals=trust; w.draw_while_hidden=allow;
@@ -262,14 +261,14 @@ void run() {
         check("macOS minimize observation/event respects trust", w.iconified==trust && (trust ? !events.empty() && events.back()==SAPP_EVENTTYPE_ICONIFIED : events.empty()));
         window.occlusionState=1; window.miniaturized=false; restore(&view,nil);
         check("macOS restore stops only target fallback", !w.fallback_active && w.fallback_timer==nil && stops==1 && !w.occluded && !w.iconified);
-        check("macOS restore event respects trust", trust ? !events.empty() && events.back()==SAPP_EVENTTYPE_RESTORED : events.empty());
+        check("macOS restore event respects trust", trust ? !events.empty() && events==std::vector<int>{SAPP_EVENTTYPE_SUSPENDED,SAPP_EVENTTYPE_ICONIFIED,SAPP_EVENTTYPE_RESTORED,SAPP_EVENTTYPE_RESUMED} : events.empty());
         int prior=consulted; fallback_tick(&view,&timer);
         check("macOS stale fallback tick is dropped", consulted==prior);
         link_tick(&view,&link);
         check("macOS resumed link is sole source", consulted==prior+1 && timers==1);
         if (!trust) {
             // Stale observations must not veto drawing when OS input is ignored.
-            w.iconified=w.occluded=true; _sapp_tc_mac_observe(&w);
+            w.iconified=w.occluded=true; w.suspended_sent=true; _sapp_tc_mac_observe(&w);
             check("macOS untrusted input leaves stored observations alone", w.iconified && w.occluded);
             int old=acquired; _sapp_tc_mac_tick(&w,nil);
             check("macOS stale untrusted flags still admit drawable", acquired==old+1 && events.empty());

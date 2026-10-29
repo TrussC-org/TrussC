@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""Production-linked pre-window native seam. Invoke through tcbuild.sh.
+
+Runs against either GLX or EGL shared build metadata; each optional read-through mutant
+is compiled serially and deleted immediately after its assertion result is saved.
+"""
+from pathlib import Path
+import json
+import os
+import shlex
+import shutil
+import subprocess
+
+ROOT = Path(__file__).resolve().parents[3]
+BUILD = Path(os.environ.get('TC_PREWINDOW_BUILD', ROOT / 'core/tests/allCoreTests/build-linux'))
+OUT = Path(os.environ.get('TC_PREWINDOW_OUTPUT', ROOT / '.verification/cp3fu9/pre-window'))
+OUT.mkdir(parents=True, exist_ok=True)
+os.environ['TMPDIR'] = str(OUT)
+assert shutil.disk_usage('/').free >= 15 * 1024**3, 'STOP: disk under 15 GiB'
+entries = json.loads((BUILD / 'compile_commands.json').read_text(encoding='utf-8'))
+entry = next(e for e in entries if e['file'].endswith('tcWindowRuntime.cpp'))
+args = shlex.split(entry['command'])
+compiler = args.pop(0)
+flags = []
+skip = False
+for a in args:
+    if skip:
+        skip = False
+        continue
+    if a == '-o':
+        skip = True
+        continue
+    if a == '-c' or a.endswith('tcWindowRuntime.cpp') or a.startswith(('-O', '-g')):
+        continue
+    flags.append(a)
+flags = ['-I' + str(ROOT / 'core/include'), '-I' + str(ROOT / 'core/include/tc/app'), *flags, '-O0', '-g0']
+link = shlex.split((BUILD / 'CMakeFiles/allCoreTests.dir/link.txt').read_text(encoding='utf-8'))
+libs = link[next(i for i, a in enumerate(link) if a.endswith('libTrussC.a')):]
+if archive := os.environ.get('TC_PROBE_ARCHIVE'):
+    libs[0] = archive
+
+def compile(path, output, include=None):
+    subprocess.run([compiler, *(['-I' + str(include)] if include else []), *flags,
+                    '-c', str(path), '-o', str(output)], check=True)
+
+seam = OUT / 'native-seam.cpp'
+seam.write_text('''#include <cstdlib>
+#include <atomic>
+namespace { std::atomic<unsigned> queries{0}; }
+extern "C" unsigned prewindowNativeQueries() { return queries.load(); }
+extern "C" float __wrap_sapp_dpi_scale() {
+    ++queries;
+    const char* value = std::getenv("TC_PREWINDOW_NATIVE_DPI");
+    return value ? std::atof(value) : 2.f;
+}
+extern "C" int __wrap_sapp_width() {
+    ++queries;
+    const char* value = std::getenv("TC_PREWINDOW_NATIVE_WIDTH");
+    return value ? std::atoi(value) : 1;
+}
+extern "C" int __wrap_sapp_height() {
+    ++queries;
+    const char* value = std::getenv("TC_PREWINDOW_NATIVE_HEIGHT");
+    return value ? std::atoi(value) : 1;
+}
+''', encoding='utf-8')
+async_probe = OUT / 'async-native-change.cpp'
+async_probe.write_text('#include <TrussC.h>\n#define main prewindowAsyncMain\n#include "' +
+                       str(ROOT / 'core/tests/asyncLoads/src/main.cpp') +
+                       '"\n#undef main\nint main(int argc, char** argv) {\n'
+                       '    (void)trussc::getDpiScale();\n'
+                       '    setenv("TC_PREWINDOW_NATIVE_DPI", "1", 1);\n'
+                       '    setenv("TC_PREWINDOW_NATIVE_WIDTH", "701", 1);\n'
+                       '    setenv("TC_PREWINDOW_NATIVE_HEIGHT", "401", 1);\n'
+                       '    return prewindowAsyncMain(argc, argv);\n}\n', encoding='utf-8')
+paths = {'runtime': ROOT / 'core/include/tc/app/tcWindowRuntime.cpp',
+         'global': ROOT / 'core/include/tc/app/tcGlobal.cpp',
+         'platform': ROOT / 'core/platform/linux/tcPlatform_linux.cpp',
+         'probe': Path(__file__).with_name('pre-window.cpp'), 'seam': seam,
+         'async': async_probe}
+objects = {name: OUT / (name + '.o') for name in paths}
+for name, path in paths.items():
+    compile(path, objects[name])
+wrap = '-Wl,--wrap=sapp_dpi_scale,--wrap=sapp_width,--wrap=sapp_height'
+rows = []
+
+def run(name, selected, probe='probe', include=None):
+    binary = OUT / name
+    subprocess.run([compiler, str(selected.get(probe, objects[probe])), str(objects['seam']),
+                    str(selected.get('global', objects['global'])),
+                    str(selected.get('runtime', objects['runtime'])),
+                    str(selected.get('platform', objects['platform'])), *libs, wrap,
+                    '-o', str(binary)], cwd=BUILD, check=True)
+    with (OUT / (name + '.log')).open('w', encoding='utf-8') as log:
+        result = subprocess.run([str(binary)], cwd=OUT, stdout=log, stderr=subprocess.STDOUT,
+                                timeout=180, env=dict(os.environ, TRUSSC_MCP='0', TMPDIR=str(OUT), TC_PREWINDOW_NATIVE_DPI='2',
+                                                      TC_PREWINDOW_NATIVE_WIDTH='1', TC_PREWINDOW_NATIVE_HEIGHT='1'))
+    output = (OUT / (name + '.log')).read_text(encoding='utf-8')
+    failed = output.count('pre-window: FAIL:') if probe == 'probe' else sum(line.endswith('FAIL') for line in output.splitlines())
+    expected_failure = bool(os.environ.get('TC_PREWINDOW_EXPECT_FAILURE')) or name not in ('baseline', 'async-loads')
+    valid = result.returncode == (1 if expected_failure else 0) and (failed > 0 if expected_failure else failed == 0)
+    rows.append(dict(name=name, returncode=result.returncode, failed_assertions=failed, valid=valid,
+                     initial_native_dpi=2, initial_native_width=1, initial_native_height=1))
+    (OUT / 'results.json').write_text(json.dumps(rows, indent=2), encoding='utf-8')
+    print(rows[-1], flush=True)
+    binary.unlink()
+
+run('baseline', {})
+run('async-loads', {}, 'async')
+if os.environ.get('TC_PREWINDOW_MUTATIONS'):
+    # Mutate actual production getter and capture bodies together. A symlink
+    # overlay keeps unchanged pragma-once headers identical to the shared tree.
+    header = ROOT / 'core/include/TrussC.h'
+    window = ROOT / 'core/include/tc/app/tcWindow.h'
+    for name in ['snapshot-restored', 'dpi-read', 'width-read', 'height-read']:
+        scratch = OUT / 'mutant'
+        include = scratch / 'include'
+        include.mkdir(parents=True)
+        for original in (ROOT / 'core/include').rglob('*'):
+            relative = original.relative_to(ROOT / 'core/include')
+            target = include / relative
+            if original.is_dir():
+                target.mkdir(exist_ok=True)
+            elif original not in (header, window):
+                target.symlink_to(original)
+        public = header.read_text(encoding='utf-8')
+        private = window.read_text(encoding='utf-8')
+        if name == 'snapshot-restored':
+            # A first-observation snapshot is deliberately wrong after native
+            # changes. Each context retains its own earlier observation.
+            marker = 'inline WindowDimensions windowDimensions(const WindowContext& ctx) noexcept {'
+            public = public.replace('inline float getDpiScale() {',
+                                    'namespace internal { inline WindowDimensions snapshotDimensions(const WindowContext&) noexcept; }\n'
+                                    'inline float getDpiScale() {')
+            snapshot = ("inline WindowDimensions snapshotDimensions(const WindowContext& ctx) noexcept {\n"
+                        "    static std::map<const WindowContext*, WindowDimensions> snapshots;\n"
+                        "    auto [entry, added] = snapshots.try_emplace(&ctx, WindowDimensions{sapp_dpi_scale(), sapp_width(), sapp_height()});\n"
+                        "    return entry->second;\n}\n")
+            private = private.replace(marker, snapshot + marker)
+            private = private.replace('return {sapp_dpi_scale(), sapp_width(), sapp_height()};',
+                                      'return snapshotDimensions(ctx);')
+            for native, field in [('sapp_dpi_scale()', 'dpiScale'), ('sapp_width()', 'fbWidth'), ('sapp_height()', 'fbHeight')]:
+                public = public.replace('? ' + native + ' : ctx.' + field,
+                                        '? internal::snapshotDimensions(ctx).' + field + ' : ctx.' + field)
+        else:
+            native, default = {'dpi-read': ('sapp_dpi_scale()', '1.f'),
+                               'width-read': ('sapp_width()', '0'),
+                               'height-read': ('sapp_height()', '0')}[name]
+            # Limit substitution to the audited functions, leaving unrelated
+            # native platform operations unchanged.
+            first = public.index('inline float getDpiScale()')
+            last = public.index('// Active drawing extent', first)
+            public = public[:first] + public[first:last].replace(native, default) + public[last:]
+            private = private.replace('return {sapp_dpi_scale(), sapp_width(), sapp_height()};',
+                                      'return {sapp_dpi_scale(), sapp_width(), sapp_height()};'.replace(native, default))
+        (include / 'TrussC.h').write_text(public, encoding='utf-8')
+        (include / 'tc/app/tcWindow.h').write_text(private, encoding='utf-8')
+        selected = {}
+        for kind in ['runtime', 'global', 'platform', 'probe', 'async']:
+            selected[kind] = scratch / (kind + '.o')
+            compile(paths[kind], selected[kind], include)
+        run(name, selected)
+        if name == 'snapshot-restored':
+            run('snapshot-async-loads', selected, 'async')
+        shutil.rmtree(scratch)
+
+for obj in objects.values():
+    obj.unlink()
+raise SystemExit(any(not row['valid'] for row in rows))

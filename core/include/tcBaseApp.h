@@ -293,23 +293,31 @@ public:
     }
 
     bool handleMousePressed(const MouseEventArgs& e) {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext(), e.button);
+        if (!dispatch.current(e.button)) return false;
         mousePressed(e);
-        return !e.consumed && bool(dispatchMousePress(e));
+        return dispatch.current(e.button) && !e.consumed && bool(dispatchMousePress(e));
     }
 
     bool handleMouseReleased(const MouseEventArgs& e) {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext());
+        if (!dispatch.current(e.button)) return false;
         mouseReleased(e);
-        return !e.consumed && bool(dispatchMouseRelease(e));
+        return dispatch.current(e.button) && !e.consumed && bool(dispatchMouseRelease(e));
     }
 
     bool handleMouseMoved(const MouseMoveEventArgs& e) {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext());
+        if (!dispatch.current()) return false;
         mouseMoved(e);
-        return !e.consumed && bool(dispatchMouseMove(internal::toRaw(e)));
+        return dispatch.current() && !e.consumed && bool(dispatchMouseMove(internal::toRaw(e)));
     }
 
     bool handleMouseDragged(const MouseDragEventArgs& e) {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext());
+        if (!dispatch.current()) return false;
         mouseDragged(e);
-        return !e.consumed && bool(dispatchMouseMove(internal::toRaw(e)));
+        return dispatch.current() && !e.consumed && bool(dispatchMouseMove(internal::toRaw(e)));
     }
 
     bool handleMouseMoved(const internal::MouseEventRaw& e) {
@@ -332,18 +340,27 @@ protected:
     using RectNode::onMouseRelease;
     using RectNode::onMouseDrag;
     bool onMousePress(const MouseEventArgs& e) override {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext(), e.button);
+        if (!dispatch.current(e.button)) return false;
         MouseEventArgs args = e;
         RectNode::mousePressed.notify(args);
+        if (!dispatch.current(e.button)) return false;
         return onMousePress(e.pos, e.button) || args.consumed;
     }
     bool onMouseRelease(const MouseEventArgs& e) override {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext());
+        if (!dispatch.current(e.button)) return false;
         MouseEventArgs args = e;
         RectNode::mouseReleased.notify(args);
+        if (!dispatch.current(e.button)) return false;
         return onMouseRelease(e.pos, e.button) || args.consumed;
     }
     bool onMouseDrag(const MouseDragEventArgs& e) override {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext());
+        if (!dispatch.current()) return false;
         MouseDragEventArgs args = e;
         RectNode::mouseDragged.notify(args);
+        if (!dispatch.current()) return false;
         return onMouseDrag(e.pos, e.button) || args.consumed;
     }
 

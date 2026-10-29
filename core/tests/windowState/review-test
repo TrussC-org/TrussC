@@ -45,13 +45,8 @@ def main():
         elif flag != '-c' and not flag.endswith('tcWindowRuntime.cpp') and not flag.startswith(('-O', '-g')):
             stripped.append(flag)
     flags = ['-I' + str(OVERLAY / 'core/include'), *stripped, '-O0', '-g0']
-    linux = source('core/platform/linux/tcWindowLinux.cpp').read_text()
     probe = '#include <TrussC.h>\n#include <cstdio>\n#include <stdexcept>\nusing namespace trussc;\n'
     probe += '#include "' + str(ROOT / 'core/tests/windowState/src/resizeDeliveryChecks.h') + '"\n'
-    probe += 'namespace bridge {\n'
-    for marker in ('void dispatchWindowEvent(', 'void windowEvent('):
-        probe += body(linux, marker) + '\n'
-    probe += '}\n'
     probe += r'''
 int checks=0, failures=0;
 void check(const char* name, bool ok) {
@@ -71,7 +66,7 @@ struct Probe : App {
         resizing=true;
         owner->setApp(std::make_shared<App>());
         sapp_event event{}; event.type=SAPP_EVENTTYPE_FOCUSED;
-        bridge::windowEvent(&event,{700},owner);
+        internal::mainWindowEvent(&event,{700},owner);
         check("replacement remains queued until resize returns", owner->getApp().get()==this && cleanups==0 && exits==0);
         resizing=false;
     }
@@ -93,7 +88,7 @@ void exercise(void (*tick)(sapp_window,void*), const char* name) {
     });
     m.fb_width=m.fb_height=150;
     sapp_event event{}; event.type=SAPP_EVENTTYPE_RESIZED;
-    bridge::windowEvent(&event,{700},&window);
+    internal::mainWindowEvent(&event,{700},&window);
     check("raw exception leaves native/App size out of sync", window.context().fbWidth==150 && app->getWidth()==100 && app->sizes==initialSizes);
     raw.disconnect();
     m.occluded=true; app->nested=true;
@@ -124,7 +119,7 @@ void resizeDelivery(bool main, bool pixels) {
     auto event=[&] {
         sapp_event e{}; e.type=SAPP_EVENTTYPE_RESIZED;
         if (main) internal::mainWindowEvent(&e,handle,&window);
-        else bridge::windowEvent(&e,handle,&window);
+        else internal::mainWindowEvent(&e,handle,&window);
     };
     auto tick=[&] {
         internal::windowTick(handle, &window);

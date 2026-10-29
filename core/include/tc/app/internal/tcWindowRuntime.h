@@ -17,6 +17,8 @@ struct WindowNativeOperations {
     void (*setFullscreen)(Window&, bool) = nullptr;
     uint32_t (*fullscreenPhase)(const Window&) = nullptr;
     void (*toggleFullscreen)(Window&) = nullptr;
+    bool (*closeRecorded)(sapp_window, void*) = nullptr;
+    bool (*injectEvent)(sapp_window, void*, const sapp_event*) = nullptr;
 };
 struct WindowBinding {
     sapp_window handle{};
@@ -24,9 +26,11 @@ struct WindowBinding {
     void* user = nullptr;
     sapp_tc_window_metadata metadata{};
     bool bound = false;
-    // Last delivered aggregate visibility, initially visible. Snapshot publication
-    // is independent; checkpoint 3 compares these at the common ready entry.
+    // Last attempted aggregate visibility, initially visible. Snapshot publication
+    // never consumes its delivery.
     bool lastDeliveredHidden = false;
+    bool visibilityReady = false;
+    uint64_t visibilityRevision = 0;
     WindowGeometryState geometry;
     bool geometryInitialized = false;
 };
@@ -43,7 +47,7 @@ private:
 // A receiver is retained until pending requests and caller restoration finish.
 class WindowEntryScope {
 public:
-    explicit WindowEntryScope(Window& window, bool tick = false, bool bootstrap = false);
+    explicit WindowEntryScope(Window& window, bool tick = false, bool bootstrap = false, bool pendingVisibility = true);
     ~WindowEntryScope() noexcept;
     explicit operator bool() const { return admitted_; }
     WindowEntryScope(const WindowEntryScope&) = delete;
@@ -56,18 +60,22 @@ private:
     bool entered_ = false, admitted_ = false, dispatch_ = false, requestsReady_ = false;
     void leave() noexcept;
 };
-using WindowEventDispatch = void (*)(const sapp_event*, sapp_window, Window*, WindowContext&);
 void mainWindowEvent(const sapp_event*, sapp_window, void*) noexcept;
 void singleWindowEvent(const sapp_event*) noexcept;
-void enterWindowEvent(const sapp_event*, sapp_window, void*, WindowEventDispatch) noexcept;
+void enterWindowEvent(const sapp_event*, sapp_window, void*) noexcept;
+void convertWindowEvent(const sapp_event*, Window&);
+const char* eventEntryName(const sapp_event*, bool);
+void dispatchWindowEventForTests(const sapp_event*, Window&);
+void dispatchWindowDisplayEventForTests(const sapp_event*, Window&);
 bool enterWindowTick(Window&, sapp_window, std::chrono::steady_clock::time_point, double,
                      const WindowTickPresentation* = nullptr);
 void windowTick(sapp_window, void*) noexcept;
 void windowClosed(sapp_window, void*) noexcept;
 void singleWindowFrame() noexcept;
 void mainWindowBootstrap(void (*bootstrap)());
-// Deferred §3 delivery hook; checkpoint 2 deliberately emits nothing here.
-void deliverPendingWindowVisibilityAtReadyEntry(Window&) noexcept;
+// Reconcile launch visibility; single-window lifecycle observations also use this hook.
+void deliverPendingWindowVisibilityAtReadyEntry(Window&);
+bool currentWindowCloseRecorded();
 // Hooks bracket an actual native loop turn, including turns with no due window.
 class HostTurnScope {
 public:
@@ -85,6 +93,13 @@ struct HostServiceOperations {
 };
 HostServiceOperations& hostServiceOperationsForTests();
 Window* mainWindow();
+// Capture readers need dimensions by value, without changing unbound contexts.
+struct WindowDimensions {
+    float dpiScale;
+    int fbWidth, fbHeight;
+};
+inline bool usesNativeWindowDimensions(const WindowContext&) noexcept;
+inline WindowDimensions windowDimensions(const WindowContext&) noexcept;
 WindowContext& nonWindowContext();
 WindowContext* nonWindowContextIfInitialized() noexcept;
 void nativeWindowSetTitle(Window&, const char*);

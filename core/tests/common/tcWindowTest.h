@@ -3,8 +3,7 @@
 namespace tcCoreTest {
 inline void dispatchMainEvent(const sapp_event* event) {
     auto* window = trussc::internal::mainWindow();
-    trussc::internal::mainWindowEvent(event,
-        trussc::internal::WindowRequestAccess::binding(*window).handle, window);
+    trussc::internal::dispatchWindowEventForTests(event, *window);
 }
 inline bool beginScheduledFrame(std::chrono::steady_clock::time_point now) {
     using namespace trussc::internal;

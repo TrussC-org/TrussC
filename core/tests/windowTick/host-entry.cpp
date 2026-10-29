@@ -1,5 +1,6 @@
 // Production-linked deterministic entry/coordinator probe; no native display.
 #include <TrussC.h>
+#include "sokol/util/sokol_window_event.h"
 #include <cstdio>
 #include <stdexcept>
 #include <cmath>
@@ -54,9 +55,16 @@ struct Probe : App {
     void update() override { ++updates; }
     void exit() override { ++exits; if (onExit) onExit(); }
 };
-void event(Window& window, internal::WindowEventDispatch dispatch) {
+using TestDispatch = void (*)(const sapp_event*, sapp_window, Window*, internal::WindowContext&);
+void deliver(const sapp_event* event, sapp_window handle, Window* window, TestDispatch dispatch = nullptr) {
+    auto listener = window->events().rawEvent.listen([&](const sapp_event& e) {
+        if (dispatch && event && e.type == event->type) dispatch(&e, handle, window, window->context());
+    });
+    internal::enterWindowEvent(event, handle, window);
+}
+void event(Window& window, TestDispatch dispatch = nullptr) {
     sapp_event e{}; e.type = SAPP_EVENTTYPE_KEY_DOWN;
-    internal::enterWindowEvent(&e, internal::WindowRequestAccess::binding(window).handle, &window, dispatch);
+    deliver(&e, internal::WindowRequestAccess::binding(window).handle, &window, dispatch);
 }
 void plainDraw(Window& window) {
     check("App draw binding exists after attachment", window.context().appEventListeners.size() >= 2);
@@ -128,7 +136,7 @@ void bootstrap() {
                 check("during-init raw delivery is synchronous", delivered == expected);
             }
             sapp_event e{}; e.type=SAPP_EVENTTYPE_FOCUSED;
-            internal::enterWindowEvent(&e, {716}, &other,
+            deliver(&e, {716}, &other,
                 [](const sapp_event*, sapp_window, Window*, internal::WindowContext&) { ++peerEvents; });
             check("secondary init-time event is admitted", peerEvents == 1);
             if (queryEndSession) {
@@ -147,6 +155,7 @@ void bootstrap() {
         check("hidden seed leaves visibility pending for checkpoint 3", window.isOccluded() && window.context().suspended && !internal::WindowRequestAccess::binding(window).lastDeliveredHidden);
         check("visibility history belongs to each Window", !internal::WindowRequestAccess::binding(other).lastDeliveredHidden);
         check("initial App attached and size seeded before setup", window.getApp() == bootstrapApp && bootstrapApp->sizes == 1 && bootstrapApp->seeded && bootstrapApp->setups == 0);
+        expected.push_back(SAPP_EVENTTYPE_SUSPENDED);
         for (auto type : {SAPP_EVENTTYPE_FOCUSED, SAPP_EVENTTYPE_KEY_DOWN, SAPP_EVENTTYPE_CHAR, SAPP_EVENTTYPE_KEY_UP}) {
             expected.push_back(type); nativeSend(type);
             check("post-init input before first draw delivered once in order", delivered == expected);
@@ -158,7 +167,7 @@ void bootstrap() {
         check("startup input arrives exactly once without replay", delivered == expected && bootstrapCallbacks == int(expected.size()) && window.context().keysPressed.empty());
         plainDraw(window); tick(window);
         check("setup ran with authoritative snapshot", bootstrapApp->setups == 1);
-        check("ready entry preserves pending checkpoint-3 visibility", !internal::WindowRequestAccess::binding(window).lastDeliveredHidden);
+        check("ready entry delivers pending visibility once", internal::WindowRequestAccess::binding(window).lastDeliveredHidden);
         listener.disconnect(); dropped.disconnect(); pressed.disconnect(); released.disconnect(); exit.disconnect();
         sapp_event visibility{}; visibility.type = SAPP_EVENTTYPE_SUSPENDED;
         internal::mainWindowEvent(&visibility, {717}, &window);
@@ -233,9 +242,9 @@ void roots() {
             check("resource key follows common admitted tick count", internal::resourceFrameKey() == ctx.resourceTickCount);
         });
         const auto updates = window.context().updateCount;
-        internal::enterWindowEvent(nullptr, {native.expected}, &window, input);
+        deliver(nullptr, {native.expected}, &window, input);
         sapp_event e{};
-        internal::enterWindowEvent(&e, {9999}, &window, input);
+        deliver(&e, {9999}, &window, input);
         check("invalid events are rejected without delivery", inputs == 1);
         const int readsBefore = native.reads;
         check("stale tick identity is rejected", !internal::enterWindowTick(window, {9999}, now, .1, &presentation) && window.context().updateCount == updates && native.reads == readsBefore);
@@ -245,7 +254,7 @@ void roots() {
         native.live = true;
         auto throwing = window.events().keyPressed.listen([](KeyEventArgs&) { throw 1; });
         event(window, [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
-            KeyEventArgs e; w->events().keyPressed.notify(e);
+            /* Common converter performs typed delivery. */
         });
         check("throwing event restores caller and dispatch depth", internal::currentWindowCtx() == &peer.context() && window.dispatchDepth_ == 0 && !internal::WindowRequestAccess::dispatchActive(window));
         throwing.disconnect();
@@ -255,12 +264,12 @@ void roots() {
         });
         auto outerInput = window.events().keyPressed.listen([&](KeyEventArgs&) {
             event(peer, [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
-                KeyEventArgs e; w->events().keyPressed.notify(e);
+                /* Common converter performs typed delivery. */
             });
             check("nested peer event restores receiving A", internal::currentWindowCtx() == &window.context());
         });
         event(window, [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
-            KeyEventArgs e; w->events().keyPressed.notify(e);
+            /* Common converter performs typed delivery. */
         });
         outerInput.disconnect(); peerInput.disconnect();
         auto next = std::make_shared<Probe>();
@@ -271,7 +280,7 @@ void roots() {
             check("reentrant tick cannot apply pending attachment", window.getApp() == app && app->exits == 0);
         });
         event(window, [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
-            KeyEventArgs e; w->events().keyPressed.notify(e);
+            /* Common converter performs typed delivery. */
         });
         check("attachment lands at outer entry exit", window.getApp() == next && app->exits == 1);
         replace.disconnect();
@@ -279,7 +288,7 @@ void roots() {
         next->onExit = [&] { window.setApp(later); };
         auto atExit = window.events().keyPressed.listen([&](KeyEventArgs&) { window.setApp(committed); });
         event(window, [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
-            KeyEventArgs e; w->events().keyPressed.notify(e);
+            /* Common converter performs typed delivery. */
         });
         check("request created at exit boundary survives to next boundary", window.getApp() == committed && window.pendingApp_ == later && window.appRequested_);
         atExit.disconnect(); tick(window);
@@ -300,6 +309,7 @@ void roots() {
         const auto noDrawCount = window.context().drawCount;
         check("hidden draw gate runs before fake presentation", !tick(window) && window.context().drawCount == noDrawCount);
         window.closeRequested_ = true;
+        { internal::WindowEntryScope closedEntry(window, true); check("pending close rejects tick entry itself", !closedEntry); }
         auto refused = std::make_shared<Probe>(); window.pendingApp_ = refused; window.appRequested_ = true;
         const auto sizes = next->sizes, closingUpdates = next->updates;
         check("close outranks tick and attachment", !tick(window) && window.getApp() == next && next->sizes == sizes && next->updates == closingUpdates);
@@ -308,10 +318,7 @@ void roots() {
             ++vetoes; args.cancel = true; window.closeRequested_ = false;
         });
         sapp_event quit{}; quit.type = SAPP_EVENTTYPE_QUIT_REQUESTED;
-        internal::enterWindowEvent(&quit, {native.expected}, &window,
-            [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
-                ExitRequestEventArgs args; w->events().exitRequested.notify(args);
-            });
+        internal::enterWindowEvent(&quit, {native.expected}, &window);
         check("pending close still delivers the existing quit-veto endpoint", vetoes == 1 && !window.closeRequested_);
         veto.disconnect();
         window.context().drawWhileHidden = runner;
@@ -339,7 +346,7 @@ void retention() {
         inside = false;
     });
     event(*raw, [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
-        KeyEventArgs e; w->events().keyPressed.notify(e);
+        /* Common converter performs typed delivery. */
     });
     check("receiver release waits until safe entry unwind", destroyed && !destroyedInside && !internal::WindowRequestAccess::dispatchActive(*raw));
     listener.disconnect(); delete raw;

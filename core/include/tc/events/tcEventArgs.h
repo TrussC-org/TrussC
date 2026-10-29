@@ -207,6 +207,11 @@ inline MouseEventRaw toRaw(const T& a) {
 // ---------------------------------------------------------------------------
 // Window resize event arguments
 // ---------------------------------------------------------------------------
+/// Visibility of a window, including minimization.
+struct OccludedEventArgs {
+    bool occluded = false;
+};
+
 struct ResizeEventArgs {
     int width = 0;
     int height = 0;

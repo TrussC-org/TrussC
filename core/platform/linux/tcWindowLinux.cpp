@@ -34,172 +34,12 @@ bool bindAdapter(uint32_t id, void* user) noexcept {
     return internal::bindNativeWindow(id, window);
 }
 
-// --- events: map sapp_event onto CoreEvents / App hooks / tree dispatch ----
-// One event is an entry point (#349): the guard restores the stacks while
-// this window's context is still current.
-void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window* win,
-                         internal::WindowContext& ctx) {
-    internal::EntryStackGuard guard(internal::AppEntry::Event,
-        internal::eventEntryName(ev, ctx.mousePressed && ctx.mouseButton >= 0));
-
-    internal::WindowCallbackTimeScope callbackTime;
-
-    // Raw listeners can change pointer lock; snapshot this move's reliability.
-    const bool recoverButtonsOnMove = internal::mouseMoveHasReliableButtonBits(ev);
-
-    // Keep this event's metadata revision through raw-listener reentry.
-    const float scale = internal::appPointerScale(ctx.dpiScale);
-    // Raw event pass-through (same hook addons use on the main window)
-    win->events().rawEvent.notify(*ev);
-
-    // sapp pointer coordinates arrive in framebuffer pixels. Secondary coordinates
-    // use main's unit scale: pixels in pixelPerfect mode, logical points otherwise.
-    // Delta derivation and enter/leave handling retain their existing differences.
-    const bool hasShift = (ev->modifiers & SAPP_MODIFIER_SHIFT) != 0;
-    const bool hasCtrl  = (ev->modifiers & SAPP_MODIFIER_CTRL) != 0;
-    const bool hasAlt   = (ev->modifiers & SAPP_MODIFIER_ALT) != 0;
-    const bool hasSuper = (ev->modifiers & SAPP_MODIFIER_SUPER) != 0;
-
-    auto releaseMouse = [&](int button) {
-        const unsigned int bit = internal::mouseButtonBit(button);
-        if ((ctx.pressedMouseButtons & bit) == 0) return;
-        ctx.pressedMouseButtons &= ~bit;
-        // Match the base drag-button semantics independently of release tracking.
-        ctx.mouseButton = -1;
-        ctx.mousePressed = false;
-        MouseEventArgs e;
-        e.pos = e.globalPos = Vec2(ctx.lastPointerX, ctx.lastPointerY);
-        e.button = button;
-        e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
-        e.syncLegacy();
-        win->events().mouseReleased.notify(e);
-    };
-
-    for (int button = SAPP_MOUSEBUTTON_LEFT; button <= SAPP_MOUSEBUTTON_MIDDLE; ++button) {
-        if (recoverButtonsOnMove && (ctx.pressedMouseButtons & internal::mouseButtonBit(button)) && internal::mouseButtonLostOnMove(ev, button))
-            releaseMouse(button); // last real position, before updating the move
-    }
-
-    switch (ev->type) {
-        case SAPP_EVENTTYPE_UNFOCUSED:
-            for (int button = SAPP_MOUSEBUTTON_LEFT; button <= SAPP_MOUSEBUTTON_MIDDLE; ++button)
-                releaseMouse(button);
-            break;
-        case SAPP_EVENTTYPE_MOUSE_DOWN: {
-            const float x = ev->mouse_x * scale, y = ev->mouse_y * scale;
-            ctx.mouseX = ctx.lastPointerX = x; ctx.mouseY = ctx.lastPointerY = y;
-            ctx.pressedMouseButtons |= internal::mouseButtonBit(ev->mouse_button);
-            ctx.mouseButton = (int)ev->mouse_button;
-            ctx.mousePressed = true;
-            MouseEventArgs e;
-            e.pos = e.globalPos = Vec2(x, y);
-            e.button = (int)ev->mouse_button;
-            e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
-            e.syncLegacy();
-            win->events().mousePressed.notify(e);
-            break;
-        }
-        case SAPP_EVENTTYPE_MOUSE_UP: {
-            const float x = ev->mouse_x * scale, y = ev->mouse_y * scale;
-            ctx.mouseX = ctx.lastPointerX = x; ctx.mouseY = ctx.lastPointerY = y;
-            releaseMouse((int)ev->mouse_button);
-            break;
-        }
-        case SAPP_EVENTTYPE_MOUSE_ENTER:
-        case SAPP_EVENTTYPE_MOUSE_MOVE: {
-            const float x = ev->mouse_x * scale, y = ev->mouse_y * scale;
-            ctx.pmouseX = ctx.mouseX; ctx.pmouseY = ctx.mouseY;
-            ctx.mouseX = ctx.lastPointerX = x; ctx.mouseY = ctx.lastPointerY = y;
-            internal::MouseEventRaw raw;
-            raw.pos = raw.globalPos = Vec2(x, y);
-            raw.delta = raw.globalDelta = Vec2(ev->mouse_dx * scale, ev->mouse_dy * scale);
-            raw.shift = hasShift; raw.ctrl = hasCtrl; raw.alt = hasAlt; raw.super = hasSuper;
-            if (ctx.mousePressed && ctx.mouseButton >= 0) {
-                raw.button = ctx.mouseButton;
-                MouseDragEventArgs e = internal::toDragArgs(raw);
-                win->events().mouseDragged.notify(e);
-            } else {
-                MouseMoveEventArgs e = internal::toMoveArgs(raw);
-                win->events().mouseMoved.notify(e);
-            }
-            break;
-        }
-        case SAPP_EVENTTYPE_MOUSE_LEAVE: {
-            // Park the cursor offscreen so the next tick's updateHoverState
-            // clears this window's hover (hoveredNode lives in ITS context).
-            ctx.pmouseX = ctx.mouseX; ctx.pmouseY = ctx.mouseY;
-            ctx.mouseX = -1.0f; ctx.mouseY = -1.0f;
-            break;
-        }
-        case SAPP_EVENTTYPE_MOUSE_SCROLL: {
-            ScrollEventArgs e;
-            e.pos = e.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
-            e.scroll = Vec2(ev->scroll_x, ev->scroll_y);
-            e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
-            e.syncLegacy();
-            win->events().mouseScrolled.notify(e);
-            break;
-        }
-        case SAPP_EVENTTYPE_KEY_DOWN: {
-            KeyEventArgs e;
-            e.key = ev->key_code;   // SAPP_KEYCODE_*, identical to the main window
-            e.isRepeat = ev->key_repeat;
-            e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
-            if (!ev->key_repeat) ctx.keysPressed.insert(e.key);
-            win->events().keyPressed.notify(e);
-            break;
-        }
-        case SAPP_EVENTTYPE_KEY_UP: {
-            KeyEventArgs e;
-            e.key = ev->key_code;
-            e.isRepeat = false;
-            e.shift = hasShift; e.ctrl = hasCtrl; e.alt = hasAlt; e.super = hasSuper;
-            ctx.keysPressed.erase(e.key);
-            win->events().keyReleased.notify(e);
-            break;
-        }
-        case SAPP_EVENTTYPE_RESIZED:
-            internal::syncWindowAppSize(*win);
-            break;
-        case SAPP_EVENTTYPE_SUSPENDED:
-            logNotice("Window") << "second window hidden - skipping frames (no stall)";
-            break;
-        case SAPP_EVENTTYPE_RESUMED:
-            logNotice("Window") << "second window visible again - resuming ticks";
-            break;
-        default:
-            // CHAR / RESIZED / FOCUSED: rawEvent carries them;
-            // size sync happens per tick.
-            break;
-    }
-}
-
-void windowEvent(const sapp_event* ev, sapp_window handle, void* user) noexcept {
-    internal::enterWindowEvent(ev, handle, user, dispatchWindowEvent);
-}
-
-
 } // namespace
 
 // ---------------------------------------------------------------------------
 // Window methods (Linux implementations)
 // ---------------------------------------------------------------------------
 namespace trussc {
-
-// Internal headless-test seam. The caller makes win's context current; an
-// invalid native handle uses the backend's unit DPI without creating a window.
-namespace internal {
-void dispatchSecondaryWindowEventForTests(const sapp_event* ev, Window& win) {
-    enterWindowEvent(ev, WindowRequestAccess::binding(win).handle, &win, dispatchWindowEvent);
-}
-// Display-test seam: use the native handle, DPI conversion and frame boundary.
-void dispatchSecondaryDisplayEventForTests(const sapp_event* ev, Window& win) {
-    auto* st = static_cast<AdapterState*>(win.native_);
-    if (st) windowEvent(ev, st->win, &win);
-}
-
-} // namespace internal
-
 
 // A request (see tcWindow.h): the backend calls close_cb -> teardown() at its
 // next safe point, outside this window's tick and events.
@@ -293,7 +133,7 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     d.no_high_dpi = !settings.highDpi;
     d.sample_count = settings.sampleCount;  // NOTE: forced to the shared configuration's count
     d.tick_cb = &internal::windowTick;
-    d.event_cb = &windowEvent;
+    d.event_cb = &internal::mainWindowEvent;
     d.close_cb = &internal::windowClosed;
     d.user_data = win.get();
     d.bind_cb = bindAdapter;

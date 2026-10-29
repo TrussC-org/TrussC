@@ -180,6 +180,7 @@ public:
     // The root is locked once per call, so it stays alive for the whole call
     // even if a handler detaches the window's App (setApp(nullptr)).
     void dispatchMousePressToTree(const MouseEventArgs& e) {
+        internal::MouseDispatchScope dispatch(ctx_, e.button, true);
         if (auto root = ctx_.rootNode.lock()) root->dispatchMousePress(e);
     }
     void dispatchMouseReleaseToTree(const MouseEventArgs& e) {
@@ -337,7 +338,7 @@ public:
     static const WindowBinding& binding(const Window& w) { return w.binding_; }
     static void unbind(Window& w) noexcept { w.binding_.bound = false; w.binding_.handle = {}; w.ctx_.suspended = false; }
     static void resetForLaunch(Window& w) {
-        w.binding_.lastDeliveredHidden = false;
+        w.binding_.lastDeliveredHidden = false; w.binding_.visibilityReady = false;
         w.exitDelivered_ = false; w.closeRequested_ = false; w.ctx_.targetsClosed = false;
         w.appEventState_.reset(); w.initialAppBindings_ = false; w.appSizeSeeded_ = false;
     }
@@ -967,6 +968,17 @@ inline internal::WindowFullscreenPhase Window::fullscreenPhase() const {
 inline bool Window::isFullscreen() const {
     return fullscreenPhase() != internal::WindowFullscreenPhase::Windowed;
 }
+namespace internal {
+inline bool usesNativeWindowDimensions(const WindowContext& ctx) noexcept {
+    return ctx.isMain && (!ctx.hostWindow || !ctx.hostWindow->isOpen());
+}
+inline WindowDimensions windowDimensions(const WindowContext& ctx) noexcept {
+    if (usesNativeWindowDimensions(ctx))
+        return {sapp_dpi_scale(), sapp_width(), sapp_height()};
+    return {ctx.dpiScale, ctx.fbWidth, ctx.fbHeight};
+}
+} // namespace internal
+
 inline int Window::getWidth() const {
     return isOpen() ? internal::framebufferToLogical(ctx_.fbWidth, ctx_.dpiScale) : 0;
 }

@@ -788,23 +788,31 @@ private:
     // Fire an input event to this node's own handler AND its mods; consumed if
     // either consumes. Mouse events go to the hit/grabbed node, keys broadcast.
     bool fireMousePress(const MouseEventArgs& e) {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext(), e.button);
+        if (!dispatch.current(e.button)) return false;
         bool consumed = onMousePress(e);
-        forEachMod([&](Mod* m) { if (m->onMousePress(e)) consumed = true; });
+        forEachMod([&](Mod* m) { if (dispatch.current(e.button) && m->onMousePress(e)) consumed = true; });
         return consumed;
     }
     bool fireMouseRelease(const MouseEventArgs& e) {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext());
+        if (!dispatch.current(e.button)) return false;
         bool consumed = onMouseRelease(e);
-        forEachMod([&](Mod* m) { if (m->onMouseRelease(e)) consumed = true; });
+        forEachMod([&](Mod* m) { if (dispatch.current(e.button) && m->onMouseRelease(e)) consumed = true; });
         return consumed;
     }
     bool fireMouseMove(const MouseMoveEventArgs& e) {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext());
+        if (!dispatch.current()) return false;
         bool consumed = onMouseMove(e);
-        forEachMod([&](Mod* m) { if (m->onMouseMove(e)) consumed = true; });
+        forEachMod([&](Mod* m) { if (dispatch.current() && m->onMouseMove(e)) consumed = true; });
         return consumed;
     }
     bool fireMouseDrag(const MouseDragEventArgs& e) {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext());
+        if (!dispatch.current()) return false;
         bool consumed = onMouseDrag(e);
-        forEachMod([&](Mod* m) { if (m->onMouseDrag(e)) consumed = true; });
+        forEachMod([&](Mod* m) { if (dispatch.current() && m->onMouseDrag(e)) consumed = true; });
         return consumed;
     }
     bool fireMouseScroll(const ScrollEventArgs& e) {
@@ -1057,7 +1065,10 @@ private:
     // it (the same idea as destroy()).
     Ptr dispatchMousePress(const MouseEventArgs& e) {
         auto& ctx = internal::currentWindowContext();
+        internal::MouseDispatchScope dispatch(ctx, e.button);
+        if (!dispatch.current(e.button)) return nullptr;
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
+        if (!dispatch.current(e.button)) return nullptr;
 
         // Selection: clicking a node selects it; clicking empty space clears it.
         // (Selection follows the front-most hit, not the consumer — it is a
@@ -1067,7 +1078,9 @@ private:
         // Bubble up from the hit node until consumed
         for (Ptr current = result.node; current; current = current->getParent()) {
             MouseEventArgs local = current->localizeMouse(e);
-            if (current->fireMousePress(local)) {
+            const bool handled = current->fireMousePress(local);
+            if (!dispatch.current(e.button)) return nullptr;
+            if (handled) {
                 // The consumer grabs the pointer for drag tracking
                 ctx.grabbedNode = current;
                 ctx.grabbedButton = e.button;
@@ -1080,6 +1093,8 @@ private:
 
     Ptr dispatchMouseRelease(const MouseEventArgs& e) {
         auto& ctx = internal::currentWindowContext();
+        internal::MouseDispatchScope dispatch(ctx);
+        if (!dispatch.current(e.button)) return nullptr;
 
         // Send release to the grabbed node. A grab whose node is gone (freed
         // after it was removed) is dropped, and the release falls back to the
@@ -1089,6 +1104,7 @@ private:
             if (grabbed) {
                 MouseEventArgs local = grabbed->localizeMouse(e);
                 const bool handled = grabbed->fireMouseRelease(local);
+                if (!dispatch.current(e.button)) return nullptr;
                 ctx.grabbedNode.reset();
                 ctx.grabbedButton = -1;
                 return handled ? grabbed : nullptr;
@@ -1101,12 +1117,13 @@ private:
 
         // Fallback (no grab): bubble from the hit node like press
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
+        if (!dispatch.current(e.button)) return nullptr;
 
         for (Ptr current = result.node; current; current = current->getParent()) {
             MouseEventArgs local = current->localizeMouse(e);
-            if (current->fireMouseRelease(local)) {
-                return current;
-            }
+            const bool handled = current->fireMouseRelease(local);
+            if (!dispatch.current(e.button)) return nullptr;
+            if (handled) return current;
         }
 
         return nullptr;
@@ -1114,6 +1131,10 @@ private:
 
     Ptr dispatchMouseMove(const internal::MouseEventRaw& e) {
         auto& ctx = internal::currentWindowContext();
+        internal::MouseDispatchScope dispatch(ctx);
+        if (!dispatch.current()) return nullptr;
+        // App/BeforeApp reentry can replace the grab with another button.
+        dispatch.trackMotionButtons();
 
         Ptr dragConsumer;
         // Send drag event to grabbed node
@@ -1124,13 +1145,18 @@ private:
             if (grabbed->fireMouseDrag(internal::toDragArgs(local))) dragConsumer = grabbed;
         }
 
+        if (!dispatch.current()) return nullptr;
+
         // Also send move event, bubbling from the hit node (hover itself is
         // handled separately by updateHoverState and stays front-most-only)
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
 
+        if (!dispatch.current()) return nullptr;
         for (Ptr current = result.node; current; current = current->getParent()) {
             internal::MouseEventRaw local = current->localizeMouse(e);
-            if (current->fireMouseMove(internal::toMoveArgs(local))) {
+            const bool handled = current->fireMouseMove(internal::toMoveArgs(local));
+            if (!dispatch.current()) return nullptr;
+            if (handled) {
                 return current;
             }
         }

@@ -51,6 +51,7 @@ public:
 
     // Window
     Event<ResizeEventArgs> windowResized{EventPriority::BeforeApp};
+    Event<OccludedEventArgs> occludedChanged; // Explicit listeners for effective-hidden changes
 
     // Drag & drop
     Event<DragDropEventArgs> filesDropped{EventPriority::BeforeApp};

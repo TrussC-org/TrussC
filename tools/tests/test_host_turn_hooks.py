@@ -16,16 +16,14 @@ parts=[]
 for index,match in enumerate(re.finditer(r'static void _sapp_tc_send\(_sapp_tc_window_t\* w, sapp_event\* ev\) \{',NATIVE)):
     implementation=body(NATIVE[match.start():],match.group())
     parts.append(f'namespace event_{index} {{\n'+r'''
-struct sapp_window { uint32_t id; };
-struct sapp_event { int type=0; uint64_t frame_count=0; int window_width=0,window_height=0,framebuffer_width=0,framebuffer_height=0; };
 struct _sapp_tc_window_t {
-    uint32_t win_id=23; uint64_t frame_count=7;
+    uint32_t win_id=23; uint64_t frame_count=7; float dpi_scale=2;
     int win_width=80,win_height=40,fb_width=160,fb_height=80;
     bool ready=true,in_tick=false,wake_on_input=true,input_delivered=false;
     bool (*events_enabled)()=nullptr;
     struct { void (*event_cb)(const sapp_event*,sapp_window,void*)=nullptr; void* user_data=nullptr; } desc;
 };
-struct { struct { _sapp_tc_window_t* main=nullptr; } app; } _sapp_tc;
+struct { bool mouse_locked=false; _sapp_tc_window_t* lock_owner=nullptr; struct { _sapp_tc_window_t* main=nullptr; } app; } _sapp_tc;
 _sapp_tc_window_t* live=nullptr;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return live && live->win_id==h.id ? live : nullptr; }
 '''+implementation+r'''
@@ -35,7 +33,7 @@ void callback(const sapp_event* e,sapp_window h,void* p) {
     check("event metadata and receiver survive common binding", h.id==23 && e->framebuffer_width==160 && e->frame_count==7);
 }
 void run() {
-    _sapp_tc_window_t w; live=&w; _sapp_tc.app.main=&w; w.desc={callback,&w};
+    _sapp_tc_window_t w, first; first.win_id=24; live=&w; _sapp_tc.app.main=&first; w.frame_count=99; w.desc={callback,&w};
     for (bool outer : {false,true}) {
         w.in_tick=outer;
         sapp_event e{}; e.type=SAPP_EVENTTYPE_KEY_DOWN;
@@ -173,18 +171,17 @@ prefix=r'''
 int failures=0,checks=0;
 void check(const char* label,bool ok) { ++checks; if (!ok) { ++failures; printf("host-turn: FAIL: %s\n",label); } }
 '''
-enums=sorted(set(re.findall(r'SAPP_EVENTTYPE_[A-Z_]+',''.join(parts)+x11)))
-prefix+='enum { '+','.join(enums)+' };\n'
+prefix+='#include "sokol_app_tc.h"\n'
+prefix+=(ROOT/'core/include/sokol/util/sokol_window_event.h').read_text(encoding='utf-8').replace('#pragma once','')+'\n'
 source=prefix+''.join(parts)+mac+x11+quit_gate+modal+r'''
 int main() { event_0::run();event_1::run();event_2::run();mac::run();x11::run();quit_gate::run();modal::run();
     printf("host-turn: %d checks, %d failures\n",checks,failures);return failures?1:0; }
 '''
 variants=[('baseline',source)]
 if os.environ.get('TC_HOST_TURN_MUTATIONS'):
-    for i in range(3):
-        old=parts[i]; new=old.replace('    w->in_tick = true;', '    /* mutation: event callback unguarded */')
-        assert new!=old
-        variants.append((f'event_guard_{i}',source.replace(old,new)))
+    old='    w->in_tick = true;'
+    assert source.count(old)==1
+    variants.append(('common_event_guard',source.replace(old,'    /* mutation: event callback unguarded */')))
     old='if (auto* live = _sapp_tc_lookup(source.handle)) _sapp_tc_win32_tick(live);'
     assert old in modal
     variants.append(('modal_uses_stale_receiver',source.replace(modal,modal.replace(old,'_sapp_tc_win32_tick(w);'))))
@@ -205,7 +202,7 @@ with tempfile.TemporaryDirectory(prefix='tc-host-turn-') as folder:
     for name,code in variants:
         for backend in ('SOKOL_GLCORE','SOKOL_GLES3'):
             cpp=Path(folder)/'probe.cpp'; binary=Path(folder)/'probe'; cpp.write_text(code,encoding="utf-8")
-            subprocess.run([os.environ.get('CXX','c++'),'-std=c++20','-D'+backend,str(cpp),'-o',str(binary)],check=True)
+            subprocess.run([os.environ.get('CXX','c++'),'-std=c++20','-I'+str(ROOT/'core/include/sokol'),'-D'+backend,str(cpp),'-o',str(binary)],check=True)
             result=subprocess.run([str(binary)],text=True,encoding="utf-8",stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=15)
             print(name,backend,result.stdout,flush=True)
             failed=result.stdout.count('host-turn: FAIL:')

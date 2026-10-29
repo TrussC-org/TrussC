@@ -394,31 +394,92 @@ void registerInspectionTools() { setToolLevel(ToolLevel::ReadOnly); }
 
 namespace trussc::mcp::internal {
 
-void fillKeyModifiers(KeyEventArgs& args, int key, bool down) {
-    auto heldAfter = [key, down](int code) {
-        return code == key ? down : isKeyPressed(code);
-    };
-    args.shift = heldAfter(SAPP_KEYCODE_LEFT_SHIFT)   || heldAfter(SAPP_KEYCODE_RIGHT_SHIFT);
-    args.ctrl  = heldAfter(SAPP_KEYCODE_LEFT_CONTROL) || heldAfter(SAPP_KEYCODE_RIGHT_CONTROL);
-    args.alt   = heldAfter(SAPP_KEYCODE_LEFT_ALT)     || heldAfter(SAPP_KEYCODE_RIGHT_ALT);
-    args.super = heldAfter(SAPP_KEYCODE_LEFT_SUPER)   || heldAfter(SAPP_KEYCODE_RIGHT_SUPER);
-}
-
-void injectKeyDown(int key) {
-    KeyEventArgs args;
-    args.key = key;
-    fillKeyModifiers(args, key, true);
-    ::trussc::internal::currentWindowContext().keysPressed.insert(key);
-    events().keyPressed.notify(args);
-}
-
-void injectKeyUp(int key) {
-    KeyEventArgs args;
-    args.key = key;
-    fillKeyModifiers(args, key, false);
-    ::trussc::internal::currentWindowContext().keysPressed.erase(key);
-    events().keyReleased.notify(args);
-}
+// A whole tool call retains the main attachment, including both halves of a click.
+struct InputTarget {
+    trussc::Window& window = *trussc::internal::mainWindow();
+    std::optional<trussc::internal::WindowEntryScope> entry;
+    sapp_tc_window_metadata snapshot{};
+    trussc::internal::WindowContext& ctx = window.context();
+    InputTarget() {
+        if (!window.isOpen()) throw InputArgumentError("main window is not available for input");
+        const auto& b = trussc::internal::WindowRequestAccess::binding(window);
+        snapshot = b.metadata;
+        if (b.operations && b.operations->readMetadata && !b.operations->readMetadata(b.handle, b.user, snapshot))
+            throw InputArgumentError("main window is not available for input");
+    }
+    void begin() {
+        if (!entry) {
+            entry.emplace(window, false, false, false);
+            if (!*entry) throw InputArgumentError("main window is not available for input");
+        }
+        const auto& b = trussc::internal::WindowRequestAccess::binding(window);
+        if (b.operations && b.operations->readMetadata && !b.operations->readMetadata(b.handle, b.user, snapshot))
+            throw InputArgumentError("main window is not available for input");
+    }
+    uint32_t modifiers(int key = -1, bool down = false) const {
+        const auto held = [&](int code) { return code == key ? down : ctx.keysPressed.contains(code); };
+        uint32_t result = 0;
+        if (held(SAPP_KEYCODE_LEFT_SHIFT) || held(SAPP_KEYCODE_RIGHT_SHIFT)) result |= SAPP_MODIFIER_SHIFT;
+        if (held(SAPP_KEYCODE_LEFT_CONTROL) || held(SAPP_KEYCODE_RIGHT_CONTROL)) result |= SAPP_MODIFIER_CTRL;
+        if (held(SAPP_KEYCODE_LEFT_ALT) || held(SAPP_KEYCODE_RIGHT_ALT)) result |= SAPP_MODIFIER_ALT;
+        if (held(SAPP_KEYCODE_LEFT_SUPER) || held(SAPP_KEYCODE_RIGHT_SUPER)) result |= SAPP_MODIFIER_SUPER;
+        if (ctx.pressedMouseButtons & 1) result |= SAPP_MODIFIER_LMB;
+        if (ctx.pressedMouseButtons & 2) result |= SAPP_MODIFIER_RMB;
+        if (ctx.pressedMouseButtons & 4) result |= SAPP_MODIFIER_MMB;
+        return result;
+    }
+    sapp_event pointer(sapp_event_type type, float x, float y, int button = -1) {
+        // Validate the original transform before entry can call App code, then
+        // rebuild from the current native revision after pending requests.
+        buildPointer(type, x, y, button);
+        begin();
+        return buildPointer(type, x, y, button);
+    }
+    sapp_event buildPointer(sapp_event_type type, float x, float y, int button) const {
+        sapp_event event{}; event.type = type; event.modifiers = modifiers();
+        event.mouse_button = button >= 0 ? static_cast<sapp_mousebutton>(button) : SAPP_MOUSEBUTTON_INVALID;
+        if (type == SAPP_EVENTTYPE_MOUSE_DOWN && button >= 0) event.modifiers |= SAPP_MODIFIER_LMB << button;
+        if (type == SAPP_EVENTTYPE_MOUSE_UP && button >= 0) event.modifiers &= ~(SAPP_MODIFIER_LMB << button);
+        const double dpi = snapshot.dpi_scale > 0 ? snapshot.dpi_scale : ctx.dpiScale;
+        const double factor = trussc::internal::pixelPerfectMode() ? 1 : dpi;
+        const double nx = double(x) * factor, ny = double(y) * factor;
+        const double basis = trussc::internal::pixelPerfectMode() ? dpi : 1;
+        const double dx = ctx.pointerValid ? double(x) - double(ctx.pointerLogicalX) * basis : 0;
+        const double dy = ctx.pointerValid ? double(y) - double(ctx.pointerLogicalY) * basis : 0;
+        // Bound (abi): transformed positions and differences must fit finite float event fields; reject before injection.
+        for (double value : {nx, ny, dx, dy, dx * factor, dy * factor})
+            if (!std::isfinite(value) || std::abs(value) > std::numeric_limits<float>::max())
+                throw InputArgumentError("transformed pointer position or delta is out of range");
+        event.mouse_x = float(nx); event.mouse_y = float(ny);
+        event.mouse_dx = float(dx * factor); event.mouse_dy = float(dy * factor);
+        return event;
+    }
+    void send(sapp_event event, bool reserve = true, const void* pressOwner = nullptr) {
+        begin();
+        const auto& binding = trussc::internal::WindowRequestAccess::binding(window);
+        event.source = SAPP_EVENTSOURCE_INJECTED;
+        // Bound (security): every injected event reserves its existing MCP work budget before delivery.
+        if (reserve) reserveWork(sizeof(sapp_event));
+        struct PressOwnerScope {
+            trussc::internal::WindowContext& ctx;
+            const void* previous;
+            ~PressOwnerScope() { ctx.pendingMousePressOwner = previous; }
+        } ownerScope{ctx, ctx.pendingMousePressOwner};
+        ctx.pendingMousePressOwner = pressOwner;
+        bool delivered = false;
+        if constexpr (trussc::internal::supportsSecondaryWindows()) {
+            delivered = binding.operations && binding.operations->injectEvent &&
+                binding.operations->injectEvent(binding.handle, binding.user, &event);
+        } else delivered = sapp_window_inject_event(binding.handle, &event);
+        if (!delivered) throw InputArgumentError("main window rejected input");
+    }
+    void key(int key, bool down) {
+        sapp_event event{};
+        event.type = down ? SAPP_EVENTTYPE_KEY_DOWN : SAPP_EVENTTYPE_KEY_UP;
+        event.key_code = static_cast<sapp_keycode>(key); event.modifiers = modifiers(key, down);
+        send(event);
+    }
+};
 
 json heldKeysJson() {
     std::vector<int> held(::trussc::internal::currentWindowContext().keysPressed.begin(),
@@ -1038,23 +1099,12 @@ void registerStandardTools(Server& server) {
             float x = internal::inputFloat(a, "x");
             float y = internal::inputFloat(a, "y");
             int button = internal::inputMouseButton(a, true);
-            // If button is pressed, treat as drag
-            if (button >= 0) {
-                trussc::internal::MouseEventRaw args;
-                args.pos = args.globalPos = Vec2(x, y);
-                args.button = button;
-                MouseDragEventArgs dragArgs = trussc::internal::toDragArgs(args);
-                events().mouseDragged.notify(dragArgs);
-            } else {
-                trussc::internal::MouseEventRaw args;
-                args.pos = args.globalPos = Vec2(x, y);
-                MouseMoveEventArgs moveArgs = trussc::internal::toMoveArgs(args);
-                events().mouseMoved.notify(moveArgs);
-            }
-
-            // Update global mouse state
-            ::trussc::internal::currentWindowContext().mouseX = x;
-            ::trussc::internal::currentWindowContext().mouseY = y;
+            internal::InputTarget target;
+            auto event = target.pointer(SAPP_EVENTTYPE_MOUSE_MOVE, x, y);
+            event.button_snapshot = true;
+            event.modifiers &= ~(SAPP_MODIFIER_LMB | SAPP_MODIFIER_RMB | SAPP_MODIFIER_MMB);
+            if (button >= 0) event.modifiers |= SAPP_MODIFIER_LMB << button;
+            target.send(event);
 
             return json{{"status", "ok"}};
         });
@@ -1069,16 +1119,10 @@ void registerStandardTools(Server& server) {
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
         .bind([](const json& a) -> json {
-            MouseEventArgs args;
-            args.pos = args.globalPos = Vec2(internal::inputFloat(a, "x"), internal::inputFloat(a, "y"));
-            args.button = internal::inputMouseButton(a);
-            args.syncLegacy();
-
-            ::trussc::internal::currentWindowContext().mouseX = args.pos.x;
-            ::trussc::internal::currentWindowContext().mouseY = args.pos.y;
-
-            events().mousePressed.notify(args);
-
+            const float x = internal::inputFloat(a, "x"), y = internal::inputFloat(a, "y");
+            const int button = internal::inputMouseButton(a);
+            internal::InputTarget target;
+            target.send(target.pointer(SAPP_EVENTTYPE_MOUSE_DOWN, x, y, button));
 
             return json{{"status", "ok"}};
         });
@@ -1089,16 +1133,10 @@ void registerStandardTools(Server& server) {
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
         .bind([](const json& a) -> json {
-            MouseEventArgs args;
-            args.pos = args.globalPos = Vec2(internal::inputFloat(a, "x"), internal::inputFloat(a, "y"));
-            args.button = internal::inputMouseButton(a);
-            args.syncLegacy();
-
-            ::trussc::internal::currentWindowContext().mouseX = args.pos.x;
-            ::trussc::internal::currentWindowContext().mouseY = args.pos.y;
-
-            events().mouseReleased.notify(args);
-
+            const float x = internal::inputFloat(a, "x"), y = internal::inputFloat(a, "y");
+            const int button = internal::inputMouseButton(a);
+            internal::InputTarget target;
+            target.send(target.pointer(SAPP_EVENTTYPE_MOUSE_UP, x, y, button));
 
             return json{{"status", "ok"}};
         });
@@ -1114,24 +1152,77 @@ void registerStandardTools(Server& server) {
         .arg<bool>("super", "Hold Cmd/Super", false)
         .bind([](const json& a) -> json {
             internal::validateInputModifiers(a);
-            MouseEventArgs args;
-            args.pos = args.globalPos = Vec2(internal::inputFloat(a, "x"), internal::inputFloat(a, "y"));
-            args.button = internal::inputMouseButton(a);
-            args.shift = a.value("shift", false);
-            args.ctrl  = a.value("ctrl", false);
-            args.alt   = a.value("alt", false);
-            args.super = a.value("super", false);
-            args.syncLegacy();
-
-            // Press
-            events().mousePressed.notify(args);
-
-
-            // Release (fresh consumed flag — the press consumer may differ)
-            MouseEventArgs rel = args;
-            rel.consumed = false;
-            events().mouseReleased.notify(rel);
-
+            const float x = internal::inputFloat(a, "x"), y = internal::inputFloat(a, "y");
+            const int button = internal::inputMouseButton(a);
+            internal::InputTarget target;
+            auto press = target.pointer(SAPP_EVENTTYPE_MOUSE_DOWN, x, y, button);
+            target.begin();
+            // Prepare modifier nodes before changing held input. Restoration uses
+            // those nodes without allocation and preserves callback changes to other keys.
+            constexpr std::array<int, 8> modifierKeys{SAPP_KEYCODE_LEFT_SHIFT, SAPP_KEYCODE_RIGHT_SHIFT,
+                SAPP_KEYCODE_LEFT_CONTROL, SAPP_KEYCODE_RIGHT_CONTROL, SAPP_KEYCODE_LEFT_ALT,
+                SAPP_KEYCODE_RIGHT_ALT, SAPP_KEYCODE_LEFT_SUPER, SAPP_KEYCODE_RIGHT_SUPER};
+            std::unordered_set<int> saved, requested;
+            for (int code : modifierKeys) if (target.ctx.keysPressed.contains(code)) saved.insert(code);
+            for (auto [name, code] : {std::pair{"shift", SAPP_KEYCODE_LEFT_SHIFT},
+                 {"ctrl", SAPP_KEYCODE_LEFT_CONTROL}, {"alt", SAPP_KEYCODE_LEFT_ALT}, {"super", SAPP_KEYCODE_LEFT_SUPER}})
+                if (a.value(name, false)) requested.insert(code);
+            // Native key codes fit the SDK domain; later callbacks cannot exhaust this capacity.
+            target.ctx.keysPressed.reserve(SAPP_MAX_KEYCODES);
+            struct RestoreModifiers {
+                std::unordered_set<int>& held;
+                const std::array<int, 8>& codes;
+                std::array<std::unordered_set<int>::node_type, 8> nodes;
+                RestoreModifiers(std::unordered_set<int>& held, const std::array<int, 8>& codes,
+                                 std::unordered_set<int>& saved) : held(held), codes(codes) {
+                    for (size_t i = 0; i < codes.size(); ++i) nodes[i] = saved.extract(codes[i]);
+                }
+                ~RestoreModifiers() {
+                    for (int code : codes) held.erase(code);
+                    for (auto& node : nodes) if (node) held.insert(std::move(node));
+                }
+            } restore{target.ctx.keysPressed, modifierKeys, saved};
+            for (int code : modifierKeys) target.ctx.keysPressed.erase(code);
+            while (!requested.empty()) target.ctx.keysPressed.insert(requested.extract(requested.begin()));
+            constexpr uint32_t keyboardModifiers = SAPP_MODIFIER_SHIFT | SAPP_MODIFIER_CTRL |
+                SAPP_MODIFIER_ALT | SAPP_MODIFIER_SUPER;
+            const uint32_t clickModifiers = target.modifiers() & keyboardModifiers;
+            press.modifiers = (press.modifiers & ~keyboardModifiers) | clickModifiers;
+            auto release = target.pointer(SAPP_EVENTTYPE_MOUSE_UP, x, y, button);
+            // Admit both halves before the first user callback.
+            internal::reserveWork(2 * sizeof(sapp_event));
+            struct ReleaseRecovery {
+                trussc::internal::WindowContext& ctx;
+                int button;
+                uint64_t epoch;
+                ~ReleaseRecovery() {
+                    // A delivered UP retires the ledger; a newer DOWN replaces this owner.
+                    // Only a remaining grab from this gesture still needs cleanup after UP.
+                    if (ctx.mousePressGenerations[button] != epoch) return;
+                    if (ctx.mousePressOwners[button] != this) return;
+                    ctx.mousePressOwners[button] = nullptr;
+                    ctx.pressedMouseButtons &= ~(1u << button);
+                    ctx.snapshotMouseButtons &= ~(1u << button);
+                    if (ctx.mouseButton == button) { ctx.mouseButton = -1; ctx.mousePressed = false; }
+                    if (ctx.grabbedButton == button) { ctx.grabbedNode.reset(); ctx.grabbedButton = -1; }
+                }
+            } recovery{target.ctx, button, target.ctx.mousePressGenerations[button] + 1};
+            target.send(press, false, &recovery);
+            if (target.ctx.mousePressGenerations[button] != recovery.epoch) return json{{"status", "ok"}};
+            try {
+                release = target.pointer(SAPP_EVENTTYPE_MOUSE_UP, x, y, button);
+            } catch (const internal::InputArgumentError&) {
+                // A press callback may change DPI. Keep the release representable
+                // in the current native basis even if the requested position no longer fits.
+                const double factor = trussc::internal::pixelPerfectMode() ? 1 : target.snapshot.dpi_scale;
+                // Bound (abi): clamp recovery coordinates to finite native floats so UP can complete after a DPI change.
+                const double limit = std::nextafter(float(std::numeric_limits<float>::max() / std::max(1.0, factor)), 0.0f);
+                release = target.pointer(SAPP_EVENTTYPE_MOUSE_UP,
+                    float(std::clamp(double(x), -limit, limit)),
+                    float(std::clamp(double(y), -limit, limit)), button);
+            }
+            release.modifiers = (release.modifiers & ~keyboardModifiers) | clickModifiers;
+            target.send(release, false, &recovery);
 
             return json{{"status", "ok"}};
         });
@@ -1143,11 +1234,10 @@ void registerStandardTools(Server& server) {
         .bind([](const json& a) -> json {
             const float dx = internal::inputFloat(a, "dx");
             const float dy = internal::inputFloat(a, "dy");
-            ScrollEventArgs args;
-            args.pos = args.globalPos = Vec2(::trussc::internal::currentWindowContext().mouseX, ::trussc::internal::currentWindowContext().mouseY);
-            args.scroll = Vec2(dx, dy);
-            args.syncLegacy();
-            events().mouseScrolled.notify(args);
+            internal::InputTarget target;
+            sapp_event event{}; event.type = SAPP_EVENTTYPE_MOUSE_SCROLL;
+            event.scroll_x = dx; event.scroll_y = dy; event.modifiers = target.modifiers();
+            target.send(event);
 
             return json{{"status", "ok"}};
         });
@@ -1174,13 +1264,14 @@ void registerStandardTools(Server& server) {
         .bind([](const json& a) -> json {
             const int key = internal::inputKey(a);
             internal::validateInputModifiers(a);
+            internal::InputTarget target; target.begin();
 
             // Press the requested modifiers first (skip any already held —
             // whichever side, so an explicit RIGHT_SHIFT hold is respected).
             json pressedMods = json::array();
             auto holdMod = [&](const char* flag, bool alreadyHeld, int code) {
                 if (a.value(flag, false) && !alreadyHeld) {
-                    internal::injectKeyDown(code);
+                    target.key(code, true);
                     pressedMods.push_back(code);
                 }
             };
@@ -1189,7 +1280,7 @@ void registerStandardTools(Server& server) {
             holdMod("alt",   isAltPressed(),     SAPP_KEYCODE_LEFT_ALT);
             holdMod("super", isSuperPressed(),   SAPP_KEYCODE_LEFT_SUPER);
 
-            internal::injectKeyDown(key);
+            target.key(key, true);
 
             return json{{"status", "ok"},
                         {"modifiersPressed", pressedMods},
@@ -1210,15 +1301,16 @@ void registerStandardTools(Server& server) {
         .bind([](const json& a) -> json {
             const int key = internal::inputKey(a);
             internal::validateInputModifiers(a);
+            internal::InputTarget target; target.begin();
 
             // The key goes up first — while the modifiers are still held, so
             // this event still carries them (as it does on a real keyboard).
-            internal::injectKeyUp(key);
+            target.key(key, false);
 
             json releasedMods = json::array();
             auto dropMod = [&](const char* flag, int code) {
                 if (a.value(flag, false) && isKeyPressed(code)) {
-                    internal::injectKeyUp(code);
+                    target.key(code, false);
                     releasedMods.push_back(code);
                 }
             };

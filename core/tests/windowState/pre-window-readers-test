@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Production-linked TSan regression; invoke through tcbuild.sh.
+
+TC_READERS_INCLUDE can select a retained earlier include tree for the negative
+control. Only TSan startup mapping failures are retried, never completed probes.
+"""
+from pathlib import Path
+import json
+import os
+import shlex
+import shutil
+import subprocess
+
+ROOT = Path(__file__).resolve().parents[3]
+BUILD = ROOT / 'core/tests/allCoreTests/build-linux'
+OUT = Path(os.environ.get('TC_READERS_OUTPUT', ROOT / '.verification/cp3fu9/readers'))
+OUT.mkdir(parents=True, exist_ok=True)
+os.environ['TMPDIR'] = str(OUT)
+assert shutil.disk_usage('/').free >= 15 * 1024**3, 'STOP: disk under 15 GiB'
+INCLUDE = Path(os.environ.get('TC_READERS_INCLUDE', ROOT / 'core/include'))
+entry = next(e for e in json.loads((BUILD / 'compile_commands.json').read_text(encoding='utf-8'))
+             if e['file'].endswith('tcWindowRuntime.cpp'))
+args = shlex.split(entry['command'])
+compiler = args.pop(0)
+flags = []
+skip = False
+for arg in args:
+    if skip:
+        skip = False
+        continue
+    if arg == '-o':
+        skip = True
+        continue
+    if arg == '-c' or arg.endswith('tcWindowRuntime.cpp') or arg.startswith(('-O', '-g')):
+        continue
+    flags.append(arg)
+flags = ['-I' + str(INCLUDE), '-I' + str(INCLUDE / 'tc/app'), *flags,
+         '-I' + str(ROOT / 'core/platform/linux'),
+         '-O1', '-g', '-fsanitize=thread', '-fno-omit-frame-pointer', '-fno-pie']
+link = shlex.split((BUILD / 'CMakeFiles/allCoreTests.dir/link.txt').read_text(encoding='utf-8'))
+libs = link[next(i for i, arg in enumerate(link) if arg.endswith('libTrussC.a')):]
+paths = [INCLUDE / 'tc/app/tcWindowRuntime.cpp',
+         Path(os.environ.get('TC_READERS_PLATFORM', ROOT / 'core/platform/linux/tcPlatform_linux.cpp')),
+         Path(__file__).with_name('pre-window-readers.cpp')]
+objects = []
+for index, path in enumerate(paths):
+    obj = OUT / f'{index}.o'
+    subprocess.run([compiler, *flags, '-c', str(path), '-o', str(obj)], check=True)
+    objects.append(obj)
+binary = OUT / 'readers'
+subprocess.run([compiler, '-fsanitize=thread', '-no-pie', *map(str, objects), *libs, '-o', str(binary)],
+               cwd=BUILD, check=True)
+rows = []
+try:
+    for mode in ['pre-window', 'headless']:
+        for attempt in range(100):
+            log = OUT / f'{mode}-{attempt}.log'
+            with log.open('w', encoding='utf-8') as stream:
+                result = subprocess.run([str(binary), *(['headless'] if mode == 'headless' else [])],
+                                        stdout=stream, stderr=subprocess.STDOUT, timeout=120,
+                                        env=dict(os.environ, TRUSSC_MCP='0',
+                                                 TSAN_OPTIONS='halt_on_error=0:exitcode=66'))
+            output = log.read_text(encoding='utf-8')
+            if 'FATAL: ThreadSanitizer: unexpected memory mapping' in output:
+                continue
+            races = output.count('WARNING: ThreadSanitizer: data race')
+            expected = bool(os.environ.get('TC_READERS_EXPECT_RACE'))
+            valid = ('304000 checks finished' in output and '0 failed' in output and
+                     result.returncode == (66 if expected else 0) and
+                     (races > 0 if expected else 'ThreadSanitizer' not in output))
+            rows.append(dict(mode=mode, attempts=attempt+1, returncode=result.returncode,
+                             races=races, valid=valid, completed_log=log.name))
+            print(rows[-1], flush=True)
+            break
+        else:
+            rows.append(dict(mode=mode, valid=False, error='no completed TSan run in 100 attempts'))
+        (OUT / 'results.json').write_text(json.dumps(rows, indent=2), encoding='utf-8')
+finally:
+    if not os.environ.get('TC_READERS_RETAIN_BINARY'):
+        binary.unlink()
+    for obj in objects:
+        obj.unlink()
+raise SystemExit(any(not row['valid'] for row in rows))

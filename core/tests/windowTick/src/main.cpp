@@ -320,7 +320,10 @@ bool readVisibility(sapp_window handle, void* user, sapp_tc_window_metadata& met
 }
 const internal::WindowNativeOperations& visibilityOperations() {
     static const auto operations = [] {
-        auto ops = internal::productionWindowOperations(); ops.readMetadata = readVisibility; return ops;
+        auto ops = internal::productionWindowOperations(); ops.readMetadata = readVisibility;
+        // Unit bindings have no native record; display mode reads the real close observation.
+        ops.closeRecorded = [](sapp_window handle, void*) { return sapp_isvalid() && sapp_tc_window_close_recorded(handle); };
+        return ops;
     }();
     return operations;
 }

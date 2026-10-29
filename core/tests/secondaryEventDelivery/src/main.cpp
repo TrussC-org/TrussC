@@ -7,7 +7,7 @@
 
 #if (defined(__APPLE__) && TARGET_OS_OSX) || defined(_WIN32) || (defined(__linux__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__ANDROID__))
 namespace trussc::internal {
-void dispatchSecondaryDisplayEventForTests(const sapp_event*, Window&);
+void dispatchWindowDisplayEventForTests(const sapp_event*, Window&);
 }
 using namespace tc;
 namespace {
@@ -51,7 +51,7 @@ void feed(sapp_event_type type, float x = 20, float y = 20, unsigned int modifie
     e.mouse_button = SAPP_MOUSEBUTTON_LEFT;
     const float dpi = secondary->context().dpiScale;
     e.mouse_x = x * dpi; e.mouse_y = y * dpi; e.modifiers = modifiers; e.scroll_y = 1;
-    internal::dispatchSecondaryDisplayEventForTests(&e, *secondary);
+    internal::dispatchWindowDisplayEventForTests(&e, *secondary);
 }
 struct Probe : RectNode {
     Probe() { setPos(10, 10); setSize(60, 60); enableEvents(); }

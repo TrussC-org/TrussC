@@ -12,7 +12,7 @@
     (defined(__linux__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__ANDROID__))
 #define TC_TEST_SECONDARY_DISPATCH
 namespace trussc::internal {
-void dispatchSecondaryWindowEventForTests(const sapp_event* ev, Window& win);
+void dispatchWindowEventForTests(const sapp_event* ev, Window& win);
 }
 #endif
 
@@ -130,7 +130,7 @@ struct Fixture {
         auto& ctx = internal::currentWindowContext();
         ctx.rootNode = app;
         ctx.pressedMouseButtons = 0;
-        internal::currentMouseButton = -1;
+        internal::currentWindowContext().mouseButton = -1;
         ctx.mousePressed = false; ctx.mouseButton = -1;
     }
     ~Fixture() {
@@ -147,7 +147,7 @@ struct Fixture {
             sapp_event e{};
             e.type = type; e.mouse_button = static_cast<sapp_mousebutton>(button);
             e.modifiers = modifiers; e.mouse_x = x; e.mouse_y = y;
-            internal::dispatchSecondaryWindowEventForTests(&e, *window);
+            internal::dispatchWindowEventForTests(&e, *window);
             return;
         }
 #endif
@@ -167,7 +167,7 @@ void scenario(int kind, int button, unsigned int bit, bool secondary = false) {
     auto releaseListener = events().mouseReleased.listen([&](const MouseEventArgs& e) {
         ++releases; lastRelease = e; order += 'R';
         stateClearAtRelease = !isMousePressed() && ctx.mouseButton == -1 &&
-            internal::currentMouseButton == -1;
+            internal::currentWindowContext().mouseButton == -1;
     });
     auto moveListener = events().mouseMoved.listen([&](const MouseMoveEventArgs&) { ++moves; order += 'M'; });
     auto dragListener = events().mouseDragged.listen([&](const MouseDragEventArgs&) { ++drags; order += 'D'; });

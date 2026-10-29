@@ -31,10 +31,11 @@ struct _sapp_tc_window_t {
     unsigned win_id=717; bool ready=true,in_tick=false,is_main=true,cancel_tick=false;
     bool close_requested=false,input_delivered=false,wake_on_input=true,credit_held=false,waitable_ready=true;
     int drawable=1,swap_chain=1; void* frame_wait=nullptr; double earliest_next=0;
+    float dpi_scale=2;
     uint64_t frame_count=0; int win_width=100,win_height=50,fb_width=200,fb_height=100;
     void* hwnd=nullptr; bool (*events_enabled)()=nullptr; sapp_window_desc desc{};
 } record;
-struct { int display=0; size_t window_slots=1; _sapp_tc_window_t* windows[1]={&record};
+struct { bool mouse_locked=false; _sapp_tc_window_t* lock_owner=nullptr; int display=0; size_t window_slots=1; _sapp_tc_window_t* windows[1]={&record};
     struct { bool init_called=false,quit_requested=false,quit_ordered=false;
         unsigned host_loop_depth=1; bool host_turn_open=false;
         Descriptor desc; _sapp_tc_window_t* main=&record; } app; } _sapp_tc;
@@ -172,16 +173,15 @@ def mac_init_exit_probe(native):
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include "sokol_app_tc.h"
+#include "util/sokol_window_event.h"
 using BOOL=bool;
 constexpr bool YES=true,NO=false;
-constexpr int _SAPP_TC_MAX_WINDOWS=1,SAPP_EVENTTYPE_QUIT_REQUESTED=1,SAPP_EVENTTYPE_RESIZED=2;
-struct sapp_window { uint32_t id; };
-struct sapp_event { int type=0; uint64_t frame_count=0;
-    int window_width=0,window_height=0,framebuffer_width=0,framebuffer_height=0; };
+constexpr int _SAPP_TC_MAX_WINDOWS=1;
 struct NSWindow { void close(); void performClose(); } nativeWindow;
 struct CADisplayLink { double timestamp=1,targetTimestamp=2; };
 struct _sapp_tc_window_t {
-    unsigned win_id=717; bool ready=true,in_tick=false,is_main=true,close_requested=false;
+    unsigned win_id=717; float dpi_scale=2; bool ready=true,in_tick=false,is_main=true,close_requested=false;
     bool draw_while_hidden=true,draw_admitted=false,wake_on_input=false,input_delivered=false;
     int timing=0,win_width=100,win_height=50,fb_width=200,fb_height=100;
     double last_tick_time=0,frame_duration=0; uint64_t frame_count=0;
@@ -292,7 +292,7 @@ def main():
             path = Path(scratch) / (name + '.cpp')
             binary = Path(scratch) / name
             path.write_text('#include <initializer_list>\n' + code, encoding='utf-8')
-            subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', str(path), '-o', str(binary)], check=True)
+            subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-I'+str(Path(__file__).resolve().parents[3]/'core/include/sokol'), str(path), '-o', str(binary)], check=True)
             result = subprocess.run([str(binary)], capture_output=True, text=True, encoding='utf-8', timeout=10)
             failed = result.stdout.count('macOS intended exception: FAIL:')
             valid = result.returncode == (0 if name == 'baseline' else 1) and (failed == 0 if name == 'baseline' else failed > 0)

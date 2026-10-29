@@ -3660,6 +3660,11 @@ void Node::update()  // Called on every update step while the node is active, be
 bool Node::HitResult::hit() const  // Returns whether the result contains a hit node.
 ```
 
+### OccludedEventArgs — Describes a change in window visibility.
+
+```cpp
+```
+
 ### OnceGate — Controls whether an action runs once or at a specified interval.
 
 ```cpp

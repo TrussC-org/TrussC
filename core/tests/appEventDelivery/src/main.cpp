@@ -1,4 +1,5 @@
 #include <TrussC.h>
+#include "../../common/tcInjectedWindowTest.h"
 #include "../../common/tcWindowTest.h"
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
@@ -95,7 +96,7 @@ struct Probe : RectNode {
     bool onMousePress(const MouseEventArgs&) override { order["mousePressed"] += 't'; return treeConsumes; }
     bool onMouseRelease(const MouseEventArgs&) override { order["mouseReleased"] += 't'; return releaseConsumes; }
     bool onMouseDrag(const MouseDragEventArgs&) override { order["mouseDragged"] += 't'; return treeConsumes && dragConsumes; }
-    bool onMouseMove(const MouseMoveEventArgs&) override { order[internal::currentMouseButton < 0 ? "mouseMoved" : "mouseDragged"] += 't'; return treeConsumes; }
+    bool onMouseMove(const MouseMoveEventArgs&) override { order[internal::currentWindowContext().mouseButton < 0 ? "mouseMoved" : "mouseDragged"] += 't'; return treeConsumes; }
     bool onMouseScroll(const ScrollEventArgs&) override { order["mouseScrolled"] += 't'; return treeConsumes; }
     bool onKeyPress(const KeyEventArgs&) override { order["keyPressed"] += 't'; return treeConsumes; }
     bool onKeyRelease(const KeyEventArgs&) override { order["keyReleased"] += 't'; return treeConsumes; }
@@ -360,7 +361,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     getMainThreadId(); // model _setup_cb on the actual App thread
     check("descriptor creation does not claim the App thread", isMainThread());
     internal::pixelPerfectMode() = true;
-    internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 101);
+    tcCoreTest::InjectedWindow native(*internal::mainWindow());
+    native.metadata.fb_width = native.metadata.fb_height = 128;
     internal::mainWindowContext().fbWidth = internal::mainWindowContext().fbHeight = 128;
     internal::appSetupFunc();
     internal::mainWindowContext().fbWidth = internal::mainWindowContext().fbHeight = 128; internal::syncWindowAppSize(*internal::mainWindow());

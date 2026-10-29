@@ -918,9 +918,10 @@ void present() {
             internal::popTarget(*entry.target, entry.token);
         }
     }
+    const bool closing = internal::currentWindowCloseRecorded();
     window.swapchainTarget.flushLayers();
     window.swapchainTarget.endPass();
-    if (internal::finishWindowCaptureSource(window.swapchainTarget)) {
+    if (!closing && internal::finishWindowCaptureSource(window.swapchainTarget)) {
         if (!sg_tc_mtl_authorize_drawable(window.swapchainTarget.ownerId,
                 window.swapchainTarget.resources().generation, window.renderEpoch))
             sg_tc_mtl_cancel_drawables(window.swapchainTarget.ownerId);
@@ -1014,8 +1015,6 @@ void createMainWindow(const WindowSettings& settings) {
     WindowRequestAccess::resetForLaunch(window);
     WindowRequestAccess::binding(window) = {};
     WindowRequestAccess::binding(window).geometry = {double(settings.width), double(settings.height), settings.pixelPerfect};
-    window.ctx_.fbWidth = window.ctx_.fbHeight = 0;
-    window.ctx_.dpiScale = 1;
     window.ctx_.suspended = false;
     window.ctx_.acquireSwapchain = nullptr;
     window.ctx_.acquireSwapchainUser = nullptr;
@@ -1397,17 +1396,17 @@ void observeWindowVisibility(WindowContext& ctx, sapp_event_type type) {
             return;
         }
     }
-    if (type == SAPP_EVENTTYPE_SUSPENDED || type == SAPP_EVENTTYPE_ICONIFIED) {
-        ctx.suspended = true;
-        if (occlusionPausesUpdate(ctx) || nativeSuspensionPausesUpdate()) {
+    // Lifecycle suspension has a separate reason. Visibility was sampled before
+    // this call and remains authoritative for raw listeners and the typed event.
+    if (type == SAPP_EVENTTYPE_SUSPENDED) {
+        ctx.lifecycleSuspended = nativeSuspensionPausesUpdate();
+        if (ctx.lifecycleSuspended || (ctx.suspended && occlusionPausesUpdate(ctx))) {
             ctx.visibilityPaused = true;
             ctx.mainUpdateCallTimeInitialized = false;
         }
-    } else if (type == SAPP_EVENTTYPE_RESUMED || type == SAPP_EVENTTYPE_RESTORED) {
-        ctx.suspended = false;
+    } else if (type == SAPP_EVENTTYPE_RESUMED) {
+        ctx.lifecycleSuspended = false;
 #if defined(__EMSCRIPTEN__)
-        // Browsers may stop rAF entirely. Rebase the first returned tick,
-        // without suppressing any callback actually delivered while hidden.
         ctx.visibilityPaused = true;
 #endif
     }
@@ -1425,11 +1424,12 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     ctx.frameUptimeSampled = true;
     auto* window = currentWindow();
     if (window) ctx.suspended = window->isOccluded();
-    const bool hidden = nativeDrawGated || ctx.suspended;
+    const bool hidden = nativeDrawGated || ctx.suspended || ctx.lifecycleSuspended;
     // Preserve the existing capture override even while main is hidden.
     const bool capturePending = forceDraw || !ctx.pendingScreenshotPaths.empty()
         || !ctx.asyncScreenshots.pending.empty();
     const auto nonPresentingExit = [&] {
+        if (currentWindowCloseRecorded()) sg_tc_mtl_cancel_drawables(ctx.swapchainTarget.ownerId);
         // Prelude callbacks can upload or render FBOs even without a draw.
         // Native gates have not activated this window's GPU context. In
         // particular, a nested gated callback must not commit foreign work.
@@ -1463,6 +1463,7 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     if (!nativeDrawGated && independentTick) ++ctx.resourceTickCount;
     const auto updatesBefore = ctx.updateCount;
     if (!ctx.loop.updateSyncedToDraw) runIndependentUpdates(now);
+    if (currentWindowCloseRecorded()) return nonPresentingExit();
     if (nativeDrawGated) {
         // The native gate forbids all rendering, including forced captures.
         // A future secondary policy change can run updates on delivered ticks.
@@ -1483,6 +1484,10 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     // A mode switch from an independent update applies on the next tick;
     // never add a second, synchronized update to that same tick.
     if (ctx.updateCount == updatesBefore) runSyncedUpdate();
+    if (currentWindowCloseRecorded()) {
+        sg_tc_mtl_cancel_drawables(ctx.swapchainTarget.ownerId);
+        return nonPresentingExit();
+    }
     // Reserve before notifying so redraw() from draw/afterFrame survives.
     // A failed draw/present keeps the original request for a later tick.
     struct RedrawReservation {
@@ -1503,6 +1508,10 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
         }
         WindowCallbackTimeScope callbackTime;
         events().draw.notify();
+        if (currentWindowCloseRecorded()) {
+            sg_tc_mtl_cancel_drawables(ctx.swapchainTarget.ownerId);
+            return nonPresentingExit();
+        }
         if (presentation) admitted = presentation->present();
         else {
             resetShaderStack(); present();
@@ -1511,7 +1520,7 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
             admitted = !ctx.swapchainTarget.binding.swapchain.invalid;
         }
     }
-    if (!admitted) return nonPresentingExit();
+    if (!admitted || currentWindowCloseRecorded()) return nonPresentingExit();
     reservation.completed = true;
     ++ctx.drawCount;
     { EntryStackGuard guard(AppEntry::AfterFrame); events().afterFrame.notify(); }
@@ -3014,11 +3023,6 @@ float& farClipOverride() {
 bool& touchAsMouse() {
     static bool enabled = true;
     return enabled;
-}
-
-TouchMouseMapper& touchMouseMapper() {
-    static TouchMouseMapper mapper;
-    return mapper;
 }
 
 // Whether the setup callback ran in the current launch (#394).

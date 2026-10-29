@@ -37,6 +37,8 @@ def main():
 #include <cstdio>
 #include <cstdint>
 #include <cstddef>
+#include <vector>
+#include <algorithm>
 #define __ANDROID__ 1
 int failures=0;
 void check(const char* label, bool ok) {
@@ -78,16 +80,16 @@ enum sapp_event_type { SAPP_EVENTTYPE_UNFOCUSED, SAPP_EVENTTYPE_SUSPENDED,
     SAPP_EVENTTYPE_ICONIFIED, SAPP_EVENTTYPE_RESUMED, SAPP_EVENTTYPE_RESTORED };
 struct sapp_window { unsigned id; };
 struct sapp_tc_window_metadata {
-    int fb_width=0, fb_height=0, sample_count=0, color_format=0, depth_format=0;
+    int fb_width=0, fb_height=0, width=0, height=0, sample_count=0, color_format=0, depth_format=0;
     float dpi_scale=1;
     double source_interval=0;
     bool trust_hidden_signals=false, iconified=false, occluded=false, drawable_available=false;
 };
 struct WindowContext {
-    bool isMain=true, pauseUpdatesWhenHidden=false, suspended=false, visibilityPaused=false, mainUpdateCallTimeInitialized=true;
+    bool isMain=true, pauseUpdatesWhenHidden=false, suspended=false, lifecycleSuspended=false, visibilityPaused=false, mainUpdateCallTimeInitialized=true;
 };
 struct Window {
-    struct { sapp_tc_window_metadata metadata; } binding_;
+    struct { sapp_tc_window_metadata metadata; sapp_window handle{1}; bool lastDeliveredHidden=false,visibilityReady=false; } binding_;
     WindowContext ctx;
     int dispatchDepth_=0;
     bool isOpen() const { return true; }
@@ -121,8 +123,26 @@ void publishWindowMetadata(Window& w, const sapp_tc_window_metadata& m) {
 }
 ''' + body(runtime, 'void refreshMainWindowMetadata()') + r'''
 ''' + body(runtime, 'bool refreshWindowEntryMetadata(') + '\n' + body(global_source, 'static bool occlusionPausesUpdate(') + '\n' + body(global_source, 'static bool nativeSuspensionPausesUpdate(') + '\n' + body(global_source, 'void observeWindowVisibility(').replace('openWindows()', 'windows()') + r'''
+enum class VisibilityDelivery { Drop, RawOnly, RawThenTyped };
+struct sapp_event {
+    sapp_event_type type{}; unsigned window_id=0; uint64_t frame_count=0;
+    float dpi_scale=1; int window_width=0,window_height=0,framebuffer_width=0,framebuffer_height=0;
+};
+uint64_t sapp_frame_count() { return 0; }
+std::vector<int> visibilityTrace;
+''' + body(runtime, 'VisibilityDelivery prepareWindowVisibilityDelivery(') + r'''
+void convertWindowEvent(const sapp_event* event, Window& window) {
+    const auto delivery=prepareWindowVisibilityDelivery(window,event->type);
+    if(delivery==VisibilityDelivery::Drop)return;
+    check("mobile raw listener sees authoritative getter and ctx",window.ctx.suspended==window.isOccluded());
+    visibilityTrace.push_back(event->type);
+    if(delivery==VisibilityDelivery::RawThenTyped)visibilityTrace.push_back(window.isOccluded()?20:40);
+}
+''' + body(runtime, 'void deliverPendingWindowVisibilityAtReadyEntry(') + r'''
 void _sapp_tc_android_app_event(sapp_event_type type) {
     refreshMainWindowMetadata(); observeWindowVisibility(owner.ctx,type);
+    sapp_event event{};event.type=type;convertWindowEvent(&event,owner);
+    deliverPendingWindowVisibilityAtReadyEntry(owner);
 }
 #define _SAPP_INFO(x) ((void)0)
 enum { _SOKOL_ANDROID_MSG_RESUME, _SOKOL_ANDROID_MSG_PAUSE,
@@ -138,9 +158,12 @@ void frame(bool hidden) {
     check("single-window frame refreshes native observation", queries==before+1);
     check("frame getter and suspension follow current native lifecycle/focus", owner.isOccluded()==hidden && owner.ctx.suspended==hidden);
     check("mobile hidden state still pauses native updates", nativeSuspensionPausesUpdate());
+    deliverPendingWindowVisibilityAtReadyEntry(owner);
 }
 void run() {
-    message(_SOKOL_ANDROID_MSG_RESUME); message(_SOKOL_ANDROID_MSG_FOCUS); frame(false);
+    message(_SOKOL_ANDROID_MSG_RESUME);
+    check("lifecycle-first ready entry sends a matching hidden pair",visibilityTrace==std::vector<int>{SAPP_EVENTTYPE_RESUMED,SAPP_EVENTTYPE_SUSPENDED,20});
+    message(_SOKOL_ANDROID_MSG_FOCUS); frame(false);
     message(_SOKOL_ANDROID_MSG_PAUSE); message(_SOKOL_ANDROID_MSG_NO_FOCUS); frame(true);
     message(_SOKOL_ANDROID_MSG_RESUME);
     check("resume before focus retains current hidden native snapshot", owner.isOccluded());
@@ -149,16 +172,45 @@ void run() {
     frame(false);
     message(_SOKOL_ANDROID_MSG_PAUSE); frame(true); // focus alone must not erase pause
     message(_SOKOL_ANDROID_MSG_RESUME); frame(false);
+    visibilityTrace.clear();
+    message(_SOKOL_ANDROID_MSG_PAUSE);message(_SOKOL_ANDROID_MSG_NO_FOCUS);frame(true);
+    message(_SOKOL_ANDROID_MSG_RESUME);frame(true);
+    check("resume before focus does not report visible twice",visibilityTrace==std::vector<int>{SAPP_EVENTTYPE_SUSPENDED,20,SAPP_EVENTTYPE_RESUMED});
+    message(_SOKOL_ANDROID_MSG_FOCUS);frame(false);
+    check("focus snapshot delivers raw then typed visible once",visibilityTrace==std::vector<int>{SAPP_EVENTTYPE_SUSPENDED,20,SAPP_EVENTTYPE_RESUMED,SAPP_EVENTTYPE_RESUMED,40});
+    frame(false);check("repeated focus snapshot is silent",std::count(visibilityTrace.begin(),visibilityTrace.end(),40)==1);
+    visibilityTrace.clear();_sapp_tc_android_app_event(SAPP_EVENTTYPE_SUSPENDED);
+    check("lifecycle notice alone does not imply a visibility change",visibilityTrace==std::vector<int>{SAPP_EVENTTYPE_SUSPENDED}&&!owner.ctx.suspended);
 }
 }
 int main() { mac::run(); mobile::run(); return failures?1:0; }
 '''
+    variants=[('baseline',code)]
+    if os.environ.get('TC_VISIBILITY_LIFECYCLE_MUTATIONS'):
+        edits=[
+            ('single_late_observation', 'if constexpr (supportsSecondaryWindows()) { if (b.visibilityReady) return; }', 'if (b.visibilityReady) return;'),
+            ('lifecycle_snapshot_overwrite', 'ctx.lifecycleSuspended = nativeSuspensionPausesUpdate();', 'ctx.suspended = true; ctx.lifecycleSuspended = nativeSuspensionPausesUpdate();'),
+            ('lifecycle_raw_name_as_visibility', 'if ((type == SAPP_EVENTTYPE_SUSPENDED) != hidden)\n        return supportsSecondaryWindows() ? VisibilityDelivery::Drop : VisibilityDelivery::RawOnly;', '/* wrongly reuse lifecycle raw name */'),
+            ('single_attempt_not_committed', 'binding.lastDeliveredHidden = hidden;', '/* omit attempt commit */'),
+        ]
+        for name,old,new in edits:
+            assert code.count(old)==1,(name,code.count(old))
+            variants.append((name,code.replace(old,new)))
+    results=[]
     with tempfile.TemporaryDirectory(prefix='tc-window-lifecycle-') as folder:
-        source, binary = Path(folder)/'probe.cpp', Path(folder)/'probe'
-        source.write_text(code, encoding='utf-8')
-        subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-Wall', '-Wextra',
-                        str(source), '-o', str(binary)], check=True)
-        subprocess.run([str(binary)], check=True)
+        for name,text in variants:
+            source,binary=Path(folder)/'probe.cpp',Path(folder)/'probe'
+            source.write_text(text,encoding='utf-8')
+            subprocess.run([os.environ.get('CXX','c++'),'-std=c++20','-Wall','-Wextra',str(source),'-o',str(binary)],check=True)
+            r=subprocess.run([str(binary)],capture_output=True,text=True,encoding='utf-8',timeout=15)
+            print(name,r.stdout,flush=True)
+            failed=r.stdout.count(': FAIL')
+            valid=(r.returncode==0 and not failed) if name=='baseline' else (r.returncode==1 and failed>0)
+            results.append(dict(name=name,returncode=r.returncode,failed_assertions=failed,valid=valid))
+    if output:=os.environ.get('TC_VISIBILITY_LIFECYCLE_RESULTS'):
+        import json
+        Path(output).write_text(json.dumps(results,indent=2),encoding='utf-8')
+    if any(not r['valid'] for r in results):raise SystemExit(1)
 
 
 if __name__ == '__main__':

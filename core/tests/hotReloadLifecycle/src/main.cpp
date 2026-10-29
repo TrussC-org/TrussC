@@ -118,6 +118,7 @@
 
 #include "tcApp.h"
 #include "../../common/tcWindowTest.h"
+#include "../../common/tcInjectedWindowTest.h"
 #include "impl/httplib.h"
 
 #ifndef TC_HOT_RELOAD_BUILD
@@ -321,7 +322,7 @@ static int runCycles(const std::string& guestPath, int port) {
     internal::createMainWindow(WindowSettings{});
     internal::prepareMainAppBindings();
     auto* mainHandle = internal::mainWindow();
-    internal::WindowRequestAccess::bindForTests(*mainHandle, 101); // no native window in this mode
+    tcCoreTest::InjectedWindow native(*mainHandle, 101); // virtual native producer through the shared gate
     const auto mainId = internal::WindowRequestAccess::creationId(*mainHandle);
     struct MainOwnerReset { ~MainOwnerReset() { internal::destroyMainWindow(); } } mainOwnerReset;
     const int kCycles = 5;

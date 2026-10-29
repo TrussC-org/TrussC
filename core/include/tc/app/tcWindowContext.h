@@ -26,6 +26,7 @@
 namespace trussc {
 
 class Node;
+class Window;
 class CoreEvents;
 class Shader;          // shader stack holds Shader* (defined in tc/gpu/tcShader.h)
 // 3D types whose state lives per-window (defined later, in the tc/3d headers).
@@ -95,6 +96,25 @@ struct ShadowSlotState {
     float refDot[maxShadowLights]{};
 };
 
+struct WindowContext;
+// One admitted input frame. Nested native delivery installs its own frame;
+// App/tree continuations reuse the admitting frame rather than recapturing it.
+class MouseDispatchScope {
+public:
+    MouseDispatchScope(WindowContext&, int pressButton = -1, bool force = false) noexcept;
+    ~MouseDispatchScope() noexcept;
+    bool current(int button = -1) const noexcept;
+    void trackMotionButtons(int dragButton = -1) noexcept;
+    void beginRecovery(int button) noexcept;
+    MouseDispatchScope(const MouseDispatchScope&) = delete;
+private:
+    WindowContext& ctx_;
+    MouseDispatchScope* previous_;
+    uint64_t epochs_[SAPP_MAX_MOUSEBUTTONS] = {};
+    bool installed_;
+    unsigned int motionButtons_ = 0;
+};
+
 struct WindowContext {
     WindowContext();
     ~WindowContext();
@@ -108,6 +128,8 @@ struct WindowContext {
     WindowContext(const WindowContext&) = delete;
     WindowContext& operator=(const WindowContext&) = delete;
 
+    Window* hostWindow = nullptr;
+
     // --- input state (written by the framework event loop) ---
     float mouseX = 0.0f;
     float mouseY = 0.0f;
@@ -117,6 +139,17 @@ struct WindowContext {
     bool mousePressed = false;
     // Outstanding presses are independent of the legacy current drag button.
     unsigned int pressedMouseButtons = 0;
+    unsigned int snapshotMouseButtons = 0;
+    // Scoped click ownership is consumed at converter entry, before reentrant callbacks.
+    const void* pendingMousePressOwner = nullptr;
+    const void* mousePressOwners[SAPP_MAX_MOUSEBUTTONS] = {};
+    uint64_t mousePressGenerations[SAPP_MAX_MOUSEBUTTONS] = {};
+    MouseDispatchScope* mouseDispatch = nullptr;
+    void admitMousePress(int button) noexcept;
+    bool pointerValid = false;
+    float pointerBasis = 1;
+    double pointerLogicalX = 0, pointerLogicalY = 0;
+    TouchMouseMapper touchMapper;
     // MOUSE_LEAVE parks mouseX/Y offscreen for hover clearing.
     float lastPointerX = 0.0f;
     float lastPointerY = 0.0f;
@@ -169,6 +202,7 @@ struct WindowContext {
     bool pauseUpdatesWhenHidden = false;
     bool drawWhileHidden = true;
     const void* deferredResponseTarget = nullptr;
+    // Published dimensions for bound windows; unbound main/headless reads native.
     int fbWidth = 0;
     int fbHeight = 0;
     float dpiScale = 1.0f;
@@ -188,6 +222,7 @@ struct WindowContext {
     double tickDuration = 0.0;
     bool tickActive = false;
     bool suspended = false;
+    bool lifecycleSuspended = false;
     bool visibilityPaused = false;
     std::chrono::steady_clock::time_point tickTime{};
 
