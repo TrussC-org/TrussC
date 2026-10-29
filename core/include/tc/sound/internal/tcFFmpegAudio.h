@@ -109,8 +109,10 @@ struct FFmpegAudio {
             if (r == 0 || r == AVERROR_EOF) {
                 const bool flush = r == AVERROR_EOF;
                 if (!flush && sourceFormat == AV_SAMPLE_FMT_NONE) sourceFormat = AVSampleFormat(frame->format);
+                // Bound (crash guard): reject changed frame formats before the fixed-input resampler; fail the stream/load cleanly with a Warning.
                 if (!flush && (frame->ch_layout.nb_channels != sourceChannels || frame->sample_rate != sourceRate ||
                         frame->format != sourceFormat || frame->nb_samples < 0)) {
+                    logWarning("FFmpegAudio") << "Audio frame format changed; stopping decode";
                     return MA_INVALID_DATA;
                 }
                 int count = flush ? 0 : frame->nb_samples;

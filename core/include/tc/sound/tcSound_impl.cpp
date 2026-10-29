@@ -88,19 +88,11 @@ bool drainDecoder(ma_decoder& decoder, SoundBuffer& out, internal::AudioDecodeSt
     internal::interleavedSampleCount(stated, int(ch), buf.max_size(), landingSamples);
     uint64_t frames = 0;
     ma_result result = MA_SUCCESS;
-    ma_uint32 nativeChannels = 0, nativeRate = 0;
-    ma_data_source_get_data_format(decoder.pBackend, nullptr, &nativeChannels, &nativeRate, nullptr, 0);
     if (ok) ok = internal::growAudioVector(chunk, size_t(kDecodeChunkFrames) * ch, status);
     if (ok) chunk.resize(size_t(kDecodeChunkFrames) * ch);
     while (ok) {
         ma_uint64 got = 0;
         result = ma_decoder_read_pcm_frames(&decoder, chunk.data(), kDecodeChunkFrames, &got);
-        ma_uint32 currentChannels = 0, currentRate = 0;
-        ma_data_source_get_data_format(decoder.pBackend, nullptr, &currentChannels, &currentRate, nullptr, 0);
-        if (currentChannels != nativeChannels || currentRate != nativeRate) {
-            status.reject("audio format change", currentChannels, nativeChannels);
-            ok = false; break;
-        }
         if (result == MA_OUT_OF_MEMORY) status.failAllocation();
         if (status.rejected || status.allocationFailed || got > kDecodeChunkFrames) { ok = false; break; }
         if (got && !internal::appendAudio(buf, chunk.data(), size_t(got) * ch, status, landingSamples)) { ok = false; break; }

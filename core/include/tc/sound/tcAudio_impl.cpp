@@ -670,9 +670,7 @@ struct StreamInstance {
     static constexpr int    CHANNELS    = 2;              // stereo, hard-coded
                                                           // because that's what
                                                           // the mixer consumes
-    internal::AudioDecodeStatus decodeStatus{true};
     ma_decoder decoder;
-    ma_uint32 nativeChannels = 0, nativeRate = 0;
     bool decoderInitialized = false;
     std::shared_ptr<const Mp3StreamData> mp3Data;
 
@@ -748,7 +746,6 @@ struct StreamInstance {
         const ma_result r = maDecoderInitPathA(src.path_, &cfg, &decoder);
         if (r != MA_SUCCESS) return r;
         decoderInitialized = true;
-        ma_data_source_get_data_format(decoder.pBackend, nullptr, &nativeChannels, &nativeRate, nullptr, 0);
         uint32_t seekPoints = 0;
         if (decoder.pBackendVTable == &g_ma_decoding_backend_vtable_mp3 && decoder.pBackend) {
             mp3Data = src.mp3Data_;
@@ -1013,20 +1010,7 @@ private:
             *read = 0;
             return MA_IO_ERROR;
         }
-        ma_uint32 channels = 0, rate = 0;
-        ma_data_source_get_data_format(s.decoder.pBackend, nullptr, &channels, &rate, nullptr, 0);
-        if (channels != s.nativeChannels || rate != s.nativeRate) {
-            s.decodeStatus.reject("stream format change", channels, s.nativeChannels);
-            *read = 0;
-            return MA_INVALID_DATA;
-        }
         const ma_result r = ma_decoder_read_pcm_frames(&s.decoder, out, frames, read);
-        ma_data_source_get_data_format(s.decoder.pBackend, nullptr, &channels, &rate, nullptr, 0);
-        if (s.decodeStatus.rejected || channels != s.nativeChannels || rate != s.nativeRate) {
-            s.decodeStatus.reject("stream format change", channels, s.nativeChannels);
-            *read = 0;
-            return MA_INVALID_DATA;
-        }
         if (fault == (int)internal::StreamFaultForTests::ReadFailsWithFrames && *read > 0) {
             return MA_IO_ERROR;
         }
