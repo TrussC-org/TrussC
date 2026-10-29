@@ -4704,8 +4704,11 @@ WindowSettings & WindowSettings::setClipboardSize(int size)  // Sets the clipboa
 WindowSettings & WindowSettings::setDecorated(bool enabled)  // Sets whether the window displays its frame and title bar.
 WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Sets whether the main window starts in fullscreen.
 WindowSettings & WindowSettings::setHighDpi(bool enabled)  // Sets whether rendering uses the display's high pixel density.
+WindowSettings & WindowSettings::setPipelinePoolSize(int count)  // Sets the startup pipeline pool slot count.
 WindowSettings & WindowSettings::setPixelPerfect(bool enabled)  // Sets whether window coordinates use framebuffer pixels.
+WindowSettings & WindowSettings::setResourcePoolSize(int count)  // Sets the startup slot count for each resource pool.
 WindowSettings & WindowSettings::setSampleCount(int count)  // Sets the window's MSAA sample count.
+WindowSettings & WindowSettings::setShaderPoolSize(int count)  // Sets the startup shader pool slot count.
 WindowSettings & WindowSettings::setSize(int w, int h)  // Sets the initial window dimensions.
 WindowSettings & WindowSettings::setSwapInterval(int interval)  // Sets the requested VSync presentation interval.
 WindowSettings & WindowSettings::setTitle(const std::string & t)  // Sets the initial window title.

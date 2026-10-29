@@ -1,0 +1,4 @@
+{test} --gpu-check
+{test} --large-check
+{test} --zero-check
+{test} --negative-check

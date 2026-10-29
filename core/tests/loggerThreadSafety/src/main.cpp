@@ -421,7 +421,8 @@ static void testSokolBridge() {
         EventListener l = lg.onLog.listen([&](LogEventArgs& e) { seen.push_back({e.level, e.message}); });
         internal::sokolLog("sg", 1, 12, nullptr, 345, nullptr, nullptr);
         internal::sokolLog("sapp", 2, 7, "warned", 10, "sokol_app.h", nullptr);
-        internal::sokolLog("sgl", 3, 3, "info message", 11, nullptr, nullptr);
+        // Use an informational item: ID 3 is pipeline-pool exhaustion.
+        internal::sokolLog("sgl", 3, SGL_LOGITEM_CONTEXT_POOL_GROWN, "info message", 11, nullptr, nullptr);
         internal::sokolLog("simgui", 1, 5, "imgui error", 12, nullptr, nullptr);
     }
     lg.closeFile();

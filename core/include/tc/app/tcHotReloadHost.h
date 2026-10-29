@@ -658,6 +658,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
 
     // Build the sokol descriptor (without template — we handle App* manually)
     internal::pixelPerfectMode() = settings.pixelPerfect;
+    internal::configureGraphicsPools(settings);
 
     sapp_desc desc = {};
     if (settings.pixelPerfect) {
