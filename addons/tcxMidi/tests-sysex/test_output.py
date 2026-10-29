@@ -2,7 +2,7 @@
 """Run the production ALSA output with a fake sequencer and real event encoder.
 
 Usage (through tcbuild.sh): test_output.py PATCHED_LIBREMIDI NEW_SCRATCH_DIR
-The only include overlay replaces dlsym at the driver boundary. No device needed.
+Include overlays replace dlsym and count sleep requests. No device needed.
 """
 from pathlib import Path
 import subprocess
@@ -22,7 +22,15 @@ def main():
     overlay.write_text(contents, encoding="utf-8")
     test = Path(__file__).parent / "host/alsa_output.cpp"
 
-    def run(label, failure=None):
+    output = source / "include/libremidi/backends/alsa_seq/midi_out.hpp"
+    patched = output.read_text(encoding="utf-8")
+    target = work / "include/libremidi/backends/alsa_seq/midi_out.hpp"
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    def run(label, failure=None, contents=patched):
+        # Count requested waits at the sleep boundary; never assert elapsed time.
+        target.write_text(contents.replace("std::this_thread::sleep_for(", "alsaTestSleep("),
+                          encoding="utf-8")
         binary = work / label
         command = ["c++", "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror",
                    "-DLIBREMIDI_NO_BOOST", "-I" + str(work / "include"),
@@ -39,14 +47,9 @@ def main():
             print(result.stdout, end="", flush=True)
 
     run("baseline")
-    output = source / "include/libremidi/backends/alsa_seq/midi_out.hpp"
-    patched = output.read_text(encoding="utf-8")
     patch = (Path(__file__).parents[1] / "cmake/PatchLibremidi.cmake").read_text(encoding="utf-8")
-    original = patch.split('if(hash4 STREQUAL original4)', 1)[1].split('string(REPLACE [==[', 1)[1].split(']==]', 1)[0]
-    target = work / "include/libremidi/backends/alsa_seq/midi_out.hpp"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(original, encoding="utf-8")
-    run("replacement_removed", failure="real encoder splits reported-size SysEx")
+    original = patch.split('if(hash0 STREQUAL original0)', 1)[1].split('string(REPLACE [==[', 1)[1].split(']==]', 1)[0]
+    run("replacement_removed", failure="real encoder splits reported-size SysEx", contents=original)
     for name, before, after, failure in [
         ("supplied_mode_changed", "    if (!drop_output)",
          '    snd.library.symbol<decltype(&::snd_seq_nonblock)>("snd_seq_nonblock")(this->seq, 1);\n'
@@ -68,8 +71,7 @@ def main():
          "    std::size_t offset = 0;", "shared duplex output never reads unrelated input"),
     ]:
         assert patched.count(before) == 1
-        target.write_text(patched.replace(before, after), encoding="utf-8")
-        run(name, failure=failure)
+        run(name, failure=failure, contents=patched.replace(before, after))
 
 
 if __name__ == "__main__":

@@ -50,7 +50,7 @@ int alsaRoundtrip(bool requireDevice) {
         }
     }
     if (!connected) return 1;
-    // Test the reported size plus the largest logical message #957 admits.
+    // Test the two original #992 regression sizes.
     std::vector<unsigned char> first(1048577), second(1048576);
     for (size_t i = 0; i < first.size(); ++i) first[i] = static_cast<unsigned char>((i * 37 + i / 128) % 128);
     for (size_t i = 0; i < second.size(); ++i) second[i] = static_cast<unsigned char>((i * 53 + i / 127) % 128);

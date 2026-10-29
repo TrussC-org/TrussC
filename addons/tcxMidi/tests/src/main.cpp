@@ -119,54 +119,6 @@ void inputLifecycle() {
         check(calls == 1, "late callback after teardown drops safely");
     }
     libremidi::test::inputCallback = {};
-    int sysexWarnings = 0;
-    bool safeThread = true;
-    auto diagnosticListener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
-        if (event.level == tc::LogLevel::Warning &&
-            event.message.find("SysEx assembly") != std::string::npos) {
-            ++sysexWarnings;
-            safeThread &= std::this_thread::get_id() == mainThread;
-        }
-    });
-    MidiIn diagnostics;
-    check(diagnostics.openVirtualPort("diagnostics"), "open for SysEx diagnostics");
-    std::thread overflow([&] {
-        for (int i = 0; i < 10; ++i) libremidi::test::sysexOverflow(1048577);
-    });
-    overflow.join();
-    check(sysexWarnings == 0, "SysEx reporting never logs on the backend thread");
-#if !defined(__EMSCRIPTEN__)
-    check(tc::internal::mainThreadQueue().size() == 0 &&
-          tc::internal::countQueuedMainThreadSlots() == 1,
-          "first SysEx loss posts one slot without a queued closure");
-#endif
-    diagnostics.closePort();
-    check(diagnostics.openVirtualPort("replacement diagnostics"), "reopen for SysEx diagnostics");
-    std::thread moreOverflow([&] { libremidi::test::sysexOverflow(1048577); });
-    moreOverflow.join();
-    tc::internal::drainMainThreadQueue();
-    check(sysexWarnings == 1 && safeThread, "SysEx store warns once without polling across close/reopen");
-    check(diagnostics.getDroppedMessageCount() == 0, "SysEx losses do not change polling message count");
-    std::thread laterOverflow([&] { libremidi::test::sysexOverflow(1048578); });
-    laterOverflow.join();
-    tc::internal::drainMainThreadQueue();
-    check(sysexWarnings == 1, "later SysEx losses do not repeat the Warning");
-    {
-        MidiIn retired;
-        check(retired.openVirtualPort("retired diagnostics"), "open for pending SysEx teardown");
-        std::thread worker([&] { libremidi::test::sysexOverflow(1048577); });
-        worker.join();
-    }
-    // The mock retains configuration callbacks independently of its backend.
-    libremidi::test::sysexOverflow = {};
-    libremidi::test::inputCallback = {};
-    tc::internal::drainMainThreadQueue();
-    check(sysexWarnings == 2 && safeThread, "pending SysEx Warning survives input destruction without polling");
-#if !defined(__EMSCRIPTEN__)
-    check(tc::internal::mainThreadQueue().size() == 0 &&
-          tc::internal::countQueuedMainThreadSlots() == 0,
-          "SysEx reporting leaves no work after delivery");
-#endif
 
 }
 }

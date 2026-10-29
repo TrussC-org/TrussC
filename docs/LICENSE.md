@@ -339,10 +339,8 @@ THIS SOFTWARE.
 
 libremidi's own code is under the BSD 2-Clause License (Copyright (c) 2017-2023, Jean-Michaël Celerier & the libremidi contributors). It is derived from RtMidi (MIT) and ModernMidi (BSD 2-Clause). Full text: [LICENSE.md](https://github.com/celtera/libremidi/blob/master/LICENSE.md).
 
-TrussC applies local patches to 5.4.3 for bounded SysEx assembly, stray-EOX
-suppression, borrowed-byte ALSA receive, WinMM receive-loss reporting, and
-256-byte ALSA output chunks with bounded drain retries and synchronous SysEx
-pacing;
+TrussC applies a local patch to 5.4.3 for 256-byte ALSA output chunks with
+bounded drain retries and synchronous SysEx pacing;
 see [LIBREMIDI_TRUSSC_MODIFICATIONS.md](../addons/tcxMidi/LIBREMIDI_TRUSSC_MODIFICATIONS.md)
 for the changes and upgrade procedure.
 
