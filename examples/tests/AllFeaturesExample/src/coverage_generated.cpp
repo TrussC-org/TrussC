@@ -3679,6 +3679,9 @@ struct Cover_TcpServer : af::Scope<TcpServer> {
         (void)af::val<TcpServer>().sendAsync(af::val<int>(), af::val<const std::string>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+        (void)af::val<TcpServer>().setBindAddress(af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().setReceiveBufferSize(af::val<size_t>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
@@ -3955,6 +3958,9 @@ struct Cover_UdpSocket : af::Scope<UdpSocket> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().sendTo(af::val<const std::string>(), af::val<int>(), af::val<const void *>(), af::val<size_t>());
         (void)af::val<UdpSocket>().sendTo(af::val<const std::string>(), af::val<int>(), af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<UdpSocket>().setBindAddress(af::val<const std::string>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().setBroadcast(af::val<bool>());

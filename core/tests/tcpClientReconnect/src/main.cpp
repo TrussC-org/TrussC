@@ -1137,6 +1137,7 @@ static void scenario() {
 namespace {
 void asyncReceiveReconnect() {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     check("daily async fixture starts", server.start(0));
     TcpClient client;
     atomic<int> receives{0};

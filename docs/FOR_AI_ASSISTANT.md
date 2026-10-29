@@ -11,9 +11,22 @@
   and topic guides, so you don't need to load this whole file into context:
       git clone https://github.com/TrussC-org/trussc-dev-skill.git ~/.claude/skills/trussc-dev
   (Codex: clone into ~/.codex/skills/trussc-dev)
+  Any AI tool that speaks MCP can also connect the TrussC docs search server
+  (beta, Streamable HTTP) at https://api.trussc.org/mcp — Claude Code:
+      claude mcp add --transport http --scope user trussc-docs https://api.trussc.org/mcp
 -->
 
 You are a coding assistant for the TrussC framework.
+When a `trussc_api_details.txt` reference file is available, look up an entry's `## <id>` section there for its details and code examples.
+
+## Docs search (MCP, beta)
+If the `trussc_search` tool is available (the TrussC docs MCP server at `https://api.trussc.org/mcp`), use it whenever you need TrussC knowledge: which API to use, how something behaves, examples, addons.
+- Ask freely, in English or Japanese. A plain question works, and so does describing what the user wants to make; you don't need the exact API name.
+- Every result, and every line under "Other possibly related", carries an id tag like `[#symbol:Sound::play]`. Pass the id without the `#` (`symbol:Sound::play`) to `trussc_get` to read a cut-short example in full or to open a related card.
+- The search covers the TrussC `main` API, guides, examples, release notes, known open bugs and the registered addons. It can lag behind the newest commits.
+- It is a beta service. If it is busy, rate-limited (HTTP 429) or down, don't keep retrying: look things up yourself in the normal docs instead — the API index in this file, https://trussc.org/reference/, and the headers in the TrussC repo.
+- Queries are logged to improve search, kept for about six months and then deleted. Query text is sent to Jev (typesafe.ai) to select documentation; IP addresses are not sent.
+- Never put personal information, passwords or other secrets, or private code in a query.
 
 ## About TrussC
 - Lightweight creative coding framework based on sokol
@@ -3878,7 +3891,7 @@ int ScreenRecorder::getFrameCount() const [macos,windows,linux,android,ios]  // 
 fs::path ScreenRecorder::getPath() const [macos,windows,linux,android,ios]  // Returns the recording's output path.
 uint64_t ScreenRecorder::getRejectedFrameCount() const [macos,windows,linux,android,ios]  // Returns the number of frames rejected during capture or layout validation.
 bool ScreenRecorder::isRecording() const [macos,windows,linux,android,ios]  // Returns whether the recorder is capturing frames.
-SaveResult ScreenRecorder::start(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start live capture of the originating window or an Fbo at its actual pixel size at start. The take keeps fixed encoder dimensions and stays open across source resizes: mismatched frames are skipped before copying and counted by getRejectedFrameCount(), and recording resumes when the original size returns. stop() finalizes the take. One capture/encode operation may be pending: busy opportunities are counted and skipped while wall/audio PTS gaps are preserved. Calling start finalizes the previous take first and refuses replacement while an old operation remains pending. Destroying the source Fbo stops/finalizes automatically. Returns SaveResult for path preparation and encoder opening; check stop() for finalization.
+SaveResult ScreenRecorder::start(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Starts recording the window or an Fbo to a video file.
 SaveResult ScreenRecorder::stop() [macos,windows,linux,android,ios]  // Stops capturing and finalizes the recording file.
 VideoWriter & ScreenRecorder::writer() [macos,windows,linux,android,ios]  // Returns access to the recorder's underlying video writer.
 ```
@@ -4194,6 +4207,7 @@ size_t TcpServer::getSendAsyncPendingBytes(int clientId) const [macos,windows,li
 bool TcpServer::isRunning() const [macos,windows,linux,android]  // Returns whether the server is running.
 bool TcpServer::send(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Sends data to a specified client.
 SendResult TcpServer::sendAsync(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Queues data for a specified client.
+void TcpServer::setBindAddress(const std::string & address) [macos,windows,linux,android]  // Chooses the local IPv4 address for TCP connections.
 void TcpServer::setReceiveBufferSize(size_t size) [macos,windows,linux,android]  // Sets the client receive buffer size.
 void TcpServer::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android]  // Sets the per-client send high-water mark.
 void TcpServer::setSendItemLimit(size_t bytes) [macos,windows,linux,android]  // Sets the maximum owned send payload capacity.
@@ -4400,6 +4414,7 @@ void UdpSocket::processNetwork() [macos,windows,linux,android,ios]  // Processes
 int UdpSocket::receive(void * buffer, size_t bufferSize) [+1] [macos,windows,linux,android,ios]  // Receives one UDP datagram into a buffer.
 bool UdpSocket::send(const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to the configured destination.
 bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to a specified host and port.
+void UdpSocket::setBindAddress(const std::string & address) [macos,windows,linux,android,ios]  // Chooses the local IPv4 address for receiving UDP datagrams.
 bool UdpSocket::setBroadcast(bool enable) [macos,windows,linux,android,ios]  // Enables or disables UDP broadcast sending.
 bool UdpSocket::setMulticastInterface(const std::string & interfaceAddr) [macos,windows,linux,android,ios]  // Selects the outgoing IPv4 multicast interface.
 bool UdpSocket::setMulticastLoopback(bool enable) [macos,windows,linux,android,ios]  // Controls local loopback of outgoing multicast datagrams.
@@ -5199,6 +5214,7 @@ Sound sfx = bundle.build();
 20. **`setBlendMode()` inside a 3D scene kills depth — restore it with `enableDepthTest()`.** Every blend pipeline (Alpha, Add, even Disabled) has depth write/test OFF by default; only the 3D pipeline (screen setup / `EasyCam::begin()`) writes depth. Geometry then renders in submission order (e.g. a box's unlit bottom face overwrites its lit front face). Call `tc::enableDepthTest()` after the blend-mode change to restore depth (LESS_EQUAL + depth write, same as the 3D pipeline) for all subsequent draws; it persists like the blend mode (across frames and Fbo passes) until `disableDepthTest()` — call that before 2D overlays (HUD, text) so they draw on top. Query with `isDepthTestEnabled()`.
 21. **IBL no-ops on iOS Safari (wasm).** `Environment::loadProcedural()`/`loadFromHDR()` return false on iOS web (the cube-face bake breaks the canvas swapchain there); PBR falls back to flat hemisphere ambient + direct lights. Don't rely on IBL reflections for cross-platform looks if you target iOS web. Native, desktop web, and Android web are unaffected.
 22. **Don't hand-parse JSON/XML.** `tc::Json` (nlohmann) and `tc::Xml` (pugixml) are bundled and included via `<TrussC.h>` — use `loadJson`/`parseJson`/`loadXml`/`parseXml`.
+23. **Move things with `getDeltaTime()` / `getElapsedTime()`, not a fixed step per frame.** The frame rate follows the monitor (60/120/144 Hz, or 30 on some external displays), so `x += 2` runs at different speeds on different screens; `x += speed * getDeltaTime()` does not.
 
 ## Code Examples
 

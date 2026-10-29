@@ -196,6 +196,10 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
         t["message"] = &trussc::TcpConnectEventArgs::message;
         t["success"] = &trussc::TcpConnectEventArgs::success;
     }
+    {
+        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
+        t["text"] = &trussc::ClipboardPastedEventArgs::text;
+    }
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

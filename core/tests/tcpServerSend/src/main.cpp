@@ -182,6 +182,7 @@ TC_CORE_TEST_MAIN() {
     g_phase = "a send parked behind a non-reading peer";
 
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     if (!server.start(0, 8)) {
         printf("could not start server\n");
         return 1;
@@ -193,6 +194,7 @@ TC_CORE_TEST_MAIN() {
     // Concurrent listeners must each get their own usable port.
     {
         TcpServer other;
+        other.setBindAddress("127.0.0.1");
         const bool started = other.start(0);
         check("another start(0) gets a distinct positive port",
               started && other.getPort() > 0 && other.getPort() != port);
@@ -339,6 +341,7 @@ TC_CORE_TEST_MAIN() {
     g_phase = "an onError listener disconnecting its own client";
     {
         TcpServer s2;
+        s2.setBindAddress("127.0.0.1");
         if (!s2.start(0, 8)) { printf("could not start second server\n"); bail(); }
         const int port2 = s2.getPort();
         s2.setSendTimeout(0.5f);
@@ -433,6 +436,7 @@ TC_CORE_TEST_MAIN() {
     // for the offence of being on a slow link with a big payload.
     {
         TcpServer s3;
+        s3.setBindAddress("127.0.0.1");
         if (!s3.start(0, 8)) { printf("could not start third server\n"); bail(); }
         const int port3 = s3.getPort();
         s3.setSendTimeout(1.0f);
@@ -513,6 +517,7 @@ TC_CORE_TEST_MAIN() {
     // listener can be well into its 600 ms before stop() even starts.
     {
         TcpServer s5;
+        s5.setBindAddress("127.0.0.1");
         if (!s5.start(0, 8)) { printf("could not start fifth server\n"); bail(); }
         const int port5 = s5.getPort();
 
@@ -569,6 +574,7 @@ TC_CORE_TEST_MAIN() {
     // the queue still full.
     {
         TcpServer s6;
+        s6.setBindAddress("127.0.0.1");
         if (!s6.start(0, 8)) { printf("could not start sixth server\n"); bail(); }
         const int port6 = s6.getPort();
 
@@ -672,6 +678,7 @@ TC_CORE_TEST_MAIN() {
     // socket would overtake everything already queued ahead of it.
     {
         TcpServer s7;
+        s7.setBindAddress("127.0.0.1");
         if (!s7.start(0, 8)) { printf("could not start seventh server\n"); bail(); }
         const int port7 = s7.getPort();
 
@@ -745,6 +752,7 @@ TC_CORE_TEST_MAIN() {
     // send after it fills is the one that gets nothing through.
     {
         TcpServer s8;
+        s8.setBindAddress("127.0.0.1");
         if (!s8.start(0, 8)) { printf("could not start eighth server\n"); bail(); }
         const int port8 = s8.getPort();
         s8.setSendTimeout(0.5f);                  // short, so this does not take a minute
@@ -808,6 +816,7 @@ TC_CORE_TEST_MAIN() {
         const bool ok = completesWithin(30000, [&] {
             for (int round = 0; round < 20; ++round) {
                 TcpServer s4;
+                s4.setBindAddress("127.0.0.1");
                 if (!s4.start(0, 8)) return;
                 const int port4 = s4.getPort();
 

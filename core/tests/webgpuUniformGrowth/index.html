@@ -1,0 +1,23 @@
+<!doctype html><meta charset="utf-8"><title>WebGPU uniform growth</title>
+<pre id="verdict">RUNNING</pre>
+<script>
+var Module = {
+    print: text => { console.log(text); if (text.startsWith('WEBGPU_UNIFORM_GROWTH:')) document.querySelector('#verdict').textContent = Module.webgpuValidationErrors ? 'WEBGPU_UNIFORM_GROWTH: FAIL WebGPU validation' : text; },
+    printErr: text => console.error(text),
+    onAbort: text => { document.querySelector('#verdict').textContent = 'WEBGPU_UNIFORM_GROWTH: FAIL ' + text; }
+};
+(async () => {
+    try {
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) throw Error('no WebGPU adapter');
+        Module.preinitializedWebGPUDevice = await adapter.requestDevice();
+        Module.preinitializedWebGPUDevice.addEventListener('uncapturederror', e => {
+            Module.webgpuValidationErrors = (Module.webgpuValidationErrors || 0) + 1;
+            console.error(e.error.message);
+            document.querySelector('#verdict').textContent = 'WEBGPU_UNIFORM_GROWTH: FAIL WebGPU validation: ' + e.error.message;
+        });
+        const script = document.createElement('script');
+        script.src = 'webgpuUniformGrowth.js'; document.body.appendChild(script);
+    } catch (error) { document.querySelector('#verdict').textContent = 'WEBGPU_UNIFORM_GROWTH: FAIL ' + error; }
+})();
+</script>

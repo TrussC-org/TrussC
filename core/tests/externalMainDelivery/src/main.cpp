@@ -335,6 +335,7 @@ void overflowReconnect() {
 
 void tcpOverflow(bool serverSide) {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     server.setReceiveBufferSize(1);
     check("TCP server starts", server.start(0));
     TcpClient client;

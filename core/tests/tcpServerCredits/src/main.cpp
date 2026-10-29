@@ -140,6 +140,7 @@ struct Warnings {
 };
 void connectionBounds() {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     Warnings warnings;
     check("zero and negative client configurations fail", !server.start(0, 0) && !server.start(0, -1));
     require("default server starts", server.start(0));
@@ -195,6 +196,7 @@ void connectionBounds() {
 
 void sendCredits() {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     Warnings warnings;
     require("send-credit server starts", server.start(0, 4));
     vector<TestSocket> peers;
@@ -266,6 +268,7 @@ void sendCredits() {
 }
 void broadcastAndSync() {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     require("broadcast fixture starts", server.start(0, 2));
     auto first = peer(server.getPort()), second = peer(server.getPort());
     require("broadcast peers registered", until([&] { return server.getClientCount() == 2; }));
@@ -337,6 +340,7 @@ void broadcastAndSync() {
 
 void slowSockets() {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     server.setSendTimeout(0.01f);
     require("slow socket fixture starts", server.start(0, 4));
     vector<TestSocket> peers;
@@ -361,6 +365,7 @@ void slowSockets() {
 }
 void borrowedStream() {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     require("borrowed stream fixture starts", server.start(0, 1));
     auto fd = peer(server.getPort());
     require("borrowed stream peer registers", until([&] { return server.getClientCount() == 1; }));
@@ -403,6 +408,7 @@ void borrowedStream() {
 
 void rejectionListenerCanStop() {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     require("reentrant Warning fixture starts", server.start(0, 1));
     auto fd = peer(server.getPort());
     require("reentrant Warning peer registers", until([&] { return server.getClientCount() == 1; }));
@@ -418,6 +424,7 @@ void rejectionListenerCanStop() {
 
 void exceptionalAsyncReports(bool throwingListener) {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     server.setSendAsyncBufferSize(1);
     server.setTotalSendBufferSize(2);
     require("exceptional fanout starts", server.start(0, 4));
@@ -470,6 +477,7 @@ void exceptionalAsyncReports(bool throwingListener) {
 
 void exceptionalSyncReports(bool throwingListener) {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     server.setTotalSendBufferSize(1);
     require("exceptional sync broadcast starts", server.start(0, 3));
     vector<TestSocket> peers;
@@ -514,6 +522,7 @@ void exceptionalSyncReports(bool throwingListener) {
 
 void fanoutWarningCanSend(bool fromReceive) {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     server.setTotalSendBufferSize(1);
     require("fanout reentrant fixture starts", server.start(0, 2));
     auto first = peer(server.getPort()), second = peer(server.getPort());
@@ -572,6 +581,7 @@ void callbackAdmission(CallbackPressure pressure, bool syncCompletion = false, b
     const bool freeCredits = pressure == CallbackPressure::None;
     const bool destinationWait = entryPressure || highWater;
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     Warnings warnings;
     server.setTotalSendBufferSize(1);
     if (highWater) server.setSendAsyncBufferSize(1);
@@ -637,6 +647,7 @@ void callbackAdmission(CallbackPressure pressure, bool syncCompletion = false, b
 
 void receiveCallbackWaits(CallbackPressure pressure) {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     Warnings warnings;
     server.setTotalSendBufferSize(1);
     if (pressure == CallbackPressure::HighWater) server.setSendAsyncBufferSize(1);
@@ -677,6 +688,8 @@ void receiveCallbackWaits(CallbackPressure pressure) {
 
 void crossServerWriterAdmission() {
     TcpServer source, destination;
+    source.setBindAddress("127.0.0.1");
+    destination.setBindAddress("127.0.0.1");
     Warnings warnings;
     destination.setTotalSendBufferSize(1);
     require("cross-server source starts", source.start(0, 1));
@@ -715,6 +728,7 @@ void crossServerWriterAdmission() {
 
 void errorCallbackAdmission(bool queuedCredit) {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     Warnings warnings;
     server.setTotalSendBufferSize(queuedCredit ? 2 : 1);
     require("error callback server starts", server.start(0, 2));
@@ -753,6 +767,7 @@ void errorCallbackAdmission(bool queuedCredit) {
 
 void disconnectedCompletionAdmission() {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     Warnings warnings;
     server.setTotalSendBufferSize(1);
     require("disconnected completion server starts", server.start(0, 2));
@@ -787,6 +802,7 @@ void disconnectedCompletionAdmission() {
 
 void saturatedRejections() {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     Warnings warnings;
     const auto maximum = (numeric_limits<uint64_t>::max)();
     // Issue each lifetime Warning before moving its total near overflow. A

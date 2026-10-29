@@ -3,6 +3,7 @@
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
 #include <condition_variable>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <mutex>
@@ -342,6 +343,27 @@ struct Logs {
         lock_guard<mutex> held(lock); lines.push_back(to_string((int)e.level) + ":" + e.message);
     });
 };
+// AAC platform decoders may choose SIMD paths by buffer alignment, differing by about 1 ULP.
+constexpr double kAacPcmTolerance = 1e-6;
+bool samePcm(const vector<float>& expected, const vector<float>& actual, const char* name) {
+    const double tolerance = string(name) == "valid.m4a" ? kAacPcmTolerance : 0.0;
+    const size_t count = expected.size();
+    size_t firstDifference = count;
+    double maxDifference = 0.0;
+    for (size_t i = 0; i < count && i < actual.size(); ++i) {
+        const double difference = std::abs(double(expected[i]) - double(actual[i]));
+        if (!(difference <= tolerance) && firstDifference == count) firstDifference = i;
+        if (difference > maxDifference) maxDifference = difference;
+    }
+    if (count != actual.size() && firstDifference == count)
+        firstDifference = count < actual.size() ? count : actual.size();
+    if (count != actual.size() || firstDifference != count) {
+        printf("%s PCM mismatch: first differing index=%zu, max absolute difference=%.9g, sample count=%zu (async=%zu)\n",
+               name, firstDifference, maxDifference, count, actual.size());
+        return false;
+    }
+    return true;
+}
 void parity() {
     for (const fs::path& path : {png, broken, fixtureDir / "missing.png"}) {
         Image sync, async; sync.load(png); async.load(png);
@@ -373,8 +395,9 @@ void parity() {
         { Logs logs; expected = sync.load(path); syncLogs = logs.lines; }
         auto listener = async.onLoad.listen([&](LoadResult& r) { actual = r; });
         { Logs logs; async.loadAsync(path); finish(); asyncLogs = logs.lines; }
+        const bool pcmMatches = samePcm(sync.samples, async.samples, clip.name);
         check("Sound format success has identical result/logs/PCM/metadata/path", expected && sameResult(expected, actual) && syncLogs == asyncLogs &&
-              sync.samples == async.samples && sync.channels == async.channels && sync.sampleRate == async.sampleRate &&
+              pcmMatches && sync.channels == async.channels && sync.sampleRate == async.sampleRate &&
               sync.numSamples == async.numSamples && sync.getPath() == async.getPath());
     }
     for (auto ext : {"wav", "ogg", "mp3", "flac", "aac", "m4a", "xyz"}) {
