@@ -46548,29 +46548,34 @@ platform_note.ko = '''
 category = "window_system"
 keywords = ["wake lock", "no sleep", "stay awake", "awake"]
 description.en = "Returns the keep-screen-on setting."
-description.ja = "画面のスリープ抑止設定を返す。"
-description.ko = "화면 절전 방지 설정을 반환한다."
+description.ja = "画面のスリープ抑止設定を返します。"
+description.ko = "화면 절전 방지 설정을 반환합니다."
 details.en = '''
-- Returns the state stored by `setKeepScreenOn`, initially false; it does not query the OS sleep state.
-- macOS reports true only after successfully creating the display-sleep assertion. Windows, Android and iOS store the requested value even if applying it fails or has not completed.
+- Returns the state stored by `setKeepScreenOn`, initially false. It does not check whether the display or screen saver is actually inhibited. See `setKeepScreenOn` for each OS's limits.
+- Linux, Windows, Web, Android and iOS store the requested value even if applying it fails or has not completed. macOS reports true only after creating its display-sleep assertion successfully.
 '''
 details.ja = '''
-- `setKeepScreenOn` が保存した状態を返し、初期値は false です。OS のスリープ状態は調べません。
-- macOS は画面スリープの抑止要求の作成に成功した場合にのみ true になります。Windows、Android、iOS は、適用に失敗した場合や適用がまだ完了していない場合でも、要求された値を保存します。
+- `setKeepScreenOn` が保存した状態を返し、初期値は false です。実際に画面スリープやスクリーンセーバーを抑止できているかは調べません。OS ごとの制限は `setKeepScreenOn` を参照します。
+- Linux、Windows、Web、Android、iOS は、適用に失敗した場合や適用がまだ完了していない場合でも、要求された値を保存します。macOS は画面スリープの抑止要求の作成に成功した場合にのみ true になります。
 '''
 details.ko = '''
-- `setKeepScreenOn`이 저장한 상태를 반환하며 초기값은 false입니다. OS의 절전 상태를 조회하지 않습니다.
-- macOS는 화면 절전 방지 요청을 성공적으로 생성한 경우에만 true가 됩니다. Windows, Android, iOS는 적용이 실패하거나 아직 완료되지 않았어도 요청한 값을 저장합니다.
+- `setKeepScreenOn`이 저장한 상태를 반환하며 초기값은 false입니다. 실제로 화면 절전이나 화면 보호기를 막고 있는지는 확인하지 않습니다. OS별 제한은 `setKeepScreenOn`에서 설명합니다.
+- Linux, Windows, Web, Android, iOS는 적용이 실패하거나 아직 완료되지 않았어도 요청한 값을 저장합니다. macOS는 화면 절전 방지 요청을 성공적으로 생성한 경우에만 true가 됩니다.
 '''
 related = ["setKeepScreenOn"]
 platform_note.en = '''
-- Linux and Web always return false because their setters have no effect.
+- Web returns the requested state even while hidden or when the Screen Wake Lock API is unavailable or rejects the request.
 '''
 platform_note.ja = '''
-- Linux と Web では設定関数が何も行わないため、常に false を返します。
+- Web は、ページが非表示の場合や Screen Wake Lock API が利用できない場合、要求が拒否された場合も、要求された状態を返します。
 '''
 platform_note.ko = '''
-- Linux와 Web에서는 설정 함수가 아무 작업도 하지 않으므로 항상 false를 반환합니다.
+- Web은 페이지가 숨겨져 있거나 Screen Wake Lock API를 사용할 수 없거나 요청이 거부된 경우에도 요청한 상태를 반환합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    logNotice() << getKeepScreenOn();
+}
 '''
 
 ["getLocalIp"]
@@ -51754,33 +51759,54 @@ void tcApp::setup() {
 ["setKeepScreenOn"]
 category = "window_system"
 keywords = ["wake lock", "no sleep", "stay awake", "prevent lock", "screensaver"]
-description.en = "Controls whether display sleep and automatic locking are inhibited."
-description.ja = "画面スリープと自動ロックの抑止を切り替える。"
-description.ko = "화면 절전과 자동 잠금 방지를 전환한다."
+description.en = "Requests that the display stay on."
+description.ja = "画面を点灯したままにするよう要求します。"
+description.ko = "화면을 켜 둔 상태로 유지하도록 요청합니다."
 details.en = '''
-- Pass true to request that the screen stay on, or false to release the request. The initial setting is false; `getKeepScreenOn` returns the stored state.
-- Android sets the activity's keep-screen-on flag, iOS changes the idle-timer setting, and macOS creates or releases a display-sleep assertion. Windows requests both display and system wakefulness.
-- iOS applies the change asynchronously on the main queue, so the getter can reflect the request before the OS setting changes.
+- Pass true to request that the screen stay on, or false to release the request. The initial setting is false.
+- Exhibition apps should call `setKeepScreenOn(true)` in `setup()` on every OS, including when using fullscreen.
+- On Windows, Linux and Web pthread builds, calls from any thread store the latest request immediately and apply it on the next frame on the main thread. Repeating the same value has no additional effect. Normal app cleanup releases the request. Use the main thread for portable code on other OSes.
+- `getKeepScreenOn` returns the stored setting. It does not prove that the OS accepted the request. Explicit locking, manual sleep and administrative power policies can still apply.
 '''
 details.ja = '''
-- true で画面を点灯したままにするよう要求し、false で要求を解除します。初期設定は false で、`getKeepScreenOn` から保存された状態を取得できます。
-- Android は Activity の画面点灯維持フラグ、iOS はアイドルタイマーの設定を変更し、macOS は画面スリープの抑止要求を作成または解除します。Windows は画面とシステムの両方のスリープ抑止を要求します。
-- iOS はメインキューで非同期に適用するため、OS の設定が変わる前に取得関数が要求された値を返す場合があります。
+- true で画面を点灯したままにするよう要求し、false で要求を解除します。初期設定は false です。
+- 展示用のアプリでは、フルスクリーンを使う場合も含めて、すべての OS で `setup()` から `setKeepScreenOn(true)` を呼び出します。
+- Windows、Linux、Web の pthreads ビルドでは、どのスレッドから呼んでも最後の要求をすぐに保存し、次のフレームでメインスレッドから適用します。同じ値を繰り返しても追加の処理は行いません。アプリの正常終了時に要求を解除します。ほかの OS でも使うコードでは、メインスレッドで呼び出します。
+- `getKeepScreenOn` は保存された設定を返しますが、OS が要求を受け付けたことは確認できません。明示的なロック、手動のスリープ、管理者による電源設定は適用される場合があります。
 '''
 details.ko = '''
-- true를 전달하면 화면을 켜 둔 상태로 유지하도록 요청하고 false를 전달하면 요청을 해제합니다. 초기 설정은 false이며 `getKeepScreenOn`으로 저장된 상태를 조회할 수 있습니다.
-- Android는 Activity의 화면 켜짐 유지 플래그, iOS는 유휴 타이머 설정을 변경하며 macOS는 화면 절전 방지 요청을 생성하거나 해제합니다. Windows는 화면과 시스템 모두의 절전 방지를 요청합니다.
-- iOS는 메인 큐에서 비동기로 적용하므로 OS 설정이 변경되기 전에 조회 함수가 요청한 값을 반환할 수 있습니다.
+- true를 전달하면 화면을 켜 둔 상태로 유지하도록 요청하고 false를 전달하면 요청을 해제합니다. 초기 설정은 false입니다.
+- 전시용 앱은 전체 화면을 사용하는 경우에도 모든 OS에서 `setup()` 안에 `setKeepScreenOn(true)`를 호출합니다.
+- Windows, Linux, Web pthreads 빌드에서는 어느 스레드에서 호출해도 마지막 요청을 즉시 저장하고 다음 프레임에 메인 스레드에서 적용합니다. 같은 값을 반복해도 추가 작업을 하지 않습니다. 앱이 정상 종료하면 요청을 해제합니다. 다른 OS에서도 사용할 코드는 메인 스레드에서 호출합니다.
+- `getKeepScreenOn`은 저장된 설정을 반환하지만 OS가 요청을 수락했는지는 확인하지 않습니다. 명시적인 잠금, 수동 절전, 관리자의 전원 정책은 적용될 수 있습니다.
 '''
-related = ["getKeepScreenOn", "setImmersiveMode"]
+related = ["getKeepScreenOn", "setImmersiveMode", "toggleFullscreen"]
 platform_note.en = '''
-- Supported on Android, iOS, macOS and Windows. Has no effect on Linux or Web.
+- Windows uses `SetThreadExecutionState` to keep the display and system awake. It does not stop the screen saver. Fullscreen suppresses screen-saver and monitor-power-off commands sent to TrussC windows while the app is in the foreground.
+- macOS uses a `NoDisplaySleep` assertion to prevent idle display sleep. Screen-saver suppression is to be confirmed on device. Fullscreen alone adds no inhibition.
+- Linux only stops the X server's own screen saver and blanking, where available. It has no effect in headless apps or when this support is unavailable, and logs one notice pointing to OS or desktop settings. Fullscreen alone adds no inhibition.
+- Desktop environments and compositors such as GNOME, KDE, LXDE/LXQt, Raspberry Pi OS/labwc and Wayland sessions in general control their own screen blanking. `setKeepScreenOn` does not reach those controls. Turn blanking off in their settings.
+- Raspberry Pi OS is not supported. Disable screen blanking in Raspberry Pi Configuration.
+- Android keeps the activity's screen on. iOS disables the idle timer asynchronously on the main queue, so the getter may change first. Fullscreen alone adds no separate inhibition on either OS.
+- Web works in browsers that support the Screen Wake Lock API while the page is visible in a secure context (HTTPS or localhost). It automatically re-takes the lock when the page becomes visible again while still requested. Unsupported or insecure contexts log one notice. Rejected requests are silent and retry when the page becomes visible again or after disabling and re-enabling. Fullscreen alone adds no inhibition. Builds without pthreads apply directly on the main thread.
 '''
 platform_note.ja = '''
-- Android、iOS、macOS、Windows に対応しています。Linux と Web では何も行いません。
+- Windows は `SetThreadExecutionState` で画面とシステムのスリープを抑止します。スクリーンセーバーは抑止しません。フルスクリーンでは、アプリが手前にある間、TrussC のウィンドウに届くスクリーンセーバーとモニター電源オフの命令を拒否します。
+- macOS は `NoDisplaySleep` の要求で、操作がないときの画面スリープを抑止します。スクリーンセーバーの抑止は実機での確認が必要です。フルスクリーンだけでは抑止要求を追加しません。
+- Linux では、利用できる場合に X サーバー自身のスクリーンセーバーと画面消灯だけを抑止します。ヘッドレスアプリやこの機能を利用できない環境では何も行わず、OS またはデスクトップの設定を案内する通知を一度出します。フルスクリーンだけでは抑止要求を追加しません。
+- GNOME、KDE、LXDE/LXQt、Raspberry Pi OS/labwc、Wayland セッション全般など、デスクトップ環境やコンポジターは独自に画面消灯を管理します。`setKeepScreenOn` はこれらの制御には届きません。それぞれの設定で画面消灯を無効にします。
+- Raspberry Pi OS は対応していません。Raspberry Pi Configuration で画面消灯を無効にします。
+- Android は Activity の画面点灯を維持します。iOS はメインキューでアイドルタイマーを非同期に無効にするため、取得関数の値が先に変わる場合があります。どちらもフルスクリーンだけでは別の抑止要求を追加しません。
+- Web は Screen Wake Lock API に対応したブラウザーで、セキュアコンテキスト（HTTPS または localhost）のページが表示されている間に動作します。要求中にページが再び表示されると、自動的にロックを再取得します。未対応または非セキュアな環境では通知を一度出します。要求の拒否は通知せず、ページの再表示時や無効化後の再有効化時に再試行します。フルスクリーンだけでは抑止要求を追加しません。pthreads を使わないビルドではメインスレッドで直接適用します。
 '''
 platform_note.ko = '''
-- Android, iOS, macOS, Windows에서 지원합니다. Linux와 Web에서는 아무 작업도 하지 않습니다.
+- Windows는 `SetThreadExecutionState`로 화면과 시스템의 절전을 막습니다. 화면 보호기는 막지 않습니다. 전체 화면에서는 앱이 앞에 있는 동안 TrussC 창에 전달되는 화면 보호기와 모니터 전원 끄기 명령을 거부합니다.
+- macOS는 `NoDisplaySleep` 요청으로 입력이 없을 때의 화면 절전을 막습니다. 화면 보호기 방지는 기기에서 확인해야 합니다. 전체 화면만으로는 방지 요청을 추가하지 않습니다.
+- Linux는 지원되는 환경에서 X 서버 자체의 화면 보호기와 화면 꺼짐만 막습니다. 헤드리스 앱이나 이 기능을 사용할 수 없는 환경에서는 아무 작업도 하지 않으며 OS 또는 데스크톱 설정을 안내하는 알림을 한 번 기록합니다. 전체 화면만으로는 방지 요청을 추가하지 않습니다.
+- GNOME, KDE, LXDE/LXQt, Raspberry Pi OS/labwc, Wayland 세션 전반 등 데스크톱 환경과 컴포지터는 자체적으로 화면 꺼짐을 관리합니다. `setKeepScreenOn`은 이러한 제어에 영향을 주지 않습니다. 각 환경의 설정에서 화면 꺼짐을 비활성화합니다.
+- Raspberry Pi OS는 지원하지 않습니다. Raspberry Pi Configuration에서 화면 꺼짐을 비활성화합니다.
+- Android는 Activity의 화면 켜짐을 유지합니다. iOS는 메인 큐에서 유휴 타이머를 비동기로 비활성화하므로 조회 함수의 값이 먼저 바뀔 수 있습니다. 두 OS 모두 전체 화면만으로는 별도의 방지 요청을 추가하지 않습니다.
+- Web은 Screen Wake Lock API를 지원하는 브라우저에서 보안 컨텍스트(HTTPS 또는 localhost)의 페이지가 보이는 동안 동작합니다. 요청이 유지된 상태에서 페이지가 다시 보이면 자동으로 잠금을 다시 획득합니다. 지원하지 않거나 안전하지 않은 컨텍스트에서는 알림을 한 번 기록합니다. 요청이 거부되면 알림 없이 페이지가 다시 보이거나 비활성화 후 다시 활성화될 때 재시도합니다. 전체 화면만으로는 방지 요청을 추가하지 않습니다. pthreads를 사용하지 않는 빌드는 메인 스레드에서 직접 적용합니다.
 '''
 snippet = '''
 void tcApp::setup() {

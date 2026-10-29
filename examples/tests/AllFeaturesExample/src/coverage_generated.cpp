@@ -744,7 +744,7 @@ static void cover_window_system() {
     (void)getDpiScale();
     (void)getFramebufferHeight();
     (void)getFramebufferWidth();
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_ANDROID) || defined(AF_IOS)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS) || defined(AF_WEB)
     (void)getKeepScreenOn();
 #endif
     (void)getMaxUpdateSteps();
@@ -763,7 +763,7 @@ static void cover_window_system() {
     (void)setClipboardString(af::val<const std::string>());
     (void)setFullscreen(af::val<bool>());
     (void)setIndependentFps(af::val<float>(), af::val<float>());
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_ANDROID) || defined(AF_IOS)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS) || defined(AF_WEB)
     (void)setKeepScreenOn(af::val<bool>());
 #endif
     (void)setMaxUpdateSteps(af::val<int>());

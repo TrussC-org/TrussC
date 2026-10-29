@@ -309,6 +309,9 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     internal::HeadlessSleeper sleeper;
 
     while (headless::running && !app->isExitRequested()) {
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)) || defined(__EMSCRIPTEN_PTHREADS__)
+        internal::updateKeepScreenOn(true);
+#endif
         headless::pollExitSignal();
         if (!headless::running) break;
         auto now = std::chrono::steady_clock::now();
@@ -361,6 +364,9 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         app->cleanup();
     }
 
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__EMSCRIPTEN__)
+    internal::shutdownKeepScreenOn();
+#endif
     internal::waitForResourceLoadsAtAppExit();
     appListeners.clear();
     ctx.rootNode.reset();   // no longer the running App
