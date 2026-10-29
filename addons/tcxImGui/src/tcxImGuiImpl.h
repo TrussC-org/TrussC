@@ -6,11 +6,13 @@
 
 namespace tcx::imgui {
 
-void ImGuiManager::setup() {
+void ImGuiManager::setup() { setup(0); }
+
+void ImGuiManager::setup(int initialVertices) {
     if (initialized_) return;
 
     offscreenOwner_ = false;
-    initializeContext_();
+    initializeContext_(initialVertices);
 
     // Listen to beforePresent for rendering. events() resolves against the
     // CURRENT window context, so these listeners land on this window's
@@ -130,12 +132,14 @@ void ImGuiManager::shutdown() {
     tc::logVerbose() << "ImGui shutdown";
 }
 
-void ImGuiManager::setupOffscreen() {
+void ImGuiManager::setupOffscreen() { setupOffscreen(0); }
+
+void ImGuiManager::setupOffscreen(int initialVertices) {
     if (initialized_) return;
     offscreenOwner_ = true;
     const auto previous = simgui_tc_get_context();
     auto* previousImGui = ImGui::GetCurrentContext();
-    initializeContext_();
+    initializeContext_(initialVertices);
     // Independent UI state must not share the window manager's ini file.
     ImGui::GetIO().IniFilename = nullptr;
     simgui_tc_set_context(previous);
@@ -229,9 +233,22 @@ void ImGuiManager::installDeadlineListeners_() {
     }
 }
 
-void ImGuiManager::initializeContext_() {
+void ImGuiManager::initializeContext_(int initialVertices) {
     simgui_desc_t desc = {};
-    desc.logger.func = tc::internal::sokolLog;
+    // The backend info level normally maps to Verbose; growth is a Notice.
+    desc.logger.func = [](const char* tag, uint32_t level, uint32_t item,
+                          const char* message, uint32_t line, const char* file, void* data) {
+        try {
+            if (item == SIMGUI_LOGITEM_BUFFER_GROWN) {
+                tc::logNotice("ImGui") << message;
+            } else {
+                tc::internal::sokolLog(tag, level, item, message, line, file, data);
+            }
+        } catch (...) {
+            // Nothing may throw out of the backend's C logger callback.
+        }
+    };
+    desc.max_vertices = initialVertices < 1 ? 65536 : initialVertices;
     desc.disable_set_mouse_cursor = offscreenOwner_;
     simguiCtx_ = simgui_tc_make_context(&desc);
     simgui_tc_set_context(simguiCtx_);
@@ -257,8 +274,10 @@ ImGuiManager::Scope::~Scope() {
     ImGui::SetCurrentContext(previousImGui_);
 }
 
-void imguiSetup() {
-    ImGuiManager::instance().setup();
+void imguiSetup() { imguiSetup(0); }
+
+void imguiSetup(int initialVertices) {
+    ImGuiManager::instance().setup(initialVertices);
     // Registration always happens; the host's tool level controls exposure.
     registerImGuiTools();
 }

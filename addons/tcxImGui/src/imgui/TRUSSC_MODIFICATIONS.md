@@ -303,6 +303,24 @@ atlas, buffers, pipeline) per window, for multi-window apps.
 marked `CmdListsCount` obsolete). Identical to upstream, so it carries no
 marker and merges cleanly on the next update.
 
+### 6. Automatic vertex/index buffer growth (#340)
+
+Before copying a frame, `simgui_render()` sums vertex/index bytes with checked
+arithmetic and doubles the active context's capacity until both fit (indices
+remain 3x vertices). Final byte sizes must fit Sokol's signed int storage
+before allocation; doubling caps at that representation limit, and setup
+checks the initial size too. CPU blocks and GPU buffers are replaced transactionally;
+detected allocation failure keeps the old buffers and draws complete lists that fit,
+with one useful Error per failed frame. Old GPU buffers use normal
+`sg_destroy_buffer()` before this frame's single upload per buffer.
+The first successful grow per context emits a sized message in Release too;
+`ImGuiManager` maps this backend info item to Notice. Initial capacity is
+configurable through `imguiSetup(int)`, `setup(int)`, and `setupOffscreen(int)`.
+No Dear ImGui core file changes are needed.
+
+On the next sokol sync, move this logic to the `sg_write_buffer_transient()`
+path, which replaces CPU staging in upstream versions after `082152c`.
+
 ---
 
 ## Grep markers
@@ -317,7 +335,7 @@ Expected counts (lines containing the marker; this file excluded):
 |---|---|
 | `imgui/imconfig.h` | 4 (the hooks-on line, `begin`, a comment, `end`) |
 | `imgui/imgui_widgets.cpp` | 43 (19 call sites + 24 wrapped returns) |
-| `sokol_imgui.h` | 5 |
+| `sokol_imgui.h` | 11 |
 
 ---
 
