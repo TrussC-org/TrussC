@@ -48,6 +48,7 @@
 
 #ifdef __APPLE__
 #include <os/log.h>   // the Logger's platform sink (internal::writeSystemLog)
+#include <unistd.h>
 #endif
 #include <cstdlib>
 
@@ -1545,6 +1546,15 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
 // Logger platform sink (declared in tcLog.h)
 // ---------------------------------------------------------------------------
 #if TC_LOG_SYSTEM_SINK
+#if defined(__APPLE__)
+namespace {
+// libtrace/libdispatch state inherited across fork is not usable until exec.
+// Capture the original process before main, including when the child's first
+// log is the forwarding-loss warning. Console/file sinks and onLog listeners
+// still receive that warning; entering os_log here can terminate the child.
+const pid_t systemLogProcess = getpid();
+}
+#endif
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
 namespace {
 // True when os_log lines are mirrored into the console that already shows
@@ -1567,6 +1577,7 @@ namespace internal {
 
 void writeSystemLog(const LogEventArgs& e) {
 #if defined(__APPLE__)
+    if (getpid() != systemLogProcess) return;
 #if !TARGET_OS_IPHONE
     if (osLogMirroredToConsole()) return;
 #endif

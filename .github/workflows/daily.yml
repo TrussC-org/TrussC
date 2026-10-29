@@ -190,7 +190,7 @@ jobs:
         id: daily_tools_native
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/daily_tools_native.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/daily_tools_native.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           if [ "$RUNNER_OS" == "macOS" ]; then
             sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
             sed -i '' 's/open /#open /g' tools/build_mac.command
@@ -214,7 +214,7 @@ jobs:
         id: daily_examples_native
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_examples_native.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_examples_native.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x examples/build_all.py
           ./examples/build_all.py --verbose
           TC_BUILD
@@ -229,7 +229,7 @@ jobs:
         id: daily_addon_tests
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_addon_tests.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_addon_tests.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           ./examples/build_all.py --addon-tests-only --include-daily --verbose
           TC_BUILD
 
@@ -242,7 +242,7 @@ jobs:
         id: daily_core_tests
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_core_tests.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_core_tests.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           ./examples/build_all.py --core-tests-only --include-daily --verbose
           TC_BUILD
 
@@ -260,7 +260,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl-mesa0
-          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_display_builds.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_display_builds.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           xvfb-run -a -s '-screen 0 1280x1024x24' python3 tools/run_core_display_tests.py
           TC_BUILD
 
@@ -373,7 +373,7 @@ jobs:
         id: daily_tools_web
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/daily_tools_web.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/daily_tools_web.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x tools/build_linux.sh
           sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
           sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
@@ -389,7 +389,7 @@ jobs:
         id: web_examples
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/web_examples.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/web_examples.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x examples/build_all.py
           ./examples/build_all.py --web-only --verbose
           TC_BUILD
@@ -410,7 +410,7 @@ jobs:
         if: ${{ !cancelled() && steps.web_examples.outcome != 'skipped' }}
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_core_tests_web.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_core_tests_web.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           ./examples/build_all.py --web-only --core-tests-only --include-daily --verbose
           TC_BUILD
 

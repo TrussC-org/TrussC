@@ -434,6 +434,116 @@ int main() {
                 self.assertEqual({p['preset'] for p in platforms}, {'linux', 'macos', 'windows'})
                 self.assertIn('sweep-web', workflow['jobs'])
 
+    @unittest.skipUnless(sys.platform != 'win32' and shutil.which('c++'), 'requires POSIX and C++')
+    def test_apple_system_sink_does_not_enter_inherited_libtrace_after_fork(self):
+        # Compile the actual Apple sink on Linux with a faulting OS boundary.
+        # libtrace cannot be safely entered in a pre-exec fork child; such a
+        # failure cannot be recovered by the build capture's C++ catch blocks.
+        source = (ROOT / 'core/include/tc/app/tcGlobal.cpp').read_text(encoding='utf-8')
+        owner = source[source.index('const pid_t systemLogProcess ='):].split(';', 1)[0] + ';'
+        start = source.index('void writeSystemLog(const LogEventArgs& e) {')
+        end = source.index('\n}', start) + 2
+        function = source[start:end]
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            cpp = directory / 'sink.cpp'
+            cpp.write_text(r'''#include <string>
+#include <unistd.h>
+#include <sys/wait.h>
+#define __APPLE__ 1
+#define TARGET_OS_IPHONE 0
+#define OS_LOG_TYPE_DEBUG 0
+#define OS_LOG_TYPE_ERROR 1
+#define OS_LOG_TYPE_FAULT 2
+#define OS_LOG_TYPE_DEFAULT 3
+using os_log_t = int;
+using os_log_type_t = int;
+enum class LogLevel { Verbose, Notice, Warning, Error, Fatal };
+struct LogEventArgs { LogLevel level; std::string message; };
+const char* logLevelToString(LogLevel) { return "WARNING"; }
+bool osLogMirroredToConsole() { return false; }
+int calls = 0;
+''' + owner + r'''
+os_log_t os_log_create(const char*, const char*) {
+    if (getpid() != systemLogProcess) _exit(90);
+    return 1;
+}
+void os_log_with_type(os_log_t, os_log_type_t, const char*, const char*, const char*) {
+    if (getpid() != systemLogProcess) _exit(91);
+    ++calls;
+}
+''' + function + r'''
+int main() {
+    LogEventArgs warning{LogLevel::Warning, "forwarding failed"};
+    writeSystemLog(warning);
+    const pid_t child = fork();
+    if (!child) { writeSystemLog(warning); writeSystemLog(warning); _exit(0); }
+    int status = 0;
+    if (child < 0 || waitpid(child, &status, 0) != child ||
+        !WIFEXITED(status) || WEXITSTATUS(status)) return 1;
+    writeSystemLog(warning);
+    return calls == 2 ? 0 : 2;
+}
+''', encoding='utf-8')
+            gate.run_build(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
+                            str(cpp), '-o', str(directory / 'sink')], echo=False, check=True)
+            result = subprocess.run([str(directory / 'sink')], capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # The same OS fault kills the child with the former unguarded sink.
+            cpp.write_text(cpp.read_text(encoding='utf-8').replace(
+                '    if (getpid() != systemLogProcess) return;\n', ''), encoding='utf-8')
+            gate.run_build(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
+                            str(cpp), '-o', str(directory / 'unguarded')], echo=False, check=True)
+            result = subprocess.run([str(directory / 'unguarded')], capture_output=True)
+            self.assertEqual(result.returncode, 1, result.stderr)
+
+    def test_wrapped_workflow_steps_use_the_running_shell(self):
+        # Python's Windows PATH search can choose the System32 WSL launcher
+        # for bare bash, even though the step itself runs in Git Bash.
+        import shlex
+        for filename, expected in [('build.yml', 13), ('daily.yml', 8)]:
+            workflow = yaml.load((ROOT / '.github/workflows' / filename).read_text(encoding='utf-8'),
+                                 Loader=yaml.BaseLoader)
+            wrapped = 0
+            for job in workflow['jobs'].values():
+                for step in job.get('steps', []):
+                    script = step.get('run', '')
+                    for line in script.splitlines():
+                        if 'check_build_warnings.py --capture' not in line:
+                            continue
+                        wrapped += 1
+                        with self.subTest(workflow=filename, step=step.get('name')):
+                            tokens = shlex.split(line)
+                            self.assertEqual(tokens[tokens.index('--') + 1], '$BASH')
+                            self.assertIn('-- "$BASH" -eo pipefail', line)
+                            syntax = subprocess.run(['bash', '-n'], input=script, text=True,
+                                                    encoding='utf-8', capture_output=True)
+                            self.assertEqual(syntax.returncode, 0, syntax.stderr)
+            self.assertEqual(wrapped, expected, filename)
+        if os.name != 'nt':
+            with tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                wrong = directory / 'bash'
+                wrong.write_text('#!/bin/sh\nexit 73\n', encoding='utf-8')
+                wrong.chmod(0o755)
+                own_shell = directory / 'Git Bash' / 'bash'
+                own_shell.parent.mkdir()
+                shutil.copyfile(shutil.which('bash'), own_shell)
+                own_shell.chmod(0o755)
+                env = dict(os.environ, PATH=str(directory) + os.pathsep + os.environ['PATH'])
+                for option in ('--capture', '--capture-builds'):
+                    log = directory / 'build.log'
+                    prefix = (f'{shlex.quote(sys.executable)} {shlex.quote(str(SCRIPT))} '
+                              f'{option} {shlex.quote(str(log))} -- ')
+                    command = '-eo pipefail -c "echo shell-ok; exit 7"'
+                    good = subprocess.run([str(own_shell), '-c', prefix + '"$BASH" ' + command],
+                                          env=env, capture_output=True)
+                    self.assertEqual(good.returncode, 7, good.stderr)
+                    self.assertIn(b'shell-ok', good.stdout)
+                    bad = subprocess.run([str(own_shell), '-c', prefix + 'bash ' + command],
+                                         env=env, capture_output=True)
+                    self.assertEqual(bad.returncode, 73, bad.stderr)
+
     def test_merge_queue_uses_build_workflow_and_required_jobs(self):
         workflow = yaml.load((ROOT / '.github/workflows/build.yml').read_text(encoding='utf-8'),
                              Loader=yaml.BaseLoader)

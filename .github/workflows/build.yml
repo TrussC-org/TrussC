@@ -319,7 +319,7 @@ jobs:
         id: warning_build_1
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_1.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_1.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           if [ "$RUNNER_OS" == "macOS" ]; then
             sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
             sed -i '' 's/open /#open /g' tools/build_mac.command
@@ -372,7 +372,7 @@ jobs:
         if: matrix.shard == 1
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_2.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_2.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x examples/build_all.py
           ./examples/build_all.py --test-only --verbose
           TC_BUILD
@@ -390,7 +390,7 @@ jobs:
         id: warning_build_3
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_3.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_3.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           ./examples/build_all.py --core-tests-only --shard ${{ matrix.shard }}/3 --verbose
           TC_BUILD
 
@@ -511,7 +511,7 @@ jobs:
         if: matrix.selected != '[]'
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_4.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_4.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           if [ "$RUNNER_OS" = "macOS" ]; then
             sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
             sed -i '' 's/open /#open /g' tools/build_mac.command
@@ -535,7 +535,7 @@ jobs:
           SELECTED_ADDONS: ${{ matrix.selected }}
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_5.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_5.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           python3 - <<'PYTHON'
           import json
           import os
@@ -677,7 +677,7 @@ jobs:
         id: warning_build_6
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_6.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_6.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x tools/build_linux.sh
           sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
           sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
@@ -693,7 +693,7 @@ jobs:
         id: warning_build_7
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_7.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_7.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           PG=tools/bin/trusscli
           EXAMPLE=examples/tests/AllFeaturesExample
 
@@ -838,7 +838,7 @@ jobs:
         id: warning_build_8
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_8.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_8.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x tools/build_linux.sh
           sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
           sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
@@ -855,7 +855,7 @@ jobs:
         id: warning_build_9
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_9.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_9.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x examples/build_all.py
           ./examples/build_all.py --web-only --test-only --verbose
           TC_BUILD
@@ -942,7 +942,7 @@ jobs:
         id: warning_build_10
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_10.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_10.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           cd examples/tests/AllFeaturesExample
           cmake -B build-ios -G Xcode \
             -DCMAKE_SYSTEM_NAME=iOS \
@@ -960,7 +960,7 @@ jobs:
         id: warning_build_11
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_11.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_11.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           cd examples/sound/soundPlayerExample
           cmake -B build-ios -G Xcode \
             -DCMAKE_SYSTEM_NAME=iOS \
@@ -1069,7 +1069,7 @@ jobs:
         id: warning_build_12
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_12.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_12.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
           cmake --build tools/build --config Release --parallel 4
           TC_BUILD
@@ -1086,7 +1086,7 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         shell: bash
         run: |
-          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_13.log" -- bash -eo pipefail <<'TC_BUILD'
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_13.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           if [ -z "$BASE_REF" ] || [ "$BASE_REF" = "0000000000000000000000000000000000000000" ]; then
             BASE_REF="$HEAD_REF^"
           fi
