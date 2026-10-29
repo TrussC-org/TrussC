@@ -62065,7 +62065,7 @@ description.ja = "画像を非同期に読み込む。"
 description.ko = "이미지를 비동기로 로드한다."
 details.en = '''
 - OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
-- Asynchronous Image, SoundBuffer and Font loads share 4 active preparations. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
+- Asynchronous Image, SoundBuffer and Font loads share active preparation slots (default 4); `setResourceLoadConcurrency` changes their number. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
 - On Web, CMake propagates exception support to framework and application C++ code for document/font loaders and reflection. Resource preparation and application also retain exception-enabled out-of-line host definitions. If a custom build disables exception support in application TUs, allocation failure inside inline header helpers remains outside the recovery guarantee.
 - Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
 - `loadAsync(path, mipmaps = false)` returns without a result; retain an `onLoad` listener to receive the `LoadResult`. Path resolution, formats and load errors follow `Image::load`.
@@ -62081,7 +62081,7 @@ details.en = '''
 '''
 details.ja = '''
 - OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
-- Image・SoundBuffer・Font の非同期読み込みは、同時準備 4 件を共有します。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（終了時に未配信なら省略します）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
+- Image・SoundBuffer・Font の非同期読み込みは、同時準備枠（既定 4 件）を共有します。件数は `setResourceLoadConcurrency` で変更できます。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（終了時に未配信なら省略します）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
 - Web では、ドキュメント・フォント読み込みとリフレクションのため、CMake がフレームワークとアプリケーションの C++ コードに例外サポートを伝播します。リソースの準備・反映も、例外を有効にしたヘッダー外のホスト定義を維持します。独自ビルドでアプリケーションの翻訳単位の例外サポートを無効にした場合、ヘッダー内のインラインヘルパーでのメモリ確保失敗は復旧保証の対象外です。
 - Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
 - `loadAsync(path, mipmaps = false)` は結果を返しません。`LoadResult` を受け取るには `onLoad` のリスナーを保持してください。パス解決、対応形式、読み込みエラーは `Image::load` と同じです。
@@ -62097,7 +62097,7 @@ details.ja = '''
 '''
 details.ko = '''
 - OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
-- Image, SoundBuffer, Font의 비동기 로드는 동시 준비 4건을 공유합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(종료 시 미전달 Notice는 생략합니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
+- Image, SoundBuffer, Font의 비동기 로드는 동시 준비 슬롯(기본값 4개)을 공유합니다. 개수는 `setResourceLoadConcurrency`로 변경합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(종료 시 미전달 Notice는 생략합니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
 - Web에서는 문서·폰트 로더와 리플렉션을 위해 CMake가 프레임워크와 애플리케이션의 C++ 코드에 예외 지원을 전파합니다. 리소스 준비와 반영도 예외가 활성화된 헤더 밖의 호스트 정의를 유지합니다. 사용자 정의 빌드에서 애플리케이션 번역 단위의 예외 지원을 비활성화하면 인라인 헤더 헬퍼 내부의 할당 실패는 복구 보장 대상이 아닙니다.
 - Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
 - `loadAsync(path, mipmaps = false)`는 결과를 반환하지 않습니다. `LoadResult`를 받으려면 `onLoad` 리스너를 유지합니다. 경로 해석, 지원 형식과 로드 오류는 `Image::load`를 따릅니다.
@@ -62111,6 +62111,7 @@ details.ko = '''
 - 완료 알림에는 실행 중인 `runApp()` 또는 `runHeadlessApp()` 루프가 필요합니다. 앱 실행이 없는 일반 `main()`에서는 완료 이벤트를 전달하지 않습니다. 앱 종료는 실행 중인 네이티브 디코딩을 기다리며, 종료된 실행이나 핫 리로드 이전의 결과는 버립니다.
 - Web에서는 VFS 읽기와 CPU 디코딩을 이후 메인 루프 처리로 미루므로 해당 프레임이 멈출 수 있습니다. 결과 반영은 그다음 처리에서 수행합니다. 이 진입점은 Asyncify로 기다리지 않습니다.
 '''
+related = ["setResourceLoadConcurrency", "getResourceLoadConcurrency", "Image::load", "Image::onLoad", "Image::isLoading", "LoadResult"]
 snippet = '''
 // tcApp.h: Image image; EventListener listener;
 void tcApp::setup() {
@@ -62165,7 +62166,7 @@ description.en = "Starts asynchronous loading of decoded audio data."
 description.ja = "デコード済み音声データの非同期読み込みを開始する。"
 description.ko = "디코딩된 오디오 데이터의 비동기 로드를 시작한다."
 details.en = '''
-- Asynchronous Image, SoundBuffer and Font loads share 4 active preparations. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
+- Asynchronous Image, SoundBuffer and Font loads share active preparation slots (default 4); `setResourceLoadConcurrency` changes their number. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
 - On Web, CMake propagates exception support to framework and application C++ code for document/font loaders and reflection. Resource preparation and application also retain exception-enabled out-of-line host definitions. If a custom build disables exception support in application TUs, allocation failure inside inline header helpers remains outside the recovery guarantee.
 - `loadAsync(path)` returns no result directly and uses the same path resolution, format selection, errors, and decoder logs as `SoundBuffer::load`. Native builds prepare private PCM and metadata on a worker; existing committed data remains readable until the result is applied.
 - Results are applied on the main thread in a later frame, never during this call. Each frame or headless loop pass takes one batch of pending completions; work queued during that pass waits for another pass. After application, `isLoading()` becomes `false` before one `onLoad` event delivers the `LoadResult`.
@@ -62178,7 +62179,7 @@ details.en = '''
 - On Web, WAV/MP3/FLAC/OGG file reading and CPU decoding are deferred to a main-loop pass and may stall that frame; application waits for a subsequent pass. AAC/M4A use asynchronous browser decoding and poll for completion before application is queued. This entry point does not wait through Asyncify.
 '''
 details.ja = '''
-- Image・SoundBuffer・Font の非同期読み込みは、同時準備 4 件を共有します。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（終了時に未配信なら省略します）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
+- Image・SoundBuffer・Font の非同期読み込みは、同時準備枠（既定 4 件）を共有します。件数は `setResourceLoadConcurrency` で変更できます。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（終了時に未配信なら省略します）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
 - Web では、ドキュメント・フォント読み込みとリフレクションのため、CMake がフレームワークとアプリケーションの C++ コードに例外サポートを伝播します。リソースの準備・反映も、例外を有効にしたヘッダー外のホスト定義を維持します。独自ビルドでアプリケーションの翻訳単位の例外サポートを無効にした場合、ヘッダー内のインラインヘルパーでのメモリ確保失敗は復旧保証の対象外です。
 - `loadAsync(path)` は結果を直接返さず、パスの解決、形式の選択、エラー、デコーダーのログは `SoundBuffer::load` と同じです。ネイティブではワーカーが専用の PCM とメタデータを準備し、結果が反映されるまでは確定済みのデータを参照できます。
 - 結果は後のフレームのメインスレッドで反映され、この呼び出し中には反映されません。各フレームまたはヘッドレスのループ処理では、保留中の完了処理を一括で取り出し、その処理中に追加された分は次回に回します。反映後に `isLoading()` が `false` になり、続いて `onLoad` が `LoadResult` を一度通知します。
@@ -62191,7 +62192,7 @@ details.ja = '''
 - Web では WAV/MP3/FLAC/OGG のファイル読み込みと CPU デコードを後のメインループ処理に回すため、そのフレームが停止する場合があります。結果はさらに後の処理で反映します。AAC/M4A はブラウザーで非同期にデコードし、完了を定期的に確認してから反映をキューに追加します。この入口では Asyncify による待機を行いません。
 '''
 details.ko = '''
-- Image, SoundBuffer, Font의 비동기 로드는 동시 준비 4건을 공유합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(종료 시 미전달 Notice는 생략합니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
+- Image, SoundBuffer, Font의 비동기 로드는 동시 준비 슬롯(기본값 4개)을 공유합니다. 개수는 `setResourceLoadConcurrency`로 변경합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(종료 시 미전달 Notice는 생략합니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
 - Web에서는 문서·폰트 로더와 리플렉션을 위해 CMake가 프레임워크와 애플리케이션의 C++ 코드에 예외 지원을 전파합니다. 리소스 준비와 반영도 예외가 활성화된 헤더 밖의 호스트 정의를 유지합니다. 사용자 정의 빌드에서 애플리케이션 번역 단위의 예외 지원을 비활성화하면 인라인 헤더 헬퍼 내부의 할당 실패는 복구 보장 대상이 아닙니다.
 - `loadAsync(path)`는 결과를 직접 반환하지 않으며 경로 해석, 형식 선택, 오류, 디코더 로그는 `SoundBuffer::load`와 같습니다. 네이티브 빌드에서는 워커가 별도의 PCM과 메타데이터를 준비하며, 결과가 반영될 때까지 기존에 확정된 데이터를 읽을 수 있습니다.
 - 결과는 이후 프레임의 메인 스레드에서 반영되며 이 호출 중에는 반영되지 않습니다. 각 프레임 또는 헤드리스 루프 실행은 대기 중인 완료 처리를 한 번에 가져오며, 처리 중 추가된 작업은 다음 실행까지 기다립니다. 반영 후 `isLoading()`이 `false`가 되고 이어서 `onLoad`가 `LoadResult`를 한 번 전달합니다.
@@ -62203,7 +62204,7 @@ details.ko = '''
 - 완료 알림에는 실행 중인 `runApp` 또는 `runHeadlessApp`이 필요하며, 둘 다 사용하지 않는 독립적인 `main()`에서는 완료 이벤트가 발생하지 않습니다. 종료된 실행이나 이전 핫 리로드의 결과는 버리며, 네이티브 앱 종료는 실행 중인 디코딩이 끝날 때까지 기다립니다.
 - Web에서는 WAV/MP3/FLAC/OGG 파일 읽기와 CPU 디코딩을 이후 메인 루프 실행으로 미루므로 해당 프레임이 멈출 수 있습니다. 결과 반영은 그다음 실행까지 기다립니다. AAC/M4A는 브라우저에서 비동기적으로 디코딩하며 완료 여부를 주기적으로 확인한 뒤 반영 작업을 큐에 추가합니다. 이 진입점은 Asyncify로 기다리지 않습니다.
 '''
-related = ["SoundBuffer::load", "SoundBuffer::onLoad", "SoundBuffer::isLoading", "LoadResult"]
+related = ["setResourceLoadConcurrency", "getResourceLoadConcurrency", "SoundBuffer::load", "SoundBuffer::onLoad", "SoundBuffer::isLoading", "LoadResult"]
 snippet = '''
 void tcApp::setup() {
     static SoundBuffer buffer;
@@ -62256,7 +62257,7 @@ description.en = "Load a font asynchronously and report completion through an ev
 description.ja = "フォントを非同期で読み込み、イベントで完了を通知する。"
 description.ko = "폰트를 비동기로 로드하고 이벤트로 완료를 알린다."
 details.en = '''
-- Asynchronous Image, SoundBuffer and Font loads share 4 active preparations. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
+- Asynchronous Image, SoundBuffer and Font loads share active preparation slots (default 4); `setResourceLoadConcurrency` changes their number. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
 - On Web, CMake propagates exception support to framework and application C++ code for document/font loaders and reflection. Resource preparation and application also retain exception-enabled out-of-line host definitions. If a custom build disables exception support in application TUs, allocation failure inside inline header helpers remains outside the recovery guarantee.
 - Call `loadAsync(nameOrPath, size, faceIndex = 0)` with a file path, system font name, or Web URL. Size is in logical pixels; path precedence and collection-face selection follow `Font::load`.
 - Returns no result directly. Success, failure, and cache hits are applied on the main thread in a later frame, never during this call; `isLoading()` becomes `false` before the single `onLoad` notification.
@@ -62271,7 +62272,7 @@ details.en = '''
 - On Web, CPU preparation is deferred to a main-loop pass and can stall that pass, including without pthreads; application follows in a subsequent pass. This entry point does not wait through Asyncify, and URL fetching uses a 30-second timeout.
 '''
 details.ja = '''
-- Image・SoundBuffer・Font の非同期読み込みは、同時準備 4 件を共有します。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（終了時に未配信なら省略します）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
+- Image・SoundBuffer・Font の非同期読み込みは、同時準備枠（既定 4 件）を共有します。件数は `setResourceLoadConcurrency` で変更できます。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（終了時に未配信なら省略します）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
 - Web では、ドキュメント・フォント読み込みとリフレクションのため、CMake がフレームワークとアプリケーションの C++ コードに例外サポートを伝播します。リソースの準備・反映も、例外を有効にしたヘッダー外のホスト定義を維持します。独自ビルドでアプリケーションの翻訳単位の例外サポートを無効にした場合、ヘッダー内のインラインヘルパーでのメモリ確保失敗は復旧保証の対象外です。
 - `loadAsync(nameOrPath, size, faceIndex = 0)` にファイルパス、システムフォント名、または Web の URL を渡します。サイズの単位は論理ピクセルです。パスの優先順位とコレクション内の書体選択は `Font::load` と同じです。
 - 結果を直接返しません。成功、失敗、キャッシュへの一致はいずれも後のフレームでメインスレッドに反映し、この呼び出し中には通知しません。`isLoading()` が `false` になってから `onLoad` を一度通知します。
@@ -62286,7 +62287,7 @@ details.ja = '''
 - Web では CPU の準備を後のメインループ処理に回すため、その処理が停止することがあります。pthreads がない場合も同様で、結果はさらに後の処理で反映します。この関数は Asyncify で待機しません。URL の取得には 30 秒のタイムアウトを使います。
 '''
 details.ko = '''
-- Image, SoundBuffer, Font의 비동기 로드는 동시 준비 4건을 공유합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(종료 시 미전달 Notice는 생략합니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
+- Image, SoundBuffer, Font의 비동기 로드는 동시 준비 슬롯(기본값 4개)을 공유합니다. 개수는 `setResourceLoadConcurrency`로 변경합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(종료 시 미전달 Notice는 생략합니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
 - Web에서는 문서·폰트 로더와 리플렉션을 위해 CMake가 프레임워크와 애플리케이션의 C++ 코드에 예외 지원을 전파합니다. 리소스 준비와 반영도 예외가 활성화된 헤더 밖의 호스트 정의를 유지합니다. 사용자 정의 빌드에서 애플리케이션 번역 단위의 예외 지원을 비활성화하면 인라인 헤더 헬퍼 내부의 할당 실패는 복구 보장 대상이 아닙니다.
 - `loadAsync(nameOrPath, size, faceIndex = 0)`에 파일 경로, 시스템 폰트 이름 또는 Web URL을 전달합니다. 크기의 단위는 논리 픽셀입니다. 경로 우선순위와 컬렉션 내 서체 선택은 `Font::load`와 같습니다.
 - 결과를 직접 반환하지 않습니다. 성공, 실패, 캐시 적중 모두 이후 프레임의 메인 스레드에서 반영하며, 이 호출 중에는 알리지 않습니다. `isLoading()`이 `false`가 된 뒤 `onLoad`를 한 번 알립니다.
@@ -62300,7 +62301,7 @@ details.ko = '''
 - 이동은 양쪽 핸들의 미완료 요청을 취소하고 확정된 데이터를 옮기며, 리스너는 원래 핸들에 남습니다. 리스너 수명과 재로드, 이동, 폰트 자체의 파괴를 수행하는 콜백은 `Font::onLoad`를 참조합니다.
 - Web에서는 CPU 준비를 이후 메인 루프 처리로 미루므로 해당 처리가 멈출 수 있습니다. pthreads가 없는 경우도 같으며, 결과는 그다음 처리에서 반영합니다. 이 함수는 Asyncify로 기다리지 않습니다. URL 가져오기는 30초 타임아웃을 사용합니다.
 '''
-related = ["Font::load", "Font::onLoad", "Font::isLoading", "LoadResult"]
+related = ["setResourceLoadConcurrency", "getResourceLoadConcurrency", "Font::load", "Font::onLoad", "Font::isLoading", "LoadResult"]
 snippet = '''
 // tcApp members: Font font; EventListener fontLoadListener;
 void tcApp::setup() {
@@ -63039,3 +63040,63 @@ details.ko = '''
 - 메인/호스트 순서와 v0.8 전환은 App::mousePressed를 참조하세요.
 '''
 related = ["App::mousePressed", "Node::onMouseDrag", "RectNode::onMouseDrag"]
+
+[setResourceLoadConcurrency]
+keywords = ["async", "load", "concurrency", "queue", "worker"]
+description.en = "Sets how many resource loads can prepare at once."
+description.ja = "リソース読み込みを同時に準備する件数を設定します。"
+description.ko = "리소스 로드를 동시에 준비하는 개수를 설정합니다."
+details.en = '''
+- Sets the shared preparation slots used by Image, SoundBuffer and Font `loadAsync`. The default is 4. Local files and URLs share these slots.
+- Call on the main thread, at any time. Every value of 1 or more is accepted as given, without an upper cap. A value below 1 becomes 1 and logs one Notice for that call.
+- Raising the setting starts queued preparations right away. Lowering it lets running preparations finish; new preparations wait until fewer than the configured count are running.
+- Waiting for a preparation slot never rejects a queued load. Local-file queues can grow. The separate URL/network-input admission budgets remain 64 pending requests, 68 live requests and 1 GiB of retained results; requests or results exceeding those budgets can still fail.
+- On native platforms, each active preparation slot is a worker thread.
+- On Web, a slot is an active fetch/decode slot, rather than an OS thread. CPU decoding still runs on the main loop.
+'''
+details.ja = '''
+- Image・SoundBuffer・Font の `loadAsync` が共有する準備枠を設定します。既定は 4 件です。ローカルファイルと URL は同じ枠を使います。
+- メインスレッドでいつでも呼び出せます。1 以上の値は上限を設けずそのまま受け付けます。1 未満の値は 1 にし、その呼び出しで Notice を一度記録します。
+- 設定を上げると、待機中の準備をすぐに開始します。下げた場合は実行中の準備を完了させ、新しい準備は実行数が設定件数を下回るまで待ちます。
+- 準備枠を待つことを理由にキューの読み込みを拒否しません。ローカルファイルのキューは拡張できます。別に設けた URL／ネットワーク入力の受付予算は、待機要求 64 件、未反映要求 68 件、保持結果 1 GiB のままです。この予算を超える要求や結果は失敗することがあります。
+- ネイティブ環境では、実行中の準備枠 1 件がワーカースレッド 1 本に対応します。
+- Web の枠は OS スレッドではなく、実行中の取得・デコードの枠です。CPU デコードは引き続きメインループで行います。
+'''
+details.ko = '''
+- Image, SoundBuffer, Font의 `loadAsync`가 공유하는 준비 슬롯을 설정합니다. 기본값은 4개입니다. 로컬 파일과 URL은 같은 슬롯을 사용합니다.
+- 메인 스레드에서 언제든지 호출합니다. 1 이상의 값은 상한 없이 그대로 적용합니다. 1 미만의 값은 1로 바꾸고 해당 호출에서 Notice를 한 번 기록합니다.
+- 설정을 높이면 대기 중인 준비를 즉시 시작합니다. 낮추면 실행 중인 준비를 완료하고 새 준비는 실행 수가 설정 개수보다 작아질 때까지 기다립니다.
+- 준비 슬롯을 기다린다는 이유로 큐의 로드를 거부하지 않습니다. 로컬 파일 큐는 확장할 수 있습니다. 별도의 URL/네트워크 입력 수락 예산은 대기 요청 64건, 미반영 요청 68건, 보유 결과 1 GiB로 유지합니다. 이 예산을 초과하는 요청이나 결과는 실패할 수 있습니다.
+- 네이티브 환경에서는 실행 중인 준비 슬롯 하나가 워커 스레드 하나에 해당합니다.
+- Web의 슬롯은 OS 스레드가 아니라 실행 중인 가져오기/디코딩 슬롯입니다. CPU 디코딩은 계속 메인 루프에서 수행합니다.
+'''
+related = ["getResourceLoadConcurrency", "Image::loadAsync", "SoundBuffer::loadAsync", "Font::loadAsync"]
+snippet = '''
+void tcApp::setup() {
+    setResourceLoadConcurrency(8);  // prepare up to 8 images, sounds or fonts at once
+    for (auto& path : imagePaths) images.emplace_back().loadAsync(path);
+}
+'''
+
+[getResourceLoadConcurrency]
+keywords = ["async", "load", "concurrency", "queue", "worker"]
+description.en = "Returns how many resource loads can prepare at once."
+description.ja = "リソース読み込みを同時に準備する設定件数を返します。"
+description.ko = "리소스 로드를 동시에 준비하는 설정 개수를 반환합니다."
+details.en = '''
+- Returns the shared preparation slot setting for Image, SoundBuffer and Font `loadAsync`, initially 4.
+- Call on the main thread. This is the configured limit, rather than the number of preparations currently running; after lowering the setting, running preparations can temporarily exceed it.
+- See `setResourceLoadConcurrency` for queue behavior, runtime changes and native/Web slot meanings.
+'''
+details.ja = '''
+- Image・SoundBuffer・Font の `loadAsync` が共有する準備枠の設定件数を返します。初期値は 4 です。
+- メインスレッドで呼び出します。実行中の準備数ではなく設定値です。設定を下げた直後は、実行中の準備数が一時的に設定値を超えることがあります。
+- キューの扱い、実行中の変更、ネイティブと Web での枠の意味は `setResourceLoadConcurrency` を参照してください。
+'''
+details.ko = '''
+- Image, SoundBuffer, Font의 `loadAsync`가 공유하는 준비 슬롯의 설정 개수를 반환합니다. 초기값은 4입니다.
+- 메인 스레드에서 호출합니다. 실행 중인 준비 수가 아니라 설정값입니다. 설정을 낮춘 직후에는 실행 중인 준비 수가 일시적으로 설정값을 초과할 수 있습니다.
+- 큐 동작, 실행 중 변경, 네이티브와 Web에서 슬롯의 의미는 `setResourceLoadConcurrency`를 참조합니다.
+'''
+related = ["setResourceLoadConcurrency", "Image::loadAsync", "SoundBuffer::loadAsync", "Font::loadAsync"]
+snippet = "int count = getResourceLoadConcurrency();"

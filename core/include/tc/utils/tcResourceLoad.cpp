@@ -24,12 +24,13 @@ struct LoadHost {
     struct Job { std::shared_ptr<ResourceLoadState> state; std::function<void()> work; };
     std::shared_ptr<ResourceLoadState> pendingHead, pendingTail;
     size_t pendingCount = 0;
-    // Bound (security): file/network preparations must not multiply decoder workers indefinitely. Local overflow waits; URL/network-buffer overflow waits in the bounded pending queue, then rejects whole requests and is counted.
+    // Shared preparation slots, configurable on main. Queued work waits for a slot.
     size_t activeLimit = 4, active = 0;
     // Bound (security): URL/network-buffer loads retain paths and preparation state. Overflow rejects whole new requests and is counted. Local files wait in a growable queue; app CPU jobs are unaffected.
     size_t pendingLimit = 64;
     // Bound (security): tiny URL/network-buffer results must not accumulate unlimited completion bookkeeping. Active + pending request credits stay held through application/cancellation; overflow rejects whole new URL/network-buffer loads and is counted. Local files wait without a request cap.
     size_t outstanding = 0;
+    size_t requestLimit = 68; // Admission budget is independent of public concurrency changes.
     // Bound (security): decoded URL/network-buffer results waiting for main must not retain unlimited memory. Overflow rejects the whole result and is counted, without dropping its failure notification. Local files keep their results and log one Notice per run on overflow.
     size_t byteLimit = size_t(1024) * 1024 * 1024, retained = 0;
     uint64_t rejected = 0;
@@ -220,7 +221,7 @@ void pumpExternalLoads() {
                     runExternalJob(job);
                     job = {};
                     std::lock_guard<std::mutex> lock(owner.mutex);
-                    if (!owner.pendingHead) {
+                    if (!owner.pendingHead || owner.active > owner.activeLimit) {
                         --owner.active;
                         owner.changed.notify_all();
                         return;
@@ -389,8 +390,7 @@ void startExternalResourceLoad(std::shared_ptr<ResourceLoadState> state, std::fu
     bool accepted = false;
     {
         std::lock_guard<std::mutex> lock(owner.mutex);
-        const size_t requestLimit = owner.pendingLimit > SIZE_MAX - owner.activeLimit
-            ? SIZE_MAX : owner.pendingLimit + owner.activeLimit;
+        const size_t requestLimit = owner.requestLimit;
         if (state->localFile || (owner.outstanding < requestLimit && owner.pendingCount < owner.pendingLimit && owner.retained < owner.byteLimit)) {
             state->preparation = std::move(preparation);
             if (owner.pendingTail) owner.pendingTail->nextPending = state;
@@ -425,6 +425,7 @@ void setResourceLoadLimitsForTests(size_t active, size_t pending, size_t bytes) 
     auto& owner = host();
     std::lock_guard<std::mutex> lock(owner.mutex);
     owner.activeLimit = active; owner.pendingLimit = pending; owner.byteLimit = bytes;
+    owner.requestLimit = pending > SIZE_MAX - active ? SIZE_MAX : pending + active;
 }
 void failResourceLoadLaunchForTests(bool fail) { host().failLaunch = fail; }
 
@@ -585,3 +586,23 @@ size_t resourceLoadWorkersForTests() {
 #endif
 }
 } // namespace trussc::internal
+
+namespace trussc {
+void setResourceLoadConcurrency(int count) {
+    if (count < 1) {
+        logNotice("ResourceLoad") << "Resource load concurrency below 1; using 1";
+        count = 1;
+    }
+    auto& owner = internal::host();
+    {
+        std::lock_guard<std::mutex> lock(owner.mutex);
+        owner.activeLimit = static_cast<size_t>(count);
+    }
+    internal::pumpExternalLoads();
+}
+int getResourceLoadConcurrency() {
+    auto& owner = internal::host();
+    std::lock_guard<std::mutex> lock(owner.mutex);
+    return static_cast<int>(owner.activeLimit);
+}
+} // namespace trussc
