@@ -127,7 +127,7 @@ class WorkflowTests(unittest.TestCase):
             for result in ('success','skipped','failure','cancelled'):
                 for docs in ('true','false'):
                     env = dict(driver.os.environ, EVENT_NAME=event, DOCS_ONLY=docs,
-                               **{key:'success' for key in ('R_CHANGES','R_BUILD','R_ANDROID','R_WEB','R_IOS','R_REF','R_HDR')},
+                               **{key:'success' for key in ('R_CHANGES','R_BUILD','R_ADDONS','R_ANDROID','R_WEB','R_IOS','R_REF','R_HDR')},
                                R_RENDER=result)
                     proc = subprocess.run(['bash','-eu','-c',script],env=env,capture_output=True,text=True, encoding="utf-8")
                     ok = result == 'success' or (result == 'skipped' and
