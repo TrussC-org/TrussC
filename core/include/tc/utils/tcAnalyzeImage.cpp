@@ -5,9 +5,130 @@
 #include <array>
 #include <climits>
 #include <stdexcept>
+#include <string_view>
 
 namespace trussc::mcp::internal {
 namespace {
+// MCP retains its existing header policy independently of Pixels loading.
+LoadResult admitMcpImageHeader(const unsigned char* bytes, size_t length) {
+    // PIC info also checks a pixel product before returning dimensions.
+    // Validate its fixed header and bounded packet table before admission.
+    if (length >= 108 && !std::memcmp(bytes, "\x53\x80\xf6\x34", 4) &&
+        !std::memcmp(bytes + 88, "PICT", 4)) {
+        // Bound (abi): PIC metadata must fit stb's ten packet descriptors. Overflow returns DecodeFailed.
+        for (size_t packet = 0; packet < 10; ++packet) {
+            const size_t at = 104 + packet * 4;
+            if (at + 4 > length || bytes[at] > 1 || bytes[at + 1] != 8 ||
+                bytes[at + 2] > 2 || !(bytes[at + 3] & 0xf0) || (bytes[at + 3] & 0x0f))
+                return LoadResult::fail(LoadError::DecodeFailed, "invalid PIC header");
+            if (!bytes[at]) return trussc::internal::admitImageDimensions((unsigned(bytes[92]) << 8) | bytes[93],
+                (unsigned(bytes[94]) << 8) | bytes[95], 4, 1);
+        }
+        return LoadResult::fail(LoadError::DecodeFailed, "invalid PIC packets");
+    }
+    // stb narrows HDR's original strtol fields to int. Validate the text
+    // before either its info or float decoder can accept a wrapped canvas.
+    if ((length >= 11 && !std::memcmp(bytes, "#?RADIANCE\n", 11)) ||
+        (length >= 7 && !std::memcmp(bytes, "#?RGBE\n", 7))) {
+        size_t at = 0;
+        auto line = [&](std::string_view& value) {
+            const size_t start = at;
+            while (at < length && bytes[at] != '\n') {
+                // stb's C-string tokens end at NUL, so it must not select a different header/resolution.
+                if (bytes[at] == 0) return false;
+                ++at;
+            }
+            if (at == length) return false;
+            value = std::string_view(reinterpret_cast<const char*>(bytes + start), at - start);
+            ++at;
+            return true;
+        };
+        auto invalid = [] { return LoadResult::fail(LoadError::DecodeFailed, "invalid HDR resolution"); };
+        std::string_view text;
+        bool format = false;
+        if (!line(text)) return invalid();
+        for (;;) {
+            if (!line(text)) return invalid();
+            if (text.empty()) break;
+            if (text == "FORMAT=32-bit_rle_rgbe") format = true;
+        }
+        // Bound (abi): HDR resolution must fit stb's 1024-byte token. Overflow returns DecodeFailed.
+        if (!text.empty() || !format || !line(text) || text.size() >= 1024 || text.substr(0, 3) != "-Y ")
+            return invalid();
+        text.remove_prefix(3);
+        auto spaces = [&] {
+            while (!text.empty() && (text.front() == ' ' || text.front() == '\t' || text.front() == '\r' ||
+                   text.front() == '\v' || text.front() == '\f')) text.remove_prefix(1);
+        };
+        auto number = [&](int& value) {
+            spaces();
+            if (!text.empty() && text.front() == '+') text.remove_prefix(1);
+            value = 0;
+            bool digits = false;
+            while (!text.empty() && text.front() >= '0' && text.front() <= '9') {
+                const int digit = text.front() - '0';
+                // Bound (abi): original HDR fields must fit positive int before narrowing. Overflow returns DecodeFailed.
+                if (value > (INT32_MAX - digit) / 10) return false;
+                value = value * 10 + digit;
+                digits = true;
+                text.remove_prefix(1);
+            }
+            return digits && value > 0;
+        };
+        int width = 0, height = 0;
+        if (!number(height)) return invalid();
+        // Match stb's supported -Y / +X orientation and separator.
+        while (!text.empty() && text.front() == ' ') text.remove_prefix(1);
+        if (text.substr(0, 3) != "+X ") return invalid();
+        text.remove_prefix(3);
+        if (!number(width)) return invalid();
+        spaces();
+        if (!text.empty()) return invalid();
+        return trussc::internal::admitImageDimensions(width, height, 4, sizeof(float));
+    }
+    // PNG's info parser applies its own axis/product limits inside IHDR.
+    // Walk supported prefix chunks with checked spans before inspecting IHDR.
+    static constexpr unsigned char signature[]{137,80,78,71,13,10,26,10};
+    if (length < 8 || std::memcmp(bytes, signature, 8)) return LoadResult::success();
+    auto be32 = [&](size_t at) {
+        return (uint32_t(bytes[at]) << 24) | (uint32_t(bytes[at + 1]) << 16) |
+               (uint32_t(bytes[at + 2]) << 8) | bytes[at + 3];
+    };
+    size_t chunk = 8;
+    for (;;) {
+        if (length - chunk < 12 || be32(chunk) > length - chunk - 12)
+            return LoadResult::fail(LoadError::DecodeFailed, "invalid PNG chunk span");
+        const size_t size = be32(chunk);
+        if (!std::memcmp(bytes + chunk + 4, "IHDR", 4)) {
+            if (size != 13) return LoadResult::fail(LoadError::DecodeFailed, "invalid PNG IHDR size");
+            break;
+        }
+        if (std::memcmp(bytes + chunk + 4, "CgBI", 4))
+            return LoadResult::fail(LoadError::DecodeFailed, "invalid PNG prefix chunk");
+        uint32_t crc = 0xffffffffu;
+        for (size_t i = chunk + 4; i < chunk + 8 + size; ++i) {
+            crc ^= bytes[i];
+            for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u)));
+        }
+        if (~crc != be32(chunk + 8 + size))
+            return LoadResult::fail(LoadError::DecodeFailed, "invalid PNG prefix CRC");
+        chunk += size + 12;
+    }
+    const auto width = be32(chunk + 8), height = be32(chunk + 12);
+    const unsigned depth = bytes[chunk + 16], color = bytes[chunk + 17];
+    const bool validDepth = (color == 0 && (depth == 1 || depth == 2 || depth == 4 || depth == 8 || depth == 16)) ||
+        (color == 3 && (depth == 1 || depth == 2 || depth == 4 || depth == 8)) ||
+        ((color == 2 || color == 4 || color == 6) && (depth == 8 || depth == 16));
+    uint32_t crc = 0xffffffffu;
+    for (size_t i = chunk + 4; i < chunk + 21; ++i) {
+        crc ^= bytes[i];
+        for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u)));
+    }
+    if (!width || !height || width > INT32_MAX || height > INT32_MAX || !validDepth ||
+        bytes[chunk + 18] || bytes[chunk + 19] || bytes[chunk + 20] > 1 || ~crc != be32(chunk + 21))
+        return LoadResult::fail(LoadError::DecodeFailed, "invalid PNG IHDR");
+    return trussc::internal::admitImageDimensions(width, height, 4, depth == 16 ? 2 : 1);
+}
 using Channels = std::array<double, 4>;
 struct Rect { int x, y, w, h; };
 int integer(const json& j) {
@@ -260,7 +381,7 @@ bool loadMcpImage(Pixels& pixels, const fs::path& source) try {
     if (!encoded) { trussc::internal::imageDecodeOutOfMemory(); return false; }
     if (std::fread(encoded.get(), 1, size_t(length), file.get()) != size_t(length) ||
         std::fgetc(file.get()) != EOF || std::ferror(file.get())) return false;
-    if (!trussc::internal::admitImageHeader(encoded.get(), size_t(length))) return false;
+    if (!admitMcpImageHeader(encoded.get(), size_t(length))) return false;
     int width = 0, height = 0, channels = 0;
     size_t denied = 0;
     bool metadata = false;
