@@ -188,6 +188,41 @@ void vorbisCommentLengths(vector<char> ogg, const fs::path& dir) {
     }
 }
 
+void changingAac(const fs::path& dir) {
+    if (std::system("command -v gst-launch-1.0 >/dev/null 2>&1 && gst-inspect-1.0 avenc_aac >/dev/null 2>&1 && gst-inspect-1.0 aacparse >/dev/null 2>&1") != 0) {
+        printf("SKIP: changing AAC requires GStreamer AAC encoder/parser\n"); return;
+    }
+    vector<char> joined;
+    size_t expectedFrames = 0;
+    for (int part = 0; part < 2; ++part) {
+        const auto path = dir / ("part-" + to_string(part) + ".aac");
+        const string command = "gst-launch-1.0 -q audiotestsrc num-buffers=32 ! audio/x-raw,channels=" +
+            to_string(part + 1) + ",rate=" + to_string(part ? 48000 : 32000) +
+            " ! audioconvert ! avenc_aac ! aacparse ! audio/mpeg,stream-format=adts ! filesink location='" + path.string() + "'";
+        check("AAC segment generated offline", std::system(command.c_str()) == 0);
+        ifstream input(path, ios::binary);
+        vector<char> bytes((istreambuf_iterator<char>(input)), istreambuf_iterator<char>());
+        check("AAC segment is nonempty", !bytes.empty());
+        SoundBuffer segment;
+        check("AAC segment loads independently", bool(segment.loadAac(path)));
+        expectedFrames += segment.numSamples;
+        joined.insert(joined.end(), bytes.begin(), bytes.end());
+    }
+    const auto path = dir / "changing.aac";
+    writeBytes(path, joined);
+    SoundBuffer file, memory;
+    const auto before = internal::audioDecodeRejections();
+    check("GStreamer loads AAC with changing input format", bool(file.loadAac(path)));
+    check("GStreamer loads changing AAC from memory", bool(memory.loadAacFromMemory(joined.data(), joined.size())));
+    // Allow resampler rounding/tail at the transition between complete segments.
+    check("changing AAC produces complete matching PCM", file.sampleRate == 44100 &&
+          file.channels == 1 && expectedFrames > 0 &&
+          abs(double(file.numSamples) - double(expectedFrames)) <= 64 &&
+          file.samples.size() == file.numSamples * size_t(file.channels) && memory.samples == file.samples &&
+          memory.channels == file.channels && memory.sampleRate == file.sampleRate && memory.numSamples == file.numSamples);
+    check("changing AAC is not counted as a rejection", internal::audioDecodeRejections() == before);
+}
+
 void longAac(const fs::path& dir) {
     // Generate a moov atom larger than 16 KiB; skip only unavailable tooling/plugins.
     if (std::system("command -v gst-launch-1.0 >/dev/null 2>&1 && gst-inspect-1.0 avenc_aac >/dev/null 2>&1 && gst-inspect-1.0 mp4mux >/dev/null 2>&1 && gst-inspect-1.0 audiotestsrc >/dev/null 2>&1") != 0) {
@@ -461,6 +496,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     check("direct Vorbis PCM keeps malloc/free contract", rawFrames == 10000 && rawPcm && rawChannels == 2 && rawRate == 8000);
     std::free(rawPcm);
 #if defined(__linux__) && !defined(__ANDROID__)
+    changingAac(dir);
     longAac(dir);
     SoundBuffer aac;
     check("GStreamer memory route remains supported", bool(aac.loadAacFromMemory(toneAac, sizeof(toneAac))) && !aac.samples.empty());

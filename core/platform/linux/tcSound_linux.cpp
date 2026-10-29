@@ -57,7 +57,7 @@ private:
             "decodebin name=decoder ! "
             "audioconvert ! "
             "audioresample ! "
-            "audio/x-raw,format=F32LE,rate=44100 ! "
+            "capsfilter name=output caps=audio/x-raw,format=F32LE,layout=interleaved,rate=44100 ! "
             "appsink name=sink sync=false";
 
         return runPipeline(pipelineStr, buffer, label, true);
@@ -156,10 +156,6 @@ private:
                     // drained, so keep pulling until it does.
                     gst_message_unref(msg);
                 }
-                if (invalidFormat_.load()) {
-                    status.reject("AAC format change", 0, 0);
-                    decodeFailed = true;
-                }
                 if (decodeFailed || eos) break;
                 continue;
             }
@@ -171,9 +167,8 @@ private:
                 gst_structure_get_int(structure, "channels", &sampleChannels);
                 gst_structure_get_int(structure, "rate", &sampleRate);
             }
-            if (invalidFormat_.load() || (sampleChannels < 1 || sampleRate < 1) ||
-                (channels && channels != sampleChannels)) {
-                status.reject("AAC format change", sampleChannels, channels);
+            if (sampleChannels < 1 || sampleRate < 1) {
+                logWarning("SoundBuffer") << "invalid AAC decoded output format";
                 decodeFailed = true;
             }
             channels = sampleChannels;
@@ -281,35 +276,29 @@ private:
         return FALSE;
     }
 
-    void checkRawCaps(GstCaps* caps) {
-        if (!caps || !gst_caps_get_size(caps)) return;
-        auto* st = gst_caps_get_structure(caps, 0);
-        if (!gst_structure_has_name(st, "audio/x-raw")) return;
-        int channels = 0, rate = 0;
-        if (!gst_structure_get_int(st, "channels", &channels) || !gst_structure_get_int(st, "rate", &rate)) return;
-        const int previousChannels = rawChannels_.exchange(channels);
-        const int previousRate = rawRate_.exchange(rate);
-        if (channels < 1 || rate < 1 ||
-            (previousChannels && previousChannels != channels) || (previousRate && previousRate != rate)) invalidFormat_.store(true);
-    }
-    static GstPadProbeReturn onCapsEvent(GstPad* pad, GstPadProbeInfo* info, gpointer data) {
-        if (!gst_pad_is_linked(pad)) return GST_PAD_PROBE_OK;
-        GstEvent* event = GST_PAD_PROBE_INFO_EVENT(info);
-        if (event && GST_EVENT_TYPE(event) == GST_EVENT_CAPS) {
-            GstCaps* caps = nullptr;
-            gst_event_parse_caps(event, &caps);
-            static_cast<GstAacDecoder*>(data)->checkRawCaps(caps);
-        }
-        return GST_PAD_PROBE_OK;
-    }
     static void onPadAdded(GstElement*, GstPad* pad, gpointer data) {
-        gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, onCapsEvent, data, nullptr);
+        auto* self = static_cast<GstAacDecoder*>(data);
         GstCaps* caps = gst_pad_get_current_caps(pad);
-        if (gst_pad_is_linked(pad)) static_cast<GstAacDecoder*>(data)->checkRawCaps(caps);
+        int channels = 0;
+        if (caps && !self->outputChannels_) {
+            auto* structure = gst_caps_get_structure(caps, 0);
+            if (gst_structure_has_name(structure, "audio/x-raw") &&
+                gst_structure_get_int(structure, "channels", &channels) && channels > 0) {
+                // Keep the first output channel count; audioconvert handles later input changes.
+                self->outputChannels_ = channels;
+                GstElement* output = gst_bin_get_by_name(GST_BIN(self->pipeline_), "output");
+                GstCaps* outputCaps = gst_caps_new_simple("audio/x-raw",
+                    "format", G_TYPE_STRING, "F32LE", "layout", G_TYPE_STRING, "interleaved",
+                    "rate", G_TYPE_INT, 44100, "channels", G_TYPE_INT, channels, nullptr);
+                g_object_set(output, "caps", outputCaps, nullptr);
+                gst_caps_unref(outputCaps);
+                gst_object_unref(output);
+            }
+        }
         if (caps) gst_caps_unref(caps);
     }
-    std::atomic<bool> invalidFormat_{false}, inputFailed_{false};
-    std::atomic<int> rawChannels_{0}, rawRate_{0};
+    int outputChannels_ = 0;
+    std::atomic<bool> inputFailed_{false};
     GstElement* pipeline_ = nullptr;
 
     // Memory buffer for appsrc
