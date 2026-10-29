@@ -556,7 +556,39 @@ static Texture* loadGltfTexture(const cgltf_texture* tex,
     if (pixels.getWidth() == 0) return nullptr;
 
     auto t = make_unique<Texture>();
-    t->allocate(pixels, TextureUsage::Immutable, true);  // with mipmaps
+    // Texture supports independent axes; cgltf supplies REPEAT for omitted
+    // sampler fields. A texture without a sampler has the same glTF default.
+    const auto* sampler = tex->sampler;
+    auto wrapMode = [](cgltf_wrap_mode wrap) {
+        switch (wrap) {
+            case cgltf_wrap_mode_clamp_to_edge: return TextureWrap::ClampToEdge;
+            case cgltf_wrap_mode_mirrored_repeat: return TextureWrap::MirroredRepeat;
+            default: return TextureWrap::Repeat;
+        }
+    };
+    const auto minFilter = sampler ? sampler->min_filter : cgltf_filter_type_undefined;
+    const bool mipmaps = minFilter != cgltf_filter_type_nearest &&
+                         minFilter != cgltf_filter_type_linear;
+    // Configure before allocation so only the final sampler is created.
+    t->setWrapU(wrapMode(sampler ? sampler->wrap_s : cgltf_wrap_mode_repeat));
+    t->setWrapV(wrapMode(sampler ? sampler->wrap_t : cgltf_wrap_mode_repeat));
+    if (sampler) {
+        if (sampler->mag_filter == cgltf_filter_type_nearest) {
+            t->setMagFilter(TextureFilter::Nearest);
+        } else if (sampler->mag_filter == cgltf_filter_type_linear) {
+            t->setMagFilter(TextureFilter::Linear);
+        }
+        // Texture uses linear mipmap interpolation. The *_MIPMAP_NEAREST
+        // modes have no matching API and retain the existing default.
+        if (minFilter == cgltf_filter_type_nearest ||
+            minFilter == cgltf_filter_type_nearest_mipmap_linear) {
+            t->setMinFilter(TextureFilter::Nearest);
+        } else if (minFilter == cgltf_filter_type_linear ||
+                   minFilter == cgltf_filter_type_linear_mipmap_linear) {
+            t->setMinFilter(TextureFilter::Linear);
+        }
+    }
+    t->allocate(pixels, TextureUsage::Immutable, mipmaps);
     Texture* raw = t.get();
     store.push_back(std::move(t));
     return raw;
