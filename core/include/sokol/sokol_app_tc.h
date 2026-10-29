@@ -11954,11 +11954,13 @@ static void _sapp_tc_x11_wait_until(double deadline) {
 #endif
 
 /*-- the run loop --------------------------------------------------------------------
-    While the main window presents normally, its blocking vsync'd swap paces
-    the loop and the XPending drain runs once per frame (upstream parity).
+    Normal main presentation relies on vsync'd native work to pace the loop;
+    a driver can block in activation or rendering instead of the swap call.
+    The XPending drain runs once per pass (upstream parity).
     When every window is timer-paced (minimized, skip_present), the loop
     sleeps in poll() on the X connection fd until the next deadline or an
-    incoming event, so the process never busy-spins. */
+    incoming event. An interval-positive main that presents without any native
+    blocking remains immediately due; it must not accelerate the secondaries. */
 static void _sapp_tc_x11_run_loop(void) {
     XFlush(_sapp_tc.display);
     while (!_sapp_tc.app.quit_ordered) {
@@ -12005,11 +12007,38 @@ static void _sapp_tc_x11_run_loop(void) {
 #endif
         /* tick every due window (re-fetch each slot: a tick or a processed
            event may have destroyed windows) */
+        bool main_drives_secondaries = false;
         for (size_t i = 0; i < _sapp_tc.window_slots; i++) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
-            // An earlier window's swap may have blocked across this deadline.
-            if (_sapp_tc_x11_window_due(w, _sapp_tc_now())) {
+            // An earlier window's native work may have crossed this deadline.
+            const double tick_now = _sapp_tc_now();
+            // The launch/main window occupies the first slot. At refresh rate
+            // the main pass is the admission clock, independent of timer phase.
+            // Lower setFps requests are frame-skipped by the window callback;
+            // native interval-zero ticks still supply its refresh-rate source.
+            // A timer tick just before this main pass has already spent the
+            // secondary's refresh credit; don't tick it again on the handoff.
+            const bool follow_main = main_drives_secondaries && w && w != _sapp_tc.app.main &&
+                w->swap_interval == 0 && w->ready && w->drawable && !w->in_tick &&
+                tick_now - w->timing.last >= 0.5 * _sapp_tc.refresh_period;
+            if (follow_main || _sapp_tc_x11_window_due(w, tick_now)) {
+                const bool is_main = w == _sapp_tc.app.main;
+                const double previous_present = w->last_present;
+                // This tick spends the main pass's refresh credit, not a
+                // periodic deadline. Re-arm the fallback timer from completion
+                // so losing the main source cannot immediately replay a tick.
+                if (follow_main) w->earliest_next = 0.0;
                 _sapp_tc_x11_tick(w);
+                // Re-fetch after callbacks. A visible interval-positive main
+                // must present near refresh cadence; EGL can block in activation
+                // or rendering instead of swap itself.
+                if (is_main && _sapp_tc.app.main == w) {
+                    const double main_period = w->last_present - previous_present;
+                    main_drives_secondaries = w->swap_interval > 0 &&
+                        !_sapp_tc_native_hidden(w) && !_sapp_tc_native_iconified(w) &&
+                        w->last_present > previous_present &&
+                        main_period >= 0.5 * _sapp_tc.refresh_period && main_period <= 1.5 * _sapp_tc.refresh_period;
+                }
             }
         }
         XFlush(_sapp_tc.display);
