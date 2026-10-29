@@ -1,3 +1,4 @@
+#include "../../../../core/tests/common/tcTestFailure.h"
 // =============================================================================
 // tcxHap tests — PCM audio byte order (#419), sample table checks (#343),
 // PCM tables, sound descriptions and playback clock (#291)
@@ -1186,8 +1187,8 @@ public:
         const size_t headerSize = (bytes[sample.offset] == 0 &&
                                    bytes[sample.offset + 1] == 0 &&
                                    bytes[sample.offset + 2] == 0) ? 8 : 4;
-        bytes[sample.offset + headerSize] = 0x80;
-        bytes[sample.offset + headerSize + 1] = 0x80;
+        bytes[sample.offset + headerSize] = static_cast<char>(0x80);
+        bytes[sample.offset + headerSize + 1] = static_cast<char>(0x80);
         bytes[sample.offset + headerSize + 2] = 0x04; // 65536 bytes (varint)
         written = writeBytes(tmp, bytes);
         check("decoder failure fixture written", written);
@@ -1460,7 +1461,11 @@ public:
     }
 };
 
+int runRecordedFormatsTests();
+
 int main(int argc, char** argv) {
+    if (argc > 1 && string(argv[1]) == "--recorded-formats") return runRecordedFormatsTests();
+    g_fail += runRecordedFormatsTests();
     if (argc > 1 && string(argv[1]) == "--shader-failure") {
         WindowSettings settings;
         settings.setSize(64, 64);

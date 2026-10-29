@@ -92,6 +92,7 @@ TC_CORE_TEST_MAIN() {
     // go, like an OSC input. Its constructor also starts Winsock, which the
     // raw socket calls below rely on.
     UdpSocket rx;
+    rx.setBindAddress("127.0.0.1");
     const int port = freeUdpPort();
     check("found a free UDP port", port != 0);
     if (port == 0) return 1;

@@ -7,11 +7,14 @@
 // ensureWinsock().
 // =============================================================================
 #pragma once
+#include <string>
 
 #ifdef _WIN32
     #include <winsock2.h>
+    #include <ws2tcpip.h>
 #else
     #include <sys/socket.h>
+    #include <netinet/in.h>
 #endif
 
 // Writing to a socket the peer already closed raises SIGPIPE, whose default
@@ -37,6 +40,13 @@ namespace internal {
 // once that count ran out every socket in the process stopped working.
 // Returns false if WSAStartup() failed. Always true on other platforms.
 bool ensureWinsock();
+
+// Numeric IPv4 only; never resolve a hostname or truncate an embedded NUL.
+// Returns a bounded diagnostic on failure, an empty string on success.
+std::string parseBindAddress(const std::string& address, in_addr& parsed);
+// Save only a valid literal or a bounded diagnostic; failure is reported at start/bind.
+void saveBindAddress(const std::string& input, std::string& address, std::string& error);
+bool isBindAddressUnavailable(int code);
 
 // Belt and braces for Apple SDKs that predate MSG_NOSIGNAL (see TC_SEND_FLAGS).
 // A no-op where SO_NOSIGPIPE does not exist.

@@ -4448,6 +4448,10 @@ typedef struct sg_stats {
     _SG_LOGITEM_XMACRO(WGPU_BINDGROUPS_POOL_EXHAUSTED, "bindgroups pool exhausted (increase sg_desc.bindgroups_cache_size) (wgpu)") \
     _SG_LOGITEM_XMACRO(WGPU_BINDGROUPSCACHE_SIZE_GREATER_ONE, "sg_desc.wgpu.bindgroups_cache_size must be > 1 (wgpu)") \
     _SG_LOGITEM_XMACRO(WGPU_BINDGROUPSCACHE_SIZE_POW2, "sg_desc.wgpu.bindgroups_cache_size must be a power of 2 (wgpu)") \
+    _SG_LOGITEM_XMACRO(WGPU_UNIFORM_BUFFER_GROWN, "per-frame uniform buffer auto-grown (webgpu); use sg_desc.uniform_buffer_size to pre-allocate") \
+    _SG_LOGITEM_XMACRO(WGPU_UNIFORM_UPLOAD_FAILED, "WebGPU uniform upload failed (allocation, binding or device limit); skipping uploads and draws until next commit") \
+    _SG_LOGITEM_XMACRO(WGPU_UNIFORM_BUFFER_CREATION_FAILED, "WebGPU uniform buffer or bind group creation failed on the GPU (out of memory or validation); returned to the previous buffer, the affected frame may be dropped") \
+    _SG_LOGITEM_XMACRO(WGPU_UNIFORM_CHECK_CAPTURED_ERROR, "WebGPU error captured while new uniform resources were unconfirmed (message follows; it may come from a failed uniform creation reported separately)") \
     _SG_LOGITEM_XMACRO(WGPU_CREATEBINDGROUP_FAILED, "wgpuDeviceCreateBindGroup failed") \
     _SG_LOGITEM_XMACRO(WGPU_CREATE_BUFFER_FAILED, "wgpuDeviceCreateBuffer() failed") \
     _SG_LOGITEM_XMACRO(WGPU_CREATE_TEXTURE_FAILED, "wgpuDeviceCreateTexture() failed") \
@@ -5514,7 +5518,7 @@ inline int sg_append_buffer(sg_buffer buf_id, const sg_range& data) { return sg_
 
 #include <stdlib.h> // malloc, free, qsort
 #include <string.h> // memset
-#include <stdio.h> // snprintf ([TrussC modification] metal uniform-buffer auto-grow log)
+#include <stdio.h> // snprintf ([TrussC modification] uniform-buffer growth logs)
 #include <limits.h> // INT_MAX ([TrussC] checked Metal uniform cursor growth)
 #include <float.h> // FLT_MAX
 
@@ -6244,6 +6248,7 @@ enum {
     _SG_DEFAULT_VIEW_POOL_SIZE = 256,
     _SG_DEFAULT_UB_SIZE = 4 * 1024 * 1024,
     _SG_DEFAULT_MAX_COMMIT_LISTENERS = 1024,
+    // Bound (cache): direct-mapped resource groups reuse a finite cache. Overflow evicts or replaces.
     _SG_DEFAULT_WGPU_BINDGROUP_CACHE_SIZE = 1024,
     _SG_DEFAULT_VK_COPY_STAGING_SIZE = (4 * 1024 * 1024),
     _SG_DEFAULT_VK_STREAM_STAGING_SIZE = (16 * 1024 * 1024),
@@ -6936,6 +6941,7 @@ typedef struct _sg_shader_s {
         _sg_wgpu_shader_func_t compute_func;
         WGPUBindGroupLayout bgl_ub;
         WGPUBindGroup bg_ub;
+        uint64_t ub_generation; // [TrussC] lazily replace groups after uniform growth
         WGPUBindGroupLayout bgl_view_smp;
         // a mapping of sokol-gfx bind slots to setBindGroup dynamic-offset-array indices
         uint8_t ub_num_dynoffsets;
@@ -6975,6 +6981,30 @@ typedef struct {
     uint8_t* staging;   // intermediate buffer for uniform data updates
     WGPUBuffer buf;     // the GPU-side uniform buffer
     bool dirty;
+    // [TrussC] Failed uploads suppress draws until commit; diagnostics are once per backend.
+    bool failed;
+    bool error_logged;
+    bool growth_logged;
+    uint64_t generation;
+    // [TrussC] WebGPU reports GPU creation failures asynchronously through error
+    // scopes. The last confirmed buffer stays referenced until the current one is
+    // confirmed; a failure reported for the current token rolls back to it.
+    // Each buffer creation starts a generation (token); its groups share it.
+    WGPUBuffer good_buf;
+    uint32_t good_bytes;
+    // Empty groups (shaders without uniform blocks) reference no buffer and are
+    // kept across growth and recovery.
+    uint64_t base_bytes;        // initial reservation; a missing buffer is recreated at this size
+    uint32_t first_token;       // first token of this backend; older callbacks are stale
+    uint32_t scope_token;       // current generation: the buffer and the groups built on it
+    uint32_t scope_ok;          // NoError results for the current buffer's two scopes
+    uint32_t scope_pending;     // creation scope results not yet delivered
+    uint32_t use_pending;       // containment scope results not yet delivered
+    bool scope_failed;          // a creation scope reported failure for scope_token
+    bool superseded_failed;     // ... for a replaced generation (reported; nothing to roll back)
+    bool empty_failed;          // an empty group's creation scope reported failure
+    uint32_t failed_token;      // newest generation whose creation scope reported failure
+    uint32_t reported_token;    // newest failed generation already reported (one Error each)
     uint32_t bind_offsets[SG_MAX_UNIFORMBLOCK_BINDSLOTS];   // NOTE: index is sokol-gfx ub slot index!
 } _sg_wgpu_uniform_system_t;
 
@@ -7045,6 +7075,7 @@ typedef struct {
     _sg_wgpu_bindings_cache_t bindings_cache;
     _sg_wgpu_bindgroups_cache_t bindgroups_cache;
     _sg_wgpu_bindgroups_pool_t bindgroups_pool;
+    bool bindgroup_error_logged; // [TrussC] unexpected failure, not ordinary cache eviction
 } _sg_wgpu_backend_t;
 
 #elif defined(SOKOL_VULKAN)
@@ -17568,24 +17599,358 @@ _SOKOL_PRIVATE void _sg_wgpu_init_caps(void) {
     }
 }
 
+// [TrussC] Allocation is transactional and fallible (the generic _sg_malloc panics).
+_SOKOL_PRIVATE bool _sg_wgpu_uniform_fail(void) {
+    _sg.wgpu.uniform.failed = true;
+    if (!_sg.wgpu.uniform.error_logged) {
+        _sg.wgpu.uniform.error_logged = true;
+        _SG_ERROR(WGPU_UNIFORM_UPLOAD_FAILED);
+    }
+    return false;
+}
+
+// [TrussC] Error-scope tokens are unique for the process lifetime, so a callback
+// that fires after sg_shutdown() or a later sg_setup() never matches live state.
+// _sg is static storage (never freed); the callbacks only compare and set flags.
+static uint32_t _sg_wgpu_uniform_scope_serial;
+
+_SOKOL_PRIVATE uint32_t _sg_wgpu_uniform_next_token(void) {
+    if (0 == ++_sg_wgpu_uniform_scope_serial) { ++_sg_wgpu_uniform_scope_serial; }
+    return _sg_wgpu_uniform_scope_serial;
+}
+
+// What one pair of creation scopes wraps (userdata2 of the creation callback).
+enum {
+    _SG_WGPU_UNIFORM_SCOPE_GROUP = 0,       // a group that references the buffer
+    _SG_WGPU_UNIFORM_SCOPE_BUFFER = 1,      // the buffer itself
+    _SG_WGPU_UNIFORM_SCOPE_EMPTY_GROUP = 2, // a group without entries (no buffer)
+};
+
+// Creation result (userdata1 = token, userdata2 = _SG_WGPU_UNIFORM_SCOPE_*).
+// No order between results is assumed: each one only sets flags for its token.
+_SOKOL_PRIVATE void _sg_wgpu_uniform_scope_callback(WGPUPopErrorScopeStatus status, WGPUErrorType type, WGPUStringView message, void* userdata1, void* userdata2) {
+    _SOKOL_UNUSED(message);
+    const uint32_t token = (uint32_t)(uintptr_t)userdata1;
+    const uintptr_t kind = (uintptr_t)userdata2;
+    _sg_wgpu_uniform_system_t* u = &_sg.wgpu.uniform;
+    // Stale backend (or after teardown): not ours.
+    if (!_sg.wgpu.valid || (token < u->first_token)) {
+        return;
+    }
+    if (u->scope_pending > 0) { u->scope_pending--; }
+    // Cancelled at device/instance teardown: no verdict.
+    if (status != WGPUPopErrorScopeStatus_Success) {
+        return;
+    }
+    if (kind == _SG_WGPU_UNIFORM_SCOPE_EMPTY_GROUP) {
+        // Empty groups outlive generations; whichever one failed is replaced.
+        if (type != WGPUErrorType_NoError) { u->empty_failed = true; }
+        return;
+    }
+    // A token newer than the current one was abandoned after a null return,
+    // already reported.
+    if (token > u->scope_token) {
+        return;
+    }
+    if (type != WGPUErrorType_NoError) {
+        if (token > u->failed_token) { u->failed_token = token; }
+        // A replaced generation has nothing left to roll back, but its failure
+        // is still reported (draws that used it may have lost their frame).
+        if (token == u->scope_token) { u->scope_failed = true; }
+        else { u->superseded_failed = true; }
+    } else if ((kind == _SG_WGPU_UNIFORM_SCOPE_BUFFER) && (token == u->scope_token)) {
+        u->scope_ok++;
+    }
+}
+
+// Containment result (userdata1 = token current when the scopes were pushed).
+_SOKOL_PRIVATE void _sg_wgpu_uniform_use_callback(WGPUPopErrorScopeStatus status, WGPUErrorType type, WGPUStringView message, void* userdata1, void* userdata2) {
+    _SOKOL_UNUSED(userdata2);
+    const uint32_t token = (uint32_t)(uintptr_t)userdata1;
+    _sg_wgpu_uniform_system_t* u = &_sg.wgpu.uniform;
+    if (!_sg.wgpu.valid || (token < u->first_token)) {
+        return;
+    }
+    if (u->use_pending > 0) { u->use_pending--; }
+    if ((status != WGPUPopErrorScopeStatus_Success) || (type == WGPUErrorType_NoError)) {
+        return;
+    }
+    // Every captured error is logged with its message; none is attributed or
+    // dropped. It can be the app's own error, or a validation error from using
+    // a uniform resource whose failed creation the recovery Error also reports.
+    // Bound (platform): the logged WebGPU message is cut at 200 bytes.
+    const char* text = message.data ? message.data : "";
+    size_t length = message.data ? message.length : 0;
+    if (length == WGPU_STRLEN) {
+        length = 0;
+        while ((length < 200) && text[length]) { length++; }
+    }
+    if (length > 200) { length = 200; }
+    char line[320];
+    snprintf(line, sizeof(line), "WebGPU error captured while new uniform resources were unconfirmed (webgpu): %.*s", (int)length, text);
+    _sg_log(SG_LOGITEM_WGPU_UNIFORM_CHECK_CAPTURED_ERROR, 1, line, __LINE__);
+}
+
+// Validation outside, OutOfMemory inside; popped in order.
+_SOKOL_PRIVATE void _sg_wgpu_uniform_push_scopes(void) {
+    wgpuDevicePushErrorScope(_sg.wgpu.dev, WGPUErrorFilter_Validation);
+    wgpuDevicePushErrorScope(_sg.wgpu.dev, WGPUErrorFilter_OutOfMemory);
+}
+
+_SOKOL_PRIVATE void _sg_wgpu_uniform_pop_scopes_with(WGPUPopErrorScopeCallback callback, uint32_t userdata1, uint32_t userdata2) {
+    _SG_STRUCT(WGPUPopErrorScopeCallbackInfo, cb_info);
+    // Emscripten resolves spontaneous callbacks from its event loop on the main
+    // thread; native Dawn delivers them in wgpuInstanceProcessEvents().
+    #if defined(__EMSCRIPTEN__)
+    cb_info.mode = WGPUCallbackMode_AllowSpontaneous;
+    #else
+    cb_info.mode = WGPUCallbackMode_AllowProcessEvents;
+    #endif
+    cb_info.callback = callback;
+    cb_info.userdata1 = (void*)(uintptr_t)userdata1;
+    cb_info.userdata2 = (void*)(uintptr_t)userdata2;
+    wgpuDevicePopErrorScope(_sg.wgpu.dev, cb_info);
+    wgpuDevicePopErrorScope(_sg.wgpu.dev, cb_info);
+}
+
+// Wraps one GPU creation of the current generation (kind: _SG_WGPU_UNIFORM_SCOPE_*).
+_SOKOL_PRIVATE void _sg_wgpu_uniform_pop_scopes(uint32_t kind) {
+    _sg_wgpu_uniform_pop_scopes_with(_sg_wgpu_uniform_scope_callback, _sg.wgpu.uniform.scope_token, kind);
+    _sg.wgpu.uniform.scope_pending += 2;
+}
+
+// [TrussC] Until its creation scopes resolve, the current buffer or a group may
+// be an error object. Writing it, and finishing/submitting commands that bind
+// it, raise errors outside the creation scopes; those calls are wrapped too.
+_SOKOL_PRIVATE bool _sg_wgpu_uniform_contain_begin(void) {
+    const _sg_wgpu_uniform_system_t* u = &_sg.wgpu.uniform;
+    if ((0 == u->scope_pending) && !u->scope_failed && !u->superseded_failed && !u->empty_failed) {
+        return false;
+    }
+    _sg_wgpu_uniform_push_scopes();
+    return true;
+}
+
+_SOKOL_PRIVATE void _sg_wgpu_uniform_contain_end(void) {
+    _sg_wgpu_uniform_pop_scopes_with(_sg_wgpu_uniform_use_callback, _sg.wgpu.uniform.scope_token, 0);
+    _sg.wgpu.uniform.use_pending += 2;
+}
+
+_SOKOL_PRIVATE bool _sg_wgpu_shader_has_uniform_blocks(const _sg_shader_t* shd) {
+    for (size_t i = 0; i < SG_MAX_UNIFORMBLOCK_BINDSLOTS; i++) {
+        if (shd->cmn.uniform_blocks[i].stage != SG_SHADERSTAGE_NONE) { return true; }
+    }
+    return false;
+}
+
+// Old shader groups reference a previous (or errored) buffer. Encoded commands
+// retain their own groups; idle shaders must not pin a previous peak buffer.
+// Empty groups reference no buffer and are released only when one failed.
+_SOKOL_PRIVATE void _sg_wgpu_uniform_release_groups(bool buffer_groups, bool empty_groups) {
+    if (buffer_groups) { _sg.wgpu.uniform.generation++; }
+    for (int i = 0; i < _sg.pools.shader_pool.size; i++) {
+        _sg_shader_t* shader = &_sg.pools.shaders[i];
+        if (!shader->wgpu.bg_ub) { continue; }
+        const bool uses_buffer = _sg_wgpu_shader_has_uniform_blocks(shader);
+        if (uses_buffer ? buffer_groups : empty_groups) {
+            wgpuBindGroupRelease(shader->wgpu.bg_ub);
+            shader->wgpu.bg_ub = 0;
+        }
+    }
+}
+
+// Releases every uniform group (both kinds).
+_SOKOL_PRIVATE void _sg_wgpu_uniform_retire_groups(void) {
+    _sg_wgpu_uniform_release_groups(true, true);
+}
+
+// Runs at every frame's first pass (offset 0 after the per-frame reset), whether
+// or not the frame uploads uniforms, when no command of the frame is recorded yet.
+_SOKOL_PRIVATE void _sg_wgpu_uniform_recover(void) {
+    _sg_wgpu_uniform_system_t* u = &_sg.wgpu.uniform;
+    SOKOL_ASSERT(0 == u->offset);
+    const bool buffer_confirmed = u->scope_ok >= 2;
+    const bool group_retire = u->scope_failed;
+    const bool empty_retire = u->empty_failed;
+    // One Error per failed generation: late results of an already reported
+    // generation stay silent, a later distinct failure is reported again.
+    const bool report_generation = (u->scope_failed || u->superseded_failed) && (u->failed_token > u->reported_token);
+    const bool report = report_generation || u->empty_failed;
+    if (u->scope_failed) {
+        // Draws recorded since the failed creation used an error object; that
+        // frame may already be lost. Return to the last good buffer and size.
+        if (buffer_confirmed) {
+            // Only a bind group failed; the buffer itself is valid.
+            if (u->good_buf) { wgpuBufferRelease(u->good_buf); }
+        } else if (u->good_buf) {
+            if (u->buf) { wgpuBufferRelease(u->buf); }
+            u->buf = u->good_buf;
+            u->num_bytes = u->good_bytes;
+        } else {
+            // No confirmed predecessor: drop the errored buffer. The next upload
+            // or group that needs a buffer creates one at the initial reservation.
+            if (u->buf) { wgpuBufferRelease(u->buf); }
+            u->buf = 0;
+            u->num_bytes = 0;
+        }
+        u->good_buf = 0;
+        u->good_bytes = 0;
+        u->scope_failed = false;
+        // Treat the restored buffer as confirmed under a new token; late results
+        // of the failed generation then count as superseded (already reported).
+        u->scope_token = _sg_wgpu_uniform_next_token();
+        u->scope_ok = 2;
+    } else if (buffer_confirmed && u->good_buf) {
+        wgpuBufferRelease(u->good_buf);
+        u->good_buf = 0;
+        u->good_bytes = 0;
+    }
+    // Groups built on the failed generation are rebuilt lazily. Valid empty
+    // groups stay: they never referenced the buffer. After an empty group
+    // failed, every empty group is rebuilt (which one failed is not tracked).
+    if (group_retire || empty_retire) { _sg_wgpu_uniform_release_groups(group_retire, empty_retire); }
+    u->superseded_failed = false;
+    u->empty_failed = false;
+    if (report) {
+        if (report_generation) { u->reported_token = u->failed_token; }
+        _SG_ERROR(WGPU_UNIFORM_BUFFER_CREATION_FAILED);
+    }
+}
+
+_SOKOL_PRIVATE void _sg_wgpu_uniform_system_on_frame_begin(void) {
+    _sg_wgpu_uniform_recover();
+}
+
+_SOKOL_PRIVATE bool _sg_wgpu_uniform_reserve(uint64_t required) {
+    _sg_wgpu_uniform_system_t* u = &_sg.wgpu.uniform;
+    if (u->buf && required <= u->num_bytes) {
+        return true;
+    }
+    // Bound (gpu): dynamic offsets are uint32 and the device limits buffer size.
+    // Unrepresentable demand skips uploads/draws until commit with one Error.
+    uint64_t limit = _sg.wgpu.limits.maxBufferSize;
+    if (limit > UINT32_MAX) { limit = UINT32_MAX; }
+    limit &= ~((uint64_t)255);
+    if (required > limit) { return _sg_wgpu_uniform_fail(); }
+    uint64_t capacity = u->num_bytes ? (uint64_t)u->num_bytes * 2 : required;
+    if (capacity < required) { capacity = required; }
+    // No buffer (initial creation failed): recreate at least the initial reservation.
+    if (!u->buf && (capacity < u->base_bytes)) { capacity = u->base_bytes; }
+    if (capacity > limit) { capacity = limit; }
+    uint8_t* staging = (uint8_t*)(_sg.desc.allocator.alloc_fn
+        ? _sg.desc.allocator.alloc_fn((size_t)capacity, _sg.desc.allocator.user_data)
+        : malloc((size_t)capacity));
+    if (!staging) { return _sg_wgpu_uniform_fail(); }
+    _SG_STRUCT(WGPUBufferDescriptor, desc);
+    desc.size = capacity;
+    desc.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+    // A non-null handle is not success: out-of-memory and validation failures
+    // return an error object and are reported later through the error scopes.
+    const uint32_t previous_token = u->scope_token;
+    u->scope_token = _sg_wgpu_uniform_next_token();
+    _sg_wgpu_uniform_push_scopes();
+    WGPUBuffer buffer = wgpuDeviceCreateBuffer(_sg.wgpu.dev, &desc);
+    _sg_wgpu_uniform_pop_scopes(_SG_WGPU_UNIFORM_SCOPE_BUFFER);
+    if (!buffer) {
+        // The scopes above carry the abandoned new token; the callback ignores it.
+        u->scope_token = previous_token;
+        _sg_free(staging);
+        return _sg_wgpu_uniform_fail();
+    }
+    if (u->offset) {
+        memcpy(staging, u->staging, u->offset);
+        // Already encoded draws use the old buffer. Upload its immutable prefix
+        // before releasing our reference. WebGPU commands/bind groups retain it
+        // through submission/completion: never call wgpuBufferDestroy here.
+        // The old buffer may itself be an unconfirmed error object.
+        const bool contain = _sg_wgpu_uniform_contain_begin();
+        wgpuQueueWriteBuffer(_sg.wgpu.queue, u->buf, 0, u->staging, u->offset);
+        if (contain) { _sg_wgpu_uniform_contain_end(); }
+        _sg_stats_add(wgpu.uniforms.size_write_buffer, u->offset);
+    }
+    const uint32_t previous_size = u->num_bytes;
+    if (u->buf) {
+        if (u->scope_ok >= 2) {
+            // Confirmed: keep it as the rollback target until the new one is.
+            if (u->good_buf) { wgpuBufferRelease(u->good_buf); }
+            u->good_buf = u->buf;
+            u->good_bytes = previous_size;
+        } else {
+            // Unconfirmed intermediate: keep the older confirmed buffer instead.
+            wgpuBufferRelease(u->buf);
+        }
+    }
+    if (u->staging) { _sg_free(u->staging); }
+    u->staging = staging;
+    u->buf = buffer;
+    u->num_bytes = (uint32_t)capacity;
+    u->scope_ok = 0;
+    // A failure already reported for the replaced generation is still owed one Error.
+    if (u->scope_failed) { u->superseded_failed = true; }
+    u->scope_failed = false;
+    _sg_wgpu_uniform_release_groups(true, false);
+    u->dirty = true;
+    if (previous_size && !u->growth_logged) {
+        u->growth_logged = true;
+        char message[256];
+        snprintf(message, sizeof(message),
+            "per-frame uniform buffer auto-grown %u -> %u bytes (webgpu); use sg_desc.uniform_buffer_size to pre-allocate",
+            (unsigned)previous_size, (unsigned)u->num_bytes);
+        _sg_log(SG_LOGITEM_WGPU_UNIFORM_BUFFER_GROWN, 2, message, __LINE__);
+    }
+    return true;
+}
+
 _SOKOL_PRIVATE void _sg_wgpu_uniform_system_init(const sg_desc* desc) {
-    SOKOL_ASSERT(0 == _sg.wgpu.uniform.staging);
-    SOKOL_ASSERT(0 == _sg.wgpu.uniform.buf);
+    // Bound (gpu): each dynamic binding spans 64 KiB even for a smaller block.
+    // Keep that slack beyond every aligned upload; total frame storage grows.
+    const uint64_t required = (((uint64_t)desc->uniform_buffer_size + 255) & ~((uint64_t)255))
+        + _SG_WGPU_MAX_UNIFORM_UPDATE_SIZE;
+    _sg_wgpu_uniform_system_t* u = &_sg.wgpu.uniform;
+    u->base_bytes = required;
+    u->first_token = _sg_wgpu_uniform_next_token();
+    u->scope_token = u->first_token;
+    _sg_wgpu_uniform_reserve(required);
+}
 
-    // Add the max-uniform-update size (64 KB) to the requested buffer size,
-    // this is to prevent validation errors in the WebGPU implementation
-    // if the entire buffer size is used per frame. 64 KB is the allowed
-    // max uniform update size on NVIDIA
-    //
-    // FIXME: is this still needed?
-    _sg.wgpu.uniform.num_bytes = (uint32_t)(desc->uniform_buffer_size + _SG_WGPU_MAX_UNIFORM_UPDATE_SIZE);
-    _sg.wgpu.uniform.staging = (uint8_t*)_sg_malloc(_sg.wgpu.uniform.num_bytes);
-
-    _SG_STRUCT(WGPUBufferDescriptor, ub_desc);
-    ub_desc.size = _sg.wgpu.uniform.num_bytes;
-    ub_desc.usage = WGPUBufferUsage_Uniform|WGPUBufferUsage_CopyDst;
-    _sg.wgpu.uniform.buf = wgpuDeviceCreateBuffer(_sg.wgpu.dev, &ub_desc);
-    SOKOL_ASSERT(_sg.wgpu.uniform.buf);
+// [TrussC] Only publish a replacement group once creation succeeds. Old groups
+// remain retained by recorded commands; offsets into the copied staging stay valid.
+// An asynchronous creation failure is latched (for the current generation, or
+// as an empty-group failure), and the next frame's recovery retires the affected
+// groups, so none stays cached as valid.
+_SOKOL_PRIVATE bool _sg_wgpu_uniform_bindgroup(_sg_shader_t* shd) {
+    // An empty group (no uniform blocks) references no buffer: it needs none and
+    // stays valid across growth and recovery.
+    const bool uses_buffer = _sg_wgpu_shader_has_uniform_blocks(shd);
+    if (shd->wgpu.bg_ub && (!uses_buffer || (shd->wgpu.ub_generation == _sg.wgpu.uniform.generation))) {
+        return true;
+    }
+    // No buffer (an initial creation failed with no confirmed predecessor):
+    // create one at the initial reservation now rather than fail this group.
+    if (uses_buffer && !_sg.wgpu.uniform.buf && !_sg_wgpu_uniform_reserve(_sg.wgpu.uniform.base_bytes)) {
+        return false;
+    }
+    _SG_STRUCT(WGPUBindGroupEntry, entries[SG_MAX_UNIFORMBLOCK_BINDSLOTS]);
+    size_t count = 0;
+    for (size_t i = 0; i < SG_MAX_UNIFORMBLOCK_BINDSLOTS; i++) {
+        if (shd->cmn.uniform_blocks[i].stage == SG_SHADERSTAGE_NONE) { continue; }
+        entries[count].binding = shd->wgpu.ub_grp0_bnd_n[i];
+        entries[count].buffer = _sg.wgpu.uniform.buf;
+        entries[count].size = _SG_WGPU_MAX_UNIFORM_UPDATE_SIZE;
+        count++;
+    }
+    _SG_STRUCT(WGPUBindGroupDescriptor, desc);
+    desc.layout = shd->wgpu.bgl_ub;
+    desc.entryCount = count;
+    desc.entries = entries;
+    _sg_wgpu_uniform_push_scopes();
+    WGPUBindGroup group = wgpuDeviceCreateBindGroup(_sg.wgpu.dev, &desc);
+    _sg_wgpu_uniform_pop_scopes(uses_buffer ? _SG_WGPU_UNIFORM_SCOPE_GROUP : _SG_WGPU_UNIFORM_SCOPE_EMPTY_GROUP);
+    if (!group) { return _sg_wgpu_uniform_fail(); }
+    if (shd->wgpu.bg_ub) { wgpuBindGroupRelease(shd->wgpu.bg_ub); }
+    shd->wgpu.bg_ub = group;
+    shd->wgpu.ub_generation = _sg.wgpu.uniform.generation;
+    return true;
 }
 
 _SOKOL_PRIVATE void _sg_wgpu_uniform_system_discard(void) {
@@ -17593,17 +17958,33 @@ _SOKOL_PRIVATE void _sg_wgpu_uniform_system_discard(void) {
         wgpuBufferRelease(_sg.wgpu.uniform.buf);
         _sg.wgpu.uniform.buf = 0;
     }
+    if (_sg.wgpu.uniform.good_buf) {
+        wgpuBufferRelease(_sg.wgpu.uniform.good_buf);
+        _sg.wgpu.uniform.good_buf = 0;
+    }
+    // Pending scope callbacks must not match this backend again (a later one
+    // starts above every token issued so far).
+    _sg.wgpu.uniform.first_token = UINT32_MAX;
+    _sg.wgpu.uniform.scope_token = 0;
+    _sg.wgpu.uniform.scope_pending = 0;
+    _sg.wgpu.uniform.use_pending = 0;
+    _sg.wgpu.uniform.scope_failed = false;
+    _sg.wgpu.uniform.superseded_failed = false;
+    _sg.wgpu.uniform.empty_failed = false;
+    _sg.wgpu.uniform.failed_token = 0;
+    _sg.wgpu.uniform.reported_token = 0;
     if (_sg.wgpu.uniform.staging) {
         _sg_free(_sg.wgpu.uniform.staging);
         _sg.wgpu.uniform.staging = 0;
     }
 }
 
-_SOKOL_PRIVATE void _sg_wgpu_uniform_system_set_bindgroup(void) {
+_SOKOL_PRIVATE bool _sg_wgpu_uniform_system_set_bindgroup(void) {
     SOKOL_ASSERT(_sg.wgpu.uniform.dirty);
     _sg.wgpu.uniform.dirty = false;
     const _sg_pipeline_t* pip = _sg_pipeline_ref_ptr(&_sg.cur_pip);
-    const _sg_shader_t* shd = _sg_shader_ref_ptr(&pip->cmn.shader);
+    _sg_shader_t* shd = _sg_shader_ref_ptr(&pip->cmn.shader);
+    if (!_sg_wgpu_uniform_bindgroup(shd)) { return false; }
     // NOTE: dynamic offsets must be in binding order, not in BindGroupEntry order
     SOKOL_ASSERT(shd->wgpu.ub_num_dynoffsets < SG_MAX_UNIFORMBLOCK_BINDSLOTS);
     _SG_STRUCT(uint32_t, dyn_offsets[SG_MAX_UNIFORMBLOCK_BINDSLOTS]);
@@ -17630,6 +18011,7 @@ _SOKOL_PRIVATE void _sg_wgpu_uniform_system_set_bindgroup(void) {
             shd->wgpu.ub_num_dynoffsets,
             dyn_offsets);
     }
+    return true;
 }
 
 _SOKOL_PRIVATE void _sg_wgpu_uniform_system_on_apply_pipeline(void) {
@@ -17637,9 +18019,12 @@ _SOKOL_PRIVATE void _sg_wgpu_uniform_system_on_apply_pipeline(void) {
 }
 
 _SOKOL_PRIVATE void _sg_wgpu_uniform_system_on_commit(void) {
-    wgpuQueueWriteBuffer(_sg.wgpu.queue, _sg.wgpu.uniform.buf, 0, _sg.wgpu.uniform.staging, _sg.wgpu.uniform.offset);
+    if (_sg.wgpu.uniform.offset) {
+        wgpuQueueWriteBuffer(_sg.wgpu.queue, _sg.wgpu.uniform.buf, 0, _sg.wgpu.uniform.staging, _sg.wgpu.uniform.offset);
+    }
     _sg_stats_add(wgpu.uniforms.size_write_buffer, _sg.wgpu.uniform.offset);
     _sg.wgpu.uniform.offset = 0;
+    _sg.wgpu.uniform.failed = false;
     _sg_clear(_sg.wgpu.uniform.bind_offsets, sizeof(_sg.wgpu.uniform.bind_offsets));
 }
 
@@ -17686,7 +18071,10 @@ _SOKOL_PRIVATE _sg_wgpu_bindgroup_handle_t _sg_wgpu_alloc_bindgroup(void) {
         res.id = _sg_slot_alloc(&p->pool, &p->bindgroups[slot_index].slot, slot_index);
     } else {
         res.id = SG_INVALID_ID;
-        _SG_ERROR(WGPU_BINDGROUPS_POOL_EXHAUSTED);
+        if (!_sg.wgpu.bindgroup_error_logged) {
+            _sg.wgpu.bindgroup_error_logged = true;
+            _SG_ERROR(WGPU_BINDGROUPS_POOL_EXHAUSTED);
+        }
     }
     return res;
 }
@@ -17867,7 +18255,10 @@ _SOKOL_PRIVATE _sg_wgpu_bindgroup_t* _sg_wgpu_create_bindgroup(_sg_bindings_ptrs
     bg_desc.entries = bg_entries;
     bg->bindgroup = wgpuDeviceCreateBindGroup(_sg.wgpu.dev, &bg_desc);
     if (bg->bindgroup == 0) {
-        _SG_ERROR(WGPU_CREATEBINDGROUP_FAILED);
+        if (!_sg.wgpu.bindgroup_error_logged) {
+            _sg.wgpu.bindgroup_error_logged = true;
+            _SG_ERROR(WGPU_CREATEBINDGROUP_FAILED);
+        }
         bg->slot.state = SG_RESOURCESTATE_FAILED;
         return bg;
     }
@@ -17879,7 +18270,7 @@ _SOKOL_PRIVATE _sg_wgpu_bindgroup_t* _sg_wgpu_create_bindgroup(_sg_bindings_ptrs
 _SOKOL_PRIVATE void _sg_wgpu_discard_bindgroup(_sg_wgpu_bindgroup_t* bg) {
     SOKOL_ASSERT(bg);
     _sg_stats_inc(wgpu.bindings.num_discard_bindgroup);
-    if (bg->slot.state == SG_RESOURCESTATE_VALID) {
+    if ((bg->slot.state == SG_RESOURCESTATE_VALID) || (bg->slot.state == SG_RESOURCESTATE_FAILED)) {
         if (bg->bindgroup) {
             wgpuBindGroupRelease(bg->bindgroup);
             bg->bindgroup = 0;
@@ -18085,6 +18476,10 @@ _SOKOL_PRIVATE bool _sg_wgpu_apply_bindings_bindgroup(_sg_bindings_ptrs_t* bnd) 
         if (bg == 0) {
             // either no cache entry yet, or cache collision, create new bindgroup and store in cache
             bg = _sg_wgpu_create_bindgroup(bnd);
+            if (!bg || bg->slot.state != SG_RESOURCESTATE_VALID) {
+                if (bg) { _sg_wgpu_discard_bindgroup(bg); }
+                return false;
+            }
             _sg_wgpu_bindgroups_cache_set(key.hash, bg->slot.id);
         }
         if (bg && bg->slot.state == SG_RESOURCESTATE_VALID) {
@@ -18099,7 +18494,9 @@ _SOKOL_PRIVATE bool _sg_wgpu_apply_bindings_bindgroup(_sg_bindings_ptrs_t* bnd) 
             if (bg->slot.state == SG_RESOURCESTATE_VALID) {
                 _sg_wgpu_set_bindgroup(_SG_WGPU_VIEW_SMP_BINDGROUP_INDEX, bg);
             }
+            const bool valid = bg->slot.state == SG_RESOURCESTATE_VALID;
             _sg_wgpu_discard_bindgroup(bg);
+            if (!valid) { return false; }
         } else {
             return false;
         }
@@ -18494,8 +18891,6 @@ _SOKOL_PRIVATE sg_resource_state _sg_wgpu_create_shader(_sg_shader_t* shd, const
     SOKOL_ASSERT(_SG_WGPU_MAX_UB_BINDGROUP_ENTRIES <= _SG_WGPU_MAX_VIEW_SMP_BINDGROUP_ENTRIES);
     _SG_STRUCT(WGPUBindGroupLayoutEntry, bgl_entries[_SG_WGPU_MAX_VIEW_SMP_BINDGROUP_ENTRIES]);
     _SG_STRUCT(WGPUBindGroupLayoutDescriptor, bgl_desc);
-    _SG_STRUCT(WGPUBindGroupEntry, bg_entries[_SG_WGPU_MAX_VIEW_SMP_BINDGROUP_ENTRIES]);
-    _SG_STRUCT(WGPUBindGroupDescriptor, bg_desc);
     _SG_STRUCT(_sg_wgpu_dynoffset_mapping_t, dynoffset_map[SG_MAX_UNIFORMBLOCK_BINDSLOTS]);
     size_t bgl_index = 0;
     for (size_t i = 0; i < SG_MAX_UNIFORMBLOCK_BINDSLOTS; i++) {
@@ -18503,15 +18898,11 @@ _SOKOL_PRIVATE sg_resource_state _sg_wgpu_create_shader(_sg_shader_t* shd, const
             continue;
         }
         shd->wgpu.ub_grp0_bnd_n[i] = desc->uniform_blocks[i].wgsl_group0_binding_n;
-        WGPUBindGroupEntry* bg_entry = &bg_entries[bgl_index];
         WGPUBindGroupLayoutEntry* bgl_entry = &bgl_entries[bgl_index];
         bgl_entry->binding = shd->wgpu.ub_grp0_bnd_n[i];
         bgl_entry->visibility = _sg_wgpu_shader_stage(shd->cmn.uniform_blocks[i].stage);
         bgl_entry->buffer.type = WGPUBufferBindingType_Uniform;
         bgl_entry->buffer.hasDynamicOffset = true;
-        bg_entry->binding = bgl_entry->binding;
-        bg_entry->buffer = _sg.wgpu.uniform.buf;
-        bg_entry->size = _SG_WGPU_MAX_UNIFORM_UPDATE_SIZE;
         dynoffset_map[i].sokol_slot = (uint8_t)i;
         dynoffset_map[i].wgpu_slot = (uint8_t)bgl_entry->binding;
         bgl_index += 1;
@@ -18519,12 +18910,11 @@ _SOKOL_PRIVATE sg_resource_state _sg_wgpu_create_shader(_sg_shader_t* shd, const
     bgl_desc.entryCount = bgl_index;
     bgl_desc.entries = bgl_entries;
     shd->wgpu.bgl_ub = wgpuDeviceCreateBindGroupLayout(_sg.wgpu.dev, &bgl_desc);
-    SOKOL_ASSERT(shd->wgpu.bgl_ub);
-    bg_desc.layout = shd->wgpu.bgl_ub;
-    bg_desc.entryCount = bgl_index;
-    bg_desc.entries = bg_entries;
-    shd->wgpu.bg_ub = wgpuDeviceCreateBindGroup(_sg.wgpu.dev, &bg_desc);
-    SOKOL_ASSERT(shd->wgpu.bg_ub);
+    if (!shd->wgpu.bgl_ub) {
+        _SG_ERROR(WGPU_SHADER_CREATE_BINDGROUP_LAYOUT_FAILED);
+        return SG_RESOURCESTATE_FAILED;
+    }
+    if (!_sg_wgpu_uniform_bindgroup(shd)) { return SG_RESOURCESTATE_FAILED; }
 
     // sort the dynoffset_map by wgpu bindings, this is because the
     // dynamic offsets of the WebGPU setBindGroup call must be in
@@ -18903,6 +19293,9 @@ _SOKOL_PRIVATE void _sg_wgpu_begin_pass(const sg_pass* pass, const _sg_attachmen
 
     // first pass in the frame? create command encoder
     if (0 == _sg.wgpu.cmd_enc) {
+        // [TrussC] Frame boundary: apply asynchronous uniform creation results
+        // whether or not this frame uploads uniforms.
+        _sg_wgpu_uniform_system_on_frame_begin();
         _SG_STRUCT(WGPUCommandEncoderDescriptor, cmd_enc_desc);
         _sg.wgpu.cmd_enc = wgpuDeviceCreateCommandEncoder(_sg.wgpu.dev, &cmd_enc_desc);
         SOKOL_ASSERT(_sg.wgpu.cmd_enc);
@@ -18935,6 +19328,9 @@ _SOKOL_PRIVATE void _sg_wgpu_commit(void) {
         // no valid pass in this frame
         return;
     }
+    // [TrussC] The uniform write, and finish/submit of commands that bind
+    // uniform groups, may use unconfirmed error objects (_sg_wgpu_uniform_contain_begin).
+    const bool contain = _sg_wgpu_uniform_contain_begin();
     _sg_wgpu_uniform_system_on_commit();
     _SG_STRUCT(WGPUCommandBufferDescriptor, cmd_buf_desc);
     WGPUCommandBuffer wgpu_cmd_buf = wgpuCommandEncoderFinish(_sg.wgpu.cmd_enc, &cmd_buf_desc);
@@ -18943,6 +19339,7 @@ _SOKOL_PRIVATE void _sg_wgpu_commit(void) {
     _sg.wgpu.cmd_enc = 0;
     wgpuQueueSubmit(_sg.wgpu.queue, 1, &wgpu_cmd_buf);
     wgpuCommandBufferRelease(wgpu_cmd_buf);
+    if (contain) { _sg_wgpu_uniform_contain_end(); }
 }
 
 _SOKOL_PRIVATE void _sg_wgpu_apply_viewport(int x, int y, int w, int h, bool origin_top_left) {
@@ -18995,24 +19392,31 @@ _SOKOL_PRIVATE bool _sg_wgpu_apply_bindings(_sg_bindings_ptrs_t* bnd) {
 
 _SOKOL_PRIVATE void _sg_wgpu_apply_uniforms(int ub_slot, const sg_range* data) {
     const uint32_t alignment = _sg.wgpu.limits.minUniformBufferOffsetAlignment;
-    SOKOL_ASSERT(_sg.wgpu.uniform.staging);
-    SOKOL_ASSERT((ub_slot >= 0) && (ub_slot < SG_MAX_UNIFORMBLOCK_BINDSLOTS));
-    SOKOL_ASSERT((_sg.wgpu.uniform.offset + data->size) <= _sg.wgpu.uniform.num_bytes);
-    SOKOL_ASSERT((_sg.wgpu.uniform.offset & (alignment - 1)) == 0);
-    SOKOL_ASSERT(data->size <= _SG_WGPU_MAX_UNIFORM_UPDATE_SIZE);
+    if (_sg.wgpu.uniform.failed) { return; }
+    // Bound (gpu): a bind group entry covers at most 64 KiB. Invalid blocks
+    // skip uploads/draws until commit with one Error; no memcpy is attempted.
+    if ((ub_slot < 0) || (ub_slot >= SG_MAX_UNIFORMBLOCK_BINDSLOTS)
+        || !data->ptr || !data->size || (data->size > _SG_WGPU_MAX_UNIFORM_UPDATE_SIZE)) {
+        _sg_wgpu_uniform_fail();
+        return;
+    }
+    const uint64_t end = (uint64_t)_sg.wgpu.uniform.offset + data->size;
+    const uint64_t aligned_end = (end + alignment - 1) & ~((uint64_t)alignment - 1);
+    // Include binding slack, not only the memcpy length (dynamic offsets plus
+    // 64 KiB must fit). All arithmetic is wide before narrowing the offset.
+    if (!_sg_wgpu_uniform_reserve(aligned_end + _SG_WGPU_MAX_UNIFORM_UPDATE_SIZE)) { return; }
 
     _sg_stats_inc(wgpu.uniforms.num_set_bindgroup);
     memcpy(_sg.wgpu.uniform.staging + _sg.wgpu.uniform.offset, data->ptr, data->size);
     _sg.wgpu.uniform.bind_offsets[ub_slot] = _sg.wgpu.uniform.offset;
-    _sg.wgpu.uniform.offset = _sg_roundup_u32(_sg.wgpu.uniform.offset + (uint32_t)data->size, alignment);
+    _sg.wgpu.uniform.offset = (uint32_t)aligned_end;
     _sg.wgpu.uniform.dirty = true;
 }
 
 _SOKOL_PRIVATE void _sg_wgpu_draw(int base_element, int num_elements, int num_instances, int base_vertex, int base_instance) {
     SOKOL_ASSERT(_sg.wgpu.rpass_enc);
-    if (_sg.wgpu.uniform.dirty) {
-        _sg_wgpu_uniform_system_set_bindgroup();
-    }
+    if (_sg.wgpu.uniform.failed) { return; }
+    if (_sg.wgpu.uniform.dirty && !_sg_wgpu_uniform_system_set_bindgroup()) { return; }
     if (_sg.use_indexed_draw) {
         wgpuRenderPassEncoderDrawIndexed(_sg.wgpu.rpass_enc,
             (uint32_t)num_elements,
@@ -19031,9 +19435,8 @@ _SOKOL_PRIVATE void _sg_wgpu_draw(int base_element, int num_elements, int num_in
 
 _SOKOL_PRIVATE void _sg_wgpu_dispatch(int num_groups_x, int num_groups_y, int num_groups_z) {
     SOKOL_ASSERT(_sg.wgpu.cpass_enc);
-    if (_sg.wgpu.uniform.dirty) {
-        _sg_wgpu_uniform_system_set_bindgroup();
-    }
+    if (_sg.wgpu.uniform.failed) { return; }
+    if (_sg.wgpu.uniform.dirty && !_sg_wgpu_uniform_system_set_bindgroup()) { return; }
     wgpuComputePassEncoderDispatchWorkgroups(_sg.wgpu.cpass_enc,
         (uint32_t)num_groups_x,
         (uint32_t)num_groups_y,

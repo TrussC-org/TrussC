@@ -22,6 +22,7 @@ struct IesParseResult {
 inline bool parseIes(const std::string& data, IesParseResult& result,
                      std::string& error) {
     error.clear();
+    try {
     std::istringstream iss(data);
     std::string line;
     bool foundTilt = false;
@@ -45,12 +46,20 @@ inline bool parseIes(const std::string& data, IesParseResult& result,
     // Extraction stops immediately on a failed stream.
     std::vector<float> tokens;
     float value;
-    while (iss >> value) tokens.push_back(value);
+    for (;;) {
+        // Establish clean EOF before attempting a token. A token extraction
+        // failure is malformed even when it also consumes the end of input.
+        iss >> std::ws;
+        if (iss.eof()) break;
+        if (!(iss >> value)) { error = "invalid numeric IES data"; return false; }
+        if (!std::isfinite(value)) { error = "non-finite IES value"; return false; }
+        tokens.push_back(value);
+    }
 
     const auto validCount = [](float count, int minimum, std::size_t remaining) {
         // Compare without rounding INT_MAX up to the next float before casting.
         // Bound (abi): file angle counts must fit int indices and the available token count. Overflow rejects the IES data.
-        return std::isfinite(count) && count >= minimum &&
+        return std::isfinite(count) && std::trunc(count) == count && count >= minimum &&
                static_cast<double>(count) <= std::numeric_limits<int>::max() &&
                static_cast<long double>(count) <= remaining;
     };
@@ -111,11 +120,16 @@ inline bool parseIes(const std::string& data, IesParseResult& result,
         row.resize(numVert);
         for (auto& cd : row) {
             cd = tokens[idx++] * candelaMultiplier;
+            if (!std::isfinite(cd)) { error = "candela value out of range"; return false; }
             if (cd > parsed.maxCandela) parsed.maxCandela = cd;
         }
     }
     result = std::move(parsed);
     return true;
+    } catch (const std::exception&) {
+        error = "out of memory";
+        return false;
+    }
 }
 
 } // namespace trussc::internal

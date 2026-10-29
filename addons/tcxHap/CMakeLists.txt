@@ -103,3 +103,9 @@ target_include_directories(${ADDON_NAME} PRIVATE
 trussc_compile_shaders(${ADDON_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders")
 
 target_link_libraries(${ADDON_NAME} PUBLIC ${ADDON_NAME}_shaders)
+
+# Inline playback paths catch allocation failure too. Keep these catches in Web
+# consumers; a malloc preflight cannot guarantee a subsequent vector allocation.
+if(EMSCRIPTEN)
+    target_compile_options(tcxHap INTERFACE -fexceptions)
+endif()

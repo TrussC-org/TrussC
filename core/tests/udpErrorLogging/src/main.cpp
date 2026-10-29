@@ -221,6 +221,7 @@ void racingRecovery() {
 void loopback() {
     Logs logs;
     UdpSocket receiver, sender;
+    receiver.setBindAddress("127.0.0.1");
     Access::freezeGates(receiver);
     Access::freezeGates(sender);
     if (!receiver.bind(0, false)) { check("bind loopback fixture", false); return; }

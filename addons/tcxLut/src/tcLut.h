@@ -1,4 +1,6 @@
 #pragma once
+#include "impl/tcDocumentInput.h"
+#include "impl/tcImportError.h"
 
 // =============================================================================
 // tcxLut - 3D LUT (Look-Up Table) for color grading
@@ -28,6 +30,7 @@
 #include <iomanip>
 
 #include "shaders/lut.glsl.h"
+#include "tcLutParse.h"
 
 namespace tcx::lut {
 
@@ -66,91 +69,76 @@ public:
 
     // Load from .cube file. Relative paths resolve via getDataPath, like
     // Image::load.
+    // OOM recovery holds in Release, or with iterator debugging off
+    // (_ITERATOR_DEBUG_LEVEL=0); see docs/ADDONS.md.
     bool load(const fs::path& filePath) {
-        const fs::path path = getDataPath(filePath);   // absolute paths pass through
-        std::ifstream file(path);
-        if (!file) {
-            logError() << "Lut3D: failed to open " << path;
-            return false;
-        }
-
-        std::string line;
-        int size = 0;
-        std::vector<float> data;
-        title_ = pathToUtf8(path.stem());
-
-        // Parse .cube file
-        while (std::getline(file, line)) {
-            // Skip empty lines and comments
-            if (line.empty() || line[0] == '#') continue;
-
-            // Remove trailing whitespace/carriage return
-            while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) {
-                line.pop_back();
-            }
-            if (line.empty()) continue;
-
-            std::istringstream iss(line);
-            std::string keyword;
-            iss >> keyword;
-
-            if (keyword == "TITLE") {
-                // Extract title (may be quoted)
-                std::string rest;
-                std::getline(iss, rest);
-                // Remove leading whitespace
-                size_t start = rest.find_first_not_of(" \t\"");
-                size_t end = rest.find_last_not_of(" \t\"");
-                if (start != std::string::npos && end != std::string::npos) {
-                    title_ = rest.substr(start, end - start + 1);
-                }
-            } else if (keyword == "LUT_3D_SIZE") {
-                iss >> size;
-                // Bound (security): file-provided LUT dimensions grow cubically; a cap limits the declared table allocation. Overflow returns false.
-                if (size < 2 || size > 256) {
-                    logError() << "Lut3D: invalid LUT size " << size;
-                    return false;
-                }
-                data.reserve(size * size * size * 3);
-            } else if (keyword == "DOMAIN_MIN" || keyword == "DOMAIN_MAX") {
-                // Ignore domain (assume 0-1)
-            } else if (keyword == "LUT_1D_SIZE") {
-                logError() << "Lut3D: 1D LUT not supported";
+        fs::path path;
+        try {
+            path = getDataPath(filePath); // absolute paths pass through
+            std::ifstream file(path, std::ios::binary);
+            if (!file) {
+                internal::reportImportError("Lut3D", "failed to open LUT document: ", path);
                 return false;
-            } else {
-                // Try to parse as RGB values
-                float r, g, b;
-                std::istringstream dataIss(line);
-                if (dataIss >> r >> g >> b) {
-                    data.push_back(r);
-                    data.push_back(g);
-                    data.push_back(b);
-                }
             }
-        }
-
-        if (size == 0 || data.size() != size * size * size * 3) {
-            logError() << "Lut3D: invalid .cube file (size=" << size
-                       << ", data=" << data.size() << " floats, expected " << (size*size*size*3) << ")";
+            std::error_code ec;
+            if (fs::file_size(path, ec) > 16u * 1024u * 1024u && !ec)
+                logNotice("Lut3D") << "loading a local LUT larger than 16 MiB";
+            detail::CubeData parsed;
+            std::string error;
+            std::string bytes;
+            if (!internal::readDocumentBytes(file, bytes)) {
+                internal::reportImportError("Lut3D", "failed to read the complete LUT document: ", path);
+                return false;
+            }
+            std::istringstream input(std::move(bytes));
+            if (!detail::parseCube(input, parsed, error)) {
+                internal::reportImportError("Lut3D", error.c_str(), &path);
+                return false;
+            }
+            // Prepare all allocating metadata and resources before publishing.
+            std::string title = parsed.title.empty() ? pathToUtf8(path.stem()) : std::move(parsed.title);
+            Lut3D prepared;
+            prepared.filter_ = filter_;
+            prepared.allocateDocument(parsed.side, parsed.rgb.data(), &path);
+            if (!prepared.isAllocated()) return false;
+            prepared.title_.swap(title);
+            std::swap(image_, prepared.image_);
+            std::swap(view_, prepared.view_);
+            std::swap(sampler_, prepared.sampler_);
+            std::swap(size_, prepared.size_);
+            std::swap(allocated_, prepared.allocated_);
+            title_.swap(prepared.title_);
+            return true;
+        } catch (const std::exception&) {
+            internal::reportImportError("Lut3D", "cannot allocate LUT document: ", path.empty() ? filePath : path);
             return false;
         }
-
-        allocate(size, data.data());
-        return true;
     }
 
     // Allocate empty or with data
-    void allocate(int size, const float* rgbData = nullptr) {
+    void allocate(int size, const float* rgbData = nullptr) { allocateDocument(size, rgbData, nullptr); }
+
+private:
+    void allocateDocument(int size, const float* rgbData, const fs::path* sourcePath) {
         clear();
 
+        size_t rgbaBytes = 0;
+        // Bound (gpu): 3D texture dimensions must fit the active device before CPU conversion. Overflow rejects the whole LUT and is counted.
+        if (!detail::cubeElements(size, 4, rgbaBytes) || !sg_isvalid() ||
+            size > sg_query_limits().max_image_size_3d) {
+            internal::reportImportError("Lut3D", "LUT dimensions exceed the texture or storage range", sourcePath);
+            return;
+        }
         size_ = size;
 
         // Convert RGB float data to RGBA8
         // .cube format: R varies fastest, then G, then B (depth)
-        std::vector<unsigned char> rgba(size * size * size * 4);
+        std::vector<unsigned char> rgba;
+        try { rgba.resize(rgbaBytes); }
+        catch (const std::exception&) { internal::reportImportError("Lut3D", "cannot allocate LUT conversion", sourcePath); size_ = 0; return; }
 
         if (rgbData) {
-            for (int i = 0; i < size * size * size; i++) {
+            for (size_t i = 0; i < rgbaBytes / 4; i++) {
                 rgba[i * 4 + 0] = static_cast<unsigned char>(std::clamp(rgbData[i * 3 + 0] * 255.0f, 0.0f, 255.0f));
                 rgba[i * 4 + 1] = static_cast<unsigned char>(std::clamp(rgbData[i * 3 + 1] * 255.0f, 0.0f, 255.0f));
                 rgba[i * 4 + 2] = static_cast<unsigned char>(std::clamp(rgbData[i * 3 + 2] * 255.0f, 0.0f, 255.0f));
@@ -174,7 +162,9 @@ public:
         image_ = sg_make_image(&img_desc);
         if (sg_query_image_state(image_) != SG_RESOURCESTATE_VALID) {
             logError() << "Lut3D: failed to create 3D texture";
+            sg_destroy_image(image_);
             image_ = {};
+            size_ = 0;
             return;
         }
 
@@ -186,8 +176,19 @@ public:
         // Create sampler
         createSampler();
 
+        if (sg_query_view_state(view_) != SG_RESOURCESTATE_VALID ||
+            sg_query_sampler_state(sampler_) != SG_RESOURCESTATE_VALID) {
+            internal::reportImportError("Lut3D", "failed to create LUT view or sampler", sourcePath);
+            sg_destroy_sampler(sampler_);
+            sg_destroy_view(view_);
+            sg_destroy_image(image_);
+            sampler_ = {}; view_ = {}; image_ = {}; size_ = 0;
+            return;
+        }
         allocated_ = true;
     }
+
+public:
 
     // Release resources
     void clear() {
@@ -284,7 +285,7 @@ private:
 // Generate identity LUT (no color change)
 inline void generateIdentity(float* data, int size) {
     float scale = 1.0f / (size - 1);
-    int idx = 0;
+    size_t idx = 0;
     for (int b = 0; b < size; b++) {
         for (int g = 0; g < size; g++) {
             for (int r = 0; r < size; r++) {
@@ -299,7 +300,7 @@ inline void generateIdentity(float* data, int size) {
 // Generate vintage/faded LUT (lifted blacks, warm tones)
 inline void generateVintage(float* data, int size) {
     float scale = 1.0f / (size - 1);
-    int idx = 0;
+    size_t idx = 0;
     for (int b = 0; b < size; b++) {
         for (int g = 0; g < size; g++) {
             for (int r = 0; r < size; r++) {
@@ -333,7 +334,7 @@ inline void generateVintage(float* data, int size) {
 // Generate cinematic LUT (orange/teal split toning)
 inline void generateCinematic(float* data, int size) {
     float scale = 1.0f / (size - 1);
-    int idx = 0;
+    size_t idx = 0;
     for (int b = 0; b < size; b++) {
         for (int g = 0; g < size; g++) {
             for (int r = 0; r < size; r++) {
@@ -375,7 +376,7 @@ inline void generateCinematic(float* data, int size) {
 // Generate film noir LUT (high contrast B&W with slight blue)
 inline void generateFilmNoir(float* data, int size) {
     float scale = 1.0f / (size - 1);
-    int idx = 0;
+    size_t idx = 0;
     for (int b = 0; b < size; b++) {
         for (int g = 0; g < size; g++) {
             for (int r = 0; r < size; r++) {
@@ -406,7 +407,7 @@ inline void generateFilmNoir(float* data, int size) {
 // Generate warm LUT
 inline void generateWarm(float* data, int size) {
     float scale = 1.0f / (size - 1);
-    int idx = 0;
+    size_t idx = 0;
     for (int b = 0; b < size; b++) {
         for (int g = 0; g < size; g++) {
             for (int r = 0; r < size; r++) {
@@ -430,7 +431,7 @@ inline void generateWarm(float* data, int size) {
 // Generate cool LUT
 inline void generateCool(float* data, int size) {
     float scale = 1.0f / (size - 1);
-    int idx = 0;
+    size_t idx = 0;
     for (int b = 0; b < size; b++) {
         for (int g = 0; g < size; g++) {
             for (int r = 0; r < size; r++) {
@@ -454,7 +455,7 @@ inline void generateCool(float* data, int size) {
 // Generate cyberpunk LUT (neon pink/cyan)
 inline void generateCyberpunk(float* data, int size) {
     float scale = 1.0f / (size - 1);
-    int idx = 0;
+    size_t idx = 0;
     for (int b = 0; b < size; b++) {
         for (int g = 0; g < size; g++) {
             for (int r = 0; r < size; r++) {
@@ -497,7 +498,7 @@ inline void generateCyberpunk(float* data, int size) {
 // Generate pastel LUT (soft, desaturated colors)
 inline void generatePastel(float* data, int size) {
     float scale = 1.0f / (size - 1);
-    int idx = 0;
+    size_t idx = 0;
     for (int b = 0; b < size; b++) {
         for (int g = 0; g < size; g++) {
             for (int r = 0; r < size; r++) {
@@ -540,7 +541,7 @@ inline bool saveCube(const fs::path& path, const float* data, int size, const st
     file << "\n";
 
     // Data (R varies fastest, then G, then B)
-    int idx = 0;
+    size_t idx = 0;
     for (int b = 0; b < size; b++) {
         for (int g = 0; g < size; g++) {
             for (int r = 0; r < size; r++) {
@@ -559,7 +560,14 @@ inline bool saveCube(const fs::path& path, const float* data, int size, const st
 // Create and allocate a Lut3D with generated data
 inline Lut3D createIdentity(int size = 32) {
     Lut3D lut;
-    std::vector<float> data(size * size * size * 3);
+    size_t count = 0;
+    if (!detail::cubeElements(size, 3, count) || count > std::vector<float>().max_size()) {
+        internal::reportImportError("Lut3D", "invalid LUT dimensions");
+        return lut;
+    }
+    std::vector<float> data;
+    try { data.resize(count); }
+    catch (const std::exception&) { internal::reportImportError("Lut3D", "cannot allocate LUT table"); return lut; }
     generateIdentity(data.data(), size);
     lut.allocate(size, data.data());
     return lut;
@@ -567,7 +575,14 @@ inline Lut3D createIdentity(int size = 32) {
 
 inline Lut3D createVintage(int size = 32) {
     Lut3D lut;
-    std::vector<float> data(size * size * size * 3);
+    size_t count = 0;
+    if (!detail::cubeElements(size, 3, count) || count > std::vector<float>().max_size()) {
+        internal::reportImportError("Lut3D", "invalid LUT dimensions");
+        return lut;
+    }
+    std::vector<float> data;
+    try { data.resize(count); }
+    catch (const std::exception&) { internal::reportImportError("Lut3D", "cannot allocate LUT table"); return lut; }
     generateVintage(data.data(), size);
     lut.allocate(size, data.data());
     return lut;
@@ -575,7 +590,14 @@ inline Lut3D createVintage(int size = 32) {
 
 inline Lut3D createCinematic(int size = 32) {
     Lut3D lut;
-    std::vector<float> data(size * size * size * 3);
+    size_t count = 0;
+    if (!detail::cubeElements(size, 3, count) || count > std::vector<float>().max_size()) {
+        internal::reportImportError("Lut3D", "invalid LUT dimensions");
+        return lut;
+    }
+    std::vector<float> data;
+    try { data.resize(count); }
+    catch (const std::exception&) { internal::reportImportError("Lut3D", "cannot allocate LUT table"); return lut; }
     generateCinematic(data.data(), size);
     lut.allocate(size, data.data());
     return lut;
@@ -583,7 +605,14 @@ inline Lut3D createCinematic(int size = 32) {
 
 inline Lut3D createFilmNoir(int size = 32) {
     Lut3D lut;
-    std::vector<float> data(size * size * size * 3);
+    size_t count = 0;
+    if (!detail::cubeElements(size, 3, count) || count > std::vector<float>().max_size()) {
+        internal::reportImportError("Lut3D", "invalid LUT dimensions");
+        return lut;
+    }
+    std::vector<float> data;
+    try { data.resize(count); }
+    catch (const std::exception&) { internal::reportImportError("Lut3D", "cannot allocate LUT table"); return lut; }
     generateFilmNoir(data.data(), size);
     lut.allocate(size, data.data());
     return lut;
@@ -591,7 +620,14 @@ inline Lut3D createFilmNoir(int size = 32) {
 
 inline Lut3D createWarm(int size = 32) {
     Lut3D lut;
-    std::vector<float> data(size * size * size * 3);
+    size_t count = 0;
+    if (!detail::cubeElements(size, 3, count) || count > std::vector<float>().max_size()) {
+        internal::reportImportError("Lut3D", "invalid LUT dimensions");
+        return lut;
+    }
+    std::vector<float> data;
+    try { data.resize(count); }
+    catch (const std::exception&) { internal::reportImportError("Lut3D", "cannot allocate LUT table"); return lut; }
     generateWarm(data.data(), size);
     lut.allocate(size, data.data());
     return lut;
@@ -599,7 +635,14 @@ inline Lut3D createWarm(int size = 32) {
 
 inline Lut3D createCool(int size = 32) {
     Lut3D lut;
-    std::vector<float> data(size * size * size * 3);
+    size_t count = 0;
+    if (!detail::cubeElements(size, 3, count) || count > std::vector<float>().max_size()) {
+        internal::reportImportError("Lut3D", "invalid LUT dimensions");
+        return lut;
+    }
+    std::vector<float> data;
+    try { data.resize(count); }
+    catch (const std::exception&) { internal::reportImportError("Lut3D", "cannot allocate LUT table"); return lut; }
     generateCool(data.data(), size);
     lut.allocate(size, data.data());
     return lut;
@@ -607,7 +650,14 @@ inline Lut3D createCool(int size = 32) {
 
 inline Lut3D createCyberpunk(int size = 32) {
     Lut3D lut;
-    std::vector<float> data(size * size * size * 3);
+    size_t count = 0;
+    if (!detail::cubeElements(size, 3, count) || count > std::vector<float>().max_size()) {
+        internal::reportImportError("Lut3D", "invalid LUT dimensions");
+        return lut;
+    }
+    std::vector<float> data;
+    try { data.resize(count); }
+    catch (const std::exception&) { internal::reportImportError("Lut3D", "cannot allocate LUT table"); return lut; }
     generateCyberpunk(data.data(), size);
     lut.allocate(size, data.data());
     return lut;
@@ -615,7 +665,14 @@ inline Lut3D createCyberpunk(int size = 32) {
 
 inline Lut3D createPastel(int size = 32) {
     Lut3D lut;
-    std::vector<float> data(size * size * size * 3);
+    size_t count = 0;
+    if (!detail::cubeElements(size, 3, count) || count > std::vector<float>().max_size()) {
+        internal::reportImportError("Lut3D", "invalid LUT dimensions");
+        return lut;
+    }
+    std::vector<float> data;
+    try { data.resize(count); }
+    catch (const std::exception&) { internal::reportImportError("Lut3D", "cannot allocate LUT table"); return lut; }
     generatePastel(data.data(), size);
     lut.allocate(size, data.data());
     return lut;

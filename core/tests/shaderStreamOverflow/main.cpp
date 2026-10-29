@@ -251,7 +251,7 @@ void tests(sg_pipeline pip, Trace& trace) {
 } // namespace
 
 namespace trussc::internal {
-void deferGpuDestroy(sg_buffer buffer) {
+void deferGpuDestroy(sg_buffer buffer) noexcept {
     pendingDestroys.push_back(buffer);
 }
 } // namespace trussc::internal

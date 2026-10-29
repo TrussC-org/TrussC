@@ -6,8 +6,8 @@
 
 #ifdef __EMSCRIPTEN__
 
+#include <TrussC.h>
 #include "tc/sound/internal/tcAudioDecodeBudget.h"
-#include "tc/utils/tcLog.h"
 #include <emscripten.h>
 #include <algorithm>
 #include <climits>
@@ -120,27 +120,42 @@ LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
 }
 
 void SoundBuffer::loadAacWebAsync(std::shared_ptr<SoundBuffer> decoded,
-                                 std::function<void(LoadResult)> complete, const fs::path& path) {
+                                 std::function<void(LoadResult)> complete, const fs::path& path,
+                                 const std::shared_ptr<internal::ResourceLoadState>& owner) {
     struct Run {
         std::shared_ptr<SoundBuffer> decoded;
         std::function<void(LoadResult)> complete;
         fs::path path;
         int slot;
         double deadline;
+        std::weak_ptr<internal::ResourceLoadState> owner;
+        std::shared_ptr<std::function<void()>> stop;
+        bool done = false;
+        void finish(LoadResult result) {
+            if (done) return;
+            done = true;
+            releaseAacDecode(slot);
+            if (auto state = owner.lock()) state->cancelBackend = {};
+            owner.reset();
+            stop.reset();
+            decoded.reset();
+            auto callback = std::move(complete);
+            callback(std::move(result));
+        }
         static void poll(void* data) {
             auto* run = static_cast<Run*>(data);
-            if (isAacDecodeComplete(run->slot)) {
-                auto result = run->decoded->finishAacWebDecode(run->slot, run->path);
-                releaseAacDecode(run->slot);
-                run->complete(std::move(result));
-                delete run;
-            } else if (emscripten_get_now() >= run->deadline) {
-                releaseAacDecode(run->slot);
-                run->complete(internal::reportWebLoadTimeout(run->path, "SoundBuffer"));
-                delete run;
-            } else {
-                emscripten_async_call(poll, run, 10);
+            if (run->done) { delete run; return; }
+            LoadResult result;
+            try {
+                if (isAacDecodeComplete(run->slot)) result = run->decoded->finishAacWebDecode(run->slot, run->path);
+                else if (emscripten_get_now() >= run->deadline) result = internal::reportWebLoadTimeout(run->path, "SoundBuffer");
+                else { emscripten_async_call(poll, run, 10); return; }
+            } catch (...) {
+                result.error = LoadError::Unknown;
+                result.message.clear();
             }
+            run->finish(std::move(result));
+            delete run;
         }
     };
     const auto pathStr = internal::pathToUtf8(path);
@@ -154,12 +169,20 @@ void SoundBuffer::loadAacWebAsync(std::shared_ptr<SoundBuffer> decoded,
     try {
         // Keep completion available if copying the callback/path fails too.
         run = new (std::nothrow) Run{decoded, complete, path, slot,
-                                   emscripten_get_now() + internal::webLoadTimeoutMSecs};
+                                   emscripten_get_now() + internal::webLoadTimeoutMSecs, owner, {}};
     } catch (const std::bad_alloc&) {}
     if (!run) {
         releaseAacDecode(slot);
         logError("SoundBuffer") << "audio allocation failed; previous PCM kept";
         complete(LoadResult::fail(LoadError::DecodeFailed, "AAC allocation failed"));
+        return;
+    }
+    try {
+        run->stop = internal::registerResourceStop([run] { run->finish(LoadResult::fail(LoadError::Cancelled)); });
+        owner->cancelBackend = [run] { run->finish(LoadResult::fail(LoadError::Cancelled)); };
+    } catch (const std::bad_alloc&) {
+        run->finish(LoadResult::fail(LoadError::Unknown));
+        delete run;
         return;
     }
     emscripten_async_call(Run::poll, run, 0);

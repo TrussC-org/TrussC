@@ -96,7 +96,7 @@ private:
     tc::EventListener overdueListener_;   // on the main window's afterFrame
     tc::EventListener eventListener_;
 
-    // Input arbitration: consume listeners (BeforeApp) + pointer-gesture capture.
+    // Input arbitration: consume listeners (-20) + pointer-gesture capture.
     bool pointerCaptured_ = false;  // imgui owns the current press→release gesture
     tc::EventListener mousePressConsume_;
     tc::EventListener mouseReleaseConsume_;

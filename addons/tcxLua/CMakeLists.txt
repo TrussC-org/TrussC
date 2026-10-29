@@ -79,3 +79,9 @@ if(USE_LUAJIT)
 else()
     target_link_libraries(${ADDON_NAME} PUBLIC TrussC)
 endif()
+# Recover STL/sol allocation failures at the owned loading/lint boundaries on Web.
+if(EMSCRIPTEN)
+    set_property(SOURCE src/tcxLuaLoad.cpp src/tcxLuaLint.cpp
+        APPEND PROPERTY COMPILE_OPTIONS -fexceptions)
+    target_link_options(${ADDON_NAME} INTERFACE -fexceptions)
+endif()

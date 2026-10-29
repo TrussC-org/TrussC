@@ -290,7 +290,36 @@ static void testRotationUnits() {
     insp.resetTouched();
 }
 
+// #947 / PR 2 teardown lesson: real protected addon cleanup after App exit.
+namespace {
+int headlessExits = 0;
+struct HeadlessInspectorApp : App {
+    EventListener ordinaryExit;
+    size_t keyListeners = 0;
+    void setup() override {
+        keyListeners = events().keyPressed.listenerCount();
+        NodeInspector::setToggleKey(KEY_F1);
+        ordinaryExit = events().exit.listen([] { check("ordinary exit hook was cleared", false); }, EventPriority::AfterApp);
+    }
+    void update() override { exitApp(); }
+    void exit() override {
+        ++headlessExits;
+        check("headless inspector remains registered inside App exit", events().keyPressed.listenerCount() == keyListeners + 1);
+        events().exit.clear();
+    }
+    void cleanup() override {
+        check("headless inspector teardown survives App exit clear", events().keyPressed.listenerCount() == keyListeners);
+    }
+};
+static void testHeadlessInspector() {
+    check("headless inspector runner exits", runHeadlessApp<HeadlessInspectorApp>(HeadlessSettings().setFps(1024)) == 0);
+    check("headless inspector App exits once", headlessExits == 1);
+    check("headless inspector mandatory teardown disconnects itself", events().exit.listenerCount() == 0);
+}
+} // namespace
+
 int main() {
+    testHeadlessInspector();
     std::printf("=== tcxNodeInspector tests ===\n");
     testDestroyed();
     testMods();

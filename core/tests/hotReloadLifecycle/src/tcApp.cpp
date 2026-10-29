@@ -16,6 +16,13 @@ void tcApp::setup() {
     audioOutHooksInSetup = (long)AudioEngine::getInstance().audioOut.listenerCount();
     audioInHooksInSetup = (long)AudioEngine::getInstance().audioIn.listenerCount();
     if (cycleOnly) return;
+    struct FrameProbe : Node {
+        tcApp& app;
+        explicit FrameProbe(tcApp& owner) : app(owner) {}
+        void update() override { if (app.frameOrder) *app.frameOrder += 't'; }
+        void draw() override { if (app.frameOrder) *app.frameOrder += 't'; }
+    };
+    addChild(std::make_shared<FrameProbe>(*this));
     setWindowTitle("hotReloadLifecycle");
     // Draws its Hierarchy panel at (10, 10) every frame from an onRender
     // listener, through tcxImGui (set up by attach()).
@@ -23,6 +30,7 @@ void tcApp::setup() {
 }
 
 void tcApp::draw() {
+    if (frameOrder) *frameOrder += 'a';
     clear(0.12f);
     setColor(0.9f);
     drawBitmapString("Edit src/tcApp.cpp and save to reload", 280, 30);

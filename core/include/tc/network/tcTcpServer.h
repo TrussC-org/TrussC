@@ -37,6 +37,7 @@
 namespace trussc {
 namespace internal {
 struct TcpServerTestAccess;
+struct TcpServerBindAddressTestAccess;
 // Test hook, not a user setting: stop(), on the thread that has just joined
 // the accept thread, calls fn before it disconnects the clients and joins
 // their threads, so a test can hold it there. Applies to every TcpServer; an
@@ -103,6 +104,7 @@ struct TcpServerErrorEventArgs {
 // =============================================================================
 class TC_PLATFORMS("macos,windows,linux,android") TcpServer {
     friend struct internal::TcpServerTestAccess;
+    friend struct internal::TcpServerBindAddressTestAccess;
     struct State : std::enable_shared_from_this<State> {
         internal::EventSnapshotDelivery<TcpClientConnectEventArgs> onClientConnect;
         internal::EventSnapshotDelivery<TcpServerReceiveEventArgs> onReceive;
@@ -110,6 +112,7 @@ class TC_PLATFORMS("macos,windows,linux,android") TcpServer {
         internal::EventSnapshotDelivery<TcpServerErrorEventArgs> onError;
         internal::EventSnapshotDelivery<TcpSendCompleteEventArgs> onSendComplete;
         // Bounds per-connection channels and workers; excess sockets are closed before allocation.
+        void setBindAddress(const std::string& address);
         bool start(int port, int maxClients = 64);
         void stop();
         bool isRunning() const;
@@ -142,7 +145,7 @@ class TC_PLATFORMS("macos,windows,linux,android") TcpServer {
         void acceptThreadFunc();
         void clientThreadFunc(int clientId);
         void writerThreadFunc(int clientId, std::shared_ptr<internal::TcpSendChannel> ch);
-        void notifyError(const std::string& msg, int code = 0, int clientId = -1);
+        void notifyError(const std::string& msg, int code = 0, int clientId = -1, bool external = false);
         bool removeClient(int clientId);
         void reapClientThreads();
         void joinClientThreads();
@@ -154,6 +157,9 @@ class TC_PLATFORMS("macos,windows,linux,android") TcpServer {
         int serverSocket_ = -1;
     #endif
         std::mutex listenSocketMutex_;
+        std::mutex bindAddressMutex_;
+        std::string bindAddress_;
+        std::string bindAddressError_;
         int port_ = 0;
         int maxClients_ = 64;
         std::atomic<size_t> workerClients_{0};
@@ -283,6 +289,13 @@ public:
     // -------------------------------------------------------------------------
     // Server management
     // -------------------------------------------------------------------------
+    // Choose a numeric IPv4 listen address. Empty or "0.0.0.0" selects every
+    // interface (default); "127.0.0.1" accepts traffic from this machine only.
+    // Invalid input, IPv6 and nonlocal addresses make start() return false
+    // and report onError. Configure before start().
+    // A change while running logs a Warning,
+    // leaves the active socket unchanged, and applies on the next start().
+    void setBindAddress(const std::string& address);
     // Start server (listen on specified port).
     //
     // maxClients defaults to 64 and must be positive. A full server closes

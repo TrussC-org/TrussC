@@ -56,3 +56,31 @@ The load-entry tests check `FileNotFound` and the exact shared missing-file
 Error, `DecodeFailed` with exactly one Error for a broken OBJ, and relative
 Japanese OBJ/MTL/texture paths through `getDataPath()`. Fixtures are generated
 at runtime.
+
+Model table tests check declared tag values against the input before allocation,
+preserve upstream’s silent truncation to 8192 values per kind for direct
+vendor callers retaining tags, accept tag values starting with `#`, discard
+unused tag payloads across groups on the framework path, recover from single and
+persistent injected allocation failures, and load local OBJ and MTL files above
+the former stream threshold. Pending tinyobj Warnings are delivered before
+the Error when a later OBJ statement rejects the model.
+Unsupported or malformed MTL statements warn and keep usable geometry, like a
+missing MTL. Tests cover `d -halo`, `Tf xyz`, `Ka spectral` and an allocation
+failure while opening an MTL: successful geometry without materials must warn.
+If diagnostics also cannot allocate, addon recovery returns failure. Fixtures and
+allocation-size observations are generated in the test process. Equal-length
+tagged and untagged files compare actual framework allocation totals, so
+enabling tag retention in ObjLoader fails the harness. Single and persistent
+sweeps cover every observed request for two textured groups and point-only OBJ,
+with core context warmed before injection and a successful retry after each fault.
+
+Under persistent allocation exhaustion, failure text and logging are best effort;
+addon recovery does not require a diagnostic allocation. Pre-existing core
+GPU-uploaded model reload can still terminate if deferred GPU-buffer retirement
+cannot allocate. Cold-start Material destruction can initialize core context and
+allocate (code trace only). These core paths are outside addon recovery.
+LogStream delivery failures are guarded in core.
+
+OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, constructing or moving even an empty `LoadResult` / `SaveResult` string or STL container can allocate a container proxy, so persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging remain best effort.
+
+STL-wide persistent allocation-failure cases SKIP when `_ITERATOR_DEBUG_LEVEL != 0`, with the reason printed. Targeted one-shot payload failures still run. Exhaustive one-shot STL sweeps, including the optional-MTL open regression, SKIP too: they deliberately target noexcept container proxy construction and moves, which can terminate even after a single refused proxy allocation. MSVC Debug CRT reports go to stderr and abort dialogs are disabled by the shared test support header.

@@ -511,14 +511,16 @@ void allocationChecks(const fs::path& root) {
     }
     internal::failImageDecodeAllocationAfterForTests(-1);
     const auto png = encoded("png", 8, 8);
-    // No test assertions or fixture construction while new is disabled.
-    Pixels exhausted;
-    failNew = true;
-    auto emergency = internal::imageDecodeOutOfMemory();
-    auto exhaustedResult = exhausted.loadFromMemory(png.data(), int(png.size()));
-    failNew = false;
-    check("OOM reporting survives failed message and Logger allocations", emergency.error == LoadError::Unknown &&
-          exhaustedResult.error == LoadError::Unknown && empty(exhausted));
+    if (!tcTest::skipPersistentAllocationFailure("image OOM result/reporting")) {
+        // No test assertions or fixture construction while new is disabled.
+        Pixels exhausted;
+        failNew = true;
+        auto emergency = internal::imageDecodeOutOfMemory();
+        auto exhaustedResult = exhausted.loadFromMemory(png.data(), int(png.size()));
+        failNew = false;
+        check("OOM reporting survives failed message and Logger allocations", emergency.error == LoadError::Unknown &&
+              exhaustedResult.error == LoadError::Unknown && empty(exhausted));
+    }
     writeFile(root / "mcp-allocation.png", png);
     Pixels mcpPixels;
     internal::failImageDecodeAllocationAfterForTests(-1);
@@ -559,11 +561,65 @@ void allocationChecks(const fs::path& root) {
     internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
     check("async allocation failure completes without bound loss", events == 1 && !image.isLoading() &&
           internal::imageDecodeRejectionsForTests() == rejectedBefore);
+    // Both populated and empty snapshots must survive persistent OOM, including
+    // the move into delivery (MSVC list sentinels/vector proxies can allocate).
+    static_assert(std::is_nothrow_default_constructible_v<internal::ResourceLoadBatch>);
+    static_assert(std::is_nothrow_move_constructible_v<internal::ResourceLoadBatch>);
+    static_assert(std::is_nothrow_destructible_v<internal::ResourceLoadBatch>);
+    int callbacks = 0;
+    internal::enqueueResourceLoad([&] { ++callbacks; });
+    bool escaped = false, emptySnapshot = false;
+    failNew = true;
+    try {
+        auto batch = internal::takeResourceLoadBatch();
+        auto empty = internal::takeResourceLoadBatch();
+        emptySnapshot = empty.empty();
+        internal::deliverResourceLoadBatch(std::move(batch));
+        internal::deliverResourceLoadBatch(std::move(empty));
+    } catch (...) { escaped = true; }
+    failNew = false;
+    check("resource snapshots construct/move/deliver without allocating", !escaped && emptySnapshot && callbacks == 1);
+    Image pending;
+    pending.loadAsync(path);
+    internal::waitForResourceLoadsForTests();
+    auto discardedPayload = make_shared<int>(0);
+    weak_ptr<int> discardedOwner = discardedPayload;
+    internal::enqueueResourceLoad([payload = std::move(discardedPayload), &callbacks] { ++callbacks; });
+    escaped = false;
+    failNew = true;
+    try { internal::waitForResourceLoadsAtAppExit(); } catch (...) { escaped = true; }
+    failNew = false;
+    check("resource shutdown returns all completion credits without allocating", !escaped && !pending.isLoading() &&
+          internal::resourceLoadUsageForTests().retainedBytes == 0 && internal::resourceLoadUsageForTests().outstanding == 0);
+    check("resource shutdown discards generic payload without callbacks or allocation", discardedOwner.expired() && callbacks == 1);
+    Image launchFailure;
+    int launchEvents = 0;
+    LoadError launchError = LoadError::None;
+    auto launchListener = launchFailure.onLoad.listen([&](LoadResult& ready) { ++launchEvents; launchError = ready.error; });
+    internal::setResourceLoadProbeForTests([](const char* stage, const fs::path&) {
+        if (std::strcmp(stage, "image.dispatch") == 0) failNew = true;
+    });
+    escaped = false;
+    try { launchFailure.loadAsync(path); } catch (...) { escaped = true; }
+    failNew = false;
+    internal::setResourceLoadProbeForTests({});
+    internal::waitForResourceLoadsForTests();
+    internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
+    check("preparation dispatch allocation failure settles without escaping", !escaped && launchEvents == 1 &&
+          launchError == LoadError::Unknown && !launchFailure.isLoading() && internal::resourceLoadUsageForTests().outstanding == 0);
     internal::appRunToken()->store(false);
 }
 } // namespace
 #include "deviceFixtures.h"
 TC_CORE_TEST_MAIN(int argc, char** argv) {
+    bool hookRejected = false;
+    failNew = true;
+    try {
+        void* block = ::operator new(sizeof(Pixels));
+        ::operator delete(block);
+    } catch (const std::bad_alloc&) { hookRejected = true; }
+    failNew = false;
+    check("global allocation-failure hook is active", hookRejected);
     if (argc > 1) return imageDeviceMain(argc, argv);
     const auto root = fs::temp_directory_path() / "tc_imageDecodeBounds";
     fs::create_directories(root);
