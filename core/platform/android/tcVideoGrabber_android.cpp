@@ -8,7 +8,7 @@
 
 #include "TrussC.h"
 
-#pragma message("STUB: tcVideoGrabber_android.cpp — needs Camera2 NDK implementation")
+// Not implemented on Android yet (#1113): needs Camera2 NDK implementation.
 
 namespace trussc {
 

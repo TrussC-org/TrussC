@@ -136,6 +136,18 @@ else()
     file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
 endif()
 
+# Omit implementation TUs whose platform guards leave no symbols. Apple's
+# libtool warns about empty objects (including the iOS archive).
+if(TC_PLATFORM_MACOS OR TC_PLATFORM_IOS OR TC_PLATFORM_ANDROID)
+    list(REMOVE_ITEM TC_IMPL_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/impl/tcKeepScreenOn.cpp)
+endif()
+if(TC_PLATFORM_IOS OR TC_PLATFORM_ANDROID OR TC_PLATFORM_EMSCRIPTEN)
+    list(REMOVE_ITEM TC_APP_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/app/tcCrashHandler.cpp)
+endif()
+if(NOT TC_PLATFORM_EMSCRIPTEN)
+    list(REMOVE_ITEM TC_GRAPHICS_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/graphics/tcBoundedFontFetch.cpp)
+endif()
+
 # Combine all sources
 set(TC_ALL_SOURCES
     ${TC_HEADERS}

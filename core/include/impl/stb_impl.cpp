@@ -194,6 +194,12 @@ void fontScratchFree(void* pointer) {
 #define STBTT_VALIDATE_GLYPH(info, glyph) (!trussc::internal::fontScratchFailed() && trussc::internal::fontGlyphRangeFits(info, trussc::internal::fontScratchSourceBytes(), glyph))
 #define STBTT_REPORT_FAILURE() trussc::internal::fontScratchFailure()
 
+#ifdef _MSC_VER
+#  pragma warning(push)
+// stb's size_t-to-int limit expressions contain an unselected truncating cast
+// on 64-bit MSVC. Cover the include and our expansions of those vendor macros.
+#  pragma warning(disable: 4310)
+#endif
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb/stb_truetype.h"
 
@@ -227,6 +233,9 @@ void resetStbttLimitsForTests() {
 } // namespace internal
 } // namespace trussc
 
+#ifdef _MSC_VER
+#  pragma warning(pop)
+#endif
 #if defined(__GNUC__) || defined(__clang__)
 #  pragma GCC diagnostic pop
 #endif

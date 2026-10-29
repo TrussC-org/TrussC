@@ -6,7 +6,11 @@ import subprocess
 import tempfile
 import unittest
 
+import sys
+
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+from check_build_warnings import run_build
 
 
 class ShaderTargetTests(unittest.TestCase):
@@ -51,7 +55,8 @@ add_custom_target(_tc_gen_exports)
 set(CMAKE_CXX_COMPILER_ARCHITECTURE_ID x64)
 ''' + block, encoding="utf-8")
             def run(*command):
-                return subprocess.run(command, check=True, text=True,
+                runner = subprocess.run if command[0] == readobj else run_build
+                return runner(command, check=True, text=True,
                                       stdout=subprocess.PIPE,
                                       stderr=subprocess.STDOUT, encoding="utf-8", errors="replace").stdout
 

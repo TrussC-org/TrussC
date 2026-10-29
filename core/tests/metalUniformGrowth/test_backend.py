@@ -11,6 +11,9 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
+from check_build_warnings import run_build
+
 HERE = Path(__file__).resolve().parent
 HEADER = HERE.parents[1] / "include/sokol/sokol_gfx.h"
 
@@ -42,7 +45,7 @@ def main():
         path = Path(scratch)
         (path / "functions.inc").write_text(functions, encoding="utf-8")
         (path / "mock.mm").write_text(fixture, encoding="utf-8")
-        subprocess.run(["clang++", "-std=c++20", "-Wall", "-Wextra", "-Werror",
+        run_build(["clang++", "-std=c++20", "-Wall", "-Wextra", "-Werror",
                         "-Wno-unused-function", "-x", "objective-c++", str(path / "mock.mm"),
                         "-l:libobjc.so.4", "-o", str(path / "mock")], check=True)
         return subprocess.run([str(path / "mock")]).returncode

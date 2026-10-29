@@ -249,6 +249,12 @@ jobs:
       # through the OS-only prefix). Key on the runner IMAGE: the first build
       # after an image update is cold (the compiler cache still helps), and a
       # cache never crosses images.
+      # Probe diagnostics on a real cache hit; never disable the cache.
+      - name: Verify cached warning replay
+        if: runner.os != 'Windows'
+        shell: bash
+        run: python3 tools/verify_warning_cache.py ccache
+
       - name: Runner image id (cache key)
         shell: bash
         run: echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
@@ -304,9 +310,16 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Verify cached warning replay (MSVC)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: python3 tools/verify_warning_cache.py sccache
+
       - name: Build trusscli
+        id: warning_build_1
         shell: bash
         run: |
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_1.log" -- bash -eo pipefail <<'TC_BUILD'
           if [ "$RUNNER_OS" == "macOS" ]; then
             sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
             sed -i '' 's/open /#open /g' tools/build_mac.command
@@ -321,6 +334,12 @@ jobs:
             echo "Searching for trusscli.exe..."
             find . -name trusscli.exe
           fi
+          TC_BUILD
+
+      - name: Check build warnings (1)
+        if: always() && steps.warning_build_1.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/warning_build_1.log"
 
       # trusscli CLI regressions, against the trusscli just built from this
       # commit: clean refuses a folder that is not a TrussC project (#459), and
@@ -349,19 +368,36 @@ jobs:
       # addons (see examples/tests/AllFeaturesExample/src/coverage.h). Every
       # other example is built daily (daily.yml).
       - name: Build AllFeaturesExample
+        id: warning_build_2
         if: matrix.shard == 1
         shell: bash
         run: |
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_2.log" -- bash -eo pipefail <<'TC_BUILD'
           chmod +x examples/build_all.py
           ./examples/build_all.py --test-only --verbose
+          TC_BUILD
+
+      - name: Check build warnings (2)
+        if: always() && steps.warning_build_2.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/warning_build_2.log"
 
       # Behavioral regression tests for the core (core/tests/*/): built AND run
       # on every build (small headless console projects, non-zero exit fails).
       # hotReloadLifecycle also covers the host/guest split build with an addon.
       # This job runs its shard only (see the matrix); ci-ok needs every shard.
       - name: Build & run core tests
+        id: warning_build_3
         shell: bash
-        run: ./examples/build_all.py --core-tests-only --shard ${{ matrix.shard }}/3 --verbose
+        run: |
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_3.log" -- bash -eo pipefail <<'TC_BUILD'
+          ./examples/build_all.py --core-tests-only --shard ${{ matrix.shard }}/3 --verbose
+          TC_BUILD
+
+      - name: Check build warnings (3)
+        if: always() && steps.warning_build_3.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/warning_build_3.log"
 
       - name: Compiler cache stats
         if: always()
@@ -441,6 +477,12 @@ jobs:
           echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
           echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
 
+      # Probe diagnostics on a real cache hit; never disable the cache.
+      - name: Verify cached warning replay
+        if: matrix.selected != '[]'
+        shell: bash
+        run: python3 tools/verify_warning_cache.py ccache
+
       - name: Restore build directories
         if: matrix.selected != '[]'
         uses: actions/cache/restore@v5
@@ -465,9 +507,11 @@ jobs:
         uses: ./.github/actions/apt-deps
 
       - name: Build trusscli
+        id: warning_build_4
         if: matrix.selected != '[]'
         shell: bash
         run: |
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_4.log" -- bash -eo pipefail <<'TC_BUILD'
           if [ "$RUNNER_OS" = "macOS" ]; then
             sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
             sed -i '' 's/open /#open /g' tools/build_mac.command
@@ -477,13 +521,21 @@ jobs:
             sed -i 's|"$SCRIPT_DIR/trusscli"|#&|g' tools/build_linux.sh
             ./tools/build_linux.sh
           fi
+          TC_BUILD
+
+      - name: Check build warnings (4)
+        if: always() && matrix.selected != '[]' && steps.warning_build_4.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/warning_build_4.log"
 
       - name: Build and run affected addon tests
+        id: warning_build_5
         if: matrix.selected != '[]'
         env:
           SELECTED_ADDONS: ${{ matrix.selected }}
         shell: bash
         run: |
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_5.log" -- bash -eo pipefail <<'TC_BUILD'
           python3 - <<'PYTHON'
           import json
           import os
@@ -492,6 +544,12 @@ jobs:
                           '--include-daily', '--verbose', '--addons',
                           *json.loads(os.environ['SELECTED_ADDONS'])], check=True)
           PYTHON
+          TC_BUILD
+
+      - name: Check build warnings (5)
+        if: always() && matrix.selected != '[]' && steps.warning_build_5.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/warning_build_5.log"
 
   build-android:
     needs: changes
@@ -571,6 +629,11 @@ jobs:
           echo "ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
 
+      # Probe diagnostics on a real cache hit; never disable the cache.
+      - name: Verify cached warning replay
+        shell: bash
+        run: python3 tools/verify_warning_cache.py ccache
+
       - name: Cache Android build
         if: github.event_name != 'merge_group'
         uses: actions/cache@v5
@@ -611,14 +674,26 @@ jobs:
         uses: ./.github/actions/apt-deps
 
       - name: Build trusscli
+        id: warning_build_6
+        shell: bash
         run: |
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_6.log" -- bash -eo pipefail <<'TC_BUILD'
           chmod +x tools/build_linux.sh
           sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
           sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
           ./tools/build_linux.sh
+          TC_BUILD
+
+      - name: Check build warnings (6)
+        if: always() && steps.warning_build_6.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/warning_build_6.log"
 
       - name: Build AllFeaturesExample (Android)
+        id: warning_build_7
+        shell: bash
         run: |
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_7.log" -- bash -eo pipefail <<'TC_BUILD'
           PG=tools/bin/trusscli
           EXAMPLE=examples/tests/AllFeaturesExample
 
@@ -634,6 +709,12 @@ jobs:
             -DANDROID_PLATFORM=android-26 \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build . -- -j$(nproc)
+          TC_BUILD
+
+      - name: Check build warnings (7)
+        if: always() && steps.warning_build_7.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/warning_build_7.log"
 
       - name: Compiler cache stats
         if: always()
@@ -699,6 +780,11 @@ jobs:
           # a runner-VM swap (see build job for the macOS symptom).
           echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
 
+      # Probe diagnostics on a real cache hit; never disable the cache.
+      - name: Verify cached warning replay
+        shell: bash
+        run: python3 tools/verify_warning_cache.py ccache
+
       - name: Cache build directories
         if: github.event_name != 'merge_group'
         uses: actions/cache@v5
@@ -749,17 +835,35 @@ jobs:
         uses: ./.github/actions/apt-deps
 
       - name: Build trusscli
+        id: warning_build_8
+        shell: bash
         run: |
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_8.log" -- bash -eo pipefail <<'TC_BUILD'
           chmod +x tools/build_linux.sh
           sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
           sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
           ./tools/build_linux.sh
+          TC_BUILD
+
+      - name: Check build warnings (8)
+        if: always() && steps.warning_build_8.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/warning_build_8.log"
 
       # Every addon example (web) is built daily (daily.yml).
       - name: Build AllFeaturesExample (Web)
+        id: warning_build_9
+        shell: bash
         run: |
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_9.log" -- bash -eo pipefail <<'TC_BUILD'
           chmod +x examples/build_all.py
           ./examples/build_all.py --web-only --test-only --verbose
+          TC_BUILD
+
+      - name: Check build warnings (9)
+        if: always() && steps.warning_build_9.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/warning_build_9.log"
 
       - name: Compiler cache stats
         if: always()
@@ -835,22 +939,40 @@ jobs:
           key: sokol-shdc-v1-${{ runner.os }}
 
       - name: Build AllFeaturesExample (iOS device SDK, unsigned)
+        id: warning_build_10
+        shell: bash
         run: |
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_10.log" -- bash -eo pipefail <<'TC_BUILD'
           cd examples/tests/AllFeaturesExample
           cmake -B build-ios -G Xcode \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=16.3
           cmake --build build-ios --config Release -- \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          TC_BUILD
+
+      - name: Check build warnings (10)
+        if: always() && steps.warning_build_10.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/warning_build_10.log"
 
       - name: Build soundPlayerExample (iOS device SDK, unsigned)
+        id: warning_build_11
+        shell: bash
         run: |
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_11.log" -- bash -eo pipefail <<'TC_BUILD'
           cd examples/sound/soundPlayerExample
           cmake -B build-ios -G Xcode \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=16.3
           cmake --build build-ios --config Release -- \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          TC_BUILD
+
+      - name: Check build warnings (11)
+        if: always() && steps.warning_build_11.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/warning_build_11.log"
 
   # Verify the API reference (docs/reference/) against the real C++ headers.
   # The structure is DERIVED from the clang AST, so signatures can't drift — the
@@ -938,19 +1060,44 @@ jobs:
           echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
           echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
           echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
+      # Probe diagnostics on a real cache hit; never disable the cache.
+      - name: Verify cached warning replay
+        shell: bash
+        run: python3 tools/verify_warning_cache.py ccache
+
       - name: Build trusscli
+        id: warning_build_12
+        shell: bash
         run: |
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_12.log" -- bash -eo pipefail <<'TC_BUILD'
           cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
           cmake --build tools/build --config Release --parallel 4
+          TC_BUILD
+
+      - name: Check build warnings (12)
+        if: always() && steps.warning_build_12.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/warning_build_12.log"
+
       - name: Compare merge-base and head; self-check head
+        id: warning_build_13
         env:
           BASE_REF: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           HEAD_REF: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        shell: bash
         run: |
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_13.log" -- bash -eo pipefail <<'TC_BUILD'
           if [ -z "$BASE_REF" ] || [ "$BASE_REF" = "0000000000000000000000000000000000000000" ]; then
             BASE_REF="$HEAD_REF^"
           fi
           xvfb-run -a -s '-screen 0 1024x768x24' python3 tools/render_regression.py "$BASE_REF" "$HEAD_REF"
+          TC_BUILD
+
+      - name: Check build warnings (13)
+        if: always() && steps.warning_build_13.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/warning_build_13.log"
+
       - name: Compiler cache stats
         if: always()
         run: ccache -sv || true
@@ -1032,6 +1179,10 @@ jobs:
       - name: affected addon CI regression checks
         if: always()
         run: python3 tools/tests/test_addon_ci.py -v
+
+      - name: build warning gate regression checks
+        if: always()
+        run: python3 tools/tests/test_build_warnings.py -v
 
       - name: build workflow cache regression checks
         if: always()

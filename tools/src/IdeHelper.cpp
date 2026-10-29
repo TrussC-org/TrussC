@@ -107,7 +107,9 @@ string IdeHelper::openInIde(IdeType ideType, const string& path) {
 #endif
 
     if (!cmd.empty()) {
-        system(cmd.c_str());
+        if (std::system(cmd.c_str()) != 0) {
+            return "Failed to open project in " + string(getIdeName(ideType));
+        }
     }
 
     return "";  // Success

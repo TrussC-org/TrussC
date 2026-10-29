@@ -22,7 +22,7 @@ EM_JS(void, tc_video_setup, (unsigned id, int width, int height), {
         state.stream = stream;
         const video = document.createElement('video');
         state.video = video;
-        video.setAttribute('playsinline', '');
+        video.setAttribute("playsinline", "");
         video.muted = true;
         video.style.display = 'none';
         document.body.appendChild(video);

@@ -16,9 +16,13 @@ import shlex
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
+from check_build_warnings import run_build
 
 TEST = Path(__file__).resolve().parent
 # Bound (security): the DevTools WebSocket upgrade response (external bytes). Overflow fails the run.
@@ -241,8 +245,8 @@ class AssetServer(http.server.ThreadingHTTPServer):
 def build(directory):
     wrapper = shlex.split(os.environ.get('TC_BUILD_WRAPPER', str(Path.home() / 'TrussC-dev/trussc-ai-tools/tcbuild.sh')))
     emcmake = Path(os.environ.get('EMSDK', Path.home() / 'emsdk')) / 'upstream/emscripten/emcmake'
-    subprocess.run(wrapper + [str(emcmake), 'cmake', '-S', str(TEST), '-B', str(directory), '-DCMAKE_BUILD_TYPE=Release'], check=True)
-    subprocess.run(wrapper + ['cmake', '--build', str(directory), '--parallel', '4'], check=True)
+    run_build(wrapper + [str(emcmake), 'cmake', '-S', str(TEST), '-B', str(directory), '-DCMAKE_BUILD_TYPE=Release'], check=True)
+    run_build(wrapper + ['cmake', '--build', str(directory), '--parallel', '4'], check=True)
 
 
 def main():

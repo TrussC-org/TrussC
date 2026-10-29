@@ -286,7 +286,7 @@ void earlyPngChecks() {
     check("complete over-axis PNG is below encoded cap", png.size() < 64 * 1024 * 1024);
     rejected("complete 16385x16385 PNG admitted before codec product check", png);
     auto corrupt = png;
-    std::fill(corrupt.begin() + 24, corrupt.begin() + 29, 255);
+    std::fill(corrupt.begin() + 24, corrupt.begin() + 29, static_cast<unsigned char>(255));
     rejected("garbage IHDR stays a decode error", corrupt, LoadError::DecodeFailed);
     corrupt = png;
     corrupt[29] ^= 1;
