@@ -47,7 +47,7 @@ jobs:
   # anything that isn't clearly a doc (and every non-diff event, e.g.
   # workflow_dispatch) counts as code and builds everything.
   changes:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       docs_only: ${{ steps.detect.outputs.docs_only }}
     steps:
@@ -147,7 +147,7 @@ jobs:
             launcher: sccache
             cmake_gen: Ninja
           - preset: linux
-            os: ubuntu-24.04
+            os: ubuntu-latest
             launcher: ccache
 
     runs-on: ${{ matrix.os }}
@@ -370,7 +370,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     timeout-minutes: 30
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5
@@ -516,7 +516,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     timeout-minutes: 30
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5
@@ -788,7 +788,7 @@ jobs:
     if: needs.changes.outputs.docs_only != 'true' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
     # Merge-base and head share compiler-cache entries; allow cold-cache startup.
     timeout-minutes: 60
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     env:
       LIBGL_ALWAYS_SOFTWARE: '1'
       __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/50_mesa.json
@@ -857,7 +857,7 @@ jobs:
   # Cheap and independent of the build — always runs (not gated).
   header-state-check:
     timeout-minutes: 5
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
@@ -941,7 +941,7 @@ jobs:
   # still restore the newest main save through restore-keys. Not part of ci-ok.
   # ---------------------------------------------------------------------------
   ccache-prune:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     needs: [build, build-android, build-web, render-regression]
     if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
@@ -974,7 +974,7 @@ jobs:
   # skipped only when the `changes` gate declared the diff docs-only.
   # ---------------------------------------------------------------------------
   ci-ok:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     needs: [changes, build, build-android, build-web, build-ios, reference-check, header-state-check, render-regression]
     if: always()
     steps:

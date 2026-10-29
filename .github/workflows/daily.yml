@@ -30,7 +30,7 @@ jobs:
   # A manual dispatch always runs. Also finds the last GREEN run's commit for
   # the failure report's range.
   check:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.c.outputs.run }}
       last_green: ${{ steps.c.outputs.last_green }}
@@ -82,7 +82,7 @@ jobs:
             preset: windows
             launcher: sccache
             cmake_gen: Ninja
-          - os: ubuntu-24.04
+          - os: ubuntu-latest
             preset: linux
             launcher: ccache
 
@@ -248,7 +248,7 @@ jobs:
     needs: check
     if: needs.check.outputs.run == 'true'
     timeout-minutes: 180
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5
@@ -361,7 +361,7 @@ jobs:
   report:
     needs: [check, sweep, sweep-web]
     if: always() && contains(needs.*.result, 'failure')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - name: Open or update tracking issue
         env:
