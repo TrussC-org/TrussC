@@ -89,7 +89,9 @@ public:
         if (sg_query_buffer_state(vertexBuffer) != SG_RESOURCESTATE_VALID ||
             (recipe_.index_type != SG_INDEXTYPE_NONE && recipe_.index_type != _SG_INDEXTYPE_DEFAULT &&
              sg_query_buffer_state(indexBuffer) != SG_RESOURCESTATE_VALID)) {
-            internal::deferGpuDestroy(vertexBuffer); internal::deferGpuDestroy(indexBuffer);
+            if (!stream_) {
+                internal::deferGpuDestroy(vertexBuffer); internal::deferGpuDestroy(indexBuffer);
+            }
             internal::deferGpuDestroy(shader);
             shader = {}; vertexBuffer = {}; indexBuffer = {}; stream_.reset();
             logError("Shader") << "Failed to create draw buffers";
@@ -106,8 +108,10 @@ public:
         // This is what makes scope-local Shaders safe — the captured pipeline
         // and buffers outlive the object until the flush.
         if (loaded) {
-            internal::deferGpuDestroy(indexBuffer);
-            internal::deferGpuDestroy(vertexBuffer);
+            if (!stream_) {
+                internal::deferGpuDestroy(indexBuffer);
+                internal::deferGpuDestroy(vertexBuffer);
+            }
             internal::retirePipelineProgram(shader);
             internal::deferGpuDestroy(shader);
         }
@@ -330,18 +334,10 @@ public:
         // destroyed before present()) and later setUniform()/setTexture()
         // calls cannot retroactively change this draw. Same pattern as
         // PbrDrawCommand; executed by internal::executeDeferredShaderDraw().
-        // Grow before capturing any handles in this sokol frame. Later FBO
-        // flushes can request growth, but must not replace this frame's buffers.
+        // Protected handles are aliases; replay owns and can replace the stream.
         if (stream_) {
-            const auto growth = stream_->beginFrame(vertexBuffer, indexBuffer);
-            if (growth == internal::ShaderStreamGrowth::Grown) {
-                logWarning("Shader") << "Stream buffers grew to "
-                    << sg_query_buffer_size(vertexBuffer) / sizeof(ShaderVertex)
-                    << " vertices and " << sg_query_buffer_size(indexBuffer) / sizeof(uint32_t)
-                    << " indices";
-            } else if (growth == internal::ShaderStreamGrowth::Failed) {
-                logError("Shader") << "Failed to grow stream buffers";
-            }
+            vertexBuffer = stream_->vertices;
+            indexBuffer = stream_->indices;
         }
         internal::DeferredShaderDraw draw;
         draw.stream = stream_;
@@ -455,9 +451,9 @@ protected:
     }
 
     virtual void createVertexBuffer() {
-        vertexBuffer = internal::makeShaderStreamBuffer(65536 * sizeof(ShaderVertex), false);
-        indexBuffer = internal::makeShaderStreamBuffer(65536 * sizeof(uint32_t), true);
         stream_ = std::make_shared<internal::ShaderStreamState>();
+        vertexBuffer = stream_->vertices = internal::makeShaderStreamBuffer(65536 * sizeof(ShaderVertex), false);
+        indexBuffer = stream_->indices = internal::makeShaderStreamBuffer(65536 * sizeof(uint32_t), true);
     }
 
     virtual void onBegin() {}
