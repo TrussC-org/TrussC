@@ -75,7 +75,7 @@ These libraries are only included if you use the corresponding addon.
 
 | Library | Version | Pinned / vendored in | Upstream | License | Author/Organization | Addon |
 |---------|---------|----------------------|----------|---------|---------------------|-------|
-| **Dear ImGui** | 1.92.9b (+ TrussC local ini storage/reuse and font import patches, see [TRUSSC_MODIFICATIONS.md](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md)) | `addons/tcxImGui/src/imgui/` | https://github.com/ocornut/imgui | MIT | Omar Cornut | tcxImGui |
+| **Dear ImGui** | 1.92.9b (+ TrussC test engine and widget value hooks, see [TRUSSC_MODIFICATIONS.md](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md)) | `addons/tcxImGui/src/imgui/` | https://github.com/ocornut/imgui | MIT | Omar Cornut | tcxImGui |
 | **sokol_imgui.h** | not recorded | `addons/tcxImGui/src/sokol_imgui.h` | https://github.com/floooh/sokol | zlib License | Andre Weissflog | tcxImGui |
 | **mbedTLS** | 3.6.7 | `addons/tcxTls/CMakeLists.txt` | https://github.com/Mbed-TLS/mbedtls | Apache-2.0 or GPL-2.0-or-later (dual-licensed) | Arm Limited | tcxTls |
 | **libcurl** | 8.22.0 (Windows; macOS/Linux use system libcurl) | `addons/tcxCurl/CMakeLists.txt` | https://github.com/curl/curl | curl License (MIT-style) | Daniel Stenberg and contributors | tcxCurl |
