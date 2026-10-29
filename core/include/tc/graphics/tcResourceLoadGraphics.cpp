@@ -273,7 +273,7 @@ LoadResult Image::finishLoad(const fs::path& path, bool mipmaps) try {
 void Font::loadAsync(const fs::path& nameOrPath, int size, int faceIndex) {
     cancelAsync();
     auto state = async_.begin(onLoad, [this](AsyncState& ready) { applyAsync(ready); });
-    state->dpi = sapp_dpi_scale();
+    state->dpi = getDpiScale();
     state->size = size;
     const auto resolvedPath = internal::resolveLoadPath(nameOrPath);
     state->input = resolveInput(nameOrPath, resolvedPath, faceIndex);

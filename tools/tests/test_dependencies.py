@@ -1,6 +1,7 @@
 """Offline tests for the per-PR dependency inventory gate."""
 
 import copy
+import hashlib
 import importlib.util
 import os
 from pathlib import Path
@@ -20,6 +21,11 @@ spec.loader.exec_module(deps)
 
 
 class DependencyTests(unittest.TestCase):
+    def test_nlohmann_is_unmodified_upstream_3_12_0(self):
+        header = ROOT / "core/include/nlohmann/json.hpp"
+        self.assertEqual(hashlib.sha256(header.read_bytes()).hexdigest(),
+                         "aaf127c04cb31c406e5b04a63f1ae89369fccde6d8fa7cdda1ed4f32dfc5de63")
+
     @classmethod
     def setUpClass(cls):
         cls.rows = deps.load(str(ROOT))

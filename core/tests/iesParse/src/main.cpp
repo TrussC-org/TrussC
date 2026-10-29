@@ -49,6 +49,37 @@ TC_CORE_TEST_MAIN() {
           result.candela == std::vector<std::vector<float>>({{2, 4, 6}, {12, 10, 8}}) &&
           result.maxCandela == 12);
 
+    const struct { const char* name; const char* bytes; } trailingCases[] = {
+        {"no trailing bytes", ""}, {"trailing DOS EOF", "\x1a"},
+        {"trailing text", " trailing text"}, {"DOS EOF then text", "\x1a" "then text"},
+        {"extra numeric values", " 7 8 9"}, {"trailing overflow", " 1e999"},
+        {"trailing incomplete exponent", " 4e"}
+    };
+    for (const std::string tilt : {"TILT=NONE\n", "TILT=INCLUDE\n1 2\n0 90\n1 0.5\n"}) {
+        for (const auto& suffix : trailingCases) {
+            for (bool crlf : {false, true}) {
+                std::string source = tilt + grid.substr(0, grid.size() - 1) + suffix.bytes;
+                if (crlf) {
+                    for (std::size_t pos = 0; (pos = source.find('\n', pos)) != std::string::npos; pos += 2)
+                        source.replace(pos, 1, "\r\n");
+                }
+                check(std::string(suffix.name) + (crlf ? " (CRLF)" : " (LF)"),
+                      parseIes(source, result, error) && error.empty() &&
+                      result.vertAngles == std::vector<float>({0, 90, 180}) &&
+                      result.horizAngles == std::vector<float>({0, 90}) &&
+                      result.candela == std::vector<std::vector<float>>({{2, 4, 6}, {12, 10, 8}}) &&
+                      result.maxCandela == 12);
+            }
+        }
+    }
+    rejected("text in required angles", "TILT=NONE\n" + header("1", "1") + "0 text 42\n");
+    rejected("DOS EOF before required candela", "TILT=NONE\n" + header("1", "1") + "0 0\x1a" "then text");
+    rejected("malformed required value (CRLF)",
+             "TILT=NONE\r\n1 1000 2 1 1 1 1 0 0 0 1 1 10\r\n0 text 42\r\n");
+    for (const char* value : {"1e999", "4e"}) {
+        rejected("malformed required value at EOF", "TILT=NONE\n" + header("1", "1") + "0 0 " + value);
+    }
+
     for (const std::string count : {"0", "-5", "1e10", "2147483648", "0.5", "4"}) {
         rejected("vertical count " + count, "TILT=NONE\n" + header(count, "1") + "0 0 42\n");
         rejected("horizontal count " + count, "TILT=NONE\n" + header("1", count) + "0 0 42\n");

@@ -18,7 +18,7 @@
 // - A GIF whose LZW prefix chains are as long as the format allows decodes
 //   with a small stack (TrussC patch in stb_image.h: the chain is walked with
 //   a loop, not recursion).
-//   Native POSIX builds run it on a thread with a 64 KB stack; Windows and
+//   Native POSIX builds use max(64 KB, platform minimum), page-aligned; Windows and
 //   the web build decode it on the calling thread, which only checks the
 //   output there (the wasm call stack is not the 64 KB data stack).
 // - SoundBuffer::loadOgg() and loadOggFromMemory() report the clip's channel
@@ -34,12 +34,15 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
 
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #include <pthread.h>
+#include <unistd.h>
+#include <limits.h>
 #define TC_TEST_SMALL_STACK_THREAD 1
 #endif
 
@@ -273,21 +276,45 @@ static void* runSmallStackJob(void* arg) {
     return nullptr;
 }
 
+static size_t smallStackBytes() {
+    // Bound (catches recursive GIF decoding): 64 KiB, raised only to the platform's minimum thread stack.
+    size_t bytes = 64 * 1024;
+#if defined(TC_TEST_SMALL_STACK_THREAD)
+    bytes = max(bytes, static_cast<size_t>(PTHREAD_STACK_MIN));
+    const long runtimeMinimum = sysconf(_SC_THREAD_STACK_MIN);
+    if (runtimeMinimum > 0) bytes = max(bytes, static_cast<size_t>(runtimeMinimum));
+    const long pageSize = sysconf(_SC_PAGESIZE);
+    if (pageSize > 0) {
+        const size_t page = static_cast<size_t>(pageSize);
+        bytes = ((bytes + page - 1) / page) * page;
+    }
+#endif
+    return bytes;
+}
+
 // Runs the decode on a thread with `stackBytes` of stack (native POSIX), or
 // on the calling thread elsewhere. Returns false if the thread could not start.
-static bool decodeOnSmallStack(SmallStackJob& job, size_t stackBytes) {
+static bool decodeOnSmallStack(SmallStackJob& job, size_t stackBytes, string& error) {
 #if defined(TC_TEST_SMALL_STACK_THREAD)
     pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    if (pthread_attr_setstacksize(&attr, stackBytes) != 0) { pthread_attr_destroy(&attr); return false; }
+    auto failed = [&](const char* operation, int rc) {
+        error = string(operation) + ": rc=" + to_string(rc) + " (" + std::strerror(rc) + ")";
+        return false;
+    };
+    int rc = pthread_attr_init(&attr);
+    if (rc != 0) return failed("pthread_attr_init", rc);
+    rc = pthread_attr_setstacksize(&attr, stackBytes);
+    if (rc != 0) { pthread_attr_destroy(&attr); return failed("pthread_attr_setstacksize", rc); }
     pthread_t th;
-    int rc = pthread_create(&th, &attr, runSmallStackJob, &job);
+    rc = pthread_create(&th, &attr, runSmallStackJob, &job);
     pthread_attr_destroy(&attr);
-    if (rc != 0) return false;
-    pthread_join(th, nullptr);
+    if (rc != 0) return failed("pthread_create", rc);
+    rc = pthread_join(th, nullptr);
+    if (rc != 0) return failed("pthread_join", rc);
     return true;
 #else
     (void)stackBytes;
+    (void)error;
     runSmallStackJob(&job);
     return true;
 #endif
@@ -443,7 +470,7 @@ TC_CORE_TEST_MAIN() {
         checkImage("gif 1 frame", gif(4, 2, pal, {frame1}), 4, 2, expect);
     }
 
-    // --- GIF with the longest LZW prefix chains, decoded on a 64 KB stack ------------------
+    // --- GIF with the longest LZW prefix chains, decoded on a bounded stack ------------------
     {
         // After the first literal, each code is the entry being defined (the
         // "KwKwK" case), so every entry extends the previous one by a link:
@@ -454,10 +481,12 @@ TC_CORE_TEST_MAIN() {
         const Bytes deep = gif(2, 2, {{{30, 60, 90}}, {{0, 0, 0}}, {{0, 0, 0}}, {{0, 0, 0}}}, {codes});
         SmallStackJob job;
         job.bytes = &deep;
-        const bool ran = decodeOnSmallStack(job, 64 * 1024);
-        check("gif long LZW chains: decode thread ran", ran);
+        const size_t stackBytes = smallStackBytes();
+        string threadError;
+        const bool ran = decodeOnSmallStack(job, stackBytes, threadError);
+        check("gif long LZW chains: decode thread ran", ran, threadError);
 #if defined(TC_TEST_SMALL_STACK_THREAD)
-        const string where = "on a 64 KB thread stack";
+        const string where = "on a " + to_string(stackBytes / 1024) + " KB thread stack";
 #else
         const string where = "on the calling thread";
 #endif
