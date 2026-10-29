@@ -22,6 +22,8 @@
 #define MA_NO_ENCODING
 #define MA_NO_GENERATION
 // Use the WAV field's full range instead of dr_wav's default rate policy.
+// <cstdint> first: on MSVC nothing in this TU declares UINT32_MAX before miniaudio.
+#include <cstdint>
 #define MA_DR_WAV_MAX_SAMPLE_RATE UINT32_MAX
 #define MINIAUDIO_IMPLEMENTATION
 #include "tc/sound/tcAudioDeviceInternal.h"
