@@ -541,6 +541,8 @@ inline void reportWindowAppAttachmentFailure() noexcept {
 // passes both request-time checks; the second window to apply refuses it).
 inline void Window::applyPendingApp() {
     if (!appRequested_ || dispatchDepth_ > 0 || applyingApp_ || exitDelivered_) return;
+    // A busy session end freezes App attachment until the process ends.
+    if (internal::sessionEndExit()) return;
     applyingApp_ = true;
     struct ApplyingReset {
         bool& flag;

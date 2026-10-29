@@ -19,22 +19,30 @@ namespace native {
 struct Record {
     uint32_t win_id=91; sapp_window_desc desc{};
     uint64_t frame_count=9,close_recorded_frame=0; bool ready=true,in_tick=false,close_requested=false,close_recorded=false,is_main=true;
-    int link=0;
+    int link=0,callback_depth=0; bool native_closed=false,closed_pending=false;
     bool input_delivered=false,wake_on_input=true;bool (*events_enabled)()=nullptr;
     int win_width=80,win_height=40,fb_width=160,fb_height=80;float dpi_scale=2;
 } record;
 Record first;
 using _sapp_tc_window_t=Record;
 Record* live=&record;
-struct { bool mouse_locked=false;Record* lock_owner=nullptr;struct {Record* main=&first;}app;} _sapp_tc;
+constexpr int _SAPP_TC_MAX_WINDOWS=1;
+struct { bool mouse_locked=false;Record* lock_owner=nullptr; Record* windows[1]={&record};
+    int callbacks_active=0,constructing=0; bool deferred_blocked=false;
+    struct {Record* main=&first;}app;} _sapp_tc;
+bool _sapp_tc_mac_frozen() { return false; }
+void _sapp_tc_mac_contained(const char*) {}
+void _sapp_tc_mac_schedule_deferred() {}
 Record* _sapp_tc_lookup(sapp_window h){return live&&h.id==live->win_id?live:nullptr;}
 '''
 import re
 send=next(re.finditer(r'static void _sapp_tc_send\(_sapp_tc_window_t\* w, sapp_event\* ev\) \{',source))
+code+=body(source,'struct _sapp_tc_mac_callback_scope {')+';\n'+body(source,'static bool _sapp_tc_mac_busy(')+'\n'
 code+=body(source[send.start():],send.group())+'\n'
+code+='#define __APPLE__ 1\n#define TARGET_OS_OSX 1\n'
 for marker in ['extern "C" bool sapp_window_inject_event(', 'extern "C" bool sapp_tc_window_close_recorded(']:
     code+=body(source,marker).replace('extern "C" ','')+'\n'
-closed=body(source,'static void _sapp_tc_mac_closed(').replace('[NSApp terminate:nil]','terminate()').replace('[w->link invalidate]','invalidate(w->link)').replace('= nil','= 0')
+closed=(body(source,'static void _sapp_tc_mac_closed_now(')+body(source,'static void _sapp_tc_mac_closed(')).replace('[NSApp terminate:nil]','terminate()').replace('[w->link invalidate]','invalidate(w->link)').replace('= nil','= 0')
 code+='void terminate(); void invalidate(int); void _sapp_tc_mac_stop_fallback(Record*);\n'+closed+'\n'
 code+=r'''
 int terminated=0,closedCallbacks=0;
@@ -62,11 +70,14 @@ void run(){
     check("direct main close records frame cancellation without a queued close",record.close_recorded&&!record.close_requested&&record.ready&&terminated==1&&sapp_tc_window_close_recorded({91}));
     sapp_event closedInput{};closedInput.type=SAPP_EVENTTYPE_MOUSE_MOVE;
     check("physically closed target rejects input in its closing frame",!sapp_window_inject_event({91},&closedInput));
+    ++record.frame_count;check("native close persists beyond its recorded frame",sapp_tc_window_close_recorded({91}));--record.frame_count;
+    record.native_closed=false; // Isolate the shared frame marker contract too.
+    check("shared physical close marker rejects closing-frame input",!sapp_window_inject_event({91},&closedInput));
     ++record.frame_count;check("physical close marker is limited to its native frame",!sapp_tc_window_close_recorded({91}));--record.frame_count;
     record.close_recorded=false;record.is_main=false;record.desc.close_cb=[](sapp_window,void*){++closedCallbacks;};
     _sapp_tc_mac_closed(&record);
     check("direct secondary close stops admission and reports once",record.close_recorded&&!record.ready&&!record.close_requested&&closedCallbacks==1);
-    record.close_recorded=false;record.ready=true;record.is_main=false;
+    record.close_recorded=false;record.native_closed=false;record.ready=true;record.is_main=false;
     sapp_event e{};e.type=SAPP_EVENTTYPE_MOUSE_MOVE;e.mouse_x=40;e.mouse_y=20;
     _sapp_tc_send(&record,&e);check("real source is zero",last.source==SAPP_EVENTSOURCE_REAL&&!record.in_tick);
     e.window_id=999;e.frame_count=999;e.dpi_scale=999;

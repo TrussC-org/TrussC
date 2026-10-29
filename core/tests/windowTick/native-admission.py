@@ -29,13 +29,17 @@ struct Descriptor {
 };
 struct _sapp_tc_window_t {
     unsigned win_id=717; bool ready=true,in_tick=false,is_main=true,cancel_tick=false;
+    bool native_closed=false,closed_pending=false,draw_admitted=false; int callback_depth=0,frame_drawable=0;
     bool close_requested=false,input_delivered=false,wake_on_input=true,credit_held=false,waitable_ready=true;
+    struct { double last=0; } timing;
+    int swap_interval=1; double last_present=0;
     int drawable=1,swap_chain=1; void* frame_wait=nullptr; double earliest_next=0;
     float dpi_scale=2;
     uint64_t frame_count=0; int win_width=100,win_height=50,fb_width=200,fb_height=100;
     void* hwnd=nullptr; bool (*events_enabled)()=nullptr; sapp_window_desc desc{};
 } record;
-struct { bool mouse_locked=false; _sapp_tc_window_t* lock_owner=nullptr; int display=0; size_t window_slots=1; _sapp_tc_window_t* windows[1]={&record};
+struct { bool mouse_locked=false; _sapp_tc_window_t* lock_owner=nullptr; int display=0; double refresh_period=1.0/60.0; size_t window_slots=1; _sapp_tc_window_t* windows[1]={&record};
+    int callbacks_active=0,constructing=0; bool deferred_blocked=false;
     struct { bool init_called=false,quit_requested=false,quit_ordered=false;
         unsigned host_loop_depth=1; bool host_turn_open=false;
         Descriptor desc; _sapp_tc_window_t* main=&record; } app; } _sapp_tc;
@@ -45,7 +49,10 @@ int drained=0,initCount=0,ticks=0;
 bool queued=true;
 double _sapp_tc_now() { return 1; }
 void _sapp_tc_d3d11_dispatch_pending_device_loss() {}
-''' + predicate + '\n' + send + r'''
+void _sapp_tc_mac_schedule_deferred() {}
+bool _sapp_tc_native_hidden(_sapp_tc_window_t*) { return false; }
+bool _sapp_tc_native_iconified(_sapp_tc_window_t*) { return false; }
+''' + (body(native, 'struct _sapp_tc_mac_callback_scope {') + ';\nvoid _sapp_tc_mac_contained(const char*) {}\nbool _sapp_tc_mac_frozen() { return false; }\n' if port == 'mac' else '') + predicate + '\n' + send + r'''
 void emit(sapp_event_type type) {
     sapp_event event{}; event.type=type; event.key_code=SAPP_KEYCODE_B; event.char_code='b';
     _sapp_tc_send(&record,&event);
@@ -125,15 +132,17 @@ void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
             observer = body(native, 'static void _sapp_tc_mac_host_turn(')
             if early == platform:
                 observer = observer.replace('    if (activity == kCFRunLoopBeforeSources) {', '    if (activity == kCFRunLoopBeforeSources) {\n        _sapp_tc_mac_init_client();')
-            tick = body(native, 'static void _sapp_tc_mac_tick(')
-            start = tick.index('        w->in_tick = true;')
-            end = tick.index('\n        w = _sapp_tc_lookup(handle);', start)
+            tick = body(native, 'static void _sapp_tc_mac_tick_body(')
+            start = tick.index('        w->draw_admitted = admitted;')
+            end = tick.index('\n        w = _sapp_tc_lookup(handle);    /* the callback', start)
+            code += body(native, 'struct _sapp_tc_mac_tick_scope {').replace('= nil', '= 0') + ';\n'
             code += r'''
 using CFRunLoopObserverRef=void*;using CFRunLoopActivity=unsigned;
 constexpr int kCFRunLoopEntry=1,kCFRunLoopExit=2,kCFRunLoopBeforeSources=4;
 ''' + observer + r'''
 void tick() {
     auto* w=&record; const sapp_window handle{w->win_id}; bool admitted=true;
+    _sapp_tc_mac_tick_scope guard(w);
 ''' + tick[start:end].replace('        w->draw_admitted = admitted;', '        (void)admitted;') + r'''
     ++ticks; w->in_tick=false;
 }
@@ -166,8 +175,16 @@ def mac_init_exit_probe(native):
     deferred = body(native, 'static void _sapp_tc_mac_process_deferred(')
     # Replace only Objective-C message syntax; retain the production decisions.
     deferred = deferred.replace('[nsw close]', 'nsw->close()').replace(
-        '[first->window performClose:nil]', 'first->window->performClose()')
-    tick = body(native, 'static void _sapp_tc_mac_tick(').replace('@autoreleasepool', '').replace('link.', 'link->')
+        '[first->window performClose:nil]', 'first->window->performClose()').replace('[NSApp terminate:nil]', 'terminate_app()')
+    tick = body(native, 'struct _sapp_tc_mac_tick_scope {').replace('= nil', '= 0') + ';\n'
+    tick += body(native, 'static void _sapp_tc_mac_tick_body(').replace('@autoreleasepool', '').replace('link.', 'link->')
+    tick += body(native, 'static bool _sapp_tc_mac_tick_blocked(')
+    tick += body(native, 'static void _sapp_tc_mac_tick(')
+    delegates = body(native, '- (BOOL)windowShouldClose:(id)sender').replace(
+        '- (BOOL)windowShouldClose:(id)sender', 'bool window_should_close(void* sender)').replace('self.w', '&record')
+    delegates += body(native, '- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender').replace(
+        '- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender', 'int application_should_terminate(void* sender)')
+
     return r'''
 #include <cstdint>
 #include <cstdio>
@@ -182,6 +199,7 @@ struct CADisplayLink { double timestamp=1,targetTimestamp=2; };
 struct _sapp_tc_window_t {
     unsigned win_id=717; float dpi_scale=2; bool ready=true,in_tick=false,is_main=true,close_requested=false;
     bool draw_while_hidden=true,draw_admitted=false,wake_on_input=false,input_delivered=false;
+    bool native_closed=false,closed_pending=false; int callback_depth=0,frame_drawable=0;
     int timing=0,win_width=100,win_height=50,fb_width=200,fb_height=100;
     double last_tick_time=0,frame_duration=0; uint64_t frame_count=0;
     NSWindow* window=&nativeWindow; bool (*events_enabled)()=nullptr;
@@ -189,6 +207,7 @@ struct _sapp_tc_window_t {
         void (*tick_cb)(sapp_window,void*)=nullptr; void* user_data=nullptr; } desc;
 } record;
 struct { _sapp_tc_window_t* windows[1]={&record};
+    int callbacks_active=0,constructing=0; bool deferred_blocked=false,terminate_pending=false;
     struct { bool init_called=false,quit_requested=false,quit_ordered=false;
         _sapp_tc_window_t* main=&record;
         struct { void (*init_cb)()=nullptr; void (*init_userdata_cb)(void*)=nullptr;
@@ -199,13 +218,23 @@ struct { _sapp_tc_window_t* windows[1]={&record};
     } app;
 } _sapp_tc;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return h.id==record.win_id?&record:nullptr; }
-namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} }
-int checks=0,failures=0,delivered=0,replayed=0,closed=0;
+namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} void setExitReason(const char*) {} }
+constexpr int NSTerminateCancel=0,NSTerminateNow=1;
+using AEEventID=unsigned;
+bool _sapp_tc_mac_frozen() { return false; }
+void _sapp_tc_mac_contained(const char*) {}
+void _sapp_tc_mac_schedule_deferred() {}
+void _sapp_tc_mac_closed_now(_sapp_tc_window_t*) {}
+AEEventID _sapp_tc_mac_quit_reason() { return 0; }
+bool _sapp_tc_mac_is_session_end(AEEventID) { return false; }
+void _sapp_tc_mac_session_end(AEEventID) {}
+void terminate_app();
+int checks=0,failures=0,delivered=0,replayed=0,closed=0,terminated=0;
 bool setupReturned=false,callbacksActive=false,requestClose=false,veto=false;
 void check(const char* message,bool ok) {
     ++checks; if (!ok) { ++failures; std::printf("macOS intended exception: FAIL: %s\n",message); }
 }
-''' + body(mac, 'static bool _sapp_tc_app_events_enabled(') + '\n' + body(
+''' + body(native, 'struct _sapp_tc_mac_callback_scope {') + ';\n' + body(native, 'static bool _sapp_tc_mac_busy(') + body(native, 'static bool _sapp_tc_mac_deferred_pending(') + body(mac, 'static bool _sapp_tc_app_events_enabled(') + '\n' + body(
         mac, 'static void _sapp_tc_send(') + '\n' + body(
         native, 'static BOOL _sapp_tc_request_exit(') + '\n' + body(
         native, 'static BOOL _sapp_tc_mac_close(') + '\n' + deferred + '\n' + body(
@@ -216,7 +245,8 @@ bool _sapp_tc_native_hidden(_sapp_tc_window_t*) { return false; }
 bool _sapp_tc_mac_update_dimensions(_sapp_tc_window_t*) { return false; }
 void _sapp_tc_send_type(_sapp_tc_window_t*,int) {}
 void _sapp_tc_mac_swap(_sapp_tc_window_t*) {}
-''' + tick + r'''
+''' + tick + delegates + r'''
+void terminate_app() { ++terminated; if (application_should_terminate(nullptr)==NSTerminateNow) nativeWindow.close(); }
 void NSWindow::close() { ++closed; _sapp_tc.app.main=nullptr; record.window=nullptr; }
 void NSWindow::performClose() {
     ++replayed;
@@ -234,9 +264,9 @@ void setup() {
     check("init is an active callback under the approved busy rule",record.in_tick);
     // NO is NSTerminateCancel at applicationShouldTerminate:, or the refusal
     // returned by windowShouldClose:. Both production paths must defer.
-    const BOOL answer=requestClose?_sapp_tc_mac_close(&record):_sapp_tc_request_exit();
+    const BOOL answer=requestClose?window_should_close(nullptr):application_should_terminate(nullptr);
     check("Quit/close during init returns cancel",answer==NO);
-    check("init Quit/close is retained for replay",requestClose?record.close_requested:_sapp_tc.app.quit_requested);
+    check("init Quit/close is retained for replay",requestClose?record.close_requested:_sapp_tc.terminate_pending);
     check("no QUIT_REQUESTED during setup",delivered==0);
     _sapp_tc_mac_process_deferred(); // nested AppKit loop while setup is active
     check("nested loop cannot replay during setup",delivered==0 && replayed==0 && closed==0);
@@ -246,7 +276,7 @@ void setup() {
 int main() {
     for (bool closeRequest : {false,true}) for (bool cancel : {false,true}) {
         record={}; _sapp_tc.app={};
-        delivered=replayed=closed=0; setupReturned=callbacksActive=false;
+        delivered=replayed=closed=terminated=0; setupReturned=callbacksActive=false;
         requestClose=closeRequest; veto=cancel;
         record.events_enabled=_sapp_tc_app_events_enabled; record.desc.event_cb=listener;
         _sapp_tc.app.desc._tc_event_cb=listener;
@@ -255,11 +285,11 @@ int main() {
         // Production tick supplies the init guard, unwinds it and drains replay.
         _sapp_tc_mac_tick(&record,nullptr);
         check("Quit/close delivered exactly once after setup",setupReturned && delivered==1);
-        check("application Quit is replayed once through performClose",requestClose || replayed==1);
+        check("application Quit replays once through process termination",requestClose || (terminated==1 && replayed==0));
         check("close intent is consumed after setup",!record.close_requested && !record.in_tick);
         check("replayed request preserves the existing veto",_sapp_tc.app.quit_ordered==!veto && closed==int(!veto));
         _sapp_tc_mac_process_deferred();
-        check("another drain cannot duplicate QUIT_REQUESTED",delivered==1 && closed==int(!veto) && (requestClose || replayed==1));
+        check("another drain cannot duplicate QUIT_REQUESTED",delivered==1 && closed==int(!veto) && (requestClose || (terminated==1 && replayed==0)));
     }
     std::printf("macOS init admission: %d checks, %d failures\n",checks,failures);
     return failures?1:0;
@@ -274,14 +304,12 @@ def main():
     native = (Path(__file__).resolve().parents[3] / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
     source = mac_init_exit_probe(native)
     variants = [('baseline', source)]
-    request = body(source, 'static BOOL _sapp_tc_request_exit(')
-    immediate_request = request[:request.index('{') + 1] + '\n' + request[request.index('    _sapp_tc_window_t* w ='):]
-    close = body(source, 'static BOOL _sapp_tc_mac_close(')
-    immediate_close = close[:close.index('{') + 1] + '\n' + close[close.index('    if (w->is_main)'):]
+    app_delegate = body(source, 'int application_should_terminate(')
+    close_delegate = body(source, 'bool window_should_close(')
     variants += [
-        ('quit_immediate_during_init', source.replace(request, immediate_request)),
-        ('close_immediate_during_init', source.replace(request, immediate_request).replace(close, immediate_close)),
-        ('quit_drop_replay', source.replace('first->window->performClose();', '/* mutation: drop Quit replay */')),
+        ('quit_immediate_during_init', source.replace(app_delegate, app_delegate.replace('if (_sapp_tc_mac_busy())', 'if (false)'))),
+        ('close_immediate_during_init', source.replace(close_delegate, close_delegate.replace('if (_sapp_tc_mac_busy())', 'if (false)'))),
+        ('quit_drop_replay', source.replace('        terminate_app();', '        /* mutation: drop Quit replay */', 1)),
         ('close_drop_replay', source.replace('if (nsw && _sapp_tc_mac_close(cw)) nsw->close();', '(void)nsw; /* mutation: drop close replay */')),
     ]
     with tempfile.TemporaryDirectory(prefix='mac-init-admission-') as scratch:

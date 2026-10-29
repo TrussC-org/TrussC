@@ -27,7 +27,13 @@ resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 rows = []
 with tempfile.TemporaryDirectory(prefix='tc-an2b-cp3fu11-late-', dir=os.environ.get('TMPDIR')) as directory:
     scratch = Path(directory)
-    flags = []
+    # Execute the incoming macOS shared_ptr deleter on real retained Windows.
+    # Destruction still uses the production common CPU registry and mutex.
+    mac = (ROOT/'core/platform/mac/tcWindowMac.mm').read_text(encoding='utf-8')
+    deleter = body(mac, '[](Window* w) {')
+    (scratch/'late-mac-deleter.h').write_text(
+        'namespace trussc::internal { const auto lateMacWindowDeleter = ' + deleter + '; }\n', encoding='utf-8')
+    flags = ['-DTC_LATE_MAC_DELETER', '-I'+str(scratch)]
     for line in (ROOT/'core/build-linux/CMakeFiles/TrussC.dir/flags.make').read_text(encoding='utf-8').splitlines():
         if line.startswith(('CXX_DEFINES =', 'CXX_INCLUDES =')):
             flags += shlex.split(line.split('=', 1)[1])

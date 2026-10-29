@@ -28,9 +28,24 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     unset(CMAKE_REQUIRED_LIBRARIES)
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND (TC_X11_GL_DEPS OR TC_X11_EGL_DEPS))
+    include(CTest)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    # build_all.py --core-tests-only builds this project and runs its named
+    # binary, rather than CTest. Run the display-free seam during that build
+    # too; a failed probe must fail the core sweep on Pi and CI.
+    add_custom_target(x11PacingCheck ALL
+        COMMAND "${CMAKE_COMMAND}" -E env "CXX=${CMAKE_CXX_COMPILER}"
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../windowTick/x11-pacing-test"
+        VERBATIM)
+    add_test(NAME x11Pacing COMMAND "${CMAKE_COMMAND}" -E env "CXX=${CMAKE_CXX_COMPILER}"
+        "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../windowTick/x11-pacing-test")
+endif()
+
 if(TC_X11_AVAILABLE)
     # The continuous visibility histories must also exercise the GLX dispatcher.
-    include(CTest)
     if(TC_X11_GL_DEPS)
         add_executable(x11VisibilityGLX ../windowTick/x11-regression.cpp)
         target_compile_features(x11VisibilityGLX PRIVATE cxx_std_20)

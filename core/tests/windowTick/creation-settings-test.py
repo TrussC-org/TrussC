@@ -49,8 +49,12 @@ def mac_api(source):
         ('[NSScreen mainScreen].maximumFramesPerSecond', '120.0f'),
         ('_sapp_tc_win_delegate* del = [_sapp_tc_win_delegate new]', 'Delegate* del = new Delegate'),
         ('[w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes]', 'add_link(w)'),
-        ('[w->window makeKeyAndOrderFront:nil]', 'mac_show(w)'),
+        ('[window makeKeyAndOrderFront:nil]', 'mac_show(w)'),
+        ('NSWindow* window = w->window;', 'NativeWindow* window = w->window;'),
     ]
+    source = source.replace('[w->window makeKeyAndOrderFront:nil]', 'mac_show(w)')
+    assert source.count('[window orderOut:nil]') == 2
+    source = source.replace('[window orderOut:nil]', 'order_out(window)')
     for old, new in replacements:
         source = replace_once(source, old, new)
     for name in ('w->window', 'w->layer', 'w->link', 'view', 'del'):
@@ -83,8 +87,8 @@ def generate(backend, variant):
         constructor = replace_once(constructor, 'if (d->fullscreen)', 'if (false && d->fullscreen)')
     elif variant == 'fullscreen_order':
         if backend == 'mac':
-            request = '    if (d->fullscreen) _sapp_tc_request_fullscreen(w, true);\n'
-            show = '    [w->window makeKeyAndOrderFront:nil];\n'
+            request = body(constructor, '    if (d->fullscreen) {')
+            show = '    [window makeKeyAndOrderFront:nil];\n'
         elif backend == 'win':
             request = '    if (d->fullscreen) _sapp_tc_win32_set_fullscreen(w, true, SWP_HIDEWINDOW);\n'
             show = '    ShowWindow(w->hwnd, SW_SHOW);\n'
@@ -93,6 +97,9 @@ def generate(backend, variant):
             show = '    if (d->fullscreen) {'
         constructor = replace_once(constructor, request, '')
         constructor = replace_once(constructor, show, show + request)
+    elif variant == 'mac_show_before_init':
+        constructor = replace_once(constructor, '    if (!_sapp_tc_mac_initialize_dimensions(w))',
+                                   '    [w->window makeKeyAndOrderFront:nil];\n    if (!_sapp_tc_mac_initialize_dimensions(w))')
     elif variant == 'mac_rate':
         constructor = replace_once(constructor, 'if (w->swap_interval > 1)', 'if (false && w->swap_interval > 1)')
     elif variant not in ('baseline', 'win_present'):
@@ -141,7 +148,7 @@ def main():
             variants = ['baseline', 'adapter_fullscreen', 'adapter_interval', 'entry_fullscreen',
                         'entry_interval', 'record_interval', 'constructor_fullscreen', 'fullscreen_order']
             if backend == 'mac':
-                variants.append('mac_rate')
+                variants.extend(('mac_rate', 'mac_show_before_init'))
             if backend == 'win':
                 variants.append('win_present')
             for variant in variants:

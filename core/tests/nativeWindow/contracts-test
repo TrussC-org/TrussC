@@ -14,11 +14,8 @@ header = (include/'sokol_app_tc.h').read_text()
 comments_ok = all('always valid' not in re.search(r'float mouse_' + axis + r';[^\n]*', header)[0]
                   for axis in ('dx', 'dy'))
 print('native-contracts: mouse delta comments avoid universal validity: ' + ('PASS' if comments_ok else 'FAIL'), flush=True)
-# Scope generic public function extraction to X11 after all three a2 ports.
-x11 = '#elif defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)'
-if x11 not in header:
-    sys.exit('native-contracts: missing X11 implementation marker: ' + x11)
-header = header[header.index(x11):]
+header = header[header.index('/*== Linux (X11 + GLX or EGL)'):]
+header = header[header.index('#include "util/sokol_window_native.h"'):]
 header = header[:header.index('#elif defined(__ANDROID__)')]
 def body(marker):
     start = header.index(marker)
@@ -57,7 +54,7 @@ static struct {
     unsigned next_id;
     size_t window_slots = 4;
     _sapp_tc_window_t* windows[4];
-    struct { _sapp_tc_window_t* main; sapp_desc desc; bool valid = true; } app;
+    struct { _sapp_tc_window_t* main; sapp_desc desc; bool valid = true; bool init_called = false; } app;
     Atom NET_WM_NAME = 1, NET_WM_ICON_NAME = 2, UTF8_STRING = 3;
 #ifdef SOKOL_GLES3
     EGLContext ctx = (EGLContext)4;
@@ -173,7 +170,8 @@ code += body('struct _sapp_tc_x11_surface_scope {') + ';\n'
 for name in ('static _sapp_tc_window_t* _sapp_tc_x11_create_window(', 'sapp_window sapp_create_window(',
              'static void _sapp_tc_x11_update_window_title(', 'void sapp_window_set_title(',
              'void sapp_set_window_title(', 'void sapp_tc_window_skip_present(',
-             'static void _sapp_tc_x11_scroll_event(', 'static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {'):
+             'static void _sapp_tc_x11_scroll_event(', 'static void _sapp_tc_x11_init_client(void) {',
+             'static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {'):
     code += body(name) + '\n'
 code += r'''
 int main() {

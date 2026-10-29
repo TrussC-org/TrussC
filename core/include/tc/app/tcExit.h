@@ -5,6 +5,8 @@
 namespace trussc::internal {
 int& appExitCode();  // defined in tcGlobal.cpp; shared by host, guests and backends
 bool& appSetupCalled();  // defined in tcGlobal.cpp; whether setup ran in this launch
+bool& sessionEndExit();  // defined in tcGlobal.cpp; a native session end ends the process itself
+void notifyAppExitsAtSessionEnd() noexcept;  // tcGlobal.cpp; exit notification only
 void setExitReason(const char* reason);
 void setExitReasonIfEmpty(const char* reason);
 std::string exitReason();

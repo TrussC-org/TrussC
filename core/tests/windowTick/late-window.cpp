@@ -9,7 +9,18 @@
 #include <barrier>
 #include <thread>
 using namespace tc;
+#if defined(TC_LATE_MAC_DELETER)
+#include "late-mac-deleter.h"
+#endif
 namespace {
+std::shared_ptr<Window> makeRetainedWindow() {
+    auto* window = internal::WindowRequestAccess::makeMain().release();
+#if defined(TC_LATE_MAC_DELETER)
+    return std::shared_ptr<Window>(window, internal::lateMacWindowDeleter);
+#else
+    return std::shared_ptr<Window>(window);
+#endif
+}
 constinit std::atomic<bool> forbidLateCalls{false};
 bool allowLateCalls = false;
 void checkLateCall(const char* name) {
@@ -57,7 +68,7 @@ struct RestartFirst : App {
         initialFbos = internal::debugObjects(internal::DebugObjectKind::Fbo).size();
         initialImages = internal::debugObjects(internal::DebugObjectKind::Image).size();
         initialWindows = internal::openWindows().size();
-        retained = std::shared_ptr<Window>(internal::WindowRequestAccess::makeMain().release());
+        retained = makeRetainedWindow();
         retainedFbo = std::make_unique<Fbo>();
         retainedImage = std::make_unique<Image>();
         retainedFbo->setDebugName("retained through the first headless run");
@@ -73,7 +84,7 @@ struct RestartFirst : App {
         if (concurrentRestart) {
             for (auto& batch : concurrentObjects) {
                 for (size_t i = 0; i < objectsPerWorker; ++i) {
-                    batch.push_back({std::shared_ptr<Window>(internal::WindowRequestAccess::makeMain().release()),
+                    batch.push_back({makeRetainedWindow(),
                         std::make_unique<Fbo>(), std::make_unique<Image>(), std::make_unique<Light>(),
                         std::make_unique<Material>(), std::make_unique<Environment>()});
                 }
@@ -142,7 +153,7 @@ struct Headless : App {
     void setup() override {
         // Headless has no secondary native windows. Retain an unbound Window
         // to exercise the same destructor and non-window shutdown boundary.
-        retained = std::shared_ptr<Window>(internal::WindowRequestAccess::makeMain().release());
+        retained = makeRetainedWindow();
         requestExitApp();
     }
 };
@@ -200,6 +211,10 @@ int main(int argc, char** argv) {
         if (runHeadlessApp<RestartFirst>()) return 2;
         forbidLateCalls.store(true, std::memory_order_release);
         restartCheck(internal::frameworkShutdown(), "run 1 stopped before destruction");
+#if defined(TC_LATE_MAC_DELETER)
+        // Even a stale session flag must allow stopped CPU registry removal.
+        internal::sessionEndExit() = true;
+#endif
         if (concurrentRestart) {
             std::barrier start(static_cast<ptrdiff_t>(workerCount));
             std::array<std::thread, workerCount> workers;
@@ -227,6 +242,9 @@ int main(int argc, char** argv) {
         retainedLight.reset(); retainedMaterial.reset(); retainedEnvironment.reset();
         checkLighting(retained->context());
         retainedFbo.reset(); retainedImage.reset(); retained.reset();
+#if defined(TC_LATE_MAC_DELETER)
+        internal::sessionEndExit() = false;
+#endif
         forbidLateCalls.store(false, std::memory_order_release);
         if (runHeadlessApp<RestartSecond>()) return 2;
         std::printf("late-window: restart completed, %d failures\n", restartFailures);

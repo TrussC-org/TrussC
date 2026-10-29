@@ -33,7 +33,9 @@ for index, platform in enumerate(('mac', 'win32', 'x11')):
     if platform == 'mac':
         seams = {
             '[w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes]': 'add_link()',
-            '[w->window makeKeyAndOrderFront:nil]': 'show()',
+            '[window makeKeyAndOrderFront:nil]': 'show()',
+            '[window orderOut:nil]': 'order_out()',
+            'NSWindow* window = w->window;': 'int window=0;',
             '[w->view registerForDraggedTypes:@[NSPasteboardTypeFileURL]]': 'register_drop()',
             '(__bridge const void*)_sapp_tc.app.device': '_sapp_tc.app.device',
         }
@@ -50,8 +52,8 @@ struct sapp_window_desc { Client event_cb=nullptr; Tick tick_cb=nullptr; void* u
 struct sapp_desc { int logger=0; Client _tc_event_cb=nullptr; Tick _tc_tick_cb=nullptr; void(*event_cb)(const sapp_event*)=nullptr; void(*event_userdata_cb)(const sapp_event*,void*)=nullptr; int swap_interval=1; bool fullscreen=false; int _tc_draw_while_hidden=1; const char* window_title=nullptr; };
 struct _sapp_tc_native_desc { sapp_window_desc window; bool(*events_enabled)()=nullptr; int swap_interval=0; bool fullscreen=false,draw_while_hidden=false,center_on_create=false; int title_limit=0,color_format=0,depth_format=0; };
 struct _sapp_tc_mac_window_attrs { bool restorable=false,nearest_magnification=false,take_key_focus_on_create=false; };
-struct _sapp_tc_window_t { unsigned win_id=23; float dpi_scale=2; bool input_delivered=false,wake_on_input=true; sapp_window_desc desc; bool ready=false,in_tick=false,is_main=false,draw_while_hidden=false,trust_hidden_signals=true; int swap_interval=0; bool(*events_enabled)()=nullptr; uint64_t frame_count=7; int win_width=80,win_height=40,fb_width=160,fb_height=80; void* hwnd=nullptr; const char* title="test"; };
-struct { _sapp_tc_window_t* windows[1]{}; uint32_t gl_framebuffer=0; struct { sapp_desc desc; bool init_called=false,valid=false; _sapp_tc_window_t* main=nullptr; void* device=nullptr; int logger=0; } app; const char* create_error=nullptr; } _sapp_tc;
+struct _sapp_tc_window_t { unsigned win_id=23; float dpi_scale=2; bool input_delivered=false,wake_on_input=true; sapp_window_desc desc; bool ready=false,in_tick=false,is_main=false,native_closed=false; int callback_depth=0; bool draw_while_hidden=false,trust_hidden_signals=true; int swap_interval=0; bool(*events_enabled)()=nullptr; uint64_t frame_count=7; int win_width=80,win_height=40,fb_width=160,fb_height=80; void* hwnd=nullptr; const char* title="test"; };
+struct { int callbacks_active=0,constructing=0; bool deferred_blocked=false; _sapp_tc_window_t* windows[1]{}; uint32_t gl_framebuffer=0; struct { sapp_desc desc; bool init_called=false,valid=false; _sapp_tc_window_t* main=nullptr; void* device=nullptr; int logger=0; } app; const char* create_error=nullptr; } _sapp_tc;
 _sapp_tc_window_t record;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { auto* w=_sapp_tc.windows[0]; return w && w->win_id==h.id ? w : nullptr; }
 constexpr int SAPP_PIXELFORMAT_RGB10A2=1,SAPP_PIXELFORMAT_DEPTH_STENCIL=2,SAPP_PIXELFORMAT_RGBA8=3,SW_SHOW=1,TRUE=1,SAPP_LOGITEM_OK=0,GL_FRAMEBUFFER_BINDING=1;
@@ -77,14 +79,18 @@ void _sapp_tc_x11_unwind(_sapp_tc_window_t*) {}
 _sapp_tc_window_t* _sapp_tc_mac_fail(_sapp_tc_window_t*,const char*) { return nullptr; }
 bool _sapp_tc_win32_trust_hidden_signals() { return true; }
 void DragAcceptFiles(void*,int) {}
-void add_link() {} void register_drop() {}
+void add_link() {} void register_drop() {} void order_out() {}
+bool _sapp_tc_mac_frozen() { return false; }
+void _sapp_tc_mac_contained(const char*) {}
+void _sapp_tc_mac_schedule_deferred() {}
+_sapp_tc_window_t* _sapp_tc_mac_live(unsigned id) { return _sapp_tc_lookup({id}); }
 void _sapp_tc_request_fullscreen(_sapp_tc_window_t*,bool) {}
 void _sapp_tc_mac_update_dimensions(_sapp_tc_window_t*) {}
 void _sapp_tc_x11_update_dimensions(_sapp_tc_window_t*) {}
 void _sapp_tc_x11_set_fullscreen(_sapp_tc_window_t*,bool) {}
 bool _sapp_tc_x11_make_current(_sapp_tc_window_t*) { return true; }
 void sapp_set_icon(...) {}
-''' + send + r'''
+''' + (body(NATIVE,'struct _sapp_tc_mac_callback_scope {')+';\n' if platform=='mac' else '') + send + r'''
 void show() {
     check("native dimensions and host binding ready at synchronous show",record.ready && bound==1);
     for (int type : {SAPP_EVENTTYPE_FOCUSED,SAPP_EVENTTYPE_RESIZED,SAPP_EVENTTYPE_KEY_DOWN,SAPP_EVENTTYPE_FILES_DROPPED}) {
@@ -96,7 +102,7 @@ void _sapp_tc_x11_show_window(_sapp_tc_window_t*) { show(); }
 ''' + f'\n_sapp_tc_window_t* {ctor_name}({args}) {{\n' + r'''
     int slot=0; unsigned id=record.win_id;
     auto* w=&record;
-''' + transfer + '\n' + suffix + '\n' + main + r'''
+''' + (body(constructor,'    struct constructing_scope {')+' constructing;\n' if platform=='mac' else '') + transfer + '\n' + suffix + '\n' + main + r'''
 void run() {
     for (bool direct : {true,false}) {
         _sapp_tc={}; record={}; callbacks=bound=0; graphics=app=false;

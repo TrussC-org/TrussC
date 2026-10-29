@@ -30,7 +30,7 @@ static void _sapp_tc_mac_update_suspension(_sapp_tc_window_t*);
 '''
 # Copy every production observer call expression, including one-argument calls.
 calls = re.findall(r'^\s+(_sapp_tc_mac_observe\([^;]+\);)', source, re.M)
-assert len(calls) >= 5, calls
+assert len(calls) >= 4, calls
 callsite = '\nvoid calls(_sapp_tc_window_t* w) { struct { _sapp_tc_window_t* w; } self{w};\n' + '\n'.join(calls) + '\n}\n'
 results = []
 for name, declaration, expected in [
@@ -74,7 +74,7 @@ static void _sapp_tc_send_type(_sapp_tc_window_t*, sapp_event_type);
 static _sapp_tc_window_t* _sapp_tc_mac_live(uint32_t);
 static void _sapp_tc_mac_update_suspension(_sapp_tc_window_t*);
 '''
-    objc += helpers['declaration'](source, '_sapp_tc_mac_tick') + decl + definition
+    objc += helpers['declaration'](source, '_sapp_tc_mac_source_tick') + 'static void _sapp_tc_mac_contained(const char*);\n' + decl + definition
     for cls, markers in [
         ('_sapp_tc_view', ['- (void)tick:(CADisplayLink*)link', '- (void)fallbackTick:(NSTimer*)timer']),
         ('_sapp_tc_win_delegate', ['- (void)windowDidChangeOcclusionState:(NSNotification*)n',

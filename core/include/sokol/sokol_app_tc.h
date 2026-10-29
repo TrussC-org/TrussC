@@ -2467,7 +2467,8 @@ typedef struct sapp_window_desc {
     bool (*bind_cb)(uint32_t id, void* user);
     bool fullscreen;            /* initial native fullscreen; preserves windowed restore geometry */
     int swap_interval;          /* macOS/Win32: 0 = default (1), positive = display interval;
-                                  X11 secondaries use nonblocking swaps and a refresh timer */
+                                  X11 secondaries use nonblocking swaps and main presentation admission,
+                                  with a refresh timer fallback */
 } sapp_window_desc;
 
 // Private host metadata boundary. Reading it never acquires a drawable.
@@ -2675,6 +2676,9 @@ struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     bool draw_admitted;                 /* this tick may acquire a drawable */
     bool link_suspended;                /* AppKit stops the view's display link while not visible */
     bool suspended_sent;                /* last aggregate effective-hidden transition */
+    int callback_depth;                 /* client callbacks of this window on the stack */
+    bool closed_pending;                /* closed natively while busy; close handling deferred */
+    bool native_closed;                 /* the NSWindow closed; its close was handled (or is pending) */
 };
 
 #define _SAPP_TC_MAX_WINDOWS (32)
@@ -2685,6 +2689,11 @@ static struct {
     uint32_t next_id;
     _sapp_tc_window_t* windows[_SAPP_TC_MAX_WINDOWS];
     const char* create_error;           /* last native constructor failure, for the launch log */
+    int callbacks_active;               /* client callbacks on the stack, any window */
+    int constructing;                   /* native constructors from admission through return */
+    bool terminate_pending;             /* an AppKit terminate arrived while busy; replayed later */
+    bool deferred_blocked;              /* deferred work waited for a callback, tick or constructor */
+    bool deferred_scheduled;            /* a deferred pass is queued on the main run loop */
 
     /* ---- process state (this header owns sapp_run on macOS) ---- */
     struct {
@@ -2722,6 +2731,9 @@ static struct {
 } _sapp_tc;
 
 static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link);
+static void _sapp_tc_mac_schedule_deferred(void);
+static bool _sapp_tc_mac_busy(void);
+static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback);
 static bool _sapp_tc_mac_update_dimensions(_sapp_tc_window_t* w);
 static void _sapp_tc_mac_observe(_sapp_tc_window_t* w, sapp_event_type detail = SAPP_EVENTTYPE_INVALID);
 static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown);
@@ -2905,6 +2917,14 @@ static _sapp_tc_window_t* _sapp_tc_resolve(sapp_window win) {
     return win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
 }
 
+/* Busy session end: from the moment _sapp_tc_mac_session_end starts until its
+   _exit, the backend is frozen. Only the exit notifications run: no tick, event,
+   deferred close/quit, terminate, window creation, dimension/texture update or
+   drawable acquisition is admitted. */
+static bool _sapp_tc_mac_frozen(void) {
+    return trussc::internal::sessionEndExit();
+}
+
 static uint32_t _sapp_tc_mods(NSEvent* ev) {
     const NSEventModifierFlags f = ev.modifierFlags;
     uint32_t m = 0;
@@ -2915,11 +2935,43 @@ static uint32_t _sapp_tc_mods(NSEvent* ev) {
     return m;
 }
 
+/* Client callback boundary. While a callback runs it is marked active (deferred
+   close and quit wait until none is), the mark is cleared through the window's
+   identity even if the callback disposed it, and no exception crosses into
+   AppKit, CADisplayLink or NSTimer frames. */
+struct _sapp_tc_mac_callback_scope {
+    uint32_t win_id;
+    explicit _sapp_tc_mac_callback_scope(_sapp_tc_window_t* w) : win_id(w ? w->win_id : 0) {
+        ++_sapp_tc.callbacks_active;
+        if (w) ++w->callback_depth;
+    }
+    ~_sapp_tc_mac_callback_scope() {
+        --_sapp_tc.callbacks_active;
+        if (_sapp_tc_window_t* w = _sapp_tc_lookup({win_id})) --w->callback_depth;
+        // The outermost callback returned: run work it held back, from the run loop.
+        if (_sapp_tc.callbacks_active == 0 && _sapp_tc.deferred_blocked) _sapp_tc_mac_schedule_deferred();
+    }
+};
+
+// Contained-exception report: fixed text, no allocation of its own.
+static void _sapp_tc_mac_contained(const char* where) noexcept {
+    try {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__, "error: ",
+                     "%s threw; the exception was contained at the native boundary", where);
+    } catch (...) {
+        // The installed logger may allocate (and so throw); keep a fixed line.
+        fputs("sokol_app_tc.h: error: a native callback threw; the exception was contained\n", stderr);
+    }
+}
+
 static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
+    if (_sapp_tc_mac_frozen() || !w || w->native_closed) return;
     ev->pointer_locked = false;
     ev->reliable_button_bits = false; // AppKit reports keyboard modifiers only.
-    _sapp_tc_deliver_event(w, ev, _sapp_tc.app.main ? _sapp_tc.app.main->frame_count : 0,
+    _sapp_tc_mac_callback_scope scope(w);
+    const auto result = _sapp_tc_deliver_event(w, ev, _sapp_tc.app.main ? _sapp_tc.app.main->frame_count : 0,
         [] (sapp_window handle) { return _sapp_tc_lookup(handle); });
+    if (result.client_threw) _sapp_tc_mac_contained("sapp_window_desc.event_cb");
 }
 
 /* Event and window callbacks may destroy their window (sapp_destroy_window
@@ -2952,7 +3004,7 @@ static void _sapp_tc_mac_stop_fallback(_sapp_tc_window_t* w) {
    tick may draw is decided by effective visibility (trust_hidden_signals)
    and draw_while_hidden in the tick. */
 static void _sapp_tc_mac_select_source(_sapp_tc_window_t* w) {
-    const bool fallback = w->ready && w->link_suspended && w->view;
+    const bool fallback = w->ready && !w->closed_pending && w->link_suspended && w->view;
     if (fallback == w->fallback_active) return;
     if (!fallback) { _sapp_tc_mac_stop_fallback(w); return; }
     NSTimer* t = [NSTimer timerWithTimeInterval:w->refresh_period
@@ -3278,18 +3330,17 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
 }
 
 /*-- tick sources: this view's display link, or its fallback timer --------*/
-/* Both shims sample visibility first, so exactly one source ticks: a link
-   tick that arrives while the window still selects its fallback (or a
-   fallback tick after the link resumed) is dropped. The strong local keeps
-   this view alive if the tick's deferred close disposes its window. */
+/* Both shims enter _sapp_tc_mac_source_tick, which samples visibility under the
+   tick guard, so exactly one source ticks: a link tick that arrives while the
+   window still selects its fallback (or a fallback tick after the link
+   resumed) is dropped. The strong local keeps this view alive if the tick's
+   deferred close disposes its window; nothing thrown leaves the shim. */
 - (void)tick:(CADisplayLink*)link {
     _sapp_tc_view* keep = self;
     _sapp_tc_window_t* w = keep.w;
     if (!w) return;
-    const uint32_t win_id = w->win_id;
-    _sapp_tc_mac_observe(w);
-    if (!(w = _sapp_tc_mac_live(win_id)) || w->fallback_active) return;
-    _sapp_tc_mac_tick(w, link);
+    try { _sapp_tc_mac_source_tick(w, link, false); }
+    catch (...) { _sapp_tc_mac_contained("display-link tick"); }
 }
 
 - (void)fallbackTick:(NSTimer*)timer {
@@ -3297,10 +3348,8 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
     _sapp_tc_view* keep = self;
     _sapp_tc_window_t* w = keep.w;
     if (!w) return;
-    const uint32_t win_id = w->win_id;
-    _sapp_tc_mac_observe(w);
-    if (!(w = _sapp_tc_mac_live(win_id)) || !w->fallback_active) return;
-    _sapp_tc_mac_tick(w, nil);
+    try { _sapp_tc_mac_source_tick(w, nil, true); }
+    catch (...) { _sapp_tc_mac_contained("fallback-timer tick"); }
 }
 
 @end
@@ -3311,16 +3360,6 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
 @end
 
 static BOOL _sapp_tc_request_exit(void) {
-    if (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active()) {
-        _sapp_tc.app.quit_requested = true;
-        return NO;
-    }
-    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i) {
-        if (_sapp_tc.windows[i] && _sapp_tc.windows[i]->in_tick) {
-            _sapp_tc.app.quit_requested = true;
-            return NO;
-        }
-    }
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     /* main window: sokol_app.h's cancellable quit dance. sapp_quit() pre-sets
        quit_ordered (unvetoable); otherwise QUIT_REQUESTED is delivered and a
@@ -3341,9 +3380,6 @@ static BOOL _sapp_tc_request_exit(void) {
    sapp_window_request_close() all ask here whether AppKit may close now.
    Only the first window is special: closing it is a cancellable process quit. */
 static BOOL _sapp_tc_mac_close(_sapp_tc_window_t* w) {
-    if (w->in_tick || (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active())) {
-        w->close_requested = true; return NO;
-    }
     if (w->is_main) {
         trussc::internal::setExitReasonIfEmpty("window-close");
         return _sapp_tc_request_exit();
@@ -3354,9 +3390,7 @@ static BOOL _sapp_tc_mac_close(_sapp_tc_window_t* w) {
 /* The native window has closed: the first window terminates the AppKit
    application (cleanup runs in applicationWillTerminate, never returns);
    any other window reports to its close callback, which may destroy it. */
-static void _sapp_tc_mac_closed(_sapp_tc_window_t* w) {
-    w->close_recorded = true;
-    w->close_recorded_frame = w->frame_count;
+static void _sapp_tc_mac_closed_now(_sapp_tc_window_t* w) {
     if (w->is_main) {
         [NSApp terminate:nil];
         return;
@@ -3367,7 +3401,32 @@ static void _sapp_tc_mac_closed(_sapp_tc_window_t* w) {
     w->ready = false;
     _sapp_tc_mac_stop_fallback(w);
     if (w->link) { [w->link invalidate]; w->link = nil; }
-    if (w->desc.close_cb) w->desc.close_cb({w->win_id}, w->desc.user_data);
+    if (!w->desc.close_cb) return;
+    void (*close_cb)(sapp_window, void*) = w->desc.close_cb;
+    const sapp_window handle = { w->win_id };
+    void* user = w->desc.user_data;
+    _sapp_tc_mac_callback_scope scope(w);
+    try { close_cb(handle, user); } catch (...) { _sapp_tc_mac_contained("sapp_window_desc.close_cb"); }
+}
+
+/* windowWillClose: cannot refuse, and -[NSWindow close] reaches it without
+   windowShouldClose:. While any tick, callback or constructor is active, only
+   record the close: the window stops ticking (no drawable, no present) and
+   receiving events, and the record and NSWindow stay alive. The deferred pass
+   after the outermost callback runs the close handling above, unchanged and
+   not vetoable (the native window is already closed). */
+static void _sapp_tc_mac_closed(_sapp_tc_window_t* w) {
+    // Closed natively: any close request still pending is satisfied by it.
+    w->close_recorded = true;
+    w->close_recorded_frame = w->frame_count;
+    w->native_closed = true;
+    w->close_requested = false;
+    if (_sapp_tc_mac_busy()) {
+        w->closed_pending = true;
+        _sapp_tc.deferred_blocked = true;
+        return;
+    }
+    _sapp_tc_mac_closed_now(w);
 }
 
 static void _sapp_tc_mac_fullscreen_terminal(_sapp_tc_window_t* w, bool observed) {
@@ -3379,7 +3438,15 @@ static void _sapp_tc_mac_fullscreen_terminal(_sapp_tc_window_t* w, bool observed
 - (BOOL)windowShouldClose:(id)sender {
     (void)sender;
     _sapp_tc_window_t* w = self.w;
-    return w ? _sapp_tc_mac_close(w) : YES;
+    if (!w) return YES;
+    if (_sapp_tc_mac_busy()) {
+        // A close button or performClose: inside a callback, tick or constructor:
+        // refuse now and let the deferred path close it after they return.
+        w->close_requested = true;
+        _sapp_tc.deferred_blocked = true;
+        return NO;
+    }
+    return _sapp_tc_mac_close(w);
 }
 - (void)windowWillClose:(NSNotification*)n {
     (void)n;
@@ -3491,8 +3558,11 @@ static CGFloat _sapp_tc_mac_scale(_sapp_tc_window_t* w) {
 /* Re-sample scale + sizes and keep the layer drawable and the swapchain
    textures in sync. Called by the common initializer, every admitted tick
    and windowDidResize / windowDidChangeScreen. Returns whether published
-   dimensions changed; a zero-area view keeps the last published sizes. */
+   dimensions changed; a zero-area view keeps the last published sizes.
+   The one path to drawableSize, contentsScale and the swapchain textures:
+   while frozen (busy session end) nothing here changes. */
 static bool _sapp_tc_mac_update_dimensions(_sapp_tc_window_t* w) {
+    if (_sapp_tc_mac_frozen()) return false;
     if (!w->view || !w->layer) return false;
     const CGFloat scale = _sapp_tc_mac_scale(w);
     w->dpi_scale = (float)scale;
@@ -3538,7 +3608,8 @@ static bool _sapp_tc_mac_initialize_dimensions(_sapp_tc_window_t* w) {
    that tick admitted a draw (a hidden, non-admitted window must never reach
    nextDrawable, which can stall). Repeated queries reuse the drawable. */
 static id<CAMetalDrawable> _sapp_tc_mac_drawable(_sapp_tc_window_t* w) {
-    if (!w || !w->in_tick || !w->draw_admitted || !w->layer) return nil;
+    if (_sapp_tc_mac_frozen()) return nil;   // no drawable while frozen, even inside the interrupted tick
+    if (!w || !w->in_tick || !w->draw_admitted || w->closed_pending || !w->layer) return nil;
     if (w->frame_drawable == nil) w->frame_drawable = [w->layer nextDrawable];
     return w->frame_drawable;
 }
@@ -3558,22 +3629,78 @@ static void _sapp_tc_mac_swap(_sapp_tc_window_t* w) {
    performClose:, which only plays the alert sound on a borderless window)
    sends windowWillClose: once the common close path agrees. Re-fetch each
    slot: a close destroys windows. */
-static void _sapp_tc_mac_process_deferred(void) {
-    if (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active()) return;
+/* Any tick, client callback or constructor on the stack, of any window. Native
+   close and terminate requests arriving then are deferred, like
+   sapp_window_request_close(): a client callback must never see its own window
+   (or the App) torn down underneath it. */
+static bool _sapp_tc_mac_busy(void) {
+    if (_sapp_tc.callbacks_active > 0 || _sapp_tc.constructing > 0) return true;
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
-        if (_sapp_tc.windows[i] && _sapp_tc.windows[i]->in_tick) return;
+        const _sapp_tc_window_t* cw = _sapp_tc.windows[i];
+        if (cw && (cw->in_tick || cw->callback_depth > 0)) return true;
+    }
+    return false;
+}
+
+static bool _sapp_tc_mac_deferred_pending(void) {
+    if (_sapp_tc.terminate_pending || _sapp_tc.app.quit_requested || _sapp_tc.app.quit_ordered) return true;
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+        const _sapp_tc_window_t* cw = _sapp_tc.windows[i];
+        if (cw && (cw->close_requested || cw->closed_pending)) return true;
+    }
+    return false;
+}
+
+static void _sapp_tc_mac_process_deferred(void) {
+    if (_sapp_tc_mac_frozen()) return;   // the process ends; nothing deferred runs
+    // Only when no tick, client callback or constructor is on the stack.
+    if (_sapp_tc_mac_busy()) {
+        if (_sapp_tc_mac_deferred_pending()) _sapp_tc.deferred_blocked = true;
+        return;
+    }
+    _sapp_tc.deferred_blocked = false;
+    // Native closes that happened while busy: run their close handling now.
+    // Re-fetch each slot: a close callback destroys windows.
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+        _sapp_tc_window_t* cw = _sapp_tc.windows[i];
+        if (!cw || !cw->closed_pending) continue;
+        cw->closed_pending = false;
+        _sapp_tc_mac_closed_now(cw);
     }
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         _sapp_tc_window_t* cw = _sapp_tc.windows[i];
         if (!cw || !cw->close_requested) continue;
         cw->close_requested = false;
+        if (cw->native_closed) continue;    // already closed natively: never close it again
         NSWindow* nsw = cw->window;   /* strong: outlives the destroy in close_cb */
         if (nsw && _sapp_tc_mac_close(cw)) [nsw close];
+    }
+    if (_sapp_tc.terminate_pending) {
+        // Replay the terminate AppKit asked for while busy: vetoable as usual.
+        _sapp_tc.terminate_pending = false;
+        [NSApp terminate:nil];
+        return;
     }
     _sapp_tc_window_t* first = _sapp_tc.app.main;
     if (first && first->window && (_sapp_tc.app.quit_requested || _sapp_tc.app.quit_ordered)) {
         [first->window performClose:nil];
     }
+}
+
+/* Deferred work held back by a callback or constructor runs once the outermost
+   one has returned, from the main run loop rather than inside the AppKit
+   notification or modal frame that ended it. A window whose ticks were blocked
+   therefore does not need a tick of its own for its close to proceed. */
+static void _sapp_tc_mac_schedule_deferred(void) {
+    if (_sapp_tc.deferred_scheduled) return;
+    _sapp_tc.deferred_scheduled = true;
+    CFRunLoopRef loop = CFRunLoopGetMain();
+    CFRunLoopPerformBlock(loop, kCFRunLoopCommonModes, ^{
+        _sapp_tc.deferred_scheduled = false;
+        try { _sapp_tc_mac_process_deferred(); }
+        catch (...) { _sapp_tc_mac_contained("deferred close/quit"); }
+    });
+    CFRunLoopWakeUp(loop);
 }
 
 /* One native tick for every window: reconcile this window's own fullscreen
@@ -3583,31 +3710,41 @@ static void _sapp_tc_mac_process_deferred(void) {
    `link` is nil when the window's fallback timer is the source. */
 static void _sapp_tc_mac_init_client(void) {
     if (!_sapp_tc.app.init_called) {
-        // Bootstrap used to run inside the launch tick; retain its native busy guard.
-        const sapp_window handle{_sapp_tc.app.main ? _sapp_tc.app.main->win_id : 0};
-        auto* target = _sapp_tc_lookup(handle);
-        const bool was_busy = target && target->in_tick;
-        if (target) target->in_tick = true;
-        struct InitScope {
-            sapp_window handle;
-            bool previous;
-            ~InitScope() { if (auto* live = _sapp_tc_lookup(handle)) live->in_tick = previous; }
-        } init_scope{handle, was_busy};
+        _sapp_tc_mac_callback_scope scope(_sapp_tc.app.main);
         _sapp_tc.app.init_called = true;
-        if (_sapp_tc.app.desc.init_cb) _sapp_tc.app.desc.init_cb();
-        else if (_sapp_tc.app.desc.init_userdata_cb)
-            _sapp_tc.app.desc.init_userdata_cb(_sapp_tc.app.desc.user_data);
+        try {
+            if (_sapp_tc.app.desc.init_cb) _sapp_tc.app.desc.init_cb();
+            else if (_sapp_tc.app.desc.init_userdata_cb)
+                _sapp_tc.app.desc.init_userdata_cb(_sapp_tc.app.desc.user_data);
+        } catch (...) { _sapp_tc_mac_contained("sapp_desc.init_cb"); }
     }
 }
 
-static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {
-    if (!w->ready || w->in_tick) return;
+/* The tick guard is set at tick entry, before any notification or callback
+   (visibility sampling, fullscreen reconciliation, RESIZED, tick_cb), so a run
+   loop spun inside any of them cannot start a nested tick of this window. It is
+   cleared through the window's identity, also when the window was disposed. */
+struct _sapp_tc_mac_tick_scope {
+    uint32_t win_id;
+    explicit _sapp_tc_mac_tick_scope(_sapp_tc_window_t* w) : win_id(w->win_id) { w->in_tick = true; }
+    ~_sapp_tc_mac_tick_scope() {
+        if (_sapp_tc_window_t* w = _sapp_tc_lookup({win_id})) {
+            w->in_tick = false;
+            w->draw_admitted = false;
+            w->frame_drawable = nil;
+        }
+    }
+};
+
+/* Tick body; the caller holds the tick guard. */
+static void _sapp_tc_mac_tick_body(_sapp_tc_window_t* w, CADisplayLink* link) {
     const sapp_window handle = { w->win_id };
     // Reconcile once after terminal notifications, outside native delegates.
     // Re-fetch: toggling AppKit can synchronously deliver native events.
     _sapp_tc_reconcile_fullscreen(w);
+    // A notification or callback may have closed the window natively: no draw.
     w = _sapp_tc_lookup(handle);
-    if (!w) return;
+    if (!w || w->closed_pending) return;
     @autoreleasepool {
         _sapp_tc_timing_update(&w->timing);
         if (link) {
@@ -3621,20 +3758,55 @@ static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {
         const bool admitted = w->draw_while_hidden || !_sapp_tc_native_hidden(w);
         if (admitted && _sapp_tc_mac_update_dimensions(w)) {
             _sapp_tc_send_type(w, SAPP_EVENTTYPE_RESIZED);
-            if (!(w = _sapp_tc_lookup(handle))) return;
+            if (!(w = _sapp_tc_lookup(handle)) || w->closed_pending) return;
         }
-        w->in_tick = true;
         w->draw_admitted = admitted;
         if (w->is_main) _sapp_tc_mac_init_client();
-        if (!(w = _sapp_tc_lookup(handle))) return;
-        if (w->desc.tick_cb) w->desc.tick_cb(handle, w->desc.user_data);
+        if (!(w = _sapp_tc_lookup(handle)) || w->native_closed) return;
+        if (w->desc.tick_cb) {
+            void (*tick_cb)(sapp_window, void*) = w->desc.tick_cb;
+            void* user = w->desc.user_data;
+            _sapp_tc_mac_callback_scope scope(w);
+            try { tick_cb(handle, user); } catch (...) { _sapp_tc_mac_contained("sapp_window_desc.tick_cb"); }
+        }
         w = _sapp_tc_lookup(handle);    /* the callback may have disposed it */
         if (w) {
-            w->in_tick = false;
             w->draw_admitted = false;
             ++w->frame_count;
             _sapp_tc_mac_swap(w);
         }
+    }
+}
+
+/* A window does not tick while one of its own client callbacks is on the
+   stack, inside or outside a tick (D5, as on Win32): a run loop spun by that
+   callback, e.g. a synchronous modal dialog, pauses only this window. Other
+   windows keep ticking. Notifications keep its source selection current, and
+   its next tick after the callback returns runs normally and processes
+   deferred close/quit. */
+static bool _sapp_tc_mac_tick_blocked(const _sapp_tc_window_t* w) {
+    return _sapp_tc_mac_frozen() || w->in_tick || w->callback_depth > 0 || w->closed_pending;
+}
+
+static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {
+    if (!w->ready || _sapp_tc_mac_tick_blocked(w)) return;
+    {
+        _sapp_tc_mac_tick_scope guard(w);
+        _sapp_tc_mac_tick_body(w, link);
+    }
+    _sapp_tc_mac_process_deferred();
+}
+
+/* A tick from one of the window's sources. Visibility sampling may notify, so
+   it runs under the tick guard; the inactive source's ticks are dropped. */
+static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {
+    if (_sapp_tc_mac_tick_blocked(w)) return;
+    {
+        const uint32_t win_id = w->win_id;
+        _sapp_tc_mac_tick_scope guard(w);
+        _sapp_tc_mac_observe(w);
+        w = _sapp_tc_mac_live(win_id);
+        if (w && w->ready && !w->closed_pending && w->fallback_active == from_fallback) _sapp_tc_mac_tick_body(w, link);
     }
     _sapp_tc_mac_process_deferred();
 }
@@ -3697,6 +3869,15 @@ struct _sapp_tc_mac_window_attrs {
 static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_desc* d,
                                                         const _sapp_tc_mac_window_attrs* attrs) {
     _sapp_tc.create_error = 0;
+    if (_sapp_tc_mac_frozen()) { _sapp_tc.create_error = "Window creation refused: the session is ending"; return 0; }
+    struct constructing_scope {
+        constructing_scope() { ++_sapp_tc.constructing; }
+        ~constructing_scope() {
+            --_sapp_tc.constructing;
+            if (_sapp_tc.constructing == 0 && _sapp_tc.callbacks_active == 0 && _sapp_tc.deferred_blocked)
+                _sapp_tc_mac_schedule_deferred();
+        }
+    } constructing;
     int slot = -1;
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         if (_sapp_tc.windows[i] == 0) { slot = i; break; }
@@ -3815,11 +3996,29 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
     }
     w->ready = true;
     [w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-    /* AppKit's native transition needs initialized windowed dimensions and a
-       live delegate/host binding. Request before ordering front, as at launch,
-       so the transition and its terminal notifications share the same state. */
-    if (d->fullscreen) _sapp_tc_request_fullscreen(w, true);
-    [w->window makeKeyAndOrderFront:nil];
+    /* Startup fullscreen and showing can notify synchronously (resize, key
+       focus), and a client may destroy the window from those callbacks: keep
+       the NSWindow alive across the calls, re-resolve the record by identity
+       after each, and report an invalid window if it is gone. No deferred
+       close or quit runs until the constructor returns. */
+    const uint32_t win_id = w->win_id;
+    NSWindow* window = w->window;
+    if (d->fullscreen) {
+        _sapp_tc_request_fullscreen(w, true);
+        if (!(w = _sapp_tc_mac_live(win_id))) {
+            [window orderOut:nil];
+            _sapp_tc.create_error = "Window was destroyed during creation";
+            return 0;
+        }
+    }
+    [window makeKeyAndOrderFront:nil];
+    if (!(w = _sapp_tc_mac_live(win_id))) {
+        /* disposed from a notification inside the call, which then still
+           ordered the window in: take it off screen again */
+        [window orderOut:nil];
+        _sapp_tc.create_error = "Window was destroyed during creation";
+        return 0;
+    }
     /* silent startup re-sample (sokol parity: the startup update never fires
        RESIZED). The display link is the first source; occlusion notifications
        and link ticks select the fallback once AppKit reports the window hidden. */
@@ -3880,6 +4079,7 @@ static void _sapp_tc_mac_host_turn(CFRunLoopObserverRef, CFRunLoopActivity activ
         --_sapp_tc.app.host_loop_depth; return;
     }
     if (_sapp_tc.app.host_loop_depth > 1) return;
+    _sapp_tc_mac_callback_scope scope(_sapp_tc.app.main);
     // A source can keep the loop awake. End its preceding turn before the next one.
     if (_sapp_tc.app.host_turn_open) {
         _sapp_tc.app.host_turn_open = false;
@@ -3890,6 +4090,60 @@ static void _sapp_tc_mac_host_turn(CFRunLoopObserverRef, CFRunLoopActivity activ
         if (_sapp_tc.app.desc._tc_before_turn) _sapp_tc.app.desc._tc_before_turn();
     }
     if (activity == kCFRunLoopExit && _sapp_tc.app.host_loop_depth) --_sapp_tc.app.host_loop_depth;
+}
+
+/* keyAEQuitReason ('why?') of the quit Apple event being handled: Cocoa
+   forwards it for OS session exits. A real logout sends it as an event
+   attribute, not a parameter (seen on macOS), so read the attribute first.
+   Zero when absent or unreadable: a plain quit. */
+static AEEventID _sapp_tc_mac_quit_reason(void) {
+    NSAppleEventDescriptor* event = [[NSAppleEventManager sharedAppleEventManager] currentAppleEvent];
+    NSAppleEventDescriptor* reason = [event attributeDescriptorForKeyword:0x7768793f];
+    if (!reason) reason = [event paramDescriptorForKeyword:0x7768793f];
+    return reason ? [reason enumCodeValue] : 0;
+}
+
+static bool _sapp_tc_mac_is_session_end(AEEventID reason) {
+    switch (reason) {
+        case 0x6c6f676f: // kAELogOut ('logo')
+        case 0x726c676f: // kAEReallyLogOut ('rlgo')
+        case 0x72727374: // kAEShowRestartDialog ('rrst')
+        case 0x72657374: // kAERestart ('rest')
+        case 0x7273646e: // kAEShowShutdownDialog ('rsdn')
+        case 0x73687574: // kAEShutDown ('shut')
+            return true;
+        default:
+            return false;
+    }
+}
+
+/* Session end while a tick, callback or constructor is active, as Win32
+   WM_ENDSESSION: the App is not asked (no QUIT_REQUESTED) and the session is
+   not cancelled. From here until _exit the backend is frozen (see
+   _sapp_tc_mac_frozen): run the cleanup callback once, in place, then end the
+   process at once so control never returns to the interrupted callback.
+   Native windows and GPU resources are left to the OS. */
+static void _sapp_tc_mac_session_end(AEEventID reason) {
+    switch (reason) {
+        case 0x72727374: case 0x72657374: trussc::internal::setExitReason("os-restart"); break;
+        case 0x7273646e: case 0x73687574: trussc::internal::setExitReason("os-shutdown"); break;
+        default: trussc::internal::setExitReason("os-logoff"); break;
+    }
+    _sapp_tc.app.quit_ordered = true;
+    // Only the _exit below ends the process: cleanup must not std::exit.
+    trussc::internal::sessionEndExit() = true;
+    if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
+        _sapp_tc.app.cleanup_called = true;
+        try {
+            if (_sapp_tc.app.desc.cleanup_cb) {
+                _sapp_tc.app.desc.cleanup_cb();
+            } else if (_sapp_tc.app.desc.cleanup_userdata_cb) {
+                _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
+            }
+        } catch (...) { _sapp_tc_mac_contained("sapp_desc.cleanup_cb"); }
+    }
+    fflush(NULL);
+    _exit(trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1);
 }
 
 @interface _sapp_tc_app_delegate : NSObject <NSApplicationDelegate>
@@ -3937,6 +4191,9 @@ static void _sapp_tc_mac_host_turn(CFRunLoopObserverRef, CFRunLoopActivity activ
 }
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender {
     (void)sender;
+    // A quit (or a second session end) while frozen: the process is already ending.
+    if (_sapp_tc_mac_frozen()) return NSTerminateCancel;
+    const AEEventID quit_reason = _sapp_tc_mac_quit_reason();
     if (!_sapp_tc.app.quit_ordered) {
         // Cocoa forwards the quit Apple event's reason for OS session exits.
         // keyAEQuitReason ('why?'). [TrussC] Any other quit (Cmd+Q, the Dock's
@@ -3945,11 +4202,7 @@ static void _sapp_tc_mac_host_turn(CFRunLoopObserverRef, CFRunLoopActivity activ
         // IfEmpty keeps a reason an earlier exit request already recorded.
         // A real logout sends the reason as an event attribute, not a
         // parameter (seen on macOS); read the attribute first.
-        NSAppleEventDescriptor* event = [[NSAppleEventManager sharedAppleEventManager] currentAppleEvent];
-        NSAppleEventDescriptor* reason = [event attributeDescriptorForKeyword:0x7768793f];
-        if (!reason) reason = [event paramDescriptorForKeyword:0x7768793f];
-        const AEEventID why = [reason enumCodeValue];
-        switch (why) {
+        switch (quit_reason) {
             case 0x6c6f676f: // kAELogOut ('logo')
             case 0x726c676f: // kAEReallyLogOut ('rlgo')
                 trussc::internal::setExitReason("os-logoff"); break;
@@ -3960,6 +4213,17 @@ static void _sapp_tc_mac_host_turn(CFRunLoopObserverRef, CFRunLoopActivity activ
             default:
                 trussc::internal::setExitReasonIfEmpty("app-quit"); break;
         }
+    }
+    if (_sapp_tc_mac_busy()) {
+        // A session end is not asked and not cancelled (as Win32 WM_ENDSESSION).
+        if (_sapp_tc_mac_is_session_end(quit_reason)) _sapp_tc_mac_session_end(quit_reason);
+        /* Any other quit inside a callback, tick or constructor (e.g. a run loop
+           spun by a client callback): cancel this request and replay it after they return.
+           NSTerminateLater would wait in a nested modal loop above that
+           callback, which can then never return. */
+        _sapp_tc.terminate_pending = true;
+        _sapp_tc.deferred_blocked = true;
+        return NSTerminateCancel;
     }
     return _sapp_tc_request_exit() ? NSTerminateNow : NSTerminateCancel;
 }
@@ -3981,11 +4245,13 @@ static void _sapp_tc_mac_host_turn(CFRunLoopObserverRef, CFRunLoopActivity activ
        sokol_gfx here; we only hold the device/layer references) */
     if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
         _sapp_tc.app.cleanup_called = true;
-        if (_sapp_tc.app.desc.cleanup_cb) {
-            _sapp_tc.app.desc.cleanup_cb();
-        } else if (_sapp_tc.app.desc.cleanup_userdata_cb) {
-            _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
-        }
+        try {
+            if (_sapp_tc.app.desc.cleanup_cb) {
+                _sapp_tc.app.desc.cleanup_cb();
+            } else if (_sapp_tc.app.desc.cleanup_userdata_cb) {
+                _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
+            }
+        } catch (...) { _sapp_tc_mac_contained("sapp_desc.cleanup_cb"); }
     }
     /* native disposal follows App cleanup; reverse slot order keeps the
        first window until last */
@@ -4421,6 +4687,7 @@ const void* sapp_metal_get_device(void) {
    via sglue_swapchain()); outside a tick each call acquires a fresh
    drawable, exactly like sokol_app.h. */
 static id<CAMetalDrawable> _sapp_tc_main_next_drawable(void) {
+    if (_sapp_tc_mac_frozen()) return nil;
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     if (!w || !w->layer) return nil;
     if (w->in_tick) return _sapp_tc_mac_drawable(w);
@@ -11674,12 +11941,17 @@ static void _sapp_tc_x11_pace(_sapp_tc_window_t* w, double seconds) {
 
 /* absolute periodic schedule (timer-paced secondary windows): pacing from the
    previous deadline instead of "now" keeps the average rate at the period
-   despite tick jitter; resync when far off (first tick, after occlusion) */
+   despite tick jitter; skip missed periods, initialize or resync a future phase */
 static void _sapp_tc_x11_pace_periodic(_sapp_tc_window_t* w, double period) {
     const double now = _sapp_tc_now();
     double next = w->earliest_next + period;
-    if ((next <= now) || (next > now + 2.0 * period)) {
+    if (w->earliest_next <= 0.0 || next > now + 2.0 * period) {
         next = now + period;
+    } else if (next <= now) {
+        // Skip elapsed deadlines without moving the timer's phase to tick completion.
+        next += (floor((now - next) / period) + 1.0) * period;
+        // Rounding can land exactly on now; a skipped deadline must stay in the future.
+        if (next <= now) next += period;
     }
     w->earliest_next = next;
 }
@@ -11811,11 +12083,13 @@ static void _sapp_tc_x11_wait_until(double deadline) {
 #endif
 
 /*-- the run loop --------------------------------------------------------------------
-    While the main window presents normally, its blocking vsync'd swap paces
-    the loop and the XPending drain runs once per frame (upstream parity).
+    Normal main presentation relies on vsync'd native work to pace the loop;
+    a driver can block in activation or rendering instead of the swap call.
+    The XPending drain runs once per pass (upstream parity).
     When every window is timer-paced (minimized, skip_present), the loop
     sleeps in poll() on the X connection fd until the next deadline or an
-    incoming event, so the process never busy-spins. */
+    incoming event. An interval-positive main that presents without any native
+    blocking remains immediately due; it must not accelerate the secondaries. */
 static void _sapp_tc_x11_run_loop(void) {
     XFlush(_sapp_tc.display);
 
@@ -11864,11 +12138,38 @@ static void _sapp_tc_x11_run_loop(void) {
 #endif
         /* tick every due window (re-fetch each slot: a tick or a processed
            event may have destroyed windows) */
-        now = _sapp_tc_now();
+        bool main_drives_secondaries = false;
         for (size_t i = 0; i < _sapp_tc.window_slots; i++) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
-            if (_sapp_tc_x11_window_due(w, now)) {
+            // An earlier window's native work may have crossed this deadline.
+            const double tick_now = _sapp_tc_now();
+            // The launch/main window occupies the first slot. At refresh rate
+            // the main pass is the admission clock, independent of timer phase.
+            // Lower setFps requests are frame-skipped by the window callback;
+            // native interval-zero ticks still supply its refresh-rate source.
+            // A timer tick just before this main pass has already spent the
+            // secondary's refresh credit; don't tick it again on the handoff.
+            const bool follow_main = main_drives_secondaries && w && w != _sapp_tc.app.main &&
+                w->swap_interval == 0 && w->ready && w->drawable && !w->in_tick &&
+                tick_now - w->timing.last >= 0.5 * _sapp_tc.refresh_period;
+            if (follow_main || _sapp_tc_x11_window_due(w, tick_now)) {
+                const bool is_main = w == _sapp_tc.app.main;
+                const double previous_present = w->last_present;
+                // This tick spends the main pass's refresh credit, not a
+                // periodic deadline. Re-arm the fallback timer from completion
+                // so losing the main source cannot immediately replay a tick.
+                if (follow_main) w->earliest_next = 0.0;
                 _sapp_tc_x11_tick(w);
+                // Re-fetch after callbacks. A visible interval-positive main
+                // must present near refresh cadence; EGL can block in activation
+                // or rendering instead of swap itself.
+                if (is_main && _sapp_tc.app.main == w) {
+                    const double main_period = w->last_present - previous_present;
+                    main_drives_secondaries = w->swap_interval > 0 &&
+                        !_sapp_tc_native_hidden(w) && !_sapp_tc_native_iconified(w) &&
+                        w->last_present > previous_present &&
+                        main_period >= 0.5 * _sapp_tc.refresh_period && main_period <= 1.5 * _sapp_tc.refresh_period;
+                }
             }
         }
         if (_sapp_tc.app.desc._tc_after_turn) _sapp_tc.app.desc._tc_after_turn();
@@ -12038,7 +12339,7 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     native.fullscreen = desc->fullscreen;
     /* Allowed X11 pacing difference: the shared GL context must not block on
        every window. Main keeps blocking vsync; secondaries swap at interval 0
-       and are admitted by the existing refresh timer (GLX and EGL alike). */
+       and follow main presentations, with refresh-timer fallback (GLX and EGL). */
     native.swap_interval = 0;
     native.window.sample_count = _sapp_tc.app.desc.sample_count;
     _sapp_tc_window_t* w = _sapp_tc_x11_create_window(&native);
@@ -17858,6 +18159,9 @@ extern "C" void sapp_tc_gl_restore(sapp_tc_gl_state) {}
 extern "C" bool sapp_tc_window_close_recorded(sapp_window win) {
 #if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
     const auto* w = _sapp_tc_lookup(win);
+#if defined(__APPLE__) && TARGET_OS_OSX
+    if (w && w->native_closed) return true;
+#endif
     return !w || !w->ready || w->close_requested ||
         (w->close_recorded && w->close_recorded_frame == w->frame_count);
 #else
@@ -17868,6 +18172,9 @@ extern "C" bool sapp_tc_window_close_recorded(sapp_window win) {
 extern "C" bool sapp_window_inject_event(sapp_window win, const sapp_event* input) {
 #if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
     auto* w = _sapp_tc_lookup(win);
+#if defined(__APPLE__) && TARGET_OS_OSX
+    if (_sapp_tc_mac_frozen() || (w && w->native_closed)) return false;
+#endif
     if (!w || !input || !_sapp_tc_valid_injected_event(*input) || !w->ready ||
         (w->close_recorded && w->close_recorded_frame == w->frame_count) ||
         !w->desc.event_cb || (w->events_enabled && !w->events_enabled())) return false;

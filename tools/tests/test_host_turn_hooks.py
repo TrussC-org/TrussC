@@ -19,14 +19,18 @@ for index,match in enumerate(re.finditer(r'static (?:void|_sapp_tc_event_result)
 struct _sapp_tc_window_t {
     uint32_t win_id=23; uint64_t frame_count=7; float dpi_scale=2;
     int win_width=80,win_height=40,fb_width=160,fb_height=80;
-    bool ready=true,in_tick=false,wake_on_input=true,input_delivered=false;
+    bool ready=true,in_tick=false,wake_on_input=true,input_delivered=false,native_closed=false; int callback_depth=0;
     bool (*events_enabled)()=nullptr;
     struct { void (*event_cb)(const sapp_event*,sapp_window,void*)=nullptr; void* user_data=nullptr; } desc;
 };
-struct { bool mouse_locked=false; _sapp_tc_window_t* lock_owner=nullptr; struct { _sapp_tc_window_t* main=nullptr; } app; } _sapp_tc;
+struct { int callbacks_active=0; bool deferred_blocked=false; bool mouse_locked=false; _sapp_tc_window_t* lock_owner=nullptr; struct { _sapp_tc_window_t* main=nullptr; } app; } _sapp_tc;
 _sapp_tc_window_t* live=nullptr;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return live && live->win_id==h.id ? live : nullptr; }
-'''+implementation+r'''
+''' + ('''
+bool _sapp_tc_mac_frozen() { return false; }
+void _sapp_tc_mac_contained(const char*) {}
+void _sapp_tc_mac_schedule_deferred() {}
+''' + extract(NATIVE,'struct _sapp_tc_mac_callback_scope {')+';\n' if index==0 else '')+implementation+r'''
 void callback(const sapp_event* e,sapp_window h,void* p) {
     auto& w=*static_cast<_sapp_tc_window_t*>(p);
     check("native event callback excludes its own native tick", w.in_tick);
@@ -49,12 +53,17 @@ mac=r'''
 namespace mac {
 using CFRunLoopObserverRef=void*; using CFRunLoopActivity=unsigned;
 enum { kCFRunLoopEntry=1,kCFRunLoopExit=2,kCFRunLoopBeforeSources=4,kCFRunLoopBeforeWaiting=8 };
-struct { struct { unsigned host_loop_depth=1; bool host_turn_open=false;
+struct _sapp_tc_window_t { unsigned win_id=1; int callback_depth=0; bool in_tick=false; };
+constexpr int _SAPP_TC_MAX_WINDOWS=1;
+struct { int callbacks_active=0,constructing=0; bool deferred_blocked=false; _sapp_tc_window_t* windows[1]{};
+    struct { _sapp_tc_window_t* main=nullptr; unsigned host_loop_depth=1; bool host_turn_open=false;
     struct { void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; } desc; } app; } _sapp_tc;
 void _sapp_tc_mac_init_client() {}
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_window) { return nullptr; }
+void _sapp_tc_mac_schedule_deferred() {}
 int before=0,after=0;
-void begin() { ++before; } void end() { ++after; }
-'''+observer+r'''
+void begin() { ++before; check("AppKit process callbacks share native busy scope",_sapp_tc.callbacks_active>0); } void end() { ++after; check("AppKit end callbacks share native busy scope",_sapp_tc.callbacks_active>0); }
+'''+extract(NATIVE,'struct _sapp_tc_mac_callback_scope {')+';\n'+observer+r'''
 void observe(unsigned activity) { _sapp_tc_mac_host_turn(nullptr,activity,nullptr); }
 void run() {
     _sapp_tc.app.desc={begin,end};
@@ -73,11 +82,11 @@ void run() {
 x11=r'''
 namespace x11 {
 struct sapp_window { unsigned id; };
-struct _sapp_tc_window_t { uint32_t win_id=27; bool ready=true, in_tick=false, close_requested=false,input_delivered=false; int drawable=1; double earliest_next=100; };
+struct _sapp_tc_window_t { uint32_t win_id=27; bool ready=true, in_tick=false, close_requested=false,input_delivered=false; int drawable=1,swap_interval=1; double earliest_next=100,last_present=0; struct {double last=0;}timing; };
 struct Descriptor { void (*init_cb)()=nullptr; void (*init_userdata_cb)(void*)=nullptr; void* user_data=nullptr;
     void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; bool (*_tc_callbacks_active)()=nullptr; };
 _sapp_tc_window_t window;
-struct { int display=0; size_t window_slots=1; _sapp_tc_window_t* windows[1]={&window};
+struct { int display=0; double refresh_period=1.0/60.0; size_t window_slots=1; _sapp_tc_window_t* windows[1]={&window};
     struct { bool init_called=false,quit_ordered=false,quit_requested=false; Descriptor desc; _sapp_tc_window_t* main=&window; } app; } _sapp_tc;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return h.id==window.win_id ? &window : nullptr; }
 int before=0,after=0,init=0,ticks=0,clockCalls=0;
@@ -95,6 +104,8 @@ struct XEvent {};
 void XNextEvent(int,XEvent*) {} void _sapp_tc_x11_process_event(XEvent*) {}
 void _sapp_tc_x11_wait_until(double) {}
 void _sapp_tc_x11_tick(_sapp_tc_window_t*) { ++ticks; }
+bool _sapp_tc_native_hidden(_sapp_tc_window_t*) { return false; }
+bool _sapp_tc_native_iconified(_sapp_tc_window_t*) { return false; }
 void _sapp_tc_x11_close(_sapp_tc_window_t*) {}
 void _sapp_tc_x11_app_event(_sapp_tc_window_t*,int) {}
 '''+extract(NATIVE,'static bool _sapp_tc_x11_window_due(')+'\n'+extract(NATIVE,'static void _sapp_tc_x11_run_loop(').replace('poll(&pfd','fake_poll(&pfd')+r'''
@@ -106,29 +117,38 @@ void run() {
 }
 }
 '''
-for marker in ('static BOOL _sapp_tc_request_exit(', 'static void _sapp_tc_mac_process_deferred(', 'static BOOL _sapp_tc_mac_close(', 'static void _sapp_tc_x11_close('):
-    assert '_tc_callbacks_active' in extract(NATIVE, marker), marker
+# macOS uses the incoming RAII scopes; the other backends retain host admission.
+assert '_tc_callbacks_active' in extract(NATIVE, 'static void _sapp_tc_x11_close(')
+assert '_tc_callbacks_active' not in extract(NATIVE, 'static bool _sapp_tc_mac_busy(')
 quit_gate=r'''
 namespace quit_gate {
-using BOOL=int;
-constexpr int YES=1,NO=0,_SAPP_TC_MAX_WINDOWS=1;
-struct sapp_event { int type=0; };
-struct _sapp_tc_window_t { bool in_tick=false; } window;
-bool hostActive=false;
-bool active() { return hostActive; }
-struct { _sapp_tc_window_t* windows[1]={&window};
-    struct { _sapp_tc_window_t* main=&window; bool quit_requested=false,quit_ordered=false;
-             struct { bool (*_tc_callbacks_active)()=active; } desc; } app; } _sapp_tc;
+using NSApplication=void; using NSApplicationTerminateReply=int; using AEEventID=unsigned;
+constexpr int NSTerminateCancel=0,NSTerminateNow=1,_SAPP_TC_MAX_WINDOWS=1;
+struct _sapp_tc_window_t { unsigned win_id=3; bool in_tick=false; int callback_depth=0; } window;
+struct { int callbacks_active=0,constructing=0; bool deferred_blocked=false,terminate_pending=false;
+    _sapp_tc_window_t* windows[1]={&window};
+    struct { bool quit_requested=false,quit_ordered=false; } app; } _sapp_tc;
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return _sapp_tc.windows[0] && h.id==window.win_id?&window:nullptr; }
+void _sapp_tc_mac_schedule_deferred() {}
+bool _sapp_tc_mac_frozen() { return false; }
+AEEventID _sapp_tc_mac_quit_reason() { return 0; }
+bool _sapp_tc_mac_is_session_end(AEEventID) { return false; }
+void _sapp_tc_mac_session_end(AEEventID) {}
+namespace trussc::internal { void setExitReason(const char*) {} void setExitReasonIfEmpty(const char*) {} }
 int requests=0;
-void _sapp_tc_send(_sapp_tc_window_t*,sapp_event*) { ++requests; }
-'''+extract(NATIVE,'static BOOL _sapp_tc_request_exit(')+r'''
+bool _sapp_tc_request_exit() { ++requests; return true; }
+'''+extract(NATIVE,'struct _sapp_tc_mac_callback_scope {')+';\n'+extract(NATIVE,'static bool _sapp_tc_mac_busy(')+extract(NATIVE,'- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender').replace(
+    '- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender','int should_terminate(void* sender)')+r'''
 void run() {
-    hostActive=true;
-    check("AppKit quit defers for host ending callbacks after native unbind",_sapp_tc_request_exit()==NO && requests==0 && _sapp_tc.app.quit_requested);
-    hostActive=false; window.in_tick=true; _sapp_tc.app.quit_requested=false;
-    check("AppKit quit defers for native callback activity",_sapp_tc_request_exit()==NO && requests==0);
+    {
+        _sapp_tc_mac_callback_scope host(nullptr); // process callback after native unbind
+        _sapp_tc.windows[0]=nullptr;
+        check("AppKit quit defers for host ending callbacks after native unbind",should_terminate(nullptr)==NSTerminateCancel && requests==0 && _sapp_tc.terminate_pending);
+    }
+    _sapp_tc.windows[0]=&window; window.in_tick=true;
+    check("AppKit quit defers for native tick activity",should_terminate(nullptr)==NSTerminateCancel && requests==0);
     window.in_tick=false;
-    check("AppKit quit reaches the existing endpoint at the next safe boundary",_sapp_tc_request_exit()==YES && requests==1);
+    check("AppKit quit reaches the existing endpoint at the next safe boundary",should_terminate(nullptr)==NSTerminateNow && requests==1);
 }
 }
 '''
@@ -185,7 +205,7 @@ if os.environ.get('TC_HOST_TURN_MUTATIONS'):
     old='if (auto* live = _sapp_tc_lookup(source.handle)) _sapp_tc_win32_tick(live);'
     assert old in modal
     variants.append(('modal_uses_stale_receiver',source.replace(modal,modal.replace(old,'_sapp_tc_win32_tick(w);'))))
-    quit_condition='if (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active())'
+    quit_condition='if (_sapp_tc_mac_busy())'
     assert quit_condition in quit_gate
     variants.append(('native_quit_ignores_host_callbacks',source.replace(quit_gate,quit_gate.replace(quit_condition,'if (false)'))))
     old='    if (_sapp_tc.app.host_loop_depth > 1) return;'
