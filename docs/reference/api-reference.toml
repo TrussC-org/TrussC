@@ -40892,7 +40892,7 @@ details.ko = '''
 - `clipboardSize`의 기본값은 65536바이트입니다. `setClipboardSize()`는 백엔드 텍스트 버퍼의 한도를 설정합니다. 한도를 넘는 클립보드 텍스트는 플랫폼에 따라 잘리거나 거부될 수 있습니다.
 - `uniformBufferReserve`의 기본값은 백엔드 기본값을 사용하는 `0`입니다. `reserveUniformBuffer(bytes)`는 프레임별 GPU 유니폼 버퍼 예약량을 설정합니다. Metal과 WebGPU는 필요에 따라 버퍼를 확장하며 Vulkan에서는 충분한 용량이 필요합니다. GL과 D3D11은 이 예약량을 사용하지 않습니다.
 '''
-related = ["runApp", "setWindowSize", "setWindowTitle", "HeadlessSettings"]
+related = ["runApp", "setWindowSize", "setWindowTitle", "HeadlessSettings", "WindowSettings::setResourcePoolSize", "WindowSettings::setShaderPoolSize", "WindowSettings::setPipelinePoolSize"]
 snippet = '''
 int main() {
     WindowSettings settings;
@@ -41052,6 +41052,8 @@ details.ko = '''
 - 예약량을 늘리면 메모리 사용량이 증가하지만 매 프레임 할당이 추가되지는 않습니다. Metal과 Vulkan은 처리 중인 프레임을 위해 버퍼 2개를 할당합니다. WebGPU는 GPU 버퍼와 CPU 스테이징 공간을 할당하며 각각 64 KiB를 추가합니다.
 - 핫 리로드 실행기와 보조 윈도우 생성에서는 이 예약량을 반영하지 않습니다.
 '''
+
+related = ["WindowSettings", "WindowSettings::setResourcePoolSize", "WindowSettings::setShaderPoolSize", "WindowSettings::setPipelinePoolSize"]
 
 ["WindowSettings::sampleCount"]
 description.en = "Specifies the window's MSAA sample count."
@@ -62989,6 +62991,138 @@ details.ko = '''
 - 메인/호스트 순서와 v0.8 전환은 App::mousePressed를 참조하세요.
 '''
 related = ["App::mousePressed", "Node::onMouseDrag", "RectNode::onMouseDrag"]
+
+["WindowSettings::setResourcePoolSize"]
+description.en = "Sets the startup slot count for each resource pool."
+description.ja = "各リソースプールの起動時の枠数を設定します。"
+description.ko = "각 리소스 풀의 시작 슬롯 수를 설정합니다."
+details.en = '''
+- Buffers, images, views and samplers each get `count` slots; the default is 10000 each. Resource slots are small CPU tables; raising their count does not reserve GPU storage for every resource.
+- `count` sets the number of slots and returns the same `WindowSettings&` for chaining. Sokol uses 16-bit slot indices, so the backend supports at most 65,535 slots per pool. Larger values log one Error for this setting at graphics startup and use 65,535. Allocation also needs enough memory.
+- `0` selects the default. A negative value logs one Notice for this setting at graphics startup and uses the default.
+- Set this before `runApp()`. Graphics startup reads it once; changing settings later does not resize pools. The hot-reload launcher also forwards this setting. Headless mode has no `sg_setup()`, so this setting does not apply there.
+- Exhaustion logs one Error per pool per process, including its configured size and the setter to increase it before `runApp()`. Affected resource creation fails. Sokol's original line remains at debug verbosity.
+'''
+details.ja = '''
+- バッファー、画像、ビュー、サンプラーの各プールに `count` 枠を用意します。既定値はそれぞれ 10000 枠です。リソースの枠は小さな CPU 管理テーブルです。枠数を増やしても全リソース分の GPU 領域を予約するわけではありません。
+- `count` で枠数を設定し、チェイン用に同じ `WindowSettings&` を返します。sokol は枠の番号を 16 ビットで表すため、バックエンドが扱えるのは各プール 65,535 枠までです。それより大きな値では描画系の起動時にこの設定について Error を一度出し、65,535 を使います。確保には十分なメモリも必要です。
+- `0` は既定値を選びます。負の値では描画系の起動時にこの設定について Notice を一度出し、既定値を使います。
+- `runApp()` の前に設定してください。描画系の起動時に一度だけ読み取るため、後から設定を変えてもプールの大きさは変わりません。ホットリロード用ランチャーにも反映します。ヘッドレスモードには `sg_setup()` がないため、この設定は適用しません。
+- 枠が足りない場合、プロセス内の各プールについて Error を一度出します。設定した枠数と、`runApp()` の前に枠数を増やすセッターを示します。該当するリソースの作成は失敗します。sokol の元の行はデバッグ用のログレベルに残します。
+'''
+details.ko = '''
+- 버퍼, 이미지, 뷰, 샘플러의 각 풀에 `count`개 슬롯을 준비합니다. 기본값은 각각 10000개입니다. 리소스 슬롯은 작은 CPU 관리 테이블입니다. 슬롯 수를 늘려도 모든 리소스의 GPU 저장 공간을 예약하지는 않습니다.
+- `count`로 슬롯 수를 설정하고 호출을 연결할 수 있도록 같은 `WindowSettings&`를 반환합니다. sokol은 슬롯 번호를 16비트로 표현하므로 백엔드는 풀마다 최대 65,535개 슬롯을 지원합니다. 더 큰 값이면 그래픽 시작 시 이 설정에 대해 Error를 한 번 기록하고 65,535를 사용합니다. 할당에는 충분한 메모리도 필요합니다.
+- `0`은 기본값을 선택합니다. 음수이면 그래픽 시작 시 이 설정에 대해 Notice를 한 번 기록하고 기본값을 사용합니다.
+- `runApp()` 전에 설정해야 합니다. 그래픽 시작 시 한 번만 읽으므로 이후에 설정을 바꿔도 풀 크기는 바뀌지 않습니다. 핫 리로드 실행기도 이 설정을 전달합니다. 헤드리스 모드에는 `sg_setup()`이 없으므로 적용하지 않습니다.
+- 슬롯이 부족하면 프로세스의 각 풀에 대해 Error를 한 번 기록합니다. 설정한 슬롯 수와 `runApp()` 전에 늘릴 수 있는 세터를 표시합니다. 해당 리소스 생성은 실패합니다. sokol의 원래 로그는 디버그 상세 수준으로 유지합니다.
+'''
+related = ["WindowSettings", "WindowSettings::reserveUniformBuffer", "WindowSettings::setShaderPoolSize", "WindowSettings::setPipelinePoolSize"]
+snippet = '''
+int main() {
+    WindowSettings settings;
+    settings.setSize(1280, 720).setResourcePoolSize(50000).setShaderPoolSize(4096);
+    return runApp<tcApp>(settings);
+}
+'''
+
+["WindowSettings::setShaderPoolSize"]
+description.en = "Sets the startup shader pool slot count."
+description.ja = "シェーダープールの起動時の枠数を設定します。"
+description.ko = "셰이더 풀의 시작 슬롯 수를 설정합니다."
+details.en = '''
+- The default is 1024 shader slots. Each shader slot costs about 3.4 KB of CPU memory, even before loading a shader; 4096 slots use about 14 MB.
+- `count` sets the number of slots and returns the same `WindowSettings&` for chaining. Sokol uses 16-bit slot indices, so the backend supports at most 65,535 slots per pool. Larger values log one Error for this setting at graphics startup and use 65,535. Allocation also needs enough memory.
+- `0` selects the default. A negative value logs one Notice for this setting at graphics startup and uses the default.
+- Set this before `runApp()`. Graphics startup reads it once; changing settings later does not resize pools. The hot-reload launcher also forwards this setting. Headless mode has no `sg_setup()`, so this setting does not apply there.
+- Exhaustion logs one Error per pool per process, including its configured size and the setter to increase it before `runApp()`. Affected resource creation fails. Sokol's original line remains at debug verbosity.
+'''
+details.ja = '''
+- 既定値はシェーダー 1024 枠です。シェーダーを読み込む前でも、1 枠あたり約 3.4 KB の CPU メモリを使います。4096 枠なら約 14 MB です。
+- `count` で枠数を設定し、チェイン用に同じ `WindowSettings&` を返します。sokol は枠の番号を 16 ビットで表すため、バックエンドが扱えるのは各プール 65,535 枠までです。それより大きな値では描画系の起動時にこの設定について Error を一度出し、65,535 を使います。確保には十分なメモリも必要です。
+- `0` は既定値を選びます。負の値では描画系の起動時にこの設定について Notice を一度出し、既定値を使います。
+- `runApp()` の前に設定してください。描画系の起動時に一度だけ読み取るため、後から設定を変えてもプールの大きさは変わりません。ホットリロード用ランチャーにも反映します。ヘッドレスモードには `sg_setup()` がないため、この設定は適用しません。
+- 枠が足りない場合、プロセス内の各プールについて Error を一度出します。設定した枠数と、`runApp()` の前に枠数を増やすセッターを示します。該当するリソースの作成は失敗します。sokol の元の行はデバッグ用のログレベルに残します。
+'''
+details.ko = '''
+- 기본값은 셰이더 슬롯 1024개입니다. 셰이더를 불러오기 전에도 슬롯당 약 3.4 KB의 CPU 메모리를 사용합니다. 4096개는 약 14 MB를 사용합니다.
+- `count`로 슬롯 수를 설정하고 호출을 연결할 수 있도록 같은 `WindowSettings&`를 반환합니다. sokol은 슬롯 번호를 16비트로 표현하므로 백엔드는 풀마다 최대 65,535개 슬롯을 지원합니다. 더 큰 값이면 그래픽 시작 시 이 설정에 대해 Error를 한 번 기록하고 65,535를 사용합니다. 할당에는 충분한 메모리도 필요합니다.
+- `0`은 기본값을 선택합니다. 음수이면 그래픽 시작 시 이 설정에 대해 Notice를 한 번 기록하고 기본값을 사용합니다.
+- `runApp()` 전에 설정해야 합니다. 그래픽 시작 시 한 번만 읽으므로 이후에 설정을 바꿔도 풀 크기는 바뀌지 않습니다. 핫 리로드 실행기도 이 설정을 전달합니다. 헤드리스 모드에는 `sg_setup()`이 없으므로 적용하지 않습니다.
+- 슬롯이 부족하면 프로세스의 각 풀에 대해 Error를 한 번 기록합니다. 설정한 슬롯 수와 `runApp()` 전에 늘릴 수 있는 세터를 표시합니다. 해당 리소스 생성은 실패합니다. sokol의 원래 로그는 디버그 상세 수준으로 유지합니다.
+'''
+related = ["WindowSettings", "WindowSettings::reserveUniformBuffer", "WindowSettings::setResourcePoolSize", "WindowSettings::setPipelinePoolSize"]
+snippet = '''
+int main() {
+    WindowSettings settings;
+    settings.setSize(1280, 720).setResourcePoolSize(50000).setShaderPoolSize(4096);
+    return runApp<tcApp>(settings);
+}
+'''
+
+["WindowSettings::setPipelinePoolSize"]
+description.en = "Sets the startup pipeline pool slot count."
+description.ja = "パイプラインプールの起動時の枠数を設定します。"
+description.ko = "파이프라인 풀의 시작 슬롯 수를 설정합니다."
+details.en = '''
+- The default is 1024 pipeline slots. Each sokol_gfx pipeline slot costs about 1.2 KB of CPU memory; 4096 slots use about 4.9 MB.
+- sokol_gl uses the same slot count, including after its drawing buffers are resized. Its slots are small CPU records (about 32 B), so using the same count avoids a separate hidden limit. One sokol_gl pipeline still needs up to five sokol_gfx pipeline slots. The context pool keeps growing as before.
+- `count` sets the number of slots and returns the same `WindowSettings&` for chaining. Sokol uses 16-bit slot indices, so the backend supports at most 65,535 slots per pool. Larger values log one Error for this setting at graphics startup and use 65,535. Allocation also needs enough memory.
+- `0` selects the default. A negative value logs one Notice for this setting at graphics startup and uses the default.
+- Set this before `runApp()`. Graphics startup reads it once; changing settings later does not resize pools. The hot-reload launcher also forwards this setting. Headless mode has no `sg_setup()`, so this setting does not apply there.
+- Exhaustion logs one Error per pool per process, including its configured size and the setter to increase it before `runApp()`. Affected resource creation fails. Sokol's original line remains at debug verbosity.
+'''
+details.ja = '''
+- 既定値はパイプライン 1024 枠です。sokol_gfx のパイプラインは 1 枠あたり約 1.2 KB の CPU メモリを使います。4096 枠なら約 4.9 MB です。
+- sokol_gl も同じ枠数を使い、描画バッファーのサイズ変更後も維持します。枠は約 32 B の小さな CPU 管理情報なので、同じ数にして別の隠れた制限を避けます。sokol_gl の 1 パイプラインには sokol_gfx の枠が最大 5 個必要です。コンテキストプールは従来どおり拡張します。
+- `count` で枠数を設定し、チェイン用に同じ `WindowSettings&` を返します。sokol は枠の番号を 16 ビットで表すため、バックエンドが扱えるのは各プール 65,535 枠までです。それより大きな値では描画系の起動時にこの設定について Error を一度出し、65,535 を使います。確保には十分なメモリも必要です。
+- `0` は既定値を選びます。負の値では描画系の起動時にこの設定について Notice を一度出し、既定値を使います。
+- `runApp()` の前に設定してください。描画系の起動時に一度だけ読み取るため、後から設定を変えてもプールの大きさは変わりません。ホットリロード用ランチャーにも反映します。ヘッドレスモードには `sg_setup()` がないため、この設定は適用しません。
+- 枠が足りない場合、プロセス内の各プールについて Error を一度出します。設定した枠数と、`runApp()` の前に枠数を増やすセッターを示します。該当するリソースの作成は失敗します。sokol の元の行はデバッグ用のログレベルに残します。
+'''
+details.ko = '''
+- 기본값은 파이프라인 슬롯 1024개입니다. sokol_gfx 파이프라인 슬롯은 각각 약 1.2 KB의 CPU 메모리를 사용합니다. 4096개는 약 4.9 MB를 사용합니다.
+- sokol_gl도 같은 슬롯 수를 사용하며 그리기 버퍼 크기를 바꾼 뒤에도 유지합니다. 슬롯은 약 32 B의 작은 CPU 관리 정보이므로 같은 수를 사용해 별도의 숨은 제한을 피합니다. sokol_gl 파이프라인 하나에는 sokol_gfx 슬롯이 최대 5개 필요합니다. 컨텍스트 풀은 기존처럼 확장합니다.
+- `count`로 슬롯 수를 설정하고 호출을 연결할 수 있도록 같은 `WindowSettings&`를 반환합니다. sokol은 슬롯 번호를 16비트로 표현하므로 백엔드는 풀마다 최대 65,535개 슬롯을 지원합니다. 더 큰 값이면 그래픽 시작 시 이 설정에 대해 Error를 한 번 기록하고 65,535를 사용합니다. 할당에는 충분한 메모리도 필요합니다.
+- `0`은 기본값을 선택합니다. 음수이면 그래픽 시작 시 이 설정에 대해 Notice를 한 번 기록하고 기본값을 사용합니다.
+- `runApp()` 전에 설정해야 합니다. 그래픽 시작 시 한 번만 읽으므로 이후에 설정을 바꿔도 풀 크기는 바뀌지 않습니다. 핫 리로드 실행기도 이 설정을 전달합니다. 헤드리스 모드에는 `sg_setup()`이 없으므로 적용하지 않습니다.
+- 슬롯이 부족하면 프로세스의 각 풀에 대해 Error를 한 번 기록합니다. 설정한 슬롯 수와 `runApp()` 전에 늘릴 수 있는 세터를 표시합니다. 해당 리소스 생성은 실패합니다. sokol의 원래 로그는 디버그 상세 수준으로 유지합니다.
+'''
+related = ["WindowSettings", "WindowSettings::reserveUniformBuffer", "WindowSettings::setResourcePoolSize", "WindowSettings::setShaderPoolSize"]
+snippet = '''
+int main() {
+    WindowSettings settings;
+    settings.setSize(1280, 720).setResourcePoolSize(50000).setShaderPoolSize(4096);
+    return runApp<tcApp>(settings);
+}
+'''
+
+["WindowSettings::resourcePoolSize"]
+description.en = "Specifies the startup resource pool slot count."
+description.ja = "起動時のリソースプールの枠数を指定します。"
+description.ko = "시작 시 리소스 풀 슬롯 수를 지정합니다."
+details.en = "Default: `0`. This is the backing field for `WindowSettings::setResourcePoolSize`; see that setter for effective defaults, validation, startup restrictions and memory costs."
+details.ja = "既定値は `0` です。`WindowSettings::setResourcePoolSize` が設定するフィールドです。実際の既定値、値の確認、起動時の制限、メモリ使用量はセッターを参照してください。"
+details.ko = "기본값은 `0`입니다. `WindowSettings::setResourcePoolSize`가 설정하는 필드입니다. 실제 기본값, 값 확인, 시작 시 제한과 메모리 사용량은 세터를 참조해야 합니다."
+related = ["WindowSettings::setResourcePoolSize"]
+
+["WindowSettings::shaderPoolSize"]
+description.en = "Specifies the startup shader pool slot count."
+description.ja = "起動時のシェーダープールの枠数を指定します。"
+description.ko = "시작 시 셰이더 풀 슬롯 수를 지정합니다."
+details.en = "Default: `0`. This is the backing field for `WindowSettings::setShaderPoolSize`; see that setter for effective defaults, validation, startup restrictions and memory costs."
+details.ja = "既定値は `0` です。`WindowSettings::setShaderPoolSize` が設定するフィールドです。実際の既定値、値の確認、起動時の制限、メモリ使用量はセッターを参照してください。"
+details.ko = "기본값은 `0`입니다. `WindowSettings::setShaderPoolSize`가 설정하는 필드입니다. 실제 기본값, 값 확인, 시작 시 제한과 메모리 사용량은 세터를 참조해야 합니다."
+related = ["WindowSettings::setShaderPoolSize"]
+
+["WindowSettings::pipelinePoolSize"]
+description.en = "Specifies the startup pipeline pool slot count."
+description.ja = "起動時のパイプラインプールの枠数を指定します。"
+description.ko = "시작 시 파이프라인 풀 슬롯 수를 지정합니다."
+details.en = "Default: `0`. This is the backing field for `WindowSettings::setPipelinePoolSize`; see that setter for effective defaults, validation, startup restrictions and memory costs."
+details.ja = "既定値は `0` です。`WindowSettings::setPipelinePoolSize` が設定するフィールドです。実際の既定値、値の確認、起動時の制限、メモリ使用量はセッターを参照してください。"
+details.ko = "기본값은 `0`입니다. `WindowSettings::setPipelinePoolSize`가 설정하는 필드입니다. 실제 기본값, 값 확인, 시작 시 제한과 메모리 사용량은 세터를 참조해야 합니다."
+related = ["WindowSettings::setPipelinePoolSize"]
 
 [setResourceLoadConcurrency]
 keywords = ["async", "load", "concurrency", "queue", "worker"]
