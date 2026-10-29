@@ -2465,6 +2465,9 @@ typedef struct sapp_window_desc {
     void (*close_cb)(sapp_window win, void* user);  /* user closed the window; call sapp_destroy_window() to accept */
     void* user_data;
     bool (*bind_cb)(uint32_t id, void* user);
+    bool fullscreen;            /* initial native fullscreen; preserves windowed restore geometry */
+    int swap_interval;          /* macOS/Win32: 0 = default (1), positive = display interval;
+                                  X11 secondaries use nonblocking swaps and a refresh timer */
 } sapp_window_desc;
 
 // Private host metadata boundary. Reading it never acquires a drawable.
@@ -3812,6 +3815,9 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
     }
     w->ready = true;
     [w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    /* AppKit's native transition needs initialized windowed dimensions and a
+       live delegate/host binding. Request before ordering front, as at launch,
+       so the transition and its terminal notifications share the same state. */
     if (d->fullscreen) _sapp_tc_request_fullscreen(w, true);
     [w->window makeKeyAndOrderFront:nil];
     /* silent startup re-sample (sokol parity: the startup update never fires
@@ -4009,6 +4015,8 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     _sapp_tc_init_keytable();
     _sapp_tc_native_desc native = {};
     native.window = _sapp_tc_normalize_window(desc);
+    native.fullscreen = desc->fullscreen;
+    native.swap_interval = desc->swap_interval > 0 ? desc->swap_interval : 1;
     native.color_format = SAPP_PIXELFORMAT_BGRA8;
     native.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL;
     _sapp_tc_window_t* w = _sapp_tc_mac_create_window(&native);
@@ -6792,10 +6800,10 @@ static uint32_t _sapp_tc_win32_mods(void) {
     return m;
 }
 
-static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
+static _sapp_tc_event_result _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
     ev->pointer_locked = false;
     ev->reliable_button_bits = true;
-    _sapp_tc_deliver_event(w, ev, _sapp_tc.app.main ? _sapp_tc.app.main->frame_count : 0,
+    return _sapp_tc_deliver_event(w, ev, _sapp_tc.app.main ? _sapp_tc.app.main->frame_count : 0,
         [] (sapp_window handle) { return _sapp_tc_lookup(handle); });
 }
 
@@ -7315,11 +7323,11 @@ static void _sapp_tc_win32_char_event(_sapp_tc_window_t* w, uint32_t c, bool rep
     _sapp_tc_send(w, &e);
 }
 
-static void _sapp_tc_win32_app_event(_sapp_tc_window_t* w, sapp_event_type type) {
+static _sapp_tc_event_result _sapp_tc_win32_app_event(_sapp_tc_window_t* w, sapp_event_type type) {
     sapp_event e;
     memset(&e, 0, sizeof(e));
     e.type = type;
-    _sapp_tc_send(w, &e);
+    return _sapp_tc_send(w, &e);
 }
 
 /* refcounted capture across buttons: dragging with two buttons held must not
@@ -7586,9 +7594,9 @@ static void _sapp_tc_win32_modal_tick(_sapp_tc_window_t* w) {
 static bool _sapp_tc_win32_request_exit(_sapp_tc_window_t* w) {
     if (!_sapp_tc.app.quit_ordered) {
         _sapp_tc.app.quit_requested = true;
-        try {
-            _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_QUIT_REQUESTED);
-        } catch (...) {
+        // A throwing quit client vetoes once, just like sapp_cancel_quit().
+        // Delivery contains the exception before it reaches the OS callback.
+        if (_sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_QUIT_REQUESTED).client_threw) {
             _sapp_tc.app.quit_requested = false;
         }
     }
@@ -8203,9 +8211,10 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     if (!desc || !_sapp_tc.app.valid || !_sapp_tc.app.device) return invalid;
     _sapp_tc_native_desc native = {};
     native.window = _sapp_tc_normalize_window(desc);
+    native.fullscreen = desc->fullscreen;
+    native.swap_interval = desc->swap_interval > 0 ? desc->swap_interval : 1;
     native.window.x = desc->x >= 0 ? desc->x : 120;
     native.window.y = desc->y >= 0 ? desc->y : 120;
-    native.swap_interval = 1;
     native.color_format = SAPP_PIXELFORMAT_BGRA8;
     native.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL;
     _sapp_tc_window_t* w = _sapp_tc_win32_create_window(&native);
@@ -12026,6 +12035,11 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     native.color_format = SAPP_PIXELFORMAT_RGBA8;
     native.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL;
     native.window = _sapp_tc_normalize_window(desc);
+    native.fullscreen = desc->fullscreen;
+    /* Allowed X11 pacing difference: the shared GL context must not block on
+       every window. Main keeps blocking vsync; secondaries swap at interval 0
+       and are admitted by the existing refresh timer (GLX and EGL alike). */
+    native.swap_interval = 0;
     native.window.sample_count = _sapp_tc.app.desc.sample_count;
     _sapp_tc_window_t* w = _sapp_tc_x11_create_window(&native);
     return {w ? w->win_id : 0};

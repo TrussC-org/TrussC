@@ -3,7 +3,7 @@
 # TC_NATIVE_GATES_INCLUDE may name a private sokol header directory for mutations.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
-scratch=$(mktemp -d "${TMPDIR:-/tmp}/tc-an2b-cp3fu2-native-gates.XXXXXX")
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/tc-an2b-cp3fu10-native-gates.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
 python3 - "$root" "$scratch" <<'PY'
 from pathlib import Path
@@ -540,3 +540,6 @@ for backend in ('SOKOL_GLCORE', 'SOKOL_GLES3'):
     failed |= subprocess.run([str(binary)]).returncode != 0
 sys.exit(int(failed))
 PY
+
+python3 "$root/core/tests/windowTick/native-quit-test.py"
+python3 "$root/core/tests/windowTick/creation-settings-test.py"

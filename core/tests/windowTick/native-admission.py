@@ -16,8 +16,8 @@ def generate(native, early=False):
                                       ('x11_glx', 2, 'SOKOL_GLCORE'), ('x11_egl', 2, 'SOKOL_GLES3')]:
         port = platform.split('_')[0]
         start = predicates[index].start()
-        send_start = native.rindex('static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {', 0, start)
-        send = body(native[send_start:start], 'static void _sapp_tc_send(')
+        send_start = native.rfind('\nstatic ', 0, native.rindex('_sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {', 0, start)) + 1
+        send = body(native[send_start:start], native[send_start:native.index('{', send_start)])
         predicate = body(native[start:native.index('static void _sapp_tc_main_event_tramp', start)], 'static bool _sapp_tc_app_events_enabled(')
         init = body(native, f'static void _sapp_tc_{port}_init_client(')
         code = r'''
@@ -106,8 +106,7 @@ bool PeekMessageW(MSG*,void*,int,int,int) { if (!queued) return false; queued=fa
 void TranslateMessage(MSG*) {} void DispatchMessageW(MSG*) { ++drained; emit(SAPP_EVENTTYPE_KEY_DOWN); }
 void ShutdownBlockReasonDestroy(...) {} void ShutdownBlockReasonCreate(...) {}
 int MultiByteToWideChar(...) { return 0; }
-void _sapp_tc_win32_app_event(_sapp_tc_window_t*,sapp_event_type type) { emit(type); }
-''' + body(native, 'static bool _sapp_tc_win32_request_exit(') + r'''
+''' + body(native, 'static _sapp_tc_event_result _sapp_tc_win32_app_event(') + '\n' + body(native, 'static bool _sapp_tc_win32_request_exit(') + r'''
 int querySession() {
     auto* w=&record; void* hwnd=nullptr;
     switch (WM_QUERYENDSESSION) {

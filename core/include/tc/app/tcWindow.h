@@ -102,7 +102,9 @@ public:
     // Until then isOpen() is true and getApp() / App::getWindow() still
     // return the App and the window. Safe to call from the window's own
     // App (update() / draw() / keyPressed() ...). Destroying the Window
-    // (the last shared_ptr) still closes it immediately.
+    // (the last shared_ptr) closes it immediately while the framework runs.
+    // After framework shutdown, destruction abandons native/GPU handles without
+    // calling the framework; those resources are reclaimed with the process.
     // Secondary teardown destroys the native window; main teardown is owned
     // by the runner. In either case isOpen() turns false,
     // then events().exit delivers App::exit() at App priority, followed by
@@ -814,12 +816,14 @@ inline constexpr bool supportsSecondaryWindows() { return true; }
 
 // Desktop controls use the addressed binding. Single-window platforms retain
 // their canvas/surface control endpoints.
-inline Window::~Window() { teardown(); }
+inline Window::~Window() { if (!internal::frameworkShutdown()) teardown(); }
 inline void Window::close() {
+    if (internal::frameworkShutdown()) return;
     if (!ctx_.isMain) { closeSecondary(); return; }
     if (isOpen() && !closeRequested_) { closeRequested_ = true; requestExitApp(); }
 }
 inline void Window::teardown() noexcept {
+    if (internal::frameworkShutdown()) return;
     internal::WindowLifecycleScope lifecycle(*this);
     if (!ctx_.isMain) { teardownSecondary(); return; }
     if (isOpen()) internal::WindowRequestAccess::endMain(*this);

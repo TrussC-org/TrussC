@@ -71,9 +71,14 @@ static inline bool _sapp_tc_valid_injected_event(const sapp_event& e) {
     return false;
 }
 
+struct _sapp_tc_event_result {
+    bool delivered = false;
+    bool client_threw = false;
+};
+
 template<class Record, class Lookup>
-static bool _sapp_tc_deliver_event(Record* w, sapp_event* event, uint64_t frame, Lookup lookup) noexcept {
-    if (!w || !event || !w->ready || !w->desc.event_cb || (w->events_enabled && !w->events_enabled())) return false;
+static _sapp_tc_event_result _sapp_tc_deliver_event(Record* w, sapp_event* event, uint64_t frame, Lookup lookup) noexcept {
+    if (!w || !event || !w->ready || !w->desc.event_cb || (w->events_enabled && !w->events_enabled())) return {};
     const auto id = w->win_id;
     const bool busy = w->in_tick;
     w->in_tick = true;
@@ -83,10 +88,11 @@ static bool _sapp_tc_deliver_event(Record* w, sapp_event* event, uint64_t frame,
     event->framebuffer_width = w->fb_width; event->framebuffer_height = w->fb_height;
     event->dpi_scale = w->dpi_scale;
     if (_sapp_tc_event_wakes(event->type)) w->input_delivered = w->wake_on_input;
+    _sapp_tc_event_result result{true, false};
     try { w->desc.event_cb(event, {id}, w->desc.user_data); }
-    catch (...) { /* A native client cannot unwind through an OS callback. */ }
+    catch (...) { result.client_threw = true; } // Report failure without unwinding through an OS callback.
     if (auto* live = lookup(sapp_window{id})) live->in_tick = busy;
-    return true;
+    return result;
 }
 
 // Adapt the single-window ports' existing state to the same delivery gate.

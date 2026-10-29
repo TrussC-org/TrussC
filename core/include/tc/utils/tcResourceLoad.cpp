@@ -271,12 +271,14 @@ ResourceLoadState::ResourceLoadState() : MainThreadSlot([](MainThreadSlot& slot)
     deliver(state);
 }, [](MainThreadSlot& slot) { static_cast<ResourceLoadState&>(slot).cancel(); }) {}
 ResourceLoadState::~ResourceLoadState() {
+    if (frameworkShutdown()) return;
     if (!credits && !requestCredit) return; // setup may have failed before the host existed
     auto& owner = host();
     std::lock_guard<std::mutex> lock(owner.mutex);
     releaseCredits(owner, *this);
 }
 void ResourceLoadState::cancel() {
+    if (frameworkShutdown()) return;
     cancelled.store(true);
     auto& owner = host();
     bool releasedActive = false;

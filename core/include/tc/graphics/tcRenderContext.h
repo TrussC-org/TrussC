@@ -1243,6 +1243,7 @@ public:
           matrixDepth_(rc_.getMatrixStackDepth()), styleDepth_(rc_.getStyleStackDepth()), target_(&currentTarget()),
           previousEntry_(std::exchange(rc_.activeEntry_, entry)) {}
     ~EntryStackGuard() {
+        if (frameworkShutdown()) return;
         // present() owns Draw's stack reset. Nested update/setup/event guards
         // temporarily override Draw, even when a native pass is already open.
         TeardownSteps steps;

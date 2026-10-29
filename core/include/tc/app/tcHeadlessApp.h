@@ -239,6 +239,10 @@ struct HeadlessSettings {
 // ---------------------------------------------------------------------------
 template<typename AppClass>
 int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
+    internal::beginFrameworkLifetime();
+    struct EndFrameworkLifetime {
+        ~EndFrameworkLifetime() { internal::endFrameworkLifetime(); }
+    } endFrameworkLifetime;
     internal::installCrashHandler();
     internal::CrashPhaseScope crashPhase("headless");
 

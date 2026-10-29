@@ -744,12 +744,16 @@ bool shadowNativeFailureProbe() {
 // IDs recycle exactly, then exercise the real cleanup and retirement collector.
 bool shadowDeviceRestartProbe() {
     cleanup();
+    // This fixture bypasses setup(): begin the new framework lifetime before
+    // each manual device setup, just as setup() does in the real runner.
+    internal::beginFrameworkLifetime();
     sg_desc desc = {}; sg_setup(&desc); sgl_desc_t sd = {}; sgl_setup(&sd);
     auto& owner = internal::mainWindowContext();
     bool ok = internal::ensureShadowStorage(owner,64);
     if (!owner.shadow.storage) return false;
     const auto old = owner.shadow.storage->colorImage;
     cleanup();
+    internal::beginFrameworkLifetime();
     sg_setup(&desc); sgl_setup(&sd);
     ok &= internal::ensureShadowStorage(owner,64);
     if (!owner.shadow.storage) return false;

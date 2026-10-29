@@ -56,7 +56,7 @@ TC_LUA_SKIP [[nodiscard]] inline StyleScope scopedStyle();
 
 class [[nodiscard]] TC_LUA_SKIP MatrixScope {
 public:
-    ~MatrixScope() { ctx_.popMatrix(); }
+    ~MatrixScope() { if (!internal::frameworkShutdown()) ctx_.popMatrix(); }
     MatrixScope(const MatrixScope&) = delete;
     MatrixScope& operator=(const MatrixScope&) = delete;
     MatrixScope(MatrixScope&&) = delete;
@@ -70,7 +70,7 @@ private:
 
 class [[nodiscard]] TC_LUA_SKIP StyleScope {
 public:
-    ~StyleScope() { ctx_.popStyle(); }
+    ~StyleScope() { if (!internal::frameworkShutdown()) ctx_.popStyle(); }
     StyleScope(const StyleScope&) = delete;
     StyleScope& operator=(const StyleScope&) = delete;
     StyleScope(StyleScope&&) = delete;

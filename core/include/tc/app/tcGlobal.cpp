@@ -109,6 +109,7 @@ bool shadowNativeValid(sg_sampler);
 // Initialization (setup)
 // ---------------------------------------------------------------------------
 void setup() {
+    internal::beginFrameworkLifetime();
     // Initialize sokol_gfx (with memory tracking allocator)
     sg_desc sgdesc = {};
     sgdesc.environment = sglue_environment();
@@ -242,6 +243,7 @@ void cleanup() {
         }
         fontAtlas.initialized = false;
     }
+    internal::endFrameworkLifetime();
     sgl_shutdown();
     internal::recordImageDecodeLimit(0);
     sg_shutdown();
@@ -446,12 +448,14 @@ void reportTeardownFailure(const char* step) noexcept {
 }
 
 WindowContext::~WindowContext() {
+    if (frameworkShutdown()) return;
     targetsClosed = true;
     teardownTargets();
     if (currentWindowCtx() == this) currentWindowCtx() = nullptr;
 }
 
 void WindowContext::teardownTargets() noexcept {
+    if (frameworkShutdown()) return;
     // popTarget resolves through the current window. Destruction may be
     // dispatched while a different window is current.
     TeardownSteps steps;
@@ -826,6 +830,7 @@ TargetPassScope::TargetPassScope(const sg_pass& pass, int width, int height,
     token_ = pushTarget(owned_);
 }
 TargetPassScope::~TargetPassScope() noexcept {
+    if (frameworkShutdown()) return;
     try {
         if (token_ && target_->activation == token_ && !popTarget(*target_, token_)) {
             // An owned scope cannot disappear while children still borrow it.
@@ -953,19 +958,34 @@ bool isInSwapchainPass() {
 
 namespace internal {
 namespace {
-// Main-thread-only lighting cleanup can outlive these function-local statics
+// Constant initialization and trivial destruction keep this readable after all
+// static destructors, without consulting a singleton. Atomic publication covers
+// a handle released by a worker after the framework run has ended.
+constinit std::atomic<bool> frameworkStopped{false};
+static_assert(std::is_trivially_destructible_v<decltype(frameworkStopped)>);
+
+// Lighting cleanup can outlive these function-local statics
 // (e.g. a sketch's global Material). Constant initialization and trivial
-// destruction keep the flag readable throughout static destruction.
-constinit bool windowStateDestroyed = false;
+// destruction keep the pointers readable throughout static destruction.
 constinit WindowContext* initializedMainWindowContext = nullptr;
 constinit std::vector<Window*>* initializedWindowRegistry = nullptr;
 
 struct WindowStateLifetimeMark {
+    bool registry = false;
     explicit WindowStateLifetimeMark(WindowContext* ctx) { initializedMainWindowContext = ctx; }
-    explicit WindowStateLifetimeMark(std::vector<Window*>* list) { initializedWindowRegistry = list; }
-    ~WindowStateLifetimeMark() { windowStateDestroyed = true; }
+    explicit WindowStateLifetimeMark(std::vector<Window*>* list) : registry(true) { initializedWindowRegistry = list; }
+    ~WindowStateLifetimeMark() {
+        if (registry) {
+            initializedWindowRegistry = nullptr;
+            endFrameworkLifetime();
+        } else initializedMainWindowContext = nullptr;
+    }
 };
 } // namespace
+
+bool frameworkShutdown() noexcept { return frameworkStopped.load(std::memory_order_acquire); }
+void beginFrameworkLifetime() noexcept { frameworkStopped.store(false, std::memory_order_release); }
+void endFrameworkLifetime() noexcept { frameworkStopped.store(true, std::memory_order_release); }
 
 // The main window's state container. Non-inline so a hot-reload guest binds
 // to the host's instance (same pattern as events()/getDefaultContext()).
@@ -973,8 +993,16 @@ WindowContext& mainWindowContext() {
     return mainWindow()->context();
 }
 // Open-window registry (see tcWindow.h). Non-inline for the same host/guest
-// reason as mainWindowContext(). Main thread only.
+// reason as mainWindowContext(). Running access remains main-thread-only;
+// stopped destructors share this lock with the CPU lighting scrubs.
+static std::mutex& windowRegistryMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
 static std::vector<Window*>& windowRegistryStorage() {
+    // Outlive the list and the main/non-window contexts (their construction
+    // initializes this registry), including on MSVC where mutex has a destructor.
+    windowRegistryMutex();
     static std::vector<Window*> list;
     // Either storage may be initialized first; stop cleanup before either dies.
     static WindowStateLifetimeMark lifetimeMark(&list);
@@ -982,15 +1010,29 @@ static std::vector<Window*>& windowRegistryStorage() {
     return list;
 }
 void registerWindow(Window* w) {
+    std::lock_guard lock(windowRegistryMutex());
     windowRegistryStorage().push_back(w);
 }
 void unregisterWindow(Window* w) {
-    auto& list = windowRegistryStorage();
+    // The existing marker clears this pointer only at static destruction.
+    // A stopped runner still owns live CPU storage that a later run will use.
+    if (!initializedWindowRegistry) return;
+    std::lock_guard lock(windowRegistryMutex());
+    auto& list = *initializedWindowRegistry;
     list.erase(std::remove(list.begin(), list.end(), w), list.end());
 }
 CoreEvents& mainCoreEvents() { return mainWindow()->events(); }
 RenderContext& mainRenderContext() { return mainWindow()->render_; }
-static std::unique_ptr<Window>& mainWindowOwner() {
+struct MainWindowDeleter {
+    void operator()(Window* window) const noexcept {
+        // std::exit can bypass the cleanup callback. Let the still-live main
+        // owner deliver its existing exit/cleanup before closing the lifetime;
+        // every later handle must stop before looking up the now-deleted owner.
+        delete window;
+        endFrameworkLifetime();
+    }
+};
+static std::unique_ptr<Window, MainWindowDeleter>& mainWindowOwner() {
     // Initialize dependencies before the owner so they outlive its destructor.
     getLogger();
     windowRegistryStorage();
@@ -1003,7 +1045,7 @@ static std::unique_ptr<Window>& mainWindowOwner() {
     mcp::internal::statusImageRegistry();
     mcp::internal::deferredResponsesMutex();
     mcp::internal::deferredResponses();
-    static std::unique_ptr<Window> owner = WindowRequestAccess::makeMain();
+    static std::unique_ptr<Window, MainWindowDeleter> owner(WindowRequestAccess::makeMain().release());
     static WindowStateLifetimeMark lifetimeMark(&owner->context());
     (void)lifetimeMark;
     return owner;
@@ -1011,6 +1053,7 @@ static std::unique_ptr<Window>& mainWindowOwner() {
 Window* mainWindow() { return mainWindowOwner().get(); }
 void createMainWindow(const WindowSettings& settings) {
     destroyMainWindow();
+    beginFrameworkLifetime();
     auto& window = *mainWindow();
     WindowRequestAccess::resetForLaunch(window);
     WindowRequestAccess::binding(window) = {};
@@ -1065,6 +1108,8 @@ WindowControlHook& windowControlHookForTests() {
 }
 
 std::vector<Window*> openWindows() {
+    if (frameworkShutdown()) return {};
+    std::lock_guard lock(windowRegistryMutex());
     std::vector<Window*> out;
     for (Window* w : windowRegistryStorage()) {
         if (w && w->isOpen()) out.push_back(w);
@@ -1072,15 +1117,18 @@ std::vector<Window*> openWindows() {
     return out;
 }
 
-// Main thread only. These scrubs perform only raw-pointer assignment/erasure:
-// context() is non-virtual and no user code, close, or registration is invoked.
-// Thus the registry cannot mutate during this walk. Include closed windows too:
+// These scrubs perform only raw-pointer assignment/erasure under the registry
+// lock: context() is non-virtual; no callbacks, GPU/native calls or other locks.
+// Unregistration precedes destruction of a Window's context. Include closed windows too:
 // their contexts can still retain lighting pointers until Window destruction.
 // Do not initialize either storage from a destructor under allocation failure.
 namespace {
 template<class Scrub> void scrubLightingContexts(Scrub scrub) noexcept {
+    // All three storages can have died during static teardown. Do not touch
+    // the mutex then; the existing storage markers remain the lifetime guards.
+    if (!nonWindowContextIfInitialized() && !initializedMainWindowContext && !initializedWindowRegistry) return;
+    std::lock_guard lock(windowRegistryMutex());
     if (auto* ctx = nonWindowContextIfInitialized()) scrub(*ctx);
-    if (windowStateDestroyed) return;
     if (initializedMainWindowContext) scrub(*initializedMainWindowContext);
     if (initializedWindowRegistry) {
         for (Window* w : *initializedWindowRegistry) {
@@ -1123,7 +1171,14 @@ void resetNodeRefsForUnload() {
     };
     reset(mainWindowContext());
     mainWindowContext().rootNode.reset();
-    for (Window* w : windowRegistryStorage()) {
+    // Weak-reference reset can release user control blocks. Copy the registry
+    // under its lock, then do the existing main-thread unload work outside it.
+    std::vector<Window*> windows;
+    {
+        std::lock_guard lock(windowRegistryMutex());
+        windows = windowRegistryStorage();
+    }
+    for (Window* w : windows) {
         if (w) reset(w->context());
     }
 }
@@ -1524,6 +1579,8 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     reservation.completed = true;
     ++ctx.drawCount;
     { EntryStackGuard guard(AppEntry::AfterFrame); events().afterFrame.notify(); }
+    // Snapshot screenshot requests only after all listeners, including those
+    // installed by App::setup(), have queued captures of this finished frame.
     if (presentation) presentation->finish();
     else drainPendingScreenshots();
     return true;
@@ -2133,6 +2190,7 @@ namespace {
 ShadowStorage* retiredShadows = nullptr;
 
 void retireShadowStorage(ShadowStorage* storage) noexcept {
+    if (frameworkShutdown()) { delete storage; return; }
     if (!sg_isvalid()) { delete storage; return; }
     storage->retiredNext = retiredShadows;
     retiredShadows = storage;
@@ -2181,6 +2239,7 @@ PendingGpuDestroys& pendingGpuDestroys() {
 } // anonymous namespace
 
 TextureRetirement::~TextureRetirement() noexcept {
+    if (frameworkShutdown()) return;
     if (!sg_isvalid()) return;
     for (auto handle : cubeViews) if (handle.id) sg_destroy_view(handle);
     for (auto handle : mipAttachments) if (handle.id) sg_destroy_view(handle);
@@ -2191,6 +2250,7 @@ TextureRetirement::~TextureRetirement() noexcept {
     if (sampler.id) sg_destroy_sampler(sampler);
 }
 void retireTexture(TextureRetirement* storage) noexcept {
+    if (frameworkShutdown()) { delete storage; return; }
     if (!sg_isvalid()) { delete storage; return; }
     storage->next = retiredTextures;
     retiredTextures = storage;
@@ -2199,6 +2259,7 @@ void retireTexture(TextureRetirement* storage) noexcept {
 namespace {
 template<class Handle, class Queue>
 void enqueueGpuRetirement(Handle handle, Queue&& queue) noexcept {
+    if (frameworkShutdown()) return;
     if (!handle.id) return;
     try { queue(pendingGpuDestroys()).push_back(handle); }
     catch (...) {
@@ -2347,6 +2408,7 @@ ScreenRecorder& globalScreenRecorder() {
 }
 
 ShadowStorage::~ShadowStorage() noexcept {
+    if (frameworkShutdown()) return;
     if (!sg_isvalid()) return;
     for (auto view : colorAttachments) if (view.id) sg_destroy_view(view);
     if (colorTexture.id) sg_destroy_view(colorTexture);
@@ -2637,6 +2699,7 @@ PipelineKey PipelineKey::immediate(ImmediateSelection selection) {
     return key;
 }
 PipelineGeneration::~PipelineGeneration() {
+    if (frameworkShutdown()) return;
     for (const auto& entry : cache) deferGpuDestroy(entry.second);
 }
 bool RenderTargetResources::makeContext(const sgl_context_desc_t& desc, const char* what) {
@@ -2650,6 +2713,7 @@ bool RenderTargetResources::makeContext(const sgl_context_desc_t& desc, const ch
     return !contextFailed;
 }
 void RenderTargetResources::release() {
+    if (frameworkShutdown()) return;
     for (const auto& entry : cache) {
         if (entry.second.id) sgl_destroy_pipeline(entry.second);
 #ifndef NDEBUG
@@ -2724,6 +2788,7 @@ PipelineSelection RenderTarget::pipeline(const PipelineKey& request) {
     return result;
 }
 void retirePipelineProgram(sg_shader shader) {
+    if (frameworkShutdown()) return;
     auto erase = [&](RenderTargetResources& bundle) {
         if (!bundle.rawCache) return;
         auto& cache = bundle.rawCache->cache;
@@ -2747,6 +2812,7 @@ void invalidateTargetBucket(sg_pixel_format format, int samples, sg_pixel_format
     for (auto& lease : bucket.leases) if (!lease->leased) lease->release();
 }
 void returnTargetResources(RenderTargetResources& lease) {
+    if (frameworkShutdown()) return;
     lease.leased = false;
     // An invalidated parked generation lives through its activation, then
     // retires immediately. Idle leases never pin obsolete raw caches.
@@ -3305,6 +3371,7 @@ CapturePrefixScope::CapturePrefixScope(CaptureSource source)
     submitCapturePrefix();
 }
 CapturePrefixScope::~CapturePrefixScope() noexcept {
+    if (frameworkShutdown()) return;
     if (!resume_ || &currentWindowContext() != window_ || window_->currentTarget != target_ || target_->activation != token_) return;
     try { ensureCurrentPass(); }
     catch (...) { reportTeardownFailure("capture target resumption"); }

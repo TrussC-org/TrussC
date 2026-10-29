@@ -15,6 +15,12 @@
 
 namespace trussc { namespace internal {
 
+// Host-owned, atomic and readable through static destruction. Late Window
+// destruction stops before context, registry, logger or GPU access.
+bool frameworkShutdown() noexcept;
+void beginFrameworkLifetime() noexcept;
+void endFrameworkLifetime() noexcept;
+
 // Always exported: Debug consumers can link against a Release core.
 std::unordered_map<uint32_t, uint32_t>& pipelineOwnerCtx();
 

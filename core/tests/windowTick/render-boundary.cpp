@@ -2,7 +2,11 @@
 #include <TrussC.h>
 #include "../common/tcCoreTest.h"
 #include <EGL/egl.h>
+#if defined(SOKOL_GLES3)
+#include <GLES3/gl3.h>
+#else
 #include <GL/gl.h>
+#endif
 #include <cstdio>
 #include <array>
 using namespace tc;
@@ -109,8 +113,32 @@ struct ShadowReplayProbe {
     bool acquired = false;
     static void read(sg_image image, float* pixels) {
         const auto native = sg_gl_query_image_info(image);
+#if defined(SOKOL_GLES3)
+        // GLES has no glGetTexImage. Read every array layer through an FBO;
+        // RGBA float readback also works for the single-channel shadow target.
+        GLint previous = 0;
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previous);
+        GLuint fbo = 0;
+        glGenFramebuffers(1, &fbo);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+        std::array<float, 32*32*4> rgba{};
+        for (int layer = 0; layer < internal::maxShadowLights; ++layer) {
+            glFramebufferTextureLayer(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                native.tex[native.active_slot], 0, layer);
+            check("GLES shadow readback FBO complete",
+                glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+            glReadBuffer(GL_COLOR_ATTACHMENT0);
+            glReadPixels(0, 0, 32, 32, GL_RGBA, GL_FLOAT, rgba.data());
+            for (int pixel = 0; pixel < 32*32; ++pixel)
+                pixels[layer*32*32+pixel] = rgba[pixel*4];
+        }
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, previous);
+        glDeleteFramebuffers(1, &fbo);
+        check("GLES shadow readback succeeds", glGetError() == GL_NO_ERROR);
+#else
         glBindTexture(GL_TEXTURE_2D_ARRAY, native.tex[native.active_slot]);
         glGetTexImage(GL_TEXTURE_2D_ARRAY, 0, GL_RED, GL_FLOAT, pixels);
+#endif
         sg_reset_state_cache();
     }
     static sg_swapchain acquire(void* user) {
@@ -165,14 +193,21 @@ TC_CORE_TEST_MAIN() {
     EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     EGLint major, minor;
     if (!eglInitialize(display, &major, &minor)) return 2;
+#if defined(SOKOL_GLES3)
+    eglBindAPI(EGL_OPENGL_ES_API);
+    const EGLint renderable = EGL_OPENGL_ES3_BIT;
+    const EGLint version[] = {EGL_CONTEXT_CLIENT_VERSION,3,EGL_NONE};
+#else
     eglBindAPI(EGL_OPENGL_API);
-    const EGLint attrs[] = {EGL_SURFACE_TYPE,EGL_PBUFFER_BIT,EGL_RENDERABLE_TYPE,EGL_OPENGL_BIT,
+    const EGLint renderable = EGL_OPENGL_BIT;
+    const EGLint version[] = {EGL_CONTEXT_MAJOR_VERSION,3,EGL_CONTEXT_MINOR_VERSION,3,EGL_NONE};
+#endif
+    const EGLint attrs[] = {EGL_SURFACE_TYPE,EGL_PBUFFER_BIT,EGL_RENDERABLE_TYPE,renderable,
         EGL_RED_SIZE,8,EGL_GREEN_SIZE,8,EGL_BLUE_SIZE,8,EGL_ALPHA_SIZE,8,EGL_DEPTH_SIZE,24,EGL_STENCIL_SIZE,8,EGL_NONE};
     EGLConfig config; EGLint count;
     if (!eglChooseConfig(display, attrs, &config, 1, &count) || count != 1) return 2;
     const EGLint size[] = {EGL_WIDTH,64,EGL_HEIGHT,64,EGL_NONE};
     auto surface = eglCreatePbufferSurface(display, config, size);
-    const EGLint version[] = {EGL_CONTEXT_MAJOR_VERSION,3,EGL_CONTEXT_MINOR_VERSION,3,EGL_NONE};
     auto context = eglCreateContext(display, config, EGL_NO_CONTEXT, version);
     if (!eglMakeCurrent(display, surface, surface, context)) return 2;
     getMainThreadId();

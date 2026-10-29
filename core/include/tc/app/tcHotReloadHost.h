@@ -654,6 +654,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     appExitCode() = 0;
     appSetupCalled() = false;
     sapp_run(&desc);
+    endFrameworkLifetime();
     setHostReloadPoll(nullptr);
     return appSetupCalled() ? appExitCode() : 1;
 }

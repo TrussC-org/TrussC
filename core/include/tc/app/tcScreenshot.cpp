@@ -95,6 +95,7 @@ void write(const std::shared_ptr<ScreenshotState>& state) {
 ScreenshotQueue::ScreenshotQueue() = default;
 ScreenshotQueue::~ScreenshotQueue() { registration.reset(); closeScreenshots(*this); }
 void closeScreenshots(ScreenshotQueue& window) noexcept {
+    if (frameworkShutdown()) return;
     TeardownSteps steps;
     // Pop before attempting completion. Moving a deque can allocate (including
     // MSVC Debug proxies); moving a shared_ptr and popping cannot. If result

@@ -44,6 +44,7 @@ namespace trussc {
 // A request (see tcWindow.h): the backend calls close_cb -> teardown() at its
 // next safe point, outside this window's tick and events.
 void Window::closeSecondary() {
+    if (internal::frameworkShutdown()) return;
     auto* st = static_cast<AdapterState*>(native_);
     if (!st || closeRequested_) return;
     closeRequested_ = true;
@@ -51,6 +52,7 @@ void Window::closeSecondary() {
 }
 
 void Window::teardownSecondary() noexcept {
+    if (internal::frameworkShutdown()) return;
     auto* st = static_cast<AdapterState*>(native_);
     if (!st) return;
     internal::TeardownSteps steps;
@@ -131,6 +133,8 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     d.title = settings.title.c_str();
     d.borderless = !settings.decorated;
     d.no_high_dpi = !settings.highDpi;
+    d.fullscreen = settings.fullscreen;
+    d.swap_interval = settings.swapInterval;
     d.sample_count = settings.sampleCount;  // NOTE: forced to the shared configuration's count
     d.tick_cb = &internal::windowTick;
     d.event_cb = &internal::mainWindowEvent;

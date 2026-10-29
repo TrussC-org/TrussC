@@ -42,7 +42,7 @@ struct InjectedWindow {
         event.pointer_locked = event.pointer_locked || pointerLocked;
         event.reliable_button_bits = true;
         return _sapp_tc_deliver_event(this, &event, 123,
-            [&](sapp_window h) { return h.id == win_id ? this : nullptr; });
+            [&](sapp_window h) { return h.id == win_id ? this : nullptr; }).delivered;
     }
     ~InjectedWindow() { trussc::internal::WindowRequestAccess::unbind(window); }
 };

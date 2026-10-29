@@ -13,7 +13,7 @@ for adapter in ('linux/tcWindowLinux.cpp','win/tcWindowWin.cpp','mac/tcWindowMac
     assert 'd.tick_cb = &internal::windowTick;' in text, adapter
     assert 'runWindowTick(' not in text and 'windowTickImpl(' not in text, adapter
 parts=[]
-for index,match in enumerate(re.finditer(r'static void _sapp_tc_send\(_sapp_tc_window_t\* w, sapp_event\* ev\) \{',NATIVE)):
+for index,match in enumerate(re.finditer(r'static (?:void|_sapp_tc_event_result) _sapp_tc_send\(_sapp_tc_window_t\* w, sapp_event\* ev\) \{',NATIVE)):
     implementation=body(NATIVE[match.start():],match.group())
     parts.append(f'namespace event_{index} {{\n'+r'''
 struct _sapp_tc_window_t {

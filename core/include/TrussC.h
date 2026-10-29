@@ -2138,16 +2138,14 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline bool grabScreen(Pixels& o
 namespace internal {
     // Capture every path queued by saveScreenshot() on the CURRENT window's
     // queue (WindowContext::pendingScreenshotPaths). Requests appended during
-    // the drain remain queued for the next drain. Called right
-    // after present() while that window's context — and thus its
-    // lastSwapchainDrawable — is current: the main window from the afterFrame
-    // listener installed in _setup_cb, each secondary window from its own
-    // windowTick (platform/*/tcWindow*). Failures log via logError.
-    // A secondary window also answers the MCP requests aimed at it here
+    // the drain remain queued for the next drain. The common host tick calls
+    // this after the complete afterFrame notification, while that window's
+    // context and lastSwapchainDrawable are current, for main and secondaries
+    // on every rendering backend. Failures log via logError.
+    // Each window also answers the MCP requests aimed at it here
     // (tc_get_screenshot / tc_save_screenshot with a window index): only
     // inside its own tick is its drawable the one a readback sees (#243).
-    // The main window's are drained by the same afterFrame listener.
-    // The capture callback also permits headless drain regression tests.
+    // The capture callback also permits GPU-free drain regression tests.
     inline void drainPendingScreenshots(
         bool (*capture)(const std::filesystem::path&) = captureWindowToFile) {
         auto& ctx = currentWindowContext();
@@ -2168,8 +2166,6 @@ namespace internal {
         }
         queue.erase(queue.begin(), queue.begin() + std::min(count, queue.size()));
     }
-    // Keeps the afterFrame drain subscription alive for the app's lifetime.
-    // Host-only, so a per-module copy is fine: installed in _setup_cb.
 }
 
 namespace internal {
@@ -2203,7 +2199,9 @@ inline bool queueScreenshot(const std::filesystem::path& path) {
 
 // Save a screenshot of the current frame to a file. Safe to call from anywhere
 // (setup/update/draw/event handlers): the actual capture is deferred to just
-// after present(), so it always grabs the fully-rendered frame — no black
+// after present() and the complete events().afterFrame notification. A request
+// queued by an afterFrame listener captures that same finished frame. It always
+// grabs the fully-rendered frame — no black
 // captures on Linux when called inside draw().
 //
 // Returns true if the destination was prepared and the capture was queued;
@@ -2530,6 +2528,7 @@ namespace internal {
     inline void _cleanup_cb() noexcept {
         TeardownSteps steps;
         steps.run("main native callback", [&] { _cleanup_cb_impl(); });
+        endFrameworkLifetime();
     }
 
 
@@ -2738,6 +2737,7 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     // The browser owns the asynchronous loop; returning is not app shutdown.
     return 0;
 #else
+    internal::endFrameworkLifetime();
     return internal::appSetupCalled() ? internal::appExitCode() : 1;
 #endif
 }

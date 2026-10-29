@@ -17,8 +17,8 @@ parts = []
 for index, platform in enumerate(('mac', 'win32', 'x11')):
     start = NATIVE.index('static bool _sapp_tc_app_events_enabled(', 0 if index == 0 else start + 1)
     # Select this platform's send definition, before its readiness predicate.
-    send_start = NATIVE.rindex('static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {', 0, start)
-    send = body(NATIVE[send_start:start], 'static void _sapp_tc_send(')
+    send_start = NATIVE.rfind('\nstatic ', 0, NATIVE.rindex('_sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {', 0, start)) + 1
+    send = body(NATIVE[send_start:start], NATIVE[send_start:NATIVE.index('{', send_start)])
     # body() selects the last match, so bound it to this platform first.
     predicate = body(NATIVE[start:NATIVE.index('static void _sapp_tc_main_event_tramp', start)], 'static bool _sapp_tc_app_events_enabled(')
     main = body(NATIVE, f'static bool _sapp_tc_{platform}_create_main_window(')

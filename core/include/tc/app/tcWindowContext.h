@@ -277,11 +277,9 @@ struct WindowContext {
     // Bound (security): OS clipboard text needs finite storage in the window backend. Overflow truncates or rejects oversized text, depending on the backend.
     int clipboardSize = 65536;   // Clipboard buffer size (for overflow check)
     // Resolved absolute paths (download names on web) queued by saveScreenshot()
-    // on THIS window, drained
-    // right after present() while this context is current (so the capture reads
-    // back this window's lastSwapchainDrawable, not the main window's). The main
-    // window drains from the afterFrame listener in _setup_cb; each secondary
-    // window drains in its own windowTick. See TrussC.h drainPendingScreenshots().
+    // on THIS window. The common host tick drains after the complete afterFrame
+    // notification while this context and lastSwapchainDrawable are current,
+    // identically for main and secondaries. See TrussC.h drainPendingScreenshots().
     std::vector<std::filesystem::path> pendingScreenshotPaths;
     ScreenshotQueue asyncScreenshots;
 

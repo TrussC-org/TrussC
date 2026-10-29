@@ -642,6 +642,7 @@ void Texture::createResources(const void* initialData, const sg_image_data* imag
 #ifdef __EMSCRIPTEN__
 
 void Font::finishUrlAsync(internal::BoundedFontFetch* fetch, bool success) {
+    if (internal::frameworkShutdown()) return;
     auto* holder = static_cast<std::shared_ptr<AsyncState>*>(fetch->userData);
     auto state = *holder;
     if (state->fetchComplete) return;

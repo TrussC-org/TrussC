@@ -363,6 +363,7 @@ private:
 public:
 
     void cleanup() {
+        if (internal::frameworkShutdown()) return;
         // Only release GPU resources if sokol is still valid
         // (may have already shut down at program exit). Destruction is
         // deferred: cleanup() also runs mid-frame when a font is re-loaded

@@ -60,7 +60,7 @@ public:
         internal::fboCount()++;
     }
     ~Fbo() {
-        if (target_.activation) {
+        if (!internal::frameworkShutdown() && target_.activation) {
             logError("Fbo") << "destroying an active Fbo is invalid; end() it first";
             std::terminate(); // rejecting destruction avoids dangling borrowed stack entries
         }
@@ -254,6 +254,7 @@ public:
 
     // Release resources
     void clear() {
+        if (internal::frameworkShutdown()) return;
         if (target_.activation) {
             logWarning("Fbo") << "clear rejected while active";
             return;

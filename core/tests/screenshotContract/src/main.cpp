@@ -52,7 +52,20 @@ void drainWithoutEscape() {
 
 } // namespace
 
-TC_CORE_TEST_MAIN() {
+#ifndef __EMSCRIPTEN__
+#include "afterFrame.h"
+#endif
+
+TC_CORE_TEST_MAIN(int argc, char** argv) {
+#ifndef __EMSCRIPTEN__
+    if (argc == 2 && std::string(argv[1]) == "--after-frame") {
+        WindowSettings settings;
+        settings.setSize(40, 30).setHighDpi(false).setTitle("afterFrame screenshot main");
+        return tcCoreTest::runDisplayTest<AfterFrameScreenshotApp>(settings, g_fail);
+    }
+#else
+    (void)argc; (void)argv;
+#endif
     // Count the "[Screenshot]" warnings/errors the calls below log.
     int screenshotWarnings = 0;
     int screenshotErrors = 0;

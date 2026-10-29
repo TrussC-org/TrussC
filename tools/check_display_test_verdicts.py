@@ -4,8 +4,9 @@
 This is deliberately a source check, including inactive preprocessor branches.
 Every launcher call must be the entire returned expression. Tests using
 runDisplayTest put their final checks in its callback, before exitApp(code).
-The few tests of returning startup failure, fatal abort or atexit verdicts
-must annotate the individual call and explain why it is safe.
+The few tests of returning startup failure, fatal abort, atexit verdicts or
+Linux-only post-run lifetime must annotate the individual call and explain why
+it is safe.
 """
 
 from pathlib import Path
@@ -21,6 +22,7 @@ EXCEPTIONS = {
     ("core/tests/startupExit/src/main.cpp", "returning-startup-failure"),
     ("core/tests/loggerThreadSafety/src/main.cpp", "expected-abort"),
     ("core/tests/hotReloadLifecycle/src/main.cpp", "atexit-verdict"),
+    ("core/tests/windowTick/late-window.cpp", "linux-returning-lifetime"),
 }
 NON_CODE = re.compile(
     r'//[^\n]*|/\*.*?\*/|(?:u8|u|U|L)?R"([^ ()\\\t\r\n]{0,16})\(.*?\)\1"'

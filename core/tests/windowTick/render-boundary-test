@@ -9,11 +9,16 @@ from pathlib import Path
 import shlex, subprocess, sys, os, re
 root, scratch = map(Path, sys.argv[1:])
 flags = []
-for line in (root/'core/build-linux/CMakeFiles/TrussC.dir/flags.make').read_text().splitlines():
+build = Path(os.environ.get('TC_RENDER_TEST_BUILD', root/'core/build-linux'))
+for line in (build/'CMakeFiles/TrussC.dir/flags.make').read_text(encoding='utf-8').splitlines():
     if line.startswith(('CXX_DEFINES =','CXX_INCLUDES =')): flags += shlex.split(line.split('=',1)[1])
 link = shlex.split((root/'core/tests/allCoreTests/build-linux/CMakeFiles/allCoreTests.dir/link.txt').read_text())
 libs = link[link.index('-o')+2:]
 libs = [x for x in libs if not x.endswith('.o') and x != '-Wl,--wrap=malloc']
+if os.environ.get('TC_RENDER_TEST_ARCHIVE'):
+    libs = [os.environ['TC_RENDER_TEST_ARCHIVE'] if x.endswith('libTrussC.a') else x for x in libs]
+if '-DSOKOL_GLES3' in flags:
+    libs = [x for x in libs if x != '-lGL'] + ['-lGLESv2']
 # An optional include root makes copied-source mutations reproducible.
 inc = os.environ.get('TC_RENDER_TEST_INCLUDE', str(root/'core/include'))
 pool_settings = re.findall(r'sgdesc\.(\w+_pool_size) = (\d+);', (root/'core/include/tc/app/tcGlobal.cpp').read_text())
