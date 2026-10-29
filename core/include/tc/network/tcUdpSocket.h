@@ -184,9 +184,10 @@ public:
     void setBindAddress(const std::string& address);
     // Bind port for receiving
     // startReceiving=true automatically starts receive thread
-    // Without setReuseAddress(true) / setReusePort(true) the port is exclusive
-    // on every platform: on Windows bind() sets SO_EXCLUSIVEADDRUSE, so a later
-    // socket using SO_REUSEADDR cannot bind over it either.
+    // Without setReuseAddress(true) / setReusePort(true), binding is exclusive
+    // against binds to the same address (SO_EXCLUSIVEADDRUSE on Windows).
+    // With a specific setBindAddress(), macOS and Windows still allow a socket
+    // binding all addresses with reuse enabled to share the port; Linux refuses.
     bool bind(int port, bool startReceiving = true);
     // Set destination (after setting, can send via send(data, size))
     bool connect(const std::string& host, int port);
