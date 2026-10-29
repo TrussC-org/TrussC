@@ -57451,27 +57451,30 @@ description.ja = "シェーダー描画用の頂点バッファとインデッ�
 description.ko = "셰이더 그리기용 정점 및 인덱스 버퍼를 생성한다."
 details.en = '''
 - Protected virtual `void createVertexBuffer()` called by `load()`; subclasses can override it to populate `vertexBuffer` and `indexBuffer` for their pipeline.
-- The default creates stream-updated buffers with room for 65,536 `ShaderVertex` values and 65,536 `uint32_t` indices, plus shared stream usage tracking.
-- Deferred draws that exceed the remaining capacity of either buffer are skipped and counted toward demand. At the first submission of a later sokol frame, both buffers are doubled repeatedly until that demand fits; buffers are not replaced partway through a frame.
-- Growth failure is logged and retains the existing buffers; resource retirement follows `Shader::clear`.
+- The default creates stream-updated buffers with room for 65,536 `ShaderVertex` values and 65,536 `uint32_t` indices, plus shared ownership for replay-time stream growth.
+- When a deferred draw exceeds either buffer's remaining capacity, replay grows that buffer by repeated doubling and draws in the same frame, including the first frame and separate FBO/window passes. Already issued draws retain their old buffers until submission; no re-upload is needed.
+- Allocation failure skips the affected draw and retains the existing buffers. One Error per run reports the requested vertex count and suggests reducing geometry submitted with `Shader::submitVertices()` to lower storage demand. Sizes must fit sokol's signed buffer sizes and draw counts; no additional geometry cap is imposed. Resource retirement follows `Shader::clear`.
+- On OpenGL/GLES/WebGL, GPU out-of-memory while growing may go undetected (sokol reports the buffer as created), so that draw may be lost without the Error; Metal/D3D11 report the failure.
 '''
 details.ja = '''
 - `load()` が呼ぶ protected の仮想関数 `void createVertexBuffer()` です。サブクラスでオーバーライドし、パイプラインに合う `vertexBuffer` と `indexBuffer` を設定できます。
-- デフォルトでは、65,536 個の `ShaderVertex` と 65,536 個の `uint32_t` インデックスを格納できるストリーム更新用バッファ、および共有のストリーム使用量記録を生成します。
-- どちらかのバッファの残り容量を超える遅延描画は省略し、必要量には加算します。後の sokol フレームで最初に送信するときに、その必要量を満たすまで両方のバッファを繰り返し倍増します。フレームの途中ではバッファを置き換えません。
-- 拡張に失敗するとログに出し、既存のバッファを保持します。リソースの解放時期は `Shader::clear` に従います。
+- デフォルトでは、65,536 個の `ShaderVertex` と 65,536 個の `uint32_t` インデックスを格納できるストリーム更新用バッファ、および実行時の拡張に使う共有のストリーム所有オブジェクトを生成します。
+- 遅延描画がどちらかのバッファの残り容量を超えると、実行時にそのバッファを必要なだけ倍増し、同じフレームで描画します。最初のフレームや別々の FBO・ウィンドウのパスにも適用されます。実行済みの描画は送信まで旧バッファを保持するため、再アップロードは不要です。
+- メモリ確保に失敗した描画は省略し、既存のバッファを保持します。実行中に一度だけ Error で要求された頂点数を知らせ、必要な記憶領域を減らすために `Shader::submitVertices()` で送信する描画形状を減らす方法を案内します。サイズは sokol の符号付きバッファサイズと描画数で表現できる必要がありますが、追加の頂点数上限は設けません。リソースの解放時期は `Shader::clear` に従います。
+- OpenGL/GLES/WebGL では、拡張時の GPU メモリ不足を検出できない場合があり（sokol がバッファを作成済みと報告するため）、Error なしでその描画が失われることがあります。Metal/D3D11 は失敗を報告します。
 '''
 details.ko = '''
 - `load()`가 호출하는 protected 가상 함수 `void createVertexBuffer()`입니다. 서브클래스에서 재정의하여 파이프라인에 맞는 `vertexBuffer`와 `indexBuffer`를 설정할 수 있습니다.
-- 기본 구현은 `ShaderVertex` 65,536개와 `uint32_t` 인덱스 65,536개를 담는 스트림 갱신용 버퍼 및 공유 스트림 사용량 기록을 생성합니다.
-- 어느 버퍼든 남은 용량을 초과하는 지연된 그리기는 생략하고 필요한 용량에는 합산합니다. 이후 sokol 프레임의 첫 제출 시 해당 수요를 충족할 때까지 두 버퍼의 크기를 반복해서 두 배로 늘립니다. 프레임 도중에는 버퍼를 교체하지 않습니다.
-- 확장에 실패하면 로그를 남기고 기존 버퍼를 유지합니다. 리소스 해제 시점은 `Shader::clear`를 따릅니다.
+- 기본 구현은 `ShaderVertex` 65,536개와 `uint32_t` 인덱스 65,536개를 담는 스트림 갱신용 버퍼 및 실행 시 확장을 위한 공유 스트림 소유 객체를 생성합니다.
+- 지연된 그리기가 어느 버퍼든 남은 용량을 초과하면 실행 시 해당 버퍼를 필요한 만큼 두 배로 늘리고 같은 프레임에 그립니다. 첫 프레임과 별도의 FBO/창 패스에도 적용됩니다. 실행한 그리기는 제출까지 이전 버퍼를 유지하므로 다시 업로드할 필요가 없습니다.
+- 메모리 할당 실패 시 해당 그리기를 생략하고 기존 버퍼를 유지합니다. 실행 중 한 번만 Error로 요청한 정점 수를 알리고, 필요한 저장 공간을 줄이도록 `Shader::submitVertices()`로 제출하는 형상을 줄이는 방법을 안내합니다. 크기는 sokol의 부호 있는 버퍼 크기와 그리기 수로 표현할 수 있어야 하며 추가 정점 수 제한은 없습니다. 리소스 해제 시점은 `Shader::clear`를 따릅니다.
+- OpenGL/GLES/WebGL에서는 확장 중 GPU 메모리 부족을 감지하지 못할 수 있어(sokol이 버퍼가 생성되었다고 보고함) Error 없이 해당 그리기가 사라질 수 있습니다. Metal/D3D11은 실패를 보고합니다.
 '''
 snippet = '''
 class StreamShader : public Shader {
 protected:
     void createVertexBuffer() override {
-        // Initialize the standard buffers and stream usage tracking.
+        // Initialize the standard buffers and shared stream owner.
         Shader::createVertexBuffer();
     }
 };

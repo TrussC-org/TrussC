@@ -54,6 +54,29 @@
 namespace trussc {
 
 namespace internal {
+namespace {
+thread_local bool shaderStreamBufferAllocation = false;
+}
+
+sg_buffer growShaderStreamBuffer(size_t bytes, bool index) {
+    struct AllocationScope {
+        bool previous = std::exchange(shaderStreamBufferAllocation, true);
+        ~AllocationScope() { shaderStreamBufferAllocation = previous; }
+    } scope;
+    return makeShaderStreamBuffer(bytes, index);
+}
+
+void reportShaderStreamFailure(size_t vertices) noexcept {
+    static OnceGate reported;
+    if (!reported.isFirstTime()) return;
+    // Logging allocates too. Never let allocation failure escape a draw callback.
+    try {
+        logError("Shader") << "Shader stream could not allocate vertex/index storage for " << vertices
+            << " vertices; this draw was skipped. Reduce geometry submitted with "
+               "Shader::submitVertices() to lower stream storage demand";
+    } catch (...) {}
+}
+
 BuildOutputLoss& buildOutputLoss() { static BuildOutputLoss loss; return loss; }
 void BuildOutputLoss::record(uint64_t omitted) {
     if (!omitted) return;
@@ -1504,6 +1527,10 @@ std::string sokolLogMessage(const char* tag, uint32_t logItem,
 void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
               const char* message, uint32_t lineNr, const char* filename,
               void* userData) {
+    // A failed stream replacement gets one actionable Shader Error after the
+    // allocation returns. Avoid duplicating its immediate backend errors. Fatal
+    // errors, warnings and asynchronous errors on other threads keep their path.
+    if (shaderStreamBufferAllocation && logLevel == 1 && tag && std::strcmp(tag, "sg") == 0) return;
     // Called from sokol's C code: nothing may throw out of here, and a panic
     // must reach slog_func (the abort) whatever happens before it.
     const bool noLogger = loggerDestroyed.load();

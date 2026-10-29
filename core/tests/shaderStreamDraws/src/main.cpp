@@ -17,8 +17,6 @@ void check(const char* name, bool ok) {
 
 struct InspectShader : Shader {
     sg_pipeline_desc description() { return createPipelineDesc(); }
-    size_t vertexCapacity() const { return sg_query_buffer_size(vertexBuffer) / sizeof(ShaderVertex); }
-    size_t indexCapacity() const { return sg_query_buffer_size(indexBuffer) / sizeof(uint32_t); }
 };
 
 struct InspectFullscreen : FullscreenShader {
@@ -52,13 +50,12 @@ public:
         fbo_.allocate(32, 32);
         // The final triangle is the visible one and uses indices above 65536.
         large_.resize(70002, vertex(-2, -2, 1, 0));
-        large_[69999] = vertex(-1, -1, 1, 0);
-        large_[70000] = vertex(1, -1, 1, 0);
-        large_[70001] = vertex(0, 1, 1, 0);
         listener_ = getLogger().onLog.listen([this](LogEventArgs& e) {
-            if (e.level == LogLevel::Warning && e.message.find("Stream buffers grew to") != std::string::npos) {
-                ++warnings_;
-                sizeReported_ = e.message.find("262144 vertices and 262144 indices") != std::string::npos;
+            if (e.level == LogLevel::Error) ++allErrors_;
+            if (e.level == LogLevel::Error && e.message.find("Shader stream could not allocate vertex/index storage for") != std::string::npos) {
+                ++errors_;
+                sizeReported_ = e.message.find("70002 vertices; this draw was skipped") != std::string::npos
+                    && e.message.find("Shader::submitVertices()") != std::string::npos;
             }
         });
     }
@@ -66,18 +63,27 @@ public:
     void draw() override {
         if (!shader_.isLoaded()) { exitApp(); return; }
         clear(0.0f);
-        // Capture a swapchain draw before the FBO flush requests growth. Its
-        // captured handles must stay the same throughout this sokol frame.
+        // Park a swapchain recording while separate FBO passes grow its stream.
         ShaderVertex triangle[] = {vertex(-1, -1, 1, 0), vertex(1, -1, 1, 0), vertex(0, 1, 1, 0)};
         shader_.begin();
         shader_.submitVertices(triangle, 3, PrimitiveType::Triangles);
         shader_.end();
         const auto captured = internal::currentWindowContext().currentTarget->deferredShaderDraws.back().bindings;
 
+        if (frame_ == 1) large_.assign(300003, vertex(-2, -2, 0, 1));
+        // Both the original buffer's left triangle and the replacement's tail
+        // triangle must survive within one pass on the first and later frame.
+        const size_t tail = large_.size() - 3;
+        large_[tail] = vertex(0, -1, 0, 1);
+        large_[tail + 1] = vertex(1, -1, 0, 1);
+        large_[tail + 2] = vertex(0.5f, 1, 0, 1);
+        ShaderVertex left[] = {vertex(-1, -1, 1, 0), vertex(0, -1, 1, 0), vertex(-0.5f, 1, 1, 0)};
         fbo_.begin(0, 0, 0, 1);
+        shader_.submitVertices(left, 3, PrimitiveType::Triangles);
         shader_.submitVertices(large_.data(), static_cast<int>(large_.size()), PrimitiveType::Triangles);
         fbo_.end();
-        checkPixel("large FBO draw", frame_ == 0 ? 0 : 255, 0);
+        checkPixel("pre-growth draw survives", 255, 0, 8);
+        checkPixel(frame_ == 0 ? "first-frame large draw tail" : "later sudden growth tail", 0, 255, 24);
 
         // A separate pass consumes the same Shader's index stream. Only its
         // last rectangle is visible, so readback proves the tail was rendered.
@@ -89,7 +95,7 @@ public:
             vertex(1, 1, 0, 1), vertex(-1, 1, 0, 1)};
         shader_.submitVertices(visible, 4, PrimitiveType::Quads);
         fbo_.end();
-        checkPixel("rectangle tail in second FBO pass", 0, frame_ == 0 ? 0 : 255);
+        checkPixel("rectangle tail in second FBO pass", 0, 255);
         check("FBO flush preserves captured swapchain buffer handles",
             internal::currentWindowContext().currentTarget->deferredShaderDraws.back().bindings.vertex_buffers[0].id
                 == captured.vertex_buffers[0].id);
@@ -97,9 +103,8 @@ public:
             InspectShader moved(std::move(shader_));
             shader_ = std::move(moved);
         } else {
-            check("growth warning reports new capacities once", warnings_ == 1 && sizeReported_);
-            check("buffers cover all passes next frame",
-                shader_.vertexCapacity() == 262144 && shader_.indexCapacity() == 262144);
+            check("successful growth emits no errors", errors_ == 0);
+            checkAllocationFailure();
             // The queued swapchain draw still has to replay after clear().
             shader_.clear();
             completed = true;
@@ -108,10 +113,35 @@ public:
     }
 
 private:
-    void checkPixel(const char* name, int red, int green) {
+    void checkAllocationFailure() {
+        InspectShader failing, another;
+        check("failure-test shaders load", failing.load(testShader) && another.load(testShader));
+        std::vector<sg_buffer> held;
+        // query_stats publishes actual pool occupancy even with stats disabled.
+        while (sg_query_stats().total.buffers.free) held.push_back(sg_alloc_buffer());
+        // No slots remain for replacement buffers. Repeat the failing draw to
+        // verify the core's process-wide Error gate rather than a test mock.
+        std::vector<ShaderVertex> geometry(70002, vertex(-2, -2, 1, 0));
+        geometry[69999] = vertex(-1, -1, 1, 0);
+        geometry[70000] = vertex(1, -1, 1, 0);
+        geometry[70001] = vertex(0, 1, 1, 0);
+        fbo_.begin(0, 0, 0, 1);
+        failing.submitVertices(geometry.data(), static_cast<int>(geometry.size()), PrimitiveType::Triangles);
+        another.submitVertices(geometry.data(), static_cast<int>(geometry.size()), PrimitiveType::Triangles);
+        fbo_.end();
+        checkPixel("allocation failure skips draw", 0, 0);
+        check("allocation failure emits one actionable Error", errors_ == 1 && allErrors_ == 1 && sizeReported_);
+        for (auto buffer : held) sg_dealloc_buffer(buffer);
+        fbo_.begin(0, 0, 0, 1);
+        failing.submitVertices(geometry.data(), static_cast<int>(geometry.size()), PrimitiveType::Triangles);
+        fbo_.end();
+        checkPixel("allocation failure can recover in-frame", 255, 0);
+    }
+
+    void checkPixel(const char* name, int red, int green, int x = 16) {
         std::vector<unsigned char> pixels(32 * 32 * 4);
         check("FBO readback succeeds", fbo_.readPixels(pixels.data()));
-        const size_t center = (16 * 32 + 16) * 4;
+        const size_t center = (16 * 32 + x) * 4;
         check(name, pixels[center] == red && pixels[center + 1] == green);
     }
 
@@ -120,7 +150,8 @@ private:
     std::vector<ShaderVertex> large_;
     EventListener listener_;
     int frame_ = 0;
-    int warnings_ = 0;
+    int errors_ = 0;
+    int allErrors_ = 0;
     bool sizeReported_ = false;
 };
 #endif
