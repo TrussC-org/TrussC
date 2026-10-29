@@ -63,9 +63,9 @@ int main() {
         stbtt_vertex* vertices = nullptr;
         const int count = stbtt_GetGlyphShape(&malformedInfo, 1, &vertices);
         if (vertices) stbtt_FreeShape(&malformedInfo, vertices);
-        if (count || !scratch.failed()) return 1;
+        if (count || vertices) return 1;
     }
-    // Reuse the round-1 generated compound fixture, with an empty leaf.
+    // Finite empty composition beyond the former visit allowance is accepted.
     vector<Bytes> doubled(21);
     for (size_t i = 0; i + 1 < doubled.size(); ++i) {
         auto& bytes = doubled[i];
@@ -77,16 +77,16 @@ int main() {
     doubled.back().resize(10);
     const auto repeated = makeFont(doubled);
     if (!stbtt_InitFont(&malformedInfo, repeated.data(), 0)) return 1;
-    bool bounded = false;
+    bool expandedAccepted = false;
     {
         trussc::internal::FontScratchScope scratch(repeated.size());
         stbtt_vertex* vertices = nullptr;
         const int count = stbtt_GetGlyphShape(&malformedInfo, 0, &vertices);
         if (vertices) stbtt_FreeShape(&malformedInfo, vertices);
-        bounded = !count && scratch.failed();
+        expandedAccepted = !count && !scratch.failed();
     }
-    std::printf("fontScratch: total compound work rejected: %s\n", bounded ? "PASS" : "FAIL");
-    // Flat nonempty components exercise accumulated append copies, not visits.
+    std::printf("fontScratch: expanded empty compound accepted: %s\n", expandedAccepted ? "PASS" : "FAIL");
+    // Finite outlines beyond the former append-copy allowance still render.
     Bytes flat;
     put16(flat, 0xffff);
     for (int i = 0; i < 4; ++i) put16(flat, 0);
@@ -96,17 +96,53 @@ int main() {
     }
     const auto flatFont = makeFont({Bytes{}, boxGlyph(0, 0, 100, 100), flat, Bytes{}});
     if (!stbtt_InitFont(&malformedInfo, flatFont.data(), 0)) return 1;
-    bool copiesBounded = false;
+    bool expandedRendered = false;
     {
         trussc::internal::FontScratchScope scratch(flatFont.size());
         const auto remaining = trussc::internal::fontScratchRemaining();
         stbtt_vertex* vertices = nullptr;
         const int count = stbtt_GetGlyphShape(&malformedInfo, 2, &vertices);
-        copiesBounded = !count && !vertices && scratch.failed() &&
-            trussc::internal::fontScratchRemaining() == remaining;
+        expandedRendered = count == 2048 * 5 && vertices && !scratch.failed();
         if (vertices) stbtt_FreeShape(&malformedInfo, vertices);
+        expandedRendered &= trussc::internal::fontScratchRemaining() == remaining;
     }
-    std::printf("fontScratch: accumulated compound copies rejected and released: %s\n", copiesBounded ? "PASS" : "FAIL");
+    std::printf("fontScratch: expanded compound renders and releases allocations: %s\n", expandedRendered ? "PASS" : "FAIL");
+    // A rejected nested component must discard its drawable sibling too.
+    auto compose = [](initializer_list<int> children) {
+        Bytes bytes;
+        put16(bytes, 0xffff);
+        for (int i = 0; i < 4; ++i) put16(bytes, 0);
+        size_t index = 0;
+        for (int child : children) {
+            put16(bytes, ++index < children.size() ? 0x22 : 0x02);
+            put16(bytes, child); put16(bytes, 0);
+        }
+        return bytes;
+    };
+    const auto nested = makeFont({boxGlyph(0, 0, 100, 100), compose({0, 0}),
+                                  compose({1, 0}), Bytes{}});
+    if (!stbtt_InitFont(&malformedInfo, nested.data(), 0)) return 1;
+    auto checkWorkspace = [&](int glyph, size_t available, int expectedCount, bool expectedFailure) {
+        constexpr size_t workspace = 256u * 1024u * 1024u;
+        trussc::internal::FontScratchScope scratch(nested.size(), workspace - available);
+        trussc::internal::failFontScratchAllocationAfterForTests(-1);
+        stbtt_vertex* vertices = nullptr;
+        const int count = stbtt_GetGlyphShape(&malformedInfo, glyph, &vertices);
+        const bool hasOutline = vertices != nullptr;
+        if (vertices) stbtt_FreeShape(&malformedInfo, vertices);
+        const bool ok = count == expectedCount && hasOutline == (expectedCount != 0) &&
+                        scratch.failed() == expectedFailure &&
+                        trussc::internal::fontScratchRemaining() == available;
+        std::printf("fontScratch: glyph %d, workspace %zu: vertices=%d, failed=%d: %s\n",
+                    glyph, available, count, scratch.failed(), ok ? "PASS" : "FAIL");
+        return ok;
+    };
+    // 350 bytes reaches the nested compound's append check, without a failed malloc.
+    const bool nestedRejected = checkWorkspace(2, 350, 0, true);
+    const bool nestedComplete = checkWorkspace(2, 4096, 15, false);
+    // The simple-glyph vertex bound must propagate through the same parent chain.
+    const bool simpleRejected = checkWorkspace(2, 80, 0, true);
+    const bool simpleComplete = checkWorkspace(0, 4096, 5, false);
     // A normal compound with two distinct simple glyphs still rasterizes.
     Bytes pair;
     put16(pair, 0xffff);
@@ -125,5 +161,6 @@ int main() {
     std::printf("fontScratch: normal compound renders: %s\n", compoundRendered ? "PASS" : "FAIL");
     std::printf("fontScratch: malformed records and compound depth reject before allocation\n");
     std::printf("fontScratch: clean failures=%d, complete render=%d, no retained workspace\n", sawFailure, sawSuccess);
-    return sawFailure && sawSuccess && bounded && copiesBounded && compoundRendered ? 0 : 1;
+    return sawFailure && sawSuccess && expandedAccepted && expandedRendered && compoundRendered &&
+           nestedRejected && nestedComplete && simpleRejected && simpleComplete ? 0 : 1;
 }

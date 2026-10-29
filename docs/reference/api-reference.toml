@@ -41356,18 +41356,24 @@ description.en = "Wraps a pugixml document for loading, saving, and querying XML
 description.ja = "XML の読み込み・保存・検索を行う pugixml ドキュメントのラッパー。"
 description.ko = "XML을 읽고 저장하고 검색하는 pugixml 문서 래퍼이다."
 details.en = '''
+- The wrapper rejects embedded NUL input and follows upstream pugixml behavior for element depth.
+- If you recursively walk untrusted XML yourself, mind the depth.
 - Owns the XML document, which initially has no root element; use `root()`, `child()`, and `addRoot()` to access nodes as `XmlNode` handles.
 - Node and attribute handles refer to document-owned data; destroying or resetting the document, replacing its contents during loading or parsing, or removing the corresponding nodes invalidates those handles.
 - `load()` and `parse()` use the default pugixml options, which do not retain comments, processing instructions, XML declarations, document type declarations, or ordinary text nodes consisting only of literal XML whitespace. Whitespace from character references and whitespace inside CDATA are retained.
 - `save()` and `toString()` output UTF-8 with two spaces per indentation level by default, and automatically include an XML declaration if the document has none.
 '''
 details.ja = '''
+- ラッパーは入力中の NUL を拒否し、要素の深さは pugixml 本家と同じ扱いにします。
+- 信頼できない XML をアプリ側で再帰的に走査する場合は、深さに注意が必要です。
 - XML ドキュメントを所有し、初期状態ではルート要素を持ちません。`root()`、`child()`、`addRoot()` で `XmlNode` ハンドルを取得してノードを操作します。
 - ノードと属性のハンドルはドキュメントが所有するデータを参照します。ドキュメントの破棄やリセット、読み込みや解析による内容の置き換え、対応するノードの削除によって、これらのハンドルは無効になります。
 - `load()` と `parse()` は pugixml の既定のオプションを使い、コメント、処理命令、XML 宣言、文書型宣言、入力に直接書かれた XML の空白文字だけからなる通常のテキストノードを保持しません。文字参照で生成される空白や CDATA 内の空白は保持します。
 - `save()` と `toString()` は既定で各階層を半角スペース 2 個で字下げした UTF-8 を出力し、ドキュメントに XML 宣言がなければ自動的に付加します。
 '''
 details.ko = '''
+- 래퍼는 입력의 NUL을 거부하며 요소 깊이는 원본 pugixml과 동일하게 처리합니다.
+- 신뢰할 수 없는 XML을 앱에서 직접 재귀적으로 순회하는 경우 깊이에 주의해야 합니다.
 - XML 문서를 소유하며, 초기 상태에는 루트 요소가 없습니다. `root()`, `child()`, `addRoot()`로 `XmlNode` 핸들을 얻어 노드를 조작합니다.
 - 노드와 속성 핸들은 문서가 소유한 데이터를 참조합니다. 문서를 소멸하거나 초기화하거나, 읽기 또는 파싱으로 내용을 교체하거나, 해당 노드를 삭제하면 이 핸들들은 무효화됩니다.
 - `load()`와 `parse()`는 pugixml의 기본 옵션을 사용하며 주석, 처리 명령, XML 선언, 문서 형식 선언, 입력에 직접 쓰인 XML 공백 문자만으로 이루어진 일반 텍스트 노드를 보존하지 않습니다. 문자 참조로 생성된 공백과 CDATA 내부의 공백은 보존합니다.
@@ -41474,19 +41480,19 @@ description.en = "Loads an XML document from a file."
 description.ja = "ファイルから XML ドキュメントを読み込む。"
 description.ko = "파일에서 XML 문서를 읽는다."
 details.en = '''
-- Local input has no byte-size cap; documents above 16 MiB produce a Notice. Nesting is limited to 64 elements to keep DOM consumers safe. Parsing uses a temporary document; failure preserves the previous document and never publishes a parsed prefix.
+- Local input has no byte-size cap; documents above 16 MiB produce a Notice. Parsing uses a temporary document; failure preserves the previous document and never publishes a parsed prefix.
 - Accepts a file path; relative paths are resolved through `getDataPath()`, and absolute paths are used directly.
 - Returns `true` on success and `false` for a missing or unreadable file or a parsing error; failures are logged, with a description and offset for parsing errors.
 - See `Xml` for parsing defaults and node handle lifetime. Node handles remain valid after failure and are invalidated by a successful replacement.
 '''
 details.ja = '''
-- ローカル入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。DOM の利用を安全にするため、要素のネストは 64 段までです。一時ドキュメントで解析し、失敗時は以前のドキュメントを保持して解析途中の内容を公開しません。
+- ローカル入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。一時ドキュメントで解析し、失敗時は以前のドキュメントを保持して解析途中の内容を公開しません。
 - ファイルパスを受け取ります。相対パスは `getDataPath()` で解決し、絶対パスはそのまま使います。
 - 成功時は `true`、ファイルが存在しない場合、読み取れない場合、解析に失敗した場合は `false` を返します。失敗時はログを出力し、解析エラーには説明と位置を含めます。
 - 解析の既定の動作とノードハンドルの有効期間は `Xml` を参照してください。失敗時は既存のノードハンドルも維持し、成功して置き換えた場合に無効になります。
 '''
 details.ko = '''
-- 로컬 입력의 바이트 크기 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다. DOM 사용을 안전하게 유지하기 위해 요소 중첩은 64단계로 제한합니다. 임시 문서에서 파싱하며 실패하면 이전 문서를 유지하고 파싱 중인 일부 내용을 공개하지 않습니다.
+- 로컬 입력의 바이트 크기 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다. 임시 문서에서 파싱하며 실패하면 이전 문서를 유지하고 파싱 중인 일부 내용을 공개하지 않습니다.
 - 파일 경로를 받습니다. 상대 경로는 `getDataPath()`로 해석하고 절대 경로는 그대로 사용합니다.
 - 성공하면 `true`를, 파일이 없거나 읽을 수 없거나 파싱에 실패하면 `false`를 반환합니다. 실패 시 로그를 출력하며 파싱 오류에는 설명과 위치를 포함합니다.
 - 파싱의 기본 동작과 노드 핸들의 유효 기간은 `Xml`을 참조하세요. 실패 후에는 기존 노드 핸들이 유효하며 성공하여 교체하면 무효화됩니다.
@@ -41504,19 +41510,19 @@ description.en = "Parses an XML document from a string."
 description.ja = "文字列から XML ドキュメントを解析する。"
 description.ko = "문자열에서 XML 문서를 파싱한다."
 details.en = '''
-- Local input has no byte-size cap; documents above 16 MiB produce a Notice. Nesting is limited to 64 elements to keep DOM consumers safe. Parsing uses a temporary document; failure preserves the previous document and never publishes a parsed prefix.
+- Local input has no byte-size cap; documents above 16 MiB produce a Notice. Parsing uses a temporary document; failure preserves the previous document and never publishes a parsed prefix.
 - Accepts a UTF-8 string; embedded null characters are rejected.
 - Returns `true` on success; failure logs an error description and offset and returns `false`.
 - See `Xml` for parsing defaults and node handle lifetime.
 '''
 details.ja = '''
-- ローカル入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。DOM の利用を安全にするため、要素のネストは 64 段までです。一時ドキュメントで解析し、失敗時は以前のドキュメントを保持して解析途中の内容を公開しません。
+- ローカル入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。一時ドキュメントで解析し、失敗時は以前のドキュメントを保持して解析途中の内容を公開しません。
 - UTF-8 の文字列を受け取ります。途中の null 文字は拒否します。
 - 成功時は `true` を返します。失敗時はエラーの説明と位置をログに出力して `false` を返します。
 - 解析の既定の動作とノードハンドルの有効期間は `Xml` を参照してください。
 '''
 details.ko = '''
-- 로컬 입력의 바이트 크기 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다. DOM 사용을 안전하게 유지하기 위해 요소 중첩은 64단계로 제한합니다. 임시 문서에서 파싱하며 실패하면 이전 문서를 유지하고 파싱 중인 일부 내용을 공개하지 않습니다.
+- 로컬 입력의 바이트 크기 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다. 임시 문서에서 파싱하며 실패하면 이전 문서를 유지하고 파싱 중인 일부 내용을 공개하지 않습니다.
 - UTF-8 문자열을 받습니다. 문자열 중간의 null 문자는 거부합니다.
 - 성공하면 `true`를 반환합니다. 실패하면 오류 설명과 위치를 로그에 출력하고 `false`를 반환합니다.
 - 파싱의 기본 동작과 노드 핸들의 유효 기간은 `Xml`을 참조하세요.
@@ -61130,35 +61136,38 @@ description.en = "Explicitly starts the MCP HTTP listener."
 description.ja = "MCP の HTTP リスナーを明示的に起動する。"
 description.ko = "MCP HTTP 리스너를 명시적으로 시작한다."
 details.en = '''
+- MCP listens on loopback only by default; put a reverse proxy in front if you expose it on a network.
 - Call `startHttpServer(port, host, token)`; defaults are 0, `"127.0.0.1"`, and `""`. A nonpositive port lets the OS choose; retrieve the bound port with `mcp::getHttpPort`.
 - JSON-RPC requests use `POST /mcp`. A configured token requires `Authorization: Bearer <token>`; hosts other than `localhost`, `127.0.0.1`, and `::1` require a nonempty token.
 - Returns void; refusal or bind failure logs an Error. `TRUSSC_MCP=0` prevents startup and closes an existing listener.
 - The first successful opener chooses the address and token. Call this before `mcp::setToolLevel` to choose them explicitly; later mismatched parameters log an Error and change nothing.
 - Matching parameters reuse the listener; the original requested port or the actual bound port is accepted. A matching explicit call also permits Public custom tools on a health-only listener.
-- Default admission limits are 1 MiB each for wire and decoded bodies, 8 KiB per request/header/trailer line, 64 KiB total HTTP metadata, 128 header/trailer fields, 32 outstanding connections, and 4 workers.
-- Oversized bodies return 413, excessive metadata returns 431, and excess connections close. Rejections log one Warning per admission store and increment counters that persist across HTTP restarts.
+- Default admission limits are 64 MiB for the payload and decoded body, 32 outstanding connections, and 4 workers. Upstream read/write and keep-alive inactivity timeouts are 5 seconds; each connection serves at most 100 requests.
+- Oversized bodies return 413 and excess connections close. MCP-owned rejections log one Warning per admission store and increment counters that persist across HTTP restarts. Header/trailer count and total size have no separate MCP cap; upstream retains its default per-line header limit, payload limit and read timeout.
 - Request JSON nesting defaults to 64 levels. Parse admission failures return HTTP 503 with a reason; configure limits with `mcp::setAdmissionLimits` while the server is stopped.
 - The HTTP APIs `startHttpServer`, `stopHttpServer`, `processHttpQueue`, and `getHttpPort` are available on macOS, Windows, Linux, iOS, and Android; they are not declared for Web.
 '''
 details.ja = '''
+- MCP は既定でループバックのみを待ち受けます。ネットワークに公開する場合は、前段にリバースプロキシを置いてください。
 - `startHttpServer(port, host, token)` と呼びます。既定値は 0、`"127.0.0.1"`、`""` です。ポートが 0 以下なら OS が選択し、実際のポートは `mcp::getHttpPort` で取得できます。
 - JSON-RPC 要求には `POST /mcp` を使用します。トークンを設定した場合は `Authorization: Bearer <token>` が必要です。ホストが `localhost`、`127.0.0.1`、`::1` 以外なら、空でないトークンが必要です。
 - 戻り値は void です。起動の拒否やバインドの失敗は Error に記録します。`TRUSSC_MCP=0` は起動を防ぎ、起動済みのリスナーを閉じます。
 - 最初に起動に成功した呼び出しが、アドレスとトークンを決めます。明示的に選ぶ場合は `mcp::setToolLevel` より先に呼んでください。後から異なる値を指定すると、Error を記録して何も変更しません。
 - 設定が一致する呼び出しはリスナーを再利用します。ポートには、最初に要求した値と実際にバインドされた値のどちらも指定できます。一致する明示的な呼び出しは、ヘルス確認専用リスナーで Public のカスタムツールも利用可能にします。
-- 受付上限の既定値は、通信時とデコード後の本文がそれぞれ 1 MiB、要求行・ヘッダー行・トレーラー行が各 8 KiB、HTTP メタデータの合計が 64 KiB、ヘッダーとトレーラーが 128 フィールド、未完了接続が 32、ワーカーが 4 です。
-- 本文の超過には 413、メタデータの超過には 431 を返し、接続数の超過では接続を閉じます。拒否は受付項目ごとに初回だけ Warning を記録し、HTTP の再起動後も維持するカウンターを増やします。
+- 受付上限の既定値は、ペイロードとデコード後の本文が 64 MiB、未完了接続が 32、ワーカーが 4 です。上流の読み取り・書き込み・keep-alive の無通信タイムアウトは 5 秒、接続あたりの要求数は最大 100 です。
+- 本文の超過には 413 を返し、接続数の超過では接続を閉じます。MCP が行う拒否は受付項目ごとに初回だけ Warning を記録し、HTTP の再起動後も維持するカウンターを増やします。ヘッダーとトレーラーの個数・合計サイズに MCP 独自の上限はありません。上流の既定のヘッダー行上限、ペイロード上限、読み取りタイムアウトが適用されます。
 - 要求 JSON のネスト上限の既定値は 64 レベルです。解析時の受付上限を超えると、理由付きの HTTP 503 を返します。上限はサーバー停止中に `mcp::setAdmissionLimits` で設定してください。
 - HTTP API の `startHttpServer`、`stopHttpServer`、`processHttpQueue`、`getHttpPort` は macOS、Windows、Linux、iOS、Android で使用できます。Web では宣言されません。
 '''
 details.ko = '''
+- MCP는 기본적으로 루프백에서만 수신합니다. 네트워크에 공개하는 경우 앞에 리버스 프록시를 배치해야 합니다.
 - `startHttpServer(port, host, token)`으로 호출합니다. 기본값은 0, `"127.0.0.1"`, `""`입니다. 포트가 0 이하이면 OS가 선택하며 실제 포트는 `mcp::getHttpPort`로 조회합니다.
 - JSON-RPC 요청에는 `POST /mcp`를 사용합니다. 토큰을 설정하면 `Authorization: Bearer <token>`이 필요합니다. 호스트가 `localhost`, `127.0.0.1`, `::1` 이외이면 비어 있지 않은 토큰이 필요합니다.
 - 반환형은 void입니다. 시작 거부나 바인딩 실패는 Error로 기록합니다. `TRUSSC_MCP=0`은 시작을 막고 실행 중인 리스너를 닫습니다.
 - 처음 시작에 성공한 호출이 주소와 토큰을 결정합니다. 명시적으로 선택하려면 `mcp::setToolLevel`보다 먼저 호출하세요. 이후 다른 값을 지정하면 Error를 기록하고 아무것도 변경하지 않습니다.
 - 설정이 일치하는 호출은 리스너를 재사용합니다. 포트는 처음 요청한 값이나 실제 바인딩된 값 모두 허용합니다. 일치하는 명시적 호출은 상태 확인 전용 리스너에서 Public 사용자 도구도 허용합니다.
-- 기본 수락 한도는 전송 본문과 디코딩된 본문 각각 1 MiB, 요청/헤더/트레일러 한 줄 8 KiB, 전체 HTTP 메타데이터 64 KiB, 헤더와 트레일러 필드 128개, 미완료 연결 32개 및 워커 4개입니다.
-- 본문 초과에는 413, 메타데이터 초과에는 431을 반환하며 연결 수 초과 시 연결을 닫습니다. 거부는 수락 항목별 최초 한 번만 Warning을 기록하며 HTTP 재시작 후에도 유지되는 카운터를 증가시킵니다.
+- 기본 수락 한도는 페이로드와 디코딩된 본문 64 MiB, 미완료 연결 32개, 워커 4개입니다. 업스트림 읽기·쓰기·keep-alive 비활성 타임아웃은 5초이며 연결당 최대 요청 수는 100개입니다.
+- 본문 초과에는 413을 반환하며 연결 수 초과 시 연결을 닫습니다. MCP에서 수행한 거부는 수락 항목별 최초 한 번만 Warning을 기록하고 HTTP 재시작 후에도 유지되는 카운터를 증가시킵니다. 헤더와 트레일러의 개수 및 총크기에 별도 MCP 한도는 없습니다. 업스트림 기본 헤더 줄 한도, 페이로드 한도 및 읽기 타임아웃을 적용합니다.
 - 요청 JSON 중첩 한도의 기본값은 64단계입니다. 파싱 수락 한도를 초과하면 이유와 함께 HTTP 503을 반환합니다. 한도는 서버가 중지된 상태에서 `mcp::setAdmissionLimits`로 설정하세요.
 - HTTP API인 `startHttpServer`, `stopHttpServer`, `processHttpQueue`, `getHttpPort`는 macOS, Windows, Linux, iOS 및 Android에서 사용할 수 있습니다. Web에서는 선언되지 않습니다.
 '''
@@ -62642,9 +62651,9 @@ description.ja = "MCP 要求の受付と処理の上限を定義する。"
 description.ko = "MCP 요청의 수락 및 처리 한도를 정의한다."
 details.en = '''
 - All fields are positive `size_t` values. Settings are shared across the process; change them through `mcp::setAdmissionLimits` while HTTP is stopped and no work remains outstanding.
-- HTTP defaults are `bodyBytes = 1048576` (1 MiB), `outstanding = 32`, `workers = 4`, `lineBytes = 8192`, `headerBytes = 65536` and `headerCount = 128`.
+- HTTP defaults are `bodyBytes = 67108864` (64 MiB), `outstanding = 32` and `workers = 4`.
 - Processing defaults are `jsonDepth = 64`, `histogramBins = 4096`, `gridCells = 65536`, `operations = 256`, `replyBytes = 67108864` (64 MiB) and `workingBytes = 268435456` (256 MiB).
-- Excess HTTP body data returns 413, excess metadata returns 431, and both close the connection. Initial headers and trailers share the metadata byte and field-count limits; excess connection admission closes the new socket.
+- Excess HTTP body data returns 413 and closes the connection; excess connection admission closes the new socket. Header/trailer count and aggregate size have no MCP limit; only upstream's default per-line header limit, payload limit and read timeout remain. Upstream metadata allocations are outside MCP working-memory accounting.
 - Histogram bins, grid cell products and operation counts are checked before analysis runs; exceeding a limit rejects the operation or request instead of truncating its input.
 - Reply construction, including JSON escaping, must fit the reply limit. Concurrent requests share the working-memory limit for retained request copies, parsing, image copies, encoders, audio scratch space and results; exceeding a limit rejects admission or returns an error, including HTTP 503 when an HTTP reply cannot be produced.
 - Encoded image input must fit `INT_MAX` bytes and its working-memory allowance before reading. Decoded pixels, retained copies and decoder workspace are checked before decoding.
@@ -62652,13 +62661,13 @@ details.en = '''
 - JSON nesting is checked during parsing against `jsonDepth` before recursive copies or serialization; exceeding the limit rejects the request.
 - Audio snapshot copies and scratch/result size products are checked before allocation. FFT lengths must fit `int` and the fixed audio-history ring; excessive lengths return an error. The audio callback does not allocate for these reads.
 - Limit rejections increment counters and log a Warning on the first rejection for each limit store. Counters and first-Warning state persist for the process lifetime across queries and HTTP restarts; configuration rejection logging follows `mcp::setAdmissionLimits`.
-- HTTP chunk sizes must fit the unsigned-long parser; a parsed value of `ULONG_MAX` is rejected with 413 and counted.
+- Invalid chunk sizes follow upstream parsing and return 400; they do not increment admission counters.
 '''
 details.ja = '''
 - すべてのフィールドは正の `size_t` 値です。設定はプロセス全体で共有します。HTTP が停止し、未完了の作業がない状態で `mcp::setAdmissionLimits` を使って変更してください。
-- HTTP の既定値は `bodyBytes = 1048576`（1 MiB）、`outstanding = 32`、`workers = 4`、`lineBytes = 8192`、`headerBytes = 65536`、`headerCount = 128` です。
+- HTTP の既定値は `bodyBytes = 67108864`（64 MiB）、`outstanding = 32`、`workers = 4` です。
 - 処理の既定値は `jsonDepth = 64`、`histogramBins = 4096`、`gridCells = 65536`、`operations = 256`、`replyBytes = 67108864`（64 MiB）、`workingBytes = 268435456`（256 MiB）です。
-- HTTP 本文の超過は 413、メタデータの超過は 431 を返し、どちらも接続を閉じます。最初のヘッダーとトレーラーはメタデータのバイト数とフィールド数の上限を共有します。接続の受付上限を超えると、新しいソケットを閉じます。
+- HTTP 本文の超過は 413 を返し、接続を閉じます。接続の受付上限を超えると、新しいソケットを閉じます。ヘッダーとトレーラーの個数・合計サイズに MCP の上限はなく、上流の既定のヘッダー行上限、ペイロード上限、読み取りタイムアウトだけが残ります。上流のメタデータ確保は MCP の作業メモリ計上の対象外です。
 - 解析の実行前にヒストグラムのビン数、グリッドのセル数の積、操作数を検査します。上限を超えた場合は入力を切り詰めず、操作または要求を拒否します。
 - JSON のエスケープを含む応答の生成は応答上限内に収める必要があります。同時要求は、保持する要求のコピー、解析、画像のコピー、エンコーダー、音声の作業領域と結果に対して作業メモリ上限を共有します。超過すると受付を拒否するかエラーを返し、HTTP 応答を生成できない場合などは HTTP 503 になります。
 - エンコード済み画像の入力は、読み取り前に `INT_MAX` バイト以下かつ作業メモリの許容範囲内である必要があります。デコード後のピクセル、保持するコピー、デコーダーの作業領域はデコード前に検査します。
@@ -62666,13 +62675,13 @@ details.ja = '''
 - JSON のネストは解析中に `jsonDepth` と比較し、再帰的なコピーやシリアライズより前に検査します。上限を超えると要求を拒否します。
 - 音声スナップショットのコピーと、作業領域や結果のサイズの積は、メモリ確保前に検査します。FFT 長は `int` と固定長の音声履歴リングに収まる必要があり、超過するとエラーを返します。これらの読み取りのために音声コールバックがメモリを確保することはありません。
 - 上限による拒否はカウンターを増やし、上限を管理する領域ごとの最初の拒否で Warning を記録します。カウンターと初回 Warning の状態は、照会や HTTP の再起動後もプロセスの生存期間中保持します。設定の拒否時のログは `mcp::setAdmissionLimits` に従います。
-- HTTP のチャンクサイズは unsigned long の解析範囲に収まる必要があります。解析値が `ULONG_MAX` の場合は 413 で拒否し、計数します。
+- 不正なチャンクサイズは上流の解析に従って 400 を返し、受付拒否カウンターには含みません。
 '''
 details.ko = '''
 - 모든 필드는 양수인 `size_t` 값입니다. 설정은 프로세스 전체에서 공유합니다. HTTP가 중지되고 미완료 작업이 없는 상태에서 `mcp::setAdmissionLimits`로 변경하세요.
-- HTTP 기본값은 `bodyBytes = 1048576`(1 MiB), `outstanding = 32`, `workers = 4`, `lineBytes = 8192`, `headerBytes = 65536`, `headerCount = 128`입니다.
+- HTTP 기본값은 `bodyBytes = 67108864`(64 MiB), `outstanding = 32`, `workers = 4`입니다.
 - 처리 기본값은 `jsonDepth = 64`, `histogramBins = 4096`, `gridCells = 65536`, `operations = 256`, `replyBytes = 67108864`(64 MiB), `workingBytes = 268435456`(256 MiB)입니다.
-- HTTP 본문이 초과하면 413, 메타데이터가 초과하면 431을 반환하며 두 경우 모두 연결을 닫습니다. 초기 헤더와 트레일러는 메타데이터 바이트 및 필드 수 한도를 공유합니다. 연결 수락 한도를 초과하면 새 소켓을 닫습니다.
+- HTTP 본문이 초과하면 413을 반환하고 연결을 닫습니다. 연결 수락 한도를 초과하면 새 소켓을 닫습니다. 헤더와 트레일러 개수 및 총크기에 MCP 한도는 없으며 업스트림 기본 헤더 줄 한도, 페이로드 한도 및 읽기 타임아웃만 유지됩니다. 업스트림 메타데이터 할당은 MCP 작업 메모리 계산 대상이 아닙니다.
 - 분석 실행 전에 히스토그램 빈 수, 그리드 셀 수의 곱, 연산 수를 검사합니다. 한도를 초과하면 입력을 잘라내지 않고 연산 또는 요청을 거부합니다.
 - JSON 이스케이프를 포함한 응답 생성은 응답 한도 내에 있어야 합니다. 동시 요청은 유지되는 요청 복사본, 파싱, 이미지 복사본, 인코더, 오디오 작업 공간 및 결과에 대한 작업 메모리 한도를 공유합니다. 초과하면 수락을 거부하거나 오류를 반환하며, HTTP 응답을 생성할 수 없는 경우 등에는 HTTP 503을 반환합니다.
 - 인코딩된 이미지 입력은 읽기 전에 `INT_MAX` 바이트 이하이며 작업 메모리 허용 범위 내에 있어야 합니다. 디코딩된 픽셀, 유지되는 복사본 및 디코더 작업 공간은 디코딩 전에 검사합니다.
@@ -62680,7 +62689,7 @@ details.ko = '''
 - JSON 중첩은 파싱 중에 `jsonDepth`와 비교하여 재귀적 복사나 직렬화 전에 검사합니다. 한도를 초과하면 요청을 거부합니다.
 - 오디오 스냅샷 복사본과 작업 공간 및 결과 크기의 곱은 할당 전에 검사합니다. FFT 길이는 `int` 및 고정 크기 오디오 이력 링에 들어가야 하며 초과하면 오류를 반환합니다. 오디오 콜백은 이러한 읽기를 위해 메모리를 할당하지 않습니다.
 - 한도로 인한 거부는 카운터를 증가시키며 한도를 관리하는 영역별 첫 거부에 Warning을 기록합니다. 카운터와 첫 Warning 상태는 조회나 HTTP 재시작 후에도 프로세스 수명 동안 유지합니다. 설정 거부 시 로그는 `mcp::setAdmissionLimits`를 따릅니다.
-- HTTP 청크 크기는 unsigned long 파서의 범위에 들어가야 합니다. 파싱한 값이 `ULONG_MAX`이면 413으로 거부하고 거부 횟수에 포함합니다.
+- 잘못된 청크 크기는 업스트림 파싱에 따라 400을 반환하며 수락 거부 카운터에 포함하지 않습니다.
 '''
 
 ["mcp::setAdmissionLimits"]
@@ -62728,18 +62737,18 @@ description.en = "Limits the size of HTTP request bodies."
 description.ja = "HTTP 要求本文のサイズを制限する。"
 description.ko = "HTTP 요청 본문의 크기를 제한한다."
 details.en = '''
-- Defaults to 1048576 bytes (1 MiB); the limit applies separately to received body bytes, including chunk framing, and decoded body bytes.
-- Exceeding either limit returns HTTP 413 and closes the connection.
+- Defaults to 67108864 bytes (64 MiB), configured through upstream `set_payload_max_length`. The MCP content receiver also checks chunked and decoded body bytes before appending; chunk framing and trailers are not counted.
+- Exceeding the body limit returns HTTP 413 and closes the connection.
 - For configuration and shared rejection reporting, see `mcp::AdmissionLimits`.
 '''
 details.ja = '''
-- 既定値は 1048576 バイト（1 MiB）です。チャンクの区切り情報を含む受信本文のバイト数と、デコード後の本文のバイト数に、それぞれ適用します。
-- どちらかが上限を超えると HTTP 413 を返し、接続を閉じます。
+- 既定値は 67108864 バイト（64 MiB）で、上流の `set_payload_max_length` で設定します。MCP の受信コールバックは、チャンク形式およびデコード後の本文も追加前に検査します。チャンクの区切り情報とトレーラーは数えません。
+- 本文が上限を超えると HTTP 413 を返し、接続を閉じます。
 - 設定方法と共通の拒否記録は `mcp::AdmissionLimits` を参照してください。
 '''
 details.ko = '''
-- 기본값은 1048576바이트(1 MiB)입니다. 청크 구분 정보를 포함한 수신 본문 바이트 수와 디코딩된 본문 바이트 수에 각각 적용합니다.
-- 어느 한도를 초과해도 HTTP 413을 반환하고 연결을 닫습니다.
+- 기본값은 67108864바이트(64 MiB)이며 업스트림 `set_payload_max_length`로 설정합니다. MCP 수신 콜백은 청크 형식 및 디코딩된 본문도 추가 전에 검사합니다. 청크 구분 정보와 트레일러는 계산하지 않습니다.
+- 본문 한도를 초과하면 HTTP 413을 반환하고 연결을 닫습니다.
 - 설정 방법과 공통 거부 기록은 `mcp::AdmissionLimits`를 참조하세요.
 '''
 
@@ -62783,69 +62792,6 @@ details.ko = '''
 - 기본값은 워커 스레드 4개입니다. 모든 워커가 사용 중이면 수락된 연결은 큐에서 대기하며, 대기 중인 연결도 `outstanding`에 포함합니다.
 - 메인 스레드 처리나 지연 응답을 기다리는 동안에도 워커를 사용합니다. 이 값을 늘려도 메인 스레드의 도구 핸들러가 병렬로 실행되지는 않습니다.
 - 설정 방법과 공통 수락 규칙은 `mcp::AdmissionLimits`를 참조하세요.
-'''
-
-["mcp::AdmissionLimits::lineBytes"]
-category = "mcp"
-description.en = "Limits the length of individual HTTP metadata lines."
-description.ja = "HTTP メタデータの各行の長さを制限する。"
-description.ko = "HTTP 메타데이터 각 줄의 길이를 제한한다."
-details.en = '''
-- Defaults to 8192 bytes per request, header or trailer line; chunk-size lines also use this limit.
-- Exceeding the line limit returns HTTP 431 and closes the connection; the shared `headerBytes` and `headerCount` limits also apply to request metadata.
-- For configuration and shared rejection reporting, see `mcp::AdmissionLimits`.
-'''
-details.ja = '''
-- 既定値は要求行、ヘッダー行、トレーラー行それぞれ 8192 バイトです。チャンクサイズの行にもこの上限を使います。
-- 行の上限を超えると HTTP 431 を返し、接続を閉じます。要求のメタデータには、共通の `headerBytes` と `headerCount` の上限も適用します。
-- 設定方法と共通の拒否記録は `mcp::AdmissionLimits` を参照してください。
-'''
-details.ko = '''
-- 기본값은 요청 줄, 헤더 줄 및 트레일러 줄마다 8192바이트입니다. 청크 크기 줄에도 이 한도를 사용합니다.
-- 줄 한도를 초과하면 HTTP 431을 반환하고 연결을 닫습니다. 요청 메타데이터에는 공통 `headerBytes` 및 `headerCount` 한도도 적용합니다.
-- 설정 방법과 공통 거부 기록은 `mcp::AdmissionLimits`를 참조하세요.
-'''
-
-["mcp::AdmissionLimits::headerBytes"]
-category = "mcp"
-description.en = "Limits the total byte count of HTTP request metadata."
-description.ja = "HTTP 要求のメタデータの合計バイト数を制限する。"
-description.ko = "HTTP 요청 메타데이터의 총바이트 수를 제한한다."
-details.en = '''
-- The default is 65536 bytes (64 KiB), shared by the request line, headers and trailers, including line endings and blank separator lines.
-- Exceeding this limit returns HTTP 431 and closes the connection; `mcp::AdmissionLimits::lineBytes` also limits each line.
-- For configuration requirements, see `mcp::setAdmissionLimits`.
-'''
-details.ja = '''
-- 既定値は 65536 バイト（64 KiB）で、要求行・ヘッダー・トレーラーで共有します。改行と区切りの空行も含みます。
-- 上限を超えると HTTP 431 を返して接続を閉じます。各行には `mcp::AdmissionLimits::lineBytes` の上限も適用されます。
-- 設定条件は `mcp::setAdmissionLimits` を参照してください。
-'''
-details.ko = '''
-- 기본값은 65536바이트(64 KiB)이며 요청 줄, 헤더, 트레일러가 공유합니다. 줄바꿈과 구분용 빈 줄도 포함합니다.
-- 한도를 초과하면 HTTP 431을 반환하고 연결을 닫습니다. 각 줄에는 `mcp::AdmissionLimits::lineBytes` 한도도 적용됩니다.
-- 설정 조건은 `mcp::setAdmissionLimits`를 참조하세요.
-'''
-
-["mcp::AdmissionLimits::headerCount"]
-category = "mcp"
-description.en = "Limits the combined number of HTTP header and trailer fields."
-description.ja = "HTTP ヘッダーとトレーラーの合計フィールド数を制限する。"
-description.ko = "HTTP 헤더와 트레일러의 합계 필드 수를 제한한다."
-details.en = '''
-- The default is 128 fields, shared by headers and trailers; repeated field names count separately.
-- Exceeding this limit returns HTTP 431 and closes the connection.
-- For configuration requirements, see `mcp::setAdmissionLimits`.
-'''
-details.ja = '''
-- 既定値は 128 フィールドで、ヘッダーとトレーラーで共有します。同じ名前のフィールドも個別に数えます。
-- 上限を超えると HTTP 431 を返して接続を閉じます。
-- 設定条件は `mcp::setAdmissionLimits` を参照してください。
-'''
-details.ko = '''
-- 기본값은 128개 필드이며 헤더와 트레일러가 공유합니다. 이름이 같은 필드도 각각 계산합니다.
-- 한도를 초과하면 HTTP 431을 반환하고 연결을 닫습니다.
-- 설정 조건은 `mcp::setAdmissionLimits`를 참조하세요.
 '''
 
 ["mcp::AdmissionLimits::histogramBins"]

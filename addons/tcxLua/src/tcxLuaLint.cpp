@@ -39,7 +39,7 @@ struct LintWork {
         if (!lua_checkstack(lua, 4)) throw std::runtime_error("lint stack allocation failed");
     }
     int compile(lua_State* lua, const std::pair<std::string, std::string>& file) {
-        return luaL_loadbuffer(lua, file.second.data(), file.second.size(), file.first.c_str());
+        return luaL_loadbufferx(lua, file.second.data(), file.second.size(), file.first.c_str(), "t");
     }
 };
 
@@ -195,6 +195,8 @@ std::vector<LuaLintIssue> tcxLuaLintUndefinedGlobals(
                         continue; // source syntax errors are reported by the host load path
                     }
                     const char* detail = lua_tostring(lua, -1);
+                    if (detail && std::strstr(detail, "attempt to load chunk with wrong mode"))
+                        detail = "binary chunks are rejected; only text Lua scripts are accepted (mode 't')";
                     throw std::runtime_error(detail ? detail : "lint compilation failed");
                 }
 #ifndef TCXLUA_USE_LUAJIT

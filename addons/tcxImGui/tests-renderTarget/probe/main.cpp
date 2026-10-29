@@ -391,6 +391,8 @@ extern "C" void __wrap_sapp_set_mouse_cursor(sapp_mouse_cursor next) { ++cursorC
 extern "C" sapp_mouse_cursor __wrap_sapp_get_mouse_cursor() { ++cursorCalls; return cursor; }
 extern "C" bool __wrap_sapp_keyboard_shown() { ++keyboardQueries; return keyboard; }
 extern "C" void __wrap_sapp_show_keyboard(bool shown) { ++keyboardCalls; keyboard = shown; }
+#include "bufferGrow.h"
+
 int main(int argc, char** argv) {
     EGLDisplay display = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
     if (!eglInitialize(display,nullptr,nullptr) || !eglBindAPI(EGL_OPENGL_API)) return 2;
@@ -411,7 +413,8 @@ int main(int argc, char** argv) {
     w.swapchainTarget.width = w.swapchainTarget.height = 256;
     w.swapchainTarget.colorFormat = SG_PIXELFORMAT_RGBA8;
     if (argc == 2 && std::string(argv[1]) == "--static-exit") staticExitRegression();
-    regressions();
+    bufferGrowRegression();
+    if (argc != 2 || std::string(argv[1]) != "--buffer-grow") regressions();
     internal::drainPendingGpuDestroys(); sgl_shutdown(); sg_shutdown();
     eglMakeCurrent(display,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT);
     eglDestroyContext(display,context); eglTerminate(display);

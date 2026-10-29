@@ -102,3 +102,20 @@ NodeInspector input and an Fbo recorder. Closing it checks that App exit runs
 once while those services remain available, and that clearing exit subscriptions
 from App exit preserves mandatory AfterApp teardown and a readable recording.
 On Linux, use Xvfb with the software Mesa environment used by the display suite.
+
+The surfaceless probe also covers #340 buffer growth: real frames above 65,536
+vertices must reach callbacks in every draw list, including the foreground.
+It checks per-context Notices, repeated growth, explicit/default initial sizes
+through both manager setup paths, two staging allocation failures, a partial
+GPU allocation failure, old-buffer fallback and next-frame recovery.
+Run `bin/imguiNativeProbe --buffer-grow` to isolate these checks. The fixture
+also verifies GPU readback of the last list, index-only growth, exact staging
+doubling and safe rejection of unrepresentable Sokol byte offsets.
+
+The same native-probe option builds `bin/imguiBufferSizeProbe`, which uses an
+isolated dummy backend. It checks the signed-int byte-size boundary, caps
+otherwise overflowing doubling, rejects unrepresentable initial sizes before
+allocation, and checks one Error plus old-buffer partial rendering for
+unrepresentable vertex and index demands. Large staging requests receive a
+1-byte stand-in and are never copied into; the test allocates no multi-GB
+CPU or GPU blocks. Run this probe separately from the real-GL modes.
