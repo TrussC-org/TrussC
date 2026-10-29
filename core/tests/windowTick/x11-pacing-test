@@ -97,6 +97,11 @@ int main() {
     _sapp_tc_x11_pace_periodic(&window,period);
     bool ok=std::abs(window.earliest_next-(10+4*period))<1e-9;
     std::printf("late periodic phase: %s\n",ok?"PASS":"FAIL"); failures+=!ok;
+    // Floating-point rounding must not leave a skipped deadline due at once.
+    window.earliest_next=10+1.0/60.0; clockValue=20;
+    _sapp_tc_x11_pace_periodic(&window,1.0/60.0);
+    ok=window.earliest_next>20 && !_sapp_tc_x11_window_due(&window,20);
+    std::printf("exact-boundary skip stays future: %s\n",ok?"PASS":"FAIL"); failures+=!ok;
     window.earliest_next=100; clockValue=10;
     _sapp_tc_x11_pace_periodic(&window,period);
     ok=std::abs(window.earliest_next-(10+period))<1e-9;

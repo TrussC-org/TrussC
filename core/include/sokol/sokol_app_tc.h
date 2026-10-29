@@ -11845,6 +11845,8 @@ static void _sapp_tc_x11_pace_periodic(_sapp_tc_window_t* w, double period) {
     } else if (next <= now) {
         // Skip elapsed deadlines without moving the timer's phase to tick completion.
         next += (floor((now - next) / period) + 1.0) * period;
+        // Rounding can land exactly on now; a skipped deadline must stay in the future.
+        if (next <= now) next += period;
     }
     w->earliest_next = next;
 }
