@@ -137,7 +137,7 @@ TC_CORE_TEST_MAIN() {
     check("stream starts with the decoder held back", bool(stream.loadStream(path)) && stream.play());
     check("startup callback parked", gate.park());
     check("startup silence is excluded", engine.getStats().underrunFrames == 0);
-    internal::pumpAudioDiagnostics();
+    internal::flushAudioDiagnostics();
     check("startup wait has no underrun warning", countWarnings("stream underrun") == 0);
     internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
     gate.resume();
@@ -151,8 +151,10 @@ TC_CORE_TEST_MAIN() {
     check("paused callback parked", gate.park());
     const auto underruns = engine.getStats().underrunFrames;
     check("audio thread has not logged underruns", countWarnings("stream underrun") == 0);
-    internal::pumpAudioDiagnostics();
-    check("main-thread pump reports underruns", countWarnings("stream underrun") == 1);
+    internal::flushAudioDiagnostics();
+    check("main-thread flush reports underruns", countWarnings("stream underrun") == 1);
+    internal::flushAudioDiagnostics();
+    check("second flush adds no underrun duplicate", countWarnings("stream underrun") == 1);
     gate.resume();
     check("next paused callback parked", gate.park());
     check("paused silence is excluded", engine.getStats().underrunFrames == underruns);
@@ -195,7 +197,8 @@ TC_CORE_TEST_MAIN() {
     check("metered voice plays", tone.play());
     check("master meters publish output", waitFor([&] { return engine.getStats().peak > 0; }));
     check("callbacks are healthy before the stall", waitFor([&] { return !engine.getStats().stalled; }));
-    internal::pumpAudioDiagnostics();
+    // Drain earlier parked-callback reports before measuring this stall.
+    internal::flushAudioDiagnostics();
     const auto stallsBefore = countWarnings("audio stall(s)");
     check("callback parked for stall detection", gate.park());
     check("unfinished callback becomes stalled", waitFor([&] { return engine.getStats().stalled; }));
@@ -209,9 +212,11 @@ TC_CORE_TEST_MAIN() {
           state.value("stalled", false) && state.value("underrunFrames", uint64_t(0)) == streamUnderruns
           && state["master"]["peak"] == 0 && state["playingSounds"][0]["level"] == 0
           && state.contains("voicesStoppedByReinit") && !state["thread"].contains("overruns"));
-    internal::pumpAudioDiagnostics();
-    internal::pumpAudioDiagnostics();
+    // Force reporting so earlier stalls cannot suppress this check for two seconds.
+    internal::flushAudioDiagnostics();
     check("a sustained stall is reported once", countWarnings("audio stall(s)") == stallsBefore + 1);
+    internal::flushAudioDiagnostics();
+    check("second flush adds no stall duplicate", countWarnings("audio stall(s)") == stallsBefore + 1);
     gate.resume();
     check("completion clears the stall", waitFor([&] { return !engine.getStats().stalled; }));
     tone.stop();
@@ -231,7 +236,8 @@ TC_CORE_TEST_MAIN() {
         + " (result=-20); stopping the playback"; // MA_IO_ERROR from ReopenFails
     check("migration logs the failed path and result during init", countWarnings(migrationWarning) == 1);
     internal::pumpAudioDiagnostics();
-    check("pump adds no migration summary or duplicate",
+    internal::flushAudioDiagnostics();
+    check("pump and flush add no migration summary or duplicate",
           countWarnings("stream voices stopped by re-init") == 0 && countWarnings(migrationWarning) == 1);
     check("MCP reports the re-init counter", audioState().value("voicesStoppedByReinit", uint64_t(0)) == after.voicesStoppedByReinit);
     internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
