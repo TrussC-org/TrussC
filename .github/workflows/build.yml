@@ -2,8 +2,9 @@
 # kept to what catches breakage cheaply: AllFeaturesExample on every platform
 # (desktop, Android, web, iOS), plus the core library + trusscli and the core
 # behavioral tests (core/tests incl. the hot reload host/guest split) on
-# desktop, split over three jobs per OS (#806). The addon test harnesses run
-# in daily.yml. Runs only for main: changes land on next/<topic> branches
+# desktop, split over three jobs per OS (#806). Affected addon tests run
+# on Linux/macOS; the full addon suite stays in daily.yml. Runs only for main:
+# changes land on next/<topic> branches
 # without CI and reach main as one batch PR per topic. AllFeaturesExample
 # references every documented public core API and the repo-contained bundled
 # addons without running them (its src/coverage.h), so each platform compiles
@@ -50,10 +51,20 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       docs_only: ${{ steps.detect.outputs.docs_only }}
+      addons: ${{ steps.addons.outputs.selected }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - id: addons
+        name: Select affected addon tests
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          selected=$(python3 tools/select_addon_tests.py --event-file "$GITHUB_EVENT_PATH" --event-name "$EVENT_NAME")
+          echo "Affected addons: $selected"
+          echo "selected=$selected" >> "$GITHUB_OUTPUT"
 
       - id: detect
         shell: bash
@@ -344,10 +355,6 @@ jobs:
           chmod +x examples/build_all.py
           ./examples/build_all.py --test-only --verbose
 
-      # The addon test harnesses (addons/*/tests/) run in daily.yml only
-      # (--addon-tests-only --include-daily, #806): they were about 15 of the
-      # job's 36-40 minutes.
-
       # Behavioral regression tests for the core (core/tests/*/): built AND run
       # on every build (small headless console projects, non-zero exit fails).
       # hotReloadLifecycle also covers the host/guest split build with an addon.
@@ -365,6 +372,126 @@ jobs:
           else
             ccache -sv || true
           fi
+
+  # Always completes for PRs and merge groups, including an empty selection.
+  # No workflow paths filter: ci-ok must receive a result for unrelated changes.
+  addon-tests:
+    name: addon-tests (${{ matrix.preset }})
+    needs: changes
+    # An all-addons run (runner, selector or workflow changes) takes ~25-30 min.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        selected: ["${{ needs.changes.outputs.addons }}"]
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            preset: linux
+          - os: macos-latest
+            preset: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: No affected addons
+        if: matrix.selected == '[]'
+        run: echo "No affected addon tests."
+
+      - uses: actions/checkout@v5
+        if: matrix.selected != '[]'
+
+      - name: Restore FetchContent
+        if: matrix.selected != '[]'
+        id: fetchcontent
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-build-${{ hashFiles('addons/*/CMakeLists.txt') }}
+          restore-keys: |
+            fetchcontent-${{ runner.os }}-sweep-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Configure shared FetchContent
+        if: matrix.selected != '[]'
+        shell: bash
+        env:
+          FETCHCONTENT_CACHE_HIT: ${{ steps.fetchcontent.outputs.cache-hit }}
+        run: |
+          echo "TRUSSC_FETCHCONTENT_DIR=$GITHUB_WORKSPACE/.fetchcontent" >> "$GITHUB_ENV"
+          if [ "$FETCHCONTENT_CACHE_HIT" = "true" ]; then
+            echo "TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON" >> "$GITHUB_ENV"
+          fi
+
+      - name: Setup compiler cache
+        if: matrix.selected != '[]'
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          variant: ccache
+          key: ${{ matrix.os }}-build
+          max-size: 2G
+          save: 'false'
+
+      - name: Enable compiler launcher
+        if: matrix.selected != '[]'
+        shell: bash
+        run: |
+          for lang in C CXX OBJC OBJCXX; do
+            echo "CMAKE_${lang}_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+          done
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
+          echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
+
+      - name: Restore build directories
+        if: matrix.selected != '[]'
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            core/build-${{ matrix.preset }}
+            tools/build
+          key: ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-${{ hashFiles('core/**/*.h', 'core/**/*.cpp', 'core/**/*.mm') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-
+
+      - name: Restore sokol-shdc
+        if: matrix.selected != '[]'
+        uses: actions/cache/restore@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Install Linux dependencies
+        if: matrix.selected != '[]' && runner.os == 'Linux'
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-deps
+
+      - name: Build trusscli
+        if: matrix.selected != '[]'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
+            sed -i '' 's/open /#open /g' tools/build_mac.command
+            ./tools/build_mac.command
+          else
+            sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
+            sed -i 's|"$SCRIPT_DIR/trusscli"|#&|g' tools/build_linux.sh
+            ./tools/build_linux.sh
+          fi
+
+      - name: Build and run affected addon tests
+        if: matrix.selected != '[]'
+        env:
+          SELECTED_ADDONS: ${{ matrix.selected }}
+        shell: bash
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+          import subprocess
+          subprocess.run(['python3', 'examples/build_all.py', '--addon-tests-only',
+                          '--include-daily', '--verbose', '--addons',
+                          *json.loads(os.environ['SELECTED_ADDONS'])], check=True)
+          PYTHON
 
   build-android:
     needs: changes
@@ -902,6 +1029,10 @@ jobs:
         if: always()
         run: python3 tools/tests/test_daily_workflow.py -v
 
+      - name: affected addon CI regression checks
+        if: always()
+        run: python3 tools/tests/test_addon_ci.py -v
+
       - name: build workflow cache regression checks
         if: always()
         run: python3 tools/tests/test_build_workflow_caches.py -v
@@ -931,6 +1062,10 @@ jobs:
       - name: core test symbol checker regression checks
         if: always()
         run: python3 tools/tests/test_core_test_symbols.py -v
+
+      - name: test binary discovery regression checks
+        if: always()
+        run: python3 tools/tests/test_build_all_test_binary.py -v
 
   # ---------------------------------------------------------------------------
   # Keep one compiler-cache save per platform (#776). Every ccache-action save
@@ -975,7 +1110,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ci-ok:
     runs-on: ubuntu-latest
-    needs: [changes, build, build-android, build-web, build-ios, reference-check, header-state-check, render-regression]
+    needs: [changes, build, addon-tests, build-android, build-web, build-ios, reference-check, header-state-check, render-regression]
     if: always()
     steps:
       - name: Verify job results
@@ -983,6 +1118,7 @@ jobs:
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
           R_CHANGES: ${{ needs.changes.result }}
           R_BUILD: ${{ needs.build.result }}
+          R_ADDONS: ${{ needs.addon-tests.result }}
           R_ANDROID: ${{ needs.build-android.result }}
           R_WEB: ${{ needs.build-web.result }}
           R_IOS: ${{ needs.build-ios.result }}
@@ -1004,6 +1140,7 @@ jobs:
               *) ok=0 ;;
             esac
           }
+          check "addon-tests"     "$R_ADDONS"
           check "changes"         "$R_CHANGES"
           check "build"           "$R_BUILD"    skippable
           check "build-android"   "$R_ANDROID"  skippable
