@@ -2556,6 +2556,7 @@ EnumLabelSpan enumReflectedSpan()  // Returns an enum label table built from ref
 const std::array<E, internal::enumValidCount<E> enumValues()  // Returns the automatically discovered values of an enum's enumerators.
 EVENT_DRIVEN  // Selects rendering on demand.
 float exp2(float x) [std]  // Returns two raised to the given power.
+int getResourceLoadConcurrency()  // Returns how many resource loads can prepare at once.
 HALF_TAU  // Represents half a turn in radians.
 KEY_BACKSPACE  // Identifies the Backspace key.
 KEY_DELETE  // Identifies the Delete key.
@@ -2600,6 +2601,7 @@ QUARTER_TAU  // Defines a quarter turn in radians.
 float remainder(float x, float y) [std]  // Returns the IEEE floating-point remainder.
 Right  // Provides shorthand for `Direction::Right`.
 void saveScreenshotAsync(const fs::path & path)  // Requests an asynchronous screenshot save.
+void setResourceLoadConcurrency(int count)  // Sets how many resource loads can prepare at once.
 float tanh(float x) [std]  // Returns the hyperbolic tangent.
 TAU  // Represents one full turn in radians.
 Top  // Provides the shorthand constant for Direction::Top.

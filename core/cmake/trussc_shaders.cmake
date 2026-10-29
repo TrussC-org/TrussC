@@ -16,6 +16,7 @@
 # =============================================================================
 
 include_guard(GLOBAL)
+include("${CMAKE_CURRENT_LIST_DIR}/tc_acquire_shdc.cmake")
 
 function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
     cmake_parse_arguments(_TC_SHADERS "" "OUTPUT_DIR" "" ${ARGN})
@@ -76,60 +77,8 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
         "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/sokol-shdc" ABSOLUTE)
     set(_TC_SOKOL_SHDC "${_TC_SOKOL_SHDC_TOOLS_DIR}/sokol-shdc${_TC_SOKOL_SHDC_EXT}")
 
-    # Replace stale caches when the pin changes, including old CI caches.
-    if(EXISTS "${_TC_SOKOL_SHDC}")
-        file(SHA256 "${_TC_SOKOL_SHDC}" _TC_SOKOL_SHDC_ACTUAL_HASH)
-        if(NOT _TC_SOKOL_SHDC_ACTUAL_HASH STREQUAL _TC_SOKOL_SHDC_EXPECTED_HASH)
-            message(STATUS "[${_TC_TARGET}] Cached sokol-shdc does not match the pinned SHA-256; downloading replacement")
-            file(REMOVE "${_TC_SOKOL_SHDC}")
-        endif()
-    endif()
-
-    # Download sokol-shdc if not present, then verify before installing it.
-    # raw.githubusercontent.com rate-limits anonymous requests (HTTP 429),
-    # especially from shared CI runner IPs, so retry with a pause before
-    # giving up. Remove failed temporary downloads so neither a transport
-    # failure nor a hash mismatch leaves an executable for a later build.
-    if(NOT EXISTS "${_TC_SOKOL_SHDC}")
-        message(STATUS "[${_TC_TARGET}] Downloading sokol-shdc...")
-        file(MAKE_DIRECTORY "${_TC_SOKOL_SHDC_TOOLS_DIR}")
-        set(_TC_SOKOL_SHDC_DOWNLOAD "${_TC_SOKOL_SHDC}.download")
-        foreach(_TC_ATTEMPT RANGE 1 3)
-            file(DOWNLOAD "${_TC_SOKOL_SHDC_URL}" "${_TC_SOKOL_SHDC_DOWNLOAD}"
-                SHOW_PROGRESS
-                STATUS _TC_DOWNLOAD_STATUS)
-            list(GET _TC_DOWNLOAD_STATUS 0 _TC_DOWNLOAD_ERROR)
-            if(NOT _TC_DOWNLOAD_ERROR)
-                break()
-            endif()
-            file(REMOVE "${_TC_SOKOL_SHDC_DOWNLOAD}")
-            if(_TC_ATTEMPT LESS 3)
-                message(STATUS "[${_TC_TARGET}] sokol-shdc download failed (${_TC_DOWNLOAD_STATUS}), retrying in 5s (attempt ${_TC_ATTEMPT}/3)...")
-                execute_process(COMMAND ${CMAKE_COMMAND} -E sleep 5)
-            endif()
-        endforeach()
-        if(_TC_DOWNLOAD_ERROR)
-            message(FATAL_ERROR "Failed to download sokol-shdc: ${_TC_DOWNLOAD_STATUS}")
-        endif()
-        # An explicit SHA256 check lets us clean up before FATAL_ERROR;
-        # file(DOWNLOAD EXPECTED_HASH) can stop before that cleanup runs.
-        file(SHA256 "${_TC_SOKOL_SHDC_DOWNLOAD}" _TC_SOKOL_SHDC_ACTUAL_HASH)
-        if(NOT _TC_SOKOL_SHDC_ACTUAL_HASH STREQUAL _TC_SOKOL_SHDC_EXPECTED_HASH)
-            file(REMOVE "${_TC_SOKOL_SHDC_DOWNLOAD}")
-            message(FATAL_ERROR
-                "sokol-shdc SHA-256 mismatch for ${_TC_SOKOL_SHDC_DIR} at commit ${_TC_SOKOL_SHDC_COMMIT}:\n"
-                "  expected: ${_TC_SOKOL_SHDC_EXPECTED_HASH}\n"
-                "  actual:   ${_TC_SOKOL_SHDC_ACTUAL_HASH}\n"
-                "  URL: ${_TC_SOKOL_SHDC_URL}\n"
-                "The failed download was removed.")
-        endif()
-        file(RENAME "${_TC_SOKOL_SHDC_DOWNLOAD}" "${_TC_SOKOL_SHDC}")
-        # Make executable on Unix
-        if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
-            file(CHMOD "${_TC_SOKOL_SHDC}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
-        endif()
-        message(STATUS "[${_TC_TARGET}] sokol-shdc downloaded and SHA-256 verified (${_TC_SOKOL_SHDC_COMMIT})")
-    endif()
+    trussc_acquire_shdc("${_TC_SOKOL_SHDC}" "${_TC_SOKOL_SHDC_URL}"
+        "${_TC_SOKOL_SHDC_EXPECTED_HASH}" "${_TC_SOKOL_SHDC_DIR}" "${_TC_SOKOL_SHDC_COMMIT}")
 
     # Output languages: Metal (macOS/iOS/iOS-simulator), HLSL (Windows),
     # GLSL 4.30 (Linux desktop, SOKOL_GLCORE), GLSL ES3 (Android/RasPi/

@@ -477,6 +477,7 @@ static void cover_other() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
     (void)createWindow(af::val<const WindowSettings>());
 #endif
+    (void)getResourceLoadConcurrency();
     (void)onScreenshotSave();
     (void)operator*(af::val<float>(), af::val<const Vec2>());
     (void)operator*(af::val<float>(), af::val<const Vec3>());
@@ -484,6 +485,7 @@ static void cover_other() {
     (void)operator*(af::val<int>(), af::val<const IVec3>());
     (void)operator*(af::val<float>(), af::val<const Vec4>());
     (void)saveScreenshotAsync(af::val<const fs::path>());
+    (void)setResourceLoadConcurrency(af::val<int>());
 }
 
 static void cover_platform() {
@@ -4775,11 +4777,8 @@ struct Cover_mcp__AdmissionLimits : af::Scope<mcp::AdmissionLimits> {
     static void run() {
         (void)af::val<mcp::AdmissionLimits>().bodyBytes;
         (void)af::val<mcp::AdmissionLimits>().gridCells;
-        (void)af::val<mcp::AdmissionLimits>().headerBytes;
-        (void)af::val<mcp::AdmissionLimits>().headerCount;
         (void)af::val<mcp::AdmissionLimits>().histogramBins;
         (void)af::val<mcp::AdmissionLimits>().jsonDepth;
-        (void)af::val<mcp::AdmissionLimits>().lineBytes;
         (void)af::val<mcp::AdmissionLimits>().operations;
         (void)af::val<mcp::AdmissionLimits>().outstanding;
         (void)af::val<mcp::AdmissionLimits>().replyBytes;

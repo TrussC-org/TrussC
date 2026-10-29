@@ -102,7 +102,7 @@ std::string tcxLua::getLuaVersionEstimated(const std::shared_ptr<sol::state>& lu
         end
     )LUA";
     
-    lua->safe_script(luaSource);
+    lua->safe_script(luaSource, "version", sol::load_mode::text);
 
     sol::protected_function_result result = ((*lua)["___internal_estimated_lua_version"])();
 

@@ -235,6 +235,7 @@ bool replayFailureProbe(bool destructor) {
     auto* lease = internal::leaseTargetResources(SG_PIXELFORMAT_RGBA8,1,SG_PIXELFORMAT_NONE);
     target.pooledResources = lease;
     Shader shader; shader.load(descriptor);
+    const int beforeReplay = submittedDraws;
     bool caught = false;
     {
         internal::TargetPassScope scope(target);
@@ -245,11 +246,13 @@ bool replayFailureProbe(bool destructor) {
             catch (const std::bad_alloc&) { caught = true; }
         }
     }
-    const bool ok = !failAllocation && (destructor || caught) && window.targetStack.size() == 1 &&
+    // Stream allocation failure skips this draw without escaping into the
+    // target coordinator; explicit pop and RAII destruction both restore it.
+    const bool ok = !failAllocation && !caught && submittedDraws == beforeReplay && window.targetStack.size() == 1 &&
         window.currentTarget == &window.swapchainTarget && !target.activation && !target.activeWindow &&
         !target.inPass && window.swapchainTarget.inPass && !lease->leased && !target.pooledResources &&
         target.deferredShaderDraws.empty() && sgl_get_context().id == sgl_default_context().id;
-    std::printf("REPLAY BAD_ALLOC destructor=%d restored=%d expected=1\n",destructor,ok);
+    std::printf("REPLAY ALLOCATION SKIP destructor=%d restored=%d expected=1\n",destructor,ok);
     // A following activation must reuse the released lease, with no stale draw.
     const int before = submittedDraws;
     fbo.begin(0,0,0); fbo.end();
@@ -957,17 +960,21 @@ bool foreignTeardownReplayFailureProbe() {
     const auto before = submittedDraws;
     failAllocation = true;
     windows.secondary.context().teardownTargets();
-    ok &= !failAllocation && !target.inPass && !_sg.cur_pass.in_pass && target.recordingFailed &&
-        target.deferredShaderDraws.empty() && !target.openShaderScopes && windows.main.shaderStack.empty() &&
+    ok &= !failAllocation && !target.inPass && !_sg.cur_pass.in_pass && !target.recordingFailed &&
+        target.deferredShaderDraws.empty() && target.openShaderScopes == 1 &&
+        !windows.main.shaderStack.empty() && windows.main.shaderStack.back() == &shader &&
         !sgl_tc_context_has_pending_draws(target.resources().context) && target.activation == token &&
         &internal::currentWindowContext() == &windows.main && submittedDraws == before;
-    // The owner boundary completes the discarded recording before new work.
+    // Only the failed draw is skipped. Its owner's scope remains usable and
+    // must still be ended normally after the foreign window is torn down.
+    shader.end();
+    ok &= !target.openShaderScopes && windows.main.shaderStack.empty();
     present();
     ok &= submittedDraws == before && !target.recordingFailed;
     // Recovery permits a new pass, with neither a stale draw nor a scope.
     internal::ensureCurrentPass(); recordTriangle(); present();
     ok &= submittedDraws == before + 1 && !target.recordingFailed;
-    std::printf("FOREIGN TEARDOWN replay_allocation_failure_cleanup=%d expected=1\n",ok);
+    std::printf("FOREIGN TEARDOWN stream_allocation_skip_preserves_owner=%d expected=1\n",ok);
     return ok;
 }
 

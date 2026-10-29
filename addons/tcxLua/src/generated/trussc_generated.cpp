@@ -434,6 +434,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getPointSize", []() { return trussc::getPointSize(); });
     lua->set_function("getPointStyle", []() { return trussc::getPointStyle(); });
     lua->set_function("getProjectionMatrix", []() { return trussc::getProjectionMatrix(); });
+    lua->set_function("getResourceLoadConcurrency", []() { return trussc::getResourceLoadConcurrency(); });
     lua->set_function("getRootNode", []() { return trussc::getRootNode(); });
     lua->set_function("getScale", []() { return trussc::getScale(); });
     lua->set_function("getSeconds", []() { return trussc::getSeconds(); });
@@ -752,6 +753,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
 #endif
     lua->set_function("setPointSize", [](float px) { return trussc::setPointSize(px); });
     lua->set_function("setPointStyle", [](trussc::PointStyle s) { return trussc::setPointStyle(s); });
+    lua->set_function("setResourceLoadConcurrency", [](int count) { return trussc::setResourceLoadConcurrency(count); });
     lua->set_function("setScissor", sol::overload(
         [](float x, float y, float w, float h) { return trussc::setScissor(x, y, w, h); },
         [](int x, int y, int w, int h) { return trussc::setScissor(x, y, w, h); }
