@@ -81,6 +81,44 @@ void check(const char* name, bool passed) {
 }
 void drain() { internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch()); }
 #ifdef __EMSCRIPTEN__
+void webConcurrency() {
+    check("Web default preparation concurrency is four", getResourceLoadConcurrency() == 4);
+    std::vector<std::shared_ptr<internal::ResourceLoadState>> states;
+    int prepared = 0;
+    for (int i = 0; i < 10; ++i) {
+        auto state = std::make_shared<internal::ResourceLoadState>();
+        state->localFile = true;
+        state->run = internal::appRunToken();
+        internal::startExternalResourceLoad(state, [&, raw = state.get()] {
+            ++prepared;
+            raw->backendPending = true; // Fake fetch/decode retains its slot.
+        });
+        states.push_back(std::move(state));
+    }
+    drain();
+    check("Web four active backends retain slots", prepared == 4 && internal::resourceLoadUsageForTests().active == 4);
+    setResourceLoadConcurrency(8);
+    check("Web raise pumps queue immediately", internal::resourceLoadUsageForTests().active == 8 &&
+        internal::resourceLoadUsageForTests().pending == 2);
+    drain();
+    check("Web eight fetch/decode preparations run", prepared == 8);
+    setResourceLoadConcurrency(2);
+    for (int i = 0; i < 6; ++i) internal::completeResourceLoad(states[i]);
+    check("Web lower retains running backends and waits", internal::resourceLoadUsageForTests().active == 2 &&
+        internal::resourceLoadUsageForTests().pending == 2 && !states[6]->cancelled && !states[7]->cancelled);
+    internal::completeResourceLoad(states[6]);
+    check("Web released slot admits queued backend below new limit", internal::resourceLoadUsageForTests().active == 2 &&
+        internal::resourceLoadUsageForTests().pending == 1);
+    drain();
+    internal::completeResourceLoad(states[7]);
+    drain();
+    internal::completeResourceLoad(states[8]);
+    internal::completeResourceLoad(states[9]);
+    drain();
+    check("Web all queued preparations finish without cancellation", prepared == 10 &&
+        internal::resourceLoadUsageForTests().active == 0 && internal::resourceLoadUsageForTests().pending == 0);
+    setResourceLoadConcurrency(4);
+}
 struct Timer { em_arg_callback_func callback; void* data; int id = 0; };
 std::vector<Timer> timers;
 int nextTimer = 1, abortReentries = 0;
@@ -364,6 +402,7 @@ TC_CORE_TEST_MAIN() {
 #else
     getMainThreadId();
     internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
+    webConcurrency();
     externalRejections();
     abortReentries = 0;
     installAudioMock();
