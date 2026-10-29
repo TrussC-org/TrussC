@@ -1,45 +1,27 @@
 # cgltf provenance
 
-CMake fetches cgltf v1.15 from https://github.com/jkuhlmann/cgltf.
-The upstream `cgltf.h` SHA-256 is
+CMake fetches cgltf v1.15 from https://github.com/jkuhlmann/cgltf and leaves
+that source intact. The LF-normalized upstream `cgltf.h` SHA-256 is
 `e378a21c084bf1f288bb799de827bb26906efb024255f1ecf1705ea13f11c6ec`.
-Its MIT license is retained in the header.
 
-The fetched file stays intact. CMake generates `cgltf-safe/tcxGltfCgltf.h`
-in the addon build directory with two integration patches. The first runs immediately after
-`cgltf_parse_json_root` returns:
+C1 consists of two small insertions fixing an upstream allocation-failure path
+during parsing: reset `*out_attributes_count` to zero if its table allocation
+fails; check the material-mapping allocation, reset `mappings_count` to zero
+and return `CGLTF_ERROR_NOMEM` on failure. No other cgltf source changes are made.
+The generated implementation copy, `cgltf-safe/tcxGltfCgltf.h`, has SHA-256
+`ad63ae638f790df8346a2fc7abc56c1a03b46a27e1c1f71a9093999892cebf74`.
+CMake fails configuration if either checksum differs. The MIT license remains
+in the generated header. Tests use the fetched header's unchanged declarations.
 
-```c
-if (CGLTF_TRUSSC_CALLBACK_FAILED(options->memory.user_data))
-{
-    options->memory.free_func(options->memory.user_data, tokens);
-    return cgltf_result_out_of_memory;
-}
-```
+M42 parser allocation tracking is removed for #1105. Production uses cgltf's
+default allocator, result codes and `cgltf_free`, without an allocation list,
+callback state or allocation hooks.
 
-The implementation defines this hook to inspect the per-load callback failure
-state. cgltf's parse error cleanup otherwise walks tables whose counts can
-already be set when their allocation returned NULL. Its material-variant
-mapping parser can also continue after a NULL allocation, so the guard must
-precede pointer fixup as well as cleanup. On callback failure no partial tree
-is published or passed to `cgltf_free`. The addon's deleter also skips
-`cgltf_free` after buffer-loading callback failure. The per-load allocation
-registry releases every remaining block directly. Successful loads and
-failures without a callback failure use ordinary cgltf cleanup.
+`CGLTF_ATOI` / `CGLTF_ATOLL` remain defined in `tcxGltf.cpp`, using
+`invalidModelInteger` to reject malformed integer counts and references. They
+are integer-conversion correctness checks, independent of allocation tracking,
+and require no changes to upstream source.
 
-The second adds `CGLTF_TRUSSC_RECORD_OOM(options->memory.user_data);` before
-the overflow return in `cgltf_calloc`. Otherwise that NULL result bypasses the
-allocator callback and its failure state. A synthetic overflow test exercises
-this branch without a large input or allocation. CMake checks the upstream
-LF-normalized checksum and both insertion sites before creating the build copy,
-including when the Windows checkout uses CRLF.
-
-All allocator and file callbacks contain exceptions and return the library's
-failure value. Diagnostics run only after the cgltf call returns. This avoids
-unwinding through C linkage functions, including under MSVC `/EHsc`.
-
-Local parse-table allocations have no policy cap. The allocator records when
-its cumulative table bytes exceed 256 MiB without logging or allocating a
-diagnostic. After the load outcome and parser cleanup are complete, the loader logs one Notice with
-the resolved file path and the table byte count, including on a later parse
-failure. Callback failures still follow the guarded registry-only cleanup above.
+Filesystem-aware file callbacks contain exceptions and return cgltf result
+codes; exceptions never unwind through cgltf callbacks. TrussC model building
+has one exception boundary that clears partial state and returns a load failure.

@@ -31,8 +31,8 @@ model data is validated before it is read:
   loader catches it and skips that image). On POSIX the bytes are a valid
   file name, so there the image is skipped because the file does not exist;
 - an exception while the model is read (injected through
-  `internal::setTextureLoadHookForTests()`, a `std::exception` and one that
-  is not) fails the load, logs an Error (with `what()` when there is one)
+  `internal::setTextureLoadHookForTests()`, `std::bad_alloc` or
+  `std::length_error`) fails the load, logs an Error (with `what()` when there is one)
   and leaves the model empty, also of the primitive read before it. Under
   ASan this also checks that the parsed data is freed on that path;
 - a component type glTF 2.0 does not allow fails validation;
@@ -48,31 +48,27 @@ model data is validated before it is read:
 Texture cases use sokol's dummy graphics backend (no window or GPU). On
 Windows, the test executable uses the UTF-8 manifest from `trussc_app()`.
 
-Rejected input logs one Error and leaves the model empty. Under allocation
-exhaustion, error text and logging are best effort; the failed result and empty
-model do not require a diagnostic allocation in addon recovery. GPU-uploaded
-model reload can still terminate if deferred GPU-buffer retirement cannot
-allocate. Cold-start Material destruction can initialize core context and
-allocate (code trace only). These core paths are outside addon recovery.
-LogStream delivery failures are guarded in core.
+Rejected input logs one Error and leaves the model empty. A test-only
+`cgltf_options` memory callback checks early parser allocation failure, retry,
+and buffer allocation failure followed by ordinary `cgltf_free`. Another
+test first locates a valid mesh's attribute-table and material-variant mapping
+allocations, then fails each exact Nth allocation after a partial tree has been
+built, checks OOM without a published tree, and retries successfully. Production
+uses cgltf's default allocator without tracking or failure-injection hooks.
+Model-building tests throw `std::bad_alloc` after the first primitive and
+`std::length_error` at texture loading, checking empty state and one Error.
+Existing image encoder failure tests remain independent of parser allocation.
 
-The allocation tests observe requested sizes and inject failures into every
-cgltf allocation as well as every observed STL request for inline glTF, GLB, and
-external-buffer/PNG glTF, including persistent rejection after the first failed
-request. Failed loads clear the model, release the parser's independently owned
-allocations, and permit a successful retry. The parser sweep checks registry counts and outstanding bytes observed at the
-actual malloc/free calls after each failure, including partially published trees.
-Removing a free while retaining the bookkeeping decrement fails this check.
-NULL, `bad_alloc`, and non-standard allocator failures are injected directly
-at the parser seam, including persistent failure, for glTF, GLB, and external
-buffers. C callbacks contain all exceptions; diagnostics run after cgltf
-returns. A documented build-copy guard prevents cgltf's own error cleanup from
-walking partially published tables. Every assertion also requires zero live
-registry blocks and zero independently tracked outstanding bytes.
-STL tests use Nth-allocation injection so they do not depend on filebuf using
-operator new on Windows. Image encoding callback failures are also exercised
-for PNG, BMP, and JPEG, preserving any existing destination file.
-The addon enables exception recovery and non-aborting malloc on Emscripten too.
+The test executable's STL allocator also refuses every allocation starting at
+the second primitive's texture step, through failure diagnostics and result
+construction. The result must be `DecodeFailed` with empty state and no escaped
+exception; a later retry must load. A separate case starts exhaustion during
+path resolution. No production allocator hook is used. These persistent cases
+are skipped with MSVC iterator debugging, whose STL proxy construction can
+terminate on allocation failure. Throwing logger listeners are also contained.
+Under persistent exhaustion, diagnostics use a fixed stderr fallback and the
+result message may be empty; an Error event is not required.
+
 Synthetic size tests exercise the actual token-count, individual-length and
 ptrdiff_t offset limits without large fixtures. A synthetic trailing-whitespace
 size seam reaches the load-time document-size gate beyond INT_MAX. Load tests
@@ -83,14 +79,9 @@ containers for untrusted input; cgltf skips iteratively. Synthetic tests check
 cumulative skip-end arithmetic as well as per-object products.
 Node hierarchies use the existing iterative walk with cycle and duplicate
 protection. Local model and referenced files have no policy size or per-table
-count caps, including no parse-table cap. When parse tables first exceed
-256 MiB, one Notice per load reports the resolved path and the byte count,
-after the load outcome and parser cleanup are complete. A roughly 5.2 MB JSON file with real parse
-tables above the former input-scaled threshold loads successfully twice,
-with exactly one such Notice each time. Actual malloc/free tracking checks
-that the tables obtain memory and cleanup leaves no outstanding blocks. A
-roughly 12 MB JSON document with roughly 83 MB of parse tables loads without
-a large-table Notice. Both unpadded base64 tails load; a one-character tail fails.
+count caps. A roughly 5.2 MB JSON file with large parse tables loads twice
+without a parse-table Notice. Both unpadded base64 tails load; a one-character
+tail fails.
 
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
 push/PR across macOS / Windows / Linux; a non-zero exit fails the job. Run it
@@ -107,11 +98,3 @@ Error, `DecodeFailed` with exactly one Error for rejected data, relative paths
 through `getDataPath()`, Japanese model/buffer/texture filenames, escaped spaces
 and UTF-8 in buffer/image URIs, and `%25` decoded exactly once. All fixtures
 are generated at runtime.
-
-Small fixtures also check independent load results during log delivery using
-an implementation-only Notice threshold seam. The production threshold remains
-256 MiB.
-
-OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, constructing or moving even an empty `LoadResult` / `SaveResult` string or STL container can allocate a container proxy, so persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging remain best effort.
-
-STL-wide persistent allocation-failure cases SKIP when `_ITERATOR_DEBUG_LEVEL != 0`, with the reason printed. Targeted one-shot payload failures and the glTF C-parser-only persistent sweep still run. Exhaustive one-shot STL sweeps SKIP too: they deliberately target noexcept container proxy construction and moves, which can terminate even after a single refused proxy allocation. MSVC Debug CRT reports go to stderr and abort dialogs are disabled by the shared test support header.
