@@ -2723,6 +2723,9 @@ namespace internal {
             return;
         }
         frameReentryGuard = true;
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)) || defined(__EMSCRIPTEN_PTHREADS__)
+        updateKeepScreenOn();
+#endif
         auto* previousWindow = currentWindowCtx();
         restoreWindowContext(nullptr);
         crashFrame(sapp_frame_count());
@@ -2820,6 +2823,9 @@ namespace internal {
             appCleanupFunc();
         }
 
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__EMSCRIPTEN__)
+        shutdownKeepScreenOn();
+#endif
         waitForResourceLoadsAtAppExit();
 
         // Stop the audio device explicitly: the AudioEngine singleton is

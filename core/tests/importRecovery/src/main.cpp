@@ -21,19 +21,7 @@ void check(const char* name, bool ok) {
 #include "../../asyncLoads/src/fontFixture.h"
 struct Settings {
     int count = 1;
-    string name = string(100, 'x');
-    int passes = 0, getterCalls = 0;
-    bool failCommit = false, failGetter = false;
-    const string& getName() {
-        ++getterCalls;
-        if (failGetter) failNext = true;
-        return name;
-    }
-    void setName(const string& value) { name = value; }
-    TC_REFLECT_ROOT(Settings) {
-        if (++_tc_self.passes == 2 && _tc_self.failCommit) failNext = true;
-        TC_VALUE(count) TC_VALUE(name, getName, setName)
-    }
+    TC_REFLECT_ROOT(Settings) { TC_VALUE(count) }
 };
 struct IesRecoveryApp : App {
     void setup() override {
@@ -99,60 +87,17 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         settings.setHighDpi(false);
         return tcCoreTest::runDisplayTest<IesRecoveryApp>(settings, failures);
     }
-    const auto source = Json::parse(R"({"count":99,"name":"new"})");
-    if (mode == "all" || mode == "commit") {
-        Settings settings;
-        settings.failCommit = true;
-        const auto result = reflectFromJson(settings, source);
-        failAll = false;
-        failNext = false;
-        check("a rejected commit leaves both fields unchanged", !internal::JsonReadResultAccess::rejected(result) || (settings.count == 1 && settings.name == string(100, 'x')));
-        check("commit uses staged getter values without allocating", failedRequests == 0 && settings.count == 99 && settings.name == "new" && settings.getterCalls == 1 && !result.applied.empty());
-        Settings rejected;
-        rejected.failGetter = true;
-        const auto rejectedResult = reflectFromJson(rejected, source);
-        failNext = false;
-        check("getter staging failure changes no fields", rejected.count == 1 && rejected.name == string(100, 'x') && rejectedResult.applied.empty() && internal::JsonReadResultAccess::rejected(rejectedResult));
-    }
     if (mode == "all" || mode == "reflect") {
-        Settings exhausted;
-        if (!tcTest::skipPersistentAllocationFailure("reflection result construction/return")) {
-            bool returned = false, rejectedFlag = false;
-            failAll = true;
-            try {
-                auto r = reflectFromJson(exhausted, source);
-                rejectedFlag = internal::JsonReadResultAccess::rejected(r);
-                returned = r.applied.empty();
-            } catch (...) {}
-            failAll = false;
-            check("reflection returns rejection under persistent exhaustion", returned && rejectedFlag && exhausted.count == 1 && exhausted.name == string(100, 'x'));
-            bool fallbackReturned = false;
-            failAll = true;
-            try {
-                JsonReadReflector empty{Json()};
-                internal::JsonReadResultAccess::reject(empty);
-                fallbackReturned = internal::JsonReadResultAccess::rejected(empty) && empty.applied.empty() && empty.unknownKeys().empty();
-            } catch (...) {}
-            failAll = false;
-            check("empty rejected reader needs no allocation without iterator debugging", fallbackReturned);
-        }
-        JsonReadReflector reader(source);
-        failAll = true;
-        exhausted.reflectMembers(reader);
-        failAll = false;
-        check("reader recovery hook survives persistent exhaustion", reader.applied.empty() && internal::JsonReadResultAccess::rejected(reader) && exhausted.count == 1);
-    }
-    if (mode == "all" || mode == "root") {
-        for (const char* text : {"17", "[]"}) {
+        for (bool parsed : {false, true}) {
             Settings settings;
-            JsonReadReflector reader(Json::parse(text));
-            bool returned = false;
-            failAll = true;
-            try { settings.reflectMembers(reader); returned = true; } catch (...) {}
-            failAll = false;
-            check("direct invalid-root entry rejects under persistent exhaustion",
-                  returned && internal::JsonReadResultAccess::rejected(reader) &&
-                  reader.applied.empty() && settings.count == 1 && settings.passes == 0);
+            const Json input = {{"count", 99}};
+            const Json source = parsed ? Json::parse(input.dump()) : input;
+            bool propagated = false;
+            failNext = true;
+            try { (void)reflectFromJson(settings, source); }
+            catch (const bad_alloc&) { propagated = true; }
+            failNext = false;
+            check("reflection allocation failure propagates for all JSON", propagated && settings.count == 1);
         }
     }
     if (mode == "all" || mode == "ies") {

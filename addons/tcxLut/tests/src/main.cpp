@@ -53,10 +53,23 @@ int main() {
     auto logs = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
         if (event.level == tc::LogLevel::Error) lastError = event.message;
     });
+    const auto directory = path.parent_path();
+    check("LUT requires a regular file",
+          !lut.load(directory) && !lut.isAllocated() &&
+          lastError.find("failed to open LUT document: ") != std::string::npos);
     check("load reports failure when no GPU can create the texture", !lut.load(path) && !lut.isAllocated());
     check("LUT resource error names the non-ASCII file", lastError.find(tc::pathToUtf8(path)) != std::string::npos);
     { std::ofstream file(path); file << "LUT_3D_SIZE invalid\n"; }
     check("LUT parser error names the non-ASCII file", !lut.load(path) && lastError.find(tc::pathToUtf8(path)) != std::string::npos);
+    for (const char* range : {"LUT_1D_INPUT_RANGE -1 3", "LUT_3D_INPUT_RANGE -1 1", "DOMAIN_MIN -1 0 0", "DOMAIN_MAX 1 1 2",
+                              "LUT_IN_VIDEO_RANGE", "LUT_OUT_VIDEO_RANGE"}) {
+        { std::ofstream file(path); file << range << "\nLUT_3D_SIZE 2\n"; }
+        const std::string keyword = std::string(range).substr(0, std::string(range).find(' '));
+        check("unsupported range load reports the keyword and file",
+              !lut.load(path) && !lut.isAllocated() &&
+              lastError.find("unsupported LUT range (" + keyword + ")") != std::string::npos &&
+              lastError.find(tc::pathToUtf8(path)) != std::string::npos);
+    }
     lut.allocate(std::numeric_limits<int>::max());
     check("invalid direct allocation leaves an empty LUT", !lut.isAllocated() && lut.getSize() == 0);
     std::filesystem::remove(path);
