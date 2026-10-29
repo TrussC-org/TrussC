@@ -62930,11 +62930,6 @@ static ma_result ma_decoder__init_data_converter(ma_decoder* pDecoder, const ma_
     }
 
 
-#ifdef MA_TRUSSC_VALIDATE_AUDIO_FORMAT
-    /* Bound (security): validate external format before converter allocation. Overflow rejects the whole sound or stream and is counted by the owner. */
-    if (!MA_TRUSSC_VALIDATE_AUDIO_FORMAT(pDecoder, internalChannels, internalSampleRate)) return MA_INVALID_DATA;
-#endif
-
     /* Make sure we're not asking for too many channels. */
     if (pConfig->channels > MA_MAX_CHANNELS) {
         return MA_INVALID_ARGS;
@@ -81606,10 +81601,6 @@ MA_PRIVATE ma_bool32 ma_dr_wav_init__internal(ma_dr_wav* pWav, ma_dr_wav_chunk_p
     if (!foundChunk_fmt || !foundChunk_data) {
         return MA_FALSE;
     }
-#ifdef MA_TRUSSC_VALIDATE_AUDIO_FRAME
-    // Bound (security): validate source WAV format before backend limits and size-driven work. Overflow rejects the whole sound or stream and is counted by the owner.
-    if (!MA_TRUSSC_VALIDATE_AUDIO_FRAME(&pWav->allocationCallbacks, fmt.channels, fmt.sampleRate, 0, 0)) return MA_FALSE;
-#endif
     if ((fmt.sampleRate    == 0 || fmt.sampleRate    > MA_DR_WAV_MAX_SAMPLE_RATE    ) ||
         (fmt.channels      == 0 || fmt.channels      > MA_DR_WAV_MAX_CHANNELS       ) ||
         (fmt.bitsPerSample == 0 || fmt.bitsPerSample > MA_DR_WAV_MAX_BITS_PER_SAMPLE) ||
@@ -88052,12 +88043,6 @@ static ma_result ma_dr_flac__decode_flac_frame(ma_dr_flac* pFlac)
         return MA_ERROR;
     }
     channelCount = ma_dr_flac__get_channel_count_from_channel_assignment(pFlac->currentFLACFrame.header.channelAssignment);
-#ifdef MA_TRUSSC_VALIDATE_AUDIO_FRAME
-    // Bound (security): validate per-frame audio format before subframe work. Overflow rejects the whole sound or stream and is counted by the owner.
-    if (!MA_TRUSSC_VALIDATE_AUDIO_FRAME(&pFlac->allocationCallbacks, channelCount,
-        pFlac->currentFLACFrame.header.sampleRate ? pFlac->currentFLACFrame.header.sampleRate : pFlac->sampleRate,
-        pFlac->channels, pFlac->sampleRate)) return MA_ERROR;
-#endif
     if (channelCount != (int)pFlac->channels) {
         return MA_ERROR;
     }
@@ -89832,10 +89817,6 @@ static ma_dr_flac* ma_dr_flac_open_with_metadata_private(ma_dr_flac_read_proc on
     if (!ma_dr_flac__init_private(&init, onRead, onSeek, onTell, onMeta, container, pUserData, pUserDataMD)) {
         return NULL;
     }
-#ifdef MA_TRUSSC_VALIDATE_AUDIO_FRAME
-    // Bound (security): inspect FLAC metadata before size-driven decoder allocation. Overflow rejects the whole sound or stream and is counted by the owner.
-    if (!MA_TRUSSC_VALIDATE_AUDIO_FRAME(pAllocationCallbacks, init.channels, init.sampleRate, 0, 0)) return NULL;
-#endif
     if (pAllocationCallbacks != NULL) {
         allocationCallbacks = *pAllocationCallbacks;
         if (allocationCallbacks.onFree == NULL || (allocationCallbacks.onMalloc == NULL && allocationCallbacks.onRealloc == NULL)) {
@@ -94731,23 +94712,12 @@ static ma_uint32 ma_dr_mp3_decode_next_frame_ex__memory(ma_dr_mp3* pMP3, ma_dr_m
 }
 static ma_uint32 ma_dr_mp3_decode_next_frame_ex(ma_dr_mp3* pMP3, ma_dr_mp3d_sample_t* pPCMFrames, ma_dr_mp3dec_frame_info* pMP3FrameInfo, const ma_uint8** ppMP3FrameData)
 {
-    ma_uint32 result;
     if (pMP3->memory.pData != NULL && pMP3->memory.dataSize > 0) {
-        result = ma_dr_mp3_decode_next_frame_ex__memory(pMP3, pPCMFrames, pMP3FrameInfo, ppMP3FrameData);
+        return ma_dr_mp3_decode_next_frame_ex__memory(pMP3, pPCMFrames, pMP3FrameInfo, ppMP3FrameData);
     } else {
-        result = ma_dr_mp3_decode_next_frame_ex__callbacks(pMP3, pPCMFrames, pMP3FrameInfo, ppMP3FrameData);
+        return ma_dr_mp3_decode_next_frame_ex__callbacks(pMP3, pPCMFrames, pMP3FrameInfo, ppMP3FrameData);
     }
-#ifdef MA_TRUSSC_VALIDATE_AUDIO_FRAME
-    // Bound (security): changed external frame layouts cannot be published under stale metadata. Overflow rejects the whole sound or stream and is counted by the owner.
-    if (result && !MA_TRUSSC_VALIDATE_AUDIO_FRAME(&pMP3->allocationCallbacks, pMP3->mp3FrameChannels, pMP3->mp3FrameSampleRate, pMP3->channels, pMP3->sampleRate)) {
-        pMP3->atEnd = MA_TRUE;
-        pMP3->pcmFramesRemainingInMP3Frame = 0;
-        return 0;
-    }
-#endif
-    return result;
 }
-
 static ma_uint32 ma_dr_mp3_decode_next_frame(ma_dr_mp3* pMP3)
 {
     MA_DR_MP3_ASSERT(pMP3 != NULL);

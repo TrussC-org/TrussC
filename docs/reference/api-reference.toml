@@ -28870,27 +28870,30 @@ description.en = "Decode an audio file into the buffer."
 description.ja = "音声ファイルをバッファにデコードする。"
 description.ko = "오디오 파일을 버퍼로 디코딩한다."
 details.en = '''
+- Decoder-supported audio loads at any positive sample rate up to 2,147,483,647 Hz, the int range of the sample-rate getter; higher rates fail with an Error naming the file and the representation constraint. TrussC adds no channel-count ceiling or decoder memory budget; Vorbis retains its fixed channel-array bound.
 - Selects the decoder by the case-insensitive extension `.wav`, `.mp3`, `.ogg`, `.flac`, `.aac`, or `.m4a`, and finishes decoding into interleaved float PCM before returning.
 - File loaders resolve relative paths with `getDataPath()` and use absolute paths unchanged; successful loads record the resolved path in `getPath()`.
 - Returns `LoadResult`, which converts to true on success; inspect `error` and `message` for failure details. Missing or unreadable files report `LoadError::FileNotFound`; an existing file with an unsupported extension reports `LoadError::UnsupportedFormat`.
 - All synchronous file, encoded-memory, and PCM loaders cancel a pending `loadAsync` and clear `getPath()` before loading, including requests that fail.
-- All encoded audio loaders preserve previous PCM and audio metadata on any failure and never publish a partial sound. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Encoded inputs above 64 MiB are not loaded fully; allocation failure is a clean Error.
+- All encoded audio loaders preserve previous PCM and audio metadata on any failure and never publish a partial sound. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Local files have no encoded-size cap. Encoded memory inputs retain a 64 MiB limit. Allocation failure is a clean Error.
 - Serialize handle operations and direct sample access on the main thread. Synchronous loading, generation, and editing do not lock the audio mixer, so do not modify a buffer while any playing `Sound` reads it.
 '''
 details.ja = '''
+- デコーダーが対応する音声は、サンプルレート取得関数の int の範囲である 1〜2,147,483,647 Hz の任意のレートで読み込めます。これを超えると、ファイル名と表現上の制約を示す Error を出して失敗します。TrussC独自のチャンネル数上限やデコーダーのメモリ予算はありません。Vorbisの固定チャンネル配列の制約は残ります。
 - 大文字小文字を区別せず、拡張子 `.wav`、`.mp3`、`.ogg`、`.flac`、`.aac`、`.m4a` でデコーダを選び、チャンネルを交互に並べたfloat PCMへのデコードを完了してから戻ります。
 - ファイル読み込みでは相対パスを `getDataPath()` で解決し、絶対パスはそのまま使います。成功すると解決済みパスを `getPath()` に記録します。
 - 成功時に真として評価できる `LoadResult` を返します。失敗の詳細は `error` と `message` で確認できます。存在しないファイルや開けないファイルは `LoadError::FileNotFound`、存在するファイルの非対応拡張子は `LoadError::UnsupportedFormat` になります。
 - 同期的なファイル・エンコード済みメモリ・PCMの読み込みは、失敗する要求も含め、読み込み前に進行中の `loadAsync` をキャンセルして `getPath()` を空にします。
-- エンコード済み音声の読み込みは、どの失敗でも以前のPCMと音声メタデータを保持し、部分的な音声を公開しません。全体読み込みには長さの上限はありません。デコード済みPCMが256 MiBを超えると、プロセスで一度だけNoticeを出し、長い曲には `SoundStream::loadStream()` / `Sound::loadStream()` を推奨します。エンコード済み入力が64 MiBを超える場合は全体を読み込まず、メモリ確保の失敗はErrorとして安全に失敗します。
+- エンコード済み音声の読み込みは、どの失敗でも以前のPCMと音声メタデータを保持し、部分的な音声を公開しません。全体読み込みには長さの上限はありません。デコード済みPCMが256 MiBを超えると、プロセスで一度だけNoticeを出し、長い曲には `SoundStream::loadStream()` / `Sound::loadStream()` を推奨します。ローカルファイルの入力サイズに上限はありません。符号化済みメモリ入力は64 MiBが上限です。メモリ確保の失敗はErrorとして安全に失敗します。
 - ハンドルの操作とサンプルへの直接アクセスはメインスレッドで順に行ってください。同期読み込み・生成・編集はオーディオミキサーをロックしないため、再生中の `Sound` が読み取るバッファは変更しないでください。
 '''
 details.ko = '''
+- 디코더가 지원하는 오디오는 샘플레이트 getter의 int 범위인 1~2,147,483,647 Hz의 모든 레이트로 로드됩니다. 이를 넘으면 파일 이름과 표현 범위 제한을 명시한 Error와 함께 실패합니다. TrussC 자체의 채널 수 상한이나 디코더 메모리 예산은 없으며 Vorbis의 고정 채널 배열 한도는 유지됩니다.
 - 대소문자를 구분하지 않는 확장자 `.wav`, `.mp3`, `.ogg`, `.flac`, `.aac`, `.m4a`로 디코더를 선택하며, 채널을 번갈아 배치한 float PCM으로 디코딩을 완료한 뒤 반환합니다.
 - 파일 로더는 상대 경로를 `getDataPath()`로 해석하고 절대 경로는 그대로 사용합니다. 성공하면 해석된 경로를 `getPath()`에 기록합니다.
 - 성공 시 참으로 평가되는 `LoadResult`를 반환합니다. 실패 정보는 `error`와 `message`로 확인합니다. 없거나 열 수 없는 파일은 `LoadError::FileNotFound`를, 존재하는 파일의 미지원 확장자는 `LoadError::UnsupportedFormat`을 보고합니다.
 - 동기 파일, 인코딩된 메모리, PCM 로더는 실패하는 요청도 포함해 로드 전에 진행 중인 `loadAsync`를 취소하고 `getPath()`를 비웁니다.
-- 인코딩된 오디오 로더는 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 전체 로드에는 길이 제한이 없습니다. 디코딩된 PCM이 256 MiB를 넘으면 프로세스에서 한 번만 Notice를 기록하며 긴 트랙에는 `SoundStream::loadStream()` / `Sound::loadStream()`을 권장합니다. 인코딩된 입력이 64 MiB를 넘으면 전체를 로드하지 않으며 메모리 할당 실패는 안전하게 Error로 처리합니다.
+- 인코딩된 오디오 로더는 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 전체 로드에는 길이 제한이 없습니다. 디코딩된 PCM이 256 MiB를 넘으면 프로세스에서 한 번만 Notice를 기록하며 긴 트랙에는 `SoundStream::loadStream()` / `Sound::loadStream()`을 권장합니다. 로컬 파일의 입력 크기에는 상한이 없습니다. 인코딩된 메모리 입력은 64 MiB로 제한됩니다. 메모리 할당 실패는 안전하게 Error로 처리합니다.
 - 핸들 조작과 샘플 직접 접근은 메인 스레드에서 순서대로 수행해야 합니다. 동기 로드, 생성, 편집은 오디오 믹서를 잠그지 않으므로 재생 중인 `Sound`가 읽는 버퍼를 변경하지 않아야 합니다.
 '''
 snippet = '''
@@ -28908,17 +28911,17 @@ description.ko = "AAC 또는 M4A 파일을 버퍼로 디코딩한다."
 details.en = '''
 - Returns `LoadResult`; see `SoundBuffer::load` for path resolution, cancellation, and threading rules.
 - On Web, waits for `OfflineAudioContext` decoding to finish even inside `setup()`, with a 30-second timeout, and stores PCM at 44100 Hz.
-- On any failure, previous PCM and audio metadata are preserved; no partial sound is published. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Encoded inputs above 64 MiB are not loaded fully; allocation failure is a clean Error.
+- On any failure, previous PCM and audio metadata are preserved; no partial sound is published. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Local files have no encoded-size cap. Encoded memory inputs retain a 64 MiB limit. Allocation failure is a clean Error.
 '''
 details.ja = '''
 - `LoadResult` を返します。パスの解決、キャンセル、スレッドの扱いは `SoundBuffer::load` を参照してください。
 - Webでは `setup()` 内でも `OfflineAudioContext` によるデコード完了まで待ち、30秒でタイムアウトします。PCMは44100 Hzで保持します。
-- どの失敗でも以前のPCMと音声メタデータを保持し、部分的な音声を公開しません。全体読み込みには長さの上限はありません。デコード済みPCMが256 MiBを超えると、プロセスで一度だけNoticeを出し、長い曲には `SoundStream::loadStream()` / `Sound::loadStream()` を推奨します。エンコード済み入力が64 MiBを超える場合は全体を読み込まず、メモリ確保の失敗はErrorとして安全に失敗します。
+- どの失敗でも以前のPCMと音声メタデータを保持し、部分的な音声を公開しません。全体読み込みには長さの上限はありません。デコード済みPCMが256 MiBを超えると、プロセスで一度だけNoticeを出し、長い曲には `SoundStream::loadStream()` / `Sound::loadStream()` を推奨します。ローカルファイルの入力サイズに上限はありません。符号化済みメモリ入力は64 MiBが上限です。メモリ確保の失敗はErrorとして安全に失敗します。
 '''
 details.ko = '''
 - `LoadResult`를 반환합니다. 경로 해석, 취소, 스레드 규칙은 `SoundBuffer::load`를 참조하세요.
 - Web에서는 `setup()` 안에서도 `OfflineAudioContext` 디코딩 완료를 기다리며 30초 후 시간 초과로 처리합니다. PCM은 44100 Hz로 저장합니다.
-- 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 전체 로드에는 길이 제한이 없습니다. 디코딩된 PCM이 256 MiB를 넘으면 프로세스에서 한 번만 Notice를 기록하며 긴 트랙에는 `SoundStream::loadStream()` / `Sound::loadStream()`을 권장합니다. 인코딩된 입력이 64 MiB를 넘으면 전체를 로드하지 않으며 메모리 할당 실패는 안전하게 Error로 처리합니다.
+- 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 전체 로드에는 길이 제한이 없습니다. 디코딩된 PCM이 256 MiB를 넘으면 프로세스에서 한 번만 Notice를 기록하며 긴 트랙에는 `SoundStream::loadStream()` / `Sound::loadStream()`을 권장합니다. 로컬 파일의 입력 크기에는 상한이 없습니다. 인코딩된 메모리 입력은 64 MiB로 제한됩니다. 메모리 할당 실패는 안전하게 Error로 처리합니다.
 '''
 platform_note.en = '''
 - AAC/M4A files loaded through `Sound::load` or this function use AudioToolbox `ExtAudioFile` on macOS/iOS, Media Foundation on Windows, GStreamer on Linux, and Web Audio on Web; Linux output is also fixed at 44100 Hz.
@@ -28943,17 +28946,17 @@ description.ko = "메모리의 AAC 데이터를 디코딩한다."
 details.en = '''
 - `data` points to encoded data and `dataSize` is its size in bytes; decoding completes before returning a `LoadResult`.
 - See `SoundBuffer::loadWavFromMemory` for input lifetime and `SoundBuffer::load` for cancellation and threading rules.
-- On any failure, previous PCM and audio metadata are preserved; no partial sound is published. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Encoded inputs above 64 MiB are not loaded fully; allocation failure is a clean Error.
+- On any failure, previous PCM and audio metadata are preserved; no partial sound is published. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Local files have no encoded-size cap. Encoded memory inputs retain a 64 MiB limit. Allocation failure is a clean Error.
 '''
 details.ja = '''
 - `data` はエンコード済みデータへのポインター、`dataSize` はバイト数です。デコードを完了してから `LoadResult` を返します。
 - 入力の有効期間は `SoundBuffer::loadWavFromMemory`、キャンセルとスレッドの扱いは `SoundBuffer::load` を参照してください。
-- どの失敗でも以前のPCMと音声メタデータを保持し、部分的な音声を公開しません。全体読み込みには長さの上限はありません。デコード済みPCMが256 MiBを超えると、プロセスで一度だけNoticeを出し、長い曲には `SoundStream::loadStream()` / `Sound::loadStream()` を推奨します。エンコード済み入力が64 MiBを超える場合は全体を読み込まず、メモリ確保の失敗はErrorとして安全に失敗します。
+- どの失敗でも以前のPCMと音声メタデータを保持し、部分的な音声を公開しません。全体読み込みには長さの上限はありません。デコード済みPCMが256 MiBを超えると、プロセスで一度だけNoticeを出し、長い曲には `SoundStream::loadStream()` / `Sound::loadStream()` を推奨します。ローカルファイルの入力サイズに上限はありません。符号化済みメモリ入力は64 MiBが上限です。メモリ確保の失敗はErrorとして安全に失敗します。
 '''
 details.ko = '''
 - `data`는 인코딩된 데이터의 포인터이고 `dataSize`는 바이트 수입니다. 디코딩을 완료한 뒤 `LoadResult`를 반환합니다.
 - 입력의 유효 기간은 `SoundBuffer::loadWavFromMemory`를, 취소 및 스레드 규칙은 `SoundBuffer::load`를 참조하세요.
-- 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 전체 로드에는 길이 제한이 없습니다. 디코딩된 PCM이 256 MiB를 넘으면 프로세스에서 한 번만 Notice를 기록하며 긴 트랙에는 `SoundStream::loadStream()` / `Sound::loadStream()`을 권장합니다. 인코딩된 입력이 64 MiB를 넘으면 전체를 로드하지 않으며 메모리 할당 실패는 안전하게 Error로 처리합니다.
+- 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 전체 로드에는 길이 제한이 없습니다. 디코딩된 PCM이 256 MiB를 넘으면 프로세스에서 한 번만 Notice를 기록하며 긴 트랙에는 `SoundStream::loadStream()` / `Sound::loadStream()`을 권장합니다. 로컬 파일의 입력 크기에는 상한이 없습니다. 인코딩된 메모리 입력은 64 MiB로 제한됩니다. 메모리 할당 실패는 안전하게 Error로 처리합니다.
 '''
 platform_note.en = '''
 - Implemented with AudioToolbox on macOS/iOS, Media Foundation on Windows, and GStreamer on Linux.
@@ -29446,6 +29449,7 @@ description.en = "Prepares an audio file for streaming playback."
 description.ja = "音声ファイルのストリーミング再生を準備する。"
 description.ko = "오디오 파일의 스트리밍 재생을 준비한다."
 details.en = '''
+- TrussC adds no channel-count or sample-rate ceiling and no decoder memory budget. Supported formats still depend on the decoder; Vorbis retains its fixed channel-array bound.
 - `loadStream(path, maxPolyphony = 1)` synchronously opens and probes WAV, MP3, or FLAC files, selecting the format from the extension without regard to case. OGG and AAC/M4A are unsupported by this entry point.
 - Relative paths resolve through `getDataPath`; absolute paths pass through unchanged. Returns a `LoadResult` that converts to `true` on success and `false` on failure.
 - On success, `channels` becomes `2`, `sampleRate` becomes the audio engine's current rate in Hz, and the duration is recorded in seconds. These fields describe the converted output at load time. This function does not initialize the audio engine.
@@ -29455,6 +29459,7 @@ details.en = '''
 - Files with unknown length can still load successfully; see `SoundStream::getDuration` for their seek and engine reinitialization behavior.
 '''
 details.ja = '''
+- TrussC独自のチャンネル数・サンプルレートの上限や、デコーダーのメモリ予算はありません。対応する形式はデコーダーによって異なり、Vorbisの固定チャンネル配列の制約は残ります。
 - `loadStream(path, maxPolyphony = 1)` は WAV、MP3、FLAC ファイルを同期的に開いて調べ、拡張子の大文字・小文字を区別せず形式を選びます。この入口では OGG と AAC/M4A に対応しません。
 - 相対パスは `getDataPath` で解決し、絶対パスはそのまま使用します。成功時に `true`、失敗時に `false` に変換される `LoadResult` を返します。
 - 成功すると `channels` は `2`、`sampleRate` はオーディオエンジンの現在の Hz 単位のレートになり、長さを秒単位で記録します。これらのフィールドは読み込み時の変換後の出力を表します。この関数はオーディオエンジンを初期化しません。
@@ -29464,6 +29469,7 @@ details.ja = '''
 - 長さが不明なファイルも読み込めます。その場合のシークとエンジン再初期化時の動作は `SoundStream::getDuration` を参照してください。
 '''
 details.ko = '''
+- TrussC 자체의 채널 수·샘플레이트 상한이나 디코더 메모리 예산은 없습니다. 지원 형식은 디코더에 따라 다르며 Vorbis의 고정 채널 배열 한도는 유지됩니다.
 - `loadStream(path, maxPolyphony = 1)`은 WAV, MP3, FLAC 파일을 동기적으로 열어 조사하며 확장자의 대소문자를 구분하지 않고 형식을 선택합니다. 이 진입점은 OGG와 AAC/M4A를 지원하지 않습니다.
 - 상대 경로는 `getDataPath`로 해석하며 절대 경로는 그대로 사용합니다. 성공 시 `true`, 실패 시 `false`로 변환되는 `LoadResult`를 반환합니다.
 - 성공하면 `channels`는 `2`, `sampleRate`는 오디오 엔진의 현재 Hz 단위 레이트가 되며 길이를 초 단위로 기록합니다. 이 필드들은 로드 시 변환된 출력을 나타냅니다. 이 함수는 오디오 엔진을 초기화하지 않습니다.

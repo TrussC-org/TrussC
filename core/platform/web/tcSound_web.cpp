@@ -7,7 +7,7 @@
 #ifdef __EMSCRIPTEN__
 
 #include <TrussC.h>
-#include "tc/sound/internal/tcAudioDecodeBudget.h"
+#include "tc/sound/internal/tcAudioDecode.h"
 #include <emscripten.h>
 #include <algorithm>
 #include <climits>
@@ -17,7 +17,7 @@ namespace trussc {
 
 // Each invocation owns a separate slot. Removing a timed-out slot invalidates
 // only that promise; a late settlement cannot overwrite another decode.
-EM_JS(int, decodeAacFile, (const char* pathPtr, double encodedCap, int channelCap, int rateCap), {
+EM_JS(int, decodeAacFile, (const char* pathPtr), {
     var slots = Module['trusscAacSlots'] || (Module['trusscAacSlots'] = new Map());
     // C++ receives a signed wasm i32. Recycle vacant IDs at its boundary;
     // active slots and late promises remain protected by object identity.
@@ -28,15 +28,7 @@ EM_JS(int, decodeAacFile, (const char* pathPtr, double encodedCap, int channelCa
     var decode = {complete: false, success: false, data: null};
     slots.set(id, decode);
     try {
-        // Bound (security): check encoded input before browser decode and format before any TrussC copy. Overflow rejects the whole sound and is counted on completion.
-        var size = FS.stat(UTF8ToString(pathPtr)).size;
-        if (!Number.isSafeInteger(size) || size < 0 || size > encodedCap) {
-            decode.bound = 1; decode.needed = size; decode.capacity = encodedCap; decode.complete = true; return id;
-        }
         var fileData = FS.readFile(UTF8ToString(pathPtr));
-        if (fileData.byteLength > encodedCap) {
-            decode.bound = 1; decode.needed = fileData.byteLength; decode.capacity = encodedCap; decode.complete = true; return id;
-        }
         var arrayBuffer = fileData.buffer;
         var OfflineContext = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
         var audioCtx = new OfflineContext(2, 1, 44100);
@@ -48,11 +40,9 @@ EM_JS(int, decodeAacFile, (const char* pathPtr, double encodedCap, int channelCa
             decode.length = buffer.length;
             var bytes = buffer.length * buffer.numberOfChannels * 4;
             if (!Number.isSafeInteger(bytes) || !Number.isInteger(buffer.length) || buffer.length < 1 ||
-                !Number.isInteger(buffer.numberOfChannels) || buffer.numberOfChannels < 1 || buffer.numberOfChannels > channelCap ||
-                !Number.isFinite(buffer.sampleRate) || buffer.sampleRate < 1 || buffer.sampleRate > rateCap) {
+                !Number.isInteger(buffer.numberOfChannels) || buffer.numberOfChannels < 1 ||
+                !Number.isFinite(buffer.sampleRate) || buffer.sampleRate < 1) {
                 decode.bound = 2; decode.needed = bytes; decode.capacity = Number.MAX_SAFE_INTEGER;
-                if (buffer.numberOfChannels > channelCap) { decode.bound = 3; decode.needed = buffer.numberOfChannels; decode.capacity = channelCap; }
-                if (buffer.sampleRate > rateCap) { decode.bound = 4; decode.needed = buffer.sampleRate; decode.capacity = rateCap; }
                 decode.complete = true; return;
             }
             // Keep the AudioBuffer only: copy its channels straight to wasm.
@@ -101,7 +91,7 @@ LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
     const auto pathStr = internal::pathToUtf8(path);
     const double deadline = emscripten_get_now() + internal::webLoadTimeoutMSecs;
     // Start async decode
-    const int slot = decodeAacFile(pathStr.c_str(), double(internal::audioEncodedLimit), internal::audioChannelLimit, internal::audioRateLimit);
+    const int slot = decodeAacFile(pathStr.c_str());
     if (!slot) {
         logError("SoundBuffer") << "Failed to start AAC decode: " << pathStr;
         return LoadResult::fail(LoadError::DecodeFailed, "AAC decode failed: " + pathStr);
@@ -159,7 +149,7 @@ void SoundBuffer::loadAacWebAsync(std::shared_ptr<SoundBuffer> decoded,
         }
     };
     const auto pathStr = internal::pathToUtf8(path);
-    const int slot = decodeAacFile(pathStr.c_str(), double(internal::audioEncodedLimit), internal::audioChannelLimit, internal::audioRateLimit);
+    const int slot = decodeAacFile(pathStr.c_str());
     if (!slot) {
         logError("SoundBuffer") << "Failed to start AAC decode: " << pathStr;
         complete(LoadResult::fail(LoadError::DecodeFailed, "AAC decode failed: " + pathStr));
@@ -190,14 +180,11 @@ void SoundBuffer::loadAacWebAsync(std::shared_ptr<SoundBuffer> decoded,
 
 LoadResult SoundBuffer::finishAacWebDecode(int slot, const fs::path& path) {
     const auto pathStr = internal::pathToUtf8(path);
-    internal::AudioDecodeBudget budget;
+    internal::AudioDecodeStatus status;
     if (isAacDecodeBound(slot)) {
-        const int kind = isAacDecodeBound(slot);
         const double needed = getAacBoundNeeded(slot);
-        budget.reject(kind == 1 ? "encoded audio bytes" : kind == 3 ? "audio channels" :
-                      kind == 4 ? "audio sample rate" : "decoded audio bytes",
-                      std::isfinite(needed) && needed >= 0 && needed < double(UINT64_MAX) ? uint64_t(needed) : UINT64_MAX,
-                      uint64_t(getAacBoundCapacity(slot)));
+        status.reject("decoded audio bytes", std::isfinite(needed) && needed >= 0 && needed < double(UINT64_MAX)
+                      ? uint64_t(needed) : UINT64_MAX, uint64_t(getAacBoundCapacity(slot)));
         return LoadResult::fail(LoadError::DecodeFailed, "AAC input or format rejected; use SoundStream::loadStream()");
     }
     if (!isAacDecodeSuccess(slot)) {
@@ -210,7 +197,7 @@ LoadResult SoundBuffer::finishAacWebDecode(int slot, const fs::path& path) {
     int srcSampleRate = getAacSampleRate(slot);
     int srcNumSamples = getAacLength(slot);
     size_t srcTotal = 0;
-    if (srcNumSamples < 1 || !budget.format(srcChannels, srcSampleRate) ||
+    if (srcNumSamples < 1 || (srcChannels < 1 || srcSampleRate < 1) ||
         !internal::interleavedSampleCount((uint64_t)srcNumSamples, srcChannels,
                                           std::min(samples.max_size(), (size_t)INT_MAX),
                                           srcTotal)) {
@@ -220,8 +207,6 @@ LoadResult SoundBuffer::finishAacWebDecode(int slot, const fs::path& path) {
         return LoadResult::fail(LoadError::DecodeFailed, "AAC decode failed: " + pathStr);
     }
 
-    if (!budget.pcm(uint64_t(srcNumSamples), unsigned(srcChannels)))
-        return LoadResult::fail(LoadError::DecodeFailed, "AAC length out of range");
     internal::noticeAudioDecodedBytes(srcTotal * sizeof(float));
     std::vector<float> decoded;
 
@@ -229,7 +214,7 @@ LoadResult SoundBuffer::finishAacWebDecode(int slot, const fs::path& path) {
     const int targetSampleRate = 44100;
 
     if (srcSampleRate == targetSampleRate) {
-        if (!internal::growAudioVector(decoded, srcTotal, budget))
+        if (!internal::growAudioVector(decoded, srcTotal, status))
             return LoadResult::fail(LoadError::DecodeFailed, "AAC allocation failed; use SoundStream::loadStream()");
         decoded.resize(srcTotal);
         copyAacData(slot, decoded.data(), (int)srcTotal);
@@ -245,11 +230,11 @@ LoadResult SoundBuffer::finishAacWebDecode(int slot, const fs::path& path) {
         if (newNumSamples == 0 ||
             !internal::interleavedSampleCount(newNumSamples, srcChannels, samples.max_size(),
                                               newTotal)) {
-            budget.reject("resampled audio frames", uint64_t(newFrames), budget.limit() / sizeof(float) / unsigned(srcChannels));
+            status.reject("resampled audio frames", uint64_t(newFrames), samples.max_size() / unsigned(srcChannels));
             return LoadResult::fail(LoadError::DecodeFailed, "AAC length rejected; use SoundStream::loadStream()");
         }
         std::vector<float> srcSamples;
-        if (!internal::growAudioVector(srcSamples, srcTotal, budget))
+        if (!internal::growAudioVector(srcSamples, srcTotal, status))
             return LoadResult::fail(LoadError::DecodeFailed, "AAC allocation failed; use SoundStream::loadStream()");
         srcSamples.resize(srcTotal);
 
@@ -257,7 +242,7 @@ LoadResult SoundBuffer::finishAacWebDecode(int slot, const fs::path& path) {
         copyAacData(slot, srcSamples.data(), (int)srcTotal);
 
         // Resample with linear interpolation
-        if (!internal::growAudioVector(decoded, newTotal, budget))
+        if (!internal::growAudioVector(decoded, newTotal, status))
             return LoadResult::fail(LoadError::DecodeFailed, "AAC allocation failed; use SoundStream::loadStream()");
         decoded.resize(newTotal);
 
