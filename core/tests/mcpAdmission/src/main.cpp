@@ -32,15 +32,15 @@ TC_CORE_TEST_MAIN() {
     // and is covered separately by mcpAdmissionConstruction.
     constexpr size_t storeCount = static_cast<size_t>(AdmissionStore::Configuration);
     array<atomic<int>, storeCount> warnings{};
-    const char* stores[] = {"body", "headers", "connections", "histogram", "grid", "operations", "reply", "working memory"};
+    const char* stores[] = {"body", "connections", "histogram", "grid", "operations", "reply", "working memory"};
     EventListener listener = getLogger().onLog.listen([&](LogEventArgs& event) {
         if (event.level != LogLevel::Warning) return;
         for (size_t i = 0; i < storeCount; ++i)
             if (event.message.find(string("[MCP] ") + stores[i] + " capacity ") == 0) ++warnings[i];
     });
     const auto defaults = mcp::getAdmissionLimits();
-    check("default admission settings", defaults.bodyBytes == 1024u * 1024 && defaults.jsonDepth == 64 && defaults.outstanding == 32 && defaults.workers == 4 &&
-        defaults.lineBytes == 8192 && defaults.headerBytes == 65536 && defaults.headerCount == 128 && defaults.histogramBins == 4096 &&
+    check("default admission settings", defaults.bodyBytes == 64u * 1024 * 1024 && defaults.jsonDepth == 64 && defaults.outstanding == 32 && defaults.workers == 4 &&
+        defaults.histogramBins == 4096 &&
         defaults.gridCells == 65536 && defaults.operations == 256 && defaults.replyBytes == 64u * 1024 * 1024 && defaults.workingBytes == 256u * 1024 * 1024);
     auto zero = defaults;
     zero.bodyBytes = 0;
@@ -100,14 +100,14 @@ TC_CORE_TEST_MAIN() {
     try { (void)mcp::internal::dumpReply(json(string(64u * 1024 * 1024 + 1, 'a'))); }
     catch (const exception&) { rejected = true; }
     check("reply bytes are bounded during serialization", rejected);
-    auto small = defaults;
-    small.replyBytes = 4096;
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(small));
+    auto reduced = defaults;
+    reduced.replyBytes = 4096;
+    check("admission limits configuration succeeds", mcp::setAdmissionLimits(reduced));
     auto limited = analyze(json::array({{{"op", "grid"}, {"cols", 8}, {"rows", 8}}}));
     check("reply allowance is checked before constructing cells", limited.value("status", "") == "error" && !limited.contains("results"));
     check("analysis releases working credits", mcp::internal::workingMemory() == 0);
-    small.replyBytes = 32768;
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(small));
+    reduced.replyBytes = 32768;
+    check("admission limits configuration succeeds", mcp::setAdmissionLimits(reduced));
     {
         ReplyNode node;
         node.value.assign(32768, 'a');
@@ -116,9 +116,9 @@ TC_CORE_TEST_MAIN() {
         try { (void)nodeToJson(node); } catch (const mcp::internal::AdmissionError&) { full = true; }
         check("reflected fields are checked before copying", full);
     }
-    small = defaults;
-    small.workingBytes = 128;
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(small));
+    reduced = defaults;
+    reduced.workingBytes = 128;
+    check("admission limits configuration succeeds", mcp::setAdmissionLimits(reduced));
     {
         mcp::internal::WorkScope scope;
         mcp::internal::reserveWork(100);
@@ -265,9 +265,31 @@ TC_CORE_TEST_MAIN() {
         return response;
     };
     for (int i = 0; i < 2; ++i) {
-        check("MCP length limit rejects before body read", raw("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 1048577\r\n\r\n").find("413") != string::npos);
-        check("MCP header line is bounded while reading", raw("GET / HTTP/1.1\r\nX: " + string(16384, 'a')).find("431") != string::npos);
+        check("MCP length limit rejects before body read", raw("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 67108865\r\n\r\n").find("413") != string::npos);
     }
+    mcp::stopHttpServer();
+    auto ingressLimits = defaults;
+    ingressLimits.bodyBytes = 64;
+    check("small ingress limits configured", mcp::setAdmissionLimits(ingressLimits));
+    mcp::startHttpServer();
+    const string prefix = "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n";
+    check("chunked payload exceeding the limit is rejected",
+        raw(prefix + "Transfer-Encoding: chunked\r\n\r\n41\r\n" + string(65, 'a') + "\r\n0\r\n\r\n").find("413") != string::npos);
+    check("unregistered body routes preserve upstream 404",
+        raw("PUT /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\n\r\n").find("404") != string::npos);
+    check("upstream invalid chunk status is preserved",
+        raw(prefix + "Transfer-Encoding: chunked\r\n\r\nffffffffffffffff\r\n").find("400") != string::npos);
+#ifdef CPPHTTPLIB_ZLIB_SUPPORT
+    string compressed;
+    httplib::detail::gzip_compressor gzip;
+    gzip.compress(string(4096, 'a').data(), 4096, true,
+        [&](const char* data, size_t count) { compressed.append(data, count); return true; });
+    check("decoded bytes are checked before append", raw(prefix + "Content-Encoding: gzip\r\nContent-Length: " +
+        to_string(compressed.size()) + "\r\n\r\n" + compressed).find("413") != string::npos);
+#endif
+    mcp::stopHttpServer();
+    check("ingress limits restored", mcp::setAdmissionLimits(defaults));
+    mcp::startHttpServer();
     while (mcp::internal::admittedConnections() != 0) this_thread::yield();
     mcp::Tool deferred;
     deferred.name = "admission_reply";
@@ -404,9 +426,14 @@ TC_CORE_TEST_MAIN() {
 #endif
     const uint64_t expected[] = {
 #ifndef _WIN32
-        socketsAvailable ? 2u : 0u, socketsAvailable ? 2u : 0u, socketsAvailable ? 1u : 0u,
+#ifdef CPPHTTPLIB_ZLIB_SUPPORT
+        socketsAvailable ? 4u : 0u,
 #else
-        0, 0, 0,
+        socketsAvailable ? 3u : 0u,
+#endif
+        socketsAvailable ? 1u : 0u,
+#else
+        0, 0,
 #endif
         3, 3, 2,
 #ifndef _WIN32
@@ -470,13 +497,13 @@ TC_CORE_TEST_MAIN() {
         check("nested id rejection releases request credits", mcp::internal::workingMemory() == 0);
     }
 
-    // Model the same connection/request scope boundary installed in httplib.
+    // Model the connection/request scope boundary around upstream request processing.
     // These checks also run when a sandbox prohibits bind().
     check("admission limits configuration succeeds", mcp::setAdmissionLimits(defaults));
     {
         auto connection = make_shared<mcp::internal::WorkBudget>(true);
         mcp::internal::WorkScope connectionScope(connection);
-        connection->reserve(defaults.bodyBytes * 4 + defaults.headerBytes * 16);
+        connection->reserve(4u * 1024 * 1024); // Default socket body workspace; request bodies reserve incrementally.
         const auto base = mcp::internal::workingMemory();
         const string body = R"({"jsonrpc":"2.0","id":7,"method":"initialize","padding":")" +
             string(300000, 'a') + R"("})";

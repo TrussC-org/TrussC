@@ -490,8 +490,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     size_t mcp::AdmissionLimits::* const fields[] = {
         &mcp::AdmissionLimits::bodyBytes, &mcp::AdmissionLimits::jsonDepth,
         &mcp::AdmissionLimits::outstanding, &mcp::AdmissionLimits::workers,
-        &mcp::AdmissionLimits::lineBytes, &mcp::AdmissionLimits::headerBytes,
-        &mcp::AdmissionLimits::headerCount, &mcp::AdmissionLimits::histogramBins,
+        &mcp::AdmissionLimits::histogramBins,
         &mcp::AdmissionLimits::gridCells, &mcp::AdmissionLimits::operations,
         &mcp::AdmissionLimits::replyBytes, &mcp::AdmissionLimits::workingBytes};
     auto sameLimits = [&](const mcp::AdmissionLimits& a, const mcp::AdmissionLimits& b) {
@@ -559,7 +558,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     configurationListener.disconnect();
     auto small = defaults;
     small.workingBytes = 1024 * 1024;
-    small.bodyBytes = small.headerBytes = 1024;
+    small.bodyBytes = 1024;
     check("admission limits configuration succeeds", mcp::setAdmissionLimits(small));
     {
         Image image;
