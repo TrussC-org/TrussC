@@ -10,4 +10,6 @@ target_sources(${PROJECT_NAME} PRIVATE
     "${_TC_TRUSSCLI_SRC}/VsDetector.cpp"
     "${_TC_TRUSSCLI_SRC}/GeneratedFile.cpp"
 )
-target_include_directories(${PROJECT_NAME} PRIVATE "${_TC_TRUSSCLI_SRC}")
+# Keep the private tools headers on this fixture when built into allCoreTests.
+set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
+    APPEND PROPERTY INCLUDE_DIRECTORIES "${_TC_TRUSSCLI_SRC}")

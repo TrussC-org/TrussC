@@ -363,6 +363,7 @@ TC_CORE_TEST_MAIN() {
     check("Font URL uses bounded stream adapter", fontFetches() == 1 && fontRequests() == 1);
     font.loadAsync("https://test/two.ttf", 24);
     check("replacement immediately disposes old Font request", fontRequests() == 0 && fontAborts(0) == 1);
+    check("replacement closes cancelled Font stream before starting another", fontRequests() == 0 && fontEvents == 0);
     drain();
     check("Font replacement closes the cancelled backend immediately", fontRequests() == 1 && fontFetches() == 2 && fontAborts(0) == 1);
     const int beforeSuccess = fontCompletions();
@@ -370,6 +371,7 @@ TC_CORE_TEST_MAIN() {
     check("successful Font fetch calls the observed C completion once", fontCompletions() == beforeSuccess + 1);
     check("fetch callback queues delivery", fontEvents == 0 && font.isLoading() && fontRequests() == 0);
     drain();
+    check("cancelled Font completion cannot replace newer success", fontEvents == 1 && font.isLoaded() && fontRequests() == 0);
     const int beforeReplacementReply = fontCompletions();
     reply(0, true); drain();
     check("replacement prevents late C completion", fontCompletions() == beforeReplacementReply);
@@ -378,6 +380,7 @@ TC_CORE_TEST_MAIN() {
     font.loadAsync("https://test/two.ttf", 24);
     check("URL cache hit never notifies inline", fontEvents == 1);
     drain(); check("URL cache hit deferred once without fetch", fontEvents == 2 && fontFetches() == 2);
+    check("URL cache hit deferred once", fontEvents == 2);
     {
         auto doomed = make_unique<Font>();
         int doomedEvents = 0;
@@ -388,6 +391,8 @@ TC_CORE_TEST_MAIN() {
         doomed.reset();
         check("Font destruction immediately cancels stream and request", fontRequests() == 0 && fontAborts(2) == 1 && fontCancels(2) == 1);
         check("Font destruction releases backend and deadline immediately", fontRequests() == 0 && timers.empty());
+        drain();
+        check("Font destruction closes pending stream without an event", fontRequests() == 0 && doomedEvents == 0 && fontEvents == 2);
         auto bytes = makeFont();
         fontChunk(2, bytes.data(), bytes.size(), true); settleFontPromises(); drain();
         check("Font destruction prevents late C completion", fontCompletions() == beforeDestruction);
@@ -399,6 +404,8 @@ TC_CORE_TEST_MAIN() {
     moved = std::move(font);
     check("Font move immediately disposes pending request", fontRequests() == 0 && fontAborts(3) == 1);
     check("Font move releases backend and deadline immediately", fontRequests() == 0 && timers.empty());
+    drain();
+    check("Font move closes pending stream and drops URL event", fontEvents == 2 && !moved.isLoading() && fontRequests() == 0);
     reply(3, true); drain();
     check("Font move prevents late C completion", fontCompletions() == beforeMove);
     check("Font move drops pending URL event", fontEvents == 2 && !moved.isLoading());
@@ -413,6 +420,7 @@ TC_CORE_TEST_MAIN() {
     check("Font timeout immediately disposes request before delivery", expiredEvents == 0 && fontRequests() == 0 && fontAborts(4) == 1);
     drain();
     check("Font timeout delivers one deferred error", expiredEvents == 1 && !expiredResult && !expired.isLoaded());
+    check("Font timeout closes fetch despite reentrant abort", expiredEvents == 1 && !expired.isLoaded() && fontRequests() == 0 && fontAborts(4) == 1);
     reply(4, true); drain();
     check("Font timeout prevents late C completion", fontCompletions() == beforeTimeout);
     check("late timed-out fetch cannot notify again", expiredEvents == 1 && fontRequests() == 0);
@@ -444,6 +452,7 @@ TC_CORE_TEST_MAIN() {
     int abortReentries = 0;
     for (int index = 0; index < fontFetches(); ++index) abortReentries += fontAborts(index);
     check("all fetch close abort reentries were handled", abortReentries >= 6 && fontRequests() == 0 && timers.empty());
+    check("Font cancellation and timeout abort reentries were handled", abortReentries >= 4 && fontRequests() == 0);
     checkFontBounds();
     // Asyncify's initial unwind returns 0 to callMain. Its final rewind does
     // not propagate main's return value to Node, so publish the verdict here.
