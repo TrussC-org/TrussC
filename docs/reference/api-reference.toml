@@ -41356,21 +41356,24 @@ description.en = "Wraps a pugixml document for loading, saving, and querying XML
 description.ja = "XML の読み込み・保存・検索を行う pugixml ドキュメントのラッパー。"
 description.ko = "XML을 읽고 저장하고 검색하는 pugixml 문서 래퍼이다."
 details.en = '''
-- The wrapper checks element depth (maximum 64) by an iterative walk after parsing, and rejects embedded NUL input. Upstream element parsing is iterative; deep local input allocates a temporary DOM before the wrapper rejects it. Direct pugixml access follows upstream rules.
+- The wrapper rejects embedded NUL input and follows upstream pugixml behavior for element depth.
+- If you recursively walk untrusted XML yourself, mind the depth.
 - Owns the XML document, which initially has no root element; use `root()`, `child()`, and `addRoot()` to access nodes as `XmlNode` handles.
 - Node and attribute handles refer to document-owned data; destroying or resetting the document, replacing its contents during loading or parsing, or removing the corresponding nodes invalidates those handles.
 - `load()` and `parse()` use the default pugixml options, which do not retain comments, processing instructions, XML declarations, document type declarations, or ordinary text nodes consisting only of literal XML whitespace. Whitespace from character references and whitespace inside CDATA are retained.
 - `save()` and `toString()` output UTF-8 with two spaces per indentation level by default, and automatically include an XML declaration if the document has none.
 '''
 details.ja = '''
-- ラッパーは解析後の反復走査で要素の深さ（最大 64）を確認し、入力中の NUL を拒否します。upstream の要素解析も反復処理で、深いローカル入力は一時 DOM を確保した後で拒否されます。pugixml の直接利用には upstream の規則が適用されます。
+- ラッパーは入力中の NUL を拒否し、要素の深さは pugixml 本家と同じ扱いにします。
+- 信頼できない XML をアプリ側で再帰的に走査する場合は、深さに注意が必要です。
 - XML ドキュメントを所有し、初期状態ではルート要素を持ちません。`root()`、`child()`、`addRoot()` で `XmlNode` ハンドルを取得してノードを操作します。
 - ノードと属性のハンドルはドキュメントが所有するデータを参照します。ドキュメントの破棄やリセット、読み込みや解析による内容の置き換え、対応するノードの削除によって、これらのハンドルは無効になります。
 - `load()` と `parse()` は pugixml の既定のオプションを使い、コメント、処理命令、XML 宣言、文書型宣言、入力に直接書かれた XML の空白文字だけからなる通常のテキストノードを保持しません。文字参照で生成される空白や CDATA 内の空白は保持します。
 - `save()` と `toString()` は既定で各階層を半角スペース 2 個で字下げした UTF-8 を出力し、ドキュメントに XML 宣言がなければ自動的に付加します。
 '''
 details.ko = '''
-- 래퍼는 파싱 후 반복 순회로 요소 깊이(최대 64)를 확인하고 입력의 NUL을 거부합니다. upstream 요소 파싱도 반복 처리이며 깊은 로컬 입력은 임시 DOM을 할당한 후 거부됩니다. pugixml을 직접 사용하면 upstream 규칙을 따릅니다.
+- 래퍼는 입력의 NUL을 거부하며 요소 깊이는 원본 pugixml과 동일하게 처리합니다.
+- 신뢰할 수 없는 XML을 앱에서 직접 재귀적으로 순회하는 경우 깊이에 주의해야 합니다.
 - XML 문서를 소유하며, 초기 상태에는 루트 요소가 없습니다. `root()`, `child()`, `addRoot()`로 `XmlNode` 핸들을 얻어 노드를 조작합니다.
 - 노드와 속성 핸들은 문서가 소유한 데이터를 참조합니다. 문서를 소멸하거나 초기화하거나, 읽기 또는 파싱으로 내용을 교체하거나, 해당 노드를 삭제하면 이 핸들들은 무효화됩니다.
 - `load()`와 `parse()`는 pugixml의 기본 옵션을 사용하며 주석, 처리 명령, XML 선언, 문서 형식 선언, 입력에 직접 쓰인 XML 공백 문자만으로 이루어진 일반 텍스트 노드를 보존하지 않습니다. 문자 참조로 생성된 공백과 CDATA 내부의 공백은 보존합니다.
@@ -41477,19 +41480,19 @@ description.en = "Loads an XML document from a file."
 description.ja = "ファイルから XML ドキュメントを読み込む。"
 description.ko = "파일에서 XML 문서를 읽는다."
 details.en = '''
-- Local input has no byte-size cap; documents above 16 MiB produce a Notice. Nesting is limited to 64 elements to keep DOM consumers safe. Parsing uses a temporary document; failure preserves the previous document and never publishes a parsed prefix.
+- Local input has no byte-size cap; documents above 16 MiB produce a Notice. Parsing uses a temporary document; failure preserves the previous document and never publishes a parsed prefix.
 - Accepts a file path; relative paths are resolved through `getDataPath()`, and absolute paths are used directly.
 - Returns `true` on success and `false` for a missing or unreadable file or a parsing error; failures are logged, with a description and offset for parsing errors.
 - See `Xml` for parsing defaults and node handle lifetime. Node handles remain valid after failure and are invalidated by a successful replacement.
 '''
 details.ja = '''
-- ローカル入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。DOM の利用を安全にするため、要素のネストは 64 段までです。一時ドキュメントで解析し、失敗時は以前のドキュメントを保持して解析途中の内容を公開しません。
+- ローカル入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。一時ドキュメントで解析し、失敗時は以前のドキュメントを保持して解析途中の内容を公開しません。
 - ファイルパスを受け取ります。相対パスは `getDataPath()` で解決し、絶対パスはそのまま使います。
 - 成功時は `true`、ファイルが存在しない場合、読み取れない場合、解析に失敗した場合は `false` を返します。失敗時はログを出力し、解析エラーには説明と位置を含めます。
 - 解析の既定の動作とノードハンドルの有効期間は `Xml` を参照してください。失敗時は既存のノードハンドルも維持し、成功して置き換えた場合に無効になります。
 '''
 details.ko = '''
-- 로컬 입력의 바이트 크기 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다. DOM 사용을 안전하게 유지하기 위해 요소 중첩은 64단계로 제한합니다. 임시 문서에서 파싱하며 실패하면 이전 문서를 유지하고 파싱 중인 일부 내용을 공개하지 않습니다.
+- 로컬 입력의 바이트 크기 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다. 임시 문서에서 파싱하며 실패하면 이전 문서를 유지하고 파싱 중인 일부 내용을 공개하지 않습니다.
 - 파일 경로를 받습니다. 상대 경로는 `getDataPath()`로 해석하고 절대 경로는 그대로 사용합니다.
 - 성공하면 `true`를, 파일이 없거나 읽을 수 없거나 파싱에 실패하면 `false`를 반환합니다. 실패 시 로그를 출력하며 파싱 오류에는 설명과 위치를 포함합니다.
 - 파싱의 기본 동작과 노드 핸들의 유효 기간은 `Xml`을 참조하세요. 실패 후에는 기존 노드 핸들이 유효하며 성공하여 교체하면 무효화됩니다.
@@ -41507,19 +41510,19 @@ description.en = "Parses an XML document from a string."
 description.ja = "文字列から XML ドキュメントを解析する。"
 description.ko = "문자열에서 XML 문서를 파싱한다."
 details.en = '''
-- Local input has no byte-size cap; documents above 16 MiB produce a Notice. Nesting is limited to 64 elements to keep DOM consumers safe. Parsing uses a temporary document; failure preserves the previous document and never publishes a parsed prefix.
+- Local input has no byte-size cap; documents above 16 MiB produce a Notice. Parsing uses a temporary document; failure preserves the previous document and never publishes a parsed prefix.
 - Accepts a UTF-8 string; embedded null characters are rejected.
 - Returns `true` on success; failure logs an error description and offset and returns `false`.
 - See `Xml` for parsing defaults and node handle lifetime.
 '''
 details.ja = '''
-- ローカル入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。DOM の利用を安全にするため、要素のネストは 64 段までです。一時ドキュメントで解析し、失敗時は以前のドキュメントを保持して解析途中の内容を公開しません。
+- ローカル入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。一時ドキュメントで解析し、失敗時は以前のドキュメントを保持して解析途中の内容を公開しません。
 - UTF-8 の文字列を受け取ります。途中の null 文字は拒否します。
 - 成功時は `true` を返します。失敗時はエラーの説明と位置をログに出力して `false` を返します。
 - 解析の既定の動作とノードハンドルの有効期間は `Xml` を参照してください。
 '''
 details.ko = '''
-- 로컬 입력의 바이트 크기 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다. DOM 사용을 안전하게 유지하기 위해 요소 중첩은 64단계로 제한합니다. 임시 문서에서 파싱하며 실패하면 이전 문서를 유지하고 파싱 중인 일부 내용을 공개하지 않습니다.
+- 로컬 입력의 바이트 크기 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다. 임시 문서에서 파싱하며 실패하면 이전 문서를 유지하고 파싱 중인 일부 내용을 공개하지 않습니다.
 - UTF-8 문자열을 받습니다. 문자열 중간의 null 문자는 거부합니다.
 - 성공하면 `true`를 반환합니다. 실패하면 오류 설명과 위치를 로그에 출력하고 `false`를 반환합니다.
 - 파싱의 기본 동작과 노드 핸들의 유효 기간은 `Xml`을 참조하세요.

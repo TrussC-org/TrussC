@@ -64,11 +64,6 @@ public:
                 internal::reportImportError("", "XML load error: ", path, detail);
                 return false;
             }
-            if (!checkDepth(parsed)) {
-                internal::reportImportError("", "XML load error: ", path,
-                                            "XML element nesting exceeds 64");
-                return false;
-            }
             logVerbose() << "XML loaded: " << fullPath;
             doc_ = std::move(parsed);
             return true;
@@ -91,10 +86,6 @@ public:
         if (!result) {
             logError() << "XML parse error: " << result.description()
                          << " (offset: " << result.offset << ")";
-            return false;
-        }
-        if (!checkDepth(parsed)) {
-            logError("Xml") << "XML element nesting exceeds 64";
             return false;
         }
         doc_ = std::move(parsed);
@@ -175,31 +166,6 @@ private:
             if (zero) return true;
         }
         return false;
-    }
-
-    static bool checkDepth(const XmlDocument& parsed) {
-        // Walk elements without recursion or additional allocations. The XML
-        // parser itself is iterative too; the limit protects DOM consumers.
-        auto node = parsed.first_child();
-        size_t depth = 0;
-        while (node) {
-            // Bound (security): nesting must keep DOM consumers' recursion finite; reject the whole document.
-            if (node.type() == pugi::node_element && ++depth > 64) return false;
-            if (node.first_child()) {
-                node = node.first_child();
-                continue;
-            }
-            while (node) {
-                if (node.type() == pugi::node_element) --depth;
-                if (node.next_sibling()) {
-                    node = node.next_sibling();
-                    break;
-                }
-                node = node.parent();
-                if (node == parsed) return true;
-            }
-        }
-        return true;
     }
 
     XmlDocument doc_;

@@ -52,20 +52,6 @@ TC_CORE_TEST_MAIN() {
     Xml invalid;
     check("malformed XML reports failure", !invalid.parse("<root>"));
     check("empty XML reports failure", !invalid.parse(""));
-    auto nested = [](int count) {
-        string text;
-        for (int i = 0; i < count; ++i) text += "<n>";
-        for (int i = 0; i < count; ++i) text += "</n>";
-        return text;
-    };
-    check("wrapper accepts depth 64 with text and siblings",
-          restored.parse("<root>text" + nested(63) + nested(63) + "</root>"));
-    check("wrapper rejects depth 65 and preserves its document",
-          !restored.parse(nested(65)) && string(restored.root().name()) == "root");
-    pugi::xml_document upstream;
-    const string deep = nested(8192);
-    check("upstream iterative parser accepts deep local data", upstream.load_buffer(deep.data(), deep.size()));
-    check("wrapper iteratively rejects deep parsed data", !restored.parse(deep));
     check("wrapper string rejects trailing NUL", !restored.parse(string("<n/>") + char(0)));
 
     const auto folder = fs::temp_directory_path() / ("trussc-xml-" +
@@ -76,11 +62,6 @@ TC_CORE_TEST_MAIN() {
         ofstream file(path, ios::binary);
         file.write(text.data(), static_cast<streamsize>(text.size()));
     };
-    write(nested(64));
-    check("file wrapper accepts depth 64", restored.load(path));
-    write(nested(65));
-    check("file wrapper rejects depth 65 and preserves document",
-          !restored.load(path) && string(restored.root().name()) == "n");
     for (int width : {1, 2, 4}) {
         for (bool bigEndian : {false, true}) {
             if (width == 1 && bigEndian) continue; // UTF-8 has no byte-order variants.
