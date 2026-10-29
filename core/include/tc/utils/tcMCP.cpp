@@ -56,7 +56,7 @@ bool setAdmissionLimits(const AdmissionLimits& limits) {
     auto& state = admissionState();
     const char* reason = nullptr;
     const size_t values[] = {limits.bodyBytes, limits.jsonDepth, limits.outstanding, limits.workers,
-        limits.lineBytes, limits.headerBytes, limits.headerCount, limits.histogramBins,
+        limits.histogramBins,
         limits.gridCells, limits.operations, limits.replyBytes, limits.workingBytes};
     for (auto value : values) if (!value) { reason = "limits must be positive"; break; }
     {
@@ -78,12 +78,12 @@ bool setAdmissionLimits(const AdmissionLimits& limits) {
 
 namespace internal {
 void admissionRejected(AdmissionStore store, size_t capacity, size_t needed, const char* units) {
-    static constexpr const char* names[] = {"body", "headers", "connections", "histogram", "grid", "operations", "reply", "working memory", "configuration"};
+    static constexpr const char* names[] = {"body", "connections", "histogram", "grid", "operations", "reply", "working memory", "configuration"};
     auto& count = admissionState().rejected[static_cast<size_t>(store)];
     if (count.fetch_add(1) == 0)
         logWarning("MCP") << names[static_cast<size_t>(store)] << " capacity " << capacity
                           << ", needed " << needed << " " << (units ? units :
-                              (store == AdmissionStore::Body || store == AdmissionStore::Headers ||
+                              (store == AdmissionStore::Body ||
                                store == AdmissionStore::Reply || store == AdmissionStore::Working ? "bytes" : "items"))
                           << "; request rejected";
 }
@@ -357,6 +357,39 @@ std::deque<json>& alertQueue() {
 // thread while the listener and its request workers are still using it.
 // A request worker cannot join the listener, which joins that worker in turn.
 static thread_local bool handlingHttpRequest = false;
+static thread_local bool closeHttpConnection = false;
+
+// Use upstream's virtual socket hook and protected request entry point. The
+// adapter scopes request credits across upstream request/response destruction.
+class McpHttpServer final : public httplib::Server {
+private:
+    bool process_and_close_socket(socket_t sock) override {
+        struct SocketOwner {
+            socket_t value;
+            ~SocketOwner() { httplib::detail::shutdown_socket(value); httplib::detail::close_socket(value); }
+        } socketOwner{sock};
+        try {
+            std::string remoteAddress, localAddress;
+            int remotePort = 0, localPort = 0;
+            httplib::detail::get_remote_ip_and_port(sock, remoteAddress, remotePort);
+            httplib::detail::get_local_ip_and_port(sock, localAddress, localPort);
+            return httplib::detail::process_server_socket(
+                svr_sock_, sock, keep_alive_max_count_, keep_alive_timeout_sec_,
+                read_timeout_sec_, read_timeout_usec_, write_timeout_sec_, write_timeout_usec_,
+                [&](httplib::Stream& stream, bool closeConnection, bool& connectionClosed) {
+                    WorkScope requestScope(std::make_shared<WorkBudget>(true));
+                    closeHttpConnection = false;
+                    const bool result = process_request(stream, remoteAddress, remotePort,
+                        localAddress, localPort, closeConnection, connectionClosed, nullptr);
+                    connectionClosed = connectionClosed || closeHttpConnection;
+                    return result;
+                });
+        } catch (...) {
+            // Worker callbacks must unwind to socket cleanup, never out of the thread pool.
+            return false;
+        }
+    }
+};
 
 // The queue hook runs on the accept thread, before httplib reads any bytes.
 class AdmittedQueue final : public httplib::TaskQueue {
@@ -379,13 +412,14 @@ public:
         std::shared_ptr<Credit> credit;
         try {
             credit = std::make_shared<Credit>();
-            // Account string growth/copies and map nodes before reading headers/body.
-            if (limits_.bodyBytes > limits_.workingBytes / 4 || limits_.headerBytes > limits_.workingBytes / 16) {
+            // Reserve baseline body workspace for each admitted socket;
+            // upstream header/trailer allocations are outside WorkBudget accounting.
+            const size_t ingressBody = (std::min)(limits_.bodyBytes, size_t(1024 * 1024));
+            if (ingressBody > limits_.workingBytes / 4) {
                 admissionRejected(AdmissionStore::Working, limits_.workingBytes, limits_.bodyBytes);
                 return false;
             }
-            credit->budget->reserve(limits_.bodyBytes * 4);
-            credit->budget->reserve(limits_.headerBytes * 16);
+            credit->budget->reserve(ingressBody * 4);
             return pool_.enqueue([fn = std::move(fn), credit] {
                 WorkScope workScope(credit->budget);
                 struct WorkerScope {
@@ -561,18 +595,35 @@ void startHttpServerImpl(int port, const std::string& host,
     internal::mcpAuthToken() = token;
     internal::mcpLoopbackOnly().store(isLoopback);
 
-    svr = std::make_unique<httplib::Server>();
     const auto limits = getAdmissionLimits();
+    svr = std::make_unique<McpHttpServer>();
     svr->new_task_queue = [limits] { return new AdmittedQueue(limits); };
-    svr->set_request_scope_handler([]() -> std::shared_ptr<void> {
-        // The socket keeps its ingress credits; request credits retire after
-        // response destruction and the last main/deferred-stage owner releases.
-        return std::make_shared<WorkScope>(std::make_shared<WorkBudget>(true));
-    });
+    // Bound (security): upstream limits Content-Length; the content receiver checks chunked and decoded body bytes.
     svr->set_payload_max_length(limits.bodyBytes);
+    // Bound (security): inactive reads/writes and idle keep-alive sockets expire; a connection serves at most 100 requests.
+    svr->set_read_timeout(5);
+    svr->set_write_timeout(5);
+    svr->set_keep_alive_timeout(5);
+    svr->set_keep_alive_max_count(100);
+    svr->set_idle_interval(0, 10000);
     svr->set_pre_routing_handler([limits](const httplib::Request& req, httplib::Response& res) {
-        if (req.has_header("Content-Length") && req.get_header_value_u64("Content-Length") > limits.bodyBytes)
-            return httplib::Server::HandlerResponse::Unhandled;
+        if (req.has_header("Content-Length") && req.get_header_value_u64("Content-Length") > limits.bodyBytes) {
+            const auto length = req.get_header_value_u64("Content-Length");
+            admissionRejected(AdmissionStore::Body, limits.bodyBytes, static_cast<size_t>((std::min)(length, uint64_t(SIZE_MAX))));
+            res.status = 413;
+        } else if (req.method == "POST" && req.path == "/mcp") {
+            if (!checkRequest(req, res, true)) {
+                res.set_header("Connection", "close");
+                return httplib::Server::HandlerResponse::Handled;
+            }
+        } else if (httplib::detail::expect_content(req)) {
+            // Only the MCP content receiver accepts bodies, including decoded data.
+            res.status = req.method == "PRI" ? 400 : 404;
+        }
+        if (res.status >= 400) {
+            res.set_header("Connection", "close");
+            return httplib::Server::HandlerResponse::Handled;
+        }
         size_t workspace = 0;
         const auto encoding = req.get_header_value("Content-Encoding");
 #ifdef CPPHTTPLIB_ZLIB_SUPPORT
@@ -590,13 +641,13 @@ void startHttpServerImpl(int port, const std::string& host,
         }
         return httplib::Server::HandlerResponse::Unhandled;
     });
-    svr->set_header_limits(limits.lineBytes, limits.headerBytes, limits.headerCount);
-    svr->set_limit_handler([](int status, size_t capacity, size_t needed, const char* units) {
-        admissionRejected(status == 413 ? AdmissionStore::Body : AdmissionStore::Headers, capacity, needed, units);
+    // Upstream's keep-alive loop observes the request's close flag only. Carry
+    // a response-side refusal back to the socket hook before its next request.
+    svr->set_logger([](const httplib::Request&, const httplib::Response& res) {
+        closeHttpConnection = res.get_header_value("Connection") == "close";
     });
     svr->set_error_handler([](const httplib::Request&, httplib::Response& res) {
         if (res.status == 413) res.set_content("{\"error\":\"MCP body limit exceeded\"}", "application/json");
-        if (res.status == 431) res.set_content("{\"error\":\"MCP header limit exceeded\"}", "application/json");
     });
 
     // A fixed port that is already in use fails to bind and is reported below.
@@ -616,7 +667,32 @@ void startHttpServerImpl(int port, const std::string& host,
     // POST /mcp — JSON-RPC requests. No CORS header: MCP clients are native and
     // ignore CORS, while a wildcard origin would let any web page in the user's
     // browser drive the local server. (OPTIONS preflight handler dropped too.)
-    svr->Post("/mcp", [](const httplib::Request& req, httplib::Response& res) {
+    svr->Post("/mcp", [limits](const httplib::Request& request, httplib::Response& res, const httplib::ContentReader& reader) {
+        httplib::Request req = request;
+        bool bodyRejected = false, workingRejected = false;
+        const bool read = reader([&](const char* data, size_t count) {
+            // Bound (security): decoded JSON is checked before append, independently of its wire representation.
+            if (count > limits.bodyBytes - req.body.size()) {
+                admissionRejected(AdmissionStore::Body, limits.bodyBytes, count > SIZE_MAX - req.body.size() ? SIZE_MAX : req.body.size() + count);
+                bodyRejected = true;
+                return false;
+            }
+            try {
+                if (count > SIZE_MAX / 4) throw AdmissionError();
+                reserveWork(count * 4);
+                req.body.append(data, count);
+            } catch (const AdmissionError&) { workingRejected = true; return false; }
+            return true;
+        });
+        if (!read) {
+            if (bodyRejected) res.status = 413;
+            else if (workingRejected) {
+                res.status = 503;
+                res.set_content("{\"error\":\"request copies exceed MCP working memory\"}", "application/json");
+            }
+            res.set_header("Connection", "close");
+            return;
+        }
         struct RequestScope {
             bool previous = handlingHttpRequest;
             RequestScope() { handlingHttpRequest = true; }

@@ -95,9 +95,7 @@
 #endif
 
 #ifndef CPPHTTPLIB_PAYLOAD_MAX_LENGTH
-// TRUSSC PATCH: finite ingress defaults; see impl/HTTPLIB_PATCHES.md.
-// Bound (security): HTTP bodies consume externally driven storage. Overflow rejects with 413 and is counted.
-#define CPPHTTPLIB_PAYLOAD_MAX_LENGTH (64 * 1024 * 1024)
+#define CPPHTTPLIB_PAYLOAD_MAX_LENGTH ((std::numeric_limits<size_t>::max)())
 #endif
 
 #ifndef CPPHTTPLIB_FORM_URL_ENCODED_PAYLOAD_MAX_LENGTH
@@ -611,18 +609,7 @@ public:
 using Range = std::pair<ssize_t, ssize_t>;
 using Ranges = std::vector<Range>;
 
-// TRUSSC PATCH: shared request/header/trailer admission state.
-struct HeaderReadState {
-  // Bound (security): HTTP metadata must fit finite ingress storage. Overflow rejects with 431 and is counted.
-  size_t line_max = 8192, bytes_max = 65536, count_max = 128;
-  size_t bytes = 0, count = 0;
-  bool exceeded = false;
-  size_t failed_limit = 0, failed_needed = 0;
-  const char *failed_units = "bytes";
-};
-
 struct Request {
-  HeaderReadState header_read; // TRUSSC PATCH
   std::string method;
   std::string path;
   Params params;
@@ -677,7 +664,6 @@ struct Request {
 };
 
 struct Response {
-  HeaderReadState header_read; // TRUSSC PATCH
   std::string version;
   int status = -1;
   std::string reason;
@@ -985,12 +971,6 @@ public:
   Server &set_exception_handler(ExceptionHandler handler);
   Server &set_pre_routing_handler(HandlerWithResponse handler);
   Server &set_post_routing_handler(Handler handler);
-  // TRUSSC PATCH: optional RAII scope spanning one request, response write and
-  // destruction. A keep-alive socket creates a fresh scope on every iteration.
-  Server &set_request_scope_handler(std::function<std::shared_ptr<void>()> handler) {
-    request_scope_handler_ = std::move(handler);
-    return *this;
-  }
 
   Server &set_expect_100_continue_handler(Expect100ContinueHandler handler);
   Server &set_logger(Logger logger);
@@ -1020,15 +1000,6 @@ public:
   Server &set_idle_interval(const std::chrono::duration<Rep, Period> &duration);
 
   Server &set_payload_max_length(size_t length);
-  // TRUSSC PATCH: configure before listen; positive values are required.
-  Server &set_header_limits(size_t line, size_t bytes, size_t count) {
-    if (!line || !bytes || !count) { throw std::invalid_argument("HTTP header limits must be positive"); }
-    header_limits_.line_max = line; header_limits_.bytes_max = bytes; header_limits_.count_max = count;
-    return *this;
-  }
-  Server &set_limit_handler(std::function<void(int, size_t, size_t, const char *)> handler) {
-    limit_handler_ = std::move(handler); return *this;
-  }
 
   bool bind_to_port(const std::string &host, int port, int socket_flags = 0);
   int bind_to_any_port(const std::string &host, int socket_flags = 0);
@@ -1060,10 +1031,6 @@ protected:
   time_t idle_interval_sec_ = CPPHTTPLIB_IDLE_INTERVAL_SECOND;
   time_t idle_interval_usec_ = CPPHTTPLIB_IDLE_INTERVAL_USECOND;
   size_t payload_max_length_ = CPPHTTPLIB_PAYLOAD_MAX_LENGTH;
-  // TRUSSC PATCH: internal counters last for this Server's lifetime.
-  HeaderReadState header_limits_;
-  std::atomic<size_t> payload_rejections_{0}, header_rejections_{0}, descriptor_rejections_{0};
-  std::function<void(int, size_t, size_t, const char *)> limit_handler_;
 
 private:
   using Handlers =
@@ -1147,7 +1114,6 @@ private:
   ExceptionHandler exception_handler_;
   HandlerWithResponse pre_routing_handler_;
   Handler post_routing_handler_;
-  std::function<std::shared_ptr<void>()> request_scope_handler_;
   Expect100ContinueHandler expect_100_continue_handler_;
 
   Logger logger_;
@@ -2504,8 +2470,7 @@ public:
   const char *ptr() const;
   size_t size() const;
   bool end_with_crlf() const;
-  bool getline(size_t max_length = CPPHTTPLIB_HEADER_MAX_LENGTH);
-  bool exceeded = false; // TRUSSC PATCH: distinguish admission from I/O failure.
+  bool getline();
 
 private:
   void append(char c);
@@ -2514,7 +2479,6 @@ private:
   char *fixed_buffer_;
   const size_t fixed_buffer_size_;
   size_t fixed_buffer_used_size_ = 0;
-  size_t max_length_ = CPPHTTPLIB_HEADER_MAX_LENGTH; // TRUSSC PATCH
   std::string glowable_buffer_;
 };
 
@@ -2917,10 +2881,7 @@ inline bool stream_line_reader::end_with_crlf() const {
   return size() >= 2 && end[-2] == '\r' && end[-1] == '\n';
 }
 
-inline bool stream_line_reader::getline(size_t max_length) {
-  // TRUSSC PATCH: check before append, including unterminated lines.
-  max_length_ = max_length;
-  exceeded = false;
+inline bool stream_line_reader::getline() {
   fixed_buffer_used_size_ = 0;
   glowable_buffer_.clear();
 
@@ -2942,8 +2903,6 @@ inline bool stream_line_reader::getline(size_t max_length) {
       }
     }
 
-    // Bound (security): line storage must stop while reading. Overflow rejects with 431 and is counted.
-    if (i >= max_length_) { exceeded = true; return false; }
     append(byte);
 
 #ifdef CPPHTTPLIB_ALLOW_LF_AS_LINE_TERMINATOR
@@ -2964,7 +2923,6 @@ inline void stream_line_reader::append(char c) {
   } else {
     if (glowable_buffer_.empty()) {
       assert(fixed_buffer_[fixed_buffer_used_size_] == '\0');
-      glowable_buffer_.reserve(max_length_); // TRUSSC PATCH: avoid geometric overshoot.
       glowable_buffer_.assign(fixed_buffer_, fixed_buffer_used_size_);
     }
     glowable_buffer_ += c;
@@ -4207,31 +4165,13 @@ inline bool parse_header(const char *beg, const char *end, T fn) {
   return false;
 }
 
-inline bool read_headers(Stream &strm, Headers &headers,
-                         HeaderReadState *state = nullptr) {
-  HeaderReadState local;
-  if (!state) { state = &local; }
+inline bool read_headers(Stream &strm, Headers &headers) {
   const auto bufsiz = 2048;
   char buf[bufsiz];
   stream_line_reader line_reader(strm, buf, bufsiz);
 
   for (;;) {
-    // Bound (security): header/trailer maps share one byte and entry allowance. Overflow rejects with 431 and is counted.
-    const auto remaining = state->bytes_max - (std::min)(state->bytes, state->bytes_max);
-    const auto line_max = state->count >= state->count_max ? size_t(2) : state->line_max;
-    if (!line_reader.getline((std::min)(line_max, remaining))) {
-      state->exceeded = line_reader.exceeded;
-      if (state->exceeded) {
-        state->failed_limit = remaining < line_max ? state->bytes_max : line_max;
-        state->failed_needed = state->failed_limit + 1;
-        if (state->count >= state->count_max && remaining >= line_max) {
-          state->failed_limit = state->count_max; state->failed_needed = state->count + 1;
-          state->failed_units = "items";
-        }
-      }
-      return false;
-    }
-    state->bytes += line_reader.size();
+    if (!line_reader.getline()) { return false; }
 
     // Check if the line ends with CRLF.
     auto line_terminator_len = 2;
@@ -4248,12 +4188,7 @@ inline bool read_headers(Stream &strm, Headers &headers,
 #endif
     }
 
-    if (state->count >= state->count_max) {
-      state->exceeded = true; state->failed_limit = state->count_max;
-      state->failed_needed = state->count + 1; state->failed_units = "items";
-      return false;
-    }
-    ++state->count;
+    if (line_reader.size() > CPPHTTPLIB_HEADER_MAX_LENGTH) { return false; }
 
     // Exclude line terminator
     auto end = line_reader.ptr() + line_reader.size() - line_terminator_len;
@@ -4308,8 +4243,7 @@ inline bool read_content_without_length(Stream &strm,
   uint64_t r = 0;
   for (;;) {
     auto n = strm.read(buf, CPPHTTPLIB_RECV_BUFSIZ);
-    if (n < 0) { return false; }
-    if (n == 0) { return true; }
+    if (n <= 0) { return true; }
 
     if (!out(buf, static_cast<size_t>(n), r, 0)) { return false; }
     r += static_cast<uint64_t>(n);
@@ -4320,22 +4254,13 @@ inline bool read_content_without_length(Stream &strm,
 
 template <typename T>
 inline bool read_content_chunked(Stream &strm, T &x,
-                                 ContentReceiverWithProgress out, int *status = nullptr) {
+                                 ContentReceiverWithProgress out) {
   const auto bufsiz = 16;
   char buf[bufsiz];
 
   stream_line_reader line_reader(strm, buf, bufsiz);
 
-  auto read_line = [&] {
-    if (line_reader.getline(x.header_read.line_max)) return true;
-    if (line_reader.exceeded) {
-      x.header_read.exceeded = true;
-      x.header_read.failed_limit = x.header_read.line_max;
-      x.header_read.failed_needed = x.header_read.line_max + 1;
-    }
-    return false;
-  };
-  if (!read_line()) { return false; }
+  if (!line_reader.getline()) { return false; }
 
   unsigned long chunk_len;
   while (true) {
@@ -4344,11 +4269,7 @@ inline bool read_content_chunked(Stream &strm, T &x,
     chunk_len = std::strtoul(line_reader.ptr(), &end_ptr, 16);
 
     if (end_ptr == line_reader.ptr()) { return false; }
-    // Bound (abi): chunk sizes must fit the unsigned-long parser. Overflow rejects with 413 and is counted.
-    if (chunk_len == ULONG_MAX) {
-      if (status) *status = StatusCode::PayloadTooLarge_413;
-      return false;
-    }
+    if (chunk_len == ULONG_MAX) { return false; }
 
     if (chunk_len == 0) { break; }
 
@@ -4356,17 +4277,45 @@ inline bool read_content_chunked(Stream &strm, T &x,
       return false;
     }
 
-    if (!read_line()) { return false; }
+    if (!line_reader.getline()) { return false; }
 
     if (strcmp(line_reader.ptr(), "\r\n") != 0) { return false; }
 
-    if (!read_line()) { return false; }
+    if (!line_reader.getline()) { return false; }
   }
 
   assert(chunk_len == 0);
 
-  // TRUSSC PATCH: trailers use the initial headers' remaining allowance.
-  return read_headers(strm, x.headers, &x.header_read);
+  // NOTE: In RFC 9112, '7.1 Chunked Transfer Coding' mentiones "The chunked
+  // transfer coding is complete when a chunk with a chunk-size of zero is
+  // received, possibly followed by a trailer section, and finally terminated by
+  // an empty line". https://www.rfc-editor.org/rfc/rfc9112.html#section-7.1
+  //
+  // In '7.1.3. Decoding Chunked', however, the pseudo-code in the section
+  // does't care for the existence of the final CRLF. In other words, it seems
+  // to be ok whether the final CRLF exists or not in the chunked data.
+  // https://www.rfc-editor.org/rfc/rfc9112.html#section-7.1.3
+  //
+  // According to the reference code in RFC 9112, cpp-htpplib now allows
+  // chuncked transfer coding data without the final CRLF.
+  if (!line_reader.getline()) { return true; }
+
+  while (strcmp(line_reader.ptr(), "\r\n") != 0) {
+    if (line_reader.size() > CPPHTTPLIB_HEADER_MAX_LENGTH) { return false; }
+
+    // Exclude line terminator
+    constexpr auto line_terminator_len = 2;
+    auto end = line_reader.ptr() + line_reader.size() - line_terminator_len;
+
+    parse_header(line_reader.ptr(), end,
+                 [&](const std::string &key, const std::string &val) {
+                   x.headers.emplace(key, val);
+                 });
+
+    if (!line_reader.getline()) { return false; }
+  }
+
+  return true;
 }
 
 inline bool is_chunked_transfer_encoding(const Headers &headers) {
@@ -4426,66 +4375,33 @@ template <typename T>
 bool read_content(Stream &strm, T &x, size_t payload_max_length, int &status,
                   Progress progress, ContentReceiverWithProgress receiver,
                   bool decompress) {
-  // TRUSSC PATCH: admission precedes reading, appending and decompression.
-  if (has_header(x.headers, "Content-Length") &&
-      get_header_value_u64(x.headers, "Content-Length", 0, 0) > payload_max_length) {
-    status = StatusCode::PayloadTooLarge_413;
-    return false;
-  }
-  size_t decoded = 0;
-  bool exceeded = false;
-  ContentReceiverWithProgress bounded = [&](const char *buf, size_t n,
-                                            uint64_t off, uint64_t len) {
-    // Bound (security): decoded expansion shares the body allowance. Overflow rejects with 413 and is counted.
-    if (n > payload_max_length - decoded) { exceeded = true; return false; }
-    decoded += n;
-    return receiver(buf, n, off, len);
-  };
-  // Count all wire bytes, including chunk framing, before downstream reads.
-  class WireStream final : public Stream {
-  public:
-    WireStream(Stream &source, size_t limit) : source_(source), limit_(limit) {}
-    bool is_readable() const override { return source_.is_readable(); }
-    bool is_writable() const override { return source_.is_writable(); }
-    ssize_t read(char *buf, size_t n) override {
-      // Bound (security): wire framing and encoded bodies must also fit. Overflow rejects with 413 and is counted.
-      if (used_ == limit_) {
-        char extra;
-        auto got = source_.read(&extra, 1);
-        if (got <= 0) { return got; }
-        exceeded = true; return -1;
-      }
-      auto got = source_.read(buf, (std::min)(n, limit_ - used_));
-      if (got > 0) { used_ += static_cast<size_t>(got); }
-      return got;
-    }
-    ssize_t write(const char *buf, size_t n) override { return source_.write(buf, n); }
-    void get_remote_ip_and_port(std::string &ip, int &port) const override { source_.get_remote_ip_and_port(ip, port); }
-    void get_local_ip_and_port(std::string &ip, int &port) const override { source_.get_local_ip_and_port(ip, port); }
-    socket_t socket() const override { return source_.socket(); }
-    bool exceeded = false;
-  private:
-    Stream &source_;
-    size_t limit_, used_ = 0;
-  } wire(strm, payload_max_length);
-  auto ret = prepare_content_receiver(x, status, bounded, decompress,
+  return prepare_content_receiver(
+      x, status, std::move(receiver), decompress,
       [&](const ContentReceiverWithProgress &out) {
+        auto ret = true;
+        auto exceed_payload_max_length = false;
+
         if (is_chunked_transfer_encoding(x.headers)) {
-          return read_content_chunked(wire, x, out, &status);
+          ret = read_content_chunked(strm, x, out);
+        } else if (!has_header(x.headers, "Content-Length")) {
+          ret = read_content_without_length(strm, out);
+        } else {
+          auto len = get_header_value_u64(x.headers, "Content-Length", 0, 0);
+          if (len > payload_max_length) {
+            exceed_payload_max_length = true;
+            skip_content_with_length(strm, len);
+            ret = false;
+          } else if (len > 0) {
+            ret = read_content_with_length(strm, len, std::move(progress), out);
+          }
         }
-        if (!has_header(x.headers, "Content-Length")) {
-          auto ok = read_content_without_length(wire, out);
-          return ok && !wire.exceeded;
+
+        if (!ret) {
+          status = exceed_payload_max_length ? StatusCode::PayloadTooLarge_413
+                                             : StatusCode::BadRequest_400;
         }
-        auto len = get_header_value_u64(x.headers, "Content-Length", 0, 0);
-        return len == 0 || read_content_with_length(wire, len, std::move(progress), out);
+        return ret;
       });
-  if (!ret) {
-    if (x.header_read.exceeded) { status = StatusCode::RequestHeaderFieldsTooLarge_431; }
-    else if (exceeded || wire.exceeded) { status = StatusCode::PayloadTooLarge_413; }
-    else if (status == 0 || status == -1) { status = StatusCode::BadRequest_400; }
-  }
-  return ret;
 }
 
 inline ssize_t write_request_line(Stream &strm, const std::string &method,
@@ -6499,22 +6415,6 @@ inline bool Server::write_response_core(Stream &strm, bool close_connection,
                                         const Request &req, Response &res,
                                         bool need_apply_ranges) {
   assert(res.status != -1);
-  // TRUSSC PATCH: one first-rejection diagnostic per receiving store.
-  if (res.status == 413 || res.status == 431) {
-    auto &counter = res.status == 413 ? payload_rejections_ : header_rejections_;
-    auto previous = counter.fetch_add(1);
-    const auto capacity = res.status == 413 ? payload_max_length_ : req.header_read.failed_limit;
-    const auto length = req.get_header_value_u64("Content-Length");
-    const auto needed = res.status == 413 ? (length > capacity ? size_t(length) : capacity + 1)
-                                          : req.header_read.failed_needed;
-    const auto units = res.status == 413 ? "bytes" : req.header_read.failed_units;
-    if (limit_handler_) { limit_handler_(res.status, capacity, needed, units); }
-    else if (!previous) {
-      std::cerr << "Warning: HTTP " << (res.status == 413 ? "body" : "headers")
-                << " capacity " << capacity << ", needed " << needed << " " << units
-                << "; request rejected (" << res.status << ")\n";
-    }
-  }
 
   if (400 <= res.status && error_handler_ &&
       error_handler_(req, res) == HandlerResponse::Handled) {
@@ -6524,9 +6424,6 @@ inline bool Server::write_response_core(Stream &strm, bool close_connection,
   std::string content_type;
   std::string boundary;
   if (need_apply_ranges) { apply_ranges(req, res, content_type, boundary); }
-
-  // TRUSSC PATCH: admission failures leave unread bytes.
-  if (res.status == 413 || res.status == 431) { close_connection = true; }
 
   // Prepare additional headers
   if (close_connection || req.get_header_value("Connection") == "close") {
@@ -6652,9 +6549,7 @@ inline bool Server::read_content(Stream &strm, Request &req, Response &res) {
           },
           // Multipart
           [&](const MultipartFormData &file) {
-            // Bound (security): multipart fields consume metadata even when empty. Overflow rejects with 413 and is counted.
             if (file_count++ == CPPHTTPLIB_MULTIPART_FORM_DATA_FILE_MAX_COUNT) {
-              res.status = StatusCode::PayloadTooLarge_413;
               return false;
             }
             cur = req.files.emplace(file.name, file);
@@ -6668,7 +6563,6 @@ inline bool Server::read_content(Stream &strm, Request &req, Response &res) {
           })) {
     const auto &content_type = req.get_header_value("Content-Type");
     if (!content_type.find("application/x-www-form-urlencoded")) {
-      // Bound (security): form parsing expands body bytes into metadata. Overflow rejects with 413 and is counted.
       if (req.body.size() > CPPHTTPLIB_FORM_URL_ENCODED_PAYLOAD_MAX_LENGTH) {
         res.status = StatusCode::PayloadTooLarge_413; // NOTE: should be 414?
         return false;
@@ -6732,7 +6626,6 @@ Server::read_content_core(Stream &strm, Request &req, Response &res,
 
   if (!detail::read_content(strm, req, payload_max_length_, res.status, nullptr,
                             out, true)) {
-    res.set_header("Connection", "close");
     return false;
   }
 
@@ -7149,46 +7042,46 @@ Server::process_request(Stream &strm, const std::string &remote_addr,
                         int local_port, bool close_connection,
                         bool &connection_closed,
                         const std::function<void(Request &)> &setup_request) {
-  // TRUSSC PATCH: declare before Request/Response so their storage dies first.
-  auto request_scope = request_scope_handler_ ? request_scope_handler_() : nullptr;
   std::array<char, 2048> buf{};
 
   detail::stream_line_reader line_reader(strm, buf.data(), buf.size());
+
+  // Connection has been closed on client
+  if (!line_reader.getline()) { return false; }
+
   Request req;
-  req.header_read = header_limits_;
+
   Response res;
   res.version = "HTTP/1.1";
   res.headers = default_headers_;
 
-  // TRUSSC PATCH: request line is part of the shared metadata allowance.
-  if (!line_reader.getline((std::min)(header_limits_.line_max, header_limits_.bytes_max))) {
-    if (!line_reader.exceeded) { return false; }
-    req.header_read.failed_limit = (std::min)(header_limits_.line_max, header_limits_.bytes_max);
-    req.header_read.failed_needed = req.header_read.failed_limit + 1;
-    res.status = StatusCode::RequestHeaderFieldsTooLarge_431;
-    connection_closed = true;
-    return write_response(strm, true, req, res);
-  }
-#if !defined(_WIN32) && !defined(CPPHTTPLIB_USE_POLL)
-  // Bound (platform): select requires a representable descriptor. Overflow rejects the connection with 500 and is counted.
+#ifdef _WIN32
+  // TODO: Increase FD_SETSIZE statically (libzmq), dynamically (MySQL).
+#else
+#ifndef CPPHTTPLIB_USE_POLL
+  // Socket file descriptor exceeded FD_SETSIZE...
   if (strm.socket() >= FD_SETSIZE) {
-    if (descriptor_rejections_.fetch_add(1) == 0) {
-      std::cerr << "Warning: HTTP descriptors capacity " << FD_SETSIZE
-                << ", needed " << (static_cast<size_t>(strm.socket()) + 1)
-                << " descriptors; request rejected (500)\n";
-    }
+    Headers dummy;
+    detail::read_headers(strm, dummy);
     res.status = StatusCode::InternalServerError_500;
-    connection_closed = true;
-    return write_response(strm, true, req, res);
+    return write_response(strm, close_connection, req, res);
   }
 #endif
-  req.header_read.bytes = line_reader.size();
+#endif
+
+  // Check if the request URI doesn't exceed the limit
+  if (line_reader.size() > CPPHTTPLIB_REQUEST_URI_MAX_LENGTH) {
+    Headers dummy;
+    detail::read_headers(strm, dummy);
+    res.status = StatusCode::UriTooLong_414;
+    return write_response(strm, close_connection, req, res);
+  }
+
+  // Request line and headers
   if (!parse_request_line(line_reader.ptr(), req) ||
-      !detail::read_headers(strm, req.headers, &req.header_read)) {
-    res.status = req.header_read.exceeded ? StatusCode::RequestHeaderFieldsTooLarge_431
-                                          : StatusCode::BadRequest_400;
-    connection_closed = true;
-    return write_response(strm, true, req, res);
+      !detail::read_headers(strm, req.headers)) {
+    res.status = StatusCode::BadRequest_400;
+    return write_response(strm, close_connection, req, res);
   }
 
   if (req.get_header_value("Connection") == "close") {
@@ -7273,8 +7166,6 @@ Server::process_request(Stream &strm, const std::string &remote_addr,
     }
   }
 #endif
-  // TRUSSC PATCH: unread rejected bodies cannot become another request.
-  if (res.status == 413 || res.status == 431 || res.get_header_value("Connection") == "close") { connection_closed = true; close_connection = true; }
   if (routed) {
     if (res.status == -1) {
       res.status = req.ranges.empty() ? StatusCode::OK_200

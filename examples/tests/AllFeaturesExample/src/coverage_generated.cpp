@@ -4769,11 +4769,8 @@ struct Cover_mcp__AdmissionLimits : af::Scope<mcp::AdmissionLimits> {
     static void run() {
         (void)af::val<mcp::AdmissionLimits>().bodyBytes;
         (void)af::val<mcp::AdmissionLimits>().gridCells;
-        (void)af::val<mcp::AdmissionLimits>().headerBytes;
-        (void)af::val<mcp::AdmissionLimits>().headerCount;
         (void)af::val<mcp::AdmissionLimits>().histogramBins;
         (void)af::val<mcp::AdmissionLimits>().jsonDepth;
-        (void)af::val<mcp::AdmissionLimits>().lineBytes;
         (void)af::val<mcp::AdmissionLimits>().operations;
         (void)af::val<mcp::AdmissionLimits>().outstanding;
         (void)af::val<mcp::AdmissionLimits>().replyBytes;
