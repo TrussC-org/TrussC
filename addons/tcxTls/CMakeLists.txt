@@ -26,17 +26,8 @@ if(NOT MBEDTLS_USER_CONFIG_FILE)
     set(MBEDTLS_USER_CONFIG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/mbedtls_user_config.h"
         CACHE FILEPATH "Mbed TLS user configuration" FORCE)
 endif()
-# Upstream still declares a policy version older than 3.10. CMake 4 warns
-# about that compatibility mode. Apply the documented external policy floor
-# only while adding this dependency, preserving any higher caller setting.
-function(_tcxTls_make_available)
-    if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0" AND
-       (NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM OR CMAKE_POLICY_VERSION_MINIMUM VERSION_LESS "3.10"))
-        set(CMAKE_POLICY_VERSION_MINIMUM 3.10)
-    endif()
-    FetchContent_MakeAvailable(mbedtls)
-endfunction()
-_tcxTls_make_available()
+include("${CMAKE_CURRENT_LIST_DIR}/../../core/cmake/tc_fetch_quiet.cmake")
+tc_fetch_quiet(mbedtls)
 
 # Embed the Mozilla CA bundle as a generated .cpp: Windows adds it to ROOT,
 # and POSIX uses it as a fallback when no OS bundle file can be loaded.

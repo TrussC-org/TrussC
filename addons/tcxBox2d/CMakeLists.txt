@@ -17,17 +17,8 @@ set(BOX2D_BUILD_UNIT_TESTS OFF CACHE BOOL "" FORCE)
 set(BOX2D_BUILD_TESTBED OFF CACHE BOOL "" FORCE)
 set(BOX2D_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(BOX2D_USER_SETTINGS OFF CACHE BOOL "" FORCE)
-# Upstream still declares a policy version older than 3.10. CMake 4 warns
-# about that compatibility mode. Apply the documented external policy floor
-# only while adding this dependency, preserving any higher caller setting.
-function(_tcxBox2d_make_available)
-    if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0" AND
-       (NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM OR CMAKE_POLICY_VERSION_MINIMUM VERSION_LESS "3.10"))
-        set(CMAKE_POLICY_VERSION_MINIMUM 3.10)
-    endif()
-    FetchContent_MakeAvailable(box2d)
-endfunction()
-_tcxBox2d_make_available()
+include("${CMAKE_CURRENT_LIST_DIR}/../../core/cmake/tc_fetch_quiet.cmake")
+tc_fetch_quiet(box2d)
 
 # Source files
 file(GLOB ADDON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)

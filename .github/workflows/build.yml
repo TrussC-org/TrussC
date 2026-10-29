@@ -330,6 +330,8 @@ jobs:
             sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
             ./tools/build_linux.sh
           elif [ "$RUNNER_OS" == "Windows" ]; then
+            # Do not launch the GUI (it also inherits the capture pipes).
+            sed -i 's/^start /REM &/' tools/build_win.bat
             ./tools/build_win.bat
             echo "Searching for trusscli.exe..."
             find . -name trusscli.exe

@@ -2,6 +2,7 @@
 """Fail normal CI builds on compiler, linker and CMake warnings.
 
 --capture keeps stdout/stderr visible and saves them, preserving command status.
+Inherited output pipes get a bounded grace period after command exit.
 Scan that log in a following step, even when the build command failed.
 For mixed build/test drivers, --capture-builds collects only run_build calls
 and C++ hot-reload builds via TC_BUILD_WARNING_LOG; runtime stdout stays visible.
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import threading
 import queue
+import time
 from contextlib import nullcontext
 
 ALLOWLIST = Path(__file__).with_name('build_warning_allowlist.json')
@@ -38,6 +40,7 @@ BUILD_LOG_ENV = 'TC_BUILD_WARNING_LOG'
 
 # Bound (memory): 8 queued lines + 2 reader lines, tail and warning sample; each <= 64K Unicode characters (256 KiB).
 OUTPUT_LIMIT = 64 * 1024
+CAPTURE_EXIT_GRACE = 1.0
 
 
 def run_build(command, *, echo=True, on_line=None, **kwargs):
@@ -182,12 +185,82 @@ def capture(path, command):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('wb') as output:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        for line in process.stdout:
-            output.write(line)
+        pending = queue.Queue(maxsize=8)
+        stopped = threading.Event()
+
+        def enqueue(item):
+            while not stopped.is_set():
+                try:
+                    pending.put(item, timeout=.1)
+                    return
+                except queue.Full:
+                    pass
+
+        def read_output():
+            # A descendant can retain the pipe after the command exits. This
+            # daemon owns/ultimately closes it; closing a blocked reader from
+            # the main thread can itself hang on Windows/Python's stream lock.
+            try:
+                with process.stdout as pipe:
+                    while not stopped.is_set():
+                        chunk = os.read(pipe.fileno(), OUTPUT_LIMIT)
+                        if not chunk:
+                            break
+                        enqueue(chunk)
+            except OSError as error:
+                enqueue(error)
+            finally:
+                enqueue(None)
+
+        reader = threading.Thread(target=read_output, daemon=True)
+        reader.start()
+        deadline = None
+
+        def write_chunk(chunk):
+            if isinstance(chunk, Exception):
+                raise chunk
+            output.write(chunk)
             output.flush()
-            sys.stdout.buffer.write(line)
+            sys.stdout.buffer.write(chunk)
             sys.stdout.buffer.flush()
-        status = process.wait()
+
+        try:
+            while True:
+                if process.poll() is not None and deadline is None:
+                    deadline = time.monotonic() + CAPTURE_EXIT_GRACE
+                if deadline is not None and time.monotonic() >= deadline:
+                    stopped.set()
+                    # Preserve bytes already read. The queue plus a racing
+                    # producer put contains at most nine bounded chunks.
+                    for _ in range(9):
+                        try:
+                            chunk = pending.get_nowait()
+                        except queue.Empty:
+                            break
+                        if chunk is not None:
+                            write_chunk(chunk)
+                    notice = (b'\nBuild capture: output may be incomplete; inherited output pipe '
+                              b'remained open after command exit.\n')
+                    output.write(notice)
+                    sys.stderr.buffer.write(notice)
+                    sys.stderr.buffer.flush()
+                    break
+                try:
+                    chunk = pending.get(timeout=.05)
+                except queue.Empty:
+                    continue
+                if chunk is None:
+                    break
+                write_chunk(chunk)
+            status = process.wait()
+        except BaseException:
+            process.kill()
+            process.wait()
+            raise
+        finally:
+            stopped.set()
+            reader.join(timeout=.1)
+            output.flush()
     return status if status >= 0 else 128 - status
 
 

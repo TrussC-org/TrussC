@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
@@ -95,6 +96,53 @@ class WarningTests(unittest.TestCase):
             self.assertEqual(subprocess.run([sys.executable, str(SCRIPT), str(log)], capture_output=True).returncode, 0)
             log.unlink()
             self.assertEqual(subprocess.run([sys.executable, str(SCRIPT), str(log)], capture_output=True).returncode, 1)
+
+    def test_capture_bounds_inherited_pipe_wait(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            log = Path(directory) / 'build.log'
+            pidfile = Path(directory) / 'grandchild.pid'
+            grandchild = ('import time; time.sleep(.2); '
+                          'print("late.cpp:2: warning: inherited pipe", flush=True); '
+                          'time.sleep(60)')
+            child = (
+                'import subprocess,sys; from pathlib import Path; '
+                f'p=subprocess.Popen([sys.executable,"-c",{grandchild!r}], '
+                'stdin=subprocess.DEVNULL); '
+                'Path(sys.argv[1]).write_text(str(p.pid)); '
+                'sys.stdout.write("x.cpp:1: warning: before exit\\npartial output"); '
+                'sys.stdout.flush(); sys.exit(7)')
+            started = time.monotonic()
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPT), '--capture', str(log), '--',
+                     sys.executable, '-c', child, str(pidfile)],
+                    capture_output=True, timeout=10)
+                self.assertLess(time.monotonic() - started, 8)
+                self.assertEqual(result.returncode, 7)
+                self.assertIn(b'output may be incomplete', result.stderr)
+                self.assertIn(b'partial output', log.read_bytes())
+                self.assertIn(b'warning: before exit', result.stdout)
+                self.assertIn(b'warning: inherited pipe', result.stdout)
+                checked = subprocess.run([sys.executable, str(SCRIPT), str(log)],
+                                         capture_output=True, timeout=10)
+                self.assertEqual(checked.returncode, 1)
+                self.assertIn(b'warning: before exit', checked.stdout)
+            finally:
+                if pidfile.exists():
+                    pid = int(pidfile.read_text(encoding='utf-8'))
+                    if os.name == 'nt':
+                        subprocess.run(['taskkill', '/PID', str(pid), '/F'], capture_output=True)
+                    else:
+                        import signal
+                        os.kill(pid, signal.SIGTERM)
+
+    def test_windows_ci_disables_gui_launch(self):
+        workflow = yaml.safe_load((ROOT / '.github/workflows/build.yml').read_text(encoding='utf-8'))
+        step = next(s for s in workflow['jobs']['build']['steps']
+                    if s.get('name') == 'Build trusscli')
+        windows = step['run'].split('elif [ "$RUNNER_OS" == "Windows" ]; then')[1]
+        self.assertLess(windows.index("sed -i 's/^start /REM &/' tools/build_win.bat"),
+                        windows.index('./tools/build_win.bat'))
 
     def test_runtime_output_never_enters_build_log(self):
         # Exercise the actual mixed build/run boundary. Even marker-like text
