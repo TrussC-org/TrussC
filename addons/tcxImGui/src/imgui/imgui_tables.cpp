@@ -4171,7 +4171,6 @@ static void* TableSettingsHandler_ReadOpen(ImGuiContext*, ImGuiSettingsHandler*,
     // We might want to use another MAX defined as (1<<(sizeof(ImGuiTableColumnIdx)*8-1))-1.
     ImGuiID id = 0;
     int columns_count = 0;
-    // Bound (abi): ini columns must fit ImGui's compiled table/index representation. Overflow rejects the whole import in the preflight and is counted.
     if (sscanf(name, "0x%08X,%d", &id, &columns_count) < 2 || columns_count <= 0 || columns_count >= IMGUI_TABLE_MAX_COLUMNS)
         return NULL;
     return ImGui::TableSettingsCreate(id, columns_count);
