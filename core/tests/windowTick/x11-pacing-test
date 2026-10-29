@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Deterministic production X11 admission/deadline test (no display needed).
+
+Run through tcbuild.sh. TC_X11_PACING_HEADER selects a private pre-fix header.
+Native swaps model steady or queued vsync; the loop, tick and periodic
+decision are extracted verbatim and compiled for both GLX and EGL.
+"""
+from pathlib import Path
+import os
+import subprocess
+import tempfile
+
+root = Path(__file__).resolve().parents[3]
+header = Path(os.environ.get('TC_X11_PACING_HEADER', root / 'core/include/sokol/sokol_app_tc.h'))
+source = header.read_text()
+
+
+def body(marker):
+    start = source.find(marker)
+    if start < 0:
+        raise SystemExit(f'{header}: missing extraction marker {marker!r}')
+    opening = source.index('{', start)
+    depth, end = 1, opening + 1
+    while depth and end < len(source):
+        depth += (source[end] == '{') - (source[end] == '}')
+        end += 1
+    if depth:
+        raise SystemExit(f'{header}: unbalanced body {marker!r}')
+    return source[start:end]
+
+probe = r'''
+#include <cmath>
+#include <cstdio>
+#include <cstddef>
+struct sapp_window { int id; };
+struct _sapp_tc_window_t {
+    bool ready=true, in_tick=false, close_requested=false, input_delivered=false;
+    int drawable=1, frame_count=0, swap_interval=0, win_id=1;
+    bool draw_while_hidden=true, skip_present=false;
+    double earliest_next=0, frame_duration=0, last_present=0;
+    struct { double smooth_dt=1.0/62.0; } timing;
+    struct { void (*tick_cb)(struct sapp_window, void*)=nullptr; void* user_data=nullptr; } desc;
+};
+struct App { bool quit_ordered=false, quit_requested=false; _sapp_tc_window_t* main=nullptr; };
+struct { App app; int display=0; size_t window_slots=2; double refresh_period=1.0/62.0;
+    _sapp_tc_window_t* windows[2]; } _sapp_tc;
+struct XEvent {};
+struct pollfd { int fd, events, revents; };
+constexpr int POLLIN=1, SAPP_EVENTTYPE_QUIT_REQUESTED=1, SAPP_EVENTTYPE_RESIZED=2;
+static double clockValue=10, period=1.0/62.0, tail=0;
+static int limit=620;
+static bool queued=false;
+double _sapp_tc_now() { return clockValue; }
+int XPending(int) { return 0; }
+void XFlush(int) {}
+void XNextEvent(int, XEvent*) {}
+int ConnectionNumber(int) { return 0; }
+int poll(pollfd*, int, int ms) { clockValue+=ms*.001; return 0; }
+void _sapp_tc_x11_wait_until(double deadline) { clockValue=deadline; }
+void _sapp_tc_x11_process_event(XEvent*) {}
+void _sapp_tc_x11_close(_sapp_tc_window_t*) {}
+void _sapp_tc_x11_app_event(_sapp_tc_window_t*,int) {}
+PERIODIC
+DUE
+struct _sapp_tc_x11_surface_scope {};
+void _sapp_tc_timing_update(decltype(_sapp_tc_window_t::timing)*) {}
+bool _sapp_tc_x11_update_dimensions(_sapp_tc_window_t*) { return false; }
+bool _sapp_tc_x11_make_current(_sapp_tc_window_t*) { return true; }
+bool _sapp_tc_native_hidden(_sapp_tc_window_t*) { return false; }
+bool _sapp_tc_native_iconified(_sapp_tc_window_t*) { return false; }
+void _sapp_tc_x11_swap(_sapp_tc_window_t* w) {
+    if (w==_sapp_tc.app.main) {
+        clockValue+=queued ? (w->frame_count%2 ? 0 : 2*period) : period;
+        if(w->frame_count==limit) _sapp_tc.app.quit_ordered=true;
+    } else clockValue+=tail;
+}
+PACE
+TICK
+LOOP
+int main() {
+    int failures=0;
+    for (bool burst : {false, true}) for (double work : {0.0, .0001, .001}) {
+        _sapp_tc_window_t main{}, secondary{};
+        _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
+        _sapp_tc.app.main=&main; main.swap_interval=1; clockValue=10; tail=work; queued=burst;
+        _sapp_tc_x11_run_loop();
+        // Steady swaps should admit almost every tick. Queued EGL swaps may
+        // teach the existing estimator a doubled period, so allow half cadence.
+        bool ok=burst ? secondary.frame_count*2>=main.frame_count-4
+                      : secondary.frame_count*4>=main.frame_count*3;
+        std::printf("relative cadence queued=%d work=%.4f main=%d secondary=%d refresh_ms=%.3f: %s\n",burst,work,main.frame_count,secondary.frame_count,_sapp_tc.refresh_period*1000,ok?"PASS":"FAIL");
+        failures+=!ok;
+    }
+    // A late callback must retain phase and skip elapsed deadlines in one step.
+    _sapp_tc_window_t window{}; window.earliest_next=10;
+    clockValue=10+3.2*period;
+    _sapp_tc_x11_pace_periodic(&window,period);
+    bool ok=std::abs(window.earliest_next-(10+4*period))<1e-9;
+    std::printf("late periodic phase: %s\n",ok?"PASS":"FAIL"); failures+=!ok;
+    window.earliest_next=100; clockValue=10;
+    _sapp_tc_x11_pace_periodic(&window,period);
+    ok=std::abs(window.earliest_next-(10+period))<1e-9;
+    std::printf("future deadline resync: %s\n",ok?"PASS":"FAIL"); failures+=!ok;
+    return failures?1:0;
+}
+'''
+probe = '#include <initializer_list>\n' + probe
+for placeholder, marker in (
+    ('PERIODIC', 'static void _sapp_tc_x11_pace_periodic('),
+    ('DUE', 'static bool _sapp_tc_x11_window_due('),
+    ('PACE', 'static void _sapp_tc_x11_pace('),
+    ('TICK', 'static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {'),
+    ('LOOP', 'static void _sapp_tc_x11_run_loop('),
+):
+    probe = probe.replace(placeholder, body(marker))
+with tempfile.TemporaryDirectory(prefix='tc-an2a-pacing-', dir=os.environ.get('TMPDIR')) as temporary:
+    scratch = Path(temporary)
+    (scratch / 'probe.cpp').write_text(probe)
+    failed = False
+    for backend in ('GLCORE', 'GLES3'):
+        subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-O1', '-DSOKOL_'+backend,
+                        str(scratch/'probe.cpp'), '-o', str(scratch/'probe')], check=True)
+        print(backend, flush=True)
+        failed |= subprocess.run([str(scratch/'probe')]).returncode != 0
+    raise SystemExit(int(failed))

@@ -14,6 +14,7 @@ header = (include/'sokol_app_tc.h').read_text()
 comments_ok = all('always valid' not in re.search(r'float mouse_' + axis + r';[^\n]*', header)[0]
                   for axis in ('dx', 'dy'))
 print('native-contracts: mouse delta comments avoid universal validity: ' + ('PASS' if comments_ok else 'FAIL'), flush=True)
+header = header[header.index('/*== Linux (X11 + GLX or EGL)'):]
 header = header[header.index('#include "util/sokol_window_native.h"'):]
 header = header[:header.index('#elif defined(__ANDROID__)')]
 def body(marker):

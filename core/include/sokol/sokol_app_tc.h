@@ -11836,12 +11836,15 @@ static void _sapp_tc_x11_pace(_sapp_tc_window_t* w, double seconds) {
 
 /* absolute periodic schedule (timer-paced secondary windows): pacing from the
    previous deadline instead of "now" keeps the average rate at the period
-   despite tick jitter; resync when far off (first tick, after occlusion) */
+   despite tick jitter; skip missed periods, initialize or resync a future phase */
 static void _sapp_tc_x11_pace_periodic(_sapp_tc_window_t* w, double period) {
     const double now = _sapp_tc_now();
     double next = w->earliest_next + period;
-    if ((next <= now) || (next > now + 2.0 * period)) {
+    if (w->earliest_next <= 0.0 || next > now + 2.0 * period) {
         next = now + period;
+    } else if (next <= now) {
+        // Skip elapsed deadlines without moving the timer's phase to tick completion.
+        next += (floor((now - next) / period) + 1.0) * period;
     }
     w->earliest_next = next;
 }
@@ -12000,10 +12003,10 @@ static void _sapp_tc_x11_run_loop(void) {
 #endif
         /* tick every due window (re-fetch each slot: a tick or a processed
            event may have destroyed windows) */
-        now = _sapp_tc_now();
         for (size_t i = 0; i < _sapp_tc.window_slots; i++) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
-            if (_sapp_tc_x11_window_due(w, now)) {
+            // An earlier window's swap may have blocked across this deadline.
+            if (_sapp_tc_x11_window_due(w, _sapp_tc_now())) {
                 _sapp_tc_x11_tick(w);
             }
         }

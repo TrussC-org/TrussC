@@ -31,6 +31,9 @@ endif()
 if(TC_X11_AVAILABLE)
     # The continuous visibility histories must also exercise the GLX dispatcher.
     include(CTest)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME x11Pacing COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../windowTick/x11-pacing-test")
     if(TC_X11_GL_DEPS)
         add_executable(x11VisibilityGLX ../windowTick/x11-regression.cpp)
         target_compile_features(x11VisibilityGLX PRIVATE cxx_std_20)
