@@ -41356,18 +41356,21 @@ description.en = "Wraps a pugixml document for loading, saving, and querying XML
 description.ja = "XML の読み込み・保存・検索を行う pugixml ドキュメントのラッパー。"
 description.ko = "XML을 읽고 저장하고 검색하는 pugixml 문서 래퍼이다."
 details.en = '''
+- The wrapper checks element depth (maximum 64) by an iterative walk after parsing, and rejects embedded NUL input. Upstream element parsing is iterative; deep local input allocates a temporary DOM before the wrapper rejects it. Direct pugixml access follows upstream rules.
 - Owns the XML document, which initially has no root element; use `root()`, `child()`, and `addRoot()` to access nodes as `XmlNode` handles.
 - Node and attribute handles refer to document-owned data; destroying or resetting the document, replacing its contents during loading or parsing, or removing the corresponding nodes invalidates those handles.
 - `load()` and `parse()` use the default pugixml options, which do not retain comments, processing instructions, XML declarations, document type declarations, or ordinary text nodes consisting only of literal XML whitespace. Whitespace from character references and whitespace inside CDATA are retained.
 - `save()` and `toString()` output UTF-8 with two spaces per indentation level by default, and automatically include an XML declaration if the document has none.
 '''
 details.ja = '''
+- ラッパーは解析後の反復走査で要素の深さ（最大 64）を確認し、入力中の NUL を拒否します。upstream の要素解析も反復処理で、深いローカル入力は一時 DOM を確保した後で拒否されます。pugixml の直接利用には upstream の規則が適用されます。
 - XML ドキュメントを所有し、初期状態ではルート要素を持ちません。`root()`、`child()`、`addRoot()` で `XmlNode` ハンドルを取得してノードを操作します。
 - ノードと属性のハンドルはドキュメントが所有するデータを参照します。ドキュメントの破棄やリセット、読み込みや解析による内容の置き換え、対応するノードの削除によって、これらのハンドルは無効になります。
 - `load()` と `parse()` は pugixml の既定のオプションを使い、コメント、処理命令、XML 宣言、文書型宣言、入力に直接書かれた XML の空白文字だけからなる通常のテキストノードを保持しません。文字参照で生成される空白や CDATA 内の空白は保持します。
 - `save()` と `toString()` は既定で各階層を半角スペース 2 個で字下げした UTF-8 を出力し、ドキュメントに XML 宣言がなければ自動的に付加します。
 '''
 details.ko = '''
+- 래퍼는 파싱 후 반복 순회로 요소 깊이(최대 64)를 확인하고 입력의 NUL을 거부합니다. upstream 요소 파싱도 반복 처리이며 깊은 로컬 입력은 임시 DOM을 할당한 후 거부됩니다. pugixml을 직접 사용하면 upstream 규칙을 따릅니다.
 - XML 문서를 소유하며, 초기 상태에는 루트 요소가 없습니다. `root()`, `child()`, `addRoot()`로 `XmlNode` 핸들을 얻어 노드를 조작합니다.
 - 노드와 속성 핸들은 문서가 소유한 데이터를 참조합니다. 문서를 소멸하거나 초기화하거나, 읽기 또는 파싱으로 내용을 교체하거나, 해당 노드를 삭제하면 이 핸들들은 무효화됩니다.
 - `load()`와 `parse()`는 pugixml의 기본 옵션을 사용하며 주석, 처리 명령, XML 선언, 문서 형식 선언, 입력에 직접 쓰인 XML 공백 문자만으로 이루어진 일반 텍스트 노드를 보존하지 않습니다. 문자 참조로 생성된 공백과 CDATA 내부의 공백은 보존합니다.

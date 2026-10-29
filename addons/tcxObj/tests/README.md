@@ -57,10 +57,10 @@ Error, `DecodeFailed` with exactly one Error for a broken OBJ, and relative
 Japanese OBJ/MTL/texture paths through `getDataPath()`. Fixtures are generated
 at runtime.
 
-Model table tests check declared tag values against the input before allocation,
+Model table tests accept upstream-compatible tag counts,
 preserve upstream’s silent truncation to 8192 values per kind for direct
-vendor callers retaining tags, accept tag values starting with `#`, discard
-unused tag payloads across groups on the framework path, recover from single and
+vendor callers retaining tags, accept tag values starting with `#`, retain
+upstream tag payloads across groups, recover from single and
 persistent injected allocation failures, and load local OBJ and MTL files above
 the former stream threshold. Pending tinyobj Warnings are delivered before
 the Error when a later OBJ statement rejects the model.
@@ -68,9 +68,7 @@ Unsupported or malformed MTL statements warn and keep usable geometry, like a
 missing MTL. Tests cover `d -halo`, `Tf xyz`, `Ka spectral` and an allocation
 failure while opening an MTL: successful geometry without materials must warn.
 If diagnostics also cannot allocate, addon recovery returns failure. Fixtures and
-allocation-size observations are generated in the test process. Equal-length
-tagged and untagged files compare actual framework allocation totals, so
-enabling tag retention in ObjLoader fails the harness. Single and persistent
+allocation-size observations are generated in the test process. Single and persistent
 sweeps cover every observed request for two textured groups and point-only OBJ,
 with core context warmed before injection and a successful retry after each fault.
 
