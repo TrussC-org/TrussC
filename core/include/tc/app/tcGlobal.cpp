@@ -54,6 +54,29 @@
 namespace trussc {
 
 namespace internal {
+namespace {
+thread_local bool shaderStreamBufferAllocation = false;
+}
+
+sg_buffer growShaderStreamBuffer(size_t bytes, bool index) {
+    struct AllocationScope {
+        bool previous = std::exchange(shaderStreamBufferAllocation, true);
+        ~AllocationScope() { shaderStreamBufferAllocation = previous; }
+    } scope;
+    return makeShaderStreamBuffer(bytes, index);
+}
+
+void reportShaderStreamFailure(size_t vertices) noexcept {
+    static OnceGate reported;
+    if (!reported.isFirstTime()) return;
+    // Logging allocates too. Never let allocation failure escape a draw callback.
+    try {
+        logError("Shader") << "Shader stream could not allocate vertex/index storage for " << vertices
+            << " vertices; this draw was skipped. Reduce geometry submitted with "
+               "Shader::submitVertices() to lower stream storage demand";
+    } catch (...) {}
+}
+
 BuildOutputLoss& buildOutputLoss() { static BuildOutputLoss loss; return loss; }
 void BuildOutputLoss::record(uint64_t omitted) {
     if (!omitted) return;
@@ -105,6 +128,58 @@ bool shadowNativeValid(sg_view);
 bool shadowNativeValid(sg_sampler);
 }
 
+namespace {
+struct GraphicsPoolSizes {
+    int resources = 10000;
+    int shaders = 1024;
+    int pipelines = 1024;
+};
+GraphicsPoolSizes requestedGraphicsPools;
+GraphicsPoolSizes activeGraphicsPools;
+// Process lifetime: graphics restarts and hot reload must not repeat errors.
+std::atomic<bool> poolExhaustionReported[7]{};
+
+// Bound (representation): 16-bit sokol pool indices would alias handles above 65535; log Error and use 65535.
+constexpr int maxGraphicsPoolSize = 65535;
+
+int graphicsPoolSize(int count, int defaultCount, const char* setter) {
+    if (count > maxGraphicsPoolSize) {
+        logError("WindowSettings") << setter << "(" << count << "): sokol handles index pools with 16 bits; using " << maxGraphicsPoolSize;
+        return maxGraphicsPoolSize;
+    }
+    if (count < 0) {
+        logNotice("WindowSettings") << setter << "() received a negative count; using default " << defaultCount;
+    }
+    return count > 0 ? count : defaultCount;
+}
+}
+
+namespace internal {
+void configureGraphicsPools(const WindowSettings& settings) {
+    requestedGraphicsPools = {settings.resourcePoolSize, settings.shaderPoolSize, settings.pipelinePoolSize};
+}
+sgl_desc_t sglSetupDescriptor() {
+    sgl_desc_t desc = {};
+    desc.logger.func = sokolLog;
+    // Use the same count for sgl: its small CPU slots (32 B) should not impose
+    // a separate hidden limit. Each sgl pipeline still needs up to 5 sg slots.
+    // The sgl context pool keeps its existing automatic growth behavior.
+    desc.pipeline_pool_size = activeGraphicsPools.pipelines;
+    // sokol_gl's default of 4 contexts runs out fast: the swapchain takes one,
+    // every secondary window takes one more, and Fbo::ensureShared() takes one
+    // per (sample count, color format) combination. An app with a second window
+    // and a couple of float FBO formats is already past four, and the overflow
+    // is a per-frame SGL_LOGITEM_CONTEXT_POOL_EXHAUSTED with nothing drawn.
+    desc.context_pool_size = 64;
+    desc.max_vertices = sglBudget().maxVertices;
+    desc.max_commands = sglBudget().maxCommands;
+    desc.allocator.alloc_fn = smemtrack_alloc;
+    desc.allocator.free_fn = smemtrack_free;
+    return desc;
+}
+
+}
+
 // ---------------------------------------------------------------------------
 // Initialization (setup)
 // ---------------------------------------------------------------------------
@@ -113,19 +188,19 @@ void setup() {
     sg_desc sgdesc = {};
     sgdesc.environment = sglue_environment();
     sgdesc.logger.func = internal::sokolLog;
-    // Shader and pipeline pools are fixed at sg_setup(): sg resources point
-    // into the pool arrays, so these pools cannot grow (#317). 10000 like the
-    // pools below would cost ~34 MB (shader slot ~3.4 KB) and ~12 MB
-    // (pipeline slot ~1.2 KB). 1024 shaders (~3.5 MB) leaves room for many
-    // loaded Shader objects next to TrussC's own dozen or so. 1024 pipelines
-    // (~1.2 MB) is ~200 sgl pipelines (5 sg pipelines each) plus the PBR /
-    // point / Shader pipelines per target format.
-    sgdesc.shader_pool_size = 1024;   // sokol default 32
-    sgdesc.pipeline_pool_size = 1024; // sokol default 64
-    sgdesc.buffer_pool_size = 10000;  // default 128 too small with many meshes (only CPU slot table, not GPU memory)
-    sgdesc.image_pool_size = 10000;
-    sgdesc.view_pool_size = 10000;
-    sgdesc.sampler_pool_size = 10000;
+    // Fixed at sg_setup: slots hold CPU tables (~3.4 KB/shader, ~1.2 KB/pipeline).
+    // Resolve the requested counts once; later sgl rebuilds retain these values.
+    activeGraphicsPools = {
+        graphicsPoolSize(requestedGraphicsPools.resources, 10000, "setResourcePoolSize"),
+        graphicsPoolSize(requestedGraphicsPools.shaders, 1024, "setShaderPoolSize"),
+        graphicsPoolSize(requestedGraphicsPools.pipelines, 1024, "setPipelinePoolSize")
+    };
+    sgdesc.shader_pool_size = activeGraphicsPools.shaders;
+    sgdesc.pipeline_pool_size = activeGraphicsPools.pipelines;
+    sgdesc.buffer_pool_size = activeGraphicsPools.resources;
+    sgdesc.image_pool_size = activeGraphicsPools.resources;
+    sgdesc.view_pool_size = activeGraphicsPools.resources;
+    sgdesc.sampler_pool_size = activeGraphicsPools.resources;
     // Per-frame uniform ring buffer (Metal/WebGPU/Vulkan; GL/D3D11 ignore it).
     // Metal and WebGPU grow on demand; the reserve skips initial growth.
     // Start with 1 MiB of app-produced uniforms. Vulkan keeps its fixed reserve.
@@ -142,23 +217,8 @@ void setup() {
     sg_setup(&sgdesc);
     internal::recordImageDecodeLimit(sg_isvalid() ? sg_query_limits().max_image_size_2d : 0);
 
-    // Initialize sokol_gl (with memory tracking allocator)
-    sgl_desc_t sgldesc = {};
-    sgldesc.logger.func = internal::sokolLog;
-    // sgl pipeline slots are small (32 B); the sg pipeline pool above is the
-    // real limit, since each sgl pipeline uses 5 sg pipelines. The sgl
-    // context pool is left at the sokol_gl_tc.h default: it grows when full.
-    sgldesc.pipeline_pool_size = 256;
-    // sokol_gl's default of 4 contexts runs out fast: the swapchain takes one,
-    // every secondary window takes one more, and Fbo::ensureShared() takes one
-    // per (sample count, color format) combination. An app with a second window
-    // and a couple of float FBO formats is already past four, and the overflow
-    // is a per-frame SGL_LOGITEM_CONTEXT_POOL_EXHAUSTED with nothing drawn.
-    sgldesc.context_pool_size = 64;
-    sgldesc.max_vertices = internal::sglBudget().maxVertices;
-    sgldesc.max_commands = internal::sglBudget().maxCommands;
-    sgldesc.allocator.alloc_fn = smemtrack_alloc;
-    sgldesc.allocator.free_fn = smemtrack_free;
+    // Initialize sokol_gl with the same descriptor used for later rebuilds.
+    auto sgldesc = internal::sglSetupDescriptor();
     sgl_setup(&sgldesc);
 
     // RenderTarget: the swapchain target uses the default sgl context (carries the
@@ -1501,9 +1561,44 @@ std::string sokolLogMessage(const char* tag, uint32_t logItem,
     return text;
 }
 
+namespace {
+bool logPoolExhaustion(const char* tag, uint32_t logItem) {
+    int pool = -1;
+    if (tag && std::strcmp(tag, "sg") == 0) {
+        switch (logItem) {
+            case SG_LOGITEM_BUFFER_POOL_EXHAUSTED: pool = 0; break;
+            case SG_LOGITEM_IMAGE_POOL_EXHAUSTED: pool = 1; break;
+            case SG_LOGITEM_VIEW_POOL_EXHAUSTED: pool = 2; break;
+            case SG_LOGITEM_SAMPLER_POOL_EXHAUSTED: pool = 3; break;
+            case SG_LOGITEM_SHADER_POOL_EXHAUSTED: pool = 4; break;
+            case SG_LOGITEM_PIPELINE_POOL_EXHAUSTED: pool = 5; break;
+            default: break;
+        }
+    } else if (tag && std::strcmp(tag, "sgl") == 0 && logItem == SGL_LOGITEM_PIPELINE_POOL_EXHAUSTED) {
+        pool = 6;
+    }
+    if (pool < 0) return false;
+    if (!poolExhaustionReported[pool].exchange(true)) {
+        const char* names[] = {"buffer", "image", "view", "sampler", "shader", "pipeline", "pipeline"};
+        const int count = pool < 4 ? activeGraphicsPools.resources :
+                          pool == 4 ? activeGraphicsPools.shaders : activeGraphicsPools.pipelines;
+        const char* setter = pool < 4 ? "setResourcePoolSize" :
+                             pool == 4 ? "setShaderPoolSize" : "setPipelinePoolSize";
+        getLogger().log(LogLevel::Error, std::string(names[pool]) + " pool exhausted (" +
+            std::to_string(count) + " " + names[pool] + "s in use); raise it with WindowSettings::" +
+            setter + "() before runApp()");
+    }
+    return true;
+}
+}
+
 void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
               const char* message, uint32_t lineNr, const char* filename,
               void* userData) {
+    // A failed stream replacement gets one actionable Shader Error after the
+    // allocation returns. Avoid duplicating its immediate backend errors. Fatal
+    // errors, warnings and asynchronous errors on other threads keep their path.
+    if (shaderStreamBufferAllocation && logLevel == 1 && tag && std::strcmp(tag, "sg") == 0) return;
     // Called from sokol's C code: nothing may throw out of here, and a panic
     // must reach slog_func (the abort) whatever happens before it.
     const bool noLogger = loggerDestroyed.load();
@@ -1516,6 +1611,9 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
                 if (!v3dResolveFlushNoticed.exchange(true)) {
                     logNotice("RenderTarget") << "Mesa V3D: flushing before MSAA resolve (Mesa bug fixed in 25.1.5)";
                 }
+            } else if (logPoolExhaustion(tag, logItem)) {
+                // Keep sokol's own line at debug verbosity, including repeats.
+                getLogger().log(LogLevel::Verbose, sokolLogMessage(tag, logItem, message, lineNr));
             } else if (logLevel == 0) {
                 // A panic: the process ends right after, so the sinks do not
                 // wait for the lock (a thread holding it may never let go).
@@ -2506,13 +2604,7 @@ bool rebuildTargetResources() {
         entry.second.generation.reset(); entry.second.allocationFailed = false;
         for (auto& lease : entry.second.leases) { assert(!lease->leased); discard(*lease); }
     }
-    sgl_desc_t desc = {};
-    desc.logger.func = sokolLog;
-    // Bound (retain existing pool budget; growth belongs to #863's sgl lane): 256 slots; pipeline creation fails on overflow and affected draws are skipped with a log.
-    desc.pipeline_pool_size = 256;
-    desc.context_pool_size = 64;   // same reason as in the setup path above
-    desc.max_vertices = sglBudget().maxVertices; desc.max_commands = sglBudget().maxCommands;
-    desc.allocator.alloc_fn = smemtrack_alloc; desc.allocator.free_fn = smemtrack_free;
+    auto desc = sglSetupDescriptor();
     sgl_setup(&desc);
     sgl_tc_context_target_owned(sgl_default_context());
     for (auto* window : windows) {

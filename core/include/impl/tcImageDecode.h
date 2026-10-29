@@ -14,11 +14,22 @@ int imageDecodeAxisLimit(); // 16384 when no GPU limit has been recorded
 uint64_t imageDecodeRejectionsForTests(); // cumulative, process lifetime
 LoadResult rejectImageDecode(LoadError error, const char* message);
 LoadResult imageDecodeOutOfMemory() noexcept;
+// MCP-only dimension policy; CPU Pixels decoding has no axis cap.
 LoadResult admitImageDimensions(int64_t width, int64_t height,
                                 size_t channels, size_t elementBytes);
 LoadResult readEncodedImage(const std::filesystem::path& path, std::unique_ptr<unsigned char[]>& bytes, size_t& length);
 LoadResult admitImageEncodedSize(size_t bytes);
-LoadResult admitImageHeader(const unsigned char* bytes, size_t length);
+
+// Local snapshot adapter; copyAt also permits generated input in seam tests.
+struct ImageCallbackInput {
+    const void* source;
+    size_t length;
+    void (*copyAt)(const void*, size_t, char*, size_t);
+    size_t position = 0, delivered = 0;
+    bool limitReached = false;
+    void* decode(bool asFloat, int& width, int& height, int& channels);
+    LoadResult result(const std::filesystem::path& path) const;
+};
 
 // Observe allocation failure without imposing a separate working-memory cap.
 class ImageDecodeAllocationScope {

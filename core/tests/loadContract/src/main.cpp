@@ -65,31 +65,27 @@ void missingFont(Font& font) {
 }
 void imageSizeChecks() {
     const int limit = sg_query_limits().max_image_size_2d;
-    check("image decoder recorded the GPU axis limit", internal::imageDecodeAxisLimit() == limit);
+    check("MCP recorded the GPU axis limit", internal::imageDecodeAxisLimit() == limit);
     Pixels pixels;
     pixels.allocate(limit + 1, 1, 4);
     check("oversize PNG fixture", pixels.save(dataRoot / "large.png").ok());
     Pixels decoded;
-    check("Pixels rejects size above GPU limit before decoding", decoded.load("large.png").error == LoadError::TooLarge && !decoded.isAllocated());
+    check("CPU Pixels loads above the GPU axis limit", decoded.load("large.png") && decoded.isAllocated() && decoded.getWidth() == limit + 1);
     Image image;
-    auto tooLarge = [&](const char* label, int width, int height, const fs::path& name, auto load) {
+    auto tooLarge = [&](const char* label, auto load) {
         ErrorCapture logs;
-        (void)width;
-        (void)height;
-        (void)name;
-        const auto before = internal::imageDecodeRejectionsForTests();
         const auto result = load();
         check(label, result.error == LoadError::TooLarge &&
               !image.isAllocated() && !image.getTexture().isAllocated());
-        check(string(label) + " counts one rejection", internal::imageDecodeRejectionsForTests() == before + 1);
-        check(string(label) + " uses first-loss reporting without repeated Errors", logs.messages.empty());
+        check(string(label) + " reports the GPU upload limit once", logs.messages.size() == 1 &&
+              logs.messages[0].find("image exceeds GPU texture limit") != string::npos);
     };
-    tooLarge("Image rejects width above GPU limit", limit + 1, 1, "large.png", [&] { return image.load("large.png"); });
+    tooLarge("Image rejects width above GPU limit", [&] { return image.load("large.png"); });
     auto bytes = readBytes(dataRoot / "large.png");
-    tooLarge("Image memory rejects width above GPU limit", limit + 1, 1, {}, [&] { return image.loadFromMemory(bytes.data(), int(bytes.size())); });
+    tooLarge("Image memory rejects width above GPU limit", [&] { return image.loadFromMemory(bytes.data(), int(bytes.size())); });
     pixels.allocate(1, limit + 1, 4);
     check("tall PNG fixture", pixels.save(dataRoot / "tall.png").ok());
-    tooLarge("Image rejects height above GPU limit", 1, limit + 1, "tall.png", [&] { return image.load("tall.png"); });
+    tooLarge("Image rejects height above GPU limit", [&] { return image.load("tall.png"); });
     pixels.allocate(limit, 1, 4);
     check("boundary PNG fixture", pixels.save(dataRoot / "boundary.png").ok());
     check("Image accepts GPU boundary", image.load("boundary.png").ok() && image.getTexture().isAllocated());

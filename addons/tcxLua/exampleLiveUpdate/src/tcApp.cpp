@@ -38,7 +38,7 @@ void tcApp::update() {
     if (script != compiledScript) {
         compiledScript = script;
         stepErrorLogged.emplace();
-        auto result = lua.safe_script("function step() x, y = " + script + " end", sol::script_pass_on_error);
+        auto result = lua.safe_script("function step() x, y = " + script + " end", sol::script_pass_on_error, "live-update", sol::load_mode::text);
         if (!result.valid()) {
             sol::error err = result;
             logError("tcxLua") << err.what();

@@ -7,10 +7,9 @@
 // Owned binary: exercise real allocation failure, including on MSVC.
 namespace {
 thread_local int failAfter = -1;
-thread_local bool failImageValidationPayload = false;
-// Derived from the dimension diagnostic: allow small iterator proxies, then
-// refuse its character-storage growth after the encoded snapshot exists.
-constexpr size_t validationPayloadFaultBytes = sizeof(" exceeds the GPU limit of ");
+thread_local bool failImageCopyStorage = false;
+// Refuse the RGBA copy after the encoded snapshot and stb decode exist.
+constexpr size_t imageCopyBytes = 8 * 8 * 4;
 int allocationFaults = 0;
 std::atomic<bool> trackFontStorage{false};
 size_t fontStorageSize = 0;
@@ -28,14 +27,13 @@ void trackAllocation(void* p, size_t n) {
     if (trackImageStorage && n == encodedImageSize) {
         imageStorage = p;
         ++imageStorageAllocations;
-        // readEncodedImageImpl still returns a fresh LoadResult here. Allow
-        // its iterator proxy; target validation's diagnostic payload instead.
-        failImageValidationPayload = true;
+        // Allow result iterator proxies; target the decoded RGBA copy instead.
+        failImageCopyStorage = true;
     }
 }
 bool rejectAllocation(size_t n) {
-    if (failImageValidationPayload && n >= validationPayloadFaultBytes) {
-        failImageValidationPayload = false;
+    if (failImageCopyStorage && n == imageCopyBytes) {
+        failImageCopyStorage = false;
         ++allocationFaults;
         return true;
     }
@@ -81,6 +79,44 @@ void check(const char* name, bool passed) {
 }
 void drain() { internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch()); }
 #ifdef __EMSCRIPTEN__
+void webConcurrency() {
+    check("Web default preparation concurrency is four", getResourceLoadConcurrency() == 4);
+    std::vector<std::shared_ptr<internal::ResourceLoadState>> states;
+    int prepared = 0;
+    for (int i = 0; i < 10; ++i) {
+        auto state = std::make_shared<internal::ResourceLoadState>();
+        state->localFile = true;
+        state->run = internal::appRunToken();
+        internal::startExternalResourceLoad(state, [&, raw = state.get()] {
+            ++prepared;
+            raw->backendPending = true; // Fake fetch/decode retains its slot.
+        });
+        states.push_back(std::move(state));
+    }
+    drain();
+    check("Web four active backends retain slots", prepared == 4 && internal::resourceLoadUsageForTests().active == 4);
+    setResourceLoadConcurrency(8);
+    check("Web raise pumps queue immediately", internal::resourceLoadUsageForTests().active == 8 &&
+        internal::resourceLoadUsageForTests().pending == 2);
+    drain();
+    check("Web eight fetch/decode preparations run", prepared == 8);
+    setResourceLoadConcurrency(2);
+    for (int i = 0; i < 6; ++i) internal::completeResourceLoad(states[i]);
+    check("Web lower retains running backends and waits", internal::resourceLoadUsageForTests().active == 2 &&
+        internal::resourceLoadUsageForTests().pending == 2 && !states[6]->cancelled && !states[7]->cancelled);
+    internal::completeResourceLoad(states[6]);
+    check("Web released slot admits queued backend below new limit", internal::resourceLoadUsageForTests().active == 2 &&
+        internal::resourceLoadUsageForTests().pending == 1);
+    drain();
+    internal::completeResourceLoad(states[7]);
+    drain();
+    internal::completeResourceLoad(states[8]);
+    internal::completeResourceLoad(states[9]);
+    drain();
+    check("Web all queued preparations finish without cancellation", prepared == 10 &&
+        internal::resourceLoadUsageForTests().active == 0 && internal::resourceLoadUsageForTests().pending == 0);
+    setResourceLoadConcurrency(4);
+}
 struct Timer { em_arg_callback_func callback; void* data; int id = 0; };
 std::vector<Timer> timers;
 int nextTimer = 1, abortReentries = 0;
@@ -223,20 +259,11 @@ void publicationAllocationFailure() {
     fs::remove(path);
 }
 
-void imageValidationAllocationFailure() {
-    const auto path = fs::absolute("resourceLoadCreditsWeb-validation.png");
+void imageCopyAllocationFailure() {
+    const auto path = fs::absolute("resourceLoadCreditsWeb-copy.ppm");
     unsigned char bytes[encodedImageSize]{};
-    const unsigned char header[]{137,80,78,71,13,10,26,10,0,0,0,13,'I','H','D','R',
-        0,0,0x4e,0x20,0,0,0,1,8,6,0,0,0}; // 20000 x 1, RGBA8
-    std::memcpy(bytes, header, sizeof(header));
-    uint32_t crc = 0xffffffffu;
-    for (size_t i = 12; i < 29; ++i) {
-        crc ^= bytes[i];
-        for (int bit = 0; bit < 8; ++bit)
-            crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u)));
-    }
-    crc = ~crc;
-    for (int i = 0; i < 4; ++i) bytes[29 + i] = (crc >> (24 - 8 * i)) & 255;
+    const char header[] = "P6\n8 8\n255\n";
+    std::memcpy(bytes, header, sizeof(header) - 1);
     std::ofstream(path, std::ios::binary).write(reinterpret_cast<const char*>(bytes), sizeof(bytes));
     const int faultsBefore = allocationFaults;
     int events = 0;
@@ -256,20 +283,20 @@ void imageValidationAllocationFailure() {
         internal::waitForResourceLoadsForTests();
 #endif
         trackImageStorage = false;
-        failImageValidationPayload = false;
+        failImageCopyStorage = false;
         failAfter = -1;
         internal::setResourceLoadProbeForTests({});
         drain();
-        check("Image validation allocation fault fires after encoded storage exists",
+        check("Image copy allocation fault fires after encoded storage exists",
             imageStorageAllocations == 1 && allocationFaults == faultsBefore + 1);
-        check("Image validation allocation failure settles once",
+        check("Image copy allocation failure settles once",
             events == 1 && error == LoadError::Unknown && !image.isAllocated());
     }
     check("Image destruction leaves no encoded storage or completion credits",
         !imageStorage && internal::resourceLoadUsageForTests().retainedBytes == 0 &&
         internal::resourceLoadUsageForTests().outstanding == 0);
     drain();
-    check("Image validation failure has no duplicate notification", events == 1);
+    check("Image copy failure has no duplicate notification", events == 1);
     fs::remove(path);
 }
 
@@ -359,11 +386,12 @@ TC_CORE_TEST_MAIN() {
     localFileAdmissionChecks();
     localNoticeWithoutAllocation();
     publicationAllocationFailure();
-    imageValidationAllocationFailure();
+    imageCopyAllocationFailure();
     return failures ? 1 : 0;
 #else
     getMainThreadId();
     internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
+    webConcurrency();
     externalRejections();
     abortReentries = 0;
     installAudioMock();
@@ -444,7 +472,7 @@ TC_CORE_TEST_MAIN() {
     localFileAdmissionChecks();
     localNoticeWithoutAllocation();
     publicationAllocationFailure();
-    imageValidationAllocationFailure();
+    imageCopyAllocationFailure();
 
     SoundBuffer failed;
     LoadResult error;

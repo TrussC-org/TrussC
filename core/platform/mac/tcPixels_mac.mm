@@ -22,8 +22,11 @@ template<class T> struct ImageRef {
 };
 
 LoadResult decodeImageIO(Pixels& pixels, const unsigned char* encoded, size_t length, bool mcpAdmission) {
-    auto admitted = internal::admitImageEncodedSize(length);
-    if (!admitted) return admitted;
+    LoadResult admitted;
+    if (mcpAdmission) {
+        admitted = internal::admitImageEncodedSize(length);
+        if (!admitted) return admitted;
+    }
     if (!encoded || !length) return LoadResult::fail(LoadError::DecodeFailed, "empty ImageIO input");
     @autoreleasepool {
         ImageRef<CFDataRef> data(CFDataCreateWithBytesNoCopy(kCFAllocatorDefault,
@@ -56,8 +59,14 @@ LoadResult decodeImageIO(Pixels& pixels, const unsigned char* encoded, size_t le
         const auto w = number(kCGImagePropertyPixelWidth, -1);
         const auto h = number(kCGImagePropertyPixelHeight, -1);
         const auto depth = number(kCGImagePropertyDepth, 32);
-        admitted = internal::admitImageDimensions(w, h, 4, 1);
-        if (!admitted) return admitted;
+        if (mcpAdmission) {
+            admitted = internal::admitImageDimensions(w, h, 4, 1);
+            if (!admitted) return admitted;
+        }
+        size_t elements = 0;
+        if (w <= 0 || h <= 0 || w > INT_MAX || h > INT_MAX ||
+            !internal::pixelBufferCount(int(w), int(h), 4, 1, SIZE_MAX, elements))
+            return LoadResult::fail(LoadError::DecodeFailed, "invalid ImageIO dimensions");
         if (depth <= 0) return LoadResult::fail(LoadError::DecodeFailed, "invalid ImageIO sample depth");
         const auto model = CFDictionaryGetValue(properties.value, kCGImagePropertyColorModel);
         const size_t colorChannels = model && CFEqual(model, kCGImagePropertyColorModelGray) ? 1 :
@@ -66,9 +75,9 @@ LoadResult decodeImageIO(Pixels& pixels, const unsigned char* encoded, size_t le
         const size_t sourceChannels = colorChannels + (alpha && CFEqual(alpha, kCFBooleanTrue) ? 1 : 0);
         const uint64_t sampleBytes = uint64_t(depth) / 8 + (uint64_t(depth) % 8 != 0);
         if (sampleBytes > SIZE_MAX) return internal::rejectImageDecode(LoadError::TooLarge, "ImageIO sample size exceeds size_t capacity");
-        admitted = internal::admitImageDimensions(w, h, sourceChannels, size_t(sampleBytes));
-        if (!admitted) return admitted;
         if (mcpAdmission) {
+            admitted = internal::admitImageDimensions(w, h, sourceChannels, size_t(sampleBytes));
+            if (!admitted) return admitted;
             // Preserve the existing, stricter MCP request-owner workspace policy.
             // Bound (security): MCP ImageIO samples fit its admitted workspace. Overflow rejects the whole image and is counted by MCP.
             mcp::internal::checkAdmission(uint64_t(depth), 128, mcp::internal::AdmissionStore::Working);

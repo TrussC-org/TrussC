@@ -455,11 +455,9 @@ static void gdbjit_sleb128(GDBJITctx *ctx, int32_t v)
 #define DSV(x)		(ctx->p = p, gdbjit_sleb128(ctx, (x)), p = ctx->p)
 #define DSTR(str)	(ctx->p = p, gdbjit_strz(ctx, (str)), p = ctx->p)
 #define DALIGNNOP(s)	while ((uintptr_t)p & ((s)-1)) *p++ = DW_CFA_nop
-/* Keep section bodies outside macro arguments: they contain target #ifs. */
-#define DSECT_BEGIN(name) \
-  { uint32_t *szp_##name = (uint32_t *)p; p += 4;
-#define DSECT_END(name) \
-    *szp_##name = (uint32_t)((p-(uint8_t *)szp_##name)-4); }
+#define DSECT(name, stmt) \
+  { uint32_t *szp_##name = (uint32_t *)p; p += 4; stmt \
+    *szp_##name = (uint32_t)((p-(uint8_t *)szp_##name)-4); } \
 
 /* Initialize ELF section headers. */
 static void LJ_FASTCALL gdbjit_secthdr(GDBJITctx *ctx)
@@ -528,7 +526,7 @@ static void LJ_FASTCALL gdbjit_ehframe(GDBJITctx *ctx)
   uint8_t *framep = p;
 
   /* Emit DWARF EH CIE. */
-  DSECT_BEGIN(CIE)
+  DSECT(CIE,
     DU32(0);			/* Offset to CIE itself. */
     DB(DW_CIE_VERSION);
     DSTR("zR");			/* Augmentation. */
@@ -543,10 +541,10 @@ static void LJ_FASTCALL gdbjit_ehframe(GDBJITctx *ctx)
     DB(DW_CFA_offset|DW_REG_RA); DUV(1);
 #endif
     DALIGNNOP(sizeof(uintptr_t));
-  DSECT_END(CIE)
+  )
 
   /* Emit DWARF EH FDE. */
-  DSECT_BEGIN(FDE)
+  DSECT(FDE,
     DU32((uint32_t)(p-framep));	/* Offset to CIE. */
     DU32(0);			/* Machine code offset relative to .text. */
     DU32(ctx->szmcode);		/* Machine code length. */
@@ -602,7 +600,7 @@ static void LJ_FASTCALL gdbjit_ehframe(GDBJITctx *ctx)
     }
     DB(DW_CFA_def_cfa_offset); DUV(ctx->spadj);  /* Trace stack frame size. */
     DALIGNNOP(sizeof(uintptr_t));
-  DSECT_END(FDE)
+  )
 
   ctx->p = p;
 }
@@ -612,7 +610,7 @@ static void LJ_FASTCALL gdbjit_debuginfo(GDBJITctx *ctx)
 {
   uint8_t *p = ctx->p;
 
-  DSECT_BEGIN(info)
+  DSECT(info,
     DU16(2);			/* DWARF version. */
     DU32(0);			/* Abbrev offset. */
     DB(sizeof(uintptr_t));	/* Pointer size. */
@@ -622,7 +620,7 @@ static void LJ_FASTCALL gdbjit_debuginfo(GDBJITctx *ctx)
     DADDR(ctx->mcaddr);		/* DW_AT_low_pc. */
     DADDR(ctx->mcaddr + ctx->szmcode);  /* DW_AT_high_pc. */
     DU32(0);			/* DW_AT_stmt_list. */
-  DSECT_END(info)
+  )
 
   ctx->p = p;
 }
@@ -651,9 +649,9 @@ static void LJ_FASTCALL gdbjit_debugline(GDBJITctx *ctx)
 {
   uint8_t *p = ctx->p;
 
-  DSECT_BEGIN(line)
+  DSECT(line,
     DU16(2);			/* DWARF version. */
-    DSECT_BEGIN(header)
+    DSECT(header,
       DB(1);			/* Minimum instruction length. */
       DB(1);			/* is_stmt. */
       DI8(0);			/* Line base for special opcodes. */
@@ -665,7 +663,7 @@ static void LJ_FASTCALL gdbjit_debugline(GDBJITctx *ctx)
       /* File name table. */
       DSTR(ctx->filename); DUV(0); DUV(0); DUV(0);
       DB(0);
-    DSECT_END(header)
+    )
 
     DLNE(DW_LNE_set_address, sizeof(uintptr_t)); DADDR(ctx->mcaddr);
     if (ctx->lineno) {
@@ -674,7 +672,7 @@ static void LJ_FASTCALL gdbjit_debugline(GDBJITctx *ctx)
     DB(DW_LNS_copy);
     DB(DW_LNS_advance_pc); DUV(ctx->szmcode);
     DLNE(DW_LNE_end_sequence, 0);
-  DSECT_END(line)
+  )
 
   ctx->p = p;
 }
@@ -691,8 +689,7 @@ static void LJ_FASTCALL gdbjit_debugline(GDBJITctx *ctx)
 #undef DSV
 #undef DSTR
 #undef DALIGNNOP
-#undef DSECT_BEGIN
-#undef DSECT_END
+#undef DSECT
 
 /* Type of a section initializer callback. */
 typedef void (LJ_FASTCALL *GDBJITinitf)(GDBJITctx *ctx);

@@ -63,6 +63,11 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
   3. `stbi__parse_png_file`: validate memory IDAT spans before allocation,
      calculate the scanline storage from IHDR (including Adam7), and decode
      into that fixed destination. Decoder failure leaves no partial pixels.
+     S4 is intentionally kept as a decompression-bomb guard (owner decision,
+     2026-10-29: "S4 は残すでいいよ"). It never rejects a valid PNG: a valid
+     stream inflates exactly to its declared canvas's filtered scanlines.
+     It only stops a hostile file of a few KB from driving buffer growth
+     unrelated to its size. This decision makes no change to `stb_image.h`.
   4. BMP metadata reports positive row counts for top-down images, matching
      decoded dimensions. The shared header reader rejects a height whose
      absolute value cannot fit the decoder's integer indices.
@@ -124,19 +129,16 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
      usable encoding record still wins; unsupported maps, including the
      variation-only format 14, do not replace it. Platform/encoding filters
      are unchanged; Windows Symbol records are not accepted.
-  5. Glyph input/workspace admission: TrueType glyph records are checked before
-     outline allocation; compound shapes check depth, combined vertex counts and
-     total glyph visits per shape, including empty components, plus cumulative
-     append copies (including previous components). CFF interpreter
-     passes (metrics, outline counting and output) each allow at most 524,288
-     interpreter dispatches, including operands and no-output operators inside
-     local/global subroutines. TrussC also added a cumulative 65,536-call expansion
-     ceiling per pass, separate from upstream's recursion-depth check.
-     Exhaustion rejects the glyph and marks its workspace, independently of
-     output vertices or recursion depth. Exhaustion frees
-     the in-progress outline. Raster scanline allocation failures return before
-     pointer arithmetic. The shared backend reports failures through its owning
-     workspace scope; see the v0.8 import notes below.
+  5. TrueType glyph records are checked before outline allocation. Compound
+     shapes keep a 64-level depth guard and checked combined vertex counts;
+     depth and vertex rejection discard the whole shape. The validation hook
+     receives the final rejection flag so the shared backend records failure.
+     Raster scanline allocation
+     failures return before pointer arithmetic. The former per-shape visit and
+     append-copy counters, CFF dispatch counter and subroutine-call ceiling
+     have been removed. Glyphs are no longer rejected for exceeding those work
+     allowances. The shared backend still checks allocation failures and its
+     per-glyph workspace independently; see the v0.8 import notes below.
 - **Configuration** (in `core/include/impl/stb_impl.cpp`, not a change to the
   file): `STBTT_assert` does nothing in every build type, so Debug and
   Release builds handle font data the same way. Allocations through
@@ -156,7 +158,7 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
   (for CFF, past the CharStrings count) and a codepoint above U+10FFFF map
   to .notdef. Fonts of 1 GiB or more are refused by the existing backend addressing guard.
   Supported cmap sections and ranges are checked before initialization. Glyph
-  records, compound depth/work and decoded workspace are checked when a shape is
+  records, compound depth and decoded workspace are checked when a shape is
   requested. A font with no supported Unicode map is refused with a diagnostic.
 - **Covered by**: `core/tests/fontSfntCheck`.
 
@@ -236,13 +238,11 @@ and ImGui font imports. Local fonts retain only the backend addressing guard.
 `impl/tcFontScratch.h` tracks live stb allocations per glyph, checks glyph counts and raster metrics
 against its live workspace, and reports allocation failure before a
 glyph is published. Atlas pages remain independent. Compound TrueType shapes
-have a depth guard, a per-shape total-visit bound (including empty components),
-a per-shape cumulative append-copy allowance of 1,048,576 vertices (including
-copies of previous components), and checked combined vertex counts. The copy
-allowance also bounds component transforms and propagates whole-shape rejection.
-CFF bounds every glyph interpreter pass to
-524,288 interpreter dispatches, including operands and no-output subroutine bodies,
-with a separate cumulative 65,536-call expansion ceiling per pass added by TrussC,
-in addition to upstream's recursion-depth check; raster scanline
-allocation failure returns before pointer arithmetic. Keep these patches when
-updating stb and run `documentImports`, `fontSfntCheck`, and ImGui addon tests.
+have a 64-level depth guard and checked combined vertex counts. There are no
+per-shape visit/copy counters or CFF dispatch/subroutine-call ceilings. CFF
+retains its upstream subroutine stack depth limit and the vertex-count checks
+above. Raster scanline allocation failure returns before pointer arithmetic.
+The 256 MiB per-glyph workspace cap remains separate from the 1 GiB font-input
+addressing guard; removing work counters does not change either limit.
+Keep these remaining patches when updating stb and run `documentImports`,
+`fontSfntCheck`, `fontScratch`, and ImGui addon tests.

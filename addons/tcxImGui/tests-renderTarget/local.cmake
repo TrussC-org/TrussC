@@ -9,4 +9,8 @@ if(TC_IMGUI_NATIVE_PROBE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
         "-Wl,--wrap=sapp_set_mouse_cursor,--wrap=sapp_get_mouse_cursor,--wrap=sapp_show_keyboard,--wrap=sapp_keyboard_shown")
     set_target_properties(imguiNativeProbe PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin")
+    add_executable(imguiBufferSizeProbe probe/bufferSizes.cpp)
+    target_link_libraries(imguiBufferSizeProbe PRIVATE tcxImGui)
+    set_target_properties(imguiBufferSizeProbe PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin")
 endif()
