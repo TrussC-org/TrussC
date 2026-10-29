@@ -2602,7 +2602,7 @@ VSYNC  // Selects frame scheduling at the display refresh rate.
 ```cpp
 void App::audioIn(const AudioInBuffer & buf)  // Meant for reading incoming audio on the audio thread, but currently never called.
 void App::audioOut(AudioOutBuffer & buf)  // Called on the audio thread once per device buffer, so you can add your own sound to the output.
-void App::exit()  // Called once when the App ends, right before cleanup().
+void App::exit()  // Called once when the App ends.
 void App::filesDropped(const std::vector<std::string> & files)  // Called when files are dropped onto the main window, with their paths.
 Window * App::getWindow() const  // Returns this App’s Window, including the main window, or nullptr when unattached.
 bool App::isExitRequested() const  // Returns whether requestExit() has been called on this App.

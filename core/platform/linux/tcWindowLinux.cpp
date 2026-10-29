@@ -229,7 +229,7 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
             break;
         }
         case SAPP_EVENTTYPE_SUSPENDED:
-            logNotice("Window") << "second window occluded - skipping frames (no stall)";
+            logNotice("Window") << "second window hidden - skipping frames (no stall)";
             break;
         case SAPP_EVENTTYPE_RESUMED:
             logNotice("Window") << "second window visible again - resuming ticks";
@@ -343,7 +343,7 @@ void Window::setSecondarySize(double width, double height, bool pixelSize) {
     if (!st) return;
     internal::x11Geometry((Display*)sapp_x11_get_display(),
         (::Window)(uintptr_t)sapp_window_x11_get_window(st->win), st->geometry,
-        false, 0, 0, width, height, ctx_.dpiScale, fullscreenRequested_, pixelSize);
+        false, 0, 0, width, height, ctx_.dpiScale, isSecondaryFullscreen(), pixelSize);
 }
 
 void Window::setSecondaryPosition(int x, int y) {
@@ -351,7 +351,7 @@ void Window::setSecondaryPosition(int x, int y) {
     if (!st) return;
     internal::x11Geometry((Display*)sapp_x11_get_display(),
         (::Window)(uintptr_t)sapp_window_x11_get_window(st->win), st->geometry,
-        true, x, y, 0, 0, ctx_.dpiScale, fullscreenRequested_);
+        true, x, y, 0, 0, ctx_.dpiScale, isSecondaryFullscreen());
 }
 
 IVec2 Window::getSecondaryPosition() const {
@@ -362,20 +362,12 @@ IVec2 Window::getSecondaryPosition() const {
 
 void Window::setSecondaryFullscreen(bool full) {
     auto* st = static_cast<AdapterState*>(native_);
-    if (!st) return;
-    Display* dpy = (Display*)(void*)sapp_x11_get_display();
-    ::Window xwin = (::Window)(uintptr_t)sapp_window_x11_get_window(st->win);
-    if (!dpy || !xwin) return;
-
-    // The WM resizes the window to the monitor; the per-window tick's
-    // fbWidth/fbHeight sync + syncRootSize pick up the new size on the next tick.
-    internal::x11State(dpy, xwin, full, "_NET_WM_STATE_FULLSCREEN");
-    XFlush(dpy);
-    fullscreenRequested_ = full;
+    if (st) sapp_tc_window_set_fullscreen(st->win, full);
 }
 
 bool Window::isSecondaryFullscreen() const {
-    return fullscreenRequested_;
+    auto* st = static_cast<AdapterState*>(native_);
+    return st && sapp_tc_window_fullscreen_phase(st->win) != 0;
 }
 
 int Window::getSecondaryWidth() const {

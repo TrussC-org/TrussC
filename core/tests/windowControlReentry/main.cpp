@@ -237,16 +237,16 @@ void testFullscreenCalls(Window& main, Window& secondary) {
             }
         }
     }
-    // The Linux/Win32 secondary query uses its own backend intent, even
-    // when another window is current. The dummy endpoint records admission.
+    // The Linux secondary query reads native fullscreen intent, even when
+    // another window is current. The recording sapp endpoint supplies it.
     internal::windowFullscreenHookForTests() = nullptr;
     internal::currentWindowCtx() = &main.context();
-    secondary.fullscreenRequested_ = true;
+    secondaryFullscreen.phase = Phase::Fullscreen;
     const int beforeMessages = messages, beforeApplied = appliedControls;
     secondary.setSize(320, 240);
     check("secondary backend intent blocks a cross-window request",
         secondary.isFullscreen() && messages == beforeMessages + 1 && appliedControls == beforeApplied);
-    secondary.fullscreenRequested_ = false;
+    secondaryFullscreen.phase = Phase::Windowed;
     secondary.setSize(320, 240);
     check("cleared backend intent immediately accepts a request",
         !secondary.isFullscreen() && messages == beforeMessages + 1 && appliedControls == beforeApplied + 1);
@@ -314,6 +314,9 @@ extern "C" int sapp_width() { return framebufferWidth; }
 extern "C" int sapp_height() { return framebufferHeight; }
 extern "C" float sapp_dpi_scale() { return nativeDpi; }
 extern "C" float sapp_window_dpi_scale(sapp_window) { return nativeDpi; }
+extern "C" uint32_t sapp_tc_window_fullscreen_phase(sapp_window) {
+    return static_cast<uint32_t>(secondaryFullscreen.phase);
+}
 extern "C" bool sapp_isvalid() { return true; }
 int main() {
     getMainThreadId();
@@ -515,6 +518,8 @@ int main() {
     sgl_shutdown(); sg_shutdown();
     return failures ? 1 : 0;
 }
+#elif defined(_WIN32)
+#include "../nativeWindow/win32.cpp"
 #else
 #include <cstdio>
 int main() { std::puts("SKIP: Linux dummy SG/SGL reentry fixture; macOS/Windows are covered by the device probe"); }

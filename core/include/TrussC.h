@@ -2595,6 +2595,9 @@ namespace internal {
             || mcp::internal::hasDeferredResponses()
 #endif
             ;
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+        sapp_tc_window_draw_while_hidden({0}, true);
+#endif
         if (!runWindowTick(std::chrono::steady_clock::now(), sapp_frame_duration(), forceDraw))
             sapp_skip_present();
 
@@ -2609,6 +2612,21 @@ namespace internal {
     }
 
     inline void _cleanup_cb_impl() {
+        #if defined(__APPLE__) && TARGET_OS_OSX
+        // A macOS session end under a paused callback; the backend _exits right
+        // after. Only the App exit notification, audio stop and the exit log
+        // lines: no GPU, window or resource-worker teardown on top of it.
+        if (sessionEndExit()) {
+            if (!beginExitCleanup()) return;
+            if (auto token = appRunToken()) token->store(false);
+            CrashPhaseScope crashPhase("cleanup");
+            writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
+            notifyAppExitsAtSessionEnd();
+            trussc::shutdownAudio();
+            writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(true));
+            return;
+        }
+        #endif
         if (!beginExitCleanup()) return;
         if (auto token = appRunToken()) token->store(false);
         internal::cancelResourceBackends();
@@ -3084,6 +3102,8 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings) {
     desc.sample_count = settings.sampleCount;
     desc.fullscreen = settings.fullscreen;
     desc.swap_interval = settings.swapInterval;
+    // Admit setup and the first draw even when covered before the first tick.
+    desc._tc_draw_while_hidden = 1;
     desc.init_cb = internal::_setup_cb;
     desc.frame_cb = internal::_frame_cb;
     desc.cleanup_cb = internal::_cleanup_cb;

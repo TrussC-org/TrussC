@@ -80,8 +80,9 @@ size_t n = getMicAnalysisBuffer(samples, 1024);
 ```
 
 - The argument is a read-only `const AudioInBuffer&`. `data` is a `const float*` with `frameCount * channels` interleaved samples, and the buffer also provides `sampleRate` and `framePosition`.
-- Everything else works as in `App::audioOut`: the audio-thread rules, when it starts being called (after the first `setup()` returns; an App that never runs receives no calls), the priority, and the exit order (it is stopped, and a running call is waited for with no time limit, before `cleanup()`).
+- Normally, everything else works as in `App::audioOut`: the audio-thread rules, when it starts being called (after the first `setup()` returns; an App that never runs receives no calls), the priority, and the exit order (it is stopped, and a running call is waited for with no time limit, before `cleanup()`).
 - Known issue: [#907](https://github.com/TrussC-org/TrussC/issues/907) (never called).
+- On macOS, a logout, restart or shutdown during a running handler skips the normal exit order; see `App::exit`.
 '''
 details.ja = '''
 - 現在、この関数は呼ばれません。TrussC の core にも addon にも、`AudioEngine::audioIn` を送るコードがないためです。マイクの音が必要な場合は、代わりに `MicInput`（`getMicInput()`, `getMicAnalysisBuffer()`）を使ってください。
@@ -92,8 +93,9 @@ size_t n = getMicAnalysisBuffer(samples, 1024);
 ```
 
 - 引数は読み取り専用の `const AudioInBuffer&` です。`data` は `const float*` で、サンプルが `frameCount * channels` 個、チャンネル交互に並んでいます。ほかに `sampleRate` と `framePosition` も持っています。
-- それ以外は `App::audioOut` と同じです。オーディオスレッドでのルール、呼ばれ始めるタイミング（最初の `setup()` が終わったあと。一度も実行されない App には呼ばれません）、優先度、終了時の順番（`cleanup()` の前に呼び出しが止められ、実行中の呼び出しを時間制限なしで待ちます）も共通です。
+- それ以外の動作は、通常 `App::audioOut` と同じです。オーディオスレッドでのルール、呼ばれ始めるタイミング（最初の `setup()` が終わったあと。一度も実行されない App には呼ばれません）、優先度、終了時の順番（`cleanup()` の前に呼び出しが止められ、実行中の呼び出しを時間制限なしで待ちます）も共通です。
 - 既知の問題: [#907](https://github.com/TrussC-org/TrussC/issues/907)（呼ばれない）。
+- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、通常の終了順序は省略されます。`App::exit` を参照してください。
 '''
 details.ko = '''
 - 현재 이 함수는 호출되지 않습니다. TrussC core 에도 addon 에도 `AudioEngine::audioIn` 을 보내는 코드가 없기 때문입니다. 마이크 소리가 필요하면 대신 `MicInput` (`getMicInput()`, `getMicAnalysisBuffer()`) 을 사용하세요.
@@ -104,10 +106,11 @@ size_t n = getMicAnalysisBuffer(samples, 1024);
 ```
 
 - 인자는 읽기 전용 `const AudioInBuffer&` 입니다. `data` 는 `const float*` 로, 샘플이 `frameCount * channels` 개 채널이 번갈아 들어 있습니다. 그 밖에 `sampleRate` 와 `framePosition` 도 가집니다.
-- 나머지는 `App::audioOut` 과 같습니다. 오디오 스레드 규칙, 호출이 시작되는 시점 (첫 `setup()` 이 끝난 뒤. 한 번도 실행되지 않는 App 에는 호출되지 않음), 우선순위, 종료 순서 (`cleanup()` 전에 호출이 멈추고, 실행 중인 호출을 시간 제한 없이 기다림) 도 공통입니다.
+- 그 밖의 동작은 일반적으로 `App::audioOut` 과 같습니다. 오디오 스레드 규칙, 호출이 시작되는 시점 (첫 `setup()` 이 끝난 뒤. 한 번도 실행되지 않는 App 에는 호출되지 않음), 우선순위, 종료 순서 (`cleanup()` 전에 호출이 멈추고, 실행 중인 호출을 시간 제한 없이 기다림) 도 공통입니다.
 - 알려진 문제: [#907](https://github.com/TrussC-org/TrussC/issues/907)(호출되지 않음).
+- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 일반적인 종료 순서를 건너뜁니다. `App::exit`을 참고하십시오.
 '''
-related = ["App::audioOut", "AudioInBuffer", "AudioEngine::audioIn", "MicInput", "getMicInput", "getMicAnalysisBuffer", "MicInput::getBuffer"]
+related = ["App::audioOut", "AudioInBuffer", "AudioEngine::audioIn", "MicInput", "getMicInput", "getMicAnalysisBuffer", "MicInput::getBuffer", "App::exit"]
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
 void audioIn(const AudioInBuffer& buf) override;   // currently never called (#907)
@@ -136,8 +139,9 @@ void tcApp::setup() { AudioEngine::getInstance().init(); }
 - It runs on the audio thread, once per device buffer, after all `Sound` voices are mixed. Keep it real-time safe: do not allocate memory, do not call engine functions such as `play()` or `load()`, and do not take heavy locks.
 - It starts being called right after your App's first `setup()` returns, not from the constructor. An App that never runs receives no calls.
 - Its priority is `audio::priority::Generator - 1`. It therefore runs before listeners at the default priority (including ones registered before the App existed), and `Effect` / `Monitor` listeners receive what you wrote.
-- On every way the app can exit, the order is: first `exit()`, then audioOut is stopped and TrussC waits, with no time limit, for a call that is still running, and finally `cleanup()`. You can therefore free audio state in `cleanup()`. **Never wait on the main thread or its locks in this function**, or the exit hangs (an error is logged after 1 second).
+- Normally, the exit order is: first `exit()`, then audioOut is stopped and TrussC waits, with no time limit, for a call that is still running, and finally `cleanup()`. You can therefore free audio state in `cleanup()`. **Never wait on the main thread or its locks in this function**, or the exit hangs (an error is logged after 1 second).
 - After that it is never registered again, because an App runs only once (see `App`).
+- On macOS, a logout, restart or shutdown during a running handler skips the normal exit order; see `App::exit`.
 '''
 details.ja = '''
 - 自分の音は `buf.data` に `+=` で**足して**ください。ここにはミックス済みの `Sound` の音がすでに入っているため、0 にしたり上書きしたりするとその音が消えてしまいます。すべての書き込みが終わったあと、最終的な音は [-1, 1] の範囲に収められます（クランプ）。
@@ -151,8 +155,9 @@ void tcApp::setup() { AudioEngine::getInstance().init(); }
 - オーディオスレッドで、デバイスのバッファごとに 1 回、すべての `Sound` がミックスされたあとに呼ばれます。リアルタイム処理のため、メモリの確保、`play()` や `load()` のようなエンジンの呼び出し、重いロックは行わないでください。
 - 呼ばれ始めるのは、App の最初の `setup()` が終わった直後です（コンストラクタの時点ではありません）。一度も実行されない App には呼ばれません。
 - 優先度は `audio::priority::Generator - 1` です。そのため、デフォルト優先度のリスナー（App より前に登録したものを含む）より先に呼ばれ、`Effect` や `Monitor` のリスナーはここで書いた音を受け取ります。
-- どの終わり方でも、まず `exit()` が呼ばれ、次に audioOut の呼び出しが止められて実行中の呼び出しの終了を時間制限なしで待ち、最後に `cleanup()` が呼ばれます。したがって、`cleanup()` でオーディオ用のデータを解放できます。**この関数の中でメインスレッドやそのロックを待たないでください**。終了処理が止まってしまいます（1 秒たつとエラーログが出ます）。
+- 通常は、まず `exit()` が呼ばれ、次に audioOut の呼び出しが止められて実行中の呼び出しの終了を時間制限なしで待ち、最後に `cleanup()` が呼ばれます。したがって、`cleanup()` でオーディオ用のデータを解放できます。**この関数の中でメインスレッドやそのロックを待たないでください**。終了処理が止まってしまいます（1 秒たつとエラーログが出ます）。
 - 一度終了すると、二度と登録されません。App は 1 回しか動かないためです（`App` を参照してください）。
+- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、通常の終了順序は省略されます。`App::exit` を参照してください。
 '''
 details.ko = '''
 - 직접 만든 샘플은 `buf.data` 에 `+=` 로 **더하세요**. 여기에는 믹스된 `Sound` 보이스가 이미 들어 있으므로, 0 으로 만들거나 덮어쓰면 그 소리가 사라집니다. 모든 쓰기가 끝난 뒤 최종 믹스는 [-1, 1] 범위로 잘립니다 (클램프).
@@ -166,8 +171,9 @@ void tcApp::setup() { AudioEngine::getInstance().init(); }
 - 오디오 스레드에서 디바이스 버퍼마다 1 회, 모든 `Sound` 보이스가 믹스된 뒤에 호출됩니다. 실시간 처리이므로 메모리 할당, `play()` 나 `load()` 같은 엔진 호출, 무거운 락은 하지 않아야 합니다.
 - 호출이 시작되는 것은 App 의 첫 `setup()` 이 끝난 직후입니다 (생성자 시점이 아닙니다). 한 번도 실행되지 않는 App 에는 호출되지 않습니다.
 - 우선순위는 `audio::priority::Generator - 1` 입니다. 따라서 기본 우선순위 리스너 (App 보다 먼저 등록한 것 포함) 보다 먼저 호출되고, `Effect` / `Monitor` 리스너는 여기서 쓴 소리를 받습니다.
-- 어떤 방식으로 종료하든, 먼저 `exit()` 가 호출되고, 다음으로 audioOut 호출이 멈추며 실행 중인 호출이 끝나기를 시간 제한 없이 기다린 뒤, 마지막으로 `cleanup()` 이 호출됩니다. 따라서 `cleanup()` 에서 오디오용 데이터를 해제할 수 있습니다. **이 함수 안에서 메인 스레드나 그 락을 기다리지 마세요**. 종료 처리가 멈춥니다 (1 초가 지나면 에러 로그가 출력됩니다).
+- 일반적으로 먼저 `exit()` 가 호출되고, 다음으로 audioOut 호출이 멈추며 실행 중인 호출이 끝나기를 시간 제한 없이 기다린 뒤, 마지막으로 `cleanup()` 이 호출됩니다. 따라서 `cleanup()` 에서 오디오용 데이터를 해제할 수 있습니다. **이 함수 안에서 메인 스레드나 그 락을 기다리지 마세요**. 종료 처리가 멈춥니다 (1 초가 지나면 에러 로그가 출력됩니다).
 - 한 번 종료되면 다시 등록되지 않습니다. App 은 한 번만 동작하기 때문입니다 (`App` 참조).
+- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 일반적인 종료 순서를 건너뜁니다. `App::exit`을 참고하십시오.
 '''
 related = ["AudioOutBuffer", "AudioEngine::audioOut", "AudioEngine::init", "AudioSettings", "AudioEngine::waitForAudioCallbacks", "audio::priority::Generator", "audio::priority::Effect", "audio::priority::Monitor", "App::audioIn", "App::exit", "App"]
 snippet = '''
@@ -188,70 +194,73 @@ void tcApp::audioOut(AudioOutBuffer& buf) {
 ["App::exit"]
 category = "events"
 keywords = ["quit", "cleanup", "shutdown", "teardown", "ofApp::exit", "save on quit", "exit order", "cancel exit"]
-description.en = "Called once when the App ends, right before cleanup()."
-description.ja = "App が終わるときに、cleanup() の直前に 1 回呼ばれる。"
-description.ko = "App이 끝날 때 cleanup() 직전에 한 번 호출된다."
+description.en = "Called once when the App ends."
+description.ja = "App が終わるときに 1 回呼ばれます。"
+description.ko = "App이 끝날 때 한 번 호출됩니다."
 details.en = '''
 - It does nothing by default. Override it to save settings or release resources.
-- It runs once per App however the App ends (program exit, hot reload, removal from its window), always on the main thread, and `cleanup()` always follows it.
+- Normally, it runs once per App however the App ends (program exit, hot reload, removal from its window), always on the main thread, and `cleanup()` follows it.
 - The audio device and the GPU are still alive inside `exit()`, and `audioOut()`/`audioIn()` may still be running at the same time. Free audio state in `cleanup()` instead.
 - **Never make the audio callback wait for the main thread**, or shutdown will hang.
+- On macOS, when the operating system logs out, restarts or shuts down while one of the app's handlers is running, the app ends even before that handler returns. `exit()` may then run while that handler is paused; in that case, `cleanup()` and the framework's own cleanup, such as finishing a recording, do not run. Apps remain attached to their windows until the process ends. This macOS case skips `events().exitRequested`. In this case, don't create, draw or read back GPU resources in `exit()`: they are not guaranteed to complete, and the process ends right after.
 - It cannot cancel the exit. To cancel, set `args.cancel = true` earlier, in `events().exitRequested`. That event is fired for an OS quit, `requestExitApp()`, and SIGINT/SIGTERM on Linux/macOS, but `exitApp()` skips it.
 
 ```cpp
 exitListener = events().exitRequested.listen([](ExitRequestEventArgs& args) { args.cancel = true; });
 ```
 
-- Only the root App receives `cleanup()`. At app exit, child nodes receive no `cleanup()`; only their destructors run.
+- Normally, only the root App receives `cleanup()`. At app exit, child nodes receive no `cleanup()`; only their destructors run.
 - Headless: it runs after the loop ends, followed by audio detach and `cleanup()`. `events().exit` delivers BeforeApp → App::exit() (100) → AfterApp shutdown hooks once; the App and mandatory teardown survive `clear()`. The audio device keeps running.
 - Hot reload: after `events().hotReloadUnload`, the old App receives `exit()` and `cleanup()`. `events().exit` fires only at the final exit.
-- A sub-window App: it runs when its window closes (as an App-priority listener on that window's `events().exit`) or when `setApp()` swaps it out. `getWindow()` is already nullptr there.
+- A sub-window App normally runs when its window closes (as an App-priority listener on that window's `events().exit`) or when `setApp()` swaps it out. `getWindow()` is already nullptr there.
 - An App added as a child node never receives `exit()`.
 - Any `pushMatrix()`/`pushStyle()` left open is popped, with a warning that names `exit()`.
-- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
-- Main/host: App::exit runs inside exit notify at 100; AfterApp shutdown hooks follow, then pending window closes, audio detach, cleanup and destruction. Hot-reload guest swaps retain the direct exit exception.
+- Main window and hot-reload host normally use `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- Main/host normally: App::exit runs inside exit notify at 100; AfterApp shutdown hooks follow, then pending window closes, audio detach, cleanup and destruction. Hot-reload guest swaps retain the direct exit exception.
 '''
 details.ja = '''
 - 既定では何もしません。設定の保存やリソースの解放を行いたい場合にオーバーライドしてください。
-- どのような終わり方（プログラムの終了、ホットリロード、ウィンドウから外されたとき）でも App ごとに 1 回、メインスレッドで呼ばれ、その後に必ず `cleanup()` が続きます。
+- 通常は、どのような終わり方（プログラムの終了、ホットリロード、ウィンドウから外されたとき）でも App ごとに 1 回、メインスレッドで呼ばれ、その後に `cleanup()` が続きます。
 - `exit()` の中ではオーディオデバイスも GPU もまだ動作しており、`audioOut()`/`audioIn()` が同時に実行されていることもあります。オーディオ関係の後片付けは `cleanup()` で行ってください。
 - **オーディオコールバックの中でメインスレッドを待たないでください。** 終了処理が止まってしまいます。
+- macOS でアプリの処理が実行中にオペレーティングシステムがログアウト、再起動、シャットダウンすると、その処理が戻る前でもアプリは終了します。その処理が一時停止している間に `exit()` が呼ばれることがあり、その場合は `cleanup()` と、録画の終了処理などのフレームワーク自身の後片付けは行われません。プロセスが終了するまで App はウィンドウに接続されたままです。この macOS の場合は `events().exitRequested` は通知されません。この場合、`exit()` の中で GPU のリソースを作成、描画、読み戻ししないでください。完了する保証はなく、その直後にプロセスが終了します。
 - ここから終了を取り消すことはできません。取り消したい場合は、それより前の `events().exitRequested` で `args.cancel = true` にします。このイベントは OS からの終了、`requestExitApp()`、Linux/macOS の SIGINT/SIGTERM で発行されますが、`exitApp()` では発行されません。
 
 ```cpp
 exitListener = events().exitRequested.listen([](ExitRequestEventArgs& args) { args.cancel = true; });
 ```
 
-- `cleanup()` が呼ばれるのはルートの App だけです。アプリ終了時、子ノードには `cleanup()` は呼ばれず、デストラクタだけが実行されます。
+- 通常は、`cleanup()` が呼ばれるのはルートの App だけです。アプリ終了時、子ノードには `cleanup()` は呼ばれず、デストラクタだけが実行されます。
 - ヘッドレスでは、ループが終わった後に呼ばれ、続いてオーディオの切り離しと `cleanup()` が行われます。`events().exit` は BeforeApp → App::exit()（100）→ AfterApp の終了フックの順に一度通知され、App と必須の終了処理は `clear()` 後も残ります。音声デバイスは動作を続けます。
 - ホットリロードでは、`events().hotReloadUnload` の後に古い App の `exit()` と `cleanup()` が呼ばれます。`events().exit` は本当に終了するときだけ発行されます。
-- サブウィンドウの App では、ウィンドウが閉じたとき（そのウィンドウの `events().exit` の App 優先度のリスナーとして）か、`setApp()` で入れ替えられたときに呼ばれます。その中ではすでに `getWindow()` が nullptr です。
+- 通常は、サブウィンドウの App では、ウィンドウが閉じたとき（そのウィンドウの `events().exit` の App 優先度のリスナーとして）か、`setApp()` で入れ替えられたときに呼ばれます。その中ではすでに `getWindow()` が nullptr です。
 - 子ノードとして追加した App では `exit()` は呼ばれません。
 - 閉じ忘れた `pushMatrix()`/`pushStyle()` は、`exit()` の名前を含む警告とともに pop されます。
-- メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
-- メインとホストでは exit notify の 100 で App::exit を呼び、AfterApp の終了フック、保留中のウィンドウ閉鎖、音声切り離し、cleanup、破棄と続きます。ホットリロードのゲスト交換では exit の直接呼び出しを維持します。
+- 通常は、メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
+- 通常は、メインとホストでは exit notify の 100 で App::exit を呼び、AfterApp の終了フック、保留中のウィンドウ閉鎖、音声切り離し、cleanup、破棄と続きます。ホットリロードのゲスト交換では exit の直接呼び出しを維持します。
 '''
 details.ko = '''
 - 기본적으로는 아무것도 하지 않습니다. 설정 저장이나 리소스 해제를 하려면 오버라이드하세요.
-- 어떤 방식으로 끝나든(프로그램 종료, 핫 리로드, 윈도우에서 빠질 때) App마다 한 번 메인 스레드에서 호출되며, 그 뒤에 반드시 `cleanup()`이 이어집니다.
+- 일반적으로 어떤 방식으로 끝나든(프로그램 종료, 핫 리로드, 윈도우에서 빠질 때) App마다 한 번 메인 스레드에서 호출되며, 그 뒤에 `cleanup()`이 이어집니다.
 - `exit()` 안에서는 오디오 장치와 GPU가 아직 동작 중이며, `audioOut()`/`audioIn()`이 동시에 실행되고 있을 수도 있습니다. 오디오 관련 정리는 `cleanup()`에서 하세요.
 - **오디오 콜백 안에서 메인 스레드를 기다리지 마세요.** 종료 처리가 멈춰 버립니다.
+- macOS에서 앱의 처리 함수가 실행 중일 때 운영 체제가 로그아웃, 다시 시작 또는 종료하면 해당 함수가 반환되기 전에도 앱이 종료됩니다. 해당 함수가 일시 정지된 동안 `exit()`가 호출될 수 있으며, 이 경우 `cleanup()`과 녹화 마무리 같은 프레임워크 자체의 정리는 실행되지 않습니다. 프로세스가 끝날 때까지 App은 윈도우에 연결된 상태를 유지합니다. 이 macOS 경우에는 `events().exitRequested`가 발생하지 않습니다. 이 경우 `exit()` 안에서 GPU 리소스를 만들거나 그리거나 읽어 오지 마십시오. 완료가 보장되지 않으며 그 직후에 프로세스가 끝납니다.
 - 여기서는 종료를 취소할 수 없습니다. 취소하려면 그보다 앞의 `events().exitRequested`에서 `args.cancel = true`로 설정합니다. 이 이벤트는 OS 종료, `requestExitApp()`, Linux/macOS의 SIGINT/SIGTERM에서 발생하지만 `exitApp()`에서는 발생하지 않습니다.
 
 ```cpp
 exitListener = events().exitRequested.listen([](ExitRequestEventArgs& args) { args.cancel = true; });
 ```
 
-- `cleanup()`이 호출되는 것은 루트 App뿐입니다. 앱 종료 시 자식 노드에는 `cleanup()`이 호출되지 않고 소멸자만 실행됩니다.
+- 일반적으로 `cleanup()`이 호출되는 것은 루트 App뿐입니다. 앱 종료 시 자식 노드에는 `cleanup()`이 호출되지 않고 소멸자만 실행됩니다.
 - 헤드리스에서는 루프가 끝난 뒤 호출되고, 이어서 오디오 분리와 `cleanup()`이 진행됩니다. `events().exit`는 BeforeApp → App::exit()(100) → AfterApp 종료 훅 순서로 한 번 전달되며 App과 필수 종료 처리는 `clear()` 후에도 남습니다. 오디오 장치는 계속 동작합니다.
 - 핫 리로드에서는 `events().hotReloadUnload` 뒤에 이전 App의 `exit()`와 `cleanup()`이 호출됩니다. `events().exit`는 실제로 종료할 때만 발생합니다.
-- 서브 윈도우 App에서는 윈도우가 닫힐 때(그 윈도우의 `events().exit`에서 App 우선순위 리스너로) 또는 `setApp()`으로 교체될 때 호출됩니다. 그 안에서는 이미 `getWindow()`가 nullptr입니다.
+- 일반적으로 서브 윈도우 App에서는 윈도우가 닫힐 때(그 윈도우의 `events().exit`에서 App 우선순위 리스너로) 또는 `setApp()`으로 교체될 때 호출됩니다. 그 안에서는 이미 `getWindow()`가 nullptr입니다.
 - 자식 노드로 추가한 App에서는 `exit()`가 호출되지 않습니다.
 - 닫지 않은 `pushMatrix()`/`pushStyle()`은 `exit()`를 언급하는 경고와 함께 pop됩니다.
-- 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
-- 메인/호스트에서는 exit notify의 100에서 App::exit를 호출하고 AfterApp 종료 훅, 대기 중 윈도우 닫기, 오디오 분리, cleanup, 파괴 순서로 진행합니다. 핫 리로드 게스트 교체는 exit 직접 호출 예외를 유지합니다.
+- 일반적으로 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
+- 일반적으로 메인/호스트에서는 exit notify의 100에서 App::exit를 호출하고 AfterApp 종료 훅, 대기 중 윈도우 닫기, 오디오 분리, cleanup, 파괴 순서로 진행합니다. 핫 리로드 게스트 교체는 exit 직접 호출 예외를 유지합니다.
 '''
-related = ["Node::cleanup", "CoreEvents::exit", "CoreEvents::exitRequested", "ExitRequestEventArgs", "requestExitApp", "exitApp", "App::requestExit", "App::getWindow", "App::audioOut", "Window::setApp", "Window::close", "runHeadlessApp", "CoreEvents::hotReloadUnload", "App"]
+related = ["Node::cleanup", "CoreEvents::exit", "CoreEvents::exitRequested", "ExitRequestEventArgs", "requestExitApp", "exitApp", "App::requestExit", "App::getWindow", "App::audioOut", "Window::setApp", "Window::close", "runHeadlessApp", "CoreEvents::hotReloadUnload", "App", "App::audioIn", "App::isExitRequested", "App::setSize", "AudioRecorder::stop", "ExitRequestEventArgs::cancel", "TcpClient::disconnect", "Texture::clear", "shutdownAudio", "stopRecording", "console::start"]
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
 void exit() override;
@@ -328,8 +337,9 @@ details.en = '''
 - The window is looked up from the App, not from the active window, so `subApp->getWindow()` works even when called from the main window's callbacks.
 - `setApp()` takes effect at the window's next frame boundary. If you call it inside a frame or an event, `getWindow()` changes only after that processing finishes.
 - `close()` only asks the window to close, so the window is still returned until shutdown actually starts. Only open windows are returned.
-- **It is nullptr during shutdown**, because the attachment is removed first. This applies to this App's own `exit()`/`cleanup()`, the window's `events().exit` listeners, and the outgoing App's `exit()`/`cleanup()` when `setApp(other)` or `setApp(nullptr)` swaps it out. Read what you need from the window before that point.
+- Normally, **it is nullptr during shutdown**, because the attachment is removed first. This applies to this App's own `exit()`/`cleanup()`, the window's `events().exit` listeners, and the outgoing App's `exit()`/`cleanup()` when `setApp(other)` or `setApp(nullptr)` swaps it out. Read what you need from the window before that point.
 - Call it on the main thread only.
+- On macOS, a logout, restart or shutdown during a running handler leaves `getWindow()` returning the window during the exit notification; see `App::exit`.
 '''
 details.ja = '''
 - 全ウィンドウ対応環境で `runApp` のメイン Window を返します。対応するデスクトップのホットリロードでも同じ Window を維持します。`runHeadlessApp`、未接続の App、コンストラクタでは nullptr です。
@@ -338,8 +348,9 @@ details.ja = '''
 - ウィンドウはアクティブなウィンドウではなく App から探されます。そのため、メインウィンドウのコールバックから `subApp->getWindow()` を呼んでも正しく動作します。
 - `setApp()` はそのウィンドウの次のフレームの区切りで反映されます。フレームやイベントの処理中に呼んだ場合、`getWindow()` が変わるのはその処理が終わってからです。
 - `close()` は閉じるよう依頼するだけなので、実際に終了処理が始まるまではウィンドウが返されます。返されるのは開いているウィンドウだけです。
-- **終了処理中は nullptr になります。** 接続が先に解除されるためです。この App 自身の `exit()`/`cleanup()`、そのウィンドウの `events().exit` リスナー、そして `setApp(other)` や `setApp(nullptr)` で外される側の App の `exit()`/`cleanup()` の中が該当します。ウィンドウから必要な情報は、それより前に読んでおいてください。
+- 通常は、**終了処理中は nullptr になります。** 接続が先に解除されるためです。この App 自身の `exit()`/`cleanup()`、そのウィンドウの `events().exit` リスナー、そして `setApp(other)` や `setApp(nullptr)` で外される側の App の `exit()`/`cleanup()` の中が該当します。ウィンドウから必要な情報は、それより前に読んでおいてください。
 - メインスレッドからのみ呼んでください。
+- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、終了通知の間も `getWindow()` はウィンドウを返します。`App::exit` を参照してください。
 '''
 details.ko = '''
 - 모든 윈도우 지원 플랫폼에서 `runApp`의 메인 Window를 반환합니다. 지원되는 데스크톱 핫 리로드에서도 같은 Window를 유지합니다. `runHeadlessApp`, 연결되지 않은 App, 생성자에서는 nullptr입니다.
@@ -348,8 +359,9 @@ details.ko = '''
 - 윈도우를 활성 윈도우가 아니라 App에서 찾습니다. 그래서 메인 윈도우의 콜백에서 `subApp->getWindow()`를 호출해도 올바르게 동작합니다.
 - `setApp()`은 그 윈도우의 다음 프레임 경계에서 반영됩니다. 프레임이나 이벤트 처리 중에 호출했다면 `getWindow()`는 그 처리가 끝난 뒤에 바뀝니다.
 - `close()`는 닫아 달라고 요청할 뿐이므로 실제로 종료 처리가 시작될 때까지는 윈도우가 반환됩니다. 반환되는 것은 열린 윈도우뿐입니다.
-- **종료 처리 중에는 nullptr이 됩니다.** 연결이 먼저 해제되기 때문입니다. 이 App 자신의 `exit()`/`cleanup()`, 그 윈도우의 `events().exit` 리스너, 그리고 `setApp(other)`나 `setApp(nullptr)`로 빠지는 쪽 App의 `exit()`/`cleanup()` 안이 해당됩니다. 윈도우에서 필요한 정보는 그 전에 읽어 두세요.
+- 일반적으로 **종료 처리 중에는 nullptr이 됩니다.** 연결이 먼저 해제되기 때문입니다. 이 App 자신의 `exit()`/`cleanup()`, 그 윈도우의 `events().exit` 리스너, 그리고 `setApp(other)`나 `setApp(nullptr)`로 빠지는 쪽 App의 `exit()`/`cleanup()` 안이 해당됩니다. 윈도우에서 필요한 정보는 그 전에 읽어 두세요.
 - 메인 스레드에서만 호출하세요.
+- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 종료 알림 중에도 `getWindow()`은 윈도우를 반환합니다. `App::exit`을 참고하십시오.
 '''
 related = ["Window::setApp", "Window::getApp", "createWindow", "Window::close", "Window::isOpen", "App::setSize", "App::exit", "App"]
 platform_note.en = '''
@@ -882,8 +894,9 @@ details.en = '''
 - **The resize is asynchronous.** Right after the call, `getWidth()`/`getHeight()` still return the old size. They change, and `windowResized()` is called, once the window has actually been resized.
 - The resized window is always the App's own `getWindow()`, regardless of the current callback. Without an attached Window, only the App's own Node size changes.
 - For this reason, calling `subApp->setSize(800, 600)` from the main window's `update()` resizes the sub window.
-- Inside a sub-window App's own `exit()`/`cleanup()`, `getWindow()` is already nullptr, so the call only changes the App's size.
+- Normally, inside a sub-window App's own `exit()`/`cleanup()`, `getWindow()` is already nullptr, so the call only changes the App's size.
 - It returns nothing and does not report failure. `setWidth()`/`setHeight()` never resize the window.
+- On macOS, a logout, restart or shutdown during a running handler keeps the App attached to its window during the exit notification; see `App::exit`.
 '''
 details.ja = '''
 - ウィンドウに接続済みの App は macOS・Windows・Linux X11 では fullscreen 中のサイズ・位置要求は無効な引数も含め無視し、呼び出しごとに Notice を 1 回出します。予約・再実行はせず、終了時には開始前の位置とサイズに戻ります。サイズ・位置は `isFullscreen()` が false を返してから指定してください。macOS は移行開始・終了のアニメーション中も無視し、Windows/X11 は `setFullscreen(false)` の直後から受け付けます。
@@ -894,8 +907,9 @@ details.ja = '''
 - **リサイズは非同期で行われます。** 呼んだ直後の `getWidth()`/`getHeight()` はまだ古いサイズを返します。実際にウィンドウのサイズが変わった時点で値が更新され、`windowResized()` が呼ばれます。
 - 現在のコールバックに関係なく、この App 自身の `getWindow()` が返す窓をリサイズします。所属する Window がなければ、この App の Node サイズだけを変更します。
 - そのため、メインウィンドウの `update()` から `subApp->setSize(800, 600)` を呼ぶと、サブウィンドウがリサイズされます。
-- サブウィンドウの App 自身の `exit()`/`cleanup()` の中では `getWindow()` がすでに nullptr のため、App のサイズが変わるだけになります。
+- 通常は、サブウィンドウの App 自身の `exit()`/`cleanup()` の中では `getWindow()` がすでに nullptr のため、App のサイズが変わるだけになります。
 - 戻り値はなく、失敗しても通知されません。`setWidth()`/`setHeight()` ではウィンドウはリサイズされません。
+- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、終了通知の間も App はウィンドウに接続されたままです。`App::exit` を参照してください。
 '''
 details.ko = '''
 - 윈도우에 연결된 App은 macOS, Windows, Linux X11에서 fullscreen 중 크기·위치 요청을 잘못된 인수도 포함해 무시하고 호출마다 Notice를 한 번 출력합니다. 예약하거나 재실행하지 않으며 종료 시 진입 전 위치와 크기를 복원합니다. `isFullscreen()`이 false를 반환한 뒤 크기·위치를 지정하세요. macOS는 진입·종료 애니메이션 중에도 무시하고 Windows/X11은 `setFullscreen(false)` 직후부터 허용합니다.
@@ -906,10 +920,11 @@ details.ko = '''
 - **리사이즈는 비동기로 이루어집니다.** 호출 직후의 `getWidth()`/`getHeight()`는 아직 이전 크기를 반환합니다. 실제로 윈도우 크기가 바뀐 시점에 값이 갱신되고 `windowResized()`가 호출됩니다.
 - 현재 콜백과 관계없이 이 App 자신의 `getWindow()`가 반환하는 윈도우를 리사이즈합니다. 연결된 Window가 없으면 이 App의 Node 크기만 변경합니다.
 - 그래서 메인 윈도우의 `update()`에서 `subApp->setSize(800, 600)`을 호출하면 서브 윈도우가 리사이즈됩니다.
-- 서브 윈도우 App 자신의 `exit()`/`cleanup()` 안에서는 `getWindow()`가 이미 nullptr이므로 App 크기만 바뀝니다.
+- 일반적으로 서브 윈도우 App 자신의 `exit()`/`cleanup()` 안에서는 `getWindow()`가 이미 nullptr이므로 App 크기만 바뀝니다.
 - 반환값이 없으며 실패해도 알려 주지 않습니다. `setWidth()`/`setHeight()`로는 윈도우가 리사이즈되지 않습니다.
+- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 종료 알림 중에도 App은 윈도우에 연결된 상태를 유지합니다. `App::exit`을 참고하십시오.
 '''
-related = ["getWindowSize", "setWindowSize", "App::getWindow", "App::windowResized", "App", "Window::setSize", "Window::setApp", "WindowSettings"]
+related = ["getWindowSize", "setWindowSize", "App::getWindow", "App::windowResized", "App", "Window::setSize", "Window::setApp", "WindowSettings", "App::exit"]
 platform_note.en = '''
 - macOS, Windows and Linux X11 (GLX and Pi GLES3/EGL) support main and secondary resizing; headless KMS logs a Warning.
 - Web: attached Apps are a no-op with one Notice on every call, including invalid sizes, like `setWindowSize()`. Page CSS controls the canvas; its drawable and attachments stay synchronized by sokol.
@@ -2234,6 +2249,7 @@ void tcApp::exit() {
     if (!result) logError("AudioRecorder") << result.message;
 }
 '''
+related = ["App::exit"]
 
 ["AudioRecorder::isRecording"]
 category = "sound"
@@ -5450,23 +5466,26 @@ related = ["Node::draw", "CoreEvents::update", "events", "EventListener"]
 
 ["CoreEvents::exit"]
 keywords = ["shutdown", "teardown", "before App exit", "per window", "release", "listen"]
-description.en = "Delivers shutdown; main/host App::exit runs at 100, followed by AfterApp resource hooks."
-description.ja = "終了を通知する。メインとホストでは 100 で App::exit を呼び、AfterApp でリソースを解放する。"
-description.ko = "종료를 알린다. 메인/호스트 App::exit는 100에서, 리소스 해제 훅은 AfterApp에서 실행한다."
+description.en = "Delivers shutdown; main/host App::exit runs at priority 100."
+description.ja = "終了を通知します。メインとホストでは優先度 100 で App::exit を呼びます。"
+description.ko = "종료를 알립니다. 메인/호스트 App::exit는 우선순위 100에서 실행됩니다."
 details.en = '''
-- Main window and hot-reload host: `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
+- Main window and hot-reload host normally use `BeforeApp` (0) → App (virtual, then tree where applicable) → `AfterApp` (200). The App is a framework-owned listener at `App` (100), retained by `clear()`. Equal priorities follow registration order; constructor/setup listeners at explicit 100 run after the App slot, listeners registered before the launcher run before it. Host bindings are installed before loading the guest and keep their position across reloads.
 - This migration currently covers the main window, hot-reload host and MCP injection. Secondary windows retain notify-before-direct-App input delivery and App-only resize/swap paths; headless delivers update/exit through App virtuals only (see runHeadlessApp). App input virtuals keep const arguments and cannot consume.
-- Main/host shutdown: exit notify calls App::exit at 100, then AfterApp shutdown hooks (ImGui including offscreen manager, NodeInspector, ScreenRecorder), then audio detach and cleanup. Guest swaps still call exit directly after hotReloadUnload; they do not emit events().exit. Startup and reload resize seeds remain App-only.
+- Normal main/host shutdown: exit notify calls App::exit at 100, then AfterApp shutdown hooks (ImGui including offscreen manager, NodeInspector, ScreenRecorder), then audio detach and cleanup. Guest swaps still call exit directly after hotReloadUnload; they do not emit events().exit. Startup and reload resize seeds remain App-only.
+- On macOS, when the operating system logs out, restarts or shuts down while one of the app's handlers is running, `exit()` may run while that handler is paused. `cleanup()` and framework shutdown hooks do not run, and Apps remain attached to their windows until the process ends. See `App::exit`.
 '''
 details.ja = '''
-- メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
+- 通常は、メインウィンドウとホットリロードホストでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
 - 今回の移行対象はメインウィンドウ、ホットリロードホスト、MCP 入力です。副ウィンドウは notify 後の App 直接呼び出しと、App のみのリサイズ・交換経路を維持します。ヘッドレスの update/exit は App 仮想関数だけを呼びます（runHeadlessApp 参照）。App の入力仮想関数の引数は const のままで消費できません。
-- メインとホストの終了では exit notify が 100 で App::exit を呼び、その後 AfterApp で ImGui（オフスクリーン管理を含む）、NodeInspector、ScreenRecorder を終了し、音声を切り離して cleanup します。ゲスト交換では hotReloadUnload 後に exit を直接呼び、events().exit は発火しません。起動・リロード時のサイズ初期化は App のみです。
+- 通常は、メインとホストの終了では exit notify が 100 で App::exit を呼び、その後 AfterApp で ImGui（オフスクリーン管理を含む）、NodeInspector、ScreenRecorder を終了し、音声を切り離して cleanup します。ゲスト交換では hotReloadUnload 後に exit を直接呼び、events().exit は発火しません。起動・リロード時のサイズ初期化は App のみです。
+- macOS でアプリの処理が実行中に OS がログアウト、再起動、シャットダウンすると、その処理が一時停止している間に `exit()` が呼ばれることがあります。`cleanup()` とフレームワークの終了フックは実行されず、プロセスが終了するまで App はウィンドウに接続されたままです。`App::exit` を参照してください。
 '''
 details.ko = '''
-- 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
+- 일반적으로 메인 윈도우와 핫 리로드 호스트에서는 `BeforeApp` (0) → App(가상 함수, 해당 이벤트의 트리) → `AfterApp` (200) 순서입니다. App은 `App` (100)의 프레임워크 소유 리스너이며 `clear()` 후에도 남습니다. 같은 우선순위는 등록 순서입니다. App 생성자나 setup에서 명시적 100으로 등록하면 App 뒤, 실행기 시작 전에 등록하면 App 앞입니다. 호스트는 게스트 로드 전에 등록하며 리로드 후에도 위치를 유지합니다.
 - 이번 전환 범위는 메인 윈도우, 핫 리로드 호스트, MCP 입력입니다. 보조 윈도우는 notify 이후 App 직접 입력 호출과 App 전용 리사이즈/교체 경로를 유지합니다. 헤드리스 update/exit는 App 가상 함수만 호출합니다(runHeadlessApp 참조). App 입력 가상 함수의 인자는 const이며 소비할 수 없습니다.
-- 메인/호스트 종료 시 exit notify가 100에서 App::exit를 호출하고 AfterApp에서 ImGui(오프스크린 관리자 포함), NodeInspector, ScreenRecorder를 종료한 뒤 오디오를 분리하고 cleanup합니다. 게스트 교체는 hotReloadUnload 후 exit를 직접 호출하며 events().exit를 발생시키지 않습니다. 시작/리로드 크기 초기화는 App 전용입니다.
+- 일반적으로 메인/호스트 종료 시 exit notify가 100에서 App::exit를 호출하고 AfterApp에서 ImGui(오프스크린 관리자 포함), NodeInspector, ScreenRecorder를 종료한 뒤 오디오를 분리하고 cleanup합니다. 게스트 교체는 hotReloadUnload 후 exit를 직접 호출하며 events().exit를 발생시키지 않습니다. 시작/리로드 크기 초기화는 App 전용입니다.
+- macOS에서 앱의 처리 함수가 실행 중일 때 운영 체제가 로그아웃, 다시 시작 또는 종료하면 해당 함수가 일시 정지된 동안 `exit()`가 호출될 수 있습니다. `cleanup()`과 프레임워크 종료 훅은 실행되지 않으며 프로세스가 끝날 때까지 App은 윈도우에 연결된 상태를 유지합니다. `App::exit`을 참고하십시오.
 '''
 related = ["App::exit", "Node::cleanup", "CoreEvents::update", "events", "EventListener"]
 snippet = '''
@@ -5489,20 +5508,23 @@ details.en = '''
 - Set `args.cancel = true` to keep the application running. `args.reason` can supply an explanation when blocking Windows shutdown.
 - The arguments have no `consumed` field, so cancellation does not stop subsequent listeners. The final `cancel` value determines whether the request is accepted.
 - Headless runs also notify this event for `requestExitApp()`, after update processing. `exitApp()` bypasses this event and cannot be cancelled.
+- On macOS, a logout, restart or shutdown during a running handler skips this event and ends the app without asking; see `App::exit`.
 '''
 details.ja = '''
 - ネイティブの終了要求または `requestExitApp()` による要求を受け入れる前に、メインウィンドウのイベント群を通じて、メインスレッドで `ExitRequestEventArgs&` を渡します。サブウィンドウを閉じても発生しません。
 - `args.cancel = true` にすると、アプリケーションを実行し続けられます。`args.reason` には Windows のシャットダウンを妨げる理由を指定できます。
 - 引数に `consumed` はないため、キャンセルしても後続のリスナーは呼ばれます。最後の `cancel` の値で要求を受け入れるかどうかを決めます。
 - ヘッドレス実行でも、`requestExitApp()` による要求を update の処理後に通知します。`exitApp()` はこのイベントを経由せず、キャンセルできません。
+- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、このイベントは通知されず、アプリは確認なしで終了します。`App::exit` を参照してください。
 '''
 details.ko = '''
 - 네이티브 종료 요청이나 `requestExitApp()`의 요청을 받아들이기 전에 메인 윈도우의 이벤트 모음을 통해 메인 스레드에서 `ExitRequestEventArgs&`를 전달합니다. 보조 윈도우를 닫을 때는 발생하지 않습니다.
 - `args.cancel = true`로 설정하면 애플리케이션을 계속 실행합니다. `args.reason`에는 Windows 종료를 막는 이유를 지정할 수 있습니다.
 - 인수에 `consumed`가 없으므로 취소해도 이후 리스너는 호출됩니다. 마지막 `cancel` 값으로 요청을 받아들일지 결정합니다.
 - 헤드리스 실행에서도 `requestExitApp()`의 요청을 update 처리 후에 알립니다. `exitApp()`은 이 이벤트를 거치지 않으며 취소할 수 없습니다.
+- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 이 이벤트는 발생하지 않으며 앱은 확인 없이 종료됩니다. `App::exit`을 참고하십시오.
 '''
-related = ["ExitRequestEventArgs", "requestExitApp", "exitApp"]
+related = ["ExitRequestEventArgs", "requestExitApp", "exitApp", "App::exit"]
 
 ["CoreEvents::filesDropped"]
 description.en = "Fired when files are dropped onto the window."
@@ -5538,23 +5560,26 @@ description.ja = "ホットリロードで現在のゲスト世代をアンロ�
 description.ko = "핫 리로드의 현재 게스트 세대를 언로드하기 전에 발생한다."
 details.en = '''
 - This hot-reload-only `Event<void>` runs on the main thread through the main window's hub while the guest App is still alive. It has no arguments or cancellation and never fires in a normal build.
-- On reload, it fires after a successful rebuild and before the old App's `exit()` and `cleanup()`. At application exit, it fires after the exit event and the App's `exit()` and `cleanup()`, but before the App is destroyed.
+- Normally, on reload, it fires after a successful rebuild and before the old App's `exit()` and `cleanup()`. At application exit, it fires after the exit event and the App's `exit()` and `cleanup()`, but before the App is destroyed.
 - Guest state that outlives the App, such as singletons and function-local statics, must release its listeners on host events here.
 - `tcxImGui` and `tcxNodeInspector` release their listeners automatically; see `Event<T>` for listener lifetime.
+- On macOS, a logout, restart or shutdown during a running handler skips this event; see `App::exit`.
 '''
 details.ja = '''
 - ホットリロード専用の `Event<void>` で、ゲストの App が生存している間に、メインウィンドウのイベント群を通じてメインスレッドで呼びます。引数もキャンセル機能もなく、通常ビルドでは発生しません。
-- リロード時は再ビルドの成功後、古い App の `exit()` と `cleanup()` より前に発生します。アプリケーション終了時は exit イベントと App の `exit()`、`cleanup()` のあと、App を破棄する前に発生します。
+- 通常は、リロード時は再ビルドの成功後、古い App の `exit()` と `cleanup()` より前に発生します。アプリケーション終了時は exit イベントと App の `exit()`、`cleanup()` のあと、App を破棄する前に発生します。
 - シングルトンや関数内 static など、App より長く生存するゲストの状態は、ここでホストのイベントに登録したリスナーを解除する必要があります。
 - `tcxImGui` と `tcxNodeInspector` はリスナーを自動で解除します。リスナーの寿命については `Event<T>` を参照してください。
+- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、このイベントは発生しません。`App::exit` を参照してください。
 '''
 details.ko = '''
 - 핫 리로드 전용 `Event<void>`이며 게스트 App이 살아 있는 동안 메인 윈도우의 이벤트 모음을 통해 메인 스레드에서 호출합니다. 인수와 취소 기능은 없으며 일반 빌드에서는 발생하지 않습니다.
-- 리로드할 때는 재빌드가 성공한 후, 이전 App의 `exit()`와 `cleanup()` 전에 발생합니다. 애플리케이션 종료 시에는 exit 이벤트와 App의 `exit()`, `cleanup()` 이후, App을 파괴하기 전에 발생합니다.
+- 일반적으로 리로드할 때는 재빌드가 성공한 후, 이전 App의 `exit()`와 `cleanup()` 전에 발생합니다. 애플리케이션 종료 시에는 exit 이벤트와 App의 `exit()`, `cleanup()` 이후, App을 파괴하기 전에 발생합니다.
 - 싱글턴이나 함수 내부 static처럼 App보다 오래 유지되는 게스트 상태는 여기서 호스트 이벤트에 등록한 리스너를 해제해야 합니다.
 - `tcxImGui`와 `tcxNodeInspector`는 리스너를 자동으로 해제합니다. 리스너 수명은 `Event<T>`를 참조하세요.
+- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 이 이벤트는 발생하지 않습니다. `App::exit`을 참고하십시오.
 '''
-related = ["CoreEvents::exit", "Event<T>", "EventListener"]
+related = ["CoreEvents::exit", "Event<T>", "EventListener", "App::exit"]
 
 ["CoreEvents::keyPressed"]
 description.en = "Fired when a key is pressed."
@@ -7907,6 +7932,7 @@ details.ko = '''
 - OS의 강제 종료는 막을 수 없습니다. Windows에서는 `WM_ENDSESSION(TRUE)` 처리 중에 `App::exit()`과 `App::cleanup()`을 마쳐야 합니다. Windows에 제어를 반환한 직후 프로세스가 종료될 수 있습니다.
 - `exitApp()`은 이 이벤트를 거치지 않습니다. 헤드리스 앱에서는 `requestExitApp()`을 취소할 수 있지만, 시그널 핸들러는 `exitRequested`를 보내지 않고 앱을 중지합니다.
 '''
+related = ["App::exit"]
 
 ["Fbo"]
 category = "graphics_fbo"
@@ -19600,8 +19626,9 @@ details.en = '''
 - `removeChild()` / `removeAllChildren()` do not call `cleanup()`. They only detach the node.
 - It can run even if `setup()` never ran (the node was destroyed before it was first updated or drawn), so do not assume that what `setup()` creates is there.
 - Before `cleanup()` runs, the node is marked dead, its async timers are cancelled, and it is no longer treated as the hovered, grabbed or selected node.
-- For the App, `exit()` and then `cleanup()` are called directly, not through the tree, so child nodes receive no `cleanup()` at app exit. Audio is disconnected before this, so you can release audio state here. For the whole shutdown order, see `App::exit`.
+- Normally, for the App, `exit()` and then `cleanup()` are called directly, not through the tree, so child nodes receive no `cleanup()` at app exit. Audio is disconnected before this, so you can release audio state here. For the whole shutdown order, see `App::exit`.
 - Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (child nodes get no cleanup() at app exit).
+- On macOS, a logout, restart or shutdown during a running handler skips `cleanup()`; see `App::exit`.
 '''
 details.ja = '''
 - `destroy()` は印を付けるだけです。`cleanup()` は、親が次に update されてそのノードを片付けるときに実行されます。親が非アクティブであったり update されていなかったりする場合は、親が再び update されるまで待ちます。
@@ -19609,8 +19636,9 @@ details.ja = '''
 - `removeChild()` / `removeAllChildren()` は `cleanup()` を呼びません。ノードを切り離すだけです。
 - `setup()` が一度も実行されていないノード（最初に update か draw される前に destroy されたもの）でも呼ばれることがあります。`setup()` で作ったものが存在するとは想定しないでください。
 - `cleanup()` の前に、ノードは dead として扱われ、非同期タイマーはキャンセルされ、hover・grab・選択中のノードとしても扱われなくなります。
-- App では `exit()` の次に `cleanup()` が直接呼ばれます（ツリー経由ではありません）。そのため、アプリ終了時に子ノードの `cleanup()` は呼ばれません。それより前にオーディオは切り離されているので、オーディオ関連の状態はここで解放できます。終了処理の流れについては `App::exit` を参照してください。
+- 通常は、App では `exit()` の次に `cleanup()` が直接呼ばれます（ツリー経由ではありません）。そのため、アプリ終了時に子ノードの `cleanup()` は呼ばれません。それより前にオーディオは切り離されているので、オーディオ関連の状態はここで解放できます。終了処理の流れについては `App::exit` を参照してください。
 - 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（アプリ終了時に子ノードの cleanup() が呼ばれない）。
+- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、`cleanup()` は呼ばれません。`App::exit` を参照してください。
 '''
 details.ko = '''
 - `destroy()`는 표시만 합니다. `cleanup()`은 부모가 다음에 update되면서 그 노드를 정리할 때 실행됩니다. 부모가 비활성이거나 update되지 않고 있으면 부모가 다시 update될 때까지 기다립니다.
@@ -19618,8 +19646,9 @@ details.ko = '''
 - `removeChild()` / `removeAllChildren()`은 `cleanup()`을 호출하지 않습니다. 노드를 떼어내기만 합니다.
 - `setup()`이 한 번도 실행되지 않은 노드(처음 update 또는 draw되기 전에 destroy된 노드)에서도 호출될 수 있습니다. `setup()`에서 만든 것이 있다고 가정하지 마세요.
 - `cleanup()` 전에 노드는 dead로 표시되고, 비동기 타이머가 취소되며, hover·grab·선택 중인 노드로도 더 이상 다뤄지지 않습니다.
-- App에서는 `exit()` 다음에 `cleanup()`이 직접 호출됩니다(트리 경유가 아님). 따라서 앱 종료 시 자식 노드의 `cleanup()`은 호출되지 않습니다. 그 전에 오디오가 분리되어 있으므로 오디오 관련 상태는 여기서 해제할 수 있습니다. 종료 처리 흐름은 `App::exit`을 참고하세요.
+- 일반적으로 App에서는 `exit()` 다음에 `cleanup()`이 직접 호출됩니다(트리 경유가 아님). 따라서 앱 종료 시 자식 노드의 `cleanup()`은 호출되지 않습니다. 그 전에 오디오가 분리되어 있으므로 오디오 관련 상태는 여기서 해제할 수 있습니다. 종료 처리 흐름은 `App::exit`을 참고하세요.
 - 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(앱 종료 시 자식 노드의 cleanup()이 호출되지 않음).
+- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 `cleanup()`은 호출되지 않습니다. `App::exit`을 참고하십시오.
 '''
 related = ["Node::destroy", "Node::removeChild", "App::exit", "Node::setup", "Node::cancelAllAsyncTimers"]
 snippet = '''
@@ -30109,7 +30138,7 @@ details.ko = '''
 - 클라이언트가 살아 있는 동안 대기 중인 전송은 `SendError::Disconnected`로 완료를 알립니다. 파괴 시에는 새 이벤트를 알리지 않습니다.
 - 작업자의 수명과 종료 처리는 `TcpClient`를, 취소의 제한은 `TcpClient::connectAsync`를 참조하세요.
 '''
-related = ["TcpClient::onDisconnect", "TcpClient::onSendComplete", "TcpClient"]
+related = ["TcpClient::onDisconnect", "TcpClient::onSendComplete", "TcpClient", "App::exit"]
 snippet = '''
 // tcApp member: TcpClient client;
 void tcApp::exit() {
@@ -32072,7 +32101,7 @@ details.ko = '''
 - 필터, 래핑, 알파 사전 곱셈, 용도, 샘플 수 설정은 유지합니다. 색으로 채우는 작업이 아니라 저장 공간을 해제하는 작업입니다.
 - 반복해서 호출할 수 있습니다. 기록된 그리기 명령이 리소스를 참조하는 동안 GPU 리소스의 파괴를 지연합니다. GPU 리소스 규칙은 `Texture`를 참조하세요.
 '''
-related = ["Texture", "Texture::allocate"]
+related = ["Texture", "Texture::allocate", "App::exit"]
 snippet = '''
 // tcApp.h: Texture texture;
 void tcApp::setup() {
@@ -40232,38 +40261,41 @@ details.en = '''
 - Returns immediately and applies the request at the next boundary before or after this window processes a frame or event. Calling it from the App's own `update()`, `draw()`, or input callback is supported. Until application, `getApp()` returns the current App.
 - A request during update or input keeps the outgoing App for the entire current tick or event, including the remaining tree processing and drawing in that tick. Bindings change only when the request is accepted at the boundary.
 - The last accepted request before the boundary wins. Requesting the current App cancels a pending replacement without restarting it. A pending `close()` takes precedence over attachment.
-- The App's `setup()` runs once, on its first processed frame. Replacing or removing it, or closing the window, calls its `exit()`, disconnects its audio callbacks and waits for any running audio callback, then calls its `cleanup()`.
+- The App's `setup()` runs once, on its first processed frame. Normally, replacing or removing it, or closing the window, calls its `exit()`, disconnects its audio callbacks and waits for any running audio callback, then calls its `cleanup()`.
 - Replacement and removal directly call the outgoing App's `exit()` exactly once and do not notify `events().exit`; this is an exception to event-based delivery. Closing the window delivers exit through the window event instead.
 - An App whose cleanup has begun cannot be attached again; create a new App to display it again.
 - An App already attached to another window, an App whose cleanup has begun, or attachment to a closed or closing window is rejected with an error log. These checks run again when the request is applied; rejection leaves the current App unchanged.
 - Passing `nullptr` to a closed or closing window has no effect. When replacement is applied, `getApp()` already returns the replacement during the outgoing App's exit and cleanup callbacks.
 - Use Window APIs on the main thread. Window lifecycle, input, update, and draw callbacks run on that thread; see `App` for audio callback threading.
+- On macOS, a logout, restart or shutdown during a running handler skips the normal exit order; see `App::exit`.
 '''
 details.ja = '''
 - `shared_ptr<App>` を渡すと、このウィンドウにコンテンツを設定します。`nullptr` を渡すと App を外します。各ウィンドウに設定できる App は 1 つで、update、draw、入力、リサイズのコールバックはこのウィンドウに対して実行され、RectNode のサイズもウィンドウに合わせて更新されます。
 - すぐに戻り、このウィンドウがフレームやイベントを処理する前後の次の境界で要求を反映します。App 自身の `update()`、`draw()`、入力コールバックからも呼び出せます。反映されるまで、`getApp()` は現在の App を返します。
 - update や入力中の要求でも、現在の tick やイベントが終わるまでは元の App が残り、その tick の残りのツリー処理や描画も受け取ります。登録の切り替えは境界で要求が受け付けられたときだけ行います。
 - 境界までに受け付けた最後の要求が有効です。現在の App を指定すると、App を再起動せずに差し替え待ちの要求を取り消します。`close()` が要求されている場合は、App の設定より優先されます。
-- App の `setup()` は最初に処理されるフレームで 1 回だけ実行されます。差し替え、取り外し、ウィンドウの終了では、App の `exit()` を呼び、オーディオのコールバックを切断して実行中の呼び出しを待ってから、`cleanup()` を呼びます。
+- App の `setup()` は最初に処理されるフレームで 1 回だけ実行されます。通常は、差し替え、取り外し、ウィンドウの終了では、App の `exit()` を呼び、オーディオのコールバックを切断して実行中の呼び出しを待ってから、`cleanup()` を呼びます。
 - 差し替えと取り外しは、元の App の `exit()` を直接 1 回だけ呼び、`events().exit` は通知しません。これはイベントによる配信の例外です。ウィンドウを閉じる場合は、ウィンドウのイベント経由で exit を配信します。
 - クリーンアップが始まった App は再設定できません。再び表示するには、新しい App を作成してください。
 - 別のウィンドウに設定済みの App、クリーンアップが始まった App、閉じたウィンドウや閉じる途中のウィンドウへの設定は、エラーログを出して拒否します。反映時にも同じ検査を行い、拒否した場合は現在の App を変更しません。
 - 閉じたウィンドウや閉じる途中のウィンドウに `nullptr` を渡しても何もしません。差し替えが反映されると、元の App の exit や cleanup のコールバック内でも、`getApp()` は差し替え後の App を返します。
 - Window の API はメインスレッドで使用してください。ウィンドウのライフサイクル、入力、update、draw のコールバックもメインスレッドで実行されます。オーディオのコールバックのスレッドについては `App` を参照してください。
+- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、通常の終了順序は省略されます。`App::exit` を参照してください。
 '''
 details.ko = '''
 - `shared_ptr<App>`을 전달하여 이 윈도우에 콘텐츠를 설정하거나, `nullptr`을 전달하여 App을 분리합니다. 윈도우마다 App 하나를 연결하며, update, draw, 입력, 크기 변경 콜백은 이 윈도우에 대해 실행됩니다. App의 RectNode 크기도 윈도우 크기에 맞춰 갱신됩니다.
 - 즉시 반환하고 이 윈도우가 프레임이나 이벤트를 처리하기 전후의 다음 경계에서 요청을 반영합니다. App 자신의 `update()`, `draw()`, 입력 콜백에서도 호출할 수 있습니다. 반영되기 전까지 `getApp()`은 현재 App을 반환합니다.
 - update나 입력 중에 요청해도 현재 tick이나 이벤트가 끝날 때까지 이전 App이 남아 해당 tick의 나머지 트리 처리와 그리기를 받습니다. 등록은 경계에서 요청을 수락할 때만 바뀝니다.
 - 경계까지 수락한 마지막 요청이 적용됩니다. 현재 App을 지정하면 App을 다시 시작하지 않고 대기 중인 교체 요청을 취소합니다. 대기 중인 `close()` 요청은 App 연결보다 우선합니다.
-- App의 `setup()`은 처음 처리하는 프레임에서 한 번 실행됩니다. App을 교체하거나 분리하거나 윈도우를 닫으면 App의 `exit()`을 호출하고, 오디오 콜백의 연결을 해제하여 실행 중인 호출이 끝날 때까지 기다린 다음 `cleanup()`을 호출합니다.
+- App의 `setup()`은 처음 처리하는 프레임에서 한 번 실행됩니다. 일반적으로 App을 교체하거나 분리하거나 윈도우를 닫으면 App의 `exit()`을 호출하고, 오디오 콜백의 연결을 해제하여 실행 중인 호출이 끝날 때까지 기다린 다음 `cleanup()`을 호출합니다.
 - 교체와 분리는 이전 App의 `exit()`을 직접 한 번 호출하며 `events().exit`을 알리지 않습니다. 이는 이벤트 기반 전달의 예외입니다. 윈도우를 닫을 때는 윈도우 이벤트를 통해 exit을 전달합니다.
 - 정리가 시작된 App은 다시 연결할 수 없습니다. 다시 표시하려면 새 App을 생성합니다.
 - 다른 윈도우에 이미 연결된 App, 정리가 시작된 App, 닫혔거나 닫히는 중인 윈도우에 대한 연결은 오류 로그를 남기고 거부합니다. 요청을 반영할 때도 같은 검사를 수행하며, 거부하면 현재 App을 변경하지 않습니다.
 - 닫혔거나 닫히는 중인 윈도우에 `nullptr`을 전달해도 아무 작업을 하지 않습니다. 교체가 반영되면 이전 App의 exit 및 cleanup 콜백 안에서도 `getApp()`은 교체된 App을 반환합니다.
 - Window API는 메인 스레드에서 사용합니다. 윈도우의 수명 주기, 입력, update, draw 콜백도 메인 스레드에서 실행됩니다. 오디오 콜백의 스레드 규칙은 `App`을 참조하세요.
+- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 일반적인 종료 순서를 건너뜁니다. `App::exit`을 참고하십시오.
 '''
-related = ["App", "Window::getApp", "Window::close", "createWindow"]
+related = ["App", "Window::getApp", "Window::close", "createWindow", "App::exit"]
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
 shared_ptr<Window> secondary;
@@ -40330,26 +40362,30 @@ details.en = '''
 - Returns immediately. Closing the main Window quits the application; closing a secondary leaves the other windows running. Calling it from this window's own App callbacks is supported. Repeated requests or calls on a closed window have no effect.
 - Secondary closure follows the same path as the close button, outside window callbacks: after the current run-loop pass on Linux, through a close message posted at the loop tail on Windows, and after the next main-window tick on macOS.
 - Until closure is applied, `isOpen()` remains `true`, and `getApp()` and `App::getWindow()` still return the current App and window.
-- Secondary teardown destroys the native window and makes `isOpen()` return `false`, then notifies `events().exit` exactly once while retaining the outgoing App. Within that notification, `BeforeApp` runs before `App::exit()` at 100, and mandatory teardown hooks run at `AfterApp` even if the App calls `events().exit.clear()`. Audio detachment and `cleanup()` follow the notification. `getApp()` and `App::getWindow()` return `nullptr` during these teardown callbacks; the framework holds the outgoing App internally.
+- Normally, secondary teardown destroys the native window and makes `isOpen()` return `false`, then notifies `events().exit` exactly once while retaining the outgoing App. Within that notification, `BeforeApp` runs before `App::exit()` at 100, and mandatory teardown hooks run at `AfterApp` even if the App calls `events().exit.clear()`. Audio detachment and `cleanup()` follow the notification. `getApp()` and `App::getWindow()` return `nullptr` during these teardown callbacks; the framework holds the outgoing App internally.
 - Main Window pointers are borrowed from the runner and expire at application shutdown. Secondary closure leaves retained Window handles valid. Destroying the Window object when its last `shared_ptr` is released closes its native window immediately.
 - For main-thread requirements, see `Window::setApp`.
+- On macOS, a logout, restart or shutdown during a running handler leaves `getApp()` and `App::getWindow()` returning the App and window during the exit notification; see `App::exit`.
 '''
 details.ja = '''
 - すぐに戻ります。メイン Window を閉じるとアプリが終了し、副窓を閉じても他の窓は動き続けます。このウィンドウ自身の App のコールバックからも呼び出せます。繰り返し要求した場合や、閉じたウィンドウに対して呼んだ場合は何もしません。
 - 副窓は閉じるボタンと同じ経路で、ウィンドウのコールバックの外で閉じます。Linux では今回のイベントループの処理後、Windows ではループの末尾で送った終了メッセージの処理時、macOS では次のメインウィンドウのフレーム処理後に反映します。
 - 終了が反映されるまで、`isOpen()` は `true` のままで、`getApp()` と `App::getWindow()` は現在の App とウィンドウを返します。
-- 副窓の終了処理では、ネイティブウィンドウを破棄して `isOpen()` が `false` を返す状態にし、元の App を保持したまま `events().exit` を 1 回だけ通知します。その通知では `BeforeApp`、優先度 100 の `App::exit()`、`AfterApp` の必須終了フックの順に実行します。App が `events().exit.clear()` を呼んでも必須フックは残ります。通知後にオーディオを切断し、`cleanup()` を実行します。これらの終了コールバック内では、`getApp()` と `App::getWindow()` は `nullptr` を返し、フレームワークが元の App を内部で保持します。
+- 通常は、副窓の終了処理では、ネイティブウィンドウを破棄して `isOpen()` が `false` を返す状態にし、元の App を保持したまま `events().exit` を 1 回だけ通知します。その通知では `BeforeApp`、優先度 100 の `App::exit()`、`AfterApp` の必須終了フックの順に実行します。App が `events().exit.clear()` を呼んでも必須フックは残ります。通知後にオーディオを切断し、`cleanup()` を実行します。これらの終了コールバック内では、`getApp()` と `App::getWindow()` は `nullptr` を返し、フレームワークが元の App を内部で保持します。
 - メイン Window のポインタは runner からの借用で、アプリ終了後は無効です。副窓は閉じたあとも保持した Window ハンドルが有効です。最後の `shared_ptr` を解放して Window オブジェクトを破棄した場合は、ネイティブウィンドウを直ちに閉じます。
 - メインスレッドでの使用については `Window::setApp` を参照してください。
+- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、終了通知の間も `getApp()` と `App::getWindow()` は App とウィンドウを返します。`App::exit` を参照してください。
 '''
 details.ko = '''
 - 즉시 반환합니다. 메인 Window를 닫으면 앱이 종료되며 보조 윈도우를 닫아도 다른 윈도우는 계속 실행됩니다. 이 윈도우 자신의 App 콜백에서도 호출할 수 있습니다. 반복 요청이나 닫힌 윈도우에 대한 호출은 아무 작업도 하지 않습니다.
 - 보조 윈도우는 닫기 버튼과 같은 경로로 윈도우 콜백 밖에서 닫습니다. Linux에서는 현재 이벤트 루프 처리 후, Windows에서는 루프 끝에서 보낸 닫기 메시지를 처리할 때, macOS에서는 다음 메인 윈도우 프레임 처리 후에 반영합니다.
 - 닫기가 반영되기 전까지 `isOpen()`은 `true`를 유지하며, `getApp()`과 `App::getWindow()`은 현재 App과 윈도우를 반환합니다.
-- 보조 윈도우의 종료 처리에서는 네이티브 윈도우를 파괴하여 `isOpen()`이 `false`를 반환하게 하고, 이전 App을 유지한 채 `events().exit`을 한 번 알립니다. 알림 안에서 `BeforeApp`, 우선순위 100의 `App::exit()`, `AfterApp`의 필수 종료 훅 순으로 실행됩니다. App이 `events().exit.clear()`를 호출해도 필수 훅은 유지됩니다. 알림 후에 오디오를 분리하고 `cleanup()`을 실행합니다. 이러한 종료 콜백 안에서는 `getApp()`과 `App::getWindow()`이 `nullptr`을 반환하며 프레임워크가 이전 App을 내부에서 유지합니다.
+- 일반적으로 보조 윈도우의 종료 처리에서는 네이티브 윈도우를 파괴하여 `isOpen()`이 `false`를 반환하게 하고, 이전 App을 유지한 채 `events().exit`을 한 번 알립니다. 알림 안에서 `BeforeApp`, 우선순위 100의 `App::exit()`, `AfterApp`의 필수 종료 훅 순으로 실행됩니다. App이 `events().exit.clear()`를 호출해도 필수 훅은 유지됩니다. 알림 후에 오디오를 분리하고 `cleanup()`을 실행합니다. 이러한 종료 콜백 안에서는 `getApp()`과 `App::getWindow()`이 `nullptr`을 반환하며 프레임워크가 이전 App을 내부에서 유지합니다.
 - 메인 Window 포인터는 runner에서 빌려 쓰며 앱 종료 후에는 무효입니다. 보조 윈도우는 닫힌 뒤에도 보관한 Window 핸들이 유효합니다. 마지막 `shared_ptr`을 해제하여 Window 객체를 소멸시키면 네이티브 윈도우를 즉시 닫습니다.
 - 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
+- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 종료 알림 중에도 `getApp()`과 `App::getWindow()`은 App과 윈도우를 반환합니다. `App::exit`을 참고하십시오.
 '''
+related = ["App::exit"]
 
 ["Window::isOpen"]
 description.en = "Returns whether this window is open."
@@ -40919,14 +40955,17 @@ description.ja = "ディスプレイの高い画素密度を使って描画す�
 description.ko = "디스플레이의 높은 픽셀 밀도를 사용하여 렌더링할지 지정한다."
 details.en = '''
 - The default is `true`, which requests a full-resolution framebuffer on high-DPI displays such as Retina.
+- Linux X11 applies this setting to main and secondary windows on GLX and EGL. At `Xft.dpi: 192`, disabling it reports a DPI scale of 1 instead of 2.
 - Disabling this setting requests a framebuffer at logical resolution. Coordinate units are controlled separately by `WindowSettings::pixelPerfect`.
 '''
 details.ja = '''
 - デフォルトは `true` で、Retina などの高 DPI ディスプレイでは画面の解像度に合わせたフレームバッファを要求します。
+- Linux X11 では GLX・EGL ともに主窓・副窓へ適用します。`Xft.dpi: 192` でも無効時の DPI スケールは 2 ではなく 1 です。
 - 無効にすると、論理解像度のフレームバッファを要求します。座標の単位は `WindowSettings::pixelPerfect` で別に指定します。
 '''
 details.ko = '''
 - 기본값은 `true`이며, Retina 같은 고 DPI 디스플레이에서 디스플레이 해상도에 맞는 프레임버퍼를 요청합니다.
+- Linux X11에서는 GLX와 EGL 모두 메인 및 보조 윈도우에 적용합니다. `Xft.dpi: 192`에서도 비활성화하면 DPI 배율은 2가 아닌 1입니다.
 - 비활성화하면 논리 해상도의 프레임버퍼를 요청합니다. 좌표 단위는 `WindowSettings::pixelPerfect`에서 별도로 지정합니다.
 '''
 
@@ -41716,14 +41755,17 @@ description.ko = "알림 대화상자를 표시한다."
 details.en = '''
 - `alertDialog(title, message)` displays a heading or title and body text with an OK button on supported platforms, returning after dismissal.
 - Synchronous dialogs run on the calling thread and do not dispatch to the main thread. Call them from a main-thread app callback; the caller waits while the dialog is open.
+- While the dialog is open, the app's windows do not update or draw. The exception is macOS, where only the window whose code opened it pauses and other windows keep running. On macOS, [`alertDialogAsync`](#alertDialogAsync) keeps drawing when there is a key window.
 '''
 details.ja = '''
 - `alertDialog(title, message)` は、対応するプラットフォームで見出しまたはタイトルと本文を OK ボタン付きで表示し、閉じると戻ります。
 - 同期ダイアログは呼び出したスレッドで実行し、メインスレッドへの切り替えは行いません。メインスレッドのアプリコールバックから呼び出してください。ダイアログが開いている間、呼び出し元は待機します。
+- ダイアログを閉じるまで、アプリのウィンドウは更新も描画も行いません。ただし、macOS では、呼び出したコードのウィンドウだけが停止し、ほかのウィンドウは動き続けます。macOS では、キーウィンドウがあれば [`alertDialogAsync`](#alertDialogAsync) で描画を続けられます。
 '''
 details.ko = '''
 - `alertDialog(title, message)`는 지원하는 플랫폼에서 제목과 본문을 OK 버튼과 함께 표시하며, 대화상자를 닫으면 반환합니다.
 - 동기 대화상자는 호출한 스레드에서 실행하며 메인 스레드로 전환하지 않습니다. 메인 스레드의 앱 콜백에서 호출해야 합니다. 대화상자가 열려 있는 동안 호출자는 대기합니다.
+- 대화상자를 닫을 때까지 앱의 윈도우는 갱신하거나 그리지 않습니다. 다만 macOS에서는 이를 연 코드의 윈도우만 멈추고 다른 윈도우는 계속 실행됩니다. macOS에서는 키 윈도우가 있으면 [`alertDialogAsync`](#alertDialogAsync)로 계속 그릴 수 있습니다.
 '''
 related = ["alertDialogAsync", "confirmDialog"]
 platform_note.en = '''
@@ -42899,14 +42941,17 @@ description.ko = "확인 대화상자를 표시한다."
 details.en = '''
 - `confirmDialog(title, message)` displays a title and body text. Returns `true` for an affirmative choice and `false` for rejection or failure.
 - Threading and blocking behavior follow `alertDialog`.
+- While the dialog is open, the app's windows do not update or draw. The exception is macOS, where only the window whose code opened it pauses and other windows keep running. On macOS, [`confirmDialogAsync`](#confirmDialogAsync) keeps drawing; see its notes.
 '''
 details.ja = '''
 - `confirmDialog(title, message)` はタイトルと本文を表示します。肯定の選択で `true`、否定の選択や失敗で `false` を返します。
 - スレッドと呼び出し元の待機の扱いは `alertDialog` を参照してください。
+- ダイアログを閉じるまで、アプリのウィンドウは更新も描画も行いません。ただし、macOS では、呼び出したコードのウィンドウだけが停止し、ほかのウィンドウは動き続けます。macOS では、[`confirmDialogAsync`](#confirmDialogAsync) で描画を続けられます。注意事項はそちらを参照してください。
 '''
 details.ko = '''
 - `confirmDialog(title, message)`는 제목과 본문을 표시합니다. 긍정 선택에는 `true`를, 부정 선택이나 실패에는 `false`를 반환합니다.
 - 스레드와 호출자의 대기 동작은 `alertDialog`에 설명되어 있습니다.
+- 대화상자를 닫을 때까지 앱의 윈도우는 갱신하거나 그리지 않습니다. 다만 macOS에서는 이를 연 코드의 윈도우만 멈추고 다른 윈도우는 계속 실행됩니다. macOS에서는 [`confirmDialogAsync`](#confirmDialogAsync)로 계속 그릴 수 있습니다. 해당 함수의 주의 사항을 참조하세요.
 '''
 related = ["confirmDialogAsync", "alertDialog"]
 platform_note.en = '''
@@ -48445,18 +48490,21 @@ details.en = '''
 - Selects one file, or one folder when `folderSelection` is `true`; this function does not read the selected file.
 - Returns `FileDialogResult` with `success = true`, the full `filePath`, and the final path component in `fileName` after selection. Cancellation or failure returns `success = false` with empty paths.
 - Threading and blocking behavior follow `alertDialog`.
+- While the dialog is open, the app's windows do not update or draw. The exception is macOS, where only the window whose code opened it pauses and other windows keep running. On macOS, [`loadDialogAsync`](#loadDialogAsync) keeps drawing; see its notes.
 '''
 details.ja = '''
 - 引数は `title`、`message`、初期フォルダーを指定する `defaultPath`、`folderSelection` です。文字列とパスのデフォルトは空で、`folderSelection` のデフォルトは `false` です。
 - ファイルを 1 個選択します。`folderSelection` が `true` ならフォルダーを 1 個選択します。この関数自体は選択したファイルを読み込みません。
 - 選択後は、`success = true`、フルパスの `filePath`、パスの最後の要素を格納した `fileName` を持つ `FileDialogResult` を返します。キャンセルや失敗では `success = false` となり、パスは空になります。
 - スレッドと呼び出し元の待機の扱いは `alertDialog` を参照してください。
+- ダイアログを閉じるまで、アプリのウィンドウは更新も描画も行いません。ただし、macOS では、呼び出したコードのウィンドウだけが停止し、ほかのウィンドウは動き続けます。macOS では、[`loadDialogAsync`](#loadDialogAsync) で描画を続けられます。注意事項はそちらを参照してください。
 '''
 details.ko = '''
 - 인수는 `title`, `message`, 초기 폴더를 지정하는 `defaultPath`, `folderSelection`입니다. 문자열과 경로의 기본값은 비어 있으며, `folderSelection`의 기본값은 `false`입니다.
 - 파일 하나를 선택합니다. `folderSelection`이 `true`이면 폴더 하나를 선택합니다. 이 함수 자체는 선택한 파일을 읽지 않습니다.
 - 선택 후에는 `success = true`, 전체 경로인 `filePath`, 경로의 마지막 요소를 담은 `fileName`을 가진 `FileDialogResult`를 반환합니다. 취소하거나 실패하면 `success = false`이며 경로는 비어 있습니다.
 - 스레드와 호출자의 대기 동작은 `alertDialog`에 설명되어 있습니다.
+- 대화상자를 닫을 때까지 앱의 윈도우는 갱신하거나 그리지 않습니다. 다만 macOS에서는 이를 연 코드의 윈도우만 멈추고 다른 윈도우는 계속 실행됩니다. macOS에서는 [`loadDialogAsync`](#loadDialogAsync)로 계속 그릴 수 있습니다. 해당 함수의 주의 사항을 참조하세요.
 '''
 related = ["FileDialogResult", "loadDialogAsync", "saveDialog", "loadTextFile"]
 platform_note.en = '''
@@ -50268,7 +50316,7 @@ details.ko = '''
 - Tween, 업데이트 모드 TcpClient/UdpSocket 수신, tcxBox2d 자동 스텝, WebSocket 타임아웃 등 update 이벤트에 의존하는 처리가 헤드리스에서도 동작합니다.
 - 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(헤드리스 실행은 앱 자체의 `update()`만 호출하며 자식 노드·Mod·타이머를 갱신하지 않습니다).
 '''
-related = ["HeadlessSettings", "runApp", "setMaxUpdateSteps"]
+related = ["HeadlessSettings", "runApp", "setMaxUpdateSteps", "App::exit"]
 snippet = '''
 int main() {
     return runHeadlessApp<tcApp>();
@@ -50350,18 +50398,21 @@ details.en = '''
 - Returns `FileDialogResult` with `success = true`, the full `filePath`, and `fileName` after selection. Cancellation or failure returns `success = false` with empty paths.
 - Selects a destination without writing the file. Check `success`, then save data to `filePath` with a file-writing API.
 - Threading and blocking behavior follow `alertDialog`.
+- While the dialog is open, the app's windows do not update or draw. The exception is macOS, where only the window whose code opened it pauses and other windows keep running. On macOS, [`saveDialogAsync`](#saveDialogAsync) keeps drawing; see its notes.
 '''
 details.ja = '''
 - 引数は `title`、`message`、初期フォルダーを指定する `defaultPath`、初期ファイル名を指定する `defaultName` です。デフォルトはすべて空です。
 - 選択後は、`success = true`、フルパスの `filePath`、`fileName` を持つ `FileDialogResult` を返します。キャンセルや失敗では `success = false` となり、パスは空になります。
 - 保存先を選ぶだけで、ファイルには書き込みません。`success` を確認してから、ファイル書き込み API で `filePath` にデータを保存してください。
 - スレッドと呼び出し元の待機の扱いは `alertDialog` を参照してください。
+- ダイアログを閉じるまで、アプリのウィンドウは更新も描画も行いません。ただし、macOS では、呼び出したコードのウィンドウだけが停止し、ほかのウィンドウは動き続けます。macOS では、[`saveDialogAsync`](#saveDialogAsync) で描画を続けられます。注意事項はそちらを参照してください。
 '''
 details.ko = '''
 - 인수는 `title`, `message`, 초기 폴더를 지정하는 `defaultPath`, 초기 파일명을 지정하는 `defaultName`입니다. 기본값은 모두 비어 있습니다.
 - 선택 후에는 `success = true`, 전체 경로인 `filePath`, `fileName`을 가진 `FileDialogResult`를 반환합니다. 취소하거나 실패하면 `success = false`이며 경로는 비어 있습니다.
 - 저장할 위치만 선택하며 파일을 쓰지는 않습니다. `success`를 확인한 뒤 파일 쓰기 API로 `filePath`에 데이터를 저장해야 합니다.
 - 스레드와 호출자의 대기 동작은 `alertDialog`에 설명되어 있습니다.
+- 대화상자를 닫을 때까지 앱의 윈도우는 갱신하거나 그리지 않습니다. 다만 macOS에서는 이를 연 코드의 윈도우만 멈추고 다른 윈도우는 계속 실행됩니다. macOS에서는 [`saveDialogAsync`](#saveDialogAsync)로 계속 그릴 수 있습니다. 해당 함수의 주의 사항을 참조하세요.
 '''
 related = ["FileDialogResult", "saveDialogAsync", "loadDialog", "saveTextFile"]
 platform_note.en = '''
@@ -52529,20 +52580,23 @@ description.ja = "グローバルなオーディオエンジンを終了する�
 description.ko = "전역 오디오 엔진을 종료한다."
 details.en = '''
 - Closes the audio device, releases its device context, clears the audio meters, and marks the global `AudioEngine` as uninitialized.
-- The windowed app loop calls it automatically during shutdown after application cleanup, so an explicit call is usually unnecessary; repeated calls are safe when the device is already closed.
+- Normally, the windowed app loop calls it automatically during shutdown after application cleanup, so an explicit call is unnecessary; repeated calls are safe when the device is already closed.
 - `runHeadlessApp()` leaves the audio device running when it returns; call this function explicitly when audio is no longer needed. See `AudioEngine` for threading rules.
+- On macOS, a logout, restart or shutdown during a running handler still stops audio after `exit()`; see `App::exit`.
 '''
 details.ja = '''
 - オーディオデバイスを閉じ、そのデバイスコンテキストを解放し、オーディオメーターをクリアして、グローバルな `AudioEngine` を未初期化状態にします。
-- ウィンドウ付きアプリのループは、アプリケーションのクリーンアップ後に自動的に呼ぶため、通常は明示的に呼ぶ必要はありません。デバイスがすでに閉じていても繰り返し呼べます。
+- 通常は、ウィンドウ付きアプリのループがアプリケーションのクリーンアップ後に自動的に呼ぶため、明示的に呼ぶ必要はありません。デバイスがすでに閉じていても繰り返し呼べます。
 - `runHeadlessApp()` は戻るときにオーディオデバイスを停止しません。オーディオが不要になったら、この関数を明示的に呼んでください。スレッドの扱いは `AudioEngine` を参照してください。
+- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、`exit()` の後に音声は停止します。`App::exit` を参照してください。
 '''
 details.ko = '''
 - 오디오 장치를 닫고 해당 장치 컨텍스트를 해제하며 오디오 미터를 지운 뒤 전역 `AudioEngine`을 미초기화 상태로 설정합니다.
-- 윈도우 앱 루프는 애플리케이션 정리 후 종료 과정에서 자동 호출하므로 보통 명시적으로 호출할 필요가 없습니다. 장치가 이미 닫혀 있어도 반복 호출할 수 있습니다.
+- 일반적으로 윈도우 앱 루프가 애플리케이션 정리 후 종료 과정에서 자동 호출하므로 명시적으로 호출할 필요가 없습니다. 장치가 이미 닫혀 있어도 반복 호출할 수 있습니다.
 - `runHeadlessApp()`은 반환할 때 오디오 장치를 중지하지 않습니다. 오디오가 더 이상 필요하지 않으면 이 함수를 명시적으로 호출하세요. 스레드 규칙은 `AudioEngine`을 참조하세요.
+- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 `exit()` 뒤에 오디오는 중지됩니다. `App::exit`을 참고하십시오.
 '''
-related = ["initAudio", "AudioEngine", "runHeadlessApp"]
+related = ["initAudio", "AudioEngine", "runHeadlessApp", "App::exit"]
 
 ["sign"]
 category = "math_general"
@@ -52813,7 +52867,7 @@ details.ko = '''
 - 전역 레코더의 `ScreenRecorder::stop()`이 반환하는 `SaveResult`를 반환합니다. 완료 대기, 실패 결과 유지, 반복 호출, 출력 경로에서의 직접 마무리는 해당 항목을 참조하세요.
 - 전역 레코더의 공유 범위는 `isRecording`을 참조하세요.
 '''
-related = ["startRecording", "isRecording", "recordingPath"]
+related = ["startRecording", "isRecording", "recordingPath", "App::exit"]
 snippet = '''
 void tcApp::exit() {
     auto result = stopRecording();
@@ -60214,36 +60268,40 @@ details.en = '''
 - Commands are delivered through `events().console` on the main thread before updates. Input is split on whitespace, text from `#` onward is ignored, and lines with no arguments are discarded.
 - Discards queued commands before enabling delivery. Calling it while delivery is already enabled does nothing.
 - The first call creates the process's only detached reader, which consumes standard input until EOF or process exit. Later calls reuse it; a reader that has reached EOF is not restarted.
-- `console::stop()` disables delivery while the reader continues consuming input and discards lines read while stopped. Both runners stop delivery before the app's `exit()` and `cleanup()`.
+- `console::stop()` disables delivery while the reader continues consuming input and discards lines read while stopped. Normally, both runners stop delivery before the app's `exit()` and `cleanup()`.
 - Supports LF and CRLF line endings, including a final line without a newline at EOF.
 - External control text is bounded to 1 MiB per line (excluding LF, including CR), 1024 pending commands and 16 MiB of pending raw text. An oversized line is drained and rejected whole; a full queue drops the new whole command. Reading continues without waiting for app delivery. Each store emits one Warning on its first rejection and retains cumulative internal loss counts for the process lifetime; stopping/restarting delivery does not reset them.
 - On Web, logs a notice and leaves delivery disabled.
+- On macOS, a logout, restart or shutdown during a running handler skips `console::stop()` before `exit()`; see `App::exit`.
 '''
 details.ja = '''
 - ウィンドウ付きアプリでもヘッドレスアプリでも、`setup()` で `console::start()` を明示的に呼んでください。どちらのランナーも入力を自動では開始しません。これは v0.8.0 の破壊的変更です。
 - コマンドは更新処理より前に、メインスレッドで `events().console` を通じて届きます。入力を空白文字で分割し、`#` 以降を無視し、引数がない行は破棄します。
 - 配信を有効にする前に、キューに残っているコマンドを破棄します。すでに有効な場合は何もしません。
 - 初回の呼び出しで、プロセス内で唯一の切り離された読み取りスレッドを作成し、EOF またはプロセス終了まで標準入力を読み取ります。以後の呼び出しは同じスレッドを使い、EOF に達した読み取りは再開しません。
-- `console::stop()` は配信を無効にしますが、読み取りスレッドは入力を読み続け、停止中に読んだ行を破棄します。どちらのランナーもアプリの `exit()` と `cleanup()` より前に配信を停止します。
+- `console::stop()` は配信を無効にしますが、読み取りスレッドは入力を読み続け、停止中に読んだ行を破棄します。通常は、どちらのランナーもアプリの `exit()` と `cleanup()` より前に配信を停止します。
 - LF と CRLF の改行に対応し、EOF 直前の改行がない最終行も扱います。
 - 外部からの制御テキストには、1 行 1 MiB（LF を除き CR を含む）、待機コマンド 1024 件、待機中の生テキスト合計 16 MiB の上限があります。長すぎる行は最後まで読み捨てて全体を拒否し、キューが満杯なら新しいコマンド全体を破棄します。アプリの配信を待たずに読み取りを続けます。各保存先は初回の拒否時に Warning を 1 回出し、プロセスの有効期間中は内部の累積損失数を保持します。配信の停止・再開ではリセットしません。
 - Web では通知ログを出力し、配信は無効のままです。
+- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、`exit()` の前に `console::stop()` は呼ばれません。`App::exit` を参照してください。
 '''
 details.ko = '''
 - 창 앱과 헤드리스 앱 모두 `setup()`에서 `console::start()`를 명시적으로 호출하세요. 어느 러너도 입력을 자동으로 시작하지 않습니다. 이는 v0.8.0의 호환성을 깨는 변경입니다.
 - 명령은 업데이트 전에 메인 스레드에서 `events().console`을 통해 전달됩니다. 입력을 공백 문자로 나누고, `#` 이후의 텍스트를 무시하며, 인수가 없는 줄은 버립니다.
 - 전달을 활성화하기 전에 큐에 남은 명령을 버립니다. 이미 활성화되어 있으면 아무 작업도 하지 않습니다.
 - 최초 호출에서 프로세스의 유일한 분리된 읽기 스레드를 생성하며, EOF 또는 프로세스 종료까지 표준 입력을 읽습니다. 이후 호출은 같은 스레드를 사용하며, EOF에 도달한 읽기는 다시 시작하지 않습니다.
-- `console::stop()`은 전달을 비활성화하지만 읽기 스레드는 입력을 계속 읽으며 중지 중에 읽은 줄을 버립니다. 두 러너 모두 앱의 `exit()`와 `cleanup()` 전에 전달을 중지합니다.
+- `console::stop()`은 전달을 비활성화하지만 읽기 스레드는 입력을 계속 읽으며 중지 중에 읽은 줄을 버립니다. 일반적으로 두 러너 모두 앱의 `exit()`와 `cleanup()` 전에 전달을 중지합니다.
 - LF와 CRLF 줄바꿈을 지원하며, EOF 직전의 줄바꿈 없는 마지막 줄도 처리합니다.
 - 외부 제어 텍스트는 줄당 1 MiB(LF 제외, CR 포함), 대기 명령 1024개, 대기 원문 합계 16 MiB로 제한됩니다. 너무 긴 줄은 끝까지 읽고 전체를 거부하며, 큐가 가득 차면 새 명령 전체를 버립니다. 앱의 전달을 기다리지 않고 계속 읽습니다. 각 저장소는 첫 거부 시 Warning을 한 번 출력하고 프로세스 수명 동안 내부 누적 손실 수를 유지합니다. 전달을 중지하거나 재개해도 초기화하지 않습니다.
 - Web에서는 알림 로그를 출력하고 전달을 비활성화 상태로 유지합니다.
+- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 `exit()` 전에 `console::stop()`은 호출되지 않습니다. `App::exit`을 참고하십시오.
 '''
 snippet = '''
 void tcApp::setup() {
     console::start();
 }
 '''
+related = ["App::exit"]
 
 ["console::stop"]
 category = "console"

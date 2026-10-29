@@ -1,0 +1,266 @@
+#!/bin/sh
+# Compile production constructor/title/skip bodies with deterministic native seams.
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/tc-native-contracts.XXXXXX")
+trap 'rm -rf "$scratch"' EXIT HUP INT TERM
+python3 - "$root" "$scratch" <<'PY'
+from pathlib import Path
+import os, re, subprocess, sys
+root, scratch = map(Path, sys.argv[1:])
+include = Path(os.environ.get('TC_X11_TEST_INCLUDE', root/'core/include/sokol'))
+header = (include/'sokol_app_tc.h').read_text()
+# The event field contract applies to every window, including EGL first scroll.
+comments_ok = all('always valid' not in re.search(r'float mouse_' + axis + r';[^\n]*', header)[0]
+                  for axis in ('dx', 'dy'))
+print('native-contracts: mouse delta comments avoid universal validity: ' + ('PASS' if comments_ok else 'FAIL'), flush=True)
+header = header[header.index('/*== Linux (X11 + GLX or EGL)'):]
+header = header[header.index('#include "util/sokol_window_native.h"'):]
+header = header[:header.index('#elif defined(__ANDROID__)')]
+def body(marker):
+    start = header.index(marker)
+    opening = header.index('{', start)
+    end, depth = opening + 1, 1
+    while depth:
+        depth += (header[end] == '{') - (header[end] == '}')
+        end += 1
+    return header[start:end]
+code = r'''
+#include "sokol_app_tc.h"
+#include "util/sokol_window_native.h"
+#include <GL/glx.h>
+#include <EGL/egl.h>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <new>
+#include <initializer_list>
+using std::isfinite;
+struct _sapp_tc_window_t : _sapp_tc_native_window_t {
+    Window xwin;
+    float mouse_x, mouse_y, mouse_dx, mouse_dy;
+#ifdef SOKOL_GLES3
+    EGLSurface drawable;
+#else
+    GLXWindow drawable;
+#endif
+};
+static struct {
+    Display* display = (Display*)1;
+    EGLDisplay egl_display = (EGLDisplay)1;
+    float dpi = 96;
+    double refresh_period = 1.0 / 60.0;
+    unsigned next_id;
+    size_t window_slots = 4;
+    _sapp_tc_window_t* windows[4];
+    struct { _sapp_tc_window_t* main; sapp_desc desc; bool valid = true; } app;
+    Atom NET_WM_NAME = 1, NET_WM_ICON_NAME = 2, UTF8_STRING = 3;
+#ifdef SOKOL_GLES3
+    EGLContext ctx = (EGLContext)4;
+#else
+    GLXContext ctx = (GLXContext)4;
+#endif
+} _sapp_tc;
+static int failures, failAt, titleBytes, titleCalls, presents;
+static uintptr_t presented;
+static Window titleWindow;
+static sapp_event received;
+static void _sapp_tc_send(_sapp_tc_window_t*, sapp_event* event) { received = *event; }
+static Display* currentDisplay;
+static GLXContext currentContext;
+static GLXDrawable currentDraw, currentRead;
+static void check(const char* label, bool ok) {
+    printf("native-contracts: %s: %s\n", label, ok ? "PASS" : "FAIL");
+    failures += !ok;
+}
+extern "C" Display* glXGetCurrentDisplay() { return currentDisplay; }
+extern "C" GLXContext glXGetCurrentContext() { return currentContext; }
+extern "C" GLXDrawable glXGetCurrentDrawable() { return currentDraw; }
+extern "C" GLXDrawable glXGetCurrentReadDrawable() { return currentRead; }
+extern "C" Bool glXMakeContextCurrent(Display* d, GLXDrawable draw, GLXDrawable read, GLXContext ctx) {
+    currentDisplay = ctx ? d : nullptr; currentDraw = draw; currentRead = read; currentContext = ctx;
+    return True;
+}
+extern "C" Bool glXMakeCurrent(Display* d, GLXDrawable draw, GLXContext ctx) {
+    return glXMakeContextCurrent(d, draw, draw, ctx);
+}
+extern "C" EGLDisplay eglGetCurrentDisplay() { return (EGLDisplay)currentDisplay; }
+extern "C" EGLContext eglGetCurrentContext() { return (EGLContext)currentContext; }
+extern "C" EGLSurface eglGetCurrentSurface(EGLint which) { return (EGLSurface)(which == EGL_DRAW ? currentDraw : currentRead); }
+extern "C" EGLBoolean eglMakeCurrent(EGLDisplay d, EGLSurface draw, EGLSurface read, EGLContext ctx) {
+    return glXMakeContextCurrent((Display*)d, (GLXDrawable)draw, (GLXDrawable)read, (GLXContext)ctx);
+}
+extern "C" int XChangeProperty(Display*, Window w, Atom, Atom, int, int, const unsigned char*, int count) {
+    titleWindow = w; titleBytes = count; ++titleCalls; return 1;
+}
+extern "C" void Xutf8SetWMProperties(Display*, Window, const char*, const char*, char**, int, XSizeHints*, XWMHints*, XClassHint*) {}
+extern "C" int XFlush(Display*) { return 0; }
+static _sapp_tc_window_t* _sapp_tc_lookup(sapp_window win) {
+    if (win.id) for (auto* w : _sapp_tc.windows) if (w && w->win_id == win.id) return w;
+    return nullptr;
+}
+static size_t _sapp_tc_x11_reserve_slot() {
+    if (failAt == 1) return SIZE_MAX;
+    for (size_t i = 0; i < 4; ++i) if (!_sapp_tc.windows[i]) return i;
+    return SIZE_MAX;
+}
+static void* _sapp_tc_x11_alloc(size_t bytes, bool zero) {
+    if (failAt == 2) return nullptr;
+    return zero ? calloc(1, bytes) : malloc(bytes);
+}
+static void _sapp_tc_x11_free(void* p) { free(p); }
+static void _sapp_tc_x11_unwind(_sapp_tc_window_t* w) {
+    free(w->title);
+#ifdef SOKOL_GLES3
+    free(w);
+#else
+    delete w;
+#endif
+}
+static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char*, int, int, bool) {
+    w->xwin = 100; w->drawable = decltype(w->drawable)(100);
+    if (failAt == 3) glXMakeCurrent(_sapp_tc.display, 100, (GLXContext)_sapp_tc.ctx);
+    return failAt != 3;
+}
+static bool _sapp_tc_x11_initialize_dimensions(_sapp_tc_window_t*) {
+    if (failAt == 4) glXMakeCurrent(_sapp_tc.display, 100, (GLXContext)_sapp_tc.ctx);
+    return failAt != 4;
+}
+static bool _sapp_tc_x11_make_current(_sapp_tc_window_t* w) {
+    // Also disturb the binding on the injected activation failure: the guard
+    // must cover that return path rather than depend on driver failure behavior.
+    glXMakeCurrent(_sapp_tc.display, (GLXDrawable)w->drawable, (GLXContext)_sapp_tc.ctx);
+    return failAt != 5;
+}
+static bool _sapp_tc_x11_trust_hidden_signals() { return true; }
+static void _sapp_tc_x11_set_swapinterval(_sapp_tc_window_t*, int) {}
+static void _sapp_tc_x11_show_window(_sapp_tc_window_t*) {}
+static void _sapp_tc_x11_set_fullscreen(_sapp_tc_window_t*, bool) {}
+static bool _sapp_tc_x11_update_dimensions(_sapp_tc_window_t*) { return false; }
+static double _sapp_tc_now() { return 1; }
+static void _sapp_tc_timing_update(_sapp_tc_timing_t*) {}
+static void _sapp_tc_x11_app_event(_sapp_tc_window_t*, sapp_event_type) {}
+static void _sapp_tc_x11_pace(_sapp_tc_window_t*, double) {}
+static void _sapp_tc_x11_pace_periodic(_sapp_tc_window_t*, double) {}
+static void _sapp_tc_x11_swap(_sapp_tc_window_t* w) { ++presents; presented = (uintptr_t)w->drawable; }
+static void _sapp_tc_log(const sapp_logger*, int, uint32_t, int, const char*, const char*) {}
+'''
+# Use the production surface type declaration when the guard covers both backends.
+if 'using _sapp_tc_x11_surface_t' in header:
+    a = header.index('#if defined(SOKOL_GLES3)\nusing _sapp_tc_x11_surface_t')
+    b = header.index('static uint32_t _sapp_tc_x11_surface_window_id', a)
+    code += header[a:b]
+# Include the same live-surface checks as production, when present.
+for name in ('static uint32_t _sapp_tc_x11_surface_window_id(', 'static bool _sapp_tc_x11_saved_surface_alive('):
+    helper = body(name)
+    if 'EGLSurface surface' in helper:
+        code += '#if defined(SOKOL_GLES3)\n' + helper + '\n#endif\n'
+    else:
+        code += helper + '\n'
+code += body('struct _sapp_tc_x11_surface_scope {') + ';\n'
+for name in ('static _sapp_tc_window_t* _sapp_tc_x11_create_window(', 'sapp_window sapp_create_window(',
+             'static void _sapp_tc_x11_update_window_title(', 'void sapp_window_set_title(',
+             'void sapp_set_window_title(', 'void sapp_tc_window_skip_present(',
+             'static void _sapp_tc_x11_scroll_event(', 'static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {'):
+    code += body(name) + '\n'
+code += r'''
+int main() {
+    _sapp_tc_window_t first{}, second{};
+    first.win_id = 1; first.xwin = 11; second.win_id = 2; second.xwin = 22;
+    first.drawable = decltype(first.drawable)(11); second.drawable = decltype(second.drawable)(22);
+    _sapp_tc.windows[0] = &first; _sapp_tc.windows[1] = &second; _sapp_tc.app.main = &first;
+    _sapp_tc.next_id = 2;
+    sapp_window_desc desc{};
+    for (bool bound : {true, false}) for (int failure = 0; failure <= 6; ++failure) {
+        failAt = failure;
+        _sapp_tc.next_id = failure == 6 ? UINT32_MAX : 2;
+        glXMakeContextCurrent((Display*)9, bound ? 31 : 0, bound ? 32 : 0, bound ? (GLXContext)8 : nullptr);
+        const auto created = sapp_create_window(&desc);
+        check("constructor restores display/draw/read/context on every exit",
+            currentDisplay == (bound ? (Display*)9 : nullptr) && currentDraw == (bound ? 31u : 0u) &&
+            currentRead == (bound ? 32u : 0u) && currentContext == (bound ? (GLXContext)8 : nullptr));
+        check("injected constructor outcome", bool(created.id) == (failure == 0));
+        if (created.id) {
+            auto* w = _sapp_tc_lookup(created); _sapp_tc.windows[2] = nullptr; _sapp_tc_x11_unwind(w);
+        }
+    }
+    failAt = 0;
+    // Nested tick-style activation restores both surfaces, even when read
+    // belongs to another registered window. A closed caller uses first safely.
+    glXMakeContextCurrent(_sapp_tc.display, 11, 22, (GLXContext)_sapp_tc.ctx);
+    {
+        _sapp_tc_x11_surface_scope restore;
+        _sapp_tc_x11_make_current(&second);
+    }
+    check("temporary activation restores distinct registered draw/read", currentDisplay == _sapp_tc.display &&
+        currentDraw == 11 && currentRead == 22 && currentContext == (GLXContext)_sapp_tc.ctx);
+    {
+        _sapp_tc_x11_surface_scope restore;
+        _sapp_tc_x11_make_current(&first);
+        _sapp_tc.windows[1] = nullptr;
+    }
+    check("destroyed read caller falls back to first", currentDraw == 11 && currentRead == 11);
+    _sapp_tc.windows[1] = &second;
+#ifdef SOKOL_GLCORE
+    glXMakeContextCurrent((Display*)9, 11, 22, (GLXContext)8);
+    {
+        _sapp_tc_x11_surface_scope restore;
+        _sapp_tc_x11_make_current(&first);
+        _sapp_tc.windows[1] = nullptr;
+    }
+    check("foreign display drawable IDs do not alias registered surfaces", currentDisplay == (Display*)9 &&
+        currentDraw == 11 && currentRead == 22 && currentContext == (GLXContext)8);
+    _sapp_tc.windows[1] = &second;
+#endif
+#ifdef SOKOL_GLES3
+    first.title_limit = 128;
+#else
+    first.title_limit = 256;
+#endif
+    first.title = (char*)calloc(first.title_limit, 1);
+    _sapp_tc.app.desc.window_title = first.title;
+    char title[401]; memset(title, 't', 400); title[400] = 0;
+    for (auto* target : {&first, &second}) {
+        titleCalls = 0;
+        sapp_window_set_title({target->win_id}, title);
+        check("handle title keeps all 400 bytes for either window", titleCalls == 2 && titleBytes == 400 && titleWindow == target->xwin);
+        // The legacy entry point always addresses first, even while secondary is current.
+        glXMakeCurrent(_sapp_tc.display, target->xwin, (GLXContext)_sapp_tc.ctx);
+        titleCalls = 0;
+        sapp_set_window_title(title);
+        check("legacy title retains backend prefix and first-window targeting", titleCalls == 2 &&
+            titleBytes == int(first.title_limit - 1) && titleWindow == first.xwin);
+    }
+    titleCalls = 0;
+    sapp_window_set_title({0}, title); sapp_window_set_title({999}, title);
+    sapp_window_set_title({1}, nullptr); sapp_set_window_title(nullptr);
+    check("title null/invalid validation preserved", titleCalls == 0);
+    for (auto* target : {&first, &second}) {
+        target->mouse_x = 30; target->mouse_y = 40; target->mouse_dx = 2; target->mouse_dy = 3;
+        _sapp_tc_x11_scroll_event(target, 0, 1, 0);
+        check("wheel builder preserves anchor and zero deltas for either window", received.mouse_x == 30 &&
+            received.mouse_y == 40 && received.mouse_dx == 0 && received.mouse_dy == 0 &&
+            target->mouse_dx == 2 && target->mouse_dy == 3);
+    }
+    first.skip_present = second.skip_present = false;
+    sapp_tc_window_skip_present({0});
+    check("zero skip addresses only first", first.skip_present && !second.skip_present);
+    _sapp_tc_x11_tick(&second); _sapp_tc_x11_tick(&first);
+    check("zero skip suppresses first present and leaves secondary presenting", presents == 1 && presented == 22 &&
+        !first.skip_present && !second.skip_present);
+    presents = 0; _sapp_tc_x11_tick(&first);
+    check("zero skip is one shot", presents == 1 && presented == 11);
+    free(first.title);
+    return failures ? 1 : 0;
+}
+'''
+source = scratch/'probe.cpp'
+source.write_text(code)
+failed = not comments_ok
+for backend in os.environ.get('TC_NATIVE_TEST_BACKEND', 'SOKOL_GLCORE SOKOL_GLES3').split():
+    binary = scratch/backend
+    subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-D'+backend, '-I'+str(include), str(source), '-o', str(binary)], check=True)
+    failed |= subprocess.run([str(binary)]).returncode != 0
+sys.exit(int(failed))
+PY

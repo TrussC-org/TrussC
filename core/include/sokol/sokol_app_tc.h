@@ -1757,8 +1757,8 @@ typedef struct sapp_event {
     sapp_mousebutton mouse_button;      // mouse button that was pressed or released, valid in MOUSE_DOWN, MOUSE_UP
     float mouse_x;                      // current horizontal mouse position in pixels, always valid except during mouse lock
     float mouse_y;                      // current vertical mouse position in pixels, always valid except during mouse lock
-    float mouse_dx;                     // relative horizontal mouse movement since last frame, always valid
-    float mouse_dy;                     // relative vertical mouse movement since last frame, always valid
+    float mouse_dx;                     // relative horizontal mouse movement, valid in MOUSE_MOVE; other events depend on their builder (X11 scroll is 0)
+    float mouse_dy;                     // relative vertical mouse movement, valid in MOUSE_MOVE; other events depend on their builder (X11 scroll is 0)
     float scroll_x;                     // horizontal mouse wheel scroll distance, valid in MOUSE_SCROLL events
     float scroll_y;                     // vertical mouse wheel scroll distance, valid in MOUSE_SCROLL events
     int num_touches;                    // number of valid items in the touches[] array
@@ -2212,6 +2212,9 @@ typedef struct sapp_desc {
     sapp_win32_desc win32;
     sapp_html5_desc html5;
     sapp_ios_desc ios;
+    // TrussC internal launch data: +1 draws while hidden, -1 pauses drawing.
+    // Zero preserves legacy sapp launch behavior (draw while hidden).
+    int _tc_draw_while_hidden;
 } sapp_desc;
 
 /* HTML5 specific: request and response structs for
@@ -2464,9 +2467,11 @@ SOKOL_APP_API_DECL int sapp_window_sample_count(sapp_window win);
 
      macOS: occlusionState is not visible (minimized, fully covered, on
             another Space), kept current by windowDidChangeOcclusionState
+            (reports visible when native trust_hidden_signals is disabled)
      Win32: minimized (WM_SIZE SIZE_MINIMIZED), or the last Present returned
             DXGI_STATUS_OCCLUDED
      X11:   iconified (WM_STATE IconicState), or VisibilityFullyObscured
+            (reports visible when native trust_hidden_signals is disabled)
    Internal: zero queries the main window; unsupported queries return false. */
 SOKOL_APP_API_DECL bool sapp_window_occluded(sapp_window win);
 SOKOL_APP_API_DECL void sapp_window_set_title(sapp_window win, const char* title);
@@ -2498,6 +2503,17 @@ SOKOL_APP_API_DECL uint32_t sapp_window_gl_framebuffer(sapp_window win);
 SOKOL_APP_API_DECL void sapp_tc_gl_make_current(sapp_window win);
 // [TrussC] Desktop adapter seam: suppress this secondary window's present.
 SOKOL_APP_API_DECL void sapp_tc_window_skip_present(sapp_window win);
+#if defined(__APPLE__)
+#include <TargetConditionals.h> /* TARGET_OS_OSX for the desktop-only seams below */
+#endif
+#if (defined(__APPLE__) && TARGET_OS_OSX) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
+SOKOL_APP_API_DECL uint32_t sapp_tc_window_fullscreen_phase(sapp_window win);
+SOKOL_APP_API_DECL void sapp_tc_window_set_fullscreen(sapp_window win, bool full);
+SOKOL_APP_API_DECL void sapp_tc_window_toggle_fullscreen(sapp_window win);
+#endif
+#if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
+SOKOL_APP_API_DECL void sapp_tc_window_draw_while_hidden(sapp_window win, bool allow);
+#endif
 
 /* native escape hatches (macOS: NSWindow*; Windows: HWND; Linux: X11 Window XID) */
 SOKOL_APP_API_DECL const void* sapp_window_macos_get_window(sapp_window win);
@@ -2584,7 +2600,8 @@ uint64_t sapp_html5_get_dropped_file_size64(int index) {
 #if !defined(__OBJC__)
 #error "sokol_app_tc.h macOS implementation must be compiled as Objective-C++ (.mm)"
 #endif
-#include "tc/app/internal/tcWindowFullscreen.h"
+#include "util/sokol_window_native.h"
+#include <new>
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
@@ -2598,68 +2615,53 @@ uint64_t sapp_html5_get_dropped_file_size64(int index) {
 @class _sapp_tc_win_delegate;
 @class _sapp_tc_app_delegate;
 
-typedef struct _sapp_tc_window_t {
-    uint32_t win_id;
-    trussc::internal::WindowFullscreenState fullscreen_state;
-    sapp_window_desc desc;
-    bool is_main;                       /* window #0: created by sapp_run, drives the app callbacks */
+// One native record per window, main included; AppKit/Metal handles stay here.
+struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     NSWindow* window;
     _sapp_tc_view* view;
     _sapp_tc_win_delegate* delegate;
     CAMetalLayer* layer;
-    CADisplayLink* link;
+    CADisplayLink* link;                /* per-window vsync source */
+    NSTimer* fallback_timer;            /* per-window source while AppKit suspends the link */
     MTLPixelFormat color_fmt;           /* layer + MSAA color texture format */
     id<MTLTexture> depth_tex;           /* depth-stencil, drawable-sized */
     id<MTLTexture> msaa_tex;            /* MSAA color (sample_count > 1) */
-    id<CAMetalDrawable> frame_drawable; /* valid during one tick only (main: lazily acquired) */
-    int fb_width, fb_height;            /* aux/drawable size (pixels) */
-    int win_width, win_height;          /* logical points (last seen) */
-    float dpi_scale;
-    double frame_duration;              /* measured tick interval */
-    double last_tick_time;              /* CADisplayLink timestamp */
-    bool occluded;
-    bool in_tick;
-    bool close_requested;               /* sapp_window_request_close(): closed after the main tick */
-} _sapp_tc_window_t;
+    id<CAMetalDrawable> frame_drawable; /* lazily acquired after draw admission; one tick only */
+    bool draw_admitted;                 /* this tick may acquire a drawable */
+    bool link_suspended;                /* AppKit stops the view's display link while not visible */
+    bool suspended_sent;                /* SUSPENDED delivered: draw admission paused while hidden */
+    int callback_depth;                 /* client callbacks of this window on the stack */
+    bool closed_pending;                /* closed natively while busy; close handling deferred */
+    bool native_closed;                 /* the NSWindow closed; its close was handled (or is pending) */
+};
 
 #define _SAPP_TC_MAX_WINDOWS (32)
-
-/* EMA-filtered frame timer, port of sokol_app.h's _sapp_timing_* — used only
-   while the main window ticks from the occluded-fallback NSTimer (the display
-   link timestamps are the source whenever the link is active) */
-typedef struct {
-    double last;        /* previous sample time, 0 = none yet */
-    double ema;
-    double smooth_dt;
-    double dt;          /* last raw (clamped) delta */
-} _sapp_tc_timing_t;
 
 static struct {
     bool keytable_valid;
     sapp_keycode keycodes[SAPP_MAX_KEYCODES];
     uint32_t next_id;
     _sapp_tc_window_t* windows[_SAPP_TC_MAX_WINDOWS];
+    const char* create_error;           /* last native constructor failure, for the launch log */
+    int callbacks_active;               /* client callbacks on the stack, any window */
+    int constructing;                   /* native constructors between publication and return */
+    bool terminate_pending;             /* an AppKit terminate arrived while busy; replayed later */
+    bool deferred_blocked;              /* deferred work waited for a callback, tick or constructor */
+    bool deferred_scheduled;            /* a deferred pass is queued on the main run loop */
 
-    /* ---- app / main-window state (this header owns sapp_run on macOS) ---- */
+    /* ---- process state (this header owns sapp_run on macOS) ---- */
     struct {
-        sapp_desc desc;                 /* sanitized copy; window_title points at the buffer below */
-        char window_title[256];
+        sapp_desc desc;                 /* sanitized copy; window_title borrows the first window's title */
         bool valid;
         bool init_called;
         bool cleanup_called;
         bool quit_requested;
         bool quit_ordered;
-        bool fullscreen;              /* raw sokol state; TrussC uses fullscreen_state */
-        trussc::internal::WindowFullscreenState fullscreen_state;
         bool event_consumed;
-        bool skip_present;              /* stored for API parity; ignored on Metal (as upstream) */
-        uint64_t frame_count;
-        _sapp_tc_window_t* main;
+        _sapp_tc_window_t* main;        /* first live window: legacy sapp_* APIs resolve it */
         _sapp_tc_app_delegate* dlg;
         id keyup_monitor;               /* Cmd+key-up workaround (Cocoa swallows those) */
         id<MTLDevice> device;
-        NSTimer* fallback_timer;        /* ~60Hz tick source while the main window is occluded */
-        _sapp_tc_timing_t timing;
         /* mouse cursor */
         bool mouse_shown;
         sapp_mouse_cursor current_cursor;
@@ -2679,8 +2681,12 @@ static struct {
     } app;
 } _sapp_tc;
 
-static void _sapp_tc_main_tick(CADisplayLink* link);
-static void _sapp_tc_update_main_dimensions(bool allow_event);
+static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link);
+static void _sapp_tc_mac_schedule_deferred(void);
+static bool _sapp_tc_mac_busy(void);
+static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback);
+static bool _sapp_tc_mac_update_dimensions(_sapp_tc_window_t* w);
+static void _sapp_tc_mac_observe(_sapp_tc_window_t* w);
 static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown);
 
 static void _sapp_tc_timing_reset(_sapp_tc_timing_t* t) {
@@ -2710,18 +2716,16 @@ static void _sapp_tc_timing_update(_sapp_tc_timing_t* t) {
     t->last = now;
 }
 
-static trussc::internal::WindowFullscreenState& _sapp_tc_fullscreen_state(_sapp_tc_window_t* w) {
-    return w->is_main ? _sapp_tc.app.fullscreen_state : w->fullscreen_state;
-}
+// Fullscreen state is the target window's own native record.
 static void _sapp_tc_request_fullscreen(_sapp_tc_window_t* w, bool full) {
     if (!w || !w->window) return;
-    if (!_sapp_tc_fullscreen_state(w).request(full)) return;
-    if (w->is_main) _sapp_tc.app.fullscreen = full;
+    if (!w->fullscreen_state.request(full)) return;
+    w->fullscreen = full;
     [w->window toggleFullScreen:nil];
 }
 static void _sapp_tc_reconcile_fullscreen(_sapp_tc_window_t* w) {
-    if (!w || !w->window || !_sapp_tc_fullscreen_state(w).reconcile()) return;
-    if (w->is_main) _sapp_tc.app.fullscreen = _sapp_tc_fullscreen_state(w).desired;
+    if (!w || !w->window || !w->fullscreen_state.reconcile()) return;
+    w->fullscreen = w->fullscreen_state.desired;
     [w->window toggleFullScreen:nil];
 }
 
@@ -2859,6 +2863,19 @@ static _sapp_tc_window_t* _sapp_tc_lookup(sapp_window win) {
     return 0;
 }
 
+// Internal seams whose zero handle addresses the first window.
+static _sapp_tc_window_t* _sapp_tc_resolve(sapp_window win) {
+    return win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+}
+
+/* Busy session end: from the moment _sapp_tc_mac_session_end starts until its
+   _exit, the backend is frozen. Only the exit notifications run: no tick, event,
+   deferred close/quit, terminate, window creation, dimension/texture update or
+   drawable acquisition is admitted. */
+static bool _sapp_tc_mac_frozen(void) {
+    return trussc::internal::sessionEndExit();
+}
+
 static uint32_t _sapp_tc_mods(NSEvent* ev) {
     const NSEventModifierFlags f = ev.modifierFlags;
     uint32_t m = 0;
@@ -2869,33 +2886,121 @@ static uint32_t _sapp_tc_mods(NSEvent* ev) {
     return m;
 }
 
+/* Client callback boundary. While a callback runs it is marked active (deferred
+   close and quit wait until none is), the mark is cleared through the window's
+   identity even if the callback disposed it, and no exception crosses into
+   AppKit, CADisplayLink or NSTimer frames. */
+struct _sapp_tc_mac_callback_scope {
+    uint32_t win_id;
+    explicit _sapp_tc_mac_callback_scope(_sapp_tc_window_t* w) : win_id(w->win_id) {
+        ++_sapp_tc.callbacks_active;
+        ++w->callback_depth;
+    }
+    ~_sapp_tc_mac_callback_scope() {
+        --_sapp_tc.callbacks_active;
+        if (_sapp_tc_window_t* w = _sapp_tc_lookup({win_id})) --w->callback_depth;
+        // The outermost callback returned: run work it held back, from the run loop.
+        if (_sapp_tc.callbacks_active == 0 && _sapp_tc.deferred_blocked) _sapp_tc_mac_schedule_deferred();
+    }
+};
+
+// Contained-exception report: fixed text, no allocation of its own.
+static void _sapp_tc_mac_contained(const char* where) noexcept {
+    try {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__, "error: ",
+                     "%s threw; the exception was contained at the native boundary", where);
+    } catch (...) {
+        // The installed logger may allocate (and so throw); keep a fixed line.
+        fputs("sokol_app_tc.h: error: a native callback threw; the exception was contained\n", stderr);
+    }
+}
+
 static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
-    if (!w->desc.event_cb) return;
-    ev->frame_count = _sapp_tc.app.frame_count;
+    if (_sapp_tc_mac_frozen()) return;
+    if (!w->ready || w->closed_pending || !w->desc.event_cb || (w->events_enabled && !w->events_enabled())) return;
+    // Event metadata keeps the process (first-window) frame count, as before.
+    ev->frame_count = _sapp_tc.app.main ? _sapp_tc.app.main->frame_count : 0;
     ev->window_width = w->win_width;
     ev->window_height = w->win_height;
     ev->framebuffer_width = w->fb_width;
     ev->framebuffer_height = w->fb_height;
-    sapp_window handle = { w->win_id };
-    w->desc.event_cb(ev, handle, w->desc.user_data);
+    const sapp_window handle = { w->win_id };
+    void (*event_cb)(const sapp_event*, sapp_window, void*) = w->desc.event_cb;
+    void* user = w->desc.user_data;
+    _sapp_tc_mac_callback_scope scope(w);
+    try { event_cb(ev, handle, user); } catch (...) { _sapp_tc_mac_contained("sapp_window_desc.event_cb"); }
 }
 
-/* Secondary windows: store the window server's occlusionState in w->occluded
-   and send SUSPENDED / RESUMED when it changes. Called from
-   windowDidChangeOcclusionState (a hidden view's display link is suspended,
-   so the tick alone often never sees the window become hidden) and from the
-   tick gate (the transition race). Both run on the main run loop; the
-   compare keeps them from sending an event twice. Returns the new state. */
-static bool _sapp_tc_update_occluded(_sapp_tc_window_t* w) {
+/* Event and window callbacks may destroy their window (sapp_destroy_window
+   frees a secondary at once): after any send, re-resolve it by identity. */
+static _sapp_tc_window_t* _sapp_tc_mac_live(uint32_t win_id) {
+    return _sapp_tc_lookup({win_id});
+}
+
+static void _sapp_tc_send_type(_sapp_tc_window_t* w, sapp_event_type type) {
+    sapp_event e;
+    memset(&e, 0, sizeof(e));
+    e.type = type;
+    _sapp_tc_send(w, &e);
+}
+
+// Device opt-out point: an unreliable OS hidden signal must never stop drawing.
+static bool _sapp_tc_mac_trust_hidden_signals(void) {
+    return true;
+}
+
+static void _sapp_tc_mac_stop_fallback(_sapp_tc_window_t* w) {
+    if (w->fallback_timer) [w->fallback_timer invalidate];
+    w->fallback_timer = nil;
+    w->fallback_active = false;
+}
+
+/* One active tick source per window. AppKit suspends a view's display link
+   while the window is not visible; the window's own fallback timer then
+   ticks it at refresh_period. This selects a source only: whether such a
+   tick may draw is decided by effective visibility (trust_hidden_signals)
+   and draw_while_hidden in the tick. */
+static void _sapp_tc_mac_select_source(_sapp_tc_window_t* w) {
+    const bool fallback = w->ready && !w->closed_pending && w->link_suspended && w->view;
+    if (fallback == w->fallback_active) return;
+    if (!fallback) { _sapp_tc_mac_stop_fallback(w); return; }
+    NSTimer* t = [NSTimer timerWithTimeInterval:w->refresh_period
+                                         target:w->view
+                                       selector:@selector(fallbackTick:)
+                                       userInfo:nil
+                                        repeats:YES];
+    if (t == nil) return;
+    [[NSRunLoop mainRunLoop] addTimer:t forMode:NSRunLoopCommonModes];
+    w->fallback_timer = t;
+    w->fallback_active = true;
+}
+
+/* SUSPENDED / RESUMED report this window's hidden draw admission: sent when
+   effective visibility pauses drawing (draw_while_hidden false) and when it
+   resumes. A window that draws while hidden, or that does not trust hidden
+   signals, never pauses and so never receives them. */
+static void _sapp_tc_mac_update_suspension(_sapp_tc_window_t* w) {
+    const bool suspended = !w->draw_while_hidden && _sapp_tc_native_hidden(w);
+    if (suspended == w->suspended_sent) return;
+    w->suspended_sent = suspended;
+    _sapp_tc_send_type(w, suspended ? SAPP_EVENTTYPE_SUSPENDED : SAPP_EVENTTYPE_RESUMED);
+}
+
+/* Sample AppKit's visibility for one window: from the occlusion/miniaturize
+   notifications (a hidden view's link is suspended, so a tick alone often
+   never sees it) and at each tick (the transition race). Raw observations
+   only enter the shared record while hidden signals are trusted. */
+static void _sapp_tc_mac_observe(_sapp_tc_window_t* w) {
+    if (!w || !w->window) return;
     const bool occluded = (w->window.occlusionState & NSWindowOcclusionStateVisible) == 0;
-    if (occluded != w->occluded) {
+    const bool iconified = w->window.miniaturized;
+    w->link_suspended = occluded || iconified;
+    if (w->trust_hidden_signals) {
         w->occluded = occluded;
-        sapp_event e;
-        memset(&e, 0, sizeof(e));
-        e.type = occluded ? SAPP_EVENTTYPE_SUSPENDED : SAPP_EVENTTYPE_RESUMED;
-        _sapp_tc_send(w, &e);
+        w->iconified = iconified;
     }
-    return occluded;
+    _sapp_tc_mac_select_source(w);
+    _sapp_tc_mac_update_suspension(w);
 }
 
 /*-- main window: event routing to the sapp_desc callbacks ------------------*/
@@ -3050,8 +3155,10 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
 }
 
 - (void)keyEvt:(NSEvent*)ev pressed:(bool)down {
-    _sapp_tc_window_t* w = self.w;
+    _sapp_tc_view* keep = self;
+    _sapp_tc_window_t* w = keep.w;
     if (!w) return;
+    const uint32_t win_id = w->win_id;
     sapp_event e;
     memset(&e, 0, sizeof(e));
     e.type = down ? SAPP_EVENTTYPE_KEY_DOWN : SAPP_EVENTTYPE_KEY_UP;
@@ -3059,6 +3166,7 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
     e.key_repeat = ev.isARepeat;
     e.modifiers = _sapp_tc_mods(ev);
     _sapp_tc_send(w, &e);
+    if (!(w = _sapp_tc_mac_live(win_id))) return;
 
     /* CHAR events on key down, same filtering as sokol_app.h (skip the
        function-key private range and control characters) */
@@ -3083,6 +3191,7 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
             ce.key_repeat = ev.isARepeat;
             ce.modifiers = _sapp_tc_mods(ev);
             _sapp_tc_send(w, &ce);
+            if (!(w = _sapp_tc_mac_live(win_id))) return;
         }
     }
 
@@ -3173,97 +3282,27 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
     _sapp_tc_send(w, &e);
 }
 
-/*-- per-frame tick (CADisplayLink target) ---------------------------------*/
+/*-- tick sources: this view's display link, or its fallback timer --------*/
+/* Both shims enter _sapp_tc_mac_source_tick, which samples visibility under the
+   tick guard, so exactly one source ticks: a link tick that arrives while the
+   window still selects its fallback (or a fallback tick after the link
+   resumed) is dropped. The strong local keeps this view alive if the tick's
+   deferred close disposes its window; nothing thrown leaves the shim. */
 - (void)tick:(CADisplayLink*)link {
-    _sapp_tc_window_t* w = self.w;
+    _sapp_tc_view* keep = self;
+    _sapp_tc_window_t* w = keep.w;
     if (!w) return;
+    try { _sapp_tc_mac_source_tick(w, link, false); }
+    catch (...) { _sapp_tc_mac_contained("display-link tick"); }
+}
 
-    /* window #0 runs the app frame loop (sokol_app.h parity: no occlusion
-       gate — while occluded the link auto-suspends and a ~60Hz fallback
-       timer keeps the frame callback alive, exactly like upstream) */
-    if (w->is_main) {
-        _sapp_tc_main_tick(link);
-        return;
-    }
-
-    /* Occluded => not due. THIS is what makes the nextDrawable stall
-       structurally impossible: the acquiring code below only runs for a
-       provably visible window. (The display link also auto-suspends for
-       occluded views; this gate covers the transition race.) */
-    if (_sapp_tc_update_occluded(w)) {
-        if (w->desc.tick_cb) {
-            sapp_window handle = { w->win_id };
-            w->desc.tick_cb(handle, w->desc.user_data);
-        }
-        return;
-    }
-
-    /* measured tick interval (the display's refresh period) */
-    if (w->last_tick_time > 0.0) {
-        w->frame_duration = link.timestamp - w->last_tick_time;
-    } else {
-        w->frame_duration = link.targetTimestamp - link.timestamp;
-    }
-    w->last_tick_time = link.timestamp;
-
-    /* keep the layer sized to the view; ONE dpi ratio source: the scale we
-       size the drawable with is the scale we report (and the scale mouse
-       coordinates are multiplied by) -- never assume backingScale == 2 */
-    const CGFloat scale = w->desc.no_high_dpi ? 1.0 : w->window.backingScaleFactor;
-    const NSSize sz = self.bounds.size;
-    const int fbw = (int)(sz.width * scale);
-    const int fbh = (int)(sz.height * scale);
-    if (fbw <= 0 || fbh <= 0) return;
-    if ((int)w->layer.drawableSize.width != fbw || (int)w->layer.drawableSize.height != fbh) {
-        w->layer.contentsScale = scale;
-        w->layer.drawableSize = CGSizeMake(fbw, fbh);
-    }
-    const bool resized = (fbw != w->fb_width) || (fbh != w->fb_height) ||
-                         ((int)sz.width != w->win_width) || ((int)sz.height != w->win_height);
-    w->fb_width = fbw;
-    w->fb_height = fbh;
-    w->win_width = (int)sz.width;
-    w->win_height = (int)sz.height;
-    w->dpi_scale = (float)scale;
-    if (resized) {
-        sapp_event e;
-        memset(&e, 0, sizeof(e));
-        e.type = SAPP_EVENTTYPE_RESIZED;
-        _sapp_tc_send(w, &e);
-    }
-
-    /* depth-stencil / MSAA textures, drawable-sized */
-    if (w->depth_tex == nil || (int)w->depth_tex.width != fbw || (int)w->depth_tex.height != fbh) {
-        id<MTLDevice> dev = w->layer.device;
-        MTLTextureDescriptor* dd = [MTLTextureDescriptor
-            texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float_Stencil8
-            width:fbw height:fbh mipmapped:NO];
-        dd.usage = MTLTextureUsageRenderTarget;
-        dd.storageMode = MTLStorageModePrivate;
-        dd.sampleCount = w->desc.sample_count;
-        dd.textureType = w->desc.sample_count > 1 ? MTLTextureType2DMultisample : MTLTextureType2D;
-        w->depth_tex = [dev newTextureWithDescriptor:dd];
-        if (w->desc.sample_count > 1) {
-            MTLTextureDescriptor* md = [MTLTextureDescriptor
-                texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
-                width:fbw height:fbh mipmapped:NO];
-            md.usage = MTLTextureUsageRenderTarget;
-            md.storageMode = MTLStorageModePrivate;
-            md.sampleCount = w->desc.sample_count;
-            md.textureType = MTLTextureType2DMultisample;
-            w->msaa_tex = [dev newTextureWithDescriptor:md];
-        }
-    }
-
-    w->frame_drawable = [w->layer nextDrawable];
-    if (w->frame_drawable == nil) return;
-    w->in_tick = true;
-    if (w->desc.tick_cb) {
-        sapp_window handle = { w->win_id };
-        w->desc.tick_cb(handle, w->desc.user_data);
-    }
-    w->in_tick = false;
-    w->frame_drawable = nil;
+- (void)fallbackTick:(NSTimer*)timer {
+    (void)timer;
+    _sapp_tc_view* keep = self;
+    _sapp_tc_window_t* w = keep.w;
+    if (!w) return;
+    try { _sapp_tc_mac_source_tick(w, nil, true); }
+    catch (...) { _sapp_tc_mac_contained("fallback-timer tick"); }
 }
 
 @end
@@ -3272,9 +3311,6 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
 @interface _sapp_tc_win_delegate : NSObject <NSWindowDelegate>
 @property (assign) _sapp_tc_window_t* w;
 @end
-
-static void _sapp_tc_start_fallback_timer(void);
-static void _sapp_tc_stop_fallback_timer(void);
 
 static BOOL _sapp_tc_request_exit(void) {
     _sapp_tc_window_t* w = _sapp_tc.app.main;
@@ -3293,126 +3329,143 @@ static BOOL _sapp_tc_request_exit(void) {
     return _sapp_tc.app.quit_ordered ? YES : NO;
 }
 
+/* The one native close path: a close button, performClose: and deferred
+   sapp_window_request_close() all ask here whether AppKit may close now.
+   Only the first window is special: closing it is a cancellable process quit. */
+static BOOL _sapp_tc_mac_close(_sapp_tc_window_t* w) {
+    if (w->is_main) {
+        trussc::internal::setExitReasonIfEmpty("window-close");
+        return _sapp_tc_request_exit();
+    }
+    return YES;
+}
+
+/* The native window has closed: the first window terminates the AppKit
+   application (cleanup runs in applicationWillTerminate, never returns);
+   any other window reports to its close callback, which may destroy it. */
+static void _sapp_tc_mac_closed_now(_sapp_tc_window_t* w) {
+    if (w->is_main) {
+        [NSApp terminate:nil];
+        return;
+    }
+    /* A closed window never ticks or receives events again, even when its
+       close_cb keeps it registered: unpublish it and stop both sources (no
+       source restarts while not ready). sapp_destroy_window unwinds it once. */
+    w->ready = false;
+    _sapp_tc_mac_stop_fallback(w);
+    if (w->link) { [w->link invalidate]; w->link = nil; }
+    if (!w->desc.close_cb) return;
+    void (*close_cb)(sapp_window, void*) = w->desc.close_cb;
+    const sapp_window handle = { w->win_id };
+    void* user = w->desc.user_data;
+    _sapp_tc_mac_callback_scope scope(w);
+    try { close_cb(handle, user); } catch (...) { _sapp_tc_mac_contained("sapp_window_desc.close_cb"); }
+}
+
+/* windowWillClose: cannot refuse, and -[NSWindow close] reaches it without
+   windowShouldClose:. While any tick, callback or constructor is active, only
+   record the close: the window stops ticking (no drawable, no present) and
+   receiving events, and the record and NSWindow stay alive. The deferred pass
+   after the outermost callback runs the close handling above, unchanged and
+   not vetoable (the native window is already closed). */
+static void _sapp_tc_mac_closed(_sapp_tc_window_t* w) {
+    // Closed natively: any close request still pending is satisfied by it.
+    w->native_closed = true;
+    w->close_requested = false;
+    if (_sapp_tc_mac_busy()) {
+        w->closed_pending = true;
+        _sapp_tc.deferred_blocked = true;
+        return;
+    }
+    _sapp_tc_mac_closed_now(w);
+}
+
+static void _sapp_tc_mac_fullscreen_terminal(_sapp_tc_window_t* w, bool observed) {
+    w->fullscreen_state.terminal(observed);
+    w->fullscreen = observed;
+}
+
 @implementation _sapp_tc_win_delegate
 - (BOOL)windowShouldClose:(id)sender {
     (void)sender;
     _sapp_tc_window_t* w = self.w;
-    if (!w || !w->is_main) return YES;
-    trussc::internal::setExitReasonIfEmpty("window-close");
-    return _sapp_tc_request_exit();
+    if (!w) return YES;
+    if (_sapp_tc_mac_busy()) {
+        // A close button or performClose: inside a callback, tick or constructor:
+        // refuse now and let the deferred path close it after they return.
+        w->close_requested = true;
+        _sapp_tc.deferred_blocked = true;
+        return NO;
+    }
+    return _sapp_tc_mac_close(w);
 }
 - (void)windowWillClose:(NSNotification*)n {
     (void)n;
     _sapp_tc_window_t* w = self.w;
-    if (!w) return;
-    if (w->is_main) {
-        /* main window gone = app gone, even if secondary windows are still
-           open. terminate: runs applicationWillTerminate (cleanup_cb) and
-           never returns to the run loop. */
-        [NSApp terminate:nil];
-        return;
-    }
-    if (w->desc.close_cb) {
-        sapp_window handle = { w->win_id };
-        w->desc.close_cb(handle, w->desc.user_data);
-    }
+    if (w) _sapp_tc_mac_closed(w);
 }
 - (void)windowDidResize:(NSNotification*)n {
     (void)n;
     _sapp_tc_window_t* w = self.w;
-    if (w && w->is_main) _sapp_tc_update_main_dimensions(true);
+    if (w && w->ready && _sapp_tc_mac_update_dimensions(w)) _sapp_tc_send_type(w, SAPP_EVENTTYPE_RESIZED);
 }
 - (void)windowDidChangeScreen:(NSNotification*)n {
     (void)n;
     _sapp_tc_window_t* w = self.w;
-    if (w && w->is_main) _sapp_tc_update_main_dimensions(true);
+    if (w && w->ready && _sapp_tc_mac_update_dimensions(w)) _sapp_tc_send_type(w, SAPP_EVENTTYPE_RESIZED);
 }
 - (void)windowDidChangeOcclusionState:(NSNotification*)n {
     (void)n;
-    _sapp_tc_window_t* w = self.w;
-    if (!w) return;
-    if (!w->is_main) {
-        /* keeps sapp_window_occluded() current and sends SUSPENDED / RESUMED
-           (the display link of a hidden secondary window is suspended, so
-           its tick would not notice) */
-        _sapp_tc_update_occluded(w);
-        return;
-    }
-    if (w->window.occlusionState & NSWindowOcclusionStateVisible) {
-        _sapp_tc_stop_fallback_timer();     /* the display link auto-resumes */
-    } else {
-        _sapp_tc_start_fallback_timer();    /* keep frame_cb alive while hidden */
-    }
+    _sapp_tc_mac_observe(self.w);
 }
 - (void)windowDidMiniaturize:(NSNotification*)n {
     (void)n;
-    _sapp_tc_window_t* w = self.w;
+    _sapp_tc_win_delegate* keep = self;
+    _sapp_tc_window_t* w = keep.w;
     if (!w) return;
-    /* the fallback timer is main-only; secondary windows get the event too
-       (Win32 / X11 parity; their occluded flag follows occlusionState) */
-    if (w->is_main) _sapp_tc_start_fallback_timer();
-    sapp_event e; memset(&e, 0, sizeof(e));
-    e.type = SAPP_EVENTTYPE_ICONIFIED;
-    _sapp_tc_send(w, &e);
+    const uint32_t win_id = w->win_id;
+    _sapp_tc_mac_observe(w);
+    // Untrusted minimize input is ignored, including its transition event.
+    if ((w = _sapp_tc_mac_live(win_id)) && w->trust_hidden_signals) _sapp_tc_send_type(w, SAPP_EVENTTYPE_ICONIFIED);
 }
 - (void)windowDidDeminiaturize:(NSNotification*)n {
     (void)n;
-    _sapp_tc_window_t* w = self.w;
+    _sapp_tc_win_delegate* keep = self;
+    _sapp_tc_window_t* w = keep.w;
     if (!w) return;
-    if (w->is_main) _sapp_tc_stop_fallback_timer();
-    sapp_event e; memset(&e, 0, sizeof(e));
-    e.type = SAPP_EVENTTYPE_RESTORED;
-    _sapp_tc_send(w, &e);
+    const uint32_t win_id = w->win_id;
+    _sapp_tc_mac_observe(w);
+    if ((w = _sapp_tc_mac_live(win_id)) && w->trust_hidden_signals) _sapp_tc_send_type(w, SAPP_EVENTTYPE_RESTORED);
 }
 - (void)windowWillEnterFullScreen:(NSNotification*)n {
     (void)n;
-    if (self.w) _sapp_tc_fullscreen_state(self.w).will(true);
+    if (self.w) self.w->fullscreen_state.will(true);
 }
 - (void)windowWillExitFullScreen:(NSNotification*)n {
     (void)n;
-    if (self.w) _sapp_tc_fullscreen_state(self.w).will(false);
+    if (self.w) self.w->fullscreen_state.will(false);
 }
 - (void)windowDidEnterFullScreen:(NSNotification*)n {
     (void)n;
-    _sapp_tc_window_t* w = self.w;
-    if (!w) return;
-    _sapp_tc_fullscreen_state(w).terminal(true);
-    if (w->is_main) _sapp_tc.app.fullscreen = true;
+    if (self.w) _sapp_tc_mac_fullscreen_terminal(self.w, true);
 }
 - (void)windowDidExitFullScreen:(NSNotification*)n {
     (void)n;
-    _sapp_tc_window_t* w = self.w;
-    if (!w) return;
-    _sapp_tc_fullscreen_state(w).terminal(false);
-    if (w->is_main) _sapp_tc.app.fullscreen = false;
+    if (self.w) _sapp_tc_mac_fullscreen_terminal(self.w, false);
 }
 - (void)windowDidFailToEnterFullScreen:(NSWindow*)window {
-    _sapp_tc_window_t* w = self.w;
-    if (!w) return;
-    const bool observed = (window.styleMask & NSWindowStyleMaskFullScreen) != 0;
-    _sapp_tc_fullscreen_state(w).terminal(observed);
-    if (w->is_main) _sapp_tc.app.fullscreen = observed;
+    if (self.w) _sapp_tc_mac_fullscreen_terminal(self.w, (window.styleMask & NSWindowStyleMaskFullScreen) != 0);
 }
 - (void)windowDidFailToExitFullScreen:(NSWindow*)window {
-    _sapp_tc_window_t* w = self.w;
-    if (!w) return;
-    const bool observed = (window.styleMask & NSWindowStyleMaskFullScreen) != 0;
-    _sapp_tc_fullscreen_state(w).terminal(observed);
-    if (w->is_main) _sapp_tc.app.fullscreen = observed;
+    if (self.w) _sapp_tc_mac_fullscreen_terminal(self.w, (window.styleMask & NSWindowStyleMaskFullScreen) != 0);
 }
 - (void)windowDidBecomeKey:(NSNotification*)n {
-    _sapp_tc_window_t* w = self.w;
-    if (!w) return;
-    sapp_event e; memset(&e, 0, sizeof(e));
-    e.type = SAPP_EVENTTYPE_FOCUSED;
-    _sapp_tc_send(w, &e);
+    (void)n;
+    if (self.w) _sapp_tc_send_type(self.w, SAPP_EVENTTYPE_FOCUSED);
 }
 - (void)windowDidResignKey:(NSNotification*)n {
-    _sapp_tc_window_t* w = self.w;
-    if (!w) return;
-    sapp_event e; memset(&e, 0, sizeof(e));
-    e.type = SAPP_EVENTTYPE_UNFOCUSED;
-    _sapp_tc_send(w, &e);
+    (void)n;
+    if (self.w) _sapp_tc_send_type(self.w, SAPP_EVENTTYPE_UNFOCUSED);
 }
 @end
 
@@ -3445,24 +3498,34 @@ static void _sapp_tc_ensure_swapchain_textures(_sapp_tc_window_t* w) {
     }
 }
 
-/* re-sample scale + sizes, keep the layer drawable in sync, emit RESIZED.
-   Called from the tick, windowDidResize / windowDidChangeScreen, and once
-   silently right after window creation (allow_event=false, sokol parity:
-   the startup update never fires RESIZED). */
-static void _sapp_tc_update_main_dimensions(bool allow_event) {
-    _sapp_tc_window_t* w = _sapp_tc.app.main;
-    if (!w || !w->view) return;
-    CGFloat scale = 1.0;
-    if (_sapp_tc.app.desc.high_dpi) {
-        NSScreen* screen = w->window.screen ? w->window.screen : [NSScreen mainScreen];
-        scale = screen.backingScaleFactor;
-        if (scale <= 0.0) scale = 1.0;
-    }
+static MTLPixelFormat _sapp_tc_mac_pixel_format(sapp_pixel_format format) {
+    return format == SAPP_PIXELFORMAT_RGB10A2 ? MTLPixelFormatRGB10A2Unorm : MTLPixelFormatBGRA8Unorm;
+}
+
+/* ONE dpi ratio source: the scale the drawable is sized with is the scale
+   reported (and the scale mouse coordinates are multiplied by) -- never
+   assume backingScale == 2 */
+static CGFloat _sapp_tc_mac_scale(_sapp_tc_window_t* w) {
+    if (w->desc.no_high_dpi) return 1.0;
+    const CGFloat scale = w->window.backingScaleFactor;
+    return scale > 0.0 ? scale : 1.0;
+}
+
+/* Re-sample scale + sizes and keep the layer drawable and the swapchain
+   textures in sync. Called by the common initializer, every admitted tick
+   and windowDidResize / windowDidChangeScreen. Returns whether published
+   dimensions changed; a zero-area view keeps the last published sizes.
+   The one path to drawableSize, contentsScale and the swapchain textures:
+   while frozen (busy session end) nothing here changes. */
+static bool _sapp_tc_mac_update_dimensions(_sapp_tc_window_t* w) {
+    if (_sapp_tc_mac_frozen()) return false;
+    if (!w->view || !w->layer) return false;
+    const CGFloat scale = _sapp_tc_mac_scale(w);
     w->dpi_scale = (float)scale;
     const NSSize sz = w->view.bounds.size;
-    int fbw = (int)((CGFloat)sz.width * scale);
-    int fbh = (int)((CGFloat)sz.height * scale);
-    if (fbw <= 0 || fbh <= 0) return;
+    const int fbw = (int)((CGFloat)sz.width * scale);
+    const int fbh = (int)((CGFloat)sz.height * scale);
+    if (fbw <= 0 || fbh <= 0) return false;
     /* re-apply contentsScale every time: live-resize installs a non-scaling
        layer placement that would otherwise stick (sokol_app.h does the same) */
     w->layer.contentsScale = scale;
@@ -3476,214 +3539,537 @@ static void _sapp_tc_update_main_dimensions(bool allow_event) {
     w->win_width = (int)sz.width;
     w->win_height = (int)sz.height;
     _sapp_tc_ensure_swapchain_textures(w);
-    if (changed && allow_event) {
-        sapp_event e;
-        memset(&e, 0, sizeof(e));
-        e.type = SAPP_EVENTTYPE_RESIZED;
-        _sapp_tc_send(w, &e);
-    }
+    return changed;
 }
 
-/* one main-window frame: timing -> dimensions -> init_cb (first tick only)
-   -> frame_cb -> quit check. The drawable is NOT acquired here; it is
-   acquired lazily by sapp_get_swapchain() (upstream parity) and released
-   when the tick ends. `link` is nil when driven by the fallback timer. */
-static void _sapp_tc_main_tick(CADisplayLink* link) {
-    _sapp_tc_window_t* w = _sapp_tc.app.main;
-    if (!w || w->in_tick) return;
-    // Reconcile once after terminal notifications, outside native delegates.
-    // Re-fetch slots: toggling AppKit can synchronously deliver native events.
-    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i) {
-        _sapp_tc_reconcile_fullscreen(_sapp_tc.windows[i]);
+/* The common initializer, run before publication (#1024): backing scale,
+   reported DPI, framebuffer/logical sizes and drawable-sized textures agree
+   before the window's first event or tick, independent of its first draw.
+   A zero-sized view defers texture allocation until it has a drawable size. */
+static bool _sapp_tc_mac_initialize_dimensions(_sapp_tc_window_t* w) {
+    _sapp_tc_mac_update_dimensions(w);
+    if (w->fb_width <= 0 || w->fb_height <= 0) return true;
+    if (w->depth_tex == nil) {
+        _sapp_tc.create_error = "Metal depth texture creation returned nil (no NSError available)";
+        return false;
     }
-    w = _sapp_tc.app.main;
-    if (!w) return;
-    _sapp_tc_timing_update(&_sapp_tc.app.timing);      /* feeds the fallback estimate */
-    if (link) {
-        if (w->last_tick_time > 0.0) {
-            const double dt = link.timestamp - w->last_tick_time;
-            if ((dt > 0.000001) && (dt < 0.1)) w->frame_duration = dt;
-        }
-        w->last_tick_time = link.timestamp;
+    if (w->desc.sample_count > 1 && w->msaa_tex == nil) {
+        _sapp_tc.create_error = "Metal MSAA texture creation returned nil (no NSError available)";
+        return false;
     }
-    _sapp_tc_update_main_dimensions(true);
-    @autoreleasepool {
-        w->in_tick = true;
-        if (!_sapp_tc.app.init_called) {
-            _sapp_tc.app.init_called = true;
-            if (_sapp_tc.app.desc.init_cb) {
-                _sapp_tc.app.desc.init_cb();
-            } else if (_sapp_tc.app.desc.init_userdata_cb) {
-                _sapp_tc.app.desc.init_userdata_cb(_sapp_tc.app.desc.user_data);
-            }
-        }
-        if (_sapp_tc.app.desc.frame_cb) {
-            _sapp_tc.app.desc.frame_cb();
-        } else if (_sapp_tc.app.desc.frame_userdata_cb) {
-            _sapp_tc.app.desc.frame_userdata_cb(_sapp_tc.app.desc.user_data);
-        }
-        _sapp_tc.app.frame_count++;
-        w->in_tick = false;
-        w->frame_drawable = nil;    /* presented by sg_commit; release our ref */
+    return true;
+}
+
+/* Lazy drawable acquisition: only inside this window's tick, and only once
+   that tick admitted a draw (a hidden, non-admitted window must never reach
+   nextDrawable, which can stall). Repeated queries reuse the drawable. */
+static id<CAMetalDrawable> _sapp_tc_mac_drawable(_sapp_tc_window_t* w) {
+    if (_sapp_tc_mac_frozen()) return nil;   // no drawable while frozen, even inside the interrupted tick
+    if (!w || !w->in_tick || !w->draw_admitted || w->closed_pending || !w->layer) return nil;
+    if (w->frame_drawable == nil) w->frame_drawable = [w->layer nextDrawable];
+    return w->frame_drawable;
+}
+
+/* Metal's native present belongs to sokol_gfx: committing a swapchain pass
+   presents the lazily acquired drawable, and a frame that began no such
+   pass presents nothing (upstream parity). The native end of frame drops
+   this tick's drawable reference and consumes the window's one-shot skip. */
+static void _sapp_tc_mac_swap(_sapp_tc_window_t* w) {
+    w->frame_drawable = nil;
+    w->skip_present = false;
+}
+
+/* sapp_window_request_close() and the process quit request land here,
+   after a tick and outside every window's tick (a modal loop inside one
+   window's callback may run another window's tick). -close (not
+   performClose:, which only plays the alert sound on a borderless window)
+   sends windowWillClose: once the common close path agrees. Re-fetch each
+   slot: a close destroys windows. */
+/* Any tick, client callback or constructor on the stack, of any window. Native
+   close and terminate requests arriving then are deferred, like
+   sapp_window_request_close(): a client callback must never see its own window
+   (or the App) torn down underneath it. */
+static bool _sapp_tc_mac_busy(void) {
+    if (_sapp_tc.callbacks_active > 0 || _sapp_tc.constructing > 0) return true;
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+        const _sapp_tc_window_t* cw = _sapp_tc.windows[i];
+        if (cw && (cw->in_tick || cw->callback_depth > 0)) return true;
     }
-    /* sapp_window_request_close() lands here, after the main tick and
-       outside every window's tick: -close (not performClose:, which only
-       plays the alert sound on a borderless window) sends windowWillClose:,
-       which calls close_cb like a click on the close button. Re-fetch each
-       slot: a close destroys windows. */
+    return false;
+}
+
+static bool _sapp_tc_mac_deferred_pending(void) {
+    if (_sapp_tc.terminate_pending || _sapp_tc.app.quit_requested || _sapp_tc.app.quit_ordered) return true;
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+        const _sapp_tc_window_t* cw = _sapp_tc.windows[i];
+        if (cw && (cw->close_requested || cw->closed_pending)) return true;
+    }
+    return false;
+}
+
+static void _sapp_tc_mac_process_deferred(void) {
+    if (_sapp_tc_mac_frozen()) return;   // the process ends; nothing deferred runs
+    // Only when no tick, client callback or constructor is on the stack.
+    if (_sapp_tc_mac_busy()) {
+        if (_sapp_tc_mac_deferred_pending()) _sapp_tc.deferred_blocked = true;
+        return;
+    }
+    _sapp_tc.deferred_blocked = false;
+    // Native closes that happened while busy: run their close handling now.
+    // Re-fetch each slot: a close callback destroys windows.
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         _sapp_tc_window_t* cw = _sapp_tc.windows[i];
-        if (!cw || cw->is_main || !cw->close_requested) continue;
+        if (!cw || !cw->closed_pending) continue;
+        cw->closed_pending = false;
+        _sapp_tc_mac_closed_now(cw);
+    }
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+        _sapp_tc_window_t* cw = _sapp_tc.windows[i];
+        if (!cw || !cw->close_requested) continue;
         cw->close_requested = false;
+        if (cw->native_closed) continue;    // already closed natively: never close it again
         NSWindow* nsw = cw->window;   /* strong: outlives the destroy in close_cb */
-        if (nsw) [nsw close];
+        if (nsw && _sapp_tc_mac_close(cw)) [nsw close];
     }
-    if (_sapp_tc.app.quit_requested || _sapp_tc.app.quit_ordered) {
-        [w->window performClose:nil];
+    if (_sapp_tc.terminate_pending) {
+        // Replay the terminate AppKit asked for while busy: vetoable as usual.
+        _sapp_tc.terminate_pending = false;
+        [NSApp terminate:nil];
+        return;
+    }
+    _sapp_tc_window_t* first = _sapp_tc.app.main;
+    if (first && first->window && (_sapp_tc.app.quit_requested || _sapp_tc.app.quit_ordered)) {
+        [first->window performClose:nil];
     }
 }
 
-static void _sapp_tc_start_fallback_timer(void) {
-    if (_sapp_tc.app.fallback_timer != nil || _sapp_tc.app.dlg == nil) return;
-    NSTimer* t = [NSTimer timerWithTimeInterval:(1.0 / 60.0)
-                                         target:_sapp_tc.app.dlg
-                                       selector:@selector(fallbackTick:)
-                                       userInfo:nil
-                                        repeats:YES];
-    [[NSRunLoop mainRunLoop] addTimer:t forMode:NSRunLoopCommonModes];
-    _sapp_tc.app.fallback_timer = t;
+/* Deferred work held back by a callback or constructor runs once the outermost
+   one has returned, from the main run loop rather than inside the AppKit
+   notification or modal frame that ended it. A window whose ticks were blocked
+   therefore does not need a tick of its own for its close to proceed. */
+static void _sapp_tc_mac_schedule_deferred(void) {
+    if (_sapp_tc.deferred_scheduled) return;
+    _sapp_tc.deferred_scheduled = true;
+    CFRunLoopRef loop = CFRunLoopGetMain();
+    CFRunLoopPerformBlock(loop, kCFRunLoopCommonModes, ^{
+        _sapp_tc.deferred_scheduled = false;
+        try { _sapp_tc_mac_process_deferred(); }
+        catch (...) { _sapp_tc_mac_contained("deferred close/quit"); }
+    });
+    CFRunLoopWakeUp(loop);
 }
 
-static void _sapp_tc_stop_fallback_timer(void) {
-    if (_sapp_tc.app.fallback_timer == nil) return;
-    [_sapp_tc.app.fallback_timer invalidate];
-    _sapp_tc.app.fallback_timer = nil;
+/* One native tick for every window: reconcile this window's own fullscreen
+   state, sample timing, resolve effective visibility, then an admitted tick
+   (dimensions; the drawable is acquired lazily by the callback) or a hidden
+   tick that still reaches the callback's update policy without a drawable.
+   `link` is nil when the window's fallback timer is the source. */
+/* The tick guard is set at tick entry, before any notification or callback
+   (visibility sampling, fullscreen reconciliation, RESIZED, tick_cb), so a run
+   loop spun inside any of them cannot start a nested tick of this window. It is
+   cleared through the window's identity, also when the window was disposed. */
+struct _sapp_tc_mac_tick_scope {
+    uint32_t win_id;
+    explicit _sapp_tc_mac_tick_scope(_sapp_tc_window_t* w) : win_id(w->win_id) { w->in_tick = true; }
+    ~_sapp_tc_mac_tick_scope() {
+        if (_sapp_tc_window_t* w = _sapp_tc_lookup({win_id})) {
+            w->in_tick = false;
+            w->draw_admitted = false;
+            w->frame_drawable = nil;
+        }
+    }
+};
+
+/* Tick body; the caller holds the tick guard. */
+static void _sapp_tc_mac_tick_body(_sapp_tc_window_t* w, CADisplayLink* link) {
+    const sapp_window handle = { w->win_id };
+    // Reconcile once after terminal notifications, outside native delegates.
+    // Re-fetch: toggling AppKit can synchronously deliver native events.
+    _sapp_tc_reconcile_fullscreen(w);
+    // A notification or callback may have closed the window natively: no draw.
+    w = _sapp_tc_lookup(handle);
+    if (!w || w->closed_pending) return;
+    @autoreleasepool {
+        _sapp_tc_timing_update(&w->timing);
+        if (link) {
+            /* measured tick interval (this window's display refresh period) */
+            const double dt = (w->last_tick_time > 0.0)
+                ? link.timestamp - w->last_tick_time
+                : link.targetTimestamp - link.timestamp;
+            if ((dt > 0.000001) && (dt < 0.1)) w->frame_duration = dt;
+            w->last_tick_time = link.timestamp;
+        }
+        const bool admitted = w->draw_while_hidden || !_sapp_tc_native_hidden(w);
+        if (admitted && _sapp_tc_mac_update_dimensions(w)) {
+            _sapp_tc_send_type(w, SAPP_EVENTTYPE_RESIZED);
+            if (!(w = _sapp_tc_lookup(handle)) || w->closed_pending) return;
+        }
+        w->draw_admitted = admitted;
+        if (w->desc.tick_cb) {
+            void (*tick_cb)(sapp_window, void*) = w->desc.tick_cb;
+            void* user = w->desc.user_data;
+            _sapp_tc_mac_callback_scope scope(w);
+            try { tick_cb(handle, user); } catch (...) { _sapp_tc_mac_contained("sapp_window_desc.tick_cb"); }
+        }
+        w = _sapp_tc_lookup(handle);    /* the callback may have disposed it */
+        if (w) {
+            w->draw_admitted = false;
+            ++w->frame_count;
+            _sapp_tc_mac_swap(w);
+        }
+    }
 }
 
-static bool _sapp_tc_create_main_window(void) {
-    const sapp_desc* d = &_sapp_tc.app.desc;
+/* A window does not tick while one of its own client callbacks is on the
+   stack, inside or outside a tick (D5, as on Win32): a run loop spun by that
+   callback, e.g. a synchronous modal dialog, pauses only this window. Other
+   windows keep ticking. Notifications keep its source selection current, and
+   its next tick after the callback returns runs normally and processes
+   deferred close/quit. */
+static bool _sapp_tc_mac_tick_blocked(const _sapp_tc_window_t* w) {
+    return _sapp_tc_mac_frozen() || w->in_tick || w->callback_depth > 0 || w->closed_pending;
+}
+
+static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {
+    if (!w->ready || _sapp_tc_mac_tick_blocked(w)) return;
+    {
+        _sapp_tc_mac_tick_scope guard(w);
+        _sapp_tc_mac_tick_body(w, link);
+    }
+    _sapp_tc_mac_process_deferred();
+}
+
+/* A tick from one of the window's sources. Visibility sampling may notify, so
+   it runs under the tick guard; the inactive source's ticks are dropped. */
+static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {
+    if (_sapp_tc_mac_tick_blocked(w)) return;
+    {
+        const uint32_t win_id = w->win_id;
+        _sapp_tc_mac_tick_scope guard(w);
+        _sapp_tc_mac_observe(w);
+        w = _sapp_tc_mac_live(win_id);
+        if (w && w->ready && !w->closed_pending && w->fallback_active == from_fallback) _sapp_tc_mac_tick_body(w, link);
+    }
+    _sapp_tc_mac_process_deferred();
+}
+
+// The legacy callbacks are one client of the native callback contract.
+static void _sapp_tc_main_tick_tramp(sapp_window win, void* user) {
+    (void)win; (void)user;
+    if (!_sapp_tc.app.init_called) {
+        _sapp_tc.app.init_called = true;
+        if (_sapp_tc.app.desc.init_cb) {
+            _sapp_tc.app.desc.init_cb();
+        } else if (_sapp_tc.app.desc.init_userdata_cb) {
+            _sapp_tc.app.desc.init_userdata_cb(_sapp_tc.app.desc.user_data);
+        }
+    }
+    if (_sapp_tc.app.desc.frame_cb) {
+        _sapp_tc.app.desc.frame_cb();
+    } else if (_sapp_tc.app.desc.frame_userdata_cb) {
+        _sapp_tc.app.desc.frame_userdata_cb(_sapp_tc.app.desc.user_data);
+    }
+}
+
+/* The one disposal path, for failed construction and ordinary destruction:
+   stop this window's tick sources, then release its resources. Every
+   partially initialized handle is nil-safe. A published window has already
+   been removed from the registry by its caller. */
+static void _sapp_tc_mac_unwind(_sapp_tc_window_t* w) {
+    if (!w) return;
+    w->ready = false;
+    _sapp_tc_mac_stop_fallback(w);
+    if (w->link) { [w->link invalidate]; w->link = nil; }
+    w->view.w = 0;
+    w->delegate.w = 0;
+    if (w->window) {
+        w->window.delegate = nil;
+        [w->window orderOut:nil];
+        w->window = nil;
+    }
+    w->view = nil;
+    w->delegate = nil;
+    w->layer = nil;
+    w->depth_tex = nil;
+    w->msaa_tex = nil;
+    w->frame_drawable = nil;
+    free(w->title);
+    w->title = 0;
+    delete w;
+}
+
+static _sapp_tc_window_t* _sapp_tc_mac_fail(_sapp_tc_window_t* w, const char* reason) {
+    if (reason) _sapp_tc.create_error = reason;
+    _sapp_tc_mac_unwind(w);
+    return 0;
+}
+
+/* macOS-only creation data beside the shared descriptor (which is frozen).
+   The legacy run path passes true for all three, sapp_create_window false.
+   Step (b)'s common adapter takes these fields over. */
+struct _sapp_tc_mac_window_attrs {
+    bool restorable;                /* NSWindow state restoration */
+    bool nearest_magnification;     /* nearest-filter layer scaling during live resize */
+    bool take_key_focus_on_create;  /* content view is first responder from creation */
+};
+
+/* The one native constructor, for the first window and every other window.
+   Startup placement, formats, pacing, hidden admission and AppKit attributes
+   are creation data; nothing here selects by window role. */
+static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_desc* d,
+                                                        const _sapp_tc_mac_window_attrs* attrs) {
+    _sapp_tc.create_error = 0;
+    if (_sapp_tc_mac_frozen()) { _sapp_tc.create_error = "Window creation refused: the session is ending"; return 0; }
     int slot = -1;
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         if (_sapp_tc.windows[i] == 0) { slot = i; break; }
     }
-    if (slot < 0) {
-        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
-                     "error: ", "Main window creation failed: no free window slot");
-        return false;
+    // Bound (registry): a fixed window table keeps lookup finite. Exhaustion refuses creation.
+    if (slot < 0) { _sapp_tc.create_error = "Window creation failed: no free window slot"; return 0; }
+    _sapp_tc_window_t* w = new (std::nothrow) _sapp_tc_window_t();
+    if (!w) { _sapp_tc.create_error = "Window record allocation failed"; return 0; }
+    if (!_sapp_tc_next_window_id(&_sapp_tc.next_id, &w->win_id)) {
+        return _sapp_tc_mac_fail(w, "Window creation failed: window identities exhausted");
     }
-
-    _sapp_tc_window_t* w = new _sapp_tc_window_t();
-    w->win_id = ++_sapp_tc.next_id;
-    w->is_main = true;
-    auto fail = [w, slot](const char* operation, const char* reason = "returned nil (no NSError available)") {
-        // These creation APIs have no NSError output parameter.
-        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
-                     "error: ", "%s %s", operation, reason);
-        w->view.w = 0;
-        w->delegate.w = 0;
-        w->window.delegate = nil;
-        [w->link invalidate];
-        [w->window orderOut:nil];
-        _sapp_tc.windows[slot] = 0;
-        _sapp_tc.app.main = 0;
-        _sapp_tc.app.device = nil;
-        delete w;
-        return false;
-    };
-    w->color_fmt = MTLPixelFormatRGB10A2Unorm;  /* TrussC 10-bit output */
+    w->desc = d->window;
+    w->swap_interval = d->swap_interval;
+    w->draw_while_hidden = d->draw_while_hidden;
+    w->trust_hidden_signals = _sapp_tc_mac_trust_hidden_signals();
+    w->title_limit = d->title_limit;
+    w->color_format = d->color_format;
+    w->depth_format = d->depth_format;
+    w->color_fmt = _sapp_tc_mac_pixel_format(d->color_format);
+    w->refresh_period = 1.0 / 60.0;     /* fallback source period while the link is suspended */
     w->dpi_scale = 1.0f;
+    _sapp_tc_timing_reset(&w->timing);
 
-    /* content size in points; 0 = 4/5 of the main screen (sokol parity) */
-    int width = d->width;
-    int height = d->height;
+    const bool has_title = w->desc.title != 0;
+    const char* title = has_title ? w->desc.title : "";
+    size_t length = strlen(title);
+    if (w->title_limit && length >= w->title_limit) length = w->title_limit - 1;
+    // Bound (compatibility): legacy title capacity preserves its byte prefix and stable descriptor pointer.
+    const size_t title_bytes = w->title_limit ? w->title_limit : length + 1;
+    w->title = (char*)calloc(1, title_bytes);
+    if (!w->title) return _sapp_tc_mac_fail(w, "Window title allocation failed");
+    memcpy(w->title, title, length);
+    w->title[length] = 0;
+    w->desc.title = w->title;
+
+    id<MTLDevice> dev = (__bridge id<MTLDevice>)w->desc.mtl_device;
+    if (dev == nil) dev = _sapp_tc.app.device;
+    if (dev == nil) return _sapp_tc_mac_fail(w, "Metal device unavailable");
+
+    /* content size in points; non-positive = 4/5 of the main screen (sokol parity) */
+    int width = w->desc.width;
+    int height = w->desc.height;
     const NSRect screen_rect = NSScreen.mainScreen.frame;
     if (width <= 0)  width = (int)(screen_rect.size.width * 0.8);
     if (height <= 0) height = (int)(screen_rect.size.height * 0.8);
-
-    /* per-window desc: the app callbacks are reached via the trampoline */
     w->desc.width = width;
     w->desc.height = height;
-    w->desc._tc_pixel_width = d->_tc_pixel_width;
-    w->desc._tc_pixel_height = d->_tc_pixel_height;
-    w->desc.sample_count = d->sample_count;
-    w->desc.no_high_dpi = !d->high_dpi;
-    w->desc.event_cb = _sapp_tc_main_event_tramp;
-
-    id<MTLDevice> dev = MTLCreateSystemDefaultDevice();
-    if (dev == nil) return fail("MTLCreateSystemDefaultDevice");
-    _sapp_tc.app.device = dev;
-
-    NSRect rect = NSMakeRect(0, 0, width, height);
-    const NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-                                    NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
+    const int px = d->center_on_create ? 0 : ((w->desc.x >= 0) ? w->desc.x : 120);
+    const int py = d->center_on_create ? 0 : ((w->desc.y >= 0) ? w->desc.y : 120);
+    NSRect rect = NSMakeRect(px, py, width, height);
+    NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+                              NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
+    if (w->desc.borderless) style = NSWindowStyleMaskBorderless;
     w->window = [[NSWindow alloc] initWithContentRect:rect styleMask:style
                                   backing:NSBackingStoreBuffered defer:NO];
-    if (w->window == nil) return fail("NSWindow initWithContentRect");
-    if (d->_tc_pixel_width > 0 || d->_tc_pixel_height > 0) {
-        const float scale = d->high_dpi ? (float)w->window.backingScaleFactor : 1.0f;
-        if (!_sapp_tc_window_pixels_representable(d->_tc_pixel_width, d->_tc_pixel_height, scale)) {
-            return fail("Pixel size", "exceeds logical-size getters");
+    if (w->window == nil) return _sapp_tc_mac_fail(w, "NSWindow initWithContentRect returned nil (no NSError available)");
+    w->window.releasedWhenClosed = NO;  /* the object must outlive performClose */
+    if (w->desc._tc_pixel_width > 0 || w->desc._tc_pixel_height > 0) {
+        const float scale = w->desc.no_high_dpi ? 1.0f : (float)w->window.backingScaleFactor;
+        if (!_sapp_tc_window_pixels_representable(w->desc._tc_pixel_width, w->desc._tc_pixel_height, scale)) {
+            return _sapp_tc_mac_fail(w, "Pixel size exceeds logical-size getters");
         }
         [w->window setContentSize:NSMakeSize(
-            _sapp_tc_window_points(width, d->_tc_pixel_width, scale),
-            _sapp_tc_window_points(height, d->_tc_pixel_height, scale))];
+            _sapp_tc_window_points(width, w->desc._tc_pixel_width, scale),
+            _sapp_tc_window_points(height, w->desc._tc_pixel_height, scale))];
         rect.size = [w->window contentRectForFrameRect:w->window.frame].size;
     }
-    w->window.title = [NSString stringWithUTF8String:_sapp_tc.app.window_title];
-    w->window.releasedWhenClosed = NO;  /* the object must outlive performClose */
+    if (has_title) {
+        NSString* ns_title = [NSString stringWithUTF8String:w->title];
+        if (ns_title) w->window.title = ns_title;   /* invalid UTF-8: keep the native title */
+    }
     w->window.acceptsMouseMovedEvents = YES;
-    w->window.restorable = YES;
+    if (attrs->restorable) w->window.restorable = YES;
 
     _sapp_tc_view* view = [[_sapp_tc_view alloc] initWithFrame:rect];
-    if (view == nil) return fail("Main window view initWithFrame");
-    view.w = w;
+    if (view == nil) return _sapp_tc_mac_fail(w, "Window view initWithFrame returned nil (no NSError available)");
     w->view = view;
     w->layer = [CAMetalLayer layer];
-    if (w->layer == nil) return fail("CAMetalLayer layer");
+    if (w->layer == nil) return _sapp_tc_mac_fail(w, "CAMetalLayer layer returned nil (no NSError available)");
     w->layer.device = dev;
     w->layer.pixelFormat = w->color_fmt;
     w->layer.opaque = YES;
-    w->layer.magnificationFilter = kCAFilterNearest;
-    w->layer.framebufferOnly = NO;      /* captureWindow() reads the drawable */
+    if (attrs->nearest_magnification) w->layer.magnificationFilter = kCAFilterNearest;
+    w->layer.framebufferOnly = NO;      /* [TrussC] captureWindow() reads the drawable (#879) */
     view.wantsLayer = YES;
     view.layer = w->layer;
-    [view registerForDraggedTypes:@[NSPasteboardTypeFileURL]];
     w->window.contentView = view;
-    [w->window makeFirstResponder:view];
+    if (attrs->take_key_focus_on_create) [w->window makeFirstResponder:view];
+    /* target-monitor placement precedes the dimensions it determines */
+    if (d->center_on_create) [w->window center];
+    if (!_sapp_tc_mac_initialize_dimensions(w)) return _sapp_tc_mac_fail(w, 0);
 
+    /* per-window display link: fires on the main run loop at THIS window's
+       display rate; auto-suspends while the view is not visible (macOS 14+);
+       swap_interval > 1 divides the display rate */
+    w->link = [view displayLinkWithTarget:view selector:@selector(tick:)];
+    if (w->link == nil) return _sapp_tc_mac_fail(w, "Window display link creation returned nil (no NSError available)");
+    if (w->swap_interval > 1) {
+        const float maxfps = (float)[NSScreen mainScreen].maximumFramesPerSecond;
+        const float p = maxfps / (float)w->swap_interval;
+        w->link.preferredFrameRateRange = CAFrameRateRangeMake(p, p, p);
+    }
     _sapp_tc_win_delegate* del = [_sapp_tc_win_delegate new];
-    if (del == nil) return fail("Main window delegate allocation");
+    if (del == nil) return _sapp_tc_mac_fail(w, "Window delegate allocation returned nil (no NSError available)");
+
+    /* publish only now: every event and tick sees initialized dimensions */
+    view.w = w;
     del.w = w;
     w->delegate = del;
     w->window.delegate = del;
-
-    [w->window center];
     _sapp_tc.windows[slot] = w;
-    _sapp_tc.app.main = w;
-
+    w->ready = true;
+    [w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    /* Startup fullscreen and showing can notify synchronously (resize, key
+       focus), and a client may destroy the window from those callbacks: keep
+       the NSWindow alive across the calls, re-resolve the record by identity
+       after each, and report an invalid window if it is gone. No deferred
+       close or quit runs until the constructor returns. */
+    struct constructing_scope {
+        constructing_scope() { ++_sapp_tc.constructing; }
+        ~constructing_scope() {
+            --_sapp_tc.constructing;
+            if (_sapp_tc.constructing == 0 && _sapp_tc.callbacks_active == 0 && _sapp_tc.deferred_blocked)
+                _sapp_tc_mac_schedule_deferred();
+        }
+    } constructing;
+    const uint32_t win_id = w->win_id;
+    NSWindow* window = w->window;
     if (d->fullscreen) {
         _sapp_tc_request_fullscreen(w, true);
+        if (!(w = _sapp_tc_mac_live(win_id))) {
+            [window orderOut:nil];
+            _sapp_tc.create_error = "Window was destroyed during creation";
+            return 0;
+        }
     }
-    [w->window makeKeyAndOrderFront:nil];
-    _sapp_tc_update_main_dimensions(false);     /* silent startup sizing */
+    [window makeKeyAndOrderFront:nil];
+    if (!(w = _sapp_tc_mac_live(win_id))) {
+        /* disposed from a notification inside the call, which then still
+           ordered the window in: take it off screen again */
+        [window orderOut:nil];
+        _sapp_tc.create_error = "Window was destroyed during creation";
+        return 0;
+    }
+    /* silent startup re-sample (sokol parity: the startup update never fires
+       RESIZED). The display link is the first source; occlusion notifications
+       and link ticks select the fallback once AppKit reports the window hidden. */
+    _sapp_tc_mac_update_dimensions(w);
+    return w;
+}
 
-    /* A zero-sized view defers texture allocation until it has a drawable size. */
-    if (w->fb_width > 0 && w->fb_height > 0) {
-        if (w->depth_tex == nil) return fail("Metal depth texture creation");
-        if (d->sample_count > 1 && w->msaa_tex == nil) return fail("Metal MSAA texture creation");
-    }
+/* The contract constructor: no macOS creation attributes. */
+static _sapp_tc_window_t* _sapp_tc_mac_create_window(const _sapp_tc_native_desc* d) {
+    const _sapp_tc_mac_window_attrs none = {};
+    return _sapp_tc_mac_create_window_ex(d, &none);
+}
 
-    /* window #0's vsync source; swap_interval > 1 divides the display rate */
-    w->link = [view displayLinkWithTarget:view selector:@selector(tick:)];
-    if (w->link == nil) return fail("Main window display link creation");
-    if (d->swap_interval > 1) {
-        const float maxfps = (float)[NSScreen mainScreen].maximumFramesPerSecond;
-        const float p = maxfps / (float)d->swap_interval;
-        w->link.preferredFrameRateRange = CAFrameRateRangeMake(p, p, p);
+/* The legacy run path: bootstrap the process device, normalize the launch
+   descriptor and bind the first window as the process-owned window #1. */
+static bool _sapp_tc_mac_create_main_window(void) {
+    const sapp_desc* d = &_sapp_tc.app.desc;
+    _sapp_tc.app.device = MTLCreateSystemDefaultDevice();
+    if (_sapp_tc.app.device == nil) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                     "error: ", "MTLCreateSystemDefaultDevice returned nil (no NSError available)");
+        return false;
     }
-    [w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    _sapp_tc_native_desc native = {};
+    native.window = _sapp_tc_normalize_main_window(d);
+    native.window.event_cb = _sapp_tc_main_event_tramp;
+    native.window.tick_cb = _sapp_tc_main_tick_tramp;
+    native.window.mtl_device = (__bridge const void*)_sapp_tc.app.device;
+    native.swap_interval = d->swap_interval;
+    native.fullscreen = d->fullscreen;
+    native.draw_while_hidden = d->_tc_draw_while_hidden > 0;
+    native.title_limit = 256;           /* legacy macOS title storage, terminator included */
+    native.color_format = SAPP_PIXELFORMAT_RGB10A2;   /* TrussC 10-bit output */
+    native.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL;
+    native.center_on_create = true;
+    _sapp_tc_mac_window_attrs attrs = {};
+    attrs.restorable = attrs.nearest_magnification = attrs.take_key_focus_on_create = true;
+    _sapp_tc_window_t* w = _sapp_tc_mac_create_window_ex(&native, &attrs);
+    if (!w) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                     "error: ", "%s", _sapp_tc.create_error ? _sapp_tc.create_error : "Main window creation failed");
+        _sapp_tc.app.device = nil;
+        return false;
+    }
+    w->is_main = true;
+    w->events_enabled = _sapp_tc_app_events_enabled;
+    _sapp_tc.app.main = w;
+    _sapp_tc.app.desc.window_title = w->title;
+    /* Drop registration stays with the first window until step (b). */
+    [w->view registerForDraggedTypes:@[NSPasteboardTypeFileURL]];
     _sapp_tc.app.valid = true;
     return true;
+}
+
+/* keyAEQuitReason ('why?') of the quit Apple event being handled: Cocoa
+   forwards it for OS session exits. A real logout sends it as an event
+   attribute, not a parameter (seen on macOS), so read the attribute first.
+   Zero when absent or unreadable: a plain quit. */
+static AEEventID _sapp_tc_mac_quit_reason(void) {
+    NSAppleEventDescriptor* event = [[NSAppleEventManager sharedAppleEventManager] currentAppleEvent];
+    NSAppleEventDescriptor* reason = [event attributeDescriptorForKeyword:0x7768793f];
+    if (!reason) reason = [event paramDescriptorForKeyword:0x7768793f];
+    return reason ? [reason enumCodeValue] : 0;
+}
+
+static bool _sapp_tc_mac_is_session_end(AEEventID reason) {
+    switch (reason) {
+        case 0x6c6f676f: // kAELogOut ('logo')
+        case 0x726c676f: // kAEReallyLogOut ('rlgo')
+        case 0x72727374: // kAEShowRestartDialog ('rrst')
+        case 0x72657374: // kAERestart ('rest')
+        case 0x7273646e: // kAEShowShutdownDialog ('rsdn')
+        case 0x73687574: // kAEShutDown ('shut')
+            return true;
+        default:
+            return false;
+    }
+}
+
+/* Session end while a tick, callback or constructor is active, as Win32
+   WM_ENDSESSION: the App is not asked (no QUIT_REQUESTED) and the session is
+   not cancelled. From here until _exit the backend is frozen (see
+   _sapp_tc_mac_frozen): run the cleanup callback once, in place, then end the
+   process at once so control never returns to the interrupted callback.
+   Native windows and GPU resources are left to the OS. */
+static void _sapp_tc_mac_session_end(AEEventID reason) {
+    switch (reason) {
+        case 0x72727374: case 0x72657374: trussc::internal::setExitReason("os-restart"); break;
+        case 0x7273646e: case 0x73687574: trussc::internal::setExitReason("os-shutdown"); break;
+        default: trussc::internal::setExitReason("os-logoff"); break;
+    }
+    _sapp_tc.app.quit_ordered = true;
+    // Only the _exit below ends the process: cleanup must not std::exit.
+    trussc::internal::sessionEndExit() = true;
+    if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
+        _sapp_tc.app.cleanup_called = true;
+        try {
+            if (_sapp_tc.app.desc.cleanup_cb) {
+                _sapp_tc.app.desc.cleanup_cb();
+            } else if (_sapp_tc.app.desc.cleanup_userdata_cb) {
+                _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
+            }
+        } catch (...) { _sapp_tc_mac_contained("sapp_desc.cleanup_cb"); }
+    }
+    fflush(NULL);
+    _exit(trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1);
 }
 
 @interface _sapp_tc_app_delegate : NSObject <NSApplicationDelegate>
@@ -3695,7 +4081,7 @@ static bool _sapp_tc_create_main_window(void) {
     /* activation policy must be set before window creation (sokol #1500) */
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
     _sapp_tc_init_cursors();
-    if (!_sapp_tc_create_main_window()) {
+    if (!_sapp_tc_mac_create_main_window()) {
         /* Wake the event loop after stopping it so sapp_run can report failure. */
         [NSApp stop:nil];
         NSEvent* event = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
@@ -3725,6 +4111,9 @@ static bool _sapp_tc_create_main_window(void) {
 }
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender {
     (void)sender;
+    // A quit (or a second session end) while frozen: the process is already ending.
+    if (_sapp_tc_mac_frozen()) return NSTerminateCancel;
+    const AEEventID quit_reason = _sapp_tc_mac_quit_reason();
     if (!_sapp_tc.app.quit_ordered) {
         // Cocoa forwards the quit Apple event's reason for OS session exits.
         // keyAEQuitReason ('why?'). [TrussC] Any other quit (Cmd+Q, the Dock's
@@ -3733,11 +4122,7 @@ static bool _sapp_tc_create_main_window(void) {
         // IfEmpty keeps a reason an earlier exit request already recorded.
         // A real logout sends the reason as an event attribute, not a
         // parameter (seen on macOS); read the attribute first.
-        NSAppleEventDescriptor* event = [[NSAppleEventManager sharedAppleEventManager] currentAppleEvent];
-        NSAppleEventDescriptor* reason = [event attributeDescriptorForKeyword:0x7768793f];
-        if (!reason) reason = [event paramDescriptorForKeyword:0x7768793f];
-        const AEEventID why = [reason enumCodeValue];
-        switch (why) {
+        switch (quit_reason) {
             case 0x6c6f676f: // kAELogOut ('logo')
             case 0x726c676f: // kAEReallyLogOut ('rlgo')
                 trussc::internal::setExitReason("os-logoff"); break;
@@ -3749,36 +4134,56 @@ static bool _sapp_tc_create_main_window(void) {
                 trussc::internal::setExitReasonIfEmpty("app-quit"); break;
         }
     }
+    if (_sapp_tc_mac_busy()) {
+        // A session end is not asked and not cancelled (as Win32 WM_ENDSESSION).
+        if (_sapp_tc_mac_is_session_end(quit_reason)) _sapp_tc_mac_session_end(quit_reason);
+        /* Any other quit inside a callback, tick or constructor (e.g. a run loop
+           spun by a client callback): cancel this request and replay it after they return.
+           NSTerminateLater would wait in a nested modal loop above that
+           callback, which can then never return. */
+        _sapp_tc.terminate_pending = true;
+        _sapp_tc.deferred_blocked = true;
+        return NSTerminateCancel;
+    }
     return _sapp_tc_request_exit() ? NSTerminateNow : NSTerminateCancel;
 }
 - (void)applicationWillTerminate:(NSNotification*)n {
     (void)n;
-    /* stop all tick sources first so no frame runs during teardown */
-    _sapp_tc_stop_fallback_timer();
+    /* stop every window's tick sources first so no frame runs during teardown */
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         _sapp_tc_window_t* w = _sapp_tc.windows[i];
-        if (w && w->link) { [w->link invalidate]; w->link = nil; }
+        if (!w) continue;
+        _sapp_tc_mac_stop_fallback(w);
+        if (w->link) { [w->link invalidate]; w->link = nil; }
     }
     /* user cleanup runs BEFORE any GPU object release (the app shuts down
        sokol_gfx here; we only hold the device/layer references) */
     if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
         _sapp_tc.app.cleanup_called = true;
-        if (_sapp_tc.app.desc.cleanup_cb) {
-            _sapp_tc.app.desc.cleanup_cb();
-        } else if (_sapp_tc.app.desc.cleanup_userdata_cb) {
-            _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
-        }
+        try {
+            if (_sapp_tc.app.desc.cleanup_cb) {
+                _sapp_tc.app.desc.cleanup_cb();
+            } else if (_sapp_tc.app.desc.cleanup_userdata_cb) {
+                _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
+            }
+        } catch (...) { _sapp_tc_mac_contained("sapp_desc.cleanup_cb"); }
     }
+    /* native disposal follows App cleanup; reverse slot order keeps the
+       first window until last */
+    for (int i = _SAPP_TC_MAX_WINDOWS; i-- > 0;) {
+        _sapp_tc_window_t* w = _sapp_tc.windows[i];
+        if (!w) continue;
+        _sapp_tc.windows[i] = 0;
+        _sapp_tc_mac_unwind(w);
+    }
+    _sapp_tc.app.main = 0;
+    _sapp_tc.app.desc.window_title = 0;
     if (_sapp_tc.app.keyup_monitor) {
         [NSEvent removeMonitor:_sapp_tc.app.keyup_monitor];
         _sapp_tc.app.keyup_monitor = nil;
     }
     if (_sapp_tc.app.clipboard) { free(_sapp_tc.app.clipboard); _sapp_tc.app.clipboard = 0; }
     if (_sapp_tc.app.drop_buffer) { free(_sapp_tc.app.drop_buffer); _sapp_tc.app.drop_buffer = 0; }
-}
-- (void)fallbackTick:(NSTimer*)t {
-    (void)t;
-    _sapp_tc_main_tick(nil);
 }
 @end
 
@@ -3789,100 +4194,32 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     sapp_window invalid = { 0 };
     if (!desc) return invalid;
     _sapp_tc_init_keytable();
-
-    int slot = -1;
-    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
-        if (_sapp_tc.windows[i] == 0) { slot = i; break; }
-    }
-    if (slot < 0) return invalid;
-
-    _sapp_tc_window_t* w = new _sapp_tc_window_t();
-    w->win_id = ++_sapp_tc.next_id;
-    w->desc = *desc;
-    if (w->desc.width <= 0) w->desc.width = 640;
-    if (w->desc.height <= 0) w->desc.height = 480;
-    if (w->desc.sample_count <= 0) w->desc.sample_count = 1;
-    w->dpi_scale = 1.0f;
-
-    const int px = (desc->x >= 0) ? desc->x : 120;
-    const int py = (desc->y >= 0) ? desc->y : 120;
-    NSRect rect = NSMakeRect(px, py, w->desc.width, w->desc.height);
-    NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-                              NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
-    if (w->desc.borderless) style = NSWindowStyleMaskBorderless;
-    w->window = [[NSWindow alloc] initWithContentRect:rect styleMask:style
-                                  backing:NSBackingStoreBuffered defer:NO];
-    if (w->desc._tc_pixel_width > 0 || w->desc._tc_pixel_height > 0) {
-        const float scale = w->desc.no_high_dpi ? 1.0f : (float)w->window.backingScaleFactor;
-        if (!_sapp_tc_window_pixels_representable(w->desc._tc_pixel_width, w->desc._tc_pixel_height, scale)) {
-            delete w;
-            return invalid;
-        }
-        [w->window setContentSize:NSMakeSize(
-            _sapp_tc_window_points(w->desc.width, w->desc._tc_pixel_width, scale),
-            _sapp_tc_window_points(w->desc.height, w->desc._tc_pixel_height, scale))];
-        rect.size = [w->window contentRectForFrameRect:w->window.frame].size;
-    }
-    if (w->desc.title) w->window.title = [NSString stringWithUTF8String:w->desc.title];
-    w->window.releasedWhenClosed = NO;
-    w->window.acceptsMouseMovedEvents = YES;
-
-    _sapp_tc_view* view = [[_sapp_tc_view alloc] initWithFrame:rect];
-    view.w = w;
-    w->view = view;
-    w->layer = [CAMetalLayer layer];
-    w->layer.device = (__bridge id<MTLDevice>)w->desc.mtl_device;
-    w->layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-    w->layer.opaque = YES;
-    w->layer.framebufferOnly = NO;      /* [TrussC] captureWindow() reads the drawable (#879) */
-    view.wantsLayer = YES;
-    view.layer = w->layer;
-    w->window.contentView = view;
-
-    _sapp_tc_win_delegate* del = [_sapp_tc_win_delegate new];
-    del.w = w;
-    w->delegate = del;
-    w->window.delegate = del;
-
-    _sapp_tc.windows[slot] = w;
-    [w->window makeKeyAndOrderFront:nil];
-
-    /* per-window display link: fires on the main run loop at THIS window's
-       display rate; auto-suspends while the view is not visible (macOS 14+) */
-    w->link = [view displayLinkWithTarget:view selector:@selector(tick:)];
-    [w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-
-    sapp_window handle = { w->win_id };
-    return handle;
+    _sapp_tc_native_desc native = {};
+    native.window = _sapp_tc_normalize_window(desc);
+    native.color_format = SAPP_PIXELFORMAT_BGRA8;
+    native.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL;
+    _sapp_tc_window_t* w = _sapp_tc_mac_create_window(&native);
+    return { w ? w->win_id : 0 };
 }
 
 void sapp_destroy_window(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w) return;
+    if (w->is_main) {
+        // The first window owns process quit/veto; disposal follows cleanup.
+        w->close_requested = true;
+        return;
+    }
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         if (_sapp_tc.windows[i] == w) { _sapp_tc.windows[i] = 0; break; }
     }
     w->desc.close_cb = 0;   /* no callback from the orderOut below */
-    if (w->link) { [w->link invalidate]; w->link = nil; }
-    w->view.w = 0;
-    w->delegate.w = 0;
-    if (w->window) {
-        w->window.delegate = nil;
-        [w->window orderOut:nil];
-        w->window = nil;
-    }
-    w->view = nil;
-    w->delegate = nil;
-    w->layer = nil;
-    w->depth_tex = nil;
-    w->msaa_tex = nil;
-    w->frame_drawable = nil;
-    delete w;
+    _sapp_tc_mac_unwind(w);
 }
 
 void sapp_window_request_close(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    if (!w || w->is_main) return;   /* the main window: sapp_request_quit() */
+    if (!w) return;
     w->close_requested = true;
 }
 
@@ -3925,42 +4262,48 @@ int sapp_window_sample_count(sapp_window win) {
 }
 
 void sapp_tc_window_skip_present(sapp_window win) {
-    (void)win; /* Metal only presents when the shared tick commits a draw. */
+    _sapp_tc_window_t* w = _sapp_tc_resolve(win);
+    if (w) w->skip_present = true;
+}
+
+void sapp_tc_window_draw_while_hidden(sapp_window win, bool allow) {
+    _sapp_tc_window_t* w = _sapp_tc_resolve(win);
+    if (w) w->draw_while_hidden = allow;
 }
 
 bool sapp_window_occluded(sapp_window win) {
-    _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
-    return w && w->window ? (w->window.occlusionState & NSWindowOcclusionStateVisible) == 0 : false;
+    _sapp_tc_window_t* w = _sapp_tc_resolve(win);
+    return w ? _sapp_tc_native_hidden(w) : false;
 }
 
 void sapp_window_set_title(sapp_window win, const char* title) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (w && w->window && title) {
-        w->window.title = [NSString stringWithUTF8String:title];
+        NSString* ns_title = [NSString stringWithUTF8String:title];
+        if (ns_title) w->window.title = ns_title;   /* invalid UTF-8: keep the native title */
     }
 }
 
 double sapp_window_frame_duration(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w) return 1.0 / 60.0;
+    if (w->fallback_active) return w->timing.smooth_dt;
     return (w->frame_duration > 0.0) ? w->frame_duration : 1.0 / 60.0;
 }
 
 const void* sapp_window_metal_current_drawable(sapp_window win) {
-    _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    if (!w || !w->in_tick) return 0;
-    return (__bridge const void*)w->frame_drawable;
+    return (__bridge const void*)_sapp_tc_mac_drawable(_sapp_tc_lookup(win));
 }
 
 const void* sapp_window_metal_depth_stencil_texture(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    if (!w || !w->in_tick) return 0;
+    if (!w || !w->in_tick || !w->draw_admitted) return 0;
     return (__bridge const void*)w->depth_tex;
 }
 
 const void* sapp_window_metal_msaa_color_texture(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    if (!w || !w->in_tick || w->desc.sample_count <= 1) return 0;
+    if (!w || !w->in_tick || !w->draw_admitted || w->desc.sample_count <= 1) return 0;
     return (__bridge const void*)w->msaa_tex;
 }
 
@@ -3983,14 +4326,14 @@ void sapp_run(const sapp_desc* desc) {
     if (!desc) return;
     _sapp_tc.app.desc = *desc;
     sapp_desc* d = &_sapp_tc.app.desc;
+    // Legacy descriptor default, before normalization into common constructor data.
+    if (d->_tc_draw_while_hidden == 0) d->_tc_draw_while_hidden = 1;
     if (d->sample_count <= 0) d->sample_count = 1;
     if (d->swap_interval <= 0) d->swap_interval = 1;
     if (d->clipboard_size <= 0) d->clipboard_size = 8192;
     if (d->max_dropped_files <= 0) d->max_dropped_files = 1;
     if (d->max_dropped_file_path_length <= 0) d->max_dropped_file_path_length = 2048;
-    strncpy(_sapp_tc.app.window_title, d->window_title ? d->window_title : "sokol",
-            sizeof(_sapp_tc.app.window_title) - 1);
-    d->window_title = _sapp_tc.app.window_title;
+    if (!d->window_title) d->window_title = "sokol";
     if (d->enable_clipboard) {
         _sapp_tc.app.clipboard_enabled = true;
         _sapp_tc.app.clipboard_size = d->clipboard_size;
@@ -4005,7 +4348,6 @@ void sapp_run(const sapp_desc* desc) {
     }
     _sapp_tc.app.mouse_shown = true;
     _sapp_tc.app.current_cursor = SAPP_MOUSECURSOR_DEFAULT;
-    _sapp_tc_timing_reset(&_sapp_tc.app.timing);
     _sapp_tc_init_keytable();
 
     [NSApplication sharedApplication];
@@ -4055,12 +4397,13 @@ float sapp_heightf(void) {
 }
 
 int sapp_sample_count(void) {
+    if (_sapp_tc.app.main) return _sapp_tc.app.main->desc.sample_count;
     return _sapp_tc.app.desc.sample_count > 0 ? _sapp_tc.app.desc.sample_count : 1;
 }
 
 bool sapp_high_dpi(void) {
     _sapp_tc_window_t* w = _sapp_tc.app.main;
-    return _sapp_tc.app.desc.high_dpi && w && (w->dpi_scale >= 1.5f);
+    return w && !w->desc.no_high_dpi && (w->dpi_scale >= 1.5f);
 }
 
 float sapp_dpi_scale(void) {
@@ -4073,13 +4416,13 @@ float sapp_dpi_scale(void) {
 }
 
 uint64_t sapp_frame_count(void) {
-    return _sapp_tc.app.frame_count;
+    return _sapp_tc.app.main ? _sapp_tc.app.main->frame_count : 0;
 }
 
 double sapp_frame_duration(void) {
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     if (!w) return 1.0 / 60.0;
-    if (_sapp_tc.app.fallback_timer != nil) return _sapp_tc.app.timing.smooth_dt;
+    if (w->fallback_active) return w->timing.smooth_dt;
     if (w->frame_duration > 0.0) return w->frame_duration;
     const double maxfps = (double)[NSScreen mainScreen].maximumFramesPerSecond;
     return (maxfps > 0.0) ? (1.0 / maxfps) : (1.0 / 60.0);
@@ -4102,9 +4445,10 @@ void sapp_consume_event(void) {
 }
 
 void sapp_skip_present(void) {
-    /* API parity: stored but ignored on Metal (upstream behaves the same;
-       not starting a swapchain pass already skips the present) */
-    _sapp_tc.app.skip_present = true;
+    /* API parity: stored on window #1 and consumed by its tick, otherwise
+       ignored on Metal (upstream behaves the same; not starting a swapchain
+       pass already skips the present) */
+    if (_sapp_tc.app.main) _sapp_tc.app.main->skip_present = true;
 }
 
 void sapp_show_keyboard(bool show) {
@@ -4203,20 +4547,24 @@ const char* sapp_get_clipboard_string(void) {
 
 void sapp_set_window_title(const char* str) {
     if (!str) return;
-    strncpy(_sapp_tc.app.window_title, str, sizeof(_sapp_tc.app.window_title) - 1);
     _sapp_tc_window_t* w = _sapp_tc.app.main;
-    if (w && w->window) {
-        w->window.title = [NSString stringWithUTF8String:_sapp_tc.app.window_title];
-    }
+    if (!w || !w->window || !w->title || !w->title_limit) return;
+    size_t length = strlen(str);
+    // Bound (compatibility): only the legacy setter retains the 255-byte macOS title prefix.
+    if (length >= w->title_limit) length = w->title_limit - 1;
+    memmove(w->title, str, length);
+    w->title[length] = 0;
+    NSString* ns_title = [NSString stringWithUTF8String:w->title];
+    if (ns_title) w->window.title = ns_title;   /* invalid UTF-8: keep the native title */
 }
 
 bool sapp_is_fullscreen(void) {
-    return _sapp_tc.app.fullscreen;
+    return _sapp_tc.app.main && _sapp_tc.app.main->fullscreen;
 }
 
 void sapp_toggle_fullscreen(void) {
     _sapp_tc_window_t* w = _sapp_tc.app.main;
-    if (w) _sapp_tc_request_fullscreen(w, !_sapp_tc_fullscreen_state(w).desired);
+    if (w) _sapp_tc_request_fullscreen(w, !w->fullscreen_state.desired);
 }
 
 int sapp_get_num_dropped_files(void) {
@@ -4230,11 +4578,12 @@ const char* sapp_get_dropped_file_path(int index) {
 }
 
 sapp_pixel_format sapp_color_format(void) {
-    return SAPP_PIXELFORMAT_RGB10A2;    /* TrussC 10-bit output on Metal */
+    /* TrussC 10-bit output on Metal, also before window #1 exists */
+    return _sapp_tc.app.main ? _sapp_tc.app.main->color_format : SAPP_PIXELFORMAT_RGB10A2;
 }
 
 sapp_pixel_format sapp_depth_format(void) {
-    return SAPP_PIXELFORMAT_DEPTH_STENCIL;
+    return _sapp_tc.app.main ? _sapp_tc.app.main->depth_format : SAPP_PIXELFORMAT_DEPTH_STENCIL;
 }
 
 const void* sapp_macos_get_window(void) {
@@ -4246,19 +4595,15 @@ const void* sapp_metal_get_device(void) {
     return (__bridge const void*)_sapp_tc.app.device;
 }
 
-/* main-window drawable: acquired lazily HERE (upstream parity — sokol_gfx's
-   begin-pass is the acquisition point via sglue_swapchain()). Inside a tick
-   the drawable is cached so repeated queries stay safe; outside a tick each
-   call acquires a fresh drawable, exactly like sokol_app.h. */
+/* window #1's drawable for the legacy API: inside its tick this is the
+   common lazy acquisition (sokol_gfx's begin-pass is the acquisition point
+   via sglue_swapchain()); outside a tick each call acquires a fresh
+   drawable, exactly like sokol_app.h. */
 static id<CAMetalDrawable> _sapp_tc_main_next_drawable(void) {
+    if (_sapp_tc_mac_frozen()) return nil;
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     if (!w || !w->layer) return nil;
-    if (w->in_tick) {
-        if (w->frame_drawable == nil) {
-            w->frame_drawable = [w->layer nextDrawable];
-        }
-        return w->frame_drawable;
-    }
+    if (w->in_tick) return _sapp_tc_mac_drawable(w);
     return [w->layer nextDrawable];
 }
 
@@ -4306,18 +4651,16 @@ sapp_swapchain sapp_get_swapchain(void) {
 
 } /* extern "C" */
 
-namespace trussc::internal {
-WindowFullscreenPhase macWindowFullscreenPhase(uint32_t id) noexcept {
-    _sapp_tc_window_t* w = id ? _sapp_tc_lookup({id}) : _sapp_tc.app.main;
-    return w ? _sapp_tc_fullscreen_state(w).phase : WindowFullscreenPhase::Windowed;
+extern "C" uint32_t sapp_tc_window_fullscreen_phase(sapp_window win) {
+    _sapp_tc_window_t* w = _sapp_tc_resolve(win);
+    return w ? (uint32_t)w->fullscreen_state.phase : 0;
 }
-void setMacWindowFullscreen(uint32_t id, bool full) noexcept {
-    _sapp_tc_request_fullscreen(id ? _sapp_tc_lookup({id}) : _sapp_tc.app.main, full);
+extern "C" void sapp_tc_window_set_fullscreen(sapp_window win, bool full) {
+    _sapp_tc_request_fullscreen(_sapp_tc_resolve(win), full);
 }
-void toggleMacWindowFullscreen(uint32_t id) noexcept {
-    _sapp_tc_window_t* w = id ? _sapp_tc_lookup({id}) : _sapp_tc.app.main;
-    if (w) _sapp_tc_request_fullscreen(w, !_sapp_tc_fullscreen_state(w).desired);
-}
+extern "C" void sapp_tc_window_toggle_fullscreen(sapp_window win) {
+    _sapp_tc_window_t* w = _sapp_tc_resolve(win);
+    if (w) _sapp_tc_request_fullscreen(w, !w->fullscreen_state.desired);
 }
 
 #elif defined(__APPLE__) && TARGET_OS_IPHONE
@@ -6312,6 +6655,8 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); retur
 #include <d3d11.h>
 #include <dxgi1_3.h>    /* IDXGIFactory2 / IDXGISwapChain2 (frame latency waitable) */
 #include "util/sokol_d3d11_device_loss.h"
+#include "./util/sokol_window_native.h"
+#include <new>
 
 #if defined(_MSC_VER)
 #pragma comment (lib, "kernel32")
@@ -6339,21 +6684,7 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); retur
 #define _SAPP_TC_MODAL_TIMER (1)
 #define _SAPP_TC_RELEASE(obj) do { if (obj) { (obj)->Release(); (obj) = 0; } } while (0)
 
-/* EMA-filtered frame timer, port of sokol_app.h's _sapp_timing_* (QPC-based;
-   Windows has no display-link timestamps, so this is the only dt source) */
-typedef struct {
-    double last;        /* previous sample time, 0 = none yet */
-    double ema;
-    double smooth_dt;
-    double dt;          /* last raw (clamped) delta */
-} _sapp_tc_timing_t;
-
-typedef struct _sapp_tc_window_t {
-    bool skip_present; /* one-shot, per-window EVENT_DRIVEN presentation */
-    uint32_t win_id;
-    sapp_window_desc desc;
-    bool is_main;               /* window #0: created by sapp_run, drives the app callbacks */
-    bool ready;                 /* creation finished; wndproc may deliver events */
+typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     HWND hwnd;
     HMONITOR hmonitor;
     DXGI_FORMAT color_fmt;
@@ -6371,25 +6702,17 @@ typedef struct _sapp_tc_window_t {
     ID3D11RenderTargetView* msaa_rtv;
     ID3D11Texture2D* ds;        /* depth-stencil */
     ID3D11DepthStencilView* dsv;
-    int fb_width, fb_height;    /* framebuffer pixels */
-    int win_width, win_height;  /* logical points */
     float window_scale;         /* OS DPI / 96 (physical px per point) */
-    float dpi_scale;            /* framebuffer px per point (content scale) */
     float mouse_scale;          /* client px -> event coordinate (framebuffer px) */
-    double refresh_period;      /* this window's display refresh period (pacing fallback) */
-    double earliest_next;       /* QPC seconds; window is not due before this */
-    double frame_duration;
-    _sapp_tc_timing_t timing;
-    bool occluded;
-    bool iconified;
-    bool in_tick;
-    bool close_requested;       /* sapp_window_request_close(): WM_CLOSE posted at the loop tail */
     bool mouse_tracked;         /* TrackMouseEvent enter/leave state */
     bool mouse_pos_valid;
     float mouse_x, mouse_y;     /* last position in event coordinates */
     float mouse_dx, mouse_dy;
     uint8_t capture_mask;       /* SetCapture refcount by button bit */
     WCHAR surrogate;            /* WM_CHAR high-surrogate accumulator */
+    bool from_modal;           /* source shim data, never a window role */
+    bool cancel_tick;          /* client aborted init before its first frame */
+    LONG_PTR stored_style, stored_ex_style;
     RECT stored_window_rect;    /* windowed rect for fullscreen restore */
 } _sapp_tc_window_t;
 
@@ -6407,19 +6730,14 @@ static struct {
 
     /* ---- app / main-window state (this header owns sapp_run on Windows) -- */
     struct {
-        sapp_desc desc;             /* sanitized copy; window_title points at the buffer below */
-        char window_title[256];
-        WCHAR window_title_wide[256];
+        sapp_desc desc;             /* normalized launch data; title borrows the first record */
         bool valid;
         bool init_called;
         bool cleanup_called;
         bool quit_requested;
         bool quit_ordered;
-        bool fullscreen;
         bool event_consumed;
-        bool skip_present;          /* one-shot; honored on D3D11 (TrussC flicker patch) */
         bool dpi_aware;
-        uint64_t frame_count;
         _sapp_tc_window_t* main;
         bool device_lost_notified;  /* one notification across every swapchain */
         bool device_lost_event_pending; /* deliver after app initialization */
@@ -6450,7 +6768,9 @@ static struct {
     } app;
 } _sapp_tc;
 
-static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal);
+static void _sapp_tc_win32_tick(_sapp_tc_window_t* w);
+static void _sapp_tc_win32_modal_tick(_sapp_tc_window_t* w);
+static void _sapp_tc_win32_close(_sapp_tc_window_t* w);
 static bool _sapp_tc_win32_update_dimensions(_sapp_tc_window_t* w);
 static bool _sapp_tc_d3d11_resize(_sapp_tc_window_t* w);
 static void _sapp_tc_win32_apply_cursor(sapp_mouse_cursor cursor, bool shown, bool skip_area_test);
@@ -6634,6 +6954,7 @@ static _sapp_tc_window_t* _sapp_tc_lookup(sapp_window win) {
 
 /*-- UTF-8 <-> UTF-16 -------------------------------------------------------*/
 static bool _sapp_tc_win32_utf8_to_wide(const char* src, wchar_t* dst, int dst_num) {
+    // Bound (conversion): native UTF-16 storage is caller-sized; overflow fails with NUL termination.
     dst[0] = 0;
     if (0 == MultiByteToWideChar(CP_UTF8, 0, src, -1, dst, dst_num)) {
         dst[dst_num - 1] = 0;
@@ -6643,6 +6964,7 @@ static bool _sapp_tc_win32_utf8_to_wide(const char* src, wchar_t* dst, int dst_n
 }
 
 static bool _sapp_tc_win32_wide_to_utf8(const wchar_t* src, char* dst, int dst_size) {
+    // Bound (conversion): native UTF-8 storage is caller-sized; overflow fails with NUL termination.
     dst[0] = 0;
     if (0 == WideCharToMultiByte(CP_UTF8, 0, src, -1, dst, dst_size, NULL, NULL)) {
         dst[dst_size - 1] = 0;
@@ -6666,8 +6988,18 @@ static uint32_t _sapp_tc_win32_mods(void) {
 }
 
 static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
-    if (!w->desc.event_cb) return;
-    ev->frame_count = _sapp_tc.app.frame_count;
+    if (!w->ready || !w->desc.event_cb || (w->events_enabled && !w->events_enabled())) return;
+    const bool was_in_tick = w->in_tick;
+    w->in_tick = true;
+    struct EventScope {
+        uint32_t id;
+        bool was_in_tick;
+        ~EventScope() {
+            // A client may explicitly destroy a secondary during delivery.
+            if (auto* live = _sapp_tc_lookup(sapp_window{id})) live->in_tick = was_in_tick;
+        }
+    } scope{w->win_id, was_in_tick};
+    ev->frame_count = _sapp_tc.app.main ? _sapp_tc.app.main->frame_count : 0;
     ev->window_width = w->win_width;
     ev->window_height = w->win_height;
     ev->framebuffer_width = w->fb_width;
@@ -7267,31 +7599,45 @@ static void _sapp_tc_win32_files_dropped(_sapp_tc_window_t* w, HDROP hdrop) {
     _sapp_tc_send(w, &e);
 }
 
-/*-- fullscreen (main window; borderless style-swap, upstream parity) -------*/
-static void _sapp_tc_win32_set_fullscreen(bool fullscreen, UINT swp_flags) {
-    _sapp_tc_window_t* w = _sapp_tc.app.main;
-    if (!w) return;
-    HMONITOR monitor = MonitorFromWindow(w->hwnd, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO minfo;
-    memset(&minfo, 0, sizeof(minfo));
+/*-- fullscreen (one native target; legacy wrappers resolve the first) -----*/
+static void _sapp_tc_win32_set_fullscreen(_sapp_tc_window_t* w, bool fullscreen, UINT swp_flags) {
+    if (!w || w->fullscreen == fullscreen) return;
+    MONITORINFO minfo = {};
     minfo.cbSize = sizeof(minfo);
-    if (!GetMonitorInfoW(monitor, &minfo)) return;
-    _sapp_tc.app.fullscreen = fullscreen;
+    if (!GetMonitorInfoW(MonitorFromWindow(w->hwnd, MONITOR_DEFAULTTONEAREST), &minfo)) return;
     RECT rect;
-    DWORD style;
     if (fullscreen) {
         GetWindowRect(w->hwnd, &w->stored_window_rect);
-        style = WS_POPUP | WS_SYSMENU | WS_VISIBLE;
+        w->stored_style = GetWindowLongPtrW(w->hwnd, GWL_STYLE);
+        w->stored_ex_style = GetWindowLongPtrW(w->hwnd, GWL_EXSTYLE);
+        w->restore_valid = true;
         rect = minfo.rcMonitor;
+        SetWindowLongPtrW(w->hwnd, GWL_STYLE, WS_POPUP | WS_SYSMENU | WS_VISIBLE);
     } else {
-        style = WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU |
-                WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SIZEBOX;
+        if (!w->restore_valid) return;
         rect = w->stored_window_rect;
+        SetWindowLongPtrW(w->hwnd, GWL_STYLE, w->stored_style);
+        SetWindowLongPtrW(w->hwnd, GWL_EXSTYLE, w->stored_ex_style);
     }
-    SetWindowLongPtrW(w->hwnd, GWL_STYLE, (LONG_PTR)style);
+    w->fullscreen = fullscreen;
+    w->fullscreen_state.terminal(fullscreen);
     SetWindowPos(w->hwnd, HWND_TOP, rect.left, rect.top,
-                 rect.right - rect.left, rect.bottom - rect.top,
-                 swp_flags | SWP_FRAMECHANGED);
+                 rect.right - rect.left, rect.bottom - rect.top, swp_flags | SWP_FRAMECHANGED);
+}
+
+static bool _sapp_tc_win32_any_fullscreen(void) {
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i) {
+        const _sapp_tc_window_t* w = _sapp_tc.windows[i];
+        if (!w) continue;
+        if (w->fullscreen) return true;
+        // The outgoing secondary adapter still performs its own style swap in
+        // step (a). Its fullscreen style clears WINDOWEDGE; constructors retain
+        // that bit for ordinary borderless windows. The marker survives minimize.
+        if (!(GetWindowLongPtrW(w->hwnd, GWL_STYLE) & WS_POPUP)) continue;
+        if (GetWindowLongPtrW(w->hwnd, GWL_EXSTYLE) & WS_EX_WINDOWEDGE) continue;
+        return true;
+    }
+    return false;
 }
 
 /*-- per-window tick + pacing ------------------------------------------------
@@ -7321,146 +7667,112 @@ static bool _sapp_tc_win32_window_due(_sapp_tc_window_t* w) {
     return true;
 }
 
-static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
-    if (_sapp_tc.app.quit_ordered || w->in_tick || !w->swap_chain) return;
-    /* the due-check just consumed a waitable credit (unless one was already
-       held); hold it until a real Present returns it through the swapchain.
-       Clear waitable_ready: this signal is now spent (the next one comes from
-       the run-loop's MsgWait after this frame is presented). */
+static void _sapp_tc_main_tick_tramp(sapp_window, void*) {
+    if (!_sapp_tc.app.init_called) {
+        _sapp_tc.app.init_called = true;
+        if (_sapp_tc.app.desc.init_cb) _sapp_tc.app.desc.init_cb();
+        else if (_sapp_tc.app.desc.init_userdata_cb)
+            _sapp_tc.app.desc.init_userdata_cb(_sapp_tc.app.desc.user_data);
+        _sapp_tc_d3d11_dispatch_pending_device_loss();
+        if (_sapp_tc.app.quit_ordered) {
+            _sapp_tc.app.main->cancel_tick = true;
+            return;
+        }
+    }
+    if (_sapp_tc.app.desc.frame_cb) _sapp_tc.app.desc.frame_cb();
+    else if (_sapp_tc.app.desc.frame_userdata_cb)
+        _sapp_tc.app.desc.frame_userdata_cb(_sapp_tc.app.desc.user_data);
+}
+
+static void _sapp_tc_win32_observe_occlusion(_sapp_tc_window_t* w, bool occluded) {
+    const bool was_hidden = _sapp_tc_native_hidden(w);
+    w->occluded = occluded;
+    const bool now_hidden = _sapp_tc_native_hidden(w);
+    if (was_hidden != now_hidden)
+        _sapp_tc_win32_app_event(w, now_hidden ? SAPP_EVENTTYPE_SUSPENDED : SAPP_EVENTTYPE_RESUMED);
+}
+
+static void _sapp_tc_win32_swap(_sapp_tc_window_t* w) {
+    const UINT flags = w->from_modal ? DXGI_PRESENT_DO_NOT_WAIT : 0;
+    const HRESULT hr = w->swap_chain->Present((UINT)w->swap_interval, flags);
+    if (_sapp_tc_d3d11_check_device_loss(hr)) return;
+    _sapp_tc_win32_observe_occlusion(w, hr == DXGI_STATUS_OCCLUDED);
+    const bool presented = SUCCEEDED(hr) && hr != DXGI_STATUS_OCCLUDED;
+    if (presented) {
+        w->credit_held = false;
+        w->last_present = _sapp_tc_now();
+    }
+    if (presented && w->frame_wait) w->earliest_next = 0.0;
+    else _sapp_tc_win32_pace(w, w->refresh_period * (double)w->swap_interval);
+}
+
+static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
+    if (!w || !w->ready || _sapp_tc.app.quit_ordered || w->in_tick || !w->swap_chain) return;
+    w->in_tick = true;
+    w->cancel_tick = false;
+    struct TickScope {
+        _sapp_tc_window_t* w;
+        ~TickScope() { w->in_tick = false; }
+    } scope{w};
+    // MsgWait (or the modal shim) already consumed this auto-reset signal.
     if (w->frame_wait) { w->credit_held = true; w->waitable_ready = false; }
     _sapp_tc_timing_update(&w->timing);
     w->frame_duration = w->timing.smooth_dt;
-    const int swap_interval = (_sapp_tc.app.desc.swap_interval > 0) ? _sapp_tc.app.desc.swap_interval : 1;
+    _sapp_tc_win32_pace(w, w->refresh_period * (double)w->swap_interval);
 
-    if (w->is_main) {
-        /* resize is deliberately coalesced here, NOT in WM_SIZE (upstream:
-           per-WM_SIZE ResizeBuffers blows up memory on some drivers). During
-           a modal size-move loop the swapchain keeps its size (DXGI stretch)
-           and one resize lands on the first normal tick after the drag. */
-        if (!_sapp_tc.app.device_lost_notified &&
-            !from_modal && _sapp_tc_win32_update_dimensions(w)) {
-            if (!_sapp_tc_d3d11_resize(w)) return;
-            _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESIZED);
-        }
-        w->in_tick = true;
-        if (!_sapp_tc.app.init_called) {
-            _sapp_tc.app.init_called = true;
-            if (_sapp_tc.app.desc.init_cb) {
-                _sapp_tc.app.desc.init_cb();
-            } else if (_sapp_tc.app.desc.init_userdata_cb) {
-                _sapp_tc.app.desc.init_userdata_cb(_sapp_tc.app.desc.user_data);
-            }
-            _sapp_tc_d3d11_dispatch_pending_device_loss();
-            if (_sapp_tc.app.quit_ordered) {
-                w->in_tick = false;
-                return;
-            }
-        }
-        if (w->occluded && !_sapp_tc.app.device_lost_notified) {
-            const HRESULT hr = w->swap_chain->Present(0, DXGI_PRESENT_TEST);
-            if (_sapp_tc_d3d11_check_device_loss(hr)) { w->in_tick = false; return; }
-            w->occluded = (hr == DXGI_STATUS_OCCLUDED);
-        }
-        if (_sapp_tc.app.desc.frame_cb) {
-            _sapp_tc.app.desc.frame_cb();
-        } else if (_sapp_tc.app.desc.frame_userdata_cb) {
-            _sapp_tc.app.desc.frame_userdata_cb(_sapp_tc.app.desc.user_data);
-        }
-        _sapp_tc.app.frame_count++;
-        w->in_tick = false;
-        bool presented = false;
-        if (_sapp_tc.app.skip_present || _sapp_tc.app.device_lost_notified) {
-            /* one-shot event-driven present suppression (TrussC patch: keeps
-               the last image on screen when a frame decides not to draw) */
-            _sapp_tc.app.skip_present = false;
-        } else {
-            const UINT flags = from_modal ? DXGI_PRESENT_DO_NOT_WAIT : 0;
-            const HRESULT hr = w->swap_chain->Present((UINT)swap_interval, flags);
-            if (_sapp_tc_d3d11_check_device_loss(hr)) return;
-            w->occluded = (hr == DXGI_STATUS_OCCLUDED);
-            presented = SUCCEEDED(hr) && (hr != DXGI_STATUS_OCCLUDED);
-        }
-        if (presented) {
-            w->credit_held = false;
-        }
-        if (w->iconified) {
-            /* minimized: frame_cb keeps running, throttled (upstream Sleep(16)
-               / mac fallback-timer parity) */
-            _sapp_tc_win32_pace(w, 0.0166 * (double)swap_interval);
-        } else if (presented && w->frame_wait) {
-            w->earliest_next = 0.0;     /* vsync pacing via the waitable */
-        } else {
-            _sapp_tc_win32_pace(w, w->refresh_period * (double)swap_interval);
-        }
-    } else {
-        /* secondary window */
-        if (w->iconified) {
-            if (w->desc.tick_cb) {
-                sapp_window handle = { w->win_id };
-                w->desc.tick_cb(handle, w->desc.user_data);
-            }
-            _sapp_tc_win32_pace(w, w->refresh_period);
-            return;
-        }
-        if (w->occluded && !_sapp_tc.app.device_lost_notified) {
-            /* cheap visibility poll: a fully covered window costs one
-               present-test per pace period and never renders or stalls */
-            const HRESULT hr = w->swap_chain->Present(0, DXGI_PRESENT_TEST);
-            if (_sapp_tc_d3d11_check_device_loss(hr)) return;
-            if (hr == DXGI_STATUS_OCCLUDED) {
-                if (w->desc.tick_cb) {
-                    sapp_window handle = { w->win_id };
-                    w->desc.tick_cb(handle, w->desc.user_data);
-                }
-                _sapp_tc_win32_pace(w, w->refresh_period);
-                return;
-            }
-            w->occluded = false;
-            _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESUMED);
-        }
-        if (!_sapp_tc.app.device_lost_notified && !from_modal && _sapp_tc_win32_update_dimensions(w)) {
-            if (!_sapp_tc_d3d11_resize(w)) return;
-            _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESIZED);
-        }
-        w->in_tick = true;
-        if (w->desc.tick_cb) {
-            sapp_window handle = { w->win_id };
-            w->desc.tick_cb(handle, w->desc.user_data);
-        }
-        w->in_tick = false;
-        if (_sapp_tc.app.device_lost_notified) {
-            _sapp_tc_win32_pace(w, w->refresh_period);
-            return;
-        }
-        if (w->skip_present) {
-            w->skip_present = false;
-            _sapp_tc_win32_pace(w, w->refresh_period);
-            return;
-        }
-        const UINT flags = from_modal ? DXGI_PRESENT_DO_NOT_WAIT : 0;
-        const HRESULT hr = w->swap_chain->Present(1, flags);
+    // Probe, hidden admission, dimensions: RESUMED precedes RESIZED.
+    if (_sapp_tc_native_occluded(w) && !_sapp_tc.app.device_lost_notified) {
+        const HRESULT hr = w->swap_chain->Present(0, DXGI_PRESENT_TEST);
         if (_sapp_tc_d3d11_check_device_loss(hr)) return;
-        if (hr == DXGI_STATUS_OCCLUDED) {
-            w->occluded = true;
-            _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_SUSPENDED);
-            _sapp_tc_win32_pace(w, w->refresh_period);
-        } else if (SUCCEEDED(hr)) {
-            w->credit_held = false;
-            if (w->frame_wait) {
-                w->earliest_next = 0.0;
-            } else {
-                _sapp_tc_win32_pace(w, w->refresh_period);
-            }
-        } else {
-            _sapp_tc_win32_pace(w, w->refresh_period);
-        }
+        _sapp_tc_win32_observe_occlusion(w, hr == DXGI_STATUS_OCCLUDED);
     }
+    const bool admitted = w->draw_while_hidden || !_sapp_tc_native_hidden(w);
+    if (admitted && !_sapp_tc.app.device_lost_notified && !w->from_modal &&
+        _sapp_tc_win32_update_dimensions(w)) {
+        if (!_sapp_tc_d3d11_resize(w)) return;
+        _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESIZED);
+    }
+    // Hidden ticks retain the existing client's update policy, under the same
+    // reentry guard as visible ticks. Native drawing/presentation is admitted above.
+    if (w->desc.tick_cb) {
+        sapp_window handle = { w->win_id };
+        w->desc.tick_cb(handle, w->desc.user_data);
+    }
+    if (w->cancel_tick) return;
+    ++w->frame_count;
+    const bool skip = w->skip_present;
+    w->skip_present = false; // one-shot is consumed at the completed tick boundary, even on loss
+    if (admitted && !skip && !_sapp_tc.app.device_lost_notified) {
+        _sapp_tc_win32_swap(w);
+        if (_sapp_tc.app.device_lost_notified) return;
+    } else {
+        // Win32 fallback deadlines follow completed callback/presentation work.
+        _sapp_tc_win32_pace(w, w->refresh_period * (double)w->swap_interval);
+    }
+    if (_sapp_tc_native_iconified(w) && w->draw_while_hidden) {
+        // Preserve the legacy drawing-while-minimized fallback interval.
+        _sapp_tc_win32_pace(w, 0.0166 * (double)w->swap_interval);
+    }
+}
+
+static void _sapp_tc_win32_modal_tick(_sapp_tc_window_t* w) {
+    if (w->in_tick) return;
+    w->from_modal = true;
+    struct SourceScope {
+        _sapp_tc_window_t* w;
+        ~SourceScope() { w->from_modal = false; }
+    } source{w};
+    _sapp_tc_win32_tick(w);
 }
 
 static bool _sapp_tc_win32_request_exit(_sapp_tc_window_t* w) {
     if (!_sapp_tc.app.quit_ordered) {
         _sapp_tc.app.quit_requested = true;
-        _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_QUIT_REQUESTED);
+        try {
+            _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_QUIT_REQUESTED);
+        } catch (...) {
+            _sapp_tc.app.quit_requested = false;
+        }
     }
     return _sapp_tc.app.quit_ordered || _sapp_tc.app.quit_requested;
 }
@@ -7476,8 +7788,28 @@ static void _sapp_tc_win32_cleanup(void) {
     }
 }
 
+static void _sapp_tc_win32_close(_sapp_tc_window_t* w) {
+    if (w->is_main) {
+        trussc::internal::setExitReasonIfEmpty("window-close");
+        if (_sapp_tc_win32_request_exit(w)) {
+            _sapp_tc.app.quit_ordered = true;
+            ShutdownBlockReasonDestroy(w->hwnd);
+        }
+        if (_sapp_tc.app.quit_ordered) {
+            PostQuitMessage(0);
+        }
+    } else {
+        /* user closed a secondary window: notify; the app accepts by
+           calling sapp_destroy_window() (w may be freed after this) */
+        if (w->desc.close_cb) {
+            sapp_window handle = { w->win_id };
+            w->desc.close_cb(handle, w->desc.user_data);
+        }
+    }
+}
+
 /*-- window procedure --------------------------------------------------------*/
-static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+static LRESULT _sapp_tc_wndproc_impl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_NCCREATE) {
         /* stash the window struct passed via CreateWindowExW lpCreateParams */
         const CREATESTRUCTW* cs = (const CREATESTRUCTW*)lParam;
@@ -7531,29 +7863,14 @@ static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             }
             return 0;
         case WM_CLOSE:
-            if (w->is_main) {
-                trussc::internal::setExitReasonIfEmpty("window-close");
-                if (_sapp_tc_win32_request_exit(w)) {
-                    _sapp_tc.app.quit_ordered = true;
-                    ShutdownBlockReasonDestroy(hwnd);
-                }
-                if (_sapp_tc.app.quit_ordered) {
-                    PostQuitMessage(0);
-                }
-            } else {
-                /* user closed a secondary window: notify; the app accepts by
-                   calling sapp_destroy_window() (w may be freed after this) */
-                if (w->desc.close_cb) {
-                    sapp_window handle = { w->win_id };
-                    w->desc.close_cb(handle, w->desc.user_data);
-                }
-            }
-            return 0;   /* never let DefWindowProc destroy the window here */
+            if (w->in_tick) w->close_requested = true;
+            else _sapp_tc_win32_close(w);
+            return 0;   /* disposal only follows the common close decision */
         case WM_SYSCOMMAND:
             switch (wParam & 0xFFF0) {
                 case SC_SCREENSAVE:
                 case SC_MONITORPOWER:
-                    if (_sapp_tc.app.fullscreen) {
+                    if (_sapp_tc_win32_any_fullscreen()) {
                         return 0;   /* no screensaver/monitor-off in fullscreen */
                     }
                     break;
@@ -7569,14 +7886,21 @@ static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             /* only iconify tracking here; RESIZED + ResizeBuffers are
                coalesced into the tick (upstream parity) */
             const bool iconified = (wParam == SIZE_MINIMIZED);
-            if (iconified != w->iconified) {
-                w->iconified = iconified;
+            const bool was_iconified = _sapp_tc_native_iconified(w);
+            const bool was_hidden = _sapp_tc_native_hidden(w);
+            w->iconified = iconified;
+            const bool now_hidden = _sapp_tc_native_hidden(w);
+            if (_sapp_tc_native_iconified(w) != was_iconified) {
+                const sapp_window handle = { w->win_id };
                 _sapp_tc_win32_app_event(w, iconified ? SAPP_EVENTTYPE_ICONIFIED
                                                       : SAPP_EVENTTYPE_RESTORED);
+                if (_sapp_tc_lookup(handle) != w) return 0;
                 if (!iconified) {
                     w->earliest_next = 0.0;     /* resume promptly */
                 }
             }
+            if (was_hidden != now_hidden)
+                _sapp_tc_win32_app_event(w, now_hidden ? SAPP_EVENTTYPE_SUSPENDED : SAPP_EVENTTYPE_RESUMED);
             break;
         }
         case WM_SETFOCUS:
@@ -7700,7 +8024,7 @@ static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
                         tw->waitable_ready = true;
                     }
                     if (_sapp_tc_win32_window_due(tw)) {
-                        _sapp_tc_win32_tick(tw, true);
+                        _sapp_tc_win32_modal_tick(tw);
                     }
                 }
             }
@@ -7724,6 +8048,27 @@ static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             break;
     }
     return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    try {
+        return _sapp_tc_wndproc_impl(hwnd, msg, wParam, lParam);
+    } catch (...) {
+        if (msg == WM_ENDSESSION && wParam) {
+            _sapp_tc.app.quit_ordered = true;
+            try { _sapp_tc_win32_cleanup(); } catch (...) { }
+            TerminateProcess(GetCurrentProcess(),
+                trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1);
+            return 0;
+        }
+        if (msg == WM_QUERYENDSESSION) {
+            _sapp_tc.app.quit_requested = false;
+            ShutdownBlockReasonCreate(hwnd, L"The app is still busy.");
+            return FALSE;
+        }
+        if (msg == WM_CLOSE) return 0; // a throwing close client must not let DefWindowProc destroy the HWND
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
 }
 
 /*-- window creation / destruction ------------------------------------------*/
@@ -7754,11 +8099,11 @@ static bool _sapp_tc_win32_ensure_wndclass(void) {
    one client resize. Pixel overrides use render DPI for pixels -> points,
    just like setSize (render DPI can be 1 with high_dpi disabled). */
 static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wchar_t* title,
-        DWORD style, DWORD ex_style, int x, int y, bool use_default_size) {
+        DWORD style, DWORD ex_style, int x, int y) {
     if (!_sapp_tc_win32_ensure_wndclass()) return false;
     int outer_w = CW_USEDEFAULT;
     int outer_h = CW_USEDEFAULT;
-    if (!use_default_size) {
+    if (w->desc.width > 0 && w->desc.height > 0) {
         RECT rect = { 0, 0, (LONG)w->desc.width, (LONG)w->desc.height };
         AdjustWindowRectEx(&rect, style, FALSE, ex_style);
         outer_w = (int)(rect.right - rect.left);
@@ -7780,17 +8125,23 @@ static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wcha
     _sapp_tc_win32_update_refresh(w);
     _sapp_tc_win32_update_scale(w);
     if (!_sapp_tc_window_pixels_representable(w->desc._tc_pixel_width, w->desc._tc_pixel_height, w->dpi_scale)) {
-        DestroyWindow(w->hwnd);
-        w->hwnd = NULL;
         return false;
     }
-    if (!use_default_size && (w->window_scale != 1.0f)) {
+    const bool correct_size = w->window_scale != 1.0f ||
+        w->desc.width <= 0 || w->desc.height <= 0 ||
+        (w->desc._tc_pixel_width > 0 && w->desc._tc_pixel_width != w->desc.width) ||
+        (w->desc._tc_pixel_height > 0 && w->desc._tc_pixel_height != w->desc.height);
+    if (correct_size) {
+        RECT client;
+        if (!GetClientRect(w->hwnd, &client)) return false;
         const double width = _sapp_tc_window_points(w->desc.width, w->desc._tc_pixel_width, w->dpi_scale);
         const double height = _sapp_tc_window_points(w->desc.height, w->desc._tc_pixel_height, w->dpi_scale);
-        const LONG pw = w->desc._tc_pixel_width > 0 ? (LONG)(width * w->window_scale + 0.5) :
-            (LONG)((float)w->desc.width * w->window_scale + 0.5f);
-        const LONG ph = w->desc._tc_pixel_height > 0 ? (LONG)(height * w->window_scale + 0.5) :
-            (LONG)((float)w->desc.height * w->window_scale + 0.5f);
+        const LONG pw = (w->desc.width <= 0 && w->desc._tc_pixel_width <= 0) ? client.right :
+            (w->desc._tc_pixel_width > 0 ? (LONG)(width * w->window_scale + 0.5) :
+                (LONG)((float)w->desc.width * w->window_scale + 0.5f));
+        const LONG ph = (w->desc.height <= 0 && w->desc._tc_pixel_height <= 0) ? client.bottom :
+            (w->desc._tc_pixel_height > 0 ? (LONG)(height * w->window_scale + 0.5) :
+                (LONG)((float)w->desc.height * w->window_scale + 0.5f));
         RECT rect = { 0, 0, pw, ph };
         if (_sapp_tc.GetDpiForWindow && _sapp_tc.AdjustWindowRectExForDpi) {
             _sapp_tc.AdjustWindowRectExForDpi(&rect, style, FALSE, ex_style,
@@ -7806,73 +8157,108 @@ static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wcha
     return true;
 }
 
-static void _sapp_tc_win32_destroy_window_resources(_sapp_tc_window_t* w) {
-    _sapp_tc_d3d11_destroy_render_targets(w);
-    if (w->frame_wait) {
-        CloseHandle(w->frame_wait);
-        w->frame_wait = NULL;
-    }
-    _SAPP_TC_RELEASE(w->swap_chain);
+static void _sapp_tc_win32_unwind(_sapp_tc_window_t* w) {
+    if (!w) return;
+    w->ready = false;
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i)
+        if (_sapp_tc.windows[i] == w) _sapp_tc.windows[i] = 0;
+    if (_sapp_tc.app.main == w) _sapp_tc.app.main = 0;
     if (w->hwnd) {
         KillTimer(w->hwnd, _SAPP_TC_MODAL_TIMER);
-        SetWindowLongPtrW(w->hwnd, GWLP_USERDATA, 0);   /* wndproc goes inert */
-        DestroyWindow(w->hwnd);
-        w->hwnd = NULL;
+        SetWindowLongPtrW(w->hwnd, GWLP_USERDATA, 0);
     }
+    _sapp_tc_d3d11_destroy_render_targets(w);
+    if (w->frame_wait) CloseHandle(w->frame_wait);
+    _SAPP_TC_RELEASE(w->swap_chain);
+    if (w->hwnd) DestroyWindow(w->hwnd);
+    free(w->title);
+    delete w;
+}
+
+static bool _sapp_tc_win32_initialize_dimensions(_sapp_tc_window_t* w) {
+    _sapp_tc_win32_update_dimensions(w);
+    return w->fb_width > 0 && w->fb_height > 0 && w->win_width > 0 && w->win_height > 0;
+}
+
+static bool _sapp_tc_win32_trust_hidden_signals(void) {
+    return true;
+}
+
+static _sapp_tc_window_t* _sapp_tc_win32_create_window(const _sapp_tc_native_desc* d) {
+    int slot = -1;
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i)
+        if (!_sapp_tc.windows[i]) { slot = i; break; }
+    // Bound (compatibility): retain the 32-window registry; exhaustion rejects creation.
+    if (slot < 0) return 0;
+    uint32_t id;
+    if (!_sapp_tc_next_window_id(&_sapp_tc.next_id, &id)) return 0;
+    _sapp_tc_window_t* w = new (std::nothrow) _sapp_tc_window_t();
+    if (!w) return 0;
+    w->win_id = id;
+    w->desc = d->window;
+    w->draw_while_hidden = d->draw_while_hidden;
+    w->trust_hidden_signals = _sapp_tc_win32_trust_hidden_signals();
+    w->swap_interval = d->swap_interval;
+    w->title_limit = d->title_limit;
+    w->color_format = d->color_format;
+    w->depth_format = d->depth_format;
+    w->color_fmt = d->color_format == SAPP_PIXELFORMAT_RGB10A2 ?
+        DXGI_FORMAT_R10G10B10A2_UNORM : DXGI_FORMAT_B8G8R8A8_UNORM;
+    w->window_scale = w->dpi_scale = w->mouse_scale = 1.0f;
+    w->refresh_period = 1.0 / 60.0;
+    const char* title = d->window.title ? d->window.title : "TrussC";
+    const size_t capacity = w->title_limit ? w->title_limit : strlen(title) + 1;
+    w->title = (char*)calloc(capacity, 1);
+    if (!w->title) { _sapp_tc_win32_unwind(w); return 0; }
+    // Bound (compatibility): launch title storage retains the legacy 255-byte prefix and terminator.
+    strncpy(w->title, title, capacity - 1);
+    w->desc.title = w->title;
+    // Bound (conversion): native titles retain the 256-wide-character conversion buffer; overflow fails conversion.
+    WCHAR wide[256];
+    _sapp_tc_win32_utf8_to_wide(w->title, wide, 256);
+    const DWORD style = w->desc.borderless ? WS_POPUP | WS_SYSMENU :
+        WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU |
+        WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SIZEBOX;
+    const DWORD ex_style = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
+    if (!_sapp_tc_win32_create_native_window(w, wide, style, ex_style, w->desc.x, w->desc.y)) {
+        _sapp_tc_win32_unwind(w);
+        return 0;
+    }
+    // Stage startup geometry while unpublished, retaining the covered first
+    // launch and sizing the initial drawable before any event can escape.
+    if (d->fullscreen) _sapp_tc_win32_set_fullscreen(w, true, SWP_HIDEWINDOW);
+    if (!_sapp_tc_win32_initialize_dimensions(w) || !_sapp_tc_d3d11_create_swapchain(w)) {
+        _sapp_tc_win32_unwind(w);
+        return 0;
+    }
+    if (d->clear_on_create) _sapp_tc.app.device_context->ClearRenderTargetView(w->rtv, d->clear_color);
+    _sapp_tc.windows[slot] = w;
+    w->ready = true;
+    ShowWindow(w->hwnd, SW_SHOW);
+    // Showing may synchronously deliver a client event that destroys this creation.
+    if (_sapp_tc_lookup(sapp_window{ id }) != w) return 0;
+    DragAcceptFiles(w->hwnd, TRUE);
+    return w;
 }
 
 static bool _sapp_tc_win32_create_main_window(void) {
     const sapp_desc* d = &_sapp_tc.app.desc;
-    int slot = -1;
-    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
-        if (_sapp_tc.windows[i] == 0) { slot = i; break; }
-    }
-    if (slot < 0) {
-        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
-                     "error: ", "Main window creation failed: no free window slot");
-        return false;
-    }
-
-    _sapp_tc_window_t* w = new _sapp_tc_window_t();
-    w->win_id = ++_sapp_tc.next_id;
+    _sapp_tc_native_desc native = {};
+    native.window = _sapp_tc_normalize_main_window(d);
+    native.window.event_cb = _sapp_tc_main_event_tramp;
+    native.window.tick_cb = _sapp_tc_main_tick_tramp;
+    native.swap_interval = d->swap_interval;
+    native.fullscreen = d->fullscreen;
+    native.draw_while_hidden = d->_tc_draw_while_hidden > 0;
+    native.title_limit = 256;
+    native.color_format = SAPP_PIXELFORMAT_RGB10A2;
+    native.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL;
+    _sapp_tc_window_t* w = _sapp_tc_win32_create_window(&native);
+    if (!w) return false;
     w->is_main = true;
-    w->color_fmt = DXGI_FORMAT_R10G10B10A2_UNORM;   /* TrussC 10-bit output */
-    w->window_scale = w->dpi_scale = w->mouse_scale = 1.0f;
-    w->refresh_period = 1.0 / 60.0;
-
-    /* per-window desc: the app callbacks are reached via the trampoline */
-    w->desc.width = d->width;
-    w->desc.height = d->height;
-    w->desc._tc_pixel_width = d->_tc_pixel_width;
-    w->desc._tc_pixel_height = d->_tc_pixel_height;
-    w->desc.sample_count = d->sample_count;
-    w->desc.no_high_dpi = !d->high_dpi;
-    w->desc.event_cb = _sapp_tc_main_event_tramp;
-
-    const DWORD style = WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU |
-                        WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SIZEBOX;
-    const DWORD ex_style = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
-    /* width/height 0: let the OS pick (CW_USEDEFAULT, upstream parity) */
-    const bool use_default_size = (d->width <= 0) || (d->height <= 0);
-    if (!_sapp_tc_win32_create_native_window(w, _sapp_tc.app.window_title_wide,
-            style, ex_style, -1, -1, use_default_size)) {
-        delete w;
-        return false;
-    }
-    _sapp_tc.windows[slot] = w;
+    w->events_enabled = _sapp_tc_app_events_enabled;
     _sapp_tc.app.main = w;
-    w->ready = true;
-    _sapp_tc_win32_update_dimensions(w);    /* silent startup sizing (no RESIZED) */
-    if (d->fullscreen) {
-        _sapp_tc_win32_set_fullscreen(true, SWP_HIDEWINDOW);
-        _sapp_tc_win32_update_dimensions(w);
-    }
-    ShowWindow(w->hwnd, SW_SHOW);
-    /* drop target is always registered; the handler gates on enable_dragndrop */
-    DragAcceptFiles(w->hwnd, TRUE);
-    if (!_sapp_tc_d3d11_create_swapchain(w)) {
-        return false;
-    }
+    _sapp_tc.app.desc.window_title = w->title;
     _sapp_tc.app.valid = true;
     return true;
 }
@@ -7960,7 +8346,7 @@ static void _sapp_tc_win32_run_loop(void) {
         for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
             if (_sapp_tc_win32_window_due(w)) {
-                _sapp_tc_win32_tick(w, false);
+                _sapp_tc_win32_tick(w);
             }
         }
         /* sapp_window_request_close(): post WM_CLOSE to that window, so the
@@ -7968,7 +8354,7 @@ static void _sapp_tc_win32_run_loop(void) {
            on its close button, outside every tick */
         for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
-            if (!w || w->is_main || !w->close_requested) continue;
+            if (!w || w->in_tick || !w->close_requested) continue;
             w->close_requested = false;
             if (w->hwnd) PostMessageW(w->hwnd, WM_CLOSE, 0, 0);
         }
@@ -7986,71 +8372,28 @@ extern "C" {
 
 sapp_window sapp_create_window(const sapp_window_desc* desc) {
     sapp_window invalid = { 0 };
-    if (!desc) return invalid;
-    if (!_sapp_tc.app.valid || !_sapp_tc.app.device) return invalid;
-    _sapp_tc_init_keytable();
-
-    int slot = -1;
-    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
-        if (_sapp_tc.windows[i] == 0) { slot = i; break; }
-    }
-    if (slot < 0) return invalid;
-
-    _sapp_tc_window_t* w = new _sapp_tc_window_t();
-    w->win_id = ++_sapp_tc.next_id;
-    w->desc = *desc;
-    if (w->desc.width <= 0) w->desc.width = 640;
-    if (w->desc.height <= 0) w->desc.height = 480;
-    if (w->desc.sample_count <= 0) w->desc.sample_count = 1;
-    w->color_fmt = DXGI_FORMAT_B8G8R8A8_UNORM;  /* secondary windows are BGRA8 (mac parity) */
-    w->window_scale = w->dpi_scale = w->mouse_scale = 1.0f;
-    w->refresh_period = 1.0 / 60.0;
-
-    DWORD style;
-    if (w->desc.borderless) {
-        style = WS_POPUP | WS_SYSMENU;
-    } else {
-        style = WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU |
-                WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SIZEBOX;
-    }
-    const DWORD ex_style = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
-    WCHAR title[256];
-    _sapp_tc_win32_utf8_to_wide(w->desc.title ? w->desc.title : "TrussC", title, 256);
-    const int px = (desc->x >= 0) ? desc->x : 120;
-    const int py = (desc->y >= 0) ? desc->y : 120;
-    if (!_sapp_tc_win32_create_native_window(w, title, style, ex_style, px, py, false)) {
-        delete w;
-        return invalid;
-    }
-    w->ready = true;
-    _sapp_tc_win32_update_dimensions(w);
-    ShowWindow(w->hwnd, SW_SHOW);
-    DragAcceptFiles(w->hwnd, TRUE);
-    if (!_sapp_tc_d3d11_create_swapchain(w)) {
-        _sapp_tc_win32_destroy_window_resources(w);
-        delete w;
-        return invalid;
-    }
-    _sapp_tc.windows[slot] = w;
-    sapp_window handle = { w->win_id };
-    return handle;
+    if (!desc || !_sapp_tc.app.valid || !_sapp_tc.app.device) return invalid;
+    _sapp_tc_native_desc native = {};
+    native.window = _sapp_tc_normalize_window(desc);
+    native.window.x = desc->x >= 0 ? desc->x : 120;
+    native.window.y = desc->y >= 0 ? desc->y : 120;
+    native.swap_interval = 1;
+    native.color_format = SAPP_PIXELFORMAT_BGRA8;
+    native.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL;
+    _sapp_tc_window_t* w = _sapp_tc_win32_create_window(&native);
+    return w ? sapp_window{w->win_id} : invalid;
 }
 
 void sapp_destroy_window(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    if (!w || w->is_main) return;   /* the main window is owned by sapp_run */
-    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
-        if (_sapp_tc.windows[i] == w) { _sapp_tc.windows[i] = 0; break; }
-    }
-    w->desc.close_cb = 0;
-    _sapp_tc_win32_destroy_window_resources(w);
-    delete w;
+    if (!w) return;
+    if (w->is_main) { w->close_requested = true; return; }
+    _sapp_tc_win32_unwind(w);
 }
 
 void sapp_window_request_close(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    if (!w || w->is_main) return;   /* the main window: sapp_request_quit() */
-    w->close_requested = true;
+    if (w) w->close_requested = true;
 }
 
 bool sapp_window_valid(sapp_window win) {
@@ -8088,14 +8431,33 @@ int sapp_window_sample_count(sapp_window win) {
 }
 
 void sapp_tc_window_skip_present(sapp_window win) {
-    _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    if (w && !w->is_main) w->skip_present = true;
+    _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+    if (w) w->skip_present = true;
+}
+
+void sapp_tc_window_draw_while_hidden(sapp_window win, bool allow) {
+    _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+    if (w) w->draw_while_hidden = allow;
+}
+
+uint32_t sapp_tc_window_fullscreen_phase(sapp_window win) {
+    _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+    return (uint32_t)(w ? w->fullscreen_state.phase : _sapp_tc_fullscreen_phase::Windowed);
+}
+
+void sapp_tc_window_set_fullscreen(sapp_window win, bool full) {
+    _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+    _sapp_tc_win32_set_fullscreen(w, full, SWP_SHOWWINDOW);
+}
+
+void sapp_tc_window_toggle_fullscreen(sapp_window win) {
+    _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+    if (w) _sapp_tc_win32_set_fullscreen(w, !w->fullscreen, SWP_SHOWWINDOW);
 }
 
 bool sapp_window_occluded(sapp_window win) {
-    /* both flags gate the secondary tick (see the declaration) */
     _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
-    return w ? (w->occluded || w->iconified) : false;
+    return w ? _sapp_tc_native_hidden(w) : false;
 }
 
 void sapp_window_set_title(sapp_window win, const char* title) {
@@ -8150,6 +8512,8 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { (void)win; return 0; }
 
 void sapp_run(const sapp_desc* desc) {
     if (!desc) return;
+    // Keep creation identities across repeated runs; reset only process services.
+    memset(&_sapp_tc.app, 0, sizeof(_sapp_tc.app));
     _sapp_tc.app.desc = *desc;
     sapp_desc* d = &_sapp_tc.app.desc;
     if (d->sample_count <= 0) d->sample_count = 1;
@@ -8157,12 +8521,8 @@ void sapp_run(const sapp_desc* desc) {
     if (d->clipboard_size <= 0) d->clipboard_size = 8192;
     if (d->max_dropped_files <= 0) d->max_dropped_files = 1;
     if (d->max_dropped_file_path_length <= 0) d->max_dropped_file_path_length = 2048;
-    strncpy(_sapp_tc.app.window_title, d->window_title ? d->window_title : "sokol",
-            sizeof(_sapp_tc.app.window_title) - 1);
-    d->window_title = _sapp_tc.app.window_title;
-    _sapp_tc_win32_utf8_to_wide(_sapp_tc.app.window_title,
-        _sapp_tc.app.window_title_wide,
-        (int)(sizeof(_sapp_tc.app.window_title_wide) / sizeof(WCHAR)));
+    if (d->_tc_draw_while_hidden == 0) d->_tc_draw_while_hidden = 1;
+
     if (d->enable_clipboard) {
         _sapp_tc.app.clipboard_enabled = true;
         _sapp_tc.app.clipboard_size = d->clipboard_size;
@@ -8194,23 +8554,10 @@ void sapp_run(const sapp_desc* desc) {
     /* user cleanup runs BEFORE any GPU/window teardown (the app shuts down
        sokol_gfx here, which still needs the device) */
     _sapp_tc_win32_cleanup();
-    /* destroy any windows the app left open (secondary first, then main) */
-    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
-        _sapp_tc_window_t* w = _sapp_tc.windows[i];
-        if (!w || w->is_main) continue;
-        _sapp_tc.windows[i] = 0;
-        _sapp_tc_win32_destroy_window_resources(w);
-        delete w;
-    }
-    if (_sapp_tc.app.main) {
-        _sapp_tc_window_t* w = _sapp_tc.app.main;
-        for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
-            if (_sapp_tc.windows[i] == w) { _sapp_tc.windows[i] = 0; break; }
-        }
-        _sapp_tc.app.main = 0;
-        _sapp_tc_win32_destroy_window_resources(w);
-        delete w;
-    }
+    for (int i = _SAPP_TC_MAX_WINDOWS - 1; i >= 0; --i)
+        _sapp_tc_win32_unwind(_sapp_tc.windows[i]);
+    _sapp_tc.app.desc.window_title = 0;
+
     _SAPP_TC_RELEASE(_sapp_tc.app.device_context);
     _SAPP_TC_RELEASE(_sapp_tc.app.device);
     if (_sapp_tc.wndclass_registered) {
@@ -8253,12 +8600,13 @@ float sapp_heightf(void) {
 }
 
 int sapp_sample_count(void) {
-    return _sapp_tc.app.desc.sample_count > 0 ? _sapp_tc.app.desc.sample_count : 1;
+    const _sapp_tc_window_t* w = _sapp_tc.app.main;
+    return w ? w->desc.sample_count : (_sapp_tc.app.desc.sample_count > 0 ? _sapp_tc.app.desc.sample_count : 1);
 }
 
 bool sapp_high_dpi(void) {
     _sapp_tc_window_t* w = _sapp_tc.app.main;
-    return _sapp_tc.app.desc.high_dpi && w && (w->dpi_scale >= 1.5f);
+    return w && !w->desc.no_high_dpi && (w->dpi_scale >= 1.5f);
 }
 
 float sapp_dpi_scale(void) {
@@ -8267,7 +8615,7 @@ float sapp_dpi_scale(void) {
 }
 
 uint64_t sapp_frame_count(void) {
-    return _sapp_tc.app.frame_count;
+    return _sapp_tc.app.main ? _sapp_tc.app.main->frame_count : 0;
 }
 
 double sapp_frame_duration(void) {
@@ -8295,7 +8643,7 @@ void sapp_consume_event(void) {
 void sapp_skip_present(void) {
     /* one-shot; HONORED on D3D11 (TrussC patch: event-driven present
        suppression -- keeps the last image on screen, prevents flicker) */
-    _sapp_tc.app.skip_present = true;
+    sapp_tc_window_skip_present(sapp_window{0});
 }
 
 void sapp_show_keyboard(bool show) {
@@ -8410,25 +8758,26 @@ const char* sapp_get_clipboard_string(void) {
 }
 
 void sapp_set_window_title(const char* str) {
-    if (!str) return;
-    strncpy(_sapp_tc.app.window_title, str, sizeof(_sapp_tc.app.window_title) - 1);
-    _sapp_tc_win32_utf8_to_wide(_sapp_tc.app.window_title,
-        _sapp_tc.app.window_title_wide,
-        (int)(sizeof(_sapp_tc.app.window_title_wide) / sizeof(WCHAR)));
     _sapp_tc_window_t* w = _sapp_tc.app.main;
-    if (w && w->hwnd) {
-        SetWindowTextW(w->hwnd, _sapp_tc.app.window_title_wide);
-    }
+    if (!str || !w || !w->title) return;
+    // Bound (compatibility): legacy updates keep the 255-byte prefix in stable borrowed storage.
+    strncpy(w->title, str, w->title_limit - 1);
+    w->title[w->title_limit - 1] = 0;
+    WCHAR wide[256];
+    _sapp_tc_win32_utf8_to_wide(w->title, wide, 256);
+    if (w->hwnd) SetWindowTextW(w->hwnd, wide);
 }
 
 bool sapp_is_fullscreen(void) {
-    return _sapp_tc.app.fullscreen;
+    return _sapp_tc.app.main && _sapp_tc.app.main->fullscreen;
 }
 
 void sapp_toggle_fullscreen(void) {
-    if (!_sapp_tc.app.main) return;
-    _sapp_tc_win32_set_fullscreen(!_sapp_tc.app.fullscreen, SWP_SHOWWINDOW);
+    sapp_tc_window_toggle_fullscreen(sapp_window{0});
 }
+
+sapp_desc sapp_query_desc(void) { return _sapp_tc.app.desc; }
+void* sapp_userdata(void) { return _sapp_tc.app.desc.user_data; }
 
 int sapp_get_num_dropped_files(void) {
     return _sapp_tc.app.drop_enabled ? _sapp_tc.app.drop_num_files : 0;
@@ -8441,11 +8790,11 @@ const char* sapp_get_dropped_file_path(int index) {
 }
 
 sapp_pixel_format sapp_color_format(void) {
-    return SAPP_PIXELFORMAT_RGB10A2;    /* TrussC 10-bit output on D3D11 */
+    return _sapp_tc.app.main ? _sapp_tc.app.main->color_format : SAPP_PIXELFORMAT_RGB10A2;
 }
 
 sapp_pixel_format sapp_depth_format(void) {
-    return SAPP_PIXELFORMAT_DEPTH_STENCIL;
+    return _sapp_tc.app.main ? _sapp_tc.app.main->depth_format : SAPP_PIXELFORMAT_DEPTH_STENCIL;
 }
 
 const void* sapp_win32_get_hwnd(void) {
@@ -8600,44 +8949,20 @@ sapp_swapchain sapp_get_swapchain(void) {
 #define _SAPP_X11_MAX_X11_KEYCODES (256)
 #define _SAPP_TC_XDND_VERSION (5)
 
-/* EMA-filtered frame timer, port of sokol_app.h's _sapp_timing_* (X11 has no
-   display-link timestamps, so this measured filter is the only dt source) */
-typedef struct {
-    double last;        /* previous sample time, 0 = none yet */
-    double ema;
-    double smooth_dt;
-    double dt;          /* last raw (clamped) delta */
-} _sapp_tc_timing_t;
+#include "util/sokol_window_native.h"
 
-typedef struct _sapp_tc_window_t {
-    bool skip_present; /* one-shot, per-window EVENT_DRIVEN presentation */
-    uint32_t win_id;
-    sapp_window_desc desc;
-    bool is_main;               /* window #0: created by sapp_run, drives the app callbacks */
-    bool ready;                 /* creation finished; event dispatch may deliver events */
-    Window xwin;                /* the X11 window XID */
-    Colormap colormap;          /* per-window (created against the shared visual) */
+typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
+    Window xwin;
+    Colormap colormap;
 #if defined(SOKOL_GLES3)
-    EGLSurface drawable;       /* one surface per X11 window, one shared context */
+    EGLSurface drawable;
 #else
     GLXWindow drawable;
 #endif
-    int fb_width, fb_height;    /* framebuffer pixels (== X11 window pixels) */
-    int win_width, win_height;  /* logical points */
-    float dpi_scale;            /* framebuffer px per point (Xft.dpi / 96) */
-    double earliest_next;       /* CLOCK_MONOTONIC seconds; window is not due before this */
-    double last_present;        /* time of the previous real present (main pacing probe) */
-    double frame_duration;
-    _sapp_tc_timing_t timing;
-    bool iconified;             /* WM_STATE == IconicState */
-    bool occluded;              /* VisibilityFullyObscured, shared scheduler input */
-    bool in_tick;
-    bool close_requested;       /* sapp_window_request_close(): close_cb at the loop tail */
     bool mouse_pos_valid;
-    float mouse_x, mouse_y;     /* last position in event coordinates (raw px) */
-    float mouse_dx, mouse_dy;
-    uint8_t mouse_buttons;      /* held-button bitmask (enter/leave suppression) */
-    bool key_repeat[_SAPP_X11_MAX_X11_KEYCODES];  /* software repeat tracking */
+    float mouse_x, mouse_y, mouse_dx, mouse_dy;
+    uint8_t mouse_buttons;
+    bool key_repeat[_SAPP_X11_MAX_X11_KEYCODES];
 } _sapp_tc_window_t;
 
 static struct {
@@ -8690,7 +9015,7 @@ static struct {
     EGLContext ctx;
     struct { bool available; int major_opcode; } xi;
     bool mouse_locked;
-    bool main_input_delivered;
+    _sapp_tc_window_t* lock_owner;
     int xi_event_base, xi_error_base;
 #else
     /* ---- GLX (one shared context; per-window GLXWindow drawables) -------- */
@@ -8706,21 +9031,12 @@ static struct {
     /* ---- app / main-window state (this header owns sapp_run on Linux) ---- */
     struct {
         sapp_desc desc;             /* sanitized copy; window_title points at the buffer below */
-#if defined(SOKOL_GLES3)
-        // Bound (compatibility): retain the existing EGL main title buffer; longer titles are truncated.
-        char window_title[128];
-#else
-        char window_title[256];
-#endif
         bool valid;
         bool init_called;
         bool cleanup_called;
         bool quit_requested;
         bool quit_ordered;
-        bool fullscreen;
         bool event_consumed;
-        bool skip_present;          /* one-shot; honored on glXSwapBuffers (TrussC flicker patch) */
-        uint64_t frame_count;
         _sapp_tc_window_t* main;
         /* mouse cursor */
         bool mouse_shown;
@@ -8851,34 +9167,13 @@ static _sapp_tc_window_t* _sapp_tc_lookup_xwin(Window xwin) {
 
 /*-- event plumbing ---------------------------------------------------------*/
 static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
-    if (!w->desc.event_cb) return;
-    ev->frame_count = _sapp_tc.app.frame_count;
+    if (!w->desc.event_cb || (w->events_enabled && !w->events_enabled())) return;
+    ev->frame_count = _sapp_tc.app.main ? _sapp_tc.app.main->frame_count : 0;
     ev->window_width = w->win_width;
     ev->window_height = w->win_height;
     ev->framebuffer_width = w->fb_width;
     ev->framebuffer_height = w->fb_height;
-#if defined(SOKOL_GLES3)
-    if (w->is_main) {
-        ev->mouse_x = w->mouse_x;
-        ev->mouse_y = w->mouse_y;
-        ev->mouse_dx = w->mouse_dx;
-        ev->mouse_dy = w->mouse_dy;
-    }
-#endif
     sapp_window handle = { w->win_id };
-    w->desc.event_cb(ev, handle, w->desc.user_data);
-}
-
-/*-- main window: event routing to the sapp_desc callbacks ------------------*/
-static bool _sapp_tc_app_events_enabled(void) {
-    /* same gate as sokol_app.h: nothing fires before the first tick's init_cb */
-    return _sapp_tc.app.init_called &&
-        (_sapp_tc.app.desc.event_cb || _sapp_tc.app.desc.event_userdata_cb);
-}
-
-static void _sapp_tc_main_event_tramp(const sapp_event* ev, sapp_window win, void* user) {
-    (void)win; (void)user;
-    if (!_sapp_tc_app_events_enabled()) return;
 #if defined(SOKOL_GLES3)
     switch (ev->type) {
         case SAPP_EVENTTYPE_KEY_DOWN:
@@ -8896,11 +9191,24 @@ static void _sapp_tc_main_event_tramp(const sapp_event* ev, sapp_window win, voi
         case SAPP_EVENTTYPE_RESTORED:
         case SAPP_EVENTTYPE_FILES_DROPPED:
         case SAPP_EVENTTYPE_CLIPBOARD_PASTED:
-            _sapp_tc.main_input_delivered = true;
+            w->input_delivered = w->wake_on_input;
             break;
         default: break;
     }
 #endif
+    w->desc.event_cb(ev, handle, w->desc.user_data);
+}
+
+/*-- main window: event routing to the sapp_desc callbacks ------------------*/
+static bool _sapp_tc_app_events_enabled(void) {
+    /* same gate as sokol_app.h: nothing fires before the first tick's init_cb */
+    return _sapp_tc.app.init_called &&
+        (_sapp_tc.app.desc.event_cb || _sapp_tc.app.desc.event_userdata_cb);
+}
+
+static void _sapp_tc_main_event_tramp(const sapp_event* ev, sapp_window win, void* user) {
+    (void)win; (void)user;
+    if (!_sapp_tc_app_events_enabled()) return;
     _sapp_tc.app.event_consumed = false;
     if (_sapp_tc.app.desc.event_cb) {
         _sapp_tc.app.desc.event_cb(ev);
@@ -10163,7 +10471,7 @@ static void _sapp_tc_x11_release_error_handler(void) {
 }
 
 /*-- window properties -------------------------------------------------------*/
-static unsigned long _sapp_tc_x11_get_window_property(Window xwin, Atom property, Atom type, unsigned char** value, long length = LONG_MAX) {
+static unsigned long _sapp_tc_x11_get_window_property(Window xwin, Atom property, Atom type, unsigned char** value, long length) {
     Atom actual_type;
     int actual_format;
     unsigned long item_count, bytes_after;
@@ -10387,15 +10695,14 @@ static bool _sapp_tc_x11_update_dimensions(_sapp_tc_window_t* w) {
 }
 
 /*-- fullscreen (EWMH _NET_WM_STATE; must be called after XMapWindow) ---------*/
-static void _sapp_tc_x11_set_fullscreen(bool enable) {
-    _sapp_tc_window_t* w = _sapp_tc.app.main;
+static void _sapp_tc_x11_set_fullscreen(_sapp_tc_window_t* w, bool enable) {
     if (!w) return;
     if (_sapp_tc.NET_WM_STATE && _sapp_tc.NET_WM_STATE_FULLSCREEN) {
         const long op = enable ? 1 : 0;     /* _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE */
         _sapp_tc_x11_send_event(w->xwin, _sapp_tc.NET_WM_STATE,
                                 op, (long)_sapp_tc.NET_WM_STATE_FULLSCREEN, 0, 1, 0);
     }
-    _sapp_tc.app.fullscreen = enable;
+    w->fullscreen = enable;
     XFlush(_sapp_tc.display);
 }
 
@@ -10636,7 +10943,7 @@ static sapp_mousebutton _sapp_tc_x11_translate_button(unsigned int button) {
 
 static void _sapp_tc_x11_mouse_update(_sapp_tc_window_t* w, int x, int y, bool clear_dxdy) {
 #if defined(SOKOL_GLES3)
-    if (_sapp_tc.mouse_locked) return;
+    if (_sapp_tc.mouse_locked && w == _sapp_tc.lock_owner) return;
 #endif
     /* event coordinates are raw window pixels == framebuffer pixels on X11 */
     const float fx = (float)x;
@@ -10679,9 +10986,6 @@ static void _sapp_tc_x11_scroll_event(_sapp_tc_window_t* w, float x, float y, ui
 }
 
 static void _sapp_tc_x11_key_event(_sapp_tc_window_t* w, sapp_event_type type, sapp_keycode key, bool repeat, uint32_t mods) {
-#if defined(SOKOL_GLES3)
-    if (w->is_main && key == SAPP_KEYCODE_INVALID) return;
-#endif
     sapp_event e;
     memset(&e, 0, sizeof(e));
     e.type = type;
@@ -10758,6 +11062,15 @@ static void _sapp_tc_x11_on_selectionnotify(XEvent* event) {
     _sapp_tc.xdnd.types_truncated_noticed = false;
 }
 
+static void _sapp_tc_x11_close(_sapp_tc_window_t* w) {
+    if (w->is_main) {
+        trussc::internal::setExitReasonIfEmpty("window-close");
+        _sapp_tc.app.quit_requested = true;
+    } else if (w->desc.close_cb) {
+        w->desc.close_cb({w->win_id}, w->desc.user_data);
+    }
+}
+
 static void _sapp_tc_x11_on_clientmessage(XEvent* event) {
     if (event->xclient.format != 32) return;
     if (XFilterEvent(event, None)) {
@@ -10767,18 +11080,7 @@ static void _sapp_tc_x11_on_clientmessage(XEvent* event) {
     if (event->xclient.message_type == _sapp_tc.WM_PROTOCOLS) {
         const Atom protocol = (Atom)event->xclient.data.l[0];
         if ((protocol == _sapp_tc.WM_DELETE_WINDOW) && w) {
-            if (w->is_main) {
-                /* the cancellable quit dance runs at the loop tail (upstream
-                   parity): QUIT_REQUESTED is delivered there and a handler
-                   may sapp_cancel_quit() */
-                trussc::internal::setExitReasonIfEmpty("window-close");
-                _sapp_tc.app.quit_requested = true;
-            } else if (w->desc.close_cb) {
-                /* user closed a secondary window: notify; the app accepts by
-                   calling sapp_destroy_window() (w may be freed after this) */
-                sapp_window handle = { w->win_id };
-                w->desc.close_cb(handle, w->desc.user_data);
-            }
+            _sapp_tc_x11_close(w);
         }
     } else if (!_sapp_tc.app.drop_enabled) {
         return;
@@ -11080,8 +11382,7 @@ static bool _sapp_tc_x11_make_current(_sapp_tc_window_t* w) {
 #if defined(SOKOL_GLES3)
     return eglMakeCurrent(_sapp_tc.egl_display, w->drawable, w->drawable, _sapp_tc.ctx) == EGL_TRUE;
 #else
-    glXMakeCurrent(_sapp_tc.display, w->drawable, _sapp_tc.ctx);
-    return true;
+    return glXMakeCurrent(_sapp_tc.display, w->drawable, _sapp_tc.ctx) == True;
 #endif
 }
 
@@ -11096,20 +11397,23 @@ static void _sapp_tc_x11_swap(_sapp_tc_window_t* w) {
 }
 
 #if defined(SOKOL_GLES3)
-static uint32_t _sapp_tc_x11_surface_window_id(EGLSurface surface) {
-    if (surface == EGL_NO_SURFACE) return 0;
+using _sapp_tc_x11_surface_t = EGLSurface;
+#else
+using _sapp_tc_x11_surface_t = GLXDrawable;
+#endif
+static uint32_t _sapp_tc_x11_surface_window_id(_sapp_tc_x11_surface_t surface) {
+    if (!surface) return 0;
     for (size_t i = 0; i < _sapp_tc.window_slots; ++i) {
         const _sapp_tc_window_t* w = _sapp_tc.windows[i];
         if (w && w->drawable == surface) return w->win_id;
     }
-    return 0; // caller may own an external EGL surface
+    return 0; // caller may own an external surface
 }
-static bool _sapp_tc_x11_saved_surface_alive(uint32_t id, EGLSurface surface) {
+static bool _sapp_tc_x11_saved_surface_alive(uint32_t id, _sapp_tc_x11_surface_t surface) {
     if (!id) return true;
     const _sapp_tc_window_t* w = _sapp_tc_lookup(sapp_window{id});
     return w && w->drawable == surface;
 }
-#endif
 
 struct _sapp_tc_x11_surface_scope {
 #if defined(SOKOL_GLES3)
@@ -11117,21 +11421,41 @@ struct _sapp_tc_x11_surface_scope {
     EGLContext context = eglGetCurrentContext();
     EGLSurface draw = eglGetCurrentSurface(EGL_DRAW);
     EGLSurface read = eglGetCurrentSurface(EGL_READ);
+#else
+    Display* display = glXGetCurrentDisplay();
+    GLXContext context = glXGetCurrentContext();
+    GLXDrawable draw = glXGetCurrentDrawable();
+    GLXDrawable read = glXGetCurrentReadDrawable();
+#endif
+#if defined(SOKOL_GLES3)
     uint32_t draw_window = _sapp_tc_x11_surface_window_id(draw);
     uint32_t read_window = _sapp_tc_x11_surface_window_id(read);
+#else
+    uint32_t draw_window = display == _sapp_tc.display ? _sapp_tc_x11_surface_window_id(draw) : 0;
+    uint32_t read_window = display == _sapp_tc.display ? _sapp_tc_x11_surface_window_id(read) : 0;
+#endif
     ~_sapp_tc_x11_surface_scope() {
         // A callback may close the caller. Never reactivate its destroyed surface.
         if (!_sapp_tc_x11_saved_surface_alive(draw_window, draw) ||
             !_sapp_tc_x11_saved_surface_alive(read_window, read)) {
             if (_sapp_tc.app.main) _sapp_tc_x11_make_current(_sapp_tc.app.main);
+#if defined(SOKOL_GLES3)
             else eglMakeCurrent(_sapp_tc.egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+#else
+            else glXMakeContextCurrent(_sapp_tc.display, None, None, NULL);
+#endif
             return;
         }
+#if defined(SOKOL_GLES3)
         if (display != eglGetCurrentDisplay() || context != eglGetCurrentContext() ||
             draw != eglGetCurrentSurface(EGL_DRAW) || read != eglGetCurrentSurface(EGL_READ))
             eglMakeCurrent(display != EGL_NO_DISPLAY ? display : _sapp_tc.egl_display, draw, read, context);
-    }
+#else
+        if (display != glXGetCurrentDisplay() || context != glXGetCurrentContext() ||
+            draw != glXGetCurrentDrawable() || read != glXGetCurrentReadDrawable())
+            glXMakeContextCurrent(display ? display : _sapp_tc.display, draw, read, context);
 #endif
+    }
 };
 
 static void _sapp_tc_x11_set_swapinterval(_sapp_tc_window_t* w, int interval) {
@@ -11253,7 +11577,8 @@ static void _sapp_tc_x11_destroy_window_resources(_sapp_tc_window_t* w) {
         }
         eglDestroySurface(_sapp_tc.egl_display, w->drawable);
 #else
-        if (glXGetCurrentDrawable() == w->drawable) {
+        if (glXGetCurrentDisplay() == _sapp_tc.display &&
+            (glXGetCurrentDrawable() == w->drawable || glXGetCurrentReadDrawable() == w->drawable)) {
             glXMakeCurrent(_sapp_tc.display, None, NULL);
         }
         glXDestroyWindow(_sapp_tc.display, w->drawable);
@@ -11275,11 +11600,14 @@ static void _sapp_tc_x11_destroy_window_resources(_sapp_tc_window_t* w) {
 #if defined(SOKOL_GLES3)
 static void _sapp_tc_x11_lock_mouse(bool lock) {
     if (!_sapp_tc.app.main) return;
+    if (lock) _sapp_tc.lock_owner = _sapp_tc.app.main;
+    _sapp_tc_window_t* owner = _sapp_tc.lock_owner;
+    if (!owner) return;
     if (lock == _sapp_tc.mouse_locked) {
         return;
     }
-    _sapp_tc.app.main->mouse_dx = 0.0f;
-    _sapp_tc.app.main->mouse_dy = 0.0f;
+    owner->mouse_dx = 0.0f;
+    owner->mouse_dy = 0.0f;
     _sapp_tc.mouse_locked = lock;
     if (_sapp_tc.mouse_locked) {
         if (_sapp_tc.xi.available) {
@@ -11292,12 +11620,12 @@ static void _sapp_tc_x11_lock_mouse(bool lock) {
             XISelectEvents(_sapp_tc.display, _sapp_tc.root, &em, 1);
         }
         XGrabPointer(_sapp_tc.display, // display
-            _sapp_tc.app.main->xwin,           // grab_window
+            owner->xwin,           // grab_window
             True,                       // owner_events
             ButtonPressMask | ButtonReleaseMask | PointerMotionMask,    // event_mask
             GrabModeAsync,              // pointer_mode
             GrabModeAsync,              // keyboard_mode
-            _sapp_tc.app.main->xwin,           // confine_to
+            owner->xwin,           // confine_to
             _sapp_tc.hidden_cursor,    // cursor
             CurrentTime);               // time
     } else {
@@ -11309,9 +11637,10 @@ static void _sapp_tc_x11_lock_mouse(bool lock) {
             em.mask = mask;
             XISelectEvents(_sapp_tc.display, _sapp_tc.root, &em, 1);
         }
-        XWarpPointer(_sapp_tc.display, None, _sapp_tc.app.main->xwin, 0, 0, 0, 0, (int) _sapp_tc.app.main->mouse_x, _sapp_tc.app.main->mouse_y);
+        XWarpPointer(_sapp_tc.display, None, owner->xwin, 0, 0, 0, 0, (int) owner->mouse_x, owner->mouse_y);
         XUngrabPointer(_sapp_tc.display, CurrentTime);
     }
+    if (!lock) _sapp_tc.lock_owner = NULL;
     XFlush(_sapp_tc.display);
 }
 
@@ -11321,12 +11650,12 @@ static void _sapp_tc_x11_lock_mouse(bool lock) {
 static void _sapp_tc_x11_process_event(XEvent* ev) {
 #if defined(SOKOL_GLES3)
     if (ev->type == GenericEvent) {
-        if (_sapp_tc.mouse_locked && _sapp_tc.xi.available && _sapp_tc.app.main &&
+        if (_sapp_tc.mouse_locked && _sapp_tc.xi.available && _sapp_tc.lock_owner &&
             ev->xcookie.extension == _sapp_tc.xi.major_opcode && XGetEventData(_sapp_tc.display, &ev->xcookie)) {
             if (ev->xcookie.evtype == XI_RawMotion && ev->xcookie.data) {
                 const XIRawEvent* raw = (const XIRawEvent*)ev->xcookie.data;
                 if (raw->valuators.mask_len > 0 && raw->valuators.mask && raw->raw_values) {
-                    _sapp_tc_window_t* main = _sapp_tc.app.main;
+                    _sapp_tc_window_t* main = _sapp_tc.lock_owner;
                     const double* values = raw->raw_values;
                     if (XIMaskIsSet(raw->valuators.mask, 0)) main->mouse_dx = (float)*values++;
                     if (XIMaskIsSet(raw->valuators.mask, 1)) main->mouse_dy = (float)*values;
@@ -11354,7 +11683,7 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
             break;
         case FocusOut:
 #if defined(SOKOL_GLES3)
-            if (w && w->is_main && _sapp_tc.mouse_locked) _sapp_tc_x11_lock_mouse(false);
+            if (w && w == _sapp_tc.lock_owner && _sapp_tc.mouse_locked) _sapp_tc_x11_lock_mouse(false);
 #endif
             if (w && ev->xfocus.detail != NotifyPointer && (ev->xfocus.mode == NotifyNormal || ev->xfocus.mode == NotifyWhileGrabbed)) {
                 _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_UNFOCUSED);
@@ -11431,16 +11760,13 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
             break;
         case LeaveNotify:
             if (w && (w->mouse_buttons == 0)) {
-#if defined(SOKOL_GLES3)
-                if (w->is_main) _sapp_tc_x11_mouse_update(w, ev->xcrossing.x, ev->xcrossing.y, true);
-#endif
                 _sapp_tc_x11_mouse_event(w, SAPP_EVENTTYPE_MOUSE_LEAVE,
                     SAPP_MOUSEBUTTON_INVALID, _sapp_tc_x11_mods(ev->xcrossing.state));
             }
             break;
         case MotionNotify:
 #if defined(SOKOL_GLES3)
-            if (w && w->is_main && _sapp_tc.mouse_locked) break;
+            if (w && w == _sapp_tc.lock_owner && _sapp_tc.mouse_locked) break;
 #endif
             if (w) {
                 _sapp_tc_x11_mouse_update(w, ev->xmotion.x, ev->xmotion.y, false);
@@ -11450,33 +11776,37 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
             break;
         case PropertyNotify:
             /* iconify/restore detection (there is no map/unmap handling) */
-            if (w && (ev->xproperty.state == PropertyNewValue) &&
+            if (w && w->trust_hidden_signals && (ev->xproperty.state == PropertyNewValue) &&
                 (ev->xproperty.atom == _sapp_tc.WM_STATE)) {
+                const bool was_hidden = _sapp_tc_native_hidden(w);
                 const int state = _sapp_tc_x11_get_window_state(w);
-                if ((state == IconicState) && !w->iconified) {
+                if ((state == IconicState) && !_sapp_tc_native_iconified(w)) {
                     w->iconified = true;
                     _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_ICONIFIED);
-                } else if ((state == NormalState) && w->iconified) {
+                } else if ((state == NormalState) && _sapp_tc_native_iconified(w)) {
                     w->iconified = false;
-                    w->earliest_next = 0.0;     /* resume promptly */
                     _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_RESTORED);
+                }
+                const bool hidden = _sapp_tc_native_hidden(w);
+                if (hidden != was_hidden) {
+                    _sapp_tc_x11_app_event(w, hidden ? SAPP_EVENTTYPE_SUSPENDED
+                                                     : SAPP_EVENTTYPE_RESUMED);
+                    if (!hidden) {
+                        w->earliest_next = 0.0;     /* resume promptly */
+                    }
                 }
             }
             break;
         case VisibilityNotify:
-#if defined(SOKOL_GLES3)
-            // Preserve the existing EGL main visibility-query/event support.
-            // Secondary visibility joins the same native policy as GLX.
-            if (w && w->is_main) break;
-#endif
             /* Visibility is the same scheduler input for every supported window. */
-            if (w && ev->xvisibility.state >= VisibilityUnobscured && ev->xvisibility.state <= VisibilityFullyObscured) {
-                const bool obscured = (ev->xvisibility.state == VisibilityFullyObscured);
-                if (obscured != w->occluded) {
-                    w->occluded = obscured;
-                    _sapp_tc_x11_app_event(w, obscured ? SAPP_EVENTTYPE_SUSPENDED
-                                                       : SAPP_EVENTTYPE_RESUMED);
-                    if (!obscured) {
+            if (w && w->trust_hidden_signals && ev->xvisibility.state >= VisibilityUnobscured && ev->xvisibility.state <= VisibilityFullyObscured) {
+                const bool was_hidden = _sapp_tc_native_hidden(w);
+                w->occluded = (ev->xvisibility.state == VisibilityFullyObscured);
+                const bool hidden = _sapp_tc_native_hidden(w);
+                if (hidden != was_hidden) {
+                    _sapp_tc_x11_app_event(w, hidden ? SAPP_EVENTTYPE_SUSPENDED
+                                                     : SAPP_EVENTTYPE_RESUMED);
+                    if (!hidden) {
                         w->earliest_next = 0.0;
                     }
                 }
@@ -11506,12 +11836,17 @@ static void _sapp_tc_x11_pace(_sapp_tc_window_t* w, double seconds) {
 
 /* absolute periodic schedule (timer-paced secondary windows): pacing from the
    previous deadline instead of "now" keeps the average rate at the period
-   despite tick jitter; resync when far off (first tick, after occlusion) */
+   despite tick jitter; skip missed periods, initialize or resync a future phase */
 static void _sapp_tc_x11_pace_periodic(_sapp_tc_window_t* w, double period) {
     const double now = _sapp_tc_now();
     double next = w->earliest_next + period;
-    if ((next <= now) || (next > now + 2.0 * period)) {
+    if (w->earliest_next <= 0.0 || next > now + 2.0 * period) {
         next = now + period;
+    } else if (next <= now) {
+        // Skip elapsed deadlines without moving the timer's phase to tick completion.
+        next += (floor((now - next) / period) + 1.0) * period;
+        // Rounding can land exactly on now; a skipped deadline must stay in the future.
+        if (next <= now) next += period;
     }
     w->earliest_next = next;
 }
@@ -11521,122 +11856,86 @@ static bool _sapp_tc_x11_window_due(_sapp_tc_window_t* w, double now) {
     return w->earliest_next <= now;
 }
 
+// The legacy callbacks are just one client of the native callback contract.
+static void _sapp_tc_main_tick_tramp(sapp_window, void*) {
+    if (!_sapp_tc.app.init_called) {
+        _sapp_tc.app.init_called = true;
+        if (_sapp_tc.app.desc.init_cb) _sapp_tc.app.desc.init_cb();
+        else if (_sapp_tc.app.desc.init_userdata_cb)
+            _sapp_tc.app.desc.init_userdata_cb(_sapp_tc.app.desc.user_data);
+    }
+    if (_sapp_tc.app.desc.frame_cb) _sapp_tc.app.desc.frame_cb();
+    else if (_sapp_tc.app.desc.frame_userdata_cb)
+        _sapp_tc.app.desc.frame_userdata_cb(_sapp_tc.app.desc.user_data);
+}
+
 static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
     if (w->in_tick || !w->drawable) return;
     _sapp_tc_x11_surface_scope restore_surface;
     const double frame_start = _sapp_tc_now();
     _sapp_tc_timing_update(&w->timing);
     w->frame_duration = w->timing.smooth_dt;
-    const int swap_interval = (_sapp_tc.app.desc.swap_interval > 0) ? _sapp_tc.app.desc.swap_interval : 1;
-
-    if (w->is_main) {
-        /* resize is polled here every frame (upstream parity: the X11 backend
-           has no ConfigureNotify handler; this poll is the size authority) */
-        if (_sapp_tc_x11_update_dimensions(w) && _sapp_tc.app.init_called) {
-            _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_RESIZED);
-        }
-        if (!_sapp_tc_x11_make_current(w)) {
-            _sapp_tc_x11_pace(w, _sapp_tc.refresh_period);
-            return;
-        }
-        w->in_tick = true;
-        if (!_sapp_tc.app.init_called) {
-            _sapp_tc.app.init_called = true;
-            if (_sapp_tc.app.desc.init_cb) {
-                _sapp_tc.app.desc.init_cb();
-            } else if (_sapp_tc.app.desc.init_userdata_cb) {
-                _sapp_tc.app.desc.init_userdata_cb(_sapp_tc.app.desc.user_data);
-            }
-        }
-        if (_sapp_tc.app.desc.frame_cb) {
-            _sapp_tc.app.desc.frame_cb();
-        } else if (_sapp_tc.app.desc.frame_userdata_cb) {
-            _sapp_tc.app.desc.frame_userdata_cb(_sapp_tc.app.desc.user_data);
-        }
-        _sapp_tc.app.frame_count++;
-        w->in_tick = false;
-        bool presented = false;
-        if (_sapp_tc.app.skip_present) {
-            /* one-shot event-driven present suppression (TrussC patch: keeps
-               the last image on screen when a frame decides not to draw) */
-            _sapp_tc.app.skip_present = false;
-#if defined(SOKOL_GLES3)
-        } else {
-#else
-        } else if (!w->iconified) {
+    if (!w->draw_while_hidden && _sapp_tc_native_hidden(w)) {
+        if (w->desc.tick_cb) w->desc.tick_cb({w->win_id}, w->desc.user_data);
+        ++w->frame_count;
+        _sapp_tc_x11_pace(w, _sapp_tc.refresh_period);
+        return;
+    }
+    if (_sapp_tc_x11_update_dimensions(w))
+        _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_RESIZED);
+    if (!_sapp_tc_x11_make_current(w)) {
+        _sapp_tc_x11_pace(w, _sapp_tc.refresh_period);
+        return;
+    }
+    w->in_tick = true;
+    if (w->desc.tick_cb) w->desc.tick_cb({w->win_id}, w->desc.user_data);
+    w->in_tick = false;
+    ++w->frame_count;
+    bool presented = false;
+    if (!w->skip_present
+#if defined(SOKOL_GLCORE)
+        && !_sapp_tc_native_iconified(w)
 #endif
-            /* with swap interval >= 1 this call BLOCKS until vsync -- that
-               blocking swap is the run loop's pacing (upstream parity) */
-            _sapp_tc_x11_swap(w);
-            presented = true;
-        }
-        const double now = _sapp_tc_now();
+    ) {
+        _sapp_tc_x11_swap(w);
+        presented = true;
+    }
+    w->skip_present = false;
+    if (w->swap_interval == 0) {
+        _sapp_tc_x11_pace_periodic(w, _sapp_tc.refresh_period);
+        return;
+    }
+    const double now = _sapp_tc_now();
 #if defined(SOKOL_GLES3)
-        if (!presented) {
-            w->earliest_next = frame_start + 0.0166 * (double)swap_interval;
-        } else {
-            // EGL's blocking swap remains the main window's pacing source.
-            const double swap_dt = now - w->last_present;
-            w->last_present = now;
-            const double per_frame = swap_dt / (double)swap_interval;
+    if (!presented) {
+        w->earliest_next = frame_start + 0.0166 * (double)w->swap_interval;
+    } else {
+        const double swap_dt = now - w->last_present;
+        w->last_present = now;
+        const double per_frame = swap_dt / (double)w->swap_interval;
+        if (per_frame > 1.0 / 240.0 && per_frame < 1.0 / 30.0)
+            _sapp_tc.refresh_period += 0.1 * (per_frame - _sapp_tc.refresh_period);
+        w->earliest_next = 0.0;
+    }
+#else
+    (void)frame_start;
+    if (_sapp_tc_native_iconified(w)) {
+        _sapp_tc_x11_pace(w, 0.0166 * (double)w->swap_interval);
+    } else if (presented) {
+        const double swap_dt = now - w->last_present;
+        w->last_present = now;
+        if (swap_dt > 0.002) {
+            const double per_frame = swap_dt / (double)w->swap_interval;
             if (per_frame > 1.0 / 240.0 && per_frame < 1.0 / 30.0)
                 _sapp_tc.refresh_period += 0.1 * (per_frame - _sapp_tc.refresh_period);
             w->earliest_next = 0.0;
-        }
-#else
-        if (w->iconified) {
-            /* minimized: frame_cb keeps running, throttled (win32 parity) */
-            _sapp_tc_x11_pace(w, 0.0166 * (double)swap_interval);
-        } else if (presented) {
-            const double swap_dt = now - w->last_present;
-            w->last_present = now;
-            if (swap_dt > 0.002) {
-                /* the swap blocked (vsync paces the loop); refine the refresh
-                   estimate that paces the secondary windows */
-                const double per_frame = swap_dt / (double)swap_interval;
-                if ((per_frame > (1.0 / 240.0)) && (per_frame < (1.0 / 30.0))) {
-                    _sapp_tc.refresh_period += 0.1 * (per_frame - _sapp_tc.refresh_period);
-                }
-                w->earliest_next = 0.0;
-            } else {
-                /* the swap returned immediately (unmapped/unredirected window,
-                   MESA context-wide interval 0, driver without vsync): fall
-                   back to timer pacing so the loop can never busy-spin */
-                _sapp_tc_x11_pace_periodic(w, _sapp_tc.refresh_period * (double)swap_interval);
-            }
         } else {
-            _sapp_tc_x11_pace(w, _sapp_tc.refresh_period * (double)swap_interval);
+            _sapp_tc_x11_pace_periodic(w, _sapp_tc.refresh_period * (double)w->swap_interval);
         }
-#endif
     } else {
-        /* secondary window: swap interval 0 (vsyncing N drawables would
-           serialize the loop to refresh/N), timer-paced to the measured
-           refresh estimate */
-        if (w->iconified || w->occluded) {
-            if (w->desc.tick_cb) {
-                sapp_window handle = { w->win_id };
-                w->desc.tick_cb(handle, w->desc.user_data);
-            }
-            _sapp_tc_x11_pace(w, _sapp_tc.refresh_period);
-            return;
-        }
-        if (_sapp_tc_x11_update_dimensions(w)) {
-            _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_RESIZED);
-        }
-        if (!_sapp_tc_x11_make_current(w)) {
-            _sapp_tc_x11_pace(w, _sapp_tc.refresh_period);
-            return;
-        }
-        w->in_tick = true;
-        if (w->desc.tick_cb) {
-            sapp_window handle = { w->win_id };
-            w->desc.tick_cb(handle, w->desc.user_data);
-        }
-        w->in_tick = false;
-        if (!w->skip_present) _sapp_tc_x11_swap(w);
-        w->skip_present = false;
-        _sapp_tc_x11_pace_periodic(w, _sapp_tc.refresh_period);
+        _sapp_tc_x11_pace(w, _sapp_tc.refresh_period * (double)w->swap_interval);
     }
+#endif
 }
 
 #if defined(SOKOL_GLES3)
@@ -11655,11 +11954,13 @@ static void _sapp_tc_x11_wait_until(double deadline) {
 #endif
 
 /*-- the run loop --------------------------------------------------------------------
-    While the main window presents normally, its blocking vsync'd swap paces
-    the loop and the XPending drain runs once per frame (upstream parity).
+    Normal main presentation relies on vsync'd native work to pace the loop;
+    a driver can block in activation or rendering instead of the swap call.
+    The XPending drain runs once per pass (upstream parity).
     When every window is timer-paced (minimized, skip_present), the loop
     sleeps in poll() on the X connection fd until the next deadline or an
-    incoming event, so the process never busy-spins. */
+    incoming event. An interval-positive main that presents without any native
+    blocking remains immediately due; it must not accelerate the secondaries. */
 static void _sapp_tc_x11_run_loop(void) {
     XFlush(_sapp_tc.display);
     while (!_sapp_tc.app.quit_ordered) {
@@ -11690,7 +11991,8 @@ static void _sapp_tc_x11_run_loop(void) {
         /* drain exactly the already-queued events (can't block: count bounded) */
         int count = XPending(_sapp_tc.display);
 #if defined(SOKOL_GLES3)
-        _sapp_tc.main_input_delivered = false;
+        for (size_t i = 0; i < _sapp_tc.window_slots; ++i)
+            if (_sapp_tc.windows[i]) _sapp_tc.windows[i]->input_delivered = false;
 #endif
         while (count--) {
             XEvent event;
@@ -11698,16 +12000,45 @@ static void _sapp_tc_x11_run_loop(void) {
             _sapp_tc_x11_process_event(&event);
         }
 #if defined(SOKOL_GLES3)
-        // Delivered main input ends main's skipped-present delay.
-        if (_sapp_tc.main_input_delivered && _sapp_tc.app.main) _sapp_tc.app.main->earliest_next = 0.0;
+        for (size_t i = 0; i < _sapp_tc.window_slots; ++i) {
+            _sapp_tc_window_t* w = _sapp_tc.windows[i];
+            if (w && w->input_delivered) w->earliest_next = 0.0;
+        }
 #endif
         /* tick every due window (re-fetch each slot: a tick or a processed
            event may have destroyed windows) */
-        now = _sapp_tc_now();
+        bool main_drives_secondaries = false;
         for (size_t i = 0; i < _sapp_tc.window_slots; i++) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
-            if (_sapp_tc_x11_window_due(w, now)) {
+            // An earlier window's native work may have crossed this deadline.
+            const double tick_now = _sapp_tc_now();
+            // The launch/main window occupies the first slot. At refresh rate
+            // the main pass is the admission clock, independent of timer phase.
+            // Lower setFps requests are frame-skipped by the window callback;
+            // native interval-zero ticks still supply its refresh-rate source.
+            // A timer tick just before this main pass has already spent the
+            // secondary's refresh credit; don't tick it again on the handoff.
+            const bool follow_main = main_drives_secondaries && w && w != _sapp_tc.app.main &&
+                w->swap_interval == 0 && w->ready && w->drawable && !w->in_tick &&
+                tick_now - w->timing.last >= 0.5 * _sapp_tc.refresh_period;
+            if (follow_main || _sapp_tc_x11_window_due(w, tick_now)) {
+                const bool is_main = w == _sapp_tc.app.main;
+                const double previous_present = w->last_present;
+                // This tick spends the main pass's refresh credit, not a
+                // periodic deadline. Re-arm the fallback timer from completion
+                // so losing the main source cannot immediately replay a tick.
+                if (follow_main) w->earliest_next = 0.0;
                 _sapp_tc_x11_tick(w);
+                // Re-fetch after callbacks. A visible interval-positive main
+                // must present near refresh cadence; EGL can block in activation
+                // or rendering instead of swap itself.
+                if (is_main && _sapp_tc.app.main == w) {
+                    const double main_period = w->last_present - previous_present;
+                    main_drives_secondaries = w->swap_interval > 0 &&
+                        !_sapp_tc_native_hidden(w) && !_sapp_tc_native_iconified(w) &&
+                        w->last_present > previous_present &&
+                        main_period >= 0.5 * _sapp_tc.refresh_period && main_period <= 1.5 * _sapp_tc.refresh_period;
+                }
             }
         }
         XFlush(_sapp_tc.display);
@@ -11716,12 +12047,9 @@ static void _sapp_tc_x11_run_loop(void) {
            slot: a close may destroy windows) */
         for (size_t i = 0; i < _sapp_tc.window_slots; i++) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
-            if (!w || w->is_main || !w->close_requested) continue;
+            if (!w || !w->close_requested) continue;
             w->close_requested = false;
-            if (w->desc.close_cb) {
-                sapp_window handle = { w->win_id };
-                w->desc.close_cb(handle, w->desc.user_data);
-            }
+            _sapp_tc_x11_close(w);
         }
         /* the cancellable quit dance (upstream parity): WM_DELETE_WINDOW or
            sapp_request_quit() land here; sapp_quit() pre-sets quit_ordered */
@@ -11736,60 +12064,107 @@ static void _sapp_tc_x11_run_loop(void) {
     }
 }
 
-/*-- main window creation --------------------------------------------------------*/
-static bool _sapp_tc_x11_create_main_window(void) {
-    const sapp_desc* d = &_sapp_tc.app.desc;
-    const size_t slot = _sapp_tc_x11_reserve_slot();
-    if (slot == SIZE_MAX) return false;
+// Normalize the two caller descriptors before native allocation. Platform
+// startup defaults are data; the constructor never selects by window role.
 
+
+static void _sapp_tc_x11_unwind(_sapp_tc_window_t* w) {
+    if (!w) return;
+    _sapp_tc_x11_destroy_window_resources(w);
+    _sapp_tc_x11_free(w->title);
+    _sapp_tc_x11_free_window(w);
+}
+
+static bool _sapp_tc_x11_initialize_dimensions(_sapp_tc_window_t* w) {
+    _sapp_tc_x11_update_dimensions(w);
+    return w->fb_width > 0 && w->fb_height > 0;
+}
+
+// Device opt-out point: an unreliable OS hidden signal must never stop drawing.
+static bool _sapp_tc_x11_trust_hidden_signals(void) {
+    return true;
+}
+
+static _sapp_tc_window_t* _sapp_tc_x11_create_window(const _sapp_tc_native_desc* d) {
+    _sapp_tc_x11_surface_scope restore;
+    const size_t slot = _sapp_tc_x11_reserve_slot();
+    if (slot == SIZE_MAX || _sapp_tc.next_id == UINT32_MAX) return NULL;
 #if defined(SOKOL_GLES3)
     _sapp_tc_window_t* w = (_sapp_tc_window_t*)_sapp_tc_x11_alloc(sizeof(_sapp_tc_window_t), true);
 #else
     _sapp_tc_window_t* w = new (std::nothrow) _sapp_tc_window_t();
 #endif
-    if (!w) return false;
-    w->win_id = ++_sapp_tc.next_id;
-    w->is_main = true;
-#if defined(SOKOL_GLES3)
-    w->dpi_scale = _sapp_tc.dpi / 96.0f;
-#else
-    w->dpi_scale = d->high_dpi ? (_sapp_tc.dpi / 96.0f) : 1.0f;
-#endif
-    if (w->dpi_scale <= 0.0f) w->dpi_scale = 1.0f;
-
-    /* per-window desc: the app callbacks are reached via the trampoline */
-    w->desc.width = d->width;
-    w->desc.height = d->height;
-    w->desc._tc_pixel_width = d->_tc_pixel_width;
-    w->desc._tc_pixel_height = d->_tc_pixel_height;
-    w->desc.sample_count = d->sample_count;
-    w->desc.no_high_dpi = !d->high_dpi;
-    w->desc.event_cb = _sapp_tc_main_event_tramp;
-
-    if (!_sapp_tc_x11_create_native_window(w, _sapp_tc.app.window_title,
-            d->width, d->height, false)) {
-        _sapp_tc_x11_destroy_window_resources(w);
-        _sapp_tc_x11_free_window(w);
-        return false;
+    if (!w) return NULL;
+    if (!_sapp_tc_next_window_id(&_sapp_tc.next_id, &w->win_id)) {
+        _sapp_tc_x11_unwind(w);
+        return NULL;
     }
+    w->desc = d->window;
+    w->swap_interval = d->swap_interval;
+    w->draw_while_hidden = d->draw_while_hidden;
+    w->trust_hidden_signals = _sapp_tc_x11_trust_hidden_signals();
+    w->wake_on_input = d->swap_interval > 0;
+    w->title_limit = d->title_limit;
+    w->color_format = d->color_format;
+    w->depth_format = d->depth_format;
+    w->dpi_scale = w->desc.no_high_dpi ? 1.0f : _sapp_tc.dpi / 96.0f;
+    if (!(w->dpi_scale > 0.0f) || !isfinite(w->dpi_scale)) w->dpi_scale = 1.0f;
+    const char* title = w->desc.title ? w->desc.title : "TrussC";
+    size_t length = strlen(title);
+    if (w->title_limit && length >= w->title_limit) length = w->title_limit - 1;
+    // Bound (compatibility): legacy title capacity preserves its byte prefix and stable descriptor pointer.
+    const size_t title_bytes = w->title_limit ? w->title_limit : length + 1;
+    w->title = (char*)_sapp_tc_x11_alloc(title_bytes, false);
+    if (!w->title) { _sapp_tc_x11_unwind(w); return NULL; }
+    memcpy(w->title, title, length); w->title[length] = 0;
+    w->desc.title = w->title;
+    if (!_sapp_tc_x11_create_native_window(w, w->title, w->desc.width,
+            w->desc.height, w->desc.borderless) ||
+        !_sapp_tc_x11_initialize_dimensions(w)) {
+        _sapp_tc_x11_unwind(w);
+        return NULL;
+    }
+    if (!_sapp_tc_x11_make_current(w)) {
+        _sapp_tc_x11_unwind(w);
+        return NULL;
+    }
+    _sapp_tc_x11_set_swapinterval(w, w->swap_interval);
     _sapp_tc.windows[slot] = w;
-    _sapp_tc.app.main = w;
     w->ready = true;
-    _sapp_tc_x11_update_dimensions(w);      /* silent startup sizing (no RESIZED) */
-    if (!_sapp_tc_x11_make_current(w)) return false;
-    {
-        /* capture the default-framebuffer id sapp_get_swapchain() reports */
-        GLint fb = 0;
-        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fb);
-        _sapp_tc.gl_framebuffer = (uint32_t)fb;
-    }
-    _sapp_tc_x11_set_swapinterval(w, (d->swap_interval > 0) ? d->swap_interval : 1);
     _sapp_tc_x11_show_window(w);
     if (d->fullscreen) {
-        /* must be after XMapWindow */
-        _sapp_tc_x11_set_fullscreen(true);
+        _sapp_tc_x11_set_fullscreen(w, true);
         _sapp_tc_x11_update_dimensions(w);
     }
+    return w;
+}
+
+static bool _sapp_tc_x11_create_main_window(void) {
+    const sapp_desc* d = &_sapp_tc.app.desc;
+    _sapp_tc_native_desc native = {};
+    native.color_format = SAPP_PIXELFORMAT_RGBA8;
+    native.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL;
+    native.window = _sapp_tc_normalize_main_window(d);
+    native.window.event_cb = _sapp_tc_main_event_tramp;
+    native.window.tick_cb = _sapp_tc_main_tick_tramp;
+    native.swap_interval = d->swap_interval;
+    native.fullscreen = d->fullscreen;
+    native.draw_while_hidden = d->_tc_draw_while_hidden > 0;
+#if defined(SOKOL_GLES3)
+    native.title_limit = 128;
+#else
+    native.title_limit = 256;
+#endif
+    _sapp_tc_window_t* w = _sapp_tc_x11_create_window(&native);
+    if (!w) return false;
+    w->is_main = true;
+    w->events_enabled = _sapp_tc_app_events_enabled;
+    _sapp_tc.app.main = w;
+    _sapp_tc.app.desc.window_title = w->title;
+    if (!_sapp_tc_x11_make_current(w)) return false;
+    GLint fb = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fb);
+    _sapp_tc.gl_framebuffer = (uint32_t)fb;
     _sapp_tc.app.valid = true;
 #if defined(SOKOL_GLES3)
     sapp_set_icon(&d->icon);
@@ -11816,61 +12191,36 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     }
     if (!_sapp_tc.app.valid || !_sapp_tc.ctx) return invalid;
 
-    const size_t slot = _sapp_tc_x11_reserve_slot();
-    if (slot == SIZE_MAX) return invalid;
-
-#if defined(SOKOL_GLES3)
-    _sapp_tc_window_t* w = (_sapp_tc_window_t*)_sapp_tc_x11_alloc(sizeof(_sapp_tc_window_t), true);
-#else
-    _sapp_tc_window_t* w = new (std::nothrow) _sapp_tc_window_t();
-#endif
-    if (!w) return invalid;
-    w->win_id = ++_sapp_tc.next_id;
-    w->desc = *desc;
-    if (w->desc.width <= 0) w->desc.width = 640;
-    if (w->desc.height <= 0) w->desc.height = 480;
-    /* all windows share ONE fbconfig/visual/context: the MSAA sample count is
-       the one negotiated at startup, not per-window */
-    w->desc.sample_count = _sapp_tc.app.desc.sample_count;
-    w->dpi_scale = w->desc.no_high_dpi ? 1.0f : (_sapp_tc.dpi / 96.0f);
-    if (w->dpi_scale <= 0.0f) w->dpi_scale = 1.0f;
-
-    if (!_sapp_tc_x11_create_native_window(w, w->desc.title,
-            w->desc.width, w->desc.height, w->desc.borderless)) {
-        _sapp_tc_x11_destroy_window_resources(w);
-        _sapp_tc_x11_free_window(w);
-        return invalid;
-    }
-    /* never vsync a second drawable (it would serialize the run loop to
-       refresh/N); this window is timer-paced instead. Requires a current
-       context (there always is one while the app runs). With only the
-       context-wide MESA fallback this turns vsync off for the WHOLE context
-       and the main tick self-heals to timer pacing. */
-    _sapp_tc_x11_set_swapinterval(w, 0);
-    _sapp_tc.windows[slot] = w;
-    w->ready = true;
-    _sapp_tc_x11_update_dimensions(w);
-    _sapp_tc_x11_show_window(w);
-    sapp_window handle = { w->win_id };
-    return handle;
+    _sapp_tc_native_desc native = {};
+    native.color_format = SAPP_PIXELFORMAT_RGBA8;
+    native.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL;
+    native.window = _sapp_tc_normalize_window(desc);
+    native.window.sample_count = _sapp_tc.app.desc.sample_count;
+    _sapp_tc_window_t* w = _sapp_tc_x11_create_window(&native);
+    return {w ? w->win_id : 0};
 }
 
 void sapp_destroy_window(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    if (!w || w->is_main) return;   /* the main window is owned by sapp_run */
+    if (!w) return;
+    if (w->is_main) {
+        // The first window owns process quit/veto; disposal follows cleanup.
+        _sapp_tc_x11_close(w);
+        return;
+    }
 #if defined(SOKOL_GLES3)
     const bool was_current = w->drawable &&
         (eglGetCurrentSurface(EGL_DRAW) == w->drawable || eglGetCurrentSurface(EGL_READ) == w->drawable);
 #else
-    const bool was_current = w->drawable && glXGetCurrentDrawable() == w->drawable;
+    const bool was_current = w->drawable && glXGetCurrentDisplay() == _sapp_tc.display &&
+        (glXGetCurrentDrawable() == w->drawable || glXGetCurrentReadDrawable() == w->drawable);
 #endif
     for (size_t i = 0; i < _sapp_tc.window_slots; i++) {
         if (_sapp_tc.windows[i] == w) { _sapp_tc.windows[i] = 0; break; }
     }
     if (_sapp_tc.xdnd.over == w) _sapp_tc.xdnd.over = 0;
     w->desc.close_cb = 0;
-    _sapp_tc_x11_destroy_window_resources(w);
-    _sapp_tc_x11_free_window(w);
+    _sapp_tc_x11_unwind(w);
     /* restore the main window's drawable if the destroy released it */
     if (was_current && _sapp_tc.app.main && _sapp_tc.app.main->drawable) {
         _sapp_tc_x11_make_current(_sapp_tc.app.main);
@@ -11879,7 +12229,7 @@ void sapp_destroy_window(sapp_window win) {
 
 void sapp_window_request_close(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    if (!w || w->is_main) return;   /* the main window: sapp_request_quit() */
+    if (!w) return;
     w->close_requested = true;
 }
 
@@ -11917,18 +12267,33 @@ int sapp_window_sample_count(sapp_window win) {
     return w ? w->desc.sample_count : 1;
 }
 
+uint32_t sapp_tc_window_fullscreen_phase(sapp_window win) {
+    _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+    return (uint32_t)(w && w->fullscreen ? _sapp_tc_fullscreen_phase::Fullscreen : _sapp_tc_fullscreen_phase::Windowed);
+}
+
+void sapp_tc_window_set_fullscreen(sapp_window win, bool full) {
+    _sapp_tc_x11_set_fullscreen(win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main, full);
+}
+
+void sapp_tc_window_toggle_fullscreen(sapp_window win) {
+    _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+    if (w) _sapp_tc_x11_set_fullscreen(w, !w->fullscreen);
+}
+
+void sapp_tc_window_draw_while_hidden(sapp_window win, bool allow) {
+    _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+    if (w) w->draw_while_hidden = allow;
+}
+
 void sapp_tc_window_skip_present(sapp_window win) {
-    _sapp_tc_window_t* w = _sapp_tc_lookup(win);
-    if (w && !w->is_main) w->skip_present = true;
+    _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+    if (w) w->skip_present = true;
 }
 
 bool sapp_window_occluded(sapp_window win) {
-    /* both flags gate the secondary tick (see the declaration) */
     _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
-#if defined(SOKOL_GLES3)
-    if (w && w->is_main) return false; // existing EGL main query fallback
-#endif
-    return w ? (w->occluded || w->iconified) : false;
+    return w ? _sapp_tc_native_hidden(w) : false;
 }
 
 void sapp_window_set_title(sapp_window win, const char* title) {
@@ -11981,6 +12346,8 @@ void sapp_run(const sapp_desc* desc) {
     _sapp_tc.window_slots = sizeof(_sapp_tc.windows) / sizeof(_sapp_tc.windows[0]);
 #endif
     sapp_desc* d = &_sapp_tc.app.desc;
+    // Legacy descriptor default, before normalization into common constructor data.
+    if (d->_tc_draw_while_hidden == 0) d->_tc_draw_while_hidden = 1;
 #if defined(SOKOL_GLES3)
     if (!d->gl.major_version) { d->gl.major_version = 3; d->gl.minor_version = 1; }
 #endif
@@ -11989,9 +12356,7 @@ void sapp_run(const sapp_desc* desc) {
     if (d->clipboard_size <= 0) d->clipboard_size = 8192;
     if (d->max_dropped_files <= 0) d->max_dropped_files = 1;
     if (d->max_dropped_file_path_length <= 0) d->max_dropped_file_path_length = 2048;
-    strncpy(_sapp_tc.app.window_title, d->window_title ? d->window_title : "sokol",
-            sizeof(_sapp_tc.app.window_title) - 1);
-    d->window_title = _sapp_tc.app.window_title;
+    if (!d->window_title) d->window_title = "sokol";
     if (d->enable_clipboard) {
         _sapp_tc.app.clipboard_enabled = true;
         _sapp_tc.app.clipboard_size = d->clipboard_size;
@@ -12068,23 +12433,15 @@ void sapp_run(const sapp_desc* desc) {
             _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
         }
     }
-    /* destroy any windows the app left open (secondary first, then main) */
-    for (size_t i = 0; i < _sapp_tc.window_slots; i++) {
+    /* Reverse publication-slot order keeps the first drawable until last. */
+    for (size_t i = _sapp_tc.window_slots; i-- > 0;) {
         _sapp_tc_window_t* w = _sapp_tc.windows[i];
-        if (!w || w->is_main) continue;
+        if (!w) continue;
         _sapp_tc.windows[i] = 0;
-        _sapp_tc_x11_destroy_window_resources(w);
-        _sapp_tc_x11_free_window(w);
+        _sapp_tc_x11_unwind(w);
     }
-    if (_sapp_tc.app.main) {
-        _sapp_tc_window_t* w = _sapp_tc.app.main;
-        for (size_t i = 0; i < _sapp_tc.window_slots; i++) {
-            if (_sapp_tc.windows[i] == w) { _sapp_tc.windows[i] = 0; break; }
-        }
-        _sapp_tc.app.main = 0;
-        _sapp_tc_x11_destroy_window_resources(w);
-        _sapp_tc_x11_free_window(w);
-    }
+    _sapp_tc.app.main = NULL;
+    _sapp_tc.app.desc.window_title = NULL;
     if (_sapp_tc.ctx) {
 #if defined(SOKOL_GLES3)
         eglMakeCurrent(_sapp_tc.egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -12141,12 +12498,12 @@ float sapp_heightf(void) {
 }
 
 int sapp_sample_count(void) {
-    return _sapp_tc.app.desc.sample_count > 0 ? _sapp_tc.app.desc.sample_count : 1;
+    return _sapp_tc.app.main ? _sapp_tc.app.main->desc.sample_count : 1;
 }
 
 bool sapp_high_dpi(void) {
     _sapp_tc_window_t* w = _sapp_tc.app.main;
-    return _sapp_tc.app.desc.high_dpi && w && (w->dpi_scale >= 1.5f);
+    return w && !w->desc.no_high_dpi && (w->dpi_scale >= 1.5f);
 }
 
 float sapp_dpi_scale(void) {
@@ -12155,7 +12512,7 @@ float sapp_dpi_scale(void) {
 }
 
 uint64_t sapp_frame_count(void) {
-    return _sapp_tc.app.frame_count;
+    return _sapp_tc.app.main ? _sapp_tc.app.main->frame_count : 0;
 }
 
 double sapp_frame_duration(void) {
@@ -12183,7 +12540,7 @@ void sapp_consume_event(void) {
 void sapp_skip_present(void) {
     /* one-shot; HONORED on glXSwapBuffers (TrussC patch: event-driven present
        suppression -- keeps the last image on screen, prevents flicker) */
-    _sapp_tc.app.skip_present = true;
+    if (_sapp_tc.app.main) _sapp_tc.app.main->skip_present = true;
 }
 
 void sapp_show_keyboard(bool show) {
@@ -12336,21 +12693,22 @@ const char* sapp_get_clipboard_string(void) {
 
 void sapp_set_window_title(const char* str) {
     if (!str) return;
-    strncpy(_sapp_tc.app.window_title, str, sizeof(_sapp_tc.app.window_title) - 1);
-    _sapp_tc.app.window_title[sizeof(_sapp_tc.app.window_title) - 1] = 0;
     _sapp_tc_window_t* w = _sapp_tc.app.main;
-    if (w && w->xwin) {
-        _sapp_tc_x11_update_window_title(w, _sapp_tc.app.window_title);
-    }
+    if (!w || !w->xwin) return;
+    size_t length = strlen(str);
+    // Bound (compatibility): only the legacy setter retains the EGL128/GLX256 title prefix.
+    if (length >= w->title_limit) length = w->title_limit - 1;
+    memmove(w->title, str, length); w->title[length] = 0;
+    _sapp_tc_x11_update_window_title(w, w->title);
 }
 
 bool sapp_is_fullscreen(void) {
-    return _sapp_tc.app.fullscreen;
+    return _sapp_tc.app.main && _sapp_tc.app.main->fullscreen;
 }
 
 void sapp_toggle_fullscreen(void) {
     if (!_sapp_tc.app.main) return;
-    _sapp_tc_x11_set_fullscreen(!_sapp_tc.app.fullscreen);
+    _sapp_tc_x11_set_fullscreen(_sapp_tc.app.main, !_sapp_tc.app.main->fullscreen);
     _sapp_tc_x11_update_dimensions(_sapp_tc.app.main);
 }
 
@@ -12365,11 +12723,11 @@ const char* sapp_get_dropped_file_path(int index) {
 }
 
 sapp_pixel_format sapp_color_format(void) {
-    return SAPP_PIXELFORMAT_RGBA8;      /* plain 8-bit RGBA on GL (no 10-bit path) */
+    return _sapp_tc.app.main ? _sapp_tc.app.main->color_format : SAPP_PIXELFORMAT_RGBA8;
 }
 
 sapp_pixel_format sapp_depth_format(void) {
-    return SAPP_PIXELFORMAT_DEPTH_STENCIL;
+    return _sapp_tc.app.main ? _sapp_tc.app.main->depth_format : SAPP_PIXELFORMAT_DEPTH_STENCIL;
 }
 
 const void* sapp_x11_get_window(void) {

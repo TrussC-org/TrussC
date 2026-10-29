@@ -8,7 +8,108 @@
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
+#include <initializer_list>
 namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} }
+
+
+static long observedState = NormalState;
+static bool visibilityProbe;
+static int visibilityFailures, visibilityChecks, visibilitySteps;
+static sapp_event_type visibilityEvents[16];
+static int visibilityEventCount;
+static uint32_t visibilityWindow;
+static void visibilityCheck(const char* label, bool ok) {
+    ++visibilityChecks;
+    std::printf("effective-visibility: %s: %s\n", label, ok ? "PASS" : "FAIL");
+    if (!ok) ++visibilityFailures;
+}
+static void visibilityEvent(const sapp_event* ev, sapp_window window, void*) {
+    // Bound (test trace): retain at most 16 events; count overflow so exact-sequence checks fail.
+    if (visibilityEventCount < 16) visibilityEvents[visibilityEventCount] = ev->type;
+    ++visibilityEventCount;
+    visibilityCheck("callback targets the observed window", window.id == visibilityWindow);
+}
+static void effectiveVisibility(Display* display) {
+    for (bool mainRole : {true, false}) for (bool trust : {true, false}) {
+        _sapp_tc = {};
+        _sapp_tc_window_t first{}, second{};
+        first.win_id = first.xwin = 1; first.is_main = true;
+        second.win_id = second.xwin = 2;
+        first.ready = second.ready = true;
+        first.trust_hidden_signals = second.trust_hidden_signals = true;
+        first.desc.event_cb = second.desc.event_cb = visibilityEvent;
+#if defined(SOKOL_GLES3)
+        _sapp_tc_window_t* windows[2];
+        _sapp_tc.windows = windows;
+#endif
+        _sapp_tc.windows[0] = &first; _sapp_tc.windows[1] = &second;
+        _sapp_tc.display = display; _sapp_tc.window_slots = 2;
+        _sapp_tc.app.main = &first; _sapp_tc.WM_STATE = 99;
+        auto* target = mainRole ? &first : &second;
+        auto* peer = mainRole ? &second : &first;
+        target->trust_hidden_signals = trust;
+        visibilityWindow = target->win_id; visibilityEventCount = 0;
+        visibilityProbe = true;
+        std::printf("effective-visibility: window=%u trust=%d\n", visibilityWindow, trust);
+        auto observe = [&](const char* label, int type, int value,
+                           std::initializer_list<sapp_event_type> expected) {
+            ++visibilitySteps;
+            const int before = visibilityEventCount;
+            target->earliest_next = peer->earliest_next = 37.0;
+            XEvent ev{}; ev.type = type;
+            if (type == PropertyNotify) {
+                observedState = value; ev.xproperty.window = target->xwin;
+                ev.xproperty.atom = _sapp_tc.WM_STATE; ev.xproperty.state = PropertyNewValue;
+            } else {
+                ev.xvisibility.window = target->xwin; ev.xvisibility.state = value;
+            }
+            _sapp_tc_x11_process_event(&ev);
+            bool exact = visibilityEventCount == before + (trust ? int(expected.size()) : 0);
+            bool resumed = false;
+            int index = before;
+            if (trust) for (auto event : expected) {
+                exact &= index < 16 && index < visibilityEventCount && visibilityEvents[index] == event;
+                ++index; resumed |= event == SAPP_EVENTTYPE_RESUMED;
+            }
+            visibilityCheck(label, exact);
+            visibilityCheck("only effective visibility return clears deadline",
+                target->earliest_next == (resumed ? 0.0 : 37.0));
+            visibilityCheck("peer observations and deadline remain unchanged",
+                !peer->iconified && !peer->occluded && peer->earliest_next == 37.0);
+            if (!trust) visibilityCheck("untrusted observations remain ignored",
+                !target->iconified && !target->occluded && !_sapp_tc_native_hidden(target));
+        };
+        // One continuous native observation history per role/trust setting.
+        observe("visible minimize: ICONIFIED then SUSPENDED", PropertyNotify, IconicState,
+            {SAPP_EVENTTYPE_ICONIFIED, SAPP_EVENTTYPE_SUSPENDED});
+        observe("duplicate minimize", PropertyNotify, IconicState, {});
+        observe("unobscure while minimized: no RESUMED", VisibilityNotify, VisibilityUnobscured, {});
+        observe("duplicate unobscure while minimized", VisibilityNotify, VisibilityUnobscured, {});
+        observe("fully obscure while minimized: no second SUSPENDED", VisibilityNotify, VisibilityFullyObscured, {});
+        observe("duplicate fully obscure while minimized", VisibilityNotify, VisibilityFullyObscured, {});
+        observe("restore while obscured: RESTORED only", PropertyNotify, NormalState, {SAPP_EVENTTYPE_RESTORED});
+        observe("duplicate restore while obscured", PropertyNotify, NormalState, {});
+        observe("unobscure after restore: RESUMED once", VisibilityNotify, VisibilityUnobscured, {SAPP_EVENTTYPE_RESUMED});
+        observe("duplicate visible notification", VisibilityNotify, VisibilityUnobscured, {});
+        observe("visible obscure: SUSPENDED once", VisibilityNotify, VisibilityFullyObscured, {SAPP_EVENTTYPE_SUSPENDED});
+        observe("duplicate obscured notification", VisibilityNotify, VisibilityFullyObscured, {});
+        observe("obscured minimize: ICONIFIED only", PropertyNotify, IconicState, {SAPP_EVENTTYPE_ICONIFIED});
+        observe("duplicate obscured minimize", PropertyNotify, IconicState, {});
+        observe("unobscure iconic window: no RESUMED", VisibilityNotify, VisibilityUnobscured, {});
+        observe("duplicate iconic unobscure", VisibilityNotify, VisibilityUnobscured, {});
+        observe("restore while unobscured: RESTORED then RESUMED", PropertyNotify, NormalState,
+            {SAPP_EVENTTYPE_RESTORED, SAPP_EVENTTYPE_RESUMED});
+        observe("duplicate visible restore", PropertyNotify, NormalState, {});
+        observe("partial visibility stays visible", VisibilityNotify, VisibilityPartiallyObscured, {});
+        observe("duplicate partial visibility", VisibilityNotify, VisibilityPartiallyObscured, {});
+        visibilityCheck("continuous trace has exactly eight trusted events", visibilityEventCount == (trust ? 8 : 0));
+        visibilityProbe = false;
+    }
+    std::printf("effective-visibility summary: %d observations, %d checks, %d failures\n",
+        visibilitySteps, visibilityChecks, visibilityFailures);
+}
+
+#if defined(SOKOL_GLES3)
 
 static int failures, polls, pending, frames, swaps, owners, logs, mouseEvents, warpX, warpY;
 static double now, firstFrame, nextFrame, inputAt, work;
@@ -29,7 +130,7 @@ static sapp_event lastEvent, lastKeyDown;
 static int callbacks, keyCallbacks, charCallbacks, dropCallbacks;
 static KeySym lookupKeysym = XK_a;
 static EGLContext currentContext;
-static EGLSurface currentDraw, currentRead;
+static EGLSurface currentDraw, currentRead, presentedSurface;
 static std::string property;
 static long requestedLength;
 static int propertyCalls, propertyDeletes;
@@ -77,7 +178,7 @@ extern "C" EGLBoolean __wrap_eglMakeCurrent(EGLDisplay, EGLSurface draw, EGLSurf
 extern "C" EGLContext __wrap_eglGetCurrentContext() { return currentContext; }
 extern "C" EGLSurface __wrap_eglGetCurrentSurface(EGLint which) { return which == EGL_DRAW ? currentDraw : currentRead; }
 extern "C" EGLDisplay __wrap_eglGetCurrentDisplay() { return currentContext ? (EGLDisplay)1 : EGL_NO_DISPLAY; }
-extern "C" EGLBoolean __wrap_eglSwapBuffers(EGLDisplay, EGLSurface) { ++swaps; now += .0664; return EGL_TRUE; }
+extern "C" EGLBoolean __wrap_eglSwapBuffers(EGLDisplay, EGLSurface surface) { presentedSurface = surface; ++swaps; now += .0664; return EGL_TRUE; }
 extern "C" int __wrap_XGrabPointer(Display*, Window, Bool, unsigned int, int, int, Window, Cursor, Time) { return GrabSuccess; }
 extern "C" int __wrap_XUngrabPointer(Display*, Time) { return 1; }
 extern "C" int __wrap_XWarpPointer(Display*, Window, Window, int, int, unsigned int, unsigned int, int x, int y) {
@@ -100,7 +201,7 @@ extern "C" int __wrap_XGetWindowProperty(Display*, Window, Atom, long offset, lo
     Atom type, Atom* actual, int* format, unsigned long* count, unsigned long* after, unsigned char** data) {
     ++propertyCalls; requestedLength = length;
     *actual = wrongType ? type + 1 : type;
-    *format = wrongFormat ? 16 : ((stateProperty || typeList) ? 32 : 8);
+    *format = wrongFormat ? 16 : ((stateProperty || visibilityProbe || typeList) ? 32 : 8);
     if (typeList) {
         const unsigned long n = std::min(offeredCount, (unsigned long)length);
         *count = excessItems ? _sapp_tc.app.drop_max_types + 1 : n;
@@ -116,10 +217,10 @@ extern "C" int __wrap_XGetWindowProperty(Display*, Window, Atom, long offset, lo
         if (movingProperty == 2 && propertyCalls > 1) *count = 4;
         *data = (unsigned char*)std::calloc(9, 1);
         std::memcpy(*data, propertyCalls == 1 ? "file:///" : "\r\r\r\r\r\r\r\r", 8);
-    } else if (stateProperty) {
+    } else if (stateProperty || visibilityProbe) {
         *count = 2; *after = property.empty() ? 0 : 4;
         auto* record = (unsigned long*)std::calloc(2, sizeof(unsigned long));
-        record[0] = NormalState; *data = (unsigned char*)record;
+        record[0] = observedState; *data = (unsigned char*)record;
     } else {
         const size_t begin = (size_t)offset * 4;
         if (begin > property.size()) std::abort();
@@ -147,7 +248,11 @@ static void event(const sapp_event* ev) {
     if (ev->type == SAPP_EVENTTYPE_MOUSE_DOWN || ev->type == SAPP_EVENTTYPE_MOUSE_UP ||
         ev->type == SAPP_EVENTTYPE_MOUSE_ENTER || ev->type == SAPP_EVENTTYPE_MOUSE_SCROLL) {
         ++mouseEvents;
-        if (_sapp_tc.mouse_locked) check("locked button/wheel/enter reports anchor", ev->mouse_x == 10 && ev->mouse_y == 20);
+        if (_sapp_tc.mouse_locked) {
+            check("locked button/wheel/enter reports anchor", ev->mouse_x == 10 && ev->mouse_y == 20);
+            if (ev->type == SAPP_EVENTTYPE_MOUSE_SCROLL)
+                check("locked wheel has zero movement deltas", ev->mouse_dx == 0 && ev->mouse_dy == 0);
+        }
     }
 }
 static void frame() {
@@ -163,9 +268,12 @@ static void frame() {
 }
 static void reset(_sapp_tc_window_t& main, _sapp_tc_window_t** windows, Display* display) {
     _sapp_tc = {}; main = {};
-    main.is_main = main.ready = true; main.xwin = 1; main.drawable = (EGLSurface)1;
+    main.is_main = main.ready = main.trust_hidden_signals = true; main.xwin = 1; main.drawable = (EGLSurface)1;
     main.dpi_scale = 1; main.fb_width = main.fb_height = 64;
     main.desc.event_cb = _sapp_tc_main_event_tramp;
+    main.desc.tick_cb = _sapp_tc_main_tick_tramp;
+    main.events_enabled = _sapp_tc_app_events_enabled;
+    main.swap_interval = 4; main.wake_on_input = true; main.draw_while_hidden = true;
     _sapp_tc.display = display; _sapp_tc.windows = windows; _sapp_tc.window_slots = 1;
     _sapp_tc.ctx = (EGLContext)1; _sapp_tc.egl_display = (EGLDisplay)1;
     _sapp_tc.app.main = &main; _sapp_tc.app.init_called = true;
@@ -201,6 +309,11 @@ static void offerTypes(Window window, Window source = 2) {
 int main() {
     auto* display = (Display*)std::calloc(1, sizeof(*(_XPrivDisplay)nullptr));
     _sapp_tc_window_t main{}; _sapp_tc_window_t* windows[] = { &main };
+    effectiveVisibility(display);
+    observedState = NormalState;
+    uint32_t counter = UINT32_MAX - 1, identity = 0;
+    check("last native identity is issued once", _sapp_tc_next_window_id(&counter, &identity) && identity == UINT32_MAX);
+    check("native identity exhaustion never wraps", !_sapp_tc_next_window_id(&counter, &identity) && counter == UINT32_MAX);
     reset(main, windows, display); inject = true; _sapp_tc_x11_run_loop();
     check("production loop waits on X11 fd", polls == 1 && timeouts[0] >= 61 && timeouts[0] <= 62);
     check("dispatched input admits next main frame within 2ms", inputAt > 0 && nextFrame >= inputAt && nextFrame - inputAt < .002);
@@ -209,9 +322,39 @@ int main() {
         reset(main, windows, display); inject = true; injectedType = type; _sapp_tc_x11_run_loop();
         check("main key/button at 10ms re-admits", inputAt > 0 && nextFrame - inputAt < .002);
     }
-    _sapp_tc_window_t secondary{}; secondary.ready = true; secondary.xwin = 2;
+    _sapp_tc_window_t secondary{}; secondary.ready = secondary.trust_hidden_signals = true; secondary.xwin = 2;
     secondary.drawable = (EGLSurface)2; secondary.earliest_next = 20;
     _sapp_tc_window_t* pair[] = { &main, &secondary };
+    reset(main, pair, display); _sapp_tc.window_slots = 2;
+    main.win_id = 1; secondary.win_id = 2;
+    main.desc.tick_cb = secondary.desc.tick_cb = [](sapp_window, void*) { ++frames; };
+    for (auto* target : {&main, &secondary}) {
+        for (bool trust : {false, true}) for (bool iconified : {false, true}) {
+            target->trust_hidden_signals = trust;
+            target->iconified = iconified; target->occluded = !iconified;
+            for (bool allow : {false, true}) {
+                target->draw_while_hidden = allow; frames = swaps = 0;
+                _sapp_tc_x11_tick(target);
+                check("native hidden admission and trust follow data for either role",
+                    frames == 1 && swaps == int(!trust || allow));
+                check("untrusted hidden flags report visible", sapp_window_occluded({target->win_id}) == trust &&
+                    (target != &main || sapp_window_occluded({0}) == trust));
+            }
+        }
+        target->occluded = target->iconified = false;
+        target->trust_hidden_signals = true;
+    }
+    swaps = 0;
+    sapp_skip_present();
+    _sapp_tc_x11_tick(&secondary);
+    _sapp_tc_x11_tick(&main);
+    check("main skip does not suppress secondary present", swaps == 1 && presentedSurface == secondary.drawable);
+    swaps = 0;
+    sapp_tc_window_skip_present({2});
+    _sapp_tc_x11_tick(&main);
+    _sapp_tc_x11_tick(&secondary);
+    check("secondary skip does not suppress main present", swaps == 1 && presentedSurface == main.drawable);
+    secondary.earliest_next = 20;
     for (int type : { Expose, ConfigureNotify, FocusIn, PropertyNotify }) {
         reset(main, pair, display); _sapp_tc.window_slots = 2;
         inject = true; injectedType = type; injectedWindow = type == FocusIn ? 999 : 2;
@@ -250,25 +393,25 @@ int main() {
                 ev.xfocus.detail = NotifyNonlinear;
                 _sapp_tc_x11_process_event(&ev);
                 check("Nonlinear focus delivers once to the addressed window", callbacks == 1 && lastEvent.type == expected);
-                check("real focus re-admits only EGL main", _sapp_tc.main_input_delivered == (window == 1));
-                _sapp_tc.main_input_delivered = false;
+                check("real focus re-admits only EGL main", main.input_delivered == (window == 1));
+                main.input_delivered = false;
                 for (int pointerType : { type == FocusIn ? FocusOut : FocusIn, type }) {
                     ev.type = pointerType; ev.xfocus.detail = NotifyPointer;
                     _sapp_tc_x11_process_event(&ev);
                     check("pointer focus adds no callback or main admission", callbacks == 1 &&
-                        lastEvent.type == expected && !_sapp_tc.main_input_delivered);
+                        lastEvent.type == expected && !main.input_delivered);
                 }
                 ev.type = type; ev.xfocus.detail = NotifyAncestor;
                 _sapp_tc_x11_process_event(&ev);
                 check("Ancestor focus still delivers and admits only main", callbacks == 2 &&
-                    lastEvent.type == expected && _sapp_tc.main_input_delivered == (window == 1));
+                    lastEvent.type == expected && main.input_delivered == (window == 1));
             }
             for (int mode : { NotifyGrab, NotifyUngrab }) {
                 reset(main, pair, display); _sapp_tc.window_slots = 2;
                 XEvent ev{}; ev.type = type; ev.xfocus.window = window;
                 ev.xfocus.mode = mode; ev.xfocus.detail = NotifyNonlinear;
                 _sapp_tc_x11_process_event(&ev);
-                check("grab-cycle focus remains ignored", callbacks == 0 && !_sapp_tc.main_input_delivered);
+                check("grab-cycle focus remains ignored", callbacks == 0 && !main.input_delivered);
             }
         }
     }
@@ -278,7 +421,7 @@ int main() {
     pointerOut.xfocus.mode = NotifyNormal; pointerOut.xfocus.detail = NotifyPointer;
     _sapp_tc_x11_process_event(&pointerOut);
     check("pointer FocusOut retains EGL main mouse unlock without admission", !_sapp_tc.mouse_locked &&
-        warpX == 10 && warpY == 20 && callbacks == 0 && !_sapp_tc.main_input_delivered);
+        warpX == 10 && warpY == 20 && callbacks == 0 && !main.input_delivered);
 
     reset(main, windows, display);
     mouseEvents = 0;
@@ -300,38 +443,38 @@ int main() {
         XEvent ev{}; ev.type = type; ev.xany.window = 1;
         if (type == KeyPress || type == KeyRelease) ev.xkey.keycode = 24;
         _sapp_tc_x11_process_event(&ev);
-        check("focus/key dispatch retains current pointer and deltas", lastEvent.mouse_x == 30 &&
-            lastEvent.mouse_y == 40 && lastEvent.mouse_dx == 2 && lastEvent.mouse_dy == 3);
+        check("focus/key dispatch has no pointer metadata", lastEvent.mouse_x == 0 &&
+            lastEvent.mouse_y == 0 && lastEvent.mouse_dx == 0 && lastEvent.mouse_dy == 0);
     }
-    check("KEY_DOWN retains pointer independently of following CHAR", lastKeyDown.key_code == SAPP_KEYCODE_A &&
-        lastKeyDown.mouse_x == 30 && lastKeyDown.mouse_y == 40 && lastKeyDown.mouse_dx == 2 && lastKeyDown.mouse_dy == 3);
-    check("positive key has a real mapping and CHAR retains pointer", keyCallbacks == 2 && charCallbacks == 1 && lastEvent.key_code == SAPP_KEYCODE_A);
+    check("KEY_DOWN has no pointer metadata", lastKeyDown.key_code == SAPP_KEYCODE_A &&
+        lastKeyDown.mouse_x == 0 && lastKeyDown.mouse_y == 0 && lastKeyDown.mouse_dx == 0 && lastKeyDown.mouse_dy == 0);
+    check("positive key has a real mapping and CHAR is delivered", keyCallbacks == 2 && charCallbacks == 1 && lastEvent.key_code == SAPP_KEYCODE_A);
     _sapp_tc.app.clipboard_enabled = true;
     _sapp_tc.keycodes[24] = SAPP_KEYCODE_V;
     XEvent paste{}; paste.type = KeyPress; paste.xkey.window = 1; paste.xkey.keycode = 24;
     paste.xkey.state = ControlMask; lookupKeysym = NoSymbol;
     _sapp_tc_x11_process_event(&paste);
-    check("clipboard notification retains pointer metadata", lastEvent.type == SAPP_EVENTTYPE_CLIPBOARD_PASTED &&
-        lastEvent.mouse_x == 30 && lastEvent.mouse_y == 40 && lastEvent.mouse_dx == 2 && lastEvent.mouse_dy == 3);
+    check("clipboard notification has no pointer metadata", lastEvent.type == SAPP_EVENTTYPE_CLIPBOARD_PASTED &&
+        lastEvent.mouse_x == 0 && lastEvent.mouse_y == 0 && lastEvent.mouse_dx == 0 && lastEvent.mouse_dy == 0);
     for (int type : { KeyPress, KeyRelease }) {
         XEvent ev{}; ev.type = type; ev.xkey.window = 1; ev.xkey.keycode = 200;
-        lookupKeysym = 0x1008ff12; callbacks = 0; _sapp_tc.main_input_delivered = false;
+        lookupKeysym = 0x1008ff12; callbacks = 0; main.input_delivered = false;
         _sapp_tc_x11_process_event(&ev);
-        check("unmapped non-text key has no callback or main admission", callbacks == 0 && !_sapp_tc.main_input_delivered);
+        check("unmapped non-text key is delivered", callbacks == 1 && main.input_delivered && lastEvent.key_code == SAPP_KEYCODE_INVALID);
     }
     XEvent text{}; text.type = KeyPress; text.xkey.window = 1; text.xkey.keycode = 200;
-    lookupKeysym = XK_a; callbacks = 0; _sapp_tc.main_input_delivered = false;
+    lookupKeysym = XK_a; callbacks = 0; main.input_delivered = false;
     _sapp_tc_x11_process_event(&text);
-    check("unmapped text key retains CHAR and main admission", callbacks == 1 &&
-        lastEvent.type == SAPP_EVENTTYPE_CHAR && _sapp_tc.main_input_delivered);
+    check("unmapped text key delivers KEY_DOWN and CHAR", callbacks == 2 &&
+        lastEvent.type == SAPP_EVENTTYPE_CHAR && main.input_delivered);
     for (bool locked : { false, true }) {
         main.mouse_x = 30; main.mouse_y = 40; main.mouse_dx = 2; main.mouse_dy = 3;
         _sapp_tc.mouse_locked = locked;
         XEvent ev{}; ev.type = LeaveNotify; ev.xcrossing.window = 1; ev.xcrossing.x = 101; ev.xcrossing.y = 42;
         _sapp_tc_x11_process_event(&ev);
-        check("leave uses crossing position and clears deltas unless locked", lastEvent.type == SAPP_EVENTTYPE_MOUSE_LEAVE &&
-            lastEvent.mouse_x == (locked ? 30 : 101) && lastEvent.mouse_y == (locked ? 40 : 42) &&
-            lastEvent.mouse_dx == (locked ? 2 : 0) && lastEvent.mouse_dy == (locked ? 3 : 0));
+        check("leave retains last position and deltas", lastEvent.type == SAPP_EVENTTYPE_MOUSE_LEAVE &&
+            lastEvent.mouse_x == 30 && lastEvent.mouse_y == 40 &&
+            lastEvent.mouse_dx == 2 && lastEvent.mouse_dy == 3);
     }
     _sapp_tc.mouse_locked = false;
 
@@ -340,23 +483,23 @@ int main() {
             SAPP_EVENTTYPE_MOUSE_MOVE, SAPP_EVENTTYPE_MOUSE_ENTER, SAPP_EVENTTYPE_MOUSE_LEAVE,
             SAPP_EVENTTYPE_FOCUSED, SAPP_EVENTTYPE_UNFOCUSED, SAPP_EVENTTYPE_ICONIFIED,
             SAPP_EVENTTYPE_RESTORED, SAPP_EVENTTYPE_FILES_DROPPED, SAPP_EVENTTYPE_CLIPBOARD_PASTED }) {
-        _sapp_tc.main_input_delivered = false;
+        main.input_delivered = false;
         _sapp_tc_x11_app_event(&main, type);
-        check("eligible delivered main event marks batch", _sapp_tc.main_input_delivered);
+        check("eligible delivered main event marks batch", main.input_delivered);
     }
     for (sapp_event_type type : { SAPP_EVENTTYPE_RESIZED, SAPP_EVENTTYPE_SUSPENDED, SAPP_EVENTTYPE_RESUMED }) {
-        _sapp_tc.main_input_delivered = false;
+        main.input_delivered = false;
         _sapp_tc_x11_app_event(&main, type);
-        check("non-input main callback leaves batch unmarked", !_sapp_tc.main_input_delivered);
+        check("non-input main callback leaves batch unmarked", !main.input_delivered);
     }
-    _sapp_tc.main_input_delivered = false;
+    main.input_delivered = false;
     _sapp_tc.app.init_called = false;
     _sapp_tc_x11_app_event(&main, SAPP_EVENTTYPE_FOCUSED);
-    check("suppressed pre-init main event leaves batch unmarked", !_sapp_tc.main_input_delivered);
+    check("suppressed pre-init main event leaves batch unmarked", !main.input_delivered);
     _sapp_tc.app.init_called = true;
     _sapp_tc.app.desc.event_cb = nullptr;
     _sapp_tc_x11_app_event(&main, SAPP_EVENTTYPE_FOCUSED);
-    check("absent main callback leaves batch unmarked", !_sapp_tc.main_input_delivered);
+    check("absent main callback leaves batch unmarked", !main.input_delivered);
     _sapp_tc.app.desc.event_cb = event;
 
     char clipboard[8]{};
@@ -409,7 +552,7 @@ int main() {
         movingProperty = mode == 4 ? 0 : mode;
         wrongFormat = mode == 0; property = "file:///a\n";
         propertyCalls = dropCallbacks = 0;
-        _sapp_tc.main_input_delivered = false;
+        main.input_delivered = false;
         XEvent ev{}; ev.type = SelectionNotify; ev.xselection.requestor = 1;
         ev.xselection.property = 19; ev.xselection.target = 15;
         _sapp_tc_x11_process_event(&ev);
@@ -417,9 +560,9 @@ int main() {
         check("SelectionNotify reports final outcome in Finished flags and action", sentEvent.xclient.message_type == 18 &&
             sentEvent.xclient.data.l[1] == (good ? 1 : 0) && sentEvent.xclient.data.l[2] == (good ? 20 : None));
         check("drop delivery and retained paths match final outcome", good ?
-            (dropCallbacks == 1 && _sapp_tc.main_input_delivered && lastEvent.mouse_x == 30 && lastEvent.mouse_y == 40 &&
-                lastEvent.mouse_dx == 2 && lastEvent.mouse_dy == 3) :
-            (propertyCalls <= 2 && dropCallbacks == 0 && !_sapp_tc.main_input_delivered && _sapp_tc.app.drop_num_files == 0 && paths[0] == 0));
+            (dropCallbacks == 1 && main.input_delivered && lastEvent.mouse_x == 0 && lastEvent.mouse_y == 0 &&
+                lastEvent.mouse_dx == 0 && lastEvent.mouse_dy == 0) :
+            (propertyCalls <= 2 && dropCallbacks == 0 && !main.input_delivered && _sapp_tc.app.drop_num_files == 0 && paths[0] == 0));
     }
     movingProperty = 0; wrongFormat = false;
     struct DropCase {
@@ -442,13 +585,13 @@ int main() {
         property = test.payload;
         propertyCalls = callbacks = dropCallbacks = 0;
         sentEvent = {};
-        _sapp_tc.main_input_delivered = false;
+        main.input_delivered = false;
         XEvent ev{}; ev.type = SelectionNotify; ev.xselection.requestor = 1;
         ev.xselection.property = 19; ev.xselection.target = 15;
         _sapp_tc_x11_process_event(&ev);
         const bool good = test.retainedFiles > 0;
         check("URI content SelectionNotify callback count and main admission", callbacks == (good ? 1 : 0) &&
-            dropCallbacks == (good ? 1 : 0) && _sapp_tc.main_input_delivered == good);
+            dropCallbacks == (good ? 1 : 0) && main.input_delivered == good);
         check("URI content SelectionNotify retains the parser's completed-entry policy",
             _sapp_tc.app.drop_num_files == test.retainedFiles &&
             (test.retainedFiles == 0 || std::strcmp(paths, test.retainedPath) == 0) &&
@@ -504,5 +647,22 @@ int main() {
     offerTypes(1, 3);
     check("complete type list accepts without excess Notice", _sapp_tc.xdnd.format == 15 && notices == 3 && atomNames == 0);
     std::free(display);
-    return failures ? 1 : 0;
+    return failures || visibilityFailures ? 1 : 0;
 }
+
+#else
+// GLX runs the same production dispatcher and continuous visibility sequences.
+extern "C" int __wrap_XGetWindowProperty(Display*, Window, Atom, long, long, Bool,
+    Atom type, Atom* actual, int* format, unsigned long* count, unsigned long* after, unsigned char** data) {
+    *actual = type; *format = 32; *count = 2; *after = 0;
+    auto* record = (unsigned long*)std::calloc(2, sizeof(unsigned long));
+    record[0] = observedState; *data = (unsigned char*)record;
+    return Success;
+}
+int main() {
+    auto* display = (Display*)std::calloc(1, sizeof(*(_XPrivDisplay)nullptr));
+    effectiveVisibility(display);
+    std::free(display);
+    return visibilityFailures ? 1 : 0;
+}
+#endif

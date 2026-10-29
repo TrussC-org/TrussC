@@ -26,9 +26,9 @@ struct AdapterState {
     sapp_window win{0};
 };
 
-// Swapchain provider handed to WindowContext::acquireSwapchain. The drawable
-// was acquired by the native layer at the top of the current tick (it is only
-// ever acquired for a visible window; never blocks here).
+// Swapchain provider handed to WindowContext::acquireSwapchain. The native
+// layer acquires the drawable lazily on this first query, and only in a tick
+// whose draw it admitted (a hidden, non-admitted window gets none).
 sg_swapchain acquireSecondarySwapchain(void* user) {
     auto* st = static_cast<AdapterState*>(user);
     sg_swapchain sc = {};
@@ -399,7 +399,22 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
         logError("Window") << "createWindow(): not available in headless mode";
         return nullptr;
     }
-    auto win = std::shared_ptr<Window>(new Window());
+    if (sessionEndExit()) {
+        // Busy session end (frozen until _exit): no native window is created.
+        static bool reported = false;
+        if (!reported) {
+            reported = true;
+            logError("Window") << "createWindow(): refused, the session is ending";
+        }
+        return nullptr;
+    }
+    // While a busy session end is frozen, the last release of a Window does not
+    // tear it down: it stays alive (and its context valid) until the process
+    // _exits. Otherwise the release destroys it as usual.
+    auto win = std::shared_ptr<Window>(new Window(), [](Window* w) {
+        if (sessionEndExit()) return;
+        delete w;
+    });
     win->title_ = settings.title;
     win->ctx_.swapchainTarget.colorFormat = SG_PIXELFORMAT_BGRA8;
     auto* st = new AdapterState();
@@ -445,3 +460,17 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
 } // namespace trussc
 
 #endif // __APPLE__
+
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+namespace trussc::internal {
+WindowFullscreenPhase macWindowFullscreenPhase(uint32_t id) noexcept {
+    return static_cast<WindowFullscreenPhase>(sapp_tc_window_fullscreen_phase({id}));
+}
+void setMacWindowFullscreen(uint32_t id, bool full) noexcept {
+    sapp_tc_window_set_fullscreen({id}, full);
+}
+void toggleMacWindowFullscreen(uint32_t id) noexcept {
+    sapp_tc_window_toggle_fullscreen({id});
+}
+}
+#endif

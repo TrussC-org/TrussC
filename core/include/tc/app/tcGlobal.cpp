@@ -32,6 +32,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <mutex>
@@ -1111,6 +1112,31 @@ void destroyMainWindow() noexcept {
     auto& owner = mainWindowOwner();
     if (owner) WindowRequestAccess::endMain(*owner);
     owner.reset();
+}
+// Session end under a paused callback (the native backend _exits right after).
+// The framework is frozen (sessionEndExit()): no tick, event, App attachment,
+// deferred close or window creation runs, and a released Window is not torn
+// down. Deliver events().exit (App::exit and its BeforeApp/App listeners) to
+// the windows open before the first notification: main first, then the others
+// newest first. Each delivery selects only that window's event/state context;
+// no detach, close, App::cleanup() or GPU work.
+void notifyAppExitsAtSessionEnd() noexcept {
+    TeardownSteps steps;
+    auto* previous = currentWindowCtx();
+    std::vector<Window*> order;
+    steps.run("session-end window snapshot", [&] {
+        Window* main = mainWindow();
+        if (main) order.push_back(main);
+        auto open = openWindows();
+        for (auto it = open.rbegin(); it != open.rend(); ++it) {
+            if (*it != main) order.push_back(*it);
+        }
+    });
+    for (Window* w : order) {
+        currentWindowCtx() = &w->context();
+        FrameworkEventAccess::notifySessionEnd(w->events().exit, steps);
+        currentWindowCtx() = previous;
+    }
 }
 
 WindowFullscreenHook& windowFullscreenHookForTests() {
@@ -3095,6 +3121,14 @@ TouchMouseMapper& touchMouseMapper() {
 bool& appSetupCalled() {
     static bool called = false;
     return called;
+}
+
+// Set by a native backend that ends the process itself (_exit) right after
+// cleanup, e.g. a macOS session end while a callback is paused: cleanup must
+// then not leave through std::exit (atexit handlers, static destructors).
+bool& sessionEndExit() {
+    static bool active = false;
+    return active;
 }
 
 DataPathState& dataPathState() {

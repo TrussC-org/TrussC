@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""Deterministic production X11 admission/deadline test (no display needed).
+
+Run through tcbuild.sh. TC_X11_PACING_HEADER selects a private pre-fix header.
+Native swaps model steady or queued vsync; the loop, tick and periodic
+decision are extracted verbatim and compiled for both GLX and EGL.
+"""
+from pathlib import Path
+import os
+import subprocess
+import tempfile
+
+root = Path(__file__).resolve().parents[3]
+header = Path(os.environ.get('TC_X11_PACING_HEADER', root / 'core/include/sokol/sokol_app_tc.h'))
+source = header.read_text(encoding='utf-8')
+
+
+def body(marker):
+    start = source.find(marker)
+    if start < 0:
+        raise SystemExit(f'{header}: missing extraction marker {marker!r}')
+    opening = source.index('{', start)
+    depth, end = 1, opening + 1
+    while depth and end < len(source):
+        depth += (source[end] == '{') - (source[end] == '}')
+        end += 1
+    if depth:
+        raise SystemExit(f'{header}: unbalanced body {marker!r}')
+    return source[start:end]
+
+probe = r'''
+#include <cmath>
+#include <cstdio>
+#include <cstddef>
+struct sapp_window { int id; };
+struct _sapp_tc_window_t {
+    bool ready=true, in_tick=false, close_requested=false, input_delivered=false;
+    int drawable=1, frame_count=0, swap_interval=0, win_id=1;
+    bool draw_while_hidden=true, skip_present=false;
+    double earliest_next=0, frame_duration=0, last_present=0;
+    struct { double smooth_dt=1.0/62.0, last=0; } timing;
+    struct { void (*tick_cb)(struct sapp_window, void*)=nullptr; void* user_data=nullptr; } desc;
+};
+struct App { bool quit_ordered=false, quit_requested=false; _sapp_tc_window_t* main=nullptr; };
+struct { App app; int display=0; size_t window_slots=2; double refresh_period=1.0/62.0;
+    _sapp_tc_window_t* windows[2]; } _sapp_tc;
+struct XEvent {};
+struct pollfd { int fd, events, revents; };
+constexpr int POLLIN=1, SAPP_EVENTTYPE_QUIT_REQUESTED=1, SAPP_EVENTTYPE_RESIZED=2;
+static double clockValue=10, period=1.0/62.0, tail=0;
+static int limit=620;
+static bool queued=false, nonblocking=false, hideMain=false, iconMain=false, hideAfterSecondary=false;
+static double mainPeriod=0, nextMain=0, previousSecondary=0, minSecondaryGap=100;
+static int secondaryDraws=0, mainWaits=0;
+static double drawAccumulator=0, previousDrawTick=0, callbackWork=0;
+FRAME_SKIP
+void lowerFps(sapp_window, void*) noexcept {
+    const double elapsed=clockValue-previousDrawTick;
+    previousDrawTick=clockValue;
+    if (frameSkipShouldTick(drawAccumulator,elapsed,1.0/20.0)) { ++secondaryDraws; clockValue+=callbackWork; }
+    else _sapp_tc.windows[1]->skip_present=true;
+    if (_sapp_tc.windows[1]->frame_count==limit-1) _sapp_tc.app.quit_ordered=true;
+}
+void renderWork(sapp_window,void*) noexcept { clockValue+=callbackWork; }
+double _sapp_tc_now() { return clockValue; }
+int XPending(int) { return 0; }
+void XFlush(int) {}
+void XNextEvent(int, XEvent*) {}
+int ConnectionNumber(int) { return 0; }
+int poll(pollfd*, int, int ms) { clockValue+=ms*.001; return 0; }
+void _sapp_tc_x11_wait_until(double deadline) { clockValue=deadline; }
+void _sapp_tc_x11_process_event(XEvent*) {}
+void _sapp_tc_x11_close(_sapp_tc_window_t*) {}
+void _sapp_tc_x11_app_event(_sapp_tc_window_t*,int) {}
+PERIODIC
+DUE
+struct _sapp_tc_x11_surface_scope {};
+void _sapp_tc_timing_update(decltype(_sapp_tc_window_t::timing)* t) {
+    if (_sapp_tc.windows[1] && t==&_sapp_tc.windows[1]->timing) {
+        if (previousSecondary>0) minSecondaryGap=std::min(minSecondaryGap,clockValue-previousSecondary);
+        previousSecondary=clockValue;
+    }
+    t->last=clockValue;
+}
+bool _sapp_tc_x11_update_dimensions(_sapp_tc_window_t*) { return false; }
+bool _sapp_tc_x11_make_current(_sapp_tc_window_t* w) {
+    // A native boundary outside swap supplies the observed main cadence.
+    // No claim that this is the particular blocking boundary on the Pi.
+    if (nonblocking && w==_sapp_tc.app.main) {
+        nextMain+=mainPeriod;
+        if (clockValue<nextMain) { clockValue=nextMain; ++mainWaits; }
+    }
+    return true;
+}
+bool _sapp_tc_native_hidden(_sapp_tc_window_t* w) { return (hideMain || iconMain) && w==_sapp_tc.app.main; }
+bool _sapp_tc_native_iconified(_sapp_tc_window_t* w) { return iconMain && w==_sapp_tc.app.main; }
+void _sapp_tc_x11_swap(_sapp_tc_window_t* w) {
+    if (w==_sapp_tc.app.main) {
+        clockValue+=nonblocking ? .00005 : (queued ? (w->frame_count%2 ? 0 : 2*period) : period);
+        if(w->frame_count==limit) _sapp_tc.app.quit_ordered=true;
+    } else {
+        clockValue+=tail;
+        if (hideAfterSecondary) hideMain=true;
+    }
+}
+PACE
+TICK
+LOOP
+int main() {
+    int failures=0;
+    for (bool burst : {false, true}) for (double work : {0.0, .0001, .001}) {
+        _sapp_tc_window_t main{}, secondary{};
+        _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
+        _sapp_tc.app.main=&main; main.swap_interval=1; clockValue=10; tail=work; queued=burst;
+        _sapp_tc_x11_run_loop();
+        // Steady swaps should admit almost every tick. Queued EGL swaps may
+        // teach the existing estimator a doubled period, so allow half cadence.
+        bool ok=secondary.frame_count*4>=main.frame_count*3;
+#if defined(SOKOL_GLES3)
+        if (burst) ok=secondary.frame_count*2>=main.frame_count-4;
+#endif
+        std::printf("relative cadence queued=%d work=%.4f main=%d secondary=%d refresh_ms=%.3f: %s\n",burst,work,main.frame_count,secondary.frame_count,_sapp_tc.refresh_period*1000,ok?"PASS":"FAIL");
+        failures+=!ok;
+    }
+    // Main ticks at P<R, with its swap returning in 0.05ms. The secondary
+    // starts eps after a main tick and completion work spans that eps.
+    // Light callback work exposes startup admission misses. A refresh of
+    // non-swap callback work also makes completion skip the following deadline,
+    // reproducing sustained half cadence despite both swaps returning quickly.
+    for (bool heavy : {false,true}) for (bool lower : {false,true}) {
+        _sapp_tc_window_t main{}, secondary{};
+        _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
+        _sapp_tc.app.main=&main; main.swap_interval=1;
+        clockValue=nextMain=10; mainPeriod=period-.0001;
+        main.last_present=10; secondary.earliest_next=10+mainPeriod+.0001;
+        nonblocking=true; queued=false; tail=heavy?.00005:.0002; callbackWork=heavy?period:0;
+        previousSecondary=0; minSecondaryGap=100; mainWaits=0;
+        secondaryDraws=0; previousDrawTick=10; drawAccumulator=0;
+        secondary.desc.tick_cb=lower?lowerFps:renderWork;
+        _sapp_tc_x11_run_loop();
+        const double expectedDraws=(clockValue-10)*20;
+        bool ok=secondary.frame_count==main.frame_count
+            && minSecondaryGap>period*.5 && (heavy || mainWaits>=limit-1);
+        if(lower) ok=ok && std::abs(secondaryDraws-expectedDraws)<=2;
+        std::printf("phase lock nonblocking P=R-0.1ms callback_work_R=%d lower_fps=%d main=%d secondary=%d draws=%d gap_ms=%.3f: %s\n",
+            heavy,lower,main.frame_count,secondary.frame_count,secondaryDraws,minSecondaryGap*1000,ok?"PASS":"FAIL");
+        failures+=!ok;
+    }
+    callbackWork=0;
+    // A fast main whose interval-positive swaps do not actually pace the
+    // loop must leave the secondary on its refresh timer.
+    {
+        _sapp_tc_window_t main{}, secondary{};
+        _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
+        _sapp_tc.app.main=&main; main.swap_interval=1; main.last_present=10;
+        clockValue=nextMain=10; mainPeriod=.001; tail=0;
+        previousSecondary=0; minSecondaryGap=100;
+        _sapp_tc_x11_run_loop();
+        bool ok=secondary.frame_count<main.frame_count*.75 && minSecondaryGap>=period*.5;
+#if defined(SOKOL_GLES3)
+        ok=ok && std::abs(secondary.frame_count-(clockValue-10)/period)<=2;
+#endif
+        // GLX supplies its own periodic wait when swaps return immediately;
+        // its estimator may change R. EGL leaves main due and tests a truly
+        // unpaced main. Both must avoid promoting every fast pass to a tick.
+        std::printf("unpaced main retains timer main=%d secondary=%d elapsed_ms=%.3f R_ms=%.3f min_gap_ms=%.3f: %s\n",main.frame_count,secondary.frame_count,(clockValue-10)*1000,_sapp_tc.refresh_period*1000,minSecondaryGap*1000,ok?"PASS":"FAIL");
+        failures+=!ok;
+    }
+    // On the main-to-timer handoff, the obsolete phase could otherwise
+    // leave a quarter-refresh deadline and replay a tick immediately.
+    {
+        _sapp_tc_window_t main{}, secondary{};
+        _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
+        _sapp_tc.app.main=&main; main.swap_interval=1; main.last_present=10;
+        main.draw_while_hidden=false;
+        clockValue=nextMain=10; mainPeriod=period; tail=0;
+        secondary.earliest_next=10+.25*period+.00005;
+        previousSecondary=0; minSecondaryGap=100; hideAfterSecondary=true;
+        secondary.desc.tick_cb=[](sapp_window,void*) noexcept {
+            if (_sapp_tc.windows[1]->frame_count==1) _sapp_tc.app.quit_ordered=true;
+        };
+        _sapp_tc_x11_run_loop();
+        bool ok=secondary.frame_count==2 && minSecondaryGap>=.5*period;
+        std::printf("main-to-timer handoff secondary=%d gap_ms=%.3f: %s\n",secondary.frame_count,minSecondaryGap*1000,ok?"PASS":"FAIL");
+        failures+=!ok;
+    }
+    hideAfterSecondary=hideMain=false;
+    nonblocking=false;
+    // Hidden/iconified main uses timers; it must not gate the secondary.
+    for (bool absent : {false,true}) for (bool iconify : {false,true}) for (bool lower : {false,true}) {
+        _sapp_tc_window_t main{}, secondary{};
+        _sapp_tc={}; _sapp_tc.windows[0]=absent?nullptr:&main; _sapp_tc.windows[1]=&secondary;
+        _sapp_tc.app.main=absent?nullptr:&main; main.swap_interval=1; main.draw_while_hidden=false;
+        clockValue=10; hideMain=!iconify; iconMain=iconify; tail=0;
+        previousSecondary=0; minSecondaryGap=100;
+        secondaryDraws=0; previousDrawTick=10; drawAccumulator=0;
+        secondary.desc.tick_cb=[](sapp_window,void*) noexcept {
+            if (_sapp_tc.windows[1]->frame_count==limit-1) _sapp_tc.app.quit_ordered=true;
+        };
+        if (lower) secondary.desc.tick_cb=lowerFps;
+        _sapp_tc_x11_run_loop();
+        bool ok=secondary.frame_count==limit && std::abs((clockValue-10)-(limit-1)*period)<.7;
+        if (lower) ok=ok && std::abs(secondaryDraws-(clockValue-10)*20)<=2;
+        std::printf("timer fallback absent_main=%d iconified=%d lower_fps=%d secondary=%d draws=%d: %s\n",absent,iconify,lower,secondary.frame_count,secondaryDraws,ok?"PASS":"FAIL");
+        failures+=!ok;
+    }
+    hideMain=iconMain=false;
+    // A late callback must retain phase and skip elapsed deadlines in one step.
+    _sapp_tc_window_t window{}; window.earliest_next=10;
+    clockValue=10+3.2*period;
+    _sapp_tc_x11_pace_periodic(&window,period);
+    bool ok=std::abs(window.earliest_next-(10+4*period))<1e-9;
+    std::printf("late periodic phase: %s\n",ok?"PASS":"FAIL"); failures+=!ok;
+    // Floating-point rounding must not leave a skipped deadline due at once.
+    window.earliest_next=10+1.0/60.0; clockValue=20;
+    _sapp_tc_x11_pace_periodic(&window,1.0/60.0);
+    ok=window.earliest_next>20 && !_sapp_tc_x11_window_due(&window,20);
+    std::printf("exact-boundary skip stays future: %s\n",ok?"PASS":"FAIL"); failures+=!ok;
+    window.earliest_next=100; clockValue=10;
+    _sapp_tc_x11_pace_periodic(&window,period);
+    ok=std::abs(window.earliest_next-(10+period))<1e-9;
+    std::printf("future deadline resync: %s\n",ok?"PASS":"FAIL"); failures+=!ok;
+    return failures?1:0;
+}
+'''
+probe = '#include <initializer_list>\n#include <algorithm>\n' + probe
+saved_source = source
+source = (root / 'core/include/tc/app/tcGlobal.cpp').read_text(encoding='utf-8')
+probe = probe.replace('FRAME_SKIP', body('bool frameSkipShouldTick('))
+source = saved_source
+for placeholder, marker in (
+    ('PERIODIC', 'static void _sapp_tc_x11_pace_periodic('),
+    ('DUE', 'static bool _sapp_tc_x11_window_due('),
+    ('PACE', 'static void _sapp_tc_x11_pace('),
+    ('TICK', 'static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {'),
+    ('LOOP', 'static void _sapp_tc_x11_run_loop('),
+):
+    probe = probe.replace(placeholder, body(marker))
+with tempfile.TemporaryDirectory(prefix='tc-an2a-pacing2-', dir=os.environ.get('TMPDIR')) as temporary:
+    scratch = Path(temporary)
+    (scratch / 'probe.cpp').write_text(probe, encoding='utf-8')
+    failed = False
+    for backend in ('GLCORE', 'GLES3'):
+        subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-O1', '-DSOKOL_'+backend,
+                        str(scratch/'probe.cpp'), '-o', str(scratch/'probe')], check=True)
+        print(backend, flush=True)
+        failed |= subprocess.run([str(scratch/'probe')]).returncode != 0
+    raise SystemExit(int(failed))

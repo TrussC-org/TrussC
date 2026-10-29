@@ -1,0 +1,1 @@
+Launches itself as GUI child processes that end through _exit or std::exit; process exit is the observable, so it must not share a binary.

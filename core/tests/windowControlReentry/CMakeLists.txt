@@ -11,4 +11,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Real dummy SG/SGL definitions and recording sapp endpoints precede the
     # native archive, as in shaderScopeDummy. No display server is involved.
     target_link_options(windowControlReentry PRIVATE -Wl,--allow-multiple-definition)
+elseif(WIN32)
+    target_compile_definitions(windowControlReentry PRIVATE SOKOL_D3D11)
+    target_include_directories(windowControlReentry PRIVATE ../../include/sokol)
+    target_link_libraries(windowControlReentry PRIVATE d3d11 dxgi user32 shell32 gdi32)
+    if(MSVC)
+        target_compile_options(windowControlReentry PRIVATE /utf-8)
+    endif()
 endif()
