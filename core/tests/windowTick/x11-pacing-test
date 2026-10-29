@@ -34,7 +34,7 @@ probe = r'''
 #include <cstddef>
 struct sapp_window { int id; };
 struct _sapp_tc_window_t {
-    bool is_main=false, ready=true, in_tick=false, close_requested=false, input_delivered=false;
+    bool is_main=false, ready=true, constructing=false, surface_resize_pending=false, in_tick=false, close_requested=false, input_delivered=false;
     int drawable=1, frame_count=0, swap_interval=0, win_id=1;
     bool draw_while_hidden=true, skip_present=false;
     double earliest_next=0, frame_duration=0, last_present=0;
@@ -88,6 +88,7 @@ void _sapp_tc_timing_update(decltype(_sapp_tc_window_t::timing)* t) {
     t->last=clockValue;
 }
 bool _sapp_tc_x11_update_dimensions(_sapp_tc_window_t*) { return false; }
+bool _sapp_tc_x11_resize_surface(_sapp_tc_window_t*) { return true; }
 bool _sapp_tc_x11_make_current(_sapp_tc_window_t* w) {
     // A native boundary outside swap supplies the observed main cadence.
     // No claim that this is the particular blocking boundary on the Pi.

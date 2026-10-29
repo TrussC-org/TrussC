@@ -2576,6 +2576,7 @@ SOKOL_APP_API_DECL const void* sapp_window_x11_get_window(sapp_window win);
 
 #include "../tc/app/tcExit.h"
 #include "util/sokol_window_event.h"
+#include "util/sokol_window_creation.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -3787,7 +3788,7 @@ static void _sapp_tc_mac_tick_body(_sapp_tc_window_t* w, CADisplayLink* link) {
    its next tick after the callback returns runs normally and processes
    deferred close/quit. */
 static bool _sapp_tc_mac_tick_blocked(const _sapp_tc_window_t* w) {
-    return _sapp_tc_mac_frozen() || w->in_tick || w->callback_depth > 0 || w->closed_pending;
+    return _sapp_tc_mac_frozen() || w->constructing || w->in_tick || w->callback_depth > 0 || w->closed_pending;
 }
 
 static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {
@@ -3991,11 +3992,13 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
     del.w = w;
     w->delegate = del;
     w->window.delegate = del;
+    _sapp_tc_creation_transaction creation(w, [](_sapp_tc_window_t* record) {
+        // A nested creation may grow the registry; resolve the slot again.
+        for (auto& slot : _sapp_tc.windows) if (slot == record) { slot = nullptr; break; }
+        _sapp_tc_mac_fail(record, "Host window creation failed");
+    });
     _sapp_tc.windows[slot] = w;
-    if (w->desc.bind_cb && !w->desc.bind_cb(w->win_id, w->desc.user_data)) {
-        _sapp_tc.windows[slot] = 0;
-        return _sapp_tc_mac_fail(w, "Host window binding failed");
-    }
+    if (w->desc.bind_cb && !w->desc.bind_cb(w->win_id, w->desc.user_data)) return nullptr;
     w->ready = true;
     [w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
     /* Showing and fullscreen can notify synchronously (resize, key
@@ -4007,6 +4010,7 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
     NSWindow* window = w->window;
     [window makeKeyAndOrderFront:nil];
     if (!(w = _sapp_tc_mac_live(win_id))) {
+        creation.removed();
         /* disposed from a notification inside the call, which then still
            ordered the window in: take it off screen again */
         [window orderOut:nil];
@@ -4016,6 +4020,7 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
     if (d->fullscreen) {
         _sapp_tc_request_fullscreen(w, true);
         if (!(w = _sapp_tc_mac_live(win_id))) {
+            creation.removed();
             [window orderOut:nil];
             _sapp_tc.create_error = "Window was destroyed during creation";
             return 0;
@@ -4025,6 +4030,7 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
        RESIZED). The display link is the first source; occlusion notifications
        and link ticks select the fallback once AppKit reports the window hidden. */
     _sapp_tc_mac_update_dimensions(w);
+    creation.commit();
     return w;
 }
 
@@ -4294,6 +4300,7 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
 void sapp_destroy_window(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w) return;
+    if (w->constructing) { w->close_requested = true; return; }
     if (w->is_main) {
         // The first window owns process quit/veto; disposal follows cleanup.
         w->close_requested = true;
@@ -5069,6 +5076,7 @@ typedef struct {
     bool fullscreen;            /* inert: iOS is inherently fullscreen */
     bool first_frame;
     bool init_called;
+    bool constructing; // client publication uses the shared creation transaction
     bool cleanup_called;
     bool quit_requested;        /* inert: no user-driven quit path on iOS */
     bool quit_ordered;
@@ -5146,12 +5154,18 @@ _SOKOL_PRIVATE int _sapp_tc_roundf_gzero(float f) {
 }
 
 _SOKOL_PRIVATE void _sapp_tc_call_init(void) {
+    if (_sapp_tc.init_called || _sapp_tc.constructing) return;
+    // These OS-owned sole surfaces have no sapp_window identity/registry.
+    // Native resources and dimensions already exist at this client boundary.
+    struct { bool& ready; bool& constructing; } publication{_sapp_tc.init_called, _sapp_tc.constructing};
+    _sapp_tc_creation_transaction creation(&publication, [](auto*) {});
     if (_sapp_tc.desc.init_cb) {
         _sapp_tc.desc.init_cb();
     } else if (_sapp_tc.desc.init_userdata_cb) {
         _sapp_tc.desc.init_userdata_cb(_sapp_tc.desc.user_data);
     }
     _sapp_tc.init_called = true;
+    creation.commit();
 }
 
 _SOKOL_PRIVATE void _sapp_tc_call_frame(void) {
@@ -7722,7 +7736,7 @@ static void _sapp_tc_win32_pace(_sapp_tc_window_t* w, double seconds) {
 }
 
 static bool _sapp_tc_win32_window_due(_sapp_tc_window_t* w) {
-    if (!w || !w->swap_chain || w->in_tick) return false;
+    if (!w || !w->swap_chain || w->constructing || w->in_tick) return false;
     if (w->earliest_next > _sapp_tc_now()) return false;
     /* Waitable pacing: the frame latency waitable is an auto-reset object that
        the run-loop's MsgWaitForMultipleObjectsEx already waits on. That wait
@@ -7788,7 +7802,7 @@ static void _sapp_tc_win32_swap(_sapp_tc_window_t* w) {
 }
 
 static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
-    if (!w || !w->ready || _sapp_tc.app.quit_ordered || w->in_tick || !w->swap_chain) return;
+    if (!w || !w->ready || w->constructing || _sapp_tc.app.quit_ordered || w->in_tick || !w->swap_chain) return;
     w->in_tick = true;
     w->cancel_tick = false;
     const sapp_window tick_handle{w->win_id};
@@ -7812,10 +7826,10 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
     const bool admitted = w->draw_while_hidden || !_sapp_tc_native_hidden(w);
     // Sampling must progress while covered, without touching GPU resources.
     // Retain the resize until drawing is admitted, even if later polls agree.
-    const bool dimensions_changed = !_sapp_tc.app.device_lost_notified && !w->from_modal &&
+    const bool dimensions_changed = !_sapp_tc.app.device_lost_notified &&
         _sapp_tc_win32_update_dimensions(w);
     if (dimensions_changed) w->resize_pending = true;
-    if (admitted && !_sapp_tc.app.device_lost_notified && !w->from_modal && w->resize_pending) {
+    if (admitted && !_sapp_tc.app.device_lost_notified && w->resize_pending) {
         if (!_sapp_tc_d3d11_resize(w)) return;
         w->resize_pending = false;
     }
@@ -7850,6 +7864,10 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
 
 static void _sapp_tc_win32_modal_tick(_sapp_tc_window_t* w) {
     if (w->in_tick) return;
+    // A native modal loop can interrupt a framework callback with a live
+    // shared D3D pass. Defer this tick (including ResizeBuffers' target
+    // unbind) until that callback has returned and parked its geometry.
+    if (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active()) return;
     w->from_modal = true;
     struct SourceScope {
         sapp_window handle;
@@ -7958,7 +7976,7 @@ static LRESULT _sapp_tc_wndproc_impl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             }
             return 0;
         case WM_CLOSE:
-            if (w->in_tick || (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active())) w->close_requested = true;
+            if (w->constructing || w->in_tick || (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active())) w->close_requested = true;
             else _sapp_tc_win32_close(w);
             return 0;   /* disposal only follows the common close decision */
         case WM_SYSCOMMAND:
@@ -8328,15 +8346,19 @@ static _sapp_tc_window_t* _sapp_tc_win32_create_window(const _sapp_tc_native_des
         return 0;
     }
     if (d->clear_on_create) _sapp_tc.app.device_context->ClearRenderTargetView(w->rtv, d->clear_color);
+    _sapp_tc_creation_transaction creation(w, [](_sapp_tc_window_t* record) {
+        // A nested creation may grow the registry; resolve the slot again.
+        for (auto& slot : _sapp_tc.windows) if (slot == record) { slot = nullptr; break; }
+        _sapp_tc_win32_unwind(record);
+    });
     _sapp_tc.windows[slot] = w;
-    if (w->desc.bind_cb && !w->desc.bind_cb(w->win_id, w->desc.user_data)) {
-        _sapp_tc_win32_unwind(w); return 0;
-    }
+    if (w->desc.bind_cb && !w->desc.bind_cb(w->win_id, w->desc.user_data)) return nullptr;
     w->ready = true;
     ShowWindow(w->hwnd, SW_SHOW);
     // Showing may synchronously deliver a client event that destroys this creation.
-    if (_sapp_tc_lookup(sapp_window{ id }) != w) return 0;
+    if (_sapp_tc_lookup(sapp_window{ id }) != w) { creation.removed(); return 0; }
     DragAcceptFiles(w->hwnd, TRUE);
+    creation.commit();
     return w;
 }
 
@@ -8395,7 +8417,7 @@ static void _sapp_tc_win32_run_loop(void) {
         double wake_at = wake_cap;
         for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
-            if (!w || !w->swap_chain || w->in_tick) continue;
+            if (!w || !w->swap_chain || w->constructing || w->in_tick) continue;
             if (w->earliest_next > now) {
                 if (w->earliest_next < wake_at) wake_at = w->earliest_next;
             } else if (w->frame_wait && !w->credit_held && !w->waitable_ready) {
@@ -8459,7 +8481,7 @@ static void _sapp_tc_win32_run_loop(void) {
            on its close button, outside every tick */
         for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
-            if (!w || w->in_tick || !w->close_requested) continue;
+            if (!w || w->constructing || w->in_tick || !w->close_requested) continue;
             w->close_requested = false;
             if (w->hwnd) PostMessageW(w->hwnd, WM_CLOSE, 0, 0);
         }
@@ -8493,6 +8515,7 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
 void sapp_destroy_window(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w) return;
+    if (w->constructing) { w->close_requested = true; return; }
     if (w->is_main) { w->close_requested = true; return; }
     _sapp_tc_win32_unwind(w);
 }
@@ -9058,12 +9081,15 @@ sapp_swapchain sapp_get_swapchain(void) {
 #include "util/sokol_window_native.h"
 
 typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
+    bool surface_resize_pending;
     Window xwin;
     Colormap colormap;
 #if defined(SOKOL_GLES3)
     EGLSurface drawable;
 #else
-    GLXWindow drawable;
+    GLXDrawable drawable;
+    bool drawable_is_pbuffer;
+    Window recovery_xwin; // unmapped recovery window, using this Window's colormap
 #endif
     bool mouse_pos_valid;
     float mouse_x, mouse_y, mouse_dx, mouse_dy;
@@ -10769,6 +10795,7 @@ static bool _sapp_tc_x11_update_dimensions(_sapp_tc_window_t* w) {
     }
     /* X11 has no separate backing scale: framebuffer == window pixels */
     const bool changed = (attribs.width != w->fb_width) || (attribs.height != w->fb_height);
+    if (changed && w->fb_width > 0 && w->fb_height > 0) w->surface_resize_pending = true;
     w->fb_width = attribs.width;
     w->fb_height = attribs.height;
     const float scale = (w->dpi_scale > 0.0f) ? w->dpi_scale : 1.0f;
@@ -11146,7 +11173,7 @@ static void _sapp_tc_x11_on_selectionnotify(XEvent* event) {
 }
 
 static void _sapp_tc_x11_close(_sapp_tc_window_t* w) {
-    if (w->in_tick || (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active())) {
+    if (w->constructing || w->in_tick || (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active())) {
         w->close_requested = true; return;
     }
     if (w->is_main) {
@@ -11348,9 +11375,11 @@ static bool _sapp_tc_glx_choose_fbconfig(void) {
     const int want_samples = (_sapp_tc.app.desc.sample_count > 1) ? _sapp_tc.app.desc.sample_count : 0;
     int best = -1;
     int best_score = INT_MAX;
+    bool best_has_pbuffer = false;
     for (int i = 0; i < count; i++) {
         if (!(_sapp_tc_glx_attrib(configs[i], GLX_RENDER_TYPE) & GLX_RGBA_BIT)) continue;
-        if (!(_sapp_tc_glx_attrib(configs[i], GLX_DRAWABLE_TYPE) & GLX_WINDOW_BIT)) continue;
+        const int drawable_types = _sapp_tc_glx_attrib(configs[i], GLX_DRAWABLE_TYPE);
+        if (!(drawable_types & GLX_WINDOW_BIT)) continue;
         if (!_sapp_tc_glx_attrib(configs[i], GLX_DOUBLEBUFFER)) continue;
         if (_sapp_tc_glx_attrib(configs[i], GLX_RED_SIZE) != 8) continue;
         if (_sapp_tc_glx_attrib(configs[i], GLX_GREEN_SIZE) != 8) continue;
@@ -11363,7 +11392,9 @@ static bool _sapp_tc_glx_choose_fbconfig(void) {
         int sample_diff = samples - want_samples;
         if (sample_diff < 0) sample_diff = -sample_diff;
         const int score = sample_diff * 100 + (depth - 24) + (stencil - 8);
-        if (score < best_score) {
+        const bool has_pbuffer = (drawable_types & GLX_PBUFFER_BIT) != 0;
+        if (score < best_score || (score == best_score && has_pbuffer && !best_has_pbuffer)) {
+            best_has_pbuffer = has_pbuffer;
             best_score = score;
             best = i;
         }
@@ -11428,7 +11459,7 @@ static bool _sapp_tc_egl_init(void) {
         !eglInitialize(_sapp_tc.egl_display, NULL, NULL) || !eglBindAPI(EGL_OPENGL_ES_API)) return false;
     const sapp_desc* d = &_sapp_tc.app.desc;
     const EGLint attrs[] = {
-        EGL_SURFACE_TYPE, EGL_WINDOW_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+        EGL_SURFACE_TYPE, EGL_WINDOW_BIT | EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
         EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
         EGL_ALPHA_SIZE, d->alpha ? 8 : 0, EGL_DEPTH_SIZE, 24, EGL_STENCIL_SIZE, 8,
         EGL_SAMPLE_BUFFERS, d->sample_count > 1 ? 1 : 0,
@@ -11498,7 +11529,8 @@ static uint32_t _sapp_tc_x11_surface_window_id(_sapp_tc_x11_surface_t surface) {
 static bool _sapp_tc_x11_saved_surface_alive(uint32_t id, _sapp_tc_x11_surface_t surface) {
     if (!id) return true;
     const _sapp_tc_window_t* w = _sapp_tc_lookup(sapp_window{id});
-    return w && w->drawable == surface;
+    (void)surface;
+    return w && w->drawable;
 }
 
 struct _sapp_tc_x11_surface_scope {
@@ -11514,8 +11546,8 @@ struct _sapp_tc_x11_surface_scope {
     GLXDrawable read = glXGetCurrentReadDrawable();
 #endif
 #if defined(SOKOL_GLES3)
-    uint32_t draw_window = _sapp_tc_x11_surface_window_id(draw);
-    uint32_t read_window = _sapp_tc_x11_surface_window_id(read);
+    uint32_t draw_window = display == _sapp_tc.egl_display ? _sapp_tc_x11_surface_window_id(draw) : 0;
+    uint32_t read_window = display == _sapp_tc.egl_display ? _sapp_tc_x11_surface_window_id(read) : 0;
 #else
     uint32_t draw_window = display == _sapp_tc.display ? _sapp_tc_x11_surface_window_id(draw) : 0;
     uint32_t read_window = display == _sapp_tc.display ? _sapp_tc_x11_surface_window_id(read) : 0;
@@ -11524,14 +11556,17 @@ struct _sapp_tc_x11_surface_scope {
         // A callback may close the caller. Never reactivate its destroyed surface.
         if (!_sapp_tc_x11_saved_surface_alive(draw_window, draw) ||
             !_sapp_tc_x11_saved_surface_alive(read_window, read)) {
-            if (_sapp_tc.app.main) _sapp_tc_x11_make_current(_sapp_tc.app.main);
 #if defined(SOKOL_GLES3)
-            else eglMakeCurrent(_sapp_tc.egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            eglMakeCurrent(_sapp_tc.egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 #else
-            else glXMakeContextCurrent(_sapp_tc.display, None, None, NULL);
+            glXMakeContextCurrent(_sapp_tc.display, None, None, NULL);
 #endif
             return;
         }
+        // A resize can replace a surface without replacing its Window. Keep
+        // the caller's distinct draw/read owners rather than selecting main.
+        if (draw_window) draw = _sapp_tc_lookup(sapp_window{draw_window})->drawable;
+        if (read_window) read = _sapp_tc_lookup(sapp_window{read_window})->drawable;
 #if defined(SOKOL_GLES3)
         if (display != eglGetCurrentDisplay() || context != eglGetCurrentContext() ||
             draw != eglGetCurrentSurface(EGL_DRAW) || read != eglGetCurrentSurface(EGL_READ))
@@ -11565,6 +11600,133 @@ static void _sapp_tc_x11_set_swapinterval(_sapp_tc_window_t* w, int interval) {
 #else
     _sapp_tc_glx_set_swapinterval(w, interval);
 #endif
+}
+
+// X11/EGL and GLX drivers may keep the creation-sized back buffer until a
+// swap, even after XGetWindowAttributes/QuerySurface report the new extent.
+// Rebuild only the native surface before a resized frame; never present an
+// old-sized buffer to make the new size take effect. The GL context survives.
+static void _sapp_tc_x11_destroy_surface(_sapp_tc_window_t* w) {
+    if (!w->drawable) return;
+#if defined(SOKOL_GLES3)
+    if (eglGetCurrentSurface(EGL_DRAW) == w->drawable || eglGetCurrentSurface(EGL_READ) == w->drawable)
+        eglMakeCurrent(_sapp_tc.egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    eglDestroySurface(_sapp_tc.egl_display, w->drawable);
+#else
+    if (glXGetCurrentDisplay() == _sapp_tc.display &&
+        (glXGetCurrentDrawable() == w->drawable || glXGetCurrentReadDrawable() == w->drawable))
+        glXMakeContextCurrent(_sapp_tc.display, None, None, NULL);
+    if (w->drawable_is_pbuffer) glXDestroyPbuffer(_sapp_tc.display, w->drawable);
+    else glXDestroyWindow(_sapp_tc.display, w->drawable);
+    w->drawable_is_pbuffer = false;
+    if (w->recovery_xwin) {
+        XDestroyWindow(_sapp_tc.display, w->recovery_xwin);
+        w->recovery_xwin = 0;
+    }
+#endif
+    w->drawable = 0;
+}
+static bool _sapp_tc_x11_create_surface(_sapp_tc_window_t* w) {
+    _sapp_tc_x11_grab_error_handler();
+#if defined(SOKOL_GLES3)
+    w->drawable = eglCreateWindowSurface(_sapp_tc.egl_display, _sapp_tc.fbconfig, (EGLNativeWindowType)w->xwin, NULL);
+#else
+    w->drawable = glXCreateWindow(_sapp_tc.display, _sapp_tc.fbconfig, w->xwin, NULL);
+#endif
+    _sapp_tc_x11_release_error_handler();
+    // Release synchronizes with XSync: a nonzero allocated XID can still
+    // represent a failed request. Never publish or destroy that invalid XID.
+    if (_sapp_tc.error_code) w->drawable = 0;
+    return w->drawable != 0;
+}
+static bool _sapp_tc_x11_resize_surface(_sapp_tc_window_t* w) {
+    _sapp_tc_x11_surface_scope caller;
+#if defined(SOKOL_GLES3)
+    // EGL forbids two window surfaces for one native window. Reserve a device
+    // drawable before releasing the old one; if that fails, retain the old
+    // surface. A failed window renewal keeps this pbuffer, so the next host
+    // turn can still upload resources with the shared context current.
+    const EGLint attributes[] = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
+    const EGLSurface recovery = eglCreatePbufferSurface(_sapp_tc.egl_display, _sapp_tc.fbconfig, attributes);
+    if (recovery == EGL_NO_SURFACE) return false;
+    _sapp_tc_x11_destroy_surface(w);
+    if (!_sapp_tc_x11_create_surface(w)) {
+        w->drawable = recovery;
+        return false;
+    }
+    eglDestroySurface(_sapp_tc.egl_display, recovery);
+#else
+    // GLX 1.4 forbids a second GLXWindow associated with the same X window.
+    // Validate recovery before retiring the usable drawable. Window-only
+    // configs remain supported: their recovery uses a distinct, unmapped X
+    // window with the config's visual and the owning Window's colormap.
+    // Failed replacements retain this recovery and retries reuse it.
+    if (!w->drawable_is_pbuffer && !w->recovery_xwin) {
+        const bool pbuffer = (_sapp_tc_glx_attrib(_sapp_tc.fbconfig, GLX_DRAWABLE_TYPE) & GLX_PBUFFER_BIT) != 0;
+        GLXDrawable recovery = 0;
+        Window recovery_xwin = 0;
+        if (pbuffer) {
+            const int attributes[] = {GLX_PBUFFER_WIDTH, 1, GLX_PBUFFER_HEIGHT, 1, None};
+            _sapp_tc_x11_grab_error_handler();
+            recovery = glXCreatePbuffer(_sapp_tc.display, _sapp_tc.fbconfig, attributes);
+            _sapp_tc_x11_release_error_handler();
+            if (!recovery || _sapp_tc.error_code) return false;
+        } else {
+            XVisualInfo* vi = glXGetVisualFromFBConfig(_sapp_tc.display, _sapp_tc.fbconfig);
+            if (!vi) return false;
+            XSetWindowAttributes attributes = {};
+            attributes.colormap = w->colormap;
+            attributes.border_pixel = 0;
+            _sapp_tc_x11_grab_error_handler();
+            recovery_xwin = XCreateWindow(_sapp_tc.display, _sapp_tc.root,
+                0, 0, 1, 1, 0, vi->depth, InputOutput, vi->visual,
+                CWColormap | CWBorderPixel, &attributes);
+            _sapp_tc_x11_release_error_handler();
+            XFree(vi);
+            if (!recovery_xwin || _sapp_tc.error_code) return false;
+            _sapp_tc_x11_grab_error_handler();
+            recovery = glXCreateWindow(_sapp_tc.display, _sapp_tc.fbconfig, recovery_xwin, NULL);
+            _sapp_tc_x11_release_error_handler();
+            if (!recovery || _sapp_tc.error_code) {
+                XDestroyWindow(_sapp_tc.display, recovery_xwin);
+                return false;
+            }
+        }
+        bool current;
+        {
+            _sapp_tc_x11_surface_scope restore;
+            _sapp_tc_x11_grab_error_handler();
+            current = glXMakeContextCurrent(_sapp_tc.display, recovery, recovery, _sapp_tc.ctx);
+            _sapp_tc_x11_release_error_handler();
+            current = current && !_sapp_tc.error_code;
+            if (current) {
+                _sapp_tc_x11_destroy_surface(w);
+                w->drawable = recovery;
+                w->drawable_is_pbuffer = pbuffer;
+                w->recovery_xwin = recovery_xwin;
+            }
+        }
+        if (!current) {
+            if (pbuffer) glXDestroyPbuffer(_sapp_tc.display, recovery);
+            else {
+                glXDestroyWindow(_sapp_tc.display, recovery);
+                XDestroyWindow(_sapp_tc.display, recovery_xwin);
+            }
+            return false;
+        }
+    }
+    const auto recovery = w->drawable;
+    if (!_sapp_tc_x11_create_surface(w)) {
+        w->drawable = recovery;
+        return false;
+    }
+    const auto replacement = w->drawable;
+    w->drawable = recovery;
+    _sapp_tc_x11_destroy_surface(w);
+    w->drawable = replacement;
+#endif
+    _sapp_tc_x11_set_swapinterval(w, w->swap_interval);
+    return true;
 }
 
 /*-- window creation / destruction ---------------------------------------------*/
@@ -11643,15 +11805,7 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* 
                         32, PropModeReplace, (unsigned char*)&version, 1);
     }
     _sapp_tc_x11_update_window_title(w, title ? title : "TrussC");
-    /* Per-window GL surface wrapping the X window; the context is shared. */
-    _sapp_tc_x11_grab_error_handler();
-#if defined(SOKOL_GLES3)
-    w->drawable = eglCreateWindowSurface(_sapp_tc.egl_display, _sapp_tc.fbconfig, (EGLNativeWindowType)w->xwin, NULL);
-#else
-    w->drawable = glXCreateWindow(_sapp_tc.display, _sapp_tc.fbconfig, w->xwin, NULL);
-#endif
-    _sapp_tc_x11_release_error_handler();
-    if (!w->drawable) {
+    if (!_sapp_tc_x11_create_surface(w)) {
         _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_CREATE_WINDOW_FAILED, __LINE__,
                      "", "failed to create the per-window GL surface");
         return false;
@@ -11669,22 +11823,7 @@ static void _sapp_tc_x11_show_window(_sapp_tc_window_t* w) {
 }
 
 static void _sapp_tc_x11_destroy_window_resources(_sapp_tc_window_t* w) {
-    if (w->drawable) {
-        /* never destroy the drawable that is current */
-#if defined(SOKOL_GLES3)
-        if (eglGetCurrentSurface(EGL_DRAW) == w->drawable || eglGetCurrentSurface(EGL_READ) == w->drawable) {
-            eglMakeCurrent(_sapp_tc.egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        }
-        eglDestroySurface(_sapp_tc.egl_display, w->drawable);
-#else
-        if (glXGetCurrentDisplay() == _sapp_tc.display &&
-            (glXGetCurrentDrawable() == w->drawable || glXGetCurrentReadDrawable() == w->drawable)) {
-            glXMakeCurrent(_sapp_tc.display, None, NULL);
-        }
-        glXDestroyWindow(_sapp_tc.display, w->drawable);
-#endif
-        w->drawable = 0;
-    }
+    _sapp_tc_x11_destroy_surface(w);
     if (w->xwin) {
         XUnmapWindow(_sapp_tc.display, w->xwin);
         XDestroyWindow(_sapp_tc.display, w->xwin);
@@ -11959,7 +12098,7 @@ static void _sapp_tc_x11_pace_periodic(_sapp_tc_window_t* w, double period) {
 }
 
 static bool _sapp_tc_x11_window_due(_sapp_tc_window_t* w, double now) {
-    if (!w || !w->ready || !w->drawable || w->in_tick) return false;
+    if (!w || !w->ready || w->constructing || (!w->drawable && !w->surface_resize_pending) || w->in_tick) return false;
     return w->earliest_next <= now;
 }
 
@@ -11990,7 +12129,7 @@ static void _sapp_tc_main_tick_tramp(sapp_window, void*) {
 }
 
 static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
-    if (w->in_tick || !w->drawable) return;
+    if (w->constructing || w->in_tick || (!w->drawable && !w->surface_resize_pending)) return;
     const sapp_window handle = {w->win_id};
     w->in_tick = true;
     struct TickGuard {
@@ -12001,8 +12140,16 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
     const double frame_start = _sapp_tc_now();
     _sapp_tc_timing_update(&w->timing);
     w->frame_duration = w->timing.smooth_dt;
-    if (_sapp_tc_x11_update_dimensions(w))
+    const bool resized = _sapp_tc_x11_update_dimensions(w);
+    if (resized || w->surface_resize_pending) {
+        w->surface_resize_pending = true;
+        if (!_sapp_tc_x11_resize_surface(w)) {
+            _sapp_tc_x11_pace(w, _sapp_tc.refresh_period);
+            return;
+        }
+        w->surface_resize_pending = false;
         _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_RESIZED);
+    }
     if (_sapp_tc_lookup(handle) != w) return;
     if (!w->draw_while_hidden && _sapp_tc_native_hidden(w)) {
         if (w->is_main) _sapp_tc_x11_init_client();
@@ -12268,17 +12415,24 @@ static _sapp_tc_window_t* _sapp_tc_x11_create_window(const _sapp_tc_native_desc*
         return NULL;
     }
     _sapp_tc_x11_set_swapinterval(w, w->swap_interval);
+    _sapp_tc_creation_transaction creation(w, [](_sapp_tc_window_t* record) {
+        // A nested creation may grow the registry; resolve the slot again.
+        for (size_t i = 0; i < _sapp_tc.window_slots; ++i)
+            if (_sapp_tc.windows[i] == record) { _sapp_tc.windows[i] = nullptr; break; }
+        _sapp_tc_x11_unwind(record);
+    });
     _sapp_tc.windows[slot] = w;
-    if (w->desc.bind_cb && !w->desc.bind_cb(w->win_id, w->desc.user_data)) {
-        _sapp_tc.windows[slot] = NULL;
-        _sapp_tc_x11_unwind(w); return NULL;
-    }
+    if (w->desc.bind_cb && !w->desc.bind_cb(w->win_id, w->desc.user_data)) return nullptr;
     w->ready = true;
+    const sapp_window identity{w->win_id};
     _sapp_tc_x11_show_window(w);
+    if (_sapp_tc_lookup(identity) != w) { creation.removed(); return nullptr; }
     if (d->fullscreen) {
         _sapp_tc_x11_set_fullscreen(w, true);
+        if (_sapp_tc_lookup(identity) != w) { creation.removed(); return nullptr; }
         _sapp_tc_x11_update_dimensions(w);
     }
+    creation.commit();
     return w;
 }
 
@@ -12351,28 +12505,19 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
 void sapp_destroy_window(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w) return;
+    if (w->constructing) { w->close_requested = true; return; }
     if (w->is_main) {
         // The first window owns process quit/veto; disposal follows cleanup.
         _sapp_tc_x11_close(w);
         return;
     }
-#if defined(SOKOL_GLES3)
-    const bool was_current = w->drawable &&
-        (eglGetCurrentSurface(EGL_DRAW) == w->drawable || eglGetCurrentSurface(EGL_READ) == w->drawable);
-#else
-    const bool was_current = w->drawable && glXGetCurrentDisplay() == _sapp_tc.display &&
-        (glXGetCurrentDrawable() == w->drawable || glXGetCurrentReadDrawable() == w->drawable);
-#endif
     for (size_t i = 0; i < _sapp_tc.window_slots; i++) {
         if (_sapp_tc.windows[i] == w) { _sapp_tc.windows[i] = 0; break; }
     }
     if (_sapp_tc.xdnd.over == w) _sapp_tc.xdnd.over = 0;
     w->desc.close_cb = 0;
     _sapp_tc_x11_unwind(w);
-    /* restore the main window's drawable if the destroy released it */
-    if (was_current && _sapp_tc.app.main && _sapp_tc.app.main->drawable) {
-        _sapp_tc_x11_make_current(_sapp_tc.app.main);
-    }
+
 }
 
 void sapp_window_request_close(sapp_window win) {
@@ -13314,6 +13459,7 @@ typedef struct {
     bool fullscreen;            /* inert: Android is inherently fullscreen */
     bool first_frame;
     bool init_called;
+    bool constructing; // client publication uses the shared creation transaction
     bool cleanup_called;
     bool quit_requested;        /* inert: lifecycle is activity-driven */
     bool quit_ordered;
@@ -13392,12 +13538,18 @@ _SOKOL_PRIVATE int _sapp_tc_roundf_gzero(float f) {
 }
 
 _SOKOL_PRIVATE void _sapp_tc_call_init(void) {
+    if (_sapp_tc.init_called || _sapp_tc.constructing) return;
+    // These OS-owned sole surfaces have no sapp_window identity/registry.
+    // Native resources and dimensions already exist at this client boundary.
+    struct { bool& ready; bool& constructing; } publication{_sapp_tc.init_called, _sapp_tc.constructing};
+    _sapp_tc_creation_transaction creation(&publication, [](auto*) {});
     if (_sapp_tc.desc.init_cb) {
         _sapp_tc.desc.init_cb();
     } else if (_sapp_tc.desc.init_userdata_cb) {
         _sapp_tc.desc.init_userdata_cb(_sapp_tc.desc.user_data);
     }
     _sapp_tc.init_called = true;
+    creation.commit();
 }
 
 _SOKOL_PRIVATE void _sapp_tc_call_frame(void) {
@@ -15334,6 +15486,7 @@ typedef struct {
     bool fullscreen;
     bool first_frame;
     bool init_called;
+    bool constructing; // client publication uses the shared creation transaction
     bool cleanup_called;
     bool quit_requested;
     bool quit_ordered;
@@ -15418,12 +15571,18 @@ _SOKOL_PRIVATE int _sapp_tc_roundf_gzero(float f) {
 }
 
 _SOKOL_PRIVATE void _sapp_tc_call_init(void) {
+    if (_sapp_tc.init_called || _sapp_tc.constructing) return;
+    // These OS-owned sole surfaces have no sapp_window identity/registry.
+    // Native resources and dimensions already exist at this client boundary.
+    struct { bool& ready; bool& constructing; } publication{_sapp_tc.init_called, _sapp_tc.constructing};
+    _sapp_tc_creation_transaction creation(&publication, [](auto*) {});
     if (_sapp_tc.desc.init_cb) {
         _sapp_tc.desc.init_cb();
     } else if (_sapp_tc.desc.init_userdata_cb) {
         _sapp_tc.desc.init_userdata_cb(_sapp_tc.desc.user_data);
     }
     _sapp_tc.init_called = true;
+    creation.commit();
 }
 
 _SOKOL_PRIVATE void _sapp_tc_call_frame(void) {

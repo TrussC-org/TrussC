@@ -129,6 +129,7 @@ struct WindowContext {
     WindowContext& operator=(const WindowContext&) = delete;
 
     Window* hostWindow = nullptr;
+    bool processSwapchainWarned = false;
 
     // --- input state (written by the framework event loop) ---
     float mouseX = 0.0f;
@@ -322,7 +323,7 @@ inline SwapchainTargetFormat swapchainTargetFormat(const WindowContext& ctx) {
 // Main window context. Non-inline (tcGlobal.cpp) — Host/Guest share one.
 WindowContext& mainWindowContext();
 
-// Active context while dispatching a window's events / draw. Null = main. The
+// Active context while dispatching a window's events / draw. Null = no Window. The
 // native window layer points it at a secondary window's context around that
 // window's tick. Non-inline (tcGlobal.cpp) like mainWindowContext(): a Windows
 // hot reload guest DLL would get its own copy of an inline variable, which
@@ -336,7 +337,7 @@ WindowContext*& currentWindowCtx();
 WindowContext& currentWindowContext();
 
 // Restore both window dispatch and its current target's actual SGL context.
-// A resize can replace the main context; nullptr still denotes the main window.
+// nullptr restores process context, without selecting any Window or surface.
 void restoreWindowContext(WindowContext* previous);
 
 // Drop the node references of every window context: hover, grab and

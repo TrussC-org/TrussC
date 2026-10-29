@@ -40,6 +40,10 @@ TrussC itself builds without compiler warnings on macOS, Windows and Linux, whic
 
 ## App Structure
 
+CP4 keeps process services in one host-owned internal Runtime with one epoch per run. A guest reload retains that epoch and the existing reload token policy. Null Window selection means process context: queue and maintenance work selects no Window and progresses on safe outer turns even with zero windows, hidden windows, no draws or headless execution. Nested callbacks defer process service reentry; unwind restores the actual caller and its render/native state. Process root swapchain drawing is refused with a Warning directing it to a window callback or an Fbo; explicit offscreen drawing works and service drawing style is separate from main. Constructor scopes supply token/epoch/owner throughout construction; only the returned, fully constructed candidate receives the ticket. Incidental Apps cannot claim it, and ordinary allocation (including virtual bases and class-specific new/delete) is preserved. The ticket stack has nested and exception restoration. C1 owns the forthcoming Runtime Window ownership, `win->setApp<T>(args...)` attachment and common ending; existing endpoints remain until C1, and there is no public makeApp factory.
+
+Native creation resolves identity/resources/dimensions, stages binding, publishes readiness, then shows under a shared Constructing transaction. Synchronous show events cannot tick or destroy the constructing record; failures roll back once. Before every resized frame begins its pass, framebuffer metadata, swapchain size, automatic viewport and clear must absorb the same external size, including the first WM clamp. X11 GLX/EGL renew a resized surface before drawing, preserve caller identity across renewal and retain a usable device context on failure. Win32 modal ticks reconcile client size and attachments before drawing too. D2 retains control/drop ownership; D3 supplies final settings/format/macOS attributes/activation/refresh policy. Do not describe Q11 as completed by CP4.
+
 ### File Layout (3 files)
 ```cpp
 // src/tcApp.h

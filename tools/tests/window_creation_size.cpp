@@ -4,6 +4,7 @@
 #include <cmath>
 #include <initializer_list>
 #include <cstring>
+#include <string>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -23,7 +24,7 @@ struct Descriptor {
     int _tc_event_cb = 0;
     int width = 0, height = 0, x = 0, y = 0, sample_count = 1;
     int _tc_pixel_width = 0, _tc_pixel_height = 0;
-    bool high_dpi = true, no_high_dpi = false;
+    bool borderless=false, high_dpi = true, no_high_dpi = false;
     int swap_interval = 1, _tc_draw_while_hidden = 0;
     bool fullscreen = false;
     int event_cb = 0, tick_cb = 0;
@@ -33,7 +34,7 @@ struct Descriptor {
 };
 using sapp_desc = Descriptor;
 using sapp_window_desc = Descriptor;
-struct Settings { int width = 0, height = 0; bool pixelPerfect = false, highDpi = true; };
+struct Settings { int width = 0, height = 0; bool pixelPerfect = false, highDpi = true, decorated=true, fullscreen=false; int swapInterval=1,sampleCount=1; std::string title="probe"; };
 struct Platform { static constexpr bool isDesktop() { return true; } };
 float displayScale = 1, renderScale = 1, preWindowScale = 1;
 bool enabled = false;
@@ -45,6 +46,7 @@ struct State {
     Descriptor desc;
     float window_scale = 1, dpi_scale = 1;
     int xwin = 1, fb_width = 0, fb_height = 0, win_width = 0, win_height = 0;
+    bool surface_resize_pending=false;
     bool (*events_enabled)() = nullptr;
 #ifdef TEST_WIN
     State* hwnd = nullptr;
@@ -98,6 +100,7 @@ struct { void* display = nullptr; struct { void* device = nullptr; } app; } _sap
 #if defined(TEST_WIN) || defined(TEST_MAC)
 struct _sapp_tc_native_desc {
     Descriptor window;
+    bool surface_resize_pending=false;
     bool (*events_enabled)() = nullptr;
     int swap_interval = 0, title_limit = 0, color_format = 0, depth_format = 0;
     bool fullscreen = false, draw_while_hidden = false, center_on_create = false;
@@ -125,6 +128,7 @@ Descriptor macSecondaryTransfer(const Descriptor* desc) {
 #endif
 Size roundMac(double width, double height) { return {int(std::ceil(width) * renderScale), int(std::ceil(height) * renderScale)}; }
 namespace internal {
+SHARED_DESCRIPTOR
 Descriptor buildWindowDescriptor(const Settings& settings) {
     LAUNCHER
     return desc;
@@ -134,7 +138,7 @@ using internal::buildWindowDescriptor;
 Descriptor mainDescriptor(const Settings& settings) { NORMAL_LAUNCHER }
 Descriptor hotDescriptor(const Settings& settings) { HOT_LAUNCHER return desc; }
 Descriptor secondaryDescriptor(const Settings& settings) {
-    sapp_window_desc d{};
+    using internal::buildNativeWindowDescriptor;
     SECONDARY
     return d;
 }

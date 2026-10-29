@@ -29,7 +29,7 @@ for index, platform in enumerate(('mac', 'win32', 'x11')):
     transfer_start = constructor.index('    w->desc = d->window;')
     transfer_end = constructor.index('    w->swap_interval = d->swap_interval;', transfer_start) + len('    w->swap_interval = d->swap_interval;')
     transfer = constructor[transfer_start:transfer_end]
-    suffix = constructor[constructor.index('    _sapp_tc.windows[slot] = w;'):]
+    suffix = constructor[constructor.index('    _sapp_tc_creation_transaction creation('):]
     if platform == 'mac':
         seams = {
             '[w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes]': 'add_link()',
@@ -52,8 +52,8 @@ struct sapp_window_desc { Client event_cb=nullptr; Tick tick_cb=nullptr; void* u
 struct sapp_desc { int logger=0; Client _tc_event_cb=nullptr; Tick _tc_tick_cb=nullptr; void(*event_cb)(const sapp_event*)=nullptr; void(*event_userdata_cb)(const sapp_event*,void*)=nullptr; int swap_interval=1; bool fullscreen=false; int _tc_draw_while_hidden=1; const char* window_title=nullptr; };
 struct _sapp_tc_native_desc { sapp_window_desc window; bool(*events_enabled)()=nullptr; int swap_interval=0; bool fullscreen=false,draw_while_hidden=false,center_on_create=false; int title_limit=0,color_format=0,depth_format=0; };
 struct _sapp_tc_mac_window_attrs { bool restorable=false,nearest_magnification=false,take_key_focus_on_create=false; };
-struct _sapp_tc_window_t { unsigned win_id=23; float dpi_scale=2; bool input_delivered=false,wake_on_input=true; sapp_window_desc desc; bool ready=false,in_tick=false,is_main=false,native_closed=false; int callback_depth=0; bool draw_while_hidden=false,trust_hidden_signals=true; int swap_interval=0; bool(*events_enabled)()=nullptr; uint64_t frame_count=7; int win_width=80,win_height=40,fb_width=160,fb_height=80; void* hwnd=nullptr; const char* title="test"; };
-struct { int callbacks_active=0,constructing=0; bool deferred_blocked=false; _sapp_tc_window_t* windows[1]{}; uint32_t gl_framebuffer=0; struct { sapp_desc desc; bool init_called=false,valid=false; _sapp_tc_window_t* main=nullptr; void* device=nullptr; int logger=0; } app; const char* create_error=nullptr; } _sapp_tc;
+struct _sapp_tc_window_t { unsigned win_id=23; float dpi_scale=2; bool input_delivered=false,wake_on_input=true; sapp_window_desc desc; bool constructing=false, ready=false,in_tick=false,is_main=false,native_closed=false; int callback_depth=0; bool draw_while_hidden=false,trust_hidden_signals=true; int swap_interval=0; bool(*events_enabled)()=nullptr; uint64_t frame_count=7; int win_width=80,win_height=40,fb_width=160,fb_height=80; void* hwnd=nullptr; const char* title="test"; };
+struct { size_t window_slots=1; int callbacks_active=0,constructing=0; bool deferred_blocked=false; _sapp_tc_window_t* windows[1]{}; uint32_t gl_framebuffer=0; struct { sapp_desc desc; bool init_called=false,valid=false; _sapp_tc_window_t* main=nullptr; void* device=nullptr; int logger=0; } app; const char* create_error=nullptr; } _sapp_tc;
 _sapp_tc_window_t record;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { auto* w=_sapp_tc.windows[0]; return w && w->win_id==h.id ? w : nullptr; }
 constexpr int SAPP_PIXELFORMAT_RGB10A2=1,SAPP_PIXELFORMAT_DEPTH_STENCIL=2,SAPP_PIXELFORMAT_RGBA8=3,SW_SHOW=1,TRUE=1,SAPP_LOGITEM_OK=0,GL_FRAMEBUFFER_BINDING=1;
@@ -132,7 +132,7 @@ for index, platform in enumerate(('web', 'ios', 'android')):
     init = body(NATIVE[starts[index].start():starts[index+1].start() if index<2 else len(NATIVE)], '_SOKOL_PRIVATE void _sapp_tc_call_init(')
     enabled = body(NATIVE[predicates[index].start():predicates[index+1].start() if index<2 else len(NATIVE)], '_SOKOL_PRIVATE bool _sapp_tc_events_enabled(')
     parts.append('namespace single_' + platform + ' {\n' + r'''
-struct { bool init_called=false; struct {
+struct { bool constructing=false,init_called=false; struct {
     void (*init_cb)()=nullptr; void (*init_userdata_cb)(void*)=nullptr; void* user_data=nullptr;
     void (*event_cb)()=nullptr; void (*event_userdata_cb)()=nullptr;
 } desc; } _sapp_tc;
@@ -156,7 +156,7 @@ prefix = r'''
 int checks=0,failures=0;
 void check(const char* label,bool ok) { ++checks; if (!ok) { ++failures; printf("bootstrap: FAIL: %s\n",label); } }
 '''
-prefix+='#include "sokol_app_tc.h"\n'
+prefix+='#include "sokol_app_tc.h"\n#include "util/sokol_window_creation.h"\n'
 prefix+=(ROOT/'core/include/sokol/util/sokol_window_event.h').read_text(encoding='utf-8').replace('#pragma once','')+'\n'
 source = prefix + ''.join(parts) + r'''
 int main() { mac::run();win32::run();x11::run();single_web::run();single_ios::run();single_android::run(); printf("bootstrap: %d checks, %d failures\n",checks,failures); return failures?1:0; }

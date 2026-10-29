@@ -6,11 +6,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} }
-struct Settings { int width, height; bool pixelPerfect; bool highDpi = true; };
+struct Settings { int width, height; bool pixelPerfect; bool highDpi = true, decorated=true, fullscreen=false; int swapInterval=1,sampleCount=1; std::string title="probe"; };
 struct Platform { static constexpr bool isDesktop() { return true; } };
 float getDisplayScaleFactor() { return 2; }
 namespace internal {
+SHARED_DESCRIPTOR
 sapp_desc buildWindowDescriptor(const Settings& settings) {
     LAUNCHER
     return desc;
@@ -34,7 +36,7 @@ bool tinyScale = false, tinySecondary = false, baseMode = false;
 Settings requested{};
 bool pixelPerfectMode() { return requested.pixelPerfect; }
 sapp_window_desc secondaryDescriptor(const Settings& settings) {
-    sapp_window_desc d = {};
+    using internal::buildNativeWindowDescriptor;
     SECONDARY
     return d;
 }

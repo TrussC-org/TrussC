@@ -354,6 +354,8 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
     if (headless::isActive()) return;
 
     auto& ctx = internal::currentWindowContext();
+    if (ctx.currentTarget->passKind == internal::TargetPassKind::Swapchain &&
+        !internal::admitRootSwapchainPass()) return;
     if (ctx.currentTarget->isFbo) {
         ctx.currentTarget->restartClear(r, g, b, a);
     } else if (ctx.swapchainTarget.inPass) {
@@ -534,6 +536,10 @@ void selectTarget(RenderTarget& target) {
         sgl_layer(target.sglLayerNext);
         if (target.windowDrawingSizeStale) refreshWindowDrawingSize();
         applyTargetDrawingState();
+    } else if (sg_isvalid()) {
+        // In particular, returning from a process Fbo must not leave its
+        // pooled recording selected as the targetless process root.
+        sgl_set_context({0});
     }
 }
 }
@@ -541,6 +547,7 @@ void selectTarget(RenderTarget& target) {
 void RenderTarget::beginPass(TargetPassStart reason) {
     auto& window = currentWindowContext();
     assert(window.currentTarget == this && !inPass);
+    if (passKind == TargetPassKind::Swapchain && !admitRootSwapchainPass()) return;
     if (frameEpoch != window.renderEpoch) {
         frameEpoch = window.renderEpoch;
         passStartedThisFrame = false;
@@ -557,6 +564,17 @@ void RenderTarget::beginPass(TargetPassStart reason) {
             // Acquire exactly once per window frame, including on Metal.
             binding.swapchain = window.acquireSwapchain
                 ? window.acquireSwapchain(window.acquireSwapchainUser) : sglue_swapchain();
+            // The acquired attachments define this frame on every host,
+            // including sole-surface ports without a WindowBinding adapter.
+            if (binding.swapchain.width > 0 && binding.swapchain.height > 0) {
+                if (window.hostWindow) {
+                    auto metadata = WindowRequestAccess::binding(*window.hostWindow).metadata;
+                    metadata.fb_width = binding.swapchain.width;
+                    metadata.fb_height = binding.swapchain.height;
+                    if constexpr (!supportsSecondaryWindows()) metadata.dpi_scale = sapp_dpi_scale();
+                    publishWindowMetadata(*window.hostWindow, metadata);
+                }
+            }
             window.lastSwapchain = binding.swapchain;
             window.lastSwapchainDrawable = binding.swapchain.metal.current_drawable;
             if (!sg_tc_mtl_register_drawable(&binding.swapchain, ownerId,
@@ -589,6 +607,9 @@ void RenderTarget::beginPass(TargetPassStart reason) {
         // Metal's swapchain adapter also uses depth STORE to retain MSAA samples.
         pass.action.depth.store_action = resumable ? SG_STOREACTION_STORE : SG_STOREACTION_DONTCARE;
     }
+    // Absorb the acquired extent before the backend begins its pass/clear.
+    // Existing parked frames still retain their original attachments.
+    if (passKind == TargetPassKind::Swapchain) refreshWindowDrawingSize();
     sg_begin_pass(&pass);
     if (hasFixedPipeline) {
         const auto selected = pipeline(fixedPipeline);
@@ -779,7 +800,17 @@ bool popTarget(RenderTarget& target, uint64_t token) {
     return true;
 }
 
-void ensureCurrentPass() {
+bool admitRootSwapchainPass() {
+    auto& context = currentWindowContext();
+    if (context.hostWindow) return true;
+    if (!context.processSwapchainWarned) {
+        context.processSwapchainWarned = true;
+        logWarning("RenderTarget") << "No Window selected: draw inside a window callback or into an Fbo";
+    }
+    return false;
+}
+
+bool ensureCurrentPass() {
     auto& window = currentWindowContext();
     ensureTargetStack(window);
     auto& target = *window.currentTarget;
@@ -788,6 +819,7 @@ void ensureCurrentPass() {
         target.beginPass(target.passStartedThisFrame ? TargetPassStart::Resume : TargetPassStart::Initial);
         selectTarget(target);
     }
+    return target.inPass;
 }
 
 bool hasPublicFboActivation() {
@@ -914,7 +946,7 @@ void present() {
     // encoder; a proven uninterrupted final pass keeps resolve-only/depth discard.
     if (!window.swapchainTarget.inPass)
         window.swapchainTarget.resumable = events().onRender.listenerCount() != 0;
-    internal::ensureCurrentPass();
+    if (!internal::ensureCurrentPass()) return;
     window.swapchainTarget.flushLayers();
     events().onRender.notify();
     if (window.targetStack.size() != 1) {
@@ -1794,7 +1826,8 @@ double getDeltaTime() {
     return internal::currentWindowContext().updateDeltaTime;
 }
 
-double getFrameRate() {
+namespace internal {
+double measuredWindowRate(const WindowContext& ctx) {
     // Measured update rate over the last few frames: update steps divided by
     // the wall time they covered. Recorded by the main and headless loops
     // (recordUpdateRateSample), so reading it has no side effects. In fixed-Hz
@@ -1802,7 +1835,6 @@ double getFrameRate() {
     // the fixed-step loops count the time their steps consumed (fractional
     // steps), so a rate that isn't a multiple of the frame rate reads steady,
     // and dropped time lowers it.
-    auto& ctx = internal::currentWindowContext();
     double time = 0.0;
     double steps = 0.0;
     for (int i = 0; i < ctx.rateCount; i++) {
@@ -1811,6 +1843,8 @@ double getFrameRate() {
     }
     return time > 0.0 ? steps / time : 0.0;
 }
+}
+double getFrameRate() { return internal::measuredWindowRate(internal::currentWindowContext()); }
 
 namespace {
 // Set during static destruction, right before getLogger()'s Logger is
@@ -2107,29 +2141,13 @@ std::atomic<bool>& spawned() {
 
 namespace internal {
 
-std::shared_ptr<std::atomic<bool>>& appRunToken() {
-    static auto* token = new std::shared_ptr<std::atomic<bool>>;
-    return *token;
-}
-
-// Constant-initialized and trivially destructible: workers may post while
-// static destructors run, after the queue below has been destroyed.
+// Preserve the allocation-free CP3 mailbox even before Runtime's first use.
+// Workers can post while static destructors run; this atomic never dies.
 std::atomic<MainThreadSlot*>& mainThreadSlots() noexcept {
     static constinit std::atomic<MainThreadSlot*> head{nullptr};
     static_assert(std::is_trivially_destructible_v<std::atomic<MainThreadSlot*>>);
     return head;
 }
-
-#if !defined(__EMSCRIPTEN__)
-ThreadChannel<std::function<void()>>& mainThreadQueue() {
-    static ThreadChannel<std::function<void()>> q;
-    return q;
-}
-std::atomic<size_t>& mainThreadQueuePendingCount() {
-    static std::atomic<size_t> n{0};
-    return n;
-}
-#endif
 
 AsyncScheduler::AsyncScheduler() {
 #ifdef _WIN32
@@ -3354,16 +3372,8 @@ std::atomic<size_t>& fboCount() {
     return count;
 }
 
-namespace {
-WindowContext* currentWindowCtxStorage = nullptr;
-} // anonymous namespace
-
-WindowContext*& currentWindowCtx() {
-    return currentWindowCtxStorage;
-}
-
 WindowContext& currentWindowContext() {
-    return currentWindowCtxStorage ? *currentWindowCtxStorage : mainWindowContext();
+    return currentWindowCtx() ? *currentWindowCtx() : nonWindowContext();
 }
 
 void parkWindowPass() {
@@ -3415,7 +3425,7 @@ CapturePrefixScope::~CapturePrefixScope() noexcept {
 }
 
 void restoreWindowContext(WindowContext* previous) {
-    auto* incoming = previous ? previous : &mainWindowContext();
+    auto* incoming = previous ? previous : &nonWindowContext();
     if (&currentWindowContext() != incoming && sg_isvalid()) parkWindowPass();
     currentWindowCtx() = previous;
     // A closed owner can remain selected during exit/cleanup. Restoring that
@@ -3431,6 +3441,11 @@ void restoreWindowContext(WindowContext* previous) {
     if (sg_isvalid() && context.id) {
         sgl_tc_context_target_owned(context);
         sgl_set_context(context);
+    } else if (sg_isvalid()) {
+        // Zero is an invalid SGL handle (the default has its own nonzero id).
+        // Immediate colour, transform, pipeline and vertex calls then no-op
+        // instead of mutating the previously selected Window's recording.
+        sgl_set_context({0});
     }
 }
 

@@ -123,7 +123,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     internal::WindowRequestAccess::bindForTests(*window, 101); // no sapp in headless contract mode
     auto first = std::make_shared<Probe>();
     check("runner uses shared attachment", internal::attachMainApp(first));
-    check("main currentWindow equals App handle", internal::currentWindow() == window && first->getWindow() == window);
+    check("attachment retains main handle without selecting a caller Window", !internal::currentWindow() && first->getWindow() == window);
     check("main context and events retained", &window->context() == &internal::mainWindowContext() && &window->events() == &events());
     const auto id = internal::WindowRequestAccess::creationId(*window);
     setWindowTitle("Main title");

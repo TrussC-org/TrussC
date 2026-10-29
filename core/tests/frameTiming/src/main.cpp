@@ -1644,6 +1644,9 @@ static void testHeadlessLoop() {
 } // namespace
 
 TC_CORE_TEST_MAIN() {
+    // These scheduler probes explicitly exercise the main receiver, outside
+    // native callbacks. Process context no longer implicitly selects it.
+    internal::currentWindowCtx() = &internal::mainWindowContext();
     // Must run first: proves the clock origin predates the first read.
     testElapsedClock();
 

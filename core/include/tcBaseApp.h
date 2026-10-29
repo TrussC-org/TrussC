@@ -14,6 +14,7 @@
 #include "tc/sound/tcSound.h"      // AudioEngine + AudioOutBuffer / AudioInBuffer
 #include "tc/utils/tcUtils.h"      // internal::resolveDataPathRootOnce
 #include "tc/events/tcEventListener.h"
+#include "tc/app/internal/tcAppConstruction.h"
 #include "tc/utils/tcAnnotations.h"
 #include <vector>
 #include <string>
@@ -236,6 +237,8 @@ public:
     virtual void audioIn(const AudioInBuffer& buf) { (void)buf; }
 
 private:
+    internal::AppConstructionTicket constructorTicket_;
+    friend void internal::completeAppConstruction(App&) noexcept;
     EventListener audioOutListener_;
     EventListener audioInListener_;
 
@@ -270,6 +273,7 @@ private:
     bool cleanupCalled_ = false;
 
     friend class Window; // Close/swap ends admission before releasing user captures.
+    friend class internal::WindowRequestAccess;
 
     friend void internal::attachAppAudio(App& app);
     friend void internal::detachAppAudio(App& app);

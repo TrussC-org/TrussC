@@ -6,9 +6,10 @@
 #include <cstring>
 #include <type_traits>
 #include <initializer_list>
+#include <vector>
 namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} }
 namespace {
-int failures, callbacks, liveWindows, presents;
+int failures, callbacks, liveWindows, presents, resizeTicks;
 bool failSurface, noHighDpi, didInitialize, coveredFirst;
 int launchHidden;
 Window firstXwin;
@@ -146,6 +147,44 @@ void initialized() {
     presents = 0; sapp_tc_window_skip_present({0});
     _sapp_tc_x11_tick(other); _sapp_tc_x11_tick(first);
     check("zero skip suppresses only first presentation", presents == 1 && presentedDrawable == (uintptr_t)other->drawable);
+    // An external configure must replace the old-sized native back buffer
+    // before its first frame, without changing the Window identity. Exercise
+    // a failed replacement too: no stale draw/present, then retry next tick.
+    _sapp_tc_x11_make_current(first);
+    const auto caller = sapp_tc_gl_save();
+    XResizeWindow(_sapp_tc.display, other->xwin, 100, 60);
+    XSync(_sapp_tc.display, False);
+    XEvent configure{}; configure.xconfigure.type = ConfigureNotify;
+    configure.xconfigure.window = other->xwin;
+    configure.xconfigure.width = 100; configure.xconfigure.height = 60;
+    _sapp_tc_x11_process_event(&configure);
+    callbacks = presents = 0;
+    failSurface = true;
+    _sapp_tc_x11_tick(other);
+    failSurface = false;
+    check("failed resize surface blocks stale drawing and presentation", !callbacks && !presents &&
+        other->drawable && other->surface_resize_pending && sapp_window_valid(second));
+    other->desc.tick_cb = [](sapp_window handle, void*) {
+        ++resizeTicks;
+        sapp_tc_window_metadata metadata{};
+        check("resized native frame publishes new metadata", sapp_tc_window_read_metadata(handle, &metadata) &&
+            metadata.fb_width == 100 && metadata.fb_height == 60);
+        glViewport(0, 0, metadata.fb_width, metadata.fb_height);
+        glClearColor(1, 0, 0, 1); glClear(GL_COLOR_BUFFER_BIT);
+        std::vector<unsigned char> pixels(100 * 60 * 4);
+        glReadPixels(0, 0, 100, 60, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+        bool solid = true;
+        for (size_t i = 0; i < pixels.size(); i += 4)
+            solid &= pixels[i] == 255 && pixels[i + 1] == 0 && pixels[i + 2] == 0 && pixels[i + 3] == 255;
+        check("first resized native clear covers all 100x60 pixels", solid && glGetError() == GL_NO_ERROR);
+    };
+    _sapp_tc_x11_tick(other);
+    const auto restored = sapp_tc_gl_save();
+    check("resize retry draws exactly once with the same identity", resizeTicks == 1 && presents == 1 &&
+        other->drawable && !other->surface_resize_pending && sapp_window_valid(second));
+    check("resize failure and retry restore actual native caller", restored.display == caller.display &&
+        restored.context == caller.context && restored.draw == caller.draw && restored.read == caller.read);
+    other->desc.tick_cb = [](sapp_window, void*) { ++callbacks; };
     first->in_tick = true;
     const float savedDpi = _sapp_tc.dpi;
     _sapp_tc.dpi = 9.6e-7f;

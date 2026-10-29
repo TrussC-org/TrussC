@@ -82,7 +82,7 @@ void run() {
 x11=r'''
 namespace x11 {
 struct sapp_window { unsigned id; };
-struct _sapp_tc_window_t { uint32_t win_id=27; bool ready=true, in_tick=false, close_requested=false,input_delivered=false; int drawable=1,swap_interval=1; double earliest_next=100,last_present=0; struct {double last=0;}timing; };
+struct _sapp_tc_window_t { uint32_t win_id=27; bool constructing=false,surface_resize_pending=false,ready=true, in_tick=false, close_requested=false,input_delivered=false; int drawable=1,swap_interval=1; double earliest_next=100,last_present=0; struct {double last=0;}timing; };
 struct Descriptor { void (*init_cb)()=nullptr; void (*init_userdata_cb)(void*)=nullptr; void* user_data=nullptr;
     void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; bool (*_tc_callbacks_active)()=nullptr; };
 _sapp_tc_window_t window;
@@ -162,13 +162,20 @@ int before=0,after=0,ticks=0;
 bool release=false;
 void begin() { ++before; if (release) live=nullptr; }
 void end() { ++after; }
-struct { struct { struct { void (*_tc_before_turn)()=begin; void (*_tc_after_turn)()=end; } desc; } app; } _sapp_tc;
+bool busy=false;
+bool callbacksActive() { return busy; }
+struct { struct { struct { void (*_tc_before_turn)()=begin; void (*_tc_after_turn)()=end;
+    bool (*_tc_callbacks_active)()=callbacksActive; } desc; } app; } _sapp_tc;
 void _sapp_tc_win32_tick(_sapp_tc_window_t* receiver) {
     ++ticks;
     check("modal source revalidates receiver after process queue callbacks",receiver==live);
 }
 '''+extract(NATIVE,'static void _sapp_tc_win32_modal_tick(')+r'''
 void run() {
+    busy=true;
+    _sapp_tc_win32_modal_tick(&window);
+    check("modal source defers native work during a foreign framework callback",before==0 && after==0 && ticks==0 && !window.from_modal);
+    busy=false;
     _sapp_tc_win32_modal_tick(&window);
     check("modal source brackets live tick and restores its source flag",before==1 && after==1 && ticks==1 && !window.from_modal);
     release=true;

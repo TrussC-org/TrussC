@@ -210,6 +210,7 @@ struct Log { template<class T> Log& operator<<(const T&) { return *this; } };
 Log logError(const char*) { return {}; } Log logWarning(const char*) { return {}; }
 bool pixelPerfectMode() { return false; }
 namespace internal {
+struct WindowLifecycleScope { explicit WindowLifecycleScope(Window&) {} };
 struct WindowRequestAccess {
     struct Binding { decltype(Window::geometry) geometry; };
     static void setHostOwner(Window&,const std::shared_ptr<Window>&) {}

@@ -154,7 +154,13 @@ struct GuestLibrary {
             if (auto token = internal::appRunToken()) token->store(false);
             internal::cancelResourceBackends();
             internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
-            App* raw = createApp();
+            App* raw;
+            internal::AppConstructionTicket ticket{internal::appRunToken(), mcpOwner};
+            {
+                internal::AppConstructionScope construction(ticket);
+                raw = createApp();
+                if (raw) internal::completeAppConstruction(*raw);
+            }
             auto deleter = destroyApp;
             // Destroying an App is not retiring its generation: a guest can
             // self-swap, and the replacement (built while this generation's
@@ -201,7 +207,7 @@ struct GuestLibrary {
         // window context is current.
         if (handle || !app.expired()) {
             auto* prev = internal::currentWindowCtx();
-            internal::restoreWindowContext(nullptr);
+            internal::restoreWindowContext(&internal::mainWindowContext());
             events().hotReloadUnload.notify();
             internal::restoreWindowContext(prev);
         }
@@ -617,6 +623,7 @@ namespace internal {
 
 inline int runHotReloadApp(const WindowSettings& settings) {
     using namespace hot_reload;
+    internal::beginRuntimeRun();
 
     // Initialize the host (builds and loads Guest for the first time)
     // This must happen AFTER sokol is initialized, but we need the App*

@@ -174,7 +174,8 @@ TC_CORE_TEST_MAIN() {
     internal::destroyMainWindow();
     check("cleanup preserves canonical references", internal::mainWindow() == canonical && &internal::mainWindowContext() == context && &tc::events() == events && &internal::getDefaultContext() == render);
     check("headless runner succeeds", runHeadlessApp<HeadlessProbe>() == 0);
-    check("headless restores the caller context", &internal::currentWindowContext() == context);
+    check("headless restores the null process caller", !internal::currentWindowCtx() &&
+        &internal::currentWindowContext() == &internal::nonWindowContext());
     std::printf("windowState: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

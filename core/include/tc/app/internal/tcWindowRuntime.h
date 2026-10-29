@@ -1,9 +1,18 @@
 #pragma once
 #include "tcWindowGeometryState.h"
+#include "tcAppConstruction.h"
 
 namespace trussc {
 class Window;
 namespace internal {
+struct Runtime;
+Runtime& runtime();
+class RuntimeActivityScope {
+public:
+    RuntimeActivityScope() noexcept;
+    ~RuntimeActivityScope() noexcept;
+    RuntimeActivityScope(const RuntimeActivityScope&) = delete;
+};
 // Per-window production operations are replaceable without creating a native
 // window. No query may acquire a drawable, allocate GPU resources or call App code.
 struct WindowNativeOperations {

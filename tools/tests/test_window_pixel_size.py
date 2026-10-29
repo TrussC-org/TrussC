@@ -168,7 +168,9 @@ def creation_source(backend, *, native_path=None):
     adapter_path = {'win': 'win/tcWindowWin.cpp', 'x11': 'linux/tcWindowLinux.cpp',
                     'mac': 'mac/tcWindowMac.mm', 'egl': 'linux/tcWindowLinux.cpp'}[backend]
     adapter = (ROOT / 'core/platform' / adapter_path).read_text(encoding='utf-8')
-    secondary = between(adapter, '    sapp_window_desc d = {};', '    d.title')
+    secondary = between(adapter, '    sapp_window_desc d = internal::buildNativeWindowDescriptor(', '    d.tick_cb =')
+    secondary = '    sapp_window_desc d = internal::buildNativeWindowDescriptor(' + secondary
+    secondary = secondary.replace('settings, pixelPerfectMode()', 'settings, settings.pixelPerfect').replace('    d.mtl_device = sglue_environment().metal.device;\n', '')
     main_signature = {'win': 'static bool _sapp_tc_win32_create_main_window(',
                       'x11': 'static bool _sapp_tc_x11_create_main_window(',
                       'mac': 'static bool _sapp_tc_mac_create_main_window(',
@@ -182,7 +184,7 @@ def creation_source(backend, *, native_path=None):
     win_creator = ''
     if backend == 'win':
         launcher += 'desc.high_dpi = ' + between(header, '    desc.high_dpi = ', ';') + ';'
-        secondary += 'd.no_high_dpi = ' + between(adapter, '    d.no_high_dpi = ', ';') + ';'
+        # High-DPI forwarding is executed in the shared descriptor producer.
         # Both entry points feed the same constructor. Replay their production
         # normalization and its descriptor copy, then the entire native creator
         # (including the target-DPI correction condition and SetWindowPos call).
@@ -254,7 +256,7 @@ def creation_source(backend, *, native_path=None):
         validation = 'if (!' + guard(creator) + ') return false;'
         arithmetic = 'return roundMac(' + call + ');'
     template = (ROOT / 'tools/tests/window_creation_size.cpp').read_text(encoding='utf-8')
-    return (template.replace('NORMAL_LAUNCHER', normal).replace('HOT_LAUNCHER', hot)
+    return (template.replace('SHARED_DESCRIPTOR', body(header, 'inline sapp_window_desc buildNativeWindowDescriptor(').replace('WindowSettings', 'Settings')).replace('NORMAL_LAUNCHER', normal).replace('HOT_LAUNCHER', hot)
             .replace('WIN32_NORMALIZERS', normalizers).replace('WIN32_NATIVE_CREATOR', win_creator)
             .replace('WIN32_SECONDARY_TRANSFER', secondary_transfer).replace('WIN32_COMMON_TRANSFER', common_transfer)
             .replace('MAC_TRANSFERS', mac_transfers)
@@ -353,7 +355,7 @@ class WindowPixelSizeTests(unittest.TestCase):
             ('win', 'inline sapp_desc buildWindowDescriptor('),
             ('win', '    const auto& windowTitle'),
             ('win', '    sapp_desc desc = '),
-            ('win', '    sapp_window_desc d = {};'),
+            ('win', '    sapp_window_desc d = internal::buildNativeWindowDescriptor('),
             ('win', 'static bool _sapp_tc_win32_create_main_window('),
             ('win', 'static _sapp_tc_window_t* _sapp_tc_win32_create_window('),
             ('win', 'sapp_window sapp_create_window('),
@@ -399,8 +401,10 @@ class WindowPixelSizeTests(unittest.TestCase):
         normal = 'return ' + before(split_marker(body(header, 'sapp_desc buildAppDescriptor('), '    return ', last=True)[1], ';') + ';'
         source = (ROOT / 'tools/tests/window_creation_native.cpp').read_text(encoding='utf-8')
         adapter = (ROOT / 'core/platform/linux/tcWindowLinux.cpp').read_text(encoding='utf-8')
-        secondary = between(adapter, '    sapp_window_desc d = {};', '    d.title')
-        source = source.replace('NORMAL_LAUNCHER', normal).replace('LAUNCHER', launcher).replace('SECONDARY', secondary)
+        secondary = between(adapter, '    sapp_window_desc d = internal::buildNativeWindowDescriptor(', '    d.tick_cb =')
+        secondary = '    sapp_window_desc d = internal::buildNativeWindowDescriptor(' + secondary
+        secondary = secondary.replace('settings, pixelPerfectMode()', 'settings, settings.pixelPerfect').replace('    d.mtl_device = sglue_environment().metal.device;\n', '')
+        source = source.replace('SHARED_DESCRIPTOR', body(header, 'inline sapp_window_desc buildNativeWindowDescriptor(').replace('WindowSettings', 'Settings')).replace('NORMAL_LAUNCHER', normal).replace('LAUNCHER', launcher).replace('SECONDARY', secondary)
         runner = r'''import re, subprocess, sys
 for binary in sys.argv[1:-1]:
     for pixels in (False, True):

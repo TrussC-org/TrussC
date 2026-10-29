@@ -28,7 +28,7 @@ struct Descriptor {
     void (*event_cb)(const sapp_event*)=nullptr; void (*event_userdata_cb)(const sapp_event*,void*)=nullptr;
 };
 struct _sapp_tc_window_t {
-    unsigned win_id=717; bool ready=true,in_tick=false,is_main=true,cancel_tick=false;
+    unsigned win_id=717; bool constructing=false,surface_resize_pending=false,ready=true,in_tick=false,is_main=true,cancel_tick=false;
     bool native_closed=false,closed_pending=false,draw_admitted=false; int callback_depth=0,frame_drawable=0;
     bool close_requested=false,input_delivered=false,wake_on_input=true,credit_held=false,waitable_ready=true;
     struct { double last=0; } timing;
@@ -197,7 +197,7 @@ constexpr int _SAPP_TC_MAX_WINDOWS=1;
 struct NSWindow { void close(); void performClose(); } nativeWindow;
 struct CADisplayLink { double timestamp=1,targetTimestamp=2; };
 struct _sapp_tc_window_t {
-    unsigned win_id=717; float dpi_scale=2; bool ready=true,in_tick=false,is_main=true,close_requested=false;
+    unsigned win_id=717; float dpi_scale=2; bool constructing=false,surface_resize_pending=false,ready=true,in_tick=false,is_main=true,close_requested=false;
     bool draw_while_hidden=true,draw_admitted=false,wake_on_input=false,input_delivered=false;
     bool native_closed=false,closed_pending=false; int callback_depth=0,frame_drawable=0;
     int timing=0,win_width=100,win_height=50,fb_width=200,fb_height=100;

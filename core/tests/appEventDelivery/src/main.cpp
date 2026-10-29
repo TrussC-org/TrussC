@@ -362,6 +362,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     check("descriptor creation does not claim the App thread", isMainThread());
     internal::pixelPerfectMode() = true;
     tcCoreTest::InjectedWindow native(*internal::mainWindow());
+    internal::currentWindowCtx() = &internal::mainWindowContext();
     native.metadata.fb_width = native.metadata.fb_height = 128;
     internal::mainWindowContext().fbWidth = internal::mainWindowContext().fbHeight = 128;
     internal::appSetupFunc();

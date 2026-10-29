@@ -183,7 +183,7 @@ void testCatchUp(Mode mode, int expectedSteps) {
     auto app = std::make_shared<ExitProbeApp>();
     auto appListeners = internal::registerHeadlessAppEventListeners(app);
     app->setup();
-    auto& ctx = internal::mainWindowContext();
+    auto& ctx = internal::nonWindowContext();
     const int rateIndex = ctx.rateIndex;
     double accumulator = 0.0;
     // Binary-exact interval and elapsed time: exactly 100 owed steps,
@@ -215,7 +215,7 @@ void testSetupFirstPass() {
     auto appListeners = internal::registerHeadlessAppEventListeners(app);
     app->setup();
     double accumulator = 0.0;
-    internal::runHeadlessUpdatePass(*app, internal::mainWindowContext(), accumulator, 0.0, 1.0);
+    internal::runHeadlessUpdatePass(*app, internal::nonWindowContext(), accumulator, 0.0, 1.0);
     check(result.requests == 1 && result.updates == 0 && !headless::running,
           "setup request is handled on first pass even with no due steps");
     headless::active = false;

@@ -363,7 +363,8 @@ struct TargetStackEntry {
 uint64_t pushTarget(RenderTarget& target, bool prepareOnly = false);
 bool startPreparedTarget(RenderTarget& target, uint64_t token);
 bool popTarget(RenderTarget& target, uint64_t token);
-void ensureCurrentPass();
+bool ensureCurrentPass();
+bool admitRootSwapchainPass();
 void parkWindowPass();
 void submitCapturePrefix();
 // Window: a capture of the current window's pixels; even a never-opened pass

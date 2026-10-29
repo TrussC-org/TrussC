@@ -325,6 +325,12 @@ static int runCycles(const std::string& guestPath, int port) {
     tcCoreTest::InjectedWindow native(*mainHandle, 101); // virtual native producer through the shared gate
     const auto mainId = internal::WindowRequestAccess::creationId(*mainHandle);
     struct MainOwnerReset { ~MainOwnerReset() { internal::destroyMainWindow(); } } mainOwnerReset;
+    auto* caller = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &mainHandle->context();
+    struct CallerRestore {
+        internal::WindowContext* previous;
+        ~CallerRestore() { internal::currentWindowCtx() = previous; }
+    } callerRestore{caller};
     const int kCycles = 5;
     uint64_t prevAppId = 0;
     for (int i = 1; i <= kCycles; ++i) {
@@ -1586,6 +1592,26 @@ int main(int argc, char** argv) {
     // Record the main thread id first, as _setup_cb does: isMainThread() and
     // runOnMainThread() key off whichever thread asks first.
     getMainThreadId();
+
+    {
+        const auto setup = internal::appSetupFunc;
+        const auto cleanup = internal::appCleanupFunc;
+        const auto epoch = internal::runtimeEpoch();
+        const auto token = internal::appRunToken();
+        bool rejected = false;
+        {
+            internal::RuntimeActivityScope callback;
+            try { (void)internal::runHotReloadApp(WindowSettings{}); }
+            catch (const std::logic_error&) { rejected = true; }
+        }
+        const bool intact = internal::appSetupFunc == setup && internal::appCleanupFunc == cleanup &&
+            internal::runtimeEpoch() == epoch && internal::appRunToken() == token;
+        internal::appSetupFunc = setup;
+        internal::appCleanupFunc = cleanup;
+        std::printf("hotReloadLifecycle: nested startup preserves active callbacks and epoch: %s\n",
+                    rejected && intact ? "PASS" : "FAIL");
+        if (!rejected || !intact) return 1;
+    }
 
     if (int rc = lifetime::run()) return rc;
     if (int rc = checkWatcherExtensions()) return rc;

@@ -129,7 +129,7 @@ bool sg_tc_mtl_authorize_drawable(unsigned,unsigned,unsigned){authorized=true;re
 void sgl_tc_reset_matrix_stacks(){}
 namespace headless{bool isActive(){return false;}}
 namespace internal {
-Window& currentWindowContext(){return window;}void ensureTargetStack(Window&){}void ensureCurrentPass(){window.swapchainTarget.inPass=true;}
+Window& currentWindowContext(){return window;}void ensureTargetStack(Window&){}bool ensureCurrentPass(){window.swapchainTarget.inPass=true;return true;}
 void popTarget(...){}bool currentWindowCloseRecorded(){return closed;}bool finishWindowCaptureSource(Target&){return true;}
 void endGpuFrame(){++commits;check("acquired drawable not authorized after onRender close",!authorized);}
 struct Context{void resetStacksAtFrameEnd(){}}context;

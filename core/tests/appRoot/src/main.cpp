@@ -100,6 +100,8 @@ static void runAppCallbacks() {
     sapp_tc_window_metadata metadata{};
     metadata.fb_width = 901; metadata.fb_height = 601; metadata.dpi_scale = 1.5f;
     internal::publishWindowMetadata(*internal::mainWindow(), metadata);
+    auto* caller = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &internal::mainWindowContext();
     internal::appSetupFunc();
     check("runApp: the setup callback made the App", g_windowedApp != nullptr);
     check("runApp: the App is getRootNode() once it is made",
@@ -121,6 +123,7 @@ static void runAppCallbacks() {
     internal::appCleanupFunc();
     check("runApp: getRootNode() is null once the cleanup callback freed the App",
           getRootNode() == nullptr);
+    internal::currentWindowCtx() = caller;
 }
 
 // ---------------------------------------------------------------------------

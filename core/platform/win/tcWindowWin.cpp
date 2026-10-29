@@ -103,29 +103,17 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     internal::WindowRequestAccess::binding(*win).geometry = {double(settings.width), double(settings.height), pixelPerfectMode()};
     auto* st = new AdapterState();
 
-    sapp_window_desc d = {};
-    d.x = -1;
-    d.y = -1;
-    d.width = settings.width;
-    d.height = settings.height;
-    if (pixelPerfectMode()) {
-        d._tc_pixel_width = settings.width > 0 ? settings.width : 0;
-        d._tc_pixel_height = settings.height > 0 ? settings.height : 0;
-    }
-    d.title = settings.title.c_str();
-    d.borderless = !settings.decorated;
-    d.no_high_dpi = !settings.highDpi;
-    d.fullscreen = settings.fullscreen;
-    d.swap_interval = settings.swapInterval;
-    d.sample_count = settings.sampleCount;
-    // (the shared D3D11 device is owned by sokol_app_tc.h; nothing to pass)
+    sapp_window_desc d = internal::buildNativeWindowDescriptor(settings, pixelPerfectMode());
     d.tick_cb = &internal::windowTick;
     d.event_cb = &internal::mainWindowEvent;
     d.close_cb = &internal::windowClosed;
     d.user_data = win.get();
     d.bind_cb = bindAdapter;
     win->native_ = st;
-    st->win = sapp_create_window(&d);
+    {
+        internal::WindowLifecycleScope construction(*win);
+        st->win = sapp_create_window(&d);
+    }
     if (st->win.id == 0) {
         win->native_ = nullptr;
         internal::WindowRequestAccess::unbind(*win);

@@ -1,4 +1,5 @@
 // Real GPU regression for #239: no native window or presentation mock.
+#define GL_GLEXT_PROTOTYPES
 #include <TrussC.h>
 #include "../common/tcCoreTest.h"
 #include <EGL/egl.h>
@@ -10,11 +11,111 @@
 #include <cstdio>
 #include <array>
 using namespace tc;
+static int legacySwapchains;
+extern "C" sapp_swapchain __wrap_sapp_get_swapchain() { ++legacySwapchains; return {}; }
+
+namespace renewal {
+using _sapp_tc_x11_surface_t = EGLSurface;
+struct _sapp_tc_window_t { uint32_t win_id = 7; EGLSurface drawable{}; uintptr_t xwin = 1; int swap_interval = 1; };
+static struct { EGLDisplay egl_display{}; EGLConfig fbconfig{}; int error_code = 0; size_t window_slots = 1;
+    _sapp_tc_window_t* windows[1]{}; } _sapp_tc;
+static _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) {
+    auto* w = _sapp_tc.windows[0]; return w && w->win_id == h.id ? w : nullptr;
+}
+static void _sapp_tc_x11_grab_error_handler() {}
+static void _sapp_tc_x11_release_error_handler() {}
+static void _sapp_tc_x11_set_swapinterval(_sapp_tc_window_t*, int) {}
+static EGLSurface eglCreateWindowSurface(EGLDisplay, EGLConfig, EGLNativeWindowType, const EGLint*) { return EGL_NO_SURFACE; }
+static bool failRecovery;
+static EGLSurface eglCreatePbufferSurface(EGLDisplay d, EGLConfig c, const EGLint* a) {
+    return failRecovery ? EGL_NO_SURFACE : ::eglCreatePbufferSurface(d, c, a);
+}
+#if !defined(SOKOL_GLES3)
+#define SOKOL_GLES3
+#include "renewal.inc"
+#undef SOKOL_GLES3
+#else
+#include "renewal.inc"
+#endif
+}
 namespace {
 int failures;
 void check(const char* name, bool ok) {
     std::printf("render-boundary: %s: %s\n", name, ok ? "PASS" : "FAIL");
     if (!ok) ++failures;
+}
+void failedCurrentRenewal(EGLDisplay display, EGLConfig config, EGLSurface& surface) {
+    renewal::_sapp_tc_window_t window;
+    window.drawable = surface;
+    renewal::_sapp_tc.egl_display = display; renewal::_sapp_tc.fbconfig = config;
+    renewal::_sapp_tc.windows[0] = &window;
+    renewal::failRecovery = true;
+    check("failed device drawable reservation preserves current old surface",
+        !renewal::_sapp_tc_x11_resize_surface(&window) && window.drawable == surface &&
+        eglGetCurrentSurface(EGL_DRAW) == surface && eglGetCurrentContext() != EGL_NO_CONTEXT);
+    renewal::failRecovery = false;
+    {
+        renewal::_sapp_tc_x11_surface_scope outerTick;
+        check("forced renewal failure on CURRENT window is rejected", !renewal::_sapp_tc_x11_resize_surface(&window));
+    }
+    check("both renewal scopes retain a usable current device context",
+        eglGetCurrentContext() != EGL_NO_CONTEXT && eglGetCurrentSurface(EGL_DRAW) == window.drawable);
+    bool uploaded = false;
+    std::thread worker([&] { runOnMainThread([&] {
+        uint32_t pixel = 0xffffffff;
+        sg_image_desc desc{}; desc.width = desc.height = 1; desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+        desc.data.mip_levels[0] = {&pixel, sizeof pixel};
+        const auto image = sg_make_image(&desc);
+        const auto native = sg_gl_query_image_info(image);
+        check("next process turn image is VALID with a real native texture",
+            sg_query_image_state(image) == SG_RESOURCESTATE_VALID && native.tex[native.active_slot] != 0);
+        uploaded = true; sg_destroy_image(image);
+    }); });
+    worker.join();
+    { internal::HostTurnScope turn; }
+    check("CPU queue progresses after current surface renewal failure", uploaded);
+    // Return to the normal fixture extent after the failure probe's 1x1 device drawable.
+    const EGLint size[] = {EGL_WIDTH,64,EGL_HEIGHT,64,EGL_NONE};
+    surface = ::eglCreatePbufferSurface(display, config, size);
+    check("fixture restores its drawable", surface != EGL_NO_SURFACE &&
+        eglMakeCurrent(display, surface, surface, eglGetCurrentContext()));
+    eglDestroySurface(display, window.drawable);
+    renewal::_sapp_tc.windows[0] = nullptr;
+}
+void processPasses() {
+    internal::restoreWindowContext(nullptr);
+    auto& context = internal::currentWindowContext();
+    int warnings = 0;
+    auto logs = getLogger().onLog.listen([&](LogEventArgs& event) {
+        if (event.level == LogLevel::Warning && event.message.find("No Window selected") != std::string::npos) {
+            ++warnings;
+            check("process draw warning names window callback and Fbo", event.message.find("window callback") != std::string::npos &&
+                event.message.find("Fbo") != std::string::npos);
+        }
+    });
+    // Loaded is the only seam: refusal must precede any shader/pipeline use.
+    struct DrawProbe : FullscreenShader { DrawProbe() { loaded = true; } } shader;
+    glClearColor(1, 0, 0, 1); glClear(GL_COLOR_BUFFER_BIT);
+    const int before = legacySwapchains;
+    std::thread worker([&] { runOnMainThread([&] {
+        clear(0, 1, 0, 1); shader.draw(); shader.draw();
+        check("process root pass cleanly refuses", !internal::ensureCurrentPass() && !context.swapchainTarget.inPass);
+        Fbo fbo; fbo.allocate(8, 8);
+        fbo.begin(0, 1, 0); clear(0, 1, 0, 1);
+        unsigned char pixel[4]{}; glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+        check("explicit process Fbo renders real green pixels", pixel[0] == 0 && pixel[1] == 255 && pixel[2] == 0 && pixel[3] == 255);
+        fbo.end();
+    }); });
+    worker.join();
+    { internal::HostTurnScope turn; }
+    check("process root refusal warns once and never acquires legacy main swapchain", warnings == 1 && legacySwapchains == before);
+    check("process pass never imports main dimensions", context.fbWidth == 0 && context.fbHeight == 0 &&
+        context.swapchainTarget.width == 0 && context.swapchainTarget.height == 0);
+    internal::parkWindowPass();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    unsigned char pixel[4]{}; glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    check("queued process clear and Shader draw leave window pixels untouched", pixel[0] == 255 && pixel[1] == 0 && pixel[2] == 0);
+    sg_reset_state_cache();
 }
 struct WindowProbe : Window {
     int nativeStandIn = 0;
@@ -26,6 +127,56 @@ sg_swapchain swapchain(void*) {
     sg_swapchain s{}; s.invalid = rejectSwapchain; s.width = s.height = 64; s.sample_count = 1;
     s.color_format = SG_PIXELFORMAT_RGBA8; s.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
     return s;
+}
+void recordingIsolation() {
+    WindowProbe owner;
+    auto& ctx = owner.context();
+    internal::currentWindowCtx() = &ctx;
+    ctx.fbWidth = ctx.fbHeight = 64; ctx.dpiScale = 1;
+    ctx.swapchainTarget.width = ctx.swapchainTarget.height = 64;
+    ctx.swapchainTarget.sampleCount = 1; ctx.swapchainTarget.colorFormat = SG_PIXELFORMAT_RGBA8;
+    ctx.acquireSwapchain = swapchain;
+    beginFrame();
+    clear(1, 0, 0, 1); setColor(1, 0, 0); drawRect(0, 0, 64, 64);
+    const int before = sgl_num_vertices();
+    check("caller has pending red geometry before process recording", before == 6);
+    const auto caller = sgl_get_context();
+    auto& process = internal::nonWindowContext();
+    process.processSwapchainWarned = false;
+    int warnings = 0;
+    auto logs = getLogger().onLog.listen([&](LogEventArgs& event) {
+        if (event.level == LogLevel::Warning && event.message.find("No Window selected") != std::string::npos) {
+            ++warnings;
+            check("recording refusal uses the shared guidance", event.message.find("window callback") != std::string::npos &&
+                event.message.find("Fbo") != std::string::npos);
+        }
+    });
+    std::thread worker([&] { runOnMainThread([&] {
+        check("process recording selects no Window or SGL context", !internal::currentWindow() && !sgl_get_context().id);
+        setColor(0, 1, 0); drawRect(0, 0, 64, 64); drawRect(0, 0, 64, 64);
+        pushMatrix(); translate(300, 400); scale(2, 3); popMatrix();
+        setBlendMode(BlendMode::Add);
+        check("refused immediate recording emits no vertices", sgl_num_vertices() == 0);
+        Fbo fbo; fbo.allocate(8, 8);
+        fbo.begin(1, 0, 0); resetBlendMode(); setColor(0, 1, 0); drawRect(0, 0, 8, 8);
+        internal::currentTarget().flushLayers();
+        unsigned char pixel[4]{}; glReadPixels(4, 4, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+        check("process immediate Fbo drawing produces green pixels", pixel[0] == 0 && pixel[1] == 255 && pixel[2] == 0 && pixel[3] == 255);
+        fbo.end();
+        check("process Fbo exit selects no SGL context", !sgl_get_context().id);
+        drawRect(0, 0, 64, 64);
+    }); });
+    worker.join();
+    { internal::HostTurnScope turn; }
+    check("process root recording warns once per context", warnings == 1);
+    check("caller SGL recording and vertex count are unchanged", sgl_get_context().id == caller.id && sgl_num_vertices() == before);
+    // Flush the retained red prefix so any injected green geometry remains visible.
+    internal::ensureCurrentPass(); ctx.swapchainTarget.flushLayers();
+    unsigned char pixel[4]{}; glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    check("caller frame stays red after process immediate drawing", pixel[0] == 255 && pixel[1] == 0 && pixel[2] == 0 && pixel[3] == 255);
+    ctx.swapchainTarget.endPass();
+    internal::restoreWindowContext(nullptr);
+    sg_reset_state_cache();
 }
 struct Resources {
     WindowProbe window;
@@ -219,6 +370,9 @@ TC_CORE_TEST_MAIN() {
 #include "gpu-pools.inc"
     sg_setup(&gd);
     sgl_desc_t sd{}; sd.max_vertices = 65536; sd.logger.func = internal::sokolLog; sgl_setup(&sd);
+    failedCurrentRenewal(display, config, surface);
+    processPasses();
+    recordingIsolation();
     uint8_t glyph[13] = {};
     bitmapfont::registerGlyph({65, glyph, bitmapfont::Width::Halfwidth});
     internal::bitmapFontAtlas().initialized = true;

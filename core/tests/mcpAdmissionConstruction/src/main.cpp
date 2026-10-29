@@ -699,6 +699,12 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 #ifdef TC_ADMISSION_CAPTURE_PROBE
     OpenWindow secondary;
     auto& main = internal::mainWindowContext();
+    auto* processCaller = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &main;
+    struct RestoreCaller {
+        internal::WindowContext* previous;
+        ~RestoreCaller() { internal::currentWindowCtx() = previous; }
+    } restoreCaller{processCaller};
     check("unbound main getters read native dimensions", main.isMain &&
           getFramebufferWidth() == sapp_width() && getFramebufferHeight() == sapp_height() && getDpiScale() == sapp_dpi_scale());
     // Model a bound Window before assigning its published dimensions.

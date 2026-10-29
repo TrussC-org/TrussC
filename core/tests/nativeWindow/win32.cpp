@@ -98,6 +98,8 @@ double started;
 int loopStage;
 unsigned loopTicks[3];
 bool vetoQuit, throwQuit;
+int resizeFrameWidth, resizeFrameHeight, resizeFrameChecks;
+bool resizeFrameModal;
 void check(const char* label, bool passed) {
     std::printf("nativeWindow/Win32: %s: %s\n", label, passed ? "PASS" : "FAIL");
     std::fflush(stdout);
@@ -182,7 +184,12 @@ BOOL WINAPI testShowWindow(HWND hwnd, int command) {
     auto* w = (_sapp_tc_window_t*)GetWindowLongPtrW(hwnd,GWLP_USERDATA);
     if (destroyOnShow && w) {
         destroyOnShow=false;
+        const auto frames = w->frame_count;
+        check("Constructing excludes show-time native scheduling", !_sapp_tc_win32_window_due(w));
+        _sapp_tc_win32_tick(w);
+        check("Constructing excludes show-time native tick", w->constructing && w->frame_count == frames);
         sapp_destroy_window({w->win_id});
+        check("Constructing defers show-time physical destruction", _sapp_tc_lookup({w->win_id}) == w && w->close_requested);
         return FALSE;
     }
     if (runLaunch && command == SW_SHOW && w && w->swap_chain && !launchProbe) {
@@ -236,7 +243,7 @@ void faults() {
     d.window.sample_count = 1;
     destroyOnShow=true;
     auto* revoked=_sapp_tc_win32_create_window(&d);
-    check("synchronous show-time disposal revokes construction safely", !revoked && !destroyOnShow && liveHwnds==live);
+    check("synchronous show-time disposal waits for construction return", revoked && !revoked->constructing && revoked->close_requested && !destroyOnShow && liveHwnds==live+1);
     _sapp_tc_win32_unwind(revoked);
     _sapp_tc_window_t placeholder{};
     for (auto& entry : _sapp_tc.windows) if (!entry) entry = &placeholder;
@@ -482,16 +489,51 @@ void policies(_sapp_tc_window_t* w) {
     _sapp_tc_win32_tick(w);
     check("device loss consumes completed tick's skip one-shot", !w->skip_present && spy.presents == 0);
     _sapp_tc.app.device_lost_notified = false;
-    // Modal source uses the same tick, leaves resize to the next ordinary tick.
+    // Every admitted frame, including WM_TIMER in the modal loop, must see
+    // the new client extent in both native metadata and its D3D attachments.
     sizeClient(w, 313, 219);
     spy.resizes = 0;
+    resizeFrameWidth = 313; resizeFrameHeight = 219; resizeFrameModal = true;
+    resizeFrameChecks = 0;
+    w->desc.tick_cb = [](sapp_window handle, void*) {
+        ++resizeFrameChecks;
+        auto* live = _sapp_tc_lookup(handle);
+        ID3D11Texture2D* buffer = nullptr;
+        const HRESULT hr = live->swap_chain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&buffer);
+        D3D11_TEXTURE2D_DESC desc{};
+        if (buffer) { buffer->GetDesc(&desc); buffer->Release(); }
+        check("first resized frame uses new metadata and attachments", live->from_modal == resizeFrameModal &&
+            live->fb_width == resizeFrameWidth && live->fb_height == resizeFrameHeight && SUCCEEDED(hr) &&
+            desc.Width == UINT(resizeFrameWidth) && desc.Height == UINT(resizeFrameHeight));
+    };
     SendMessageW(w->hwnd,WM_ENTERSIZEMOVE,0,0);
     w->credit_held=true; w->earliest_next=0;
+    // Stand in for a framework Window callback paused in MessageBoxW with
+    // another Window's live target bound on the shared immediate context.
+    // The modal timer must leave that pass intact until its owner can park.
+    const auto savedActive = _sapp_tc.app.desc._tc_callbacks_active;
+    _sapp_tc.app.desc._tc_callbacks_active = [] { return true; };
+    auto* caller = w == first ? _sapp_tc_lookup(second) : first;
+    ID3D11RenderTargetView* callerTarget = caller->msaa_rtv ? caller->msaa_rtv : caller->rtv;
+    _sapp_tc.app.device_context->OMSetRenderTargets(1, &callerTarget, caller->dsv);
+    SendMessageW(w->hwnd,WM_TIMER,_SAPP_TC_MODAL_TIMER,0);
+    ID3D11RenderTargetView* retained = nullptr;
+    _sapp_tc.app.device_context->OMGetRenderTargets(1, &retained, nullptr);
+    check("nested modal resize preserves foreign active target until caller parks",
+        retained == callerTarget && spy.resizes == 0 && resizeFrameChecks == 0);
+    if (retained) retained->Release();
+    _sapp_tc.app.device_context->OMSetRenderTargets(0, nullptr, nullptr);
+    _sapp_tc.app.desc._tc_callbacks_active = savedActive;
     SendMessageW(w->hwnd,WM_TIMER,_SAPP_TC_MODAL_TIMER,0);
     SendMessageW(w->hwnd,WM_EXITSIZEMOVE,0,0);
-    check("modal timer source defers ResizeBuffers", spy.resizes == 0 && !w->from_modal);
+    check("modal timer source reconciles ResizeBuffers", spy.resizes == 1 && resizeFrameChecks == 1 && !w->from_modal);
+    resizeFrameWidth = 319; resizeFrameHeight = 223; resizeFrameModal = false;
+    sizeClient(w, resizeFrameWidth, resizeFrameHeight);
     _sapp_tc_win32_tick(w);
-    check("ordinary tick coalesces modal resize", spy.resizes == 1);
+    check("ordinary resize reconciles before its first callback", spy.resizes == 2 && resizeFrameChecks == 2);
+    w->desc.tick_cb = tick;
+    _sapp_tc_win32_tick(w);
+    check("ordinary tick preserves reconciled resize", spy.resizes == 2 && w->fb_width == 319 && w->fb_height == 223);
     // Advance an injected clock inside the client: no wall-time/speed assertion.
     const double realPeriod=_sapp_tc.qpc_period;
     const auto realTiming=w->timing;

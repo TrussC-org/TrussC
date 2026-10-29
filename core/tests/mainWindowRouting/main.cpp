@@ -29,6 +29,7 @@ int main() {
     internal::createMainWindow(WindowSettings{});
     auto* main = internal::mainWindow();
     internal::WindowRequestAccess::bindForTests(*main, 101);
+    internal::currentWindowCtx() = &main->context();
     const bool attached = internal::attachMainApp(std::make_shared<App>());
     setWindowTitle("sapp main"); setWindowSize(321, 123);
     main->setSize(321, 123);
@@ -55,7 +56,7 @@ int main() {
     alternate.isMain = false; alternate.dpiScale = 7.0f;
     internal::currentWindowCtx() = &alternate;
     main->getApp()->setSize(642, 246);
-    internal::currentWindowCtx() = nullptr;
+    internal::currentWindowCtx() = &main->context();
     const bool ownWindowSize = sizeCalls == 3 && fractionalCalls == 1 && widthSeen == 321 && heightSeen == 123;
     const bool ok = attached && internal::currentWindow() == main && titleCalls == 1 &&
         titleSeen == (mcp::internal::isDevBuild() ? "sapp main [MCP]" : "sapp main") && main->getTitle() == titleSeen && ownWindowSize &&
@@ -69,7 +70,7 @@ int main() {
         oddPixels &= fractionalCalls == before + 1 && widthSeen == 1001.0 / dpi &&
             heightSeen == 667.0 / dpi && internal::currentWindowCtx() == &alternate;
     }
-    internal::currentWindowCtx() = nullptr;
+    internal::currentWindowCtx() = &main->context();
     internal::destroyMainWindow();
     std::printf("mainWindowRouting: sapp main title/size/fullscreen: %s\n", ok && oddPixels ? "PASS" : "FAIL");
     return ok && oddPixels ? 0 : 1;

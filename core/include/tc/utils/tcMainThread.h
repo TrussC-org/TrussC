@@ -46,8 +46,12 @@ namespace trussc {
 
 namespace internal {
     // Runtime-owned liveness for native async dialog completions. One copy
-    // in tcGlobal.cpp, shared with hot reload guests; accessed on main thread.
+    // in the host Runtime, shared with hot reload guests; accessed on main
+    // thread. During construction it selects the innermost ticket's token.
     std::shared_ptr<std::atomic<bool>>& appRunToken();
+    // During a complete derived constructor C1 can capture its ticket's token.
+    // This accessor and appRunToken use the same host Runtime across DLLs.
+    std::shared_ptr<std::atomic<bool>> constructorRunToken();
     inline bool appRunIsAlive(const std::weak_ptr<std::atomic<bool>>& token) {
         auto alive = token.lock();
         return alive && alive->load();

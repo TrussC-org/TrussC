@@ -481,6 +481,9 @@ inline bool hasDeferredResponsesForTarget(const void* target) {
 // The owner is a generation, not an App: releasing one App of a generation
 // (a main setApp() swap to a replacement the guest built) retires nothing;
 // only the generation's unload does.
+// Internal AppConstructionScope temporarily selects a ticket's attribution
+// across a complete derived constructor and restores nested/throwing callers.
+// It never retires an owner or creates a second attachment authority.
 // Both accessors are defined in tcMCP.cpp: the host sets the owner and a guest
 // registers under it, so they must see the same one on every platform.
 namespace internal {

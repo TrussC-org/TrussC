@@ -66,15 +66,16 @@ def generate(backend, variant):
     port = {'mac': 'mac', 'win': 'win32', 'glx': 'x11', 'egl': 'x11'}[backend]
     adapter = (ROOT / 'core/platform' / FILES[backend]).read_text(encoding='utf-8')
     adapter = body(adapter, 'std::shared_ptr<Window> internal::createSecondaryWindow(')
+    descriptor = body(HEADER, 'inline sapp_window_desc buildNativeWindowDescriptor(')
     # Pick the correct same-named public entry, with no last-occurrence shortcut.
     entry_region = NATIVE[NATIVE.index('static _sapp_tc_window_t* _sapp_tc_' + port + '_create_window'):]
     entry = body(entry_region, 'sapp_window sapp_create_window(')
     constructor_name = '_sapp_tc_' + port + ('_create_window_ex' if backend == 'mac' else '_create_window')
     constructor = body(NATIVE, 'static _sapp_tc_window_t* ' + constructor_name + '(')
     if variant == 'adapter_fullscreen':
-        adapter = replace_once(adapter, 'd.fullscreen = settings.fullscreen;', 'd.fullscreen = false;')
+        descriptor = replace_once(descriptor, 'd.fullscreen = settings.fullscreen;', 'd.fullscreen = false;')
     elif variant == 'adapter_interval':
-        adapter = replace_once(adapter, 'd.swap_interval = settings.swapInterval;', 'd.swap_interval = 1;')
+        descriptor = replace_once(descriptor, 'd.swap_interval = settings.swapInterval;', 'd.swap_interval = 1;')
     elif variant == 'entry_fullscreen':
         entry = replace_once(entry, 'native.fullscreen = desc->fullscreen;', 'native.fullscreen = false;')
     elif variant == 'entry_interval':
@@ -147,7 +148,7 @@ def generate(backend, variant):
         '// PRODUCTION_NATIVE': production,
         '// PRODUCTION_SETTINGS': body(HEADER, 'struct WindowSettings {') + ';',
         '// PRODUCTION_BIND': body((ROOT / 'core/platform' / FILES[backend]).read_text(encoding='utf-8'), 'bool bindAdapter('),
-        '// PRODUCTION_ADAPTER': adapter,
+        '// PRODUCTION_ADAPTER': 'namespace internal {\n' + descriptor + '\n}\n' + adapter,
     }
     result = TEMPLATE
     for marker, text in replacements.items():

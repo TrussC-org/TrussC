@@ -324,6 +324,7 @@ namespace internal {
 // VideoPlayer to its platform code.
 class WindowRequestAccess {
 public:
+    static const AppConstructionTicket& constructionTicket(const App& app) { return app.constructorTicket_; }
     using HostState = Window::OwnedState;
     static bool appStarted(const Window& w) { return w.appStarted(); }
     // Explicit virtual binding for deterministic host tests; no native operation is called.
@@ -976,7 +977,7 @@ inline bool Window::isFullscreen() const {
 }
 namespace internal {
 inline bool usesNativeWindowDimensions(const WindowContext& ctx) noexcept {
-    return ctx.isMain && (!ctx.hostWindow || !ctx.hostWindow->isOpen());
+    return ctx.isMain && ctx.hostWindow && !ctx.hostWindow->isOpen();
 }
 inline WindowDimensions windowDimensions(const WindowContext& ctx) noexcept {
     if (usesNativeWindowDimensions(ctx))

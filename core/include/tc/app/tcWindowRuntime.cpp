@@ -18,6 +18,83 @@ Window::Window(bool mainWindow)
 }
 
 namespace internal {
+namespace {
+void processQueues();
+void processMaintenance();
+}
+// One host instance, shared by ordinary apps, guests and headless runs. This
+// substrate adds no Window registry or attachment/ending authority (C1).
+struct Runtime {
+    unsigned entries = 0, turns = 0;
+    bool servicing = false, bootstrapping = false, servicedTurn = false;
+    uint64_t epoch = 0;
+    void (*reload)() = nullptr;
+    HostServiceOperations services{processQueues, processMaintenance};
+    std::shared_ptr<std::atomic<bool>> runToken;
+    AppConstructionTicket* constructor = nullptr;
+    WindowContext* selected = nullptr;
+#ifndef __EMSCRIPTEN__
+    ThreadChannel<std::function<void()>> mainQueue;
+    std::atomic<size_t> mainQueuePending{0};
+#endif
+};
+Runtime& runtime() {
+    // Async completions and static App destructors may consult it at exit.
+    static auto* state = new Runtime;
+    return *state;
+}
+RuntimeActivityScope::RuntimeActivityScope() noexcept { ++runtime().entries; }
+RuntimeActivityScope::~RuntimeActivityScope() noexcept { --runtime().entries; }
+WindowContext*& currentWindowCtx() { return runtime().selected; }
+std::shared_ptr<std::atomic<bool>>& appRunToken() {
+    auto& state = runtime();
+    return state.constructor ? state.constructor->runToken : state.runToken;
+}
+#ifndef __EMSCRIPTEN__
+ThreadChannel<std::function<void()>>& mainThreadQueue() { return runtime().mainQueue; }
+std::atomic<size_t>& mainThreadQueuePendingCount() { return runtime().mainQueuePending; }
+#endif
+uint64_t runtimeEpoch() noexcept { return runtime().epoch; }
+void beginRuntimeRun() {
+    auto& state = runtime();
+    if (state.entries || state.turns || state.servicing || state.constructor)
+        throw std::logic_error("a Runtime run cannot begin inside a host entry");
+    if (state.epoch == UINT64_MAX) throw std::overflow_error("Runtime epochs exhausted");
+    auto token = std::make_shared<std::atomic<bool>>(true);
+    if (state.runToken) state.runToken->store(false);
+    {
+        RuntimeActivityScope starting;
+        cancelResourceBackends();
+    }
+    state.runToken = std::move(token);
+    ++state.epoch;
+    state.servicedTurn = false;
+}
+AppConstructionTicket* currentAppConstruction() noexcept { return runtime().constructor; }
+std::shared_ptr<std::atomic<bool>> constructorRunToken() {
+    return appRunToken();
+}
+AppConstructionScope::AppConstructionScope(AppConstructionTicket& ticket)
+    : ticket_(ticket), previous_(currentAppConstruction()), previousOwner_(mcp::internal::registrationOwner()),
+      exceptions_(std::uncaught_exceptions()) {
+    if (!ticket.runToken) ticket.runToken = appRunToken();
+    if (!ticket.epoch) ticket.epoch = runtimeEpoch();
+    runtime().constructor = &ticket;
+    ++runtime().entries;
+    mcp::internal::setRegistrationOwner(ticket.registrationOwner);
+}
+AppConstructionScope::~AppConstructionScope() noexcept {
+    if (std::uncaught_exceptions() > exceptions_) ticket_.app = nullptr;
+    mcp::internal::setRegistrationOwner(previousOwner_);
+    runtime().constructor = previous_;
+    --runtime().entries;
+}
+void completeAppConstruction(App& app) noexcept {
+    if (auto* ticket = currentAppConstruction(); ticket && (!ticket->app || ticket->app == &app)) {
+        ticket->app = &app;
+        app.constructorTicket_ = *ticket;
+    }
+}
 void WindowContext::admitMousePress(int button) noexcept {
     ++mousePressGenerations[button];
     // Scoped MCP owners cannot outlive a superseded click's stack frame.
@@ -71,6 +148,7 @@ void MouseDispatchScope::beginRecovery(int button) noexcept {
 namespace {
 constinit WindowContext* initializedNonWindow = nullptr;
 struct NonWindowState {
+    RenderContext processRender;
     WindowContext context;
     NonWindowState() {
         // Preserve prelaunch subscriptions and render references. Their storage
@@ -85,6 +163,14 @@ NonWindowState& nonWindowState() {
     static NonWindowState state;
     return state;
 }
+// Keep canonical prelaunch/headless references stable while isolating service
+// drawing style (including its stack and entry bookkeeping) from main.
+struct ProcessDrawingScope {
+    WindowContext& context = nonWindowState().context;
+    RenderContext* previous = context.render;
+    ProcessDrawingScope() { context.render = &nonWindowState().processRender; }
+    ~ProcessDrawingScope() { context.render = previous; }
+};
 sg_pixel_format pixelFormat(sapp_pixel_format format) {
     switch (format) {
         case SAPP_PIXELFORMAT_RGBA8: return SG_PIXELFORMAT_RGBA8;
@@ -103,11 +189,6 @@ bool readMetadata(sapp_window handle, void*, sapp_tc_window_metadata& out) {
 sg_swapchain acquireSwapchain(sapp_window handle, void*) {
     sapp_tc_window_metadata metadata{};
     sg_swapchain sc{};
-    if (!sapp_tc_window_read_metadata(handle, &metadata)) return sc;
-    sc.width = metadata.fb_width; sc.height = metadata.fb_height;
-    sc.sample_count = metadata.sample_count;
-    sc.color_format = pixelFormat(metadata.color_format);
-    sc.depth_format = pixelFormat(metadata.depth_format);
 #if defined(SOKOL_METAL)
     sc.metal.current_drawable = sapp_window_metal_current_drawable(handle);
     if (!sc.metal.current_drawable) return {};
@@ -121,6 +202,13 @@ sg_swapchain acquireSwapchain(sapp_window handle, void*) {
 #else
     sc.gl.framebuffer = sapp_window_gl_framebuffer(handle);
 #endif
+    // Acquiring a drawable can absorb an external resize (notably Retina).
+    // Read its metadata afterwards, so the pass has one native size snapshot.
+    if (!sapp_tc_window_read_metadata(handle, &metadata)) return {};
+    sc.width = metadata.fb_width; sc.height = metadata.fb_height;
+    sc.sample_count = metadata.sample_count;
+    sc.color_format = pixelFormat(metadata.color_format);
+    sc.depth_format = pixelFormat(metadata.depth_format);
     return sc;
 }
 void activate(sapp_window handle, void*) {
@@ -134,7 +222,14 @@ sg_swapchain acquireBoundSwapchain(void* user) {
     if (!user) return {};  // the adapter cleared its user during teardown
     auto& b = WindowRequestAccess::binding(*static_cast<Window*>(user));
     if (!b.bound || !b.operations || !b.operations->acquireSwapchain) return {};
-    return b.operations->acquireSwapchain(b.handle, b.user);
+    const auto swapchain = b.operations->acquireSwapchain(b.handle, b.user);
+    if (swapchain.width > 0 && swapchain.height > 0) {
+        auto metadata = b.metadata;
+        if (b.operations->readMetadata && !b.operations->readMetadata(b.handle, b.user, metadata)) return {};
+        metadata.fb_width = swapchain.width; metadata.fb_height = swapchain.height;
+        publishWindowMetadata(*static_cast<Window*>(user), metadata);
+    }
+    return swapchain;
 }
 void activateBinding(void* user) {
     if (!user) return;  // the adapter cleared its user during teardown
@@ -288,13 +383,7 @@ void bindSingleWindowMain() {
 }
 
 namespace {
-struct Coordinator {
-    unsigned entries = 0, turns = 0;
-    bool servicing = false;
-    bool bootstrapping = false;
-    void (*reload)() = nullptr;
-};
-Coordinator& coordinator() { static Coordinator state; return state; }
+Runtime& coordinator() { return runtime(); }
 void processQueues() {
     auto loads = takeResourceLoadBatch();
     EntryStackGuard guard(AppEntry::Prelude);
@@ -325,8 +414,7 @@ WindowLifecycleScope::~WindowLifecycleScope() noexcept {
     --window_.entryDepth_;
 }
 HostServiceOperations& hostServiceOperationsForTests() {
-    static HostServiceOperations operations{processQueues, processMaintenance};
-    return operations;
+    return runtime().services;
 }
 void setHostReloadPoll(void (*poll)()) noexcept { coordinator().reload = poll; }
 HostTurnScope::HostTurnScope() noexcept { beforeHostTurn(); }
@@ -336,13 +424,14 @@ void beforeHostTurn() noexcept {
     auto& state = coordinator();
     if (state.turns++ || state.entries || state.servicing) return;
     state.servicing = true;
+    state.servicedTurn = true;
     auto* previous = currentWindowCtx();
     const auto native = sapp_tc_gl_save();
     const auto sgl = sg_isvalid() ? sgl_get_context() : sgl_context{};
     TeardownSteps steps;
     steps.run("host turn services", [&] {
-        // Headless services keep the explicit non-window root selected.
-        if (!headless::isActive()) restoreWindowContext(nullptr);
+        restoreWindowContext(nullptr);
+        ProcessDrawingScope drawing;
         if (state.reload) state.reload();
         if (auto queues = hostServiceOperationsForTests().queues) queues();
         // Queue callbacks may upload/Fbo-render during a no-draw turn.
@@ -356,12 +445,22 @@ void beforeHostTurn() noexcept {
 }
 void afterHostTurn() noexcept {
     auto& state = coordinator();
-    if (!state.turns || --state.turns || state.entries || state.servicing) return;
+    if (!state.turns || --state.turns || state.entries || state.servicing || !state.servicedTurn) return;
+    state.servicedTurn = false;
     state.servicing = true;
+    auto* previous = currentWindowCtx();
+    const auto native = sapp_tc_gl_save();
+    const auto sgl = sg_isvalid() ? sgl_get_context() : sgl_context{};
     TeardownSteps steps;
     steps.run("host turn maintenance", [&] {
+        restoreWindowContext(nullptr);
+        ProcessDrawingScope drawing;
         if (auto maintenance = hostServiceOperationsForTests().maintenance) maintenance();
     });
+    steps.run("maintenance caller restoration", [&] { restoreWindowContext(previous); });
+    currentWindowCtx() = previous;
+    if (sg_isvalid() && sgl.id) sgl_set_context(sgl);
+    sapp_tc_gl_restore(native);
     state.servicing = false;
 }
 bool currentWindowCloseRecorded() {

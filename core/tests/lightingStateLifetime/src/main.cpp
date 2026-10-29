@@ -50,6 +50,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     // Also allow reversing which of the two storages is destroyed first.
     if (registryFirst) internal::registerWindow(nullptr);
     auto& ctx = internal::mainWindowContext();
+    internal::currentWindowCtx() = &ctx;
     clearMaterial();
     clearEnvironment();
     clearLights();

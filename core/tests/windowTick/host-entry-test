@@ -35,8 +35,13 @@ if os.environ.get('TC_HOST_ENTRY_PCH'):
 def compile(path, output, include=None):
     precompiled=['-include',str(pch)] if pch and include is None else []
     subprocess.run([compiler,*(["-I"+str(include)] if include else []),*flags,*precompiled,'-c',str(path),'-o',str(output)],check=True)
+guest=OUT/'constructor-guest.cpp'
+guest.write_text('#include "tc/app/internal/tcAppConstruction.h"\nnamespace trussc::internal { struct Runtime; Runtime& runtime(); std::shared_ptr<std::atomic<bool>>& appRunToken(); }\nextern "C" bool cp4_constructor_probe(trussc::internal::AppConstructionTicket* ticket, uint64_t epoch, const void* runtime, const void* token) {\n    using namespace trussc::internal;\n    return currentAppConstruction() == ticket && runtimeEpoch() == epoch && &trussc::internal::runtime() == runtime && &appRunToken() == token;\n}\n', encoding='utf-8')
+guest_library=OUT/'constructor-guest.so'
+subprocess.run([compiler,*flags,'-fPIC','-shared',str(guest),'-o',str(guest_library)],check=True)
+os.environ['TC_CONSTRUCTOR_GUEST']=str(guest_library)
 objects=[]
-for name,path in [('probe',Path(os.environ.get('TC_HOST_ENTRY_PROBE', ROOT/'core/tests/windowTick/host-entry.cpp'))),('global',ROOT/'core/include/tc/app/tcGlobal.cpp')]:
+for name,path in [('probe',Path(os.environ.get('TC_HOST_ENTRY_PROBE', ROOT/'core/tests/windowTick/host-entry.cpp'))),('global',ROOT/'core/include/tc/app/tcGlobal.cpp'),('standard-tools',ROOT/'core/include/tc/utils/tcStandardTools.cpp')]:
     output=OUT/(name+'.o'); compile(path,output); objects.append(str(output))
 link=shlex.split((BUILD/'CMakeFiles/allCoreTests.dir/link.txt').read_text(encoding="utf-8"))
 libs=link[next(i for i,x in enumerate(link) if x.endswith('libTrussC.a')):]
@@ -79,7 +84,7 @@ for name,text in variants:
     path=OUT/(name+'.cpp'); path.write_text(text,encoding="utf-8")
     obj=OUT/(name+'.o'); compile(path,obj)
     binary=OUT/name
-    subprocess.run([compiler,*objects,str(obj),*libs,'-Wl,--wrap=_Znwm,--wrap=_Znam,--wrap=sg_isvalid,--wrap=sg_query_stats,--wrap=sapp_cancel_quit,--wrap=sapp_get_num_dropped_files,--wrap=sapp_get_dropped_file_path','-o',str(binary)],cwd=BUILD,check=True)
+    subprocess.run([compiler,'-rdynamic',*objects,str(obj),*libs,'-Wl,--wrap=_Znwm,--wrap=_Znam,--wrap=sg_isvalid,--wrap=sg_query_stats,--wrap=sapp_cancel_quit,--wrap=sapp_get_num_dropped_files,--wrap=sapp_get_dropped_file_path','-o',str(binary)],cwd=BUILD,check=True)
     with (OUT/(name+'.log')).open('w', encoding='utf-8') as log:
         result=subprocess.run([str(binary)],stdout=log,stderr=subprocess.STDOUT,timeout=30,env=dict(os.environ,TRUSSC_MCP='0'))
     output=(OUT/(name+'.log')).read_text(encoding="utf-8")
@@ -98,7 +103,7 @@ if os.environ.get('TC_HOST_ENTRY_MUTATIONS') and results[0]['valid']:
         (include/'native-admission.h').write_text(admission.generate(native, early=platform), encoding='utf-8')
         obj=OUT/(name+'.o'); compile(Path(os.environ.get('TC_HOST_ENTRY_PROBE', ROOT/'core/tests/windowTick/host-entry.cpp')),obj,include)
         binary=OUT/(name+'-test')
-        subprocess.run([compiler,str(obj),objects[1],str(OUT/'baseline.o'),*libs,'-Wl,--wrap=_Znwm,--wrap=_Znam,--wrap=sg_isvalid,--wrap=sg_query_stats,--wrap=sapp_cancel_quit,--wrap=sapp_get_num_dropped_files,--wrap=sapp_get_dropped_file_path','-o',str(binary)],cwd=BUILD,check=True)
+        subprocess.run([compiler,'-rdynamic',str(obj),*objects[1:],str(OUT/'baseline.o'),*libs,'-Wl,--wrap=_Znwm,--wrap=_Znam,--wrap=sg_isvalid,--wrap=sg_query_stats,--wrap=sapp_cancel_quit,--wrap=sapp_get_num_dropped_files,--wrap=sapp_get_dropped_file_path','-o',str(binary)],cwd=BUILD,check=True)
         with (OUT/(name+'.log')).open('w',encoding='utf-8') as log:
             result=subprocess.run([str(binary)],stdout=log,stderr=subprocess.STDOUT,timeout=30,env=dict(os.environ,TRUSSC_MCP='0'))
         failed=(OUT/(name+'.log')).read_text(encoding='utf-8').count('host-entry: FAIL:')
@@ -127,13 +132,13 @@ if os.environ.get('TC_HOST_ENTRY_EXTRA_MUTATIONS') and results[0]['valid']:
             include=OUT/(name+'-include'); include.mkdir(exist_ok=True)
             (include/'TrussC.h').write_text(mutated,encoding="utf-8")
             obj=OUT/(name+'.o'); compile(Path(os.environ.get('TC_HOST_ENTRY_PROBE', ROOT/'core/tests/windowTick/host-entry.cpp')),obj,include)
-            selected=[str(obj),objects[1]]
+            selected=[str(obj),*objects[1:]]
         else:
             path=OUT/(name+'.cpp'); path.write_text(mutated,encoding="utf-8")
             obj=OUT/(name+'.o'); compile(path,obj)
-            selected=[objects[0],str(obj)]
+            selected=[objects[0],str(obj),*objects[2:]]
         binary=OUT/name
-        subprocess.run([compiler,*selected,str(OUT/'baseline.o'),*libs,'-Wl,--wrap=_Znwm,--wrap=_Znam,--wrap=sg_isvalid,--wrap=sg_query_stats,--wrap=sapp_cancel_quit,--wrap=sapp_get_num_dropped_files,--wrap=sapp_get_dropped_file_path','-o',str(binary)],cwd=BUILD,check=True)
+        subprocess.run([compiler,'-rdynamic',*selected,str(OUT/'baseline.o'),*libs,'-Wl,--wrap=_Znwm,--wrap=_Znam,--wrap=sg_isvalid,--wrap=sg_query_stats,--wrap=sapp_cancel_quit,--wrap=sapp_get_num_dropped_files,--wrap=sapp_get_dropped_file_path','-o',str(binary)],cwd=BUILD,check=True)
         with (OUT/(name+'.log')).open('w', encoding='utf-8') as log:
             result=subprocess.run([str(binary)],stdout=log,stderr=subprocess.STDOUT,timeout=30,env=dict(os.environ,TRUSSC_MCP='0'))
         failed=(OUT/(name+'.log')).read_text(encoding="utf-8").count('host-entry: FAIL:')

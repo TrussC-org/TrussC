@@ -5,6 +5,7 @@
 #include "../../common/tcWindowTest.h"
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
+int runResizeFirstFrameTest();
 #include <cstdio>
 using namespace tc;
 namespace {
@@ -517,6 +518,12 @@ struct MainDisplayApp : App {
                 // Two synthetic hidden ticks with no intervening secondary
                 // commit: a visible window must not mask the missing boundary.
                 auto& ctx = internal::mainWindowContext();
+                auto* caller = internal::currentWindowCtx();
+                internal::restoreWindowContext(&ctx);
+                struct RestoreCaller {
+                    internal::WindowContext* caller;
+                    ~RestoreCaller() { internal::restoreWindowContext(caller); }
+                } restoreCaller{caller};
                 const auto loop = ctx.loop;
                 ctx.loop.updateTargetFps = EVENT_DRIVEN;
                 ctx.loop.redrawCount = 0;
@@ -573,7 +580,8 @@ struct MainDisplayApp : App {
             onNextPrelude([this] {
                 setMainHidden(true);
                 check("main visibility reports scheduler input", getWindow()->isOccluded());
-                hiddenUpdates = getUpdateCount(); hiddenDraws = getDrawCount();
+                const auto& main = internal::mainWindowContext();
+                hiddenUpdates = main.updateCount; hiddenDraws = main.drawCount;
                 visibleDraws = displaySecondary->context().drawCount;
                 displaySecondary->setFps(VSYNC);
                 uploadLog = getLogger().onLog.listen([this](LogEventArgs& e) {
@@ -625,6 +633,7 @@ struct HeadlessProbe : App {
 }
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     getMainThreadId();
+    if (argc > 1 && std::string(argv[1]) == "--resize-first-frame") return runResizeFirstFrameTest();
     if (argc > 1 && std::string(argv[1]) == "--display") {
         if (!internal::supportsSecondaryWindows()) { std::puts("SKIP: windowTick display requires desktop secondary windows"); return 0; }
         WindowSettings settings; settings.width = settings.height = 128;

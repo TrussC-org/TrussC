@@ -177,6 +177,7 @@ inline std::vector<EventListener> registerHeadlessAppEventListeners(
 inline void runHeadlessUpdatePass(App& app, WindowContext& ctx,
                                   double& accumulator, double elapsed,
                                   double targetDelta) {
+    RuntimeActivityScope activity;
     FixedStepAdvance adv = advanceFixedStep(
         accumulator, elapsed, targetDelta, getMaxUpdateSteps());
     if (adv.droppedTime > 0.0) {
@@ -239,9 +240,14 @@ struct HeadlessSettings {
 // ---------------------------------------------------------------------------
 template<typename AppClass>
 int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
+    internal::beginRuntimeRun();
     internal::beginFrameworkLifetime();
     struct EndFrameworkLifetime {
-        ~EndFrameworkLifetime() { internal::endFrameworkLifetime(); }
+        ~EndFrameworkLifetime() {
+            if (auto token = internal::appRunToken()) token->store(false);
+            headless::active = false;
+            internal::endFrameworkLifetime();
+        }
     } endFrameworkLifetime;
     internal::installCrashHandler();
     internal::CrashPhaseScope crashPhase("headless");
@@ -272,10 +278,6 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     // isMainThread() / runOnMainThread() behave the same as in the windowed app.
     getMainThreadId();
 
-    if (auto token = internal::appRunToken()) token->store(false);
-    internal::cancelResourceBackends();
-    internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
-
     // Reset state
     headless::active = true;
     headless::frameCount = 0;
@@ -289,20 +291,30 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         ~RestoreContext() { internal::currentWindowCtx() = previous; }
     } restoreContext{previousContext};
     ctx.drawCount = 0;
+    ctx.updateCount = 0;
+    ctx.resourceTickCount = 0;
     internal::sampleFrameTime(ctx);
 
     // Create app instance. Owned by a shared_ptr, as runApp() owns the
     // windowed App: it is the main window's scene-graph root (getRootNode(),
     // held weakly) while it runs, and weak_from_this() works, so setup() can
     // addChild().
-    auto app = std::make_shared<AppClass>();
+    std::shared_ptr<AppClass> app;
+    internal::AppConstructionTicket ticket{internal::appRunToken(), mcp::internal::registrationOwner()};
+    {
+        internal::AppConstructionScope construction(ticket);
+        app = internal::makeConstructedApp<AppClass>();
+    }
     ctx.rootNode = app;
     auto appListeners = internal::registerHeadlessAppEventListeners(app);
 
     // setup() once, then the framework's post-setup hook, as the windowed
     // App gets them on its first tree update: the App's audioOut() /
     // audioIn() are subscribed only once setup() has returned (#426).
-    internal::setupNodeOnce(*app);
+    {
+        internal::RuntimeActivityScope activity;
+        internal::setupNodeOnce(*app);
+    }
 
     // Main loop: fixed timestep at the nominal 1/fps (getDeltaTime() reports
     // exactly that), at most getMaxUpdateSteps() steps per pass (the main
@@ -350,6 +362,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
 
     // App exit at 100, then protected framework teardown at AfterApp.
     {
+        internal::RuntimeActivityScope activity;
         internal::EntryStackGuard guard(internal::AppEntry::Exit);
         events().exit.notify();
         // The device keeps running; finish any callback before cleanup().

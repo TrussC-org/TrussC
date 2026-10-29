@@ -2507,7 +2507,7 @@ namespace internal {
         CrashPhaseScope crashPhase("cleanup");
         writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
         // Session end may arrive inside a secondary window's modal loop.
-        restoreWindowContext(nullptr);
+        restoreWindowContext(&mainWindowContext());
         // Stop MCP HTTP server
         #ifndef __EMSCRIPTEN__
         mcp::stopHttpServer();
@@ -2556,13 +2556,32 @@ namespace internal {
 // ---------------------------------------------------------------------------
 
 namespace internal {
+// Descriptor data shared by startup, desktop secondaries and sole-surface
+// hosts. Backend defaults/attributes remain their existing policy (D3).
+inline sapp_window_desc buildNativeWindowDescriptor(const WindowSettings& settings, bool pixels) {
+    sapp_window_desc d = {};
+    d.x = d.y = -1;
+    d.width = settings.width; d.height = settings.height;
+    if (pixels) {
+        d._tc_pixel_width = settings.width > 0 ? settings.width : 0;
+        d._tc_pixel_height = settings.height > 0 ? settings.height : 0;
+    }
+    d.title = settings.title.c_str();
+    d.borderless = !settings.decorated;
+    d.no_high_dpi = !settings.highDpi;
+    d.fullscreen = settings.fullscreen;
+    d.swap_interval = settings.swapInterval;
+    d.sample_count = settings.sampleCount;
+    return d;
+}
 // Shared by normal startup and the hot-reload host; callbacks may be overridden.
 inline sapp_desc buildWindowDescriptor(const WindowSettings& settings) {
     sapp_desc desc = {};
+    const auto window = buildNativeWindowDescriptor(settings, settings.pixelPerfect);
     if constexpr (Platform::isDesktop()) {
         // Native creation knows the target window's DPI; preserve pixels until then.
-        desc.width = settings.width;
-        desc.height = settings.height;
+        desc.width = window.width;
+        desc.height = window.height;
         // Preserve the launcher's old per-dimension native validation/default inputs.
         if (settings.pixelPerfect && (settings.width <= 0 || settings.height <= 0)) {
             const float displayScale = getDisplayScaleFactor();
@@ -2570,8 +2589,8 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings) {
             if (settings.height <= 0) desc.height = static_cast<int>(settings.height / displayScale);
         }
         if (settings.pixelPerfect) {
-            desc._tc_pixel_width = settings.width > 0 ? settings.width : 0;
-            desc._tc_pixel_height = settings.height > 0 ? settings.height : 0;
+            desc._tc_pixel_width = window._tc_pixel_width;
+            desc._tc_pixel_height = window._tc_pixel_height;
         }
     } else if (settings.pixelPerfect) {
         // For pixel perfect, treat specified size as framebuffer size
@@ -2580,15 +2599,15 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings) {
         desc.width = static_cast<int>(settings.width / displayScale);
         desc.height = static_cast<int>(settings.height / displayScale);
     } else {
-        desc.width = settings.width;
-        desc.height = settings.height;
+        desc.width = window.width;
+        desc.height = window.height;
     }
     const auto& windowTitle = mcp::internal::mainWindowTitle(settings.title);
     desc.window_title = windowTitle.c_str();
-    desc.high_dpi = settings.highDpi;
-    desc.sample_count = settings.sampleCount;
-    desc.fullscreen = settings.fullscreen;
-    desc.swap_interval = settings.swapInterval;
+    desc.high_dpi = !window.no_high_dpi;
+    desc.sample_count = window.sample_count;
+    desc.fullscreen = window.fullscreen;
+    desc.swap_interval = window.swap_interval;
     // Admit setup and the first draw even when covered before the first tick.
     desc._tc_draw_while_hidden = 1;
     desc._tc_bind_cb = bindNativeWindow;
@@ -2614,7 +2633,7 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings) {
     // Enable clipboard
     desc.enable_clipboard = true;
     desc.clipboard_size = settings.clipboardSize;
-    internal::currentWindowContext().clipboardSize = settings.clipboardSize;
+    internal::mainWindowContext().clipboardSize = settings.clipboardSize;
 
     // Windows: keep console input and output UTF-8 while the app runs.
     // Takes effect whenever the process has a console (Debug builds,
@@ -2636,10 +2655,8 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings) {
 // Used by runApp() on desktop and by sokol_main() on Android.
 template<typename AppClass>
 sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) {
+    internal::beginRuntimeRun();
     internal::appExitCode() = 0;
-    if (auto token = internal::appRunToken()) token->store(false);
-    internal::cancelResourceBackends();
-    internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
 
     // Set pixel perfect mode
     internal::pixelPerfectMode() = settings.pixelPerfect;
@@ -2653,7 +2670,13 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     internal::createMainWindow(settings);
     internal::prepareMainAppBindings();
     internal::appSetupFunc = []() {
-        if (!internal::attachMainApp(std::make_shared<AppClass>())) {
+        std::shared_ptr<AppClass> app;
+        internal::AppConstructionTicket ticket{internal::appRunToken(), mcp::internal::registrationOwner()};
+        {
+            internal::AppConstructionScope construction(ticket);
+            app = internal::makeConstructedApp<AppClass>();
+        }
+        if (!internal::attachMainApp(std::move(app))) {
             internal::appExitCode() = 1;
             sapp_quit();
         }

@@ -85,7 +85,7 @@ void recordShow(id self, SEL cmd, id sender) {
     _sapp_tc_window_t* found = nullptr;
     for (auto* w : _sapp_tc.windows) if (w && w->window == self) found = w;
     if (!found) std::printf("nativeWindow: show of unregistered window \"%s\"\n", ((NSWindow*)self).title.UTF8String);
-    check("published window has initial scale and dimensions before it is shown", found && found->ready &&
+    check("published window has initial scale and dimensions before it is shown", found && found->ready && found->constructing &&
         found->fb_width > 0 && found->fb_height > 0 && found->win_width > 0 && found->win_height > 0 &&
         found->dpi_scale == (found->desc.no_high_dpi ? 1.0f : (float)((NSWindow*)self).backingScaleFactor) &&
         found->fb_width == (int)(found->win_width * found->dpi_scale) &&
@@ -267,8 +267,9 @@ void destroyInCallbackChecks() {
         for (auto* r : _sapp_tc.windows) after += r != nullptr;
         std::printf("nativeWindow: destroy on first FOCUSED during creation: destroyed=%d returned id=%u\n",
             destroyedInCallback, victim.id);
-        check("destroying the window from its first FOCUSED during creation is safe and returns invalid",
-            destroyedInCallback && victim.id == 0 && after == before);
+        check("destroy from first FOCUSED waits for construction return",
+            destroyedInCallback && victim.id && _sapp_tc_lookup(victim) &&
+            !_sapp_tc_lookup(victim)->constructing && _sapp_tc_lookup(victim)->close_requested && after == before + 1);
         if (victim.id && sapp_window_valid(victim)) sapp_destroy_window(victim);
     }
 }
@@ -757,7 +758,8 @@ void step() {
         fsCreatedId = fsCreated ? fsCreated->win_id : 0;
         std::printf("nativeWindow: startup fullscreen creation: destroyed during creation=%d returned=%d\n",
             destroyedInCallback, fsCreated != nullptr);
-        check("destroy during startup-fullscreen creation returns invalid", !destroyedInCallback || fsCreated == nullptr);
+        check("destroy during startup-fullscreen creation defers physical destruction", !destroyedInCallback ||
+            (fsCreated && !fsCreated->constructing && fsCreated->close_requested));
         enter(FsSettle);
         break;
     }

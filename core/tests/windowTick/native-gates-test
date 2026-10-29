@@ -192,6 +192,7 @@ helpers = '\n'.join(body(shared, 'static inline bool '+name+'(', 'sokol_window_n
 
 code = r'''
 #include <cstdio>
+#include "util/sokol_window_creation.h"
 #include <cstdlib>
 #include <string>
 #include <cstdint>
@@ -226,7 +227,7 @@ enum { SAPP_EVENTTYPE_INVALID=-1, SAPP_EVENTTYPE_SUSPENDED, SAPP_EVENTTYPE_RESUM
 struct SwapChain { HRESULT Present(UINT, UINT); };
 struct _sapp_tc_window_t {
     bool iconified=false, occluded=false, draw_while_hidden=false, trust_hidden_signals=true, is_main=false;
-    bool ready=true, in_tick=false, skip_present=false, cancel_tick=false;
+    bool constructing=false,surface_resize_pending=false,ready=true, in_tick=false, skip_present=false, cancel_tick=false;
     bool from_modal=false, frame_wait=false, credit_held=false, waitable_ready=true;
     bool resize_pending=false, input_delivered=false, wake_on_input=false;
     bool close_recorded=false; unsigned close_recorded_frame=0;
@@ -675,7 +676,7 @@ int native_allocations=0;
     if (trussc::internal::sessionEndExit()) return target;
     Native* w=target; // Fixture has completed allocation, initialization and publication.
     creation_record=w;
-''' + mac_constructing_scope + mac_constructor + '\n' + extract('static _sapp_tc_window_t* _sapp_tc_mac_create_window(const _sapp_tc_native_desc* d) {') + extract('sapp_window sapp_create_window(const sapp_window_desc* desc) {') + r'''
+''' + mac_constructing_scope + '    _sapp_tc_creation_transaction creation(w, [](Native*) {});\n' + mac_constructor + '\n' + extract('static _sapp_tc_window_t* _sapp_tc_mac_create_window(const _sapp_tc_native_desc* d) {') + extract('sapp_window sapp_create_window(const sapp_window_desc* desc) {') + r'''
 void session_record(char step) { if (session_pipe>=0) (void)write(session_pipe,&step,1); }
 namespace trussc {
 void shutdownAudio() { session_record('A'); }
@@ -718,6 +719,7 @@ bool frameworkShutdown() { return stopped; }
 bool change_exit_registry=false;
 void mutate_exit_registry();
 void restoreWindowContext(void*);
+int& mainWindowContext() { static int context=0; return context; }
 struct Window {
     int id;
     ExitContext state;
@@ -1336,10 +1338,16 @@ void run() {
 }
 }
 namespace win {
-struct { struct { bool quit_ordered=false, device_lost_notified=false; } app; } _sapp_tc;
-int consulted, updates, dimensions, tests, presents, resizes;
+struct { struct { bool quit_ordered=false, device_lost_notified=false;
+    struct { void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr;
+        bool (*_tc_callbacks_active)()=nullptr; } desc;
+} app; } _sapp_tc;
+int consulted, updates, dimensions, tests, presents, resizes, resizesAtCallback;
 int probe_result, present_result;
 bool changed, resize_ok, skip_in_callback, cancel_in_callback, loss_in_callback, reenter;
+bool foreignActive, foreignBound;
+int deferredGeometry, preservedGeometry, nativeWidth, attachmentWidth, firstDrawWidth;
+bool callbacksActive() { return foreignActive; }
 Native* target;
 std::vector<int> events, callback_events;
 void _sapp_tc_win32_init_client() {} // admission covered by host-entry-test
@@ -1352,7 +1360,11 @@ bool _sapp_tc_d3d11_check_device_loss(HRESULT hr) {
     return hr<0;
 }
 bool _sapp_tc_win32_update_dimensions(Native*) { ++dimensions; return changed; }
-bool _sapp_tc_d3d11_resize(Native*) { ++resizes; return resize_ok; }
+bool _sapp_tc_d3d11_resize(Native*) {
+    // ResizeBuffers unbinds the shared immediate context before the later
+    // WindowEntryScope could flush a foreign caller's deferred geometry.
+    foreignBound=false; attachmentWidth=nativeWidth; ++resizes; return resize_ok;
+}
 void _sapp_tc_win32_app_event(Native* w,int type) {
     events.push_back(type);
     if (reenter) {
@@ -1364,6 +1376,8 @@ void _sapp_tc_win32_app_event(Native* w,int type) {
 Native* _sapp_tc_lookup(sapp_window h) { return h.id==target->win_id?target:nullptr; }
 void callback(sapp_window h,void* user) {
     Native* w=static_cast<Native*>(user); ++consulted; callback_events=events;
+    resizesAtCallback=resizes;
+    firstDrawWidth=attachmentWidth;
     check("Win32 callback target and reentry guard", h.id==w->win_id && w->in_tick);
     if (!(_sapp_tc_native_hidden(w) && occlusionPausesUpdate({!w->is_main}))) ++updates;
     if (reenter) {
@@ -1374,7 +1388,7 @@ void callback(sapp_window h,void* user) {
     if (cancel_in_callback) w->cancel_tick=true;
     if (loss_in_callback) _sapp_tc.app.device_lost_notified=true;
 }
-''' + extract('static bool _sapp_tc_win32_window_due(') + extract('static void _sapp_tc_win32_observe_occlusion(') + extract('static void _sapp_tc_win32_swap(') + extract('static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {') + r'''
+''' + extract('static bool _sapp_tc_win32_window_due(') + extract('static void _sapp_tc_win32_observe_occlusion(') + extract('static void _sapp_tc_win32_swap(') + extract('static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {') + extract('static void _sapp_tc_win32_modal_tick(_sapp_tc_window_t* w) {') + r'''
 constexpr int WM_SIZE=1, SIZE_MINIMIZED=1;
 int size(Native* w,bool minimized) {
     int wParam=minimized?SIZE_MINIMIZED:0;
@@ -1389,6 +1403,9 @@ void reset(Native& w) {
     _sapp_tc.app={}; consulted=updates=dimensions=tests=presents=resizes=0;
     probe_result=present_result=0; changed=false; resize_ok=true;
     skip_in_callback=cancel_in_callback=loss_in_callback=reenter=false; events.clear(); callback_events.clear();
+    foreignActive=foreignBound=false; deferredGeometry=preservedGeometry=0;
+    nativeWidth=attachmentWidth=firstDrawWidth=40;
+    _sapp_tc.app.desc._tc_callbacks_active=callbacksActive;
 }
 void run() {
     int before=failures, count=checks;
@@ -1436,9 +1453,24 @@ void run() {
         check("Win32 deferred drawable resize consumed once", resizes==1 && presents==2);
         reset(w); w.resize_pending=true; w.from_modal=true; changed=true;
         _sapp_tc_win32_tick(&w);
-        check("Win32 modal tick retains existing dimension/resize deferral", dimensions==0 && resizes==0 && w.resize_pending && events.empty());
+        check("Win32 modal tick reconciles attachments before draw", dimensions==1 && resizes==1 && !w.resize_pending &&
+            consulted==1 && resizesAtCallback==1 && callback_events==std::vector<int>{SAPP_EVENTTYPE_RESIZED});
+        changed=false; events.clear();
         w.from_modal=false; _sapp_tc_win32_tick(&w);
-        check("Win32 ordinary tick samples and consumes deferred drawable resize", dimensions==1 && resizes==1 && !w.resize_pending && events==std::vector<int>{SAPP_EVENTTYPE_RESIZED});
+        check("Win32 ordinary tick retains modal extent without duplicate resize", dimensions==2 && resizes==1 && !w.resize_pending && events.empty());
+        reset(w); w.is_main=role; w.win_id=role?1:2;
+        foreignActive=foreignBound=true; deferredGeometry=6; nativeWidth=100; changed=true;
+        _sapp_tc_win32_modal_tick(&w);
+        check("Win32 nested modal tick preserves foreign active pass and geometry",
+            foreignBound && deferredGeometry==6 && resizes==0 && consulted==0 && dimensions==0 && !w.from_modal);
+        // The interrupted callback now returns and parks while its target is
+        // still bound. Model the GPU prefix consumed by parkWindowPass().
+        if (foreignBound) preservedGeometry+=deferredGeometry;
+        deferredGeometry=0; foreignActive=foreignBound=false;
+        _sapp_tc_win32_modal_tick(&w);
+        check("Win32 deferred modal first frame uses new extent after caller parking",
+            preservedGeometry==6 && resizes==1 && consulted==1 && firstDrawWidth==100 && !w.from_modal &&
+            callback_events==std::vector<int>{SAPP_EVENTTYPE_RESIZED});
         // Skip is per-window and consumed by a completed hidden tick as well.
         for (bool hidden : {false,true}) for (bool from_callback : {false,true}) {
             reset(w); w.is_main=role; w.win_id=role?1:2; w.iconified=hidden;
@@ -1497,6 +1529,7 @@ void _sapp_tc_timing_update(_sapp_tc_timing_t*) {}
 struct _sapp_tc_x11_surface_scope {};
 void _sapp_tc_x11_pace(Native* w,double seconds) { w->earliest_next=10+seconds; }
 void _sapp_tc_x11_pace_periodic(Native* w,double seconds) { w->earliest_next=10+seconds; }
+bool _sapp_tc_x11_resize_surface(Native*) { return true; }
 bool _sapp_tc_x11_update_dimensions(Native*) { ++polls; return changed; }
 bool _sapp_tc_x11_make_current(Native*) { ++acquired; return true; }
 void _sapp_tc_x11_swap(Native*) { ++presents; }
@@ -1591,7 +1624,7 @@ source.write_text(code)
 failed = False
 for backend in ('SOKOL_GLCORE', 'SOKOL_GLES3'):
     binary = scratch/backend
-    result = subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-D'+backend,
+    result = subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-I'+str(include), '-D'+backend,
                              str(source), '-o', str(binary)])
     if result.returncode:
         fail(f'{backend}: probe compilation failed (exit {result.returncode})')
@@ -1619,6 +1652,8 @@ if '--mutations' in sys.argv[3:]:
     admission = 'const bool admitted = w->draw_while_hidden || !_sapp_tc_native_hidden(w);'
     scope = '_sapp_tc_mac_callback_scope scope(w);'
     mutants = {
+        'win-modal-foreign-pass': change('static void _sapp_tc_win32_modal_tick(_sapp_tc_window_t* w) {',
+            'if (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active()) return;', ''),
         'mac-ignore-own-callback': change(blocked, 'w->in_tick || w->callback_depth > 0', 'w->in_tick'),
         'mac-pause-all-windows': change(blocked, 'return _sapp_tc_mac_frozen() || w->in_tick', 'return _sapp_tc_mac_frozen() || _sapp_tc.callbacks_active > 0 || w->in_tick'),
         'mac-event-without-scope': change('static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {', scope, ''),

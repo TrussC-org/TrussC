@@ -24,8 +24,28 @@ inc = os.environ.get('TC_RENDER_TEST_INCLUDE', str(root/'core/include'))
 pool_settings = re.findall(r'sgdesc\.(\w+_pool_size) = (\d+);', (root/'core/include/tc/app/tcGlobal.cpp').read_text())
 assert pool_settings, 'production GPU pool settings not found'
 (scratch/'gpu-pools.inc').write_text(''.join(f'gd.{field} = {value};\n' for field, value in pool_settings))
+# Compile the actual renewal and caller restoration bodies against real EGL.
+# Only window-surface allocation is forced to fail; the original and recovery
+# pbuffers, context, Sokol image upload and next Runtime host turn are real.
+native = (Path(inc)/'sokol/sokol_app_tc.h').read_text()
+def body(marker):
+    start = native.index(marker)
+    opening = native.index('{', start)
+    end, depth = opening + 1, 1
+    while depth:
+        depth += (native[end] == '{') - (native[end] == '}')
+        end += 1
+    return native[start:end]
+renewal = '\n'.join(body(marker) + (';' if marker.startswith('struct ') else '') for marker in (
+    'static uint32_t _sapp_tc_x11_surface_window_id(',
+    'static bool _sapp_tc_x11_saved_surface_alive(',
+    'struct _sapp_tc_x11_surface_scope {',
+    'static void _sapp_tc_x11_destroy_surface(',
+    'static bool _sapp_tc_x11_create_surface(',
+    'static bool _sapp_tc_x11_resize_surface('))
+(scratch/'renewal.inc').write_text(renewal)
 objects = [os.environ['TC_RENDER_TEST_CORE_OBJECT']] if os.environ.get('TC_RENDER_TEST_CORE_OBJECT') else []
-cmd = ['c++','-std=c++20','-O0','-g0','-DNDEBUG','-I'+inc,'-I'+str(scratch)]+flags+[str(root/'core/tests/windowTick/render-boundary.cpp'),'-o',str(scratch/'probe')]+objects+libs+['-lEGL']
+cmd = ['c++','-std=c++20','-O0','-g0','-DNDEBUG','-I'+inc,'-I'+str(scratch)]+flags+[str(root/'core/tests/windowTick/render-boundary.cpp'),'-o',str(scratch/'probe')]+objects+libs+['-lEGL','-Wl,--wrap=sapp_get_swapchain']
 subprocess.run(cmd, cwd=root, check=True)
 result = subprocess.run([str(scratch/'probe')], cwd=root, env=dict(os.environ, EGL_PLATFORM='surfaceless', LIBGL_ALWAYS_SOFTWARE='1'), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 print(result.stdout, end='')

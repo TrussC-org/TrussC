@@ -325,6 +325,7 @@ int main() {
     }
     _sapp_tc_window_t secondary{}; secondary.ready = secondary.trust_hidden_signals = true; secondary.xwin = 2;
     secondary.drawable = (EGLSurface)2; secondary.earliest_next = 20;
+    secondary.fb_width = secondary.fb_height = 64; // initialized native metadata precedes readiness
     _sapp_tc_window_t* pair[] = { &main, &secondary };
     reset(main, pair, display); _sapp_tc.window_slots = 2;
     main.win_id = 1; secondary.win_id = 2;

@@ -1,1 +1,3 @@
 {test} --display
+
+{test} --resize-first-frame

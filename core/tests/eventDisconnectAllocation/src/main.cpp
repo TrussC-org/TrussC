@@ -55,7 +55,7 @@ struct AttachmentDevice {
         auto& main = internal::mainWindowContext();
         main.fbWidth = main.fbHeight = 32;
         main.swapchainTarget.width = main.swapchainTarget.height = 32;
-        internal::restoreWindowContext(nullptr);
+        internal::restoreWindowContext(&main);
     }
     ~AttachmentDevice() {
         internal::mainWindowContext().swapchainTarget.resources().release();

@@ -25,7 +25,7 @@ def main():
     window = read('core/include/tc/app/tcWindow.h')
     constructor = body(native, 'static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(')
     # Keep the entire published-but-not-ready interval, including rejection.
-    rejection = constructor[constructor.index('_sapp_tc.windows[slot] = w;'):
+    rejection = constructor[constructor.index('_sapp_tc_creation_transaction creation('):
                             constructor.index('w->ready = true;')]
     android = native[native.index('/* ---- multi-window API: explicit platform gap on Android') :]
     android = android[:android.index('void sapp_window_set_title(')]
@@ -39,6 +39,7 @@ def main():
 #include <cstddef>
 #include <vector>
 #include <algorithm>
+#include "util/sokol_window_creation.h"
 #define __ANDROID__ 1
 int failures=0;
 void check(const char* label, bool ok) {
@@ -46,7 +47,7 @@ void check(const char* label, bool ok) {
 }
 namespace mac {
 struct _sapp_tc_window_t {
-    unsigned win_id=19;
+    unsigned win_id=19; bool constructing=false,ready=false;
     struct { bool (*bind_cb)(unsigned,void*)=nullptr; void* user_data=nullptr; } desc;
 };
 struct { _sapp_tc_window_t* windows[2]{}; const char* create_error=nullptr; } _sapp_tc;
@@ -63,6 +64,7 @@ bool reject(unsigned id, void*) {
 }
 _sapp_tc_window_t* publish(_sapp_tc_window_t* w, size_t slot) {
 ''' + rejection + r'''
+    creation.commit();
     return w;
 }
 void run() {
@@ -201,7 +203,7 @@ int main() { mac::run(); mobile::run(); return failures?1:0; }
         for name,text in variants:
             source,binary=Path(folder)/'probe.cpp',Path(folder)/'probe'
             source.write_text(text,encoding='utf-8')
-            subprocess.run([os.environ.get('CXX','c++'),'-std=c++20','-Wall','-Wextra',str(source),'-o',str(binary)],check=True)
+            subprocess.run([os.environ.get('CXX','c++'),'-std=c++20','-I'+str(ROOT/'core/include/sokol'),'-Wall','-Wextra',str(source),'-o',str(binary)],check=True)
             r=subprocess.run([str(binary)],capture_output=True,text=True,encoding='utf-8',timeout=15)
             print(name,r.stdout,flush=True)
             failed=r.stdout.count(': FAIL')

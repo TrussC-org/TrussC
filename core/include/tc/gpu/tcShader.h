@@ -569,7 +569,7 @@ public:
         if (!loaded) return;
 
         // Ensure render pass is active (swapchain or FBO)
-        internal::ensureCurrentPass();
+        if (!internal::ensureCurrentPass()) return;
 
         // Submit all preceding layers, including deferred user shaders, meshes
         // and points. Advance the command base so end()/present() cannot blend

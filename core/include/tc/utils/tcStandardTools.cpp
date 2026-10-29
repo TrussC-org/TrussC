@@ -44,6 +44,7 @@
 extern "C" unsigned char *stbi_write_png_to_mem(const unsigned char *pixels, int stride_bytes, int x, int y, int n, int *out_len);
 
 namespace trussc {
+namespace internal { double measuredWindowRate(const WindowContext&); }
 namespace {
 // The writer checks each field before JsonWriteReflector copies its value.
 class McpJsonWriteReflector : public JsonWriteReflector {
@@ -542,10 +543,15 @@ void registerStandardTools(Server& server) {
     coreTool(server, "tc_list_windows", "List open windows (index 0 = main; use the index as the 'window' arg of tc_get_screenshot / tc_save_screenshot). Each secondary window has 'occluded': true while the OS reports it hidden (minimized, covered, on another Space, or the screen locked or off); it then renders no frames and cannot be captured.")
         .level(ToolLevel::ReadOnly)
         .bind(std::function<json()>([]() -> json {
+            // Read the tool's explicit main/headless target without selecting a Window.
+            const auto& ctx = headless::isActive() ? trussc::internal::nonWindowContext() : trussc::internal::mainWindowContext();
+            const auto dimensions = trussc::internal::windowDimensions(ctx);
+            const auto size = trussc::internal::framebufferResizeArgs(dimensions.fbWidth, dimensions.fbHeight,
+                trussc::internal::appSizeDpi(dimensions.dpiScale));
             json arr = json::array();
             // The main window keeps rendering while hidden: no occluded field.
             arr.push_back(json{{"index", 0}, {"main", true},
-                               {"width", getWindowWidth()}, {"height", getWindowHeight()}});
+                               {"width", size.width}, {"height", size.height}});
             int i = 1;
             for (auto* w : trussc::internal::openWindows()) {
                 if (w->context().isMain) continue;
@@ -895,16 +901,20 @@ void registerStandardTools(Server& server) {
     coreTool(server, "tc_get_health", "Lightweight liveness snapshot: fps (measured average), frame count, uptime seconds, window size, TrussC version, pid, process RSS bytes, main-thread queue backlog, sokol-tracked bytes. Cheap enough to poll — reads counters only, touches no GPU state. pid lets a supervisor confirm it is talking to ITS child (port collisions); rssBytes is the number to graph for leak hunting; mainQueuePending is how many runOnMainThread / Deliver::Main calls this frame's drain started with (a number that keeps growing means workers queue faster than the app runs them).")
         .level(ToolLevel::Public)
         .bind(std::function<json()>([]() -> json {
+            const auto& ctx = headless::isActive() ? trussc::internal::nonWindowContext() : trussc::internal::mainWindowContext();
+            const auto dimensions = trussc::internal::windowDimensions(ctx);
+            const auto size = trussc::internal::framebufferResizeArgs(dimensions.fbWidth, dimensions.fbHeight,
+                trussc::internal::appSizeDpi(dimensions.dpiScale));
             return json{{"status", "ok"},
                         {"buildKind", internal::isDevBuild() ? "dev" : "default"},
                         {"toolLevel", internal::toolLevelName(getToolLevel())},
-                        {"fps", trussc::getFps()},
-                        {"frameCount", trussc::getFrameCount()},
+                        {"fps", static_cast<float>(trussc::internal::measuredWindowRate(ctx))},
+                        {"frameCount", ctx.updateCount},
                         // Process uptime: the framework clock, which
                         // resetElapsedTimeCounter() does not touch (#229).
                         {"uptimeSec", trussc::internal::getUptimeSeconds()},
-                        {"width", trussc::getWindowWidth()},
-                        {"height", trussc::getWindowHeight()},
+                        {"width", size.width},
+                        {"height", size.height},
                         {"version", trussc::getVersion()},
                         {"pid", internal::currentPid()},
                         {"rssBytes", internal::processRssBytes()},

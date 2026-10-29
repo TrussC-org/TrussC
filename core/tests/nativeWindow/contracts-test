@@ -36,9 +36,11 @@ code = r'''
 #include <cstring>
 #include <new>
 #include <initializer_list>
+#include <stdexcept>
 using std::isfinite;
 struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     Window xwin;
+    bool surface_resize_pending=false;
     float mouse_x, mouse_y, mouse_dx, mouse_dy;
 #ifdef SOKOL_GLES3
     EGLSurface drawable;
@@ -56,6 +58,7 @@ static struct {
     _sapp_tc_window_t* windows[4];
     struct { _sapp_tc_window_t* main; sapp_desc desc; bool valid = true; bool init_called = false; } app;
     Atom NET_WM_NAME = 1, NET_WM_ICON_NAME = 2, UTF8_STRING = 3;
+    struct { _sapp_tc_window_t* over=nullptr; } xdnd;
 #ifdef SOKOL_GLES3
     EGLContext ctx = (EGLContext)4;
 #else
@@ -63,7 +66,8 @@ static struct {
 #endif
 } _sapp_tc;
 static int failures, failAt, titleBytes, titleCalls, presents, bindingCalls, shows;
-static bool rejectBinding;
+static bool rejectBinding, throwBinding, duringShow;
+static int unwinds;
 static uintptr_t presented;
 static Window titleWindow;
 static sapp_event received;
@@ -112,6 +116,7 @@ static void* _sapp_tc_x11_alloc(size_t bytes, bool zero) {
 }
 static void _sapp_tc_x11_free(void* p) { free(p); }
 static void _sapp_tc_x11_unwind(_sapp_tc_window_t* w) {
+    ++unwinds;
     free(w->title);
 #ifdef SOKOL_GLES3
     free(w);
@@ -137,11 +142,23 @@ static bool _sapp_tc_x11_make_current(_sapp_tc_window_t* w) {
 }
 static bool _sapp_tc_x11_trust_hidden_signals() { return true; }
 static void _sapp_tc_x11_set_swapinterval(_sapp_tc_window_t*, int) {}
-static void _sapp_tc_x11_show_window(_sapp_tc_window_t*) { ++shows; }
+static bool _sapp_tc_x11_resize_surface(_sapp_tc_window_t*) { return true; }
+static void _sapp_tc_x11_tick(_sapp_tc_window_t*);
+static void _sapp_tc_x11_close(_sapp_tc_window_t* w) { w->close_requested = true; }
+static void _sapp_tc_x11_show_window(_sapp_tc_window_t* w) {
+    ++shows;
+    if (!duringShow) return;
+    const auto frames = w->frame_count;
+    _sapp_tc_x11_tick(w);
+    check("Constructing excludes synchronous show-time tick", w->constructing && w->ready && w->frame_count == frames);
+    sapp_destroy_window({w->win_id});
+    check("Constructing defers synchronous show-time destruction", _sapp_tc_lookup({w->win_id}) == w && w->close_requested);
+}
 static bool bindHost(uint32_t id, void* user) {
     ++bindingCalls;
     auto* w = _sapp_tc_lookup({id});
     check("host binds actual ID and initialized metadata before ready/show", w && id > 2 && !w->ready && w->fb_width == 640 && w->fb_height == 480 && w->dpi_scale == 1 && shows == 0 && user == &bindingCalls);
+    if (throwBinding) throw std::runtime_error("bind fault");
     return !rejectBinding;
 }
 static void _sapp_tc_x11_set_fullscreen(_sapp_tc_window_t*, bool) {}
@@ -168,6 +185,7 @@ for name in ('static uint32_t _sapp_tc_x11_surface_window_id(', 'static bool _sa
         code += helper + '\n'
 code += body('struct _sapp_tc_x11_surface_scope {') + ';\n'
 for name in ('static _sapp_tc_window_t* _sapp_tc_x11_create_window(', 'sapp_window sapp_create_window(',
+             'void sapp_destroy_window(sapp_window win) {',
              'static void _sapp_tc_x11_update_window_title(', 'void sapp_window_set_title(',
              'void sapp_set_window_title(', 'void sapp_tc_window_skip_present(',
              'static void _sapp_tc_x11_scroll_event(', 'static void _sapp_tc_x11_init_client(void) {',
@@ -189,7 +207,25 @@ int main() {
         if (created.id) { auto* w = _sapp_tc_lookup(created); _sapp_tc.windows[2] = nullptr; _sapp_tc_x11_unwind(w); }
         else check("failed host binding leaves no native registry slot", _sapp_tc.windows[2] == nullptr);
     }
+    {
+        shows = 0; throwBinding = true;
+        const auto before = unwinds;
+        bool caught = false;
+        try { (void)sapp_create_window(&desc); } catch (const std::runtime_error&) { caught = true; }
+        throwBinding = false;
+        check("throwing binder rolls back publication/resources once without show", caught && unwinds == before + 1 && !shows && !_sapp_tc.windows[2]);
+    }
     desc.bind_cb = nullptr; desc.user_data = nullptr;
+    {
+        duringShow = true;
+        const auto created = sapp_create_window(&desc);
+        duringShow = false;
+        auto* w = _sapp_tc_lookup(created);
+        check("show-time close waits until construction returns", w && !w->constructing && w->close_requested);
+        const auto before = unwinds;
+        sapp_destroy_window(created);
+        check("deferred show-time disposal releases exactly once", !_sapp_tc_lookup(created) && unwinds == before + 1);
+    }
     for (bool bound : {true, false}) for (int failure = 0; failure <= 6; ++failure) {
         failAt = failure;
         _sapp_tc.next_id = failure == 6 ? UINT32_MAX : 2;
@@ -218,9 +254,8 @@ int main() {
         _sapp_tc_x11_make_current(&first);
         _sapp_tc.windows[1] = nullptr;
     }
-    check("destroyed read caller falls back to first", currentDraw == 11 && currentRead == 11);
+    check("destroyed read caller restores unbound state", !currentContext && currentDraw == 0 && currentRead == 0);
     _sapp_tc.windows[1] = &second;
-#ifdef SOKOL_GLCORE
     glXMakeContextCurrent((Display*)9, 11, 22, (GLXContext)8);
     {
         _sapp_tc_x11_surface_scope restore;
@@ -230,7 +265,6 @@ int main() {
     check("foreign display drawable IDs do not alias registered surfaces", currentDisplay == (Display*)9 &&
         currentDraw == 11 && currentRead == 22 && currentContext == (GLXContext)8);
     _sapp_tc.windows[1] = &second;
-#endif
 #ifdef SOKOL_GLES3
     first.title_limit = 128;
 #else
@@ -282,3 +316,5 @@ for backend in os.environ.get('TC_NATIVE_TEST_BACKEND', 'SOKOL_GLCORE SOKOL_GLES
     failed |= subprocess.run([str(binary)]).returncode != 0
 sys.exit(int(failed))
 PY
+
+python3 "$root/core/tests/nativeWindow/glx-renewal-test.py"

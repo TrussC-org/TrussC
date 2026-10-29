@@ -48,7 +48,7 @@ using LRESULT=long;
 constexpr int TRUE=1,FALSE=0,CP_UTF8=65001;
 enum { WM_QUERYENDSESSION=1,WM_ENDSESSION,WM_CLOSE,WM_OTHER };
 struct _sapp_tc_window_t {
-    unsigned win_id=17; bool ready=true,in_tick=false,is_main=true,close_requested=false;
+    unsigned win_id=17; bool constructing=false,ready=true,in_tick=false,is_main=true,close_requested=false;
     bool wake_on_input=false,input_delivered=false; bool (*events_enabled)()=nullptr;
     int win_width=80,win_height=40,fb_width=160,fb_height=80,hwnd=17;
     float dpi_scale=2; uint64_t frame_count=7; sapp_window_desc desc{};

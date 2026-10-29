@@ -5,12 +5,14 @@
 #include <stdexcept>
 #include <cmath>
 #include <poll.h>
+#include <dlfcn.h>
 using namespace trussc;
 namespace {
 bool gpuValid = false;
 sg_stats gpuStats{};
 int checks = 0, failures = 0;
 size_t eventAllocations = 0;
+int customAppAllocations = 0, customAppDeallocations = 0;
 void check(const char* label, bool ok) {
     ++checks;
     if (!ok) { ++failures; std::printf("host-entry: FAIL: %s\n", label); }
@@ -191,15 +193,184 @@ void input(const sapp_event*, sapp_window, Window* window, internal::WindowConte
     check("same-window tick is rejected inside input", !tick(*window) && app->updates == 0);
     check("native deferred endpoints observe active host callbacks", internal::hostCallbacksActive());
 }
+void constructorsAndEpochs() {
+    internal::beginRuntimeRun();
+    const auto epoch = internal::runtimeEpoch();
+    const auto firstRun = internal::appRunToken();
+    check("run has a live host token", firstRun && firstRun->load());
+    bool staleQueueRan = false, newQueueRan = false;
+    std::thread staleWorker([&] { runOnMainThread([&] { staleQueueRan = true; }, firstRun); });
+    staleWorker.join();
+    internal::beginRuntimeRun();
+    check("next run has a distinct epoch and invalidates old token",
+        internal::runtimeEpoch() == epoch + 1 && !firstRun->load() && internal::appRunToken() != firstRun);
+    std::thread newWorker([&] { runOnMainThread([&] {
+        newQueueRan = true;
+        check("Window0 queue delivery uses process context", !internal::currentWindow());
+    }, internal::appRunToken()); });
+    newWorker.join();
+    { internal::HostTurnScope turn; }
+    check("Window0 outer turn progresses queue and excludes old epoch work", !staleQueueRan && newQueueRan);
+    auto* previous = internal::currentAppConstruction();
+    const auto owner = mcp::internal::registrationOwner();
+    int aOwner, bOwner;
+    internal::AppConstructionTicket a{internal::appRunToken(), &aOwner};
+    internal::AppConstructionTicket b{std::make_shared<std::atomic<bool>>(true), &bOwner};
+    struct Derived : App {
+        explicit Derived(internal::AppConstructionTicket& ticket) {
+            const auto& attributed = internal::WindowRequestAccess::constructionTicket(*this);
+            check("constructor scope precedes candidate attribution", internal::currentAppConstruction() == &ticket &&
+                !ticket.app && !attributed.app && !attributed.runToken);
+            check("derived constructor sees its own owner and token", mcp::internal::registrationOwner() == ticket.registrationOwner &&
+                internal::appRunToken() == ticket.runToken && internal::constructorRunToken() == ticket.runToken && internal::hostCallbacksActive());
+        }
+    };
+    {
+        internal::AppConstructionScope outer(a);
+        const auto before = internal::runtimeEpoch();
+        bool rejected = false;
+        try { internal::beginRuntimeRun(); } catch (const std::logic_error&) { rejected = true; }
+        check("a nested run cannot replace the active epoch", rejected && internal::runtimeEpoch() == before &&
+            internal::appRunToken() == a.runToken);
+        const auto previousExitCode = internal::appExitCode();
+        internal::appExitCode() = 71;
+        rejected = false;
+        try { (void)buildAppDescriptor<Probe>(); } catch (const std::logic_error&) { rejected = true; }
+        check("nested startup rejects before changing active run state", rejected && internal::appExitCode() == 71 &&
+            internal::runtimeEpoch() == before && internal::appRunToken() == a.runToken);
+        internal::appExitCode() = previousExitCode;
+        auto app = internal::makeConstructedApp<Derived>(a);
+        check("completed candidate receives scope attribution", a.app == app.get() &&
+            internal::WindowRequestAccess::constructionTicket(*app).runToken == a.runToken &&
+            internal::WindowRequestAccess::constructionTicket(*app).epoch == internal::runtimeEpoch());
+        {
+            internal::AppConstructionScope inner(b);
+            auto nested = internal::makeConstructedApp<Derived>(b);
+            check("completed nested candidate receives B attribution", b.app == nested.get() &&
+                internal::WindowRequestAccess::constructionTicket(*nested).registrationOwner == &bOwner);
+            check("nested constructor selects B", internal::currentAppConstruction() == &b);
+        }
+        check("nested constructor restores A", internal::currentAppConstruction() == &a &&
+            mcp::internal::registrationOwner() == &aOwner && internal::constructorRunToken() == a.runToken);
+        internal::AppConstructionTicket failed{b.runToken, &bOwner};
+        struct Throwing : App { Throwing() { throw std::runtime_error("derived constructor"); } };
+        try {
+            internal::AppConstructionScope inner(failed);
+            (void)internal::makeConstructedApp<Throwing>();
+        } catch (const std::runtime_error&) {}
+        check("failed derived constructor unwinds claim and restores A", !failed.app &&
+            internal::currentAppConstruction() == &a && mcp::internal::registrationOwner() == &aOwner);
+        if (const char* path = std::getenv("TC_CONSTRUCTOR_GUEST")) {
+            void* guest = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+            check("constructor guest links to host", guest != nullptr);
+            if (guest) {
+                using Probe = bool (*)(internal::AppConstructionTicket*, uint64_t, const void*, const void*);
+                auto probe = reinterpret_cast<Probe>(dlsym(guest, "cp4_constructor_probe"));
+                check("guest shares host ticket, epoch, Runtime and token storage", probe &&
+                    probe(&a, internal::runtimeEpoch(), &internal::runtime(), &internal::appRunToken()));
+                dlclose(guest);
+            }
+        }
+    }
+    check("constructor stack and owner restore on exit", internal::currentAppConstruction() == previous &&
+        mcp::internal::registrationOwner() == owner && !internal::hostCallbacksActive());
+    struct EarlierBase { App helper; };
+    struct Root : EarlierBase, App {};
+    struct VirtualRoot : EarlierBase, virtual App {};
+    auto attribution = [&]<class T>() {
+        internal::AppConstructionTicket ticket{internal::appRunToken(), &aOwner};
+        internal::AppConstructionScope scope(ticket);
+        auto candidate = internal::makeConstructedApp<T>();
+        const auto& root = internal::WindowRequestAccess::constructionTicket(*candidate);
+        const auto& helper = internal::WindowRequestAccess::constructionTicket(candidate->helper);
+        check("requested App claims ticket after earlier incidental App", ticket.app == static_cast<App*>(candidate.get()) &&
+            root.app == ticket.app && root.epoch == internal::runtimeEpoch() && root.registrationOwner == &aOwner &&
+            root.runToken == ticket.runToken && !helper.app && !helper.runToken);
+    };
+    attribution.template operator()<Root>();
+    attribution.template operator()<VirtualRoot>();
+    {
+        internal::AppConstructionTicket ticket{internal::appRunToken(), &aOwner};
+        internal::AppConstructionScope scope(ticket);
+        std::unique_ptr<Root> candidate(new Root());
+        internal::completeAppConstruction(*candidate);
+        check("guest allocation attributes requested App, not helper", ticket.app == static_cast<App*>(candidate.get()) &&
+            !internal::WindowRequestAccess::constructionTicket(candidate->helper).app);
+    }
+    struct CustomRoot : EarlierBase, App {
+        static void* operator new(size_t size) { ++customAppAllocations; return ::operator new(size); }
+        static void operator delete(void* p) noexcept { ++customAppDeallocations; ::operator delete(p); }
+    };
+    {
+        internal::AppConstructionTicket ticket{internal::appRunToken(), &aOwner};
+        internal::AppConstructionScope scope(ticket);
+        std::unique_ptr<CustomRoot> candidate(new CustomRoot());
+        internal::completeAppConstruction(*candidate);
+        check("raw guest attribution preserves class allocation", customAppAllocations == 1 &&
+            ticket.app == static_cast<App*>(candidate.get()) && !internal::WindowRequestAccess::constructionTicket(candidate->helper).app);
+    }
+    check("raw guest attribution preserves class deallocation", customAppDeallocations == 1);
+    internal::restoreWindowContext(&internal::mainWindowContext());
+    setColor(1, 0, 0);
+    std::thread styleWorker([] { runOnMainThread([] {
+        check("service style uses process selection", !internal::currentWindow());
+        setColor(0, 1, 0);
+    }); });
+    styleWorker.join();
+    { internal::HostTurnScope turn; }
+    const auto color = internal::getDefaultContext().getColor();
+    check("process drawing style leaves main red", color.r == 1 && color.g == 0 && color.b == 0);
+    internal::restoreWindowContext(nullptr);
+    check("null restoration selects no Window", !internal::currentWindowCtx() && !internal::currentWindow() &&
+        &internal::currentWindowContext() == &internal::nonWindowContext());
+    check("process dimensions never fall back to a native main surface",
+        !internal::usesNativeWindowDimensions(internal::currentWindowContext()));
+}
+void processToolSnapshots() {
+    auto& window = *internal::mainWindow();
+    Native native; bind(window, native, 141);
+    auto& ctx = window.context();
+    const auto updates = ctx.updateCount;
+    const auto rates = ctx.rateCount;
+    const auto duration = ctx.rateDurations[0], steps = ctx.rateSteps[0];
+    ctx.updateCount = 42;
+    ctx.rateCount = 1; ctx.rateDurations[0] = .5; ctx.rateSteps[0] = 3;
+    internal::restoreWindowContext(nullptr);
+    const auto level = mcp::getToolLevel();
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
+    auto call = [](const char* name) {
+        auto reply = json::parse(mcp::internal::Server::instance().processMessage(
+            json{{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"},
+                 {"params", {{"name", name}, {"arguments", json::object()}}}}.dump()));
+        return json::parse(reply.at("result").at("content").at(0).at("text").get<std::string>());
+    };
+    const auto health = call("tc_get_health");
+    const auto windows = call("tc_list_windows");
+    check("process health reads explicit main metrics", health.at("width") == 100 && health.at("height") == 50 &&
+        health.at("frameCount") == 42 && health.at("fps") == 6);
+    check("process window listing preserves main dimensions", windows.at("windows").at(0).at("width") == 100 &&
+        windows.at("windows").at(0).at("height") == 50);
+    check("tool snapshots leave process context unselected", !internal::currentWindowCtx() && !internal::currentWindow());
+    mcp::setToolLevel(level);
+    internal::WindowRequestAccess::unbind(window);
+    ctx.updateCount = updates; ctx.rateCount = rates;
+    ctx.rateDurations[0] = duration; ctx.rateSteps[0] = steps;
+}
 int queues = 0, maintenance = 0, reloads = 0;
 bool throwQueue = false;
 void queueService() {
     ++queues;
+    check("queues select no Window", internal::currentWindowCtx() == nullptr && !internal::currentWindow());
     internal::beforeHostTurn(); internal::afterHostTurn();
     check("nested service turn coalesces", queues == maintenance + 1);
     if (throwQueue) throw std::runtime_error("queue service fault");
 }
-void maintain() { ++maintenance; }
+void maintain() {
+    ++maintenance;
+    check("maintenance selects no Window", internal::currentWindowCtx() == nullptr && !internal::currentWindow());
+    internal::HostTurnScope nested;
+    check("maintenance cannot reenter services", queues == maintenance);
+}
 void reload() { ++reloads; }
 void roots() {
     for (bool runner : {true, false}) {
@@ -375,12 +546,16 @@ void turns() {
     const auto saved = internal::hostServiceOperationsForTests();
     internal::hostServiceOperationsForTests() = {queueService, maintain};
     internal::setHostReloadPoll(reload);
+    auto* caller = internal::currentWindowCtx();
+    internal::WindowContext peer;
+    internal::currentWindowCtx() = &peer;
     for (int i = 1; i <= 3; ++i) {
         internal::beforeHostTurn();
         check("queues and reload run once per outer turn", queues == i && reloads == i);
         internal::beforeHostTurn(); internal::afterHostTurn();
         check("nested native turn does not duplicate process services", queues == i && maintenance == i - 1);
         internal::afterHostTurn();
+        check("services and maintenance restore actual caller", internal::currentWindowCtx() == &peer);
         check("no-window no-draw turn still runs maintenance", maintenance == i);
     }
     Window window; Native native; bind(window, native, 921);
@@ -409,6 +584,7 @@ void turns() {
     check("throwing outer-loop work still completes the host turn", queues == queuesBeforeThrow + 1 && maintenance == maintenanceBeforeThrow + 1);
     internal::setHostReloadPoll(nullptr);
     internal::hostServiceOperationsForTests() = saved;
+    internal::currentWindowCtx() = caller;
 #ifndef __EMSCRIPTEN__
     mcp::internal::DeferredResponse response;
     response.id = 239; response.target = &window.context(); response.deadline = now;
@@ -440,6 +616,8 @@ int main() {
     getMainThreadId();
     internal::pixelPerfectMode() = false;
     internal::windowClockForTests() = readClock;
+    constructorsAndEpochs();
+    processToolSnapshots();
     WindowSettings settings; settings.pixelPerfect = false;
     const auto descriptor = internal::buildWindowDescriptor(settings);
     check("launch descriptor installs the common desktop tick client", descriptor._tc_tick_cb == internal::windowTick && descriptor._tc_bind_user == internal::mainWindow() && descriptor._tc_event_cb == internal::mainWindowEvent);
