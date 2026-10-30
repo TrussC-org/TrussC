@@ -1,5 +1,4 @@
 #pragma once
-#include "tc/events/tcExternalDelivery.h"
 
 #include <string>
 #include <vector>
@@ -302,7 +301,6 @@ public:
     }
 
 private:
-    friend struct trussc::internal::ExternalPayload<OscMessage>;
     // An argument with data, and the index of its type tag
     struct StoredArg {
         size_t index;
@@ -359,18 +357,3 @@ private:
 // -----------------------------------------------------------------------------
 namespace tcx    { using osc::OscMessage; } // deprecated: remove at v1.0.0
 namespace trussc { using tcx::osc::OscMessage; } // deprecated: remove at v1.0.0
-
-namespace trussc::internal {
-template<> struct ExternalPayload<tcx::osc::OscMessage> {
-    static size_t bytes(const tcx::osc::OscMessage& msg) {
-        size_t result = externalSizeAdd(sizeof(msg), externalSizeAdd(msg.address_.capacity(), 1));
-        result = externalSizeAdd(result, externalSizeAdd(msg.typeTags_.capacity(), 1));
-        result = externalSizeAdd(result, externalSizeMultiply(msg.args_.capacity(), sizeof(tcx::osc::OscMessage::StoredArg)));
-        for (const auto& arg : msg.args_) {
-            if (const auto* str = std::get_if<std::string>(&arg.value)) result = externalSizeAdd(result, externalSizeAdd(str->capacity(), 1));
-            if (const auto* blob = std::get_if<std::vector<uint8_t>>(&arg.value)) result = externalSizeAdd(result, blob->capacity());
-        }
-        return result;
-    }
-};
-} // namespace trussc::internal

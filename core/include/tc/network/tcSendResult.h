@@ -28,6 +28,7 @@ enum class SendError {
     Timeout,         // the peer stopped reading; the connection is still up
     QueueFull,       // the send queue is already at its high-water mark
     NotRunning,      // the server (or client) is not connected
+    AllocationFailed, // payload or queue storage could not be allocated
 };
 
 // Result of sendAsync(). Truthy when the payload was queued.
@@ -56,6 +57,7 @@ inline const char* sendErrorName(SendError e) {
         case SendError::Disconnected:   return "Disconnected";
         case SendError::Timeout:        return "Timeout";
         case SendError::QueueFull:      return "QueueFull";
+        case SendError::AllocationFailed: return "AllocationFailed";
         case SendError::NotRunning:     return "NotRunning";
     }
     return "Unknown";

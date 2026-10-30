@@ -171,70 +171,63 @@ void tcxLuaGenShard_15(const std::shared_ptr<sol::state>& lua) {
         t["update"] = &trussc::StrokeMesh::update;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::SoundStream
-            , trussc::SoundStream()
+        auto constructors = tcxLuaConstructors<trussc::AudioRecorder
+            , trussc::AudioRecorder()
         >();
-        sol::usertype<trussc::SoundStream> t = lua->new_usertype<trussc::SoundStream>("SoundStream", constructors, sol::call_constructor, constructors);
-        t["channels"] = &trussc::SoundStream::channels;
-        t["sampleRate"] = &trussc::SoundStream::sampleRate;
-        t["getDuration"] = &trussc::SoundStream::getDuration;
-        t["getMaxPolyphony"] = &trussc::SoundStream::getMaxPolyphony;
-        t["getPath"] = &trussc::SoundStream::getPath;
-        t["kind"] = &trussc::SoundStream::kind;
-        t["loadStream"] = sol::overload([](trussc::SoundStream& self, const fs::path & path) { return self.loadStream(path); }, [](trussc::SoundStream& self, const fs::path & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
+        sol::usertype<trussc::AudioRecorder> t = lua->new_usertype<trussc::AudioRecorder>("AudioRecorder", constructors, sol::call_constructor, constructors);
+        t["getDroppedFrames"] = &trussc::AudioRecorder::getDroppedFrames;
+        t["getPath"] = &trussc::AudioRecorder::getPath;
+        t["getRecordedSeconds"] = &trussc::AudioRecorder::getRecordedSeconds;
+        t["isRecording"] = &trussc::AudioRecorder::isRecording;
+        t["start"] = sol::overload([](trussc::AudioRecorder& self, const fs::path & path) { return self.start(path); }, [](trussc::AudioRecorder& self, const fs::path & path, const trussc::AudioRecordSettings & settings) { return self.start(path, settings); });
+        t["stop"] = &trussc::AudioRecorder::stop;
+    }
+    lua->new_usertype<trussc::Beep>("Beep",
+        sol::meta_function::equal_to, [](trussc::Beep a, trussc::Beep b){ return a == b; },
+        "ping", sol::var(trussc::Beep::ping),
+        "success", sol::var(trussc::Beep::success),
+        "complete", sol::var(trussc::Beep::complete),
+        "coin", sol::var(trussc::Beep::coin),
+        "error", sol::var(trussc::Beep::error),
+        "warning", sol::var(trussc::Beep::warning),
+        "cancel", sol::var(trussc::Beep::cancel),
+        "click", sol::var(trussc::Beep::click),
+        "typing", sol::var(trussc::Beep::typing),
+        "notify", sol::var(trussc::Beep::notify),
+        "sweep", sol::var(trussc::Beep::sweep));
+    {
+        sol::usertype<trussc::SaveResult> t = lua->new_usertype<trussc::SaveResult>("SaveResult");
+        t["error"] = &trussc::SaveResult::error;
+        t["message"] = &trussc::SaveResult::message;
+        t["ok"] = &trussc::SaveResult::ok;
+        t["fail"] = sol::overload([](trussc::SaveError error) { return trussc::SaveResult::fail(error); }, [](trussc::SaveError error, std::string message) { return trussc::SaveResult::fail(error, message); });
+        t["success"] = &trussc::SaveResult::success;
     }
     {
-        sol::usertype<trussc::PlayingSoundInfo> t = lua->new_usertype<trussc::PlayingSoundInfo>("PlayingSoundInfo");
-        t["duration"] = &trussc::PlayingSoundInfo::duration;
-        t["level"] = &trussc::PlayingSoundInfo::level;
-        t["loop"] = &trussc::PlayingSoundInfo::loop;
-        t["pan"] = &trussc::PlayingSoundInfo::pan;
-        t["path"] = &trussc::PlayingSoundInfo::path;
-        t["paused"] = &trussc::PlayingSoundInfo::paused;
-        t["position"] = &trussc::PlayingSoundInfo::position;
-        t["slot"] = &trussc::PlayingSoundInfo::slot;
-        t["speed"] = &trussc::PlayingSoundInfo::speed;
-        t["streaming"] = &trussc::PlayingSoundInfo::streaming;
-        t["volume"] = &trussc::PlayingSoundInfo::volume;
-    }
-    lua->new_usertype<trussc::BlendMode>("BlendMode",
-        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
-        "Alpha", sol::var(trussc::BlendMode::Alpha),
-        "Add", sol::var(trussc::BlendMode::Add),
-        "Multiply", sol::var(trussc::BlendMode::Multiply),
-        "Screen", sol::var(trussc::BlendMode::Screen),
-        "Subtract", sol::var(trussc::BlendMode::Subtract),
-        "Disabled", sol::var(trussc::BlendMode::Disabled));
-    lua->new_usertype<trussc::StrokeMesh::JoinType>("StrokeMeshJoinType",
-        sol::meta_function::equal_to, [](trussc::StrokeMesh::JoinType a, trussc::StrokeMesh::JoinType b){ return a == b; },
-        "JOIN_MITER", sol::var(trussc::StrokeMesh::JoinType::JOIN_MITER),
-        "JOIN_ROUND", sol::var(trussc::StrokeMesh::JoinType::JOIN_ROUND),
-        "JOIN_BEVEL", sol::var(trussc::StrokeMesh::JoinType::JOIN_BEVEL));
-    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
-        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
-        "Repeat", sol::var(trussc::TextureWrap::Repeat),
-        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
-        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
-    {
-        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
-        t["accuracy"] = &trussc::Location::accuracy;
-        t["altitude"] = &trussc::Location::altitude;
-        t["latitude"] = &trussc::Location::latitude;
-        t["longitude"] = &trussc::Location::longitude;
-    }
-    lua->new_usertype<trussc::AudioBackend>("AudioBackend",
-        sol::meta_function::equal_to, [](trussc::AudioBackend a, trussc::AudioBackend b){ return a == b; },
-        "Default", sol::var(trussc::AudioBackend::Default),
-        "Null", sol::var(trussc::AudioBackend::Null));
-    {
-        sol::usertype<trussc::MicStartResult> t = lua->new_usertype<trussc::MicStartResult>("MicStartResult");
-        t["message"] = &trussc::MicStartResult::message;
-        t["success"] = &trussc::MicStartResult::success;
+        sol::usertype<trussc::TcpSendCompleteEventArgs> t = lua->new_usertype<trussc::TcpSendCompleteEventArgs>("TcpSendCompleteEventArgs");
+        t["bytesSent"] = &trussc::TcpSendCompleteEventArgs::bytesSent;
+        t["clientId"] = &trussc::TcpSendCompleteEventArgs::clientId;
+        t["error"] = &trussc::TcpSendCompleteEventArgs::error;
+        t["sendId"] = &trussc::TcpSendCompleteEventArgs::sendId;
     }
     {
-        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
-        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
+        sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
+        t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
+        t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
     }
+    lua->new_usertype<trussc::SoundSource::Kind>("SoundSourceKind",
+        sol::meta_function::equal_to, [](trussc::SoundSource::Kind a, trussc::SoundSource::Kind b){ return a == b; },
+        "Eager", sol::var(trussc::SoundSource::Kind::Eager),
+        "Stream", sol::var(trussc::SoundSource::Kind::Stream));
+    lua->new_usertype<trussc::ImageType>("ImageType",
+        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
+        "Color", sol::var(trussc::ImageType::Color),
+        "Grayscale", sol::var(trussc::ImageType::Grayscale));
+    lua->new_usertype<trussc::Deliver>("Deliver",
+        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
+        "Inline", sol::var(trussc::Deliver::Inline),
+        "Main", sol::var(trussc::Deliver::Main));
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

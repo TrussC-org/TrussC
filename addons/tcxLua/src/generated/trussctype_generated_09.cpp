@@ -166,88 +166,92 @@ void tcxLuaGenShard_09(const std::shared_ptr<sol::state>& lua) {
         t["fromAngle"] = sol::overload([](float radians) { return trussc::Vec2::fromAngle(radians); }, [](float radians, float length) { return trussc::Vec2::fromAngle(radians, length); });
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::Rect
-            , trussc::Rect()
-            , trussc::Rect(float, float, float, float)
-            , trussc::Rect(const trussc::Vec2 &, float, float)
-            , trussc::Rect(const trussc::Vec3 &, float, float)
-            , trussc::Rect(float, float, float, float, float)
+        auto constructors = tcxLuaConstructors<trussc::Ray
+            , trussc::Ray()
+            , trussc::Ray(const trussc::Vec3 &, const trussc::Vec3 &)
         >();
-        sol::usertype<trussc::Rect> t = lua->new_usertype<trussc::Rect>("Rect", constructors, sol::call_constructor, constructors);
-        t["height"] = &trussc::Rect::height;
-        t["width"] = &trussc::Rect::width;
-        t["x"] = &trussc::Rect::x;
-        t["y"] = &trussc::Rect::y;
-        t["contains"] = &trussc::Rect::contains;
-        t["getBottom"] = &trussc::Rect::getBottom;
-        t["getCenter"] = &trussc::Rect::getCenter;
-        t["getCenterX"] = &trussc::Rect::getCenterX;
-        t["getCenterY"] = &trussc::Rect::getCenterY;
-        t["getRight"] = &trussc::Rect::getRight;
-        t["intersects"] = &trussc::Rect::intersects;
-        t["set"] = sol::overload([](trussc::Rect& self, float x_, float y_, float w_, float h_) -> decltype(auto) { return self.set(x_, y_, w_, h_); }, [](trussc::Rect& self, const trussc::Vec2 & pos, float w_, float h_) -> decltype(auto) { return self.set(pos, w_, h_); });
+        sol::usertype<trussc::Ray> t = lua->new_usertype<trussc::Ray>("Ray", constructors, sol::call_constructor, constructors);
+        t["direction"] = &trussc::Ray::direction;
+        t["origin"] = &trussc::Ray::origin;
+        t["at"] = &trussc::Ray::at;
+        t["intersectAABB"] = [](trussc::Ray& self, const trussc::Vec3 & boxMin, const trussc::Vec3 & boxMax) { return self.intersectAABB(boxMin, boxMax); };
+        t["intersectPlane"] = [](trussc::Ray& self, const trussc::Vec3 & planeNormal, float planeD) { return self.intersectPlane(planeNormal, planeD); };
+        t["intersectSphere"] = [](trussc::Ray& self, float radius) { return self.intersectSphere(radius); };
+        t["intersectZPlane"] = [](trussc::Ray& self) { return self.intersectZPlane(); };
+        t["transformed"] = &trussc::Ray::transformed;
+        t["fromScreenPoint2D"] = sol::overload([](float screenX, float screenY) { return trussc::Ray::fromScreenPoint2D(screenX, screenY); }, [](float screenX, float screenY, float startZ) { return trussc::Ray::fromScreenPoint2D(screenX, screenY, startZ); });
     }
     {
-        sol::usertype<trussc::MouseDragEventArgs> t = lua->new_usertype<trussc::MouseDragEventArgs>("MouseDragEventArgs");
-        t["alt"] = &trussc::MouseDragEventArgs::alt;
-        t["button"] = &trussc::MouseDragEventArgs::button;
-        t["consumed"] = &trussc::MouseDragEventArgs::consumed;
-        t["ctrl"] = &trussc::MouseDragEventArgs::ctrl;
-        t["delta"] = &trussc::MouseDragEventArgs::delta;
-        t["deltaX"] = &trussc::MouseDragEventArgs::deltaX;
-        t["deltaY"] = &trussc::MouseDragEventArgs::deltaY;
-        t["globalDelta"] = &trussc::MouseDragEventArgs::globalDelta;
-        t["globalPos"] = &trussc::MouseDragEventArgs::globalPos;
-        t["pos"] = &trussc::MouseDragEventArgs::pos;
-        t["shift"] = &trussc::MouseDragEventArgs::shift;
-        t["super"] = &trussc::MouseDragEventArgs::super;
-        t["x"] = &trussc::MouseDragEventArgs::x;
-        t["y"] = &trussc::MouseDragEventArgs::y;
-        t["syncLegacy"] = &trussc::MouseDragEventArgs::syncLegacy;
-    }
-    lua->new_usertype<trussc::ChipSoundNote::Wave>("ChipSoundNoteWave",
-        sol::meta_function::equal_to, [](trussc::ChipSoundNote::Wave a, trussc::ChipSoundNote::Wave b){ return a == b; },
-        "Sin", sol::var(trussc::ChipSoundNote::Wave::Sin),
-        "Square", sol::var(trussc::ChipSoundNote::Wave::Square),
-        "Triangle", sol::var(trussc::ChipSoundNote::Wave::Triangle),
-        "Sawtooth", sol::var(trussc::ChipSoundNote::Wave::Sawtooth),
-        "Noise", sol::var(trussc::ChipSoundNote::Wave::Noise),
-        "PinkNoise", sol::var(trussc::ChipSoundNote::Wave::PinkNoise),
-        "Silent", sol::var(trussc::ChipSoundNote::Wave::Silent));
-    {
-        sol::usertype<trussc::SaveResult> t = lua->new_usertype<trussc::SaveResult>("SaveResult");
-        t["error"] = &trussc::SaveResult::error;
-        t["message"] = &trussc::SaveResult::message;
-        t["ok"] = &trussc::SaveResult::ok;
-        t["fail"] = sol::overload([](trussc::SaveError error) { return trussc::SaveResult::fail(error); }, [](trussc::SaveError error, std::string message) { return trussc::SaveResult::fail(error, message); });
-        t["success"] = &trussc::SaveResult::success;
+        sol::usertype<trussc::NetworkInterface> t = lua->new_usertype<trussc::NetworkInterface>("NetworkInterface");
+        t["address"] = &trussc::NetworkInterface::address;
+        t["isIPv4"] = &trussc::NetworkInterface::isIPv4;
+        t["isLoopback"] = &trussc::NetworkInterface::isLoopback;
+        t["isUp"] = &trussc::NetworkInterface::isUp;
+        t["mac"] = &trussc::NetworkInterface::mac;
+        t["name"] = &trussc::NetworkInterface::name;
+        t["netmask"] = &trussc::NetworkInterface::netmask;
+        t["getAddress"] = &trussc::NetworkInterface::getAddress;
+        t["getIsIPv4"] = &trussc::NetworkInterface::getIsIPv4;
+        t["getIsLoopback"] = &trussc::NetworkInterface::getIsLoopback;
+        t["getIsUp"] = &trussc::NetworkInterface::getIsUp;
+        t["getMac"] = &trussc::NetworkInterface::getMac;
+        t["getName"] = &trussc::NetworkInterface::getName;
+        t["getNetmask"] = &trussc::NetworkInterface::getNetmask;
     }
     {
-        sol::usertype<trussc::SerialDisconnectEventArgs> t = lua->new_usertype<trussc::SerialDisconnectEventArgs>("SerialDisconnectEventArgs");
-        t["baudRate"] = &trussc::SerialDisconnectEventArgs::baudRate;
-        t["portName"] = &trussc::SerialDisconnectEventArgs::portName;
-        t["reason"] = &trussc::SerialDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::SerialDisconnectEventArgs::wasClean;
+        sol::usertype<trussc::PlayingSound> t = lua->new_usertype<trussc::PlayingSound>("PlayingSound");
+        t["buffer"] = &trussc::PlayingSound::buffer;
+        t["level"] = &trussc::PlayingSound::level;
+        t["loop"] = &trussc::PlayingSound::loop;
+        t["mixMode"] = &trussc::PlayingSound::mixMode;
+        t["pan"] = &trussc::PlayingSound::pan;
+        t["paused"] = &trussc::PlayingSound::paused;
+        t["playing"] = &trussc::PlayingSound::playing;
+        t["positionF"] = &trussc::PlayingSound::positionF;
+        t["rateRatio"] = &trussc::PlayingSound::rateRatio;
+        t["speed"] = &trussc::PlayingSound::speed;
+        t["volume"] = &trussc::PlayingSound::volume;
     }
     {
-        sol::usertype<trussc::AudioInBuffer> t = lua->new_usertype<trussc::AudioInBuffer>("AudioInBuffer");
-        t["channels"] = &trussc::AudioInBuffer::channels;
-        t["frameCount"] = &trussc::AudioInBuffer::frameCount;
-        t["framePosition"] = &trussc::AudioInBuffer::framePosition;
-        t["sampleRate"] = &trussc::AudioInBuffer::sampleRate;
+        sol::usertype<trussc::Reflector> t = lua->new_usertype<trussc::Reflector>("Reflector");
+        t["endGroup"] = &trussc::Reflector::endGroup;
+        t["isDerived"] = &trussc::Reflector::isDerived;
+        t["isReadOnly"] = &trussc::Reflector::isReadOnly;
+        t["popDerived"] = &trussc::Reflector::popDerived;
+        t["popReadOnly"] = &trussc::Reflector::popReadOnly;
+        t["pushDerived"] = &trussc::Reflector::pushDerived;
+        t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
     }
-    lua->new_usertype<trussc::SoundBuffer::Kind>("SoundBufferKind",
-        sol::meta_function::equal_to, [](trussc::SoundBuffer::Kind a, trussc::SoundBuffer::Kind b){ return a == b; },
-        "Eager", sol::var(trussc::SoundBuffer::Kind::Eager),
-        "Stream", sol::var(trussc::SoundBuffer::Kind::Stream));
-    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
-        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
-        "Nearest", sol::var(trussc::TextureFilter::Nearest),
-        "Linear", sol::var(trussc::TextureFilter::Linear));
     {
-        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
-        t["pixels"] = &trussc::GrabberFrame::pixels;
-        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
+        auto constructors = tcxLuaConstructors<trussc::OnceGate
+            , trussc::OnceGate()
+            , trussc::OnceGate(double)
+        >();
+        sol::usertype<trussc::OnceGate> t = lua->new_usertype<trussc::OnceGate>("OnceGate", constructors, sol::call_constructor, constructors);
+        t["isFirstTime"] = &trussc::OnceGate::isFirstTime;
+        t["reset"] = &trussc::OnceGate::reset;
+    }
+    {
+        sol::usertype<trussc::AudioOutBuffer> t = lua->new_usertype<trussc::AudioOutBuffer>("AudioOutBuffer");
+        t["channels"] = &trussc::AudioOutBuffer::channels;
+        t["frameCount"] = &trussc::AudioOutBuffer::frameCount;
+        t["framePosition"] = &trussc::AudioOutBuffer::framePosition;
+        t["sampleRate"] = &trussc::AudioOutBuffer::sampleRate;
+    }
+    lua->new_usertype<trussc::AxisMode>("AxisMode",
+        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
+        "None", sol::var(trussc::AxisMode::None),
+        "Fill", sol::var(trussc::AxisMode::Fill),
+        "Content", sol::var(trussc::AxisMode::Content));
+    {
+        sol::usertype<trussc::VideoErrorEventArgs> t = lua->new_usertype<trussc::VideoErrorEventArgs>("VideoErrorEventArgs");
+        t["errorCode"] = &trussc::VideoErrorEventArgs::errorCode;
+        t["message"] = &trussc::VideoErrorEventArgs::message;
+    }
+    {
+        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
+        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
+        t["message"] = &trussc::UdpErrorEventArgs::message;
     }
 }
 #ifdef _MSC_VER

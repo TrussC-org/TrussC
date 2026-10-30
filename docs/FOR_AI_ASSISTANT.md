@@ -1619,7 +1619,7 @@ Rules for callbacks that are not on the main thread:
        // runs on the main thread (next frame); dropped if listener_ is gone
    }, Deliver::Main);
    ```
-   `Deliver::Main` copies the payload and checks that the listener is still alive before calling it. Each external network/device Main copy reserves credit at its listener turn, after earlier Inline edits, with a lazy store per event capped at 1024 pending deliveries and 64 MiB retained payload. Overflow rejects the whole copy before copying its payload or callable, counts it, and warns once on main without receive polling. Each queued invocation owns an independent callable copy, including mutable value captures. TCP overflow closes the connection and cancels that run’s queued chunks. App-authored notifications (including clean disconnects and send rejections), overflow teardown, `runOnMainThread` work, and send completions remain growable. Plain `runOnMainThread(fn)` also moves work to the main thread, but has no such check, so don't capture a raw `this` there.
+   `Deliver::Main` copies the payload and checks that the listener is still alive before calling it. External network/device copies are unlimited by default. `event.setMainThreadDeliveryLimit(count)` optionally limits queued and executing copies across the event's listeners (0 restores unlimited delivery). Overflow or allocation failure drops and counts the whole copy; TCP stays connected and accepted copies remain queued. Each invocation owns an independent callable copy, including mutable value captures. App-authored notifications, `runOnMainThread` work and send completions remain growable. Plain `runOnMainThread(fn)` also moves work to the main thread but has no liveness check, so avoid capturing a raw `this` there.
 2. **Audio callbacks stay on the audio thread.** They need low latency, so don't marshal them. Keep them short: no allocation, no file IO, no locks that the main thread may hold for a long time. Share values through atomics.
 3. **When the receiving object goes away, stop the source first, and wait for it.** `Event` does not wait for a callback that is already running on another thread, so dropping or disconnecting the listener is not enough there. It is enough only for listeners on the main thread and for `Deliver::Main` listeners, whose queued call is dropped. For an inline listener on another thread, call the source's own stop-and-wait before the members the callback uses are destroyed:
    - `TcpClient::disconnect()` and `UdpSocket::close()` join their threads.
@@ -2917,6 +2917,7 @@ void Event::clear()  // Removes user listeners, preserving framework-owned liste
 EventListener Event::listen(Callback callback) [+11]  // Registers an event listener and returns its connection token.
 size_t Event::listenerCount() const  // Returns the number of registered listeners.
 void Event::notify(T & arg)  // Notifies the event's listeners.
+void Event::setMainThreadDeliveryLimit(size_t count)  // Sets an optional limit for external main-thread copies.
 ```
 
 ### EventListener — Owns an event-listener connection.
@@ -4212,9 +4213,7 @@ SendResult TcpServer::sendAsync(int clientId, const void * data, size_t size) [+
 void TcpServer::setBindAddress(const std::string & address) [macos,windows,linux,android]  // Chooses the local IPv4 address for TCP connections.
 void TcpServer::setReceiveBufferSize(size_t size) [macos,windows,linux,android]  // Sets the client receive buffer size.
 void TcpServer::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android]  // Sets the per-client send high-water mark.
-void TcpServer::setSendItemLimit(size_t bytes) [macos,windows,linux,android]  // Sets the maximum owned send payload capacity.
 void TcpServer::setSendTimeout(float seconds) [macos,windows,linux,android]  // Sets the send inactivity timeout.
-void TcpServer::setTotalSendBufferSize(size_t bytes) [macos,windows,linux,android]  // Sets aggregate TCP server send credits.
 bool TcpServer::start(int port, int maxClients = 64) [macos,windows,linux,android]  // Starts listening for TCP connections.
 void TcpServer::stop() [macos,windows,linux,android]  // Stops the TCP server.
 ```
@@ -4801,7 +4800,7 @@ enum PointStyle { Square, Round, Pixel }  // Defines the shape used to draw poin
 enum PrimitiveMode { Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points }  // Selects how a mesh connects its vertices into drawing primitives.
 enum PrimitiveType { Points, Lines, LineStrip, Triangles, TriangleStrip, Quads }  // Selects the primitive topology used by vertex writers.
 enum SaveError { None, AccessDenied, NoSpace, WriteFailed, Unknown }  // Identifies a save error.
-enum SendError { None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning }  // Describes a send queue rejection or a completed send's outcome.
+enum SendError { None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning, AllocationFailed }  // Describes a send queue rejection or a completed send's outcome.
 enum SoundSource::Kind { Eager, Stream }  // Identifies how a sound source supplies audio data.
 enum StrokeCap { Butt, Round, Square }  // Selects the shape of stroke endpoints.
 enum StrokeJoin { Miter, Round, Bevel }  // Selects the shape of stroke corners.
