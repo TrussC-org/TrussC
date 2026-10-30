@@ -10,6 +10,8 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+from check_build_warnings import run_build
 CLI = Path(os.environ.get("TRUSSCLI", ROOT / "tools/bin/trusscli")).resolve()
 
 
@@ -25,17 +27,17 @@ class WriteTests(unittest.TestCase):
             b"# TrussC addons - one addon per line\r\n")
 
     def cli(self, *args, success=True, env=None):
-        result = subprocess.run(
+        result = run_build(
             [str(CLI), *map(str, args)], cwd=self.project,
             env=dict(os.environ, TRUSSC_DIR=str(ROOT), **(env or {})),
             capture_output=True, text=True, check=False,
             encoding="utf-8", errors="replace",
         )
         if success:
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(result.returncode, 0, result.stdout)
         else:
-            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertEqual(result.stderr.count("Error:"), 1, result.stderr)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(result.stdout.count("Error:"), 1, result.stdout)
         return result
 
     def snapshot(self, project=None):
@@ -102,7 +104,7 @@ class WriteTests(unittest.TestCase):
                 (blocker / "keep").write_bytes(b"keep")
                 try:
                     result = self.cli("update", success=False)
-                    self.assertIn(name, result.stderr)
+                    self.assertIn(name, result.stdout)
                     self.assertEqual((self.project / name).read_bytes(), before[name])
                 finally:
                     shutil.rmtree(blocker)
@@ -152,7 +154,7 @@ class WriteTests(unittest.TestCase):
                 (blocker / "keep").write_bytes(b"keep")
                 try:
                     result = self.cli("update", success=False, env=env)
-                    self.assertIn(name, result.stderr)
+                    self.assertIn(name, result.stdout)
                     self.assertEqual((self.project / name).read_bytes(), before[name])
                 finally:
                     shutil.rmtree(blocker)
@@ -166,7 +168,7 @@ class WriteTests(unittest.TestCase):
         temporary = self.project / "addons.make.tmp"
         temporary.symlink_to("/dev/full")
         result = self.cli("update", success=False)
-        self.assertIn("Write error", result.stderr)
+        self.assertIn("Write error", result.stdout)
         self.assertFalse(temporary.is_symlink())
         self.assertEqual(before, self.snapshot())
 

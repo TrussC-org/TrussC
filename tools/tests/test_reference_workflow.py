@@ -94,6 +94,9 @@ print('diff --git a/generated.cpp b/generated.cpp')
         reference = self.directory / 'docs/reference'
         reference.mkdir(parents=True)
         (self.directory / 'addons/tcxLua/src/generated').mkdir(parents=True)
+        (self.directory / 'tools').mkdir()
+        for name in ('check_build_warnings.py', 'build_warning_allowlist.json'):
+            (self.directory / 'tools' / name).write_bytes((ROOT / 'tools' / name).read_bytes())
         script = reference / 'regenerate.sh'
         script.write_text((ROOT / 'docs/reference/regenerate.sh').read_text(encoding="utf-8"), encoding="utf-8")
         stub = '''import json, os, sys

@@ -26,7 +26,8 @@ if(NOT MBEDTLS_USER_CONFIG_FILE)
     set(MBEDTLS_USER_CONFIG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/mbedtls_user_config.h"
         CACHE FILEPATH "Mbed TLS user configuration" FORCE)
 endif()
-FetchContent_MakeAvailable(mbedtls)
+include("${CMAKE_CURRENT_LIST_DIR}/../../core/cmake/tc_fetch_quiet.cmake")
+tc_fetch_quiet(mbedtls)
 
 # Embed the Mozilla CA bundle as a generated .cpp: Windows adds it to ROOT,
 # and POSIX uses it as a fallback when no OS bundle file can be loaded.

@@ -28,12 +28,13 @@ public:
             tailSize_ = cursor_ = 0;
             return;
         }
-        if (count >= endBytes) {
-            std::memcpy(tail_.data(), bytes + count - endBytes, endBytes);
-            tailSize_ = endBytes;
-            cursor_ = 0;
-            return;
-        }
+        // Keep only the end of a large input, then use the same ring copy for
+        // every chunk size. A separate constant-size memcpy here made GCC
+        // diagnose an impossible 64 KiB read from the process reader's 4 KiB
+        // buffer when append() was inlined in optimized host builds.
+        const size_t retained = (std::min)(count, endBytes);
+        bytes += count - retained;
+        count = retained;
         const size_t first = (std::min)(count, endBytes - cursor_);
         std::memcpy(tail_.data() + cursor_, bytes, first);
         std::memcpy(tail_.data(), bytes + first, count - first);

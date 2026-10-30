@@ -8,7 +8,7 @@
 
 #include "TrussC.h"
 
-#pragma message("STUB: tcVideoPlayer_android.cpp — needs MediaCodec NDK implementation")
+// Not implemented on Android yet (#1113): needs MediaCodec NDK implementation.
 
 namespace trussc {
 

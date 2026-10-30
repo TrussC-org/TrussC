@@ -17,7 +17,8 @@ set(BOX2D_BUILD_UNIT_TESTS OFF CACHE BOOL "" FORCE)
 set(BOX2D_BUILD_TESTBED OFF CACHE BOOL "" FORCE)
 set(BOX2D_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(BOX2D_USER_SETTINGS OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(box2d)
+include("${CMAKE_CURRENT_LIST_DIR}/../../core/cmake/tc_fetch_quiet.cmake")
+tc_fetch_quiet(box2d)
 
 # Source files
 file(GLOB ADDON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
