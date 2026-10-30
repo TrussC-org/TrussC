@@ -2215,7 +2215,7 @@ float getDisplayScaleFactor()  // Returns the platform display scale factor.
 float getDpiScale()  // Returns the current window's DPI scale factor.
 int getFramebufferHeight()  // Returns the current window framebuffer's height.
 int getFramebufferWidth()  // Returns the current window framebuffer's width.
-bool getKeepScreenOn() [macos,windows,android,ios]  // Returns the keep-screen-on setting.
+bool getKeepScreenOn() [macos,windows,linux,android,ios,web]  // Returns the keep-screen-on setting.
 int getMaxUpdateSteps()  // Returns the limit on fixed-rate update steps.
 IVec2 getWindowPosition() [macos,windows]  // Returns the window position on the screen.
 bool grabScreen(Pixels & outPixels) [macos,windows,linux,ios,android]  // Read this window's screen into Pixels. What is captured depends on when you call it
@@ -2229,7 +2229,7 @@ bool saveScreenshot(const std::filesystem::path & path)  // Queues a screenshot 
 void setClipboardString(const std::string & text)  // Copies text to the clipboard.
 void setFullscreen(bool full)  // Sets the window fullscreen state.
 void setIndependentFps(float updateFps, float drawFps)  // Sets separate update and drawing rates.
-void setKeepScreenOn(bool enabled) [macos,windows,android,ios]  // Controls whether display sleep and automatic locking are inhibited.
+void setKeepScreenOn(bool enabled) [macos,windows,linux,android,ios,web]  // Requests that the display stay on.
 void setMaxUpdateSteps(int steps)  // Sets the maximum number of fixed update steps per loop pass.
 void setOrientation(Orientation mask) [android,ios]  // Sets the allowed screen orientations.
 void setWindowDecorated(bool decorated)  // Controls the main window's standard decorations.

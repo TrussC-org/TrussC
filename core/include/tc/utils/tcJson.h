@@ -35,8 +35,9 @@ inline Json loadJson(const fs::path& path) {
         if (fs::file_size(fullPath, ec) > 16u * 1024u * 1024u && !ec)
             logNotice("Json") << "loading a local document larger than 16 MiB: " << fullPath;
         std::string bytes;
-        if (!internal::readDocumentBytes(file, bytes)) {
-            internal::reportImportError("Json", "failed to read the complete JSON document: ", path);
+        const char* readError = nullptr;
+        if (!internal::readDocumentBytes(file, bytes, &readError)) {
+            internal::reportImportError("Json", "failed to read the complete JSON document: ", path, readError);
             return Json();
         }
         // The bundled lexer treats raw NUL as EOF; reject it before parsing

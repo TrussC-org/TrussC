@@ -11843,17 +11843,17 @@ description.en = "An alias for the nlohmann::json value type."
 description.ja = "nlohmann::json の値型の別名を表す。"
 description.ko = "nlohmann::json 값 타입의 별칭이다."
 details.en = '''
-- v0.8: the bundled text parser rejects nesting beyond 64 levels, including direct `Json::parse` calls. Parsed values carry private provenance used by transactional settings reflection; see `JsonReadReflector`. Local documents have no byte-size cap.
+- When parsing untrusted JSON yourself, limit nesting depth with the `Json::parse` callback, or avoid recursing over the result.
 - Defined as `using Json = nlohmann::json;` and used by `loadJson`, `saveJson`, `parseJson`, and `toJsonString`. Its full API is the nlohmann/json API.
 - A default-constructed `Json()` holds JSON `null`, not an empty object or array; check it with `is_null()`.
 '''
 details.ja = '''
-- v0.8: 同梱のテキストパーサーは、直接の `Json::parse` 呼び出しも含め、64 段を超えるネストを拒否します。解析した値は設定のトランザクション適用に使う非公開の由来情報を保持します。`JsonReadReflector` を参照してください。ローカル文書のバイト数には上限を設けません。
+- 信頼できない JSON を自分で解析する場合は、`Json::parse` のコールバックでネストの深さを制限するか、結果の再帰処理を避けてください。
 - `using Json = nlohmann::json;` と定義され、`loadJson`、`saveJson`、`parseJson`、`toJsonString` が使用します。利用できる API の全体は nlohmann/json の API を参照してください。
 - 既定構築した `Json()` は空のオブジェクトや配列ではなく、JSON の `null` を保持します。`is_null()` で確認できます。
 '''
 details.ko = '''
-- v0.8: 번들 텍스트 파서는 직접 `Json::parse`를 호출하는 경우에도 64단계보다 깊은 중첩을 거부합니다. 파싱한 값은 설정 트랜잭션에 사용하는 비공개 이력을 유지합니다. `JsonReadReflector`를 참조하세요. 로컬 문서에는 바이트 크기 제한을 두지 않습니다.
+- 신뢰할 수 없는 JSON을 직접 파싱할 때는 `Json::parse` 콜백으로 중첩 깊이를 제한하거나 결과를 재귀적으로 처리하지 않도록 합니다.
 - `using Json = nlohmann::json;`으로 정의되며, `loadJson`, `saveJson`, `parseJson`, `toJsonString`에서 사용합니다. 전체 API는 nlohmann/json API를 참조하세요.
 - 기본 생성한 `Json()`은 빈 객체나 배열이 아닌 JSON `null`을 보유합니다. `is_null()`로 확인할 수 있습니다.
 '''
@@ -35217,6 +35217,7 @@ details.en = '''
 - These sockets use IPv4. An IPv6 literal fails with `IPv6 is not supported`. An address that is not assigned to this machine fails with `Bind address is not available on this machine`.
 - Validation and binding failures make `bind()` return `false`, emit `onError`, and log an Error. They never fall back to every interface. Set a valid address and call `bind()` again to retry.
 - Calling this setter while bound (including when reception is stopped) logs a Warning and leaves the active socket unchanged. The value is saved for `close()` followed by the next `bind()`.
+- Exclusivity is against binds to the same address. With a specific `setBindAddress()`, macOS and Windows still allow another socket binding all addresses with reuse enabled to share the port; Linux refuses.
 '''
 details.ja = '''
 - `bind()` の前に `setBindAddress(address)` を呼び、使用するローカルインターフェースを選びます。このマシンからの通信だけを受け付ける場合は `"127.0.0.1"` を指定してください。既定値、空文字列、`"0.0.0.0"` は、いずれもすべてのローカル IPv4 インターフェースを選びます。
@@ -35224,6 +35225,7 @@ details.ja = '''
 - ソケットは IPv4 を使用します。IPv6 アドレスでは `IPv6 is not supported`、このマシンに割り当てられていないアドレスでは `Bind address is not available on this machine` というエラーになります。
 - 入力の検証やバインドに失敗すると、`bind()` は `false` を返し、`onError` で通知して Error のログを記録します。すべてのインターフェースに自動で切り替えることはありません。有効なアドレスを設定して `bind()` を再度呼ぶと、再試行できます。
 - バインド済みの場合（受信停止中も含みます）にこの setter を呼ぶと、Warning のログを記録し、使用中のソケットは変わりません。値は保存され、`close()` 後の次の `bind()` で適用されます。
+- 排他的なバインドは、同じアドレスへのバインドに対して適用されます。`setBindAddress()` で特定のアドレスを指定した場合、macOS と Windows では、再利用を有効にしてすべてのアドレスにバインドする別のソケットが同じポートを共有できます。Linux はこれを拒否します。
 '''
 details.ko = '''
 - `bind()` 전에 `setBindAddress(address)`를 호출하여 로컬 인터페이스를 선택합니다. 이 컴퓨터에서 오는 통신만 받으려면 `"127.0.0.1"`을 지정합니다. 기본값, 빈 문자열 및 `"0.0.0.0"`은 모두 모든 로컬 IPv4 인터페이스를 선택합니다.
@@ -35231,6 +35233,7 @@ details.ko = '''
 - 소켓은 IPv4를 사용합니다. IPv6 주소는 `IPv6 is not supported` 오류로 실패합니다. 이 컴퓨터에 할당되지 않은 주소는 `Bind address is not available on this machine` 오류로 실패합니다.
 - 입력 검증이나 바인딩에 실패하면 `bind()`는 `false`를 반환하고 `onError`로 알리며 Error 로그를 기록합니다. 모든 인터페이스로 자동 전환하지 않습니다. 유효한 주소를 설정하고 `bind()`를 다시 호출하여 재시도할 수 있습니다.
 - 바인딩된 상태(수신 중지 상태도 포함)에 이 setter를 호출하면 Warning 로그를 기록하며 사용 중인 소켓은 변경하지 않습니다. 값은 저장되어 `close()` 후 다음 `bind()`에 적용됩니다.
+- 독점 바인딩은 같은 주소에 대한 바인딩에 적용됩니다. `setBindAddress()`로 특정 주소를 지정하면 macOS와 Windows에서는 재사용을 활성화하고 모든 주소에 바인딩하는 다른 소켓이 같은 포트를 공유할 수 있습니다. Linux는 이를 거부합니다.
 '''
 related = ["UdpSocket::bind"]
 snippet = '''
@@ -35248,21 +35251,21 @@ details.en = '''
 - Creates the socket if necessary and binds it to all local IPv4 interfaces by default. Call `setBindAddress()` before `bind()` to choose an interface. Pass `port = 0` to let the OS select a port, then read it with `getLocalPort()`.
 - Returns `true` on success or `false` if socket creation, binding, or retrieval of the assigned port fails; these failures emit `onError`.
 - The second argument, `startReceiving`, defaults to `true` and starts event reception after binding; pass `false` for synchronous `receive()` or to configure reception before starting it.
-- Configure `setReuseAddress()` or `setReusePort()` before binding if the port must be shared; otherwise binding is exclusive, with `SO_EXCLUSIVEADDRUSE` explicitly enabled on Windows.
+- Configure `setReuseAddress()` or `setReusePort()` before binding if the port must be shared; otherwise binding is exclusive against binds to the same address, with `SO_EXCLUSIVEADDRUSE` explicitly enabled on Windows.
 - See `UdpSocket::onReceive` for callback threading and `UdpSocket::close` for worker lifetime and waiting rules.
 '''
 details.ja = '''
 - 必要に応じてソケットを作成し、既定ですべてのローカル IPv4 インターフェースにバインドします。インターフェースを選ぶ場合は、`bind()` の前に `setBindAddress()` を呼んでください。`port = 0` を渡すと OS がポートを選び、`getLocalPort()` でその番号を取得できます。
 - 成功すると `true`、ソケットの作成、バインド、割り当てられたポートの取得に失敗すると `false` を返します。これらの失敗時には `onError` が発火します。
 - 第 2 引数の `startReceiving` は既定で `true` で、バインド後にイベントによる受信を開始します。同期 `receive()` を使う場合や、受信開始前に設定を行う場合は `false` を渡してください。
-- ポートを共有する場合は、バインド前に `setReuseAddress()` または `setReusePort()` を設定してください。それ以外の場合はポートを排他的に使用し、Windows では `SO_EXCLUSIVEADDRUSE` を明示的に有効にします。
+- ポートを共有する場合は、バインド前に `setReuseAddress()` または `setReusePort()` を設定してください。それ以外の場合は同じアドレスへのバインドに対して排他的に使用し、Windows では `SO_EXCLUSIVEADDRUSE` を明示的に有効にします。
 - コールバックのスレッドについては `UdpSocket::onReceive`、ワーカーの寿命と終了待ちについては `UdpSocket::close` を参照してください。
 '''
 details.ko = '''
 - 필요한 경우 소켓을 생성하고 기본적으로 모든 로컬 IPv4 인터페이스에 바인딩합니다. 인터페이스를 선택하려면 `bind()` 전에 `setBindAddress()`를 호출합니다. `port = 0`을 전달하면 OS가 포트를 선택하며, `getLocalPort()`로 해당 번호를 가져올 수 있습니다.
 - 성공하면 `true`를 반환하고 소켓 생성, 바인딩 또는 할당된 포트 조회에 실패하면 `false`를 반환합니다. 이러한 실패 시에는 `onError`가 발생합니다.
 - 두 번째 인수인 `startReceiving`의 기본값은 `true`이며 바인딩 후 이벤트 수신을 시작합니다. 동기 `receive()`를 사용하거나 수신 시작 전에 설정하려면 `false`를 전달합니다.
-- 포트를 공유하려면 바인딩 전에 `setReuseAddress()` 또는 `setReusePort()`를 설정합니다. 그렇지 않으면 포트를 독점적으로 사용하며 Windows에서는 `SO_EXCLUSIVEADDRUSE`를 명시적으로 활성화합니다.
+- 포트를 공유하려면 바인딩 전에 `setReuseAddress()` 또는 `setReusePort()`를 설정합니다. 그렇지 않으면 같은 주소에 대한 바인딩에 대해 독점적으로 사용하며 Windows에서는 `SO_EXCLUSIVEADDRUSE`를 명시적으로 활성화합니다.
 - 콜백 스레드는 `UdpSocket::onReceive`를, 워커 수명과 종료 대기는 `UdpSocket::close`를 참조하세요.
 '''
 related = ["UdpSocket::setBindAddress"]
@@ -35781,17 +35784,21 @@ details.en = '''
 - Call before `bind()`; `true` enables `SO_REUSEADDR`, while `false` disables it, and reuse is initially disabled.
 - Creates the socket if necessary and returns `true` if the option is applied; socket creation or option failure emits `onError` and returns `false`.
 - On Windows, enabling address reuse before binding also prevents this socket from requesting exclusive address use; see `UdpSocket::setReusePort` for sharing one port between receivers.
+- For exclusivity against binds to the same address and specific-address versus wildcard sharing, see `UdpSocket::setBindAddress`.
 '''
 details.ja = '''
 - `bind()` の前に呼んでください。`true` で `SO_REUSEADDR` を有効に、`false` で無効にします。初期状態では再利用は無効です。
 - 必要に応じてソケットを作成し、オプションの適用に成功すると `true` を返します。ソケットの作成またはオプション設定に失敗すると、`onError` を発火して `false` を返します。
 - Windows では、バインド前に有効にすると、このソケットはアドレスの排他的使用を要求しなくなります。複数の受信側で 1 つのポートを共有する場合は、`UdpSocket::setReusePort` も参照してください。
+- 同じアドレスへのバインドに対する排他性と、特定のアドレスとすべてのアドレスの間でのポート共有については、`UdpSocket::setBindAddress` を参照してください。
 '''
 details.ko = '''
 - `bind()` 전에 호출합니다. `true`로 `SO_REUSEADDR`를 활성화하고 `false`로 비활성화합니다. 초기 상태에서는 재사용이 비활성화되어 있습니다.
 - 필요한 경우 소켓을 생성하고 옵션 적용에 성공하면 `true`를 반환합니다. 소켓 생성 또는 옵션 설정에 실패하면 `onError`를 발생시키고 `false`를 반환합니다.
 - Windows에서는 바인딩 전에 활성화하면 이 소켓이 주소의 독점 사용을 요청하지 않습니다. 여러 수신 측에서 하나의 포트를 공유하려면 `UdpSocket::setReusePort`도 참조하세요.
+- 같은 주소에 대한 바인딩의 독점성과 특정 주소 및 모든 주소 사이의 포트 공유는 `UdpSocket::setBindAddress`를 참조하세요.
 '''
+related = ["UdpSocket::setBindAddress"]
 
 ["UdpSocket::setReusePort"]
 description.en = "Enables or disables sharing a local UDP port."
@@ -35801,17 +35808,21 @@ details.en = '''
 - Call with `true` before `bind()` when multiple sockets need the same port, such as multicast receivers; pass `false` to disable reuse, which is the initial setting.
 - Uses `SO_REUSEPORT` on POSIX and `SO_REUSEADDR` on Windows, where it shares the OS option used by `setReuseAddress()`.
 - Creates the socket if necessary and returns `true` if the option is applied; socket creation or option failure emits `onError` and returns `false`.
+- For exclusivity against binds to the same address and specific-address versus wildcard sharing, see `UdpSocket::setBindAddress`.
 '''
 details.ja = '''
 - マルチキャスト受信などで複数のソケットが同じポートを使う場合は、`bind()` の前に `true` を渡してください。`false` で再利用を無効にし、初期状態も無効です。
 - POSIX では `SO_REUSEPORT`、Windows では `SO_REUSEADDR` を使います。Windows では `setReuseAddress()` と同じ OS のオプションを設定します。
 - 必要に応じてソケットを作成し、オプションの適用に成功すると `true` を返します。ソケットの作成またはオプション設定に失敗すると、`onError` を発火して `false` を返します。
+- 同じアドレスへのバインドに対する排他性と、特定のアドレスとすべてのアドレスの間でのポート共有については、`UdpSocket::setBindAddress` を参照してください。
 '''
 details.ko = '''
 - 멀티캐스트 수신처럼 여러 소켓이 같은 포트를 사용해야 하면 `bind()` 전에 `true`를 전달합니다. `false`로 재사용을 비활성화하며 초기 상태도 비활성화입니다.
 - POSIX에서는 `SO_REUSEPORT`를, Windows에서는 `SO_REUSEADDR`를 사용합니다. Windows에서는 `setReuseAddress()`와 같은 OS 옵션을 설정합니다.
 - 필요한 경우 소켓을 생성하고 옵션 적용에 성공하면 `true`를 반환합니다. 소켓 생성 또는 옵션 설정에 실패하면 `onError`를 발생시키고 `false`를 반환합니다.
+- 같은 주소에 대한 바인딩의 독점성과 특정 주소 및 모든 주소 사이의 포트 공유는 `UdpSocket::setBindAddress`를 참조하세요.
 '''
+related = ["UdpSocket::setBindAddress"]
 
 ["UdpSocket::setSendBufferSize"]
 description.en = "Sets the OS socket send buffer size."
@@ -46548,29 +46559,34 @@ platform_note.ko = '''
 category = "window_system"
 keywords = ["wake lock", "no sleep", "stay awake", "awake"]
 description.en = "Returns the keep-screen-on setting."
-description.ja = "画面のスリープ抑止設定を返す。"
-description.ko = "화면 절전 방지 설정을 반환한다."
+description.ja = "画面のスリープ抑止設定を返します。"
+description.ko = "화면 절전 방지 설정을 반환합니다."
 details.en = '''
-- Returns the state stored by `setKeepScreenOn`, initially false; it does not query the OS sleep state.
-- macOS reports true only after successfully creating the display-sleep assertion. Windows, Android and iOS store the requested value even if applying it fails or has not completed.
+- Returns the state stored by `setKeepScreenOn`, initially false. It does not check whether the display or screen saver is actually inhibited. See `setKeepScreenOn` for each OS's limits.
+- Linux, Windows, Web, Android and iOS store the requested value even if applying it fails or has not completed. macOS reports true only after creating its display-sleep assertion successfully.
 '''
 details.ja = '''
-- `setKeepScreenOn` が保存した状態を返し、初期値は false です。OS のスリープ状態は調べません。
-- macOS は画面スリープの抑止要求の作成に成功した場合にのみ true になります。Windows、Android、iOS は、適用に失敗した場合や適用がまだ完了していない場合でも、要求された値を保存します。
+- `setKeepScreenOn` が保存した状態を返し、初期値は false です。実際に画面スリープやスクリーンセーバーを抑止できているかは調べません。OS ごとの制限は `setKeepScreenOn` を参照します。
+- Linux、Windows、Web、Android、iOS は、適用に失敗した場合や適用がまだ完了していない場合でも、要求された値を保存します。macOS は画面スリープの抑止要求の作成に成功した場合にのみ true になります。
 '''
 details.ko = '''
-- `setKeepScreenOn`이 저장한 상태를 반환하며 초기값은 false입니다. OS의 절전 상태를 조회하지 않습니다.
-- macOS는 화면 절전 방지 요청을 성공적으로 생성한 경우에만 true가 됩니다. Windows, Android, iOS는 적용이 실패하거나 아직 완료되지 않았어도 요청한 값을 저장합니다.
+- `setKeepScreenOn`이 저장한 상태를 반환하며 초기값은 false입니다. 실제로 화면 절전이나 화면 보호기를 막고 있는지는 확인하지 않습니다. OS별 제한은 `setKeepScreenOn`에서 설명합니다.
+- Linux, Windows, Web, Android, iOS는 적용이 실패하거나 아직 완료되지 않았어도 요청한 값을 저장합니다. macOS는 화면 절전 방지 요청을 성공적으로 생성한 경우에만 true가 됩니다.
 '''
 related = ["setKeepScreenOn"]
 platform_note.en = '''
-- Linux and Web always return false because their setters have no effect.
+- Web returns the requested state even while hidden or when the Screen Wake Lock API is unavailable or rejects the request.
 '''
 platform_note.ja = '''
-- Linux と Web では設定関数が何も行わないため、常に false を返します。
+- Web は、ページが非表示の場合や Screen Wake Lock API が利用できない場合、要求が拒否された場合も、要求された状態を返します。
 '''
 platform_note.ko = '''
-- Linux와 Web에서는 설정 함수가 아무 작업도 하지 않으므로 항상 false를 반환합니다.
+- Web은 페이지가 숨겨져 있거나 Screen Wake Lock API를 사용할 수 없거나 요청이 거부된 경우에도 요청한 상태를 반환합니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    logNotice() << getKeepScreenOn();
+}
 '''
 
 ["getLocalIp"]
@@ -48837,19 +48853,22 @@ description.en = "Loads a JSON value from a file."
 description.ja = "ファイルから JSON 値を読み込む。"
 description.ko = "파일에서 JSON 값을 읽는다."
 details.en = '''
-- Local files have no byte-size cap. Nesting is limited to 64 levels; deeper input is rejected as a whole. Files above 16 MiB produce a Notice. Caught allocation exceptions log an Error and return `Json()`; recovery during JSON DOM cleanup is not guaranteed.
+- When parsing untrusted JSON yourself, limit nesting depth with the `Json::parse` callback, or avoid recursing over the result.
+- Local files have no byte-size cap. Files above 16 MiB produce a Notice. Caught allocation exceptions log an Error and return `Json()`; recovery during JSON DOM cleanup is not guaranteed.
 - Accepts a file path and returns the parsed `Json` value. Relative paths resolve through `getDataPath()`; absolute paths are used directly.
 - A missing, unreadable, or non-regular file, or a JSON parse error, logs an Error and returns `Json()`, which holds JSON `null`.
 - A valid file containing `null` returns the same value as these failures. Caught parsing and allocation exceptions are reported as failures.
 '''
 details.ja = '''
-- ローカルファイルのバイト数に上限はありません。ネストは 64 段までとし、それを超える入力は全体を拒否します。16 MiB を超えるファイルは Notice を出力します。捕捉したメモリ確保の例外は Error を出力して `Json()` を返しますが、JSON DOM の破棄中の復旧は保証しません。
+- 信頼できない JSON を自分で解析する場合は、`Json::parse` のコールバックでネストの深さを制限するか、結果の再帰処理を避けてください。
+- ローカルファイルのバイト数に上限はありません。16 MiB を超えるファイルは Notice を出力します。捕捉したメモリ確保の例外は Error を出力して `Json()` を返しますが、JSON DOM の破棄中の復旧は保証しません。
 - ファイルパスを受け取り、解析した `Json` 値を返します。相対パスは `getDataPath()` で解決し、絶対パスはそのまま使用します。
 - ファイルが存在しない場合、読み取れない場合、通常のファイルではない場合、JSON の解析に失敗した場合は、Error をログに出力して JSON の `null` を保持する `Json()` を返します。
 - 正常なファイルに `null` が入っている場合も、これらの失敗時と同じ値になります。捕捉した解析とメモリ確保の例外は失敗として報告します。
 '''
 details.ko = '''
-- 로컬 파일의 바이트 크기 제한은 없습니다. 중첩을 64단계로 제한하며 더 깊은 입력은 전체를 거부합니다. 16 MiB가 넘는 파일은 Notice를 기록합니다. 처리한 메모리 할당 예외는 Error를 기록하고 `Json()`을 반환하지만 JSON DOM 소멸 중의 복구는 보장하지 않습니다.
+- 신뢰할 수 없는 JSON을 직접 파싱할 때는 `Json::parse` 콜백으로 중첩 깊이를 제한하거나 결과를 재귀적으로 처리하지 않도록 합니다.
+- 로컬 파일의 바이트 크기 제한은 없습니다. 16 MiB가 넘는 파일은 Notice를 기록합니다. 처리한 메모리 할당 예외는 Error를 기록하고 `Json()`을 반환하지만 JSON DOM 소멸 중의 복구는 보장하지 않습니다.
 - 파일 경로를 받아 파싱한 `Json` 값을 반환합니다. 상대 경로는 `getDataPath()`로 해석하고 절대 경로는 그대로 사용합니다.
 - 파일이 없거나 읽을 수 없거나 일반 파일이 아닌 경우, 또는 JSON 파싱에 실패하면 Error 로그를 출력하고 JSON `null`을 보유하는 `Json()`을 반환합니다.
 - 정상적인 파일에 `null`이 들어 있어도 이러한 실패 시와 같은 값을 반환합니다. 처리한 파싱과 메모리 할당 예외는 실패로 보고합니다.
@@ -49458,30 +49477,32 @@ description.en = "Parses a JSON string into a Json value."
 description.ja = "JSON 文字列を解析して Json 値に変換する。"
 description.ko = "JSON 문자열을 파싱하여 Json 값으로 변환한다."
 details.en = '''
-- Input has no byte-size cap; documents above 16 MiB produce a Notice. Nesting deeper than 64 levels rejects the whole input. Parsed values retain their external-input provenance for transactional settings reflection.
+- When parsing untrusted JSON yourself, limit nesting depth with the `Json::parse` callback, or avoid recursing over the result.
+- Input has no byte-size cap; documents above 16 MiB produce a Notice.
 - Accepts a `const string&` and returns its parsed JSON value without accessing a file.
-- Syntax and nesting failures, raw NUL bytes, and caught allocation exceptions log an Error and return `Json()`, which holds JSON `null`. Recovery during JSON DOM cleanup is not guaranteed.
+- Syntax failures, raw NUL bytes, and caught allocation exceptions log an Error and return `Json()`, which holds JSON `null`. Recovery during JSON DOM cleanup is not guaranteed.
 - Valid input `"null"` returns the same value as a parse failure, so `is_null()` alone cannot distinguish them.
 '''
 details.ja = '''
-- 入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。64 段を超えるネストは入力全体を拒否します。解析した値は、設定のリフレクションをトランザクションとして扱うための外部入力情報を保持します。
+- 信頼できない JSON を自分で解析する場合は、`Json::parse` のコールバックでネストの深さを制限するか、結果の再帰処理を避けてください。
+- 入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。
 - `const string&` を受け取り、ファイルへアクセスせずに解析した JSON 値を返します。
-- 構文・ネストのエラー、生の NUL バイト、捕捉したメモリ確保の例外は Error を出力し、JSON の `null` を保持する `Json()` を返します。JSON DOM の破棄中の復旧は保証しません。
+- 構文エラー、生の NUL バイト、捕捉したメモリ確保の例外は Error を出力し、JSON の `null` を保持する `Json()` を返します。JSON DOM の破棄中の復旧は保証しません。
 - 正常な入力 `"null"` も解析失敗時と同じ値になるため、`is_null()` だけでは区別できません。
 '''
 details.ko = '''
-- 입력 바이트 크기에 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다. 64단계보다 깊은 중첩은 전체 입력을 거부합니다. 파싱한 값은 설정 리플렉션을 트랜잭션으로 처리하기 위한 외부 입력 이력을 유지합니다.
+- 신뢰할 수 없는 JSON을 직접 파싱할 때는 `Json::parse` 콜백으로 중첩 깊이를 제한하거나 결과를 재귀적으로 처리하지 않도록 합니다.
+- 입력 바이트 크기에 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다.
 - `const string&`를 받아 파일에 접근하지 않고 파싱한 JSON 값을 반환합니다.
-- 구문·중첩 오류, 원시 NUL 바이트, 처리한 메모리 할당 예외는 Error를 기록하고 JSON `null`을 보유하는 `Json()`을 반환합니다. JSON DOM 소멸 중의 복구는 보장하지 않습니다.
+- 구문 오류, 원시 NUL 바이트, 처리한 메모리 할당 예외는 Error를 기록하고 JSON `null`을 보유하는 `Json()`을 반환합니다. JSON DOM 소멸 중의 복구는 보장하지 않습니다.
 - 정상적인 입력 `"null"`도 파싱 실패 시와 같은 값을 반환하므로 `is_null()`만으로는 구분할 수 없습니다.
 '''
 related = ["Json", "toJsonString", "loadJson"]
 snippet = '''
 void tcApp::setup() {
-    Json settings = parseJson(R"({"enabled":true,"count":3})");
-    if (!settings.is_null()) {
-        logNotice() << toJsonString(settings);
-    }
+    auto limit = [](int depth, Json::parse_event_t, Json&) { if (depth > 64) throw runtime_error("JSON nesting too deep"); return true; };
+    try { settings = Json::parse(loadTextFile("settings.json"), limit); }
+    catch (const exception& e) { logWarning() << "settings.json: " << e.what(); }
 }
 '''
 
@@ -50049,19 +50070,19 @@ description.en = "Applies JSON values to an object's reflected members."
 description.ja = "JSON の値をオブジェクトのリフレクションで公開されたメンバに適用する。"
 description.ko = "JSON 값을 객체의 리플렉션으로 공개된 멤버에 적용한다."
 details.en = '''
-- v0.8: JSON parsed from files or strings (including MCP input) is validated as a whole before application. All present fields, nested groups, unknown keys, numeric ranges, enum labels, and writable access are validated before any assignment or setter. Invalid input applies nothing and logs an Error naming the field; `applied` stays empty. Parsed provenance survives copies, moves, and child extraction. JSON constructed directly by app code keeps the permissive behavior described below. Setter exceptions during commit and JSON DOM cleanup are outside the recovery guarantee. Allocation recovery requires standard-library configurations without iterator debugging; MSVC Debug with `_ITERATOR_DEBUG_LEVEL != 0` can allocate iterator proxies in noexcept container construction/moves and is outside this guarantee.
+- Applies matching members and skips mismatches for all JSON values. Earlier writes remain if a later conversion, allocation, or setter throws.
 - Calls `obj.reflectMembers()` with a JSON reader, updating only members whose keys are present in `j`. It updates an existing object and does not create nodes or mods.
 - Returns a `JsonReadReflector` containing `applied`, `skipped`, `readOnly`, and `unknownKeys()` results.
 - See `JsonReadReflector` for accepted JSON forms, setter behavior, processing order, and result naming.
 '''
 details.ja = '''
-- v0.8: ファイルや文字列から解析した JSON（MCP 入力を含む）は、適用前に全体を検証します。存在する全フィールド、ネストしたグループ、不明なキー、数値の範囲、列挙型のラベル、書き込み可否を、代入やセッターの実行前に検証します。不正な入力は何も適用せず、フィールド名を含む Error を出力し、`applied` は空のままです。解析済みという情報はコピー、移動、子要素の取り出しでも保持します。アプリが直接構築した JSON は、以下の従来の柔軟な動作を維持します。適用中のセッター例外と JSON DOM の破棄は、復旧保証の対象外です。メモリ確保失敗からの復旧は、イテレーターデバッグを無効にした標準ライブラリ構成が対象です。MSVC Debug の `_ITERATOR_DEBUG_LEVEL != 0` では noexcept なコンテナーの構築・移動でプロキシを確保するため、保証対象外です。
+- すべての JSON 値で、一致するメンバを適用し、形式が合わない値をスキップします。後の変換、メモリ確保、セッターで例外が発生した場合、それ以前の変更は残ります。
 - JSON リーダーを使って `obj.reflectMembers()` を呼び出し、`j` にキーがあるメンバだけを更新します。既存のオブジェクトを更新する関数で、ノードや Mod は生成しません。
 - `applied`、`skipped`、`readOnly`、`unknownKeys()` の結果を確認できる `JsonReadReflector` を返します。
 - 受け付ける JSON の形式、セッターの扱い、処理順、結果に記録する名前は `JsonReadReflector` を参照してください。
 '''
 details.ko = '''
-- v0.8: 파일이나 문자열에서 파싱한 JSON(MCP 입력 포함)은 적용 전에 전체를 검증합니다. 대입이나 세터 호출 전에 존재하는 모든 필드, 중첩 그룹, 알 수 없는 키, 숫자 범위, 열거형 레이블, 쓰기 가능 여부를 검증합니다. 잘못된 입력은 아무것도 적용하지 않고 필드 이름을 포함한 Error를 기록하며 `applied`는 비어 있습니다. 파싱 이력은 복사, 이동, 하위 값 추출 후에도 유지됩니다. 앱 코드가 직접 만든 JSON은 아래의 기존 유연한 동작을 유지합니다. 적용 중의 세터 예외와 JSON DOM 소멸은 복구 보장 대상이 아닙니다. 할당 실패 복구는 반복자 디버깅이 없는 표준 라이브러리 구성을 대상으로 합니다. MSVC Debug의 `_ITERATOR_DEBUG_LEVEL != 0`에서는 noexcept 컨테이너 생성·이동이 프록시를 할당하므로 보장 대상이 아닙니다.
+- 모든 JSON 값에서 일치하는 멤버를 적용하고 형식이 다른 값은 건너뜁니다. 이후 변환, 메모리 할당 또는 세터에서 예외가 발생하면 이전 변경은 유지합니다.
 - JSON 리더로 `obj.reflectMembers()`를 호출하여 `j`에 키가 있는 멤버만 갱신합니다. 기존 객체를 갱신하며 노드나 Mod를 생성하지 않습니다.
 - `applied`, `skipped`, `readOnly`, `unknownKeys()` 결과를 확인할 수 있는 `JsonReadReflector`를 반환합니다.
 - 허용되는 JSON 형식, 세터 처리, 처리 순서, 결과에 기록되는 이름은 `JsonReadReflector`를 참조하세요.
@@ -51754,33 +51775,54 @@ void tcApp::setup() {
 ["setKeepScreenOn"]
 category = "window_system"
 keywords = ["wake lock", "no sleep", "stay awake", "prevent lock", "screensaver"]
-description.en = "Controls whether display sleep and automatic locking are inhibited."
-description.ja = "画面スリープと自動ロックの抑止を切り替える。"
-description.ko = "화면 절전과 자동 잠금 방지를 전환한다."
+description.en = "Requests that the display stay on."
+description.ja = "画面を点灯したままにするよう要求します。"
+description.ko = "화면을 켜 둔 상태로 유지하도록 요청합니다."
 details.en = '''
-- Pass true to request that the screen stay on, or false to release the request. The initial setting is false; `getKeepScreenOn` returns the stored state.
-- Android sets the activity's keep-screen-on flag, iOS changes the idle-timer setting, and macOS creates or releases a display-sleep assertion. Windows requests both display and system wakefulness.
-- iOS applies the change asynchronously on the main queue, so the getter can reflect the request before the OS setting changes.
+- Pass true to request that the screen stay on, or false to release the request. The initial setting is false.
+- Exhibition apps should call `setKeepScreenOn(true)` in `setup()` on every OS, including when using fullscreen.
+- On Windows, Linux and Web pthread builds, calls from any thread store the latest request immediately and apply it on the next frame on the main thread. Repeating the same value has no additional effect. Normal app cleanup releases the request. Use the main thread for portable code on other OSes.
+- `getKeepScreenOn` returns the stored setting. It does not prove that the OS accepted the request. Explicit locking, manual sleep and administrative power policies can still apply.
 '''
 details.ja = '''
-- true で画面を点灯したままにするよう要求し、false で要求を解除します。初期設定は false で、`getKeepScreenOn` から保存された状態を取得できます。
-- Android は Activity の画面点灯維持フラグ、iOS はアイドルタイマーの設定を変更し、macOS は画面スリープの抑止要求を作成または解除します。Windows は画面とシステムの両方のスリープ抑止を要求します。
-- iOS はメインキューで非同期に適用するため、OS の設定が変わる前に取得関数が要求された値を返す場合があります。
+- true で画面を点灯したままにするよう要求し、false で要求を解除します。初期設定は false です。
+- 展示用のアプリでは、フルスクリーンを使う場合も含めて、すべての OS で `setup()` から `setKeepScreenOn(true)` を呼び出します。
+- Windows、Linux、Web の pthreads ビルドでは、どのスレッドから呼んでも最後の要求をすぐに保存し、次のフレームでメインスレッドから適用します。同じ値を繰り返しても追加の処理は行いません。アプリの正常終了時に要求を解除します。ほかの OS でも使うコードでは、メインスレッドで呼び出します。
+- `getKeepScreenOn` は保存された設定を返しますが、OS が要求を受け付けたことは確認できません。明示的なロック、手動のスリープ、管理者による電源設定は適用される場合があります。
 '''
 details.ko = '''
-- true를 전달하면 화면을 켜 둔 상태로 유지하도록 요청하고 false를 전달하면 요청을 해제합니다. 초기 설정은 false이며 `getKeepScreenOn`으로 저장된 상태를 조회할 수 있습니다.
-- Android는 Activity의 화면 켜짐 유지 플래그, iOS는 유휴 타이머 설정을 변경하며 macOS는 화면 절전 방지 요청을 생성하거나 해제합니다. Windows는 화면과 시스템 모두의 절전 방지를 요청합니다.
-- iOS는 메인 큐에서 비동기로 적용하므로 OS 설정이 변경되기 전에 조회 함수가 요청한 값을 반환할 수 있습니다.
+- true를 전달하면 화면을 켜 둔 상태로 유지하도록 요청하고 false를 전달하면 요청을 해제합니다. 초기 설정은 false입니다.
+- 전시용 앱은 전체 화면을 사용하는 경우에도 모든 OS에서 `setup()` 안에 `setKeepScreenOn(true)`를 호출합니다.
+- Windows, Linux, Web pthreads 빌드에서는 어느 스레드에서 호출해도 마지막 요청을 즉시 저장하고 다음 프레임에 메인 스레드에서 적용합니다. 같은 값을 반복해도 추가 작업을 하지 않습니다. 앱이 정상 종료하면 요청을 해제합니다. 다른 OS에서도 사용할 코드는 메인 스레드에서 호출합니다.
+- `getKeepScreenOn`은 저장된 설정을 반환하지만 OS가 요청을 수락했는지는 확인하지 않습니다. 명시적인 잠금, 수동 절전, 관리자의 전원 정책은 적용될 수 있습니다.
 '''
-related = ["getKeepScreenOn", "setImmersiveMode"]
+related = ["getKeepScreenOn", "setImmersiveMode", "toggleFullscreen"]
 platform_note.en = '''
-- Supported on Android, iOS, macOS and Windows. Has no effect on Linux or Web.
+- Windows uses `SetThreadExecutionState` to keep the display and system awake. It does not stop the screen saver. Fullscreen suppresses screen-saver and monitor-power-off commands sent to TrussC windows while the app is in the foreground.
+- macOS uses a `NoDisplaySleep` assertion to prevent idle display sleep. Screen-saver suppression is to be confirmed on device. Fullscreen alone adds no inhibition.
+- Linux only stops the X server's own screen saver and blanking, where available. It has no effect in headless apps or when this support is unavailable, and logs one notice pointing to OS or desktop settings. Fullscreen alone adds no inhibition.
+- Desktop environments and compositors such as GNOME, KDE, LXDE/LXQt, Raspberry Pi OS/labwc and Wayland sessions in general control their own screen blanking. `setKeepScreenOn` does not reach those controls. Turn blanking off in their settings.
+- Raspberry Pi OS is not supported. Disable screen blanking in Raspberry Pi Configuration.
+- Android keeps the activity's screen on. iOS disables the idle timer asynchronously on the main queue, so the getter may change first. Fullscreen alone adds no separate inhibition on either OS.
+- Web works in browsers that support the Screen Wake Lock API while the page is visible in a secure context (HTTPS or localhost). It automatically re-takes the lock when the page becomes visible again while still requested. Unsupported or insecure contexts log one notice. Rejected requests are silent and retry when the page becomes visible again or after disabling and re-enabling. Fullscreen alone adds no inhibition. Builds without pthreads apply directly on the main thread.
 '''
 platform_note.ja = '''
-- Android、iOS、macOS、Windows に対応しています。Linux と Web では何も行いません。
+- Windows は `SetThreadExecutionState` で画面とシステムのスリープを抑止します。スクリーンセーバーは抑止しません。フルスクリーンでは、アプリが手前にある間、TrussC のウィンドウに届くスクリーンセーバーとモニター電源オフの命令を拒否します。
+- macOS は `NoDisplaySleep` の要求で、操作がないときの画面スリープを抑止します。スクリーンセーバーの抑止は実機での確認が必要です。フルスクリーンだけでは抑止要求を追加しません。
+- Linux では、利用できる場合に X サーバー自身のスクリーンセーバーと画面消灯だけを抑止します。ヘッドレスアプリやこの機能を利用できない環境では何も行わず、OS またはデスクトップの設定を案内する通知を一度出します。フルスクリーンだけでは抑止要求を追加しません。
+- GNOME、KDE、LXDE/LXQt、Raspberry Pi OS/labwc、Wayland セッション全般など、デスクトップ環境やコンポジターは独自に画面消灯を管理します。`setKeepScreenOn` はこれらの制御には届きません。それぞれの設定で画面消灯を無効にします。
+- Raspberry Pi OS は対応していません。Raspberry Pi Configuration で画面消灯を無効にします。
+- Android は Activity の画面点灯を維持します。iOS はメインキューでアイドルタイマーを非同期に無効にするため、取得関数の値が先に変わる場合があります。どちらもフルスクリーンだけでは別の抑止要求を追加しません。
+- Web は Screen Wake Lock API に対応したブラウザーで、セキュアコンテキスト（HTTPS または localhost）のページが表示されている間に動作します。要求中にページが再び表示されると、自動的にロックを再取得します。未対応または非セキュアな環境では通知を一度出します。要求の拒否は通知せず、ページの再表示時や無効化後の再有効化時に再試行します。フルスクリーンだけでは抑止要求を追加しません。pthreads を使わないビルドではメインスレッドで直接適用します。
 '''
 platform_note.ko = '''
-- Android, iOS, macOS, Windows에서 지원합니다. Linux와 Web에서는 아무 작업도 하지 않습니다.
+- Windows는 `SetThreadExecutionState`로 화면과 시스템의 절전을 막습니다. 화면 보호기는 막지 않습니다. 전체 화면에서는 앱이 앞에 있는 동안 TrussC 창에 전달되는 화면 보호기와 모니터 전원 끄기 명령을 거부합니다.
+- macOS는 `NoDisplaySleep` 요청으로 입력이 없을 때의 화면 절전을 막습니다. 화면 보호기 방지는 기기에서 확인해야 합니다. 전체 화면만으로는 방지 요청을 추가하지 않습니다.
+- Linux는 지원되는 환경에서 X 서버 자체의 화면 보호기와 화면 꺼짐만 막습니다. 헤드리스 앱이나 이 기능을 사용할 수 없는 환경에서는 아무 작업도 하지 않으며 OS 또는 데스크톱 설정을 안내하는 알림을 한 번 기록합니다. 전체 화면만으로는 방지 요청을 추가하지 않습니다.
+- GNOME, KDE, LXDE/LXQt, Raspberry Pi OS/labwc, Wayland 세션 전반 등 데스크톱 환경과 컴포지터는 자체적으로 화면 꺼짐을 관리합니다. `setKeepScreenOn`은 이러한 제어에 영향을 주지 않습니다. 각 환경의 설정에서 화면 꺼짐을 비활성화합니다.
+- Raspberry Pi OS는 지원하지 않습니다. Raspberry Pi Configuration에서 화면 꺼짐을 비활성화합니다.
+- Android는 Activity의 화면 켜짐을 유지합니다. iOS는 메인 큐에서 유휴 타이머를 비동기로 비활성화하므로 조회 함수의 값이 먼저 바뀔 수 있습니다. 두 OS 모두 전체 화면만으로는 별도의 방지 요청을 추가하지 않습니다.
+- Web은 Screen Wake Lock API를 지원하는 브라우저에서 보안 컨텍스트(HTTPS 또는 localhost)의 페이지가 보이는 동안 동작합니다. 요청이 유지된 상태에서 페이지가 다시 보이면 자동으로 잠금을 다시 획득합니다. 지원하지 않거나 안전하지 않은 컨텍스트에서는 알림을 한 번 기록합니다. 요청이 거부되면 알림 없이 페이지가 다시 보이거나 비활성화 후 다시 활성화될 때 재시도합니다. 전체 화면만으로는 방지 요청을 추가하지 않습니다. pthreads를 사용하지 않는 빌드는 메인 스레드에서 직접 적용합니다.
 '''
 snippet = '''
 void tcApp::setup() {
@@ -55935,19 +55977,16 @@ description.en = "Returns unrecognized keys from the source JSON object."
 description.ja = "元の JSON オブジェクトから認識されなかったキーを返す。"
 description.ko = "원본 JSON 객체에서 인식되지 않은 키를 반환한다."
 details.en = '''
-- For parsed external JSON, group names are recognized and invalid group shapes or unknown nested keys reject the whole transaction. The permissive group behavior below applies to app-constructed JSON.
 - Call after `reflectMembers()` to obtain a `vector<string>` of top-level source keys not encountered by a top-level `visit()`. A non-object source returns an empty vector.
 - Recognized top-level keys are excluded even when skipped or read-only; unknown keys inside nested groups are not reported.
 - `beginGroup()` does not mark its group name as recognized, so a composite member's top-level key can appear here even when its nested values were applied.
 '''
 details.ja = '''
-- 解析済みの外部 JSON ではグループ名を認識し、不正なグループ形式やグループ内の不明なキーはトランザクション全体を拒否します。以下の柔軟なグループ処理は、アプリが直接構築した JSON に適用します。
 - `reflectMembers()` の後に呼ぶと、トップレベルの `visit()` が処理しなかった元データのトップレベルキーを `vector<string>` で取得できます。元データがオブジェクトでなければ空のベクターを返します。
 - 認識したトップレベルキーは、スキップや読み取り専用の結果になっても含めません。ネストしたグループ内の不明なキーは報告しません。
 - `beginGroup()` はグループ名を認識済みとして記録しないため、内部の値を適用できた複合メンバでも、トップレベルのキーがここに含まれる場合があります。
 '''
 details.ko = '''
-- 파싱된 외부 JSON은 그룹 이름을 인식하며 잘못된 그룹 형식이나 중첩된 알 수 없는 키가 있으면 전체 트랜잭션을 거부합니다. 아래의 유연한 그룹 처리는 앱이 직접 만든 JSON에 적용합니다.
 - `reflectMembers()` 뒤에 호출하면 최상위 `visit()`이 처리하지 않은 원본의 최상위 키를 `vector<string>`로 얻습니다. 원본이 객체가 아니면 빈 벡터를 반환합니다.
 - 인식한 최상위 키는 건너뛰었거나 읽기 전용이어도 포함하지 않습니다. 중첩 그룹 안의 알 수 없는 키는 보고하지 않습니다.
 - `beginGroup()`은 그룹 이름을 인식한 것으로 기록하지 않으므로 내부 값을 적용한 복합 멤버도 최상위 키가 여기에 포함될 수 있습니다.
@@ -55978,19 +56017,16 @@ description.en = "Enters a nested source JSON object."
 description.ja = "元の JSON のネストしたオブジェクトに入る。"
 description.ko = "원본 JSON의 중첩 객체에 진입한다."
 details.en = '''
-- For parsed external JSON, group names are recognized and invalid group shapes or unknown nested keys reject the whole transaction. The permissive group behavior below applies to app-constructed JSON.
 - Selects the object under `name` in the current source; subsequent visits read that object until the matching `endGroup()`.
 - If the key is absent or its value is not an object, visits inside the group find no values and add nothing to the result lists.
 - Group names are not recorded as recognized top-level keys; see `JsonReadReflector::unknownKeys`.
 '''
 details.ja = '''
-- 解析済みの外部 JSON ではグループ名を認識し、不正なグループ形式やグループ内の不明なキーはトランザクション全体を拒否します。以下の柔軟なグループ処理は、アプリが直接構築した JSON に適用します。
 - 現在の元データから `name` のオブジェクトを選び、対応する `endGroup()` まで、そのオブジェクトから値を読み取ります。
 - キーが存在しない場合や値がオブジェクトでない場合、グループ内では値が見つからず、結果リストにも何も追加しません。
 - グループ名は認識済みのトップレベルキーとして記録しません。`JsonReadReflector::unknownKeys` を参照してください。
 '''
 details.ko = '''
-- 파싱된 외부 JSON은 그룹 이름을 인식하며 잘못된 그룹 형식이나 중첩된 알 수 없는 키가 있으면 전체 트랜잭션을 거부합니다. 아래의 유연한 그룹 처리는 앱이 직접 만든 JSON에 적용합니다.
 - 현재 원본에서 `name`의 객체를 선택하며 대응하는 `endGroup()`까지 그 객체에서 값을 읽습니다.
 - 키가 없거나 값이 객체가 아니면 그룹 안에서 값을 찾지 못하며 결과 목록에도 아무것도 추가하지 않습니다.
 - 그룹 이름은 인식한 최상위 키로 기록하지 않습니다. `JsonReadReflector::unknownKeys`를 참조하세요.
@@ -56740,8 +56776,7 @@ description.en = "Reads JSON values into reflected members."
 description.ja = "JSON の値をリフレクションで公開されたメンバに読み込む。"
 description.ko = "JSON 값을 리플렉션으로 공개된 멤버에 읽어 들인다."
 details.en = '''
-- External integer fields require representable integers; floats must be finite and representable. External vectors require exactly 2 or 3 components; colors require 3 or 4 finite components. Read-only fields and invalid group shapes reject the transaction. Setters control the final stored values; setter exceptions, including allocation failure, can leave earlier writes applied.
-- v0.8: JSON parsed from files or strings (including MCP input) is validated as a whole before application. All present fields, nested groups, unknown keys, numeric ranges, enum labels, and writable access are validated before any assignment or setter. Invalid input applies nothing and logs an Error naming the field; `applied` stays empty. Parsed provenance survives copies, moves, and child extraction. JSON constructed directly by app code keeps the permissive behavior described below. Setter exceptions during commit and JSON DOM cleanup are outside the recovery guarantee. Allocation recovery requires standard-library configurations without iterator debugging; MSVC Debug with `_ITERATOR_DEBUG_LEVEL != 0` can allocate iterator proxies in noexcept container construction/moves and is outside this guarantee.
+- Applies matching members and skips mismatches for all JSON values. Earlier writes remain if a later conversion, allocation, or setter throws.
 - Construct with a source `Json`, then pass the reader to `obj.reflectMembers(r)`. The reader owns its source value, so constructing it from a temporary is safe.
 - Only present keys are processed, in reflection order rather than JSON key order. `TC_VALUE` getter/setter members and `TC_DERIVED` members use their setters when value reflection reports an edit; directly reflected fields are assigned directly.
 - For composite properties whose type has `reflectMembers()`, the outer setter is not called and edits to the getter's temporary copy are discarded. Expose such composites as direct fields to apply nested edits.
@@ -56754,8 +56789,7 @@ details.en = '''
 - Processing is synchronous on the calling thread. For scene access and thread rules when modifying nodes, see `Node`.
 '''
 details.ja = '''
-- 外部入力の int フィールドには表現可能な整数、float には有限で表現可能な数値が必要です。外部入力のベクトルは正確に 2 または 3 成分、色は有限の 3 または 4 成分が必要です。読み取り専用フィールドや不正なグループ形式はトランザクションを拒否します。最終的な値はセッターが決定します。メモリ確保の失敗を含むセッター例外では、それ以前の変更が残る場合があります。
-- v0.8: ファイルや文字列から解析した JSON（MCP 入力を含む）は、適用前に全体を検証します。存在する全フィールド、ネストしたグループ、不明なキー、数値の範囲、列挙型のラベル、書き込み可否を、代入やセッターの実行前に検証します。不正な入力は何も適用せず、フィールド名を含む Error を出力し、`applied` は空のままです。解析済みという情報はコピー、移動、子要素の取り出しでも保持します。アプリが直接構築した JSON は、以下の従来の柔軟な動作を維持します。適用中のセッター例外と JSON DOM の破棄は、復旧保証の対象外です。メモリ確保失敗からの復旧は、イテレーターデバッグを無効にした標準ライブラリ構成が対象です。MSVC Debug の `_ITERATOR_DEBUG_LEVEL != 0` では noexcept なコンテナーの構築・移動でプロキシを確保するため、保証対象外です。
+- すべての JSON 値で、一致するメンバを適用し、形式が合わない値をスキップします。後の変換、メモリ確保、セッターで例外が発生した場合、それ以前の変更は残ります。
 - 元の `Json` を渡して構築し、`obj.reflectMembers(r)` にリーダーを渡します。リーダーは元データを所有するため、一時オブジェクトから構築しても安全です。
 - 存在するキーだけを、JSON のキー順ではなくリフレクションの順番で処理します。`TC_VALUE` のゲッター・セッター形式と `TC_DERIVED` のメンバは、値のリフレクションが編集を報告した場合にセッターを使い、直接公開されたフィールドには直接代入します。
 - 型に `reflectMembers()` がある複合プロパティでは、外側のセッターは呼ばれず、ゲッターから得た一時コピーへの編集は破棄されます。内部の編集を適用するには、このような複合値を直接フィールドとして公開してください。
@@ -56768,8 +56802,7 @@ details.ja = '''
 - 呼び出したスレッドで同期的に処理します。ノードを変更する際のシーンへのアクセスとスレッドの規則は `Node` を参照してください。
 '''
 details.ko = '''
-- 외부 입력의 int 필드에는 표현 가능한 정수가, float에는 유한하고 표현 가능한 숫자가 필요합니다. 외부 벡터는 정확히 2개 또는 3개 성분, 색상은 유한한 3개 또는 4개 성분이 필요합니다. 읽기 전용 필드나 잘못된 그룹 형식은 트랜잭션을 거부합니다. 최종 값은 세터가 결정합니다. 메모리 할당 실패를 포함한 세터 예외가 발생하면 이전 변경이 남을 수 있습니다.
-- v0.8: 파일이나 문자열에서 파싱한 JSON(MCP 입력 포함)은 적용 전에 전체를 검증합니다. 대입이나 세터 호출 전에 존재하는 모든 필드, 중첩 그룹, 알 수 없는 키, 숫자 범위, 열거형 레이블, 쓰기 가능 여부를 검증합니다. 잘못된 입력은 아무것도 적용하지 않고 필드 이름을 포함한 Error를 기록하며 `applied`는 비어 있습니다. 파싱 이력은 복사, 이동, 하위 값 추출 후에도 유지됩니다. 앱 코드가 직접 만든 JSON은 아래의 기존 유연한 동작을 유지합니다. 적용 중의 세터 예외와 JSON DOM 소멸은 복구 보장 대상이 아닙니다. 할당 실패 복구는 반복자 디버깅이 없는 표준 라이브러리 구성을 대상으로 합니다. MSVC Debug의 `_ITERATOR_DEBUG_LEVEL != 0`에서는 noexcept 컨테이너 생성·이동이 프록시를 할당하므로 보장 대상이 아닙니다.
+- 모든 JSON 값에서 일치하는 멤버를 적용하고 형식이 다른 값은 건너뜁니다. 이후 변환, 메모리 할당 또는 세터에서 예외가 발생하면 이전 변경은 유지합니다.
 - 원본 `Json`을 전달하여 생성한 뒤 `obj.reflectMembers(r)`에 리더를 전달합니다. 리더가 원본 데이터를 소유하므로 임시 객체로 생성해도 안전합니다.
 - 존재하는 키만 JSON 키 순서가 아닌 리플렉션 순서로 처리합니다. `TC_VALUE`의 게터·세터 형식과 `TC_DERIVED` 멤버는 값의 리플렉션이 편집을 보고하면 세터를 사용하며 직접 공개된 필드에는 직접 대입합니다.
 - 타입에 `reflectMembers()`가 있는 복합 프로퍼티는 바깥쪽 세터를 호출하지 않으며 게터에서 얻은 임시 복사본의 편집을 버립니다. 내부 편집을 적용하려면 이런 복합 값을 직접 필드로 공개하세요.

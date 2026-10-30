@@ -414,6 +414,18 @@ void parity() {
                   sync.numSamples == async.numSamples && sync.getPath() == async.getPath());
         }
     }
+    // Exercise the real context routing without a display or a native DPI mock.
+    // A secondary window can have a different scale from the native main screen.
+    internal::WindowContext fontContext;
+    fontContext.isMain = false;
+    fontContext.dpiScale = sapp_dpi_scale() + 1.0f;
+    struct RestoreContext {
+        internal::WindowContext* previous = internal::currentWindowCtx();
+        ~RestoreContext() { internal::currentWindowCtx() = previous; }
+    } restoreContext;
+    internal::currentWindowCtx() = &fontContext;
+    check("Font parity uses main-thread context DPI distinct from native DPI",
+          isMainThread() && getDpiScale() == fontContext.dpiScale && getDpiScale() != sapp_dpi_scale());
     for (const fs::path& path : {font, broken, fixtureDir / "missing.ttf", fs::path("https://invalid/font.ttf")}) {
         Font sync, async; sync.load(font, 24); async.load(font, 24);
         const auto* oldSyncAtlas = sync.getAtlas(0);
@@ -423,10 +435,16 @@ void parity() {
         { Logs logs; expected = sync.load(path, 27, path == font ? 2 : 0); syncLogs = logs.lines; }
         auto listener = async.onLoad.listen([&](LoadResult& r) { actual = r; ++events; });
         { Logs logs; async.loadAsync(path, 27, path == font ? 2 : 0); finish(); asyncLogs = logs.lines; }
-        check("Font branch-specific result, logs, atlas and logical size parity", sameResult(expected, actual) && syncLogs == asyncLogs &&
-              sync.isLoaded() == async.isLoaded() && sync.getAtlasCount() == async.getAtlasCount() &&
-              sync.getSize() == async.getSize() && sync.getAscent() == async.getAscent() &&
-              sync.getDescent() == async.getDescent() && sync.getWidth("AWa") == async.getWidth("AWa") && events == 1);
+        printf("Font parity branch: %s\n", path.string().c_str());
+        check("Font branch result parity", sameResult(expected, actual));
+        check("Font branch logs parity", syncLogs == asyncLogs);
+        check("Font branch events parity", events == 1);
+        check("Font branch atlas state parity", sync.isLoaded() == async.isLoaded() &&
+              sync.getAtlasCount() == async.getAtlasCount());
+        check("Font branch logical size parity", sync.getSize() == async.getSize());
+        check("Font branch ascent parity", sync.getAscent() == async.getAscent());
+        check("Font branch descent parity", sync.getDescent() == async.getDescent());
+        check("Font branch width parity", sync.getWidth("AWa") == async.getWidth("AWa"));
         if (path == fs::path("https://invalid/font.ttf")) {
             check("native unsupported URL retains the exact previous atlas in both", !expected &&
                   sync.getAtlas(0) == oldSyncAtlas && async.getAtlas(0) == oldAsyncAtlas && sync.isLoaded() && async.isLoaded() &&

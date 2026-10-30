@@ -1281,12 +1281,7 @@ void registerStandardTools(Server& server) {
                 {"applied", r.applied},
                 {"members", std::move(after)}
             };
-            if (!r.skipped.empty() || trussc::internal::JsonReadResultAccess::rejected(r)) {
-                result["status"] = "error";
-                result["message"] = "Settings transaction rejected at field " +
-                    (r.skipped.empty() ? std::string("$") : r.skipped.front());
-                if (!r.skipped.empty()) result["skipped"] = r.skipped;
-            }
+            if (!r.skipped.empty()) result["skipped"] = r.skipped;
             if (!r.readOnly.empty()) result["readOnly"] = r.readOnly;
             auto unknown = r.unknownKeys();
             if (!unknown.empty()) result["unknown"] = unknown;

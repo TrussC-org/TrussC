@@ -2223,7 +2223,7 @@ static int stbtt__run_charstring(const stbtt_fontinfo *info, int glyph_index, st
          }
          // FALLTHROUGH
       case 0x1D: // callgsubr
-         // Bound (security): retain the 65536-call expansion ceiling as well as the total instruction allowance. Exhaustion rejects the glyph and marks its owning workspace.
+         // Bound (security): TrussC adds a cumulative 65536-call expansion ceiling per glyph interpreter pass, separate from upstream's recursion-depth check and the total instruction allowance. Exhaustion rejects the glyph and marks its owning workspace.
          if (++subr_calls > 65536) { STBTT_REPORT_FAILURE(); return STBTT__CSERR("subroutine work"); }
          if (sp < 1) return STBTT__CSERR("call(g|)subr stack");
          v = (int) s[--sp];

@@ -1,4 +1,5 @@
 #pragma once
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -49,11 +50,43 @@ inline bool parseCube(std::istream& input, CubeData& result, std::string& error)
                     error = "invalid LUT dimensions"; return false;
                 }
                 // No reserve from the declaration: storage grows only with actual complete rows.
-            } else if (keyword == "DOMAIN_MIN" || keyword == "DOMAIN_MAX") {
-                float a, b, c;
-                if (!(fields >> a >> b >> c) || !std::isfinite(a) || !std::isfinite(b) || !std::isfinite(c)) {
-                    error = "invalid LUT domain"; return false;
+            } else if (keyword == "LUT_1D_INPUT_RANGE" || keyword == "LUT_3D_INPUT_RANGE" ||
+                       keyword == "DOMAIN_MIN" || keyword == "DOMAIN_MAX") {
+                // Bound (format): input range requires two finite values; per-channel domain requires three.
+                const bool inputRange = keyword == "LUT_1D_INPUT_RANGE" || keyword == "LUT_3D_INPUT_RANGE";
+                const int components = inputRange ? 2 : 3;
+                bool defaultRange = true;
+                for (int component = 0; component < components; ++component) {
+                    double value;
+                    if (!(fields >> value) || !std::isfinite(value)) {
+                        error = "invalid LUT range (" + keyword + ")"; return false;
+                    }
+                    const auto next = fields.peek();
+                    if (next != std::char_traits<char>::eof() && next != '#' &&
+                        !std::isspace(static_cast<unsigned char>(next))) {
+                        error = "invalid LUT range (" + keyword + ")"; return false;
+                    }
+                    const double expectedValue = keyword == "DOMAIN_MAX" ||
+                        (inputRange && component == 1) ? 1.0 : 0.0;
+                    // Bound (implementation): sampling supports only the default 0..1 domain.
+                    // Compare parsed doubles exactly; no epsilon admits semantics we cannot apply.
+                    defaultRange = defaultRange && value == expectedValue;
                 }
+                const auto trailing = (fields >> std::ws).peek();
+                if (trailing != std::char_traits<char>::eof() && trailing != '#') {
+                    error = "invalid LUT range (" + keyword + ")"; return false;
+                }
+                if (!defaultRange) {
+                    error = "unsupported LUT range (" + keyword + "): only 0..1 is supported"; return false;
+                }
+            } else if (keyword == "LUT_IN_VIDEO_RANGE" || keyword == "LUT_OUT_VIDEO_RANGE") {
+                // Resolve uses bare flags for legal range; full range omits the flags.
+                // Bound (implementation): video-range conversion is unsupported, so these flags must fail.
+                const auto trailing = (fields >> std::ws).peek();
+                if (trailing != std::char_traits<char>::eof() && trailing != '#') {
+                    error = "invalid LUT range (" + keyword + ")"; return false;
+                }
+                error = "unsupported LUT range (" + keyword + "): only full range is supported"; return false;
             } else {
                 if (keyword == "LUT_1D_SIZE") { error = "1D LUT not supported"; return false; }
                 float r, g, b;

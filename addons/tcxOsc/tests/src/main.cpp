@@ -2,7 +2,7 @@
 // =============================================================================
 // tcxOsc tests - headless behavioral test (no window).
 //
-// Built and run by CI on every push/PR across macOS / Windows / Linux via
+// Built and run by daily CI across macOS / Windows / Linux via
 // examples/build_all.py --addon-tests-only (exit 0 = pass, non-zero = fail).
 // Console only, so it runs on headless runners. Uses tc::UdpSocket through
 // OscSender/OscReceiver (not raw POSIX sockets) so it compiles on Windows too.
@@ -552,10 +552,11 @@ int main() {
     tx.setMulticastLoopback(true);    // deliver to local listeners on this host
     tx.setMulticastInterface(MIF);
 
-    // Exclusive setup must reject a second listener and allow port fallback.
+    // Compare wildcard binds throughout: exclusivity is against the same address.
+    // Unicast data-path fixtures below continue to use loopback.
     {
         OscReceiver owner;
-        const int occupied = bindFirstFree(owner, UNI_PORTS);
+        const int occupied = bindFirstFree(owner, UNI_PORTS, false);
         check("exclusive: first receiver bound", occupied != 0);
         if (occupied) {
             OscReceiver second;
@@ -575,7 +576,6 @@ int main() {
                 check("setup failure: exactly one Error log", logs == 1);
                 check("setup failure: receiver is not listening", !second.isListening());
             };
-            tcx::osc::OscReceiverTestAccess::socket(second).setBindAddress("127.0.0.1");
             expectSetupFailure("exclusive: second setup fails",
                 [&] { return second.setup(occupied); }, std::to_string(occupied));
             tcx::osc::OscReceiverTestAccess::socket(second).setBindAddress("");
@@ -585,13 +585,12 @@ int main() {
             // Covers Windows SO_EXCLUSIVEADDRUSE: even a later raw socket with
             // reuse enabled must not be able to bind over the exclusive receiver.
             tc::UdpSocket sharing;
-            sharing.setBindAddress("127.0.0.1");
             check("exclusive: competing socket enables reuse", sharing.setReuseAddress(true));
             check("exclusive: reuse socket cannot take owned port", !sharing.bind(occupied, false));
             sharing.close();
 
             const int candidates[4] = { occupied, MC_PORTS[0], MC_PORTS[1], MC_PORTS[2] };
-            const int freePort = bindFirstFree(second, candidates);
+            const int freePort = bindFirstFree(second, candidates, false);
             check("exclusive: bindFirstFree skips occupied port", freePort != 0 && freePort != occupied);
             second.close();
 
@@ -602,11 +601,27 @@ int main() {
                 [&] { return second.setupMulticast(freePort, GROUP_A, "invalid-interface"); }, "Invalid multicast/interface");
             if (freePort) {
                 tc::UdpSocket reclaimed;
-                reclaimed.setBindAddress("127.0.0.1");
                 check("multicast setup: failed join releases port", reclaimed.bind(freePort, false));
             }
         }
     }
+
+#if defined(__linux__)
+    // Linux also refuses a wildcard reuse bind over an exclusive loopback bind.
+    // macOS and Windows allow this different-address combination.
+    {
+        tc::UdpSocket owner, sharing;
+        owner.setBindAddress("127.0.0.1");
+        const bool bound = owner.bind(0, false);
+        check("Linux: exclusive loopback socket bound", bound);
+        if (bound) {
+            check("Linux: wildcard socket enables address reuse", sharing.setReuseAddress(true));
+            check("Linux: wildcard socket enables port reuse", sharing.setReusePort(true));
+            check("Linux: wildcard reuse cannot share exclusive loopback port",
+                  !sharing.bind(owner.getLocalPort(), false));
+        }
+    }
+#endif
 
     // Both receivers must receive the same multicast datagram on a shared port.
     {
@@ -645,8 +660,7 @@ int main() {
             }
             second.close();
             // Reusing a receiver for setup() must clear its old sharing options.
-            tcx::osc::OscReceiverTestAccess::socket(first).setBindAddress("127.0.0.1");
-            check("exclusive: switch from multicast to unicast", first.setup(port) && oscBoundToLoopback(first));
+            check("exclusive: switch from multicast to unicast", first.setup(port));
             check("exclusive: switched receiver rejects sharing socket",
                   !second.setupMulticast(port, GROUP_A, MIF));
         }
