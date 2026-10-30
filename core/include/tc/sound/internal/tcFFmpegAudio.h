@@ -64,6 +64,7 @@ struct FFmpegAudio {
         packet = av_packet_alloc();
         if (!codec || !frame || !packet) return MA_OUT_OF_MEMORY;
         if (avcodec_parameters_to_context(codec, st->codecpar) < 0) return MA_INVALID_FILE;
+        codec->thread_count = 0; // Let FFmpeg choose decoder threads.
         if (avcodec_open2(codec, decoder, nullptr) < 0) return MA_INVALID_FILE;
         sourceFormat = codec->sample_fmt;
         rate = codec->sample_rate;

@@ -39,13 +39,16 @@ public:
     }
 
     bool decodeMemory(const void* data, size_t dataSize, SoundBuffer& buffer) {
-        internal::AudioDecodeStatus entry;
-        if (!entry.encoded(dataSize)) return false;
         return decodeMemoryInput(data, dataSize, buffer, "memory");
     }
 private:
     bool decodeMemoryInput(const void* data, size_t dataSize, SoundBuffer& buffer, const std::string& label) {
         if (!data || !dataSize) return false;
+        // Bound (abi): appsrc exposes its byte length as gint64; larger inputs fail before narrowing.
+        if (dataSize > uint64_t(G_MAXINT64)) {
+            logError("SoundBuffer") << "AAC memory input size does not fit GStreamer's gint64 byte length";
+            return false;
+        }
         // Store memory data for appsrc callback
         memoryData_ = static_cast<const uint8_t*>(data);
         memorySize_ = dataSize;

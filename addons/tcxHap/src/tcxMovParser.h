@@ -325,10 +325,10 @@ public:
         // The sample must lie fully inside the file; this is checked before
         // the buffer is sized
         // Bound (security): untrusted MOV sample sizes must fit the file to keep reads and memory bounded by input. Overflow rejects the sample via false and is counted.
-        if (!sample.size || sample.size > detail::movFrameBytes || sample.size > fileSize_ || sample.offset > fileSize_ - sample.size) {
-            return reject("sample is empty or exceeds file range or 128 MiB frame budget", false, sample.size, detail::movFrameBytes);
+        if (!sample.size || sample.size > fileSize_ || sample.offset > fileSize_ - sample.size) {
+            return reject("sample is empty or exceeds file range", false, sample.size, fileSize_);
         }
-        // Bound (security): encoded frames fit 128 MiB before allocation; exact growth includes old storage in the 512 MiB player set. Overflow rejects the sample and is counted.
+        // Allocation failure rejects the complete sample.
         if (!detail::resizeMovBuffer(data, sample.size)) { tc::logError("MovParser") << "MOV sample allocation failed"; return false; }
 
         if (!readCapturedSample(sample, data.data(), data.size())) {
