@@ -69,52 +69,6 @@ std::size_t compressBound(std::size_t nbytes, Codec codec) {
 
 // --- vector form -----------------------------------------------------------
 
-namespace {
-// Walk the block without producing bytes. Lengths and back references must
-// fit the supplied block and declared output before any output allocation.
-bool lz4OutputSize(const void* src, size_t size, size_t expected) {
-    const auto* bytes = static_cast<const uint8_t*>(src);
-    size_t position = 0, produced = 0;
-    auto length = [&](size_t initial, size_t& value) {
-        value = initial;
-        if (initial == 15) {
-            unsigned extension;
-            do {
-                if (position == size) return false;
-                extension = bytes[position++];
-                if (extension > expected || value > expected - extension) return false;
-                value += extension;
-            } while (extension == 255);
-        }
-        return value <= expected - produced;
-    };
-    while (position < size) {
-        unsigned token = bytes[position++];
-        size_t literals;
-        if (!length(token >> 4, literals) || literals > size - position) return false;
-        position += literals;
-        produced += literals;
-        // LZ4 block end conditions (lz4.c: LASTLITERALS == 5): the
-        // final sequence is literal-only and needs five literals, except
-        // for a short block consisting entirely of literals (including empty).
-        if (position == size)
-            return produced == expected && literals >= std::min(expected, size_t(5));
-        // lz4.c: MFLIMIT == 12. Every match, including the last, must
-        // start at least twelve decoded bytes before the end of the block.
-        if (expected - produced < 12) return false;
-        if (size - position < 2) return false;
-        size_t offset = bytes[position] | (size_t(bytes[position + 1]) << 8);
-        position += 2;
-        if (!offset || offset > produced) return false;
-        size_t match;
-        if (!length(token & 15, match) || expected - produced < 4 ||
-            match > expected - produced - 4) return false;
-        produced += match + 4;
-    }
-    return false;
-}
-}
-
 bool compress(const void* src, std::size_t nbytes,
               std::vector<std::uint8_t>& out, Codec codec) {
     const std::size_t cap = compressBound(nbytes, codec);
@@ -153,7 +107,6 @@ bool decompress(const void* src, std::size_t nbytes,
         // Bound (abi): LZ4 lengths and its decoded result use int.
         // Overflow rejects the whole unit and is counted by the returned false.
         if (decompressedSize > INT_MAX || nbytes > INT_MAX) return failure();
-        if (!lz4OutputSize(src, nbytes, decompressedSize)) return failure();
     } else return failure();
     if (codec == Codec::LZ4 && decompressedSize > 256u*1024u*1024u) {
         try {

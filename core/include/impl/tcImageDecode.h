@@ -47,6 +47,7 @@ private:
 };
 bool imageDecodeAllocationAllowed(size_t bytes = 0);
 void imageDecodeAllocationFailed();
+// Tests retained image decode failure reporting and MCP workspace admission.
 // Thread-local deterministic failure injection; -1 disables it.
 void failImageDecodeAllocationAfterForTests(int64_t successfulAllocations);
 size_t imageDecodeAllocationAttemptsForTests();

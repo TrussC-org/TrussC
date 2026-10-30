@@ -235,12 +235,11 @@ struct GuestLibrary {
 struct FileWatcher {
     vector<fs::path> watchPaths;
     fs::file_time_type lastBuildTime;
-    internal::HotReloadScanLoss scanLoss;
 
     void init(const string& srcDir) {
-        // Release old path storage before constructing the bounded replacement.
+        // Release old paths before scanning again.
         vector<fs::path>().swap(watchPaths);
-        watchPaths = internal::hotReloadSources(srcDir, scanLoss);
+        watchPaths = internal::hotReloadSources(srcDir);
         lastBuildTime = fs::file_time_type::clock::now();
     }
 
@@ -275,18 +274,9 @@ inline string findCMake(const string& buildDir = "") {
     // know the generator used by the current build (e.g. "Visual Studio 18 2026").
     if (!buildDir.empty()) {
         fs::path cachePath = fs::path(buildDir) / "CMakeCache.txt";
-        auto& loss = internal::hotReloadCacheLoss();
-        const auto path = internal::hotReloadCMakeCommand(cachePath, loss);
-        try {
-            std::error_code error;
-            if (!path.empty() && fs::is_regular_file(path, error)) return path;
-        } catch (const fs::filesystem_error&) {
-            ++loss.rejectedCaches;
-            loss.warn();
-        } catch (const std::bad_alloc&) {
-            ++loss.rejectedCaches;
-            loss.warn();
-        }
+        const auto path = internal::hotReloadCMakeCommand(cachePath);
+        std::error_code error;
+        if (!path.empty() && fs::is_regular_file(path, error)) return path;
     }
 #ifdef __APPLE__
     const char* paths[] = {

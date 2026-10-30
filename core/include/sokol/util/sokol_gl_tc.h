@@ -2559,8 +2559,7 @@ typedef struct {
     #define _SGL_DEFAULT_MAX_VERTICES (128)
     #define _SGL_DEFAULT_MAX_COMMANDS (64)
 #else
-    /* Non-Metal: start with larger buffers to minimize grow frequency,
-       since mid-frame grow requires deferral (1-frame rendering skip) */
+    /* Non-Metal: start with larger buffers to minimize grow frequency. */
     #define _SGL_DEFAULT_MAX_VERTICES (1024 * 64)
     #define _SGL_DEFAULT_MAX_COMMANDS (1024 * 16)
 #endif
@@ -2612,7 +2611,6 @@ typedef struct {
 
     /* sokol-gfx resources */
     sg_buffer vbuf;
-    int pending_grow_vertices;  /* [TrussC fork] deferred grow: if >0, grow buffer at start of next _sgl_draw */
     sg_buffer retired_bufs[4];  /* [TrussC fork] retire list: old GPU buffers awaiting destruction */
     int retired_count;
     /* [TrussC fork] per-frame single-upload cache. All layer draws within one
@@ -3867,12 +3865,6 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
         }
         ctx->retired_count = 0;
 
-        /* [TrussC fork] If a deferred grow was requested last frame, do it now
-           (safe because we're at the start of a new frame's draw) */
-        if (ctx->pending_grow_vertices > 0) {
-            _sgl_grow_gpu_buffer(ctx, ctx->pending_grow_vertices);
-            ctx->pending_grow_vertices = 0;
-        }
         /* [TrussC fork] If GPU buffer was released, recreate it */
         if (SG_INVALID_ID == ctx->vbuf.id) {
             sg_buffer_desc vbuf_desc;
