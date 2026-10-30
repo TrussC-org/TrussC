@@ -1,83 +1,52 @@
 # TrussC modifications
 
-## LuaJIT
+## Engine source provenance
 
-Upstream version: LuaJIT 2.1.ROLLING (`LuaJIT/src/luajit_rolling.h`).
-Upstream commit: unknown; the import history and `docs/LICENSE.md` do not
-record it. The MIT license is retained in `LuaJIT/COPYRIGHT`.
+The L1/L2 binary-reader patches and both `tcloadbuffer.h` files were removed.
+The L3 MSVC source rewrite in `lj_gdbjit.c` was also removed. Each restored
+file is byte-identical to the imported source before `cc1f0733` (#969), recovered
+with `git show cc1f0733^:<path>` without network access.
 
-- `LuaJIT/src/lj_bcread.c`: adds checks so malformed bytecode cannot read
-  beyond its section or allocate from unchecked counts. The byte/block and
-  32/33-bit ULEB readers check bounds and overflow; table and prototype loading
-  checks counts, size products and native representation limits before
-  allocation. Debug loading checks line-info size and upvalue-name
-  terminators. `lj_bcread` confines each prototype to its declared section.
-  Refill logic is replaced by reads from a complete stable binary block,
-  supplied by the load guard or the bundled-library loader. On update,
-  recheck all bytecode accessors, allocation sizes and debug layouts, and
-  retain section-local checks if upstream still lacks them.
-- `LuaJIT/src/lj_gdbjit.c`: behaviour-preserving compiler compatibility patch.
-  `#if` conditionals inside the `DSECT` macro arguments do not compile on
-  MSVC (C2121). Paired `DSECT_BEGIN`/`DSECT_END` replace `DSECT`; all five
-  invocations (CIE, FDE, info, line and its nested header) and the `#undef`s
-  are updated in the EH-frame, debug-info and debug-line emission regions.
-  The enabled GDB JIT preprocessed tokens are unchanged. On update, check
-  whether upstream has removed directives from macro arguments; otherwise
-  reapply the pairs and verify enabled GDB JIT compilation and token
-  equivalence, including the target-dependent branches.
-- `LuaJIT/src/lj_lex.c`: `lex_more` allows a complete first binary block at or
-  above `LJ_MAX_BUF`, using pointer/`size_t` ranges. This preserves valid
-  large-file loading with the new guard; text scratch buffers and individual
-  prototypes retain native limits. The special `SIZE_MAX` embedded-bytecode
-  end-marker convention is preserved. On update, recheck the first-block
-  detection and end-marker path, and rerun large-file and embedded-module
-  loading regressions.
-- `LuaJIT/src/lj_load.c`: `lua_loadx` installs the vendor-local reader guard
-  around the native protected parser and releases its buffer after lexer
-  cleanup, on success or failure. This integration enables the range checks;
-  it changes binary input buffering while source remains streamed. On update,
-  recheck protected-call boundaries, cleanup ordering and all binary-loader
-  entry points against `lj_bcread.c`'s stable-block requirement.
-- `LuaJIT/src/tcloadbuffer.h` (added): `TcLuaLoadGuard` and
-  `tcLuaLoadBegin`/`tcLuaLoadRead`/`tcLuaLoadEnd` collect finite binary-enabled
-  reader input into one stable block, checking `size_t` overflow and `GCSize`
-  narrowing. Native `lj_mem_realloc`/`lj_mem_free` preserve allocator ownership,
-  GC accounting and memory errors; there is no load-size policy cap or
-  allocator swap. Source, text-only rejection and `SIZE_MAX` embedded modules
-  pass through. On update, recheck allocator/accounting APIs, mode handling,
-  embedded-module conventions and cleanup after failed reads or allocations.
+PUC Lua is 5.4.9 (import update `9feb00f5`). LuaJIT is 2.1.ROLLING,
+imported in `4e4bed81`; its exact upstream commit was not recorded. Therefore
+LuaJIT identity against a separately downloaded upstream commit cannot be
+verified offline. Original MIT copyright notices are retained.
 
-## PUC Lua
+| Restored file | Imported upstream version | SHA-256 |
+| --- | --- | --- |
+| `LuaJIT/src/lj_bcread.c` | LuaJIT 2.1.ROLLING (upstream commit unrecorded) | `653b2572f30ac7847949b3e978f42a2c84487eddaae5566bd4f260091656ab94` |
+| `LuaJIT/src/lj_lex.c` | LuaJIT 2.1.ROLLING (upstream commit unrecorded) | `49f7c0d261603e820213624637d79923e16b147ece3826cd6d98ae042dd23ac2` |
+| `LuaJIT/src/lj_load.c` | LuaJIT 2.1.ROLLING (upstream commit unrecorded) | `5cad42007acdaa25f20a57caa666302c1c6301c6dd4f4e3f4661eeafa784279a` |
+| `LuaJIT/src/lj_gdbjit.c` | LuaJIT 2.1.ROLLING (upstream commit unrecorded) | `c0c7430331b187b759b275b8807d3503db3741ee5cb6dcbac2db0db33185176b` |
+| `lua/src/lapi.c` | Lua 5.4.9 | `cd369dc6900a7696ca55ccbd4f50eadfa799b975f34b7afe450e1b859517a56e` |
+| `lua/src/lundump.c` | Lua 5.4.9 | `7f7b078026e162161d402feba73a69cbe66a98558ec0745a445a595f42eac688` |
 
-Upstream version: Lua 5.4.9 (`lua/src/lua.h`). The MIT license is retained
-in that header.
+## Build integration retained
 
-- `lua/src/lapi.c`: `lua_load` installs the vendor-local reader guard before
-  `luaD_protectedparser` and frees its buffer afterward for either status.
-  This enables pre-allocation range checks by changing binary input buffering;
-  source remains streamed. On update, recheck parser protection and cleanup
-  paths, including allocation errors, against the undumper's stable-block
-  requirement.
-- `lua/src/lundump.c`: adds remaining-byte checks before block reads and
-  allocations for strings, code, constants, child prototypes, upvalues and
-  debug tables. Constant tags, closure/upvalue counts, line-info counts,
-  absolute-line positions and intervals, line-number overflow, local-variable
-  ranges and upvalue-name counts are validated instead of trusting the dump
-  or assertions. `LoadState`, `loadFunction` and `luaU_undump` track nesting
-  against `LUAI_MAXCCALLS`, covering parser-produced prototypes while bounding
-  native-stack recursion. On update, review the bytecode format, every
-  allocation site, debug lookup assumptions and the parser's nesting limit;
-  retain equivalent checks before publishing prototypes to lint or runtime.
-- `lua/src/tcloadbuffer.h` (added): `TcLuaLoadGuard` and
-  `tcLuaLoadBegin`/`tcLuaLoadRead`/`tcLuaLoadEnd` buffer finite binary-enabled
-  reader input with `size_t` overflow checks. Native
-  `luaM_realloc_`/`luaM_free_` retain GC accounting, emergency collection/retry
-  and native memory errors, without a load-size policy cap or allocator swap.
-  Source and text-only rejection pass through. On update, recheck native
-  allocation and error APIs, mode handling and buffer release on all outcomes.
+TrussC does not enable `LUAJIT_USE_GDBJIT`. Its luajit-cmake integration now
+excludes `lj_gdbjit.c` from ordinary builds and rejects the GDB JIT CMake
+switches. The optional upstream amalgamation still includes its disabled body;
+no TrussC build defines the enabling macro. Custom compiler flags enabling it
+are unsupported.
 
-When updating either engine, rerun `tests/engine` checks for malformed and
-chunked bytecode, text-only rejection, allocator failures and binary memory
-accounting, plus the addon loading/lint regressions. For LuaJIT, also run the
-embedded-module and optional large-bytecode targets. These patches check
-bytecode structure; they are not an instruction verifier or execution sandbox.
+Other existing build/configuration support remains: MSVC `/bigobj`, the iOS
+`LUA_USE_IOS` definition (upstream `loslib.c` stubs `system()`), and Web C++
+exception recovery for owned load/lint boundaries. The separate upstream Lua
+CLI `lua.c` remains excluded from this embedded library. The supplied Decision
+calls the retained work “L4” without identifying a file or patch; no other
+existing vendor changes were reverted or rewritten.
+
+## Text loading policy (addon code, not vendor source)
+
+TrussC's `runFile`, initial sketch/file loads, reload and lint use mode `"t"`;
+initial file loads and reload share `runFile`. The live editor compiles source
+as text. Binary chunks are rejected at these entry points. LuaJIT's generic
+wrong-mode diagnostic is clarified in the owned file/lint paths to name binary
+input and text mode. The script-visible standard `load`, `loadstring`
+(when present), `loadfile`, `dofile` and `require` remain upstream, including
+binary loading. Scripts choose and are responsible for inputs they load
+through those functions. Native engine and sol2 C++ APIs are also unchanged.
+
+Run `tests/engine` for both engines and the full addon tests when updating.
+Tests for the removed reader guards were removed; text-loading and independent
+lint lifetime/failure regressions remain.

@@ -1,5 +1,5 @@
 // Executes the actual EM_JS ingress with a deterministic browser SDK stand-in.
-// This checks admission/copy ownership, not browser codec internals.
+// This checks format handling/copy ownership, not browser codec internals.
 const fs = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
@@ -21,23 +21,24 @@ async function run({size = 12, channels = 2, rate = 44100, length = 8, highPoint
             }
         }};
     vm.createContext(context);
-    vm.runInContext('function decodeAacFile(pathPtr, encodedCap, channelCap, rateCap) {' + body('decodeAacFile') + '}', context);
-    const id = context.decodeAacFile(0, 64, 32, 384000);
+    vm.runInContext('function decodeAacFile(pathPtr) {' + body('decodeAacFile') + '}', context);
+    const id = context.decodeAacFile(0);
     await Promise.resolve(); await Promise.resolve();
     const slot = context.Module.trusscAacSlots.get(id);
     if (slot.success) {
         const writes = [];
-        context.HEAPF32 = highPointer ? new Proxy({}, {set: (_, key) => { writes.push(Number(key)); return true; }}) : new Float32Array(32);
+        context.HEAPF32 = highPointer ? new Proxy({}, {set: (_, key) => { writes.push(Number(key)); return true; }}) : new Float32Array(channels * length);
         vm.runInContext('function copyAacData(slot, outPtr, totalSamples) {' + body('copyAacData') + '}', context);
         context.copyAacData(id, highPointer ? 0x80000000 : 0, channels * length);
         if (highPointer) assert.deepEqual(writes.slice(0, 2), [0x20000000, 0x20000002]);
-        else assert.deepEqual(Array.from(context.HEAPF32.slice(0, 6)), [0, 10, 1, 11, 2, 12]);
+        else for (let ch = 0; ch < channels; ++ch)
+            for (let i = 0; i < length; ++i) assert.equal(context.HEAPF32[i * channels + ch], ch * 10 + i);
     }
     return {slot: context.Module.trusscAacSlots.get(id), reads, decodes, copies};
 }
 (async () => {
     let r = await run({size: 65});
-    assert.equal(r.reads, 0); assert.equal(r.decodes, 0); assert.ok(r.slot.bound);
+    assert.equal(r.reads, 1); assert.equal(r.decodes, 1); assert.ok(r.slot.success);
     r = await run({highPointer: true});
     assert.equal(r.slot.success, true);
     r = await run(); // exactly 64 bytes of decoded audio
@@ -45,9 +46,12 @@ async function run({size = 12, channels = 2, rate = 44100, length = 8, highPoint
     assert.equal(r.copies, 2); // one direct channel access per channel
     r = await run({length: 9}); // decoded PCM has no quota
     assert.equal(r.slot.success, true);
-    for (const metadata of [ {channels: 33}, {rate: 384001}, {rate: NaN}, {channels: 1.5}, {length: -1}]) {
+    for (const metadata of [{channels: 254}, {rate: 384001}]) {
+        r = await run(metadata); assert.equal(r.slot.success, true);
+    }
+    for (const metadata of [ {rate: NaN}, {channels: 1.5}, {length: -1}]) {
         r = await run(metadata);
         assert.ok(r.slot.bound); assert.equal(r.slot.data, null); assert.equal(r.copies, 0);
     }
-    console.log('PASS: Web admission and AudioBuffer ownership (SDK stand-in)');
+    console.log('PASS: Web unusual formats and AudioBuffer ownership (SDK stand-in)');
 })().catch(e => { console.error(e); process.exitCode = 1; });

@@ -152,28 +152,31 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["updateScrollBounds"] = &trussc::ScrollContainer::updateScrollBounds;
     }
     {
-        sol::usertype<trussc::WindowSettings> t = lua->new_usertype<trussc::WindowSettings>("WindowSettings");
-        t["clipboardSize"] = &trussc::WindowSettings::clipboardSize;
-        t["decorated"] = &trussc::WindowSettings::decorated;
-        t["fullscreen"] = &trussc::WindowSettings::fullscreen;
-        t["height"] = &trussc::WindowSettings::height;
-        t["highDpi"] = &trussc::WindowSettings::highDpi;
-        t["pixelPerfect"] = &trussc::WindowSettings::pixelPerfect;
-        t["sampleCount"] = &trussc::WindowSettings::sampleCount;
-        t["swapInterval"] = &trussc::WindowSettings::swapInterval;
-        t["title"] = &trussc::WindowSettings::title;
-        t["uniformBufferReserve"] = &trussc::WindowSettings::uniformBufferReserve;
-        t["width"] = &trussc::WindowSettings::width;
-        t["reserveUniformBuffer"] = &trussc::WindowSettings::reserveUniformBuffer;
-        t["setClipboardSize"] = &trussc::WindowSettings::setClipboardSize;
-        t["setDecorated"] = &trussc::WindowSettings::setDecorated;
-        t["setFullscreen"] = &trussc::WindowSettings::setFullscreen;
-        t["setHighDpi"] = &trussc::WindowSettings::setHighDpi;
-        t["setPixelPerfect"] = &trussc::WindowSettings::setPixelPerfect;
-        t["setSampleCount"] = &trussc::WindowSettings::setSampleCount;
-        t["setSize"] = &trussc::WindowSettings::setSize;
-        t["setSwapInterval"] = &trussc::WindowSettings::setSwapInterval;
-        t["setTitle"] = &trussc::WindowSettings::setTitle;
+        sol::usertype<trussc::CoreEvents> t = lua->new_usertype<trussc::CoreEvents>("CoreEvents");
+        t["afterFrame"] = &trussc::CoreEvents::afterFrame;
+        t["clipboardPasted"] = &trussc::CoreEvents::clipboardPasted;
+        t["console"] = &trussc::CoreEvents::console;
+        t["deviceLost"] = &trussc::CoreEvents::deviceLost;
+        t["draw"] = &trussc::CoreEvents::draw;
+        t["exit"] = &trussc::CoreEvents::exit;
+        t["exitRequested"] = &trussc::CoreEvents::exitRequested;
+        t["filesDropped"] = &trussc::CoreEvents::filesDropped;
+        t["hotReloadUnload"] = &trussc::CoreEvents::hotReloadUnload;
+        t["keyPressed"] = &trussc::CoreEvents::keyPressed;
+        t["keyReleased"] = &trussc::CoreEvents::keyReleased;
+        t["mouseDragged"] = &trussc::CoreEvents::mouseDragged;
+        t["mouseMoved"] = &trussc::CoreEvents::mouseMoved;
+        t["mousePressed"] = &trussc::CoreEvents::mousePressed;
+        t["mouseReleased"] = &trussc::CoreEvents::mouseReleased;
+        t["mouseScrolled"] = &trussc::CoreEvents::mouseScrolled;
+        t["onRender"] = &trussc::CoreEvents::onRender;
+        t["rawEvent"] = &trussc::CoreEvents::rawEvent;
+        t["setup"] = &trussc::CoreEvents::setup;
+        t["touchMoved"] = &trussc::CoreEvents::touchMoved;
+        t["touchPressed"] = &trussc::CoreEvents::touchPressed;
+        t["touchReleased"] = &trussc::CoreEvents::touchReleased;
+        t["update"] = &trussc::CoreEvents::update;
+        t["windowResized"] = &trussc::CoreEvents::windowResized;
     }
     {
         sol::usertype<trussc::JsonWriteReflector> t = lua->new_usertype<trussc::JsonWriteReflector>("JsonWriteReflector");
@@ -188,52 +191,57 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["pushDerived"] = &trussc::JsonWriteReflector::pushDerived;
         t["pushReadOnly"] = &trussc::JsonWriteReflector::pushReadOnly;
     }
-    lua->new_usertype<trussc::Orientation>("Orientation",
-        sol::meta_function::equal_to, [](trussc::Orientation a, trussc::Orientation b){ return a == b; },
-        "Portrait", sol::var(trussc::Orientation::Portrait),
-        "PortraitUpsideDown", sol::var(trussc::Orientation::PortraitUpsideDown),
-        "LandscapeLeft", sol::var(trussc::Orientation::LandscapeLeft),
-        "LandscapeRight", sol::var(trussc::Orientation::LandscapeRight),
-        "Landscape", sol::var(trussc::Orientation::Landscape),
-        "All", sol::var(trussc::Orientation::All),
-        "AllButUpsideDown", sol::var(trussc::Orientation::AllButUpsideDown));
     {
-        sol::usertype<trussc::SerialDeviceInfo> t = lua->new_usertype<trussc::SerialDeviceInfo>("SerialDeviceInfo");
-        t["deviceId"] = &trussc::SerialDeviceInfo::deviceId;
-        t["deviceName"] = &trussc::SerialDeviceInfo::deviceName;
-        t["devicePath"] = &trussc::SerialDeviceInfo::devicePath;
-        t["getDeviceID"] = &trussc::SerialDeviceInfo::getDeviceID;
-        t["getDeviceName"] = &trussc::SerialDeviceInfo::getDeviceName;
-        t["getDevicePath"] = &trussc::SerialDeviceInfo::getDevicePath;
-    }
-    lua->new_usertype<trussc::SaveError>("SaveError",
-        sol::meta_function::equal_to, [](trussc::SaveError a, trussc::SaveError b){ return a == b; },
-        "None", sol::var(trussc::SaveError::None),
-        "AccessDenied", sol::var(trussc::SaveError::AccessDenied),
-        "NoSpace", sol::var(trussc::SaveError::NoSpace),
-        "WriteFailed", sol::var(trussc::SaveError::WriteFailed),
-        "Unknown", sol::var(trussc::SaveError::Unknown));
-    {
-        sol::usertype<trussc::TcpClientConnectEventArgs> t = lua->new_usertype<trussc::TcpClientConnectEventArgs>("TcpClientConnectEventArgs");
-        t["clientId"] = &trussc::TcpClientConnectEventArgs::clientId;
-        t["host"] = &trussc::TcpClientConnectEventArgs::host;
-        t["port"] = &trussc::TcpClientConnectEventArgs::port;
+        sol::usertype<trussc::PlayingSound> t = lua->new_usertype<trussc::PlayingSound>("PlayingSound");
+        t["buffer"] = &trussc::PlayingSound::buffer;
+        t["level"] = &trussc::PlayingSound::level;
+        t["loop"] = &trussc::PlayingSound::loop;
+        t["mixMode"] = &trussc::PlayingSound::mixMode;
+        t["pan"] = &trussc::PlayingSound::pan;
+        t["paused"] = &trussc::PlayingSound::paused;
+        t["playing"] = &trussc::PlayingSound::playing;
+        t["positionF"] = &trussc::PlayingSound::positionF;
+        t["rateRatio"] = &trussc::PlayingSound::rateRatio;
+        t["speed"] = &trussc::PlayingSound::speed;
+        t["volume"] = &trussc::PlayingSound::volume;
     }
     {
-        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
-        t["accuracy"] = &trussc::Location::accuracy;
-        t["altitude"] = &trussc::Location::altitude;
-        t["latitude"] = &trussc::Location::latitude;
-        t["longitude"] = &trussc::Location::longitude;
+        sol::usertype<trussc::ShaderVertex> t = lua->new_usertype<trussc::ShaderVertex>("ShaderVertex");
+        t["a"] = &trussc::ShaderVertex::a;
+        t["b"] = &trussc::ShaderVertex::b;
+        t["g"] = &trussc::ShaderVertex::g;
+        t["r"] = &trussc::ShaderVertex::r;
+        t["u"] = &trussc::ShaderVertex::u;
+        t["v"] = &trussc::ShaderVertex::v;
+        t["x"] = &trussc::ShaderVertex::x;
+        t["y"] = &trussc::ShaderVertex::y;
+        t["z"] = &trussc::ShaderVertex::z;
     }
-    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
-        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
-        "Nearest", sol::var(trussc::TextureFilter::Nearest),
-        "Linear", sol::var(trussc::TextureFilter::Linear));
+    lua->new_usertype<trussc::StrokeMesh::CapType>("StrokeMeshCapType",
+        sol::meta_function::equal_to, [](trussc::StrokeMesh::CapType a, trussc::StrokeMesh::CapType b){ return a == b; },
+        "CAP_BUTT", sol::var(trussc::StrokeMesh::CapType::CAP_BUTT),
+        "CAP_ROUND", sol::var(trussc::StrokeMesh::CapType::CAP_ROUND),
+        "CAP_SQUARE", sol::var(trussc::StrokeMesh::CapType::CAP_SQUARE));
     {
-        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
-        t["pixels"] = &trussc::GrabberFrame::pixels;
-        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
+        sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
+        t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
+        t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
+    }
+    {
+        sol::usertype<trussc::FileDialogResult> t = lua->new_usertype<trussc::FileDialogResult>("FileDialogResult");
+        t["fileName"] = &trussc::FileDialogResult::fileName;
+        t["filePath"] = &trussc::FileDialogResult::filePath;
+        t["success"] = &trussc::FileDialogResult::success;
+    }
+    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
+        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
+        "U8", sol::var(trussc::PixelFormat::U8),
+        "F32", sol::var(trussc::PixelFormat::F32));
+    {
+        sol::usertype<trussc::TcpErrorEventArgs> t = lua->new_usertype<trussc::TcpErrorEventArgs>("TcpErrorEventArgs");
+        t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
+        t["message"] = &trussc::TcpErrorEventArgs::message;
     }
 }
 #ifdef _MSC_VER

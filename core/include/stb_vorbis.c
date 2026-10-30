@@ -3711,10 +3711,6 @@ static int start_decoder(vorb *f)
    if (get32(f) != 0)                               return error(f, VORBIS_invalid_first_page);
    f->channels = get8(f); if (!f->channels)         return error(f, VORBIS_invalid_first_page);
    f->sample_rate = get32(f); if (!f->sample_rate)  return error(f, VORBIS_invalid_first_page);
-#ifdef STB_VORBIS_VALIDATE_FORMAT
-   // Bound (security): validate external audio format before setup allocations. Overflow rejects the whole sound and is counted by the caller.
-   if (!STB_VORBIS_VALIDATE_FORMAT(f->channels, f->sample_rate)) return error(f, VORBIS_invalid_first_page);
-#endif
    if (f->channels > STB_VORBIS_MAX_CHANNELS)       return error(f, VORBIS_too_many_channels);
    get32(f); // bitrate_maximum
    get32(f); // bitrate_nominal

@@ -1,6 +1,6 @@
 // cgltf is not vendored in this repo: CMakeLists.txt fetches the upstream
-// single header at tag v1.15 (github.com/jkuhlmann/cgltf). The build copy
-// guards partial-tree cleanup after callback failure; see PROVENANCE.md.
+// single header at tag v1.15 (github.com/jkuhlmann/cgltf), without patches;
+// see PROVENANCE.md.
 // load() runs its own range checks (checkDataRanges()) and then
 // cgltf_validate() on every file, before any accessor, index or image data
 // is read.
@@ -37,22 +37,15 @@ int modelInt(const char* text) noexcept {
 // cgltf's default atoi/atoll silently narrow file counts and references.
 #define CGLTF_ATOI(text) modelInt(text)
 #define CGLTF_ATOLL(text) modelInteger(text)
-namespace tcx::gltf {
-static bool gltfCallbackFailed(void* user) noexcept;
-static void recordGltfOutOfMemory(void* user) noexcept;
-}
-#define CGLTF_TRUSSC_CALLBACK_FAILED(user) tcx::gltf::gltfCallbackFailed(user)
-#define CGLTF_TRUSSC_RECORD_OOM(user) tcx::gltf::recordGltfOutOfMemory(user)
 #define CGLTF_IMPLEMENTATION
 #include "tcxGltfCgltf.h"
-#undef CGLTF_TRUSSC_CALLBACK_FAILED
-#undef CGLTF_TRUSSC_RECORD_OOM
 
 #include "tcxGltf.h"
 
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -70,71 +63,14 @@ namespace tcx::gltf {
 // reaching this callback (cgltf_load_buffer_file with an empty base filename).
 // No cgltf operation opens a narrow filename, and '%' in the model directory
 // is never interpreted as a URI escape.
-static thread_local size_t g_liveParserAllocations = 0;
-// Implementation-local allocator seam observes real frees independently of
-// registry counters. Production always uses malloc/free.
-static void releaseParserBlock(void* block) noexcept { std::free(block); }
-static thread_local void* (*g_parserMalloc)(size_t) = &std::malloc;
-static thread_local void (*g_parserFree)(void*) noexcept = &releaseParserBlock;
-static thread_local size_t g_parserTableBytesForTests = 0;
-
-static thread_local size_t largeParseTableNoticeBytes = size_t(256) * 1024 * 1024;
 struct GltfFileContext {
-    // cgltf publishes some counts before checking allocation success. Keep
-    // ownership independent of its partial parse tree; callbacks never unwind.
-    struct alignas(max_align_t) Allocation {
-        Allocation* previous;
-        Allocation* next;
-    };
-    Allocation* allocations = nullptr;
-    const size_t noticeThreshold = largeParseTableNoticeBytes;
-    size_t parseTableBytes = 0;
-    bool largeParseTables = false;
-    bool parsingTables = false;
-    enum class Failure { None, OutOfMemory, IoError };
-    Failure failure = Failure::None;
-    void recordFailure(Failure reason) noexcept {
-        if (failure == Failure::None) failure = reason;
-    }
     fs::path modelPath;
-    explicit GltfFileContext(const fs::path& path) : modelPath(path) {}
-    ~GltfFileContext() {
-        g_parserTableBytesForTests = parseTableBytes;
-        while (allocations) {
-            Allocation* next = allocations->next;
-            g_parserFree(allocations);
-            --g_liveParserAllocations;
-            allocations = next;
-        }
-    }
     bool readingModel = true;
+    explicit GltfFileContext(const fs::path& path) : modelPath(path) {}
 };
-
-// The build-copy parse guard runs before cgltf's partial-tree cleanup and
-// pointer fixup. The registry owns all blocks left after callback failure.
-static bool gltfCallbackFailed(void* user) noexcept {
-    return user && static_cast<GltfFileContext*>(user)->failure != GltfFileContext::Failure::None;
-}
-static void recordGltfOutOfMemory(void* user) noexcept {
-    if (user) static_cast<GltfFileContext*>(user)->recordFailure(GltfFileContext::Failure::OutOfMemory);
-}
 
 namespace internal {
 // These are implementation-only helpers, also exercised with synthetic sizes.
-bool parserCallocOverflowForTests() {
-    GltfFileContext files{fs::path{}};
-    cgltf_options options{};
-    options.memory.user_data = &files;
-    return cgltf_calloc(&options, 2, SIZE_MAX) == nullptr &&
-        files.failure == GltfFileContext::Failure::OutOfMemory && !files.allocations;
-}
-size_t liveParserAllocationsForTests() { return g_liveParserAllocations; }
-void setParserAllocatorForTests(void* (*allocate)(size_t), void (*release)(void*) noexcept) {
-    g_parserMalloc = allocate ? allocate : &std::malloc;
-    g_parserFree = release ? release : &releaseParserBlock;
-}
-size_t parserTableBytesForTests() { return g_parserTableBytesForTests; }
-void setLargeParseTableNoticeBytesForTests(size_t bytes) { largeParseTableNoticeBytes = bytes; }
 bool jsonSkipFits(size_t tokens, size_t members) {
     // Bound (abi): cgltf_skip_json's accumulated int end is bounded by tokens + object members; overflow rejects via LoadResult.
     return tokens <= static_cast<size_t>(INT_MAX) && members <= static_cast<size_t>(INT_MAX) - tokens;
@@ -253,65 +189,6 @@ static bool modelJsonFits(const unsigned char* bytes, size_t count) {
     return parsedTokens > 0 && static_cast<size_t>(parsedTokens) == tokens;
 }
 
-// Internal allocation fault/size observer, deliberately absent from the API.
-static atomic<bool (*)(size_t)> g_allocationHook{nullptr};
-namespace internal {
-void setAllocationHookForTests(bool (*hook)(size_t)) {
-    g_allocationHook.store(hook, memory_order_relaxed);
-}
-}
-static void* allocateGltf(void* user, cgltf_size size) noexcept {
-    auto& context = *static_cast<GltfFileContext*>(user);
-    if (context.failure != GltfFileContext::Failure::None) return nullptr;
-    try {
-        if (auto hook = g_allocationHook.load(memory_order_relaxed)) {
-            if (!hook(size)) {
-                context.recordFailure(GltfFileContext::Failure::OutOfMemory);
-                return nullptr;
-            }
-        }
-        using Allocation = GltfFileContext::Allocation;
-        // Bound (abi): each parser allocation and its ownership header must fit size_t. Overflow rejects the model and is reported by LoadResult.
-        if (size > SIZE_MAX - sizeof(Allocation)) {
-            context.recordFailure(GltfFileContext::Failure::OutOfMemory);
-            return nullptr;
-        }
-        auto* block = static_cast<Allocation*>(g_parserMalloc(sizeof(Allocation) + (size ? size : 1)));
-        if (!block) {
-            context.recordFailure(GltfFileContext::Failure::OutOfMemory);
-            return nullptr;
-        }
-        if (context.parsingTables) {
-            // Local parse tables have no policy cap. Saturate diagnostic
-            // accounting, and record the first crossing without allocating or
-            // logging inside the C callback; report after cgltf returns.
-            context.parseTableBytes = size > SIZE_MAX - context.parseTableBytes ?
-                SIZE_MAX : context.parseTableBytes + size;
-            if (context.parseTableBytes > context.noticeThreshold)
-                context.largeParseTables = true;
-        }
-        block->previous = nullptr;
-        block->next = context.allocations;
-        if (block->next) block->next->previous = block;
-        context.allocations = block;
-        ++g_liveParserAllocations;
-        return block + 1;
-    } catch (...) {
-        context.recordFailure(GltfFileContext::Failure::OutOfMemory);
-        return nullptr;
-    }
-}
-static void freeGltf(void* user, void* data) noexcept {
-    if (!data) return;
-    auto* block = static_cast<GltfFileContext::Allocation*>(data) - 1;
-    auto& context = *static_cast<GltfFileContext*>(user);
-    if (block->previous) block->previous->next = block->next;
-    else context.allocations = block->next;
-    if (block->next) block->next->previous = block->previous;
-    g_parserFree(block);
-    --g_liveParserAllocations;
-}
-
 static void releaseGltfFile(const cgltf_memory_options* memory,
                             const cgltf_file_options*, void* data) noexcept {
     if (memory->free_func) memory->free_func(memory->user_data, data);
@@ -350,17 +227,12 @@ static cgltf_result readGltfFile(const cgltf_memory_options* memory,
             releaseGltfFile(memory, options, buffer);
             return cgltf_result_invalid_gltf;
         }
-        if (context.readingModel) {
-            context.parsingTables = true;
-        }
         *size = bytes;
         *data = buffer;
         return cgltf_result_success;
     } catch (const bad_alloc&) {
-        context.recordFailure(GltfFileContext::Failure::OutOfMemory);
         return cgltf_result_out_of_memory;
     } catch (...) {
-        context.recordFailure(GltfFileContext::Failure::IoError);
         return cgltf_result_io_error;
     }
 }
@@ -684,7 +556,39 @@ static Texture* loadGltfTexture(const cgltf_texture* tex,
     if (pixels.getWidth() == 0) return nullptr;
 
     auto t = make_unique<Texture>();
-    t->allocate(pixels, TextureUsage::Immutable, true);  // with mipmaps
+    // Texture supports independent axes; cgltf supplies REPEAT for omitted
+    // sampler fields. A texture without a sampler has the same glTF default.
+    const auto* sampler = tex->sampler;
+    auto wrapMode = [](cgltf_wrap_mode wrap) {
+        switch (wrap) {
+            case cgltf_wrap_mode_clamp_to_edge: return TextureWrap::ClampToEdge;
+            case cgltf_wrap_mode_mirrored_repeat: return TextureWrap::MirroredRepeat;
+            default: return TextureWrap::Repeat;
+        }
+    };
+    const auto minFilter = sampler ? sampler->min_filter : cgltf_filter_type_undefined;
+    const bool mipmaps = minFilter != cgltf_filter_type_nearest &&
+                         minFilter != cgltf_filter_type_linear;
+    // Configure before allocation so only the final sampler is created.
+    t->setWrapU(wrapMode(sampler ? sampler->wrap_s : cgltf_wrap_mode_repeat));
+    t->setWrapV(wrapMode(sampler ? sampler->wrap_t : cgltf_wrap_mode_repeat));
+    if (sampler) {
+        if (sampler->mag_filter == cgltf_filter_type_nearest) {
+            t->setMagFilter(TextureFilter::Nearest);
+        } else if (sampler->mag_filter == cgltf_filter_type_linear) {
+            t->setMagFilter(TextureFilter::Linear);
+        }
+        // Texture uses linear mipmap interpolation. The *_MIPMAP_NEAREST
+        // modes have no matching API and retain the existing default.
+        if (minFilter == cgltf_filter_type_nearest ||
+            minFilter == cgltf_filter_type_nearest_mipmap_linear) {
+            t->setMinFilter(TextureFilter::Nearest);
+        } else if (minFilter == cgltf_filter_type_linear ||
+                   minFilter == cgltf_filter_type_linear_mipmap_linear) {
+            t->setMinFilter(TextureFilter::Linear);
+        }
+    }
+    t->allocate(pixels, TextureUsage::Immutable, mipmaps);
     Texture* raw = t.get();
     store.push_back(std::move(t));
     return raw;
@@ -863,239 +767,189 @@ static void bakeTransform(Mesh& mesh, const Mat4& m) {
 // GltfModel implementation
 // ---------------------------------------------------------------------------
 
-// Best-effort diagnostics cannot be a prerequisite for allocation recovery.
-// Diagnostic delivery is guarded independently of model recovery.
-static LoadResult recoveryFailure(const char* reason, const char* detail = nullptr) noexcept {
-    LoadResult result{LoadError::DecodeFailed, {}};
-    try {
-        result.message = reason;
-        if (detail) result.message += detail;
-        getLogger().log(LogLevel::Error, "[GltfModel] " + result.message);
-    } catch (...) {
-        // A failed result may have an empty message under sustained exhaustion.
-    }
-    return result;
-}
-
 LoadResult GltfModel::load(const fs::path& path) {
     nodes_.clear();
     textures_.clear();
     loaded_ = false;
 
-    // Any failure below either logs an Error and returns before anything is
-    // built, or sets `failure` and stops; the model is then
-    // left empty. Addon/parser exceptions are recovered below. Core GPU
-    // destruction can still allocate during GPU-uploaded model reload.
+    // Parser results and one exception boundary handle load failures.
     string resolved;
     auto decodeFailure = [&](const string& reason) {
         string message = reason + ": " + resolved;
         getLogger().log(LogLevel::Error, "[GltfModel] " + message);
         return LoadResult::fail(LoadError::DecodeFailed, message);
     };
-    bool largeParseTables = false;
-    size_t parseTableBytes = 0;
-    auto performLoad = [&]() -> LoadResult {
-        string failure;
-        size_t skippedPrimitives = 0;
-        try {
-            fs::path resolvedPath = tc::internal::resolveLoadPath(path);
-            resolved = tc::internal::pathToDisplayUtf8(resolvedPath);
-            auto entry = tc::internal::checkLoadFile(resolvedPath, "GltfModel");
-            if (!entry) return entry;
+    string failure;
+    size_t skippedPrimitives = 0;
+    try {
+        fs::path resolvedPath = tc::internal::resolveLoadPath(path);
+        resolved = tc::internal::pathToDisplayUtf8(resolvedPath);
+        auto entry = tc::internal::checkLoadFile(resolvedPath, "GltfModel");
+        if (!entry) return entry;
 
-            // Normal trees use cgltf_free. After callback failure the build-copy
-            // parse guard skips internal cleanup and pointer fixup; the deleter
-            // below also skips tree traversal. files releases all remaining blocks.
-            GltfFileContext files{resolvedPath};
-            cgltf_options options = {};
-            options.memory.alloc_func = allocateGltf;
-            options.memory.free_func = freeGltf;
-            options.memory.user_data = &files;
-            options.file.read = readGltfFile;
-            options.file.release = releaseGltfFile;
-            options.file.user_data = &files;
-            auto callbackFailure = [&]() {
-                if (files.failure == GltfFileContext::Failure::OutOfMemory)
-                    return recoveryFailure("not enough memory for the model data");
-                return decodeFailure("error while reading the model");
-            };
-            cgltf_data* parsed = nullptr;
-            invalidModelInteger = false;
-            cgltf_result result = cgltf_parse_file(&options, "", &parsed);
-            // Snapshot the per-parse thread-local result before any diagnostic
-            // can synchronously invoke a listener that loads another model.
-            const bool parseInvalidInteger = invalidModelInteger;
-            largeParseTables = files.largeParseTables;
-            parseTableBytes = files.parseTableBytes;
-            // Do not adopt or inspect a potentially partial output on failure.
-            auto releaseTree = [&files](cgltf_data* tree) noexcept {
-                if (files.failure == GltfFileContext::Failure::None) cgltf_free(tree);
-            };
-            unique_ptr<cgltf_data, decltype(releaseTree)> dataOwner(
-                files.failure == GltfFileContext::Failure::None ? parsed : nullptr, releaseTree);
-            if (files.failure != GltfFileContext::Failure::None) return callbackFailure();
-            cgltf_data* data = dataOwner.get();
-            files.parsingTables = false;
-            if (result != cgltf_result_success || parseInvalidInteger) {
-                return decodeFailure("failed to parse");
-            }
-
-            if (!bufferUrisFit(data)) return decodeFailure("invalid inline buffer length");
-
-            // Load external buffers (for .gltf with separate .bin)
-            files.readingModel = false;
-            result = cgltf_load_buffers(&options, data, "");
-            if (files.failure != GltfFileContext::Failure::None) return callbackFailure();
-            if (result != cgltf_result_success) {
-                return decodeFailure("failed to load buffers");
-            }
-
-            // Validate the model data before reading any of it
-            if (const char* reason = checkDataRanges(data)) {
-                return decodeFailure(reason);
-            }
-            result = cgltf_validate(data);
-            if (files.failure != GltfFileContext::Failure::None) return callbackFailure();
-            if (result != cgltf_result_success) {
-                return decodeFailure("model data failed validation (cgltf result " +
-                                     to_string(static_cast<int>(result)) + ")");
-            }
-            // Base directory for relative texture paths
-            fs::path baseDir = resolvedPath.parent_path();
-
-            // Root nodes: those of the default scene (or scene 0). A file without
-            // scenes is loaded from every node that has no parent.
-            vector<const cgltf_node*> roots;
-            if (data->scenes_count > 0) {
-                const cgltf_scene* scene = data->scene ? data->scene : &data->scenes[0];
-                roots.assign(scene->nodes, scene->nodes + scene->nodes_count);
-            } else if (data->nodes_count == 0) {
-                failure = "no scene and no nodes to load";
-            } else {
-                for (cgltf_size n = 0; n < data->nodes_count; n++) {
-                    if (!data->nodes[n].parent) roots.push_back(&data->nodes[n]);
-                }
-            }
-
-            // Depth-first walk with an explicit stack, without recursion, so any
-            // depth of hierarchy loads. Each entry carries its parent's world
-            // transform, so every world transform is computed once, from its
-            // parent's. Nodes are visited in the same order as a recursive
-            // pre-order walk.
-            struct Pending {
-                const cgltf_node* node;
-                float parentWorld[16];
-                bool hasParent;
-            };
-            vector<Pending> stack;
-            for (size_t r = roots.size(); r-- > 0;) {
-                stack.push_back({roots[r], {}, false});
-            }
-            // glTF requires the node hierarchy to be a set of disjoint trees and
-            // a scene's nodes to be unique: every node is reached at most once,
-            // and a node reached again fails the load.
-            vector<bool> visited(data->nodes_count, false);
-
-            while (!stack.empty() && failure.empty()) {
-                Pending cur = stack.back();
-                stack.pop_back();
-                const cgltf_node* node = cur.node;
-                size_t nodeIndex = (size_t)(node - data->nodes);
-                if (visited[nodeIndex]) {
-                    failure = "the node hierarchy reaches a node more than once";
-                    break;
-                }
-                visited[nodeIndex] = true;
-
-                float local[16];
-                float world[16];
-                cgltf_node_transform_local(node, local);
-                if (cur.hasParent) {
-                    composeTransform(cur.parentWorld, local, world);
-                } else {
-                    memcpy(world, local, sizeof(world));
-                }
-
-                if (node->mesh) {
-                    Mat4 worldXform = toMat4(world);
-
-                    for (cgltf_size p = 0; p < node->mesh->primitives_count; p++) {
-                        const cgltf_primitive* prim = &node->mesh->primitives[p];
-                        if (prim->type != cgltf_primitive_type_triangles) continue;
-                        if (!hasVertexData(prim)) {
-                            skippedPrimitives++;
-                            continue;
-                        }
-
-                        Node entry;
-                        if (!loadGltfPrimitive(prim, entry.mesh)) {
-                            failure = "a mesh index points past its vertices";
-                            break;
-                        }
-                        entry.material = loadGltfMaterial(prim->material, textures_,
-                                                          baseDir, data);
-                        entry.transform = worldXform;
-                        entry.name = node->name ? node->name : "";
-
-                        // Bake world transform into vertex positions and normals
-                        // so draw() doesn't need multMatrix
-                        bakeTransform(entry.mesh, worldXform);
-
-                        nodes_.push_back(std::move(entry));
-                    }
-                    if (!failure.empty()) break;
-                }
-
-                for (cgltf_size c = node->children_count; c-- > 0;) {
-                    Pending child;
-                    child.node = node->children[c];
-                    memcpy(child.parentWorld, world, sizeof(world));
-                    child.hasParent = true;
-                    stack.push_back(child);
-                }
-            }
-
-            if (!failure.empty()) {
-                nodes_.clear();
-                textures_.clear();
-                return decodeFailure(failure);
-            }
-            if (skippedPrimitives > 0) {
-                getLogger().log(LogLevel::Warning, "[GltfModel] skipped " + to_string(skippedPrimitives) +
-                                " primitive(s) without POSITION or index data: " + resolved);
-            }
-            getLogger().log(LogLevel::Notice, "[GltfModel] loaded " + to_string(nodes_.size()) + " nodes, " +
-                            to_string(textures_.size()) + " textures from " + tc::internal::pathToDisplayUtf8(path));
-            loaded_ = true;
-            return LoadResult::success();
-        } catch (const bad_alloc&) {
-            nodes_.clear();
-            textures_.clear();
-            return recoveryFailure("not enough memory for the model data");
-        } catch (const length_error& e) {
-            nodes_.clear();
-            textures_.clear();
-            return recoveryFailure("model storage width exceeded: ", e.what());
-        } catch (const exception& e) {
-            nodes_.clear();
-            textures_.clear();
-            return recoveryFailure("error while reading the model: ", e.what());
-        } catch (...) {
-            nodes_.clear();
-            textures_.clear();
-            return recoveryFailure("error while reading the model");
+        GltfFileContext files{resolvedPath};
+        cgltf_options options = {};
+        options.file.read = readGltfFile;
+        options.file.release = releaseGltfFile;
+        options.file.user_data = &files;
+        cgltf_data* parsed = nullptr;
+        invalidModelInteger = false;
+        cgltf_result result = cgltf_parse_file(&options, "", &parsed);
+        // Snapshot the per-parse thread-local result before any diagnostic
+        // can synchronously invoke a listener that loads another model.
+        const bool parseInvalidInteger = invalidModelInteger;
+        unique_ptr<cgltf_data, decltype(&cgltf_free)> dataOwner(parsed, cgltf_free);
+        cgltf_data* data = dataOwner.get();
+        if (result != cgltf_result_success) {
+            return decodeFailure(result == cgltf_result_out_of_memory ?
+                "not enough memory for the model data" : "failed to parse");
         }
-    };
-    LoadResult outcome = performLoad();
-    // All decisions and parser cleanup are complete. Best-effort diagnostic
-    // delivery cannot change this load's outcome, even if a listener throws.
-    if (largeParseTables) {
+        if (parseInvalidInteger) return decodeFailure("invalid model integer");
+
+        if (!bufferUrisFit(data)) return decodeFailure("invalid inline buffer length");
+
+        // Load external buffers (for .gltf with separate .bin)
+        files.readingModel = false;
+        result = cgltf_load_buffers(&options, data, "");
+        if (result != cgltf_result_success) {
+            return decodeFailure(result == cgltf_result_out_of_memory ?
+                "not enough memory for the model data" : "failed to load buffers");
+        }
+
+        // Validate the model data before reading any of it
+        if (const char* reason = checkDataRanges(data)) {
+            return decodeFailure(reason);
+        }
+        result = cgltf_validate(data);
+        if (result != cgltf_result_success) {
+            return decodeFailure("model data failed validation (cgltf result " +
+                                 to_string(static_cast<int>(result)) + ")");
+        }
+        // Base directory for relative texture paths
+        fs::path baseDir = resolvedPath.parent_path();
+
+        // Root nodes: those of the default scene (or scene 0). A file without
+        // scenes is loaded from every node that has no parent.
+        vector<const cgltf_node*> roots;
+        if (data->scenes_count > 0) {
+            const cgltf_scene* scene = data->scene ? data->scene : &data->scenes[0];
+            roots.assign(scene->nodes, scene->nodes + scene->nodes_count);
+        } else if (data->nodes_count == 0) {
+            failure = "no scene and no nodes to load";
+        } else {
+            for (cgltf_size n = 0; n < data->nodes_count; n++) {
+                if (!data->nodes[n].parent) roots.push_back(&data->nodes[n]);
+            }
+        }
+
+        // Depth-first walk with an explicit stack, without recursion, so any
+        // depth of hierarchy loads. Each entry carries its parent's world
+        // transform, so every world transform is computed once, from its
+        // parent's. Nodes are visited in the same order as a recursive
+        // pre-order walk.
+        struct Pending {
+            const cgltf_node* node;
+            float parentWorld[16];
+            bool hasParent;
+        };
+        vector<Pending> stack;
+        for (size_t r = roots.size(); r-- > 0;) {
+            stack.push_back({roots[r], {}, false});
+        }
+        // glTF requires the node hierarchy to be a set of disjoint trees and
+        // a scene's nodes to be unique: every node is reached at most once,
+        // and a node reached again fails the load.
+        vector<bool> visited(data->nodes_count, false);
+
+        while (!stack.empty() && failure.empty()) {
+            Pending cur = stack.back();
+            stack.pop_back();
+            const cgltf_node* node = cur.node;
+            size_t nodeIndex = (size_t)(node - data->nodes);
+            if (visited[nodeIndex]) {
+                failure = "the node hierarchy reaches a node more than once";
+                break;
+            }
+            visited[nodeIndex] = true;
+
+            float local[16];
+            float world[16];
+            cgltf_node_transform_local(node, local);
+            if (cur.hasParent) {
+                composeTransform(cur.parentWorld, local, world);
+            } else {
+                memcpy(world, local, sizeof(world));
+            }
+
+            if (node->mesh) {
+                Mat4 worldXform = toMat4(world);
+
+                for (cgltf_size p = 0; p < node->mesh->primitives_count; p++) {
+                    const cgltf_primitive* prim = &node->mesh->primitives[p];
+                    if (prim->type != cgltf_primitive_type_triangles) continue;
+                    if (!hasVertexData(prim)) {
+                        skippedPrimitives++;
+                        continue;
+                    }
+
+                    Node entry;
+                    if (!loadGltfPrimitive(prim, entry.mesh)) {
+                        failure = "a mesh index points past its vertices";
+                        break;
+                    }
+                    entry.material = loadGltfMaterial(prim->material, textures_,
+                                                      baseDir, data);
+                    entry.transform = worldXform;
+                    entry.name = node->name ? node->name : "";
+
+                    // Bake world transform into vertex positions and normals
+                    // so draw() doesn't need multMatrix
+                    bakeTransform(entry.mesh, worldXform);
+
+                    nodes_.push_back(std::move(entry));
+                }
+                if (!failure.empty()) break;
+            }
+
+            for (cgltf_size c = node->children_count; c-- > 0;) {
+                Pending child;
+                child.node = node->children[c];
+                memcpy(child.parentWorld, world, sizeof(world));
+                child.hasParent = true;
+                stack.push_back(child);
+            }
+        }
+
+        if (!failure.empty()) {
+            nodes_.clear();
+            textures_.clear();
+            return decodeFailure(failure);
+        }
+        if (skippedPrimitives > 0) {
+            getLogger().log(LogLevel::Warning, "[GltfModel] skipped " + to_string(skippedPrimitives) +
+                            " primitive(s) without POSITION or index data: " + resolved);
+        }
+        getLogger().log(LogLevel::Notice, "[GltfModel] loaded " + to_string(nodes_.size()) + " nodes, " +
+                        to_string(textures_.size()) + " textures from " + tc::internal::pathToDisplayUtf8(path));
+        loaded_ = true;
+        return LoadResult::success();
+    } catch (...) {
+        nodes_.clear();
+        textures_.clear();
+        // Diagnostics (including listeners and LoadResult's message) may also
+        // allocate or throw. Keep them inside the load boundary too.
         try {
-            getLogger().log(LogLevel::Notice, "[GltfModel] large local parse tables for " + resolved +
-                ": " + to_string(parseTableBytes) + " bytes");
-        } catch (...) {}
+            try {
+                throw;
+            } catch (const exception& e) {
+                return decodeFailure(string("error while building the model: ") + e.what());
+            }
+        } catch (...) {
+            // A fixed fallback needs no C++ allocation or logger callbacks.
+            std::fputs("[GltfModel] load failed\n", stderr);
+        }
+        return {LoadError::DecodeFailed, {}};
     }
-    return outcome;
 }
 
 void GltfModel::draw() const {

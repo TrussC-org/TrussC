@@ -1,151 +1,35 @@
-# Bounded SysEx tests
+# SysEx tests
 
-This console harness uses the addon's real pinned libremidi headers and library.
-It is discovered by `examples/build_all.py --addon-tests-only`. Running without
-arguments needs no MIDI device or display. On Linux with ALSA headers, it also
-runs the real ALSA sequencer event codec without opening a client or port.
+This console addon harness uses the pinned upstream libremidi decoder and the
+retained ALSA output patch (#992). The default run needs no MIDI device or display.
+It checks complete and fragmented SysEx above 1 MiB through both decoder entry
+points, byte-for-byte delivery, start timestamps and subsequent normal messages.
+Input cap, overflow-callback and patched WinMM/ALSA input tests were removed with
+R1–R3 in #1098.
 
-From the repository root (use the build resource wrapper when required):
+Build through the addon path from the repository root:
 
 ```sh
 tools/bin/trusscli update -p addons/tcxMidi/tests-sysex --tc-root "$PWD" --ide cmake
-cmake -S addons/tcxMidi/tests-sysex -B addons/tcxMidi/tests-sysex/build-linux -DCMAKE_BUILD_TYPE=Release
-cmake --build addons/tcxMidi/tests-sysex/build-linux --config Release --parallel 4
+/path/to/tcbuild.sh cmake -S addons/tcxMidi/tests-sysex -B addons/tcxMidi/tests-sysex/build-linux -DCMAKE_BUILD_TYPE=Release
+/path/to/tcbuild.sh cmake --build addons/tcxMidi/tests-sysex/build-linux --config Release
 addons/tcxMidi/tests-sysex/bin/tests-sysex
 ```
 
-For an offline source override, copy pristine libremidi 5.4.3 into a private
-writable directory, apply `cmake/PatchLibremidi.cmake` as described in the ledger,
-and configure with `-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI=path/to/private/copy`.
-Unpatched overrides fail configuration deliberately.
-
-The tests cover both stream entry points, initial and continuation admission,
-exact-limit complete/fragmented messages, bounded capacity growth, real-time
-filtering, discard/resynchronization, start timestamps, ignored SysEx, reset,
-successive messages without stack growth, stray EOX (including orphan data tails),
-ALSA scratch and safe-thread reporting. Stray EOX neither delivers a message nor
-counts a SysEx loss or schedules a Warning.
-The actual patched WinMM callback also runs with mocked driver calls: LONGERROR,
-failed/successful re-queues, combined errors, ignored SysEx and empty shutdown
-buffers check accounting, reset, allocation failure and the sole Warning slot.
-The reporting callback is also checked with backend allocations disabled, empty
-idle queues, one posted slot on first loss and slot lifetime through teardown.
-The wrapper's `tests/` harness additionally checks idle input creation/destruction,
-automatic reporting across close/reopen and destruction without polling, and
-separation from the polling drop count.
-
-The offline configure checks use a pristine source directory and a new scratch
-directory. They reconstruct a local archive to exercise FetchContent's actual
-patch command, reconfiguration, unpatched/patched/edited source overrides and
-reused extracted caches; they do not replace the production archive hash.
-They also compare byte-exact LF output from LF/CRLF patch scripts, reject CRLF
-source inputs without writes, and check read-only verification and idempotence.
-A writer mutation reproduces the CRLF hash failure using native Windows writes
-on Windows and an explicit text-mode conversion emulation on other hosts.
-Use `--script-only` to check the patch's CMake 3.20 minimum independently of
-libremidi's build, which requires CMake 3.22.
+For offline builds, copy libremidi v5.4.3 into a private directory, apply
+`cmake/PatchLibremidi.cmake`, and configure with
+`-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI=path/to/private/copy`.
+Only ALSA output is patched; verification also requires the four restored input
+files to match upstream. Normal reconfiguration uses a fresh R4 source location.
+Stale overrides/caches fail with the differing file and clean-source instructions.
 
 ```sh
-python3 addons/tcxMidi/tests-sysex/test_patch.py path/to/pristine/libremidi tmp/patch-checks
+/path/to/tcbuild.sh python3 addons/tcxMidi/tests-sysex/test_patch.py path/to/pristine/libremidi tmp/patch-checks
 ```
 
-After a native Linux Makefiles build, independently disable each protection in
-scratch include overlays and confirm its tests fail (the baseline must pass):
-
-```sh
-python3 addons/tcxMidi/tests-sysex/test_hooks.py path/to/patched/libremidi addons/tcxMidi/tests-sysex/build-linux tmp/hook-checks
-```
-
-## Native port checks
-
-A SysEx above 1,048,576 bytes including F0/F7 is now discarded whole; this is a
-receiver memory policy, not the MIDI protocol maximum. Device/driver delivery
-and representative controller or firmware dumps need separate verification.
-
-The same executable accepts `--receive-virtual NAME`, `--receive NAME`, and
-`--send NAME`. The sender sends an over-limit SysEx, an over-limit SysEx with
-F8 just before its final F7, then a valid small SysEx and Note On. The F8
-comes after enough data that CoreMIDI's inserted EOX still terminates an
-over-limit prefix; the orphan tail EOX is ignored. Exact-cap + F8 remains a unit
-test only because CoreMIDI can rewrite that shape into an under-cap SysEx.
-Start the receiver first; it waits for that note with a 60 second failure timeout. It does not enable
-polling. Expected receiver result (exit 0):
-
-```text
-oversize=0 clocks=1 valid_sysex=1 notes=1 unexpected=0 warnings=1
-```
-
-Expect one `SysEx assembly` Warning naming limit 1048576 and needed bytes;
-neither rejected SysEx is delivered. WinMM already waits for SysEx buffer
-completion and ALSA drains output inside each backend send. CoreMIDI queues
-packets without a non-destructive drain. After successful sends the harness keeps
-the client alive with one bounded sleep: total bytes / 256 KiB/s plus two seconds
-(about 10.001 seconds for this traffic). This assumes virtual loopback throughput;
-it does not support 31.25 kbit/s DIN cables. Sender exit 0 means sends and the
-delivery wait completed; the receiver's counters establish successful delivery.
-A failed send or a driver that filters/rejects the test traffic is a failed port
-check, even if the unit tests pass.
-
-The macOS port check needs an IAC bus (or another virtual port) to be enabled.
-Enabling an offline IAC bus needs the owner's OK. Build once:
-
-```sh
-tools/bin/trusscli update -p addons/tcxMidi/tests-sysex --tc-root "$PWD" --ide cmake
-cmake -S addons/tcxMidi/tests-sysex -B addons/tcxMidi/tests-sysex/build-macos -DCMAKE_BUILD_TYPE=Release
-cmake --build addons/tcxMidi/tests-sysex/build-macos --config Release --parallel 4
-```
-
-In terminal 1:
-
-```sh
-addons/tcxMidi/tests-sysex/bin/tests-sysex.app/Contents/MacOS/tests-sysex --receive TrussC-SysEx-Check
-```
-
-In terminal 2:
-
-```sh
-addons/tcxMidi/tests-sysex/bin/tests-sysex.app/Contents/MacOS/tests-sysex --send TrussC-SysEx-Check
-```
-
-Use the actual enabled bus name in both commands. `--receive-virtual NAME` is
-also available. Open-by-name needs a port the current observer can enumerate;
-virtual-port visibility (including IAC and another process's virtual input) is
-handled separately in #982. The full virtual-port check depends on that fix;
-this PR does not change `track_virtual`.
-
-Windows 10/11 WinMM has no generic built-in MIDI loopback and does not support
-libremidi virtual ports. Use a MIDI loopback device that passes the over-cap
-messages and create `TrussC-SysEx-Check`. The test uses two large messages, so prefer a virtual loopback over a
-31.25 kbit/s hardware cable, which exceeds the receiver timeout. Without an
-existing loopback device or an installed loopback driver, this WinMM check
-cannot run.
-
-loopMIDI drops SysEx larger than its SysexSize setting (KiB, maximum 512) without an error to either side, so the port check's over-cap step cannot run through loopMIDI.
-
-In a Visual Studio developer PowerShell, build once:
-
-```powershell
-.\tools\bin\trusscli.exe update -p addons/tcxMidi/tests-sysex --tc-root "$PWD" --ide cmake
-cmake -S addons/tcxMidi/tests-sysex -B addons/tcxMidi/tests-sysex/build-windows
-cmake --build addons/tcxMidi/tests-sysex/build-windows --config Release --parallel 4
-```
-
-In terminal 1:
-
-```powershell
-.\addons\tcxMidi\tests-sysex\bin\tests-sysex.exe --receive TrussC-SysEx-Check
-```
-
-In terminal 2:
-
-```powershell
-.\addons\tcxMidi\tests-sysex\bin\tests-sysex.exe --send TrussC-SysEx-Check
-```
-
-On Linux, use `--receive NAME` and `--send NAME` with an existing ALSA sequencer
-loopback such as Midi Through or snd-virmidi, if accessible without sudo.
-The sequencer device (`/dev/snd/seq`) must be available. A virtual receiver plus
-open-by-name sender has the same #982 dependency; no observer change is included.
+The offline patch tests exercise FetchContent, source overrides, reused caches,
+LF/CRLF scripts, stale input and unknown output sources, read-only verification and idempotence.
+They compare all other files byte-for-byte with the pristine source.
 
 ## ALSA large-output regression (#992)
 
@@ -158,10 +42,8 @@ addons/tcxMidi/tests-sysex/bin/tests-sysex --alsa-roundtrip --require-device
 
 This opens two real ALSA clients and sends patterned 1,048,577-byte and
 1,048,576-byte SysEx through `MidiOut::sendSysex`. A raw sequencer receiver
-checks all 2,097,153 bytes in order, with a 200-cell input pool. Using a raw
-receiver allows the issue's original size without changing #957's input cap;
-the second message is the largest that cap admits. The raw subscription also
-avoids depending on observer virtual-port enumeration (#982). No external MIDI
+checks all 2,097,153 bytes in order, with a 200-cell input pool. The raw
+subscription avoids depending on observer virtual-port enumeration (#982). No external MIDI
 hardware, MIDI Through device, display, or root privileges are needed, but the
 user must be able to open `/dev/snd/seq`. A missing/inaccessible sequencer prints
 `SKIP: ALSA sequencer cannot be opened: ...` and exits 0. `--require-device`
@@ -172,11 +54,12 @@ On a successful Pi run expect (exit 0):
 PASS: ALSA SysEx roundtrip sizes=1048577,1048576 sent=1 received=2097153 byte_match=1
 ```
 
-Also rerun the native port check above on the Pi with #957 and this fix combined.
+Native MIDI delivery on other backends requires a separate device or loopback check.
 
 The output host test uses the production patched ALSA backend and the real
 `snd_midi_event` encoder, replacing only the dynamic-library symbol boundary
-with fake sequencer calls. It needs ALSA development headers, a C++20 compiler
+with fake sequencer calls and counting sleep requests. It needs ALSA development
+headers, a C++20 compiler
 and libasound, but no device or display. Run through the build wrapper:
 
 ```sh
@@ -186,12 +69,14 @@ python3 addons/tcxMidi/tests-sysex/test_output.py path/to/patched/libremidi /tmp
 It checks byte-for-byte large-message encoding, draining every event, temporary
 EAGAIN/EINTR recovery without duplicate chunks, fatal drain failure, exact retry
 exhaustion, pending-buffer cleanup, recovery with a fresh F0, and calling-thread
-pacing. The output must make no input calls on supplied shared duplex or
+pacing requests without wall-clock assertions. The output must make no input
+calls on supplied shared duplex or
 output-only contexts, including when an attempted read would return EBADF.
 The driver overlay counts both event-input and input-pending calls.
 The baseline must pass; mutations must fail at their intended assertions:
 remove the entire output replacement, enlarge the encoder chunk, ignore fatal
 drain errors, change the retry bound, remove pacing, add an event-input read,
 and add an input-pending read. Mutation sources and binaries stay in the
-supplied scratch directory. The host latency measurement uses immediate mock
-drains; it does not measure kernel delivery or prove receiver scheduling.
+supplied scratch directory. Sleep requests are counted at the sleep boundary;
+the test does not measure
+kernel delivery, elapsed time or receiver scheduling.

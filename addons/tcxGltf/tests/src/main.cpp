@@ -39,18 +39,13 @@
 // =============================================================================
 
 #include <tcxGltf.h>
+#include <cgltf.h>
 #include "../../../../core/tests/common/tcModelAllocationProbe.h"
 
 namespace tcx::gltf::internal {
-bool parserCallocOverflowForTests();
-void setAllocationHookForTests(bool (*hook)(size_t));
 bool jsonOffsetsFit(size_t bytes);
 bool jsonObjectMembersFit(size_t members);
 bool jsonSkipFits(size_t tokens, size_t members);
-size_t liveParserAllocationsForTests();
-void setParserAllocatorForTests(void* (*allocate)(size_t), void (*release)(void*) noexcept);
-size_t parserTableBytesForTests();
-void setLargeParseTableNoticeBytesForTests(size_t bytes);
 void setJsonPaddingForTests(size_t bytes);
 void setJsonObjectMembersForTests(size_t members);
 bool jsonTokenFits(size_t count, size_t length, bool stringToken);
@@ -71,10 +66,8 @@ using namespace tc;
 using tcx::gltf::GltfModel;
 namespace gltf_internal = tcx::gltf::internal;
 
-static size_t outstandingParserBytes = 0;
 static int g_pass = 0, g_fail = 0;
 static void check(const string& name, bool ok) {
-    ok = ok && gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0;
     printf("%-60s %s\n", name.c_str(), ok ? "PASS" : "FAIL");
     fflush(stdout);  // flush each line so CI logs survive a later crash
     ok ? ++g_pass : ++g_fail;
@@ -129,7 +122,6 @@ struct GltfBuilder {
     long long bufferLength = -1;         // -1 = bin.size()
     vector<string> extraBuffers;         // JSON of buffers 1, 2, ...
     string extra;                        // more top-level members, each ending in ","
-    bool meshesLast = false;             // put mapping allocation last before fixup
 
     // Append raw bytes (padded to 4) and a buffer view over them.
     int addView(const void* data, size_t size, int byteStride = 0) {
@@ -165,7 +157,7 @@ struct GltfBuilder {
         if (!nodes.empty()) j += "\"nodes\":" + nodes + ",";
         j += extra;
         const string meshTable = "\"meshes\":[{\"primitives\":[" + primitive + "]}]";
-        if (!meshesLast) j += meshTable + ",";
+        j += meshTable + ",";
         j += "\"accessors\":[" + join(accessors) + "],";
         j += "\"bufferViews\":[" + join(views) + "],";
         j += "\"buffers\":[{\"byteLength\":" + to_string(len);
@@ -173,7 +165,6 @@ struct GltfBuilder {
         j += "}";
         for (const auto& eb : extraBuffers) j += "," + eb;
         j += "]";
-        if (meshesLast) j += "," + meshTable;
         j += "}";
         return j;
     }
@@ -281,65 +272,58 @@ static GltfBuilder texturedTriangle(const string& imageJson) {
     return b;
 }
 
-static size_t parserAllocationCount = 0, rejectParserAllocation = 0;
-static bool parserFaultPersistent = false;
-static int parserFaultKind = 0;
-static bool observeParserAllocation(size_t bytes) {
-    ++parserAllocationCount;
-    if (!modelAllocationProbe::observe(bytes)) return false;
-    if (!rejectParserAllocation || parserAllocationCount < rejectParserAllocation ||
-        (!parserFaultPersistent && parserAllocationCount != rejectParserAllocation)) return true;
-    if (parserFaultKind == 1) throw bad_alloc();
-    if (parserFaultKind == 2) throw 42;
-    return false;
-}
-
-// Observe actual malloc/free calls independently of registry bookkeeping.
-struct ParserBlock { void* pointer; size_t bytes; };
-// The deep-node fixture alone has 20000 child tables. This is observer
-// capacity for these fixed tests, independent of production model admission.
-static ParserBlock parserBlocks[65536]{};
-static size_t actualParserAllocations = 0;
-static size_t grantedParserBytes = 0, peakParserBytes = 0, largestParserBlock = 0;
-static void* trackParserMalloc(size_t bytes) {
-    void* pointer = std::malloc(bytes);
-    if (!pointer) return nullptr;
-    for (auto& block : parserBlocks) if (!block.pointer) {
-        block = {pointer, bytes};
-        outstandingParserBytes += bytes;
-        ++actualParserAllocations;
-        grantedParserBytes += bytes;
-        peakParserBytes = (std::max)(peakParserBytes, outstandingParserBytes);
-        largestParserBlock = (std::max)(largestParserBlock, bytes);
-        return pointer;
-    }
-    std::abort(); // Test tracker capacity, never a model acceptance limit.
-}
-static void trackParserFree(void* pointer) noexcept {
-    for (auto& block : parserBlocks) if (block.pointer == pointer) {
-        outstandingParserBytes -= block.bytes;
-        block = {};
-        std::free(pointer);
-        return;
-    }
-    std::abort(); // A double free or untracked pointer is a test failure.
-}
-
-static void throwRuntimeError() { throw runtime_error("injected failure"); }
-static void throwInt() { throw 42; }
-
 static bool vecNear(const Vec3& v, float x, float y, float z) {
     return fabs(v.x - x) < 1e-5f && fabs(v.y - y) < 1e-5f && fabs(v.z - z) < 1e-5f;
 }
 
 int main() {
     sg_desc graphics = {};
+    graphics.sampler_pool_size = 64;
     sg_setup(&graphics);
     g_dir = fs::temp_directory_path() /
             utf8ToPath("tcxGltf-テスト-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(g_dir);
 
-    gltf_internal::setParserAllocatorForTests(trackParserMalloc, trackParserFree);
+    {
+        // Run before other texture cases, with all 64 sampler slots available.
+        // The whole model loads synchronously, without collecting retired handles.
+        constexpr int primitiveCount = 22;
+        Pixels pixels;
+        pixels.allocate(2, 2, 4);
+        for (int y = 0; y < 2; ++y)
+            for (int x = 0; x < 2; ++x) pixels.setColor(x, y, Color(1, 0, 0, 1));
+        check("many textures: fixture PNG saved", bool(pixels.save(g_dir / "many-textures.png")));
+        auto b = texturedTriangle(R"({"uri":"many-textures.png"})");
+        b.extra = R"("images":[{"uri":"many-textures.png"}],
+            "samplers":[{"wrapS":33648,"wrapT":10497,"minFilter":9986,"magFilter":9728}],
+            "textures":[{"source":0},{"source":0,"sampler":0}],
+            "materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0}}},
+                         {"pbrMetallicRoughness":{"baseColorTexture":{"index":1}}}],)";
+        b.primitive.clear();
+        for (int i = 0; i < primitiveCount; ++i) {
+            if (i) b.primitive += ',';
+            b.primitive += R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1,"material":)" +
+                           to_string(i % 2) + "}";
+        }
+        GltfModel model;
+        if (loadCase("many textures", b, true, model)) {
+            check("many textures: all primitives loaded", model.getNodeCount() == primitiveCount);
+            for (int i = 0; i < primitiveCount && i < model.getNodeCount(); ++i) {
+                const auto* texture = model.getNode(i).material.getBaseColorTexture();
+                const string label = "many textures: primitive " + to_string(i);
+                check(label + ": valid sampler", texture &&
+                      sg_query_sampler_state(texture->getSampler()) == SG_RESOURCESTATE_VALID);
+                const auto desc = texture ? sg_query_sampler_desc(texture->getSampler()) : sg_sampler_desc{};
+                check(label + ": backend descriptor",
+                      desc.wrap_u == (i % 2 ? SG_WRAP_MIRRORED_REPEAT : SG_WRAP_REPEAT) &&
+                      desc.wrap_v == SG_WRAP_REPEAT &&
+                      desc.min_filter == (i % 2 ? SG_FILTER_NEAREST : SG_FILTER_LINEAR) &&
+                      desc.mag_filter == (i % 2 ? SG_FILTER_NEAREST : SG_FILTER_LINEAR) &&
+                      desc.mipmap_filter == SG_FILTER_LINEAR);
+            }
+        }
+    }
+
 
     {
         // Model fixtures exercise stb too. Fail the growing encoder output
@@ -415,8 +399,6 @@ int main() {
 
     {
         const size_t maxInt = static_cast<size_t>(INT_MAX);
-        check("cgltf calloc overflow records failure without invoking allocator",
-              gltf_internal::parserCallocOverflowForTests());
         check("JSON offsets use ptrdiff_t rather than int",
               gltf_internal::jsonOffsetsFit(static_cast<size_t>(PTRDIFF_MAX)) &&
               !gltf_internal::jsonOffsetsFit(static_cast<size_t>(PTRDIFF_MAX) + 1));
@@ -528,100 +510,56 @@ int main() {
         }
     }
     {
-        const auto valid = g_dir / "reentrant-valid.gltf";
-        const auto invalid = g_dir / "reentrant-invalid.gltf";
-        ofstream(valid) << R"({"asset":{"version":"2.0"},"nodes":[{}],"scenes":[{"nodes":[0]}],"scene":0})";
-        ofstream(invalid) << R"({"asset":{"version":"2.0"},"nodes":[{}],"scenes":[{"nodes":[0]}],"scene":2147483648})";
-        // Exercise the production Notice with tiny fixtures. This seam is
-        // implementation-only; each context captures its own threshold.
-        gltf_internal::setLargeParseTableNoticeBytesForTests(0);
-        for (bool malformedOuter : {true, false}) {
-            GltfModel outer;
-            GltfModel inner;
-            bool entered = false;
-            bool innerOk = false;
-            size_t outerNotices = 0;
-            auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
-                if (event.message.find("large local parse tables") == string::npos || entered) return;
-                entered = true;
-                ++outerNotices;
-                innerOk = inner.load(malformedOuter ? valid : invalid).ok();
-            });
-            const auto result = outer.load(malformedOuter ? invalid : valid);
-            check(malformedOuter ? "reentrant valid inner preserves outer rejection" :
-                                   "reentrant invalid inner preserves outer success",
-                  entered && outerNotices == 1 && innerOk == malformedOuter &&
-                  inner.isLoaded() == malformedOuter && result.ok() == !malformedOuter &&
-                  outer.isLoaded() == !malformedOuter &&
-                  (malformedOuter ? result.error == LoadError::DecodeFailed : result.ok()));
+        // A large table remains accepted without parser admission bookkeeping.
+        string json = R"({"asset":{"version":"2.0"},"nodes":[{}],"materials":[)";
+        for (size_t i = 0; i < 400000; ++i) {
+            if (i) json += ',';
+            json += "{}          ";
         }
-        gltf_internal::setLargeParseTableNoticeBytesForTests(size_t(256) * 1024 * 1024);
-    }
-    {
-        constexpr size_t MiB = 1024 * 1024;
-        auto materialJson = [](size_t count, size_t padding) {
-            string json = R"({"asset":{"version":"2.0"},"nodes":[{}],"materials":[)";
-            string material = "{}" + string(padding, ' ');
-            json.reserve(count * (material.size() + 1) + 100);
-            for (size_t i = 0; i < count; ++i) { if (i) json += ','; json += material; }
-            return json + "]}";
-        };
-        auto path = g_dir / utf8ToPath("parse-memory-大.gltf");
-        // Over 5 MB JSON, with enough real parse tables to exceed both the
-        // Notice threshold and the former input-scaled rejection threshold.
-        string json = materialJson(400000, 10);
+        json += "]}";
+        const auto path = g_dir / "large-tables.gltf";
         ofstream(path, ios::binary) << json;
         GltfModel model;
-        WarningCounter logs;
-        size_t notices = 0;
-        string notice;
-        const string prefix = "[GltfModel] large local parse tables for " + pathToUtf8(path) + ": ";
-        auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
-            if (e.level == LogLevel::Notice && e.message.find("large local parse tables") != string::npos) {
-                ++notices;
-                notice = e.message;
-            }
+        size_t tableNotices = 0;
+        auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
+            if (event.message.find("large local parse tables") != string::npos) ++tableNotices;
         });
         for (int attempt = 0; attempt < 2; ++attempt) {
-            notices = 0;
-            notice.clear();
-            actualParserAllocations = grantedParserBytes = peakParserBytes = largestParserBlock = 0;
-            auto result = model.load(path);
-            size_t tables = gltf_internal::parserTableBytesForTests();
-            printf("large local parse tables: input=%zu tables=%zu malloc-peak=%zu\n",
-                   json.size(), tables, peakParserBytes);
-            check("large local parse tables load with one Notice per load " + to_string(attempt),
-                  result.ok() && model.isLoaded() &&
-                  logs.count == 0 && notices == 1 &&
-                  notice == prefix + to_string(tables) + " bytes" && tables > 256 * MiB &&
-                  json.size() >= 5000000 && tables > 64 * json.size());
-            check("large parse tables obtain real memory and release every block",
-                  actualParserAllocations > 1 && grantedParserBytes > tables &&
-                  peakParserBytes > 256 * MiB && outstandingParserBytes == 0 &&
-                  gltf_internal::liveParserAllocationsForTests() == 0);
+            check("large local parse tables load without a table Notice",
+                  model.load(path).ok() && model.isLoaded() && tableNotices == 0);
         }
-        json = materialJson(60000, 197); // ~12 MB JSON, ~83 MB tables.
-        ofstream(path, ios::binary) << json;
-        notices = 0;
-        auto result = model.load(path);
-        size_t tables = gltf_internal::parserTableBytesForTests();
-        check("ordinary parse loads without a large-table Notice",
-              result.ok() && model.isLoaded() && logs.count == 0 && notices == 0 &&
-              json.size() >= 12000000 && tables > 60 * MiB && tables < 90 * MiB);
-        check("parse table loads free parser storage",
-              gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0);
     }
-    gltf_internal::setAllocationHookForTests(&observeParserAllocation);
+    {
+        // Only this test supplies a memory callback; production uses cgltf's
+        // allocator. Fail before a partial parse tree can be constructed.
+        bool refuse = true;
+        cgltf_options options{};
+        options.memory.user_data = &refuse;
+        options.memory.alloc_func = +[](void* user, cgltf_size bytes) noexcept -> void* {
+            return *static_cast<bool*>(user) ? nullptr : std::malloc(bytes);
+        };
+        options.memory.free_func = +[](void*, void* block) noexcept { std::free(block); };
+        const string json = triangle().json();
+        cgltf_data* parsed = nullptr;
+        auto result = cgltf_parse(&options, json.data(), json.size(), &parsed);
+        check("upstream parser reports allocation failure", result == cgltf_result_out_of_memory && !parsed);
+        cgltf_free(parsed);
+
+        refuse = false;
+        result = cgltf_parse(&options, json.data(), json.size(), &parsed);
+        check("upstream parser retries after allocation failure", result == cgltf_result_success && parsed);
+        if (parsed) {
+            refuse = true;
+            result = cgltf_load_buffers(&options, parsed, "");
+            check("upstream buffer allocation failure frees normally", result == cgltf_result_out_of_memory);
+            cgltf_free(parsed);
+        }
+    }
     {
         GltfBuilder b = triangle();
         b.bufferLength = 1000000000;
-        auto path = writeGltf(b);
         GltfModel model;
-        modelAllocationProbe::begin();
-        auto result = model.load(path);
-        modelAllocationProbe::end();
-        check("inline buffer length checked before allocation", !result && !model.isLoaded() &&
-              model.getNodeCount() == 0 && modelAllocationProbe::largest < 65536);
+        loadCase("inline buffer length exceeds decoded payload", b, false, model);
     }
     {
         GltfBuilder b = triangle();
@@ -670,126 +608,6 @@ int main() {
         auto result = model.load(path);
         check("GLB chunks must fit the declared file length", !result && !model.isLoaded());
     }
-    {
-        // Faults in both the C parser allocator and STL output allocations
-        // must release partial state and allow the same model to load again.
-        auto path = writeGltf(triangle());
-        GltfModel model;
-        for (bool persistent : {false, true}) {
-            if (persistent && tcTest::skipPersistentAllocationFailure("glTF load entry")) continue;
-            check("glTF starts allocation test with a loaded model", model.load(path).ok());
-            LoadResult result;
-            bool escaped = false;
-            // Target path payload growth inside recovery, allowing setup
-            // proxies. The threshold comes from the fixture, not an index.
-            modelAllocationProbe::begin(path.native().size(), persistent);
-            try { result = model.load(path); }
-            catch (const bad_alloc&) { escaped = true; }
-            modelAllocationProbe::end();
-            check(persistent ? "persistent allocation failure returns empty failure" :
-                               "STL allocation failure returns empty failure",
-                  modelAllocationProbe::failed && !escaped && !result &&
-                  result.error == LoadError::DecodeFailed && !model.isLoaded() && model.getNodeCount() == 0 &&
-                  gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0);
-            check("retry after parser allocation failure succeeds", model.load(path).ok());
-        }
-    }
-    {
-        // Sweep NULL, bad_alloc, and non-standard exceptions at the actual C
-        // allocator seam, independently of platform STL/filebuf allocation.
-        // Extra tables reproduce cgltf's count-before-NULL-check cleanup sites.
-        // Mappings come last: their NULL allocation can still return a positive
-        // root index, so the failure guard must precede pointer fixup too.
-        auto b = triangle();
-        b.meshesLast = true;
-        b.primitive = R"({"attributes":{"POSITION":0},"targets":[{"POSITION":0}],"extras":{"x":1},"extensions":{"unknown":{"x":1},"KHR_materials_variants":{"mappings":[{"material":0,"variants":[0]}]}}})";
-        b.extra = R"("materials":[{}],"extensionsUsed":["unknown","KHR_materials_variants"],"extensionsRequired":["unknown"],"extensions":{"unknown":{"x":1},"KHR_materials_variants":{"variants":[{"name":"sample"}]}},)";
-        for (int shape = 0; shape < 3; ++shape) {
-            auto path = shape == 1 ? writeGlb(b) : writeGltf(b);
-            if (shape == 2) {
-                string document = b.json();
-                size_t uri = document.find("data:application/octet-stream;base64,");
-                document.replace(uri, document.find('"', uri) - uri, "fault.bin");
-                ofstream(g_dir / "fault.bin", ios::binary).write(reinterpret_cast<const char*>(b.bin.data()), b.bin.size());
-                ofstream(path, ios::binary) << document;
-            }
-            GltfModel model;
-            parserAllocationCount = 0;
-            bool ok = model.load(path).ok();
-            size_t allocations = parserAllocationCount;
-            printf("parser seam shape=%d requests=%zu (mappings last in parse)\n", shape, allocations);
-            for (bool persistent : {false, true}) {
-                for (int fault = 0; fault < 3; ++fault) {
-                    bool clean = ok && allocations > 10;
-                    for (size_t nth = 1; nth <= allocations; ++nth) {
-                        parserAllocationCount = 0;
-                        rejectParserAllocation = nth;
-                        parserFaultPersistent = persistent;
-                        parserFaultKind = fault;
-                        auto result = model.load(path);
-                        clean = clean && parserAllocationCount >= nth && !result &&
-                            result.error == LoadError::DecodeFailed &&
-                            result.message.find("not enough memory") != string::npos &&
-                            !model.isLoaded() && model.getNodeCount() == 0 &&
-                            gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0;
-                        rejectParserAllocation = 0;
-                        clean = clean && model.load(path).ok() &&
-                            gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0;
-                    }
-                    check("parser seam shape=" + to_string(shape) + " fault=" + to_string(fault) +
-                          (persistent ? " persistent cleanup and retry" : " single cleanup and retry"), clean);
-                }
-            }
-        }
-    }
-    {
-        Pixels pixels;
-        pixels.allocate(2, 2, 4);
-        pixels.save(g_dir / "sweep.png");
-        for (int shape = 0; shape < 3; ++shape) {
-            auto b = shape == 2 ? texturedTriangle(R"({"uri":"sweep.png"})") : triangle();
-            auto path = shape == 1 ? writeGlb(b) : writeGltf(b);
-            if (shape == 2) {
-                Json document = Json::parse(b.json());
-                document["buffers"][0]["uri"] = "sweep.bin";
-                ofstream(g_dir / "sweep.bin", ios::binary).write(reinterpret_cast<const char*>(b.bin.data()), b.bin.size());
-                ofstream(path, ios::binary) << document.dump();
-            }
-            { GltfModel warm; warm.load(path); }
-            size_t requests = 0;
-            { GltfModel model;
-              modelAllocationProbe::begin();
-              model.load(path);
-              modelAllocationProbe::end();
-              requests = modelAllocationProbe::requests; }
-            for (bool persistent : {false, true}) {
-                if (persistent && tcTest::skipPersistentAllocationFailure("glTF every allocation")) continue;
-                if (!persistent && tcTest::skipProxyAllocationSweep("glTF every allocation: single recovery and retry")) continue;
-                bool clean = requests > 0;
-                for (size_t nth = 1; nth <= requests; ++nth) {
-                    // Retire prior dummy resources between cases, as an app
-                    // does after a frame, before enabling fault injection.
-                    sg_commit();
-                    tc::internal::drainPendingGpuDestroys();
-                    GltfModel model;
-                    LoadResult result;
-                    bool escaped = false;
-                    modelAllocationProbe::beginNth(nth, persistent);
-                    try { result = model.load(path); } catch (...) { escaped = true; }
-                    modelAllocationProbe::end();
-                    clean = clean && modelAllocationProbe::failed && !escaped &&
-                            (result.ok() || (result.error == LoadError::DecodeFailed && !model.isLoaded() && model.getNodeCount() == 0));
-                    clean = clean && gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0;
-                    clean = clean && model.load(path).ok() &&
-                            gltf_internal::liveParserAllocationsForTests() == 0 && outstandingParserBytes == 0;
-                }
-                check(persistent ? "glTF every allocation: persistent recovery and retry" :
-                                   "glTF every allocation: single recovery and retry", clean);
-            }
-        }
-    }
-    gltf_internal::setAllocationHookForTests(nullptr);
-
     // Decode each URI once, including escaped '%' and UTF-8 bytes, while
     // leaving the literal '%' in the model's parent directory untouched.
     for (const string& imageUri : {string("a%20b.png"), string("a%2520b.png"),
@@ -1267,6 +1085,99 @@ int main() {
 
     // ----- textures -------------------------------------------------------------
     {
+        Pixels pixels;
+        pixels.allocate(2, 2, 4);
+        for (int y = 0; y < 2; ++y)
+            for (int x = 0; x < 2; ++x) pixels.setColor(x, y, Color(1, 0, 0, 1));
+        check("sampler: fixture PNG saved", bool(pixels.save(g_dir / "sampler.png")));
+        struct SamplerCase {
+            const char* name;
+            const char* json;  // nullptr means no sampler
+            TextureWrap wrapU;
+            TextureWrap wrapV;
+            TextureFilter minFilter;
+            TextureFilter magFilter;
+            int mipLevels;
+        };
+        const SamplerCase cases[] = {
+            {"missing sampler", nullptr, TextureWrap::Repeat, TextureWrap::Repeat,
+             TextureFilter::Linear, TextureFilter::Linear, 2},
+            {"empty sampler", "{}", TextureWrap::Repeat, TextureWrap::Repeat,
+             TextureFilter::Linear, TextureFilter::Linear, 2},
+            {"explicit repeat", R"({"wrapS":10497,"wrapT":10497})",
+             TextureWrap::Repeat, TextureWrap::Repeat, TextureFilter::Linear, TextureFilter::Linear, 2},
+            {"mixed axes", R"({"wrapS":33071,"wrapT":33648})",
+             TextureWrap::ClampToEdge, TextureWrap::MirroredRepeat,
+             TextureFilter::Linear, TextureFilter::Linear, 2},
+            {"reversed axes", R"({"wrapS":33648,"wrapT":33071})",
+             TextureWrap::MirroredRepeat, TextureWrap::ClampToEdge,
+             TextureFilter::Linear, TextureFilter::Linear, 2},
+            {"nearest", R"({"minFilter":9728,"magFilter":9728})",
+             TextureWrap::Repeat, TextureWrap::Repeat, TextureFilter::Nearest, TextureFilter::Nearest, 1},
+            {"linear", R"({"minFilter":9729,"magFilter":9729})",
+             TextureWrap::Repeat, TextureWrap::Repeat, TextureFilter::Linear, TextureFilter::Linear, 1},
+            {"nearest mipmap linear", R"({"minFilter":9986,"magFilter":9729})",
+             TextureWrap::Repeat, TextureWrap::Repeat, TextureFilter::Nearest, TextureFilter::Linear, 2},
+            {"linear mipmap linear", R"({"minFilter":9987,"magFilter":9728})",
+             TextureWrap::Repeat, TextureWrap::Repeat, TextureFilter::Linear, TextureFilter::Nearest, 2},
+            {"unsupported nearest mipmap nearest", R"({"minFilter":9984})",
+             TextureWrap::Repeat, TextureWrap::Repeat, TextureFilter::Linear, TextureFilter::Linear, 2},
+            {"unsupported linear mipmap nearest", R"({"minFilter":9985})",
+             TextureWrap::Repeat, TextureWrap::Repeat, TextureFilter::Linear, TextureFilter::Linear, 2},
+        };
+        for (const auto& c : cases) {
+            auto b = texturedTriangle(R"({"uri":"sampler.png"})");
+            if (c.json) {
+                b.extra = R"("samplers":[)" + string(c.json) + "]," + b.extra;
+                const auto pos = b.extra.find(R"("source":0)");
+                b.extra.insert(pos, R"("sampler":0,)");
+            }
+            GltfModel model;
+            const string label = string("sampler: ") + c.name;
+            if (!loadCase(label, b, true, model)) continue;
+            const Texture* texture = model.getNode(0).material.getBaseColorTexture();
+            check(label + ": wrap axes", texture && texture->getWrapU() == c.wrapU &&
+                  texture->getWrapV() == c.wrapV);
+            check(label + ": filters", texture && texture->getMinFilter() == c.minFilter &&
+                  texture->getMagFilter() == c.magFilter);
+            check(label + ": mip levels", texture &&
+                  sg_query_image_desc(texture->getImage()).num_mipmaps == c.mipLevels);
+            if (texture) {
+                const auto desc = sg_query_sampler_desc(texture->getSampler());
+                auto sgWrap = [](TextureWrap wrap) {
+                    if (wrap == TextureWrap::Repeat) return SG_WRAP_REPEAT;
+                    if (wrap == TextureWrap::MirroredRepeat) return SG_WRAP_MIRRORED_REPEAT;
+                    return SG_WRAP_CLAMP_TO_EDGE;
+                };
+                check(label + ": backend sampler", desc.wrap_u == sgWrap(c.wrapU) &&
+                      desc.wrap_v == sgWrap(c.wrapV) &&
+                      desc.min_filter == (c.minFilter == TextureFilter::Nearest ? SG_FILTER_NEAREST : SG_FILTER_LINEAR) &&
+                      desc.mag_filter == (c.magFilter == TextureFilter::Nearest ? SG_FILTER_NEAREST : SG_FILTER_LINEAR) &&
+                      desc.mipmap_filter == (c.mipLevels > 1 ? SG_FILTER_LINEAR : SG_FILTER_NEAREST));
+            }
+        }
+        // Two material textures share image 0, but use different samplers.
+        auto b = triangle();
+        b.extra = R"("images":[{"uri":"sampler.png"}],
+            "samplers":[{"wrapS":33071,"wrapT":33648},{}],
+            "textures":[{"source":0,"sampler":0},{"source":0,"sampler":1}],
+            "materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0}}},
+                         {"pbrMetallicRoughness":{"baseColorTexture":{"index":1}}}],)";
+        b.primitive = R"({"attributes":{"POSITION":0},"material":0},
+                         {"attributes":{"POSITION":0},"material":1})";
+        GltfModel model;
+        if (loadCase("shared image with different samplers", b, true, model)) {
+            const auto* first = model.getNode(0).material.getBaseColorTexture();
+            const auto* second = model.getNode(1).material.getBaseColorTexture();
+            check("shared image: independent textures and wrap modes",
+                  first && second && first != second &&
+                  first->getWrapU() == TextureWrap::ClampToEdge &&
+                  first->getWrapV() == TextureWrap::MirroredRepeat &&
+                  second->getWrapU() == TextureWrap::Repeat &&
+                  second->getWrapV() == TextureWrap::Repeat);
+        }
+    }
+    {
         // Put a valid image outside the model folder and a different-sized
         // image at the appended path, so selecting the outside file is visible.
         fs::path modelDir = g_dir / "absolute-uri-model";
@@ -1376,7 +1287,7 @@ int main() {
         b.primitive = R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1},)"
                       R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1,"material":0})";
         GltfModel m;
-        gltf_internal::setTextureLoadHookForTests(&throwRuntimeError);
+        gltf_internal::setTextureLoadHookForTests(+[] { throw bad_alloc(); });
         string warning;
         bool threw = false;
         try {
@@ -1388,23 +1299,72 @@ int main() {
         check("exception while reading: does not escape load()", !threw);
         check("exception while reading: primitive read before it not kept",
               m.getNodeCount() == 0 && !m.isLoaded());
-        check("exception while reading: warning names the error",
-              warning.find("injected failure") != string::npos);
-
-        // An exception that is not a std::exception
-        gltf_internal::setTextureLoadHookForTests(&throwInt);
-        threw = false;
-        try {
-            loadCase("non-standard exception while reading", b, false, m);
-        } catch (...) {
-            threw = true;
-        }
-        gltf_internal::setTextureLoadHookForTests(nullptr);
-        check("non-standard exception while reading: does not escape load()", !threw);
+        check("exception while reading: error names model building",
+              warning.find("error while building the model") != string::npos);
 
         // With the hook off, the same file loads (the texture is skipped)
         loadCase("same file without the hook", b, true, m);
         check("same file without the hook: both primitives", m.getNodeCount() == 2);
+
+        if (!tcTest::skipPersistentAllocationFailure("glTF diagnostic exhaustion")) {
+            // Start refusing real STL allocations after a primitive has been
+            // built. Keep refusing through the catch and result construction.
+            const auto path = g_dir / "persistent-exhaustion.gltf";
+            ofstream(path, ios::binary) << b.json();
+            gltf_internal::setTextureLoadHookForTests(+[] {
+                modelAllocationProbe::beginNth(1, true);
+                vector<int> allocation(16);
+            });
+            LoadResult result;
+            threw = false;
+            try {
+                result = m.load(path);
+            } catch (...) {
+                threw = true;
+            }
+            const bool exhausted = modelAllocationProbe::failed;
+            const size_t requests = modelAllocationProbe::requests;
+            modelAllocationProbe::end();
+            gltf_internal::setTextureLoadHookForTests(nullptr);
+            check("persistent exhaustion: diagnostic also tried allocation",
+                  exhausted && requests > 1);
+            check("persistent exhaustion: failed result, no exception, empty model",
+                  !threw && result.error == LoadError::DecodeFailed &&
+                  result.message.empty() && !m.isLoaded() && m.getNodeCount() == 0);
+            loadCase("retry after persistent exhaustion", b, true, m);
+
+            // Also fail before parsing, while resolving the native path.
+            modelAllocationProbe::beginNth(1, true);
+            threw = false;
+            try { result = m.load(path); } catch (...) { threw = true; }
+            const bool pathExhausted = modelAllocationProbe::failed;
+            modelAllocationProbe::end();
+            check("persistent exhaustion during path resolution stays contained",
+                  pathExhausted && !threw && result.error == LoadError::DecodeFailed &&
+                  !m.isLoaded() && m.getNodeCount() == 0);
+        }
+
+        // A user logger listener can throw as well; both logging attempts
+        // must stay within load(), even with an otherwise healthy allocator.
+        const auto path = g_dir / "throwing-logger.gltf";
+        ofstream(path, ios::binary) << b.json();
+        for (bool standard : {false, true}) {
+            size_t calls = 0;
+            auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
+                if (event.message.rfind("[GltfModel]", 0) != 0) return;
+                ++calls;
+                if (standard) throw bad_alloc();
+                throw 42;
+            });
+            threw = false;
+            LoadResult result;
+            try { result = m.load(path); } catch (...) { threw = true; }
+            check("throwing logger: failed result, no exception, empty model",
+                  !threw && result.error == LoadError::DecodeFailed &&
+                  !m.isLoaded() && m.getNodeCount() == 0);
+            check("throwing logger: diagnostic logging stays contained",
+                  calls == (standard ? 2 : 1));
+        }
     }
 
     {
@@ -1496,6 +1456,69 @@ int main() {
         bool second = m.load(writeGltf(bad)).ok();
         check("reload: good then rejected leaves the model empty",
               first && !second && !m.isLoaded() && m.getNodeCount() == 0);
+    }
+
+    for (bool materialMappings : {false, true}) {
+        // Find the target table's allocation number in a successful parse,
+        // then fail that exact request. All observation lives in the test.
+        struct Allocator {
+            size_t calls = 0;
+            size_t failNth = 0;
+            void* blocks[128]{};
+        } allocator;
+        cgltf_options options{};
+        options.memory.user_data = &allocator;
+        options.memory.alloc_func = +[](void* user, cgltf_size bytes) noexcept -> void* {
+            auto& state = *static_cast<Allocator*>(user);
+            ++state.calls;
+            if (state.calls == state.failNth) return nullptr;
+            void* block = std::malloc(bytes ? bytes : 1);
+            if (state.calls <= 128) state.blocks[state.calls - 1] = block;
+            return block;
+        };
+        options.memory.free_func = +[](void*, void* block) noexcept { std::free(block); };
+        auto builder = triangle();
+        if (materialMappings) {
+            builder.extra = R"("materials":[{}],"extensionsUsed":["KHR_materials_variants"],"extensions":{"KHR_materials_variants":{"variants":[{"name":"default"}]}},)";
+            builder.primitive.pop_back();
+            builder.primitive += R"(,"extensions":{"KHR_materials_variants":{"mappings":[{"material":0,"variants":[0]}]}}})";
+        }
+        const string label = materialMappings ? "material-mapping" : "attribute-table";
+        const string json = builder.json();
+        cgltf_data* parsed = nullptr;
+        auto result = cgltf_parse(&options, json.data(), json.size(), &parsed);
+        check(label + ": baseline parses", result == cgltf_result_success && parsed);
+        size_t tableRequest = 0;
+        if (result == cgltf_result_success && parsed && parsed->meshes_count) {
+            const auto& primitive = parsed->meshes[0].primitives[0];
+            for (size_t n = 0; n < allocator.calls && n < 128; ++n) {
+                if (allocator.blocks[n] == (materialMappings
+                        ? static_cast<void*>(primitive.mappings)
+                        : static_cast<void*>(primitive.attributes))) tableRequest = n + 1;
+            }
+            check(label + ": expected table exists", materialMappings
+                  ? primitive.mappings_count == 1 : primitive.attributes_count == 2);
+            result = cgltf_load_buffers(&options, parsed, nullptr);
+            check(label + ": baseline model is valid", result == cgltf_result_success &&
+                  cgltf_validate(parsed) == cgltf_result_success);
+        }
+        cgltf_free(parsed);
+        check(label + ": allocation occurs after a partial tree", tableRequest > 3);
+        if (tableRequest) {
+            allocator = {};
+            allocator.failNth = tableRequest;
+            parsed = nullptr;
+            result = cgltf_parse(&options, json.data(), json.size(), &parsed);
+            check(label + ": allocation failure returns OOM without a tree",
+                  allocator.calls == tableRequest &&
+                  result == cgltf_result_out_of_memory && !parsed);
+            cgltf_free(parsed);
+            allocator = {};
+            parsed = nullptr;
+            result = cgltf_parse(&options, json.data(), json.size(), &parsed);
+            check(label + ": retries after allocation failure", result == cgltf_result_success && parsed);
+            cgltf_free(parsed);
+        }
     }
 
     error_code ec;

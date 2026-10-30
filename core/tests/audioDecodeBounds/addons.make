@@ -1,1 +1,1 @@
-# Core audio decoder admission tests (no addons).
+# Core audio decoding regression tests (no addons).

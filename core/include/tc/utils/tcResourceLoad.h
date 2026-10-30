@@ -11,6 +11,15 @@
 #include <vector>
 #include <type_traits>
 
+namespace trussc {
+
+// Main thread. Shared Image/SoundBuffer/Font preparation slots, default 4.
+// Values below 1 become 1 with a Notice; there is no upper cap.
+void setResourceLoadConcurrency(int count);
+int getResourceLoadConcurrency();
+
+} // namespace trussc
+
 namespace trussc::internal {
 
 // Allocate generic callback storage only when enqueueing. Keeping the vector

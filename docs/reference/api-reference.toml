@@ -8557,19 +8557,22 @@ details.en = '''
 - Asynchronous Image, SoundBuffer and Font preparation or retained-result admission can also fail with `TooLarge`; see their `loadAsync` entries for the shared limits.
 - This scoped enum contains `None`, `FileNotFound`, `UnsupportedFormat`, `DecodeFailed`, `Unknown`, `TooLarge`, and `Cancelled`; `None` has value `0` and means success.
 - `FileNotFound` covers missing files or files that could not be opened; `UnsupportedFormat` identifies an unsupported extension or container, and `DecodeFailed` identifies data rejected by the decoder.
-- `TooLarge` identifies an image dimension or encoded-input size limit, including CPU-only `Pixels`. Image dimensions use the recorded GPU texture limit, or 16384 per axis when unknown; encoded inputs are limited to 64 MiB. `Cancelled` identifies cancellation, and `Unknown` covers failures without a more specific classification.
+- `TooLarge` identifies a GPU upload dimension limit, a URL or encoded-memory input above 64 MiB, or storage that cannot fit the platform representation. CPU `Pixels` loading has no GPU axis cap. `Cancelled` identifies cancellation; `Unknown` covers other failures, including allocation failure.
+- Local image input is limited to what stb_image can address (about 2 GiB).
 '''
 details.ja = '''
 - Image・SoundBuffer・Font の非同期準備または完了結果の保持に対する admission 拒否も `TooLarge` を返します。共有上限は各 `loadAsync` の項を参照してください。
 - スコープ付き列挙型で、`None`、`FileNotFound`、`UnsupportedFormat`、`DecodeFailed`、`Unknown`、`TooLarge`、`Cancelled` があります。`None` の値は `0` で、成功を表します。
 - `FileNotFound` はファイルが存在しない場合や開けない場合、`UnsupportedFormat` は未対応の拡張子やコンテナー、`DecodeFailed` はデコーダーがデータを読み取れなかった場合を表します。
-- `TooLarge` は、CPU 上の `Pixels` を含め、画像の寸法または符号化済み入力サイズの上限超過を表します。寸法は記録済みの GPU テクスチャ上限、不明な場合は各軸 16384 ピクセル、符号化済み入力は 64 MiB が上限です。`Cancelled` はキャンセル、`Unknown` はより具体的に分類できない失敗を表します。
+- `TooLarge` は GPU 転送時の寸法上限、URL・符号化済みメモリ入力の 64 MiB 超過、またはプラットフォームで表現できない保存領域を表します。CPU の `Pixels` 読み込みには GPU の軸上限を適用しません。`Cancelled` はキャンセル、`Unknown` はメモリ確保失敗などのその他の失敗を表します。
+- ローカル画像入力は stb_image が扱える範囲（約 2 GiB）に制限されます。
 '''
 details.ko = '''
 - Image, SoundBuffer, Font의 비동기 준비 또는 완료 결과 보관에 대한 admission 거부도 `TooLarge`를 반환합니다. 공유 한도는 각 `loadAsync` 항목을 참조하세요.
 - 범위가 지정된 열거형으로 `None`, `FileNotFound`, `UnsupportedFormat`, `DecodeFailed`, `Unknown`, `TooLarge`, `Cancelled`가 있습니다. `None`의 값은 `0`이며 성공을 나타냅니다.
 - `FileNotFound`는 파일이 없거나 열 수 없는 경우, `UnsupportedFormat`은 지원하지 않는 확장자나 컨테이너, `DecodeFailed`는 디코더가 데이터를 읽지 못한 경우를 나타냅니다.
-- `TooLarge`는 CPU 전용 `Pixels`를 포함하여 이미지 크기나 인코딩된 입력 크기 한도를 초과한 경우를 나타냅니다. 이미지 크기는 기록된 GPU 텍스처 한도, 알 수 없으면 축당 16384픽셀을 사용하며 인코딩된 입력은 64 MiB로 제한됩니다. `Cancelled`는 취소를, `Unknown`은 더 구체적으로 분류할 수 없는 실패를 나타냅니다.
+- `TooLarge`는 GPU 업로드 크기 한도, URL·인코딩된 메모리 입력의 64 MiB 초과 또는 플랫폼에서 표현할 수 없는 저장 공간을 나타냅니다. CPU `Pixels` 로드에는 GPU 축 한도를 적용하지 않습니다. `Cancelled`는 취소를, `Unknown`은 메모리 할당 실패 등 기타 실패를 나타냅니다.
+- 로컬 이미지 입력은 stb_image가 처리할 수 있는 범위(약 2 GiB)로 제한됩니다.
 '''
 related = ["LoadResult"]
 value_desc.None.en = "Success (no error)"
@@ -11541,7 +11544,8 @@ description.ja = "ファイルから画像を読み込む。"
 description.ko = "파일에서 이미지를 로드한다."
 details.en = '''
 - OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
-- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
+- Local files have no 64 MiB size cap. CPU `Pixels` loading has no GPU axis cap and lets the decoder read headers. URL and encoded memory inputs keep the 64 MiB cap; GPU uploads still check device dimensions. Allocation failure reports an error without publishing a partial image.
+- Local image input is limited to what stb_image can address (about 2 GiB).
 - `load(path, mipmaps = false)` decodes the file into four-channel U8 RGBA pixels and uploads an Immutable texture. Relative paths resolve through `getDataPath()`; absolute paths are used as given.
 - The decoder supports JPEG, PNG, TGA, BMP, PSD, GIF, Radiance HDR, Softimage PIC and binary PPM/PGM, subject to each decoder's supported variants. This method produces U8 pixels even for HDR or higher-bit-depth input; use `Pixels::loadHDR()` for floating-point HDR pixels.
 - On macOS and iOS, files rejected by the first decoder are tried with ImageIO, including HEIC/HEIF, TIFF and JPEG 2000 where supported by the OS. This fallback sets alpha to 1.
@@ -11552,7 +11556,8 @@ details.en = '''
 '''
 details.ja = '''
 - OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
-- Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
+- ローカルファイルには 64 MiB のサイズ上限はありません。CPU の `Pixels` 読み込みには GPU の軸上限を適用せず、ヘッダーの解釈はデコーダーに任せます。URL と符号化済みメモリ入力の 64 MiB 上限、および GPU 転送時のデバイス寸法の確認は残ります。メモリ確保に失敗するとエラーを報告し、部分的な画像は公開しません。
+- ローカル画像入力は stb_image が扱える範囲（約 2 GiB）に制限されます。
 - `load(path, mipmaps = false)` はファイルを 4 チャンネルの U8 RGBA ピクセルにデコードし、Immutable テクスチャに転送します。相対パスは `getDataPath()` で解決し、絶対パスはそのまま使います。
 - デコーダーは JPEG、PNG、TGA、BMP、PSD、GIF、Radiance HDR、Softimage PIC、バイナリ PPM/PGM に対応します。各形式の対応範囲はデコーダーによります。HDR や高ビット深度の入力も、このメソッドでは U8 ピクセルになります。浮動小数点の HDR ピクセルには `Pixels::loadHDR()` を使ってください。
 - macOS と iOS では、最初のデコーダーが読み込めなかったファイルを ImageIO でも試します。OS が対応する HEIC/HEIF、TIFF、JPEG 2000 などを読み込めます。このフォールバックではアルファを 1 にします。
@@ -11563,7 +11568,8 @@ details.ja = '''
 '''
 details.ko = '''
 - OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
-- Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
+- 로컬 파일에는 64 MiB 크기 한도가 없습니다. CPU `Pixels` 로드에는 GPU 축 한도를 적용하지 않으며 헤더 해석은 디코더에 맡깁니다. URL과 인코딩된 메모리 입력은 64 MiB 한도를 유지하고 GPU 업로드는 장치 크기를 확인합니다. 메모리 할당에 실패하면 오류를 보고하며 부분 이미지를 공개하지 않습니다.
+- 로컬 이미지 입력은 stb_image가 처리할 수 있는 범위(약 2 GiB)로 제한됩니다.
 - `load(path, mipmaps = false)`는 파일을 4채널 U8 RGBA 픽셀로 디코딩하고 Immutable 텍스처에 업로드합니다. 상대 경로는 `getDataPath()`로 해석하며 절대 경로는 그대로 사용합니다.
 - 디코더는 JPEG, PNG, TGA, BMP, PSD, GIF, Radiance HDR, Softimage PIC, 바이너리 PPM/PGM을 지원합니다. 각 형식의 세부 지원 범위는 디코더에 따릅니다. 이 메서드는 HDR이나 높은 비트 깊이의 입력도 U8 픽셀로 변환합니다. 부동소수점 HDR 픽셀에는 `Pixels::loadHDR()`를 사용합니다.
 - macOS와 iOS에서는 첫 디코더가 읽지 못한 파일을 ImageIO로도 시도합니다. OS가 지원하는 HEIC/HEIF, TIFF, JPEG 2000 등을 읽을 수 있습니다. 이 대체 경로는 알파를 1로 설정합니다.
@@ -11590,7 +11596,8 @@ description.ja = "メモリ上の符号化された画像を読み込む。"
 description.ko = "메모리에서 인코딩된 이미지를 로드한다."
 details.en = '''
 - OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
-- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
+- Local files have no 64 MiB size cap. CPU `Pixels` loading has no GPU axis cap and lets the decoder read headers. URL and encoded memory inputs keep the 64 MiB cap; GPU uploads still check device dimensions. Allocation failure reports an error without publishing a partial image.
+- Local image input is limited to what stb_image can address (about 2 GiB).
 - `loadFromMemory(buffer, len, mipmaps = false)` decodes `len` bytes of encoded image data into four-channel U8 RGBA pixels and uploads an Immutable texture. It copies the decoded pixels and does not retain the input buffer.
 - Uses the same primary decoder as `Image::load`, without the platform file-loading fallback. `mipmaps = true` builds a mip chain.
 - Returns `LoadResult`: `DecodeFailed` for rejected data, `TooLarge` for dimensions above the active GPU texture limit, or `Unknown` for texture upload failure. Clears the previous image and cancels asynchronous loading before decoding; failure leaves the image empty.
@@ -11598,7 +11605,8 @@ details.en = '''
 '''
 details.ja = '''
 - OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
-- Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
+- ローカルファイルには 64 MiB のサイズ上限はありません。CPU の `Pixels` 読み込みには GPU の軸上限を適用せず、ヘッダーの解釈はデコーダーに任せます。URL と符号化済みメモリ入力の 64 MiB 上限、および GPU 転送時のデバイス寸法の確認は残ります。メモリ確保に失敗するとエラーを報告し、部分的な画像は公開しません。
+- ローカル画像入力は stb_image が扱える範囲（約 2 GiB）に制限されます。
 - `loadFromMemory(buffer, len, mipmaps = false)` は、符号化された画像データ `len` バイトを 4 チャンネルの U8 RGBA ピクセルにデコードし、Immutable テクスチャに転送します。デコードしたピクセルをコピーし、入力バッファは保持しません。
 - `Image::load` と同じ最初のデコーダーを使いますが、プラットフォーム固有のファイル読み込みへのフォールバックは行いません。`mipmaps = true` はミップマップ連鎖を作成します。
 - `LoadResult` を返し、デコードできないデータは `DecodeFailed`、使用中の GPU のテクスチャ上限を超える寸法は `TooLarge`、テクスチャ転送の失敗は `Unknown` です。デコード前に以前の画像を消去して非同期読み込みを取り消し、失敗時は画像が空になります。
@@ -11606,7 +11614,8 @@ details.ja = '''
 '''
 details.ko = '''
 - OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
-- Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
+- 로컬 파일에는 64 MiB 크기 한도가 없습니다. CPU `Pixels` 로드에는 GPU 축 한도를 적용하지 않으며 헤더 해석은 디코더에 맡깁니다. URL과 인코딩된 메모리 입력은 64 MiB 한도를 유지하고 GPU 업로드는 장치 크기를 확인합니다. 메모리 할당에 실패하면 오류를 보고하며 부분 이미지를 공개하지 않습니다.
+- 로컬 이미지 입력은 stb_image가 처리할 수 있는 범위(약 2 GiB)로 제한됩니다.
 - `loadFromMemory(buffer, len, mipmaps = false)`는 인코딩된 이미지 데이터 `len`바이트를 4채널 U8 RGBA 픽셀로 디코딩하고 Immutable 텍스처에 업로드합니다. 디코딩된 픽셀을 복사하며 입력 버퍼는 보관하지 않습니다.
 - `Image::load`와 같은 기본 디코더를 사용하지만 플랫폼별 파일 로드 대체 경로는 사용하지 않습니다. `mipmaps = true`는 밉맵 체인을 생성합니다.
 - `LoadResult`를 반환하며, 디코딩할 수 없는 데이터는 `DecodeFailed`, 활성 GPU의 텍스처 한도를 초과하는 크기는 `TooLarge`, 텍스처 업로드 실패는 `Unknown`을 반환합니다. 디코딩 전에 이전 이미지를 비우고 비동기 로드를 취소하며, 실패하면 이미지는 빈 상태가 됩니다.
@@ -22829,7 +22838,8 @@ description.ja = "画像ファイルを CPU ピクセルに読み込む。"
 description.ko = "이미지 파일을 CPU 픽셀로 읽는다."
 details.en = '''
 - OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
-- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
+- Local files have no 64 MiB size cap. CPU `Pixels` loading has no GPU axis cap and lets the decoder read headers. URL and encoded memory inputs keep the 64 MiB cap; GPU uploads still check device dimensions. Allocation failure reports an error without publishing a partial image.
+- Local image input is limited to what stb_image can address (about 2 GiB).
 - Clears existing pixels, decodes with stb_image, and tries `loadPlatform()` if decoding fails; successful loading produces four-channel `PixelFormat::U8` data.
 - Returns a `LoadResult` that evaluates to `true` on success; an unavailable file reports `LoadError::FileNotFound`, and failed decoding reports `LoadError::DecodeFailed`. The buffer remains cleared on failure.
 - Performs no GPU work and can run on a worker thread; upload the result with `Texture::allocate(pixels)` on the main thread. See `Texture` for GPU resource rules.
@@ -22837,7 +22847,8 @@ details.en = '''
 '''
 details.ja = '''
 - OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
-- Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
+- ローカルファイルには 64 MiB のサイズ上限はありません。CPU の `Pixels` 読み込みには GPU の軸上限を適用せず、ヘッダーの解釈はデコーダーに任せます。URL と符号化済みメモリ入力の 64 MiB 上限、および GPU 転送時のデバイス寸法の確認は残ります。メモリ確保に失敗するとエラーを報告し、部分的な画像は公開しません。
+- ローカル画像入力は stb_image が扱える範囲（約 2 GiB）に制限されます。
 - 既存のピクセルを解放して stb_image でデコードし、デコードに失敗した場合は `loadPlatform()` を試します。成功すると 4 チャンネルの `PixelFormat::U8` データになります。
 - 成功時に `true` と評価される `LoadResult` を返します。ファイルを利用できない場合は `LoadError::FileNotFound`、デコード失敗時は `LoadError::DecodeFailed` を返し、バッファは解放状態のままです。
 - GPU 処理を行わないため、ワーカースレッドで実行できます。結果のアップロードはメインスレッドで `Texture::allocate(pixels)` を使ってください。GPU リソースの扱いは `Texture` を参照してください。
@@ -22845,7 +22856,8 @@ details.ja = '''
 '''
 details.ko = '''
 - OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
-- Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
+- 로컬 파일에는 64 MiB 크기 한도가 없습니다. CPU `Pixels` 로드에는 GPU 축 한도를 적용하지 않으며 헤더 해석은 디코더에 맡깁니다. URL과 인코딩된 메모리 입력은 64 MiB 한도를 유지하고 GPU 업로드는 장치 크기를 확인합니다. 메모리 할당에 실패하면 오류를 보고하며 부분 이미지를 공개하지 않습니다.
+- 로컬 이미지 입력은 stb_image가 처리할 수 있는 범위(약 2 GiB)로 제한됩니다.
 - 기존 픽셀을 해제하고 stb_image로 디코딩하며, 디코딩에 실패하면 `loadPlatform()`을 시도합니다. 성공하면 4채널 `PixelFormat::U8` 데이터가 됩니다.
 - 성공 시 `true`로 평가되는 `LoadResult`를 반환합니다. 파일을 이용할 수 없으면 `LoadError::FileNotFound`, 디코딩에 실패하면 `LoadError::DecodeFailed`를 반환하며 버퍼는 해제 상태로 남습니다.
 - GPU 작업을 하지 않으므로 작업자 스레드에서 실행할 수 있습니다. 결과 업로드는 메인 스레드에서 `Texture::allocate(pixels)`를 사용합니다. GPU 리소스 규칙은 `Texture`를 참조합니다.
@@ -22870,21 +22882,24 @@ description.ja = "メモリ上の画像を CPU ピクセルにデコードする
 description.ko = "메모리의 이미지를 CPU 픽셀로 디코딩한다."
 details.en = '''
 - OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
-- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
+- Local files have no 64 MiB size cap. CPU `Pixels` loading has no GPU axis cap and lets the decoder read headers. URL and encoded memory inputs keep the 64 MiB cap; GPU uploads still check device dimensions. Allocation failure reports an error without publishing a partial image.
+- Local image input is limited to what stb_image can address (about 2 GiB).
 - `loadFromMemory(const unsigned char* buffer, int len)` reads encoded image bytes, with `len` in bytes, and produces four-channel `PixelFormat::U8` pixels; this is not an import of raw pixel values.
 - Clears existing pixels before decoding and returns `LoadResult`; rejected data reports `LoadError::DecodeFailed`, size limits report `TooLarge`, and allocation failure reports `Unknown`. Failure leaves the buffer cleared. It does not try the platform decoder.
 - Performs no GPU work and can run on a worker thread; see `Image::load` for stb_image formats and `Texture` for GPU upload rules.
 '''
 details.ja = '''
 - OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
-- Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
+- ローカルファイルには 64 MiB のサイズ上限はありません。CPU の `Pixels` 読み込みには GPU の軸上限を適用せず、ヘッダーの解釈はデコーダーに任せます。URL と符号化済みメモリ入力の 64 MiB 上限、および GPU 転送時のデバイス寸法の確認は残ります。メモリ確保に失敗するとエラーを報告し、部分的な画像は公開しません。
+- ローカル画像入力は stb_image が扱える範囲（約 2 GiB）に制限されます。
 - `loadFromMemory(const unsigned char* buffer, int len)` はエンコード済みの画像データを読み、4 チャンネルの `PixelFormat::U8` ピクセルを生成します。`len` の単位はバイトで、生のピクセル値を取り込む関数ではありません。
 - デコード前に既存のピクセルを解放し、`LoadResult` を返します。不正なデータは `LoadError::DecodeFailed`、サイズ制限は `TooLarge`、メモリ確保の失敗は `Unknown` です。失敗時のバッファは解放状態のままです。プラットフォームのデコーダは試しません。
 - GPU 処理を行わないため、ワーカースレッドで実行できます。stb_image の対応形式は `Image::load`、GPU アップロードの規則は `Texture` を参照してください。
 '''
 details.ko = '''
 - OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
-- Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
+- 로컬 파일에는 64 MiB 크기 한도가 없습니다. CPU `Pixels` 로드에는 GPU 축 한도를 적용하지 않으며 헤더 해석은 디코더에 맡깁니다. URL과 인코딩된 메모리 입력은 64 MiB 한도를 유지하고 GPU 업로드는 장치 크기를 확인합니다. 메모리 할당에 실패하면 오류를 보고하며 부분 이미지를 공개하지 않습니다.
+- 로컬 이미지 입력은 stb_image가 처리할 수 있는 범위(약 2 GiB)로 제한됩니다.
 - `loadFromMemory(const unsigned char* buffer, int len)`는 인코딩된 이미지 바이트를 읽어 4채널 `PixelFormat::U8` 픽셀을 생성합니다. `len`의 단위는 바이트이며 원시 픽셀 값을 가져오는 함수가 아닙니다.
 - 디코딩 전에 기존 픽셀을 해제하고 `LoadResult`를 반환합니다. 잘못된 데이터는 `LoadError::DecodeFailed`, 크기 제한은 `TooLarge`, 메모리 할당 실패는 `Unknown`입니다. 실패하면 버퍼는 해제 상태로 남습니다. 플랫폼 디코더는 시도하지 않습니다.
 - GPU 작업을 하지 않으므로 작업자 스레드에서 실행할 수 있습니다. stb_image 지원 형식은 `Image::load`, GPU 업로드 규칙은 `Texture`를 참조합니다.
@@ -22898,21 +22913,24 @@ description.ja = "HDR 画像を浮動小数点の CPU ピクセルに読み込�
 description.ko = "HDR 이미지를 부동소수점 CPU 픽셀로 읽는다."
 details.en = '''
 - OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
-- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
+- Local files have no 64 MiB size cap. CPU `Pixels` loading has no GPU axis cap and lets the decoder read headers. URL and encoded memory inputs keep the 64 MiB cap; GPU uploads still check device dimensions. Allocation failure reports an error without publishing a partial image.
+- Local image input is limited to what stb_image can address (about 2 GiB).
 - Decodes Radiance HDR data into four-channel `PixelFormat::F32` pixels with linear RGB values and alpha set to 1; the float decoder also accepts supported non-HDR images and converts them to floats.
 - Clears existing pixels first and returns `LoadResult`; unavailable files report `LoadError::FileNotFound`, and decoding failures report `LoadError::DecodeFailed`, leaving the buffer cleared. There is no platform decoder fallback.
 - Performs no GPU work; see `Image::load` for path resolution, including relative paths through `getDataPath()` and unchanged absolute paths.
 '''
 details.ja = '''
 - OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
-- Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
+- ローカルファイルには 64 MiB のサイズ上限はありません。CPU の `Pixels` 読み込みには GPU の軸上限を適用せず、ヘッダーの解釈はデコーダーに任せます。URL と符号化済みメモリ入力の 64 MiB 上限、および GPU 転送時のデバイス寸法の確認は残ります。メモリ確保に失敗するとエラーを報告し、部分的な画像は公開しません。
+- ローカル画像入力は stb_image が扱える範囲（約 2 GiB）に制限されます。
 - Radiance HDR データを線形 RGB 値の 4 チャンネル `PixelFormat::F32` ピクセルにデコードし、アルファを 1 にします。float デコーダは対応する非 HDR 画像も受け付け、浮動小数点に変換します。
 - 最初に既存のピクセルを解放し、`LoadResult` を返します。ファイルを利用できない場合は `LoadError::FileNotFound`、デコード失敗時は `LoadError::DecodeFailed` を返し、バッファは解放状態のままです。プラットフォームのデコーダへの切り替えはありません。
 - GPU 処理は行いません。パスの解決は `Image::load` を参照してください。相対パスは `getDataPath()` を使い、絶対パスはそのまま使います。
 '''
 details.ko = '''
 - OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
-- Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
+- 로컬 파일에는 64 MiB 크기 한도가 없습니다. CPU `Pixels` 로드에는 GPU 축 한도를 적용하지 않으며 헤더 해석은 디코더에 맡깁니다. URL과 인코딩된 메모리 입력은 64 MiB 한도를 유지하고 GPU 업로드는 장치 크기를 확인합니다. 메모리 할당에 실패하면 오류를 보고하며 부분 이미지를 공개하지 않습니다.
+- 로컬 이미지 입력은 stb_image가 처리할 수 있는 범위(약 2 GiB)로 제한됩니다.
 - Radiance HDR 데이터를 선형 RGB 값의 4채널 `PixelFormat::F32` 픽셀로 디코딩하고 알파를 1로 설정합니다. float 디코더는 지원되는 비 HDR 이미지도 받아 부동소수점으로 변환합니다.
 - 먼저 기존 픽셀을 해제하고 `LoadResult`를 반환합니다. 파일을 이용할 수 없으면 `LoadError::FileNotFound`, 디코딩에 실패하면 `LoadError::DecodeFailed`를 반환하며 버퍼는 해제 상태로 남습니다. 플랫폼 디코더로 대체하지 않습니다.
 - GPU 작업은 하지 않습니다. 경로 해석은 `Image::load`를 참조합니다. 상대 경로는 `getDataPath()`를 사용하고 절대 경로는 그대로 사용합니다.
@@ -22933,19 +22951,22 @@ description.en = "Loads an image through the platform decoder."
 description.ja = "プラットフォームのデコーダで画像を読み込む。"
 description.ko = "플랫폼 디코더로 이미지를 읽는다."
 details.en = '''
-- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding. Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
+- Local files have no 64 MiB size cap. CPU `Pixels` loading has no GPU axis cap and lets the decoder read headers. URL and encoded memory inputs keep the 64 MiB cap; GPU uploads still check device dimensions. Allocation failure reports an error without publishing a partial image.
+- Local image input is limited to what stb_image can address (about 2 GiB).
 - On macOS and iOS, uses ImageIO to decode the first image into four-channel U8 pixels and forces every alpha value to 255; see `Image::load` for supported formats and path resolution.
 - Returns `true` after replacing the buffer on success; returns `false` without changing existing pixels on failure.
 - On non-Apple platforms, checks file availability and always returns `false` without changing the buffer.
 '''
 details.ja = '''
-- Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
+- ローカルファイルには 64 MiB のサイズ上限はありません。CPU の `Pixels` 読み込みには GPU の軸上限を適用せず、ヘッダーの解釈はデコーダーに任せます。URL と符号化済みメモリ入力の 64 MiB 上限、および GPU 転送時のデバイス寸法の確認は残ります。メモリ確保に失敗するとエラーを報告し、部分的な画像は公開しません。
+- ローカル画像入力は stb_image が扱える範囲（約 2 GiB）に制限されます。
 - macOS と iOS では ImageIO で最初の画像を 4 チャンネルの U8 ピクセルにデコードし、すべてのアルファ値を 255 にします。対応形式とパスの解決は `Image::load` を参照してください。
 - 成功時はバッファを置き換えて `true` を返し、失敗時は既存のピクセルを変更せず `false` を返します。
 - Apple 以外のプラットフォームではファイルを利用できるか確認し、バッファを変更せず常に `false` を返します。
 '''
 details.ko = '''
-- Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다. GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
+- 로컬 파일에는 64 MiB 크기 한도가 없습니다. CPU `Pixels` 로드에는 GPU 축 한도를 적용하지 않으며 헤더 해석은 디코더에 맡깁니다. URL과 인코딩된 메모리 입력은 64 MiB 한도를 유지하고 GPU 업로드는 장치 크기를 확인합니다. 메모리 할당에 실패하면 오류를 보고하며 부분 이미지를 공개하지 않습니다.
+- 로컬 이미지 입력은 stb_image가 처리할 수 있는 범위(약 2 GiB)로 제한됩니다.
 - macOS와 iOS에서는 ImageIO로 첫 번째 이미지를 4채널 U8 픽셀로 디코딩하며 모든 알파 값을 255로 설정합니다. 지원 형식과 경로 해석은 `Image::load`를 참조합니다.
 - 성공하면 버퍼를 교체하고 `true`를 반환하며, 실패하면 기존 픽셀을 변경하지 않고 `false`를 반환합니다.
 - Apple 이외의 플랫폼에서는 파일 이용 가능 여부를 확인하고 버퍼를 변경하지 않은 채 항상 `false`를 반환합니다.
@@ -28870,27 +28891,30 @@ description.en = "Decode an audio file into the buffer."
 description.ja = "音声ファイルをバッファにデコードする。"
 description.ko = "오디오 파일을 버퍼로 디코딩한다."
 details.en = '''
+- Decoder-supported audio loads at any positive sample rate up to 2,147,483,647 Hz, the int range of the sample-rate getter; higher rates fail with an Error naming the file and the representation constraint. TrussC adds no channel-count ceiling or decoder memory budget; Vorbis retains its fixed channel-array bound.
 - Selects the decoder by the case-insensitive extension `.wav`, `.mp3`, `.ogg`, `.flac`, `.aac`, or `.m4a`, and finishes decoding into interleaved float PCM before returning.
 - File loaders resolve relative paths with `getDataPath()` and use absolute paths unchanged; successful loads record the resolved path in `getPath()`.
 - Returns `LoadResult`, which converts to true on success; inspect `error` and `message` for failure details. Missing or unreadable files report `LoadError::FileNotFound`; an existing file with an unsupported extension reports `LoadError::UnsupportedFormat`.
 - All synchronous file, encoded-memory, and PCM loaders cancel a pending `loadAsync` and clear `getPath()` before loading, including requests that fail.
-- All encoded audio loaders preserve previous PCM and audio metadata on any failure and never publish a partial sound. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Encoded inputs above 64 MiB are not loaded fully; allocation failure is a clean Error.
+- All encoded audio loaders preserve previous PCM and audio metadata on any failure and never publish a partial sound. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Local files have no encoded-size cap. Encoded memory inputs retain a 64 MiB limit. Allocation failure is a clean Error.
 - Serialize handle operations and direct sample access on the main thread. Synchronous loading, generation, and editing do not lock the audio mixer, so do not modify a buffer while any playing `Sound` reads it.
 '''
 details.ja = '''
+- デコーダーが対応する音声は、サンプルレート取得関数の int の範囲である 1〜2,147,483,647 Hz の任意のレートで読み込めます。これを超えると、ファイル名と表現上の制約を示す Error を出して失敗します。TrussC独自のチャンネル数上限やデコーダーのメモリ予算はありません。Vorbisの固定チャンネル配列の制約は残ります。
 - 大文字小文字を区別せず、拡張子 `.wav`、`.mp3`、`.ogg`、`.flac`、`.aac`、`.m4a` でデコーダを選び、チャンネルを交互に並べたfloat PCMへのデコードを完了してから戻ります。
 - ファイル読み込みでは相対パスを `getDataPath()` で解決し、絶対パスはそのまま使います。成功すると解決済みパスを `getPath()` に記録します。
 - 成功時に真として評価できる `LoadResult` を返します。失敗の詳細は `error` と `message` で確認できます。存在しないファイルや開けないファイルは `LoadError::FileNotFound`、存在するファイルの非対応拡張子は `LoadError::UnsupportedFormat` になります。
 - 同期的なファイル・エンコード済みメモリ・PCMの読み込みは、失敗する要求も含め、読み込み前に進行中の `loadAsync` をキャンセルして `getPath()` を空にします。
-- エンコード済み音声の読み込みは、どの失敗でも以前のPCMと音声メタデータを保持し、部分的な音声を公開しません。全体読み込みには長さの上限はありません。デコード済みPCMが256 MiBを超えると、プロセスで一度だけNoticeを出し、長い曲には `SoundStream::loadStream()` / `Sound::loadStream()` を推奨します。エンコード済み入力が64 MiBを超える場合は全体を読み込まず、メモリ確保の失敗はErrorとして安全に失敗します。
+- エンコード済み音声の読み込みは、どの失敗でも以前のPCMと音声メタデータを保持し、部分的な音声を公開しません。全体読み込みには長さの上限はありません。デコード済みPCMが256 MiBを超えると、プロセスで一度だけNoticeを出し、長い曲には `SoundStream::loadStream()` / `Sound::loadStream()` を推奨します。ローカルファイルの入力サイズに上限はありません。符号化済みメモリ入力は64 MiBが上限です。メモリ確保の失敗はErrorとして安全に失敗します。
 - ハンドルの操作とサンプルへの直接アクセスはメインスレッドで順に行ってください。同期読み込み・生成・編集はオーディオミキサーをロックしないため、再生中の `Sound` が読み取るバッファは変更しないでください。
 '''
 details.ko = '''
+- 디코더가 지원하는 오디오는 샘플레이트 getter의 int 범위인 1~2,147,483,647 Hz의 모든 레이트로 로드됩니다. 이를 넘으면 파일 이름과 표현 범위 제한을 명시한 Error와 함께 실패합니다. TrussC 자체의 채널 수 상한이나 디코더 메모리 예산은 없으며 Vorbis의 고정 채널 배열 한도는 유지됩니다.
 - 대소문자를 구분하지 않는 확장자 `.wav`, `.mp3`, `.ogg`, `.flac`, `.aac`, `.m4a`로 디코더를 선택하며, 채널을 번갈아 배치한 float PCM으로 디코딩을 완료한 뒤 반환합니다.
 - 파일 로더는 상대 경로를 `getDataPath()`로 해석하고 절대 경로는 그대로 사용합니다. 성공하면 해석된 경로를 `getPath()`에 기록합니다.
 - 성공 시 참으로 평가되는 `LoadResult`를 반환합니다. 실패 정보는 `error`와 `message`로 확인합니다. 없거나 열 수 없는 파일은 `LoadError::FileNotFound`를, 존재하는 파일의 미지원 확장자는 `LoadError::UnsupportedFormat`을 보고합니다.
 - 동기 파일, 인코딩된 메모리, PCM 로더는 실패하는 요청도 포함해 로드 전에 진행 중인 `loadAsync`를 취소하고 `getPath()`를 비웁니다.
-- 인코딩된 오디오 로더는 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 전체 로드에는 길이 제한이 없습니다. 디코딩된 PCM이 256 MiB를 넘으면 프로세스에서 한 번만 Notice를 기록하며 긴 트랙에는 `SoundStream::loadStream()` / `Sound::loadStream()`을 권장합니다. 인코딩된 입력이 64 MiB를 넘으면 전체를 로드하지 않으며 메모리 할당 실패는 안전하게 Error로 처리합니다.
+- 인코딩된 오디오 로더는 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 전체 로드에는 길이 제한이 없습니다. 디코딩된 PCM이 256 MiB를 넘으면 프로세스에서 한 번만 Notice를 기록하며 긴 트랙에는 `SoundStream::loadStream()` / `Sound::loadStream()`을 권장합니다. 로컬 파일의 입력 크기에는 상한이 없습니다. 인코딩된 메모리 입력은 64 MiB로 제한됩니다. 메모리 할당 실패는 안전하게 Error로 처리합니다.
 - 핸들 조작과 샘플 직접 접근은 메인 스레드에서 순서대로 수행해야 합니다. 동기 로드, 생성, 편집은 오디오 믹서를 잠그지 않으므로 재생 중인 `Sound`가 읽는 버퍼를 변경하지 않아야 합니다.
 '''
 snippet = '''
@@ -28908,17 +28932,17 @@ description.ko = "AAC 또는 M4A 파일을 버퍼로 디코딩한다."
 details.en = '''
 - Returns `LoadResult`; see `SoundBuffer::load` for path resolution, cancellation, and threading rules.
 - On Web, waits for `OfflineAudioContext` decoding to finish even inside `setup()`, with a 30-second timeout, and stores PCM at 44100 Hz.
-- On any failure, previous PCM and audio metadata are preserved; no partial sound is published. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Encoded inputs above 64 MiB are not loaded fully; allocation failure is a clean Error.
+- On any failure, previous PCM and audio metadata are preserved; no partial sound is published. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Local files have no encoded-size cap. Encoded memory inputs retain a 64 MiB limit. Allocation failure is a clean Error.
 '''
 details.ja = '''
 - `LoadResult` を返します。パスの解決、キャンセル、スレッドの扱いは `SoundBuffer::load` を参照してください。
 - Webでは `setup()` 内でも `OfflineAudioContext` によるデコード完了まで待ち、30秒でタイムアウトします。PCMは44100 Hzで保持します。
-- どの失敗でも以前のPCMと音声メタデータを保持し、部分的な音声を公開しません。全体読み込みには長さの上限はありません。デコード済みPCMが256 MiBを超えると、プロセスで一度だけNoticeを出し、長い曲には `SoundStream::loadStream()` / `Sound::loadStream()` を推奨します。エンコード済み入力が64 MiBを超える場合は全体を読み込まず、メモリ確保の失敗はErrorとして安全に失敗します。
+- どの失敗でも以前のPCMと音声メタデータを保持し、部分的な音声を公開しません。全体読み込みには長さの上限はありません。デコード済みPCMが256 MiBを超えると、プロセスで一度だけNoticeを出し、長い曲には `SoundStream::loadStream()` / `Sound::loadStream()` を推奨します。ローカルファイルの入力サイズに上限はありません。符号化済みメモリ入力は64 MiBが上限です。メモリ確保の失敗はErrorとして安全に失敗します。
 '''
 details.ko = '''
 - `LoadResult`를 반환합니다. 경로 해석, 취소, 스레드 규칙은 `SoundBuffer::load`를 참조하세요.
 - Web에서는 `setup()` 안에서도 `OfflineAudioContext` 디코딩 완료를 기다리며 30초 후 시간 초과로 처리합니다. PCM은 44100 Hz로 저장합니다.
-- 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 전체 로드에는 길이 제한이 없습니다. 디코딩된 PCM이 256 MiB를 넘으면 프로세스에서 한 번만 Notice를 기록하며 긴 트랙에는 `SoundStream::loadStream()` / `Sound::loadStream()`을 권장합니다. 인코딩된 입력이 64 MiB를 넘으면 전체를 로드하지 않으며 메모리 할당 실패는 안전하게 Error로 처리합니다.
+- 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 전체 로드에는 길이 제한이 없습니다. 디코딩된 PCM이 256 MiB를 넘으면 프로세스에서 한 번만 Notice를 기록하며 긴 트랙에는 `SoundStream::loadStream()` / `Sound::loadStream()`을 권장합니다. 로컬 파일의 입력 크기에는 상한이 없습니다. 인코딩된 메모리 입력은 64 MiB로 제한됩니다. 메모리 할당 실패는 안전하게 Error로 처리합니다.
 '''
 platform_note.en = '''
 - AAC/M4A files loaded through `Sound::load` or this function use AudioToolbox `ExtAudioFile` on macOS/iOS, Media Foundation on Windows, GStreamer on Linux, and Web Audio on Web; Linux output is also fixed at 44100 Hz.
@@ -28943,17 +28967,17 @@ description.ko = "메모리의 AAC 데이터를 디코딩한다."
 details.en = '''
 - `data` points to encoded data and `dataSize` is its size in bytes; decoding completes before returning a `LoadResult`.
 - See `SoundBuffer::loadWavFromMemory` for input lifetime and `SoundBuffer::load` for cancellation and threading rules.
-- On any failure, previous PCM and audio metadata are preserved; no partial sound is published. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Encoded inputs above 64 MiB are not loaded fully; allocation failure is a clean Error.
+- On any failure, previous PCM and audio metadata are preserved; no partial sound is published. Full loads have no length limit. Past 256 MiB decoded PCM, one process-lifetime Notice recommends `SoundStream::loadStream()` / `Sound::loadStream()` for long tracks. Local files have no encoded-size cap. Encoded memory inputs retain a 64 MiB limit. Allocation failure is a clean Error.
 '''
 details.ja = '''
 - `data` はエンコード済みデータへのポインター、`dataSize` はバイト数です。デコードを完了してから `LoadResult` を返します。
 - 入力の有効期間は `SoundBuffer::loadWavFromMemory`、キャンセルとスレッドの扱いは `SoundBuffer::load` を参照してください。
-- どの失敗でも以前のPCMと音声メタデータを保持し、部分的な音声を公開しません。全体読み込みには長さの上限はありません。デコード済みPCMが256 MiBを超えると、プロセスで一度だけNoticeを出し、長い曲には `SoundStream::loadStream()` / `Sound::loadStream()` を推奨します。エンコード済み入力が64 MiBを超える場合は全体を読み込まず、メモリ確保の失敗はErrorとして安全に失敗します。
+- どの失敗でも以前のPCMと音声メタデータを保持し、部分的な音声を公開しません。全体読み込みには長さの上限はありません。デコード済みPCMが256 MiBを超えると、プロセスで一度だけNoticeを出し、長い曲には `SoundStream::loadStream()` / `Sound::loadStream()` を推奨します。ローカルファイルの入力サイズに上限はありません。符号化済みメモリ入力は64 MiBが上限です。メモリ確保の失敗はErrorとして安全に失敗します。
 '''
 details.ko = '''
 - `data`는 인코딩된 데이터의 포인터이고 `dataSize`는 바이트 수입니다. 디코딩을 완료한 뒤 `LoadResult`를 반환합니다.
 - 입력의 유효 기간은 `SoundBuffer::loadWavFromMemory`를, 취소 및 스레드 규칙은 `SoundBuffer::load`를 참조하세요.
-- 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 전체 로드에는 길이 제한이 없습니다. 디코딩된 PCM이 256 MiB를 넘으면 프로세스에서 한 번만 Notice를 기록하며 긴 트랙에는 `SoundStream::loadStream()` / `Sound::loadStream()`을 권장합니다. 인코딩된 입력이 64 MiB를 넘으면 전체를 로드하지 않으며 메모리 할당 실패는 안전하게 Error로 처리합니다.
+- 모든 실패 시 이전 PCM과 오디오 메타데이터를 보존하며 부분적인 사운드를 공개하지 않습니다. 전체 로드에는 길이 제한이 없습니다. 디코딩된 PCM이 256 MiB를 넘으면 프로세스에서 한 번만 Notice를 기록하며 긴 트랙에는 `SoundStream::loadStream()` / `Sound::loadStream()`을 권장합니다. 로컬 파일의 입력 크기에는 상한이 없습니다. 인코딩된 메모리 입력은 64 MiB로 제한됩니다. 메모리 할당 실패는 안전하게 Error로 처리합니다.
 '''
 platform_note.en = '''
 - Implemented with AudioToolbox on macOS/iOS, Media Foundation on Windows, and GStreamer on Linux.
@@ -29446,6 +29470,7 @@ description.en = "Prepares an audio file for streaming playback."
 description.ja = "音声ファイルのストリーミング再生を準備する。"
 description.ko = "오디오 파일의 스트리밍 재생을 준비한다."
 details.en = '''
+- TrussC adds no channel-count or sample-rate ceiling and no decoder memory budget. Supported formats still depend on the decoder; Vorbis retains its fixed channel-array bound.
 - `loadStream(path, maxPolyphony = 1)` synchronously opens and probes WAV, MP3, or FLAC files, selecting the format from the extension without regard to case. OGG and AAC/M4A are unsupported by this entry point.
 - Relative paths resolve through `getDataPath`; absolute paths pass through unchanged. Returns a `LoadResult` that converts to `true` on success and `false` on failure.
 - On success, `channels` becomes `2`, `sampleRate` becomes the audio engine's current rate in Hz, and the duration is recorded in seconds. These fields describe the converted output at load time. This function does not initialize the audio engine.
@@ -29455,6 +29480,7 @@ details.en = '''
 - Files with unknown length can still load successfully; see `SoundStream::getDuration` for their seek and engine reinitialization behavior.
 '''
 details.ja = '''
+- TrussC独自のチャンネル数・サンプルレートの上限や、デコーダーのメモリ予算はありません。対応する形式はデコーダーによって異なり、Vorbisの固定チャンネル配列の制約は残ります。
 - `loadStream(path, maxPolyphony = 1)` は WAV、MP3、FLAC ファイルを同期的に開いて調べ、拡張子の大文字・小文字を区別せず形式を選びます。この入口では OGG と AAC/M4A に対応しません。
 - 相対パスは `getDataPath` で解決し、絶対パスはそのまま使用します。成功時に `true`、失敗時に `false` に変換される `LoadResult` を返します。
 - 成功すると `channels` は `2`、`sampleRate` はオーディオエンジンの現在の Hz 単位のレートになり、長さを秒単位で記録します。これらのフィールドは読み込み時の変換後の出力を表します。この関数はオーディオエンジンを初期化しません。
@@ -29464,6 +29490,7 @@ details.ja = '''
 - 長さが不明なファイルも読み込めます。その場合のシークとエンジン再初期化時の動作は `SoundStream::getDuration` を参照してください。
 '''
 details.ko = '''
+- TrussC 자체의 채널 수·샘플레이트 상한이나 디코더 메모리 예산은 없습니다. 지원 형식은 디코더에 따라 다르며 Vorbis의 고정 채널 배열 한도는 유지됩니다.
 - `loadStream(path, maxPolyphony = 1)`은 WAV, MP3, FLAC 파일을 동기적으로 열어 조사하며 확장자의 대소문자를 구분하지 않고 형식을 선택합니다. 이 진입점은 OGG와 AAC/M4A를 지원하지 않습니다.
 - 상대 경로는 `getDataPath`로 해석하며 절대 경로는 그대로 사용합니다. 성공 시 `true`, 실패 시 `false`로 변환되는 `LoadResult`를 반환합니다.
 - 성공하면 `channels`는 `2`, `sampleRate`는 오디오 엔진의 현재 Hz 단위 레이트가 되며 길이를 초 단위로 기록합니다. 이 필드들은 로드 시 변환된 출력을 나타냅니다. 이 함수는 오디오 엔진을 초기화하지 않습니다.
@@ -40892,7 +40919,7 @@ details.ko = '''
 - `clipboardSize`의 기본값은 65536바이트입니다. `setClipboardSize()`는 백엔드 텍스트 버퍼의 한도를 설정합니다. 한도를 넘는 클립보드 텍스트는 플랫폼에 따라 잘리거나 거부될 수 있습니다.
 - `uniformBufferReserve`의 기본값은 백엔드 기본값을 사용하는 `0`입니다. `reserveUniformBuffer(bytes)`는 프레임별 GPU 유니폼 버퍼 예약량을 설정합니다. Metal과 WebGPU는 필요에 따라 버퍼를 확장하며 Vulkan에서는 충분한 용량이 필요합니다. GL과 D3D11은 이 예약량을 사용하지 않습니다.
 '''
-related = ["runApp", "setWindowSize", "setWindowTitle", "HeadlessSettings"]
+related = ["runApp", "setWindowSize", "setWindowTitle", "HeadlessSettings", "WindowSettings::setResourcePoolSize", "WindowSettings::setShaderPoolSize", "WindowSettings::setPipelinePoolSize"]
 snippet = '''
 int main() {
     WindowSettings settings;
@@ -41052,6 +41079,8 @@ details.ko = '''
 - 예약량을 늘리면 메모리 사용량이 증가하지만 매 프레임 할당이 추가되지는 않습니다. Metal과 Vulkan은 처리 중인 프레임을 위해 버퍼 2개를 할당합니다. WebGPU는 GPU 버퍼와 CPU 스테이징 공간을 할당하며 각각 64 KiB를 추가합니다.
 - 핫 리로드 실행기와 보조 윈도우 생성에서는 이 예약량을 반영하지 않습니다.
 '''
+
+related = ["WindowSettings", "WindowSettings::setResourcePoolSize", "WindowSettings::setShaderPoolSize", "WindowSettings::setPipelinePoolSize"]
 
 ["WindowSettings::sampleCount"]
 description.en = "Specifies the window's MSAA sample count."
@@ -41356,18 +41385,24 @@ description.en = "Wraps a pugixml document for loading, saving, and querying XML
 description.ja = "XML の読み込み・保存・検索を行う pugixml ドキュメントのラッパー。"
 description.ko = "XML을 읽고 저장하고 검색하는 pugixml 문서 래퍼이다."
 details.en = '''
+- The wrapper rejects embedded NUL input and follows upstream pugixml behavior for element depth.
+- If you recursively walk untrusted XML yourself, mind the depth.
 - Owns the XML document, which initially has no root element; use `root()`, `child()`, and `addRoot()` to access nodes as `XmlNode` handles.
 - Node and attribute handles refer to document-owned data; destroying or resetting the document, replacing its contents during loading or parsing, or removing the corresponding nodes invalidates those handles.
 - `load()` and `parse()` use the default pugixml options, which do not retain comments, processing instructions, XML declarations, document type declarations, or ordinary text nodes consisting only of literal XML whitespace. Whitespace from character references and whitespace inside CDATA are retained.
 - `save()` and `toString()` output UTF-8 with two spaces per indentation level by default, and automatically include an XML declaration if the document has none.
 '''
 details.ja = '''
+- ラッパーは入力中の NUL を拒否し、要素の深さは pugixml 本家と同じ扱いにします。
+- 信頼できない XML をアプリ側で再帰的に走査する場合は、深さに注意が必要です。
 - XML ドキュメントを所有し、初期状態ではルート要素を持ちません。`root()`、`child()`、`addRoot()` で `XmlNode` ハンドルを取得してノードを操作します。
 - ノードと属性のハンドルはドキュメントが所有するデータを参照します。ドキュメントの破棄やリセット、読み込みや解析による内容の置き換え、対応するノードの削除によって、これらのハンドルは無効になります。
 - `load()` と `parse()` は pugixml の既定のオプションを使い、コメント、処理命令、XML 宣言、文書型宣言、入力に直接書かれた XML の空白文字だけからなる通常のテキストノードを保持しません。文字参照で生成される空白や CDATA 内の空白は保持します。
 - `save()` と `toString()` は既定で各階層を半角スペース 2 個で字下げした UTF-8 を出力し、ドキュメントに XML 宣言がなければ自動的に付加します。
 '''
 details.ko = '''
+- 래퍼는 입력의 NUL을 거부하며 요소 깊이는 원본 pugixml과 동일하게 처리합니다.
+- 신뢰할 수 없는 XML을 앱에서 직접 재귀적으로 순회하는 경우 깊이에 주의해야 합니다.
 - XML 문서를 소유하며, 초기 상태에는 루트 요소가 없습니다. `root()`, `child()`, `addRoot()`로 `XmlNode` 핸들을 얻어 노드를 조작합니다.
 - 노드와 속성 핸들은 문서가 소유한 데이터를 참조합니다. 문서를 소멸하거나 초기화하거나, 읽기 또는 파싱으로 내용을 교체하거나, 해당 노드를 삭제하면 이 핸들들은 무효화됩니다.
 - `load()`와 `parse()`는 pugixml의 기본 옵션을 사용하며 주석, 처리 명령, XML 선언, 문서 형식 선언, 입력에 직접 쓰인 XML 공백 문자만으로 이루어진 일반 텍스트 노드를 보존하지 않습니다. 문자 참조로 생성된 공백과 CDATA 내부의 공백은 보존합니다.
@@ -41474,19 +41509,19 @@ description.en = "Loads an XML document from a file."
 description.ja = "ファイルから XML ドキュメントを読み込む。"
 description.ko = "파일에서 XML 문서를 읽는다."
 details.en = '''
-- Local input has no byte-size cap; documents above 16 MiB produce a Notice. Nesting is limited to 64 elements to keep DOM consumers safe. Parsing uses a temporary document; failure preserves the previous document and never publishes a parsed prefix.
+- Local input has no byte-size cap; documents above 16 MiB produce a Notice. Parsing uses a temporary document; failure preserves the previous document and never publishes a parsed prefix.
 - Accepts a file path; relative paths are resolved through `getDataPath()`, and absolute paths are used directly.
 - Returns `true` on success and `false` for a missing or unreadable file or a parsing error; failures are logged, with a description and offset for parsing errors.
 - See `Xml` for parsing defaults and node handle lifetime. Node handles remain valid after failure and are invalidated by a successful replacement.
 '''
 details.ja = '''
-- ローカル入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。DOM の利用を安全にするため、要素のネストは 64 段までです。一時ドキュメントで解析し、失敗時は以前のドキュメントを保持して解析途中の内容を公開しません。
+- ローカル入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。一時ドキュメントで解析し、失敗時は以前のドキュメントを保持して解析途中の内容を公開しません。
 - ファイルパスを受け取ります。相対パスは `getDataPath()` で解決し、絶対パスはそのまま使います。
 - 成功時は `true`、ファイルが存在しない場合、読み取れない場合、解析に失敗した場合は `false` を返します。失敗時はログを出力し、解析エラーには説明と位置を含めます。
 - 解析の既定の動作とノードハンドルの有効期間は `Xml` を参照してください。失敗時は既存のノードハンドルも維持し、成功して置き換えた場合に無効になります。
 '''
 details.ko = '''
-- 로컬 입력의 바이트 크기 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다. DOM 사용을 안전하게 유지하기 위해 요소 중첩은 64단계로 제한합니다. 임시 문서에서 파싱하며 실패하면 이전 문서를 유지하고 파싱 중인 일부 내용을 공개하지 않습니다.
+- 로컬 입력의 바이트 크기 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다. 임시 문서에서 파싱하며 실패하면 이전 문서를 유지하고 파싱 중인 일부 내용을 공개하지 않습니다.
 - 파일 경로를 받습니다. 상대 경로는 `getDataPath()`로 해석하고 절대 경로는 그대로 사용합니다.
 - 성공하면 `true`를, 파일이 없거나 읽을 수 없거나 파싱에 실패하면 `false`를 반환합니다. 실패 시 로그를 출력하며 파싱 오류에는 설명과 위치를 포함합니다.
 - 파싱의 기본 동작과 노드 핸들의 유효 기간은 `Xml`을 참조하세요. 실패 후에는 기존 노드 핸들이 유효하며 성공하여 교체하면 무효화됩니다.
@@ -41504,19 +41539,19 @@ description.en = "Parses an XML document from a string."
 description.ja = "文字列から XML ドキュメントを解析する。"
 description.ko = "문자열에서 XML 문서를 파싱한다."
 details.en = '''
-- Local input has no byte-size cap; documents above 16 MiB produce a Notice. Nesting is limited to 64 elements to keep DOM consumers safe. Parsing uses a temporary document; failure preserves the previous document and never publishes a parsed prefix.
+- Local input has no byte-size cap; documents above 16 MiB produce a Notice. Parsing uses a temporary document; failure preserves the previous document and never publishes a parsed prefix.
 - Accepts a UTF-8 string; embedded null characters are rejected.
 - Returns `true` on success; failure logs an error description and offset and returns `false`.
 - See `Xml` for parsing defaults and node handle lifetime.
 '''
 details.ja = '''
-- ローカル入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。DOM の利用を安全にするため、要素のネストは 64 段までです。一時ドキュメントで解析し、失敗時は以前のドキュメントを保持して解析途中の内容を公開しません。
+- ローカル入力のバイト数に上限はなく、16 MiB を超える文書は Notice を出力します。一時ドキュメントで解析し、失敗時は以前のドキュメントを保持して解析途中の内容を公開しません。
 - UTF-8 の文字列を受け取ります。途中の null 文字は拒否します。
 - 成功時は `true` を返します。失敗時はエラーの説明と位置をログに出力して `false` を返します。
 - 解析の既定の動作とノードハンドルの有効期間は `Xml` を参照してください。
 '''
 details.ko = '''
-- 로컬 입력의 바이트 크기 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다. DOM 사용을 안전하게 유지하기 위해 요소 중첩은 64단계로 제한합니다. 임시 문서에서 파싱하며 실패하면 이전 문서를 유지하고 파싱 중인 일부 내용을 공개하지 않습니다.
+- 로컬 입력의 바이트 크기 제한은 없으며 16 MiB가 넘는 문서는 Notice를 기록합니다. 임시 문서에서 파싱하며 실패하면 이전 문서를 유지하고 파싱 중인 일부 내용을 공개하지 않습니다.
 - UTF-8 문자열을 받습니다. 문자열 중간의 null 문자는 거부합니다.
 - 성공하면 `true`를 반환합니다. 실패하면 오류 설명과 위치를 로그에 출력하고 `false`를 반환합니다.
 - 파싱의 기본 동작과 노드 핸들의 유효 기간은 `Xml`을 참조하세요.
@@ -57445,27 +57480,30 @@ description.ja = "シェーダー描画用の頂点バッファとインデッ�
 description.ko = "셰이더 그리기용 정점 및 인덱스 버퍼를 생성한다."
 details.en = '''
 - Protected virtual `void createVertexBuffer()` called by `load()`; subclasses can override it to populate `vertexBuffer` and `indexBuffer` for their pipeline.
-- The default creates stream-updated buffers with room for 65,536 `ShaderVertex` values and 65,536 `uint32_t` indices, plus shared stream usage tracking.
-- Deferred draws that exceed the remaining capacity of either buffer are skipped and counted toward demand. At the first submission of a later sokol frame, both buffers are doubled repeatedly until that demand fits; buffers are not replaced partway through a frame.
-- Growth failure is logged and retains the existing buffers; resource retirement follows `Shader::clear`.
+- The default creates stream-updated buffers with room for 65,536 `ShaderVertex` values and 65,536 `uint32_t` indices, plus shared ownership for replay-time stream growth.
+- When a deferred draw exceeds either buffer's remaining capacity, replay grows that buffer by repeated doubling and draws in the same frame, including the first frame and separate FBO/window passes. Already issued draws retain their old buffers until submission; no re-upload is needed.
+- Allocation failure skips the affected draw and retains the existing buffers. One Error per run reports the requested vertex count and suggests reducing geometry submitted with `Shader::submitVertices()` to lower storage demand. Sizes must fit sokol's signed buffer sizes and draw counts; no additional geometry cap is imposed. Resource retirement follows `Shader::clear`.
+- On OpenGL/GLES/WebGL, GPU out-of-memory while growing may go undetected (sokol reports the buffer as created), so that draw may be lost without the Error; Metal/D3D11 report the failure.
 '''
 details.ja = '''
 - `load()` が呼ぶ protected の仮想関数 `void createVertexBuffer()` です。サブクラスでオーバーライドし、パイプラインに合う `vertexBuffer` と `indexBuffer` を設定できます。
-- デフォルトでは、65,536 個の `ShaderVertex` と 65,536 個の `uint32_t` インデックスを格納できるストリーム更新用バッファ、および共有のストリーム使用量記録を生成します。
-- どちらかのバッファの残り容量を超える遅延描画は省略し、必要量には加算します。後の sokol フレームで最初に送信するときに、その必要量を満たすまで両方のバッファを繰り返し倍増します。フレームの途中ではバッファを置き換えません。
-- 拡張に失敗するとログに出し、既存のバッファを保持します。リソースの解放時期は `Shader::clear` に従います。
+- デフォルトでは、65,536 個の `ShaderVertex` と 65,536 個の `uint32_t` インデックスを格納できるストリーム更新用バッファ、および実行時の拡張に使う共有のストリーム所有オブジェクトを生成します。
+- 遅延描画がどちらかのバッファの残り容量を超えると、実行時にそのバッファを必要なだけ倍増し、同じフレームで描画します。最初のフレームや別々の FBO・ウィンドウのパスにも適用されます。実行済みの描画は送信まで旧バッファを保持するため、再アップロードは不要です。
+- メモリ確保に失敗した描画は省略し、既存のバッファを保持します。実行中に一度だけ Error で要求された頂点数を知らせ、必要な記憶領域を減らすために `Shader::submitVertices()` で送信する描画形状を減らす方法を案内します。サイズは sokol の符号付きバッファサイズと描画数で表現できる必要がありますが、追加の頂点数上限は設けません。リソースの解放時期は `Shader::clear` に従います。
+- OpenGL/GLES/WebGL では、拡張時の GPU メモリ不足を検出できない場合があり（sokol がバッファを作成済みと報告するため）、Error なしでその描画が失われることがあります。Metal/D3D11 は失敗を報告します。
 '''
 details.ko = '''
 - `load()`가 호출하는 protected 가상 함수 `void createVertexBuffer()`입니다. 서브클래스에서 재정의하여 파이프라인에 맞는 `vertexBuffer`와 `indexBuffer`를 설정할 수 있습니다.
-- 기본 구현은 `ShaderVertex` 65,536개와 `uint32_t` 인덱스 65,536개를 담는 스트림 갱신용 버퍼 및 공유 스트림 사용량 기록을 생성합니다.
-- 어느 버퍼든 남은 용량을 초과하는 지연된 그리기는 생략하고 필요한 용량에는 합산합니다. 이후 sokol 프레임의 첫 제출 시 해당 수요를 충족할 때까지 두 버퍼의 크기를 반복해서 두 배로 늘립니다. 프레임 도중에는 버퍼를 교체하지 않습니다.
-- 확장에 실패하면 로그를 남기고 기존 버퍼를 유지합니다. 리소스 해제 시점은 `Shader::clear`를 따릅니다.
+- 기본 구현은 `ShaderVertex` 65,536개와 `uint32_t` 인덱스 65,536개를 담는 스트림 갱신용 버퍼 및 실행 시 확장을 위한 공유 스트림 소유 객체를 생성합니다.
+- 지연된 그리기가 어느 버퍼든 남은 용량을 초과하면 실행 시 해당 버퍼를 필요한 만큼 두 배로 늘리고 같은 프레임에 그립니다. 첫 프레임과 별도의 FBO/창 패스에도 적용됩니다. 실행한 그리기는 제출까지 이전 버퍼를 유지하므로 다시 업로드할 필요가 없습니다.
+- 메모리 할당 실패 시 해당 그리기를 생략하고 기존 버퍼를 유지합니다. 실행 중 한 번만 Error로 요청한 정점 수를 알리고, 필요한 저장 공간을 줄이도록 `Shader::submitVertices()`로 제출하는 형상을 줄이는 방법을 안내합니다. 크기는 sokol의 부호 있는 버퍼 크기와 그리기 수로 표현할 수 있어야 하며 추가 정점 수 제한은 없습니다. 리소스 해제 시점은 `Shader::clear`를 따릅니다.
+- OpenGL/GLES/WebGL에서는 확장 중 GPU 메모리 부족을 감지하지 못할 수 있어(sokol이 버퍼가 생성되었다고 보고함) Error 없이 해당 그리기가 사라질 수 있습니다. Metal/D3D11은 실패를 보고합니다.
 '''
 snippet = '''
 class StreamShader : public Shader {
 protected:
     void createVertexBuffer() override {
-        // Initialize the standard buffers and stream usage tracking.
+        // Initialize the standard buffers and shared stream owner.
         Shader::createVertexBuffer();
     }
 };
@@ -61127,35 +61165,38 @@ description.en = "Explicitly starts the MCP HTTP listener."
 description.ja = "MCP の HTTP リスナーを明示的に起動する。"
 description.ko = "MCP HTTP 리스너를 명시적으로 시작한다."
 details.en = '''
+- MCP listens on loopback only by default; put a reverse proxy in front if you expose it on a network.
 - Call `startHttpServer(port, host, token)`; defaults are 0, `"127.0.0.1"`, and `""`. A nonpositive port lets the OS choose; retrieve the bound port with `mcp::getHttpPort`.
 - JSON-RPC requests use `POST /mcp`. A configured token requires `Authorization: Bearer <token>`; hosts other than `localhost`, `127.0.0.1`, and `::1` require a nonempty token.
 - Returns void; refusal or bind failure logs an Error. `TRUSSC_MCP=0` prevents startup and closes an existing listener.
 - The first successful opener chooses the address and token. Call this before `mcp::setToolLevel` to choose them explicitly; later mismatched parameters log an Error and change nothing.
 - Matching parameters reuse the listener; the original requested port or the actual bound port is accepted. A matching explicit call also permits Public custom tools on a health-only listener.
-- Default admission limits are 1 MiB each for wire and decoded bodies, 8 KiB per request/header/trailer line, 64 KiB total HTTP metadata, 128 header/trailer fields, 32 outstanding connections, and 4 workers.
-- Oversized bodies return 413, excessive metadata returns 431, and excess connections close. Rejections log one Warning per admission store and increment counters that persist across HTTP restarts.
+- Default admission limits are 64 MiB for the payload and decoded body, 32 outstanding connections, and 4 workers. Upstream read/write and keep-alive inactivity timeouts are 5 seconds; each connection serves at most 100 requests.
+- Oversized bodies return 413 and excess connections close. MCP-owned rejections log one Warning per admission store and increment counters that persist across HTTP restarts. Header/trailer count and total size have no separate MCP cap; upstream retains its default per-line header limit, payload limit and read timeout.
 - Request JSON nesting defaults to 64 levels. Parse admission failures return HTTP 503 with a reason; configure limits with `mcp::setAdmissionLimits` while the server is stopped.
 - The HTTP APIs `startHttpServer`, `stopHttpServer`, `processHttpQueue`, and `getHttpPort` are available on macOS, Windows, Linux, iOS, and Android; they are not declared for Web.
 '''
 details.ja = '''
+- MCP は既定でループバックのみを待ち受けます。ネットワークに公開する場合は、前段にリバースプロキシを置いてください。
 - `startHttpServer(port, host, token)` と呼びます。既定値は 0、`"127.0.0.1"`、`""` です。ポートが 0 以下なら OS が選択し、実際のポートは `mcp::getHttpPort` で取得できます。
 - JSON-RPC 要求には `POST /mcp` を使用します。トークンを設定した場合は `Authorization: Bearer <token>` が必要です。ホストが `localhost`、`127.0.0.1`、`::1` 以外なら、空でないトークンが必要です。
 - 戻り値は void です。起動の拒否やバインドの失敗は Error に記録します。`TRUSSC_MCP=0` は起動を防ぎ、起動済みのリスナーを閉じます。
 - 最初に起動に成功した呼び出しが、アドレスとトークンを決めます。明示的に選ぶ場合は `mcp::setToolLevel` より先に呼んでください。後から異なる値を指定すると、Error を記録して何も変更しません。
 - 設定が一致する呼び出しはリスナーを再利用します。ポートには、最初に要求した値と実際にバインドされた値のどちらも指定できます。一致する明示的な呼び出しは、ヘルス確認専用リスナーで Public のカスタムツールも利用可能にします。
-- 受付上限の既定値は、通信時とデコード後の本文がそれぞれ 1 MiB、要求行・ヘッダー行・トレーラー行が各 8 KiB、HTTP メタデータの合計が 64 KiB、ヘッダーとトレーラーが 128 フィールド、未完了接続が 32、ワーカーが 4 です。
-- 本文の超過には 413、メタデータの超過には 431 を返し、接続数の超過では接続を閉じます。拒否は受付項目ごとに初回だけ Warning を記録し、HTTP の再起動後も維持するカウンターを増やします。
+- 受付上限の既定値は、ペイロードとデコード後の本文が 64 MiB、未完了接続が 32、ワーカーが 4 です。上流の読み取り・書き込み・keep-alive の無通信タイムアウトは 5 秒、接続あたりの要求数は最大 100 です。
+- 本文の超過には 413 を返し、接続数の超過では接続を閉じます。MCP が行う拒否は受付項目ごとに初回だけ Warning を記録し、HTTP の再起動後も維持するカウンターを増やします。ヘッダーとトレーラーの個数・合計サイズに MCP 独自の上限はありません。上流の既定のヘッダー行上限、ペイロード上限、読み取りタイムアウトが適用されます。
 - 要求 JSON のネスト上限の既定値は 64 レベルです。解析時の受付上限を超えると、理由付きの HTTP 503 を返します。上限はサーバー停止中に `mcp::setAdmissionLimits` で設定してください。
 - HTTP API の `startHttpServer`、`stopHttpServer`、`processHttpQueue`、`getHttpPort` は macOS、Windows、Linux、iOS、Android で使用できます。Web では宣言されません。
 '''
 details.ko = '''
+- MCP는 기본적으로 루프백에서만 수신합니다. 네트워크에 공개하는 경우 앞에 리버스 프록시를 배치해야 합니다.
 - `startHttpServer(port, host, token)`으로 호출합니다. 기본값은 0, `"127.0.0.1"`, `""`입니다. 포트가 0 이하이면 OS가 선택하며 실제 포트는 `mcp::getHttpPort`로 조회합니다.
 - JSON-RPC 요청에는 `POST /mcp`를 사용합니다. 토큰을 설정하면 `Authorization: Bearer <token>`이 필요합니다. 호스트가 `localhost`, `127.0.0.1`, `::1` 이외이면 비어 있지 않은 토큰이 필요합니다.
 - 반환형은 void입니다. 시작 거부나 바인딩 실패는 Error로 기록합니다. `TRUSSC_MCP=0`은 시작을 막고 실행 중인 리스너를 닫습니다.
 - 처음 시작에 성공한 호출이 주소와 토큰을 결정합니다. 명시적으로 선택하려면 `mcp::setToolLevel`보다 먼저 호출하세요. 이후 다른 값을 지정하면 Error를 기록하고 아무것도 변경하지 않습니다.
 - 설정이 일치하는 호출은 리스너를 재사용합니다. 포트는 처음 요청한 값이나 실제 바인딩된 값 모두 허용합니다. 일치하는 명시적 호출은 상태 확인 전용 리스너에서 Public 사용자 도구도 허용합니다.
-- 기본 수락 한도는 전송 본문과 디코딩된 본문 각각 1 MiB, 요청/헤더/트레일러 한 줄 8 KiB, 전체 HTTP 메타데이터 64 KiB, 헤더와 트레일러 필드 128개, 미완료 연결 32개 및 워커 4개입니다.
-- 본문 초과에는 413, 메타데이터 초과에는 431을 반환하며 연결 수 초과 시 연결을 닫습니다. 거부는 수락 항목별 최초 한 번만 Warning을 기록하며 HTTP 재시작 후에도 유지되는 카운터를 증가시킵니다.
+- 기본 수락 한도는 페이로드와 디코딩된 본문 64 MiB, 미완료 연결 32개, 워커 4개입니다. 업스트림 읽기·쓰기·keep-alive 비활성 타임아웃은 5초이며 연결당 최대 요청 수는 100개입니다.
+- 본문 초과에는 413을 반환하며 연결 수 초과 시 연결을 닫습니다. MCP에서 수행한 거부는 수락 항목별 최초 한 번만 Warning을 기록하고 HTTP 재시작 후에도 유지되는 카운터를 증가시킵니다. 헤더와 트레일러의 개수 및 총크기에 별도 MCP 한도는 없습니다. 업스트림 기본 헤더 줄 한도, 페이로드 한도 및 읽기 타임아웃을 적용합니다.
 - 요청 JSON 중첩 한도의 기본값은 64단계입니다. 파싱 수락 한도를 초과하면 이유와 함께 HTTP 503을 반환합니다. 한도는 서버가 중지된 상태에서 `mcp::setAdmissionLimits`로 설정하세요.
 - HTTP API인 `startHttpServer`, `stopHttpServer`, `processHttpQueue`, `getHttpPort`는 macOS, Windows, Linux, iOS 및 Android에서 사용할 수 있습니다. Web에서는 선언되지 않습니다.
 '''
@@ -62065,9 +62106,10 @@ description.ja = "画像を非同期に読み込む。"
 description.ko = "이미지를 비동기로 로드한다."
 details.en = '''
 - OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
-- Asynchronous Image, SoundBuffer and Font loads share 4 active preparations. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
+- Asynchronous Image, SoundBuffer and Font loads share active preparation slots (default 4); `setResourceLoadConcurrency` changes their number. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
 - On Web, CMake propagates exception support to framework and application C++ code for document/font loaders and reflection. Resource preparation and application also retain exception-enabled out-of-line host definitions. If a custom build disables exception support in application TUs, allocation failure inside inline header helpers remains outside the recovery guarantee.
-- Bound (gpu): images above the GPU maximum texture size on either axis are rejected before decoding (`TooLarge`). Without a recorded GPU limit (headless or before window creation), the limit is 16384 pixels per axis. Bound (security): encoded files or memory inputs larger than 64 MiB are not loaded. Allocation failure reports an Error and rejects the whole image.
+- Local files have no 64 MiB size cap. CPU `Pixels` loading has no GPU axis cap and lets the decoder read headers. URL and encoded memory inputs keep the 64 MiB cap; GPU uploads still check device dimensions. Allocation failure reports an error without publishing a partial image.
+- Local image input is limited to what stb_image can address (about 2 GiB).
 - `loadAsync(path, mipmaps = false)` returns without a result; retain an `onLoad` listener to receive the `LoadResult`. Path resolution, formats and load errors follow `Image::load`.
 - On native platforms, a worker decodes into private CPU pixels. A later main-thread frame applies the result, uploads the Immutable texture, optionally builds mipmaps and sends `onLoad`; notification never occurs inside `loadAsync()`.
 - The committed image remains readable until application. A surviving failure clears it, as with synchronous loading. Headless loading retains CPU pixels without allocating a texture.
@@ -62081,9 +62123,10 @@ details.en = '''
 '''
 details.ja = '''
 - OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
-- Image・SoundBuffer・Font の非同期読み込みは、同時準備 4 件を共有します。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（終了時に未配信なら省略します）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
+- Image・SoundBuffer・Font の非同期読み込みは、同時準備枠（既定 4 件）を共有します。件数は `setResourceLoadConcurrency` で変更できます。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（終了時に未配信なら省略します）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
 - Web では、ドキュメント・フォント読み込みとリフレクションのため、CMake がフレームワークとアプリケーションの C++ コードに例外サポートを伝播します。リソースの準備・反映も、例外を有効にしたヘッダー外のホスト定義を維持します。独自ビルドでアプリケーションの翻訳単位の例外サポートを無効にした場合、ヘッダー内のインラインヘルパーでのメモリ確保失敗は復旧保証の対象外です。
-- Bound (gpu): GPU の最大テクスチャサイズを幅または高さが超える画像は、デコード前に拒否します（`TooLarge`）。GPU 上限が未記録の場合（ヘッドレス、ウィンドウ作成前など）は各軸 16384 ピクセルが上限です。Bound (security): 64 MiB を超えるファイルや符号化済みメモリ入力は読み込みません。メモリ確保の失敗は Error を記録し、画像全体を拒否します。
+- ローカルファイルには 64 MiB のサイズ上限はありません。CPU の `Pixels` 読み込みには GPU の軸上限を適用せず、ヘッダーの解釈はデコーダーに任せます。URL と符号化済みメモリ入力の 64 MiB 上限、および GPU 転送時のデバイス寸法の確認は残ります。メモリ確保に失敗するとエラーを報告し、部分的な画像は公開しません。
+- ローカル画像入力は stb_image が扱える範囲（約 2 GiB）に制限されます。
 - `loadAsync(path, mipmaps = false)` は結果を返しません。`LoadResult` を受け取るには `onLoad` のリスナーを保持してください。パス解決、対応形式、読み込みエラーは `Image::load` と同じです。
 - ネイティブではワーカーが専用の CPU ピクセルにデコードします。後のメインスレッドのフレームで結果を反映し、Immutable テクスチャへの転送と任意のミップマップ生成を行ってから `onLoad` を通知します。`loadAsync()` の呼び出し中には通知しません。
 - 結果を反映するまでは確定済み画像を参照できます。取り消されていない要求が失敗すると、同期読み込みと同様に画像を空にします。ヘッドレスではテクスチャを確保せず CPU ピクセルを保持します。
@@ -62097,9 +62140,10 @@ details.ja = '''
 '''
 details.ko = '''
 - OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
-- Image, SoundBuffer, Font의 비동기 로드는 동시 준비 4건을 공유합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(종료 시 미전달 Notice는 생략합니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
+- Image, SoundBuffer, Font의 비동기 로드는 동시 준비 슬롯(기본값 4개)을 공유합니다. 개수는 `setResourceLoadConcurrency`로 변경합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(종료 시 미전달 Notice는 생략합니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
 - Web에서는 문서·폰트 로더와 리플렉션을 위해 CMake가 프레임워크와 애플리케이션의 C++ 코드에 예외 지원을 전파합니다. 리소스 준비와 반영도 예외가 활성화된 헤더 밖의 호스트 정의를 유지합니다. 사용자 정의 빌드에서 애플리케이션 번역 단위의 예외 지원을 비활성화하면 인라인 헤더 헬퍼 내부의 할당 실패는 복구 보장 대상이 아닙니다.
-- Bound (gpu): 너비나 높이가 GPU의 최대 텍스처 크기를 초과하면 디코딩 전에 거부합니다(`TooLarge`). GPU 한도가 기록되지 않은 경우(헤드리스 또는 창 생성 전) 각 축의 한도는 16384픽셀입니다. Bound (security): 64 MiB를 초과하는 파일이나 인코딩된 메모리 입력은 로드하지 않습니다. 메모리 할당 실패는 Error를 기록하고 이미지 전체를 거부합니다.
+- 로컬 파일에는 64 MiB 크기 한도가 없습니다. CPU `Pixels` 로드에는 GPU 축 한도를 적용하지 않으며 헤더 해석은 디코더에 맡깁니다. URL과 인코딩된 메모리 입력은 64 MiB 한도를 유지하고 GPU 업로드는 장치 크기를 확인합니다. 메모리 할당에 실패하면 오류를 보고하며 부분 이미지를 공개하지 않습니다.
+- 로컬 이미지 입력은 stb_image가 처리할 수 있는 범위(약 2 GiB)로 제한됩니다.
 - `loadAsync(path, mipmaps = false)`는 결과를 반환하지 않습니다. `LoadResult`를 받으려면 `onLoad` 리스너를 유지합니다. 경로 해석, 지원 형식과 로드 오류는 `Image::load`를 따릅니다.
 - 네이티브 플랫폼에서는 워커가 전용 CPU 픽셀로 디코딩합니다. 이후 메인 스레드 프레임에서 결과를 반영하고 Immutable 텍스처 업로드와 선택적인 밉맵 생성을 수행한 뒤 `onLoad`로 알립니다. `loadAsync()` 호출 중에는 알리지 않습니다.
 - 결과를 반영하기 전까지 확정된 이미지를 읽을 수 있습니다. 취소되지 않은 요청이 실패하면 동기 로드와 마찬가지로 이미지를 비웁니다. 헤드리스에서는 텍스처를 할당하지 않고 CPU 픽셀을 유지합니다.
@@ -62111,6 +62155,7 @@ details.ko = '''
 - 완료 알림에는 실행 중인 `runApp()` 또는 `runHeadlessApp()` 루프가 필요합니다. 앱 실행이 없는 일반 `main()`에서는 완료 이벤트를 전달하지 않습니다. 앱 종료는 실행 중인 네이티브 디코딩을 기다리며, 종료된 실행이나 핫 리로드 이전의 결과는 버립니다.
 - Web에서는 VFS 읽기와 CPU 디코딩을 이후 메인 루프 처리로 미루므로 해당 프레임이 멈출 수 있습니다. 결과 반영은 그다음 처리에서 수행합니다. 이 진입점은 Asyncify로 기다리지 않습니다.
 '''
+related = ["setResourceLoadConcurrency", "getResourceLoadConcurrency", "Image::load", "Image::onLoad", "Image::isLoading", "LoadResult"]
 snippet = '''
 // tcApp.h: Image image; EventListener listener;
 void tcApp::setup() {
@@ -62165,7 +62210,7 @@ description.en = "Starts asynchronous loading of decoded audio data."
 description.ja = "デコード済み音声データの非同期読み込みを開始する。"
 description.ko = "디코딩된 오디오 데이터의 비동기 로드를 시작한다."
 details.en = '''
-- Asynchronous Image, SoundBuffer and Font loads share 4 active preparations. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
+- Asynchronous Image, SoundBuffer and Font loads share active preparation slots (default 4); `setResourceLoadConcurrency` changes their number. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
 - On Web, CMake propagates exception support to framework and application C++ code for document/font loaders and reflection. Resource preparation and application also retain exception-enabled out-of-line host definitions. If a custom build disables exception support in application TUs, allocation failure inside inline header helpers remains outside the recovery guarantee.
 - `loadAsync(path)` returns no result directly and uses the same path resolution, format selection, errors, and decoder logs as `SoundBuffer::load`. Native builds prepare private PCM and metadata on a worker; existing committed data remains readable until the result is applied.
 - Results are applied on the main thread in a later frame, never during this call. Each frame or headless loop pass takes one batch of pending completions; work queued during that pass waits for another pass. After application, `isLoading()` becomes `false` before one `onLoad` event delivers the `LoadResult`.
@@ -62178,7 +62223,7 @@ details.en = '''
 - On Web, WAV/MP3/FLAC/OGG file reading and CPU decoding are deferred to a main-loop pass and may stall that frame; application waits for a subsequent pass. AAC/M4A use asynchronous browser decoding and poll for completion before application is queued. This entry point does not wait through Asyncify.
 '''
 details.ja = '''
-- Image・SoundBuffer・Font の非同期読み込みは、同時準備 4 件を共有します。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（終了時に未配信なら省略します）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
+- Image・SoundBuffer・Font の非同期読み込みは、同時準備枠（既定 4 件）を共有します。件数は `setResourceLoadConcurrency` で変更できます。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（終了時に未配信なら省略します）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
 - Web では、ドキュメント・フォント読み込みとリフレクションのため、CMake がフレームワークとアプリケーションの C++ コードに例外サポートを伝播します。リソースの準備・反映も、例外を有効にしたヘッダー外のホスト定義を維持します。独自ビルドでアプリケーションの翻訳単位の例外サポートを無効にした場合、ヘッダー内のインラインヘルパーでのメモリ確保失敗は復旧保証の対象外です。
 - `loadAsync(path)` は結果を直接返さず、パスの解決、形式の選択、エラー、デコーダーのログは `SoundBuffer::load` と同じです。ネイティブではワーカーが専用の PCM とメタデータを準備し、結果が反映されるまでは確定済みのデータを参照できます。
 - 結果は後のフレームのメインスレッドで反映され、この呼び出し中には反映されません。各フレームまたはヘッドレスのループ処理では、保留中の完了処理を一括で取り出し、その処理中に追加された分は次回に回します。反映後に `isLoading()` が `false` になり、続いて `onLoad` が `LoadResult` を一度通知します。
@@ -62191,7 +62236,7 @@ details.ja = '''
 - Web では WAV/MP3/FLAC/OGG のファイル読み込みと CPU デコードを後のメインループ処理に回すため、そのフレームが停止する場合があります。結果はさらに後の処理で反映します。AAC/M4A はブラウザーで非同期にデコードし、完了を定期的に確認してから反映をキューに追加します。この入口では Asyncify による待機を行いません。
 '''
 details.ko = '''
-- Image, SoundBuffer, Font의 비동기 로드는 동시 준비 4건을 공유합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(종료 시 미전달 Notice는 생략합니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
+- Image, SoundBuffer, Font의 비동기 로드는 동시 준비 슬롯(기본값 4개)을 공유합니다. 개수는 `setResourceLoadConcurrency`로 변경합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(종료 시 미전달 Notice는 생략합니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
 - Web에서는 문서·폰트 로더와 리플렉션을 위해 CMake가 프레임워크와 애플리케이션의 C++ 코드에 예외 지원을 전파합니다. 리소스 준비와 반영도 예외가 활성화된 헤더 밖의 호스트 정의를 유지합니다. 사용자 정의 빌드에서 애플리케이션 번역 단위의 예외 지원을 비활성화하면 인라인 헤더 헬퍼 내부의 할당 실패는 복구 보장 대상이 아닙니다.
 - `loadAsync(path)`는 결과를 직접 반환하지 않으며 경로 해석, 형식 선택, 오류, 디코더 로그는 `SoundBuffer::load`와 같습니다. 네이티브 빌드에서는 워커가 별도의 PCM과 메타데이터를 준비하며, 결과가 반영될 때까지 기존에 확정된 데이터를 읽을 수 있습니다.
 - 결과는 이후 프레임의 메인 스레드에서 반영되며 이 호출 중에는 반영되지 않습니다. 각 프레임 또는 헤드리스 루프 실행은 대기 중인 완료 처리를 한 번에 가져오며, 처리 중 추가된 작업은 다음 실행까지 기다립니다. 반영 후 `isLoading()`이 `false`가 되고 이어서 `onLoad`가 `LoadResult`를 한 번 전달합니다.
@@ -62203,7 +62248,7 @@ details.ko = '''
 - 완료 알림에는 실행 중인 `runApp` 또는 `runHeadlessApp`이 필요하며, 둘 다 사용하지 않는 독립적인 `main()`에서는 완료 이벤트가 발생하지 않습니다. 종료된 실행이나 이전 핫 리로드의 결과는 버리며, 네이티브 앱 종료는 실행 중인 디코딩이 끝날 때까지 기다립니다.
 - Web에서는 WAV/MP3/FLAC/OGG 파일 읽기와 CPU 디코딩을 이후 메인 루프 실행으로 미루므로 해당 프레임이 멈출 수 있습니다. 결과 반영은 그다음 실행까지 기다립니다. AAC/M4A는 브라우저에서 비동기적으로 디코딩하며 완료 여부를 주기적으로 확인한 뒤 반영 작업을 큐에 추가합니다. 이 진입점은 Asyncify로 기다리지 않습니다.
 '''
-related = ["SoundBuffer::load", "SoundBuffer::onLoad", "SoundBuffer::isLoading", "LoadResult"]
+related = ["setResourceLoadConcurrency", "getResourceLoadConcurrency", "SoundBuffer::load", "SoundBuffer::onLoad", "SoundBuffer::isLoading", "LoadResult"]
 snippet = '''
 void tcApp::setup() {
     static SoundBuffer buffer;
@@ -62256,7 +62301,7 @@ description.en = "Load a font asynchronously and report completion through an ev
 description.ja = "フォントを非同期で読み込み、イベントで完了を通知する。"
 description.ko = "폰트를 비동기로 로드하고 이벤트로 완료를 알린다."
 details.en = '''
-- Asynchronous Image, SoundBuffer and Font loads share 4 active preparations. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
+- Asynchronous Image, SoundBuffer and Font loads share active preparation slots (default 4); `setResourceLoadConcurrency` changes their number. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice is omitted at shutdown). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
 - On Web, CMake propagates exception support to framework and application C++ code for document/font loaders and reflection. Resource preparation and application also retain exception-enabled out-of-line host definitions. If a custom build disables exception support in application TUs, allocation failure inside inline header helpers remains outside the recovery guarantee.
 - Call `loadAsync(nameOrPath, size, faceIndex = 0)` with a file path, system font name, or Web URL. Size is in logical pixels; path precedence and collection-face selection follow `Font::load`.
 - Returns no result directly. Success, failure, and cache hits are applied on the main thread in a later frame, never during this call; `isLoading()` becomes `false` before the single `onLoad` notification.
@@ -62271,7 +62316,7 @@ details.en = '''
 - On Web, CPU preparation is deferred to a main-loop pass and can stall that pass, including without pthreads; application follows in a subsequent pass. This entry point does not wait through Asyncify, and URL fetching uses a 30-second timeout.
 '''
 details.ja = '''
-- Image・SoundBuffer・Font の非同期読み込みは、同時準備 4 件を共有します。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（終了時に未配信なら省略します）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
+- Image・SoundBuffer・Font の非同期読み込みは、同時準備枠（既定 4 件）を共有します。件数は `setResourceLoadConcurrency` で変更できます。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（終了時に未配信なら省略します）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
 - Web では、ドキュメント・フォント読み込みとリフレクションのため、CMake がフレームワークとアプリケーションの C++ コードに例外サポートを伝播します。リソースの準備・反映も、例外を有効にしたヘッダー外のホスト定義を維持します。独自ビルドでアプリケーションの翻訳単位の例外サポートを無効にした場合、ヘッダー内のインラインヘルパーでのメモリ確保失敗は復旧保証の対象外です。
 - `loadAsync(nameOrPath, size, faceIndex = 0)` にファイルパス、システムフォント名、または Web の URL を渡します。サイズの単位は論理ピクセルです。パスの優先順位とコレクション内の書体選択は `Font::load` と同じです。
 - 結果を直接返しません。成功、失敗、キャッシュへの一致はいずれも後のフレームでメインスレッドに反映し、この呼び出し中には通知しません。`isLoading()` が `false` になってから `onLoad` を一度通知します。
@@ -62286,7 +62331,7 @@ details.ja = '''
 - Web では CPU の準備を後のメインループ処理に回すため、その処理が停止することがあります。pthreads がない場合も同様で、結果はさらに後の処理で反映します。この関数は Asyncify で待機しません。URL の取得には 30 秒のタイムアウトを使います。
 '''
 details.ko = '''
-- Image, SoundBuffer, Font의 비동기 로드는 동시 준비 4건을 공유합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(종료 시 미전달 Notice는 생략합니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
+- Image, SoundBuffer, Font의 비동기 로드는 동시 준비 슬롯(기본값 4개)을 공유합니다. 개수는 `setResourceLoadConcurrency`로 변경합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(종료 시 미전달 Notice는 생략합니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
 - Web에서는 문서·폰트 로더와 리플렉션을 위해 CMake가 프레임워크와 애플리케이션의 C++ 코드에 예외 지원을 전파합니다. 리소스 준비와 반영도 예외가 활성화된 헤더 밖의 호스트 정의를 유지합니다. 사용자 정의 빌드에서 애플리케이션 번역 단위의 예외 지원을 비활성화하면 인라인 헤더 헬퍼 내부의 할당 실패는 복구 보장 대상이 아닙니다.
 - `loadAsync(nameOrPath, size, faceIndex = 0)`에 파일 경로, 시스템 폰트 이름 또는 Web URL을 전달합니다. 크기의 단위는 논리 픽셀입니다. 경로 우선순위와 컬렉션 내 서체 선택은 `Font::load`와 같습니다.
 - 결과를 직접 반환하지 않습니다. 성공, 실패, 캐시 적중 모두 이후 프레임의 메인 스레드에서 반영하며, 이 호출 중에는 알리지 않습니다. `isLoading()`이 `false`가 된 뒤 `onLoad`를 한 번 알립니다.
@@ -62300,7 +62345,7 @@ details.ko = '''
 - 이동은 양쪽 핸들의 미완료 요청을 취소하고 확정된 데이터를 옮기며, 리스너는 원래 핸들에 남습니다. 리스너 수명과 재로드, 이동, 폰트 자체의 파괴를 수행하는 콜백은 `Font::onLoad`를 참조합니다.
 - Web에서는 CPU 준비를 이후 메인 루프 처리로 미루므로 해당 처리가 멈출 수 있습니다. pthreads가 없는 경우도 같으며, 결과는 그다음 처리에서 반영합니다. 이 함수는 Asyncify로 기다리지 않습니다. URL 가져오기는 30초 타임아웃을 사용합니다.
 '''
-related = ["Font::load", "Font::onLoad", "Font::isLoading", "LoadResult"]
+related = ["setResourceLoadConcurrency", "getResourceLoadConcurrency", "Font::load", "Font::onLoad", "Font::isLoading", "LoadResult"]
 snippet = '''
 // tcApp members: Font font; EventListener fontLoadListener;
 void tcApp::setup() {
@@ -62639,9 +62684,9 @@ description.ja = "MCP 要求の受付と処理の上限を定義する。"
 description.ko = "MCP 요청의 수락 및 처리 한도를 정의한다."
 details.en = '''
 - All fields are positive `size_t` values. Settings are shared across the process; change them through `mcp::setAdmissionLimits` while HTTP is stopped and no work remains outstanding.
-- HTTP defaults are `bodyBytes = 1048576` (1 MiB), `outstanding = 32`, `workers = 4`, `lineBytes = 8192`, `headerBytes = 65536` and `headerCount = 128`.
+- HTTP defaults are `bodyBytes = 67108864` (64 MiB), `outstanding = 32` and `workers = 4`.
 - Processing defaults are `jsonDepth = 64`, `histogramBins = 4096`, `gridCells = 65536`, `operations = 256`, `replyBytes = 67108864` (64 MiB) and `workingBytes = 268435456` (256 MiB).
-- Excess HTTP body data returns 413, excess metadata returns 431, and both close the connection. Initial headers and trailers share the metadata byte and field-count limits; excess connection admission closes the new socket.
+- Excess HTTP body data returns 413 and closes the connection; excess connection admission closes the new socket. Header/trailer count and aggregate size have no MCP limit; only upstream's default per-line header limit, payload limit and read timeout remain. Upstream metadata allocations are outside MCP working-memory accounting.
 - Histogram bins, grid cell products and operation counts are checked before analysis runs; exceeding a limit rejects the operation or request instead of truncating its input.
 - Reply construction, including JSON escaping, must fit the reply limit. Concurrent requests share the working-memory limit for retained request copies, parsing, image copies, encoders, audio scratch space and results; exceeding a limit rejects admission or returns an error, including HTTP 503 when an HTTP reply cannot be produced.
 - Encoded image input must fit `INT_MAX` bytes and its working-memory allowance before reading. Decoded pixels, retained copies and decoder workspace are checked before decoding.
@@ -62649,13 +62694,13 @@ details.en = '''
 - JSON nesting is checked during parsing against `jsonDepth` before recursive copies or serialization; exceeding the limit rejects the request.
 - Audio snapshot copies and scratch/result size products are checked before allocation. FFT lengths must fit `int` and the fixed audio-history ring; excessive lengths return an error. The audio callback does not allocate for these reads.
 - Limit rejections increment counters and log a Warning on the first rejection for each limit store. Counters and first-Warning state persist for the process lifetime across queries and HTTP restarts; configuration rejection logging follows `mcp::setAdmissionLimits`.
-- HTTP chunk sizes must fit the unsigned-long parser; a parsed value of `ULONG_MAX` is rejected with 413 and counted.
+- Invalid chunk sizes follow upstream parsing and return 400; they do not increment admission counters.
 '''
 details.ja = '''
 - すべてのフィールドは正の `size_t` 値です。設定はプロセス全体で共有します。HTTP が停止し、未完了の作業がない状態で `mcp::setAdmissionLimits` を使って変更してください。
-- HTTP の既定値は `bodyBytes = 1048576`（1 MiB）、`outstanding = 32`、`workers = 4`、`lineBytes = 8192`、`headerBytes = 65536`、`headerCount = 128` です。
+- HTTP の既定値は `bodyBytes = 67108864`（64 MiB）、`outstanding = 32`、`workers = 4` です。
 - 処理の既定値は `jsonDepth = 64`、`histogramBins = 4096`、`gridCells = 65536`、`operations = 256`、`replyBytes = 67108864`（64 MiB）、`workingBytes = 268435456`（256 MiB）です。
-- HTTP 本文の超過は 413、メタデータの超過は 431 を返し、どちらも接続を閉じます。最初のヘッダーとトレーラーはメタデータのバイト数とフィールド数の上限を共有します。接続の受付上限を超えると、新しいソケットを閉じます。
+- HTTP 本文の超過は 413 を返し、接続を閉じます。接続の受付上限を超えると、新しいソケットを閉じます。ヘッダーとトレーラーの個数・合計サイズに MCP の上限はなく、上流の既定のヘッダー行上限、ペイロード上限、読み取りタイムアウトだけが残ります。上流のメタデータ確保は MCP の作業メモリ計上の対象外です。
 - 解析の実行前にヒストグラムのビン数、グリッドのセル数の積、操作数を検査します。上限を超えた場合は入力を切り詰めず、操作または要求を拒否します。
 - JSON のエスケープを含む応答の生成は応答上限内に収める必要があります。同時要求は、保持する要求のコピー、解析、画像のコピー、エンコーダー、音声の作業領域と結果に対して作業メモリ上限を共有します。超過すると受付を拒否するかエラーを返し、HTTP 応答を生成できない場合などは HTTP 503 になります。
 - エンコード済み画像の入力は、読み取り前に `INT_MAX` バイト以下かつ作業メモリの許容範囲内である必要があります。デコード後のピクセル、保持するコピー、デコーダーの作業領域はデコード前に検査します。
@@ -62663,13 +62708,13 @@ details.ja = '''
 - JSON のネストは解析中に `jsonDepth` と比較し、再帰的なコピーやシリアライズより前に検査します。上限を超えると要求を拒否します。
 - 音声スナップショットのコピーと、作業領域や結果のサイズの積は、メモリ確保前に検査します。FFT 長は `int` と固定長の音声履歴リングに収まる必要があり、超過するとエラーを返します。これらの読み取りのために音声コールバックがメモリを確保することはありません。
 - 上限による拒否はカウンターを増やし、上限を管理する領域ごとの最初の拒否で Warning を記録します。カウンターと初回 Warning の状態は、照会や HTTP の再起動後もプロセスの生存期間中保持します。設定の拒否時のログは `mcp::setAdmissionLimits` に従います。
-- HTTP のチャンクサイズは unsigned long の解析範囲に収まる必要があります。解析値が `ULONG_MAX` の場合は 413 で拒否し、計数します。
+- 不正なチャンクサイズは上流の解析に従って 400 を返し、受付拒否カウンターには含みません。
 '''
 details.ko = '''
 - 모든 필드는 양수인 `size_t` 값입니다. 설정은 프로세스 전체에서 공유합니다. HTTP가 중지되고 미완료 작업이 없는 상태에서 `mcp::setAdmissionLimits`로 변경하세요.
-- HTTP 기본값은 `bodyBytes = 1048576`(1 MiB), `outstanding = 32`, `workers = 4`, `lineBytes = 8192`, `headerBytes = 65536`, `headerCount = 128`입니다.
+- HTTP 기본값은 `bodyBytes = 67108864`(64 MiB), `outstanding = 32`, `workers = 4`입니다.
 - 처리 기본값은 `jsonDepth = 64`, `histogramBins = 4096`, `gridCells = 65536`, `operations = 256`, `replyBytes = 67108864`(64 MiB), `workingBytes = 268435456`(256 MiB)입니다.
-- HTTP 본문이 초과하면 413, 메타데이터가 초과하면 431을 반환하며 두 경우 모두 연결을 닫습니다. 초기 헤더와 트레일러는 메타데이터 바이트 및 필드 수 한도를 공유합니다. 연결 수락 한도를 초과하면 새 소켓을 닫습니다.
+- HTTP 본문이 초과하면 413을 반환하고 연결을 닫습니다. 연결 수락 한도를 초과하면 새 소켓을 닫습니다. 헤더와 트레일러 개수 및 총크기에 MCP 한도는 없으며 업스트림 기본 헤더 줄 한도, 페이로드 한도 및 읽기 타임아웃만 유지됩니다. 업스트림 메타데이터 할당은 MCP 작업 메모리 계산 대상이 아닙니다.
 - 분석 실행 전에 히스토그램 빈 수, 그리드 셀 수의 곱, 연산 수를 검사합니다. 한도를 초과하면 입력을 잘라내지 않고 연산 또는 요청을 거부합니다.
 - JSON 이스케이프를 포함한 응답 생성은 응답 한도 내에 있어야 합니다. 동시 요청은 유지되는 요청 복사본, 파싱, 이미지 복사본, 인코더, 오디오 작업 공간 및 결과에 대한 작업 메모리 한도를 공유합니다. 초과하면 수락을 거부하거나 오류를 반환하며, HTTP 응답을 생성할 수 없는 경우 등에는 HTTP 503을 반환합니다.
 - 인코딩된 이미지 입력은 읽기 전에 `INT_MAX` 바이트 이하이며 작업 메모리 허용 범위 내에 있어야 합니다. 디코딩된 픽셀, 유지되는 복사본 및 디코더 작업 공간은 디코딩 전에 검사합니다.
@@ -62677,7 +62722,7 @@ details.ko = '''
 - JSON 중첩은 파싱 중에 `jsonDepth`와 비교하여 재귀적 복사나 직렬화 전에 검사합니다. 한도를 초과하면 요청을 거부합니다.
 - 오디오 스냅샷 복사본과 작업 공간 및 결과 크기의 곱은 할당 전에 검사합니다. FFT 길이는 `int` 및 고정 크기 오디오 이력 링에 들어가야 하며 초과하면 오류를 반환합니다. 오디오 콜백은 이러한 읽기를 위해 메모리를 할당하지 않습니다.
 - 한도로 인한 거부는 카운터를 증가시키며 한도를 관리하는 영역별 첫 거부에 Warning을 기록합니다. 카운터와 첫 Warning 상태는 조회나 HTTP 재시작 후에도 프로세스 수명 동안 유지합니다. 설정 거부 시 로그는 `mcp::setAdmissionLimits`를 따릅니다.
-- HTTP 청크 크기는 unsigned long 파서의 범위에 들어가야 합니다. 파싱한 값이 `ULONG_MAX`이면 413으로 거부하고 거부 횟수에 포함합니다.
+- 잘못된 청크 크기는 업스트림 파싱에 따라 400을 반환하며 수락 거부 카운터에 포함하지 않습니다.
 '''
 
 ["mcp::setAdmissionLimits"]
@@ -62725,18 +62770,18 @@ description.en = "Limits the size of HTTP request bodies."
 description.ja = "HTTP 要求本文のサイズを制限する。"
 description.ko = "HTTP 요청 본문의 크기를 제한한다."
 details.en = '''
-- Defaults to 1048576 bytes (1 MiB); the limit applies separately to received body bytes, including chunk framing, and decoded body bytes.
-- Exceeding either limit returns HTTP 413 and closes the connection.
+- Defaults to 67108864 bytes (64 MiB), configured through upstream `set_payload_max_length`. The MCP content receiver also checks chunked and decoded body bytes before appending; chunk framing and trailers are not counted.
+- Exceeding the body limit returns HTTP 413 and closes the connection.
 - For configuration and shared rejection reporting, see `mcp::AdmissionLimits`.
 '''
 details.ja = '''
-- 既定値は 1048576 バイト（1 MiB）です。チャンクの区切り情報を含む受信本文のバイト数と、デコード後の本文のバイト数に、それぞれ適用します。
-- どちらかが上限を超えると HTTP 413 を返し、接続を閉じます。
+- 既定値は 67108864 バイト（64 MiB）で、上流の `set_payload_max_length` で設定します。MCP の受信コールバックは、チャンク形式およびデコード後の本文も追加前に検査します。チャンクの区切り情報とトレーラーは数えません。
+- 本文が上限を超えると HTTP 413 を返し、接続を閉じます。
 - 設定方法と共通の拒否記録は `mcp::AdmissionLimits` を参照してください。
 '''
 details.ko = '''
-- 기본값은 1048576바이트(1 MiB)입니다. 청크 구분 정보를 포함한 수신 본문 바이트 수와 디코딩된 본문 바이트 수에 각각 적용합니다.
-- 어느 한도를 초과해도 HTTP 413을 반환하고 연결을 닫습니다.
+- 기본값은 67108864바이트(64 MiB)이며 업스트림 `set_payload_max_length`로 설정합니다. MCP 수신 콜백은 청크 형식 및 디코딩된 본문도 추가 전에 검사합니다. 청크 구분 정보와 트레일러는 계산하지 않습니다.
+- 본문 한도를 초과하면 HTTP 413을 반환하고 연결을 닫습니다.
 - 설정 방법과 공통 거부 기록은 `mcp::AdmissionLimits`를 참조하세요.
 '''
 
@@ -62780,69 +62825,6 @@ details.ko = '''
 - 기본값은 워커 스레드 4개입니다. 모든 워커가 사용 중이면 수락된 연결은 큐에서 대기하며, 대기 중인 연결도 `outstanding`에 포함합니다.
 - 메인 스레드 처리나 지연 응답을 기다리는 동안에도 워커를 사용합니다. 이 값을 늘려도 메인 스레드의 도구 핸들러가 병렬로 실행되지는 않습니다.
 - 설정 방법과 공통 수락 규칙은 `mcp::AdmissionLimits`를 참조하세요.
-'''
-
-["mcp::AdmissionLimits::lineBytes"]
-category = "mcp"
-description.en = "Limits the length of individual HTTP metadata lines."
-description.ja = "HTTP メタデータの各行の長さを制限する。"
-description.ko = "HTTP 메타데이터 각 줄의 길이를 제한한다."
-details.en = '''
-- Defaults to 8192 bytes per request, header or trailer line; chunk-size lines also use this limit.
-- Exceeding the line limit returns HTTP 431 and closes the connection; the shared `headerBytes` and `headerCount` limits also apply to request metadata.
-- For configuration and shared rejection reporting, see `mcp::AdmissionLimits`.
-'''
-details.ja = '''
-- 既定値は要求行、ヘッダー行、トレーラー行それぞれ 8192 バイトです。チャンクサイズの行にもこの上限を使います。
-- 行の上限を超えると HTTP 431 を返し、接続を閉じます。要求のメタデータには、共通の `headerBytes` と `headerCount` の上限も適用します。
-- 設定方法と共通の拒否記録は `mcp::AdmissionLimits` を参照してください。
-'''
-details.ko = '''
-- 기본값은 요청 줄, 헤더 줄 및 트레일러 줄마다 8192바이트입니다. 청크 크기 줄에도 이 한도를 사용합니다.
-- 줄 한도를 초과하면 HTTP 431을 반환하고 연결을 닫습니다. 요청 메타데이터에는 공통 `headerBytes` 및 `headerCount` 한도도 적용합니다.
-- 설정 방법과 공통 거부 기록은 `mcp::AdmissionLimits`를 참조하세요.
-'''
-
-["mcp::AdmissionLimits::headerBytes"]
-category = "mcp"
-description.en = "Limits the total byte count of HTTP request metadata."
-description.ja = "HTTP 要求のメタデータの合計バイト数を制限する。"
-description.ko = "HTTP 요청 메타데이터의 총바이트 수를 제한한다."
-details.en = '''
-- The default is 65536 bytes (64 KiB), shared by the request line, headers and trailers, including line endings and blank separator lines.
-- Exceeding this limit returns HTTP 431 and closes the connection; `mcp::AdmissionLimits::lineBytes` also limits each line.
-- For configuration requirements, see `mcp::setAdmissionLimits`.
-'''
-details.ja = '''
-- 既定値は 65536 バイト（64 KiB）で、要求行・ヘッダー・トレーラーで共有します。改行と区切りの空行も含みます。
-- 上限を超えると HTTP 431 を返して接続を閉じます。各行には `mcp::AdmissionLimits::lineBytes` の上限も適用されます。
-- 設定条件は `mcp::setAdmissionLimits` を参照してください。
-'''
-details.ko = '''
-- 기본값은 65536바이트(64 KiB)이며 요청 줄, 헤더, 트레일러가 공유합니다. 줄바꿈과 구분용 빈 줄도 포함합니다.
-- 한도를 초과하면 HTTP 431을 반환하고 연결을 닫습니다. 각 줄에는 `mcp::AdmissionLimits::lineBytes` 한도도 적용됩니다.
-- 설정 조건은 `mcp::setAdmissionLimits`를 참조하세요.
-'''
-
-["mcp::AdmissionLimits::headerCount"]
-category = "mcp"
-description.en = "Limits the combined number of HTTP header and trailer fields."
-description.ja = "HTTP ヘッダーとトレーラーの合計フィールド数を制限する。"
-description.ko = "HTTP 헤더와 트레일러의 합계 필드 수를 제한한다."
-details.en = '''
-- The default is 128 fields, shared by headers and trailers; repeated field names count separately.
-- Exceeding this limit returns HTTP 431 and closes the connection.
-- For configuration requirements, see `mcp::setAdmissionLimits`.
-'''
-details.ja = '''
-- 既定値は 128 フィールドで、ヘッダーとトレーラーで共有します。同じ名前のフィールドも個別に数えます。
-- 上限を超えると HTTP 431 を返して接続を閉じます。
-- 設定条件は `mcp::setAdmissionLimits` を参照してください。
-'''
-details.ko = '''
-- 기본값은 128개 필드이며 헤더와 트레일러가 공유합니다. 이름이 같은 필드도 각각 계산합니다.
-- 한도를 초과하면 HTTP 431을 반환하고 연결을 닫습니다.
-- 설정 조건은 `mcp::setAdmissionLimits`를 참조하세요.
 '''
 
 ["mcp::AdmissionLimits::histogramBins"]
@@ -63039,3 +63021,195 @@ details.ko = '''
 - 메인/호스트 순서와 v0.8 전환은 App::mousePressed를 참조하세요.
 '''
 related = ["App::mousePressed", "Node::onMouseDrag", "RectNode::onMouseDrag"]
+
+["WindowSettings::setResourcePoolSize"]
+description.en = "Sets the startup slot count for each resource pool."
+description.ja = "各リソースプールの起動時の枠数を設定します。"
+description.ko = "각 리소스 풀의 시작 슬롯 수를 설정합니다."
+details.en = '''
+- Buffers, images, views and samplers each get `count` slots; the default is 10000 each. Resource slots are small CPU tables; raising their count does not reserve GPU storage for every resource.
+- `count` sets the number of slots and returns the same `WindowSettings&` for chaining. Sokol uses 16-bit slot indices, so the backend supports at most 65,535 slots per pool. Larger values log one Error for this setting at graphics startup and use 65,535. Allocation also needs enough memory.
+- `0` selects the default. A negative value logs one Notice for this setting at graphics startup and uses the default.
+- Set this before `runApp()`. Graphics startup reads it once; changing settings later does not resize pools. The hot-reload launcher also forwards this setting. Headless mode has no `sg_setup()`, so this setting does not apply there.
+- Exhaustion logs one Error per pool per process, including its configured size and the setter to increase it before `runApp()`. Affected resource creation fails. Sokol's original line remains at debug verbosity.
+'''
+details.ja = '''
+- バッファー、画像、ビュー、サンプラーの各プールに `count` 枠を用意します。既定値はそれぞれ 10000 枠です。リソースの枠は小さな CPU 管理テーブルです。枠数を増やしても全リソース分の GPU 領域を予約するわけではありません。
+- `count` で枠数を設定し、チェイン用に同じ `WindowSettings&` を返します。sokol は枠の番号を 16 ビットで表すため、バックエンドが扱えるのは各プール 65,535 枠までです。それより大きな値では描画系の起動時にこの設定について Error を一度出し、65,535 を使います。確保には十分なメモリも必要です。
+- `0` は既定値を選びます。負の値では描画系の起動時にこの設定について Notice を一度出し、既定値を使います。
+- `runApp()` の前に設定してください。描画系の起動時に一度だけ読み取るため、後から設定を変えてもプールの大きさは変わりません。ホットリロード用ランチャーにも反映します。ヘッドレスモードには `sg_setup()` がないため、この設定は適用しません。
+- 枠が足りない場合、プロセス内の各プールについて Error を一度出します。設定した枠数と、`runApp()` の前に枠数を増やすセッターを示します。該当するリソースの作成は失敗します。sokol の元の行はデバッグ用のログレベルに残します。
+'''
+details.ko = '''
+- 버퍼, 이미지, 뷰, 샘플러의 각 풀에 `count`개 슬롯을 준비합니다. 기본값은 각각 10000개입니다. 리소스 슬롯은 작은 CPU 관리 테이블입니다. 슬롯 수를 늘려도 모든 리소스의 GPU 저장 공간을 예약하지는 않습니다.
+- `count`로 슬롯 수를 설정하고 호출을 연결할 수 있도록 같은 `WindowSettings&`를 반환합니다. sokol은 슬롯 번호를 16비트로 표현하므로 백엔드는 풀마다 최대 65,535개 슬롯을 지원합니다. 더 큰 값이면 그래픽 시작 시 이 설정에 대해 Error를 한 번 기록하고 65,535를 사용합니다. 할당에는 충분한 메모리도 필요합니다.
+- `0`은 기본값을 선택합니다. 음수이면 그래픽 시작 시 이 설정에 대해 Notice를 한 번 기록하고 기본값을 사용합니다.
+- `runApp()` 전에 설정해야 합니다. 그래픽 시작 시 한 번만 읽으므로 이후에 설정을 바꿔도 풀 크기는 바뀌지 않습니다. 핫 리로드 실행기도 이 설정을 전달합니다. 헤드리스 모드에는 `sg_setup()`이 없으므로 적용하지 않습니다.
+- 슬롯이 부족하면 프로세스의 각 풀에 대해 Error를 한 번 기록합니다. 설정한 슬롯 수와 `runApp()` 전에 늘릴 수 있는 세터를 표시합니다. 해당 리소스 생성은 실패합니다. sokol의 원래 로그는 디버그 상세 수준으로 유지합니다.
+'''
+related = ["WindowSettings", "WindowSettings::reserveUniformBuffer", "WindowSettings::setShaderPoolSize", "WindowSettings::setPipelinePoolSize"]
+snippet = '''
+int main() {
+    WindowSettings settings;
+    settings.setSize(1280, 720).setResourcePoolSize(50000).setShaderPoolSize(4096);
+    return runApp<tcApp>(settings);
+}
+'''
+
+["WindowSettings::setShaderPoolSize"]
+description.en = "Sets the startup shader pool slot count."
+description.ja = "シェーダープールの起動時の枠数を設定します。"
+description.ko = "셰이더 풀의 시작 슬롯 수를 설정합니다."
+details.en = '''
+- The default is 1024 shader slots. Each shader slot costs about 3.4 KB of CPU memory, even before loading a shader; 4096 slots use about 14 MB.
+- `count` sets the number of slots and returns the same `WindowSettings&` for chaining. Sokol uses 16-bit slot indices, so the backend supports at most 65,535 slots per pool. Larger values log one Error for this setting at graphics startup and use 65,535. Allocation also needs enough memory.
+- `0` selects the default. A negative value logs one Notice for this setting at graphics startup and uses the default.
+- Set this before `runApp()`. Graphics startup reads it once; changing settings later does not resize pools. The hot-reload launcher also forwards this setting. Headless mode has no `sg_setup()`, so this setting does not apply there.
+- Exhaustion logs one Error per pool per process, including its configured size and the setter to increase it before `runApp()`. Affected resource creation fails. Sokol's original line remains at debug verbosity.
+'''
+details.ja = '''
+- 既定値はシェーダー 1024 枠です。シェーダーを読み込む前でも、1 枠あたり約 3.4 KB の CPU メモリを使います。4096 枠なら約 14 MB です。
+- `count` で枠数を設定し、チェイン用に同じ `WindowSettings&` を返します。sokol は枠の番号を 16 ビットで表すため、バックエンドが扱えるのは各プール 65,535 枠までです。それより大きな値では描画系の起動時にこの設定について Error を一度出し、65,535 を使います。確保には十分なメモリも必要です。
+- `0` は既定値を選びます。負の値では描画系の起動時にこの設定について Notice を一度出し、既定値を使います。
+- `runApp()` の前に設定してください。描画系の起動時に一度だけ読み取るため、後から設定を変えてもプールの大きさは変わりません。ホットリロード用ランチャーにも反映します。ヘッドレスモードには `sg_setup()` がないため、この設定は適用しません。
+- 枠が足りない場合、プロセス内の各プールについて Error を一度出します。設定した枠数と、`runApp()` の前に枠数を増やすセッターを示します。該当するリソースの作成は失敗します。sokol の元の行はデバッグ用のログレベルに残します。
+'''
+details.ko = '''
+- 기본값은 셰이더 슬롯 1024개입니다. 셰이더를 불러오기 전에도 슬롯당 약 3.4 KB의 CPU 메모리를 사용합니다. 4096개는 약 14 MB를 사용합니다.
+- `count`로 슬롯 수를 설정하고 호출을 연결할 수 있도록 같은 `WindowSettings&`를 반환합니다. sokol은 슬롯 번호를 16비트로 표현하므로 백엔드는 풀마다 최대 65,535개 슬롯을 지원합니다. 더 큰 값이면 그래픽 시작 시 이 설정에 대해 Error를 한 번 기록하고 65,535를 사용합니다. 할당에는 충분한 메모리도 필요합니다.
+- `0`은 기본값을 선택합니다. 음수이면 그래픽 시작 시 이 설정에 대해 Notice를 한 번 기록하고 기본값을 사용합니다.
+- `runApp()` 전에 설정해야 합니다. 그래픽 시작 시 한 번만 읽으므로 이후에 설정을 바꿔도 풀 크기는 바뀌지 않습니다. 핫 리로드 실행기도 이 설정을 전달합니다. 헤드리스 모드에는 `sg_setup()`이 없으므로 적용하지 않습니다.
+- 슬롯이 부족하면 프로세스의 각 풀에 대해 Error를 한 번 기록합니다. 설정한 슬롯 수와 `runApp()` 전에 늘릴 수 있는 세터를 표시합니다. 해당 리소스 생성은 실패합니다. sokol의 원래 로그는 디버그 상세 수준으로 유지합니다.
+'''
+related = ["WindowSettings", "WindowSettings::reserveUniformBuffer", "WindowSettings::setResourcePoolSize", "WindowSettings::setPipelinePoolSize"]
+snippet = '''
+int main() {
+    WindowSettings settings;
+    settings.setSize(1280, 720).setResourcePoolSize(50000).setShaderPoolSize(4096);
+    return runApp<tcApp>(settings);
+}
+'''
+
+["WindowSettings::setPipelinePoolSize"]
+description.en = "Sets the startup pipeline pool slot count."
+description.ja = "パイプラインプールの起動時の枠数を設定します。"
+description.ko = "파이프라인 풀의 시작 슬롯 수를 설정합니다."
+details.en = '''
+- The default is 1024 pipeline slots. Each sokol_gfx pipeline slot costs about 1.2 KB of CPU memory; 4096 slots use about 4.9 MB.
+- sokol_gl uses the same slot count, including after its drawing buffers are resized. Its slots are small CPU records (about 32 B), so using the same count avoids a separate hidden limit. One sokol_gl pipeline still needs up to five sokol_gfx pipeline slots. The context pool keeps growing as before.
+- `count` sets the number of slots and returns the same `WindowSettings&` for chaining. Sokol uses 16-bit slot indices, so the backend supports at most 65,535 slots per pool. Larger values log one Error for this setting at graphics startup and use 65,535. Allocation also needs enough memory.
+- `0` selects the default. A negative value logs one Notice for this setting at graphics startup and uses the default.
+- Set this before `runApp()`. Graphics startup reads it once; changing settings later does not resize pools. The hot-reload launcher also forwards this setting. Headless mode has no `sg_setup()`, so this setting does not apply there.
+- Exhaustion logs one Error per pool per process, including its configured size and the setter to increase it before `runApp()`. Affected resource creation fails. Sokol's original line remains at debug verbosity.
+'''
+details.ja = '''
+- 既定値はパイプライン 1024 枠です。sokol_gfx のパイプラインは 1 枠あたり約 1.2 KB の CPU メモリを使います。4096 枠なら約 4.9 MB です。
+- sokol_gl も同じ枠数を使い、描画バッファーのサイズ変更後も維持します。枠は約 32 B の小さな CPU 管理情報なので、同じ数にして別の隠れた制限を避けます。sokol_gl の 1 パイプラインには sokol_gfx の枠が最大 5 個必要です。コンテキストプールは従来どおり拡張します。
+- `count` で枠数を設定し、チェイン用に同じ `WindowSettings&` を返します。sokol は枠の番号を 16 ビットで表すため、バックエンドが扱えるのは各プール 65,535 枠までです。それより大きな値では描画系の起動時にこの設定について Error を一度出し、65,535 を使います。確保には十分なメモリも必要です。
+- `0` は既定値を選びます。負の値では描画系の起動時にこの設定について Notice を一度出し、既定値を使います。
+- `runApp()` の前に設定してください。描画系の起動時に一度だけ読み取るため、後から設定を変えてもプールの大きさは変わりません。ホットリロード用ランチャーにも反映します。ヘッドレスモードには `sg_setup()` がないため、この設定は適用しません。
+- 枠が足りない場合、プロセス内の各プールについて Error を一度出します。設定した枠数と、`runApp()` の前に枠数を増やすセッターを示します。該当するリソースの作成は失敗します。sokol の元の行はデバッグ用のログレベルに残します。
+'''
+details.ko = '''
+- 기본값은 파이프라인 슬롯 1024개입니다. sokol_gfx 파이프라인 슬롯은 각각 약 1.2 KB의 CPU 메모리를 사용합니다. 4096개는 약 4.9 MB를 사용합니다.
+- sokol_gl도 같은 슬롯 수를 사용하며 그리기 버퍼 크기를 바꾼 뒤에도 유지합니다. 슬롯은 약 32 B의 작은 CPU 관리 정보이므로 같은 수를 사용해 별도의 숨은 제한을 피합니다. sokol_gl 파이프라인 하나에는 sokol_gfx 슬롯이 최대 5개 필요합니다. 컨텍스트 풀은 기존처럼 확장합니다.
+- `count`로 슬롯 수를 설정하고 호출을 연결할 수 있도록 같은 `WindowSettings&`를 반환합니다. sokol은 슬롯 번호를 16비트로 표현하므로 백엔드는 풀마다 최대 65,535개 슬롯을 지원합니다. 더 큰 값이면 그래픽 시작 시 이 설정에 대해 Error를 한 번 기록하고 65,535를 사용합니다. 할당에는 충분한 메모리도 필요합니다.
+- `0`은 기본값을 선택합니다. 음수이면 그래픽 시작 시 이 설정에 대해 Notice를 한 번 기록하고 기본값을 사용합니다.
+- `runApp()` 전에 설정해야 합니다. 그래픽 시작 시 한 번만 읽으므로 이후에 설정을 바꿔도 풀 크기는 바뀌지 않습니다. 핫 리로드 실행기도 이 설정을 전달합니다. 헤드리스 모드에는 `sg_setup()`이 없으므로 적용하지 않습니다.
+- 슬롯이 부족하면 프로세스의 각 풀에 대해 Error를 한 번 기록합니다. 설정한 슬롯 수와 `runApp()` 전에 늘릴 수 있는 세터를 표시합니다. 해당 리소스 생성은 실패합니다. sokol의 원래 로그는 디버그 상세 수준으로 유지합니다.
+'''
+related = ["WindowSettings", "WindowSettings::reserveUniformBuffer", "WindowSettings::setResourcePoolSize", "WindowSettings::setShaderPoolSize"]
+snippet = '''
+int main() {
+    WindowSettings settings;
+    settings.setSize(1280, 720).setResourcePoolSize(50000).setShaderPoolSize(4096);
+    return runApp<tcApp>(settings);
+}
+'''
+
+["WindowSettings::resourcePoolSize"]
+description.en = "Specifies the startup resource pool slot count."
+description.ja = "起動時のリソースプールの枠数を指定します。"
+description.ko = "시작 시 리소스 풀 슬롯 수를 지정합니다."
+details.en = "Default: `0`. This is the backing field for `WindowSettings::setResourcePoolSize`; see that setter for effective defaults, validation, startup restrictions and memory costs."
+details.ja = "既定値は `0` です。`WindowSettings::setResourcePoolSize` が設定するフィールドです。実際の既定値、値の確認、起動時の制限、メモリ使用量はセッターを参照してください。"
+details.ko = "기본값은 `0`입니다. `WindowSettings::setResourcePoolSize`가 설정하는 필드입니다. 실제 기본값, 값 확인, 시작 시 제한과 메모리 사용량은 세터를 참조해야 합니다."
+related = ["WindowSettings::setResourcePoolSize"]
+
+["WindowSettings::shaderPoolSize"]
+description.en = "Specifies the startup shader pool slot count."
+description.ja = "起動時のシェーダープールの枠数を指定します。"
+description.ko = "시작 시 셰이더 풀 슬롯 수를 지정합니다."
+details.en = "Default: `0`. This is the backing field for `WindowSettings::setShaderPoolSize`; see that setter for effective defaults, validation, startup restrictions and memory costs."
+details.ja = "既定値は `0` です。`WindowSettings::setShaderPoolSize` が設定するフィールドです。実際の既定値、値の確認、起動時の制限、メモリ使用量はセッターを参照してください。"
+details.ko = "기본값은 `0`입니다. `WindowSettings::setShaderPoolSize`가 설정하는 필드입니다. 실제 기본값, 값 확인, 시작 시 제한과 메모리 사용량은 세터를 참조해야 합니다."
+related = ["WindowSettings::setShaderPoolSize"]
+
+["WindowSettings::pipelinePoolSize"]
+description.en = "Specifies the startup pipeline pool slot count."
+description.ja = "起動時のパイプラインプールの枠数を指定します。"
+description.ko = "시작 시 파이프라인 풀 슬롯 수를 지정합니다."
+details.en = "Default: `0`. This is the backing field for `WindowSettings::setPipelinePoolSize`; see that setter for effective defaults, validation, startup restrictions and memory costs."
+details.ja = "既定値は `0` です。`WindowSettings::setPipelinePoolSize` が設定するフィールドです。実際の既定値、値の確認、起動時の制限、メモリ使用量はセッターを参照してください。"
+details.ko = "기본값은 `0`입니다. `WindowSettings::setPipelinePoolSize`가 설정하는 필드입니다. 실제 기본값, 값 확인, 시작 시 제한과 메모리 사용량은 세터를 참조해야 합니다."
+related = ["WindowSettings::setPipelinePoolSize"]
+
+[setResourceLoadConcurrency]
+keywords = ["async", "load", "concurrency", "queue", "worker"]
+description.en = "Sets how many resource loads can prepare at once."
+description.ja = "リソース読み込みを同時に準備する件数を設定します。"
+description.ko = "리소스 로드를 동시에 준비하는 개수를 설정합니다."
+details.en = '''
+- Sets the shared preparation slots used by Image, SoundBuffer and Font `loadAsync`. The default is 4. Local files and URLs share these slots.
+- Call on the main thread, at any time. Every value of 1 or more is accepted as given, without an upper cap. A value below 1 becomes 1 and logs one Notice for that call.
+- Raising the setting starts queued preparations right away. Lowering it lets running preparations finish; new preparations wait until fewer than the configured count are running.
+- Waiting for a preparation slot never rejects a queued load. Local-file queues can grow. The separate URL/network-input admission budgets remain 64 pending requests, 68 live requests and 1 GiB of retained results; requests or results exceeding those budgets can still fail.
+- On native platforms, each active preparation slot is a worker thread.
+- On Web, a slot is an active fetch/decode slot, rather than an OS thread. CPU decoding still runs on the main loop.
+'''
+details.ja = '''
+- Image・SoundBuffer・Font の `loadAsync` が共有する準備枠を設定します。既定は 4 件です。ローカルファイルと URL は同じ枠を使います。
+- メインスレッドでいつでも呼び出せます。1 以上の値は上限を設けずそのまま受け付けます。1 未満の値は 1 にし、その呼び出しで Notice を一度記録します。
+- 設定を上げると、待機中の準備をすぐに開始します。下げた場合は実行中の準備を完了させ、新しい準備は実行数が設定件数を下回るまで待ちます。
+- 準備枠を待つことを理由にキューの読み込みを拒否しません。ローカルファイルのキューは拡張できます。別に設けた URL／ネットワーク入力の受付予算は、待機要求 64 件、未反映要求 68 件、保持結果 1 GiB のままです。この予算を超える要求や結果は失敗することがあります。
+- ネイティブ環境では、実行中の準備枠 1 件がワーカースレッド 1 本に対応します。
+- Web の枠は OS スレッドではなく、実行中の取得・デコードの枠です。CPU デコードは引き続きメインループで行います。
+'''
+details.ko = '''
+- Image, SoundBuffer, Font의 `loadAsync`가 공유하는 준비 슬롯을 설정합니다. 기본값은 4개입니다. 로컬 파일과 URL은 같은 슬롯을 사용합니다.
+- 메인 스레드에서 언제든지 호출합니다. 1 이상의 값은 상한 없이 그대로 적용합니다. 1 미만의 값은 1로 바꾸고 해당 호출에서 Notice를 한 번 기록합니다.
+- 설정을 높이면 대기 중인 준비를 즉시 시작합니다. 낮추면 실행 중인 준비를 완료하고 새 준비는 실행 수가 설정 개수보다 작아질 때까지 기다립니다.
+- 준비 슬롯을 기다린다는 이유로 큐의 로드를 거부하지 않습니다. 로컬 파일 큐는 확장할 수 있습니다. 별도의 URL/네트워크 입력 수락 예산은 대기 요청 64건, 미반영 요청 68건, 보유 결과 1 GiB로 유지합니다. 이 예산을 초과하는 요청이나 결과는 실패할 수 있습니다.
+- 네이티브 환경에서는 실행 중인 준비 슬롯 하나가 워커 스레드 하나에 해당합니다.
+- Web의 슬롯은 OS 스레드가 아니라 실행 중인 가져오기/디코딩 슬롯입니다. CPU 디코딩은 계속 메인 루프에서 수행합니다.
+'''
+related = ["getResourceLoadConcurrency", "Image::loadAsync", "SoundBuffer::loadAsync", "Font::loadAsync"]
+snippet = '''
+void tcApp::setup() {
+    setResourceLoadConcurrency(8);  // prepare up to 8 images, sounds or fonts at once
+    for (auto& path : imagePaths) images.emplace_back().loadAsync(path);
+}
+'''
+
+[getResourceLoadConcurrency]
+keywords = ["async", "load", "concurrency", "queue", "worker"]
+description.en = "Returns how many resource loads can prepare at once."
+description.ja = "リソース読み込みを同時に準備する設定件数を返します。"
+description.ko = "리소스 로드를 동시에 준비하는 설정 개수를 반환합니다."
+details.en = '''
+- Returns the shared preparation slot setting for Image, SoundBuffer and Font `loadAsync`, initially 4.
+- Call on the main thread. This is the configured limit, rather than the number of preparations currently running; after lowering the setting, running preparations can temporarily exceed it.
+- See `setResourceLoadConcurrency` for queue behavior, runtime changes and native/Web slot meanings.
+'''
+details.ja = '''
+- Image・SoundBuffer・Font の `loadAsync` が共有する準備枠の設定件数を返します。初期値は 4 です。
+- メインスレッドで呼び出します。実行中の準備数ではなく設定値です。設定を下げた直後は、実行中の準備数が一時的に設定値を超えることがあります。
+- キューの扱い、実行中の変更、ネイティブと Web での枠の意味は `setResourceLoadConcurrency` を参照してください。
+'''
+details.ko = '''
+- Image, SoundBuffer, Font의 `loadAsync`가 공유하는 준비 슬롯의 설정 개수를 반환합니다. 초기값은 4입니다.
+- 메인 스레드에서 호출합니다. 실행 중인 준비 수가 아니라 설정값입니다. 설정을 낮춘 직후에는 실행 중인 준비 수가 일시적으로 설정값을 초과할 수 있습니다.
+- 큐 동작, 실행 중 변경, 네이티브와 Web에서 슬롯의 의미는 `setResourceLoadConcurrency`를 참조합니다.
+'''
+related = ["setResourceLoadConcurrency", "Image::loadAsync", "SoundBuffer::loadAsync", "Font::loadAsync"]
+snippet = "int count = getResourceLoadConcurrency();"

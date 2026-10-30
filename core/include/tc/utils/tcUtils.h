@@ -699,6 +699,7 @@ struct BeepManager {
     bool lastBeepTimeValid = false;
     static constexpr double beepDebounceSeconds = 0.005;  // suppress within ~5 ms
     float volume = 0.5f;
+    // Bound (cache): retain 128 sounds; clear the cache before adding a sound when full.
     static constexpr size_t MAX_CACHE_SIZE = 128;
 
     // Returns true if a beep issued now should be suppressed (a previous beep

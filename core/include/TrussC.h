@@ -270,16 +270,16 @@ namespace internal {
         int pendingCommands = 0; // explicit deferred request; 0 derives from vertices
     };
     SglBudget& sglBudget();
+    sgl_desc_t sglSetupDescriptor();
 
     // Separate report gates for screen and FBO contexts, shared across modules.
     OnceGate& sglStackErrorReportGate(bool inFbo);
     void reportSglStackErrors(sgl_error_t err, bool inFbo);
 
     // Per-frame uniform buffer reservation passed to sg_setup (Metal/WebGPU/Vulkan
-    // ring buffer; GL/D3D11 ignore it). 0 = default: 1MB on Metal (auto-grows on
-    // overflow — TrussC patch in sokol_gfx.h), 4MB sokol default on WebGPU/Vulkan
-    // (no auto-grow there, so set this via WindowSettings::reserveUniformBuffer
-    // for scenes with very high draw-call counts).
+    // ring buffer; GL/D3D11 ignore it). 0 = default: 1 MiB on Metal/WebGPU
+    // (grows on overflow), 4 MiB on Vulkan (fixed capacity). Set this via
+    // WindowSettings::reserveUniformBuffer to reserve capacity at startup.
     // Host-only, so a per-module copy is fine (tools/header_state_allowlist.txt):
     // the launcher sets it and setup() (tcGlobal.cpp) reads it.
     inline int gpuUniformBufferReserve = 0;
@@ -2329,6 +2329,11 @@ constexpr int MOUSE_BUTTON_MIDDLE = (int)MouseButton::Middle;
 // Window settings
 // ---------------------------------------------------------------------------
 
+struct WindowSettings;
+namespace internal {
+    void configureGraphicsPools(const WindowSettings& settings);
+}
+
 struct WindowSettings {
     int width = 1280;
     int height = 720;
@@ -2404,12 +2409,27 @@ struct WindowSettings {
         return *this;
     }
 
+    // Fixed startup capacities; 0 selects defaults, negatives log a Notice.
+    // Headless apps do not initialize graphics, so these settings do not apply.
+    WindowSettings& setResourcePoolSize(int count) {
+        resourcePoolSize = count;
+        return *this;
+    }
+    WindowSettings& setShaderPoolSize(int count) {
+        shaderPoolSize = count;
+        return *this;
+    }
+    WindowSettings& setPipelinePoolSize(int count) {
+        pipelinePoolSize = count;
+        return *this;
+    }
+
     // Reserve the per-frame GPU uniform buffer, in bytes (0 = default: 1MB on
-    // Metal, 4MB on WebGPU/Vulkan). Like std::vector::reserve: on Metal the
-    // ring auto-grows (doubling, with a warning log) when a frame overflows it,
+    // Metal/WebGPU, 4MB on Vulkan). Like std::vector::reserve: on Metal/WebGPU
+    // the ring grows (with a warning log) when a frame overflows it,
     // so a sufficient reservation only skips the one-time grow hitch. Every
     // draw call takes a 256-byte-aligned slice of this ring buffer (~4MB per
-    // 8k draw calls per frame). WebGPU/Vulkan do NOT auto-grow yet: there an
+    // 8k draw calls per frame). Vulkan does NOT auto-grow: there an
     // overflowing frame is still an error, so size this generously for very
     // high draw-call scenes. GL/D3D11 ignore it — they have no such cap.
     // Metal/WebGPU/Vulkan allocate it x2 (in-flight frames).
@@ -2417,6 +2437,11 @@ struct WindowSettings {
         uniformBufferReserve = bytes;
         return *this;
     }
+
+    // Keep settings aggregate-initializable, like the existing public fields.
+    int resourcePoolSize = 0;
+    int shaderPoolSize = 0;
+    int pipelinePoolSize = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -3251,6 +3276,7 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
 
     // Per-frame uniform reservation for sg_setup (consumed in internal::setup()).
     internal::gpuUniformBufferReserve = settings.uniformBufferReserve;
+    internal::configureGraphicsPools(settings);
 
     // Create app instance (shared_ptrで管理してNodeのweak_from_thisを有効にする)
     // Host-only, so a per-module copy is fine: a hot reload build launches

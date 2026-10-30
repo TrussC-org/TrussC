@@ -47,7 +47,7 @@ LoadResult ObjLoader::load(const fs::path& path) try {
 
     // This bundled tinyobjloader converts UTF-8 to wide paths for both
     // LoadObj and MaterialFileReader on Windows (including long paths).
-    bool ok = tinyobj::detail::LoadObjWithoutTags(&attrib, &shapes, &materials, &warn, &err,
+    bool ok = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err,
                                pathToUtf8(objPath).c_str(),
                                (pathToUtf8(baseDir) + "/").c_str());
 

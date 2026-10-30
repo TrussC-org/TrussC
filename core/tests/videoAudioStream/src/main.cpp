@@ -6,6 +6,8 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/opt.h>
 }
+#include "miniaudio.h"
+#include "tc/sound/internal/tcFFmpegAudio.h"
 #include <condition_variable>
 #include <cstdio>
 #include <mutex>
@@ -247,6 +249,19 @@ TC_CORE_TEST_MAIN() {
     auto path = dir / "ramp.mkv";
     check("PCM Matroska fixture", fixture(path, true));
     check("video-only fixture", fixture(dir / "silent.mkv", false));
+    {
+        internal::FFmpegAudio decoder;
+        check("FFmpeg guard fixture opens", decoder.open(path.c_str()) == MA_SUCCESS);
+        check("FFmpeg accepts negotiated frame format", decoder.fill() == MA_SUCCESS);
+        decoder.sourceChannels = 1;
+        int warnings = 0;
+        auto warningListener = getLogger().onLog.listen([&](LogEventArgs& event) {
+            if (event.level == LogLevel::Warning && event.message.find("Audio frame format changed") != std::string::npos) ++warnings;
+        });
+        check("FFmpeg rejects incompatible frame before resampling", decoder.fill() == MA_INVALID_DATA);
+        check("FFmpeg format failure emits a Warning", warnings == 1);
+    }
+
     Sound silent;
     check("no audio stream fails", !internal::loadFFmpegAudioStream(dir / "silent.mkv", silent));
     Sound sound;

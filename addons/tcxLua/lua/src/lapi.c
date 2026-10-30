@@ -158,8 +158,6 @@ LUA_API lua_Number lua_version (lua_State *L) {
 
 
 
-#include "tcloadbuffer.h"
-
 /*
 ** basic stack manipulation
 */
@@ -1089,15 +1087,12 @@ LUA_API int lua_pcallk (lua_State *L, int nargs, int nresults, int errfunc,
 LUA_API int lua_load (lua_State *L, lua_Reader reader, void *data,
                       const char *chunkname, const char *mode) {
   ZIO z;
-  TcLuaLoadGuard guard;
   int status;
   lua_lock(L);
   luaC_checkGC(L);
   if (!chunkname) chunkname = "?";
-  tcLuaLoadBegin(L, &guard, reader, data, mode);
-  luaZ_init(L, &z, tcLuaLoadRead, &guard);
+  luaZ_init(L, &z, reader, data);
   status = luaD_protectedparser(L, &z, chunkname, mode);
-  tcLuaLoadEnd(L, &guard);
   if (status == LUA_OK) {  /* no errors? */
     LClosure *f = clLvalue(s2v(L->top.p - 1));  /* get new function */
     if (f->nupvalues >= 1) {  /* does it have an upvalue? */
